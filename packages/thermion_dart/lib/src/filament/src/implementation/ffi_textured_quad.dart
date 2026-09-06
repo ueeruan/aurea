@@ -1,0 +1,203 @@
+import 'package:thermion_dart/src/filament/src/interface/ktx1_bundle.dart';
+import 'package:vector_math/vector_math_64.dart' as v64;
+import 'package:thermion_dart/src/filament/src/implementation/ffi_texture.dart';
+import 'package:thermion_dart/thermion_dart.dart';
+import 'ffi_asset.dart';
+import 'ffi_filament_app.dart';
+
+class FFITexturedQuad<T> extends TexturedQuad<T> {
+  final ThermionAsset<T> asset;
+
+  ThermionEntity get entity => asset.entity;
+
+  Texture? texture;
+
+  FFITextureSampler? sampler;
+
+  final MaterialInstance mi;
+
+  int? width;
+  int? height;
+
+  final FFIFilamentApp _app;
+
+  FFITexturedQuad({required this.asset, this.texture, this.sampler, required this.mi, required FFIFilamentApp app})
+    : _app = app;
+
+  T getNativeHandle() {
+    return asset.getNativeHandle();
+  }
+
+  ///
+  ///
+  ///
+  Future destroy() async {
+    await _app.destroyAsset(asset as FFIAsset);
+    await texture?.dispose();
+    await sampler?.dispose();
+    await mi.destroy();
+  }
+
+  ///
+  ///
+  ///
+  Future setBackgroundColor(double r, double g, double b, double a) async {
+    await mi.setParameterFloat4("backgroundColor", r, g, b, a);
+  }
+
+  ///
+  ///
+  ///
+  Future hideImage() async {
+    await mi.setParameterInt("showImage", 0);
+  }
+
+  ///
+  ///
+  ///
+  Future setCubemapFace(int index) async {
+    if (index < 0 || index > 5) {
+      throw Exception("Incorrect cubemap face index");
+    }
+    await mi.setParameterInt("cubeMapFace", index);
+  }
+
+  ///
+  ///
+  ///
+  Future setImageFromKtxBundle(Ktx1Bundle bundle) async {
+    final texture = await bundle.createTexture();
+
+    if (bundle.isCubemap()) {
+      sampler ??= await _app.createTextureSampler() as FFITextureSampler;
+      this.texture = texture;
+      await mi.setParameterTexture("cubeMap", texture as FFITexture, sampler as FFITextureSampler);
+      await setBackgroundColor(1, 1, 1, 0);
+      await mi.setParameterInt("showImage", 1);
+      await mi.setParameterInt("isCubeMap", 1);
+      await setCubemapFace(0);
+      width = await texture.getWidth();
+      height = await texture.getHeight();
+    } else {
+      await setImageFromTexture(texture);
+    }
+  }
+
+  ///
+  ///
+  ///
+  Future setImage(Uint8List imageData) async {
+    // 3-channel float textures (RGB32F, format 49) aren't supported on the
+    // Windows backend, and neither is uploading RGB/FLOAT source data into an
+    // RGBA32F texture. So on Windows force an alpha channel at decode time:
+    // this yields 4-channel RGBA source data that uploads cleanly into RGBA32F.
+    // Other platforms keep the tighter 3-channel RGB32F path.
+    final image = await _app.decodeImage(imageData, requireAlpha: IS_WINDOWS);
+    final channels = await image.getChannels();
+    if (channels != 3 && channels != 4) {
+      throw UnimplementedError("Currently only 3 or 4 channels are supported");
+    }
+    final textureFormat = channels == 4 ? TextureFormat.RGBA32F : TextureFormat.RGB32F;
+    final pixelFormat = channels == 4 ? PixelDataFormat.RGBA : PixelDataFormat.RGB;
+
+    final texture = await _app.createTexture(
+      await image.getWidth(),
+      await image.getHeight(),
+      flags: {TextureUsage.TEXTURE_USAGE_SAMPLEABLE, TextureUsage.TEXTURE_USAGE_UPLOADABLE},
+      textureFormat: textureFormat,
+    );
+    await texture.setLinearImage(image, pixelFormat, PixelDataType.FLOAT);
+    await setImageFromTexture(texture);
+  }
+
+  ///
+  ///
+  ///
+  Future setImageFromTexture(Texture texture) async {
+    this.texture = texture;
+    sampler ??= await _app.createTextureSampler() as FFITextureSampler;
+    await mi.setParameterInt("isCubeMap", 0);
+    await mi.setParameterTexture("image", texture as FFITexture, sampler as FFITextureSampler);
+    await setBackgroundColor(1, 1, 1, 0);
+    await mi.setParameterInt("showImage", 1);
+    width = await texture.getWidth();
+    height = await texture.getHeight();
+  }
+
+  ///
+  ///
+  ///
+  @override
+  Future<ThermionAsset> createInstance({covariant List<MaterialInstance>? materialInstances = null}) {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<List<ThermionEntity>> getChildEntities() async {
+    return [];
+  }
+
+  @override
+  Future<ThermionAsset> getInstance(int index) {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<int> getInstanceCount() async {
+    return 0;
+  }
+
+  @override
+  Future<List<ThermionAsset>> getInstances() async {
+    return [];
+  }
+
+  @override
+  Future setTransform(Matrix4 transform, {ThermionEntity? entity}) async {
+    await mi.setParameterMat4("transform", transform);
+  }
+
+  @override
+  Future<List<String>> getChildEntityNames() async {
+    return [];
+  }
+
+  @override
+  Future<bool> isCastShadowsEnabled({ThermionEntity? entity}) async {
+    return false;
+  }
+
+  @override
+  Future<bool> isReceiveShadowsEnabled({ThermionEntity? entity}) async {
+    return false;
+  }
+
+  @override
+  Future<MaterialInstance> getMaterialInstanceAt({ThermionEntity? entity, int index = 0}) async {
+    if (index == 0 && (entity == null || entity == this.entity)) {
+      return mi;
+    }
+    throw Exception();
+  }
+
+  ThermionAsset? get boundingBoxAsset => throw UnimplementedError();
+
+  Future<v64.Aabb3> getBoundingBox() {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future setDepth(double depth) async {
+    await mi.setDepthWriteEnabled(true);
+    await mi.setParameterFloat("depth", depth);
+  }
+
+  @override
+  ThermionAsset<dynamic>? get instanceOwner => null;
+
+  @override
+  bool get isInstance => false;
+
+  @override
+  SceneAssetType get type => SceneAssetType.geometry;
+}

@@ -1,0 +1,29 @@
+#ifndef _T_RENDERTARGET_H
+#define _T_RENDERTARGET_H
+
+#include "APIExport.h"
+#include "APIBoundaryTypes.h"
+#include "TMaterialInstance.h"
+#include "TTexture.h"
+
+#ifdef __cplusplus
+extern "C"
+{
+#endif
+
+EMSCRIPTEN_KEEPALIVE TRenderTarget *RenderTarget_create(
+    TEngine *tEngine,
+    TTexture *color,
+    TTexture *depth
+);
+
+EMSCRIPTEN_KEEPALIVE void RenderTarget_destroy(
+    TEngine *tEngine,
+    TRenderTarget *tRenderTarget
+);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif

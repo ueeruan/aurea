@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "additionalDirectories": [
+      "C:\\Users\\SnyX\\AppData\\Local\\Android\\Sdk",
+      "C:\\Users\\SnyX\\AppData\\Local\\Java\\jdk-21.0.12.1+1",
+      "C:\\Users\\SnyX\\Documents\\Easing Studio\\.tooling\\flutter"
+    ]
+  }
+}

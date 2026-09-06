@@ -1,0 +1,16 @@
+import 'package:test/test.dart';
+import 'package:thermion_dart/src/filament/src/implementation/ffi_filament_app.dart';
+import 'package:thermion_dart/src/viewer/viewer.dart';
+import 'helpers.dart';
+
+void main() async {
+  final testHelper = TestHelper("app");
+
+  test('destroy app', () async {
+    await testHelper.setup();
+    final viewer = (await testHelper.createViewer()).$1;
+    await viewer.dispose();
+    await FilamentApp.instance!.destroy();
+    await testHelper.setup();
+  });
+}

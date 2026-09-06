@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "aurea-web",
+      "runtimeExecutable": "C:\\Users\\SnyX\\.aurea\\flutter\\bin\\flutter.bat",
+      "runtimeArgs": ["run", "-d", "web-server", "--web-port", "5317"],
+      "port": 5317
+    }
+  ]
+}

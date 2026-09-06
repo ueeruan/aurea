@@ -1,0 +1,108 @@
+# Sobe o app para o TESTFLIGHT num runner macOS, assinando na nuvem com
+# uma chave da App Store Connect — sem certificado .p12, sem Mac local.
+#
+# O que precisa existir UMA vez, na sua conta Apple (docs/testflight.md):
+#   1. Apple Developer Program ativo (a conta paga).
+#   2. Um app na App Store Connect com o bundle id com.aurea.aurea.
+#   3. Uma chave de API (Users and Access -> Integrations -> App Store
+#      Connect API), papel App Manager, com "Access to Cloud Managed
+#      Distribution Certificate" marcado.
+#   4. Quatro segredos no repositorio: APPLE_TEAM_ID, ASC_KEY_ID,
+#      ASC_ISSUER_ID e ASC_KEY_P8_BASE64 (o .p8 em base64).
+#
+# Como usar depois disso: git tag tf-1 && git push origin tf-1
+# (ou Actions -> TestFlight -> Run workflow). O numero do build vem do
+# pubspec (version: x.y.z+N); cada envio precisa de um N maior.
+name: TestFlight
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['tf-*']
+
+jobs:
+  testflight:
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Segredos presentes?
+        run: |
+          faltam=""
+          for v in APPLE_TEAM_ID ASC_KEY_ID ASC_ISSUER_ID; do
+            [ -z "${!v}" ] && faltam="$faltam $v"
+          done
+          [ -z "${{ secrets.ASC_KEY_P8_BASE64 }}" ] && faltam="$faltam ASC_KEY_P8_BASE64"
+          if [ -n "$faltam" ]; then
+            echo "::error::Faltam segredos no repositorio:$faltam (veja docs/testflight.md)"
+            exit 1
+          fi
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.2
+
+      - name: Xcode mais novo da imagem
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+          xcodebuild -version
+
+      # A chave fica onde o xcodebuild e o altool procuram por padrao.
+      - name: Chave da App Store Connect
+        run: |
+          mkdir -p ~/private_keys
+          echo "${{ secrets.ASC_KEY_P8_BASE64 }}" | base64 --decode > ~/private_keys/AuthKey_${ASC_KEY_ID}.p8
+          chmod 600 ~/private_keys/AuthKey_${ASC_KEY_ID}.p8
+
+      - name: Dependencias
+        run: flutter pub get
+
+      # O Flutter gera o Generated.xcconfig, os pods e o motor em release;
+      # a assinatura fica para o archive do Xcode, que sabe falar com a
+      # Apple pela chave.
+      - name: Build iOS (Flutter)
+        run: flutter build ios --release --no-codesign
+
+      - name: Archive assinado na nuvem
+        run: |
+          xcodebuild -workspace ios/Runner.xcworkspace \
+            -scheme Runner -configuration Release -sdk iphoneos \
+            -archivePath build/ios/Runner.xcarchive archive \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$HOME/private_keys/AuthKey_${ASC_KEY_ID}.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            CODE_SIGN_STYLE=Automatic \
+            CODE_SIGN_IDENTITY="Apple Distribution" -quiet
+          test -d build/ios/Runner.xcarchive
+
+      - name: Exportar IPA (App Store Connect)
+        run: |
+          sed "s/TEAM_ID_AQUI/$APPLE_TEAM_ID/" ios/ExportOptions.plist > build/ExportOptions.plist
+          xcodebuild -exportArchive \
+            -archivePath build/ios/Runner.xcarchive \
+            -exportOptionsPlist build/ExportOptions.plist \
+            -exportPath build/ios/ipa \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$HOME/private_keys/AuthKey_${ASC_KEY_ID}.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+          ls -la build/ios/ipa
+
+      - name: Subir para o TestFlight
+        run: |
+          IPA=$(ls build/ios/ipa/*.ipa | head -1)
+          xcrun altool --upload-app --type ios -f "$IPA" \
+            --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aurea-ipa-assinado
+          path: build/ios/ipa/*.ipa

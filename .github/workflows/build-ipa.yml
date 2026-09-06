@@ -1,0 +1,66 @@
+# Gera um IPA SEM ASSINATURA num runner macOS — para sideload com
+# Sideloadly (que assina com o seu Apple ID na hora de instalar).
+# iOS nao compila no Windows; este workflow e o caminho ate ter um Mac.
+#
+# Como usar:
+#   1. Suba este repositorio para o GitHub (git init + push).
+#   2. Aba Actions -> "Build IPA (unsigned)" -> Run workflow.
+#   3. Baixe o artefato "aurea-ipa" e arraste o .ipa no Sideloadly.
+name: Build IPA (unsigned)
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['ipa-*']
+
+jobs:
+  build-ipa:
+    # macos-15: o Xcode 15 do macos-14 nao conhece isiOSAppOnVision, usado
+    # pelo device_info_plus que o Laboratorio usa para nomear o aparelho.
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.2
+
+      # Plugin novo costuma pedir SDK novo; pegar o Xcode mais recente da
+      # imagem evita ter que subir o runner a cada atualizacao de pacote.
+      - name: Xcode mais novo da imagem
+        run: |
+          ls -d /Applications/Xcode*.app
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+          xcodebuild -version
+
+      - name: Dependencias
+        run: flutter pub get
+
+      - name: Build iOS (sem assinatura)
+        run: |
+          set -o pipefail
+          flutter build ios --release --no-codesign --dart-define=AUREA_FILAMENT=true -v 2>&1 | tee build-ios.log
+
+      - name: Guardar diagnostico da compilacao
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build-diagnostics
+          path: |
+            build-ios.log
+            packages/thermion_dart/build.log
+            packages/thermion_flutter/build.log
+          if-no-files-found: ignore
+
+      - name: Empacotar IPA
+        run: |
+          mkdir -p Payload
+          cp -r build/ios/iphoneos/Runner.app Payload/
+          zip -qr aurea-unsigned.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aurea-ipa
+          path: aurea-unsigned.ipa

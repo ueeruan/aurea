@@ -1,0 +1,46 @@
+name: thermion_flutter
+description: Flutter plugin for 3D rendering with the Thermion toolkit.
+version: 0.5.0
+homepage: https://thermion.dev
+repository: https://github.com/nmfisher/thermion
+
+environment:
+  sdk: ">=3.10.0 <4.0.0"
+  flutter: ">=3.38.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_web_plugins:
+    sdk: flutter
+  vector_math: ^2.1.2
+  plugin_platform_interface: ^2.0.0
+  ffi: ^2.1.2
+  thermion_dart: ^0.5.0
+  hooks: ^2.0.2
+  logging: ^1.2.0
+  web: ^1.0.0
+  objective_c: ^8.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^1.0.0
+  ffigen: ^18.1.0
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        pluginClass: ThermionFlutterPlugin
+        package: dev.thermion.android
+      ios:
+        pluginClass: SwiftThermionFlutterPlugin
+        sharedDarwinSource: true
+      macos:
+        pluginClass: SwiftThermionFlutterPlugin
+        sharedDarwinSource: true
+      windows:
+        pluginClass: ThermionFlutterPluginCApi
+      linux:
+        pluginClass: ThermionFlutterPlugin

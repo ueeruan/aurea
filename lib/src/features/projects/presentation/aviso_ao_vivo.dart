@@ -55,7 +55,7 @@ class _AvisoAoVivoState extends State<AvisoAoVivo> {
       context: context,
       builder: (dialogo) => CupertinoAlertDialog(
         key: ValueKey('aviso-janela-${aviso.id}'),
-        title: const Text('Aviso'),
+        title: const AppText('Aviso'),
         content: Padding(
           padding: const EdgeInsets.only(top: 8),
           child: Text(aviso.texto),
@@ -77,7 +77,7 @@ class _AvisoAoVivoState extends State<AvisoAoVivo> {
           CupertinoDialogAction(
             key: const ValueKey('aviso-janela-fechar'),
             onPressed: () => Navigator.of(dialogo).pop(),
-            child: const Text('Agora não'),
+            child: const AppText('Agora não'),
           ),
         ],
       ),
@@ -134,7 +134,7 @@ class _Faixa extends StatelessWidget {
             height: 22,
             alignment: Alignment.center,
             decoration: BoxDecoration(color: cor, shape: BoxShape.circle),
-            child: const Text(
+            child: const AppText(
               '!',
               style: TextStyle(
                 fontSize: 14,

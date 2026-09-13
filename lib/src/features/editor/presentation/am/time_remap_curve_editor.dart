@@ -126,6 +126,23 @@ class _TimeRemapCurveEditorState extends ConsumerState<TimeRemapCurveEditor> {
   double _maxCompDuration = 5.0;
   double _maxSourceDuration = 5.0;
 
+  /// O TETO DO EIXO VERTICAL, em segundos da fonte.
+  ///
+  /// Era a duracao da fonte, fixa — e com a velocidade acima de 100% o
+  /// tempo de fonte passa dela, entao a curva SAIA POR CIMA do grafico
+  /// (as duas retas cortando o topo na captura dos testadores). O eixo
+  /// agora abre para caber o ponto mais alto e as alcas dele, com uma
+  /// folga, e o desenho e recortado na moldura por garantia.
+  double get _yRange {
+    var topo = _maxSourceDuration;
+    for (final p in _points) {
+      final alto = p.sourceTime + p.inHandle.dy.abs() + p.outHandle.dy.abs();
+      if (alto > topo) topo = alto;
+      if (p.sourceTime > topo) topo = p.sourceTime;
+    }
+    return topo <= 0 ? 1.0 : topo * 1.08;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -332,7 +349,7 @@ class _TimeRemapCurveEditorState extends ConsumerState<TimeRemapCurveEditor> {
 
   void _showToast(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), duration: const Duration(seconds: 2)),
+      SnackBar(content: AppText(msg), duration: const Duration(seconds: 2)),
     );
   }
 
@@ -361,8 +378,7 @@ class _TimeRemapCurveEditorState extends ConsumerState<TimeRemapCurveEditor> {
                   size: 20,
                 ),
                 const SizedBox(width: 8),
-                const Text(
-                  'TIME REMAPPING',
+                const AppText('TIME REMAPPING',
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 14,
@@ -371,7 +387,7 @@ class _TimeRemapCurveEditorState extends ConsumerState<TimeRemapCurveEditor> {
                   ),
                 ),
                 const Spacer(),
-                Text(
+                AppText(
                   'Velocidade: ${(currentSpeed * 100).toStringAsFixed(0)}%',
                   style: TextStyle(
                     color: currentSpeed < 0
@@ -405,7 +421,7 @@ class _TimeRemapCurveEditorState extends ConsumerState<TimeRemapCurveEditor> {
                       points: _points,
                       selectedIndex: _selectedIndex,
                       maxCompDuration: _maxCompDuration,
-                      maxSourceDuration: _maxSourceDuration,
+                      maxSourceDuration: _yRange,
                       playheadSec: playheadSec,
                     ),
                   ),
@@ -497,11 +513,10 @@ class _TimeRemapCurveEditorState extends ConsumerState<TimeRemapCurveEditor> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          'COMPOSIÇÃO',
+                        const AppText('COMPOSIÇÃO',
                           style: TextStyle(color: Colors.grey, fontSize: 10),
                         ),
-                        Text(
+                        AppText(
                           formatTime(
                             Duration(
                               microseconds:
@@ -522,11 +537,10 @@ class _TimeRemapCurveEditorState extends ConsumerState<TimeRemapCurveEditor> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          'FONTE (VÍDEO)',
+                        const AppText('FONTE (VÍDEO)',
                           style: TextStyle(color: Colors.grey, fontSize: 10),
                         ),
-                        Text(
+                        AppText(
                           formatTime(
                             Duration(
                               microseconds: (selectedPoint.sourceTime * 1000000)
@@ -546,11 +560,10 @@ class _TimeRemapCurveEditorState extends ConsumerState<TimeRemapCurveEditor> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          'TIPO',
+                        const AppText('TIPO',
                           style: TextStyle(color: Colors.grey, fontSize: 10),
                         ),
-                        Text(
+                        AppText(
                           switch (selectedPoint.interpolation) {
                             1 => 'Hold',
                             2 => 'Bézier',
@@ -590,7 +603,7 @@ class _TimeRemapCurveEditorState extends ConsumerState<TimeRemapCurveEditor> {
           pt +
           Offset(
             p.inHandle.dx * width / _maxCompDuration,
-            -p.inHandle.dy * height / _maxSourceDuration,
+            -p.inHandle.dy * height / _yRange,
           );
       if ((local - inPt).distance <= 20) {
         _draggingInHandle = true;
@@ -601,7 +614,7 @@ class _TimeRemapCurveEditorState extends ConsumerState<TimeRemapCurveEditor> {
           pt +
           Offset(
             p.outHandle.dx * width / _maxCompDuration,
-            -p.outHandle.dy * height / _maxSourceDuration,
+            -p.outHandle.dy * height / _yRange,
           );
       if ((local - outPt).distance <= 20) {
         _draggingOutHandle = true;
@@ -646,7 +659,7 @@ class _TimeRemapCurveEditorState extends ConsumerState<TimeRemapCurveEditor> {
         0.0,
         _maxCompDuration,
       );
-      final newSource = ((1.0 - local.dy / height) * _maxSourceDuration).clamp(
+      final newSource = ((1.0 - local.dy / height) * _yRange).clamp(
         0.0,
         _maxSourceDuration * 2.0,
       );
@@ -676,7 +689,7 @@ class _TimeRemapCurveEditorState extends ConsumerState<TimeRemapCurveEditor> {
         }
         p.inHandle = Offset(
           delta.dx / width * _maxCompDuration,
-          -delta.dy / height * _maxSourceDuration,
+          -delta.dy / height * _yRange,
         );
       });
       _syncToDartProject();
@@ -689,7 +702,7 @@ class _TimeRemapCurveEditorState extends ConsumerState<TimeRemapCurveEditor> {
         p.interpolation = 2;
         p.outHandle = Offset(
           delta.dx / width * _maxCompDuration,
-          -delta.dy / height * _maxSourceDuration,
+          -delta.dy / height * _yRange,
         );
       });
       _syncToDartProject();
@@ -709,7 +722,7 @@ class _TimeRemapCurveEditorState extends ConsumerState<TimeRemapCurveEditor> {
     double h,
   ) {
     final x = (compTime / _maxCompDuration) * w;
-    final y = h - (sourceTime / _maxSourceDuration) * h;
+    final y = h - (sourceTime / _yRange) * h;
     return Offset(x, y);
   }
 }
@@ -776,6 +789,9 @@ class _CurvePainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final w = size.width;
     final h = size.height;
+    // NADA SAI DA MOLDURA. O eixo ja abre para caber a curva; o recorte
+    // e a garantia para o caso que a conta nao previu.
+    canvas.clipRect(Offset.zero & size);
 
     // 1. Grade de Fundo
     final gridPaint = Paint()

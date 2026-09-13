@@ -78,7 +78,7 @@ class _FolhaDeLuzesState extends ConsumerState<FolhaDeLuzes> {
                     for (var i = 0; i < lights.length; i++)
                       DropdownMenuItem(
                         value: lights[i].id,
-                        child: Text('${_lightName(lights[i].kind)} ${i + 1}'),
+                        child: AppText('${_lightName(lights[i].kind)} ${i + 1}'),
                       ),
                   ],
                   onChanged: (id) {
@@ -94,7 +94,7 @@ class _FolhaDeLuzesState extends ConsumerState<FolhaDeLuzes> {
                   for (final kind in Light3DKind.values)
                     TextButton.icon(
                       icon: const Icon(Icons.add, size: 16),
-                      label: Text(_lightName(kind)),
+                      label: AppText(_lightName(kind)),
                       onPressed: () {
                         c.addSceneLight(widget.layerId, kind);
                         setState(() => _luzSelecionadaIndex = lights.length);
@@ -104,9 +104,8 @@ class _FolhaDeLuzesState extends ConsumerState<FolhaDeLuzes> {
               ),
               SwitchListTile.adaptive(
                 contentPadding: EdgeInsets.zero,
-                title: const Text('Reflexos da cena'),
-                subtitle: const Text(
-                  'Captura real dos objetos ao redor; reutilizada durante a reprodução.',
+                title: const AppText('Reflexos da cena'),
+                subtitle: const AppText('Captura real dos objetos ao redor; reutilizada durante a reprodução.',
                 ),
                 value: camada.scene.reflectionProbe.enabled,
                 onChanged: (v) => c.setSceneReflectionProbe(
@@ -125,19 +124,19 @@ class _FolhaDeLuzesState extends ConsumerState<FolhaDeLuzes> {
               if (camada.scene.reflectionProbe.enabled) ...[
                 TextButton.icon(
                   icon: const Icon(Icons.refresh),
-                  label: const Text('Atualizar reflexos'),
+                  label: const AppText('Atualizar reflexos'),
                   onPressed: () => c.setSceneReflectionProbe(
                     widget.layerId,
                     camada.scene.reflectionProbe.copyWith(),
                   ),
                 ),
-                const Text('Força dos reflexos'),
+                const AppText('Força dos reflexos'),
                 Slider(
                   value: camada.scene.envReflect.clamp(0.0, 1.0),
                   onChanged: (v) => c.setSceneEnvReflect(widget.layerId, v),
                 ),
               ],
-              const Text('Iluminação ambiente da cena'),
+              const AppText('Iluminação ambiente da cena'),
               Slider(
                 key: const ValueKey('scene-ambient-intensity'),
                 value: camada.scene.ambient.clamp(0.0, 1.0),
@@ -147,7 +146,7 @@ class _FolhaDeLuzesState extends ConsumerState<FolhaDeLuzes> {
                   activeLight.kind != Light3DKind.ambient)
                 SwitchListTile.adaptive(
                   contentPadding: EdgeInsets.zero,
-                  title: const Text('Projetar sombras'),
+                  title: const AppText('Projetar sombras'),
                   value: activeLight.castsShadow,
                   onChanged: (v) =>
                       c.setSceneLightShadow(widget.layerId, activeLight.id, v),
@@ -155,7 +154,7 @@ class _FolhaDeLuzesState extends ConsumerState<FolhaDeLuzes> {
               if (activeLight != null)
                 TextButton.icon(
                   icon: const Icon(Icons.open_with),
-                  label: const Text('Posição, direção e alcance'),
+                  label: const AppText('Posição, direção e alcance'),
                   onPressed: () {
                     ref.read(noSelecionadoProvider.notifier).state = null;
                     ref.read(cameraSelecionadaProvider.notifier).state = null;
@@ -170,8 +169,7 @@ class _FolhaDeLuzesState extends ConsumerState<FolhaDeLuzes> {
                   },
                 ),
               if (activeLight == null)
-                const Text(
-                  'Adicione uma luz para ajustar sua cor e intensidade.',
+                const AppText('Adicione uma luz para ajustar sua cor e intensidade.',
                 ),
             ],
           ),
@@ -253,7 +251,7 @@ class _FolhaDeLuzesState extends ConsumerState<FolhaDeLuzes> {
                       borderRadius: BorderRadius.circular(6),
                       border: Border.all(color: Scene3DTheme.border),
                     ),
-                    child: Text(
+                    child: AppText(
                       intensidade.toStringAsFixed(1),
                       style: const TextStyle(
                         fontSize: 12,
@@ -298,8 +296,7 @@ class _FolhaDeLuzesState extends ConsumerState<FolhaDeLuzes> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
-                    'Ângulo',
+                  const AppText('Ângulo',
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
@@ -316,7 +313,7 @@ class _FolhaDeLuzesState extends ConsumerState<FolhaDeLuzes> {
                       borderRadius: BorderRadius.circular(6),
                       border: Border.all(color: Scene3DTheme.border),
                     ),
-                    child: Text(
+                    child: AppText(
                       '${activeLight?.coneDegrees.round() ?? 45}°',
                       style: TextStyle(
                         fontSize: 12,

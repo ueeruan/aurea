@@ -608,8 +608,7 @@ class _Scene3DStudioState extends ConsumerState<Scene3DStudio>
       return const Scaffold(
         backgroundColor: AmColors.bg,
         body: Center(
-          child: Text(
-            'Cena nao encontrada',
+          child: AppText('Cena nao encontrada',
             style: TextStyle(color: AmColors.muted),
           ),
         ),
@@ -754,8 +753,7 @@ class _Scene3DStudioState extends ConsumerState<Scene3DStudio>
       return const SizedBox(
         height: 44,
         child: Center(
-          child: Text(
-            'Escolha Mover, Girar ou Escalar para ajustar',
+          child: AppText('Escolha Mover, Girar ou Escalar para ajustar',
             style: TextStyle(fontSize: 11, color: AmColors.muted),
           ),
         ),
@@ -840,7 +838,7 @@ class _Scene3DStudioState extends ConsumerState<Scene3DStudio>
                       },
                 child: FittedBox(
                   fit: BoxFit.scaleDown,
-                  child: Text(
+                  child: AppText(
                     '${tracks.length == 1 ? (node == null ? 'mm' : '%') : ['X', 'Y', 'Z'][axis]}  '
                     '${(tracks[axis].valueAt(_time) * (tool == FerramentaDoEstudio.escalar && node != null ? 100 : 1)).toStringAsFixed(1)}',
                     style: const TextStyle(
@@ -908,7 +906,7 @@ class _Scene3DStudioState extends ConsumerState<Scene3DStudio>
                     ),
                     const SizedBox(width: 6),
                     Flexible(
-                      child: Text(
+                      child: AppText(
                         _tituloDaVista(layer),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -1304,7 +1302,7 @@ class _Scene3DStudioState extends ConsumerState<Scene3DStudio>
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
+          AppText(
             dicasDoEstudio[i],
             style: const TextStyle(
               fontSize: 12.5,
@@ -1315,7 +1313,7 @@ class _Scene3DStudioState extends ConsumerState<Scene3DStudio>
           const SizedBox(height: 4),
           Row(
             children: [
-              Text(
+              AppText(
                 '${i + 1}/${dicasDoEstudio.length}',
                 style: const TextStyle(fontSize: 11, color: AmColors.muted),
               ),
@@ -1326,8 +1324,7 @@ class _Scene3DStudioState extends ConsumerState<Scene3DStudio>
                   padding: const EdgeInsets.symmetric(horizontal: 10),
                   minimumSize: const Size(0, 30),
                   onPressed: () => setState(() => _dica = i + 1),
-                  child: const Text(
-                    'Proxima',
+                  child: const AppText('Proxima',
                     style: TextStyle(fontSize: 13, color: AmColors.text),
                   ),
                 ),
@@ -1336,8 +1333,7 @@ class _Scene3DStudioState extends ConsumerState<Scene3DStudio>
                 padding: const EdgeInsets.symmetric(horizontal: 10),
                 minimumSize: const Size(0, 30),
                 onPressed: fechar,
-                child: const Text(
-                  'Entendi',
+                child: const AppText('Entendi',
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
@@ -1585,10 +1581,10 @@ class _Scene3DStudioState extends ConsumerState<Scene3DStudio>
         child: ListView(
           shrinkWrap: true,
           children: [
-            const ListTile(title: Text('Linkar a objeto nulo ou objeto')),
+            const ListTile(title: AppText('Linkar a objeto nulo ou objeto')),
             ListTile(
               leading: const Icon(CupertinoIcons.add),
-              title: const Text('Criar nulo e linkar'),
+              title: const AppText('Criar nulo e linkar'),
               onTap: () {
                 final parent = _controller.addSceneNull(widget.layerId);
                 _controller.setSceneNodeParent(widget.layerId, node.id, parent);
@@ -1597,7 +1593,7 @@ class _Scene3DStudioState extends ConsumerState<Scene3DStudio>
             ),
             ListTile(
               leading: const Icon(CupertinoIcons.link),
-              title: const Text('Sem vinculo'),
+              title: const AppText('Sem vinculo'),
               onTap: () {
                 _controller.setSceneNodeParent(widget.layerId, node.id, null);
                 Navigator.pop(ctx);
@@ -1605,7 +1601,7 @@ class _Scene3DStudioState extends ConsumerState<Scene3DStudio>
             ),
             for (final parent in candidates)
               ListTile(
-                title: Text(parent.name),
+                title: AppText(parent.name),
                 leading: Icon(
                   parent.isNull ? CupertinoIcons.folder : CupertinoIcons.cube,
                 ),
@@ -2039,7 +2035,7 @@ class _Scene3DStudioState extends ConsumerState<Scene3DStudio>
               Positioned(
                 left: 5,
                 top: 3,
-                child: Text(
+                child: AppText(
                   sceneViewLabel(_miniView),
                   style: const TextStyle(fontSize: 9, color: AmColors.muted),
                 ),
@@ -2221,7 +2217,7 @@ class _Scene3DStudioState extends ConsumerState<Scene3DStudio>
                 ),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: Text(
+                  child: AppText(
                     '${(_time.inMicroseconds / 1e6).toStringAsFixed(2)} s',
                     style: const TextStyle(fontSize: 12, color: AmColors.text),
                   ),
@@ -2282,19 +2278,19 @@ class _Scene3DStudioState extends ConsumerState<Scene3DStudio>
                     itemBuilder: (_) => [
                       const PopupMenuItem(
                         value: Easing.linear,
-                        child: Text('Linear'),
+                        child: AppText('Linear'),
                       ),
                       const PopupMenuItem(
                         value: Easing.easeInOut,
-                        child: Text('Suave'),
+                        child: AppText('Suave'),
                       ),
                       const PopupMenuItem(
                         value: Easing.easeOut,
-                        child: Text('Desacelerar'),
+                        child: AppText('Desacelerar'),
                       ),
                       const PopupMenuItem(
                         value: Easing.overshoot,
-                        child: Text('Antecipacao e retorno'),
+                        child: AppText('Antecipacao e retorno'),
                       ),
                     ],
                     onSelected: (ease) => _mapTracks((track) {
@@ -2373,7 +2369,7 @@ class _Scene3DStudioState extends ConsumerState<Scene3DStudio>
                           // encolhe, nao quebra.
                           FittedBox(
                             fit: BoxFit.scaleDown,
-                            child: Text(
+                            child: AppText(
                               ferramentaLabel(f),
                               maxLines: 1,
                               style: TextStyle(
@@ -2417,8 +2413,7 @@ class _Scene3DStudioState extends ConsumerState<Scene3DStudio>
                     const Padding(
                       padding: EdgeInsets.only(right: 6),
                       child: Center(
-                        child: Text(
-                          'Eixo',
+                        child: AppText('Eixo',
                           style: TextStyle(fontSize: 11, color: AmColors.muted),
                         ),
                       ),

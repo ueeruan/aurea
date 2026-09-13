@@ -117,12 +117,12 @@ class _UserTabState extends ConsumerState<UserTab> {
     final novo = await showCupertinoDialog<String>(
       context: context,
       builder: (c) => CupertinoAlertDialog(
-        title: const Text('Editar apelido'),
+        title: const AppText('Editar apelido'),
         content: Padding(
           padding: const EdgeInsets.only(top: 10),
           child: CupertinoTextField(
             controller: controller,
-            placeholder: 'Novo apelido',
+            placeholder: translate(context, 'Novo apelido'),
             maxLength: 20,
             autofocus: true,
           ),
@@ -157,9 +157,8 @@ class _UserTabState extends ConsumerState<UserTab> {
     final confirma = await showCupertinoDialog<bool>(
       context: context,
       builder: (c) => CupertinoAlertDialog(
-        title: const Text('Sair desta conta?'),
-        content: const Text(
-          'Sua conta e posts continuarão seguros no Cloudflare. '
+        title: const AppText('Sair desta conta?'),
+        content: const AppText('Sua conta e posts continuarão seguros no Cloudflare. '
           'Certifique-se de ter copiado seu código de acesso antes de sair.',
         ),
         actions: [
@@ -232,8 +231,7 @@ class _UserTabState extends ConsumerState<UserTab> {
                       ),
                     ),
                     const SizedBox(width: 6),
-                    Text(
-                      'Cloudflare KV',
+                    AppText('Cloudflare KV',
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w600,
@@ -312,8 +310,7 @@ class _UserTabState extends ConsumerState<UserTab> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        'Conta Oficial do Criador',
+                      AppText('Conta Oficial do Criador',
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w700,
@@ -321,8 +318,7 @@ class _UserTabState extends ConsumerState<UserTab> {
                         ),
                       ),
                       const SizedBox(height: 2),
-                      Text(
-                        'Publique projetos no mural e sincronize com a nuvem.',
+                      AppText('Publique projetos no mural e sincronize com a nuvem.',
                         style: TextStyle(
                           fontSize: 12,
                           color: AppColors.muted,
@@ -359,8 +355,7 @@ class _UserTabState extends ConsumerState<UserTab> {
                           : null,
                     ),
                     alignment: Alignment.center,
-                    child: Text(
-                      'Criar Conta',
+                    child: AppText('Criar Conta',
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
@@ -392,8 +387,7 @@ class _UserTabState extends ConsumerState<UserTab> {
                           : null,
                     ),
                     alignment: Alignment.center,
-                    child: Text(
-                      'Entrar com Código',
+                    child: AppText('Entrar com Código',
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
@@ -473,7 +467,7 @@ class _UserTabState extends ConsumerState<UserTab> {
               onChanged: (_) => setState(() => _erro = null),
               style: TextStyle(color: AppColors.onDark, fontSize: 15),
               decoration: InputDecoration(
-                hintText: 'Seu apelido criativo (ex: Pedro Motion)',
+                hintText: translate(context, 'Seu apelido criativo (ex: Pedro Motion)'),
                 hintStyle: TextStyle(color: AppColors.muted),
                 counterText: '',
                 filled: true,
@@ -490,8 +484,7 @@ class _UserTabState extends ConsumerState<UserTab> {
               ),
             ),
             const SizedBox(height: 8),
-            Text(
-              'Este apelido é único e assinará seus vídeos e templates no mural.',
+            AppText('Este apelido é único e assinará seus vídeos e templates no mural.',
               style: TextStyle(fontSize: 11.5, color: AppColors.muted),
             ),
             const SizedBox(height: 20),
@@ -515,8 +508,7 @@ class _UserTabState extends ConsumerState<UserTab> {
                         color: Colors.black,
                       ),
                     )
-                  : const Text(
-                      'Criar Minha Conta no Cloudflare',
+                  : const AppText('Criar Minha Conta no Cloudflare',
                       style: TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
@@ -536,9 +528,9 @@ class _UserTabState extends ConsumerState<UserTab> {
                 fontFamily: 'monospace',
               ),
               decoration: InputDecoration(
-                labelText: 'Código de acesso (48 dígitos)',
+                labelText: translate(context, 'Código de acesso (48 dígitos)'),
                 labelStyle: TextStyle(color: AppColors.muted),
-                hintText: 'ex: 8f4e2b0c1a9d...',
+                hintText: translate(context, 'ex: 8f4e2b0c1a9d...'),
                 hintStyle: TextStyle(color: AppColors.muted.withValues(alpha: .5)),
                 counterText: '',
                 filled: true,
@@ -555,8 +547,7 @@ class _UserTabState extends ConsumerState<UserTab> {
               ),
             ),
             const SizedBox(height: 8),
-            Text(
-              'Cole o código de 48 caracteres gerado na criação da sua conta.',
+            AppText('Cole o código de 48 caracteres gerado na criação da sua conta.',
               style: TextStyle(fontSize: 11.5, color: AppColors.muted),
             ),
             const SizedBox(height: 20),
@@ -580,8 +571,7 @@ class _UserTabState extends ConsumerState<UserTab> {
                         color: Colors.black,
                       ),
                     )
-                  : const Text(
-                      'Restaurar Minha Conta',
+                  : const AppText('Restaurar Minha Conta',
                       style: TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
@@ -608,7 +598,7 @@ class _UserTabState extends ConsumerState<UserTab> {
                   ),
                   const SizedBox(width: 8),
                   Expanded(
-                    child: Text(
+                    child: AppText(
                       _erro!,
                       style: const TextStyle(
                         color: Colors.redAccent,
@@ -677,7 +667,7 @@ class _UserTabState extends ConsumerState<UserTab> {
                                   ),
                                 )
                               : Center(
-                                  child: Text(
+                                  child: AppText(
                                     conta.inicial,
                                     style: TextStyle(
                                       fontSize: 34,
@@ -729,7 +719,7 @@ class _UserTabState extends ConsumerState<UserTab> {
                 ],
               ),
               const SizedBox(height: 4),
-              Text(
+              AppText(
                 'Criador Áurea • Membro desde ${_formatarData(conta.criadaEm)}',
                 style: TextStyle(fontSize: 12, color: AppColors.muted),
               ),
@@ -739,8 +729,7 @@ class _UserTabState extends ConsumerState<UserTab> {
                 color: AppColors.surfaceHigh,
                 borderRadius: BorderRadius.circular(20),
                 onPressed: () => _editarApelido(context, conta),
-                child: Text(
-                  'Editar apelido',
+                child: AppText('Editar apelido',
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
@@ -775,8 +764,7 @@ class _UserTabState extends ConsumerState<UserTab> {
                   ),
                   const SizedBox(width: 8),
                   Expanded(
-                    child: Text(
-                      'Código de Acesso Mestre',
+                    child: AppText('Código de Acesso Mestre',
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w700,
@@ -804,7 +792,7 @@ class _UserTabState extends ConsumerState<UserTab> {
                   color: AppColors.background,
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Text(
+                child: AppText(
                   _codigoVisivel
                       ? conta.codigo
                       : '••••••••••••••••••••••••••••••••••••••••••••••••',
@@ -822,7 +810,7 @@ class _UserTabState extends ConsumerState<UserTab> {
                 child: OutlinedButton.icon(
                   key: const ValueKey('conta-copiar-codigo'),
                   icon: const Icon(CupertinoIcons.doc_on_clipboard, size: 16),
-                  label: const Text('Copiar código de acesso'),
+                  label: const AppText('Copiar código de acesso'),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: AppColors.lime,
                     side: BorderSide(
@@ -843,8 +831,7 @@ class _UserTabState extends ConsumerState<UserTab> {
                 ),
               ),
               const SizedBox(height: 6),
-              Text(
-                'Guarde este código para acessar seu perfil em outros aparelhos.',
+              AppText('Guarde este código para acessar seu perfil em outros aparelhos.',
                 style: TextStyle(fontSize: 11, color: AppColors.muted),
               ),
             ],
@@ -904,16 +891,14 @@ class _UserTabState extends ConsumerState<UserTab> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'Compartilhar criações',
+                    AppText('Compartilhar criações',
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
                         color: AppColors.onDark,
                       ),
                     ),
-                    Text(
-                      'Mostre seus projetos na aba Comunidade.',
+                    AppText('Mostre seus projetos na aba Comunidade.',
                       style: TextStyle(fontSize: 12, color: AppColors.muted),
                     ),
                   ],
@@ -924,8 +909,7 @@ class _UserTabState extends ConsumerState<UserTab> {
                 color: AppColors.surfaceHigh,
                 borderRadius: BorderRadius.circular(14),
                 onPressed: () => ref.read(homeTabProvider.notifier).state = 1,
-                child: Text(
-                  'Ir',
+                child: AppText('Ir',
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
@@ -953,8 +937,7 @@ class _UserTabState extends ConsumerState<UserTab> {
                   color: Colors.redAccent,
                 ),
                 SizedBox(width: 8),
-                Text(
-                  'Sair desta conta',
+                AppText('Sair desta conta',
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
@@ -999,7 +982,7 @@ class _CartaoEstatistica extends StatelessWidget {
           children: [
             Icon(icone, color: AppColors.lime, size: 22),
             const SizedBox(height: 8),
-            Text(
+            AppText(
               valor,
               style: TextStyle(
                 fontSize: 20,

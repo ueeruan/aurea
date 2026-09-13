@@ -68,7 +68,7 @@ class SettingsTab extends ConsumerWidget {
           ListTile(
             leading: const Icon(Icons.language),
             title: const AppText('Idioma'),
-            subtitle: Text(appLanguages[ref.watch(appLanguageProvider)]!),
+            subtitle: AppText(appLanguages[ref.watch(appLanguageProvider)]!),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => showDialog<void>(
               context: context,
@@ -87,7 +87,7 @@ class SettingsTab extends ConsumerWidget {
                         }
                       }
                     },
-                    child: Text(language.value, textDirection: language.key == 'ar' ? TextDirection.rtl : TextDirection.ltr),
+                    child: AppText(language.value, textDirection: language.key == 'ar' ? TextDirection.rtl : TextDirection.ltr),
                   ),
                 ],
               ),
@@ -156,7 +156,7 @@ class SettingsTab extends ConsumerWidget {
               ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-                child: Text(
+                child: AppText(
                   settings.modoDeTranscricao.explicacao,
                   style: TextStyle(fontSize: 12.5, color: AppColors.muted),
                 ),
@@ -226,7 +226,7 @@ class _GroupHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(left: 16, bottom: 8),
-      child: Text(
+      child: AppText(
         text.toUpperCase(),
         style: TextStyle(
           fontSize: 12,
@@ -304,7 +304,7 @@ class _SegmentedRow<T extends Object> extends StatelessWidget {
                 for (final v in values)
                   v: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 6),
-                    child: Text(
+                    child: AppText(
                       labelOf(v),
                       style: TextStyle(
                         fontSize: 13,
@@ -348,10 +348,10 @@ class _SwitchRow extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: Theme.of(context).textTheme.bodyLarge),
+                AppText(title, style: Theme.of(context).textTheme.bodyLarge),
                 if (subtitle != null) ...[
                   const SizedBox(height: 1),
-                  Text(subtitle!, style: Theme.of(context).textTheme.bodySmall),
+                  AppText(subtitle!, style: Theme.of(context).textTheme.bodySmall),
                 ],
               ],
             ),
@@ -387,10 +387,10 @@ class _TapRow extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title, style: Theme.of(context).textTheme.bodyLarge),
+                  AppText(title, style: Theme.of(context).textTheme.bodyLarge),
                   if (subtitle != null) ...[
                     const SizedBox(height: 1),
-                    Text(
+                    AppText(
                       subtitle!,
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
@@ -444,7 +444,7 @@ class _Motor3DRowState extends State<_Motor3DRow> {
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-          child: Text(
+          child: AppText(
             aviso.isEmpty
                 ? 'Automatico usa a GPU e desiste sozinho se o app fechar '
                       'desenhando. Reabra o app depois de trocar.'
@@ -490,7 +490,7 @@ class _GraficoRowState extends State<_GraficoRow> {
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-          child: Text(
+          child: AppText(
             pref.caiu
                 ? 'O app nao voltou da ultima abertura em OpenGL ES, entao '
                       'a opcao foi desligada sozinha. Este aparelho fica no '
@@ -541,8 +541,7 @@ class _Qualidade3DRowState extends State<_Qualidade3DRow> {
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
           child: ValueListenableBuilder<Qualidade3D>(
             valueListenable: c.nivel,
-            builder: (context, nivel, _) => Text(
-              'Automatica escolhe pelo orcamento de memoria do aparelho e '
+            builder: (context, nivel, _) => AppText('Automatica escolhe pelo orcamento de memoria do aparelho e '
               'desce um degrau (sombra, MSAA, escala, textura, LOD) antes '
               'de o app travar; sobe de volta quando sobra folga. Agora: '
               '${qualidade3dRotulo(nivel)}.',

@@ -61,8 +61,7 @@ Future<void> showCaptionStyleSheet(
               if (!temPalavras)
                 const Padding(
                   padding: EdgeInsets.only(bottom: 12),
-                  child: Text(
-                    'Esta legenda foi gerada em frases. O destaque precisa '
+                  child: AppText('Esta legenda foi gerada em frases. O destaque precisa '
                     'do tempo por palavra — gere de novo no modo Palavra '
                     'por palavra.',
                     style: TextStyle(
@@ -121,8 +120,7 @@ Future<void> showCaptionStyleSheet(
                     ),
                     const SizedBox(width: 10),
                     Expanded(
-                      child: Text(
-                        'A palavra dita entra nesta cor; as vizinhas ficam '
+                      child: AppText('A palavra dita entra nesta cor; as vizinhas ficam '
                         'na cor do contexto.',
                         style: const TextStyle(
                           fontSize: 11,
@@ -144,7 +142,7 @@ Future<void> showCaptionStyleSheet(
                   height: 42,
                   onChanged: (v) => edita((s) => s.copyWith(destaque: v / 100)),
                 ),
-                Text(
+                AppText(
                   h.destaque <= 1.001
                       ? '100% — igual ao contexto, vira legenda comum'
                       : '${(h.destaque * 100).round()}% do tamanho do contexto',
@@ -181,13 +179,11 @@ Future<void> showCaptionStyleSheet(
                       ),
                       const SizedBox(width: 8),
                       const Expanded(
-                        child: Text(
-                          'Atras da pessoa',
+                        child: AppText('Atras da pessoa',
                           style: TextStyle(fontSize: 13, color: AmColors.text),
                         ),
                       ),
-                      const Text(
-                        'sem mascara de segmentacao',
+                      const AppText('sem mascara de segmentacao',
                         style: TextStyle(fontSize: 10, color: AmColors.muted),
                       ),
                     ],
@@ -269,8 +265,7 @@ Future<void> showCaptionStyleSheet(
                   ],
                 ),
                 const SizedBox(height: 6),
-                const Text(
-                  'A fonte do destaque e a do contexto saem da lista de '
+                const AppText('A fonte do destaque e a do contexto saem da lista de '
                   'fontes importadas (secao Fonte). Quem tiver a licenca '
                   'da original usa a original.',
                   style: TextStyle(
@@ -317,8 +312,7 @@ class _Rotulo extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(bottom: 6),
-    child: Text(
-      texto,
+    child: AppText(texto,
       style: const TextStyle(
         fontSize: 10,
         fontWeight: FontWeight.w700,

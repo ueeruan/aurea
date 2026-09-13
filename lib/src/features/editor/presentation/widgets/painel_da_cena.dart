@@ -217,8 +217,7 @@ class _LinhaDaCamera extends StatelessWidget {
                   ),
                   const SizedBox(width: 10),
                   Flexible(
-                    child: Text(
-                      nome,
+                    child: AppText(nome,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -324,8 +323,7 @@ class _Grade<T> extends StatelessWidget {
                       ? null
                       : Border.all(color: AmColors.hairline),
                 ),
-                child: Text(
-                  nome,
+                child: AppText(nome,
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
@@ -383,7 +381,7 @@ class _Acao extends StatelessWidget {
                   if (detalhe != null)
                     Padding(
                       padding: const EdgeInsets.only(top: 2),
-                      child: Text(
+                      child: AppText(
                         detalhe!,
                         style: TextStyle(
                           fontSize: 10,
@@ -459,8 +457,7 @@ class _Titulo extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.fromLTRB(4, 12, 0, 6),
-    child: Text(
-      texto,
+    child: AppText(texto,
       style: const TextStyle(
         fontSize: 11,
         fontWeight: FontWeight.w700,
@@ -478,8 +475,7 @@ class _Aviso extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.fromLTRB(6, 2, 0, 6),
-    child: Text(
-      texto,
+    child: AppText(texto,
       style: const TextStyle(fontSize: 11, color: AmColors.muted, height: 1.4),
     ),
   );

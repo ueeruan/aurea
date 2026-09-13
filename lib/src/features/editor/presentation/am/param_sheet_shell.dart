@@ -2,6 +2,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import 'am_colors.dart';
+import 'package:aurea/src/core/l10n/app_language.dart';
 
 /// COMO SE FECHA UM PAINEL DE PARAMETRO.
 ///
@@ -165,7 +166,7 @@ class _ParamSheetShellState extends State<ParamSheetShell> {
                   ),
                 ),
                 Expanded(
-                  child: Text(
+                  child: AppText(
                     widget.title ?? 'Ajustar',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,

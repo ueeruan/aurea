@@ -86,7 +86,7 @@ class ProjectsTab extends ConsumerWidget {
   /// Prepara o campo com suas texturas embutidas antes de abrir.
   Future<void> _openCampo(BuildContext context, WidgetRef ref) async {
     ScaffoldMessenger.of(context)
-        .showSnackBar(const SnackBar(content: Text('Preparando o campo 3D…')));
+        .showSnackBar(const SnackBar(content: AppText('Preparando o campo 3D…')));
     try {
       final model = await prepareCampoArvore();
       if (!context.mounted) return;
@@ -96,7 +96,7 @@ class ProjectsTab extends ConsumerWidget {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Não consegui preparar o campo. Tente novamente.'),
+          content: AppText('Não consegui preparar o campo. Tente novamente.'),
         ),
       );
     }
@@ -110,7 +110,7 @@ class ProjectsTab extends ConsumerWidget {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Nao consegui preparar o motion VHF. Tente novamente.'),
+          content: AppText('Nao consegui preparar o motion VHF. Tente novamente.'),
         ),
       );
     }
@@ -130,7 +130,7 @@ class ProjectsTab extends ConsumerWidget {
     } catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Nao consegui preparar o astronauta: $e')),
+        SnackBar(content: AppText('Nao consegui preparar o astronauta: $e')),
       );
     }
   }
@@ -151,7 +151,7 @@ class ProjectsTab extends ConsumerWidget {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Nao consegui preparar os modelos do Monolito: $e'),
+          content: AppText('Nao consegui preparar os modelos do Monolito: $e'),
         ),
       );
     }
@@ -166,8 +166,7 @@ class ProjectsTab extends ConsumerWidget {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-            'Nao consegui preparar o motion. Tente abrir novamente.',
+          content: AppText('Nao consegui preparar o motion. Tente abrir novamente.',
           ),
         ),
       );
@@ -186,8 +185,7 @@ class ProjectsTab extends ConsumerWidget {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-            'Nao consegui preparar a trilha. Tente abrir o modelo novamente.',
+          content: AppText('Nao consegui preparar a trilha. Tente abrir o modelo novamente.',
           ),
         ),
       );
@@ -216,7 +214,7 @@ class ProjectsTab extends ConsumerWidget {
     if (!context.mounted) return;
     if (pack == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Nao consegui ler esse template')),
+        const SnackBar(content: AppText('Nao consegui ler esse template')),
       );
       return;
     }
@@ -265,7 +263,7 @@ class ProjectsTab extends ConsumerWidget {
     } catch (_) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Não consegui importar essa mídia.')),
+          const SnackBar(content: AppText('Não consegui importar essa mídia.')),
         );
       }
     }
@@ -301,10 +299,10 @@ class ProjectsTab extends ConsumerWidget {
     final abrir = await showCupertinoDialog<bool>(
       context: context,
       builder: (c) => CupertinoAlertDialog(
-        title: const Text('Cena importada'),
+        title: const AppText('Cena importada'),
         content: Padding(
           padding: const EdgeInsets.only(top: 8),
-          child: Text(
+          child: AppText(
             _resumoDaImportacao(resultado),
             textAlign: TextAlign.left,
           ),
@@ -350,16 +348,16 @@ class ProjectsTab extends ConsumerWidget {
       showCupertinoDialog<void>(
         context: context,
         builder: (c) => CupertinoAlertDialog(
-          title: Text(titulo),
+          title: AppText(titulo),
           content: Padding(
             padding: const EdgeInsets.only(top: 8),
-            child: Text(texto),
+            child: AppText(texto),
           ),
           actions: [
             CupertinoDialogAction(
               isDefaultAction: true,
               onPressed: () => Navigator.of(c).pop(),
-              child: const Text('OK'),
+              child: const AppText('OK'),
             ),
           ],
         ),
@@ -379,7 +377,7 @@ class ProjectsTab extends ConsumerWidget {
     final apaga = await showCupertinoModalPopup<bool>(
       context: context,
       builder: (c) => CupertinoActionSheet(
-        title: Text(project.name),
+        title: AppText(project.name),
         actions: [
           CupertinoActionSheetAction(
             isDestructiveAction: true,
@@ -430,8 +428,8 @@ class ProjectsTab extends ConsumerWidget {
     final acao = await showCupertinoModalPopup<String>(
       context: context,
       builder: (c) => CupertinoActionSheet(
-        title: Text(project.name),
-        message: Text(fichaDoProjeto(project)),
+        title: AppText(project.name),
+        message: AppText(fichaDoProjeto(project)),
         actions: [
           for (final (rotulo, chave) in const [
             ('Abrir', 'abrir'),
@@ -572,8 +570,7 @@ class ProjectsTab extends ConsumerWidget {
           if (projects.isEmpty)
             Padding(
               padding: EdgeInsets.fromLTRB(20, 10, 20, 6),
-              child: Text(
-                'Seus projetos aparecem aqui, com a miniatura do que voce fez.',
+              child: AppText('Seus projetos aparecem aqui, com a miniatura do que voce fez.',
                 style: TextStyle(color: AppColors.muted, fontSize: 13.5),
               ),
             )
@@ -797,10 +794,10 @@ class _TituloSecao extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           Expanded(
-            child: Text(titulo, style: Theme.of(context).textTheme.titleMedium),
+            child: AppText(titulo, style: Theme.of(context).textTheme.titleMedium),
           ),
           if (detalhe != null)
-            Text(
+            AppText(
               detalhe!,
               style: TextStyle(fontSize: 12.5, color: AppColors.muted),
             ),
@@ -870,7 +867,7 @@ class _LinhaProjeto extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text(
+                  AppText(
                     project.name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -882,7 +879,7 @@ class _LinhaProjeto extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 3),
-                  Text(
+                  AppText(
                     fichaDoProjeto(project),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -999,8 +996,7 @@ class _CartaoModelo extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 8),
-            Text(
-              titulo,
+            AppText(titulo,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
@@ -1011,7 +1007,7 @@ class _CartaoModelo extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 2),
-            Text(
+            AppText(
               detalhe,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
@@ -1049,8 +1045,7 @@ class _Linha extends StatelessWidget {
             Icon(icon, size: 18, color: AppColors.lime),
             const SizedBox(width: 12),
             Expanded(
-              child: Text(
-                texto,
+              child: AppText(texto,
                 style: TextStyle(fontSize: 14, color: AppColors.onDark),
               ),
             ),
@@ -1107,7 +1102,7 @@ class _AtalhoModerno extends StatelessWidget {
                 color: AppColors.onDark,
               ),
             ),
-            Text(
+            AppText(
               subrotulo,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
@@ -1164,8 +1159,7 @@ class _SpotlightComunidade extends ConsumerWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'Mural da Comunidade',
+                  AppText('Mural da Comunidade',
                     style: TextStyle(
                       fontSize: 14.5,
                       fontWeight: FontWeight.w700,
@@ -1173,8 +1167,7 @@ class _SpotlightComunidade extends ConsumerWidget {
                     ),
                   ),
                   const SizedBox(height: 2),
-                  Text(
-                    'Explore projetos reais, templates e criações no Cloudflare.',
+                  AppText('Explore projetos reais, templates e criações no Cloudflare.',
                     style: TextStyle(
                       fontSize: 11.5,
                       color: AppColors.muted,
@@ -1200,7 +1193,7 @@ class _SpotlightComunidade extends ConsumerWidget {
                 ),
               ),
               onPressed: onExplorar,
-              child: const Text('Ver feed'),
+              child: const AppText('Ver feed'),
             ),
           ],
         ),

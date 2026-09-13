@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/ui/am_colors.dart';
 import '../../application/editor_controller.dart';
 import '../../domain/keyframe.dart';
+import 'package:aurea/src/core/l10n/app_language.dart';
 
 /// QUAL CURVA ESTA ABERTA PARA EDICAO.
 ///
@@ -364,7 +365,7 @@ class _RailDeFamilias extends StatelessWidget {
                       fit: BoxFit.scaleDown,
                       child: Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 2),
-                        child: Text(
+                        child: AppText(
                           rotuloDaFamilia(f),
                           style: TextStyle(
                             fontSize: 8,
@@ -455,7 +456,7 @@ class _Passo extends StatelessWidget {
           ),
           Expanded(
             child: FittedBox(
-              child: Text(
+              child: AppText(
                 valor,
                 style: const TextStyle(
                   fontSize: 12,
@@ -517,8 +518,7 @@ class _NomeDoPreset extends StatelessWidget {
           aoTocar: () => aoTrocar(-1),
         ),
         Expanded(
-          child: Text(
-            nome,
+          child: AppText(nome,
             maxLines: 1,
             textAlign: TextAlign.center,
             overflow: TextOverflow.ellipsis,

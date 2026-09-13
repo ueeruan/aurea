@@ -73,7 +73,7 @@ class _GizmoDeVistaState extends State<GizmoDeVista> {
                   FittedBox(
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 3),
-                      child: Text(
+                      child: AppText(
                         sceneViewLabel(widget.navegacao.vista),
                         style: const TextStyle(
                           fontSize: 8,
@@ -173,8 +173,7 @@ class _Face extends StatelessWidget {
               color: escolhida ? AmColors.accent : AmColors.muted,
             ),
             const SizedBox(width: 7),
-            Text(
-              texto,
+            AppText(texto,
               style: TextStyle(
                 fontSize: 11.5,
                 fontWeight: FontWeight.w600,

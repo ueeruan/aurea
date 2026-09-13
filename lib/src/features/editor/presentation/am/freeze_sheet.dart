@@ -46,7 +46,7 @@ Future<void> showFreezeSheet(
                   ),
                   SizedBox(
                     width: 62,
-                    child: Text(
+                    child: AppText(
                       '${seconds.toStringAsFixed(1)} s',
                       textAlign: TextAlign.right,
                       style: const TextStyle(
@@ -64,11 +64,11 @@ Future<void> showFreezeSheet(
                 children: const {
                   FreezePlacement.separateClip: Padding(
                     padding: EdgeInsets.symmetric(horizontal: 8, vertical: 7),
-                    child: Text('Clipe separado'),
+                    child: AppText('Clipe separado'),
                   ),
                   FreezePlacement.insideClip: Padding(
                     padding: EdgeInsets.symmetric(horizontal: 8, vertical: 7),
-                    child: Text('Dentro do clipe'),
+                    child: AppText('Dentro do clipe'),
                   ),
                 },
                 onValueChanged: (value) {
@@ -99,7 +99,7 @@ Future<void> showFreezeSheet(
                     }
                     closeParamSheet(sheetContext);
                   },
-                  child: const Text('Congelar aqui'),
+                  child: const AppText('Congelar aqui'),
                 ),
               ),
             ],

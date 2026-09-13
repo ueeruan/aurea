@@ -77,8 +77,7 @@ Future<T?> folhaDoEstudio<T>(
               if (titulo != null)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(18, 12, 18, 4),
-                  child: Text(
-                    titulo,
+                  child: AppText(titulo,
                     style: const TextStyle(
                       fontSize: 17,
                       fontWeight: FontWeight.w700,
@@ -147,8 +146,7 @@ class LinhaDoEstudio extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    titulo,
+                  AppText(titulo,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -158,7 +156,7 @@ class LinhaDoEstudio extends StatelessWidget {
                     ),
                   ),
                   if (subtitulo != null)
-                    Text(
+                    AppText(
                       subtitulo!,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
@@ -204,7 +202,7 @@ class SecaoDoEstudio extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.fromLTRB(18, 14, 18, 4),
-    child: Text(
+    child: AppText(
       titulo.toUpperCase(),
       style: const TextStyle(
         fontSize: 11,
@@ -324,7 +322,7 @@ class ReguaDoEstudio extends StatelessWidget {
         ),
         SizedBox(
           width: 52,
-          child: Text(
+          child: AppText(
             formato?.call(value) ?? value.toStringAsFixed(2),
             textAlign: TextAlign.right,
             style: const TextStyle(fontSize: 12, color: AmColors.muted),
@@ -347,7 +345,7 @@ Future<String?> pedirNome(
   final r = await showCupertinoDialog<String>(
     context: context,
     builder: (ctx) => CupertinoAlertDialog(
-      title: Text(titulo),
+      title: AppText(titulo),
       content: Padding(
         padding: const EdgeInsets.only(top: 12),
         child: CupertinoTextField(
@@ -365,7 +363,7 @@ Future<String?> pedirNome(
         CupertinoDialogAction(
           isDefaultAction: true,
           onPressed: () => Navigator.pop(ctx, ctrl.text),
-          child: const Text('OK'),
+          child: const AppText('OK'),
         ),
       ],
     ),
@@ -409,8 +407,7 @@ Future<void> showAdicionar(
               color: AmColors.text,
             ),
           ),
-          Text(
-            titulo,
+          AppText(titulo,
             style: const TextStyle(
               fontSize: 17,
               fontWeight: FontWeight.w700,
@@ -608,7 +605,7 @@ Future<void> showHierarquia(
                     ),
                   ),
                 ),
-                Text(
+                AppText(
                   '${layer.scene.nodes.length} objetos · '
                   '${layer.scene.lights.length} luzes · '
                   '${layer.allCameras.length} cameras',
@@ -622,7 +619,7 @@ Future<void> showHierarquia(
             child: CupertinoSearchTextField(
               key: const ValueKey('estudio-busca'),
               autofocus: buscar,
-              placeholder: 'Buscar na cena',
+              placeholder: translate(context, 'Buscar na cena'),
               style: const TextStyle(color: AmColors.text, fontSize: 14),
               backgroundColor: AmColors.chip,
               onChanged: (v) => setSheet(() => termo = v),
@@ -632,8 +629,7 @@ Future<void> showHierarquia(
             child: itens.isEmpty
                 ? const Padding(
                     padding: EdgeInsets.all(24),
-                    child: Text(
-                      'Nada com esse nome.',
+                    child: AppText('Nada com esse nome.',
                       textAlign: TextAlign.center,
                       style: TextStyle(color: AmColors.muted),
                     ),
@@ -781,8 +777,7 @@ Future<void> showAcoesDoItem(
       final linhas = <Widget>[
         Padding(
           padding: const EdgeInsets.fromLTRB(18, 10, 18, 4),
-          child: Text(
-            item.nome,
+          child: AppText(item.nome,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
@@ -1255,8 +1250,7 @@ Future<void> showLuzes(
           if (layer.scene.lights.isEmpty)
             const Padding(
               padding: EdgeInsets.fromLTRB(18, 6, 18, 6),
-              child: Text(
-                'A cena usa a luz padrao do ambiente. Crie uma luz para '
+              child: AppText('A cena usa a luz padrao do ambiente. Crie uma luz para '
                 'controlar direcao, cor e sombra.',
                 style: TextStyle(
                   fontSize: 12.5,
@@ -1567,8 +1561,7 @@ Future<void> showMenuDaCamera(
           ),
           const Padding(
             padding: EdgeInsets.fromLTRB(18, 8, 18, 0),
-            child: Text(
-              'As vistas fixas sao ortograficas e nao mexem na camera. '
+            child: AppText('As vistas fixas sao ortograficas e nao mexem na camera. '
               'Para a camera assumir uma vista, use "Alinhar camera a '
               'vista" no menu de tres pontos.',
               style: TextStyle(

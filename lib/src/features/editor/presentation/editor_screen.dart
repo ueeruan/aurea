@@ -43,6 +43,7 @@ import 'shell/transport_bar.dart';
 import 'widgets/add_layer_sheet.dart';
 import 'widgets/mask_node_editor.dart';
 import 'widgets/preview_stage.dart';
+import 'package:aurea/src/core/l10n/app_language.dart';
 
 /// O EDITOR — cinco zonas fixas (secao 4 do prompt):
 ///
@@ -474,8 +475,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
               children: [
                 const Padding(
                   padding: EdgeInsets.fromLTRB(18, 14, 18, 6),
-                  child: Text(
-                    'Agrupar quais camadas?',
+                  child: AppText('Agrupar quais camadas?',
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w700,
@@ -491,7 +491,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                         CheckboxListTile(
                           key: ValueKey('agrupar-${l.id}'),
                           value: escolhidas.contains(l.id),
-                          title: Text(
+                          title: AppText(
                             l.name,
                             style: const TextStyle(color: AmColors.text),
                           ),
@@ -514,7 +514,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                     onPressed: escolhidas.length >= 2
                         ? () => Navigator.pop(ctx, true)
                         : null,
-                    child: const Text('Agrupar'),
+                    child: const AppText('Agrupar'),
                   ),
                 ),
               ],
@@ -893,6 +893,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                       }
                       _onTapLayer(l);
                     },
+                    onTapBackground: panel != null ? _back : null,
                     onScrub: _videos.scrub,
                     onExpand: _session.toggleTimelineExpanded,
                     expanded: s.timelineExpanded,
@@ -1116,7 +1117,7 @@ class _DiagOverlay extends ConsumerWidget {
                           builder: (context, pior, _) =>
                               ValueListenableBuilder<FrameReport?>(
                                 valueListenable: FrameLog.report,
-                                builder: (context, r, _) => Text(
+                                builder: (context, r, _) => AppText(
                                   'UI: $jank travadas · pior ${pior.toStringAsFixed(0)} ms\n'
                                   'MARCHA: ${gear == null ? '—' : gearLabel(gear.gear)}\n'
                                   'motivo: ${gear?.reason ?? '—'}\n'
@@ -1187,8 +1188,7 @@ class _Diag3D extends StatelessWidget {
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: AmColors.hairline),
                 ),
-                child: Text(
-                  '── 3D ──\n'
+                child: AppText('── 3D ──\n'
                   'nivel ${qualidade3dRotulo(nivel)} · pressao '
                   '${nivelDePressaoRotulo(pressao)} · ${c.motivo.value}\n'
                   'GPU estimada ${bytesLegiveis(est.total)} de '
@@ -1249,8 +1249,7 @@ class _RascunhoBadge extends ConsumerWidget {
               color: const Color(0xCC12151A),
               borderRadius: BorderRadius.circular(999),
             ),
-            child: const Text(
-              'Rascunho · pause para ver a qualidade final',
+            child: const AppText('Rascunho · pause para ver a qualidade final',
               style: TextStyle(fontSize: 10.5, color: AmColors.muted),
             ),
           ),

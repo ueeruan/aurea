@@ -93,7 +93,7 @@ class _EffectsPanelState extends ConsumerState<EffectsPanel> {
     return showCupertinoDialog<String>(
       context: context,
       builder: (dialogContext) => CupertinoAlertDialog(
-        title: const Text('Nome do preset'),
+        title: const AppText('Nome do preset'),
         content: Padding(
           padding: const EdgeInsets.only(top: 12),
           child: CupertinoTextField(
@@ -305,7 +305,7 @@ class _EffectsPanelState extends ConsumerState<EffectsPanel> {
                       if (layer is VideoLayer)
                         TextButton.icon(
                           icon: const Icon(CupertinoIcons.music_note),
-                          label: const Text('Efeitos de audio'),
+                          label: const AppText('Efeitos de audio'),
                           onPressed: () => showModalBottomSheet<void>(
                             context: context,
                             backgroundColor: AmColors.panel,
@@ -377,7 +377,7 @@ class _EffectsPanelState extends ConsumerState<EffectsPanel> {
                                 layer.effects[i].type == EffectType.timeRemap
                             ? TextButton.icon(
                                 icon: const Icon(Icons.timeline),
-                                label: const Text('Editar curva de tempo'),
+                                label: const AppText('Editar curva de tempo'),
                                 onPressed: () => showModalBottomSheet<void>(
                                   context: context,
                                   isScrollControlled: true,
@@ -659,7 +659,7 @@ class _EffectCard extends StatelessWidget {
                         ),
                         const SizedBox(width: 10),
                         Expanded(
-                          child: Text(
+                          child: AppText(
                             effect.spec.name,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -955,7 +955,7 @@ class _ParamRow extends StatelessWidget {
           ),
           SizedBox(
             width: 58,
-            child: Text(
+            child: AppText(
               amNumber(value, value.abs() >= 10 ? 1 : 3),
               textAlign: TextAlign.right,
               style: _estiloValor,
@@ -1061,7 +1061,7 @@ class _PointRow extends StatelessWidget {
           ),
           SizedBox(
             width: 44,
-            child: Text(
+            child: AppText(
               amNumber(x, 2),
               textAlign: TextAlign.right,
               style: _estiloValor,
@@ -1069,7 +1069,7 @@ class _PointRow extends StatelessWidget {
           ),
           SizedBox(
             width: 44,
-            child: Text(
+            child: AppText(
               amNumber(y, 2),
               textAlign: TextAlign.right,
               style: _estiloValor,
@@ -1136,7 +1136,7 @@ class _ChoiceRow extends StatelessWidget {
                         color: value == i ? AmColors.accentDim : AmColors.chip,
                         borderRadius: BorderRadius.circular(8),
                       ),
-                      child: Text(
+                      child: AppText(
                         options[i],
                         style: const TextStyle(
                           fontSize: 12,
@@ -1182,7 +1182,7 @@ class _SeedRow extends StatelessWidget {
               style: const TextStyle(fontSize: 13, color: AmColors.muted),
             ),
           ),
-          Text(
+          AppText(
             '${value.round()}',
             style: const TextStyle(fontSize: 13, color: AmColors.accent),
           ),
@@ -1204,8 +1204,7 @@ class _SeedRow extends StatelessWidget {
                     color: AmColors.accent,
                   ),
                   SizedBox(width: 6),
-                  Text(
-                    'Sortear',
+                  AppText('Sortear',
                     style: TextStyle(fontSize: 12, color: AmColors.accent),
                   ),
                 ],
@@ -1297,7 +1296,7 @@ class _ColorRow extends StatelessWidget {
             ),
           ),
           const Spacer(),
-          Text(
+          AppText(
             '${(c.r * 255).round()} ${(c.g * 255).round()} ${(c.b * 255).round()}',
             style: const TextStyle(fontSize: 13, color: AmColors.accent),
           ),
@@ -1392,7 +1391,7 @@ class _BotaoAnalisarState extends State<_BotaoAnalisar> {
                     color: temAnalise ? AmColors.chip : AmColors.accentDim,
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: Text(
+                  child: AppText(
                     _rodando
                         ? 'Analisando o video...'
                         : (temAnalise
@@ -1407,7 +1406,7 @@ class _BotaoAnalisarState extends State<_BotaoAnalisar> {
                 ),
               ),
               const SizedBox(height: 4),
-              Text(
+              AppText(
                 temAnalise
                     ? '${dados.frames.length} quadros com caixas gravadas. '
                           'Desenhar virou consulta: o seek e instantaneo.'

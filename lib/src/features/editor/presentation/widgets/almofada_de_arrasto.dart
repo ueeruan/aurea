@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../../../core/ui/am_colors.dart';
+import 'package:aurea/src/core/l10n/app_language.dart';
 
 /// A FOLGA ENTRE O L E A BORDA DA AREA: o canto precisa de ar do lado
 /// de fora para ser lido como marca. Colado na borda ele vira o canto
@@ -171,7 +172,7 @@ class _AlmofadaDeArrastoState extends State<AlmofadaDeArrasto> {
                     padding: EdgeInsets.only(
                       top: widget.cabecalho != null ? 36.0 : 0.0,
                     ),
-                    child: Text(
+                    child: AppText(
                       widget.dica,
                       textAlign: TextAlign.center,
                       style: TextStyle(

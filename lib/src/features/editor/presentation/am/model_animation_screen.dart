@@ -10,6 +10,7 @@ import '../../domain/camera3d.dart';
 import '../../domain/model_asset3d.dart';
 import '../widgets/scene3d_painter.dart';
 import 'am_widgets.dart';
+import 'package:aurea/src/core/l10n/app_language.dart';
 
 /// A real scene preview and seekable clock, not a list of animation names.
 /// FK edits are additive to the imported clip and stored as pose keyframes.
@@ -78,15 +79,15 @@ class _ModelAnimationScreenState extends ConsumerState<ModelAnimationScreen>
     final n = l is Scene3DLayer ? l.scene.nodeById(widget.nodeId) : null;
     if (l is! Scene3DLayer || n?.modelAsset == null) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Animacao 3D')),
-        body: const Center(child: Text('Modelo indisponivel.')),
+        appBar: AppBar(title: const AppText('Animacao 3D')),
+        body: const Center(child: AppText('Modelo indisponivel.')),
       );
     }
     final node = n!, asset = node.modelAsset!, motion = node.modelMotion;
     selected = selected.clamp(0, asset.nodes.length - 1);
     return Scaffold(
       appBar: AppBar(
-        title: Text('Animar · ${node.name}'),
+        title: AppText('Animar · ${node.name}'),
         actions: [
           IconButton(
             tooltip: 'Mostrar rig',
@@ -152,7 +153,7 @@ class _ModelAnimationScreenState extends ConsumerState<ModelAnimationScreen>
                     ),
                     Padding(
                       padding: const EdgeInsets.only(right: 12),
-                      child: Text('${seconds.toStringAsFixed(2)} s'),
+                      child: AppText('${seconds.toStringAsFixed(2)} s'),
                     ),
                   ],
                 ),
@@ -161,25 +162,24 @@ class _ModelAnimationScreenState extends ConsumerState<ModelAnimationScreen>
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
                     children: [
                       if (node.locked)
-                        const Text(
-                          'Objeto bloqueado. Desbloqueie na cena para editar.',
+                        const AppText('Objeto bloqueado. Desbloqueie na cena para editar.',
                         ),
                       DropdownButtonFormField<int>(
                         initialValue: motion.clip >= asset.clips.length
                             ? -1
                             : motion.clip,
-                        decoration: const InputDecoration(
-                          labelText: 'Clipe importado',
+                        decoration: InputDecoration(
+                          labelText: translate(context, 'Clipe importado'),
                         ),
                         items: [
                           const DropdownMenuItem(
                             value: -1,
-                            child: Text('Pose de repouso'),
+                            child: AppText('Pose de repouso'),
                           ),
                           for (var i = 0; i < asset.clips.length; i++)
                             DropdownMenuItem(
                               value: i,
-                              child: Text(asset.clipNames[i]),
+                              child: AppText(asset.clipNames[i]),
                             ),
                         ],
                         onChanged: node.locked
@@ -188,7 +188,7 @@ class _ModelAnimationScreenState extends ConsumerState<ModelAnimationScreen>
                       ),
                       SwitchListTile.adaptive(
                         contentPadding: EdgeInsets.zero,
-                        title: const Text('Repetir clipe'),
+                        title: const AppText('Repetir clipe'),
                         value: motion.loop,
                         onChanged: node.locked
                             ? null
@@ -206,14 +206,14 @@ class _ModelAnimationScreenState extends ConsumerState<ModelAnimationScreen>
                       DropdownButtonFormField<int>(
                         initialValue: selected,
                         isExpanded: true,
-                        decoration: const InputDecoration(
-                          labelText: 'Osso / parte do modelo',
+                        decoration: InputDecoration(
+                          labelText: translate(context, 'Osso / parte do modelo'),
                         ),
                         items: [
                           for (var i = 0; i < asset.nodes.length; i++)
                             DropdownMenuItem(
                               value: i,
-                              child: Text(
+                              child: AppText(
                                 '${asset.joints.contains(i) ? 'Osso · ' : ''}${asset.nodes[i]['name']}',
                                 overflow: TextOverflow.ellipsis,
                               ),
@@ -223,8 +223,7 @@ class _ModelAnimationScreenState extends ConsumerState<ModelAnimationScreen>
                       ),
                       const Padding(
                         padding: EdgeInsets.symmetric(vertical: 8),
-                        child: Text(
-                          'Escolha uma parte, avance o tempo e ajuste a pose. Cada ajuste grava um keyframe. O rig importado deforma a malha pelos pesos dos ossos.',
+                        child: AppText('Escolha uma parte, avance o tempo e ajuste a pose. Cada ajuste grava um keyframe. O rig importado deforma a malha pelos pesos dos ossos.',
                           style: TextStyle(fontSize: 12),
                         ),
                       ),
@@ -276,7 +275,7 @@ class _ModelAnimationScreenState extends ConsumerState<ModelAnimationScreen>
                                         m.withPose(seconds, m.poseAt(seconds)),
                                   ),
                             icon: const Icon(Icons.diamond_outlined),
-                            label: const Text('Gravar pose'),
+                            label: const AppText('Gravar pose'),
                           ),
                           TextButton(
                             onPressed: node.locked
@@ -292,13 +291,13 @@ class _ModelAnimationScreenState extends ConsumerState<ModelAnimationScreen>
                                           .toList(),
                                     ),
                                   ),
-                            child: const Text('Apagar keyframe'),
+                            child: const AppText('Apagar keyframe'),
                           ),
                           TextButton(
                             onPressed: node.locked
                                 ? null
                                 : () => poseChange(const ModelPose3D()),
-                            child: const Text('Zerar parte'),
+                            child: const AppText('Zerar parte'),
                           ),
                         ],
                       ),
@@ -307,7 +306,7 @@ class _ModelAnimationScreenState extends ConsumerState<ModelAnimationScreen>
                         children: [
                           for (final key in motion.keys)
                             ActionChip(
-                              label: Text(
+                              label: AppText(
                                 '◆ ${key.seconds.toStringAsFixed(2)}s',
                               ),
                               onPressed: () {
@@ -322,7 +321,7 @@ class _ModelAnimationScreenState extends ConsumerState<ModelAnimationScreen>
                         ],
                       ),
                       if (asset.warnings.isNotEmpty)
-                        Text(
+                        AppText(
                           asset.warnings.join('\n'),
                           style: const TextStyle(fontSize: 11),
                         ),
@@ -348,7 +347,7 @@ class _ModelAnimationScreenState extends ConsumerState<ModelAnimationScreen>
     children: [
       SizedBox(
         width: 128,
-        child: Text(
+        child: AppText(
           '$label\n${value.toStringAsFixed(2)}',
           style: const TextStyle(fontSize: 12),
         ),

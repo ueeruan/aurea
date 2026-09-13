@@ -552,7 +552,7 @@ class _Estresse3DScreenState extends State<Estresse3DScreen>
         ? (_relatorioAnterior ?? '')
         : _relatorio();
     return Scaffold(
-      appBar: AppBar(title: const Text('Teste de estresse 3D')),
+      appBar: AppBar(title: const AppText('Teste de estresse 3D')),
       body: Column(
         children: [
           if (container != null && playback != null && videos != null)
@@ -573,8 +573,7 @@ class _Estresse3DScreenState extends State<Estresse3DScreen>
               child: ColoredBox(
                 color: Color(0xFF0B0E14),
                 child: Center(
-                  child: Text(
-                    'O palco aparece aqui durante cada cena',
+                  child: AppText('O palco aparece aqui durante cada cena',
                     style: TextStyle(color: AppColors.muted),
                   ),
                 ),
@@ -585,7 +584,7 @@ class _Estresse3DScreenState extends State<Estresse3DScreen>
             child: Row(
               children: [
                 Expanded(
-                  child: Text(
+                  child: AppText(
                     _status,
                     style: TextStyle(fontSize: 13, color: AppColors.muted),
                   ),
@@ -598,7 +597,7 @@ class _Estresse3DScreenState extends State<Estresse3DScreen>
                 else
                   FilledButton(
                     onPressed: _prefs == null ? null : _rodarTudo,
-                    child: Text(
+                    child: AppText(
                       _resultados.isEmpty ? 'Rodar os nove' : 'Rodar de novo',
                     ),
                   ),
@@ -644,13 +643,13 @@ class _Estresse3DScreenState extends State<Estresse3DScreen>
                               if (context.mounted) {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(
-                                    content: Text('Relatorio copiado.'),
+                                    content: AppText('Relatorio copiado.'),
                                   ),
                                 );
                               }
                             },
                       icon: const Icon(Icons.copy_rounded),
-                      label: const Text('Copiar relatorio'),
+                      label: const AppText('Copiar relatorio'),
                     ),
                   ),
                 ],

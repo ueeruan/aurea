@@ -4,6 +4,7 @@ import 'package:video_player/video_player.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../domain/tutorial.dart';
+import 'package:aurea/src/core/l10n/app_language.dart';
 
 /// A TELA DO TUTORIAL: o video em cima, os passos embaixo.
 ///
@@ -118,13 +119,13 @@ class _TutorialScreenState extends State<TutorialScreen> {
                     ),
                   ),
                   Expanded(
-                    child: Text(
+                    child: AppText(
                       t == null ? 'Tutorial' : 'Tutorial · ${t.titulo}',
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                   ),
                   if (t != null)
-                    Text(
+                    AppText(
                       _mmss(t.duracao),
                       style: TextStyle(fontSize: 12.5, color: AppColors.muted),
                     ),
@@ -137,7 +138,7 @@ class _TutorialScreenState extends State<TutorialScreen> {
                   ? Center(
                       child: _erro == null
                           ? const CupertinoActivityIndicator()
-                          : Text(
+                          : AppText(
                               _erro!,
                               style: TextStyle(color: AppColors.muted),
                             ),
@@ -183,7 +184,7 @@ class _TutorialScreenState extends State<TutorialScreen> {
                                     left: 12,
                                     right: 12,
                                     bottom: 12,
-                                    child: Text(
+                                    child: AppText(
                                       _erro!,
                                       key: const ValueKey('tutorial-erro'),
                                       style: TextStyle(
@@ -225,7 +226,7 @@ class _TutorialScreenState extends State<TutorialScreen> {
                                       : AppColors.surfaceHigh,
                                   shape: BoxShape.circle,
                                 ),
-                                child: Text(
+                                child: AppText(
                                   '${c.n}',
                                   style: TextStyle(
                                     fontSize: 12,
@@ -238,8 +239,7 @@ class _TutorialScreenState extends State<TutorialScreen> {
                               ),
                               const SizedBox(width: 12),
                               Expanded(
-                                child: Text(
-                                  c.texto,
+                                child: AppText(c.texto,
                                   style: TextStyle(
                                     fontSize: 14,
                                     height: 1.35,

@@ -96,7 +96,7 @@ Future<void> showAppleCascadeSheet(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(
+                AppText(
                   'Cascata · $selectionCount camadas',
                   style: const TextStyle(
                     fontSize: 17,
@@ -126,8 +126,7 @@ Future<void> showAppleCascadeSheet(
                 ),
                 const SizedBox(height: 14),
                 if (depth == _CascadeDepth.pronto) ...[
-                  const Text(
-                    '40 ms entre cada camada, com Mola de interface.',
+                  const AppText('40 ms entre cada camada, com Mola de interface.',
                     style: TextStyle(fontSize: 12, color: AmColors.muted),
                   ),
                   const SizedBox(height: 10),
@@ -136,8 +135,7 @@ Future<void> showAppleCascadeSheet(
                     onPressed: selectionCount < 2
                         ? null
                         : () => apply(ready: true),
-                    child: const Text(
-                      'Escalonar selecao',
+                    child: const AppText('Escalonar selecao',
                       style: TextStyle(
                         color: AmColors.bg,
                         fontWeight: FontWeight.w700,
@@ -149,8 +147,7 @@ Future<void> showAppleCascadeSheet(
                     children: [
                       const SizedBox(
                         width: 82,
-                        child: Text(
-                          'Intervalo',
+                        child: AppText('Intervalo',
                           style: TextStyle(fontSize: 12, color: AmColors.muted),
                         ),
                       ),
@@ -166,7 +163,7 @@ Future<void> showAppleCascadeSheet(
                       ),
                       SizedBox(
                         width: 58,
-                        child: Text(
+                        child: AppText(
                           '${intervalMs.round()} ms',
                           textAlign: TextAlign.end,
                           style: const TextStyle(
@@ -178,8 +175,7 @@ Future<void> showAppleCascadeSheet(
                     ],
                   ),
                   const SizedBox(height: 10),
-                  const Text(
-                    'Ordem',
+                  const AppText('Ordem',
                     style: TextStyle(fontSize: 12, color: AmColors.muted),
                   ),
                   const SizedBox(height: 6),
@@ -202,8 +198,7 @@ Future<void> showAppleCascadeSheet(
                   ),
                   if (depth == _CascadeDepth.avancado) ...[
                     const SizedBox(height: 14),
-                    const Text(
-                      'Vinculo de propriedade',
+                    const AppText('Vinculo de propriedade',
                       style: TextStyle(fontSize: 12, color: AmColors.muted),
                     ),
                     const SizedBox(height: 6),
@@ -231,8 +226,7 @@ Future<void> showAppleCascadeSheet(
                       ],
                     ),
                     const SizedBox(height: 14),
-                    const Text(
-                      'Curva compartilhada',
+                    const AppText('Curva compartilhada',
                       style: TextStyle(fontSize: 12, color: AmColors.muted),
                     ),
                     const SizedBox(height: 6),
@@ -258,8 +252,7 @@ Future<void> showAppleCascadeSheet(
                       ],
                     ),
                     const SizedBox(height: 8),
-                    const Text(
-                      'Os keyframes continuam reais e podem ser editados por camada.',
+                    const AppText('Os keyframes continuam reais e podem ser editados por camada.',
                       style: TextStyle(fontSize: 10, color: AmColors.muted),
                     ),
                   ],
@@ -272,7 +265,7 @@ Future<void> showAppleCascadeSheet(
                               onLinkProperty != null
                         ? linkProperty
                         : apply,
-                    child: Text(
+                    child: AppText(
                       depth == _CascadeDepth.avancado && onLinkProperty != null
                           ? 'Vincular com atraso incremental'
                           : 'Aplicar cascata',

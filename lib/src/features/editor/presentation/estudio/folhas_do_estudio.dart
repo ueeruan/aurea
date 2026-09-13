@@ -455,7 +455,7 @@ class _FolhaDaCenaState extends ConsumerState<_FolhaDaCena> {
                 style: const TextStyle(fontSize: 12.5, color: AmColors.text),
                 decoration: InputDecoration(
                   isDense: true,
-                  hintText: 'Procurar na cena...',
+                  hintText: translate(context, 'Procurar na cena...'),
                   hintStyle: const TextStyle(
                     fontSize: 12.5,
                     color: AmColors.muted,
@@ -876,8 +876,7 @@ class TituloDaFolha extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.fromLTRB(2, 12, 0, 6),
-    child: Text(
-      texto,
+    child: AppText(texto,
       style: const TextStyle(
         fontSize: 11,
         fontWeight: FontWeight.w700,
@@ -895,8 +894,7 @@ class AvisoDaFolha extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.fromLTRB(2, 4, 0, 8),
-    child: Text(
-      texto,
+    child: AppText(texto,
       style: const TextStyle(
         fontSize: 11,
         color: AmColors.muted,
@@ -996,7 +994,7 @@ class AcaoDaFolha extends StatelessWidget {
                   if (detalhe != null)
                     Padding(
                       padding: const EdgeInsets.only(top: 2),
-                      child: Text(
+                      child: AppText(
                         detalhe!,
                         style: TextStyle(
                           fontSize: 10,
@@ -1322,7 +1320,7 @@ class LinhaDeAnimar extends StatelessWidget {
                     color: AmColors.text,
                   ),
                 ),
-                Text(
+                AppText(
                   marcas.isEmpty
                       ? 'sem keyframes'
                       : '${marcas.length} keyframes',
@@ -1556,8 +1554,7 @@ class _LinhaDaHierarquia extends StatelessWidget {
                   ),
                   const SizedBox(width: 9),
                   Flexible(
-                    child: Text(
-                      item.nome,
+                    child: AppText(item.nome,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(

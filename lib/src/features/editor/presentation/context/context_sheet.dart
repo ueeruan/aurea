@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../../core/theme/tokens.dart';
 import '../../application/ui/editor_layout.dart';
+import 'package:aurea/src/core/l10n/app_language.dart';
 
 /// ZONA E — A CASCA DO PAINEL CONTEXTUAL.
 ///
@@ -70,7 +71,7 @@ class ContextSheet extends StatelessWidget {
                       Expanded(
                         child: Tooltip(
                           message: subtitle ?? title!,
-                          child: Text(
+                          child: AppText(
                             title!,
                             key: const ValueKey('editor-context'),
                             maxLines: 1,

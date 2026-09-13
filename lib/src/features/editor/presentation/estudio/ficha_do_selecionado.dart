@@ -95,7 +95,7 @@ class BarraDeContexto extends ConsumerWidget {
             const SizedBox(width: 6),
             ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 130),
-              child: Text(
+              child: AppText(
                 extras > 0 ? '${alvo.nome} +$extras' : alvo.nome,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
@@ -341,8 +341,7 @@ class _FichaState extends ConsumerState<FichaDoSelecionado> {
             Icon(alvo.icone, size: 17, color: AmColors.accent),
             const SizedBox(width: 7),
             Expanded(
-              child: Text(
-                alvo.nome,
+              child: AppText(alvo.nome,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
@@ -439,8 +438,7 @@ class _NadaSelecionado extends ConsumerWidget {
       const TituloDaFolha('Nada selecionado'),
       const Padding(
         padding: EdgeInsets.only(bottom: 8),
-        child: Text(
-          'Toque num objeto da vista para escolher, ou crie um.',
+        child: AppText('Toque num objeto da vista para escolher, ou crie um.',
           style: TextStyle(fontSize: 11.5, color: AmColors.muted),
         ),
       ),

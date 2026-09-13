@@ -447,8 +447,7 @@ class _Rastreio3DScreenState extends ConsumerState<Rastreio3DScreen> {
                   ),
                   if (_quadros.isEmpty)
                     Center(
-                      child: Text(
-                        'Sem prévia do vídeo — os pontos continuam valendo.',
+                      child: AppText('Sem prévia do vídeo — os pontos continuam valendo.',
                         textAlign: TextAlign.center,
                         style: TextStyle(fontSize: 12, color: AmColors.muted),
                       ),
@@ -472,7 +471,7 @@ class _Rastreio3DScreenState extends ConsumerState<Rastreio3DScreen> {
     padding: const EdgeInsets.only(top: 8),
     child: Row(
       children: [
-        Text(
+        AppText(
           '${_indice + 1}/${_quadros.length}',
           style: TextStyle(fontSize: 11, color: AmColors.muted),
         ),
@@ -646,8 +645,7 @@ class _Cabecalho extends StatelessWidget {
           ),
         ),
         Expanded(
-          child: Text(
-            'Rastreio de câmera 3D',
+          child: AppText('Rastreio de câmera 3D',
             style: TextStyle(
               fontSize: 15,
               fontWeight: FontWeight.w700,
@@ -692,8 +690,7 @@ class _FichaDoSolve extends StatelessWidget {
         children: [
           Row(
             children: [
-              Text(
-                'Qualidade do rastreio',
+              AppText('Qualidade do rastreio',
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w700,
@@ -745,7 +742,7 @@ class _Numero extends StatelessWidget {
     mainAxisSize: MainAxisSize.min,
     children: [
       AppText(rotulo, style: TextStyle(fontSize: 10.5, color: AmColors.muted)),
-      Text(
+      AppText(
         valor,
         style: TextStyle(
           fontSize: 14,
@@ -799,8 +796,7 @@ class _Acao extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  titulo,
+                AppText(titulo,
                   style: TextStyle(
                     fontSize: 13.5,
                     fontWeight: FontWeight.w700,
@@ -808,7 +804,7 @@ class _Acao extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 2),
-                Text(
+                AppText(
                   detalhe,
                   style: TextStyle(fontSize: 11.5, color: AmColors.muted),
                 ),
@@ -840,8 +836,7 @@ class _Faixa extends StatelessWidget {
       color: destaque ? AmColors.accent.withValues(alpha: .16) : AmColors.panel,
       borderRadius: BorderRadius.circular(10),
     ),
-    child: Text(
-      texto,
+    child: AppText(texto,
       style: TextStyle(
         fontSize: 12,
         height: 1.35,
@@ -1034,8 +1029,7 @@ class _FolhaAvancada extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 3),
-            Text(
-              'O que a análise fez, e o que dá para mudar antes de '
+            AppText('O que a análise fez, e o que dá para mudar antes de '
               'refazê-la.',
               style: TextStyle(fontSize: 12, color: AmColors.muted),
             ),

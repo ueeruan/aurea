@@ -63,7 +63,7 @@ class _EstudioDaCenaState extends ConsumerState<EstudioDaCena> {
 
   void _dizer(String text) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: AppText(text)));
   }
 
   void _adicionar(BuildContext context, Duration time) => abrirFolhaDeAdicionar(
@@ -129,7 +129,7 @@ class _EstudioDaCenaState extends ConsumerState<EstudioDaCena> {
     final project = ref.watch(projetoVisivelProvider);
     final layer = project.layerById(widget.layerId);
     if (layer is! Scene3DLayer) {
-      return const Scaffold(body: Center(child: Text('Cena indisponível')));
+      return const Scaffold(body: Center(child: AppText('Cena indisponível')));
     }
     final autoKey = ref.watch(autoKeyframeProvider);
     final tool = ref.watch(ferramentaProvider);
@@ -208,7 +208,7 @@ class _EstudioDaCenaState extends ConsumerState<EstudioDaCena> {
                                       for (final cam in layer.allCameras)
                                         DropdownMenuItem(
                                           value: cam.id,
-                                          child: Text(
+                                          child: AppText(
                                             'No vídeo: ${cam.name}',
                                             overflow: TextOverflow.ellipsis,
                                           ),
@@ -262,7 +262,7 @@ class _EstudioDaCenaState extends ConsumerState<EstudioDaCena> {
                                     ])
                                       PopupMenuItem(
                                         value: v,
-                                        child: Text(sceneViewLabel(v)),
+                                        child: AppText(sceneViewLabel(v)),
                                       ),
                                   ],
                                 ),
@@ -293,7 +293,7 @@ class _EstudioDaCenaState extends ConsumerState<EstudioDaCena> {
                                   Padding(
                                     padding: const EdgeInsets.only(right: 6),
                                     child: ChoiceChip(
-                                      label: Text(ferramentaLabel(f)),
+                                      label: AppText(ferramentaLabel(f)),
                                       selected: tool == f,
                                       onSelected: (_) =>
                                           ref
@@ -338,8 +338,7 @@ class _EstudioDaCenaState extends ConsumerState<EstudioDaCena> {
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: FilterChip(
-                                    label: const Text(
-                                      'AutoKey',
+                                    label: const AppText('AutoKey',
                                       overflow: TextOverflow.ellipsis,
                                     ),
                                     selected: autoKey,
@@ -392,7 +391,7 @@ class _EstudioDaCenaState extends ConsumerState<EstudioDaCena> {
                                             : Scene3DTheme.textMuted,
                                       ),
                                       icon: Icon(_icons[i], size: 18),
-                                      label: Text(_tabs[i]),
+                                      label: AppText(_tabs[i]),
                                     ),
                                 ],
                               ),
@@ -468,14 +467,14 @@ class _EstudioDaCenaState extends ConsumerState<EstudioDaCena> {
                       items: [
                         const DropdownMenuItem(
                           value: '',
-                          child: Text('Vincular a nulo: nenhum'),
+                          child: AppText('Vincular a nulo: nenhum'),
                         ),
                         for (final parent in layer.scene.nodes)
                           if ((parent.isNull || parent.id == node.parentId) &&
                               canParent(parent.id))
                             DropdownMenuItem(
                               value: parent.id,
-                              child: Text(
+                              child: AppText(
                                 'Nulo: ${parent.name}',
                                 overflow: TextOverflow.ellipsis,
                               ),
@@ -526,8 +525,7 @@ class _EstudioDaCenaState extends ConsumerState<EstudioDaCena> {
         if (layer.scene.nodes.isEmpty)
           const Padding(
             padding: EdgeInsets.all(16),
-            child: Text(
-              'Sua cena começa aqui. Toque em Adicionar para criar ou importar um objeto.',
+            child: AppText('Sua cena começa aqui. Toque em Adicionar para criar ou importar um objeto.',
             ),
           ),
         for (final node in layer.scene.nodes)
@@ -537,14 +535,14 @@ class _EstudioDaCenaState extends ConsumerState<EstudioDaCena> {
             leading: Icon(
               node.isNull ? Icons.control_camera : Icons.view_in_ar_outlined,
             ),
-            title: Text(
+            title: AppText(
               node.name,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
             subtitle: node.parentId == null
                 ? null
-                : Text(
+                : AppText(
                     'Ligado a ${layer.scene.nodeById(node.parentId!)?.name ?? "nulo"}',
                   ),
             trailing: const Icon(Icons.tune, size: 20),
@@ -558,7 +556,7 @@ class _EstudioDaCenaState extends ConsumerState<EstudioDaCena> {
         TextButton.icon(
           key: const ValueKey('estudio-cena'),
           icon: const Icon(Icons.account_tree_outlined),
-          label: const Text('Organizar objetos, luzes e câmeras'),
+          label: const AppText('Organizar objetos, luzes e câmeras'),
           onPressed: () =>
               abrirFolhaDaCena(context, ref, layerId: layer.id, tempo: time),
         ),
@@ -594,7 +592,7 @@ class _EstudioDaCenaState extends ConsumerState<EstudioDaCena> {
           Expanded(
             child: Column(
               children: [
-                Text(
+                AppText(
                   '${(local.inMilliseconds / 1000).toStringAsFixed(2)} / ${(end / 1000000).toStringAsFixed(2)} s',
                   style: const TextStyle(fontSize: 11),
                 ),
@@ -678,15 +676,14 @@ class _Tip extends StatelessWidget {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          title,
+        AppText(title,
           style: const TextStyle(
             fontWeight: FontWeight.w700,
             color: Scene3DTheme.accent,
           ),
         ),
         const SizedBox(height: 4),
-        Text(body),
+        AppText(body),
       ],
     ),
   );

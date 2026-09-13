@@ -25,16 +25,14 @@ class AboutTab extends StatelessWidget {
           const Center(child: AureaLogo(size: 96)),
           const SizedBox(height: 18),
           Center(
-            child: Text(
-              'Aurea',
+            child: AppText('Aurea',
               style: Theme.of(context).textTheme.headlineLarge
                   ?.copyWith(fontSize: 28),
             ),
           ),
           const SizedBox(height: 4),
           Center(
-            child: Text(
-              'Editor de video e composicao',
+            child: AppText('Editor de video e composicao',
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ),
@@ -46,7 +44,7 @@ class AboutTab extends StatelessWidget {
                 color: AppColors.lime.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(20),
               ),
-              child: Text(
+              child: AppText(
                 'Versao $_appVersion',
                 style: TextStyle(
                   fontSize: 12,
@@ -65,8 +63,7 @@ class AboutTab extends StatelessWidget {
               color: AppColors.surface,
               borderRadius: BorderRadius.circular(16),
             ),
-            child: Text(
-              'Aurea e um editor de video e composicao para celular: '
+            child: AppText('Aurea e um editor de video e composicao para celular: '
               'timeline multi-trilha, preview em tempo real e exportacao '
               'direto do aparelho, sem depender de nuvem.',
               style: Theme.of(context).textTheme.bodyMedium
@@ -84,9 +81,8 @@ class AboutTab extends StatelessWidget {
               children: [
                 ListTile(
                   leading: Icon(CupertinoIcons.book, color: AppColors.lime),
-                  title: const Text('Como usar o AUREA'),
-                  subtitle: const Text(
-                    'Guia rápido e ajuda dos efeitos · offline',
+                  title: const AppText('Como usar o AUREA'),
+                  subtitle: const AppText('Guia rápido e ajuda dos efeitos · offline',
                   ),
                   trailing: const Icon(CupertinoIcons.chevron_right, size: 16),
                   onTap: () => Navigator.of(context).push(
@@ -101,9 +97,8 @@ class AboutTab extends StatelessWidget {
                     color: AppColors.lime,
                     size: 21,
                   ),
-                  title: Text('Tecnologia'),
-                  subtitle: Text(
-                    'Flutter + FFmpeg',
+                  title: AppText('Tecnologia'),
+                  subtitle: AppText('Flutter + FFmpeg',
                     style: TextStyle(fontSize: 12, color: AppColors.muted),
                   ),
                 ),
@@ -117,9 +112,8 @@ class AboutTab extends StatelessWidget {
                     color: AppColors.lime,
                     size: 21,
                   ),
-                  title: const Text('Reportar erro ou sugerir'),
-                  subtitle: Text(
-                    'Vai direto para o criador',
+                  title: const AppText('Reportar erro ou sugerir'),
+                  subtitle: AppText('Vai direto para o criador',
                     style: TextStyle(fontSize: 12, color: AppColors.muted),
                   ),
                   trailing: Icon(
@@ -139,8 +133,8 @@ class AboutTab extends StatelessWidget {
                     color: AppColors.lime,
                     size: 21,
                   ),
-                  title: const Text('Criador'),
-                  subtitle: Text(
+                  title: const AppText('Criador'),
+                  subtitle: AppText(
                     '${AureaAutor.nome}  ·  @${AureaAutor.instagram}  ·  '
                     'TikTok @${AureaAutor.tiktok}',
                     style: TextStyle(fontSize: 12, color: AppColors.muted),
@@ -162,7 +156,7 @@ class AboutTab extends StatelessWidget {
                     color: AppColors.lime,
                     size: 21,
                   ),
-                  title: const Text('Licencas de codigo aberto'),
+                  title: const AppText('Licencas de codigo aberto'),
                   trailing: Icon(
                     CupertinoIcons.chevron_right,
                     size: 16,
@@ -179,7 +173,7 @@ class AboutTab extends StatelessWidget {
           ),
           const SizedBox(height: 26),
           Center(
-            child: Text(
+            child: AppText(
               'Feito por ${AureaAutor.nome} com Flutter',
               style: Theme.of(context).textTheme.bodySmall
                   ?.copyWith(fontSize: 11),

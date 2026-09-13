@@ -65,6 +65,7 @@ import 'particles_painter.dart';
 import '../../application/scene3d_gpu.dart';
 import 'scene3d_painter.dart';
 import 'scene3d_gpu_view.dart';
+import 'package:aurea/src/core/l10n/app_language.dart';
 
 // Photos decode asynchronously and videos update their external textures.
 // An automatic snapshot of either can retain a placeholder/previous frame.
@@ -710,15 +711,14 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
                     ref.read(previewResolutionProvider.notifier).state = v,
                 itemBuilder: (_) => [
                   for (final v in PreviewResolution.values)
-                    PopupMenuItem(value: v, child: Text(v.label)),
+                    PopupMenuItem(value: v, child: AppText(v.label)),
                 ],
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 10,
                     vertical: 8,
                   ),
-                  child: Text(
-                    resolution.label,
+                  child: AppText(resolution.label,
                     style: const TextStyle(color: Colors.white, fontSize: 12),
                   ),
                 ),
@@ -770,8 +770,7 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
                   children: [
                     const SizedBox(width: 10),
                     const Expanded(
-                      child: Text(
-                        'Desenho livre · arraste na prévia',
+                      child: AppText('Desenho livre · arraste na prévia',
                         maxLines: 2,
                         style: TextStyle(color: Colors.white, fontSize: 12),
                       ),

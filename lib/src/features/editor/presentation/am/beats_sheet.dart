@@ -58,8 +58,7 @@ Future<void> showBeatsSheet(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'FAIXA DE FREQUENCIA',
+                const AppText('FAIXA DE FREQUENCIA',
                   style: TextStyle(
                     fontSize: 10.5,
                     letterSpacing: 0.6,
@@ -85,8 +84,7 @@ Future<void> showBeatsSheet(
                   ],
                 ),
                 const SizedBox(height: 4),
-                const Text(
-                  'Bumbo e chimbal atacam em instantes diferentes. Cortar '
+                const AppText('Bumbo e chimbal atacam em instantes diferentes. Cortar '
                   'no grave e cortar no pulso; no agudo, na levada.',
                   style: TextStyle(
                     fontSize: 11,
@@ -105,8 +103,7 @@ Future<void> showBeatsSheet(
                 ),
 
                 const SizedBox(height: 10),
-                const Text(
-                  'SUBDIVISAO',
+                const AppText('SUBDIVISAO',
                   style: TextStyle(
                     fontSize: 10.5,
                     letterSpacing: 0.6,
@@ -135,8 +132,7 @@ Future<void> showBeatsSheet(
                   ],
                 ),
                 const SizedBox(height: 4),
-                const Text(
-                  'Em compasso 4/4: 1/4 poe uma marca em cada tempo, 1/8 '
+                const AppText('Em compasso 4/4: 1/4 poe uma marca em cada tempo, 1/8 '
                   'duas, 1/1 uma por compasso.',
                   style: TextStyle(
                     fontSize: 11,
@@ -150,13 +146,12 @@ Future<void> showBeatsSheet(
                   children: [
                     const SizedBox(
                       width: 110,
-                      child: Text(
-                        'Andamento',
+                      child: AppText('Andamento',
                         style: TextStyle(fontSize: 12, color: AmColors.muted),
                       ),
                     ),
                     Expanded(
-                      child: Text(
+                      child: AppText(
                         project.bpm == null
                             ? 'ainda nao analisado'
                             : '${project.bpm!.toStringAsFixed(1)} bpm '
@@ -196,7 +191,7 @@ Future<void> showBeatsSheet(
                       color: AmColors.accentDim,
                       borderRadius: BorderRadius.circular(11),
                     ),
-                    child: Text(
+                    child: AppText(
                       rodando
                           ? 'Ouvindo a faixa...'
                           : (project.beats.isEmpty
@@ -368,7 +363,7 @@ class _Linha extends StatelessWidget {
       ),
       SizedBox(
         width: 42,
-        child: Text(
+        child: AppText(
           value.toStringAsFixed(0),
           textAlign: TextAlign.right,
           style: const TextStyle(fontSize: 12, color: AmColors.text),

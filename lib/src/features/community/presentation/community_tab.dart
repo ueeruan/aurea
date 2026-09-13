@@ -356,8 +356,7 @@ class _CommunityTabState extends ConsumerState<CommunityTab> {
               ],
             ),
             const SizedBox(height: 6),
-            Text(
-              'O mural do beta: mostre o que você fez e veja o que os '
+            AppText('O mural do beta: mostre o que você fez e veja o que os '
               'outros estão fazendo.',
               style: Theme.of(context).textTheme.bodySmall,
             ),
@@ -451,7 +450,7 @@ class _LinhaDaConta extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
+                  AppText(
                     c?.apelido ?? 'Criar minha conta',
                     style: TextStyle(
                       fontSize: 14.5,
@@ -460,7 +459,7 @@ class _LinhaDaConta extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 2),
-                  Text(
+                  AppText(
                     c == null
                         ? 'Um apelido e uma foto. É com isso que você assina.'
                         : 'É assim que você assina no mural.',
@@ -497,7 +496,7 @@ class _Avatar extends StatelessWidget {
     return CircleAvatar(
       radius: raio,
       backgroundColor: AppColors.violet,
-      child: Text(
+      child: AppText(
         nome.trim().isEmpty ? 'A' : nome.trim()[0].toUpperCase(),
         style: TextStyle(
           fontSize: raio * 0.85,
@@ -530,8 +529,7 @@ class _BotaoPublicar extends StatelessWidget {
         children: [
           Icon(CupertinoIcons.plus, size: 17, color: Color(0xFF0B0E12)),
           SizedBox(width: 6),
-          Text(
-            'Publicar',
+          AppText('Publicar',
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w700,
@@ -602,8 +600,7 @@ class _Cartao extends StatelessWidget {
                     color: AppColors.muted,
                   ),
                   const SizedBox(width: 6),
-                  Text(
-                    'Repostou',
+                  AppText('Repostou',
                     style: TextStyle(
                       fontSize: 11.5,
                       fontWeight: FontWeight.w600,
@@ -633,7 +630,7 @@ class _Cartao extends StatelessWidget {
                           color: AppColors.onDark,
                         ),
                       ),
-                      Text(
+                      AppText(
                         post.quandoEmPalavras(),
                         style: TextStyle(
                           fontSize: 11.5,
@@ -653,8 +650,7 @@ class _Cartao extends StatelessWidget {
           if (post.texto.trim().isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
-              child: Text(
-                post.texto,
+              child: Text(post.texto,
                 style: TextStyle(
                   fontSize: 14,
                   height: 1.4,
@@ -690,7 +686,7 @@ class _Cartao extends StatelessWidget {
                         color: AppColors.accentDim,
                         borderRadius: BorderRadius.circular(8),
                       ),
-                      child: Text(
+                      child: AppText(
                         '#$e',
                         style: TextStyle(
                           fontSize: 11,
@@ -900,7 +896,7 @@ class _Citacao extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              Text(
+              AppText(
                 original.quandoEmPalavras(),
                 style: TextStyle(fontSize: 11, color: AppColors.muted),
               ),
@@ -910,8 +906,7 @@ class _Citacao extends StatelessWidget {
         if (original.texto.trim().isNotEmpty)
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
-            child: Text(
-              original.texto,
+            child: Text(original.texto,
               maxLines: 6,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
@@ -958,7 +953,7 @@ class _CartaoDeProjeto extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
+                  AppText(
                     post.nomeDoProjeto ?? 'Projeto do Aurea',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -969,7 +964,7 @@ class _CartaoDeProjeto extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 2),
-                  Text(
+                  AppText(
                     onAbrir == null
                         ? 'Anexado — vai subir junto com o post.'
                         : 'Toque para abrir como um projeto seu.',
@@ -1033,7 +1028,7 @@ class _ConversaState extends ConsumerState<_Conversa> {
     appBar: AppBar(
       backgroundColor: AppColors.background,
       elevation: 0,
-      title: const Text('Conversa'),
+      title: const AppText('Conversa'),
     ),
     body: RefreshIndicator(
       onRefresh: _buscar,
@@ -1052,7 +1047,7 @@ class _ConversaState extends ConsumerState<_Conversa> {
             },
           ),
           const SizedBox(height: 18),
-          Text(
+          AppText(
             _carregando
                 ? 'Carregando as respostas...'
                 : _respostas.isEmpty
@@ -1234,7 +1229,7 @@ class _MidiaState extends State<_Midia> {
                     color: Colors.black.withValues(alpha: .6),
                     borderRadius: BorderRadius.circular(6),
                   ),
-                  child: Text(
+                  child: AppText(
                     _emMinutos(post.duracaoDaMidia!),
                     style: const TextStyle(
                       fontSize: 11,
@@ -1270,7 +1265,7 @@ class _Selo extends StatelessWidget {
         color: AppColors.surfaceHigh,
         borderRadius: BorderRadius.circular(8),
       ),
-      child: Text(
+      child: AppText(
         // "so voce ve" e literal: enquanto nao entrou no servidor, o post
         // existe so neste aparelho.
         enviado ? 'no mural' : 'só você vê',
@@ -1364,8 +1359,7 @@ class _Aviso extends StatelessWidget {
         ),
         const SizedBox(width: 10),
         Expanded(
-          child: Text(
-            texto,
+          child: AppText(texto,
             style: TextStyle(
               fontSize: 12.5,
               height: 1.35,
@@ -1393,8 +1387,7 @@ class _Vazio extends StatelessWidget {
           color: AppColors.muted.withValues(alpha: .6),
         ),
         const SizedBox(height: 14),
-        Text(
-          'O mural ainda está vazio',
+        AppText('O mural ainda está vazio',
           style: TextStyle(
             fontSize: 15,
             fontWeight: FontWeight.w700,
@@ -1402,8 +1395,7 @@ class _Vazio extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 6),
-        Text(
-          'Seja quem começa. Toque em Publicar e mostre o que você fez '
+        AppText('Seja quem começa. Toque em Publicar e mostre o que você fez '
           'no Aurea.',
           textAlign: TextAlign.center,
           style: TextStyle(fontSize: 13, height: 1.4, color: AppColors.muted),
@@ -1503,7 +1495,7 @@ class _FolhaDaContaState extends ConsumerState<_FolhaDaConta> {
             obscureText: true,
             textInputAction: TextInputAction.done,
             onSubmitted: (_) => _salvar(),
-            decoration: const InputDecoration(labelText: 'Código de acesso'),
+            decoration: InputDecoration(labelText: translate(context, 'Código de acesso')),
           )
         else
           Row(
@@ -1540,7 +1532,7 @@ class _FolhaDaContaState extends ConsumerState<_FolhaDaConta> {
                   onChanged: (_) => setState(() => _erro = null),
                   style: TextStyle(fontSize: 15, color: AppColors.onDark),
                   decoration: InputDecoration(
-                    hintText: 'Seu apelido no mural',
+                    hintText: translate(context, 'Seu apelido no mural'),
                     hintStyle: TextStyle(color: AppColors.muted),
                     counterText: '',
                     filled: true,
@@ -1572,7 +1564,7 @@ class _FolhaDaContaState extends ConsumerState<_FolhaDaConta> {
                     _entrando = !_entrando;
                     _erro = null;
                   }),
-            child: Text(
+            child: AppText(
               _entrando
                   ? 'Criar uma nova conta'
                   : 'Já tenho um código de acesso',
@@ -1582,7 +1574,7 @@ class _FolhaDaContaState extends ConsumerState<_FolhaDaConta> {
           TextButton.icon(
             key: const ValueKey('conta-copiar-codigo'),
             icon: const Icon(CupertinoIcons.doc_on_doc),
-            label: const Text('Copiar meu código de acesso'),
+            label: const AppText('Copiar meu código de acesso'),
             onPressed: () async {
               await Clipboard.setData(ClipboardData(text: conta.codigo));
               if (!context.mounted) return;
@@ -1869,7 +1861,7 @@ class _CompositorState extends ConsumerState<_Compositor> {
           controller: _etiquetas,
           style: TextStyle(fontSize: 13, color: AppColors.onDark),
           decoration: InputDecoration(
-            hintText: 'etiquetas: motion, 3d, tutorial',
+            hintText: translate(context, 'etiquetas: motion, 3d, tutorial'),
             hintStyle: TextStyle(color: AppColors.muted),
             filled: true,
             fillColor: AppColors.surface,
@@ -1934,7 +1926,7 @@ class _CompositorState extends ConsumerState<_Compositor> {
                           color: AppColors.muted,
                         ),
                         const SizedBox(height: 4),
-                        Text(
+                        AppText(
                           _duracao == null
                               ? 'Vídeo anexado'
                               : 'Vídeo · ${_emMinutos(_duracao!)}',
@@ -2033,7 +2025,7 @@ class _EscolherProjeto extends StatelessWidget {
                 Icon(CupertinoIcons.cube_box, size: 18, color: AppColors.muted),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: Text(
+                  child: AppText(
                     p.name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -2044,7 +2036,7 @@ class _EscolherProjeto extends StatelessWidget {
                     ),
                   ),
                 ),
-                Text(
+                AppText(
                   '${p.layers.length} '
                   '${p.layers.length == 1 ? "camada" : "camadas"}',
                   style: TextStyle(fontSize: 11.5, color: AppColors.muted),
@@ -2098,8 +2090,7 @@ class _Folha extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 14),
-                Text(
-                  titulo,
+                AppText(titulo,
                   style: TextStyle(
                     fontSize: 17,
                     fontWeight: FontWeight.w700,
@@ -2107,8 +2098,7 @@ class _Folha extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 3),
-                Text(
-                  subtitulo,
+                AppText(subtitulo,
                   style: TextStyle(fontSize: 12, color: AppColors.muted),
                 ),
                 const SizedBox(height: 14),

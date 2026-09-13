@@ -80,7 +80,7 @@ class SheetTransport extends StatelessWidget {
         ),
         SizedBox(
           width: 78,
-          child: Text(
+          child: AppText(
             formatTimecode(t, fps),
             textAlign: TextAlign.center,
             style: const TextStyle(
@@ -263,7 +263,7 @@ class AmValueChip extends StatelessWidget {
             color: AmColors.chip,
             borderRadius: BorderRadius.circular(10),
           ),
-          child: Text(
+          child: AppText(
             text,
             style: TextStyle(
               fontSize: 19,
@@ -275,7 +275,7 @@ class AmValueChip extends StatelessWidget {
         ),
         if (label != null) ...[
           const SizedBox(height: 4),
-          Text(
+          AppText(
             label!,
             style: TextStyle(
               fontSize: 11,

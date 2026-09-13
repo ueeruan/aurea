@@ -103,6 +103,7 @@ class AmTimeline extends ConsumerStatefulWidget {
     this.playheadColor = Colors.white,
     this.height = 260,
     this.onTapLayer,
+    this.onTapBackground,
     this.activeTimesUs,
     this.onScrub,
     this.onForeignKeyframe,
@@ -123,6 +124,12 @@ class AmTimeline extends ConsumerStatefulWidget {
   final Color playheadColor;
   final double height;
   final void Function(Layer layer)? onTapLayer;
+
+  /// TOQUE NO VAZIO DA TIMELINE. Com um painel aberto, e o caminho de
+  /// volta: "queremos voltar para a timeline quando tocamos AQUI, e nao
+  /// so no canto superior esquerdo" — o pedido dos testadores. Nulo
+  /// quando nao ha para onde voltar.
+  final VoidCallback? onTapBackground;
 
   /// Chamado enquanto a regua e arrastada — o editor toca o som em
   /// lasquinhas. Ouvir onde se esta e o que torna a decupagem rapida.
@@ -516,7 +523,15 @@ class _AmTimelineState extends ConsumerState<AmTimeline> {
                               ),
                               const SizedBox(height: 18),
                               Expanded(
-                                child: ListView.builder(
+                                // O FUNDO E UM ALVO. As barras sao opacas
+                                // e ficam com o toque delas; o que sobra
+                                // — o vazio abaixo das linhas — e o toque
+                                // de voltar.
+                                child: GestureDetector(
+                                  key: const ValueKey('timeline-fundo'),
+                                  behavior: HitTestBehavior.translucent,
+                                  onTap: widget.onTapBackground,
+                                  child: ListView.builder(
                                   controller: _rowsScroll,
                                   padding: EdgeInsets.zero,
                                   itemExtent: kAmRowHeight,
@@ -541,6 +556,7 @@ class _AmTimelineState extends ConsumerState<AmTimeline> {
                                     );
                                   },
                                 ),
+                                ),
                               ),
                             ],
                           ),
@@ -559,7 +575,7 @@ class _AmTimelineState extends ConsumerState<AmTimeline> {
                         builder: (context, t, _) => Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Text(
+                            AppText(
                               formatTimecode(t, project.fps),
                               style: const TextStyle(
                                 fontSize: 13,
@@ -863,7 +879,7 @@ class _Breadcrumb extends StatelessWidget {
             if (i > 0)
               const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 3),
-                child: Text(
+                child: AppText(
                   '›',
                   style: TextStyle(color: AmColors.muted, fontSize: 12),
                 ),
@@ -873,7 +889,7 @@ class _Breadcrumb extends StatelessWidget {
                 key: ValueKey('timeline-breadcrumb-$i'),
                 behavior: HitTestBehavior.opaque,
                 onTap: i == nomes.length - 1 ? null : () => onNivel(i),
-                child: Text(
+                child: AppText(
                   nomes[i],
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -1061,8 +1077,8 @@ Future<void> _menuDaMarca(
                 controller: texto,
                 autofocus: true,
                 style: const TextStyle(color: AmColors.text),
-                decoration: const InputDecoration(
-                  hintText: 'Nome da marca',
+                decoration: InputDecoration(
+                  hintText: translate(context, 'Nome da marca'),
                   hintStyle: TextStyle(color: AmColors.muted),
                 ),
                 onSubmitted: (v) {
@@ -1103,8 +1119,7 @@ Future<void> _menuDaMarca(
                 color: AmColors.pink,
                 size: 20,
               ),
-              title: const Text(
-                'Apagar a marca',
+              title: const AppText('Apagar a marca',
                 style: TextStyle(color: AmColors.pink, fontSize: 15),
               ),
               onTap: () {
@@ -1176,6 +1191,10 @@ class _AmRulerPainter extends CustomPainter {
 /// O toque no vazio da linha tira a selecao — e com ela fecha as
 /// ferramentas da camada e qualquer painel aberto ("clicar na timeline
 /// fecha essa aba").
+/// Os dois eixos do arrasto longo numa barra: deslocar no TEMPO ou
+/// trocar de degrau na PILHA. Nunca os dois no mesmo gesto.
+enum _EixoDoArrasto { tempo, pilha }
+
 class _AmLayerRow extends ConsumerWidget {
   const _AmLayerRow({
     super.key,
@@ -1307,6 +1326,10 @@ class _AmBarState extends ConsumerState<_AmBar> {
   /// selecionada, em pixels; a cada linha inteira a camada troca de
   /// degrau na pilha.
   double _acumuladoVertical = 0;
+
+  /// O eixo que o arrasto longo escolheu no primeiro movimento. Nulo
+  /// ate la. Ver o comentario em `onLongPressMoveUpdate`.
+  _EixoDoArrasto? _eixoDoArrasto;
 
   /// SUBIR E DESCER NA PILHA PELA PROPRIA TIMELINE. "Ja que da para
   /// selecionar, tem de dar para mover para cima ou para baixo": o
@@ -1524,6 +1547,7 @@ class _AmBarState extends ConsumerState<_AmBar> {
                       _moveuNoToqueLongo = false;
                       _ultimoDyLongo = 0;
                       _acumuladoVertical = 0;
+                      _eixoDoArrasto = null;
                       _dragStart0 = layer.startTime;
                       HapticFeedback.mediumImpact();
                     },
@@ -1538,11 +1562,23 @@ class _AmBarState extends ConsumerState<_AmBar> {
                       if (locked) return;
                       if (!_moveuNoToqueLongo) _comecarArrasto();
                       _moveuNoToqueLongo = true;
-                      if (d.offsetFromOrigin.dx.abs() > dy.abs()) {
+                      // O EIXO SE DECIDE UMA VEZ, no primeiro movimento.
+                      //
+                      // Era decidido a CADA atualizacao: um tremor do
+                      // dedo no meio de uma subida vertical virava um
+                      // deslocamento no tempo, e a camada que so devia
+                      // trocar de degrau saia do lugar. "Arrastar a
+                      // camada sem modificar a posicao" e o que a
+                      // referencia faz — e o que a trava garante.
+                      _eixoDoArrasto ??=
+                          d.offsetFromOrigin.dx.abs() > dy.abs() || compact
+                          ? _EixoDoArrasto.tempo
+                          : _EixoDoArrasto.pilha;
+                      if (_eixoDoArrasto == _EixoDoArrasto.tempo) {
                         final desired =
                             _dragStart0 + _pxToDur(d.offsetFromOrigin.dx);
                         controller.moveLayer(layer.id, _snapMove(desired));
-                      } else if (!compact) {
+                      } else {
                         _reordenarPorArrasto(dy - _ultimoDyLongo);
                       }
                       _ultimoDyLongo = dy;
@@ -1590,7 +1626,7 @@ class _AmBarState extends ConsumerState<_AmBar> {
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 6,
                               ),
-                              child: Text(
+                              child: AppText(
                                 layer.name,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
@@ -1675,7 +1711,7 @@ class _AmBarState extends ConsumerState<_AmBar> {
                                   ),
                                 if (width > 52)
                                   Flexible(
-                                    child: Text(
+                                    child: AppText(
                                       layer.name,
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
@@ -1711,7 +1747,7 @@ class _AmBarState extends ConsumerState<_AmBar> {
                                       ),
                                       borderRadius: BorderRadius.circular(6),
                                     ),
-                                    child: Text(
+                                    child: AppText(
                                       '${(layer as GroupLayer).children.length}',
                                       style: const TextStyle(
                                         color: Colors.white,
@@ -1814,7 +1850,7 @@ class _AmBarState extends ConsumerState<_AmBar> {
                               size: 12,
                               color: Colors.black,
                             )
-                          : Text(
+                          : AppText(
                               '${transition.type.shortLabel} '
                               '${transition.duration.inMilliseconds}ms',
                               maxLines: 1,
@@ -1858,8 +1894,7 @@ class _AmBarState extends ConsumerState<_AmBar> {
                     color: AmColors.action,
                     borderRadius: BorderRadius.circular(6),
                   ),
-                  child: const Text(
-                    'Juntar',
+                  child: const AppText('Juntar',
                     style: TextStyle(
                       color: AmColors.onAction,
                       fontSize: 9.5,

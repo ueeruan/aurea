@@ -48,9 +48,8 @@ Future<void> showTransitionSheet(
           final fallback = await showCupertinoDialog<TransitionEdgeFallback>(
             context: sheetContext,
             builder: (dialogContext) => CupertinoAlertDialog(
-              title: const Text('Falta sobra de midia'),
-              content: const Text(
-                'Esta transicao precisa de quadros alem do corte. '
+              title: const AppText('Falta sobra de midia'),
+              content: const AppText('Esta transicao precisa de quadros alem do corte. '
                 'Encurte a transicao ou congele as pontas.',
               ),
               actions: [
@@ -59,14 +58,14 @@ Future<void> showTransitionSheet(
                     dialogContext,
                     TransitionEdgeFallback.shorten,
                   ),
-                  child: const Text('Encurtar'),
+                  child: const AppText('Encurtar'),
                 ),
                 CupertinoDialogAction(
                   onPressed: () => Navigator.pop(
                     dialogContext,
                     TransitionEdgeFallback.freeze,
                   ),
-                  child: const Text('Congelar pontas'),
+                  child: const AppText('Congelar pontas'),
                 ),
                 CupertinoDialogAction(
                   isDestructiveAction: true,
@@ -102,8 +101,7 @@ Future<void> showTransitionSheet(
                     children: [
                       const Padding(
                         padding: EdgeInsets.fromLTRB(18, 16, 18, 8),
-                        child: Text(
-                          'Efeito da transicao',
+                        child: AppText('Efeito da transicao',
                           style: TextStyle(
                             fontSize: 17,
                             fontWeight: FontWeight.w700,
@@ -117,11 +115,11 @@ Future<void> showTransitionSheet(
                             type != EffectType.forceMotionBlur)
                           ListTile(
                             dense: true,
-                            title: Text(
+                            title: AppText(
                               effectSpecs[type]!.name,
                               style: const TextStyle(color: AmColors.text),
                             ),
-                            subtitle: Text(
+                            subtitle: AppText(
                               effectSpecs[type]!.category,
                               style: const TextStyle(color: AmColors.muted),
                             ),
@@ -174,8 +172,7 @@ Future<void> showTransitionSheet(
                   ],
                 ),
                 const SizedBox(height: 16),
-                const Text(
-                  'Distorcao e revelacao',
+                const AppText('Distorcao e revelacao',
                   style: TextStyle(color: AmColors.muted, fontSize: 12),
                 ),
                 const SizedBox(height: 8),
@@ -232,7 +229,7 @@ Future<void> showTransitionSheet(
                       ),
                       SizedBox(
                         width: 58,
-                        child: Text(
+                        child: AppText(
                           '${transition.duration.inMilliseconds} ms',
                           textAlign: TextAlign.right,
                           style: const TextStyle(
@@ -244,8 +241,7 @@ Future<void> showTransitionSheet(
                     ],
                   ),
                   const SizedBox(height: 12),
-                  const Text(
-                    'Alinhamento',
+                  const AppText('Alinhamento',
                     style: TextStyle(fontSize: 11, color: AmColors.muted),
                   ),
                   const SizedBox(height: 6),
@@ -267,8 +263,7 @@ Future<void> showTransitionSheet(
                     ],
                   ),
                   const SizedBox(height: 12),
-                  const Text(
-                    'Curva',
+                  const AppText('Curva',
                     style: TextStyle(fontSize: 11, color: AmColors.muted),
                   ),
                   const SizedBox(height: 6),
@@ -298,8 +293,7 @@ Future<void> showTransitionSheet(
                     Row(
                       children: [
                         const Expanded(
-                          child: Text(
-                            'Cruzar audio junto',
+                          child: AppText('Cruzar audio junto',
                             style: TextStyle(
                               fontSize: 13,
                               color: AmColors.text,
@@ -323,7 +317,7 @@ Future<void> showTransitionSheet(
                   if (transition.type == ClipTransitionType.effect &&
                       transition.effect != null) ...[
                     const SizedBox(height: 16),
-                    Text(
+                    AppText(
                       'Avancado · ${transition.effect!.spec.name}',
                       style: const TextStyle(
                         fontSize: 12,
@@ -355,8 +349,7 @@ Future<void> showTransitionSheet(
                       controller.removeTransition(outgoingId);
                       setSheetState(() {});
                     },
-                    child: const Text(
-                      'Remover transicao',
+                    child: const AppText('Remover transicao',
                       style: TextStyle(color: CupertinoColors.systemRed),
                     ),
                   ),
@@ -421,7 +414,7 @@ class _EffectParamRow extends StatelessWidget {
     children: [
       SizedBox(
         width: 108,
-        child: Text(
+        child: AppText(
           name,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
@@ -442,7 +435,7 @@ class _EffectParamRow extends StatelessWidget {
       ),
       SizedBox(
         width: 48,
-        child: Text(
+        child: AppText(
           value.toStringAsFixed(2),
           textAlign: TextAlign.right,
           style: const TextStyle(fontSize: 10, color: AmColors.text),

@@ -220,8 +220,7 @@ class _ColorPickerSheetState extends State<_ColorPickerSheet> {
               // HEX + valores.
               Row(
                 children: [
-                  const Text(
-                    'HEX',
+                  const AppText('HEX',
                     style: TextStyle(fontSize: 12, color: AmColors.muted),
                   ),
                   const SizedBox(width: 8),
@@ -260,7 +259,7 @@ class _ColorPickerSheetState extends State<_ColorPickerSheet> {
                     ),
                   ),
                   const Spacer(),
-                  Text(
+                  AppText(
                     widget.withAlpha ? '${(_alpha * 100).round()}%' : '',
                     style: const TextStyle(fontSize: 12, color: AmColors.muted),
                   ),
@@ -268,8 +267,7 @@ class _ColorPickerSheetState extends State<_ColorPickerSheet> {
               ),
               const SizedBox(height: 14),
 
-              const Text(
-                'Rapidas',
+              const AppText('Rapidas',
                 style: TextStyle(fontSize: 12, color: AmColors.muted),
               ),
               const SizedBox(height: 8),
@@ -531,7 +529,7 @@ class ColorWell extends StatelessWidget {
     return Row(
       children: [
         Expanded(
-          child: Text(
+          child: AppText(
             label!,
             style: const TextStyle(fontSize: 12, color: AmColors.muted),
           ),

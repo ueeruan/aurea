@@ -1,3 +1,4 @@
+import 'package:aurea/src/core/l10n/app_language.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -423,7 +424,9 @@ List<QuickAction> quickActionsFor(
 /// A LINHA DE ACOES RAPIDAS: botoes de 56 pt com icone e rotulo,
 /// rolaveis. Desabilitado esmaece e explica no toque; nunca some.
 class QuickActionsRow extends StatelessWidget {
-  const QuickActionsRow({super.key, required this.actions, this.height = 60});
+  // 52 e nao 60: "os de baixo um pouco menores, para o acesso ser mais
+  // facil" — o pedido dos testadores. O alvo continua acima do minimo.
+  const QuickActionsRow({super.key, required this.actions, this.height = 52});
 
   final List<QuickAction> actions;
   final double height;
@@ -469,13 +472,13 @@ class QuickActionsRow extends StatelessWidget {
           child: Opacity(
             opacity: a.enabled ? 1 : .35,
             child: SizedBox(
-              width: 62,
+              width: 58,
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(a.icon, size: 21, color: a.aceso ? t.accent : t.text),
-                  const SizedBox(height: 3),
-                  Text(
+                  Icon(a.icon, size: 19, color: a.aceso ? t.accent : t.text),
+                  const SizedBox(height: 2),
+                  AppText(
                     a.label,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -520,8 +523,7 @@ Future<void> showAllActionsSheet(
             children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(18, 14, 18, 6),
-                child: Text(
-                  'Acoes da camada',
+                child: AppText('Acoes da camada',
                   style: TextStyle(
                     fontSize: 17,
                     fontWeight: FontWeight.w700,
@@ -533,7 +535,7 @@ Future<void> showAllActionsSheet(
                 ListTile(
                   key: ValueKey('mais-${a.key}'),
                   leading: Icon(a.icon, color: a.aceso ? t.accent : t.text),
-                  title: Text(a.label, style: TextStyle(color: t.text)),
+                  title: AppText(a.label, style: TextStyle(color: t.text)),
                   enabled: a.enabled,
                   onTap: () {
                     HapticFeedback.lightImpact();

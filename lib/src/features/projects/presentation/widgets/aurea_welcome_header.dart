@@ -7,6 +7,7 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/aurea_logo.dart';
 import '../../../community/application/conta_da_comunidade.dart';
 import '../home_shell.dart';
+import 'package:aurea/src/core/l10n/app_language.dart';
 
 /// O CABEÇALHO ANIMADO DE BOAS-VINDAS DA HOME.
 ///
@@ -126,7 +127,7 @@ class _AureaWelcomeHeaderState extends ConsumerState<AureaWelcomeHeader>
                       children: [
                         Row(
                           children: [
-                            Text(
+                            AppText(
                               apelido != null
                                   ? '$saudacao, '
                                   : 'Bem-vindo ao ',
@@ -139,7 +140,7 @@ class _AureaWelcomeHeaderState extends ConsumerState<AureaWelcomeHeader>
                             ),
                             if (apelido != null)
                               Flexible(
-                                child: Text(
+                                child: AppText(
                                   apelido,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
@@ -157,8 +158,7 @@ class _AureaWelcomeHeaderState extends ConsumerState<AureaWelcomeHeader>
                           shaderCallback: (bounds) => const LinearGradient(
                             colors: [Color(0xFFFFFFFF), Color(0xFFD4E0ED)],
                           ).createShader(bounds),
-                          child: const Text(
-                            'Áurea Motion',
+                          child: const AppText('Áurea Motion',
                             style: TextStyle(
                               fontSize: 24,
                               fontWeight: FontWeight.w800,
@@ -229,7 +229,7 @@ class _AureaWelcomeHeaderState extends ConsumerState<AureaWelcomeHeader>
                             ),
                           ),
                           alignment: Alignment.center,
-                          child: Text(
+                          child: AppText(
                             conta?.inicial ?? '?',
                             style: const TextStyle(
                               fontSize: 11,
@@ -239,7 +239,7 @@ class _AureaWelcomeHeaderState extends ConsumerState<AureaWelcomeHeader>
                           ),
                         ),
                       const SizedBox(width: 6),
-                      Text(
+                      AppText(
                         conta != null ? 'Perfil' : 'Entrar',
                         style: TextStyle(
                           fontSize: 12,
@@ -259,8 +259,7 @@ class _AureaWelcomeHeaderState extends ConsumerState<AureaWelcomeHeader>
           // Subtítulo descritivo animado
           FadeTransition(
             opacity: _subtitleFade,
-            child: Text(
-              'Estúdio de animação gráfica, vídeo e 3D em tempo real.',
+            child: AppText('Estúdio de animação gráfica, vídeo e 3D em tempo real.',
               style: TextStyle(
                 fontSize: 12.5,
                 color: AppColors.muted.withValues(alpha: 0.85),

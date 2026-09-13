@@ -124,7 +124,7 @@ class _NewProjectSheetState extends ConsumerState<_NewProjectSheet> {
                   ),
                 ),
                 // A FICHA, viva: muda com cada escolha.
-                Text(
+                AppText(
                   '${quadro.largura} × ${quadro.altura} · $_fps fps',
                   key: const ValueKey('projeto-ficha'),
                   style: TextStyle(fontSize: 12.5, color: AppColors.muted),
@@ -200,7 +200,7 @@ class _NewProjectSheetState extends ConsumerState<_NewProjectSheet> {
               child: FilledButton(
                 key: const ValueKey('criar-projeto'),
                 onPressed: _create,
-                child: const Text('Criar projeto'),
+                child: const AppText('Criar projeto'),
               ),
             ),
           ],
@@ -268,8 +268,7 @@ class _Moldura extends StatelessWidget {
                     color: AppColors.onDark,
                   ),
                 ),
-                Text(
-                  hint,
+                AppText(hint,
                   style: TextStyle(fontSize: 12, color: AppColors.muted),
                 ),
               ],
@@ -327,8 +326,7 @@ class _FormatoItem extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 7),
-            Text(
-              option.label,
+            AppText(option.label,
               style: TextStyle(
                 fontSize: 12.5,
                 fontWeight: FontWeight.w600,
@@ -336,8 +334,7 @@ class _FormatoItem extends StatelessWidget {
                 color: selected ? AppColors.lime : AppColors.onDark,
               ),
             ),
-            Text(
-              option.hint,
+            AppText(option.hint,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: 10, color: AppColors.muted),
@@ -356,7 +353,7 @@ class _SectionLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Text(
+    return AppText(
       text.toUpperCase(),
       style: TextStyle(
         fontSize: 12,
@@ -396,7 +393,7 @@ class _Segmented<T extends Object> extends StatelessWidget {
           for (final v in values)
             v: Padding(
               padding: const EdgeInsets.symmetric(vertical: 7),
-              child: Text(
+              child: AppText(
                 labelOf(v),
                 style: TextStyle(
                   fontSize: 13,

@@ -45,7 +45,7 @@ class _EnhanceScreenState extends State<EnhanceScreen> {
 
   void _message(String text) {
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: AppText(text)));
     }
   }
 
@@ -170,16 +170,15 @@ class _EnhanceScreenState extends State<EnhanceScreen> {
   void _help() => showDialog<void>(
     context: context,
     builder: (context) => AlertDialog(
-      title: const Text('Qualidade e cor'),
+      title: const AppText('Qualidade e cor'),
       content: const SingleChildScrollView(
-        child: Text(
-          'Escolha uma foto ou vídeo. A IA ESRGAN amplia detalhes no aparelho, sem enviar sua mídia. Use 2× para arquivos menores ou 4× para ampliar mais.\n\nOs CCs mudam as cores: escolha um visual e ajuste a intensidade. Reduzir ruído suaviza granulação; Detalhes realça bordas.\n\nComparar processa uma imagem ou o primeiro quadro do vídeo. Gerar resultado processa tudo. Vídeos são salvos a 30 fps com o áudio original, recodificado. O tempo depende do arquivo e do celular.\n\nA IA pode alterar texturas; compare antes de salvar. O original permanece intacto.',
+        child: AppText('Escolha uma foto ou vídeo. A IA ESRGAN amplia detalhes no aparelho, sem enviar sua mídia. Use 2× para arquivos menores ou 4× para ampliar mais.\n\nOs CCs mudam as cores: escolha um visual e ajuste a intensidade. Reduzir ruído suaviza granulação; Detalhes realça bordas.\n\nComparar processa uma imagem ou o primeiro quadro do vídeo. Gerar resultado processa tudo. Vídeos são salvos a 30 fps com o áudio original, recodificado. O tempo depende do arquivo e do celular.\n\nA IA pode alterar texturas; compare antes de salvar. O original permanece intacto.',
         ),
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('Entendi'),
+          child: const AppText('Entendi'),
         ),
       ],
     ),
@@ -211,14 +210,13 @@ class _EnhanceScreenState extends State<EnhanceScreen> {
               style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 6),
-            const Text(
-              'Amplie com IA e aplique um visual de cor, sem abrir o editor.',
+            const AppText('Amplie com IA e aplique um visual de cor, sem abrir o editor.',
             ),
             const SizedBox(height: 16),
             OutlinedButton.icon(
               onPressed: _busy ? null : _pick,
               icon: const Icon(Icons.add_photo_alternate_outlined),
-              label: Text(
+              label: AppText(
                 _source == null ? 'Escolher foto ou vídeo' : 'Trocar arquivo',
               ),
             ),
@@ -245,15 +243,15 @@ class _EnhanceScreenState extends State<EnhanceScreen> {
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const AppText('Ampliar com IA'),
-                subtitle: const Text('ESRGAN • processamento no aparelho'),
+                subtitle: const AppText('ESRGAN • processamento no aparelho'),
                 value: _ai,
                 onChanged: _busy ? null : (v) => _changed(() => _ai = v),
               ),
               if (_ai)
                 SegmentedButton<int>(
                   segments: const [
-                    ButtonSegment(value: 2, label: Text('2×')),
-                    ButtonSegment(value: 4, label: Text('4×')),
+                    ButtonSegment(value: 2, label: AppText('2×')),
+                    ButtonSegment(value: 4, label: AppText('4×')),
                   ],
                   selected: {_scale},
                   onSelectionChanged: _busy
@@ -293,7 +291,7 @@ class _EnhanceScreenState extends State<EnhanceScreen> {
                         value: p.fraction > 0 ? p.fraction : null,
                       ),
                       const SizedBox(height: 8),
-                      Text(p.label),
+                      AppText(p.label),
                     ],
                   ),
                 ),
@@ -317,7 +315,7 @@ class _EnhanceScreenState extends State<EnhanceScreen> {
                 FilledButton.icon(
                   onPressed: _saving ? null : _save,
                   icon: const Icon(Icons.download),
-                  label: Text(_saving ? 'Salvando…' : 'Salvar na galeria'),
+                  label: AppText(_saving ? 'Salvando…' : 'Salvar na galeria'),
                 ),
             ],
           ],
@@ -355,8 +353,7 @@ class _EnhanceScreenState extends State<EnhanceScreen> {
         : (_after ?? _before ?? (_video ? null : _source));
     return path == null
         ? const Center(
-            child: Text(
-              'Toque em Comparar para ver a prévia',
+            child: AppText('Toque em Comparar para ver a prévia',
               style: TextStyle(color: Colors.white),
               textAlign: TextAlign.center,
             ),
@@ -365,8 +362,7 @@ class _EnhanceScreenState extends State<EnhanceScreen> {
             File(path),
             fit: BoxFit.contain,
             errorBuilder: (_, _, _) => const Center(
-              child: Text(
-                'Use Comparar para preparar a imagem',
+              child: AppText('Use Comparar para preparar a imagem',
                 style: TextStyle(color: Colors.white),
               ),
             ),
@@ -378,7 +374,7 @@ class _EnhanceScreenState extends State<EnhanceScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const SizedBox(height: 14),
-          Text('$label • ${(value * 100).round()}%'),
+          AppText('$label • ${(value * 100).round()}%'),
           Slider(
             value: value,
             onChanged: _busy ? null : (v) => _changed(() => update(v)),

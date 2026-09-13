@@ -106,8 +106,7 @@ class Scene3DSheetHeader extends StatelessWidget {
             const SizedBox(width: 4),
           ],
           Expanded(
-            child: Text(
-              title,
+            child: AppText(title,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(

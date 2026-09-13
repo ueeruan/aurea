@@ -2,6 +2,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/ui/am_colors.dart';
+import 'package:aurea/src/core/l10n/app_language.dart';
 
 // Change this revision when publishing a new set of release notes.
 const releaseNoticeRevision = '2026-09-12-beta-78';
@@ -48,8 +49,7 @@ Future<void> showReleaseNotice(BuildContext context) => showDialog<void>(
     surfaceTintColor: Colors.transparent,
     insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
     scrollable: true,
-    title: const Text(
-      'O que mudou no Aurea',
+    title: const AppText('O que mudou no Aurea',
       style: TextStyle(
         color: AmColors.text,
         fontSize: 21,
@@ -102,7 +102,7 @@ Future<void> showReleaseNotice(BuildContext context) => showDialog<void>(
           foregroundColor: AmColors.onAction,
         ),
         onPressed: () => Navigator.of(dialogContext).pop(),
-        child: const Text('Vamos editar'),
+        child: const AppText('Vamos editar'),
       ),
     ],
   ),

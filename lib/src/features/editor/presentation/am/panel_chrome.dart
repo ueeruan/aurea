@@ -407,8 +407,7 @@ class _Aba extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              aba.label,
+            AppText(aba.label,
               style: TextStyle(
                 fontSize: 12.5,
                 fontWeight: selecionada ? FontWeight.w700 : FontWeight.w500,
@@ -552,8 +551,7 @@ class AmRightTabs extends StatelessWidget {
                                 const SizedBox(height: 1),
                               ],
                               if (aba.icone == null)
-                                Text(
-                                  aba.label,
+                                AppText(aba.label,
                                   maxLines: 1,
                                   textAlign: TextAlign.center,
                                   overflow: TextOverflow.ellipsis,

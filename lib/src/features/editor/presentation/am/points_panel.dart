@@ -323,7 +323,7 @@ class PointsPanelState extends ConsumerState<PointsPanel> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text(
+                  AppText(
                     switch (modo) {
                       PointsMode.move =>
                         temSel

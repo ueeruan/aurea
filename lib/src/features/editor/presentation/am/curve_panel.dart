@@ -195,8 +195,7 @@ class _CurvePanelState extends ConsumerState<CurvePanel> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text(
-                    'Crie pelo menos 2 keyframes\npara editar a curva.',
+                  const AppText('Crie pelo menos 2 keyframes\npara editar a curva.',
                     textAlign: TextAlign.center,
                     style: TextStyle(color: AmColors.muted, fontSize: 13),
                   ),
@@ -271,39 +270,39 @@ class _CurvePanelState extends ConsumerState<CurvePanel> {
                               itemBuilder: (_) => [
                                 const PopupMenuItem(
                                   value: 'copy',
-                                  child: Text('Copiar curva'),
+                                  child: AppText('Copiar curva'),
                                 ),
                                 PopupMenuItem(
                                   value: 'paste',
                                   enabled: EasingClipboard.valor != null,
-                                  child: const Text('Colar curva'),
+                                  child: const AppText('Colar curva'),
                                 ),
                                 const PopupMenuItem(
                                   value: 'all',
-                                  child: Text('Aplicar em todos os segmentos'),
+                                  child: AppText('Aplicar em todos os segmentos'),
                                 ),
                                 CheckedPopupMenuItem(
                                   value: 'overshoot',
                                   checked: _overshoot,
-                                  child: const Text('Overshoot'),
+                                  child: const AppText('Overshoot'),
                                 ),
                                 CheckedPopupMenuItem(
                                   value: 'speed',
                                   checked: _velocidade,
-                                  child: const Text('Gráfico de velocidade'),
+                                  child: const AppText('Gráfico de velocidade'),
                                 ),
                                 const PopupMenuDivider(),
                                 const PopupMenuItem(
                                   value: 'loop-none',
-                                  child: Text('Loop: nenhum'),
+                                  child: AppText('Loop: nenhum'),
                                 ),
                                 const PopupMenuItem(
                                   value: 'loop-cycle',
-                                  child: Text('Loop: repetir'),
+                                  child: AppText('Loop: repetir'),
                                 ),
                                 const PopupMenuItem(
                                   value: 'loop-pingPong',
-                                  child: Text('Loop: vai e volta'),
+                                  child: AppText('Loop: vai e volta'),
                                 ),
                               ],
                               onSelected: (action) {
@@ -416,7 +415,7 @@ class _CurvePanelState extends ConsumerState<CurvePanel> {
                             ),
                             const SizedBox(width: 4),
                             Flexible(
-                              child: Text(
+                              child: AppText(
                                 foraDoTrecho
                                     ? 'Efeito Ease (${times.indexOf(segment.$1) + 1} \u2192 ${times.indexOf(segment.$1) + 2})'
                                     : 'Efeito Ease de Cúbico-Bezier',
@@ -675,7 +674,7 @@ Future<void> showTrackCurveSheet(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
+                      AppText(
                         'Curva — $label',
                         style: const TextStyle(
                           fontSize: 16,
@@ -696,8 +695,7 @@ Future<void> showTrackCurveSheet(
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Text(
-                                'Crie 2+ keyframes neste parametro e leve o\n'
+                              const AppText('Crie 2+ keyframes neste parametro e leve o\n'
                                 'playhead para DENTRO do trecho entre eles.',
                                 textAlign: TextAlign.center,
                                 style: TextStyle(
@@ -714,8 +712,7 @@ Future<void> showTrackCurveSheet(
                                           (times[1] - times[0]) ~/ 2,
                                     );
                                   },
-                                  child: const Text(
-                                    'Ir ao primeiro trecho',
+                                  child: const AppText('Ir ao primeiro trecho',
                                     style: TextStyle(
                                       color: AmColors.accent,
                                       fontSize: 14,
@@ -813,8 +810,7 @@ Future<void> showTrackCurveSheet(
                                   EasingClipboard.valor = ease;
                                   setSheetState(() {});
                                 },
-                                child: const Text(
-                                  'Copiar',
+                                child: const AppText('Copiar',
                                   style: TextStyle(
                                     fontSize: 12,
                                     color: AmColors.accent,
@@ -834,8 +830,7 @@ Future<void> showTrackCurveSheet(
                                         );
                                         setSheetState(() {});
                                       },
-                                child: const Text(
-                                  'Colar',
+                                child: const AppText('Colar',
                                   style: TextStyle(
                                     fontSize: 12,
                                     color: AmColors.accent,
@@ -858,6 +853,63 @@ Future<void> showTrackCurveSheet(
   // nunca "cai" de volta na timeline sem aviso. So reabre se NENHUM
   // outro sheet tomou o lugar nesse meio-tempo.
   if (paramSheetGeneration == myGen) onClosed?.call();
+}
+
+/// ONDE FICAM AS ALCAS AMARELAS de cada familia parametrica, e o que
+/// cada uma escreve.
+///
+/// A alca A anda na HORIZONTAL e conta as repeticoes: quanto mais para
+/// a esquerda, mais oscilacoes cabem no trecho. A alca B anda na
+/// VERTICAL e regula a forca — quanto o elastico passa do ponto, quanto
+/// o quique perde de altura, quanto o ciclo e suave. As duas ficam
+/// sempre EM CIMA do que controlam, para o dedo entender sem legenda.
+abstract final class AlcasParametricas {
+  static const int maximo = 12;
+
+  /// Onde a alca A se apoia na curva: no primeiro pico (elastico), no
+  /// primeiro toque no chao (quicar) ou no fim do primeiro ciclo.
+  static double _fatorDeA(EasingType t) => switch (t) {
+    EasingType.elastic => 0.75,
+    EasingType.bounce => 0.5,
+    _ => 1.0,
+  };
+
+  static List<(double, double)> de(Easing e) {
+    final n = (e.count < 1 ? 1 : e.count).clamp(1, maximo);
+    final xA = (_fatorDeA(e.type) / n).clamp(0.04, 0.96);
+    switch (e.type) {
+      case EasingType.elastic:
+        return [(xA, e.transform(xA)), (0.5, 1 + 0.45 * e.intensity)];
+      case EasingType.bounce:
+        return [(xA, e.transform(xA)), (0.5, 1 - 0.6 * e.intensity)];
+      case EasingType.cyclic:
+        return [(xA, e.transform(xA)), (0.5, e.smooth.clamp(0.0, 1.0))];
+      case EasingType.steps:
+      case EasingType.elasticSteps:
+        return [(xA, e.transform(xA))];
+      default:
+        return const [];
+    }
+  }
+
+  /// A alca A moveu para [x]: recalcula as repeticoes.
+  static Easing comAlcaA(Easing e, double x) {
+    final xx = x.clamp(0.04, 0.96);
+    final n = (_fatorDeA(e.type) / xx).round().clamp(1, maximo);
+    return e.copyWith(count: n);
+  }
+
+  /// A alca B moveu para [y]: recalcula a forca.
+  static Easing comAlcaB(Easing e, double y) => switch (e.type) {
+    EasingType.elastic => e.copyWith(
+      intensity: ((y - 1) / 0.45).clamp(0.05, 1.0),
+    ),
+    EasingType.bounce => e.copyWith(
+      intensity: ((1 - y) / 0.6).clamp(0.05, 1.0),
+    ),
+    EasingType.cyclic => e.copyWith(smooth: y.clamp(0.0, 1.0)),
+    _ => e,
+  };
 }
 
 class _CurveGraph extends StatefulWidget {
@@ -892,7 +944,12 @@ class _CurveGraph extends StatefulWidget {
   double get _yMin =>
       overshootEnabled || ease.y1 < 0 || ease.y2 < 0 ? -0.5 : -0.12;
   double get _yMax =>
-      overshootEnabled || ease.y1 > 1 || ease.y2 > 1 ? 1.5 : 1.12;
+      overshootEnabled ||
+          ease.y1 > 1 ||
+          ease.y2 > 1 ||
+          ease.type == EasingType.elastic
+      ? 1.5
+      : 1.12;
 
   Offset _toPlot(Size size, double x, double y) => Offset(
     x * size.width,
@@ -957,21 +1014,57 @@ class _CurveGraphState extends State<_CurveGraph> {
           widget.onGestoFim?.call();
         }
 
+        // AS ALCAS AMARELAS DAS FAMILIAS PARAMETRICAS (Elastico, Quicar,
+        // Ciclico, degraus). "Voce consegue colocar pra editar o grafico
+        // de elastico?" — o pedido dos testadores. Cada alca escreve num
+        // numero real do `Easing` (`count`, `intensity`, `smooth`) e a
+        // curva desenhada, a previa e a exportacao mudam juntas.
+        final alcas = AlcasParametricas.de(ease);
+        final parametrico = alcas.isNotEmpty;
+        final hA = parametrico ? widget._toPlot(size, alcas[0].$1, alcas[0].$2) : null;
+        final hB = alcas.length > 1
+            ? widget._toPlot(size, alcas[1].$1, alcas[1].$2)
+            : null;
+
+        void inicioParam(DragStartDetails d) {
+          final p = d.localPosition;
+          _alca = hB == null ||
+                  (p - hA!).distanceSquared <= (p - hB).distanceSquared
+              ? 1
+              : 2;
+          widget.onGestoInicio?.call();
+        }
+
+        void dragParam(DragUpdateDetails d) {
+          final alca = _alca;
+          if (alca == null) return;
+          final (x, y) = widget._fromPlot(size, d.localPosition);
+          if (x.isNaN || y.isNaN || !x.isFinite || !y.isFinite) return;
+          widget.onBezierChanged(
+            alca == 1
+                ? AlcasParametricas.comAlcaA(ease, x)
+                : AlcasParametricas.comAlcaB(ease, y),
+          );
+        }
+
         final enabled = ease.type == EasingType.cubicBezier;
         // Reconhecedores vertical E horizontal (nao pan): dentro de um
         // bottom sheet persistente, o pan PERDE a arena de gestos para o
         // drag-de-fechar vertical do sheet — a alca "nao mexia" e o
         // gesto arrastava o sheet. Recognizer igual em no mais fundo
         // ganha a arena.
+        final onStart = enabled ? inicio : (parametrico ? inicioParam : null);
+        final onUpdate = enabled ? drag : (parametrico ? dragParam : null);
+        final ativo = enabled || parametrico;
         return GestureDetector(
-          onVerticalDragStart: enabled ? inicio : null,
-          onVerticalDragUpdate: enabled ? drag : null,
-          onVerticalDragEnd: enabled ? (_) => fim() : null,
-          onVerticalDragCancel: enabled ? fim : null,
-          onHorizontalDragStart: enabled ? inicio : null,
-          onHorizontalDragUpdate: enabled ? drag : null,
-          onHorizontalDragEnd: enabled ? (_) => fim() : null,
-          onHorizontalDragCancel: enabled ? fim : null,
+          onVerticalDragStart: onStart,
+          onVerticalDragUpdate: onUpdate,
+          onVerticalDragEnd: ativo ? (_) => fim() : null,
+          onVerticalDragCancel: ativo ? fim : null,
+          onHorizontalDragStart: onStart,
+          onHorizontalDragUpdate: onUpdate,
+          onHorizontalDragEnd: ativo ? (_) => fim() : null,
+          onHorizontalDragCancel: ativo ? fim : null,
           child: CustomPaint(
             size: size,
             painter: _AmCurvePainter(
@@ -1353,6 +1446,34 @@ class _AmCurvePainter extends CustomPainter {
       }
     }
 
+    // AS ALCAS AMARELAS das familias parametricas, com as guias
+    // pontilhadas ate a base — o mesmo desenho da referencia.
+    final alcas = AlcasParametricas.de(ease);
+    if (alcas.isNotEmpty) {
+      final guia = Paint()
+        ..color = const Color(0xFFFFD84D).withValues(alpha: .55)
+        ..strokeWidth = 1;
+      final bola = Paint()..color = const Color(0xFFFFD84D);
+      final aro = Paint()
+        ..color = Colors.white
+        ..strokeWidth = 1.5
+        ..style = PaintingStyle.stroke;
+      for (final (x, y) in alcas) {
+        final h = _pt(size, x, y);
+        final minY = math.min(h.dy, base);
+        final maxY = math.max(h.dy, base);
+        for (var yy = minY; yy < maxY; yy += 6) {
+          canvas.drawLine(
+            Offset(h.dx, yy),
+            Offset(h.dx, math.min(yy + 3, maxY)),
+            guia,
+          );
+        }
+        canvas.drawCircle(h, 10, bola);
+        canvas.drawCircle(h, 10, aro);
+      }
+    }
+
     // Pontos de ancoragem verdes nos cantos
     final endDot = Paint()..color = const Color(0xFF1ED6B1);
     canvas.drawCircle(p0, 4.5, endDot);
@@ -1451,7 +1572,7 @@ class _ScopeToggle extends StatelessWidget {
           color: todos == value ? AmColors.accent : AmColors.bg,
           borderRadius: BorderRadius.circular(8),
         ),
-        child: Text(
+        child: AppText(
           text,
           maxLines: 1,
           style: TextStyle(
@@ -1566,7 +1687,7 @@ class _AmCurvePresetCard extends StatelessWidget {
                   color: const Color(0xFF1ED6B1),
                   borderRadius: BorderRadius.circular(4),
                 ),
-                child: Text(
+                child: AppText(
                   badge!,
                   style: const TextStyle(
                     fontSize: 6.5,

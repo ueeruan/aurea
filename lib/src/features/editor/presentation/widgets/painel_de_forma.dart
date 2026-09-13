@@ -9,6 +9,7 @@ import '../../domain/layer.dart';
 import '../../domain/shape.dart';
 import 'linha_de_parametro.dart';
 import 'rails_do_painel.dart';
+import 'package:aurea/src/core/l10n/app_language.dart';
 
 final parametroDaFormaAbertoProvider = StateProvider<String?>((ref) => null);
 
@@ -48,8 +49,7 @@ class PainelDeForma extends ConsumerWidget {
             height: alturaMaxima,
             color: AmColors.panelHigh,
             alignment: Alignment.center,
-            child: const Text(
-              'Esta camada nao tem forma parametrica para ajustar.',
+            child: const AppText('Esta camada nao tem forma parametrica para ajustar.',
               style: TextStyle(fontSize: 12, color: AmColors.muted),
             ),
           );
@@ -103,8 +103,7 @@ class PainelDeForma extends ConsumerWidget {
                       if (formas.length > 1)
                         const Padding(
                           padding: EdgeInsets.only(bottom: 8),
-                          child: Text(
-                            'Ajustando o primeiro desenho desta camada.',
+                          child: AppText('Ajustando o primeiro desenho desta camada.',
                             style: TextStyle(fontSize: 11, color: AmColors.muted),
                           ),
                         ),

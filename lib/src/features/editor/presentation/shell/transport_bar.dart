@@ -46,7 +46,32 @@ class EditorTransportBar extends ConsumerWidget {
     final fps = ref.watch(editorControllerProvider.select((p) => p.fps));
     final controller = ref.read(editorControllerProvider.notifier);
     final selected = ref.watch(selectedLayerProvider);
-    ref.watch(editorControllerProvider);
+    final project = ref.watch(editorControllerProvider);
+    // OS KEYFRAMES DA CAMADA SELECIONADA, em tempo do projeto.
+    //
+    // "Quando voce poe um keyframe e clica aqui, tinha de ir para o
+    // keyframe, e nao para o fim do projeto" — o relato dos testadores,
+    // e e o que o Alight faz: com uma camada animada, |◀ e ▶| andam de
+    // marca em marca. Sem camada, ou sem marca do lado, vao ao comeco e
+    // ao fim como antes.
+    final camada = selected == null ? null : project.layerById(selected);
+    final marcas = camada == null
+        ? const <Duration>[]
+        : [for (final k in camada.keyframeTimes) camada.startTime + k];
+    Duration? anterior(Duration agora) {
+      Duration? achada;
+      for (final m in marcas) {
+        if (m < agora - const Duration(milliseconds: 1)) achada = m;
+      }
+      return achada;
+    }
+
+    Duration? proxima(Duration agora) {
+      for (final m in marcas) {
+        if (m > agora + const Duration(milliseconds: 1)) return m;
+      }
+      return null;
+    }
     Widget botao({
       required Key key,
       required IconData icon,
@@ -111,8 +136,12 @@ class EditorTransportBar extends ConsumerWidget {
             botao(
               key: const ValueKey('transport-start'),
               icon: CupertinoIcons.backward_end,
-              tooltip: 'Início · segure para marcas',
-              onTap: () => playback.seek(Duration.zero),
+              tooltip: marcas.isEmpty
+                  ? 'Início · segure para marcas'
+                  : 'Keyframe anterior · segure para marcas',
+              onTap: () => playback.seek(
+                anterior(playback.time.value) ?? Duration.zero,
+              ),
               onLongPress: () => menuDasMarcas(context, ref, playback),
             ),
             ListenableBuilder(
@@ -134,8 +163,11 @@ class EditorTransportBar extends ConsumerWidget {
             botao(
               key: const ValueKey('transport-end'),
               icon: CupertinoIcons.forward_end,
-              tooltip: 'Fim · segure para ir ao tempo',
-              onTap: () => playback.seek(duration),
+              tooltip: marcas.isEmpty
+                  ? 'Fim · segure para ir ao tempo'
+                  : 'Próximo keyframe · segure para ir ao tempo',
+              onTap: () =>
+                  playback.seek(proxima(playback.time.value) ?? duration),
               onLongPress: () =>
                   _digitarTempo(context, playback, duration, fps),
             ),
@@ -185,14 +217,86 @@ class EditorTransportBar extends ConsumerWidget {
           final fatia = c.maxWidth.isFinite && filhos.isNotEmpty
               ? (c.maxWidth / filhos.length).clamp(0.0, AureaTokens.minTap)
               : AureaTokens.minTap;
-          return Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              for (final f in filhos)
+          Widget caixa(Widget f) => SizedBox(
+            width: fatia,
+            child: Center(child: f),
+          );
+          // TRES GRUPOS, e a reproducao no CENTRO da tela. Os nove
+          // botoes repartidos por igual deixavam o play deslocado para
+          // a esquerda; o pedido dos testadores foi o arranjo da
+          // referencia: desfazer/refazer a esquerda, |◀ ▶ ▶| no meio,
+          // e o que age na camada a direita.
+          //
+          // A conta de largura: o trio do meio fica no centro EXATO quando
+          // as laterais cabem com alvos de 36 pt (a partir de 420 px);
+          // abaixo disso as laterais dividem a largura na proporcao de
+          // botoes, e o play fica um pouco a esquerda do centro em vez de
+          // estourar a fileira num aparelho de 375 px.
+          final esquerda = filhos.sublist(0, 2);
+          final meio = filhos.sublist(2, 5);
+          final direita = filhos.sublist(5);
+          final trio = fatia * meio.length;
+          // O PISO DE 40 PT VALE PARA TODO BOTAO. O trio fica o mais
+          // perto do centro que os pisos permitem: a folga vai primeiro
+          // para o lado que empurra o play para o meio.
+          const piso = 40.0;
+          final minEsq = esquerda.length * piso;
+          final minDir = direita.length * piso;
+          final cabeCentrado =
+              c.maxWidth.isFinite && c.maxWidth >= trio + minEsq + minDir;
+          if (cabeCentrado) {
+            final idealEsq = (c.maxWidth - trio) / 2;
+            final esq = idealEsq.clamp(minEsq, c.maxWidth - trio - minDir);
+            final dir = c.maxWidth - trio - esq;
+            final fatiaEsq = (esq / esquerda.length).clamp(
+              piso,
+              AureaTokens.minTap,
+            );
+            final fatiaDir = (dir / direita.length).clamp(
+              piso,
+              AureaTokens.minTap,
+            );
+            Widget lateral(Widget f, double largura) => SizedBox(
+              width: largura,
+              child: Center(child: f),
+            );
+            return Row(
+              children: [
                 SizedBox(
-                  width: fatia,
-                  child: Center(child: f),
+                  width: esq,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.start,
+                    children: [for (final f in esquerda) lateral(f, fatiaEsq)],
+                  ),
                 ),
+                for (final f in meio) caixa(f),
+                SizedBox(
+                  width: dir,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [for (final f in direita) lateral(f, fatiaDir)],
+                  ),
+                ),
+              ],
+            );
+          }
+          return Row(
+            children: [
+              Expanded(
+                flex: esquerda.length,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.start,
+                  children: [for (final f in esquerda) caixa(f)],
+                ),
+              ),
+              for (final f in meio) caixa(f),
+              Expanded(
+                flex: direita.length,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [for (final f in direita) caixa(f)],
+                ),
+              ),
             ],
           );
         },
@@ -213,7 +317,7 @@ class EditorTransportBar extends ConsumerWidget {
     final r = await showCupertinoDialog<String>(
       context: context,
       builder: (ctx) => CupertinoAlertDialog(
-        title: const Text('Ir para o tempo'),
+        title: const AppText('Ir para o tempo'),
         content: Padding(
           padding: const EdgeInsets.only(top: 12),
           child: CupertinoTextField(
@@ -221,7 +325,7 @@ class EditorTransportBar extends ConsumerWidget {
             controller: ctrl,
             autofocus: true,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            placeholder: 'segundos, ou mm:ss.ms',
+            placeholder: translate(context, 'segundos, ou mm:ss.ms'),
             onSubmitted: (v) => Navigator.pop(ctx, v),
           ),
         ),
@@ -233,7 +337,7 @@ class EditorTransportBar extends ConsumerWidget {
           CupertinoDialogAction(
             isDefaultAction: true,
             onPressed: () => Navigator.pop(ctx, ctrl.text),
-            child: const Text('Ir'),
+            child: const AppText('Ir'),
           ),
         ],
       ),

@@ -77,7 +77,7 @@ class _FolhaDeAdicionarState extends ConsumerState<FolhaDeAdicionar> {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text('Não foi possível importar o modelo: $error'),
+                content: AppText('Não foi possível importar o modelo: $error'),
               ),
             );
           }
@@ -200,8 +200,8 @@ class _FolhaDeAdicionarState extends ConsumerState<FolhaDeAdicionar> {
                       fontSize: 14,
                       color: Scene3DTheme.text,
                     ),
-                    decoration: const InputDecoration(
-                      hintText: 'Buscar modelo...',
+                    decoration: InputDecoration(
+                      hintText: translate(context, 'Buscar modelo...'),
                       hintStyle: TextStyle(
                         fontSize: 14,
                         color: Scene3DTheme.textSubtle,
@@ -395,8 +395,7 @@ class _FolhaDeAdicionarState extends ConsumerState<FolhaDeAdicionar> {
               ),
             ),
             const SizedBox(height: 8),
-            Text(
-              title,
+            AppText(title,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(

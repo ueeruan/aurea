@@ -56,3 +56,8 @@ output/
 android/.kotlin/
 *.apk
 *.ipa
+
+# A chave de assinatura do Android e o arquivo que aponta para ela.
+android/key.properties
+*.jks
+*.keystore

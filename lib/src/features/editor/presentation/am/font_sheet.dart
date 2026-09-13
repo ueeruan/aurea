@@ -8,6 +8,7 @@ import '../../application/font_service.dart';
 import '../../domain/layer.dart';
 import 'am_colors.dart';
 import 'am_widgets.dart';
+import 'package:aurea/src/core/l10n/app_language.dart';
 
 /// ESCOLHER A FONTE — e trazer a sua.
 ///
@@ -79,8 +80,7 @@ Future<void> showFontSheet(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Arquivos .ttf e .otf. A fonte e copiada para dentro do '
+                const AppText('Arquivos .ttf e .otf. A fonte e copiada para dentro do '
                   'Aurea — o projeto continua abrindo mesmo se o arquivo '
                   'original sumir.',
                   style: TextStyle(
@@ -146,7 +146,7 @@ Future<void> showFontSheet(
                           color: AmColors.accent,
                         ),
                         const SizedBox(width: 6),
-                        Text(
+                        AppText(
                           importing ? 'Importando…' : 'Importar fontes',
                           style: const TextStyle(
                             fontSize: 13,
@@ -198,13 +198,12 @@ class _Linha extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  nome,
+                AppText(nome,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontSize: 11, color: AmColors.muted),
                 ),
-                Text(
+                AppText(
                   sample.trim().isEmpty ? 'Aa Bb Cc 123' : sample,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,

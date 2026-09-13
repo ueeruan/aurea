@@ -199,8 +199,7 @@ class _RastreioState extends State<_Rastreio> {
                       onChanged: (v) => setState(() => _comEscala = v),
                     ),
                     const SizedBox(height: 6),
-                    const Text(
-                      'Qual camada gruda nesse objeto?',
+                    const AppText('Qual camada gruda nesse objeto?',
                       style: TextStyle(fontSize: 12, color: AmColors.muted),
                     ),
                     const SizedBox(height: 6),
@@ -321,8 +320,7 @@ class _Titulo extends StatelessWidget {
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      Text(
-        titulo,
+      AppText(titulo,
         style: const TextStyle(
           fontSize: 15,
           fontWeight: FontWeight.w700,
@@ -330,7 +328,7 @@ class _Titulo extends StatelessWidget {
         ),
       ),
       const SizedBox(height: 3),
-      Text(
+      AppText(
         explicacao,
         style: const TextStyle(
           fontSize: 11.5,
@@ -368,8 +366,7 @@ class _Botao extends StatelessWidget {
         color: destaque ? AmColors.accentDim : AmColors.chip,
         borderRadius: BorderRadius.circular(12),
       ),
-      child: Text(
-        texto,
+      child: AppText(texto,
         textAlign: TextAlign.center,
         style: TextStyle(
           fontSize: 13,
@@ -400,7 +397,7 @@ class _Andamento extends StatelessWidget {
       children: [
         const CupertinoActivityIndicator(radius: 8),
         const SizedBox(width: 8),
-        Text(
+        AppText(
           etapa.isEmpty ? 'Rastreando...' : etapa,
           style: const TextStyle(fontSize: 13, color: AmColors.text),
         ),
@@ -431,7 +428,7 @@ class _Resultado extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
+          AppText(
             'Rastreio ${solucao.qualidade.toLowerCase()}',
             style: const TextStyle(
               fontSize: 13,
@@ -440,7 +437,7 @@ class _Resultado extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 3),
-          Text(
+          AppText(
             '${solucao.poses.length} posições de câmera, '
             '${solucao.nuvem.length} pontos no espaço, '
             'lente de ${(36 * solucao.focalPx / solucao.largura).round()} mm.',
@@ -452,8 +449,7 @@ class _Resultado extends StatelessWidget {
           ),
           if (ruim) ...[
             const SizedBox(height: 4),
-            const Text(
-              'A cena vai escorregar. Um plano com mais textura e com a '
+            const AppText('A cena vai escorregar. Um plano com mais textura e com a '
               'câmera andando de lado costuma resolver.',
               style: TextStyle(
                 fontSize: 11.5,
@@ -497,7 +493,7 @@ class _ListaDeBlobs extends StatelessWidget {
       key: const ValueKey('rastreio-blobs'),
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
+        AppText(
           '${ids.length} ${ids.length == 1 ? "objeto" : "objetos"} '
           'encontrados. Toque no que você quer seguir.',
           style: const TextStyle(fontSize: 12, color: AmColors.muted),
@@ -520,7 +516,7 @@ class _ListaDeBlobs extends StatelessWidget {
                     color: id == escolhido ? AmColors.accentDim : AmColors.chip,
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: Text(
+                  child: AppText(
                     'Objeto $id · ${dados.duracaoDe(id)} q',
                     style: TextStyle(
                       fontSize: 12,
@@ -558,8 +554,7 @@ class _LinhaDeCamada extends StatelessWidget {
       child: Row(
         children: [
           Expanded(
-            child: Text(
-              nome,
+            child: AppText(nome,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 13, color: AmColors.text),
@@ -614,8 +609,7 @@ class _Aviso extends StatelessWidget {
       color: AmColors.chip,
       borderRadius: BorderRadius.circular(12),
     ),
-    child: Text(
-      texto,
+    child: AppText(texto,
       style: const TextStyle(
         fontSize: 11.5,
         height: 1.35,

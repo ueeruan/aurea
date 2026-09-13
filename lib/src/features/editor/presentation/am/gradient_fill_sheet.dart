@@ -9,6 +9,7 @@ import '../../domain/shape.dart';
 import 'am_colors.dart';
 import 'am_widgets.dart';
 import 'color_picker_sheet.dart';
+import 'package:aurea/src/core/l10n/app_language.dart';
 
 Future<void> showGradientFillSheet(
   BuildContext context,
@@ -39,8 +40,7 @@ class _GradientPanel extends ConsumerWidget {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        const Text(
-          'Cores e distribuicao',
+        const AppText('Cores e distribuicao',
           style: TextStyle(color: AmColors.text, fontSize: 18),
         ),
         for (final g in layer.contents.whereType<ShapeGradientFill>()) ...[
@@ -58,7 +58,7 @@ class _GradientPanel extends ConsumerWidget {
             children: [
               Expanded(
                 child: SwitchListTile.adaptive(
-                  title: const Text('Animar cores'),
+                  title: const AppText('Animar cores'),
                   value: g.colorFrames.isNotEmpty,
                   onChanged: (enabled) => controller.updateShapeGradient(
                     layerId,
@@ -98,7 +98,7 @@ class _GradientPanel extends ConsumerWidget {
             ],
           ),
           SwitchListTile.adaptive(
-            title: const Text('Radial'),
+            title: const AppText('Radial'),
             value: g.radial,
             onChanged: (v) => controller.updateShapeGradient(
               layerId,
@@ -138,7 +138,7 @@ class _GradientPanel extends ConsumerWidget {
                     color: g.colorsAt(local)[i],
                   ),
                 ),
-                Text(
+                AppText(
                   '${(g.resolvedStops[i] * 100).round()}%',
                   style: const TextStyle(color: AmColors.text),
                 ),
@@ -221,7 +221,7 @@ class _GradientPanel extends ConsumerWidget {
     children: [
       SizedBox(
         width: 82,
-        child: Text(name, style: const TextStyle(color: AmColors.text)),
+        child: AppText(name, style: const TextStyle(color: AmColors.text)),
       ),
       Expanded(
         child: AmTickRuler(
@@ -235,7 +235,7 @@ class _GradientPanel extends ConsumerWidget {
       ),
       SizedBox(
         width: 44,
-        child: Text(
+        child: AppText(
           v.toStringAsFixed(2),
           style: const TextStyle(color: AmColors.muted),
         ),

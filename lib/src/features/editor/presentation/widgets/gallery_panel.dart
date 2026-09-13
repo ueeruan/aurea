@@ -222,7 +222,7 @@ class _GalleryPanelState extends ConsumerState<GalleryPanel>
                               for (final album in _albums)
                                 PopupMenuItem(
                                   value: album,
-                                  child: Text(album.name),
+                                  child: AppText(album.name),
                                 ),
                             ],
                             child: Row(
@@ -234,7 +234,7 @@ class _GalleryPanelState extends ConsumerState<GalleryPanel>
                                 ),
                                 const SizedBox(width: 5),
                                 Expanded(
-                                  child: Text(
+                                  child: AppText(
                                     _album?.name ?? 'Todos',
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
@@ -293,8 +293,7 @@ class _GalleryPanelState extends ConsumerState<GalleryPanel>
                 onTap: _selectMore,
                 child: const Padding(
                   padding: EdgeInsets.symmetric(vertical: 4),
-                  child: Text(
-                    'Acesso limitado · Selecionar mais fotos',
+                  child: AppText('Acesso limitado · Selecionar mais fotos',
                     style: TextStyle(color: AmColors.accent, fontSize: 11),
                   ),
                 ),
@@ -304,7 +303,7 @@ class _GalleryPanelState extends ConsumerState<GalleryPanel>
                 onTap: _refresh,
                 child: Padding(
                   padding: const EdgeInsets.all(4),
-                  child: Text(
+                  child: AppText(
                     '$_error Tentar novamente',
                     maxLines: 3,
                     style: const TextStyle(color: AmColors.pink, fontSize: 11),
@@ -363,8 +362,7 @@ class _GalleryPanelState extends ConsumerState<GalleryPanel>
                   children: [
                     CupertinoActivityIndicator(),
                     SizedBox(height: 10),
-                    Text(
-                      'Carregando mídia…',
+                    AppText('Carregando mídia…',
                       style: TextStyle(color: AmColors.text, fontSize: 12),
                     ),
                   ],
@@ -381,7 +379,7 @@ class _GalleryPanelState extends ConsumerState<GalleryPanel>
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
+          AppText(
             switch (_access) {
               GalleryAccess.denied => 'Permita acesso para ver as fotos aqui.',
               GalleryAccess.unavailable =>
@@ -395,9 +393,9 @@ class _GalleryPanelState extends ConsumerState<GalleryPanel>
           if (_access == GalleryAccess.denied)
             TextButton(
               onPressed: _service.settings,
-              child: const Text('Abrir ajustes'),
+              child: const AppText('Abrir ajustes'),
             ),
-          TextButton(onPressed: _refresh, child: const Text('Atualizar')),
+          TextButton(onPressed: _refresh, child: const AppText('Atualizar')),
         ],
       ),
     ),
@@ -459,7 +457,7 @@ class _GalleryThumbnailState extends State<_GalleryThumbnail> {
             Positioned(
               right: 3,
               bottom: 2,
-              child: Text(
+              child: AppText(
                 '${widget.asset.duration.inMinutes}:${(widget.asset.duration.inSeconds % 60).toString().padLeft(2, '0')}',
                 style: const TextStyle(
                   color: Colors.white,

@@ -264,8 +264,7 @@ class EstadoVazio extends StatelessWidget {
       child: Row(
         children: [
           Expanded(
-            child: Text(
-              'Comece adicionando uma mídia, um texto ou uma forma.',
+            child: AppText('Comece adicionando uma mídia, um texto ou uma forma.',
               key: const ValueKey('estado-vazio'),
               style: TextStyle(fontSize: 12.5, color: t.muted),
             ),
@@ -281,8 +280,7 @@ class EstadoVazio extends StatelessWidget {
                 color: t.accent,
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: Text(
-                '+ Adicione uma mídia',
+              child: AppText('+ Adicione uma mídia',
                 style: TextStyle(
                   fontSize: 12.5,
                   fontWeight: FontWeight.w700,

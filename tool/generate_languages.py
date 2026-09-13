@@ -8,8 +8,14 @@ root = Path(__file__).resolve().parent.parent
 rows = list(csv.reader((root / 'tool/languages.tsv').read_text(encoding='utf-8').splitlines(), delimiter='\t'))
 codes = rows[0][1:]
 catalog = {}
+def celula(v):
+    # No TSV a quebra de linha vive como os dois caracteres `\n`;
+    # a chave do dicionario tem de ser a string Dart de verdade.
+    return v.replace('\\n', '\n')
+
 for row in rows[1:]:
     assert len(row) == len(codes) + 1 and all(row), row
+    row = [celula(v) for v in row]
     assert row[0] not in catalog, row[0]
     catalog[row[0]] = dict(zip(codes, row[1:]))
 for source, values in list(catalog.items()):

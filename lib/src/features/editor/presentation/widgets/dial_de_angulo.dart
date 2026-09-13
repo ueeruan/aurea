@@ -4,6 +4,7 @@ import 'package:flutter/widgets.dart';
 
 import '../../../../core/ui/am_colors.dart';
 import 'campo_de_valor.dart';
+import 'package:aurea/src/core/l10n/app_language.dart';
 
 /// O RAIO DO BOTAO. Alvo grande de proposito: e um gesto de precisao
 /// feito com um dedo que cobre o proprio alvo.
@@ -263,8 +264,7 @@ class _CaixaDoAngulo extends StatelessWidget {
       color: const Color(0xFF242436),
       borderRadius: BorderRadius.circular(8),
     ),
-    child: Text(
-      texto,
+    child: AppText(texto,
       textAlign: TextAlign.center,
       style: TextStyle(
         color: AmColors.accent,

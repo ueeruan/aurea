@@ -121,7 +121,7 @@ class _AutoEditScreenState extends ConsumerState<AutoEditScreen> {
       backgroundColor: AmColors.bg,
       appBar: AppBar(
         backgroundColor: AmColors.bg,
-        title: const Text('AutoEdit'),
+        title: const AppText('AutoEdit'),
         leading: IconButton(
           icon: const Icon(CupertinoIcons.chevron_back),
           onPressed: () {
@@ -148,8 +148,7 @@ class _AutoEditScreenState extends ConsumerState<AutoEditScreen> {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'Um video falado entra, um projeto editavel sai.',
+        const AppText('Um video falado entra, um projeto editavel sai.',
           style: TextStyle(fontSize: 17, height: 1.35, color: AmColors.text),
         ),
         const SizedBox(height: 8),
@@ -164,8 +163,7 @@ class _AutoEditScreenState extends ConsumerState<AutoEditScreen> {
             ),
             const SizedBox(width: 6),
             Expanded(
-              child: Text(
-                'Tudo acontece no aparelho. O video nao e enviado para '
+              child: AppText('Tudo acontece no aparelho. O video nao e enviado para '
                 'lugar nenhum.',
                 style: TextStyle(
                   fontSize: 12,
@@ -181,7 +179,7 @@ class _AutoEditScreenState extends ConsumerState<AutoEditScreen> {
           height: 50,
           child: FilledButton.icon(
             icon: const Icon(CupertinoIcons.videocam, size: 19),
-            label: const Text('Escolher video'),
+            label: const AppText('Escolher video'),
             onPressed: _escolherVideo,
           ),
         ),
@@ -194,8 +192,7 @@ class _AutoEditScreenState extends ConsumerState<AutoEditScreen> {
   Widget _telaEstilo() => ListView(
     padding: const EdgeInsets.all(16),
     children: [
-      const Text(
-        'Escolha o estilo',
+      const AppText('Escolha o estilo',
         style: TextStyle(
           fontSize: 18,
           fontWeight: FontWeight.w700,
@@ -203,8 +200,7 @@ class _AutoEditScreenState extends ConsumerState<AutoEditScreen> {
         ),
       ),
       const SizedBox(height: 4),
-      const Text(
-        'Cada um e um conjunto de ajustes prontos. Da para mudar tudo '
+      const AppText('Cada um e um conjunto de ajustes prontos. Da para mudar tudo '
         'depois, no editor.',
         style: TextStyle(fontSize: 12, color: AmColors.muted, height: 1.3),
       ),
@@ -226,14 +222,14 @@ class _AutoEditScreenState extends ConsumerState<AutoEditScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (run?.erro != null) ...[
-            Text(
+            AppText(
               run!.erro!,
               style: const TextStyle(fontSize: 14, color: AmColors.pink),
             ),
             const SizedBox(height: 16),
             OutlinedButton(
               onPressed: () => setState(() => _etapa = _Etapa.estilo),
-              child: const Text('Escolher outro estilo'),
+              child: const AppText('Escolher outro estilo'),
             ),
           ] else
             for (final p in run?.passos ?? const <AutoEditStep>[])
@@ -269,7 +265,7 @@ class _AutoEditScreenState extends ConsumerState<AutoEditScreen> {
           ),
         ),
         const SizedBox(height: 4),
-        Text(
+        AppText(
           plano.cortes.isEmpty
               ? '${plano.falas.length} falas legendadas.'
               : '${plano.falas.length} falas · '
@@ -289,7 +285,7 @@ class _AutoEditScreenState extends ConsumerState<AutoEditScreen> {
           height: 44,
           onChanged: (v) => _replaneja(ritmo: v / 100),
         ),
-        Text(
+        AppText(
           _estilo.ritmo <= 0
               ? 'Nenhum corte'
               : 'Corta ${(_estilo.ritmo * 100).round()}% do silencio',
@@ -314,8 +310,7 @@ class _AutoEditScreenState extends ConsumerState<AutoEditScreen> {
                           : AmColors.chip,
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: Text(
-                      z.rotulo,
+                    child: AppText(z.rotulo,
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
@@ -337,13 +332,12 @@ class _AutoEditScreenState extends ConsumerState<AutoEditScreen> {
           height: 50,
           child: FilledButton.icon(
             icon: const Icon(CupertinoIcons.pencil, size: 18),
-            label: const Text('Abrir no editor'),
+            label: const AppText('Abrir no editor'),
             onPressed: _abrirNoEditor,
           ),
         ),
         const SizedBox(height: 10),
-        const Text(
-          'Os cortes, as legendas e os keyframes de zoom entram como '
+        const AppText('Os cortes, as legendas e os keyframes de zoom entram como '
           'camadas comuns. Tudo editavel, nada de caixa-preta.',
           style: TextStyle(fontSize: 11, color: AmColors.muted, height: 1.35),
         ),
@@ -360,8 +354,7 @@ class _Rotulo extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(bottom: 6),
-    child: Text(
-      texto,
+    child: AppText(texto,
       style: const TextStyle(
         fontSize: 10,
         fontWeight: FontWeight.w700,
@@ -391,8 +384,7 @@ class _CartaoEstilo extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            estilo.nome,
+          AppText(estilo.nome,
             style: const TextStyle(
               fontSize: 15,
               fontWeight: FontWeight.w700,
@@ -400,8 +392,7 @@ class _CartaoEstilo extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 3),
-          Text(
-            estilo.descricao,
+          AppText(estilo.descricao,
             style: const TextStyle(
               fontSize: 12,
               height: 1.3,
@@ -434,8 +425,7 @@ class _LinhaPasso extends StatelessWidget {
           Icon(icone, size: 15, color: cor),
           const SizedBox(width: 10),
           Expanded(
-            child: Text(
-              passo.id.rotulo,
+            child: AppText(passo.id.rotulo,
               style: TextStyle(
                 fontSize: 14,
                 color: passo.estado == AutoEditStepState.esperando
@@ -445,7 +435,7 @@ class _LinhaPasso extends StatelessWidget {
             ),
           ),
           if (passo.detalhe != null)
-            Text(
+            AppText(
               passo.detalhe!,
               style: const TextStyle(fontSize: 12, color: AmColors.muted),
             ),

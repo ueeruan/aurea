@@ -413,7 +413,7 @@ class _ShapePanelState extends ConsumerState<ShapePanel> {
                   playback: widget.playback,
                 ),
                 icon: const Icon(Icons.gradient, size: 18),
-                label: const Text('Gradiente'),
+                label: const AppText('Gradiente'),
               ),
           ],
           animado: animado,
@@ -612,8 +612,7 @@ class _CompoundShapeEditor extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      const Text(
-                        'Adicionar geometria ao composto',
+                      const AppText('Adicionar geometria ao composto',
                         style: TextStyle(fontSize: 11, color: AmColors.muted),
                       ),
                       const SizedBox(height: 6),
@@ -625,8 +624,7 @@ class _CompoundShapeEditor extends StatelessWidget {
                               padding: const EdgeInsets.symmetric(vertical: 8),
                               onPressed: () =>
                                   onAddGeometry(ParamShapeKind.rect),
-                              child: const Text(
-                                'Retangulo',
+                              child: const AppText('Retangulo',
                                 style: TextStyle(
                                   fontSize: 11,
                                   color: AmColors.text,
@@ -641,8 +639,7 @@ class _CompoundShapeEditor extends StatelessWidget {
                               padding: const EdgeInsets.symmetric(vertical: 8),
                               onPressed: () =>
                                   onAddGeometry(ParamShapeKind.ellipse),
-                              child: const Text(
-                                'Circulo',
+                              child: const AppText('Circulo',
                                 style: TextStyle(
                                   fontSize: 11,
                                   color: AmColors.text,
@@ -664,8 +661,7 @@ class _CompoundShapeEditor extends StatelessWidget {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
-                                'Combinar caminhos',
+                              const AppText('Combinar caminhos',
                                 style: TextStyle(
                                   fontSize: 12,
                                   fontWeight: FontWeight.w700,
@@ -693,7 +689,7 @@ class _CompoundShapeEditor extends StatelessWidget {
                                             7,
                                           ),
                                         ),
-                                        child: Text(
+                                        child: AppText(
                                           mergeModeLabel(mode),
                                           style: TextStyle(
                                             fontSize: 10,
@@ -712,7 +708,7 @@ class _CompoundShapeEditor extends StatelessWidget {
                       CupertinoButton(
                         color: AmColors.panelHigh,
                         onPressed: onAddMerge,
-                        child: Text(
+                        child: AppText(
                           merges.isEmpty
                               ? 'Adicionar Merge Paths'
                               : 'Adicionar outro Merge Paths',
@@ -720,8 +716,7 @@ class _CompoundShapeEditor extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 8),
-                      const Text(
-                        'O operador combina os caminhos que aparecem antes dele.',
+                      const AppText('O operador combina os caminhos que aparecem antes dele.',
                         textAlign: TextAlign.center,
                         style: TextStyle(fontSize: 10, color: AmColors.muted),
                       ),
@@ -748,8 +743,7 @@ class _Reguas extends StatelessWidget {
     final local = layer.localTime(t);
     if (trilhas.isEmpty) {
       return const Center(
-        child: Text(
-          'Esta forma nao tem esse numero',
+        child: AppText('Esta forma nao tem esse numero',
           style: TextStyle(fontSize: 13, color: AmColors.muted),
         ),
       );
@@ -903,8 +897,7 @@ class _Traco extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text(
-              'Sem traco',
+            const AppText('Sem traco',
               style: TextStyle(fontSize: 13, color: AmColors.muted),
             ),
             const SizedBox(height: 10),
@@ -1014,8 +1007,7 @@ class _Desenhar extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text(
-              'Drawing Progress: a linha se desenhando, o contorno animado.',
+            const AppText('Drawing Progress: a linha se desenhando, o contorno animado.',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 13, color: AmColors.muted),
             ),
@@ -1052,7 +1044,7 @@ class _Pontos extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
+          AppText(
             parametrica
                 ? 'Editar os pontos vira a forma em caminho: os numeros (tamanho, cantos, pontas) deixam de valer.'
                 : 'Mova, adicione e anime os pontos do caminho pelo trackpad.',
@@ -1116,7 +1108,7 @@ class _Linha extends StatelessWidget {
           ),
           SizedBox(
             width: 58,
-            child: Text(
+            child: AppText(
               display,
               textAlign: TextAlign.center,
               style: const TextStyle(fontSize: 13, color: AmColors.accent),
@@ -1145,8 +1137,7 @@ class _Botao extends StatelessWidget {
           color: cheio ? AmColors.accent : AmColors.chip,
           borderRadius: BorderRadius.circular(10),
         ),
-        child: Text(
-          texto,
+        child: AppText(texto,
           style: TextStyle(
             fontSize: 13,
             fontWeight: FontWeight.w600,

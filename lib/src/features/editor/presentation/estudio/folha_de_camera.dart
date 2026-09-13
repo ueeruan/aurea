@@ -109,8 +109,7 @@ class _FolhaDeCameraState extends ConsumerState<FolhaDeCamera> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   const Expanded(
-                    child: Text(
-                      'Campo de visão (FOV)',
+                    child: AppText('Campo de visão (FOV)',
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
@@ -128,7 +127,7 @@ class _FolhaDeCameraState extends ConsumerState<FolhaDeCamera> {
                       borderRadius: BorderRadius.circular(6),
                       border: Border.all(color: Scene3DTheme.border),
                     ),
-                    child: Text(
+                    child: AppText(
                       '${fov.round()}°',
                       style: const TextStyle(
                         fontSize: 12,

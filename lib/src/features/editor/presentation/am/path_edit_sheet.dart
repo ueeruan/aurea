@@ -80,8 +80,7 @@ Future<void> showPathEditSheet(
                 Row(
                   children: [
                     const Expanded(
-                      child: Text(
-                        'Editar nos',
+                      child: AppText('Editar nos',
                         style: TextStyle(
                           fontSize: 17,
                           fontWeight: FontWeight.w700,
@@ -89,7 +88,7 @@ Future<void> showPathEditSheet(
                         ),
                       ),
                     ),
-                    Text(
+                    AppText(
                       '${caminho.vertices.length} nos',
                       style: const TextStyle(
                         fontSize: 12,
@@ -99,7 +98,7 @@ Future<void> showPathEditSheet(
                   ],
                 ),
                 const SizedBox(height: 4),
-                Text(
+                AppText(
                   temNo
                       ? 'No ${sel + 1} selecionado. Arraste as bolinhas '
                             'azuis para curvar.'
@@ -178,7 +177,7 @@ Future<void> showPathEditSheet(
                   ],
                 ),
                 const SizedBox(height: 10),
-                Text(
+                AppText(
                   forma
                       ? 'Com o caminho animado, cada ajuste cria keyframe no '
                             'tempo atual — e entre dois keyframes a forma '

@@ -57,8 +57,7 @@ class _FolhaDeExportarState extends ConsumerState<FolhaDeExportar> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'Formato',
+              const AppText('Formato',
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
@@ -91,8 +90,7 @@ class _FolhaDeExportarState extends ConsumerState<FolhaDeExportar> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'Resolução',
+              const AppText('Resolução',
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
@@ -116,8 +114,7 @@ class _FolhaDeExportarState extends ConsumerState<FolhaDeExportar> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'FPS',
+              const AppText('FPS',
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
@@ -155,7 +152,7 @@ class _FolhaDeExportarState extends ConsumerState<FolhaDeExportar> {
                 decoration: Scene3DTheme.cardDecoration(borderRadius: 12),
                 padding: const EdgeInsets.symmetric(horizontal: 14),
                 alignment: Alignment.centerLeft,
-                child: Text(
+                child: AppText(
                   duracaoTexto,
                   style: const TextStyle(
                     fontSize: 14,
@@ -249,7 +246,7 @@ class _FolhaDeExportarState extends ConsumerState<FolhaDeExportar> {
             color: Scene3DTheme.text,
           ),
           items: items.map((item) {
-            return DropdownMenuItem<String>(value: item, child: Text(item));
+            return DropdownMenuItem<String>(value: item, child: AppText(item));
           }).toList(),
           onChanged: (v) {
             if (v != null) onChanged(v);

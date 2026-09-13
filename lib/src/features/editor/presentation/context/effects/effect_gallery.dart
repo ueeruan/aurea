@@ -93,8 +93,7 @@ Future<void> showEffectGallery(
                     borderRadius: BorderRadius.circular(9),
                     border: aceso ? Border.all(color: AmColors.action) : null,
                   ),
-                  child: Text(
-                    texto,
+                  child: AppText(texto,
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
@@ -140,7 +139,7 @@ Future<void> showEffectGallery(
                     CupertinoSearchTextField(
                       key: const ValueKey('galeria-busca'),
                       controller: search,
-                      placeholder: 'glow, rgb split, pixelate...',
+                      placeholder: translate(context, 'glow, rgb split, pixelate...'),
                       style: const TextStyle(
                         fontSize: 14,
                         color: AmColors.text,
@@ -205,14 +204,14 @@ Future<void> showEffectGallery(
                                     color: AmColors.accent,
                                     size: 20,
                                   ),
-                                  title: Text(
+                                  title: AppText(
                                     p.name,
                                     style: const TextStyle(
                                       color: AmColors.text,
                                       fontSize: 14,
                                     ),
                                   ),
-                                  subtitle: Text(
+                                  subtitle: AppText(
                                     '${p.category} · ${p.effects.length} efeito(s)'
                                     '${p.builtIn ? '' : ' · salvo por você'}',
                                     style: const TextStyle(
@@ -235,7 +234,7 @@ Future<void> showEffectGallery(
                           ? Center(
                               child: Padding(
                                 padding: const EdgeInsets.all(24),
-                                child: Text(
+                                child: AppText(
                                   favoritos && query.isEmpty
                                       ? 'Nenhum favorito ainda. Toque na estrela de um efeito.'
                                       : 'Nada encontrado. Tente "glow", "rgb", "pixel" ou "shake".',
@@ -346,7 +345,7 @@ class _EffectTile extends StatelessWidget {
                           color: Colors.black.withValues(alpha: .55),
                           borderRadius: BorderRadius.circular(6),
                         ),
-                        child: Text(
+                        child: AppText(
                           'custo ${spec.cost}',
                           style: const TextStyle(
                             fontSize: 9,
@@ -384,7 +383,7 @@ class _EffectTile extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 5),
-              Text(
+              AppText(
                 spec.name,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
@@ -394,7 +393,7 @@ class _EffectTile extends StatelessWidget {
                   color: t.text,
                 ),
               ),
-              Text(
+              AppText(
                 categoriaDoEfeito(spec.category),
                 maxLines: 1,
                 style: TextStyle(fontSize: 10.5, color: t.muted),

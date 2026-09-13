@@ -6,6 +6,7 @@ import '../../application/audio_render_service.dart';
 import '../../domain/audio_effect.dart';
 import 'am_colors.dart';
 import 'am_widgets.dart';
+import 'package:aurea/src/core/l10n/app_language.dart';
 
 class AudioEffectsPanel extends ConsumerStatefulWidget {
   const AudioEffectsPanel({super.key, required this.layerId});
@@ -52,7 +53,7 @@ class _AudioEffectsPanelState extends ConsumerState<AudioEffectsPanel> {
                       : 'Efeitos de audio');
               return Padding(
                 padding: const EdgeInsets.only(bottom: 8),
-                child: Text(
+                child: AppText(
                   status,
                   style: const TextStyle(color: AmColors.muted),
                 ),
@@ -66,7 +67,7 @@ class _AudioEffectsPanelState extends ConsumerState<AudioEffectsPanel> {
                 children: [
                   ListTile(
                     dense: true,
-                    title: Text(
+                    title: AppText(
                       effects[i].spec.name,
                       style: const TextStyle(color: AmColors.text),
                     ),
@@ -142,8 +143,7 @@ class _AudioEffectsPanelState extends ConsumerState<AudioEffectsPanel> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              entry.value.label,
+                            AppText(entry.value.label,
                               style: const TextStyle(color: AmColors.text),
                             ),
                             if (entry.value.options.isNotEmpty)
@@ -161,7 +161,7 @@ class _AudioEffectsPanelState extends ConsumerState<AudioEffectsPanel> {
                                   )
                                     DropdownMenuItem(
                                       value: j.toDouble(),
-                                      child: Text(
+                                      child: AppText(
                                         entry.value.options[j],
                                         style: const TextStyle(
                                           color: AmColors.text,
@@ -197,7 +197,7 @@ class _AudioEffectsPanelState extends ConsumerState<AudioEffectsPanel> {
                                   ),
                                   SizedBox(
                                     width: 62,
-                                    child: Text(
+                                    child: AppText(
                                       effects[i]
                                           .value(entry.key)
                                           .toStringAsFixed(2),
@@ -218,7 +218,7 @@ class _AudioEffectsPanelState extends ConsumerState<AudioEffectsPanel> {
           TextButton.icon(
             key: const ValueKey('adicionar-efeito-audio'),
             icon: const Icon(Icons.add),
-            label: const Text('Adicionar efeito de audio'),
+            label: const AppText('Adicionar efeito de audio'),
             onPressed: () async {
               final type = await showModalBottomSheet<AudioEffectType>(
                 context: context,
@@ -228,7 +228,7 @@ class _AudioEffectsPanelState extends ConsumerState<AudioEffectsPanel> {
                     children: [
                       for (final entry in audioEffectSpecs.entries)
                         ListTile(
-                          title: Text(
+                          title: AppText(
                             entry.value.name,
                             style: const TextStyle(color: AmColors.text),
                           ),

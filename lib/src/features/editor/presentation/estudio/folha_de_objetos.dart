@@ -296,7 +296,7 @@ class _FolhaDeObjetosState extends ConsumerState<FolhaDeObjetos> {
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: Text(
+                child: AppText(
                   name,
                   style: TextStyle(
                     fontSize: 14,

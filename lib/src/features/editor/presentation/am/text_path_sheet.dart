@@ -46,8 +46,7 @@ Future<void> showTextPathSheet(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Texto em caminho',
+                const AppText('Texto em caminho',
                   style: TextStyle(
                     fontSize: 17,
                     fontWeight: FontWeight.w700,
@@ -55,8 +54,7 @@ Future<void> showTextPathSheet(
                   ),
                 ),
                 const SizedBox(height: 4),
-                const Text(
-                  'Selo circular, arco, ou seguindo uma forma que voce '
+                const AppText('Selo circular, arco, ou seguindo uma forma que voce '
                   'desenhou — com os operadores e tudo.',
                   style: TextStyle(
                     fontSize: 11,
@@ -79,8 +77,7 @@ Future<void> showTextPathSheet(
                 if (spec.kind == TextPathKind.layer) ...[
                   const SizedBox(height: 6),
                   if (formas.isEmpty)
-                    const Text(
-                      'Nao ha camada de forma no projeto para seguir.',
+                    const AppText('Nao ha camada de forma no projeto para seguir.',
                       style: TextStyle(fontSize: 11, color: AmColors.muted),
                     )
                   else
@@ -103,7 +100,7 @@ Future<void> showTextPathSheet(
                                     : AmColors.chip,
                                 borderRadius: BorderRadius.circular(8),
                               ),
-                              child: Text(
+                              child: AppText(
                                 f.name,
                                 style: TextStyle(
                                   fontSize: 11,
@@ -179,8 +176,7 @@ Future<void> showTextPathSheet(
                     onChanged: (v) => edit((s) => s.copyWith(reverse: v)),
                   ),
                   const SizedBox(height: 6),
-                  const Text(
-                    'Animar "Deslizar" faz o texto correr pelo caminho — '
+                  const AppText('Animar "Deslizar" faz o texto correr pelo caminho — '
                     'e assim que um selo gira.',
                     style: TextStyle(
                       fontSize: 11,
@@ -239,7 +235,7 @@ class _Ruler extends StatelessWidget {
         ),
         SizedBox(
           width: 56,
-          child: Text(
+          child: AppText(
             '${value.round()}$suffix',
             textAlign: TextAlign.right,
             style: const TextStyle(fontSize: 12, color: AmColors.text),
@@ -293,7 +289,7 @@ class _Chips extends StatelessWidget {
                       color: i == index ? AmColors.accentDim : AmColors.chip,
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: Text(
+                    child: AppText(
                       options[i],
                       style: TextStyle(
                         fontSize: 11,

@@ -59,8 +59,7 @@ Future<void> showOrganizeSheet(
                   ),
                 ),
                 Expanded(
-                  child: Text(
-                    hint,
+                  child: AppText(hint,
                     style: const TextStyle(fontSize: 10, color: AmColors.muted),
                   ),
                 ),
@@ -81,7 +80,7 @@ Future<void> showOrganizeSheet(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
+                AppText(
                   'Organizar — ${layer.name}',
                   style: const TextStyle(
                     fontSize: 16,
@@ -90,8 +89,7 @@ Future<void> showOrganizeSheet(
                   ),
                 ),
                 const SizedBox(height: 10),
-                const Text(
-                  'Rotulo',
+                const AppText('Rotulo',
                   style: TextStyle(fontSize: 12, color: AmColors.muted),
                 ),
                 const SizedBox(height: 6),
@@ -253,7 +251,7 @@ Future<void> showLayerStylesSheet(
                 ),
                 SizedBox(
                   width: 44,
-                  child: Text(
+                  child: AppText(
                     amNumber(value, 0),
                     textAlign: TextAlign.center,
                     style: const TextStyle(
@@ -285,8 +283,7 @@ Future<void> showLayerStylesSheet(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Estilos de camada',
+                const AppText('Estilos de camada',
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w700,
@@ -310,7 +307,7 @@ Future<void> showLayerStylesSheet(
                                   : AmColors.bg,
                               borderRadius: BorderRadius.circular(8),
                             ),
-                            child: Text(
+                            child: AppText(
                               switch (depth) {
                                 _ShadowDepth.pronto => 'Pronto',
                                 _ShadowDepth.montar => 'Montar',
@@ -349,8 +346,7 @@ Future<void> showLayerStylesSheet(
                         );
                         setSheetState(() {});
                       },
-                      child: const Text(
-                        'Sombra suave',
+                      child: const AppText('Sombra suave',
                         style: TextStyle(color: AmColors.text),
                       ),
                     ),
@@ -675,8 +671,7 @@ Future<void> showLoopSheet(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Loop de keyframes',
+                const AppText('Loop de keyframes',
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w700,
@@ -720,8 +715,7 @@ Future<void> showLoopSheet(
                 ),
                 const SizedBox(height: 10),
                 if (n < 2)
-                  const Text(
-                    'Esta propriedade precisa de 2 ou mais keyframes '
+                  const AppText('Esta propriedade precisa de 2 ou mais keyframes '
                     'para ter loop.',
                     style: TextStyle(fontSize: 12, color: AmColors.muted),
                   )
@@ -769,8 +763,7 @@ Future<void> showLoopSheet(
                     ],
                   ),
                   const SizedBox(height: 8),
-                  const Text(
-                    'Ciclo repete do inicio · Vai-e-volta alterna a '
+                  const AppText('Ciclo repete do inicio · Vai-e-volta alterna a '
                     'direcao · Deslocado soma o percurso a cada volta '
                     '(esteira) · Continuar mantem a velocidade final.',
                     style: TextStyle(fontSize: 11, color: AmColors.muted),
@@ -790,8 +783,7 @@ Future<void> showLoopSheet(
                         color: AmColors.chip,
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      child: const Text(
-                        'Inverter no tempo',
+                      child: const AppText('Inverter no tempo',
                         style: TextStyle(fontSize: 12, color: AmColors.accent),
                       ),
                     ),

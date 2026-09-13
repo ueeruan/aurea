@@ -200,8 +200,7 @@ class _SecaoFormasState extends State<_SecaoFormas> {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    'Mais formas',
+                  AppText('Mais formas',
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
@@ -240,8 +239,7 @@ class _SecaoFormasState extends State<_SecaoFormas> {
                       children: [
                         Icon(icone, size: 15, color: AmColors.accent),
                         const SizedBox(width: 6),
-                        Text(
-                          nome,
+                        AppText(nome,
                           style: const TextStyle(
                             fontSize: 13,
                             color: AmColors.text,
@@ -353,8 +351,7 @@ Future<void> showCaptionCreationSheet(
                   Row(
                     children: [
                       const Expanded(
-                        child: Text(
-                          'Legendas',
+                        child: AppText('Legendas',
                           style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w700,
@@ -412,7 +409,7 @@ Future<void> showCaptionCreationSheet(
                     ],
                   ),
                   const SizedBox(height: 6),
-                  Text(
+                  AppText(
                     modo.explicacao,
                     style: const TextStyle(fontSize: 11, color: AmColors.muted),
                   ),
@@ -443,7 +440,7 @@ Future<void> showCaptionCreationSheet(
                                 color: Color(0xFF0B0E12),
                               ),
                             ),
-                          Text(
+                          AppText(
                             busy ? 'Transcrevendo...' : 'Transcrever',
                             style: const TextStyle(
                               fontSize: 14,
@@ -458,7 +455,7 @@ Future<void> showCaptionCreationSheet(
                   if (estado is TranscricaoRodando) ...[
                     Padding(
                       padding: const EdgeInsets.only(top: 8),
-                      child: Text(
+                      child: AppText(
                         estado.status,
                         style: const TextStyle(
                           fontSize: 12,
@@ -473,8 +470,7 @@ Future<void> showCaptionCreationSheet(
                       key: const ValueKey('segundo-plano'),
                       padding: EdgeInsets.zero,
                       onPressed: () => Navigator.of(sheetContext).pop(),
-                      child: const Text(
-                        'Continuar em segundo plano',
+                      child: const AppText('Continuar em segundo plano',
                         style: TextStyle(fontSize: 12, color: AmColors.accent),
                       ),
                     ),
@@ -482,8 +478,7 @@ Future<void> showCaptionCreationSheet(
                   if (falha != null) ...[
                     Padding(
                       padding: const EdgeInsets.only(top: 8),
-                      child: Text(
-                        falha.mensagem,
+                      child: AppText(falha.mensagem,
                         style: const TextStyle(
                           fontSize: 12,
                           color: AmColors.pink,
@@ -518,7 +513,7 @@ Future<void> showCaptionCreationSheet(
                   if (estado is TranscricaoPronta)
                     Padding(
                       padding: const EdgeInsets.only(top: 8),
-                      child: Text(
+                      child: AppText(
                         'Legendas prontas: ${estado.falas} falas.',
                         style: const TextStyle(
                           fontSize: 12,
@@ -527,8 +522,7 @@ Future<void> showCaptionCreationSheet(
                       ),
                     ),
                   const SizedBox(height: 14),
-                  const Text(
-                    'ou cole um SRT:',
+                  const AppText('ou cole um SRT:',
                     style: TextStyle(fontSize: 12, color: AmColors.muted),
                   ),
                   const SizedBox(height: 8),
@@ -537,7 +531,7 @@ Future<void> showCaptionCreationSheet(
                     maxLines: 6,
                     minLines: 3,
                     enabled: !busy,
-                    placeholder: '1\n00:00:00,000 --> 00:00:02,000\nSua primeira fala...',
+                    placeholder: translate(context, '1\n00:00:00,000 --> 00:00:02,000\nSua primeira fala...'),
                     style: const TextStyle(fontSize: 13, color: AmColors.text),
                     placeholderStyle: const TextStyle(
                       fontSize: 13,
@@ -563,8 +557,7 @@ Future<void> showCaptionCreationSheet(
                               );
                               Navigator.of(sheetContext).pop();
                             },
-                      child: const Text(
-                        'Criar do SRT colado',
+                      child: const AppText('Criar do SRT colado',
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w700,
@@ -848,8 +841,7 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
           ),
           const SizedBox(width: 6),
           Expanded(
-            child: Text(
-              texto,
+            child: AppText(texto,
               maxLines: 2,
               style: TextStyle(
                 fontSize: 11,
@@ -903,7 +895,7 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
                             : AmColors.text,
                       ),
                       const SizedBox(height: 2),
-                      Text(
+                      AppText(
                         nomes[a]!.$1,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -1072,8 +1064,7 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
               children: [
                 CupertinoActivityIndicator(),
                 SizedBox(height: 12),
-                Text(
-                  'Preparando audio...',
+                AppText('Preparando audio...',
                   style: TextStyle(color: AmColors.text),
                 ),
               ],
@@ -1177,8 +1168,7 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
                     color: const Color(0xFF00FFB2),
                     borderRadius: BorderRadius.circular(4),
                   ),
-                  child: const Text(
-                    'PROVAR',
+                  child: const AppText('PROVAR',
                     style: TextStyle(
                       color: Colors.black,
                       fontSize: 8.5,

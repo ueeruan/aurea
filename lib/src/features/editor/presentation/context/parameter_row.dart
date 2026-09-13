@@ -303,7 +303,7 @@ class ParameterColorRow extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             Expanded(
-              child: Text(
+              child: AppText(
                 '#${color.toARGB32().toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}',
                 style: TextStyle(fontSize: 12.5, color: t.text),
               ),
@@ -474,13 +474,13 @@ class ParameterValue extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (prefix != null) ...[
-                  Text(
+                  AppText(
                     prefix!,
                     style: TextStyle(fontSize: 10.5, color: t.muted),
                   ),
                   const SizedBox(width: 4),
                 ],
-                Text(
+                AppText(
                   text,
                   style: TextStyle(
                     fontSize: 14,
@@ -515,7 +515,7 @@ Future<double?> showNumberInput(
   final r = await showCupertinoDialog<String>(
     context: context,
     builder: (ctx) => CupertinoAlertDialog(
-      title: Text(title ?? 'Valor exato${unit.isEmpty ? '' : ' ($unit)'}'),
+      title: AppText(title ?? 'Valor exato${unit.isEmpty ? '' : ' ($unit)'}'),
       content: Padding(
         padding: const EdgeInsets.only(top: 12),
         child: CupertinoTextField(
@@ -526,7 +526,7 @@ Future<double?> showNumberInput(
             decimal: true,
             signed: true,
           ),
-          placeholder: 'ex.: 120, 1080/3 ou 50%',
+          placeholder: translate(context, 'ex.: 120, 1080/3 ou 50%'),
           onSubmitted: (v) => Navigator.pop(ctx, v),
         ),
       ),
@@ -538,7 +538,7 @@ Future<double?> showNumberInput(
         CupertinoDialogAction(
           isDefaultAction: true,
           onPressed: () => Navigator.pop(ctx, ctrl.text),
-          child: const Text('OK'),
+          child: const AppText('OK'),
         ),
       ],
     ),
@@ -563,7 +563,7 @@ Future<String?> showExpressionEditor(
   final r = await showCupertinoDialog<String>(
     context: context,
     builder: (ctx) => CupertinoAlertDialog(
-      title: Text('Expressão${nome == null ? '' : ' · $nome'}'),
+      title: AppText('Expressão${nome == null ? '' : ' · $nome'}'),
       content: Padding(
         padding: const EdgeInsets.only(top: 12),
         child: Column(
@@ -575,12 +575,12 @@ Future<String?> showExpressionEditor(
               autofocus: true,
               maxLines: 3,
               minLines: 1,
-              placeholder: 'ex.: wiggle(2, 30) ou time * 90',
+              placeholder: translate(context, 'ex.: wiggle(2, 30) ou time * 90'),
               onSubmitted: (v) => Navigator.pop(ctx, v),
             ),
             if (erro != null) ...[
               const SizedBox(height: 8),
-              Text(
+              AppText(
                 erro,
                 style: const TextStyle(fontSize: 12, color: Color(0xFFFF6B6B)),
               ),
@@ -591,7 +591,7 @@ Future<String?> showExpressionEditor(
       actions: [
         CupertinoDialogAction(
           onPressed: () => Navigator.pop(ctx, ''),
-          child: const Text('Limpar'),
+          child: const AppText('Limpar'),
         ),
         CupertinoDialogAction(
           onPressed: () => Navigator.pop(ctx),
@@ -600,7 +600,7 @@ Future<String?> showExpressionEditor(
         CupertinoDialogAction(
           isDefaultAction: true,
           onPressed: () => Navigator.pop(ctx, ctrl.text),
-          child: const Text('OK'),
+          child: const AppText('OK'),
         ),
       ],
     ),

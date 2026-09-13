@@ -132,7 +132,7 @@ Future<void> showProjectSettingsSheet(BuildContext context, WidgetRef ref) {
             subtitulo: onion == 0
                 ? 'Desligada'
                 : '$onion quadro${onion == 1 ? '' : 's'} vizinho${onion == 1 ? '' : 's'} em transparencia',
-            trailing: Text(
+            trailing: AppText(
               onion == 0 ? 'Desligada' : '$onion',
               style: const TextStyle(fontSize: 13),
             ),
@@ -454,7 +454,7 @@ class _Chips<T> extends StatelessWidget {
                           ? Border.all(color: AmColors.action)
                           : null,
                     ),
-                    child: Text(
+                    child: AppText(
                       rotuloDe(o),
                       style: TextStyle(
                         fontSize: 12.5,

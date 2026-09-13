@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/ui/am_colors.dart';
 import 'release_notice.dart';
+import 'package:aurea/src/core/l10n/app_language.dart';
 
 /// Uma novidade da versao.
 class NewsItem {
@@ -541,8 +542,7 @@ class WhatsNewCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'O que ha de novo',
+                  AppText('O que ha de novo',
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w700,
@@ -550,8 +550,7 @@ class WhatsNewCard extends StatelessWidget {
                     ),
                   ),
                   SizedBox(height: 2),
-                  Text(
-                    'Correções de áudio e keyframes, melhorias no 3D, '
+                  AppText('Correções de áudio e keyframes, melhorias no 3D, '
                     'novos efeitos e transições.',
                     style: TextStyle(fontSize: 12, color: AmColors.muted),
                   ),
@@ -599,8 +598,7 @@ Future<void> showWhatsNewHistorySheet(BuildContext context) {
             ),
           ),
           const SizedBox(height: 16),
-          const Text(
-            'O que ha de novo',
+          const AppText('O que ha de novo',
             style: TextStyle(
               fontSize: 24,
               fontWeight: FontWeight.w700,
@@ -608,8 +606,7 @@ Future<void> showWhatsNewHistorySheet(BuildContext context) {
             ),
           ),
           const SizedBox(height: 4),
-          Text(
-            'Histórico de novidades',
+          AppText('Histórico de novidades',
             style: const TextStyle(fontSize: 13, color: AmColors.muted),
           ),
           const SizedBox(height: 18),
@@ -625,8 +622,7 @@ Future<void> showWhatsNewHistorySheet(BuildContext context) {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          item.title,
+                        AppText(item.title,
                           style: const TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.w600,
@@ -634,7 +630,7 @@ Future<void> showWhatsNewHistorySheet(BuildContext context) {
                           ),
                         ),
                         const SizedBox(height: 3),
-                        Text(
+                        AppText(
                           item.body,
                           style: const TextStyle(
                             fontSize: 12.5,

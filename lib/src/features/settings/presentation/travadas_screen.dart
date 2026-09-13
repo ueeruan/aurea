@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../editor/application/registro_de_travadas.dart';
+import 'package:aurea/src/core/l10n/app_language.dart';
 
 /// O REGISTRO DE TRAVADAS, para ler no aparelho e me mandar.
 ///
@@ -40,7 +41,7 @@ class _TravadasScreenState extends State<TravadasScreen> {
     final titulo = Theme.of(context).textTheme.titleSmall;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Travadas'),
+        title: const AppText('Travadas'),
         actions: [
           IconButton(
             key: const ValueKey('travadas-copiar'),
@@ -53,7 +54,7 @@ class _TravadasScreenState extends State<TravadasScreen> {
               if (!context.mounted) return;
               ScaffoldMessenger.of(
                 context,
-              ).showSnackBar(const SnackBar(content: Text('Registro copiado')));
+              ).showSnackBar(const SnackBar(content: AppText('Registro copiado')));
             },
           ),
           IconButton(
@@ -70,7 +71,7 @@ class _TravadasScreenState extends State<TravadasScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
         children: [
-          Text('Versao e motor 3D em uso', style: titulo),
+          AppText('Versao e motor 3D em uso', style: titulo),
           const SizedBox(height: 6),
           SelectableText(
             descreverMotor3D(),
@@ -79,12 +80,12 @@ class _TravadasScreenState extends State<TravadasScreen> {
           ),
           if (causas.isNotEmpty) ...[
             const SizedBox(height: 22),
-            Text('Por marca, do que mais pesou', style: titulo),
+            AppText('Por marca, do que mais pesou', style: titulo),
             const SizedBox(height: 6),
             for (final c in causas.take(8))
               Padding(
                 padding: const EdgeInsets.only(bottom: 4),
-                child: Text(
+                child: AppText(
                   '${c.somaMs.toString().padLeft(6)} ms  '
                   '${c.vezes.toString().padLeft(4)}x  '
                   'pior ${c.piorMs.toString().padLeft(4)} ms   ${c.oQue}',
@@ -94,14 +95,14 @@ class _TravadasScreenState extends State<TravadasScreen> {
           ],
           const SizedBox(height: 22),
           if (travadas.isEmpty)
-            Text(
+            AppText(
               'Nenhum quadro passou de ${RegistroDeTravadas.limiteMs} ms '
               'desde que o aplicativo abriu. Use o projeto que trava e '
               'volte aqui.',
               key: const ValueKey('travadas-vazio'),
             )
           else ...[
-            Text('${travadas.length} travadas, da mais recente', style: titulo),
+            AppText('${travadas.length} travadas, da mais recente', style: titulo),
             const SizedBox(height: 6),
             for (final t in travadas)
               Padding(
@@ -111,7 +112,7 @@ class _TravadasScreenState extends State<TravadasScreen> {
           ],
           if (quadros.isNotEmpty) ...[
             const SizedBox(height: 22),
-            Text('Constroi x desenha', style: titulo),
+            AppText('Constroi x desenha', style: titulo),
             const SizedBox(height: 6),
             for (final q in quadros)
               Padding(

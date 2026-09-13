@@ -6,6 +6,7 @@ import '../../application/editor_controller.dart';
 import '../../application/model_import_service.dart';
 import '../../application/texture_cache.dart';
 import '../../domain/model_import3d.dart';
+import 'package:aurea/src/core/l10n/app_language.dart';
 
 class ModelImportButton extends ConsumerStatefulWidget {
   const ModelImportButton({
@@ -88,18 +89,17 @@ class _ModelImportButtonState extends ConsumerState<ModelImportButton> {
                 child: CircularProgressIndicator(strokeWidth: 2),
               )
             : const Icon(Icons.file_open),
-        label: Text(
+        label: AppText(
           busy ? 'Importando modelo...' : 'Importar GLB / glTF / OBJ / FBX',
         ),
       ),
-      const Text(
-        'Selecione o modelo e, se necessario, .bin, .mtl e texturas juntos.',
+      const AppText('Selecione o modelo e, se necessario, .bin, .mtl e texturas juntos.',
         style: TextStyle(fontSize: 11),
       ),
       if (status != null)
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Text(status!, style: const TextStyle(fontSize: 12)),
+          child: AppText(status!, style: const TextStyle(fontSize: 12)),
         ),
     ],
   );

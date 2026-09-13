@@ -7,6 +7,7 @@ import '../../application/editor_controller.dart';
 import '../am/export_sheet.dart';
 import 'layer_actions.dart';
 import 'project_settings_sheet.dart';
+import 'package:aurea/src/core/l10n/app_language.dart';
 
 /// Cabeçalho da referência: voltar, nome e ações do contexto.
 class EditorTopBar extends ConsumerWidget {
@@ -50,7 +51,7 @@ class EditorTopBar extends ConsumerWidget {
               onTap: () => layer == null
                   ? renomearProjeto(context, ref)
                   : renomearCamada(context, ref, layer),
-              child: Text(
+              child: AppText(
                 title ?? layer?.name ?? project.name,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,

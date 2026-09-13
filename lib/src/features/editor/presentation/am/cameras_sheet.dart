@@ -57,7 +57,7 @@ Future<void> showCamerasSheet(
                   ),
                 ),
                 const SizedBox(height: 4),
-                Text(
+                AppText(
                   'Playhead em ${formatTime(local)}. Toque numa camera '
                   'para CORTAR para ela aqui.',
                   style: const TextStyle(
@@ -100,8 +100,7 @@ Future<void> showCamerasSheet(
                   children: [
                     const SizedBox(
                       width: 74,
-                      child: Text(
-                        'Transicao',
+                      child: AppText('Transicao',
                         style: TextStyle(fontSize: 12, color: AmColors.muted),
                       ),
                     ),
@@ -117,7 +116,7 @@ Future<void> showCamerasSheet(
                     ),
                     SizedBox(
                       width: 66,
-                      child: Text(
+                      child: AppText(
                         transicao < 0.05
                             ? 'corte'
                             : '${transicao.toStringAsFixed(1)} s',
@@ -130,8 +129,7 @@ Future<void> showCamerasSheet(
                     ),
                   ],
                 ),
-                const Text(
-                  'Zero e corte seco. Maior que zero derrete de uma '
+                const AppText('Zero e corte seco. Maior que zero derrete de uma '
                   'camera na outra.',
                   style: TextStyle(
                     fontSize: 11,
@@ -144,8 +142,7 @@ Future<void> showCamerasSheet(
                 // A PONTE COM A COMPOSICAO: todo rig de camera e "camera
                 // parenteada a um nulo". Sem isto, orbita, tripe, dolly,
                 // camera na mao e dolly zoom estao todos quebrados.
-                const Text(
-                  'Seguir um nulo da composicao',
+                const AppText('Seguir um nulo da composicao',
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
@@ -159,8 +156,7 @@ Future<void> showCamerasSheet(
                         .whereType<NullLayer>()
                         .toList();
                     if (nulos.isEmpty) {
-                      return const Text(
-                        'Nao ha objeto nulo no projeto. Crie um e a camera '
+                      return const AppText('Nao ha objeto nulo no projeto. Crie um e a camera '
                         'pode segui-lo — girar o nulo orbita a cena.',
                         style: TextStyle(
                           fontSize: 11,
@@ -202,8 +198,7 @@ Future<void> showCamerasSheet(
                   },
                 ),
                 const SizedBox(height: 4),
-                const Text(
-                  'A camera herda posicao e rotacao do nulo — nunca a '
+                const AppText('A camera herda posicao e rotacao do nulo — nunca a '
                   'escala. Camera nao tem escala.',
                   style: TextStyle(
                     fontSize: 11,
@@ -225,8 +220,7 @@ Future<void> showCamerasSheet(
                       color: AmColors.accentDim,
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Text(
-                      'Nova camera (enquadramento atual)',
+                    child: const AppText('Nova camera (enquadramento atual)',
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
@@ -238,8 +232,7 @@ Future<void> showCamerasSheet(
 
                 if (tomadas.isNotEmpty) ...[
                   const SizedBox(height: 16),
-                  const Text(
-                    'Tomadas',
+                  const AppText('Tomadas',
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
@@ -275,8 +268,7 @@ Future<void> showCamerasSheet(
                         onAction: controller.undo,
                       );
                     },
-                    child: const Text(
-                      'Limpar tomadas',
+                    child: const AppText('Limpar tomadas',
                       style: TextStyle(fontSize: 12, color: AmColors.pink),
                     ),
                   ),
@@ -343,7 +335,7 @@ class _LinhaCamera extends StatelessWidget {
           ),
           const SizedBox(width: 10),
           Expanded(
-            child: Text(
+            child: AppText(
               principal ? '$nome (principal)' : nome,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
@@ -393,20 +385,20 @@ class _LinhaTomada extends StatelessWidget {
         children: [
           SizedBox(
             width: 74,
-            child: Text(
+            child: AppText(
               tempo,
               style: const TextStyle(fontSize: 12, color: AmColors.accent),
             ),
           ),
           Expanded(
-            child: Text(
+            child: AppText(
               camera ?? 'camera apagada',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 12, color: AmColors.text),
             ),
           ),
-          Text(
+          AppText(
             transicao,
             style: const TextStyle(fontSize: 11, color: AmColors.muted),
           ),

@@ -29,6 +29,15 @@ class AureaApp extends ConsumerWidget {
       locale: Locale(ref.watch(appLanguageProvider)),
       supportedLocales: [for (final code in appLanguages.keys) Locale(code)],
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
+      // O LAYOUT NAO ESPELHA. Em arabe o Flutter viraria o app inteiro
+      // da direita para a esquerda — timeline, transporte, paineis. Os
+      // testadores arabes pediram o contrario: "o programa deve
+      // continuar como esta, sem mudar de direcao". O texto traduz; a
+      // direcao do editor fica.
+      builder: (context, child) => Directionality(
+        textDirection: TextDirection.ltr,
+        child: child ?? const SizedBox.shrink(),
+      ),
       debugShowCheckedModeBanner: false,
       theme: AppTheme.tema(claro: claro),
       home: const HomeShell(),

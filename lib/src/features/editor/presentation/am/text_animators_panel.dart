@@ -48,8 +48,7 @@ class _TextAnimatorsPanelState extends ConsumerState<TextAnimatorsPanel> {
     if (layer is! TextLayer) {
       return _shell(
         const Center(
-          child: Text(
-            'Selecione uma camada de texto',
+          child: AppText('Selecione uma camada de texto',
             style: TextStyle(color: AmColors.muted, fontSize: 13),
           ),
         ),
@@ -115,8 +114,7 @@ class _TextAnimatorsPanelState extends ConsumerState<TextAnimatorsPanel> {
               color: AmColors.text,
             ),
           ),
-          const Text(
-            'Animacao de texto',
+          const AppText('Animacao de texto',
             style: TextStyle(
               fontSize: 15,
               fontWeight: FontWeight.w600,
@@ -148,8 +146,7 @@ class _TextAnimatorsPanelState extends ConsumerState<TextAnimatorsPanel> {
                   color: AmColors.accent,
                 ),
                 SizedBox(width: 5),
-                Text(
-                  'Tutorial',
+                AppText('Tutorial',
                   style: TextStyle(fontSize: 12, color: AmColors.accent),
                 ),
               ],
@@ -181,7 +178,7 @@ class _TextAnimatorsPanelState extends ConsumerState<TextAnimatorsPanel> {
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Text(
+                      AppText(
                         textAnimSlotLabel(s),
                         style: TextStyle(
                           fontSize: 13,
@@ -317,8 +314,7 @@ class _TextAnimatorsPanelState extends ConsumerState<TextAnimatorsPanel> {
       children: [
         Row(
           children: [
-            Text(
-              anim.label,
+            AppText(anim.label,
               style: const TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w700,
@@ -326,7 +322,7 @@ class _TextAnimatorsPanelState extends ConsumerState<TextAnimatorsPanel> {
               ),
             ),
             const Spacer(),
-            Text(
+            AppText(
               'total ${_ms(anim.totalFor(n))}',
               style: const TextStyle(fontSize: 11, color: AmColors.muted),
             ),
@@ -444,8 +440,7 @@ class _TextAnimatorsPanelState extends ConsumerState<TextAnimatorsPanel> {
         // decaimento, os mesmos tres numeros.
         if (anim.ease == TextAnimEase.mola) ...[
           const SizedBox(height: 4),
-          const Text(
-            'Mola',
+          const AppText('Mola',
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w700,
@@ -518,13 +513,12 @@ class _TextAnimatorsPanelState extends ConsumerState<TextAnimatorsPanel> {
                   color: AmColors.muted,
                 ),
                 const SizedBox(width: 8),
-                const Text(
-                  'Avancado (animadores do AE)',
+                const AppText('Avancado (animadores do AE)',
                   style: TextStyle(fontSize: 12, color: AmColors.text),
                 ),
                 const Spacer(),
                 if (layer.animators.isNotEmpty)
-                  Text(
+                  AppText(
                     '${layer.animators.length}',
                     style: const TextStyle(
                       fontSize: 11,
@@ -537,8 +531,7 @@ class _TextAnimatorsPanelState extends ConsumerState<TextAnimatorsPanel> {
         ),
         if (_advanced) ...[
           const SizedBox(height: 8),
-          const Text(
-            'Cada animador combina seletores e propriedades na mao — o '
+          const AppText('Cada animador combina seletores e propriedades na mao — o '
             'modelo do After Effects. As animacoes acima sao compiladas '
             'para estes mesmos animadores.',
             style: TextStyle(fontSize: 11, height: 1.35, color: AmColors.muted),
@@ -567,14 +560,14 @@ class _TextAnimatorsPanelState extends ConsumerState<TextAnimatorsPanel> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
+                        AppText(
                           a.name,
                           style: const TextStyle(
                             fontSize: 12,
                             color: AmColors.text,
                           ),
                         ),
-                        Text(
+                        AppText(
                           a.properties.isEmpty
                               ? 'sem propriedades'
                               : a.properties
@@ -614,8 +607,7 @@ class _TextAnimatorsPanelState extends ConsumerState<TextAnimatorsPanel> {
                 children: [
                   Icon(CupertinoIcons.plus, size: 13, color: AmColors.accent),
                   SizedBox(width: 6),
-                  Text(
-                    'Animador cru',
+                  AppText('Animador cru',
                     style: TextStyle(fontSize: 12, color: AmColors.accent),
                   ),
                 ],
@@ -661,7 +653,7 @@ class _TextAnimatorsPanelState extends ConsumerState<TextAnimatorsPanel> {
                       color: i == index ? AmColors.accentDim : AmColors.chip,
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: Text(
+                    child: AppText(
                       options[i],
                       style: TextStyle(
                         fontSize: 11,
@@ -711,7 +703,7 @@ class _TextAnimatorsPanelState extends ConsumerState<TextAnimatorsPanel> {
           ),
           SizedBox(
             width: 58,
-            child: Text(
+            child: AppText(
               '${value.toStringAsFixed(decimals)}$suffix',
               textAlign: TextAlign.right,
               style: const TextStyle(fontSize: 11, color: AmColors.text),

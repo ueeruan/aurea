@@ -57,7 +57,7 @@ Future<void> showAlignSheet(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
+                AppText(
                   'Alinhar — ${ids.length} camada(s)',
                   style: const TextStyle(
                     fontSize: 16,
@@ -69,8 +69,7 @@ Future<void> showAlignSheet(
                 // Referencia do alinhamento.
                 Row(
                   children: [
-                    const Text(
-                      'Em relacao a',
+                    const AppText('Em relacao a',
                       style: TextStyle(fontSize: 12, color: AmColors.muted),
                     ),
                     const SizedBox(width: 10),
@@ -172,16 +171,14 @@ Future<void> showAlignSheet(
                   ],
                 ),
                 const Divider(color: AmColors.hairline, height: 20),
-                const Text(
-                  'Distribuir',
+                const AppText('Distribuir',
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
                     color: AmColors.text,
                   ),
                 ),
-                const Text(
-                  'Por centro iguala os centros; por vao iguala os '
+                const AppText('Por centro iguala os centros; por vao iguala os '
                   'espacos. Com tamanhos diferentes, dao resultados '
                   'distintos.',
                   style: TextStyle(fontSize: 11, color: AmColors.muted),
@@ -251,8 +248,7 @@ Future<void> showAlignSheet(
                 const SizedBox(height: 10),
                 Row(
                   children: [
-                    const Text(
-                      'Espaco exato',
+                    const AppText('Espaco exato',
                       style: TextStyle(fontSize: 12, color: AmColors.muted),
                     ),
                     const SizedBox(width: 10),
@@ -275,7 +271,7 @@ Future<void> showAlignSheet(
                               color: AmColors.chip,
                               borderRadius: BorderRadius.circular(8),
                             ),
-                            child: Text(
+                            child: AppText(
                               '${gap.round()}px',
                               style: const TextStyle(
                                 fontSize: 11,

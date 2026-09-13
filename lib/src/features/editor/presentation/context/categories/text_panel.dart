@@ -71,8 +71,7 @@ class TextPanel extends ConsumerWidget {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        'Abc',
+                      AppText('Abc',
                         style: TextStyle(
                           fontFamily: layer.fontFamily,
                           fontSize: 14,
@@ -83,7 +82,7 @@ class TextPanel extends ConsumerWidget {
                         ),
                       ),
                       const SizedBox(width: 8),
-                      Text(
+                      AppText(
                         layer.fontFamily ?? 'Padrão',
                         style: TextStyle(fontSize: 12.5, color: t.muted),
                       ),
@@ -144,13 +143,13 @@ class TextPanel extends ConsumerWidget {
                     final coluna = await showCupertinoModalPopup<String?>(
                       context: context,
                       builder: (ctx) => CupertinoActionSheet(
-                        title: Text('Coluna de ${dados.name}'),
+                        title: AppText('Coluna de ${dados.name}'),
                         actions: [
                           for (final col in dados.columns)
                             CupertinoActionSheetAction(
                               key: ValueKey('texto-dados-$col'),
                               onPressed: () => Navigator.pop(ctx, col),
-                              child: Text(col),
+                              child: AppText(col),
                             ),
                           if (vinculo != null)
                             CupertinoActionSheetAction(
@@ -183,7 +182,7 @@ class TextPanel extends ConsumerWidget {
                       color: t.chip,
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: Text(
+                    child: AppText(
                       vinculo == null
                           ? 'Vincular a uma coluna'
                           : 'Coluna: ${vinculo.column}',
@@ -219,8 +218,7 @@ class TextPanel extends ConsumerWidget {
                         color: AmColors.onAction,
                       ),
                       SizedBox(width: 6),
-                      Text(
-                        'Animar texto',
+                      AppText('Animar texto',
                         style: TextStyle(
                           fontSize: 12.5,
                           fontWeight: FontWeight.w700,
@@ -299,7 +297,7 @@ class _CampoDeTextoState extends State<_CampoDeTexto> {
       maxLines: 3,
       minLines: 1,
       style: TextStyle(fontSize: 15, color: t.text),
-      placeholder: 'Escreva o texto',
+      placeholder: translate(context, 'Escreva o texto'),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: t.chip,

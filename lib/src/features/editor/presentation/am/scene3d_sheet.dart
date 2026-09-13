@@ -94,8 +94,7 @@ Future<void> showScene3DSheet(
                             color: AmColors.accent,
                           ),
                           SizedBox(width: 5),
-                          Text(
-                            'Estudio',
+                          AppText('Estudio',
                             style: TextStyle(
                               fontSize: 13,
                               color: AmColors.accent,
@@ -287,7 +286,7 @@ class _ObjectsTab extends StatelessWidget {
                                 color: AmColors.accent,
                               ),
                               const SizedBox(width: 6),
-                              Text(
+                              AppText(
                                 f.name,
                                 style: const TextStyle(
                                   fontSize: 11,
@@ -450,7 +449,7 @@ class _ObjectsTab extends StatelessWidget {
                         color: AmColors.accent,
                       ),
                       const SizedBox(width: 5),
-                      Text(
+                      AppText(
                         element3DLabel(kind),
                         style: const TextStyle(
                           fontSize: 12,
@@ -621,7 +620,7 @@ class _ObjectsTab extends StatelessWidget {
             ),
             SwitchListTile.adaptive(
               contentPadding: EdgeInsets.zero,
-              title: const Text('Materiais originais do modelo'),
+              title: const AppText('Materiais originais do modelo'),
               value: node.useModelMaterials,
               onChanged: (v) {
                 controller.updateSceneNode(
@@ -773,7 +772,7 @@ class _ObjectsTab extends StatelessWidget {
                   ),
                 ),
                 Expanded(
-                  child: Text(
+                  child: AppText(
                     node.material.imagePath == null
                         ? 'Nenhuma'
                         : node.material.imagePath!.split(RegExp(r'[\\/]')).last,
@@ -1067,7 +1066,7 @@ class _ObjectsTab extends StatelessWidget {
           ),
           if (!node.credit.isEmpty) ...[
             const SizedBox(height: 8),
-            Text(
+            AppText(
               'Modelo · ${node.credit.badge}',
               style: const TextStyle(fontSize: 10, color: AmColors.muted),
             ),
@@ -1161,7 +1160,7 @@ class _NodeRow extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             Expanded(
-              child: Text(
+              child: AppText(
                 node.name,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
@@ -1174,7 +1173,7 @@ class _NodeRow extends StatelessWidget {
             if (node.instances.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(right: 6),
-                child: Text(
+                child: AppText(
                   '${node.instances.length}x',
                   style: const TextStyle(fontSize: 11, color: AmColors.accent),
                 ),
@@ -1458,7 +1457,7 @@ class _EnvironmentTab extends StatelessWidget {
         ),
         if (panorama.hasImage) ...[
           const SizedBox(height: 6),
-          Text(
+          AppText(
             panorama.sourcePath!.split(RegExp(r'[\\/]')).last,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
@@ -2114,7 +2113,7 @@ class _CameraTab extends StatelessWidget {
                         : AmColors.chip,
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Text(
+                  child: AppText(
                     '${mm.toInt()}mm',
                     style: const TextStyle(
                       fontSize: 12,
@@ -2438,7 +2437,7 @@ class _DofTab extends StatelessWidget {
         ),
         Padding(
           padding: const EdgeInsets.only(left: 2, bottom: 6),
-          child: Text(
+          child: AppText(
             'Diafragma f/${fStop.toStringAsFixed(1)}',
             style: const TextStyle(fontSize: 12, color: AmColors.muted),
           ),
@@ -2619,7 +2618,7 @@ class _HelpersTab extends StatelessWidget {
             child: Row(
               children: [
                 Expanded(
-                  child: Text(
+                  child: AppText(
                     s.savedViews[i].name,
                     style: const TextStyle(fontSize: 13, color: AmColors.text),
                   ),
@@ -2689,7 +2688,7 @@ class _Tabs extends StatelessWidget {
               color: i == index ? AmColors.accentDim : AmColors.chip,
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Text(
+            child: AppText(
               labels[i],
               style: TextStyle(
                 fontSize: 13,
@@ -2712,7 +2711,7 @@ class _SectionTitle extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(top: 6, bottom: 4),
-    child: Text(
+    child: AppText(
       text,
       style: const TextStyle(
         fontSize: 13,
@@ -2731,7 +2730,7 @@ class _Hint extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(bottom: 8),
-    child: Text(
+    child: AppText(
       text,
       style: const TextStyle(fontSize: 11, height: 1.35, color: AmColors.muted),
     ),
@@ -2822,7 +2821,7 @@ class _Plain extends StatelessWidget {
           ),
           SizedBox(
             width: 62,
-            child: Text(
+            child: AppText(
               '${value.toStringAsFixed(decimals)}$suffix',
               textAlign: TextAlign.right,
               style: const TextStyle(fontSize: 12, color: AmColors.text),
@@ -2878,7 +2877,7 @@ class _Chips extends StatelessWidget {
                         color: i == index ? AmColors.accentDim : AmColors.chip,
                         borderRadius: BorderRadius.circular(8),
                       ),
-                      child: Text(
+                      child: AppText(
                         options[i],
                         style: const TextStyle(
                           fontSize: 11,
@@ -3049,8 +3048,7 @@ class _AvisoDoMotor extends StatelessWidget {
         color: const Color(0x33FFB020),
         borderRadius: BorderRadius.circular(9),
       ),
-      child: Text(
-        'Este aparelho esta desenhando a cena no pintor em CPU: sem sombra '
+      child: AppText('Este aparelho esta desenhando a cena no pintor em CPU: sem sombra '
         'nem brilho, e bem mais lento.'
         '${motivo.isEmpty ? '' : ' Motivo: $motivo'}',
         style: const TextStyle(
@@ -3086,7 +3084,7 @@ class _BudgetBadge extends StatelessWidget {
         color: over ? const Color(0x33FF6B6B) : AmColors.chip,
         borderRadius: BorderRadius.circular(7),
       ),
-      child: Text(
+      child: AppText(
         '${Scene3DGpu.comoDesenha} · ${frame.drawCalls} chamadas · '
         '${frame.triangles} tri · '
         '${estimateSceneMemoryMb(layer.scene).toStringAsFixed(1)} MB',

@@ -41,8 +41,12 @@ class Easing {
   static const easeOut = Easing(x1: 0, y1: 0, x2: 0.58, y2: 1);
   static const easeInOut = Easing(x1: 0.42, y1: 0, x2: 0.58, y2: 1);
   static const overshoot = Easing(x1: 0.34, y1: 1.56, x2: 0.64, y2: 1);
-  static const bounce = Easing(type: EasingType.bounce);
-  static const elastic = Easing(type: EasingType.elastic);
+  static const bounce = Easing(type: EasingType.bounce, count: 4, intensity: .5);
+  static const elastic = Easing(
+    type: EasingType.elastic,
+    count: 3,
+    intensity: .65,
+  );
 
   /// Timing usado nas transicoes de interface da Apple. As molas usam o
   /// mesmo vocabulário do SwiftUI (resposta, amortecimento e velocidade
@@ -108,9 +112,25 @@ class Easing {
           y2,
         ).transform(t);
       case EasingType.bounce:
-        return Curves.bounceOut.transform(t);
+        // QUICAR PARAMETRICO. `count` e quantos toques no chao; `intensity`
+        // e quanto cada quique perde de altura (mais intensidade, quiques
+        // mais altos por mais tempo). Antes era `Curves.bounceOut` fixo, e
+        // os dois parametros existiam sem mudar um pixel — as alcas
+        // amarelas do editor de curvas escrevem AQUI.
+        final n = count < 1 ? 1 : count;
+        final decaimento = math.pow(1 - t, 2.0 * (1.5 - intensity)).toDouble();
+        return (1 - decaimento * math.cos(math.pi * n * t).abs()).clamp(
+          0.0,
+          1.0,
+        );
       case EasingType.elastic:
-        return Curves.elasticOut.transform(t);
+        // ELASTICO PARAMETRICO. `count` e quantas oscilacoes cabem no
+        // trecho; `intensity` e quanto elas demoram a se acalmar. Sai de
+        // zero e assenta em um, como o `elasticOut` de sempre, mas com os
+        // dois numeros de verdade.
+        final n = count < 1 ? 1 : count;
+        final freio = math.pow(2.0, -10.0 * t / (0.35 + intensity)).toDouble();
+        return freio * math.sin((t * n - 0.25) * 2 * math.pi) + 1;
       case EasingType.steps:
         final n = count < 2 ? 2 : count;
         return ((t * n).floor() / (n - 1)).clamp(0.0, 1.0);

@@ -47,8 +47,7 @@ Future<void> showPrecompSheet(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Precomp',
+                const AppText('Precomp',
                   style: TextStyle(
                     fontSize: 17,
                     fontWeight: FontWeight.w700,
@@ -56,8 +55,7 @@ Future<void> showPrecompSheet(
                   ),
                 ),
                 const SizedBox(height: 4),
-                const Text(
-                  'O grupo passa a ter tempo proprio: da para congelar, '
+                const AppText('O grupo passa a ter tempo proprio: da para congelar, '
                   'inverter e acelerar tudo o que esta dentro de uma vez.',
                   style: TextStyle(
                     fontSize: 11,
@@ -141,8 +139,7 @@ Future<void> showPrecompSheet(
                     ],
                   ),
                   const SizedBox(height: 4),
-                  const Text(
-                    'Cada ajuste com o remapeamento ligado cria um '
+                  const AppText('Cada ajuste com o remapeamento ligado cria um '
                     'keyframe de tempo — dois keyframes distantes viram '
                     'camera lenta, dois proximos viram aceleracao.',
                     style: TextStyle(
@@ -162,8 +159,7 @@ Future<void> showPrecompSheet(
                     redesenha();
                   },
                 ),
-                const Text(
-                  'Sem quadro proprio, os filhos compoem direto com o pai '
+                const AppText('Sem quadro proprio, os filhos compoem direto com o pai '
                   '— e a forma vetorial nao pixela ao ampliar.',
                   style: TextStyle(
                     fontSize: 11,
@@ -257,7 +253,7 @@ class _Ruler extends StatelessWidget {
         ),
         SizedBox(
           width: 62,
-          child: Text(
+          child: AppText(
             '${value.toStringAsFixed(decimals)}$suffix',
             textAlign: TextAlign.right,
             style: const TextStyle(fontSize: 12, color: AmColors.text),

@@ -156,8 +156,7 @@ class _ReportSheetState extends State<_ReportSheet> {
                     color: AmColors.accent,
                   ),
                   const SizedBox(width: 8),
-                  const Text(
-                    'Reportar',
+                  const AppText('Reportar',
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.w700,
@@ -177,8 +176,7 @@ class _ReportSheetState extends State<_ReportSheet> {
                 ],
               ),
               const SizedBox(height: 4),
-              const Text(
-                'Erro, sugestao de ferramenta ou de efeito — vai direto '
+              const AppText('Erro, sugestao de ferramenta ou de efeito — vai direto '
                 'para o criador do app.',
                 style: TextStyle(
                   fontSize: 12,
@@ -205,7 +203,7 @@ class _ReportSheetState extends State<_ReportSheet> {
                               : AmColors.chip,
                           borderRadius: BorderRadius.circular(9),
                         ),
-                        child: Text(
+                        child: AppText(
                           _tipoLabel(t),
                           style: TextStyle(
                             fontSize: 12,
@@ -238,8 +236,7 @@ class _ReportSheetState extends State<_ReportSheet> {
               Row(
                 children: [
                   Expanded(
-                    child: Text(
-                      'Incluir modelo e versao do sistema',
+                    child: AppText('Incluir modelo e versao do sistema',
                       style: const TextStyle(
                         fontSize: 12,
                         color: AmColors.muted,
@@ -260,8 +257,7 @@ class _ReportSheetState extends State<_ReportSheet> {
                   color: AmColors.accent,
                   borderRadius: BorderRadius.circular(12),
                   onPressed: _enviar,
-                  child: const Text(
-                    'Enviar',
+                  child: const AppText('Enviar',
                     style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w700,
@@ -273,8 +269,7 @@ class _ReportSheetState extends State<_ReportSheet> {
               const SizedBox(height: 16),
               const Divider(color: AmColors.hairline, height: 1),
               const SizedBox(height: 14),
-              const Text(
-                'Criador',
+              const AppText('Criador',
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w700,
@@ -348,7 +343,7 @@ class _ReportSheetState extends State<_ReportSheet> {
                   label,
                   style: const TextStyle(fontSize: 13, color: AmColors.text),
                 ),
-                Text(
+                AppText(
                   sub,
                   style: const TextStyle(fontSize: 11, color: AmColors.muted),
                 ),
@@ -399,8 +394,7 @@ class BetaBanner extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Versao beta para testes',
+                  const AppText('Versao beta para testes',
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
@@ -409,8 +403,7 @@ class BetaBanner extends StatelessWidget {
                   ),
                   if (!compact) ...[
                     const SizedBox(height: 3),
-                    const Text(
-                      'Pode ter erros, travar ou perder alteracoes nao '
+                    const AppText('Pode ter erros, travar ou perder alteracoes nao '
                       'salvas. Achou um problema ou quer sugerir algo? '
                       'Toque aqui.',
                       style: TextStyle(

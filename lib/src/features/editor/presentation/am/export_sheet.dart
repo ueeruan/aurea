@@ -63,7 +63,7 @@ class _Escolha extends StatelessWidget {
                       color: i == indice ? AmColors.accentDim : AmColors.chip,
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: Text(
+                    child: AppText(
                       opcoes[i],
                       style: TextStyle(
                         fontSize: 11,
@@ -225,7 +225,7 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
                                         : AmColors.text,
                                   ),
                                 ),
-                                Text(
+                                AppText(
                                   'MP4 · ${project.fps} fps',
                                   style: TextStyle(
                                     fontSize: 10.5,
@@ -249,8 +249,7 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
                 if (!completo)
                   const Padding(
                     padding: EdgeInsets.only(bottom: 6),
-                    child: Text(
-                      'Codec, taxa, PNG, Lottie, SVG e template ficam no modo Pro.',
+                    child: AppText('Codec, taxa, PNG, Lottie, SVG e template ficam no modo Pro.',
                       style: TextStyle(fontSize: 11.5, color: AmColors.muted),
                     ),
                   ),
@@ -262,8 +261,7 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
                       color: AmColors.accent,
                       borderRadius: BorderRadius.circular(12),
                       onPressed: busy ? null : () => renderizar(ajustes),
-                      child: const Text(
-                        'Renderizar com os ajustes abaixo',
+                      child: const AppText('Renderizar com os ajustes abaixo',
                         style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.w700,
@@ -304,7 +302,7 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
                                     'legendas (.srt)',
                                   );
                                 },
-                          child: Text(
+                          child: AppText(
                             'Legendas (.srt) · ${legenda.name}',
                             style: const TextStyle(
                               fontSize: 14,
@@ -391,8 +389,7 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
                         children: [
                           const SizedBox(
                             width: 74,
-                            child: Text(
-                              'Taxa',
+                            child: AppText('Taxa',
                               style: TextStyle(
                                 fontSize: 12,
                                 color: AmColors.muted,
@@ -414,7 +411,7 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
                           ),
                           SizedBox(
                             width: 66,
-                            child: Text(
+                            child: AppText(
                               '${ajustes.bitrateMbps!.toStringAsFixed(0)} Mb/s',
                               textAlign: TextAlign.right,
                               style: const TextStyle(
@@ -436,7 +433,7 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
                       );
                       final f = ajustes.resolveFps(project.fps);
                       if (ajustes.format == ExportFormat.pngSequence) {
-                        return Text(
+                        return AppText(
                           '${w}x$h - $f fps - PNG com transparencia. '
                           'Sequencia ocupa muito espaco, mas nao perde nada.',
                           style: const TextStyle(
@@ -455,7 +452,7 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
                       final aviso = ajustes.codec == ExportCodec.hevc
                           ? ' - HEVC nao toca em aparelho antigo'
                           : '';
-                      return Text(
+                      return AppText(
                         '${w}x$h - $f fps - ~${mb.toStringAsFixed(0)} MB$aviso',
                         style: const TextStyle(
                           fontSize: 11,
@@ -466,8 +463,7 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
                     },
                   ),
                   const Divider(color: AmColors.hairline, height: 22),
-                  const Text(
-                    'Para produto (Lottie / SVG)',
+                  const AppText('Para produto (Lottie / SVG)',
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
@@ -491,8 +487,7 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
                         ),
                       ),
                       const Expanded(
-                        child: Text(
-                          'Modo compativel com Lottie: avisa sobre o que '
+                        child: AppText('Modo compativel com Lottie: avisa sobre o que '
                           'nao sobrevive enquanto voce monta.',
                           style: TextStyle(fontSize: 11, color: AmColors.muted),
                         ),
@@ -502,7 +497,7 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
                   const Divider(color: AmColors.hairline, height: 18),
 
                   // VALIDADOR: o que nao sobrevive, camada por camada.
-                  Text(
+                  AppText(
                     blocking.isEmpty
                         ? 'Tudo sobrevive ao Lottie.'
                         : '${blocking.length} camada(s) NAO sobrevivem:',
@@ -528,7 +523,7 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
                           ),
                           const SizedBox(width: 6),
                           Expanded(
-                            child: Text(
+                            child: AppText(
                               '${i.layerName}: ${i.message}',
                               style: const TextStyle(
                                 fontSize: 11,
@@ -552,7 +547,7 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
                           ),
                           const SizedBox(width: 6),
                           Expanded(
-                            child: Text(
+                            child: AppText(
                               '${i.layerName}: ${i.message}',
                               style: const TextStyle(
                                 fontSize: 11,
@@ -582,8 +577,7 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
                                     '${out.skipped > 0 ? ', ${out.skipped} puladas' : ''})',
                               );
                             },
-                      child: const Text(
-                        'Exportar Lottie (.json)',
+                      child: const AppText('Exportar Lottie (.json)',
                         style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.w700,
@@ -599,8 +593,7 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
                       color: AmColors.chip,
                       borderRadius: BorderRadius.circular(12),
                       onPressed: busy ? null : exportSvg,
-                      child: const Text(
-                        'Exportar SVG animado',
+                      child: const AppText('Exportar SVG animado',
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
@@ -610,8 +603,7 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
                     ),
                   ),
                   const Divider(color: AmColors.hairline, height: 22),
-                  const Text(
-                    'Template',
+                  const AppText('Template',
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
@@ -626,7 +618,7 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
                       return Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
+                          AppText(
                             trava.isEmpty
                                 ? '${project.exposed.length} campo(s) para quem '
                                       'receber preencher.'
@@ -644,7 +636,7 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
                           ))
                             Padding(
                               padding: const EdgeInsets.only(top: 3),
-                              child: Text(
+                              child: AppText(
                                 aviso.message,
                                 style: const TextStyle(
                                   fontSize: 11,
@@ -669,8 +661,7 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
                                       ).encode(),
                                       'Template',
                                     ),
-                              child: Text(
-                                'Exportar template',
+                              child: AppText('Exportar template',
                                 style: TextStyle(
                                   fontSize: 14,
                                   fontWeight: FontWeight.w600,
@@ -688,7 +679,7 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
                 ],
                 if (status != null) ...[
                   const SizedBox(height: 10),
-                  Text(
+                  AppText(
                     status!,
                     style: const TextStyle(
                       fontSize: 11,

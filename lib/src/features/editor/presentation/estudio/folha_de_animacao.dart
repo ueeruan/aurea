@@ -73,7 +73,7 @@ class _FolhaDeAnimacaoState extends ConsumerState<FolhaDeAnimacao> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(
+              AppText(
                 node?.name ?? camera.name,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
@@ -90,7 +90,7 @@ class _FolhaDeAnimacaoState extends ConsumerState<FolhaDeAnimacao> {
                   isExpanded: true,
                   items: [
                     for (final p in PropDoNo.values)
-                      DropdownMenuItem(value: p, child: Text(propDoNoLabel(p))),
+                      DropdownMenuItem(value: p, child: AppText(propDoNoLabel(p))),
                   ],
                   onChanged: (p) {
                     if (p != null) setState(() => _nodeProp = p);
@@ -104,7 +104,7 @@ class _FolhaDeAnimacaoState extends ConsumerState<FolhaDeAnimacao> {
                     for (final p in PropDaCamera.values)
                       DropdownMenuItem(
                         value: p,
-                        child: Text(propDaCameraLabel(p)),
+                        child: AppText(propDaCameraLabel(p)),
                       ),
                   ],
                   onChanged: (p) {
@@ -133,7 +133,7 @@ class _FolhaDeAnimacaoState extends ConsumerState<FolhaDeAnimacao> {
                 ),
               ),
               const SizedBox(height: 12),
-              Text(
+              AppText(
                 '${track.keyframes.length} keyframes · ${track.valueAt(local).toStringAsFixed(2)}',
                 style: const TextStyle(color: Scene3DTheme.textMuted),
               ),
@@ -172,7 +172,7 @@ class _FolhaDeAnimacaoState extends ConsumerState<FolhaDeAnimacao> {
                             }
                           },
                     icon: const Icon(Icons.auto_graph),
-                    label: const Text('Ajustar curva'),
+                    label: const AppText('Ajustar curva'),
                   ),
                   OutlinedButton.icon(
                     key: const ValueKey('scene-animation-delete'),

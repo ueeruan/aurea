@@ -59,8 +59,7 @@ Future<void> showBeatPulseSheet(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Pulsar na batida',
+                const AppText('Pulsar na batida',
                   style: TextStyle(
                     fontSize: 17,
                     fontWeight: FontWeight.w700,
@@ -68,7 +67,7 @@ Future<void> showBeatPulseSheet(
                   ),
                 ),
                 const SizedBox(height: 4),
-                Text(
+                AppText(
                   '"${layer.name}" cresce um tiquinho em cada ataque da '
                   'musica.',
                   style: const TextStyle(
@@ -80,13 +79,11 @@ Future<void> showBeatPulseSheet(
                 const SizedBox(height: 12),
 
                 if (fontes.isEmpty)
-                  const Text(
-                    'Nao ha faixa de som no projeto.',
+                  const AppText('Nao ha faixa de som no projeto.',
                     style: TextStyle(fontSize: 12, color: AmColors.muted),
                   )
                 else ...[
-                  const Text(
-                    'Ouvir de',
+                  const AppText('Ouvir de',
                     style: TextStyle(fontSize: 12, color: AmColors.muted),
                   ),
                   const SizedBox(height: 6),
@@ -108,7 +105,7 @@ Future<void> showBeatPulseSheet(
                                   : AmColors.chip,
                               borderRadius: BorderRadius.circular(8),
                             ),
-                            child: Text(
+                            child: AppText(
                               f.name,
                               style: TextStyle(
                                 fontSize: 11,
@@ -127,8 +124,7 @@ Future<void> showBeatPulseSheet(
                     children: [
                       const SizedBox(
                         width: 62,
-                        child: Text(
-                          'Forca',
+                        child: AppText('Forca',
                           style: TextStyle(fontSize: 12, color: AmColors.muted),
                         ),
                       ),
@@ -144,7 +140,7 @@ Future<void> showBeatPulseSheet(
                       ),
                       SizedBox(
                         width: 56,
-                        child: Text(
+                        child: AppText(
                           '+${(forca * 100).toStringAsFixed(0)}%',
                           textAlign: TextAlign.right,
                           style: const TextStyle(
@@ -156,7 +152,7 @@ Future<void> showBeatPulseSheet(
                     ],
                   ),
                   const SizedBox(height: 6),
-                  Text(
+                  AppText(
                     batidas == null
                         ? 'Lendo o som...'
                         : '${batidas.length} batidas encontradas.',

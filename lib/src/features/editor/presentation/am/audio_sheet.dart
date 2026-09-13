@@ -68,8 +68,7 @@ Future<void> showAudioSheet(
                       color: AmColors.accent,
                     ),
                     const SizedBox(width: 8),
-                    const Text(
-                      'Som',
+                    const AppText('Som',
                       style: TextStyle(
                         fontSize: 17,
                         fontWeight: FontWeight.w700,
@@ -77,7 +76,7 @@ Future<void> showAudioSheet(
                       ),
                     ),
                     const Spacer(),
-                    Text(
+                    AppText(
                       spec.muted
                           ? 'mudo'
                           : '${db.isFinite ? db.toStringAsFixed(1) : '-∞'} dB',
@@ -130,8 +129,7 @@ Future<void> showAudioSheet(
                   ),
                 ),
                 const SizedBox(height: 6),
-                const Text(
-                  'O fade e de igual potencia: fade reto de volume soa '
+                const AppText('O fade e de igual potencia: fade reto de volume soa '
                   'como um buraco no meio.',
                   style: TextStyle(
                     fontSize: 11,
@@ -141,8 +139,7 @@ Future<void> showAudioSheet(
                 ),
 
                 const SizedBox(height: 14),
-                const Text(
-                  'Abaixar pela voz',
+                const AppText('Abaixar pela voz',
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
@@ -150,8 +147,7 @@ Future<void> showAudioSheet(
                   ),
                 ),
                 const SizedBox(height: 4),
-                const Text(
-                  'A trilha desce quando a voz entra e volta quando ela '
+                const AppText('A trilha desce quando a voz entra e volta quando ela '
                   'para — sem desenhar envelope na mao.',
                   style: TextStyle(
                     fontSize: 11,
@@ -161,8 +157,7 @@ Future<void> showAudioSheet(
                 ),
                 const SizedBox(height: 8),
                 if (vozes.isEmpty)
-                  const Text(
-                    'Nao ha outra faixa com som no projeto.',
+                  const AppText('Nao ha outra faixa com som no projeto.',
                     style: TextStyle(fontSize: 11, color: AmColors.muted),
                   )
                 else
@@ -199,8 +194,7 @@ Future<void> showAudioSheet(
                 // existia no modelo ganha os controles.
                 if (pro) ...[
                   const SizedBox(height: 12),
-                  const Text(
-                    'Voz e EQ',
+                  const AppText('Voz e EQ',
                     key: ValueKey('som-voz-eq'),
                     style: TextStyle(
                       fontSize: 13,
@@ -399,7 +393,7 @@ class _Slider extends StatelessWidget {
           ),
           SizedBox(
             width: 52,
-            child: Text(
+            child: AppText(
               '${value.toStringAsFixed(decimals)}$suffix',
               textAlign: TextAlign.right,
               style: const TextStyle(fontSize: 12, color: AmColors.text),

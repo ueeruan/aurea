@@ -11,6 +11,7 @@ import '../am/am_timeline.dart' show magneticProvider;
 import '../am/apple_cascade_sheet.dart';
 import '../am/layer_look.dart';
 import '../am/scene3d_studio_ux.dart' show pedirNome;
+import 'package:aurea/src/core/l10n/app_language.dart';
 
 /// AS ACOES ESTRUTURAIS SOBRE CAMADAS, num lugar so.
 ///
@@ -121,7 +122,7 @@ Future<void> vincularSelecao(
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(18, 14, 18, 6),
-              child: Text(
+              child: AppText(
                 '${targets.length} camadas seguirem...',
                 style: const TextStyle(
                   fontSize: 16,
@@ -139,7 +140,7 @@ Future<void> vincularSelecao(
                     size: 20,
                     color: layerTypeStripe(other),
                   ),
-                  title: Text(
+                  title: AppText(
                     other.name,
                     style: const TextStyle(color: AmColors.text),
                   ),
@@ -193,7 +194,7 @@ Future<void> menuDasMarcas(
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
             child: Row(
               children: [
-                Text(
+                AppText(
                   '$quantas marca${quantas == 1 ? '' : 's'}',
                   style: const TextStyle(
                     fontSize: 15,
@@ -203,7 +204,7 @@ Future<void> menuDasMarcas(
                 ),
                 const Spacer(),
                 if (project.bpm != null)
-                  Text(
+                  AppText(
                     '${project.bpm!.toStringAsFixed(0)} bpm',
                     style: const TextStyle(fontSize: 12, color: AmColors.muted),
                   ),
@@ -216,8 +217,7 @@ Future<void> menuDasMarcas(
               size: 19,
               color: AmColors.text,
             ),
-            title: const Text(
-              'Marcar aqui',
+            title: const AppText('Marcar aqui',
               style: TextStyle(color: AmColors.text, fontSize: 15),
             ),
             onTap: () {
@@ -231,8 +231,7 @@ Future<void> menuDasMarcas(
               size: 19,
               color: AmColors.text,
             ),
-            title: const Text(
-              'Ir para a proxima marca',
+            title: const AppText('Ir para a proxima marca',
               style: TextStyle(color: AmColors.text, fontSize: 15),
             ),
             enabled: quantas > 0,
@@ -251,8 +250,7 @@ Future<void> menuDasMarcas(
               size: 19,
               color: AmColors.text,
             ),
-            title: const Text(
-              'Cortar em todas as marcas',
+            title: const AppText('Cortar em todas as marcas',
               style: TextStyle(color: AmColors.text, fontSize: 15),
             ),
             enabled: quantas > 0,
@@ -268,12 +266,10 @@ Future<void> menuDasMarcas(
               size: 19,
               color: AmColors.text,
             ),
-            title: const Text(
-              'Distribuir as camadas nas marcas',
+            title: const AppText('Distribuir as camadas nas marcas',
               style: TextStyle(color: AmColors.text, fontSize: 15),
             ),
-            subtitle: const Text(
-              'Uma camada por marca, na ordem em que estao',
+            subtitle: const AppText('Uma camada por marca, na ordem em que estao',
               style: TextStyle(color: AmColors.muted, fontSize: 11.5),
             ),
             enabled: quantas > 1,
@@ -289,8 +285,7 @@ Future<void> menuDasMarcas(
               size: 19,
               color: AmColors.pink,
             ),
-            title: const Text(
-              'Limpar as marcas',
+            title: const AppText('Limpar as marcas',
               style: TextStyle(color: AmColors.pink, fontSize: 15),
             ),
             enabled: quantas > 0,

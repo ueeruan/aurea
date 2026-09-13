@@ -728,7 +728,7 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
               ),
             ],
             const SizedBox(height: 4),
-            Text(
+            AppText(
               sequencia
                   ? '$sw x $sh · $fps qps · guarda transparencia'
                   : '$sw x $sh · $fps qps · cerca de '
@@ -773,8 +773,7 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
                   color: AmColors.pink,
                 ),
                 SizedBox(width: 8),
-                Text(
-                  'Nao deu para exportar',
+                AppText('Nao deu para exportar',
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w700,
@@ -784,7 +783,7 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
               ],
             ),
             const SizedBox(height: 8),
-            Text(
+            AppText(
               _erro ?? '',
               style: const TextStyle(
                 fontSize: 11,
@@ -826,8 +825,7 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
                   color: AmColors.accent,
                 ),
                 SizedBox(width: 8),
-                Text(
-                  'Video pronto',
+                AppText('Video pronto',
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w700,
@@ -838,7 +836,7 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
             ),
             if (_galeria != null) ...[
               const SizedBox(height: 6),
-              Text(
+              AppText(
                 _galeria!,
                 style: const TextStyle(
                   fontSize: 12,
@@ -848,7 +846,7 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
               ),
             ],
             const SizedBox(height: 6),
-            Text(
+            AppText(
               _saida?.path ?? '',
               style: const TextStyle(
                 fontSize: 10,
@@ -871,14 +869,13 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
                       );
                       messenger?.showSnackBar(
                         const SnackBar(
-                          content: Text('Caminho copiado'),
+                          content: AppText('Caminho copiado'),
                           duration: Duration(seconds: 2),
                           behavior: SnackBarBehavior.floating,
                         ),
                       );
                     },
-                    child: const Text(
-                      'Copiar caminho',
+                    child: const AppText('Copiar caminho',
                       style: TextStyle(fontSize: 13, color: AmColors.accent),
                     ),
                   ),
@@ -890,8 +887,7 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
                     borderRadius: BorderRadius.circular(12),
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     onPressed: () => Navigator.of(context).maybePop(),
-                    child: const Text(
-                      'Concluir',
+                    child: const AppText('Concluir',
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
@@ -933,7 +929,7 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
                 ),
               ),
               const Spacer(),
-              Text(
+              AppText(
                 '${(_progresso * 100).round()}%',
                 style: const TextStyle(fontSize: 13, color: AmColors.accent),
               ),
@@ -950,15 +946,14 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
             ),
           ),
           const SizedBox(height: 8),
-          Text(
+          AppText(
             _detalhe,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontSize: 11, color: AmColors.muted),
           ),
           const SizedBox(height: 4),
-          const Text(
-            'Deixe o app aberto nesta tela ate terminar.',
+          const AppText('Deixe o app aberto nesta tela ate terminar.',
             style: TextStyle(fontSize: 10, color: AmColors.muted),
           ),
         ],
@@ -993,8 +988,7 @@ class _Escolhas<T> extends StatelessWidget {
       children: [
         Padding(
           padding: const EdgeInsets.only(bottom: 6),
-          child: Text(
-            titulo,
+          child: AppText(titulo,
             style: const TextStyle(
               fontSize: 11,
               fontWeight: FontWeight.w700,
@@ -1028,8 +1022,7 @@ class _Escolhas<T> extends StatelessWidget {
                           ? null
                           : Border.all(color: AmColors.hairline),
                     ),
-                    child: Text(
-                      nome,
+                    child: AppText(nome,
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,

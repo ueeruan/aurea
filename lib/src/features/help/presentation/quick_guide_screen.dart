@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../editor/domain/effect.dart';
+import 'package:aurea/src/core/l10n/app_language.dart';
 
 /// Offline, shipped in the executable: no network or external PDF viewer.
 class QuickGuideScreen extends StatefulWidget {
@@ -37,17 +38,16 @@ class _QuickGuideScreenState extends State<QuickGuideScreen> {
         )
         .toList();
     return Scaffold(
-      appBar: AppBar(title: const Text('Como usar o AUREA')),
+      appBar: AppBar(title: const AppText('Como usar o AUREA')),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 40),
           children: [
-            Text(
-              'Do zero ao primeiro motion',
+            AppText('Do zero ao primeiro motion',
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 8),
-            const Text('Guia rápido • disponível sem internet'),
+            const AppText('Guia rápido • disponível sem internet'),
             const SizedBox(height: 16),
             for (final step in quickStartSteps)
               Padding(
@@ -55,41 +55,39 @@ class _QuickGuideScreenState extends State<QuickGuideScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
+                    AppText(
                       step.$1,
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                     const SizedBox(height: 4),
-                    Text(step.$2),
+                    AppText(step.$2),
                   ],
                 ),
               ),
             const ExpansionTile(
               tilePadding: EdgeInsets.zero,
-              title: Text('Receita: texto com brilho e entrada suave'),
+              title: AppText('Receita: texto com brilho e entrada suave'),
               children: [
                 Padding(
                   padding: EdgeInsets.only(bottom: 16),
-                  child: Text(
-                    'Adicione um texto. Em Mover e transformar, crie uma posição inicial fora da tela e outra no centro após 1 segundo. Escolha uma curva de desaceleração. Em Efeitos, adicione Glow; comece com intensidade 80, raio 20 e limite 60. Ajuste a cor do brilho. Use o interruptor do efeito para comparar antes/depois e exporte um trecho curto.',
+                  child: AppText('Adicione um texto. Em Mover e transformar, crie uma posição inicial fora da tela e outra no centro após 1 segundo. Escolha uma curva de desaceleração. Em Efeitos, adicione Glow; comece com intensidade 80, raio 20 e limite 60. Ajuste a cor do brilho. Use o interruptor do efeito para comparar antes/depois e exporte um trecho curto.',
                   ),
                 ),
               ],
             ),
             const ExpansionTile(
               tilePadding: EdgeInsets.zero,
-              title: Text('Desempenho e limites'),
+              title: AppText('Desempenho e limites'),
               children: [
                 Padding(
                   padding: EdgeInsets.only(bottom: 16),
-                  child: Text(
-                    'Muitos ecos, desfoques grandes, Pixel Sort e cenas 3D custam mais. Reduza amostras, raio ou qualidade enquanto edita. Exporte um trecho de teste antes do vídeo inteiro. O motor FX V2 trabalha em SDR; não reproduz o pipeline HDR/32 bits do After Effects. Nomes semelhantes não significam algoritmos, plugins ou resultados idênticos. Projetos antigos continuam abrindo, mas efeitos reescritos podem mudar o visual. A prévia em aparelhos sem o backend gráfico nativo pode ter limitações com vídeo ao vivo.',
+                  child: AppText('Muitos ecos, desfoques grandes, Pixel Sort e cenas 3D custam mais. Reduza amostras, raio ou qualidade enquanto edita. Exporte um trecho de teste antes do vídeo inteiro. O motor FX V2 trabalha em SDR; não reproduz o pipeline HDR/32 bits do After Effects. Nomes semelhantes não significam algoritmos, plugins ou resultados idênticos. Projetos antigos continuam abrindo, mas efeitos reescritos podem mudar o visual. A prévia em aparelhos sem o backend gráfico nativo pode ter limitações com vídeo ao vivo.',
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 24),
-            Text(
+            AppText(
               'Guia dos ${effectSpecs.length} efeitos',
               style: Theme.of(context).textTheme.titleLarge,
             ),
@@ -98,7 +96,7 @@ class _QuickGuideScreenState extends State<QuickGuideScreen> {
               controller: _search,
               onChanged: (_) => setState(() {}),
               decoration: InputDecoration(
-                labelText: 'Buscar efeito ou finalidade',
+                labelText: translate(context, 'Buscar efeito ou finalidade'),
                 prefixIcon: const Icon(Icons.search),
                 suffixIcon: IconButton(
                   tooltip: 'Limpar busca',
@@ -112,22 +110,21 @@ class _QuickGuideScreenState extends State<QuickGuideScreen> {
             if (entries.isEmpty)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 24),
-                child: Text(
-                  'Nenhum efeito encontrado. Tente brilho, cor ou distorção.',
+                child: AppText('Nenhum efeito encontrado. Tente brilho, cor ou distorção.',
                 ),
               ),
             for (final entry in entries)
               ExpansionTile(
                 key: ValueKey(entry.key),
                 tilePadding: EdgeInsets.zero,
-                title: Text(entry.value.name),
-                subtitle: Text(entry.value.category),
+                title: AppText(entry.value.name),
+                subtitle: AppText(entry.value.category),
                 children: [
                   Align(
                     alignment: Alignment.centerLeft,
                     child: Padding(
                       padding: const EdgeInsets.only(bottom: 16),
-                      child: Text(effectHelp(entry.key)),
+                      child: AppText(effectHelp(entry.key)),
                     ),
                   ),
                 ],

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../domain/layer.dart';
 import '../../domain/video_project.dart';
 import 'am_colors.dart';
+import 'package:aurea/src/core/l10n/app_language.dart';
 
 String labelOfProp(LayerProp prop) => switch (prop) {
   LayerProp.position => 'Posição',
@@ -99,7 +100,7 @@ class PropertyKeyframeContext extends StatelessWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
+                  AppText(
                     labelOfProp(prop),
                     maxLines: 1,
                     style: TextStyle(
@@ -109,7 +110,7 @@ class PropertyKeyframeContext extends StatelessWidget {
                       fontWeight: FontWeight.w600,
                     ),
                   ),
-                  Text(
+                  AppText(
                     status,
                     key: const ValueKey('property-keyframe-status'),
                     maxLines: 1,

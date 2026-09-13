@@ -76,7 +76,7 @@ class LayerHeader extends ConsumerWidget {
               key: const ValueKey('camada-nome'),
               behavior: HitTestBehavior.opaque,
               onTap: () => renomearCamada(context, ref, layer),
-              child: Text(
+              child: AppText(
                 layer.name.isEmpty ? 'Camada' : layer.name,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
@@ -185,7 +185,7 @@ class MultiSelectionPanel extends ConsumerWidget {
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: Text(
+                child: AppText(
                   '$n camadas',
                   key: const ValueKey('selecao-contagem'),
                   style: TextStyle(

@@ -159,7 +159,7 @@ class _Cabecalho extends StatelessWidget {
             ),
           ),
           const Spacer(),
-          Text(
+          AppText(
             '$r $g $b',
             style: const TextStyle(
               fontSize: 12,

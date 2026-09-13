@@ -195,7 +195,7 @@ class CampoDeValor extends StatelessWidget {
                 // "..." mentiria sobre o numero.
                 child: FittedBox(
                   fit: BoxFit.scaleDown,
-                  child: Text(
+                  child: AppText(
                     _texto,
                     maxLines: 1,
                     softWrap: false,
@@ -296,7 +296,7 @@ class _DialogoDeValorState extends State<_DialogoDeValor> {
 
   @override
   Widget build(BuildContext context) => CupertinoAlertDialog(
-    title: Text(widget.titulo),
+    title: AppText(widget.titulo),
     content: Padding(
       padding: const EdgeInsets.only(top: 12),
       child: CupertinoTextField(
@@ -338,7 +338,7 @@ class _DialogoDeValorState extends State<_DialogoDeValor> {
         key: const ValueKey('campo-de-valor-ok'),
         isDefaultAction: true,
         onPressed: _confirmar,
-        child: const Text('OK'),
+        child: const AppText('OK'),
       ),
     ],
   );

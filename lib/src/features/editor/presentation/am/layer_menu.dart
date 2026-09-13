@@ -478,8 +478,7 @@ Future<void> showGridSheet(
             children: [
               const Padding(
                 padding: EdgeInsets.all(14),
-                child: Text(
-                  'Camadas da grade (ordem = indice)',
+                child: AppText('Camadas da grade (ordem = indice)',
                   style: TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w700,
@@ -501,7 +500,7 @@ Future<void> showGridSheet(
                             activeColor: AmColors.accent,
                             checkColor: const Color(0xFF0B0E12),
                             controlAffinity: ListTileControlAffinity.leading,
-                            title: Text(
+                            title: AppText(
                               l.name,
                               style: const TextStyle(
                                 fontSize: 14,
@@ -531,7 +530,7 @@ Future<void> showGridSheet(
                       controller.setGridAssets(nullId, picked.toList());
                       Navigator.of(c2).pop();
                     },
-                    child: Text(
+                    child: AppText(
                       'Usar ${picked.length} camada(s)',
                       style: const TextStyle(
                         fontSize: 15,
@@ -598,7 +597,7 @@ Future<void> showGridSheet(
                   ),
                   SizedBox(
                     width: 56,
-                    child: Text(
+                    child: AppText(
                       display,
                       textAlign: TextAlign.center,
                       style: const TextStyle(
@@ -652,7 +651,7 @@ Future<void> showGridSheet(
                   ),
                   SizedBox(
                     width: 48,
-                    child: Text(
+                    child: AppText(
                       display,
                       textAlign: TextAlign.center,
                       style: const TextStyle(
@@ -731,8 +730,7 @@ Future<void> showGridSheet(
                   Row(
                     children: [
                       const Expanded(
-                        child: Text(
-                          'Modulo Grade',
+                        child: AppText('Modulo Grade',
                           style: TextStyle(
                             fontSize: 17,
                             fontWeight: FontWeight.w700,
@@ -769,7 +767,7 @@ Future<void> showGridSheet(
                       color: rig == null ? AmColors.accent : AmColors.chip,
                       borderRadius: BorderRadius.circular(12),
                       onPressed: () => pickAssets(sheetContext, setSheetState),
-                      child: Text(
+                      child: AppText(
                         rig == null
                             ? 'Escolher camadas da grade...'
                             : 'Camadas: ${rig.assets.length}  (editar)',
@@ -1010,8 +1008,7 @@ Future<void> showGridSheet(
                     ),
                     Row(
                       children: [
-                        const Text(
-                          'Embaralhar',
+                        const AppText('Embaralhar',
                           style: TextStyle(fontSize: 13, color: AmColors.muted),
                         ),
                         Transform.scale(
@@ -1029,8 +1026,7 @@ Future<void> showGridSheet(
                           ),
                         ),
                         const SizedBox(width: 12),
-                        const Text(
-                          'Proximidade',
+                        const AppText('Proximidade',
                           style: TextStyle(fontSize: 13, color: AmColors.muted),
                         ),
                         Transform.scale(
@@ -1063,8 +1059,7 @@ Future<void> showGridSheet(
                     // modula a grade — animar/curvar o nulo anima a grade.
                     Row(
                       children: [
-                        const Text(
-                          'Nulo controlador',
+                        const AppText('Nulo controlador',
                           style: TextStyle(fontSize: 13, color: AmColors.muted),
                         ),
                         const SizedBox(width: 10),
@@ -1094,7 +1089,7 @@ Future<void> showGridSheet(
                                     : AmColors.chip,
                                 borderRadius: BorderRadius.circular(9),
                               ),
-                              child: Text(
+                              child: AppText(
                                 rig.controllerId == null
                                     ? 'Nenhum'
                                     : (ref
@@ -1116,16 +1111,14 @@ Future<void> showGridSheet(
                     if (rig.controllerId != null)
                       const Padding(
                         padding: EdgeInsets.only(top: 4),
-                        child: Text(
-                          'Escala do nulo -> espacamento/raio · Rotacao Z '
+                        child: AppText('Escala do nulo -> espacamento/raio · Rotacao Z '
                           '-> rotacao da grade · Rotacao Y -> twist.',
                           style: TextStyle(fontSize: 11, color: AmColors.muted),
                         ),
                       ),
                     if (rig.proximity?.enabled ?? false) ...[
                       const SizedBox(height: 6),
-                      const Text(
-                        'O effector e uma ESFERA 3D: raio 200 tambem '
+                      const AppText('O effector e uma ESFERA 3D: raio 200 tambem '
                         'alcanca 200 de profundidade.',
                         style: TextStyle(fontSize: 11, color: AmColors.muted),
                       ),
@@ -1298,7 +1291,7 @@ Future<void> showMasksSheet(
                   ),
                   SizedBox(
                     width: 56,
-                    child: Text(
+                    child: AppText(
                       display,
                       textAlign: TextAlign.center,
                       style: const TextStyle(
@@ -1334,7 +1327,7 @@ Future<void> showMasksSheet(
                   color: AmColors.chip,
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Text(
+                child: AppText(
                   '+ $label',
                   style: const TextStyle(
                     fontSize: 13,
@@ -1358,8 +1351,7 @@ Future<void> showMasksSheet(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Máscaras',
+                  const AppText('Máscaras',
                     style: TextStyle(
                       fontSize: 17,
                       fontWeight: FontWeight.w700,
@@ -1372,8 +1364,7 @@ Future<void> showMasksSheet(
                     fps: ref.read(editorControllerProvider).fps,
                   ),
                   const SizedBox(height: 4),
-                  const Text(
-                    'A primeira corta o alfa da camada; as seguintes '
+                  const AppText('A primeira corta o alfa da camada; as seguintes '
                     'operam sobre as de cima.',
                     style: TextStyle(fontSize: 12, color: AmColors.muted),
                   ),
@@ -1392,7 +1383,7 @@ Future<void> showMasksSheet(
                           Row(
                             children: [
                               Expanded(
-                                child: Text(
+                                child: AppText(
                                   '${i + 1}. ${m.name}',
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
@@ -1510,7 +1501,7 @@ Future<void> showMasksSheet(
                                           : AmColors.chip,
                                       borderRadius: BorderRadius.circular(7),
                                     ),
-                                    child: Text(
+                                    child: AppText(
                                       modeLabel(mode),
                                       style: TextStyle(
                                         fontSize: 11,
@@ -1526,8 +1517,7 @@ Future<void> showMasksSheet(
                           Row(
                             children: [
                               const Expanded(
-                                child: Text(
-                                  'Inverter',
+                                child: AppText('Inverter',
                                   style: TextStyle(
                                     fontSize: 12,
                                     color: AmColors.muted,
@@ -1551,16 +1541,14 @@ Future<void> showMasksSheet(
                             ],
                           ),
                           if (!m.path.valueAt(local).closed)
-                            const Text(
-                              'Caminho aberto nao corta; pode servir de entrada de efeito.',
+                            const AppText('Caminho aberto nao corta; pode servir de entrada de efeito.',
                               style: TextStyle(
                                 fontSize: 11,
                                 color: AmColors.accent,
                               ),
                             ),
                           if (maskFeatherExceedsBounds(m, local, maskSize))
-                            const Text(
-                              'Aviso: caminho + feather/2 + expansao passa do limite.',
+                            const AppText('Aviso: caminho + feather/2 + expansao passa do limite.',
                               style: TextStyle(
                                 fontSize: 11,
                                 color: AmColors.accent,
@@ -1706,8 +1694,7 @@ Future<void> showParentSheet(
         children: [
           const Padding(
             padding: EdgeInsets.all(14),
-            child: Text(
-              'Seguir a camada (pai)...',
+            child: AppText('Seguir a camada (pai)...',
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w700,
@@ -1725,12 +1712,10 @@ Future<void> showParentSheet(
                 size: 20,
                 color: AmColors.muted,
               ),
-              title: const Text(
-                'Nenhum',
+              title: const AppText('Nenhum',
                 style: TextStyle(color: AmColors.text),
               ),
-              subtitle: const Text(
-                'Solta a camada do pai',
+              subtitle: const AppText('Solta a camada do pai',
                 style: TextStyle(fontSize: 11, color: AmColors.muted),
               ),
               trailing: currentParentId == null
@@ -1766,17 +1751,16 @@ Future<void> showParentSheet(
                       borderRadius: BorderRadius.circular(6),
                     ),
                   ),
-                  title: Text(
+                  title: AppText(
                     other.name,
                     style: const TextStyle(color: AmColors.text),
                   ),
                   subtitle: other.id == child.id
-                      ? const Text(
-                          'É a própria camada',
+                      ? const AppText('É a própria camada',
                           style: TextStyle(fontSize: 11, color: AmColors.muted),
                         )
                       : other is NullLayer
-                      ? Text(
+                      ? AppText(
                           other.is3D ? 'Objeto Nulo 3D' : 'Objeto Nulo',
                           style: const TextStyle(
                             fontSize: 11,
@@ -1873,7 +1857,7 @@ Future<void> showParticlesSheet(
                 ),
                 SizedBox(
                   width: 64,
-                  child: Text(
+                  child: AppText(
                     display,
                     textAlign: TextAlign.center,
                     style: const TextStyle(
@@ -1933,7 +1917,7 @@ Future<void> showParticlesSheet(
                                   : AmColors.chip,
                               borderRadius: BorderRadius.circular(9),
                             ),
-                            child: Text(
+                            child: AppText(
                               nomes[i],
                               style: const TextStyle(
                                 fontSize: 12,
@@ -1952,7 +1936,7 @@ Future<void> showParticlesSheet(
 
         Widget titulo(String t) => Padding(
           padding: const EdgeInsets.only(top: 6, bottom: 8),
-          child: Text(
+          child: AppText(
             t,
             style: const TextStyle(
               fontSize: 12,
@@ -1978,8 +1962,7 @@ Future<void> showParticlesSheet(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Particulas 3D',
+                const AppText('Particulas 3D',
                   style: TextStyle(
                     fontSize: 17,
                     fontWeight: FontWeight.w700,
@@ -2263,8 +2246,7 @@ Future<void> showParticlesSheet(
                     children: [
                       const SizedBox(
                         width: 86,
-                        child: Text(
-                          'Cor final',
+                        child: AppText('Cor final',
                           style: TextStyle(fontSize: 13, color: AmColors.muted),
                         ),
                       ),
@@ -2284,8 +2266,7 @@ Future<void> showParticlesSheet(
                                 : AmColors.chip,
                             borderRadius: BorderRadius.circular(9),
                           ),
-                          child: const Text(
-                            'Nenhuma',
+                          child: const AppText('Nenhuma',
                             style: TextStyle(
                               fontSize: 12,
                               color: AmColors.accent,
@@ -2326,8 +2307,7 @@ Future<void> showParticlesSheet(
                 const SizedBox(height: 4),
                 Row(
                   children: [
-                    const Text(
-                      'Cintilar',
+                    const AppText('Cintilar',
                       style: TextStyle(fontSize: 13, color: AmColors.muted),
                     ),
                     Transform.scale(
@@ -2414,8 +2394,7 @@ Future<void> showElement3DSheet(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Elemento 3D',
+                const AppText('Elemento 3D',
                   style: TextStyle(
                     fontSize: 17,
                     fontWeight: FontWeight.w700,
@@ -2447,7 +2426,7 @@ Future<void> showElement3DSheet(
                                 : AmColors.chip,
                             borderRadius: BorderRadius.circular(9),
                           ),
-                          child: Text(
+                          child: AppText(
                             element3DLabel(kind),
                             style: const TextStyle(
                               fontSize: 12,
@@ -2486,7 +2465,7 @@ Future<void> showElement3DSheet(
                     ),
                     SizedBox(
                       width: 56,
-                      child: Text(
+                      child: AppText(
                         amNumber(layer.size, 0),
                         textAlign: TextAlign.center,
                         style: const TextStyle(
@@ -2500,8 +2479,7 @@ Future<void> showElement3DSheet(
                 const SizedBox(height: 8),
                 Row(
                   children: [
-                    const Text(
-                      'Arestas',
+                    const AppText('Arestas',
                       style: TextStyle(fontSize: 13, color: AmColors.muted),
                     ),
                     Transform.scale(
@@ -2567,8 +2545,7 @@ Future<void> showElement3DSheet(
                   children: [
                     const SizedBox(
                       width: 86,
-                      child: Text(
-                        'Reflexo',
+                      child: AppText('Reflexo',
                         style: TextStyle(fontSize: 13, color: AmColors.muted),
                       ),
                     ),
@@ -2590,7 +2567,7 @@ Future<void> showElement3DSheet(
                     ),
                     SizedBox(
                       width: 56,
-                      child: Text(
+                      child: AppText(
                         amNumber(layer.reflect * 100, 0),
                         textAlign: TextAlign.center,
                         style: const TextStyle(
@@ -2626,7 +2603,7 @@ Future<void> showElement3DSheet(
                                 : AmColors.chip,
                             borderRadius: BorderRadius.circular(9),
                           ),
-                          child: Text(
+                          child: AppText(
                             environmentLabel(k),
                             style: const TextStyle(
                               fontSize: 12,
@@ -2683,8 +2660,7 @@ Future<void> showElement3DSheet(
                                       : AmColors.chip,
                                   borderRadius: BorderRadius.circular(9),
                                 ),
-                                child: Text(
-                                  nome,
+                                child: AppText(nome,
                                   style: const TextStyle(
                                     fontSize: 12,
                                     color: AmColors.accent,
@@ -2707,8 +2683,7 @@ Future<void> showElement3DSheet(
                         width: 86,
                         child: Padding(
                           padding: EdgeInsets.only(top: 6),
-                          child: Text(
-                            'Degrade',
+                          child: AppText('Degrade',
                             style: TextStyle(
                               fontSize: 13,
                               color: AmColors.muted,
@@ -2756,8 +2731,7 @@ Future<void> showElement3DSheet(
                   children: [
                     const SizedBox(
                       width: 86,
-                      child: Text(
-                        'Brilho',
+                      child: AppText('Brilho',
                         style: TextStyle(fontSize: 13, color: AmColors.muted),
                       ),
                     ),
@@ -2779,7 +2753,7 @@ Future<void> showElement3DSheet(
                     ),
                     SizedBox(
                       width: 56,
-                      child: Text(
+                      child: AppText(
                         amNumber(layer.shininess * 100, 0),
                         textAlign: TextAlign.center,
                         style: const TextStyle(
@@ -2796,13 +2770,12 @@ Future<void> showElement3DSheet(
                   children: [
                     const SizedBox(
                       width: 86,
-                      child: Text(
-                        'Modelo',
+                      child: AppText('Modelo',
                         style: TextStyle(fontSize: 13, color: AmColors.muted),
                       ),
                     ),
                     Expanded(
-                      child: Text(
+                      child: AppText(
                         _descricaoDoModelo(layer),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -2835,8 +2808,7 @@ Future<void> showElement3DSheet(
                               color: AmColors.accent,
                             ),
                             SizedBox(width: 6),
-                            Text(
-                              'OBJ / FBX',
+                            AppText('OBJ / FBX',
                               style: TextStyle(
                                 fontSize: 12,
                                 color: AmColors.accent,
@@ -2878,7 +2850,7 @@ Future<void> showElement3DSheet(
                       ),
                     ),
                     Expanded(
-                      child: Text(
+                      child: AppText(
                         layer.imagePath == null
                             ? 'Nenhuma'
                             : layer.imagePath!.split(RegExp(r'[\\/]')).last,
@@ -2921,8 +2893,7 @@ Future<void> showElement3DSheet(
                               color: AmColors.accent,
                             ),
                             SizedBox(width: 6),
-                            Text(
-                              'Escolher',
+                            AppText('Escolher',
                               style: TextStyle(
                                 fontSize: 12,
                                 color: AmColors.accent,
@@ -2953,8 +2924,7 @@ Future<void> showElement3DSheet(
                   ],
                 ),
                 const SizedBox(height: 6),
-                const Text(
-                  'Gire com a rotacao X/Y/Z normal da camada — ou '
+                const AppText('Gire com a rotacao X/Y/Z normal da camada — ou '
                   'vincule a um nulo 3D e gire o nulo.',
                   style: TextStyle(fontSize: 11, color: AmColors.muted),
                 ),
@@ -3034,7 +3004,7 @@ Future<void> showShapeParamsSheet(
                   ),
                   SizedBox(
                     width: 48,
-                    child: Text(
+                    child: AppText(
                       display,
                       textAlign: TextAlign.center,
                       style: const TextStyle(
@@ -3134,8 +3104,7 @@ Future<void> showShapeParamsSheet(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Forma — geometria',
+                  const AppText('Forma — geometria',
                     style: TextStyle(
                       fontSize: 17,
                       fontWeight: FontWeight.w700,
@@ -3155,7 +3124,7 @@ Future<void> showShapeParamsSheet(
                         layerId,
                         playback: playback,
                       ),
-                      child: const Text('Gradiente: cores, posicoes e alcance'),
+                      child: const AppText('Gradiente: cores, posicoes e alcance'),
                     ),
                   // EDITAR NOS: a forma vira caminho bezier (se ainda nao
                   // e) e os nos aparecem sobre o preview. E daqui que sai
@@ -3220,8 +3189,7 @@ Future<void> showShapeParamsSheet(
                             color: AmColors.accent,
                           ),
                           SizedBox(width: 8),
-                          Text(
-                            'Editar nos do caminho',
+                          AppText('Editar nos do caminho',
                             style: TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w600,
@@ -3234,8 +3202,7 @@ Future<void> showShapeParamsSheet(
                   ),
                   const SizedBox(height: 10),
                   if (sp == null) ...[
-                    const Text(
-                      'Esta forma e um caminho desenhado (sem '
+                    const AppText('Esta forma e um caminho desenhado (sem '
                       'parametros). Converta para editar Tamanho, '
                       'Arredondamento, Pontas e afins — animaveis.',
                       style: TextStyle(fontSize: 13, color: AmColors.muted),
@@ -3256,8 +3223,7 @@ Future<void> showShapeParamsSheet(
                           }
                           setSheetState(() {});
                         },
-                        child: const Text(
-                          'Converter para parametrica',
+                        child: const AppText('Converter para parametrica',
                           style: TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.w700,
@@ -3333,8 +3299,7 @@ Future<void> showShapeParamsSheet(
                       ),
                       Row(
                         children: [
-                          const Text(
-                            'Unidade do canto',
+                          const AppText('Unidade do canto',
                             style: TextStyle(
                               fontSize: 12,
                               color: AmColors.muted,
@@ -3457,8 +3422,7 @@ Future<void> showShapeParamsSheet(
                         '${amNumber(sp.sweep.valueAt(local), 0)}°',
                       ),
                     ],
-                    const Text(
-                      'Tamanho muda a GEOMETRIA (traco constante). '
+                    const AppText('Tamanho muda a GEOMETRIA (traco constante). '
                       'Escala, em Mover, engorda tudo junto.',
                       style: TextStyle(fontSize: 11, color: AmColors.muted),
                     ),
@@ -3525,7 +3489,7 @@ Future<void> showCaptionCuesSheet(
                 Row(
                   children: [
                     Expanded(
-                      child: Text(
+                      child: AppText(
                         'Legendas — ${cues.length} cues',
                         style: const TextStyle(
                           fontSize: 16,
@@ -3557,8 +3521,7 @@ Future<void> showCaptionCuesSheet(
                               : AmColors.chip,
                           borderRadius: BorderRadius.circular(9),
                         ),
-                        child: Text(
-                          'Estilo',
+                        child: AppText('Estilo',
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
@@ -3577,8 +3540,7 @@ Future<void> showCaptionCuesSheet(
                   fps: project.fps,
                 ),
                 const SizedBox(height: 4),
-                const Text(
-                  'Toque no tempo para ouvir o trecho; corrija o texto '
+                const AppText('Toque no tempo para ouvir o trecho; corrija o texto '
                   'direto. Editar trava o cue.',
                   style: TextStyle(fontSize: 11, color: AmColors.muted),
                 ),
@@ -3586,8 +3548,7 @@ Future<void> showCaptionCuesSheet(
                 Expanded(
                   child: cues.isEmpty
                       ? const Center(
-                          child: Text(
-                            'Sem cues nesta camada.',
+                          child: AppText('Sem cues nesta camada.',
                             style: TextStyle(
                               fontSize: 13,
                               color: AmColors.muted,
@@ -3617,7 +3578,7 @@ Future<void> showCaptionCuesSheet(
                                         color: AmColors.chip,
                                         borderRadius: BorderRadius.circular(8),
                                       ),
-                                      child: Text(
+                                      child: AppText(
                                         formatTimecode(c.start, project.fps),
                                         style: TextStyle(
                                           fontSize: 11,
@@ -3720,8 +3681,7 @@ Future<void> showEffectPresetsSheet(
                       color: AmColors.accent,
                     ),
                     SizedBox(width: 8),
-                    Text(
-                      'Presets de efeito',
+                    AppText('Presets de efeito',
                       style: TextStyle(
                         fontSize: 17,
                         fontWeight: FontWeight.w700,
@@ -3734,8 +3694,7 @@ Future<void> showEffectPresetsSheet(
               if (meus.isEmpty)
                 const Padding(
                   padding: EdgeInsets.fromLTRB(18, 0, 18, 6),
-                  child: Text(
-                    'Para guardar um efeito seu: no cartao do efeito, '
+                  child: AppText('Para guardar um efeito seu: no cartao do efeito, '
                     'menu (...) > "Salvar como preset".',
                     style: TextStyle(fontSize: 11, color: AmColors.muted),
                   ),
@@ -3758,14 +3717,14 @@ Future<void> showEffectPresetsSheet(
                           size: 20,
                           color: AmColors.accent,
                         ),
-                        title: Text(
+                        title: AppText(
                           p.name,
                           style: const TextStyle(
                             fontSize: 14,
                             color: AmColors.text,
                           ),
                         ),
-                        subtitle: Text(
+                        subtitle: AppText(
                           '${meu ? 'Meu preset' : p.category} · '
                           '${p.effects.length} efeito(s)',
                           style: const TextStyle(
@@ -3891,7 +3850,7 @@ class _MenuTile extends StatelessWidget {
                       color: const Color(0xFFFFD600),
                       borderRadius: BorderRadius.circular(4),
                     ),
-                    child: Text(
+                    child: AppText(
                       badge!,
                       style: const TextStyle(
                         color: Colors.black,
@@ -4280,8 +4239,7 @@ class _BlendingPanelState extends ConsumerState<BlendingPanel> {
           // camada sozinha em Multiplicar (que some no preto) ou em Tela
           // (que nao muda) vira "a mesclagem nao funciona" — o relato do
           // beta. A conta esta certa; faltava dizer com o que ela conta.
-          const Text(
-            'A mescla combina esta camada com as camadas abaixo. Branco em '
+          const AppText('A mescla combina esta camada com as camadas abaixo. Branco em '
             'Clarear cobre a imagem; em Escurecer deixa a imagem aparecer. '
             'Ajuste também a opacidade para reduzir a intensidade.',
             maxLines: 3,
@@ -4329,7 +4287,7 @@ class _BlendingPanelState extends ConsumerState<BlendingPanel> {
             border: selected ? Border.all(color: AmColors.accent) : null,
           ),
           alignment: Alignment.center,
-          child: Text(
+          child: AppText(
             text,
             style: TextStyle(
               fontSize: 12,
@@ -4402,8 +4360,7 @@ class _BlendingPanelState extends ConsumerState<BlendingPanel> {
               }
             }),
             const SizedBox(height: 14),
-            const Text(
-              'Sete modos, pilha, feather X/Y, opacidade e caminho.',
+            const AppText('Sete modos, pilha, feather X/Y, opacidade e caminho.',
               style: TextStyle(fontSize: 12, color: AmColors.muted),
             ),
             const SizedBox(height: 12),
@@ -4425,8 +4382,7 @@ class _BlendingPanelState extends ConsumerState<BlendingPanel> {
       return ListView(
         padding: const EdgeInsets.fromLTRB(10, 7, 14, 12),
         children: [
-          const Text(
-            'Pronto · Revelar',
+          const AppText('Pronto · Revelar',
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w700,
@@ -4434,8 +4390,7 @@ class _BlendingPanelState extends ConsumerState<BlendingPanel> {
             ),
           ),
           const SizedBox(height: 4),
-          const Text(
-            'Um toque cria mascara e keyframes reais com mola.',
+          const AppText('Um toque cria mascara e keyframes reais com mola.',
             style: TextStyle(fontSize: 12, color: AmColors.muted),
           ),
           const SizedBox(height: 9),
@@ -4485,7 +4440,7 @@ class _BlendingPanelState extends ConsumerState<BlendingPanel> {
           }
         }),
         const SizedBox(height: 8),
-        Text(
+        AppText(
           'Montar · ${mask.name}',
           style: const TextStyle(
             fontSize: 14,
@@ -4538,8 +4493,7 @@ class _BlendingPanelState extends ConsumerState<BlendingPanel> {
         Row(
           children: [
             const Expanded(
-              child: Text(
-                'Inverter',
+              child: AppText('Inverter',
                 style: TextStyle(fontSize: 12, color: AmColors.muted),
               ),
             ),
@@ -4565,13 +4519,11 @@ class _BlendingPanelState extends ConsumerState<BlendingPanel> {
           (v) => c.editMaskParam(id, mask.id, 'expansion', t, v),
         ),
         if (!mask.path.valueAt(local).closed)
-          const Text(
-            'Caminho aberto nao recorta. Feche no Edit Points.',
+          const AppText('Caminho aberto nao recorta. Feche no Edit Points.',
             style: TextStyle(fontSize: 11, color: AmColors.accent),
           ),
         if (maskFeatherExceedsBounds(mask, local, size))
-          const Text(
-            'Aviso: feather e expansao passam do limite.',
+          const AppText('Aviso: feather e expansao passam do limite.',
             style: TextStyle(fontSize: 11, color: AmColors.accent),
           ),
       ],
@@ -4605,7 +4557,7 @@ class _BlendingPanelState extends ConsumerState<BlendingPanel> {
       ),
       SizedBox(
         width: 38,
-        child: Text(
+        child: AppText(
           amNumber(value, 0),
           textAlign: TextAlign.center,
           style: const TextStyle(fontSize: 12, color: AmColors.accent),
@@ -4638,8 +4590,7 @@ class _BlendingPanelState extends ConsumerState<BlendingPanel> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text(
-              'Pronto · Recortar',
+            const AppText('Pronto · Recortar',
               style: TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w700,
@@ -4647,7 +4598,7 @@ class _BlendingPanelState extends ConsumerState<BlendingPanel> {
               ),
             ),
             const SizedBox(height: 6),
-            Text(
+            AppText(
               above == null
                   ? 'Coloque uma camada acima desta.'
                   : 'Fonte acima: ${above.name}. Ela sera ocultada.',
@@ -4674,7 +4625,7 @@ class _BlendingPanelState extends ConsumerState<BlendingPanel> {
       children: [
         _depth(depth, setDepth),
         const SizedBox(height: 10),
-        Text(
+        AppText(
           advanced ? 'Avançado · Fonte e canal' : 'Montar · Canal',
           style: const TextStyle(
             fontSize: 14,
@@ -4725,8 +4676,7 @@ class _BlendingPanelState extends ConsumerState<BlendingPanel> {
             },
           ),
           const SizedBox(height: 7),
-          const Text(
-            'A fonte some enquanto o recorte estiver ligado, volta ao '
+          const AppText('A fonte some enquanto o recorte estiver ligado, volta ao '
             'desligar e a transparencia abaixo e preservada.',
             style: TextStyle(fontSize: 11, color: AmColors.muted),
           ),
@@ -4760,8 +4710,7 @@ Future<String?> _pickControllerNull(
         children: [
           const Padding(
             padding: EdgeInsets.all(14),
-            child: Text(
-              'Nulo controlador da grade',
+            child: AppText('Nulo controlador da grade',
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w700,
@@ -4772,8 +4721,7 @@ Future<String?> _pickControllerNull(
           if (nulls.isEmpty)
             const Padding(
               padding: EdgeInsets.fromLTRB(20, 0, 20, 12),
-              child: Text(
-                'Crie outro Nulo 3D para usar como controlador '
+              child: AppText('Crie outro Nulo 3D para usar como controlador '
                 '(o proprio nulo da grade nao conta).',
                 style: TextStyle(fontSize: 13, color: AmColors.muted),
               ),
@@ -4781,8 +4729,7 @@ Future<String?> _pickControllerNull(
           Material(
             color: Colors.transparent,
             child: ListTile(
-              title: const Text(
-                'Nenhum',
+              title: const AppText('Nenhum',
                 style: TextStyle(color: AmColors.muted),
               ),
               onTap: () => Navigator.of(sheetContext).pop(''),
@@ -4792,12 +4739,11 @@ Future<String?> _pickControllerNull(
             Material(
               color: Colors.transparent,
               child: ListTile(
-                title: Text(
+                title: AppText(
                   other.name,
                   style: const TextStyle(color: AmColors.text),
                 ),
-                subtitle: const Text(
-                  'Escala/rotacao dele passam a modular a grade',
+                subtitle: const AppText('Escala/rotacao dele passam a modular a grade',
                   style: TextStyle(fontSize: 11, color: AmColors.muted),
                 ),
                 onTap: () => Navigator.of(sheetContext).pop(other.id),
@@ -4828,8 +4774,7 @@ Future<String?> _pickMatteSource(
         children: [
           const Padding(
             padding: EdgeInsets.all(14),
-            child: Text(
-              'Usar como matte...',
+            child: AppText('Usar como matte...',
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w700,
@@ -4845,12 +4790,11 @@ Future<String?> _pickMatteSource(
               Material(
                 color: Colors.transparent,
                 child: ListTile(
-                  title: Text(
+                  title: AppText(
                     other.name,
                     style: const TextStyle(color: AmColors.text),
                   ),
-                  subtitle: const Text(
-                    'A fonte fica oculta na cena',
+                  subtitle: const AppText('A fonte fica oculta na cena',
                     style: TextStyle(fontSize: 11, color: AmColors.muted),
                   ),
                   onTap: () => Navigator.of(sheetContext).pop(other.id),
@@ -4911,8 +4855,7 @@ class ColorFillPanel extends ConsumerWidget {
           Expanded(
             child: current == null
                 ? const Center(
-                    child: Text(
-                      'Esta camada nao tem cor editavel.',
+                    child: AppText('Esta camada nao tem cor editavel.',
                       style: TextStyle(color: AmColors.muted, fontSize: 13),
                     ),
                   )
@@ -4963,8 +4906,7 @@ class ColorFillPanel extends ConsumerWidget {
                                 ),
                                 const SizedBox(width: 12),
                                 const Expanded(
-                                  child: Text(
-                                    'Escolher qualquer cor',
+                                  child: AppText('Escolher qualquer cor',
                                     style: TextStyle(
                                       fontSize: 14,
                                       color: AmColors.text,
@@ -5073,7 +5015,7 @@ class _ShapeOperators extends ConsumerWidget {
           ),
           SizedBox(
             width: 40,
-            child: Text(
+            child: AppText(
               amNumber(value, 0),
               textAlign: TextAlign.right,
               style: const TextStyle(fontSize: 11, color: AmColors.text),
@@ -5087,8 +5029,7 @@ class _ShapeOperators extends ConsumerWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const SizedBox(height: 16),
-        const Text(
-          'OPERADORES',
+        const AppText('OPERADORES',
           style: TextStyle(
             fontSize: 11,
             letterSpacing: 1,
@@ -5112,8 +5053,7 @@ class _ShapeOperators extends ConsumerWidget {
                   Row(
                     children: [
                       const Expanded(
-                        child: Text(
-                          'Trim Paths',
+                        child: AppText('Trim Paths',
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
@@ -5138,7 +5078,7 @@ class _ShapeOperators extends ConsumerWidget {
                             color: AmColors.chip,
                             borderRadius: BorderRadius.circular(7),
                           ),
-                          child: Text(
+                          child: AppText(
                             item.individually ? 'Individual' : 'Continuo',
                             style: const TextStyle(
                               fontSize: 11,
@@ -5214,8 +5154,7 @@ class _ShapeOperators extends ConsumerWidget {
                   Row(
                     children: [
                       const Expanded(
-                        child: Text(
-                          'Repeater',
+                        child: AppText('Repeater',
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
@@ -5239,7 +5178,7 @@ class _ShapeOperators extends ConsumerWidget {
                           color: AmColors.muted,
                         ),
                       ),
-                      Text(
+                      AppText(
                         '${item.copies}',
                         style: const TextStyle(
                           fontSize: 13,
@@ -5324,8 +5263,7 @@ class _ShapeOperators extends ConsumerWidget {
                   Row(
                     children: [
                       Expanded(
-                        child: Text(
-                          'Morph  '
+                        child: AppText('Morph  '
                           '${_primName(item.from.primitive)} -> '
                           '${_primName(item.to.primitive)}',
                           style: const TextStyle(
@@ -5400,7 +5338,7 @@ class _ShapeOperators extends ConsumerWidget {
                 children: [
                   Row(
                     children: [
-                      Text(
+                      AppText(
                         _opName(item),
                         style: const TextStyle(
                           fontSize: 12,
@@ -5422,7 +5360,7 @@ class _ShapeOperators extends ConsumerWidget {
                               color: AmColors.chip,
                               borderRadius: BorderRadius.circular(7),
                             ),
-                            child: Text(
+                            child: AppText(
                               mergeModeLabel(item.mode),
                               style: const TextStyle(
                                 fontSize: 11,
@@ -5477,7 +5415,7 @@ class _ShapeOperators extends ConsumerWidget {
                     color: AmColors.chip,
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Text(
+                  child: AppText(
                     '+ ${shapePathOpLabel(op)}',
                     style: const TextStyle(
                       fontSize: 11,
@@ -5495,8 +5433,7 @@ class _ShapeOperators extends ConsumerWidget {
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
               onPressed: () =>
                   controller.addShapeOperator(layerId, repeater: false),
-              child: const Text(
-                '+ Trim Paths',
+              child: const AppText('+ Trim Paths',
                 style: TextStyle(fontSize: 12, color: AmColors.accent),
               ),
             ),
@@ -5504,16 +5441,14 @@ class _ShapeOperators extends ConsumerWidget {
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
               onPressed: () =>
                   controller.addShapeOperator(layerId, repeater: true),
-              child: const Text(
-                '+ Repeater',
+              child: const AppText('+ Repeater',
                 style: TextStyle(fontSize: 12, color: AmColors.accent),
               ),
             ),
             CupertinoButton(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
               onPressed: () => _pickMorphTarget(context, ref),
-              child: const Text(
-                '+ Morfar',
+              child: const AppText('+ Morfar',
                 style: TextStyle(fontSize: 12, color: AmColors.accent),
               ),
             ),
@@ -5612,8 +5547,7 @@ class _ShapeOperators extends ConsumerWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'Morfar para...',
+              const AppText('Morfar para...',
                 style: TextStyle(
                   fontSize: 17,
                   fontWeight: FontWeight.w700,
@@ -5621,8 +5555,7 @@ class _ShapeOperators extends ConsumerWidget {
                 ),
               ),
               const SizedBox(height: 6),
-              const Text(
-                'A forma atual vira a origem; anime o Progresso com '
+              const AppText('A forma atual vira a origem; anime o Progresso com '
                 'keyframes para ver a transformacao.',
                 style: TextStyle(fontSize: 12, color: AmColors.muted),
               ),
@@ -5713,8 +5646,7 @@ Future<void> showExtrudeSheet(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Extrude 3D',
+                const AppText('Extrude 3D',
                   style: TextStyle(
                     fontSize: 17,
                     fontWeight: FontWeight.w700,
@@ -5722,7 +5654,7 @@ Future<void> showExtrudeSheet(
                   ),
                 ),
                 const SizedBox(height: 6),
-                Text(
+                AppText(
                   inclinada
                       ? 'Espessura da camada. Gire em X ou Y para ver a lateral.'
                       : 'A espessura so aparece com a camada girada em X ou Y (Mover e transf. > Rotacao 3D).',
@@ -5733,8 +5665,7 @@ Future<void> showExtrudeSheet(
                   children: [
                     const SizedBox(
                       width: 86,
-                      child: Text(
-                        'Espessura',
+                      child: AppText('Espessura',
                         style: TextStyle(fontSize: 13, color: AmColors.muted),
                       ),
                     ),
@@ -5753,7 +5684,7 @@ Future<void> showExtrudeSheet(
                     ),
                     SizedBox(
                       width: 56,
-                      child: Text(
+                      child: AppText(
                         amNumber(atual, 0),
                         textAlign: TextAlign.center,
                         style: const TextStyle(
@@ -5785,7 +5716,7 @@ Future<void> showExtrudeSheet(
                                 : AmColors.chip,
                             borderRadius: BorderRadius.circular(9),
                           ),
-                          child: Text(
+                          child: AppText(
                             v == 0 ? 'Desligado' : amNumber(v, 0),
                             style: const TextStyle(
                               fontSize: 12,
@@ -5849,10 +5780,10 @@ Future<void> _escolherModelo3D(
     final segue = await showCupertinoDialog<bool>(
       context: context,
       builder: (c) => CupertinoAlertDialog(
-        title: const Text('Modelo pesado'),
+        title: const AppText('Modelo pesado'),
         content: Padding(
           padding: const EdgeInsets.only(top: 8),
-          child: Text(
+          child: AppText(
             '${resultado.faceCount} faces'
             '${resultado.truncated ? ' (o app usa as primeiras $kMeshFacesMax)' : ''}. '
             'Modelos assim podem travar em celulares fracos; em aparelhos '
@@ -5867,7 +5798,7 @@ Future<void> _escolherModelo3D(
           CupertinoDialogAction(
             isDefaultAction: true,
             onPressed: () => Navigator.of(c).pop(true),
-            child: const Text('Importar'),
+            child: const AppText('Importar'),
           ),
         ],
       ),
@@ -5888,16 +5819,16 @@ Future<void> _avisoModelo(
   await showCupertinoDialog<void>(
     context: context,
     builder: (c) => CupertinoAlertDialog(
-      title: Text(titulo),
+      title: AppText(titulo),
       content: Padding(
         padding: const EdgeInsets.only(top: 8),
-        child: Text(texto),
+        child: AppText(texto),
       ),
       actions: [
         CupertinoDialogAction(
           isDefaultAction: true,
           onPressed: () => Navigator.of(c).pop(),
-          child: const Text('OK'),
+          child: const AppText('OK'),
         ),
       ],
     ),

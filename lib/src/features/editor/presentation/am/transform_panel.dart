@@ -130,28 +130,28 @@ class _TransformPanelState extends ConsumerState<TransformPanel> {
         CheckedPopupMenuItem(
           value: '3d',
           checked: layer.is3D,
-          child: const Text('Transformação 3D'),
+          child: const AppText('Transformação 3D'),
         ),
         if (widget.tool == TransformTool.position)
           PopupMenuItem(
             value: 'link',
-            child: Text(linked ? 'Desvincular posição' : 'Vincular posição'),
+            child: AppText(linked ? 'Desvincular posição' : 'Vincular posição'),
           ),
         CheckedPopupMenuItem(
           value: 'auto',
           checked: ref.read(autoKeyframeProvider),
-          child: const Text('Auto-key'),
+          child: const AppText('Auto-key'),
         ),
         const PopupMenuItem(
           value: 'previous',
-          child: Text('Keyframe anterior'),
+          child: AppText('Keyframe anterior'),
         ),
-        const PopupMenuItem(value: 'next', child: Text('Próximo keyframe')),
-        const PopupMenuItem(value: 'reset', child: Text('Resetar propriedade')),
+        const PopupMenuItem(value: 'next', child: AppText('Próximo keyframe')),
+        const PopupMenuItem(value: 'reset', child: AppText('Resetar propriedade')),
         CheckedPopupMenuItem(
           value: 'pivot',
           checked: widget.tool == TransformTool.pivot,
-          child: const Text('Editar pivô'),
+          child: const AppText('Editar pivô'),
         ),
         CheckedPopupMenuItem(
           value: 'opacity',
@@ -410,8 +410,7 @@ class _PositionControlState extends ConsumerState<_PositionControl> {
           children: [
             const Padding(
               padding: EdgeInsets.all(14),
-              child: Text(
-                'Seguir a posicao de...',
+              child: AppText('Seguir a posicao de...',
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w700,
@@ -422,7 +421,7 @@ class _PositionControlState extends ConsumerState<_PositionControl> {
             for (final other in project.layers)
               if (other.id != layer.id)
                 ListTile(
-                  title: Text(
+                  title: AppText(
                     other.name,
                     style: const TextStyle(color: AmColors.text),
                   ),
@@ -495,6 +494,42 @@ class _PositionControlState extends ConsumerState<_PositionControl> {
           onReset: () => controller.resetProp(layer.id, LayerProp.position),
         ),
         const SizedBox(height: 4),
+        // A REGUA DE PROFUNDIDADE VEM ANTES DA ALMOFADA. Ela ficava
+        // depois, abaixo da dobra num painel curto: "nao to sentindo o Z
+        // de profundidade" — porque o controle que da o Z nem aparecia
+        // sem rolar. Agora e a segunda coisa do painel quando o 3D esta
+        // ligado.
+        if (layer.is3D) ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 0, 4, 2),
+            child: Row(
+              children: [
+                const AppText(
+                  'Profundidade',
+                  style: TextStyle(fontSize: 11, color: AmColors.muted),
+                ),
+                const Spacer(),
+                AppText(
+                  '${z.round()}',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: AmColors.accent,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          AmTickRuler(
+            value: z,
+            min: -1000,
+            max: 4000,
+            unitsPerPixel: 4,
+            height: 34,
+            onChanged: (v) => controller.editPositionZ(layer.id, t, v),
+          ),
+          const SizedBox(height: 4),
+        ],
         Expanded(
           child: AreaDeArrasto(
             key: const ValueKey('position-drag-pad'),
@@ -508,8 +543,7 @@ class _PositionControlState extends ConsumerState<_PositionControl> {
             child: Container(
               decoration: BoxDecoration(color: AmColors.panel),
               child: const Center(
-                child: Text(
-                  'Deslize aqui para mover a camada',
+                child: AppText('Deslize aqui para mover a camada',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 12,
@@ -521,15 +555,6 @@ class _PositionControlState extends ConsumerState<_PositionControl> {
             ),
           ),
         ),
-        if (layer.is3D)
-          AmTickRuler(
-            value: z,
-            min: -1000,
-            max: 4000,
-            unitsPerPixel: 4,
-            height: 34,
-            onChanged: (v) => controller.editPositionZ(layer.id, t, v),
-          ),
         const SizedBox(height: 4),
       ],
     );
@@ -579,8 +604,7 @@ class _PivotControl extends ConsumerWidget {
                       color: AmColors.muted,
                     ),
                     SizedBox(height: 6),
-                    Text(
-                      'Arraste o ponto de giro\n(toque duplo = centro)',
+                    AppText('Arraste o ponto de giro\n(toque duplo = centro)',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 12,
@@ -722,7 +746,7 @@ class _RotationControlState extends ConsumerState<_RotationControl> {
                     color: AmColors.chip,
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Text(
+                  child: AppText(
                     turns == 0
                         ? '${amNumber(deg, 0)}°'
                         : '${amNumber(deg % 360, 0)}°, ${turns}x',
@@ -811,8 +835,7 @@ class _RotationControlState extends ConsumerState<_RotationControl> {
           children: [
             const SizedBox(
               width: 44,
-              child: Text(
-                '3D X',
+              child: AppText('3D X',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 12, color: AmColors.muted),
               ),
@@ -829,7 +852,7 @@ class _RotationControlState extends ConsumerState<_RotationControl> {
             ),
             SizedBox(
               width: 62,
-              child: Text(
+              child: AppText(
                 '${amNumber(rx, 0)}°',
                 textAlign: TextAlign.center,
                 style: const TextStyle(fontSize: 13, color: AmColors.accent),
@@ -842,8 +865,7 @@ class _RotationControlState extends ConsumerState<_RotationControl> {
           children: [
             const SizedBox(
               width: 44,
-              child: Text(
-                '3D Y',
+              child: AppText('3D Y',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 12, color: AmColors.muted),
               ),
@@ -861,7 +883,7 @@ class _RotationControlState extends ConsumerState<_RotationControl> {
             ),
             SizedBox(
               width: 62,
-              child: Text(
+              child: AppText(
                 '${amNumber(ry, 0)}°',
                 textAlign: TextAlign.center,
                 style: const TextStyle(fontSize: 13, color: AmColors.accent),

@@ -4,6 +4,7 @@ import 'package:flutter/scheduler.dart';
 
 import '../../application/perfil3d.dart';
 import '../../application/preview_stats.dart';
+import 'package:aurea/src/core/l10n/app_language.dart';
 
 /// O PAINEL DE DESEMPENHO, para builds de desenvolvimento.
 ///
@@ -139,7 +140,7 @@ class _HudDesempenhoState extends State<HudDesempenho> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   for (final l in linhas)
-                    Text(
+                    AppText(
                       l,
                       style: TextStyle(
                         fontSize: 10,

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/storage/prefs.dart';
 import '../am/am_colors.dart';
+import 'package:aurea/src/core/l10n/app_language.dart';
 
 /// AS QUATRO DICAS DE PRIMEIRO USO (Fase 6): o que o editor precisa que a
 /// pessoa saiba, e nada mais. Aparecem uma vez, no alto do preview, e
@@ -79,7 +80,7 @@ class _OnboardingCoachState extends State<OnboardingCoach> {
           Flexible(
             child: IgnorePointer(
               child: SingleChildScrollView(
-                child: Text(
+                child: AppText(
                   dicasDoEditor[_i],
                   style: const TextStyle(
                     fontSize: 12.5,
@@ -94,7 +95,7 @@ class _OnboardingCoachState extends State<OnboardingCoach> {
           Row(
             children: [
               IgnorePointer(
-                child: Text(
+                child: AppText(
                   '${_i + 1}/${dicasDoEditor.length}',
                   style: const TextStyle(fontSize: 11, color: AmColors.muted),
                 ),
@@ -106,8 +107,7 @@ class _OnboardingCoachState extends State<OnboardingCoach> {
                   padding: const EdgeInsets.symmetric(horizontal: 10),
                   minimumSize: const Size(0, 30),
                   onPressed: () => setState(() => _i++),
-                  child: const Text(
-                    'Próxima',
+                  child: const AppText('Próxima',
                     style: TextStyle(fontSize: 13, color: AmColors.text),
                   ),
                 ),
@@ -116,8 +116,7 @@ class _OnboardingCoachState extends State<OnboardingCoach> {
                 padding: const EdgeInsets.symmetric(horizontal: 10),
                 minimumSize: const Size(0, 30),
                 onPressed: widget.onFechar,
-                child: const Text(
-                  'Entendi',
+                child: const AppText('Entendi',
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
@@ -147,8 +146,7 @@ class DicaDoPalco extends StatelessWidget {
     child: Center(
       child: Padding(
         padding: EdgeInsets.symmetric(horizontal: 16),
-        child: Text(
-          'Toque num objeto na tela para editar.',
+        child: AppText('Toque num objeto na tela para editar.',
           key: ValueKey('dica-palco'),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,

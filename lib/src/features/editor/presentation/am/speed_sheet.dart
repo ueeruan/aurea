@@ -72,7 +72,7 @@ Future<void> showSpeedSheet(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
+                AppText(
                   '${speed.toStringAsFixed(2)}x · ${formatTime(layer.duration)}',
                   style: const TextStyle(fontSize: 12, color: AmColors.accent),
                 ),
@@ -105,8 +105,7 @@ Future<void> showSpeedSheet(
                   children: [
                     const SizedBox(
                       width: 62,
-                      child: Text(
-                        'Ajuste',
+                      child: AppText('Ajuste',
                         style: TextStyle(fontSize: 12, color: AmColors.muted),
                       ),
                     ),
@@ -122,7 +121,7 @@ Future<void> showSpeedSheet(
                     ),
                     SizedBox(
                       width: 58,
-                      child: Text(
+                      child: AppText(
                         '${speed.toStringAsFixed(2)}x',
                         textAlign: TextAlign.right,
                         style: const TextStyle(
@@ -171,8 +170,7 @@ Future<void> showSpeedSheet(
                   // lenta, e so na exportacao — o preview mostra o quadro
                   // mais proximo. Dito aqui, para ninguem procurar o
                   // efeito no palco.
-                  const Text(
-                    'Interpolação de quadros (câmera lenta, na exportação)',
+                  const AppText('Interpolação de quadros (câmera lenta, na exportação)',
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w700,
@@ -199,8 +197,7 @@ Future<void> showSpeedSheet(
                 ],
                 if (video != null && remap != null) ...[
                   const SizedBox(height: 14),
-                  const Text(
-                    'Avancado · keyframes de Time Remap',
+                  const AppText('Avancado · keyframes de Time Remap',
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w700,
@@ -208,8 +205,7 @@ Future<void> showSpeedSheet(
                     ),
                   ),
                   const SizedBox(height: 4),
-                  Text(
-                    'Mover um valor muda qual instante da fonte aparece. '
+                  AppText('Mover um valor muda qual instante da fonte aparece. '
                     'Os diamantes tambem ficam visiveis na timeline.',
                     style: TextStyle(
                       fontSize: 10,
@@ -223,8 +219,7 @@ Future<void> showSpeedSheet(
                     child: ElevatedButton.icon(
                       key: const ValueKey('abrir-curva-time-remap'),
                       icon: const Icon(Icons.show_chart_rounded, size: 18),
-                      label: const Text(
-                        'ABRIR EDITOR DE CURVA BÉZIER',
+                      label: const AppText('ABRIR EDITOR DE CURVA BÉZIER',
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.bold,
@@ -420,7 +415,7 @@ class _RemapRow extends StatelessWidget {
     children: [
       SizedBox(
         width: 54,
-        child: Text(
+        child: AppText(
           formatTime(time),
           style: const TextStyle(fontSize: 10, color: AmColors.muted),
         ),
@@ -437,7 +432,7 @@ class _RemapRow extends StatelessWidget {
       ),
       SizedBox(
         width: 54,
-        child: Text(
+        child: AppText(
           '${value.toStringAsFixed(2)} s',
           textAlign: TextAlign.right,
           style: const TextStyle(fontSize: 10, color: AmColors.text),

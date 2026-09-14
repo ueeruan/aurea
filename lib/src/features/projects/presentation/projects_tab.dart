@@ -199,11 +199,18 @@ class ProjectsTab extends ConsumerWidget {
   /// entender por que.
   Future<void> _openTemplate(BuildContext context, WidgetRef ref) async {
     final r = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: const ['json', 'aurea'],
+      type: Platform.isIOS ? FileType.any : FileType.custom,
+      allowedExtensions: Platform.isIOS ? null : const ['json', 'aurea'],
     );
     final caminho = r?.files.single.path;
     if (caminho == null || !context.mounted) return;
+    final ext = caminho.split('.').last.toLowerCase();
+    if (ext != 'aurea' && ext != 'json') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: AppText('Escolha um arquivo .aurea')),
+      );
+      return;
+    }
 
     TemplatePack? pack;
     try {
@@ -377,12 +384,20 @@ class ProjectsTab extends ConsumerWidget {
     final apaga = await showCupertinoModalPopup<bool>(
       context: context,
       builder: (c) => CupertinoActionSheet(
-        title: AppText(project.name),
+        title: Text(project.name),
         actions: [
           CupertinoActionSheetAction(
             isDestructiveAction: true,
             onPressed: () => Navigator.of(c).pop(true),
             child: const AppText('Excluir projeto'),
+          ),
+          CupertinoActionSheetAction(
+            isDestructiveAction: true,
+            onPressed: () {
+              Navigator.of(c).pop(false);
+              apagarTodosOsProjetos(context, ref);
+            },
+            child: const AppText('Apagar todos os projetos'),
           ),
         ],
         cancelButton: CupertinoActionSheetAction(
@@ -428,7 +443,7 @@ class ProjectsTab extends ConsumerWidget {
     final acao = await showCupertinoModalPopup<String>(
       context: context,
       builder: (c) => CupertinoActionSheet(
-        title: AppText(project.name),
+        title: Text(project.name),
         message: AppText(fichaDoProjeto(project)),
         actions: [
           for (final (rotulo, chave) in const [
@@ -446,6 +461,14 @@ class ProjectsTab extends ConsumerWidget {
             isDestructiveAction: true,
             onPressed: () => Navigator.of(c).pop('excluir'),
             child: const AppText('Excluir projeto'),
+          ),
+          CupertinoActionSheetAction(
+            isDestructiveAction: true,
+            onPressed: () {
+              Navigator.of(c).pop(false);
+              apagarTodosOsProjetos(context, ref);
+            },
+            child: const AppText('Apagar todos os projetos'),
           ),
         ],
         cancelButton: CupertinoActionSheetAction(
@@ -867,7 +890,7 @@ class _LinhaProjeto extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  AppText(
+                  Text(
                     project.name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -1199,5 +1222,35 @@ class _SpotlightComunidade extends ConsumerWidget {
         ),
       ),
     );
+  }
+}
+
+/// Confirma e apaga TODOS os projetos e miniaturas.
+Future<void> apagarTodosOsProjetos(BuildContext context, WidgetRef ref) async {
+  final total = ref.read(projectsControllerProvider).length;
+  if (total == 0) return;
+  final ok = await showCupertinoDialog<bool>(
+    context: context,
+    builder: (c) => CupertinoAlertDialog(
+      title: const AppText('Apagar todos os projetos?'),
+      content: Text('$total projeto(s) serao apagados. Isso nao pode ser desfeito.'),
+      actions: [
+        CupertinoDialogAction(
+          onPressed: () => Navigator.of(c).pop(false),
+          child: const AppText('Cancelar'),
+        ),
+        CupertinoDialogAction(
+          isDestructiveAction: true,
+          onPressed: () => Navigator.of(c).pop(true),
+          child: const AppText('Apagar todos'),
+        ),
+      ],
+    ),
+  );
+  if (ok != true) return;
+  final ids = [for (final p in ref.read(projectsControllerProvider)) p.id];
+  ref.read(projectsControllerProvider.notifier).removeAll();
+  for (final id in ids) {
+    ThumbnailService.instance.delete(id);
   }
 }

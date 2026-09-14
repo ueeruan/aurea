@@ -75,6 +75,22 @@ class ProjectsController extends Notifier<List<VideoProject>> {
     ref.read(projectRepositoryProvider).save(project);
   }
 
+  /// APAGA TODOS OS PROJETOS (com confirmacao na interface).
+  void removeAll() {
+    _ensureLifecycle();
+    final ids = [for (final p in state) p.id];
+    for (final t in _saveTimers.values) {
+      t.cancel();
+    }
+    _saveTimers.clear();
+    _pending.clear();
+    state = const [];
+    final repo = ref.read(projectRepositoryProvider);
+    for (final id in ids) {
+      repo.delete(id);
+    }
+  }
+
   void remove(String id) {
     _ensureLifecycle();
     _pending.remove(id);

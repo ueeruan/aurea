@@ -51,6 +51,9 @@ import '../../domain/pixel_effect.dart';
 import '../../domain/bloom.dart';
 import '../../domain/coloring.dart';
 import '../../domain/one_frame.dart';
+import '../../domain/time_slice.dart';
+import '../../application/quadros_de_video.dart';
+import '../../application/proxy_service.dart';
 import '../../domain/color_space.dart';
 import 'mask_node_editor.dart';
 import 'world3d_painter.dart';
@@ -1176,11 +1179,17 @@ class CompositionView extends ConsumerStatefulWidget {
     required this.selectedId,
     this.exportFrames,
     this.exporting = false,
+    this.quadroDeVideoEm,
   });
 
   final ValueListenable<Duration> time;
   final VideoLayerManager videos;
   final String? selectedId;
+
+  /// Exportando: o quadro de uma camada de video em OUTRO instante da
+  /// composicao — faixas do Time Slice, degrau do Posterize Time, copias
+  /// do Echo. A exportacao decodifica esses quadros antes de desenhar.
+  final ui.Image? Function(VideoLayer layer, Duration tempo)? quadroDeVideoEm;
 
   /// Na exportacao, o quadro ja decodificado de cada camada de video —
   /// textura de plataforma nao entra em `toImage`, entao o video chega
@@ -1219,6 +1228,90 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
   Map<String, ui.Image>? get exportFrames => widget.exportFrames;
   bool get exporting => widget.exporting;
 
+  /// O instante que o relogio mostra agora. Camada montada em OUTRO
+  /// instante (e com [_pedindoQuadros]) pede o quadro de video daquele
+  /// instante, e nao o do tocador.
+  Duration _tempoVivo = Duration.zero;
+  bool _pedindoQuadros = false;
+
+  /// Monta [f] pedindo os quadros de video do instante em que as camadas
+  /// forem montadas (Time Slice, Posterize Time, Echo).
+  T _emOutroTempo<T>(T Function() f) {
+    final antes = _pedindoQuadros;
+    _pedindoQuadros = true;
+    try {
+      return f();
+    } finally {
+      _pedindoQuadros = antes;
+    }
+  }
+
+  /// TIME SLICE: [atual] e a camada (ou o composto abaixo da camada de
+  /// ajuste) no instante [t]; [emTempo] monta o mesmo conteudo noutro
+  /// instante da composicao. Faixas com o mesmo atraso dividem a mesma
+  /// montagem.
+  Widget _timeSlice(
+    VideoProject project,
+    EffectInstance efeito,
+    Layer layer,
+    Duration t,
+    Widget atual,
+    Widget Function(Duration tempo) emTempo,
+  ) {
+    final local = layer.localTime(t);
+    final mistura = (efeito.paramAt('mix', local) / 100).clamp(0.0, 1.0);
+    if (mistura <= .001) return atual;
+    final atrasos = atrasosDoEfeito(efeito, local);
+    final n = atrasos.length;
+    final tamanho = Size(
+      project.outputWidth.toDouble(),
+      project.outputHeight.toDouble(),
+    );
+    final angulo = efeito.paramAt('angle', local);
+    final vao = pxAt1080(
+      efeito.paramAt('gap', local).clamp(0.0, 10.0),
+      fxWidth,
+      fxHeight,
+    );
+    final porAtraso = <int, Widget>{};
+    final faixas = <Widget>[
+      for (var k = 0; k < n; k++)
+        Positioned.fill(
+          child: ClipPath(
+            clipper: _RecorteDaFaixa(
+              faixaDoTimeSlice(
+                tamanho,
+                anguloGraus: angulo,
+                k: k,
+                n: n,
+                vao: vao,
+              ),
+            ),
+            child: porAtraso[atrasos[k]] ??= Stack(
+              clipBehavior: Clip.none,
+              children: [
+                atrasos[k] == 0
+                    ? atual
+                    : emTempo(
+                        layer.startTime +
+                            localDeslocado(layer, local, atrasos[k], fxFps),
+                      ),
+              ],
+            ),
+          ),
+        ),
+    ];
+    final fatiado = Stack(clipBehavior: Clip.none, children: faixas);
+    if (mistura >= .999) return fatiado;
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        atual,
+        Positioned.fill(child: Opacity(opacity: mistura, child: fatiado)),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final project = ref.watch(projetoVisivelProvider);
@@ -1231,6 +1324,7 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
       builder: (context, _, _) => ValueListenableBuilder<Duration>(
         valueListenable: time,
         builder: (context, t, _) {
+          _tempoVivo = t;
           if (exporting) {
             return Stack(
               clipBehavior: Clip.none,
@@ -1368,6 +1462,54 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
           clipBehavior: Clip.none,
           children: List<Widget>.of(children),
         );
+        // TEMPO DO QUE ESTA EMBAIXO: Posterize Time e Time Slice numa
+        // camada de ajuste remontam as camadas de baixo em outros
+        // instantes — e assim que o edit fatia o clipe inteiro.
+        final abaixo = layers.sublist(layers.indexOf(layer) + 1);
+        var tAjuste = t;
+        final posterAjuste = efeitoDeTempo(layer, EffectType.posterizeTime);
+        if (posterAjuste != null) {
+          final degrau = localPosterizado(
+            local,
+            posterAjuste.paramAt('rate', local),
+            posterAjuste.paramAt('phase', local),
+          );
+          if (degrau != local) {
+            tAjuste = layer.startTime + degrau;
+            adjusted = Stack(
+              clipBehavior: Clip.none,
+              children: _emOutroTempo(
+                () => _buildLayers(
+                  project,
+                  abaixo,
+                  tAjuste,
+                  resolveLinks: resolveLinks,
+                ),
+              ),
+            );
+          }
+        }
+        final fatiasAjuste = efeitoDeTempo(layer, EffectType.timeSlice);
+        if (fatiasAjuste != null) {
+          adjusted = _timeSlice(
+            project,
+            fatiasAjuste,
+            layer,
+            tAjuste,
+            adjusted,
+            (tempo) => Stack(
+              clipBehavior: Clip.none,
+              children: _emOutroTempo(
+                () => _buildLayers(
+                  project,
+                  abaixo,
+                  tempo,
+                  resolveLinks: resolveLinks,
+                ),
+              ),
+            ),
+          );
+        }
         adjusted = _applyEffects(layer.effects, adjusted, local);
         if (layer.masks.isNotEmpty) {
           final pos = layer.position.valueAt(local);
@@ -1445,13 +1587,15 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
         for (var i = n; i >= 1; i--) {
           final et = t - Duration(microseconds: gapUs * i);
           if (!layer.activeAt(et)) continue;
-          Widget copy = _buildLayer(
-            project,
-            layer,
-            et,
-            resolveLinks,
-            rig: rigMembers,
-            opacityMul: math.pow(decay, i).toDouble(),
+          Widget copy = _emOutroTempo(
+            () => _buildLayer(
+              project,
+              layer,
+              et,
+              resolveLinks,
+              rig: rigMembers,
+              opacityMul: math.pow(decay, i).toDouble(),
+            ),
           );
           // Rastro COLORIDO (item 16): cada copia com matiz proprio.
           if (hueStep > 0.5) {
@@ -1476,16 +1620,47 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
         if (e.enabled && e.type == EffectType.forceMotionBlur) forceMb = e;
       }
 
-      var w = forceMb == null
-          ? _buildLayer(project, layer, t, resolveLinks, rig: rigMembers)
+      // POSTERIZE TIME: a camada INTEIRA (conteudo, efeitos e
+      // transformacao) anda em degraus, como no After Effects.
+      var tCamada = t;
+      final posterFx = efeitoDeTempo(layer, EffectType.posterizeTime);
+      if (posterFx != null) {
+        final localCamada = layer.localTime(t);
+        tCamada =
+            layer.startTime +
+            localPosterizado(
+              localCamada,
+              posterFx.paramAt('rate', localCamada),
+              posterFx.paramAt('phase', localCamada),
+            );
+      }
+      Widget montar(Duration tempo) => forceMb == null
+          ? _buildLayer(project, layer, tempo, resolveLinks, rig: rigMembers)
           : _forceMotionBlur(
               project,
               layer,
-              t,
+              tempo,
               forceMb,
               resolveLinks,
               rigMembers,
             );
+      var w = tCamada == t ? montar(t) : _emOutroTempo(() => montar(tCamada));
+
+      // TIME SLICE na propria camada: faixas da camada inteira em outros
+      // instantes, recortadas no espaco da composicao.
+      final fatiasFx = efeitoDeTempo(layer, EffectType.timeSlice);
+      if (fatiasFx != null) {
+        w = Positioned.fill(
+          child: _timeSlice(
+            project,
+            fatiasFx,
+            layer,
+            tCamada,
+            Stack(clipBehavior: Clip.none, children: [w]),
+            (tempo) => _emOutroTempo(() => montar(tempo)),
+          ),
+        );
+      }
 
       // Uma camada curta pode participar de duas janelas ao mesmo tempo
       // (entra de A e ja sai para C). Cada contexto precisa ser composto;
@@ -2132,6 +2307,8 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
       project: project,
       exportFrames: exportFrames,
       exporting: exporting,
+      tempoAlheio: _pedindoQuadros && t != _tempoVivo ? t : null,
+      quadroEm: widget.quadroDeVideoEm,
       compWidth: project.outputWidth.toDouble(),
       videos: videos,
       localTime: contentLocal,
@@ -4939,6 +5116,10 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
         // instante da camada foi montado, la em cima.
         case EffectType.opticalFlow:
         case EffectType.timeRemap:
+        // TIME SLICE e POSTERIZE TIME remontam a camada inteira em outros
+        // instantes: quem os aplica e o compositor (_buildLayers).
+        case EffectType.timeSlice:
+        case EffectType.posterizeTime:
         // FORCE MOTION BLUR nao acontece aqui: ele precisa re-renderizar
         // a camada em outros instantes, e a pilha de efeitos so recebe o
         // widget ja pronto. Quem o aplica e o compositor.
@@ -5464,6 +5645,8 @@ class _LayerContent extends StatelessWidget {
   const _LayerContent({
     this.exportFrames,
     required this.exporting,
+    this.tempoAlheio,
+    this.quadroEm,
     required this.layer,
     required this.project,
     required this.compWidth,
@@ -5487,6 +5670,67 @@ class _LayerContent extends StatelessWidget {
   /// Quadro ja decodificado por camada de video (so na exportacao).
   final Map<String, ui.Image>? exportFrames;
   final bool exporting;
+
+  /// Instante da composicao em que esta camada foi montada, quando e
+  /// OUTRO que o do relogio e o efeito pediu o quadro daquele instante.
+  final Duration? tempoAlheio;
+
+  /// Exportando: o quadro de video de outro instante.
+  final ui.Image? Function(VideoLayer layer, Duration tempo)? quadroEm;
+
+  Widget _quadroFixo(ui.Image img) => SizedBox(
+    width: compWidth,
+    height: compWidth * img.height / img.width,
+    child: RawImage(
+      image: img,
+      fit: BoxFit.contain,
+      filterQuality: FilterQuality.medium,
+    ),
+  );
+
+  /// PREVIA de outro instante: o quadro extraido do arquivo, se ja veio;
+  /// senao o tocador ao vivo, e a extracao e pedida.
+  Widget _videoDeOutroTempo(VideoLayer l, Duration tempo) =>
+      ValueListenableBuilder<int>(
+        valueListenable: QuadrosDeVideo.instance.revision,
+        builder: (context, _, _) {
+          final arquivo = ProxyService.instance.playbackPath(l.sourcePath);
+          final fonte = videoAbsoluteSourceTimeAt(l, l.localTime(tempo));
+          final img = QuadrosDeVideo.instance.quadro(arquivo, fonte);
+          if (img != null) return _quadroFixo(img);
+          QuadrosDeVideo.instance.preparar(
+            arquivo,
+            l.sourceOffset,
+            l.sourceOffset + videoSourceSpan(l),
+          );
+          return _videoAoVivo(l);
+        },
+      );
+
+  Widget _videoAoVivo(VideoLayer l) => RepaintBoundary(
+    child: ValueListenableBuilder<int>(
+      valueListenable: videos.revision,
+      builder: (context, _, _) {
+        final controller = videos.controllerFor(l.id);
+        if (controller == null || !controller.value.isInitialized) {
+          return SizedBox(
+            width: compWidth,
+            height: compWidth * 9 / 16,
+            child: const Center(
+              child: Icon(CupertinoIcons.film, size: 60, color: Colors.white24),
+            ),
+          );
+        }
+        final rawRatio = controller.value.aspectRatio;
+        final ratio = rawRatio > 0 && rawRatio.isFinite ? rawRatio : (16 / 9);
+        return SizedBox(
+          width: compWidth,
+          height: compWidth / ratio,
+          child: VideoPlayer(controller),
+        );
+      },
+    ),
+  );
 
   /// Recursao do precomp: constroi as camadas filhas no tempo local.
   final List<Widget> Function(List<Layer> layers, Duration t) buildChildren;
@@ -5634,6 +5878,15 @@ class _LayerContent extends StatelessWidget {
       ),
       // EXPORTANDO: o quadro vem decodificado do disco. A textura do
       // player nunca entra num `toImage`, entao o video sairia preto.
+      // OUTRO INSTANTE, EXPORTANDO: o quadro decodificado para ele.
+      VideoLayer l
+          when exporting &&
+              tempoAlheio != null &&
+              quadroEm?.call(l, tempoAlheio!) != null =>
+        _quadroFixo(quadroEm!(l, tempoAlheio!)!),
+      // OUTRO INSTANTE, NA PREVIA: o quadro extraido (ou o ao vivo).
+      VideoLayer l when !exporting && tempoAlheio != null =>
+        _videoDeOutroTempo(l, tempoAlheio!),
       VideoLayer l when exportFrames != null && exportFrames![l.id] != null =>
         SizedBox(
           width: compWidth,
@@ -5647,36 +5900,7 @@ class _LayerContent extends StatelessWidget {
             filterQuality: FilterQuality.medium,
           ),
         ),
-      VideoLayer l => RepaintBoundary(
-        child: ValueListenableBuilder<int>(
-          valueListenable: videos.revision,
-          builder: (context, _, _) {
-            final controller = videos.controllerFor(l.id);
-            if (controller == null || !controller.value.isInitialized) {
-              return SizedBox(
-                width: compWidth,
-                height: compWidth * 9 / 16,
-                child: const Center(
-                  child: Icon(
-                    CupertinoIcons.film,
-                    size: 60,
-                    color: Colors.white24,
-                  ),
-                ),
-              );
-            }
-            final rawRatio = controller.value.aspectRatio;
-            final ratio = rawRatio > 0 && rawRatio.isFinite
-                ? rawRatio
-                : (16 / 9);
-            return SizedBox(
-              width: compWidth,
-              height: compWidth / ratio,
-              child: VideoPlayer(controller),
-            );
-          },
-        ),
-      ),
+      VideoLayer l => _videoAoVivo(l),
       AudioLayer _ => const SizedBox.shrink(),
       // OBJETO NULO: o quadrado tracejado com o X e uma AJUDA — existe
       // para se ver o que se esta arrastando. O comentario aqui sempre
@@ -5823,4 +6047,18 @@ class _ShapePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_ShapePainter old) => true;
+}
+
+/// O recorte de uma faixa do Time Slice: o poligono ja vem pronto, no
+/// espaco da composicao.
+class _RecorteDaFaixa extends CustomClipper<ui.Path> {
+  _RecorteDaFaixa(this.caminho);
+  final ui.Path caminho;
+
+  @override
+  ui.Path getClip(Size size) => caminho;
+
+  @override
+  bool shouldReclip(covariant _RecorteDaFaixa oldClipper) =>
+      !identical(oldClipper.caminho, caminho);
 }

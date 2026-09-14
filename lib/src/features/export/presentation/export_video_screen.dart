@@ -16,6 +16,7 @@ import '../../editor/application/texture_cache.dart';
 import '../../editor/application/video_layer_manager.dart';
 import '../../editor/domain/cut_ops.dart';
 import '../../editor/domain/layer.dart';
+import '../../editor/domain/time_slice.dart';
 import '../../../core/ui/am_colors.dart';
 import '../../editor/presentation/widgets/dither_layer.dart';
 import '../../editor/presentation/widgets/pixel_effect_engine.dart';
@@ -91,6 +92,11 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
   final Map<String, Duration> _inicioDosQuadros = {};
   final Map<String, ui.Image> _quadroAtual = {};
 
+  /// Quadros de video em OUTROS instantes da composicao (faixas do Time
+  /// Slice, degrau do Posterize Time, copias do Echo), por
+  /// `camada@indice`. Sem eles, cada faixa sairia com o mesmo quadro.
+  final Map<String, ui.Image> _quadrosExtras = {};
+
   @override
   void initState() {
     super.initState();
@@ -108,6 +114,9 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
   @override
   void dispose() {
     for (final img in _quadroAtual.values) {
+      img.dispose();
+    }
+    for (final img in _quadrosExtras.values) {
       img.dispose();
     }
     _engine?.cancel();
@@ -486,17 +495,7 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
         _quadroAtual.remove(l.id)?.dispose();
         continue;
       }
-      final transition = transitionContextAt(exportLayers, t);
-      final local = localTimeForCut(l, t, transition);
-      final source = videoAbsoluteSourceTimeAt(l, local);
-      final extractedFrom = _inicioDosQuadros[l.id] ?? l.sourceOffset;
-      // A MESMA TAXA DA EXTRACAO: com interpolacao ligada ha mais
-      // quadros no disco do que a composicao tem, e o indice segue a
-      // taxa em que eles foram escritos.
-      final taxa = _engine!.fpsDeExtracao(l);
-      final idx = ((source - extractedFrom).inMicroseconds * taxa / 1000000)
-          .floor()
-          .clamp(0, count - 1);
+      final idx = _indiceDoQuadro(l, t, exportLayers)!;
       final file = File('${dir.path}/${idx.toString().padLeft(6, '0')}.png');
       if (!file.existsSync()) continue;
 
@@ -507,6 +506,59 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
       codec.dispose();
       _quadroAtual[l.id] = frame.image;
     }
+
+    // OUTROS INSTANTES que este quadro vai pedir as camadas de video.
+    // Decodificados antes do desenho, e so os deste quadro ficam: um Time
+    // Slice de doze faixas anda um quadro por vez, entao quase todos
+    // sao reaproveitados do quadro anterior.
+    final extras = instantesDeOutroTempo(exportLayers, t, _engine!.fps);
+    final usados = <String>{};
+    for (final outro in extras) {
+      for (final l in videoLayers) {
+        if (!visibleForCut(exportLayers, l, outro)) continue;
+        final idx = _indiceDoQuadro(l, outro, exportLayers);
+        if (idx == null) continue;
+        final chave = '${l.id}@$idx';
+        usados.add(chave);
+        if (_quadrosExtras.containsKey(chave)) continue;
+        final file = File(
+          '${_pastas[l.id]!.path}/${idx.toString().padLeft(6, '0')}.png',
+        );
+        if (!file.existsSync()) continue;
+        final codec = await ui.instantiateImageCodec(await file.readAsBytes());
+        final frame = await codec.getNextFrame();
+        codec.dispose();
+        _quadrosExtras[chave] = frame.image;
+      }
+    }
+    for (final chave in _quadrosExtras.keys.toList()) {
+      if (!usados.contains(chave)) _quadrosExtras.remove(chave)?.dispose();
+    }
+  }
+
+  /// O indice do PNG que a camada [l] mostra no instante [t] da
+  /// composicao (null se a camada nao tem quadros extraidos).
+  int? _indiceDoQuadro(VideoLayer l, Duration t, List<Layer> layers) {
+    final count = _contagem[l.id] ?? 0;
+    if (_pastas[l.id] == null || count == 0) return null;
+    final transition = transitionContextAt(layers, t);
+    final local = localTimeForCut(l, t, transition);
+    final source = videoAbsoluteSourceTimeAt(l, local);
+    final extractedFrom = _inicioDosQuadros[l.id] ?? l.sourceOffset;
+    // A MESMA TAXA DA EXTRACAO: com interpolacao ligada ha mais quadros
+    // no disco do que a composicao tem, e o indice segue a taxa em que
+    // eles foram escritos.
+    final taxa = _engine!.fpsDeExtracao(l);
+    return ((source - extractedFrom).inMicroseconds * taxa / 1000000)
+        .floor()
+        .clamp(0, count - 1);
+  }
+
+  ui.Image? _quadroDeOutroTempo(VideoLayer l, Duration t) {
+    final engine = _engine;
+    if (engine == null) return null;
+    final idx = _indiceDoQuadro(l, t, engine.project.layers);
+    return idx == null ? null : _quadrosExtras['${l.id}@$idx'];
   }
 
   /// CAPTURA CRUA: os pixels como saem da composicao, sem compressao.
@@ -605,6 +657,7 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
                                 selectedId: null,
                                 exportFrames: _quadroAtual,
                                 exporting: true,
+                                quadroDeVideoEm: _quadroDeOutroTempo,
                               ),
                             ),
                           ),

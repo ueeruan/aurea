@@ -168,6 +168,8 @@ void main() {
         'findEdges',
         'selectiveColor',
         'sliceGlitch',
+        'timeSlice',
+        'posterizeTime',
       };
 
       final mortos = <String>[];

@@ -83,6 +83,9 @@ enum EffectType {
   zoomPunch,
   sliceGlitch,
   twitch,
+  // --- tempo da camada inteira (pesquisa 14/09/2026) ---
+  timeSlice,
+  posterizeTime,
 }
 
 /// O tipo a partir do IDENTIFICADOR estavel.
@@ -3213,6 +3216,108 @@ const effectSpecs = <EffectType, EffectSpec>{
         'enable_slide': 0,
         'enable_light': 0,
       }),
+    ],
+  ),
+
+  // TIME SLICE: faixas paralelas, cada uma a mesma camada num instante
+  // diferente. A distribuicao escada com o atraso maximo de (N-1)/2 e o
+  // S_TimeSlice (um quadro por faixa); linear com ease out e a transicao
+  // dos edits, em que as faixas do clipe chegam em sequencia.
+  EffectType.timeSlice: EffectSpec(
+    id: 'time_slice',
+    name: 'Time Slice',
+    category: 'Time',
+    cost: 3,
+    synonyms: [
+      'time slice',
+      'timeslice',
+      'fatias de tempo',
+      'slit scan',
+      'time displacement',
+      'deslocamento de tempo',
+      'faixas',
+      'hologram',
+      'split',
+    ],
+    params: {
+      'slices': EffectParam('Slices', 12, 1, 64),
+      'angle': EffectParam('Slice Direction', 90, 0, 360),
+      'distribution': EffectParam(
+        'Distribution',
+        0,
+        0,
+        4,
+        kind: ParamKind.choice,
+        options: ['Staircase', 'Linear', 'Center', 'Random', 'Wave'],
+      ),
+      'max_offset': EffectParam('Max Offset (Frames)', 6, -60, 60),
+      'curve': EffectParam(
+        'Curve',
+        0,
+        0,
+        3,
+        kind: ParamKind.choice,
+        options: ['Linear', 'Ease In', 'Ease Out', 'Ease In Out'],
+      ),
+      'cycles': EffectParam('Cycles', 1, .25, 8),
+      'phase': EffectParam('Phase', 0, 0, 1),
+      'sweep': EffectParam('Sweep', 0, -10, 10),
+      'frame_offset': EffectParam('Frame Offset', 0, -120, 120),
+      'gap': EffectParam('Gap', 0, 0, 10, relative: true),
+      'mix': EffectParam('Mix With Original', 100, 0, 100),
+      'seed': EffectParam('Seed', 0, 0, 1000, kind: ParamKind.seed),
+    },
+    montar: ['slices', 'max_offset', 'angle'],
+    presets: [
+      EffectPronto('Sapphire 12', {
+        'slices': 12,
+        'angle': 90,
+        'distribution': 0,
+        'max_offset': 6,
+      }),
+      EffectPronto('Vertical Slide', {
+        'slices': 16,
+        'angle': 0,
+        'distribution': 1,
+        'max_offset': -15,
+        'curve': 2,
+      }),
+      EffectPronto('Glitch Slices', {
+        'slices': 24,
+        'angle': 90,
+        'distribution': 3,
+        'max_offset': 8,
+        'seed': 7,
+        'gap': 1,
+      }),
+    ],
+  ),
+
+  // POSTERIZE TIME (Time Quantization no Alight Motion): a camada inteira
+  // anda em degraus de N quadros por segundo — o "12 fps de anime".
+  EffectType.posterizeTime: EffectSpec(
+    id: 'posterize_time',
+    name: 'Posterize Time',
+    category: 'Time',
+    synonyms: [
+      'posterize time',
+      'time quantization',
+      'quantizacao de tempo',
+      'stop motion',
+      'choppy',
+      'anime',
+      '12 fps',
+      'travado',
+    ],
+    params: {
+      'rate': EffectParam('Frame Rate', 12, 1, 60),
+      'phase': EffectParam('Phase', 0, 0, 1),
+    },
+    montar: ['rate'],
+    presets: [
+      EffectPronto('Anime 12 fps', {'rate': 12}),
+      EffectPronto('Stop Motion', {'rate': 8}),
+      EffectPronto('Choppy', {'rate': 4}),
     ],
   ),
 };

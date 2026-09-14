@@ -164,6 +164,8 @@ const quickStartSteps = <(String, String)>[
 ];
 
 String effectHelp(EffectType type) => switch (type) {
+  EffectType.timeSlice => 'Divide o quadro em faixas e cada faixa mostra a camada num instante diferente. Escada imita o S_TimeSlice; linear com ease out vira a transição de faixas dos edits. Numa camada de ajuste, fatia tudo que está embaixo.',
+  EffectType.posterizeTime => 'Faz a camada inteira andar em degraus de N quadros por segundo: 12 para o visual de anime, 8 para stop motion, 4 para travado. Numa camada de ajuste, quantiza tudo que está embaixo.',
   EffectType.flash => 'Clarão de um ou poucos quadros na batida: branco, somar, tela, exposição ou negativo. Segura N quadros e cai em M; o gatilho repete a cada N quadros ou dispara ao acaso. Evite flashes rápidos em conteúdo sensível.',
   EffectType.strobe => 'Pisca por quadros: a camada some, vira cor, negativo, estoura ou apaga. Periódico acende a cada período; aleatório sorteia blocos. Ótimo para texto piscando. Evite flashes rápidos em conteúdo sensível.',
   EffectType.zoomPunch => 'Zoom que entra seco na batida e volta ao tamanho normal: suave, exponencial ou com quique. Ataque, hold e soltura são contados em quadros; o rastro de zoom borra a entrada.',

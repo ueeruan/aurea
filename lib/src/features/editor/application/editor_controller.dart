@@ -4169,6 +4169,39 @@ class EditorController extends Notifier<VideoProject> {
     );
   }
 
+  /// O REVERSO VIRA CURVA.
+  ///
+  /// Com Reverso ligado o nucleo toca `span - curva(t)`, e o grafico de
+  /// tempo desenhava a curva guardada — de cabeca para baixo em relacao
+  /// ao que aparece na previa. O editor de curva mostra o que toca e, na
+  /// primeira edicao, grava isso: cada marca vira `span - valor` (com o
+  /// MESMO span do nucleo) e o Reverso desliga. Nenhum quadro muda.
+  ///
+  /// Sem remap, a reta da velocidade constante e espelhada do mesmo jeito.
+  /// Quem chama junta isto com a edicao no mesmo passo de desfazer
+  /// (gesto aberto ou [runAsOneUndo]).
+  void assarReversoNoTimeRemap(String id) {
+    final layer = _layer(id);
+    if (layer is! VideoLayer || !layer.reverse) return;
+    final span = videoSourceSpan(layer).inMicroseconds / 1000000.0;
+    final atual =
+        timeRemapTrackOf(layer) ??
+        AnimatedDouble(0, [
+          const Keyframe(time: Duration.zero, value: 0),
+          Keyframe(time: layer.duration, value: span),
+        ]);
+    final espelhada = AnimatedDouble(0, [
+      for (final k in atual.keyframes) k.copyWith(value: span - k.value),
+    ]);
+    _replace(
+      layer.copyLayer(
+        speed: 1,
+        reverse: false,
+        effects: replaceTimeRemap(layer, espelhada),
+      ),
+    );
+  }
+
   /// Liga o modo avancado com identidade linear ou volta a velocidade
   /// constante equivalente, sem alterar o quadro nem a duracao.
   void setClipInterpolacao(String id, InterpolacaoDeQuadros modo) {
@@ -4604,9 +4637,15 @@ class EditorController extends Notifier<VideoProject> {
             layer.sourceOffset.inMicroseconds / 1000000.0;
         track = track.withKeyframe(k.time, absolute, k.ease);
       }
+      // A MARCA QUE SOLTA O QUADRO LEVA A CURVA DO TRECHO SEGUINTE.
+      // Cravada sem easing, o primeiro trecho depois do congelamento
+      // virava linear e o resto da rampa deixava de ser preservado.
+      final saida = after.track.keyframes.isEmpty
+          ? Easing.linear
+          : after.track.keyframes.first.ease;
       track = track
           .withKeyframe(at, frozenValue)
-          .withKeyframe(at + duration, frozenValue);
+          .withKeyframe(at + duration, frozenValue, saida);
       for (final k in after.track.keyframes.skip(1)) {
         final absolute =
             after.sourceOffset.inMicroseconds / 1000000.0 +

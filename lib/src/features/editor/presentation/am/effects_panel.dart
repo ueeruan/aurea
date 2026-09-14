@@ -378,18 +378,11 @@ class _EffectsPanelState extends ConsumerState<EffectsPanel> {
                             ? TextButton.icon(
                                 icon: const Icon(Icons.timeline),
                                 label: const AppText('Editar curva de tempo'),
-                                onPressed: () => showModalBottomSheet<void>(
-                                  context: context,
-                                  isScrollControlled: true,
-                                  useSafeArea: true,
-                                  builder: (_) => SizedBox(
-                                    height:
-                                        MediaQuery.sizeOf(context).height * .8,
-                                    child: TimeRemapCurveEditor(
-                                      layerId: id,
-                                      playback: widget.playback,
-                                    ),
-                                  ),
+                                onPressed: () => showTimeRemapCurveSheet(
+                                  context,
+                                  ref,
+                                  id,
+                                  widget.playback,
                                 ),
                               )
                             : layer is VideoLayer &&

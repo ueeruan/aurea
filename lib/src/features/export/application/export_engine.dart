@@ -11,6 +11,7 @@ import 'package:ffmpeg_kit_flutter_new_full/ffprobe_kit.dart';
 import 'package:ffmpeg_kit_flutter_new_full/return_code.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../../editor/domain/aprimoramento_ia.dart';
 import '../../editor/domain/cut.dart';
 import '../../editor/domain/cut_ops.dart';
 import '../../editor/domain/audio_mix.dart';
@@ -22,6 +23,7 @@ import '../../editor/domain/plano_de_interpolacao.dart';
 import '../../editor/domain/video_project.dart';
 import '../domain/export_settings.dart';
 import '../domain/video_color.dart';
+import 'aprimoramento_export.dart';
 import 'interpolacao_rife.dart';
 import 'platform_encoder.dart';
 
@@ -67,6 +69,18 @@ class ExportEngine {
   /// Como os quadros a mais de cada clipe foram feitos, por id da camada:
   /// 'IA (RIFE)', 'quadros reais' ou 'FFmpeg: ' seguido do motivo.
   final Map<String, String> interpolacaoUsada = {};
+
+  /// Quem faz o APRIMORAMENTO POR IA dos clipes marcados (Android com o
+  /// motor). Nulo: o clipe sai sem ele, e [avisos] conta.
+  AprimoradorDeQuadros? aprimorador;
+
+  /// O plano de aprimoramento de cada clipe marcado, por id da camada.
+  final Map<String, PlanoDeAprimoramento> aprimoramentoUsado = {};
+
+  /// O QUE NAO SAIU COMO PEDIDO, em frases para o fim da exportacao (um
+  /// clipe com "Aprimorar com IA" num aparelho sem o motor, por exemplo).
+  /// Nunca silencioso.
+  final List<String> avisos = [];
 
   void cancel() {
     _cancelled = true;
@@ -141,6 +155,9 @@ class ExportEngine {
     if (l.speed != 1.0) return null;
     if (l.reverse || l.speedBlur || hasTimeRemap(l)) return null;
     if (l.transitionIn != null) return null;
+    // Aprimoramento por IA redesenha cada quadro: copiar o arquivo pularia
+    // o efeito em silencio.
+    if (l.aprimorar) return null;
 
     // Remux tambem copiaria o audio original sem estes ajustes.
     if (l.volume != 1.0 || !l.audio.isNeutral) return null;
@@ -224,6 +241,26 @@ class ExportEngine {
     final dur = (range.$2 - range.$1).inMicroseconds / 1000000.0;
 
     final info = await infoDoVideo(layer.sourcePath);
+    // APRIMORAMENTO POR IA: decide antes de extrair, porque muda a
+    // resolucao em que a fonte e lida (a propria, nao a da composicao).
+    final ia = aprimorador;
+    final planoIa = planoDeAprimoramento(
+      ligado: layer.aprimorar,
+      motorDisponivel: ia != null && ia.disponivel,
+      larguraDaFonte: info.cor.largura,
+      alturaDaFonte: info.cor.altura,
+      rotacao: info.rotacao,
+      larguraDaComposicao: width,
+      alturaDaComposicao: height,
+    );
+    if (layer.aprimorar) {
+      aprimoramentoUsado[layer.id] = planoIa;
+      if (!planoIa.aplica) {
+        avisos.add('"${layer.name}" saiu sem o aprimoramento por IA: '
+            '${planoIa.emPalavras}.');
+      }
+    }
+    final areaIa = planoIa.aplica ? areaMaximaDaEntradaDaIa : null;
     // QUADROS A MAIS quando o clipe anda mais devagar que a fonte e a
     // pessoa pediu interpolacao: os PNGs saem numa taxa maior, e quem
     // escolhe o quadro depois usa a mesma taxa — ver fpsDeExtracao. QUEM
@@ -238,6 +275,7 @@ class ExportEngine {
       fpsDaFonte: info.fps,
       rifeDisponivel: rife != null && rife.disponivel,
     );
+    var extraido = false;
     if (escolha.como == ComoInterpolar.rife) {
       try {
         await _extrairComRife(
@@ -249,12 +287,12 @@ class ExportEngine {
           taxa: taxa,
           taxaBase: escolha.taxaBase,
           rife: rife!,
+          areaMaximaParaIa: areaIa,
           onProgress: onProgress,
           onDetalhe: onDetalhe,
         );
         interpolacaoUsada[layer.id] = 'IA (RIFE)';
-        onProgress?.call(1);
-        return dir;
+        extraido = true;
       } catch (e) {
         // Cancelado: a tela para no proximo passo; nao vale reextrair.
         if (_cancelled) return dir;
@@ -268,27 +306,78 @@ class ExportEngine {
     } else if (escolha.como == ComoInterpolar.quadrosReais) {
       interpolacaoUsada[layer.id] = 'quadros reais';
     }
-    final filtro = switch (escolha.como) {
-      ComoInterpolar.nada || ComoInterpolar.quadrosReais => '',
-      ComoInterpolar.rife ||
-      ComoInterpolar.ffmpeg => filtroDeInterpolacao(layer, fps: fps),
-    };
-    final falha = await _extrairPng(
-      layer,
-      dir,
-      info.cor,
-      start,
-      dur,
-      taxa: taxa,
-      filtro: filtro,
-    );
-    if (falha == null) {
-      onProgress?.call(1);
-      return dir;
+    if (!extraido) {
+      final filtro = switch (escolha.como) {
+        ComoInterpolar.nada || ComoInterpolar.quadrosReais => '',
+        ComoInterpolar.rife ||
+        ComoInterpolar.ffmpeg => filtroDeInterpolacao(layer, fps: fps),
+      };
+      final falha = await _extrairPng(
+        layer,
+        dir,
+        info.cor,
+        start,
+        dur,
+        taxa: taxa,
+        filtro: filtro,
+        areaMaximaParaIa: areaIa,
+      );
+      if (falha != null) {
+        throw ExportException(
+          'Falha ao ler o video "${layer.name}".\n${_tail(falha)}',
+        );
+      }
     }
-    throw ExportException(
-      'Falha ao ler o video "${layer.name}".\n${_tail(falha)}',
-    );
+    if (planoIa.aplica && !_cancelled) {
+      await _aprimorarQuadros(
+        layer,
+        dir,
+        ia!,
+        onProgress: onProgress,
+        onDetalhe: onDetalhe,
+      );
+    }
+    onProgress?.call(1);
+    return dir;
+  }
+
+  /// A IA EM CADA QUADRO extraido do clipe, em lugar. Falha para a
+  /// exportacao com o nome do clipe e o que fazer: o arquivo nunca sai com
+  /// o clipe na resolucao pequena da extracao fingindo que foi aprimorado.
+  Future<void> _aprimorarQuadros(
+    VideoLayer layer,
+    Directory dir,
+    AprimoradorDeQuadros ia, {
+    void Function(double p)? onProgress,
+    void Function(String detalhe)? onDetalhe,
+  }) async {
+    final arquivos = dir
+        .listSync()
+        .whereType<File>()
+        .map((f) => f.path)
+        .where((p) => p.endsWith('.png'))
+        .toList()
+      ..sort();
+    try {
+      await ia.aprimorar(
+        arquivos: arquivos,
+        forca: layer.forcaDoAprimoramento,
+        larguraDaComposicao: width,
+        alturaDaComposicao: height,
+        aoAvancar: (feitos, total) {
+          onProgress?.call(feitos / total);
+          onDetalhe?.call('Aprimorando com IA: quadro $feitos de $total');
+        },
+        cancelado: () => _cancelled,
+      );
+    } catch (e) {
+      if (_cancelled) return;
+      final motivo = e is StateError ? e.message : '$e';
+      throw ExportException(
+        'O aprimoramento por IA falhou em "${layer.name}": $motivo.\n'
+        'Desligue "Aprimorar com IA" nesse clipe para exportar sem ele.',
+      );
+    }
   }
 
   /// Roda as receitas de extracao em ordem ate uma dar certo: `%06d.png`
@@ -302,6 +391,7 @@ class ExportEngine {
     double dur, {
     required int taxa,
     required String filtro,
+    int? areaMaximaParaIa,
   }) async {
     // Escala para caber na composicao mantendo proporcao — quadro maior
     // que isso e memoria jogada fora.
@@ -311,6 +401,7 @@ class ExportEngine {
         fps: taxa,
         largura: width,
         altura: height,
+        areaMaximaParaIa: areaMaximaParaIa,
       ))
         '$filtro$r',
     ];
@@ -358,6 +449,7 @@ class ExportEngine {
     required int taxa,
     required int taxaBase,
     required InterpoladorDeQuadros rife,
+    int? areaMaximaParaIa,
     void Function(double p)? onProgress,
     void Function(String detalhe)? onDetalhe,
   }) async {
@@ -373,6 +465,7 @@ class ExportEngine {
         dur,
         taxa: taxaBase,
         filtro: '',
+        areaMaximaParaIa: areaMaximaParaIa,
       );
       if (falha != null) throw StateError('os quadros reais não saíram');
       final quadros = base
@@ -404,23 +497,7 @@ class ExportEngine {
   /// Pergunta ao ffprobe a cor e a taxa de quadros do primeiro fluxo de
   /// video. Sem resposta, so o tamanho decide a cor (igual ao player) e a
   /// taxa fica desconhecida (vale a da composicao).
-  Future<({CorDoVideo cor, double? fps})> infoDoVideo(String source) async {
-    try {
-      final info = await FFprobeKit.getMediaInformation(source);
-      final streams = info.getMediaInformation()?.getStreams() ?? [];
-      for (final st in streams) {
-        if (st.getType() != 'video') continue;
-        final props = st.getAllProperties() ?? const <dynamic, dynamic>{};
-        return (cor: CorDoVideo.deProps(props), fps: fpsDeProps(props));
-      }
-    } catch (_) {
-      // Sem informacao, segue com o criterio de tamanho.
-    }
-    return (
-      cor: const CorDoVideo.desconhecida(largura: 0, altura: 0),
-      fps: null,
-    );
-  }
+  Future<InfoDoVideo> infoDoVideo(String source) => lerInfoDoVideo(source);
 
   /// So a cor (ver [infoDoVideo]).
   Future<CorDoVideo> corDoVideo(String source) async =>
@@ -1195,6 +1272,34 @@ class ExportEngine {
         ? lines.join('\n')
         : lines.sublist(lines.length - 12).join('\n');
   }
+}
+
+/// Cor, taxa de quadros e rotacao do primeiro fluxo de video.
+typedef InfoDoVideo = ({CorDoVideo cor, double? fps, int rotacao});
+
+/// Pergunta ao ffprobe (ver [ExportEngine.infoDoVideo]). Sem resposta, a
+/// cor fica pelo criterio de tamanho, a taxa desconhecida e sem rotacao.
+Future<InfoDoVideo> lerInfoDoVideo(String source) async {
+  try {
+    final info = await FFprobeKit.getMediaInformation(source);
+    final streams = info.getMediaInformation()?.getStreams() ?? [];
+    for (final st in streams) {
+      if (st.getType() != 'video') continue;
+      final props = st.getAllProperties() ?? const <dynamic, dynamic>{};
+      return (
+        cor: CorDoVideo.deProps(props),
+        fps: fpsDeProps(props),
+        rotacao: rotacaoDeProps(props),
+      );
+    }
+  } catch (_) {
+    // Sem informacao, segue com o criterio de tamanho.
+  }
+  return (
+    cor: const CorDoVideo.desconhecida(largura: 0, altura: 0),
+    fps: null,
+    rotacao: 0,
+  );
 }
 
 class ExportException implements Exception {

@@ -61,6 +61,7 @@ endforeach()
 
 add_library(aurea_enhance SHARED
   aurea_enhance.cpp
+  aurea_png.cpp
   aurea_rife.cpp
   ${_rife}/rife.cpp
   ${_rife}/warp.cpp

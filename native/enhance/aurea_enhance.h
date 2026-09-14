@@ -30,6 +30,7 @@ extern "C" {
 #define AE_ERR_INFERENCE -2 /* extract falhou: memoria da GPU ou operador */
 #define AE_ERR_CANCELLED -3
 #define AE_ERR_MODEL -4
+#define AE_ERR_IO -5 /* PNG ilegivel ou escrita falhou */
 
 typedef struct ae_engine ae_engine;
 
@@ -63,8 +64,18 @@ AE_EXPORT int32_t ae_process(ae_engine* engine, const uint8_t* rgb, int32_t w, i
                              int32_t out_scale, float strength, uint8_t* out,
                              const int32_t* cancel);
 
-/* Redimensionamento convencional (Catmull-Rom) para comparar antes/depois
- * na mesma resolucao. */
+/*
+ * PNG -> PNG, para a exportacao do editor: le o quadro (RGB), roda
+ * ae_process na escala out_scale e, com fit_w/fit_h > 0, leva ao tamanho
+ * da composicao (Catmull-Rom, com o nucleo alargado ao reduzir). Gravacao
+ * atomica: in_path == out_path substitui o quadro so quando tudo deu certo.
+ */
+AE_EXPORT int32_t ae_process_png(ae_engine* engine, const char* in_path, const char* out_path,
+                                 int32_t out_scale, float strength, int32_t fit_w, int32_t fit_h,
+                                 const int32_t* cancel);
+
+/* Redimensionamento convencional (Catmull-Rom; alarga o nucleo ao reduzir)
+ * para comparar antes/depois na mesma resolucao. */
 AE_EXPORT int32_t ae_resize(const uint8_t* rgb, int32_t w, int32_t h, uint8_t* out,
                             int32_t ow, int32_t oh);
 

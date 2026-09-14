@@ -95,10 +95,22 @@ class CorDoVideo {
 /// matriz para adivinhar. E a saida em RGB que faz o PNG intermediario
 /// carregar a cor certa — um JPEG carrega YCbCr, e quem o abre supoe a
 /// matriz do JFIF (601), esteja o conteudo em 709 ou nao.
-String _encaixe(CorDoVideo cor, int largura, int altura) =>
-    'scale=$largura:$altura:force_original_aspect_ratio=decrease'
+String _encaixe(CorDoVideo cor, int largura, int altura, int? areaMaxima) =>
+    '${_escala(largura, altura, areaMaxima)}'
     ':in_color_matrix=${cor.matrizParaScale}:in_range=${cor.faixaResolvida}'
     ',format=rgb24';
+
+/// O `scale` da extracao. Normal: encaixa na composicao. PARA A IA
+/// ([areaMaxima]): a propria fonte, sem ampliar (quem amplia e a rede),
+/// reduzida so se passar da area — conta feita pelo FFmpeg DEPOIS de girar,
+/// entao vale para video em pe. Aspas simples protegem as virgulas.
+String _escala(int largura, int altura, int? areaMaxima) {
+  if (areaMaxima == null) {
+    return 'scale=$largura:$altura:force_original_aspect_ratio=decrease';
+  }
+  final k = 'min(1,sqrt($areaMaxima/(iw*ih)))';
+  return "scale=w='max(1,trunc(iw*$k))':h='max(1,trunc(ih*$k))'";
+}
 
 /// Filtro para video SDR: a matriz e a faixa certas, e mais nada.
 ///
@@ -110,10 +122,11 @@ String filtroSdr(
   required int fps,
   required int largura,
   required int altura,
+  int? areaMaxima,
 }) =>
     'fps=$fps'
     ',setparams=colorspace=${cor.matrizResolvida}:range=${cor.faixaResolvida}'
-    ',${_encaixe(cor, largura, altura)}';
+    ',${_encaixe(cor, largura, altura, areaMaxima)}';
 
 /// Filtro para video HDR (PQ/HLG): lineariza, mapeia para o alcance
 /// SDR e sai em BT.709 — a receita canonica do FFmpeg com o zimg.
@@ -127,6 +140,7 @@ String filtroHdrParaSdr(
   required int fps,
   required int largura,
   required int altura,
+  int? areaMaxima,
 }) {
   const sdr = CorDoVideo(
     matriz: 'bt709',
@@ -141,7 +155,7 @@ String filtroHdrParaSdr(
       ',tonemap=tonemap=hable:desat=0'
       ',zscale=t=bt709:m=bt709:r=tv'
       ',format=yuv420p'
-      ',${_encaixe(sdr, largura, altura)}';
+      ',${_encaixe(sdr, largura, altura, areaMaxima)}';
 }
 
 /// Filtro de reserva: o de antes, so que em RGB. Serve se um FFmpeg
@@ -151,20 +165,41 @@ String filtroDeReserva({
   required int fps,
   required int largura,
   required int altura,
-}) =>
-    'fps=$fps,scale=$largura:$altura:force_original_aspect_ratio=decrease,format=rgb24';
+  int? areaMaxima,
+}) => 'fps=$fps,${_escala(largura, altura, areaMaxima)},format=rgb24';
 
 /// As receitas, na ordem em que se tenta.
+///
+/// [areaMaximaParaIa]: os quadros vao para o aprimoramento por IA e saem na
+/// resolucao da fonte (no maximo esta area), nao na da composicao.
 List<String> receitasDeExtracao(
   CorDoVideo cor, {
   required int fps,
   required int largura,
   required int altura,
+  int? areaMaximaParaIa,
 }) => [
   if (cor.hdr)
-    filtroHdrParaSdr(cor, fps: fps, largura: largura, altura: altura),
-  filtroSdr(cor, fps: fps, largura: largura, altura: altura),
-  filtroDeReserva(fps: fps, largura: largura, altura: altura),
+    filtroHdrParaSdr(
+      cor,
+      fps: fps,
+      largura: largura,
+      altura: altura,
+      areaMaxima: areaMaximaParaIa,
+    ),
+  filtroSdr(
+    cor,
+    fps: fps,
+    largura: largura,
+    altura: altura,
+    areaMaxima: areaMaximaParaIa,
+  ),
+  filtroDeReserva(
+    fps: fps,
+    largura: largura,
+    altura: altura,
+    areaMaxima: areaMaximaParaIa,
+  ),
 ];
 
 /// A TAXA DE QUADROS de um fluxo pelas propriedades do ffprobe.
@@ -190,4 +225,31 @@ double? fpsDeProps(Map<dynamic, dynamic> props) {
   }
 
   return razao(props['avg_frame_rate']) ?? razao(props['r_frame_rate']);
+}
+
+/// A ROTACAO DE EXIBICAO do fluxo em graus (0, 90, 180 ou 270), pelas
+/// propriedades do ffprobe: a matriz de exibicao (`side_data_list`,
+/// FFmpeg 5+) ou a etiqueta `rotate` (antes disso). Video de celular em pe
+/// costuma vir gravado deitado com -90 aqui.
+int rotacaoDeProps(Map<dynamic, dynamic> props) {
+  num? graus;
+  final lados = props['side_data_list'];
+  if (lados is List) {
+    for (final lado in lados) {
+      if (lado is Map && lado['rotation'] is num) {
+        graus = lado['rotation'] as num;
+        break;
+      }
+    }
+  }
+  if (graus == null) {
+    final tags = props['tags'];
+    if (tags is Map) {
+      final r = tags['rotate'];
+      graus = r is num ? r : (r is String ? num.tryParse(r.trim()) : null);
+    }
+  }
+  if (graus == null || !graus.isFinite) return 0;
+  final quartos = (graus / 90).round();
+  return ((quartos * 90) % 360 + 360) % 360;
 }

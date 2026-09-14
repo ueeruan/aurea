@@ -26,6 +26,7 @@ final class _AeInfo extends Struct {
 
 const aeOk = 0;
 const aeErrCancelled = -3;
+const aeErrIo = -5;
 
 /// Onde a biblioteca mora: Android empacota pelo CMake do app; no host,
 /// os testes apontam AUREA_ENHANCE_LIB para a DLL construida localmente.
@@ -71,6 +72,13 @@ class NativeEnhancer {
   final Pointer<Int32> cancel = calloc<Int32>();
 
   static bool get libraryAvailable => _abrirBiblioteca() != null;
+
+  /// A biblioteca tem o caminho de PNG da exportacao do editor (uma build
+  /// antiga so tinha o de buffers).
+  static bool get pngAvailable {
+    final lib = _abrirBiblioteca();
+    return lib != null && lib.providesSymbol('ae_process_png');
+  }
 
   /// Carrega o modelo x4 de [modelDir] (x4.param/x4.bin). Devolve o motor
   /// ou lanca StateError com o motivo real.
@@ -130,6 +138,35 @@ class NativeEnhancer {
     } finally {
       malloc.free(inp);
       malloc.free(out);
+    }
+  }
+
+  /// PNG [input] -> PNG [output] (pode ser o mesmo arquivo: a troca so
+  /// acontece no fim). A IA roda na escala [scale] e, com [fitW]/[fitH],
+  /// a saida vai ao tamanho da composicao. Lanca StateError em falha.
+  void processPng(
+    String input,
+    String output, {
+    required int scale,
+    double strength = 1,
+    int fitW = 0,
+    int fitH = 0,
+    Pointer<Int32>? parar,
+  }) {
+    final fn = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, Int32, Float, Int32, Int32, Pointer<Int32>),
+      int Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, int, double, int, int, Pointer<Int32>)
+    >('ae_process_png');
+    final pi = input.toNativeUtf8(), po = output.toNativeUtf8();
+    try {
+      // [parar]: a celula de cancelamento de quem chama (lida entre tiles).
+      final rc = fn(_engine, pi, po, scale, strength, fitW, fitH, parar ?? cancel);
+      if (rc == aeErrCancelled) throw StateError('Cancelado');
+      if (rc == aeErrIo) throw StateError('Quadro ilegível ou sem espaço para gravar');
+      if (rc != aeOk) throw StateError('A IA falhou neste quadro (código $rc)');
+    } finally {
+      calloc.free(pi);
+      calloc.free(po);
     }
   }
 

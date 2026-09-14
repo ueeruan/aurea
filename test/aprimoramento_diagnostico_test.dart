@@ -2,8 +2,8 @@
 //
 // Os defeitos 1 a 4 foram presos em teste no commit 4f3f380 e agora estao
 // invertidos: o teste prova que o caminho novo nao os tem. O defeito 5
-// (efeito fora do editor e da exportacao do projeto) CONTINUA — o motor
-// novo ainda so atende a tela de aprimoramento.
+// (efeito fora do editor e da exportacao do projeto) tambem: o clipe de
+// video tem "Aprimorar com IA" e a exportacao do projeto aplica a rede.
 import 'dart:io';
 
 import 'package:aurea/src/features/enhance/application/enhancement_job.dart';
@@ -47,8 +47,13 @@ void main() {
     expect(pubspec.contains('tflite_flutter'), isFalse);
   });
 
-  test('AINDA ABERTO 5: o aprimoramento nao entra na exportacao do projeto do editor', () {
+  test('CORRIGIDO 5: o aprimoramento entra no editor e na exportacao do projeto', () {
     final export = File('lib/src/features/export/application/export_engine.dart').readAsStringSync();
-    expect(export.contains('enhance'), isFalse);
+    expect(export.contains('planoDeAprimoramento('), isTrue);
+    expect(export.contains('_aprimorarQuadros('), isTrue);
+    final tela = File('lib/src/features/export/presentation/export_video_screen.dart').readAsStringSync();
+    expect(tela.contains('AprimoradorIa.doAparelho()'), isTrue);
+    final menu = File('lib/src/features/editor/presentation/am/layer_menu.dart').readAsStringSync();
+    expect(menu.contains('showAprimoramentoSheet('), isTrue);
   });
 }

@@ -1186,6 +1186,10 @@ Map<String, dynamic> layerToJson(Layer l) {
       if (v.interpolacao != InterpolacaoDeQuadros.nenhuma) {
         base['interpolacao'] = v.interpolacao.name;
       }
+      if (v.aprimorar) base['aprimorar'] = true;
+      if (v.forcaDoAprimoramento != 1.0) {
+        base['forcaAprimoramento'] = v.forcaDoAprimoramento;
+      }
       base['volume'] = v.volume;
       final va = _audioSpec(v.audio);
       if (va != null) base['audio'] = va;
@@ -1997,6 +2001,12 @@ Layer layerFromJson(Map<String, dynamic> m) {
           (i) => i.name == m['interpolacao'],
           orElse: () => InterpolacaoDeQuadros.nenhuma,
         ),
+        aprimorar: m['aprimorar'] as bool? ?? false,
+        // Numero ilegivel ou fora da faixa nao derruba o projeto.
+        forcaDoAprimoramento: (() {
+          final f = (m['forcaAprimoramento'] as num?)?.toDouble() ?? 1.0;
+          return f.isFinite ? f.clamp(0.0, 1.0) : 1.0;
+        })(),
         volume: (m['volume'] as num).toDouble(),
         audio: _asAudioSpec(m['audio']),
         position: pos,

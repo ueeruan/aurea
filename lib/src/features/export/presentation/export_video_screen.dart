@@ -24,6 +24,7 @@ import '../../editor/presentation/widgets/pixel_effect_engine.dart';
 import '../../editor/presentation/widgets/preview_stage.dart';
 import '../../editor/application/duck_service.dart';
 import '../../editor/application/media_preview_service.dart';
+import '../application/aprimoramento_export.dart';
 import '../application/export_engine.dart';
 import '../application/interpolacao_rife.dart';
 import '../application/platform_encoder.dart';
@@ -157,8 +158,10 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
         MediaPreviewService.instance.peaksOf,
       ),
     );
-    // Camera lenta com IA quando o aparelho tem o motor (Android).
+    // Camera lenta e aprimoramento com IA quando o aparelho tem o motor
+    // (Android).
     engine.interpolador = InterpoladorRife.doAparelho();
+    engine.aprimorador = AprimoradorIa.doAparelho();
     _engine = engine;
 
     try {
@@ -324,7 +327,7 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
           _fase = _Fase.pronto;
           _progresso = 1;
           _saida = file;
-          _detalhe = file.path;
+          _detalhe = _comAvisos(engine, file.path);
           _galeria = naGaleria;
         });
         return;
@@ -341,7 +344,10 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
           _fase = _Fase.pronto;
           _progresso = 1;
           _saida = File('${pasta.path}/000000.png');
-          _detalhe = '$total imagens em ${pasta.path}';
+          _detalhe = _comAvisos(
+            engine,
+            '$total imagens em ${pasta.path}',
+          );
         });
         return;
       }
@@ -366,7 +372,7 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
         _fase = _Fase.pronto;
         _progresso = 1;
         _saida = file;
-        _detalhe = file.path;
+        _detalhe = _comAvisos(engine, file.path);
         _galeria = naGaleria;
       });
     } on ExportException catch (e) {
@@ -388,6 +394,12 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
       });
     }
   }
+
+  /// O detalhe do fim e, embaixo, o que nao saiu como pedido (clipe com
+  /// aprimoramento por IA num aparelho sem o motor, por exemplo).
+  String _comAvisos(ExportEngine engine, String detalhe) => engine.avisos.isEmpty
+      ? detalhe
+      : '$detalhe\n\n${engine.avisos.join('\n')}';
 
   /// LARGA A EXPORTACAO NO MEIO sem deixar nada aberto.
   ///

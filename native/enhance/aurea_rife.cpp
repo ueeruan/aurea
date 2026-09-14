@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <mutex>
@@ -21,40 +20,11 @@
 #endif
 
 #include "aurea_gpu.h"
+#include "aurea_png.h"
 #include "cpu.h"
 #include "gpu.h"
 #include "net.h"
 #include "rife.h"
-
-#if defined(__ANDROID__)
-// zlib do sistema (API estavel do NDK): nivel 1 comprime o quadro em uma
-// fracao do tempo do compressor embutido do stb.
-#include <zlib.h>
-static unsigned char* aurea_zlib(unsigned char* data, int len, int* out_len, int) {
-  uLongf cap = compressBound(static_cast<uLong>(len));
-  unsigned char* out = static_cast<unsigned char*>(std::malloc(cap));
-  if (!out) return nullptr;
-  if (compress2(out, &cap, data, static_cast<uLong>(len), Z_BEST_SPEED) != Z_OK) {
-    std::free(out);
-    return nullptr;
-  }
-  *out_len = static_cast<int>(cap);
-  return out;
-}
-#define STBIW_ZLIB_COMPRESS aurea_zlib
-#endif
-
-// Implementacoes do stb so neste arquivo, e com ligacao interna: outra
-// biblioteca do processo com stb nao colide com esta.
-#define STB_IMAGE_STATIC
-#define STB_IMAGE_IMPLEMENTATION
-#define STBI_ONLY_PNG
-#define STBI_NO_STDIO
-#include "stb_image.h"
-#define STB_IMAGE_WRITE_STATIC
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#define STBI_WRITE_NO_STDIO
-#include "stb_image_write.h"
 
 namespace {
 
@@ -73,65 +43,11 @@ std::wstring largo(const std::string& s) {
 }
 #endif
 
-FILE* abre(const std::string& caminho, const char* modo) {
-#if defined(_WIN32)
-  const std::wstring m = largo(modo);
-  return _wfopen(largo(caminho).c_str(), m.c_str());
-#else
-  return std::fopen(caminho.c_str(), modo);
-#endif
-}
-
-bool legivel(const std::string& caminho) {
-  FILE* f = abre(caminho, "rb");
-  if (!f) return false;
-  std::fclose(f);
-  return true;
-}
-
-struct LiberaStb {
-  void operator()(unsigned char* p) const { stbi_image_free(p); }
-};
-
 // Um quadro decodificado, lembrado pelo caminho.
 struct Quadro {
   std::string caminho;
-  int w = 0;
-  int h = 0;
-  std::unique_ptr<unsigned char, LiberaStb> rgb;
+  aurea_png::Imagem imagem;
 };
-
-// Le o arquivo inteiro sem excecoes (o ncnn do Android compila sem elas).
-std::unique_ptr<unsigned char[]> lerArquivo(const std::string& caminho, int* tamanho) {
-  FILE* f = abre(caminho, "rb");
-  if (!f) return nullptr;
-  std::unique_ptr<unsigned char[]> dados;
-  if (std::fseek(f, 0, SEEK_END) == 0) {
-    const long n = std::ftell(f);
-    if (n > 0 && n < 512L * 1024 * 1024 && std::fseek(f, 0, SEEK_SET) == 0) {
-      dados.reset(new (std::nothrow) unsigned char[static_cast<size_t>(n)]);
-      if (dados && std::fread(dados.get(), 1, static_cast<size_t>(n), f) == static_cast<size_t>(n)) {
-        *tamanho = static_cast<int>(n);
-      } else {
-        dados.reset();
-      }
-    }
-  }
-  std::fclose(f);
-  return dados;
-}
-
-struct Saida {
-  FILE* f = nullptr;
-  bool ok = true;
-};
-
-void escreve(void* ctx, void* data, int size) {
-  Saida* s = static_cast<Saida*>(ctx);
-  if (s->ok && size > 0 && std::fwrite(data, 1, static_cast<size_t>(size), s->f) != static_cast<size_t>(size)) {
-    s->ok = false;
-  }
-}
 
 }  // namespace
 
@@ -182,20 +98,14 @@ int32_t interpolarTravado(ar_engine* e, const uint8_t* a, const uint8_t* b, int 
 // outro lado do par em andamento).
 const Quadro* quadro(ar_engine* e, const std::string& caminho, const Quadro* manter) {
   for (Quadro& q : e->cache) {
-    if (q.rgb && q.caminho == caminho) return &q;
+    if (q.imagem.rgb && q.caminho == caminho) return &q;
   }
-  int tamanho = 0;
-  const std::unique_ptr<unsigned char[]> bytes = lerArquivo(caminho, &tamanho);
-  if (!bytes) return nullptr;
-  int w = 0, h = 0, canais = 0;
-  unsigned char* px = stbi_load_from_memory(bytes.get(), tamanho, &w, &h, &canais, 3);
-  if (!px) return nullptr;
+  aurea_png::Imagem lida;
+  if (!aurea_png::ler(caminho, &lida)) return nullptr;
   Quadro* vaga = &e->cache[0];
-  if (vaga == manter || (e->cache[1].rgb == nullptr && manter != &e->cache[1])) vaga = &e->cache[1];
+  if (vaga == manter || (!e->cache[1].imagem.rgb && manter != &e->cache[1])) vaga = &e->cache[1];
   vaga->caminho = caminho;
-  vaga->w = w;
-  vaga->h = h;
-  vaga->rgb.reset(px);
+  vaga->imagem = std::move(lida);
   return vaga;
 }
 
@@ -210,7 +120,7 @@ ar_engine* ar_create(const char* model_dir, int32_t use_gpu, char* err, int32_t 
   }
   std::string dir(model_dir);
   while (dir.size() > 1 && (dir.back() == '/' || dir.back() == '\\')) dir.pop_back();
-  if (!legivel(dir + "/flownet.param") || !legivel(dir + "/flownet.bin")) {
+  if (!aurea_png::legivel(dir + "/flownet.param") || !aurea_png::legivel(dir + "/flownet.bin")) {
     writeErr(err, err_len, "arquivos do modelo ausentes ou ilegiveis");
     return nullptr;
   }
@@ -304,49 +214,22 @@ int32_t ar_interpolate_png(ar_engine* e, const char* a_path, const char* b_path,
   if (!qa) return AR_ERR_IO;
   const Quadro* qb = quadro(e, b_path, qa);
   if (!qb) return AR_ERR_IO;
-  // [quadro] pode ter trocado a vaga de [qa]? Nao: [manter] protege.
-  if (qa->w != qb->w || qa->h != qb->h || qa->w > 8192 || qa->h > 8192) return AR_ERR_IO;
-  const int w = qa->w, h = qa->h;
+  const aurea_png::Imagem& ia = qa->imagem;
+  const aurea_png::Imagem& ib = qb->imagem;
+  if (ia.w != ib.w || ia.h != ib.h || ia.w > 8192 || ia.h > 8192) return AR_ERR_IO;
+  const int w = ia.w, h = ia.h;
   const size_t n = static_cast<size_t>(w) * static_cast<size_t>(h) * 3;
   std::unique_ptr<uint8_t[]> px(new (std::nothrow) uint8_t[n]);
   if (!px) return AR_ERR_INFERENCE;
-  int32_t rc = AR_OK;
   if (t <= 0) {
-    std::memcpy(px.get(), qa->rgb.get(), n);
+    std::memcpy(px.get(), ia.rgb.get(), n);
   } else if (t >= 1) {
-    std::memcpy(px.get(), qb->rgb.get(), n);
+    std::memcpy(px.get(), ib.rgb.get(), n);
   } else {
-    rc = interpolarTravado(e, qa->rgb.get(), qb->rgb.get(), w, h, t, px.get());
+    const int32_t rc = interpolarTravado(e, ia.rgb.get(), ib.rgb.get(), w, h, t, px.get());
+    if (rc != AR_OK) return rc;
   }
-  if (rc != AR_OK) return rc;
-  // PNG sem filtro e compressao minima: arquivo de passagem que vive
-  // minutos (a mesma escolha do FFmpeg na extracao).
-  stbi_write_png_compression_level = 1;
-  stbi_write_force_png_filter = 0;
-  const std::string destino(out_path);
-  const std::string temporario = destino + ".tmp";
-  Saida s;
-  s.f = abre(temporario, "wb");
-  if (!s.f) return AR_ERR_IO;
-  const int escrito = stbi_write_png_to_func(escreve, &s, w, h, 3, px.get(), w * 3);
-  const bool fechou = std::fclose(s.f) == 0;
-  if (!escrito || !s.ok || !fechou) {
-    std::remove(temporario.c_str());
-    return AR_ERR_IO;
-  }
-  // Troca atomica: um PNG pela metade nunca aparece com o nome final.
-#if defined(_WIN32)
-  if (!MoveFileExW(largo(temporario).c_str(), largo(destino).c_str(), MOVEFILE_REPLACE_EXISTING)) {
-    _wremove(largo(temporario).c_str());
-    return AR_ERR_IO;
-  }
-#else
-  if (std::rename(temporario.c_str(), destino.c_str()) != 0) {
-    std::remove(temporario.c_str());
-    return AR_ERR_IO;
-  }
-#endif
-  return AR_OK;
+  return aurea_png::gravar(out_path, px.get(), w, h) ? AR_OK : AR_ERR_IO;
 }
 
 }  // extern "C"

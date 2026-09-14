@@ -194,6 +194,14 @@ Future<void> showSpeedSheet(
                         ),
                     ],
                   ),
+                  const SizedBox(height: 6),
+                  const AppText('No Android, "Movimento" usa IA (RIFE) quando o aparelho tem GPU; vídeos de 60 fps ou mais usam os quadros reais.',
+                    style: TextStyle(
+                      fontSize: 10,
+                      height: 1.35,
+                      color: AmColors.muted,
+                    ),
+                  ),
                 ],
                 if (video != null && remap != null) ...[
                   const SizedBox(height: 14),

@@ -6,18 +6,18 @@
 // aurea_rife.cpp) preenche os quadros do meio, com os mesmos nomes que o
 // FFmpeg minterpolate escreveria. Qualquer falha (sem GPU, pouca memoria,
 // quadro ilegivel) volta para o FFmpeg — nada muda para quem desenha.
-import 'dart:async';
 import 'dart:ffi';
 import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
 
-import 'package:ffi/ffi.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../editor/domain/plano_de_interpolacao.dart';
 import '../../enhance/application/native_interpolator.dart';
+import 'modelos_de_ia.dart';
+import 'trabalho_de_ia.dart';
 
 /// Quem faz os quadros do meio. A exportacao so conhece isto (testes
 /// usam um falso).
@@ -92,26 +92,14 @@ class InterpoladorRife implements InterpoladorDeQuadros {
 
   /// Copia o modelo dos assets para a pasta de apoio uma vez (o C++ le
   /// arquivo, nao asset). Arquivo com tamanho diferente e refeito.
-  Future<String> prepararModelo() async {
-    final pronto = modeloPronto;
-    if (pronto != null) return pronto;
-    final dir = Directory('${(await _pastaDeApoio()).path}/ai/rife-v4.6');
-    await dir.create(recursive: true);
-    for (final e in modeloAssets.entries) {
-      final destino = File('${dir.path}/${e.key}');
-      final dados = await _carregarAsset(e.value);
-      if (await destino.exists() && await destino.length() == dados.lengthInBytes) {
-        continue;
-      }
-      final temporario = File('${destino.path}.tmp');
-      await temporario.writeAsBytes(
-        dados.buffer.asUint8List(dados.offsetInBytes, dados.lengthInBytes),
-        flush: true,
+  Future<String> prepararModelo() async =>
+      modeloPronto ??
+      await prepararModeloDeIa(
+        subpasta: 'rife-v4.6',
+        arquivos: modeloAssets,
+        carregarAsset: _carregarAsset,
+        pastaDeApoio: _pastaDeApoio,
       );
-      await temporario.rename(destino.path);
-    }
-    return dir.path;
-  }
 
   @override
   Future<void> interpolar({
@@ -131,57 +119,23 @@ class InterpoladorRife implements InterpoladorDeQuadros {
       passos[k * 3 + 2] = plano[k].b;
       instantes[k] = plano[k].t;
     }
-    // O pedido de parada e uma celula de memoria nativa: o isolate de
-    // trabalho esta preso no FFI e so a le entre um quadro e outro.
-    final parar = calloc<Int32>();
-    // UMA porta para tudo (progresso, erro, fim e a saida do isolate): a
-    // ordem numa porta e garantida, entao a saida (nulo) chega por ultimo.
-    final mensagens = ReceivePort();
-    final saiu = Completer<void>();
-    final vigia = Timer.periodic(const Duration(milliseconds: 100), (_) {
-      if (cancelado?.call() ?? false) parar.value = 1;
-    });
-    String? falha;
-    var concluido = false;
-    mensagens.listen((m) {
-      if (m == null) {
-        if (!saiu.isCompleted) saiu.complete();
-      } else if (m is int) {
-        aoAvancar?.call(m, plano.length);
-      } else if (m is String) {
-        falha ??= m;
-      } else if (m == true) {
-        concluido = true;
-      } else if (m is List) {
-        // onError do isolate: [erro, pilha].
-        falha ??= m.isEmpty ? 'Interpolação falhou' : '${m.first}';
-      }
-    });
-    try {
-      await Isolate.spawn(
-        _trabalhoRife,
-        _Pedido(
-          mensagens.sendPort,
-          modelo,
-          pastaBase,
-          pastaSaida,
-          passos,
-          instantes,
-          parar.address,
-          exigirGpu,
-        ),
-        onExit: mensagens.sendPort,
-        onError: mensagens.sendPort,
-      );
-      await saiu.future;
-    } finally {
-      vigia.cancel();
-      mensagens.close();
-      // So depois da saida: o isolate lia esta celula ate o fim.
-      calloc.free(parar);
-    }
-    if (falha != null) throw StateError(falha!);
-    if (!concluido) throw StateError('Interpolação interrompida');
+    await rodarTrabalhoDeIa<_Pedido>(
+      corpo: _trabalhoRife,
+      pedido: (porta, parar) => _Pedido(
+        porta,
+        modelo,
+        pastaBase,
+        pastaSaida,
+        passos,
+        instantes,
+        parar,
+        exigirGpu,
+      ),
+      total: plano.length,
+      aoAvancar: aoAvancar,
+      cancelado: cancelado,
+      interrompido: 'Interpolação interrompida',
+    );
   }
 }
 

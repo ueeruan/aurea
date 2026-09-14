@@ -12,6 +12,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/utils/time_format.dart';
 import '../../application/editor_controller.dart';
 import 'precomp_sheet.dart';
+import 'aprimoramento_sheet.dart';
 import '../../application/playback_controller.dart';
 import '../../domain/blend_extra.dart';
 import '../../domain/caption.dart';
@@ -250,6 +251,32 @@ class LayerToolsDock extends ConsumerWidget {
                           CupertinoIcons.speaker_2,
                           size: 20,
                           color: AmColors.text,
+                        ),
+                      ),
+                    ),
+                    // APRIMORAR COM IA: so video tem quadros para a rede.
+                    // O icone acende quando o clipe sai aprimorado.
+                    if (layer is VideoLayer)
+                    Expanded(
+                      child: IconButton(
+                        key: const ValueKey('aprimorar-ia'),
+                        tooltip: 'Aprimorar com IA',
+                        onPressed: () {
+                          HapticFeedback.lightImpact();
+                          playback.pause();
+                          showAprimoramentoSheet(
+                            context,
+                            ref,
+                            layer.id,
+                            playback,
+                          );
+                        },
+                        icon: Icon(
+                          CupertinoIcons.sparkles,
+                          size: 20,
+                          color: (layer as VideoLayer).aprimorar
+                              ? AmColors.accent
+                              : AmColors.text,
                         ),
                       ),
                     ),

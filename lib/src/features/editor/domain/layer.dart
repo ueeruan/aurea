@@ -463,6 +463,8 @@ class VideoLayer extends Layer {
     this.reverse = false,
     this.speedBlur = false,
     this.interpolacao = InterpolacaoDeQuadros.nenhuma,
+    this.aprimorar = false,
+    this.forcaDoAprimoramento = 1.0,
     this.volume = 1.0,
     this.audio = const AudioSpec(),
     super.position,
@@ -520,6 +522,17 @@ class VideoLayer extends Layer {
   /// Sem isto, cada quadro da fonte se repete e a camera lenta soluca.
   final InterpolacaoDeQuadros interpolacao;
 
+  /// APRIMORAMENTO POR IA na exportacao (Real-ESRGAN, native/enhance): a
+  /// rede amplia a fonte ate o tamanho em que o clipe aparece, limpando
+  /// ruido e blocos de compressao. O palco mostra o original. Ver
+  /// aprimoramento_ia.dart para quando ele entra e em que ordem.
+  final bool aprimorar;
+
+  /// Quanto da saida da rede vai para o quadro (0..1): mistura com o
+  /// original ampliado de forma convencional. E a intensidade do efeito,
+  /// nao um controle de ruido.
+  final double forcaDoAprimoramento;
+
   /// Transicao da camada anterior (A) para esta camada (B).
 
   final double volume;
@@ -562,6 +575,8 @@ class VideoLayer extends Layer {
     bool? reverse,
     bool? speedBlur,
     InterpolacaoDeQuadros? interpolacao,
+    bool? aprimorar,
+    double? forcaDoAprimoramento,
     ClipTransition? transitionIn,
     bool clearTransitionIn = false,
     AudioSpec? audio,
@@ -579,6 +594,8 @@ class VideoLayer extends Layer {
       reverse: reverse ?? this.reverse,
       speedBlur: speedBlur ?? this.speedBlur,
       interpolacao: interpolacao ?? this.interpolacao,
+      aprimorar: aprimorar ?? this.aprimorar,
+      forcaDoAprimoramento: forcaDoAprimoramento ?? this.forcaDoAprimoramento,
       transitionIn: clearTransitionIn
           ? null
           : (transitionIn ?? this.transitionIn),
@@ -619,6 +636,8 @@ class VideoLayer extends Layer {
     reverse: reverse,
     speedBlur: speedBlur,
     interpolacao: interpolacao,
+    aprimorar: aprimorar,
+    forcaDoAprimoramento: forcaDoAprimoramento,
     // A transicao pertence a uma JUNCAO, nao ao conteudo do clipe.
     // Duplicar B nao pode criar uma segunda entrada apontando para A.
     transitionIn: null,

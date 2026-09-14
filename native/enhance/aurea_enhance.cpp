@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "aurea_gpu.h"
+#include "aurea_png.h"
 #include "cpu.h"
 #include "gpu.h"
 #include "net.h"
@@ -37,38 +38,69 @@ double cubicW(double x) {
   return 0;
 }
 
+// Pesos de uma dimensao. Ampliando, e o Catmull-Rom de 4 amostras de
+// sempre; REDUZINDO, o nucleo alarga na razao da reducao (sem isso a saida
+// x4 da IA reduzida para o tamanho da composicao serrilhava).
+struct Janela {
+  std::vector<int> primeiro;  // primeira amostra de cada pixel de saida
+  std::vector<double> peso;   // taps por pixel de saida, ja normalizados
+  int taps = 0;
+};
+
+Janela janela(int entrada, int saida) {
+  Janela j;
+  const double escala = static_cast<double>(entrada) / saida;
+  const double f = std::max(1.0, escala);
+  const double raio = 2.0 * f;
+  j.taps = static_cast<int>(std::ceil(raio)) * 2 + 1;
+  j.primeiro.resize(static_cast<size_t>(saida));
+  j.peso.assign(static_cast<size_t>(saida) * j.taps, 0.0);
+  for (int o = 0; o < saida; ++o) {
+    const double centro = (o + 0.5) * escala - 0.5;
+    const int p0 = static_cast<int>(std::floor(centro - raio)) + 1;
+    j.primeiro[o] = p0;
+    double soma = 0;
+    for (int k = 0; k < j.taps; ++k) {
+      const double wk = cubicW((p0 + k - centro) / f);
+      j.peso[static_cast<size_t>(o) * j.taps + k] = wk;
+      soma += wk;
+    }
+    if (soma != 0) {
+      for (int k = 0; k < j.taps; ++k) j.peso[static_cast<size_t>(o) * j.taps + k] /= soma;
+    }
+  }
+  return j;
+}
+
 void resizeCubic(const uint8_t* src, int w, int h, uint8_t* dst, int ow, int oh) {
   std::vector<float> tmp(static_cast<size_t>(ow) * h * 3);
-  const double sx = static_cast<double>(w) / ow, sy = static_cast<double>(h) / oh;
+  const Janela jx = janela(w, ow), jy = janela(h, oh);
   for (int x = 0; x < ow; ++x) {
-    const double fx = (x + 0.5) * sx - 0.5;
-    const int ix = static_cast<int>(std::floor(fx));
-    double wt[4], sum = 0;
-    for (int k = 0; k < 4; ++k) sum += (wt[k] = cubicW(fx - (ix - 1 + k)));
+    const int p0 = jx.primeiro[x];
+    const double* wt = &jx.peso[static_cast<size_t>(x) * jx.taps];
     for (int y = 0; y < h; ++y) {
       for (int c = 0; c < 3; ++c) {
         double v = 0;
-        for (int k = 0; k < 4; ++k) {
-          const int xx = std::min(w - 1, std::max(0, ix - 1 + k));
+        for (int k = 0; k < jx.taps; ++k) {
+          if (wt[k] == 0) continue;
+          const int xx = std::min(w - 1, std::max(0, p0 + k));
           v += wt[k] * src[(static_cast<size_t>(y) * w + xx) * 3 + c];
         }
-        tmp[(static_cast<size_t>(y) * ow + x) * 3 + c] = static_cast<float>(v / sum);
+        tmp[(static_cast<size_t>(y) * ow + x) * 3 + c] = static_cast<float>(v);
       }
     }
   }
   for (int y = 0; y < oh; ++y) {
-    const double fy = (y + 0.5) * sy - 0.5;
-    const int iy = static_cast<int>(std::floor(fy));
-    double wt[4], sum = 0;
-    for (int k = 0; k < 4; ++k) sum += (wt[k] = cubicW(fy - (iy - 1 + k)));
+    const int p0 = jy.primeiro[y];
+    const double* wt = &jy.peso[static_cast<size_t>(y) * jy.taps];
     for (int x = 0; x < ow; ++x) {
       for (int c = 0; c < 3; ++c) {
         double v = 0;
-        for (int k = 0; k < 4; ++k) {
-          const int yy = std::min(h - 1, std::max(0, iy - 1 + k));
+        for (int k = 0; k < jy.taps; ++k) {
+          if (wt[k] == 0) continue;
+          const int yy = std::min(h - 1, std::max(0, p0 + k));
           v += wt[k] * tmp[(static_cast<size_t>(yy) * ow + x) * 3 + c];
         }
-        v /= sum;
         dst[(static_cast<size_t>(y) * ow + x) * 3 + c] =
             static_cast<uint8_t>(std::min(255.0, std::max(0.0, v)) + 0.5);
       }
@@ -257,6 +289,29 @@ int32_t ae_process(ae_engine* e, const uint8_t* rgb, int32_t w, int32_t h, int32
     }
   }
   return AE_OK;
+}
+
+int32_t ae_process_png(ae_engine* e, const char* in_path, const char* out_path, int32_t out_scale,
+                       float strength, int32_t fit_w, int32_t fit_h, const int32_t* cancel) {
+  if (!e || !in_path || !out_path) return AE_ERR_ARGS;
+  if (out_scale != 1 && out_scale != 2 && out_scale != 4) return AE_ERR_ARGS;
+  if (fit_w < 0 || fit_h < 0 || fit_w > 8192 || fit_h > 8192) return AE_ERR_ARGS;
+  aurea_png::Imagem entrada;
+  if (!aurea_png::ler(in_path, &entrada)) return AE_ERR_IO;
+  const int w = entrada.w, h = entrada.h;
+  if (w > 4096 || h > 4096) return AE_ERR_ARGS;
+  const int ow = w * out_scale, oh = h * out_scale;
+  std::unique_ptr<uint8_t[]> ia(new (std::nothrow) uint8_t[static_cast<size_t>(ow) * oh * 3]);
+  if (!ia) return AE_ERR_INFERENCE;
+  const int32_t rc = ae_process(e, entrada.rgb.get(), w, h, out_scale, strength, ia.get(), cancel);
+  if (rc != AE_OK) return rc;
+  if (fit_w <= 0 || fit_h <= 0 || (fit_w == ow && fit_h == oh)) {
+    return aurea_png::gravar(out_path, ia.get(), ow, oh) ? AE_OK : AE_ERR_IO;
+  }
+  std::unique_ptr<uint8_t[]> final(new (std::nothrow) uint8_t[static_cast<size_t>(fit_w) * fit_h * 3]);
+  if (!final) return AE_ERR_INFERENCE;
+  resizeCubic(ia.get(), ow, oh, final.get(), fit_w, fit_h);
+  return aurea_png::gravar(out_path, final.get(), fit_w, fit_h) ? AE_OK : AE_ERR_IO;
 }
 
 }  // extern "C"

@@ -789,13 +789,16 @@ class _Cartao extends StatelessWidget {
                   key: ValueKey('post-apagar-${post.id}'),
                   behavior: HitTestBehavior.opaque,
                   onTap: () => _menu(context),
+                  // A UNICA ACAO do post e apagar: a lixeira a vista, e nao
+                  // tres pontinhos escondendo um item so (a confirmacao
+                  // continua na folha).
                   child: SizedBox(
                     width: 44,
                     height: 44,
                     child: Icon(
-                      CupertinoIcons.ellipsis,
-                      size: 18,
-                      color: AppColors.onDark,
+                      CupertinoIcons.trash,
+                      size: 17,
+                      color: AppColors.muted,
                     ),
                   ),
                 )

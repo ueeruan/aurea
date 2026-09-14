@@ -61,3 +61,26 @@ Host:
 AUREA_ENHANCE_LIB=<caminho>\aurea_enhance.dll flutter test test/rife_motor_nativo_test.dart
 AUREA_RIFE_GPU=1 AUREA_ENHANCE_LIB=<caminho>\aurea_enhance.dll flutter test test/rife_motor_nativo_test.dart
 ```
+
+# Aprimoramento na exportação do editor
+
+`ae_process_png(motor, entrada, saída, escala, força, largura, altura)`
+lê um PNG, roda a rede na escala 1/2/4, leva ao encaixe da composição
+(Catmull-Rom com o núcleo alargado ao reduzir) e grava com troca
+atômica. Os PNGs passam por `aurea_png.cpp` (stb com ligação interna;
+zlib do sistema no Android) e são o mesmo módulo do RIFE.
+
+No app, o clipe de vídeo tem a porta "Aprimorar com IA" (liga,
+intensidade e antes/depois de um quadro). A exportação lê esse clipe na
+resolução da própria fonte (teto de 960x540, sem ampliar; a conta é do
+FFmpeg depois de girar), aplica a câmera lenta se houver e só então a
+rede, quadro a quadro, num isolate. Vídeo que já tem a resolução da
+composição não passa pela rede. Sem o motor, o clipe sai sem o efeito e
+a tela final diz isso; se a rede falhar, a exportação para com o nome do
+clipe.
+
+Host:
+
+```
+AUREA_ENHANCE_LIB=<caminho>\aurea_enhance.dll flutter test test/aprimoramento_export_nativo_test.dart
+```

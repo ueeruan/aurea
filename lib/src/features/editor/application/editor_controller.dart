@@ -4031,6 +4031,19 @@ class EditorController extends Notifier<VideoProject> {
     _replace(layer.copyLayer(interpolacao: modo));
   }
 
+  /// Liga/desliga o APRIMORAMENTO POR IA do clipe e/ou muda a forca
+  /// (0..1). Desligar guarda a forca: religar volta como estava.
+  void setClipAprimoramento(String id, {bool? ligado, double? forca}) {
+    final layer = _layer(id);
+    if (layer is! VideoLayer) return;
+    final f = forca == null || !forca.isFinite ? null : forca.clamp(0.0, 1.0);
+    if ((ligado == null || ligado == layer.aprimorar) &&
+        (f == null || f == layer.forcaDoAprimoramento)) {
+      return;
+    }
+    _replace(layer.copyLayer(aprimorar: ligado, forcaDoAprimoramento: f));
+  }
+
   void setClipTimeRemapEnabled(String id, bool enabled) {
     final layer = _layer(id);
     if (layer is! VideoLayer) return;

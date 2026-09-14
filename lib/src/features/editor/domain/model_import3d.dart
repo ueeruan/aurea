@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:aurea_meshopt/aurea_meshopt.dart';
+
 import 'model_asset3d.dart';
 import 'packed_model_vectors.dart';
 
@@ -116,8 +118,61 @@ class _GltfReader {
     return value;
   }
 
+  /// Vistas comprimidas ja decodificadas (uma vez por vista).
+  final Map<int, Uint8List> _vistasDecodificadas = {};
+
+  static Map? _extensaoMeshopt(Object? dono) {
+    final ext = (dono as Map?)?['extensions'] as Map?;
+    return (ext?['EXT_meshopt_compression'] ?? ext?['KHR_meshopt_compression'])
+        as Map?;
+  }
+
+  /// GLB COMPRIMIDO COM MESHOPT (gltfpack, Blender, glTF-Transform):
+  /// a vista aponta para bytes comprimidos, decodificados em C++ pelo
+  /// meshoptimizer — seguro para arquivo nao confiavel.
+  Uint8List _decodificarVista(Map ext) {
+    final data = buffers[ext['buffer'] as int];
+    final offset = ext['byteOffset'] as int? ?? 0;
+    final length = ext['byteLength'] as int;
+    if (offset < 0 || length < 0 || offset + length > data.length) {
+      modelFail('bufferView comprimido fora do arquivo.');
+    }
+    final count = ext['count'] as int;
+    final stride = ext['byteStride'] as int;
+    if (count <= 0 || stride <= 0 || count * stride > 1 << 30) {
+      modelFail('bufferView comprimido invalido.');
+    }
+    final modo = switch (ext['mode']) {
+      'ATTRIBUTES' => MeshoptMode.attributes,
+      'TRIANGLES' => MeshoptMode.triangles,
+      'INDICES' => MeshoptMode.indices,
+      _ => modelFail('Modo de compressao meshopt desconhecido: ${ext['mode']}.'),
+    };
+    final filtro = switch (ext['filter'] ?? 'NONE') {
+      'NONE' => MeshoptFilter.none,
+      'OCTAHEDRAL' => MeshoptFilter.octahedral,
+      'QUATERNION' => MeshoptFilter.quaternion,
+      'EXPONENTIAL' => MeshoptFilter.exponential,
+      'COLOR' => MeshoptFilter.color,
+      _ => modelFail('Filtro meshopt desconhecido: ${ext['filter']}.'),
+    };
+    final out = decodeMeshopt(
+      mode: modo,
+      filter: filtro,
+      count: count,
+      stride: stride,
+      source: Uint8List.sublistView(data, offset, offset + length),
+    );
+    if (out == null) modelFail('Dados comprimidos (meshopt) corrompidos.');
+    return out;
+  }
+
   Uint8List view(int i) {
     final v = list('bufferViews')[i];
+    final comprimida = _extensaoMeshopt(v);
+    if (comprimida != null) {
+      return _vistasDecodificadas[i] ??= _decodificarVista(comprimida);
+    }
     final data = buffers[v['buffer'] as int];
     final offset = v['byteOffset'] as int? ?? 0,
         length = v['byteLength'] as int;
@@ -251,11 +306,13 @@ class _GltfReader {
       'KHR_materials_unlit',
       'KHR_mesh_quantization',
       'KHR_texture_transform',
+      'EXT_meshopt_compression',
+      'KHR_meshopt_compression',
     };
     for (final e in list('extensionsRequired')) {
       if (!supported.contains(e)) {
         modelFail(
-          'Extensao obrigatoria nao suportada: $e. Exporte GLB sem compressao Draco/Meshopt e com texturas PNG/JPEG.',
+          'Extensao obrigatoria nao suportada: $e. Exporte GLB sem compressao Draco (Meshopt funciona) e com texturas PNG/JPEG.',
         );
       }
     }
@@ -264,15 +321,21 @@ class _GltfReader {
         warnings.add('Extensao opcional nao aplicada: $e');
       }
     }
+    // BUFFER RESERVA do meshopt: declara o tamanho descomprimido e nao
+    // tem bytes (quem tem e a vista comprimida). Nao e "buffer ausente".
+    bool reserva(int i) => _extensaoMeshopt(list('buffers')[i])?['fallback'] == true;
     buffers = [
       for (var i = 0; i < list('buffers').length; i++)
         list('buffers')[i]['uri'] == null
             ? (i == 0 && bin != null
                   ? bin!
+                  : reserva(i)
+                  ? Uint8List(0)
                   : modelFail('Buffer binario ausente.'))
             : resource(list('buffers')[i]['uri'] as String),
     ];
     for (var i = 0; i < buffers.length; i++) {
+      if (reserva(i) && buffers[i].isEmpty) continue;
       if (buffers[i].length < (list('buffers')[i]['byteLength'] as int)) {
         modelFail('Buffer incompleto.');
       }
@@ -437,6 +500,12 @@ class _GltfReader {
           continue;
         }
         final attributes = p['attributes'];
+        // PRIMITIVA SEM POSICAO: a especificacao manda so pular. Antes
+        // virava "Modelo invalido" e o arquivo inteiro era recusado.
+        if (attributes['POSITION'] == null) {
+          warnings.add('Primitiva sem POSITION foi ignorada.');
+          continue;
+        }
         if (attributes['COLOR_0'] != null) {
           warnings.add(
             'Cores por vertice nao aplicadas nesta versao; material e textura de cor preservados.',

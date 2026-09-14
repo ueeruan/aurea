@@ -69,6 +69,11 @@ class ModelAsset3D {
       for (final t in (p['targets'] as List? ?? const [])) {
         bytes += daLista((t as Map)['positions']) + daLista(t['normals']);
       }
+      // Niveis de detalhe da importacao: mais indices sobre os mesmos
+      // vertices.
+      for (final l in (p['lods'] as List? ?? const [])) {
+        bytes += daLista(l);
+      }
     }
     for (final c in clips) {
       for (final channel in c['channels'] as List) {
@@ -210,6 +215,7 @@ class ModelAsset3D {
     );
     final vertices = PackedModelVectors(vertexCount, 3);
     final faces = <List<int>>[];
+    final partes = <ParteDoModelo>[];
     var vertexCursor = 0;
     final uvs = <Offset?>[], normals = <Vec3?>[], materials = <Material3D>[];
     for (final p in primitives) {
@@ -281,6 +287,15 @@ class ModelAsset3D {
       // Mirrored node transforms reverse winding. Skinning already outputs
       // world coordinates; a mesh-node matrix must not be applied twice.
       final mirrored = skin == null && world[ni]!.determinant() < 0;
+      partes.add(
+        ParteDoModelo(
+          primeiro: first,
+          indices: indices,
+          lods: p['lods'] as List?,
+          material: material,
+          espelhado: mirrored,
+        ),
+      );
       for (var j = 0; j + 2 < indices.length; j += 3) {
         faces.add([
           first + (indices[j] as int),
@@ -296,6 +311,7 @@ class ModelAsset3D {
       normals,
       materials,
       {for (final j in joints) j: normalized(world[j]!.getTranslation())},
+      partes: partes,
     );
   }
 
@@ -347,19 +363,47 @@ class ModelAsset3D {
   }
 }
 
+/// Uma primitiva dentro do quadro avaliado: onde os vertices dela
+/// comecam, os indices cheios e os niveis de detalhe da importacao.
+class ParteDoModelo {
+  const ParteDoModelo({
+    required this.primeiro,
+    required this.indices,
+    required this.material,
+    required this.espelhado,
+    this.lods,
+  });
+  final int primeiro;
+  final List indices;
+  final List? lods;
+  final Material3D material;
+  final bool espelhado;
+
+  /// Os indices do [nivel] (0 = 1/4, 1 = 1/16); sem nivel, os cheios.
+  List facesDoNivel(int nivel) {
+    final l = lods;
+    if (l == null || l.isEmpty) return indices;
+    return l[math.min(nivel, l.length - 1)] as List;
+  }
+}
+
 class ModelFrame3D {
   const ModelFrame3D(
     this.mesh,
     this.uvs,
     this.normals,
     this.materials,
-    this.joints,
-  );
+    this.joints, {
+    this.partes = const [],
+  });
   final Element3DMesh mesh;
   final List<Offset?> uvs;
   final List<Vec3?> normals;
   final List<Material3D> materials;
   final Map<int, vm.Vector3> joints;
+
+  /// As primitivas do quadro (para montar os niveis de detalhe).
+  final List<ParteDoModelo> partes;
 
   static final _rascunhos = Expando<Map<int, ModelFrame3D>>();
 
@@ -384,6 +428,51 @@ class ModelFrame3D {
     if (faces <= maxFaces || maxFaces <= 0) return this;
     final guardados = _rascunhos[this] ??= {};
     return guardados[maxFaces] ??= () {
+      // NIVEL DE DETALHE DA IMPORTACAO (simplificado em C++ sobre os
+      // mesmos vertices): o mais fino que cabe no teto. A malha continua
+      // fechada — o "uma face a cada N" abaixo fica so para modelo antigo,
+      // salvo antes dos niveis existirem.
+      if (partes.any((p) => p.lods != null && p.lods!.isNotEmpty)) {
+        for (var nivel = 0; nivel < 2; nivel++) {
+          final total = partes.fold<int>(
+            0,
+            (s, p) => s + p.facesDoNivel(nivel).length ~/ 3,
+          );
+          if (total > maxFaces && nivel == 0) continue;
+          final facesNovas = <List<int>>[];
+          final materiaisNovos = <Material3D>[];
+          for (final p in partes) {
+            final idx = p.facesDoNivel(nivel);
+            for (var j = 0; j + 2 < idx.length; j += 3) {
+              facesNovas.add([
+                p.primeiro + (idx[j] as int),
+                p.primeiro + (idx[j + (p.espelhado ? 2 : 1)] as int),
+                p.primeiro + (idx[j + (p.espelhado ? 1 : 2)] as int),
+              ]);
+              materiaisNovos.add(p.material);
+            }
+          }
+          final nivelado = ModelFrame3D(
+            Element3DMesh(mesh.verts, facesNovas, normals: mesh.normals),
+            uvs,
+            normals,
+            materiaisNovos,
+            joints,
+          );
+          return facesNovas.length <= maxFaces
+              ? nivelado
+              : nivelado._aCadaN(maxFaces);
+        }
+      }
+      return _aCadaN(maxFaces);
+    }();
+  }
+
+  /// Uma face a cada N (o rascunho de antes dos niveis de detalhe).
+  ModelFrame3D _aCadaN(int maxFaces) {
+    final faces = mesh.faces.length;
+    if (faces <= maxFaces) return this;
+    return () {
       final passo = (faces / maxFaces).ceil();
       final facesNovas = <List<int>>[];
       final materiaisNovos = <Material3D>[];

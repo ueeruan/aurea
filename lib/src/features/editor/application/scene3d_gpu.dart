@@ -1,8 +1,6 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 
-import 'package:aurea_meshopt/aurea_meshopt.dart';
 
 import 'dart:math' as math;
 import 'dart:ui' as ui;
@@ -116,8 +114,6 @@ class Scene3DGpu {
   // Uploads include an RGBA readback and mip generation. Serializing them
   // across views prevents a textured import from allocating all copies at once.
   static Future<void> _uploads = Future<void>.value();
-  static Future<void> _meshJobs = Future<void>.value();
-  static int optimizedGeometryCount = 0;
 
   /// Carrega os shaders e recursos estaticos do motor. Falha em silencio
   /// (com log) onde nao ha GPU: [pronto] fica false e o pintor em CPU
@@ -652,44 +648,11 @@ class Scene3DGpu {
       no.geometrias[e.key] = geometria;
       no.indices[e.key] = g.indexList;
       no.tamanhos[e.key] = g.positions.length;
-      if (!fonte.dinamica &&
-          !instanciado &&
-          g.indices >= 3000 &&
-          e.key.kind != MaterialKind.transparent &&
-          e.key.opacity >= .999 &&
-          e.key.baseColor.a >= .999) {
-        // One background job at a time bounds temporary native allocations.
-        // The first preview can render while optimization runs.
-        final original = g.indexList;
-        _meshJobs = _meshJobs.then((_) async {
-          if (_descartado || !identical(no.geometrias[e.key], geometria)) {
-            return;
-          }
-          try {
-            final optimized = await compute(_optimizeMesh, (
-              original,
-              g.vertices,
-            ));
-            if (_descartado || !identical(no.geometrias[e.key], geometria)) {
-              return;
-            }
-            final replacement = fs.MeshGeometry.fromArrays(
-              storage: fs.GeometryStorage.fixed,
-              positions: g.positions,
-              normals: g.normals,
-              texCoords: g.texCoords,
-              indices: optimized,
-            );
-            primitive.geometry = replacement;
-            no.geometrias[e.key] = replacement;
-            no.indices[e.key] = optimized;
-            optimizedGeometryCount++;
-            onMudou?.call();
-          } catch (error) {
-            debugPrint('meshoptimizer: original mesh retained ($error)');
-          }
-        });
-      }
+      // O CACHE DE VERTICES saiu daqui. Rodava em `compute` (um isolate
+      // aberto por malha: ~1,4 s sincrono no iPhone 13) e depois reenviava
+      // a geometria inteira. Agora a importacao ja entrega os triangulos
+      // na ordem boa, soldados e com niveis de detalhe, uma vez so e fora
+      // da thread da tela — ver domain/malha_importada.dart.
       if (instanciado) {
         final im = fs.InstancedMesh(
           geometry: geometria,
@@ -1383,5 +1346,4 @@ class _NoGpu {
   }
 }
 
-Uint32List _optimizeMesh((Uint32List, int) input) =>
-    optimizeVertexCache(input.$1, input.$2);
+

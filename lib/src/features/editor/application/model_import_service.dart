@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
 
+import '../domain/malha_importada.dart';
 import '../domain/model_asset3d.dart';
 import '../domain/model_import3d.dart';
 import '../domain/fbx_import3d.dart';
@@ -12,7 +13,13 @@ import '../domain/obj_import3d.dart';
 // analyzer here: it blocks the UI and its recommendations are not consumed
 // by the active renderer.
 Future<ModelAsset3D> readModel3DFiles(List<String> paths) =>
-    Isolate.run(() => _read(paths));
+    Isolate.run(() async {
+      final asset = await _read(paths);
+      // Solda, cache de vertices, busca e niveis de detalhe em C++ — aqui,
+      // no isolate da importacao, uma vez so (ver malha_importada.dart).
+      otimizarMalhasImportadas(asset.data);
+      return asset;
+    });
 
 Future<ModelAsset3D> _read(List<String> paths) async {
   final models = paths
@@ -101,18 +108,32 @@ Future<ModelAsset3D> _read(List<String> paths) async {
   }
   if (lower.endsWith('.obj')) {
     final source = utf8.decode(bytes);
+    // MTL E TEXTURA SAO OPCIONAIS: o que faltar vira aviso no importador,
+    // e a geometria entra com material padrao.
+    Future<Uint8List?> talvez(String uri, {Directory? relativeTo}) async {
+      try {
+        return await resolve(uri, relativeTo: relativeTo);
+      } on ModelImportException {
+        return null;
+      }
+    }
+
     for (final line in const LineSplitter().convert(source)) {
       if (!line.trimLeft().startsWith('mtllib ')) continue;
       final mtlName = line.trim().substring(7).trim();
-      final mtl = utf8.decode(await resolve(mtlName));
+      final mtlBytes = await talvez(mtlName);
+      if (mtlBytes == null) continue;
+      final mtl = utf8.decode(mtlBytes, allowMalformed: true);
       for (final entry in const LineSplitter().convert(mtl)) {
         if (!entry.trimLeft().startsWith('map_Kd ')) continue;
-        final name = entry.trim().substring(7).trim();
-        if (name.startsWith('-')) continue;
+        final name = texturaDoMapKd(
+          entry.trim().substring(7).trim().split(RegExp(r'\s+')),
+        );
+        if (name == null) continue;
         final mtlDirectory = Directory.fromUri(
           file.parent.uri.resolve(mtlName).resolve('.'),
         );
-        await resolve(name, relativeTo: mtlDirectory);
+        await talvez(name, relativeTo: mtlDirectory);
       }
     }
     return importObj3D(
@@ -142,9 +163,18 @@ Future<ModelAsset3D> _read(List<String> paths) async {
       if (uri != null && !uri.startsWith('data:')) await resolve(uri);
     }
   }
-  return importGltf3D(
+  final asset = importGltf3D(
     bytes,
     binary: lower.endsWith('.glb'),
     resources: resources,
   );
+  // O NOME DO ARQUIVO quando a cena nao tem nome de verdade: quase todo
+  // exportador chama a cena de "Scene", e a camada nascia com esse nome.
+  final nome = (asset.data['name'] as String? ?? '').trim();
+  if (nome.isEmpty || nome == 'Scene' || nome == 'Modelo glTF') {
+    final arquivo = file.uri.pathSegments.last;
+    final ponto = arquivo.lastIndexOf('.');
+    asset.data['name'] = ponto > 0 ? arquivo.substring(0, ponto) : arquivo;
+  }
+  return asset;
 }

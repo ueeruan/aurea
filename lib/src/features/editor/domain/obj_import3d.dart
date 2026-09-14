@@ -33,10 +33,15 @@ ModelAsset3D importObj3D(
 
   void mtl(String file) {
     final bytes = resources[file];
+    // MTL AUSENTE NAO BARRA O MODELO. A geometria esta inteira no OBJ; sem
+    // o MTL ela entra com material padrao e um aviso — antes a importacao
+    // inteira falhava por causa de um arquivo de cor.
     if (bytes == null) {
-      modelFail(
-        'Material ausente: $file. Selecione tambem o MTL e suas texturas.',
+      warnings.add(
+        'Material ausente: $file. O modelo entrou com material padrao; '
+        'selecione tambem o MTL e as texturas para as cores.',
       );
+      return;
     }
     Map<String, dynamic>? current;
     for (final line in const LineSplitter().convert(utf8.decode(bytes))) {
@@ -77,16 +82,21 @@ ModelAsset3D importObj3D(
           current['roughness'] = numbers(rest, 1).first.clamp(0.0, 1.0);
         }
         if (op == 'map_Kd') {
-          if (rest.isEmpty || rest.first.startsWith('-')) {
-            modelFail(
-              'MTL map_Kd com opcoes nao suportadas. Exporte GLB para preservar a textura.',
+          // OPCOES DO MAP_KD (-s, -o, -bm...): o arquivo e o que sobra
+          // no fim. As opcoes nao sao aplicadas, a textura sim.
+          final path = texturaDoMapKd(rest);
+          final bytes = path == null ? null : resources[path];
+          if (path == null || bytes == null) {
+            warnings.add(
+              'Textura ausente: ${path ?? rest.join(' ')}. A cor do material foi mantida.',
             );
+          } else {
+            if (rest.first.startsWith('-')) {
+              warnings.add('Opcoes do map_Kd (escala, deslocamento) nao sao aplicadas.');
+            }
+            current['image'] =
+                'data:application/octet-stream;base64,${base64Encode(bytes)}';
           }
-          final path = rest.join(' ');
-          final bytes = resources[path];
-          if (bytes == null) modelFail('Textura ausente: $path.');
-          current['image'] =
-              'data:application/octet-stream;base64,${base64Encode(bytes)}';
         }
         if (['map_Bump', 'bump', 'map_Ks', 'map_Ns', 'disp'].contains(op)) {
           warnings.add('Mapas adicionais do MTL nao sao aplicados.');
@@ -105,12 +115,18 @@ ModelAsset3D importObj3D(
     switch (op) {
       case 'v':
         final v = numbers(rest, 3);
-        if (rest.length > 3) {
+        // `v x y z w` e coordenada homogenea; `v x y z r g b` (seis ou
+        // sete numeros) e COR POR VERTICE, a extensao que ZBrush, MeshLab
+        // e fotogrametria exportam. Dividir pela "cor vermelha" achatava o
+        // modelo — e vermelho zero parava a importacao.
+        if (rest.length == 4) {
           final w = numbers(rest.skip(3).toList(), 1).first;
           if (w == 0) modelFail('Vertice OBJ com w zero.');
           for (var i = 0; i < 3; i++) {
             v[i] /= w;
           }
+        } else if (rest.length >= 6) {
+          warnings.add('Cores por vertice do OBJ nao sao aplicadas.');
         }
         positions.add(v);
       case 'vt':
@@ -125,7 +141,9 @@ ModelAsset3D importObj3D(
       case 'usemtl':
         material = materialIds[rest.join(' ')] ?? -1;
         if (material < 0) {
-          modelFail('Material OBJ nao definido: ${rest.join(' ')}.');
+          warnings.add(
+            'Material OBJ nao definido: ${rest.join(' ')}. Usado o material padrao.',
+          );
         }
       case 'f':
         if (rest.length < 3 || rest.length > 4096) {
@@ -273,4 +291,45 @@ List<int> triangulateModelPolygon(List<List<double>> vertices, List<int> face) {
     }
   }
   return [...result, ...remaining];
+}
+
+/// O ARQUIVO de uma linha `map_Kd` depois das opcoes (`-s 1 1 1`, `-bm 2`,
+/// `-clamp on`...). Cada opcao consome um numero conhecido de valores; o
+/// que sobra e o caminho (que pode ter espacos).
+String? texturaDoMapKd(List<String> partes) {
+  const valores = {
+    '-blendu': 1,
+    '-blendv': 1,
+    '-bm': 1,
+    '-boost': 1,
+    '-cc': 1,
+    '-clamp': 1,
+    '-imfchan': 1,
+    '-mm': 2,
+    '-o': 3,
+    '-s': 3,
+    '-t': 3,
+    '-texres': 1,
+    '-type': 1,
+  };
+  var i = 0;
+  while (i < partes.length && partes[i].startsWith('-')) {
+    final n = valores[partes[i]];
+    if (n == null) {
+      i++;
+      continue;
+    }
+    // -o, -s e -t aceitam de 1 a 3 numeros.
+    var consumidos = 0;
+    i++;
+    while (consumidos < n &&
+        i < partes.length &&
+        double.tryParse(partes[i]) != null) {
+      i++;
+      consumidos++;
+    }
+    if (n == 1 && consumidos == 0 && i < partes.length) i++;
+  }
+  if (i >= partes.length) return null;
+  return partes.sublist(i).join(' ');
 }

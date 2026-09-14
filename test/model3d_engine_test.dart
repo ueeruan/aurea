@@ -386,11 +386,16 @@ void main() {
   test(
     'OBJ/MTL sem recurso nao resulta em importacao silenciosamente quebrada',
     () {
+      // 14/09/2026: MTL ausente deixou de barrar a geometria. O modelo
+      // entra com material padrao e o AVISO diz qual arquivo faltou — nao
+      // e silencioso, e nao perde o modelo por causa de um arquivo de cor.
+      final semMtl = importObj3D(
+        'mtllib material.mtl\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3',
+      );
+      expect(semMtl.primitives, hasLength(1));
       expect(
-        () => importObj3D(
-          'mtllib material.mtl\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3',
-        ),
-        throwsA(isA<ModelImportException>()),
+        semMtl.warnings.where((w) => w.contains('material.mtl')),
+        isNotEmpty,
       );
       expect(
         () => importObj3D('v 0 0 0\nf 1 2 3'),

@@ -570,12 +570,16 @@ void main() {
     expect(r.abriu, isFalse);
   });
 
-  test('meshopt e recusado', () {
+  // 14/09/2026: o meshoptimizer inteiro entrou no pacote nativo, com o
+  // decodificador do EXT_meshopt_compression. Arquivo que declara a
+  // extensao abre; o comprimido de verdade e comparado vertice a vertice
+  // em test/modelo_importado_cpp_test.dart.
+  test('meshopt abre', () {
     final g = _malha(10)
       ..usadas.add('EXT_meshopt_compression')
       ..exigidas.add('EXT_meshopt_compression');
     final r = _medir('Meshopt', g.bytes());
     resultados.add(r);
-    expect(r.abriu, isFalse);
+    expect(r.abriu, isTrue, reason: r.recusa);
   });
 }

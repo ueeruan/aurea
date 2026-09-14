@@ -358,3 +358,49 @@ List<double> matrizDeGanho(Rgb ganho) => [
   0, 0, ganho.b, 0, 0,
   0, 0, 0, 1, 0,
 ];
+
+/// OS LOOKS: saturacao, contraste (pivo no meio), ganho e piso por canal.
+/// Na ordem das opcoes do efeito Looks.
+const _looks = <({double sat, double contraste, List<double> ganho, List<double> piso})>[
+  (sat: 1.25, contraste: 1.18, ganho: [1.02, 1.02, 1.0], piso: [-.02, -.02, -.02]),
+  (sat: 1.1, contraste: 1.12, ganho: [1.06, 1.0, 1.08], piso: [-.02, 0, .04]),
+  (sat: .85, contraste: .9, ganho: [1.08, 1.0, .86], piso: [.06, .04, .02]),
+  (sat: .9, contraste: 1.35, ganho: [.95, .95, .97], piso: [-.06, -.06, -.05]),
+  (sat: 1.4, contraste: 1.05, ganho: [1.04, 1.04, 1.06], piso: [.02, .02, .03]),
+  (sat: .9, contraste: .85, ganho: [1.03, 1.0, 1.02], piso: [.05, .04, .05]),
+  (sat: .92, contraste: 1.08, ganho: [1.04, 1.0, .94], piso: [.03, .02, 0]),
+  (sat: .45, contraste: 1.3, ganho: [1, 1, 1], piso: [-.03, -.03, -.03]),
+  (sat: 0, contraste: 1.4, ganho: [1, 1, 1], piso: [-.05, -.05, -.05]),
+  (sat: 1.1, contraste: 1.05, ganho: [1.12, 1.02, .8], piso: [.03, .01, -.02]),
+  (sat: .95, contraste: 1.05, ganho: [.9, 1.0, 1.12], piso: [-.01, .01, .04]),
+  (sat: 1.15, contraste: 1.2, ganho: [1.08, 1.0, .95], piso: [-.03, 0, .05]),
+];
+
+/// A MATRIZ DO LOOK [look] com [forca] de 0 a 100, no formato do
+/// `ColorFilter.matrix` (4x5, piso em 0..255). Forca 0 e a identidade.
+List<double> matrizDoLook(int look, double forca) {
+  final l = _looks[look.clamp(0, _looks.length - 1)];
+  final f = (forca.isFinite ? forca : 0).clamp(0.0, 100.0) / 100;
+  const lr = .2126, lg = .7152, lb = .0722;
+  final s = l.sat, k = l.contraste;
+  // Saturacao em volta da luma, depois contraste no pivo 0,5, depois ganho
+  // e piso do canal: c' = g * (k * (sat(c) - .5) + .5) + piso.
+  final sat = <List<double>>[
+    [lr * (1 - s) + s, lg * (1 - s), lb * (1 - s)],
+    [lr * (1 - s), lg * (1 - s) + s, lb * (1 - s)],
+    [lr * (1 - s), lg * (1 - s), lb * (1 - s) + s],
+  ];
+  final m = List<double>.filled(20, 0);
+  for (var i = 0; i < 3; i++) {
+    final g = l.ganho[i];
+    for (var j = 0; j < 3; j++) {
+      final alvo = g * k * sat[i][j];
+      final identidade = i == j ? 1.0 : 0.0;
+      m[i * 5 + j] = identidade + (alvo - identidade) * f;
+    }
+    final piso = (g * (.5 - .5 * k) + l.piso[i]) * 255;
+    m[i * 5 + 4] = piso * f;
+  }
+  m[18] = 1;
+  return m;
+}

@@ -171,6 +171,7 @@ void main() {
         'timeSlice',
         'posterizeTime',
         'mathOps',
+        'sSharpen',
       };
 
       final mortos = <String>[];

@@ -743,5 +743,20 @@ void main() {
     c=mix(base,destino,m);
   }
 
+  // 47 - S_SHARPEN. O detalhe e a diferenca para o desfoque em anel em
+  // duas escalas (fina inteira, grossa pela metade). A borda que ja passa
+  // do limiar perde o reforco com transicao suave — sem o degrau do
+  // unsharp comum. A luma e a cor do detalhe tem forcas separadas. Forca
+  // zero soma zero: a imagem sai intacta.
+  if(mode==47) {
+    float raio=clamp(p0.y,0.5,6.0)*uPixelScale;
+    vec3 b1=straight(desfoqueEmAnel(uv,raio));
+    vec3 b2=straight(desfoqueEmAnel(uv,raio*2.0));
+    vec3 det=(c-b1)+(b1-b2)*.5;
+    float dl=lum(det);
+    float w=1.0-smoothstep(p0.z,p0.z*2.0+.02,abs(dl));
+    c=clamp(c+(vec3(dl)*p0.w+(det-vec3(dl))*p1.x)*p0.x*w,0.0,1.0);
+  }
+
   fragColor=premul(c,a);
 }

@@ -85,7 +85,8 @@ void main() {
     // 41 -> 42 no mesmo dia: Slice Glitch dos one framers (modo 44).
     // 42 -> 43: Hue/Saturation da camada de ajuste do After (modo 45).
     // 43 -> 44: S_MathOps (modo 46).
-    expect(pixelKernels.length, 44);
+    // 44 -> 45: S_Sharpen (modo 47).
+    expect(pixelKernels.length, 45);
     expect(
       pixelKernels.values.map((k) => k.mode).toSet().length,
       pixelKernels.length,

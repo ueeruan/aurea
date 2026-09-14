@@ -229,6 +229,12 @@
     "s_flicker": {
       "preset": null
     },
+    "s_sharpen": {
+      "preset": null
+    },
+    "looks": {
+      "preset": null
+    },
     "math_ops": {
       "preset": null
     }

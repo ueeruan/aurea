@@ -2844,6 +2844,8 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
         // S_MathOps le a camada desfocada e a mascara de luma em volta de
         // cada pixel: a operacao nao cabe numa matriz de cor.
         case EffectType.mathOps:
+        // S_Sharpen compara cada pixel com o desfoque em anel: so no shader.
+        case EffectType.sSharpen:
           break;
 
         case EffectType.gaussianBlur:
@@ -3840,6 +3842,18 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
                 opacidade:
                     effect.paramAt('opacity', local) *
                     (modoMapa == 0 ? 1 : .5),
+              ),
+            ),
+            child: out,
+          );
+
+        // LOOKS: uma matriz por look, misturada com a identidade pela forca.
+        case EffectType.looks:
+          out = ColorFiltered(
+            colorFilter: ColorFilter.matrix(
+              matrizDoLook(
+                effect.paramAt('look', local).round(),
+                effect.paramAt('forca', local),
               ),
             ),
             child: out,

@@ -273,6 +273,13 @@ const pixelKernels = <EffectType, PixelKernel>{
     'colorize_hue',
     'colorize_saturation',
   ]),
+  EffectType.sSharpen: PixelKernel(47, [
+    'amount',
+    'width',
+    'threshold',
+    'luma',
+    'chroma',
+  ]),
   EffectType.mathOps: PixelKernel(46, [
     'operation',
     'source_b',

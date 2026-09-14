@@ -90,6 +90,8 @@ enum EffectType {
   hueSaturation,
   sFlicker,
   mathOps,
+  sSharpen,
+  looks,
 }
 
 /// O tipo a partir do IDENTIFICADOR estavel.
@@ -3478,6 +3480,89 @@ const effectSpecs = <EffectType, EffectSpec>{
   // mascara de luma limita onde o resultado aparece. Somar com a fonte B
   // Nenhuma (preto) e tudo no neutro devolve a imagem intacta. So no
   // shader: a fonte desfocada e a mascara leem a vizinhanca do pixel.
+  // S_SHARPEN (Sapphire): afia em duas escalas com amostra em anel, e a
+  // borda que ja e forte (acima do limiar) nao recebe mais: e o que evita
+  // o halo branco do unsharp comum. Luma e cor separados.
+  EffectType.sSharpen: EffectSpec(
+    id: 's_sharpen',
+    name: 'S_Sharpen',
+    category: 'Lens',
+    synonyms: [
+      's_sharpen',
+      's sharpen',
+      'sharpen',
+      'nitidez',
+      'afiar',
+      'detalhe',
+      'sapphire',
+    ],
+    params: {
+      'amount': EffectParam('Força', 1, 0, 3),
+      'width': EffectParam('Largura', 1.5, .5, 6),
+      'threshold': EffectParam('Limiar de borda', .15, 0, 1),
+      'luma': EffectParam('Nitidez da luma', 1, 0, 2),
+      'chroma': EffectParam('Nitidez da cor', 0, 0, 2),
+    },
+    montar: ['amount', 'width', 'threshold'],
+    presets: [
+      EffectPronto('Suave', {'amount': .6, 'width': 1}),
+      EffectPronto('Médio', {'amount': 1.2, 'width': 1.5}),
+      EffectPronto('Forte', {'amount': 2.2, 'width': 2}),
+    ],
+  ),
+
+  // LOOKS (o Magic Bullet Looks da camada de ajuste): um look pronto e a
+  // forca dele. Cada look e UMA matriz de cor (saturacao, contraste,
+  // ganho e piso por canal) e a forca mistura com a identidade — conta
+  // linear, entao 0 devolve a imagem exata e o meio e o meio. Um passe so,
+  // igual na previa, na exportacao e no teste.
+  EffectType.looks: EffectSpec(
+    id: 'looks',
+    name: 'Looks',
+    category: 'Color',
+    synonyms: [
+      'looks',
+      'magic bullet',
+      'look',
+      'lut',
+      'coloring',
+      'cc',
+      'color grading',
+      'cinema',
+      'teal orange',
+    ],
+    params: {
+      'look': EffectParam(
+        'Look',
+        0,
+        0,
+        11,
+        kind: ParamKind.choice,
+        options: [
+          'HDR',
+          'Azul teal',
+          'Vintage quente',
+          'Escuro contrastado',
+          'Anime',
+          'PSD suave',
+          'Cor de filme',
+          'Bleach bypass',
+          'Noir',
+          'Dourado',
+          'Frio',
+          'Blockbuster',
+        ],
+      ),
+      'forca': EffectParam('Força', 80, 0, 100),
+    },
+    montar: ['look', 'forca'],
+    presets: [
+      EffectPronto('Blockbuster', {'look': 11, 'forca': 85}),
+      EffectPronto('Cor de filme', {'look': 6, 'forca': 80}),
+      EffectPronto('Noir', {'look': 8, 'forca': 100}),
+    ],
+  ),
+
   EffectType.mathOps: EffectSpec(
     id: 'math_ops',
     name: 'S_MathOps',
@@ -3606,6 +3691,8 @@ const efeitosDeEdit = <EffectType>[
   EffectType.selectiveColor,
   EffectType.brightnessContrast,
   EffectType.mathOps,
+  EffectType.looks,
+  EffectType.sSharpen,
 ];
 
 /// Categorias do catalogo, na ordem em que aparecem.

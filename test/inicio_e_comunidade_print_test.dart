@@ -143,7 +143,14 @@ void main() {
       await _montar(tester, tamanho, _comFundo(chave, const CommunityTab()), feed);
       await tester.pump(const Duration(milliseconds: 600));
       // A imagem do post decodifica fora do relogio falso do teste.
-      await tester.runAsync(() => precacheImage(FileImage(File(imagem)), tester.element(find.byType(CommunityTab))));
+      // Com teto: no segundo tamanho a imagem ja esta no cache do teste
+      // anterior e o precache pode nunca completar no relogio falso.
+      await tester.runAsync(
+        () => precacheImage(
+          FileImage(File(imagem)),
+          tester.element(find.byType(CommunityTab)),
+        ).timeout(const Duration(seconds: 3), onTimeout: () {}),
+      );
       await tester.pump();
       expect(tester.takeException(), isNull);
       expect(find.text('Bruno 3D'), findsWidgets);

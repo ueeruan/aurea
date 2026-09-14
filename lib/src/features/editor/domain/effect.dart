@@ -3599,6 +3599,33 @@ class EffectInstance {
     );
   }
 
+  /// O INSTANTE [de] DO EFEITO VAI PARA [para]: todo parametro com marca
+  /// ali anda junto, com o valor e a curva dele.
+  ///
+  /// O keyframe do efeito e universal (ver [withKeyframeToggled]); mover
+  /// so parte dos parametros deixaria metade da marca para tras. O proprio
+  /// efeito, intacto, quando nenhum parametro tem marca em [de].
+  EffectInstance comKeyframeMovido(Duration de, Duration para) {
+    Map<String, AnimatedDouble>? novos;
+    for (final p in params.entries) {
+      final movida = p.value.comKeyframeMovido(de, para);
+      if (identical(movida, p.value)) continue;
+      (novos ??= {...params})[p.key] = movida;
+    }
+    return novos == null ? this : copyWith(params: novos);
+  }
+
+  /// TIRA a marca de [local] de todos os parametros. Intacto quando nao
+  /// havia nenhuma.
+  EffectInstance semKeyframeEm(Duration local) {
+    Map<String, AnimatedDouble>? novos;
+    for (final p in params.entries) {
+      if (!p.value.hasKeyframeAt(local)) continue;
+      (novos ??= {...params})[p.key] = p.value.withoutKeyframe(local);
+    }
+    return novos == null ? this : copyWith(params: novos);
+  }
+
   /// Tempos (locais) com keyframe em qualquer parametro.
   Iterable<Duration> get keyframeTimes sync* {
     for (final t in params.values) {

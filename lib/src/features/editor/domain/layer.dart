@@ -23,6 +23,43 @@ import 'text_path.dart';
 import 'text_animator.dart';
 import 'cut_ops.dart' show remappedContentTime;
 
+/// POR QUE O LOSANGO DA LINHA DO TEMPO NAO ANDA.
+///
+/// Arrastar um keyframe pode ser recusado por motivos bem diferentes, e
+/// cada um pede uma resposta diferente de quem arrasta: um aviso, um
+/// limite calado, nada. Com um booleano a interface nao tinha o que
+/// explicar — e "segurei e nao aconteceu nada" foi o relato do beta.
+enum MotivoDoKeyframeParado {
+  /// A camada nao existe mais.
+  semCamada,
+
+  /// Nao ha marca nenhuma neste instante.
+  semKeyframe,
+
+  /// O instante tem marca de MODULO (grade do nulo, operadores da forma,
+  /// lente da camera, cena 3D). Essas trilhas ainda nao andam com o
+  /// losango, e mover so o resto rachava o losango em dois.
+  modulo,
+
+  /// O destino fica antes do comeco ou depois do fim da camada.
+  foraDaCamada,
+
+  /// Ja ha outra marca no destino.
+  ocupado,
+}
+
+/// Ha algum dos [tempos] (em us) a menos de [kToleranciaDoKeyframe] de
+/// [t]? E a regua de "mesmo instante" das trilhas, aplicada a camada.
+bool _marcaPerto(Set<int> tempos, Duration t) {
+  final us = t.inMicroseconds;
+  if (tempos.contains(us)) return true;
+  final tol = kToleranciaDoKeyframe.inMicroseconds;
+  for (final outro in tempos) {
+    if ((outro - us).abs() < tol) return true;
+  }
+  return false;
+}
+
 /// Camada da composicao (compositor por camadas: tudo tem transform
 /// animavel). Coordenadas em pixels logicos; posicao e o centro; o pivo e
 /// um deslocamento a partir do centro, em torno do qual gira/escala/skew.
@@ -165,10 +202,7 @@ sealed class Layer {
   };
   Set<int> get pivotTimesUs => _times(pivot.keyframes);
 
-  /// Os instantes das trilhas de TRANSFORMACAO — as que a linha do tempo
-  /// sabe arrastar. Efeito, mascara e modulo ficam de fora: cada um
-  /// guarda o tempo do seu jeito, e mover so metade das marcas de um
-  /// instante rachava o losango em dois.
+  /// Os instantes das trilhas de TRANSFORMACAO.
   Set<int> get transformTimesUs => {
     ...positionTimesUs,
     ...scaleTimesUs,
@@ -178,16 +212,106 @@ sealed class Layer {
     ...pivotTimesUs,
   };
 
-  /// Este instante pode ser arrastado? So quando TUDO que ha nele e
-  /// transformacao. Um losango que carrega marca de efeito nao se mexe —
-  /// e nao deve parecer que se mexe.
-  bool podeArrastarKeyframeEm(Duration t) {
-    final us = t.inMicroseconds;
-    if (!transformTimesUs.contains(us)) return false;
-    return !effectTimesUs.contains(us) &&
-        !maskTimesUs.contains(us) &&
-        !moduleTimesUs.contains(us);
+  /// Este instante pode ser arrastado? Ver [porQueNaoArrastaKeyframeEm].
+  bool podeArrastarKeyframeEm(Duration t) =>
+      porQueNaoArrastaKeyframeEm(t) == null;
+
+  /// POR QUE O LOSANGO DE [t] NAO SE ARRASTA — nulo quando se arrasta.
+  ///
+  /// O losango e um INSTANTE, e arrastar leva tudo o que ha nele:
+  /// transformacao, parametros de efeito e trilhas das mascaras. Antes so
+  /// a transformacao andava, e qualquer marca de efeito ou mascara no
+  /// mesmo instante travava o losango inteiro.
+  ///
+  /// MODULO continua de fora: grade, operadores da forma, lente e cena 3D
+  /// guardam o tempo cada um do seu jeito, e mover so o resto rachava o
+  /// losango em dois. Um losango com marca de modulo nao se mexe — e nao
+  /// deve parecer que se mexe.
+  ///
+  /// "Neste instante" usa a tolerancia das trilhas
+  /// ([kToleranciaDoKeyframe]): e ela que decide o que anda junto.
+  MotivoDoKeyframeParado? porQueNaoArrastaKeyframeEm(Duration t) {
+    if (_marcaPerto(moduleTimesUs, t)) return MotivoDoKeyframeParado.modulo;
+    if (_marcaPerto(transformTimesUs, t) ||
+        _marcaPerto(effectTimesUs, t) ||
+        _marcaPerto(maskTimesUs, t)) {
+      return null;
+    }
+    return MotivoDoKeyframeParado.semKeyframe;
   }
+
+  /// POR QUE O INSTANTE [de] NAO PODE IR PARA [para] — nulo quando pode.
+  ///
+  /// Alem do que vale para arrastar: o destino fica dentro da camada, e
+  /// nao encosta em OUTRA marca. Juntar dois instantes num so apagaria a
+  /// diferenca entre eles, e o losango que resultasse nao se separaria
+  /// mais arrastando — arrastar leva tudo o que ha no instante.
+  MotivoDoKeyframeParado? porQueNaoMoveKeyframe(Duration de, Duration para) {
+    final motivo = porQueNaoArrastaKeyframeEm(de);
+    if (motivo != null || de == para) return motivo;
+    if (para < Duration.zero || para > duration) {
+      return MotivoDoKeyframeParado.foraDaCamada;
+    }
+    final tol = kToleranciaDoKeyframe.inMicroseconds;
+    for (final us in <int>{
+      ...transformTimesUs,
+      ...effectTimesUs,
+      ...maskTimesUs,
+      ...moduleTimesUs,
+    }) {
+      // O que esta no instante de origem anda junto: nao atrapalha.
+      if ((us - de.inMicroseconds).abs() < tol) continue;
+      if ((us - para.inMicroseconds).abs() < tol) {
+        return MotivoDoKeyframeParado.ocupado;
+      }
+    }
+    return null;
+  }
+
+  /// O INSTANTE [de] INTEIRO VAI PARA [para]: transformacao, parametros de
+  /// efeito e trilhas das mascaras, cada marca com o valor e a curva dela.
+  ///
+  /// Nao confere nada — quem chama pergunta antes a
+  /// [porQueNaoMoveKeyframe]. Trilha sem marca em [de] fica como esta.
+  Layer comKeyframeMovido(Duration de, Duration para) => _comTrilhasDoInstante(
+    (t) => t.comKeyframeMovido(de, para),
+    (t) => t.comKeyframeMovido(de, para),
+    (e) => e.comKeyframeMovido(de, para),
+    (m) => m.comKeyframeMovido(de, para),
+  );
+
+  /// TIRA todas as marcas do instante [t]: transformacao, efeitos e
+  /// mascaras (as mesmas familias que [comKeyframeMovido] leva).
+  Layer semKeyframeEm(Duration t) => _comTrilhasDoInstante(
+    (a) => a.hasKeyframeAt(t) ? a.withoutKeyframe(t) : a,
+    (a) => a.hasKeyframeAt(t) ? a.withoutKeyframe(t) : a,
+    (e) => e.semKeyframeEm(t),
+    (m) => m.semKeyframeEm(t),
+  );
+
+  /// UMA LISTA SO DAS TRILHAS QUE O LOSANGO LEVA. Mover e apagar passam
+  /// por aqui para nunca discordarem sobre o que e "o instante".
+  Layer _comTrilhasDoInstante(
+    AnimatedDouble Function(AnimatedDouble) numero,
+    AnimatedOffset Function(AnimatedOffset) ponto,
+    EffectInstance Function(EffectInstance) efeito,
+    LayerMask Function(LayerMask) mascara,
+  ) => copyLayer(
+    position: ponto(position),
+    positionZ: numero(positionZ),
+    scaleX: numero(scaleX),
+    scaleY: numero(scaleY),
+    rotation: numero(rotation),
+    rotationX: numero(rotationX),
+    rotationY: numero(rotationY),
+    opacity: numero(opacity),
+    skewX: numero(skewX),
+    skewY: numero(skewY),
+    pivot: ponto(pivot),
+    effects: [for (final e in effects) efeito(e)],
+    masks: [for (final m in masks) mascara(m)],
+  );
+
   Set<int> get effectTimesUs => {
     for (final e in effects) ...e.keyframeTimes.map((t) => t.inMicroseconds),
   };

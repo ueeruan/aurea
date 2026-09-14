@@ -5582,76 +5582,67 @@ class EditorController extends Notifier<VideoProject> {
     return copia.id;
   }
 
-  /// MOVE no tempo todas as marcas de transformacao de um instante.
+  /// MOVE O LOSANGO DA LINHA DO TEMPO: todas as marcas de um instante.
   ///
-  /// O losango da linha do tempo representa um INSTANTE, e num instante
-  /// pode haver marca de posicao, escala, rotacao e opacidade ao mesmo
-  /// tempo. Arrastar tem de levar todas juntas — mover so uma rachava o
-  /// losango em dois e desmontava a animacao sem o usuario pedir.
+  /// O losango representa um INSTANTE, e num instante pode haver marca de
+  /// posicao, de opacidade, de um efeito e de uma mascara ao mesmo tempo.
+  /// Arrastar leva todas juntas — mover so uma rachava o losango em dois e
+  /// desmontava a animacao sem ninguem pedir. Cada marca anda com o valor
+  /// e a CURVA dela: o caminho antigo (apagar e cravar de novo) devolvia a
+  /// marca linear.
   ///
-  /// Efeito, mascara e modulo NAO entram (ver
-  /// [Layer.podeArrastarKeyframeEm]): cada um guarda o tempo do seu
-  /// jeito, e mover metade seria pior que nao mover.
-  void moverKeyframeDeTransformacao(
+  /// Devolve POR QUE nao moveu, e nulo quando moveu — ou quando [deLocal]
+  /// e [paraLocal] sao o mesmo instante e nao havia o que fazer. Quem
+  /// arrasta precisa do motivo para explicar a recusa.
+  ///
+  /// Um passo de desfazer por chamada, pela janela de sempre; o arrasto da
+  /// linha do tempo abre um gesto ([beginGesture]) para o movimento
+  /// inteiro virar um passo so.
+  MotivoDoKeyframeParado? moverKeyframe(
     String id,
     Duration deLocal,
     Duration paraLocal,
   ) {
     final layer = _layer(id);
-    if (layer == null || deLocal == paraLocal) return;
-    if (!layer.podeArrastarKeyframeEm(deLocal)) return;
-    // Nao passa por cima de uma marca que ja existe: duas marcas no
-    // mesmo instante e um estado que nao da para desfazer olhando.
-    if (layer.transformTimesUs.contains(paraLocal.inMicroseconds)) return;
-
-    AnimatedDouble mover(AnimatedDouble t) => t.hasKeyframeAt(deLocal)
-        ? t.withoutKeyframe(deLocal).withKeyframe(paraLocal, t.valueAt(deLocal))
-        : t;
-    AnimatedOffset moverO(AnimatedOffset t) => t.hasKeyframeAt(deLocal)
-        ? t.withoutKeyframe(deLocal).withKeyframe(paraLocal, t.valueAt(deLocal))
-        : t;
-
-    _replace(
-      layer.copyLayer(
-        position: moverO(layer.position),
-        positionZ: mover(layer.positionZ),
-        scaleX: mover(layer.scaleX),
-        scaleY: mover(layer.scaleY),
-        rotation: mover(layer.rotation),
-        rotationX: mover(layer.rotationX),
-        rotationY: mover(layer.rotationY),
-        opacity: mover(layer.opacity),
-        skewX: mover(layer.skewX),
-        skewY: mover(layer.skewY),
-        pivot: moverO(layer.pivot),
-      ),
-    );
+    if (layer == null) return MotivoDoKeyframeParado.semCamada;
+    final motivo = layer.porQueNaoMoveKeyframe(deLocal, paraLocal);
+    if (motivo != null || deLocal == paraLocal) return motivo;
+    final movida = layer.comKeyframeMovido(deLocal, paraLocal);
+    // O LOSANGO NAO RACHA. Se alguma marca ficou para tras no instante de
+    // origem (duas marcas da mesma trilha dentro da tolerancia, vindas de
+    // um projeto antigo), nada muda: meio losango parado e pior que
+    // nenhum movimento.
+    if ((paraLocal - deLocal).abs() >= kToleranciaDoKeyframe &&
+        movida.keyframeTimes.any(
+          (t) => (t - deLocal).abs() < kToleranciaDoKeyframe,
+        )) {
+      return MotivoDoKeyframeParado.ocupado;
+    }
+    _replace(movida);
+    return null;
   }
 
-  /// APAGA todas as marcas de transformacao de um instante.
-  void apagarKeyframeDeTransformacao(String id, Duration local) {
+  /// O nome de quando so a transformacao andava. Hoje e o mesmo que
+  /// [moverKeyframe], e continua valendo para quem ja chamava.
+  MotivoDoKeyframeParado? moverKeyframeDeTransformacao(
+    String id,
+    Duration deLocal,
+    Duration paraLocal,
+  ) => moverKeyframe(id, deLocal, paraLocal);
+
+  /// APAGA o losango: todas as marcas de um instante — transformacao,
+  /// efeitos e mascaras, as mesmas que [moverKeyframe] leva. Um instante
+  /// com marca de modulo fica inteiro, pelo mesmo motivo que nao se
+  /// arrasta.
+  void apagarKeyframe(String id, Duration local) {
     final layer = _layer(id);
     if (layer == null || !layer.podeArrastarKeyframeEm(local)) return;
-    AnimatedDouble tirar(AnimatedDouble t) =>
-        t.hasKeyframeAt(local) ? t.withoutKeyframe(local) : t;
-    AnimatedOffset tirarO(AnimatedOffset t) =>
-        t.hasKeyframeAt(local) ? t.withoutKeyframe(local) : t;
-    _replace(
-      layer.copyLayer(
-        position: tirarO(layer.position),
-        positionZ: tirar(layer.positionZ),
-        scaleX: tirar(layer.scaleX),
-        scaleY: tirar(layer.scaleY),
-        rotation: tirar(layer.rotation),
-        rotationX: tirar(layer.rotationX),
-        rotationY: tirar(layer.rotationY),
-        opacity: tirar(layer.opacity),
-        skewX: tirar(layer.skewX),
-        skewY: tirar(layer.skewY),
-        pivot: tirarO(layer.pivot),
-      ),
-    );
+    _replace(layer.semKeyframeEm(local));
   }
+
+  /// O nome antigo de [apagarKeyframe].
+  void apagarKeyframeDeTransformacao(String id, Duration local) =>
+      apagarKeyframe(id, local);
 
   /// O LOSANGO CRAVA O QUE ESTA NA TELA.
   ///

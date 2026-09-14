@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:aurea/src/core/l10n/app_language.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/gestures.dart' show LongPressGestureRecognizer;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -250,6 +251,23 @@ class _AmTimelineState extends ConsumerState<AmTimeline> {
     _syncingScroll = true;
     _scroll.jumpTo(target.clamp(0.0, _scroll.position.maxScrollExtent));
     _syncingScroll = false;
+  }
+
+  /// FIM DE UM ARRASTO NA BARRA OU NUM LOSANGO: a regua volta a seguir o
+  /// relogio.
+  ///
+  /// Arrastar um losango leva o cabecote junto, para a previa mostrar o
+  /// quadro, enquanto a regua fica parada de proposito (senao a marca
+  /// fugiria do dedo). Sem esta acomodacao o traco do centro continuaria
+  /// apontando para onde o arrasto comecou, e o relogio diria outra coisa
+  /// — o "olha onde eu coloquei e olha onde aparece" de sempre. Depois do
+  /// quadro, porque o fim tambem chega pelo dispose de uma barra, no meio
+  /// da montagem da arvore.
+  void _terminarEdicaoDaBarra() {
+    _editingBar = false;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && !_editingBar) _onClock();
+    });
   }
 
   double _timeToPx(Duration t) => t.inMicroseconds / 1e6 * _pps;
@@ -591,7 +609,7 @@ class _AmTimelineState extends ConsumerState<AmTimeline> {
                                           widget.onForeignKeyframe,
                                       onKeyframeTap: widget.onKeyframeTap,
                                       onEditStart: () => _editingBar = true,
-                                      onEditEnd: () => _editingBar = false,
+                                      onEditEnd: _terminarEdicaoDaBarra,
                                     );
                                   },
                                 ),
@@ -1462,7 +1480,188 @@ class _AmBarState extends ConsumerState<_AmBar> {
     // A fileira pode sair da arvore no meio do arrasto (trocar de
     // painel, desfazer): o fim tem de sair mesmo assim.
     _terminarArrasto();
+    _encerrarArrastoDoLosango();
+    _reconhecedorDoLosango?.dispose();
     super.dispose();
+  }
+
+  // ------------------------------------------------------ o losango na mao
+
+  /// SEGURAR E ARRASTAR O LOSANGO.
+  ///
+  /// "Pressionamos continuamente para o keyframe se mover, e ele fica
+  /// parado" (relato do beta): o losango so tinha toque simples, e por ser
+  /// opaco por cima da barra o toque longo nao chegava a lugar nenhum.
+  ///
+  /// O RECONHECEDOR MORA AQUI, e nao no losango. A chave do losango
+  /// carrega o tempo dele, entao cada passo do arrasto troca a chave — e um
+  /// GestureDetector com outra chave e outro widget: o reconhecedor antigo
+  /// seria descartado no meio do gesto, e o arrasto morreria no primeiro
+  /// quadro. O losango so entrega o toque ([_pousarNoLosango]); quem segue
+  /// o dedo e este reconhecedor, que sobrevive a qualquer reconstrucao.
+  ///
+  /// E toque LONGO de proposito: deslizar o dedo logo de cara continua
+  /// sendo rolar a linha do tempo, o gesto mais usado daqui.
+  ///
+  /// Criado no primeiro toque num losango: a maioria das barras nunca
+  /// recebe um, e as fileiras nascem e morrem a cada rolagem da lista.
+  LongPressGestureRecognizer get _seguraOLosango =>
+      _reconhecedorDoLosango ??= (LongPressGestureRecognizer(debugOwner: this)
+        ..onLongPressStart = _pegarOLosango
+        ..onLongPressMoveUpdate = _moverOLosango
+        ..onLongPressEnd = ((_) => _soltarOLosango())
+        // Chega tanto quando o toque longo perde para a rolagem quanto
+        // quando o sistema cancela o dedo com o losango na mao.
+        ..onLongPressCancel = _soltarOLosango);
+  LongPressGestureRecognizer? _reconhecedorDoLosango;
+
+  /// O losango em que o dedo pousou por ultimo.
+  _GrupoDeKeyframes? _losangoSobODedo;
+
+  /// O arrasto em andamento, ou nulo.
+  _ArrastoDoLosango? _arrastoDoLosango;
+
+  void _pousarNoLosango(PointerDownEvent evento, _GrupoDeKeyframes grupo) {
+    // Um losango na mao por vez: um segundo dedo nao troca o alvo.
+    if (_arrastoDoLosango != null) return;
+    _losangoSobODedo = grupo;
+    _seguraOLosango.addPointer(evento);
+  }
+
+  void _pegarOLosango(LongPressStartDetails _) {
+    final grupo = _losangoSobODedo;
+    if (grupo == null || !mounted || _arrastoDoLosango != null) return;
+    // JUNTOS DEMAIS PARA PEGAR UM SO. A pilula junta instantes que caem a
+    // menos de 4 px; arrastar levaria qual deles? Aproximar separa.
+    if (grupo.times.length > 1) {
+      _avisarLosangoParado(
+        'Aproxime a linha do tempo para separar os keyframes',
+      );
+      return;
+    }
+    final projeto = ref.read(editorControllerProvider);
+    final camada = projeto.layerById(layer.id) ?? layer;
+    // Bloqueada: nem move, nem apara — nem arrasta keyframe.
+    if (projeto.metaOf(camada.id).locked) {
+      _avisarLosangoParado(
+        'Camada bloqueada: desbloqueie para mover o keyframe',
+      );
+      return;
+    }
+    final origem = grupo.times.single;
+    final motivo = camada.porQueNaoArrastaKeyframeEm(origem);
+    if (motivo == MotivoDoKeyframeParado.modulo) {
+      _avisarLosangoParado(
+        'Este keyframe anima forma, grade, lente ou cena 3D e ainda não se '
+        'arrasta',
+        duracao: const Duration(milliseconds: 2800),
+      );
+      return;
+    }
+    if (motivo != null) return;
+
+    // OS LIMITES, EM QUADROS DO PROJETO. A marca cai sempre num quadro
+    // (e onde o cabecote consegue parar), um quadro depois da vizinha de
+    // tras e um antes da da frente — encostar nelas juntaria dois
+    // instantes num losango so — e dentro da camada.
+    final fps = projeto.fps < 1 ? 30 : projeto.fps;
+    double quadroExato(Duration t) => t.inMicroseconds * fps / 1e6;
+    Duration? antes;
+    Duration? depois;
+    for (final t in camada.keyframeTimes) {
+      if (t < origem) {
+        antes = t;
+      } else if (t > origem) {
+        depois = t;
+        break;
+      }
+    }
+    // A folga de um milesimo de quadro absorve o arredondamento para cima
+    // do instante de cada quadro (ver `PlaybackController._naGrade`).
+    final inicio = camada.startTime;
+    var quadroMin = (quadroExato(inicio) - 1e-3).ceil();
+    var quadroMax = (quadroExato(inicio + camada.duration) + 1e-3).floor();
+    if (antes != null) {
+      final q = (quadroExato(inicio + antes) + 1 - 1e-3).ceil();
+      if (q > quadroMin) quadroMin = q;
+    }
+    if (depois != null) {
+      final q = (quadroExato(inicio + depois) - 1 + 1e-3).floor();
+      if (q < quadroMax) quadroMax = q;
+    }
+
+    HapticFeedback.mediumImpact();
+    playback.pause();
+    _arrastoDoLosango = _ArrastoDoLosango(
+      origem: origem,
+      inicioDaCamada: inicio,
+      cabecote: playback.time.value,
+      quadroMin: quadroMin,
+      quadroMax: quadroMax,
+      fps: fps,
+      controller: ref.read(editorControllerProvider.notifier),
+    );
+    // A regua para de seguir o relogio enquanto o dedo manda: o cabecote
+    // vai acompanhar a marca para a previa mostrar o quadro, e se a regua
+    // rolasse junto a marca fugiria do dedo para o centro da tela.
+    onEditStart();
+    setState(() {});
+  }
+
+  void _moverOLosango(LongPressMoveUpdateDetails d) {
+    final a = _arrastoDoLosango;
+    if (a == null || !mounted || a.quadroMin > a.quadroMax) return;
+    final desejado =
+        a.inicioDaCamada + a.origem + _pxToDur(d.offsetFromOrigin.dx);
+    // IMA DO CABECOTE: o de ANTES do arrasto, que e o traco que a pessoa
+    // ve no centro — durante o arrasto o relogio acompanha a marca.
+    final pertoDoCabecote =
+        (desejado - a.cabecote).abs() <= _pxToDur(_kImaDoCabecotePx);
+    final alvo = pertoDoCabecote ? a.cabecote : desejado;
+    final quadro = (alvo.inMicroseconds * a.fps / 1e6).round().clamp(
+      a.quadroMin,
+      a.quadroMax,
+    );
+    final global = _instanteDoQuadro(quadro, a.fps);
+    final encaixou = pertoDoCabecote && global == a.cabecote;
+    if (encaixou && !a.presoNoCabecote) HapticFeedback.selectionClick();
+    a.presoNoCabecote = encaixou;
+
+    final para = global - a.inicioDaCamada;
+    if (para == a.atual) return;
+    // UM ARRASTO, UM DESFAZER. O gesto abre no primeiro passo de verdade:
+    // segurar e soltar sem mover nao deixa um passo vazio na pilha.
+    if (!a.gestoAberto) {
+      a.controller.beginGesture();
+      a.gestoAberto = true;
+    }
+    if (a.controller.moverKeyframe(layer.id, a.atual, para) != null) return;
+    a.atual = para;
+    playback.seek(global);
+  }
+
+  void _soltarOLosango() {
+    if (_encerrarArrastoDoLosango() && mounted) setState(() {});
+  }
+
+  /// Fecha o gesto de desfazer e devolve a regua ao relogio. Sem setState:
+  /// tambem roda no dispose. Verdadeiro quando havia um arrasto.
+  bool _encerrarArrastoDoLosango() {
+    _losangoSobODedo = null;
+    final a = _arrastoDoLosango;
+    if (a == null) return false;
+    _arrastoDoLosango = null;
+    if (a.gestoAberto) a.controller.endGesture();
+    onEditEnd();
+    return true;
+  }
+
+  void _avisarLosangoParado(
+    String motivo, {
+    Duration duracao = const Duration(milliseconds: 2000),
+  }) {
+    HapticFeedback.lightImpact();
+    AureaSnack.show(context, translate(context, motivo), duration: duracao);
   }
 
   Layer get layer => widget.layer;
@@ -2043,101 +2242,196 @@ class _AmBarState extends ConsumerState<_AmBar> {
           // Diamantes de keyframe sobre a barra: acesos = propriedade
           // ativa; translúcidos = de outra propriedade, ainda visíveis.
           // FAIXA DE KEYFRAMES COM DENSIDADE.
-          for (final grupo in _agrupaKeyframes(layer.keyframeTimes, pps))
-            Builder(
-              builder: (context) {
-                final active =
-                    activeTimesUs == null ||
-                    grupo.times.any(
-                      (t) => activeTimesUs!.contains(t.inMicroseconds),
-                    );
-                // Dourado/Âmbar brilhante estilo After Effects para keyframes ativos; branco nítido para inativos
-                final cor = active
-                    ? const Color(0xFFFFC107)
-                    : Colors.white.withValues(alpha: 0.90);
-                final x0 = grupo.times.first.inMicroseconds / 1e6 * pps;
-                final x1 = grupo.times.last.inMicroseconds / 1e6 * pps;
-
-                final Widget marca = grupo.times.length == 1
-                    ? Transform.rotate(
-                        angle: 0.785398,
-                        child: Container(
-                          width: 11,
-                          height: 11,
-                          decoration: BoxDecoration(
-                            color: cor,
-                            borderRadius: BorderRadius.circular(2),
-                            border: Border.all(
-                              color: Colors.black.withValues(alpha: 0.85),
-                              width: 1.2,
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color:
-                                    (active
-                                            ? const Color(0xFFFFC107)
-                                            : Colors.black)
-                                        .withValues(alpha: active ? 0.5 : 0.3),
-                                blurRadius: 3,
-                                spreadRadius: 0.5,
-                              ),
-                            ],
-                          ),
-                        ),
-                      )
-                    : Container(
-                        height: 10,
-                        decoration: BoxDecoration(
-                          color: cor,
-                          borderRadius: BorderRadius.circular(5),
-                          border: Border.all(
-                            color: Colors.black.withValues(alpha: 0.85),
-                            width: 1.2,
-                          ),
-                        ),
-                      );
-
-                final largura = grupo.times.length == 1 ? 28.0 : (x1 - x0) + 28;
-                return Positioned(
-                  left: left + x0 - 14,
-                  top: compact
-                      ? (kAmBarHeight - 16) / 2
-                      : _Alturas.barraDe(context) - kAmFaixaKeyframes - 1,
-                  width: largura,
-                  height: compact ? 16 : kAmFaixaKeyframes + 2,
-                  child: GestureDetector(
-                    key: ValueKey(
-                      'layer-keyframe-${layer.id}-${grupo.times.first.inMicroseconds}',
-                    ),
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () {
-                      HapticFeedback.selectionClick();
-                      playback.pause();
-                      playback.seek(layer.startTime + grupo.times.first);
-                      if (active) {
-                        // Tocar o losango leva ao easing dele ou abre curva
-                        widget.onKeyframeTap?.call(layer, grupo.times.first);
-                      } else {
-                        onForeignKeyframe?.call(grupo.times.first);
-                      }
-                    },
-                    child: Center(
-                      child: SizedBox(
-                        key: ValueKey(
-                          'keyframe-glyph-${layer.id}-${grupo.times.first.inMicroseconds}',
-                        ),
-                        width: grupo.times.length == 1
-                            ? 16
-                            : (x1 - x0).clamp(16.0, double.infinity),
-                        height: 16,
-                        child: Center(child: marca),
-                      ),
-                    ),
-                  ),
-                );
-              },
+          for (final grupo in _gruposDosLosangos())
+            _losango(context, grupo, left),
+          // O LOSANGO NA MAO vem por ultimo, por cima dos outros, e fora do
+          // agrupamento: a um quadro da vizinha ele fica a menos de 4 px
+          // dela, e sumiria dentro da pilula bem na hora de encaixar.
+          if (_arrastoDoLosango case final arrasto?) ...[
+            _losango(
+              context,
+              _GrupoDeKeyframes([arrasto.atual]),
+              left,
+              arrastando: true,
             ),
+            _rotuloDoArrasto(context, arrasto, left),
+          ],
         ],
+      ),
+    );
+  }
+
+  /// Os grupos de losangos a desenhar — sem o que esta na mao.
+  List<_GrupoDeKeyframes> _gruposDosLosangos() {
+    final arrasto = _arrastoDoLosango;
+    final tempos = layer.keyframeTimes;
+    return _agrupaKeyframes(
+      arrasto == null
+          ? tempos
+          : [
+              for (final t in tempos)
+                if (t != arrasto.atual) t,
+            ],
+      pps,
+    );
+  }
+
+  /// UM LOSANGO (ou a pilula de varios juntos demais) na faixa de baixo da
+  /// barra. [arrastando]: o que esta na mao — maior, e sem toque proprio,
+  /// porque quem segue o dedo e [_seguraOLosango].
+  Widget _losango(
+    BuildContext context,
+    _GrupoDeKeyframes grupo,
+    double left, {
+    bool arrastando = false,
+  }) {
+    final active =
+        activeTimesUs == null ||
+        grupo.times.any((t) => activeTimesUs!.contains(t.inMicroseconds));
+    // Dourado/Âmbar brilhante estilo After Effects para keyframes ativos; branco nítido para inativos
+    final cor = active
+        ? const Color(0xFFFFC107)
+        : Colors.white.withValues(alpha: 0.90);
+    final x0 = grupo.times.first.inMicroseconds / 1e6 * pps;
+    final x1 = grupo.times.last.inMicroseconds / 1e6 * pps;
+
+    final Widget marca = grupo.times.length == 1
+        ? Transform.rotate(
+            angle: 0.785398,
+            child: Container(
+              width: 11,
+              height: 11,
+              decoration: BoxDecoration(
+                color: cor,
+                borderRadius: BorderRadius.circular(2),
+                border: Border.all(
+                  color: Colors.black.withValues(alpha: 0.85),
+                  width: 1.2,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: (active ? const Color(0xFFFFC107) : Colors.black)
+                        .withValues(alpha: active ? 0.5 : 0.3),
+                    blurRadius: 3,
+                    spreadRadius: 0.5,
+                  ),
+                ],
+              ),
+            ),
+          )
+        : Container(
+            height: 10,
+            decoration: BoxDecoration(
+              color: cor,
+              borderRadius: BorderRadius.circular(5),
+              border: Border.all(
+                color: Colors.black.withValues(alpha: 0.85),
+                width: 1.2,
+              ),
+            ),
+          );
+
+    final largura = grupo.times.length == 1 ? 28.0 : (x1 - x0) + 28;
+    final Widget alvo = GestureDetector(
+      key: ValueKey(
+        'layer-keyframe-${layer.id}-${grupo.times.first.inMicroseconds}',
+      ),
+      behavior: HitTestBehavior.opaque,
+      onTap: () {
+        HapticFeedback.selectionClick();
+        playback.pause();
+        playback.seek(layer.startTime + grupo.times.first);
+        if (active) {
+          // Tocar o losango leva ao easing dele ou abre curva
+          widget.onKeyframeTap?.call(layer, grupo.times.first);
+        } else {
+          onForeignKeyframe?.call(grupo.times.first);
+        }
+      },
+      child: Center(
+        child: SizedBox(
+          key: ValueKey(
+            'keyframe-glyph-${layer.id}-${grupo.times.first.inMicroseconds}',
+          ),
+          width: grupo.times.length == 1
+              ? 16
+              : (x1 - x0).clamp(16.0, double.infinity),
+          height: 16,
+          // NA MAO, O LOSANGO CRESCE: e o sinal de que o toque longo pegou,
+          // visivel mesmo com o dedo em cima.
+          child: Center(
+            child: arrastando
+                ? Transform.scale(scale: 1.4, child: marca)
+                : marca,
+          ),
+        ),
+      ),
+    );
+    return Positioned(
+      left: left + x0 - 14,
+      top: _topoDoLosango(context),
+      width: largura,
+      height: compact ? 16 : kAmFaixaKeyframes + 2,
+      child: arrastando
+          ? IgnorePointer(child: alvo)
+          // O toque simples continua no GestureDetector; o pouso do dedo
+          // tambem vai para o reconhecedor do toque longo, que mora no
+          // State e sobrevive a troca de chave do losango.
+          : Listener(
+              onPointerDown: (evento) => _pousarNoLosango(evento, grupo),
+              child: alvo,
+            ),
+    );
+  }
+
+  double _topoDoLosango(BuildContext context) => compact
+      ? (kAmBarHeight - 16) / 2
+      : _Alturas.barraDe(context) - kAmFaixaKeyframes - 1;
+
+  /// O TEMPO DA MARCA NA MAO, num rotulo pequeno: o dedo cobre o losango e
+  /// a regua, e soltar no quadro certo depende de ler onde ele esta. Fica
+  /// acima do losango quando cabe; na faixa compacta (sem espaco em cima,
+  /// onde a lista recorta) vai para o lado.
+  Widget _rotuloDoArrasto(
+    BuildContext context,
+    _ArrastoDoLosango arrasto,
+    double left,
+  ) {
+    final x = left + arrasto.atual.inMicroseconds / 1e6 * pps;
+    final topo = _topoDoLosango(context);
+    final acima = topo >= 16;
+    return Positioned(
+      key: ValueKey('keyframe-drag-label-${layer.id}'),
+      left: acima ? x - 40 : x + 10,
+      top: acima ? topo - 16 : topo,
+      width: 80,
+      height: 16,
+      child: IgnorePointer(
+        child: Align(
+          alignment: acima ? Alignment.center : Alignment.centerLeft,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.82),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+              child: AppText(
+                formatTimecode(
+                  arrasto.inicioDaCamada + arrasto.atual,
+                  arrasto.fps,
+                ),
+                maxLines: 1,
+                style: const TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -2147,6 +2441,56 @@ class _AmBarState extends ConsumerState<_AmBar> {
 class _GrupoDeKeyframes {
   const _GrupoDeKeyframes(this.times);
   final List<Duration> times;
+}
+
+/// A que distancia do cabecote, em pixels, o losango arrastado gruda nele.
+const double _kImaDoCabecotePx = 8;
+
+/// O INSTANTE DO QUADRO [quadro], arredondado para cima — a mesma conta do
+/// `PlaybackController`, para a marca cair onde o cabecote consegue parar.
+Duration _instanteDoQuadro(int quadro, int fps) =>
+    Duration(microseconds: (quadro * 1000000 / fps).ceil());
+
+/// UM LOSANGO NA MAO: o que o arrasto lembra entre um passo do dedo e o
+/// seguinte.
+class _ArrastoDoLosango {
+  _ArrastoDoLosango({
+    required this.origem,
+    required this.inicioDaCamada,
+    required this.cabecote,
+    required this.quadroMin,
+    required this.quadroMax,
+    required this.fps,
+    required this.controller,
+  }) : atual = origem;
+
+  /// Onde a marca estava quando o dedo a pegou, no tempo da camada. Cada
+  /// passo parte daqui, e nao do passo anterior: o ima nao prende o dedo.
+  final Duration origem;
+
+  /// Onde a marca esta agora, no tempo da camada.
+  Duration atual;
+
+  final Duration inicioDaCamada;
+
+  /// O cabecote de ANTES do arrasto, no tempo do projeto.
+  final Duration cabecote;
+
+  /// Os quadros do projeto em que a marca pode cair (inclusive).
+  final int quadroMin;
+  final int quadroMax;
+  final int fps;
+
+  /// Guardado no comeco: fechar o gesto tem de funcionar ate no dispose,
+  /// quando o `ref` ja nao pode ser lido.
+  final EditorController controller;
+
+  /// O passo de desfazer ja foi aberto ([EditorController.beginGesture]).
+  bool gestoAberto = false;
+
+  /// O cabecote esta prendendo a marca: o toque haptico sai uma vez por
+  /// encaixe, e nao a cada pixel.
+  bool presoNoCabecote = false;
 }
 
 /// Junta os keyframes que ficariam a menos de [minPx] um do outro.

@@ -308,7 +308,14 @@ class Keyframe<T> {
 }
 
 /// Mesmo frame se a diferenca for menor que isto.
-const _epsilon = Duration(milliseconds: 8);
+///
+/// PUBLICA porque ha quem decida sobre um instante INTEIRO da camada: o
+/// losango da linha do tempo junta marcas de muitas trilhas, e decidir se
+/// ele se arrasta tem de usar a mesma regua de "mesmo instante" que cada
+/// trilha usa por dentro.
+const kToleranciaDoKeyframe = Duration(milliseconds: 8);
+
+const _epsilon = kToleranciaDoKeyframe;
 
 /// Nucleo compartilhado da avaliacao: busca binaria + segmento com easing.
 /// As listas sao sempre mantidas ordenadas por tempo.
@@ -347,6 +354,47 @@ List<Keyframe<T>> _removeAt<T>(List<Keyframe<T>> kfs, Duration t) {
     for (final k in kfs)
       if ((k.time - t).abs() >= _epsilon) k,
   ]);
+}
+
+/// MOVE UMA MARCA NO TEMPO, com o valor e a curva dela.
+///
+/// Apagar e cravar de novo — `withoutKeyframe(de).withKeyframe(para, v)` —
+/// perdia a CURVA: a marca renascia linear, e o trecho que sai dela mudava
+/// de desenho so por ter mudado de lugar. Aqui a marca e a mesma e so o
+/// tempo muda. A marca anterior, dona do trecho que chega, fica com a
+/// curva dela; as outras nao trocam de ordem entre si.
+///
+/// Nulo quando nao ha marca em [de] (dentro da tolerancia) e quando ja ha
+/// OUTRA marca em [para]: juntar duas marcas num instante so apagaria uma
+/// delas em silencio, e isso nao se desfaz olhando para a linha do tempo.
+List<Keyframe<T>>? moverMarcaNaLista<T>(
+  List<Keyframe<T>> kfs,
+  Duration de,
+  Duration para,
+) {
+  // A marca que anda e a mais perto de [de], se estiver dentro da
+  // tolerancia.
+  var indice = -1;
+  var menor = _epsilon;
+  for (var i = 0; i < kfs.length; i++) {
+    final d = (kfs[i].time - de).abs();
+    if (d < menor) {
+      menor = d;
+      indice = i;
+    }
+  }
+  if (indice < 0) return null;
+  for (var i = 0; i < kfs.length; i++) {
+    if (i != indice && (kfs[i].time - para).abs() < _epsilon) return null;
+  }
+  final movida = kfs[indice].copyWith(time: para);
+  final out = [...kfs]..removeAt(indice);
+  // Insercao no lugar, e nao sort: o sort nao promete estabilidade, e
+  // marcas que por acaso tenham o mesmo tempo nao podem trocar de ordem.
+  var onde = out.indexWhere((k) => k.time > para);
+  if (onde < 0) onde = out.length;
+  out.insert(onde, movida);
+  return out;
 }
 
 /// Segmento de keyframe em que um tempo cai (PR-G0 do Modulo Grid):
@@ -641,6 +689,19 @@ class AnimatedDouble {
     return AnimatedDouble(base, rest, loop, expression);
   }
 
+  /// A MARCA DE [de] VAI PARA [para], com o valor e a curva dela.
+  ///
+  /// A propria trilha, intacta, quando nao ha marca em [de] ou quando ja
+  /// ha outra marca em [para] (ver [moverMarcaNaLista]). Intacta quer
+  /// dizer o MESMO objeto: quem move o instante inteiro de uma camada
+  /// descobre assim, sem comparar valores, que trilhas nao tinham nada ali.
+  AnimatedDouble comKeyframeMovido(Duration de, Duration para) {
+    if (de == para) return this;
+    final novas = moverMarcaNaLista(keyframes, de, para);
+    if (novas == null) return this;
+    return AnimatedDouble(base, novas, loop, expression);
+  }
+
   /// EDITAR UM VALOR NUNCA CRIA KEYFRAME.
   ///
   /// Regra do produto, acima da convencao do After Effects
@@ -809,6 +870,14 @@ class AnimatedOffset {
     final rest = _removeAt(keyframes, t);
     if (rest.isEmpty) return AnimatedOffset(valueAt(t));
     return AnimatedOffset(base, rest, loop);
+  }
+
+  /// A mesma regra de [AnimatedDouble.comKeyframeMovido].
+  AnimatedOffset comKeyframeMovido(Duration de, Duration para) {
+    if (de == para) return this;
+    final novas = moverMarcaNaLista(keyframes, de, para);
+    if (novas == null) return this;
+    return AnimatedOffset(base, novas, loop);
   }
 
   /// A mesma regra de [AnimatedDouble.edited]: editar valor nunca cria

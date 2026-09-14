@@ -477,6 +477,16 @@ class AnimatedPath {
     return AnimatedPath(base, rest);
   }
 
+  /// A mesma regra de [AnimatedDouble.comKeyframeMovido]: a marca anda
+  /// com o caminho e a curva dela, e a trilha volta intacta (o mesmo
+  /// objeto) quando nao ha o que mover.
+  AnimatedPath comKeyframeMovido(Duration de, Duration para) {
+    if (de == para) return this;
+    final novas = moverMarcaNaLista(keyframes, de, para);
+    if (novas == null) return this;
+    return AnimatedPath(base, novas);
+  }
+
   Easing easeAt(Duration t) {
     for (final k in keyframes) {
       if ((k.time - t).abs() < _epsilon) return k.ease;
@@ -569,6 +579,55 @@ class LayerMask {
       (featherY?.isAnimated ?? false) ||
       opacity.isAnimated ||
       expansion.isAnimated;
+
+  /// O INSTANTE [de] DA MASCARA VAI PARA [para]: caminho, suavidade,
+  /// opacidade e expansao juntos, cada marca com o valor e a curva dela.
+  ///
+  /// A propria mascara, intacta, quando nenhuma trilha tem marca em [de]
+  /// — criar uma copia igual a cada arrasto trocaria a identidade de todas
+  /// as mascaras da camada sem que nada tivesse mudado.
+  LayerMask comKeyframeMovido(Duration de, Duration para) {
+    final p = path.comKeyframeMovido(de, para);
+    final f = feather.comKeyframeMovido(de, para);
+    final fy = featherY?.comKeyframeMovido(de, para);
+    final o = opacity.comKeyframeMovido(de, para);
+    final x = expansion.comKeyframeMovido(de, para);
+    if (identical(p, path) &&
+        identical(f, feather) &&
+        identical(fy, featherY) &&
+        identical(o, opacity) &&
+        identical(x, expansion)) {
+      return this;
+    }
+    return copyWith(
+      path: p,
+      feather: f,
+      featherY: fy,
+      opacity: o,
+      expansion: x,
+    );
+  }
+
+  /// TIRA as marcas de [t] de todas as trilhas da mascara. Intacta quando
+  /// nao havia nenhuma.
+  LayerMask semKeyframeEm(Duration t) {
+    if (!path.hasKeyframeAt(t) &&
+        !feather.hasKeyframeAt(t) &&
+        !(featherY?.hasKeyframeAt(t) ?? false) &&
+        !opacity.hasKeyframeAt(t) &&
+        !expansion.hasKeyframeAt(t)) {
+      return this;
+    }
+    AnimatedDouble tirar(AnimatedDouble a) =>
+        a.hasKeyframeAt(t) ? a.withoutKeyframe(t) : a;
+    return copyWith(
+      path: path.hasKeyframeAt(t) ? path.withoutKeyframe(t) : path,
+      feather: tirar(feather),
+      featherY: featherY == null ? null : tirar(featherY!),
+      opacity: tirar(opacity),
+      expansion: tirar(expansion),
+    );
+  }
 
   LayerMask copyWith({
     String? name,

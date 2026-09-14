@@ -37,6 +37,51 @@ class FontService {
 
   bool isBundled(String family) => family == 'Aurea Motion Sans';
 
+  /// O arquivo da fonte empacotada, dentro dos assets do aplicativo.
+  static const assetDaFonteEmpacotada =
+      'assets/templates/dnyx/AureaMotionSans.ttf';
+
+  /// O CAMINHO DO ARQUIVO de uma familia importada, ou nulo.
+  ///
+  /// O registro do Flutter so desenha a fonte; o texto 3D precisa LER o
+  /// contorno das letras, e para isso precisa do arquivo que foi copiado
+  /// para dentro do aplicativo. A fonte empacotada nao tem caminho: ela
+  /// mora nos assets (ver [bytesDaFonte]).
+  Future<String?> caminhoDoArquivo(String familia) async {
+    if (isBundled(familia)) return null;
+    try {
+      await loadAll();
+      final arquivo = _familias[familia];
+      // Familia registrada sem arquivo (a bancada de testes) nao tem o
+      // que ler.
+      if (arquivo == null || arquivo.isEmpty) return null;
+      final dir = await _pasta();
+      final f = File('${dir.path}/$arquivo');
+      return f.existsSync() ? f.path : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// OS BYTES da fonte de [familia]: do asset, se for a empacotada; do
+  /// arquivo copiado, se foi importada. Nulo quando nao ha o que ler.
+  Future<Uint8List?> bytesDaFonte(String familia) async {
+    try {
+      if (isBundled(familia)) {
+        final dados = await rootBundle.load(assetDaFonteEmpacotada);
+        return dados.buffer.asUint8List(
+          dados.offsetInBytes,
+          dados.lengthInBytes,
+        );
+      }
+      final caminho = await caminhoDoArquivo(familia);
+      if (caminho == null) return null;
+      return await File(caminho).readAsBytes();
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Para a bancada de render (testes): declara uma familia que ja foi
   /// carregada por fora (FontLoader), sem arquivo na pasta do app.
   @visibleForTesting

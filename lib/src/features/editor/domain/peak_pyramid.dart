@@ -125,6 +125,21 @@ PeakPyramid buildPeakPyramid(Int16List samples, int sampleRate) {
     rms0[i] = math.sqrt(soma / base);
   }
 
+  return pyramidFromBase(min0, max0, rms0, sampleRate);
+}
+
+
+/// A PIRAMIDE a partir da base ja calculada (baldes de
+/// [peakBucketSizes].first amostras). E o caminho de producao: o scanner
+/// de PCM monta a base enquanto le o arquivo, sem guardar as amostras.
+PeakPyramid pyramidFromBase(
+  Float32List min0,
+  Float32List max0,
+  Float32List rms0,
+  int sampleRate,
+) {
+  if (min0.isEmpty || sampleRate <= 0) return PeakPyramid(const [], sampleRate);
+  final base = peakBucketSizes.first;
   final niveis = <PeakLevel>[
     PeakLevel(
       samplesPerBucket: base,

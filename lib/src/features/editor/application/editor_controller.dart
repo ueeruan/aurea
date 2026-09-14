@@ -599,6 +599,10 @@ class EditorController extends Notifier<VideoProject> {
       position: AnimatedOffset(_center),
     );
     _push(layer);
+    // A ONDA DO SOM JA NA IMPORTACAO: quando a barra aparecer, ela esta
+    // pronta para decupar (antes so era pedida quando a linha rolava para
+    // dentro da tela).
+    MediaPreviewService.instance.preparar([path]);
     return layer.id;
   }
 
@@ -683,6 +687,10 @@ class EditorController extends Notifier<VideoProject> {
       position: AnimatedOffset(_center),
     );
     _push(layer);
+    // A ONDA DO SOM JA NA IMPORTACAO: quando a barra aparecer, ela esta
+    // pronta para decupar (antes so era pedida quando a linha rolava para
+    // dentro da tela).
+    MediaPreviewService.instance.preparar([path]);
     return layer.id;
   }
 

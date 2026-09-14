@@ -11,6 +11,7 @@ import 'package:path_provider/path_provider.dart';
 import '../domain/audio_ops.dart';
 import '../domain/streaming_waveform.dart';
 import '../domain/peak_pyramid.dart';
+import '../domain/waveform_cache.dart';
 
 /// FORMA DE ONDA e TIRA DE MINIATURAS.
 ///
@@ -47,11 +48,33 @@ Float32List computePeaks(Int16List samples, int rate, int perSecond) {
   return out;
 }
 
+/// Em que pe esta a forma de onda de um arquivo.
+enum EstadoDaOnda { pendente, pronta, semAudio, falhou }
+
 class MediaPreviewService {
   MediaPreviewService._();
   static final instance = MediaPreviewService._();
 
   final Map<String, Float32List> _peaks = {};
+  final Map<String, EstadoDaOnda> _estado = {};
+  final Map<String, double> _ganho = {};
+
+  /// Pronta, sem audio, falhou ou ainda nao analisada.
+  EstadoDaOnda estadoDaOnda(String path) =>
+      _estado[path] ?? EstadoDaOnda.pendente;
+
+  /// Ganho de EXIBICAO da onda (fala baixa legivel), 1..12.
+  double ganhoDaOnda(String path) => _ganho[path] ?? 1;
+
+  /// PRE-AQUECE a onda de varios arquivos: chamado ao importar e ao abrir
+  /// um projeto, para a onda ja estar la quando a barra aparecer — e nao
+  /// so quando a linha rola para dentro da tela.
+  void preparar(Iterable<String> paths) {
+    for (final p in paths.toSet()) {
+      if (p.isEmpty) continue;
+      ensureWaveform(p).ignore();
+    }
+  }
 
   /// A SONORIDADE de cada arquivo, em LUFS. Medir custa uma decodificacao
   /// inteira; o numero nao muda enquanto o arquivo for o mesmo.
@@ -126,25 +149,13 @@ class MediaPreviewService {
   Future<void> _buildWaveform(String path) async {
     try {
       final dir = await _cacheDir('waveforms');
-      final cache = File('${dir.path}/${_key(path)}.pk');
+      final cache = File('${dir.path}/${_key(path)}.wf2');
       if (cache.existsSync()) {
-        final bytes = await cache.readAsBytes();
-        final env = Float32List.view(
-          bytes.buffer,
-          bytes.offsetInBytes,
-          bytes.length ~/ 4,
-        );
-        _peaks[path] = env;
-        // A piramide se remonta do envelope guardado: cada balde do
-        // envelope vira uma "amostra". Perde o detalhe abaixo de 10 ms,
-        // que e menor que um pixel em qualquer zoom da linha.
-        final comoAmostras = Int16List(env.length);
-        for (var i = 0; i < env.length; i++) {
-          comoAmostras[i] = (env[i].clamp(0.0, 1.0) * 32767).round();
+        final d = decodeWaveformCache(await cache.readAsBytes());
+        if (d != null) {
+          _aplicar(path, d);
+          return;
         }
-        _pyramids[path] = buildPeakPyramid(comoAmostras, peaksPerSecond);
-        revision.value++;
-        return;
       }
 
       // Decodifica para PCM cru mono a 16 kHz. Oito bastava para
@@ -157,8 +168,13 @@ class MediaPreviewService {
 
       final session = await FFmpegKit.executeWithArguments([
         '-y',
+        '-v',
+        'error',
+        '-nostats',
         '-i',
         path,
+        '-map',
+        '0:a:0',
         '-vn',
         '-ac',
         '1',
@@ -172,27 +188,75 @@ class MediaPreviewService {
       ]);
       if (!ReturnCode.isSuccess(await session.getReturnCode()) ||
           !raw.existsSync()) {
-        _peaks[path] = Float32List(0);
-        revision.value++;
+        final log = (await session.getOutput()) ?? '';
+        // SEM FAIXA DE AUDIO e um fato do arquivo: vai para o disco, e o
+        // FFmpeg nao roda de novo a cada sessao. Outra falha (arquivo
+        // sumiu, codec) nao e gravada — pode dar certo na proxima.
+        if (log.contains('matches no streams') ||
+            log.contains('does not contain any stream')) {
+          final d = WaveformCacheData.semAudio();
+          await _gravarAtomico(cache, encodeWaveformCache(d));
+          _aplicar(path, d);
+        } else {
+          _peaks[path] = Float32List(0);
+          _estado[path] = EstadoDaOnda.falhou;
+          revision.value++;
+        }
         return;
       }
 
       final scanned = await compute(scanMonoPcm, raw.path);
       await raw.delete();
-      final out = scanned.peaks;
-      final compact = Int16List(out.length);
-      for (var i = 0; i < out.length; i++) {
-        compact[i] = (out[i].clamp(0.0, 1.0) * 32767).round();
-      }
-      _pyramids[path] = buildPeakPyramid(compact, peaksPerSecond);
-      _lufs[path] = scanned.lufs;
-      await cache.writeAsBytes(out.buffer.asUint8List(), flush: true);
-      _peaks[path] = out;
-      revision.value++;
+      final d = WaveformCacheData(
+        hasAudio: scanned.baseMax.isNotEmpty,
+        sampleRate: 16000,
+        samplesPerBucket: waveBaseBucket,
+        lufs: scanned.lufs,
+        peaksPerSecond: peaksPerSecond,
+        peaks: scanned.peaks,
+        baseMin: scanned.baseMin,
+        baseMax: scanned.baseMax,
+        baseRms: scanned.baseRms,
+      );
+      await _gravarAtomico(cache, encodeWaveformCache(d));
+      // O cache v1 (so o envelope) fica obsoleto.
+      final antigo = File('${dir.path}/${_key(path)}.pk');
+      if (antigo.existsSync()) antigo.deleteSync();
+      _aplicar(path, d);
     } catch (_) {
       _peaks[path] = Float32List(0);
+      _estado[path] = EstadoDaOnda.falhou;
       revision.value++;
     }
+  }
+
+  void _aplicar(String path, WaveformCacheData d) {
+    if (!d.hasAudio || d.baseMax.isEmpty) {
+      _peaks[path] = Float32List(0);
+      _estado[path] = EstadoDaOnda.semAudio;
+      revision.value++;
+      return;
+    }
+    _peaks[path] = d.peaks;
+    _lufs[path] = d.lufs;
+    _pyramids[path] = pyramidFromBase(
+      d.baseMin,
+      d.baseMax,
+      d.baseRms,
+      d.sampleRate,
+    );
+    _ganho[path] = waveformDisplayGain(d.peaks);
+    _estado[path] = EstadoDaOnda.pronta;
+    revision.value++;
+  }
+
+  /// Escrita atomica: `.part` e renomeia. Um app morto no meio da escrita
+  /// nao deixa um cache truncado que seria lido como verdade.
+  static Future<void> _gravarAtomico(File destino, Uint8List bytes) async {
+    final parte = File('${destino.path}.part');
+    await parte.writeAsBytes(bytes, flush: true);
+    if (destino.existsSync()) destino.deleteSync();
+    await parte.rename(destino.path);
   }
 
   /// Envelopes por FAIXA DE FREQUENCIA, so quando alguem pede.
@@ -331,5 +395,10 @@ class MediaPreviewService {
     }
     _strips.clear();
     _peaks.clear();
+    _pyramids.clear();
+    _lufs.clear();
+    _bandas.clear();
+    _estado.clear();
+    _ganho.clear();
   }
 }

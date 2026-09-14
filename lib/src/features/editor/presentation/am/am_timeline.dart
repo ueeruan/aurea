@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:aurea/src/core/l10n/app_language.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
@@ -12,6 +14,7 @@ import '../../domain/layer.dart';
 import '../../domain/mask.dart';
 import '../../domain/cut.dart';
 import '../../domain/cut_ops.dart';
+import '../../domain/onda_no_clipe.dart';
 import '../../domain/video_project.dart' as proj;
 import '../../application/media_preview_service.dart';
 import '../../application/proxy_service.dart';
@@ -27,6 +30,34 @@ import '../../application/perfil3d.dart';
 // Alturas confortaveis para mobile (alvo de toque >= 44pt e visibilidade de keyframes).
 const double kAmRowHeight = 46;
 const double kAmBarHeight = 36;
+
+/// LINHAS ALTAS QUANDO HA VIDEO OU AUDIO. A onda do som precisa de altura
+/// para decupar ("deixar o espectro de audio bem visivel"): numa barra de
+/// 36 px ela tinha 12 px. As alturas continuam UNIFORMES na timeline — as
+/// duas listas sincronizadas, o revelar da selecao e o arrasto de pilha
+/// dependem disso — e so crescem quando o projeto tem midia com som.
+const double kAmRowHeightMidia = 78;
+const double kAmBarHeightMidia = 68;
+
+class _Alturas extends InheritedWidget {
+  const _Alturas({
+    required this.linha,
+    required this.barra,
+    required super.child,
+  });
+
+  final double linha;
+  final double barra;
+
+  static double linhaDe(BuildContext c) =>
+      c.dependOnInheritedWidgetOfExactType<_Alturas>()?.linha ?? kAmRowHeight;
+  static double barraDe(BuildContext c) =>
+      c.dependOnInheritedWidgetOfExactType<_Alturas>()?.barra ?? kAmBarHeight;
+
+  @override
+  bool updateShouldNotify(_Alturas old) =>
+      old.linha != linha || old.barra != barra;
+}
 
 /// A TIRA DE BAIXO DA BARRA, so dos keyframes.
 const double kAmFaixaKeyframes = 15;
@@ -317,6 +348,11 @@ class _AmTimelineState extends ConsumerState<AmTimeline> {
     }
     final totalWidth = (maxEndUs / 1e6 * _pps) + 200.0;
     final trilhas = empacotarTrilhas(layers);
+    final comMidia =
+        widget.singleLayerId == null &&
+        layers.any((l) => l is VideoLayer || l is AudioLayer);
+    final alturaLinha = comMidia ? kAmRowHeightMidia : kAmRowHeight;
+    final alturaBarra = comMidia ? kAmBarHeightMidia : kAmBarHeight;
     final selecionadas = <String>{?selectedId, ...multi};
     final controller = ref.read(editorControllerProvider.notifier);
     final caminho = controller.caminhoDoGrupo;
@@ -337,9 +373,9 @@ class _AmTimelineState extends ConsumerState<AmTimeline> {
             _revealedSelection != selectedId) {
           return;
         }
-        final top = index * kAmRowHeight;
+        final top = index * alturaLinha;
         final position = _rowsScroll.position;
-        final bottom = top + kAmRowHeight;
+        final bottom = top + alturaLinha;
         final target = top < position.pixels
             ? top
             : bottom > position.pixels + position.viewportDimension
@@ -351,7 +387,10 @@ class _AmTimelineState extends ConsumerState<AmTimeline> {
       });
     }
 
-    return Listener(
+    return _Alturas(
+      linha: alturaLinha,
+      barra: alturaBarra,
+      child: Listener(
       behavior: HitTestBehavior.deferToChild,
       // "Clicar na timeline fecha essa e qualquer outra aba": o toque
       // aqui fecha a barra de adicionar, sem disputar o gesto com a
@@ -534,7 +573,7 @@ class _AmTimelineState extends ConsumerState<AmTimeline> {
                                   child: ListView.builder(
                                   controller: _rowsScroll,
                                   padding: EdgeInsets.zero,
-                                  itemExtent: kAmRowHeight,
+                                  itemExtent: alturaLinha,
                                   itemCount: trilhas.length,
                                   itemBuilder: (context, index) {
                                     final trilha = trilhas[index];
@@ -685,7 +724,7 @@ class _AmTimelineState extends ConsumerState<AmTimeline> {
                       child: ListView.builder(
                         controller: _pillsScroll,
                         padding: EdgeInsets.zero,
-                        itemExtent: kAmRowHeight,
+                        itemExtent: alturaLinha,
                         itemCount: trilhas.length,
                         itemBuilder: (context, index) {
                           final trilha = trilhas[index];
@@ -706,6 +745,7 @@ class _AmTimelineState extends ConsumerState<AmTimeline> {
           },
         ),
       ),
+    ),
     );
   }
 }
@@ -759,7 +799,7 @@ class _ControlesDaTrilha extends ConsumerWidget {
                 },
                 child: SizedBox(
                   width: 26,
-                  height: kAmRowHeight,
+                  height: _Alturas.linhaDe(context),
                   child: Icon(
                     hidden ? CupertinoIcons.eye_slash : CupertinoIcons.eye,
                     size: 16,
@@ -1227,7 +1267,7 @@ class _AmLayerRow extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) => SizedBox(
-    height: kAmRowHeight,
+    height: _Alturas.linhaDe(context),
     width: totalWidth,
     child: Stack(
       clipBehavior: Clip.none,
@@ -1339,14 +1379,14 @@ class _AmBarState extends ConsumerState<_AmBar> {
   void _reordenarPorArrasto(double dy) {
     _acumuladoVertical += dy;
     final c = ref.read(editorControllerProvider.notifier);
-    while (_acumuladoVertical > kAmRowHeight / 2) {
+    while (_acumuladoVertical > _Alturas.linhaDe(context) / 2) {
       c.reorderLayer(widget.layer.id, 1);
-      _acumuladoVertical -= kAmRowHeight;
+      _acumuladoVertical -= _Alturas.linhaDe(context);
       HapticFeedback.selectionClick();
     }
-    while (_acumuladoVertical < -kAmRowHeight / 2) {
+    while (_acumuladoVertical < -_Alturas.linhaDe(context) / 2) {
       c.reorderLayer(widget.layer.id, -1);
-      _acumuladoVertical += kAmRowHeight;
+      _acumuladoVertical += _Alturas.linhaDe(context);
       HapticFeedback.selectionClick();
     }
   }
@@ -1510,7 +1550,7 @@ class _AmBarState extends ConsumerState<_AmBar> {
             left: left,
             top: 0,
             width: width.toDouble(),
-            height: kAmBarHeight,
+            height: _Alturas.barraDe(context),
             child: GestureDetector(
               key: ValueKey('clip-content-${layer.id}'),
               behavior: HitTestBehavior.opaque,
@@ -1788,7 +1828,7 @@ class _AmBarState extends ConsumerState<_AmBar> {
                 left: x - markerWidth / 2,
                 top: 0,
                 width: markerWidth,
-                height: kAmBarHeight,
+                height: _Alturas.barraDe(context),
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onTap: () => showTransitionSheet(context, ref, layer.id),
@@ -1835,7 +1875,7 @@ class _AmBarState extends ConsumerState<_AmBar> {
                     child: Container(
                       key: ValueKey('level5-transition-${layer.id}'),
                       constraints: const BoxConstraints(minWidth: 4),
-                      height: kAmBarHeight - 10,
+                      height: _Alturas.barraDe(context) - 10,
                       padding: transition == null
                           ? EdgeInsets.zero
                           : const EdgeInsets.symmetric(horizontal: 5),
@@ -1873,7 +1913,7 @@ class _AmBarState extends ConsumerState<_AmBar> {
               left: left + width - (layer is VideoLayer ? 14 : 3) - 50,
               top: 5,
               width: 48,
-              height: kAmBarHeight - 10,
+              height: _Alturas.barraDe(context) - 10,
               child: GestureDetector(
                 key: ValueKey('juntar-${layer.id}'),
                 behavior: HitTestBehavior.opaque,
@@ -1914,7 +1954,7 @@ class _AmBarState extends ConsumerState<_AmBar> {
                   3.0,
                   1e6,
                 ),
-                height: kAmBarHeight - 12,
+                height: _Alturas.barraDe(context) - 12,
                 child: IgnorePointer(
                   child: Container(
                     decoration: BoxDecoration(
@@ -2021,7 +2061,7 @@ class _AmBarState extends ConsumerState<_AmBar> {
                   left: left + x0 - 14,
                   top: compact
                       ? (kAmBarHeight - 16) / 2
-                      : kAmBarHeight - kAmFaixaKeyframes - 1,
+                      : _Alturas.barraDe(context) - kAmFaixaKeyframes - 1,
                   width: largura,
                   height: compact ? 16 : kAmFaixaKeyframes + 2,
                   child: GestureDetector(
@@ -2225,7 +2265,7 @@ class _TrimHandle extends StatelessWidget {
     return Positioned(
       left: left,
       top: 2,
-      height: kAmBarHeight - 4,
+      height: _Alturas.barraDe(context) - 4,
       width: 16,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
@@ -2304,9 +2344,12 @@ class _ClipPreviewState extends State<_ClipPreview> {
       _service.ensureWaveform(l.sourcePath);
     } else if (l is VideoLayer) {
       _service.ensureWaveform(l.sourcePath);
+      // A TIRA COBRE O ARQUIVO INTEIRO quando a duracao e conhecida: a
+      // primeira barra a pedir definia a janela, e um video longo so
+      // mostrava quadros do comeco.
       _service.ensureFilmstrip(
         l.sourcePath,
-        l.sourceOffset + videoSourceSpan(l),
+        l.sourceDuration ?? l.sourceOffset + videoSourceSpan(l),
       );
       // PROXY: pedido daqui porque a barra do clipe sempre monta —
       // pendurar no caminho de sincronia do player era fragil, ele so
@@ -2314,6 +2357,10 @@ class _ClipPreviewState extends State<_ClipPreview> {
       ProxyService.instance.ensureProxy(l.sourcePath);
     }
   }
+
+  /// O instante do arquivo ao longo da barra, calculado uma vez por
+  /// instancia da camada (a camada e imutavel: editou, e outra).
+  static final Expando<Float64List> _fontes = Expando('fonte-da-onda');
 
   @override
   Widget build(BuildContext context) {
@@ -2327,37 +2374,45 @@ class _ClipPreviewState extends State<_ClipPreview> {
     final fim =
         inicio +
         (l is VideoLayer ? videoSourceSpan(l) : (l as AudioLayer).sourceSpan);
+    final fonte = _fontes[l] ??= fonteAoLongoDoClipe(l);
+    final barra = _Alturas.barraDe(context);
+    final alta = barra >= 56;
+    final mudo = l is VideoLayer
+        ? (l.volume <= 0 || l.audio.muted)
+        : (l as AudioLayer).volume <= 0 || l.audio.muted;
 
     return ValueListenableBuilder<int>(
       valueListenable: _service.revision,
       builder: (context, _, child) {
-        final peaks = _service.peaksOf(path);
         final piramide = _service.pyramidOf(path);
         final strip = l is VideoLayer ? _service.stripOf(path) : null;
-
         final temStrip = strip != null && strip.isNotEmpty;
-        final temOnda = peaks != null && peaks.isNotEmpty;
+        final temOnda = piramide != null && !piramide.isEmpty;
+        final alturaOnda = l is AudioLayer || !temStrip
+            ? barra
+            : (alta ? barra * 0.58 : barra * 0.5);
 
         return ClipRRect(
           borderRadius: BorderRadius.circular(8),
           child: Stack(
             fit: StackFit.passthrough,
             children: [
-              // MINIATURAS em cima da barra, opacas: meia opacidade
-              // sobre o violeta lava a imagem e ela deixa de informar.
+              // MINIATURAS: em cima (barra alta) ou por baixo de tudo.
               if (temStrip)
-                Positioned.fill(
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  top: 0,
+                  height: temOnda && alta ? barra - alturaOnda : barra,
                   child: CustomPaint(
                     painter: FilmstripPainter(
                       frames: strip,
                       start: inicio,
                       end: fim,
-                      sourceDuration: fim,
+                      sourceDuration: (l as VideoLayer).sourceDuration ?? fim,
                     ),
                   ),
                 ),
-              // Veu escuro so onde o nome do clipe passa, para o texto
-              // continuar legivel sobre qualquer cena.
               if (temStrip)
                 Positioned.fill(
                   child: DecoratedBox(
@@ -2374,36 +2429,36 @@ class _ClipPreviewState extends State<_ClipPreview> {
                     ),
                   ),
                 ),
-              // Audio do proprio video: faixa fina embaixo, para nao
-              // brigar com a imagem.
+              // A ONDA DO SOM: faixa escura propria, espelhada, em dB, e
+              // seguindo o instante real do arquivo (corte, velocidade,
+              // reverso, Time Remap).
               if (temOnda)
                 Positioned(
+                  key: ValueKey('onda-${l.id}'),
                   left: 0,
                   right: 0,
                   bottom: 0,
-                  height: temStrip ? kAmBarHeight * 0.34 : null,
-                  top: temStrip ? null : 0,
-                  child: CustomPaint(
-                    // PIRAMIDE: contorno de pico e miolo de RMS, com o
-                    // nivel escolhido pelo zoom. Ampliar troca de nivel
-                    // e nunca recalcula.
-                    painter: piramide != null && !piramide.isEmpty
-                        ? PyramidWaveformPainter(
-                            pyramid: piramide,
-                            start: inicio,
-                            end: fim,
-                            color: temStrip
-                                ? AmColors.accent.withValues(alpha: 0.85)
-                                : Colors.white.withValues(alpha: 0.8),
-                          )
-                        : WaveformPainter(
-                            peaks: peaks,
-                            start: inicio,
-                            end: fim,
-                            color: temStrip
-                                ? AmColors.accent.withValues(alpha: 0.85)
-                                : Colors.white.withValues(alpha: 0.8),
-                          ),
+                  height: alturaOnda,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: temStrip
+                          ? const Color(0xE60B0E12)
+                          : Colors.transparent,
+                    ),
+                    child: CustomPaint(
+                      painter: ClipWaveformPainter(
+                        pyramid: piramide,
+                        fonte: fonte,
+                        color: temStrip
+                            ? AmColors.accent
+                            : Colors.white.withValues(alpha: 0.92),
+                        contorno: temStrip
+                            ? const Color(0xFFB9FFF0)
+                            : Colors.white,
+                        gain: _service.ganhoDaOnda(path),
+                        muted: mudo,
+                      ),
+                    ),
                   ),
                 ),
               child!,

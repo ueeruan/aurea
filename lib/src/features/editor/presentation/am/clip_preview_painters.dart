@@ -252,3 +252,141 @@ class FilmstripPainter extends CustomPainter {
       old.end != end ||
       old.sourceDuration != sourceDuration;
 }
+
+/// A ONDA DO CLIPE, legivel para decupar.
+///
+/// Diferencas para o [PyramidWaveformPainter]:
+///   * segue o instante REAL do arquivo em cada coluna ([fonte]), entao
+///     acompanha corte, velocidade, reverso e Time Remap;
+///   * espelho de verdade: o maximo para cima e o minimo para baixo;
+///   * altura em DECIBEIS (piso de -45 dB) com ganho de exibicao — fala
+///     baixa continua visivel e um estalo nao achata o resto;
+///   * le a piramide pela janela fracionaria, sem arredondar o comeco
+///     para o balde (antes a onda podia ficar ate 640 ms fora do lugar).
+class ClipWaveformPainter extends CustomPainter {
+  const ClipWaveformPainter({
+    required this.pyramid,
+    required this.fonte,
+    required this.color,
+    this.contorno,
+    this.gain = 1,
+    this.muted = false,
+  });
+
+  final PeakPyramid pyramid;
+
+  /// n+1 instantes (segundos, absolutos no arquivo) uniformes na largura.
+  final Float64List fonte;
+  final Color color;
+  final Color? contorno;
+  final double gain;
+  final bool muted;
+
+  static const double pisoDb = 45;
+
+  double _em(double u) {
+    final n = fonte.length - 1;
+    if (n <= 0) return fonte.isEmpty ? 0 : fonte.first;
+    final p = (u * n).clamp(0.0, n.toDouble());
+    final i = p.floor().clamp(0, n - 1);
+    final f = p - i;
+    return fonte[i] * (1 - f) + fonte[i + 1] * f;
+  }
+
+  double _altura(double amplitude, double half) {
+    final a = amplitude.abs() * gain;
+    if (a <= 1e-5) return 0;
+    final db = 20 * math.log(a) / math.ln10;
+    return ((db + pisoDb) / pisoDb).clamp(0.0, 1.0) * half;
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (pyramid.isEmpty || fonte.length < 2 || size.width < 2 || size.height < 6) {
+      return;
+    }
+    final colunas = size.width.floor();
+    final mid = size.height / 2;
+    final half = size.height / 2 - 1;
+    final cima = Float32List(colunas), baixo = Float32List(colunas);
+    final corpo = Float32List(colunas);
+    for (var x = 0; x < colunas; x++) {
+      final t0 = _em(x / colunas), t1 = _em((x + 1) / colunas);
+      final lo = math.min(t0, t1), hi = math.max(t0, t1);
+      final nivel = pyramid.levelFor(math.max(hi - lo, 1e-6));
+      final b = nivel.bucketSeconds;
+      if (nivel.length == 0 || b <= 0) continue;
+      var a = (lo / b).floor();
+      var z = (hi / b).ceil();
+      if (z <= a) z = a + 1;
+      if (a < 0) a = 0;
+      if (z > nivel.length) z = nivel.length;
+      var mx = 0.0, mn = 0.0, rms = 0.0;
+      for (var i = a; i < z; i++) {
+        if (nivel.max[i] > mx) mx = nivel.max[i];
+        if (nivel.min[i] < mn) mn = nivel.min[i];
+        if (nivel.rms[i] > rms) rms = nivel.rms[i];
+      }
+      cima[x] = _altura(mx, half);
+      baixo[x] = _altura(mn, half);
+      corpo[x] = _altura(rms, half);
+    }
+    final alfa = muted ? 0.35 : 1.0;
+    Path forma(Float32List up, Float32List down) {
+      final p = Path()..moveTo(0, mid - up[0]);
+      for (var x = 1; x < colunas; x++) {
+        p.lineTo(x + 0.5, mid - up[x]);
+      }
+      for (var x = colunas - 1; x >= 0; x--) {
+        p.lineTo(x + 0.5, mid + down[x]);
+      }
+      return p..close();
+    }
+
+    canvas.drawLine(
+      Offset(0, mid),
+      Offset(size.width, mid),
+      Paint()
+        ..color = Colors.white.withValues(alpha: 0.10 * alfa)
+        ..strokeWidth = 1,
+    );
+    final pico = forma(cima, baixo);
+    canvas.drawPath(
+      pico,
+      Paint()..color = color.withValues(alpha: color.a * 0.55 * alfa),
+    );
+    if (contorno != null) {
+      canvas.drawPath(
+        pico,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1
+          ..color = contorno!.withValues(alpha: contorno!.a * alfa),
+      );
+    }
+    canvas.drawPath(
+      forma(corpo, corpo),
+      Paint()..color = color.withValues(alpha: color.a * alfa),
+    );
+  }
+
+  @override
+  bool shouldRepaint(ClipWaveformPainter old) =>
+      old.pyramid != pyramid ||
+      old.color != color ||
+      old.gain != gain ||
+      old.muted != muted ||
+      old.fonte.length != fonte.length ||
+      (fonte.isNotEmpty &&
+          (old.fonte.first != fonte.first || old.fonte.last != fonte.last)) ||
+      !_iguais(old.fonte, fonte);
+
+  static bool _iguais(Float64List a, Float64List b) {
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i += math.max(1, a.length ~/ 16)) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+}

@@ -104,14 +104,25 @@ ModelAsset3D importFbx3D(
           );
         }
       }
-      final order = (p['RotationOrder']?.first as num? ?? 0).toInt();
+      // ROTATION ACTIVE. Pelo SDK do FBX, com essa chave desligada (e ela
+      // nasce desligada) a pre-rotacao, a pos-rotacao e a ordem de rotacao
+      // NAO valem — e o que o importador do Blender faz. Aplicar a
+      // pre-rotacao de todo osso mesmo assim girava cada articulacao a
+      // mais: o esqueleto "explodido" dos personagens.
+      final ativa = p['RotationActive']?.first;
+      final rotacaoAtiva = ativa == true || (ativa is num && ativa != 0);
+      final order = rotacaoAtiva
+          ? (p['RotationOrder']?.first as num? ?? 0).toInt()
+          : 0;
       if (order != 0) {
         modelFail('FBX com ordem de rotacao diferente de XYZ. Exporte GLB.');
       }
-      final rotation =
-          _fbxRotation(_fbxVec(p, 'PreRotation', [0, 0, 0])) *
-          _fbxRotation(_fbxVec(p, 'Lcl Rotation', [0, 0, 0])) *
-          (_fbxRotation(_fbxVec(p, 'PostRotation', [0, 0, 0]))..conjugate());
+      final rotation = rotacaoAtiva
+          ? _fbxRotation(_fbxVec(p, 'PreRotation', [0, 0, 0])) *
+                _fbxRotation(_fbxVec(p, 'Lcl Rotation', [0, 0, 0])) *
+                (_fbxRotation(_fbxVec(p, 'PostRotation', [0, 0, 0]))
+                  ..conjugate())
+          : _fbxRotation(_fbxVec(p, 'Lcl Rotation', [0, 0, 0]));
       final seen = <int>{};
       var cursor = entry.key;
       while (parent.containsKey(cursor)) {

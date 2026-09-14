@@ -120,6 +120,30 @@ void main() {
       isTrue,
     );
   });
+  test('PreRotation so vale com RotationActive ligado (SDK e Blender)', () {
+    String comPropriedades(String extras) => asciiFbx.replaceFirst(
+      '   P: "Lcl Translation", "Lcl Translation", "", "A", 5,0,0\n',
+      '   P: "Lcl Translation", "Lcl Translation", "", "A", 5,0,0\n'
+          '   P: "PreRotation", "Vector3D", "Vector", "", 0,0,90\n'
+          '$extras',
+    );
+    List<double> rotacao(String fonte) {
+      final model = importFbx3D(Uint8List.fromList(utf8.encode(fonte)));
+      final no = (model.nodes).firstWhere((n) => n['name'] == 'Triangle');
+      return [for (final v in no['rotation'] as List) (v as num).toDouble()];
+    }
+
+    // Sem RotationActive (o padrao e desligado): a pre-rotacao nao entra.
+    final desligada = rotacao(comPropriedades(''));
+    expect(desligada[2], closeTo(0, 1e-9));
+    expect(desligada[3], closeTo(1, 1e-9));
+    // Ligada: 90 graus em Z.
+    final ligada = rotacao(
+      comPropriedades('   P: "RotationActive", "bool", "", "",1\n'),
+    );
+    expect(ligada[2].abs(), closeTo(0.7071, 1e-3));
+    expect(ligada[3].abs(), closeTo(0.7071, 1e-3));
+  });
   test('FBX binario publico Assimp (checagem local opcional)', () {
     final file = File('build/model3d-fixtures/box.fbx');
     if (!file.existsSync()) return;

@@ -50,6 +50,7 @@ import 'pixel_effect_engine.dart';
 import '../../domain/pixel_effect.dart';
 import '../../domain/bloom.dart';
 import '../../domain/coloring.dart';
+import '../../domain/efeitos_do_after.dart';
 import '../../domain/one_frame.dart';
 import '../../domain/time_slice.dart';
 import '../../application/quadros_de_video.dart';
@@ -3803,6 +3804,23 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
                 opacidade:
                     effect.paramAt('opacity', local) *
                     (modoMapa == 0 ? 1 : .5),
+              ),
+            ),
+            child: out,
+          );
+
+        // HUE/SATURATION SEM O MOTOR DE PIXEL: a matriz aproximada. A conta
+        // exata (saturacao pelo croma, colorir pelo HSL) roda no modo 45.
+        case EffectType.hueSaturation:
+          out = ColorFiltered(
+            colorFilter: ColorFilter.matrix(
+              hueSaturationMatrix(
+                matiz: effect.paramAt('master_hue', local),
+                saturacao: effect.paramAt('master_saturation', local),
+                luminosidade: effect.paramAt('master_lightness', local),
+                colorir: effect.paramAt('colorize', local) >= .5,
+                matizColorir: effect.paramAt('colorize_hue', local),
+                saturacaoColorir: effect.paramAt('colorize_saturation', local),
               ),
             ),
             child: out,

@@ -83,7 +83,8 @@ void main() {
     // Chroma Key, Luma Key, Color Key e Find Edges (modos 33 a 36).
     // 34 -> 41 em 2026-09-14: coloring de edit (modos 37 a 43).
     // 41 -> 42 no mesmo dia: Slice Glitch dos one framers (modo 44).
-    expect(pixelKernels.length, 42);
+    // 42 -> 43: Hue/Saturation da camada de ajuste do After (modo 45).
+    expect(pixelKernels.length, 43);
     expect(
       pixelKernels.values.map((k) => k.mode).toSet().length,
       pixelKernels.length,

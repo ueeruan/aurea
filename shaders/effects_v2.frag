@@ -607,5 +607,40 @@ void main() {
     }
   }
 
+  // ------------------------------------ CAMADA DE AJUSTE DO AFTER (45+)
+  // A mesma conta de cada modo esta em Dart, em
+  // lib/src/features/editor/domain/efeitos_do_after.dart; o teste
+  // efeitos_do_after_test compara as duas pixel a pixel.
+
+  // 45 - HUE/SATURATION. A matiz gira no HSL. A saturacao escala o CROMA
+  // em volta da luminosidade do HSL, como no Photoshop: o cinza continua
+  // cinza (no HSL puro, empurrar o S de um cinza o pintava de vermelho) e
+  // o ganho para quando o pixel chega a saturacao cheia. A luminosidade
+  // mistura com o branco ou com o preto. Colorir troca matiz e saturacao
+  // de todos os pixels e guarda so a luminancia. Tudo em zero nao passa
+  // por conta nenhuma: a imagem sai intacta.
+  if(mode==45) {
+    float claro=clamp(p0.z*.01,-1.0,1.0);
+    if(p0.w>.5) {
+      float y=clamp(lum(c),0.0,1.0);
+      y=claro>=0.0 ? y+(1.0-y)*claro : y*(1.0+claro);
+      c=hslToRgb(vec3(p1.x/360.0,clamp(p1.y*.01,0.0,1.0),y));
+    } else {
+      if(abs(p0.x)>.0001) {
+        vec3 hsl=rgbToHsl(c);
+        c=hslToRgb(vec3(fract(hsl.x+p0.x/360.0),hsl.yz));
+      }
+      float sat=clamp(p0.y*.01,-1.0,1.0);
+      if(abs(sat)>.00001) {
+        float mx=max(c.r,max(c.g,c.b)),mn=min(c.r,min(c.g,c.b));
+        float l=(mx+mn)*.5,d=mx-mn;
+        float s=d<.00001 ? 0.0 : (l>.5 ? d/max(2.0-mx-mn,.00001) : d/max(mx+mn,.00001));
+        float k=sat<0.0 ? sat : 1.0/max(max(1.0-sat,s),.0001)-1.0;
+        c+=(c-vec3(l))*k;
+      }
+      if(abs(claro)>.00001) c=claro>=0.0 ? c+(1.0-c)*claro : c*(1.0+claro);
+    }
+  }
+
   fragColor=premul(c,a);
 }

@@ -255,6 +255,16 @@ const pixelKernels = <EffectType, PixelKernel>{
     'speed',
     'seed',
   ]),
+  // 45 em diante - a camada de ajuste do After: a mesma conta em Dart esta
+  // em domain/efeitos_do_after.dart.
+  EffectType.hueSaturation: PixelKernel(45, [
+    'master_hue',
+    'master_saturation',
+    'master_lightness',
+    'colorize',
+    'colorize_hue',
+    'colorize_saturation',
+  ]),
 };
 
 /// Sanitized immutable uniforms, evaluated at the current layer-local time.

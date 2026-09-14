@@ -178,6 +178,7 @@ String effectHelp(EffectType type) => switch (type) {
   EffectType.gradientMap => 'Mapeia a luminância para um gradiente de sombras, meios-tons e luzes. Em Soft Light com opacidade baixa é o coloring clássico; sem meios-tons vira duotone.',
   EffectType.brightnessContrast => 'Brilho empurra a imagem para o branco ou para o preto sem estourar; contraste afasta ou aproxima os tons do cinza médio. Os dois aceitam keyframes.',
   EffectType.colorTune => 'Rodas de lift, gamma, gain e offset, cada uma com matiz, saturação e luminância. Lift mexe nas sombras, gamma nos meios-tons, gain nas luzes e offset em tudo.',
+  EffectType.hueSaturation => 'Gira a matiz, satura ou dessatura e clareia ou escurece a imagem inteira; o cinza continua cinza. Ligue Colorir para tingir tudo com uma única matiz, como um sépia ou um duotom rápido. Com tudo em zero, a imagem fica intacta.',
   EffectType.opticalFlow => 'Estima o movimento entre quadros para suavizar câmera lenta e curvas de Time Remap. A prévia é preparada em segundo plano; a exportação calcula os quadros a partir do original. Cortes de cena não são misturados.',
   EffectType.twirl => 'Torce a imagem ao redor de um centro. Angulo controla o giro e raio delimita a area afetada. As bordas sao espelhadas.',
   EffectType.fisheye => 'Deforma a imagem como uma lente grande angular. Valores positivos ampliam o centro; negativos comprimem.',

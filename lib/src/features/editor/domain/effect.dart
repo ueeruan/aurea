@@ -86,6 +86,8 @@ enum EffectType {
   // --- tempo da camada inteira (pesquisa 14/09/2026) ---
   timeSlice,
   posterizeTime,
+  // --- camada de ajuste de um edit no After (dono, 14/09/2026) ---
+  hueSaturation,
 }
 
 /// O tipo a partir do IDENTIFICADOR estavel.
@@ -3323,6 +3325,65 @@ const effectSpecs = <EffectType, EffectSpec>{
       EffectPronto('Choppy', {'rate': 4}),
     ],
   ),
+
+  // ------------------------------------------------------------------
+  // A CAMADA DE AJUSTE DO AFTER (dono, 14/09/2026). Um edit de referencia
+  // tinha, empilhados: Magic Bullet Looks, S_Sharpen, S_Flicker,
+  // S_MathOps, S_FilmDamage, Hue/Saturation e Brightness & Contrast. As
+  // contas de referencia estao em domain/efeitos_do_after.dart; o
+  // desenho roda no shader, com a mesma conta.
+  // ------------------------------------------------------------------
+
+  // HUE/SATURATION, o mestre do After e do Photoshop: a matiz gira no
+  // HSL, a saturacao escala o croma em volta da luminosidade (o cinza
+  // continua cinza) e a luminosidade mistura com o branco ou o preto.
+  // Colorir troca matiz e saturacao de todos os pixels e guarda so a
+  // luminancia — o sepia e o duotom de um toque.
+  EffectType.hueSaturation: EffectSpec(
+    id: 'hue_saturation',
+    name: 'Hue/Saturation',
+    category: 'Color',
+    synonyms: [
+      'hue/saturation',
+      'hue saturation',
+      'matiz/saturação',
+      'matiz e saturação',
+      'matiz',
+      'saturação',
+      'luminosidade',
+      'colorir',
+      'colorize',
+      'dessaturar',
+      'preto e branco',
+      'sépia',
+      'coloring',
+      'cc',
+    ],
+    params: {
+      'master_hue': EffectParam('Matiz', 0, -180, 180),
+      'master_saturation': EffectParam('Saturação', 0, -100, 100),
+      'master_lightness': EffectParam('Luminosidade', 0, -100, 100),
+      'colorize': EffectParam(
+        'Colorir',
+        0,
+        0,
+        1,
+        kind: ParamKind.toggle,
+      ),
+      'colorize_hue': EffectParam('Matiz ao colorir', 0, 0, 360),
+      'colorize_saturation': EffectParam('Saturação ao colorir', 25, 0, 100),
+    },
+    montar: ['master_hue', 'master_saturation', 'master_lightness'],
+    presets: [
+      EffectPronto('Preto e branco', {'master_saturation': -100}),
+      EffectPronto('Sépia', {
+        'colorize': 1,
+        'colorize_hue': 35,
+        'colorize_saturation': 30,
+      }),
+      EffectPronto('Cores vivas', {'master_saturation': 35}),
+    ],
+  ),
 };
 
 /// OS EFEITOS DE EDIT, na ordem em que se procura: batida, glitch,
@@ -3342,6 +3403,7 @@ const efeitosDeEdit = <EffectType>[
   EffectType.colorBalance,
   EffectType.gradientMap,
   EffectType.colorTune,
+  EffectType.hueSaturation,
   EffectType.photoFilter,
   EffectType.channelMixer,
   EffectType.selectiveColor,

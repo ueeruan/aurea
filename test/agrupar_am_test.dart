@@ -434,4 +434,28 @@ void main() {
       const Duration(seconds: 2),
     ]);
   });
+
+  test('desfazer o agrupamento nao deixa a selecao presa no grupo que sumiu', () {
+    final c = ProviderContainer();
+    addTearDown(c.dispose);
+    final e = c.read(editorControllerProvider.notifier);
+    e.addShapeLayer(Duration.zero);
+    e.addShapeLayer(Duration.zero);
+    final ids = [for (final l in c.read(editorControllerProvider).layers) l.id];
+    c.read(multiSelectProvider.notifier).state = {...ids};
+    e.groupLayers(ids);
+    final grupo = c.read(selectedLayerProvider);
+    expect(c.read(editorControllerProvider).layerById(grupo!), isA<GroupLayer>());
+    // A selecao multipla aponta para ids que agora moram dentro do grupo.
+    c.read(multiSelectProvider.notifier).state = {grupo, ...ids};
+
+    e.undo();
+    expect(c.read(editorControllerProvider).layerById(grupo), isNull);
+    expect(c.read(selectedLayerProvider), isNull, reason: 'o grupo desfeito nao fica selecionado');
+    expect(c.read(multiSelectProvider), {...ids}, reason: 'so ficam os ids que existem');
+
+    e.redo();
+    expect(c.read(editorControllerProvider).layerById(grupo), isA<GroupLayer>());
+    expect(c.read(multiSelectProvider), isEmpty, reason: 'os filhos voltaram para dentro do grupo');
+  });
 }

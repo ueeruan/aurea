@@ -446,6 +446,7 @@ class EditorController extends Notifier<VideoProject> {
     _redoStack.add(state);
     state = _undoStack.removeLast();
     _lastPush = DateTime.fromMillisecondsSinceEpoch(0);
+    _podarSelecao();
   }
 
   void redo() {
@@ -453,6 +454,29 @@ class EditorController extends Notifier<VideoProject> {
     _undoStack.add(state);
     state = _redoStack.removeLast();
     _lastPush = DateTime.fromMillisecondsSinceEpoch(0);
+    _podarSelecao();
+  }
+
+  /// DESFAZER NAO DEIXA SELECAO FANTASMA. O estado que volta pode nao ter
+  /// a camada selecionada: desfazer um agrupamento apaga o grupo que
+  /// estava selecionado, desfazer "adicionar" apaga a camada nova. Sem
+  /// isto o painel ficava preso num id morto, e agrupar ou excluir a
+  /// selecao multipla agia sobre camadas que nao existem.
+  void _podarSelecao() {
+    final selecionada = ref.read(selectedLayerProvider);
+    if (selecionada != null && state.layerById(selecionada) == null) {
+      ref.read(selectedLayerProvider.notifier).state = null;
+    }
+    final multi = ref.read(multiSelectProvider);
+    if (multi.isNotEmpty) {
+      final vivas = {
+        for (final id in multi)
+          if (state.layerById(id) != null) id,
+      };
+      if (vivas.length != multi.length) {
+        ref.read(multiSelectProvider.notifier).state = vivas;
+      }
+    }
   }
 
   void openProject(VideoProject project) {

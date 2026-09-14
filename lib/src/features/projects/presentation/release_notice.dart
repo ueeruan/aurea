@@ -6,39 +6,34 @@ import '../../../core/ui/am_colors.dart';
 import 'package:aurea/src/core/l10n/app_language.dart';
 
 // Change this revision when publishing a new set of release notes.
-const releaseNoticeRevision = '2026-09-14-beta-80';
+const releaseNoticeRevision = '2026-09-14-beta-81';
 const releaseNoticeSeenKey = 'aurea.releaseNotice.seen';
 
 const releaseHighlights = <(IconData, String, String)>[
   (
-    CupertinoIcons.wand_stars,
-    'Aprimorar com IA no clipe',
-    'No painel do clipe de vídeo: tipo Vídeo real ou Animação, redução de ruído, intensidade e antes e depois no quadro. O vídeo exportado sai com o efeito. Por enquanto só no Android.',
-  ),
-  (
-    CupertinoIcons.speedometer,
-    'Câmera lenta com IA',
-    'No Android, clipe lento com interpolação Movimento ganha quadros novos do RIFE na exportação. Se o vídeo já tem quadros suficientes, como em 60 ou 120 fps, usa os próprios quadros.',
+    CupertinoIcons.textformat_alt,
+    'Texto 3D de metal',
+    'Adicionar > Objeto > Texto 3D: letras com chanfro em ouro, cromo ou aço escovado, num estúdio feito para metal. O texto segue um nulo na linha do tempo.',
   ),
   (
     CupertinoIcons.sparkles,
-    'Efeitos de edit',
-    'Coloring com pilhas CC prontas, one frame edits, Twitch, Shake mais forte, Time Slice e Posterize Time. Atalho Edits na galeria de efeitos.',
+    'Efeitos com prévia de verdade',
+    'A galeria mostra cada efeito animado numa foto. Novos: Looks com força, S_Sharpen, S_Flicker, S_MathOps, Hue/Saturation e Film Damage 2.',
   ),
   (
-    CupertinoIcons.layers,
-    'Grupos como no Alight Motion',
-    'Modo Selecionar para agrupar com toques. A caixa do grupo envolve o conteúdo, o grupo gira no próprio centro e cortar ou dividir não reinicia o que está dentro.',
+    CupertinoIcons.fullscreen,
+    'Mídia em tela cheia',
+    'Foto e vídeo importados cobrem a composição. Preencher e Ajustar no painel de Escala, e a mesclagem não encolhe mais a camada.',
   ),
   (
-    CupertinoIcons.film,
-    'Prévia e timeline',
-    'Vídeo cortado não trava mais na prévia. A onda de áudio aparece bem visível no clipe de vídeo, e a tela cheia ocupa a tela toda.',
+    CupertinoIcons.speedometer,
+    'Gráfico do Time Remap',
+    'Arraste o ponto para cima ou para baixo, toque na linha para criar ponto. Um desfazer volta o arrasto inteiro.',
   ),
   (
-    CupertinoIcons.cube,
-    'Modelos 3D',
-    'A importação é preparada em C++, abre GLB comprimido com meshopt e corrige a rotação de alguns modelos FBX.',
+    CupertinoIcons.hand_draw,
+    'Keyframes e limpeza',
+    'Segure e arraste o keyframe na linha do tempo. Partículas de volta; saíram a aba Presets e o aviso de camada apagada.',
   ),
 ];
 

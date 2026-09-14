@@ -2,37 +2,43 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/ui/am_colors.dart';
+
 import 'package:aurea/src/core/l10n/app_language.dart';
 
 // Change this revision when publishing a new set of release notes.
-const releaseNoticeRevision = '2026-09-14-beta-79';
+const releaseNoticeRevision = '2026-09-14-beta-80';
 const releaseNoticeSeenKey = 'aurea.releaseNotice.seen';
 
 const releaseHighlights = <(IconData, String, String)>[
   (
-    CupertinoIcons.house,
-    'Início e Comunidade novas',
-    'Início com grade de projetos e atalhos. Comunidade no estilo feed de fotos, com a fila de criadores para ver os posts de cada pessoa.',
-  ),
-  (
     CupertinoIcons.wand_stars,
-    'Melhorar qualidade com IA de verdade',
-    'Real-ESRGAN rodando no aparelho (GPU), sem PNG por quadro, na taxa original do vídeo. Intensidade da IA e nitidez separadas.',
+    'Aprimorar com IA no clipe',
+    'No painel do clipe de vídeo: tipo Vídeo real ou Animação, redução de ruído, intensidade e antes e depois no quadro. O vídeo exportado sai com o efeito. Por enquanto só no Android.',
   ),
   (
-    CupertinoIcons.timer,
-    'Time Remap mais preciso',
-    'O tempo do vídeo agora é calculado num núcleo em C++: curvas exatas, corte e divisão sem deslocar o tempo.',
+    CupertinoIcons.speedometer,
+    'Câmera lenta com IA',
+    'No Android, clipe lento com interpolação Movimento ganha quadros novos do RIFE na exportação. Se o vídeo já tem quadros suficientes, como em 60 ou 120 fps, usa os próprios quadros.',
+  ),
+  (
+    CupertinoIcons.sparkles,
+    'Efeitos de edit',
+    'Coloring com pilhas CC prontas, one frame edits, Twitch, Shake mais forte, Time Slice e Posterize Time. Atalho Edits na galeria de efeitos.',
   ),
   (
     CupertinoIcons.layers,
-    'Camadas',
-    'Profundidade Z sempre no painel de Posição, camada por camada. Copiar e colar efeitos entre camadas.',
+    'Grupos como no Alight Motion',
+    'Modo Selecionar para agrupar com toques. A caixa do grupo envolve o conteúdo, o grupo gira no próprio centro e cortar ou dividir não reinicia o que está dentro.',
   ),
   (
-    CupertinoIcons.folder,
-    'Projetos',
-    'Apagar todos os projetos pelo menu de qualquer projeto. Arquivos .aurea abrem no iPhone. Nomes de projeto não mudam mais com o idioma.',
+    CupertinoIcons.film,
+    'Prévia e timeline',
+    'Vídeo cortado não trava mais na prévia. A onda de áudio aparece bem visível no clipe de vídeo, e a tela cheia ocupa a tela toda.',
+  ),
+  (
+    CupertinoIcons.cube,
+    'Modelos 3D',
+    'A importação é preparada em C++, abre GLB comprimido com meshopt e corrige a rotação de alguns modelos FBX.',
   ),
 ];
 
@@ -44,7 +50,8 @@ Future<void> showReleaseNotice(BuildContext context) => showDialog<void>(
     surfaceTintColor: Colors.transparent,
     insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
     scrollable: true,
-    title: const AppText('O que mudou no Aurea',
+    title: const AppText(
+      'O que mudou no Aurea',
       style: TextStyle(
         color: AmColors.text,
         fontSize: 21,

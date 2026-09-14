@@ -89,6 +89,7 @@ enum EffectType {
   // --- camada de ajuste de um edit no After (dono, 14/09/2026) ---
   hueSaturation,
   sFlicker,
+  mathOps,
 }
 
 /// O tipo a partir do IDENTIFICADOR estavel.
@@ -3455,6 +3456,115 @@ const effectSpecs = <EffectType, EffectSpec>{
       }),
     ],
   ),
+
+  // S_MATHOPS (Sapphire): combina a camada (A) com uma fonte B numa
+  // operacao de pixel. Antes, cada entrada passa por Luzes (escala),
+  // Sombras (desloca os escuros: c*luzes + sombras*(1-c)) e Saturacao (em
+  // volta da luma Rec.709); depois, o destino passa pelos mesmos tres. A
+  // mascara de luma limita onde o resultado aparece. Somar com a fonte B
+  // Nenhuma (preto) e tudo no neutro devolve a imagem intacta. So no
+  // shader: a fonte desfocada e a mascara leem a vizinhanca do pixel.
+  EffectType.mathOps: EffectSpec(
+    id: 'math_ops',
+    name: 'S_MathOps',
+    category: 'Color',
+    synonyms: [
+      's_mathops',
+      's mathops',
+      'math ops',
+      'mathops',
+      'operações',
+      'somar',
+      'multiplicar',
+      'screen',
+      'diferença',
+      'blend',
+      'coloring',
+    ],
+    params: {
+      'operation': EffectParam(
+        'Operação',
+        0,
+        0,
+        8,
+        kind: ParamKind.choice,
+        options: [
+          'Somar',
+          'Subtrair',
+          'Multiplicar',
+          'Tela',
+          'Média',
+          'Sobrepor',
+          'Mínimo',
+          'Máximo',
+          'Diferença',
+        ],
+      ),
+      'source_b': EffectParam(
+        'Fonte B',
+        0,
+        0,
+        2,
+        kind: ParamKind.choice,
+        options: ['Nenhuma', 'A própria camada', 'A camada desfocada'],
+      ),
+      // Pixel pensado em 1080p; so conta com a camada desfocada.
+      'b_blur': EffectParam('Desfoque de B', 20, 0, 100, relative: true),
+      'a_lights': EffectParam('Luzes de A', 1, 0, 3),
+      'a_darks': EffectParam('Sombras de A', 0, -1, 1),
+      'a_saturation': EffectParam('Saturação de A', 1, 0, 3),
+      'b_lights': EffectParam('Luzes de B', 1, 0, 3),
+      'b_darks': EffectParam('Sombras de B', 0, -1, 1),
+      'b_saturation': EffectParam('Saturação de B', 1, 0, 3),
+      'dest_lights': EffectParam('Luzes do destino', 1, 0, 3),
+      'dest_darks': EffectParam('Sombras do destino', 0, -1, 1),
+      'dest_saturation': EffectParam('Saturação do destino', 1, 0, 3),
+      'mask': EffectParam(
+        'Máscara',
+        0,
+        0,
+        1,
+        kind: ParamKind.choice,
+        options: ['Nenhuma', 'Luma'],
+      ),
+      'mask_blur': EffectParam(
+        'Desfoque da máscara',
+        0,
+        0,
+        100,
+        relative: true,
+      ),
+      'invert_mask': EffectParam(
+        'Inverter máscara',
+        0,
+        0,
+        1,
+        kind: ParamKind.toggle,
+      ),
+    },
+    montar: ['a_lights', 'a_darks', 'dest_saturation'],
+    presets: [
+      // A camada de ajuste do edit de referencia: Somar sem fonte B,
+      // sombras de A em -0,03 e desfoque da mascara 12.
+      EffectPronto('Edit de referência', {
+        'operation': 0,
+        'source_b': 0,
+        'a_darks': -.03,
+        'mask_blur': 12,
+      }),
+      EffectPronto('Brilho difuso', {
+        'operation': 3,
+        'source_b': 2,
+        'b_blur': 30,
+        'b_lights': .6,
+      }),
+      EffectPronto('Contraste de sobreposição', {
+        'operation': 5,
+        'source_b': 1,
+        'dest_saturation': .9,
+      }),
+    ],
+  ),
 };
 
 /// OS EFEITOS DE EDIT, na ordem em que se procura: batida, glitch,
@@ -3480,6 +3590,7 @@ const efeitosDeEdit = <EffectType>[
   EffectType.channelMixer,
   EffectType.selectiveColor,
   EffectType.brightnessContrast,
+  EffectType.mathOps,
 ];
 
 /// Categorias do catalogo, na ordem em que aparecem.

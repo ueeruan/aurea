@@ -273,6 +273,9 @@ void main() {
       achou('S_Flicker', EffectType.sFlicker);
       achou('sapphire flicker', EffectType.sFlicker);
       achou('cintilacao', EffectType.sFlicker);
+      achou('S_MathOps', EffectType.mathOps);
+      achou('math ops', EffectType.mathOps);
+      achou('operacoes', EffectType.mathOps);
     });
   });
 
@@ -289,6 +292,10 @@ void main() {
       // O Flicker antigo continua de pe, com a mesma ficha.
       expect(effectSpecs[EffectType.flicker]!.id, 'flicker');
       expect(pixelKernels[EffectType.flicker]!.mode, 31);
+
+      expect(effectSpecs[EffectType.mathOps]!.category, 'Color');
+      expect(efeitosDeEdit, contains(EffectType.mathOps));
+      expect(pixelKernels[EffectType.mathOps]!.mode, 46);
     });
   });
 
@@ -576,6 +583,183 @@ void main() {
           reason: 'canal $c com ganho ${ganhos[c]}',
         );
       }
+    });
+  });
+
+  group('S_MathOps', () {
+    test('nos valores iniciais a imagem sai intacta', () async {
+      final entrada = await _imagem(_rampa);
+      await _comparar(
+        entrada,
+        _rampa,
+        _quadro(EffectType.mathOps, const {}),
+        (c) => c,
+        tolerancia: 1.5,
+        nome: 'mathOps neutro',
+      );
+      entrada.dispose();
+    });
+
+    test('as nove operacoes, com luzes, sombras e saturacao, batem com a '
+        'referencia', () async {
+      final entrada = await _imagem(_rampa);
+      for (var op = 0; op < 9; op++) {
+        await _comparar(
+          entrada,
+          _rampa,
+          _quadro(EffectType.mathOps, {
+            'operation': op.toDouble(),
+            'source_b': 1,
+            'a_lights': 1.2,
+            'a_darks': -.05,
+            'b_lights': .6,
+            'b_darks': .1,
+            'b_saturation': 1.4,
+            'dest_darks': .02,
+            'dest_saturation': .8,
+          }),
+          (c) => mathOps(
+            c,
+            operacao: op,
+            fonteB: 1,
+            luzesA: 1.2,
+            sombrasA: -.05,
+            luzesB: .6,
+            sombrasB: .1,
+            saturacaoB: 1.4,
+            sombrasDestino: .02,
+            saturacaoDestino: .8,
+          ),
+          nome: 'mathOps operacao $op',
+        );
+      }
+      entrada.dispose();
+    });
+
+    test(
+      'o preset do edit de referencia: Somar sem B, sombras de A -0,03',
+      () async {
+        final preset = effectSpecs[EffectType.mathOps]!.presets.first;
+        expect(preset.valores, const {
+          'operation': 0,
+          'source_b': 0,
+          'a_darks': -.03,
+          'mask_blur': 12,
+        });
+        final entrada = await _imagem(_rampa);
+        await _comparar(
+          entrada,
+          _rampa,
+          _quadro(EffectType.mathOps, preset.valores),
+          (c) => mathOps(c, sombrasA: -.03),
+          nome: 'mathOps edit de referencia',
+        );
+        // Sombras negativas escurecem mais os escuros: o preto desce, o
+        // branco fica.
+        _mesmaCor(mathOps((r: 1, g: 1, b: 1), sombrasA: -.03), (
+          r: 1,
+          g: 1,
+          b: 1,
+        ));
+        expect(
+          mathOps((r: .1, g: .1, b: .1), sombrasA: -.03).r,
+          closeTo(.073, 1e-9),
+        );
+        entrada.dispose();
+      },
+    );
+
+    test(
+      'mascara de luma limita o resultado; inverter so vale com ela',
+      () async {
+        final entrada = await _imagem(_rampa);
+        // Multiplicar pelo preto da fonte Nenhuma apaga tudo onde a mascara
+        // deixa passar: e o jeito mais visivel de ver a mascara.
+        for (final inverter in [false, true]) {
+          await _comparar(
+            entrada,
+            _rampa,
+            _quadro(EffectType.mathOps, {
+              'operation': 2,
+              'mask': 1,
+              'invert_mask': inverter ? 1 : 0,
+            }),
+            (c) => mathOps(
+              c,
+              operacao: 2,
+              mascaraDeLuma: true,
+              inverterMascara: inverter,
+            ),
+            nome: 'mathOps mascara inverter=$inverter',
+          );
+        }
+        await _comparar(
+          entrada,
+          _rampa,
+          _quadro(EffectType.mathOps, const {'operation': 2, 'invert_mask': 1}),
+          (c) => mathOps(c, operacao: 2),
+          nome: 'mathOps inverter sem mascara',
+        );
+        entrada.dispose();
+      },
+    );
+
+    test('os dois desfoques conservam uma imagem lisa e estao vivos', () async {
+      const lisa = (r: 90 / 255, g: 140 / 255, b: 200 / 255);
+      Rgb fonteLisa(int x, int y) => lisa;
+      final plana = await _imagem(fonteLisa);
+      // B = a camada desfocada; numa imagem lisa ela e a propria camada, e
+      // a diferenca e zero.
+      await _comparar(
+        plana,
+        fonteLisa,
+        _quadro(EffectType.mathOps, const {
+          'operation': 8,
+          'source_b': 2,
+          'b_blur': 40,
+        }),
+        (c) => (r: 0.0, g: 0.0, b: 0.0),
+        tolerancia: 1.5,
+        nome: 'mathOps B desfocada lisa',
+      );
+      await _comparar(
+        plana,
+        fonteLisa,
+        _quadro(EffectType.mathOps, const {
+          'operation': 2,
+          'mask': 1,
+          'mask_blur': 60,
+        }),
+        (c) => mathOps(c, operacao: 2, mascaraDeLuma: true),
+        nome: 'mathOps mascara desfocada lisa',
+      );
+      plana.dispose();
+
+      // Na rampa (o azul alterna a cada 4 px) o desfoque muda a imagem.
+      final entrada = await _imagem(_rampa);
+      final nitida = await _renderizar(
+        entrada,
+        _quadro(EffectType.mathOps, const {
+          'operation': 8,
+          'source_b': 2,
+          'b_blur': 0,
+        }),
+      );
+      final borrada = await _renderizar(
+        entrada,
+        _quadro(EffectType.mathOps, const {
+          'operation': 8,
+          'source_b': 2,
+          'b_blur': 40,
+        }),
+      );
+      var acesos = 0;
+      for (var i = 0; i < nitida.length; i += 4) {
+        expect(nitida[i + 2], lessThanOrEqualTo(1), reason: 'sem desfoque');
+        if (borrada[i + 2] > 20) acesos++;
+      }
+      expect(acesos, greaterThan(_w * _h ~/ 4));
+      entrada.dispose();
     });
   });
 }

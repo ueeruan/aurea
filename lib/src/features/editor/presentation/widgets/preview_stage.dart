@@ -2840,6 +2840,9 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
         case EffectType.selectiveColor:
         // Fatias de glitch deslocam linhas inteiras de pixels: so no shader.
         case EffectType.sliceGlitch:
+        // S_MathOps le a camada desfocada e a mascara de luma em volta de
+        // cada pixel: a operacao nao cabe numa matriz de cor.
+        case EffectType.mathOps:
           break;
 
         case EffectType.gaussianBlur:

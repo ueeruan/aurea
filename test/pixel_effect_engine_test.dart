@@ -84,7 +84,8 @@ void main() {
     // 34 -> 41 em 2026-09-14: coloring de edit (modos 37 a 43).
     // 41 -> 42 no mesmo dia: Slice Glitch dos one framers (modo 44).
     // 42 -> 43: Hue/Saturation da camada de ajuste do After (modo 45).
-    expect(pixelKernels.length, 43);
+    // 43 -> 44: S_MathOps (modo 46).
+    expect(pixelKernels.length, 44);
     expect(
       pixelKernels.values.map((k) => k.mode).toSet().length,
       pixelKernels.length,

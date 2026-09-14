@@ -137,6 +137,45 @@ vec3 tuneWheel(float hueDeg,float satPct) {
   return clamp(satPct*.01,0.0,1.0)*(k-vec3(dot(k,LUMA)));
 }
 
+// ------------------------------- AUXILIARES DA CAMADA DE AJUSTE (45+)
+
+// DESFOQUE EM ANEL: um passe so, 17 amostras — o centro e dois aneis de
+// 8, o de fora girado meio passo. O raio chega em pixel da imagem, com o
+// uPixelScale e o teto ja aplicados por quem chama. Poucas amostras de
+// proposito: e o que cabe num quadro de celular, e num raio grande o anel
+// vira textura suave, nunca degrau.
+vec4 desfoqueEmAnel(vec2 uv,float raio) {
+  vec4 centro=src(uv);
+  if(raio<.5) return centro;
+  vec4 soma=centro;
+  for(int i=0;i<8;i++) {
+    vec2 d=rotate2(vec2(1.0,0.0),float(i)*.785398163);
+    soma+=src(uv+d*raio*.5/uSize)*.75;
+    soma+=src(uv+rotate2(d,.392699082)*raio/uSize)*.4;
+  }
+  return soma/10.2;
+}
+
+// Luzes escala, sombras desloca os escuros e a saturacao gira em volta da
+// luma: c*luzes + sombras*(1-c), depois mix(luma, c, saturacao).
+vec3 luzesSombras(vec3 c,float luzes,float sombras,float sat) {
+  c=c*luzes+sombras*(1.0-c);
+  return mix(vec3(lum(c)),c,sat);
+}
+
+// As nove operacoes do S_MathOps, na ordem da ficha.
+vec3 operacaoMath(int op,vec3 a,vec3 b) {
+  if(op==1) return a-b;
+  if(op==2) return a*b;
+  if(op==3) return 1.0-(1.0-a)*(1.0-b);
+  if(op==4) return (a+b)*.5;
+  if(op==5) return mix(1.0-2.0*(1.0-a)*(1.0-b),2.0*a*b,step(a,vec3(.5)));
+  if(op==6) return min(a,b);
+  if(op==7) return max(a,b);
+  if(op==8) return abs(a-b);
+  return a+b;
+}
+
 void main() {
   vec2 uv=FlutterFragCoord().xy/uSize;
   vec4 original=src(uv);
@@ -640,6 +679,30 @@ void main() {
       }
       if(abs(claro)>.00001) c=claro>=0.0 ? c+(1.0-c)*claro : c*(1.0+claro);
     }
+  }
+
+  // 46 - S_MATHOPS. A e a camada; B e preto (Nenhuma), a propria camada
+  // ou ela desfocada. Cada entrada passa por luzes/sombras/saturacao, a
+  // operacao combina as duas e o destino passa pelos mesmos tres. A
+  // mascara de luma (da camada, desfocada se pedido) decide onde o
+  // resultado aparece; inverter so vale com a mascara ligada. Somar com B
+  // Nenhuma e tudo no neutro: A + 0 = A, a imagem sai intacta. Os raios
+  // tem teto de 100 px em 1080p, escalados pelo tamanho da composicao.
+  if(mode==46) {
+    vec3 base=c;
+    vec3 ea=luzesSombras(c,p0.w,p1.x,p1.y);
+    vec3 eb=vec3(0.0);
+    int fonte=int(p0.y+.5);
+    if(fonte==1) eb=c;
+    if(fonte==2) eb=straight(desfoqueEmAnel(uv,clamp(p0.z,0.0,100.0)*uPixelScale));
+    eb=luzesSombras(eb,p1.z,p1.w,p2.x);
+    vec3 destino=luzesSombras(operacaoMath(int(p0.x+.5),ea,eb),p2.y,p2.z,p2.w);
+    float m=1.0;
+    if(p3.x>.5) {
+      m=clamp(lum(straight(desfoqueEmAnel(uv,clamp(p3.y,0.0,100.0)*uPixelScale))),0.0,1.0);
+      if(p3.z>.5) m=1.0-m;
+    }
+    c=mix(base,destino,m);
   }
 
   fragColor=premul(c,a);

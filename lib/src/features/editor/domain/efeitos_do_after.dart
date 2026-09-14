@@ -220,6 +220,101 @@ Rgb ganhoDoSFlicker({
   );
 }
 
+// ------------------------------------------------------------ S_MATHOPS
+
+/// Luzes escala, sombras desloca os escuros e a saturacao gira em volta da
+/// luma Rec.709: c*luzes + sombras*(1-c), depois a saturacao. Luzes 1,
+/// sombras 0 e saturacao 1 devolvem a cor intacta.
+Rgb luzesSombrasSaturacao(
+  Rgb c, {
+  double luzes = 1,
+  double sombras = 0,
+  double saturacao = 1,
+}) {
+  double canal(double v) => v * luzes + sombras * (1 - v);
+  final x = (r: canal(c.r), g: canal(c.g), b: canal(c.b));
+  final y = _lum(x);
+  // A mesma forma do mix() do shader: y*(1-s) + x*s.
+  double sat(double v) => y * (1 - saturacao) + v * saturacao;
+  return (r: sat(x.r), g: sat(x.g), b: sat(x.b));
+}
+
+/// As nove operacoes, na ordem da ficha: somar, subtrair, multiplicar,
+/// tela, media, sobrepor, minimo, maximo e diferenca.
+double operacaoMath(int operacao, double a, double b) => switch (operacao) {
+  1 => a - b,
+  2 => a * b,
+  3 => 1 - (1 - a) * (1 - b),
+  4 => (a + b) * .5,
+  5 => a <= .5 ? 2 * a * b : 1 - 2 * (1 - a) * (1 - b),
+  6 => math.min(a, b),
+  7 => math.max(a, b),
+  8 => (a - b).abs(),
+  _ => a + b,
+};
+
+/// S_MathOps num pixel. [fonteB]: 0 preto, 1 a propria camada, 2 a camada
+/// desfocada — cuja cor neste pixel chega em [bDesfocada]. A mascara de
+/// luma le [mascaraDesfocada] (a camada desfocada pelo Desfoque da
+/// mascara). Sem desfoque, as duas sao a propria [c]. Nao limita os
+/// passos do meio: quem limita a 0..1 e a saida, como no shader (modo 46).
+Rgb mathOps(
+  Rgb c, {
+  int operacao = 0,
+  int fonteB = 0,
+  Rgb? bDesfocada,
+  double luzesA = 1,
+  double sombrasA = 0,
+  double saturacaoA = 1,
+  double luzesB = 1,
+  double sombrasB = 0,
+  double saturacaoB = 1,
+  double luzesDestino = 1,
+  double sombrasDestino = 0,
+  double saturacaoDestino = 1,
+  bool mascaraDeLuma = false,
+  Rgb? mascaraDesfocada,
+  bool inverterMascara = false,
+}) {
+  final a = luzesSombrasSaturacao(
+    c,
+    luzes: luzesA,
+    sombras: sombrasA,
+    saturacao: saturacaoA,
+  );
+  final Rgb semB = (r: 0.0, g: 0.0, b: 0.0);
+  final b = luzesSombrasSaturacao(
+    switch (fonteB) {
+      1 => c,
+      2 => bDesfocada ?? c,
+      _ => semB,
+    },
+    luzes: luzesB,
+    sombras: sombrasB,
+    saturacao: saturacaoB,
+  );
+  final destino = luzesSombrasSaturacao(
+    (
+      r: operacaoMath(operacao, a.r, b.r),
+      g: operacaoMath(operacao, a.g, b.g),
+      b: operacaoMath(operacao, a.b, b.b),
+    ),
+    luzes: luzesDestino,
+    sombras: sombrasDestino,
+    saturacao: saturacaoDestino,
+  );
+  var m = 1.0;
+  if (mascaraDeLuma) {
+    m = _lum(mascaraDesfocada ?? c).clamp(0.0, 1.0);
+    if (inverterMascara) m = 1 - m;
+  }
+  return (
+    r: c.r * (1 - m) + destino.r * m,
+    g: c.g * (1 - m) + destino.g * m,
+    b: c.b * (1 - m) + destino.b * m,
+  );
+}
+
 /// A matriz de cor de um ganho por canal; o alfa nao muda.
 List<double> matrizDeGanho(Rgb ganho) => [
   ganho.r, 0, 0, 0, 0, //

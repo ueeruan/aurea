@@ -265,6 +265,23 @@ const pixelKernels = <EffectType, PixelKernel>{
     'colorize_hue',
     'colorize_saturation',
   ]),
+  EffectType.mathOps: PixelKernel(46, [
+    'operation',
+    'source_b',
+    'b_blur',
+    'a_lights',
+    'a_darks',
+    'a_saturation',
+    'b_lights',
+    'b_darks',
+    'b_saturation',
+    'dest_lights',
+    'dest_darks',
+    'dest_saturation',
+    'mask',
+    'mask_blur',
+    'invert_mask',
+  ]),
 };
 
 /// Sanitized immutable uniforms, evaluated at the current layer-local time.

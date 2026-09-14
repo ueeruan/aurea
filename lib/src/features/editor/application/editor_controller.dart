@@ -35,6 +35,7 @@ import '../domain/tracker2d.dart';
 import '../domain/fx.dart';
 import '../domain/grid_rig.dart';
 import '../domain/grupo_ops.dart';
+import '../domain/deslocar_animacao.dart';
 import '../domain/keyframe.dart';
 import '../domain/loudness.dart';
 import '../domain/layer.dart';
@@ -874,8 +875,9 @@ class EditorController extends Notifier<VideoProject> {
     // A barra acompanha um filho que passou do fim do grupo la dentro.
     var fimDosFilhos = g.duration;
     for (final l in dentro.layers) {
-      if (l.endTime > fimDosFilhos && g.timeRemap == null) {
-        fimDosFilhos = l.endTime;
+      final fimNaBarra = l.endTime - g.contentOffset;
+      if (fimNaBarra > fimDosFilhos && g.timeRemap == null) {
+        fimDosFilhos = fimNaBarra;
       }
     }
     final novo = g.copyLayer(
@@ -4805,81 +4807,10 @@ class EditorController extends Notifier<VideoProject> {
   /// ultima marca de fora vira a marca do instante zero com o valor que
   /// ela ja tinha ali. Assim o valor no comeco da camada e exatamente o
   /// que era antes de aparar, e nenhuma animacao vira degrau.
-  static Layer _deslocarAnimacao(Layer layer, Duration delta) {
-    if (delta == Duration.zero) return layer;
-    AnimatedDouble d(AnimatedDouble t) => _deslocarD(t, delta);
-    AnimatedOffset o(AnimatedOffset t) => _deslocarO(t, delta);
-    return layer.copyLayer(
-      position: o(layer.position),
-      positionZ: d(layer.positionZ),
-      scaleX: d(layer.scaleX),
-      scaleY: d(layer.scaleY),
-      rotation: d(layer.rotation),
-      rotationX: d(layer.rotationX),
-      rotationY: d(layer.rotationY),
-      opacity: d(layer.opacity),
-      skewX: d(layer.skewX),
-      skewY: d(layer.skewY),
-      pivot: o(layer.pivot),
-      effects: [
-        for (final e in layer.effects)
-          e.copyWith(
-            params: {
-              for (final entry in e.params.entries)
-                entry.key: _deslocarD(entry.value, delta),
-            },
-          ),
-      ],
-    );
-  }
-
-  static AnimatedDouble _deslocarD(AnimatedDouble t, Duration delta) {
-    if (!t.isAnimated) return t;
-    final noZero = t.valueAt(-delta);
-    final easeNoZero = t.easeAt(-delta);
-    final novos = <Keyframe<double>>[];
-    var presa = false;
-    for (final k in t.keyframes) {
-      final quando = k.time + delta;
-      if (quando < Duration.zero) {
-        presa = true;
-        continue;
-      }
-      novos.add(k.copyWith(time: quando));
-    }
-    if (presa) {
-      novos.removeWhere((k) => k.time == Duration.zero);
-      novos.insert(
-        0,
-        Keyframe<double>(time: Duration.zero, value: noZero, ease: easeNoZero),
-      );
-    }
-    return AnimatedDouble(t.base, novos, t.loop, t.expression);
-  }
-
-  static AnimatedOffset _deslocarO(AnimatedOffset t, Duration delta) {
-    if (!t.isAnimated) return t;
-    final noZero = t.valueAt(-delta);
-    final easeNoZero = t.easeAt(-delta);
-    final novos = <Keyframe<Offset>>[];
-    var presa = false;
-    for (final k in t.keyframes) {
-      final quando = k.time + delta;
-      if (quando < Duration.zero) {
-        presa = true;
-        continue;
-      }
-      novos.add(k.copyWith(time: quando));
-    }
-    if (presa) {
-      novos.removeWhere((k) => k.time == Duration.zero);
-      novos.insert(
-        0,
-        Keyframe<Offset>(time: Duration.zero, value: noZero, ease: easeNoZero),
-      );
-    }
-    return AnimatedOffset(t.base, novos, t.loop);
-  }
+  // A conta mora no dominio (deslocar_animacao.dart): o desagrupar e a
+  // divisao de grupo usam a mesma.
+  static Layer _deslocarAnimacao(Layer layer, Duration delta) =>
+      deslocarAnimacao(layer, delta);
 
   void trimLayerStart(String id, Duration newStart) {
     final layer = _layer(id);
@@ -4937,6 +4868,20 @@ class EditorController extends Notifier<VideoProject> {
           startTime: start,
           duration: layer.endTime - start,
           sourceOffset: offset,
+        ),
+      );
+    } else if (layer is GroupLayer && layer.timeRemap == null) {
+      // GRUPO: a barra encurta (ou cresce) e o conteudo fica parado na
+      // tela — o ponto de entrada anda junto. Antes o conteudo recomecava
+      // do zero no novo inicio, e o keyframe do segundo 1 aparecia no 2.
+      _replace(
+        _deslocarAnimacao(
+          layer.copyLayer(
+            startTime: start,
+            duration: layer.endTime - start,
+            contentOffset: layer.contentOffset + delta,
+          ),
+          -delta,
         ),
       );
     } else {
@@ -5083,6 +5028,11 @@ class EditorController extends Notifier<VideoProject> {
               microseconds: (firstDur.inMicroseconds * layer.speed).round(),
             ),
       );
+    } else if (second is GroupLayer &&
+        layer is GroupLayer &&
+        layer.timeRemap == null) {
+      // A SEGUNDA METADE DO GRUPO CONTINUA de onde a primeira parou.
+      second = second.copyLayer(contentOffset: layer.contentOffset + firstDur);
     }
 
     // A SEGUNDA METADE COMECA NOUTRO INSTANTE, e o tempo local dela
@@ -6565,6 +6515,7 @@ class EditorController extends Notifier<VideoProject> {
         // de uma mudanca de tempo da precomp.
         customBlend: layer.customBlend,
         transitionIn: layer.transitionIn,
+        contentOffset: layer.contentOffset,
         is3D: layer.is3D,
         positionZ: layer.positionZ,
         effects: layer.effects,

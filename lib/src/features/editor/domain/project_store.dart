@@ -1217,6 +1217,9 @@ Map<String, dynamic> layerToJson(Layer l) {
       if (g.timeRemap != null) base['remap'] = _ad(g.timeRemap!);
       if (g.collapse) base['collapse'] = true;
       if (!g.clipToComp) base['noClip'] = true;
+      if (g.contentOffset != Duration.zero) {
+        base['contentOffset'] = g.contentOffset.inMicroseconds;
+      }
     case CaptionLayer c:
       base['kind'] = 'caption';
       base['cues'] = [for (final q in c.cues) _cue(q)];
@@ -2129,6 +2132,9 @@ Layer layerFromJson(Map<String, dynamic> m) {
         timeRemap: m['remap'] == null ? null : _asAd(m['remap']),
         collapse: m['collapse'] as bool? ?? false,
         clipToComp: !(m['noClip'] as bool? ?? false),
+        contentOffset: Duration(
+          microseconds: (m['contentOffset'] as num? ?? 0).toInt(),
+        ),
         position: pos,
         scaleX: sx,
         scaleY: sy,

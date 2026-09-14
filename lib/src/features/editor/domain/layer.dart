@@ -1159,6 +1159,7 @@ class GroupLayer extends Layer {
     this.timeRemap,
     this.collapse = false,
     this.clipToComp = true,
+    this.contentOffset = Duration.zero,
     super.position,
     super.scaleX,
     super.scaleY,
@@ -1203,6 +1204,13 @@ class GroupLayer extends Layer {
   /// continua aparecendo.
   final bool clipToComp;
 
+  /// PONTO DE ENTRADA NO CONTEUDO: o instante do conteudo que aparece no
+  /// primeiro quadro da barra. Aparar o inicio do grupo avanca este ponto
+  /// (o conteudo fica parado na tela, so a barra encurta), e a segunda
+  /// metade de uma divisao continua de onde a primeira parou — antes as
+  /// duas coisas recomecavam o conteudo do zero. Sem remapeamento.
+  final Duration contentOffset;
+
   /// Duracao interna efetiva.
   Duration get innerDuration => sourceDuration ?? duration;
 
@@ -1213,7 +1221,7 @@ class GroupLayer extends Layer {
   /// antes do comeco.
   Duration contentTimeAt(Duration local) {
     final r = timeRemap;
-    if (r == null) return local;
+    if (r == null) return local + contentOffset;
     return remappedContentTime(r, local, bakeUntil: duration);
   }
 
@@ -1247,6 +1255,7 @@ class GroupLayer extends Layer {
     AnimatedDouble? timeRemap,
     bool? collapse,
     bool? clipToComp,
+    Duration? contentOffset,
     ClipTransition? transitionIn,
     bool clearTransitionIn = false,
   }) {
@@ -1263,6 +1272,7 @@ class GroupLayer extends Layer {
       timeRemap: timeRemap ?? this.timeRemap,
       collapse: collapse ?? this.collapse,
       clipToComp: clipToComp ?? this.clipToComp,
+      contentOffset: contentOffset ?? this.contentOffset,
       position: position ?? this.position,
       scaleX: scaleX ?? this.scaleX,
       scaleY: scaleY ?? this.scaleY,
@@ -1286,16 +1296,44 @@ class GroupLayer extends Layer {
     );
   }
 
+  /// A COPIA RELIGA as referencias entre os filhos: cada filho ganha id
+  /// novo, e o matte e a transicao que apontavam para um irmao passam a
+  /// apontar para a copia dele. Sem isso o recorte da copia sumia (o alvo
+  /// ia a alfa zero e a fonte aparecia).
   @override
-  GroupLayer duplicated() => GroupLayer(
+  GroupLayer duplicated() {
+    final copias = [for (final c in children) c.duplicated()];
+    final novoId = <String, String>{
+      for (var i = 0; i < children.length; i++) children[i].id: copias[i].id,
+    };
+    Layer religa(Layer c) {
+      var r = c;
+      final matte = c.matteSourceId;
+      if (matte != null && novoId.containsKey(matte)) {
+        r = r.copyLayer(matteSourceId: novoId[matte]);
+      }
+      final tr = r.transitionIn;
+      if (tr != null && novoId.containsKey(tr.outgoingLayerId)) {
+        r = r.copyLayer(
+          transitionIn: tr.copyWith(outgoingLayerId: novoId[tr.outgoingLayerId]),
+        );
+      }
+      return r;
+    }
+
+    return _duplicadoCom([for (final c in copias) religa(c)]);
+  }
+
+  GroupLayer _duplicadoCom(List<Layer> filhos) => GroupLayer(
     name: name,
     startTime: startTime,
     duration: duration,
-    children: [for (final c in children) c.duplicated()],
+    children: filhos,
     sourceDuration: sourceDuration,
     timeRemap: timeRemap,
     collapse: collapse,
     clipToComp: clipToComp,
+    contentOffset: contentOffset,
     position: position,
     scaleX: scaleX,
     scaleY: scaleY,

@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'dart:ui';
 
+import 'deslocar_animacao.dart';
 import 'keyframe.dart';
 import 'layer.dart';
 
@@ -74,16 +75,32 @@ bool grupoAnimado(GroupLayer g) =>
       'A inclinacao e o giro 3D do grupo nao passam para os filhos.',
   ];
   final animado = grupoAnimado(g);
-  return (
-    filhos: [
-      for (final c in g.children)
-        animado
-            ? _reamostrado(g, c, centro, fps)
-            : _levadoParado(g, c, centro),
-    ],
-    avisos: avisos,
-  );
+  // A JANELA DO GRUPO: so o que a barra mostra. Filho inteiro fora dela
+  // nunca aparecia e fica de fora; filho que atravessa a borda e aparado
+  // nela, com o mesmo quadro no mesmo instante.
+  final inicio = g.startTime;
+  final fim = g.endTime;
+  final filhos = <Layer>[];
+  for (final c in g.children) {
+    var fora = animado
+        ? _reamostrado(g, c, centro, fps)
+        : _levadoParado(g, c, centro);
+    if (fora.endTime <= inicio || fora.startTime >= fim) continue;
+    if (fora.startTime < inicio) {
+      fora = aparaInicio(fora, inicio - fora.startTime);
+    }
+    if (fora.endTime > fim) {
+      fora = fora.copyLayer(duration: fim - fora.startTime);
+    }
+    filhos.add(fora);
+  }
+  return (filhos: filhos, avisos: avisos);
 }
+
+/// Inicio absoluto de um filho: o do grupo, mais o do filho no conteudo,
+/// menos o ponto de entrada do grupo no conteudo.
+Duration _inicioAbsoluto(GroupLayer g, Layer c) =>
+    g.startTime + c.startTime - g.contentOffset;
 
 Layer _levadoParado(GroupLayer g, Layer c, Offset centro) {
   const tg = Duration.zero;
@@ -98,7 +115,7 @@ Layer _levadoParado(GroupLayer g, Layer c, Offset centro) {
       sxG == 1 &&
       syG == 1 &&
       opG == 1;
-  if (neutro) return c.copyLayer(startTime: g.startTime + c.startTime);
+  if (neutro) return c.copyLayer(startTime: _inicioAbsoluto(g, c));
 
   // O pivo do filho entra na conta: e em volta dele que o filho gira, e
   // e ele que tem de cair no mesmo ponto da tela.
@@ -141,7 +158,7 @@ Layer _levadoParado(GroupLayer g, Layer c, Offset centro) {
       );
 
   return c.copyLayer(
-    startTime: g.startTime + c.startTime,
+    startTime: _inicioAbsoluto(g, c),
     position: posicao,
     rotation: mapa(c.rotation, (v) => v + rotG),
     scaleX: mapa(c.scaleX, (v) => v * sxG),
@@ -171,7 +188,7 @@ Layer _reamostrado(GroupLayer g, Layer c, Offset centro, int fps) {
       g.opacity.keyframes,
     ])
       for (final k in a) k.time,
-  ], c.startTime);
+  ], c.startTime - g.contentOffset);
   junta([
     for (final a in [c.position.keyframes, c.pivot.keyframes])
       for (final k in a) k.time,
@@ -199,7 +216,8 @@ Layer _reamostrado(GroupLayer g, Layer c, Offset centro, int fps) {
   final sy = <Keyframe<double>>[];
   final op = <Keyframe<double>>[];
   for (final t in ordem) {
-    final tg = c.startTime + t;
+    // Tempo da BARRA do grupo (onde moram os keyframes dele).
+    final tg = c.startTime + t - g.contentOffset;
     final piv = c.pivot.valueAt(t);
     pos.add(kf(t, pontoPeloGrupo(g, c.position.valueAt(t) + piv, tg, centro) - piv));
     rot.add(kf(t, c.rotation.valueAt(t) + g.rotation.valueAt(tg)));
@@ -208,7 +226,7 @@ Layer _reamostrado(GroupLayer g, Layer c, Offset centro, int fps) {
     op.add(kf(t, c.opacity.valueAt(t) * g.opacity.valueAt(tg)));
   }
   return c.copyLayer(
-    startTime: g.startTime + c.startTime,
+    startTime: _inicioAbsoluto(g, c),
     position: AnimatedOffset(pos.first.value, pos),
     rotation: AnimatedDouble(rot.first.value, rot),
     scaleX: AnimatedDouble(sx.first.value, sx),
@@ -232,29 +250,45 @@ Layer _reamostrado(GroupLayer g, Layer c, Offset centro, int fps) {
 List<Layer> midiasAchatadas(List<Layer> layers) {
   if (!layers.any((l) => l is GroupLayer)) return layers;
   final out = <Layer>[...layers];
-  void abrir(List<Layer> lista, Duration deslocamento, Duration fim) {
+  // [origem]: onde o zero do conteudo cai na linha do tempo de cima;
+  // [de]..[ate]: a janela que os grupos ate aqui deixam aparecer.
+  void abrir(List<Layer> lista, Duration origem, Duration de, Duration ate) {
     for (final l in lista) {
       if (l is GroupLayer) {
         // Conteudo remapeado nao anda junto com a linha do tempo: o
         // tocador nao tem como seguir a curva.
         if (l.timeRemap != null) continue;
-        final ini = deslocamento + l.startTime;
+        final ini = origem + l.startTime;
         final f = ini + l.duration;
-        abrir(l.children, ini, f < fim ? f : fim);
+        abrir(
+          l.children,
+          ini - l.contentOffset,
+          ini > de ? ini : de,
+          f < ate ? f : ate,
+        );
         continue;
       }
       if (l is! VideoLayer && l is! AudioLayer) continue;
-      final ini = deslocamento + l.startTime;
-      var dur = l.duration;
-      if (ini + dur > fim) dur = fim - ini;
-      if (dur <= Duration.zero) continue;
-      out.add(l.copyLayer(startTime: ini, duration: dur));
+      final ini = origem + l.startTime;
+      if (ini + l.duration <= de || ini >= ate) continue;
+      var m = l.copyLayer(startTime: ini);
+      // O comeco que o grupo esconde sai do tocador tambem: o ponto de
+      // entrada no arquivo avanca junto (e o que um grupo aparado mostra).
+      if (m.startTime < de) m = aparaInicio(m, de - m.startTime);
+      if (m.endTime > ate) m = m.copyLayer(duration: ate - m.startTime);
+      if (m.duration <= Duration.zero) continue;
+      out.add(m);
     }
   }
 
   for (final l in layers) {
     if (l is GroupLayer && l.timeRemap == null) {
-      abrir(l.children, l.startTime, l.startTime + l.duration);
+      abrir(
+        l.children,
+        l.startTime - l.contentOffset,
+        l.startTime,
+        l.startTime + l.duration,
+      );
     }
   }
   return out;

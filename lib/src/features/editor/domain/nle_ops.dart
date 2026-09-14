@@ -173,6 +173,10 @@ Layer _avancarFonte(Layer l, Duration quanto) => switch (l) {
         a.sourceOffset +
         Duration(microseconds: (quanto.inMicroseconds * a.speed).round()),
   ),
+  // O grupo tambem tem ponto de entrada: o conteudo continua.
+  GroupLayer g when g.timeRemap == null => g.copyLayer(
+    contentOffset: g.contentOffset + quanto,
+  ),
   _ => l,
 };
 

@@ -16,6 +16,8 @@ import 'package:aurea/src/features/editor/application/video_layer_manager.dart';
 import 'package:aurea/src/features/editor/domain/grupo_ops.dart';
 import 'package:aurea/src/features/editor/domain/keyframe.dart';
 import 'package:aurea/src/features/editor/domain/layer.dart';
+import 'package:aurea/src/features/editor/domain/mask.dart';
+import 'package:aurea/src/features/editor/domain/project_store.dart';
 import 'package:aurea/src/features/editor/domain/shape.dart';
 import 'package:aurea/src/features/editor/domain/video_project.dart';
 import 'package:aurea/src/features/editor/presentation/widgets/preview_stage.dart';
@@ -297,6 +299,99 @@ void main() {
     final a = achatadas.firstWhere((l) => l.id == 'a');
     expect(a.startTime, const Duration(milliseconds: 2500));
     expect(a.duration, const Duration(seconds: 2));
+  });
+
+  testWidgets('aparar o inicio e dividir um grupo nao mexem no conteudo', (
+    tester,
+  ) async {
+    _tela(tester);
+    // Retangulo que anda de x = 20 (0 s) a x = 100 (2 s) dentro do grupo.
+    final andando = _retangulo('a', const Offset(20, 64), const Color(0xFFFFFFFF))
+        .copyLayer(
+          position: AnimatedOffset(const Offset(20, 64), const [
+            Keyframe(time: Duration.zero, value: Offset(20, 64)),
+            Keyframe(time: Duration(seconds: 2), value: Offset(100, 64)),
+          ]),
+        );
+    GroupLayer grupo() => GroupLayer(
+      id: 'g',
+      name: 'Grupo 1',
+      startTime: const Duration(seconds: 1),
+      duration: const Duration(seconds: 3),
+      children: [andando],
+    );
+    const t = Duration(milliseconds: 2500);
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    final e = container.read(editorControllerProvider.notifier);
+    e.openProject(_projeto([grupo()]));
+    final referencia = await _quadro(tester, container, t);
+
+    e.trimLayerStart('g', const Duration(seconds: 2));
+    final aparado = container.read(editorControllerProvider).layers.single as GroupLayer;
+    expect(aparado.startTime, const Duration(seconds: 2));
+    expect(aparado.contentOffset, const Duration(seconds: 1));
+    expect(_diferenca(referencia, await _quadro(tester, container, t)), lessThan(.005));
+
+    e.openProject(_projeto([grupo()]));
+    e.splitLayer('g', const Duration(seconds: 2));
+    final metades = container.read(editorControllerProvider).layers;
+    expect(metades, hasLength(2));
+    expect(_diferenca(referencia, await _quadro(tester, container, t)), lessThan(.005));
+
+    // Desagrupar a segunda metade: o filho entra com o trecho que aparecia.
+    final segunda = metades.firstWhere((l) => l.startTime == const Duration(seconds: 2));
+    e.ungroupLayer(segunda.id);
+    expect(_diferenca(referencia, await _quadro(tester, container, t)), lessThan(.01));
+  });
+
+  test('ponto de entrada e matte de copia sobrevivem ao arquivo e a duplicar', () {
+    final fonte = _retangulo('fonte', const Offset(30, 30), const Color(0xFFFFFFFF));
+    final alvo = _retangulo('alvo', const Offset(30, 30), const Color(0xFFFF0000))
+        .copyLayer(matteMode: MatteMode.alpha, matteSourceId: 'fonte');
+    final grupo = GroupLayer(
+      id: 'g',
+      name: 'Grupo 1',
+      startTime: Duration.zero,
+      duration: const Duration(seconds: 2),
+      contentOffset: const Duration(milliseconds: 750),
+      children: [alvo, fonte],
+    );
+    final volta = projectFromJson(projectToJson(_projeto([grupo])));
+    expect(
+      (volta.layers.single as GroupLayer).contentOffset,
+      const Duration(milliseconds: 750),
+    );
+    final copia = grupo.duplicated();
+    final novoAlvo = copia.children.first;
+    final novaFonte = copia.children.last;
+    expect(novaFonte.id, isNot('fonte'));
+    expect(novoAlvo.matteSourceId, novaFonte.id);
+    expect(copia.contentOffset, const Duration(milliseconds: 750));
+  });
+
+  test('video em grupo aparado entra no tocador a partir do que aparece', () {
+    final video = VideoLayer(
+      id: 'v',
+      name: 'v',
+      startTime: Duration.zero,
+      duration: const Duration(seconds: 6),
+      sourcePath: '/v.mp4',
+      sourceOffset: const Duration(seconds: 10),
+    );
+    final grupo = GroupLayer(
+      id: 'g',
+      name: 'Grupo 1',
+      startTime: const Duration(seconds: 3),
+      duration: const Duration(seconds: 2),
+      contentOffset: const Duration(seconds: 1),
+      children: [video],
+    );
+    final v = midiasAchatadas([grupo]).whereType<VideoLayer>().single;
+    // O conteudo em 1 s aparece no inicio da barra (3 s).
+    expect(v.startTime, const Duration(seconds: 3));
+    expect(v.sourceOffset, const Duration(seconds: 11));
+    expect(v.endTime, const Duration(seconds: 5));
   });
 
   test('nomes numerados, cabecote convertido e desfazer de um passo', () {

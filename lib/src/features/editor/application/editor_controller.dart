@@ -4320,38 +4320,7 @@ class EditorController extends Notifier<VideoProject> {
     VideoLayer layer,
     Duration from,
     Duration to,
-  ) {
-    final originalTrack = timeRemapTrackOf(layer);
-    final times = <Duration>{from, to};
-    if (originalTrack != null) {
-      for (final k in originalTrack.keyframes) {
-        if (k.time > from && k.time < to) times.add(k.time);
-      }
-    }
-    final sorted = times.toList()..sort();
-    final values = <double>[
-      for (final t in sorted)
-        videoSourceTimeAt(layer, t).inMicroseconds / 1000000.0,
-    ];
-    var minimum = values.first;
-    for (final value in values) {
-      if (value < minimum) minimum = value;
-    }
-    var track = AnimatedDouble(values.first - minimum);
-    for (var i = 0; i < sorted.length; i++) {
-      track = track.withKeyframe(
-        sorted[i] - from,
-        values[i] - minimum,
-        originalTrack?.easeAt(sorted[i]) ?? Easing.linear,
-      );
-    }
-    return (
-      sourceOffset:
-          layer.sourceOffset +
-          Duration(microseconds: (minimum * 1000000).round()),
-      track: track,
-    );
-  }
+  ) => sliceVideoTrack(layer, from, to);
 
   /// Congela o quadro do cabecote e ripla tudo que comeca dali para a
   /// direita. [insideClip] grava o hold no proprio Time Remap;
@@ -5054,6 +5023,15 @@ class EditorController extends Notifier<VideoProject> {
     // do desenho, e os posteriores aparecem deslocados do quadro em que
     // foram feitos.
     second = _deslocarAnimacao(second, -firstDur);
+    // A TRILHA DE TEMPO JA NASCEU RELATIVA ao corte (_sliceVideoTrack).
+    // O deslocamento acima vale para os demais parametros; aplicado nela
+    // tambem, empurrava a segunda metade para antes do comeco da fonte.
+    if (second is VideoLayer &&
+        layer is VideoLayer &&
+        (hasTimeRemap(layer) || layer.reverse)) {
+      final b = _sliceVideoTrack(layer, firstDur, layer.duration);
+      second = second.copyLayer(effects: replaceTimeRemap(second, b.track));
+    }
 
     final layers = <Layer>[];
     for (final l in state.layers) {

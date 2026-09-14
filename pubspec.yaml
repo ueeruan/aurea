@@ -37,6 +37,8 @@ dependencies:
   image: ^4.5.4
   aurea_meshopt:
     path: packages/aurea_meshopt
+  aurea_timecore:
+    path: packages/aurea_timecore
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.

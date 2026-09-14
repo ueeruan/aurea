@@ -19,6 +19,7 @@ import 'shape.dart';
 import 'text_anim.dart';
 import 'text_path.dart';
 import 'text_animator.dart';
+import 'cut_ops.dart' show remappedContentTime;
 
 /// Camada da composicao (compositor por camadas: tudo tem transform
 /// animavel). Coordenadas em pixels logicos; posicao e o centro; o pivo e
@@ -1213,8 +1214,7 @@ class GroupLayer extends Layer {
   Duration contentTimeAt(Duration local) {
     final r = timeRemap;
     if (r == null) return local;
-    final us = (r.valueAt(local) * 1000000).round();
-    return Duration(microseconds: us < 0 ? 0 : us);
+    return remappedContentTime(r, local, bakeUntil: duration);
   }
 
   @override

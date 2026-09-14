@@ -2545,11 +2545,15 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
 
   /// Tempo de CONTEUDO da camada depois do remapeamento (se houver).
   static Duration _remappedTime(Layer layer, Duration local) {
+    // Video pergunta ao MESMO mapeamento da previa e da exportacao
+    // (velocidade, reverso e extrapolacao inclusos); as demais camadas
+    // seguram as pontas. As duas respostas vem do nucleo C++.
+    if (layer is VideoLayer) {
+      return hasTimeRemap(layer) ? videoSourceTimeAt(layer, local) : local;
+    }
     for (final e in layer.effects) {
       if (!e.enabled || e.type != EffectType.timeRemap) continue;
-      final secs = e.paramAt('tempo', local);
-      final us = (secs * 1000000).round();
-      return Duration(microseconds: us < 0 ? 0 : us);
+      return remappedContentTime(e.track('tempo'), local, bakeUntil: layer.duration);
     }
     return local;
   }

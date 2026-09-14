@@ -9,6 +9,7 @@ import '../../application/playback_controller.dart';
 import '../../domain/cut_ops.dart';
 import '../../domain/keyframe.dart';
 import '../../domain/layer.dart';
+import '../../domain/time_core.dart';
 import 'am_colors.dart';
 
 /// Modelo de Keyframe local para edição da Curva de Time Remapping
@@ -217,17 +218,18 @@ class _TimeRemapCurveEditorState extends ConsumerState<TimeRemapCurveEditor> {
         .setClipTimeRemap(widget.layerId, remapTrackFromPoints(_points));
   }
 
-  double _evaluateAt(double compTime) =>
-      remapTrackFromPoints(_points)
-          .valueAt(Duration(microseconds: (compTime * 1e6).round()));
+  double _evaluateAt(double compTime) => coreValue(
+    remapTrackFromPoints(_points),
+    Duration(microseconds: (compTime * 1e6).round()),
+    linear: true,
+  );
 
-  // VELOCIDADE DERIVADA
-  double _getSpeedAt(double compTime) {
-    const delta = 0.01;
-    final y1 = _evaluateAt(compTime - delta);
-    final y2 = _evaluateAt(compTime + delta);
-    return (y2 - y1) / (delta * 2);
-  }
+  // VELOCIDADE: derivada analitica do nucleo, a mesma da previa.
+  double _getSpeedAt(double compTime) => coreSlope(
+    remapTrackFromPoints(_points),
+    Duration(microseconds: (compTime * 1e6).round()),
+    linear: true,
+  );
 
   // ADIÇÃO EXPLÍCITA DE KEYFRAME (NUNCA AUTOMÁTICA)
   void _addKeyframeExplicit() {
@@ -818,7 +820,7 @@ class _CurvePainter extends CustomPainter {
         final t = x / w * maxCompDuration;
         final pt = _toScreen(
           t,
-          track.valueAt(Duration(microseconds: (t * 1e6).round())),
+          coreValue(track, Duration(microseconds: (t * 1e6).round()), linear: true),
           w,
           h,
         );

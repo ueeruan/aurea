@@ -32,6 +32,13 @@ packages:
       relative: true
     source: path
     version: "1.0.0"
+  aurea_timecore:
+    dependency: "direct main"
+    description:
+      path: "packages/aurea_timecore"
+      relative: true
+    source: path
+    version: "1.0.0"
   boolean_selector:
     dependency: transitive
     description:

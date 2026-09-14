@@ -164,6 +164,13 @@ const quickStartSteps = <(String, String)>[
 ];
 
 String effectHelp(EffectType type) => switch (type) {
+  EffectType.colorBalance => 'Empurra sombras, meios-tons e altas luzes em direção a vermelho, verde ou azul. Valores positivos puxam a faixa para o canal escolhido; preservar luminosidade mantém o brilho original.',
+  EffectType.selectiveColor => 'Ajusta ciano, magenta, amarelo e preto só na faixa escolhida (vermelhos, azuis, brancos, neutros...). Para mexer em mais de uma faixa, empilhe outra instância. Precisa da GPU.',
+  EffectType.channelMixer => 'Recria cada canal de saída como uma soma dos canais de entrada. Troque canais para cores cruzadas ou ligue Monochrome para um preto e branco com pesos próprios.',
+  EffectType.photoFilter => 'Aplica um filtro de cor, como na lente, ou ajusta a temperatura em Kelvin. Kelvin maior esfria e menor esquenta; densidade controla a força e a luminosidade pode ser preservada.',
+  EffectType.gradientMap => 'Mapeia a luminância para um gradiente de sombras, meios-tons e luzes. Em Soft Light com opacidade baixa é o coloring clássico; sem meios-tons vira duotone.',
+  EffectType.brightnessContrast => 'Brilho empurra a imagem para o branco ou para o preto sem estourar; contraste afasta ou aproxima os tons do cinza médio. Os dois aceitam keyframes.',
+  EffectType.colorTune => 'Rodas de lift, gamma, gain e offset, cada uma com matiz, saturação e luminância. Lift mexe nas sombras, gamma nos meios-tons, gain nas luzes e offset em tudo.',
   EffectType.opticalFlow => 'Estima o movimento entre quadros para suavizar câmera lenta e curvas de Time Remap. A prévia é preparada em segundo plano; a exportação calcula os quadros a partir do original. Cortes de cena não são misturados.',
   EffectType.twirl => 'Torce a imagem ao redor de um centro. Angulo controla o giro e raio delimita a area afetada. As bordas sao espelhadas.',
   EffectType.fisheye => 'Deforma a imagem como uma lente grande angular. Valores positivos ampliam o centro; negativos comprimem.',

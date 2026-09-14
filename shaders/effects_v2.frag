@@ -80,6 +80,63 @@ vec4 blurLine(vec2 uv,vec2 delta,int count) {
   return sum/max(weight,.00001);
 }
 
+// ---------------------------------------------------- COLORING (37-43)
+// Referencias publicas: W3C Compositing (Lum, SetLum, Soft Light,
+// Overlay), GIMP/FFmpeg (Color Balance), FFmpeg (Selective Color) e
+// Tanner Helland (Kelvin). A mesma conta em Dart esta em
+// lib/src/features/editor/domain/coloring.dart, e o teste compara as duas.
+float lumW3c(vec3 c) { return dot(c,vec3(.3,.59,.11)); }
+vec3 clipColor(vec3 c) {
+  float l=lumW3c(c);
+  float n=min(c.r,min(c.g,c.b));
+  float x=max(c.r,max(c.g,c.b));
+  if(n<0.0) c=vec3(l)+(c-vec3(l))*l/max(l-n,.00001);
+  if(x>1.0) c=vec3(l)+(c-vec3(l))*(1.0-l)/max(x-l,.00001);
+  return c;
+}
+vec3 setLum(vec3 c,float l) { return clipColor(c+vec3(l-lumW3c(c))); }
+vec3 softLightW3c(vec3 cb,vec3 cs) {
+  vec3 d=mix(sqrt(max(cb,vec3(0))),((16.0*cb-12.0)*cb+4.0)*cb,step(cb,vec3(.25)));
+  return mix(cb+(2.0*cs-1.0)*(d-cb),cb-(1.0-2.0*cs)*cb*(1.0-cb),step(cs,vec3(.5)));
+}
+vec3 overlayW3c(vec3 cb,vec3 cs) {
+  return mix(1.0-2.0*(1.0-cb)*(1.0-cs),2.0*cb*cs,step(cb,vec3(.5)));
+}
+vec3 rgbToHsl(vec3 c) {
+  float mx=max(c.r,max(c.g,c.b)),mn=min(c.r,min(c.g,c.b));
+  float l=(mx+mn)*.5,d=mx-mn,h=0.0,s=0.0;
+  if(d>.00001) {
+    s=l>.5 ? d/max(2.0-mx-mn,.00001) : d/max(mx+mn,.00001);
+    if(mx==c.r) h=(c.g-c.b)/d+(c.g<c.b ? 6.0 : 0.0);
+    else if(mx==c.g) h=(c.b-c.r)/d+2.0;
+    else h=(c.r-c.g)/d+4.0;
+    h/=6.0;
+  }
+  return vec3(h,s,l);
+}
+vec3 hslToRgb(vec3 hsl) {
+  vec3 k=clamp(abs(mod(hsl.x*6.0+vec3(0,4,2),6.0)-3.0)-1.0,0.0,1.0);
+  return vec3(hsl.z)+(1.0-abs(2.0*hsl.z-1.0))*hsl.y*(k-.5);
+}
+float balanceComp(float v,float l,float s,float m,float h) {
+  s*=clamp((.333-l)*4.0+.5,0.0,1.0)*.7;
+  m*=clamp((l-.333)*4.0+.5,0.0,1.0)*clamp((1.0-l-.333)*4.0+.5,0.0,1.0)*.7;
+  h*=clamp((l+.333-1.0)*4.0+.5,0.0,1.0)*.7;
+  return clamp(v+s+m+h,0.0,1.0);
+}
+vec3 kelvinRgb(float kelvin) {
+  float t=clamp(kelvin,1000.0,40000.0)/100.0;
+  float r=t<=66.0 ? 1.0 : clamp(329.698727446*pow(t-60.0,-.1332047592)/255.0,0.0,1.0);
+  float g=t<=66.0 ? clamp((99.4708025861*log(t)-161.1195681661)/255.0,0.0,1.0)
+                  : clamp(288.1221695283*pow(t-60.0,-.0755148492)/255.0,0.0,1.0);
+  float b=t>=66.0 ? 1.0 : (t<=19.0 ? 0.0 : clamp((138.5177312231*log(t-10.0)-305.0447927307)/255.0,0.0,1.0));
+  return vec3(r,g,b);
+}
+vec3 tuneWheel(float hueDeg,float satPct) {
+  vec3 k=clamp(abs(mod(hueDeg/60.0+vec3(0,4,2),6.0)-3.0)-1.0,0.0,1.0);
+  return clamp(satPct*.01,0.0,1.0)*(k-vec3(dot(k,LUMA)));
+}
+
 void main() {
   vec2 uv=FlutterFragCoord().xy/uSize;
   vec4 original=src(uv);
@@ -413,6 +470,109 @@ void main() {
     float g=clamp(length(vec2(gx,gy)),0.0,1.0);
     vec3 borda=p0.x>.5 ? vec3(1.0-g) : vec3(g);
     c=mix(borda,c,clamp(p0.y,0.0,1.0));
+  }
+
+  // ---------------------------------------------------------- COLORING
+
+  // 37 - COLOR BALANCE: sombras, meios e altas com as mascaras de
+  // luminosidade do GIMP (somam 1 em toda a faixa: o mesmo ajuste nas
+  // tres e um ajuste global). Preservar luminosidade devolve o L do HSL.
+  if(mode==37) {
+    float mx=max(c.r,max(c.g,c.b)),mn=min(c.r,min(c.g,c.b));
+    float L=(mx+mn)*.5;
+    vec3 o=vec3(
+      balanceComp(c.r,L,p0.x*.01,p0.w*.01,p1.z*.01),
+      balanceComp(c.g,L,p0.y*.01,p1.x*.01,p1.w*.01),
+      balanceComp(c.b,L,p0.z*.01,p1.y*.01,p2.x*.01));
+    if(p2.y>.5) { vec3 h=rgbToHsl(o); o=hslToRgb(vec3(h.xy,L)); }
+    c=o;
+  }
+
+  // 38 - SELECTIVE COLOR (FFmpeg vf_selectivecolor), uma faixa por vez.
+  if(mode==38) {
+    float mx=max(c.r,max(c.g,c.b)),mn=min(c.r,min(c.g,c.b));
+    float md=c.r+c.g+c.b-mx-mn;
+    int faixa=int(p0.x+.5);
+    bool dentro=false;
+    float escala=0.0;
+    if(faixa==0) { dentro=c.r>=mx; escala=mx-md; }
+    else if(faixa==1) { dentro=c.b<=mn; escala=md-mn; }
+    else if(faixa==2) { dentro=c.g>=mx; escala=mx-md; }
+    else if(faixa==3) { dentro=c.r<=mn; escala=md-mn; }
+    else if(faixa==4) { dentro=c.b>=mx; escala=mx-md; }
+    else if(faixa==5) { dentro=c.g<=mn; escala=md-mn; }
+    else if(faixa==6) { dentro=mn>.5; escala=2.0*mn-1.0; }
+    else if(faixa==7) { dentro=mx>0.0 && mn<1.0; escala=1.0-(abs(2.0*mx-1.0)+abs(2.0*mn-1.0))*.5; }
+    else { dentro=mx<.5; escala=1.0-2.0*mx; }
+    if(dentro && escala>0.0) {
+      vec3 ajuste=vec3(p0.y,p0.z,p0.w)*.01;
+      float k=p1.x*.01;
+      vec3 res=(-1.0-ajuste)*k-ajuste;
+      if(p1.y<.5) res*=1.0-c;
+      res=clamp(res,-c,1.0-c);
+      c=clamp(c+res*escala,0.0,1.0);
+    }
+  }
+
+  // 39 - CHANNEL MIXER: cada saida e uma soma ponderada das entradas.
+  if(mode==39) {
+    vec3 k=c;
+    vec3 o=vec3(dot(k,p0.xyz),dot(k,p1.xyz),dot(k,p2.xyz))*.01+vec3(p0.w,p1.w,p2.w)*.01;
+    c=p3.x>.5 ? vec3(o.r) : o;
+  }
+
+  // 40 - PHOTO FILTER: filtro de cor (Photoshop) ou temperatura em
+  // Kelvin, esta em luz linear e normalizada pela luminancia.
+  if(mode==40) {
+    float densidade=clamp(p0.y*.01,0.0,1.0);
+    if(p0.x<.5) {
+      vec3 m=mix(c,c*uColor.rgb,densidade*uColor.a);
+      c=p0.w>.5 ? setLum(m,lumW3c(c)) : m;
+    } else {
+      vec3 g=kelvinRgb(p0.z)/max(kelvinRgb(6500.0),vec3(.0001));
+      g/=max(dot(g,LUMA),.0001);
+      vec3 lin=srgbToLinear(clamp(c,0.0,1.0));
+      vec3 w=mix(lin,lin*g,densidade);
+      if(p0.w>.5) w*=dot(lin,LUMA)/max(dot(w,LUMA),.0001);
+      c=linearToSrgb(w);
+    }
+  }
+
+  // 41 - GRADIENT MAP: a luminancia escolhe a cor do gradiente, que
+  // entra no modo de mistura pedido (W3C) com a opacidade pedida.
+  if(mode==41) {
+    float y=clamp(dot(c,vec3(.299,.587,.114)),0.0,1.0);
+    float meio=clamp(p0.w*.01,.05,.95);
+    vec3 g=p0.z>.5
+      ? (y<meio ? mix(uColor.rgb,uColor2.rgb,y/meio) : mix(uColor2.rgb,uColor3.rgb,(y-meio)/(1.0-meio)))
+      : mix(uColor.rgb,uColor3.rgb,y);
+    int modo=int(p0.x+.5);
+    vec3 b=g;
+    if(modo==1) b=softLightW3c(c,g);
+    else if(modo==2) b=overlayW3c(c,g);
+    else if(modo==3) b=c*g;
+    else if(modo==4) b=c+g-c*g;
+    else if(modo==5) b=setLum(g,lumW3c(c));
+    else if(modo==6) b=setLum(c,lumW3c(g));
+    c=mix(c,clamp(b,0.0,1.0),clamp(p0.y*.01,0.0,1.0));
+  }
+
+  // 42 - BRIGHTNESS & CONTRAST (estilo Alight Motion): brilho empurra
+  // para o branco ou o preto sem estourar; contraste gira no cinza medio.
+  if(mode==42) {
+    float brilho=clamp(p0.x*.01,-1.0,1.0),contraste=clamp(p0.y*.01,-1.0,3.0);
+    vec3 c1=brilho>=0.0 ? c+brilho*(1.0-c) : c*(1.0+brilho);
+    c=(c1-.5)*(1.0+contraste)+.5;
+  }
+
+  // 43 - COLOR TUNE: offset, gain, lift e gamma, cada um com matiz,
+  // saturacao e luminancia.
+  if(mode==43) {
+    vec3 x=c+.5*(vec3(p2.w)+tuneWheel(p2.y,p2.z));
+    x*=vec3(1.0+p2.x)+tuneWheel(p1.z,p1.w);
+    x+=.5*(vec3(p0.z)+tuneWheel(p0.x,p0.y))*(1.0-x);
+    x=pow(max(x,vec3(0)),pow(vec3(2.0),-(vec3(p1.y)+tuneWheel(p0.w,p1.x))));
+    c=x;
   }
 
   fragColor=premul(c,a);

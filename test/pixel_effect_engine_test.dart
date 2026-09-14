@@ -81,7 +81,8 @@ void main() {
     // A CONTAGEM E UMA TRAVA DE PROPOSITO: quem adiciona um kernel tem
     // de passar por aqui e conferir o contrato. 30 -> 34 em 2026-09-06:
     // Chroma Key, Luma Key, Color Key e Find Edges (modos 33 a 36).
-    expect(pixelKernels.length, 34);
+    // 34 -> 41 em 2026-09-14: coloring de edit (modos 37 a 43).
+    expect(pixelKernels.length, 41);
     expect(
       pixelKernels.values.map((k) => k.mode).toSet().length,
       pixelKernels.length,

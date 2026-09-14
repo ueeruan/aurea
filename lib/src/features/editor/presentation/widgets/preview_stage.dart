@@ -49,6 +49,7 @@ import 'linear_light.dart';
 import 'pixel_effect_engine.dart';
 import '../../domain/pixel_effect.dart';
 import '../../domain/bloom.dart';
+import '../../domain/coloring.dart';
 import '../../domain/color_space.dart';
 import 'mask_node_editor.dart';
 import 'world3d_painter.dart';
@@ -2597,6 +2598,9 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
         case EffectType.lumaKey:
         case EffectType.colorKey:
         case EffectType.findEdges:
+        // Cor seletiva depende da faixa de CADA pixel (qual canal manda,
+        // quanto e branco, neutro ou preto): nao ha matriz honesta.
+        case EffectType.selectiveColor:
           break;
 
         case EffectType.gaussianBlur:
@@ -3420,6 +3424,151 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
                     ],
                   );
           }
+
+        // COLORING SEM O MOTOR DE PIXEL (aparelho sem shader como
+        // filtro). Com o motor, estes efeitos nem chegam aqui: rodam no
+        // shader, modos 37 a 43. Sem ele, a parte LINEAR de cada conta
+        // vira matriz de cor — brilho/contraste, mistura de canais e o
+        // filtro de foto saem exatos; o que depende da faixa tonal (cor
+        // seletiva, sombras x altas, Soft Light) fica aproximado ou
+        // neutro, e nunca some com a camada.
+        case EffectType.brightnessContrast:
+          out = ColorFiltered(
+            colorFilter: ColorFilter.matrix(
+              brightnessContrastMatrix(
+                effect.paramAt('brightness', local),
+                effect.paramAt('contrast', local),
+              ),
+            ),
+            child: out,
+          );
+
+        case EffectType.channelMixer:
+          out = ColorFiltered(
+            colorFilter: ColorFilter.matrix(
+              channelMixerMatrix(
+                vermelho: [
+                  effect.paramAt('red_red', local),
+                  effect.paramAt('red_green', local),
+                  effect.paramAt('red_blue', local),
+                  effect.paramAt('red_const', local),
+                ],
+                verde: [
+                  effect.paramAt('green_red', local),
+                  effect.paramAt('green_green', local),
+                  effect.paramAt('green_blue', local),
+                  effect.paramAt('green_const', local),
+                ],
+                azul: [
+                  effect.paramAt('blue_red', local),
+                  effect.paramAt('blue_green', local),
+                  effect.paramAt('blue_blue', local),
+                  effect.paramAt('blue_const', local),
+                ],
+                monocromatico: effect.paramAt('monochrome', local) >= .5,
+              ),
+            ),
+            child: out,
+          );
+
+        case EffectType.photoFilter:
+          // Sem shader nao ha como devolver a luminancia pixel a pixel:
+          // preservar so suaviza o filtro.
+          final preservaFiltro = effect.paramAt('preserve_luminosity', local);
+          out = ColorFiltered(
+            colorFilter: ColorFilter.matrix(
+              photoFilterMatrix(
+                temperatura: effect.paramAt('mode', local) >= .5,
+                densidade: effect.paramAt('density', local) *
+                    (preservaFiltro >= .5 ? .8 : 1),
+                kelvin: effect.paramAt('temperature', local),
+                cor: (r: effect.color.r, g: effect.color.g, b: effect.color.b),
+              ),
+            ),
+            child: out,
+          );
+
+        case EffectType.colorBalance:
+          out = ColorFiltered(
+            colorFilter: ColorFilter.matrix(
+              colorBalanceMatrix(
+                sombras: [
+                  effect.paramAt('shadow_red', local),
+                  effect.paramAt('shadow_green', local),
+                  effect.paramAt('shadow_blue', local),
+                ],
+                meios: [
+                  effect.paramAt('midtone_red', local),
+                  effect.paramAt('midtone_green', local),
+                  effect.paramAt('midtone_blue', local),
+                ],
+                altas: [
+                  effect.paramAt('highlight_red', local),
+                  effect.paramAt('highlight_green', local),
+                  effect.paramAt('highlight_blue', local),
+                ],
+                preservarLuminosidade:
+                    effect.paramAt('preserve_luminosity', local) >= .5,
+              ),
+            ),
+            child: out,
+          );
+
+        case EffectType.colorTune:
+          RodaDeCor roda(String nome) => RodaDeCor(
+            matiz: effect.paramAt('${nome}_hue', local),
+            saturacao: effect.paramAt('${nome}_saturation', local),
+            luminancia: effect.paramAt('${nome}_luminance', local),
+          );
+          // O gamma nao cabe numa matriz: sem shader, so a luminancia
+          // dele entra, como ganho medio.
+          final gammaRoda = roda('gamma');
+          final ganho = roda('gain');
+          out = ColorFiltered(
+            colorFilter: ColorFilter.matrix(
+              colorTuneMatrix(
+                lift: roda('lift'),
+                gain: RodaDeCor(
+                  matiz: ganho.matiz,
+                  saturacao: ganho.saturacao,
+                  luminancia: ganho.luminancia + gammaRoda.luminancia * .25,
+                ),
+                offset: roda('offset'),
+              ),
+            ),
+            child: out,
+          );
+
+        case EffectType.gradientMap:
+          // Duas paradas no modo Normal e exato; os outros modos ficam
+          // aproximados por ele, com metade da opacidade.
+          final modoMapa = effect.paramAt('blend_mode', local).round();
+          final meioTom = effect.paramAt('midtones', local) >= .5;
+          // A reta que substitui as tres paradas passa pelo meio-tom tanto
+          // mais cedo quanto mais baixo o ponto medio.
+          final pesoDaLuz =
+              1 - (effect.paramAt('balance', local) / 100).clamp(.05, .95) * .5;
+          final sombra = effect.color;
+          final luz = effect.extraColor(1);
+          final meio = effect.extraColor(0);
+          out = ColorFiltered(
+            colorFilter: ColorFilter.matrix(
+              gradientMapMatrix(
+                sombra: (r: sombra.r, g: sombra.g, b: sombra.b),
+                luz: meioTom
+                    ? (
+                        r: meio.r + (luz.r - meio.r) * pesoDaLuz,
+                        g: meio.g + (luz.g - meio.g) * pesoDaLuz,
+                        b: meio.b + (luz.b - meio.b) * pesoDaLuz,
+                      )
+                    : (r: luz.r, g: luz.g, b: luz.b),
+                opacidade:
+                    effect.paramAt('opacity', local) *
+                    (modoMapa == 0 ? 1 : .5),
+              ),
+            ),
+            child: out,
+          );
 
         case EffectType.twirl:
         case EffectType.fisheye:

@@ -440,4 +440,270 @@ List<EffectPreset> factoryPresets() => [
       ),
     ],
   ),
+  // ---------------------------------------------------------------
+  // COLORINGS PRONTOS (pesquisa 14/09/2026). Pilhas na ordem do pipeline
+  // de cor: exposicao e temperatura primeiro, depois curvas e
+  // equilibrio, saturacao, mapas em Soft Light, nitidez, brilho,
+  // vinheta e grao por ultimo. Os numeros vem de tutoriais de
+  // coloring (PSD, After Effects, Alight Motion) e dos presets do
+  // FFmpeg; onde nao ha fonte, sao ponto de partida — cada efeito da
+  // pilha continua editavel.
+  // ---------------------------------------------------------------
+  EffectPreset(
+    name: 'CC HDR',
+    category: 'Cor',
+    builtIn: true,
+    tags: ['coloring', 'cc', 'hdr'],
+    effects: [
+      EffectInstance(
+        type: EffectType.corrections,
+        params: {'exposicao': AnimatedDouble(0.15)},
+      ),
+      EffectInstance(
+        type: EffectType.curves,
+        params: {
+          'contraste': AnimatedDouble(0.25),
+          'sombras': AnimatedDouble(0.2),
+          'altas': AnimatedDouble(0.15),
+        },
+      ),
+      EffectInstance(
+        type: EffectType.vibrance,
+        params: {'vibracao': AnimatedDouble(0.45)},
+      ),
+      EffectInstance(
+        type: EffectType.unsharpMask,
+        params: {
+          'quantidade': AnimatedDouble(0.6),
+          'raio': AnimatedDouble(1.5),
+        },
+      ),
+      EffectInstance(
+        type: EffectType.lightGlow,
+        params: {
+          'threshold': AnimatedDouble(90),
+          'raio': AnimatedDouble(60),
+          'intensity': AnimatedDouble(40),
+        },
+        color: const Color(0xFFFFFFFF),
+      ),
+      EffectInstance(
+        type: EffectType.vignette,
+        params: {
+          'quantidade': AnimatedDouble(0.2),
+          'raio': AnimatedDouble(0.95),
+          'suavidade': AnimatedDouble(0.75),
+        },
+        color: const Color(0xFF000000),
+      ),
+    ],
+  ),
+  EffectPreset(
+    name: 'CC Azul teal',
+    category: 'Cor',
+    builtIn: true,
+    tags: ['coloring', 'cc', 'teal', 'azul'],
+    effects: [
+      EffectInstance(
+        type: EffectType.colorBalance,
+        params: {
+          'shadow_red': AnimatedDouble(-10),
+          'shadow_green': AnimatedDouble(2),
+          'shadow_blue': AnimatedDouble(14),
+          'highlight_red': AnimatedDouble(6),
+          'highlight_green': AnimatedDouble(2),
+          'highlight_blue': AnimatedDouble(-5),
+        },
+      ),
+      EffectInstance(
+        type: EffectType.curves,
+        params: {'contraste': AnimatedDouble(0.3)},
+      ),
+      EffectInstance(
+        type: EffectType.vibrance,
+        params: {'saturacao': AnimatedDouble(-0.12)},
+      ),
+      EffectInstance(
+        type: EffectType.gradientMap,
+        params: {
+          'blend_mode': AnimatedDouble(1),
+          'opacity': AnimatedDouble(25),
+          'midtones': AnimatedDouble(0),
+        },
+        color: const Color(0xFF0B2A3A),
+        extraColors: const [Color(0xFF4EABCD), Color(0xFFE8F4FF)],
+      ),
+    ],
+  ),
+  EffectPreset(
+    name: 'CC Vintage quente',
+    category: 'Cor',
+    builtIn: true,
+    tags: ['coloring', 'cc', 'vintage', 'quente'],
+    effects: [
+      EffectInstance(
+        type: EffectType.curves,
+        params: {
+          'contraste': AnimatedDouble(0.12),
+          'sombras': AnimatedDouble(0.15),
+          'altas': AnimatedDouble(0.1),
+        },
+      ),
+      EffectInstance(
+        type: EffectType.photoFilter,
+        params: {
+          'mode': AnimatedDouble(1),
+          'temperature': AnimatedDouble(4800),
+          'density': AnimatedDouble(60),
+        },
+      ),
+      EffectInstance(
+        type: EffectType.vibrance,
+        params: {'saturacao': AnimatedDouble(-0.1)},
+      ),
+      EffectInstance(
+        type: EffectType.levels,
+        params: {'saidaMin': AnimatedDouble(0.05)},
+      ),
+      EffectInstance(
+        type: EffectType.filmGrain,
+        params: {
+          'intensidade': AnimatedDouble(0.16),
+          'tamanho': AnimatedDouble(1.4),
+          'semente': AnimatedDouble(9),
+        },
+      ),
+      EffectInstance(
+        type: EffectType.vignette,
+        params: {'quantidade': AnimatedDouble(0.25)},
+        color: const Color(0xFF000000),
+      ),
+    ],
+  ),
+  EffectPreset(
+    name: 'CC Escuro contrastado',
+    category: 'Cor',
+    builtIn: true,
+    tags: ['coloring', 'cc', 'dark', 'contraste'],
+    effects: [
+      EffectInstance(
+        type: EffectType.corrections,
+        params: {'exposicao': AnimatedDouble(-0.3)},
+      ),
+      EffectInstance(
+        type: EffectType.curves,
+        params: {'contraste': AnimatedDouble(0.45)},
+      ),
+      EffectInstance(
+        type: EffectType.vibrance,
+        params: {'saturacao': AnimatedDouble(-0.2)},
+      ),
+      EffectInstance(
+        type: EffectType.photoFilter,
+        params: {
+          'mode': AnimatedDouble(1),
+          'temperature': AnimatedDouble(7500),
+          'density': AnimatedDouble(50),
+        },
+      ),
+      EffectInstance(
+        type: EffectType.vignette,
+        params: {'quantidade': AnimatedDouble(0.45)},
+        color: const Color(0xFF000000),
+      ),
+      EffectInstance(
+        type: EffectType.unsharpMask,
+        params: {'quantidade': AnimatedDouble(0.7)},
+      ),
+    ],
+  ),
+  EffectPreset(
+    name: 'CC Anime',
+    category: 'Cor',
+    builtIn: true,
+    tags: ['coloring', 'cc', 'anime'],
+    effects: [
+      EffectInstance(
+        type: EffectType.colorBalance,
+        params: {
+          'shadow_red': AnimatedDouble(-10),
+          'shadow_green': AnimatedDouble(30),
+          'shadow_blue': AnimatedDouble(40),
+          'midtone_red': AnimatedDouble(-5),
+          'midtone_green': AnimatedDouble(-5),
+          'midtone_blue': AnimatedDouble(20),
+          'highlight_red': AnimatedDouble(20),
+          'highlight_green': AnimatedDouble(10),
+          'highlight_blue': AnimatedDouble(20),
+        },
+      ),
+      EffectInstance(
+        type: EffectType.curves,
+        params: {
+          'sombras': AnimatedDouble(0.05),
+          'altas': AnimatedDouble(0.35),
+        },
+      ),
+      EffectInstance(
+        type: EffectType.vibrance,
+        params: {'vibracao': AnimatedDouble(0.5)},
+      ),
+      EffectInstance(
+        type: EffectType.lightGlow,
+        params: {
+          'threshold': AnimatedDouble(75),
+          'raio': AnimatedDouble(30),
+          'intensity': AnimatedDouble(60),
+        },
+        color: const Color(0xFFFFFFFF),
+      ),
+    ],
+  ),
+  EffectPreset(
+    name: 'CC PSD suave',
+    category: 'Cor',
+    builtIn: true,
+    tags: ['coloring', 'cc', 'psd', 'suave'],
+    effects: [
+      EffectInstance(
+        type: EffectType.vibrance,
+        params: {
+          'vibracao': AnimatedDouble(0.6),
+          'saturacao': AnimatedDouble(0.08),
+        },
+      ),
+      EffectInstance(
+        type: EffectType.gradientMap,
+        params: {
+          'blend_mode': AnimatedDouble(1),
+          'opacity': AnimatedDouble(50),
+          'midtones': AnimatedDouble(0),
+        },
+        color: const Color(0xFFDCC7AE),
+        extraColors: const [Color(0xFFE5BDB0), Color(0xFFEEB3B3)],
+      ),
+      EffectInstance(
+        type: EffectType.colorBalance,
+        params: {
+          'midtone_red': AnimatedDouble(3),
+          'midtone_green': AnimatedDouble(-10),
+          'midtone_blue': AnimatedDouble(-24),
+        },
+      ),
+      EffectInstance(
+        type: EffectType.channelMixer,
+        params: {
+          'red_red': AnimatedDouble(113),
+          'red_green': AnimatedDouble(-15),
+          'green_red': AnimatedDouble(-8),
+          'green_green': AnimatedDouble(104),
+          'green_blue': AnimatedDouble(3),
+        },
+      ),
+      EffectInstance(
+        type: EffectType.brightnessContrast,
+        params: {'contrast': AnimatedDouble(33)},
+      ),
+    ],
+  ),
 ];

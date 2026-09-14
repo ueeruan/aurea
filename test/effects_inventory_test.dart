@@ -166,6 +166,7 @@ void main() {
         'lumaKey',
         'colorKey',
         'findEdges',
+        'selectiveColor',
       };
 
       final mortos = <String>[];

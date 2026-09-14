@@ -2111,3 +2111,105 @@ IA ainda indisponível neste aparelho	AI not yet available on this device	IA aú
 1×	1×	1×	1×	1×	1×	1×	1×	1×	1×
 Tela cheia	Full screen	Pantalla completa	ملء الشاشة	전체 화면	全画面	全屏	फ़ुल स्क्रीन	Layar penuh	Во весь экран
 Sair da tela cheia	Exit full screen	Salir de pantalla completa	الخروج من ملء الشاشة	전체 화면 종료	全画面を終了	退出全屏	फ़ुल स्क्रीन से बाहर निकलें	Keluar dari layar penuh	Выйти из полноэкранного режима
+Color Balance	Color Balance	Balance de color	توازن الألوان	색상 균형	カラーバランス	色彩平衡	कलर बैलेंस	Keseimbangan Warna	Цветовой баланс
+Selective Color	Selective Color	Corrección selectiva	اللون الانتقائي	선택 색상	特定色域の選択	可选颜色	चयनात्मक रंग	Warna Selektif	Выборочная коррекция цвета
+Channel Mixer	Channel Mixer	Mezclador de canales	خالط القنوات	채널 혼합	チャンネルミキサー	通道混合器	चैनल मिक्सर	Mixer Kanal	Микширование каналов
+Photo Filter	Photo Filter	Filtro de fotografía	فلتر الصورة	포토 필터	写真フィルター	照片滤镜	फ़ोटो फ़िल्टर	Filter Foto	Фотофильтр
+Gradient Map	Gradient Map	Mapa de degradado	خريطة التدرج	그레이디언트 맵	グラデーションマップ	渐变映射	ग्रेडिएंट मैप	Peta Gradien	Карта градиента
+Brightness & Contrast	Brightness & Contrast	Brillo y contraste	السطوع والتباين	명도 및 대비	明るさ・コントラスト	亮度和对比度	ब्राइटनेस और कंट्रास्ट	Kecerahan & Kontras	Яркость и контраст
+Color Tune	Color Tune	Ajuste de color	ضبط الألوان	색상 조정	カラーチューン	色彩调节	कलर ट्यून	Penyetelan Warna	Тонкая настройка цвета
+Shadow Red Balance	Shadow Red Balance	Balance de rojo en sombras	توازن الأحمر في الظلال	그림자 빨강 균형	シャドウの赤バランス	阴影红色平衡	छाया में लाल संतुलन	Keseimbangan merah bayangan	Баланс красного в тенях
+Shadow Green Balance	Shadow Green Balance	Balance de verde en sombras	توازن الأخضر في الظلال	그림자 초록 균형	シャドウの緑バランス	阴影绿色平衡	छाया में हरा संतुलन	Keseimbangan hijau bayangan	Баланс зелёного в тенях
+Shadow Blue Balance	Shadow Blue Balance	Balance de azul en sombras	توازن الأزرق في الظلال	그림자 파랑 균형	シャドウの青バランス	阴影蓝色平衡	छाया में नीला संतुलन	Keseimbangan biru bayangan	Баланс синего в тенях
+Midtone Red Balance	Midtone Red Balance	Balance de rojo en medios tonos	توازن الأحمر في الدرجات المتوسطة	중간톤 빨강 균형	中間調の赤バランス	中间调红色平衡	मिडटोन में लाल संतुलन	Keseimbangan merah nada tengah	Баланс красного в полутонах
+Midtone Green Balance	Midtone Green Balance	Balance de verde en medios tonos	توازن الأخضر في الدرجات المتوسطة	중간톤 초록 균형	中間調の緑バランス	中间调绿色平衡	मिडटोन में हरा संतुलन	Keseimbangan hijau nada tengah	Баланс зелёного в полутонах
+Midtone Blue Balance	Midtone Blue Balance	Balance de azul en medios tonos	توازن الأزرق في الدرجات المتوسطة	중간톤 파랑 균형	中間調の青バランス	中间调蓝色平衡	मिडटोन में नीला संतुलन	Keseimbangan biru nada tengah	Баланс синего в полутонах
+Highlight Red Balance	Highlight Red Balance	Balance de rojo en luces	توازن الأحمر في الإضاءات	하이라이트 빨강 균형	ハイライトの赤バランス	高光红色平衡	हाइलाइट में लाल संतुलन	Keseimbangan merah sorotan	Баланс красного в светах
+Highlight Green Balance	Highlight Green Balance	Balance de verde en luces	توازن الأخضر في الإضاءات	하이라이트 초록 균형	ハイライトの緑バランス	高光绿色平衡	हाइलाइट में हरा संतुलन	Keseimbangan hijau sorotan	Баланс зелёного в светах
+Highlight Blue Balance	Highlight Blue Balance	Balance de azul en luces	توازن الأزرق في الإضاءات	하이라이트 파랑 균형	ハイライトの青バランス	高光蓝色平衡	हाइलाइट में नीला संतुलन	Keseimbangan biru sorotan	Баланс синего в светах
+Preserve Luminosity	Preserve Luminosity	Conservar luminosidad	الحفاظ على الإضاءة	광도 유지	輝度を保持	保持明度	ल्यूमिनोसिटी बनाए रखें	Pertahankan luminositas	Сохранять яркость
+Colors	Colors	Colores	الألوان	색상	カラー	颜色	रंग	Warna	Цвета
+Cyan	Cyan	Cian	سماوي	시안	シアン	青色	सियान	Sian	Голубой
+Magenta	Magenta	Magenta	أرجواني	마젠타	マゼンタ	洋红	मैजेंटा	Magenta	Пурпурный
+Yellow	Yellow	Amarillo	أصفر	노랑	イエロー	黄色	पीला	Kuning	Жёлтый
+Black	Black	Negro	أسود	검정	ブラック	黑色	काला	Hitam	Чёрный
+Method	Method	Método	الطريقة	방식	方法	方法	विधि	Metode	Метод
+Reds	Reds	Rojos	الأحمر	빨강 계열	レッド系	红色系	लाल रंग	Merah	Красные
+Yellows	Yellows	Amarillos	الأصفر	노랑 계열	イエロー系	黄色系	पीले रंग	Kekuningan	Жёлтые
+Greens	Greens	Verdes	الأخضر	초록 계열	グリーン系	绿色系	हरे रंग	Hijau	Зелёные
+Cyans	Cyans	Cianes	السماوي	시안 계열	シアン系	青色系	सियान रंग	Kesianan	Голубые
+Blues	Blues	Azules	الأزرق	파랑 계열	ブルー系	蓝色系	नीले रंग	Biru	Синие
+Magentas	Magentas	Magentas	الأرجواني	마젠타 계열	マゼンタ系	洋红色系	मैजेंटा रंग	Kemagentaan	Пурпурные
+Whites	Whites	Blancos	الأبيض	흰색 계열	ホワイト系	白色系	सफ़ेद रंग	Putih	Белые
+Neutrals	Neutrals	Neutros	المحايدة	중성색	中間色系	中性色	न्यूट्रल रंग	Netral	Нейтральные
+Blacks	Blacks	Negros	الأسود	검정 계열	ブラック系	黑色系	काले रंग	Kehitaman	Чёрные
+Relative	Relative	Relativo	نسبي	상대	相対	相对	सापेक्ष	Relatif	Относительный
+Absolute	Absolute	Absoluto	مطلق	절대	絶対	绝对	निरपेक्ष	Absolut	Абсолютный
+Red-Red	Red-Red	Rojo-Rojo	أحمر-أحمر	빨강-빨강	赤-赤	红-红	लाल-लाल	Merah-Merah	Красный-Красный
+Red-Green	Red-Green	Rojo-Verde	أحمر-أخضر	빨강-초록	赤-緑	红-绿	लाल-हरा	Merah-Hijau	Красный-Зелёный
+Red-Blue	Red-Blue	Rojo-Azul	أحمر-أزرق	빨강-파랑	赤-青	红-蓝	लाल-नीला	Merah-Biru	Красный-Синий
+Red-Const	Red-Const	Rojo-Const.	أحمر-ثابت	빨강-상수	赤-定数	红-常量	लाल-स्थिरांक	Merah-Konst	Красный-Константа
+Green-Red	Green-Red	Verde-Rojo	أخضر-أحمر	초록-빨강	緑-赤	绿-红	हरा-लाल	Hijau-Merah	Зелёный-Красный
+Green-Green	Green-Green	Verde-Verde	أخضر-أخضر	초록-초록	緑-緑	绿-绿	हरा-हरा	Hijau-Hijau	Зелёный-Зелёный
+Green-Blue	Green-Blue	Verde-Azul	أخضر-أزرق	초록-파랑	緑-青	绿-蓝	हरा-नीला	Hijau-Biru	Зелёный-Синий
+Green-Const	Green-Const	Verde-Const.	أخضر-ثابت	초록-상수	緑-定数	绿-常量	हरा-स्थिरांक	Hijau-Konst	Зелёный-Константа
+Blue-Red	Blue-Red	Azul-Rojo	أزرق-أحمر	파랑-빨강	青-赤	蓝-红	नीला-लाल	Biru-Merah	Синий-Красный
+Blue-Green	Blue-Green	Azul-Verde	أزرق-أخضر	파랑-초록	青-緑	蓝-绿	नीला-हरा	Biru-Hijau	Синий-Зелёный
+Blue-Blue	Blue-Blue	Azul-Azul	أزرق-أزرق	파랑-파랑	青-青	蓝-蓝	नीला-नीला	Biru-Biru	Синий-Синий
+Blue-Const	Blue-Const	Azul-Const.	أزرق-ثابت	파랑-상수	青-定数	蓝-常量	नीला-स्थिरांक	Biru-Konst	Синий-Константа
+Monochrome	Monochrome	Monocromo	أحادي اللون	흑백	モノクロ	单色	मोनोक्रोम	Monokrom	Монохромный
+Temperature	Temperature	Temperatura	الحرارة	온도	色温度	色温	तापमान	Suhu	Температура
+Density	Density	Densidad	الكثافة	농도	適用量	浓度	घनत्व	Kepadatan	Плотность
+Temperature (K)	Temperature (K)	Temperatura (K)	درجة الحرارة (K)	색온도 (K)	色温度 (K)	色温 (K)	तापमान (K)	Suhu (K)	Температура (K)
+Blending Mode	Blending Mode	Modo de fusión	وضع المزج	혼합 모드	描画モード	混合模式	ब्लेंडिंग मोड	Mode campuran	Режим наложения
+Soft Light	Soft Light	Luz suave	ضوء ناعم	소프트 라이트	ソフトライト	柔光	सॉफ़्ट लाइट	Cahaya lembut	Мягкий свет
+Overlay	Overlay	Superponer	تراكب	오버레이	オーバーレイ	叠加	ओवरले	Overlay	Перекрытие
+Multiply	Multiply	Multiplicar	ضرب	곱하기	乗算	正片叠底	मल्टीप्लाई	Kalikan	Умножение
+Luminosity	Luminosity	Luminosidad	الإضاءة	광도	輝度	明度	ल्यूमिनोसिटी	Luminositas	Яркость
+Use Midtones	Use Midtones	Usar medios tonos	استخدام الدرجات المتوسطة	중간톤 사용	中間調を使用	使用中间调	मिडटोन इस्तेमाल करें	Gunakan nada tengah	Использовать полутона
+Midpoint	Midpoint	Punto medio	نقطة المنتصف	중간점	中間点	中点	मध्य बिंदु	Titik tengah	Средняя точка
+Contrast	Contrast	Contraste	التباين	대비	コントラスト	对比度	कंट्रास्ट	Kontras	Контраст
+Lift Hue	Lift Hue	Tono de lift	تدرج الرفع	리프트 색조	リフトの色相	提升色相	लिफ़्ट ह्यू	Rona lift	Оттенок лифта
+Lift Saturation	Lift Saturation	Saturación de lift	تشبع الرفع	리프트 채도	リフトの彩度	提升饱和度	लिफ़्ट सैचुरेशन	Saturasi lift	Насыщенность лифта
+Lift Luminance	Lift Luminance	Luminancia de lift	إضاءة الرفع	리프트 휘도	リフトの輝度	提升亮度	लिफ़्ट ल्यूमिनेंस	Luminans lift	Яркость лифта
+Gamma Hue	Gamma Hue	Tono de gamma	تدرج غاما	감마 색조	ガンマの色相	伽马色相	गामा ह्यू	Rona gamma	Оттенок гаммы
+Gamma Saturation	Gamma Saturation	Saturación de gamma	تشبع غاما	감마 채도	ガンマの彩度	伽马饱和度	गामा सैचुरेशन	Saturasi gamma	Насыщенность гаммы
+Gamma Luminance	Gamma Luminance	Luminancia de gamma	إضاءة غاما	감마 휘도	ガンマの輝度	伽马亮度	गामा ल्यूमिनेंस	Luminans gamma	Яркость гаммы
+Gain Hue	Gain Hue	Tono de ganancia	تدرج الكسب	게인 색조	ゲインの色相	增益色相	गेन ह्यू	Rona gain	Оттенок усиления
+Gain Saturation	Gain Saturation	Saturación de ganancia	تشبع الكسب	게인 채도	ゲインの彩度	增益饱和度	गेन सैचुरेशन	Saturasi gain	Насыщенность усиления
+Gain Luminance	Gain Luminance	Luminancia de ganancia	إضاءة الكسب	게인 휘도	ゲインの輝度	增益亮度	गेन ल्यूमिनेंस	Luminans gain	Яркость усиления
+Offset Hue	Offset Hue	Tono de desplazamiento	تدرج الإزاحة	오프셋 색조	オフセットの色相	偏移色相	ऑफ़सेट ह्यू	Rona offset	Оттенок смещения
+Offset Saturation	Offset Saturation	Saturación de desplazamiento	تشبع الإزاحة	오프셋 채도	オフセットの彩度	偏移饱和度	ऑफ़सेट सैचुरेशन	Saturasi offset	Насыщенность смещения
+Offset Luminance	Offset Luminance	Luminancia de desplazamiento	إضاءة الإزاحة	오프셋 휘도	オフセットの輝度	偏移亮度	ऑफ़सेट ल्यूमिनेंस	Luminans offset	Яркость смещения
+Teal & Orange	Teal & Orange	Verde azulado y naranja	أزرق مخضر وبرتقالي	틸 & 오렌지	ティール&オレンジ	青橙色调	टील और ऑरेंज	Teal & Oranye	Бирюзовый и оранжевый
+Anime	Anime	Anime	أنمي	애니메	アニメ	动漫	एनीमे	Anime	Аниме
+PSD Soft	PSD Soft	PSD suave	PSD ناعم	PSD 소프트	PSDソフト	PSD 柔和	PSD सॉफ़्ट	PSD Lembut	Мягкий PSD
+Warm Skin	Warm Skin	Piel cálida	بشرة دافئة	따뜻한 피부	暖かい肌	暖色肤色	गर्म त्वचा	Kulit Hangat	Тёплая кожа
+Cyan Pop	Cyan Pop	Cian vivo	سماوي بارز	시안 팝	シアンポップ	青色跳色	सियान पॉप	Sian Menonjol	Яркий голубой
+Warm Whites	Warm Whites	Blancos cálidos	أبيض دافئ	따뜻한 흰색	暖かい白	暖白	गर्म सफ़ेद	Putih Hangat	Тёплые белые
+PSD Mix	PSD Mix	Mezcla PSD	مزج PSD	PSD 믹스	PSDミックス	PSD 混合	PSD मिक्स	Campuran PSD	Микс PSD
+Black & White	Black & White	Blanco y negro	أبيض وأسود	블랙 & 화이트	白黒	黑白	ब्लैक एंड व्हाइट	Hitam Putih	Чёрно-белый
+Cross Process	Cross Process	Proceso cruzado	معالجة متقاطعة	크로스 프로세스	クロスプロセス	交叉冲印	क्रॉस प्रोसेस	Proses Silang	Кросс-процесс
+Warm Vintage	Warm Vintage	Vintage cálido	عتيق دافئ	따뜻한 빈티지	ウォームビンテージ	暖调复古	गर्म विंटेज	Vintage Hangat	Тёплый винтаж
+Cool	Cool	Frío	بارد	차가운 톤	クール	冷调	ठंडा	Sejuk	Холодный
+Warming Filter	Warming Filter	Filtro cálido	فلتر تدفئة	웜 필터	暖色系フィルター	加温滤镜	वार्मिंग फ़िल्टर	Filter Penghangat	Тёплый фильтр
+Duotone	Duotone	Duotono	ثنائي اللون	듀오톤	ダブルトーン	双色调	ड्युओटोन	Duotone	Дуплекс
+Tritone	Tritone	Tritono	ثلاثي اللون	트라이톤	トライトーン	三色调	ट्राइटोन	Tritone	Триплекс
+PSD Contrast	PSD Contrast	Contraste PSD	تباين PSD	PSD 대비	PSDコントラスト	PSD 对比度	PSD कंट्रास्ट	Kontras PSD	Контраст PSD
+Punch	Punch	Impacto	قوة	펀치	パンチ	冲击	पंच	Tajam	Панч
+Faded	Faded	Desvaído	باهت	페이드	色あせ	褪色	फीका	Pudar	Выцветший
+Pastel	Pastel	Pastel	باستيل	파스텔	パステル	粉彩	पेस्टल	Pastel	Пастель
+Night	Night	Noche	ليل	밤	ナイト	夜晚	रात	Malam	Ночь
+CC HDR	CC HDR	CC HDR	CC HDR	CC HDR	CC HDR	CC HDR	CC HDR	CC HDR	CC HDR
+CC Azul teal	CC Teal Blue	CC Azul verdoso	CC أزرق مخضر	CC 틸 블루	CC ティールブルー	CC 青蓝	CC टील ब्लू	CC Biru Teal	CC Бирюзово-синий
+CC Vintage quente	CC Warm Vintage	CC Vintage cálido	CC عتيق دافئ	CC 따뜻한 빈티지	CC ウォームビンテージ	CC 暖调复古	CC गर्म विंटेज	CC Vintage Hangat	CC Тёплый винтаж
+CC Escuro contrastado	CC Dark Contrast	CC Oscuro contrastado	CC داكن متباين	CC 다크 콘트라스트	CC ダークコントラスト	CC 暗调高对比	CC डार्क कंट्रास्ट	CC Gelap Kontras	CC Тёмный контраст
+CC Anime	CC Anime	CC Anime	CC أنمي	CC 애니메	CC アニメ	CC 动漫	CC एनीमे	CC Anime	CC Аниме
+CC PSD suave	CC Soft PSD	CC PSD suave	CC PSD ناعم	CC PSD 소프트	CC PSDソフト	CC PSD 柔和	CC PSD सॉफ़्ट	CC PSD Lembut	CC Мягкий PSD
+Empurra sombras, meios-tons e altas luzes em direção a vermelho, verde ou azul. Valores positivos puxam a faixa para o canal escolhido; preservar luminosidade mantém o brilho original.	Pushes shadows, midtones and highlights toward red, green or blue. Positive values pull the range toward the chosen channel; preserve luminosity keeps the original brightness.	Empuja sombras, medios tonos y luces hacia rojo, verde o azul. Los valores positivos llevan el rango hacia el canal elegido; conservar luminosidad mantiene el brillo original.	يدفع الظلال والدرجات المتوسطة والإضاءات نحو الأحمر أو الأخضر أو الأزرق. القيم الموجبة تسحب النطاق نحو القناة المختارة؛ والحفاظ على الإضاءة يُبقي السطوع الأصلي.	그림자, 중간톤, 하이라이트를 빨강, 초록, 파랑 쪽으로 밀어줍니다. 양수 값은 해당 범위를 선택한 채널 쪽으로 당기고, 광도 유지는 원래 밝기를 지킵니다.	シャドウ、中間調、ハイライトを赤・緑・青の方向へ寄せます。正の値でその範囲を選んだチャンネル側へ引き、輝度を保持すると元の明るさを保ちます。	将阴影、中间调和高光推向红、绿或蓝。正值把该范围拉向所选通道；保持明度会保留原始亮度。	छाया, मिडटोन और हाइलाइट को लाल, हरे या नीले की ओर धकेलता है। धनात्मक मान उस रेंज को चुने गए चैनल की ओर खींचते हैं; ल्यूमिनोसिटी बनाए रखने से मूल ब्राइटनेस बनी रहती है।	Mendorong bayangan, nada tengah, dan sorotan ke arah merah, hijau, atau biru. Nilai positif menarik rentang ke kanal yang dipilih; pertahankan luminositas menjaga kecerahan asli.	Сдвигает тени, полутона и света к красному, зелёному или синему. Положительные значения тянут диапазон к выбранному каналу; сохранение яркости оставляет исходную яркость.
+Ajusta ciano, magenta, amarelo e preto só na faixa escolhida (vermelhos, azuis, brancos, neutros...). Para mexer em mais de uma faixa, empilhe outra instância. Precisa da GPU.	Adjusts cyan, magenta, yellow and black only in the chosen range (reds, blues, whites, neutrals...). To change more than one range, stack another instance. Requires the GPU.	Ajusta cian, magenta, amarillo y negro solo en el rango elegido (rojos, azules, blancos, neutros...). Para cambiar más de un rango, apila otra instancia. Requiere la GPU.	يضبط السماوي والأرجواني والأصفر والأسود في النطاق المختار فقط (الأحمر، الأزرق، الأبيض، المحايد...). لتعديل أكثر من نطاق، أضف نسخة أخرى. يتطلب وحدة معالجة الرسومات.	선택한 범위(빨강, 파랑, 흰색, 중성색...)에서만 시안, 마젠타, 노랑, 검정을 조정합니다. 여러 범위를 바꾸려면 인스턴스를 하나 더 쌓으세요. GPU가 필요합니다.	選んだ範囲(レッド系、ブルー系、ホワイト系、中間色系など)だけでシアン、マゼンタ、イエロー、ブラックを調整します。複数の範囲を変えるには、もう一つ重ねてください。GPUが必要です。	只在所选范围（红色、蓝色、白色、中性色……）内调整青色、洋红、黄色和黑色。要调整多个范围，请再叠加一个实例。需要 GPU。	सिर्फ़ चुनी गई रेंज (लाल, नीले, सफ़ेद, न्यूट्रल...) में सियान, मैजेंटा, पीला और काला समायोजित करता है। एक से ज़्यादा रेंज बदलने के लिए एक और इंस्टेंस जोड़ें। GPU ज़रूरी है।	Menyesuaikan sian, magenta, kuning, dan hitam hanya pada rentang yang dipilih (merah, biru, putih, netral...). Untuk mengubah lebih dari satu rentang, tumpuk instans lain. Memerlukan GPU.	Настраивает голубой, пурпурный, жёлтый и чёрный только в выбранном диапазоне (красные, синие, белые, нейтральные...). Чтобы менять несколько диапазонов, добавьте ещё один экземпляр. Нужен GPU.
+Recria cada canal de saída como uma soma dos canais de entrada. Troque canais para cores cruzadas ou ligue Monochrome para um preto e branco com pesos próprios.	Rebuilds each output channel as a sum of the input channels. Swap channels for cross colors or turn on Monochrome for a black and white with your own weights.	Reconstruye cada canal de salida como una suma de los canales de entrada. Intercambia canales para colores cruzados o activa Monocromo para un blanco y negro con pesos propios.	يعيد بناء كل قناة إخراج كمجموع لقنوات الإدخال. بدّل القنوات لألوان متقاطعة أو فعّل أحادي اللون لأبيض وأسود بأوزان خاصة بك.	각 출력 채널을 입력 채널의 합으로 다시 만듭니다. 채널을 바꿔 크로스 컬러를 만들거나 흑백을 켜서 원하는 가중치의 흑백을 만드세요.	各出力チャンネルを入力チャンネルの合計として作り直します。チャンネルを入れ替えてクロスカラーにしたり、モノクロをオンにして独自の比率の白黒にしたりできます。	把每个输出通道重建为输入通道的加权和。交换通道可得到交叉色彩，打开单色可用自定义权重做黑白。	हर आउटपुट चैनल को इनपुट चैनलों के जोड़ के रूप में फिर से बनाता है। क्रॉस रंगों के लिए चैनल बदलें या अपने वज़न वाले ब्लैक एंड व्हाइट के लिए मोनोक्रोम चालू करें।	Membangun ulang setiap kanal keluaran sebagai jumlah kanal masukan. Tukar kanal untuk warna silang atau aktifkan Monokrom untuk hitam putih dengan bobot sendiri.	Пересобирает каждый выходной канал как сумму входных. Поменяйте каналы местами для перекрёстных цветов или включите монохром, чтобы получить чёрно-белое изображение со своими весами.
+Aplica um filtro de cor, como na lente, ou ajusta a temperatura em Kelvin. Kelvin maior esfria e menor esquenta; densidade controla a força e a luminosidade pode ser preservada.	Applies a color filter, like one on the lens, or adjusts the temperature in Kelvin. Higher Kelvin cools and lower warms; density sets the strength and luminosity can be preserved.	Aplica un filtro de color, como en el objetivo, o ajusta la temperatura en Kelvin. Más Kelvin enfría y menos calienta; la densidad controla la fuerza y se puede conservar la luminosidad.	يطبق فلتر لون كما على العدسة، أو يضبط الحرارة بالكلفن. الكلفن الأعلى يبرّد والأقل يدفّئ؛ الكثافة تتحكم بالقوة ويمكن الحفاظ على الإضاءة.	렌즈 필터처럼 색상 필터를 입히거나 켈빈으로 색온도를 조정합니다. 켈빈이 높을수록 차갑고 낮을수록 따뜻해지며, 농도로 강도를 정하고 광도를 유지할 수 있습니다.	レンズに付けるようなカラーフィルターをかけるか、ケルビンで色温度を調整します。ケルビンを上げると寒色、下げると暖色になり、適用量で強さを決め、輝度を保持できます。	像镜头滤镜一样叠加颜色滤镜，或按开尔文调整色温。开尔文越高越冷、越低越暖；浓度控制强度，还可以保持明度。	लेंस पर लगे फ़िल्टर जैसा रंग फ़िल्टर लगाता है या केल्विन में तापमान बदलता है। ज़्यादा केल्विन ठंडा और कम गर्म करता है; घनत्व ताक़त तय करता है और ल्यूमिनोसिटी बनाए रखी जा सकती है।	Menerapkan filter warna seperti pada lensa, atau menyesuaikan suhu dalam Kelvin. Kelvin lebih tinggi mendinginkan dan lebih rendah menghangatkan; kepadatan mengatur kekuatan dan luminositas bisa dipertahankan.	Накладывает цветной фильтр, как на объективе, или меняет температуру в кельвинах. Больше кельвинов холоднее, меньше теплее; плотность задаёт силу, а яркость можно сохранить.
+Mapeia a luminância para um gradiente de sombras, meios-tons e luzes. Em Soft Light com opacidade baixa é o coloring clássico; sem meios-tons vira duotone.	Maps luminance to a gradient of shadows, midtones and highlights. In Soft Light with low opacity it is the classic coloring; without midtones it becomes a duotone.	Asigna la luminancia a un degradado de sombras, medios tonos y luces. En Luz suave con poca opacidad es el coloring clásico; sin medios tonos se vuelve duotono.	يربط الإضاءة بتدرج من الظلال والدرجات المتوسطة والإضاءات. في وضع الضوء الناعم مع عتامة منخفضة يكون التلوين الكلاسيكي؛ ومن دون الدرجات المتوسطة يصبح ثنائي اللون.	휘도를 그림자, 중간톤, 하이라이트 그레이디언트에 매핑합니다. 소프트 라이트에 낮은 불투명도면 전형적인 컬러링이 되고, 중간톤을 끄면 듀오톤이 됩니다.	輝度をシャドウ・中間調・ハイライトのグラデーションに割り当てます。ソフトライトで不透明度を低くすると定番のカラーリングに、中間調なしだとダブルトーンになります。	把亮度映射到阴影、中间调和高光的渐变。柔光模式配低不透明度就是经典调色；关掉中间调就变成双色调。	ल्यूमिनेंस को छाया, मिडटोन और हाइलाइट के ग्रेडिएंट पर मैप करता है। कम अपारदर्शिता वाली सॉफ़्ट लाइट में यह क्लासिक कलरिंग है; मिडटोन के बिना यह ड्युओटोन बन जाता है।	Memetakan luminans ke gradien bayangan, nada tengah, dan sorotan. Dalam Cahaya lembut dengan opasitas rendah ini adalah coloring klasik; tanpa nada tengah menjadi duotone.	Переносит яркость на градиент теней, полутонов и светов. В режиме «Мягкий свет» с низкой непрозрачностью это классический колоринг; без полутонов получается дуплекс.
+Brilho empurra a imagem para o branco ou para o preto sem estourar; contraste afasta ou aproxima os tons do cinza médio. Os dois aceitam keyframes.	Brightness pushes the image toward white or black without clipping; contrast spreads tones away from or toward middle gray. Both accept keyframes.	El brillo lleva la imagen hacia el blanco o el negro sin quemar; el contraste aleja o acerca los tonos al gris medio. Ambos aceptan fotogramas clave.	السطوع يدفع الصورة نحو الأبيض أو الأسود دون احتراق؛ والتباين يبعد الدرجات عن الرمادي المتوسط أو يقرّبها منه. كلاهما يقبل الإطارات المفتاحية.	명도는 이미지를 날리지 않고 흰색이나 검정 쪽으로 밀고, 대비는 톤을 중간 회색에서 멀어지게 하거나 가깝게 합니다. 둘 다 키프레임을 쓸 수 있습니다.	明るさは白飛びさせずに画像を白または黒の方向へ寄せ、コントラストはトーンを中間グレーから離したり近づけたりします。どちらもキーフレームに対応しています。	亮度把画面推向白色或黑色而不过曝；对比度让色调远离或靠近中灰。两者都支持关键帧。	ब्राइटनेस इमेज को बिना जलाए सफ़ेद या काले की ओर ले जाती है; कंट्रास्ट टोन को मध्य ग्रे से दूर या पास करता है। दोनों कीफ़्रेम स्वीकार करते हैं।	Kecerahan mendorong gambar ke arah putih atau hitam tanpa terbakar; kontras menjauhkan atau mendekatkan nada dari abu-abu tengah. Keduanya menerima keyframe.	Яркость смещает изображение к белому или чёрному без пересветов; контраст отдаляет тона от среднего серого или приближает к нему. Оба параметра поддерживают ключевые кадры.
+Rodas de lift, gamma, gain e offset, cada uma com matiz, saturação e luminância. Lift mexe nas sombras, gamma nos meios-tons, gain nas luzes e offset em tudo.	Lift, gamma, gain and offset wheels, each with hue, saturation and luminance. Lift works on shadows, gamma on midtones, gain on highlights and offset on everything.	Ruedas de lift, gamma, ganancia y desplazamiento, cada una con tono, saturación y luminancia. Lift actúa en sombras, gamma en medios tonos, ganancia en luces y desplazamiento en todo.	عجلات الرفع وغاما والكسب والإزاحة، لكل منها تدرج وتشبع وإضاءة. الرفع يعمل على الظلال، وغاما على الدرجات المتوسطة، والكسب على الإضاءات، والإزاحة على الكل.	리프트, 감마, 게인, 오프셋 휠에 각각 색조, 채도, 휘도가 있습니다. 리프트는 그림자, 감마는 중간톤, 게인은 하이라이트, 오프셋은 전체에 작용합니다.	リフト、ガンマ、ゲイン、オフセットのホイールで、それぞれ色相・彩度・輝度があります。リフトはシャドウ、ガンマは中間調、ゲインはハイライト、オフセットは全体に効きます。	提升、伽马、增益和偏移四个色轮，各有色相、饱和度和亮度。提升作用于阴影，伽马作用于中间调，增益作用于高光，偏移作用于全部。	लिफ़्ट, गामा, गेन और ऑफ़सेट व्हील, हर एक में ह्यू, सैचुरेशन और ल्यूमिनेंस। लिफ़्ट छाया पर, गामा मिडटोन पर, गेन हाइलाइट पर और ऑफ़सेट पूरे चित्र पर काम करता है।	Roda lift, gamma, gain, dan offset, masing-masing dengan rona, saturasi, dan luminans. Lift bekerja pada bayangan, gamma pada nada tengah, gain pada sorotan, dan offset pada semuanya.	Круги лифта, гаммы, усиления и смещения, у каждого — оттенок, насыщенность и яркость. Лифт влияет на тени, гамма на полутона, усиление на света, а смещение на всё изображение.

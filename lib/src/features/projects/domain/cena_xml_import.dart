@@ -732,6 +732,25 @@ List<EffectInstance> _efeitos(XmlNode e, _Contexto ctx) {
 
 EffectType? _efeitoPorNome(String nome) {
   final n = nome.toLowerCase();
+  // COLORING (presets "CC" do Alight Motion): antes das regras genericas
+  // abaixo, que confundiriam "colorbalance" com tint e "gradientmap" com
+  // outra coisa.
+  if (n.contains('colorbalance') || n.contains('color_balance')) {
+    return EffectType.colorBalance;
+  }
+  if (n.contains('selectivecolor')) return EffectType.selectiveColor;
+  if (n.contains('channelmix') || n.contains('channelremap')) {
+    return EffectType.channelMixer;
+  }
+  // So os que NASCEM NEUTROS: o valor do arquivo nao e lido aqui, e um
+  // mapa de gradiente ou filtro de foto com os valores de nascenca
+  // tingiria a camada com uma cor que o arquivo nao pediu.
+  if (n.contains('colortune') || n.contains('colorwheel')) {
+    return EffectType.colorTune;
+  }
+  if (n.contains('brightness') && n.contains('contrast')) {
+    return EffectType.brightnessContrast;
+  }
   if (n.contains('gaussian') || n == 'blur') return EffectType.gaussianBlur;
   if (n.contains('glow')) return EffectType.lightGlow;
   if (n.contains('solidcolor') || n.contains('tint')) return EffectType.tint;

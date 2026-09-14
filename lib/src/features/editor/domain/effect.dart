@@ -69,6 +69,14 @@ enum EffectType {
   invert,
   waveWarp,
   opticalFlow,
+  // --- coloring de edit (pesquisa 14/09/2026: FFmpeg, W3C, AE, AM) ---
+  colorBalance,
+  selectiveColor,
+  channelMixer,
+  photoFilter,
+  gradientMap,
+  brightnessContrast,
+  colorTune,
 }
 
 /// O tipo a partir do IDENTIFICADOR estavel.
@@ -255,6 +263,7 @@ class EffectSpec {
     this.hasColor = false,
     this.defaultColor = const Color(0xFFFF5566),
     this.extraColors = 0,
+    this.defaultExtraColors = const [],
     this.category = 'Estilizar',
     this.synonyms = const [],
     this.cost = 1,
@@ -292,6 +301,12 @@ class EffectSpec {
   /// Quantas cores ALEM da principal o efeito pede (gradiente de
   /// quatro cores pede tres).
   final int extraColors;
+
+  /// AS CORES EXTRAS COM QUE O EFEITO NASCE. Vazio = a paleta generica.
+  /// Um mapa de gradiente precisa nascer com sombra escura, meio-tom e
+  /// luz clara; a paleta generica (violeta, ciano, ambar) pintava o
+  /// quadro de roxo antes de qualquer escolha.
+  final List<Color> defaultExtraColors;
 
   /// Categoria do catalogo.
   final String category;
@@ -2368,6 +2383,395 @@ const effectSpecs = <EffectType, EffectSpec>{
       'radius': EffectParam('Eixo Y', 0, 0, 1),
     },
   ),
+
+  // ------------------------------------------------------------------
+  // COLORING DE EDIT. "Coloring" e a pilha de ajustes que a comunidade
+  // de edits copia do Photoshop/After Effects (e dos presets "CC" do
+  // Alight Motion): equilibrio por faixa tonal, cor seletiva, mistura
+  // de canais, filtro de foto, mapa de gradiente em Soft Light,
+  // brilho/contraste e rodas lift/gamma/gain. As contas seguem
+  // referencias publicas (FFmpeg e W3C Compositing) — as da Adobe nao
+  // sao publicadas — e rodam no shader.
+  // ------------------------------------------------------------------
+
+  // Pesos por luminosidade do FFmpeg (vf_colorbalance): sombras, meios e
+  // altas se sobrepoem sem degrau.
+  EffectType.colorBalance: EffectSpec(
+    id: 'color_balance',
+    name: 'Color Balance',
+    category: 'Color',
+    synonyms: [
+      'color balance',
+      'equilibrio de cor',
+      'balanco de cor',
+      'coloring',
+      'cc',
+      'teal orange',
+      'grading',
+      'sombras meios altas',
+    ],
+    params: {
+      'shadow_red': EffectParam('Shadow Red Balance', 0, -100, 100),
+      'shadow_green': EffectParam('Shadow Green Balance', 0, -100, 100),
+      'shadow_blue': EffectParam('Shadow Blue Balance', 0, -100, 100),
+      'midtone_red': EffectParam('Midtone Red Balance', 0, -100, 100),
+      'midtone_green': EffectParam('Midtone Green Balance', 0, -100, 100),
+      'midtone_blue': EffectParam('Midtone Blue Balance', 0, -100, 100),
+      'highlight_red': EffectParam('Highlight Red Balance', 0, -100, 100),
+      'highlight_green': EffectParam('Highlight Green Balance', 0, -100, 100),
+      'highlight_blue': EffectParam('Highlight Blue Balance', 0, -100, 100),
+      'preserve_luminosity': EffectParam(
+        'Preserve Luminosity',
+        0,
+        0,
+        1,
+        kind: ParamKind.toggle,
+      ),
+    },
+    montar: ['shadow_blue', 'midtone_red', 'highlight_red'],
+    presets: [
+      EffectPronto('Teal & Orange', {
+        'shadow_red': -12,
+        'shadow_green': 2,
+        'shadow_blue': 15,
+        'highlight_red': 10,
+        'highlight_green': 3,
+        'highlight_blue': -8,
+      }),
+      EffectPronto('Anime', {
+        'shadow_red': -10,
+        'shadow_green': 30,
+        'shadow_blue': 40,
+        'midtone_red': -5,
+        'midtone_green': -5,
+        'midtone_blue': 20,
+        'highlight_red': 20,
+        'highlight_green': 10,
+        'highlight_blue': 20,
+      }),
+      EffectPronto('PSD Soft', {
+        'midtone_red': 16,
+        'midtone_green': 12,
+        'midtone_blue': -2,
+        'highlight_blue': 13,
+      }),
+    ],
+  ),
+
+  // Uma faixa de cor por instancia (como a lista do AE): empilhe duas
+  // instancias para mexer nos vermelhos e nos neutros. Conta do FFmpeg
+  // (vf_selectivecolor), relativa por padrao como no Photoshop.
+  EffectType.selectiveColor: EffectSpec(
+    id: 'selective_color',
+    name: 'Selective Color',
+    category: 'Color',
+    synonyms: [
+      'selective color',
+      'cor seletiva',
+      'correcao seletiva',
+      'cmyk',
+      'coloring',
+      'cc',
+    ],
+    params: {
+      'colors': EffectParam(
+        'Colors',
+        0,
+        0,
+        8,
+        kind: ParamKind.choice,
+        options: [
+          'Reds',
+          'Yellows',
+          'Greens',
+          'Cyans',
+          'Blues',
+          'Magentas',
+          'Whites',
+          'Neutrals',
+          'Blacks',
+        ],
+      ),
+      'cyan': EffectParam('Cyan', 0, -100, 100),
+      'magenta': EffectParam('Magenta', 0, -100, 100),
+      'yellow': EffectParam('Yellow', 0, -100, 100),
+      'black': EffectParam('Black', 0, -100, 100),
+      'method': EffectParam(
+        'Method',
+        0,
+        0,
+        1,
+        kind: ParamKind.choice,
+        options: ['Relative', 'Absolute'],
+      ),
+    },
+    montar: ['cyan', 'magenta', 'yellow'],
+    presets: [
+      EffectPronto('Warm Skin', {
+        'colors': 0,
+        'cyan': 3,
+        'magenta': 10,
+        'yellow': 12,
+        'black': -3,
+      }),
+      EffectPronto('Cyan Pop', {'colors': 3, 'cyan': 27}),
+      EffectPronto('Warm Whites', {'colors': 6, 'cyan': -30, 'yellow': 15}),
+    ],
+  ),
+
+  EffectType.channelMixer: EffectSpec(
+    id: 'channel_mixer',
+    name: 'Channel Mixer',
+    category: 'Color',
+    synonyms: [
+      'channel mixer',
+      'misturador de canais',
+      'canais',
+      'preto e branco',
+      'monocromatico',
+      'coloring',
+    ],
+    params: {
+      'red_red': EffectParam('Red-Red', 100, -200, 200),
+      'red_green': EffectParam('Red-Green', 0, -200, 200),
+      'red_blue': EffectParam('Red-Blue', 0, -200, 200),
+      'red_const': EffectParam('Red-Const', 0, -200, 200),
+      'green_red': EffectParam('Green-Red', 0, -200, 200),
+      'green_green': EffectParam('Green-Green', 100, -200, 200),
+      'green_blue': EffectParam('Green-Blue', 0, -200, 200),
+      'green_const': EffectParam('Green-Const', 0, -200, 200),
+      'blue_red': EffectParam('Blue-Red', 0, -200, 200),
+      'blue_green': EffectParam('Blue-Green', 0, -200, 200),
+      'blue_blue': EffectParam('Blue-Blue', 100, -200, 200),
+      'blue_const': EffectParam('Blue-Const', 0, -200, 200),
+      'monochrome': EffectParam(
+        'Monochrome',
+        0,
+        0,
+        1,
+        kind: ParamKind.toggle,
+      ),
+    },
+    montar: ['red_red', 'green_green', 'blue_blue'],
+    presets: [
+      EffectPronto('PSD Mix', {
+        'red_red': 113,
+        'red_green': -15,
+        'green_red': -8,
+        'green_green': 104,
+        'green_blue': 3,
+      }),
+      EffectPronto('Black & White', {
+        'monochrome': 1,
+        'red_red': 50,
+        'red_green': 40,
+        'red_blue': 10,
+      }),
+      EffectPronto('Cross Process', {
+        'red_blue': 10,
+        'blue_green': 20,
+        'blue_blue': 90,
+      }),
+    ],
+  ),
+
+  // Filtro de cor (Photoshop) OU temperatura em Kelvin (Alight Motion).
+  // Kelvin maior = luz mais fria. A temperatura e aplicada em luz linear
+  // e normalizada pela luminancia: esquentar nao escurece.
+  EffectType.photoFilter: EffectSpec(
+    id: 'photo_filter',
+    name: 'Photo Filter',
+    category: 'Color',
+    hasColor: true,
+    defaultColor: Color(0xFFEC8A00),
+    synonyms: [
+      'photo filter',
+      'filtro de foto',
+      'color temperature',
+      'temperatura de cor',
+      'kelvin',
+      'quente',
+      'frio',
+      'warm',
+      'cool',
+    ],
+    params: {
+      'mode': EffectParam(
+        'Mode',
+        0,
+        0,
+        1,
+        kind: ParamKind.choice,
+        options: ['Color', 'Temperature'],
+      ),
+      'density': EffectParam('Density', 25, 0, 100),
+      'temperature': EffectParam('Temperature (K)', 6500, 1000, 40000),
+      'preserve_luminosity': EffectParam(
+        'Preserve Luminosity',
+        1,
+        0,
+        1,
+        kind: ParamKind.toggle,
+      ),
+    },
+    montar: ['density', 'temperature'],
+    presets: [
+      EffectPronto('Warm Vintage', {
+        'mode': 1,
+        'temperature': 4800,
+        'density': 60,
+      }),
+      EffectPronto('Cool', {'mode': 1, 'temperature': 9000, 'density': 50}),
+      EffectPronto(
+        'Warming Filter',
+        {'mode': 0, 'density': 25},
+        cor: Color(0xFFEC8A00),
+      ),
+    ],
+  ),
+
+  // Mapa de gradiente pela luminancia: sombra, meio-tom e luz, misturado
+  // no modo escolhido. Em Soft Light com opacidade baixa e o "coloring"
+  // classico; com o meio-tom desligado vira duotone.
+  EffectType.gradientMap: EffectSpec(
+    id: 'gradient_map',
+    name: 'Gradient Map',
+    category: 'Color',
+    hasColor: true,
+    defaultColor: Color(0xFF0B2A3A),
+    extraColors: 2,
+    defaultExtraColors: [Color(0xFF4EABCD), Color(0xFFE8F4FF)],
+    synonyms: [
+      'gradient map',
+      'mapa de gradiente',
+      'tritone',
+      'tritom',
+      'duotone',
+      'duotom',
+      'toner',
+      'coloring',
+      'soft light',
+    ],
+    params: {
+      'blend_mode': EffectParam(
+        'Blending Mode',
+        1,
+        0,
+        6,
+        kind: ParamKind.choice,
+        options: [
+          'Normal',
+          'Soft Light',
+          'Overlay',
+          'Multiply',
+          'Screen',
+          'Color',
+          'Luminosity',
+        ],
+      ),
+      'opacity': EffectParam('Opacity', 35, 0, 100),
+      'midtones': EffectParam(
+        'Use Midtones',
+        1,
+        0,
+        1,
+        kind: ParamKind.toggle,
+      ),
+      'balance': EffectParam('Midpoint', 50, 5, 95),
+    },
+    montar: ['opacity', 'balance'],
+    presets: [
+      EffectPronto('Soft Light', {'blend_mode': 1, 'opacity': 30}),
+      EffectPronto('Duotone', {
+        'blend_mode': 0,
+        'opacity': 100,
+        'midtones': 0,
+      }),
+      EffectPronto('Tritone', {'blend_mode': 0, 'opacity': 88}),
+    ],
+  ),
+
+  // Brilho e contraste no estilo do Alight Motion: brilho empurra para o
+  // branco (ou para o preto) sem estourar, contraste gira em torno do
+  // cinza medio. As duas contas sao lineares.
+  EffectType.brightnessContrast: EffectSpec(
+    id: 'brightness_contrast',
+    name: 'Brightness & Contrast',
+    category: 'Color',
+    synonyms: [
+      'brightness',
+      'contrast',
+      'brilho',
+      'contraste',
+      'brightness contrast',
+      'cc',
+    ],
+    params: {
+      'brightness': EffectParam('Brightness', 0, -100, 100),
+      'contrast': EffectParam('Contrast', 0, -100, 300),
+    },
+    montar: ['brightness', 'contrast'],
+    presets: [
+      EffectPronto('PSD Contrast', {'contrast': 33}),
+      EffectPronto('Punch', {'brightness': 5, 'contrast': 25}),
+      EffectPronto('Faded', {'brightness': 8, 'contrast': -20}),
+    ],
+  ),
+
+  // Rodas lift/gamma/gain/offset, cada uma com matiz, saturacao e
+  // luminancia (os nomes do Color Tune do Alight Motion). O vetor de cor
+  // da roda tem luminancia zero: girar a matiz tinge sem clarear.
+  EffectType.colorTune: EffectSpec(
+    id: 'color_tune',
+    name: 'Color Tune',
+    category: 'Color',
+    synonyms: [
+      'color tune',
+      'lift gamma gain',
+      'rodas de cor',
+      'color wheels',
+      'coloring',
+      'grading',
+      'cc',
+    ],
+    params: {
+      'lift_hue': EffectParam('Lift Hue', 0, 0, 360),
+      'lift_saturation': EffectParam('Lift Saturation', 0, 0, 100),
+      'lift_luminance': EffectParam('Lift Luminance', 0, -1, 1),
+      'gamma_hue': EffectParam('Gamma Hue', 0, 0, 360),
+      'gamma_saturation': EffectParam('Gamma Saturation', 0, 0, 100),
+      'gamma_luminance': EffectParam('Gamma Luminance', 0, -1, 1),
+      'gain_hue': EffectParam('Gain Hue', 0, 0, 360),
+      'gain_saturation': EffectParam('Gain Saturation', 0, 0, 100),
+      'gain_luminance': EffectParam('Gain Luminance', 0, -1, 1),
+      'offset_hue': EffectParam('Offset Hue', 0, 0, 360),
+      'offset_saturation': EffectParam('Offset Saturation', 0, 0, 100),
+      'offset_luminance': EffectParam('Offset Luminance', 0, -1, 1),
+    },
+    montar: ['lift_luminance', 'gamma_luminance', 'gain_luminance'],
+    presets: [
+      EffectPronto('Teal & Orange', {
+        'lift_hue': 190,
+        'lift_saturation': 25,
+        'lift_luminance': -0.03,
+        'gain_hue': 35,
+        'gain_saturation': 20,
+        'gain_luminance': 0.05,
+      }),
+      EffectPronto('Pastel', {
+        'lift_luminance': 0.08,
+        'gamma_hue': 330,
+        'gamma_saturation': 10,
+        'gamma_luminance': 0.1,
+      }),
+      EffectPronto('Night', {
+        'offset_hue': 220,
+        'offset_saturation': 30,
+        'offset_luminance': -0.05,
+        'gain_luminance': -0.1,
+      }),
+    ],
+  ),
 };
 
 /// Categorias do catalogo, na ordem em que aparecem.
@@ -2458,7 +2862,9 @@ class EffectInstance {
          extraColors ??
              List<Color>.generate(
                effectSpecs[type]!.extraColors,
-               (i) => _coresExtrasPadrao[i % _coresExtrasPadrao.length],
+               (i) => i < effectSpecs[type]!.defaultExtraColors.length
+                   ? effectSpecs[type]!.defaultExtraColors[i]
+                   : _coresExtrasPadrao[i % _coresExtrasPadrao.length],
              ),
        ),
        params = Map.unmodifiable(

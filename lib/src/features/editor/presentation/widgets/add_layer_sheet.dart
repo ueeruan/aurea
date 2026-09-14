@@ -4,6 +4,9 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/cupertino.dart';
+
+import '../../domain/modelo_do_texto3d.dart';
+import '../am/scene3d_studio_ux.dart' show pedirNome;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -1102,6 +1105,39 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
   /// diferentes: um precisa de nome e explicacao, o outro se reconhece
   /// pela silhueta. Misturar os dois numa lista so foi o que fez a aba
   /// virar cinco cards gigantes que nao cabiam na tela.
+  /// Pede o texto e o metal, e cria o Texto 3D no cabecote.
+  Future<void> _criarTexto3D() async {
+    final playhead = widget.playhead;
+    final controller = _controller;
+    final raiz = Navigator.of(context, rootNavigator: true).context;
+    _fecha();
+    final texto = await pedirNome(raiz, titulo: 'Texto 3D', atual: 'TEXTO 3D');
+    if (texto == null || texto.trim().isEmpty || !raiz.mounted) return;
+    final estilo = await showCupertinoModalPopup<EstiloDoTexto3D>(
+      context: raiz,
+      builder: (c) => CupertinoActionSheet(
+        title: const AppText('Material'),
+        actions: [
+          for (final e in EstiloDoTexto3D.values)
+            CupertinoActionSheetAction(
+              key: ValueKey('texto3d-estilo-${e.name}'),
+              onPressed: () => Navigator.of(c).pop(e),
+              child: AppText(nomeDoEstiloDoTexto3D(e)),
+            ),
+        ],
+        cancelButton: CupertinoActionSheetAction(
+          onPressed: () => Navigator.of(c).pop(),
+          child: const AppText('Cancelar'),
+        ),
+      ),
+    );
+    if (estilo == null || !raiz.mounted) return;
+    final no = await controller.addTexto3D(playhead, texto, estilo);
+    if (no == null && raiz.mounted) {
+      AureaSnack.show(raiz, 'Não consegui criar o texto 3D com essa fonte.');
+    }
+  }
+
   Widget _objetos() {
     Widget cardItem({
       Key? key,
@@ -1240,6 +1276,18 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
                   _fecha();
                   _controller.addParticlesLayer(widget.playhead);
                 },
+              ),
+              // 6. Texto 3D estilo Element 3D: pede o texto e o metal e
+              // cria as letras extrudadas na cena, presas a um nulo.
+              cardItem(
+                key: const ValueKey('add-texto3d'),
+                iconWidget: const Icon(
+                  CupertinoIcons.textformat_alt,
+                  size: 36,
+                  color: Color(0xFFFFD36B),
+                ),
+                label: 'Texto 3D',
+                onTap: _criarTexto3D,
               ),
     ];
 

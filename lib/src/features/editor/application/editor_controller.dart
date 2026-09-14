@@ -21,7 +21,12 @@ import '../domain/cena_do_rastreio.dart';
 import '../domain/cut.dart';
 import '../domain/cut_ops.dart';
 import '../domain/panorama3d.dart';
+import '../domain/fonte_truetype.dart';
+import '../domain/modelo_do_texto3d.dart';
 import '../domain/scene3d.dart';
+import '../domain/texto3d.dart';
+import 'font_service.dart';
+import 'panorama_cache.dart' show installUrbanEnvironment;
 import '../domain/rotation_math.dart';
 import '../domain/effect.dart';
 import '../domain/oscillate.dart';
@@ -2357,6 +2362,57 @@ class EditorController extends Notifier<VideoProject> {
       cena.withScene(cena.scene.copyWith(nodes: [...cena.scene.nodes, no])),
     );
     return no.id;
+  }
+
+  /// TEXTO 3D ESTILO ELEMENT 3D: letras extrudadas com chanfro, em metal,
+  /// dentro da cena 3D (criada se nao houver) e filhas de um nulo da cena —
+  /// girar, mover e animar o nulo leva o texto junto. Metal so parece metal
+  /// com o que refletir: se a cena nao tem panorama, entra o HDR urbano que
+  /// ja vem no app. Devolve o id do no, ou nulo se a fonte nao abriu.
+  Future<String?> addTexto3D(
+    Duration at,
+    String texto,
+    EstiloDoTexto3D estilo,
+  ) async {
+    final limpo = texto.trim();
+    if (limpo.isEmpty) return null;
+    final Texto3D params = Texto3D(texto: limpo);
+    MalhaDoTexto3D malha;
+    try {
+      final bytes = await FontService.instance.bytesDaFonte(params.familia);
+      if (bytes == null) return null;
+      final fonte = FonteTrueType.ler(bytes);
+      malha = malhaDoTexto3D(
+        disporTexto3D(params, fonte),
+        params,
+        fonte.unidadesPorEm,
+      );
+    } catch (_) {
+      return null;
+    }
+    if (malha.vazia) return null;
+    String? no;
+    String? cenaId;
+    runAsOneUndo(() {
+      var cena = state.layers.whereType<Scene3DLayer>().firstOrNull;
+      if (cena == null) {
+        addScene3DLayer(at);
+        cena = state.layers.whereType<Scene3DLayer>().first;
+      }
+      cenaId = cena.id;
+      no = addModel3D(cena.id, modeloDoTexto3D(malha, limpo, estilo));
+      final nulo = addSceneNull(cena.id);
+      setSceneNodeParent(cena.id, no!, nulo);
+    });
+    final id = cenaId;
+    final cena = id == null ? null : _layer(id);
+    if (cena is Scene3DLayer && cena.scene.panorama.sourcePath == null) {
+      try {
+        final pano = await installUrbanEnvironment();
+        updateScene3D(id!, (s) => s.copyWith(panorama: pano));
+      } catch (_) {}
+    }
+    return no;
   }
 
   String addModel3D(String sceneId, ModelAsset3D model) {

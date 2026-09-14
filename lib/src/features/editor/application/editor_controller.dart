@@ -5832,7 +5832,9 @@ class EditorController extends Notifier<VideoProject> {
 
   // --------------------------------------------------------------- efeitos
 
-  void addEffect(String layerId, EffectType type) {
+  /// [pronto]: o preset que a previa da galeria mostrou, para o efeito
+  /// aplicado ser o mesmo que se viu.
+  void addEffect(String layerId, EffectType type, {EffectPronto? pronto}) {
     final layer = _layer(layerId);
     if (layer == null) return;
     if (type == EffectType.timeRemap && layer is VideoLayer) {
@@ -5848,7 +5850,9 @@ class EditorController extends Notifier<VideoProject> {
       layer.copyLayer(
         effects: [
           ...layer.effects,
-          EffectInstance(type: type),
+          pronto == null
+              ? EffectInstance(type: type)
+              : EffectInstance(type: type).withPreset(pronto),
         ],
       ),
     );

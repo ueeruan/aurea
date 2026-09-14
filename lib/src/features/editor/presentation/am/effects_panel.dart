@@ -773,13 +773,6 @@ class _EffectCard extends StatelessWidget {
                       icone: CupertinoIcons.arrow_counterclockwise,
                       onTap: onResetar,
                     ),
-                  if (pro)
-                    _ComandoDoEfeito(
-                      key: const ValueKey('efeito-salvar-preset'),
-                      rotulo: 'Salvar preset',
-                      icone: CupertinoIcons.square_stack_3d_down_right,
-                      onTap: onSalvarPreset,
-                    ),
                   // ASSAR: o movimento procedural (Tremor, Flicker...) vira
                   // keyframes reais e o efeito sai da pilha.
                   if (pro && effect.spec.procedural)

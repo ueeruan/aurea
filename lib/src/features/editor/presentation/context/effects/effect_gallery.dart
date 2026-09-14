@@ -7,18 +7,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../../core/theme/tokens.dart';
 import '../../../application/editor_controller.dart';
-import '../../../application/effect_preset_store.dart';
 import '../../../application/playback_controller.dart';
 import '../../../application/ui/effect_favorites.dart';
 import '../../../application/ui/pro_mode.dart';
 import '../../../domain/effect.dart';
-import '../../../domain/effect_preset.dart';
 import '../../am/am_colors.dart';
-import 'effect_thumbnail.dart';
+import 'previa_do_efeito.dart';
 
-/// A GALERIA DE EFEITOS (Fase 4): miniatura por efeito, busca com
-/// sinonimos, categorias com contador, favoritos (Pro) e a aba Presets
-/// (de fabrica e os salvos). Um toque no tile aplica.
+/// A GALERIA DE EFEITOS (Fase 4): previa animada de verdade por efeito,
+/// busca com sinonimos, categorias com contador e favoritos. Um toque no
+/// tile aplica o mesmo efeito que a previa mostra. Sem aba Presets: os
+/// testadores do beta 1.0.5 pediram para tirar, atrapalhava achar as coisas.
 Future<void> showEffectGallery(
   BuildContext context,
   WidgetRef ref,
@@ -31,8 +30,7 @@ Future<void> showEffectGallery(
   String? category;
   var favoritos = false;
   var edits = false;
-  var showPresets = false;
-  await EffectPresetStore.instance.load();
+  await PreviasDosEfeitos.instance.manifesto();
   if (!context.mounted) return;
 
   await showModalBottomSheet<void>(
@@ -74,10 +72,6 @@ Future<void> showEffectGallery(
                   if (favs.contains(effectSpecs[t]!.id)) t,
               ];
             }
-            final presets = [
-              ...factoryPresets(),
-              ...EffectPresetStore.instance.presets,
-            ];
 
             Widget chip(
               String texto,
@@ -134,12 +128,6 @@ Future<void> showEffectGallery(
                             ),
                           ),
                         ),
-                        chip(
-                          'Presets',
-                          showPresets,
-                          () => setSheetState(() => showPresets = !showPresets),
-                          key: const ValueKey('galeria-presets'),
-                        ),
                       ],
                     ),
                     const SizedBox(height: 8),
@@ -151,13 +139,10 @@ Future<void> showEffectGallery(
                         fontSize: 14,
                         color: AmColors.text,
                       ),
-                      onChanged: (v) => setSheetState(() {
-                        query = v;
-                        showPresets = false;
-                      }),
+                      onChanged: (v) => setSheetState(() => query = v),
                     ),
                     const SizedBox(height: 8),
-                    if (!showPresets && query.isEmpty)
+                    if (query.isEmpty)
                       SizedBox(
                         height: 34,
                         child: SingleChildScrollView(
@@ -214,45 +199,7 @@ Future<void> showEffectGallery(
                       ),
                     const SizedBox(height: 8),
                     Expanded(
-                      child: showPresets
-                          ? ListView.builder(
-                              itemCount: presets.length,
-                              itemBuilder: (context, i) {
-                                final p = presets[i];
-                                return ListTile(
-                                  key: ValueKey('preset-${p.id}'),
-                                  leading: const Icon(
-                                    CupertinoIcons.square_stack_3d_down_right,
-                                    color: AmColors.accent,
-                                    size: 20,
-                                  ),
-                                  title: AppText(
-                                    p.name,
-                                    style: const TextStyle(
-                                      color: AmColors.text,
-                                      fontSize: 14,
-                                    ),
-                                  ),
-                                  subtitle: AppText(
-                                    '${p.category} · ${p.effects.length} efeito(s)'
-                                    '${p.builtIn ? '' : ' · salvo por você'}',
-                                    style: const TextStyle(
-                                      fontSize: 11,
-                                      color: AmColors.muted,
-                                    ),
-                                  ),
-                                  onTap: () {
-                                    controller.applyPreset(
-                                      layerId,
-                                      p,
-                                      at: playback.time.value,
-                                    );
-                                    Navigator.of(sheetContext).pop();
-                                  },
-                                );
-                              },
-                            )
-                          : results.isEmpty
+                      child: results.isEmpty
                           ? Center(
                               child: Padding(
                                 padding: const EdgeInsets.all(24),
@@ -274,7 +221,8 @@ Future<void> showEffectGallery(
                                 final colunas = (c.maxWidth / 118)
                                     .floor()
                                     .clamp(2, 5);
-                                return GridView.builder(
+                                return RelogioDasPrevias(
+                                  child: GridView.builder(
                                   key: const ValueKey('galeria-grade'),
                                   padding: const EdgeInsets.only(bottom: 8),
                                   gridDelegate:
@@ -300,11 +248,17 @@ Future<void> showEffectGallery(
                                           )
                                           .toggle(spec.id),
                                       onTap: () {
-                                        controller.addEffect(layerId, type);
+                                        controller.addEffect(
+                                          layerId,
+                                          type,
+                                          pronto: PreviasDosEfeitos.instance
+                                              .prontoDaPrevia(type),
+                                        );
                                         Navigator.of(sheetContext).pop();
                                       },
                                     );
                                   },
+                                ),
                                 );
                               },
                             ),
@@ -353,7 +307,7 @@ class _EffectTile extends StatelessWidget {
             children: [
               Stack(
                 children: [
-                  EffectThumbnail(type: type, size: lado),
+                  PreviaDoEfeito(tipo: type, lado: lado),
                   if (spec.cost > 1)
                     Positioned(
                       left: 6,

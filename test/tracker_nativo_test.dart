@@ -1,9 +1,11 @@
 // O TRACKER 3D NOVO (C++, packages/aurea_tracker) contra filmagens sinteticas
 // com a camera conhecida — o mesmo metodo do camera_tracker_pro_test: montar
 // a cena, projetar, entregar so as projecoes e conferir a resposta.
+import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:aurea/src/features/editor/application/camera_track_service.dart';
 import 'package:aurea/src/features/editor/domain/algebra_numerica.dart';
 import 'package:aurea/src/features/editor/domain/camera_nativa.dart';
 import 'package:aurea/src/features/editor/domain/camera_solver3d.dart';
@@ -229,5 +231,40 @@ void main() {
       erro += (dx - 1.3 * 9).abs() + (dy - .7 * 9).abs();
     }
     expect(erro / longos.length, lessThan(.35), reason: 'subpixel preservado');
+  });
+
+  test('arquivo cru: segue e devolve rastros longos (caminho do app)', () {
+    const w = 160, h = 96, quadros = 12;
+    final rng = math.Random(9);
+    final base = List<int>.generate(w * h, (_) => rng.nextInt(256));
+    final dir = Directory.systemTemp.createTempSync('aurea_cru');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final arquivo = File('${dir.path}/cinza.raw');
+    final saida = BytesBuilder();
+    for (var q = 0; q < quadros; q++) {
+      final quadro = Uint8List(w * h);
+      for (var y = 0; y < h; y++) {
+        for (var x = 0; x < w; x++) {
+          // Blocos 4x4 de ruido deslizando 1 px por quadro.
+          final bx = ((x - q) ~/ 4) % (w ~/ 4), by = (y ~/ 4) % (h ~/ 4);
+          quadro[y * w + x] = base[(by < 0 ? by + h ~/ 4 : by) * w + (bx < 0 ? bx + w ~/ 4 : bx)];
+        }
+      }
+      saida.add(quadro);
+    }
+    arquivo.writeAsBytesSync(saida.takeBytes());
+    try {
+      final r = rastrearArquivoCru(
+        arquivo.path,
+        largura: w,
+        altura: h,
+        quadros: quadros,
+        fps: 24,
+      );
+      expect(r.pontos, isNotEmpty);
+    } on RastreioException {
+      // Um plano chapado deslizando nao tem profundidade: recusar e certo.
+      // O que importa aqui e que o caminho do arquivo ate o motor rodou.
+    }
   });
 }

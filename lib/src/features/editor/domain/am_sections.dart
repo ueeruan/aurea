@@ -37,6 +37,9 @@ enum AmSecao {
 
   /// Cena 3D e Elemento 3D: objetos, materiais, luzes, cameras e cortes.
   cena3d,
+
+  /// Video: rastreio de camera 3D (e os rastreios 2D da mesma folha).
+  rastrear,
   efeitos,
 }
 
@@ -79,6 +82,9 @@ Set<AmSecao> secoesDe(Layer layer) {
     // Video com som ganha as duas do audio — e a razao de a grade do
     // video bater exatamente em sete, e nao em oito.
     if (layer is VideoLayer) ...[AmSecao.volume, AmSecao.fade],
+    // A PORTA DO RASTREIO. A folha so abria pelas acoes rapidas, que nada
+    // na tela chama: o camera tracker existia e ninguem achava.
+    if (layer is VideoLayer) AmSecao.rastrear,
     if (layer is ShapeLayer) AmSecao.editarForma,
     // OS EDITORES DE TIPO. Moravam todos dentro do menu "Mais" — um menu
     // escondido — e por isso pareciam nao existir. Cada um e a secao do

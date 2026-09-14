@@ -1,10 +1,16 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'dart:ui' show Offset;
+
+import 'package:aurea_tracker/aurea_tracker.dart';
+
+import '../domain/camera_nativa.dart';
 import '../domain/camera_solver3d.dart';
 import '../domain/pontos_seguidos.dart';
 import 'tracking_service.dart';
@@ -90,6 +96,7 @@ class CameraTrackService {
     int? fps,
     int? maximoDePontos,
     double? focalPx,
+    double? proporcao,
   }) async {
     if (_emAndamento.contains(layerId)) {
       throw const RastreioException(
@@ -98,6 +105,28 @@ class CameraTrackService {
       );
     }
     _emAndamento.add(layerId);
+    // O MOTOR NOVO (C++): quadros crus a 640 px e 24 quadros/s, seguidor KLT
+    // com subpixel, homografia para chao plano, ajuste de feixes com a focal
+    // livre e pose de todo quadro. So se ele nao carregar fica o antigo.
+    try {
+      final nova = await _rastrearComMotorNovo(
+        layerId: layerId,
+        sourcePath: sourcePath,
+        start: start,
+        duration: duration,
+        tipoDeTomada: tipoDeTomada,
+        focalPx: focalPx,
+        proporcao: proporcao,
+      );
+      if (nova != null) return nova;
+    } on RastreioException {
+      _emAndamento.remove(layerId);
+      etapa.value = '';
+      fase.value = null;
+      rethrow;
+    } catch (_) {
+      // Motor indisponivel neste aparelho: segue pelo caminho antigo.
+    }
     final taxa = fps ?? modo.fps;
     final quantos = maximoDePontos ?? modo.pontos;
     _dizer(EtapaDoRastreio.lendo, 0);
@@ -181,6 +210,80 @@ class CameraTrackService {
     }
   }
 
+  static const _larguraNova = 640;
+  static const _taxaNova = 24;
+  static const _quadrosNovos = 720;
+
+  /// Devolve nulo so quando o video nao pode ser lido assim (a pessoa ve o
+  /// caminho antigo tentar); falha de rastreio sobe como RastreioException.
+  Future<SolucaoCamera3D?> _rastrearComMotorNovo({
+    required String layerId,
+    required String sourcePath,
+    required Duration start,
+    required Duration duration,
+    required TipoDeTomada tipoDeTomada,
+    double? focalPx,
+    double? proporcao,
+  }) async {
+    attVersion(); // carrega o motor: sem ele, cai no catch de quem chamou
+    final prop = proporcao != null && proporcao.isFinite && proporcao > 0
+        ? proporcao
+        : 16 / 9;
+    const largura = _larguraNova;
+    final altura = math.max(64, (largura / prop / 2).round() * 2);
+    _dizer(EtapaDoRastreio.lendo, 0);
+    final cru = await TrackingService.instance.quadrosCinzaCrus(
+      sourcePath,
+      start: start,
+      duration: duration,
+      fps: _taxaNova,
+      largura: largura,
+      altura: altura,
+      maxFrames: _quadrosNovos,
+    );
+    if (cru == null) return null;
+    if (cru.quadros < 8) {
+      throw const RastreioException(
+        FalhaDoRastreio.poucosPontos,
+        'Esse trecho é curto demais para rastrear. '
+        'Use pelo menos dois segundos de vídeo.',
+      );
+    }
+    _dizer(EtapaDoRastreio.achandoPontos, .2);
+    final caminho = cru.arquivo.path;
+    final quadros = cru.quadros;
+    try {
+      final r = await Isolate.run(
+        () => rastrearArquivoCru(
+          caminho,
+          largura: largura,
+          altura: altura,
+          quadros: quadros,
+          fps: _taxaNova,
+          focalPx: focalPx,
+          tipoDeTomada: tipoDeTomada,
+        ),
+      );
+      _rastros[layerId] = _Rastros(
+        pontos: r.pontos,
+        largura: largura,
+        altura: altura,
+        quadros: quadros,
+        fps: _taxaNova,
+      );
+      _dizer(EtapaDoRastreio.pronto, 1);
+      await guardar(layerId, r.solucao);
+      return r.solucao;
+    } finally {
+      try {
+        cru.arquivo.deleteSync();
+      } catch (_) {}
+      _emAndamento.remove(layerId);
+      etapa.value = '';
+      fase.value = null;
+    }
+  }
+
   /// RESOLVE DE NOVO com o que ja foi lido do video.
   ///
   /// Serve para depois de apagar pontos ruins ou trocar uma opcao. Sem
@@ -202,18 +305,37 @@ class CameraTrackService {
         for (final p in r.pontos)
           if (!pontosApagados.contains(p.id)) p,
       ];
-      final solucao = await Isolate.run(
-        () => resolverCamera3D(
-          usados,
-          largura: r.largura,
-          altura: r.altura,
-          quadros: r.quadros,
-          fps: r.fps,
-          focalPx: focalPx,
-          tipoDeTomada: tipoDeTomada,
-          rodadasDeRefino: modo.refinos,
-        ),
-      );
+      SolucaoCamera3D solucao;
+      try {
+        final obs = observacoesDosPontos(usados);
+        solucao = await Isolate.run(
+          () => resolverCamera3DNativo(
+            obs,
+            largura: r.largura,
+            altura: r.altura,
+            quadros: r.quadros,
+            fps: r.fps,
+            focalPx: focalPx,
+            tipoDeTomada: tipoDeTomada,
+            pontosSeguidos: usados.length,
+          ),
+        );
+      } on RastreioException {
+        rethrow;
+      } catch (_) {
+        solucao = await Isolate.run(
+          () => resolverCamera3D(
+            usados,
+            largura: r.largura,
+            altura: r.altura,
+            quadros: r.quadros,
+            fps: r.fps,
+            focalPx: focalPx,
+            tipoDeTomada: tipoDeTomada,
+            rodadasDeRefino: modo.refinos,
+          ),
+        );
+      }
       _dizer(EtapaDoRastreio.pronto, 1);
       await guardar(layerId, solucao);
       return solucao;
@@ -288,4 +410,54 @@ class _Rastros {
   final int altura;
   final int quadros;
   final int fps;
+}
+
+/// SEGUE E RESOLVE a partir do arquivo cru (roda num isolate): le um quadro
+/// por vez (sem guardar o video na memoria), segue os pontos no motor novo e
+/// resolve a camera. Devolve os rastros (para "resolver de novo") e a
+/// solucao.
+({List<PontoSeguido> pontos, SolucaoCamera3D solucao}) rastrearArquivoCru(
+  String caminho, {
+  required int largura,
+  required int altura,
+  required int quadros,
+  required int fps,
+  double? focalPx,
+  TipoDeTomada tipoDeTomada = TipoDeTomada.auto,
+}) {
+  final seguidor = SeguidorDePontosNativo(largura, altura, maximoDePontos: 450);
+  late final Float64List obs;
+  final arquivo = File(caminho).openSync();
+  try {
+    final quadro = Uint8List(largura * altura);
+    for (var q = 0; q < quadros; q++) {
+      if (arquivo.readIntoSync(quadro) < quadro.length) break;
+      seguidor.empurrar(quadro, q);
+    }
+    obs = seguidor.observacoes();
+  } finally {
+    arquivo.closeSync();
+    seguidor.fechar();
+  }
+  final porId = <int, Map<int, Offset>>{};
+  for (var i = 0; i + 4 <= obs.length; i += 4) {
+    (porId[obs[i].round()] ??= {})[obs[i + 1].round()] =
+        Offset(obs[i + 2], obs[i + 3]);
+  }
+  final pontos = <PontoSeguido>[
+    for (final e in porId.entries)
+      if (e.value.length >= 6)
+        PontoSeguido(e.key, e.value.keys.reduce(math.min), e.value),
+  ];
+  final solucao = resolverCamera3DNativo(
+    observacoesDosPontos(pontos),
+    largura: largura,
+    altura: altura,
+    quadros: quadros,
+    fps: fps,
+    focalPx: focalPx,
+    tipoDeTomada: tipoDeTomada,
+    pontosSeguidos: pontos.length,
+  );
+  return (pontos: pontos, solucao: solucao);
 }

@@ -3892,6 +3892,9 @@ class EditorController extends Notifier<VideoProject> {
         'So da para rastrear a camera de um video.',
       );
     }
+    // A proporcao exibida decide a altura dos quadros analisados.
+    final proporcao =
+        layer.proporcaoDaFonte ?? (await sondarVideo(layer.sourcePath)).proporcao;
     return CameraTrackService.instance.rastrear(
       layerId: layerId,
       sourcePath: layer.sourcePath,
@@ -3900,6 +3903,7 @@ class EditorController extends Notifier<VideoProject> {
       modo: modo,
       tipoDeTomada: tipoDeTomada,
       fps: fps,
+      proporcao: proporcao,
     );
   }
 

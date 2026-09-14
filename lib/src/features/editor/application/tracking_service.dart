@@ -33,6 +33,50 @@ class TrackingService {
     return d;
   }
 
+  /// QUADROS CRUS EM CINZA para o motor em C++ (um arquivo so, largura x
+  /// altura bytes por quadro, sem PNG). O motor novo segue pontos com
+  /// subpixel: 640 px dao a ele o que 240 px tiravam.
+  Future<({File arquivo, int quadros})?> quadrosCinzaCrus(
+    String path, {
+    required Duration start,
+    required Duration duration,
+    required int fps,
+    required int largura,
+    required int altura,
+    required int maxFrames,
+  }) async {
+    final base = await getApplicationSupportDirectory();
+    final dir = Directory('${base.path}/track_camera')
+      ..createSync(recursive: true);
+    final saida = File('${dir.path}/cinza.raw');
+    if (saida.existsSync()) saida.deleteSync();
+    final segundos = duration.inMilliseconds / 1000.0;
+    if (segundos <= 0) return null;
+    final session = await FFmpegKit.executeWithArguments([
+      '-y',
+      '-ss',
+      (start.inMilliseconds / 1000.0).toStringAsFixed(3),
+      '-t',
+      segundos.toStringAsFixed(3),
+      '-i',
+      path,
+      '-vf',
+      'fps=$fps,scale=$largura:$altura,format=gray',
+      '-frames:v',
+      '$maxFrames',
+      '-f',
+      'rawvideo',
+      '-pix_fmt',
+      'gray',
+      saida.path,
+    ]);
+    if (!ReturnCode.isSuccess(await session.getReturnCode()) ||
+        !saida.existsSync()) {
+      return null;
+    }
+    return (arquivo: saida, quadros: saida.lengthSync() ~/ (largura * altura));
+  }
+
   /// Extrai os quadros do trecho usado, em cinza e pequenos.
   Future<List<GrayFrame>> grayFrames(
     String path, {

@@ -166,3 +166,28 @@ List<String> receitasDeExtracao(
   filtroSdr(cor, fps: fps, largura: largura, altura: altura),
   filtroDeReserva(fps: fps, largura: largura, altura: altura),
 ];
+
+/// A TAXA DE QUADROS de um fluxo pelas propriedades do ffprobe.
+///
+/// `avg_frame_rate` primeiro: e a media real, a que vale para o video de
+/// celular com taxa variavel. Sem ela, `r_frame_rate`. "30000/1001" vira
+/// 29,97; "0/0", ausente ou absurdo (acima de 480) vira nulo — e quem
+/// chama usa a taxa da composicao.
+double? fpsDeProps(Map<dynamic, dynamic> props) {
+  double? razao(Object? v) {
+    double? r;
+    if (v is num) {
+      r = v.toDouble();
+    } else if (v is String) {
+      final partes = v.trim().split('/');
+      final n = double.tryParse(partes[0].trim());
+      final d = partes.length > 1 ? double.tryParse(partes[1].trim()) : 1.0;
+      if (n == null || d == null || d == 0) return null;
+      r = n / d;
+    }
+    if (r == null || !r.isFinite || r < 1 || r > 480) return null;
+    return r;
+  }
+
+  return razao(props['avg_frame_rate']) ?? razao(props['r_frame_rate']);
+}

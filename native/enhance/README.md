@@ -31,3 +31,33 @@ AUREA_ENHANCE_LIB=<caminho>\aurea_enhance.dll flutter test test/aprimoramento_mo
 Medido no host (NVIDIA RTX 3050, Windows, fp16, tile automático 200):
 x4 com entrada 320x180 = p50 28-32 ms; tile 32 contra 200 = 57,7 dB;
 intensidade 0 igual ao bicúbico; cancelamento devolve -3.
+
+# RIFE — câmera lenta com IA na exportação (mesma biblioteca)
+
+`aurea_rife.cpp` gera o quadro do instante t entre dois quadros reais com o
+RIFE v4.6 (`rife/`, cópia corrigida do rife-ncnn-vulkan; ver
+`rife/PATCHES.md`). Divide o ncnn estático e a instância Vulkan com o
+aprimoramento (`aurea_gpu.h`): uma segunda biblioteca duplicaria ~16 MB e
+destruiria a instância da outra.
+
+Modelo: `assets/ai/rife-v4.6/flownet.{param,bin}`, empacotado só no Android
+(`platforms: [android]` no pubspec). Ver `assets/ai/README.md`.
+
+API C: `ar_create(pasta, use_gpu)`, `ar_interpolate` (RGB24) e
+`ar_interpolate_png` (PNG para PNG, escrita atômica, guarda os dois últimos
+quadros lidos). Erros: `-1` argumentos, `-2` inferência (memória da GPU),
+`-4` modelo, `-5` arquivo.
+
+No app (`lib/src/features/export/application/interpolacao_rife.dart`): um
+clipe lento com interpolação "movimento" é lido na taxa da própria fonte e
+o RIFE preenche os quadros do meio num isolate, com os nomes que o FFmpeg
+escreveria. Fonte com quadros suficientes (60/120 fps) usa só os quadros
+reais. Sem GPU, com pouca memória de GPU (2x o medido no host) ou em
+qualquer falha, a exportação volta para o `minterpolate` do FFmpeg.
+
+Host:
+
+```
+AUREA_ENHANCE_LIB=<caminho>\aurea_enhance.dll flutter test test/rife_motor_nativo_test.dart
+AUREA_RIFE_GPU=1 AUREA_ENHANCE_LIB=<caminho>\aurea_enhance.dll flutter test test/rife_motor_nativo_test.dart
+```

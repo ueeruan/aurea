@@ -1,4 +1,8 @@
-# libaurea_enhance: super-resolucao por IA (ncnn/Vulkan).
+# libaurea_enhance: IA de video sobre ncnn/Vulkan.
+#   - super-resolucao (Real-ESRGAN, aurea_enhance.cpp)
+#   - quadro intermediario para camera lenta (RIFE v4.6, aurea_rife.cpp)
+# Os dois dividem o MESMO ncnn estatico e a mesma instancia Vulkan
+# (aurea_gpu.h): duas bibliotecas duplicariam ~16 MB e brigariam pela GPU.
 #
 # ncnn vem do pacote OFICIAL 20260526, baixado uma vez e conferido por
 # SHA256 (nada de binario no git). Offline: -DAUREA_NCNN_DIR=<pasta que
@@ -31,10 +35,48 @@ endif()
 set(ncnn_DIR ${AUREA_NCNN_DIR}/lib/cmake/ncnn)
 find_package(ncnn REQUIRED)
 
-add_library(aurea_enhance SHARED aurea_enhance.cpp)
+# RIFE (copia corrigida do rife-ncnn-vulkan, ver rife/PATCHES.md): os
+# shaders .comp viram cabecalhos com o texto GLSL, compilado para SPIR-V
+# pelo ncnn na primeira execucao.
+set(_rife ${CMAKE_CURRENT_SOURCE_DIR}/rife)
+set(_rife_gerados ${CMAKE_CURRENT_BINARY_DIR}/rife_shaders)
+file(MAKE_DIRECTORY ${_rife_gerados})
+set(_rife_shaders
+  rife_preproc rife_postproc rife_preproc_tta rife_postproc_tta
+  rife_flow_tta_avg rife_v2_flow_tta_avg rife_v4_flow_tta_avg
+  rife_flow_tta_temporal_avg rife_v2_flow_tta_temporal_avg rife_v4_flow_tta_temporal_avg
+  rife_out_tta_temporal_avg rife_v4_timestep rife_v4_timestep_tta
+  warp warp_pack4 warp_pack8)
+set(_rife_cabecalhos)
+foreach(s ${_rife_shaders})
+  set(h ${_rife_gerados}/${s}.comp.hex.h)
+  add_custom_command(OUTPUT ${h}
+    COMMAND ${CMAKE_COMMAND} -DSHADER_SRC=${_rife}/${s}.comp -DSHADER_COMP_HEADER=${h}
+            -P ${_rife}/generate_shader_comp_header.cmake
+    DEPENDS ${_rife}/${s}.comp ${_rife}/generate_shader_comp_header.cmake
+    WORKING_DIRECTORY ${_rife_gerados}
+    VERBATIM)
+  list(APPEND _rife_cabecalhos ${h})
+endforeach()
+
+add_library(aurea_enhance SHARED
+  aurea_enhance.cpp
+  aurea_rife.cpp
+  ${_rife}/rife.cpp
+  ${_rife}/warp.cpp
+  ${_rife_cabecalhos})
 target_compile_features(aurea_enhance PRIVATE cxx_std_17)
+target_include_directories(aurea_enhance PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${_rife}
+  ${_rife_gerados}
+  ${CMAKE_CURRENT_SOURCE_DIR}/tools)  # stb_image / stb_image_write
 target_link_libraries(aurea_enhance PRIVATE ncnn)
+if(MSVC)
+  target_compile_definitions(aurea_enhance PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
 if(ANDROID)
-  # OpenMP do NDK embutido: sem libomp.so solta no APK.
+  # OpenMP do NDK embutido: sem libomp.so solta no APK. zlib e do sistema.
   target_link_options(aurea_enhance PRIVATE -static-openmp -fopenmp)
+  target_link_libraries(aurea_enhance PRIVATE z)
 endif()

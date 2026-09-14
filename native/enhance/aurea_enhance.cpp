@@ -9,14 +9,12 @@
 #include <new>
 #include <vector>
 
+#include "aurea_gpu.h"
 #include "cpu.h"
 #include "gpu.h"
 #include "net.h"
 
 namespace {
-
-std::mutex gGpuLock;
-int gGpuUsers = 0;
 
 void writeErr(char* err, int32_t len, const char* msg) {
   if (!err || len <= 0) return;
@@ -111,15 +109,9 @@ ae_engine* ae_create(const char* param_path, const char* bin_path, int32_t model
   }
   e->scale = model_scale;
   if (use_gpu) {
-    std::lock_guard<std::mutex> g(gGpuLock);
-    if (gGpuUsers == 0) ncnn::create_gpu_instance();
-    if (ncnn::get_gpu_count() > 0) {
-      ++gGpuUsers;
-      e->vkdev = ncnn::get_gpu_device(ncnn::get_default_gpu_index());
-      e->gpu = e->vkdev != nullptr;
-      if (!e->gpu) --gGpuUsers;
-    }
-    if (gGpuUsers == 0 && !e->gpu) ncnn::destroy_gpu_instance();
+    // Instancia Vulkan contada junto com o RIFE (aurea_gpu.h).
+    e->vkdev = aurea_gpu::adquirir();
+    e->gpu = e->vkdev != nullptr;
   }
   e->net.opt.use_vulkan_compute = e->gpu;
   e->net.opt.use_fp16_packed = e->gpu;
@@ -152,10 +144,7 @@ void ae_destroy(ae_engine* e) {
   const bool gpu = e->gpu;
   e->net.clear();
   delete e;
-  if (gpu) {
-    std::lock_guard<std::mutex> g(gGpuLock);
-    if (--gGpuUsers == 0) ncnn::destroy_gpu_instance();
-  }
+  if (gpu) aurea_gpu::liberar();
 }
 
 int32_t ae_info_get(ae_engine* e, ae_info* out) {

@@ -107,6 +107,10 @@ flutter:
   assets:
     - assets/ai/
     - assets/ai/realesr-animevideov3/
+    # RIFE v4.6 (camera lenta com IA na exportacao): o motor so existe no
+    # Android, entao os 10 MB do modelo nao entram no IPA.
+    - path: assets/ai/rife-v4.6/
+      platforms: [android]
     - assets/environments/
     - assets/templates/
     - assets/templates/dnyx/

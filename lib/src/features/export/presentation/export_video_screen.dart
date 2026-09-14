@@ -25,6 +25,7 @@ import '../../editor/presentation/widgets/preview_stage.dart';
 import '../../editor/application/duck_service.dart';
 import '../../editor/application/media_preview_service.dart';
 import '../application/export_engine.dart';
+import '../application/interpolacao_rife.dart';
 import '../application/platform_encoder.dart';
 import '../domain/export_settings.dart';
 import '../../settings/application/settings_controller.dart';
@@ -156,6 +157,8 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
         MediaPreviewService.instance.peaksOf,
       ),
     );
+    // Camera lenta com IA quando o aparelho tem o motor (Android).
+    engine.interpolador = InterpoladorRife.doAparelho();
     _engine = engine;
 
     try {
@@ -211,7 +214,14 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
           (i + 0.5) / (videoLayers.length + 1),
           'Lendo "${l.name}" (${i + 1} de ${videoLayers.length})',
         );
-        final dir = await engine.extractVideoFrames(l);
+        final dir = await engine.extractVideoFrames(
+          l,
+          onDetalhe: (d) => _passo(
+            _Fase.lendoVideos,
+            (i + 0.5) / (videoLayers.length + 1),
+            '"${l.name}": $d',
+          ),
+        );
         _pastas[l.id] = dir;
         _inicioDosQuadros[l.id] = engine.videoFrameRange(l).$1;
         _contagem[l.id] = dir

@@ -29,6 +29,9 @@ const aeErrCancelled = -3;
 
 /// Onde a biblioteca mora: Android empacota pelo CMake do app; no host,
 /// os testes apontam AUREA_ENHANCE_LIB para a DLL construida localmente.
+/// A mesma biblioteca traz o RIFE (native_interpolator.dart).
+DynamicLibrary? abrirBibliotecaDeIa() => _abrirBiblioteca();
+
 DynamicLibrary? _abrirBiblioteca() {
   try {
     final host = Platform.environment['AUREA_ENHANCE_LIB'];

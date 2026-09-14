@@ -18,9 +18,11 @@ import '../../editor/application/audio_render_service.dart';
 import '../../editor/domain/layer.dart';
 import '../../editor/domain/grupo_ops.dart';
 import '../../editor/domain/mask.dart';
+import '../../editor/domain/plano_de_interpolacao.dart';
 import '../../editor/domain/video_project.dart';
 import '../domain/export_settings.dart';
 import '../domain/video_color.dart';
+import 'interpolacao_rife.dart';
 import 'platform_encoder.dart';
 
 /// EXPORTACAO DE VIDEO — as partes que nao dependem da tela.
@@ -57,6 +59,14 @@ class ExportEngine {
 
   Directory? _work;
   bool _cancelled = false;
+
+  /// Quem faz a CAMERA LENTA COM IA (Android com o motor RIFE). Nulo, ou
+  /// qualquer falha dele, e o FFmpeg minterpolate de sempre.
+  InterpoladorDeQuadros? interpolador;
+
+  /// Como os quadros a mais de cada clipe foram feitos, por id da camada:
+  /// 'IA (RIFE)', 'quadros reais' ou 'FFmpeg: ' seguido do motivo.
+  final Map<String, String> interpolacaoUsada = {};
 
   void cancel() {
     _cancelled = true;
@@ -203,6 +213,7 @@ class ExportEngine {
   Future<Directory> extractVideoFrames(
     VideoLayer layer, {
     void Function(double p)? onProgress,
+    void Function(String detalhe)? onDetalhe,
   }) async {
     final work = await workDir();
     final dir = Directory('${work.path}/v_${layer.id}');
@@ -212,14 +223,88 @@ class ExportEngine {
     final start = range.$1.inMicroseconds / 1000000.0;
     final dur = (range.$2 - range.$1).inMicroseconds / 1000000.0;
 
-    final cor = await corDoVideo(layer.sourcePath);
+    final info = await infoDoVideo(layer.sourcePath);
+    // QUADROS A MAIS quando o clipe anda mais devagar que a fonte e a
+    // pessoa pediu interpolacao: os PNGs saem numa taxa maior, e quem
+    // escolhe o quadro depois usa a mesma taxa — ver fpsDeExtracao. QUEM
+    // faz os quadros do meio sai de [estrategiaDeInterpolacao]: os reais,
+    // quando a fonte ja tem (60/120 fps); o RIFE, no modo movimento com o
+    // motor no aparelho; senao o minterpolate do FFmpeg.
+    final taxa = fpsDeExtracao(layer);
+    final rife = interpolador;
+    final escolha = estrategiaDeInterpolacao(
+      layer,
+      fps: fps,
+      fpsDaFonte: info.fps,
+      rifeDisponivel: rife != null && rife.disponivel,
+    );
+    if (escolha.como == ComoInterpolar.rife) {
+      try {
+        await _extrairComRife(
+          layer,
+          dir,
+          info.cor,
+          start,
+          dur,
+          taxa: taxa,
+          taxaBase: escolha.taxaBase,
+          rife: rife!,
+          onProgress: onProgress,
+          onDetalhe: onDetalhe,
+        );
+        interpolacaoUsada[layer.id] = 'IA (RIFE)';
+        onProgress?.call(1);
+        return dir;
+      } catch (e) {
+        // Cancelado: a tela para no proximo passo; nao vale reextrair.
+        if (_cancelled) return dir;
+        interpolacaoUsada[layer.id] =
+            'FFmpeg: ${e is StateError ? e.message : e}';
+        for (final f in dir.listSync()) {
+          if (f is File) f.deleteSync();
+        }
+        onDetalhe?.call('IA indisponível, usando a interpolação comum');
+      }
+    } else if (escolha.como == ComoInterpolar.quadrosReais) {
+      interpolacaoUsada[layer.id] = 'quadros reais';
+    }
+    final filtro = switch (escolha.como) {
+      ComoInterpolar.nada || ComoInterpolar.quadrosReais => '',
+      ComoInterpolar.rife ||
+      ComoInterpolar.ffmpeg => filtroDeInterpolacao(layer, fps: fps),
+    };
+    final falha = await _extrairPng(
+      layer,
+      dir,
+      info.cor,
+      start,
+      dur,
+      taxa: taxa,
+      filtro: filtro,
+    );
+    if (falha == null) {
+      onProgress?.call(1);
+      return dir;
+    }
+    throw ExportException(
+      'Falha ao ler o video "${layer.name}".\n${_tail(falha)}',
+    );
+  }
+
+  /// Roda as receitas de extracao em ordem ate uma dar certo: `%06d.png`
+  /// em [destino], a [taxa] quadros por segundo, com [filtro] na frente.
+  /// Devolve nulo no sucesso ou o log da ultima falha.
+  Future<String?> _extrairPng(
+    VideoLayer layer,
+    Directory destino,
+    CorDoVideo cor,
+    double start,
+    double dur, {
+    required int taxa,
+    required String filtro,
+  }) async {
     // Escala para caber na composicao mantendo proporcao — quadro maior
     // que isso e memoria jogada fora.
-    // QUADROS A MAIS quando o clipe anda mais devagar que a fonte e a
-    // pessoa pediu interpolacao: extrai a uma taxa maior, com o ffmpeg
-    // inventando os quadros do meio (minterpolate). Quem escolhe o
-    // quadro depois usa a mesma taxa — ver fpsDeExtracao.
-    final taxa = fpsDeExtracao(layer);
     final receitas = [
       for (final r in receitasDeExtracao(
         cor,
@@ -227,7 +312,7 @@ class ExportEngine {
         largura: width,
         altura: height,
       ))
-        '${filtroDeInterpolacao(layer, fps: fps)}$r',
+        '$filtro$r',
     ];
     String ultimoLog = '';
     for (final vf in receitas) {
@@ -249,39 +334,97 @@ class ExportEngine {
         'none',
         '-start_number',
         '0',
-        '${dir.path}/%06d.png',
+        '${destino.path}/%06d.png',
       ]);
-      if (ReturnCode.isSuccess(await session.getReturnCode())) {
-        onProgress?.call(1);
-        return dir;
-      }
+      if (ReturnCode.isSuccess(await session.getReturnCode())) return null;
       ultimoLog = (await session.getAllLogsAsString()) ?? '';
       // Uma receita que falhou pode ter deixado quadros pela metade.
-      for (final f in dir.listSync()) {
+      for (final f in destino.listSync()) {
         if (f is File) f.deleteSync();
       }
     }
-    throw ExportException(
-      'Falha ao ler o video "${layer.name}".\n${_tail(ultimoLog)}',
-    );
+    return ultimoLog;
   }
 
-  /// Pergunta ao ffprobe a cor do primeiro fluxo de video. Sem resposta,
-  /// so o tamanho decide — e ainda assim decide igual ao player.
-  Future<CorDoVideo> corDoVideo(String source) async {
+  /// CAMERA LENTA COM IA: le os quadros REAIS da fonte na taxa dela (sem
+  /// quadro repetido) numa subpasta e o RIFE escreve em [dir] os PNGs na
+  /// taxa de saida, com os nomes que o minterpolate escreveria.
+  Future<void> _extrairComRife(
+    VideoLayer layer,
+    Directory dir,
+    CorDoVideo cor,
+    double start,
+    double dur, {
+    required int taxa,
+    required int taxaBase,
+    required InterpoladorDeQuadros rife,
+    void Function(double p)? onProgress,
+    void Function(String detalhe)? onDetalhe,
+  }) async {
+    final base = Directory('${dir.path}/base');
+    if (base.existsSync()) base.deleteSync(recursive: true);
+    base.createSync(recursive: true);
+    try {
+      final falha = await _extrairPng(
+        layer,
+        base,
+        cor,
+        start,
+        dur,
+        taxa: taxaBase,
+        filtro: '',
+      );
+      if (falha != null) throw StateError('os quadros reais não saíram');
+      final quadros = base
+          .listSync()
+          .whereType<File>()
+          .where((f) => f.path.endsWith('.png'))
+          .length;
+      if (quadros == 0) throw StateError('nenhum quadro real');
+      final plano = planoDeInterpolacao(
+        quadrosBase: quadros,
+        taxaBase: taxaBase,
+        taxaSaida: taxa,
+      );
+      await rife.interpolar(
+        pastaBase: base.path,
+        pastaSaida: dir.path,
+        plano: plano,
+        aoAvancar: (feitos, total) {
+          onProgress?.call(feitos / total);
+          onDetalhe?.call('Câmera lenta com IA: quadro $feitos de $total');
+        },
+        cancelado: () => _cancelled,
+      );
+    } finally {
+      if (base.existsSync()) base.deleteSync(recursive: true);
+    }
+  }
+
+  /// Pergunta ao ffprobe a cor e a taxa de quadros do primeiro fluxo de
+  /// video. Sem resposta, so o tamanho decide a cor (igual ao player) e a
+  /// taxa fica desconhecida (vale a da composicao).
+  Future<({CorDoVideo cor, double? fps})> infoDoVideo(String source) async {
     try {
       final info = await FFprobeKit.getMediaInformation(source);
       final streams = info.getMediaInformation()?.getStreams() ?? [];
       for (final st in streams) {
         if (st.getType() != 'video') continue;
         final props = st.getAllProperties() ?? const <dynamic, dynamic>{};
-        return CorDoVideo.deProps(props);
+        return (cor: CorDoVideo.deProps(props), fps: fpsDeProps(props));
       }
     } catch (_) {
       // Sem informacao, segue com o criterio de tamanho.
     }
-    return const CorDoVideo.desconhecida(largura: 0, altura: 0);
+    return (
+      cor: const CorDoVideo.desconhecida(largura: 0, altura: 0),
+      fps: null,
+    );
   }
+
+  /// So a cor (ver [infoDoVideo]).
+  Future<CorDoVideo> corDoVideo(String source) async =>
+      (await infoDoVideo(source)).cor;
 
   /// A TAXA EM QUE OS QUADROS DESTE CLIPE SAO EXTRAIDOS.
   ///

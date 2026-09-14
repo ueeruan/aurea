@@ -22,3 +22,25 @@ textura e dobrou o flicker. O realesr-general-x4v3 (indicado para video
 real) nao tem versao ncnn oficial e ainda nao foi convertido nem validado.
 
 Nao ha modelos, marcas ou presets da Topaz ou da Adobe.
+
+# Modelo de interpolação de quadros (câmera lenta)
+
+Modelo: RIFE v4.6, formato ncnn, só `flownet` (a v4 não usa contextnet nem
+fusionnet). Arquivos: `rife-v4.6/flownet.param` e `rife-v4.6/flownet.bin`.
+Origem: pasta `models/rife-v4.6` do rife-ncnn-vulkan, commit
+`a7532fc3f9f8f008cd6eecd6f2ffe2a9698e0cf7`
+(https://github.com/nihui/rife-ncnn-vulkan).
+
+SHA-256:
+- flownet.param 28df14d57a225725ee5386f52eba422488450d37c9f40800ed4f62e8ba846692
+- flownet.bin f334ed2260149ce0188a6dcf049844e8b0cdd912e01cbcfb63553157d2508958
+
+Licenças: RIFE (Practical-RIFE, hzwer) MIT; rife-ncnn-vulkan (nihui) MIT.
+
+Empacotado só no Android (`platforms: [android]` no pubspec): o motor
+(`native/enhance/aurea_rife.cpp`) não existe no iOS.
+
+Contrato verificado executando no ncnn 20260526: entradas `in0`/`in1`
+(RGB 0..1, lados múltiplos de 32) e `in2` (instante t), saída `out0`.
+No host, RIFE ganhou da mistura por 3,2 a 3,9 dB em vídeo real (720p e
+1080p) e acertou o deslocamento em janelas sintéticas.

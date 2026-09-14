@@ -26,7 +26,6 @@ import '../domain/modelo_do_texto3d.dart';
 import '../domain/scene3d.dart';
 import '../domain/texto3d.dart';
 import 'font_service.dart';
-import 'panorama_cache.dart' show installUrbanEnvironment;
 import '../domain/rotation_math.dart';
 import '../domain/effect.dart';
 import '../domain/oscillate.dart';
@@ -2392,27 +2391,54 @@ class EditorController extends Notifier<VideoProject> {
     }
     if (malha.vazia) return null;
     String? no;
-    String? cenaId;
     runAsOneUndo(() {
       var cena = state.layers.whereType<Scene3DLayer>().firstOrNull;
       if (cena == null) {
         addScene3DLayer(at);
         cena = state.layers.whereType<Scene3DLayer>().first;
       }
-      cenaId = cena.id;
-      no = addModel3D(cena.id, modeloDoTexto3D(malha, limpo, estilo));
-      final nulo = addSceneNull(cena.id);
-      setSceneNodeParent(cena.id, no!, nulo);
+      final cenaId = cena.id;
+      no = addModel3D(cenaId, modeloDoTexto3D(malha, limpo, estilo));
+      final nuloDaCena = addSceneNull(cenaId);
+      setSceneNodeParent(cenaId, no!, nuloDaCena);
+      // O NULO DA LINHA DO TEMPO: mover, girar e animar essa camada leva o
+      // texto (o nulo da cena segue ela). Nasce no centro, entao nada pula.
+      addNullLayer(at);
+      final nuloDaComposicao = state.layers.first.id;
+      renameLayer(nuloDaComposicao, 'Nulo 3D · $limpo');
+      vincularNoANuloDaComposicao(cenaId, nuloDaCena, nuloDaComposicao);
+      // Metal precisa do que refletir: o estudio proprio, se a cena nao
+      // tem um panorama escolhido pela pessoa.
+      final atual = _layer(cenaId);
+      if (atual is Scene3DLayer && atual.scene.panorama.sourcePath == null) {
+        updateScene3D(
+          cenaId,
+          (s) => s.copyWith(environment: EnvironmentKind.estudioMetal),
+        );
+      }
     });
-    final id = cenaId;
-    final cena = id == null ? null : _layer(id);
-    if (cena is Scene3DLayer && cena.scene.panorama.sourcePath == null) {
-      try {
-        final pano = await installUrbanEnvironment();
-        updateScene3D(id!, (s) => s.copyWith(panorama: pano));
-      } catch (_) {}
-    }
     return no;
+  }
+
+  /// Prende (ou solta, com nulo) um no da cena a um nulo da composicao.
+  void vincularNoANuloDaComposicao(
+    String sceneId,
+    String nodeId,
+    String? nullLayerId,
+  ) {
+    updateScene3D(
+      sceneId,
+      (s) => s.copyWith(
+        nodes: [
+          for (final n in s.nodes)
+            n.id == nodeId
+                ? (nullLayerId == null
+                      ? n.copyWith(clearCompParent: true)
+                      : n.copyWith(compParentLayerId: nullLayerId))
+                : n,
+        ],
+      ),
+    );
   }
 
   String addModel3D(String sceneId, ModelAsset3D model) {

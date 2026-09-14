@@ -33,7 +33,22 @@ enum Element3DKind {
 /// horizonte. Sem ambiente nao ha reflexo: espelho de nada e preto.
 /// [ceu] e mantido no mesmo indice para compatibilidade com projetos antigos.
 /// A grade atual de presets usa os outros seis ambientes.
-enum EnvironmentKind { estudio, ceu, porDoSol, neon, noite, branco, interior }
+enum EnvironmentKind {
+  estudio,
+  ceu,
+  porDoSol,
+  neon,
+  noite,
+  branco,
+  interior,
+
+  /// ESTUDIO PARA METAL (Texto 3D estilo Element 3D): fundo quase preto
+  /// e softboxes fortes. Metal nao tem cor propria, so reflete — num
+  /// ambiente cinza e morno ele sai chapado; o contraste entre o preto e
+  /// as luzes e o que desenha as quinas. No fim do enum: projeto salvo
+  /// guarda o indice.
+  estudioMetal,
+}
 
 String environmentLabel(EnvironmentKind k) => switch (k) {
   EnvironmentKind.estudio => 'Estudio',
@@ -43,6 +58,7 @@ String environmentLabel(EnvironmentKind k) => switch (k) {
   EnvironmentKind.noite => 'Noite',
   EnvironmentKind.branco => 'Branco',
   EnvironmentKind.interior => 'Interior',
+  EnvironmentKind.estudioMetal => 'Estudio metal',
 };
 
 (double, double, double) _mistura(
@@ -116,6 +132,10 @@ String environmentLabel(EnvironmentKind k) => switch (k) {
       horizonte = (0.68, 0.52, 0.34);
       chao = (0.12, 0.09, 0.07);
       faixa = (0.22, 0.12, 0.04);
+    case EnvironmentKind.estudioMetal:
+      topo = (0.030, 0.032, 0.036);
+      horizonte = (0.050, 0.052, 0.058);
+      chao = (0.018, 0.018, 0.020);
   }
 
   final t = y.abs();
@@ -145,6 +165,21 @@ String environmentLabel(EnvironmentKind k) => switch (k) {
       r += w * (0.95 * (1 - lado) + 0.10 * lado);
       g += w * (0.15 * (1 - lado) + 0.85 * lado);
       b += w * (0.75 * (1 - lado) + 0.95 * lado);
+    case EnvironmentKind.estudioMetal:
+      // Tres softboxes de borda macia e miolo chapado (potencia alta na
+      // gaussiana achata o topo): a principal grande no alto a esquerda,
+      // uma tira vertical a direita e um recorte atras. Radiancia muito
+      // acima de 1: o reflexo no metal estoura branco e a quina brilha.
+      double caixa(double v, double centro, double meia) =>
+          math.exp(-math.pow((v - centro) / meia, 8).toDouble());
+      final principal =
+          caixa(y, .55, .22) * caixa(x, -.45, .32) * (z > -.3 ? 1.0 : .2);
+      final tira = caixa(y, .15, .55) * caixa(x, .78, .07);
+      final recorte = caixa(y, .35, .12) * caixa(z, -.85, .25);
+      final w = 14.0 * principal + 9.0 * tira + 6.0 * recorte;
+      r += w;
+      g += w;
+      b += w * 1.02;
     case EnvironmentKind.ceu:
     case EnvironmentKind.porDoSol:
     case EnvironmentKind.noite:

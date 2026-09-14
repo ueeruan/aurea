@@ -2,7 +2,15 @@
 // presa a um nulo (pedido de 14/09/2026, "identico ao Element 3D").
 import 'dart:io';
 
+import 'package:aurea/src/features/editor/domain/element3d.dart';
 import 'package:aurea/src/features/editor/domain/fonte_truetype.dart';
+import 'package:aurea/src/features/editor/domain/keyframe.dart';
+import 'package:aurea/src/features/editor/domain/layer.dart';
+import 'package:aurea/src/features/editor/domain/project_store.dart';
+import 'package:aurea/src/features/editor/domain/scene3d.dart';
+import 'package:aurea/src/features/editor/domain/video_project.dart';
+import 'package:aurea/src/features/editor/presentation/widgets/preview_stage.dart'
+    show cenaComNulosDaComposicao;
 import 'package:aurea/src/features/editor/domain/modelo_do_texto3d.dart';
 import 'package:aurea/src/features/editor/domain/texto3d.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -29,5 +37,49 @@ void main() {
       expect((p['positions'] as List).length, (p['normals'] as List).length);
       expect((p['lods'] as List).single, isNotEmpty, reason: 'rascunho');
     }
+  });
+
+  test('estudio metal: fundo quase preto e softbox muito acima de 1', () {
+    final fundo = environmentColor(EnvironmentKind.estudioMetal, 0, -.2, 1);
+    expect(fundo.$1, lessThan(.1));
+    final luz = environmentColor(EnvironmentKind.estudioMetal, -.45, .55, .7);
+    expect(luz.$1, greaterThan(5));
+  });
+
+  test('no da cena preso ao nulo da composicao segue o nulo', () {
+    final nulo = NullLayer(
+      id: 'nulo',
+      name: 'nulo',
+      startTime: Duration.zero,
+      duration: const Duration(seconds: 4),
+      position: AnimatedOffset(const Offset(1060, 490)),
+    );
+    final no = SceneNode(name: 'texto', isNull: true, compParentLayerId: 'nulo');
+    final cena = Scene3DLayer(
+      id: 'cena',
+      name: 'cena',
+      startTime: Duration.zero,
+      duration: const Duration(seconds: 4),
+      scene: Scene3D(nodes: [no]),
+    );
+    final projeto = VideoProject(
+      name: 'p',
+      createdAt: DateTime(2026, 9, 14),
+      aspectRatio: 16 / 9,
+      resolutionHeight: 1080,
+      layers: [nulo, cena],
+    );
+    final resolvida = cenaComNulosDaComposicao(
+      projeto,
+      cena,
+      Duration.zero,
+      Duration.zero,
+    ).nodes.single;
+    // Centro 960x540: o nulo esta 100 px a direita e 50 px ACIMA.
+    expect(resolvida.x.valueAt(Duration.zero), closeTo(100, 1e-9));
+    expect(resolvida.y.valueAt(Duration.zero), closeTo(50, 1e-9));
+    final volta = projectFromJson(projectToJson(projeto));
+    final lida = (volta.layers.whereType<Scene3DLayer>().single).scene.nodes.single;
+    expect(lida.compParentLayerId, 'nulo');
   });
 }

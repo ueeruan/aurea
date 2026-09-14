@@ -424,6 +424,7 @@ class SceneNode {
     this.modelAsset,
     this.modelMotion = const ModelMotion3D(),
     this.useModelMaterials = true,
+    this.compParentLayerId,
   }) : id = id ?? const Uuid().v4(),
        x = x ?? AnimatedDouble(0),
        y = y ?? AnimatedDouble(0),
@@ -515,6 +516,12 @@ class SceneNode {
   final ModelMotion3D modelMotion;
   final bool useModelMaterials;
 
+  /// PAI NA COMPOSICAO: um nulo da linha do tempo (camada) que este no
+  /// segue — o "linkavel a nulo 3D" do Element 3D. O compositor resolve o
+  /// transform do nulo e compoe por fora do no (ver preview_stage,
+  /// cenaComNulosDaComposicao); os filhos do no vem junto.
+  final String? compParentLayerId;
+
   Vec3 positionAt(Duration t) => Vec3(x.valueAt(t), y.valueAt(t), z.valueAt(t));
 
   SceneNode copyWith({
@@ -550,6 +557,8 @@ class SceneNode {
     ModelAsset3D? modelAsset,
     ModelMotion3D? modelMotion,
     bool? useModelMaterials,
+    String? compParentLayerId,
+    bool clearCompParent = false,
   }) => SceneNode(
     id: id,
     name: name ?? this.name,
@@ -584,6 +593,9 @@ class SceneNode {
     modelAsset: modelAsset ?? this.modelAsset,
     modelMotion: modelMotion ?? this.modelMotion,
     useModelMaterials: useModelMaterials ?? this.useModelMaterials,
+    compParentLayerId: clearCompParent
+        ? null
+        : (compParentLayerId ?? this.compParentLayerId),
   );
 
   SceneNode duplicate({String? name}) => SceneNode(

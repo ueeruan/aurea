@@ -5776,6 +5776,67 @@ RenderCamera? cameraDaCena(
   );
 }
 
+/// OS NOS DA CENA PRESOS A UM NULO DA COMPOSICAO (Texto 3D estilo Element
+/// 3D). O nulo e uma camada da linha do tempo: quem conhece a cadeia de
+/// vinculos dele e o compositor, entao o transform EFETIVO dele e composto
+/// por fora do no aqui, e a cena entregue ao motor (GPU ou CPU) ja traz o
+/// no no lugar. Os filhos do no vem junto pela cadeia normal da cena.
+///
+/// Da composicao (Y para baixo, Z positivo afastando) para a cena (Y para
+/// cima, camera olhando para -Z): X igual, Y e Z trocam de sinal — o que
+/// e uma meia volta em X, entao a rotacao em X fica e Y e Z invertem.
+/// Um px da composicao vale uma unidade da cena, como na camera.
+Scene3D cenaComNulosDaComposicao(
+  VideoProject project,
+  Scene3DLayer l,
+  Duration local,
+  Duration global,
+) {
+  if (!l.scene.nodes.any((n) => n.compParentLayerId != null)) return l.scene;
+  final centro = Offset(project.outputWidth / 2, project.outputHeight / 2);
+  SceneNode noNoLugar(SceneNode n) {
+    final pai = project.layerById(n.compParentLayerId!);
+    if (pai == null) return n;
+    final eff = effectiveTransform(project, pai, global);
+    final r = composeTransforms(
+      NodeTransform(
+        position: Vec3(
+          eff.pos.dx - centro.dx,
+          centro.dy - eff.pos.dy,
+          -eff.z,
+        ),
+        rotX: eff.rotX,
+        rotY: -eff.rotY,
+        rotZ: -eff.rot,
+        scale: eff.scale,
+      ),
+      NodeTransform(
+        position: n.positionAt(local),
+        rotX: n.rotX.valueAt(local),
+        rotY: n.rotY.valueAt(local),
+        rotZ: n.rotZ.valueAt(local),
+        scale: n.scale.valueAt(local),
+      ),
+    );
+    return n.copyWith(
+      x: AnimatedDouble(r.position.x),
+      y: AnimatedDouble(r.position.y),
+      z: AnimatedDouble(r.position.z),
+      rotX: AnimatedDouble(r.rotX),
+      rotY: AnimatedDouble(r.rotY),
+      rotZ: AnimatedDouble(r.rotZ),
+      scale: AnimatedDouble(r.scale),
+    );
+  }
+
+  return l.scene.copyWith(
+    nodes: [
+      for (final n in l.scene.nodes)
+        n.compParentLayerId == null ? n : noNoLugar(n),
+    ],
+  );
+}
+
 class _LayerContent extends StatelessWidget {
   const _LayerContent({
     this.exportFrames,
@@ -5980,6 +6041,12 @@ class _LayerContent extends StatelessWidget {
               localTime,
               layer.startTime + localTime,
             );
+            final cena = cenaComNulosDaComposicao(
+              project,
+              l,
+              localTime,
+              layer.startTime + localTime,
+            );
             // Ajudas NUNCA entram na exportacao — so no preview.
             final ajudas = !exporting && l.showHelpers;
             // RASCUNHO ENQUANTO TOCA. Em 33 ms nao cabe reflexo no
@@ -6006,7 +6073,7 @@ class _LayerContent extends StatelessWidget {
                 if (!Scene3DGpu.indisponivel) {
                   return Scene3DGpuView(
                     exporting: exporting,
-                    scene: l.scene,
+                    scene: cena,
                     camera: l.camera,
                     renderCamera: l.view == SceneView.camera
                         ? (resolvida ?? l.camera.renderAt(localTime))
@@ -6019,9 +6086,7 @@ class _LayerContent extends StatelessWidget {
                 }
                 return CustomPaint(
                   painter: Scene3DPainter(
-                    scene: rascunho
-                        ? l.scene.copyWith(draftMode: true)
-                        : l.scene,
+                    scene: rascunho ? cena.copyWith(draftMode: true) : cena,
                     camera: l.camera,
                     resolvedCamera: resolvida,
                     view: l.view,

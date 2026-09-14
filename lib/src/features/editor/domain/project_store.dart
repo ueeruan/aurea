@@ -1675,6 +1675,7 @@ Map<String, dynamic> _scene(Scene3D s) => {
         // O CONTORNO basta: a malha se refaz na leitura, e o arquivo
         // nao carrega milhares de vertices que saem em milissegundos.
         if (n.parentId != null) 'parent': n.parentId,
+        if (n.compParentLayerId != null) 'compPai': n.compParentLayerId,
         if (n.isNull) 'null3d': true,
         if (n.locked) 'locked': true,
         'tag': _col(n.colorTag),
@@ -1772,6 +1773,7 @@ SceneNode _asSceneNode(Map<String, dynamic> n) {
       for (final instance in (n['inst'] as List? ?? const [])) _asVec(instance),
     ],
     parentId: n['parent'] as String?,
+    compParentLayerId: n['compPai'] as String?,
     isNull: n['null3d'] as bool? ?? false,
     locked: n['locked'] as bool? ?? false,
     colorTag: n['tag'] == null ? const Color(0xFF7C62FF) : _asCol(n['tag']),

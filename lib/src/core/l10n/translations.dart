@@ -2430,6 +2430,7 @@ const appTranslations = <String, Map<String, String>>{
   "Aço escovado": {"en": "Brushed steel", "es": "Acero cepillado", "ar": "فولاذ مصقول", "ko": "브러시드 스틸", "ja": "ブラッシュドスチール", "zh": "拉丝钢", "hi": "ब्रश्ड स्टील", "id": "Baja brushed", "ru": "Матовая сталь"},
   "Branco fosco": {"en": "Matte white", "es": "Blanco mate", "ar": "أبيض مطفي", "ko": "무광 흰색", "ja": "マットホワイト", "zh": "哑光白", "hi": "मैट सफेद", "id": "Putih doff", "ru": "Матовый белый"},
   "Não consegui criar o texto 3D com essa fonte.": {"en": "Could not create 3D text with this font.", "es": "No pude crear el texto 3D con esta fuente.", "ar": "تعذر إنشاء نص ثلاثي الأبعاد بهذا الخط.", "ko": "이 글꼴로 3D 텍스트를 만들 수 없습니다.", "ja": "このフォントでは3Dテキストを作成できませんでした。", "zh": "无法用此字体创建 3D 文字。", "hi": "इस फ़ॉन्ट से 3D टेक्स्ट नहीं बन सका।", "id": "Tidak dapat membuat teks 3D dengan font ini.", "ru": "Не удалось создать 3D-текст с этим шрифтом."},
+  "Estudio metal": {"en": "Metal studio", "es": "Estudio metal", "ar": "استوديو معدني", "ko": "메탈 스튜디오", "ja": "メタルスタジオ", "zh": "金属影棚", "hi": "मेटल स्टूडियो", "id": "Studio logam", "ru": "Металлическая студия"},
   "Video": {"en": "Video", "es": "Vídeo", "ar": "فيديو", "ko": "동영상", "ja": "動画", "zh": "视频", "hi": "वीडियो", "id": "Video", "ru": "Видео"},
   "Audio": {"en": "Audio", "es": "Audio", "ar": "صوت", "ko": "오디오", "ja": "音声", "zh": "音频", "hi": "ऑडियो", "id": "Audio", "ru": "Аудио"},
   "Midia": {"en": "Media", "es": "Multimedia", "ar": "الوسائط", "ko": "미디어", "ja": "メディア", "zh": "媒体", "hi": "मीडिया", "id": "Media", "ru": "Медиа"},

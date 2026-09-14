@@ -48,11 +48,110 @@ double giroDaPose(PoseCamera pose, Vec3 posicao, Vec3 alvo) {
 Duration _tempoDoQuadro(int quadro, int fps) =>
     Duration(microseconds: (quadro * 1000000 / math.max(1, fps)).round());
 
-/// A CAMERA DO RASTREIO, com um keyframe por quadro analisado.
+/// A POSE NUM QUADRO FRACIONARIO da analise: posicao linear e rotacao por
+/// slerp entre os dois quadros vizinhos. Camera lenta mostra o mesmo quadro
+/// da fonte por varios quadros da composicao; sem interpolar, a camera
+/// andaria em degraus.
+PoseCamera poseNoQuadro(SolucaoCamera3D s, double quadro) {
+  final ps = s.poses;
+  if (ps.length == 1 || quadro <= ps.first.quadro) return ps.first;
+  if (quadro >= ps.last.quadro) return ps.last;
+  var lo = 0, hi = ps.length - 1;
+  while (hi - lo > 1) {
+    final m = (lo + hi) >> 1;
+    if (ps[m].quadro <= quadro) {
+      lo = m;
+    } else {
+      hi = m;
+    }
+  }
+  final a = ps[lo], b = ps[hi];
+  final u = ((quadro - a.quadro) / math.max(1, b.quadro - a.quadro))
+      .clamp(0.0, 1.0);
+  if (u == 0) return a;
+  final ca = a.posicao, cb = b.posicao;
+  final c = [
+    ca[0] + (cb[0] - ca[0]) * u,
+    ca[1] + (cb[1] - ca[1]) * u,
+    ca[2] + (cb[2] - ca[2]) * u,
+  ];
+  final r = _slerp(a.rotacao, b.rotacao, u);
+  final rc = r.aplicar(c);
+  return PoseCamera(a.quadro, r, [-rc[0], -rc[1], -rc[2]]);
+}
+
+List<double> _quaternio(Mat3 r) {
+  final m = r.m;
+  final tr = m[0] + m[4] + m[8];
+  double w, x, y, z;
+  if (tr > 0) {
+    final s = math.sqrt(tr + 1) * 2;
+    w = s / 4;
+    x = (m[7] - m[5]) / s;
+    y = (m[2] - m[6]) / s;
+    z = (m[3] - m[1]) / s;
+  } else if (m[0] > m[4] && m[0] > m[8]) {
+    final s = math.sqrt(1 + m[0] - m[4] - m[8]) * 2;
+    w = (m[7] - m[5]) / s;
+    x = s / 4;
+    y = (m[3] + m[1]) / s;
+    z = (m[2] + m[6]) / s;
+  } else if (m[4] > m[8]) {
+    final s = math.sqrt(1 + m[4] - m[0] - m[8]) * 2;
+    w = (m[2] - m[6]) / s;
+    x = (m[3] + m[1]) / s;
+    y = s / 4;
+    z = (m[7] + m[5]) / s;
+  } else {
+    final s = math.sqrt(1 + m[8] - m[0] - m[4]) * 2;
+    w = (m[3] - m[1]) / s;
+    x = (m[2] + m[6]) / s;
+    y = (m[7] + m[5]) / s;
+    z = s / 4;
+  }
+  return [w, x, y, z];
+}
+
+Mat3 _slerp(Mat3 ra, Mat3 rb, double u) {
+  final a = _quaternio(ra);
+  var b = _quaternio(rb);
+  var d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
+  if (d < 0) {
+    b = [for (final v in b) -v];
+    d = -d;
+  }
+  List<double> q;
+  if (d > .9995) {
+    q = [for (var i = 0; i < 4; i++) a[i] + (b[i] - a[i]) * u];
+  } else {
+    final th = math.acos(d.clamp(-1.0, 1.0));
+    final sa = math.sin((1 - u) * th) / math.sin(th);
+    final sb = math.sin(u * th) / math.sin(th);
+    q = [for (var i = 0; i < 4; i++) a[i] * sa + b[i] * sb];
+  }
+  final n = math.sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
+  final w = q[0] / n, x = q[1] / n, y = q[2] / n, z = q[3] / n;
+  return Mat3([
+    1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y),
+    2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x),
+    2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y),
+  ]);
+}
+
+/// A CAMERA DO RASTREIO.
+///
+/// Sem [fonteNoTempo] (solucao antiga), um keyframe por quadro analisado no
+/// tempo q/fps da camada — que so bate com clipe a 1x, sem reverso e sem
+/// Time Remap. Com ele, a camera e assada no tempo da CAMADA: para cada
+/// quadro do clipe, o instante da fonte que ele mostra vira o quadro da
+/// analise, e a pose vem de la. Camera lenta, aceleracao, reverso e curva
+/// de tempo passam a mover a camera junto com a imagem.
 Camera3D cameraDoRastreio(
   SolucaoCamera3D s, {
   String id = 'rastreio_camera',
   String nome = 'Câmera rastreada',
+  Duration Function(Duration local)? fonteNoTempo,
+  Duration? duracaoDaCamada,
 }) {
   // A distancia do alvo e so uma convencao (o alvo define direcao, nao
   // profundidade). Usar a profundidade tipica da cena mantem os numeros
@@ -75,8 +174,25 @@ Camera3D cameraDoRastreio(
   final az = <Keyframe<double>>[];
   final giro = <Keyframe<double>>[];
 
-  for (final pose in s.poses) {
-    final t = _tempoDoQuadro(pose.quadro, s.fps);
+  final inicio = s.inicioDaFonteUs;
+  final assadas = <(Duration, PoseCamera)>[
+    if (fonteNoTempo != null && inicio != null && duracaoDaCamada != null)
+      for (
+        var i = 0;
+        i * 1000000 / math.max(1, s.fps) <= duracaoDaCamada.inMicroseconds;
+        i++
+      )
+        () {
+          final t = _tempoDoQuadro(i, s.fps);
+          final fonte = fonteNoTempo(t).inMicroseconds;
+          final quadro = (fonte - inicio) * s.fps / 1000000;
+          return (t, poseNoQuadro(s, quadro));
+        }()
+    else
+      for (final pose in s.poses) (_tempoDoQuadro(pose.quadro, s.fps), pose),
+  ];
+
+  for (final (t, pose) in assadas) {
     final pos = pose.posicao;
     final frente = pose.frente;
     final alvo = [
@@ -172,12 +288,17 @@ Scene3DLayer camadaDoRastreio(
   required Offset position,
   String nome = 'Rastreio 3D',
   bool comNuvem = true,
+  Duration Function(Duration local)? fonteNoTempo,
 }) => Scene3DLayer(
   name: nome,
   startTime: startTime,
   duration: duration,
   position: AnimatedOffset(position),
-  camera: cameraDoRastreio(s),
+  camera: cameraDoRastreio(
+    s,
+    fonteNoTempo: fonteNoTempo,
+    duracaoDaCamada: duration,
+  ),
   // Os ajudantes ficam LIGADOS: sem ver a nuvem e o horizonte, nao ha
   // como saber se o rastreio pegou o chao ou a parede — e descobrir isso
   // depois de montar a cena inteira e caro.

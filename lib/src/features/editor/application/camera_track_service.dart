@@ -270,10 +270,12 @@ class CameraTrackService {
         altura: altura,
         quadros: quadros,
         fps: _taxaNova,
+        inicioDaFonteUs: start.inMicroseconds,
       );
+      final solucao = r.solucao.copiarCom(inicioDaFonteUs: start.inMicroseconds);
       _dizer(EtapaDoRastreio.pronto, 1);
-      await guardar(layerId, r.solucao);
-      return r.solucao;
+      await guardar(layerId, solucao);
+      return solucao;
     } finally {
       try {
         cru.arquivo.deleteSync();
@@ -335,6 +337,9 @@ class CameraTrackService {
             rodadasDeRefino: modo.refinos,
           ),
         );
+      }
+      if (r.inicioDaFonteUs != null) {
+        solucao = solucao.copiarCom(inicioDaFonteUs: r.inicioDaFonteUs);
       }
       _dizer(EtapaDoRastreio.pronto, 1);
       await guardar(layerId, solucao);
@@ -403,6 +408,7 @@ class _Rastros {
     required this.altura,
     required this.quadros,
     required this.fps,
+    this.inicioDaFonteUs,
   });
 
   final List<PontoSeguido> pontos;
@@ -410,6 +416,7 @@ class _Rastros {
   final int altura;
   final int quadros;
   final int fps;
+  final int? inicioDaFonteUs;
 }
 
 /// SEGUE E RESOLVE a partir do arquivo cru (roda num isolate): le um quadro

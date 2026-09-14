@@ -3895,11 +3895,15 @@ class EditorController extends Notifier<VideoProject> {
     // A proporcao exibida decide a altura dos quadros analisados.
     final proporcao =
         layer.proporcaoDaFonte ?? (await sondarVideo(layer.sourcePath)).proporcao;
+    // O TRECHO DA FONTE QUE O CLIPE MOSTRA: com velocidade, reverso ou Time
+    // Remap ele nao e [sourceOffset, sourceOffset + duracao]. Varre o tempo
+    // da camada e fica com o menor e o maior instante do arquivo.
+    final (inicio, fim) = trechoDaFonteMostrado(layer);
     return CameraTrackService.instance.rastrear(
       layerId: layerId,
       sourcePath: layer.sourcePath,
-      start: layer.sourceOffset,
-      duration: layer.sourceSpan,
+      start: inicio,
+      duration: fim - inicio,
       modo: modo,
       tipoDeTomada: tipoDeTomada,
       fps: fps,
@@ -3935,6 +3939,9 @@ class EditorController extends Notifier<VideoProject> {
       position: _center,
       nome: 'Rastreio 3D · ${layer.name}',
       comNuvem: comNuvem,
+      fonteNoTempo: layer is VideoLayer
+          ? (t) => videoAbsoluteSourceTimeAt(layer, t)
+          : null,
     );
     final indice = state.layers.indexWhere((l) => l.id == layerId);
     final lista = [...state.layers];

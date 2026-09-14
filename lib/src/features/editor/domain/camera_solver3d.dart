@@ -97,6 +97,7 @@ class SolucaoCamera3D {
     this.vistasPorPonto = const {},
     this.pontosSeguidos = 0,
     this.tipoDeTomada = TipoDeTomada.auto,
+    this.inicioDaFonteUs,
   });
 
   /// Tamanho do quadro ANALISADO (nao o do video).
@@ -139,6 +140,12 @@ class SolucaoCamera3D {
 
   /// O tipo de tomada com que a analise foi feita.
   final TipoDeTomada tipoDeTomada;
+
+  /// DE QUE INSTANTE DO ARQUIVO saiu o quadro 0 da analise (microssegundos,
+  /// tempo absoluto da fonte). Com ele a camera segue o quadro que o clipe
+  /// MOSTRA — velocidade, reverso e Time Remap incluidos. Nulo em solucao
+  /// antiga: o quadro q vale q/fps do tempo da camada, como era.
+  final int? inicioDaFonteUs;
 
   /// A QUALIDADE DE UM PONTO, do jeito que a tela mostra.
   ///
@@ -197,6 +204,7 @@ class SolucaoCamera3D {
     Map<int, int>? vistasPorPonto,
     double? erroPixels,
     TipoDeTomada? tipoDeTomada,
+    int? inicioDaFonteUs,
   }) => SolucaoCamera3D(
     largura: largura,
     altura: altura,
@@ -210,6 +218,7 @@ class SolucaoCamera3D {
     vistasPorPonto: vistasPorPonto ?? this.vistasPorPonto,
     pontosSeguidos: pontosSeguidos,
     tipoDeTomada: tipoDeTomada ?? this.tipoDeTomada,
+    inicioDaFonteUs: inicioDaFonteUs ?? this.inicioDaFonteUs,
   );
 
   bool get isEmpty => poses.isEmpty || nuvem.isEmpty;
@@ -250,6 +259,7 @@ class SolucaoCamera3D {
     'vp': {for (final e in vistasPorPonto.entries) '${e.key}': e.value},
     'ps': pontosSeguidos,
     'tt': tipoDeTomada.name,
+    'src0': ?inicioDaFonteUs,
   };
 
   static SolucaoCamera3D? decode(String fonte) {
@@ -292,6 +302,7 @@ class SolucaoCamera3D {
           (t) => t.name == m['tt'],
           orElse: () => TipoDeTomada.auto,
         ),
+        inicioDaFonteUs: (m['src0'] as num?)?.toInt(),
       );
     } catch (_) {
       // Solucao antiga ou estragada nao pode impedir de rastrear de novo.

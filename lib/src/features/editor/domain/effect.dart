@@ -3322,6 +3322,29 @@ const effectSpecs = <EffectType, EffectSpec>{
   ),
 };
 
+/// OS EFEITOS DE EDIT, na ordem em que se procura: batida, glitch,
+/// tempo e coloring. E o atalho "Edits" da galeria — quem vem do Alight
+/// Motion procura por isso, e nao pela categoria tecnica de cada um.
+const efeitosDeEdit = <EffectType>[
+  EffectType.flash,
+  EffectType.zoomPunch,
+  EffectType.strobe,
+  EffectType.sliceGlitch,
+  EffectType.twitch,
+  EffectType.tremor,
+  EffectType.timeSlice,
+  EffectType.posterizeTime,
+  EffectType.rgbSplit,
+  EffectType.glitch,
+  EffectType.colorBalance,
+  EffectType.gradientMap,
+  EffectType.colorTune,
+  EffectType.photoFilter,
+  EffectType.channelMixer,
+  EffectType.selectiveColor,
+  EffectType.brightnessContrast,
+];
+
 /// Categorias do catalogo, na ordem em que aparecem.
 /// CATEGORIAS, em ingles como os nomes. A arrumacao do catalogo e a
 /// primeira coisa que a pessoa le, e misturar idioma ali confunde mais

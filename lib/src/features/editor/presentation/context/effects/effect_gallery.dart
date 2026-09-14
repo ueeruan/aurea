@@ -30,6 +30,7 @@ Future<void> showEffectGallery(
   var query = '';
   String? category;
   var favoritos = false;
+  var edits = false;
   var showPresets = false;
   await EffectPresetStore.instance.load();
   if (!context.mounted) return;
@@ -60,6 +61,12 @@ Future<void> showEffectGallery(
               results = results
                   .where((t) => t != EffectType.opticalFlow)
                   .toList();
+            }
+            if (edits && query.isEmpty && !favoritos) {
+              results = [
+                for (final t in efeitosDeEdit)
+                  if (results.contains(t)) t,
+              ];
             }
             if (favoritos && query.isEmpty) {
               results = [
@@ -158,13 +165,26 @@ Future<void> showEffectGallery(
                           child: Row(
                             children: [
                               chip(
-                                'Todos ${effectSpecs.length}',
-                                category == null && !favoritos,
+                                '${translate(sheetContext, 'Todos')} ${effectSpecs.length}',
+                                category == null && !favoritos && !edits,
                                 () => setSheetState(() {
                                   category = null;
                                   favoritos = false;
+                                  edits = false;
                                 }),
                                 key: const ValueKey('galeria-todos'),
+                              ),
+                              // EDITS: batida, glitch, tempo e coloring
+                              // num lugar so.
+                              chip(
+                                '${translate(sheetContext, 'Edits')} ${efeitosDeEdit.length}',
+                                edits,
+                                () => setSheetState(() {
+                                  edits = !edits;
+                                  category = null;
+                                  favoritos = false;
+                                }),
+                                key: const ValueKey('galeria-edits'),
                               ),
                               if (pro)
                                 chip(
@@ -173,16 +193,18 @@ Future<void> showEffectGallery(
                                   () => setSheetState(() {
                                     favoritos = !favoritos;
                                     category = null;
+                                    edits = false;
                                   }),
                                   key: const ValueKey('galeria-favoritos'),
                                 ),
                               for (final c in effectCategories)
                                 chip(
-                                  '${categoriaDoEfeito(c)} ${effectsInCategory(c).length}',
+                                  '${translate(sheetContext, categoriaDoEfeito(c))} ${effectsInCategory(c).length}',
                                   category == c,
                                   () => setSheetState(() {
                                     category = category == c ? null : c;
                                     favoritos = false;
+                                    edits = false;
                                   }),
                                   key: ValueKey('galeria-cat-$c'),
                                 ),

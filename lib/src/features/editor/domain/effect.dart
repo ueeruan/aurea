@@ -3754,15 +3754,16 @@ const _categoriaEmPortugues = <String, String>{
 /// ja normalizadas, entao tanto faz como o sinonimo foi escrito.
 List<EffectType> searchEffects(String query) {
   final q = normalizarBusca(query.trim());
-  if (q.isEmpty) return effectSpecs.keys.toList();
+  if (q.isEmpty) return efeitosDoCatalogo;
   bool contem(String texto) => normalizarBusca(texto).contains(q);
   return [
     for (final e in effectSpecs.entries)
-      if (contem(e.value.name) ||
+      if (!efeitosInternos.contains(e.key) &&
+          (contem(e.value.name) ||
           contem(e.value.id) ||
           contem(e.value.category) ||
           contem(_categoriaEmPortugues[e.value.category] ?? '') ||
-          e.value.synonyms.any(contem))
+          e.value.synonyms.any(contem)))
         e.key,
   ];
 }
@@ -3813,7 +3814,20 @@ const _semAcento = <String, String>{
 
 List<EffectType> effectsInCategory(String category) => [
   for (final e in effectSpecs.entries)
-    if (e.value.category == category) e.key,
+    if (e.value.category == category && !efeitosInternos.contains(e.key))
+      e.key,
+];
+
+/// TIME REMAP SAIU DO APP (14/09, pedido do dono). A trilha continua sendo
+/// o jeito INTERNO de congelar quadro, fazer rampa pronta e cortar clipe em
+/// reverso, entao o tipo e a spec ficam; o que some e a porta: galeria,
+/// busca, guia, cartao no painel e losango na linha do tempo.
+const efeitosInternos = <EffectType>{EffectType.timeRemap};
+
+/// O que a pessoa pode escolher na galeria.
+List<EffectType> get efeitosDoCatalogo => [
+  for (final t in effectSpecs.keys)
+    if (!efeitosInternos.contains(t)) t,
 ];
 
 /// Instancia de efeito numa camada. TODO parametro numerico e animavel
@@ -4006,6 +4020,9 @@ class EffectInstance {
   /// so parte dos parametros deixaria metade da marca para tras. O proprio
   /// efeito, intacto, quando nenhum parametro tem marca em [de].
   EffectInstance comKeyframeMovido(Duration de, Duration para) {
+    // A curva interna de tempo nao tem losango: arrastar um instante nao a
+    // mexe.
+    if (efeitosInternos.contains(type)) return this;
     Map<String, AnimatedDouble>? novos;
     for (final p in params.entries) {
       final movida = p.value.comKeyframeMovido(de, para);
@@ -4018,6 +4035,7 @@ class EffectInstance {
   /// TIRA a marca de [local] de todos os parametros. Intacto quando nao
   /// havia nenhuma.
   EffectInstance semKeyframeEm(Duration local) {
+    if (efeitosInternos.contains(type)) return this;
     Map<String, AnimatedDouble>? novos;
     for (final p in params.entries) {
       if (!p.value.hasKeyframeAt(local)) continue;

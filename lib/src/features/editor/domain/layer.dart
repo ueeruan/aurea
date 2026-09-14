@@ -313,7 +313,10 @@ sealed class Layer {
   );
 
   Set<int> get effectTimesUs => {
-    for (final e in effects) ...e.keyframeTimes.map((t) => t.inMicroseconds),
+    for (final e in effects)
+      // A curva interna de tempo (congelar, rampa) nao vira losango.
+      if (!efeitosInternos.contains(e.type))
+        ...e.keyframeTimes.map((t) => t.inMicroseconds),
   };
 
   /// Keyframes das mascaras (caminho, feather, opacidade, expansao).

@@ -9,7 +9,7 @@ import 'package:aurea/src/features/editor/domain/temporal_interpolation.dart';
 import 'package:aurea/src/features/editor/domain/video_project.dart';
 
 void main() {
-  test('Time Remap from Effects starts as identity and Optical Flow survives saving', () {
+  test('Time Remap is not addable and Optical Flow survives saving', () {
     final c = ProviderContainer();
     addTearDown(c.dispose);
     final editor = c.read(editorControllerProvider.notifier);
@@ -41,7 +41,7 @@ void main() {
       videoAbsoluteSourceTimeAt(read(), const Duration(seconds: 2)),
       before,
     );
-    expect(timeRemapTrackOf(read())!.keyframes.length, 2);
+    expect(timeRemapTrackOf(read()), isNull, reason: 'Time Remap saiu do app');
     editor.addEffect('v', EffectType.opticalFlow);
     expect(fatorDeInterpolacao(read()), 2);
     expect(filtroDeInterpolacao(read(), fps: 30), contains('mi_mode=mci'));
@@ -61,15 +61,5 @@ void main() {
     expect(fatorDeInterpolacao(read()), 2);
     editor.removeEffect('v', flow.id);
     expect(fatorDeInterpolacao(read()), 1);
-    editor.resetClipTimeRemap('v');
-    expect(timeRemapTrackOf(read())!.valueAt(const Duration(seconds: 2)), 2);
-    final remap = read().effects.firstWhere(
-      (e) => e.type == EffectType.timeRemap,
-    );
-    editor.duplicateEffect('v', remap.id);
-    expect(
-      read().effects.where((e) => e.type == EffectType.timeRemap).length,
-      1,
-    );
   });
 }

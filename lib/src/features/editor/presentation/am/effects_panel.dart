@@ -1,5 +1,4 @@
 import 'package:aurea/src/core/l10n/app_language.dart';
-import 'time_remap_curve_editor.dart';
 import '../../application/optical_flow_preview.dart';
 
 import 'package:flutter/cupertino.dart';
@@ -124,10 +123,6 @@ class _EffectsPanelState extends ConsumerState<EffectsPanel> {
   /// edicoes viram um undo so (coalesce de 450 ms).
   void _resetarEfeito(String layerId, EffectInstance effect) {
     final controller = ref.read(editorControllerProvider.notifier);
-    if (effect.type == EffectType.timeRemap) {
-      controller.resetClipTimeRemap(layerId);
-      return;
-    }
     final agora = widget.playback.time.value;
     for (final e in effect.spec.params.entries) {
       controller.editEffectParam(
@@ -186,6 +181,13 @@ class _EffectsPanelState extends ConsumerState<EffectsPanel> {
         valueListenable: widget.playback.time,
         builder: (context, t, _) {
           final local = layer.localTime(t);
+          // A curva interna de tempo (congelar, rampa pronta) nao vira
+          // cartao: o Time Remap saiu do app. Os indices da lista sao os
+          // dos visiveis; mover usa a distancia real na pilha.
+          final visiveis = [
+            for (var i = 0; i < layer.effects.length; i++)
+              if (!efeitosInternos.contains(layer.effects[i].type)) i,
+          ];
 
           // Parametro selecionado -> efeito + chaves (par X/Y vem como
           // 'x|y'). Resolve por id, nunca por indice: o efeito pode ter
@@ -296,8 +298,8 @@ class _EffectsPanelState extends ConsumerState<EffectsPanel> {
                     if (para == de) return;
                     controller.reorderEffect(
                       id,
-                      layer.effects[de].id,
-                      para - de,
+                      layer.effects[visiveis[de]].id,
+                      visiveis[para] - visiveis[de],
                     );
                   },
                   footer: Column(
@@ -369,47 +371,35 @@ class _EffectsPanelState extends ConsumerState<EffectsPanel> {
                     ],
                   ),
                   children: [
-                    for (var i = 0; i < layer.effects.length; i++)
+                    for (final (v, i) in visiveis.indexed)
                       _EffectCard(
                         key: ValueKey(layer.effects[i].id),
                         temporalControls:
                             layer is VideoLayer &&
-                                layer.effects[i].type == EffectType.timeRemap
-                            ? TextButton.icon(
-                                icon: const Icon(Icons.timeline),
-                                label: const AppText('Editar curva de tempo'),
-                                onPressed: () => showTimeRemapCurveSheet(
-                                  context,
-                                  ref,
-                                  id,
-                                  widget.playback,
-                                ),
-                              )
-                            : layer is VideoLayer &&
                                   layer.effects[i].type ==
                                       EffectType.opticalFlow
                             ? OpticalFlowStatus(layer: layer)
                             : null,
-                        index: i,
+                        index: v,
                         effect: layer.effects[i],
                         local: local,
                         expanded: _expandido(layer.effects[i].id),
                         selectedParam: _selectedParam,
                         onToggleExpanded: () =>
                             _alternarExpandido(layer.effects[i].id),
-                        onSubir: i == 0
+                        onSubir: v == 0
                             ? null
                             : () => controller.reorderEffect(
                                 id,
                                 layer.effects[i].id,
-                                -1,
+                                visiveis[v - 1] - i,
                               ),
-                        onDescer: i == layer.effects.length - 1
+                        onDescer: v == visiveis.length - 1
                             ? null
                             : () => controller.reorderEffect(
                                 id,
                                 layer.effects[i].id,
-                                1,
+                                visiveis[v + 1] - i,
                               ),
                         onDuplicar: () =>
                             controller.duplicateEffect(id, layer.effects[i].id),

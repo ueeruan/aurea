@@ -4,12 +4,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:aurea/src/features/editor/application/editor_controller.dart';
 import 'package:aurea/src/features/editor/application/playback_controller.dart';
 import 'package:aurea/src/features/editor/application/ui/editor_layout.dart';
-import 'package:aurea/src/features/editor/domain/keyframe.dart';
 import 'package:aurea/src/features/editor/domain/layer.dart';
-import 'package:aurea/src/features/editor/domain/cut_ops.dart';
 import 'package:aurea/src/features/editor/domain/video_project.dart';
-import 'package:aurea/src/features/editor/domain/project_store.dart';
-import 'package:aurea/src/features/editor/presentation/am/time_remap_curve_editor.dart';
 import 'package:aurea/src/features/editor/presentation/estudio/folha_de_animacao.dart';
 import 'package:aurea/src/features/editor/presentation/estudio/estado_do_estudio.dart';
 import 'package:aurea/src/features/editor/presentation/estudio/folha_de_camera.dart';
@@ -218,57 +214,6 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  test('remap preserves Bezier and hold through editing and project JSON', () {
-    for (final ease in [
-      Easing.easeIn,
-      Easing.overshoot,
-      const Easing(type: EasingType.hold),
-    ]) {
-      final original = AnimatedDouble(0)
-          .withKeyframe(Duration.zero, 0, ease)
-          .withKeyframe(const Duration(seconds: 4), 4);
-      final converted = remapTrackFromPoints(remapPointsFromTrack(original));
-      final v = VideoLayer(
-        name: 'v',
-        startTime: Duration.zero,
-        duration: const Duration(seconds: 4),
-        sourcePath: 'x.mp4',
-        position: AnimatedOffset(Offset.zero),
-      );
-      final layer = v.copyLayer(effects: replaceTimeRemap(v, converted));
-      final project = VideoProject(
-        name: 'p',
-        createdAt: DateTime(2026),
-        layers: [layer],
-      );
-      final restored =
-          projectFromJson(projectToJson(project)).layers.first as VideoLayer;
-      for (var ms = 0; ms <= 4000; ms += 125) {
-        final t = Duration(milliseconds: ms);
-        expect(
-          timeRemapTrackOf(restored)!.valueAt(t),
-          closeTo(original.valueAt(t), 1e-8),
-        );
-      }
-    }
-    final points = [
-      RemapPoint(
-        compositionTime: 0,
-        sourceTime: 0,
-        interpolation: 2,
-        outHandle: const Offset(1, 0),
-      ),
-      RemapPoint(
-        compositionTime: 4,
-        sourceTime: 4,
-        inHandle: const Offset(-1, -4),
-      ),
-    ];
-    expect(
-      remapTrackFromPoints(points).valueAt(const Duration(seconds: 2)),
-      lessThan(1.1),
-    );
-  });
   test('opening tools preserves preview size and total layout budget', () {
     for (final h in [320.0, 568.0, 667.0, 844.0]) {
       final normal = EditorLayoutMetrics.solve(
@@ -287,61 +232,6 @@ void main() {
       expect(tool.total, closeTo(h, 1e-6));
     }
   });
-  testWidgets(
-    'remap adds at layer-local time and preserves existing source speed',
-    (tester) async {
-      final c = ProviderContainer();
-      addTearDown(c.dispose);
-      final v = VideoLayer(
-        name: 'v',
-        startTime: const Duration(seconds: 3),
-        duration: const Duration(seconds: 4),
-        sourceDuration: const Duration(seconds: 12),
-        speed: 2,
-        sourcePath: 'x.mp4',
-        position: AnimatedOffset(Offset.zero),
-      );
-      c
-          .read(editorControllerProvider.notifier)
-          .openProject(
-            VideoProject(name: 'p', createdAt: DateTime(2026), layers: [v]),
-          );
-      final playback = PlaybackController(
-        vsync: tester,
-        durationOf: () => const Duration(seconds: 10),
-      );
-      addTearDown(playback.dispose);
-      playback.seek(const Duration(seconds: 4));
-      await tester.pumpWidget(
-        UncontrolledProviderScope(
-          container: c,
-          child: MaterialApp(
-            home: Scaffold(
-              body: TimeRemapCurveEditor(layerId: v.id, playback: playback),
-            ),
-          ),
-        ),
-      );
-      expect(
-        hasTimeRemap(
-          c.read(editorControllerProvider).layers.first as VideoLayer,
-        ),
-        isFalse,
-      );
-      await tester.tap(find.text('+ Keyframe'));
-      await tester.pump();
-      final track = timeRemapTrackOf(
-        c.read(editorControllerProvider).layers.first as VideoLayer,
-      )!;
-      expect(
-        track.keyframes.map((k) => k.time),
-        contains(const Duration(seconds: 1)),
-      );
-      expect(track.valueAt(const Duration(seconds: 1)), 2);
-      expect(track.valueAt(const Duration(seconds: 4)), 8);
-      expect(tester.takeException(), isNull);
-    },
-  );
   testWidgets('3D animation add and delete act on the selected Z track', (
     tester,
   ) async {

@@ -61,7 +61,9 @@ void main() {
       for (final c in effectCategories) {
         total += effectsInCategory(c).length;
       }
-      expect(total, effectSpecs.length);
+      // O Time Remap saiu do catalogo (fica so como curva interna).
+      expect(total, efeitosDoCatalogo.length);
+      expect(total, effectSpecs.length - efeitosInternos.length);
     });
   });
 

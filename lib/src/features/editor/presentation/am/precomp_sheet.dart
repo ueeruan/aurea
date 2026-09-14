@@ -31,9 +31,6 @@ Future<void> showPrecompSheet(
         final layer = project.layerById(layerId);
         if (layer is! GroupLayer) return const SizedBox.shrink();
 
-        final agora = playback.time.value;
-        final local = layer.localTime(agora);
-        final conteudo = layer.contentTimeAt(local);
         final remapAtivo = layer.timeRemap != null;
         final segInterna = layer.innerDuration.inMicroseconds / 1000000.0;
         final segBarra = layer.duration.inMicroseconds / 1000000.0;
@@ -52,15 +49,6 @@ Future<void> showPrecompSheet(
                     fontSize: 17,
                     fontWeight: FontWeight.w700,
                     color: AmColors.text,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                const AppText('O grupo passa a ter tempo proprio: da para congelar, '
-                  'inverter e acelerar tudo o que esta dentro de uma vez.',
-                  style: TextStyle(
-                    fontSize: 11,
-                    height: 1.35,
-                    color: AmColors.muted,
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -94,59 +82,19 @@ Future<void> showPrecompSheet(
                     },
                   ),
 
-                const SizedBox(height: 10),
-                _Toggle(
-                  label: 'Remapear tempo',
-                  value: remapAtivo,
-                  onChanged: (v) {
-                    if (v) {
-                      controller.enablePrecompTimeRemap(layerId);
-                    } else {
-                      controller.updatePrecomp(layerId, clearRemap: true);
-                    }
-                    redesenha();
-                  },
-                ),
-
+                // O TEMPO REMAPEADO saiu do app. Projeto antigo que ja o
+                // tinha ligado ve so o interruptor para desligar.
                 if (remapAtivo) ...[
-                  _Ruler(
-                    label: 'Tempo agora',
-                    value: conteudo.inMicroseconds / 1000000.0,
-                    min: 0,
-                    max: segInterna,
-                    decimals: 2,
-                    suffix: ' s',
+                  const SizedBox(height: 10),
+                  _Toggle(
+                    label: 'Remapear tempo',
+                    value: true,
                     onChanged: (v) {
-                      controller.setPrecompContentTime(layerId, agora, v);
+                      if (!v) {
+                        controller.updatePrecomp(layerId, clearRemap: true);
+                      }
                       redesenha();
                     },
-                  ),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _Botao('Congelar aqui', () {
-                          controller.freezePrecompAt(layerId, agora);
-                          redesenha();
-                        }),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: _Botao('De tras para frente', () {
-                          controller.reversePrecomp(layerId);
-                          redesenha();
-                        }),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  const AppText('Cada ajuste com o remapeamento ligado cria um '
-                    'keyframe de tempo — dois keyframes distantes viram '
-                    'camera lenta, dois proximos viram aceleracao.',
-                    style: TextStyle(
-                      fontSize: 11,
-                      height: 1.35,
-                      color: AmColors.muted,
-                    ),
                   ),
                 ],
 

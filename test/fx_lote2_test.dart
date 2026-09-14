@@ -81,7 +81,6 @@ void main() {
       }
 
       achou('pixel sort', EffectType.pixelSort);
-      achou('time remap', EffectType.timeRemap);
       achou('turbulent', EffectType.turbulentDisplace);
       achou('unsharp', EffectType.unsharpMask);
       achou('motion tile', EffectType.motionTile);
@@ -93,7 +92,9 @@ void main() {
       achou('glitchify', EffectType.glitchify);
       achou('blob', EffectType.blobTracker);
       // E tambem pelo que a pessoa QUER, nao pelo nome tecnico.
-      achou('congelar', EffectType.timeRemap);
+      // Time Remap saiu do app: nao aparece mais na busca.
+      expect(searchEffects('time remap'), isNot(contains(EffectType.timeRemap)));
+      expect(searchEffects('congelar'), isNot(contains(EffectType.timeRemap)));
       achou('velho', EffectType.filmDamage);
       achou('fita', EffectType.vhs);
       achou('nitidez', EffectType.unsharpMask);

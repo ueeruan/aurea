@@ -13,7 +13,7 @@ const releaseHighlights = <(IconData, String, String)>[
   (
     CupertinoIcons.viewfinder,
     'Tracker 3D novo',
-    'Rastrear no clipe de vídeo: motor novo em C++ que resolve chão plano e tripé, calcula a lente e dá pose a todo quadro. A câmera acompanha velocidade, reverso e Time Remap.',
+    'Rastrear no clipe de vídeo: motor novo em C++ que resolve chão plano e tripé, calcula a lente e dá pose a todo quadro. A câmera acompanha velocidade e reverso.',
   ),
   (
     CupertinoIcons.textformat_alt,
@@ -29,11 +29,6 @@ const releaseHighlights = <(IconData, String, String)>[
     CupertinoIcons.fullscreen,
     'Mídia em tela cheia',
     'Foto e vídeo importados cobrem a composição. Preencher e Ajustar no painel de Escala, e a mesclagem não encolhe mais a camada.',
-  ),
-  (
-    CupertinoIcons.speedometer,
-    'Gráfico do Time Remap',
-    'Arraste o ponto para cima ou para baixo, toque na linha para criar ponto. Um desfazer volta o arrasto inteiro.',
   ),
   (
     CupertinoIcons.hand_draw,

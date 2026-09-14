@@ -4222,16 +4222,6 @@ class EditorController extends Notifier<VideoProject> {
     _ => 1.0,
   };
 
-  bool clipHasTimeRemap(String id) => switch (_layer(id)) {
-    VideoLayer l => hasTimeRemap(l),
-    _ => false,
-  };
-
-  AnimatedDouble? clipTimeRemapTrack(String id) => switch (_layer(id)) {
-    VideoLayer l => timeRemapTrackOf(l),
-    _ => null,
-  };
-
   void setClipPreservePitch(String id, bool preserve) {
     final layer = _layer(id);
     switch (layer) {
@@ -4251,47 +4241,6 @@ class EditorController extends Notifier<VideoProject> {
     final track = speedRampTrack(preset, layer.duration, span);
     _replace(
       layer.copyLayer(speed: 1, effects: replaceTimeRemap(layer, track)),
-    );
-  }
-
-  void setClipTimeRemap(String id, AnimatedDouble track) {
-    final layer = _layer(id);
-    if (layer is! VideoLayer) return;
-    _replace(
-      layer.copyLayer(speed: 1, effects: replaceTimeRemap(layer, track)),
-    );
-  }
-
-  /// O REVERSO VIRA CURVA.
-  ///
-  /// Com Reverso ligado o nucleo toca `span - curva(t)`, e o grafico de
-  /// tempo desenhava a curva guardada — de cabeca para baixo em relacao
-  /// ao que aparece na previa. O editor de curva mostra o que toca e, na
-  /// primeira edicao, grava isso: cada marca vira `span - valor` (com o
-  /// MESMO span do nucleo) e o Reverso desliga. Nenhum quadro muda.
-  ///
-  /// Sem remap, a reta da velocidade constante e espelhada do mesmo jeito.
-  /// Quem chama junta isto com a edicao no mesmo passo de desfazer
-  /// (gesto aberto ou [runAsOneUndo]).
-  void assarReversoNoTimeRemap(String id) {
-    final layer = _layer(id);
-    if (layer is! VideoLayer || !layer.reverse) return;
-    final span = videoSourceSpan(layer).inMicroseconds / 1000000.0;
-    final atual =
-        timeRemapTrackOf(layer) ??
-        AnimatedDouble(0, [
-          const Keyframe(time: Duration.zero, value: 0),
-          Keyframe(time: layer.duration, value: span),
-        ]);
-    final espelhada = AnimatedDouble(0, [
-      for (final k in atual.keyframes) k.copyWith(value: span - k.value),
-    ]);
-    _replace(
-      layer.copyLayer(
-        speed: 1,
-        reverse: false,
-        effects: replaceTimeRemap(layer, espelhada),
-      ),
     );
   }
 
@@ -4329,78 +4278,6 @@ class EditorController extends Notifier<VideoProject> {
         forcaDoAprimoramento: f,
         perfilDoAprimoramento: perfil,
         reducaoDeRuido: r,
-      ),
-    );
-  }
-
-  void setClipTimeRemapEnabled(String id, bool enabled) {
-    final layer = _layer(id);
-    if (layer is! VideoLayer) return;
-    if (enabled) {
-      if (hasTimeRemap(layer)) return;
-      final span = videoSourceSpan(layer);
-      final track = AnimatedDouble(0)
-          .withKeyframe(Duration.zero, 0)
-          .withKeyframe(layer.duration, span.inMicroseconds / 1000000.0);
-      _replace(
-        layer.copyLayer(speed: 1, effects: replaceTimeRemap(layer, track)),
-      );
-      return;
-    }
-    final average = clipSpeedOf(id).clamp(0.1, 10.0);
-    _replace(
-      layer.copyLayer(speed: average, effects: replaceTimeRemap(layer, null)),
-    );
-  }
-
-  void resetClipTimeRemap(String id) {
-    final layer = _layer(id);
-    if (layer is! VideoLayer) return;
-    final track = AnimatedDouble(0)
-        .withKeyframe(Duration.zero, 0)
-        .withKeyframe(
-          layer.duration,
-          layer.duration.inMicroseconds / 1000000.0,
-        );
-    _replace(
-      layer.copyLayer(speed: 1, effects: replaceTimeRemap(layer, track)),
-    );
-  }
-
-  void setClipTimeRemapKeyframe(
-    String id,
-    Duration localTime,
-    double sourceSeconds,
-  ) {
-    final layer = _layer(id);
-    if (layer is! VideoLayer) return;
-    var track = timeRemapTrackOf(layer);
-    if (track == null) {
-      setClipTimeRemapEnabled(id, true);
-      final updated = _layer(id);
-      if (updated is! VideoLayer) return;
-      track = timeRemapTrackOf(updated);
-      if (track == null) return;
-      _replace(
-        updated.copyLayer(
-          effects: replaceTimeRemap(
-            updated,
-            track.withKeyframe(
-              localTime,
-              sourceSeconds,
-              track.easeAt(localTime),
-            ),
-          ),
-        ),
-      );
-      return;
-    }
-    _replace(
-      layer.copyLayer(
-        effects: replaceTimeRemap(
-          layer,
-          track.withKeyframe(localTime, sourceSeconds, track.easeAt(localTime)),
-        ),
       ),
     );
   }
@@ -5969,10 +5846,9 @@ class EditorController extends Notifier<VideoProject> {
   void addEffect(String layerId, EffectType type, {EffectPronto? pronto}) {
     final layer = _layer(layerId);
     if (layer == null) return;
-    if (type == EffectType.timeRemap && layer is VideoLayer) {
-      setClipTimeRemapEnabled(layerId, true);
-      return;
-    }
+    // Time Remap saiu do app: a curva interna so nasce de congelar,
+    // rampa pronta e corte.
+    if (efeitosInternos.contains(type)) return;
     if (type == EffectType.opticalFlow) {
       if (layer is! VideoLayer || layer.effects.any((e) => e.type == type)) {
         return;
@@ -6826,54 +6702,6 @@ class EditorController extends Notifier<VideoProject> {
         matteMode: layer.matteMode,
         matteSourceId: layer.matteSourceId,
       ),
-    );
-  }
-
-  /// Liga o remapeamento com dois keyframes que reproduzem normal — a
-  /// pessoa ajusta dali, em vez de comecar com a precomp congelada.
-  void enablePrecompTimeRemap(String id) {
-    final layer = _layer(id);
-    if (layer is! GroupLayer || layer.timeRemap != null) return;
-    final dur = layer.innerDuration.inMicroseconds / 1000000.0;
-    updatePrecomp(
-      id,
-      timeRemap: AnimatedDouble(0)
-          .withKeyframe(Duration.zero, 0)
-          .withKeyframe(layer.duration, dur),
-    );
-  }
-
-  /// Qual instante do conteudo aparece AGORA. Com a trilha animada,
-  /// vira keyframe; sem, muda o valor fixo (congelado).
-  void setPrecompContentTime(String id, Duration globalTime, double seconds) {
-    final layer = _layer(id);
-    if (layer is! GroupLayer) return;
-    final r = layer.timeRemap ?? AnimatedDouble(0);
-    final v = seconds < 0 ? 0.0 : seconds;
-    updatePrecomp(id, timeRemap: r.editada(layer.localTime(globalTime), v));
-  }
-
-  /// Congela a precomp no instante que esta aparecendo agora.
-  void freezePrecompAt(String id, Duration globalTime) {
-    final layer = _layer(id);
-    if (layer is! GroupLayer) return;
-    final agora = layer.contentTimeAt(layer.localTime(globalTime));
-    updatePrecomp(
-      id,
-      timeRemap: AnimatedDouble(agora.inMicroseconds / 1000000.0),
-    );
-  }
-
-  /// Roda a precomp de tras para frente, do fim ao comeco.
-  void reversePrecomp(String id) {
-    final layer = _layer(id);
-    if (layer is! GroupLayer) return;
-    final dur = layer.innerDuration.inMicroseconds / 1000000.0;
-    updatePrecomp(
-      id,
-      timeRemap: AnimatedDouble(0)
-          .withKeyframe(Duration.zero, dur)
-          .withKeyframe(layer.duration, 0),
     );
   }
 

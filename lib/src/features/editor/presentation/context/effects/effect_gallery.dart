@@ -52,7 +52,7 @@ Future<void> showEffectGallery(
             var results = query.isNotEmpty
                 ? searchEffects(query)
                 : (category == null
-                      ? effectSpecs.keys.toList()
+                      ? efeitosDoCatalogo
                       : effectsInCategory(category!));
             if (ref.read(editorControllerProvider).layerById(layerId)
                 is! VideoLayer) {
@@ -150,7 +150,7 @@ Future<void> showEffectGallery(
                           child: Row(
                             children: [
                               chip(
-                                '${translate(sheetContext, 'Todos')} ${effectSpecs.length}',
+                                '${translate(sheetContext, 'Todos')} ${efeitosDoCatalogo.length}',
                                 category == null && !favoritos && !edits,
                                 () => setSheetState(() {
                                   category = null;

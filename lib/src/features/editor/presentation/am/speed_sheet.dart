@@ -1,6 +1,5 @@
 import 'package:aurea/src/core/l10n/app_language.dart';
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
@@ -15,10 +14,10 @@ import '../../domain/cut_ops.dart';
 import '../../domain/layer.dart';
 import 'am_colors.dart';
 import 'am_widgets.dart';
-import 'time_remap_curve_editor.dart';
 
-/// Velocidade constante, rampas compiladas em Time Remap e controles
-/// avancados continuam na mesma folha aberta pelo icone de relogio.
+/// Velocidade constante, rampas prontas, reverso e interpolacao, na folha
+/// aberta pelo icone de relogio. O Time Remap (chave, curva e keyframes de
+/// tempo) saiu do app; as rampas prontas usam a curva interna.
 Future<void> showSpeedSheet(
   BuildContext context,
   WidgetRef ref,
@@ -38,7 +37,7 @@ Future<void> showSpeedSheet(
 
         final speed = controller.clipSpeedOf(layerId);
         final video = layer is VideoLayer ? layer : null;
-        final remap = controller.clipTimeRemapTrack(layerId);
+        final temCurva = video != null && hasTimeRemap(video);
         final audio = switch (layer) {
           VideoLayer v => v.audio,
           AudioLayer a => a.audio,
@@ -85,7 +84,7 @@ Future<void> showSpeedSheet(
                       _SpeedChip(
                         label: preset == 1 ? '1x' : '${preset}x',
                         selected:
-                            remap == null && (speed - preset).abs() < 0.01,
+                            !temCurva && (speed - preset).abs() < 0.01,
                         onTap: () => setSpeed(preset),
                       ),
                     if (video != null)
@@ -145,70 +144,6 @@ Future<void> showSpeedSheet(
                 ],
                 if (video != null) ...[
                   _ToggleRow(
-                    label: 'Rampa / Time Remap',
-                    value: remap != null,
-                    onChanged: (value) {
-                      controller.setClipTimeRemapEnabled(layerId, value);
-                      setSheetState(() {});
-                    },
-                  ),
-                  // A CURVA SEMPRE A VISTA. O botao morava no fim da folha,
-                  // so com o remap ligado e depois de rolar — quem queria
-                  // mexer no grafico nao achava a porta. Com o remap
-                  // desligado, o toque liga (reta, nenhum quadro muda) e
-                  // abre.
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4, bottom: 8),
-                    child: GestureDetector(
-                      key: const ValueKey('abrir-curva-time-remap'),
-                      behavior: HitTestBehavior.opaque,
-                      onTap: () async {
-                        if (controller.clipTimeRemapTrack(layerId) == null) {
-                          controller.setClipTimeRemapEnabled(layerId, true);
-                          setSheetState(() {});
-                        }
-                        await showTimeRemapCurveSheet(
-                          sheetContext,
-                          ref,
-                          layerId,
-                          playback,
-                        );
-                        if (sheetContext.mounted) setSheetState(() {});
-                      },
-                      child: Container(
-                        height: 44,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: AmColors.accent,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: const Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.show_chart_rounded,
-                              size: 18,
-                              color: AmColors.onAction,
-                            ),
-                            SizedBox(width: 8),
-                            Flexible(
-                              child: AppText(
-                                'Curva de tempo',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w700,
-                                  color: AmColors.onAction,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  _ToggleRow(
                     label: 'Reverso',
                     value: video.reverse,
                     onChanged: setReverse,
@@ -258,102 +193,6 @@ Future<void> showSpeedSheet(
                       color: AmColors.muted,
                     ),
                   ),
-                ],
-                if (video != null && remap != null) ...[
-                  const SizedBox(height: 14),
-                  const AppText('Avancado · keyframes de Time Remap',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: AmColors.accent,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  AppText('Mover um valor muda qual instante da fonte aparece. '
-                    'Os diamantes tambem ficam visiveis na timeline.',
-                    style: TextStyle(
-                      fontSize: 10,
-                      height: 1.35,
-                      color: AmColors.muted.withValues(alpha: 0.9),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  if (playback != null)
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _SpeedChip(
-                            key: const ValueKey('remap-keyframe-aqui'),
-                            label: 'Keyframe de tempo aqui',
-                            selected: false,
-                            onTap: () {
-                              final local = video.localTime(
-                                playback.time.value,
-                              );
-                              controller.setClipTimeRemapKeyframe(
-                                layerId,
-                                local,
-                                videoSourceTimeAt(video, local).inMicroseconds /
-                                    1000000.0,
-                              );
-                              setSheetState(() {});
-                            },
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: _SpeedChip(
-                            key: const ValueKey('remap-segurar'),
-                            label: 'Segurar quadro por 1 s',
-                            selected: false,
-                            onTap: () {
-                              final local = video.localTime(
-                                playback.time.value,
-                              );
-                              final valor =
-                                  videoSourceTimeAt(
-                                    video,
-                                    local,
-                                  ).inMicroseconds /
-                                  1000000.0;
-                              controller.setClipTimeRemapKeyframe(
-                                layerId,
-                                local,
-                                valor,
-                              );
-                              controller.setClipTimeRemapKeyframe(
-                                layerId,
-                                local + const Duration(seconds: 1),
-                                valor,
-                              );
-                              setSheetState(() {});
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-                  const SizedBox(height: 8),
-                  for (final keyframe in remap.keyframes)
-                    _RemapRow(
-                      time: keyframe.time,
-                      value: keyframe.value,
-                      max: math
-                          .max(
-                            1,
-                            videoSourceSpan(video).inMicroseconds /
-                                1000000.0 *
-                                1.25,
-                          )
-                          .toDouble(),
-                      onChanged: (value) {
-                        controller.setClipTimeRemapKeyframe(
-                          layerId,
-                          keyframe.time,
-                          value,
-                        );
-                        setSheetState(() {});
-                      },
-                    ),
                 ],
               ],
             ),
@@ -420,51 +259,6 @@ class _ToggleRow extends StatelessWidget {
         value: value,
         activeTrackColor: AmColors.accent,
         onChanged: onChanged,
-      ),
-    ],
-  );
-}
-
-class _RemapRow extends StatelessWidget {
-  const _RemapRow({
-    required this.time,
-    required this.value,
-    required this.max,
-    required this.onChanged,
-  });
-
-  final Duration time;
-  final double value;
-  final double max;
-  final ValueChanged<double> onChanged;
-
-  @override
-  Widget build(BuildContext context) => Row(
-    children: [
-      SizedBox(
-        width: 54,
-        child: AppText(
-          formatTime(time),
-          style: const TextStyle(fontSize: 10, color: AmColors.muted),
-        ),
-      ),
-      Expanded(
-        child: AmTickRuler(
-          value: value.clamp(0.0, max),
-          min: 0,
-          max: max,
-          unitsPerPixel: max / 420,
-          height: 40,
-          onChanged: onChanged,
-        ),
-      ),
-      SizedBox(
-        width: 54,
-        child: AppText(
-          '${value.toStringAsFixed(2)} s',
-          textAlign: TextAlign.right,
-          style: const TextStyle(fontSize: 10, color: AmColors.text),
-        ),
       ),
     ],
   );

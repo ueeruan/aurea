@@ -39,6 +39,13 @@ packages:
       relative: true
     source: path
     version: "1.0.0"
+  aurea_tracker:
+    dependency: "direct main"
+    description:
+      path: "packages/aurea_tracker"
+      relative: true
+    source: path
+    version: "1.0.0"
   boolean_selector:
     dependency: transitive
     description:

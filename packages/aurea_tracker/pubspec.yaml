@@ -1,0 +1,11 @@
+name: aurea_tracker
+description: Rastreio de camera 3D do Aurea em C++ (KLT piramidal, reconstrucao incremental, homografia, ajuste de feixes com focal livre, modo tripe).
+version: 1.0.0
+publish_to: none
+environment:
+  sdk: ^3.13.2
+dependencies:
+  ffi: ^2.1.3
+  hooks: ^2.0.2
+  code_assets: ^1.2.1
+  native_toolchain_c: 0.19.3

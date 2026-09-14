@@ -1455,6 +1455,10 @@ SolucaoCamera3D resolverCamera3D(
 ///   grandeza do resto da cena 3D do app. Sem isso o rastreio de um
 ///   plano largo devolve numeros na casa dos milhoes e nada do que a
 ///   pessoa adicionar depois aparece.
+/// A arrumacao do mundo (+Y para cima, centro na nuvem, raio 350) para
+/// quem resolve a camera por fora deste arquivo (o motor em C++).
+SolucaoCamera3D arrumarMundo(SolucaoCamera3D s) => _arrumarMundo(s);
+
 SolucaoCamera3D _arrumarMundo(SolucaoCamera3D s) {
   if (s.poses.isEmpty || s.nuvem.isEmpty) return s;
 

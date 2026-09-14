@@ -138,6 +138,10 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
   /// A alca que o dedo pegou neste gesto (null = arrastar a camada).
   _Alca? _alca;
   Offset _dragStartPos = Offset.zero;
+
+  /// O pivo no inicio do gesto: e em torno dele (posicao + pivo) que as
+  /// alcas giram e escalam. No grupo ele fica no centro dos filhos.
+  Offset _dragStartPivot = Offset.zero;
   Offset _dragAccum = Offset.zero;
 
   /// O ponto tocado, em coordenadas da COMPOSICAO.
@@ -166,18 +170,15 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
       if (!l.activeAt(t)) continue;
       if (project.isHidden(l.id)) continue;
       if (project.metaOf(l.id).locked) continue;
-      final tamanho = controller.layerBoxSize(l, t, scaled: false);
-      if (tamanho.isEmpty) continue;
+      // A caixa do grupo envolve os filhos (e nao a composicao inteira):
+      // tocar no vazio ao lado do conteudo nao pega o grupo.
+      final caixa = controller.layerBoxRect(l, t, scaled: false);
+      if (caixa.isEmpty) continue;
       final matrix = selectionTransform(project, l, t);
       final inverse = Matrix4.tryInvert(matrix);
       if (inverse == null) continue;
       final p = MatrixUtils.transformPoint(inverse, comp);
       // Uma folga de 12 px: alvo pequeno tambem tem de dar para pegar.
-      final caixa = Rect.fromCenter(
-        center: Offset.zero,
-        width: tamanho.width,
-        height: tamanho.height,
-      );
       if (caixa.contains(p)) return l.id;
       final nearest = Offset(
         p.dx.clamp(caixa.left, caixa.right),
@@ -202,13 +203,13 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
     final t = widget.playback.time.value;
     if (!l.activeAt(t)) return null;
     final matrix = selectionTransform(project, l, t);
-    final tamanho = ref
+    final caixa = ref
         .read(editorControllerProvider.notifier)
-        .layerBoxSize(l, t, scaled: false);
-    if (tamanho.isEmpty) return null;
+        .layerBoxRect(l, t, scaled: false);
+    if (caixa.isEmpty) return null;
     final centro =
         _stageOrigin +
-        MatrixUtils.transformPoint(matrix, Offset.zero) * _stageScale;
+        MatrixUtils.transformPoint(matrix, caixa.center) * _stageScale;
 
     // AS DUAS ALCAS NUNCA ENCOSTAM UMA NA OUTRA.
     //
@@ -246,8 +247,8 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
       return presa(centro + delta);
     }
 
-    var escala = noPalco(Offset(tamanho.width / 2, tamanho.height / 2));
-    var giro = noPalco(Offset(tamanho.width / 2, -tamanho.height / 2));
+    var escala = noPalco(caixa.bottomRight);
+    var giro = noPalco(caixa.topRight);
     if ((escala - giro).distance < 60) {
       final middle = (escala + giro) / 2;
       escala = presa(middle + const Offset(0, 30));
@@ -256,14 +257,7 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
     return (
       escala: escala,
       giro: giro,
-      quadro: MatrixUtils.transformRect(
-        matrix,
-        Rect.fromCenter(
-          center: Offset.zero,
-          width: tamanho.width,
-          height: tamanho.height,
-        ),
-      ),
+      quadro: MatrixUtils.transformRect(matrix, caixa),
     );
   }
 
@@ -338,6 +332,7 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
     _startScale = layer.scaleX.valueAt(t);
     _startRotation = layer.rotation.valueAt(t);
     _dragStartPos = layer.position.valueAt(t);
+    _dragStartPivot = layer.pivot.valueAt(t);
     _dragAccum = Offset.zero;
   }
 
@@ -368,7 +363,8 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
 
     // ALCAS: um dedo so, mas nao arrasta a camada — redimensiona ou gira.
     if (_alca != null) {
-      final centro = _stageOrigin + _dragStartPos * _stageScale;
+      final centro =
+          _stageOrigin + (_dragStartPos + _dragStartPivot) * _stageScale;
       final v = d.localFocalPoint - centro;
       if (_alca == _Alca.giro) {
         final ang = math.atan2(v.dy, v.dx) * 180 / math.pi;

@@ -1434,15 +1434,44 @@ class EditorController extends Notifier<VideoProject> {
         layer,
         layer.localTime(t),
         fallbackWidth: state.outputWidth.toDouble(),
+        compHeight: state.outputHeight.toDouble(),
         scaled: scaled,
       );
+
+  /// A CAIXA no espaco da camada (origem na posicao). Centrada na origem
+  /// para toda camada, menos o GRUPO: a dele envolve os filhos, onde quer
+  /// que eles estejam.
+  Rect layerBoxRect(Layer layer, Duration t, {bool scaled = true}) {
+    if (layer is GroupLayer) {
+      final local = layer.localTime(t);
+      final r = groupContentRect(
+        layer,
+        local,
+        compWidth: state.outputWidth.toDouble(),
+        compHeight: state.outputHeight.toDouble(),
+      );
+      if (r != null) {
+        if (!scaled) return r;
+        final sx = layer.scaleX.valueAt(local).abs();
+        final sy = layer.scaleY.valueAt(local).abs();
+        return Rect.fromLTRB(r.left * sx, r.top * sy, r.right * sx, r.bottom * sy);
+      }
+    }
+    final s = layerBoxSize(layer, t, scaled: scaled);
+    return Rect.fromCenter(center: Offset.zero, width: s.width, height: s.height);
+  }
+
+  /// Onde o CENTRO VISIVEL da camada fica em relacao a posicao: zero para
+  /// camada comum; no grupo, o centro dos filhos.
+  Offset _desvioDoCentro(Layer l, Duration t) =>
+      l is GroupLayer ? layerBoxRect(l, t).center : Offset.zero;
 
   List<LayoutBox> _layoutBoxes(Iterable<String> ids, Duration t) => [
     for (final id in ids)
       if (_layer(id) case final l?)
         (
           id: l.id,
-          center: l.position.valueAt(l.localTime(t)),
+          center: l.position.valueAt(l.localTime(t)) + _desvioDoCentro(l, t),
           size: layerBoxSize(l, t),
         ),
   ];
@@ -1462,7 +1491,12 @@ class EditorController extends Notifier<VideoProject> {
       layers = [
         for (final l in layers)
           if (l.id == e.key)
-            l.copyLayer(position: l.position.edited(l.localTime(t), e.value))
+            l.copyLayer(
+              position: l.position.edited(
+                l.localTime(t),
+                e.value - _desvioDoCentro(l, t),
+              ),
+            )
           else
             l,
       ];
@@ -7722,14 +7756,16 @@ class EditorController extends Notifier<VideoProject> {
       if (l.startTime < start) start = l.startTime;
       if (l.endTime > end) end = l.endTime;
     }
-    final group = GroupLayer(
-      name: _nomeDeGrupoNovo(),
-      startTime: start,
-      duration: end - start,
-      position: AnimatedOffset(_center),
-      children: [
-        for (final l in picked) l.copyLayer(startTime: l.startTime - start),
-      ],
+    final group = _comPivoNoConteudo(
+      GroupLayer(
+        name: _nomeDeGrupoNovo(),
+        startTime: start,
+        duration: end - start,
+        position: AnimatedOffset(_center),
+        children: [
+          for (final l in picked) l.copyLayer(startTime: l.startTime - start),
+        ],
+      ),
     );
     final layers = <Layer>[];
     var placed = false;
@@ -7751,12 +7787,14 @@ class EditorController extends Notifier<VideoProject> {
   void groupLayer(String id) {
     final layer = _layer(id);
     if (layer == null || layer is GroupLayer) return;
-    final group = GroupLayer(
-      name: _nomeDeGrupoNovo(),
-      startTime: layer.startTime,
-      duration: layer.duration,
-      position: AnimatedOffset(_center),
-      children: [layer.copyLayer(startTime: Duration.zero)],
+    final group = _comPivoNoConteudo(
+      GroupLayer(
+        name: _nomeDeGrupoNovo(),
+        startTime: layer.startTime,
+        duration: layer.duration,
+        position: AnimatedOffset(_center),
+        children: [layer.copyLayer(startTime: Duration.zero)],
+      ),
     );
     _mutate(
       state.copyWith(
@@ -7767,6 +7805,21 @@ class EditorController extends Notifier<VideoProject> {
       ),
     );
     ref.read(selectedLayerProvider.notifier).state = group.id;
+  }
+
+  /// O GRUPO GIRA E ESCALA EM TORNO DO QUE ELE MOSTRA, como no Alight
+  /// Motion: o pivo nasce no centro dos filhos (no inicio do grupo). A
+  /// transformacao continua neutra, entao nada se move ao agrupar; antes o
+  /// giro acontecia em torno do centro do quadro, longe do conteudo.
+  GroupLayer _comPivoNoConteudo(GroupLayer g) {
+    final r = groupContentRect(
+      g,
+      Duration.zero,
+      compWidth: state.outputWidth.toDouble(),
+      compHeight: state.outputHeight.toDouble(),
+    );
+    if (r == null) return g;
+    return g.copyLayer(pivot: AnimatedOffset(r.center));
   }
 
   /// "Grupo 1", "Grupo 2"... contando os grupos do projeto inteiro.

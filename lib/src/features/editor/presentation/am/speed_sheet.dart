@@ -152,6 +152,62 @@ Future<void> showSpeedSheet(
                       setSheetState(() {});
                     },
                   ),
+                  // A CURVA SEMPRE A VISTA. O botao morava no fim da folha,
+                  // so com o remap ligado e depois de rolar — quem queria
+                  // mexer no grafico nao achava a porta. Com o remap
+                  // desligado, o toque liga (reta, nenhum quadro muda) e
+                  // abre.
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4, bottom: 8),
+                    child: GestureDetector(
+                      key: const ValueKey('abrir-curva-time-remap'),
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () async {
+                        if (controller.clipTimeRemapTrack(layerId) == null) {
+                          controller.setClipTimeRemapEnabled(layerId, true);
+                          setSheetState(() {});
+                        }
+                        await showTimeRemapCurveSheet(
+                          sheetContext,
+                          ref,
+                          layerId,
+                          playback,
+                        );
+                        if (sheetContext.mounted) setSheetState(() {});
+                      },
+                      child: Container(
+                        height: 44,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: AmColors.accent,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.show_chart_rounded,
+                              size: 18,
+                              color: AmColors.onAction,
+                            ),
+                            SizedBox(width: 8),
+                            Flexible(
+                              child: AppText(
+                                'Curva de tempo',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                  color: AmColors.onAction,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
                   _ToggleRow(
                     label: 'Reverso',
                     value: video.reverse,
@@ -219,42 +275,6 @@ Future<void> showSpeedSheet(
                       fontSize: 10,
                       height: 1.35,
                       color: AmColors.muted.withValues(alpha: 0.9),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      key: const ValueKey('abrir-curva-time-remap'),
-                      icon: const Icon(Icons.show_chart_rounded, size: 18),
-                      label: const AppText('ABRIR EDITOR DE CURVA BÉZIER',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AmColors.accent,
-                        foregroundColor: Colors.black,
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                      onPressed: () {
-                        showModalBottomSheet(
-                          context: sheetContext,
-                          isScrollControlled: true,
-                          backgroundColor: Colors.transparent,
-                          builder: (ctx) => FractionallySizedBox(
-                            heightFactor: 0.82,
-                            child: TimeRemapCurveEditor(
-                              layerId: layerId,
-                              playback: playback,
-                            ),
-                          ),
-                        );
-                      },
                     ),
                   ),
                   const SizedBox(height: 10),

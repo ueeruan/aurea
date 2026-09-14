@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:aurea/src/core/l10n/app_language.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/material.dart' hide Easing;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -131,6 +132,43 @@ const _alturaDoInspetor = 104.0;
 const _alturaDosProntos = 56.0;
 
 double _segundos(Duration d) => d.inMicroseconds / 1000000.0;
+
+/// A FOLHA DA CURVA DE TEMPO, a mesma nas duas portas (Velocidade e
+/// Efeitos).
+///
+/// `enableDrag: false` e o motivo de ela existir: com a folha arrastavel,
+/// ela ganhava o arrasto vertical com 18 px e o grafico so recebia o
+/// arrasto quase horizontal — subir um ponto puxava a folha. Altura de
+/// ~62% da tela, para a previa continuar a vista em cima mostrando o
+/// quadro que o dedo esta remapeando.
+Future<void> showTimeRemapCurveSheet(
+  BuildContext context,
+  WidgetRef ref,
+  String layerId,
+  PlaybackController? playback,
+) async {
+  final layer = ref.read(editorControllerProvider).layerById(layerId);
+  if (layer is! VideoLayer || !context.mounted) return;
+  final altura = MediaQuery.sizeOf(context).height * 0.62;
+  await showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    enableDrag: false,
+    backgroundColor: AmColors.panel,
+    barrierColor: Colors.transparent,
+    clipBehavior: Clip.antiAlias,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+    ),
+    builder: (_) => SafeArea(
+      top: false,
+      child: SizedBox(
+        height: altura,
+        child: TimeRemapCurveEditor(layerId: layerId, playback: playback),
+      ),
+    ),
+  );
+}
 
 /// O GRAFICO DE TEMPO QUE SE MEXE COM O DEDO (estilo After Effects).
 ///

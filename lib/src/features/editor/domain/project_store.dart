@@ -7,6 +7,7 @@ import 'audio_effect.dart';
 import 'dart:typed_data';
 import 'dart:ui';
 
+import 'aprimoramento_ia.dart';
 import 'camera3d.dart';
 import 'caption.dart';
 import 'caption_highlight.dart';
@@ -1190,6 +1191,12 @@ Map<String, dynamic> layerToJson(Layer l) {
       if (v.forcaDoAprimoramento != 1.0) {
         base['forcaAprimoramento'] = v.forcaDoAprimoramento;
       }
+      if (v.perfilDoAprimoramento != PerfilDoAprimoramento.videoReal) {
+        base['perfilAprimoramento'] = v.perfilDoAprimoramento.name;
+      }
+      if (v.reducaoDeRuido != reducaoDeRuidoPadrao) {
+        base['ruidoAprimoramento'] = v.reducaoDeRuido;
+      }
       base['volume'] = v.volume;
       final va = _audioSpec(v.audio);
       if (va != null) base['audio'] = va;
@@ -2006,6 +2013,15 @@ Layer layerFromJson(Map<String, dynamic> m) {
         forcaDoAprimoramento: (() {
           final f = (m['forcaAprimoramento'] as num?)?.toDouble() ?? 1.0;
           return f.isFinite ? f.clamp(0.0, 1.0) : 1.0;
+        })(),
+        perfilDoAprimoramento: PerfilDoAprimoramento.values.firstWhere(
+          (p) => p.name == m['perfilAprimoramento'],
+          orElse: () => PerfilDoAprimoramento.videoReal,
+        ),
+        reducaoDeRuido: (() {
+          final r = (m['ruidoAprimoramento'] as num?)?.toDouble() ??
+              reducaoDeRuidoPadrao;
+          return r.isFinite ? r.clamp(0.0, 1.0) : reducaoDeRuidoPadrao;
         })(),
         volume: (m['volume'] as num).toDouble(),
         audio: _asAudioSpec(m['audio']),

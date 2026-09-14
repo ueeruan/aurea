@@ -9,6 +9,7 @@ import '../../../export/application/aprimoramento_export.dart';
 import '../../../export/application/comparacao_aprimoramento.dart';
 import '../../application/editor_controller.dart';
 import '../../application/playback_controller.dart';
+import '../../domain/aprimoramento_ia.dart';
 import '../../domain/cut_ops.dart';
 import '../../domain/layer.dart';
 import 'am_colors.dart';
@@ -20,30 +21,29 @@ final motorDeAprimoramentoProvider = Provider<bool>(
   (ref) => AprimoradorIa.doAparelho()?.disponivel ?? false,
 );
 
+/// O pedido de uma comparacao: o quadro e todas as escolhas do clipe.
+typedef PedidoDeComparacao = ({
+  String fonte,
+  Duration tempoDaFonte,
+  int largura,
+  int altura,
+  double forca,
+  PerfilDoAprimoramento perfil,
+  double reducaoDeRuido,
+});
+
 /// Quem gera o antes/depois (os testes trocam por um falso).
 final comparadorDeAprimoramentoProvider =
-    Provider<
-      Future<ComparacaoDoAprimoramento> Function({
-        required String fonte,
-        required Duration tempoDaFonte,
-        required int largura,
-        required int altura,
-        required double forca,
-      })
-    >(
+    Provider<Future<ComparacaoDoAprimoramento> Function(PedidoDeComparacao)>(
       (ref) =>
-          ({
-            required String fonte,
-            required Duration tempoDaFonte,
-            required int largura,
-            required int altura,
-            required double forca,
-          }) => compararAprimoramento(
-            fonte: fonte,
-            tempoDaFonte: tempoDaFonte,
-            largura: largura,
-            altura: altura,
-            forca: forca,
+          (p) => compararAprimoramento(
+            fonte: p.fonte,
+            tempoDaFonte: p.tempoDaFonte,
+            largura: p.largura,
+            altura: p.altura,
+            forca: p.forca,
+            perfil: p.perfil,
+            reducaoDeRuido: p.reducaoDeRuido,
           ),
     );
 
@@ -103,13 +103,15 @@ class _FolhaDoAprimoramentoState extends ConsumerState<_FolhaDoAprimoramento> {
     if (local < Duration.zero) local = Duration.zero;
     if (local > layer.duration) local = layer.duration;
     try {
-      final r = await ref.read(comparadorDeAprimoramentoProvider)(
+      final r = await ref.read(comparadorDeAprimoramentoProvider)((
         fonte: layer.sourcePath,
         tempoDaFonte: videoAbsoluteSourceTimeAt(layer, local),
         largura: project.outputWidth,
         altura: project.outputHeight,
         forca: layer.forcaDoAprimoramento,
-      );
+        perfil: layer.perfilDoAprimoramento,
+        reducaoDeRuido: layer.reducaoDeRuido,
+      ));
       if (!mounted || geracao != _geracao) return;
       setState(() {
         _comparacao = r;
@@ -136,6 +138,11 @@ class _FolhaDoAprimoramentoState extends ConsumerState<_FolhaDoAprimoramento> {
 
     void definirForca(double f) {
       controller.setClipAprimoramento(widget.layerId, forca: f);
+      setState(_esquecerComparacao);
+    }
+
+    void definirRuido(double r) {
+      controller.setClipAprimoramento(widget.layerId, ruido: r);
       setState(_esquecerComparacao);
     }
 
@@ -208,6 +215,69 @@ class _FolhaDoAprimoramentoState extends ConsumerState<_FolhaDoAprimoramento> {
               ],
             ),
             if (layer.aprimorar) ...[
+              const SizedBox(height: 10),
+              const AppText(
+                'Tipo de vídeo',
+                style: TextStyle(fontSize: 12, color: AmColors.muted),
+              ),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 8,
+                children: [
+                  for (final perfil in PerfilDoAprimoramento.values)
+                    _Chip(
+                      key: ValueKey('aprimorar-ia-perfil-${perfil.name}'),
+                      label: perfil.emPalavras,
+                      selected: layer.perfilDoAprimoramento == perfil,
+                      onTap: () {
+                        controller.setClipAprimoramento(
+                          widget.layerId,
+                          perfil: perfil,
+                        );
+                        setState(_esquecerComparacao);
+                      },
+                    ),
+                ],
+              ),
+              if (layer.perfilDoAprimoramento ==
+                  PerfilDoAprimoramento.videoReal) ...[
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    const SizedBox(
+                      width: 90,
+                      child: AppText(
+                        'Redução de ruído',
+                        style: TextStyle(fontSize: 12, color: AmColors.muted),
+                      ),
+                    ),
+                    Expanded(
+                      child: AmTickRuler(
+                        key: const ValueKey('aprimorar-ia-ruido'),
+                        value: layer.reducaoDeRuido * 100,
+                        min: 0,
+                        max: 100,
+                        unitsPerPixel: 100 / 420,
+                        height: 40,
+                        onChanged: (v) => definirRuido(v / 100),
+                      ),
+                    ),
+                    SizedBox(
+                      width: 48,
+                      child: Text(
+                        '${(layer.reducaoDeRuido * 100).round()}%',
+                        key: const ValueKey('aprimorar-ia-ruido-valor'),
+                        textAlign: TextAlign.right,
+                        style: const TextStyle(fontSize: 12, color: AmColors.text),
+                      ),
+                    ),
+                  ],
+                ),
+                const AppText(
+                  'Menos preserva o grão; mais limpa. A IA mistura dois modelos, não aplica um filtro depois.',
+                  style: TextStyle(fontSize: 11, height: 1.35, color: AmColors.muted),
+                ),
+              ],
               const SizedBox(height: 8),
               Row(
                 children: [

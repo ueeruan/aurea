@@ -107,6 +107,12 @@ flutter:
   assets:
     - assets/ai/
     - assets/ai/realesr-animevideov3/
+    # Real-ESRGAN para video real (general-x4v3 e a variante que preserva o
+    # grao, misturadas pela reducao de ruido): so o Android tem o motor.
+    - path: assets/ai/realesr-general-x4v3/
+      platforms: [android]
+    - path: assets/ai/realesr-general-wdn-x4v3/
+      platforms: [android]
     # RIFE v4.6 (camera lenta com IA na exportacao): o motor so existe no
     # Android, entao os 10 MB do modelo nao entram no IPA.
     - path: assets/ai/rife-v4.6/

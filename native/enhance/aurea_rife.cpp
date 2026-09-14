@@ -49,6 +49,72 @@ struct Quadro {
   aurea_png::Imagem imagem;
 };
 
+// ------------------------------------------------ semelhanca entre quadros
+// A regra do Practical-RIFE (inference_video.py): SSIM em 32x32. Abaixo de
+// 0,2 e CORTE DE CENA — interpolar entre dois planos diferentes desenha um
+// fantasma dos dois; acima de 0,996 e o MESMO quadro (a fonte de taxa
+// variavel repete quadros) — a rede so gastaria GPU para devolver o mesmo.
+constexpr int kLadoSsim = 32;
+
+// Luma (BT.601) reduzida por media de area para 32x32.
+void lumaReduzida(const unsigned char* rgb, int w, int h, double* out) {
+  for (int y = 0; y < kLadoSsim; ++y) {
+    const int y0 = static_cast<int>(static_cast<long long>(y) * h / kLadoSsim);
+    int y1 = static_cast<int>(static_cast<long long>(y + 1) * h / kLadoSsim);
+    if (y1 <= y0) y1 = y0 + 1;
+    for (int x = 0; x < kLadoSsim; ++x) {
+      const int x0 = static_cast<int>(static_cast<long long>(x) * w / kLadoSsim);
+      int x1 = static_cast<int>(static_cast<long long>(x + 1) * w / kLadoSsim);
+      if (x1 <= x0) x1 = x0 + 1;
+      double soma = 0;
+      long n = 0;
+      for (int yy = y0; yy < y1 && yy < h; ++yy) {
+        for (int xx = x0; xx < x1 && xx < w; ++xx) {
+          const unsigned char* p = &rgb[(static_cast<size_t>(yy) * w + xx) * 3];
+          soma += 0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2];
+          ++n;
+        }
+      }
+      out[y * kLadoSsim + x] = n ? soma / static_cast<double>(n) : 0.0;
+    }
+  }
+}
+
+// SSIM com janela gaussiana 11x11 (sigma 1,5) so onde a janela cabe, como o
+// ssim_matlab do Practical-RIFE. Escala 0..255.
+double ssim32(const double* a, const double* b) {
+  double g[11];
+  double soma = 0;
+  for (int i = 0; i < 11; ++i) {
+    const double d = i - 5;
+    g[i] = std::exp(-(d * d) / (2 * 1.5 * 1.5));
+    soma += g[i];
+  }
+  for (double& v : g) v /= soma;
+  const double c1 = (0.01 * 255) * (0.01 * 255), c2 = (0.03 * 255) * (0.03 * 255);
+  const int n = kLadoSsim - 10;
+  double total = 0;
+  for (int y = 0; y < n; ++y) {
+    for (int x = 0; x < n; ++x) {
+      double ma = 0, mb = 0, aa = 0, bb = 0, ab = 0;
+      for (int j = 0; j < 11; ++j) {
+        for (int i = 0; i < 11; ++i) {
+          const double peso = g[j] * g[i];
+          const double va = a[(y + j) * kLadoSsim + x + i], vb = b[(y + j) * kLadoSsim + x + i];
+          ma += peso * va;
+          mb += peso * vb;
+          aa += peso * va * va;
+          bb += peso * vb * vb;
+          ab += peso * va * vb;
+        }
+      }
+      const double sa = aa - ma * ma, sb = bb - mb * mb, sab = ab - ma * mb;
+      total += ((2 * ma * mb + c1) * (2 * sab + c2)) / ((ma * ma + mb * mb + c1) * (sa + sb + c2));
+    }
+  }
+  return total / (n * n);
+}
+
 }  // namespace
 
 struct ar_engine {
@@ -60,6 +126,12 @@ struct ar_engine {
   char device[128] = {0};
   std::mutex lock;  // um quadro por vez por motor
   Quadro cache[2];
+  // Limiares da semelhanca (ar_set_thresholds) e a do ultimo par medido:
+  // varios instantes do mesmo par nao medem de novo.
+  float limiarCorte = 0.2f;
+  float limiarParado = 0.996f;
+  std::string parA, parB;
+  double ssimDoPar = -1;
 };
 
 namespace {
@@ -92,6 +164,19 @@ int32_t interpolarTravado(ar_engine* e, const uint8_t* a, const uint8_t* b, int 
   for (size_t i = 0; i < n; i += 3) std::swap(out[i], out[i + 2]);
 #endif
   return AR_OK;
+}
+
+// SSIM do par (medida uma vez por par).
+double semelhanca(ar_engine* e, const Quadro* qa, const Quadro* qb) {
+  if (e->parA != qa->caminho || e->parB != qb->caminho) {
+    double la[kLadoSsim * kLadoSsim], lb[kLadoSsim * kLadoSsim];
+    lumaReduzida(qa->imagem.rgb.get(), qa->imagem.w, qa->imagem.h, la);
+    lumaReduzida(qb->imagem.rgb.get(), qb->imagem.w, qb->imagem.h, lb);
+    e->ssimDoPar = ssim32(la, lb);
+    e->parA = qa->caminho;
+    e->parB = qb->caminho;
+  }
+  return e->ssimDoPar;
 }
 
 // Quadro do cache ou lido agora. [manter] nao pode ser despejado (e o
@@ -221,15 +306,36 @@ int32_t ar_interpolate_png(ar_engine* e, const char* a_path, const char* b_path,
   const size_t n = static_cast<size_t>(w) * static_cast<size_t>(h) * 3;
   std::unique_ptr<uint8_t[]> px(new (std::nothrow) uint8_t[n]);
   if (!px) return AR_ERR_INFERENCE;
-  if (t <= 0) {
+  const double s = semelhanca(e, qa, qb);
+  const bool corte = s < e->limiarCorte;
+  const bool parado = s > e->limiarParado;
+  if (t <= 0 || parado || (corte && t < 0.5f)) {
     std::memcpy(px.get(), ia.rgb.get(), n);
-  } else if (t >= 1) {
+  } else if (t >= 1 || corte) {
     std::memcpy(px.get(), ib.rgb.get(), n);
   } else {
     const int32_t rc = interpolarTravado(e, ia.rgb.get(), ib.rgb.get(), w, h, t, px.get());
     if (rc != AR_OK) return rc;
   }
   return aurea_png::gravar(out_path, px.get(), w, h) ? AR_OK : AR_ERR_IO;
+}
+
+int32_t ar_similarity_png(ar_engine* e, const char* a_path, const char* b_path, double* out) {
+  if (!e || !a_path || !b_path || !out) return AR_ERR_ARGS;
+  std::lock_guard<std::mutex> g(e->lock);
+  const Quadro* qa = quadro(e, a_path, nullptr);
+  if (!qa) return AR_ERR_IO;
+  const Quadro* qb = quadro(e, b_path, qa);
+  if (!qb) return AR_ERR_IO;
+  *out = semelhanca(e, qa, qb);
+  return AR_OK;
+}
+
+void ar_set_thresholds(ar_engine* e, float cut, float still) {
+  if (!e) return;
+  std::lock_guard<std::mutex> g(e->lock);
+  e->limiarCorte = std::isnan(cut) ? -1.0f : cut;
+  e->limiarParado = std::isnan(still) ? 2.0f : still;
 }
 
 }  // extern "C"

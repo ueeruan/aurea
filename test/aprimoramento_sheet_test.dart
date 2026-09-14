@@ -19,13 +19,7 @@ void main() {
   Future<(ProviderContainer, VideoLayer Function())> abrir(
     WidgetTester tester, {
     required bool motor,
-    Future<ComparacaoDoAprimoramento> Function({
-      required String fonte,
-      required Duration tempoDaFonte,
-      required int largura,
-      required int altura,
-      required double forca,
-    })? comparador,
+    Future<ComparacaoDoAprimoramento> Function(PedidoDeComparacao)? comparador,
     bool ligado = false,
   }) async {
     tester.view.physicalSize = const Size(600, 1600);
@@ -100,28 +94,22 @@ void main() {
   });
 
   testWidgets('com motor: liga, escolhe intensidade e compara o quadro', (tester) async {
-    final pedidos = <double>[];
+    final pedidos = <PedidoDeComparacao>[];
     final (_, video) = await abrir(
       tester,
       motor: true,
-      comparador: ({
-        required String fonte,
-        required Duration tempoDaFonte,
-        required int largura,
-        required int altura,
-        required double forca,
-      }) async {
-        pedidos.add(forca);
-        expect(fonte, '/x.mp4');
-        expect((largura, altura), (1920, 1080));
+      comparador: (p) async {
+        pedidos.add(p);
+        expect(p.fonte, '/x.mp4');
+        expect((p.largura, p.altura), (1920, 1080));
         return ComparacaoDoAprimoramento(
           plano: planoDeAprimoramento(
             ligado: true,
             motorDisponivel: true,
             larguraDaFonte: 640,
             alturaDaFonte: 360,
-            larguraDaComposicao: largura,
-            alturaDaComposicao: altura,
+            larguraDaComposicao: p.largura,
+            alturaDaComposicao: p.altura,
           ),
           antes: '/nao/existe/antes.png',
           depois: '/nao/existe/depois.png',
@@ -132,6 +120,21 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('aprimorar-ia-ligar')));
     await tester.pumpAndSettle();
     expect(video().aprimorar, isTrue);
+    // Nasce no perfil de video real, com a reducao de ruido padrao.
+    expect(video().perfilDoAprimoramento, PerfilDoAprimoramento.videoReal);
+    expect(find.byKey(const ValueKey('aprimorar-ia-ruido')), findsOneWidget);
+    expect(
+      tester.widget<Text>(find.byKey(const ValueKey('aprimorar-ia-ruido-valor'))).data,
+      '50%',
+    );
+
+    // Animacao nao tem reducao de ruido (o modelo e um so).
+    await tester.tap(find.byKey(const ValueKey('aprimorar-ia-perfil-animacao')));
+    await tester.pumpAndSettle();
+    expect(video().perfilDoAprimoramento, PerfilDoAprimoramento.animacao);
+    expect(find.byKey(const ValueKey('aprimorar-ia-ruido')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('aprimorar-ia-perfil-videoReal')));
+    await tester.pumpAndSettle();
 
     await tester.tap(find.byKey(const ValueKey('aprimorar-ia-0.35')));
     await tester.pumpAndSettle();
@@ -141,7 +144,10 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('aprimorar-ia-comparar')));
     await tester.pump();
     await tester.pump();
-    expect(pedidos, [.35], reason: 'a comparacao usa a forca escolhida');
+    expect(pedidos, hasLength(1));
+    expect(pedidos.single.forca, .35, reason: 'a comparacao usa a forca escolhida');
+    expect(pedidos.single.perfil, PerfilDoAprimoramento.videoReal);
+    expect(pedidos.single.reducaoDeRuido, reducaoDeRuidoPadrao);
     expect(find.text('IA 640x360 -> 1920x1080 (x4)'), findsOneWidget);
     expect(find.byKey(const ValueKey('aprimorar-ia-antes-depois')), findsOneWidget);
 
@@ -157,13 +163,8 @@ void main() {
       tester,
       motor: true,
       ligado: true,
-      comparador: ({
-        required String fonte,
-        required Duration tempoDaFonte,
-        required int largura,
-        required int altura,
-        required double forca,
-      }) async => throw StateError('não consegui ler este quadro do vídeo'),
+      comparador: (_) async =>
+          throw StateError('não consegui ler este quadro do vídeo'),
     );
     await tester.tap(find.byKey(const ValueKey('aprimorar-ia-comparar')));
     await tester.pump();
@@ -176,20 +177,14 @@ void main() {
       tester,
       motor: true,
       ligado: true,
-      comparador: ({
-        required String fonte,
-        required Duration tempoDaFonte,
-        required int largura,
-        required int altura,
-        required double forca,
-      }) async => ComparacaoDoAprimoramento(
+      comparador: (p) async => ComparacaoDoAprimoramento(
         plano: planoDeAprimoramento(
           ligado: true,
           motorDisponivel: true,
           larguraDaFonte: 1920,
           alturaDaFonte: 1080,
-          larguraDaComposicao: largura,
-          alturaDaComposicao: altura,
+          larguraDaComposicao: p.largura,
+          alturaDaComposicao: p.altura,
         ),
       ),
     );

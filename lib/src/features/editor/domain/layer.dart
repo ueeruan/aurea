@@ -2,6 +2,7 @@ import 'dart:ui';
 
 import 'package:uuid/uuid.dart';
 
+import 'aprimoramento_ia.dart';
 import 'camera3d.dart';
 import 'camera_cuts.dart';
 import 'caption.dart';
@@ -465,6 +466,8 @@ class VideoLayer extends Layer {
     this.interpolacao = InterpolacaoDeQuadros.nenhuma,
     this.aprimorar = false,
     this.forcaDoAprimoramento = 1.0,
+    this.perfilDoAprimoramento = PerfilDoAprimoramento.videoReal,
+    this.reducaoDeRuido = reducaoDeRuidoPadrao,
     this.volume = 1.0,
     this.audio = const AudioSpec(),
     super.position,
@@ -533,6 +536,14 @@ class VideoLayer extends Layer {
   /// nao um controle de ruido.
   final double forcaDoAprimoramento;
 
+  /// Qual rede: video real (padrao) ou animacao.
+  final PerfilDoAprimoramento perfilDoAprimoramento;
+
+  /// So no video real (0..1): quanto a mistura puxa para o modelo que limpa
+  /// ruido. 0 preserva o grao; 1 limpa forte. E a mistura de pesos das duas
+  /// redes (DNI), nao um filtro depois.
+  final double reducaoDeRuido;
+
   /// Transicao da camada anterior (A) para esta camada (B).
 
   final double volume;
@@ -577,6 +588,8 @@ class VideoLayer extends Layer {
     InterpolacaoDeQuadros? interpolacao,
     bool? aprimorar,
     double? forcaDoAprimoramento,
+    PerfilDoAprimoramento? perfilDoAprimoramento,
+    double? reducaoDeRuido,
     ClipTransition? transitionIn,
     bool clearTransitionIn = false,
     AudioSpec? audio,
@@ -596,6 +609,9 @@ class VideoLayer extends Layer {
       interpolacao: interpolacao ?? this.interpolacao,
       aprimorar: aprimorar ?? this.aprimorar,
       forcaDoAprimoramento: forcaDoAprimoramento ?? this.forcaDoAprimoramento,
+      perfilDoAprimoramento:
+          perfilDoAprimoramento ?? this.perfilDoAprimoramento,
+      reducaoDeRuido: reducaoDeRuido ?? this.reducaoDeRuido,
       transitionIn: clearTransitionIn
           ? null
           : (transitionIn ?? this.transitionIn),
@@ -638,6 +654,8 @@ class VideoLayer extends Layer {
     interpolacao: interpolacao,
     aprimorar: aprimorar,
     forcaDoAprimoramento: forcaDoAprimoramento,
+    perfilDoAprimoramento: perfilDoAprimoramento,
+    reducaoDeRuido: reducaoDeRuido,
     // A transicao pertence a uma JUNCAO, nao ao conteudo do clipe.
     // Duplicar B nao pode criar uma segunda entrada apontando para A.
     transitionIn: null,

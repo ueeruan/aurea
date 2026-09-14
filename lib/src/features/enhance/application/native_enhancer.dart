@@ -9,6 +9,8 @@ import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
+import '../../editor/domain/aprimoramento_ia.dart';
+
 final class _AeInfo extends Struct {
   @Int32()
   external int gpu;
@@ -78,6 +80,61 @@ class NativeEnhancer {
   static bool get pngAvailable {
     final lib = _abrirBiblioteca();
     return lib != null && lib.providesSymbol('ae_process_png');
+  }
+
+  /// O motor do [perfil] a partir de uma pasta de modelo: `x4.param` e
+  /// `x4.bin` e, no video real, `x4-wdn.bin` — misturado na proporcao
+  /// [reducaoDeRuido] (1 = so o modelo que limpa; 0 = so o que preserva
+  /// o grao).
+  static NativeEnhancer openProfile(
+    String modelDir,
+    PerfilDoAprimoramento perfil, {
+    double reducaoDeRuido = reducaoDeRuidoPadrao,
+    bool gpu = true,
+  }) => perfil == PerfilDoAprimoramento.animacao
+      ? open(modelDir, gpu: gpu)
+      : openMixed(
+          param: '$modelDir/x4.param',
+          binA: '$modelDir/x4.bin',
+          binB: '$modelDir/x4-wdn.bin',
+          weightA: reducaoDeRuido,
+          gpu: gpu,
+        );
+
+  /// DNI: pesos = [weightA] * A + (1 - [weightA]) * B, com o mesmo param
+  /// (ae_create_dni). Lanca StateError com o motivo real.
+  static NativeEnhancer openMixed({
+    required String param,
+    required String binA,
+    required String binB,
+    required double weightA,
+    bool gpu = true,
+  }) {
+    final lib = _abrirBiblioteca();
+    if (lib == null || !lib.providesSymbol('ae_create_dni')) {
+      throw StateError('Motor de IA indisponível neste aparelho');
+    }
+    if (!weightA.isFinite || weightA < 0 || weightA > 1) {
+      throw StateError('Redução de ruído fora de 0..1');
+    }
+    final create = lib.lookupFunction<
+      Pointer<Void> Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>, Float, Int32, Int32, Pointer<Utf8>, Int32),
+      Pointer<Void> Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>, double, int, int, Pointer<Utf8>, int)
+    >('ae_create_dni');
+    final p = param.toNativeUtf8(), a = binA.toNativeUtf8(), b = binB.toNativeUtf8();
+    final err = calloc<Uint8>(256).cast<Utf8>();
+    try {
+      final engine = create(p, a, b, weightA, 4, gpu ? 1 : 0, err, 256);
+      if (engine == nullptr) {
+        throw StateError('Modelo de IA não carregou: ${err.toDartString()}');
+      }
+      return NativeEnhancer._(lib, engine);
+    } finally {
+      calloc.free(p);
+      calloc.free(a);
+      calloc.free(b);
+      calloc.free(err);
+    }
   }
 
   /// Carrega o modelo x4 de [modelDir] (x4.param/x4.bin). Devolve o motor

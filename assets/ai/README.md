@@ -18,8 +18,42 @@ saida `output` (x4, RGB 0..1). Motor proprio em `native/enhance`.
 Por que este modelo: medido no host (RTX 3050), foi o unico com custo de
 video (16-30 ms a 320x180), emendas de tile invisiveis e pouco flicker
 (+11% sobre o bicubico). O RealESRGAN_x4plus custou 30x mais, inventou
-textura e dobrou o flicker. O realesr-general-x4v3 (indicado para video
-real) nao tem versao ncnn oficial e ainda nao foi convertido nem validado.
+textura e dobrou o flicker. Hoje ele e o perfil "Animação"; o perfil
+padrao ("Vídeo real") usa os modelos abaixo.
+
+# Modelos de vídeo real (perfil padrão)
+
+`realesr-general-x4v3/x4.param`, `realesr-general-x4v3/x4.bin` e
+`realesr-general-wdn-x4v3/x4.bin` (o param e o mesmo). Nao existe versao
+ncnn oficial: foram CONVERTIDOS aqui por
+`native/enhance/tools/converter_srvgg.py` (so numpy; o .pth e lido sem
+executar pickle livre).
+
+Origem dos pesos (release v0.2.5.0 de https://github.com/xinntao/Real-ESRGAN):
+- realesr-general-x4v3.pth SHA-256 8dc7edb9ac80ccdc30c3a5dca6616509367f05fbc184ad95b731f05bece96292
+- realesr-general-wdn-x4v3.pth SHA-256 1641f8c4464b9f097c9fdda5589273713f67cf59f3d909e0bd688f0cee269dca
+
+Saida da conversao (pesos das convolucoes em fp16, como os oficiais):
+- realesr-general-x4v3/x4.param 96174ce41cb53c6b24106adbc5c77a01108674d1ce8426032e4d3fa3b2c66507
+- realesr-general-x4v3/x4.bin 01450f4a79b81c0f1f3eeefc31121167886125c25e41a6d4773e8ec8062528a1
+- realesr-general-wdn-x4v3/x4.bin bdd5bdc7da2c83411ced54c37a6646aebfe1b3f780bb7e6f877dd8934fbd3cc5
+
+Validacao, executada no ncnn 20260526 (host, `conferir-rede` e `conferir-dni`):
+- O conversor aplicado ao realesr-animevideov3.pth reproduz o x4.bin oficial
+  deste pacote: 53 blocos iguais, exceto dois pesos em que o conversor
+  oficial trunca o fp16 (33,25 contra 33,28) — o nosso arredonda.
+- Saida do ncnn contra uma implementacao de referencia do SRVGGNetCompact em
+  numpy (float64): diferenca maxima de 1 nivel (de 255) na CPU e 2 na GPU,
+  para os dois modelos, e para as misturas 0, 25%, 50% e 100%.
+- Custo no host (RTX 3050, 320x180 x4): general-x4v3 44 ms na GPU e 514 ms na
+  CPU, contra 32 ms e 281 ms do animevideov3. A mistura nao custa nada a mais.
+
+A "Redução de ruído" e a DNI (deep network interpolation) do Real-ESRGAN:
+pesos = r x general-x4v3 + (1 - r) x general-wdn-x4v3, misturados uma vez na
+carga (`ae_create_dni`). r = 0,5 e o padrao do Real-ESRGAN.
+
+Licenca: Real-ESRGAN, BSD-3-Clause (Xintao Wang). Empacotados so no Android
+(`platforms: [android]`): o motor nao existe no iOS.
 
 Nao ha modelos, marcas ou presets da Topaz ou da Adobe.
 

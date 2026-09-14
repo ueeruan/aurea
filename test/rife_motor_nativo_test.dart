@@ -98,6 +98,54 @@ void main() {
     }
   }, skip: pular);
 
+  test('corte de cena copia o vizinho mais perto; quadro repetido nao passa pela rede', () {
+    const w = 128, h = 72;
+    final dir = Directory.systemTemp.createTempSync('aurea-rife-corte-');
+    final m = NativeInterpolator.open(_modelo, gpu: gpu);
+    try {
+      String png(String nome, Uint8List rgb) {
+        final caminho = '${dir.path}/$nome.png';
+        _pngDe(rgb, w, h, caminho);
+        return caminho;
+      }
+
+      // Duas cenas sem nada em comum: textura contra um degrade liso escuro.
+      final cenaA = png('a', _janela(w, h, 0));
+      final escuro = Uint8List(w * h * 3);
+      for (var i = 0; i < escuro.length; i += 3) {
+        escuro[i] = 10 + (i ~/ 3) % w ~/ 8;
+        escuro[i + 1] = 12;
+        escuro[i + 2] = 30;
+      }
+      final cenaB = png('b', escuro);
+      final corte = m.similarityPng(cenaA, cenaB);
+      expect(corte, lessThan(.2), reason: 'semelhanca de um corte: $corte');
+      m.interpolatePng(cenaA, cenaB, .25, '${dir.path}/c1.png');
+      m.interpolatePng(cenaA, cenaB, .75, '${dir.path}/c3.png');
+      expect(_rgbDoPng('${dir.path}/c1.png'), _janela(w, h, 0), reason: 'antes do meio: a cena A inteira');
+      expect(_rgbDoPng('${dir.path}/c3.png'), escuro, reason: 'depois do meio: a cena B inteira');
+
+      // O mesmo quadro duas vezes (taxa variavel): copia, identico.
+      final igual = png('igual', _janela(w, h, 0));
+      expect(m.similarityPng(cenaA, igual), greaterThan(.996));
+      m.interpolatePng(cenaA, igual, .5, '${dir.path}/p.png');
+      expect(_rgbDoPng('${dir.path}/p.png'), _janela(w, h, 0));
+
+      // Movimento de verdade continua interpolado (nem corte nem parado).
+      final andou = png('andou', _janela(w, h, 8));
+      final s = m.similarityPng(cenaA, andou);
+      expect(s, inExclusiveRange(.2, .996), reason: 'movimento: $s');
+
+      // Com as regras desligadas, o corte volta a ser misturado pela rede.
+      m.setThresholds(cut: -1, still: 2);
+      m.interpolatePng(cenaA, cenaB, .25, '${dir.path}/sem.png');
+      expect(_rgbDoPng('${dir.path}/sem.png'), isNot(_janela(w, h, 0)));
+    } finally {
+      m.close();
+      dir.deleteSync(recursive: true);
+    }
+  }, skip: pular);
+
   test('modelo ausente e quadros ilegiveis falham com motivo', () {
     expect(() => NativeInterpolator.open('nao/existe', gpu: gpu), throwsA(isA<StateError>()));
     final m = NativeInterpolator.open(_modelo, gpu: gpu);

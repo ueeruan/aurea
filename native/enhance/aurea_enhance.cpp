@@ -3,10 +3,12 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <mutex>
 #include <new>
+#include <string>
 #include <vector>
 
 #include "aurea_gpu.h"
@@ -108,10 +110,175 @@ void resizeCubic(const uint8_t* src, int w, int h, uint8_t* dst, int ow, int oh)
   }
 }
 
+// ---------------------------------------------------------------- DNI
+// DEEP NETWORK INTERPOLATION: o "denoise strength" do Real-ESRGAN mistura os
+// PESOS de dois modelos com a mesma arquitetura (realesr-general-x4v3, que
+// limpa forte, e realesr-general-wdn-x4v3, que preserva o grao). A mistura
+// e feita aqui, uma vez, e o ncnn carrega o resultado da memoria.
+
+// Meia precisao IEEE 754 -> float.
+float meiaParaFloat(uint16_t h) {
+  const unsigned sinal = (h >> 15) & 1u, expoente = (h >> 10) & 0x1fu, mantissa = h & 0x3ffu;
+  float v;
+  if (expoente == 0) {
+    v = std::ldexp(static_cast<float>(mantissa), -24);
+  } else if (expoente == 31) {
+    v = mantissa ? NAN : INFINITY;
+  } else {
+    v = std::ldexp(static_cast<float>(mantissa | 0x400u), static_cast<int>(expoente) - 25);
+  }
+  return sinal ? -v : v;
+}
+
+bool lerArquivoInteiro(const char* caminho, std::vector<unsigned char>& out) {
+  FILE* f = std::fopen(caminho, "rb");
+  if (!f) return false;
+  bool ok = false;
+  if (std::fseek(f, 0, SEEK_END) == 0) {
+    const long n = std::ftell(f);
+    if (n > 0 && n < 256L * 1024 * 1024 && std::fseek(f, 0, SEEK_SET) == 0) {
+      out.resize(static_cast<size_t>(n));
+      ok = std::fread(out.data(), 1, out.size(), f) == out.size();
+    }
+  }
+  std::fclose(f);
+  return ok;
+}
+
+struct CamadaComPesos {
+  bool convolucao = false;  // senao PReLU
+  long pesos = 0;           // Convolution: 6=weight_data_size; PReLU: 0=num_slope
+  long bias = 0;            // Convolution com 5=1: 0=num_output
+};
+
+// So as camadas do SRVGGNetCompact: qualquer outra com pesos e recusada
+// (misturar um layout que nao se conhece daria lixo com "sucesso").
+bool lerCamadas(const std::vector<unsigned char>& texto, std::vector<CamadaComPesos>& out) {
+  std::string s(texto.begin(), texto.end());
+  size_t pos = 0;
+  int linha = 0;
+  while (pos < s.size()) {
+    size_t fim = s.find('\n', pos);
+    if (fim == std::string::npos) fim = s.size();
+    std::string l = s.substr(pos, fim - pos);
+    pos = fim + 1;
+    std::vector<std::string> partes;
+    size_t i = 0;
+    while (i < l.size()) {
+      while (i < l.size() && (l[i] == ' ' || l[i] == '\t' || l[i] == '\r')) ++i;
+      size_t j = i;
+      while (j < l.size() && l[j] != ' ' && l[j] != '\t' && l[j] != '\r') ++j;
+      if (j > i) partes.push_back(l.substr(i, j - i));
+      i = j;
+    }
+    if (partes.empty()) continue;
+    if (linha++ < 2) {
+      if (linha == 1 && partes[0] != "7767517") return false;
+      continue;
+    }
+    if (partes.size() < 4) return false;
+    const std::string& tipo = partes[0];
+    const long entradas = std::strtol(partes[2].c_str(), nullptr, 10);
+    const long saidas = std::strtol(partes[3].c_str(), nullptr, 10);
+    if (entradas < 0 || saidas < 0 || static_cast<size_t>(4 + entradas + saidas) > partes.size()) return false;
+    long k0 = -1, k5 = 0, k6 = -1;
+    for (size_t k = static_cast<size_t>(4 + entradas + saidas); k < partes.size(); ++k) {
+      const size_t igual = partes[k].find('=');
+      if (igual == std::string::npos) return false;
+      const long chave = std::strtol(partes[k].substr(0, igual).c_str(), nullptr, 10);
+      const long valor = std::strtol(partes[k].substr(igual + 1).c_str(), nullptr, 10);
+      if (chave == 0) k0 = valor;
+      if (chave == 5) k5 = valor;
+      if (chave == 6) k6 = valor;
+    }
+    if (tipo == "Convolution") {
+      if (k0 <= 0 || k6 <= 0) return false;
+      CamadaComPesos c;
+      c.convolucao = true;
+      c.pesos = k6;
+      c.bias = k5 == 1 ? k0 : 0;
+      out.push_back(c);
+    } else if (tipo == "PReLU") {
+      CamadaComPesos c;
+      c.pesos = k0 > 0 ? k0 : 1;
+      out.push_back(c);
+    } else if (tipo != "Input" && tipo != "Split" && tipo != "PixelShuffle" &&
+               tipo != "Interp" && tipo != "BinaryOp") {
+      return false;
+    }
+  }
+  return !out.empty();
+}
+
+// Le n floats de [p]: com marca (fp32 = 0 ou fp16) ou crus.
+bool lerBloco(const std::vector<unsigned char>& d, size_t& p, long n, bool comMarca,
+              std::vector<float>& out) {
+  const size_t qtd = static_cast<size_t>(n);
+  out.resize(qtd);
+  uint32_t marca = 0;
+  if (comMarca) {
+    if (d.size() - p < 4) return false;
+    std::memcpy(&marca, &d[p], 4);
+    p += 4;
+  }
+  if (marca == 0) {
+    if (d.size() - p < qtd * 4) return false;
+    std::memcpy(out.data(), &d[p], qtd * 4);
+    p += qtd * 4;
+    return true;
+  }
+  if (marca == 0x01306B47u) {
+    const size_t bytes = (qtd * 2 + 3) / 4 * 4;
+    if (d.size() - p < bytes) return false;
+    for (size_t i = 0; i < qtd; ++i) {
+      uint16_t h;
+      std::memcpy(&h, &d[p + 2 * i], 2);
+      out[i] = meiaParaFloat(h);
+    }
+    p += bytes;
+    return true;
+  }
+  return false;  // int8/codebook: nao ha como misturar
+}
+
+bool misturarPesos(const std::vector<CamadaComPesos>& camadas, const std::vector<unsigned char>& a,
+                   const std::vector<unsigned char>& b, float pesoA,
+                   std::vector<unsigned char>& saida) {
+  size_t pa = 0, pb = 0;
+  std::vector<float> va, vb;
+  auto junta = [&](long n, bool comMarca) -> bool {
+    if (!lerBloco(a, pa, n, comMarca, va) || !lerBloco(b, pb, n, comMarca, vb)) return false;
+    if (comMarca) {
+      const uint32_t zero = 0;  // sai sempre em float32
+      const size_t at = saida.size();
+      saida.resize(at + 4);
+      std::memcpy(&saida[at], &zero, 4);
+    }
+    const size_t at = saida.size();
+    saida.resize(at + va.size() * 4);
+    for (size_t i = 0; i < va.size(); ++i) {
+      const float v = pesoA * va[i] + (1.0f - pesoA) * vb[i];
+      std::memcpy(&saida[at + i * 4], &v, 4);
+    }
+    return true;
+  };
+  for (const CamadaComPesos& c : camadas) {
+    if (c.convolucao) {
+      if (!junta(c.pesos, true)) return false;
+      if (c.bias > 0 && !junta(c.bias, false)) return false;
+    } else if (!junta(c.pesos, false)) {
+      return false;
+    }
+  }
+  return pa == a.size() && pb == b.size();
+}
+
 }  // namespace
 
 struct ae_engine {
   ncnn::Net net;
+  // Pesos misturados (DNI): o ncnn os REFERENCIA, entao vivem com o motor.
+  std::vector<unsigned char> pesos;
   ncnn::VulkanDevice* vkdev = nullptr;
   int scale = 4;
   int tile = 64;
@@ -126,7 +293,8 @@ extern "C" {
 
 ae_engine* ae_create(const char* param_path, const char* bin_path, int32_t model_scale,
                      int32_t use_gpu, char* err, int32_t err_len) {
-  if (!fileReadable(param_path) || !fileReadable(bin_path)) {
+  // bin_path nulo so por dentro (ae_create_dni): prepara o motor sem pesos.
+  if (!fileReadable(param_path) || (bin_path && !fileReadable(bin_path))) {
     writeErr(err, err_len, "arquivos do modelo ausentes ou ilegiveis");
     return nullptr;
   }
@@ -163,8 +331,48 @@ ae_engine* ae_create(const char* param_path, const char* bin_path, int32_t model
     e->autoTile = 128;
   }
   e->tile = e->autoTile;
-  if (e->net.load_param(param_path) != 0 || e->net.load_model(bin_path) != 0) {
+  if (bin_path && (e->net.load_param(param_path) != 0 || e->net.load_model(bin_path) != 0)) {
     writeErr(err, err_len, "modelo invalido (param/bin nao carregou)");
+    ae_destroy(e);
+    return nullptr;
+  }
+  return e;
+}
+
+ae_engine* ae_create_dni(const char* param_path, const char* bin_a, const char* bin_b,
+                         float weight_a, int32_t model_scale, int32_t use_gpu, char* err,
+                         int32_t err_len) {
+  if (!fileReadable(param_path) || !fileReadable(bin_a) || !fileReadable(bin_b)) {
+    writeErr(err, err_len, "arquivos do modelo ausentes ou ilegiveis");
+    return nullptr;
+  }
+  if (std::isnan(weight_a) || weight_a < 0 || weight_a > 1) {
+    writeErr(err, err_len, "peso da mistura fora de 0..1");
+    return nullptr;
+  }
+  std::vector<unsigned char> texto, a, b;
+  std::vector<CamadaComPesos> camadas;
+  if (!lerArquivoInteiro(param_path, texto) || !lerCamadas(texto, camadas)) {
+    writeErr(err, err_len, "param nao e um SRVGGNetCompact que se saiba misturar");
+    return nullptr;
+  }
+  if (!lerArquivoInteiro(bin_a, a) || !lerArquivoInteiro(bin_b, b)) {
+    writeErr(err, err_len, "bin ilegivel");
+    return nullptr;
+  }
+  std::vector<unsigned char> mistura;
+  mistura.reserve(std::max(a.size(), b.size()) * 2);
+  if (!misturarPesos(camadas, a, b, weight_a, mistura)) {
+    writeErr(err, err_len, "os dois modelos nao tem o mesmo formato");
+    return nullptr;
+  }
+  // Mesmo preparo do ae_create, sem carregar o bin do disco.
+  ae_engine* e = ae_create(param_path, nullptr, model_scale, use_gpu, err, err_len);
+  if (!e) return nullptr;
+  e->pesos.swap(mistura);
+  if (e->net.load_param(param_path) != 0 ||
+      e->net.load_model(e->pesos.data()) != e->pesos.size()) {
+    writeErr(err, err_len, "modelo misturado nao carregou");
     ae_destroy(e);
     return nullptr;
   }

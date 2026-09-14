@@ -2,7 +2,8 @@ import 'dart:math' as math;
 
 /// APRIMORAMENTO POR IA NA EXPORTACAO — as contas, sem tela e sem motor.
 ///
-/// A rede (realesr-animevideov3, escala nativa 4, native/enhance) recebe o
+/// A rede (Real-ESRGAN compacto, escala nativa 4, native/enhance; o modelo
+/// sai do [PerfilDoAprimoramento]) recebe o
 /// quadro na resolucao da PROPRIA fonte e o devolve ampliado; a exportacao
 /// leva o resultado ao tamanho em que o clipe aparece na composicao. O
 /// palco continua mostrando o original: o efeito existe no arquivo.
@@ -11,6 +12,26 @@ import 'dart:math' as math;
 /// (RIFE, na resolucao pequena, que custa menos) -> IA -> composicao
 /// (efeitos, cor, texto por cima). Texto e grafico do editor nunca passam
 /// pela rede: ela so ve os quadros do video.
+
+/// QUE MODELO a rede usa. Filmagem e desenho pedem redes diferentes: o
+/// modelo de animacao achata textura de pele e folhagem, e o de video real
+/// tenta inventar grao em traco limpo.
+enum PerfilDoAprimoramento {
+  /// Camera de verdade: realesr-general-x4v3, com a reducao de ruido feita
+  /// pela mistura com o realesr-general-wdn-x4v3 (ver native/enhance).
+  videoReal,
+
+  /// Desenho, anime e grafico: realesr-animevideov3.
+  animacao;
+
+  String get emPalavras => switch (this) {
+    PerfilDoAprimoramento.videoReal => 'Vídeo real',
+    PerfilDoAprimoramento.animacao => 'Animação',
+  };
+}
+
+/// A reducao de ruido padrao do Real-ESRGAN (denoise_strength 0,5).
+const reducaoDeRuidoPadrao = 0.5;
 
 /// A maior entrada que a rede recebe, em pixels: 960x540. Uma fonte maior
 /// e reduzida antes (na extracao) — acima disto o custo por quadro no

@@ -12,6 +12,8 @@ import 'package:ffmpeg_kit_flutter_new_full/ffprobe_kit.dart';
 import 'package:ffmpeg_kit_flutter_new_full/return_code.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../../editor/domain/aprimoramento_ia.dart';
+import '../../export/application/aprimoramento_export.dart';
 import '../../export/application/platform_encoder.dart';
 import '../domain/color_look.dart';
 import 'enhance_worker.dart';
@@ -28,20 +30,22 @@ class EnhancementJob {
     : _loadAsset = loadAsset ?? rootBundle.load;
   final Future<ByteData> Function(String asset) _loadAsset;
 
-  /// realesr-animevideov3 (x4), formato ncnn. Ver assets/ai/README.md.
-  static const modelAssets = {
-    'x4.param': 'assets/ai/realesr-animevideov3/x4.param',
-    'x4.bin': 'assets/ai/realesr-animevideov3/x4.bin',
-  };
+  /// Os modelos de cada perfil (os mesmos da exportacao do editor).
+  static const modelosDoPerfil = AprimoradorIa.modelosDoPerfil;
   final progress = ValueNotifier(const EnhanceProgress('Pronto', 0));
   Directory? _directory;
   EnhanceWorker? _worker;
   bool _cancelled = false, _encoding = false, _running = false;
   int? _ffmpegSession;
   String get _cancelPath => '${_directory!.path}/cancel';
-  String get _modelDir => '${_directory!.path}/model';
+  PerfilDoAprimoramento _perfil = PerfilDoAprimoramento.videoReal;
+  String get _modelDir => '${_directory!.path}/model-${_perfil.name}';
 
-  Future<void> _prepare({required bool ai}) async {
+  Future<void> _prepare({
+    required bool ai,
+    PerfilDoAprimoramento perfil = PerfilDoAprimoramento.videoReal,
+  }) async {
+    _perfil = perfil;
     _cancelled = false;
     _directory ??= await (await getTemporaryDirectory()).createTemp(
       'aurea-enhance-',
@@ -51,7 +55,7 @@ class EnhancementJob {
     if (ai) {
       progress.value = const EnhanceProgress('Preparando modelo de IA…', 0);
       await Directory(_modelDir).create(recursive: true);
-      for (final e in modelAssets.entries) {
+      for (final e in modelosDoPerfil[perfil]!.arquivos.entries) {
         final f = File('$_modelDir/${e.key}');
         if (await f.exists()) continue;
         final data = await _loadAsset(e.value);
@@ -114,7 +118,7 @@ class EnhancementJob {
     if (_running) throw StateError('Já existe um processamento em andamento');
     _running = true;
     try {
-      await _prepare(ai: settings.ai);
+      await _prepare(ai: settings.ai, perfil: settings.perfil);
       _check();
       progress.value = const EnhanceProgress('Preparando comparação…', 0);
       var input = source;
@@ -147,7 +151,7 @@ class EnhancementJob {
     if (_running) throw StateError('Já existe um processamento em andamento');
     _running = true;
     try {
-      await _prepare(ai: settings.ai);
+      await _prepare(ai: settings.ai, perfil: settings.perfil);
       _check();
       progress.value = const EnhanceProgress('Preparando arquivo…', 0);
       final result = File(

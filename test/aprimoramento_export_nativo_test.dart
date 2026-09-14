@@ -15,6 +15,16 @@ import 'package:image/image.dart' as img;
 
 const _modelo = 'assets/ai/realesr-animevideov3';
 
+/// A pasta do perfil de video real como o app monta: x4.param, x4.bin e
+/// x4-wdn.bin juntos (os assets moram em duas pastas).
+String _pastaDoVideoReal() {
+  final dir = Directory.systemTemp.createTempSync('aurea-ia-geral-');
+  File('assets/ai/realesr-general-x4v3/x4.param').copySync('${dir.path}/x4.param');
+  File('assets/ai/realesr-general-x4v3/x4.bin').copySync('${dir.path}/x4.bin');
+  File('assets/ai/realesr-general-wdn-x4v3/x4.bin').copySync('${dir.path}/x4-wdn.bin');
+  return dir.path;
+}
+
 /// Quadro com bordas, gradiente e texto de blocos: tem o que ampliar.
 img.Image _quadro(int w, int h, int semente) {
   final r = math.Random(semente);
@@ -71,11 +81,12 @@ void main() {
       arquivos.add(emPe);
 
       final avancos = <int>[];
-      await AprimoradorIa(modeloPronto: _modelo, exigirGpu: gpu).aprimorar(
+      await AprimoradorIa(modelosProntos: (_) => _modelo, exigirGpu: gpu).aprimorar(
         arquivos: arquivos,
         forca: 1,
         larguraDaComposicao: 640,
         alturaDaComposicao: 360,
+        perfil: PerfilDoAprimoramento.animacao,
         aoAvancar: (f, _) => avancos.add(f),
       );
       expect(avancos.last, 4);
@@ -107,11 +118,12 @@ void main() {
     try {
       final caminho = '${dir.path}/000000.png';
       File(caminho).writeAsBytesSync(img.encodePng(_quadro(160, 90, 3)));
-      await AprimoradorIa(modeloPronto: _modelo, exigirGpu: gpu).aprimorar(
+      await AprimoradorIa(modelosProntos: (_) => _modelo, exigirGpu: gpu).aprimorar(
         arquivos: [caminho],
         forca: 0,
         larguraDaComposicao: 320,
         alturaDaComposicao: 180,
+        perfil: PerfilDoAprimoramento.animacao,
       );
       final saida = img.decodePng(File(caminho).readAsBytesSync())!;
       expect((saida.width, saida.height), (320, 180));
@@ -129,16 +141,50 @@ void main() {
     }
   }, skip: pular, timeout: const Timeout(Duration(minutes: 5)));
 
+  test('video real: a reducao de ruido muda o quadro de verdade, e 50% fica entre as pontas', () async {
+    final modelo = _pastaDoVideoReal();
+    final dir = Directory.systemTemp.createTempSync('aurea-ia-ruido-');
+    try {
+      Future<Uint8List> com(double ruido) async {
+        final caminho = '${dir.path}/r${(ruido * 100).round()}.png';
+        File(caminho).writeAsBytesSync(img.encodePng(_quadro(160, 90, 5)));
+        await AprimoradorIa(modelosProntos: (_) => modelo, exigirGpu: gpu).aprimorar(
+          arquivos: [caminho],
+          forca: 1,
+          larguraDaComposicao: 640,
+          alturaDaComposicao: 360,
+          perfil: PerfilDoAprimoramento.videoReal,
+          reducaoDeRuido: ruido,
+        );
+        final saida = img.decodePng(File(caminho).readAsBytesSync())!;
+        expect((saida.width, saida.height), (640, 360));
+        return _rgb(saida);
+      }
+
+      final limpa = await com(1), grao = await com(0), meio = await com(.5);
+      final pontas = _psnr(limpa, grao);
+      expect(pontas, lessThan(45), reason: 'os dois modelos dao quadros diferentes ($pontas dB)');
+      // A mistura dos pesos cai perto do meio: mais parecida com cada ponta
+      // do que as pontas entre si.
+      expect(_psnr(meio, limpa), greaterThan(pontas));
+      expect(_psnr(meio, grao), greaterThan(pontas));
+    } finally {
+      dir.deleteSync(recursive: true);
+      Directory(modelo).deleteSync(recursive: true);
+    }
+  }, skip: pular, timeout: const Timeout(Duration(minutes: 5)));
+
   test('quadro ilegivel para a exportacao com motivo e nao apaga o arquivo', () async {
     final dir = Directory.systemTemp.createTempSync('aurea-ia-ruim-');
     try {
       final ruim = File('${dir.path}/000000.png')..writeAsBytesSync([1, 2, 3, 4]);
       await expectLater(
-        AprimoradorIa(modeloPronto: _modelo, exigirGpu: gpu).aprimorar(
+        AprimoradorIa(modelosProntos: (_) => _modelo, exigirGpu: gpu).aprimorar(
           arquivos: [ruim.path],
           forca: 1,
           larguraDaComposicao: 640,
           alturaDaComposicao: 360,
+          perfil: PerfilDoAprimoramento.animacao,
         ),
         throwsA(isA<StateError>()),
       );

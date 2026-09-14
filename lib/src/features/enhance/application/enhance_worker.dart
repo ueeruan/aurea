@@ -116,13 +116,21 @@ void _workerMain(SendPort reply) async {
   reply.send(commands.sendPort);
   final inbox = StreamIterator<dynamic>(commands);
   NativeEnhancer? engine;
-  String? engineDir;
+  String? engineKey;
 
-  NativeEnhancer motor(String dir) {
-    if (engine != null && engineDir == dir) return engine!;
+  // Um motor por pasta, perfil e mistura: trocar a reducao de ruido remistura
+  // os pesos (ae_create_dni), o resto reaproveita.
+  NativeEnhancer motor(String dir, EnhanceSettings settings) {
+    final key = '$dir|${settings.perfil.name}|${settings.reducaoDeRuido}';
+    if (engine != null && engineKey == key) return engine!;
     engine?.close();
-    engine = NativeEnhancer.open(dir);
-    engineDir = dir;
+    engine = null;
+    engine = NativeEnhancer.openProfile(
+      dir,
+      settings.perfil,
+      reducaoDeRuido: settings.reducaoDeRuido,
+    );
+    engineKey = key;
     return engine!;
   }
 
@@ -141,7 +149,7 @@ void _workerMain(SendPort reply) async {
           var image = img.bakeOrientation(decoded);
           final alpha = image.hasAlpha ? image : null;
           if (settings.ai) {
-            final m = motor(modelDir);
+            final m = motor(modelDir, settings);
             final s = settings.scale.clamp(1, 4);
             final rgb = _rgbOf(image);
             final out = m.process(rgb, image.width, image.height, scale: s, strength: settings.aiStrength);
@@ -177,7 +185,7 @@ void _workerMain(SendPort reply) async {
           reply.send((image.width, image.height));
         } else if (kind is (String, String, int, int, String, EnhanceSettings, int, int)) {
           final (_, pipe, w, h, modelDir, settings, outW, outH) = kind;
-          final m = settings.ai ? motor(modelDir) : null;
+          final m = settings.ai ? motor(modelDir, settings) : null;
           final s = settings.ai ? settings.scale.clamp(1, 4) : 1;
           final frameBytes = w * h * 3;
           final buffer = BytesBuilder(copy: false);

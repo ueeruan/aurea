@@ -48,6 +48,14 @@ typedef struct ae_info {
 AE_EXPORT ae_engine* ae_create(const char* param_path, const char* bin_path,
                                int32_t model_scale, int32_t use_gpu, char* err,
                                int32_t err_len);
+/* DNI (deep network interpolation) de dois modelos com o MESMO param:
+ * pesos = weight_a * A + (1 - weight_a) * B, misturados uma vez na carga.
+ * E o "denoise strength" do Real-ESRGAN: A = realesr-general-x4v3 (limpa
+ * forte), B = realesr-general-wdn-x4v3 (preserva o grao). So aceita as
+ * camadas do SRVGGNetCompact. */
+AE_EXPORT ae_engine* ae_create_dni(const char* param_path, const char* bin_a, const char* bin_b,
+                                   float weight_a, int32_t model_scale, int32_t use_gpu,
+                                   char* err, int32_t err_len);
 AE_EXPORT void ae_destroy(ae_engine* engine);
 AE_EXPORT int32_t ae_info_get(ae_engine* engine, ae_info* out);
 /* Sobrescreve o tile automatico (32..512); 0 volta ao automatico. */

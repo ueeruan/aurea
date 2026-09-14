@@ -84,3 +84,32 @@ Host:
 ```
 AUREA_ENHANCE_LIB=<caminho>\aurea_enhance.dll flutter test test/aprimoramento_export_nativo_test.dart
 ```
+
+# Perfis e redução de ruído
+
+`ae_create_dni(param, bin_a, bin_b, peso_a, ...)` mistura os pesos de dois
+modelos com o mesmo param antes de carregar (fp16 ou fp32 na entrada,
+float32 na memória; o ncnn referencia o buffer, que vive com o motor). Só
+aceita as camadas do SRVGGNetCompact e recusa bins de formato diferente.
+
+- Vídeo real (padrão): `realesr-general-x4v3` misturado com
+  `realesr-general-wdn-x4v3` pela redução de ruído.
+- Animação: `realesr-animevideov3`.
+
+Os modelos de vídeo real foram convertidos por `tools/converter_srvgg.py`
+(ver `assets/ai/README.md` para origem, SHA-256 e validação).
+
+```
+python native/enhance/tools/converter_srvgg.py converter <modelo.pth> <x4.param> <x4.bin>
+python native/enhance/tools/converter_srvgg.py conferir-rede <modelo.pth> <x4.param> <x4.bin> <aurea_enhance.dll>
+python native/enhance/tools/converter_srvgg.py conferir-dni <a.pth> <b.pth> 0.5 <x4.param> <a.bin> <b.bin> <aurea_enhance.dll>
+```
+
+# Corte de cena e quadro repetido no RIFE
+
+`ar_interpolate_png` mede a semelhança do par (SSIM da luma em 32x32, a
+regra do Practical-RIFE) antes de chamar a rede. Abaixo de 0,2 é corte de
+cena: o quadro sai como cópia do vizinho mais perto, em vez de um
+fantasma das duas cenas. Acima de 0,996 é o mesmo quadro (fonte de taxa
+variável repetindo): cópia, sem gastar GPU. `ar_similarity_png` devolve a
+medida e `ar_set_thresholds` troca os limiares.

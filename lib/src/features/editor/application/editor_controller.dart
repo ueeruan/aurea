@@ -35,6 +35,7 @@ import '../domain/tracker2d.dart';
 import '../domain/fx.dart';
 import '../domain/grid_rig.dart';
 import '../domain/grupo_ops.dart';
+import '../domain/aprimoramento_ia.dart';
 import '../domain/deslocar_animacao.dart';
 import '../domain/keyframe.dart';
 import '../domain/loudness.dart';
@@ -4032,16 +4033,33 @@ class EditorController extends Notifier<VideoProject> {
   }
 
   /// Liga/desliga o APRIMORAMENTO POR IA do clipe e/ou muda a forca
-  /// (0..1). Desligar guarda a forca: religar volta como estava.
-  void setClipAprimoramento(String id, {bool? ligado, double? forca}) {
+  /// (0..1), o perfil (video real ou animacao) e a reducao de ruido (0..1).
+  /// Desligar guarda as escolhas: religar volta como estava.
+  void setClipAprimoramento(
+    String id, {
+    bool? ligado,
+    double? forca,
+    PerfilDoAprimoramento? perfil,
+    double? ruido,
+  }) {
     final layer = _layer(id);
     if (layer is! VideoLayer) return;
     final f = forca == null || !forca.isFinite ? null : forca.clamp(0.0, 1.0);
+    final r = ruido == null || !ruido.isFinite ? null : ruido.clamp(0.0, 1.0);
     if ((ligado == null || ligado == layer.aprimorar) &&
-        (f == null || f == layer.forcaDoAprimoramento)) {
+        (f == null || f == layer.forcaDoAprimoramento) &&
+        (perfil == null || perfil == layer.perfilDoAprimoramento) &&
+        (r == null || r == layer.reducaoDeRuido)) {
       return;
     }
-    _replace(layer.copyLayer(aprimorar: ligado, forcaDoAprimoramento: f));
+    _replace(
+      layer.copyLayer(
+        aprimorar: ligado,
+        forcaDoAprimoramento: f,
+        perfilDoAprimoramento: perfil,
+        reducaoDeRuido: r,
+      ),
+    );
   }
 
   void setClipTimeRemapEnabled(String id, bool enabled) {

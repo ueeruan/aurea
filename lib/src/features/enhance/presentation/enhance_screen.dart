@@ -8,6 +8,7 @@ import 'package:gal/gal.dart';
 import 'package:video_player/video_player.dart';
 
 import '../application/enhancement_job.dart';
+import '../../editor/domain/aprimoramento_ia.dart';
 import '../application/native_enhancer.dart';
 import '../domain/color_look.dart';
 
@@ -31,6 +32,8 @@ class _EnhanceScreenState extends State<EnhanceScreen> {
       _saving = false;
   int _scale = 2;
   double _strength = 1, _aiStrength = 1, _detail = 0;
+  double _ruido = reducaoDeRuidoPadrao;
+  PerfilDoAprimoramento _perfil = PerfilDoAprimoramento.videoReal;
   ColorLook _look = ColorLook.natural;
   VideoPlayerController? _player;
   EnhanceSettings get _settings => EnhanceSettings(
@@ -40,6 +43,8 @@ class _EnhanceScreenState extends State<EnhanceScreen> {
     strength: _strength,
     aiStrength: _aiStrength,
     detail: _detail,
+    perfil: _perfil,
+    reducaoDeRuido: _ruido,
   );
   @override
   void dispose() {
@@ -177,7 +182,7 @@ class _EnhanceScreenState extends State<EnhanceScreen> {
     builder: (context) => AlertDialog(
       title: const AppText('Qualidade e cor'),
       content: const SingleChildScrollView(
-        child: AppText('Escolha uma foto ou vídeo. A IA (Real-ESRGAN animevideov3, no aparelho, sem enviar sua mídia) reduz blocos de compressão e amplia. 1× restaura sem ampliar; 2× e 4× ampliam — os três custam o mesmo processamento.\n\nIntensidade da IA mistura o resultado com o original ampliado. Nitidez realça bordas e não é IA. Os CCs mudam as cores.\n\nComparar processa uma imagem ou o primeiro quadro do vídeo, com o antes ampliado ao mesmo tamanho. Gerar resultado processa todos os quadros na taxa original do vídeo, com o áudio original.\n\nO modelo é conservador e pode suavizar texturas; compare antes de salvar. O original permanece intacto.',
+        child: AppText('Escolha uma foto ou vídeo. A IA (Real-ESRGAN, no aparelho, sem enviar sua mídia) reduz ruído e blocos de compressão e amplia. Vídeo real usa o modelo general-x4v3; Animação usa o animevideov3. 1× restaura sem ampliar; 2× e 4× ampliam — os três custam o mesmo processamento.\n\nRedução de ruído (só em vídeo real) mistura os pesos de dois modelos: menos preserva o grão, mais limpa. Intensidade da IA mistura o resultado com o original ampliado. Nitidez realça bordas e não é IA. Os CCs mudam as cores.\n\nComparar processa uma imagem ou o primeiro quadro do vídeo, com o antes ampliado ao mesmo tamanho. Gerar resultado processa todos os quadros na taxa original do vídeo, com o áudio original.\n\nA IA pode suavizar texturas; compare antes de salvar. O original permanece intacto.',
         ),
       ),
       actions: [
@@ -258,6 +263,21 @@ class _EnhanceScreenState extends State<EnhanceScreen> {
                     ? null
                     : (v) => _changed(() => _ai = v),
               ),
+              if (_ai) ...[
+                const SizedBox(height: 8),
+                SegmentedButton<PerfilDoAprimoramento>(
+                  key: const ValueKey('melhorar-perfil'),
+                  segments: [
+                    for (final p in PerfilDoAprimoramento.values)
+                      ButtonSegment(value: p, label: AppText(p.emPalavras)),
+                  ],
+                  selected: {_perfil},
+                  onSelectionChanged: _busy
+                      ? null
+                      : (v) => _changed(() => _perfil = v.first),
+                ),
+                const SizedBox(height: 8),
+              ],
               if (_ai)
                 SegmentedButton<int>(
                   segments: const [
@@ -292,6 +312,8 @@ class _EnhanceScreenState extends State<EnhanceScreen> {
               ),
               if (_look != ColorLook.natural)
                 _slider('Intensidade da cor', _strength, (v) => _strength = v),
+              if (_ai && _perfil == PerfilDoAprimoramento.videoReal)
+                _slider('Redução de ruído', _ruido, (v) => _ruido = v),
               if (_ai)
                 _slider('Intensidade da IA', _aiStrength, (v) => _aiStrength = v),
               _slider('Nitidez (não é IA)', _detail, (v) => _detail = v),

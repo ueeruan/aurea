@@ -63,6 +63,47 @@ void main() {
     }
   }, skip: pular);
 
+  test('mistura de pesos (reducao de ruido): abre, processa e recusa o que nao sabe misturar', () {
+    const param = 'assets/ai/realesr-general-x4v3/x4.param';
+    const limpa = 'assets/ai/realesr-general-x4v3/x4.bin';
+    const grao = 'assets/ai/realesr-general-wdn-x4v3/x4.bin';
+    const w = 48, h = 32;
+    final src = _cena(w, h);
+    Uint8List com(double peso) {
+      final e = NativeEnhancer.openMixed(param: param, binA: limpa, binB: grao, weightA: peso, gpu: false);
+      try {
+        return e.process(src, w, h, scale: 4);
+      } finally {
+        e.close();
+      }
+    }
+
+    final a = com(1), b = com(0);
+    expect(_psnr(a, b), lessThan(60), reason: 'as duas pontas sao modelos diferentes');
+    // A ponta 1 da mistura e o proprio modelo que limpa, carregado do disco.
+    final direto = NativeEnhancer.open('assets/ai/realesr-general-x4v3', gpu: false);
+    try {
+      expect(_psnr(direto.process(src, w, h, scale: 4), a), greaterThan(50));
+    } finally {
+      direto.close();
+    }
+    expect(
+      () => NativeEnhancer.openMixed(param: param, binA: limpa, binB: grao, weightA: double.nan, gpu: false),
+      throwsA(isA<StateError>()),
+    );
+    // Bin de outra arquitetura (16 camadas contra 32): recusa, nao mistura lixo.
+    expect(
+      () => NativeEnhancer.openMixed(
+        param: param,
+        binA: limpa,
+        binB: 'assets/ai/realesr-animevideov3/x4.bin',
+        weightA: .5,
+        gpu: false,
+      ),
+      throwsA(isA<StateError>()),
+    );
+  }, skip: pular);
+
   test('modelo invalido falha com motivo (nunca "IA ativada" sem modelo)', () {
     expect(() => NativeEnhancer.open('nao/existe'), throwsA(isA<StateError>()));
   }, skip: pular);

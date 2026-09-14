@@ -153,6 +153,34 @@ class NativeInterpolator {
     }
   }
 
+  /// A semelhanca (SSIM em 32x32) do par, a mesma que decide corte de cena
+  /// e quadro parado em [interpolatePng].
+  double similarityPng(String a, String b) {
+    final fn = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, Pointer<Double>),
+      int Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, Pointer<Double>)
+    >('ar_similarity_png');
+    final pa = a.toNativeUtf8(), pb = b.toNativeUtf8();
+    final out = calloc<Double>();
+    try {
+      final rc = fn(_engine, pa, pb, out);
+      if (rc != arOk) throw StateError(_motivo(rc));
+      return out.value;
+    } finally {
+      calloc.free(pa);
+      calloc.free(pb);
+      calloc.free(out);
+    }
+  }
+
+  /// Limiares de corte de cena e de quadro parado (padrao 0,2 e 0,996).
+  void setThresholds({double cut = .2, double still = .996}) {
+    _lib.lookupFunction<
+      Void Function(Pointer<Void>, Float, Float),
+      void Function(Pointer<Void>, double, double)
+    >('ar_set_thresholds')(_engine, cut, still);
+  }
+
   static String _motivo(int rc) => switch (rc) {
     arErrArgs => 'RIFE: argumentos inválidos',
     arErrInference => 'RIFE falhou neste quadro (memória da GPU?)',

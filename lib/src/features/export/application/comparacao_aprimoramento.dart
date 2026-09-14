@@ -40,6 +40,8 @@ Future<ComparacaoDoAprimoramento> compararAprimoramento({
   required int largura,
   required int altura,
   required double forca,
+  PerfilDoAprimoramento perfil = PerfilDoAprimoramento.videoReal,
+  double reducaoDeRuido = reducaoDeRuidoPadrao,
   AprimoradorDeQuadros? aprimorador,
 }) async {
   final ia = aprimorador ?? AprimoradorIa.doAparelho();
@@ -107,6 +109,8 @@ Future<ComparacaoDoAprimoramento> compararAprimoramento({
     forca: forca,
     larguraDaComposicao: largura,
     alturaDaComposicao: altura,
+    perfil: perfil,
+    reducaoDeRuido: reducaoDeRuido,
   );
   return ComparacaoDoAprimoramento(plano: plano, antes: antes, depois: depois);
 }

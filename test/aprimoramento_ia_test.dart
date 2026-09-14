@@ -176,6 +176,15 @@ void main() {
       editor.setClipAprimoramento(clipe.id, forca: double.nan);
       expect(v().forcaDoAprimoramento, .35, reason: 'NaN nao entra');
 
+      // Perfil e reducao de ruido: video real e 50% por padrao.
+      expect(v().perfilDoAprimoramento, PerfilDoAprimoramento.videoReal);
+      expect(v().reducaoDeRuido, reducaoDeRuidoPadrao);
+      editor.setClipAprimoramento(clipe.id, perfil: PerfilDoAprimoramento.animacao, ruido: .2);
+      expect(v().perfilDoAprimoramento, PerfilDoAprimoramento.animacao);
+      expect(v().reducaoDeRuido, .2);
+      editor.setClipAprimoramento(clipe.id, ruido: -3);
+      expect(v().reducaoDeRuido, 0.0);
+
       // Desligar guarda a forca: religar volta como estava.
       editor.setClipAprimoramento(clipe.id, ligado: false);
       expect(v().forcaDoAprimoramento, .35);
@@ -184,6 +193,8 @@ void main() {
       final lido = projectFromJson(json).layers.single as VideoLayer;
       expect(lido.aprimorar, isFalse);
       expect(lido.forcaDoAprimoramento, .35);
+      expect(lido.perfilDoAprimoramento, PerfilDoAprimoramento.animacao);
+      expect(lido.reducaoDeRuido, 0.0);
 
       editor.setClipAprimoramento(clipe.id, ligado: true);
       final lido2 = projectFromJson(projectToJson(container.read(editorControllerProvider))).layers.single as VideoLayer;
@@ -204,9 +215,13 @@ void main() {
       final camada = (json['layers'] as List).single as Map<String, dynamic>;
       expect(camada.containsKey('aprimorar'), isFalse, reason: 'padrao nao suja o arquivo');
       expect(camada.containsKey('forcaAprimoramento'), isFalse);
+      expect(camada.containsKey('perfilAprimoramento'), isFalse);
+      expect(camada.containsKey('ruidoAprimoramento'), isFalse);
       final lido = projectFromJson(json).layers.single as VideoLayer;
       expect(lido.aprimorar, isFalse);
       expect(lido.forcaDoAprimoramento, 1.0);
+      expect(lido.perfilDoAprimoramento, PerfilDoAprimoramento.videoReal);
+      expect(lido.reducaoDeRuido, reducaoDeRuidoPadrao);
     });
 
     test('clipe aprimorado nunca vira corte puro (copia sem recodificar)', () {
@@ -235,9 +250,13 @@ void main() {
       final camada = (json['layers'] as List).single as Map<String, dynamic>;
       camada['aprimorar'] = true;
       camada['forcaAprimoramento'] = 9.5;
+      camada['perfilAprimoramento'] = 'perfil-que-nao-existe';
+      camada['ruidoAprimoramento'] = double.nan;
       final lido = projectFromJson(json).layers.single as VideoLayer;
       expect(lido.aprimorar, isTrue);
       expect(lido.forcaDoAprimoramento, 1.0);
+      expect(lido.perfilDoAprimoramento, PerfilDoAprimoramento.videoReal);
+      expect(lido.reducaoDeRuido, reducaoDeRuidoPadrao);
     });
   });
 }

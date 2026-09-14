@@ -57,9 +57,19 @@ AR_EXPORT int32_t ar_interpolate(ar_engine* engine, const uint8_t* a, const uint
 
 /* O mesmo com arquivos PNG (caminhos UTF-8). Guarda os dois ultimos quadros
  * lidos: uma sequencia de pares vizinhos le cada arquivo uma vez. A saida e
- * PNG RGB. */
+ * PNG RGB. CORTE DE CENA (semelhanca abaixo do limiar de corte) copia o
+ * vizinho mais perto em vez de desenhar um fantasma das duas cenas; o MESMO
+ * quadro (acima do limiar de parado) copia A sem gastar GPU. */
 AR_EXPORT int32_t ar_interpolate_png(ar_engine* engine, const char* a_path,
                                      const char* b_path, float t, const char* out_path);
+
+/* A semelhanca (SSIM da luma em 32x32, ate 1) que ar_interpolate_png usa. */
+AR_EXPORT int32_t ar_similarity_png(ar_engine* engine, const char* a_path,
+                                    const char* b_path, double* out);
+
+/* Limiares de corte e de quadro parado. Padrao 0,2 e 0,996 (Practical-RIFE).
+ * Corte abaixo de 0 ou parado acima de 1 desligam a regra. */
+AR_EXPORT void ar_set_thresholds(ar_engine* engine, float cut, float still);
 
 #ifdef __cplusplus
 }

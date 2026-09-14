@@ -1,5 +1,7 @@
 import 'dart:math' as math;
 
+import '../../editor/domain/aprimoramento_ia.dart';
+
 /// Original color recipes. No Adobe or third-party preset files are required.
 enum ColorLook {
   natural('Natural'),
@@ -136,8 +138,17 @@ class EnhanceSettings {
     this.strength = 1,
     this.aiStrength = 1,
     this.detail = 0,
+    this.perfil = PerfilDoAprimoramento.videoReal,
+    this.reducaoDeRuido = reducaoDeRuidoPadrao,
   });
   final bool ai;
+
+  /// Qual rede: video real (padrao) ou animacao.
+  final PerfilDoAprimoramento perfil;
+
+  /// So no video real: a mistura dos dois modelos (0 preserva o grao, 1
+  /// limpa forte). Ver ae_create_dni.
+  final double reducaoDeRuido;
 
   /// Escala de SAIDA: 1 (restaurar sem ampliar), 2 ou 4. O modelo e x4; 1x
   /// e 2x sao a inferencia x4 reduzida por area (o custo e o do x4).

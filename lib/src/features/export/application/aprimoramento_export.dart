@@ -37,6 +37,8 @@ abstract class AprimoradorDeQuadros {
     required double forca,
     required int larguraDaComposicao,
     required int alturaDaComposicao,
+    PerfilDoAprimoramento perfil = PerfilDoAprimoramento.videoReal,
+    double reducaoDeRuido = reducaoDeRuidoPadrao,
     void Function(int feitos, int total)? aoAvancar,
     bool Function()? cancelado,
   });
@@ -46,7 +48,7 @@ class AprimoradorIa implements AprimoradorDeQuadros {
   AprimoradorIa({
     Future<ByteData> Function(String asset)? carregarAsset,
     Future<Directory> Function()? pastaDeApoio,
-    this.modeloPronto,
+    this.modelosProntos,
     this.exigirGpu = true,
   }) : _carregarAsset = carregarAsset ?? rootBundle.load,
        _pastaDeApoio = pastaDeApoio ?? getApplicationSupportDirectory;
@@ -55,17 +57,33 @@ class AprimoradorIa implements AprimoradorDeQuadros {
   static AprimoradorDeQuadros? doAparelho() =>
       Platform.isAndroid ? AprimoradorIa() : null;
 
-  /// realesr-animevideov3 x4, formato ncnn (ver assets/ai/README.md).
-  static const modeloAssets = {
-    'x4.param': 'assets/ai/realesr-animevideov3/x4.param',
-    'x4.bin': 'assets/ai/realesr-animevideov3/x4.bin',
+  /// Os arquivos de cada perfil, formato ncnn (ver assets/ai/README.md).
+  /// A pasta do video real junta os dois modelos: `x4-wdn.bin` e o que
+  /// preserva o grao, misturado pela reducao de ruido.
+  static const modelosDoPerfil = {
+    PerfilDoAprimoramento.videoReal: (
+      subpasta: 'realesr-general-x4v3',
+      arquivos: {
+        'x4.param': 'assets/ai/realesr-general-x4v3/x4.param',
+        'x4.bin': 'assets/ai/realesr-general-x4v3/x4.bin',
+        'x4-wdn.bin': 'assets/ai/realesr-general-wdn-x4v3/x4.bin',
+      },
+    ),
+    PerfilDoAprimoramento.animacao: (
+      subpasta: 'realesr-animevideov3',
+      arquivos: {
+        'x4.param': 'assets/ai/realesr-animevideov3/x4.param',
+        'x4.bin': 'assets/ai/realesr-animevideov3/x4.bin',
+      },
+    ),
   };
 
   final Future<ByteData> Function(String asset) _carregarAsset;
   final Future<Directory> Function() _pastaDeApoio;
 
-  /// Pasta que ja tem o modelo (testes no host): pula a copia dos assets.
-  final String? modeloPronto;
+  /// Pasta que ja tem o modelo de cada perfil (testes no host): pula a
+  /// copia dos assets.
+  final String Function(PerfilDoAprimoramento perfil)? modelosProntos;
 
   /// Sem GPU a rede levaria segundos por quadro no celular: e erro, e a
   /// pessoa decide exportar sem o aprimoramento.
@@ -74,14 +92,17 @@ class AprimoradorIa implements AprimoradorDeQuadros {
   @override
   bool get disponivel => NativeEnhancer.pngAvailable;
 
-  Future<String> prepararModelo() async =>
-      modeloPronto ??
-      await prepararModeloDeIa(
-        subpasta: 'realesr-animevideov3',
-        arquivos: modeloAssets,
-        carregarAsset: _carregarAsset,
-        pastaDeApoio: _pastaDeApoio,
-      );
+  Future<String> prepararModelo(PerfilDoAprimoramento perfil) async {
+    final pronto = modelosProntos;
+    if (pronto != null) return pronto(perfil);
+    final m = modelosDoPerfil[perfil]!;
+    return prepararModeloDeIa(
+      subpasta: m.subpasta,
+      arquivos: m.arquivos,
+      carregarAsset: _carregarAsset,
+      pastaDeApoio: _pastaDeApoio,
+    );
+  }
 
   @override
   Future<void> aprimorar({
@@ -89,11 +110,13 @@ class AprimoradorIa implements AprimoradorDeQuadros {
     required double forca,
     required int larguraDaComposicao,
     required int alturaDaComposicao,
+    PerfilDoAprimoramento perfil = PerfilDoAprimoramento.videoReal,
+    double reducaoDeRuido = reducaoDeRuidoPadrao,
     void Function(int feitos, int total)? aoAvancar,
     bool Function()? cancelado,
   }) async {
     if (arquivos.isEmpty) return;
-    final modelo = await prepararModelo();
+    final modelo = await prepararModelo(perfil);
     await rodarTrabalhoDeIa<_PedidoIa>(
       corpo: _trabalhoIa,
       pedido: (porta, parar) => _PedidoIa(
@@ -105,6 +128,10 @@ class AprimoradorIa implements AprimoradorDeQuadros {
         alturaDaComposicao,
         parar,
         exigirGpu,
+        perfil.index,
+        reducaoDeRuido.isFinite
+            ? reducaoDeRuido.clamp(0.0, 1.0)
+            : reducaoDeRuidoPadrao,
       ),
       total: arquivos.length,
       aoAvancar: aoAvancar,
@@ -124,6 +151,8 @@ class _PedidoIa {
     this.altura,
     this.enderecoDeParar,
     this.exigirGpu,
+    this.perfil,
+    this.reducaoDeRuido,
   );
   final SendPort porta;
   final String modelo;
@@ -133,6 +162,8 @@ class _PedidoIa {
   final int altura;
   final int enderecoDeParar;
   final bool exigirGpu;
+  final int perfil;
+  final double reducaoDeRuido;
 }
 
 void _trabalhoIa(_PedidoIa p) {
@@ -178,7 +209,12 @@ void _trabalhoIa(_PedidoIa p) {
 }
 
 NativeEnhancer _abrirMotor(_PedidoIa p) {
-  final motor = NativeEnhancer.open(p.modelo, gpu: p.exigirGpu);
+  final motor = NativeEnhancer.openProfile(
+    p.modelo,
+    PerfilDoAprimoramento.values[p.perfil],
+    reducaoDeRuido: p.reducaoDeRuido,
+    gpu: p.exigirGpu,
+  );
   if (p.exigirGpu && !motor.info.gpu) {
     motor.close();
     throw StateError('sem GPU Vulkan para a IA neste aparelho');

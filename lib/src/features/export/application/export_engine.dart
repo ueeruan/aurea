@@ -364,6 +364,8 @@ class ExportEngine {
         forca: layer.forcaDoAprimoramento,
         larguraDaComposicao: width,
         alturaDaComposicao: height,
+        perfil: layer.perfilDoAprimoramento,
+        reducaoDeRuido: layer.reducaoDeRuido,
         aoAvancar: (feitos, total) {
           onProgress?.call(feitos / total);
           onDetalhe?.call('Aprimorando com IA: quadro $feitos de $total');

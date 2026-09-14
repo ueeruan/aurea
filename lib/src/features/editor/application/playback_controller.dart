@@ -43,6 +43,10 @@ class PlaybackController {
   Duration _base = Duration.zero;
   int seekRevision = 0;
 
+  /// O proximo tick pode publicar um instante ANTERIOR ao atual (so
+  /// depois de um realinhamento real para tras).
+  bool _podeVoltar = false;
+
   void _onTick(Duration elapsed) {
     final t = _base + elapsed;
     final end = durationOf();
@@ -59,7 +63,13 @@ class PlaybackController {
       return;
     }
     final quantized = _naGrade(t);
-    if (quantized != time.value) {
+    // MONOTONO: a ancoragem na midia pode puxar a base alguns ms para
+    // tras, e perto da fronteira de um quadro isso devolvia o quadro
+    // anterior — a composicao repetia um quadro, um soluco visivel. Puxar
+    // para tras agora so SEGURA o relogio ate a midia alcancar. Seek e
+    // loop mudam [time] direto; so o realinhamento real (>1 s) volta.
+    if (quantized > time.value || (_podeVoltar && quantized != time.value)) {
+      _podeVoltar = false;
       // Cadencia (marchas §6): a metrica de suavidade e a VARIANCIA do
       // intervalo entre ticks, nao a media de fps. FrameLog mede no
       // ponto de APRESENTACAO (travada-periodica, PR-J0).
@@ -85,10 +95,15 @@ class PlaybackController {
       // deriva — realinha de uma vez.
       _base += Duration(microseconds: errUs);
       debugBaseShiftUs = errUs;
+      _podeVoltar = errUs < 0;
       return;
     }
-    // Slew proporcional, teto de 20 ms por amostra (~2 amostras/s).
-    final step = (errUs * 0.25).round().clamp(-20000, 20000);
+    // Slew proporcional. O plugin publica posicao a cada 100 ms (dez
+    // amostras por segundo, e nao duas como quando isto foi escrito):
+    // 25% com teto de 20 ms por amostra chegava a mexer 20% na velocidade
+    // do relogio, e o texto por cima do video acelerava e freava. 10% com
+    // teto de 8 ms segura a variacao abaixo de 8%.
+    final step = (errUs * 0.1).round().clamp(-8000, 8000);
     debugBaseShiftUs = step;
     if (step != 0) _base += Duration(microseconds: step);
   }

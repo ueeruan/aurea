@@ -86,6 +86,10 @@ enum EffectType {
   // --- tempo da camada inteira (pesquisa 14/09/2026) ---
   timeSlice,
   posterizeTime,
+  // --- camada de ajuste de um edit no After (dono, 14/09/2026) ---
+  hueSaturation,
+  sFlicker,
+  mathOps,
 }
 
 /// O tipo a partir do IDENTIFICADOR estavel.
@@ -2051,6 +2055,9 @@ const effectSpecs = <EffectType, EffectSpec>{
       'poeira',
       'super 8',
       'granulado',
+      's_filmdamage',
+      'filmdamage',
+      'dano de filme',
     ],
     cost: 2,
     params: {
@@ -2061,6 +2068,17 @@ const effectSpecs = <EffectType, EffectSpec>{
       'queimado': EffectParam('Queimado', 0.3, 0.0, 1.0),
       'salto': EffectParam('Salto de quadro', 0.25, 0.0, 1.0),
       'semente': EffectParam('Semente', 11.0, 1.0, 999.0, kind: ParamKind.seed),
+      // S_FILMDAMAGE 2 (dono, 14/09/2026): SEMPRE NO FIM e todos neutros
+      // no inicial. Projeto salvo sem estas chaves le o inicial da ficha
+      // e abre exatamente como antes; os slots do shader dos sete de
+      // cima nao mudam de lugar.
+      'fios': EffectParam('Fios', 0, 0, 10),
+      'balanco': EffectParam('Balanço', 0, 0, 1),
+      'desfoque': EffectParam('Desfoque', 0, 0, 1),
+      'vinheta': EffectParam('Vinheta', 0, 0, 1),
+      'saturacao': EffectParam('Saturação', 1, 0, 2),
+      'sepia': EffectParam('Tom sépia', 0, 0, 1),
+      'tamanho_poeira': EffectParam('Tamanho da poeira', 1, .5, 3),
     },
     montar: ['poeira', 'riscos', 'cintilacao'],
     presets: [
@@ -2743,6 +2761,9 @@ const effectSpecs = <EffectType, EffectSpec>{
       'brilho',
       'contraste',
       'brightness contrast',
+      'brightness and contrast',
+      'brilho e contraste',
+      'brilho/contraste',
       'cc',
     ],
     params: {
@@ -3320,6 +3341,244 @@ const effectSpecs = <EffectType, EffectSpec>{
       EffectPronto('Choppy', {'rate': 4}),
     ],
   ),
+
+  // ------------------------------------------------------------------
+  // A CAMADA DE AJUSTE DO AFTER (dono, 14/09/2026). Um edit de referencia
+  // tinha, empilhados: Magic Bullet Looks, S_Sharpen, S_Flicker,
+  // S_MathOps, S_FilmDamage, Hue/Saturation e Brightness & Contrast. As
+  // contas de referencia estao em domain/efeitos_do_after.dart; o
+  // desenho roda no shader, com a mesma conta.
+  // ------------------------------------------------------------------
+
+  // HUE/SATURATION, o mestre do After e do Photoshop: a matiz gira no
+  // HSL, a saturacao escala o croma em volta da luminosidade (o cinza
+  // continua cinza) e a luminosidade mistura com o branco ou o preto.
+  // Colorir troca matiz e saturacao de todos os pixels e guarda so a
+  // luminancia — o sepia e o duotom de um toque.
+  EffectType.hueSaturation: EffectSpec(
+    id: 'hue_saturation',
+    name: 'Hue/Saturation',
+    category: 'Color',
+    synonyms: [
+      'hue/saturation',
+      'hue saturation',
+      'matiz/saturação',
+      'matiz e saturação',
+      'matiz',
+      'saturação',
+      'luminosidade',
+      'colorir',
+      'colorize',
+      'dessaturar',
+      'preto e branco',
+      'sépia',
+      'coloring',
+      'cc',
+    ],
+    params: {
+      'master_hue': EffectParam('Matiz', 0, -180, 180),
+      'master_saturation': EffectParam('Saturação', 0, -100, 100),
+      'master_lightness': EffectParam('Luminosidade', 0, -100, 100),
+      'colorize': EffectParam(
+        'Colorir',
+        0,
+        0,
+        1,
+        kind: ParamKind.toggle,
+      ),
+      'colorize_hue': EffectParam('Matiz ao colorir', 0, 0, 360),
+      'colorize_saturation': EffectParam('Saturação ao colorir', 25, 0, 100),
+    },
+    montar: ['master_hue', 'master_saturation', 'master_lightness'],
+    presets: [
+      EffectPronto('Preto e branco', {'master_saturation': -100}),
+      EffectPronto('Sépia', {
+        'colorize': 1,
+        'colorize_hue': 35,
+        'colorize_saturation': 30,
+      }),
+      EffectPronto('Cores vivas', {'master_saturation': 35}),
+    ],
+  ),
+
+  // S_FLICKER (Sapphire): "escala as cores da camada por quantias
+  // diferentes ao longo do tempo". Um aleatorio suave no brilho, outro
+  // por canal e uma onda com fase por canal; cada canal recebe a sua
+  // parte e o Brilho escala o resultado. O ganho do quadro e uma conta
+  // pura de (tempo, semente) que entra como UMA matriz de cor. O Flicker
+  // antigo continua como era: projeto salvo nao muda.
+  EffectType.sFlicker: EffectSpec(
+    id: 's_flicker',
+    name: 'S_Flicker',
+    category: 'Time',
+    synonyms: [
+      's_flicker',
+      's flicker',
+      'sapphire flicker',
+      'flicker',
+      'cintilar',
+      'cintilação',
+      'piscar',
+      'tremular',
+      'filme antigo',
+      'lâmpada',
+    ],
+    params: {
+      // Escala TUDO: zero desliga o efeito.
+      'amplitude': EffectParam('Amplitude', .2, 0, 2),
+      'rand_luma_amp': EffectParam('Brilho aleatório', 1, 0, 2),
+      'rand_color_amp': EffectParam('Cor aleatória', 0, 0, 2),
+      'rand_freq': EffectParam('Frequência aleatória', 30, 0, 60),
+      'wave_amp': EffectParam('Amplitude da onda', 0, 0, 2),
+      'wave_freq': EffectParam('Frequência da onda', 5, 0, 60),
+      'wave_red_phase': EffectParam('Fase da onda R', 0, -360, 360),
+      'wave_green_phase': EffectParam('Fase da onda G', 0, -360, 360),
+      'wave_blue_phase': EffectParam('Fase da onda B', 0, -360, 360),
+      // Quanto do pisca vai para cada canal.
+      'red_amp': EffectParam('Força em R', 1, 0, 2),
+      'green_amp': EffectParam('Força em G', 1, 0, 2),
+      'blue_amp': EffectParam('Força em B', 1, 0, 2),
+      // Escala o resultado inteiro.
+      'brightness': EffectParam('Brilho', 1, 0, 3),
+      'seed': EffectParam('Semente', 0, 0, 1000, kind: ParamKind.seed),
+    },
+    montar: ['amplitude', 'rand_freq', 'brightness'],
+    presets: [
+      EffectPronto('Filme antigo', {
+        'amplitude': .15,
+        'rand_luma_amp': 1,
+        'rand_color_amp': 0,
+        'rand_freq': 16,
+        'wave_amp': 0,
+      }),
+      EffectPronto('Lâmpada ruim', {
+        'amplitude': .6,
+        'rand_luma_amp': 1,
+        'rand_color_amp': .3,
+        'rand_freq': 12,
+        'wave_amp': 0,
+      }),
+      EffectPronto('Onda RGB', {
+        'amplitude': .3,
+        'rand_luma_amp': 0,
+        'rand_color_amp': 0,
+        'wave_amp': 1,
+        'wave_freq': 2,
+        'wave_red_phase': 0,
+        'wave_green_phase': 120,
+        'wave_blue_phase': 240,
+      }),
+    ],
+  ),
+
+  // S_MATHOPS (Sapphire): combina a camada (A) com uma fonte B numa
+  // operacao de pixel. Antes, cada entrada passa por Luzes (escala),
+  // Sombras (desloca os escuros: c*luzes + sombras*(1-c)) e Saturacao (em
+  // volta da luma Rec.709); depois, o destino passa pelos mesmos tres. A
+  // mascara de luma limita onde o resultado aparece. Somar com a fonte B
+  // Nenhuma (preto) e tudo no neutro devolve a imagem intacta. So no
+  // shader: a fonte desfocada e a mascara leem a vizinhanca do pixel.
+  EffectType.mathOps: EffectSpec(
+    id: 'math_ops',
+    name: 'S_MathOps',
+    category: 'Color',
+    synonyms: [
+      's_mathops',
+      's mathops',
+      'math ops',
+      'mathops',
+      'operações',
+      'somar',
+      'multiplicar',
+      'screen',
+      'diferença',
+      'blend',
+      'coloring',
+    ],
+    params: {
+      'operation': EffectParam(
+        'Operação',
+        0,
+        0,
+        8,
+        kind: ParamKind.choice,
+        options: [
+          'Somar',
+          'Subtrair',
+          'Multiplicar',
+          'Tela',
+          'Média',
+          'Sobrepor',
+          'Mínimo',
+          'Máximo',
+          'Diferença',
+        ],
+      ),
+      'source_b': EffectParam(
+        'Fonte B',
+        0,
+        0,
+        2,
+        kind: ParamKind.choice,
+        options: ['Nenhuma', 'A própria camada', 'A camada desfocada'],
+      ),
+      // Pixel pensado em 1080p; so conta com a camada desfocada.
+      'b_blur': EffectParam('Desfoque de B', 20, 0, 100, relative: true),
+      'a_lights': EffectParam('Luzes de A', 1, 0, 3),
+      'a_darks': EffectParam('Sombras de A', 0, -1, 1),
+      'a_saturation': EffectParam('Saturação de A', 1, 0, 3),
+      'b_lights': EffectParam('Luzes de B', 1, 0, 3),
+      'b_darks': EffectParam('Sombras de B', 0, -1, 1),
+      'b_saturation': EffectParam('Saturação de B', 1, 0, 3),
+      'dest_lights': EffectParam('Luzes do destino', 1, 0, 3),
+      'dest_darks': EffectParam('Sombras do destino', 0, -1, 1),
+      'dest_saturation': EffectParam('Saturação do destino', 1, 0, 3),
+      'mask': EffectParam(
+        'Máscara',
+        0,
+        0,
+        1,
+        kind: ParamKind.choice,
+        options: ['Nenhuma', 'Luma'],
+      ),
+      'mask_blur': EffectParam(
+        'Desfoque da máscara',
+        0,
+        0,
+        100,
+        relative: true,
+      ),
+      'invert_mask': EffectParam(
+        'Inverter máscara',
+        0,
+        0,
+        1,
+        kind: ParamKind.toggle,
+      ),
+    },
+    montar: ['a_lights', 'a_darks', 'dest_saturation'],
+    presets: [
+      // A camada de ajuste do edit de referencia: Somar sem fonte B,
+      // sombras de A em -0,03 e desfoque da mascara 12.
+      EffectPronto('Edit de referência', {
+        'operation': 0,
+        'source_b': 0,
+        'a_darks': -.03,
+        'mask_blur': 12,
+      }),
+      EffectPronto('Brilho difuso', {
+        'operation': 3,
+        'source_b': 2,
+        'b_blur': 30,
+        'b_lights': .6,
+      }),
+      EffectPronto('Contraste de sobreposição', {
+        'operation': 5,
+        'source_b': 1,
+        'dest_saturation': .9,
+      }),
+    ],
+  ),
 };
 
 /// OS EFEITOS DE EDIT, na ordem em que se procura: batida, glitch,
@@ -3329,20 +3588,24 @@ const efeitosDeEdit = <EffectType>[
   EffectType.flash,
   EffectType.zoomPunch,
   EffectType.strobe,
+  EffectType.sFlicker,
   EffectType.sliceGlitch,
   EffectType.twitch,
   EffectType.tremor,
   EffectType.timeSlice,
   EffectType.posterizeTime,
+  EffectType.filmDamage,
   EffectType.rgbSplit,
   EffectType.glitch,
   EffectType.colorBalance,
   EffectType.gradientMap,
   EffectType.colorTune,
+  EffectType.hueSaturation,
   EffectType.photoFilter,
   EffectType.channelMixer,
   EffectType.selectiveColor,
   EffectType.brightnessContrast,
+  EffectType.mathOps,
 ];
 
 /// Categorias do catalogo, na ordem em que aparecem.
@@ -3397,19 +3660,69 @@ const _categoriaEmPortugues = <String, String>{
 
 /// BUSCA (§5): nome, categoria e SINONIMOS. Quem digita "bloom" acha
 /// Glow; quem digita "pixelate" acha Mosaico.
+///
+/// SEM ACENTO E SEM CAIXA, dos dois lados. O teclado do celular poe o
+/// acento sozinho: "partículas" nao achava o sinonimo "particulas", e
+/// "saturacao" nao acharia "Saturação". A busca compara as duas pontas
+/// ja normalizadas, entao tanto faz como o sinonimo foi escrito.
 List<EffectType> searchEffects(String query) {
-  final q = query.trim().toLowerCase();
+  final q = normalizarBusca(query.trim());
   if (q.isEmpty) return effectSpecs.keys.toList();
+  bool contem(String texto) => normalizarBusca(texto).contains(q);
   return [
     for (final e in effectSpecs.entries)
-      if (e.value.name.toLowerCase().contains(q) ||
-          e.value.id.contains(q) ||
-          e.value.category.toLowerCase().contains(q) ||
-          (_categoriaEmPortugues[e.value.category] ?? '').contains(q) ||
-          e.value.synonyms.any((s) => s.contains(q)))
+      if (contem(e.value.name) ||
+          contem(e.value.id) ||
+          contem(e.value.category) ||
+          contem(_categoriaEmPortugues[e.value.category] ?? '') ||
+          e.value.synonyms.any(contem))
         e.key,
   ];
 }
+
+/// Minusculas e sem acento: "Saturação" vira "saturacao".
+///
+/// O Dart nao traz normalizacao Unicode (NFD) no nucleo, entao a tabela
+/// cobre as letras latinas acentuadas dos idiomas do app. O que nao esta
+/// nela passa intacto — hangul, kana e cirilico nao tem acento a tirar.
+String normalizarBusca(String texto) {
+  final saida = StringBuffer();
+  for (final runa in texto.toLowerCase().runes) {
+    final letra = String.fromCharCode(runa);
+    saida.write(_semAcento[letra] ?? letra);
+  }
+  return saida.toString();
+}
+
+const _semAcento = <String, String>{
+  'á': 'a',
+  'à': 'a',
+  'â': 'a',
+  'ã': 'a',
+  'ä': 'a',
+  'å': 'a',
+  'é': 'e',
+  'è': 'e',
+  'ê': 'e',
+  'ë': 'e',
+  'í': 'i',
+  'ì': 'i',
+  'î': 'i',
+  'ï': 'i',
+  'ó': 'o',
+  'ò': 'o',
+  'ô': 'o',
+  'õ': 'o',
+  'ö': 'o',
+  'ú': 'u',
+  'ù': 'u',
+  'û': 'u',
+  'ü': 'u',
+  'ç': 'c',
+  'ñ': 'n',
+  'ý': 'y',
+  'ÿ': 'y',
+};
 
 List<EffectType> effectsInCategory(String category) => [
   for (final e in effectSpecs.entries)

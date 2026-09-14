@@ -170,6 +170,7 @@ void main() {
         'sliceGlitch',
         'timeSlice',
         'posterizeTime',
+        'mathOps',
       };
 
       final mortos = <String>[];

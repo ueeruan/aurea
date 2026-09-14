@@ -158,6 +158,14 @@ const pixelKernels = <EffectType, PixelKernel>{
     'queimado',
     'salto',
     'semente',
+    // S_FilmDamage 2: sempre DEPOIS dos sete de cima (slots 7 a 13).
+    'fios',
+    'balanco',
+    'desfoque',
+    'vinheta',
+    'saturacao',
+    'sepia',
+    'tamanho_poeira',
   ]),
   EffectType.flicker: PixelKernel(31, [
     'amount',
@@ -254,6 +262,33 @@ const pixelKernels = <EffectType, PixelKernel>{
     'posterize',
     'speed',
     'seed',
+  ]),
+  // 45 em diante - a camada de ajuste do After: a mesma conta em Dart esta
+  // em domain/efeitos_do_after.dart.
+  EffectType.hueSaturation: PixelKernel(45, [
+    'master_hue',
+    'master_saturation',
+    'master_lightness',
+    'colorize',
+    'colorize_hue',
+    'colorize_saturation',
+  ]),
+  EffectType.mathOps: PixelKernel(46, [
+    'operation',
+    'source_b',
+    'b_blur',
+    'a_lights',
+    'a_darks',
+    'a_saturation',
+    'b_lights',
+    'b_darks',
+    'b_saturation',
+    'dest_lights',
+    'dest_darks',
+    'dest_saturation',
+    'mask',
+    'mask_blur',
+    'invert_mask',
   ]),
 };
 

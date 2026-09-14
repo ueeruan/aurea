@@ -51,6 +51,7 @@ import 'pixel_effect_engine.dart';
 import '../../domain/pixel_effect.dart';
 import '../../domain/bloom.dart';
 import '../../domain/coloring.dart';
+import '../../domain/efeitos_do_after.dart';
 import '../../domain/one_frame.dart';
 import '../../domain/time_slice.dart';
 import '../../application/quadros_de_video.dart';
@@ -2840,6 +2841,9 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
         case EffectType.selectiveColor:
         // Fatias de glitch deslocam linhas inteiras de pixels: so no shader.
         case EffectType.sliceGlitch:
+        // S_MathOps le a camada desfocada e a mascara de luma em volta de
+        // cada pixel: a operacao nao cabe numa matriz de cor.
+        case EffectType.mathOps:
           break;
 
         case EffectType.gaussianBlur:
@@ -3051,6 +3055,38 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
                 child: out,
               );
             }
+          }
+
+        // S_FLICKER: o ganho RGB do quadro e uma conta pura de (tempo,
+        // semente) e entra como UMA matriz de cor — exato na previa, na
+        // exportacao e no teste, sem textura a mais. As frequencias sao
+        // integradas no tempo: animar a frequencia acelera sem tranco.
+        case EffectType.sFlicker:
+          final ganhoDoPisca = ganhoDoSFlicker(
+            faseAleatoria: integratedPhase(effect.track('rand_freq'), local),
+            faseDaOnda: integratedPhase(effect.track('wave_freq'), local),
+            amplitude: effect.paramAt('amplitude', local),
+            brilhoAleatorio: effect.paramAt('rand_luma_amp', local),
+            corAleatoria: effect.paramAt('rand_color_amp', local),
+            amplitudeDaOnda: effect.paramAt('wave_amp', local),
+            faseR: effect.paramAt('wave_red_phase', local),
+            faseG: effect.paramAt('wave_green_phase', local),
+            faseB: effect.paramAt('wave_blue_phase', local),
+            forcaR: effect.paramAt('red_amp', local),
+            forcaG: effect.paramAt('green_amp', local),
+            forcaB: effect.paramAt('blue_amp', local),
+            brilho: effect.paramAt('brightness', local),
+            semente: effect.paramAt('seed', local).round(),
+          );
+          // Ganho 1 nos tres canais nao embrulha nada: um filtro a menos
+          // na arvore.
+          if ((ganhoDoPisca.r - 1).abs() > 1e-6 ||
+              (ganhoDoPisca.g - 1).abs() > 1e-6 ||
+              (ganhoDoPisca.b - 1).abs() > 1e-6) {
+            out = ColorFiltered(
+              colorFilter: ColorFilter.matrix(matrizDeGanho(ganhoDoPisca)),
+              child: out,
+            );
           }
 
         case EffectType.gradient4:
@@ -3804,6 +3840,23 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
                 opacidade:
                     effect.paramAt('opacity', local) *
                     (modoMapa == 0 ? 1 : .5),
+              ),
+            ),
+            child: out,
+          );
+
+        // HUE/SATURATION SEM O MOTOR DE PIXEL: a matriz aproximada. A conta
+        // exata (saturacao pelo croma, colorir pelo HSL) roda no modo 45.
+        case EffectType.hueSaturation:
+          out = ColorFiltered(
+            colorFilter: ColorFilter.matrix(
+              hueSaturationMatrix(
+                matiz: effect.paramAt('master_hue', local),
+                saturacao: effect.paramAt('master_saturation', local),
+                luminosidade: effect.paramAt('master_lightness', local),
+                colorir: effect.paramAt('colorize', local) >= .5,
+                matizColorir: effect.paramAt('colorize_hue', local),
+                saturacaoColorir: effect.paramAt('colorize_saturation', local),
               ),
             ),
             child: out,
@@ -5381,7 +5434,32 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
           final dy = jump <= 0.01
               ? 0.0
               : (fxNoise(frame.toDouble(), 1, seed + 5) - 0.5) * jump * 10;
+          // S_FILMDAMAGE 2: todos nascem neutros, e neutro nao embrulha
+          // nada — projeto antigo desenha a mesma arvore de antes.
+          final balancoFilme = effect.paramAt('balanco', local).clamp(0.0, 1.0);
+          final dx = balancoFilme <= 0.001
+              ? 0.0
+              : (fxValueNoise(local.inMicroseconds / 1e6 * 3, 11, seed) - 0.5) *
+                    balancoFilme *
+                    12;
+          final desfoqueFilme = effect
+              .paramAt('desfoque', local)
+              .clamp(0.0, 1.0);
+          final saturacaoFilme = effect
+              .paramAt('saturacao', local)
+              .clamp(0.0, 2.0);
+          final sepiaFilme = effect.paramAt('sepia', local).clamp(0.0, 1.0);
           var body = out;
+          if (desfoqueFilme > 0.001) {
+            final sigmaFilme = pxAt1080(desfoqueFilme * 4, fxWidth, fxHeight);
+            body = ImageFiltered(
+              imageFilter: ui.ImageFilter.blur(
+                sigmaX: sigmaFilme,
+                sigmaY: sigmaFilme,
+              ),
+              child: body,
+            );
+          }
           if ((lum - 1).abs() > 0.005) {
             body = ColorFiltered(
               colorFilter: ColorFilter.matrix(_scaleShiftMatrix(lum, 0)),
@@ -5391,7 +5469,7 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
           out = Stack(
             clipBehavior: Clip.none,
             children: [
-              Transform.translate(offset: Offset(0, dy), child: body),
+              Transform.translate(offset: Offset(dx, dy), child: body),
               Positioned.fill(
                 child: IgnorePointer(
                   child: CustomPaint(
@@ -5401,6 +5479,11 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
                       burn: effect.paramAt('queimado', local),
                       time: local,
                       seed: seed,
+                      hairs: effect.paramAt('fios', local).clamp(0.0, 10.0),
+                      vignette: effect.paramAt('vinheta', local).clamp(0.0, 1.0),
+                      dustSize: effect
+                          .paramAt('tamanho_poeira', local)
+                          .clamp(0.5, 3.0),
                     ),
                   ),
                 ),
@@ -5423,6 +5506,19 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
                 ),
             ],
           );
+          // A cor da copia por cima de tudo, como no shader: a poeira e os
+          // riscos tambem ficam sepia.
+          if ((saturacaoFilme - 1).abs() > 0.001 || sepiaFilme > 0.001) {
+            out = ColorFiltered(
+              colorFilter: ColorFilter.matrix(
+                matrizDaCopiaDeFilme(
+                  saturacao: saturacaoFilme,
+                  sepia: sepiaFilme,
+                ),
+              ),
+              child: out,
+            );
+          }
 
         case EffectType.blobTracker:
           // As caixas vem da ANALISE ja gravada. Sem analise, o pintor

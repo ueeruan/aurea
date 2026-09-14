@@ -433,11 +433,15 @@ Map<String, dynamic>? _layerJson(VideoProject p, Layer l, int index, int fps) {
     case NullLayer _:
       return {...base, 'ty': 3}; // null
     case GroupLayer g:
-      // Precomp: os filhos viram um asset proprio.
+      // Precomp: os filhos viram um asset proprio. O tempo do precomp e
+      // (tempo - st): com o ponto de entrada no conteudo (grupo aparado ou
+      // segunda metade de uma divisao) o conteudo continua de onde estava,
+      // como no editor, e nao recomeca do zero.
       return {
         ...base,
         'ty': 0,
         'refId': 'comp_${g.id}',
+        'st': (g.startTime - g.contentOffset).inMicroseconds * fps / 1000000,
         'w': p.outputWidth,
         'h': p.outputHeight,
       };
@@ -472,6 +476,29 @@ LottieExport exportLottie(
   var index = 1;
   var skipped = 0;
 
+  // O asset de um grupo, e o de cada grupo dentro dele: antes so o nivel
+  // de cima ganhava asset, e o grupo aninhado apontava para um refId que
+  // nao existia (o player descartava o arquivo inteiro).
+  void precomp(GroupLayer g) {
+    final childLayers = <Map<String, dynamic>>[];
+    var ci = 1;
+    for (final c in g.children) {
+      if (blocking.contains(c.id)) {
+        skipped++;
+        continue;
+      }
+      final cj = _layerJson(project, c, ci, fps);
+      if (cj == null) {
+        skipped++;
+        continue;
+      }
+      childLayers.add(cj);
+      ci++;
+      if (c is GroupLayer) precomp(c);
+    }
+    assets.add({'id': 'comp_${g.id}', 'layers': childLayers});
+  }
+
   // Lottie desenha da ultima para a primeira, como a nossa pilha.
   for (final l in project.layers) {
     if (blocking.contains(l.id)) {
@@ -485,25 +512,7 @@ LottieExport exportLottie(
     }
     layers.add(json);
     index++;
-
-    if (l is GroupLayer) {
-      final childLayers = <Map<String, dynamic>>[];
-      var ci = 1;
-      for (final c in l.children) {
-        if (blocking.contains(c.id)) {
-          skipped++;
-          continue;
-        }
-        final cj = _layerJson(project, c, ci, fps);
-        if (cj == null) {
-          skipped++;
-          continue;
-        }
-        childLayers.add(cj);
-        ci++;
-      }
-      assets.add({'id': 'comp_${l.id}', 'layers': childLayers});
-    }
+    if (l is GroupLayer) precomp(l);
   }
 
   final durationFrames = project.duration.inMicroseconds * fps / 1000000;

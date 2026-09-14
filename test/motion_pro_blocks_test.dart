@@ -423,6 +423,43 @@ void main() {
       expect(textLayer['ty'], 5); // text
     });
 
+    test('grupo dentro de grupo: todo refId tem asset, e o conteudo continua do ponto de entrada', () {
+      final dentro = GroupLayer(
+        name: 'dentro',
+        startTime: Duration.zero,
+        duration: const Duration(seconds: 2),
+        children: [_shape('a')],
+      );
+      final fora = GroupLayer(
+        name: 'fora',
+        startTime: const Duration(seconds: 1),
+        duration: const Duration(seconds: 2),
+        contentOffset: const Duration(milliseconds: 500),
+        children: [dentro, _shape('b')],
+      );
+      final out = exportLottie(_p([fora]));
+      final back = jsonDecode(jsonEncode(out.json)) as Map<String, dynamic>;
+      final ids = {for (final a in back['assets'] as List) (a as Map)['id']};
+      final refs = <String>{};
+      void junta(List camadas) {
+        for (final c in camadas) {
+          final m = c as Map;
+          if (m['ty'] == 0) refs.add(m['refId'] as String);
+        }
+      }
+
+      junta(back['layers'] as List);
+      for (final a in back['assets'] as List) {
+        junta((a as Map)['layers'] as List);
+      }
+      expect(refs, {'comp_${fora.id}', 'comp_${dentro.id}'});
+      expect(ids.containsAll(refs), isTrue, reason: 'refId sem asset: ${refs.difference(ids)}');
+      // st = inicio - ponto de entrada: 1 s - 0,5 s = 15 quadros a 30 fps.
+      final raiz = (back['layers'] as List).single as Map;
+      expect(raiz['st'], 15);
+      expect(raiz['ip'], 30);
+    });
+
     test('camada bloqueante e PULADA, nunca exportada quebrada', () {
       final out = exportLottie(_p([
         _shape('ok'),

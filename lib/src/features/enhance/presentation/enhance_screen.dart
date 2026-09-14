@@ -8,6 +8,7 @@ import 'package:gal/gal.dart';
 import 'package:video_player/video_player.dart';
 
 import '../application/enhancement_job.dart';
+import '../application/native_enhancer.dart';
 import '../domain/color_look.dart';
 
 class EnhanceScreen extends StatefulWidget {
@@ -19,9 +20,13 @@ class EnhanceScreen extends StatefulWidget {
 class _EnhanceScreenState extends State<EnhanceScreen> {
   final _job = EnhancementJob();
   String? _source, _before, _after, _result;
+  /// O MOTOR DE IA EXISTE NESTE APARELHO? Hoje so no Android (a
+  /// biblioteca nativa ainda nao e compilada para iOS). Sem ele o
+  /// interruptor fica desligado e diz por que, em vez de falhar ao gerar.
+  static final bool _iaDisponivel = NativeEnhancer.libraryAvailable;
   bool _video = false,
       _busy = false,
-      _ai = true,
+      _ai = _iaDisponivel,
       _showBefore = false,
       _saving = false;
   int _scale = 2;
@@ -243,13 +248,20 @@ class _EnhanceScreenState extends State<EnhanceScreen> {
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const AppText('Ampliar com IA'),
-                subtitle: const AppText('ESRGAN • processamento no aparelho'),
-                value: _ai,
-                onChanged: _busy ? null : (v) => _changed(() => _ai = v),
+                subtitle: AppText(
+                  _iaDisponivel
+                      ? 'Real-ESRGAN • processamento no aparelho'
+                      : 'IA ainda indisponível neste aparelho',
+                ),
+                value: _ai && _iaDisponivel,
+                onChanged: _busy || !_iaDisponivel
+                    ? null
+                    : (v) => _changed(() => _ai = v),
               ),
               if (_ai)
                 SegmentedButton<int>(
                   segments: const [
+                    ButtonSegment(value: 1, label: AppText('1×')),
                     ButtonSegment(value: 2, label: AppText('2×')),
                     ButtonSegment(value: 4, label: AppText('4×')),
                   ],

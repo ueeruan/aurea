@@ -30,6 +30,13 @@ class PassoDeInterpolacao {
   String toString() => 'Passo($saida: $a..$b @ $t)';
 }
 
+/// PERTO DAS PONTAS O QUADRO REAL FICA. Medido na bancada do host (RIFE
+/// v4.6, janela andando 48 px): com t ate 0,1 ou a partir de 0,9 a rede
+/// fica presa perto do vizinho e nao ganha de repetir o quadro real — so
+/// gasta GPU. Isso aparece quando as taxas nao se dividem (25 fps para
+/// 120 da t = 1/24); de 30 para 60 ou 120 nunca acontece.
+const pontaDoRife = 0.1;
+
 /// O PLANO DA CAMERA LENTA COM IA.
 ///
 /// A fonte e lida numa taxa BASE (a do proprio arquivo, sem quadro
@@ -42,6 +49,8 @@ class PassoDeInterpolacao {
 ///
 /// Sao floor(quadrosBase*saida/base) quadros (a mesma duracao dos quadros
 /// base). Depois do ultimo quadro real nao ha vizinho: copia-se ele.
+///
+/// Perto das pontas o quadro real fica: ver [pontaDoRife].
 List<PassoDeInterpolacao> planoDeInterpolacao({
   required int quadrosBase,
   required int taxaBase,
@@ -57,8 +66,12 @@ List<PassoDeInterpolacao> planoDeInterpolacao({
         final a = numerador ~/ taxaSaida;
         final resto = numerador % taxaSaida;
         if (a >= ultimo) return PassoDeInterpolacao(i, ultimo, ultimo, 0);
-        if (resto == 0) return PassoDeInterpolacao(i, a, a, 0);
-        return PassoDeInterpolacao(i, a, a + 1, resto / taxaSaida);
+        final t = resto / taxaSaida;
+        if (resto == 0 || t <= pontaDoRife) {
+          return PassoDeInterpolacao(i, a, a, 0);
+        }
+        if (t >= 1 - pontaDoRife) return PassoDeInterpolacao(i, a + 1, a + 1, 0);
+        return PassoDeInterpolacao(i, a, a + 1, t);
       }(),
   ];
 }

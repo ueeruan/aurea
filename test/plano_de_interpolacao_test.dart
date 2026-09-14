@@ -60,6 +60,20 @@ void main() {
       }
     });
 
+    test('perto das pontas o quadro real fica (a rede fica presa ali)', () {
+      // 25 -> 120: t = i*25/120 passa por 1/24 e 23/24.
+      final p = planoDeInterpolacao(quadrosBase: 25, taxaBase: 25, taxaSaida: 120);
+      final perto = p.firstWhere((x) => x.saida == 5); // 125/120 -> a=1, t=5/120
+      expect(perto, const PassoDeInterpolacao(5, 1, 1, 0));
+      final quaseB = p.firstWhere((x) => x.saida == 23); // 575/120 -> a=4, t=95/120
+      expect(quaseB.copia, isFalse, reason: '0,79 ainda e meio do caminho');
+      final noFim = p.firstWhere((x) => x.saida == 19); // 475/120 -> a=3, t=115/120
+      expect(noFim, const PassoDeInterpolacao(19, 4, 4, 0), reason: 't=0,96 vira o quadro B');
+      for (final x in p.where((x) => !x.copia)) {
+        expect(x.t, inExclusiveRange(pontaDoRife, 1 - pontaDoRife));
+      }
+    });
+
     test('pares vizinhos em ordem crescente (o motor le cada arquivo uma vez)', () {
       final p = planoDeInterpolacao(quadrosBase: 50, taxaBase: 25, taxaSaida: 100);
       var ultimoA = -1;

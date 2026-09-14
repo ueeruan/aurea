@@ -136,10 +136,7 @@ class PainelDaCena extends ConsumerWidget {
           _Acao(
             icone: Icons.clear_rounded,
             rotulo: 'Tirar os cortes de camera (${cena.shots.length})',
-            aoTocar: () {
-              c.clearCameraShots(cena.id);
-              dizer('Cortes apagados.');
-            },
+            aoTocar: () => c.clearCameraShots(cena.id),
           ),
         const _Titulo('Movimento pronto'),
         // OS RIGS GERAM KEYFRAMES DE VERDADE, e nao um efeito escondido:

@@ -415,15 +415,9 @@ List<QuickAction> quickActionsFor(
       icon: CupertinoIcons.delete_left,
       label: 'Excluir e fechar',
       pro: true,
-      onTap: () {
-        controller.rippleDeleteLayer(id);
-        AureaSnack.show(
-          context,
-          'Camada excluida e o buraco fechado',
-          actionLabel: 'Desfazer',
-          onAction: controller.undo,
-        );
-      },
+      // Sem aviso de "excluida" (pedido dos testadores): o Desfazer fica
+      // na barra de reproducao.
+      onTap: () => controller.rippleDeleteLayer(id),
     ),
     QuickAction(
       key: 'fechar-buracos',

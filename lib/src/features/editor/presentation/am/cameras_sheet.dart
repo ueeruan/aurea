@@ -2,7 +2,6 @@ import 'package:aurea/src/core/l10n/app_language.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../../core/ui/snack.dart';
 import '../../../../core/utils/time_format.dart';
 import '../../application/editor_controller.dart';
 import '../../application/playback_controller.dart';
@@ -261,12 +260,6 @@ Future<void> showCamerasSheet(
                     onTap: () {
                       controller.clearCameraShots(layerId);
                       setSheetState(() {});
-                      AureaSnack.show(
-                        sheetContext,
-                        'Tomadas removidas',
-                        actionLabel: 'Desfazer',
-                        onAction: controller.undo,
-                      );
                     },
                     child: const AppText('Limpar tomadas',
                       style: TextStyle(fontSize: 12, color: AmColors.pink),

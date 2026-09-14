@@ -320,7 +320,6 @@ class _CommunityTabState extends ConsumerState<CommunityTab> {
       return;
     }
     await _atualizar(daRede: true);
-    if (mounted) AureaSnack.show(context, 'Apagado.');
   }
 
   /// O post e meu quando a conta deste aparelho o assinou. O `autorId`

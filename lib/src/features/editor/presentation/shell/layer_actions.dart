@@ -16,15 +16,18 @@ import 'package:aurea/src/core/l10n/app_language.dart';
 /// AS ACOES ESTRUTURAIS SOBRE CAMADAS, num lugar so.
 ///
 /// O cabecalho da selecao, a linha de acoes rapidas e a timeline
-/// chamam estas funcoes: dois botoes, uma regra so (magnetico, aviso
-/// com Desfazer, limpar a selecao multipla).
+/// chamam estas funcoes: dois botoes, uma regra so (magnetico, limpar a
+/// selecao multipla).
 
-/// Exclui as camadas de [targets]: respeita o magnetico e oferece
-/// "Desfazer".
+/// Exclui as camadas de [targets], respeitando o magnetico.
+///
+/// SEM AVISO DE "EXCLUIDA". Os testadores do beta 1.0.5 pediram para tirar:
+/// o aviso cobria a timeline logo depois de cada exclusao, e a camada
+/// sumindo ja diz o que aconteceu. O Desfazer continua na barra de
+/// reproducao.
 void excluirCamadas(BuildContext context, WidgetRef ref, Set<String> targets) {
   if (targets.isEmpty) return;
   final controller = ref.read(editorControllerProvider.notifier);
-  final count = targets.length;
   // MAGNETICO: excluir FECHA o buraco e puxa o que vinha depois.
   final magnetico = ref.read(magneticProvider);
   if (magnetico) {
@@ -35,14 +38,6 @@ void excluirCamadas(BuildContext context, WidgetRef ref, Set<String> targets) {
   } else {
     controller.removeLayers(targets);
   }
-  AureaSnack.show(
-    context,
-    count == 1
-        ? (magnetico ? 'Camada excluida e o buraco fechado' : 'Camada excluida')
-        : '$count camadas excluidas',
-    actionLabel: 'Desfazer',
-    onAction: controller.undo,
-  );
 }
 
 /// Agrupa a selecao e sai da selecao multipla.

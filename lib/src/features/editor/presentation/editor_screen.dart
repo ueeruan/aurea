@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/tokens.dart';
@@ -40,6 +41,7 @@ import 'context/layer_header.dart';
 import 'shell/layer_actions.dart';
 import 'shell/top_bar.dart';
 import 'shell/transport_bar.dart';
+import 'shell/barra_de_tempo_tela_cheia.dart';
 import 'widgets/add_layer_sheet.dart';
 import 'widgets/mask_node_editor.dart';
 import 'widgets/preview_stage.dart';
@@ -111,6 +113,8 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
 
   @override
   void dispose() {
+    // Saiu do editor em tela cheia: devolve as barras do sistema.
+    if (_telaCheiaAtiva) _modoDeSistema(false);
     RecentSheets.instance.clear();
     _playback.time.removeListener(_syncVideos);
     _playback.playing.removeListener(_syncVideos);
@@ -119,6 +123,19 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
     }
     _videos.dispose();
     super.dispose();
+  }
+
+  bool _telaCheiaAtiva = false;
+
+  void _modoDeSistema(bool telaCheia) {
+    _telaCheiaAtiva = telaCheia;
+    try {
+      SystemChrome.setEnabledSystemUIMode(
+        telaCheia ? SystemUiMode.immersiveSticky : SystemUiMode.edgeToEdge,
+      );
+    } catch (_) {
+      // Plataforma sem controle de barras (testes, desktop): segue.
+    }
   }
 
   // ------------------------------------------------------- navegacao
@@ -580,6 +597,16 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
     final multi = ref.watch(multiSelectProvider);
     final s = ref.watch(editorSessionProvider);
 
+    // TELA CHEIA DE VERDADE: some a barra de status e a de navegacao
+    // enquanto a previa ocupa a tela; voltam ao sair.
+    ref.listen<bool>(
+      editorSessionProvider.select((s) => s.previewExpanded),
+      (antes, agora) {
+        if (antes == agora) return;
+        _modoDeSistema(agora);
+      },
+    );
+
     ref.listen<String?>(selectedLayerProvider, (previous, next) {
       if (previous == next) return;
       // Um painel/atalho capturado para A nao pode editar A depois de
@@ -973,8 +1000,16 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                               backLabel: _backLabel,
                               title: titulo,
                             ),
-                          preview(m.preview),
+                          preview(
+                            s.previewExpanded
+                                ? (m.preview - BarraDeTempoTelaCheia.altura)
+                                      .clamp(0.0, double.infinity)
+                                      .toDouble()
+                                : m.preview,
+                          ),
                           if (!s.previewExpanded) alca,
+                          if (s.previewExpanded)
+                            BarraDeTempoTelaCheia(playback: _playback),
                           transporte,
                           if (!s.previewExpanded) ...[
                             timeline(m.timeline),

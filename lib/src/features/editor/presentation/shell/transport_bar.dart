@@ -207,8 +207,14 @@ class EditorTransportBar extends ConsumerWidget {
             ),
             botao(
               key: const ValueKey('transport-expand'),
-              icon: CupertinoIcons.viewfinder,
-              tooltip: 'Expandir prévia',
+              // TELA CHEIA com cara de tela cheia. O visor nao dizia o que
+              // fazia: "e tela cheia tambem" pedia quem nunca achou o botao.
+              icon: ref.watch(editorSessionProvider).previewExpanded
+                  ? CupertinoIcons.fullscreen_exit
+                  : CupertinoIcons.fullscreen,
+              tooltip: ref.watch(editorSessionProvider).previewExpanded
+                  ? 'Sair da tela cheia'
+                  : 'Tela cheia',
               onTap: () => ref
                   .read(editorSessionProvider.notifier)
                   .togglePreviewExpanded(),

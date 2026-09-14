@@ -14,18 +14,22 @@ Matrix4 selectionTransform(VideoProject project, Layer layer, Duration time) {
   final ratio = ownScale.abs() < 1e-6 ? 1.0 : effective.scale / ownScale;
   var sx = ownScale * ratio;
   var sy = layer.scaleY.valueAt(local) * ratio;
+  var pos = effective.pos;
   if (layer.is3D || effective.z != 0) {
-    final perspective = 1200 / (1200 + effective.z.clamp(-1100, 100000));
-    sx *= perspective;
-    sy *= perspective;
+    // A MESMA projecao do palco: encolhe e vai para o ponto de fuga.
+    final vista = projetarProfundidade(project, pos, effective.z);
+    // Passou da camera: nao desenha, entao nao se toca.
+    if (vista == null) return Matrix4.zero();
+    pos = vista.pos;
+    sx *= vista.escala;
+    sy *= vista.escala;
   }
   final pivot = layer.pivot.valueAt(local);
   final tilt =
       (effective.rotX != 0 || effective.rotY != 0) &&
       layer is! ParticlesLayer &&
       layer is! Element3DLayer;
-  final matrix = Matrix4.identity()
-    ..translateByDouble(effective.pos.dx, effective.pos.dy, 0, 1);
+  final matrix = Matrix4.identity()..translateByDouble(pos.dx, pos.dy, 0, 1);
   if (tilt) {
     matrix.multiply(
       Matrix4.identity()

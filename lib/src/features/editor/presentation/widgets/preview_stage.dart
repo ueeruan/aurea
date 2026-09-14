@@ -162,6 +162,7 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
     final ordered = depthSortPaintOrder(
       project.layers.reversed.toList(),
       t,
+      project: project,
     ).reversed;
     for (final l in [
       ...ordered.where((l) => l is! NullLayer),
@@ -205,6 +206,8 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
     final t = widget.playback.time.value;
     if (!l.activeAt(t)) return null;
     final matrix = selectionTransform(project, l, t);
+    // Camada que passou da camera nao aparece: sem alcas soltas no canto.
+    if (matrix.storage.every((v) => v == 0)) return null;
     final caixa = ref
         .read(editorControllerProvider.notifier)
         .layerBoxRect(l, t, scaled: false);
@@ -1409,7 +1412,7 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
           layer,
     ];
     final sorted = transitionPaintOrder(
-      depthSortPaintOrder(paintOrder, t),
+      depthSortPaintOrder(paintOrder, t, project: project),
       transitions,
     );
     final transitionIds = {
@@ -2227,6 +2230,35 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
         extraZ = eff.z - layer.positionZ.valueAt(local);
         sx *= ratio;
         sy *= ratio;
+      } else if (layer.is3D &&
+          layer is! CameraLayer &&
+          rig?[layer.id] == null) {
+        // CAMADA 3D SEM PAI tambem ve a camera da composicao. So o
+        // caminho do pai passava por ela: mover a camera nao mexia na
+        // camada solta, e a moldura de selecao ficava em outro lugar.
+        final cam = cameraAtivaEm(project, t);
+        if (cam != null) {
+          final vista = vistoPelaCamera(
+            project,
+            cam,
+            t,
+            LayerTransform(
+              pos: pos,
+              rot: rotationDeg,
+              rotX: layer.rotationX.valueAt(local),
+              rotY: layer.rotationY.valueAt(local),
+              scale: 1,
+              z: layer.positionZ.valueAt(local),
+            ),
+          );
+          pos = vista.pos;
+          rotationDeg = vista.rot;
+          extraRotX = vista.rotX - layer.rotationX.valueAt(local);
+          extraRotY = vista.rotY - layer.rotationY.valueAt(local);
+          extraZ = vista.z - layer.positionZ.valueAt(local);
+          sx *= vista.scale;
+          sy *= vista.scale;
+        }
       }
     }
 
@@ -2283,11 +2315,11 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
           project.outputHeight / 2,
         );
         final authoredOffset = pos - compCenter;
-        // Mesma projecao de posicao do parenting: orbita 3D de verdade.
-        final perspPos = 1200 / (1200 + (ne.z + z2).clamp(-1100.0, 100000.0));
+        // Orbita 3D de verdade. A perspectiva fica para a projecao unica
+        // la embaixo (ponto de fuga no centro): projetar aqui tambem dobrava.
         pos =
             ne.pos +
-            Offset(x1 * czr - y1 * szr, x1 * szr + y1 * czr) * perspPos +
+            Offset(x1 * czr - y1 * szr, x1 * szr + y1 * czr) +
             authoredOffset;
         extraZ = ne.z + z2 - layer.positionZ.valueAt(local);
         rotationDeg += place.rotationDeg + ne.rot;
@@ -2299,15 +2331,23 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
       }
     }
 
-    // ---- 3D: perspectiva simples pela profundidade ----
+    // ---- 3D: profundidade de verdade ----
+    // Recuar em Z encolhe E leva a camada para o ponto de fuga (centro da
+    // composicao), a mesma conta dos solidos 3D. So encolher deixava o Z
+    // com cara de zoom: a camada ficava parada no lugar.
     if (layer.is3D || extraZ != 0) {
-      final z = (layer.positionZ.valueAt(local) + extraZ).clamp(
-        -1100.0,
-        100000.0,
+      final vista = projetarProfundidade(
+        project,
+        pos,
+        layer.positionZ.valueAt(local) + extraZ,
       );
-      final persp = 1200 / (1200 + z);
-      sx *= persp;
-      sy *= persp;
+      // Passou da camera: nao aparece (como no After Effects).
+      if (vista == null) {
+        return const Positioned(left: 0, top: 0, child: SizedBox.shrink());
+      }
+      pos = vista.pos;
+      sx *= vista.escala;
+      sy *= vista.escala;
     }
 
     final rotation = rotationDeg * math.pi / 180;

@@ -482,7 +482,59 @@ LayerTransform effectiveTransform(
   final cam = raiz && layer.is3D && layer is! CameraLayer
       ? cameraAtivaEm(project, t)
       : null;
-  if (cam != null) {
+  final mundo = LayerTransform(
+    pos: pos,
+    rot: rot,
+    rotX: rotX,
+    rotY: rotY,
+    scale: scale,
+    z: z,
+  );
+  return cam == null ? mundo : vistoPelaCamera(project, cam, t, mundo);
+}
+
+/// A LENTE DA COMPOSICAO: a mesma focal dos solidos (World3DPainter) e da
+/// camera parada (`CameraLayer.lenteNeutra`).
+const double focalDaComposicao = 1200;
+
+/// Mais perto que isso a camada ja passou da camera e nao aparece, como no
+/// After Effects. Da 12x de tamanho no limite.
+const double zPertoDaCamera = -1100;
+
+/// PROFUNDIDADE DE VERDADE para camada plana: recuar em Z encolhe E puxa a
+/// camada para o centro da composicao (o ponto de fuga); avancar faz o
+/// contrario. Antes so a escala mudava — a camada ficava parada no lugar,
+/// o Z parecia um zoom, e uma foto e um solido 3D no mesmo X/Y/Z apareciam
+/// em lugares diferentes. Nulo quando a camada passou da camera.
+({Offset pos, double escala})? projetarProfundidade(
+  VideoProject project,
+  Offset pos,
+  double z,
+) {
+  if (!z.isFinite || z <= zPertoDaCamera) return null;
+  final k = focalDaComposicao / (focalDaComposicao + z);
+  final centro = Offset(project.outputWidth / 2, project.outputHeight / 2);
+  return (pos: centro + (pos - centro) * k, escala: k);
+}
+
+/// A CAMERA DA COMPOSICAO aplicada a um transform ja resolvido no mundo
+/// (pai e vinculos incluidos). O palco usa direto para camada 3D sem pai:
+/// antes so o `effectiveTransform` de camada COM pai via a camera, entao
+/// mover a camera nao mexia na camada solta — e a moldura de selecao, que
+/// via a camera, ficava num lugar e a camada em outro.
+LayerTransform vistoPelaCamera(
+  VideoProject project,
+  CameraLayer cam,
+  Duration t,
+  LayerTransform mundo,
+) {
+  var pos = mundo.pos;
+  var rot = mundo.rot;
+  var rotX = mundo.rotX;
+  var rotY = mundo.rotY;
+  var scale = mundo.scale;
+  var z = mundo.z;
+  {
     final cl = cam.localTime(t);
     final cp = cam.position.valueAt(cl);
     final cz = cam.positionZ.valueAt(cl);
@@ -540,20 +592,31 @@ LayerTransform effectiveTransform(
 /// regra 3D (D2): trechos contiguos de camadas 3D sao ordenados por
 /// profundidade (Z maior = mais longe = pintado antes); camadas 2D mantem
 /// a ordem de empilhamento e funcionam como barreira.
-List<Layer> depthSortPaintOrder(List<Layer> paintOrder, Duration t) {
+List<Layer> depthSortPaintOrder(
+  List<Layer> paintOrder,
+  Duration t, {
+  VideoProject? project,
+}) {
   final out = <Layer>[];
   final run = <Layer>[];
+
+  // Com o projeto, a profundidade e a EFETIVA (pai e camera incluidos):
+  // uma camada presa a um nulo que foi para tras tem de ir para tras
+  // tambem na pintura, e nao ficar na frente pelo Z proprio.
+  double zDe(Layer l) => project != null
+      ? effectiveTransform(project, l, t).z
+      : l.positionZ.valueAt(l.localTime(t));
 
   void flush() {
     if (run.isEmpty) return;
     // Desempate ESTAVEL por indice na pilha (triagem 3D §5 item 14):
     // profundidades empatadas nao podem piscar entre frames.
-    final decorated = [for (var i = 0; i < run.length; i++) (run[i], i)];
+    final decorated = [
+      for (var i = 0; i < run.length; i++) (run[i], zDe(run[i]), i),
+    ];
     decorated.sort((a, b) {
-      final za = a.$1.positionZ.valueAt(a.$1.localTime(t));
-      final zb = b.$1.positionZ.valueAt(b.$1.localTime(t));
-      final c = zb.compareTo(za);
-      return c != 0 ? c : a.$2.compareTo(b.$2);
+      final c = b.$2.compareTo(a.$2);
+      return c != 0 ? c : a.$3.compareTo(b.$3);
     });
     out.addAll([for (final d in decorated) d.$1]);
     run.clear();

@@ -3053,6 +3053,38 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
             }
           }
 
+        // S_FLICKER: o ganho RGB do quadro e uma conta pura de (tempo,
+        // semente) e entra como UMA matriz de cor — exato na previa, na
+        // exportacao e no teste, sem textura a mais. As frequencias sao
+        // integradas no tempo: animar a frequencia acelera sem tranco.
+        case EffectType.sFlicker:
+          final ganhoDoPisca = ganhoDoSFlicker(
+            faseAleatoria: integratedPhase(effect.track('rand_freq'), local),
+            faseDaOnda: integratedPhase(effect.track('wave_freq'), local),
+            amplitude: effect.paramAt('amplitude', local),
+            brilhoAleatorio: effect.paramAt('rand_luma_amp', local),
+            corAleatoria: effect.paramAt('rand_color_amp', local),
+            amplitudeDaOnda: effect.paramAt('wave_amp', local),
+            faseR: effect.paramAt('wave_red_phase', local),
+            faseG: effect.paramAt('wave_green_phase', local),
+            faseB: effect.paramAt('wave_blue_phase', local),
+            forcaR: effect.paramAt('red_amp', local),
+            forcaG: effect.paramAt('green_amp', local),
+            forcaB: effect.paramAt('blue_amp', local),
+            brilho: effect.paramAt('brightness', local),
+            semente: effect.paramAt('seed', local).round(),
+          );
+          // Ganho 1 nos tres canais nao embrulha nada: um filtro a menos
+          // na arvore.
+          if ((ganhoDoPisca.r - 1).abs() > 1e-6 ||
+              (ganhoDoPisca.g - 1).abs() > 1e-6 ||
+              (ganhoDoPisca.b - 1).abs() > 1e-6) {
+            out = ColorFiltered(
+              colorFilter: ColorFilter.matrix(matrizDeGanho(ganhoDoPisca)),
+              child: out,
+            );
+          }
+
         case EffectType.gradient4:
           // GRADIENTE DE QUATRO CORES sobre a camada, preso ao alfa dela
           // (srcATop): cada canto uma cor. Girar troca os cantos de lugar.

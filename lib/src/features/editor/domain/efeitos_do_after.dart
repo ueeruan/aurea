@@ -1,7 +1,7 @@
 import 'dart:math' as math;
 
 import 'coloring.dart' show Rgb, hslToRgb, rgbToHsl;
-import 'fx.dart' show hueRotateMatrix;
+import 'fx.dart' show fxNoiseSigned, hueRotateMatrix;
 
 /// A CAMADA DE AJUSTE DO AFTER — as contas de referencia em CPU.
 ///
@@ -162,3 +162,68 @@ List<double> hueSaturationMatrix({
   }
   return comporMatrizes(_matrizDeClarear(claro), cor);
 }
+
+// ------------------------------------------------------------ S_FLICKER
+
+/// O GANHO RGB DO S_FLICKER num instante.
+///
+/// As fases chegam JA INTEGRADAS, em ciclos: [faseAleatoria] e a integral
+/// da Frequencia aleatoria no tempo e [faseDaOnda], a da Frequencia da
+/// onda. E o que o Shake faz: animar a frequencia acelera sem tranco, em
+/// vez de a fase saltar a cada keyframe.
+///
+///     ganho do canal = brilho * (1 + amplitude * forca do canal * (
+///         brilhoAleatorio * ruido comum
+///       + corAleatoria    * ruido do canal
+///       + amplitudeDaOnda * seno(2pi * (faseDaOnda + fase do canal))))
+///
+/// Os ruidos sao suaves (-1..1) e so dependem de (fase, semente): o mesmo
+/// quadro sai igual na previa, no scrub e na exportacao, e nada acumula
+/// estado entre quadros. O ganho nunca e negativo.
+Rgb ganhoDoSFlicker({
+  required double faseAleatoria,
+  required double faseDaOnda,
+  double amplitude = .2,
+  double brilhoAleatorio = 1,
+  double corAleatoria = 0,
+  double amplitudeDaOnda = 0,
+  double faseR = 0,
+  double faseG = 0,
+  double faseB = 0,
+  double forcaR = 1,
+  double forcaG = 1,
+  double forcaB = 1,
+  double brilho = 1,
+  int semente = 0,
+}) {
+  final comum = brilhoAleatorio == 0
+      ? 0.0
+      : fxNoiseSigned(semente, 0, faseAleatoria);
+  double canal(int i, double faseGraus, double forca) {
+    final ruido = corAleatoria == 0
+        ? 0.0
+        : fxNoiseSigned(semente, 1 + i, faseAleatoria);
+    final onda = amplitudeDaOnda == 0
+        ? 0.0
+        : math.sin(2 * math.pi * (faseDaOnda + faseGraus / 360));
+    final pisca =
+        brilhoAleatorio * comum + corAleatoria * ruido + amplitudeDaOnda * onda;
+    final ganho = brilho * (1 + amplitude * forca * pisca);
+    // Um numero invalido vindo do arquivo nao pode apagar a camada.
+    return ganho.isFinite ? math.max(0.0, ganho) : 1.0;
+  }
+
+  return (
+    r: canal(0, faseR, forcaR),
+    g: canal(1, faseG, forcaG),
+    b: canal(2, faseB, forcaB),
+  );
+}
+
+/// A matriz de cor de um ganho por canal; o alfa nao muda.
+List<double> matrizDeGanho(Rgb ganho) => [
+  ganho.r, 0, 0, 0, 0, //
+  0, ganho.g, 0, 0, 0,
+  0, 0, ganho.b, 0, 0,
+  0, 0, 0, 1, 0,
+];

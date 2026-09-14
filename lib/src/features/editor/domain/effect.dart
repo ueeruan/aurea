@@ -88,6 +88,7 @@ enum EffectType {
   posterizeTime,
   // --- camada de ajuste de um edit no After (dono, 14/09/2026) ---
   hueSaturation,
+  sFlicker,
 }
 
 /// O tipo a partir do IDENTIFICADOR estavel.
@@ -3384,6 +3385,76 @@ const effectSpecs = <EffectType, EffectSpec>{
       EffectPronto('Cores vivas', {'master_saturation': 35}),
     ],
   ),
+
+  // S_FLICKER (Sapphire): "escala as cores da camada por quantias
+  // diferentes ao longo do tempo". Um aleatorio suave no brilho, outro
+  // por canal e uma onda com fase por canal; cada canal recebe a sua
+  // parte e o Brilho escala o resultado. O ganho do quadro e uma conta
+  // pura de (tempo, semente) que entra como UMA matriz de cor. O Flicker
+  // antigo continua como era: projeto salvo nao muda.
+  EffectType.sFlicker: EffectSpec(
+    id: 's_flicker',
+    name: 'S_Flicker',
+    category: 'Time',
+    synonyms: [
+      's_flicker',
+      's flicker',
+      'sapphire flicker',
+      'flicker',
+      'cintilar',
+      'cintilação',
+      'piscar',
+      'tremular',
+      'filme antigo',
+      'lâmpada',
+    ],
+    params: {
+      // Escala TUDO: zero desliga o efeito.
+      'amplitude': EffectParam('Amplitude', .2, 0, 2),
+      'rand_luma_amp': EffectParam('Brilho aleatório', 1, 0, 2),
+      'rand_color_amp': EffectParam('Cor aleatória', 0, 0, 2),
+      'rand_freq': EffectParam('Frequência aleatória', 30, 0, 60),
+      'wave_amp': EffectParam('Amplitude da onda', 0, 0, 2),
+      'wave_freq': EffectParam('Frequência da onda', 5, 0, 60),
+      'wave_red_phase': EffectParam('Fase da onda R', 0, -360, 360),
+      'wave_green_phase': EffectParam('Fase da onda G', 0, -360, 360),
+      'wave_blue_phase': EffectParam('Fase da onda B', 0, -360, 360),
+      // Quanto do pisca vai para cada canal.
+      'red_amp': EffectParam('Força em R', 1, 0, 2),
+      'green_amp': EffectParam('Força em G', 1, 0, 2),
+      'blue_amp': EffectParam('Força em B', 1, 0, 2),
+      // Escala o resultado inteiro.
+      'brightness': EffectParam('Brilho', 1, 0, 3),
+      'seed': EffectParam('Semente', 0, 0, 1000, kind: ParamKind.seed),
+    },
+    montar: ['amplitude', 'rand_freq', 'brightness'],
+    presets: [
+      EffectPronto('Filme antigo', {
+        'amplitude': .15,
+        'rand_luma_amp': 1,
+        'rand_color_amp': 0,
+        'rand_freq': 16,
+        'wave_amp': 0,
+      }),
+      EffectPronto('Lâmpada ruim', {
+        'amplitude': .6,
+        'rand_luma_amp': 1,
+        'rand_color_amp': .3,
+        'rand_freq': 12,
+        'wave_amp': 0,
+      }),
+      EffectPronto('Onda RGB', {
+        'amplitude': .3,
+        'rand_luma_amp': 0,
+        'rand_color_amp': 0,
+        'wave_amp': 1,
+        'wave_freq': 2,
+        'wave_red_phase': 0,
+        'wave_green_phase': 120,
+        'wave_blue_phase': 240,
+      }),
+    ],
+  ),
 };
 
 /// OS EFEITOS DE EDIT, na ordem em que se procura: batida, glitch,
@@ -3393,6 +3464,7 @@ const efeitosDeEdit = <EffectType>[
   EffectType.flash,
   EffectType.zoomPunch,
   EffectType.strobe,
+  EffectType.sFlicker,
   EffectType.sliceGlitch,
   EffectType.twitch,
   EffectType.tremor,

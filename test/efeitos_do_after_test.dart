@@ -9,12 +9,22 @@
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:aurea/src/features/editor/application/editor_controller.dart';
+import 'package:aurea/src/features/editor/application/video_layer_manager.dart';
 import 'package:aurea/src/features/editor/domain/coloring.dart' show Rgb;
 import 'package:aurea/src/features/editor/domain/efeitos_do_after.dart';
 import 'package:aurea/src/features/editor/domain/effect.dart';
+import 'package:aurea/src/features/editor/domain/fx.dart' show integratedPhase;
 import 'package:aurea/src/features/editor/domain/keyframe.dart';
+import 'package:aurea/src/features/editor/domain/layer.dart';
 import 'package:aurea/src/features/editor/domain/pixel_effect.dart';
+import 'package:aurea/src/features/editor/domain/shape.dart';
+import 'package:aurea/src/features/editor/domain/video_project.dart';
 import 'package:aurea/src/features/editor/presentation/widgets/pixel_effect_engine.dart';
+import 'package:aurea/src/features/editor/presentation/widgets/preview_stage.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 const _w = 64, _h = 32;
@@ -83,13 +93,7 @@ PixelEffectFrame _quadro(
   EffectType tipo,
   Map<String, double> valores, {
   Duration tempo = Duration.zero,
-}) => PixelEffectFrame.of(
-  EffectInstance(
-    type: tipo,
-    params: {for (final e in valores.entries) e.key: AnimatedDouble(e.value)},
-  ),
-  tempo,
-);
+}) => PixelEffectFrame.of(_efeito(tipo, valores), tempo);
 
 const _amostras = [
   (3, 2),
@@ -142,6 +146,82 @@ void _mesmaCor(Rgb a, Rgb b, {double tol = 1e-9, String nome = ''}) {
   expect(a.b, closeTo(b.b, tol), reason: '$nome b');
 }
 
+EffectInstance _efeito(EffectType tipo, Map<String, double> valores) =>
+    EffectInstance(
+      type: tipo,
+      params: {for (final e in valores.entries) e.key: AnimatedDouble(e.value)},
+    );
+
+/// A composicao de verdade (a mesma da previa e da exportacao) com um
+/// quadrado 40x40 no meio, devolvendo os pixels RGBA.
+Future<Uint8List> _pixelsDaComposicao(
+  WidgetTester tester,
+  List<EffectInstance> efeitos,
+  Duration tempo, {
+  Color cor = const Color(0xFF305070),
+}) async {
+  final projeto = VideoProject(
+    name: 'efeitos-do-after',
+    createdAt: DateTime(2026, 9, 14),
+    aspectRatio: 1,
+    resolutionHeight: 128,
+    backgroundColor: const Color(0xFF000000),
+    layers: [
+      ShapeLayer(
+        id: 'alvo',
+        name: 'Alvo',
+        startTime: Duration.zero,
+        duration: const Duration(seconds: 10),
+        position: AnimatedOffset(const Offset(64, 64)),
+        contents: [
+          ShapePath(primitive: ShapePrimitive.rectangle, width: 40, height: 40),
+          ShapeFill(color: cor),
+        ],
+        effects: efeitos,
+      ),
+    ],
+  );
+  final container = ProviderContainer();
+  addTearDown(container.dispose);
+  container.read(editorControllerProvider.notifier).openProject(projeto);
+  final relogio = ValueNotifier(tempo);
+  addTearDown(relogio.dispose);
+  final videos = VideoLayerManager();
+  addTearDown(videos.dispose);
+  final chave = GlobalKey();
+  await tester.pumpWidget(
+    UncontrolledProviderScope(
+      container: container,
+      child: MaterialApp(
+        home: Center(
+          child: RepaintBoundary(
+            key: chave,
+            child: SizedBox(
+              width: 128,
+              height: 128,
+              child: CompositionView(
+                time: relogio,
+                videos: videos,
+                selectedId: null,
+                exporting: true,
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+  await tester.pump();
+  final limite =
+      chave.currentContext!.findRenderObject() as RenderRepaintBoundary;
+  final imagem = limite.toImageSync(pixelRatio: 1);
+  final dados = await tester.runAsync(
+    () => imagem.toByteData(format: ui.ImageByteFormat.rawStraightRgba),
+  );
+  imagem.dispose();
+  return dados!.buffer.asUint8List();
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(() async {
@@ -190,6 +270,9 @@ void main() {
       achou('saturação', EffectType.hueSaturation);
       achou('SATURACAO', EffectType.hueSaturation);
       achou('colorir', EffectType.hueSaturation);
+      achou('S_Flicker', EffectType.sFlicker);
+      achou('sapphire flicker', EffectType.sFlicker);
+      achou('cintilacao', EffectType.sFlicker);
     });
   });
 
@@ -198,6 +281,14 @@ void main() {
       expect(effectSpecs[EffectType.hueSaturation]!.category, 'Color');
       expect(efeitosDeEdit, contains(EffectType.hueSaturation));
       expect(pixelKernels[EffectType.hueSaturation]!.mode, 45);
+
+      // S_Flicker nao passa pelo shader: e uma matriz de cor por quadro.
+      expect(effectSpecs[EffectType.sFlicker]!.category, 'Time');
+      expect(efeitosDeEdit, contains(EffectType.sFlicker));
+      expect(pixelKernels.containsKey(EffectType.sFlicker), isFalse);
+      // O Flicker antigo continua de pe, com a mesma ficha.
+      expect(effectSpecs[EffectType.flicker]!.id, 'flicker');
+      expect(pixelKernels[EffectType.flicker]!.mode, 31);
     });
   });
 
@@ -303,6 +394,186 @@ void main() {
             saturacaoColorir: 60,
           ),
           nome: 'colorir $base',
+        );
+      }
+    });
+  });
+
+  group('S_Flicker', () {
+    /// O ganho de uma instancia num instante, lendo a ficha como a
+    /// composicao le.
+    Rgb ganhoEm(EffectInstance e, Duration t) => ganhoDoSFlicker(
+      faseAleatoria: integratedPhase(e.track('rand_freq'), t),
+      faseDaOnda: integratedPhase(e.track('wave_freq'), t),
+      amplitude: e.paramAt('amplitude', t),
+      brilhoAleatorio: e.paramAt('rand_luma_amp', t),
+      corAleatoria: e.paramAt('rand_color_amp', t),
+      amplitudeDaOnda: e.paramAt('wave_amp', t),
+      faseR: e.paramAt('wave_red_phase', t),
+      faseG: e.paramAt('wave_green_phase', t),
+      faseB: e.paramAt('wave_blue_phase', t),
+      forcaR: e.paramAt('red_amp', t),
+      forcaG: e.paramAt('green_amp', t),
+      forcaB: e.paramAt('blue_amp', t),
+      brilho: e.paramAt('brightness', t),
+      semente: e.paramAt('seed', t).round(),
+    );
+
+    Duration quadro(int f) =>
+        Duration(microseconds: (f * 1000000 / 30).round());
+
+    test('amplitude zero: o ganho e o Brilho e a matriz e identidade', () {
+      for (final t in [Duration.zero, quadro(7), quadro(45)]) {
+        final g = ganhoEm(
+          _efeito(EffectType.sFlicker, const {
+            'amplitude': 0,
+            'rand_color_amp': 1,
+            'wave_amp': 1,
+          }),
+          t,
+        );
+        expect([g.r, g.g, g.b], [1.0, 1.0, 1.0]);
+        final forte = ganhoEm(
+          _efeito(EffectType.sFlicker, const {
+            'amplitude': 0,
+            'brightness': 1.5,
+          }),
+          t,
+        );
+        expect([forte.r, forte.g, forte.b], [1.5, 1.5, 1.5]);
+      }
+      expect(matrizDeGanho((r: 1, g: 1, b: 1)), const [
+        1.0, 0.0, 0.0, 0.0, 0.0, //
+        0.0, 1.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 1.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 1.0, 0.0,
+      ]);
+    });
+
+    test('deterministico: o mesmo (tempo, semente) da o mesmo ganho', () {
+      final e = _efeito(EffectType.sFlicker, const {'seed': 11});
+      final ida = [for (var f = 0; f < 60; f++) ganhoEm(e, quadro(f))];
+      // Voltar no tempo (scrub) e pular quadros nao muda nada: nada
+      // acumula estado entre um quadro e outro.
+      final volta = [for (var f = 59; f >= 0; f--) ganhoEm(e, quadro(f))]
+          .reversed
+          .toList();
+      expect(volta, ida);
+      expect(ganhoEm(e, quadro(37)), ida[37]);
+    });
+
+    test('varia no tempo e muda com a semente', () {
+      final padrao = _efeito(EffectType.sFlicker, const {});
+      final outraSemente = _efeito(EffectType.sFlicker, const {'seed': 7});
+      final ganhos = [
+        for (var f = 0; f < 60; f++) ganhoEm(padrao, quadro(f)).r,
+      ];
+      expect(ganhos.toSet().length, greaterThan(30));
+      final maior = ganhos.reduce((a, b) => a > b ? a : b);
+      final menor = ganhos.reduce((a, b) => a < b ? a : b);
+      expect(maior - menor, greaterThan(.1));
+      // Amplitude .2 com o ruido em -1..1: nunca sai de 0,8..1,2.
+      expect(maior, lessThanOrEqualTo(1.2 + 1e-9));
+      expect(menor, greaterThanOrEqualTo(.8 - 1e-9));
+      var diferentes = 0;
+      for (var f = 0; f < 60; f++) {
+        if ((ganhoEm(outraSemente, quadro(f)).r - ganhos[f]).abs() > 1e-6) {
+          diferentes++;
+        }
+      }
+      expect(diferentes, greaterThan(50));
+    });
+
+    test('cor aleatoria separa os canais; sem ela os tres andam juntos', () {
+      final junto = _efeito(EffectType.sFlicker, const {'amplitude': 1});
+      final separado = _efeito(EffectType.sFlicker, const {
+        'amplitude': 1,
+        'rand_luma_amp': 0,
+        'rand_color_amp': 1,
+      });
+      var separou = false;
+      for (var f = 0; f < 30; f++) {
+        final g = ganhoEm(junto, quadro(f));
+        expect(g.g, g.r, reason: 'quadro $f');
+        expect(g.b, g.r, reason: 'quadro $f');
+        final s = ganhoEm(separado, quadro(f));
+        if ((s.r - s.g).abs() > .01 || (s.g - s.b).abs() > .01) separou = true;
+      }
+      expect(separou, isTrue);
+    });
+
+    test('onda: fase e forca por canal', () {
+      // Um quarto de ciclo: seno 1 no vermelho; fase de 180 no verde da -1;
+      // o azul com forca zero nao pisca.
+      final g = ganhoDoSFlicker(
+        faseAleatoria: 0,
+        faseDaOnda: .25,
+        amplitude: .5,
+        brilhoAleatorio: 0,
+        amplitudeDaOnda: 1,
+        faseG: 180,
+        forcaB: 0,
+      );
+      _mesmaCor(g, (r: 1.5, g: .5, b: 1.0));
+      // A frequencia da ficha chega integrada: 1 Hz em 250 ms.
+      final e = _efeito(EffectType.sFlicker, const {
+        'amplitude': .5,
+        'rand_luma_amp': 0,
+        'wave_amp': 1,
+        'wave_freq': 1,
+        'wave_green_phase': 180,
+        'blue_amp': 0,
+      });
+      _mesmaCor(ganhoEm(e, const Duration(milliseconds: 250)), g);
+      // O ganho nunca e negativo, nem com o pisca no maximo.
+      final fundo = ganhoDoSFlicker(
+        faseAleatoria: 0,
+        faseDaOnda: .75,
+        amplitude: 2,
+        brilhoAleatorio: 0,
+        amplitudeDaOnda: 2,
+        forcaR: 2,
+      );
+      expect(fundo.r, 0);
+    });
+
+    testWidgets('na composicao a camada recebe o ganho exato da conta', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(256, 256);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      // 0x30, 0x50, 0x70: com ganho ate 2 o azul ainda nao estoura.
+      const base = [0x30, 0x50, 0x70];
+      final pisca = _efeito(EffectType.sFlicker, const {
+        'amplitude': 1,
+        'rand_freq': 7,
+        'seed': 3,
+      });
+      // Um instante que pisca de verdade (o ruido pode passar perto de 0).
+      var t = Duration.zero;
+      for (var k = 1; k <= 40; k++) {
+        final candidato = Duration(milliseconds: 100 * k);
+        if ((ganhoEm(pisca, candidato).r - 1).abs() > .2) {
+          t = candidato;
+          break;
+        }
+      }
+      expect(t, isNot(Duration.zero), reason: 'nenhum instante piscou');
+      final g = ganhoEm(pisca, t);
+
+      final parado = await _pixelsDaComposicao(tester, [
+        _efeito(EffectType.sFlicker, const {'amplitude': 0}),
+      ], t);
+      final aceso = await _pixelsDaComposicao(tester, [pisca], t);
+      final i = (64 * 128 + 64) * 4;
+      expect(parado.sublist(i, i + 3), base);
+      final ganhos = [g.r, g.g, g.b];
+      for (var c = 0; c < 3; c++) {
+        expect(
+          aceso[i + c].toDouble(),
+          closeTo((base[c] * ganhos[c]).clamp(0, 255), 2),
+          reason: 'canal $c com ganho ${ganhos[c]}',
         );
       }
     });

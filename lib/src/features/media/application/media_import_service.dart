@@ -172,6 +172,28 @@ final mediaImportServiceProvider = Provider<MediaImportService>(
 /// miniaturas dentro de um seletor de 300 px nao seria olhada, e ler a
 /// pasta inteira num aparelho com centenas de arquivos custaria o tempo
 /// de abrir o menu.
+/// A PROPORCAO DE UMA FOTO (largura / altura) sem decodificar a imagem.
+///
+/// O descritor do Flutter ja entrega a medida com a orientacao EXIF
+/// aplicada (o gerador do Skia troca largura e altura quando a foto foi
+/// tirada em pe), que e a mesma que o `Image.file` mostra. Nulo quando o
+/// arquivo nao abre.
+Future<double?> proporcaoDaFoto(String path) async {
+  ui.ImmutableBuffer? buffer;
+  ui.ImageDescriptor? descritor;
+  try {
+    buffer = await ui.ImmutableBuffer.fromFilePath(path);
+    descritor = await ui.ImageDescriptor.encoded(buffer);
+    final w = descritor.width, h = descritor.height;
+    return w > 0 && h > 0 ? w / h : null;
+  } catch (_) {
+    return null;
+  } finally {
+    descritor?.dispose();
+    buffer?.dispose();
+  }
+}
+
 Future<List<File>> midiaRecente({int teto = 20}) async {
   try {
     final root = await getApplicationDocumentsDirectory();

@@ -2,6 +2,7 @@ import 'dart:ui';
 
 import 'package:uuid/uuid.dart';
 
+import 'ajuste_da_midia.dart';
 import 'aprimoramento_ia.dart';
 import 'camera3d.dart';
 import 'camera_cuts.dart';
@@ -468,6 +469,8 @@ class VideoLayer extends Layer {
     this.forcaDoAprimoramento = 1.0,
     this.perfilDoAprimoramento = PerfilDoAprimoramento.videoReal,
     this.reducaoDeRuido = reducaoDeRuidoPadrao,
+    this.ajuste = AjusteDaMidia.largura,
+    this.proporcaoDaFonte,
     this.volume = 1.0,
     this.audio = const AudioSpec(),
     super.position,
@@ -544,6 +547,16 @@ class VideoLayer extends Layer {
   /// redes (DNI), nao um filtro depois.
   final double reducaoDeRuido;
 
+  /// COMO A MIDIA OCUPA A COMPOSICAO NA ESCALA 100% (ver
+  /// ajuste_da_midia.dart). Projeto antigo abre em `largura`, o de antes;
+  /// camada importada agora nasce em `cobrir`.
+  final AjusteDaMidia ajuste;
+
+  /// Largura / altura do quadro como ele e EXIBIDO (ja girado). Nulo ate o
+  /// probe responder, ou em projeto antigo. So serve para medir a caixa
+  /// antes de o arquivo abrir: quem desenha usa a proporcao do quadro.
+  final double? proporcaoDaFonte;
+
   /// Transicao da camada anterior (A) para esta camada (B).
 
   final double volume;
@@ -590,6 +603,8 @@ class VideoLayer extends Layer {
     double? forcaDoAprimoramento,
     PerfilDoAprimoramento? perfilDoAprimoramento,
     double? reducaoDeRuido,
+    AjusteDaMidia? ajuste,
+    double? proporcaoDaFonte,
     ClipTransition? transitionIn,
     bool clearTransitionIn = false,
     AudioSpec? audio,
@@ -612,6 +627,8 @@ class VideoLayer extends Layer {
       perfilDoAprimoramento:
           perfilDoAprimoramento ?? this.perfilDoAprimoramento,
       reducaoDeRuido: reducaoDeRuido ?? this.reducaoDeRuido,
+      ajuste: ajuste ?? this.ajuste,
+      proporcaoDaFonte: proporcaoDaFonte ?? this.proporcaoDaFonte,
       transitionIn: clearTransitionIn
           ? null
           : (transitionIn ?? this.transitionIn),
@@ -656,6 +673,8 @@ class VideoLayer extends Layer {
     forcaDoAprimoramento: forcaDoAprimoramento,
     perfilDoAprimoramento: perfilDoAprimoramento,
     reducaoDeRuido: reducaoDeRuido,
+    ajuste: ajuste,
+    proporcaoDaFonte: proporcaoDaFonte,
     // A transicao pertence a uma JUNCAO, nao ao conteudo do clipe.
     // Duplicar B nao pode criar uma segunda entrada apontando para A.
     transitionIn: null,
@@ -689,6 +708,8 @@ class ImageLayer extends Layer {
     required super.startTime,
     required super.duration,
     required this.sourcePath,
+    this.ajuste = AjusteDaMidia.largura,
+    this.proporcaoDaFonte,
     super.position,
     super.scaleX,
     super.scaleY,
@@ -711,6 +732,16 @@ class ImageLayer extends Layer {
   });
 
   final String sourcePath;
+
+  /// COMO A MIDIA OCUPA A COMPOSICAO NA ESCALA 100% (ver
+  /// ajuste_da_midia.dart). Projeto antigo abre em `largura`, o de antes;
+  /// camada importada agora nasce em `cobrir`.
+  final AjusteDaMidia ajuste;
+
+  /// Largura / altura do quadro como ele e EXIBIDO (ja girado). Nulo ate o
+  /// probe responder, ou em projeto antigo. So serve para medir a caixa
+  /// antes de o arquivo abrir: quem desenha usa a proporcao do quadro.
+  final double? proporcaoDaFonte;
 
   @override
   ImageLayer copyLayer({
@@ -739,6 +770,8 @@ class ImageLayer extends Layer {
     bool clearMatteSource = false,
     ClipTransition? transitionIn,
     bool clearTransitionIn = false,
+    AjusteDaMidia? ajuste,
+    double? proporcaoDaFonte,
   }) {
     return ImageLayer(
       id: id,
@@ -749,6 +782,8 @@ class ImageLayer extends Layer {
       startTime: startTime ?? this.startTime,
       duration: duration ?? this.duration,
       sourcePath: sourcePath,
+      ajuste: ajuste ?? this.ajuste,
+      proporcaoDaFonte: proporcaoDaFonte ?? this.proporcaoDaFonte,
       position: position ?? this.position,
       scaleX: scaleX ?? this.scaleX,
       scaleY: scaleY ?? this.scaleY,
@@ -778,6 +813,8 @@ class ImageLayer extends Layer {
     startTime: startTime,
     duration: duration,
     sourcePath: sourcePath,
+    ajuste: ajuste,
+    proporcaoDaFonte: proporcaoDaFonte,
     position: position,
     scaleX: scaleX,
     scaleY: scaleY,

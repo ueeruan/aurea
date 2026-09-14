@@ -4,13 +4,14 @@ export '../../editor/domain/temporal_interpolation.dart'
 
 import 'dart:io';
 import 'dart:math' as math;
-import 'dart:ui' show BlendMode, Offset;
+import 'dart:ui' show BlendMode, Offset, Size;
 
 import 'package:ffmpeg_kit_flutter_new_full/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter_new_full/ffprobe_kit.dart';
 import 'package:ffmpeg_kit_flutter_new_full/return_code.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../../editor/domain/ajuste_da_midia.dart';
 import '../../editor/domain/aprimoramento_ia.dart';
 import '../../editor/domain/cut.dart';
 import '../../editor/domain/cut_ops.dart';
@@ -244,14 +245,32 @@ class ExportEngine {
     // APRIMORAMENTO POR IA: decide antes de extrair, porque muda a
     // resolucao em que a fonte e lida (a propria, nao a da composicao).
     final ia = aprimorador;
+    // COBRINDO A COMPOSICAO, o quadro aparece maior que ela (um video
+    // deitado num projeto em pe mostra so o miolo): quem le a fonte e a
+    // IA miram a CAIXA exibida, e nao a composicao — senao o miolo sai
+    // ampliado e borrado.
+    final (larguraExibida, alturaExibida) = dimensoesExibidas(
+      info.cor.largura,
+      info.cor.altura,
+      info.rotacao,
+    );
+    final caixa = layer.ajuste == AjusteDaMidia.cobrir
+        ? caixaDaMidia(
+            Size(width.toDouble(), height.toDouble()),
+            alturaExibida > 0
+                ? larguraExibida / alturaExibida
+                : layer.proporcaoDaFonte,
+            AjusteDaMidia.cobrir,
+          )
+        : null;
     final planoIa = planoDeAprimoramento(
       ligado: layer.aprimorar,
       motorDisponivel: ia != null && ia.disponivel,
       larguraDaFonte: info.cor.largura,
       alturaDaFonte: info.cor.altura,
       rotacao: info.rotacao,
-      larguraDaComposicao: width,
-      alturaDaComposicao: height,
+      larguraDaComposicao: caixa?.width.round() ?? width,
+      alturaDaComposicao: caixa?.height.round() ?? height,
     );
     if (layer.aprimorar) {
       aprimoramentoUsado[layer.id] = planoIa;
@@ -260,7 +279,17 @@ class ExportEngine {
             '${planoIa.emPalavras}.');
       }
     }
-    final areaIa = planoIa.aplica ? areaMaximaDaEntradaDaIa : null;
+    // A leitura da fonte: com IA, a entrada da rede; cobrindo, a propria
+    // fonte sem ampliar, reduzida so se passar da caixa exibida — com teto
+    // de DUAS composicoes de area. Sem teto, um 4K cobrindo um projeto em
+    // pe saia em PNGs de 6,5 MP por quadro (gigas de disco num clipe
+    // curto); com ele, a parte que aparece fica perto da resolucao cheia.
+    final areaIa = planoIa.aplica
+        ? areaMaximaDaEntradaDaIa
+        : (caixa == null
+              ? null
+              : math.min(caixa.width * caixa.height, 2.0 * width * height)
+                    .ceil());
     // QUADROS A MAIS quando o clipe anda mais devagar que a fonte e a
     // pessoa pediu interpolacao: os PNGs saem numa taxa maior, e quem
     // escolhe o quadro depois usa a mesma taxa — ver fpsDeExtracao. QUEM

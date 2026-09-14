@@ -4,6 +4,7 @@ import 'dart:ui';
 import 'package:flutter/widgets.dart'
     show FontWeight, TextDirection, TextPainter, TextSpan, TextStyle;
 
+import 'ajuste_da_midia.dart';
 import 'layer.dart';
 import 'shape.dart';
 
@@ -44,6 +45,20 @@ Size measureLayerBox(
         compHeight: compHeight ?? fallbackWidth * 9 / 16,
       )?.size ??
       Size(fallbackWidth, compHeight ?? fallbackWidth * 9 / 16),
+    // FOTO E VIDEO medem a caixa em que o palco os desenha: pelo ajuste
+    // (cobrir, conter ou pela largura) e pela proporcao do arquivo. Antes
+    // caiam no 16:9 inventado, e em projeto vertical a alca de escala e o
+    // toque nao tinham nada a ver com a midia.
+    ImageLayer l => caixaDaMidia(
+      Size(fallbackWidth, compHeight ?? fallbackWidth * 9 / 16),
+      l.proporcaoDaFonte,
+      l.ajuste,
+    ),
+    VideoLayer l => caixaDaMidia(
+      Size(fallbackWidth, compHeight ?? fallbackWidth * 9 / 16),
+      l.proporcaoDaFonte,
+      l.ajuste,
+    ),
     _ => Size(fallbackWidth, fallbackWidth * 9 / 16),
   };
   return scaled ? Size(base.width * sx, base.height * sy) : base;

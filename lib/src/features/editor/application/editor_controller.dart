@@ -35,6 +35,7 @@ import '../domain/tracker2d.dart';
 import '../domain/fx.dart';
 import '../domain/grid_rig.dart';
 import '../domain/grupo_ops.dart';
+import '../domain/ajuste_da_midia.dart';
 import '../domain/aprimoramento_ia.dart';
 import '../domain/deslocar_animacao.dart';
 import '../domain/keyframe.dart';
@@ -630,16 +631,32 @@ class EditorController extends Notifier<VideoProject> {
     );
   }
 
-  void addImageLayer(Duration at, String path, String name) {
-    _push(
-      ImageLayer(
-        name: name,
-        startTime: at,
-        duration: const Duration(seconds: 3),
-        sourcePath: path,
-        position: AnimatedOffset(_center),
-      ),
+  /// FOTO NOVA COBRE A COMPOSICAO (relato do beta 1.0.5: "importar
+  /// qualquer coisa e no preview ficar a tela cheia de acordo com a
+  /// resolucao"). A proporcao do arquivo e lida em seguida, sem decodificar
+  /// a foto, e so serve para medir a caixa; quem desenha ja cobre.
+  String addImageLayer(
+    Duration at,
+    String path,
+    String name, {
+    double? proporcao,
+  }) {
+    final layer = ImageLayer(
+      name: name,
+      startTime: at,
+      duration: const Duration(seconds: 3),
+      sourcePath: path,
+      ajuste: AjusteDaMidia.cobrir,
+      proporcaoDaFonte: proporcaoValida(proporcao),
+      position: AnimatedOffset(_center),
     );
+    _push(layer);
+    if (layer.proporcaoDaFonte == null) {
+      proporcaoDaFoto(
+        path,
+      ).then((a) => a == null ? null : definirProporcaoDaMidia(layer.id, a));
+    }
+    return layer.id;
   }
 
   String addVideoLayer(
@@ -648,6 +665,7 @@ class EditorController extends Notifier<VideoProject> {
     String name,
     Duration duration, {
     Duration? fonte,
+    double? proporcao,
   }) {
     final layer = VideoLayer(
       name: name,
@@ -655,9 +673,23 @@ class EditorController extends Notifier<VideoProject> {
       duration: duration,
       sourceDuration: fonte,
       sourcePath: path,
+      // VIDEO NOVO COBRE A COMPOSICAO: ver addImageLayer.
+      ajuste: AjusteDaMidia.cobrir,
+      proporcaoDaFonte: proporcaoValida(proporcao),
       position: AnimatedOffset(_center),
     );
     _push(layer);
+    // A proporcao so importa para medir a caixa antes de o tocador abrir
+    // (o palco usa a do quadro). Abrir um tocador so para isso e caro, e
+    // nos testes nao ha tocador: fica para quando nao se sabe e o app roda
+    // de verdade.
+    if (layer.proporcaoDaFonte == null &&
+        !Platform.environment.containsKey('FLUTTER_TEST')) {
+      _probe(path).then((r) {
+        final a = r.proporcao;
+        if (a != null) definirProporcaoDaMidia(layer.id, a);
+      });
+    }
     // A ONDA DO SOM JA NA IMPORTACAO: quando a barra aparecer, ela esta
     // pronta para decupar (antes so era pedida quando a linha rolava para
     // dentro da tela).
@@ -678,7 +710,9 @@ class EditorController extends Notifier<VideoProject> {
       file.name,
       const Duration(seconds: 4),
     );
-    _probeDuration(file.path).then((d) => _chegouADuracao(id, d));
+    _probe(
+      file.path,
+    ).then((r) => _chegouADuracao(id, r.duracao, proporcao: r.proporcao));
   }
 
   /// O PROBE VOLTOU: a camada aprende quanto o arquivo tem.
@@ -694,7 +728,59 @@ class EditorController extends Notifier<VideoProject> {
   ///      duracao sem olhar, entao aparar o clipe nesse meio-tempo era
   ///      trabalho perdido: o probe chegava depois e desfazia a
   ///      aparagem. Agora so estica o que ainda esta no provisorio.
-  void _chegouADuracao(String id, Duration d) {
+  /// A PROPORCAO DO ARQUIVO CHEGOU (foto lida ou video aberto).
+  ///
+  /// Como a duracao do probe, isto NAO e uma edicao: nao entra na pilha
+  /// de desfazer, e so preenche o que ainda nao se sabia.
+  void definirProporcaoDaMidia(String id, double proporcao) {
+    final a = proporcaoValida(proporcao);
+    final layer = _layer(id);
+    if (a == null) return;
+    final Layer? novo = switch (layer) {
+      VideoLayer l when l.proporcaoDaFonte == null =>
+        l.copyLayer(proporcaoDaFonte: a),
+      ImageLayer l when l.proporcaoDaFonte == null =>
+        l.copyLayer(proporcaoDaFonte: a),
+      _ => null,
+    };
+    if (novo == null) return;
+    state = state.copyWith(
+      layers: [
+        for (final l in state.layers)
+          if (l.id == id) novo else l,
+      ],
+    );
+  }
+
+  /// PREENCHER OU AJUSTAR a foto ou o video na composicao: grava o
+  /// ajuste e, se escala e posicao nao estao animadas, volta as duas ao
+  /// 100% no centro — que agora e exatamente "cobre" ou "cabe inteira".
+  void setAjusteDaMidia(String id, AjusteDaMidia ajuste) {
+    final layer = _layer(id);
+    final estatica =
+        layer != null &&
+        !layer.scaleX.isAnimated &&
+        !layer.scaleY.isAnimated &&
+        !layer.position.isAnimated;
+    final Layer? novo = switch (layer) {
+      VideoLayer l => l.copyLayer(ajuste: ajuste),
+      ImageLayer l => l.copyLayer(ajuste: ajuste),
+      _ => null,
+    };
+    if (novo == null) return;
+    _replace(
+      estatica
+          ? novo.copyLayer(
+              scaleX: AnimatedDouble(1),
+              scaleY: AnimatedDouble(1),
+              position: AnimatedOffset(_center),
+            )
+          : novo,
+    );
+  }
+
+  void _chegouADuracao(String id, Duration d, {double? proporcao}) {
+    if (proporcao != null) definirProporcaoDaMidia(id, proporcao);
     final layer = _layer(id);
     if (layer is! VideoLayer || d <= Duration.zero) return;
     final intocada =
@@ -726,7 +812,8 @@ class EditorController extends Notifier<VideoProject> {
     String name,
   ) async {
     final id = addVideoLayer(at, path, name, const Duration(seconds: 4));
-    _chegouADuracao(id, await _probeDuration(path));
+    final r = await _probe(path);
+    _chegouADuracao(id, r.duracao, proporcao: r.proporcao);
     return id;
   }
 
@@ -8330,16 +8417,29 @@ class EditorController extends Notifier<VideoProject> {
     _ => null,
   };
 
-  Future<Duration> _probeDuration(String path) async {
+  /// Duracao e proporcao de um video sem criar camada: o projeto novo feito
+  /// a partir de uma midia nasce com a proporcao dela.
+  Future<({Duration duracao, double? proporcao})> sondarVideo(String path) =>
+      _probe(path);
+
+  /// Abre o arquivo num tocador so para saber a duracao e a proporcao do
+  /// quadro exibido (com a correcao de rotacao que o tocador aplicaria).
+  Future<({Duration duracao, double? proporcao})> _probe(String path) async {
     final probe = VideoPlayerController.file(
       File(path),
       videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
     );
     try {
       await probe.initialize();
-      return probe.value.duration;
+      return (
+        duracao: probe.value.duration,
+        proporcao: proporcaoExibidaDoVideo(
+          probe.value.aspectRatio,
+          probe.value.rotationCorrection,
+        ),
+      );
     } catch (_) {
-      return const Duration(seconds: 5);
+      return (duracao: const Duration(seconds: 5), proporcao: null);
     } finally {
       await probe.dispose();
     }

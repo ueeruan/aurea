@@ -22,6 +22,7 @@ export '../../application/freehand_session.dart' show onionSkinProvider;
 import '../../application/playback_controller.dart';
 import '../../application/preview_stats.dart';
 import '../../application/video_layer_manager.dart';
+import '../../domain/ajuste_da_midia.dart';
 import '../../domain/keyframe.dart' show AnimatedDouble;
 import '../../domain/cut.dart';
 import '../../domain/cut_ops.dart';
@@ -5702,15 +5703,57 @@ class _LayerContent extends StatelessWidget {
   /// Exportando: o quadro de video de outro instante.
   final ui.Image? Function(VideoLayer layer, Duration tempo)? quadroEm;
 
-  Widget _quadroFixo(ui.Image img) => SizedBox(
-    width: compWidth,
-    height: compWidth * img.height / img.width,
-    child: RawImage(
-      image: img,
-      fit: BoxFit.contain,
-      filterQuality: FilterQuality.medium,
-    ),
+  /// A CAIXA DA MIDIA nesta composicao, pelo ajuste da camada e pela
+  /// proporcao do quadro EXIBIDO (ver ajuste_da_midia.dart).
+  Size _caixa(AjusteDaMidia ajuste, double? proporcao) => caixaDaMidia(
+    Size(compWidth, project.outputHeight.toDouble()),
+    proporcao,
+    ajuste,
   );
+
+  Widget _quadroFixo(VideoLayer l, ui.Image img) {
+    final caixa = _caixa(l.ajuste, img.width / img.height);
+    return SizedBox(
+      width: caixa.width,
+      height: caixa.height,
+      child: RawImage(
+        image: img,
+        fit: BoxFit.fill,
+        filterQuality: FilterQuality.medium,
+      ),
+    );
+  }
+
+  /// A FOTO na caixa do ajuste. Pela largura e o de sempre; cobrindo ou
+  /// contida, a caixa sai da proporcao guardada na importacao — e, sem
+  /// ela, da propria composicao, com o encaixe feito pelo Image.
+  Widget _imagem(ImageLayer l) {
+    Widget quebrada(BuildContext _, Object _, StackTrace? _) =>
+        _brokenMedia();
+    if (l.ajuste == AjusteDaMidia.largura) {
+      return Image.file(
+        File(l.sourcePath),
+        width: compWidth,
+        fit: BoxFit.contain,
+        errorBuilder: quebrada,
+      );
+    }
+    final proporcao = proporcaoValida(l.proporcaoDaFonte);
+    final caixa = _caixa(l.ajuste, proporcao);
+    return SizedBox(
+      width: caixa.width,
+      height: caixa.height,
+      child: Image.file(
+        File(l.sourcePath),
+        fit: proporcao != null
+            ? BoxFit.fill
+            : (l.ajuste == AjusteDaMidia.cobrir
+                  ? BoxFit.cover
+                  : BoxFit.contain),
+        errorBuilder: quebrada,
+      ),
+    );
+  }
 
   /// PREVIA de outro instante: o quadro extraido do arquivo, se ja veio;
   /// senao o tocador ao vivo, e a extracao e pedida.
@@ -5721,7 +5764,7 @@ class _LayerContent extends StatelessWidget {
           final arquivo = ProxyService.instance.playbackPath(l.sourcePath);
           final fonte = videoAbsoluteSourceTimeAt(l, l.localTime(tempo));
           final img = QuadrosDeVideo.instance.quadro(arquivo, fonte);
-          if (img != null) return _quadroFixo(img);
+          if (img != null) return _quadroFixo(l, img);
           QuadrosDeVideo.instance.preparar(
             arquivo,
             l.sourceOffset,
@@ -5737,19 +5780,27 @@ class _LayerContent extends StatelessWidget {
       builder: (context, _, _) {
         final controller = videos.controllerFor(l.id);
         if (controller == null || !controller.value.isInitialized) {
+          // O LUGAR DO VIDEO enquanto ele abre ja tem o tamanho certo
+          // (a proporcao veio do probe): nada pula quando o quadro chega.
+          final caixa = _caixa(l.ajuste, l.proporcaoDaFonte);
           return SizedBox(
-            width: compWidth,
-            height: compWidth * 9 / 16,
+            width: caixa.width,
+            height: caixa.height,
             child: const Center(
               child: Icon(CupertinoIcons.film, size: 60, color: Colors.white24),
             ),
           );
         }
-        final rawRatio = controller.value.aspectRatio;
-        final ratio = rawRatio > 0 && rawRatio.isFinite ? rawRatio : (16 / 9);
+        final caixa = _caixa(
+          l.ajuste,
+          proporcaoExibidaDoVideo(
+            controller.value.aspectRatio,
+            controller.value.rotationCorrection,
+          ),
+        );
         return SizedBox(
-          width: compWidth,
-          height: compWidth / ratio,
+          width: caixa.width,
+          height: caixa.height,
           child: VideoPlayer(controller),
         );
       },
@@ -5892,14 +5943,7 @@ class _LayerContent extends StatelessWidget {
           ),
         ),
       ),
-      ImageLayer l => RepaintBoundary(
-        child: Image.file(
-          File(l.sourcePath),
-          width: compWidth,
-          fit: BoxFit.contain,
-          errorBuilder: (_, _, _) => _brokenMedia(),
-        ),
-      ),
+      ImageLayer l => RepaintBoundary(child: _imagem(l)),
       // EXPORTANDO: o quadro vem decodificado do disco. A textura do
       // player nunca entra num `toImage`, entao o video sairia preto.
       // OUTRO INSTANTE, EXPORTANDO: o quadro decodificado para ele.
@@ -5907,23 +5951,12 @@ class _LayerContent extends StatelessWidget {
           when exporting &&
               tempoAlheio != null &&
               quadroEm?.call(l, tempoAlheio!) != null =>
-        _quadroFixo(quadroEm!(l, tempoAlheio!)!),
+        _quadroFixo(l, quadroEm!(l, tempoAlheio!)!),
       // OUTRO INSTANTE, NA PREVIA: o quadro extraido (ou o ao vivo).
       VideoLayer l when !exporting && tempoAlheio != null =>
         _videoDeOutroTempo(l, tempoAlheio!),
       VideoLayer l when exportFrames != null && exportFrames![l.id] != null =>
-        SizedBox(
-          width: compWidth,
-          height:
-              compWidth *
-              exportFrames![l.id]!.height /
-              exportFrames![l.id]!.width,
-          child: RawImage(
-            image: exportFrames![l.id],
-            fit: BoxFit.contain,
-            filterQuality: FilterQuality.medium,
-          ),
-        ),
+        _quadroFixo(l, exportFrames![l.id]!),
       VideoLayer l => _videoAoVivo(l),
       AudioLayer _ => const SizedBox.shrink(),
       // OBJETO NULO: o quadrado tracejado com o X e uma AJUDA — existe

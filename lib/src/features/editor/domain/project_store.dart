@@ -7,6 +7,7 @@ import 'audio_effect.dart';
 import 'dart:typed_data';
 import 'dart:ui';
 
+import 'ajuste_da_midia.dart';
 import 'aprimoramento_ia.dart';
 import 'camera3d.dart';
 import 'caption.dart';
@@ -1197,12 +1198,14 @@ Map<String, dynamic> layerToJson(Layer l) {
       if (v.reducaoDeRuido != reducaoDeRuidoPadrao) {
         base['ruidoAprimoramento'] = v.reducaoDeRuido;
       }
+      _gravarAjuste(base, v.ajuste, v.proporcaoDaFonte);
       base['volume'] = v.volume;
       final va = _audioSpec(v.audio);
       if (va != null) base['audio'] = va;
     case ImageLayer i:
       base['kind'] = 'image';
       base['src'] = i.sourcePath;
+      _gravarAjuste(base, i.ajuste, i.proporcaoDaFonte);
     case TextLayer t:
       base['kind'] = 'text';
       base['text'] = t.text;
@@ -2023,6 +2026,8 @@ Layer layerFromJson(Map<String, dynamic> m) {
               reducaoDeRuidoPadrao;
           return r.isFinite ? r.clamp(0.0, 1.0) : reducaoDeRuidoPadrao;
         })(),
+        ajuste: _lerAjuste(m['ajuste']),
+        proporcaoDaFonte: _lerProporcao(m['proporcao']),
         volume: (m['volume'] as num).toDouble(),
         audio: _asAudioSpec(m['audio']),
         position: pos,
@@ -2052,6 +2057,8 @@ Layer layerFromJson(Map<String, dynamic> m) {
         startTime: start,
         duration: dur,
         sourcePath: m['src'] as String,
+        ajuste: _lerAjuste(m['ajuste']),
+        proporcaoDaFonte: _lerProporcao(m['proporcao']),
         position: pos,
         scaleX: sx,
         scaleY: sy,
@@ -3165,3 +3172,24 @@ VideoProject projectFromJson(Map<String, dynamic> m) => VideoProject(
 Map<String, dynamic> effectToJson(EffectInstance e) => _effect(e);
 
 EffectInstance effectFromJson(Map<String, dynamic> m) => _asEffect(m);
+
+/// O AJUSTE DA MIDIA no arquivo. `largura` (o de antes) nao e gravado:
+/// projeto antigo continua identico, byte a byte.
+void _gravarAjuste(
+  Map<String, dynamic> base,
+  AjusteDaMidia ajuste,
+  double? proporcao,
+) {
+  if (ajuste != AjusteDaMidia.largura) base['ajuste'] = ajuste.name;
+  final a = proporcaoValida(proporcao);
+  if (a != null) base['proporcao'] = a;
+}
+
+/// Leitura tolerante: nome desconhecido vira `largura`, o de antes.
+AjusteDaMidia _lerAjuste(Object? v) => AjusteDaMidia.values.firstWhere(
+  (a) => a.name == v,
+  orElse: () => AjusteDaMidia.largura,
+);
+
+double? _lerProporcao(Object? v) =>
+    v is num ? proporcaoValida(v.toDouble()) : null;

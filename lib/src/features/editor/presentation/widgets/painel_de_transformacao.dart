@@ -1,3 +1,4 @@
+import 'package:aurea/src/core/l10n/app_language.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -5,6 +6,7 @@ import '../../../../core/ui/am_colors.dart';
 import '../../application/editor_controller.dart';
 import '../../application/playback_controller.dart';
 import '../../application/ui/preview_resolution.dart';
+import '../../domain/ajuste_da_midia.dart';
 import '../../domain/layer.dart';
 import 'almofada_de_arrasto.dart';
 import 'campo_de_valor.dart';
@@ -250,6 +252,55 @@ class _PainelDeTransformacaoState extends ConsumerState<PainelDeTransformacao> {
 
   // --------------------------------------------------- as superficies
 
+  /// PREENCHER OU AJUSTAR, so para foto e video. Um toque volta a midia a
+  /// 100% no centro cobrindo a composicao inteira ou cabendo inteira nela
+  /// — a conta que o testador tentava fazer na mao arrastando a escala.
+  Widget _encaixeDaMidia(Layer l) {
+    final ajuste = switch (l) {
+      VideoLayer v => v.ajuste,
+      ImageLayer i => i.ajuste,
+      _ => AjusteDaMidia.largura,
+    };
+    Widget opcao(String rotulo, AjusteDaMidia alvo, String chave) {
+      final aceso = ajuste == alvo;
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: GestureDetector(
+          key: ValueKey(chave),
+          behavior: HitTestBehavior.opaque,
+          onTap: () => _c.setAjusteDaMidia(l.id, alvo),
+          child: Container(
+            height: 30,
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: aceso
+                  ? AmColors.accent.withValues(alpha: .18)
+                  : const Color(0xFF1E222D),
+              borderRadius: BorderRadius.circular(15),
+            ),
+            child: AppText(
+              rotulo,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: aceso ? AmColors.accent : AmColors.text,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        opcao('Preencher', AjusteDaMidia.cobrir, 'midia-preencher'),
+        opcao('Ajustar', AjusteDaMidia.conter, 'midia-ajustar'),
+      ],
+    );
+  }
+
   Widget _superficie(ModoDeTransformacao modo) {
     final l = _camada;
     switch (modo) {
@@ -342,6 +393,10 @@ class _PainelDeTransformacaoState extends ConsumerState<PainelDeTransformacao> {
         return Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
+            if (l is ImageLayer || l is VideoLayer) ...[
+              _encaixeDaMidia(l),
+              const SizedBox(height: 6),
+            ],
             Expanded(
               child: FitaDeAjuste(
                 rotulo: 'Largura',

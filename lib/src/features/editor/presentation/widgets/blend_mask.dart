@@ -130,6 +130,25 @@ class _RenderBlendMask extends RenderProxyBox {
     return img;
   }
 
+  /// ONDE O FILHO PINTA, no espaco desta caixa: a propria caixa unida a
+  /// dos descendentes de filho unico (Transform, Opacity, RepaintBoundary...)
+  /// levada pela transformacao de cada um. Para em [profundidade] niveis:
+  /// alem disso a caixa ja e a do conteudo.
+  static Rect _limitesPintados(RenderBox caixa, [int profundidade = 8]) {
+    var r = Offset.zero & caixa.size;
+    if (profundidade <= 0 || caixa is! RenderProxyBox) return r;
+    final neto = caixa.child;
+    if (neto == null || !neto.hasSize) return r;
+    final m = Matrix4.identity();
+    caixa.applyPaintTransform(neto, m);
+    final dele = MatrixUtils.transformRect(
+      m,
+      _limitesPintados(neto, profundidade - 1),
+    );
+    if (dele.isFinite) r = r.expandToInclude(dele);
+    return r;
+  }
+
   /// Ha textura de video (ou outra superficie externa) no filho: ela
   /// nao entra em foto, entao a foto sairia com um buraco preto.
   static bool _temTextura(RenderObject r) {
@@ -162,20 +181,22 @@ class _RenderBlendMask extends RenderProxyBox {
       return;
     }
 
-    final cabe = fotoQueCabe(size, _margem, _pixelRatio);
-    final m = cabe.margem;
-    final limites = Rect.fromLTWH(
-      -m,
-      -m,
-      size.width + 2 * m,
-      size.height + 2 * m,
+    // A FOTO COBRE O QUE O FILHO PINTA, nao so a caixa dele. A camada
+    // ampliada chega aqui como Transform(escala) + Opacity: o tamanho de
+    // layout continua o de 100%, e a foto recortava a imagem de volta a
+    // esse retangulo. Era o "coloquei para preencher, pus a mesclagem e
+    // diminuiu" do testador: o campo seguia em 198,6 e a imagem encolhia.
+    final pintado = _limitesPintados(filho).inflate(
+      _margem.isFinite ? _margem.clamp(0.0, kFotoTetoDaMargem) : 0.0,
     );
+    final cabe = fotoQueCabe(pintado.size, 0, _pixelRatio);
+    final limites = pintado;
     if (limites.isEmpty) return;
     final razao = cabe.razao;
     final foto = _fotografar(filho, limites, razao);
 
     canvas.save();
-    canvas.translate(offset.dx - m, offset.dy - m);
+    canvas.translate(offset.dx + limites.left, offset.dy + limites.top);
     canvas.scale(1 / razao);
     canvas.drawImage(
       foto,

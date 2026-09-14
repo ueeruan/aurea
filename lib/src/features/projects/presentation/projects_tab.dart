@@ -11,6 +11,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../about/presentation/report_sheet.dart';
 import '../../editor/application/editor_controller.dart';
+import '../../editor/domain/ajuste_da_midia.dart';
+import '../../media/application/media_import_service.dart' show proporcaoDaFoto;
 import '../../editor/domain/template_pack.dart';
 import '../../editor/domain/video_project.dart';
 import '../../editor/presentation/editor_screen.dart';
@@ -245,26 +247,43 @@ class ProjectsTab extends ConsumerWidget {
       final caminho = r?.files.single.path;
       if (caminho == null || !context.mounted) return;
       final nome = r?.files.single.name ?? 'Mídia Importada';
+      final controller = ref.read(editorControllerProvider.notifier);
+      final ext = caminho.split('.').last.toLowerCase();
+      final video = ['mp4', 'mov', 'm4v', 'avi', 'mkv', 'webm', '3gp']
+          .contains(ext);
+      // O PROJETO TEM A PROPORCAO DA MIDIA: a previa abre cheia, sem faixa.
+      // Era 9:16 sempre, e o video deitado ficava pequeno no meio da tela.
+      final sonda = video ? await controller.sondarVideo(caminho) : null;
+      final proporcao = video ? sonda!.proporcao : await proporcaoDaFoto(caminho);
+      if (!context.mounted) return;
       final projeto = VideoProject(
         id: 'projeto-${DateTime.now().millisecondsSinceEpoch}',
         name: nome.replaceAll(RegExp(r'\.[^.]+$'), ''),
         createdAt: DateTime.now(),
         fps: 30,
-        aspectRatio: 9 / 16,
+        aspectRatio: proporcaoDoProjeto(proporcao),
       );
       ref.read(projectsControllerProvider.notifier).add(projeto);
-      final controller = ref.read(editorControllerProvider.notifier);
       controller.openProject(projeto);
-      final ext = caminho.split('.').last.toLowerCase();
-      if (['mp4', 'mov', 'm4v', 'avi', 'mkv'].contains(ext)) {
+      if (video) {
+        final duracao = sonda!.duracao > Duration.zero
+            ? sonda.duracao
+            : const Duration(seconds: 5);
         controller.addVideoLayer(
           Duration.zero,
           caminho,
           nome,
-          const Duration(seconds: 5),
+          duracao,
+          fonte: sonda.duracao > Duration.zero ? sonda.duracao : null,
+          proporcao: proporcao,
         );
       } else {
-        controller.addImageLayer(Duration.zero, caminho, nome);
+        controller.addImageLayer(
+          Duration.zero,
+          caminho,
+          nome,
+          proporcao: proporcao,
+        );
       }
       Navigator.of(context)
           .push(MaterialPageRoute(builder: (_) => const EditorScreen()));

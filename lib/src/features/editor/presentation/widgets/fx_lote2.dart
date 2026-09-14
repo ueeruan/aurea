@@ -1425,6 +1425,9 @@ class FilmDamagePainter extends CustomPainter {
     required this.burn,
     required this.time,
     required this.seed,
+    this.hairs = 0,
+    this.vignette = 0,
+    this.dustSize = 1,
   });
 
   final double dust;
@@ -1432,6 +1435,12 @@ class FilmDamagePainter extends CustomPainter {
   final double burn;
   final Duration time;
   final int seed;
+
+  /// S_FilmDamage 2, no caminho sem shader. Os padroes sao o neutro: quem
+  /// nao passa nada desenha exatamente o de antes.
+  final double hairs;
+  final double vignette;
+  final double dustSize;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1451,9 +1460,39 @@ class FilmDamagePainter extends CustomPainter {
         );
         canvas.drawCircle(
           Offset(r1 * size.width, r2 * size.height),
-          0.6 + r3 * 2.2,
+          (0.6 + r3 * 2.2) * dustSize,
           paint,
         );
+      }
+    }
+
+    // FIOS: pelos presos na janela; cada um fica meio segundo parado.
+    final nFios = hairs.round();
+    if (nFios > 0) {
+      final troca = (time.inMilliseconds / 500).floor().toDouble();
+      final paint = Paint()
+        ..color = Colors.black.withValues(alpha: 0.7)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.1;
+      for (var i = 0; i < nFios; i++) {
+        final x = fxNoise(i.toDouble(), troca, seed + 21) * size.width;
+        final y = fxNoise(i.toDouble(), troca, seed + 22) * size.height;
+        final angulo = fxNoise(i.toDouble(), troca, seed + 23) * math.pi * 2;
+        final meio = math.max(
+          6.0,
+          size.shortestSide *
+              (0.03 + 0.05 * fxNoise(i.toDouble(), troca, seed + 24)),
+        );
+        canvas.save();
+        canvas.translate(x, y);
+        canvas.rotate(angulo);
+        canvas.drawPath(
+          Path()
+            ..moveTo(-meio, 0)
+            ..quadraticBezierTo(0, meio * 0.3, meio, 0),
+          paint,
+        );
+        canvas.restore();
       }
     }
 
@@ -1486,6 +1525,19 @@ class FilmDamagePainter extends CustomPainter {
           ),
       );
     }
+
+    if (vignette > 0.001) {
+      canvas.drawRect(
+        Offset.zero & size,
+        Paint()
+          ..shader = ui.Gradient.radial(
+            Offset(size.width / 2, size.height / 2),
+            size.longestSide * 0.71,
+            [Colors.transparent, Colors.black.withValues(alpha: vignette)],
+            [0.3, 1.0],
+          ),
+      );
+    }
   }
 
   @override
@@ -1494,7 +1546,10 @@ class FilmDamagePainter extends CustomPainter {
       old.scratches != scratches ||
       old.burn != burn ||
       old.time != time ||
-      old.seed != seed;
+      old.seed != seed ||
+      old.hairs != hairs ||
+      old.vignette != vignette ||
+      old.dustSize != dustSize;
 }
 
 /// GLITCHIFY: blocos deslocados na horizontal, com linhas de erro.

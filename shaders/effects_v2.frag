@@ -397,17 +397,55 @@ void main() {
   if(mode==30) {
     float tick=floor(uTime*16.0),seed=p1.z;
     float jump=(hash(vec3(tick,seed,7))-.5)*p1.y*10.0*uPixelScale/uSize.y;
-    vec4 value=src(uv+vec2(0,jump));a=value.a;c=straight(value);
+    // S_FILMDAMAGE 2 (slots 7 a 13). Cada passo novo so roda fora do
+    // neutro: projeto salvo antes deles desenha exatamente como antes.
+    // BALANCO: a pelicula escorrega de lado no gate, devagar e sem salto.
+    float weave=p2.x>0.0 ? (noise(vec3(uTime*3.0,seed,11.0))-.5)*p2.x*12.0*uPixelScale/uSize.x : 0.0;
+    vec2 gate=uv+vec2(weave,jump);
+    // DESFOQUE: o foco da copia gasta, ate 8 px em 1080p.
+    vec4 value=p2.y>.001 ? desfoqueEmAnel(gate,p2.y*8.0*uPixelScale) : src(gate);
+    a=value.a;c=straight(value);
     c*=1.0+(hash(vec3(tick,seed,3))-.5)*p0.z*.4;
     c+=(hash(vec3(floor(uv*uSize),seed+tick))-.5)*p0.w*.3;
-    vec2 grid=uv*vec2(60,40);vec2 cell=floor(grid);
-    float dust=step(1.0-p0.x*.08,hash(vec3(cell,seed+tick)));
+    // TAMANHO DA POEIRA: celula maior, grao maior; 1 e a grade de sempre.
+    float tamanho=max(p3.y,.5);
+    vec2 grid=uv*vec2(60,40)/tamanho;vec2 cell=floor(grid);
+    float dust=step(1.0-p0.x*.08*tamanho,hash(vec3(cell,seed+tick)));
     dust*=1.0-smoothstep(.08,.3,length(fract(grid)-.5));c*=1.0-dust*.85;
     float scratchX=hash(vec3(floor(tick/4.0),seed,13));
     float scratch=1.0-smoothstep(.5,1.8,abs(uv.x-scratchX)*uSize.x);
     c+=scratch*p0.y*.65;
     float burn=p1.x*pow(abs(uv.x-.5)*2.0,5.0)*(.6+.4*noise(vec3(uv*3.0,tick*.04)));
     c=mix(c,vec3(1,.26,.04),burn);
+    // FIOS: pelos presos na janela do projetor. Cada um fica meio segundo
+    // no mesmo lugar, ondulando de leve, e troca de posicao.
+    int fios=int(clamp(p1.w,0.0,10.0)+.5);
+    if(fios>0) {
+      float troca=floor(uTime*2.0);
+      vec2 pixel=uv*uSize;
+      float menor=min(uSize.x,uSize.y);
+      float largura=max(.75,uPixelScale);
+      float fio=0.0;
+      for(int i=0;i<10;i++) {
+        if(i>=fios) break;
+        float fi=float(i);
+        vec2 centro=vec2(hash(vec3(fi,troca,seed+21.0)),hash(vec3(fi,troca,seed+22.0)))*uSize;
+        float angulo=hash(vec3(fi,troca,seed+23.0))*6.2831853;
+        float meio=max(menor*(.03+.05*hash(vec3(fi,troca,seed+24.0))),6.0*uPixelScale);
+        vec2 eixo=rotate2(pixel-centro,-angulo);
+        float curva=sin(eixo.x/meio*3.14159+uTime*2.0+fi)*meio*.15;
+        float dentro=1.0-smoothstep(largura*.5,largura*1.5,abs(eixo.y-curva));
+        dentro*=1.0-smoothstep(meio*.85,meio,abs(eixo.x));
+        fio=max(fio,dentro);
+      }
+      c*=1.0-fio*.8;
+    }
+    // VINHETA: os cantos escurecem como na lente do projetor.
+    if(p2.z>.0001) c*=1.0-p2.z*smoothstep(.3,1.0,length(uv-.5)*1.41421356);
+    // COR DA COPIA: saturacao em volta da luma e o tom sepia classico
+    // (a mesma matriz que o caminho sem shader usa).
+    if(abs(p2.w-1.0)>.0001) c=saturate(c,p2.w);
+    if(p3.x>.0001) c=mix(c,mat3(.393,.349,.272,.769,.686,.534,.189,.168,.131)*c,p3.x);
   }
   if(mode==31) {
     float phase=uTime*p0.y;

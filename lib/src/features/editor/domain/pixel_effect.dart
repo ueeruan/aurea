@@ -158,6 +158,14 @@ const pixelKernels = <EffectType, PixelKernel>{
     'queimado',
     'salto',
     'semente',
+    // S_FilmDamage 2: sempre DEPOIS dos sete de cima (slots 7 a 13).
+    'fios',
+    'balanco',
+    'desfoque',
+    'vinheta',
+    'saturacao',
+    'sepia',
+    'tamanho_poeira',
   ]),
   EffectType.flicker: PixelKernel(31, [
     'amount',

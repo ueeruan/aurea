@@ -315,6 +315,42 @@ Rgb mathOps(
   );
 }
 
+// ------------------------------------------------------ S_FILMDAMAGE 2
+
+/// A COR DA COPIA do Film Damage: saturacao em volta da luma Rec.709 e o
+/// tom sepia classico misturado por [sepia]. As duas contas sao lineares,
+/// entao a matriz de [matrizDaCopiaDeFilme] e exata. No shader: modo 30.
+Rgb corDaCopiaDeFilme(Rgb c, {double saturacao = 1, double sepia = 0}) {
+  final y = _lum(c);
+  final s = (
+    r: y * (1 - saturacao) + c.r * saturacao,
+    g: y * (1 - saturacao) + c.g * saturacao,
+    b: y * (1 - saturacao) + c.b * saturacao,
+  );
+  final t = (
+    r: .393 * s.r + .769 * s.g + .189 * s.b,
+    g: .349 * s.r + .686 * s.g + .168 * s.b,
+    b: .272 * s.r + .534 * s.g + .131 * s.b,
+  );
+  return (
+    r: s.r * (1 - sepia) + t.r * sepia,
+    g: s.g * (1 - sepia) + t.g * sepia,
+    b: s.b * (1 - sepia) + t.b * sepia,
+  );
+}
+
+/// [corDaCopiaDeFilme] como matriz de cor, para o caminho sem shader.
+List<double> matrizDaCopiaDeFilme({double saturacao = 1, double sepia = 0}) {
+  final k = sepia.clamp(0.0, 1.0);
+  final tom = [
+    1 - k + .393 * k, .769 * k, .189 * k, 0.0, 0.0, //
+    .349 * k, 1 - k + .686 * k, .168 * k, 0.0, 0.0,
+    .272 * k, .534 * k, 1 - k + .131 * k, 0.0, 0.0,
+    0.0, 0.0, 0.0, 1.0, 0.0,
+  ];
+  return comporMatrizes(tom, _matrizDeSaturacao(saturacao));
+}
+
 /// A matriz de cor de um ganho por canal; o alfa nao muda.
 List<double> matrizDeGanho(Rgb ganho) => [
   ganho.r, 0, 0, 0, 0, //

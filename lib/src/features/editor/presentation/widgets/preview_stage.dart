@@ -5433,7 +5433,32 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
           final dy = jump <= 0.01
               ? 0.0
               : (fxNoise(frame.toDouble(), 1, seed + 5) - 0.5) * jump * 10;
+          // S_FILMDAMAGE 2: todos nascem neutros, e neutro nao embrulha
+          // nada — projeto antigo desenha a mesma arvore de antes.
+          final balancoFilme = effect.paramAt('balanco', local).clamp(0.0, 1.0);
+          final dx = balancoFilme <= 0.001
+              ? 0.0
+              : (fxValueNoise(local.inMicroseconds / 1e6 * 3, 11, seed) - 0.5) *
+                    balancoFilme *
+                    12;
+          final desfoqueFilme = effect
+              .paramAt('desfoque', local)
+              .clamp(0.0, 1.0);
+          final saturacaoFilme = effect
+              .paramAt('saturacao', local)
+              .clamp(0.0, 2.0);
+          final sepiaFilme = effect.paramAt('sepia', local).clamp(0.0, 1.0);
           var body = out;
+          if (desfoqueFilme > 0.001) {
+            final sigmaFilme = pxAt1080(desfoqueFilme * 4, fxWidth, fxHeight);
+            body = ImageFiltered(
+              imageFilter: ui.ImageFilter.blur(
+                sigmaX: sigmaFilme,
+                sigmaY: sigmaFilme,
+              ),
+              child: body,
+            );
+          }
           if ((lum - 1).abs() > 0.005) {
             body = ColorFiltered(
               colorFilter: ColorFilter.matrix(_scaleShiftMatrix(lum, 0)),
@@ -5443,7 +5468,7 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
           out = Stack(
             clipBehavior: Clip.none,
             children: [
-              Transform.translate(offset: Offset(0, dy), child: body),
+              Transform.translate(offset: Offset(dx, dy), child: body),
               Positioned.fill(
                 child: IgnorePointer(
                   child: CustomPaint(
@@ -5453,6 +5478,11 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
                       burn: effect.paramAt('queimado', local),
                       time: local,
                       seed: seed,
+                      hairs: effect.paramAt('fios', local).clamp(0.0, 10.0),
+                      vignette: effect.paramAt('vinheta', local).clamp(0.0, 1.0),
+                      dustSize: effect
+                          .paramAt('tamanho_poeira', local)
+                          .clamp(0.5, 3.0),
                     ),
                   ),
                 ),
@@ -5475,6 +5505,19 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
                 ),
             ],
           );
+          // A cor da copia por cima de tudo, como no shader: a poeira e os
+          // riscos tambem ficam sepia.
+          if ((saturacaoFilme - 1).abs() > 0.001 || sepiaFilme > 0.001) {
+            out = ColorFiltered(
+              colorFilter: ColorFilter.matrix(
+                matrizDaCopiaDeFilme(
+                  saturacao: saturacaoFilme,
+                  sepia: sepiaFilme,
+                ),
+              ),
+              child: out,
+            );
+          }
 
         case EffectType.blobTracker:
           // As caixas vem da ANALISE ja gravada. Sem analise, o pintor

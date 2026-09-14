@@ -762,4 +762,137 @@ void main() {
       entrada.dispose();
     });
   });
+
+  group('S_FilmDamage 2', () {
+    const semDano = <String, double>{
+      'poeira': 0,
+      'riscos': 0,
+      'cintilacao': 0,
+      'granulacao': 0,
+      'queimado': 0,
+      'salto': 0,
+    };
+
+    test('as sete chaves antigas nao mudam de slot e as novas nascem '
+        'neutras', () {
+      final chaves = pixelKernels[EffectType.filmDamage]!.keys;
+      expect(chaves.take(7), [
+        'poeira',
+        'riscos',
+        'cintilacao',
+        'granulacao',
+        'queimado',
+        'salto',
+        'semente',
+      ]);
+      expect(chaves.skip(7), [
+        'fios',
+        'balanco',
+        'desfoque',
+        'vinheta',
+        'saturacao',
+        'sepia',
+        'tamanho_poeira',
+      ]);
+      // Projeto salvo antes: so as sete chaves antigas no arquivo.
+      final antigo = _efeito(EffectType.filmDamage, const {
+        'poeira': .5,
+        'riscos': .4,
+        'cintilacao': .35,
+        'granulacao': .4,
+        'queimado': .3,
+        'salto': .25,
+        'semente': 11,
+      });
+      final q = PixelEffectFrame.of(antigo, Duration.zero);
+      expect(q.values.sublist(7, 14), [0, 0, 0, 0, 1, 0, 1]);
+      expect(searchEffects('dano de filme'), contains(EffectType.filmDamage));
+      expect(searchEffects('S_FilmDamage'), contains(EffectType.filmDamage));
+      expect(efeitosDeEdit, contains(EffectType.filmDamage));
+    });
+
+    test('sem dano: o neutro sai intacto e a cor da copia bate com a '
+        'referencia', () async {
+      final entrada = await _imagem(_rampa);
+      await _comparar(
+        entrada,
+        _rampa,
+        _quadro(EffectType.filmDamage, semDano),
+        (c) => c,
+        tolerancia: 1.5,
+        nome: 'filmDamage neutro',
+      );
+      for (final (sat, sep) in [(0.0, 0.0), (1.5, 1.0), (.6, .4)]) {
+        await _comparar(
+          entrada,
+          _rampa,
+          _quadro(EffectType.filmDamage, {
+            ...semDano,
+            'saturacao': sat,
+            'sepia': sep,
+          }),
+          (c) => corDaCopiaDeFilme(c, saturacao: sat, sepia: sep),
+          nome: 'filmDamage cor sat=$sat sepia=$sep',
+        );
+      }
+      entrada.dispose();
+    });
+
+    test('a matriz da cor da copia e exata', () {
+      const c = (r: .2, g: .55, b: .8);
+      _mesmaCor(
+        _aplicarMatriz(matrizDaCopiaDeFilme(saturacao: .6, sepia: .4), c),
+        corDaCopiaDeFilme(c, saturacao: .6, sepia: .4),
+      );
+    });
+
+    test('vinheta, fios, desfoque e tamanho da poeira estao vivos', () async {
+      Rgb cinza(int x, int y) => (r: .6, g: .6, b: .6);
+      final lisa = await _imagem(cinza);
+      final vinheta = await _renderizar(
+        lisa,
+        _quadro(EffectType.filmDamage, {...semDano, 'vinheta': 1}),
+      );
+      int vermelho(Uint8List px, int x, int y) => px[(y * _w + x) * 4];
+      expect(vermelho(vinheta, 32, 16), closeTo(153, 1.5), reason: 'centro');
+      expect(vermelho(vinheta, 0, 0), lessThan(40), reason: 'canto');
+
+      final fios = await _renderizar(
+        lisa,
+        _quadro(EffectType.filmDamage, {...semDano, 'fios': 10}),
+      );
+      var escuros = 0;
+      for (var i = 0; i < fios.length; i += 4) {
+        if (fios[i] < 140) escuros++;
+      }
+      expect(escuros, greaterThan(0));
+
+      final poeiraFina = await _renderizar(
+        lisa,
+        _quadro(EffectType.filmDamage, {...semDano, 'poeira': 1}),
+      );
+      final poeiraGrossa = await _renderizar(
+        lisa,
+        _quadro(EffectType.filmDamage, {
+          ...semDano,
+          'poeira': 1,
+          'tamanho_poeira': 3,
+        }),
+      );
+      expect(poeiraGrossa, isNot(equals(poeiraFina)));
+      lisa.dispose();
+
+      final entrada = await _imagem(_rampa);
+      final nitida = await _renderizar(
+        entrada,
+        _quadro(EffectType.filmDamage, semDano),
+      );
+      final borrada = await _renderizar(
+        entrada,
+        _quadro(EffectType.filmDamage, {...semDano, 'desfoque': 1}),
+      );
+      expect(borrada, isNot(equals(nitida)));
+      entrada.dispose();
+    });
+  });
 }

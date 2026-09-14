@@ -2055,6 +2055,9 @@ const effectSpecs = <EffectType, EffectSpec>{
       'poeira',
       'super 8',
       'granulado',
+      's_filmdamage',
+      'filmdamage',
+      'dano de filme',
     ],
     cost: 2,
     params: {
@@ -2065,6 +2068,17 @@ const effectSpecs = <EffectType, EffectSpec>{
       'queimado': EffectParam('Queimado', 0.3, 0.0, 1.0),
       'salto': EffectParam('Salto de quadro', 0.25, 0.0, 1.0),
       'semente': EffectParam('Semente', 11.0, 1.0, 999.0, kind: ParamKind.seed),
+      // S_FILMDAMAGE 2 (dono, 14/09/2026): SEMPRE NO FIM e todos neutros
+      // no inicial. Projeto salvo sem estas chaves le o inicial da ficha
+      // e abre exatamente como antes; os slots do shader dos sete de
+      // cima nao mudam de lugar.
+      'fios': EffectParam('Fios', 0, 0, 10),
+      'balanco': EffectParam('Balanço', 0, 0, 1),
+      'desfoque': EffectParam('Desfoque', 0, 0, 1),
+      'vinheta': EffectParam('Vinheta', 0, 0, 1),
+      'saturacao': EffectParam('Saturação', 1, 0, 2),
+      'sepia': EffectParam('Tom sépia', 0, 0, 1),
+      'tamanho_poeira': EffectParam('Tamanho da poeira', 1, .5, 3),
     },
     montar: ['poeira', 'riscos', 'cintilacao'],
     presets: [
@@ -3580,6 +3594,7 @@ const efeitosDeEdit = <EffectType>[
   EffectType.tremor,
   EffectType.timeSlice,
   EffectType.posterizeTime,
+  EffectType.filmDamage,
   EffectType.rgbSplit,
   EffectType.glitch,
   EffectType.colorBalance,

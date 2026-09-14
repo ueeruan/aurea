@@ -23,6 +23,7 @@ import 'package:aurea/src/features/editor/domain/amostra_dos_efeitos.dart';
 import 'package:aurea/src/features/editor/domain/effect.dart';
 import 'package:aurea/src/features/editor/presentation/widgets/pixel_effect_engine.dart';
 import 'package:aurea/src/features/editor/presentation/widgets/preview_stage.dart';
+import 'package:flutter/foundation.dart' show SynchronousFuture;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -39,10 +40,19 @@ void main() {
 
   // Fonte e shader carregam em IO de verdade: dentro do corpo do
   // testWidgets (relogio falso) o await nunca volta.
+  ui.Image? foto;
   setUpAll(() async {
     if (!gerar) return;
+    TestWidgetsFlutterBinding.ensureInitialized();
     await carregarFontesReais();
     await PixelEffectEngine.warmUp();
+    // A FOTO DECODIFICA AQUI, e nao com precacheImage dentro do teste: la
+    // o carregamento de arquivo trava o relogio falso (ja travou o teste
+    // de print da Comunidade).
+    final codec = await ui.instantiateImageCodec(
+      File(fotoDaAmostra).readAsBytesSync(),
+    );
+    foto = (await codec.getNextFrame()).image;
   });
 
   testWidgets(
@@ -69,6 +79,15 @@ void main() {
       final videos = VideoLayerManager();
       addTearDown(tempo.dispose);
       addTearDown(videos.dispose);
+
+      // O palco desenha a foto com Image.file: a chave e o FileImage do
+      // mesmo caminho, entao a foto ja decodificada entra direto no cache.
+      PaintingBinding.instance.imageCache.putIfAbsent(
+        FileImage(File(fotoDaAmostra)),
+        () => OneFrameImageStreamCompleter(
+          SynchronousFuture(ImageInfo(image: foto!.clone())),
+        ),
+      );
 
       Future<List<Uint8List>> quadros(EffectType? tipo, EffectPronto? p) async {
         final container = ProviderContainer();
@@ -100,13 +119,6 @@ void main() {
             ),
           ),
         );
-        // A foto decodifica fora do relogio falso: espera de verdade.
-        await tester.runAsync(() async {
-          await precacheImage(
-            FileImage(File(fotoDaAmostra)),
-            tester.element(find.byKey(chave)),
-          );
-        });
         final out = <Uint8List>[];
         for (var i = 0; i < quadrosDaPrevia; i++) {
           tempo.value = instanteDoQuadro(i);
@@ -202,6 +214,8 @@ void main() {
           'preset': preset,
           if (neutro) 'neutro': true,
         };
+        // ignore: avoid_print
+        print('${spec.id}: ${melhor.toStringAsFixed(2)}');
         relatorio.writeln(
           '${spec.id}: diferenca ${melhor.toStringAsFixed(2)}'
           '${preset == null ? '' : ' (preset $preset)'}'

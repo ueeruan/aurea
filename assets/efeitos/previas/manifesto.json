@@ -1,0 +1,236 @@
+{
+  "versao": 1,
+  "quadros": 8,
+  "lado": 200,
+  "fps": 8,
+  "efeitos": {
+    "oscillate": {
+      "preset": null
+    },
+    "gaussian_blur": {
+      "preset": null
+    },
+    "glow": {
+      "preset": 1
+    },
+    "tint": {
+      "preset": null
+    },
+    "deep_glow": {
+      "preset": 2,
+      "neutro": true
+    },
+    "shake": {
+      "preset": null
+    },
+    "glitch": {
+      "preset": null
+    },
+    "rgb_split": {
+      "preset": null
+    },
+    "echo": {
+      "preset": null,
+      "neutro": true
+    },
+    "space_echo": {
+      "preset": null,
+      "neutro": true
+    },
+    "chromatic_aberration": {
+      "preset": null
+    },
+    "levels": {
+      "preset": null
+    },
+    "curves": {
+      "preset": null
+    },
+    "vibrance": {
+      "preset": null
+    },
+    "white_balance": {
+      "preset": null
+    },
+    "color_wheels": {
+      "preset": null
+    },
+    "unmult": {
+      "preset": null
+    },
+    "vignette": {
+      "preset": null
+    },
+    "directional_blur": {
+      "preset": null
+    },
+    "radial_blur": {
+      "preset": null
+    },
+    "light_rays": {
+      "preset": null
+    },
+    "mosaic": {
+      "preset": null
+    },
+    "film_grain": {
+      "preset": null
+    },
+    "fractal_noise": {
+      "preset": null
+    },
+    "digital_damage": {
+      "preset": null
+    },
+    "zoom_warp": {
+      "preset": null
+    },
+    "chroma_key": {
+      "preset": null
+    },
+    "luma_key": {
+      "preset": null
+    },
+    "color_key": {
+      "preset": null
+    },
+    "find_edges": {
+      "preset": null
+    },
+    "posterize": {
+      "preset": null
+    },
+    "optical_flow": {
+      "preset": null,
+      "neutro": true
+    },
+    "time_remap": {
+      "preset": null,
+      "neutro": true
+    },
+    "pixel_sorter": {
+      "preset": null
+    },
+    "blob_tracker": {
+      "preset": null
+    },
+    "turbulent_displace": {
+      "preset": null
+    },
+    "unsharp_mask": {
+      "preset": null
+    },
+    "motion_tile": {
+      "preset": 1
+    },
+    "bend": {
+      "preset": null
+    },
+    "seed": {
+      "preset": null
+    },
+    "split": {
+      "preset": null
+    },
+    "vhs": {
+      "preset": null
+    },
+    "film_damage": {
+      "preset": null
+    },
+    "glitchify": {
+      "preset": null
+    },
+    "flicker": {
+      "preset": null
+    },
+    "gradient4": {
+      "preset": null
+    },
+    "liquid_glass": {
+      "preset": null,
+      "neutro": true
+    },
+    "corrections": {
+      "preset": null
+    },
+    "force_motion_blur": {
+      "preset": null
+    },
+    "twirl": {
+      "preset": null
+    },
+    "fisheye": {
+      "preset": null
+    },
+    "kaleidoscope": {
+      "preset": null
+    },
+    "venetian_blinds": {
+      "preset": null
+    },
+    "block_dissolve": {
+      "preset": null
+    },
+    "offset": {
+      "preset": null
+    },
+    "invert": {
+      "preset": null
+    },
+    "wave_warp": {
+      "preset": null
+    },
+    "color_balance": {
+      "preset": null
+    },
+    "selective_color": {
+      "preset": null
+    },
+    "channel_mixer": {
+      "preset": null
+    },
+    "photo_filter": {
+      "preset": null
+    },
+    "gradient_map": {
+      "preset": null
+    },
+    "brightness_contrast": {
+      "preset": null
+    },
+    "color_tune": {
+      "preset": null
+    },
+    "flash": {
+      "preset": null
+    },
+    "strobe": {
+      "preset": null
+    },
+    "zoom_punch": {
+      "preset": null
+    },
+    "slice_glitch": {
+      "preset": null
+    },
+    "twitch": {
+      "preset": null
+    },
+    "time_slice": {
+      "preset": null
+    },
+    "posterize_time": {
+      "preset": null
+    },
+    "hue_saturation": {
+      "preset": null
+    },
+    "s_flicker": {
+      "preset": null
+    },
+    "math_ops": {
+      "preset": null
+    }
+  }
+}

@@ -34,8 +34,8 @@ const int ladoDaAmostra = 400;
 
 /// A composicao da amostra: a foto em tela cheia com um vaivem de zoom e
 /// deslocamento (efeito de tempo precisa de movimento para aparecer) que
-/// volta ao comeco no fim do ciclo, e um texto branco por cima (brilho,
-/// contorno e aberracao de cor precisam de borda). O efeito vai nas duas.
+/// volta ao comeco no fim do ciclo. (Um texto por cima saia como blocos:
+/// o gerador roda sem as fontes do app.)
 ///
 /// [caminhoDaFoto] vem de fora porque o gerador le a foto do disco.
 VideoProject amostraDoEfeito(
@@ -62,16 +62,6 @@ VideoProject amostraDoEfeito(
     fps: fpsDaPrevia,
     backgroundColor: const Color(0xFF000000),
     layers: [
-      TextLayer(
-        name: 'texto',
-        startTime: Duration.zero,
-        duration: const Duration(seconds: 4),
-        text: 'Aurea',
-        fontSize: 84,
-        color: const Color(0xFFFFFFFF),
-        position: AnimatedOffset(const Offset(c, lado * 0.8)),
-        effects: efeito(),
-      ),
       ImageLayer(
         name: 'foto',
         startTime: Duration.zero,

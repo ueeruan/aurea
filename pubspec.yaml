@@ -117,6 +117,8 @@ flutter:
     # Android, entao os 10 MB do modelo nao entram no IPA.
     - path: assets/ai/rife-v4.6/
       platforms: [android]
+    # Previas animadas da galeria de efeitos (tool/previas_dos_efeitos_test.dart).
+    - assets/efeitos/previas/
     - assets/environments/
     - assets/templates/
     - assets/templates/dnyx/

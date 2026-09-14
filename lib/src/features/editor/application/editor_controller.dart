@@ -34,6 +34,7 @@ import 'tracking_service.dart';
 import '../domain/tracker2d.dart';
 import '../domain/fx.dart';
 import '../domain/grid_rig.dart';
+import '../domain/grupo_ops.dart';
 import '../domain/keyframe.dart';
 import '../domain/loudness.dart';
 import '../domain/layer.dart';
@@ -762,15 +763,24 @@ class EditorController extends Notifier<VideoProject> {
     for (final q in _grupos) q.fora.layerById(q.groupId)?.name ?? 'Grupo',
   ];
 
+  /// QUEM CONVERTE O CABECOTE ao entrar e sair de grupo. Dentro, os
+  /// filhos contam o tempo a partir do inicio do grupo; o relogio do
+  /// editor tem de andar junto, senao a camada criada la dentro nasce no
+  /// instante errado e, ao sair, o cabecote fica noutro ponto. O editor
+  /// registra aqui o seek (o controlador nao conhece o relogio).
+  void Function(Duration deslocamento)? aoMudarDeNivel;
+
   void enterGroup(String id) {
     final g = _layer(id);
     if (g is! GroupLayer) return;
+    descartarPendencia();
     _grupos.add(
       _QuadroDeGrupo(
         fora: state,
         groupId: id,
         undo: [..._undoStack],
         redo: [..._redoStack],
+        inicio: g.startTime,
       ),
     );
     _undoStack.clear();
@@ -782,11 +792,13 @@ class EditorController extends Notifier<VideoProject> {
     ref.read(multiSelectProvider.notifier).state = const {};
     // Sem _mutate: entrar nao e uma edicao.
     state = state.copyWith(name: g.name, layers: g.children);
+    aoMudarDeNivel?.call(Duration.zero - g.startTime);
   }
 
   /// Sai do grupo mais fundo, gravando os filhos de volta.
   void exitGroup() {
     if (_grupos.isEmpty) return;
+    descartarPendencia();
     final q = _grupos.removeLast();
     final dentro = state;
     final fora = q.fora;
@@ -799,12 +811,14 @@ class EditorController extends Notifier<VideoProject> {
     ref.read(multiSelectProvider.notifier).state = const {};
     ref.read(selectedLayerProvider.notifier).state = q.groupId;
     state = fora;
+    aoMudarDeNivel?.call(q.inicio);
     final g = fora.layerById(q.groupId);
     if (g is! GroupLayer) return;
     final mudou =
         !identical(dentro.layers, g.children) ||
         dentro.name != g.name ||
-        !identical(dentro.meta, fora.meta);
+        !identical(dentro.meta, fora.meta) ||
+        !identical(dentro.links, fora.links);
     if (!mudou) return;
     // A gravacao do grupo e um passo de desfazer proprio.
     _lastPush = DateTime.fromMillisecondsSinceEpoch(0);
@@ -825,7 +839,18 @@ class EditorController extends Notifier<VideoProject> {
   ) {
     final g = fora.layerById(groupId);
     if (g is! GroupLayer) return fora;
-    final novo = g.copyLayer(name: dentro.name, children: dentro.layers);
+    // A barra acompanha um filho que passou do fim do grupo la dentro.
+    var fimDosFilhos = g.duration;
+    for (final l in dentro.layers) {
+      if (l.endTime > fimDosFilhos && g.timeRemap == null) {
+        fimDosFilhos = l.endTime;
+      }
+    }
+    final novo = g.copyLayer(
+      name: dentro.name,
+      children: dentro.layers,
+      duration: fimDosFilhos,
+    );
     // A meta dos filhos (olho, cadeado, rotulo) acompanha o grupo.
     final ids = {for (final l in dentro.layers) l.id};
     final meta = {
@@ -840,6 +865,9 @@ class EditorController extends Notifier<VideoProject> {
           if (l.id == groupId) novo else l,
       ],
       meta: meta,
+      // VINCULOS criados la dentro (pai, pickwhip) moram na lista do
+      // projeto: gravar so as camadas os perdia ao sair e ao salvar.
+      links: dentro.links,
     );
   }
 
@@ -6501,6 +6529,10 @@ class EditorController extends Notifier<VideoProject> {
         skewY: layer.skewY,
         pivot: layer.pivot,
         blendMode: layer.blendMode,
+        // Mescla propria e transicao de entrada nao podem sumir por causa
+        // de uma mudanca de tempo da precomp.
+        customBlend: layer.customBlend,
+        transitionIn: layer.transitionIn,
         is3D: layer.is3D,
         positionZ: layer.positionZ,
         effects: layer.effects,
@@ -7677,7 +7709,7 @@ class EditorController extends Notifier<VideoProject> {
       if (l.endTime > end) end = l.endTime;
     }
     final group = GroupLayer(
-      name: 'Grupo',
+      name: _nomeDeGrupoNovo(),
       startTime: start,
       duration: end - start,
       position: AnimatedOffset(_center),
@@ -7706,7 +7738,7 @@ class EditorController extends Notifier<VideoProject> {
     final layer = _layer(id);
     if (layer == null || layer is GroupLayer) return;
     final group = GroupLayer(
-      name: 'Grupo',
+      name: _nomeDeGrupoNovo(),
       startTime: layer.startTime,
       duration: layer.duration,
       position: AnimatedOffset(_center),
@@ -7723,14 +7755,35 @@ class EditorController extends Notifier<VideoProject> {
     ref.read(selectedLayerProvider.notifier).state = group.id;
   }
 
-  /// Desfaz o grupo devolvendo os filhos com tempo absoluto.
-  void ungroupLayer(String id) {
+  /// "Grupo 1", "Grupo 2"... contando os grupos do projeto inteiro.
+  String _nomeDeGrupoNovo() {
+    var n = 0;
+    void conta(List<Layer> ls) {
+      for (final l in ls) {
+        if (l is GroupLayer) {
+          n++;
+          conta(l.children);
+        }
+      }
+    }
+
+    conta(projetoCompleto.layers);
+    return 'Grupo ${n + 1}';
+  }
+
+  /// DESFAZ O GRUPO SEM PULAR: os filhos voltam com tempo absoluto e com a
+  /// transformacao do grupo (posicao, rotacao, escala, opacidade — e os
+  /// keyframes dele) passada para cada um. Devolve os avisos do que nao
+  /// cabe num filho (efeitos e mascaras do grupo, por exemplo).
+  List<String> ungroupLayer(String id) {
     final layer = _layer(id);
-    if (layer is! GroupLayer) return;
-    final children = [
-      for (final c in layer.children)
-        c.copyLayer(startTime: layer.startTime + c.startTime),
-    ];
+    if (layer is! GroupLayer) return const [];
+    final r = filhosDesagrupados(
+      layer,
+      centro: _center,
+      fps: state.fps < 1 ? 30 : state.fps,
+    );
+    final children = r.filhos;
     final layers = <Layer>[];
     for (final l in state.layers) {
       if (l.id == id) {
@@ -7739,10 +7792,25 @@ class EditorController extends Notifier<VideoProject> {
         layers.add(l);
       }
     }
-    _mutate(state.copyWith(layers: layers));
+    _mutate(
+      state.copyWith(
+        layers: layers,
+        // O grupo sai da lista de vinculos junto com ele.
+        links: [
+          for (final k in state.links)
+            if (k.targetLayerId != id && k.sourceLayerId != id) k,
+        ],
+      ),
+    );
+    // Os filhos ficam selecionados, como no Alight Motion: da para
+    // mover o conjunto ou agrupar de novo sem procurar um por um.
     ref.read(selectedLayerProvider.notifier).state = children.isEmpty
         ? null
         : children.first.id;
+    ref.read(multiSelectProvider.notifier).state = children.length > 1
+        ? {for (final c in children) c.id}
+        : const {};
+    return r.avisos;
   }
 
   /// MOTION BLUR REAL na camada: liga a amostragem por quadro desta
@@ -8198,10 +8266,14 @@ class _QuadroDeGrupo {
     required this.groupId,
     required this.undo,
     required this.redo,
+    required this.inicio,
   });
 
   final VideoProject fora;
   final String groupId;
   final List<VideoProject> undo;
   final List<VideoProject> redo;
+
+  /// Inicio do grupo na linha de tempo de fora (para o cabecote).
+  final Duration inicio;
 }

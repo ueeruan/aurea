@@ -17,6 +17,7 @@ import '../../editor/application/video_layer_manager.dart';
 import '../../editor/domain/cut_ops.dart';
 import '../../editor/domain/layer.dart';
 import '../../editor/domain/time_slice.dart';
+import '../../editor/domain/grupo_ops.dart';
 import '../../../core/ui/am_colors.dart';
 import '../../editor/presentation/widgets/dither_layer.dart';
 import '../../editor/presentation/widgets/pixel_effect_engine.dart';
@@ -197,7 +198,11 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
       if (engine.cancelled) return;
 
       // 1. Quadros de cada camada de video.
-      final videoLayers = project.layers.whereType<VideoLayer>().toList();
+      // Video dentro de grupo tambem: sem os quadros dele, o arquivo saia
+      // com o icone de filme no lugar.
+      final videoLayers = midiasAchatadas(
+        project.layers,
+      ).whereType<VideoLayer>().toList();
       for (var i = 0; i < videoLayers.length; i++) {
         if (engine.cancelled) return;
         final l = videoLayers[i];

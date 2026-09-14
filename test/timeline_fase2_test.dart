@@ -98,7 +98,8 @@ void main() {
 
       e.enterGroup(grupo.id);
       expect(e.dentroDeGrupo, isTrue);
-      expect(e.caminhoDoGrupo, ['Grupo']);
+      // Numerado como no Alight Motion (14/09/2026).
+      expect(e.caminhoDoGrupo, ['Grupo 1']);
       final dentro = c.read(editorControllerProvider);
       expect(dentro.layers.length, 2, reason: 'os filhos sao a timeline');
       expect(
@@ -320,7 +321,7 @@ void main() {
       expect(e.dentroDeGrupo, isTrue, reason: 'toque duplo entrou');
       expect(find.byKey(const ValueKey('timeline-breadcrumb')), findsOneWidget);
       expect(find.text('Projeto'), findsOneWidget);
-      expect(find.text('Grupo'), findsWidgets);
+      expect(find.text('Grupo 1'), findsWidgets);
       // Os filhos estao na timeline.
       for (final id in ids) {
         expect(
@@ -345,10 +346,13 @@ void main() {
       c.read(editorControllerProvider).layers.map((l) => l.id).toList(),
     );
     await tester.pumpAndSettle();
-    await openLayerActions(tester);
-    expect(find.byKey(const ValueKey('mais-entrar')), findsOneWidget);
-    await tester.ensureVisible(find.byKey(const ValueKey('mais-entrar')));
-    await tester.tap(find.byKey(const ValueKey('mais-entrar')));
+    // 14/09/2026: o "Mais" saiu na refacao do menu e levou o Entrar junto.
+    // As portas do grupo agora moram na doca da camada.
+    expect(find.byKey(const ValueKey('grupo-entrar')), findsOneWidget);
+    expect(find.byKey(const ValueKey('grupo-desagrupar')), findsOneWidget);
+    expect(find.byKey(const ValueKey('grupo-tempo')), findsOneWidget);
+    await tester.ensureVisible(find.byKey(const ValueKey('grupo-entrar')));
+    await tester.tap(find.byKey(const ValueKey('grupo-entrar')));
     await tester.pumpAndSettle();
     expect(e.dentroDeGrupo, isTrue);
     await tester.tap(find.byKey(const ValueKey('editor-back')));

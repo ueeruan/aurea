@@ -11,6 +11,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/utils/time_format.dart';
 import '../../application/editor_controller.dart';
+import 'precomp_sheet.dart';
 import '../../application/playback_controller.dart';
 import '../../domain/blend_extra.dart';
 import '../../domain/caption.dart';
@@ -95,6 +96,73 @@ class LayerToolsDock extends ConsumerWidget {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
+                    // AS PORTAS DO GRUPO. Entrar, Desagrupar e Tempo viraram
+                    // codigo sem chamador quando o menu foi refeito: grupo so
+                    // entrava por toque duplo, e desagrupar nao existia na
+                    // tela. Velocidade e volume nao fazem nada num grupo.
+                    if (layer is GroupLayer) ...[
+                      Expanded(
+                        child: IconButton(
+                          key: const ValueKey('grupo-entrar'),
+                          tooltip: 'Entrar no grupo',
+                          onPressed: () {
+                            HapticFeedback.lightImpact();
+                            playback.pause();
+                            ref
+                                .read(editorControllerProvider.notifier)
+                                .enterGroup(layer.id);
+                          },
+                          icon: const Icon(
+                            CupertinoIcons.arrow_down_right_square,
+                            size: 20,
+                            color: AmColors.text,
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: IconButton(
+                          key: const ValueKey('grupo-desagrupar'),
+                          tooltip: 'Desagrupar',
+                          onPressed: () {
+                            HapticFeedback.lightImpact();
+                            playback.pause();
+                            final avisos = ref
+                                .read(editorControllerProvider.notifier)
+                                .ungroupLayer(layer.id);
+                            if (avisos.isNotEmpty) {
+                              ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                                SnackBar(
+                                  content: AppText(avisos.join('\n')),
+                                  duration: const Duration(seconds: 3),
+                                ),
+                              );
+                            }
+                          },
+                          icon: const Icon(
+                            CupertinoIcons.square_split_2x2,
+                            size: 20,
+                            color: AmColors.text,
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: IconButton(
+                          key: const ValueKey('grupo-tempo'),
+                          tooltip: 'Tempo',
+                          onPressed: () {
+                            HapticFeedback.lightImpact();
+                            playback.pause();
+                            showPrecompSheet(context, ref, layer.id, playback);
+                          },
+                          icon: const Icon(
+                            CupertinoIcons.timer,
+                            size: 20,
+                            color: AmColors.text,
+                          ),
+                        ),
+                      ),
+                    ],
+                    if (layer is! GroupLayer)
                     Expanded(
                       child: IconButton(
                         tooltip: 'Velocidade',
@@ -169,6 +237,7 @@ class LayerToolsDock extends ConsumerWidget {
                         ),
                       ),
                     ),
+                    if (layer is! GroupLayer)
                     Expanded(
                       child: IconButton(
                         tooltip: 'Volume / Áudio',

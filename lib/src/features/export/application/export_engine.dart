@@ -16,6 +16,7 @@ import '../../editor/domain/cut_ops.dart';
 import '../../editor/domain/audio_mix.dart';
 import '../../editor/application/audio_render_service.dart';
 import '../../editor/domain/layer.dart';
+import '../../editor/domain/grupo_ops.dart';
 import '../../editor/domain/mask.dart';
 import '../../editor/domain/video_project.dart';
 import '../domain/export_settings.dart';
@@ -439,7 +440,8 @@ class ExportEngine {
   /// Camadas que carregam som. Mudo sai da conta aqui — nao adianta
   /// mixar uma faixa em volume zero e pagar por ela.
   List<Layer> get audioSources => [
-    for (final l in project.layers)
+    // O som de dentro dos grupos entra na mixagem com o tempo absoluto.
+    for (final l in midiasAchatadas(project.layers))
       if (_specOf(l) != null && !_specOf(l)!.muted)
         if (l is AudioLayer || (l is VideoLayer && l.volume > 0.001)) l,
   ];

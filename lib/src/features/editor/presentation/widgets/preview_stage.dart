@@ -2318,8 +2318,16 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
       particlesRotY: isParticles
           ? layer.rotationY.valueAt(local) + extraRotY
           : 0,
-      buildChildren: (childLayers, childT) =>
-          _buildLayers(project, childLayers, childT, resolveLinks: false),
+      // VINCULOS DENTRO DO GRUPO: os filhos resolvem pai e pickwhip entre
+      // eles. Com `resolveLinks: false` o filho preso a um nulo do mesmo
+      // grupo seguia o nulo so enquanto se estava "dentro" do grupo — fora,
+      // o vinculo morria (o "as vezes buga" do testador).
+      buildChildren: (childLayers, childT) => _buildLayers(
+        project.copyWith(layers: childLayers),
+        childLayers,
+        childT,
+        resolveLinks: true,
+      ),
     );
 
     if (layer is VideoLayer && layer.speedBlur) {

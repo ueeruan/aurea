@@ -128,7 +128,8 @@ void main() {
         await tester.pumpAndSettle();
         // Acao rapida e tile podem ter o mesmo rotulo (Volume): o primeiro
         // serve — os dois abrem a mesma ficha.
-        if (['Câmeras', 'Fonte', 'Caminho', 'Tempo'].contains(button)) await openLayerActions(tester);
+        // 'Tempo' saiu da lista: a porta do grupo mora na doca (14/09).
+        if (['Câmeras', 'Fonte', 'Caminho'].contains(button)) await openLayerActions(tester);
         final target = find.text(button).evaluate().isNotEmpty
             ? find.text(button).first
             : find.byTooltip(button).first;

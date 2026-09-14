@@ -19,6 +19,7 @@ import '../application/ui/editor_session.dart';
 import '../application/video_layer_manager.dart';
 import '../domain/effect.dart';
 import '../domain/gear.dart';
+import '../domain/grupo_ops.dart';
 import '../domain/layer.dart';
 import '../domain/orcamento_render.dart';
 import 'am/am_colors.dart';
@@ -105,6 +106,13 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
         );
     _playback.time.addListener(_syncVideos);
     _playback.playing.addListener(_syncVideos);
+    // ENTRAR E SAIR DE GRUPO movem o cabecote junto: la dentro o tempo
+    // conta do inicio do grupo.
+    _controladorDoNivel = ref.read(editorControllerProvider.notifier);
+    _controladorDoNivel!.aoMudarDeNivel = (d) {
+      final alvo = _playback.time.value + d;
+      _playback.seek(alvo < Duration.zero ? Duration.zero : alvo);
+    };
     // ABRIR UM PROJETO precisa montar os tocadores AGORA: o relogio esta
     // parado no zero e o sync so aconteceria quando ele andasse.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -112,10 +120,21 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
     });
   }
 
+  EditorController? _controladorDoNivel;
+
+  /// Midias com os grupos abertos, recalculadas so quando a pilha muda:
+  /// o gerenciador de video compara a lista por identidade.
+  List<Layer>? _pilhaDasMidias;
+  List<Layer> _midias = const [];
+
   void _syncVideos() {
     final project = ref.read(editorControllerProvider);
+    if (!identical(project.layers, _pilhaDasMidias)) {
+      _pilhaDasMidias = project.layers;
+      _midias = midiasAchatadas(project.layers);
+    }
     final master = _videos.sync(
-      project.layers,
+      _midias,
       _playback.time.value,
       _playback.playing.value,
       seekRevision: _playback.seekRevision,
@@ -128,6 +147,8 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
     // Saiu do editor em tela cheia: devolve as barras do sistema.
     if (_telaCheiaAtiva) _modoDeSistema(false);
     RecentSheets.instance.clear();
+    // Sem ref no dispose: o controlador foi guardado na montagem.
+    _controladorDoNivel?.aoMudarDeNivel = null;
     _playback.time.removeListener(_syncVideos);
     _playback.playing.removeListener(_syncVideos);
     if (widget.playback == null) {

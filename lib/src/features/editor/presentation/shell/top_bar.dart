@@ -94,7 +94,13 @@ class EditorTopBar extends ConsumerWidget {
                   size: 18,
                   color: Color(0xFF12151A),
                 ),
-                onPressed: () => showExportSheet(context, ref),
+                onPressed: () {
+                  // EXPORTAR DE DENTRO DE UM GRUPO exportava so o grupo: o
+                  // palco da exportacao le o estado do editor. Sai de todos
+                  // antes — o projeto inteiro e o que se exporta.
+                  ref.read(editorControllerProvider.notifier).exitAllGroups();
+                  showExportSheet(context, ref);
+                },
               ),
             ),
           ],

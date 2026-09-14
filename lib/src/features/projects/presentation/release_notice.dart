@@ -6,10 +6,15 @@ import '../../../core/ui/am_colors.dart';
 import 'package:aurea/src/core/l10n/app_language.dart';
 
 // Change this revision when publishing a new set of release notes.
-const releaseNoticeRevision = '2026-09-14-beta-81';
+const releaseNoticeRevision = '2026-09-14-beta-82';
 const releaseNoticeSeenKey = 'aurea.releaseNotice.seen';
 
 const releaseHighlights = <(IconData, String, String)>[
+  (
+    CupertinoIcons.viewfinder,
+    'Tracker 3D novo',
+    'Rastrear no clipe de vídeo: motor novo em C++ que resolve chão plano e tripé, calcula a lente e dá pose a todo quadro. A câmera acompanha velocidade, reverso e Time Remap.',
+  ),
   (
     CupertinoIcons.textformat_alt,
     'Texto 3D de metal',

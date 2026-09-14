@@ -7787,6 +7787,39 @@ class EditorController extends Notifier<VideoProject> {
   /// ainda sem marcas, arrastar a profundidade reescrevia a BASE em
   /// todo instante em vez de marcar: o painel prometia uma coisa e o Z
   /// fazia outra, e a animacao de profundidade nascia quebrada.
+  /// EFEITOS COPIADOS ("Copiar efeitos igual a do AM, pra nao ter que
+  /// ficar refazendo sempre"). Area de transferencia da sessao: copia a
+  /// pilha de efeitos com parametros e keyframes; colar ANEXA copias novas
+  /// (ids proprios) na camada de destino. Time Remap e interpolacao ficam
+  /// de fora: dependem do clipe de origem.
+  List<EffectInstance> _efeitosCopiados = const [];
+  bool get temEfeitosCopiados => _efeitosCopiados.isNotEmpty;
+
+  int copyEffects(String id) {
+    final layer = _layer(id);
+    if (layer == null) return 0;
+    _efeitosCopiados = [
+      for (final e in layer.effects)
+        if (e.type != EffectType.timeRemap && e.type != EffectType.opticalFlow)
+          e.duplicated(),
+    ];
+    return _efeitosCopiados.length;
+  }
+
+  int pasteEffects(String id) {
+    final layer = _layer(id);
+    if (layer == null || _efeitosCopiados.isEmpty) return 0;
+    _replace(
+      layer.copyLayer(
+        effects: [
+          ...layer.effects,
+          for (final e in _efeitosCopiados) e.duplicated(),
+        ],
+      ),
+    );
+    return _efeitosCopiados.length;
+  }
+
   void editPositionZ(String id, Duration globalTime, double value) {
     final layer = _layer(id);
     if (layer == null || !value.isFinite) return;

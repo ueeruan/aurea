@@ -484,12 +484,10 @@ class _PositionControlState extends ConsumerState<_PositionControl> {
           label: 'Posição',
           x: pos.dx,
           y: pos.dy,
-          z: layer.is3D ? z : null,
+          z: z,
           onX: (v) => controller.editPosition(layer.id, t, Offset(v, pos.dy)),
           onY: (v) => controller.editPosition(layer.id, t, Offset(pos.dx, v)),
-          onZ: layer.is3D
-              ? (v) => controller.editPositionZ(layer.id, t, v)
-              : null,
+          onZ: (v) => controller.editPositionZ(layer.id, t, v),
           keyframe: _kf(ref, layer, LayerProp.position, t, null),
           onReset: () => controller.resetProp(layer.id, LayerProp.position),
         ),
@@ -499,7 +497,10 @@ class _PositionControlState extends ConsumerState<_PositionControl> {
         // de profundidade" — porque o controle que da o Z nem aparecia
         // sem rolar. Agora e a segunda coisa do painel quando o 3D esta
         // ligado.
-        if (layer.is3D) ...[
+        // SEMPRE VISIVEL: "a camada Z ainda nao ta funcionando" — a regua
+        // so existia com o 3D ja ligado, e numa camada comum nao havia onde
+        // mexer. Mexer aqui liga o 3D da camada (editPositionZ).
+        ...[
           Padding(
             padding: const EdgeInsets.fromLTRB(4, 0, 4, 2),
             child: Row(

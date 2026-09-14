@@ -82,6 +82,30 @@ List<QuickAction> quickActionsFor(
       onTap: () => controller.splitLayer(id, t),
     ),
     QuickAction(
+      key: 'copiar-efeitos',
+      icon: CupertinoIcons.doc_on_doc,
+      label: 'Copiar efeitos',
+      enabled: layer.effects.isNotEmpty,
+      reason: 'Esta camada ainda nao tem efeitos',
+      onTap: () {
+        final n = controller.copyEffects(id);
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+          SnackBar(content: AppText(n == 0 ? 'Nada para copiar' : 'Efeitos copiados')),
+        );
+      },
+    ),
+    QuickAction(
+      key: 'colar-efeitos',
+      icon: CupertinoIcons.doc_on_clipboard,
+      label: 'Colar efeitos',
+      onTap: () {
+        final n = controller.pasteEffects(id);
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+          SnackBar(content: AppText(n == 0 ? 'Copie os efeitos de outra camada primeiro' : 'Efeitos colados')),
+        );
+      },
+    ),
+    QuickAction(
       key: 'subir',
       icon: CupertinoIcons.arrow_up_to_line,
       label: 'Subir',

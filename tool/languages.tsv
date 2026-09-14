@@ -2396,3 +2396,15 @@ Balanço	Weave	Vaivén	التمايل	흔들림	揺れ	晃动	डोलना	Go
 Vinheta	Vignette	Viñeta	تعتيم الحواف	비네트	周辺減光	暗角	विनेट	Vinyet	Виньетка
 Tom sépia	Sepia Tone	Tono sepia	درجة السيبيا	세피아 톤	セピア調	棕褐色调	सीपिया टोन	Nada sepia	Тон сепии
 Tamanho da poeira	Dust Size	Tamaño del polvo	حجم الغبار	먼지 크기	ほこりのサイズ	灰尘大小	धूल का आकार	Ukuran debu	Размер пыли
+Curva de tempo	Time curve	Curva de tiempo	منحنى الوقت	시간 곡선	時間カーブ	时间曲线	समय कर्व	Kurva waktu	Кривая времени
+Toque na linha para criar um ponto. Arraste o ponto para cima ou para baixo para mudar o tempo do vídeo.	Tap the line to create a point. Drag the point up or down to change the video time.	Toca la línea para crear un punto. Arrastra el punto hacia arriba o hacia abajo para cambiar el tiempo del video.	المس الخط لإنشاء نقطة. اسحب النقطة لأعلى أو لأسفل لتغيير وقت الفيديو.	선을 탭해 점을 만드세요. 점을 위아래로 드래그하면 동영상 시간이 바뀝니다.	線をタップしてポイントを作成します。ポイントを上下にドラッグすると動画の時間が変わります。	点按线条来创建一个点。上下拖动该点即可更改视频时间。	पॉइंट बनाने के लिए लाइन पर टैप करें। वीडियो का समय बदलने के लिए पॉइंट को ऊपर या नीचे खींचें।	Ketuk garis untuk membuat titik. Seret titik ke atas atau ke bawah untuk mengubah waktu video.	Коснитесь линии, чтобы создать точку. Перетащите точку вверх или вниз, чтобы изменить время видео.
+Tempo do clipe	Clip time	Tiempo del clip	وقت المقطع	클립 시간	クリップの時間	片段时间	क्लिप का समय	Waktu klip	Время клипа
+Tempo do vídeo	Video time	Tiempo del video	وقت الفيديو	동영상 시간	動画の時間	视频时间	वीडियो का समय	Waktu video	Время видео
+Segurar	Hold	Mantener	تثبيت	유지	ホールド	保持	होल्ड	Tahan	Удержание
+Reto (1x)	Straight (1x)	Recto (1x)	مستقيم (1x)	직선 (1x)	直線 (1x)	直线 (1x)	सीधा (1x)	Lurus (1x)	Прямая (1x)
+Câmera lenta no meio	Slow motion in the middle	Cámara lenta en el medio	حركة بطيئة في المنتصف	중간 슬로 모션	中間でスローモーション	中间慢动作	बीच में स्लो मोशन	Gerak lambat di tengah	Замедление в середине
+Acelerando	Speeding up	Acelerando	تسارع	가속	加速	加速	तेज़ होता हुआ	Makin cepat	Ускорение
+Desacelerando	Slowing down	Desacelerando	تباطؤ	감속	減速	减速	धीमा होता हुआ	Makin lambat	Замедление
+Início do vídeo	Video start	Inicio del video	بداية الفيديو	동영상 시작	動画の開始	视频开头	वीडियो की शुरुआत	Awal video	Начало видео
+Fim do vídeo	Video end	Fin del video	نهاية الفيديو	동영상 끝	動画の終了	视频结尾	वीडियो का अंत	Akhir video	Конец видео
+Leve o cabeçote para dentro do clipe para congelar.	Move the playhead inside the clip to freeze.	Lleva el cabezal dentro del clip para congelar.	انقل مؤشر التشغيل إلى داخل المقطع للتجميد.	정지하려면 재생헤드를 클립 안으로 옮기세요.	フリーズするには再生ヘッドをクリップ内に移動してください。	将播放头移到片段内即可冻结。	फ़्रीज़ करने के लिए प्लेहेड को क्लिप के अंदर ले जाएँ।	Pindahkan playhead ke dalam klip untuk membekukan.	Переместите указатель воспроизведения внутрь клипа, чтобы заморозить кадр.

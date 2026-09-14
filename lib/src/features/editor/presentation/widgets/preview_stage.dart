@@ -50,6 +50,7 @@ import 'pixel_effect_engine.dart';
 import '../../domain/pixel_effect.dart';
 import '../../domain/bloom.dart';
 import '../../domain/coloring.dart';
+import '../../domain/one_frame.dart';
 import '../../domain/color_space.dart';
 import 'mask_node_editor.dart';
 import 'world3d_painter.dart';
@@ -2565,6 +2566,40 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
   int get fxWidth => ref.read(editorControllerProvider).outputWidth;
   int get fxHeight => ref.read(editorControllerProvider).outputHeight;
 
+  /// Quadros por segundo da composicao — os efeitos de "one frame" contam
+  /// quadros, nao segundos.
+  int get fxFps {
+    final f = ref.read(editorControllerProvider).fps;
+    return f < 1 ? 30 : f;
+  }
+
+  /// BORDAS de uma camada deslocada: refletir (copias espelhadas coladas a
+  /// cada lado), repetir (copias transladas) ou nada. Mesma regra do
+  /// Shake: a borda do quadro continua parecendo imagem.
+  Widget _comBordas(Widget c, int modo) => switch (modo) {
+    0 => Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Transform.scale(scaleX: -1, alignment: Alignment.centerLeft, child: c),
+        Transform.scale(scaleX: -1, alignment: Alignment.centerRight, child: c),
+        Transform.scale(scaleY: -1, alignment: Alignment.topCenter, child: c),
+        Transform.scale(scaleY: -1, alignment: Alignment.bottomCenter, child: c),
+        c,
+      ],
+    ),
+    1 => Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Transform.translate(offset: Offset(-fxWidth.toDouble(), 0), child: c),
+        Transform.translate(offset: Offset(fxWidth.toDouble(), 0), child: c),
+        Transform.translate(offset: Offset(0, -fxHeight.toDouble()), child: c),
+        Transform.translate(offset: Offset(0, fxHeight.toDouble()), child: c),
+        c,
+      ],
+    ),
+    _ => c,
+  };
+
   Size get fxSize => Size(fxWidth.toDouble(), fxHeight.toDouble());
 
   Widget _applyEffects(
@@ -2601,6 +2636,8 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
         // Cor seletiva depende da faixa de CADA pixel (qual canal manda,
         // quanto e branco, neutro ou preto): nao ha matriz honesta.
         case EffectType.selectiveColor:
+        // Fatias de glitch deslocam linhas inteiras de pixels: so no shader.
+        case EffectType.sliceGlitch:
           break;
 
         case EffectType.gaussianBlur:
@@ -3570,6 +3607,370 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
             child: out,
           );
 
+        // ---------------------------------------------- ONE FRAME EDITS
+        // Contam QUADROS da composicao (segurar, cair, repetir, sortear).
+        // Tudo e funcao pura do quadro: o scrub cai sempre no mesmo lugar.
+        case EffectType.flash:
+          final tauFlash = quadrosDesdeODisparo(
+            f: quadroLocal(local, fxFps),
+            gatilho: effect.paramAt('trigger', local).round().clamp(0, 3),
+            periodo: effect.paramAt('period', local).round().clamp(1, 120),
+            probabilidade: effect.paramAt('probability', local),
+            semente: effect.paramAt('seed', local).round(),
+          );
+          if (tauFlash != null) {
+            // ESCURO PRIMEIRO: o quadro da batida apaga e o clarao vem no
+            // seguinte — o "flash invertido".
+            final escuroPrimeiro = effect.paramAt('dark_first', local) >= .5;
+            final envelope = envelopeHoldDecay(
+              escuroPrimeiro ? tauFlash - 1 : tauFlash,
+              hold: effect.paramAt('hold', local).round().clamp(1, 8),
+              decay: effect.paramAt('decay', local).round().clamp(0, 24),
+              gama: effect.paramAt('curve', local),
+            );
+            if (escuroPrimeiro && tauFlash == 0) {
+              out = ColorFiltered(
+                colorFilter: const ColorFilter.matrix(<double>[
+                  0, 0, 0, 0, 0, //
+                  0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0,
+                  0, 0, 0, 1, 0,
+                ]),
+                child: out,
+              );
+            } else if (envelope > .002) {
+              final sigmaFlash = pxAt1080(
+                effect.paramAt('blur', local).clamp(0.0, 60.0) * envelope,
+                fxWidth,
+                fxHeight,
+              );
+              if (sigmaFlash > .3) {
+                out = ImageFiltered(
+                  imageFilter: ui.ImageFilter.blur(
+                    sigmaX: sigmaFlash,
+                    sigmaY: sigmaFlash,
+                  ),
+                  child: out,
+                );
+              }
+              out = ColorFiltered(
+                colorFilter: ColorFilter.matrix(
+                  matrizDoFlash(
+                    effect.paramAt('mode', local).round().clamp(0, 4),
+                    (effect.paramAt('intensity', local) / 100).clamp(0.0, 1.0) *
+                        envelope,
+                    r: effect.color.r,
+                    g: effect.color.g,
+                    b: effect.color.b,
+                    stops: effect.paramAt('stops', local).clamp(0.0, 6.0) *
+                        envelope,
+                  ),
+                ),
+                child: out,
+              );
+            }
+          }
+
+        case EffectType.strobe:
+          final acesoStrobe = strobeAceso(
+            f: quadroLocal(local, fxFps),
+            aleatorio: effect.paramAt('mode', local) >= .5,
+            periodo: effect.paramAt('period', local).round().clamp(1, 30),
+            duracao: effect.paramAt('duration', local).round().clamp(1, 30),
+            probabilidade: effect.paramAt('probability', local),
+            semente: effect.paramAt('seed', local).round(),
+          );
+          if (acesoStrobe) {
+            final original = (effect.paramAt('blend', local) / 100).clamp(
+              0.0,
+              1.0,
+            );
+            final forca = 1 - original;
+            final operacao = effect.paramAt('operation', local).round().clamp(
+              0,
+              4,
+            );
+            final stopsStrobe = effect.paramAt('stops', local).clamp(0.0, 6.0);
+            if (operacao == 0) {
+              out = Opacity(opacity: original, child: out);
+            } else {
+              final cor = operacao == 4
+                  ? const Color(0xFF000000)
+                  : effect.color;
+              out = ColorFiltered(
+                colorFilter: ColorFilter.matrix(
+                  matrizDoFlash(
+                    switch (operacao) {
+                      2 => 4,
+                      3 => 3,
+                      _ => 0,
+                    },
+                    forca,
+                    r: cor.r,
+                    g: cor.g,
+                    b: cor.b,
+                    stops: stopsStrobe * forca,
+                  ),
+                ),
+                child: out,
+              );
+            }
+          }
+
+        case EffectType.zoomPunch:
+          final quadrosPunch = quadrosDesdeODisparo(
+            f: quadroLocal(local, fxFps),
+            gatilho: effect.paramAt('trigger', local).round().clamp(0, 2),
+            periodo: effect.paramAt('period', local).round().clamp(1, 120),
+            probabilidade: effect.paramAt('probability', local),
+            semente: effect.paramAt('seed', local).round(),
+          );
+          if (quadrosPunch != null) {
+            final picoPunch = effect.paramAt('peak', local);
+            final ataquePunch = effect.paramAt('attack', local).round().clamp(0, 8);
+            final holdPunch = effect.paramAt('hold', local).round().clamp(0, 8);
+            final solturaPunch = effect.paramAt('release', local).round().clamp(
+              0,
+              30,
+            );
+            final curvaPunch = effect.paramAt('curve', local).round().clamp(0, 2);
+            double escalaEm(int tau) => escalaDoSoco(
+              tau,
+              pico: picoPunch,
+              ataque: ataquePunch,
+              hold: holdPunch,
+              soltura: solturaPunch,
+              curva: curvaPunch,
+              fps: fxFps,
+            );
+            final escalaAgora = escalaEm(quadrosPunch);
+            if ((escalaAgora - 1).abs() > .0005) {
+              final ancora = Alignment(
+                effect.paramAt('center_x', local).clamp(0.0, 1.0) * 2 - 1,
+                effect.paramAt('center_y', local).clamp(0.0, 1.0) * 2 - 1,
+              );
+              final rastro = effect.paramAt('zoom_blur', local).clamp(0.0, 1.0);
+              final escalaAntes = escalaEm(quadrosPunch - 1);
+              if (rastro > .01 && (escalaAgora - escalaAntes).abs() > .002) {
+                // RASTRO DE ZOOM: copias entre a escala do quadro anterior e
+                // a de agora. Opacidade 1/(k+1) em ordem da a MEDIA exata
+                // das copias sobre fundo opaco.
+                const copias = 5;
+                final inicio = escalaAgora + (escalaAntes - escalaAgora) * rastro;
+                out = Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    for (var k = 0; k < copias; k++)
+                      Opacity(
+                        opacity: 1 / (k + 1),
+                        child: Transform.scale(
+                          scale: inicio + (escalaAgora - inicio) * k / (copias - 1),
+                          alignment: ancora,
+                          child: out,
+                        ),
+                      ),
+                  ],
+                );
+              } else {
+                out = Transform.scale(
+                  scale: escalaAgora,
+                  alignment: ancora,
+                  child: out,
+                );
+              }
+            }
+          }
+
+        case EffectType.twitch:
+          // TWITCH: cinco operadores, cada um com pulso proprio (fluxo de
+          // sorteio separado). O operador de TEMPO da referencia nao
+          // existe aqui: pediria outro quadro do video.
+          final quantidadeTwitch = (effect.paramAt('amount', local) / 100)
+              .clamp(0.0, 2.0);
+          if (quantidadeTwitch > .001) {
+            final tTwitch = local.inMicroseconds / 1e6;
+            final velocidadeTwitch = effect.paramAt('speed', local);
+            final quietudeTwitch = effect.paramAt('stillness', local).clamp(
+              0.0,
+              1.0,
+            );
+            final minimoTwitch = (effect.paramAt('randomize_min', local) / 100)
+                .clamp(0.0, 1.0);
+            final duracaoTwitch =
+                effect.paramAt('duration', local).clamp(1.0, 12.0) / fxFps;
+            final subidaTwitch = effect.paramAt('ease_in', local).clamp(0.0, 1.0);
+            final descidaTwitch = effect.paramAt('ease_out', local).clamp(
+              0.0,
+              1.0,
+            );
+            final sementeTwitch = effect.paramAt('seed', local).round();
+            PulsoTwitch pulso(int operador) => pulsoTwitch(
+              semente: sementeTwitch,
+              fluxo: 1000 * operador,
+              t: tTwitch,
+              velocidade: velocidadeTwitch,
+              quietude: quietudeTwitch,
+              minimo: minimoTwitch,
+              duracaoSeg: duracaoTwitch,
+              easeIn: subidaTwitch,
+              easeOut: descidaTwitch,
+              fps: fxFps,
+            );
+            final bordasTwitch = effect.paramAt('edges', local).round().clamp(
+              0,
+              2,
+            );
+
+            if (effect.paramAt('enable_slide', local) >= .5) {
+              final p = pulso(2);
+              final v = p.v * quantidadeTwitch;
+              if (v > .001) {
+                final distancia =
+                    v *
+                    effect.paramAt('slide_amount', local).clamp(0.0, 50.0) /
+                    100 *
+                    fxWidth;
+                final lado =
+                    (p.sorteio3 +
+                            effect
+                                .paramAt('slide_tendency', local)
+                                .clamp(-1.0, 1.0)) >=
+                        0
+                    ? 1.0
+                    : -1.0;
+                final angulo =
+                    (effect.paramAt('slide_direction', local) +
+                        effect.paramAt('slide_spread', local).clamp(0.0, 180.0) *
+                            p.sorteio4) *
+                    math.pi /
+                    180;
+                final d =
+                    Offset(math.cos(angulo), math.sin(angulo)) * distancia * lado;
+                final k = effect.paramAt('slide_rgb_split', local).clamp(0.0, 1.0);
+                if (k > .01) {
+                  final alcance = distancia * (1 + k) + 4;
+                  out = Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Transform.translate(
+                        offset: d * (1 + k),
+                        child: _channelIso(out, 0),
+                      ),
+                      BlendMask(
+                        blendMode: BlendMode.plus,
+                        margem: alcance,
+                        child: Transform.translate(
+                          offset: d,
+                          child: _channelIso(out, 1),
+                        ),
+                      ),
+                      BlendMask(
+                        blendMode: BlendMode.plus,
+                        margem: alcance,
+                        child: Transform.translate(
+                          offset: d * (1 - k),
+                          child: _channelIso(out, 2),
+                        ),
+                      ),
+                    ],
+                  );
+                } else {
+                  out = Transform.translate(offset: d, child: out);
+                }
+                out = _comBordas(out, bordasTwitch);
+              }
+            }
+
+            if (effect.paramAt('enable_scale', local) >= .5) {
+              final v = pulso(3).v * quantidadeTwitch;
+              if (v > .001) {
+                out = Transform.scale(
+                  scale:
+                      1 +
+                      v * effect.paramAt('scale_amount', local).clamp(0.0, 100.0) / 100,
+                  child: out,
+                );
+              }
+            }
+
+            if (effect.paramAt('enable_blur', local) >= .5) {
+              final v = pulso(4).v * quantidadeTwitch;
+              final raio = pxAt1080(
+                v * effect.paramAt('blur_amount', local).clamp(0.0, 200.0),
+                fxWidth,
+                fxHeight,
+              );
+              if (raio > .3) {
+                final aspecto = effect.paramAt('blur_aspect', local).clamp(-1.0, 1.0);
+                final sx = raio * (1 - math.max(0.0, aspecto));
+                final sy = raio * (1 - math.max(0.0, -aspecto));
+                out = ImageFiltered(
+                  imageFilter: ui.ImageFilter.blur(
+                    sigmaX: math.max(sx, .01),
+                    sigmaY: math.max(sy, .01),
+                  ),
+                  child: out,
+                );
+              }
+            }
+
+            if (effect.paramAt('enable_light', local) >= .5) {
+              final p = pulso(5);
+              final v = p.v * quantidadeTwitch;
+              if (v > .001) {
+                final sentido = switch (effect
+                    .paramAt('light_behaviour', local)
+                    .round()
+                    .clamp(0, 2)) {
+                  0 => 1.0,
+                  1 => -1.0,
+                  _ => p.sorteio3 >= 0 ? 1.0 : -1.0,
+                };
+                final ganho = math
+                    .pow(
+                      2,
+                      v *
+                          effect.paramAt('light_amount', local).clamp(0.0, 4.0) *
+                          sentido,
+                    )
+                    .toDouble();
+                out = ColorFiltered(
+                  colorFilter: ColorFilter.matrix(<double>[
+                    ganho, 0, 0, 0, 0, //
+                    0, ganho, 0, 0, 0,
+                    0, 0, ganho, 0, 0,
+                    0, 0, 0, 1, 0,
+                  ]),
+                  child: out,
+                );
+              }
+            }
+
+            if (effect.paramAt('enable_color', local) >= .5) {
+              final p = pulso(6);
+              final v = p.v * quantidadeTwitch;
+              if (v > .001) {
+                final sorteada = corDoMatiz(p.sorteio7);
+                final mistura = effect.paramAt('color_randomize', local).clamp(
+                  0.0,
+                  1.0,
+                );
+                final c = effect.color;
+                out = ColorFiltered(
+                  colorFilter: ColorFilter.matrix(
+                    matrizDeColorir(
+                      v * effect.paramAt('color_amount', local).clamp(0.0, 100.0) / 100,
+                      r: c.r + (sorteada.r - c.r) * mistura,
+                      g: c.g + (sorteada.g - c.g) * mistura,
+                      b: c.b + (sorteada.b - c.b) * mistura,
+                    ),
+                  ),
+                  child: out,
+                );
+              }
+            }
+          }
+
         case EffectType.twirl:
         case EffectType.fisheye:
         case EffectType.kaleidoscope:
@@ -3609,12 +4010,40 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
               integratedPhase(effect.track('frequency'), local) +
               effect.paramAt('phase', local) / 360.0;
 
+          // ENVELOPE DE EDIT: continuo (como sempre foi), impacto no inicio
+          // da camada, ou impacto a cada N quadros. O soco de zoom anda
+          // junto com o mesmo relogio de quadros.
+          final envelopeShake = effect.paramAt('envelope', local).round().clamp(
+            0,
+            2,
+          );
+          final quadroShake = quadroLocal(local, fxFps);
+          final tauShake = envelopeShake == 2
+              ? quadroShake %
+                    effect.paramAt('impact_period', local).round().clamp(1, 120)
+              : quadroShake;
+          final forcaShake = envelopeShake == 0
+              ? 1.0
+              : envelopeDeImpacto(
+                  tauShake,
+                  ataque: effect.paramAt('attack_frames', local),
+                  meiaVida: effect.paramAt('half_life', local),
+                );
+          final socoShake =
+              effect.paramAt('zoom_punch', local).clamp(0.0, 50.0) /
+              100 *
+              socoDoShake(tauShake, effect.paramAt('punch_frames', local));
+          final oitavasShake = effect.paramAt('octaves', local);
+          final serrilhadoShake = effect.paramAt('jaggedness', local);
+
           ShakeAxis eixo(String pre) => ShakeAxis(
             randomAmplitude: effect.paramAt('${pre}_random_amplitude', local),
             randomFrequency: effect.paramAt('${pre}_random_frequency', local),
             waveAmplitude: effect.paramAt('${pre}_wave_amplitude', local),
             waveFrequency: effect.paramAt('${pre}_wave_frequency', local),
             phaseDeg: effect.paramAt('${pre}_phase', local),
+            octaves: oitavasShake,
+            jaggedness: serrilhadoShake,
           );
 
           final ex = eixo('x');
@@ -3623,7 +4052,7 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
           final et = eixo('tilt');
 
           TremorSample sampleAt(double shift) => tremorSample(
-            amplitudePx: amp,
+            amplitudePx: amp * forcaShake,
             phase: phase + shift,
             style: style,
             seed: seed,
@@ -3702,7 +4131,12 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
             transform: Matrix4.identity()
               ..translateByDouble(s.dx, s.dy, 0, 1)
               ..rotateZ(s.rotationDeg * math.pi / 180)
-              ..scaleByDouble(s.scale, s.scale, 1, 1),
+              ..scaleByDouble(
+                s.scale * (1 + socoShake),
+                s.scale * (1 + socoShake),
+                1,
+                1,
+              ),
             alignment: Alignment.center,
             child: c,
           );
@@ -3723,7 +4157,7 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
               effect.paramAt('green_phase', local).abs() > 0.5 ||
               effect.paramAt('blue_phase', local).abs() > 0.5;
 
-          if (!s0.isNeutral || separaCanais) {
+          if (!s0.isNeutral || separaCanais || socoShake > .0005) {
             if (separaCanais) {
               // FASE POR CANAL: desloca o canal NO TEMPO. O vermelho se
               // move antes, os outros seguem — franja organica, que um

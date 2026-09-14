@@ -167,6 +167,7 @@ void main() {
         'colorKey',
         'findEdges',
         'selectiveColor',
+        'sliceGlitch',
       };
 
       final mortos = <String>[];

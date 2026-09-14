@@ -164,6 +164,11 @@ const quickStartSteps = <(String, String)>[
 ];
 
 String effectHelp(EffectType type) => switch (type) {
+  EffectType.flash => 'Clarão de um ou poucos quadros na batida: branco, somar, tela, exposição ou negativo. Segura N quadros e cai em M; o gatilho repete a cada N quadros ou dispara ao acaso. Evite flashes rápidos em conteúdo sensível.',
+  EffectType.strobe => 'Pisca por quadros: a camada some, vira cor, negativo, estoura ou apaga. Periódico acende a cada período; aleatório sorteia blocos. Ótimo para texto piscando. Evite flashes rápidos em conteúdo sensível.',
+  EffectType.zoomPunch => 'Zoom que entra seco na batida e volta ao tamanho normal: suave, exponencial ou com quique. Ataque, hold e soltura são contados em quadros; o rastro de zoom borra a entrada.',
+  EffectType.sliceGlitch => 'Fatias horizontais sorteadas deslizam com separação RGB, com ruído de blocos, dessaturação e posterização opcionais. Velocidade troca o padrão por segundo; zero congela. Precisa da GPU.',
+  EffectType.twitch => 'Valores aleatórios em instantes aleatórios: deslizar com RGB, escala, desfoque, luz e cor, cada um com pulso próprio. Quietude segura a camada parada entre rajadas; subida e descida suavizam o pulso.',
   EffectType.colorBalance => 'Empurra sombras, meios-tons e altas luzes em direção a vermelho, verde ou azul. Valores positivos puxam a faixa para o canal escolhido; preservar luminosidade mantém o brilho original.',
   EffectType.selectiveColor => 'Ajusta ciano, magenta, amarelo e preto só na faixa escolhida (vermelhos, azuis, brancos, neutros...). Para mexer em mais de uma faixa, empilhe outra instância. Precisa da GPU.',
   EffectType.channelMixer => 'Recria cada canal de saída como uma soma dos canais de entrada. Troque canais para cores cruzadas ou ligue Monochrome para um preto e branco com pesos próprios.',

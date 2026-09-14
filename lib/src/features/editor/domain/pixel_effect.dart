@@ -242,6 +242,19 @@ const pixelKernels = <EffectType, PixelKernel>{
     'offset_saturation',
     'offset_luminance',
   ]),
+  // 44 - fatias de glitch dos one framers.
+  EffectType.sliceGlitch: PixelKernel(44, [
+    'slices',
+    'probability',
+    'offset',
+    'rgb_offset',
+    'block_size',
+    'block_strength',
+    'desaturate',
+    'posterize',
+    'speed',
+    'seed',
+  ]),
 };
 
 /// Sanitized immutable uniforms, evaluated at the current layer-local time.

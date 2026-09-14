@@ -575,5 +575,37 @@ void main() {
     c=x;
   }
 
+  // 44 - SLICE GLITCH: fatias horizontais sorteadas deslizam (com o
+  // vermelho e o azul um pouco mais e um pouco menos), ruido de blocos,
+  // dessaturar e posterizar. O padrao troca [velocidade] vezes por
+  // segundo; velocidade zero congela.
+  if(mode==44) {
+    float padrao=p2.x>.001 ? floor(uTime*p2.x) : 0.0;
+    float semente=p2.y+padrao*17.0;
+    float n=max(2.0,floor(p0.x+.5));
+    float yj=uv.y+(hash(vec3(padrao,semente,3.0))-.5)/n;
+    float fatia=floor(yj*n);
+    float ativa=step(hash(vec3(fatia,semente,11.0)),p0.y)*step(.0001,p0.y);
+    if(ativa>.5 && p0.z>.001) {
+      float ox=(hash(vec3(fatia,semente,23.0))*2.0-1.0)*p0.z*.01;
+      float k=clamp(p0.w,0.0,1.0);
+      vec4 vr=src(vec2(fract(uv.x-ox*(1.0+k)),uv.y));
+      vec4 vg=src(vec2(fract(uv.x-ox),uv.y));
+      vec4 vb=src(vec2(fract(uv.x-ox*(1.0-k)),uv.y));
+      a=max(vg.a,max(vr.a,vb.a));
+      c=a>.00001 ? vec3(vr.r,vg.g,vb.b)/a : vec3(0.0);
+    }
+    if(p1.x>.5) {
+      vec2 celula=floor(uv*uSize/max(1.0,p1.x*uPixelScale));
+      float r=hash(vec3(celula,semente+41.0));
+      c=mix(c,c*r*2.0,clamp(p1.y,0.0,1.0));
+    }
+    c=mix(c,vec3(lum(c)),clamp(p1.z*.01,0.0,1.0));
+    if(p1.w>=2.0) {
+      float niveis=floor(p1.w+.5)-1.0;
+      c=floor(clamp(c,0.0,1.0)*niveis+.5)/niveis;
+    }
+  }
+
   fragColor=premul(c,a);
 }

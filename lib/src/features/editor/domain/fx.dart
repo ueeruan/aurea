@@ -88,6 +88,8 @@ class ShakeAxis {
     this.waveAmplitude = 0,
     this.waveFrequency = 0.5,
     this.phaseDeg = 0,
+    this.octaves = 1,
+    this.jaggedness = 0,
   });
 
   final double randomAmplitude;
@@ -95,6 +97,15 @@ class ShakeAxis {
   final double waveAmplitude;
   final double waveFrequency;
   final double phaseDeg;
+
+  /// OITAVAS do ruido (1..4, fracionario): cada oitava soma um tremor
+  /// duas vezes mais rapido com metade da forca — o fBm do wiggle. Com 1,
+  /// o valor e exatamente o de antes.
+  final double octaves;
+
+  /// SERRILHADO (0..1): 0 e o ruido suave; 1 troca de valor seco a cada
+  /// ciclo, o tremor picotado dos edits. Com 0, nada muda.
+  final double jaggedness;
 
   bool get isNeutral =>
       randomAmplitude.abs() < 1e-9 && waveAmplitude.abs() < 1e-9;
@@ -105,11 +116,28 @@ class ShakeAxis {
     final p = phase + phaseDeg / 360.0;
     final aleatorio = randomAmplitude <= 0
         ? 0.0
-        : fxNoiseSigned(seed, ch, p * randomFrequency) * randomAmplitude;
+        : _aleatorio(seed, ch, p * randomFrequency) * randomAmplitude;
     final onda = waveAmplitude <= 0
         ? 0.0
         : math.sin(p * waveFrequency * 2 * math.pi) * waveAmplitude;
     return aleatorio + onda;
+  }
+
+  double _aleatorio(int seed, int ch, double x) {
+    final n = octaves.isFinite ? octaves.clamp(1.0, 4.0) : 1.0;
+    var soma = 0.0, pesos = 0.0, peso = 1.0;
+    for (var k = 0; k < 4; k++) {
+      final w = (n - k).clamp(0.0, 1.0);
+      if (w <= 0) break;
+      soma += fxNoiseSigned(seed + 101 * k, ch, x * (1 << k)) * peso * w;
+      pesos += peso * w;
+      peso *= .5;
+    }
+    final suave = soma / pesos;
+    final j = jaggedness.isFinite ? jaggedness.clamp(0.0, 1.0) : 0.0;
+    if (j <= 0) return suave;
+    final degrau = fxHash01(seed, ch + 10, x.floor()) * 2 - 1;
+    return suave + (degrau - suave) * j;
   }
 }
 

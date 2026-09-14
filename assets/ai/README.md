@@ -1,21 +1,24 @@
-# ESRGAN compacto
+# Modelo de aprimoramento por IA
 
-Modelo: compressed_esrgan.tflite, release 2.0.0 do projeto GSOC de Adrish Dey.
-Fonte: https://github.com/captain-pool/GSOC/tree/master/E3_Distill_ESRGAN
-Download: https://github.com/captain-pool/GSOC/releases/download/2.0.0/compressed_esrgan.tflite
-Licença MIT: ESRGAN-LICENSE.txt (licença original preservada).
-SHA-256: 27ed316318cac65fe350ccdb3c1e19ac08c512f4aa2fc23b1a351ce334809c3f
+Modelo: realesr-animevideov3, escala nativa x4, formato ncnn.
+Arquivos: `realesr-animevideov3/x4.param` e `realesr-animevideov3/x4.bin`.
+Origem: pacote oficial do Real-ESRGAN-ncnn-vulkan
+https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-20220424-windows.zip
+(SHA-256 do zip abc02804e17982a3be33675e4d471e91ea374e65b70167abc09e31acb412802d).
 
-Entrada float32 RGB [1,180,320,3], valores 0–255.
-Saída float32 RGB [1,720,1280,3]. Recortar valores ao intervalo 0–255.
-O app usa tiles com margem de 16 pixels, preserva alfa separadamente e
-reduz a saída neural de 4x para 2x quando solicitado.
+SHA-256:
+- x4.param 850a248e7c14c27e5bd8cf7265113a9441036a7db63963bb8aa5169d788a435e
+- x4.bin 548a36f9c3f4ab8da56cd3b13badf23968bee207b396dad14d04b830e5f2ab2d
 
-Runtime: tflite_flutter 0.12.1, projeto mantido no repositório TensorFlow:
-https://github.com/tensorflow/flutter-tflite
-Android usa LiteRT 1.4.0; iOS usa TensorFlow Lite 2.12.0 conforme o plugin.
+Licenca: Real-ESRGAN, BSD-3-Clause (Xintao Wang). ncnn: BSD-3-Clause (Tencent).
 
-Este é um modelo destilado para super-resolução local. Não contém modelos,
-marcas, SDKs ou presets proprietários da Topaz ou da Adobe. Os presets de cor
-do Aurea são receitas próprias; os oito adicionais seguem o estilo visual
-das referências enviadas, sem incorporar as fotografias no aplicativo.
+Contrato verificado executando no ncnn 20260526: entrada `data` (RGB 0..1),
+saida `output` (x4, RGB 0..1). Motor proprio em `native/enhance`.
+
+Por que este modelo: medido no host (RTX 3050), foi o unico com custo de
+video (16-30 ms a 320x180), emendas de tile invisiveis e pouco flicker
+(+11% sobre o bicubico). O RealESRGAN_x4plus custou 30x mais, inventou
+textura e dobrou o flicker. O realesr-general-x4v3 (indicado para video
+real) nao tem versao ncnn oficial e ainda nao foi convertido nem validado.
+
+Nao ha modelos, marcas ou presets da Topaz ou da Adobe.

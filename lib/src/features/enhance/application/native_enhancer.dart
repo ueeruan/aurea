@@ -1,0 +1,153 @@
+// PONTE FFI PARA native/enhance (libaurea_enhance, Real-ESRGAN sobre ncnn).
+//
+// Carregamento explicito e com estado verdadeiro: se a biblioteca ou o
+// modelo nao carregam, [NativeEnhancer.open] devolve o motivo — a tela
+// nunca mostra "IA ativada" com o modelo fora do ar.
+import 'dart:ffi';
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:ffi/ffi.dart';
+
+final class _AeInfo extends Struct {
+  @Int32()
+  external int gpu;
+  @Int32()
+  external int fp16;
+  @Int32()
+  external int tile;
+  @Int32()
+  external int modelScale;
+  @Int64()
+  external int heapBudgetMb;
+  @Array(128)
+  external Array<Uint8> device;
+}
+
+const aeOk = 0;
+const aeErrCancelled = -3;
+
+/// Onde a biblioteca mora: Android empacota pelo CMake do app; no host,
+/// os testes apontam AUREA_ENHANCE_LIB para a DLL construida localmente.
+DynamicLibrary? _abrirBiblioteca() {
+  try {
+    final host = Platform.environment['AUREA_ENHANCE_LIB'];
+    if (host != null && host.isNotEmpty) return DynamicLibrary.open(host);
+    if (Platform.isAndroid) return DynamicLibrary.open('libaurea_enhance.so');
+  } catch (_) {}
+  return null;
+}
+
+class EnhancerInfo {
+  const EnhancerInfo(this.gpu, this.fp16, this.tile, this.heapBudgetMb, this.device);
+  final bool gpu, fp16;
+  final int tile, heapBudgetMb;
+  final String device;
+}
+
+/// Um motor carregado. Use num isolate de trabalho: [process] bloqueia.
+class NativeEnhancer {
+  NativeEnhancer._(this._lib, this._engine)
+    : _process = _lib.lookupFunction<
+        Int32 Function(Pointer<Void>, Pointer<Uint8>, Int32, Int32, Int32, Float, Pointer<Uint8>, Pointer<Int32>),
+        int Function(Pointer<Void>, Pointer<Uint8>, int, int, int, double, Pointer<Uint8>, Pointer<Int32>)
+      >('ae_process'),
+      _destroy = _lib.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>('ae_destroy'),
+      _resize = _lib.lookupFunction<
+        Int32 Function(Pointer<Uint8>, Int32, Int32, Pointer<Uint8>, Int32, Int32),
+        int Function(Pointer<Uint8>, int, int, Pointer<Uint8>, int, int)
+      >('ae_resize');
+
+  final DynamicLibrary _lib;
+  Pointer<Void> _engine;
+  final int Function(Pointer<Void>, Pointer<Uint8>, int, int, int, double, Pointer<Uint8>, Pointer<Int32>) _process;
+  final void Function(Pointer<Void>) _destroy;
+  final int Function(Pointer<Uint8>, int, int, Pointer<Uint8>, int, int) _resize;
+
+  /// Cancelamento lido pelo C++ entre tiles.
+  final Pointer<Int32> cancel = calloc<Int32>();
+
+  static bool get libraryAvailable => _abrirBiblioteca() != null;
+
+  /// Carrega o modelo x4 de [modelDir] (x4.param/x4.bin). Devolve o motor
+  /// ou lanca StateError com o motivo real.
+  static NativeEnhancer open(String modelDir, {bool gpu = true}) {
+    final lib = _abrirBiblioteca();
+    if (lib == null) {
+      throw StateError('Motor de IA indisponível neste aparelho');
+    }
+    final create = lib.lookupFunction<
+      Pointer<Void> Function(Pointer<Utf8>, Pointer<Utf8>, Int32, Int32, Pointer<Utf8>, Int32),
+      Pointer<Void> Function(Pointer<Utf8>, Pointer<Utf8>, int, int, Pointer<Utf8>, int)
+    >('ae_create');
+    final param = '$modelDir/x4.param'.toNativeUtf8();
+    final bin = '$modelDir/x4.bin'.toNativeUtf8();
+    final err = calloc<Uint8>(256).cast<Utf8>();
+    try {
+      final engine = create(param, bin, 4, gpu ? 1 : 0, err, 256);
+      if (engine == nullptr) {
+        throw StateError('Modelo de IA não carregou: ${err.toDartString()}');
+      }
+      return NativeEnhancer._(lib, engine);
+    } finally {
+      calloc.free(param);
+      calloc.free(bin);
+      calloc.free(err);
+    }
+  }
+
+  EnhancerInfo get info {
+    final get = _lib.lookupFunction<Int32 Function(Pointer<Void>, Pointer<_AeInfo>), int Function(Pointer<Void>, Pointer<_AeInfo>)>('ae_info_get');
+    final p = calloc<_AeInfo>();
+    try {
+      get(_engine, p);
+      final bytes = <int>[];
+      for (var i = 0; i < 128 && p.ref.device[i] != 0; i++) {
+        bytes.add(p.ref.device[i]);
+      }
+      return EnhancerInfo(p.ref.gpu == 1, p.ref.fp16 == 1, p.ref.tile, p.ref.heapBudgetMb, String.fromCharCodes(bytes));
+    } finally {
+      calloc.free(p);
+    }
+  }
+
+  /// RGB24 -> RGB24 (w*scale x h*scale). [strength] mistura com o original
+  /// redimensionado. Lanca StateError em falha — nunca devolve o original
+  /// fingindo sucesso.
+  Uint8List process(Uint8List rgb, int w, int h, {required int scale, double strength = 1}) {
+    final ow = w * scale, oh = h * scale;
+    final inp = malloc<Uint8>(rgb.length);
+    final out = malloc<Uint8>(ow * oh * 3);
+    try {
+      inp.asTypedList(rgb.length).setAll(0, rgb);
+      final rc = _process(_engine, inp, w, h, scale, strength, out, cancel);
+      if (rc == aeErrCancelled) throw StateError('Cancelado');
+      if (rc != aeOk) throw StateError('A IA falhou neste quadro (código $rc)');
+      return Uint8List.fromList(out.asTypedList(ow * oh * 3));
+    } finally {
+      malloc.free(inp);
+      malloc.free(out);
+    }
+  }
+
+  /// Redimensionamento convencional (para o "antes" na mesma resolução).
+  Uint8List resize(Uint8List rgb, int w, int h, int ow, int oh) {
+    final inp = malloc<Uint8>(rgb.length);
+    final out = malloc<Uint8>(ow * oh * 3);
+    try {
+      inp.asTypedList(rgb.length).setAll(0, rgb);
+      if (_resize(inp, w, h, out, ow, oh) != aeOk) throw StateError('Redimensionamento falhou');
+      return Uint8List.fromList(out.asTypedList(ow * oh * 3));
+    } finally {
+      malloc.free(inp);
+      malloc.free(out);
+    }
+  }
+
+  void close() {
+    if (_engine == nullptr) return;
+    _destroy(_engine);
+    _engine = nullptr;
+    calloc.free(cancel);
+  }
+}

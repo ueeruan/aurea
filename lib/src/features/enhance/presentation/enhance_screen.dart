@@ -25,7 +25,7 @@ class _EnhanceScreenState extends State<EnhanceScreen> {
       _showBefore = false,
       _saving = false;
   int _scale = 2;
-  double _strength = 1, _denoise = 0, _detail = .15;
+  double _strength = 1, _aiStrength = 1, _detail = 0;
   ColorLook _look = ColorLook.natural;
   VideoPlayerController? _player;
   EnhanceSettings get _settings => EnhanceSettings(
@@ -33,7 +33,7 @@ class _EnhanceScreenState extends State<EnhanceScreen> {
     scale: _scale,
     look: _look,
     strength: _strength,
-    denoise: _denoise,
+    aiStrength: _aiStrength,
     detail: _detail,
   );
   @override
@@ -172,7 +172,7 @@ class _EnhanceScreenState extends State<EnhanceScreen> {
     builder: (context) => AlertDialog(
       title: const AppText('Qualidade e cor'),
       content: const SingleChildScrollView(
-        child: AppText('Escolha uma foto ou vídeo. A IA ESRGAN amplia detalhes no aparelho, sem enviar sua mídia. Use 2× para arquivos menores ou 4× para ampliar mais.\n\nOs CCs mudam as cores: escolha um visual e ajuste a intensidade. Reduzir ruído suaviza granulação; Detalhes realça bordas.\n\nComparar processa uma imagem ou o primeiro quadro do vídeo. Gerar resultado processa tudo. Vídeos são salvos a 30 fps com o áudio original, recodificado. O tempo depende do arquivo e do celular.\n\nA IA pode alterar texturas; compare antes de salvar. O original permanece intacto.',
+        child: AppText('Escolha uma foto ou vídeo. A IA (Real-ESRGAN animevideov3, no aparelho, sem enviar sua mídia) reduz blocos de compressão e amplia. 1× restaura sem ampliar; 2× e 4× ampliam — os três custam o mesmo processamento.\n\nIntensidade da IA mistura o resultado com o original ampliado. Nitidez realça bordas e não é IA. Os CCs mudam as cores.\n\nComparar processa uma imagem ou o primeiro quadro do vídeo, com o antes ampliado ao mesmo tamanho. Gerar resultado processa todos os quadros na taxa original do vídeo, com o áudio original.\n\nO modelo é conservador e pode suavizar texturas; compare antes de salvar. O original permanece intacto.',
         ),
       ),
       actions: [
@@ -280,8 +280,9 @@ class _EnhanceScreenState extends State<EnhanceScreen> {
               ),
               if (_look != ColorLook.natural)
                 _slider('Intensidade da cor', _strength, (v) => _strength = v),
-              _slider('Reduzir ruído', _denoise, (v) => _denoise = v),
-              _slider('Detalhes', _detail, (v) => _detail = v),
+              if (_ai)
+                _slider('Intensidade da IA', _aiStrength, (v) => _aiStrength = v),
+              _slider('Nitidez (não é IA)', _detail, (v) => _detail = v),
               if (_busy) ...[
                 ValueListenableBuilder<EnhanceProgress>(
                   valueListenable: _job.progress,

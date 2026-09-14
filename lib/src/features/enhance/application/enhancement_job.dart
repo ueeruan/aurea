@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:ffmpeg_kit_flutter_new_full/ffmpeg_kit.dart';
+import 'package:ffmpeg_kit_flutter_new_full/ffmpeg_kit_config.dart';
 import 'package:ffmpeg_kit_flutter_new_full/ffmpeg_session.dart';
 import 'package:ffmpeg_kit_flutter_new_full/ffprobe_kit.dart';
 import 'package:ffmpeg_kit_flutter_new_full/return_code.dart';
@@ -22,18 +24,22 @@ class EnhanceProgress {
 
 /// Owns only its temporary directory and encoder session. Originals are read-only.
 class EnhancementJob {
-  EnhancementJob({Future<ByteData> Function()? loadModel})
-    : _loadModel = loadModel ?? _assetModel;
-  final Future<ByteData> Function() _loadModel;
-  static Future<ByteData> _assetModel() =>
-      rootBundle.load('assets/ai/compressed_esrgan.tflite');
+  EnhancementJob({Future<ByteData> Function(String asset)? loadAsset})
+    : _loadAsset = loadAsset ?? rootBundle.load;
+  final Future<ByteData> Function(String asset) _loadAsset;
+
+  /// realesr-animevideov3 (x4), formato ncnn. Ver assets/ai/README.md.
+  static const modelAssets = {
+    'x4.param': 'assets/ai/realesr-animevideov3/x4.param',
+    'x4.bin': 'assets/ai/realesr-animevideov3/x4.bin',
+  };
   final progress = ValueNotifier(const EnhanceProgress('Pronto', 0));
   Directory? _directory;
   EnhanceWorker? _worker;
   bool _cancelled = false, _encoding = false, _running = false;
   int? _ffmpegSession;
   String get _cancelPath => '${_directory!.path}/cancel';
-  String get _modelPath => '${_directory!.path}/model.tflite';
+  String get _modelDir => '${_directory!.path}/model';
 
   Future<void> _prepare({required bool ai}) async {
     _cancelled = false;
@@ -42,11 +48,17 @@ class EnhancementJob {
     );
     final flag = File(_cancelPath);
     if (await flag.exists()) await flag.delete();
-    if (ai && !await File(_modelPath).exists()) {
-      final data = await _loadModel();
-      await File(_modelPath).writeAsBytes(
-        data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
-      );
+    if (ai) {
+      progress.value = const EnhanceProgress('Preparando modelo de IA…', 0);
+      await Directory(_modelDir).create(recursive: true);
+      for (final e in modelAssets.entries) {
+        final f = File('$_modelDir/${e.key}');
+        if (await f.exists()) continue;
+        final data = await _loadAsset(e.value);
+        await f.writeAsBytes(
+          data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
+        );
+      }
     }
     _worker ??= await EnhanceWorker.start();
   }
@@ -57,6 +69,7 @@ class EnhancementJob {
 
   Future<void> cancel() async {
     _cancelled = true;
+    _worker?.cancel();
     if (_directory != null) await File(_cancelPath).writeAsString('cancel');
     final session = _ffmpegSession;
     if (session != null) await FFmpegKit.cancel(session);
@@ -112,12 +125,15 @@ class EnhancementJob {
       } else {
         input = await _imageSource(source);
       }
-      final output =
-          '${_directory!.path}/preview-${DateTime.now().microsecondsSinceEpoch}.png';
-      await _worker!.frame(input, output, _modelPath, _cancelPath, settings);
+      final stamp = DateTime.now().microsecondsSinceEpoch;
+      final output = '${_directory!.path}/preview-$stamp.png';
+      // O ANTES e o original ampliado de forma convencional ao MESMO
+      // tamanho do depois: a comparacao mostra so o que a IA mudou.
+      final before = '${_directory!.path}/before-scaled-$stamp.png';
+      await _worker!.frame(input, output, _modelDir, _cancelPath, settings, before: before);
       _check();
       progress.value = const EnhanceProgress('Comparação pronta', 1);
-      return (input, output);
+      return (before, output);
     } finally {
       _running = false;
     }
@@ -155,7 +171,7 @@ class EnhancementJob {
         await _worker!.frame(
           input,
           result.path,
-          _modelPath,
+          _modelDir,
           _cancelPath,
           settings,
         );
@@ -188,167 +204,177 @@ class EnhancementJob {
     if (!software && !await PlatformEncoder.available) {
       return _video(source, target, settings, software: true);
     }
-    final probe = await FFprobeKit.getMediaInformation(source);
-    final info = probe.getMediaInformation();
-    final seconds = double.tryParse(info?.getDuration() ?? '') ?? 0;
-    if (!seconds.isFinite || seconds <= 0) {
-      throw StateError('Não foi possível ler a duração do vídeo');
+    final info = await _probe(source);
+    final seconds = info.seconds;
+    // Entrada da IA: o quadro inteiro, reduzido so se a saida passar de
+    // 3840 px no lado maior (limite do encoder).
+    final s = settings.ai ? settings.scale.clamp(1, 4) : 1;
+    var inW = info.width, inH = info.height;
+    final longest = math.max(inW, inH) * s;
+    if (longest > 3840) {
+      final k = 3840 / longest;
+      inW = (inW * k).floor();
+      inH = (inH * k).floor();
     }
-    // Decode to one fixed clock before enhancement, keeping audio and cuts aligned.
-    const fps = 30, batch = 12;
-    final count = (seconds * fps).ceil();
+    inW = math.max(2, inW ~/ 2 * 2);
+    inH = math.max(2, inH ~/ 2 * 2);
+    final outW = math.max(2, inW * s ~/ 2 * 2);
+    final outH = math.max(2, inH * s ~/ 2 * 2);
+    // Relogio: a taxa MEDIA real da fonte (antes era 30 fixo). Fonte VFR sai
+    // em taxa constante com a mesma duracao, sem perder o sincronismo.
+    final fps = info.fps;
     final silent = '${_directory!.path}/silent.mp4';
-    final segments = <String>[];
-    for (var first = 0; first < count; first += batch) {
-      _check();
-      final n = math.min(batch, count - first);
-      var written = 0;
-      final pattern = '${_directory!.path}/frame-%03d.png';
-      for (var i = 0; i < batch; i++) {
-        final old = File(
-          '${_directory!.path}/frame-${i.toString().padLeft(3, '0')}.png',
-        );
-        if (await old.exists()) await old.delete();
-      }
-      await _ffmpeg([
-        '-y',
-        '-ss',
-        (first / fps).toStringAsFixed(9),
-        '-i',
-        source,
-        '-an',
-        '-vf',
-        'fps=$fps',
-        '-frames:v',
-        '$n',
-        '-start_number',
-        '0',
-        pattern,
-      ]);
-      for (var index = 0; index < n; index++) {
-        _check();
-        final input = File(
-          '${_directory!.path}/frame-${index.toString().padLeft(3, '0')}.png',
-        );
-        if (!await input.exists()) {
-          break; // decoder may end within the last batch
-        }
-        final output = File('${_directory!.path}/enhanced.png');
-        final size = await _worker!.frame(
-          input.path,
-          output.path,
-          _modelPath,
-          _cancelPath,
-          settings,
-          video: true,
-        );
-        _check();
-        if (!software && !_encoding) {
-          await PlatformEncoder.start(
-            path: silent,
-            width: size.$1,
-            height: size.$2,
-            fps: fps,
-            bitrate: (size.$1 * size.$2 * fps * .2).round().clamp(
-              4000000,
-              80000000,
-            ),
-          );
-          _encoding = true;
-        }
-        if (software) {
-          await output.copy(
-            '${_directory!.path}/soft-${index.toString().padLeft(3, '0')}.png',
-          );
-        } else {
-          await PlatformEncoder.frame(output.path);
-        }
-        written++;
-        await input.delete();
-        await output.delete();
-        progress.value = EnhanceProgress(
-          'Melhorando quadro ${first + index + 1} de $count',
-          (first + index + 1) / count * .95,
-        );
-      }
-      if (software && written > 0) {
-        final segment = '${_directory!.path}/segment-$first.mp4';
-        await _ffmpeg([
-          '-y',
-          '-framerate',
-          '$fps',
-          '-i',
-          '${_directory!.path}/soft-%03d.png',
-          '-frames:v',
-          '$written',
-          '-c:v',
-          'mpeg4',
-          '-q:v',
-          '2',
-          '-pix_fmt',
-          'yuv420p',
-          segment,
-        ]);
-        segments.add('segment-$first.mp4');
-        for (var i = 0; i < written; i++) {
-          await File(
-            '${_directory!.path}/soft-${i.toString().padLeft(3, '0')}.png',
-          ).delete();
-        }
-      }
+    final pipe = await FFmpegKitConfig.registerNewFFmpegPipe();
+    if (pipe == null) {
+      throw StateError('Não foi possível abrir o canal de quadros');
     }
-    if (software) {
-      if (segments.isEmpty) {
+    String? outPipe;
+    FFmpegSession? encoderSession;
+    Future<FFmpegSession>? encoderDone;
+    IOSink? outSink;
+    try {
+      // QUADROS CRUS POR PIPE: nada de PNG em disco.
+      final decodeDone = Completer<FFmpegSession>();
+      final decoder = await FFmpegKit.executeWithArgumentsAsync([
+        '-y', '-i', source, '-an',
+        '-vf', 'fps=$fps,scale=$inW:$inH:flags=bicubic',
+        '-f', 'rawvideo', '-pix_fmt', 'rgb24', pipe,
+      ], decodeDone.complete);
+      _ffmpegSession = decoder.getSessionId();
+      if (software) {
+        outPipe = await FFmpegKitConfig.registerNewFFmpegPipe();
+        if (outPipe == null) {
+          throw StateError('Não foi possível abrir o canal do codificador');
+        }
+        final done = Completer<FFmpegSession>();
+        encoderSession = await FFmpegKit.executeWithArgumentsAsync([
+          '-y', '-f', 'rawvideo', '-pix_fmt', 'rgba', '-s', '${outW}x$outH',
+          '-r', '$fps', '-i', outPipe,
+          '-c:v', 'mpeg4', '-q:v', '2', '-pix_fmt', 'yuv420p', silent,
+        ], done.complete);
+        encoderDone = done.future;
+        outSink = File(outPipe).openWrite();
+      } else {
+        await PlatformEncoder.start(
+          path: silent,
+          width: outW,
+          height: outH,
+          fps: fps,
+          bitrate: (outW * outH * fps * .2).round().clamp(4000000, 80000000),
+        );
+        _encoding = true;
+      }
+      final total = math.max(1, (seconds * fps).ceil());
+      var feitos = 0;
+      final sink = outSink;
+      final count = await _worker!.video(
+        pipe, inW, inH, _modelDir, settings, outW, outH,
+        (rgba, w, h) async {
+          _check();
+          if (sink != null) {
+            sink.add(rgba);
+            await sink.flush();
+          } else {
+            await PlatformEncoder.frameRgba(rgba, w, h);
+          }
+          feitos++;
+          progress.value = EnhanceProgress(
+            'Melhorando quadro $feitos de $total',
+            math.min(.95, feitos / total * .95),
+          );
+        },
+      );
+      final decoded = await decodeDone.future;
+      _ffmpegSession = null;
+      _check();
+      if (!ReturnCode.isSuccess(await decoded.getReturnCode()) || count == 0) {
         throw StateError('O vídeo não contém quadros legíveis');
       }
-      final list = File('${_directory!.path}/segments.txt');
-      await list.writeAsString(segments.map((s) => "file '$s'").join('\n'));
-      await _ffmpeg([
-        '-y',
-        '-f',
-        'concat',
-        '-safe',
-        '0',
-        '-i',
-        list.path,
-        '-c',
-        'copy',
-        silent,
-      ]);
-      for (final segment in segments) {
-        await File('${_directory!.path}/$segment').delete();
+      if (sink != null) {
+        await sink.close();
+        outSink = null;
+        final enc = await encoderDone!;
+        if (!ReturnCode.isSuccess(await enc.getReturnCode())) {
+          throw StateError('Não foi possível codificar o vídeo');
+        }
+      } else if (!await PlatformEncoder.finish()) {
+        throw PlatformException(
+          code: 'encode_finish',
+          message: 'Não foi possível finalizar o vídeo',
+        );
       }
-    } else if (!_encoding || !await PlatformEncoder.finish()) {
-      throw PlatformException(
-        code: 'encode_finish',
-        message: 'Não foi possível finalizar o vídeo',
-      );
+      _encoding = false;
+    } finally {
+      await outSink?.close();
+      if (encoderSession != null && _cancelled) {
+        await FFmpegKit.cancel(encoderSession.getSessionId());
+      }
+      await FFmpegKitConfig.closeFFmpegPipe(pipe);
+      if (outPipe != null) await FFmpegKitConfig.closeFFmpegPipe(outPipe);
     }
-    _encoding = false;
     _check();
     progress.value = const EnhanceProgress('Preservando o áudio…', .97);
     await _ffmpeg([
-      '-y',
-      '-i',
-      silent,
-      '-i',
-      source,
-      '-map',
-      '0:v:0',
-      '-map',
-      '1:a?',
-      '-c:v',
-      'copy',
-      '-c:a',
-      'aac',
-      '-b:a',
-      '192k',
-      '-t',
-      seconds.toStringAsFixed(9),
-      '-movflags',
-      '+faststart',
-      target,
+      '-y', '-i', silent, '-i', source,
+      '-map', '0:v:0', '-map', '1:a?',
+      '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k',
+      '-t', seconds.toStringAsFixed(9),
+      '-movflags', '+faststart', target,
     ]);
+  }
+
+  /// Tamanho ja ROTACIONADO, taxa media e duracao, via ffprobe em JSON.
+  Future<({int width, int height, int fps, double seconds})> _probe(
+    String source,
+  ) async {
+    final session = await FFprobeKit.executeWithArguments([
+      '-v', 'error', '-select_streams', 'v:0',
+      '-show_entries',
+      'stream=width,height,avg_frame_rate,r_frame_rate:stream_side_data=rotation:stream_tags=rotate:format=duration',
+      '-of', 'json', source,
+    ]);
+    final text = await session.getOutput() ?? '';
+    return parseProbe(text);
+  }
+
+  /// Separado para teste: interpreta a saida JSON do ffprobe.
+  static ({int width, int height, int fps, double seconds}) parseProbe(
+    String text,
+  ) {
+    final json = jsonDecode(text) as Map<String, dynamic>;
+    final streams = ((json['streams'] as List?) ?? const [])
+        .cast<Map<String, dynamic>>();
+    if (streams.isEmpty) throw StateError('Nenhuma faixa de vídeo encontrada');
+    final st = streams.first;
+    var w = (st['width'] as num?)?.toInt() ?? 0;
+    var h = (st['height'] as num?)?.toInt() ?? 0;
+    var rot = 0;
+    for (final sd in ((st['side_data_list'] as List?) ?? const [])
+        .cast<Map<String, dynamic>>()) {
+      rot = (sd['rotation'] as num?)?.toInt() ?? rot;
+    }
+    rot = int.tryParse('${(st['tags'] as Map?)?['rotate'] ?? ''}') ?? rot;
+    if (rot.abs() % 180 == 90) {
+      final t = w;
+      w = h;
+      h = t;
+    }
+    double rate(String? r) {
+      final p = (r ?? '').split('/');
+      if (p.length != 2) return double.tryParse(r ?? '') ?? 0;
+      final d = double.tryParse(p[1]) ?? 0;
+      return d == 0 ? 0 : (double.tryParse(p[0]) ?? 0) / d;
+    }
+
+    var f = rate(st['avg_frame_rate'] as String?);
+    if (!(f > 1 && f < 241)) f = rate(st['r_frame_rate'] as String?);
+    final fps = (f > 1 && f < 241) ? f.round() : 30;
+    final seconds =
+        double.tryParse('${(json['format'] as Map?)?['duration'] ?? ''}') ?? 0;
+    if (w <= 0 || h <= 0 || !seconds.isFinite || seconds <= 0) {
+      throw StateError('Não foi possível ler este vídeo');
+    }
+    return (width: w, height: h, fps: fps, seconds: seconds);
   }
 
   Future<void> close() async {

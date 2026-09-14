@@ -54,10 +54,13 @@ void main() {
       180,
     ));
   });
-  test('bundled neural model has real TFLite signature and weights', () {
-    final bytes = File('assets/ai/compressed_esrgan.tflite').readAsBytesSync();
-    expect(String.fromCharCodes(bytes.sublist(4, 8)), 'TFL3');
-    expect(bytes.length, 33768);
+  test('modelo Real-ESRGAN ncnn empacotado e o verificado (tamanho e cabecalho)', () {
+    final param = File('assets/ai/realesr-animevideov3/x4.param').readAsStringSync();
+    expect(param.startsWith('7767517'), isTrue, reason: 'magic do .param do ncnn');
+    expect(param.contains(' data'), isTrue);
+    expect(param.contains(' output'), isTrue);
+    expect(File('assets/ai/realesr-animevideov3/x4.bin').lengthSync(), 1247368);
+    expect(File('assets/ai/compressed_esrgan.tflite').existsSync(), isFalse);
   });
   testWidgets('standalone enhancement controls fit a small phone', (
     tester,

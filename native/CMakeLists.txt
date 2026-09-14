@@ -127,3 +127,8 @@ elseif (APPLE)
         ${AV_FOUNDATION}
     )
 endif()
+
+# Super-resolucao por IA (Real-ESRGAN sobre ncnn/Vulkan): libaurea_enhance.so
+if (ANDROID)
+    add_subdirectory(enhance)
+endif()

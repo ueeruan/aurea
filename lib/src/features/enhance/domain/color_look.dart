@@ -134,13 +134,26 @@ class EnhanceSettings {
     this.scale = 2,
     this.look = ColorLook.natural,
     this.strength = 1,
-    this.denoise = 0,
-    this.detail = .15,
+    this.aiStrength = 1,
+    this.detail = 0,
   });
   final bool ai;
+
+  /// Escala de SAIDA: 1 (restaurar sem ampliar), 2 ou 4. O modelo e x4; 1x
+  /// e 2x sao a inferencia x4 reduzida por area (o custo e o do x4).
   final int scale;
   final ColorLook look;
-  final double strength, denoise, detail;
+
+  /// Intensidade do VISUAL de cor (CCs).
+  final double strength;
+
+  /// Intensidade da IA: mistura a saida da rede com o original ampliado de
+  /// forma convencional. Nao e um denoise.
+  final double aiStrength;
+
+  /// Nitidez (unsharp) aplicada depois. Nao e IA.
+  final double detail;
+
   (int, int) outputSize(int w, int h, {bool video = false}) {
     final s = ai ? scale.clamp(1, 4) : 1;
     final width = math.max(1, w * s), height = math.max(1, h * s);

@@ -308,6 +308,22 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
     // dedo (e nada, se for o vazio).
     if (_alca == null && d.pointerCount < 2) {
       final alvo = _camadaNoPonto(_naComposicao(d.localFocalPoint));
+      // MODO SELECIONAR: tocar na camada marca e desmarca; o palco nao
+      // arrasta nada enquanto se escolhe.
+      if (ref.read(modoSelecionarProvider)) {
+        _selecionandoNoPalco = true;
+        if (alvo != null) {
+          final r = alternarNaSelecao(
+            ref.read(multiSelectProvider),
+            ref.read(selectedLayerProvider),
+            alvo,
+          );
+          ref.read(multiSelectProvider.notifier).state = r.multi;
+          ref.read(selectedLayerProvider.notifier).state = r.principal;
+        }
+        return;
+      }
+      _selecionandoNoPalco = false;
       final atual = ref.read(selectedLayerProvider);
       if (alvo != atual) {
         ref.read(multiSelectProvider.notifier).state = const {};
@@ -325,7 +341,11 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
     _dragAccum = Offset.zero;
   }
 
+  /// O toque atual comecou no modo Selecionar: nao move camada nenhuma.
+  bool _selecionandoNoPalco = false;
+
   void _onScaleUpdate(ScaleUpdateDetails d) {
+    if (_selecionandoNoPalco) return;
     final id = ref.read(selectedLayerProvider);
     if (id == null) return;
     final controller = ref.read(editorControllerProvider.notifier);

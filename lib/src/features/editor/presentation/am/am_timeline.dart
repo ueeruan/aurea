@@ -659,6 +659,36 @@ class _AmTimelineState extends ConsumerState<AmTimeline> {
                   // Dividir e Congelar moram nas acoes rapidas da camada (E2);
                   // nada flutua sobre as linhas da timeline (Fase 2).
                   // CANTO DIREITO: expandir a timeline (preview vira janela).
+                  // SELECIONAR: ao lado do expandir, sempre a vista.
+                  if (widget.singleLayerId == null)
+                    Positioned(
+                      right: widget.onExpand != null ? 34 : 0,
+                      top: 0,
+                      height: 22,
+                      child: Consumer(
+                        builder: (context, ref, _) {
+                          final ligado = ref.watch(modoSelecionarProvider);
+                          return _BotaoDaRegua(
+                            key: const ValueKey('timeline-selecionar'),
+                            tooltip: ligado
+                                ? 'Sair do modo Selecionar'
+                                : 'Selecionar varias camadas',
+                            ativo: ligado,
+                            onTap: () {
+                              ref.read(modoSelecionarProvider.notifier).state =
+                                  !ligado;
+                            },
+                            child: Icon(
+                              ligado
+                                  ? CupertinoIcons.checkmark_square_fill
+                                  : CupertinoIcons.checkmark_square,
+                              size: 14,
+                              color: ligado ? AmColors.action : AmColors.text,
+                            ),
+                          );
+                        },
+                      ),
+                    ),
                   if (widget.onExpand != null)
                     Positioned(
                       right: 0,
@@ -1561,6 +1591,17 @@ class _AmBarState extends ConsumerState<_AmBar> {
                 // editor, pelo mesmo onTapLayer.
                 if (compact) {
                   onTapLayer?.call(layer);
+                  return;
+                }
+                // MODO SELECIONAR: o toque marca e desmarca.
+                if (ref.read(modoSelecionarProvider)) {
+                  final r = alternarNaSelecao(
+                    ref.read(multiSelectProvider),
+                    ref.read(selectedLayerProvider),
+                    layer.id,
+                  );
+                  ref.read(multiSelectProvider.notifier).state = r.multi;
+                  ref.read(selectedLayerProvider.notifier).state = r.principal;
                   return;
                 }
                 // Toque simples limpa a selecao multipla.

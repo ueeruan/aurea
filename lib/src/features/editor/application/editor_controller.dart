@@ -244,6 +244,35 @@ String propDaCameraLabel(PropDaCamera p) => switch (p) {
 /// conjunto — agrupar, duplicar e excluir em lote.
 final multiSelectProvider = StateProvider<Set<String>>((ref) => const {});
 
+/// MODO SELECIONAR (como no Alight Motion): com ele ligado, o toque simples
+/// na barra da timeline ou na camada do palco marca e desmarca, e o botao
+/// Agrupar aparece com duas ou mais. Sem ele a selecao multipla so existia
+/// no toque longo PARADO na barra — gesto que ninguem descobre sozinho, e
+/// o testador acabava ligando tudo num nulo em vez de agrupar.
+final modoSelecionarProvider = StateProvider<bool>((ref) => false);
+
+/// Alterna [id] na selecao do modo Selecionar. A camada principal tambem
+/// sai (o toque longo nunca a tirava do conjunto). Com uma so, ela vira a
+/// selecao simples.
+({Set<String> multi, String? principal}) alternarNaSelecao(
+  Set<String> multi,
+  String? principal,
+  String id,
+) {
+  final conjunto = <String>{...multi};
+  if (principal != null) conjunto.add(principal);
+  if (!conjunto.add(id)) conjunto.remove(id);
+  final nova = conjunto.isEmpty
+      ? null
+      : (principal != null && conjunto.contains(principal)
+            ? principal
+            : conjunto.last);
+  return (
+    multi: conjunto.length >= 2 ? conjunto : const <String>{},
+    principal: nova,
+  );
+}
+
 /// Estado central do editor: a composicao aberta e as operacoes sobre ela.
 /// Toda mutacao passa por [_mutate], que alimenta o undo/redo.
 class EditorController extends Notifier<VideoProject> {
@@ -443,6 +472,9 @@ class EditorController extends Notifier<VideoProject> {
     // limpar, o cabecalho abre verde ("2 camadas") sobre camadas que nao
     // existem, e agrupar/excluir agem sobre ids mortos.
     ref.read(multiSelectProvider.notifier).state = const {};
+    if (ref.exists(modoSelecionarProvider)) {
+      ref.read(modoSelecionarProvider.notifier).state = false;
+    }
   }
 
   void renameProject(String name) => _mutate(state.copyWith(name: name));

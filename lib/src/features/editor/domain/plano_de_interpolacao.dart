@@ -111,8 +111,10 @@ enum ComoInterpolar {
       ? fonte.round()
       : fps;
   if (base >= taxa) return (como: ComoInterpolar.quadrosReais, taxaBase: taxa);
+  final efetiva = interpolacaoEfetiva(layer);
   if (rifeDisponivel &&
-      interpolacaoEfetiva(layer) == InterpolacaoDeQuadros.movimento) {
+      (efetiva == InterpolacaoDeQuadros.movimento ||
+          efetiva == InterpolacaoDeQuadros.ia)) {
     return (como: ComoInterpolar.rife, taxaBase: base);
   }
   return (como: ComoInterpolar.ffmpeg, taxaBase: taxa);

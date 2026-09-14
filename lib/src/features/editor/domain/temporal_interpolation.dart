@@ -53,7 +53,9 @@ String filtroDeInterpolacao(VideoLayer layer, {required int fps}) {
   final fator = fatorDeInterpolacao(layer);
   if (fator <= 1) return '';
   final modo = switch (interpolacaoEfetiva(layer)) {
-    InterpolacaoDeQuadros.movimento => 'mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1:scd=fdiff:scd_threshold=10',
+    // "IA" sem RIFE no aparelho tambem cai aqui: fluxo optico do ffmpeg.
+    InterpolacaoDeQuadros.movimento ||
+    InterpolacaoDeQuadros.ia => 'mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1:scd=fdiff:scd_threshold=10',
     _ => 'mi_mode=blend',
   };
   return 'minterpolate=fps=${fps * fator}:$modo,';

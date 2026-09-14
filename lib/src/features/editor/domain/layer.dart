@@ -570,12 +570,18 @@ enum InterpolacaoDeQuadros {
 
   /// Estima o movimento entre os vizinhos e desloca os pixels
   /// (motion-compensated). Mais caro; e o que da a camera lenta lisa.
-  movimento;
+  movimento,
+
+  /// IA (RIFE) quando o aparelho tem o motor; senao cai no movimento.
+  /// "Movimento" tambem usa a IA quando pode — este modo existe para a
+  /// escolha ser EXPLICITA no estudio do tempo.
+  ia;
 
   String get emPalavras => switch (this) {
     InterpolacaoDeQuadros.nenhuma => 'Nenhuma',
     InterpolacaoDeQuadros.mesclar => 'Mesclar',
     InterpolacaoDeQuadros.movimento => 'Movimento',
+    InterpolacaoDeQuadros.ia => 'IA',
   };
 }
 

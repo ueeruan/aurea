@@ -20,6 +20,7 @@ import '../domain/camera_solver3d.dart';
 import '../domain/cena_do_rastreio.dart';
 import '../domain/cut.dart';
 import '../domain/cut_ops.dart';
+import '../domain/remapear_tempo.dart';
 import '../domain/panorama3d.dart';
 import '../domain/fonte_truetype.dart';
 import '../domain/modelo_do_texto3d.dart';
@@ -4241,6 +4242,70 @@ class EditorController extends Notifier<VideoProject> {
     final track = speedRampTrack(preset, layer.duration, span);
     _replace(
       layer.copyLayer(speed: 1, effects: replaceTimeRemap(layer, track)),
+    );
+  }
+
+  // ------------------------------------------------- estudio do tempo
+
+  /// A curva fonte-tempo do clipe (nula = velocidade constante).
+  AnimatedDouble? trilhaDeTempo(String id) => switch (_layer(id)) {
+    VideoLayer l => timeRemapTrackOf(l),
+    _ => null,
+  };
+
+  bool temCurvaDeTempo(String id) => trilhaDeTempo(id) != null;
+
+  /// Liga a curva com a IDENTIDADE (nenhum quadro muda de lugar) ou
+  /// desliga voltando a velocidade constante equivalente.
+  void ligarCurvaDeTempo(String id, bool ligada) {
+    final layer = _layer(id);
+    if (layer is! VideoLayer) return;
+    if (ligada) {
+      if (hasTimeRemap(layer)) return;
+      final span = videoSourceSpan(layer).inMicroseconds / 1000000.0;
+      _replace(
+        layer.copyLayer(
+          speed: 1,
+          effects: replaceTimeRemap(
+            layer,
+            curvaIdentidade(layer.duration, span),
+          ),
+        ),
+      );
+      return;
+    }
+    final media = clipSpeedOf(id).clamp(0.1, 10.0);
+    _replace(
+      layer.copyLayer(speed: media, effects: replaceTimeRemap(layer, null)),
+    );
+  }
+
+  /// A trilha inteira de uma vez — e como o estudio do tempo escreve
+  /// (um arrasto = muitas chamadas dentro de um gesto = um undo).
+  void definirTrilhaDeTempo(String id, AnimatedDouble track) {
+    final layer = _layer(id);
+    if (layer is! VideoLayer) return;
+    _replace(
+      layer.copyLayer(speed: 1, effects: replaceTimeRemap(layer, track)),
+    );
+  }
+
+  /// O REVERSO VIRA CURVA. Com o interruptor Reverso ligado, grava o que
+  /// a previa ja toca (span - curva) e desliga o interruptor — nenhum
+  /// quadro muda. Sem o interruptor, espelha a curva atual (ou a
+  /// identidade): o clipe passa a correr de tras para frente.
+  void assarReversoNaCurva(String id) {
+    final layer = _layer(id);
+    if (layer is! VideoLayer) return;
+    final span = videoSourceSpan(layer).inMicroseconds / 1000000.0;
+    final atual =
+        timeRemapTrackOf(layer) ?? curvaIdentidade(layer.duration, span);
+    _replace(
+      layer.copyLayer(
+        speed: 1,
+        reverse: false,
+        effects: replaceTimeRemap(layer, curvaEspelhada(atual, span)),
+      ),
     );
   }
 

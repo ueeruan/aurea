@@ -90,7 +90,6 @@ void main() {
     ('borda e sombra', text, 'Borda e\nsombra'),
     ('fonte', text, 'Fonte'),
     ('texto em caminho', text, 'Caminho'),
-    ('presets', text, 'Presets'),
     ('volume', audio, 'Volume'),
     ('fade', audio, 'Fade'),
     ('particulas', (c) => c.addParticlesLayer(Duration.zero), 'Particulas'),

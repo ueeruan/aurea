@@ -1104,12 +1104,14 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
   /// virar cinco cards gigantes que nao cabiam na tela.
   Widget _objetos() {
     Widget cardItem({
+      Key? key,
       required Widget iconWidget,
       required String label,
       required VoidCallback onTap,
       Widget? badge,
     }) {
       return GestureDetector(
+        key: key,
         behavior: HitTestBehavior.opaque,
         onTap: onTap,
         child: Container(
@@ -1125,22 +1127,28 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
                   top: 6,
                   child: badge,
                 ),
-              Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  if (badge != null) const SizedBox(height: 10),
-                  iconWidget,
-                  const SizedBox(height: 6),
-                  AppText(
-                    label,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
+              Padding(
+                padding: const EdgeInsets.all(4),
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      if (badge != null) const SizedBox(height: 10),
+                      iconWidget,
+                      const SizedBox(height: 6),
+                      AppText(
+                        label,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
             ],
           ),
@@ -1148,18 +1156,7 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
       );
     }
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          child: GridView.count(
-            crossAxisCount: 2,
-            mainAxisSpacing: 8,
-            crossAxisSpacing: 8,
-            childAspectRatio: 1.55,
-            physics: const NeverScrollableScrollPhysics(),
-            shrinkWrap: true,
-            children: [
+    final cartoes = <Widget>[
               // 1. Scene 3D com badge PROVAR
               cardItem(
                 badge: Container(
@@ -1228,7 +1225,49 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
                   _controller.addElement3DLayer(widget.playhead, Element3DKind.cube);
                 },
               ),
-            ],
+              // 5. Particulas. O botao sumiu quando esta folha foi refeita
+              // (c7216c9) e a camada ficou sem porta de entrada, embora o
+              // codigo dela continuasse inteiro. Testadores pediram de volta.
+              cardItem(
+                key: const ValueKey('add-particulas'),
+                iconWidget: const Icon(
+                  CupertinoIcons.sparkles,
+                  size: 36,
+                  color: Colors.white,
+                ),
+                label: 'Partículas',
+                onTap: () {
+                  _fecha();
+                  _controller.addParticlesLayer(widget.playhead);
+                },
+              ),
+    ];
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // DUAS FILEIRAS DE TRES. Em duas colunas, o quinto cartao abria uma
+        // terceira fileira que ficava cortada: a grade nao rolava e o painel
+        // tem 48% da tela. A altura sai do espaco que existe, e so rola se o
+        // aparelho for baixo demais para duas fileiras.
+        const colunas = 3;
+        const espaco = 8.0;
+        final fileiras = (cartoes.length / colunas).ceil();
+        final largura =
+            (constraints.maxWidth - 16 - espaco * (colunas - 1)) / colunas;
+        final altura = constraints.hasBoundedHeight
+            ? ((constraints.maxHeight - 8 - espaco * (fileiras - 1)) /
+                      fileiras)
+                  .clamp(52.0, 118.0)
+            : 100.0;
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: GridView.count(
+            crossAxisCount: colunas,
+            mainAxisSpacing: espaco,
+            crossAxisSpacing: espaco,
+            childAspectRatio: largura / altura,
+            physics: const ClampingScrollPhysics(),
+            children: cartoes,
           ),
         );
       },

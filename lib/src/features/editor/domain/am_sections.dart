@@ -37,7 +37,6 @@ enum AmSecao {
 
   /// Cena 3D e Elemento 3D: objetos, materiais, luzes, cameras e cortes.
   cena3d,
-  presets,
   efeitos,
 }
 
@@ -66,7 +65,6 @@ Set<AmSecao> secoesDe(Layer layer) {
     return const {
       AmSecao.moverTransformar,
       AmSecao.cena3d,
-      AmSecao.presets,
       AmSecao.efeitos,
     };
   }
@@ -89,7 +87,9 @@ Set<AmSecao> secoesDe(Layer layer) {
     if (layer is CaptionLayer) AmSecao.editarLegendas,
     if (layer is ParticlesLayer) AmSecao.particulas,
     if (layer is Element3DLayer || layer is Scene3DLayer) AmSecao.cena3d,
-    AmSecao.presets,
+    // SEM "PRESETS" NA GRADE (relato do beta 1.0.5): o quadrado com o selo
+    // NEW vinha antes de "Efeitos" e empurrava os efeitos para uma fileira
+    // que so se via rolando.
     AmSecao.efeitos,
   };
 }

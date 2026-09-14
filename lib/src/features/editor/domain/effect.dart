@@ -2743,6 +2743,9 @@ const effectSpecs = <EffectType, EffectSpec>{
       'brilho',
       'contraste',
       'brightness contrast',
+      'brightness and contrast',
+      'brilho e contraste',
+      'brilho/contraste',
       'cc',
     ],
     params: {
@@ -3397,19 +3400,69 @@ const _categoriaEmPortugues = <String, String>{
 
 /// BUSCA (§5): nome, categoria e SINONIMOS. Quem digita "bloom" acha
 /// Glow; quem digita "pixelate" acha Mosaico.
+///
+/// SEM ACENTO E SEM CAIXA, dos dois lados. O teclado do celular poe o
+/// acento sozinho: "partículas" nao achava o sinonimo "particulas", e
+/// "saturacao" nao acharia "Saturação". A busca compara as duas pontas
+/// ja normalizadas, entao tanto faz como o sinonimo foi escrito.
 List<EffectType> searchEffects(String query) {
-  final q = query.trim().toLowerCase();
+  final q = normalizarBusca(query.trim());
   if (q.isEmpty) return effectSpecs.keys.toList();
+  bool contem(String texto) => normalizarBusca(texto).contains(q);
   return [
     for (final e in effectSpecs.entries)
-      if (e.value.name.toLowerCase().contains(q) ||
-          e.value.id.contains(q) ||
-          e.value.category.toLowerCase().contains(q) ||
-          (_categoriaEmPortugues[e.value.category] ?? '').contains(q) ||
-          e.value.synonyms.any((s) => s.contains(q)))
+      if (contem(e.value.name) ||
+          contem(e.value.id) ||
+          contem(e.value.category) ||
+          contem(_categoriaEmPortugues[e.value.category] ?? '') ||
+          e.value.synonyms.any(contem))
         e.key,
   ];
 }
+
+/// Minusculas e sem acento: "Saturação" vira "saturacao".
+///
+/// O Dart nao traz normalizacao Unicode (NFD) no nucleo, entao a tabela
+/// cobre as letras latinas acentuadas dos idiomas do app. O que nao esta
+/// nela passa intacto — hangul, kana e cirilico nao tem acento a tirar.
+String normalizarBusca(String texto) {
+  final saida = StringBuffer();
+  for (final runa in texto.toLowerCase().runes) {
+    final letra = String.fromCharCode(runa);
+    saida.write(_semAcento[letra] ?? letra);
+  }
+  return saida.toString();
+}
+
+const _semAcento = <String, String>{
+  'á': 'a',
+  'à': 'a',
+  'â': 'a',
+  'ã': 'a',
+  'ä': 'a',
+  'å': 'a',
+  'é': 'e',
+  'è': 'e',
+  'ê': 'e',
+  'ë': 'e',
+  'í': 'i',
+  'ì': 'i',
+  'î': 'i',
+  'ï': 'i',
+  'ó': 'o',
+  'ò': 'o',
+  'ô': 'o',
+  'õ': 'o',
+  'ö': 'o',
+  'ú': 'u',
+  'ù': 'u',
+  'û': 'u',
+  'ü': 'u',
+  'ç': 'c',
+  'ñ': 'n',
+  'ý': 'y',
+  'ÿ': 'y',
+};
 
 List<EffectType> effectsInCategory(String category) => [
   for (final e in effectSpecs.entries)

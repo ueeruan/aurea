@@ -5,39 +5,34 @@ import '../../../core/ui/am_colors.dart';
 import 'package:aurea/src/core/l10n/app_language.dart';
 
 // Change this revision when publishing a new set of release notes.
-const releaseNoticeRevision = '2026-09-12-beta-78';
+const releaseNoticeRevision = '2026-09-14-beta-79';
 const releaseNoticeSeenKey = 'aurea.releaseNotice.seen';
 
 const releaseHighlights = <(IconData, String, String)>[
   (
-    CupertinoIcons.globe,
-    'Idiomas e controles',
-    'Nove idiomas nos controles principais, em Ajustes. Toque em Z para arrastar a profundidade. Segure a camada para movê-la na timeline.',
+    CupertinoIcons.house,
+    'Início e Comunidade novas',
+    'Início com grade de projetos e atalhos. Comunidade no estilo feed de fotos, com a fila de criadores para ver os posts de cada pessoa.',
   ),
   (
-    CupertinoIcons.play_rectangle,
-    'Melhorar qualidade',
-    'Nova alternativa de codificação para celulares que rejeitam a exportação. Correção de cor pode funcionar sem carregar a IA.',
-  ),
-  (
-    CupertinoIcons.cube_box,
-    'Cena 3D',
-    'Interface nova para celular, dicas, troca fácil de câmera, reflexos do ambiente e otimização dos modelos.',
-  ),
-  (
-    CupertinoIcons.move,
-    'Animação',
-    'Rotação, vínculos com nulos e seleção com profundidade Z corrigidos. AutoKey ligado por padrão.',
+    CupertinoIcons.wand_stars,
+    'Melhorar qualidade com IA de verdade',
+    'Real-ESRGAN rodando no aparelho (GPU), sem PNG por quadro, na taxa original do vídeo. Intensidade da IA e nitidez separadas.',
   ),
   (
     CupertinoIcons.timer,
-    'Velocidade e câmera lenta',
-    'Time Remap com curvas e Optical Flow estão em Efeitos para controlar o tempo e suavizar movimentos.',
+    'Time Remap mais preciso',
+    'O tempo do vídeo agora é calculado num núcleo em C++: curvas exatas, corte e divisão sem deslocar o tempo.',
   ),
   (
-    CupertinoIcons.checkmark_seal,
-    'Exportação',
-    'Ajustes no Motion Tile, nas réguas de valores e na rolagem dos painéis. Desenho livre acessível na aba Desenhar.',
+    CupertinoIcons.layers,
+    'Camadas',
+    'Profundidade Z sempre no painel de Posição, camada por camada. Copiar e colar efeitos entre camadas.',
+  ),
+  (
+    CupertinoIcons.folder,
+    'Projetos',
+    'Apagar todos os projetos pelo menu de qualquer projeto. Arquivos .aurea abrem no iPhone. Nomes de projeto não mudam mais com o idioma.',
   ),
 ];
 

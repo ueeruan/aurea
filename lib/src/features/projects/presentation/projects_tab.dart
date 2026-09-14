@@ -36,7 +36,8 @@ import '../../tutoriais/presentation/tutorial_screen.dart';
 import 'home_shell.dart';
 import 'new_project_sheet.dart';
 import 'whats_new.dart';
-import 'widgets/aurea_welcome_header.dart';
+import '../../../core/widgets/aurea_logo.dart';
+import '../../community/application/conta_da_comunidade.dart';
 
 /// A INICIO, do jeito de um app de video: o titulo, UM botao de criar,
 /// os projetos recentes numa lista com a miniatura DE VERDADE e um menu
@@ -494,149 +495,146 @@ class ProjectsTab extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final projects = ref.watch(projectsControllerProvider);
     final mostrarTodos = ref.watch(_mostrarTodosProvider);
-    const completo = true;
     ThumbnailService.instance.init();
     final visiveis = mostrarTodos
         ? projects
         : projects.take(_recentesNaInicio).toList();
+    final largura = MediaQuery.sizeOf(context).width;
+    final colunas = largura >= 700 ? 4 : (largura >= 520 ? 3 : 2);
 
     return SafeArea(
       bottom: false,
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(0, 10, 0, 120),
-        children: [
-          // CABEÇALHO ANIMADO DE BOAS-VINDAS COM PERFIL INTEGRADO
-          const AureaWelcomeHeader(),
-          const SizedBox(height: 12),
-          // UM BOTAO SO, na largura inteira.
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: SizedBox(
-              height: 52,
-              width: double.infinity,
-              child: FilledButton.icon(
-                key: const ValueKey('novo-projeto'),
-                icon: const Icon(CupertinoIcons.plus, size: 19),
-                label: const AppText('Novo projeto'),
-                onPressed: () => _createProject(
-                  context,
-                  ref,
-                  nomeSugerido: 'Projeto ${projects.length + 1}',
+      child: CustomScrollView(
+        slivers: [
+          SliverToBoxAdapter(
+            child: _Cabecalho(onTemplate: () => _openTemplate(context, ref)),
+          ),
+          // UM BOTAO DE CRIAR, na largura inteira.
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 6, 20, 0),
+              child: SizedBox(
+                height: 54,
+                width: double.infinity,
+                child: FilledButton.icon(
+                  key: const ValueKey('novo-projeto'),
+                  style: FilledButton.styleFrom(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                  icon: const Icon(CupertinoIcons.plus, size: 20),
+                  label: const AppText('Novo projeto'),
+                  onPressed: () => _createProject(
+                    context,
+                    ref,
+                    nomeSugerido: 'Projeto ${projects.length + 1}',
+                  ),
                 ),
               ),
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
-            child: OutlinedButton.icon(
-              icon: const Icon(Icons.auto_awesome),
-              label: const AppText('Melhorar qualidade • IA e cores'),
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(builder: (_) => const EnhanceScreen()),
-              ),
-            ),
-          ),
-          // ATALHOS RÁPIDOS MODERNOS (DOCK CRIATIVO)
-          if (completo) ...[
-            const SizedBox(height: 14),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
+          // ATALHOS: icone num circulo e o nome embaixo. Sem caixa, sem borda.
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 18, 12, 0),
               child: Row(
                 children: [
                   Expanded(
-                    child: _AtalhoModerno(
+                    child: _Atalho(
                       icon: CupertinoIcons.photo_on_rectangle,
                       rotulo: 'Mídia',
-                      subrotulo: 'Galeria',
                       onTap: () => _importarMidia(context, ref),
                     ),
                   ),
-                  const SizedBox(width: 8),
                   Expanded(
-                    child: _AtalhoModerno(
-                      icon: CupertinoIcons.arrow_down_doc,
-                      rotulo: 'XML',
-                      subrotulo: 'Cena 3D',
-                      onTap: () => _importarCena(context, ref),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _AtalhoModerno(
+                    child: _Atalho(
                       icon: CupertinoIcons.doc_on_doc,
                       rotulo: 'Template',
-                      subrotulo: 'Modelos',
                       onTap: () => _openTemplate(context, ref),
                     ),
                   ),
-                  const SizedBox(width: 8),
                   Expanded(
-                    child: _AtalhoModerno(
-                      icon: CupertinoIcons.sparkles,
-                      rotulo: 'Mural',
-                      subrotulo: 'Social',
-                      onTap: () => ref.read(homeTabProvider.notifier).state = 2,
+                    child: _Atalho(
+                      icon: CupertinoIcons.cube,
+                      rotulo: 'Cena 3D',
+                      onTap: () => _importarCena(context, ref),
+                    ),
+                  ),
+                  Expanded(
+                    child: _Atalho(
+                      icon: CupertinoIcons.wand_stars,
+                      rotulo: 'Melhorar',
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => const EnhanceScreen(),
+                        ),
+                      ),
                     ),
                   ),
                 ],
               ),
             ),
-          ],
-          const SizedBox(height: 26),
-          _TituloSecao(
-            'Recentes',
-            detalhe: projects.isEmpty
-                ? null
-                : '${projects.length} ${projects.length == 1 ? 'projeto' : 'projetos'}',
           ),
-          const SizedBox(height: 4),
+          SliverToBoxAdapter(
+            child: _TituloSecao(
+              'Recentes',
+              detalhe: projects.isEmpty
+                  ? null
+                  : '${projects.length} ${translate(context, projects.length == 1 ? 'projeto' : 'projetos')}',
+            ),
+          ),
           if (projects.isEmpty)
-            Padding(
-              padding: EdgeInsets.fromLTRB(20, 10, 20, 6),
-              child: AppText('Seus projetos aparecem aqui, com a miniatura do que voce fez.',
-                style: TextStyle(color: AppColors.muted, fontSize: 13.5),
-              ),
-            )
+            const SliverToBoxAdapter(child: _SemProjetos())
           else
-            // UMA LISTA, e nao uma fila que rola de lado: o nome inteiro,
-            // a ficha e o menu de cada projeto cabem numa linha.
-            ValueListenableBuilder<int>(
-              valueListenable: ThumbnailService.instance.revision,
-              builder: (_, rev, _) => Column(
-                children: [
-                  for (final project in visiveis)
-                    _LinhaProjeto(
-                      key: ValueKey('projeto-${project.id}'),
-                      project: project,
-                      thumb: ThumbnailService.instance.fileFor(project.id),
-                      revision: rev,
-                      onOpen: () => _openProject(context, ref, project),
-                      onMenu: () => _menuDoProjeto(context, ref, project),
-                    ),
-                ],
+            SliverPadding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              sliver: ValueListenableBuilder<int>(
+                valueListenable: ThumbnailService.instance.revision,
+                builder: (_, rev, _) => SliverGrid(
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: colunas,
+                    mainAxisSpacing: 16,
+                    crossAxisSpacing: 12,
+                    // miniatura 16:10 + duas linhas de texto
+                    childAspectRatio: 1.12,
+                  ),
+                  delegate: SliverChildBuilderDelegate(
+                    (context, i) {
+                      final project = visiveis[i];
+                      return _CartaoProjeto(
+                        key: ValueKey('projeto-${project.id}'),
+                        project: project,
+                        thumb: ThumbnailService.instance.fileFor(project.id),
+                        revision: rev,
+                        onOpen: () => _openProject(context, ref, project),
+                        onMenu: () => _menuDoProjeto(context, ref, project),
+                      );
+                    },
+                    childCount: visiveis.length,
+                  ),
+                ),
               ),
             ),
           if (projects.length > _recentesNaInicio)
-            _Linha(
-              key: const ValueKey('projetos-todos'),
-              icon: mostrarTodos
-                  ? CupertinoIcons.chevron_up
-                  : CupertinoIcons.chevron_down,
-              texto: mostrarTodos
-                  ? 'Mostrar menos'
-                  : 'Mostrar todos os ${projects.length} projetos',
-              onTap: () => ref.read(_mostrarTodosProvider.notifier).state =
-                  !mostrarTodos,
+            SliverToBoxAdapter(
+              child: _Linha(
+                key: const ValueKey('projetos-todos'),
+                icon: mostrarTodos
+                    ? CupertinoIcons.chevron_up
+                    : CupertinoIcons.square_grid_2x2,
+                texto: mostrarTodos
+                    ? 'Mostrar menos'
+                    : 'Mostrar todos os ${projects.length} projetos',
+                onTap: () => ref.read(_mostrarTodosProvider.notifier).state =
+                    !mostrarTodos,
+              ),
             ),
-          // MODELOS: motions inteiros montados camada por camada — abrir
-          // um e ver como cada coisa foi feita. Estudio: usam texto,
-          // formas e efeitos que o nucleo nao mostra.
-          if (completo) ...[
-            const SizedBox(height: 24),
-            const _TituloSecao('Modelos'),
-            const SizedBox(height: 10),
-            SizedBox(
-              height: 176,
+          // MODELOS: motions inteiros montados camada por camada.
+          const SliverToBoxAdapter(child: _TituloSecao('Modelos')),
+          SliverToBoxAdapter(
+            child: SizedBox(
+              height: 196,
               child: ListView(
                 scrollDirection: Axis.horizontal,
                 padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -735,52 +733,67 @@ class ProjectsTab extends ConsumerWidget {
                 ],
               ),
             ),
-          ],
-          const SizedBox(height: 24),
-          _SpotlightComunidade(
-            onExplorar: () => ref.read(homeTabProvider.notifier).state = 2,
           ),
-          const SizedBox(height: 12),
-          _Linha(
-            icon: CupertinoIcons.sparkles,
-            texto: 'O que ha de novo nesta versao',
-            onTap: () => showWhatsNewSheet(context),
-          ),
-          _Linha(
-            key: const ValueKey('inicio-tutorial-cena3d'),
-            icon: CupertinoIcons.play_rectangle,
-            texto: 'Tutorial em vídeo: sua primeira cena 3D',
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => const TutorialScreen(id: 'cena3d'),
-              ),
+          const SliverToBoxAdapter(child: _TituloSecao('Comunidade')),
+          SliverToBoxAdapter(
+            child: _LinhaGrande(
+              icon: CupertinoIcons.person_2_fill,
+              titulo: 'Veja o que a galera está criando',
+              subtitulo: 'Poste o seu projeto, responda e reposte',
+              // A ABA DA COMUNIDADE E A 1. O atalho antigo mandava para a
+              // 2 — que e Ajustes.
+              onTap: () => ref.read(homeTabProvider.notifier).state = 1,
             ),
           ),
-          _Linha(
-            key: const ValueKey('inicio-tutorial-cena-completa'),
-            icon: CupertinoIcons.cube_box,
-            texto: 'Tutorial em vídeo: cena 3D com modelos e câmeras',
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => const TutorialScreen(id: 'cena-completa'),
-              ),
+          const SliverToBoxAdapter(child: _TituloSecao('Aprender')),
+          SliverToBoxAdapter(
+            child: Column(
+              children: [
+                _Linha(
+                  key: const ValueKey('inicio-tutorial-cena3d'),
+                  icon: CupertinoIcons.play_rectangle,
+                  texto: 'Tutorial em vídeo: sua primeira cena 3D',
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const TutorialScreen(id: 'cena3d'),
+                    ),
+                  ),
+                ),
+                _Linha(
+                  key: const ValueKey('inicio-tutorial-cena-completa'),
+                  icon: CupertinoIcons.cube_box,
+                  texto: 'Tutorial em vídeo: cena 3D com modelos e câmeras',
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) =>
+                          const TutorialScreen(id: 'cena-completa'),
+                    ),
+                  ),
+                ),
+                _Linha(
+                  key: const ValueKey('inicio-tutorial-texto-bounce'),
+                  icon: CupertinoIcons.textformat,
+                  texto: 'Tutorial em vídeo: texto que quica, do seu jeito',
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const TutorialScreen(id: 'texto-bounce'),
+                    ),
+                  ),
+                ),
+                _Linha(
+                  icon: CupertinoIcons.sparkles,
+                  texto: 'O que ha de novo nesta versao',
+                  onTap: () => showWhatsNewSheet(context),
+                ),
+                _Linha(
+                  icon: CupertinoIcons.exclamationmark_bubble,
+                  texto: 'Versao beta: achou um problema? Conte pra gente',
+                  onTap: () => showReportSheet(context),
+                ),
+              ],
             ),
           ),
-          _Linha(
-            key: const ValueKey('inicio-tutorial-texto-bounce'),
-            icon: CupertinoIcons.textformat,
-            texto: 'Tutorial em vídeo: texto que quica, do seu jeito',
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => const TutorialScreen(id: 'texto-bounce'),
-              ),
-            ),
-          ),
-          _Linha(
-            icon: CupertinoIcons.exclamationmark_bubble,
-            texto: 'Versao beta: achou um problema? Conte pra gente',
-            onTap: () => showReportSheet(context),
-          ),
+          const SliverToBoxAdapter(child: SizedBox(height: 120)),
         ],
       ),
     );
@@ -801,137 +814,6 @@ String fichaDoProjeto(VideoProject project) {
       )
       .label;
   return '$aspect · ${ProjectPresets.resolutionLabel(project.resolutionHeight)} · ${project.fps} fps';
-}
-
-class _TituloSecao extends StatelessWidget {
-  const _TituloSecao(this.titulo, {this.detalhe});
-
-  final String titulo;
-  final String? detalhe;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Expanded(
-            child: AppText(titulo, style: Theme.of(context).textTheme.titleMedium),
-          ),
-          if (detalhe != null)
-            AppText(
-              detalhe!,
-              style: TextStyle(fontSize: 12.5, color: AppColors.muted),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Uma linha de projeto: miniatura real (quando o projeto ja foi aberto
-/// e fechado uma vez), nome, ficha e o menu. Toque abre; segurar ou as
-/// reticencias abrem o menu.
-class _LinhaProjeto extends StatelessWidget {
-  const _LinhaProjeto({
-    super.key,
-    required this.project,
-    required this.thumb,
-    required this.revision,
-    required this.onOpen,
-    required this.onMenu,
-  });
-
-  final VideoProject project;
-  final File? thumb;
-  final int revision;
-  final VoidCallback onOpen;
-  final VoidCallback onMenu;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = thumb;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onOpen,
-      onLongPress: onMenu,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 7, 6, 7),
-        child: Row(
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: SizedBox(
-                width: 92,
-                height: 58,
-                child: t == null
-                    ? ColoredBox(
-                        color: AppColors.surfaceHigh,
-                        child: Center(
-                          child: Icon(
-                            CupertinoIcons.film,
-                            color: AppColors.muted,
-                            size: 20,
-                          ),
-                        ),
-                      )
-                    : Image.file(
-                        t,
-                        key: ValueKey('${project.id}-$revision'),
-                        fit: BoxFit.cover,
-                        gaplessPlayback: true,
-                      ),
-              ),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    project.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: -0.1,
-                      color: AppColors.onDark,
-                    ),
-                  ),
-                  const SizedBox(height: 3),
-                  AppText(
-                    fichaDoProjeto(project),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 12, color: AppColors.muted),
-                  ),
-                ],
-              ),
-            ),
-            // O MENU TEM 44 PX de alvo: e por onde se apaga, duplica e
-            // renomeia — nada disso pode depender de um gesto escondido.
-            GestureDetector(
-              key: ValueKey('projeto-menu-${project.id}'),
-              behavior: HitTestBehavior.opaque,
-              onTap: onMenu,
-              child: SizedBox(
-                width: 44,
-                height: 44,
-                child: Icon(
-                  CupertinoIcons.ellipsis,
-                  size: 18,
-                  color: AppColors.muted,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 }
 
 /// O dialogo de renomear: dono do proprio controlador de texto, para
@@ -987,6 +869,352 @@ class _DialogoDeNomeState extends State<_DialogoDeNome> {
 }
 
 /// Cartao de modelo pronto: um quadro renderizado do proprio motion.
+/// O CABECALHO: a marca em titulo grande, a saudacao com o apelido e dois
+/// botoes redondos (abrir template, perfil). Sem degradê no texto — ele
+/// cortava o "A" do nome e deixava o titulo apagado.
+class _Cabecalho extends ConsumerWidget {
+  const _Cabecalho({required this.onTemplate});
+
+  final VoidCallback onTemplate;
+
+  static String _saudacao() {
+    final hora = DateTime.now().hour;
+    if (hora >= 5 && hora < 12) return 'Bom dia';
+    if (hora >= 12 && hora < 18) return 'Boa tarde';
+    return 'Boa noite';
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final conta = ref.watch(contaDaComunidadeProvider);
+    final apelido = conta?.apelido;
+    final saudacao = translate(context, _saudacao());
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 14, 12, 12),
+      child: Row(
+        children: [
+          const AureaLogo(size: 38),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Aurea',
+                  style: TextStyle(
+                    fontSize: 30,
+                    height: 1.05,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.8,
+                    color: AppColors.onDark,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                // O apelido e da pessoa: nunca passa pelo dicionario.
+                Text(
+                  apelido == null ? saudacao : '$saudacao, $apelido',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 13.5, color: AppColors.muted),
+                ),
+              ],
+            ),
+          ),
+          _BotaoRedondo(
+            icon: CupertinoIcons.doc_on_doc,
+            tooltip: translate(context, 'Abrir template'),
+            onTap: onTemplate,
+          ),
+          const SizedBox(width: 6),
+          GestureDetector(
+            key: const ValueKey('inicio-perfil'),
+            behavior: HitTestBehavior.opaque,
+            onTap: () => ref.read(homeTabProvider.notifier).state = 3,
+            child: SizedBox(
+              width: 44,
+              height: 44,
+              child: Center(
+                child: conta?.avatar != null && File(conta!.avatar!).existsSync()
+                    ? CircleAvatar(
+                        radius: 17,
+                        backgroundImage: FileImage(File(conta.avatar!)),
+                      )
+                    : CircleAvatar(
+                        radius: 17,
+                        backgroundColor: AppColors.violet,
+                        child: Text(
+                          conta?.inicial ?? '?',
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BotaoRedondo extends StatelessWidget {
+  const _BotaoRedondo({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+    message: tooltip,
+    child: GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: SizedBox(
+        width: 44,
+        height: 44,
+        child: Center(
+          child: Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: AppColors.surfaceHigh,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, size: 17, color: AppColors.onDark),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+class _Atalho extends StatelessWidget {
+  const _Atalho({required this.icon, required this.rotulo, required this.onTap});
+
+  final IconData icon;
+  final String rotulo;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    behavior: HitTestBehavior.opaque,
+    onTap: onTap,
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 56,
+          height: 56,
+          decoration: BoxDecoration(
+            color: AppColors.surfaceHigh,
+            shape: BoxShape.circle,
+          ),
+          child: Icon(icon, size: 23, color: AppColors.lime),
+        ),
+        const SizedBox(height: 7),
+        AppText(
+          rotulo,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: AppColors.onDark,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _TituloSecao extends StatelessWidget {
+  const _TituloSecao(this.titulo, {this.detalhe});
+
+  final String titulo;
+  final String? detalhe;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(20, 28, 20, 12),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Expanded(
+          child: AppText(
+            titulo,
+            style: TextStyle(
+              fontSize: 21,
+              fontWeight: FontWeight.w700,
+              letterSpacing: -0.4,
+              color: AppColors.onDark,
+            ),
+          ),
+        ),
+        if (detalhe != null)
+          Text(
+            detalhe!,
+            style: TextStyle(fontSize: 13, color: AppColors.muted),
+          ),
+      ],
+    ),
+  );
+}
+
+class _SemProjetos extends StatelessWidget {
+  const _SemProjetos();
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
+    child: Row(
+      children: [
+        Icon(CupertinoIcons.film, size: 22, color: AppColors.muted),
+        const SizedBox(width: 12),
+        Expanded(
+          child: AppText(
+            'Seus projetos aparecem aqui, com a miniatura do que voce fez.',
+            style: TextStyle(color: AppColors.muted, fontSize: 13.5),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+/// UM PROJETO NA GRADE: a miniatura de verdade (ou a moldura do formato,
+/// antes da primeira), o nome como foi digitado e o menu que se ve.
+class _CartaoProjeto extends StatelessWidget {
+  const _CartaoProjeto({
+    super.key,
+    required this.project,
+    required this.thumb,
+    required this.revision,
+    required this.onOpen,
+    required this.onMenu,
+  });
+
+  final VideoProject project;
+  final File? thumb;
+  final int revision;
+  final VoidCallback onOpen;
+  final VoidCallback onMenu;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = thumb;
+    final ratio = project.aspectRatio <= 0 ? 16 / 9 : project.aspectRatio;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onOpen,
+      onLongPress: onMenu,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(14),
+              child: t == null
+                  ? DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [AppColors.surfaceHigh, AppColors.surface],
+                        ),
+                      ),
+                      child: Center(
+                        // A moldura do formato do projeto (9:16, 16:9, 1:1).
+                        child: FractionallySizedBox(
+                          heightFactor: ratio >= 1 ? null : 0.62,
+                          widthFactor: ratio >= 1 ? 0.52 : null,
+                          child: AspectRatio(
+                            aspectRatio: ratio,
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: AppColors.background.withValues(alpha: .55),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Icon(
+                                CupertinoIcons.film,
+                                size: 18,
+                                color: AppColors.muted,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    )
+                  : Image.file(
+                      t,
+                      key: ValueKey('${project.id}-$revision'),
+                      fit: BoxFit.cover,
+                      width: double.infinity,
+                      height: double.infinity,
+                      gaplessPlayback: true,
+                    ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      project.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: -0.1,
+                        color: AppColors.onDark,
+                      ),
+                    ),
+                    const SizedBox(height: 1),
+                    AppText(
+                      fichaDoProjeto(project),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 11, color: AppColors.muted),
+                    ),
+                  ],
+                ),
+              ),
+              // O MENU TEM 40 PX de alvo: e por onde se apaga, duplica e
+              // renomeia — nada disso pode depender de um gesto escondido.
+              GestureDetector(
+                key: ValueKey('projeto-menu-${project.id}'),
+                behavior: HitTestBehavior.opaque,
+                onTap: onMenu,
+                child: SizedBox(
+                  width: 40,
+                  height: 40,
+                  child: Icon(
+                    CupertinoIcons.ellipsis,
+                    size: 18,
+                    color: AppColors.muted,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// UM MODELO: o quadro renderizado grande, com o nome por cima.
 class _CartaoModelo extends StatelessWidget {
   const _CartaoModelo({
     required this.imagem,
@@ -1002,41 +1230,45 @@ class _CartaoModelo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: SizedBox(
-        width: 156,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(14),
-              child: SizedBox(
-                width: 156,
-                height: 118,
-                child: Image.asset(imagem, fit: BoxFit.cover),
+    return Padding(
+      padding: const EdgeInsets.only(right: 12),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: SizedBox(
+          width: 232,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: SizedBox(
+                  width: 232,
+                  height: 146,
+                  child: Image.asset(imagem, fit: BoxFit.cover),
+                ),
               ),
-            ),
-            const SizedBox(height: 8),
-            AppText(titulo,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                letterSpacing: -0.1,
-                color: AppColors.onDark,
+              const SizedBox(height: 8),
+              AppText(
+                titulo,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: -0.1,
+                  color: AppColors.onDark,
+                ),
               ),
-            ),
-            const SizedBox(height: 2),
-            AppText(
-              detalhe,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 11.5, color: AppColors.muted),
-            ),
-          ],
+              const SizedBox(height: 2),
+              AppText(
+                detalhe,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 11.5, color: AppColors.muted),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1062,14 +1294,15 @@ class _Linha extends StatelessWidget {
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+        padding: const EdgeInsets.fromLTRB(20, 13, 20, 13),
         child: Row(
           children: [
-            Icon(icon, size: 18, color: AppColors.lime),
-            const SizedBox(width: 12),
+            Icon(icon, size: 19, color: AppColors.lime),
+            const SizedBox(width: 14),
             Expanded(
-              child: AppText(texto,
-                style: TextStyle(fontSize: 14, color: AppColors.onDark),
+              child: AppText(
+                texto,
+                style: TextStyle(fontSize: 14.5, color: AppColors.onDark),
               ),
             ),
             Icon(
@@ -1084,145 +1317,64 @@ class _Linha extends StatelessWidget {
   }
 }
 
-/// Atalho moderno do dock criativo da Home com ícone, título e subtítulo.
-class _AtalhoModerno extends StatelessWidget {
-  const _AtalhoModerno({
+/// Linha maior, com o icone num circulo e duas linhas de texto.
+class _LinhaGrande extends StatelessWidget {
+  const _LinhaGrande({
     required this.icon,
-    required this.rotulo,
-    required this.subrotulo,
+    required this.titulo,
+    required this.subtitulo,
     required this.onTap,
   });
 
   final IconData icon;
-  final String rotulo;
-  final String subrotulo;
+  final String titulo;
+  final String subtitulo;
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.hairline, width: 1),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 20, color: AppColors.lime),
-            const SizedBox(height: 5),
-            AppText(
-              rotulo,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
-                color: AppColors.onDark,
-              ),
+  Widget build(BuildContext context) => GestureDetector(
+    key: const ValueKey('inicio-comunidade'),
+    behavior: HitTestBehavior.opaque,
+    onTap: onTap,
+    child: Padding(
+      padding: const EdgeInsets.fromLTRB(20, 2, 20, 2),
+      child: Row(
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: AppColors.lime.withValues(alpha: .14),
+              shape: BoxShape.circle,
             ),
-            AppText(
-              subrotulo,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 10, color: AppColors.muted),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Destaque interativo da Comunidade na Home que conecta direto ao mural.
-class _SpotlightComunidade extends ConsumerWidget {
-  const _SpotlightComunidade({required this.onExplorar});
-
-  final VoidCallback onExplorar;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [AppColors.surface, AppColors.surfaceHigh],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
+            child: Icon(icon, size: 22, color: AppColors.lime),
           ),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: AppColors.lime.withValues(alpha: 0.25),
-            width: 1,
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                AppText(
+                  titulo,
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.onDark,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                AppText(
+                  subtitulo,
+                  style: TextStyle(fontSize: 12.5, color: AppColors.muted),
+                ),
+              ],
+            ),
           ),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: AppColors.lime.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(
-                CupertinoIcons.person_2_fill,
-                color: AppColors.lime,
-                size: 22,
-              ),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  AppText('Mural da Comunidade',
-                    style: TextStyle(
-                      fontSize: 14.5,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.onDark,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  AppText('Explore projetos reais, templates e criações no Cloudflare.',
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      color: AppColors.muted,
-                      height: 1.3,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            FilledButton(
-              style: FilledButton.styleFrom(
-                backgroundColor: AppColors.lime,
-                foregroundColor: Colors.black,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                visualDensity: VisualDensity.compact,
-                textStyle: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              onPressed: onExplorar,
-              child: const AppText('Ver feed'),
-            ),
-          ],
-        ),
+          Icon(CupertinoIcons.chevron_right, size: 15, color: AppColors.muted),
+        ],
       ),
-    );
-  }
+    ),
+  );
 }
 
 /// Confirma e apaga TODOS os projetos e miniaturas.

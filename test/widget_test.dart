@@ -25,7 +25,7 @@ void main() {
     expect(find.text('Aurea'), findsOneWidget);
     expect(find.text('Novo projeto'), findsOneWidget);
     expect(find.text('Ajustes'), findsOneWidget);
-    expect(find.text('Usuario'), findsOneWidget);
+    expect(find.text('Perfil'), findsOneWidget);
     expect(find.text('Sobre'), findsOneWidget);
   });
 }

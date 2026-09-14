@@ -331,9 +331,37 @@ class _CommunityTabState extends ConsumerState<CommunityTab> {
     return conta != null && post.autorId != null && post.autorId == conta.id;
   }
 
+  /// Autor que a fila de cima esta filtrando (id do servidor, ou o apelido
+  /// quando o post nao tem id). Nulo = todo mundo.
+  String? _filtroAutor;
+
+  static String _chaveDoAutor(PostDaComunidade p) => p.autorId ?? p.autor;
+
+  Future<void> _abrirConta() async {
+    await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => const _FolhaDaConta(),
+    );
+    if (mounted) setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
     final conta = ref.watch(contaDaComunidadeProvider);
+    // A FILA DE CRIADORES (como os stories): quem postou, uma vez cada,
+    // na ordem do feed. Tocar filtra o feed por aquela pessoa.
+    final autores = <String, PostDaComunidade>{};
+    for (final p in _posts) {
+      if (p.meu) continue;
+      autores.putIfAbsent(_chaveDoAutor(p), () => p);
+    }
+    final filtro = _filtroAutor;
+    final visiveis = filtro == null
+        ? _posts
+        : _posts.where((p) => _chaveDoAutor(p) == filtro).toList();
+
     return SafeArea(
       bottom: false,
       child: RefreshIndicator(
@@ -341,60 +369,120 @@ class _CommunityTabState extends ConsumerState<CommunityTab> {
         color: AppColors.lime,
         backgroundColor: AppColors.surface,
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 120),
+          padding: const EdgeInsets.fromLTRB(0, 6, 0, 120),
           physics: const AlwaysScrollableScrollPhysics(),
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: AppText(
-                    'Comunidade',
-                    style: Theme.of(context).textTheme.headlineLarge,
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 12, 4),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: AppText(
+                      'Comunidade',
+                      style: TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.7,
+                        color: AppColors.onDark,
+                      ),
+                    ),
                   ),
+                  _BotaoRedondoDaComunidade(
+                    chave: 'comunidade-publicar',
+                    icone: CupertinoIcons.plus_app,
+                    dica: translate(context, 'Publicar'),
+                    onTap: _compor,
+                  ),
+                  GestureDetector(
+                    key: const ValueKey('comunidade-conta'),
+                    behavior: HitTestBehavior.opaque,
+                    onTap: _abrirConta,
+                    child: SizedBox(
+                      width: 44,
+                      height: 44,
+                      child: Center(
+                        child: _Avatar(
+                          nome: conta?.apelido ?? '?',
+                          arquivo: conta?.avatar,
+                          raio: 16,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            SizedBox(
+              height: 102,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                children: [
+                  _Criador(
+                    nome: conta == null ? 'Criar conta' : 'Seu post',
+                    avatarNome: conta?.apelido ?? '?',
+                    arquivo: conta?.avatar,
+                    mais: true,
+                    onTap: conta == null ? _abrirConta : _compor,
+                  ),
+                  for (final e in autores.entries)
+                    _Criador(
+                      chave: 'criador-${e.key}',
+                      nome: e.value.autor,
+                      avatarNome: e.value.autor,
+                      selecionado: filtro == e.key,
+                      onTap: () => setState(
+                        () => _filtroAutor = filtro == e.key ? null : e.key,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            if (filtro != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 8, 4),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '${translate(context, 'Posts de')} ${autores[filtro]?.autor ?? ''}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 13, color: AppColors.muted),
+                      ),
+                    ),
+                    TextButton(
+                      key: const ValueKey('comunidade-ver-todos'),
+                      onPressed: () => setState(() => _filtroAutor = null),
+                      child: const AppText('Ver todos'),
+                    ),
+                  ],
                 ),
-                _BotaoPublicar(onTap: _compor),
-              ],
-            ),
-            const SizedBox(height: 6),
-            AppText('O mural do beta: mostre o que você fez e veja o que os '
-              'outros estão fazendo.',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            const SizedBox(height: 14),
-            _LinhaDaConta(
-              conta: conta,
-              onTocar: () async {
-                await showModalBottomSheet<bool>(
-                  context: context,
-                  isScrollControlled: true,
-                  backgroundColor: Colors.transparent,
-                  builder: (_) => const _FolhaDaConta(),
-                );
-                if (mounted) setState(() {});
-              },
-            ),
-            const SizedBox(height: 14),
-
+              ),
+            Container(height: 0.5, color: AppColors.hairline),
+            const SizedBox(height: 10),
             if (_s.ultimoErro != null) ...[
-              _Aviso(
-                icone: CupertinoIcons.wifi_slash,
-                texto:
-                    '${_s.ultimoErro} O que já tinha sido lido continua aqui.',
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: _Aviso(
+                  icone: CupertinoIcons.wifi_slash,
+                  texto:
+                      '${_s.ultimoErro} O que já tinha sido lido continua aqui.',
+                ),
               ),
               const SizedBox(height: 14),
             ],
-
             if (_carregando && _posts.isEmpty)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 40),
                 child: Center(child: CupertinoActivityIndicator()),
               )
-            else if (_posts.isEmpty)
+            else if (visiveis.isEmpty)
               const _Vazio()
             else
-              for (final p in _posts)
+              for (final p in visiveis)
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 14),
+                  padding: const EdgeInsets.only(bottom: 22),
                   child: _Cartao(
                     post: p,
                     onEnviar: p.estado == EstadoDoPost.rascunho
@@ -422,62 +510,138 @@ class _CommunityTabState extends ConsumerState<CommunityTab> {
   }
 }
 
-/// A LINHA DA CONTA, no alto: quem voce e neste mural.
-class _LinhaDaConta extends StatelessWidget {
-  const _LinhaDaConta({required this.conta, required this.onTocar});
+/// Um botao redondo da barra de cima (publicar).
+class _BotaoRedondoDaComunidade extends StatelessWidget {
+  const _BotaoRedondoDaComunidade({
+    required this.chave,
+    required this.icone,
+    required this.dica,
+    required this.onTap,
+  });
 
-  final ContaDaComunidade? conta;
-  final VoidCallback onTocar;
+  final String chave;
+  final IconData icone;
+  final String dica;
+  final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) {
-    final c = conta;
-    return GestureDetector(
-      key: const ValueKey('comunidade-conta'),
+  Widget build(BuildContext context) => Tooltip(
+    message: dica,
+    child: GestureDetector(
+      key: ValueKey(chave),
       behavior: HitTestBehavior.opaque,
-      onTap: onTocar,
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Row(
-          children: [
-            _Avatar(nome: c?.apelido ?? '?', arquivo: c?.avatar, raio: 18),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  AppText(
-                    c?.apelido ?? 'Criar minha conta',
-                    style: TextStyle(
-                      fontSize: 14.5,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.onDark,
+      onTap: onTap,
+      child: SizedBox(
+        width: 44,
+        height: 44,
+        child: Icon(icone, size: 25, color: AppColors.onDark),
+      ),
+    ),
+  );
+}
+
+/// Uma bolinha da fila de criadores, com o anel colorido.
+class _Criador extends StatelessWidget {
+  const _Criador({
+    this.chave,
+    required this.nome,
+    required this.avatarNome,
+    this.arquivo,
+    this.mais = false,
+    this.selecionado = false,
+    required this.onTap,
+  });
+
+  final String? chave;
+  final String nome;
+  final String avatarNome;
+  final String? arquivo;
+  final bool mais;
+  final bool selecionado;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    key: chave == null ? null : ValueKey<String>(chave!),
+    behavior: HitTestBehavior.opaque,
+    onTap: onTap,
+    child: SizedBox(
+      width: 76,
+      child: Column(
+        children: [
+          const SizedBox(height: 6),
+          Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Container(
+                width: 64,
+                height: 64,
+                padding: const EdgeInsets.all(2.5),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: mais
+                      ? null
+                      : LinearGradient(
+                          begin: Alignment.bottomLeft,
+                          end: Alignment.topRight,
+                          colors: selecionado
+                              ? [AppColors.lime, AppColors.lime]
+                              : [AppColors.lime, AppColors.violet],
+                        ),
+                  color: mais ? AppColors.surfaceHigh : null,
+                ),
+                child: Container(
+                  padding: const EdgeInsets.all(2.5),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: AppColors.background,
+                  ),
+                  child: _Avatar(nome: avatarNome, arquivo: arquivo, raio: 26),
+                ),
+              ),
+              if (mais)
+                Positioned(
+                  right: -1,
+                  bottom: -1,
+                  child: Container(
+                    width: 22,
+                    height: 22,
+                    decoration: BoxDecoration(
+                      color: AppColors.lime,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: AppColors.background, width: 2),
+                    ),
+                    child: const Icon(
+                      CupertinoIcons.plus,
+                      size: 12,
+                      color: Color(0xFF0B0E12),
                     ),
                   ),
-                  const SizedBox(height: 2),
-                  AppText(
-                    c == null
-                        ? 'Um apelido e uma foto. É com isso que você assina.'
-                        : 'É assim que você assina no mural.',
-                    style: TextStyle(fontSize: 11.5, color: AppColors.muted),
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          // Apelido e da pessoa: Text. "Seu post"/"Criar conta" traduzem.
+          mais
+              ? AppText(
+                  nome,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 11.5, color: AppColors.muted),
+                )
+              : Text(
+                  nome,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: selecionado ? AppColors.lime : AppColors.onDark,
                   ),
-                ],
-              ),
-            ),
-            Icon(
-              c == null ? CupertinoIcons.plus_circle : CupertinoIcons.pencil,
-              size: 18,
-              color: AppColors.lime,
-            ),
-          ],
-        ),
+                ),
+        ],
       ),
-    );
-  }
+    ),
+  );
 }
 
 class _Avatar extends StatelessWidget {
@@ -508,40 +672,6 @@ class _Avatar extends StatelessWidget {
   }
 }
 
-class _BotaoPublicar extends StatelessWidget {
-  const _BotaoPublicar({required this.onTap});
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) => GestureDetector(
-    key: const ValueKey('comunidade-publicar'),
-    behavior: HitTestBehavior.opaque,
-    onTap: onTap,
-    child: Container(
-      height: 44,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      decoration: BoxDecoration(
-        color: AppColors.lime,
-        borderRadius: BorderRadius.circular(22),
-      ),
-      child: const Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(CupertinoIcons.plus, size: 17, color: Color(0xFF0B0E12)),
-          SizedBox(width: 6),
-          AppText('Publicar',
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w700,
-              color: Color(0xFF0B0E12),
-            ),
-          ),
-        ],
-      ),
-    ),
-  );
-}
-
 class _Cartao extends StatelessWidget {
   const _Cartao({
     required this.post,
@@ -566,203 +696,224 @@ class _Cartao extends StatelessWidget {
   /// mesma tela de novo, empilhada.
   final bool dentroDaConversa;
 
+  Future<void> _menu(BuildContext context) async {
+    final apagar = await showCupertinoModalPopup<bool>(
+      context: context,
+      builder: (c) => CupertinoActionSheet(
+        actions: [
+          CupertinoActionSheetAction(
+            key: ValueKey('post-apagar-confirma-${post.id}'),
+            isDestructiveAction: true,
+            onPressed: () => Navigator.of(c).pop(true),
+            child: const AppText('Apagar'),
+          ),
+        ],
+        cancelButton: CupertinoActionSheetAction(
+          onPressed: () => Navigator.of(c).pop(false),
+          child: const AppText('Cancelar'),
+        ),
+      ),
+    );
+    if (apagar == true) onApagar?.call();
+  }
+
   @override
   Widget build(BuildContext context) {
-    final corpo = _corpo(context);
-    // O CARTAO INTEIRO ABRE A CONVERSA, e nao so um botao pequeno. Num
-    // mural, tocar no post e o gesto que todo mundo ja faz.
+    // O POST INTEIRO ABRE A CONVERSA, e nao so um botao pequeno.
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onAbrir,
-      child: corpo,
+      child: _corpo(context),
     );
   }
 
   Widget _corpo(BuildContext context) {
-    return Container(
+    final temTexto = post.texto.trim().isNotEmpty;
+    return Column(
       key: ValueKey('post-${post.id}'),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (post.ehRepost)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
-              child: Row(
-                children: [
-                  Icon(
-                    CupertinoIcons.arrow_2_squarepath,
-                    size: 13,
-                    color: AppColors.muted,
-                  ),
-                  const SizedBox(width: 6),
-                  AppText('Repostou',
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.muted,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (post.ehRepost)
           Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
             child: Row(
               children: [
-                _Avatar(nome: post.autor),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        post.autor,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.onDark,
-                        ),
-                      ),
-                      AppText(
-                        post.quandoEmPalavras(),
-                        style: TextStyle(
-                          fontSize: 11.5,
-                          color: AppColors.muted,
-                        ),
-                      ),
-                    ],
+                Icon(
+                  CupertinoIcons.arrow_2_squarepath,
+                  size: 13,
+                  color: AppColors.muted,
+                ),
+                const SizedBox(width: 6),
+                AppText(
+                  'Repostou',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.muted,
                   ),
                 ),
-                if (post.meu) _Selo(estado: post.estado),
               ],
             ),
           ),
-          // No repost sem comentario nao ha texto: um espaco vazio de
-          // doze pixels entre o nome e a citacao so faria o cartao
-          // parecer quebrado.
-          if (post.texto.trim().isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
-              child: Text(post.texto,
-                style: TextStyle(
-                  fontSize: 14,
-                  height: 1.4,
-                  color: AppColors.onDark,
-                ),
-              ),
-            )
-          else
-            const SizedBox(height: 10),
-          if (post.original != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
-              child: _Citacao(original: post.original!),
-            ),
-          if (post.temProjeto)
-            _CartaoDeProjeto(post: post, onAbrir: onProjeto)
-          else if (post.imagem != null)
-            _Midia(post: post),
-          if (post.etiquetas.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
-              child: Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  for (final e in post.etiquetas)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 3,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppColors.accentDim,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: AppText(
-                        '#$e',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.lime,
-                        ),
+        // CABECALHO: foto, nome, quando, e o menu.
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 4, 8),
+          child: Row(
+            children: [
+              _Avatar(nome: post.autor, raio: 17),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      post.autor,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.onDark,
                       ),
                     ),
-                ],
-              ),
-            ),
-          if (post.link != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
-              child: GestureDetector(
-                onTap: () => launchUrl(
-                  Uri.parse(post.link!),
-                  mode: LaunchMode.externalApplication,
-                ),
-                child: Row(
-                  children: [
-                    Icon(CupertinoIcons.link, size: 14, color: AppColors.lime),
-                    const SizedBox(width: 5),
-                    Expanded(
-                      child: Text(
-                        post.link!,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 12, color: AppColors.lime),
-                      ),
+                    Text(
+                      post.quandoEmPalavras(),
+                      style: TextStyle(fontSize: 11.5, color: AppColors.muted),
                     ),
                   ],
                 ),
               ),
+              if (post.meu) _Selo(estado: post.estado),
+              if (onApagar != null)
+                GestureDetector(
+                  key: ValueKey('post-apagar-${post.id}'),
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => _menu(context),
+                  child: SizedBox(
+                    width: 44,
+                    height: 44,
+                    child: Icon(
+                      CupertinoIcons.ellipsis,
+                      size: 18,
+                      color: AppColors.onDark,
+                    ),
+                  ),
+                )
+              else
+                const SizedBox(width: 12),
+            ],
+          ),
+        ),
+        // A MIDIA NA LARGURA INTEIRA, como num feed de fotos.
+        if (post.temProjeto)
+          _CartaoDeProjeto(post: post, onAbrir: onProjeto)
+        else if (post.imagem != null)
+          _Midia(post: post),
+        if (post.original != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+            child: _Citacao(original: post.original!),
+          ),
+        // A BARRA DE ACOES: so icones, alvos de 44 px.
+        if (onResponder != null || onRepostar != null)
+          _BarraDoCartao(
+            post: post,
+            onResponder: onResponder,
+            onRepostar: onRepostar,
+            onAbrir: dentroDaConversa ? null : onAbrir,
+          )
+        else
+          const SizedBox(height: 8),
+        if (onEnviar != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: _AcaoDoCartao(
+              chave: 'post-enviar-${post.id}',
+              icone: CupertinoIcons.paperplane,
+              rotulo: 'Tentar publicar de novo',
+              destaque: true,
+              onTap: onEnviar!,
             ),
-          if (onEnviar != null || onApagar != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+          ),
+        // LEGENDA: o nome em negrito e o texto na mesma linha.
+        if (temTexto)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+            child: Text.rich(
+              TextSpan(
+                children: [
+                  TextSpan(
+                    text: post.autor,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const TextSpan(text: '  '),
+                  TextSpan(text: post.texto),
+                ],
+              ),
+              style: TextStyle(
+                fontSize: 14,
+                height: 1.4,
+                color: AppColors.onDark,
+              ),
+            ),
+          ),
+        if (post.etiquetas.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+            child: Wrap(
+              spacing: 8,
+              children: [
+                for (final e in post.etiquetas)
+                  Text(
+                    '#$e',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.lime,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        if (post.link != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+            child: GestureDetector(
+              onTap: () => launchUrl(
+                Uri.parse(post.link!),
+                mode: LaunchMode.externalApplication,
+              ),
               child: Row(
                 children: [
-                  if (onEnviar != null)
-                    Expanded(
-                      child: _AcaoDoCartao(
-                        chave: 'post-enviar-${post.id}',
-                        icone: CupertinoIcons.paperplane,
-                        rotulo: 'Tentar publicar de novo',
-                        destaque: true,
-                        onTap: onEnviar!,
-                      ),
+                  Icon(CupertinoIcons.link, size: 14, color: AppColors.lime),
+                  const SizedBox(width: 5),
+                  Expanded(
+                    child: Text(
+                      post.link!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12.5, color: AppColors.lime),
                     ),
-                  if (onEnviar != null && onApagar != null)
-                    const SizedBox(width: 8),
-                  if (onApagar != null)
-                    _AcaoDoCartao(
-                      chave: 'post-apagar-${post.id}',
-                      icone: CupertinoIcons.trash,
-                      rotulo: 'Apagar',
-                      onTap: onApagar!,
-                    ),
+                  ),
                 ],
               ),
             ),
-          if (onResponder != null || onRepostar != null)
-            _BarraDoCartao(
-              post: post,
-              onResponder: onResponder,
-              onRepostar: onRepostar,
-              onAbrir: dentroDaConversa ? null : onAbrir,
+          ),
+        if (onAbrir != null && !dentroDaConversa)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+            child: AppText(
+              'Ver respostas',
+              style: TextStyle(fontSize: 13, color: AppColors.muted),
             ),
-        ],
-      ),
+          ),
+      ],
     );
   }
 }
 
-/// A BARRA DE BAIXO: responder, repostar, e quantas respostas ha.
+/// A BARRA DE ACOES: responder e repostar, so icones (como num feed de
+/// fotos), com alvo de 44 px.
 class _BarraDoCartao extends StatelessWidget {
   const _BarraDoCartao({
     required this.post,
@@ -778,30 +929,23 @@ class _BarraDoCartao extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(6, 4, 6, 6),
+    padding: const EdgeInsets.fromLTRB(6, 2, 6, 0),
     child: Row(
       children: [
         if (onResponder != null)
-          Expanded(
-            child: _BotaoDaBarra(
-              chave: 'post-responder-${post.id}',
-              icone: CupertinoIcons.bubble_left,
-              rotulo: 'Responder',
-              onTap: onResponder!,
-            ),
+          _BotaoDaBarra(
+            chave: 'post-responder-${post.id}',
+            icone: CupertinoIcons.chat_bubble,
+            rotulo: 'Responder',
+            onTap: onResponder!,
           ),
         if (onRepostar != null)
-          Expanded(
-            child: _BotaoDaBarra(
-              chave: 'post-repostar-${post.id}',
-              icone: CupertinoIcons.arrow_2_squarepath,
-              rotulo: 'Repostar',
-              onTap: onRepostar!,
-            ),
+          _BotaoDaBarra(
+            chave: 'post-repostar-${post.id}',
+            icone: CupertinoIcons.arrow_2_squarepath,
+            rotulo: 'Repostar',
+            onTap: onRepostar!,
           ),
-        // NAO HA BOTAO DE ABRIR. O cartao inteiro ja abre a conversa, e
-        // uma seta ao lado de "Responder" so ensinaria a tocar no lugar
-        // menor para fazer o que o toque grande ja faz.
       ],
     ),
   );
@@ -821,37 +965,17 @@ class _BotaoDaBarra extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
-    key: ValueKey(chave),
-    behavior: HitTestBehavior.opaque,
-    onTap: onTap,
-    child: Padding(
-      // ALVO DE 44 px de altura, mesmo com o icone pequeno. Um botao de
-      // barra com a altura do texto so acerta quem tem dedo fino.
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icone, size: 16, color: AppColors.muted),
-          const SizedBox(width: 5),
-          // O ROTULO ENCOLHE ANTES DE ESTOURAR. Numa tela estreita, ou
-          // com a fonte do sistema aumentada, "Responder" e "Repostar"
-          // lado a lado nao cabem — e um cartao com a faixa amarela de
-          // overflow e pior do que um rotulo cortado.
-          Flexible(
-            child: AppText(
-              rotulo,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
-                color: AppColors.muted,
-              ),
-            ),
-          ),
-        ],
+  Widget build(BuildContext context) => Semantics(
+    button: true,
+    label: translate(context, rotulo),
+    child: GestureDetector(
+      key: ValueKey(chave),
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: SizedBox(
+        width: 44,
+        height: 44,
+        child: Icon(icone, size: 23, color: AppColors.onDark),
       ),
     ),
   );
@@ -1151,7 +1275,7 @@ class _MidiaState extends State<_Midia> {
 
     if (!post.temVideo) {
       return ConstrainedBox(
-        constraints: const BoxConstraints(maxHeight: 320),
+        constraints: const BoxConstraints(maxHeight: 540),
         child: SizedBox(
           width: double.infinity,
           child: post.imagemLocal

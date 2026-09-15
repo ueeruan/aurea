@@ -18,9 +18,10 @@ import 'package:flutter_test/flutter_test.dart';
 /// enquadramento certinho — o defeito classico de camera rastreada, e o
 /// mais dificil de perceber olhando so os numeros.
 ///
-/// Entao o teste fecha o circulo: monta uma cena conhecida, resolve,
-/// converte para a camera do app, e projeta a nuvem de volta USANDO A
-/// PROJECAO DO MOTOR. Os pontos tem de cair onde estavam no video. Se
+/// Entao o teste fecha o circulo: monta uma cena com a camera CONHECIDA
+/// (a solucao E a verdade), converte para a camera do app, e projeta a
+/// nuvem de volta USANDO A
+/// PROJECAO DO APP. Os pontos tem de cair onde estavam no video. Se
 /// caem, gruda.
 void main() {
   const largura = 240, altura = 135, quadros = 16;
@@ -29,7 +30,8 @@ void main() {
   /// A mesma cena dos testes do solver: pontos num volume e uma camera
   /// que anda de lado com leve arco e uma INCLINACAO de verdade — sem
   /// inclinacao o erro de giro passaria despercebido.
-  ({List<PontoSeguido> pontos, Map<int, Map<int, Offset>> obs}) cena() {
+  ({List<PontoSeguido> pontos, Map<int, Map<int, Offset>> obs,
+  SolucaoCamera3D solucao}) cena() {
     final rng = math.Random(11);
     final mundo = [
       for (var i = 0; i < 90; i++)
@@ -40,6 +42,7 @@ void main() {
         ],
     ];
     final obs = <int, Map<int, Offset>>{};
+    final poses = <PoseCamera>[];
     for (var q = 0; q < quadros; q++) {
       final u = q / (quadros - 1);
       final pos = [-420 + 840 * u, 40 * math.sin(u * math.pi), -60 * u];
@@ -52,6 +55,7 @@ void main() {
       ]);
       final rt = r.aplicar(pos);
       final t = [-rt[0], -rt[1], -rt[2]];
+      poses.add(PoseCamera(q, r, t));
       for (var i = 0; i < mundo.length; i++) {
         final p = projetar(r, t, mundo[i]);
         if (p == null) continue;
@@ -61,14 +65,28 @@ void main() {
         (obs[i] ??= {})[q] = Offset(px, py);
       }
     }
-    return (
-      pontos: [
-        for (final e in obs.entries)
-          if (e.value.length >= 6)
-            PontoSeguido(e.key, e.value.keys.reduce(math.min), e.value),
-      ],
-      obs: obs,
+    final pontos = [
+      for (final e in obs.entries)
+        if (e.value.length >= 6)
+          PontoSeguido(e.key, e.value.keys.reduce(math.min), e.value),
+    ];
+    // A solucao vem da VERDADE, nao de um solver: o que se prova aqui
+    // e a traducao para a camera do app, que tem de ser exata para
+    // qualquer solucao consistente — inclusive a do motor nativo.
+    final solucao = SolucaoCamera3D(
+      largura: largura,
+      altura: altura,
+      focalPx: focal,
+      poses: poses,
+      nuvem: {for (final p in pontos) p.id: mundo[p.id]},
+      erroPixels: 0.1,
+      quadros: quadros,
+      fps: 8,
+      errosPorPonto: {for (final p in pontos) p.id: 0.1},
+      vistasPorPonto: {for (final p in pontos) p.id: p.duracao},
+      pontosSeguidos: pontos.length,
     );
+    return (pontos: pontos, obs: obs, solucao: solucao);
   }
 
   /// A projecao do motor: mesma base, mesma escala, mesmo Y invertido
@@ -87,14 +105,7 @@ void main() {
 
   test('a camera montada reprojeta a nuvem em cima do video', () {
     final c = cena();
-    final s = resolverCamera3D(
-      c.pontos,
-      largura: largura,
-      altura: altura,
-      quadros: quadros,
-      fps: 8,
-      focalPx: focal,
-    );
+    final s = c.solucao;
     expect(s.erroPixels, lessThan(0.3));
 
     final cam = cameraDoRastreio(s);
@@ -131,13 +142,7 @@ void main() {
 
   test('a distancia focal em milimetros bate com a focal em pixels', () {
     final c = cena();
-    final s = resolverCamera3D(
-      c.pontos,
-      largura: largura,
-      altura: altura,
-      quadros: quadros,
-      focalPx: focal,
-    );
+    final s = c.solucao;
     final mm = focalEmMilimetros(s);
     // 36 mm de filme e a convencao do app inteiro.
     expect(mm, closeTo(36 * focal / largura, 1e-9));
@@ -149,14 +154,7 @@ void main() {
 
   test('a camada nasce pronta: camera rastreada e nuvem visivel', () {
     final c = cena();
-    final s = resolverCamera3D(
-      c.pontos,
-      largura: largura,
-      altura: altura,
-      quadros: quadros,
-      fps: 8,
-      focalPx: focal,
-    );
+    final s = c.solucao;
     final camada = camadaDoRastreio(
       s,
       startTime: const Duration(seconds: 1),
@@ -182,13 +180,7 @@ void main() {
 
   test('a solucao sobrevive a ida e volta para o disco', () {
     final c = cena();
-    final s = resolverCamera3D(
-      c.pontos,
-      largura: largura,
-      altura: altura,
-      quadros: quadros,
-      focalPx: focal,
-    );
+    final s = c.solucao;
     final volta = SolucaoCamera3D.decode(jsonEncode(s.toJson()));
     expect(volta, isNotNull);
     expect(volta!.poses.length, s.poses.length);

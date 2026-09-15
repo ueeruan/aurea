@@ -1,4 +1,3 @@
-import 'dart:async' show unawaited;
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui';
@@ -35,7 +34,6 @@ import '../domain/element3d.dart';
 import '../domain/extrude3d.dart';
 import '../domain/glb_import.dart';
 import '../domain/model_asset3d.dart';
-import 'camera_track_service.dart';
 import 'tracking_service.dart';
 import '../domain/tracker2d.dart';
 import '../domain/fx.dart';
@@ -3873,45 +3871,7 @@ class EditorController extends Notifier<VideoProject> {
     return escritos;
   }
 
-  // ------------------------------------------------- rastrear camera 3D
-
-  /// RASTREIA A CAMERA de um clipe e devolve a solucao.
-  ///
-  /// Nao mexe no projeto: quem decide o que fazer com o resultado e a
-  /// pessoa, depois de ver se o rastreio pegou. Um rastreio que ja
-  /// entrasse criando camadas obrigaria a desfazer toda vez que saisse
-  /// ruim — e sai ruim com frequencia, porque depende do plano filmado.
-  Future<SolucaoCamera3D> rastrearCamera3D(
-    String layerId, {
-    ModoDoSolve modo = ModoDoSolve.equilibrado,
-    TipoDeTomada tipoDeTomada = TipoDeTomada.auto,
-    int? fps,
-  }) async {
-    final layer = _layer(layerId);
-    if (layer is! VideoLayer) {
-      throw const RastreioException(
-        FalhaDoRastreio.poucosPontos,
-        'So da para rastrear a camera de um video.',
-      );
-    }
-    // A proporcao exibida decide a altura dos quadros analisados.
-    final proporcao =
-        layer.proporcaoDaFonte ?? (await sondarVideo(layer.sourcePath)).proporcao;
-    // O TRECHO DA FONTE QUE O CLIPE MOSTRA: com velocidade, reverso ou Time
-    // Remap ele nao e [sourceOffset, sourceOffset + duracao]. Varre o tempo
-    // da camada e fica com o menor e o maior instante do arquivo.
-    final (inicio, fim) = trechoDaFonteMostrado(layer);
-    return CameraTrackService.instance.rastrear(
-      layerId: layerId,
-      sourcePath: layer.sourcePath,
-      start: inicio,
-      duration: fim - inicio,
-      modo: modo,
-      tipoDeTomada: tipoDeTomada,
-      fps: fps,
-      proporcao: proporcao,
-    );
-  }
+  // ------------------------------------------------- cena 3D rastreada
 
   /// CRIA A CENA 3D em cima do clipe, com a camera rastreada.
   ///
@@ -4977,10 +4937,6 @@ class EditorController extends Notifier<VideoProject> {
     final layers = [...state.layers]..insert(idx, copy);
     _mutate(state.copyWith(layers: layers));
     ref.read(selectedLayerProvider.notifier).state = copy.id;
-    // O rastreio de camera acompanha a copia (e um ativo do trecho).
-    if (layer is VideoLayer) {
-      unawaited(CameraTrackService.instance.clonar(id, copy.id));
-    }
   }
 
   void reorderLayer(String id, int delta) {
@@ -5325,11 +5281,6 @@ class EditorController extends Notifier<VideoProject> {
     }
     _mutate(state.copyWith(layers: layers));
     ref.read(selectedLayerProvider.notifier).state = second.id;
-    // A segunda metade herda o rastreio de camera: mesma fonte, mesmo
-    // trecho — o mapeamento por instante da fonte escolhe as poses.
-    if (layer is VideoLayer) {
-      unawaited(CameraTrackService.instance.clonar(id, second.id));
-    }
   }
 
   /// DIVIDE a camada em todos os [times] (globais), de uma vez.

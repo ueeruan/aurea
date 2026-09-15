@@ -914,6 +914,7 @@ Map<String, dynamic>? _audioSpec(AudioSpec a) => a.isNeutral
         if (a.normalizeTargetLufs != null) 'lufs': a.normalizeTargetLufs,
         if (!a.processing.isNeutral) 'proc': _processing(a.processing),
         if (!a.preservePitch) 'pitch': false,
+        if (a.volumeAnimado != null) 'vol': _ad(a.volumeAnimado!),
       };
 
 Map<String, dynamic> _processing(AudioProcessing p) => {
@@ -966,6 +967,7 @@ AudioSpec _asAudioSpec(Object? raw) {
     normalizeTargetLufs: (m['lufs'] as num?)?.toDouble(),
     processing: _asProcessing(m['proc']),
     preservePitch: m['pitch'] as bool? ?? true,
+    volumeAnimado: m['vol'] is Map ? _asAd(m['vol']) : null,
   );
 }
 

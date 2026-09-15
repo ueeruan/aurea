@@ -459,7 +459,9 @@ class _ItensDaCamada extends ConsumerWidget {
               chave: 'camada-menu-volume',
               icone: CupertinoIcons.speaker_2,
               rotulo: 'Volume',
-              onTap: () => fecharE(() => showAudioSheet(ctx, ref, layerId)),
+              onTap: () => fecharE(
+                () => showAudioSheet(ctx, ref, layerId, playback: playback),
+              ),
             ),
         ],
         const SecaoDoMenu('Tempo'),

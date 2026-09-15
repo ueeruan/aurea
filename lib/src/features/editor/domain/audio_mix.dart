@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'audio_ops.dart';
+import 'keyframe.dart';
 import 'layer.dart';
 
 /// A MIXAGEM — a unica conta de ganho que o preview e a exportacao tem
@@ -165,6 +166,7 @@ double layerAudioGainAt(
   if (g <= 0) return 0;
 
   final local = timelineTime - layer.startTime;
+  g *= spec.volumeEm(local);
   g *= fadeGainAt(
     local,
     layer.duration,
@@ -173,6 +175,52 @@ double layerAudioGainAt(
   );
   if (spec.duckAgainstId != null) g *= duck.gainAt(timelineTime);
   return g.clamp(0.0, 12.0);
+}
+
+/// O VOLUME COM KEYFRAMES COMO ENVELOPE, para o filtro da exportacao ler
+/// os mesmos numeros que o tocador.
+///
+/// Entre dois keyframes a curva e amostrada (o easing nao e reta); fora
+/// deles, as pontas seguram. Trilha com loop ou expressao e amostrada no
+/// clipe inteiro. [deslocamento] soma a todos os tempos: e onde o zero do
+/// clipe cai na corrente do filtro.
+DuckEnvelope envelopeDoVolume(
+  AnimatedDouble trilha,
+  Duration duracao, {
+  Duration deslocamento = Duration.zero,
+  int amostrasPorTrecho = 10,
+}) {
+  double v(Duration t) => trilha.valueAt(t).clamp(0.0, 4.0).toDouble();
+  final pontos = <({Duration t, double g})>[];
+  void por(Duration t) => pontos.add((t: t + deslocamento, g: v(t)));
+  if (trilha.loop.active || trilha.hasExpression) {
+    final total = duracao.inMicroseconds;
+    final passos = (total / 66667).ceil().clamp(2, 400);
+    for (var i = 0; i <= passos; i++) {
+      por(Duration(microseconds: (total * i / passos).round()));
+    }
+    return DuckEnvelope(pontos);
+  }
+  final ks = trilha.keyframes;
+  if (ks.isEmpty) {
+    por(Duration.zero);
+    por(duracao);
+    return DuckEnvelope(pontos);
+  }
+  for (var i = 0; i < ks.length; i++) {
+    final a = ks[i].time;
+    if (i == ks.length - 1) {
+      por(a);
+      break;
+    }
+    final b = ks[i + 1].time;
+    final span = (b - a).inMicroseconds;
+    for (var j = 0; j < amostrasPorTrecho; j++) {
+      por(a + Duration(microseconds: (span * j / amostrasPorTrecho).round()));
+    }
+  }
+  if (pontos.length == 1) por(ks.first.time + const Duration(milliseconds: 1));
+  return DuckEnvelope(pontos);
 }
 
 /// A ficha de audio da camada, se ela tiver som.

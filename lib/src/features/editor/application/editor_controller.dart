@@ -66,6 +66,7 @@ import '../domain/text_anim.dart';
 import '../domain/text_path.dart';
 import '../domain/text_animator.dart';
 import '../domain/text_presets.dart';
+import '../domain/velocidade.dart';
 import '../domain/video_project.dart';
 
 export '../domain/video_project.dart' show LayerProp, PropertyLink;
@@ -4465,10 +4466,14 @@ class EditorController extends Notifier<VideoProject> {
   ///
   /// Sem mexer na barra, acelerar cortaria o fim do clipe (a fonte
   /// acabaria antes) — e a pessoa veria um pedaco congelado.
-  void setClipSpeed(String id, double speed) {
+  void setClipSpeed(
+    String id,
+    double speed, {
+    CompensacaoDaVelocidade modo = CompensacaoDaVelocidade.estenderFim,
+  }) {
     final layer = _layer(id);
     if (layer == null) return;
-    final v = speed.clamp(0.1, 10.0);
+    final v = speed.clamp(velocidadeMinima, velocidadeMaxima).toDouble();
 
     final atual = switch (layer) {
       VideoLayer l =>
@@ -4477,32 +4482,53 @@ class EditorController extends Notifier<VideoProject> {
       _ => 1.0,
     };
     if (atual <= 0) return;
-    final novaDur = Duration(
-      microseconds: (layer.duration.inMicroseconds * atual / v).round(),
+    final (deslocamento, fonte) = switch (layer) {
+      VideoLayer l => (l.sourceOffset, l.sourceDuration),
+      AudioLayer l => (l.sourceOffset, l.sourceDuration),
+      _ => (Duration.zero, null),
+    };
+    final e = enquadrarVelocidade(
+      inicio: layer.startTime,
+      duracao: layer.duration,
+      deslocamento: deslocamento,
+      fonte: fonte,
+      atual: atual,
+      nova: v,
+      modo: modo,
     );
-    if (novaDur.inMilliseconds < 50) return;
+    if (e == null) return;
 
     final novo = switch (layer) {
       VideoLayer l => l.copyLayer(
         speed: v,
-        duration: novaDur,
+        startTime: e.inicio,
+        duration: e.duracao,
+        sourceOffset: e.deslocamento,
         effects: replaceTimeRemap(l, null),
       ),
-      AudioLayer l => l.copyLayer(speed: v, duration: novaDur),
+      AudioLayer l => l.copyLayer(
+        speed: v,
+        startTime: e.inicio,
+        duration: e.duracao,
+        sourceOffset: e.deslocamento,
+      ),
       _ => null,
     };
     if (novo == null) return;
 
-    // O que vinha depois anda junto: acelerar um clipe no meio nao pode
-    // deixar buraco nem sobreposicao.
-    final delta = novaDur - layer.duration;
+    // O que vinha depois anda junto quando o FIM anda: acelerar um clipe
+    // no meio nao pode deixar buraco nem sobreposicao. Nos outros modos
+    // o fim fica (ou so encurta), e ninguem precisa se mexer.
+    final delta = modo == CompensacaoDaVelocidade.estenderFim
+        ? e.duracao - layer.duration
+        : Duration.zero;
     _mutate(
       state.copyWith(
         layers: [
           for (final l in state.layers)
             if (l.id == id)
               novo
-            else if (l.startTime >= layer.endTime)
+            else if (delta != Duration.zero && l.startTime >= layer.endTime)
               l.copyLayer(startTime: l.startTime + delta)
             else
               l,

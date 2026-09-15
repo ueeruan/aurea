@@ -247,7 +247,12 @@ class LayerToolsDock extends ConsumerWidget {
                         onPressed: () {
                           HapticFeedback.lightImpact();
                           playback.pause();
-                          showAudioSheet(context, ref, layer.id);
+                          showAudioSheet(
+                            context,
+                            ref,
+                            layer.id,
+                            playback: playback,
+                          );
                         },
                         icon: const Icon(
                           CupertinoIcons.speaker_2,
@@ -439,13 +444,17 @@ _Tile? _tileDaSecao(
     AmSecao.volume => (
       icone: CupertinoIcons.speaker_2,
       rotulo: 'Volume',
-      onTap: () => abrirDepois(() => showAudioSheet(context, ref, layer.id)),
+      onTap: () => abrirDepois(
+        () => showAudioSheet(context, ref, layer.id, playback: playback),
+      ),
       badge: null,
     ),
     AmSecao.fade => (
       icone: CupertinoIcons.slider_horizontal_below_rectangle,
       rotulo: 'Fade',
-      onTap: () => abrirDepois(() => showAudioSheet(context, ref, layer.id)),
+      onTap: () => abrirDepois(
+        () => showAudioSheet(context, ref, layer.id, playback: playback),
+      ),
       badge: null,
     ),
     AmSecao.editarForma => (

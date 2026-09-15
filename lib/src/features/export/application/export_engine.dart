@@ -855,7 +855,30 @@ class ExportEngine {
       ]);
 
       final spec = _specOf(l) ?? const AudioSpec();
-      final ganho = (volume * spec.gain).clamp(0.0, 12.0);
+      // O VOLUME COM KEYFRAMES: parado, entra no numero; animado, vira o
+      // mesmo envelope que o tocador le, desenhado pelo filtro.
+      final trilhaDoVolume = spec.volumeAnimado;
+      final volumeAnimado =
+          trilhaDoVolume != null &&
+          (trilhaDoVolume.isAnimated ||
+              trilhaDoVolume.loop.active ||
+              trilhaDoVolume.hasExpression);
+      final ganho =
+          (volume *
+                  spec.gain *
+                  (trilhaDoVolume != null && !volumeAnimado
+                      ? trilhaDoVolume.base.clamp(0.0, 4.0)
+                      : 1.0))
+              .clamp(0.0, 12.0);
+      final exprDoVolume = volumeAnimado
+          ? ffmpegVolumeExpr(
+              envelopeDoVolume(
+                trilhaDoVolume,
+                l.duration,
+                deslocamento: l.startTime - timelineStart,
+              ),
+            )
+          : null;
 
       // FADE de igual potencia: linear soa como buraco no meio, porque
       // o ouvido responde a potencia.
@@ -907,6 +930,7 @@ class ExportEngine {
       final label = 'a$idx';
       final post =
           'volume=${ganho.toStringAsFixed(3)}'
+          "${exprDoVolume == null ? '' : ",volume=volume='$exprDoVolume':eval=frame"}"
           '${fades.isEmpty ? '' : ',${fades.join(',')}'},'
           'adelay=$delayMs|$delayMs,'
           'apad=whole_dur=${_total.toStringAsFixed(3)}';
@@ -1054,6 +1078,11 @@ class ExportEngine {
     for (final l in sources) {
       final spec = _specOf(l);
       if (spec != null && spec.gain > 1.0) return true;
+      final trilha = spec?.volumeAnimado;
+      if (trilha != null &&
+          (trilha.base > 1.0 || trilha.keyframes.any((k) => k.value > 1.0))) {
+        return true;
+      }
       final v = switch (l) {
         AudioLayer a => a.volume,
         VideoLayer v => v.volume,

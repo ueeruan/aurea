@@ -479,7 +479,17 @@ class AudioSpec {
     this.normalizeTargetLufs,
     this.processing = const AudioProcessing(),
     this.preservePitch = true,
+    this.volumeAnimado,
   });
+
+  /// VOLUME COM KEYFRAMES, em tempo de clipe: um multiplicador (1 = 100%)
+  /// por cima do volume e do ganho. Nulo = sem envelope. Mora a parte do
+  /// [gain] para normalizar continuar sendo um numero so.
+  final AnimatedDouble? volumeAnimado;
+
+  /// O multiplicador do envelope no instante [local] do clipe.
+  double volumeEm(Duration local) =>
+      (volumeAnimado?.valueAt(local) ?? 1).clamp(0.0, 4.0).toDouble();
 
   /// Fade de entrada e de saida, em tempo de clipe.
   final Duration fadeIn;
@@ -525,7 +535,8 @@ class AudioSpec {
       !muted &&
       duckAgainstId == null &&
       processing.isNeutral &&
-      preservePitch;
+      preservePitch &&
+      volumeAnimado == null;
 
   AudioSpec copyWith({
     Duration? fadeIn,
@@ -541,6 +552,8 @@ class AudioSpec {
     double? normalizeTargetLufs,
     AudioProcessing? processing,
     bool? preservePitch,
+    AnimatedDouble? volumeAnimado,
+    bool clearVolumeAnimado = false,
   }) => AudioSpec(
     fadeIn: fadeIn ?? this.fadeIn,
     fadeOut: fadeOut ?? this.fadeOut,
@@ -554,6 +567,9 @@ class AudioSpec {
     normalizeTargetLufs: normalizeTargetLufs ?? this.normalizeTargetLufs,
     processing: processing ?? this.processing,
     preservePitch: preservePitch ?? this.preservePitch,
+    volumeAnimado: clearVolumeAnimado
+        ? null
+        : (volumeAnimado ?? this.volumeAnimado),
   );
 }
 

@@ -5,26 +5,63 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/ui/snack.dart';
 import '../../../../core/ui/tocavel.dart';
 import '../../application/editor_controller.dart';
+import '../../application/media_preview_service.dart';
+import '../../application/playback_controller.dart';
 import '../context/parameter_row.dart';
 import '../../domain/audio_ops.dart';
+import '../../domain/keyframe.dart';
 import '../../domain/layer.dart';
 import 'am_colors.dart';
 import 'am_widgets.dart';
 import '../../application/ui/pro_mode.dart';
 
-/// SOM da camada: fade, ganho, mudo, abaixar pela voz — e os dois
-/// comandos que economizam mais tempo numa edicao falada, normalizar e
-/// remover silencio.
+/// O SOM COPIADO por "Copiar som", para colar noutra camada com audio.
+AudioSpec? somCopiado;
+
+/// O VOLUME COM KEYFRAMES no instante [local]: parado muda o numero; com
+/// keyframes, so a marca que estiver ali (quem crava e o losango).
+AudioSpec volumeEditado(AudioSpec a, Duration local, double multiplicador) {
+  final trilha = a.volumeAnimado ?? AnimatedDouble(1);
+  final nova = trilha.edited(local, multiplicador.clamp(0.0, 4.0).toDouble());
+  if (!nova.isAnimated && (nova.base - 1).abs() < 1e-9 && !nova.hasExpression) {
+    return a.copyWith(clearVolumeAnimado: true);
+  }
+  return a.copyWith(volumeAnimado: nova);
+}
+
+/// O LOSANGO DO VOLUME: poe a marca com o valor de agora, ou tira a que
+/// estiver ali.
+AudioSpec volumeComKeyframeAlternado(AudioSpec a, Duration local) {
+  final trilha = a.volumeAnimado ?? AnimatedDouble(1);
+  if (trilha.hasKeyframeAt(local)) {
+    final sem = trilha.withoutKeyframe(local);
+    if (!sem.isAnimated && (sem.base - 1).abs() < 1e-9 && !sem.hasExpression) {
+      return a.copyWith(clearVolumeAnimado: true);
+    }
+    return a.copyWith(volumeAnimado: sem);
+  }
+  return a.copyWith(
+    volumeAnimado: trilha.withKeyframe(local, trilha.valueAt(local)),
+  );
+}
+
+/// SOM da camada: volume com keyframes, fade, ganho, mudo, abaixar pela
+/// voz — e os dois comandos que economizam mais tempo numa edicao falada,
+/// normalizar e remover silencio.
 Future<void> showAudioSheet(
   BuildContext context,
   WidgetRef ref,
-  String layerId,
-) async {
+  String layerId, {
+  PlaybackController? playback,
+}) async {
+  playback?.pause();
   await showParamSheet(
     context,
     title: 'Som',
     heightFactor: 0.52,
-    builder: (sheetContext) => StatefulBuilder(
+    builder: (sheetContext) => ValueListenableBuilder<Duration>(
+      valueListenable: playback?.time ?? ValueNotifier(Duration.zero),
+      builder: (_, agora, _) => StatefulBuilder(
       builder: (sheetContext, setSheetState) {
         final project = ref.read(editorControllerProvider);
         final controller = ref.read(editorControllerProvider.notifier);
@@ -33,6 +70,31 @@ Future<void> showAudioSheet(
         if (layer == null || spec == null) {
           return const SizedBox.shrink();
         }
+        final caminho = switch (layer) {
+          AudioLayer a => a.sourcePath,
+          VideoLayer v => v.sourcePath,
+          _ => null,
+        };
+        if (caminho != null &&
+            MediaPreviewService.instance.estadoDaOnda(caminho) ==
+                EstadoDaOnda.semAudio) {
+          return const Padding(
+            key: ValueKey('som-sem-audio'),
+            padding: EdgeInsets.fromLTRB(18, 18, 18, 24),
+            child: AppText(
+              'Esta camada não tem áudio.',
+              style: TextStyle(fontSize: 13, color: AmColors.muted),
+            ),
+          );
+        }
+        final local = playback == null
+            ? Duration.zero
+            : (agora - layer.startTime) < Duration.zero
+            ? Duration.zero
+            : (agora - layer.startTime) > layer.duration
+            ? layer.duration
+            : agora - layer.startTime;
+        final trilhaDoVolume = spec.volumeAnimado;
 
         final dur = layer.duration.inMilliseconds / 1000.0;
         final db = gainToDb(spec.gain);
@@ -95,6 +157,35 @@ Future<void> showAudioSheet(
                   label: 'Mudo',
                   value: spec.muted,
                   onChanged: (v) => edit((a) => a.copyWith(muted: v)),
+                ),
+                ParameterRow(
+                  label: 'Volume',
+                  value: spec.volumeEm(local) * 100,
+                  min: 0,
+                  max: 400,
+                  unitsPerPixel: 400 / 420,
+                  decimals: 0,
+                  unit: '%',
+                  valueKey: const ValueKey('som-volume-valor'),
+                  keyframe: KeyframeState(
+                    animated: trilhaDoVolume?.isAnimated ?? false,
+                    here: trilhaDoVolume?.hasKeyframeAt(local) ?? false,
+                    onToggle: () =>
+                        edit((a) => volumeComKeyframeAlternado(a, local)),
+                  ),
+                  onChanged: (v) {
+                    final antes = controller.audioSpecOf(layerId);
+                    if (antes?.volumeAnimado?.aceitaEdicaoEm(local) == false) {
+                      AureaSnack.show(
+                        context,
+                        'O volume tem keyframes: toque no losango para marcar este instante',
+                      );
+                      return;
+                    }
+                    edit((a) => volumeEditado(a, local, v / 100));
+                  },
+                  onReset: () =>
+                      edit((a) => a.copyWith(clearVolumeAnimado: true)),
                 ),
                 _Slider(
                   label: 'Ganho',
@@ -323,6 +414,30 @@ Future<void> showAudioSheet(
                       },
                     ),
                     _Action(
+                      key: const ValueKey('som-copiar'),
+                      icon: CupertinoIcons.doc_on_doc,
+                      label: 'Copiar som',
+                      onTap: () {
+                        somCopiado = spec;
+                        setSheetState(() {});
+                        AureaSnack.show(context, 'Som copiado');
+                      },
+                    ),
+                    if (somCopiado != null)
+                      _Action(
+                        key: const ValueKey('som-colar'),
+                        icon: CupertinoIcons.doc_on_clipboard,
+                        label: 'Colar som',
+                        onTap: () {
+                          final copia = somCopiado!;
+                          edit(
+                            (_) => copia.duckAgainstId == layerId
+                                ? copia.copyWith(clearDuck: true)
+                                : copia,
+                          );
+                        },
+                      ),
+                    _Action(
                       icon: CupertinoIcons.metronome,
                       label: 'Ver batidas',
                       onTap: () {
@@ -346,6 +461,7 @@ Future<void> showAudioSheet(
           ),
         );
       },
+      ),
     ),
   );
 }
@@ -438,7 +554,12 @@ class _Chip extends StatelessWidget {
 }
 
 class _Action extends StatelessWidget {
-  const _Action({required this.icon, required this.label, required this.onTap});
+  const _Action({
+    super.key,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
 
   final IconData icon;
   final String label;

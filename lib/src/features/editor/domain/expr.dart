@@ -31,6 +31,31 @@ double? evalExpression(String input, {double? percentOf}) {
   return v;
 }
 
+/// O QUE O TECLADO NUMERICO ENTREGA: os simbolos das teclas (× ÷ −) viram
+/// conta, e tempo com dois-pontos vira segundos ("1:30" = 90, "1:02:03.5"
+/// = 3723,5).
+double? lerValorDigitado(String input, {double? percentOf}) {
+  final src = input
+      .trim()
+      .replaceAll('×', '*')
+      .replaceAll('÷', '/')
+      .replaceAll('−', '-');
+  final tempo = RegExp(
+    r'^([-+]?)(\d+(?:[.,]\d+)?)((?::\d+(?:[.,]\d+)?)+)$',
+  ).firstMatch(src);
+  if (tempo != null) {
+    final partes = '${tempo.group(2)}${tempo.group(3)}'.split(':');
+    var total = 0.0;
+    for (final p in partes) {
+      final n = _number(p);
+      if (n == null) return null;
+      total = total * 60 + n;
+    }
+    return tempo.group(1) == '-' ? -total : total;
+  }
+  return evalExpression(src, percentOf: percentOf);
+}
+
 double? _number(String s) {
   // Aceita "1.234,56" (pt-BR) e "1234.56".
   var t = s.trim();

@@ -15,7 +15,7 @@ Layer deslocarAnimacao(Layer layer, Duration delta) {
   if (delta == Duration.zero) return layer;
   AnimatedDouble d(AnimatedDouble t) => deslocarDouble(t, delta);
   AnimatedOffset o(AnimatedOffset t) => deslocarOffset(t, delta);
-  return layer.copyLayer(
+  final deslocada = layer.copyLayer(
     position: o(layer.position),
     positionZ: d(layer.positionZ),
     scaleX: d(layer.scaleX),
@@ -37,6 +37,17 @@ Layer deslocarAnimacao(Layer layer, Duration delta) {
         ),
     ],
   );
+  // O VOLUME COM KEYFRAMES anda junto: cortar um clipe no meio de uma
+  // subida de volume nao pode recomecar a subida do zero.
+  return switch (deslocada) {
+    AudioLayer a when a.audio.volumeAnimado != null => a.copyLayer(
+      audio: a.audio.copyWith(volumeAnimado: d(a.audio.volumeAnimado!)),
+    ),
+    VideoLayer v when v.audio.volumeAnimado != null => v.copyLayer(
+      audio: v.audio.copyWith(volumeAnimado: d(v.audio.volumeAnimado!)),
+    ),
+    _ => deslocada,
+  };
 }
 
 AnimatedDouble deslocarDouble(AnimatedDouble t, Duration delta) {

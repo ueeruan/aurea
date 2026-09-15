@@ -2,7 +2,9 @@ import 'package:aurea/src/core/l10n/app_language.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/ui/tocavel.dart';
 import '../../application/editor_controller.dart';
+import '../context/parameter_row.dart';
 import '../../application/playback_controller.dart';
 import '../../domain/layer.dart';
 import 'am_colors.dart';
@@ -140,7 +142,7 @@ class _Botao extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
+  Widget build(BuildContext context) => Tocavel(
     onTap: onTap,
     child: Container(
       margin: const EdgeInsets.symmetric(vertical: 4),
@@ -158,6 +160,8 @@ class _Botao extends StatelessWidget {
   );
 }
 
+/// A linha na LINGUA NOVA do painel: arrasto na linha inteira e o numero
+/// digitavel — a duracao exata entra pelo teclado, nao pela paciencia.
 class _Ruler extends StatelessWidget {
   const _Ruler({
     required this.label,
@@ -178,37 +182,15 @@ class _Ruler extends StatelessWidget {
   final int decimals;
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 2),
-    child: Row(
-      children: [
-        SizedBox(
-          width: 104,
-          child: AppText(
-            label,
-            style: const TextStyle(fontSize: 12, color: AmColors.muted),
-          ),
-        ),
-        Expanded(
-          child: AmTickRuler(
-            value: value,
-            min: min,
-            max: max,
-            unitsPerPixel: (max - min) / 400,
-            height: 40,
-            onChanged: onChanged,
-          ),
-        ),
-        SizedBox(
-          width: 62,
-          child: AppText(
-            '${value.toStringAsFixed(decimals)}$suffix',
-            textAlign: TextAlign.right,
-            style: const TextStyle(fontSize: 12, color: AmColors.text),
-          ),
-        ),
-      ],
-    ),
+  Widget build(BuildContext context) => ParameterRow(
+    label: label,
+    value: value,
+    min: min,
+    max: max,
+    unitsPerPixel: (max - min) / 400,
+    decimals: decimals,
+    unit: suffix,
+    onChanged: (v) => onChanged(v.clamp(min, max)),
   );
 }
 
@@ -224,22 +206,6 @@ class _Toggle extends StatelessWidget {
   final ValueChanged<bool> onChanged;
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 2),
-    child: Row(
-      children: [
-        Expanded(
-          child: AppText(
-            label,
-            style: const TextStyle(fontSize: 13, color: AmColors.text),
-          ),
-        ),
-        CupertinoSwitch(
-          value: value,
-          activeTrackColor: AmColors.accent,
-          onChanged: onChanged,
-        ),
-      ],
-    ),
-  );
+  Widget build(BuildContext context) =>
+      ParameterToggleRow(label: label, value: value, onChanged: onChanged);
 }

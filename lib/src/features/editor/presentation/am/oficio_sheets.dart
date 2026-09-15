@@ -8,6 +8,7 @@ import '../../application/editor_controller.dart';
 import '../../application/playback_controller.dart';
 import '../../domain/keyframe.dart';
 import '../../domain/layer_meta.dart';
+import '../context/parameter_row.dart';
 import 'am_colors.dart';
 import 'am_widgets.dart';
 
@@ -219,6 +220,8 @@ Future<void> showLayerStylesSheet(
           );
         }
 
+        // A sub-linha do estilo na LINGUA NOVA do painel: arrasto na
+        // linha inteira e o numero digitavel.
         Widget slider(
           String label,
           double value,
@@ -227,41 +230,19 @@ Future<void> showLayerStylesSheet(
           ValueChanged<double> onChanged,
         ) {
           return Padding(
-            padding: const EdgeInsets.only(left: 12, bottom: 4),
-            child: Row(
-              children: [
-                SizedBox(
-                  width: 74,
-                  child: AppText(
-                    label,
-                    style: const TextStyle(fontSize: 11, color: AmColors.muted),
-                  ),
-                ),
-                Expanded(
-                  child: AmTickRuler(
-                    value: value,
-                    min: min,
-                    max: max,
-                    unitsPerPixel: (max - min) / 380,
-                    height: 36,
-                    onChanged: (v) {
-                      onChanged(v);
-                      setSheetState(() {});
-                    },
-                  ),
-                ),
-                SizedBox(
-                  width: 44,
-                  child: AppText(
-                    amNumber(value, 0),
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: AmColors.accent,
-                    ),
-                  ),
-                ),
-              ],
+            padding: const EdgeInsets.only(left: 12, bottom: 2),
+            child: ParameterRow(
+              label: label,
+              value: value.clamp(min, max),
+              min: min,
+              max: max,
+              unitsPerPixel: (max - min) / 380,
+              decimals: 0,
+              height: 40,
+              onChanged: (v) {
+                onChanged(v.clamp(min, max));
+                setSheetState(() {});
+              },
             ),
           );
         }

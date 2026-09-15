@@ -3,7 +3,9 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/ui/snack.dart';
+import '../../../../core/ui/tocavel.dart';
 import '../../application/editor_controller.dart';
+import '../context/parameter_row.dart';
 import '../../domain/audio_ops.dart';
 import '../../domain/layer.dart';
 import 'am_colors.dart';
@@ -100,6 +102,7 @@ Future<void> showAudioSheet(
                   min: 0,
                   max: 4,
                   decimals: 2,
+                  reset: 1,
                   onChanged: (v) => edit((a) => a.copyWith(gain: v)),
                 ),
                 _Slider(
@@ -347,6 +350,9 @@ Future<void> showAudioSheet(
   );
 }
 
+/// A linha da ficha, na LINGUA NOVA do painel (ParameterRow): a linha
+/// inteira arrasta, o numero digita o valor exato, o toque longo no nome
+/// reseta.
 class _Slider extends StatelessWidget {
   const _Slider({
     required this.label,
@@ -356,6 +362,7 @@ class _Slider extends StatelessWidget {
     required this.onChanged,
     this.decimals = 0,
     this.suffix = '',
+    this.reset,
   });
 
   final String label;
@@ -365,44 +372,20 @@ class _Slider extends StatelessWidget {
   final ValueChanged<double> onChanged;
   final int decimals;
   final String suffix;
+  final double? reset;
 
   @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 1),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 110,
-            child: AppText(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 12, color: AmColors.muted),
-            ),
-          ),
-          Expanded(
-            child: AmTickRuler(
-              value: value.clamp(min, max),
-              min: min,
-              max: max,
-              unitsPerPixel: ((max) - (min)) / 420,
-              height: 40,
-              onChanged: onChanged,
-            ),
-          ),
-          SizedBox(
-            width: 52,
-            child: AppText(
-              '${value.toStringAsFixed(decimals)}$suffix',
-              textAlign: TextAlign.right,
-              style: const TextStyle(fontSize: 12, color: AmColors.text),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  Widget build(BuildContext context) => ParameterRow(
+    label: label,
+    value: value.clamp(min, max),
+    min: min,
+    max: max,
+    unitsPerPixel: (max - min) / 420,
+    decimals: decimals,
+    unit: suffix,
+    onChanged: (v) => onChanged(v.clamp(min, max)),
+    onReset: reset == null ? null : () => onChanged(reset!),
+  );
 }
 
 class _Toggle extends StatelessWidget {
@@ -417,24 +400,8 @@ class _Toggle extends StatelessWidget {
   final ValueChanged<bool> onChanged;
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 2),
-    child: Row(
-      children: [
-        Expanded(
-          child: AppText(
-            label,
-            style: const TextStyle(fontSize: 13, color: AmColors.text),
-          ),
-        ),
-        CupertinoSwitch(
-          value: value,
-          activeTrackColor: AmColors.accent,
-          onChanged: onChanged,
-        ),
-      ],
-    ),
-  );
+  Widget build(BuildContext context) =>
+      ParameterToggleRow(label: label, value: value, onChanged: onChanged);
 }
 
 class _Chip extends StatelessWidget {
@@ -449,7 +416,7 @@ class _Chip extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
+  Widget build(BuildContext context) => Tocavel(
     onTap: onTap,
     child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
@@ -478,7 +445,7 @@ class _Action extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
+  Widget build(BuildContext context) => Tocavel(
     onTap: onTap,
     child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),

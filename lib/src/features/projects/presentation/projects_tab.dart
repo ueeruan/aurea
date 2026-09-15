@@ -1,5 +1,6 @@
 import 'package:aurea/src/core/l10n/app_language.dart';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import '../../../core/ui/tocavel.dart';
 
@@ -515,15 +516,23 @@ class ProjectsTab extends ConsumerWidget {
     final projects = ref.watch(projectsControllerProvider);
     final mostrarTodos = ref.watch(_mostrarTodosProvider);
     ThumbnailService.instance.init();
-    final visiveis = mostrarTodos
-        ? projects
-        : projects.take(_recentesNaInicio).toList();
+    // O HEROI "Continuar editando": o projeto mais recente vira um cartao
+    // largo em cima; a grade mostra o resto, sem repetir.
+    final heroi = projects.isEmpty ? null : projects.first;
+    final visiveis = [
+      for (final p
+          in mostrarTodos ? projects : projects.take(_recentesNaInicio))
+        if (p.id != heroi?.id) p,
+    ];
     final largura = MediaQuery.sizeOf(context).width;
     final colunas = largura >= 700 ? 4 : (largura >= 520 ? 3 : 2);
 
     return SafeArea(
       bottom: false,
-      child: CustomScrollView(
+      child: _BarraAoRolar(
+        onTemplate: () => _openTemplate(context, ref),
+        onPerfil: () => ref.read(homeTabProvider.notifier).state = 3,
+        child: CustomScrollView(
         slivers: [
           SliverToBoxAdapter(
             child: _Cabecalho(onTemplate: () => _openTemplate(context, ref)),
@@ -584,14 +593,28 @@ class ProjectsTab extends ConsumerWidget {
               ),
             ),
           ),
-          SliverToBoxAdapter(
-            child: _TituloSecao(
-              'Recentes',
-              detalhe: projects.isEmpty
-                  ? null
-                  : '${projects.length} ${translate(context, projects.length == 1 ? 'projeto' : 'projetos')}',
+          if (heroi != null)
+            SliverToBoxAdapter(
+              child: ValueListenableBuilder<int>(
+                valueListenable: ThumbnailService.instance.revision,
+                builder: (_, rev, _) => _CartaoContinuar(
+                  key: ValueKey('projeto-${heroi.id}'),
+                  project: heroi,
+                  thumb: ThumbnailService.instance.fileFor(heroi.id),
+                  revision: rev,
+                  onOpen: () => _openProject(context, ref, heroi),
+                  onMenu: () => _menuDoProjeto(context, ref, heroi),
+                ),
+              ),
             ),
-          ),
+          if (projects.length > 1)
+            SliverToBoxAdapter(
+              child: _TituloSecao(
+                'Recentes',
+                detalhe:
+                    '${projects.length} ${translate(context, 'projetos')}',
+              ),
+            ),
           if (projects.isEmpty)
             const SliverToBoxAdapter(child: _SemProjetos())
           else
@@ -803,6 +826,274 @@ class ProjectsTab extends ConsumerWidget {
           ),
           const SliverToBoxAdapter(child: SizedBox(height: 120)),
         ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A BARRA QUE APARECE AO ROLAR (o compacto do titulo grande do iOS):
+/// o cabecalho rola embora com a pagina; passando dele, uma barra fina
+/// com blur surge presa em cima, com o nome e os mesmos dois botoes.
+class _BarraAoRolar extends StatefulWidget {
+  const _BarraAoRolar({
+    required this.child,
+    required this.onTemplate,
+    required this.onPerfil,
+  });
+
+  final Widget child;
+  final VoidCallback onTemplate;
+  final VoidCallback onPerfil;
+
+  @override
+  State<_BarraAoRolar> createState() => _BarraAoRolarState();
+}
+
+class _BarraAoRolarState extends State<_BarraAoRolar> {
+  bool _visivel = false;
+
+  bool _aoRolar(ScrollNotification n) {
+    if (n.metrics.axis != Axis.vertical) return false;
+    final mostrar = n.metrics.pixels > 64;
+    if (mostrar != _visivel) setState(() => _visivel = mostrar);
+    return false;
+  }
+
+  @override
+  Widget build(BuildContext context) => Stack(
+    children: [
+      NotificationListener<ScrollNotification>(
+        onNotification: _aoRolar,
+        child: widget.child,
+      ),
+      Positioned(
+        left: 0,
+        right: 0,
+        top: 0,
+        // AnimatedSwitcher, e nao opacidade: a barra escondida NAO PODE
+        // continuar na arvore — tooltip e leitor de tela a achariam.
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 180),
+          switchInCurve: Curves.easeOut,
+          switchOutCurve: Curves.easeIn,
+          child: !_visivel
+              ? const SizedBox.shrink()
+              : ClipRect(
+              child: BackdropFilter(
+                filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+                child: Container(
+                  height: 52,
+                  padding: const EdgeInsets.fromLTRB(20, 0, 12, 0),
+                  color: AppColors.background.withValues(alpha: .62),
+                  child: Row(
+                    children: [
+                      const AureaLogo(size: 22),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Aurea',
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: -0.4,
+                          color: AppColors.onDark,
+                        ),
+                      ),
+                      const Spacer(),
+                      _BotaoRedondo(
+                        icon: CupertinoIcons.doc_on_doc,
+                        tooltip: translate(context, 'Template'),
+                        onTap: widget.onTemplate,
+                      ),
+                      const SizedBox(width: 2),
+                      _BotaoRedondo(
+                        icon: CupertinoIcons.person_crop_circle,
+                        tooltip: translate(context, 'Perfil'),
+                        onTap: widget.onPerfil,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+        ),
+      ),
+    ],
+  );
+}
+
+/// O CARTAO "CONTINUAR EDITANDO": o projeto mais recente em toda a
+/// largura, com a miniatura de verdade, o nome por cima e o botao que
+/// diz o verbo. Toque abre; toque longo (ou as reticencias) abre o menu
+/// do projeto — as mesmas chaves do cartao da grade.
+class _CartaoContinuar extends StatelessWidget {
+  const _CartaoContinuar({
+    super.key,
+    required this.project,
+    required this.thumb,
+    required this.revision,
+    required this.onOpen,
+    required this.onMenu,
+  });
+
+  final VideoProject project;
+  final File? thumb;
+  final int revision;
+  final VoidCallback onOpen;
+  final VoidCallback onMenu;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = thumb;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
+      child: Tocavel(
+        onTap: onOpen,
+        onLongPress: onMenu,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(20),
+          child: AspectRatio(
+            aspectRatio: 16 / 9,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                if (t == null)
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [AppColors.surfaceHigh, AppColors.surface],
+                      ),
+                    ),
+                    child: Center(
+                      child: Icon(
+                        CupertinoIcons.film,
+                        size: 34,
+                        color: AppColors.muted,
+                      ),
+                    ),
+                  )
+                else
+                  Image.file(
+                    t,
+                    key: ValueKey('continuar-${project.id}-$revision'),
+                    fit: BoxFit.cover,
+                    gaplessPlayback: true,
+                  ),
+                // O SCRIM: o nome le em cima de qualquer miniatura.
+                const DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      stops: [0.45, 1],
+                      colors: [Colors.transparent, Color(0xB3000000)],
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: 16,
+                  right: 16,
+                  bottom: 14,
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            AppText(
+                              'Continuar editando',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.4,
+                                color: AppColors.lime,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              project.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: -0.2,
+                                color: Colors.white,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            AppText(
+                              fichaDoProjeto(project),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: Colors.white70,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 9,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppColors.lime,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              CupertinoIcons.play_fill,
+                              size: 13,
+                              color: Color(0xFF10130C),
+                            ),
+                            const SizedBox(width: 6),
+                            AppText(
+                              'Continuar',
+                              style: const TextStyle(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF10130C),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                // O MENU DO PROJETO, com a mesma chave da grade: apagar,
+                // duplicar e renomear nunca dependem de gesto escondido.
+                Positioned(
+                  top: 2,
+                  right: 2,
+                  child: Tocavel(
+                    key: ValueKey('projeto-menu-${project.id}'),
+                    onTap: onMenu,
+                    child: const SizedBox(
+                      width: 40,
+                      height: 40,
+                      child: Icon(
+                        CupertinoIcons.ellipsis,
+                        size: 18,
+                        color: Colors.white70,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

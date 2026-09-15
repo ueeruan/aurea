@@ -352,10 +352,10 @@ Tudo do documento foi implementado no lugar, fase a fase, com a suíte verde ao 
 
 ### O que falta (fora desta entrega)
 
-- Reescrever em `ParameterRow` as fichas que ainda são folhas (estilos de camada, som, legendas, partículas, elemento 3D, grid, precomp) e a "Propriedades do elemento" única do E2.
+- ~~Reescrever em `ParameterRow` as fichas que ainda são folhas~~ — **entregue em 2026-09-15 (§14)**.
 - Medir no aparelho: 60 fps com 30 camadas, arrasto da régua, tema claro, miniaturas dos efeitos no Moto G05 e no iPhone 13.
 - Onboarding por zona (tooltips ancorados) — as quatro dicas são um cartão único.
-- Expor propriedade pelo toque longo no nome do parâmetro (a lista em ⚙ só remove).
+- ~~Expor propriedade pelo toque longo no nome do parâmetro~~ — **entregue em 2026-09-15 (§14)**.
 
 ### Como conferir
 
@@ -422,3 +422,20 @@ Pedido: "use o emulador e verifique a UI... ache os erros e contras". Segue o qu
 | **Faixa amarela de estouro** sobre o painel, em tela pequena. | Com o menu de adicionar cobrindo a timeline, sobrava uma tira de 12 px de timeline: nela não cabe nem a régua, e o conteúdo vazava 38 px. | Abaixo do mínimo útil, a timeline **cede o espaço inteiro** em vez de virar um risco quebrado. O painel de camada também cede a grade quando a folha é baixa demais. |
 
 Fica registrado o que **não** foi corrigido: o rótulo de uma marca da régua ainda pode aparecer atrás dos botões do canto (ímã, busca, I/O). A tentativa de pôr fundo sólido ali mexeu na estrutura do Stack e derrubou o arrasto de reordenar; o ganho não pagava o risco nesta rodada.
+
+---
+
+## 14. O redesign profundo que faltava (2026-09-15)
+
+Pedido do dono: "redesign profundo além da fluidez". O guia foi a própria lista "O que falta" do §10.
+
+| O que entrou | Onde |
+|---|---|
+| **As fichas antigas falam a língua nova.** Som (fade, ganho, voz e EQ), Precomp, Estilo da legenda, Partículas (linhas e chips), Grade (linhas e as ANIMÁVEIS, com o diamante na própria linha: toque = keyframe, toque longo = curva), Máscara (presets e E3), Elemento 3D (tamanho/reflexo/brilho, agora em %), Propriedades do elemento das Formas (animáveis com diamante) e Extrude viraram `ParameterRow`: a linha inteira arrasta, o número digita o valor exato, o toque longo no nome reseta. Os botões avulsos de losango/curva sumiram — é a mesma gramática do Transformar em todo canto. | `audio_sheet`, `precomp_sheet`, `caption_style_sheet`, `oficio_sheets` (estilos), `layer_menu` (partículas, grade, máscara, elemento 3D, formas, extrude) |
+| **Expor pelo toque longo no nome** (Pro): com só o reset, o toque longo reseta direto como sempre; com "expor" junto, um menu curto de duas ações. A lista de ⚙ Propriedades expostas deixou de ser só-remover; a Opacidade da camada é a primeira porta ligada. | `parameter_row.dart` (`onExpose`), linha de Opacidade do `layer_menu` |
+| **Início: herói "Continuar editando"** — o projeto mais recente vira um cartão largo com a miniatura real, scrim, ficha e o botão com o verbo; a grade mostra o resto sem repetir. Menu do projeto com as mesmas chaves de sempre (nada de gesto escondido). | `projects_tab.dart` (`_CartaoContinuar`) |
+| **Início: barra compacta com blur ao rolar** — o compacto do título grande do iOS: o cabeçalho rola embora; passando dele, surge a barra fina presa em cima (logo, nome, template, perfil). `AnimatedSwitcher`, não opacidade: barra escondida NÃO fica na árvore (tooltip e leitor de tela a achariam). | `projects_tab.dart` (`_BarraAoRolar`) |
+
+Pinos novos: `inicio_continuar_test.dart` (herói, grade sem repetição, barra só depois de rolar) e `parameter_row_expor_test.dart` (reset direto sem menu; menu com as duas ações).
+
+O que segue de fora, e por quê: **tooltips ancorados por zona** (onboarding é conversa para se ter acordado com o dono, não madrugada) e as **medições no aparelho** (não há aparelho aqui).

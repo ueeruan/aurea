@@ -2,7 +2,9 @@ import 'package:aurea/src/core/l10n/app_language.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/ui/tocavel.dart';
 import '../../application/editor_controller.dart';
+import '../context/parameter_row.dart';
 import '../../domain/caption_highlight.dart';
 import '../../domain/layer.dart';
 import 'am_colors.dart';
@@ -133,14 +135,16 @@ Future<void> showCaptionStyleSheet(
                 ),
 
                 const SizedBox(height: 14),
-                const _Rotulo('TAMANHO DA PALAVRA'),
-                AmTickRuler(
+                ParameterRow(
+                  label: 'Tamanho',
                   value: h.destaque * 100,
                   min: 100,
                   max: 320,
                   unitsPerPixel: 0.55,
-                  height: 42,
+                  decimals: 0,
+                  unit: '%',
                   onChanged: (v) => edita((s) => s.copyWith(destaque: v / 100)),
+                  onReset: () => edita((s) => s.copyWith(destaque: 1.6)),
                 ),
                 AppText(
                   h.destaque <= 1.001
@@ -212,36 +216,40 @@ Future<void> showCaptionStyleSheet(
                 ),
 
                 const SizedBox(height: 14),
-                const _Rotulo('TRACKING'),
-                AmTickRuler(
+                ParameterRow(
+                  label: 'Tracking',
                   value: h.tracking,
                   min: -6,
                   max: 8,
                   unitsPerPixel: 0.04,
-                  height: 40,
+                  decimals: 1,
+                  accentCenter: true,
                   onChanged: (v) => edita((s) => s.copyWith(tracking: v)),
+                  onReset: () => edita((s) => s.copyWith(tracking: 0)),
                 ),
 
                 const SizedBox(height: 12),
-                const _Rotulo('ENTRELINHA'),
-                AmTickRuler(
+                ParameterRow(
+                  label: 'Entrelinha',
                   value: h.entrelinha * 100,
                   min: 70,
                   max: 180,
                   unitsPerPixel: 0.4,
-                  height: 40,
+                  decimals: 0,
+                  unit: '%',
                   onChanged: (v) =>
                       edita((s) => s.copyWith(entrelinha: v / 100)),
                 ),
 
                 const SizedBox(height: 12),
-                const _Rotulo('DURACAO DO INFLAR'),
-                AmTickRuler(
+                ParameterRow(
+                  label: 'Inflar',
                   value: h.duracaoInflar.inMilliseconds.toDouble(),
                   min: 60,
                   max: 600,
                   unitsPerPixel: 1.6,
-                  height: 40,
+                  decimals: 0,
+                  unit: ' ms',
                   onChanged: (v) => edita(
                     (s) => s.copyWith(
                       duracaoInflar: Duration(milliseconds: v.round()),
@@ -331,7 +339,7 @@ class _Chip extends StatelessWidget {
   final bool aceso;
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
+  Widget build(BuildContext context) => Tocavel(
     behavior: HitTestBehavior.opaque,
     onTap: onTap,
     child: Container(
@@ -361,7 +369,7 @@ class _Amostra extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
+  Widget build(BuildContext context) => Tocavel(
     onTap: onTap,
     child: Container(
       width: 44,

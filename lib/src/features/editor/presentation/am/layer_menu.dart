@@ -31,6 +31,7 @@ import '../../application/ui/pro_mode.dart';
 import '../context/parameter_row.dart';
 import 'audio_sheet.dart';
 import '../../../../core/ui/snack.dart';
+import '../../domain/layer_meta.dart';
 import 'am_widgets.dart';
 import 'layer_look.dart';
 import 'caption_style_sheet.dart';
@@ -643,46 +644,21 @@ Future<void> showGridSheet(
             String display,
             ValueChanged<double> onChanged,
           ) {
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: 92,
-                    child: AppText(
-                      label,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: AmColors.muted,
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    child: AmTickRuler(
-                      value: value,
-                      min: min,
-                      max: max,
-                      unitsPerPixel: (max - min) / 420,
-                      height: 42,
-                      onChanged: (v) {
-                        onChanged(v);
-                        setSheetState(() {});
-                      },
-                    ),
-                  ),
-                  SizedBox(
-                    width: 56,
-                    child: AppText(
-                      display,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: AmColors.accent,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+            final numero = RegExp(r'^-?[\d.,]+').firstMatch(display);
+            final casas =
+                RegExp(r'[.,](\d+)$').firstMatch(numero?.group(0) ?? '');
+            return ParameterRow(
+              label: label,
+              value: value.clamp(min, max),
+              min: min,
+              max: max,
+              unitsPerPixel: (max - min) / 420,
+              decimals: casas?.group(1)?.length ?? 0,
+              unit: numero == null ? '' : display.substring(numero.end),
+              onChanged: (v) {
+                onChanged(v.clamp(min, max));
+                setSheetState(() {});
+              },
             );
           }
 
@@ -697,73 +673,29 @@ Future<void> showGridSheet(
             String display, {
             double scale = 1,
           }) {
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: 92,
-                    child: AppText(
-                      label,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: AmColors.muted,
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    child: AmTickRuler(
-                      value: track.valueAt(local) * scale,
-                      min: min,
-                      max: max,
-                      unitsPerPixel: (max - min) / 420,
-                      height: 42,
-                      onChanged: (v) {
-                        controller.editGridParam(nullId, key, t, v / scale);
-                        setSheetState(() {});
-                      },
-                    ),
-                  ),
-                  SizedBox(
-                    width: 48,
-                    child: AppText(
-                      display,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: AmColors.accent,
-                      ),
-                    ),
-                  ),
-                  CupertinoButton(
-                    padding: const EdgeInsets.only(left: 2),
-                    onPressed: () {
-                      controller.toggleGridParamKeyframe(nullId, key, t);
-                      setSheetState(() {});
-                    },
-                    child: Icon(
-                      track.hasKeyframeAt(local)
-                          ? CupertinoIcons.rhombus_fill
-                          : CupertinoIcons.rhombus,
-                      size: 17,
-                      color: track.isAnimated
-                          ? AmColors.accent
-                          : AmColors.muted,
-                    ),
-                  ),
-                  // Curve editor POR PARAMETRO: cada trilha da grade tem
-                  // sua propria curva de easing por segmento.
-                  CupertinoButton(
-                    padding: EdgeInsets.zero,
-                    onPressed: () {
-                      if (track.keyframes.length < 2) {
-                        showReasonToast(
-                          context,
-                          'Crie 2+ keyframes em "$label" para editar a curva',
-                        );
-                        return;
-                      }
-                      showGridCurveSheet(
+            // Na lingua nova, o diamante mora na propria linha: toque
+            // poe/tira o keyframe; toque LONGO abre a curva (2+ kfs).
+            final numero = RegExp(r'^-?[\d.,]+').firstMatch(display);
+            final casas =
+                RegExp(r'[.,](\d+)$').firstMatch(numero?.group(0) ?? '');
+            return ParameterRow(
+              label: label,
+              value: (track.valueAt(local) * scale).clamp(min, max),
+              min: min,
+              max: max,
+              unitsPerPixel: (max - min) / 420,
+              decimals: casas?.group(1)?.length ?? 0,
+              unit: numero == null ? '' : display.substring(numero.end),
+              keyframe: KeyframeState(
+                animated: track.isAnimated,
+                here: track.hasKeyframeAt(local),
+                onToggle: () {
+                  controller.toggleGridParamKeyframe(nullId, key, t);
+                  setSheetState(() {});
+                },
+                onCurve: track.keyframes.length < 2
+                    ? null
+                    : () => showGridCurveSheet(
                         context,
                         ref,
                         playback,
@@ -775,18 +707,12 @@ Future<void> showGridSheet(
                             showGridSheet(context, ref, nullId, playback);
                           }
                         },
-                      );
-                    },
-                    child: Icon(
-                      CupertinoIcons.graph_square,
-                      size: 17,
-                      color: track.keyframes.length >= 2
-                          ? AmColors.accent
-                          : AmColors.muted,
-                    ),
-                  ),
-                ],
+                      ),
               ),
+              onChanged: (v) {
+                controller.editGridParam(nullId, key, t, v / scale);
+                setSheetState(() {});
+              },
             );
           }
 
@@ -1337,46 +1263,21 @@ Future<void> showMasksSheet(
             String display,
             ValueChanged<double> onChanged,
           ) {
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: 86,
-                    child: AppText(
-                      label,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: AmColors.muted,
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    child: AmTickRuler(
-                      value: value,
-                      min: min,
-                      max: max,
-                      unitsPerPixel: (max - min) / 420,
-                      height: 44,
-                      onChanged: (v) {
-                        onChanged(v);
-                        setSheetState(() {});
-                      },
-                    ),
-                  ),
-                  SizedBox(
-                    width: 56,
-                    child: AppText(
-                      display,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: AmColors.accent,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+            final numero = RegExp(r'^-?[\d.,]+').firstMatch(display);
+            final casas =
+                RegExp(r'[.,](\d+)$').firstMatch(numero?.group(0) ?? '');
+            return ParameterRow(
+              label: label,
+              value: value.clamp(min, max),
+              min: min,
+              max: max,
+              unitsPerPixel: (max - min) / 420,
+              decimals: casas?.group(1)?.length ?? 0,
+              unit: numero == null ? '' : display.substring(numero.end),
+              onChanged: (v) {
+                onChanged(v.clamp(min, max));
+                setSheetState(() {});
+              },
             );
           }
 
@@ -1897,6 +1798,9 @@ Future<void> showParticlesSheet(
         final layer = ref.read(editorControllerProvider).layerById(layerId);
         if (layer is! ParticlesLayer) return const SizedBox.shrink();
 
+        // A LINGUA NOVA DO PAINEL (ParameterRow): a linha inteira
+        // arrasta e o numero digita o valor exato. A unidade e as casas
+        // saem do display de sempre — as chamadas nao mudam.
         Widget row(
           String label,
           double value,
@@ -1906,43 +1810,21 @@ Future<void> showParticlesSheet(
           String display,
           ValueChanged<double> onChanged,
         ) {
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Row(
-              children: [
-                SizedBox(
-                  width: 86,
-                  child: AppText(
-                    label,
-                    style: const TextStyle(fontSize: 13, color: AmColors.muted),
-                  ),
-                ),
-                Expanded(
-                  child: AmTickRuler(
-                    value: value,
-                    min: min,
-                    max: max,
-                    unitsPerPixel: upp,
-                    height: 46,
-                    onChanged: (v) {
-                      onChanged(v);
-                      setSheetState(() {});
-                    },
-                  ),
-                ),
-                SizedBox(
-                  width: 64,
-                  child: AppText(
-                    display,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      color: AmColors.accent,
-                    ),
-                  ),
-                ),
-              ],
-            ),
+          final numero = RegExp(r'^-?[\d.,]+').firstMatch(display);
+          final casas =
+              RegExp(r'[.,](\d+)\$').firstMatch(numero?.group(0) ?? '');
+          return ParameterRow(
+            label: label,
+            value: value.clamp(min, max),
+            min: min,
+            max: max,
+            unitsPerPixel: upp,
+            decimals: casas?.group(1)?.length ?? 0,
+            unit: numero == null ? '' : display.substring(numero.end),
+            onChanged: (v) {
+              onChanged(v.clamp(min, max));
+              setSheetState(() {});
+            },
           );
         }
 
@@ -1953,30 +1835,18 @@ Future<void> showParticlesSheet(
           ValueChanged<int> onPick,
         ) {
           return Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(
-                  width: 86,
-                  child: Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: AppText(
-                      label,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: AmColors.muted,
-                      ),
-                    ),
-                  ),
-                ),
-                Expanded(
-                  child: Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: [
-                      for (var i = 0; i < nomes.length; i++)
-                        Tocavel(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: ParameterCustomRow(
+              label: label,
+              height: 44,
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    for (var i = 0; i < nomes.length; i++)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: Tocavel(
                           onTap: () {
                             onPick(i);
                             setSheetState(() {});
@@ -2001,10 +1871,10 @@ Future<void> showParticlesSheet(
                             ),
                           ),
                         ),
-                    ],
-                  ),
+                      ),
+                  ],
                 ),
-              ],
+              ),
             ),
           );
         }
@@ -2513,43 +2383,20 @@ Future<void> showElement3DSheet(
                   ],
                 ),
                 const SizedBox(height: 12),
-                Row(
-                  children: [
-                    const SizedBox(
-                      width: 86,
-                      child: AppText(
-                        'Tamanho',
-                        style: TextStyle(fontSize: 13, color: AmColors.muted),
-                      ),
-                    ),
-                    Expanded(
-                      child: AmTickRuler(
-                        value: layer.size,
-                        min: 20,
-                        max: 600,
-                        unitsPerPixel: 1.4,
-                        height: 46,
-                        onChanged: (v) {
-                          controller.updateElement3D(
-                            layerId,
-                            (e) => e.copyElement3D(size: v),
-                          );
-                          setSheetState(() {});
-                        },
-                      ),
-                    ),
-                    SizedBox(
-                      width: 56,
-                      child: AppText(
-                        amNumber(layer.size, 0),
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          fontSize: 14,
-                          color: AmColors.accent,
-                        ),
-                      ),
-                    ),
-                  ],
+                ParameterRow(
+                  label: 'Tamanho',
+                  value: layer.size,
+                  min: 20,
+                  max: 600,
+                  unitsPerPixel: 1.4,
+                  decimals: 0,
+                  onChanged: (v) {
+                    controller.updateElement3D(
+                      layerId,
+                      (e) => e.copyElement3D(size: v),
+                    );
+                    setSheetState(() {});
+                  },
                 ),
                 const SizedBox(height: 8),
                 Row(
@@ -2616,42 +2463,21 @@ Future<void> showElement3DSheet(
                 const SizedBox(height: 12),
                 // REFLEXO DO AMBIENTE + qual ambiente. E o que faz o
                 // solido deixar de parecer plastico fosco.
-                Row(
-                  children: [
-                    const SizedBox(
-                      width: 86,
-                      child: AppText('Reflexo',
-                        style: TextStyle(fontSize: 13, color: AmColors.muted),
-                      ),
-                    ),
-                    Expanded(
-                      child: AmTickRuler(
-                        value: layer.reflect,
-                        min: 0,
-                        max: 1,
-                        unitsPerPixel: 1 / 420,
-                        height: 46,
-                        onChanged: (v) {
-                          controller.updateElement3D(
-                            layerId,
-                            (e) => e.copyElement3D(reflect: v),
-                          );
-                          setSheetState(() {});
-                        },
-                      ),
-                    ),
-                    SizedBox(
-                      width: 56,
-                      child: AppText(
-                        amNumber(layer.reflect * 100, 0),
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          fontSize: 14,
-                          color: AmColors.accent,
-                        ),
-                      ),
-                    ),
-                  ],
+                ParameterRow(
+                  label: 'Reflexo',
+                  value: layer.reflect * 100,
+                  min: 0,
+                  max: 100,
+                  unitsPerPixel: 100 / 420,
+                  decimals: 0,
+                  unit: '%',
+                  onChanged: (v) {
+                    controller.updateElement3D(
+                      layerId,
+                      (e) => e.copyElement3D(reflect: v / 100),
+                    );
+                    setSheetState(() {});
+                  },
                 ),
                 const SizedBox(height: 8),
                 Wrap(
@@ -2802,42 +2628,21 @@ Future<void> showElement3DSheet(
                   ),
                 ],
                 const SizedBox(height: 10),
-                Row(
-                  children: [
-                    const SizedBox(
-                      width: 86,
-                      child: AppText('Brilho',
-                        style: TextStyle(fontSize: 13, color: AmColors.muted),
-                      ),
-                    ),
-                    Expanded(
-                      child: AmTickRuler(
-                        value: layer.shininess,
-                        min: 0,
-                        max: 1,
-                        unitsPerPixel: 0.003,
-                        height: 46,
-                        onChanged: (v) {
-                          controller.updateElement3D(
-                            layerId,
-                            (e) => e.copyElement3D(shininess: v),
-                          );
-                          setSheetState(() {});
-                        },
-                      ),
-                    ),
-                    SizedBox(
-                      width: 56,
-                      child: AppText(
-                        amNumber(layer.shininess * 100, 0),
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          fontSize: 14,
-                          color: AmColors.accent,
-                        ),
-                      ),
-                    ),
-                  ],
+                ParameterRow(
+                  label: 'Brilho',
+                  value: layer.shininess * 100,
+                  min: 0,
+                  max: 100,
+                  unitsPerPixel: 0.3,
+                  decimals: 0,
+                  unit: '%',
+                  onChanged: (v) {
+                    controller.updateElement3D(
+                      layerId,
+                      (e) => e.copyElement3D(shininess: v / 100),
+                    );
+                    setSheetState(() {});
+                  },
                 ),
                 const SizedBox(height: 12),
                 // MODELO IMPORTADO: OBJ ou FBX (ASCII) no lugar do solido.
@@ -3050,71 +2855,29 @@ Future<void> showShapeParamsSheet(
             double scale = 1,
           }) {
             final track = shapeParamTrackOf(sp!, key)!;
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: 88,
-                    child: AppText(
-                      label,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: AmColors.muted,
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    child: AmTickRuler(
-                      value: track.valueAt(local) * scale,
-                      min: min,
-                      max: max,
-                      unitsPerPixel: (max - min) / 420,
-                      height: 42,
-                      onChanged: (v) {
-                        controller.editShapeParam(layerId, key, t, v / scale);
-                        setSheetState(() {});
-                      },
-                    ),
-                  ),
-                  SizedBox(
-                    width: 48,
-                    child: AppText(
-                      display,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: AmColors.accent,
-                      ),
-                    ),
-                  ),
-                  CupertinoButton(
-                    padding: const EdgeInsets.only(left: 2),
-                    onPressed: () {
-                      controller.toggleShapeParamKeyframe(layerId, key, t);
-                      setSheetState(() {});
-                    },
-                    child: Icon(
-                      track.hasKeyframeAt(local)
-                          ? CupertinoIcons.rhombus_fill
-                          : CupertinoIcons.rhombus,
-                      size: 17,
-                      color: track.isAnimated
-                          ? AmColors.accent
-                          : AmColors.muted,
-                    ),
-                  ),
-                  CupertinoButton(
-                    padding: EdgeInsets.zero,
-                    onPressed: () {
-                      if (track.keyframes.length < 2) {
-                        showReasonToast(
-                          context,
-                          'Crie 2+ keyframes em "$label" para editar a curva',
-                        );
-                        return;
-                      }
-                      showTrackCurveSheet(
+            // Na lingua nova o diamante mora na linha: toque poe/tira o
+            // keyframe; toque LONGO abre a curva (2+ kfs).
+            final numero = RegExp(r'^-?[\d.,]+').firstMatch(display);
+            final casas =
+                RegExp(r'[.,](\d+)$').firstMatch(numero?.group(0) ?? '');
+            return ParameterRow(
+              label: label,
+              value: (track.valueAt(local) * scale).clamp(min, max),
+              min: min,
+              max: max,
+              unitsPerPixel: (max - min) / 420,
+              decimals: casas?.group(1)?.length ?? 0,
+              unit: numero == null ? '' : display.substring(numero.end),
+              keyframe: KeyframeState(
+                animated: track.isAnimated,
+                here: track.hasKeyframeAt(local),
+                onToggle: () {
+                  controller.toggleShapeParamKeyframe(layerId, key, t);
+                  setSheetState(() {});
+                },
+                onCurve: track.keyframes.length < 2
+                    ? null
+                    : () => showTrackCurveSheet(
                         context,
                         ref,
                         playback,
@@ -3152,18 +2915,12 @@ Future<void> showShapeParamsSheet(
                             );
                           }
                         },
-                      );
-                    },
-                    child: Icon(
-                      CupertinoIcons.graph_square,
-                      size: 17,
-                      color: track.keyframes.length >= 2
-                          ? AmColors.accent
-                          : AmColors.muted,
-                    ),
-                  ),
-                ],
+                      ),
               ),
+              onChanged: (v) {
+                controller.editShapeParam(layerId, key, t, v / scale);
+                setSheetState(() {});
+              },
             );
           }
 
@@ -4118,6 +3875,25 @@ class _BlendingPanelState extends ConsumerState<BlendingPanel> {
                 : null,
           ),
           onReset: () => c.resetProp(id, LayerProp.opacity),
+          // EXPOR NO PROJETO (item que faltava do plano de redesign): a
+          // lista de ⚙ Propriedades expostas so removia; agora o toque
+          // longo no nome poe.
+          onExpose: () {
+            c.exposeProperty(
+              ExposedProperty(
+                id: 'expor-$id-opacity',
+                layerId: id,
+                property: 'opacity',
+                label: '${layer.name} · Opacidade',
+                min: 0,
+                max: 1,
+              ),
+            );
+            AureaSnack.show(
+              context,
+              'Opacidade exposta em ⚙ Propriedades do projeto',
+            );
+          },
           onChanged: (v) => c.editOpacity(id, t, v / 100),
         ),
         const SizedBox(height: 6),
@@ -4480,29 +4256,16 @@ class _BlendingPanelState extends ConsumerState<BlendingPanel> {
     ValueChanged<double> changed,
   ) => Row(
     children: [
-      SizedBox(
-        width: 70,
-        child: AppText(
-          label,
-          style: const TextStyle(fontSize: 12, color: AmColors.muted),
-        ),
-      ),
       Expanded(
-        child: AmTickRuler(
-          value: value,
+        child: ParameterRow(
+          label: label,
+          value: value.clamp(min, max),
           min: min,
           max: max,
           unitsPerPixel: (max - min) / 360,
-          height: 38,
-          onChanged: changed,
-        ),
-      ),
-      SizedBox(
-        width: 38,
-        child: AppText(
-          amNumber(value, 0),
-          textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 12, color: AmColors.accent),
+          decimals: 0,
+          height: 40,
+          onChanged: (v) => changed(v.clamp(min, max)),
         ),
       ),
     ],
@@ -5603,39 +5366,21 @@ Future<void> showExtrudeSheet(
                   style: const TextStyle(fontSize: 12.5, color: AmColors.muted),
                 ),
                 const SizedBox(height: 14),
-                Row(
-                  children: [
-                    const SizedBox(
-                      width: 86,
-                      child: AppText('Espessura',
-                        style: TextStyle(fontSize: 13, color: AmColors.muted),
-                      ),
-                    ),
-                    Expanded(
-                      child: AmTickRuler(
-                        value: atual,
-                        min: 0,
-                        max: 400,
-                        unitsPerPixel: 1,
-                        height: 46,
-                        onChanged: (v) {
-                          controller.setLayerExtrude(layerId, v);
-                          setSheetState(() {});
-                        },
-                      ),
-                    ),
-                    SizedBox(
-                      width: 56,
-                      child: AppText(
-                        amNumber(atual, 0),
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          fontSize: 14,
-                          color: AmColors.accent,
-                        ),
-                      ),
-                    ),
-                  ],
+                ParameterRow(
+                  label: 'Espessura',
+                  value: atual,
+                  min: 0,
+                  max: 400,
+                  unitsPerPixel: 1,
+                  decimals: 0,
+                  onChanged: (v) {
+                    controller.setLayerExtrude(layerId, v);
+                    setSheetState(() {});
+                  },
+                  onReset: () {
+                    controller.setLayerExtrude(layerId, 0);
+                    setSheetState(() {});
+                  },
                 ),
                 const SizedBox(height: 8),
                 Wrap(

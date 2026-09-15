@@ -48,6 +48,7 @@ class ParameterRow extends StatelessWidget {
     this.unit = '',
     this.keyframe,
     this.onReset,
+    this.onExpose,
     this.rulerKey,
     this.valueKey,
     this.accentCenter = false,
@@ -55,6 +56,12 @@ class ParameterRow extends StatelessWidget {
     this.expression,
     this.height = AureaTokens.minTap,
   });
+
+  /// EXPOR NO PROJETO (Pro): o toque longo no nome oferece por a
+  /// propriedade na lista de ⚙ Propriedades expostas — a lista que ate
+  /// aqui so removia. Com [onReset] junto, o toque longo vira um menu
+  /// com as duas acoes.
+  final VoidCallback? onExpose;
 
   /// A expressao em vigor (Pro): o chip mostra "fx" e o toque longo edita.
   final String? expression;
@@ -99,6 +106,7 @@ class ParameterRow extends StatelessWidget {
         label: label,
         keyframe: keyframe,
         onReset: onReset,
+        onExpose: onExpose,
         height: height,
         child: Row(
           children: [
@@ -352,6 +360,7 @@ class ParameterFrame extends StatelessWidget {
     required this.child,
     this.keyframe,
     this.onReset,
+    this.onExpose,
     this.height = AureaTokens.minTap,
     this.labelWidth = 76,
   });
@@ -360,8 +369,46 @@ class ParameterFrame extends StatelessWidget {
   final Widget child;
   final KeyframeState? keyframe;
   final VoidCallback? onReset;
+  final VoidCallback? onExpose;
   final double height;
   final double labelWidth;
+
+  /// O TOQUE LONGO NO NOME: so resetar (como sempre) quando e a unica
+  /// acao; com "expor" junto, um menu curto — resetar continua a um
+  /// toque de distancia, e a lista de ⚙ deixa de ser so-remover.
+  Future<void> _menuDoNome(BuildContext context) async {
+    if (onExpose == null) {
+      onReset?.call();
+      return;
+    }
+    if (onReset == null) {
+      onExpose!.call();
+      return;
+    }
+    final acao = await showCupertinoModalPopup<String>(
+      context: context,
+      builder: (c) => CupertinoActionSheet(
+        title: AppText(label),
+        actions: [
+          CupertinoActionSheetAction(
+            onPressed: () => Navigator.of(c).pop('reset'),
+            child: const AppText('Resetar propriedade'),
+          ),
+          CupertinoActionSheetAction(
+            key: const ValueKey('expor-propriedade'),
+            onPressed: () => Navigator.of(c).pop('expor'),
+            child: const AppText('Expor no projeto'),
+          ),
+        ],
+        cancelButton: CupertinoActionSheetAction(
+          onPressed: () => Navigator.of(c).pop(),
+          child: const AppText('Cancelar'),
+        ),
+      ),
+    );
+    if (acao == 'reset') onReset!.call();
+    if (acao == 'expor') onExpose!.call();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -399,10 +446,14 @@ class ParameterFrame extends StatelessWidget {
           else
             const SizedBox(width: 6),
           Tooltip(
-            message: onReset == null ? label : '$label (toque longo: resetar)',
+            message: onReset == null && onExpose == null
+                ? label
+                : '$label (toque longo: acoes)',
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
-              onLongPress: onReset,
+              onLongPress: onReset == null && onExpose == null
+                  ? null
+                  : () => _menuDoNome(context),
               child: SizedBox(
                 width: labelWidth,
                 child: Align(

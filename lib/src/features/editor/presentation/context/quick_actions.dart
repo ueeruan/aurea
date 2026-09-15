@@ -13,6 +13,7 @@ import '../../domain/layer.dart';
 import '../am/align_sheet.dart';
 import '../am/animar_sheet.dart';
 import '../am/amv_sheet.dart';
+import '../../domain/look_de_cinema.dart';
 import '../am/audio_sheet.dart';
 import '../am/beat_pulse_sheet.dart';
 import '../am/beats_sheet.dart';
@@ -115,6 +116,48 @@ List<QuickAction> quickActionsFor(
         icon: CupertinoIcons.bolt_fill,
         label: 'AMV',
         onTap: () => pausa(() => showAmvSheet(context, ref, id, playback)),
+      ),
+    // LOOK DE CINEMA: uma camada de ajuste no topo com a pilha de filme
+    // (grade, grao, bloom, halation, vinheta) — cada peca editavel.
+    if (layer is! AudioLayer)
+      QuickAction(
+        key: 'look',
+        icon: CupertinoIcons.film,
+        label: 'Look',
+        onTap: () => pausa(() {
+          showCupertinoModalPopup<void>(
+            context: context,
+            builder: (menuContext) => CupertinoActionSheet(
+              title: const AppText('Look de cinema'),
+              message: const AppText(
+                'Uma camada de ajuste no topo, com grade, grão, bloom, '
+                'halation e vinheta — tudo editável peça a peça.',
+              ),
+              actions: [
+                for (final look in LookDeCinema.values)
+                  CupertinoActionSheetAction(
+                    onPressed: () {
+                      Navigator.of(menuContext).pop();
+                      final novo = controller.adicionarLook(look);
+                      AureaSnack.show(
+                        context,
+                        novo == null
+                            ? 'Não consegui criar o look.'
+                            : '${look.emPalavras} no topo da pilha.',
+                        actionLabel: novo == null ? null : 'Desfazer',
+                        onAction: controller.undo,
+                      );
+                    },
+                    child: AppText(look.emPalavras),
+                  ),
+              ],
+              cancelButton: CupertinoActionSheetAction(
+                onPressed: () => Navigator.of(menuContext).pop(),
+                child: const AppText('Cancelar'),
+              ),
+            ),
+          );
+        }),
       ),
     // ANIMAR: presets de movimento com keyframes DE VERDADE (editaveis),
     // morphs rapidos de forma e o Auto Morph.

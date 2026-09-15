@@ -13,7 +13,13 @@ enum PresetDeMovimento {
   subir,
   pop,
   soco,
-  zoomSuave;
+  zoomSuave,
+  zoomSuaveFora,
+  panEsquerda,
+  panDireita,
+  tiltCima,
+  tiltBaixo,
+  deriva;
 
   String get emPalavras => switch (this) {
     PresetDeMovimento.aparecer => 'Aparecer',
@@ -22,6 +28,12 @@ enum PresetDeMovimento {
     PresetDeMovimento.pop => 'Pop',
     PresetDeMovimento.soco => 'Soco',
     PresetDeMovimento.zoomSuave => 'Zoom suave',
+    PresetDeMovimento.zoomSuaveFora => 'Zoom suave (afasta)',
+    PresetDeMovimento.panEsquerda => 'Pan ← esquerda',
+    PresetDeMovimento.panDireita => 'Pan → direita',
+    PresetDeMovimento.tiltCima => 'Tilt ↑ cima',
+    PresetDeMovimento.tiltBaixo => 'Tilt ↓ baixo',
+    PresetDeMovimento.deriva => 'Deriva cinematográfica',
   };
 
   String get explicacao => switch (this) {
@@ -32,6 +44,16 @@ enum PresetDeMovimento {
     PresetDeMovimento.soco => 'Incha 12% e volta — o punch de batida.',
     PresetDeMovimento.zoomSuave =>
       'Aproxima 8% devagar, do cabeçote ao fim da camada.',
+    PresetDeMovimento.zoomSuaveFora =>
+      'Afasta 8% devagar até o fim da camada.',
+    PresetDeMovimento.panEsquerda =>
+      'A câmera desliza para a esquerda até o fim da camada.',
+    PresetDeMovimento.panDireita =>
+      'A câmera desliza para a direita até o fim da camada.',
+    PresetDeMovimento.tiltCima => 'Sobe devagar até o fim da camada.',
+    PresetDeMovimento.tiltBaixo => 'Desce devagar até o fim da camada.',
+    PresetDeMovimento.deriva =>
+      'Diagonal lenta com um zoom de 5% — o drift dos reels de cinema.',
   };
 }
 

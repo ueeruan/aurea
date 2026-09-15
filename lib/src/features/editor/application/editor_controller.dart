@@ -23,6 +23,7 @@ import '../domain/cut_ops.dart';
 import '../domain/remapear_tempo.dart';
 import '../domain/presets_de_movimento.dart';
 import '../domain/impacto_amv.dart';
+import '../domain/look_de_cinema.dart';
 import '../domain/panorama3d.dart';
 import '../domain/fonte_truetype.dart';
 import '../domain/modelo_do_texto3d.dart';
@@ -4248,6 +4249,103 @@ class EditorController extends Notifier<VideoProject> {
     );
   }
 
+  // ------------------------------------------------ look de cinema
+
+  /// ADD LOOK (§37 da spec de reels): UMA camada de ajuste no topo com a
+  /// pilha de filme inteira — grade de cor, grao, bloom, halation e
+  /// vinheta — cada peca um efeito NORMAL, com parametros e keyframes.
+  /// Halation nao e um efeito novo: e o glow com os multiplicadores RGB
+  /// puxados para o quente, que e exatamente o que halation e.
+  /// Devolve o id da camada de ajuste criada.
+  String? adicionarLook(LookDeCinema look) {
+    final duracao = state.layers.isEmpty
+        ? const Duration(seconds: 5)
+        : state.layers
+              .map((l) => l.endTime)
+              .reduce((a, b) => a > b ? a : b);
+    EffectInstance efeito(EffectType type, Map<String, double> valores) {
+      final spec = effectSpecs[type]!;
+      return EffectInstance(
+        type: type,
+        params: {
+          for (final e in spec.params.entries)
+            e.key: AnimatedDouble(valores[e.key] ?? e.value.initial),
+        },
+      );
+    }
+
+    // A grade por rodas (lift/gamma/gain) de cada look, em cima do
+    // colorTune. Os numeros sao sutis de proposito: look e tempero.
+    final (gradeC, grao, bloomI, halI) = switch (look) {
+      LookDeCinema.cine => (
+        {
+          'lift_hue': 220.0,
+          'lift_saturation': .08,
+          'gain_hue': 45.0,
+          'gain_saturation': .06,
+        },
+        .22,
+        .35,
+        .30,
+      ),
+      LookDeCinema.quente => (
+        {
+          'gamma_hue': 38.0,
+          'gamma_saturation': .10,
+          'gain_hue': 45.0,
+          'gain_saturation': .10,
+        },
+        .18,
+        .45,
+        .45,
+      ),
+      LookDeCinema.frio => (
+        {
+          'lift_hue': 215.0,
+          'lift_saturation': .12,
+          'gamma_hue': 210.0,
+          'gamma_saturation': .06,
+        },
+        .18,
+        .30,
+        .15,
+      ),
+    };
+    String? id;
+    runAsOneUndo(() {
+      addAdjustmentLayer(Duration.zero);
+      final ajuste = state.layers.whereType<AdjustmentLayer>().firstOrNull;
+      if (ajuste == null) return;
+      id = ajuste.id;
+      _replace(
+        ajuste.copyLayer(
+          name: 'Look · ${look.emPalavras}',
+          duration: duracao,
+          effects: [
+            efeito(EffectType.colorTune, gradeC),
+            efeito(EffectType.filmGrain, {'intensidade': grao}),
+            // Bloom: o glow neutro por cima dos claros.
+            efeito(EffectType.lightGlow, {
+              'threshold': .72,
+              'intensity': bloomI,
+            }),
+            // Halation: o mesmo glow, quente e mais raso — o halo
+            // avermelhado do filme em volta das luzes.
+            efeito(EffectType.lightGlow, {
+              'threshold': .85,
+              'intensity': halI,
+              'mult_r': 1.35,
+              'mult_g': .85,
+              'mult_b': .6,
+            }),
+            efeito(EffectType.vignette, {'quantidade': .28}),
+          ],
+        ),
+      );
+    });
+    return id;
+  }
+
   // -------------------------------------------------- social rapido
 
   /// SEPARA O AUDIO do video numa camada propria, sincronizada pelo
@@ -4521,17 +4619,43 @@ class EditorController extends Notifier<VideoProject> {
             ),
           );
         case PresetDeMovimento.zoomSuave:
-          // Do cabecote ate o fim da camada (o zoom de talking head).
+        case PresetDeMovimento.zoomSuaveFora:
+        case PresetDeMovimento.panEsquerda:
+        case PresetDeMovimento.panDireita:
+        case PresetDeMovimento.tiltCima:
+        case PresetDeMovimento.tiltBaixo:
+        case PresetDeMovimento.deriva:
+          // MOVIMENTOS DE CAMERA: do cabecote ate o FIM da camada, com
+          // keyframes reais em posicao e escala. O deslocamento anda em
+          // proporcao da composicao para dar o mesmo tanto em qualquer
+          // resolucao; zooms ganham 2% de folga na escala quando ha pan,
+          // para a borda nao aparecer.
           final fim = l.duration;
           if (fim <= t) return;
+          final w = state.outputWidth.toDouble();
+          final (dx, dy, fator) = switch (preset) {
+            PresetDeMovimento.zoomSuave => (0.0, 0.0, 1.08),
+            PresetDeMovimento.zoomSuaveFora => (0.0, 0.0, 1 / 1.08),
+            PresetDeMovimento.panEsquerda => (-w * .05, 0.0, 1.06),
+            PresetDeMovimento.panDireita => (w * .05, 0.0, 1.06),
+            PresetDeMovimento.tiltCima => (0.0, -w * .04, 1.06),
+            PresetDeMovimento.tiltBaixo => (0.0, w * .04, 1.06),
+            PresetDeMovimento.deriva => (w * .025, -w * .02, 1.05),
+            _ => (0.0, 0.0, 1.0),
+          };
           _replace(
             l.copyLayer(
+              position: dx == 0 && dy == 0
+                  ? l.position
+                  : l.position
+                        .withKeyframe(t, pos, Easing.easeInOut)
+                        .withKeyframe(fim, pos + Offset(dx, dy)),
               scaleX: l.scaleX
                   .withKeyframe(t, sx, Easing.easeInOut)
-                  .withKeyframe(fim, sx * 1.08),
+                  .withKeyframe(fim, sx * fator),
               scaleY: l.scaleY
                   .withKeyframe(t, sy, Easing.easeInOut)
-                  .withKeyframe(fim, sy * 1.08),
+                  .withKeyframe(fim, sy * fator),
             ),
           );
         case PresetDeMovimento.soco:

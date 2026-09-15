@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:aurea/src/core/l10n/app_language.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
@@ -6,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/ui/snack.dart';
 import '../../../../core/ui/tocavel.dart';
+import '../../application/cronometro_de_edicao.dart';
 import '../../application/editor_controller.dart';
 import '../../application/operacoes_do_lote.dart';
 import '../../application/playback_controller.dart';
@@ -218,6 +221,7 @@ class BarraDoProjeto extends ConsumerWidget {
               ),
             ),
           ),
+          _ChipDoCronometro(projetoId: project.id),
           // O relogio mora na barra do projeto: tocar digita o tempo.
           ValueListenableBuilder<Duration>(
             valueListenable: playback.time,
@@ -777,9 +781,11 @@ class BarraDeReproducao extends ConsumerWidget {
                   ValueListenableBuilder<Duration>(
                     valueListenable: playback.time,
                     builder: (context, t, _) {
+                      // A MESMA TOLERANCIA do toggleMarker: o desenho diz
+                      // "ha marca aqui" exatamente quando o toque tira.
                       final aqui = project.markerNear(
                         t,
-                        Duration(microseconds: quadro.inMicroseconds ~/ 2),
+                        const Duration(milliseconds: 120),
                       );
                       return _BotaoDoCromo(
                         key: const ValueKey('playbar-marcador'),
@@ -1352,71 +1358,490 @@ class IndicadorDeZoomDoPalco extends ConsumerWidget {
   }
 }
 
-/// O ⋮ DA TIMELINE (canto inferior esquerdo): marcas, batidas, agrupar
-/// e o guia.
+/// O ⋮ DA TIMELINE (canto inferior esquerdo): tudo o que vale para o
+/// projeto inteiro ou para a linha do tempo, e nao para uma camada —
+/// selecao, reproducao, modo de previa, miniatura, marcas de introducao
+/// e final, marcadores e batidas, cronometro de edicao, agrupar e guia.
 Future<void> menuDaTimeline(
   BuildContext context,
   WidgetRef ref,
   PlaybackController playback, {
   required VoidCallback onAgrupar,
   required VoidCallback onGuia,
+  VoidCallback? onDefinirMiniatura,
 }) async {
-  await showCupertinoModalPopup<void>(
+  playback.pause();
+  await showModalBottomSheet<void>(
     context: context,
-    builder: (ctx) => CupertinoActionSheet(
-      actions: [
-        CupertinoActionSheetAction(
-          key: const ValueKey('timeline-menu-marcas'),
-          onPressed: () async {
-            Navigator.pop(ctx);
-            await menuDasMarcas(context, ref, playback);
-          },
-          child: const AppText('Marcas na timeline'),
-        ),
-        CupertinoActionSheetAction(
-          key: const ValueKey('timeline-menu-batidas'),
-          onPressed: () async {
-            Navigator.pop(ctx);
-            final som = ref
-                .read(editorControllerProvider)
-                .layers
-                .where((l) => l is AudioLayer || l is VideoLayer)
-                .firstOrNull;
-            if (som == null) {
-              AureaSnack.show(
-                context,
-                'Adicione um áudio ou um vídeo primeiro',
-              );
-              return;
-            }
-            playback.pause();
-            await showBeatsSheet(context, ref, som.id);
-          },
-          child: const AppText('Batidas da música'),
-        ),
-        CupertinoActionSheetAction(
-          key: const ValueKey('timeline-menu-agrupar'),
-          onPressed: () {
-            Navigator.pop(ctx);
-            onAgrupar();
-          },
-          child: const AppText('Agrupar camadas…'),
-        ),
-        CupertinoActionSheetAction(
-          key: const ValueKey('timeline-menu-guia'),
-          onPressed: () {
-            Navigator.pop(ctx);
-            onGuia();
-          },
-          child: const AppText('Guia rápido'),
-        ),
-      ],
-      cancelButton: CupertinoActionSheetAction(
-        onPressed: () => Navigator.pop(ctx),
-        child: const AppText('Cancelar'),
-      ),
+    isScrollControlled: true,
+    backgroundColor: AmColors.panel,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+    ),
+    builder: (folha) => _MenuDaTimeline(
+      playback: playback,
+      contextoDoEditor: context,
+      onAgrupar: onAgrupar,
+      onGuia: onGuia,
+      onDefinirMiniatura: onDefinirMiniatura,
     ),
   );
+}
+
+class _MenuDaTimeline extends ConsumerWidget {
+  const _MenuDaTimeline({
+    required this.playback,
+    required this.contextoDoEditor,
+    required this.onAgrupar,
+    required this.onGuia,
+    required this.onDefinirMiniatura,
+  });
+
+  final PlaybackController playback;
+
+  /// O contexto do editor: as folhas que este menu abre nascem dele, e
+  /// nao da folha que se fecha.
+  final BuildContext contextoDoEditor;
+  final VoidCallback onAgrupar;
+  final VoidCallback onGuia;
+  final VoidCallback? onDefinirMiniatura;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final projeto = ref.watch(editorControllerProvider);
+    final controller = ref.read(editorControllerProvider.notifier);
+    final opcoes = ref.watch(opcoesDeVisualizacaoProvider);
+    final cronometro = ref.watch(cronometroDeEdicaoProvider(projeto.id));
+    final agora = playback.time.value;
+    final expandido = ref.watch(
+      editorSessionProvider.select((s) => s.previewExpanded),
+    );
+
+    void fechar() => Navigator.of(context).pop();
+    void fecharE(VoidCallback acao) {
+      fechar();
+      acao();
+    }
+
+    Widget item(
+      String chave,
+      IconData icone,
+      String rotulo, {
+      String? detalhe,
+      bool? marcado,
+      bool radio = false,
+      required VoidCallback? onTap,
+    }) => _ItemDoMenu(
+      chave: chave,
+      icone: icone,
+      rotulo: rotulo,
+      detalhe: detalhe,
+      marcado: marcado,
+      radio: radio,
+      onTap: onTap,
+    );
+
+    Widget secao(String titulo) => Padding(
+      padding: const EdgeInsets.fromLTRB(20, 14, 20, 4),
+      child: AppText(
+        titulo,
+        style: const TextStyle(
+          color: AmColors.muted,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          letterSpacing: .2,
+        ),
+      ),
+    );
+
+    final estado = cronometro.estado;
+    final todas = [for (final l in projeto.layers) l.id];
+
+    return SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * .78,
+        ),
+        child: ListView(
+          key: const ValueKey('timeline-menu'),
+          shrinkWrap: true,
+          padding: const EdgeInsets.only(bottom: 12),
+          children: [
+            const SizedBox(height: 6),
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AmColors.muted.withValues(alpha: .4),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            secao('Seleção'),
+            item(
+              'timeline-menu-selecionar-todas',
+              CupertinoIcons.checkmark_square,
+              'Selecionar todas as camadas',
+              onTap: todas.length < 2
+                  ? null
+                  : () => fecharE(() {
+                      ref.read(selectedLayerProvider.notifier).state = null;
+                      ref.read(multiSelectProvider.notifier).state = todas
+                          .toSet();
+                    }),
+            ),
+            item(
+              'timeline-menu-limpar-selecao',
+              CupertinoIcons.square,
+              'Limpar seleção',
+              onTap: () => fecharE(() {
+                ref.read(multiSelectProvider.notifier).state = const {};
+                ref.read(selectedLayerProvider.notifier).state = null;
+              }),
+            ),
+            secao('Reprodução e prévia'),
+            item(
+              'timeline-menu-loop',
+              CupertinoIcons.repeat,
+              'Reprodução em loop',
+              marcado: playback.loop.value,
+              onTap: () => fecharE(
+                () => playback.loop.value = !playback.loop.value,
+              ),
+            ),
+            item(
+              'timeline-menu-tela-cheia',
+              CupertinoIcons.fullscreen,
+              expandido ? 'Sair da tela cheia' : 'Tela cheia',
+              onTap: () => fecharE(
+                () => ref
+                    .read(editorSessionProvider.notifier)
+                    .togglePreviewExpanded(),
+              ),
+            ),
+            for (final modo in ModoDePrevia.values)
+              item(
+                'timeline-menu-modo-${modo.name}',
+                switch (modo) {
+                  ModoDePrevia.resultadoFinal => CupertinoIcons.sparkles,
+                  ModoDePrevia.semEfeitos => CupertinoIcons.wand_rays_inverse,
+                  ModoDePrevia.meioTransparente =>
+                    CupertinoIcons.circle_lefthalf_fill,
+                },
+                'Prévia: ${rotuloDoModoDePrevia(modo)}',
+                marcado: opcoes.modo == modo,
+                radio: true,
+                onTap: () => fecharE(
+                  () => ref
+                      .read(opcoesDeVisualizacaoProvider.notifier)
+                      .definirModo(modo),
+                ),
+              ),
+            secao('Projeto'),
+            item(
+              'timeline-menu-aparar-projeto',
+              CupertinoIcons.scissors_alt,
+              'Aparar o projeto no cabeçote',
+              detalhe: 'Corta tudo o que passa de ${tempoDaInfobar(agora)}',
+              onTap: agora <= Duration.zero
+                  ? null
+                  : () => fecharE(() {
+                      controller.aparaProjetoNoCabecote(agora);
+                      AureaSnack.show(
+                        contextoDoEditor,
+                        'Projeto aparado no cabeçote',
+                        actionLabel: 'Desfazer',
+                        onAction: controller.undo,
+                      );
+                    }),
+            ),
+            item(
+              'timeline-menu-miniatura',
+              CupertinoIcons.photo,
+              'Usar este quadro como miniatura',
+              detalhe: projeto.thumbTime == null
+                  ? null
+                  : 'Hoje: ${tempoDaInfobar(projeto.thumbTime!)}',
+              onTap: onDefinirMiniatura == null
+                  ? null
+                  : () => fecharE(onDefinirMiniatura!),
+            ),
+            if (projeto.thumbTime != null)
+              item(
+                'timeline-menu-limpar-miniatura',
+                CupertinoIcons.photo_on_rectangle,
+                'Voltar à miniatura automática',
+                onTap: () =>
+                    fecharE(() => controller.definirQuadroDaMiniatura(null)),
+              ),
+            item(
+              'timeline-menu-intro',
+              CupertinoIcons.arrow_right_to_line,
+              'Marcar aqui o fim da introdução',
+              detalhe: projeto.introFim == null
+                  ? 'Esticado noutro projeto, a introdução toca intacta'
+                  : 'Hoje: ${tempoDaInfobar(projeto.introFim!)}',
+              onTap: () =>
+                  fecharE(() => controller.marcarFimDaIntroducao(agora)),
+            ),
+            if (projeto.introFim != null)
+              item(
+                'timeline-menu-intro-tirar',
+                CupertinoIcons.xmark,
+                'Tirar a marca da introdução',
+                onTap: () =>
+                    fecharE(() => controller.marcarFimDaIntroducao(null)),
+              ),
+            item(
+              'timeline-menu-final',
+              CupertinoIcons.arrow_left_to_line,
+              'Marcar aqui o começo do final',
+              detalhe: projeto.finalInicio == null
+                  ? 'Esticado noutro projeto, o final toca intacto'
+                  : 'Hoje: ${tempoDaInfobar(projeto.finalInicio!)}',
+              onTap: () =>
+                  fecharE(() => controller.marcarInicioDoFinal(agora)),
+            ),
+            if (projeto.finalInicio != null)
+              item(
+                'timeline-menu-final-tirar',
+                CupertinoIcons.xmark,
+                'Tirar a marca do final',
+                onTap: () =>
+                    fecharE(() => controller.marcarInicioDoFinal(null)),
+              ),
+            secao('Marcas e ritmo'),
+            item(
+              'timeline-menu-marcador',
+              CupertinoIcons.bookmark,
+              'Marcar este instante',
+              onTap: () => fecharE(() => controller.toggleMarker(agora)),
+            ),
+            item(
+              'timeline-menu-marcas',
+              CupertinoIcons.bookmark_solid,
+              'Marcas na timeline',
+              detalhe: projeto.markers.isEmpty
+                  ? null
+                  : '${projeto.markers.length}',
+              onTap: () => fecharE(
+                () => menuDasMarcas(contextoDoEditor, ref, playback),
+              ),
+            ),
+            item(
+              'timeline-menu-batidas',
+              CupertinoIcons.music_note_2,
+              'Batidas da música',
+              onTap: () => fecharE(() async {
+                final som = ref
+                    .read(editorControllerProvider)
+                    .layers
+                    .where((l) => l is AudioLayer || l is VideoLayer)
+                    .firstOrNull;
+                if (som == null) {
+                  AureaSnack.show(
+                    contextoDoEditor,
+                    'Adicione um áudio ou um vídeo primeiro',
+                  );
+                  return;
+                }
+                await showBeatsSheet(contextoDoEditor, ref, som.id);
+              }),
+            ),
+            secao('Cronômetro de edição'),
+            if (estado == EstadoDoCronometro.parado)
+              item(
+                'timeline-menu-cronometro-iniciar',
+                CupertinoIcons.timer,
+                'Iniciar o cronômetro',
+                detalhe: 'Conta o tempo que você passa editando este projeto',
+                onTap: () => fecharE(cronometro.iniciar),
+              ),
+            if (estado == EstadoDoCronometro.rodando)
+              item(
+                'timeline-menu-cronometro-pausar',
+                CupertinoIcons.pause_circle,
+                'Pausar o cronômetro',
+                detalhe: textoDoCronometro(cronometro.total),
+                onTap: () => fecharE(cronometro.pausar),
+              ),
+            if (estado == EstadoDoCronometro.pausado)
+              item(
+                'timeline-menu-cronometro-retomar',
+                CupertinoIcons.play_circle,
+                'Retomar o cronômetro',
+                detalhe: textoDoCronometro(cronometro.total),
+                onTap: () => fecharE(cronometro.iniciar),
+              ),
+            if (estado != EstadoDoCronometro.parado)
+              item(
+                'timeline-menu-cronometro-apagar',
+                CupertinoIcons.trash,
+                'Apagar o cronômetro',
+                onTap: () => fecharE(cronometro.apagar),
+              ),
+            secao('Mais'),
+            item(
+              'timeline-menu-agrupar',
+              CupertinoIcons.rectangle_stack,
+              'Agrupar camadas…',
+              onTap: () => fecharE(onAgrupar),
+            ),
+            item(
+              'timeline-menu-guia',
+              CupertinoIcons.book,
+              'Guia rápido',
+              onTap: () => fecharE(onGuia),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Uma linha do menu: icone, rotulo, detalhe opcional e, quando e uma
+/// escolha, o visto a direita. Sem ripple, com realce sutil (iOS).
+class _ItemDoMenu extends StatelessWidget {
+  const _ItemDoMenu({
+    required this.chave,
+    required this.icone,
+    required this.rotulo,
+    required this.onTap,
+    this.detalhe,
+    this.marcado,
+    this.radio = false,
+  });
+
+  final String chave;
+  final IconData icone;
+  final String rotulo;
+  final String? detalhe;
+  final bool? marcado;
+  final bool radio;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ativo = onTap != null;
+    final cor = ativo ? AmColors.text : AmColors.muted.withValues(alpha: .6);
+    return Tocavel(
+      key: ValueKey(chave),
+      onTap: onTap == null
+          ? null
+          : () {
+              HapticFeedback.selectionClick();
+              onTap!();
+            },
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 48),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+          child: Row(
+            children: [
+              Icon(icone, size: 20, color: cor),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    AppText(rotulo, style: TextStyle(color: cor, fontSize: 15)),
+                    if (detalhe != null)
+                      AppText(
+                        detalhe!,
+                        style: const TextStyle(
+                          color: AmColors.muted,
+                          fontSize: 12,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              if (marcado != null)
+                Icon(
+                  marcado!
+                      ? (radio
+                            ? CupertinoIcons.largecircle_fill_circle
+                            : CupertinoIcons.checkmark_alt)
+                      : (radio ? CupertinoIcons.circle : null),
+                  size: 18,
+                  color: marcado! ? AmColors.action : AmColors.muted,
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// O CRONOMETRO NA BARRA DO PROJETO: so aparece contando, e anda de
+/// segundo em segundo.
+class _ChipDoCronometro extends ConsumerStatefulWidget {
+  const _ChipDoCronometro({required this.projetoId});
+
+  final String projetoId;
+
+  @override
+  ConsumerState<_ChipDoCronometro> createState() => _ChipDoCronometroState();
+}
+
+class _ChipDoCronometroState extends ConsumerState<_ChipDoCronometro> {
+  Timer? _tique;
+
+  @override
+  void dispose() {
+    _tique?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cronometro = ref.watch(cronometroDeEdicaoProvider(widget.projetoId));
+    final rodando = cronometro.estado == EstadoDoCronometro.rodando;
+    if (rodando && _tique == null) {
+      _tique = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (mounted) setState(() {});
+      });
+    } else if (!rodando && _tique != null) {
+      _tique!.cancel();
+      _tique = null;
+    }
+    if (!rodando) return const SizedBox.shrink();
+    return Tooltip(
+      message: 'Tempo de edição deste projeto',
+      child: Container(
+        key: const ValueKey('navbar-cronometro'),
+        margin: const EdgeInsets.only(right: 2),
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+        decoration: BoxDecoration(
+          color: CromoEditor.trilho,
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              CupertinoIcons.timer,
+              size: 12,
+              color: CromoEditor.acao,
+            ),
+            const SizedBox(width: 3),
+            AppText(
+              textoDoCronometro(cronometro.total),
+              style: const TextStyle(
+                color: CromoEditor.branco,
+                fontSize: 11,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 /// IR PARA O TEMPO — o relogio da navbar aceita "12.5", "1:02.5" etc.

@@ -114,6 +114,9 @@ class VideoProject {
     this.bpm,
     this.lottieMode = false,
     this.backgroundColor = const Color(0xFF000000),
+    this.thumbTime,
+    this.introFim,
+    this.finalInicio,
   }) : id = id ?? const Uuid().v4(),
        layers = List.unmodifiable(layers ?? const <Layer>[]),
        links = List.unmodifiable(links ?? const <PropertyLink>[]),
@@ -139,6 +142,17 @@ class VideoProject {
   /// padrao, como sempre foi; o preview e a exportacao pintam esta cor
   /// atras das camadas.
   final Color backgroundColor;
+
+  /// O QUADRO DA MINIATURA escolhido no menu da timeline. Nulo = a lista
+  /// de projetos mostra o quadro de onde a pessoa saiu do editor.
+  final Duration? thumbTime;
+
+  /// AS MARCAS DE RE-TEMPORIZACAO: o fim da introducao e o comeco do
+  /// final. Quando este projeto entra noutro como camada e e esticado ou
+  /// repetido, o que fica antes de [introFim] e depois de [finalInicio]
+  /// toca intacto — so o miolo estica ou repete.
+  final Duration? introFim;
+  final Duration? finalInicio;
 
   final List<Layer> layers;
 
@@ -327,7 +341,13 @@ class VideoProject {
     data: data,
     bindings: bindings,
     markers: markers,
+    beats: beats,
+    bpm: bpm,
     lottieMode: lottieMode,
+    backgroundColor: backgroundColor,
+    thumbTime: thumbTime,
+    introFim: introFim,
+    finalInicio: finalInicio,
   );
 
   VideoProject copyWith({
@@ -350,6 +370,12 @@ class VideoProject {
     double? bpm,
     bool? lottieMode,
     Color? backgroundColor,
+    Duration? thumbTime,
+    bool limparThumbTime = false,
+    Duration? introFim,
+    bool limparIntroFim = false,
+    Duration? finalInicio,
+    bool limparFinalInicio = false,
   }) {
     return VideoProject(
       id: id,
@@ -373,6 +399,11 @@ class VideoProject {
       bpm: bpm ?? this.bpm,
       lottieMode: lottieMode ?? this.lottieMode,
       backgroundColor: backgroundColor ?? this.backgroundColor,
+      thumbTime: limparThumbTime ? null : (thumbTime ?? this.thumbTime),
+      introFim: limparIntroFim ? null : (introFim ?? this.introFim),
+      finalInicio: limparFinalInicio
+          ? null
+          : (finalInicio ?? this.finalInicio),
     );
   }
 }

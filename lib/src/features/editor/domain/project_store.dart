@@ -2897,6 +2897,9 @@ Map<String, dynamic> _projectToJson(VideoProject p) => {
   'fps': p.fps,
   'resH': p.resolutionHeight,
   if (p.backgroundColor.toARGB32() != 0xFF000000) 'bg': _col(p.backgroundColor),
+  if (p.thumbTime != null) 'thumbUs': p.thumbTime!.inMicroseconds,
+  if (p.introFim != null) 'introUs': p.introFim!.inMicroseconds,
+  if (p.finalInicio != null) 'outroUs': p.finalInicio!.inMicroseconds,
   if (p.meta.isNotEmpty)
     'meta': {
       for (final e in p.meta.entries)
@@ -3034,6 +3037,12 @@ List<Layer> _camadasDoJson(Object? bruto) {
   return out;
 }
 
+/// Um instante opcional gravado em microssegundos. Lixo vira nulo.
+Duration? _duracaoOpcional(Object? v) {
+  if (v is! num || !v.isFinite || v < 0) return null;
+  return Duration(microseconds: v.toInt());
+}
+
 VideoProject projectFromJson(Map<String, dynamic> m) => VideoProject(
   // Sem id no arquivo, um id novo — dois projetos sem id nao podem
   // virar o mesmo projeto na lista de recentes.
@@ -3044,6 +3053,9 @@ VideoProject projectFromJson(Map<String, dynamic> m) => VideoProject(
   fps: _positivo(m['fps'], 30).round(),
   resolutionHeight: _positivo(m['resH'], 1080).round(),
   backgroundColor: m['bg'] == null ? const Color(0xFF000000) : _asCol(m['bg']),
+  thumbTime: _duracaoOpcional(m['thumbUs']),
+  introFim: _duracaoOpcional(m['introUs']),
+  finalInicio: _duracaoOpcional(m['outroUs']),
   layers: _camadasDoJson(m['layers']),
   links: [
     for (final l in (m['links'] as List? ?? const []))

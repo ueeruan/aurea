@@ -230,15 +230,34 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
           return;
         }
         // A miniatura do projeto para a tela inicial: capturada AGORA,
-        // com o palco ainda vivo; a escrita segue em segundo plano.
-        ThumbnailService.instance.capture(
-          previewStageKey,
-          ref.read(editorControllerProvider).id,
-        );
+        // com o palco ainda vivo; a escrita segue em segundo plano. Com
+        // um quadro escolhido no menu da timeline, fica o escolhido.
+        if (ref.read(editorControllerProvider).thumbTime == null) {
+          ThumbnailService.instance.capture(
+            previewStageKey,
+            ref.read(editorControllerProvider).id,
+          );
+        }
         Navigator.of(context).maybePop();
       default:
         _session.closePanel();
     }
+  }
+
+  /// USAR ESTE QUADRO COMO MINIATURA: sem selecao (a borda branca da
+  /// camada escolhida entraria na foto), o palco e fotografado no quadro
+  /// seguinte e o instante fica gravado no projeto.
+  Future<void> _usarQuadroComoMiniatura() async {
+    final controller = ref.read(editorControllerProvider.notifier);
+    final id = ref.read(editorControllerProvider).id;
+    controller.definirQuadroDaMiniatura(_playback.time.value);
+    ref.read(multiSelectProvider.notifier).state = const {};
+    ref.read(selectedLayerProvider.notifier).state = null;
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    await ThumbnailService.instance.capture(previewStageKey, id);
+    if (!mounted) return;
+    AureaSnack.show(context, 'Este quadro virou a miniatura do projeto');
   }
 
   /// Titulo da categoria aberta (cabecalho da zona E).
@@ -1116,6 +1135,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                               context,
                               ref,
                               _playback,
+                              onDefinirMiniatura: _usarQuadroComoMiniatura,
                               onAgrupar: _agruparPorEscolha,
                               onGuia: () {
                                 _playback.pause();

@@ -515,6 +515,62 @@ class EditorController extends Notifier<VideoProject> {
 
   void renameProject(String name) => _mutate(state.copyWith(name: name));
 
+  /// O QUADRO DA MINIATURA (menu ⋮ da timeline). Nulo volta ao padrao:
+  /// a lista de projetos mostra o quadro de onde se saiu do editor.
+  void definirQuadroDaMiniatura(Duration? t) => _mutate(
+    t == null
+        ? state.copyWith(limparThumbTime: true)
+        : state.copyWith(thumbTime: t < Duration.zero ? Duration.zero : t),
+  );
+
+  /// O FIM DA INTRODUCAO (re-temporizacao). Nulo tira a marca. As duas
+  /// marcas nunca se cruzam: marcar a introducao depois do comeco do
+  /// final tira o final.
+  void marcarFimDaIntroducao(Duration? t) {
+    if (t == null) {
+      _mutate(state.copyWith(limparIntroFim: true));
+      return;
+    }
+    final fim = state.finalInicio;
+    _mutate(
+      state.copyWith(
+        introFim: t,
+        limparFinalInicio: fim != null && fim <= t,
+      ),
+    );
+  }
+
+  /// O COMECO DO FINAL (re-temporizacao). Nulo tira a marca.
+  void marcarInicioDoFinal(Duration? t) {
+    if (t == null) {
+      _mutate(state.copyWith(limparFinalInicio: true));
+      return;
+    }
+    final intro = state.introFim;
+    _mutate(
+      state.copyWith(
+        finalInicio: t,
+        limparIntroFim: intro != null && intro >= t,
+      ),
+    );
+  }
+
+  /// APARAR O PROJETO NO CABECOTE: o que passa dele e cortado e o que so
+  /// comeca depois dele sai. Um passo de desfazer para tudo.
+  void aparaProjetoNoCabecote(Duration t) {
+    if (t <= Duration.zero) return;
+    runAsOneUndo(() {
+      final depois = [
+        for (final l in state.layers)
+          if (l.startTime >= t) l.id,
+      ];
+      if (depois.isNotEmpty) removeLayers(depois);
+      for (final l in [...state.layers]) {
+        if (l.endTime > t) trimLayerEnd(l.id, t);
+      }
+    });
+  }
+
   /// A COMPOSICAO (⚙ Projeto, Fase 6): proporcao, resolucao e fps.
   void setComposition({double? aspectRatio, int? resolutionHeight, int? fps}) {
     _mutate(

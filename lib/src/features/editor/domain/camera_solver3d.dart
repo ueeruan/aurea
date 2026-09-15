@@ -1545,6 +1545,90 @@ SolucaoCamera3D _arrumarMundo(SolucaoCamera3D s) {
   );
 }
 
+/// MOVE A ORIGEM DO MUNDO para [origem] (um ponto da nuvem, o centro
+/// de um plano). So translacao: nada gira nem muda de tamanho, e a
+/// reprojecao fica IDENTICA — o que muda e onde o (0, 0, 0) mora.
+SolucaoCamera3D definirOrigem(SolucaoCamera3D s, List<double> origem) {
+  List<double> mover(List<double> v) => [
+    v[0] - origem[0],
+    v[1] - origem[1],
+    v[2] - origem[2],
+  ];
+  final novasPoses = <PoseCamera>[];
+  for (final p in s.poses) {
+    final pos = mover(p.posicao);
+    final rt = p.rotacao.aplicar(pos);
+    novasPoses.add(PoseCamera(p.quadro, p.rotacao, [-rt[0], -rt[1], -rt[2]]));
+  }
+  return s.copiarCom(
+    poses: novasPoses,
+    nuvem: {for (final e in s.nuvem.entries) e.key: mover(e.value)},
+  );
+}
+
+/// A CONVENCAO METRICA DO MUNDO 3D: 1 metro = 100 unidades. Rastreio de
+/// uma camera so nao sabe tamanho (a mesma filmagem serve para uma
+/// maquete e para um predio); Definir escala ancora essa ambiguidade
+/// numa medida que a pessoa conhece.
+const unidadesPorMetro = 100.0;
+
+/// ESCALA DO MUNDO: multiplica tudo por [fator]. A reprojecao nao muda
+/// um pixel — muda o que "1 unidade" quer dizer.
+SolucaoCamera3D escalarMundo(SolucaoCamera3D s, double fator) {
+  if (!fator.isFinite || fator <= 0) return s;
+  List<double> mover(List<double> v) => [
+    v[0] * fator,
+    v[1] * fator,
+    v[2] * fator,
+  ];
+  final novasPoses = <PoseCamera>[];
+  for (final p in s.poses) {
+    final pos = mover(p.posicao);
+    final rt = p.rotacao.aplicar(pos);
+    novasPoses.add(PoseCamera(p.quadro, p.rotacao, [-rt[0], -rt[1], -rt[2]]));
+  }
+  return s.copiarCom(
+    poses: novasPoses,
+    nuvem: {for (final e in s.nuvem.entries) e.key: mover(e.value)},
+  );
+}
+
+/// Unidades que a pessoa pode usar ao medir uma distancia da cena.
+enum UnidadeReal {
+  mm,
+  cm,
+  m,
+  pol,
+  pe;
+
+  double get metros => switch (this) {
+    UnidadeReal.mm => 0.001,
+    UnidadeReal.cm => 0.01,
+    UnidadeReal.m => 1,
+    UnidadeReal.pol => 0.0254,
+    UnidadeReal.pe => 0.3048,
+  };
+
+  String get emPalavras => switch (this) {
+    UnidadeReal.mm => 'mm',
+    UnidadeReal.cm => 'cm',
+    UnidadeReal.m => 'm',
+    UnidadeReal.pol => 'pol',
+    UnidadeReal.pe => 'pés',
+  };
+}
+
+/// O fator que faz a distancia entre os pontos [a] e [b] valer [metros]
+/// de verdade (na convencao de [unidadesPorMetro]). Nulo quando os
+/// pontos nao existem ou estao praticamente juntos.
+double? fatorDeEscalaReal(SolucaoCamera3D s, int a, int b, double metros) {
+  final va = s.nuvem[a], vb = s.nuvem[b];
+  if (va == null || vb == null || !metros.isFinite || metros <= 0) return null;
+  final d = norma([va[0] - vb[0], va[1] - vb[1], va[2] - vb[2]]);
+  if (d < 1e-9) return null;
+  return metros * unidadesPorMetro / d;
+}
+
 /// O PLANO DO CHAO a partir de pontos escolhidos — o "definir plano do
 /// chao e origem" do After Effects.
 ///

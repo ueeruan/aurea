@@ -60,6 +60,32 @@ class CameraTrackService {
   /// Da para recalcular sem reler o video?
   bool podeResolverDeNovo(String layerId) => _rastros.containsKey(layerId);
 
+  /// Adota uma solucao vinda de fora (copia entre camadas, testes).
+  void adotar(String layerId, SolucaoCamera3D s) {
+    _cache[layerId] = s;
+    revision.value++;
+  }
+
+  /// CORTAR OU DUPLICAR O CLIPE NAO PERDE O RASTREIO. A solucao e um
+  /// ATIVO do trecho da fonte, nao da camada: as duas metades de um
+  /// corte mostram pedacos do mesmo trecho, e o mapeamento por instante
+  /// da fonte ('src0') faz cada metade pegar as poses certas sozinha.
+  /// Copia a memoria na hora e o arquivo em segundo plano.
+  Future<void> clonar(String deId, String paraId) async {
+    final s = _cache[deId];
+    if (s != null) {
+      _cache[paraId] = s;
+      final r = _rastros[deId];
+      if (r != null) _rastros[paraId] = r;
+      revision.value++;
+    }
+    try {
+      final pasta = (await _pasta()).path;
+      final de = File('$pasta/$deId.json');
+      if (de.existsSync()) await de.copy('$pasta/$paraId.json');
+    } catch (_) {}
+  }
+
   Future<Directory> _pasta() async {
     final base = await getApplicationSupportDirectory();
     final d = Directory('${base.path}/camera3d');

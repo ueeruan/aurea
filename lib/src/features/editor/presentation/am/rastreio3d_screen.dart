@@ -13,6 +13,8 @@ import '../../domain/camera_solver3d.dart';
 import '../../domain/cena_do_rastreio.dart';
 import '../../domain/layer.dart';
 import '../../domain/plano_do_rastreio.dart';
+import '../estudio/folhas_do_estudio.dart' show escolherModeloProvider;
+import '../../application/model_import_service.dart';
 import 'am_colors.dart';
 import 'am_widgets.dart';
 
@@ -213,7 +215,8 @@ class _Rastreio3DScreenState extends ConsumerState<Rastreio3DScreen> {
     if (!mounted) return;
     AureaSnack.show(
       context,
-      'Chão definido. O mundo 3D agora tem esse plano como y = 0.',
+      'Chão definido. O mundo 3D agora tem esse plano como y = 0.'
+      '${_avisoDeCenaExistente()}',
       duration: const Duration(seconds: 4),
     );
   }
@@ -285,6 +288,14 @@ class _Rastreio3DScreenState extends ConsumerState<Rastreio3DScreen> {
       if (mounted) setState(() => _resolvendo = false);
     }
   }
+
+  /// Chao, origem e escala mexem no MUNDO inteiro. Objetos ja montados
+  /// na cena ficam onde estavam (em coordenadas velhas) — o aviso existe
+  /// para a pessoa preferir ajustar o mundo ANTES de montar.
+  String _avisoDeCenaExistente() =>
+      _cenaDoClipe(criarSePreciso: false) == null
+      ? ''
+      : ' Objetos já montados na cena não acompanham — confira a posição deles.';
 
   /// A CENA 3D onde as coisas entram. Cria se ainda não existe: a pessoa
   /// pediu para pôr um texto no chão, e não para administrar camadas.
@@ -360,6 +371,191 @@ class _Rastreio3DScreenState extends ConsumerState<Rastreio3DScreen> {
       onAction: _c.undo,
       duration: const Duration(seconds: 5),
     );
+  }
+
+  /// UMA ANCORA (nulo da cena) no ponto escolhido — o lugar do mundo em
+  /// que se pendura texto, modelo, o que vier. Nao guarda o id do ponto:
+  /// guarda a POSICAO, entao apagar pontos depois nao a derruba.
+  Future<void> _ancoraNoPonto() async {
+    final id = _escolhidos.single;
+    final cena = _cenaDoClipe();
+    if (cena == null) {
+      AureaSnack.show(context, 'Não consegui criar a cena 3D.');
+      return;
+    }
+    _c.criarNoDoPonto(cena, _s, id);
+    if (!mounted) return;
+    AureaSnack.show(
+      context,
+      'Âncora criada no ponto. Pendure camadas nela no Estúdio 3D.',
+      actionLabel: 'Desfazer',
+      onAction: _c.undo,
+      duration: const Duration(seconds: 5),
+    );
+  }
+
+  Future<void> _definirOrigemAqui() async {
+    final ponto = _s.nuvem[_escolhidos.single];
+    if (ponto == null) return;
+    await _guardar(definirOrigem(_s, ponto));
+    if (!mounted) return;
+    AureaSnack.show(
+      context,
+      'Origem definida: esse ponto agora é o (0, 0, 0).'
+      '${_avisoDeCenaExistente()}',
+      duration: const Duration(seconds: 5),
+    );
+  }
+
+  /// DEFINIR ESCALA: dois pontos + a distancia real entre eles. Depois
+  /// disso, 100 unidades do mundo = 1 metro, e os numeros dos paineis
+  /// passam a ter tamanho de verdade.
+  Future<void> _definirEscalaReal() async {
+    final ids = _escolhidos.toList();
+    var unidade = UnidadeReal.m;
+    final campo = TextEditingController(text: '1.0');
+    final valor = await showCupertinoDialog<double>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, muda) => CupertinoAlertDialog(
+          title: const AppText('Distância real'),
+          content: Column(
+            children: [
+              const SizedBox(height: 6),
+              const AppText(
+                'Quanto mede, no mundo real, a distância entre os dois '
+                'pontos escolhidos?',
+                style: TextStyle(fontSize: 12),
+              ),
+              const SizedBox(height: 10),
+              CupertinoTextField(
+                controller: campo,
+                autofocus: true,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  for (final u in UnidadeReal.values)
+                    GestureDetector(
+                      key: ValueKey('rastreio3d-unidade-${u.name}'),
+                      onTap: () => muda(() => unidade = u),
+                      child: Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 3),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: u == unidade
+                              ? AmColors.accentDim
+                              : AmColors.chip,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: AppText(
+                          u.emPalavras,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: u == unidade
+                                ? AmColors.accent
+                                : AmColors.text,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
+          actions: [
+            CupertinoDialogAction(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const AppText('Cancelar'),
+            ),
+            CupertinoDialogAction(
+              isDefaultAction: true,
+              onPressed: () {
+                final v = double.tryParse(campo.text.replaceAll(',', '.'));
+                Navigator.of(
+                  dialogContext,
+                ).pop(v == null ? null : v * unidade.metros);
+              },
+              child: const AppText('Aplicar'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (valor == null || !mounted) return;
+    final fator = fatorDeEscalaReal(_s, ids[0], ids[1], valor);
+    if (fator == null) {
+      AureaSnack.show(context, 'Esses dois pontos estão juntos demais.');
+      return;
+    }
+    await _guardar(escalarMundo(_s, fator));
+    if (!mounted) return;
+    AureaSnack.show(
+      context,
+      'Escala definida: 100 unidades = 1 metro.${_avisoDeCenaExistente()}',
+      duration: const Duration(seconds: 5),
+    );
+  }
+
+  /// MODELO 3D NA SUPERFICIE: cria a ancora no plano, abre o importador
+  /// de sempre e pendura o modelo na ancora — ele nasce deitado na
+  /// superficie e preso ao lugar.
+  Future<void> _importarModeloNoPlano(PlanoDoRastreio plano) async {
+    final cena = _cenaDoClipe();
+    if (cena == null) {
+      AureaSnack.show(context, 'Não consegui criar a cena 3D.');
+      return;
+    }
+    _c.updateScene3D(
+      cena,
+      (c) => c.copyWith(
+        nodes: [
+          ...c.nodes,
+          noNoPlano(plano, ObjetoNoPlano.nulo, nome: 'Âncora · superfície'),
+        ],
+      ),
+    );
+    final projeto = ref.read(editorControllerProvider);
+    final camada = projeto.layerById(cena);
+    if (camada is! Scene3DLayer || camada.scene.nodes.isEmpty) return;
+    final ancora = camada.scene.nodes.last.id;
+    try {
+      final caminhos = await ref.read(escolherModeloProvider)();
+      if (!mounted || caminhos.isEmpty) return;
+      final modelo = await readModel3DFiles(caminhos);
+      if (!mounted) return;
+      final noId = _c.addModel3D(cena, modelo);
+      if (noId.isEmpty) return;
+      _c.updateScene3D(
+        cena,
+        (c) => c.copyWith(
+          nodes: [
+            for (final n in c.nodes)
+              if (n.id == noId) n.copyWith(parentId: ancora) else n,
+          ],
+        ),
+      );
+      if (!mounted) return;
+      Navigator.of(context).maybePop();
+      AureaSnack.show(
+        context,
+        '${modelo.name} preso à superfície.',
+        actionLabel: 'Desfazer',
+        onAction: _c.undo,
+        duration: const Duration(seconds: 5),
+      );
+    } catch (e) {
+      if (mounted) {
+        AureaSnack.show(context, 'Não deu para importar o modelo: $e');
+      }
+    }
   }
 
   // ------------------------------------------------------------ tela
@@ -532,6 +728,15 @@ class _Rastreio3DScreenState extends ConsumerState<Rastreio3DScreen> {
                 onTap: () => _adicionar(t),
               ),
             ),
+          _Acao(
+            chave: 'rastreio3d-add-modelo',
+            icone: CupertinoIcons.arrow_down_doc,
+            titulo: 'Modelo 3D (importar)',
+            detalhe:
+                'Escolhe um arquivo de modelo e prende ele nesta '
+                'superfície, por uma âncora.',
+            onTap: () => _importarModeloNoPlano(plano),
+          ),
           const SizedBox(height: 4),
           _Acao(
             chave: 'rastreio3d-definir-chao',
@@ -566,6 +771,38 @@ class _Rastreio3DScreenState extends ConsumerState<Rastreio3DScreen> {
                         'espalhados em profundidade.',
             ),
           ),
+        if (_escolhidos.length == 1) ...[
+          _Acao(
+            chave: 'rastreio3d-ancora-ponto',
+            icone: CupertinoIcons.pin,
+            titulo: 'Âncora neste ponto',
+            detalhe: 'Um nulo da cena preso a este lugar do mundo.',
+            destaque: true,
+            onTap: _ancoraNoPonto,
+          ),
+          const SizedBox(height: 8),
+          _Acao(
+            chave: 'rastreio3d-origem',
+            icone: CupertinoIcons.smallcircle_circle,
+            titulo: 'Definir origem aqui',
+            detalhe: 'Este ponto vira o (0, 0, 0) do mundo 3D.',
+            onTap: _definirOrigemAqui,
+          ),
+          const SizedBox(height: 8),
+        ],
+        if (_escolhidos.length == 2) ...[
+          _Acao(
+            chave: 'rastreio3d-escala',
+            icone: CupertinoIcons.arrow_left_right,
+            titulo: 'Definir distância real',
+            detalhe:
+                'Diga quanto mede a distância entre os dois pontos '
+                'escolhidos, e o mundo ganha escala de verdade.',
+            destaque: true,
+            onTap: _definirEscalaReal,
+          ),
+          const SizedBox(height: 8),
+        ],
         _Acao(
           chave: 'rastreio3d-criar-camera',
           icone: CupertinoIcons.videocam,

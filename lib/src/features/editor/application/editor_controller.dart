@@ -1,3 +1,4 @@
+import 'dart:async' show unawaited;
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui';
@@ -4976,6 +4977,10 @@ class EditorController extends Notifier<VideoProject> {
     final layers = [...state.layers]..insert(idx, copy);
     _mutate(state.copyWith(layers: layers));
     ref.read(selectedLayerProvider.notifier).state = copy.id;
+    // O rastreio de camera acompanha a copia (e um ativo do trecho).
+    if (layer is VideoLayer) {
+      unawaited(CameraTrackService.instance.clonar(id, copy.id));
+    }
   }
 
   void reorderLayer(String id, int delta) {
@@ -5320,6 +5325,11 @@ class EditorController extends Notifier<VideoProject> {
     }
     _mutate(state.copyWith(layers: layers));
     ref.read(selectedLayerProvider.notifier).state = second.id;
+    // A segunda metade herda o rastreio de camera: mesma fonte, mesmo
+    // trecho — o mapeamento por instante da fonte escolhe as poses.
+    if (layer is VideoLayer) {
+      unawaited(CameraTrackService.instance.clonar(id, second.id));
+    }
   }
 
   /// DIVIDE a camada em todos os [times] (globais), de uma vez.

@@ -22,6 +22,7 @@ import '../domain/cena_do_rastreio.dart';
 import '../domain/cut_ops.dart';
 import '../domain/remapear_tempo.dart';
 import '../domain/presets_de_movimento.dart';
+import '../domain/impacto_amv.dart';
 import '../domain/panorama3d.dart';
 import '../domain/fonte_truetype.dart';
 import '../domain/modelo_do_texto3d.dart';
@@ -4245,6 +4246,100 @@ class EditorController extends Notifier<VideoProject> {
     _replace(
       layer.copyLayer(speed: 1, effects: replaceTimeRemap(layer, track)),
     );
+  }
+
+  // ------------------------------------------------------ impacto AMV
+
+  /// ADD IMPACT (§24 da spec de AMV): a batida visual completa — pulso
+  /// de escala na camada, tremor com envelope (ataque/segura/decai),
+  /// glow, flash de exposicao e RGB split — como EFEITOS NOVOS anexados
+  /// com keyframes reais. Nada de caixa preta: cada peca fica na pilha,
+  /// com nome, parametros e losangos, e um undo tira o impacto inteiro.
+  void aplicarImpactoAmv(String id, Duration globalTime, ImpactoAmv nivel) {
+    final layer = _layer(id);
+    if (layer == null) return;
+    final t = layer.localTime(globalTime);
+    final (pulso, tremor, glow, flash, rgb) = switch (nivel) {
+      ImpactoAmv.suave => (1.06, 5.0, 0.5, 0.30, 0.0),
+      ImpactoAmv.medio => (1.12, 11.0, 0.9, 0.50, 6.0),
+      ImpactoAmv.forte => (1.20, 20.0, 1.5, 0.75, 12.0),
+    };
+    const subida = Duration(milliseconds: 90);
+    const queda = Duration(milliseconds: 420);
+
+    AnimatedDouble envelope(double base, double pico) => AnimatedDouble(base)
+        .withKeyframe(t, base, Easing.easeOut)
+        .withKeyframe(t + subida, pico, Easing.easeInOut)
+        .withKeyframe(t + queda, base);
+
+    EffectInstance efeito(EffectType type, Map<String, AnimatedDouble> kfs) {
+      final spec = effectSpecs[type]!;
+      return EffectInstance(
+        type: type,
+        params: {
+          for (final e in spec.params.entries)
+            e.key: kfs[e.key] ?? AnimatedDouble(e.value.initial),
+        },
+      );
+    }
+
+    runAsOneUndo(() {
+      final l = _layer(id);
+      if (l == null) return;
+      final sx = l.scaleX.valueAt(t);
+      final sy = l.scaleY.valueAt(t);
+      _replace(
+        l.copyLayer(
+          scaleX: l.scaleX
+              .withKeyframe(t, sx, Easing.easeOut)
+              .withKeyframe(t + subida, sx * pulso, Easing.easeInOut)
+              .withKeyframe(t + queda, sx),
+          scaleY: l.scaleY
+              .withKeyframe(t, sy, Easing.easeOut)
+              .withKeyframe(t + subida, sy * pulso, Easing.easeInOut)
+              .withKeyframe(t + queda, sy),
+          effects: [
+            ...l.effects,
+            efeito(EffectType.tremor, {
+              'amplitude': envelope(0, tremor),
+            }),
+            efeito(EffectType.lightGlow, {
+              'intensity': envelope(0, glow),
+            }),
+            efeito(EffectType.brightnessContrast, {
+              'brightness': AnimatedDouble(0)
+                  .withKeyframe(t, 0, Easing.easeOut)
+                  .withKeyframe(
+                    t + const Duration(milliseconds: 50),
+                    flash,
+                    Easing.easeIn,
+                  )
+                  .withKeyframe(t + const Duration(milliseconds: 240), 0),
+            }),
+            if (rgb > 0)
+              efeito(EffectType.rgbSplit, {
+                'deslocamento': envelope(0, rgb),
+              }),
+          ],
+        ),
+      );
+    });
+  }
+
+  /// CORTA O CLIPE NAS BATIDAS que caem dentro dele (Beat Sync do AMV).
+  /// Usa a grade ja analisada (folha Batidas); devolve quantos cortes.
+  int cortarNasBatidas(String id) {
+    final layer = _layer(id);
+    if (layer == null) return 0;
+    final dentro = [
+      for (final b in state.beats)
+        if (b > layer.startTime + const Duration(milliseconds: 120) &&
+            b < layer.endTime - const Duration(milliseconds: 120))
+          b,
+    ];
+    if (dentro.isEmpty) return 0;
+    splitLayerAtTimes(id, dentro);
+    return dentro.length;
   }
 
   // --------------------------------------------- presets de movimento

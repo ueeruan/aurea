@@ -12,6 +12,7 @@ import '../../application/ui/editor_session.dart';
 import '../../domain/layer.dart';
 import '../am/align_sheet.dart';
 import '../am/animar_sheet.dart';
+import '../am/amv_sheet.dart';
 import '../am/audio_sheet.dart';
 import '../am/beat_pulse_sheet.dart';
 import '../am/beats_sheet.dart';
@@ -105,6 +106,16 @@ List<QuickAction> quickActionsFor(
         );
       },
     ),
+    // AMV: as batidas viradas em edicao — impacto, tremor, rampa, whip,
+    // flash e cortes na grade de batidas. Portas finas para sistemas
+    // normais; nada fechado.
+    if (layer is VideoLayer || layer is GroupLayer)
+      QuickAction(
+        key: 'amv',
+        icon: CupertinoIcons.bolt_fill,
+        label: 'AMV',
+        onTap: () => pausa(() => showAmvSheet(context, ref, id, playback)),
+      ),
     // ANIMAR: presets de movimento com keyframes DE VERDADE (editaveis),
     // morphs rapidos de forma e o Auto Morph.
     if (layer is! AudioLayer)

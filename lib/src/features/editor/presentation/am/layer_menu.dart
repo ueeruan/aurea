@@ -12,6 +12,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/utils/time_format.dart';
 import '../../application/editor_controller.dart';
 import 'precomp_sheet.dart';
+import 'rastreio_sheet.dart' show showRastreioSheet;
 import 'aprimoramento_sheet.dart';
 import '../../application/playback_controller.dart';
 import '../../domain/blend_extra.dart';
@@ -519,6 +520,12 @@ _Tile? _tileDaSecao(
             : showElement3DSheet(context, ref, layer.id),
       ),
       badge: null,
+    ),
+    AmSecao.rastrear => (
+      icone: CupertinoIcons.viewfinder,
+      rotulo: 'Cena 3D',
+      onTap: () => abrirDepois(() => showRastreioSheet(context, ref, layer.id)),
+      badge: 'NEW',
     ),
     AmSecao.efeitos => (
       icone: CupertinoIcons.sparkles,

@@ -13,6 +13,7 @@ import '../../domain/cut.dart';
 import '../../domain/cut_ops.dart';
 import '../../domain/layer.dart';
 import 'am_colors.dart';
+import '../../../../core/ui/tocavel.dart';
 import 'am_widgets.dart';
 import 'estudio_do_tempo.dart';
 
@@ -148,9 +149,9 @@ Future<void> showSpeedSheet(
                   // grafo de valor e de velocidade, congelar e reverso.
                   Padding(
                     padding: const EdgeInsets.only(top: 4, bottom: 8),
-                    child: GestureDetector(
+                    child: Tocavel(
                       key: const ValueKey('abrir-estudio-do-tempo'),
-                      behavior: HitTestBehavior.opaque,
+                      haptico: true,
                       onTap: () async {
                         await showEstudioDoTempo(
                           sheetContext,
@@ -266,10 +267,10 @@ class _SpeedChip extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
+  Widget build(BuildContext context) => Tocavel(
     onTap: onTap,
     child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
       decoration: BoxDecoration(
         color: selected ? AmColors.accentDim : AmColors.chip,
         borderRadius: BorderRadius.circular(9),

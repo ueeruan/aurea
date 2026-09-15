@@ -13,6 +13,7 @@ import '../../../../core/utils/time_format.dart';
 import '../../application/editor_controller.dart';
 import 'precomp_sheet.dart';
 import 'rastreio_sheet.dart' show showRastreioSheet;
+import '../../../../core/ui/tocavel.dart';
 import 'aprimoramento_sheet.dart';
 import '../../application/playback_controller.dart';
 import '../../domain/blend_extra.dart';
@@ -3754,8 +3755,7 @@ class _MenuTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Expanded(
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
+      child: Tocavel(
         onTap: () {
           HapticFeedback.lightImpact();
           onTap();

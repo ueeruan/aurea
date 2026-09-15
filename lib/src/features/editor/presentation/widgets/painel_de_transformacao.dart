@@ -1,5 +1,6 @@
 import 'package:aurea/src/core/l10n/app_language.dart';
 import 'package:flutter/material.dart';
+import '../../../../core/ui/tocavel.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/ui/am_colors.dart';
@@ -265,9 +266,8 @@ class _PainelDeTransformacaoState extends ConsumerState<PainelDeTransformacao> {
       final aceso = ajuste == alvo;
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: 4),
-        child: GestureDetector(
+        child: Tocavel(
           key: ValueKey(chave),
-          behavior: HitTestBehavior.opaque,
           onTap: () => _c.setAjusteDaMidia(l.id, alvo),
           child: Container(
             height: 30,

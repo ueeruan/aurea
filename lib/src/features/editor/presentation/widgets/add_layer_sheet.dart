@@ -1298,6 +1298,22 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
                   _controller.addCameraLayer(widget.playhead);
                 },
               ),
+              // 3c. iPhone 3D — o aparelho parametrico: pecas de verdade
+              // na cena (corpo, tela, ilha, lentes), tela que aceita
+              // imagem/camada, e um nulo na linha do tempo para animar.
+              cardItem(
+                key: const ValueKey('add-iphone3d'),
+                iconWidget: const Icon(
+                  CupertinoIcons.device_phone_portrait,
+                  size: 36,
+                  color: Color(0xFFC9CDD4),
+                ),
+                label: 'iPhone 3D',
+                onTap: () {
+                  _fecha();
+                  _controller.addIphone3D(widget.playhead);
+                },
+              ),
               // 4. Elemento / Projeto
               cardItem(
                 iconWidget: CustomPaint(

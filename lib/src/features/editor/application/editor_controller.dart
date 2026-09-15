@@ -2432,6 +2432,158 @@ class EditorController extends Notifier<VideoProject> {
     return no;
   }
 
+  /// O IPHONE 3D QUE DA PARA MODIFICAR: um aparelho paramétrico montado
+  /// de nos comuns da cena — corpo extrudado, tela, ilha das cameras e
+  /// lentes — pendurados num nulo proprio e vinculados a um nulo da
+  /// linha do tempo. Cada parte e um no de verdade: troca-se material,
+  /// cor e tamanho no estudio, e a TELA aceita imagem ou camada de
+  /// imagem pela ficha do no (a "camada na tela" do After Effects).
+  Future<String?> addIphone3D(Duration at) async {
+    String? raiz;
+    runAsOneUndo(() {
+      var cena = state.layers.whereType<Scene3DLayer>().firstOrNull;
+      if (cena == null) {
+        addScene3DLayer(at);
+        cena = state.layers.whereType<Scene3DLayer>().first;
+      }
+      final cenaId = cena.id;
+
+      SceneNode extrudado(
+        String nome,
+        double w,
+        double h,
+        double r,
+        double depth,
+        double size,
+        Material3D material, {
+        double x = 0,
+        double y = 0,
+        double z = 0,
+        String? parentId,
+      }) {
+        final contorno = _contornoArredondado(w, h, r);
+        return SceneNode(
+          name: nome,
+          mesh: extrudeOutline(contorno, depth: depth),
+          outline: contorno,
+          extrudeDepth: depth,
+          size: size,
+          material: material,
+          x: AnimatedDouble(x),
+          y: AnimatedDouble(y),
+          z: AnimatedDouble(z),
+          parentId: parentId,
+        );
+      }
+
+      final nulo = SceneNode(name: 'iPhone', isNull: true);
+      raiz = nulo.id;
+      const titanio = Material3D(
+        name: 'Titânio',
+        baseColor: Color(0xFF48484F),
+        metallic: 0.85,
+        roughness: 0.38,
+        reflectivity: 0.5,
+      );
+      final corpo = extrudado(
+        'Corpo',
+        100,
+        207,
+        16,
+        11.7,
+        110,
+        titanio,
+        parentId: nulo.id,
+      );
+      // A TELA: preta e SEM LUZ — textura na tela aparece no brilho
+      // cheio, como uma tela de verdade (e nao como plastico iluminado).
+      final tela = extrudado(
+        'Tela',
+        94,
+        201,
+        13,
+        2,
+        107,
+        const Material3D(
+          name: 'Tela',
+          baseColor: Color(0xFF07070A),
+          kind: MaterialKind.unlit,
+        ),
+        z: 5.8,
+        parentId: nulo.id,
+      );
+      final ilha = extrudado(
+        'Ilha das câmeras',
+        40,
+        40,
+        10,
+        4,
+        21,
+        const Material3D(
+          name: 'Ilha',
+          baseColor: Color(0xFF3A3A41),
+          metallic: 0.8,
+          roughness: 0.5,
+        ),
+        x: -26,
+        y: 81,
+        z: -7.8,
+        parentId: nulo.id,
+      );
+      const vidroDaLente = Material3D(
+        name: 'Lente',
+        baseColor: Color(0xFF101318),
+        metallic: 0.2,
+        roughness: 0.08,
+        reflectivity: 0.8,
+      );
+      SceneNode lente(String nome, double x, double y) => SceneNode(
+        name: nome,
+        kind: Element3DKind.cylinder,
+        size: 8,
+        material: vidroDaLente,
+        x: AnimatedDouble(x),
+        y: AnimatedDouble(y),
+        z: AnimatedDouble(-6),
+        rotX: AnimatedDouble(90),
+        parentId: nulo.id,
+      );
+      final atual = _layer(cenaId);
+      if (atual is! Scene3DLayer) return;
+      _replace(
+        atual.withScene(
+          atual.scene.copyWith(
+            nodes: [
+              ...atual.scene.nodes,
+              nulo,
+              corpo,
+              tela,
+              ilha,
+              lente('Lente 1', -34, 89),
+              lente('Lente 2', -34, 73),
+              lente('Lente 3', -18, 81),
+            ],
+          ),
+        ),
+      );
+      // O NULO DA LINHA DO TEMPO: girar e animar essa camada gira o
+      // aparelho inteiro — o mesmo arranjo do Texto 3D.
+      addNullLayer(at);
+      final nuloDaComposicao = state.layers.first.id;
+      renameLayer(nuloDaComposicao, 'Nulo 3D · iPhone');
+      vincularNoANuloDaComposicao(cenaId, raiz!, nuloDaComposicao);
+      final depois = _layer(cenaId);
+      if (depois is Scene3DLayer &&
+          depois.scene.panorama.sourcePath == null) {
+        updateScene3D(
+          cenaId,
+          (s) => s.copyWith(environment: EnvironmentKind.estudioMetal),
+        );
+      }
+    });
+    return raiz;
+  }
+
   /// AS ANIMACOES DE TEXTO DE UM TEXTO 3D (os mesmos presets do texto
   /// normal). Troca o modelo do no por um com o bloco de animacao novo —
   /// as malhas sao as mesmas listas, so o esqueleto ganha vida. A
@@ -8590,4 +8742,30 @@ class _QuadroDeGrupo {
 
   /// Inicio do grupo na linha de tempo de fora (para o cabecote).
   final Duration inicio;
+}
+
+/// CONTORNO DE RETANGULO ARREDONDADO, centrado na origem, para extrudar
+/// (as pecas do iPhone 3D). [passos] pontos por canto — seis ja sai liso
+/// no tamanho de tela.
+List<Offset> _contornoArredondado(
+  double w,
+  double h,
+  double r, [
+  int passos = 6,
+]) {
+  final metadeW = w / 2, metadeH = h / 2;
+  final raio = r.clamp(0.0, math.min(metadeW, metadeH));
+  final out = <Offset>[];
+  void canto(double cx, double cy, double a0) {
+    for (var i = 0; i <= passos; i++) {
+      final a = a0 + i / passos * (math.pi / 2);
+      out.add(Offset(cx + raio * math.cos(a), cy + raio * math.sin(a)));
+    }
+  }
+
+  canto(metadeW - raio, metadeH - raio, 0);
+  canto(-(metadeW - raio), metadeH - raio, math.pi / 2);
+  canto(-(metadeW - raio), -(metadeH - raio), math.pi);
+  canto(metadeW - raio, -(metadeH - raio), 3 * math.pi / 2);
+  return out;
 }

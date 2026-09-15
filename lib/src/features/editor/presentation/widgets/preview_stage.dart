@@ -5574,6 +5574,224 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
             );
           }
 
+        // --------------------------- lote AE do dono (15/09/2026)
+        case EffectType.lightSweep:
+          final inten = effect.paramAt('intensidade', local).clamp(0.0, 3.0);
+          if (inten > 0.02) {
+            final posicao = effect.paramAt('posicao', local);
+            final anguloVar = effect.paramAt('angulo', local) * math.pi / 180;
+            final larguraFaixa =
+                effect.paramAt('largura', local).clamp(0.02, 0.6);
+            final alfaFaixa = (0.55 * inten).clamp(0.0, 1.0);
+            // A SILHUETA BRANCA da camada: a luz so existe onde a camada
+            // existe — e o que faz parecer varredura NELA, e nao um
+            // retangulo passando por cima.
+            final silhueta = ColorFiltered(
+              colorFilter: const ColorFilter.matrix(<double>[
+                0, 0, 0, 0, 255, //
+                0, 0, 0, 0, 255, //
+                0, 0, 0, 0, 255, //
+                0, 0, 0, 1, 0,
+              ]),
+              child: out,
+            );
+            final dir = Offset(math.cos(anguloVar), math.sin(anguloVar));
+            final faixa = ShaderMask(
+              shaderCallback: (rect) {
+                final c = rect.center;
+                final alcance = rect.longestSide;
+                final centroDaFaixa =
+                    c + dir * ((posicao - 0.5) * 1.5 * alcance);
+                final metade = alcance * larguraFaixa;
+                return ui.Gradient.linear(
+                  centroDaFaixa - dir * metade,
+                  centroDaFaixa + dir * metade,
+                  [
+                    const Color(0x00FFFFFF),
+                    Colors.white.withValues(alpha: alfaFaixa),
+                    Colors.white.withValues(alpha: alfaFaixa),
+                    const Color(0x00FFFFFF),
+                  ],
+                  const [0.0, 0.38, 0.62, 1.0],
+                );
+              },
+              blendMode: BlendMode.srcIn,
+              child: silhueta,
+            );
+            out = Stack(
+              clipBehavior: Clip.none,
+              children: [
+                out,
+                BlendMask(
+                  blendMode: BlendMode.plus,
+                  margem: 4,
+                  child: faixa,
+                ),
+              ],
+            );
+          }
+
+        case EffectType.saber:
+          final intenSabre =
+              effect.paramAt('intensidade', local).clamp(0.0, 4.0);
+          if (intenSabre > 0.02) {
+            final matiz = effect.paramAt('matiz', local).clamp(0.0, 360.0);
+            final raioSabre = pxAt1080(
+              effect.paramAt('raio', local).clamp(2.0, 80.0),
+              fxWidth,
+              fxHeight,
+            );
+            final nucleo = effect.paramAt('nucleo', local).clamp(0.0, 2.0);
+            final cor = HSVColor.fromAHSV(1, matiz % 360, 1, 1).toColor();
+            // Aura: a silhueta pintada da cor, borrada e SOMADA — duas
+            // passadas (larga fraca + estreita forte) dao o miolo denso
+            // com a franja aberta que o Saber de verdade tem.
+            Widget tinta(Color c, double alfa) => ColorFiltered(
+              colorFilter: ColorFilter.matrix(<double>[
+                0, 0, 0, 0, c.r * 255, //
+                0, 0, 0, 0, c.g * 255, //
+                0, 0, 0, 0, c.b * 255, //
+                0, 0, 0, alfa.clamp(0.0, 1.0), 0,
+              ]),
+              child: out,
+            );
+            Widget borra(Widget w, double sigma) => ImageFiltered(
+              imageFilter: ui.ImageFilter.blur(
+                sigmaX: sigma,
+                sigmaY: sigma,
+                tileMode: TileMode.decal,
+              ),
+              child: w,
+            );
+            final margemSabre = raioSabre * 3 + 6;
+            out = Stack(
+              clipBehavior: Clip.none,
+              children: [
+                out,
+                BlendMask(
+                  blendMode: BlendMode.plus,
+                  margem: margemSabre,
+                  child: borra(
+                    tinta(cor, (intenSabre * 0.5).clamp(0.0, 1.0)),
+                    raioSabre,
+                  ),
+                ),
+                BlendMask(
+                  blendMode: BlendMode.plus,
+                  margem: margemSabre,
+                  child: borra(
+                    tinta(cor, (intenSabre * 0.8).clamp(0.0, 1.0)),
+                    raioSabre * 0.35,
+                  ),
+                ),
+                if (nucleo > 0.02)
+                  BlendMask(
+                    blendMode: BlendMode.plus,
+                    margem: margemSabre,
+                    child: borra(
+                      tinta(Colors.white, (nucleo * 0.9).clamp(0.0, 1.0)),
+                      (raioSabre * 0.12).clamp(0.6, 4.0),
+                    ),
+                  ),
+              ],
+            );
+          }
+
+        case EffectType.lensBlur:
+          final raioLente = pxAt1080(
+            effect.paramAt('raio', local).clamp(0.0, 60.0),
+            fxWidth,
+            fxHeight,
+          );
+          if (raioLente > 0.3) {
+            final brilho = effect.paramAt('brilho', local).clamp(0.0, 3.0);
+            final limiar = effect.paramAt('limiar', local).clamp(0.3, 1.0);
+            final desfocada = ImageFiltered(
+              imageFilter: ui.ImageFilter.blur(
+                sigmaX: raioLente,
+                sigmaY: raioLente,
+                tileMode: TileMode.decal,
+              ),
+              child: out,
+            );
+            if (brilho <= 0.02) {
+              out = desfocada;
+            } else {
+              // O ESTOURO DOS CLAROS: passa-altas de cor (o que passa do
+              // limiar sobra; o resto zera) borrado e SOMADO por cima.
+              // E o estouro que separa "lente" de "borrao".
+              final ganho = (1 / math.max(0.05, 1 - limiar)) *
+                  brilho.clamp(0.0, 3.0);
+              final realces = ImageFiltered(
+                imageFilter: ui.ImageFilter.blur(
+                  sigmaX: raioLente * 1.4,
+                  sigmaY: raioLente * 1.4,
+                  tileMode: TileMode.decal,
+                ),
+                child: ColorFiltered(
+                  colorFilter: ColorFilter.matrix(<double>[
+                    ganho, 0, 0, 0, -255 * limiar * ganho, //
+                    0, ganho, 0, 0, -255 * limiar * ganho, //
+                    0, 0, ganho, 0, -255 * limiar * ganho, //
+                    0, 0, 0, 1, 0,
+                  ]),
+                  child: out,
+                ),
+              );
+              out = Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  desfocada,
+                  BlendMask(
+                    blendMode: BlendMode.plus,
+                    margem: raioLente * 3 + 6,
+                    child: realces,
+                  ),
+                ],
+              );
+            }
+          }
+
+        case EffectType.bit8:
+          final pixel = effect.paramAt('pixel', local).clamp(8.0, 200.0);
+          final coresN = effect.paramAt('cores', local).round().clamp(2, 16);
+          final viva = effect.paramAt('vivacidade', local).clamp(0.0, 1.0);
+          // Pixel grande sem interpolacao + poucas cores + saturacao de
+          // fliperama — a mecanica do mosaic e do posterize num efeito
+          // so, com a cara da epoca.
+          out = ImageFiltered(
+            imageFilter: ui.ImageFilter.compose(
+              outer: ui.ImageFilter.matrix(
+                Matrix4.diagonal3Values(pixel / 3, pixel / 3, 1).storage,
+                filterQuality: FilterQuality.none,
+              ),
+              inner: ui.ImageFilter.matrix(
+                Matrix4.diagonal3Values(3 / pixel, 3 / pixel, 1).storage,
+                filterQuality: FilterQuality.none,
+              ),
+            ),
+            child: out,
+          );
+          out = ColorFiltered(
+            colorFilter: ColorFilter.matrix(
+              _posterizeMatrix(coresN.toDouble()),
+            ),
+            child: out,
+          );
+          if (viva > 0.01) {
+            final sViva = 1 + viva;
+            final inv = 1 - sViva;
+            out = ColorFiltered(
+              colorFilter: ColorFilter.matrix(<double>[
+                0.213 * inv + sViva, 0.715 * inv, 0.072 * inv, 0, 0, //
+                0.213 * inv, 0.715 * inv + sViva, 0.072 * inv, 0, 0, //
+                0.213 * inv, 0.715 * inv, 0.072 * inv + sViva, 0, 0, //
+                0, 0, 0, 1, 0,
+              ]),
+              child: out,
+            );
+          }
+
         case EffectType.blobTracker:
           // As caixas vem da ANALISE ja gravada. Sem analise, o pintor
           // simula — para a pessoa ajustar a aparencia antes de gastar

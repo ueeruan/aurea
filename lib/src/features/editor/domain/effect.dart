@@ -92,6 +92,11 @@ enum EffectType {
   mathOps,
   sSharpen,
   looks,
+  // --- lote AE do dono (15/09/2026): sweep, saber, lens blur, 8-bit ---
+  lightSweep,
+  saber,
+  lensBlur,
+  bit8,
 }
 
 /// O tipo a partir do IDENTIFICADOR estavel.
@@ -3662,6 +3667,90 @@ const effectSpecs = <EffectType, EffectSpec>{
         'source_b': 1,
         'dest_saturation': .9,
       }),
+    ],
+  ),
+  // A VARREDURA DE LUZ (CC Light Sweep): uma faixa clara atravessa a
+  // camada na direcao escolhida. E a posicao que se anima — dois
+  // keyframes e o brilho passa uma vez.
+  EffectType.lightSweep: EffectSpec(
+    id: 'light_sweep',
+    name: 'Light Sweep',
+    category: 'Stylize',
+    synonyms: ['varredura', 'luz', 'sweep', 'shine', 'brilho passando'],
+    cost: 2,
+    params: {
+      'posicao': EffectParam('Posição', 0.5, -0.5, 1.5),
+      'angulo': EffectParam('Ângulo', 30.0, -180.0, 180.0),
+      'largura': EffectParam('Largura', 0.18, 0.02, 0.6),
+      'intensidade': EffectParam('Intensidade', 1.0, 0.0, 3.0),
+    },
+    montar: ['posicao', 'intensidade'],
+    presets: [
+      EffectPronto('Sutil', {'largura': 0.12, 'intensidade': 0.6}),
+      EffectPronto('Vitrine', {'largura': 0.2, 'intensidade': 1.4}),
+      EffectPronto('Relâmpago', {'largura': 0.35, 'intensidade': 2.4}),
+    ],
+  ),
+  // O SABRE: nucleo branco + aura colorida a partir da propria
+  // silhueta da camada — texto e formas viram lamina de energia.
+  EffectType.saber: EffectSpec(
+    id: 'saber',
+    name: 'Saber',
+    category: 'Stylize',
+    synonyms: ['sabre', 'neon', 'laser', 'energia', 'lightsaber', 'glow'],
+    cost: 3,
+    params: {
+      'matiz': EffectParam('Matiz', 200.0, 0.0, 360.0),
+      'raio': EffectParam('Raio', 18.0, 2.0, 80.0, relative: true),
+      'intensidade': EffectParam('Intensidade', 1.4, 0.0, 4.0),
+      'nucleo': EffectParam('Núcleo', 1.0, 0.0, 2.0),
+    },
+    montar: ['matiz', 'intensidade'],
+    presets: [
+      EffectPronto('Jedi', {'matiz': 200, 'raio': 16, 'intensidade': 1.4}),
+      EffectPronto('Sith', {'matiz': 0, 'raio': 22, 'intensidade': 1.8}),
+      EffectPronto('Neon', {'matiz': 300, 'raio': 30, 'intensidade': 2.2,
+        'nucleo': 0.6}),
+    ],
+  ),
+  // LENS BLUR aproximado: desfoque grande com os REALCES estourando —
+  // e o estouro dos claros que separa "lente" de "borrao".
+  EffectType.lensBlur: EffectSpec(
+    id: 'lens_blur',
+    name: 'Lens Blur',
+    category: 'Blur',
+    synonyms: ['bokeh', 'lente', 'desfoque de lente', 'dof', 'profundidade'],
+    cost: 3,
+    params: {
+      'raio': EffectParam('Raio', 14.0, 0.0, 60.0, relative: true),
+      'brilho': EffectParam('Brilho dos realces', 1.0, 0.0, 3.0),
+      'limiar': EffectParam('Limiar', 0.75, 0.3, 1.0),
+    },
+    montar: ['raio', 'brilho'],
+    presets: [
+      EffectPronto('Suave', {'raio': 8, 'brilho': 0.6}),
+      EffectPronto('Retrato', {'raio': 18, 'brilho': 1.2}),
+      EffectPronto('Sonho', {'raio': 34, 'brilho': 2.0, 'limiar': 0.6}),
+    ],
+  ),
+  // 8-BIT: pixel grande + poucas cores + saturacao de fliperama, num
+  // efeito so (pixelate + posterize ja existem separados; aqui e o
+  // atalho que soa como a epoca).
+  EffectType.bit8: EffectSpec(
+    id: '8_bit',
+    name: '8-Bit',
+    category: 'Stylize',
+    synonyms: ['8 bit', 'pixel', 'retro', 'fliperama', 'game', 'nes'],
+    params: {
+      'pixel': EffectParam('Pixel', 90.0, 8.0, 200.0),
+      'cores': EffectParam('Cores', 5.0, 2.0, 16.0),
+      'vivacidade': EffectParam('Vivacidade', 0.35, 0.0, 1.0),
+    },
+    montar: ['pixel', 'cores'],
+    presets: [
+      EffectPronto('NES', {'pixel': 110, 'cores': 4, 'vivacidade': 0.5}),
+      EffectPronto('16-bit', {'pixel': 60, 'cores': 8, 'vivacidade': 0.3}),
+      EffectPronto('Minecraft', {'pixel': 150, 'cores': 10}),
     ],
   ),
 };

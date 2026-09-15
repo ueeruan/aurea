@@ -184,6 +184,14 @@ String effectHelp(EffectType type) => switch (type) {
   EffectType.mathOps => 'Combina a camada (A) com uma fonte B numa operação de pixel: somar, subtrair, multiplicar, tela, média, sobrepor, mínimo, máximo ou diferença. Luzes escala, sombras desloca os escuros e saturação ajusta A, B e o resultado. A máscara de luma limita onde o resultado aparece. Precisa da GPU.',
   EffectType.sSharpen => 'Afia o detalhe em duas escalas sem estourar as bordas que já são fortes. Limiar alto afia menos; Nitidez da cor afia também as bordas coloridas.',
   EffectType.looks => 'Um look de cinema pronto sobre a camada, com a força que você quiser. Use numa camada de ajuste para colorir o edit inteiro.',
+  EffectType.lightSweep =>
+    'Uma faixa de luz atravessa a camada. Anime a Posição com dois keyframes para o brilho passar uma vez; ângulo e largura moldam a faixa. Clássico para logos e texto.',
+  EffectType.saber =>
+    'Núcleo branco com aura colorida a partir da própria silhueta da camada — texto e formas viram lâmina de energia. Matiz escolhe a cor; raio espalha; núcleo controla o miolo branco.',
+  EffectType.lensBlur =>
+    'Desfoque de lente: além de borrar, estoura os pontos claros como bokeh. Limiar decide o que conta como realce; brilho controla o estouro.',
+  EffectType.bit8 =>
+    'Pixel grande, poucas cores e saturação de fliperama num efeito só. Pixel e Cores definem a época: 4 cores para NES, 8 para 16-bit.',
   EffectType.opticalFlow => 'Estima o movimento entre quadros para suavizar câmera lenta. A prévia é preparada em segundo plano; a exportação calcula os quadros a partir do original. Cortes de cena não são misturados.',
   EffectType.twirl => 'Torce a imagem ao redor de um centro. Angulo controla o giro e raio delimita a area afetada. As bordas sao espelhadas.',
   EffectType.fisheye => 'Deforma a imagem como uma lente grande angular. Valores positivos ampliam o centro; negativos comprimem.',

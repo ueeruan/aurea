@@ -6,9 +6,7 @@
 // rotY e rotZ invertem). O defeito de campo: subir o nulo descia a
 // cena, e o giro orbitava para o lado errado — a camera recebia o nulo
 // em coordenadas cruas da composicao.
-import 'dart:ui';
 
-import 'package:aurea/src/features/editor/application/editor_controller.dart';
 import 'package:aurea/src/features/editor/domain/keyframe.dart';
 import 'package:aurea/src/features/editor/domain/layer.dart';
 import 'package:aurea/src/features/editor/domain/video_project.dart';

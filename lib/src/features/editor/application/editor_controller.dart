@@ -19,6 +19,7 @@ import '../domain/caption_highlight.dart';
 import '../domain/camera3d.dart';
 import '../domain/camera_cuts.dart';
 import '../domain/cut.dart';
+import '../domain/desenho_livre.dart';
 import '../domain/presets_de_edicao.dart';
 import '../domain/camera_solver3d.dart';
 import '../domain/cena_do_rastreio.dart';
@@ -8168,6 +8169,66 @@ class EditorController extends Notifier<VideoProject> {
             i,
       ],
     );
+  }
+
+  /// O DESENHO da camada (a mao livre), se houver.
+  ShapeDesenho? desenhoDaCamada(String layerId) {
+    final layer = _layer(layerId);
+    if (layer is! ShapeLayer) return null;
+    for (final i in layer.contents) {
+      if (i is ShapeDesenho) return i;
+    }
+    return null;
+  }
+
+  /// A CAMADA DE DESENHO: uma forma vazia com um caderno de tracos
+  /// dentro, plantada no centro da composicao (o dedo desenha em
+  /// coordenadas da composicao, e a camada guarda a diferenca).
+  String criarCamadaDeDesenho(Duration at, {String nome = 'Desenho'}) {
+    addShapeLayer(at, contents: [ShapeDesenho()], name: nome);
+    final nova = state.layers.first;
+    editPosition(nova.id, at, _center);
+    return nova.id;
+  }
+
+  /// Poe mais um traco no desenho da camada.
+  void adicionarTracoAoDesenho(String layerId, TracoDoDesenho traco) {
+    _updateShape(layerId, (items) {
+      var achou = false;
+      final out = <ShapeItem>[
+        for (final i in items)
+          if (!achou && i is ShapeDesenho)
+            (() {
+              achou = true;
+              return i.copyWith(tracos: [...i.tracos, traco]);
+            })()
+          else
+            i,
+      ];
+      return achou
+          ? out
+          : [
+              ShapeDesenho(tracos: [traco]),
+              ...out,
+            ];
+    });
+  }
+
+  /// Desfazer do proprio desenho: tira o ultimo traco.
+  void tirarUltimoTracoDoDesenho(String layerId) {
+    _updateShape(layerId, (items) {
+      var achou = false;
+      return [
+        for (final i in items)
+          if (!achou && i is ShapeDesenho && i.tracos.isNotEmpty)
+            (() {
+              achou = true;
+              return i.copyWith(tracos: i.tracos.sublist(0, i.tracos.length - 1));
+            })()
+          else
+            i,
+      ];
+    });
   }
 
   /// OS CONTORNOS DA FORMA: os caminhos bezier da camada, na ordem.

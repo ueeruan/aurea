@@ -4,6 +4,7 @@ import 'dart:ui';
 
 import 'package:uuid/uuid.dart';
 
+import 'desenho_livre.dart';
 import 'keyframe.dart';
 import 'shape_ops.dart';
 import 'mask.dart';
@@ -1315,6 +1316,36 @@ ShapeParametric shapeParamWithTrack(
   _ => s,
 };
 
+/// DESENHO A MAO LIVRE dentro da forma: os tracos na ordem em que
+/// sairam do dedo. Ele mesmo e geometria E pintura — por isso nao mexe
+/// na pilha de caminhos dos outros itens.
+class ShapeDesenho extends ShapeItem {
+  ShapeDesenho({super.id, List<TracoDoDesenho>? tracos})
+    : tracos = List.unmodifiable(tracos ?? const <TracoDoDesenho>[]);
+
+  final List<TracoDoDesenho> tracos;
+
+  ShapeDesenho copyWith({List<TracoDoDesenho>? tracos}) =>
+      ShapeDesenho(id: id, tracos: tracos ?? this.tracos);
+
+  /// A area que o desenho ocupa, ja com a espessura dos tracos.
+  Rect? get caixa {
+    Rect? acc;
+    for (final traco in tracos) {
+      final meia = traco.espessura / 2 + 1;
+      for (final ponto in traco.pontos) {
+        final r = Rect.fromCenter(
+          center: ponto,
+          width: meia * 2,
+          height: meia * 2,
+        );
+        acc = acc == null ? r : acc.expandToInclude(r);
+      }
+    }
+    return acc;
+  }
+}
+
 /// ---------------------------------------------------------------- pintura
 
 class ShapeFill extends ShapeItem {
@@ -2515,6 +2546,31 @@ List<ShapeDraw> evaluateShape(
               encaixe: m.encaixe,
             ),
           );
+        }
+      case ShapeDesenho desenho:
+        // A caixa entra como um desenho transparente: e o que da a
+        // medida da camada (o traco passa da linha do caminho).
+        final caixa = desenho.caixa;
+        if (caixa != null) {
+          draws.add(
+            ShapeDraw(
+              path: Path()..addRect(caixa),
+              paint: Paint()..color = const Color(0x00000000),
+            ),
+          );
+        }
+        for (final traco in desenho.tracos) {
+          for (final (caminho, tinta) in pinceladasDoTraco(traco)) {
+            draws.add(
+              ShapeDraw(
+                path: caminho,
+                paint: tinta
+                  ..color = tinta.color.withValues(
+                    alpha: (tinta.color.a * opacity).clamp(0.0, 1.0),
+                  ),
+              ),
+            );
+          }
         }
       case ShapeStroke stroke:
         for (final path in paths) {

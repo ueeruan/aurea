@@ -113,7 +113,7 @@ void main() {
 
   for (final aspect in [16 / 9, 9 / 16, 1.0]) {
     testWidgets(
-      'finishing a stroke creates one shape without moving selection at $aspect',
+      'the session keeps every stroke in the same layer at $aspect',
       (tester) async {
         final p = _Preview();
         addTearDown(p.dispose);
@@ -128,15 +128,19 @@ void main() {
         await p.mount(tester);
         await p.drawMode(tester);
         final canvas = find.byKey(const ValueKey('freehand-canvas'));
-        final gesture = await tester.startGesture(
-          tester.getCenter(canvas) - const Offset(40, 0),
-        );
-        await gesture.moveBy(const Offset(30, 20));
-        await tester.pump();
-        await gesture.moveBy(const Offset(50, -10));
-        await gesture.up();
-        await tester.pumpAndSettle();
-        final project = p.container.read(editorControllerProvider);
+        Future<void> traco(Offset de) async {
+          final gesture = await tester.startGesture(
+            tester.getCenter(canvas) + de,
+          );
+          await gesture.moveBy(const Offset(30, 20));
+          await tester.pump();
+          await gesture.moveBy(const Offset(50, -10));
+          await gesture.up();
+          await tester.pumpAndSettle();
+        }
+
+        await traco(const Offset(-40, 0));
+        var project = p.container.read(editorControllerProvider);
         expect(project.layers.length, 2);
         expect(project.layers.first, isA<ShapeLayer>());
         expect(project.layers.first.name, startsWith('Desenho livre'));
@@ -144,8 +148,31 @@ void main() {
           project.layerById(original.id)!.position.valueAt(Duration.zero),
           original.position.valueAt(Duration.zero),
         );
+        expect(
+          p.container.read(freehandRequestProvider),
+          isTrue,
+          reason: 'the session only ends at the ✓',
+        );
+        // O SEGUNDO TRACO entra na MESMA camada: desenhar e uma sessao,
+        // nao uma camada por rabisco.
+        await traco(const Offset(-40, 60));
+        project = p.container.read(editorControllerProvider);
+        expect(project.layers.length, 2);
+        final desenho = p.editor.desenhoDaCamada(project.layers.first.id);
+        expect(desenho, isNotNull);
+        expect(desenho!.tracos.length, 2);
+        // O desfazer do desenho tira so o ultimo traco.
+        await tester.tap(find.byKey(const ValueKey('desenho-desfazer')));
+        await tester.pumpAndSettle();
+        expect(
+          p.editor.desenhoDaCamada(project.layers.first.id)!.tracos.length,
+          1,
+        );
+        await tester.tap(find.byKey(const ValueKey('desenho-concluir')));
+        await tester.pumpAndSettle();
         expect(p.container.read(freehandRequestProvider), isFalse);
         expect(canvas, findsNothing);
+        project = p.container.read(editorControllerProvider);
         await p.drawMode(tester);
         p.editor.openProject(project);
         await tester.pumpAndSettle();
@@ -158,6 +185,46 @@ void main() {
       },
     );
   }
+
+  testWidgets('a new session keeps drawing on the chosen drawing layer', (
+    tester,
+  ) async {
+    final p = _Preview();
+    addTearDown(p.dispose);
+    p.editor.openProject(VideoProject.empty('Drawing'));
+    final antigo = p.editor.criarCamadaDeDesenho(Duration.zero);
+    // A camada foi arrastada para o canto: a tinta nova tem de cair onde
+    // o dedo tocou, e nao no centro da composicao.
+    p.editor.editPosition(antigo, Duration.zero, const Offset(120, 90));
+    await p.mount(tester);
+    await p.drawMode(tester);
+    final canvas = find.byKey(const ValueKey('freehand-canvas'));
+    final toque = tester.getCenter(canvas) + const Offset(20, 10);
+    final gesture = await tester.startGesture(toque);
+    await gesture.moveBy(const Offset(30, 20));
+    await tester.pump();
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(
+      p.container.read(editorControllerProvider).layers.length,
+      1,
+      reason: 'sem camada nova por cima da que ja era um desenho',
+    );
+    final traco = p.editor.desenhoDaCamada(antigo)!.tracos.single;
+    final l = p.container.read(editorControllerProvider).layerById(antigo)!;
+    // O ponto do traco + onde a camada mora = o pixel da composicao; de
+    // volta para a tela, tem de bater com o dedo.
+    final naComposicao = l.position.valueAt(Duration.zero) + traco.pontos.first;
+    final naTela = tester
+        .renderObject<RenderBox>(canvas)
+        .localToGlobal(naComposicao);
+    expect(
+      (naTela - toque).distance,
+      lessThan(2),
+      reason: 'o traco cai embaixo do dedo',
+    );
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets(
     'cancelled and interrupted strokes never enter the next project',
@@ -174,8 +241,11 @@ void main() {
       await gesture.cancel();
       await tester.pumpAndSettle();
       expect(p.container.read(editorControllerProvider).layers, isEmpty);
-      expect(p.container.read(freehandRequestProvider), isFalse);
-      await p.drawMode(tester);
+      expect(
+        p.container.read(freehandRequestProvider),
+        isTrue,
+        reason: 'a lost stroke drops the stroke, not the whole session',
+      );
       gesture = await tester.startGesture(
         tester.getCenter(find.byKey(const ValueKey('freehand-canvas'))),
       );

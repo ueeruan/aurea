@@ -13,6 +13,7 @@ import 'camera3d.dart';
 import 'caption.dart';
 import 'caption_highlight.dart';
 import 'cut.dart';
+import 'desenho_livre.dart';
 import 'effect.dart';
 import 'element3d.dart';
 import 'extrude3d.dart';
@@ -446,6 +447,11 @@ Map<String, dynamic> _shapeItem(ShapeItem s) => switch (s) {
     if (sp.extras.isNotEmpty)
       'ex': {for (final e in sp.extras.entries) e.key: _ad(e.value)},
   },
+  ShapeDesenho d => {
+    'kind': 'desenho',
+    'id': d.id,
+    'tracos': [for (final traco in d.tracos) traco.toJson()],
+  },
   ShapeMediaFill f => {
     'kind': 'mfill',
     'id': f.id,
@@ -617,6 +623,13 @@ ShapeItem _asShapeItem(Map<String, dynamic> m) => switch (m['kind']) {
     startAngle: _asAd(m['sa']),
     sweep: _asAd(m['sw']),
     sectorInner: _asAd(m['si']),
+  ),
+  'desenho' => ShapeDesenho(
+    id: m['id'] as String,
+    tracos: [
+      for (final raw in (m['tracos'] as List? ?? const []))
+        ?TracoDoDesenho.fromJson(raw),
+    ],
   ),
   'mfill' => ShapeMediaFill(
     id: m['id'] as String,

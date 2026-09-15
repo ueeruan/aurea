@@ -995,7 +995,10 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
               },
             ),
           ),
-          Positioned(
+          // A RESOLUCAO DA PREVIA sai do caminho enquanto se desenha: a
+          // faixa de cima e da barra do desenho.
+          if (!drawing)
+            Positioned(
             right: 4,
             top: 4,
             child: Material(
@@ -1093,37 +1096,14 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
                 );
               },
             ),
+          // A BARRA DO DESENHO fica AQUI, no palco: dentro da composicao
+          // o zoom da previa mudaria o tamanho dos botoes.
           if (drawing)
             Positioned(
               top: 4,
               left: 8,
               right: 8,
-              child: Material(
-                color: const Color(0xE620242B),
-                borderRadius: BorderRadius.circular(8),
-                child: Row(
-                  children: [
-                    const SizedBox(width: 10),
-                    const Expanded(
-                      child: AppText('Desenho livre · arraste na prévia',
-                        maxLines: 2,
-                        style: TextStyle(color: Colors.white, fontSize: 12),
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: 'Cancelar desenho livre',
-                      onPressed: () =>
-                          ref.read(freehandRequestProvider.notifier).state =
-                              false,
-                      icon: const Icon(
-                        Icons.close,
-                        color: Colors.white,
-                        size: 20,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+              child: BarraDoDesenho(playback: widget.playback),
             ),
         ],
       ),
@@ -7081,6 +7061,10 @@ class _ShapePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     canvas.translate(-bounds.left, -bounds.top);
+    // A BORRACHA tira tinta do que ja foi desenhado AQUI, e nao do resto
+    // do palco: por isso o desenho inteiro vai para uma camada propria.
+    final apaga = draws.any((d) => d.paint.blendMode == BlendMode.dstOut);
+    if (apaga) canvas.saveLayer(bounds, Paint());
     for (final d in draws) {
       final caminho = d.imagem;
       if (caminho == null) {
@@ -7117,6 +7101,7 @@ class _ShapePainter extends CustomPainter {
         )
         ..restore();
     }
+    if (apaga) canvas.restore();
   }
 
   @override

@@ -42,6 +42,7 @@ import 'context/context_sheet.dart';
 import 'context/layer_header.dart';
 import 'shell/layer_actions.dart';
 import 'shell/cromo_editor.dart';
+import '../application/ui/opcoes_de_visualizacao.dart';
 import 'shell/barra_de_tempo_tela_cheia.dart';
 import 'widgets/add_layer_sheet.dart';
 import 'widgets/mask_node_editor.dart';
@@ -904,8 +905,9 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                 // AS PECAS, montadas uma vez; o arranjo depende da largura
                 // (Fase 7: acima de 700 pt, timeline e painel lado a lado —
                 // tablet e paisagem).
-                // O PALCO COM O TRILHO DO AM: solo, cameras e o zoom
-                // moram num trilho colado a direita, sobre o preview.
+                // O PALCO COM A COLUNA DE VISUALIZACAO: pixels, grade,
+                // solo, camera e zoom, colados a direita quando o olho da
+                // barra de reproducao a abre.
                 Widget preview(double? altura) => SizedBox(
                   height: altura,
                   child: Stack(
@@ -922,12 +924,26 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                       // ABAIXO do seletor de resolucao (right/top 4):
                       // no topo o trilho cobria o botao e o toque nunca
                       // chegava nele.
-                      if (!s.previewExpanded)
+                      if (!s.previewExpanded &&
+                          ref.watch(
+                            opcoesDeVisualizacaoProvider.select(
+                              (o) => o.aberta,
+                            ),
+                          ))
                         Positioned(
                           right: 0,
-                          top: 46,
-                          child: TrilhoDoPalco(playback: _playback),
+                          top: 40,
+                          bottom: 6,
+                          child: Align(
+                            alignment: Alignment.topRight,
+                            child: ColunaDeVisualizacao(playback: _playback),
+                          ),
                         ),
+                      const Positioned(
+                        left: 8,
+                        top: 8,
+                        child: IndicadorDeZoomDoPalco(),
+                      ),
                     ],
                   ),
                 );
@@ -1045,9 +1061,8 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                           ],
                         ],
                       ),
-                    // O "+" DO AM: circulo escuro com anel verde, no
-                    // canto de baixo a direita da timeline; o ⋮ fica no
-                    // canto esquerdo (a planta exata do activity_edit).
+                    // O "+": circulo escuro com anel lima no canto de
+                    // baixo a direita da timeline; o ⋮ fica no esquerdo.
                     if (!s.previewExpanded &&
                         !s.adding &&
                         s.panel == EditorPanel.none)
@@ -1129,7 +1144,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                           ),
                         ),
                       ),
-                    // A BARRA DA SELECAO DO AM: aparar, dividir, ◆,
+                    // A BARRA DA SELECAO: aparar, dividir, ◆,
                     // duplicar e excluir flutuam no pe da timeline
                     // enquanto ha UMA camada selecionada — com painel
                     // aberto tambem, porque o ◆ crava na propriedade da

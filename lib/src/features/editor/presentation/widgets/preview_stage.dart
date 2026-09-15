@@ -68,6 +68,7 @@ import 'masked_box.dart';
 import 'dither_layer.dart';
 import 'preview_raster.dart';
 import '../../application/ui/preview_resolution.dart';
+import '../../application/ui/opcoes_de_visualizacao.dart';
 import 'fx_lote2.dart';
 import 'particles_painter.dart';
 import '../../application/scene3d_gpu.dart';
@@ -290,6 +291,76 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
   /// o zoom volta ao ajustado.
   Offset _panDoPalco = Offset.zero;
 
+  /// O zoom do palco quando a pinca comecou (dois dedos no vazio).
+  double _zoomNoInicioDaPinca = 1.0;
+
+  /// TOQUE DUPLO COM DOIS DEDOS: os dedos no palco, onde desceram, se
+  /// andaram, e quando foi o ultimo toque de dois dedos.
+  final Map<int, Offset> _dedosNoPalco = {};
+  Duration? _desceramOsDois;
+  bool _osDoisAndaram = false;
+  Duration? _ultimoToqueDeDois;
+
+  void _dedoDesceu(PointerDownEvent e) {
+    _dedosNoPalco[e.pointer] = e.position;
+    if (_dedosNoPalco.length == 2) {
+      _desceramOsDois = e.timeStamp;
+      _osDoisAndaram = false;
+    } else if (_dedosNoPalco.length > 2) {
+      _desceramOsDois = null;
+    }
+  }
+
+  void _dedoAndou(PointerMoveEvent e) {
+    final origem = _dedosNoPalco[e.pointer];
+    if (origem != null && (e.position - origem).distance > 12) {
+      _osDoisAndaram = true;
+    }
+  }
+
+  void _dedoSubiu(PointerEvent e) {
+    final eramDois = _dedosNoPalco.length == 2;
+    _dedosNoPalco.remove(e.pointer);
+    final desceram = _desceramOsDois;
+    if (!eramDois || desceram == null) return;
+    _desceramOsDois = null;
+    if (_osDoisAndaram ||
+        e.timeStamp - desceram > const Duration(milliseconds: 300)) {
+      return;
+    }
+    final anterior = _ultimoToqueDeDois;
+    if (anterior != null &&
+        e.timeStamp - anterior <= const Duration(milliseconds: 450)) {
+      _ultimoToqueDeDois = null;
+      final zoom = ref.read(zoomDoPalcoProvider.notifier);
+      zoom.state = zoom.state == 1.0 ? 2.0 : 1.0;
+    } else {
+      _ultimoToqueDeDois = e.timeStamp;
+    }
+  }
+
+  /// O NUMERO QUE O DEDO ESTA MUDANDO, na barra de informacoes.
+  void _informar(String id) {
+    final camada = ref.read(editorControllerProvider).layerById(id);
+    if (camada == null) return;
+    final local = camada.localTime(widget.playback.time.value);
+    final pos = camada.position.valueAt(local);
+    final escala = camada.scaleX.valueAt(local);
+    final giro = camada.rotation.valueAt(local);
+    ref.read(infobarProvider.notifier).state = DadosDaInfobar.pares([
+      ('X', pos.dx.toStringAsFixed(0)),
+      ('Y', pos.dy.toStringAsFixed(0)),
+      ('Escala', '${(escala * 100).toStringAsFixed(0)}%'),
+      ('Rotação', '${giro.toStringAsFixed(1)}°'),
+    ]);
+  }
+
+  void _limparInfobar() {
+    if (ref.read(infobarProvider) != null) {
+      ref.read(infobarProvider.notifier).state = null;
+    }
+  }
+
   void _limparEncaixe() {
     if (_encaixeX == null && _encaixeY == null) return;
     setState(() {
@@ -299,6 +370,7 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
   }
 
   void _onScaleStart(ScaleStartDetails d) {
+    _zoomNoInicioDaPinca = ref.read(zoomDoPalcoProvider);
     // O dedo pegou uma alca? (raio generoso: 28 px)
     _alca = null;
     final alcas = _alcasDaSelecao();
@@ -356,6 +428,19 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
     // COM ZOOM E NADA SELECIONADO, o arrasto passeia pelo palco.
     if (id == null) {
       final zoom = ref.read(zoomDoPalcoProvider);
+      // DOIS DEDOS NO VAZIO: a pinca aproxima e o par de dedos passeia,
+      // como numa foto. Perto de 100% o palco gruda no ajustado.
+      if (d.pointerCount >= 2) {
+        var novo = (_zoomNoInicioDaPinca * d.scale).clamp(0.25, 4.0);
+        if ((novo - 1.0).abs() < 0.04) novo = 1.0;
+        if (novo != zoom) {
+          ref.read(zoomDoPalcoProvider.notifier).state = novo;
+        }
+        if (novo != 1.0) {
+          setState(() => _panDoPalco += d.focalPointDelta);
+        }
+        return;
+      }
       if (zoom != 1.0 && d.pointerCount == 1) {
         setState(() => _panDoPalco += d.focalPointDelta);
       }
@@ -376,6 +461,7 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
         t,
         _startRotation + d.rotation * 180 / math.pi,
       );
+      _informar(id);
       return;
     }
 
@@ -388,6 +474,7 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
         final ang = math.atan2(v.dy, v.dx) * 180 / math.pi;
         // O canto de cima e a direita comeca a 45 graus do centro.
         controller.editRotation(id, t, ang + 45);
+        _informar(id);
       } else {
         final camada = project.layerById(id);
         if (camada != null) {
@@ -412,6 +499,7 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
             t,
             (v.distance / _stageScale / meia).clamp(0.05, 8.0),
           );
+          _informar(id);
         }
       }
       return;
@@ -465,6 +553,7 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
     if (deltaLogical.distance > snap) {
       controller.editPosition(id, t, target);
       _limparEncaixe();
+      _informar(id);
       return;
     }
     final self = ref.read(editorControllerProvider.notifier);
@@ -535,6 +624,7 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
     }
 
     controller.editPosition(id, t, target);
+    _informar(id);
   }
 
   @override
@@ -545,8 +635,12 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
         setState(() => _panDoPalco = Offset.zero);
       }
     });
-    final project = ref.watch(projetoVisivelProvider);
-    final resolution = ref.watch(previewResolutionProvider);
+    final project = ref.watch(projetoDoPalcoProvider);
+    final opcoes = ref.watch(opcoesDeVisualizacaoProvider);
+    // PIXELS REAIS ignora a resolucao reduzida: o que se ve e o que sai.
+    final resolution = opcoes.pixels
+        ? PreviewResolution.full
+        : ref.watch(previewResolutionProvider);
     final padGuides = ref.watch(transformGuidesProvider);
     final selectedId = ref.watch(selectedLayerProvider);
     final onion = ref.watch(onionSkinProvider);
@@ -556,7 +650,12 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
     final useDither =
         DitherLayer.comoFiltro && !_containsRasterMedia(project.layers);
 
-    return GestureDetector(
+    return Listener(
+      onPointerDown: _dedoDesceu,
+      onPointerMove: _dedoAndou,
+      onPointerUp: _dedoSubiu,
+      onPointerCancel: _dedoSubiu,
+      child: GestureDetector(
       behavior: HitTestBehavior.opaque,
       onScaleStart: drawing ? null : _onScaleStart,
       onScaleUpdate: drawing ? null : _onScaleUpdate,
@@ -568,7 +667,12 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
       // simples passava a ser dele em vez de chegar ao `onScaleStart` —
       // que e quem seleciona a camada embaixo do dedo. O palco parou de
       // selecionar por causa de uma limpeza que ja acontecia sozinha.
-      onScaleEnd: drawing ? null : (_) => _limparEncaixe(),
+      onScaleEnd: drawing
+          ? null
+          : (_) {
+              _limparEncaixe();
+              _limparInfobar();
+            },
       child: Stack(
         fit: StackFit.expand,
         children: [
@@ -686,6 +790,7 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
                                       time: widget.playback.time,
                                       videos: widget.videos,
                                       selectedId: selectedId,
+                                      vistaDoPalco: true,
                                     ),
                                   ),
                                   // CASCA DE CEBOLA: os quadros vizinhos,
@@ -746,6 +851,24 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
                                       ),
                                     ),
                                   ),
+                                  // GRADE E PIXELS (opcoes de visualizacao):
+                                  // ajudas por cima, fora do render final.
+                                  if (opcoes.grade ||
+                                      (opcoes.pixels && scale >= 6))
+                                    Positioned.fill(
+                                      child: IgnorePointer(
+                                        child: CustomPaint(
+                                          key: const ValueKey('palco-grade'),
+                                          painter: _GradeDoPalcoPainter(
+                                            compSize: Size(compW, compH),
+                                            escala: scale,
+                                            grade: opcoes.grade,
+                                            pixels:
+                                                opcoes.pixels && scale >= 6,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
                                   // NOS DA MASCARA: quando alguem esta editando
                                   // o caminho, o dedo passa a mexer nos nos em
                                   // vez de mover a camada. Fora disso o widget
@@ -871,6 +994,7 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
               ),
             ),
         ],
+      ),
       ),
     );
   }
@@ -1052,6 +1176,63 @@ class _FractalNoisePainter extends CustomPainter {
 /// colunas/medianiz/margem, areas seguras de titulo e acao, e a mascara
 /// de enquadramento que mostra como o quadro fica cortado noutra
 /// proporcao — sem alterar o projeto.
+/// A GRADE DO PALCO: tercos marcados, oitavos apagados; com pixels reais
+/// e o palco bem aproximado, uma linha por pixel da composicao.
+class _GradeDoPalcoPainter extends CustomPainter {
+  const _GradeDoPalcoPainter({
+    required this.compSize,
+    required this.escala,
+    required this.grade,
+    required this.pixels,
+  });
+
+  final Size compSize;
+  final double escala;
+  final bool grade;
+  final bool pixels;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = compSize.width;
+    final h = compSize.height;
+    final fio = 1 / math.max(escala, .001);
+    if (pixels) {
+      final p = Paint()
+        ..color = const Color(0x1FFFFFFF)
+        ..strokeWidth = fio;
+      for (var x = 1; x < w; x++) {
+        canvas.drawLine(Offset(x.toDouble(), 0), Offset(x.toDouble(), h), p);
+      }
+      for (var y = 1; y < h; y++) {
+        canvas.drawLine(Offset(0, y.toDouble()), Offset(w, y.toDouble()), p);
+      }
+    }
+    if (grade) {
+      final fina = Paint()
+        ..color = const Color(0x26FFFFFF)
+        ..strokeWidth = fio;
+      final forte = Paint()
+        ..color = const Color(0x66FFFFFF)
+        ..strokeWidth = fio * 1.5;
+      for (var i = 1; i < 24; i++) {
+        final ehTerco = i % 8 == 0;
+        final x = w * i / 24;
+        final y = h * i / 24;
+        if (i % 3 != 0 && !ehTerco) continue;
+        canvas.drawLine(Offset(x, 0), Offset(x, h), ehTerco ? forte : fina);
+        canvas.drawLine(Offset(0, y), Offset(w, y), ehTerco ? forte : fina);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_GradeDoPalcoPainter old) =>
+      old.compSize != compSize ||
+      old.escala != escala ||
+      old.grade != grade ||
+      old.pixels != pixels;
+}
+
 class _GuidesPainter extends CustomPainter {
   const _GuidesPainter({
     required this.guides,
@@ -1255,7 +1436,13 @@ class CompositionView extends ConsumerStatefulWidget {
     this.exportFrames,
     this.exporting = false,
     this.quadroDeVideoEm,
+    this.vistaDoPalco = false,
   });
+
+  /// E O PALCO DO EDITOR: obedece as opcoes de visualizacao (sem efeitos,
+  /// sem camera, selecionada a 50%). Exportacao, miniaturas e fantasmas
+  /// desenham o projeto como ele e.
+  final bool vistaDoPalco;
 
   final ValueListenable<Duration> time;
   final VideoLayerManager videos;
@@ -1387,9 +1574,21 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
     );
   }
 
+  /// Opcao "selecionada a 50%": a camada escolhida deixa ver o que ha
+  /// atras dela enquanto se ajusta.
+  bool _metadeNaSelecao = false;
+
   @override
   Widget build(BuildContext context) {
-    final project = ref.watch(projetoVisivelProvider);
+    final project = widget.vistaDoPalco
+        ? ref.watch(projetoDoPalcoProvider)
+        : ref.watch(projetoVisivelProvider);
+    _metadeNaSelecao =
+        widget.vistaDoPalco &&
+        ref.watch(
+              opcoesDeVisualizacaoProvider.select((o) => o.modo),
+            ) ==
+            ModoDePrevia.meioTransparente;
 
     // O RASCUNHO PRECISA DE QUEM O ESCUTE. Sem este ouvinte, a
     // qualidade cheia so voltaria no proximo quadro — e ao pausar nao ha
@@ -2408,7 +2607,8 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
     final skewX = layer.skewX.valueAt(local) * math.pi / 180;
     final skewY = layer.skewY.valueAt(local) * math.pi / 180;
     final pivot = layer.pivot.valueAt(local);
-    final opacity = (opacityV * opacityMul).clamp(0.0, 1.0);
+    final metade = _metadeNaSelecao && layer.id == selectedId ? .5 : 1.0;
+    final opacity = (opacityV * opacityMul * metade).clamp(0.0, 1.0);
 
     // Particulas vivem em espaco 3D proprio: a rotacao do sistema (da
     // camada + herdada do nulo pai) e resolvida DENTRO do simulador — a
@@ -6478,10 +6678,32 @@ class _LayerContent extends StatelessWidget {
         height: project.outputHeight.toDouble(),
         child: ClipRect(
           clipBehavior: l.clipToComp && !l.collapse ? Clip.hardEdge : Clip.none,
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: buildChildren(l.children, l.contentTimeAt(localTime)),
-          ),
+          // GRUPO DE MASCARA / EXCLUSAO: um filho em dstIn/dstOut recorta
+          // SO os irmaos. Sem o grupo isolado, recortava tambem o que ja
+          // estava pintado por baixo do grupo.
+          child: l.children.any(
+                (c) =>
+                    c.blendMode == BlendMode.dstIn ||
+                    c.blendMode == BlendMode.dstOut,
+              )
+              ? BlendMask(
+                  blendMode: BlendMode.srcOver,
+                  isolate: true,
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: buildChildren(
+                      l.children,
+                      l.contentTimeAt(localTime),
+                    ),
+                  ),
+                )
+              : Stack(
+                  clipBehavior: Clip.none,
+                  children: buildChildren(
+                    l.children,
+                    l.contentTimeAt(localTime),
+                  ),
+                ),
         ),
       ),
       ImageLayer l => RepaintBoundary(child: _imagem(l)),

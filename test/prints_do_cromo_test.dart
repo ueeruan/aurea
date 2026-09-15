@@ -4,6 +4,7 @@
 // tela; sem, os testes provam que o cromo monta num celular sem estouro.
 import 'package:aurea/src/features/editor/application/editor_controller.dart';
 import 'package:aurea/src/features/editor/presentation/editor_screen.dart';
+import 'package:aurea/src/features/editor/application/ui/opcoes_de_visualizacao.dart';
 import 'package:aurea/src/features/editor/presentation/shell/cromo_editor.dart';
 import 'package:aurea/src/features/projects/application/projects_controller.dart';
 import 'package:aurea/src/features/editor/domain/video_project.dart';
@@ -57,10 +58,75 @@ void main() {
     // As pecas no lugar: relogio na barra do projeto, reproducao, trilho.
     expect(find.byKey(const ValueKey('navbar-tempo')), findsOneWidget);
     expect(find.byKey(const ValueKey('editor-undo')), findsOneWidget);
-    expect(find.byKey(const ValueKey('rail-zoom-texto')), findsOneWidget);
+    expect(find.byKey(const ValueKey('playbar-marcador')), findsOneWidget);
     expect(find.byKey(const ValueKey('editor-fab')), findsOneWidget);
     expect(find.byKey(const ValueKey('timeline-overflow')), findsOneWidget);
+    // A coluna de visualizacao nasce fechada: o palco fica livre.
+    expect(find.byKey(const ValueKey('coluna-de-visualizacao')), findsNothing);
     await gravarPrint(tester, chave, 'cromo-editor');
+  });
+
+  testWidgets('o olho da barra abre a coluna: grade, pixels e zoom', (
+    tester,
+  ) async {
+    final (c, chave) = await _editor(tester);
+    await tester.tap(find.byKey(const ValueKey('playbar-visualizacao')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('coluna-de-visualizacao')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('visao-grade')));
+    await tester.pumpAndSettle();
+    expect(c.read(opcoesDeVisualizacaoProvider).grade, isTrue);
+    expect(find.byKey(const ValueKey('palco-grade')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('rail-zoom-mais')));
+    await tester.pumpAndSettle();
+    expect(c.read(zoomDoPalcoProvider), closeTo(1.25, 1e-9));
+    // Fora do ajustado, o numero aparece sobre o palco e volta no toque.
+    expect(find.byKey(const ValueKey('preview-zoom-indicador')), findsOneWidget);
+    await gravarPrint(tester, chave, 'cromo-editor-visualizacao');
+    await tester.tap(find.byKey(const ValueKey('preview-zoom-indicador')));
+    await tester.pumpAndSettle();
+    expect(c.read(zoomDoPalcoProvider), 1.0);
+    expect(find.byKey(const ValueKey('preview-zoom-indicador')), findsNothing);
+    // A coluna inteira mora dentro do palco, acima da barra de reproducao.
+    final coluna = tester.getRect(
+      find.byKey(const ValueKey('coluna-de-visualizacao')),
+    );
+    final barra = tester.getRect(find.byKey(const ValueKey('editor-undo')));
+    expect(coluna.bottom, lessThanOrEqualTo(barra.top));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('o marcador da barra marca e desmarca o cabecote', (
+    tester,
+  ) async {
+    final (c, _) = await _editor(tester);
+    await tester.tap(find.byKey(const ValueKey('playbar-marcador')));
+    await tester.pumpAndSettle();
+    expect(c.read(editorControllerProvider).markers, hasLength(1));
+    await tester.tap(find.byKey(const ValueKey('playbar-marcador')));
+    await tester.pumpAndSettle();
+    expect(c.read(editorControllerProvider).markers, isEmpty);
+    // O salvamento adiado do projeto termina antes do teste acabar.
+    await tester.pump(const Duration(seconds: 1));
+  });
+
+  testWidgets('a barra de informacoes toma o lugar da reproducao', (
+    tester,
+  ) async {
+    final (c, chave) = await _editor(tester);
+    c.read(infobarProvider.notifier).state = const DadosDaInfobar.tempo(
+      tempo: Duration(milliseconds: 1250),
+      deslocamento: Duration(milliseconds: -500),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('barra-de-informacoes')), findsOneWidget);
+    expect(find.byKey(const ValueKey('editor-undo')), findsNothing);
+    expect(find.text('0:01.25'), findsOneWidget);
+    expect(find.text('-0:00.50'), findsOneWidget);
+    await gravarPrint(tester, chave, 'cromo-editor-infobar');
+    c.read(infobarProvider.notifier).state = null;
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('editor-undo')), findsOneWidget);
   });
 
   testWidgets('camada selecionada: a barra flutuante de aparar/dividir', (

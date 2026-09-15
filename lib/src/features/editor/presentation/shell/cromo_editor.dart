@@ -9,6 +9,7 @@ import '../../../../core/ui/tocavel.dart';
 import '../../application/editor_controller.dart';
 import '../../application/playback_controller.dart';
 import '../../application/ui/editor_session.dart';
+import '../../application/ui/opcoes_de_visualizacao.dart';
 import '../../domain/layer.dart';
 import '../../domain/layout_ops.dart';
 import '../am/align_sheet.dart';
@@ -68,6 +69,7 @@ class _BotaoDoCromo extends StatelessWidget {
     this.cor,
     this.tamanho = 21,
     this.largura = 40,
+    this.altura = 44,
   });
 
   final IconData icone;
@@ -77,6 +79,7 @@ class _BotaoDoCromo extends StatelessWidget {
   final Color? cor;
   final double tamanho;
   final double largura;
+  final double altura;
 
   @override
   Widget build(BuildContext context) {
@@ -97,7 +100,7 @@ class _BotaoDoCromo extends StatelessWidget {
               },
         child: SizedBox(
           width: largura,
-          height: 44,
+          height: altura,
           child: Icon(
             icone,
             size: tamanho,
@@ -379,12 +382,17 @@ class BarraDoLote extends ConsumerWidget {
 }
 
 /// A BARRA DE REPRODUCAO (46, sobre a timeline): desfazer/refazer a
-/// esquerda, quadro-play-quadro no centro, colar/marcas/tela-cheia a
-/// direita.
+/// esquerda, quadro-play-quadro no centro; a direita copiar e colar,
+/// marcador no cabecote, opcoes de visualizacao e tela cheia.
 ///
 /// Os saltos: toque em |◀ ▶| anda por KEYFRAME quando a camada
 /// selecionada tem marcas (o pedido dos testadores), senao UM QUADRO;
 /// segurar vai ao inicio/fim.
+///
+/// Enquanto o dedo manipula alguma coisa ([infobarProvider]), a barra
+/// vira a barra de informacoes: o numero que esta mudando fica onde o
+/// olho ja esta. Tocando, um medidor de nivel do som corre por tras
+/// dos botoes.
 class BarraDeReproducao extends ConsumerWidget {
   const BarraDeReproducao({super.key, required this.playback});
 
@@ -392,9 +400,19 @@ class BarraDeReproducao extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final info = ref.watch(infobarProvider);
+    if (info != null) {
+      return Container(
+        key: const ValueKey('barra-de-informacoes'),
+        height: CromoEditor.playbar,
+        color: CromoEditor.fundo,
+        child: _ConteudoDaInfobar(info: info),
+      );
+    }
     final controller = ref.read(editorControllerProvider.notifier);
     final project = ref.watch(editorControllerProvider);
     final selected = ref.watch(selectedLayerProvider);
+    final opcoes = ref.watch(opcoesDeVisualizacaoProvider);
     final duration = project.duration;
     final fps = project.fps <= 0 ? 30 : project.fps;
     final quadro = Duration(microseconds: 1000000 ~/ fps);
@@ -428,113 +446,177 @@ class BarraDeReproducao extends ConsumerWidget {
     return Container(
       height: CromoEditor.playbar,
       color: CromoEditor.fundo,
-      child: LayoutBuilder(
-        builder: (context, c) {
-          // NUM 320 os cinco botoes laterais (2 + 3) em 40 estouravam a
-          // fileira em 12 px: o trio do centro e fixo (132), os lados
-          // dividem o que sobra, nunca abaixo de 30.
-          final lado = c.maxWidth.isFinite
-              ? ((c.maxWidth - 132) / 5).clamp(30.0, 40.0).toDouble()
-              : 40.0;
-          return Row(
+      child: Stack(
         children: [
-          _BotaoDoCromo(
-            key: const ValueKey('editor-undo'),
-            icone: CupertinoIcons.arrow_uturn_left,
-            dica: 'Desfazer',
-            largura: lado,
-            onTap: controller.canUndo ? controller.undo : null,
+          Positioned.fill(
+            child: _MedidorDeNivel(playback: playback),
           ),
-          _BotaoDoCromo(
-            key: const ValueKey('editor-redo'),
-            icone: CupertinoIcons.arrow_uturn_right,
-            dica: 'Refazer',
-            largura: lado,
-            onTap: controller.canRedo ? controller.redo : null,
-          ),
-          Expanded(
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                _BotaoDoCromo(
-                  key: const ValueKey('transport-start'),
-                  icone: CupertinoIcons.backward_end,
-                  dica: marcas.isEmpty
-                      ? 'Um quadro atrás · segure para o início'
-                      : 'Keyframe anterior · segure para o início',
-                  onTap: () => playback.seek(
-                    anterior(playback.time.value) ??
-                        limitar(playback.time.value - quadro),
+          LayoutBuilder(
+            builder: (context, c) {
+              // NUM 320 os seis botoes laterais (2 + 4) em 40 estouravam
+              // a fileira: o trio do centro e fixo (132), os lados dividem
+              // o que sobra, nunca abaixo de 30.
+              final lado = c.maxWidth.isFinite
+                  ? ((c.maxWidth - 132) / 6).clamp(30.0, 40.0).toDouble()
+                  : 40.0;
+              return Row(
+                children: [
+                  _BotaoDoCromo(
+                    key: const ValueKey('editor-undo'),
+                    icone: CupertinoIcons.arrow_uturn_left,
+                    dica: 'Desfazer',
+                    largura: lado,
+                    onTap: controller.canUndo ? controller.undo : null,
                   ),
-                  onLongPress: () => playback.seek(Duration.zero),
-                ),
-                ListenableBuilder(
-                  listenable: Listenable.merge([
-                    playback.playing,
-                    playback.loop,
-                  ]),
-                  builder: (context, _) => _BotaoDoCromo(
-                    key: const ValueKey('transport-play'),
-                    icone: playback.playing.value
-                        ? CupertinoIcons.pause_fill
-                        : CupertinoIcons.play_fill,
-                    dica: playback.loop.value
-                        ? 'Repetição ligada · segure para desligar'
-                        : (playback.playing.value
-                              ? 'Pausar'
-                              : 'Reproduzir · segure para repetir'),
-                    cor: playback.loop.value ? CromoEditor.acao : CromoEditor.branco,
-                    tamanho: 26,
-                    largura: 52,
-                    onTap: playback.toggle,
-                    onLongPress: () =>
-                        playback.loop.value = !playback.loop.value,
+                  _BotaoDoCromo(
+                    key: const ValueKey('editor-redo'),
+                    icone: CupertinoIcons.arrow_uturn_right,
+                    dica: 'Refazer',
+                    largura: lado,
+                    onTap: controller.canRedo ? controller.redo : null,
                   ),
-                ),
-                _BotaoDoCromo(
-                  key: const ValueKey('transport-end'),
-                  icone: CupertinoIcons.forward_end,
-                  dica: marcas.isEmpty
-                      ? 'Um quadro à frente · segure para o fim'
-                      : 'Próximo keyframe · segure para o fim',
-                  onTap: () => playback.seek(
-                    proxima(playback.time.value) ??
-                        limitar(playback.time.value + quadro),
+                  Expanded(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        _BotaoDoCromo(
+                          key: const ValueKey('transport-start'),
+                          icone: CupertinoIcons.backward_end,
+                          dica: marcas.isEmpty
+                              ? 'Um quadro atrás · segure para o início'
+                              : 'Keyframe anterior · segure para o início',
+                          onTap: () => playback.seek(
+                            anterior(playback.time.value) ??
+                                limitar(playback.time.value - quadro),
+                          ),
+                          onLongPress: () => playback.seek(Duration.zero),
+                        ),
+                        ListenableBuilder(
+                          listenable: Listenable.merge([
+                            playback.playing,
+                            playback.loop,
+                          ]),
+                          builder: (context, _) => Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              _BotaoDoCromo(
+                                key: const ValueKey('transport-play'),
+                                icone: playback.playing.value
+                                    ? CupertinoIcons.pause_fill
+                                    : CupertinoIcons.play_fill,
+                                dica: playback.loop.value
+                                    ? 'Repetição ligada · segure para desligar'
+                                    : (playback.playing.value
+                                          ? 'Pausar'
+                                          : 'Reproduzir · segure para repetir'),
+                                cor: playback.loop.value
+                                    ? CromoEditor.acao
+                                    : CromoEditor.branco,
+                                tamanho: 26,
+                                largura: 52,
+                                onTap: playback.toggle,
+                                onLongPress: () =>
+                                    playback.loop.value = !playback.loop.value,
+                              ),
+                              // Repetindo, o play ganha a setinha do laco.
+                              if (playback.loop.value)
+                                const Positioned(
+                                  right: 8,
+                                  bottom: 8,
+                                  child: IgnorePointer(
+                                    child: Icon(
+                                      CupertinoIcons.repeat,
+                                      key: ValueKey('transport-play-laco'),
+                                      size: 11,
+                                      color: CromoEditor.acao,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                        _BotaoDoCromo(
+                          key: const ValueKey('transport-end'),
+                          icone: CupertinoIcons.forward_end,
+                          dica: marcas.isEmpty
+                              ? 'Um quadro à frente · segure para o fim'
+                              : 'Próximo keyframe · segure para o fim',
+                          onTap: () => playback.seek(
+                            proxima(playback.time.value) ??
+                                limitar(playback.time.value + quadro),
+                          ),
+                          onLongPress: () => playback.seek(duration),
+                        ),
+                      ],
+                    ),
                   ),
-                  onLongPress: () => playback.seek(duration),
-                ),
-              ],
-            ),
-          ),
-          _BotaoDoCromo(
-            key: const ValueKey('playbar-colar'),
-            icone: CupertinoIcons.doc_on_clipboard,
-            dica: 'Copiar e colar',
-            largura: lado,
-            onTap: selected == null && !controller.temEfeitosCopiados
-                ? null
-                : () => _menuDeColar(context, ref, selected),
-          ),
-          _BotaoDoCromo(
-            key: const ValueKey('playbar-marcas'),
-            icone: CupertinoIcons.bookmark,
-            dica: 'Marcas na timeline',
-            largura: lado,
-            onTap: () => menuDasMarcas(context, ref, playback),
-          ),
-          _BotaoDoCromo(
-            key: const ValueKey('transport-expand'),
-            icone: expandido
-                ? CupertinoIcons.fullscreen_exit
-                : CupertinoIcons.fullscreen,
-            dica: expandido ? 'Sair da tela cheia' : 'Tela cheia',
-            largura: lado,
-            onTap: () =>
-                ref.read(editorSessionProvider.notifier).togglePreviewExpanded(),
+                  _BotaoDoCromo(
+                    key: const ValueKey('playbar-colar'),
+                    icone: CupertinoIcons.doc_on_clipboard,
+                    dica: 'Copiar e colar',
+                    largura: lado,
+                    onTap: selected == null && !controller.temEfeitosCopiados
+                        ? null
+                        : () => _menuDeColar(context, ref, selected),
+                  ),
+                  ValueListenableBuilder<Duration>(
+                    valueListenable: playback.time,
+                    builder: (context, t, _) {
+                      final aqui = project.markerNear(
+                        t,
+                        Duration(microseconds: quadro.inMicroseconds ~/ 2),
+                      );
+                      return _BotaoDoCromo(
+                        key: const ValueKey('playbar-marcador'),
+                        icone: aqui == null
+                            ? CupertinoIcons.bookmark
+                            : CupertinoIcons.bookmark_fill,
+                        dica: aqui == null
+                            ? 'Marcar este instante · segure para as marcas'
+                            : 'Tirar a marca · segure para as marcas',
+                        cor: aqui?.color,
+                        largura: lado,
+                        // O TEMPO SAI NA HORA DO TOQUE, como na barra da
+                        // selecao: o construtor so decide o desenho.
+                        onTap: () =>
+                            controller.toggleMarker(playback.time.value),
+                        onLongPress: () =>
+                            menuDasMarcas(context, ref, playback),
+                      );
+                    },
+                  ),
+                  _BotaoDoCromo(
+                    key: const ValueKey('playbar-visualizacao'),
+                    icone: !opcoes.visaoDaCamera
+                        ? CupertinoIcons.videocam
+                        : (opcoes.aberta
+                              ? CupertinoIcons.eye_fill
+                              : CupertinoIcons.eye),
+                    dica: opcoes.aberta
+                        ? 'Fechar as opções de visualização'
+                        : 'Opções de visualização',
+                    cor: opcoes.aberta ? CromoEditor.acao : null,
+                    largura: lado,
+                    onTap: () => ref
+                        .read(opcoesDeVisualizacaoProvider.notifier)
+                        .alternarColuna(),
+                  ),
+                  _BotaoDoCromo(
+                    key: const ValueKey('transport-expand'),
+                    icone: expandido
+                        ? CupertinoIcons.fullscreen_exit
+                        : CupertinoIcons.fullscreen,
+                    dica: expandido ? 'Sair da tela cheia' : 'Tela cheia',
+                    largura: lado,
+                    onTap: () => ref
+                        .read(editorSessionProvider.notifier)
+                        .togglePreviewExpanded(),
+                  ),
+                ],
+              );
+            },
           ),
         ],
-          );
-        },
       ),
     );
   }
@@ -591,6 +673,141 @@ class BarraDeReproducao extends ConsumerWidget {
       ),
     );
   }
+}
+
+/// O CONTEUDO DA BARRA DE INFORMACOES: tempo e deslocamento quando o
+/// arrasto e no tempo; ate seis pares rotulo/valor quando e no palco.
+class _ConteudoDaInfobar extends StatelessWidget {
+  const _ConteudoDaInfobar({required this.info});
+
+  final DadosDaInfobar info;
+
+  @override
+  Widget build(BuildContext context) {
+    const estiloValor = TextStyle(
+      color: CromoEditor.branco,
+      fontSize: 13,
+      fontWeight: FontWeight.w600,
+      fontFeatures: [FontFeature.tabularFigures()],
+    );
+    const estiloRotulo = TextStyle(color: CromoEditor.apagado, fontSize: 10.5);
+    final tempo = info.tempo;
+    if (tempo != null) {
+      final desloc = info.deslocamento ?? Duration.zero;
+      return Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(
+            CupertinoIcons.rhombus,
+            size: 14,
+            color: CromoEditor.keyframe,
+          ),
+          const SizedBox(width: 6),
+          AppText(
+            tempoDaInfobar(tempo),
+            key: const ValueKey('infobar-tempo'),
+            style: estiloValor,
+          ),
+          const SizedBox(width: 22),
+          const Icon(
+            CupertinoIcons.arrow_right_arrow_left,
+            size: 14,
+            color: CromoEditor.apagado,
+          ),
+          const SizedBox(width: 6),
+          AppText(
+            '${desloc.isNegative ? '' : '+'}${tempoDaInfobar(desloc)}',
+            key: const ValueKey('infobar-deslocamento'),
+            style: estiloValor,
+          ),
+        ],
+      );
+    }
+    final pares = info.pares.take(6).toList();
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: Row(
+        children: [
+          for (final (rotulo, valor) in pares)
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  AppText(rotulo, maxLines: 1, style: estiloRotulo),
+                  AppText(
+                    valor,
+                    maxLines: 1,
+                    overflow: TextOverflow.fade,
+                    style: estiloValor,
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// O MEDIDOR DE NIVEL: uma faixa que respira do centro para as bordas
+/// no volume do som que esta tocando. Parado, nao desenha nada.
+class _MedidorDeNivel extends ConsumerWidget {
+  const _MedidorDeNivel({required this.playback});
+
+  final PlaybackController playback;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return IgnorePointer(
+      child: ValueListenableBuilder<bool>(
+        valueListenable: playback.playing,
+        builder: (context, tocando, _) {
+          if (!tocando) return const SizedBox.shrink();
+          return ValueListenableBuilder<Duration>(
+            valueListenable: playback.time,
+            builder: (context, t, _) {
+              final nivel = nivelDeAudioEm(
+                ref.read(editorControllerProvider),
+                t,
+              );
+              return CustomPaint(
+                key: const ValueKey('medidor-de-nivel'),
+                painter: _PintorDoMedidor(nivel),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _PintorDoMedidor extends CustomPainter {
+  const _PintorDoMedidor(this.nivel);
+
+  final double nivel;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (nivel <= 0.01) return;
+    final meia = size.width / 2 * nivel;
+    final centro = size.width / 2;
+    final faixa = Rect.fromLTRB(centro - meia, 0, centro + meia, size.height);
+    canvas.drawRect(
+      faixa,
+      Paint()
+        ..shader = LinearGradient(
+          colors: [
+            CromoEditor.acao.withValues(alpha: 0),
+            CromoEditor.acao.withValues(alpha: .16),
+            CromoEditor.acao.withValues(alpha: 0),
+          ],
+        ).createShader(faixa),
+    );
+  }
+
+  @override
+  bool shouldRepaint(_PintorDoMedidor old) => old.nivel != nivel;
 }
 
 /// A BARRA FLUTUANTE DA SELECAO: aparar, dividir, keyframe, duplicar e
@@ -675,10 +892,12 @@ class BarraDaSelecao extends ConsumerWidget {
   }
 }
 
-/// O TRILHO DA DIREITA DO PALCO: solo, cameras e o zoom do palco
-/// (− · 100% · +; tocar no numero volta ao ajustado).
-class TrilhoDoPalco extends ConsumerWidget {
-  const TrilhoDoPalco({super.key, required this.playback});
+/// A COLUNA DE OPCOES DE VISUALIZACAO (borda direita do palco, aberta
+/// pelo olho da barra de reproducao): pixels, grade, solo, visao da
+/// camera e o zoom do palco (+ · 100% · −; tocar no numero volta ao
+/// ajustado). Segurar a camera abre a lista de cameras.
+class ColunaDeVisualizacao extends ConsumerWidget {
+  const ColunaDeVisualizacao({super.key, required this.playback});
 
   final PlaybackController playback;
 
@@ -688,6 +907,8 @@ class TrilhoDoPalco extends ConsumerWidget {
     final project = ref.watch(editorControllerProvider);
     final soloAtivo = selected != null && project.metaOf(selected).solo;
     final zoom = ref.watch(zoomDoPalcoProvider);
+    final opcoes = ref.watch(opcoesDeVisualizacaoProvider);
+    final notifier = ref.read(opcoesDeVisualizacaoProvider.notifier);
 
     void mudarZoom(double fator) {
       final novo = (zoom * fator).clamp(0.25, 4.0);
@@ -705,7 +926,47 @@ class TrilhoDoPalco extends ConsumerWidget {
       return null;
     }
 
+    final camera = primeiraCamera(project.layers);
+
+    // A COLUNA CABE NO PALCO: num celular o palco tem pouco mais de 200
+    // pontos de altura, e sete alvos de 44 passavam por cima da barra de
+    // reproducao — o toque ia parar nela. Os botoes dividem a altura que
+    // ha (quatro chaves, dois de zoom e o numero valendo meio).
+    return LayoutBuilder(
+      builder: (context, c) {
+        final h = c.maxHeight.isFinite
+            ? ((c.maxHeight - 18) / 6.6).floorToDouble().clamp(18.0, 44.0)
+            : 44.0;
+        return _colunaDeVisualizacao(
+          context,
+          ref,
+          h: h,
+          camera: camera,
+          soloAtivo: soloAtivo,
+          selected: selected,
+          zoom: zoom,
+          opcoes: opcoes,
+          notifier: notifier,
+          mudarZoom: mudarZoom,
+        );
+      },
+    );
+  }
+
+  Widget _colunaDeVisualizacao(
+    BuildContext context,
+    WidgetRef ref, {
+    required double h,
+    required CameraLayer? camera,
+    required bool soloAtivo,
+    required String? selected,
+    required double zoom,
+    required OpcoesDeVisualizacao opcoes,
+    required OpcoesDeVisualizacaoNotifier notifier,
+    required void Function(double) mudarZoom,
+  }) {
     return Container(
+      key: const ValueKey('coluna-de-visualizacao'),
       width: 40,
       padding: const EdgeInsets.symmetric(vertical: 4),
       decoration: const BoxDecoration(
@@ -719,7 +980,28 @@ class TrilhoDoPalco extends ConsumerWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           _BotaoDoCromo(
+            key: const ValueKey('visao-pixels'),
+            altura: h,
+            icone: CupertinoIcons.square_grid_3x2,
+            dica: opcoes.pixels
+                ? 'Pixels reais ligados'
+                : 'Pixels reais (resolução cheia e grade de pixels no zoom)',
+            cor: opcoes.pixels ? CromoEditor.acao : CromoEditor.branco,
+            tamanho: 18,
+            onTap: notifier.alternarPixels,
+          ),
+          _BotaoDoCromo(
+            key: const ValueKey('visao-grade'),
+            altura: h,
+            icone: CupertinoIcons.grid,
+            dica: opcoes.grade ? 'Esconder a grade' : 'Mostrar a grade',
+            cor: opcoes.grade ? CromoEditor.acao : CromoEditor.branco,
+            tamanho: 18,
+            onTap: notifier.alternarGrade,
+          ),
+          _BotaoDoCromo(
             key: const ValueKey('rail-solo'),
+            altura: h,
             icone: Icons.center_focus_strong,
             dica: soloAtivo ? 'Tirar do solo' : 'Solo da camada selecionada',
             cor: soloAtivo ? CromoEditor.acao : CromoEditor.branco,
@@ -732,11 +1014,21 @@ class TrilhoDoPalco extends ConsumerWidget {
           ),
           _BotaoDoCromo(
             key: const ValueKey('rail-camera'),
-            icone: CupertinoIcons.videocam_fill,
-            dica: 'Câmeras',
+            altura: h,
+            icone: opcoes.visaoDaCamera
+                ? CupertinoIcons.videocam_fill
+                : CupertinoIcons.videocam,
+            dica: camera == null
+                ? 'Visão da câmera (adicione uma em + › Objeto)'
+                : (opcoes.visaoDaCamera
+                      ? 'Vendo pela câmera · toque para a vista livre, '
+                            'segure para as câmeras'
+                      : 'Vista livre · toque para ver pela câmera'),
+            cor: camera != null && opcoes.visaoDaCamera
+                ? CromoEditor.acao
+                : CromoEditor.branco,
             tamanho: 18,
             onTap: () {
-              final camera = primeiraCamera(project.layers);
               if (camera == null) {
                 AureaSnack.show(
                   context,
@@ -744,8 +1036,11 @@ class TrilhoDoPalco extends ConsumerWidget {
                 );
                 return;
               }
-              showCamerasSheet(context, ref, camera.id, playback);
+              notifier.alternarVisaoDaCamera();
             },
+            onLongPress: camera == null
+                ? null
+                : () => showCamerasSheet(context, ref, camera.id, playback),
           ),
           Container(
             width: 22,
@@ -755,6 +1050,7 @@ class TrilhoDoPalco extends ConsumerWidget {
           ),
           _BotaoDoCromo(
             key: const ValueKey('rail-zoom-mais'),
+            altura: h,
             icone: Icons.zoom_in,
             dica: 'Aproximar o palco',
             tamanho: 19,
@@ -769,13 +1065,15 @@ class TrilhoDoPalco extends ConsumerWidget {
                   : () => ref.read(zoomDoPalcoProvider.notifier).state = 1.0,
               child: SizedBox(
                 width: 40,
-                height: 26,
+                height: h * .6,
                 child: Center(
                   child: AppText(
                     '${(zoom * 100).round()}%',
                     style: TextStyle(
                       fontSize: 9.5,
-                      color: zoom == 1.0 ? CromoEditor.apagado : CromoEditor.acao,
+                      color: zoom == 1.0
+                          ? CromoEditor.apagado
+                          : CromoEditor.acao,
                       fontFeatures: const [FontFeature.tabularFigures()],
                     ),
                   ),
@@ -785,12 +1083,55 @@ class TrilhoDoPalco extends ConsumerWidget {
           ),
           _BotaoDoCromo(
             key: const ValueKey('rail-zoom-menos'),
+            altura: h,
             icone: Icons.zoom_out,
             dica: 'Afastar o palco',
             tamanho: 19,
             onTap: zoom <= 0.25 ? null : () => mudarZoom(0.8),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// O ZOOM SOBRE O PALCO: com o palco fora do ajustado, o numero fica no
+/// canto de cima a esquerda; tocar volta ao ajustado.
+class IndicadorDeZoomDoPalco extends ConsumerWidget {
+  const IndicadorDeZoomDoPalco({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final zoom = ref.watch(zoomDoPalcoProvider);
+    if (zoom == 1.0) return const SizedBox.shrink();
+    return Tooltip(
+      message: 'Voltar ao ajustado',
+      child: Tocavel(
+        key: const ValueKey('preview-zoom-indicador'),
+        onTap: () => ref.read(zoomDoPalcoProvider.notifier).state = 1.0,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: .55),
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.zoom_in, size: 14, color: CromoEditor.branco),
+              const SizedBox(width: 4),
+              AppText(
+                '${(zoom * 100).round()}%',
+                style: const TextStyle(
+                  color: CromoEditor.branco,
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

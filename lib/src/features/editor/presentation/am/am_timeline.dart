@@ -20,6 +20,7 @@ import '../../domain/video_project.dart' as proj;
 import '../../application/media_preview_service.dart';
 import '../../application/proxy_service.dart';
 import '../../application/ui/editor_session.dart';
+import '../../application/ui/opcoes_de_visualizacao.dart';
 import '../../../../core/storage/prefs.dart';
 import '../shell/layer_actions.dart' show menuDasMarcas;
 import 'am_colors.dart';
@@ -1487,15 +1488,30 @@ class _AmBarState extends ConsumerState<_AmBar> {
   /// tratador ja nao existe.
   bool _arrastandoBarra = false;
 
+  /// A barra de informacoes, pega no comeco do arrasto: o fim pode
+  /// chegar pelo dispose, onde o `ref` ja nao responde.
+  StateController<DadosDaInfobar?>? _infobar;
+
   void _comecarArrasto() {
     _arrastandoBarra = true;
+    _infobar = ref.read(infobarProvider.notifier);
     onEditStart();
   }
 
   void _terminarArrasto() {
     if (!_arrastandoBarra) return;
     _arrastandoBarra = false;
+    _infobar?.state = null;
+    _infobar = null;
     onEditEnd();
+  }
+
+  /// Onde o item arrastado esta e quanto andou desde que o dedo pegou.
+  void _informarTempo(Duration agora, Duration origem) {
+    _infobar?.state = DadosDaInfobar.tempo(
+      tempo: agora,
+      deslocamento: agora - origem,
+    );
   }
 
   @override
@@ -1886,7 +1902,9 @@ class _AmBarState extends ConsumerState<_AmBar> {
                       if (_eixoDoArrasto == _EixoDoArrasto.tempo) {
                         final desired =
                             _dragStart0 + _pxToDur(d.offsetFromOrigin.dx);
-                        controller.moveLayer(layer.id, _snapMove(desired));
+                        final novo = _snapMove(desired);
+                        controller.moveLayer(layer.id, novo);
+                        _informarTempo(novo, _dragStart0);
                       } else {
                         _reordenarPorArrasto(dy - _ultimoDyLongo);
                       }
@@ -2249,6 +2267,7 @@ class _AmBarState extends ConsumerState<_AmBar> {
                 final snapped = _snap(desired);
                 _hapticIfSnapped(desired, snapped);
                 controller.trimLayerStart(layer.id, snapped);
+                _informarTempo(snapped, _trimStart0);
               },
             ),
             _TrimHandle(
@@ -2265,6 +2284,7 @@ class _AmBarState extends ConsumerState<_AmBar> {
                 final snapped = _snap(desired);
                 _hapticIfSnapped(desired, snapped);
                 controller.trimLayerEnd(layer.id, snapped);
+                _informarTempo(snapped, _trimStart0);
               },
             ),
           ],

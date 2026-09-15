@@ -6,29 +6,29 @@ import '../../../core/ui/am_colors.dart';
 import 'package:aurea/src/core/l10n/app_language.dart';
 
 // Change this revision when publishing a new set of release notes.
-const releaseNoticeRevision = '2026-09-14-beta-82';
+const releaseNoticeRevision = '2026-09-15-beta-84';
 const releaseNoticeSeenKey = 'aurea.releaseNotice.seen';
 
 const releaseHighlights = <(IconData, String, String)>[
   (
-    CupertinoIcons.textformat_alt,
-    'Texto 3D de metal',
-    'Adicionar > Objeto > Texto 3D: letras com chanfro em ouro, cromo ou aço escovado, num estúdio feito para metal. O texto segue um nulo na linha do tempo.',
+    CupertinoIcons.viewfinder,
+    'Rastreio 3D: motor 2.0',
+    'O rastreio de câmera foi refeito do zero: motor nativo novo com trava anti-fantasma, tripé detectado sozinho, distorção de lente medida e toda análise assinada (motor, quadros, tempo). Estúdio novo: chão, origem, escala real, âncoras e objetos na superfície.',
+  ),
+  (
+    CupertinoIcons.rectangle_split_3x1,
+    'Decupar sozinho',
+    'Toque em Decupar no clipe: o detector de mudança de cena corta o vídeo inteiro nos pontos certos — ou só marca na régua para revisar. E a emenda de cortes não trava mais o play: o pedaço seguinte já entra rodando.',
+  ),
+  (
+    CupertinoIcons.videocam_fill,
+    'Câmera 3D e batidas',
+    'Câmera da composição ao lado do Nulo, com lente animável (dolly-zoom!). Batidas da música com porta própria no menu de marcas, compasso destacado na régua e batidas viram marcas de verdade.',
   ),
   (
     CupertinoIcons.sparkles,
-    'Efeitos com prévia de verdade',
-    'A galeria mostra cada efeito animado numa foto. Novos: Looks com força, S_Sharpen, S_Flicker, S_MathOps, Hue/Saturation e Film Damage 2.',
-  ),
-  (
-    CupertinoIcons.fullscreen,
-    'Mídia em tela cheia',
-    'Foto e vídeo importados cobrem a composição. Preencher e Ajustar no painel de Escala, e a mesclagem não encolhe mais a camada.',
-  ),
-  (
-    CupertinoIcons.hand_draw,
-    'Keyframes e limpeza',
-    'Segure e arraste o keyframe na linha do tempo. Partículas de volta; saíram a aba Presets e o aviso de camada apagada.',
+    'Efeitos novos e correções',
+    'Light Sweep, Saber, Lens Blur e 8-Bit. Exportar não falha mais com clipe sem áudio, a galeria mostra as mídias recentes primeiro, projetos abrem muito mais rápido e o Texto 3D aceita suas fontes importadas.',
   ),
 ];
 

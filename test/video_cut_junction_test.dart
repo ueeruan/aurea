@@ -249,16 +249,23 @@ void main() {
       expect(nativo.doTipo('dispose'), isEmpty, reason: 'descartar no play e o soluco');
       expect(
         nativo.doTipo('seek').toList(),
-        ['seek#1@0', 'seek#2@8000', 'seek#1@20000'],
-        reason: 'um seek por pedaco, sempre ANTES da entrada (pre-roll)',
+        ['seek#1@0', 'seek#2@7700', 'seek#1@19700'],
+        reason: 'um seek por pedaco, sempre ANTES da entrada — e 300 ms '
+            'ANTES do ponto na fonte: e a folga da largada antecipada',
       );
-      expect(nativo.log, contains('play#2@8000'));
-      expect(nativo.log, contains('play#1@20000'));
-      // A entrada de cada pedaco vem DEPOIS do seek do pre-roll dele, e o
-      // tocador que sai e so pausado.
+      // A LARGADA ANTECIPADA: o pedaco que entra ja TOCA (mudo) 300 ms
+      // antes da juncao, a partir da fonte deslocada — na emenda nao ha
+      // seek nem play, so o volume subindo.
+      expect(nativo.log, contains('play#2@7700'));
+      expect(nativo.log, contains('play#1@19700'));
       expect(
-        nativo.log.indexOf('seek#2@8000'),
-        lessThan(nativo.log.indexOf('play#2@8000')),
+        nativo.log.indexOf('seek#2@7700'),
+        lessThan(nativo.log.indexOf('play#2@7700')),
+      );
+      expect(
+        nativo.log.indexOf('play#2@7700'),
+        lessThan(nativo.log.indexOf('pause#1')),
+        reason: 'o proximo ja roda ANTES de o atual sair: emenda sem buraco',
       );
       expect(nativo.log, contains('pause#1'));
 

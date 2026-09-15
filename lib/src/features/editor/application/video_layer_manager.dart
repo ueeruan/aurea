@@ -258,6 +258,17 @@ class VideoLayerManager {
   /// so o play — sem o seek que travava o preview no ponto do corte.
   final Map<String, Duration> _preRolled = {};
 
+  /// LARGADA ANTECIPADA: o pedaco que entra ja esta TOCANDO, mudo, um
+  /// pouco antes da juncao. O pre-roll tirou o seek do ponto do corte;
+  /// isto tira o PLAY — que nao e gratis: o decodificador leva dezenas
+  /// de ms para retomar, e era a ultima travadinha da emenda. O truque:
+  /// o pre-roll posiciona a fonte [_avancoDaLargada] ANTES do ponto de
+  /// entrada, o play sai mudo quando falta esse tanto, e na juncao o
+  /// tocador ja esta exatamente no quadro certo, quente — so o volume
+  /// sobe. Emenda de graca.
+  final Set<String> _emLargada = {};
+  static const Duration _avancoDaLargada = Duration(milliseconds: 300);
+
   /// Quanto antes do inicio de um pedaco ele e preparado.
   static const Duration _janelaPreRoll = Duration(seconds: 2);
 
@@ -411,6 +422,7 @@ class VideoLayerManager {
     _lastPos.remove(id);
     _biasUs.remove(id);
     _preRolled.remove(id);
+    _emLargada.remove(id);
     _semQuadro.remove(id);
     final mandado = _tocouEm.remove(id) != null;
     final c = _controllers.remove(id);
@@ -550,6 +562,7 @@ class VideoLayerManager {
       _lastPos.clear();
       _biasUs.clear();
       _preRolled.clear();
+      _emLargada.clear();
     }
     if (isPlaying && _scrubbing) {
       _scrubbing = false;
@@ -818,19 +831,45 @@ class VideoLayerManager {
         // toca. O seek e o que custa (o decodificador volta ao quadro-
         // chave anterior e avanca ate o ponto); feito agora, na entrada
         // sobra so o play. Era o "trava quando chega onde decupei".
-        final prepareAt = switch (layer) {
+        final entrada = switch (layer) {
           VideoLayer v => videoAbsoluteSourceTimeAt(v, Duration.zero),
           _ => m.offset,
         };
+        // A LARGADA comeca ANTES do ponto de entrada na fonte, para o
+        // play mudo consumir exatamente a folga e chegar na juncao no
+        // quadro certo. So em trecho de leitura simples (sem reverso,
+        // sem Time Remap, velocidade nativa) e quando o arquivo tem
+        // fonte antes do ponto (decupagem tem; comeco de arquivo nao).
+        final avancoNaFonte = Duration(
+          microseconds: (_avancoDaLargada.inMicroseconds * rate).round(),
+        );
+        final podeLargar = !frameDriven && entrada >= avancoNaFonte;
+        final prepareAt = podeLargar ? entrada - avancoNaFonte : entrada;
         if (_preRolled[key] != prepareAt) {
+          _emLargada.remove(key);
           _parar(key, controller);
           _position(key, controller, prepareAt);
           _preRolled[key] = prepareAt;
+        }
+        final falta = layer.startTime - t;
+        if (podeLargar &&
+            falta <= _avancoDaLargada &&
+            !_positioning.containsKey(key) &&
+            _emLargada.add(key)) {
+          // Mudo, na velocidade de entrada, ja rodando: a juncao vira
+          // continuacao. O volume real entra no tique em que o pedaco
+          // fica ativo, pela mesma conta de sempre.
+          _appliedVolume[key] = 0;
+          controller.setVolume(0);
+          _setNativeRate(key, controller, rate);
+          _tocouEm[key] = agoraMs;
+          controller.play();
         }
         continue;
       }
 
       if (active && isPlaying) {
+        _emLargada.remove(key);
         if (jumped && !frameDriven) {
           _position(key, controller, local, play: true, rate: rate);
           continue;
@@ -875,11 +914,14 @@ class VideoLayerManager {
             continue;
           }
           // Pre-rolado no ponto certo: nada de seek de novo. O atraso
-          // entre o pre-roll e a entrada e de no maximo um tique.
+          // entre o pre-roll e a entrada e de no maximo um tique. Quem
+          // largou antecipado nem passa por aqui (ja esta tocando); a
+          // folga de 250 ms cobre o alvo deslocado da largada tambem.
           final preparado = _preRolled.remove(key);
           final jaNoLugar =
               preparado != null &&
-              (local - preparado).abs() < const Duration(milliseconds: 250);
+              (local - preparado).abs() <
+                  const Duration(milliseconds: 250) + _avancoDaLargada;
           if (!jaNoLugar) {
             _position(key, controller, local, play: true, rate: rate);
             continue;
@@ -952,6 +994,7 @@ class VideoLayerManager {
         }
       } else {
         _preRolled.remove(key);
+        _emLargada.remove(key);
         _parar(key, controller);
         // Scrub pausado: video precisa do seek para MOSTRAR o frame;
         // audio pausado nao tem nada a mostrar — seek so na hora do
@@ -1023,6 +1066,7 @@ class VideoLayerManager {
     _lastPos.clear();
     _biasUs.clear();
     _preRolled.clear();
+    _emLargada.clear();
     _tocouEm.clear();
     _semQuadro.clear();
     revision.dispose();

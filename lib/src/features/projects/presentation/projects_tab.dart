@@ -1,7 +1,7 @@
 import 'package:aurea/src/core/l10n/app_language.dart';
 import 'dart:io';
 
-import '../../enhance/presentation/enhance_screen.dart';
+import '../../../core/ui/tocavel.dart';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/cupertino.dart';
@@ -580,17 +580,6 @@ class ProjectsTab extends ConsumerWidget {
                       onTap: () => _importarCena(context, ref),
                     ),
                   ),
-                  Expanded(
-                    child: _Atalho(
-                      icon: CupertinoIcons.wand_stars,
-                      rotulo: 'Melhorar',
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (_) => const EnhanceScreen(),
-                        ),
-                      ),
-                    ),
-                  ),
                 ],
               ),
             ),
@@ -945,9 +934,8 @@ class _Cabecalho extends ConsumerWidget {
             onTap: onTemplate,
           ),
           const SizedBox(width: 6),
-          GestureDetector(
+          Tocavel(
             key: const ValueKey('inicio-perfil'),
-            behavior: HitTestBehavior.opaque,
             onTap: () => ref.read(homeTabProvider.notifier).state = 3,
             child: SizedBox(
               width: 44,
@@ -993,8 +981,7 @@ class _BotaoRedondo extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Tooltip(
     message: tooltip,
-    child: GestureDetector(
-      behavior: HitTestBehavior.opaque,
+    child: Tocavel(
       onTap: onTap,
       child: SizedBox(
         width: 44,
@@ -1023,8 +1010,7 @@ class _Atalho extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
-    behavior: HitTestBehavior.opaque,
+  Widget build(BuildContext context) => Tocavel(
     onTap: onTap,
     child: Column(
       mainAxisSize: MainAxisSize.min,
@@ -1130,8 +1116,7 @@ class _CartaoProjeto extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = thumb;
     final ratio = project.aspectRatio <= 0 ? 16 / 9 : project.aspectRatio;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
+    return Tocavel(
       onTap: onOpen,
       onLongPress: onMenu,
       child: Column(
@@ -1211,9 +1196,8 @@ class _CartaoProjeto extends StatelessWidget {
               ),
               // O MENU TEM 40 PX de alvo: e por onde se apaga, duplica e
               // renomeia — nada disso pode depender de um gesto escondido.
-              GestureDetector(
+              Tocavel(
                 key: ValueKey('projeto-menu-${project.id}'),
-                behavior: HitTestBehavior.opaque,
                 onTap: onMenu,
                 child: SizedBox(
                   width: 40,
@@ -1251,8 +1235,7 @@ class _CartaoModelo extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(right: 12),
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
+      child: Tocavel(
         onTap: onTap,
         child: SizedBox(
           width: 232,
@@ -1309,8 +1292,7 @@ class _Linha extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
+    return Tocavel(
       onTap: onTap,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(20, 13, 20, 13),
@@ -1351,9 +1333,8 @@ class _LinhaGrande extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
+  Widget build(BuildContext context) => Tocavel(
     key: const ValueKey('inicio-comunidade'),
-    behavior: HitTestBehavior.opaque,
     onTap: onTap,
     child: Padding(
       padding: const EdgeInsets.fromLTRB(20, 2, 20, 2),

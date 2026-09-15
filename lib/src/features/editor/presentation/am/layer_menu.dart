@@ -814,7 +814,7 @@ Future<void> showGridSheet(
                         ),
                       ),
                       if (rig != null)
-                        GestureDetector(
+                        Tocavel(
                           onTap: () {
                             controller.removeGrid(nullId);
                             setSheetState(() {});
@@ -868,7 +868,7 @@ Future<void> showGridSheet(
                         ])
                           Padding(
                             padding: const EdgeInsets.only(right: 8),
-                            child: GestureDetector(
+                            child: Tocavel(
                               onTap: () {
                                 // Com o morph ANIMADO, escolher um modo
                                 // cria keyframe no playhead (nao apaga a
@@ -1139,7 +1139,7 @@ Future<void> showGridSheet(
                         ),
                         const SizedBox(width: 10),
                         Expanded(
-                          child: GestureDetector(
+                          child: Tocavel(
                             onTap: () async {
                               final pickedId = await _pickControllerNull(
                                 sheetContext,
@@ -1381,7 +1381,7 @@ Future<void> showMasksSheet(
           }
 
           Widget preset(String label, BezierPath path) {
-            return GestureDetector(
+            return Tocavel(
               onTap: () {
                 controller.addMask(
                   layerId,
@@ -1538,7 +1538,7 @@ Future<void> showMasksSheet(
                                       : AmColors.muted,
                                 ),
                               ),
-                              GestureDetector(
+                              Tocavel(
                                 onTap: () {
                                   controller.removeMask(layerId, m.id);
                                   setSheetState(() {});
@@ -1556,7 +1556,7 @@ Future<void> showMasksSheet(
                             runSpacing: 5,
                             children: [
                               for (final mode in MaskMode.values)
-                                GestureDetector(
+                                Tocavel(
                                   onTap: () {
                                     controller.updateMask(
                                       layerId,
@@ -1651,7 +1651,7 @@ Future<void> showMasksSheet(
                               // Soltar os eixos: borda dura dos lados e
                               // macia em cima e embaixo — o degrade de
                               // horizonte que o feather redondo nao faz.
-                              GestureDetector(
+                              Tocavel(
                                 onTap: () => controller.toggleMaskFeatherAxes(
                                   layerId,
                                   m.id,
@@ -1976,7 +1976,7 @@ Future<void> showParticlesSheet(
                     runSpacing: 6,
                     children: [
                       for (var i = 0; i < nomes.length; i++)
-                        GestureDetector(
+                        Tocavel(
                           onTap: () {
                             onPick(i);
                             setSheetState(() {});
@@ -2325,7 +2325,7 @@ Future<void> showParticlesSheet(
                           style: TextStyle(fontSize: 13, color: AmColors.muted),
                         ),
                       ),
-                      GestureDetector(
+                      Tocavel(
                         onTap: () {
                           up((p) => p.copyParticles(clearColorEnd: true));
                           setSheetState(() {});
@@ -2358,7 +2358,7 @@ Future<void> showParticlesSheet(
                         Color(0xFFFFB020),
                         Color(0xFF35C4E7),
                       ])
-                        GestureDetector(
+                        Tocavel(
                           onTap: () {
                             up((p) => p.copyParticles(colorEnd: c));
                             setSheetState(() {});
@@ -2408,7 +2408,7 @@ Future<void> showParticlesSheet(
                       Color(0xFFFFB020),
                       Color(0xFF35C4E7),
                     ])
-                      GestureDetector(
+                      Tocavel(
                         onTap: () {
                           controller.updateParticles(
                             layerId,
@@ -2482,7 +2482,7 @@ Future<void> showElement3DSheet(
                   runSpacing: 8,
                   children: [
                     for (final kind in Element3DKind.values)
-                      GestureDetector(
+                      Tocavel(
                         onTap: () {
                           controller.updateElement3D(
                             layerId,
@@ -2590,7 +2590,7 @@ Future<void> showElement3DSheet(
                       Color(0xFFFF3B52),
                       Color(0xFFFFFFFF),
                     ])
-                      GestureDetector(
+                      Tocavel(
                         onTap: () {
                           controller.updateElement3D(
                             layerId,
@@ -2659,7 +2659,7 @@ Future<void> showElement3DSheet(
                   runSpacing: 8,
                   children: [
                     for (final k in EnvironmentKind.values)
-                      GestureDetector(
+                      Tocavel(
                         onTap: () {
                           controller.updateElement3D(
                             layerId,
@@ -2716,7 +2716,7 @@ Future<void> showElement3DSheet(
                             'Metal',
                             'Fosco',
                           ].indexed)
-                            GestureDetector(
+                            Tocavel(
                               onTap: () {
                                 controller.updateElement3D(
                                   layerId,
@@ -2772,7 +2772,7 @@ Future<void> showElement3DSheet(
                           runSpacing: 8,
                           children: [
                             for (final cores in kGlossyGradients)
-                              GestureDetector(
+                              Tocavel(
                                 onTap: () {
                                   controller.updateElement3D(
                                     layerId,
@@ -2860,7 +2860,7 @@ Future<void> showElement3DSheet(
                         ),
                       ),
                     ),
-                    GestureDetector(
+                    Tocavel(
                       onTap: () async {
                         await _escolherModelo3D(sheetContext, ref, layerId);
                         setSheetState(() {});
@@ -2894,7 +2894,7 @@ Future<void> showElement3DSheet(
                       ),
                     ),
                     if (layer.meshPath != null)
-                      GestureDetector(
+                      Tocavel(
                         onTap: () {
                           controller.updateElement3D(
                             layerId,
@@ -2937,7 +2937,7 @@ Future<void> showElement3DSheet(
                         ),
                       ),
                     ),
-                    GestureDetector(
+                    Tocavel(
                       onTap: () async {
                         final r = await FilePicker.platform.pickFiles(
                           type: FileType.image,
@@ -2979,7 +2979,7 @@ Future<void> showElement3DSheet(
                       ),
                     ),
                     if (layer.imagePath != null)
-                      GestureDetector(
+                      Tocavel(
                         onTap: () {
                           controller.updateElement3D(
                             layerId,
@@ -3319,7 +3319,7 @@ Future<void> showShapeParamsSheet(
                           ('Estrela', ParamShapeKind.star),
                           ('Setor', ParamShapeKind.sector),
                         ])
-                          GestureDetector(
+                          Tocavel(
                             onTap: () {
                               controller.setShapeParamKind(layerId, kind);
                               setSheetState(() {});
@@ -3387,7 +3387,7 @@ Future<void> showShapeParamsSheet(
                           ])
                             Padding(
                               padding: const EdgeInsets.only(right: 8),
-                              child: GestureDetector(
+                              child: Tocavel(
                                 onTap: () {
                                   controller.setShapeRoundnessUnit(
                                     layerId,
@@ -3576,7 +3576,7 @@ Future<void> showCaptionCuesSheet(
                     // ESTILO, visivel no cabecalho do editor de legendas.
                     // O estilo Destaque (nivel 12.1) mora aqui, com as
                     // tres profundidades.
-                    GestureDetector(
+                    Tocavel(
                       behavior: HitTestBehavior.opaque,
                       onTap: () {
                         closeParamSheet(sheetContext);
@@ -3639,7 +3639,7 @@ Future<void> showCaptionCuesSheet(
                               child: Row(
                                 crossAxisAlignment: CrossAxisAlignment.center,
                                 children: [
-                                  GestureDetector(
+                                  Tocavel(
                                     onTap: () => playback.seek(
                                       layer.startTime + c.start,
                                     ),
@@ -3860,7 +3860,7 @@ class _BlendChip extends StatelessWidget {
   final BlendMode? mode;
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
+  Widget build(BuildContext context) => Tocavel(
     onTap: onTap,
     child: Container(
       width: 74,
@@ -4218,7 +4218,7 @@ class _BlendingPanelState extends ConsumerState<BlendingPanel> {
   );
 
   Widget _button(String text, VoidCallback onTap, {bool selected = false}) =>
-      GestureDetector(
+      Tocavel(
         behavior: HitTestBehavior.opaque,
         onTap: onTap,
         child: Container(
@@ -4808,7 +4808,7 @@ class ColorFillPanel extends ConsumerWidget {
                       children: [
                         // QUALQUER COR: espectro completo, hex e alfa.
                         // Os atalhos abaixo continuam para o caso comum.
-                        GestureDetector(
+                        Tocavel(
                           onTap: () async {
                             void set(Color c) {
                               if (layer is ShapeLayer) {
@@ -4869,7 +4869,7 @@ class ColorFillPanel extends ConsumerWidget {
                           runSpacing: 14,
                           children: [
                             for (final c in _swatches)
-                              GestureDetector(
+                              Tocavel(
                                 onTap: () {
                                   if (layer is ShapeLayer) {
                                     controller.setShapePrimaryColor(id, c);
@@ -5004,7 +5004,7 @@ class _ShapeOperators extends ConsumerWidget {
                         ),
                       ),
                       // PR-M8: Individually (cascata) x Simultaneously.
-                      GestureDetector(
+                      Tocavel(
                         onTap: () => controller.setTrimMode(
                           layerId,
                           item.id,
@@ -5029,7 +5029,7 @@ class _ShapeOperators extends ConsumerWidget {
                           ),
                         ),
                       ),
-                      GestureDetector(
+                      Tocavel(
                         onTap: () =>
                             controller.removeShapeItem(layerId, item.id),
                         child: const Icon(
@@ -5141,7 +5141,7 @@ class _ShapeOperators extends ConsumerWidget {
                           color: AmColors.accent,
                         ),
                       ),
-                      GestureDetector(
+                      Tocavel(
                         onTap: () =>
                             controller.removeShapeItem(layerId, item.id),
                         child: const Icon(
@@ -5233,7 +5233,7 @@ class _ShapeOperators extends ConsumerWidget {
                               : AmColors.muted,
                         ),
                       ),
-                      GestureDetector(
+                      Tocavel(
                         onTap: () => controller.removeMorph(layerId, item.id),
                         child: const Icon(
                           CupertinoIcons.xmark,
@@ -5290,7 +5290,7 @@ class _ShapeOperators extends ConsumerWidget {
                       ),
                       const Spacer(),
                       if (item is MergePathsOperator)
-                        GestureDetector(
+                        Tocavel(
                           onTap: () =>
                               controller.cycleMergeMode(layerId, item.id),
                           child: Container(
@@ -5312,7 +5312,7 @@ class _ShapeOperators extends ConsumerWidget {
                           ),
                         ),
                       const SizedBox(width: 8),
-                      GestureDetector(
+                      Tocavel(
                         onTap: () =>
                             controller.removeShapeItem(layerId, item.id),
                         child: const Icon(
@@ -5346,7 +5346,7 @@ class _ShapeOperators extends ConsumerWidget {
           runSpacing: 6,
           children: [
             for (final op in ShapePathOp.values)
-              GestureDetector(
+              Tocavel(
                 onTap: () => controller.addPathOperator(layerId, op),
                 child: Container(
                   padding: const EdgeInsets.symmetric(
@@ -5507,7 +5507,7 @@ class _ShapeOperators extends ConsumerWidget {
                 runSpacing: 10,
                 children: [
                   for (final (label, path) in options)
-                    GestureDetector(
+                    Tocavel(
                       onTap: () {
                         controller.convertShapeToMorph(layerId, path);
                         Navigator.of(sheetContext).pop();
@@ -5642,7 +5642,7 @@ Future<void> showExtrudeSheet(
                   spacing: 8,
                   children: [
                     for (final v in const [0.0, 20.0, 40.0, 80.0, 160.0])
-                      GestureDetector(
+                      Tocavel(
                         onTap: () {
                           controller.setLayerExtrude(layerId, v);
                           setSheetState(() {});

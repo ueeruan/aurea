@@ -52,6 +52,10 @@ class _TocavelState extends State<Tocavel> {
 
   @override
   Widget build(BuildContext context) {
+    // SEM ACAO, SEM ARENA: um Tocavel inativo (onTap nulo) nao pode
+    // registrar onTapUp/onTapCancel — so de existirem, eles disputam o
+    // toque e ROUBAM o tap de um pai tocavel. Era exatamente o caso do
+    // enfeite dentro de um tile: o tile parava de abrir.
     return GestureDetector(
       behavior: widget.behavior,
       onTapDown: !_ativo
@@ -60,8 +64,8 @@ class _TocavelState extends State<Tocavel> {
               _poe(true);
               if (widget.haptico) HapticFeedback.lightImpact();
             },
-      onTapUp: (_) => _poe(false),
-      onTapCancel: () => _poe(false),
+      onTapUp: !_ativo ? null : (_) => _poe(false),
+      onTapCancel: !_ativo ? null : () => _poe(false),
       onTap: widget.onTap,
       onLongPress: widget.onLongPress == null
           ? null

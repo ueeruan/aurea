@@ -2,6 +2,7 @@ import 'package:aurea/src/core/l10n/app_language.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/ui/tocavel.dart';
 import '../../../../core/utils/time_format.dart';
 import '../../application/editor_controller.dart';
 import '../../application/playback_controller.dart';
@@ -168,7 +169,7 @@ Future<void> showCamerasSheet(
                       spacing: 6,
                       runSpacing: 6,
                       children: [
-                        GestureDetector(
+                        Tocavel(
                           onTap: () {
                             controller.setSceneCameraCompParent(layerId, null);
                             setSheetState(() {});
@@ -179,7 +180,7 @@ Future<void> showCamerasSheet(
                           ),
                         ),
                         for (final n in nulos)
-                          GestureDetector(
+                          Tocavel(
                             onTap: () {
                               controller.setSceneCameraCompParent(
                                 layerId,
@@ -207,7 +208,7 @@ Future<void> showCamerasSheet(
                 ),
 
                 const SizedBox(height: 14),
-                GestureDetector(
+                Tocavel(
                   onTap: () {
                     controller.addScene3DCamera(layerId);
                     setSheetState(() {});
@@ -256,7 +257,7 @@ Future<void> showCamerasSheet(
                       },
                     ),
                   const SizedBox(height: 8),
-                  GestureDetector(
+                  Tocavel(
                     onTap: () {
                       controller.clearCameraShots(layerId);
                       setSheetState(() {});
@@ -314,7 +315,7 @@ class _LinhaCamera extends StatelessWidget {
   final VoidCallback? onApagar;
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
+  Widget build(BuildContext context) => Tocavel(
     onTap: onCortar,
     behavior: HitTestBehavior.opaque,
     child: Padding(
@@ -339,7 +340,7 @@ class _LinhaCamera extends StatelessWidget {
             ),
           ),
           if (onApagar != null)
-            GestureDetector(
+            Tocavel(
               onTap: onApagar,
               child: const Icon(
                 CupertinoIcons.trash,
@@ -369,7 +370,7 @@ class _LinhaTomada extends StatelessWidget {
   final VoidCallback onApagar;
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
+  Widget build(BuildContext context) => Tocavel(
     onTap: onIr,
     behavior: HitTestBehavior.opaque,
     child: Padding(
@@ -396,7 +397,7 @@ class _LinhaTomada extends StatelessWidget {
             style: const TextStyle(fontSize: 11, color: AmColors.muted),
           ),
           const SizedBox(width: 10),
-          GestureDetector(
+          Tocavel(
             onTap: onApagar,
             child: const Icon(
               CupertinoIcons.xmark,

@@ -2,6 +2,7 @@ import 'package:aurea/src/core/l10n/app_language.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../../../../core/ui/tocavel.dart';
 import '../../../../core/ui/snack.dart';
 
 import 'package:flutter/cupertino.dart';
@@ -261,7 +262,7 @@ class _ObjectsTab extends StatelessWidget {
                   runSpacing: 8,
                   children: [
                     for (final f in formas)
-                      GestureDetector(
+                      Tocavel(
                         onTap: () {
                           final id = controller.extrudeShapeIntoScene(
                             layer.id,
@@ -428,7 +429,7 @@ class _ObjectsTab extends StatelessWidget {
           runSpacing: 8,
           children: [
             for (final kind in Element3DKind.values)
-              GestureDetector(
+              Tocavel(
                 onTap: () {
                   controller.addSceneNode(layer.id, kind);
                   onChanged();
@@ -796,7 +797,7 @@ class _ObjectsTab extends StatelessWidget {
                     style: const TextStyle(fontSize: 12, color: AmColors.text),
                   ),
                 ),
-                GestureDetector(
+                Tocavel(
                   onTap: () async {
                     final r = await FilePicker.platform.pickFiles(
                       type: FileType.image,
@@ -822,7 +823,7 @@ class _ObjectsTab extends StatelessWidget {
                   ),
                 ),
                 if (node.material.imagePath != null)
-                  GestureDetector(
+                  Tocavel(
                     onTap: () {
                       controller.updateSceneNode(
                         layer.id,
@@ -1099,7 +1100,7 @@ class _AcaoLarga extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
+  Widget build(BuildContext context) => Tocavel(
     onTap: onTap,
     child: Container(
       width: double.infinity,
@@ -1142,7 +1143,7 @@ class _NodeRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return Tocavel(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
       child: Container(
@@ -2115,7 +2116,7 @@ class _CameraTab extends StatelessWidget {
           runSpacing: 6,
           children: [
             for (final mm in lensPresets)
-              GestureDetector(
+              Tocavel(
                 onTap: () => setFocal(mm),
                 child: Container(
                   padding: const EdgeInsets.symmetric(
@@ -2694,7 +2695,7 @@ class _Tabs extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 16),
         itemCount: labels.length,
         separatorBuilder: (_, _) => const SizedBox(width: 8),
-        itemBuilder: (_, i) => GestureDetector(
+        itemBuilder: (_, i) => Tocavel(
           onTap: () => onChanged(i),
           child: Container(
             alignment: Alignment.center,
@@ -2928,7 +2929,7 @@ class _Chips extends StatelessWidget {
               runSpacing: 6,
               children: [
                 for (var i = 0; i < options.length; i++)
-                  GestureDetector(
+                  Tocavel(
                     onTap: () => onChanged(i),
                     child: Container(
                       padding: const EdgeInsets.symmetric(
@@ -3000,7 +3001,7 @@ class _Action extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return Tocavel(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
@@ -3063,7 +3064,7 @@ class _ColorRow extends StatelessWidget {
               runSpacing: 8,
               children: [
                 for (final c in _palette)
-                  GestureDetector(
+                  Tocavel(
                     onTap: () => onColor(c),
                     child: Container(
                       width: 24,

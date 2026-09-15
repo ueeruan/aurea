@@ -3,6 +3,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/ui/tocavel.dart';
 import '../../application/editor_controller.dart';
 import '../../application/playback_controller.dart';
 import '../../domain/keyframe.dart';
@@ -96,7 +97,7 @@ Future<void> showOrganizeSheet(
                 Row(
                   children: [
                     for (final l in LayerLabel.palette)
-                      GestureDetector(
+                      Tocavel(
                         onTap: () {
                           controller.setLayerLabel(layerId, l);
                           setSheetState(() {});
@@ -114,7 +115,7 @@ Future<void> showOrganizeSheet(
                           ),
                         ),
                       ),
-                    GestureDetector(
+                    Tocavel(
                       onTap: () {
                         controller.setLayerLabel(layerId, null);
                         setSheetState(() {});
@@ -295,7 +296,7 @@ Future<void> showLayerStylesSheet(
                   children: [
                     for (final depth in _ShadowDepth.values)
                       Expanded(
-                        child: GestureDetector(
+                        child: Tocavel(
                           onTap: () => setSheetState(() => shadowDepth = depth),
                           child: Container(
                             height: 34,
@@ -452,7 +453,7 @@ Future<void> showLayerStylesSheet(
                                   Color(0xFF392A68),
                                   Color(0xFFFFFFFF),
                                 ])
-                                  GestureDetector(
+                                  Tocavel(
                                     onTap: () {
                                       controller.updateLayerStyles(
                                         layerId,
@@ -578,7 +579,7 @@ Future<void> showLayerStylesSheet(
                               Color(0xFFFFFFFF),
                               Color(0xFF000000),
                             ])
-                              GestureDetector(
+                              Tocavel(
                                 onTap: () {
                                   controller.updateLayerStyles(
                                     layerId,
@@ -689,7 +690,7 @@ Future<void> showLoopSheet(
                       ('Rotacao', LayerProp.rotation),
                       ('Opacidade', LayerProp.opacity),
                     ])
-                      GestureDetector(
+                      Tocavel(
                         onTap: () => setSheetState(() => prop = value),
                         child: Container(
                           padding: const EdgeInsets.symmetric(
@@ -731,7 +732,7 @@ Future<void> showLoopSheet(
                         ('Deslocado', LoopMode.offset),
                         ('Continuar', LoopMode.continueValue),
                       ])
-                        GestureDetector(
+                        Tocavel(
                           onTap: () {
                             controller.setPropertyLoop(
                               layerId,
@@ -769,7 +770,7 @@ Future<void> showLoopSheet(
                     style: TextStyle(fontSize: 11, color: AmColors.muted),
                   ),
                   const SizedBox(height: 10),
-                  GestureDetector(
+                  Tocavel(
                     onTap: () {
                       controller.reversePropertyInTime(layerId, prop);
                       setSheetState(() {});

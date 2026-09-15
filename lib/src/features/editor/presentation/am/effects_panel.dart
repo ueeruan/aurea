@@ -630,7 +630,7 @@ class _EffectCard extends StatelessWidget {
                 // So chevron + nome colapsam: um toque em "..." ou na
                 // lixeira nao pode fechar o bloco junto.
                 Expanded(
-                  child: GestureDetector(
+                  child: Tocavel(
                     behavior: HitTestBehavior.opaque,
                     onTap: onToggleExpanded,
                     child: Row(
@@ -663,7 +663,7 @@ class _EffectCard extends StatelessWidget {
                 // um efeito para comparar e a acao mais frequente que
                 // existe aqui — escondida no menu viraria dois toques por
                 // comparacao, e comparar e o que se faz o tempo todo.
-                GestureDetector(
+                Tocavel(
                   behavior: HitTestBehavior.opaque,
                   onTap: onToggleEnabled,
                   child: Icon(
@@ -680,7 +680,7 @@ class _EffectCard extends StatelessWidget {
                 // A ordem dos efeitos e o resultado: Blur depois de Glow
                 // nao e a mesma imagem que Glow depois de Blur. Isso
                 // morava dentro de um tres pontinhos.
-                GestureDetector(
+                Tocavel(
                   onTap: onSubir,
                   child: Opacity(
                     opacity: onSubir == null ? 0.32 : 1,
@@ -692,7 +692,7 @@ class _EffectCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 12),
-                GestureDetector(
+                Tocavel(
                   onTap: onDescer,
                   child: Opacity(
                     opacity: onDescer == null ? 0.32 : 1,
@@ -706,7 +706,7 @@ class _EffectCard extends StatelessWidget {
                 const SizedBox(width: 12),
                 if (effect.type != EffectType.timeRemap &&
                     effect.type != EffectType.opticalFlow)
-                  GestureDetector(
+                  Tocavel(
                     onTap: onDuplicar,
                     child: const Icon(
                       CupertinoIcons.plus_square_on_square,
@@ -715,7 +715,7 @@ class _EffectCard extends StatelessWidget {
                     ),
                   ),
                 const SizedBox(width: 12),
-                GestureDetector(
+                Tocavel(
                   onTap: onRemove,
                   child: const Icon(
                     CupertinoIcons.trash,
@@ -834,7 +834,7 @@ class _NomeParam extends StatelessWidget {
     // parametro — e selecionar e o que liga o diamante do trilho. 44 px
     // e o minimo de toque do iOS e cabe sem crescer a linha; o `opaque`
     // faz o padding transparente contar como toque.
-    return GestureDetector(
+    return Tocavel(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
       child: Container(
@@ -1103,7 +1103,7 @@ class _ChoiceRow extends StatelessWidget {
               runSpacing: 6,
               children: [
                 for (var i = 0; i < options.length; i++)
-                  GestureDetector(
+                  Tocavel(
                     onTap: () => onChanged(i),
                     child: Container(
                       padding: const EdgeInsets.symmetric(
@@ -1165,7 +1165,7 @@ class _SeedRow extends StatelessWidget {
             style: const TextStyle(fontSize: 13, color: AmColors.accent),
           ),
           const SizedBox(width: 12),
-          GestureDetector(
+          Tocavel(
             onTap: () => onChanged(((value.round() + 1) % 100).toDouble()),
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -1279,7 +1279,7 @@ class _ColorRow extends StatelessWidget {
             style: const TextStyle(fontSize: 13, color: AmColors.accent),
           ),
           const SizedBox(width: 10),
-          GestureDetector(
+          Tocavel(
             onTap: () async {
               // Espectro completo: qualquer cor, com hex e alfa.
               final picked = await showColorPicker(
@@ -1344,7 +1344,7 @@ class _BotaoAnalisarState extends State<_BotaoAnalisar> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              GestureDetector(
+              Tocavel(
                 onTap: _rodando
                     ? null
                     : () async {
@@ -1418,7 +1418,7 @@ class _ComandoDoEfeito extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
+  Widget build(BuildContext context) => Tocavel(
     behavior: HitTestBehavior.opaque,
     onTap: onTap,
     child: Container(

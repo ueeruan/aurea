@@ -569,6 +569,40 @@ class _AmTimelineState extends ConsumerState<AmTimeline> {
                                             ),
                                           ),
                                         ),
+                                    // INTRODUCAO, FINAL E MINIATURA (menu ⋮):
+                                    // marcas do projeto, na cor do tempo.
+                                    for (final (chave, rotulo, tempo) in [
+                                      ('intro', 'intro', project.introFim),
+                                      ('final', 'final', project.finalInicio),
+                                      ('miniatura', '▣', project.thumbTime),
+                                    ])
+                                      if (tempo != null)
+                                        Positioned(
+                                          key: ValueKey('regua-$chave'),
+                                          left: _timeToPx(tempo) - 1,
+                                          top: 0,
+                                          bottom: 0,
+                                          child: IgnorePointer(
+                                            child: Row(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Container(
+                                                  width: 2,
+                                                  color: AmColors.accent,
+                                                ),
+                                                AppText(
+                                                  rotulo,
+                                                  style: const TextStyle(
+                                                    fontSize: 9,
+                                                    fontWeight: FontWeight.w800,
+                                                    color: AmColors.accent,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
                                     for (final m in project.markers)
                                       _MarcaNaRegua(
                                         marca: m,
@@ -635,13 +669,27 @@ class _AmTimelineState extends ConsumerState<AmTimeline> {
                       ),
                     ),
                   ),
-                  // Relogio central sob a regua.
+                  // Relogio central sob a regua. TOCAR marca o instante
+                  // do cabecote; SEGURAR abre as marcas.
                   Positioned(
                     top: 8,
                     left: 0,
                     right: 0,
                     child: Center(
-                      child: ValueListenableBuilder<Duration>(
+                      child: GestureDetector(
+                        key: const ValueKey('timeline-selo-do-tempo'),
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () {
+                          HapticFeedback.selectionClick();
+                          ref
+                              .read(editorControllerProvider.notifier)
+                              .toggleMarker(widget.playback.time.value);
+                        },
+                        onLongPress: () {
+                          HapticFeedback.mediumImpact();
+                          menuDasMarcas(context, ref, widget.playback);
+                        },
+                        child: ValueListenableBuilder<Duration>(
                         valueListenable: widget.playback.time,
                         builder: (context, t, _) => Column(
                           mainAxisSize: MainAxisSize.min,
@@ -664,6 +712,7 @@ class _AmTimelineState extends ConsumerState<AmTimeline> {
                             ),
                           ],
                         ),
+                      ),
                       ),
                     ),
                   ),
@@ -833,6 +882,14 @@ class _ControlesDaTrilha extends ConsumerWidget {
     final layer = trilha.first;
     final hidden = trilha.every((l) => project.metaOf(l.id).hidden);
     final locked = trilha.every((l) => project.metaOf(l.id).locked);
+    // A ETIQUETA DE COR da camada pinta o quadradinho; sem etiqueta, o
+    // amarelo de sempre.
+    final etiqueta = project.metaOf(layer.id).label?.color;
+    final naMulti = ref.watch(
+      multiSelectProvider.select((m) => trilha.any((l) => m.contains(l.id))),
+    );
+    // RECORTADA por outra (matte): a seta curva avisa no cabecalho.
+    final recortada = trilha.any((l) => l.matteMode != MatteMode.none);
     return Align(
       alignment: Alignment.centerLeft,
       child: Container(
@@ -891,10 +948,11 @@ class _ControlesDaTrilha extends ConsumerWidget {
                   });
                 },
                 child: Container(
+                  key: ValueKey('etiqueta-${layer.id}'),
                   width: 18,
                   height: 18,
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFFE899),
+                    color: etiqueta ?? const Color(0xFFFFE899),
                     borderRadius: BorderRadius.circular(4),
                     border: isMatteSource
                         ? Border.all(color: AmColors.accent)
@@ -906,6 +964,20 @@ class _ControlesDaTrilha extends ConsumerWidget {
                           CupertinoIcons.lock_fill,
                           size: 11,
                           color: Color(0xFF12151A),
+                        )
+                      : naMulti
+                      ? Icon(
+                          CupertinoIcons.checkmark_alt,
+                          key: ValueKey('visto-${layer.id}'),
+                          size: 13,
+                          color: const Color(0xFF12151A),
+                        )
+                      : recortada
+                      ? Icon(
+                          CupertinoIcons.arrow_turn_left_down,
+                          key: ValueKey('recorte-${layer.id}'),
+                          size: 11,
+                          color: const Color(0xFF12151A),
                         )
                       : null,
                 ),

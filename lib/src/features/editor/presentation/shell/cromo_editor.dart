@@ -127,9 +127,9 @@ String _tempoCurto(Duration d) {
   return '$m:${s.toString().padLeft(2, '0')}.${cs.toString().padLeft(2, '0')}';
 }
 
-/// A BARRA DO PROJETO: sair · titulo (toque renomeia; dentro de grupo, o
-/// chip sai do grupo) · tempo corrente (toque digita) · projeto ·
-/// exportar.
+/// A BARRA DO PROJETO: sair · trilha de grupos (dentro de grupo) ·
+/// titulo editavel ali mesmo · cronometro de edicao (contando) · tempo
+/// corrente (toque digita) · projeto · exportar.
 class BarraDoProjeto extends ConsumerWidget {
   const BarraDoProjeto({
     super.key,
@@ -171,56 +171,8 @@ class BarraDoProjeto extends ConsumerWidget {
               ),
             ),
           ),
-          if (dentroDeGrupo)
-            Tooltip(
-              message: 'Sair do grupo',
-              child: Tocavel(
-                key: const ValueKey('navbar-sair-grupo'),
-                onTap: controller.exitGroup,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  height: 26,
-                  margin: const EdgeInsets.only(right: 6),
-                  decoration: BoxDecoration(
-                    color: CromoEditor.trilho,
-                    borderRadius: BorderRadius.circular(13),
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        CupertinoIcons.chevron_left,
-                        size: 12,
-                        color: CromoEditor.selecao,
-                      ),
-                      SizedBox(width: 2),
-                      Icon(
-                        CupertinoIcons.rectangle_stack,
-                        size: 14,
-                        color: CromoEditor.selecao,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          Expanded(
-            child: GestureDetector(
-              key: const ValueKey('editor-project-name'),
-              behavior: HitTestBehavior.opaque,
-              onTap: () => renomearProjeto(context, ref),
-              child: AppText(
-                project.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: CromoEditor.branco,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ),
+          if (dentroDeGrupo) _TrilhaDeGrupos(controller: controller),
+          const Expanded(child: _TituloEditavel()),
           _ChipDoCronometro(projetoId: project.id),
           // O relogio mora na barra do projeto: tocar digita o tempo.
           ValueListenableBuilder<Duration>(
@@ -268,6 +220,185 @@ class BarraDoProjeto extends ConsumerWidget {
             },
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// A TRILHA DE GRUPOS: o projeto e cada grupo aberto por fora do atual,
+/// como migalhas. Tocar numa volta ate aquele nivel; a ultima migalha
+/// (um nivel acima) e a mesma "sair do grupo" de sempre.
+class _TrilhaDeGrupos extends StatelessWidget {
+  const _TrilhaDeGrupos({required this.controller});
+
+  final EditorController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final caminho = controller.caminhoDoGrupo;
+    // Migalhas: o projeto (nivel 0) e os grupos por fora do atual.
+    final migalhas = <(String, int)>[
+      (controller.nomeDoProjetoRaiz, 0),
+      for (var i = 0; i < caminho.length - 1; i++) (caminho[i], i + 1),
+    ];
+    return ConstrainedBox(
+      constraints: BoxConstraints(
+        maxWidth: MediaQuery.sizeOf(context).width * .38,
+      ),
+      child: SingleChildScrollView(
+        key: const ValueKey('navbar-trilha-de-grupos'),
+        scrollDirection: Axis.horizontal,
+        reverse: true,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final (nome, nivel) in migalhas)
+              Tooltip(
+                message: nivel == 0 ? 'Voltar ao projeto' : 'Voltar a $nome',
+                child: Tocavel(
+                  key: ValueKey(
+                    nivel == migalhas.last.$2
+                        ? 'navbar-sair-grupo'
+                        : 'navbar-migalha-$nivel',
+                  ),
+                  onTap: () => controller.sairAteONivel(nivel),
+                  child: Container(
+                    height: 26,
+                    constraints: const BoxConstraints(maxWidth: 96),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    margin: const EdgeInsets.only(right: 2),
+                    decoration: BoxDecoration(
+                      color: CromoEditor.trilho,
+                      borderRadius: BorderRadius.circular(13),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          nivel == 0
+                              ? CupertinoIcons.film
+                              : CupertinoIcons.rectangle_stack,
+                          size: 12,
+                          color: CromoEditor.selecao,
+                        ),
+                        const SizedBox(width: 4),
+                        Flexible(
+                          child: AppText(
+                            nome,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: CromoEditor.branco,
+                              fontSize: 11.5,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 2),
+                        const Icon(
+                          CupertinoIcons.chevron_right,
+                          size: 10,
+                          color: CromoEditor.apagado,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// O TITULO EDITAVEL ALI MESMO: tocar vira campo, confirmar (ou tocar
+/// fora) renomeia — e o renomear entra no desfazer. Dentro de um grupo
+/// e o nome do grupo. Vazio nao vale: volta o nome que estava.
+class _TituloEditavel extends ConsumerStatefulWidget {
+  const _TituloEditavel();
+
+  @override
+  ConsumerState<_TituloEditavel> createState() => _TituloEditavelState();
+}
+
+class _TituloEditavelState extends ConsumerState<_TituloEditavel> {
+  bool _editando = false;
+  final _campo = TextEditingController();
+  final _foco = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _foco.addListener(() {
+      if (!_foco.hasFocus && _editando) _confirmar();
+    });
+  }
+
+  @override
+  void dispose() {
+    _campo.dispose();
+    _foco.dispose();
+    super.dispose();
+  }
+
+  void _comecar() {
+    _campo.text = ref.read(editorControllerProvider).name;
+    _campo.selection = TextSelection(
+      baseOffset: 0,
+      extentOffset: _campo.text.length,
+    );
+    setState(() => _editando = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _foco.requestFocus();
+    });
+  }
+
+  void _confirmar() {
+    if (!_editando) return;
+    final nome = _campo.text.trim();
+    final atual = ref.read(editorControllerProvider).name;
+    setState(() => _editando = false);
+    if (nome.isEmpty || nome == atual) return;
+    ref.read(editorControllerProvider.notifier).renameProject(nome);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final nome = ref.watch(editorControllerProvider.select((p) => p.name));
+    if (_editando) {
+      return CupertinoTextField(
+        key: const ValueKey('editor-project-name-campo'),
+        controller: _campo,
+        focusNode: _foco,
+        maxLength: 320,
+        maxLines: 1,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        style: const TextStyle(
+          color: CromoEditor.branco,
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+        ),
+        decoration: BoxDecoration(
+          color: CromoEditor.trilho,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        textInputAction: TextInputAction.done,
+        onSubmitted: (_) => _confirmar(),
+      );
+    }
+    return GestureDetector(
+      key: const ValueKey('editor-project-name'),
+      behavior: HitTestBehavior.opaque,
+      onTap: _comecar,
+      child: AppText(
+        nome.trim().isEmpty ? '(Sem título)' : nome,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: nome.trim().isEmpty ? CromoEditor.apagado : CromoEditor.branco,
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+        ),
       ),
     );
   }

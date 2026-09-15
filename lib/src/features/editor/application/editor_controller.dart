@@ -989,6 +989,22 @@ class EditorController extends Notifier<VideoProject> {
   /// O grupo aberto por ultimo (o mais fundo).
   String? get grupoAberto => _grupos.isEmpty ? null : _grupos.last.groupId;
 
+  /// O nome do PROJETO de verdade, mesmo com grupos abertos (la dentro
+  /// o `state.name` e o nome do grupo).
+  String get nomeDoProjetoRaiz =>
+      _grupos.isEmpty ? state.name : _grupos.first.fora.name;
+
+  /// Quantos grupos estao abertos (0 = o projeto).
+  int get profundidadeDoGrupo => _grupos.length;
+
+  /// A TRILHA DE GRUPOS da barra do projeto: sai ate ficar com [nivel]
+  /// grupos abertos (0 = volta ao projeto).
+  void sairAteONivel(int nivel) {
+    while (_grupos.length > nivel && _grupos.isNotEmpty) {
+      exitGroup();
+    }
+  }
+
   /// Os nomes do caminho, de fora para dentro: ['Grupo 1', 'Grupo 2'].
   List<String> get caminhoDoGrupo => [
     for (final q in _grupos) q.fora.layerById(q.groupId)?.name ?? 'Grupo',

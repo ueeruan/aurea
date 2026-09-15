@@ -36,7 +36,7 @@ const releaseHighlights = <(IconData, String, String)>[
     'Quadrado → círculo → pílula → card sem deformar canto, Auto Morph entre formas e cor de preenchimento animada.',
   ),
   (
-    CupertinoIcons.hand_tap,
+    CupertinoIcons.hand_draw,
     'Mais fluido',
     'Todo botão responde ao toque no estilo iOS, alvos maiores, sem a borda no preview e mídia importada em tela cheia.',
   ),

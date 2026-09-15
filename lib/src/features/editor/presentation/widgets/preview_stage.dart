@@ -5792,6 +5792,38 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
             );
           }
 
+        case EffectType.smear:
+          final compr = effect.paramAt('comprimento', local);
+          final forca = effect.paramAt('intensidade', local);
+          if (compr > 0.5 && forca > 0.001) {
+            out = FxSnapshot(
+              painter: SmearPainter(
+                length: compr,
+                angleDeg: effect.paramAt('angulo', local),
+                intensity: forca.clamp(0.0, 1.0),
+                stretch: effect.paramAt('esticar', local).clamp(0.0, 1.0),
+              ),
+              child: out,
+            );
+          }
+
+        case EffectType.bubbleBlur:
+          final raioDaBolha = effect.paramAt('tamanho', local);
+          final bolhas = effect.paramAt('quantidade', local).round();
+          if (raioDaBolha > 1 && bolhas >= 1) {
+            out = FxSnapshot(
+              painter: BubbleBlurPainter(
+                radius: raioDaBolha,
+                count: bolhas.clamp(1, 10),
+                blur: effect.paramAt('desfoque', local).clamp(0.0, 60.0),
+                magnify: effect.paramAt('aumento', local),
+                phase: effect.paramAt('fase', local),
+                seed: effect.paramAt('semente', local).round(),
+              ),
+              child: out,
+            );
+          }
+
         case EffectType.blobTracker:
           // As caixas vem da ANALISE ja gravada. Sem analise, o pintor
           // simula — para a pessoa ajustar a aparencia antes de gastar

@@ -97,6 +97,8 @@ enum EffectType {
   saber,
   lensBlur,
   bit8,
+  smear,
+  bubbleBlur,
 }
 
 /// O tipo a partir do IDENTIFICADOR estavel.
@@ -3751,6 +3753,66 @@ const effectSpecs = <EffectType, EffectSpec>{
       EffectPronto('NES', {'pixel': 110, 'cores': 4, 'vivacidade': 0.5}),
       EffectPronto('16-bit', {'pixel': 60, 'cores': 8, 'vivacidade': 0.3}),
       EffectPronto('Minecraft', {'pixel': 150, 'cores': 10}),
+    ],
+  ),
+  // SMEAR: copias da propria camada escorrendo numa direcao, esticando
+  // e sumindo — o rastro de movimento dos edits. Nao e blur: cada copia
+  // continua legivel, e e isso que da o arrasto de anime.
+  EffectType.smear: EffectSpec(
+    id: 'smear',
+    name: 'Smear',
+    category: 'Distort',
+    synonyms: ['rastro', 'arrasto', 'motion smear', 'esticar', 'trail'],
+    cost: 2,
+    params: {
+      'comprimento': EffectParam(
+        'Comprimento',
+        70.0,
+        0.0,
+        400.0,
+        relative: true,
+      ),
+      'angulo': EffectParam('Ângulo', 0.0, -180.0, 180.0),
+      'intensidade': EffectParam('Intensidade', 0.8, 0.0, 1.0),
+      'esticar': EffectParam('Esticar', 0.25, 0.0, 1.0),
+    },
+    montar: ['comprimento', 'angulo'],
+    presets: [
+      EffectPronto('Arrasto', {'comprimento': 60, 'intensidade': 0.7}),
+      EffectPronto('Velocidade', {
+        'comprimento': 160,
+        'esticar': 0.5,
+        'intensidade': 0.9,
+      }),
+      EffectPronto('Queda', {'comprimento': 120, 'angulo': 90}),
+    ],
+  ),
+  // BUBBLE BLUR: bolhas de vidro fosco sobre a camada — dentro de cada
+  // circulo a imagem aparece ampliada e desfocada, com um aro claro. A
+  // FASE anda as bolhas (dois keyframes e elas derivam).
+  EffectType.bubbleBlur: EffectSpec(
+    id: 'bubble_blur',
+    name: 'Bubble Blur',
+    category: 'Blur',
+    synonyms: ['bolha', 'bolhas', 'vidro', 'glass', 'lupa', 'frost'],
+    cost: 3,
+    params: {
+      'tamanho': EffectParam('Tamanho', 110.0, 20.0, 320.0, relative: true),
+      'quantidade': EffectParam('Bolhas', 5.0, 1.0, 10.0),
+      'desfoque': EffectParam('Desfoque', 14.0, 0.0, 40.0, relative: true),
+      'aumento': EffectParam('Aumento', 1.18, 1.0, 1.6),
+      'fase': EffectParam('Fase', 0.0, 0.0, 100.0),
+      'semente': EffectParam('Semente', 1.0, 1.0, 99.0),
+    },
+    montar: ['tamanho', 'desfoque'],
+    presets: [
+      EffectPronto('Vidro', {'quantidade': 4, 'desfoque': 16}),
+      EffectPronto('Lupa', {'quantidade': 3, 'aumento': 1.45, 'desfoque': 4}),
+      EffectPronto('Espuma', {
+        'quantidade': 10,
+        'tamanho': 70,
+        'desfoque': 20,
+      }),
     ],
   ),
 };

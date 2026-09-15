@@ -1988,3 +1988,194 @@ class BlobTrackerPainter extends CustomPainter {
       old.fontSize != fontSize ||
       old.seed != seed;
 }
+// ------------------------------------------------------------ smear
+
+/// SMEAR: a camada escorre numa direcao — copias esticadas e cada vez
+/// mais transparentes atras da original crua. E o rastro de movimento
+/// dos edits (o "motion smear" de anime), nao um desfoque: cada copia
+/// continua legivel.
+class SmearPainter extends _FxPainter {
+  SmearPainter({
+    required this.length,
+    required this.angleDeg,
+    required this.intensity,
+    required this.stretch,
+  });
+
+  final double length;
+  final double angleDeg;
+  final double intensity;
+  final double stretch;
+
+  @override
+  void paintSnapshot(
+    PaintingContext context,
+    Offset offset,
+    Size size,
+    ui.Image image,
+    Size sourceSize,
+    double pixelRatio,
+  ) {
+    final canvas = context.canvas;
+    final src = Rect.fromLTWH(
+      0,
+      0,
+      image.width.toDouble(),
+      image.height.toDouble(),
+    );
+    final dst = _dst(offset, size);
+    final cru = Paint()..filterQuality = FilterQuality.low;
+    if (length < 0.5 || intensity <= 0.001 || size.isEmpty) {
+      canvas.drawImageRect(image, src, dst, cru);
+      return;
+    }
+    final rad = angleDeg * math.pi / 180;
+    final dir = Offset(math.cos(rad), math.sin(rad));
+    // Passos a ~6 px: rastro continuo sem virar dezenas de desenhos.
+    final passos = (length / 6).round().clamp(5, 32);
+    final centro = dst.center;
+    final copia = Paint()..filterQuality = FilterQuality.low;
+    for (var i = passos; i >= 1; i--) {
+      final f = i / passos; // 1 = ponta do rastro
+      final alfa = ((1 - f) * (1 - f) * intensity).clamp(0.0, 1.0);
+      if (alfa <= 0.003) continue;
+      copia.color = Color.fromRGBO(0, 0, 0, alfa);
+      final d = dir * (length * f);
+      final estica = 1 + stretch * f;
+      canvas
+        ..save()
+        ..translate(centro.dx + d.dx, centro.dy + d.dy)
+        ..rotate(rad)
+        ..scale(estica, 1)
+        ..rotate(-rad)
+        ..translate(-centro.dx, -centro.dy)
+        ..drawImageRect(image, src, dst, copia)
+        ..restore();
+    }
+    canvas.drawImageRect(image, src, dst, cru);
+  }
+
+  @override
+  bool shouldRepaint(covariant SmearPainter old) =>
+      old.length != length ||
+      old.angleDeg != angleDeg ||
+      old.intensity != intensity ||
+      old.stretch != stretch;
+}
+
+// ------------------------------------------------------ bubble blur
+
+/// BUBBLE BLUR: circulos de vidro fosco sobre a camada. Dentro de cada
+/// um, a propria imagem ampliada e desfocada; por cima, o aro e um
+/// brilho de vidro. As posicoes sao deterministicas da semente, e a
+/// FASE anda cada bolha num circulo proprio — dois keyframes e a espuma
+/// deriva.
+///
+/// Custo: um saveLayer POR BOLHA (o desfoque), limitado a dez bolhas do
+/// tamanho do circulo — area pequena e contada, nada de passe inteiro.
+class BubbleBlurPainter extends _FxPainter {
+  BubbleBlurPainter({
+    required this.radius,
+    required this.count,
+    required this.blur,
+    required this.magnify,
+    required this.phase,
+    required this.seed,
+  });
+
+  final double radius;
+  final int count;
+  final double blur;
+  final double magnify;
+  final double phase;
+  final int seed;
+
+  @override
+  void paintSnapshot(
+    PaintingContext context,
+    Offset offset,
+    Size size,
+    ui.Image image,
+    Size sourceSize,
+    double pixelRatio,
+  ) {
+    final canvas = context.canvas;
+    final src = Rect.fromLTWH(
+      0,
+      0,
+      image.width.toDouble(),
+      image.height.toDouble(),
+    );
+    final dst = _dst(offset, size);
+    final cru = Paint()..filterQuality = FilterQuality.low;
+    canvas.drawImageRect(image, src, dst, cru);
+    if (radius < 1 || count < 1 || size.isEmpty) return;
+    for (var i = 0; i < count.clamp(1, 10); i++) {
+      final di = i.toDouble();
+      final bx = fxNoise(di, 3.0, seed) * size.width;
+      final by = fxNoise(di, 7.0, seed + 11) * size.height;
+      final r = radius * (0.7 + 0.6 * fxNoise(di, 19.0, seed + 37));
+      // Cada bolha tem velocidade propria; a fase por padrao e parada.
+      final vel = 0.5 + fxNoise(di, 13.0, seed + 23);
+      final a = phase / 100 * 2 * math.pi * vel + di * 2.399;
+      final c = Offset(
+        offset.dx + bx + math.cos(a) * r * 0.5,
+        offset.dy + by + math.sin(a) * r * 0.5,
+      );
+      final circulo = Rect.fromCircle(center: c, radius: r);
+      if (!circulo.overlaps(dst)) continue;
+      canvas
+        ..save()
+        ..clipPath(Path()..addOval(circulo));
+      final desfocado = blur > 0.05;
+      if (desfocado) {
+        canvas.saveLayer(
+          circulo.inflate(blur * 2),
+          Paint()
+            ..imageFilter = ui.ImageFilter.blur(
+              sigmaX: blur,
+              sigmaY: blur,
+              tileMode: TileMode.decal,
+            ),
+        );
+      }
+      // A lupa: a imagem ampliada em volta do centro da bolha.
+      canvas
+        ..translate(c.dx, c.dy)
+        ..scale(magnify.clamp(1.0, 2.0))
+        ..translate(-c.dx, -c.dy)
+        ..drawImageRect(image, src, dst, cru);
+      if (desfocado) canvas.restore();
+      canvas.restore();
+      // O vidro: aro fino + brilho no alto.
+      canvas.drawCircle(
+        c,
+        r,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.6
+          ..color = const Color(0x59FFFFFF),
+      );
+      canvas.drawArc(
+        circulo.deflate(r * 0.18),
+        math.pi * 1.05,
+        math.pi * 0.35,
+        false,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = math.max(1.5, r * 0.07)
+          ..strokeCap = StrokeCap.round
+          ..color = const Color(0x4DFFFFFF),
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant BubbleBlurPainter old) =>
+      old.radius != radius ||
+      old.count != count ||
+      old.blur != blur ||
+      old.magnify != magnify ||
+      old.phase != phase ||
+      old.seed != seed;
+}

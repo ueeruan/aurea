@@ -11,7 +11,6 @@
 // camada saia com um erro proprio.
 
 import 'dart:math' as math;
-import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vector_math/vector_math_64.dart' as vm;

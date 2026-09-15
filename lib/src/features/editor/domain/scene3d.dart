@@ -684,9 +684,17 @@ class Scene3D {
     this.fogDensity = 0,
     this.fogStart = 0,
     this.fogColor = const Color(0xFF101E28),
+    this.fimDaCamada,
   });
 
   final List<SceneNode> nodes;
+
+  /// A DURACAO DA CAMADA DONA desta cena, quando o render sabe (preview
+  /// e exportacao a colocam ao resolver a cena do quadro). E a ancora da
+  /// SAIDA do texto animado — "sair no fim" precisa saber onde o fim e.
+  /// TRANSIENTE: nao vai para o projeto; nulo = vale a ancora gravada no
+  /// proprio modelo.
+  final Duration? fimDaCamada;
 
   /// O AMBIENTE refletido pelos materiais (ver [EnvironmentKind]) e a
   /// forca global do reflexo, que multiplica a de cada material.
@@ -783,7 +791,9 @@ class Scene3D {
     double? fogDensity,
     double? fogStart,
     Color? fogColor,
+    Duration? fimDaCamada,
   }) => Scene3D(
+    fimDaCamada: fimDaCamada ?? this.fimDaCamada,
     environment: environment ?? this.environment,
     envReflect: envReflect ?? this.envReflect,
     panorama: panorama ?? this.panorama,
@@ -1399,7 +1409,11 @@ SceneFrame renderScene(
     // cada N; parado, a malha cheia — ate um teto duro acima do qual
     // nem parado da para esperar. A GPU nao passa por aqui e desenha
     // tudo.
-    final bruto = node.modelAsset?.evaluate(t, node.modelMotion);
+    final bruto = node.modelAsset?.evaluate(
+      t,
+      node.modelMotion,
+      fimDaCamada: scene.fimDaCamada,
+    );
     final modelFrame = bruto?.rascunho(
       tetoDeFaces ??
           (scene.draftMode ? tetoDeFacesCpuRascunho : tetoDeFacesCpu),

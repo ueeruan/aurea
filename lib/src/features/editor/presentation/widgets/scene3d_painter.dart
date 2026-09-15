@@ -43,7 +43,8 @@ bool cenaDependeDoTempo(Scene3D scene, Camera3D camera) {
     }
     final asset = n.modelAsset;
     if (asset != null &&
-        (n.modelMotion.keys.isNotEmpty ||
+        (asset.temAnimacaoDeTexto ||
+            n.modelMotion.keys.isNotEmpty ||
             (n.modelMotion.clip >= 0 &&
                 n.modelMotion.clip < asset.clips.length))) {
       return true;

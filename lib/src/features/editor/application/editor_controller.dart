@@ -28,6 +28,7 @@ import '../domain/fonte_truetype.dart';
 import '../domain/modelo_do_texto3d.dart';
 import '../domain/scene3d.dart';
 import '../domain/texto3d.dart';
+import '../domain/texto3d_animado.dart';
 import 'font_service.dart';
 import '../domain/rotation_math.dart';
 import '../domain/effect.dart';
@@ -2382,20 +2383,25 @@ class EditorController extends Notifier<VideoProject> {
     final Texto3D params = familia == null
         ? Texto3D(texto: limpo)
         : Texto3D(texto: limpo, familia: familia);
-    MalhaDoTexto3D malha;
+    ModelAsset3D modelo;
     try {
       final bytes = await FontService.instance.bytesDaFonte(params.familia);
       if (bytes == null) return null;
       final fonte = FonteTrueType.ler(bytes);
-      malha = malhaDoTexto3D(
+      // UM NO POR LETRA: mesma geometria de sempre, mas com esqueleto —
+      // e o que deixa os presets de animacao do texto normal valerem
+      // letra a letra na malha extrudada.
+      modelo = modeloDoTexto3DPorLetra(
         disporTexto3D(params, fonte),
         params,
         fonte.unidadesPorEm,
+        limpo,
+        estilo,
       );
     } catch (_) {
       return null;
     }
-    if (malha.vazia) return null;
+    if (modelo.triangleCount == 0) return null;
     String? no;
     runAsOneUndo(() {
       var cena = state.layers.whereType<Scene3DLayer>().firstOrNull;
@@ -2404,7 +2410,7 @@ class EditorController extends Notifier<VideoProject> {
         cena = state.layers.whereType<Scene3DLayer>().first;
       }
       final cenaId = cena.id;
-      no = addModel3D(cenaId, modeloDoTexto3D(malha, limpo, estilo));
+      no = addModel3D(cenaId, modelo);
       final nuloDaCena = addSceneNull(cenaId);
       setSceneNodeParent(cenaId, no!, nuloDaCena);
       // O NULO DA LINHA DO TEMPO: mover, girar e animar essa camada leva o
@@ -2424,6 +2430,28 @@ class EditorController extends Notifier<VideoProject> {
       }
     });
     return no;
+  }
+
+  /// AS ANIMACOES DE TEXTO DE UM TEXTO 3D (os mesmos presets do texto
+  /// normal). Troca o modelo do no por um com o bloco de animacao novo —
+  /// as malhas sao as mesmas listas, so o esqueleto ganha vida. A
+  /// duracao ATUAL da camada fica gravada como ancora da SAIDA.
+  void setTexto3DAnims(String sceneId, String nodeId, List<TextAnim> anims) {
+    final cena = _layer(sceneId);
+    if (cena is! Scene3DLayer) return;
+    final node = cena.scene.nodeById(nodeId);
+    final asset = node?.modelAsset;
+    if (node == null || asset == null || asset.data['texto'] == null) return;
+    final novo = texto3DComAnims(asset, anims, fimDaCamada: cena.duration);
+    updateScene3D(
+      sceneId,
+      (s) => s.copyWith(
+        nodes: [
+          for (final n in s.nodes)
+            n.id == nodeId ? n.copyWith(modelAsset: novo) : n,
+        ],
+      ),
+    );
   }
 
   /// Prende (ou solta, com nulo) um no da cena a um nulo da composicao.

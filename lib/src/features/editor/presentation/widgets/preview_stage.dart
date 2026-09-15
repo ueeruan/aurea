@@ -6058,7 +6058,9 @@ Scene3D cenaComNulosDaComposicao(
   Duration local,
   Duration global,
 ) {
-  if (!l.scene.nodes.any((n) => n.compParentLayerId != null)) return l.scene;
+  if (!l.scene.nodes.any((n) => n.compParentLayerId != null)) {
+    return _cenaComFimDaCamada(l);
+  }
   final centro = Offset(project.outputWidth / 2, project.outputHeight / 2);
   SceneNode noNoLugar(SceneNode n) {
     final pai = project.layerById(n.compParentLayerId!);
@@ -6096,11 +6098,23 @@ Scene3D cenaComNulosDaComposicao(
   }
 
   return l.scene.copyWith(
+    fimDaCamada: l.duration,
     nodes: [
       for (final n in l.scene.nodes)
         n.compParentLayerId == null ? n : noNoLugar(n),
     ],
   );
+}
+
+/// A cena com a duracao da camada carimbada (ancora da SAIDA do texto
+/// animado) — mas SO quando algum texto animado precisa dela: carimbar
+/// sempre criaria uma cena nova por quadro e mataria o cache de quadro
+/// do pintor de CPU, que reconhece cena parada por identidade.
+Scene3D _cenaComFimDaCamada(Scene3DLayer l) {
+  if (!l.scene.nodes.any((n) => n.modelAsset?.temAnimacaoDeTexto ?? false)) {
+    return l.scene;
+  }
+  return l.scene.copyWith(fimDaCamada: l.duration);
 }
 
 class _LayerContent extends StatelessWidget {

@@ -7,6 +7,7 @@ import 'package:vector_math/vector_math_64.dart' as vm;
 
 import 'element3d.dart';
 import 'scene3d.dart';
+import 'texto3d_animado.dart';
 
 /// Portable, decoded model data. Geometry remains in the file's coordinate
 /// system; a SINGLE bind-pose normalization is applied after skinning. Never
@@ -94,28 +95,65 @@ class ModelAsset3D {
     }
     return bytes;
   }();
+  /// TEXTO 3D COM ANIMADORES: as letras (nos proprios) ganham matriz por
+  /// quadro. Imutavel por modelo — editar a animacao troca o modelo.
+  late final bool temAnimacaoDeTexto = () {
+    final texto = data['texto'];
+    return texto is Map && (texto['anims'] as List? ?? const []).isNotEmpty;
+  }();
+
   ModelMotion3D? _lastMotion;
   int? _lastTime;
+  int? _lastFimUs;
   ModelFrame3D? _lastFrame;
 
-  ModelFrame3D evaluate(Duration time, ModelMotion3D motion) {
+  ModelFrame3D evaluate(
+    Duration time,
+    ModelMotion3D motion, {
+    Duration? fimDaCamada,
+    bool comAnimacaoDeTexto = true,
+  }) {
+    if (!comAnimacaoDeTexto) {
+      // Pose neutra sob demanda (exportar o modelo, medir limites): fora
+      // do cache, que so conhece o caminho animado.
+      return _evaluate(
+        time,
+        motion,
+        normalize: true,
+        comAnimacaoDeTexto: false,
+      );
+    }
     final staticPose =
-        motion.keys.isEmpty && (motion.clip < 0 || motion.clip >= clips.length);
+        !temAnimacaoDeTexto &&
+        motion.keys.isEmpty &&
+        (motion.clip < 0 || motion.clip >= clips.length);
     if (_lastMotion == motion &&
-        (_lastTime == time.inMicroseconds || staticPose)) {
+        (staticPose ||
+            (_lastTime == time.inMicroseconds &&
+                _lastFimUs == fimDaCamada?.inMicroseconds))) {
       return _lastFrame!;
     }
-    final frame = _evaluate(time, motion, normalize: true);
+    final frame = _evaluate(
+      time,
+      motion,
+      normalize: true,
+      fimDaCamada: fimDaCamada,
+    );
     _lastMotion = motion;
     _lastTime = time.inMicroseconds;
+    _lastFimUs = fimDaCamada?.inMicroseconds;
     return _lastFrame = frame;
   }
 
   ({vm.Vector3 center, double scale}) _bindBounds() {
+    // A pose de ligacao IGNORA o texto animado: os limites vem das letras
+    // em repouso — uma entrada que nasce em escala zero nao pode encolher
+    // a caixa do modelo inteiro.
     final f = _evaluate(
       Duration.zero,
       const ModelMotion3D(clip: -1),
       normalize: false,
+      comAnimacaoDeTexto: false,
     );
     final lo = vm.Vector3.all(double.infinity),
         hi = vm.Vector3.all(-double.infinity);
@@ -137,6 +175,8 @@ class ModelAsset3D {
     Duration time,
     ModelMotion3D motion, {
     required bool normalize,
+    Duration? fimDaCamada,
+    bool comAnimacaoDeTexto = true,
   }) {
     final trs = [
       for (final n in nodes)
@@ -184,6 +224,17 @@ class ModelAsset3D {
         );
       }
       local.add(m);
+    }
+    // TEXTO ANIMADO: cada letra e um no, e a matriz do instante substitui
+    // a translacao de layout (que ja vai dentro dela).
+    if (comAnimacaoDeTexto && temAnimacaoDeTexto) {
+      final letras = matrizesDoTextoAnimado(data, time, fimDaCamada);
+      if (letras != null) {
+        for (var i = 0; i < nodes.length && i < letras.length; i++) {
+          final m = letras[i];
+          if (m != null) local[i] = m;
+        }
+      }
     }
     final world = List<vm.Matrix4?>.filled(nodes.length, null);
     vm.Matrix4 resolve(int i) {

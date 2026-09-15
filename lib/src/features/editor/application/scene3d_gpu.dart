@@ -524,7 +524,10 @@ class Scene3DGpu {
         'sincronia.transform',
         () => resolveNodeTransform(scene, node, t),
       );
-      final malha = Perfil3D.fase('sincronia.malha', () => _malhaDe(node, t));
+      final malha = Perfil3D.fase(
+        'sincronia.malha',
+        () => _malhaDe(node, t, scene.fimDaCamada),
+      );
       if (malha == null) continue;
       vivos.add(node.id);
       var g = _nos[node.id];
@@ -565,12 +568,14 @@ class Scene3DGpu {
   /// Ver [CacheDeMalhas].
   final CacheDeMalhas _malhas = CacheDeMalhas();
 
-  MalhaDoNo? _malhaDe(SceneNode node, Duration t) => _malhas.doNo(
-    node,
-    t,
-    lodDaReceita: _lodPelaReceita,
-    assinaturaDoMaterial: _assinaturaMaterial,
-  );
+  MalhaDoNo? _malhaDe(SceneNode node, Duration t, Duration? fimDaCamada) =>
+      _malhas.doNo(
+        node,
+        t,
+        lodDaReceita: _lodPelaReceita,
+        assinaturaDoMaterial: _assinaturaMaterial,
+        fimDaCamada: fimDaCamada,
+      );
 
   Element3DMesh? _lodPelaReceita(SceneNode node) => switch (_receita.lod) {
     MeshLod3D.high => node.mesh,

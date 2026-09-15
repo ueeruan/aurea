@@ -8,7 +8,13 @@ import '../../domain/scene3d.dart';
 /// Portable bridge for existing procedural/OBJ/GLB project geometry. Called on
 /// an asset isolate, never from paint/build. Filament owns glTF GPU resources.
 Uint8List encodeNodeGlb(SceneNode node) {
-  final frame = node.modelAsset?.evaluate(Duration.zero, node.modelMotion);
+  final frame = node.modelAsset?.evaluate(
+    Duration.zero,
+    node.modelMotion,
+    // O GLB leva o texto em repouso: uma entrada que nasce em escala
+    // zero exportaria letras sumidas.
+    comAnimacaoDeTexto: false,
+  );
   final mesh = frame?.mesh ?? node.mesh ?? element3DMesh(node.kind);
   final bin = BytesBuilder(copy: false);
   final views = <Map<String, Object>>[], accessors = <Map<String, Object>>[];

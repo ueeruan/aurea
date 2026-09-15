@@ -17,6 +17,8 @@ import '../../domain/keyframe.dart';
 import '../../domain/layer.dart';
 import '../../domain/panorama3d.dart';
 import '../../domain/scene3d.dart';
+import '../../domain/text_anim.dart';
+import '../../domain/texto3d_animado.dart';
 import '../widgets/element3d_painter.dart';
 import 'am_colors.dart';
 import 'am_widgets.dart';
@@ -608,6 +610,19 @@ class _ObjectsTab extends StatelessWidget {
               onChanged();
             },
           ),
+          // TEXTO 3D: os presets de animacao do texto normal, letra a
+          // letra na malha extrudada. Um por posicao (entrada / enfase /
+          // saida), como na folha do texto 2D.
+          if (node.modelAsset?.data['texto'] != null) ...[
+            const SizedBox(height: 10),
+            _SectionTitle('Animacao do texto'),
+            ..._chipsDeAnimacaoDoTexto(controller, layer, node, onChanged),
+            const _Hint(
+              'Os mesmos presets do texto normal, por letra. Opacidade '
+              'vira escala (metal nao fica transparente); desfoque e cor '
+              'nao valem na malha. A saida conta do fim da camada.',
+            ),
+          ],
           if (node.modelAsset != null) ...[
             _AcaoLarga(
               rotulo: 'Animar modelo / Rig',
@@ -2831,6 +2846,53 @@ class _Plain extends StatelessWidget {
       ),
     );
   }
+}
+
+/// OS TRES SLOTS DE ANIMACAO DO TEXTO 3D (entrada / enfase / saida),
+/// cada um com o catalogo do texto normal. Presets que so mexem em cor
+/// ficam de fora: em malha extrudada eles nao fazem nada.
+List<Widget> _chipsDeAnimacaoDoTexto(
+  EditorController controller,
+  Scene3DLayer layer,
+  SceneNode node,
+  VoidCallback onChanged,
+) {
+  final atuais = animsDoTexto3D(node.modelAsset!);
+  List<TextAnimSpec> doSlot(TextAnimSlot slot) => [
+    for (final s in textAnimsForSlot(slot))
+      if (s.id != 'colorIn' && s.id != 'rainbow') s,
+  ];
+  String rotulo(TextAnimSlot slot) => switch (slot) {
+    TextAnimSlot.entrada => 'Entrada',
+    TextAnimSlot.enfase => 'Enfase',
+    TextAnimSlot.saida => 'Saida',
+  };
+  return [
+    for (final slot in TextAnimSlot.values)
+      Builder(
+        key: ValueKey('texto3d-anim-${slot.name}'),
+        builder: (_) {
+          final specs = doSlot(slot);
+          final atual = atuais.where((a) => a.slot == slot).firstOrNull;
+          final indice = atual == null
+              ? 0
+              : specs.indexWhere((s) => s.id == atual.specId) + 1;
+          return _Chips(
+            label: rotulo(slot),
+            options: ['Nenhuma', for (final s in specs) s.label],
+            index: indice,
+            onChanged: (i) {
+              final outras = [for (final a in atuais) if (a.slot != slot) a];
+              controller.setTexto3DAnims(layer.id, node.id, [
+                ...outras,
+                if (i > 0) TextAnim(specId: specs[i - 1].id, slot: slot),
+              ]);
+              onChanged();
+            },
+          );
+        },
+      ),
+  ];
 }
 
 class _Chips extends StatelessWidget {

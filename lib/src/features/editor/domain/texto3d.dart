@@ -1,6 +1,8 @@
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:characters/characters.dart';
+
 import 'fonte_truetype.dart';
 
 /// TEXTO 3D, O DO ELEMENT 3D: letra extrudada, com chanfro e tres
@@ -195,6 +197,7 @@ class LetraDoTexto3D {
     required this.x,
     required this.y,
     required this.glifo,
+    this.unidade = -1,
   });
 
   /// A posicao entre as letras que DESENHAM (o espaco nao conta).
@@ -203,6 +206,12 @@ class LetraDoTexto3D {
   final double x;
   final double y;
   final GlifoDaFonte glifo;
+
+  /// O INDICE DA UNIDADE DE TEXTO (grapheme) de onde esta letra veio, no
+  /// texto limpo ('\r' fora) — a mesma contagem do motor de animadores de
+  /// texto ([TextUnits]). E por ele que "aparecer letra por letra" sabe a
+  /// vez de cada letra extrudada. -1 = layout antigo, sem mapa.
+  final int unidade;
 }
 
 class DisposicaoDoTexto3D {
@@ -264,15 +273,32 @@ DisposicaoDoTexto3D disporTexto3D(Texto3D t, FonteDeGlifos fonte) {
   final alturaDaLinha =
       (fonte.ascendente - fonte.descendente + fonte.entreLinhas) * escala;
   final faltando = <int>{};
-  final brutas = <({int codigo, double x, double y, GlifoDaFonte g})>[];
+  final brutas = <({int codigo, int u, double x, double y, GlifoDaFonte g})>[];
   var minX = double.infinity, minY = double.infinity;
   var maxX = -double.infinity, maxY = -double.infinity;
-  final linhas = t.texto.replaceAll('\r', '').split('\n');
+  final limpo = t.texto.replaceAll('\r', '');
+  // A UNIDADE (grapheme) DE CADA RUNE do texto limpo: e o que liga cada
+  // letra extrudada a contagem do motor de animadores de texto. Um
+  // grapheme de varios runes aponta todos para a mesma unidade.
+  final unidadeDoRune = <int>[];
+  var grapheme = 0;
+  for (final cluster in limpo.characters) {
+    for (final _ in cluster.runes) {
+      unidadeDoRune.add(grapheme);
+    }
+    grapheme++;
+  }
+  final linhas = limpo.split('\n');
+  var cursor = 0; // rune corrente dentro de `limpo`
   for (var l = 0; l < linhas.length; l++) {
-    final daLinha = <({int codigo, double x, double y, GlifoDaFonte g})>[];
+    if (l > 0) cursor++; // o '\n' que separa esta linha da anterior
+    final daLinha =
+        <({int codigo, int u, double x, double y, GlifoDaFonte g})>[];
     var caneta = 0.0;
     int? anterior;
     for (final codigo in linhas[l].runes) {
+      final unidade = unidadeDoRune[cursor];
+      cursor++;
       final g = fonte.glifoDoCaractere(codigo);
       if (g == null) {
         faltando.add(codigo);
@@ -282,7 +308,7 @@ DisposicaoDoTexto3D disporTexto3D(Texto3D t, FonteDeGlifos fonte) {
       }
       if (anterior != null) caneta += fonte.kerningEntre(anterior, codigo);
       if (g.contornos.isNotEmpty) {
-        daLinha.add((codigo: codigo, x: caneta, y: 0, g: g));
+        daLinha.add((codigo: codigo, u: unidade, x: caneta, y: 0, g: g));
       }
       caneta += g.avanco + t.espacamento * upem;
       anterior = codigo;
@@ -305,7 +331,7 @@ DisposicaoDoTexto3D disporTexto3D(Texto3D t, FonteDeGlifos fonte) {
       maxX = math.max(maxX, x + caixa.maxX);
       minY = math.min(minY, y + caixa.minY);
       maxY = math.max(maxY, y + caixa.maxY);
-      brutas.add((codigo: b.codigo, x: x, y: y, g: b.g));
+      brutas.add((codigo: b.codigo, u: b.u, x: x, y: y, g: b.g));
     }
   }
   if (brutas.isEmpty) {
@@ -323,6 +349,7 @@ DisposicaoDoTexto3D disporTexto3D(Texto3D t, FonteDeGlifos fonte) {
         LetraDoTexto3D(
           indice: i,
           codigo: brutas[i].codigo,
+          unidade: brutas[i].u,
           x: (brutas[i].x - cx) * escala,
           y: (brutas[i].y - cy) * escala,
           glifo: brutas[i].g,

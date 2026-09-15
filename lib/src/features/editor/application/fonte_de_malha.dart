@@ -68,11 +68,13 @@ class CacheDeMalhas {
     Duration t, {
     required Element3DMesh? Function(SceneNode node) lodDaReceita,
     required String Function(Material3D m) assinaturaDoMaterial,
+    Duration? fimDaCamada,
   }) {
     final asset = node.modelAsset;
     if (asset != null) {
       final motion = node.modelMotion;
       final animado =
+          asset.temAnimacaoDeTexto ||
           motion.keys.isNotEmpty ||
           (motion.clip >= 0 && motion.clip < asset.clips.length);
       // A AVALIACAO DO MODELO e o passo mais caro do quadro quando o
@@ -80,7 +82,10 @@ class CacheDeMalhas {
       // em Dart, no fio da interface.
       final frame = RegistroDeTravadas.marcando(
         'avaliando o modelo importado',
-        () => Perfil3D.fase('modelo.avaliar', () => asset.evaluate(t, motion)),
+        () => Perfil3D.fase(
+          'modelo.avaliar',
+          () => asset.evaluate(t, motion, fimDaCamada: fimDaCamada),
+        ),
       );
       // O MESMO QUADRO DO MODELO: nada a refazer. Modelo parado devolve
       // sempre o mesmo objeto (o `evaluate` guarda o ultimo).

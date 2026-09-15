@@ -11,6 +11,7 @@ import '../../media/application/media_import_service.dart';
 import '../domain/blend_extra.dart';
 import 'blob_track_service.dart';
 import 'camera_track_service.dart';
+import 'scene_cut_service.dart';
 import 'freehand_session.dart';
 import '../domain/blob_track.dart';
 import '../domain/caption.dart';
@@ -5349,6 +5350,51 @@ class EditorController extends Notifier<VideoProject> {
     if (layer is VideoLayer) {
       unawaited(CameraTrackService.instance.clonar(id, second.id));
     }
+  }
+
+  /// DECUPA o clipe: o detector de mudanca de cena (o mesmo scdet do
+  /// Premiere, via FFmpeg) acha onde a imagem corta e a camada e
+  /// dividida em todos os pontos, num passo so de desfazer.
+  ///
+  /// Devolve quantos cortes fez; 0 = nenhum corte achado; null = nao da
+  /// (video ilegivel, reverso ou Time Remap — nesses o tempo da fonte
+  /// nao e uma reta e o corte cairia no lugar errado).
+  Future<int?> decuparCamada(String id, {double sensibilidade = 0.35}) async {
+    final tempos = await _cortesDeCena(id, sensibilidade);
+    if (tempos == null) return null;
+    if (tempos.isEmpty) return 0;
+    runAsOneUndo(() => splitLayerAtTimes(id, tempos));
+    return tempos.length;
+  }
+
+  /// Os MESMOS cortes de cena, como marcas na regua (para revisar antes
+  /// de cortar, ou para navegar).
+  Future<int?> cortesDeCenaViramMarcas(
+    String id, {
+    double sensibilidade = 0.35,
+  }) async {
+    final tempos = await _cortesDeCena(id, sensibilidade);
+    if (tempos == null) return null;
+    if (tempos.isEmpty) return 0;
+    addMarkers(tempos);
+    return tempos.length;
+  }
+
+  Future<List<Duration>?> _cortesDeCena(String id, double sensibilidade) async {
+    final l = _layer(id);
+    if (l is! VideoLayer || l.reverse || hasTimeRemap(l)) return null;
+    List<Duration> rel;
+    try {
+      rel = await SceneCutService.instance.detect(
+        l.sourcePath,
+        start: l.sourceOffset,
+        duration: videoSourceSpan(l),
+        threshold: sensibilidade,
+      );
+    } catch (_) {
+      return null;
+    }
+    return temposGlobaisDosCortes(l, rel);
   }
 
   /// DIVIDE a camada em todos os [times] (globais), de uma vez.

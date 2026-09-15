@@ -462,6 +462,28 @@ List<Layer> transitionPaintOrder(
 /// absolutos da fonte): o menor e o maior, varrendo a camada a 60 quadros
 /// por segundo. Com velocidade constante e o [sourceOffset, +span]; com
 /// reverso ou Time Remap, o que a curva realmente visita.
+/// OS CORTES DE CENA NO TEMPO DA LINHA. A deteccao devolve instantes
+/// RELATIVOS AO INICIO DO TRECHO DA FONTE analisado; na linha do tempo
+/// eles caem esticados pela velocidade. So vale leitura simples (sem
+/// reverso, sem Time Remap) — quem chama recusa o resto antes. Cortes
+/// colados nas bordas saem: dividir a 40 ms da ponta so cria farelo.
+List<Duration> temposGlobaisDosCortes(
+  VideoLayer v,
+  List<Duration> relativosAFonte, {
+  Duration margem = const Duration(milliseconds: 200),
+}) {
+  final vel = v.speed <= 0 ? 1.0 : v.speed;
+  final out = <Duration>[];
+  for (final r in relativosAFonte) {
+    final t =
+        v.startTime + Duration(microseconds: (r.inMicroseconds / vel).round());
+    if (t <= v.startTime + margem) continue;
+    if (t >= v.endTime - margem) continue;
+    out.add(t);
+  }
+  return out;
+}
+
 (Duration, Duration) trechoDaFonteMostrado(VideoLayer layer) {
   final passo = 1000000 ~/ 60;
   var menor = 1 << 62, maior = -(1 << 62);

@@ -7,6 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/theme/tokens.dart';
 import '../../../../core/ui/snack.dart';
 import '../../application/editor_controller.dart';
+import '../../domain/cut_ops.dart' show hasTimeRemap;
+import '../am/decupar_sheet.dart' show showDecuparSheet;
 import '../../application/playback_controller.dart';
 import '../../application/ui/editor_session.dart';
 import '../../domain/layer.dart';
@@ -80,6 +82,18 @@ List<QuickAction> quickActionsFor(
       label: 'Dividir',
       onTap: () => controller.splitLayer(id, t),
     ),
+    // DECUPAR: o detector de cena corta o clipe inteiro sozinho — a
+    // porta do servico que existia sem entrada nenhuma.
+    if (layer is VideoLayer)
+      QuickAction(
+        key: 'decupar',
+        icon: CupertinoIcons.rectangle_split_3x1,
+        label: 'Decupar',
+        enabled: !layer.reverse && !hasTimeRemap(layer),
+        reason: 'Reverso e Time Remap entortam o tempo da fonte: '
+            'decupe antes de aplicar.',
+        onTap: () => pausa(() => showDecuparSheet(context, ref, id)),
+      ),
     QuickAction(
       key: 'copiar-efeitos',
       icon: CupertinoIcons.doc_on_doc,

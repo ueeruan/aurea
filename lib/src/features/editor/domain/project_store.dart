@@ -444,6 +444,13 @@ Map<String, dynamic> _shapeItem(ShapeItem s) => switch (s) {
     'sw': _ad(sp.sweep),
     'si': _ad(sp.sectorInner),
   },
+  ShapeMediaFill f => {
+    'kind': 'mfill',
+    'id': f.id,
+    'src': f.sourcePath,
+    'fit': f.encaixe.index,
+    'op': f.opacity,
+  },
   ShapeFill f => {
     'kind': 'fill',
     'id': f.id,
@@ -471,6 +478,7 @@ Map<String, dynamic> _shapeItem(ShapeItem s) => switch (s) {
     'cb': _col(g.colorB),
     'ang': g.angleDeg,
     'radial': g.radial,
+    if (g.varredura) 'sweep': true,
     'op': g.opacity,
     if (g.extras.isNotEmpty) 'mid': [for (final c in g.extras) _col(c)],
     if (g.stops.isNotEmpty) 'stops': g.stops,
@@ -596,6 +604,15 @@ ShapeItem _asShapeItem(Map<String, dynamic> m) => switch (m['kind']) {
     sweep: _asAd(m['sw']),
     sectorInner: _asAd(m['si']),
   ),
+  'mfill' => ShapeMediaFill(
+    id: m['id'] as String,
+    sourcePath: m['src'] as String,
+    encaixe: EncaixeNaForma.values[((m['fit'] as num?)?.toInt() ?? 0).clamp(
+      0,
+      EncaixeNaForma.values.length - 1,
+    )],
+    opacity: (m['op'] as num?)?.toDouble() ?? 1,
+  ),
   'fill' => ShapeFill(
     id: m['id'] as String,
     color: _asCol(m['color']),
@@ -622,6 +639,7 @@ ShapeItem _asShapeItem(Map<String, dynamic> m) => switch (m['kind']) {
     colorB: _asCol(m['cb']),
     angleDeg: (m['ang'] as num).toDouble(),
     radial: m['radial'] as bool,
+    varredura: m['sweep'] as bool? ?? false,
     opacity: (m['op'] as num).toDouble(),
     extras: [for (final c in (m['mid'] as List? ?? const [])) _asCol(c)],
     stops: [

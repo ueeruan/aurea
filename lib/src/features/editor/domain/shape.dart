@@ -846,6 +846,73 @@ class ShapeStroke extends ShapeItem {
 }
 
 /// Fill em gradiente (linear ou radial) com bounds do proprio caminho.
+/// O TIPO DE PREENCHIMENTO de uma forma (abas de Cor e preenchimento).
+enum TipoDePreenchimento { nenhum, cor, degrade, midia }
+
+/// O tipo que a forma usa hoje: o primeiro preenchimento da lista manda.
+TipoDePreenchimento tipoDePreenchimentoDe(List<ShapeItem> itens) {
+  for (final i in itens) {
+    if (i is ShapeFill) return TipoDePreenchimento.cor;
+    if (i is ShapeGradientFill) return TipoDePreenchimento.degrade;
+    if (i is ShapeMediaFill) return TipoDePreenchimento.midia;
+  }
+  return TipoDePreenchimento.nenhum;
+}
+
+bool ehPreenchimento(ShapeItem i) =>
+    i is ShapeFill || i is ShapeGradientFill || i is ShapeMediaFill;
+
+/// COMO A FOTO OCUPA A FORMA no preenchimento por midia.
+enum EncaixeNaForma { preencher, caber, esticar }
+
+/// PREENCHIMENTO POR MIDIA: uma foto dentro da forma (o recorte e a
+/// propria geometria). A imagem vem do cache de texturas na hora de
+/// pintar; ate carregar, a forma aparece num cinza translucido.
+class ShapeMediaFill extends ShapeItem {
+  ShapeMediaFill({
+    super.id,
+    required this.sourcePath,
+    this.encaixe = EncaixeNaForma.preencher,
+    this.opacity = 1,
+  });
+
+  final String sourcePath;
+  final EncaixeNaForma encaixe;
+  final double opacity;
+
+  ShapeMediaFill copyWith({
+    String? sourcePath,
+    EncaixeNaForma? encaixe,
+    double? opacity,
+  }) => ShapeMediaFill(
+    id: id,
+    sourcePath: sourcePath ?? this.sourcePath,
+    encaixe: encaixe ?? this.encaixe,
+    opacity: opacity ?? this.opacity,
+  );
+}
+
+/// Onde a imagem de [tamanho] pousa dentro de [caixa] no [encaixe].
+Rect destinoDaMidiaNaForma(Rect caixa, Size tamanho, EncaixeNaForma encaixe) {
+  if (tamanho.isEmpty || caixa.isEmpty) return caixa;
+  switch (encaixe) {
+    case EncaixeNaForma.esticar:
+      return caixa;
+    case EncaixeNaForma.preencher:
+    case EncaixeNaForma.caber:
+      final sx = caixa.width / tamanho.width;
+      final sy = caixa.height / tamanho.height;
+      final s = encaixe == EncaixeNaForma.preencher
+          ? math.max(sx, sy)
+          : math.min(sx, sy);
+      return Rect.fromCenter(
+        center: caixa.center,
+        width: tamanho.width * s,
+        height: tamanho.height * s,
+      );
+  }
+}
+
 class ShapeGradientFill extends ShapeItem {
   ShapeGradientFill({
     super.id,
@@ -853,6 +920,7 @@ class ShapeGradientFill extends ShapeItem {
     this.colorB = const Color(0xFF7C62FF),
     this.angleDeg = 0,
     this.radial = false,
+    this.varredura = false,
     this.opacity = 1,
     List<Color>? extras,
     List<double>? stops,
@@ -937,6 +1005,10 @@ class ShapeGradientFill extends ShapeItem {
 
   final double angleDeg;
   final bool radial;
+
+  /// DEGRADE DE VARREDURA: as cores giram em volta do centro (o angulo
+  /// diz onde a volta comeca). Vale mais que [radial].
+  final bool varredura;
   final double opacity;
 
   /// Todas as paradas na ordem em que o pincel as usa.
@@ -947,6 +1019,7 @@ class ShapeGradientFill extends ShapeItem {
     Color? colorB,
     double? angleDeg,
     bool? radial,
+    bool? varredura,
     double? opacity,
     List<Color>? extras,
     List<double>? stops,
@@ -960,6 +1033,7 @@ class ShapeGradientFill extends ShapeItem {
       colorB: colorB ?? this.colorB,
       angleDeg: angleDeg ?? this.angleDeg,
       radial: radial ?? this.radial,
+      varredura: varredura ?? this.varredura,
       opacity: opacity ?? this.opacity,
       extras: extras ?? this.extras,
       stops: stops ?? this.stops,
@@ -1442,10 +1516,20 @@ abstract final class Matrix4Utils {
 
 /// Comando de desenho resultante da avaliacao da arvore.
 class ShapeDraw {
-  const ShapeDraw({required this.path, required this.paint});
+  const ShapeDraw({
+    required this.path,
+    required this.paint,
+    this.imagem,
+    this.encaixe = EncaixeNaForma.preencher,
+  });
 
   final Path path;
   final Paint paint;
+
+  /// Preenchimento por midia: o caminho da foto. Quem pinta busca a
+  /// imagem e recorta pela [path]; sem ela, pinta [paint] (cinza).
+  final String? imagem;
+  final EncaixeNaForma encaixe;
 }
 
 Path _dashPath(
@@ -1714,7 +1798,16 @@ List<ShapeDraw> evaluateShape(
               path: path,
               paint: Paint()
                 ..style = PaintingStyle.fill
-                ..shader = g.radial
+                ..shader = g.varredura
+                    ? Gradient.sweep(
+                        center,
+                        colors,
+                        stops,
+                        TileMode.clamp,
+                        rad,
+                        rad + 2 * math.pi,
+                      )
+                    : g.radial
                     ? Gradient.radial(
                         center,
                         b.longestSide / 2 * radius,
@@ -1727,6 +1820,24 @@ List<ShapeDraw> evaluateShape(
                         colors,
                         stops,
                       ),
+            ),
+          );
+        }
+      case ShapeMediaFill m:
+        for (final path in paths) {
+          draws.add(
+            ShapeDraw(
+              path: path,
+              paint: Paint()
+                ..style = PaintingStyle.fill
+                ..color = Color.fromRGBO(
+                  255,
+                  255,
+                  255,
+                  (m.opacity * opacity).clamp(0.0, 1.0),
+                ),
+              imagem: m.sourcePath,
+              encaixe: m.encaixe,
             ),
           );
         }

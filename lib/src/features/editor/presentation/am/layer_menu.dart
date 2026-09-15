@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/utils/time_format.dart';
+import '../../../media/application/media_import_service.dart';
 import '../../application/editor_controller.dart';
 import 'camera_sheet.dart' show showCameraSheet;
 import 'precomp_sheet.dart';
@@ -4705,136 +4706,621 @@ class ColorFillPanel extends ConsumerWidget {
     final project = ref.watch(editorControllerProvider);
     final id = ref.watch(selectedLayerProvider);
     final layer = id == null ? null : project.layerById(id);
-    if (layer == null || id == null) {
+    if (layer == null || id == null || layer is AudioLayer) {
       return const ColoredBox(color: AmColors.panel);
     }
-    final controller = ref.read(editorControllerProvider.notifier);
-    final current = switch (layer) {
-      ShapeLayer l => l.primaryColor,
-      TextLayer l => l.color,
-      _ => null,
-    };
-
     return ColoredBox(
       color: AmColors.panel,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SizedBox(width: 6),
-          Expanded(
-            child: current == null
-                ? const Center(
-                    child: AppText('Esta camada nao tem cor editavel.',
-                      style: TextStyle(color: AmColors.muted, fontSize: 13),
-                    ),
-                  )
-                : ValueListenableBuilder<Duration>(
-                    valueListenable: playback.time,
-                    builder: (context, t, _) => ListView(
-                      padding: const EdgeInsets.fromLTRB(4, 16, 16, 16),
-                      children: [
-                        // QUALQUER COR: espectro completo, hex e alfa.
-                        // Os atalhos abaixo continuam para o caso comum.
-                        Tocavel(
-                          onTap: () async {
-                            void set(Color c) {
-                              if (layer is ShapeLayer) {
-                                controller.setShapePrimaryColor(id, c);
-                              } else if (layer is TextLayer) {
-                                controller.editTextLayer(id, color: c);
-                              }
-                            }
+      child: ValueListenableBuilder<Duration>(
+        valueListenable: playback.time,
+        builder: (context, t, _) => switch (layer) {
+          ShapeLayer l => _PreenchimentoDaForma(
+            layer: l,
+            layerId: id,
+            tempo: t,
+            swatches: _swatches,
+          ),
+          _ => _SobreposicaoDeCor(
+            layer: layer,
+            layerId: id,
+            swatches: _swatches,
+          ),
+        },
+      ),
+    );
+  }
+}
 
-                            final picked = await showColorPicker(
-                              context,
-                              initial: current,
-                              onChanged: set,
+/// A FILEIRA DE ABAS do painel de cor: icone e rotulo, a ativa acesa.
+class _AbasDeCor<T> extends StatelessWidget {
+  const _AbasDeCor({
+    required this.abas,
+    required this.ativa,
+    required this.onAba,
+  });
+
+  final List<(T, String, IconData, String)> abas;
+  final T ativa;
+  final ValueChanged<T> onAba;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
+    child: Row(
+      children: [
+        for (final (valor, rotulo, icone, chave) in abas)
+          Expanded(
+            child: Tocavel(
+              key: ValueKey(chave),
+              onTap: () => onAba(valor),
+              child: Container(
+                height: 50,
+                margin: const EdgeInsets.symmetric(horizontal: 3),
+                decoration: BoxDecoration(
+                  color: valor == ativa ? AmColors.accentDim : AmColors.chip,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      icone,
+                      size: 17,
+                      color: valor == ativa ? AmColors.accent : AmColors.text,
+                    ),
+                    const SizedBox(height: 3),
+                    AppText(
+                      rotulo,
+                      maxLines: 1,
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        color: valor == ativa
+                            ? AmColors.accent
+                            : AmColors.muted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+      ],
+    ),
+  );
+}
+
+/// Linha "escolher qualquer cor" + atalhos de cor.
+Widget _escolhaDeCor(
+  BuildContext context, {
+  required Color atual,
+  required List<Color> swatches,
+  required ValueChanged<Color> onCor,
+  String rotulo = 'Escolher qualquer cor',
+  String chave = 'cor-qualquer',
+}) {
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      Tocavel(
+        key: ValueKey(chave),
+        onTap: () async {
+          final picked = await showColorPicker(
+            context,
+            initial: atual,
+            onChanged: onCor,
+          );
+          if (picked != null) onCor(picked);
+        },
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 14),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+          decoration: BoxDecoration(
+            color: AmColors.chip,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: atual,
+                  borderRadius: BorderRadius.circular(9),
+                  border: Border.all(color: Colors.white24),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: AppText(
+                  rotulo,
+                  style: const TextStyle(fontSize: 14, color: AmColors.text),
+                ),
+              ),
+              const Icon(
+                CupertinoIcons.chevron_right,
+                size: 15,
+                color: AmColors.muted,
+              ),
+            ],
+          ),
+        ),
+      ),
+      Wrap(
+        spacing: 12,
+        runSpacing: 12,
+        children: [
+          for (final c in swatches)
+            Tocavel(
+              onTap: () => onCor(c),
+              child: Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: c,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: atual.toARGB32() == c.toARGB32()
+                        ? AmColors.accent
+                        : Colors.white24,
+                    width: atual.toARGB32() == c.toARGB32() ? 3 : 1,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    ],
+  );
+}
+
+/// FORMA: nenhum, cor solida, degrade (linear, radial, varredura) e midia.
+class _PreenchimentoDaForma extends ConsumerWidget {
+  const _PreenchimentoDaForma({
+    required this.layer,
+    required this.layerId,
+    required this.tempo,
+    required this.swatches,
+  });
+
+  final ShapeLayer layer;
+  final String layerId;
+  final Duration tempo;
+  final List<Color> swatches;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final c = ref.read(editorControllerProvider.notifier);
+    final tipo = tipoDePreenchimentoDe(layer.contents);
+    final degrade = layer.contents.whereType<ShapeGradientFill>().firstOrNull;
+    final midia = layer.contents.whereType<ShapeMediaFill>().firstOrNull;
+
+    Future<void> escolherMidia() async {
+      final foto = await ref
+          .read(mediaImportServiceProvider)
+          .pickImageFromGallery();
+      if (foto == null) return;
+      c.definirTipoDePreenchimento(
+        layerId,
+        TipoDePreenchimento.midia,
+        midia: foto.path,
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _AbasDeCor<TipoDePreenchimento>(
+          abas: const [
+            (TipoDePreenchimento.nenhum, 'Nenhum', CupertinoIcons.nosign, 'cor-aba-nenhum'),
+            (TipoDePreenchimento.cor, 'Cor', CupertinoIcons.drop_fill, 'cor-aba-cor'),
+            (TipoDePreenchimento.degrade, 'Degradê', CupertinoIcons.color_filter, 'cor-aba-degrade'),
+            (TipoDePreenchimento.midia, 'Mídia', CupertinoIcons.photo, 'cor-aba-midia'),
+          ],
+          ativa: tipo,
+          onAba: (novo) {
+            if (novo == TipoDePreenchimento.midia && midia == null) {
+              escolherMidia();
+              return;
+            }
+            c.definirTipoDePreenchimento(layerId, novo);
+          },
+        ),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(12, 10, 16, 16),
+            children: [
+              switch (tipo) {
+                TipoDePreenchimento.nenhum => const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 18),
+                  child: AppText(
+                    'Sem preenchimento: só o traço (se houver) aparece.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: AmColors.muted, fontSize: 13),
+                  ),
+                ),
+                TipoDePreenchimento.cor => _escolhaDeCor(
+                  context,
+                  atual: layer.primaryColor,
+                  swatches: swatches,
+                  onCor: (cor) => c.setShapePrimaryColor(layerId, cor),
+                ),
+                TipoDePreenchimento.degrade when degrade != null =>
+                  _EdicaoDoDegrade(layerId: layerId, degrade: degrade),
+                TipoDePreenchimento.degrade => const SizedBox.shrink(),
+                TipoDePreenchimento.midia => Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Tocavel(
+                      key: const ValueKey('cor-midia-escolher'),
+                      onTap: escolherMidia,
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: AmColors.chip,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              CupertinoIcons.photo_on_rectangle,
+                              color: AmColors.text,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: AppText(
+                                midia == null
+                                    ? 'Escolher uma foto'
+                                    : 'Trocar a foto',
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  color: AmColors.text,
+                                ),
+                              ),
+                            ),
+                            const Icon(
+                              CupertinoIcons.chevron_right,
+                              size: 15,
+                              color: AmColors.muted,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    if (midia != null)
+                      CupertinoSlidingSegmentedControl<EncaixeNaForma>(
+                        key: const ValueKey('cor-midia-encaixe'),
+                        groupValue: midia.encaixe,
+                        thumbColor: AmColors.accentDim,
+                        backgroundColor: AmColors.chip,
+                        children: const {
+                          EncaixeNaForma.preencher: Padding(
+                            padding: EdgeInsets.symmetric(vertical: 8),
+                            child: AppText('Preencher',
+                              style: TextStyle(color: AmColors.text, fontSize: 13),
+                            ),
+                          ),
+                          EncaixeNaForma.caber: AppText('Caber',
+                            style: TextStyle(color: AmColors.text, fontSize: 13),
+                          ),
+                          EncaixeNaForma.esticar: AppText('Esticar',
+                            style: TextStyle(color: AmColors.text, fontSize: 13),
+                          ),
+                        },
+                        onValueChanged: (e) {
+                          if (e != null) {
+                            c.definirEncaixeDaMidiaNaForma(layerId, e);
+                          }
+                        },
+                      ),
+                  ],
+                ),
+              },
+              _ShapeOperators(
+                layer: layer,
+                layerId: layerId,
+                globalTime: tempo,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// O DEGRADE ALI MESMO: tipo (linear, radial, varredura), as duas cores
+/// e o angulo.
+class _EdicaoDoDegrade extends ConsumerWidget {
+  const _EdicaoDoDegrade({required this.layerId, required this.degrade});
+
+  final String layerId;
+  final ShapeGradientFill degrade;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final c = ref.read(editorControllerProvider.notifier);
+    final g = degrade;
+    final tipo = g.varredura ? 2 : (g.radial ? 1 : 0);
+    void editar(ShapeGradientFill Function(ShapeGradientFill) f) =>
+        c.updateShapeGradient(layerId, g.id, f);
+
+    Widget amostra(String chave, String rotulo, Color cor, bool inicio) =>
+        Expanded(
+          child: Tocavel(
+            key: ValueKey(chave),
+            onTap: () async {
+              void aplicar(Color nova) => editar(
+                (x) => inicio ? x.copyWith(colorA: nova) : x.copyWith(colorB: nova),
+              );
+              final escolhida = await showColorPicker(
+                context,
+                initial: cor,
+                onChanged: aplicar,
+              );
+              if (escolhida != null) aplicar(escolhida);
+            },
+            child: Container(
+              height: 46,
+              margin: const EdgeInsets.symmetric(horizontal: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              decoration: BoxDecoration(
+                color: AmColors.chip,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 24,
+                    height: 24,
+                    decoration: BoxDecoration(
+                      color: cor,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white24),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  AppText(
+                    rotulo,
+                    style: const TextStyle(fontSize: 13, color: AmColors.text),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        CupertinoSlidingSegmentedControl<int>(
+          key: const ValueKey('cor-degrade-tipo'),
+          groupValue: tipo,
+          thumbColor: AmColors.accentDim,
+          backgroundColor: AmColors.chip,
+          children: const {
+            0: Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: AppText('Linear',
+                style: TextStyle(color: AmColors.text, fontSize: 13),
+              ),
+            ),
+            1: AppText('Radial',
+              style: TextStyle(color: AmColors.text, fontSize: 13),
+            ),
+            2: AppText('Varredura',
+              style: TextStyle(color: AmColors.text, fontSize: 13),
+            ),
+          },
+          onValueChanged: (v) {
+            if (v == null) return;
+            editar((x) => x.copyWith(radial: v == 1, varredura: v == 2));
+          },
+        ),
+        const SizedBox(height: 12),
+        // A PREVIA DO DEGRADE: a mesma conta de cores e paradas da forma.
+        Container(
+          height: 26,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            gradient: LinearGradient(
+              colors: g.paradas,
+              stops: g.resolvedStops,
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            amostra('cor-degrade-inicio', 'Início', g.colorA, true),
+            amostra('cor-degrade-fim', 'Fim', g.colorB, false),
+          ],
+        ),
+        const SizedBox(height: 10),
+        ParameterRow(
+          label: 'Ângulo',
+          value: g.angleDeg,
+          min: -360,
+          max: 360,
+          unitsPerPixel: 1,
+          decimals: 0,
+          unit: '°',
+          onChanged: (v) => editar((x) => x.copyWith(angleDeg: v)),
+        ),
+      ],
+    );
+  }
+}
+
+/// FOTO, VIDEO, GRUPO E TEXTO: cor intrinseca (a da propria midia), uma
+/// cor por cima ou um degrade por cima — os estilos de camada.
+class _SobreposicaoDeCor extends ConsumerWidget {
+  const _SobreposicaoDeCor({
+    required this.layer,
+    required this.layerId,
+    required this.swatches,
+  });
+
+  final Layer layer;
+  final String layerId;
+  final List<Color> swatches;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final c = ref.read(editorControllerProvider.notifier);
+    final estilos = ref.watch(
+      editorControllerProvider.select((p) => p.metaOf(layerId).styles),
+    );
+    final texto = layer is TextLayer;
+    final aba = estilos.gradientOverlay?.enabled == true
+        ? 2
+        : (estilos.colorOverlay?.enabled == true ? 1 : 0);
+
+    void escolherAba(int nova) {
+      c.updateLayerStyles(layerId, (s) {
+        switch (nova) {
+          case 0:
+            return s.copyWith(
+              clearColorOverlay: true,
+              clearGradientOverlay: true,
+            );
+          case 1:
+            return s.copyWith(
+              colorOverlay: (s.colorOverlay ?? OverlayStyle()).copyWith(
+                enabled: true,
+              ),
+              clearGradientOverlay: true,
+            );
+          default:
+            return s.copyWith(
+              gradientOverlay: (s.gradientOverlay ?? GradientOverlayStyle())
+                  .copyWith(enabled: true),
+              clearColorOverlay: true,
+            );
+        }
+      });
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _AbasDeCor<int>(
+          abas: [
+            (0, texto ? 'Cor do texto' : 'Intrínseca', texto ? CupertinoIcons.textformat : CupertinoIcons.photo, 'cor-aba-intrinseca'),
+            (1, 'Cor', CupertinoIcons.drop_fill, 'cor-aba-cor'),
+            (2, 'Degradê', CupertinoIcons.color_filter, 'cor-aba-degrade'),
+          ],
+          ativa: aba,
+          onAba: escolherAba,
+        ),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(12, 10, 16, 16),
+            children: [
+              if (aba == 0 && layer is TextLayer)
+                _escolhaDeCor(
+                  context,
+                  atual: (layer as TextLayer).color,
+                  swatches: swatches,
+                  onCor: (cor) => c.editTextLayer(layerId, color: cor),
+                )
+              else if (aba == 0)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 18),
+                  child: AppText(
+                    'As cores da própria camada, sem nada por cima.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: AmColors.muted, fontSize: 13),
+                  ),
+                ),
+              if (aba == 1)
+                _escolhaDeCor(
+                  context,
+                  atual: estilos.colorOverlay?.color ?? const Color(0xFFB8FF3D),
+                  swatches: swatches,
+                  rotulo: 'Cor por cima da camada',
+                  onCor: (cor) => c.updateLayerStyles(
+                    layerId,
+                    (s) => s.copyWith(
+                      colorOverlay: (s.colorOverlay ?? OverlayStyle())
+                          .copyWith(color: cor, enabled: true),
+                    ),
+                  ),
+                ),
+              if (aba == 2) ...[
+                Row(
+                  children: [
+                    for (final (chave, rotulo, inicio) in const [
+                      ('cor-sobreposicao-inicio', 'Início', true),
+                      ('cor-sobreposicao-fim', 'Fim', false),
+                    ])
+                      Expanded(
+                        child: Tocavel(
+                          key: ValueKey(chave),
+                          onTap: () async {
+                            final atual = estilos.gradientOverlay ??
+                                GradientOverlayStyle();
+                            void aplicar(Color nova) => c.updateLayerStyles(
+                              layerId,
+                              (s) => s.copyWith(
+                                gradientOverlay:
+                                    (s.gradientOverlay ?? GradientOverlayStyle())
+                                        .copyWith(
+                                          colorA: inicio ? nova : null,
+                                          colorB: inicio ? null : nova,
+                                          enabled: true,
+                                        ),
+                              ),
                             );
-                            if (picked != null) set(picked);
+                            final escolhida = await showColorPicker(
+                              context,
+                              initial: inicio ? atual.colorA : atual.colorB,
+                              onChanged: aplicar,
+                            );
+                            if (escolhida != null) aplicar(escolhida);
                           },
                           child: Container(
-                            margin: const EdgeInsets.only(bottom: 16),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 11,
-                            ),
+                            height: 46,
+                            margin: const EdgeInsets.symmetric(horizontal: 4),
                             decoration: BoxDecoration(
                               color: AmColors.chip,
-                              borderRadius: BorderRadius.circular(12),
+                              borderRadius: BorderRadius.circular(10),
                             ),
                             child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
                               children: [
                                 Container(
-                                  width: 34,
-                                  height: 34,
+                                  width: 22,
+                                  height: 22,
                                   decoration: BoxDecoration(
-                                    color: current,
-                                    borderRadius: BorderRadius.circular(9),
-                                    border: Border.all(color: Colors.white24),
+                                    shape: BoxShape.circle,
+                                    color: inicio
+                                        ? (estilos.gradientOverlay?.colorA ??
+                                              GradientOverlayStyle().colorA)
+                                        : (estilos.gradientOverlay?.colorB ??
+                                              GradientOverlayStyle().colorB),
                                   ),
                                 ),
-                                const SizedBox(width: 12),
-                                const Expanded(
-                                  child: AppText('Escolher qualquer cor',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      color: AmColors.text,
-                                    ),
+                                const SizedBox(width: 8),
+                                AppText(
+                                  rotulo,
+                                  style: const TextStyle(
+                                    color: AmColors.text,
+                                    fontSize: 13,
                                   ),
-                                ),
-                                const Icon(
-                                  CupertinoIcons.chevron_right,
-                                  size: 15,
-                                  color: AmColors.muted,
                                 ),
                               ],
                             ),
                           ),
                         ),
-                        Wrap(
-                          spacing: 14,
-                          runSpacing: 14,
-                          children: [
-                            for (final c in _swatches)
-                              Tocavel(
-                                onTap: () {
-                                  if (layer is ShapeLayer) {
-                                    controller.setShapePrimaryColor(id, c);
-                                  } else if (layer is TextLayer) {
-                                    controller.editTextLayer(id, color: c);
-                                  }
-                                },
-                                child: Container(
-                                  width: 48,
-                                  height: 48,
-                                  decoration: BoxDecoration(
-                                    color: c,
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                      color: current.toARGB32() == c.toARGB32()
-                                          ? AmColors.accent
-                                          : Colors.white24,
-                                      width: current.toARGB32() == c.toARGB32()
-                                          ? 3
-                                          : 1,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
-                        if (layer is ShapeLayer)
-                          _ShapeOperators(
-                            layer: layer,
-                            layerId: id,
-                            globalTime: t,
-                          ),
-                      ],
-                    ),
-                  ),
+                      ),
+                  ],
+                ),
+              ],
+            ],
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

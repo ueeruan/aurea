@@ -16,6 +16,7 @@ import '../../editor/application/texture_cache.dart';
 import '../../editor/application/video_layer_manager.dart';
 import '../../editor/domain/cut_ops.dart';
 import '../../editor/domain/layer.dart';
+import '../../editor/domain/shape.dart' show ShapeMediaFill;
 import '../../editor/domain/time_slice.dart';
 import '../../editor/domain/grupo_ops.dart';
 import '../../../core/ui/am_colors.dart';
@@ -440,6 +441,13 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
       if (layer is Element3DLayer) {
         final path = layer.imagePath;
         if (path != null && path.isNotEmpty) texturePaths.add(path);
+      }
+      // A FOTO DO PREENCHIMENTO POR MIDIA tambem precisa estar na
+      // memoria antes do primeiro quadro, senao sai o cinza de espera.
+      if (layer is ShapeLayer) {
+        for (final item in layer.contents.whereType<ShapeMediaFill>()) {
+          texturePaths.add(item.sourcePath);
+        }
       }
       if (layer is! Scene3DLayer) continue;
       final panorama = layer.scene.panorama;

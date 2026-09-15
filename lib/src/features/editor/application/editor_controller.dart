@@ -7596,6 +7596,91 @@ class EditorController extends Notifier<VideoProject> {
     _replace(layer.copyLayer(contents: fn(layer.contents)));
   }
 
+  /// O que a forma tinha de preenchimento antes de trocar de tipo: voltar
+  /// para "Cor" devolve a cor, e nao um marrom qualquer.
+  final Map<String, List<ShapeItem>> _preenchimentosGuardados = {};
+
+  /// TROCAR O TIPO DE PREENCHIMENTO da forma sem mexer na geometria nem no
+  /// traco. [midia] e o caminho da foto quando o tipo e midia.
+  void definirTipoDePreenchimento(
+    String id,
+    TipoDePreenchimento tipo, {
+    String? midia,
+  }) {
+    final layer = _layer(id);
+    if (layer is! ShapeLayer) return;
+    final atuais = layer.contents.where(ehPreenchimento).toList();
+    final guardados = [...atuais, ...?_preenchimentosGuardados[id]];
+    if (atuais.isNotEmpty) _preenchimentosGuardados[id] = atuais;
+    Color corBase() {
+      for (final i in guardados) {
+        if (i is ShapeFill) return i.color;
+        if (i is ShapeGradientFill) return i.colorA;
+      }
+      return layer.primaryColor;
+    }
+
+    final List<ShapeItem> novos = switch (tipo) {
+      TipoDePreenchimento.nenhum => const [],
+      TipoDePreenchimento.cor => [
+        guardados.whereType<ShapeFill>().firstOrNull ??
+            ShapeFill(color: corBase()),
+      ],
+      TipoDePreenchimento.degrade => [
+        guardados.whereType<ShapeGradientFill>().firstOrNull ??
+            ShapeGradientFill(
+              colorA: corBase(),
+              colorB: Color.lerp(corBase(), const Color(0xFF000000), .55)!,
+              angleDeg: 90,
+            ),
+      ],
+      TipoDePreenchimento.midia when midia != null => [
+        ShapeMediaFill(
+          sourcePath: midia,
+          encaixe:
+              guardados.whereType<ShapeMediaFill>().firstOrNull?.encaixe ??
+              EncaixeNaForma.preencher,
+        ),
+      ],
+      TipoDePreenchimento.midia => [
+        ...guardados.whereType<ShapeMediaFill>().take(1),
+      ],
+    };
+    if (tipo == TipoDePreenchimento.midia && novos.isEmpty) return;
+    // Sem preenchimento algum, o novo entra ANTES do traco: o traco
+    // continua pintado por cima, como sempre esteve.
+    final itens = <ShapeItem>[];
+    var colocados = false;
+    final temPreenchimento = atuais.isNotEmpty;
+    for (final i in layer.contents) {
+      if (ehPreenchimento(i)) {
+        if (!colocados) {
+          itens.addAll(novos);
+          colocados = true;
+        }
+        continue;
+      }
+      if (!colocados && !temPreenchimento && i is ShapeStroke) {
+        itens.addAll(novos);
+        colocados = true;
+      }
+      itens.add(i);
+    }
+    if (!colocados) itens.addAll(novos);
+    _replace(layer.copyLayer(contents: itens));
+  }
+
+  /// Como a foto do preenchimento por midia ocupa a forma.
+  void definirEncaixeDaMidiaNaForma(String id, EncaixeNaForma encaixe) {
+    _updateShape(
+      id,
+      (items) => [
+        for (final i in items)
+          if (i is ShapeMediaFill) i.copyWith(encaixe: encaixe) else i,
+      ],
+    );
+  }
+
   /// Edita somente o preenchimento escolhido, preservando a geometria.
   void updateShapeGradient(
     String id,

@@ -6854,7 +6854,10 @@ class _ShapeView extends StatelessWidget {
 }
 
 class _ShapePainter extends CustomPainter {
-  const _ShapePainter({required this.draws, required this.bounds});
+  // Repinta quando uma textura termina de carregar: a foto de um
+  // preenchimento por midia chega depois do primeiro quadro.
+  _ShapePainter({required this.draws, required this.bounds})
+    : super(repaint: TextureCache.instance.revision);
 
   final List<ShapeDraw> draws;
   final Rect bounds;
@@ -6863,7 +6866,40 @@ class _ShapePainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     canvas.translate(-bounds.left, -bounds.top);
     for (final d in draws) {
-      canvas.drawPath(d.path, d.paint);
+      final caminho = d.imagem;
+      if (caminho == null) {
+        canvas.drawPath(d.path, d.paint);
+        continue;
+      }
+      final imagem = TextureCache.instance.imageFor(caminho);
+      if (imagem == null) {
+        canvas.drawPath(
+          d.path,
+          Paint()..color = Color.fromRGBO(255, 255, 255, .18 * d.paint.color.a),
+        );
+        continue;
+      }
+      final tamanho = Size(
+        imagem.width.toDouble(),
+        imagem.height.toDouble(),
+      );
+      final destino = destinoDaMidiaNaForma(
+        d.path.getBounds(),
+        tamanho,
+        d.encaixe,
+      );
+      canvas
+        ..save()
+        ..clipPath(d.path)
+        ..drawImageRect(
+          imagem,
+          Offset.zero & tamanho,
+          destino,
+          Paint()
+            ..filterQuality = FilterQuality.medium
+            ..color = Color.fromRGBO(255, 255, 255, d.paint.color.a),
+        )
+        ..restore();
     }
   }
 

@@ -36,6 +36,8 @@ dependencies:
   image: ^4.5.4
   aurea_meshopt:
     path: packages/aurea_meshopt
+  aurea_tracker2:
+    path: packages/aurea_tracker2
   aurea_timecore:
     path: packages/aurea_timecore
 

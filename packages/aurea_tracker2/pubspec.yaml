@@ -1,0 +1,11 @@
+name: aurea_tracker2
+description: O motor 2.0 do rastreio de camera 3D do Aurea, em C++ puro. Seguidor Lucas-Kanade piramidal com trava de deriva, reconstrucao incremental com ajuste de feixes robusto (focal e distorcao livres), tripe automatico, validacao dura e progresso de verdade.
+version: 2.0.0
+publish_to: none
+environment:
+  sdk: ^3.13.2
+dependencies:
+  ffi: ^2.1.3
+  hooks: ^2.0.2
+  code_assets: ^1.2.1
+  native_toolchain_c: 0.19.3

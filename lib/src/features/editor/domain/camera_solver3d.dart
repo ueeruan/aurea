@@ -80,6 +80,9 @@ class SolucaoCamera3D {
     this.pontosSeguidos = 0,
     this.tipoDeTomada = TipoDeTomada.auto,
     this.inicioDaFonteUs,
+    this.distorcao = 0,
+    this.motor,
+    this.analiseMs,
   });
 
   /// Tamanho do quadro ANALISADO (nao o do video).
@@ -128,6 +131,19 @@ class SolucaoCamera3D {
   /// MOSTRA — velocidade, reverso e Time Remap incluidos. Nulo em solucao
   /// antiga: o quadro q vale q/fps do tempo da camada, como era.
   final int? inicioDaFonteUs;
+
+  /// A distorcao radial k1 medida pelo motor (r em unidades de focal).
+  /// Informativa: a cena e desenhada pinhole, mas saber que a lente
+  /// entortava e parte da ficha honesta da analise.
+  final double distorcao;
+
+  /// QUEM RESOLVEU e QUANTO TEMPO LEVOU. Sao os campos da prova: uma
+  /// solucao sem [motor] veio de uma versao antiga do app (ou de um
+  /// caminho que nao existe mais) e a interface trata como "analise
+  /// antiga — rastreie de novo". Um [analiseMs] de um segundo para um
+  /// clipe longo e a assinatura de uma analise que nao aconteceu.
+  final String? motor;
+  final int? analiseMs;
 
   /// A QUALIDADE DE UM PONTO, do jeito que a tela mostra.
   ///
@@ -187,6 +203,8 @@ class SolucaoCamera3D {
     double? erroPixels,
     TipoDeTomada? tipoDeTomada,
     int? inicioDaFonteUs,
+    String? motor,
+    int? analiseMs,
   }) => SolucaoCamera3D(
     largura: largura,
     altura: altura,
@@ -201,6 +219,9 @@ class SolucaoCamera3D {
     pontosSeguidos: pontosSeguidos,
     tipoDeTomada: tipoDeTomada ?? this.tipoDeTomada,
     inicioDaFonteUs: inicioDaFonteUs ?? this.inicioDaFonteUs,
+    distorcao: distorcao,
+    motor: motor ?? this.motor,
+    analiseMs: analiseMs ?? this.analiseMs,
   );
 
   bool get isEmpty => poses.isEmpty || nuvem.isEmpty;
@@ -242,6 +263,9 @@ class SolucaoCamera3D {
     'ps': pontosSeguidos,
     'tt': tipoDeTomada.name,
     'src0': ?inicioDaFonteUs,
+    if (distorcao != 0) 'k1': distorcao,
+    'mt': ?motor,
+    'ms': ?analiseMs,
   };
 
   static SolucaoCamera3D? decode(String fonte) {
@@ -285,6 +309,9 @@ class SolucaoCamera3D {
           orElse: () => TipoDeTomada.auto,
         ),
         inicioDaFonteUs: (m['src0'] as num?)?.toInt(),
+        distorcao: ((m['k1'] as num?) ?? 0).toDouble(),
+        motor: m['mt'] as String?,
+        analiseMs: (m['ms'] as num?)?.toInt(),
       );
     } catch (_) {
       // Solucao antiga ou estragada nao pode impedir de rastrear de novo.
@@ -295,7 +322,20 @@ class SolucaoCamera3D {
 
 /// Por que uma analise nao deu certo. Cada caso pede uma acao diferente
 /// de quem filmou, e por isso sao mensagens separadas em vez de "erro".
-enum FalhaDoRastreio { poucosPontos, semParalaxe, naoConvergiu }
+///
+/// Os tres ultimos vieram com o motor 2.0 e existem por causa do defeito
+/// que enterrou o motor 1: no aparelho, a biblioteca nao carregava e um
+/// caminho de reserva silencioso "resolvia" em um segundo com lixo. Agora
+/// motor ausente, video ilegivel e analise curta demais sao FALHAS COM
+/// NOME — nunca uma cena inventada.
+enum FalhaDoRastreio {
+  poucosPontos,
+  semParalaxe,
+  naoConvergiu,
+  poucosQuadros,
+  videoIlegivel,
+  motorIndisponivel,
+}
 
 /// QUANTO SE PODE CONFIAR NUM PONTO.
 ///

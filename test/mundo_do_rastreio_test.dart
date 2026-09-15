@@ -3,8 +3,14 @@
 // A prova central e a INVARIANCIA: mover ou escalar o mundo inteiro nao
 // pode mudar um pixel da reprojecao — se mudou, a transformacao nao foi
 // de semelhanca e o objeto colado escorregaria.
+import 'package:aurea/src/features/editor/application/camera_track_service.dart';
+import 'package:aurea/src/features/editor/application/editor_controller.dart';
 import 'package:aurea/src/features/editor/domain/algebra_numerica.dart';
 import 'package:aurea/src/features/editor/domain/camera_solver3d.dart';
+import 'package:aurea/src/features/editor/domain/keyframe.dart';
+import 'package:aurea/src/features/editor/domain/layer.dart';
+import 'package:aurea/src/features/editor/domain/video_project.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 SolucaoCamera3D _mundinho() {
@@ -103,5 +109,45 @@ void main() {
     expect(UnidadeReal.m.metros, 1);
     expect(UnidadeReal.pol.metros, closeTo(.0254, 1e-12));
     expect(UnidadeReal.pe.metros, closeTo(.3048, 1e-12));
+  });
+
+  test('cortar e duplicar o clipe carregam o rastreio junto', () async {
+    final c = ProviderContainer();
+    addTearDown(c.dispose);
+    final e = c.read(editorControllerProvider.notifier);
+    final v = VideoLayer(
+      name: 'v',
+      startTime: Duration.zero,
+      duration: const Duration(seconds: 4),
+      sourceDuration: const Duration(seconds: 4),
+      sourcePath: 'x.mp4',
+      position: AnimatedOffset(Offset.zero),
+    );
+    e.openProject(
+      VideoProject(name: 'p', createdAt: DateTime(2026), layers: [v]),
+    );
+    final s = _mundinho();
+    CameraTrackService.instance.adotar(v.id, s);
+
+    e.duplicateLayer(v.id);
+    final copia = c.read(selectedLayerProvider)!;
+    expect(copia, isNot(v.id));
+    await Future<void>.delayed(Duration.zero);
+    expect(
+      identical(CameraTrackService.instance.dataFor(copia), s),
+      isTrue,
+      reason: 'a copia herda a solucao',
+    );
+
+    e.splitLayer(v.id, const Duration(seconds: 2));
+    final segunda = c.read(selectedLayerProvider)!;
+    expect(segunda, isNot(v.id));
+    await Future<void>.delayed(Duration.zero);
+    expect(CameraTrackService.instance.dataFor(v.id), isNotNull);
+    expect(
+      identical(CameraTrackService.instance.dataFor(segunda), s),
+      isTrue,
+      reason: 'a segunda metade herda a solucao',
+    );
   });
 }

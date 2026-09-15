@@ -16,6 +16,7 @@ import '../../domain/plano_do_rastreio.dart';
 import '../estudio/folhas_do_estudio.dart' show escolherModeloProvider;
 import '../../application/model_import_service.dart';
 import 'am_colors.dart';
+import '../../../../core/ui/tocavel.dart';
 import 'am_widgets.dart';
 
 /// A TELA DO RASTREIO DE CÂMERA 3D.
@@ -871,9 +872,8 @@ class _Cabecalho extends StatelessWidget {
         // VOLTAR GRANDE E SÓ O SÍMBOLO — o mesmo tamanho de alvo do
         // resto do editor. O beta reclamou de um voltar que ninguém
         // acertava, e a régua é a mesma em toda tela.
-        GestureDetector(
+        Tocavel(
           key: const ValueKey('rastreio3d-voltar'),
-          behavior: HitTestBehavior.opaque,
           onTap: onVoltar,
           child: const SizedBox(
             width: 52,
@@ -890,9 +890,8 @@ class _Cabecalho extends StatelessWidget {
             ),
           ),
         ),
-        GestureDetector(
+        Tocavel(
           key: const ValueKey('rastreio3d-avancado'),
-          behavior: HitTestBehavior.opaque,
           onTap: onAvancado,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
@@ -1009,9 +1008,8 @@ class _Acao extends StatelessWidget {
   final bool destaque;
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
+  Widget build(BuildContext context) => Tocavel(
     key: ValueKey(chave),
-    behavior: HitTestBehavior.opaque,
     onTap: onTap,
     child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),

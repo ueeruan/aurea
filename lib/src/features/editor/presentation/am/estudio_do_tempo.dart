@@ -31,6 +31,7 @@ import '../../domain/keyframe.dart';
 import '../../domain/layer.dart';
 import '../../domain/remapear_tempo.dart';
 import 'am_colors.dart';
+import '../../../../core/ui/tocavel.dart';
 
 /// A folha do estudio: modal sem arrasto proprio (o grafico fica com o
 /// gesto), barreira transparente e ~66% da tela — a previa continua a
@@ -664,7 +665,7 @@ class _EstudioDoTempoState extends ConsumerState<EstudioDoTempo> {
   Widget _cabecalho(VideoLayer l) {
     Widget aba(String rotulo, _Aba alvo, String chave) {
       final acesa = _aba == alvo;
-      return GestureDetector(
+      return Tocavel(
         key: ValueKey(chave),
         onTap: () => setState(() => _aba = alvo),
         child: Container(
@@ -706,12 +707,11 @@ class _EstudioDoTempoState extends ConsumerState<EstudioDoTempo> {
           const SizedBox(width: 6),
           aba('Velocidade', _Aba.velocidade, 'estudio-tempo-aba-velocidade'),
           const SizedBox(width: 6),
-          GestureDetector(
+          Tocavel(
             key: const ValueKey('estudio-tempo-enquadrar'),
-            behavior: HitTestBehavior.opaque,
             onTap: () => setState(() => _enquadrado = false),
             child: const Padding(
-              padding: EdgeInsets.all(7),
+              padding: EdgeInsets.all(13),
               child: Icon(
                 CupertinoIcons.arrow_up_left_arrow_down_right,
                 size: 18,
@@ -719,11 +719,10 @@ class _EstudioDoTempoState extends ConsumerState<EstudioDoTempo> {
               ),
             ),
           ),
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
+          Tocavel(
             onTap: () => Navigator.of(context).maybePop(),
             child: const Padding(
-              padding: EdgeInsets.all(7),
+              padding: EdgeInsets.all(13),
               child: Icon(
                 CupertinoIcons.xmark,
                 size: 18,
@@ -978,11 +977,11 @@ class _EstudioDoTempoState extends ConsumerState<EstudioDoTempo> {
     final projeto = ref.read(editorControllerProvider);
     Widget botao(String rotulo, String chave, VoidCallback? faz,
         {bool aceso = false}) {
-      return GestureDetector(
+      return Tocavel(
         key: ValueKey(chave),
         onTap: faz,
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
           decoration: BoxDecoration(
             color: aceso ? AmColors.accentDim : AmColors.chip,
             borderRadius: BorderRadius.circular(10),
@@ -1009,7 +1008,7 @@ class _EstudioDoTempoState extends ConsumerState<EstudioDoTempo> {
         mainAxisSize: MainAxisSize.min,
         children: [
           SizedBox(
-            height: 40,
+            height: 44,
             // Fileira EAGER (nada de ListView preguicoso): os chips do fim
             // existem mesmo fora da tela — e os testes os encontram.
             child: SingleChildScrollView(
@@ -1022,7 +1021,7 @@ class _EstudioDoTempoState extends ConsumerState<EstudioDoTempo> {
                 const SizedBox(width: 6),
                 botao('Reverso', 'estudio-tempo-reverso', _reverso),
                 const SizedBox(width: 6),
-                GestureDetector(
+                Tocavel(
                   key: const ValueKey('estudio-tempo-batidas'),
                   onTap: () =>
                       setState(() => _grudarNasBatidas = !_grudarNasBatidas),
@@ -1071,7 +1070,7 @@ class _EstudioDoTempoState extends ConsumerState<EstudioDoTempo> {
           ),
           const SizedBox(height: 6),
           SizedBox(
-            height: 34,
+            height: 38,
             child: Row(
               children: [
                 const AppText(
@@ -1214,7 +1213,7 @@ class _ChipDePreset extends StatelessWidget {
   final VoidCallback aoTocar;
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
+  Widget build(BuildContext context) => Tocavel(
     key: ValueKey('estudio-tempo-preset-${preset.name}'),
     onTap: aoTocar,
     child: Container(

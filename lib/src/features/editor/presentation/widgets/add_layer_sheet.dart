@@ -8,6 +8,7 @@ import 'package:flutter/cupertino.dart';
 import '../../domain/modelo_do_texto3d.dart';
 import '../am/scene3d_studio_ux.dart' show pedirNome;
 import 'package:flutter/material.dart';
+import '../../../../core/ui/tocavel.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../application/editor_controller.dart';
@@ -313,7 +314,7 @@ Future<void> showCaptionCreationSheet(
     required String rotulo,
     required bool selected,
     required VoidCallback? onTap,
-  }) => GestureDetector(
+  }) => Tocavel(
     key: key,
     onTap: onTap,
     child: Container(

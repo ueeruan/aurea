@@ -19,6 +19,9 @@ class LayerLabel {
   LayerLabel copyWith({Color? color, String? name}) =>
       LayerLabel(color: color ?? this.color, name: name ?? this.name);
 
+  /// DOZE ETIQUETAS: as seis de sempre na mesma ordem (projetos antigos
+  /// guardam a cor, e nao o indice) e seis novas para separar melhor uma
+  /// timeline cheia.
   static const palette = <LayerLabel>[
     LayerLabel(color: Color(0xFFE85B81), name: 'Rosa'),
     LayerLabel(color: Color(0xFFFFB020), name: 'Ambar'),
@@ -26,6 +29,12 @@ class LayerLabel {
     LayerLabel(color: Color(0xFF2BE3A0), name: 'Verde'),
     LayerLabel(color: Color(0xFF35C4E7), name: 'Ciano'),
     LayerLabel(color: Color(0xFF7C62FF), name: 'Violeta'),
+    LayerLabel(color: Color(0xFF3D7BFF), name: 'Azul'),
+    LayerLabel(color: Color(0xFFFF7A3D), name: 'Laranja'),
+    LayerLabel(color: Color(0xFFFF4D5E), name: 'Vermelho'),
+    LayerLabel(color: Color(0xFFFFE14D), name: 'Amarelo'),
+    LayerLabel(color: Color(0xFFB0B8C4), name: 'Cinza'),
+    LayerLabel(color: Color(0xFF4A5160), name: 'Grafite'),
   ];
 }
 

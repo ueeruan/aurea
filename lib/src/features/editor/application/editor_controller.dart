@@ -7016,6 +7016,124 @@ class EditorController extends Notifier<VideoProject> {
     );
   }
 
+  /// A camada logo ABAIXO na pilha que pode servir de base de recorte
+  /// (tem pixel: nao e audio, nulo nem ajuste).
+  Layer? baseDeRecorteAbaixo(String layerId) {
+    final idx = state.layers.indexWhere((l) => l.id == layerId);
+    if (idx < 0 || idx + 1 >= state.layers.length) return null;
+    final base = state.layers[idx + 1];
+    if (base is AudioLayer || base is NullLayer || base is AdjustmentLayer) {
+      return null;
+    }
+    return base;
+  }
+
+  /// MASCARA DE RECORTE (menu da camada): esta camada so aparece onde a
+  /// de baixo tem pixel, e a de baixo continua a vista. Falso quando nao
+  /// ha base valida.
+  bool recortarPelaDeBaixo(String layerId) {
+    final base = baseDeRecorteAbaixo(layerId);
+    if (base == null || _layer(layerId) == null) return false;
+    setMatte(layerId, MatteMode.recorte, base.id);
+    return true;
+  }
+
+  /// A FORMA DO GRUPO: o filho de cima vira mascara ([BlendMode.dstIn]),
+  /// recorte ([BlendMode.dstOut]) ou volta ao normal (nulo).
+  void definirFormaDoGrupo(String groupId, BlendMode? modo) {
+    final g = _layer(groupId);
+    if (g is! GroupLayer || g.children.isEmpty) return;
+    final topo = g.children.first;
+    _replace(
+      g.copyLayer(
+        children: [
+          topo.copyLayer(
+            blendMode: modo ?? BlendMode.srcOver,
+            clearCustomBlend: true,
+          ),
+          ...g.children.skip(1),
+        ],
+      ),
+    );
+  }
+
+  /// ESPELHAR: a escala do eixo troca de sinal em TODA a trilha — base e
+  /// keyframes — para a animacao continuar a mesma, so que ao contrario.
+  void espelharCamada(String id, {required bool horizontal}) {
+    final layer = _layer(id);
+    if (layer == null) return;
+    AnimatedDouble invertida(AnimatedDouble a) => AnimatedDouble(
+      -a.base,
+      [for (final k in a.keyframes) k.copyWith(value: -k.value)],
+      a.loop,
+      a.expression,
+    );
+    _replace(
+      horizontal
+          ? layer.copyLayer(scaleX: invertida(layer.scaleX))
+          : layer.copyLayer(scaleY: invertida(layer.scaleY)),
+    );
+  }
+
+  /// CABER, PREENCHER OU ESTICAR NA COMPOSICAO: a caixa da camada (sem
+  /// escala) vai ao centro e a escala e escolhida no instante [t] — com a
+  /// propriedade animada, vira keyframe, como qualquer edicao.
+  void encaixarNaComposicao(
+    String id,
+    EncaixeNaComposicao modo,
+    Duration t,
+  ) {
+    final layer = _layer(id);
+    if (layer == null) return;
+    final caixa = layerBoxSize(layer, t, scaled: false);
+    if (caixa.width <= 0 || caixa.height <= 0) return;
+    final w = state.outputWidth / caixa.width;
+    final h = state.outputHeight / caixa.height;
+    final local = layer.localTime(t);
+    final sinalX = layer.scaleX.valueAt(local) < 0 ? -1.0 : 1.0;
+    final sinalY = layer.scaleY.valueAt(local) < 0 ? -1.0 : 1.0;
+    final (sx, sy) = switch (modo) {
+      EncaixeNaComposicao.caber => (math.min(w, h), math.min(w, h)),
+      EncaixeNaComposicao.preencher => (math.max(w, h), math.max(w, h)),
+      EncaixeNaComposicao.esticar => (w, h),
+    };
+    runAsOneUndo(() {
+      editPosition(id, t, _center);
+      editScaleX(id, t, sx * sinalX);
+      editScaleY(id, t, sy * sinalY);
+    });
+  }
+
+  /// EXTRAIR O AUDIO de uma camada de video: nasce uma camada de audio no
+  /// mesmo trecho da mesma fonte e o video fica mudo — um desfazer so. O
+  /// arquivo de audio ja extraido vem de fora ([caminhoDoAudio]).
+  String? extrairAudioDaCamada(String videoId, String caminhoDoAudio) {
+    final video = _layer(videoId);
+    if (video is! VideoLayer) return null;
+    String? novo;
+    runAsOneUndo(() {
+      final nome = video.name.isEmpty ? 'Áudio' : '${video.name} (áudio)';
+      novo = addAudioLayer(
+        video.startTime,
+        caminhoDoAudio,
+        nome,
+        video.duration,
+        fonte: video.sourceDuration,
+      );
+      final audio = _layer(novo!);
+      if (audio is AudioLayer) {
+        _replace(
+          audio.copyLayer(
+            sourceOffset: video.sourceOffset,
+            speed: video.speed,
+          ),
+        );
+      }
+      updateAudioSpec(videoId, (s) => s.copyWith(muted: true));
+    });
+    return novo;
+  }
+
   /// Modo do Trim Paths: individual (cascata) ou continuo (PR-M8).
   void setTrimMode(String layerId, String itemId, bool individually) {
     _updateShape(
@@ -8486,6 +8604,259 @@ class EditorController extends Notifier<VideoProject> {
   /// de fora: dependem do clipe de origem.
   List<EffectInstance> _efeitosCopiados = const [];
   bool get temEfeitosCopiados => _efeitosCopiados.isNotEmpty;
+
+  // ------------------------------------------ area de transferencia
+
+  /// A CAMADA COPIADA (menu copiar e colar): a camada inteira com a ficha
+  /// dela (etiqueta, estilos), para colar aqui ou noutro projeto aberto
+  /// depois.
+  Layer? _camadaCopiada;
+  LayerMeta _metaDaCamadaCopiada = LayerMeta.empty;
+
+  bool get temCamadaCopiada => _camadaCopiada != null;
+
+  void copiarCamada(String id) {
+    final l = _layer(id);
+    if (l == null) return;
+    _camadaCopiada = l;
+    _metaDaCamadaCopiada = state.metaOf(id);
+  }
+
+  /// Cola a camada copiada comecando em [t], logo acima de [acimaDe] (ou
+  /// no topo). A colada vira a selecao. Nulo quando nao ha o que colar.
+  String? colarCamada(Duration t, {String? acimaDe}) {
+    final fonte = _camadaCopiada;
+    if (fonte == null) return null;
+    final copia = fonte.duplicated().copyLayer(
+      startTime: t < Duration.zero ? Duration.zero : t,
+    );
+    final idx = acimaDe == null
+        ? 0
+        : state.layers.indexWhere((l) => l.id == acimaDe);
+    final layers = [...state.layers]..insert(idx < 0 ? 0 : idx, copia);
+    _mutate(
+      state.copyWith(
+        layers: layers,
+        meta: _metaDaCamadaCopiada.isEmpty
+            ? null
+            : {...state.meta, copia.id: _metaDaCamadaCopiada},
+      ),
+    );
+    ref.read(multiSelectProvider.notifier).state = const {};
+    ref.read(selectedLayerProvider.notifier).state = copia.id;
+    return copia.id;
+  }
+
+  /// O ESTILO COPIADO: a camada de onde saiu e a ficha dela.
+  Layer? _estiloCopiado;
+  LayerMeta _metaDoEstiloCopiado = LayerMeta.empty;
+
+  bool get temEstiloCopiado => _estiloCopiado != null;
+
+  void copiarEstilo(String id) {
+    final l = _layer(id);
+    if (l == null) return;
+    _estiloCopiado = l;
+    _metaDoEstiloCopiado = state.metaOf(id);
+  }
+
+  /// O que faz sentido colar do estilo copiado em [destinoId].
+  Set<CategoriaDeEstilo> categoriasColaveis(String destinoId) {
+    final fonte = _estiloCopiado;
+    final alvo = _layer(destinoId);
+    if (fonte == null || alvo == null) return const {};
+    bool temCor(Layer l) => l is ShapeLayer || l is TextLayer;
+    bool temSom(Layer l) => l is AudioLayer || l is VideoLayer;
+    bool temVisual(Layer l) => l is! AudioLayer;
+    return {
+      if (temCor(fonte) && temCor(alvo)) CategoriaDeEstilo.corEPreenchimento,
+      if (temVisual(fonte) && temVisual(alvo)) CategoriaDeEstilo.bordaESombra,
+      if (temVisual(fonte) && temVisual(alvo))
+        CategoriaDeEstilo.mesclagemEOpacidade,
+      if (temVisual(fonte) && temVisual(alvo))
+        CategoriaDeEstilo.moverETransformar,
+      if (fonte is TextLayer && alvo is TextLayer)
+        CategoriaDeEstilo.estiloDeTexto,
+      if (temSom(fonte) && temSom(alvo)) CategoriaDeEstilo.volume,
+      if (fonte.effects.isNotEmpty && temVisual(alvo))
+        CategoriaDeEstilo.efeitos,
+      if (temSom(fonte) && temSom(alvo)) CategoriaDeEstilo.velocidade,
+    };
+  }
+
+  /// COLAR ESTILO: leva as [categorias] do estilo copiado para
+  /// [destinoId], num desfazer so. Devolve quantas categorias entraram.
+  int colarEstilo(String destinoId, Set<CategoriaDeEstilo> categorias) {
+    final fonte = _estiloCopiado;
+    if (fonte == null) return 0;
+    final validas = categorias.intersection(categoriasColaveis(destinoId));
+    if (validas.isEmpty) return 0;
+    runAsOneUndo(() {
+      var alvo = _layer(destinoId)!;
+      for (final c in validas) {
+        switch (c) {
+          case CategoriaDeEstilo.moverETransformar:
+            alvo = alvo.copyLayer(
+              position: fonte.position,
+              scaleX: fonte.scaleX,
+              scaleY: fonte.scaleY,
+              rotation: fonte.rotation,
+              rotationX: fonte.rotationX,
+              rotationY: fonte.rotationY,
+              skewX: fonte.skewX,
+              skewY: fonte.skewY,
+              pivot: fonte.pivot,
+              positionZ: fonte.positionZ,
+              is3D: fonte.is3D,
+            );
+          case CategoriaDeEstilo.mesclagemEOpacidade:
+            alvo = alvo.copyLayer(
+              blendMode: fonte.blendMode,
+              customBlend: fonte.customBlend,
+              clearCustomBlend: fonte.customBlend == null,
+              opacity: fonte.opacity,
+            );
+          case CategoriaDeEstilo.efeitos:
+            alvo = alvo.copyLayer(
+              effects: [
+                for (final e in fonte.effects)
+                  if (e.type != EffectType.timeRemap &&
+                      e.type != EffectType.opticalFlow)
+                    e.duplicated(),
+              ],
+            );
+          case CategoriaDeEstilo.corEPreenchimento:
+            alvo = _comCorDe(alvo, fonte);
+          case CategoriaDeEstilo.bordaESombra:
+            if (fonte is ShapeLayer && alvo is ShapeLayer) {
+              alvo = alvo.copyLayer(
+                contents: _trocarItens(
+                  alvo.contents,
+                  [for (final i in fonte.contents) if (i is ShapeStroke) i],
+                  (i) => i is ShapeStroke,
+                ),
+              );
+            }
+          case CategoriaDeEstilo.estiloDeTexto:
+            if (fonte is TextLayer && alvo is TextLayer) {
+              alvo = alvo.copyLayer(
+                fontFamily: fonte.fontFamily,
+                fontSize: fonte.fontSize,
+                bold: fonte.bold,
+              );
+            }
+          case CategoriaDeEstilo.volume:
+            alvo = switch ((fonte, alvo)) {
+              (AudioLayer f, AudioLayer a) => a.copyLayer(
+                volume: f.volume,
+                audio: f.audio,
+              ),
+              (AudioLayer f, VideoLayer a) => a.copyLayer(
+                volume: f.volume,
+                audio: f.audio,
+              ),
+              (VideoLayer f, AudioLayer a) => a.copyLayer(
+                volume: f.volume,
+                audio: f.audio,
+              ),
+              (VideoLayer f, VideoLayer a) => a.copyLayer(
+                volume: f.volume,
+                audio: f.audio,
+              ),
+              _ => alvo,
+            };
+          case CategoriaDeEstilo.velocidade:
+            break;
+        }
+      }
+      _replace(alvo);
+      if (validas.contains(CategoriaDeEstilo.bordaESombra)) {
+        _updateMeta(
+          destinoId,
+          (m) => m.copyWith(styles: _metaDoEstiloCopiado.styles),
+        );
+      }
+      if (validas.contains(CategoriaDeEstilo.velocidade)) {
+        final v = switch (fonte) {
+          VideoLayer f => f.speed,
+          AudioLayer f => f.speed,
+          _ => 1.0,
+        };
+        setClipSpeed(destinoId, v);
+      }
+    });
+    return validas.length;
+  }
+
+  /// A cor de [fonte] vestida em [alvo]: forma com forma troca os
+  /// preenchimentos (cor ou gradiente) sem mexer na geometria; texto e
+  /// forma trocam a cor principal.
+  Layer _comCorDe(Layer alvo, Layer fonte) {
+    Color? corPrincipal(Layer l) => switch (l) {
+      TextLayer t => t.color,
+      ShapeLayer s => [
+        for (final i in s.contents)
+          if (i is ShapeFill) i.color,
+      ].firstOrNull,
+      _ => null,
+    };
+    if (fonte is ShapeLayer && alvo is ShapeLayer) {
+      final preenchimentos = [
+        for (final i in fonte.contents)
+          if (i is ShapeFill || i is ShapeGradientFill) i,
+      ];
+      if (preenchimentos.isEmpty) return alvo;
+      return alvo.copyLayer(
+        contents: _trocarItens(
+          alvo.contents,
+          preenchimentos,
+          (i) => i is ShapeFill || i is ShapeGradientFill,
+        ),
+      );
+    }
+    final cor = corPrincipal(fonte);
+    if (cor == null) return alvo;
+    if (alvo is TextLayer) return alvo.copyLayer(color: cor);
+    if (alvo is ShapeLayer) {
+      var feito = false;
+      return alvo.copyLayer(
+        contents: [
+          for (final i in alvo.contents)
+            if (!feito && i is ShapeFill)
+              (() {
+                feito = true;
+                return i.copyWith(color: cor);
+              })()
+            else
+              i,
+        ],
+      );
+    }
+    return alvo;
+  }
+
+  /// Troca os itens de um tipo pelos [novos], no lugar onde o primeiro
+  /// deles estava (a ordem de uma forma decide o que pinta o que).
+  static List<ShapeItem> _trocarItens(
+    List<ShapeItem> itens,
+    List<ShapeItem> novos,
+    bool Function(ShapeItem) ehDoTipo,
+  ) {
+    final saida = <ShapeItem>[];
+    var colocados = false;
+    for (final i in itens) {
+      if (ehDoTipo(i)) {
+        if (!colocados) {
+          saida.addAll(novos);
+          colocados = true;
+        }
+        continue;
+      }
+      saida.add(i);
+    }
+    if (!colocados) saida.addAll(novos);
+    return saida;
+  }
 
   int copyEffects(String id) {
     final layer = _layer(id);

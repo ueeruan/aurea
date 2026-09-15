@@ -219,6 +219,9 @@ void main() {
     tester,
   ) async {
     final c = await openEditor(tester);
+    // SEM SELECAO a barra e do projeto (nome, ajustes); COM SELECAO a
+    // barra da camada toma o lugar (v1.1.1, mapa do dono): voltar, nome da
+    // camada e o ⋯ dela. Desfazer e refazer moram na reproducao, sempre.
     void barra(String momento) {
       for (final k in [
         'editor-back',
@@ -229,6 +232,23 @@ void main() {
       ]) {
         expect(find.byKey(ValueKey(k)), findsOneWidget, reason: '$k $momento');
       }
+    }
+
+    void barraDaCamada(String momento) {
+      for (final k in [
+        'editor-back',
+        'camada-nome',
+        'camada-menu',
+        'editor-undo',
+        'editor-redo',
+      ]) {
+        expect(find.byKey(ValueKey(k)), findsOneWidget, reason: '$k $momento');
+      }
+      expect(
+        find.byKey(const ValueKey('editor-project-name')),
+        findsNothing,
+        reason: 'a barra do projeto sai com a selecao ($momento)',
+      );
     }
 
     barra('sem selecao');
@@ -249,17 +269,16 @@ void main() {
     final id = c.read(editorControllerProvider).layers.first.id;
     c.read(selectedLayerProvider.notifier).state = id;
     await tester.pumpAndSettle();
-    barra('com selecao');
+    barraDaCamada('com selecao');
     expect(
       find.text('Movimentação e transformação'),
       findsOneWidget,
       reason: 'E2 com selecao (dock AM)',
     );
-    expect(find.byKey(const ValueKey('editor-project-name')), findsOneWidget);
 
     await tester.tap(find.text('Movimentação e transformação'));
     await tester.pumpAndSettle();
-    barra('com painel aberto');
+    barraDaCamada('com painel aberto');
     expect(find.byType(TransformPanel), findsOneWidget);
   });
 
@@ -319,6 +338,13 @@ void main() {
     expect(c.read(proModeProvider), isTrue);
     c.read(proModeProvider.notifier).set(false);
     expect(c.read(proModeProvider), isTrue);
+    // Os ajustes do projeto moram na barra do PROJETO (sem selecao).
+    await tester.tap(find.byKey(const ValueKey('editor-settings')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('editor-pro')), findsNothing);
+    expect(c.read(proModeProvider), isTrue);
+    Navigator.of(tester.element(find.byKey(const ValueKey('projeto-fundo')))).pop();
+    await tester.pumpAndSettle();
     c.read(selectedLayerProvider.notifier).state = c
         .read(editorControllerProvider)
         .layers
@@ -327,11 +353,6 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Movimentação e transformação'), findsOneWidget);
     expect(find.byKey(const ValueKey('editor-pro')), findsNothing);
-    await tester.tap(find.byKey(const ValueKey('editor-settings')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('editor-pro')), findsNothing);
-    expect(c.read(proModeProvider), isTrue);
-    expect(find.text('Movimentação e transformação'), findsOneWidget);
   });
 
   testWidgets(

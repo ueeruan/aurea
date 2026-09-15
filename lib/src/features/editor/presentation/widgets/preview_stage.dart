@@ -1648,10 +1648,11 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
     Duration t, {
     required bool resolveLinks,
   }) {
-    // Camadas usadas como MATTE ficam ocultas na composicao (PR-M5).
+    // Camadas usadas como MATTE ficam ocultas na composicao (PR-M5). A
+    // base de uma MASCARA DE RECORTE continua a vista.
     final matteSourceIds = <String>{
       for (final l in layers)
-        if (l.matteMode != MatteMode.none && l.matteSourceId != null)
+        if (matteEscondeAFonte(l.matteMode) && l.matteSourceId != null)
           l.matteSourceId!,
     };
     final transitions = transitionContextsAt(layers, t);
@@ -2277,6 +2278,7 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
     Widget content = Stack(clipBehavior: Clip.none, children: [matte]);
     switch (mode) {
       case MatteMode.alpha:
+      case MatteMode.recorte:
       case MatteMode.none:
         break;
       case MatteMode.alphaInvert:

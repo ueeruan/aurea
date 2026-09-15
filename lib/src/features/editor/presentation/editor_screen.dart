@@ -971,9 +971,16 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                   onExpand: _session.togglePreviewExpanded,
                 );
                 final transporte = BarraDeReproducao(playback: _playback);
+                // A BARRA DE CIMA SEGUE A SELECAO: lote, camada ou projeto.
                 final barraDoTopo = multi.isNotEmpty
                     ? BarraDoLote(playback: _playback) as Widget
-                    : BarraDoProjeto(onBack: _back, playback: _playback);
+                    : (layer != null
+                          ? BarraDaCamada(
+                              layerId: layer.id,
+                              onBack: _back,
+                              playback: _playback,
+                            )
+                          : BarraDoProjeto(onBack: _back, playback: _playback));
                 Widget timeline(double alturaTimeline) => RepaintBoundary(
                   child: AmTimeline(
                     playback: _playback,

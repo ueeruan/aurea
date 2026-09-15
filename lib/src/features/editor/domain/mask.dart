@@ -731,4 +731,15 @@ bool maskFeatherExceedsBounds(LayerMask mask, Duration localTime, Size size) {
 }
 
 /// Matte por camada (PR-M5, modelo Alight): OUTRA camada recorta esta.
-enum MatteMode { none, alpha, alphaInvert, luma, lumaInvert }
+/// COMO OUTRA CAMADA RECORTA ESTA.
+///
+/// [alpha]..[lumaInvert] sao o track matte do After Effects: a fonte e a
+/// camada de CIMA e fica escondida. [recorte] e a mascara de recorte do
+/// menu da camada: a fonte e a camada de BAIXO e CONTINUA A VISTA — esta
+/// camada so aparece por cima dela, onde ela tem pixel. Fica no fim da
+/// lista porque o arquivo grava o indice.
+enum MatteMode { none, alpha, alphaInvert, luma, lumaInvert, recorte }
+
+/// A fonte deste modo some da composicao? So no track matte.
+bool matteEscondeAFonte(MatteMode m) =>
+    m != MatteMode.none && m != MatteMode.recorte;

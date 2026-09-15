@@ -26,6 +26,7 @@ import '../../domain/layer.dart';
 import '../../domain/mask.dart';
 import '../../domain/shape.dart';
 import '../../domain/shape_ops.dart';
+import '../../domain/video_project.dart' show descendentesPorParentesco;
 import 'am_colors.dart';
 import '../../application/ui/pro_mode.dart';
 import '../context/parameter_row.dart';
@@ -1657,6 +1658,9 @@ Future<void> showParentSheet(
     ...project.layers.whereType<NullLayer>(),
     ...project.layers.where((l) => l is! NullLayer),
   ];
+  // QUEM JA SEGUE ESTA CAMADA nao pode ser o pai dela: o dedo ficaria
+  // num ciclo sem fim. Aparecem esmaecidas, com o porque.
+  final descendentes = descendentesPorParentesco(project, child.id);
 
   await showModalBottomSheet<void>(
     context: context,
@@ -1717,15 +1721,41 @@ Future<void> showParentSheet(
                 // A PROPRIA CAMADA aparece esmaecida em vez de sumir da
                 // lista: sumir faz procurar o que nao existe. Parentear em
                 // si mesma nao da, e a lista diz isso.
-                opacity: other.id == child.id ? 0.35 : 1,
+                opacity:
+                    other.id == child.id || descendentes.contains(other.id)
+                    ? 0.35
+                    : 1,
                 child: ListTile(
-                  leading: Container(
-                    width: 20,
-                    height: 20,
-                    decoration: BoxDecoration(
-                      color: layerTypeColor(other),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
+                  key: ValueKey('pai-${other.id}'),
+                  leading: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // A ETIQUETA DE COR, a mesma do cabecalho da linha.
+                      Container(
+                        width: 4,
+                        height: 26,
+                        margin: const EdgeInsets.only(right: 8),
+                        decoration: BoxDecoration(
+                          color:
+                              project.metaOf(other.id).label?.color ??
+                              Colors.transparent,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                      Container(
+                        width: 24,
+                        height: 24,
+                        decoration: BoxDecoration(
+                          color: layerTypeColor(other),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Icon(
+                          layerTypeIcon(other),
+                          size: 14,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ],
                   ),
                   title: AppText(
                     other.name,
@@ -1733,6 +1763,10 @@ Future<void> showParentSheet(
                   ),
                   subtitle: other.id == child.id
                       ? const AppText('É a própria camada',
+                          style: TextStyle(fontSize: 11, color: AmColors.muted),
+                        )
+                      : descendentes.contains(other.id)
+                      ? const AppText('Já segue esta camada',
                           style: TextStyle(fontSize: 11, color: AmColors.muted),
                         )
                       : other is NullLayer
@@ -1756,7 +1790,8 @@ Future<void> showParentSheet(
                           size: 20,
                         )
                       : null,
-                  onTap: other.id == child.id
+                  onTap:
+                      other.id == child.id || descendentes.contains(other.id)
                       ? null
                       : () {
                           controller.linkProperty(

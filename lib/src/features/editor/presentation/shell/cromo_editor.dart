@@ -22,7 +22,10 @@ import '../am/am_colors.dart';
 import '../am/beats_sheet.dart';
 import '../am/cameras_sheet.dart';
 import '../am/export_sheet.dart';
+import '../am/layer_look.dart';
+import '../am/layer_menu.dart' show showParentSheet;
 import 'layer_actions.dart';
+import 'menu_da_camada.dart';
 import 'project_settings_sheet.dart';
 import 'transport_bar.dart' show parseTimecodeInput;
 
@@ -220,6 +223,188 @@ class BarraDoProjeto extends ConsumerWidget {
             },
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// A BARRA DA CAMADA: com uma camada escolhida ela toma o lugar da barra
+/// do projeto — voltar (tira a selecao), o tipo e o nome editavel ali
+/// mesmo, parentesco, lixeira e o ⋯ com tudo o que se faz com a camada.
+class BarraDaCamada extends ConsumerWidget {
+  const BarraDaCamada({
+    super.key,
+    required this.layerId,
+    required this.onBack,
+    required this.playback,
+  });
+
+  final String layerId;
+  final VoidCallback onBack;
+  final PlaybackController playback;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final project = ref.watch(editorControllerProvider);
+    final layer = project.layerById(layerId);
+    if (layer == null) {
+      return Container(height: CromoEditor.navbar, color: CromoEditor.fundo);
+    }
+    final temPai =
+        project.linkFor(layerId, LayerProp.parent) != null ||
+        (layer is Scene3DLayer && layer.cameraParentLayerId != null);
+    return Container(
+      key: const ValueKey('barra-da-camada'),
+      height: CromoEditor.navbar,
+      color: CromoEditor.fundo,
+      padding: const EdgeInsets.only(right: 4),
+      child: Row(
+        children: [
+          _BotaoDoCromo(
+            key: const ValueKey('editor-back'),
+            icone: CupertinoIcons.chevron_left,
+            dica: 'Voltar (tirar a seleção)',
+            largura: 44,
+            onTap: onBack,
+          ),
+          Container(
+            width: 24,
+            height: 24,
+            margin: const EdgeInsets.only(right: 8),
+            decoration: BoxDecoration(
+              color: layerTypeColor(layer),
+              borderRadius: BorderRadius.circular(7),
+            ),
+            child: Icon(layerTypeIcon(layer), size: 14, color: Colors.white),
+          ),
+          Expanded(child: _NomeDaCamadaEditavel(layerId: layerId)),
+          _BotaoDoCromo(
+            key: const ValueKey('camada-parentesco'),
+            icone: temPai ? CupertinoIcons.link_circle_fill : CupertinoIcons.link,
+            dica: temPai ? 'Segue outra camada' : 'Seguir outra camada',
+            cor: temPai ? CromoEditor.keyframe : CromoEditor.branco,
+            tamanho: 20,
+            onTap: () {
+              playback.pause();
+              showParentSheet(context, ref, layer, playback.time.value);
+            },
+          ),
+          _BotaoDoCromo(
+            key: const ValueKey('camada-lixeira'),
+            icone: CupertinoIcons.trash,
+            dica: 'Excluir camada',
+            tamanho: 19,
+            onTap: () => excluirCamadas(context, ref, {layerId}),
+          ),
+          _BotaoDoCromo(
+            key: const ValueKey('camada-menu'),
+            icone: Icons.more_vert,
+            dica: 'Tudo o que se faz com a camada',
+            tamanho: 19,
+            onTap: () => menuDaCamada(context, ref, layerId, playback),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// O NOME DA CAMADA EDITAVEL ALI MESMO. Vazio nao vale.
+class _NomeDaCamadaEditavel extends ConsumerStatefulWidget {
+  const _NomeDaCamadaEditavel({required this.layerId});
+
+  final String layerId;
+
+  @override
+  ConsumerState<_NomeDaCamadaEditavel> createState() =>
+      _NomeDaCamadaEditavelState();
+}
+
+class _NomeDaCamadaEditavelState extends ConsumerState<_NomeDaCamadaEditavel> {
+  bool _editando = false;
+  final _campo = TextEditingController();
+  final _foco = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _foco.addListener(() {
+      if (!_foco.hasFocus && _editando) _confirmar();
+    });
+  }
+
+  @override
+  void dispose() {
+    _campo.dispose();
+    _foco.dispose();
+    super.dispose();
+  }
+
+  void _comecar() {
+    final nome =
+        ref.read(editorControllerProvider).layerById(widget.layerId)?.name ??
+        '';
+    _campo.text = nome;
+    _campo.selection = TextSelection(
+      baseOffset: 0,
+      extentOffset: nome.length,
+    );
+    setState(() => _editando = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _foco.requestFocus();
+    });
+  }
+
+  void _confirmar() {
+    if (!_editando) return;
+    final nome = _campo.text.trim();
+    setState(() => _editando = false);
+    if (nome.isEmpty) return;
+    ref.read(editorControllerProvider.notifier).renameLayer(widget.layerId, nome);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final nome = ref.watch(
+      editorControllerProvider.select(
+        (p) => p.layerById(widget.layerId)?.name ?? '',
+      ),
+    );
+    if (_editando) {
+      return CupertinoTextField(
+        key: const ValueKey('camada-nome-campo'),
+        controller: _campo,
+        focusNode: _foco,
+        maxLines: 1,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        style: const TextStyle(
+          color: CromoEditor.branco,
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+        ),
+        decoration: BoxDecoration(
+          color: CromoEditor.trilho,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        textInputAction: TextInputAction.done,
+        onSubmitted: (_) => _confirmar(),
+      );
+    }
+    return GestureDetector(
+      key: const ValueKey('camada-nome'),
+      behavior: HitTestBehavior.opaque,
+      onTap: _comecar,
+      child: AppText(
+        nome.trim().isEmpty ? '(Camada sem nome)' : nome,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: nome.trim().isEmpty
+              ? CromoEditor.apagado
+              : CromoEditor.branco,
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+        ),
       ),
     );
   }
@@ -905,9 +1090,7 @@ class BarraDeReproducao extends ConsumerWidget {
                     icone: CupertinoIcons.doc_on_clipboard,
                     dica: 'Copiar e colar',
                     largura: lado,
-                    onTap: selected == null && !controller.temEfeitosCopiados
-                        ? null
-                        : () => _menuDeColar(context, ref, selected),
+                    onTap: () => menuDeCopiarEColar(context, ref, playback),
                   ),
                   ValueListenableBuilder<Duration>(
                     valueListenable: playback.time,
@@ -973,58 +1156,6 @@ class BarraDeReproducao extends ConsumerWidget {
     );
   }
 
-  Future<void> _menuDeColar(
-    BuildContext context,
-    WidgetRef ref,
-    String? selected,
-  ) async {
-    final controller = ref.read(editorControllerProvider.notifier);
-    await showCupertinoModalPopup<void>(
-      context: context,
-      builder: (ctx) => CupertinoActionSheet(
-        actions: [
-          if (selected != null)
-            CupertinoActionSheetAction(
-              key: const ValueKey('colar-duplicar'),
-              onPressed: () {
-                Navigator.pop(ctx);
-                controller.duplicateLayer(selected);
-              },
-              child: const AppText('Duplicar camada'),
-            ),
-          if (selected != null)
-            CupertinoActionSheetAction(
-              key: const ValueKey('colar-copiar-efeitos'),
-              onPressed: () {
-                Navigator.pop(ctx);
-                final n = controller.copyEffects(selected);
-                AureaSnack.show(
-                  context,
-                  n == 0
-                      ? 'Esta camada não tem efeitos para copiar'
-                      : 'Efeitos copiados: $n',
-                );
-              },
-              child: const AppText('Copiar efeitos'),
-            ),
-          if (selected != null && controller.temEfeitosCopiados)
-            CupertinoActionSheetAction(
-              key: const ValueKey('colar-colar-efeitos'),
-              onPressed: () {
-                Navigator.pop(ctx);
-                final n = controller.pasteEffects(selected);
-                AureaSnack.show(context, 'Efeitos colados: $n');
-              },
-              child: const AppText('Colar efeitos'),
-            ),
-        ],
-        cancelButton: CupertinoActionSheetAction(
-          onPressed: () => Navigator.pop(ctx),
-          child: const AppText('Cancelar'),
-        ),
-      ),
-    );
-  }
 }
 
 /// O CONTEUDO DA BARRA DE INFORMACOES: tempo e deslocamento quando o
@@ -1562,7 +1693,7 @@ class _MenuDaTimeline extends ConsumerWidget {
       bool? marcado,
       bool radio = false,
       required VoidCallback? onTap,
-    }) => _ItemDoMenu(
+    }) => ItemDoMenu(
       chave: chave,
       icone: icone,
       rotulo: rotulo,
@@ -1826,82 +1957,6 @@ class _MenuDaTimeline extends ConsumerWidget {
               onTap: () => fecharE(onGuia),
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Uma linha do menu: icone, rotulo, detalhe opcional e, quando e uma
-/// escolha, o visto a direita. Sem ripple, com realce sutil (iOS).
-class _ItemDoMenu extends StatelessWidget {
-  const _ItemDoMenu({
-    required this.chave,
-    required this.icone,
-    required this.rotulo,
-    required this.onTap,
-    this.detalhe,
-    this.marcado,
-    this.radio = false,
-  });
-
-  final String chave;
-  final IconData icone;
-  final String rotulo;
-  final String? detalhe;
-  final bool? marcado;
-  final bool radio;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final ativo = onTap != null;
-    final cor = ativo ? AmColors.text : AmColors.muted.withValues(alpha: .6);
-    return Tocavel(
-      key: ValueKey(chave),
-      onTap: onTap == null
-          ? null
-          : () {
-              HapticFeedback.selectionClick();
-              onTap!();
-            },
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(minHeight: 48),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-          child: Row(
-            children: [
-              Icon(icone, size: 20, color: cor),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    AppText(rotulo, style: TextStyle(color: cor, fontSize: 15)),
-                    if (detalhe != null)
-                      AppText(
-                        detalhe!,
-                        style: const TextStyle(
-                          color: AmColors.muted,
-                          fontSize: 12,
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              if (marcado != null)
-                Icon(
-                  marcado!
-                      ? (radio
-                            ? CupertinoIcons.largecircle_fill_circle
-                            : CupertinoIcons.checkmark_alt)
-                      : (radio ? CupertinoIcons.circle : null),
-                  size: 18,
-                  color: marcado! ? AmColors.action : AmColors.muted,
-                ),
-            ],
-          ),
         ),
       ),
     );

@@ -408,6 +408,25 @@ class VideoProject {
   }
 }
 
+/// QUEM SEGUE [id] por parentesco, direta ou indiretamente. Nenhuma delas
+/// pode virar pai de [id]: seria um ciclo.
+Set<String> descendentesPorParentesco(VideoProject projeto, String id) {
+  final saida = <String>{};
+  var mudou = true;
+  while (mudou) {
+    mudou = false;
+    for (final link in projeto.links) {
+      if (link.targetProp != LayerProp.parent) continue;
+      final fonte = link.sourceLayerId;
+      if ((fonte == id || saida.contains(fonte)) &&
+          saida.add(link.targetLayerId)) {
+        mudou = true;
+      }
+    }
+  }
+  return saida;
+}
+
 /// Transform efetivo de uma camada apos resolver a CADEIA de parenting.
 class LayerTransform {
   const LayerTransform({

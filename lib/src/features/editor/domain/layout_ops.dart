@@ -18,6 +18,43 @@ Rect _rectOf(LayoutBox b) => Rect.fromCenter(
 
 enum AlignEdge { left, centerH, right, top, centerV, bottom }
 
+/// O QUE "COLAR ESTILO" LEVA de uma camada para outra. Cada categoria so
+/// vale quando as duas camadas tem a coisa (volume entre camadas com som,
+/// estilo de texto entre textos...).
+enum CategoriaDeEstilo {
+  corEPreenchimento,
+  bordaESombra,
+  mesclagemEOpacidade,
+  moverETransformar,
+  estiloDeTexto,
+  volume,
+  efeitos,
+  velocidade,
+}
+
+String rotuloDaCategoriaDeEstilo(CategoriaDeEstilo c) => switch (c) {
+  CategoriaDeEstilo.corEPreenchimento => 'Cor e preenchimento',
+  CategoriaDeEstilo.bordaESombra => 'Borda e sombra',
+  CategoriaDeEstilo.mesclagemEOpacidade => 'Mesclagem e opacidade',
+  CategoriaDeEstilo.moverETransformar => 'Mover e transformar',
+  CategoriaDeEstilo.estiloDeTexto => 'Estilo do texto',
+  CategoriaDeEstilo.volume => 'Volume',
+  CategoriaDeEstilo.efeitos => 'Efeitos',
+  CategoriaDeEstilo.velocidade => 'Velocidade',
+};
+
+/// Como a camada ocupa a composicao inteira (menu da camada).
+enum EncaixeNaComposicao {
+  /// Cabe inteira, sobra faixa.
+  caber,
+
+  /// Cobre tudo, o que passa fica fora do quadro.
+  preencher,
+
+  /// Estica em cada eixo ate a borda (deforma).
+  esticar,
+}
+
 /// A que a selecao se alinha.
 enum AlignTo {
   /// A caixa da composicao inteira.

@@ -357,7 +357,7 @@ class _AmTimelineState extends ConsumerState<AmTimeline> {
         : project.layers;
     final matteSourceIds = <String>{
       for (final layer in project.layers)
-        if (layer.matteMode != MatteMode.none && layer.matteSourceId != null)
+        if (matteEscondeAFonte(layer.matteMode) && layer.matteSourceId != null)
           layer.matteSourceId!,
     };
     var maxEndUs = project.duration.inMicroseconds;

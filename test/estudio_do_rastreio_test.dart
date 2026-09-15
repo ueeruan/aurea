@@ -12,6 +12,7 @@ import 'package:aurea/src/features/editor/domain/layer.dart';
 import 'package:aurea/src/features/editor/domain/video_project.dart';
 import 'package:aurea/src/features/editor/presentation/am/estudio_do_rastreio.dart';
 import 'package:aurea/src/features/editor/presentation/am/rastreio_sheet.dart';
+import 'package:aurea/src/core/ui/tocavel.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -446,7 +447,7 @@ void main() {
         findsOneWidget,
       );
       tester
-          .widget<GestureDetector>(
+          .widget<Tocavel>(
             find.byKey(const ValueKey('rastreio-abrir-estudio')),
           )
           .onTap!();

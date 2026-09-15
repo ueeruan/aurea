@@ -8,16 +8,25 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../../core/theme/tokens.dart';
 import '../../../application/editor_controller.dart';
 import '../../../application/playback_controller.dart';
+import '../../../../../core/ui/snack.dart';
+import '../../../../../core/ui/tocavel.dart';
 import '../../../application/ui/effect_favorites.dart';
 import '../../../application/ui/pro_mode.dart';
 import '../../../domain/effect.dart';
+import '../../../domain/presets_de_edicao.dart';
 import '../../am/am_colors.dart';
 import 'previa_do_efeito.dart';
 
 /// A GALERIA DE EFEITOS (Fase 4): previa animada de verdade por efeito,
 /// busca com sinonimos, categorias com contador e favoritos. Um toque no
-/// tile aplica o mesmo efeito que a previa mostra. Sem aba Presets: os
-/// testadores do beta 1.0.5 pediram para tirar, atrapalhava achar as coisas.
+/// tile aplica o mesmo efeito que a previa mostra.
+///
+/// A ABA PRESETS (15/09, pedido do dono): os 15 presets do bundle
+/// 4nas.ftbl convertidos para o motor — receitas de pilha inteira, um
+/// toque aplica tudo. E outra coisa que a aba "Presets" que os
+/// testadores do 1.0.5 mandaram tirar (aquela repetia os prontos de
+/// cada efeito; esta traz looks completos que nao existem em nenhum
+/// efeito sozinho).
 Future<void> showEffectGallery(
   BuildContext context,
   WidgetRef ref,
@@ -30,6 +39,7 @@ Future<void> showEffectGallery(
   String? category;
   var favoritos = false;
   var edits = false;
+  var presets = false;
   await PreviasDosEfeitos.instance.manifesto();
   if (!context.mounted) return;
 
@@ -151,13 +161,30 @@ Future<void> showEffectGallery(
                             children: [
                               chip(
                                 '${translate(sheetContext, 'Todos')} ${efeitosDoCatalogo.length}',
-                                category == null && !favoritos && !edits,
+                                category == null &&
+                                    !favoritos &&
+                                    !edits &&
+                                    !presets,
                                 () => setSheetState(() {
                                   category = null;
                                   favoritos = false;
                                   edits = false;
+                                  presets = false;
                                 }),
                                 key: const ValueKey('galeria-todos'),
+                              ),
+                              // PRESETS DO BUNDLE: pilhas inteiras, um
+                              // toque aplica tudo.
+                              chip(
+                                'Presets ${presetsDeEdicao.length}',
+                                presets,
+                                () => setSheetState(() {
+                                  presets = !presets;
+                                  category = null;
+                                  favoritos = false;
+                                  edits = false;
+                                }),
+                                key: const ValueKey('galeria-presets'),
                               ),
                               // EDITS: batida, glitch, tempo e coloring
                               // num lugar so.
@@ -168,6 +195,7 @@ Future<void> showEffectGallery(
                                   edits = !edits;
                                   category = null;
                                   favoritos = false;
+                                  presets = false;
                                 }),
                                 key: const ValueKey('galeria-edits'),
                               ),
@@ -179,6 +207,7 @@ Future<void> showEffectGallery(
                                     favoritos = !favoritos;
                                     category = null;
                                     edits = false;
+                                    presets = false;
                                   }),
                                   key: const ValueKey('galeria-favoritos'),
                                 ),
@@ -190,6 +219,7 @@ Future<void> showEffectGallery(
                                     category = category == c ? null : c;
                                     favoritos = false;
                                     edits = false;
+                                    presets = false;
                                   }),
                                   key: ValueKey('galeria-cat-$c'),
                                 ),
@@ -198,6 +228,53 @@ Future<void> showEffectGallery(
                         ),
                       ),
                     const SizedBox(height: 8),
+                    if (presets && query.isEmpty)
+                      Expanded(
+                        child: ListView.builder(
+                          key: const ValueKey('galeria-lista-presets'),
+                          padding: const EdgeInsets.only(bottom: 8),
+                          itemCount: presetsDeEdicao.length,
+                          itemBuilder: (context, i) {
+                            final p = presetsDeEdicao[i];
+                            final soVideo =
+                                p.acao == AcaoDoPreset.cameraLenta &&
+                                ref
+                                        .read(editorControllerProvider)
+                                        .layerById(layerId)
+                                    is! VideoLayer;
+                            return _PresetTile(
+                              key: ValueKey('preset-${p.id}'),
+                              preset: p,
+                              desabilitado: soVideo,
+                              onTap: () {
+                                if (soVideo) {
+                                  AureaSnack.show(
+                                    context,
+                                    'Esse preset e camera lenta: '
+                                    'so em video.',
+                                  );
+                                  return;
+                                }
+                                final n = controller.aplicarPresetDeEdicao(
+                                  layerId,
+                                  p,
+                                );
+                                Navigator.of(sheetContext).pop();
+                                AureaSnack.show(
+                                  context,
+                                  n == 0
+                                      ? 'Nao deu para aplicar aqui.'
+                                      : '${p.nome} aplicado — '
+                                            '$n efeito${n == 1 ? '' : 's'}',
+                                  actionLabel: n == 0 ? null : 'Desfazer',
+                                  onAction: controller.undo,
+                                );
+                              },
+                            );
+                          },
+                        ),
+                      )
+                    else
                     Expanded(
                       child: results.isEmpty
                           ? Center(
@@ -377,6 +454,121 @@ class _EffectTile extends StatelessWidget {
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+/// O CARTAO DE UM PRESET DO BUNDLE: nome, o que faz, e a marca. Um
+/// toque aplica a pilha inteira.
+class _PresetTile extends StatelessWidget {
+  const _PresetTile({
+    super.key,
+    required this.preset,
+    required this.onTap,
+    this.desabilitado = false,
+  });
+
+  final PresetDeEdicao preset;
+  final VoidCallback onTap;
+  final bool desabilitado;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = AureaTokens.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Tocavel(
+        onTap: onTap,
+        child: Opacity(
+          opacity: desabilitado ? 0.45 : 1,
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+            decoration: BoxDecoration(
+              color: t.chip,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: AmColors.accentDim,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(
+                    preset.acao == AcaoDoPreset.cameraLenta
+                        ? CupertinoIcons.slowmo
+                        : CupertinoIcons.wand_rays,
+                    size: 20,
+                    color: AmColors.accent,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              preset.nome,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.w700,
+                                color: t.text,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 5,
+                              vertical: 1,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AmColors.accentDim,
+                              borderRadius: BorderRadius.circular(5),
+                            ),
+                            child: const Text(
+                              '4nas.ftbl',
+                              style: TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w700,
+                                color: AmColors.accent,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      AppText(
+                        preset.detalhe,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11,
+                          height: 1.3,
+                          color: t.muted,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Icon(
+                  CupertinoIcons.plus_circle_fill,
+                  size: 20,
+                  color: AmColors.accent,
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

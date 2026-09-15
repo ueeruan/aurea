@@ -19,6 +19,7 @@ import '../domain/caption_highlight.dart';
 import '../domain/camera3d.dart';
 import '../domain/camera_cuts.dart';
 import '../domain/cut.dart';
+import '../domain/presets_de_edicao.dart';
 import '../domain/camera_solver3d.dart';
 import '../domain/cena_do_rastreio.dart';
 import '../domain/cut_ops.dart';
@@ -6197,6 +6198,30 @@ class EditorController extends Notifier<VideoProject> {
 
   /// [pronto]: o preset que a previa da galeria mostrou, para o efeito
   /// aplicado ser o mesmo que se viu.
+  /// APLICA UM PRESET DO BUNDLE (a aba Presets da galeria): a pilha
+  /// inteira de efeitos entra de uma vez, num passo so de desfazer; o
+  /// Twixtor tambem arma a rampa de camera lenta (so video). Devolve
+  /// quantos efeitos entraram (0 = nao deu, ex.: rampa em foto).
+  int aplicarPresetDeEdicao(String layerId, PresetDeEdicao preset) {
+    final layer = _layer(layerId);
+    if (layer == null) return 0;
+    if (preset.acao == AcaoDoPreset.cameraLenta && layer is! VideoLayer) {
+      return 0;
+    }
+    var quantos = 0;
+    runAsOneUndo(() {
+      if (preset.acao == AcaoDoPreset.cameraLenta && preset.rampa != null) {
+        applySpeedRamp(layerId, preset.rampa!);
+      }
+      final atual = _layer(layerId);
+      if (atual == null) return;
+      final novos = preset.montar();
+      quantos = novos.length;
+      _replace(atual.copyLayer(effects: [...atual.effects, ...novos]));
+    });
+    return quantos;
+  }
+
   void addEffect(String layerId, EffectType type, {EffectPronto? pronto}) {
     final layer = _layer(layerId);
     if (layer == null) return;

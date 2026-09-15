@@ -237,6 +237,24 @@
     },
     "math_ops": {
       "preset": null
+    },
+    "light_sweep": {
+      "preset": null
+    },
+    "saber": {
+      "preset": null
+    },
+    "lens_blur": {
+      "preset": null
+    },
+    "bit_8": {
+      "preset": null
+    },
+    "smear": {
+      "preset": null
+    },
+    "bubble_blur": {
+      "preset": null
     }
   }
 }

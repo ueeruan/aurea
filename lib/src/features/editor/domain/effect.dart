@@ -116,6 +116,8 @@ EffectType? effectTypeFromId(String id) {
 /// NOMES ANTIGOS que ainda aparecem em arquivo. Renomear nao pode
 /// quebrar o que ja existe.
 const _aliasesDeId = <String, EffectType>{
+  // A beta 84 gravou '8_bit'; id nao pode comecar com digito.
+  '8_bit': EffectType.bit8,
   'cc_split': EffectType.ccSplit,
   'cc_scatterize': EffectType.ccScatterize,
   'cc_semear': EffectType.ccScatterize,
@@ -3739,7 +3741,7 @@ const effectSpecs = <EffectType, EffectSpec>{
   // efeito so (pixelate + posterize ja existem separados; aqui e o
   // atalho que soa como a epoca).
   EffectType.bit8: EffectSpec(
-    id: '8_bit',
+    id: 'bit_8',
     name: '8-Bit',
     category: 'Stylize',
     synonyms: ['8 bit', 'pixel', 'retro', 'fliperama', 'game', 'nes'],

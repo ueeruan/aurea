@@ -2452,3 +2452,29 @@ Distância real	Real distance	Distancia real	المسافة الحقيقية	실
 Quanto mede, no mundo real, a distância entre os dois pontos escolhidos?	In the real world, how long is the distance between the two chosen points?	¿Cuánto mide, en el mundo real, la distancia entre los dos puntos elegidos?	كم تبلغ المسافة بين النقطتين المختارتين في العالم الحقيقي؟	실제 세계에서 선택한 두 점 사이 거리는 얼마입니까?	実世界で、選んだ2点間の距離はどれくらいですか？	在现实世界中，所选两点之间的距离是多少？	वास्तविक दुनिया में चुने गए दो बिंदुओं के बीच की दूरी कितनी है?	Di dunia nyata, berapa jarak antara dua titik yang dipilih?	Каково реальное расстояние между двумя выбранными точками?
 Modelo 3D (importar)	3D model (import)	Modelo 3D (importar)	نموذج ثلاثي الأبعاد (استيراد)	3D 모델 (가져오기)	3Dモデル（読み込み）	3D模型（导入）	3D मॉडल (आयात)	Model 3D (impor)	3D-модель (импорт)
 Escolhe um arquivo de modelo e prende ele nesta superfície, por uma âncora.	Pick a model file and pin it to this surface through an anchor.	Elige un archivo de modelo y fíjalo a esta superficie mediante un ancla.	اختر ملف نموذج وثبته على هذا السطح عبر مرساة.	모델 파일을 골라 앵커로 이 표면에 고정합니다.	モデルファイルを選び、アンカーでこの面に固定します。	选择模型文件，并通过锚点固定到该表面。	मॉडल फ़ाइल चुनें और एंकर से इस सतह पर जोड़ें।	Pilih file model dan tempelkan ke permukaan ini lewat jangkar.	Выберите файл модели и закрепите его на этой поверхности через якорь.
+Light Sweep	Light Sweep	Light Sweep	Light Sweep	Light Sweep	Light Sweep	Light Sweep	Light Sweep	Light Sweep	Light Sweep
+Vitrine	Showcase	Vitrina	واجهة العرض	쇼케이스	ショーケース	橱窗	शोकेस	Etalase	Витрина
+Relâmpago	Lightning	Relámpago	برق	번개	稲妻	闪电	बिजली	Kilat	Молния
+Saber	Saber	Saber	Saber	Saber	Saber	Saber	Saber	Saber	Saber
+Núcleo	Core	Núcleo	النواة	코어	コア	核心	कोर	Inti	Ядро
+Jedi	Jedi	Jedi	Jedi	Jedi	Jedi	Jedi	Jedi	Jedi	Jedi
+Sith	Sith	Sith	Sith	Sith	Sith	Sith	Sith	Sith	Sith
+Lens Blur	Lens Blur	Lens Blur	Lens Blur	Lens Blur	Lens Blur	Lens Blur	Lens Blur	Lens Blur	Lens Blur
+Brilho dos realces	Highlight glow	Brillo de altas luces	توهج الإضاءات	하이라이트 광	ハイライトの輝き	高光辉光	हाइलाइट चमक	Kilau sorotan	Свечение светов
+Retrato	Portrait	Retrato	بورتريه	인물	ポートレート	人像	पोर्ट्रेट	Potret	Портрет
+8-Bit	8-Bit	8-Bit	8-Bit	8-Bit	8-Bit	8-Bit	8-Bit	8-Bit	8-Bit
+Pixel	Pixel	Píxel	بكسل	픽셀	ピクセル	像素	पिक्सेल	Piksel	Пиксель
+Cores	Colors	Colores	الألوان	색상	色数	颜色	रंग	Warna	Цвета
+Vivacidade	Vibrance	Intensidad	حيوية	생동감	鮮やかさ	鲜艳度	जीवंतता	Vibrance	Сочность
+NES	NES	NES	NES	NES	NES	NES	NES	NES	NES
+16-bit	16-bit	16-bit	16-bit	16-bit	16-bit	16-bit	16-bit	16-bit	16-bit
+Minecraft	Minecraft	Minecraft	Minecraft	Minecraft	Minecraft	Minecraft	Minecraft	Minecraft	Minecraft
+Smear	Smear	Smear	Smear	Smear	Smear	Smear	Smear	Smear	Smear
+Esticar	Stretch	Estirar	تمديد	늘이기	引き伸ばし	拉伸	खींचना	Regangkan	Растяжение
+Arrasto	Drag	Arrastre	سحب	끌림	引きずり	拖尾	घसीट	Seret	Шлейф
+Queda	Fall	Caída	سقوط	낙하	落下	下坠	गिरावट	Jatuh	Падение
+Bubble Blur	Bubble Blur	Bubble Blur	Bubble Blur	Bubble Blur	Bubble Blur	Bubble Blur	Bubble Blur	Bubble Blur	Bubble Blur
+Bolhas	Bubbles	Burbujas	فقاعات	거품	バブル	气泡	बुलबुले	Gelembung	Пузыри
+Aumento	Magnification	Aumento	تكبير	확대	拡大	放大	आवर्धन	Perbesaran	Увеличение
+Lupa	Magnifier	Lupa	عدسة مكبرة	돋보기	ルーペ	放大镜	आवर्धक	Kaca pembesar	Лупа
+Espuma	Foam	Espuma	رغوة	거품	泡	泡沫	झाग	Busa	Пена

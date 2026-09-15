@@ -2373,11 +2373,14 @@ class EditorController extends Notifier<VideoProject> {
   Future<String?> addTexto3D(
     Duration at,
     String texto,
-    EstiloDoTexto3D estilo,
-  ) async {
+    EstiloDoTexto3D estilo, {
+    String? familia,
+  }) async {
     final limpo = texto.trim();
     if (limpo.isEmpty) return null;
-    final Texto3D params = Texto3D(texto: limpo);
+    final Texto3D params = familia == null
+        ? Texto3D(texto: limpo)
+        : Texto3D(texto: limpo, familia: familia);
     MalhaDoTexto3D malha;
     try {
       final bytes = await FontService.instance.bytesDaFonte(params.familia);

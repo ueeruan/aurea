@@ -12,6 +12,7 @@ import '../../../../core/ui/tocavel.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../application/editor_controller.dart';
+import '../../application/font_service.dart';
 import '../../application/transcription_service.dart';
 import '../../application/transcricao_em_andamento.dart';
 import '../../../settings/application/settings_controller.dart';
@@ -1133,7 +1134,38 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
       ),
     );
     if (estilo == null || !raiz.mounted) return;
-    final no = await controller.addTexto3D(playhead, texto, estilo);
+    // A FONTE, quando ha escolha: as importadas em Ajustes valem para o
+    // 3D tambem — o extrusor le o proprio arquivo TrueType da familia.
+    String? familia;
+    final familias = FontService.instance.families;
+    if (familias.length > 1) {
+      familia = await showCupertinoModalPopup<String>(
+        context: raiz,
+        builder: (c) => CupertinoActionSheet(
+          title: const AppText('Fonte'),
+          actions: [
+            for (final f in familias)
+              CupertinoActionSheetAction(
+                key: ValueKey('texto3d-fonte-$f'),
+                onPressed: () => Navigator.of(c).pop(f),
+                child: AppText(f),
+              ),
+          ],
+          cancelButton: CupertinoActionSheetAction(
+            onPressed: () => Navigator.of(c).pop(),
+            child: const AppText('Cancelar'),
+          ),
+        ),
+      );
+      if (!raiz.mounted) return;
+      if (familia == null) return;
+    }
+    final no = await controller.addTexto3D(
+      playhead,
+      texto,
+      estilo,
+      familia: familia,
+    );
     if (no == null && raiz.mounted) {
       AureaSnack.show(raiz, 'Não consegui criar o texto 3D com essa fonte.');
     }

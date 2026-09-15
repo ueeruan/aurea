@@ -6,6 +6,7 @@ import 'package:flutter/material.dart' hide Easing;
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/ui/snack.dart';
 import '../../application/editor_controller.dart';
 import '../../application/playback_controller.dart';
 import '../../domain/grid_rig.dart';
@@ -236,18 +237,24 @@ class _CurvePanelState extends ConsumerState<CurvePanel> {
                             ),
                             const Spacer(),
                             AmRailButton(
+                              key: const ValueKey('curve-inverter'),
                               onTap: () {
-                                // Inverte a curva (espelha as alcas).
+                                // INVERTER: o fim vira o comeco. A bezier
+                                // espelha as alcas; quique e elastico
+                                // trocam de ponta; o resto e simetrico.
+                                final invertida = ease.invertida;
+                                if (invertida == null) {
+                                  AureaSnack.show(
+                                    context,
+                                    'Esta curva é igual nos dois sentidos',
+                                  );
+                                  return;
+                                }
                                 controller.setSegmentEase(
                                   id,
                                   widget.prop,
                                   segment!.$1,
-                                  ease.copyWith(
-                                    x1: (1 - ease.x2).clamp(0.0, 1.0),
-                                    y1: 1 - ease.y2,
-                                    x2: (1 - ease.x1).clamp(0.0, 1.0),
-                                    y2: 1 - ease.y1,
-                                  ),
+                                  invertida,
                                 );
                               },
                               child: const Icon(
@@ -417,8 +424,8 @@ class _CurvePanelState extends ConsumerState<CurvePanel> {
                             Flexible(
                               child: AppText(
                                 foraDoTrecho
-                                    ? 'Efeito Ease (${times.indexOf(segment.$1) + 1} \u2192 ${times.indexOf(segment.$1) + 2})'
-                                    : 'Efeito Ease de Cúbico-Bezier',
+                                    ? 'Trecho ${times.indexOf(segment.$1) + 1} \u2192 ${times.indexOf(segment.$1) + 2}'
+                                    : _nomeDaCurva(ease),
                                 textAlign: TextAlign.center,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
@@ -447,99 +454,15 @@ class _CurvePanelState extends ConsumerState<CurvePanel> {
                     ],
                   ),
                 ),
-                // Trilho direito: Presets em 2 colunas
-                Container(
-                  width: 106,
-                  padding: const EdgeInsets.fromLTRB(4, 8, 8, 8),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      // Linha 1: Linear | Ease In/Out
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          _AmCurvePresetCard(
-                            ease: Easing.linear,
-                            selected: _samePreset(ease, Easing.linear),
-                            onTap: () => controller.setSegmentEase(
-                              id,
-                              widget.prop,
-                              segment!.$1,
-                              Easing.linear,
-                            ),
-                          ),
-                          _AmCurvePresetCard(
-                            ease: Easing.easeInOut,
-                            selected: _samePreset(ease, Easing.easeInOut),
-                            onTap: () => controller.setSegmentEase(
-                              id,
-                              widget.prop,
-                              segment!.$1,
-                              Easing.easeInOut,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      // Linha 2: Ease In | Quicar (PROVAR)
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          _AmCurvePresetCard(
-                            ease: Easing.easeIn,
-                            selected: _samePreset(ease, Easing.easeIn),
-                            onTap: () => controller.setSegmentEase(
-                              id,
-                              widget.prop,
-                              segment!.$1,
-                              Easing.easeIn,
-                            ),
-                          ),
-                          _AmCurvePresetCard(
-                            ease: Easing.bounce,
-                            badge: 'PROVAR',
-                            selected: _samePreset(ease, Easing.bounce),
-                            onTap: () => controller.setSegmentEase(
-                              id,
-                              widget.prop,
-                              segment!.$1,
-                              Easing.bounce,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      // Linha 3: Ease Out | Degraus (PROVAR)
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          _AmCurvePresetCard(
-                            ease: Easing.easeOut,
-                            selected: _samePreset(ease, Easing.easeOut),
-                            onTap: () => controller.setSegmentEase(
-                              id,
-                              widget.prop,
-                              segment!.$1,
-                              Easing.easeOut,
-                            ),
-                          ),
-                          _AmCurvePresetCard(
-                            ease: const Easing(type: EasingType.steps),
-                            badge: 'PROVAR',
-                            selected: _samePreset(
-                              ease,
-                              const Easing(type: EasingType.steps),
-                            ),
-                            onTap: () => controller.setSegmentEase(
-                              id,
-                              widget.prop,
-                              segment!.$1,
-                              const Easing(type: EasingType.steps),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
+                // TRILHO DIREITO: as familias da curva em abas, quatro a
+                // seis presets cada. A aba nasce na familia do trecho.
+                _FamiliasDaCurva(
+                  ease: ease,
+                  onEscolher: (e) => controller.setSegmentEase(
+                    id,
+                    widget.prop,
+                    segment!.$1,
+                    e,
                   ),
                 ),
               ],
@@ -563,6 +486,19 @@ class _CurvePanelState extends ConsumerState<CurvePanel> {
     (nome: 'Mola interface', ease: Easing.interfaceSpring),
     (nome: 'Mola suave', ease: Easing.softSpring),
   ];
+
+  /// O NOME DO TRECHO no rodape: o preset quando e um, "(personalizada)"
+  /// quando as alcas ja sairam de qualquer um.
+  static String _nomeDaCurva(Easing e) {
+    for (final familia in _familiasDaCurva) {
+      for (final (nome, preset) in familia.presets) {
+        if (_samePreset(e, preset)) return nome;
+      }
+    }
+    return e.type == EasingType.cubicBezier
+        ? 'Bézier (personalizada)'
+        : '${e.label} (personalizada)';
+  }
 
   static bool _samePreset(Easing a, Easing b) {
     if (a.type != b.type) return false;
@@ -1641,63 +1577,171 @@ class _AmCurvePresetCard extends StatelessWidget {
     required this.ease,
     required this.selected,
     required this.onTap,
-    this.badge,
   });
 
   final Easing ease;
   final bool selected;
   final VoidCallback onTap;
-  final String? badge;
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
-      child: Stack(
-        clipBehavior: Clip.none,
-        alignment: Alignment.topCenter,
+      child: Container(
+        width: 38,
+        height: 38,
+        decoration: BoxDecoration(
+          color: const Color(0xFF1E222D),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: selected ? const Color(0xFF1ED6B1) : const Color(0xFF333B4F),
+            width: selected ? 1.8 : 1,
+          ),
+        ),
+        child: CustomPaint(
+          painter: _PresetThumbPainter(ease: ease, selected: selected),
+        ),
+      ),
+    );
+  }
+}
+
+/// AS FAMILIAS DA CURVA (v1.1.1): cada uma com os seus presets.
+const _familiasDaCurva =
+    <({String nome, IconData icone, List<(String, Easing)> presets})>[
+      (
+        nome: 'Bézier',
+        icone: CupertinoIcons.scribble,
+        presets: [
+          ('Linear', Easing.linear),
+          ('Suave na entrada', Easing.easeIn),
+          ('Suave na saída', Easing.easeOut),
+          ('Suave nas duas pontas', Easing.easeInOut),
+        ],
+      ),
+      (
+        nome: 'Quique',
+        icone: CupertinoIcons.sportscourt,
+        presets: [
+          ('Quique na saída', Easing.bounce),
+          ('Quique na entrada', Easing.bounceIn),
+          ('Elástico na saída', Easing.elastic),
+          ('Elástico na entrada', Easing.elasticIn),
+        ],
+      ),
+      (
+        nome: 'Degraus',
+        icone: CupertinoIcons.chart_bar_alt_fill,
+        presets: [
+          ('Degraus', Easing.steps),
+          ('Degraus aleatórios', Easing.stepsRandom),
+          ('Degraus elásticos', Easing.elasticSteps),
+          ('Manter', Easing.hold),
+        ],
+      ),
+      (
+        nome: 'Outras',
+        icone: CupertinoIcons.waveform_path,
+        presets: [
+          ('Oscilar', Easing.oscillate),
+          ('Cíclica', Easing.cyclic),
+          ('Aleatória', Easing.random),
+          ('Repetir', Easing.repeat),
+          ('Dente de serra', Easing.sawtooth),
+          ('Mola', Easing.interfaceSpring),
+        ],
+      ),
+    ];
+
+int _familiaDe(Easing e) => switch (e.type) {
+  EasingType.cubicBezier => 0,
+  EasingType.bounce ||
+  EasingType.bounceIn ||
+  EasingType.elastic ||
+  EasingType.elasticIn => 1,
+  EasingType.steps ||
+  EasingType.stepsRandom ||
+  EasingType.elasticSteps ||
+  EasingType.hold => 2,
+  _ => 3,
+};
+
+class _FamiliasDaCurva extends StatefulWidget {
+  const _FamiliasDaCurva({required this.ease, required this.onEscolher});
+
+  final Easing ease;
+  final ValueChanged<Easing> onEscolher;
+
+  @override
+  State<_FamiliasDaCurva> createState() => _FamiliasDaCurvaState();
+}
+
+class _FamiliasDaCurvaState extends State<_FamiliasDaCurva> {
+  late int _aba = _familiaDe(widget.ease);
+
+  @override
+  Widget build(BuildContext context) {
+    final familia = _familiasDaCurva[_aba];
+    return SizedBox(
+      width: 132,
+      child: Row(
         children: [
-          Container(
-            width: 38,
-            height: 38,
-            decoration: BoxDecoration(
-              color: const Color(0xFF1E222D),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                color: selected
-                    ? const Color(0xFF1ED6B1)
-                    : const Color(0xFF333B4F),
-                width: selected ? 1.8 : 1,
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(2, 6, 2, 6),
+              child: Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final (nome, preset) in familia.presets)
+                    Tooltip(
+                      message: nome,
+                      child: KeyedSubtree(
+                        key: ValueKey('curva-preset-$nome'),
+                        child: _AmCurvePresetCard(
+                          ease: preset,
+                          selected: _CurvePanelState._samePreset(
+                            widget.ease,
+                            preset,
+                          ),
+                          onTap: () => widget.onEscolher(preset),
+                        ),
+                      ),
+                    ),
+                ],
               ),
-            ),
-            child: CustomPaint(
-              painter: _PresetThumbPainter(ease: ease, selected: selected),
             ),
           ),
-          if (badge != null)
-            Positioned(
-              top: -5,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 4,
-                  vertical: 0.5,
-                ),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1ED6B1),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: AppText(
-                  badge!,
-                  style: const TextStyle(
-                    fontSize: 6.5,
-                    fontWeight: FontWeight.w900,
-                    color: Color(0xFF12151A),
-                    letterSpacing: 0.2,
+          // AS ABAS VERTICAIS: a familia aberta fica acesa.
+          Container(
+            width: 34,
+            color: AmColors.panelHigh,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                for (var i = 0; i < _familiasDaCurva.length; i++)
+                  Tooltip(
+                    message: _familiasDaCurva[i].nome,
+                    child: GestureDetector(
+                      key: ValueKey('curva-familia-$i'),
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => setState(() => _aba = i),
+                      child: SizedBox(
+                        width: 34,
+                        height: 40,
+                        child: Icon(
+                          _familiasDaCurva[i].icone,
+                          size: 17,
+                          color: i == _aba ? AmColors.accent : AmColors.muted,
+                        ),
+                      ),
+                    ),
                   ),
-                ),
-              ),
+              ],
             ),
+          ),
         ],
       ),
     );

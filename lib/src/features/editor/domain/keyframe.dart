@@ -16,6 +16,25 @@ enum EasingType {
   elasticSteps,
   spring,
   hold,
+  // Os de baixo entraram na v1.1.1 (familias da curva). Ficam NO FIM:
+  // o arquivo do projeto grava o indice.
+  /// O quique ao contrario: bate no comeco e decola.
+  bounceIn,
+
+  /// O elastico ao contrario: estica no comeco e dispara.
+  elasticIn,
+
+  /// Degraus que caem em alturas sorteadas (sempre as mesmas).
+  stepsRandom,
+
+  /// Vai e volta [count] vezes e termina no valor final.
+  oscillate,
+
+  /// A transicao suave repetida [count] vezes.
+  repeat,
+
+  /// A rampa reta repetida [count] vezes.
+  sawtooth,
 }
 
 /// Easing do SEGMENTO que sai de um keyframe (modelo Alight: N keyframes =
@@ -71,6 +90,47 @@ class Easing {
   );
 
   static const bezierPresets = [linear, easeIn, easeOut, easeInOut, overshoot];
+
+  // As familias do painel da curva (v1.1.1).
+  static const bounceIn = Easing(
+    type: EasingType.bounceIn,
+    count: 4,
+    intensity: .5,
+  );
+  static const elasticIn = Easing(
+    type: EasingType.elasticIn,
+    count: 3,
+    intensity: .65,
+  );
+  static const steps = Easing(type: EasingType.steps, count: 4);
+  static const stepsRandom = Easing(
+    type: EasingType.stepsRandom,
+    count: 5,
+    intensity: .8,
+  );
+  static const elasticSteps = Easing(type: EasingType.elasticSteps, count: 4);
+  static const hold = Easing(type: EasingType.hold);
+  static const oscillate = Easing(type: EasingType.oscillate, count: 3);
+  static const cyclic = Easing(type: EasingType.cyclic, count: 2);
+  static const random = Easing(type: EasingType.random, intensity: .8);
+  static const repeat = Easing(type: EasingType.repeat, count: 3);
+  static const sawtooth = Easing(type: EasingType.sawtooth, count: 3);
+
+  /// A MESMA CURVA NO SENTIDO CONTRARIO: o fim vira o comeco. Nulo quando
+  /// o tipo e simetrico e inverter nao mudaria nada.
+  Easing? get invertida => switch (type) {
+    EasingType.cubicBezier => copyWith(
+      x1: (1 - x2).clamp(0.0, 1.0),
+      y1: 1 - y2,
+      x2: (1 - x1).clamp(0.0, 1.0),
+      y2: 1 - y1,
+    ),
+    EasingType.bounce => copyWith(type: EasingType.bounceIn),
+    EasingType.bounceIn => copyWith(type: EasingType.bounce),
+    EasingType.elastic => copyWith(type: EasingType.elasticIn),
+    EasingType.elasticIn => copyWith(type: EasingType.elastic),
+    _ => null,
+  };
 
   final EasingType type;
 
@@ -154,6 +214,31 @@ class Easing {
         return _spring(t);
       case EasingType.hold:
         return t >= 1 ? 1 : 0;
+      case EasingType.bounceIn:
+        return 1 - copyWith(type: EasingType.bounce).transform(1 - t);
+      case EasingType.elasticIn:
+        return 1 - copyWith(type: EasingType.elastic).transform(1 - t);
+      case EasingType.stepsRandom:
+        final n = count < 2 ? 2 : count;
+        final k = (t * n).floor().clamp(0, n - 1);
+        if (k == n - 1) return 1;
+        final base = k / (n - 1);
+        // Sorteio fixo por degrau (o scrub nunca muda o desenho).
+        final sorteio = math.sin((k + 1) * 12.9898) * 43758.5453;
+        final ruido = (sorteio - sorteio.floorToDouble()) - 0.5;
+        return (base + ruido * intensity / (n - 1)).clamp(0.0, 1.0);
+      case EasingType.oscillate:
+        final c = count < 1 ? 1 : count;
+        return 0.5 - 0.5 * math.cos(math.pi * (2 * c - 1) * t);
+      case EasingType.repeat:
+        final c = count < 1 ? 1 : count;
+        final u = t * c;
+        final f = u - u.floorToDouble();
+        return 0.5 - 0.5 * math.cos(math.pi * f);
+      case EasingType.sawtooth:
+        final c = count < 1 ? 1 : count;
+        final u = t * c;
+        return u - u.floorToDouble();
     }
   }
 
@@ -285,6 +370,12 @@ class Easing {
     EasingType.elasticSteps => 'Deg. elastico',
     EasingType.spring => 'Mola',
     EasingType.hold => 'Manter',
+    EasingType.bounceIn => 'Quique na entrada',
+    EasingType.elasticIn => 'Elástico na entrada',
+    EasingType.stepsRandom => 'Degraus aleatórios',
+    EasingType.oscillate => 'Oscilar',
+    EasingType.repeat => 'Repetir',
+    EasingType.sawtooth => 'Dente de serra',
   };
 }
 

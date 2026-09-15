@@ -28,7 +28,6 @@ import '../../domain/shape.dart';
 import '../../domain/shape_ops.dart';
 import '../../domain/video_project.dart' show descendentesPorParentesco;
 import 'am_colors.dart';
-import '../../application/ui/pro_mode.dart';
 import '../context/parameter_row.dart';
 import 'audio_sheet.dart';
 import '../../../../core/ui/snack.dart';
@@ -3623,6 +3622,89 @@ const amBlendModes = <(String, BlendMode)>[
   ('Luminosidade', BlendMode.luminosity),
 ];
 
+/// UM MODO DE MESCLA: nativo do Flutter ou proprio da Aurea.
+class ModoDeMescla {
+  const ModoDeMescla(this.rotulo, {this.nativo, this.aurea});
+
+  final String rotulo;
+  final BlendMode? nativo;
+  final AureaBlend? aurea;
+}
+
+/// AS SETE CATEGORIAS DA MESCLAGEM (v1.1.1), com todos os modos que o
+/// motor sabe fazer — os nativos e os da Aurea lado a lado.
+const categoriasDeMescla = <({String nome, List<ModoDeMescla> modos})>[
+  (
+    nome: 'Normal',
+    modos: [
+      ModoDeMescla('Normal', nativo: BlendMode.srcOver),
+      ModoDeMescla('Dissolver', aurea: AureaBlend.dissolve),
+    ],
+  ),
+  (
+    nome: 'Escurecer',
+    modos: [
+      ModoDeMescla('Escurecer', nativo: BlendMode.darken),
+      ModoDeMescla('Multiplicar', nativo: BlendMode.multiply),
+      ModoDeMescla('Queimar cor', nativo: BlendMode.colorBurn),
+      ModoDeMescla('Queimar linear', aurea: AureaBlend.linearBurn),
+      ModoDeMescla('Cor mais escura', aurea: AureaBlend.darkerColor),
+    ],
+  ),
+  (
+    nome: 'Clarear',
+    modos: [
+      ModoDeMescla('Clarear', nativo: BlendMode.lighten),
+      ModoDeMescla('Tela', nativo: BlendMode.screen),
+      ModoDeMescla('Subexpor cor', nativo: BlendMode.colorDodge),
+      ModoDeMescla('Adicionar', nativo: BlendMode.plus),
+      ModoDeMescla('Cor mais clara', aurea: AureaBlend.lighterColor),
+    ],
+  ),
+  (
+    nome: 'Contraste',
+    modos: [
+      ModoDeMescla('Sobrepor', nativo: BlendMode.overlay),
+      ModoDeMescla('Luz suave', nativo: BlendMode.softLight),
+      ModoDeMescla('Luz forte', nativo: BlendMode.hardLight),
+      ModoDeMescla('Luz viva', aurea: AureaBlend.vividLight),
+      ModoDeMescla('Luz linear', aurea: AureaBlend.linearLight),
+      ModoDeMescla('Luz pontual', aurea: AureaBlend.pinLight),
+      ModoDeMescla('Mistura dura', aurea: AureaBlend.hardMix),
+    ],
+  ),
+  (
+    nome: 'Diferença',
+    modos: [
+      ModoDeMescla('Diferença', nativo: BlendMode.difference),
+      ModoDeMescla('Exclusão', nativo: BlendMode.exclusion),
+      ModoDeMescla('Subtrair', aurea: AureaBlend.subtract),
+      ModoDeMescla('Dividir', aurea: AureaBlend.divide),
+    ],
+  ),
+  (
+    nome: 'Cor',
+    modos: [
+      ModoDeMescla('Matiz', nativo: BlendMode.hue),
+      ModoDeMescla('Saturação', nativo: BlendMode.saturation),
+      ModoDeMescla('Cor', nativo: BlendMode.color),
+      ModoDeMescla('Luminosidade', nativo: BlendMode.luminosity),
+    ],
+  ),
+  (
+    nome: 'Máscara',
+    modos: [
+      ModoDeMescla('Máscara', nativo: BlendMode.dstIn),
+      ModoDeMescla('Recortar', nativo: BlendMode.dstOut),
+    ],
+  ),
+];
+
+/// As categorias abertas na mesclagem. Nulo = a do modo atual.
+final _mesclaAbertasProvider = StateProvider.autoDispose<Set<String>?>(
+  (ref) => null,
+);
+
 /// OS SEIS MODOS DO SIMPLES (secao 2 do plano): o resto e Pro.
 const kBlendModesSimples = <BlendMode>{
   BlendMode.srcOver,
@@ -3946,61 +4028,108 @@ class _BlendingPanelState extends ConsumerState<BlendingPanel> {
     ),
   );
 
+  /// A MESCLAGEM EM CATEGORIAS: normal, escurecer, clarear, contraste,
+  /// diferenca, cor e mascara. Cada cabecalho diz qual modo esta ligado
+  /// ali dentro; a categoria do modo atual nasce aberta.
   Widget _blending(EditorController c, String id, Layer layer) {
-    final pro = ref.watch(proModeProvider);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(10, 10, 16, 10),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            height: 68,
-            // Row em rolagem (nao lista preguicosa): os chips sao poucos e
-            // todos montados ficam achaveis.
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
+    bool ligado(ModoDeMescla m) => m.nativo != null
+        ? layer.customBlend == null && layer.blendMode == m.nativo
+        : layer.customBlend == m.aurea;
+    final atual = [
+      for (final cat in categoriasDeMescla)
+        for (final m in cat.modos)
+          if (ligado(m)) (cat, m),
+    ].firstOrNull;
+    final abertas = ref.watch(_mesclaAbertasProvider) ??
+        {if (atual != null) atual.$1.nome};
+    return ListView(
+      key: const ValueKey('mescla-categorias'),
+      padding: const EdgeInsets.fromLTRB(8, 4, 12, 12),
+      children: [
+        for (final cat in categoriasDeMescla) ...[
+          Tocavel(
+            key: ValueKey('categoria-mescla-${cat.nome}'),
+            onTap: () {
+              final novo = {...abertas};
+              if (!novo.remove(cat.nome)) novo.add(cat.nome);
+              ref.read(_mesclaAbertasProvider.notifier).state = novo;
+            },
+            child: SizedBox(
+              height: 40,
               child: Row(
                 children: [
-                  // SIMPLES: os seis modos mais usados. PRO: os 17 nativos e os
-                  // 10 da Aurea, todos com miniatura.
-                  for (final (label, mode) in amBlendModes)
-                    if (pro || kBlendModesSimples.contains(mode))
-                      _BlendChip(
-                        key: ValueKey('mescla-${mode.name}'),
-                        label: label,
-                        mode: mode,
-                        aceso:
-                            layer.customBlend == null &&
-                            layer.blendMode == mode,
-                        onTap: () => c.setBlendMode(id, mode),
+                  Icon(
+                    abertas.contains(cat.nome)
+                        ? CupertinoIcons.chevron_down
+                        : CupertinoIcons.chevron_right,
+                    size: 13,
+                    color: AmColors.muted,
+                  ),
+                  const SizedBox(width: 8),
+                  AppText(
+                    cat.nome,
+                    style: const TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w600,
+                      color: AmColors.text,
+                    ),
+                  ),
+                  const Spacer(),
+                  if (atual != null && atual.$1 == cat) ...[
+                    AppText(
+                      atual.$2.rotulo,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AmColors.accent,
                       ),
-                  if (pro)
-                    for (final extra in AureaBlend.values)
-                      _BlendChip(
-                        key: ValueKey('mescla-${extra.name}'),
-                        label: aureaBlendLabel(extra),
-                        aceso: layer.customBlend == extra,
-                        onTap: () => c.setCustomBlend(id, extra),
-                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    const Icon(
+                      CupertinoIcons.checkmark_circle_fill,
+                      size: 16,
+                      color: AmColors.accent,
+                    ),
+                  ],
                 ],
               ),
             ),
           ),
-          const SizedBox(height: 6),
-          // A MESCLA AGE SOBRE O QUE ESTA POR BAIXO. Sem isto escrito, uma
-          // camada sozinha em Multiplicar (que some no preto) ou em Tela
-          // (que nao muda) vira "a mesclagem nao funciona" — o relato do
-          // beta. A conta esta certa; faltava dizer com o que ela conta.
-          const AppText('A mescla combina esta camada com as camadas abaixo. Branco em '
-            'Clarear cobre a imagem; em Escurecer deixa a imagem aparecer. '
-            'Ajuste também a opacidade para reduzir a intensidade.',
-            maxLines: 3,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 11, height: 1.3, color: AmColors.muted),
-          ),
+          if (abertas.contains(cat.nome))
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final m in cat.modos)
+                    _BlendChip(
+                      key: ValueKey(
+                        'mescla-${m.nativo?.name ?? m.aurea!.name}',
+                      ),
+                      label: m.rotulo,
+                      mode: m.nativo,
+                      aceso: ligado(m),
+                      onTap: () => m.nativo != null
+                          ? c.setBlendMode(id, m.nativo!)
+                          : c.setCustomBlend(id, m.aurea),
+                    ),
+                ],
+              ),
+            ),
         ],
-      ),
+        const SizedBox(height: 4),
+        // A MESCLA AGE SOBRE O QUE ESTA POR BAIXO. Sem isto escrito, uma
+        // camada sozinha em Multiplicar (que some no preto) ou em Tela
+        // (que nao muda) vira "a mesclagem nao funciona" — o relato do
+        // beta. A conta esta certa; faltava dizer com o que ela conta.
+        const AppText('A mescla combina esta camada com as camadas abaixo. Branco em '
+          'Clarear cobre a imagem; em Escurecer deixa a imagem aparecer. '
+          'Ajuste também a opacidade para reduzir a intensidade.',
+          maxLines: 3,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(fontSize: 11, height: 1.3, color: AmColors.muted),
+        ),
+      ],
     );
   }
 

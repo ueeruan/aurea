@@ -119,8 +119,9 @@ class AureaTokens {
   static const double minTap = 44;
 
   /// Alturas das zonas fixas.
-  static const double topBar = 52;
-  static const double transport = 44;
+  // As barras do editor na medida do AM 5: navbar 44, playbar 46.
+  static const double topBar = 44;
+  static const double transport = 46;
 
   /// Regua de arrasto e tile de categoria.
   static const double ruler = 52;

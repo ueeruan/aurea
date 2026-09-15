@@ -49,7 +49,9 @@ class ContextSheet extends StatelessWidget {
         children: [
           SizedBox(
             key: const ValueKey('context-sheet-handle'),
-            height: handleHeight,
+            // COM TITULO, a faixa vira o cabecalho da categoria (o topo
+            // do editor nao mostra mais titulos: e a navbar do AM).
+            height: title == null ? handleHeight : titleHeight,
             // SEM PUXADOR quando nao ha titulo. A pilula cinza convidava
             // a arrastar; agora nada se arrasta, e um convite que nao
             // leva a lugar nenhum e pior do que nao convidar.

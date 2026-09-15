@@ -27,6 +27,7 @@ import '../../domain/shape_library.dart';
 import '../am/points_panel.dart' show editPointsRequestProvider;
 import 'freehand_overlay.dart' show freehandRequestProvider;
 import '../am/am_colors.dart';
+import '../shell/cromo_am.dart' show CromoAM;
 import 'gallery_panel.dart';
 import '../context/add_toolbar.dart' show AddTarget;
 
@@ -896,7 +897,7 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
                         nomes[a]!.$2,
                         size: 17,
                         color: _abaVisivel == a
-                            ? AmColors.accent
+                            ? CromoAM.verde
                             : AmColors.text,
                       ),
                       const SizedBox(height: 2),
@@ -908,7 +909,7 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
                           fontSize: 9.5,
                           fontWeight: FontWeight.w600,
                           color: _abaVisivel == a
-                              ? AmColors.accent
+                              ? CromoAM.verde
                               : AmColors.text,
                         ),
                       ),

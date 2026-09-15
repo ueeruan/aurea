@@ -263,9 +263,13 @@ void main() {
     expect(find.byType(TransformPanel), findsOneWidget);
   });
 
-  testWidgets('segurar o fim permite digitar o tempo exato', (tester) async {
+  testWidgets('o relógio da navbar permite digitar o tempo exato', (
+    tester,
+  ) async {
+    // NA LINGUA DO AM (v1.1.1): o relogio mora na navbar; tocar nele
+    // abre o "ir para o tempo". Segurar ▶| agora vai ao fim.
     await openEditor(tester);
-    await tester.longPress(find.byKey(const ValueKey('transport-end')));
+    await tester.tap(find.byKey(const ValueKey('navbar-tempo')));
     await tester.pumpAndSettle();
     final campo = find.byKey(const ValueKey('transport-timecode-campo'));
     expect(campo, findsOneWidget);

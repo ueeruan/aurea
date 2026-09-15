@@ -22,6 +22,7 @@ export '../../application/freehand_session.dart' show onionSkinProvider;
 import '../../application/playback_controller.dart';
 import '../../application/preview_stats.dart';
 import '../../application/video_layer_manager.dart';
+import '../shell/cromo_am.dart' show zoomDoPalcoProvider;
 import '../../domain/ajuste_da_midia.dart';
 import '../../domain/keyframe.dart' show AnimatedDouble;
 import '../../domain/cut.dart';
@@ -284,6 +285,11 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
   double? _encaixeX;
   double? _encaixeY;
 
+  /// O DESLOCAMENTO DO PALCO COM ZOOM (trilho da direita): arrastar o
+  /// vazio com o palco aproximado passeia pela composicao. Zera quando
+  /// o zoom volta ao ajustado.
+  Offset _panDoPalco = Offset.zero;
+
   void _limparEncaixe() {
     if (_encaixeX == null && _encaixeY == null) return;
     setState(() {
@@ -347,7 +353,14 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
   void _onScaleUpdate(ScaleUpdateDetails d) {
     if (_selecionandoNoPalco) return;
     final id = ref.read(selectedLayerProvider);
-    if (id == null) return;
+    // COM ZOOM E NADA SELECIONADO, o arrasto passeia pelo palco.
+    if (id == null) {
+      final zoom = ref.read(zoomDoPalcoProvider);
+      if (zoom != 1.0 && d.pointerCount == 1) {
+        setState(() => _panDoPalco += d.focalPointDelta);
+      }
+      return;
+    }
     final controller = ref.read(editorControllerProvider.notifier);
     final project = ref.read(editorControllerProvider);
     final t = widget.playback.time.value;
@@ -526,6 +539,12 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
 
   @override
   Widget build(BuildContext context) {
+    // ZOOM DE VOLTA AO AJUSTADO: o passeio zera junto.
+    ref.listen<double>(zoomDoPalcoProvider, (antes, agora) {
+      if (agora == 1.0 && _panDoPalco != Offset.zero) {
+        setState(() => _panDoPalco = Offset.zero);
+      }
+    });
     final project = ref.watch(projetoVisivelProvider);
     final resolution = ref.watch(previewResolutionProvider);
     final padGuides = ref.watch(transformGuidesProvider);
@@ -561,18 +580,50 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
                   constraints.biggest,
                   Size(compW, compH),
                 );
-                final scale = frame.width / compW;
+                // O ZOOM DO PALCO (trilho da direita) multiplica o
+                // ajuste; com 1.0 o quadro fica identico ao de sempre.
+                final zoomDoPalco = ref.watch(zoomDoPalcoProvider);
+                final ajuste = frame.width / compW;
+                final scale = ajuste * zoomDoPalco;
+                // O passeio nao deixa a composicao fugir da janela.
+                final folgaX =
+                    ((compW * scale - constraints.maxWidth) / 2).clamp(
+                          0.0,
+                          double.infinity,
+                        ) +
+                        48;
+                final folgaY =
+                    ((compH * scale - constraints.maxHeight) / 2).clamp(
+                          0.0,
+                          double.infinity,
+                        ) +
+                        48;
+                final pan = zoomDoPalco == 1.0
+                    ? Offset.zero
+                    : Offset(
+                        _panDoPalco.dx.clamp(-folgaX, folgaX),
+                        _panDoPalco.dy.clamp(-folgaY, folgaY),
+                      );
                 _stageScale = scale;
-                _stageOrigin = frame.topLeft;
+                _stageOrigin =
+                    Offset(
+                      (constraints.maxWidth - compW * scale) / 2,
+                      (constraints.maxHeight - compH * scale) / 2,
+                    ) +
+                    pan;
                 _tamanhoDoPalco = Size(
                   constraints.maxWidth,
                   constraints.maxHeight,
                 );
-                return Center(
-                  child: SizedBox(
-                    width: compW * scale,
-                    height: compH * scale,
-                    child: CompositionFrame(
+                return Stack(
+                  clipBehavior: Clip.hardEdge,
+                  children: [
+                    Positioned(
+                      left: _stageOrigin.dx,
+                      top: _stageOrigin.dy,
+                      width: compW * scale,
+                      height: compH * scale,
+                      child: CompositionFrame(
                       key: const ValueKey('composition-frame'),
                       // O filho precisa ter também a área de toque da
                       // composição. Transform + OverflowBox só escalava a
@@ -621,9 +672,11 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
                                         : DitherLayer(
                                             time: t,
                                             // Escala do palco x DPR de verdade: e o
-                                            // tamanho da textura do filtro.
+                                            // tamanho da textura do filtro. O AJUSTE
+                                            // (sem o zoom do trilho) — aproximar o
+                                            // palco nao pode quadruplicar a textura.
                                             pixelRatio:
-                                                scale *
+                                                ajuste *
                                                 MediaQuery.devicePixelRatioOf(
                                                   context,
                                                 ),
@@ -719,6 +772,7 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
                       ),
                     ),
                   ),
+                  ],
                 );
               },
             ),

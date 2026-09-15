@@ -41,8 +41,7 @@ import 'context/categories/text_panel.dart';
 import 'context/context_sheet.dart';
 import 'context/layer_header.dart';
 import 'shell/layer_actions.dart';
-import 'shell/top_bar.dart';
-import 'shell/transport_bar.dart';
+import 'shell/cromo_am.dart';
 import 'shell/barra_de_tempo_tela_cheia.dart';
 import 'widgets/add_layer_sheet.dart';
 import 'widgets/mask_node_editor.dart';
@@ -116,7 +115,10 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
     // ABRIR UM PROJETO precisa montar os tocadores AGORA: o relogio esta
     // parado no zero e o sync so aconteceria quando ele andasse.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _syncVideos();
+      if (!mounted) return;
+      _syncVideos();
+      // O zoom do palco e da sessao de edicao: entra sempre ajustado.
+      ref.read(zoomDoPalcoProvider.notifier).state = 1.0;
     });
   }
 
@@ -237,19 +239,6 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
         _session.closePanel();
     }
   }
-
-  bool get _temContexto {
-    final s = _s;
-    return s.panel != EditorPanel.none ||
-        ref.read(freehandRequestProvider) ||
-        s.previewExpanded ||
-        s.timelineExpanded ||
-        ref.read(selectedLayerProvider) != null ||
-        ref.read(multiSelectProvider).isNotEmpty ||
-        ref.read(editorControllerProvider.notifier).dentroDeGrupo;
-  }
-
-  String get _backLabel => _temContexto ? 'Voltar' : 'Projetos';
 
   /// Titulo da categoria aberta (cabecalho da zona E).
   String? _tituloDoPainel(EditorSession s) => switch (s.panel) {
@@ -915,26 +904,38 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                 // AS PECAS, montadas uma vez; o arranjo depende da largura
                 // (Fase 7: acima de 700 pt, timeline e painel lado a lado —
                 // tablet e paisagem).
+                // O PALCO COM O TRILHO DO AM: solo, cameras e o zoom
+                // moram num trilho colado a direita, sobre o preview.
                 Widget preview(double? altura) => SizedBox(
                   height: altura,
-                  child: RepaintBoundary(
-                    key: previewStageKey,
-                    child: PreviewStage(playback: _playback, videos: _videos),
+                  child: Stack(
+                    children: [
+                      Positioned.fill(
+                        child: RepaintBoundary(
+                          key: previewStageKey,
+                          child: PreviewStage(
+                            playback: _playback,
+                            videos: _videos,
+                          ),
+                        ),
+                      ),
+                      if (!s.previewExpanded)
+                        Positioned(
+                          right: 0,
+                          top: 8,
+                          child: TrilhoDoPalco(playback: _playback),
+                        ),
+                    ],
                   ),
                 );
                 final alca = PreviewResizeHandle(
                   expanded: false,
                   onExpand: _session.togglePreviewExpanded,
                 );
-                final transporte = EditorTransportBar(
-                  playback: _playback,
-                  keyframeEnabled: layer != null,
-                  keyframeHere: layer != null && _keyframeAqui(layer, s),
-                  onKeyframe: () {
-                    if (layer != null) _toggleKeyframe(layer, s);
-                  },
-                  onAdd: s.adding ? null : _openAdd,
-                );
+                final transporte = AmPlaybar(playback: _playback);
+                final barraDoTopo = multi.isNotEmpty
+                    ? AmSelectbar(playback: _playback) as Widget
+                    : AmNavbar(onBack: _back, playback: _playback);
                 Widget timeline(double alturaTimeline) => RepaintBoundary(
                   child: AmTimeline(
                     playback: _playback,
@@ -966,7 +967,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                 );
                 Widget folha(double alturaFolha) => ContextSheet(
                   height: alturaFolha,
-                  title: null,
+                  title: titulo,
                   subtitle: trilha,
                   onBack: titulo == null ? null : _back,
                   child: RepaintBoundary(child: conteudo),
@@ -994,11 +995,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                       Column(
                         key: const ValueKey('editor-largo'),
                         children: [
-                          EditorTopBar(
-                            onBack: _back,
-                            backLabel: _backLabel,
-                            title: titulo,
-                          ),
+                          barraDoTopo,
                           Expanded(
                             child: Row(
                               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1027,12 +1024,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                     else
                       Column(
                         children: [
-                          if (!s.previewExpanded)
-                            EditorTopBar(
-                              onBack: _back,
-                              backLabel: _backLabel,
-                              title: titulo,
-                            ),
+                          if (!s.previewExpanded) barraDoTopo,
                           preview(
                             s.previewExpanded
                                 ? (m.preview - BarraDeTempoTelaCheia.altura)
@@ -1050,10 +1042,12 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                           ],
                         ],
                       ),
+                    // O "+" DO AM: circulo escuro com anel verde, no
+                    // canto de baixo a direita da timeline; o ⋮ fica no
+                    // canto esquerdo (a planta exata do activity_edit).
                     if (!s.previewExpanded &&
                         !s.adding &&
-                        layer == null &&
-                        targets.isEmpty)
+                        s.panel == EditorPanel.none)
                       Positioned(
                         right: 18 + (largo ? larguraFolha : 0),
                         bottom: 18 + (largo || conteudo == null ? 0 : m.sheet),
@@ -1067,9 +1061,9 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                               height: 52,
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
-                                color: const Color(0xFF1E222D),
+                                color: const Color(0xFF1E2130),
                                 border: Border.all(
-                                  color: const Color(0xFF1ED6B1),
+                                  color: CromoAM.verde,
                                   width: 2.2,
                                 ),
                                 boxShadow: const [
@@ -1083,9 +1077,76 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                               child: const Icon(
                                 Icons.add,
                                 size: 32,
-                                color: Color(0xFF1ED6B1),
+                                color: CromoAM.verde,
                               ),
                             ),
+                          ),
+                        ),
+                      ),
+                    if (!s.previewExpanded &&
+                        !s.adding &&
+                        s.panel == EditorPanel.none &&
+                        !largo)
+                      Positioned(
+                        left: 14,
+                        bottom: 24 + (conteudo == null ? 0 : m.sheet),
+                        child: Tooltip(
+                          message: 'Mais da timeline',
+                          child: GestureDetector(
+                            key: const ValueKey('timeline-overflow'),
+                            onTap: () => menuDaTimeline(
+                              context,
+                              ref,
+                              _playback,
+                              onAgrupar: _agruparPorEscolha,
+                              onGuia: () {
+                                _playback.pause();
+                                Navigator.of(context).push(
+                                  MaterialPageRoute<void>(
+                                    builder: (_) => const QuickGuideScreen(
+                                      initialQuery: '',
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                            child: Container(
+                              width: 38,
+                              height: 38,
+                              decoration: const BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: Color(0xE6262A3E),
+                              ),
+                              child: const Icon(
+                                Icons.more_vert,
+                                size: 22,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    // A BARRA DA SELECAO DO AM: aparar, dividir, ◆,
+                    // duplicar e excluir flutuam no pe da timeline
+                    // enquanto ha UMA camada selecionada — com painel
+                    // aberto tambem, porque o ◆ crava na propriedade da
+                    // categoria (a regra do _propsDoDiamante).
+                    if (!s.previewExpanded &&
+                        !s.adding &&
+                        layer != null &&
+                        targets.length < 2)
+                      Positioned(
+                        left: 0,
+                        right: largo ? larguraFolha : 0,
+                        bottom: largo
+                            ? 12
+                            : 6 + (conteudo == null ? 12 : m.sheet),
+                        child: Center(
+                          child: BarraDaSelecao(
+                            playback: _playback,
+                            layerId: layer.id,
+                            keyframeHere: _keyframeAqui(layer, s),
+                            onKeyframe: () => _toggleKeyframe(layer, s),
                           ),
                         ),
                       ),

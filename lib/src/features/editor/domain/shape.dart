@@ -304,7 +304,55 @@ class ShapePath extends ShapeItem {
 /// parametro do CAMINHO, nao da transform — animar Tamanho muda a
 /// geometria e o traco fica com a mesma espessura; animar Escala (na
 /// camada) engorda tudo junto, como no AE.
-enum ParamShapeKind { rect, ellipse, polygon, star, sector }
+enum ParamShapeKind {
+  rect,
+  ellipse,
+  polygon,
+  star,
+  sector,
+  // FORMAS VIVAS (v1.1.1), no fim: os indices antigos continuam valendo.
+  seta,
+  linhaLarga,
+  lua,
+  multifolio,
+  mais,
+  selo,
+  gota,
+  balao,
+}
+
+/// OS PARAMETROS EXTRAS de cada forma viva — os que nao cabem nos campos
+/// classicos da forma parametrica. Moram em [ShapeParametric.extras].
+List<String> extrasDaForma(ParamShapeKind kind) => switch (kind) {
+  ParamShapeKind.seta => const [
+    'larguraDaCauda',
+    'larguraDaCabeca',
+    'comprimentoDaCabeca',
+  ],
+  ParamShapeKind.linhaLarga || ParamShapeKind.mais => const ['largura'],
+  ParamShapeKind.lua => const ['deslocamento'],
+  ParamShapeKind.selo => const ['picote', 'espacamento'],
+  ParamShapeKind.gota => const ['cauda', 'aperto', 'larguraDaPonta'],
+  ParamShapeKind.balao => const ['caudaX', 'caudaY', 'largura'],
+  _ => const [],
+};
+
+/// O valor de um extra que a forma ainda nao guardou.
+double? padraoDoExtraDaForma(String chave) => switch (chave) {
+  'larguraDaCauda' => 40,
+  'larguraDaCabeca' => 120,
+  'comprimentoDaCabeca' => 130,
+  'largura' => 60,
+  'deslocamento' => 70,
+  'picote' => 36,
+  'espacamento' => 18,
+  'cauda' => 150,
+  'aperto' => 2.5,
+  'larguraDaPonta' => 0,
+  'caudaX' => -60,
+  'caudaY' => 110,
+  _ => null,
+};
 
 /// Caminho parametrico: TODO numero que descreve a forma e animavel, com
 /// trilha propria de keyframes e curva. Avaliado por tempo (geometria ->
@@ -330,7 +378,9 @@ class ShapeParametric extends ShapeItem {
     AnimatedDouble? startAngle,
     AnimatedDouble? sweep,
     AnimatedDouble? sectorInner,
-  }) : sizeX = sizeX ?? AnimatedDouble(200),
+    Map<String, AnimatedDouble>? extras,
+  }) : extras = Map.unmodifiable(extras ?? const <String, AnimatedDouble>{}),
+       sizeX = sizeX ?? AnimatedDouble(200),
        sizeY = sizeY ?? AnimatedDouble(200),
        roundness = roundness ?? AnimatedDouble(0),
        points = points ?? AnimatedDouble(5),
@@ -385,6 +435,11 @@ class ShapeParametric extends ShapeItem {
   final AnimatedDouble sweep;
   final AnimatedDouble sectorInner;
 
+  /// FORMAS VIVAS: os numeros proprios de cada tipo (largura da haste da
+  /// seta, picote do selo, cauda do balao...), por nome. Ausente = o
+  /// padrao de [padraoDoExtraDaForma].
+  final Map<String, AnimatedDouble> extras;
+
   String? _memoKey;
   Path? _memoPath;
 
@@ -407,11 +462,15 @@ class ShapeParametric extends ShapeItem {
     final a0 = startAngle.valueAt(t);
     final sw = sweep.valueAt(t).clamp(0.0, 360.0);
     final secIn = math.max(0.0, sectorInner.valueAt(t));
+    final ex = <String, double>{
+      for (final k in extrasDaForma(kind))
+        k: extras[k]?.valueAt(t) ?? padraoDoExtraDaForma(k)!,
+    };
 
     final key =
         '$kind|$sx|$sy|$round|$roundTopLeft|$roundTopRight|'
         '$roundBottomRight|$roundBottomLeft|$roundnessPercent|$p|$rOut|$rIn|'
-        '$roundOut|$roundIn|$rotDeg|$a0|$sw|$secIn';
+        '$roundOut|$roundIn|$rotDeg|$a0|$sw|$secIn|${ex.values.join('|')}';
     if (key == _memoKey && _memoPath != null) return _memoPath!;
     final path = _buildFrom(
       sx,
@@ -429,6 +488,7 @@ class ShapeParametric extends ShapeItem {
       a0,
       sw,
       secIn,
+      ex,
     );
     _memoKey = key;
     _memoPath = path;
@@ -451,7 +511,15 @@ class ShapeParametric extends ShapeItem {
     double a0,
     double sw,
     double secIn,
+    Map<String, double> ex,
   ) {
+    // O canto das formas vivas: em % (100 = meia largura da parte mais
+    // estreita) ou em px, sempre preso na metade dela.
+    double canto(double valor, double metade) =>
+        (roundnessPercent ? valor / 100 * metade : valor).clamp(
+          0.0,
+          math.max(0.0, metade),
+        );
     switch (kind) {
       case ParamShapeKind.rect:
         final rect = Rect.fromCenter(
@@ -549,6 +617,65 @@ class ShapeParametric extends ShapeItem {
             ..close();
         }
         return path;
+      case ParamShapeKind.seta:
+        return _girarForma(
+          _caminhoDaSeta(
+            sx,
+            ex['larguraDaCauda']!,
+            ex['larguraDaCabeca']!,
+            ex['comprimentoDaCabeca']!,
+          ),
+          rotDeg,
+        );
+      case ParamShapeKind.linhaLarga:
+        final largura = math.max(0.0, ex['largura']!);
+        return _girarForma(
+          _caminhoDaCapsula(sx, largura, canto(roundTopLeft, largura / 2)),
+          rotDeg,
+        );
+      case ParamShapeKind.lua:
+        return _girarForma(_caminhoDaLua(rOut, ex['deslocamento']!), rotDeg);
+      case ParamShapeKind.multifolio:
+        return _girarForma(_caminhoDoMultifolio(p, rOut, rIn), rotDeg);
+      case ParamShapeKind.mais:
+        final largura = ex['largura']!.clamp(0.0, sx);
+        return _girarForma(
+          _caminhoDoMais(sx, largura, canto(roundTopLeft, largura / 2)),
+          rotDeg,
+        );
+      case ParamShapeKind.selo:
+        return _girarForma(
+          _caminhoDoSelo(
+            sx,
+            sy,
+            canto(roundTopLeft, math.min(sx, sy) / 2),
+            ex['picote']!,
+            ex['espacamento']!,
+          ),
+          rotDeg,
+        );
+      case ParamShapeKind.gota:
+        return _girarForma(
+          _caminhoDaGota(
+            rOut,
+            ex['cauda']!,
+            ex['aperto']!,
+            ex['larguraDaPonta']!,
+          ),
+          rotDeg,
+        );
+      case ParamShapeKind.balao:
+        return _girarForma(
+          _caminhoDoBalao(
+            sx,
+            sy,
+            canto(roundTopLeft, math.min(sx, sy) / 2),
+            ex['caudaX']!,
+            ex['caudaY']!,
+            ex['largura']!,
+          ),
+          rotDeg,
+        );
     }
   }
 
@@ -629,6 +756,7 @@ class ShapeParametric extends ShapeItem {
     AnimatedDouble? startAngle,
     AnimatedDouble? sweep,
     AnimatedDouble? sectorInner,
+    Map<String, AnimatedDouble>? extras,
   }) {
     return ShapeParametric(
       id: id,
@@ -650,8 +778,351 @@ class ShapeParametric extends ShapeItem {
       startAngle: startAngle ?? this.startAngle,
       sweep: sweep ?? this.sweep,
       sectorInner: sectorInner ?? this.sectorInner,
+      extras: extras ?? this.extras,
     );
   }
+}
+
+/// UMA ALCA DE PARAMETRO no desenho da forma (espaco do desenho, centro
+/// em 0,0): arrastar a alca muda o(s) numero(s) da [chave].
+typedef AlcaDaForma = ({String chave, Offset ponto});
+
+/// O giro que a forma aplica ao proprio desenho (as classicas retangulo,
+/// elipse e setor nao giram o desenho).
+double _giroDoDesenho(ShapeParametric s, Duration t) => switch (s.kind) {
+  ParamShapeKind.rect || ParamShapeKind.ellipse || ParamShapeKind.sector => 0,
+  _ => s.shapeRotation.valueAt(t) * math.pi / 180,
+};
+
+Offset _girarPonto(Offset p, double a) {
+  if (a == 0) return p;
+  final c = math.cos(a), s = math.sin(a);
+  return Offset(p.dx * c - p.dy * s, p.dx * s + p.dy * c);
+}
+
+double _extraEm(ShapeParametric s, String chave, Duration t) =>
+    s.extras[chave]?.valueAt(t) ?? padraoDoExtraDaForma(chave) ?? 0;
+
+/// AS ALCAS de cada forma: tamanho nas bordas, raios nas pontas, a cauda
+/// do balao e da gota, a largura da seta — os numeros que fazem sentido
+/// puxar com o dedo.
+List<AlcaDaForma> alcasDaForma(ShapeParametric s, Duration t) {
+  final sx = math.max(0.0, s.sizeX.valueAt(t));
+  final sy = math.max(0.0, s.sizeY.valueAt(t));
+  final rOut = math.max(0.0, s.outerRadius.valueAt(t));
+  final rIn = math.max(0.0, s.innerRadius.valueAt(t));
+  final giro = _giroDoDesenho(s, t);
+  AlcaDaForma a(String chave, Offset p) => (chave: chave, ponto: _girarPonto(p, giro));
+  switch (s.kind) {
+    case ParamShapeKind.rect:
+    case ParamShapeKind.ellipse:
+    case ParamShapeKind.selo:
+      return [a('sizeX', Offset(sx / 2, 0)), a('sizeY', Offset(0, sy / 2))];
+    case ParamShapeKind.balao:
+      return [
+        a('sizeX', Offset(sx / 2, 0)),
+        a('sizeY', Offset(0, -sy / 2)),
+        a('cauda', Offset(_extraEm(s, 'caudaX', t), sy / 2 + _extraEm(s, 'caudaY', t))),
+      ];
+    case ParamShapeKind.polygon:
+      return [a('outerRadius', Offset(0, -rOut))];
+    case ParamShapeKind.star:
+    case ParamShapeKind.multifolio:
+      final n = s.points.valueAt(t).clamp(2.0, 100.0);
+      final ang = math.pi / n - math.pi / 2;
+      return [
+        a('outerRadius', Offset(0, -rOut)),
+        a('innerRadius', Offset(math.cos(ang) * rIn, math.sin(ang) * rIn)),
+      ];
+    case ParamShapeKind.sector:
+      final a0 = (s.startAngle.valueAt(t) - 90) * math.pi / 180;
+      final a1 = a0 + s.sweep.valueAt(t).clamp(0.0, 360.0) * math.pi / 180;
+      Offset polar(double ang, double r) => Offset(math.cos(ang) * r, math.sin(ang) * r);
+      final furo = math.max(0.0, s.sectorInner.valueAt(t));
+      return [
+        a('outerRadius', polar(a0, rOut)),
+        a('sweep', polar(a1, rOut)),
+        if (furo > 0) a('sectorInner', polar(a0, furo)),
+      ];
+    case ParamShapeKind.seta:
+      final ponta = _extraEm(s, 'comprimentoDaCabeca', t).clamp(0.0, sx);
+      return [
+        a('sizeX', Offset(sx / 2, 0)),
+        a('larguraDaCabeca', Offset(sx / 2 - ponta, -_extraEm(s, 'larguraDaCabeca', t) / 2)),
+        a('larguraDaCauda', Offset(-sx / 2, -_extraEm(s, 'larguraDaCauda', t) / 2)),
+      ];
+    case ParamShapeKind.linhaLarga:
+    case ParamShapeKind.mais:
+      return [
+        a('sizeX', Offset(sx / 2, 0)),
+        a('largura', Offset(0, -_extraEm(s, 'largura', t) / 2)),
+      ];
+    case ParamShapeKind.lua:
+      return [
+        a('outerRadius', Offset(0, -rOut)),
+        a('deslocamento', Offset(_extraEm(s, 'deslocamento', t) - rOut, 0)),
+      ];
+    case ParamShapeKind.gota:
+      final cauda = math.max(0.0, _extraEm(s, 'cauda', t));
+      return [
+        a('outerRadius', Offset(rOut, cauda / 2)),
+        a('cauda', Offset(0, -rOut - cauda / 2)),
+      ];
+  }
+}
+
+/// O QUE A ALCA [chave] VIRA com o dedo em [ponto] (espaco do desenho):
+/// um ou dois parametros, ja com os limites de cada um.
+Map<String, double> valoresDaAlcaDaForma(
+  ShapeParametric s,
+  String chave,
+  Offset ponto,
+  Duration t,
+) {
+  final p = _girarPonto(ponto, -_giroDoDesenho(s, t));
+  final sy = math.max(0.0, s.sizeY.valueAt(t));
+  final rOut = math.max(0.0, s.outerRadius.valueAt(t));
+  switch (chave) {
+    case 'sizeX':
+      return {'sizeX': math.max(1.0, p.dx.abs() * 2)};
+    case 'sizeY':
+      return {'sizeY': math.max(1.0, p.dy.abs() * 2)};
+    case 'outerRadius':
+      return {
+        'outerRadius': math.max(
+          1.0,
+          s.kind == ParamShapeKind.gota ? p.dx.abs() : p.distance,
+        ),
+      };
+    case 'innerRadius':
+      return {'innerRadius': math.max(0.0, p.distance)};
+    case 'sectorInner':
+      return {'sectorInner': p.distance.clamp(0.0, rOut)};
+    case 'sweep':
+      final ang = math.atan2(p.dy, p.dx) * 180 / math.pi + 90;
+      final varredura = (ang - s.startAngle.valueAt(t)) % 360;
+      return {'sweep': varredura < 0 ? varredura + 360 : varredura};
+    case 'larguraDaCabeca':
+    case 'larguraDaCauda':
+    case 'largura':
+      return {chave: math.max(0.0, p.dy.abs() * 2)};
+    case 'deslocamento':
+      return {'deslocamento': (p.dx + rOut).clamp(0.0, rOut * 2)};
+    case 'cauda':
+      if (s.kind == ParamShapeKind.balao) {
+        return {'caudaX': p.dx, 'caudaY': math.max(0.0, p.dy - sy / 2)};
+      }
+      return {'cauda': math.max(0.0, -2 * (p.dy + rOut))};
+    default:
+      return const {};
+  }
+}
+
+/// Gira um caminho da forma viva em torno do centro.
+Path _girarForma(Path caminho, double graus) {
+  if (graus.abs() < 1e-9) return caminho;
+  return caminho.transform(
+    Matrix4Lite.rotacaoETranslacao(graus * math.pi / 180, Offset.zero),
+  );
+}
+
+/// SETA deitada no eixo X, centrada: haste, e a ponta triangular no fim.
+Path _caminhoDaSeta(
+  double comprimento,
+  double larguraDaHaste,
+  double larguraDaPonta,
+  double comprimentoDaPonta,
+) {
+  final l = math.max(0.0, comprimento);
+  if (l <= 0) return Path();
+  final meiaPonta = math.max(0.0, larguraDaPonta) / 2;
+  final meiaHaste = math.max(0.0, larguraDaHaste) / 2;
+  final ponta = comprimentoDaPonta.clamp(0.0, l);
+  final inicio = -l / 2;
+  final base = l / 2 - ponta;
+  return Path()
+    ..moveTo(inicio, -meiaHaste)
+    ..lineTo(base, -meiaHaste)
+    ..lineTo(base, -meiaPonta)
+    ..lineTo(l / 2, 0)
+    ..lineTo(base, meiaPonta)
+    ..lineTo(base, meiaHaste)
+    ..lineTo(inicio, meiaHaste)
+    ..close();
+}
+
+/// LINHA LARGA: uma faixa com as pontas arredondadas pelo canto.
+Path _caminhoDaCapsula(double comprimento, double largura, double raio) {
+  final l = math.max(0.0, comprimento);
+  if (l <= 0 || largura <= 0) return Path();
+  return Path()..addRRect(
+    RRect.fromRectAndRadius(
+      Rect.fromCenter(center: Offset.zero, width: l, height: largura),
+      Radius.circular(raio),
+    ),
+  );
+}
+
+/// LUA: o circulo menos outro igual, deslocado para a direita.
+Path _caminhoDaLua(double raio, double deslocamento) {
+  if (raio <= 0 || deslocamento <= 0) return Path();
+  final cheia = Path()
+    ..addOval(Rect.fromCircle(center: Offset.zero, radius: raio));
+  if (deslocamento >= 2 * raio) return cheia;
+  final recorte = Path()
+    ..addOval(Rect.fromCircle(center: Offset(deslocamento, 0), radius: raio));
+  return Path.combine(PathOperation.difference, cheia, recorte);
+}
+
+/// MULTIFOLIO: petalas redondas em volta do centro, a primeira em cima.
+Path _caminhoDoMultifolio(double pontas, double raioExterno, double raioInterno) {
+  final n = pontas.round().clamp(2, 32);
+  final amostras = math.max(120, n * 36);
+  final caminho = Path();
+  for (var i = 0; i <= amostras; i++) {
+    final a = i / amostras * 2 * math.pi;
+    final r = raioInterno + (raioExterno - raioInterno) * math.cos(n * a / 2).abs();
+    final x = math.cos(a - math.pi / 2) * r;
+    final y = math.sin(a - math.pi / 2) * r;
+    if (i == 0) {
+      caminho.moveTo(x, y);
+    } else {
+      caminho.lineTo(x, y);
+    }
+  }
+  return caminho..close();
+}
+
+/// MAIS: duas barras cruzadas, com os cantos arredondados.
+Path _caminhoDoMais(double tamanho, double largura, double raio) {
+  if (tamanho <= 0 || largura <= 0) return Path();
+  Path barra(double w, double h) => Path()
+    ..addRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(center: Offset.zero, width: w, height: h),
+        Radius.circular(raio),
+      ),
+    );
+  return Path.combine(
+    PathOperation.union,
+    barra(tamanho, largura),
+    barra(largura, tamanho),
+  );
+}
+
+/// SELO: o retangulo com furos redondos espalhados por igual nas bordas.
+Path _caminhoDoSelo(
+  double largura,
+  double altura,
+  double raio,
+  double picote,
+  double espacamento,
+) {
+  if (largura <= 0 || altura <= 0) return Path();
+  final base = Path()
+    ..addRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(center: Offset.zero, width: largura, height: altura),
+        Radius.circular(raio),
+      ),
+    );
+  final d = picote.clamp(0.0, math.min(largura, altura) / 2);
+  if (d < 1) return base;
+  final passo = d + math.max(0.0, espacamento);
+  final furos = Path();
+  // Furos do tamanho do picote com o espacamento exato entre eles, e a
+  // fileira centrada na borda: mexer no espacamento anda com os furos.
+  final folga = math.max(0.0, espacamento);
+  void fileira(Offset a, Offset b) {
+    final comprimento = (b - a).distance;
+    final n = ((comprimento + folga) / passo).floor();
+    if (n <= 0) return;
+    final direcao = (b - a) / comprimento;
+    final usado = n * d + (n - 1) * folga;
+    final primeiro = (comprimento - usado) / 2 + d / 2;
+    for (var i = 0; i < n; i++) {
+      furos.addOval(
+        Rect.fromCircle(
+          center: a + direcao * (primeiro + i * passo),
+          radius: d / 2,
+        ),
+      );
+    }
+  }
+
+  final w = largura / 2, h = altura / 2;
+  fileira(Offset(-w, -h), Offset(w, -h));
+  fileira(Offset(-w, h), Offset(w, h));
+  fileira(Offset(-w, -h), Offset(-w, h));
+  fileira(Offset(w, -h), Offset(w, h));
+  return Path.combine(PathOperation.difference, base, furos);
+}
+
+/// GOTA: o circulo embaixo e a cauda subindo ate a ponta; o aperto afina
+/// a cauda, e a largura da ponta achata o bico.
+Path _caminhoDaGota(double raio, double cauda, double aperto, double ponta) {
+  if (raio <= 0) return Path();
+  final c = math.max(0.0, cauda);
+  final centro = c / 2;
+  final topo = centro - raio - c;
+  final ap = aperto.clamp(.5, 10.0);
+  final meiaPonta = math.max(0.0, ponta) / 2;
+  final altura = raio + c;
+  final ombro = centro - raio * (.25 + .9 / ap);
+  return Path()
+    ..moveTo(-meiaPonta, topo)
+    ..cubicTo(
+      -meiaPonta - raio * .15 / ap,
+      topo + altura * .45,
+      -raio,
+      ombro,
+      -raio,
+      centro,
+    )
+    ..arcTo(
+      Rect.fromCircle(center: Offset(0, centro), radius: raio),
+      math.pi,
+      -math.pi,
+      false,
+    )
+    ..cubicTo(
+      raio,
+      ombro,
+      meiaPonta + raio * .15 / ap,
+      topo + altura * .45,
+      meiaPonta,
+      topo,
+    )
+    ..close();
+}
+
+/// BALAO DE FALA: o corpo arredondado e a cauda saindo do meio da base
+/// ate o ponto (caudaX, caudaY) abaixo dela.
+Path _caminhoDoBalao(
+  double largura,
+  double altura,
+  double raio,
+  double caudaX,
+  double caudaY,
+  double larguraDaCauda,
+) {
+  if (largura <= 0 || altura <= 0) return Path();
+  final corpo = Path()
+    ..addRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(center: Offset.zero, width: largura, height: altura),
+        Radius.circular(raio),
+      ),
+    );
+  final meia = math.min(larguraDaCauda / 2, largura / 2 - raio);
+  if (caudaY <= 0 || meia <= 0) return corpo;
+  final base = altura / 2 - 1;
+  final cauda = Path()
+    ..moveTo(-meia, base)
+    ..lineTo(caudaX, altura / 2 + caudaY)
+    ..lineTo(meia, base)
+    ..close();
+  return Path.combine(PathOperation.union, corpo, cauda);
 }
 
 /// Trilha animavel da primitiva parametrica por nome (controller e curve
@@ -689,11 +1160,81 @@ List<String> parametrosDaForma(ParamShapeKind kind) => switch (kind) {
     'sweep',
     'sectorInner',
   ],
+  ParamShapeKind.seta => const [
+    'sizeX',
+    'larguraDaCauda',
+    'larguraDaCabeca',
+    'comprimentoDaCabeca',
+    'shapeRotation',
+  ],
+  ParamShapeKind.linhaLarga => const [
+    'sizeX',
+    'largura',
+    'roundness',
+    'shapeRotation',
+  ],
+  ParamShapeKind.lua => const ['outerRadius', 'deslocamento', 'shapeRotation'],
+  ParamShapeKind.multifolio => const [
+    'points',
+    'outerRadius',
+    'innerRadius',
+    'shapeRotation',
+  ],
+  ParamShapeKind.mais => const ['sizeX', 'largura', 'roundness', 'shapeRotation'],
+  ParamShapeKind.selo => const [
+    'sizeX',
+    'sizeY',
+    'roundness',
+    'picote',
+    'espacamento',
+    'shapeRotation',
+  ],
+  ParamShapeKind.gota => const [
+    'outerRadius',
+    'cauda',
+    'aperto',
+    'larguraDaPonta',
+    'shapeRotation',
+  ],
+  ParamShapeKind.balao => const [
+    'sizeX',
+    'sizeY',
+    'roundness',
+    'caudaX',
+    'caudaY',
+    'largura',
+    'shapeRotation',
+  ],
 };
 
-/// O nome humano de cada parametro, e o teto para o passo da fita.
-({String rotulo, double teto}) fichaDoParametroDaForma(String chave) =>
+/// O menor valor que faz sentido para cada parametro na ficha.
+double minimoDoParametroDaForma(String chave) => switch (chave) {
+  'caudaX' => -1000,
+  'startAngle' || 'shapeRotation' => -360,
+  'points' => 2,
+  'aperto' => .5,
+  _ => 0,
+};
+
+/// O nome humano de cada parametro, e o teto para o passo da fita. Com
+/// [kind], a largura da seta vira comprimento e a do mais vira tamanho.
+({String rotulo, double teto}) fichaDoParametroDaForma(
+  String chave, [
+  ParamShapeKind? kind,
+]) =>
     switch (chave) {
+      'sizeX' when kind == ParamShapeKind.seta ||
+          kind == ParamShapeKind.linhaLarga =>
+        (rotulo: 'Comprimento', teto: 2000),
+      'sizeX' when kind == ParamShapeKind.mais =>
+        (rotulo: 'Tamanho', teto: 2000),
+      'largura' when kind == ParamShapeKind.balao =>
+        (rotulo: 'Largura da cauda', teto: 1000),
+      'largura' when kind == ParamShapeKind.mais =>
+        (rotulo: 'Espessura', teto: 1000),
+      'outerRadius' when kind == ParamShapeKind.lua ||
+          kind == ParamShapeKind.gota =>
+        (rotulo: 'Raio', teto: 1000),
       'sizeX' => (rotulo: 'Largura', teto: 2000),
       'sizeY' => (rotulo: 'Altura', teto: 2000),
       'roundness' => (rotulo: 'Cantos', teto: 400),
@@ -706,6 +1247,18 @@ List<String> parametrosDaForma(ParamShapeKind kind) => switch (kind) {
       'startAngle' => (rotulo: 'Angulo inicial', teto: 360),
       'sweep' => (rotulo: 'Abertura', teto: 360),
       'sectorInner' => (rotulo: 'Furo', teto: 1000),
+      'larguraDaCauda' => (rotulo: 'Largura da haste', teto: 1000),
+      'larguraDaCabeca' => (rotulo: 'Largura da ponta', teto: 1000),
+      'comprimentoDaCabeca' => (rotulo: 'Comprimento da ponta', teto: 1000),
+      'largura' => (rotulo: 'Largura', teto: 1000),
+      'deslocamento' => (rotulo: 'Recorte', teto: 1000),
+      'picote' => (rotulo: 'Picote', teto: 300),
+      'espacamento' => (rotulo: 'Espaçamento', teto: 300),
+      'cauda' => (rotulo: 'Cauda', teto: 1000),
+      'aperto' => (rotulo: 'Aperto', teto: 10),
+      'larguraDaPonta' => (rotulo: 'Bico', teto: 300),
+      'caudaX' => (rotulo: 'Cauda X', teto: 1000),
+      'caudaY' => (rotulo: 'Cauda Y', teto: 1000),
       _ => (rotulo: chave, teto: 1000),
     };
 
@@ -727,7 +1280,12 @@ AnimatedDouble? shapeParamTrackOf(ShapeParametric s, String key) =>
       'startAngle' => s.startAngle,
       'sweep' => s.sweep,
       'sectorInner' => s.sectorInner,
-      _ => null,
+      _ =>
+        s.extras[key] ??
+            switch (padraoDoExtraDaForma(key)) {
+              final double padrao => AnimatedDouble(padrao),
+              null => null,
+            },
     };
 
 ShapeParametric shapeParamWithTrack(
@@ -751,6 +1309,9 @@ ShapeParametric shapeParamWithTrack(
   'startAngle' => s.copyWith(startAngle: v),
   'sweep' => s.copyWith(sweep: v),
   'sectorInner' => s.copyWith(sectorInner: v),
+  _ when padraoDoExtraDaForma(key) != null => s.copyWith(
+    extras: {...s.extras, key: v},
+  ),
   _ => s,
 };
 
@@ -2099,6 +2660,86 @@ abstract final class ShapePresets {
       sweep: AnimatedDouble(360),
     ),
     ShapeFill(color: const Color(0xFF2BE3A0)),
+  ];
+
+  // ------ FORMAS VIVAS (v1.1.1): todo numero anima, com a ficha propria ---
+
+  static List<ShapeItem> paramSeta() => [
+    ShapeParametric(kind: ParamShapeKind.seta, sizeX: AnimatedDouble(420)),
+    ShapeFill(color: const Color(0xFF35C4E7)),
+  ];
+
+  static List<ShapeItem> paramLinhaLarga() => [
+    ShapeParametric(
+      kind: ParamShapeKind.linhaLarga,
+      sizeX: AnimatedDouble(460),
+      roundness: AnimatedDouble(100),
+      extras: {'largura': AnimatedDouble(48)},
+    ),
+    ShapeFill(color: const Color(0xFFFFFFFF)),
+  ];
+
+  static List<ShapeItem> paramLua() => [
+    ShapeParametric(
+      kind: ParamShapeKind.lua,
+      outerRadius: AnimatedDouble(160),
+      extras: {'deslocamento': AnimatedDouble(90)},
+    ),
+    ShapeFill(color: const Color(0xFFFFD66B)),
+  ];
+
+  static List<ShapeItem> paramMultifolio() => [
+    ShapeParametric(
+      kind: ParamShapeKind.multifolio,
+      points: AnimatedDouble(5),
+      outerRadius: AnimatedDouble(170),
+      innerRadius: AnimatedDouble(95),
+    ),
+    ShapeFill(color: const Color(0xFFE85B81)),
+  ];
+
+  static List<ShapeItem> paramMais() => [
+    ShapeParametric(
+      kind: ParamShapeKind.mais,
+      sizeX: AnimatedDouble(300),
+      extras: {'largura': AnimatedDouble(90)},
+    ),
+    ShapeFill(color: const Color(0xFF2BE3A0)),
+  ];
+
+  static List<ShapeItem> paramSelo() => [
+    ShapeParametric(
+      kind: ParamShapeKind.selo,
+      sizeX: AnimatedDouble(320),
+      sizeY: AnimatedDouble(380),
+    ),
+    ShapeFill(color: const Color(0xFFF4EDE1)),
+  ];
+
+  static List<ShapeItem> paramGota() => [
+    ShapeParametric(kind: ParamShapeKind.gota, outerRadius: AnimatedDouble(120)),
+    ShapeFill(color: const Color(0xFF4A9BFF)),
+  ];
+
+  static List<ShapeItem> paramBalao() => [
+    ShapeParametric(
+      kind: ParamShapeKind.balao,
+      sizeX: AnimatedDouble(380),
+      sizeY: AnimatedDouble(240),
+      roundness: AnimatedDouble(30),
+    ),
+    ShapeFill(color: const Color(0xFFFFFFFF)),
+  ];
+
+  static List<ShapeItem> paramArco() => [
+    ShapeParametric(
+      kind: ParamShapeKind.sector,
+      outerRadius: AnimatedDouble(170),
+      sectorInner: AnimatedDouble(120),
+      startAngle: AnimatedDouble(-110),
+      sweep: AnimatedDouble(220),
+    ),
+    ShapeFill(color: const Color(0xFF7C62FF)),
   ];
 
   // ------ legados (paths cozidos; projetos antigos continuam iguais) ---

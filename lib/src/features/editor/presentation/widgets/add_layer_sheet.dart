@@ -1512,7 +1512,6 @@ class _FormaPainter extends CustomPainter {
 
     // Pontinhos brancos nos vértices para formas geométricas conforme Screenshot 1
     if (nome == 'Triangulo' ||
-        nome == 'Seta' ||
         nome == 'Poligono' ||
         nome == 'Linha' ||
         nome == 'Triangulo reto') {

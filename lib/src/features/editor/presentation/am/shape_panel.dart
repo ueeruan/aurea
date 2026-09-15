@@ -156,6 +156,21 @@ class _ShapePanelState extends ConsumerState<ShapePanel> {
             p('sectorInner', 'Miolo', 0, 1, scale: 100, suffix: '%'),
           ],
           ParamShapeKind.polygon => [p('outerRadius', 'Raio', 1, 1200)],
+          // FORMAS VIVAS: a ficha inteira na aba Tamanho, na ordem de
+          // leitura da forma (cantos, pontas e giro tem aba propria).
+          _ => [
+            for (final chave in parametrosDaForma(sp.kind))
+              if (chave != 'roundness' &&
+                  chave != 'points' &&
+                  chave != 'shapeRotation')
+                p(
+                  chave,
+                  fichaDoParametroDaForma(chave, sp.kind).rotulo,
+                  minimoDoParametroDaForma(chave),
+                  fichaDoParametroDaForma(chave, sp.kind).teto,
+                  decimals: chave == 'aperto' ? 1 : 0,
+                ),
+          ],
         };
       case ShapeTool.corners:
         return switch (sp.kind) {
@@ -306,8 +321,11 @@ class _ShapePanelState extends ConsumerState<ShapePanel> {
           ]),
         ),
       );
-      if (sp.kind != ParamShapeKind.ellipse &&
-          sp.kind != ParamShapeKind.sector) {
+      final formaViva = sp.kind.index >= ParamShapeKind.seta.index;
+      if (formaViva
+          ? parametrosDaForma(sp.kind).contains('roundness')
+          : sp.kind != ParamShapeKind.ellipse &&
+                sp.kind != ParamShapeKind.sector) {
         abas.add(
           ParamTab(
             id: ShapeTool.corners.name,
@@ -324,7 +342,9 @@ class _ShapePanelState extends ConsumerState<ShapePanel> {
           ),
         );
       }
-      if (sp.kind == ParamShapeKind.polygon || sp.kind == ParamShapeKind.star) {
+      if (sp.kind == ParamShapeKind.polygon ||
+          sp.kind == ParamShapeKind.star ||
+          sp.kind == ParamShapeKind.multifolio) {
         abas.add(
           ParamTab(
             id: ShapeTool.points.name,

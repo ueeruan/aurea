@@ -20,6 +20,8 @@ import '../../application/editor_controller.dart';
 import '../../application/freehand_session.dart' show onionSkinProvider;
 export '../../application/freehand_session.dart' show onionSkinProvider;
 import '../../application/playback_controller.dart';
+import '../../application/ui/editor_session.dart';
+import '../am/am_colors.dart';
 import '../../application/preview_stats.dart';
 import '../../application/video_layer_manager.dart';
 import '../shell/cromo_editor.dart' show zoomDoPalcoProvider;
@@ -369,8 +371,62 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
     });
   }
 
+  /// A ALCA DE PARAMETRO DA FORMA sob o dedo (nulo = nenhuma).
+  String? _alcaDaForma;
+
+  /// O centro do desenho no comeco do arrasto da alca: a caixa da forma e
+  /// centrada no desenho, e o desenho muda enquanto se arrasta.
+  Offset _centroDoDesenho = Offset.zero;
+
+  /// AS ALCAS DA FORMA VIVA, em coordenadas do PALCO: so com o Editar
+  /// forma aberto, na forma selecionada.
+  List<({String chave, Offset ponto})> _alcasDaFormaNoPalco() {
+    if (ref.read(editorSessionProvider).panel != EditorPanel.editShape) {
+      return const [];
+    }
+    final id = ref.read(selectedLayerProvider);
+    if (id == null) return const [];
+    final project = ref.read(editorControllerProvider);
+    final l = project.layerById(id);
+    if (l is! ShapeLayer) return const [];
+    final t = widget.playback.time.value;
+    if (!l.activeAt(t)) return const [];
+    final forma = l.contents.whereType<ShapeParametric>().firstOrNull;
+    if (forma == null) return const [];
+    final local = l.localTime(t);
+    final matriz = selectionTransform(project, l, t);
+    if (matriz.storage.every((v) => v == 0)) return const [];
+    final centro = shapeBounds(evaluateShape(l.contents, local)).center;
+    return [
+      for (final a in alcasDaForma(forma, local))
+        (
+          chave: a.chave,
+          ponto:
+              _stageOrigin +
+              MatrixUtils.transformPoint(matriz, a.ponto - centro) * _stageScale,
+        ),
+    ];
+  }
+
   void _onScaleStart(ScaleStartDetails d) {
     _zoomNoInicioDaPinca = ref.read(zoomDoPalcoProvider);
+    // O dedo pegou uma alca da forma? Ela vem antes das de escala e giro:
+    // e o que se esta editando.
+    _alcaDaForma = null;
+    if (d.pointerCount < 2) {
+      for (final a in _alcasDaFormaNoPalco()) {
+        if ((d.localFocalPoint - a.ponto).distance <= 24) {
+          _alcaDaForma = a.chave;
+          final id = ref.read(selectedLayerProvider)!;
+          final l = ref.read(editorControllerProvider).layerById(id)! as ShapeLayer;
+          _centroDoDesenho = shapeBounds(
+            evaluateShape(l.contents, l.localTime(widget.playback.time.value)),
+          ).center;
+          ref.read(editorControllerProvider.notifier).beginGesture();
+          return;
+        }
+      }
+    }
     // O dedo pegou uma alca? (raio generoso: 28 px)
     _alca = null;
     final alcas = _alcasDaSelecao();
@@ -424,6 +480,11 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
 
   void _onScaleUpdate(ScaleUpdateDetails d) {
     if (_selecionandoNoPalco) return;
+    final chaveDaAlca = _alcaDaForma;
+    if (chaveDaAlca != null) {
+      _arrastarAlcaDaForma(chaveDaAlca, d.localFocalPoint);
+      return;
+    }
     final id = ref.read(selectedLayerProvider);
     // COM ZOOM E NADA SELECIONADO, o arrasto passeia pelo palco.
     if (id == null) {
@@ -627,6 +688,36 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
     _informar(id);
   }
 
+  /// O dedo numa alca da forma: do palco ao espaco do desenho (pela
+  /// inversa da selecao) e dai aos numeros da forma.
+  void _arrastarAlcaDaForma(String chave, Offset noPalco) {
+    final id = ref.read(selectedLayerProvider);
+    if (id == null) return;
+    final project = ref.read(editorControllerProvider);
+    final l = project.layerById(id);
+    if (l is! ShapeLayer) return;
+    final forma = l.contents.whereType<ShapeParametric>().firstOrNull;
+    if (forma == null) return;
+    final t = widget.playback.time.value;
+    final inversa = Matrix4.tryInvert(selectionTransform(project, l, t));
+    if (inversa == null) return;
+    final naCaixa = MatrixUtils.transformPoint(inversa, _naComposicao(noPalco));
+    final valores = valoresDaAlcaDaForma(
+      forma,
+      chave,
+      naCaixa + _centroDoDesenho,
+      l.localTime(t),
+    );
+    final controller = ref.read(editorControllerProvider.notifier);
+    for (final e in valores.entries) {
+      controller.editShapeParam(id, e.key, t, e.value);
+    }
+    ref.read(infobarProvider.notifier).state = DadosDaInfobar.pares([
+      for (final e in valores.entries)
+        (fichaDoParametroDaForma(e.key, forma.kind).rotulo, e.value.toStringAsFixed(0)),
+    ]);
+  }
+
   @override
   Widget build(BuildContext context) {
     // ZOOM DE VOLTA AO AJUSTADO: o passeio zera junto.
@@ -670,6 +761,10 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
       onScaleEnd: drawing
           ? null
           : (_) {
+              if (_alcaDaForma != null) {
+                _alcaDaForma = null;
+                ref.read(editorControllerProvider.notifier).endGesture();
+              }
               _limparEncaixe();
               _limparInfobar();
             },
@@ -928,6 +1023,43 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
               ),
             ),
           ),
+          // AS ALCAS DA FORMA VIVA: pontos brancos com borda na cor do
+          // keyframe, onde cada numero da forma se puxa com o dedo.
+          if (!drawing && ref.watch(editorSessionProvider.select((s) => s.panel)) == EditorPanel.editShape)
+            ValueListenableBuilder<Duration>(
+              valueListenable: widget.playback.time,
+              builder: (context, _, _) {
+                ref.watch(editorControllerProvider);
+                return Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    for (final a in _alcasDaFormaNoPalco())
+                      Positioned(
+                        left: a.ponto.dx - 9,
+                        top: a.ponto.dy - 9,
+                        child: IgnorePointer(
+                          child: Container(
+                            key: ValueKey('alca-forma-${a.chave}'),
+                            width: 18,
+                            height: 18,
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: AmColors.accent,
+                                width: 3,
+                              ),
+                              boxShadow: const [
+                                BoxShadow(color: Colors.black54, blurRadius: 4),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                );
+              },
+            ),
           // ALCAS DA SELECAO: marcadores sem desenho visivel
           if (!drawing)
             Builder(

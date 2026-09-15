@@ -8001,6 +8001,7 @@ class EditorController extends Notifier<VideoProject> {
         outerRadius: AnimatedDouble(125),
         sweep: AnimatedDouble(270),
       ),
+      _ => ShapeParametric(kind: kind),
     };
     _updateShape(id, (items) {
       final insertAt = items.indexWhere(

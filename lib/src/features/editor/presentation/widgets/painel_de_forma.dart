@@ -110,10 +110,10 @@ class PainelDeForma extends ConsumerWidget {
                       for (final chave in chaves)
                         if (shapeParamTrackOf(s, chave) case final trilha?)
                           LinhaDeParametro(
-                            rotulo: fichaDoParametroDaForma(chave).rotulo,
+                            rotulo: fichaDoParametroDaForma(chave, s.kind).rotulo,
                             valor: trilha.valueAt(local),
                             casas: 0,
-                            porPixel: fichaDoParametroDaForma(chave).teto / 300,
+                            porPixel: fichaDoParametroDaForma(chave, s.kind).teto / 300,
                             escolhida: chaveAtiva == chave,
                             aoEscolher: () =>
                                 ref.read(parametroDaFormaAbertoProvider.notifier).state = chave,

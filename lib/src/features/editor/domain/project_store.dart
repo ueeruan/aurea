@@ -443,6 +443,8 @@ Map<String, dynamic> _shapeItem(ShapeItem s) => switch (s) {
     'sa': _ad(sp.startAngle),
     'sw': _ad(sp.sweep),
     'si': _ad(sp.sectorInner),
+    if (sp.extras.isNotEmpty)
+      'ex': {for (final e in sp.extras.entries) e.key: _ad(e.value)},
   },
   ShapeMediaFill f => {
     'kind': 'mfill',
@@ -588,7 +590,16 @@ ShapeItem _asShapeItem(Map<String, dynamic> m) => switch (m['kind']) {
   ),
   'param' => ShapeParametric(
     id: m['id'] as String,
-    kind: ParamShapeKind.values[(m['pk'] as num).toInt()],
+    kind: ParamShapeKind.values[(m['pk'] as num).toInt().clamp(
+      0,
+      ParamShapeKind.values.length - 1,
+    )],
+    extras: m['ex'] is Map
+        ? {
+            for (final e in (m['ex'] as Map).entries)
+              e.key as String: _asAd(e.value),
+          }
+        : null,
     sizeX: _asAd(m['sx']),
     sizeY: _asAd(m['sy']),
     roundness: _asAd(m['round']),

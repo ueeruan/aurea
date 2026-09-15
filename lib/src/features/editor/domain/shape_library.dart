@@ -25,14 +25,14 @@ final List<ShapeLibraryEntry> shapeLibrary = [
   // Linha 1 (Screenshot 1)
   ShapeLibraryEntry('Circulo', ShapePresets.paramEllipse),
   ShapeLibraryEntry('Quadrado arredondado', ShapeLibrary.roundedSquare),
-  ShapeLibraryEntry('Cruz', ShapeLibrary.cross),
+  ShapeLibraryEntry('Mais', ShapePresets.paramMais),
   ShapeLibraryEntry('Anel', ShapePresets.paramRing),
   ShapeLibraryEntry('Triangulo', ShapeLibrary.triangle),
   // Linha 2 (Screenshot 1)
   ShapeLibraryEntry('Setor', ShapePresets.paramSector),
   ShapeLibraryEntry('Hexagono', ShapeLibrary.hexagon),
   ShapeLibraryEntry('Flor', ShapePresets.flower),
-  ShapeLibraryEntry('Seta', ShapePresets.arrow),
+  ShapeLibraryEntry('Seta', ShapePresets.paramSeta),
   ShapeLibraryEntry('Poligono', ShapePresets.paramPolygon),
   // Linha 3 (Screenshot 1)
   ShapeLibraryEntry('Quadrado', ShapeLibrary.square),
@@ -41,10 +41,13 @@ final List<ShapeLibraryEntry> shapeLibrary = [
   ShapeLibraryEntry('Retangulo', ShapePresets.paramRect),
   ShapeLibraryEntry('Triangulo reto', ShapeLibrary.rightTriangle),
   // Demais formas
-  ShapeLibraryEntry('Crescente', ShapeLibrary.crescent),
-  ShapeLibraryEntry('Balao', ShapeLibrary.speechBubble),
-  ShapeLibraryEntry('Gota', ShapePresets.drop),
-  ShapeLibraryEntry('Pizza', ShapeLibrary.pie),
+  ShapeLibraryEntry('Lua', ShapePresets.paramLua),
+  ShapeLibraryEntry('Balao', ShapePresets.paramBalao),
+  ShapeLibraryEntry('Gota', ShapePresets.paramGota),
+  ShapeLibraryEntry('Pizza', ShapePresets.paramSector),
+  ShapeLibraryEntry('Linha larga', ShapePresets.paramLinhaLarga),
+  ShapeLibraryEntry('Multifolio', ShapePresets.paramMultifolio),
+  ShapeLibraryEntry('Selo', ShapePresets.paramSelo),
   ShapeLibraryEntry('Nuvem', ShapeLibrary.cloud),
   ShapeLibraryEntry('X', ShapeLibrary.xMark),
   ShapeLibraryEntry('Pontos', ShapeLibrary.dotPattern),
@@ -53,7 +56,7 @@ final List<ShapeLibraryEntry> shapeLibrary = [
   ShapeLibraryEntry('Check', ShapePresets.check),
   ShapeLibraryEntry('Faisca', ShapePresets.sparkle),
   ShapeLibraryEntry('Onda', ShapePresets.wave),
-  ShapeLibraryEntry('Arco', ShapePresets.arc),
+  ShapeLibraryEntry('Arco', ShapePresets.paramArco),
   ShapeLibraryEntry('Cursor seta', ShapeLibrary.cursorArrow),
   ShapeLibraryEntry('Cursor mao', ShapeLibrary.cursorHand),
 ];

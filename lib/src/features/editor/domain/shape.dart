@@ -760,64 +760,24 @@ class ShapeFill extends ShapeItem {
   ShapeFill({
     super.id,
     this.color = const Color(0xFFB97A5E),
-    AnimatedDouble? opacity,
+    this.opacity = 1,
     this.evenOdd = false,
-    this.corR,
-    this.corG,
-    this.corB,
-  }) : opacity = opacity ?? AnimatedDouble(1);
+  });
 
-  /// A cor BASE. Com as trilhas por canal nulas, e a cor inteira.
   final Color color;
-
-  /// Opacidade ANIMAVEL (0..1), como a do traco.
-  final AnimatedDouble opacity;
+  final double opacity;
 
   /// Regra de preenchimento: false = nao-zero (padrao), true = par-impar
   /// — decide o que e "dentro" quando o caminho se cruza ou tem furo.
   final bool evenOdd;
 
-  /// COR ANIMAVEL, um canal por trilha (0..255). Nulas = cor fixa.
-  /// Por canal porque e o formato de toda animacao do app (AnimatedDouble
-  /// com bezier por trecho): o keyframe de cor entra no mesmo losango,
-  /// no mesmo editor de curva e no mesmo undo que qualquer numero.
-  final AnimatedDouble? corR;
-  final AnimatedDouble? corG;
-  final AnimatedDouble? corB;
-
-  bool get corAnimada => corR != null || corG != null || corB != null;
-
-  /// A cor no instante [t]: canais animados por cima da base. O alfa vem
-  /// da base (a opacidade animada ja cuida da transparencia).
-  Color colorAt(Duration t) {
-    if (!corAnimada) return color;
-    int canal(AnimatedDouble? trilha, double base) =>
-        (trilha?.valueAt(t) ?? base * 255).round().clamp(0, 255);
-    return Color.fromARGB(
-      (color.a * 255).round(),
-      canal(corR, color.r),
-      canal(corG, color.g),
-      canal(corB, color.b),
-    );
-  }
-
-  ShapeFill copyWith({
-    Color? color,
-    AnimatedDouble? opacity,
-    bool? evenOdd,
-    AnimatedDouble? corR,
-    AnimatedDouble? corG,
-    AnimatedDouble? corB,
-    bool limparCor = false,
-  }) => ShapeFill(
-    id: id,
-    color: color ?? this.color,
-    opacity: opacity ?? this.opacity,
-    evenOdd: evenOdd ?? this.evenOdd,
-    corR: limparCor ? null : (corR ?? this.corR),
-    corG: limparCor ? null : (corG ?? this.corG),
-    corB: limparCor ? null : (corB ?? this.corB),
-  );
+  ShapeFill copyWith({Color? color, double? opacity, bool? evenOdd}) =>
+      ShapeFill(
+        id: id,
+        color: color ?? this.color,
+        opacity: opacity ?? this.opacity,
+        evenOdd: evenOdd ?? this.evenOdd,
+      );
 }
 
 class ShapeStroke extends ShapeItem {
@@ -1722,11 +1682,8 @@ List<ShapeDraw> evaluateShape(
               path: drawn,
               paint: Paint()
                 ..style = PaintingStyle.fill
-                ..color = fill.colorAt(t).withValues(
-                  alpha:
-                      fill.color.a *
-                      fill.opacity.valueAt(t).clamp(0.0, 1.0) *
-                      opacity,
+                ..color = fill.color.withValues(
+                  alpha: fill.color.a * fill.opacity * opacity,
                 ),
             ),
           );

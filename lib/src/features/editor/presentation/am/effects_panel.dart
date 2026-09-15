@@ -14,7 +14,6 @@ import '../../domain/effect.dart';
 import '../../domain/effect_preset.dart';
 import '../../domain/keyframe.dart';
 import 'am_colors.dart';
-import '../../../../core/ui/tocavel.dart';
 import 'audio_effects_panel.dart';
 import 'color_picker_sheet.dart';
 import 'am_widgets.dart';
@@ -334,8 +333,7 @@ class _EffectsPanelState extends ConsumerState<EffectsPanel> {
                             controller: controller,
                           ),
                       const SizedBox(height: 8),
-                      Tocavel(
-                        haptico: true,
+                      GestureDetector(
                         onTap: () => showEffectGallery(
                           context,
                           ref,

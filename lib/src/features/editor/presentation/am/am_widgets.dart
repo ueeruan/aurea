@@ -6,7 +6,6 @@ import 'package:flutter/scheduler.dart';
 import '../../../../core/utils/time_format.dart';
 import '../../application/playback_controller.dart';
 import 'am_colors.dart';
-import '../../../../core/ui/tocavel.dart';
 import 'param_sheet_shell.dart';
 
 export 'param_sheet_shell.dart'
@@ -497,7 +496,8 @@ class AmRailButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final button = Tocavel(
+    final button = GestureDetector(
+      behavior: HitTestBehavior.opaque,
       onTap: onTap,
       child: Container(
         width: 52,

@@ -602,10 +602,7 @@ class VideoLayer extends Layer {
     this.forcaDoAprimoramento = 1.0,
     this.perfilDoAprimoramento = PerfilDoAprimoramento.videoReal,
     this.reducaoDeRuido = reducaoDeRuidoPadrao,
-    // TELA CHEIA POR PADRAO: tudo que for importado nasce cobrindo a
-    // composicao. Projeto antigo continua no enquadramento legado
-    // porque o JSON sem 'ajuste' decodifica como largura, explicito.
-    this.ajuste = AjusteDaMidia.cobrir,
+    this.ajuste = AjusteDaMidia.largura,
     this.proporcaoDaFonte,
     this.volume = 1.0,
     this.audio = const AudioSpec(),
@@ -844,8 +841,7 @@ class ImageLayer extends Layer {
     required super.startTime,
     required super.duration,
     required this.sourcePath,
-    // Tela cheia por padrao — mesma regra do video acima.
-    this.ajuste = AjusteDaMidia.cobrir,
+    this.ajuste = AjusteDaMidia.largura,
     this.proporcaoDaFonte,
     super.position,
     super.scaleX,

@@ -2,7 +2,6 @@ import 'package:aurea/src/core/l10n/app_language.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../../../../core/ui/tocavel.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/theme/tokens.dart';
@@ -83,8 +82,9 @@ class EditorTransportBar extends ConsumerWidget {
       VoidCallback? onLongPress,
     }) => Tooltip(
       message: tooltip,
-      child: Tocavel(
+      child: GestureDetector(
         key: key,
+        behavior: HitTestBehavior.opaque,
         onTap: onTap == null
             ? null
             : () {

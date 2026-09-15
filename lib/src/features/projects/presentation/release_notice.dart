@@ -6,39 +6,29 @@ import '../../../core/ui/am_colors.dart';
 import 'package:aurea/src/core/l10n/app_language.dart';
 
 // Change this revision when publishing a new set of release notes.
-const releaseNoticeRevision = '2026-09-14-beta-83';
+const releaseNoticeRevision = '2026-09-14-beta-82';
 const releaseNoticeSeenKey = 'aurea.releaseNotice.seen';
 
 const releaseHighlights = <(IconData, String, String)>[
   (
-    CupertinoIcons.speedometer,
-    'Estúdio do Tempo',
-    'O Time Remap novo: gráficos de valor e velocidade editados com o dedo, rampas, congelar, reverso, presets com miniatura e câmera lenta com IA.',
+    CupertinoIcons.textformat_alt,
+    'Texto 3D de metal',
+    'Adicionar > Objeto > Texto 3D: letras com chanfro em ouro, cromo ou aço escovado, num estúdio feito para metal. O texto segue um nulo na linha do tempo.',
   ),
   (
-    CupertinoIcons.viewfinder,
-    'Cena 3D no vídeo',
-    'Rastreie a câmera do clipe, toque numa superfície e pouse texto, âncoras e modelos 3D — com chão, origem e escala real (100 unidades = 1 m).',
+    CupertinoIcons.sparkles,
+    'Efeitos com prévia de verdade',
+    'A galeria mostra cada efeito animado numa foto. Novos: Looks com força, S_Sharpen, S_Flicker, S_MathOps, Hue/Saturation e Film Damage 2.',
   ),
   (
-    CupertinoIcons.film,
-    'Look de cinema',
-    'Um toque cria a pilha de filme: grade de cor, grão, bloom, halation e vinheta numa camada de ajuste, tudo editável peça a peça.',
-  ),
-  (
-    CupertinoIcons.bolt_fill,
-    'AMV e social',
-    'Impactos na batida, cortar nas batidas, whip, punch in, fundo desfocado, separar áudio e presets Animar — tudo keyframe de verdade.',
-  ),
-  (
-    CupertinoIcons.circle_grid_hex,
-    'Formas que viram outras',
-    'Quadrado → círculo → pílula → card sem deformar canto, Auto Morph entre formas e cor de preenchimento animada.',
+    CupertinoIcons.fullscreen,
+    'Mídia em tela cheia',
+    'Foto e vídeo importados cobrem a composição. Preencher e Ajustar no painel de Escala, e a mesclagem não encolhe mais a camada.',
   ),
   (
     CupertinoIcons.hand_draw,
-    'Mais fluido',
-    'Todo botão responde ao toque no estilo iOS, alvos maiores, sem a borda no preview e mídia importada em tela cheia.',
+    'Keyframes e limpeza',
+    'Segure e arraste o keyframe na linha do tempo. Partículas de volta; saíram a aba Presets e o aviso de camada apagada.',
   ),
 ];
 

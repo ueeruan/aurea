@@ -11,7 +11,6 @@ import '../../domain/blob_track.dart';
 import '../../domain/camera_solver3d.dart';
 import '../../domain/effect.dart';
 import 'am_colors.dart';
-import '../../../../core/ui/tocavel.dart';
 import 'am_widgets.dart';
 import 'rastreio3d_screen.dart';
 
@@ -355,7 +354,7 @@ class _Botao extends StatelessWidget {
   final bool destaque;
 
   @override
-  Widget build(BuildContext context) => Tocavel(
+  Widget build(BuildContext context) => GestureDetector(
     key: ValueKey(chave),
     onTap: onTap,
     child: Container(
@@ -540,7 +539,7 @@ class _LinhaDeCamada extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) => Tocavel(
+  Widget build(BuildContext context) => GestureDetector(
     onTap: onTap,
     child: Container(
       width: double.infinity,

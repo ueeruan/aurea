@@ -190,9 +190,6 @@ Future<void> showAppleCascadeSheet(
                             CascadeOrder.center => 'Centro',
                             CascadeOrder.end => 'Fim',
                             CascadeOrder.random => 'Aleatoria',
-                            CascadeOrder.esquerdaDireita =>
-                              'Esquerda → Direita',
-                            CascadeOrder.cimaBaixo => 'Cima → Baixo',
                           },
                           order == value,
                           () => setSheetState(() => order = value),

@@ -183,21 +183,8 @@ void main() {
           startTime: Duration.zero,
           duration: const Duration(seconds: 3),
           sourcePath: 'c.mp4',
-          // O enquadramento LEGADO explicito: e ele que nao vai ao
-          // arquivo, e e assim que um projeto antigo abre igualzinho.
-          ajuste: AjusteDaMidia.largura,
         ),
       ]);
-      // O PADRAO NOVO: camada criada sem dizer nada nasce cobrindo.
-      expect(
-        VideoLayer(
-          name: 'novo',
-          startTime: Duration.zero,
-          duration: const Duration(seconds: 1),
-          sourcePath: 'd.mp4',
-        ).ajuste,
-        AjusteDaMidia.cobrir,
-      );
       final json = projectToJson(p);
       final volta = projectFromJson(json);
       final foto = volta.layers[0] as ImageLayer;

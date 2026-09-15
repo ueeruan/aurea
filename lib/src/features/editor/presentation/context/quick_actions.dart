@@ -11,9 +11,6 @@ import '../../application/playback_controller.dart';
 import '../../application/ui/editor_session.dart';
 import '../../domain/layer.dart';
 import '../am/align_sheet.dart';
-import '../am/animar_sheet.dart';
-import '../am/amv_sheet.dart';
-import '../../domain/look_de_cinema.dart';
 import '../am/audio_sheet.dart';
 import '../am/beat_pulse_sheet.dart';
 import '../am/beats_sheet.dart';
@@ -107,67 +104,6 @@ List<QuickAction> quickActionsFor(
         );
       },
     ),
-    // AMV: as batidas viradas em edicao — impacto, tremor, rampa, whip,
-    // flash e cortes na grade de batidas. Portas finas para sistemas
-    // normais; nada fechado.
-    if (layer is VideoLayer || layer is GroupLayer)
-      QuickAction(
-        key: 'amv',
-        icon: CupertinoIcons.bolt_fill,
-        label: 'AMV',
-        onTap: () => pausa(() => showAmvSheet(context, ref, id, playback)),
-      ),
-    // LOOK DE CINEMA: uma camada de ajuste no topo com a pilha de filme
-    // (grade, grao, bloom, halation, vinheta) — cada peca editavel.
-    if (layer is! AudioLayer)
-      QuickAction(
-        key: 'look',
-        icon: CupertinoIcons.film,
-        label: 'Look',
-        onTap: () => pausa(() {
-          showCupertinoModalPopup<void>(
-            context: context,
-            builder: (menuContext) => CupertinoActionSheet(
-              title: const AppText('Look de cinema'),
-              message: const AppText(
-                'Uma camada de ajuste no topo, com grade, grão, bloom, '
-                'halation e vinheta — tudo editável peça a peça.',
-              ),
-              actions: [
-                for (final look in LookDeCinema.values)
-                  CupertinoActionSheetAction(
-                    onPressed: () {
-                      Navigator.of(menuContext).pop();
-                      final novo = controller.adicionarLook(look);
-                      AureaSnack.show(
-                        context,
-                        novo == null
-                            ? 'Não consegui criar o look.'
-                            : '${look.emPalavras} no topo da pilha.',
-                        actionLabel: novo == null ? null : 'Desfazer',
-                        onAction: controller.undo,
-                      );
-                    },
-                    child: AppText(look.emPalavras),
-                  ),
-              ],
-              cancelButton: CupertinoActionSheetAction(
-                onPressed: () => Navigator.of(menuContext).pop(),
-                child: const AppText('Cancelar'),
-              ),
-            ),
-          );
-        }),
-      ),
-    // ANIMAR: presets de movimento com keyframes DE VERDADE (editaveis),
-    // morphs rapidos de forma e o Auto Morph.
-    if (layer is! AudioLayer)
-      QuickAction(
-        key: 'animar',
-        icon: CupertinoIcons.sparkles,
-        label: 'Animar',
-        onTap: () => pausa(() => showAnimarSheet(context, ref, id, playback)),
-      ),
     QuickAction(
       key: 'subir',
       icon: CupertinoIcons.arrow_up_to_line,
@@ -203,57 +139,6 @@ List<QuickAction> quickActionsFor(
         aceso: mudo,
         onTap: () =>
             controller.updateAudioSpec(id, (s) => s.copyWith(muted: !mudo)),
-      ),
-    ],
-    if (layer is VideoLayer) ...[
-      QuickAction(
-        key: 'punch-in',
-        icon: CupertinoIcons.zoom_in,
-        label: 'Punch in',
-        onTap: () {
-          final novo = controller.punchIn(id, t);
-          AureaSnack.show(
-            context,
-            novo == null
-                ? 'Não deu para cortar aqui.'
-                : 'Corte com aproximação de 18%.',
-            actionLabel: novo == null ? null : 'Desfazer',
-            onAction: controller.undo,
-          );
-        },
-      ),
-      QuickAction(
-        key: 'fundo-desfocado',
-        icon: CupertinoIcons.photo_fill_on_rectangle_fill,
-        label: 'Fundo desfocado',
-        onTap: () {
-          final novo = controller.fundoDesfocado(id);
-          AureaSnack.show(
-            context,
-            novo == null
-                ? 'Só clipe de vídeo tem fundo desfocado.'
-                : 'Fundo desfocado atrás do clipe.',
-            actionLabel: novo == null ? null : 'Desfazer',
-            onAction: controller.undo,
-          );
-        },
-      ),
-      QuickAction(
-        key: 'separar-audio',
-        icon: CupertinoIcons.music_note_2,
-        label: 'Separar áudio',
-        onTap: () {
-          final novo = controller.separarAudio(id);
-          AureaSnack.show(
-            context,
-            novo == null
-                ? 'Sem som para separar (ou o clipe tem reverso/curva '
-                      'de tempo).'
-                : 'Áudio numa camada própria; o vídeo ficou mudo.',
-            actionLabel: novo == null ? null : 'Desfazer',
-            onAction: controller.undo,
-          );
-        },
       ),
     ],
     if (layer is VideoLayer)

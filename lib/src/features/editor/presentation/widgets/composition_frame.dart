@@ -26,9 +26,7 @@ Rect compositionRect(Size viewport, Size output, {double inset = 8}) {
   );
 }
 
-/// Recorta a composicao; sem contorno. O fio de 1 px que marcava a borda
-/// saiu a pedido do dono — a moldura e o proprio recorte, e video escuro
-/// se distingue do fundo pelo palco, nao por uma linha desenhada.
+/// One screen-pixel outline remains legible for black/transparent footage.
 class CompositionFrame extends StatelessWidget {
   const CompositionFrame({
     super.key,
@@ -40,14 +38,11 @@ class CompositionFrame extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => CustomPaint(
-    foregroundPainter: safeAreas
-        ? const CompositionFramePainter(safeAreas: true)
-        : null,
+    foregroundPainter: CompositionFramePainter(safeAreas: safeAreas),
     child: ClipRect(child: child),
   );
 }
 
-/// So as areas de seguranca (quando pedidas); nenhum contorno externo.
 class CompositionFramePainter extends CustomPainter {
   const CompositionFramePainter({this.safeAreas = false});
   final bool safeAreas;
@@ -56,7 +51,9 @@ class CompositionFramePainter extends CustomPainter {
     if (size.isEmpty) return;
     final stroke = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1;
+      ..strokeWidth = 1
+      ..color = const Color(0x998B94A3);
+    canvas.drawRect((Offset.zero & size).deflate(.5), stroke);
     if (safeAreas) {
       stroke.color = const Color(0x66FFFFFF);
       for (final fraction in [.8, .9]) {

@@ -1154,17 +1154,36 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                         layer != null &&
                         targets.length < 2)
                       Positioned(
-                        left: 0,
-                        right: largo ? larguraFolha : 0,
+                        // ENTRE O ⋮ E O "+": por cima deles a barra tapava
+                        // o botao de adicionar. Sem largura, encolhe.
+                        left: largo ? 12 : 60,
+                        right: (largo ? larguraFolha : 0) + 76,
                         bottom: largo
                             ? 12
                             : 6 + (conteudo == null ? 12 : m.sheet),
                         child: Center(
-                          child: BarraDaSelecao(
-                            playback: _playback,
-                            layerId: layer.id,
-                            keyframeHere: _keyframeAqui(layer, s),
-                            onKeyframe: () => _toggleKeyframe(layer, s),
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: BarraDaSelecao(
+                              playback: _playback,
+                              layerId: layer.id,
+                              keyframeHere: _keyframeAqui(layer, s),
+                              onKeyframe: () => _toggleKeyframe(layer, s),
+                            ),
+                          ),
+                        ),
+                      ),
+                    if (!s.previewExpanded && !s.adding && multi.length >= 2)
+                      Positioned(
+                        left: largo ? 12 : 60,
+                        right: (largo ? larguraFolha : 0) + 76,
+                        bottom: largo
+                            ? 12
+                            : 6 + (conteudo == null ? 12 : m.sheet),
+                        child: Center(
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: BarraDoLoteNoTempo(playback: _playback),
                           ),
                         ),
                       ),

@@ -153,11 +153,24 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.byType(BarraDoLote), findsOneWidget);
     expect(find.byKey(const ValueKey('selectbar-agrupar')), findsOneWidget);
+    expect(find.byKey(const ValueKey('selectbar-mascarar')), findsOneWidget);
+    expect(find.byKey(const ValueKey('selectbar-recortar')), findsOneWidget);
+    expect(find.byKey(const ValueKey('barra-do-lote-no-tempo')), findsOneWidget);
+    await gravarPrint(tester, chave, 'cromo-editor-multi');
+    // A segunda pagina: alinhar e distribuir.
+    await tester.tap(find.byKey(const ValueKey('selectbar-pagina-layout')));
+    await tester.pumpAndSettle();
     expect(
       find.byKey(const ValueKey('selectbar-alinhar-esquerda')),
       findsOneWidget,
     );
-    await gravarPrint(tester, chave, 'cromo-editor-multi');
+    expect(find.byKey(const ValueKey('selectbar-distribuir-h')), findsOneWidget);
+    expect(find.byKey(const ValueKey('selectbar-agrupar')), findsNothing);
+    expect(tester.takeException(), isNull);
+    await gravarPrint(tester, chave, 'cromo-editor-multi-layout');
+    await tester.tap(find.byKey(const ValueKey('selectbar-pagina-lote')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('selectbar-agrupar')), findsOneWidget);
   });
 
   testWidgets('o + abre o popup de adicionar com as abas', (

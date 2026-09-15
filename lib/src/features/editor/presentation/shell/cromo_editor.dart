@@ -7,11 +7,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/ui/snack.dart';
 import '../../../../core/ui/tocavel.dart';
 import '../../application/editor_controller.dart';
+import '../../application/operacoes_do_lote.dart';
 import '../../application/playback_controller.dart';
 import '../../application/ui/editor_session.dart';
 import '../../application/ui/opcoes_de_visualizacao.dart';
 import '../../domain/layer.dart';
 import '../../domain/layout_ops.dart';
+import '../../domain/video_project.dart';
 import '../am/align_sheet.dart';
 import '../am/am_colors.dart';
 import '../am/beats_sheet.dart';
@@ -268,115 +270,328 @@ class BarraDoProjeto extends ConsumerWidget {
 }
 
 /// A BARRA DO LOTE: quando ha multi-selecao, o topo inteiro vira
-/// violeta (a cor da selecao) com as acoes do lote — agrupar, alinhar na
-/// tela, excluir. Toque longo num alinhamento abre a folha completa.
-class BarraDoLote extends ConsumerWidget {
+/// violeta (a cor da selecao). DUAS PAGINAS, trocadas pelas setas:
+///
+///  1. o lote — agrupar, agrupar e mascarar (a de cima mostra so o que
+///     cobre), agrupar e recortar (a de cima fura as de baixo), excluir;
+///  2. o layout — alinhar na tela pelos seis lados e distribuir na
+///     vertical e na horizontal. Segurar um alinhamento abre a folha
+///     completa (alinhar a selecao, a uma ancora, espacamento exato).
+class BarraDoLote extends ConsumerStatefulWidget {
   const BarraDoLote({super.key, required this.playback});
 
   final PlaybackController playback;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<BarraDoLote> createState() => _BarraDoLoteState();
+}
+
+class _BarraDoLoteState extends ConsumerState<BarraDoLote> {
+  bool _paginaDoLayout = false;
+
+  @override
+  Widget build(BuildContext context) {
     final multi = ref.watch(multiSelectProvider);
     final controller = ref.read(editorControllerProvider.notifier);
     final ids = multi.toList();
-    final t = playback.time.value;
+    final bastam = multi.length >= 2;
+    // O tempo sai na hora do toque (a regra da barra da selecao).
+    Duration t() => widget.playback.time.value;
 
-    Widget alinhar(Key key, IconData icone, String dica, AlignEdge edge) =>
-        _BotaoDoCromo(
-          key: key,
-          icone: icone,
-          dica: dica,
-          cor: CromoEditor.branco,
-          tamanho: 18,
-          largura: 30,
-          onTap: () => controller.alignSelection(ids, edge, t),
-          onLongPress: () => showAlignSheet(context, ref, ids, t),
+    Widget botao(
+      String chave,
+      IconData icone,
+      String dica,
+      VoidCallback? onTap, {
+      VoidCallback? onLongPress,
+      double largura = 30,
+    }) => _BotaoDoCromo(
+      key: ValueKey(chave),
+      icone: icone,
+      dica: dica,
+      cor: CromoEditor.branco,
+      tamanho: 18,
+      largura: largura,
+      onTap: onTap,
+      onLongPress: onLongPress,
+    );
+
+    Widget alinhar(String chave, IconData icone, String dica, AlignEdge edge) =>
+        botao(
+          chave,
+          icone,
+          '$dica · segure para mais',
+          () => controller.alignSelection(ids, edge, t()),
+          onLongPress: () => showAlignSheet(context, ref, ids, t()),
         );
+
+    final paginaDoLote = <Widget>[
+      Expanded(
+        child: AppText(
+          bastam
+              ? '${multi.length} selecionadas'
+              : 'Selecione ao menos duas camadas',
+          key: const ValueKey('selectbar-mensagem'),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            color: CromoEditor.branco,
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+      botao(
+        'selectbar-agrupar',
+        CupertinoIcons.rectangle_stack,
+        'Agrupar seleção',
+        bastam ? () => agruparSelecao(ref, multi) : null,
+        largura: 36,
+      ),
+      botao(
+        'selectbar-mascarar',
+        CupertinoIcons.square_stack_3d_down_right_fill,
+        'Agrupar e mascarar: a de cima mostra só o que cobre',
+        bastam
+            ? () {
+                agruparComForma(
+                  controller,
+                  ref.read(editorControllerProvider),
+                  ids,
+                  recortar: false,
+                );
+                ref.read(multiSelectProvider.notifier).state = const {};
+              }
+            : null,
+        largura: 36,
+      ),
+      botao(
+        'selectbar-recortar',
+        CupertinoIcons.square_stack_3d_down_right,
+        'Agrupar e recortar: a de cima fura as de baixo',
+        bastam
+            ? () {
+                agruparComForma(
+                  controller,
+                  ref.read(editorControllerProvider),
+                  ids,
+                  recortar: true,
+                );
+                ref.read(multiSelectProvider.notifier).state = const {};
+              }
+            : null,
+        largura: 36,
+      ),
+      botao(
+        'selectbar-excluir',
+        CupertinoIcons.trash,
+        'Excluir seleção',
+        () => excluirCamadas(context, ref, multi),
+        largura: 36,
+      ),
+      botao(
+        'selectbar-pagina-layout',
+        CupertinoIcons.chevron_right,
+        'Alinhar e distribuir',
+        () => setState(() => _paginaDoLayout = true),
+      ),
+    ];
+
+    final paginaDoLayout = <Widget>[
+      botao(
+        'selectbar-pagina-lote',
+        CupertinoIcons.chevron_left,
+        'Voltar às ações do lote',
+        () => setState(() => _paginaDoLayout = false),
+      ),
+      const Spacer(),
+      alinhar(
+        'selectbar-alinhar-esquerda',
+        CupertinoIcons.arrow_left_to_line,
+        'Alinhar à esquerda',
+        AlignEdge.left,
+      ),
+      alinhar(
+        'selectbar-alinhar-centro',
+        CupertinoIcons.arrow_left_right,
+        'Centralizar na horizontal',
+        AlignEdge.centerH,
+      ),
+      alinhar(
+        'selectbar-alinhar-direita',
+        CupertinoIcons.arrow_right_to_line,
+        'Alinhar à direita',
+        AlignEdge.right,
+      ),
+      alinhar(
+        'selectbar-alinhar-topo',
+        CupertinoIcons.arrow_up_to_line,
+        'Alinhar ao topo',
+        AlignEdge.top,
+      ),
+      alinhar(
+        'selectbar-alinhar-meio',
+        CupertinoIcons.arrow_up_arrow_down,
+        'Centralizar na vertical',
+        AlignEdge.centerV,
+      ),
+      alinhar(
+        'selectbar-alinhar-base',
+        CupertinoIcons.arrow_down_to_line,
+        'Alinhar à base',
+        AlignEdge.bottom,
+      ),
+      botao(
+        'selectbar-distribuir-v',
+        CupertinoIcons.arrow_up_down_square,
+        'Distribuir na vertical (vãos iguais)',
+        multi.length >= 3
+            ? () => controller.distributeSelection(
+                ids,
+                DistributeAxis.vertical,
+                DistributeMode.byGap,
+                t(),
+              )
+            : null,
+      ),
+      botao(
+        'selectbar-distribuir-h',
+        CupertinoIcons.arrow_left_right_square,
+        'Distribuir na horizontal (vãos iguais)',
+        multi.length >= 3
+            ? () => controller.distributeSelection(
+                ids,
+                DistributeAxis.horizontal,
+                DistributeMode.byGap,
+                t(),
+              )
+            : null,
+      ),
+      const SizedBox(width: 2),
+    ];
 
     return Container(
       height: CromoEditor.navbar,
       color: CromoEditor.selecao,
       child: Row(
         children: [
-          _BotaoDoCromo(
-            key: const ValueKey('selectbar-cancelar'),
-            icone: CupertinoIcons.xmark,
-            dica: 'Cancelar seleção',
-            cor: CromoEditor.branco,
-            onTap: () =>
-                ref.read(multiSelectProvider.notifier).state = const {},
-          ),
-          Expanded(
-            child: AppText(
-              '${multi.length} selecionadas',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: CromoEditor.branco,
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-          alinhar(
-            const ValueKey('selectbar-alinhar-esquerda'),
-            CupertinoIcons.arrow_left_to_line,
-            'Alinhar à esquerda · segure para mais',
-            AlignEdge.left,
-          ),
-          alinhar(
-            const ValueKey('selectbar-alinhar-centro'),
-            CupertinoIcons.arrow_left_right,
-            'Centralizar na horizontal · segure para mais',
-            AlignEdge.centerH,
-          ),
-          alinhar(
-            const ValueKey('selectbar-alinhar-direita'),
-            CupertinoIcons.arrow_right_to_line,
-            'Alinhar à direita · segure para mais',
-            AlignEdge.right,
-          ),
-          alinhar(
-            const ValueKey('selectbar-alinhar-topo'),
-            CupertinoIcons.arrow_up_to_line,
-            'Alinhar ao topo · segure para mais',
-            AlignEdge.top,
-          ),
-          alinhar(
-            const ValueKey('selectbar-alinhar-meio'),
-            CupertinoIcons.arrow_up_arrow_down,
-            'Centralizar na vertical · segure para mais',
-            AlignEdge.centerV,
-          ),
-          alinhar(
-            const ValueKey('selectbar-alinhar-base'),
-            CupertinoIcons.arrow_down_to_line,
-            'Alinhar à base · segure para mais',
-            AlignEdge.bottom,
-          ),
-          const SizedBox(width: 2),
-          _BotaoDoCromo(
-            key: const ValueKey('selectbar-agrupar'),
-            icone: CupertinoIcons.rectangle_stack,
-            dica: 'Agrupar seleção',
-            cor: CromoEditor.branco,
+          botao(
+            'selectbar-cancelar',
+            CupertinoIcons.xmark,
+            'Cancelar seleção',
+            () => ref.read(multiSelectProvider.notifier).state = const {},
             largura: 36,
-            onTap: multi.length >= 2
-                ? () => agruparSelecao(ref, multi)
-                : null,
           ),
-          _BotaoDoCromo(
-            key: const ValueKey('selectbar-excluir'),
-            icone: CupertinoIcons.trash,
-            dica: 'Excluir seleção',
-            cor: CromoEditor.branco,
-            largura: 36,
-            onTap: () => excluirCamadas(context, ref, multi),
-          ),
-          const SizedBox(width: 4),
+          ...(_paginaDoLayout ? paginaDoLayout : paginaDoLote),
         ],
       ),
+    );
+  }
+}
+
+/// A BARRA DE TEMPO DO LOTE (flutua sobre a timeline com duas ou mais
+/// camadas escolhidas). Com o cabecote passando por dentro do lote:
+/// aparar o comeco, dividir, aparar o fim. Com o cabecote de fora:
+/// estender ate ele, mover ate ele. E sempre: alinhar os comecos,
+/// distribuir uma depois da outra, alinhar os fins.
+class BarraDoLoteNoTempo extends ConsumerWidget {
+  const BarraDoLoteNoTempo({super.key, required this.playback});
+
+  final PlaybackController playback;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final multi = ref.watch(multiSelectProvider);
+    final projeto = ref.watch(editorControllerProvider);
+    final controller = ref.read(editorControllerProvider.notifier);
+    Duration t() => playback.time.value;
+    VideoProject atual() => ref.read(editorControllerProvider);
+
+    return ValueListenableBuilder<Duration>(
+      valueListenable: playback.time,
+      builder: (context, agora, _) {
+        final dentro = cabecoteDentroDoLote(projeto, multi, agora);
+        return Container(
+          key: const ValueKey('barra-do-lote-no-tempo'),
+          height: 46,
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          decoration: BoxDecoration(
+            color: CromoEditor.trilho.withValues(alpha: .97),
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: const [
+              BoxShadow(
+                color: Colors.black45,
+                blurRadius: 10,
+                offset: Offset(0, 3),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (dentro) ...[
+                _BotaoDoCromo(
+                  key: const ValueKey('lote-aparar-esq'),
+                  icone: CupertinoIcons.arrow_right_to_line,
+                  dica: 'Aparar o início das camadas no cabeçote',
+                  onTap: () => aparaInicioDoLote(controller, atual(), multi, t()),
+                ),
+                _BotaoDoCromo(
+                  key: const ValueKey('lote-dividir'),
+                  icone: CupertinoIcons.scissors,
+                  dica: 'Dividir as camadas no cabeçote',
+                  onTap: () => dividirLote(controller, atual(), multi, t()),
+                ),
+                _BotaoDoCromo(
+                  key: const ValueKey('lote-aparar-dir'),
+                  icone: CupertinoIcons.arrow_left_to_line,
+                  dica: 'Aparar o fim das camadas no cabeçote',
+                  onTap: () => aparaFimDoLote(controller, atual(), multi, t()),
+                ),
+              ] else ...[
+                _BotaoDoCromo(
+                  key: const ValueKey('lote-estender'),
+                  icone: CupertinoIcons.arrow_right_arrow_left_square,
+                  dica: 'Estender as camadas até o cabeçote',
+                  onTap: () =>
+                      estenderLoteAteOCabecote(controller, atual(), multi, t()),
+                ),
+                _BotaoDoCromo(
+                  key: const ValueKey('lote-mover'),
+                  icone: CupertinoIcons.arrow_right_arrow_left,
+                  dica: 'Mover as camadas até o cabeçote',
+                  onTap: () =>
+                      moverLoteAteOCabecote(controller, atual(), multi, t()),
+                ),
+              ],
+              Container(
+                width: 1,
+                height: 22,
+                margin: const EdgeInsets.symmetric(horizontal: 4),
+                color: CromoEditor.apagado.withValues(alpha: .25),
+              ),
+              _BotaoDoCromo(
+                key: const ValueKey('lote-alinhar-inicios'),
+                icone: CupertinoIcons.increase_indent,
+                dica: 'Alinhar os inícios no tempo',
+                onTap: () => alinharIniciosNoTempo(controller, atual(), multi),
+              ),
+              _BotaoDoCromo(
+                key: const ValueKey('lote-distribuir-tempo'),
+                icone: CupertinoIcons.text_justify,
+                dica: 'Distribuir: uma depois da outra',
+                onTap: () => distribuirNoTempo(controller, atual(), multi),
+              ),
+              _BotaoDoCromo(
+                key: const ValueKey('lote-alinhar-fins'),
+                icone: CupertinoIcons.decrease_indent,
+                dica: 'Alinhar os fins no tempo',
+                onTap: () => alinharFinsNoTempo(controller, atual(), multi),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

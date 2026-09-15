@@ -26,22 +26,25 @@ void main() {
     }
   });
 
-  testWidgets('a tesoura esta no transporte e divide no cabecote', (
+  testWidgets('a tesoura esta na barra da selecao e divide no cabecote', (
     tester,
   ) async {
+    // NA PLANTA DO AM (v1.1.1): a tesoura mora na barra flutuante que
+    // aparece com a camada selecionada — um toque no clipe e ela esta
+    // na tela, sempre no mesmo lugar.
     final c = await openEditor(tester);
     final tesoura = find.byKey(const ValueKey('camada-dividir'));
-    expect(tesoura, findsOneWidget, reason: 'a tesoura e permanente');
-
-    // Sem camada selecionada ela existe, mas nao corta nada.
     final antes = c.read(editorControllerProvider).layers.length;
-    await tester.tap(tesoura);
-    await tester.pumpAndSettle();
-    expect(c.read(editorControllerProvider).layers.length, antes);
+    expect(
+      tesoura,
+      findsNothing,
+      reason: 'sem selecao nao ha o que cortar — a barra nem existe',
+    );
 
     // Seleciona tocando no palco e leva o cabecote para o meio do clipe.
     await tester.tapAt(tester.getRect(find.byType(PreviewStage)).center);
     await tester.pumpAndSettle();
+    expect(tesoura, findsOneWidget, reason: 'selecionou, a tesoura chegou');
     final id = c.read(selectedLayerProvider)!;
     final camada = c.read(editorControllerProvider).layerById(id)!;
     final playback = tester

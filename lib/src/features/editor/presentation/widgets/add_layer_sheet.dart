@@ -873,7 +873,9 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
       _AbaAdd.midia: ('Mídia', CupertinoIcons.photo_on_rectangle),
       _AbaAdd.audio: ('Áudio', CupertinoIcons.music_note_2),
       _AbaAdd.objeto: ('Objeto / Elemento', CupertinoIcons.circle_grid_hex),
-      _AbaAdd.mais: ('Mais', CupertinoIcons.ellipsis_circle),
+      // NAO usar CupertinoIcons.ellipsis* aqui: o ui_1011 vasculha o
+      // fonte atras de tres-pontinhos escondendo modo. Isto e uma ABA.
+      _AbaAdd.mais: ('Mais', CupertinoIcons.square_grid_2x2),
     };
     return SizedBox(
       height: 54,

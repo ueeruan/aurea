@@ -919,10 +919,13 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                           ),
                         ),
                       ),
+                      // ABAIXO do seletor de resolucao (right/top 4):
+                      // no topo o trilho cobria o botao e o toque nunca
+                      // chegava nele.
                       if (!s.previewExpanded)
                         Positioned(
                           right: 0,
-                          top: 8,
+                          top: 46,
                           child: TrilhoDoPalco(playback: _playback),
                         ),
                     ],

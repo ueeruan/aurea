@@ -414,18 +414,28 @@ class AmPlaybar extends ConsumerWidget {
     return Container(
       height: CromoAM.playbar,
       color: CromoAM.fundo,
-      child: Row(
+      child: LayoutBuilder(
+        builder: (context, c) {
+          // NUM 320 os cinco botoes laterais (2 + 3) em 40 estouravam a
+          // fileira em 12 px: o trio do centro e fixo (132), os lados
+          // dividem o que sobra, nunca abaixo de 30.
+          final lado = c.maxWidth.isFinite
+              ? ((c.maxWidth - 132) / 5).clamp(30.0, 40.0).toDouble()
+              : 40.0;
+          return Row(
         children: [
           _BotaoDoCromo(
             key: const ValueKey('editor-undo'),
             icone: CupertinoIcons.arrow_uturn_left,
             dica: 'Desfazer',
+            largura: lado,
             onTap: controller.canUndo ? controller.undo : null,
           ),
           _BotaoDoCromo(
             key: const ValueKey('editor-redo'),
             icone: CupertinoIcons.arrow_uturn_right,
             dica: 'Refazer',
+            largura: lado,
             onTap: controller.canRedo ? controller.redo : null,
           ),
           Expanded(
@@ -486,6 +496,7 @@ class AmPlaybar extends ConsumerWidget {
             key: const ValueKey('playbar-colar'),
             icone: CupertinoIcons.doc_on_clipboard,
             dica: 'Copiar e colar',
+            largura: lado,
             onTap: selected == null && !controller.temEfeitosCopiados
                 ? null
                 : () => _menuDeColar(context, ref, selected),
@@ -494,6 +505,7 @@ class AmPlaybar extends ConsumerWidget {
             key: const ValueKey('playbar-marcas'),
             icone: CupertinoIcons.bookmark,
             dica: 'Marcas na timeline',
+            largura: lado,
             onTap: () => menuDasMarcas(context, ref, playback),
           ),
           _BotaoDoCromo(
@@ -502,10 +514,13 @@ class AmPlaybar extends ConsumerWidget {
                 ? CupertinoIcons.fullscreen_exit
                 : CupertinoIcons.fullscreen,
             dica: expandido ? 'Sair da tela cheia' : 'Tela cheia',
+            largura: lado,
             onTap: () =>
                 ref.read(editorSessionProvider.notifier).togglePreviewExpanded(),
           ),
         ],
+          );
+        },
       ),
     );
   }
@@ -584,7 +599,9 @@ class BarraDaSelecao extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final controller = ref.read(editorControllerProvider.notifier);
-    final t = playback.time.value;
+    // O TEMPO SAI NA HORA DO TOQUE: lido no build, a barra cortava no
+    // cabecote de QUANDO ELA APARECEU (a selecao), nao no de agora.
+    Duration t() => playback.time.value;
     return Container(
       height: 46,
       padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -613,19 +630,19 @@ class BarraDaSelecao extends ConsumerWidget {
             key: const ValueKey('camada-aparar-esq'),
             icone: CupertinoIcons.arrow_right_to_line,
             dica: 'Aparar o início até o cabeçote',
-            onTap: () => controller.trimLayerStart(layerId, t),
+            onTap: () => controller.trimLayerStart(layerId, t()),
           ),
           _BotaoDoCromo(
             key: const ValueKey('camada-dividir'),
             icone: CupertinoIcons.scissors,
             dica: 'Dividir a camada no cabeçote',
-            onTap: () => controller.splitLayer(layerId, t),
+            onTap: () => controller.splitLayer(layerId, t()),
           ),
           _BotaoDoCromo(
             key: const ValueKey('camada-aparar-dir'),
             icone: CupertinoIcons.arrow_left_to_line,
             dica: 'Aparar o fim até o cabeçote',
-            onTap: () => controller.trimLayerEnd(layerId, t),
+            onTap: () => controller.trimLayerEnd(layerId, t()),
           ),
           _BotaoDoCromo(
             key: const ValueKey('camada-duplicar'),

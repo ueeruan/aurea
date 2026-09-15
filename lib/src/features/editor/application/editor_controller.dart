@@ -21,6 +21,7 @@ import '../domain/camera_solver3d.dart';
 import '../domain/cena_do_rastreio.dart';
 import '../domain/cut_ops.dart';
 import '../domain/remapear_tempo.dart';
+import '../domain/presets_de_movimento.dart';
 import '../domain/panorama3d.dart';
 import '../domain/fonte_truetype.dart';
 import '../domain/modelo_do_texto3d.dart';
@@ -4246,6 +4247,151 @@ class EditorController extends Notifier<VideoProject> {
     );
   }
 
+  // --------------------------------------------- presets de movimento
+
+  /// RECEITAS DE ENTRADA/SAIDA com keyframes reais nas trilhas da camada
+  /// — nada procedural escondido: o que o preset crava, a pessoa edita
+  /// keyframe a keyframe, com as mesmas curvas de sempre.
+  void aplicarPresetDeMovimento(
+    String id,
+    Duration globalTime,
+    PresetDeMovimento preset,
+  ) {
+    final layer = _layer(id);
+    if (layer == null) return;
+    final t = layer.localTime(globalTime);
+    const dur = Duration(milliseconds: 450);
+    runAsOneUndo(() {
+      final l = _layer(id);
+      if (l == null) return;
+      final op = l.opacity.valueAt(t);
+      final sx = l.scaleX.valueAt(t);
+      final sy = l.scaleY.valueAt(t);
+      final pos = l.position.valueAt(t);
+      switch (preset) {
+        case PresetDeMovimento.aparecer:
+          _replace(
+            l.copyLayer(
+              opacity: l.opacity
+                  .withKeyframe(t, 0, Easing.appleStandard)
+                  .withKeyframe(t + dur, op),
+            ),
+          );
+        case PresetDeMovimento.sumir:
+          _replace(
+            l.copyLayer(
+              opacity: l.opacity
+                  .withKeyframe(t, op, Easing.appleExit)
+                  .withKeyframe(t + dur, 0),
+            ),
+          );
+        case PresetDeMovimento.subir:
+          _replace(
+            l.copyLayer(
+              opacity: l.opacity
+                  .withKeyframe(t, 0, Easing.appleStandard)
+                  .withKeyframe(t + dur, op),
+              position: l.position
+                  .withKeyframe(
+                    t,
+                    pos + const Offset(0, 48),
+                    Easing.appleStandard,
+                  )
+                  .withKeyframe(t + dur, pos),
+            ),
+          );
+        case PresetDeMovimento.pop:
+          _replace(
+            l.copyLayer(
+              opacity: l.opacity
+                  .withKeyframe(t, 0, Easing.appleStandard)
+                  .withKeyframe(
+                    t + const Duration(milliseconds: 200),
+                    op,
+                  ),
+              scaleX: l.scaleX
+                  .withKeyframe(t, sx * 0.6, Easing.overshoot)
+                  .withKeyframe(t + dur, sx),
+              scaleY: l.scaleY
+                  .withKeyframe(t, sy * 0.6, Easing.overshoot)
+                  .withKeyframe(t + dur, sy),
+            ),
+          );
+        case PresetDeMovimento.soco:
+          const pico = Duration(milliseconds: 130);
+          const fim = Duration(milliseconds: 340);
+          _replace(
+            l.copyLayer(
+              scaleX: l.scaleX
+                  .withKeyframe(t, sx, Easing.easeOut)
+                  .withKeyframe(t + pico, sx * 1.12, Easing.easeInOut)
+                  .withKeyframe(t + fim, sx),
+              scaleY: l.scaleY
+                  .withKeyframe(t, sy, Easing.easeOut)
+                  .withKeyframe(t + pico, sy * 1.12, Easing.easeInOut)
+                  .withKeyframe(t + fim, sy),
+            ),
+          );
+      }
+    });
+  }
+
+  /// MORPH RAPIDO da forma parametrica (retangulo): quadrado -> circulo
+  /// -> pilula -> card com keyframes normais de tamanho e arredondamento
+  /// (o canto NUNCA deforma: e a conta da forma, nao a escala da camada).
+  void morphRapidoDeForma(String id, Duration globalTime, FormaRapida alvo) {
+    final layer = _layer(id);
+    if (layer is! ShapeLayer) return;
+    final t = layer.localTime(globalTime);
+    const dur = Duration(milliseconds: 500);
+    _updateShape(id, (items) => [
+      for (final i in items)
+        if (i is ShapeParametric && i.kind == ParamShapeKind.rect)
+          (() {
+            final sx = i.sizeX.valueAt(t);
+            final sy = i.sizeY.valueAt(t);
+            final lado = math.min(sx, sy);
+            final round = i.roundness.valueAt(t);
+            final cheio = i.roundnessPercent ? 100.0 : lado / 2;
+            final (ax, ay, ar) = switch (alvo) {
+              FormaRapida.circulo => (lado, lado, cheio),
+              FormaRapida.pilula => (lado * 2.4, lado, cheio),
+              FormaRapida.card => (
+                lado * 1.9,
+                lado * 1.15,
+                i.roundnessPercent ? 18.0 : lado * 0.11,
+              ),
+            };
+            AnimatedDouble anima(AnimatedDouble tr, double de, double para) =>
+                tr.withKeyframe(t, de, Easing.overshoot)
+                    .withKeyframe(t + dur, para);
+            return ShapeParametric(
+              id: i.id,
+              kind: i.kind,
+              sizeX: anima(i.sizeX, sx, ax),
+              sizeY: anima(i.sizeY, sy, ay),
+              roundness: anima(i.roundness, round, ar),
+              cornerTopLeft: i.cornerTopLeft,
+              cornerTopRight: i.cornerTopRight,
+              cornerBottomRight: i.cornerBottomRight,
+              cornerBottomLeft: i.cornerBottomLeft,
+              roundnessPercent: i.roundnessPercent,
+              points: i.points,
+              outerRadius: i.outerRadius,
+              innerRadius: i.innerRadius,
+              outerRoundness: i.outerRoundness,
+              innerRoundness: i.innerRoundness,
+              shapeRotation: i.shapeRotation,
+              startAngle: i.startAngle,
+              sweep: i.sweep,
+              sectorInner: i.sectorInner,
+            );
+          })()
+        else
+          i,
+    ]);
+  }
+
   // ------------------------------------------------- estudio do tempo
 
   /// A curva fonte-tempo do clipe (nula = velocidade constante).
@@ -7414,6 +7560,94 @@ class EditorController extends Notifier<VideoProject> {
     );
   }
 
+  /// O LOSANGO DA COR do preenchimento: crava (ou tira) keyframe nos
+  /// tres canais de uma vez, no instante do cabecote. Na primeira
+  /// cravada as trilhas nascem da cor base — dai em diante a cor anima
+  /// como qualquer numero do app.
+  void toggleShapeFillColorKeyframe(String id, String itemId, Duration g) {
+    if (_cravarPendencia(id, g)) return;
+    final layer = _layer(id);
+    if (layer == null) return;
+    final local = layer.localTime(g);
+    _updateShape(id, (items) => [
+      for (final i in items)
+        if (i is ShapeFill && i.id == itemId)
+          (() {
+            final atual = i.colorAt(local);
+            AnimatedDouble trilha(AnimatedDouble? t, double canal) =>
+                t ?? AnimatedDouble(canal);
+            final r = trilha(i.corR, atual.r * 255);
+            final gT = trilha(i.corG, atual.g * 255);
+            final b = trilha(i.corB, atual.b * 255);
+            final tem = r.hasKeyframeAt(local);
+            AnimatedDouble poe(AnimatedDouble t, double v) => tem
+                ? t.withoutKeyframe(local)
+                : t.withKeyframe(local, v);
+            return i.copyWith(
+              corR: poe(r, atual.r * 255),
+              corG: poe(gT, atual.g * 255),
+              corB: poe(b, atual.b * 255),
+            );
+          })()
+        else
+          i,
+    ]);
+  }
+
+  /// TROCA A COR do preenchimento no instante [g], respeitando a regra
+  /// do app: sem animacao muda a base; animada e SOBRE um keyframe,
+  /// atualiza aquele keyframe; animada fora de keyframe, nao mexe (o
+  /// losango e quem crava).
+  void setShapeFillColorAt(String id, String itemId, Duration g, Color cor) {
+    final layer = _layer(id);
+    if (layer == null) return;
+    final local = layer.localTime(g);
+    _updateShape(id, (items) => [
+      for (final i in items)
+        if (i is ShapeFill && i.id == itemId)
+          !i.corAnimada
+              ? i.copyWith(color: cor)
+              : i.copyWith(
+                  corR: (i.corR ?? AnimatedDouble(i.color.r * 255))
+                      .edited(local, cor.r * 255),
+                  corG: (i.corG ?? AnimatedDouble(i.color.g * 255))
+                      .edited(local, cor.g * 255),
+                  corB: (i.corB ?? AnimatedDouble(i.color.b * 255))
+                      .edited(local, cor.b * 255),
+                )
+        else
+          i,
+    ]);
+  }
+
+  /// AUTO MORPH: a forma atual vira origem e [alvo] o destino, com o
+  /// progresso ja keyframado 0 -> 1 em [duracao] a partir do cabecote —
+  /// keyframes normais, editaveis, com easing proprio.
+  void autoMorphPara(
+    String id,
+    ShapePrimitive alvo,
+    Duration globalTime, {
+    Duration duracao = const Duration(milliseconds: 500),
+  }) {
+    final layer = _layer(id);
+    if (layer is! ShapeLayer) return;
+    final local = layer.localTime(globalTime);
+    runAsOneUndo(() {
+      convertShapeToMorph(id, ShapePath(primitive: alvo));
+      _updateShape(id, (items) => [
+        for (final i in items)
+          if (i is ShapeMorph)
+            i.copyWith(
+              progress: AnimatedDouble(0)
+                  .withKeyframe(local, 0, Easing.easeInOut)
+                  .withKeyframe(local + duracao, 1),
+            )
+          else
+            i,
+      ]);
+    });
+  }
+
   /// Transforma a forma num MORPH: a primeira ShapePath (ou o destino do
   /// morph atual) vira a origem, e [target] o destino. O progresso (0..1)
   /// anima por keyframe como qualquer propriedade.
@@ -7613,6 +7847,17 @@ class EditorController extends Notifier<VideoProject> {
           'dashOffset' => s.dashOffset,
           _ => null,
         },
+        ShapeFill f => switch (key) {
+          'opacity' => f.opacity,
+          'cr' => f.corR,
+          'cg' => f.corG,
+          'cb' => f.corB,
+          _ => null,
+        },
+        ShapeMorph m => switch (key) {
+          'progress' => m.progress,
+          _ => null,
+        },
         _ => null,
       };
 
@@ -7634,6 +7879,17 @@ class EditorController extends Notifier<VideoProject> {
       'gapLength' => s.copyWith(gapLength: v),
       'dashOffset' => s.copyWith(dashOffset: v),
       _ => s,
+    },
+    ShapeFill f => switch (key) {
+      'opacity' => f.copyWith(opacity: v),
+      'cr' => f.copyWith(corR: v),
+      'cg' => f.copyWith(corG: v),
+      'cb' => f.copyWith(corB: v),
+      _ => f,
+    },
+    ShapeMorph m => switch (key) {
+      'progress' => m.copyWith(progress: v),
+      _ => m,
     },
     _ => item,
   };

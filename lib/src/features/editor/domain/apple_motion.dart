@@ -2,7 +2,7 @@ import 'keyframe.dart';
 import 'layer.dart';
 
 /// Ordem em que os elementos selecionados recebem o atraso da cascata.
-enum CascadeOrder { start, center, end, random }
+enum CascadeOrder { start, center, end, random, esquerdaDireita, cimaBaixo }
 
 /// Escalona keyframes reais das camadas selecionadas. O resultado continua
 /// editável trilha por trilha; não há efeito procedural escondendo o timing.
@@ -51,6 +51,12 @@ List<Layer> orderedCascadeLayers(
         final distance = (ia - center).abs().compareTo((ib - center).abs());
         return distance != 0 ? distance : ia.compareTo(ib);
       });
+    case CascadeOrder.esquerdaDireita:
+      return [...selected]
+        ..sort((a, b) => a.position.base.dx.compareTo(b.position.base.dx));
+    case CascadeOrder.cimaBaixo:
+      return [...selected]
+        ..sort((a, b) => a.position.base.dy.compareTo(b.position.base.dy));
     case CascadeOrder.random:
       final out = [...selected];
       var seed = 0x6A09E667;

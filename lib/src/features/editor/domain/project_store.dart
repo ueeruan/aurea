@@ -448,8 +448,11 @@ Map<String, dynamic> _shapeItem(ShapeItem s) => switch (s) {
     'kind': 'fill',
     'id': f.id,
     'color': _col(f.color),
-    'op': f.opacity,
+    'op': _ad(f.opacity),
     'eo': f.evenOdd,
+    if (f.corR != null) 'cr': _ad(f.corR!),
+    if (f.corG != null) 'cg': _ad(f.corG!),
+    if (f.corB != null) 'cb': _ad(f.corB!),
   },
   ShapeStroke st => {
     'kind': 'stroke',
@@ -599,8 +602,14 @@ ShapeItem _asShapeItem(Map<String, dynamic> m) => switch (m['kind']) {
   'fill' => ShapeFill(
     id: m['id'] as String,
     color: _asCol(m['color']),
-    opacity: (m['op'] as num).toDouble(),
+    // Arquivo antigo guardava um numero; o novo guarda a trilha.
+    opacity: m['op'] is num
+        ? AnimatedDouble((m['op'] as num).toDouble())
+        : _asAd(m['op']),
     evenOdd: m['eo'] as bool? ?? false,
+    corR: m['cr'] == null ? null : _asAd(m['cr']),
+    corG: m['cg'] == null ? null : _asAd(m['cg']),
+    corB: m['cb'] == null ? null : _asAd(m['cb']),
   ),
   'stroke' => ShapeStroke(
     id: m['id'] as String,

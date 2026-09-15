@@ -11,6 +11,7 @@ import '../../application/playback_controller.dart';
 import '../../application/ui/editor_session.dart';
 import '../../domain/layer.dart';
 import '../am/align_sheet.dart';
+import '../am/animar_sheet.dart';
 import '../am/audio_sheet.dart';
 import '../am/beat_pulse_sheet.dart';
 import '../am/beats_sheet.dart';
@@ -104,6 +105,15 @@ List<QuickAction> quickActionsFor(
         );
       },
     ),
+    // ANIMAR: presets de movimento com keyframes DE VERDADE (editaveis),
+    // morphs rapidos de forma e o Auto Morph.
+    if (layer is! AudioLayer)
+      QuickAction(
+        key: 'animar',
+        icon: CupertinoIcons.sparkles,
+        label: 'Animar',
+        onTap: () => pausa(() => showAnimarSheet(context, ref, id, playback)),
+      ),
     QuickAction(
       key: 'subir',
       icon: CupertinoIcons.arrow_up_to_line,

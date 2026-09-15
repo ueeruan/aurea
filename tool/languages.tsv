@@ -2452,3 +2452,11 @@ Distância real	Real distance	Distancia real	المسافة الحقيقية	실
 Quanto mede, no mundo real, a distância entre os dois pontos escolhidos?	In the real world, how long is the distance between the two chosen points?	¿Cuánto mide, en el mundo real, la distancia entre los dos puntos elegidos?	كم تبلغ المسافة بين النقطتين المختارتين في العالم الحقيقي؟	실제 세계에서 선택한 두 점 사이 거리는 얼마입니까?	実世界で、選んだ2点間の距離はどれくらいですか？	在现实世界中，所选两点之间的距离是多少？	वास्तविक दुनिया में चुने गए दो बिंदुओं के बीच की दूरी कितनी है?	Di dunia nyata, berapa jarak antara dua titik yang dipilih?	Каково реальное расстояние между двумя выбранными точками?
 Modelo 3D (importar)	3D model (import)	Modelo 3D (importar)	نموذج ثلاثي الأبعاد (استيراد)	3D 모델 (가져오기)	3Dモデル（読み込み）	3D模型（导入）	3D मॉडल (आयात)	Model 3D (impor)	3D-модель (импорт)
 Escolhe um arquivo de modelo e prende ele nesta superfície, por uma âncora.	Pick a model file and pin it to this surface through an anchor.	Elige un archivo de modelo y fíjalo a esta superficie mediante un ancla.	اختر ملف نموذج وثبته على هذا السطح عبر مرساة.	모델 파일을 골라 앵커로 이 표면에 고정합니다.	モデルファイルを選び、アンカーでこの面に固定します。	选择模型文件，并通过锚点固定到该表面。	मॉडल फ़ाइल चुनें और एंकर से इस सतह पर जोड़ें।	Pilih file model dan tempelkan ke permukaan ini lewat jangkar.	Выберите файл модели и закрепите его на этой поверхности через якорь.
+Sumir	Fade out	Desvanecer	اختفاء	페이드 아웃	フェードアウト	淡出	फ़ेड आउट	Menghilang	Исчезание
+Surgir de baixo	Rise in	Surgir desde abajo	الصعود من الأسفل	아래에서 등장	下から登場	自下而上出现	नीचे से उभरना	Muncul dari bawah	Появление снизу
+Virar círculo	Become a circle	Convertir en círculo	التحول إلى دائرة	원으로 변형	円にする	变成圆形	वृत्त बनाएं	Jadikan lingkaran	Превратить в круг
+Virar pílula	Become a pill	Convertir en píldora	التحول إلى كبسولة	알약 모양으로	ピル形にする	变成胶囊形	पिल बनाएं	Jadikan pil	Превратить в капсулу
+Virar card	Become a card	Convertir en tarjeta	التحول إلى بطاقة	카드로 변형	カードにする	变成卡片	कार्ड बनाएं	Jadikan kartu	Превратить в карточку
+Auto Morph	Auto Morph	Auto Morph	تحويل تلقائي	자동 모프	オートモーフ	自动变形	ऑटो मॉर्फ़	Auto Morph	Автоморфинг
+Morph da forma	Shape morph	Morph de la forma	تحويل الشكل	도형 모프	シェイプモーフ	形状变形	आकृति मॉर्फ़	Morph bentuk	Морфинг формы
+Coração	Heart	Corazón	قلب	하트	ハート	心形	दिल	Hati	Сердце

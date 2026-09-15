@@ -16,6 +16,8 @@ import '../domain/caption_highlight.dart';
 import '../domain/camera3d.dart';
 import '../domain/camera_cuts.dart';
 import '../domain/cut.dart';
+import '../domain/camera_solver3d.dart';
+import '../domain/cena_do_rastreio.dart';
 import '../domain/cut_ops.dart';
 import '../domain/remapear_tempo.dart';
 import '../domain/panorama3d.dart';
@@ -32,6 +34,7 @@ import '../domain/element3d.dart';
 import '../domain/extrude3d.dart';
 import '../domain/glb_import.dart';
 import '../domain/model_asset3d.dart';
+import 'camera_track_service.dart';
 import 'tracking_service.dart';
 import '../domain/tracker2d.dart';
 import '../domain/fx.dart';
@@ -3867,6 +3870,93 @@ class EditorController extends Notifier<VideoProject> {
       ),
     );
     return escritos;
+  }
+
+  // ------------------------------------------------- rastrear camera 3D
+
+  /// RASTREIA A CAMERA de um clipe e devolve a solucao.
+  ///
+  /// Nao mexe no projeto: quem decide o que fazer com o resultado e a
+  /// pessoa, depois de ver se o rastreio pegou. Um rastreio que ja
+  /// entrasse criando camadas obrigaria a desfazer toda vez que saisse
+  /// ruim — e sai ruim com frequencia, porque depende do plano filmado.
+  Future<SolucaoCamera3D> rastrearCamera3D(
+    String layerId, {
+    ModoDoSolve modo = ModoDoSolve.equilibrado,
+    TipoDeTomada tipoDeTomada = TipoDeTomada.auto,
+    int? fps,
+  }) async {
+    final layer = _layer(layerId);
+    if (layer is! VideoLayer) {
+      throw const RastreioException(
+        FalhaDoRastreio.poucosPontos,
+        'So da para rastrear a camera de um video.',
+      );
+    }
+    // A proporcao exibida decide a altura dos quadros analisados.
+    final proporcao =
+        layer.proporcaoDaFonte ?? (await sondarVideo(layer.sourcePath)).proporcao;
+    // O TRECHO DA FONTE QUE O CLIPE MOSTRA: com velocidade, reverso ou Time
+    // Remap ele nao e [sourceOffset, sourceOffset + duracao]. Varre o tempo
+    // da camada e fica com o menor e o maior instante do arquivo.
+    final (inicio, fim) = trechoDaFonteMostrado(layer);
+    return CameraTrackService.instance.rastrear(
+      layerId: layerId,
+      sourcePath: layer.sourcePath,
+      start: inicio,
+      duration: fim - inicio,
+      modo: modo,
+      tipoDeTomada: tipoDeTomada,
+      fps: fps,
+      proporcao: proporcao,
+    );
+  }
+
+  /// CRIA A CENA 3D em cima do clipe, com a camera rastreada.
+  ///
+  /// A camada entra IMEDIATAMENTE ACIMA do clipe rastreado, e nao no
+  /// topo da pilha: o que estava por cima do video (uma legenda, uma
+  /// marca) tem de continuar por cima da cena tambem.
+  ///
+  /// A cena 3D e desenhada no tamanho da COMPOSICAO, e o angulo de visao
+  /// resolvido vale para a largura do quadro analisado. Os dois so
+  /// coincidem quando o clipe rastreado preenche a composicao — que e o
+  /// caso normal. Com o video encaixotado numa composicao de outra
+  /// proporcao, o 3D fica certo na horizontal e desencontrado na
+  /// vertical; a folha avisa quando isso acontece.
+  ///
+  /// Devolve o id da camada criada.
+  String? criarCenaDoRastreio(
+    String layerId,
+    SolucaoCamera3D solucao, {
+    bool comNuvem = true,
+  }) {
+    final layer = _layer(layerId);
+    if (layer == null) return null;
+    final camada = camadaDoRastreio(
+      solucao,
+      startTime: layer.startTime,
+      duration: layer.duration,
+      position: _center,
+      nome: 'Cena 3D · ${layer.name}',
+      comNuvem: comNuvem,
+      fonteNoTempo: layer is VideoLayer
+          ? (t) => videoAbsoluteSourceTimeAt(layer, t)
+          : null,
+    );
+    final indice = state.layers.indexWhere((l) => l.id == layerId);
+    final lista = [...state.layers];
+    lista.insert(indice < 0 ? 0 : indice, camada);
+    _mutate(state.copyWith(layers: lista));
+    ref.read(selectedLayerProvider.notifier).state = camada.id;
+    return camada.id;
+  }
+
+  /// Poe um NULO num ponto rastreado, para pendurar coisas nele.
+  void criarNoDoPonto(String cenaId, SolucaoCamera3D solucao, int idDoPonto) {
+    final no = noNoPonto(solucao, idDoPonto);
+    if (no == null) return;
+    updateScene3D(cenaId, (cena) => cena.copyWith(nodes: [...cena.nodes, no]));
   }
 
   // ------------------------------------------------------- estabilizar

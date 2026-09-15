@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../application/editor_controller.dart';
 import '../../application/playback_controller.dart';
+import '../../application/ui/editor_session.dart';
 import '../../domain/layer.dart';
 import '../../domain/mask.dart';
 import '../../domain/path_edit.dart';
@@ -19,6 +20,22 @@ enum PointsMode { move, handle, add }
 final pathEditModeProvider = StateProvider<PointsMode>(
   (ref) => PointsMode.move,
 );
+
+/// As duas abas do Edit Points: mexer nos PONTOS ou nos KEYFRAMES deles.
+enum AbaDosPontos { pontos, keyframes }
+
+final abaDosPontosProvider = StateProvider<AbaDosPontos>(
+  (ref) => AbaDosPontos.pontos,
+);
+
+/// Qual alca o modo Alca puxa.
+final alcaDosPontosProvider = StateProvider<Handle>((ref) => Handle.saida);
+
+/// ALCAS IGUAIS: no ponto suave, a alca oposta espelha tambem o tamanho.
+final alcasIguaisProvider = StateProvider<bool>((ref) => false);
+
+/// MOVER TODOS: o trackpad anda com o contorno inteiro.
+final moverTodosOsPontosProvider = StateProvider<bool>((ref) => false);
 
 /// EDIT POINTS (o editor de pontos do Alight Motion, em retrato).
 ///
@@ -236,6 +253,14 @@ class PointsPanelState extends ConsumerState<PointsPanel> {
     final d = _paraCaminho(delta);
     final temSel =
         caminho != null && sel != null && sel < caminho.vertices.length;
+    if (modo == PointsMode.move &&
+        ref.read(moverTodosOsPontosProvider) &&
+        caminho != null &&
+        caminho.vertices.isNotEmpty) {
+      _editar((c) => moverTodosOsPontos(c, d));
+      _setCursor(_cursor() + d);
+      return;
+    }
     if (modo == PointsMode.move && temSel) {
       final alvo = caminho.vertices[sel].p + d;
       _editar((c) => moveVertex(c, sel, alvo));
@@ -244,12 +269,57 @@ class PointsPanelState extends ConsumerState<PointsPanel> {
     }
     if (modo == PointsMode.handle && temSel) {
       final v = caminho.vertices[sel];
-      final alvo = v.p + v.outT + d;
-      _editar((c) => moveHandle(c, sel, Handle.saida, alvo));
+      final lado = ref.read(alcaDosPontosProvider);
+      final alvo = v.p + (lado == Handle.saida ? v.outT : v.inT) + d;
+      final iguais = ref.read(alcasIguaisProvider);
+      _editar((c) => moveHandle(c, sel, lado, alvo, alcasIguais: iguais));
       _setCursor(alvo);
       return;
     }
     _setCursor(_cursor() + d);
+  }
+
+  /// Seleciona o ponto [i] pela regua do contorno.
+  void _selecionar(int i) {
+    final caminho = _caminho();
+    if (caminho == null || i < 0 || i >= caminho.vertices.length) return;
+    ref.read(pathEditSelectedProvider.notifier).state = i;
+    _setCursor(caminho.vertices[i].p);
+  }
+
+  /// Vai para outro contorno da mesma forma.
+  void _abrirContorno(String itemId) {
+    ref.read(pathEditTargetProvider.notifier).state = PathEditTarget(
+      widget.layerId,
+      itemId,
+      forma: true,
+    );
+    ref.read(pathEditSelectedProvider.notifier).state = null;
+    ref.read(pathEditCursorProvider.notifier).state = null;
+    ref
+        .read(editorSessionProvider.notifier)
+        .openEditPoints(itemId, returnTo: EditorPanel.editShape);
+  }
+
+  /// Pula o cabecote para o keyframe anterior/seguinte dos pontos.
+  void _pularKeyframe(int direcao) {
+    final l = _layer;
+    final trilha = _trilha();
+    if (l == null || trilha == null || trilha.keyframes.isEmpty) return;
+    final agora = l.localTime(_t);
+    const folga = Duration(milliseconds: 5);
+    final alvo = direcao < 0
+        ? trilha.keyframes.lastWhere(
+            (k) => k.time < agora - folga,
+            orElse: () => trilha.keyframes.first,
+          )
+        : trilha.keyframes.firstWhere(
+            (k) => k.time > agora + folga,
+            orElse: () => trilha.keyframes.last,
+          );
+    widget.playback.pause();
+    widget.playback.seek(l.startTime + alvo.time);
+    setState(() {});
   }
 
   void _toque() {
@@ -267,12 +337,19 @@ class PointsPanelState extends ConsumerState<PointsPanel> {
     ref.watch(editorControllerProvider);
     final modo = ref.watch(pathEditModeProvider);
     final sel = ref.watch(pathEditSelectedProvider);
+    final aba = ref.watch(abaDosPontosProvider);
     final caminho = _caminho();
     final n = caminho?.vertices.length ?? 0;
     final temSel = sel != null && sel < n;
 
     final caminhoFechado = caminho?.closed ?? true;
     final temPontos = n > 0;
+    final contornos = _editaForma
+        ? ref
+              .read(editorControllerProvider.notifier)
+              .contornosDaForma(widget.layerId)
+        : const <String>[];
+    final indiceDoContorno = contornos.indexOf(widget.itemId);
 
     return ColoredBox(
       color: AmColors.panel,
@@ -323,6 +400,192 @@ class PointsPanelState extends ConsumerState<PointsPanel> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  // ABA E CONTORNO: pontos ou keyframes; qual caminho da
+                  // forma; um contorno novo (furo, segunda ilha).
+                  SizedBox(
+                    height: 34,
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: CupertinoSlidingSegmentedControl<AbaDosPontos>(
+                            key: const ValueKey('pontos-abas'),
+                            groupValue: aba,
+                            thumbColor: AmColors.accentDim,
+                            backgroundColor: AmColors.chip,
+                            children: const {
+                              AbaDosPontos.pontos: Padding(
+                                key: ValueKey('pontos-aba-pontos'),
+                                padding: EdgeInsets.symmetric(vertical: 5),
+                                child: AppText(
+                                  'Pontos',
+                                  style: TextStyle(fontSize: 12, color: AmColors.text),
+                                ),
+                              ),
+                              AbaDosPontos.keyframes: Padding(
+                                key: ValueKey('pontos-aba-keyframes'),
+                                padding: EdgeInsets.symmetric(vertical: 5),
+                                child: AppText(
+                                  'Keyframes',
+                                  style: TextStyle(fontSize: 12, color: AmColors.text),
+                                ),
+                              ),
+                            },
+                            onValueChanged: (v) {
+                              if (v != null) {
+                                ref.read(abaDosPontosProvider.notifier).state = v;
+                              }
+                            },
+                          ),
+                        ),
+                        if (_editaForma) ...[
+                          _BotaoPequeno(
+                            chave: 'pontos-contorno-anterior',
+                            icone: CupertinoIcons.chevron_left,
+                            onTap: indiceDoContorno > 0
+                                ? () => _abrirContorno(contornos[indiceDoContorno - 1])
+                                : null,
+                          ),
+                          AppText(
+                            '${indiceDoContorno + 1}/${contornos.length}',
+                            key: const ValueKey('pontos-contorno'),
+                            style: const TextStyle(fontSize: 11.5, color: AmColors.muted),
+                          ),
+                          _BotaoPequeno(
+                            chave: 'pontos-contorno-proximo',
+                            icone: CupertinoIcons.chevron_right,
+                            onTap: indiceDoContorno >= 0 &&
+                                    indiceDoContorno < contornos.length - 1
+                                ? () => _abrirContorno(contornos[indiceDoContorno + 1])
+                                : null,
+                          ),
+                          _BotaoPequeno(
+                            chave: 'pontos-contorno-novo',
+                            icone: CupertinoIcons.plus_square_on_square,
+                            onTap: () {
+                              final novo = ref
+                                  .read(editorControllerProvider.notifier)
+                                  .adicionarContorno(widget.layerId);
+                              if (novo == null) return;
+                              ref.read(pathEditModeProvider.notifier).state =
+                                  PointsMode.add;
+                              _abrirContorno(novo);
+                            },
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  if (aba == AbaDosPontos.keyframes)
+                    Expanded(
+                      child: _AbaDeKeyframes(
+                        animado: animado,
+                        aqui: temKeyframeAqui,
+                        quantos: _trilha()?.keyframes.length ?? 0,
+                        onCravar: () {
+                          toggleKeyframe();
+                          setState(() {});
+                        },
+                        onAnterior: () => _pularKeyframe(-1),
+                        onProximo: () => _pularKeyframe(1),
+                      ),
+                    )
+                  else ...[
+                  // A REGUA DO CONTORNO: os pontos em fila, o escolhido
+                  // maior; tocar seleciona.
+                  if (temPontos)
+                    SizedBox(
+                      height: 30,
+                      child: ListView.separated(
+                        key: const ValueKey('pontos-regua'),
+                        scrollDirection: Axis.horizontal,
+                        itemCount: n,
+                        separatorBuilder: (_, _) => const SizedBox(width: 6),
+                        itemBuilder: (_, i) => GestureDetector(
+                          key: ValueKey('pontos-no-$i'),
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () => _selecionar(i),
+                          child: Container(
+                            width: sel == i ? 30 : 24,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: sel == i ? AmColors.accent : AmColors.chip,
+                              shape: BoxShape.circle,
+                            ),
+                            child: AppText(
+                              '${i + 1}',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: sel == i ? AmColors.onAction : AmColors.text,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (temPontos) const SizedBox(height: 6),
+                  if (modo == PointsMode.handle)
+                    SizedBox(
+                      height: 32,
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: CupertinoSlidingSegmentedControl<Handle>(
+                              key: const ValueKey('pontos-lado-da-alca'),
+                              groupValue: ref.watch(alcaDosPontosProvider),
+                              thumbColor: AmColors.accentDim,
+                              backgroundColor: AmColors.chip,
+                              children: const {
+                                Handle.entrada: Padding(
+                                  key: ValueKey('pontos-alca-entrada'),
+                                  padding: EdgeInsets.symmetric(vertical: 4),
+                                  child: AppText(
+                                    'Entrada',
+                                    style: TextStyle(fontSize: 11.5, color: AmColors.text),
+                                  ),
+                                ),
+                                Handle.saida: Padding(
+                                  key: ValueKey('pontos-alca-saida'),
+                                  padding: EdgeInsets.symmetric(vertical: 4),
+                                  child: AppText(
+                                    'Saída',
+                                    style: TextStyle(fontSize: 11.5, color: AmColors.text),
+                                  ),
+                                ),
+                              },
+                              onValueChanged: (v) {
+                                if (v != null) {
+                                  ref.read(alcaDosPontosProvider.notifier).state = v;
+                                }
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          _Alternador(
+                            chave: 'pontos-alcas-iguais',
+                            rotulo: 'Alças iguais',
+                            ligado: ref.watch(alcasIguaisProvider),
+                            onTap: () => ref
+                                .read(alcasIguaisProvider.notifier)
+                                .update((v) => !v),
+                          ),
+                        ],
+                      ),
+                    ),
+                  if (modo == PointsMode.move)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: _Alternador(
+                        chave: 'pontos-mover-todos',
+                        rotulo: 'Mover o contorno inteiro',
+                        ligado: ref.watch(moverTodosOsPontosProvider),
+                        onTap: () => ref
+                            .read(moverTodosOsPontosProvider.notifier)
+                            .update((v) => !v),
+                      ),
+                    ),
+                  if (modo != PointsMode.add) const SizedBox(height: 6),
                   AppText(
                     switch (modo) {
                       PointsMode.move =>
@@ -393,6 +656,7 @@ class PointsPanelState extends ConsumerState<PointsPanel> {
                       ),
                     ],
                   ),
+                  ],
                 ],
               ),
             ),
@@ -401,6 +665,134 @@ class PointsPanelState extends ConsumerState<PointsPanel> {
       ),
     );
   }
+}
+
+/// A ABA DE KEYFRAMES DOS PONTOS: cravar a forma de agora e andar entre
+/// as formas cravadas (e assim que o contorno faz morph).
+class _AbaDeKeyframes extends StatelessWidget {
+  const _AbaDeKeyframes({
+    required this.animado,
+    required this.aqui,
+    required this.quantos,
+    required this.onCravar,
+    required this.onAnterior,
+    required this.onProximo,
+  });
+
+  final bool animado;
+  final bool aqui;
+  final int quantos;
+  final VoidCallback onCravar;
+  final VoidCallback onAnterior;
+  final VoidCallback onProximo;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      AppText(
+        animado
+            ? '$quantos keyframes na forma dos pontos. Mova o cabeçote, mude os pontos e crave outra forma.'
+            : 'Crave a forma de agora; depois mova o cabeçote e mude os pontos para animar o contorno.',
+        style: const TextStyle(fontSize: 12, color: AmColors.muted),
+      ),
+      const SizedBox(height: 10),
+      Row(
+        children: [
+          _BotaoPequeno(
+            chave: 'pontos-kf-anterior',
+            icone: CupertinoIcons.backward_end_fill,
+            onTap: animado ? onAnterior : null,
+          ),
+          Expanded(
+            child: _AcaoDoPonto(
+              chave: 'pontos-kf',
+              icon: aqui ? CupertinoIcons.rhombus_fill : CupertinoIcons.rhombus,
+              rotulo: aqui ? 'Tirar keyframe daqui' : 'Cravar keyframe aqui',
+              onTap: onCravar,
+            ),
+          ),
+          _BotaoPequeno(
+            chave: 'pontos-kf-proximo',
+            icone: CupertinoIcons.forward_end_fill,
+            onTap: animado ? onProximo : null,
+          ),
+        ],
+      ),
+    ],
+  );
+}
+
+class _BotaoPequeno extends StatelessWidget {
+  const _BotaoPequeno({required this.chave, required this.icone, this.onTap});
+
+  final String chave;
+  final IconData icone;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    key: ValueKey(chave),
+    behavior: HitTestBehavior.opaque,
+    onTap: onTap,
+    child: SizedBox(
+      width: 34,
+      height: 34,
+      child: Icon(
+        icone,
+        size: 16,
+        color: onTap == null ? AmColors.muted.withValues(alpha: .5) : AmColors.text,
+      ),
+    ),
+  );
+}
+
+class _Alternador extends StatelessWidget {
+  const _Alternador({
+    required this.chave,
+    required this.rotulo,
+    required this.ligado,
+    required this.onTap,
+  });
+
+  final String chave;
+  final String rotulo;
+  final bool ligado;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    key: ValueKey(chave),
+    behavior: HitTestBehavior.opaque,
+    onTap: onTap,
+    child: Container(
+      height: 30,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: ligado ? AmColors.accentDim : AmColors.chip,
+        borderRadius: BorderRadius.circular(15),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            ligado ? CupertinoIcons.checkmark_alt : CupertinoIcons.circle,
+            size: 13,
+            color: ligado ? AmColors.accent : AmColors.muted,
+          ),
+          const SizedBox(width: 5),
+          AppText(
+            rotulo,
+            style: TextStyle(
+              fontSize: 11.5,
+              color: ligado ? AmColors.accent : AmColors.text,
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 /// Uma acao do ponto: icone e NOME, num alvo de 44 pt.

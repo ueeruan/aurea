@@ -77,25 +77,44 @@ BezierPath moveVertex(BezierPath path, int index, Offset to) {
 /// Num no de CURVA as duas alcas ficam opostas: puxar uma empurra a
 /// outra, mantendo o comprimento dela. E o que impede o "bico" aparecer
 /// no meio de uma curva lisa. Num no de CANTO cada alca anda sozinha.
-BezierPath moveHandle(BezierPath path, int index, Handle which, Offset to) {
+BezierPath moveHandle(
+  BezierPath path,
+  int index,
+  Handle which,
+  Offset to, {
+  bool alcasIguais = false,
+}) {
   if (index < 0 || index >= path.vertices.length) return path;
   final v = path.vertices[index];
   final rel = to - v.p;
 
+  // Ponto suave: a alca oposta segue a direcao. Com [alcasIguais], segue
+  // tambem o tamanho — as duas alcas espelhadas por inteiro.
+  Offset oposta(Offset antiga) => alcasIguais ? -rel : _oposta(rel, antiga);
   var inT = v.inT;
   var outT = v.outT;
   if (which == Handle.entrada) {
     inT = rel;
-    if (!v.corner) outT = _oposta(rel, v.outT);
+    if (!v.corner) outT = oposta(v.outT);
   } else {
     outT = rel;
-    if (!v.corner) inT = _oposta(rel, v.inT);
+    if (!v.corner) inT = oposta(v.inT);
   }
 
   final out = [...path.vertices];
   out[index] = PathVertex(p: v.p, inT: inT, outT: outT, corner: v.corner);
   return BezierPath(vertices: out, closed: path.closed);
 }
+
+/// MOVER O CONTORNO INTEIRO: todos os pontos (e as alcas, que sao
+/// relativas) andam [delta].
+BezierPath moverTodosOsPontos(BezierPath path, Offset delta) => BezierPath(
+  closed: path.closed,
+  vertices: [
+    for (final v in path.vertices)
+      PathVertex(p: v.p + delta, inT: v.inT, outT: v.outT, corner: v.corner),
+  ],
+);
 
 /// A alca oposta: mesma direcao invertida, comprimento preservado.
 Offset _oposta(Offset movida, Offset antiga) {

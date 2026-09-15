@@ -8170,6 +8170,38 @@ class EditorController extends Notifier<VideoProject> {
     );
   }
 
+  /// OS CONTORNOS DA FORMA: os caminhos bezier da camada, na ordem.
+  List<String> contornosDaForma(String layerId) => switch (_layer(layerId)) {
+    ShapeLayer l => [
+      for (final i in l.contents)
+        if (i is ShapeBezier) i.id,
+    ],
+    _ => const [],
+  };
+
+  /// NOVO CONTORNO na mesma forma (um furo, uma segunda ilha): nasce um
+  /// caminho vazio antes das pinturas, pronto para receber pontos.
+  String? adicionarContorno(String layerId) {
+    if (_layer(layerId) is! ShapeLayer) return null;
+    final novo = ShapeBezier(
+      path: AnimatedPath(BezierPath(vertices: const [], closed: false)),
+    );
+    _updateShape(layerId, (items) {
+      final pintura = items.indexWhere(
+        (i) =>
+            i is ShapeFill ||
+            i is ShapeStroke ||
+            i is ShapeGradientFill ||
+            i is ShapeMediaFill ||
+            i is MergePathsOperator,
+      );
+      final out = [...items];
+      out.insert(pintura < 0 ? out.length : pintura, novo);
+      return out;
+    });
+    return novo.id;
+  }
+
   /// Keyframe do CAMINHO da forma no tempo atual.
   void toggleShapeBezierKeyframe(
     String layerId,

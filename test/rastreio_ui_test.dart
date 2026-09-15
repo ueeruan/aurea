@@ -1,11 +1,8 @@
-import 'editor_audit_helpers.dart';
-
 import 'package:aurea/src/features/editor/application/blob_track_service.dart';
 import 'package:aurea/src/features/editor/application/editor_controller.dart';
 import 'package:aurea/src/features/editor/domain/blob_track.dart';
 import 'package:aurea/src/features/editor/domain/layer.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'editor_hierarchy_test.dart' show openEditor;
@@ -147,35 +144,5 @@ void main() {
       movido.scaleX.valueAt(const Duration(milliseconds: 1900)),
       greaterThan(movido.scaleX.valueAt(Duration.zero) * 1.2),
     );
-  });
-
-  testWidgets('a acao Rastrear aparece num video e abre a folha', (
-    tester,
-  ) async {
-    final c = await openEditor(tester);
-    final e = c.read(editorControllerProvider.notifier);
-    e.addVideoLayer(
-      Duration.zero,
-      'clipe.mp4',
-      'Clipe',
-      const Duration(seconds: 6),
-    );
-    final video = c.read(editorControllerProvider).layers
-        .whereType<VideoLayer>()
-        .first;
-    c.read(selectedLayerProvider.notifier).state = video.id;
-    await tester.pumpAndSettle();
-
-    // A porta de entrada existe, e vem antes de reenquadrar/estabilizar.
-    await openLayerActions(tester);
-    await tester.scrollUntilVisible(find.byKey(const ValueKey('mais-rastrear')),
-        180, scrollable: find.descendant(of: find.byType(BottomSheet),
-            matching: find.byType(Scrollable)).first);
-    expect(find.byKey(const ValueKey('mais-rastrear')), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('mais-rastrear')));
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
-    await tester.pumpAndSettle();
-    expect(find.text('Rastrear'), findsWidgets);
-    expect(tester.takeException(), isNull);
   });
 }

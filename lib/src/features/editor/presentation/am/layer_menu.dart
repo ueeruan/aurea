@@ -41,7 +41,6 @@ import 'path_edit_sheet.dart';
 import 'scene3d_sheet.dart';
 import 'speed_sheet.dart';
 import '../estudio/estudio_da_cena.dart';
-import 'rastreio_sheet.dart' show showRastreioSheet;
 
 /// Acao escolhida no menu da camada.
 enum LayerMenuAction {
@@ -520,12 +519,6 @@ _Tile? _tileDaSecao(
             : showElement3DSheet(context, ref, layer.id),
       ),
       badge: null,
-    ),
-    AmSecao.rastrear => (
-      icone: CupertinoIcons.viewfinder,
-      rotulo: 'Rastrear',
-      onTap: () => abrirDepois(() => showRastreioSheet(context, ref, layer.id)),
-      badge: 'NEW',
     ),
     AmSecao.efeitos => (
       icone: CupertinoIcons.sparkles,

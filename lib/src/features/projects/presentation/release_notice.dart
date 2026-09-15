@@ -11,11 +11,6 @@ const releaseNoticeSeenKey = 'aurea.releaseNotice.seen';
 
 const releaseHighlights = <(IconData, String, String)>[
   (
-    CupertinoIcons.viewfinder,
-    'Tracker 3D novo',
-    'Rastrear no clipe de vídeo: motor novo em C++ que resolve chão plano e tripé, calcula a lente e dá pose a todo quadro. A câmera acompanha velocidade e reverso.',
-  ),
-  (
     CupertinoIcons.textformat_alt,
     'Texto 3D de metal',
     'Adicionar > Objeto > Texto 3D: letras com chanfro em ouro, cromo ou aço escovado, num estúdio feito para metal. O texto segue um nulo na linha do tempo.',

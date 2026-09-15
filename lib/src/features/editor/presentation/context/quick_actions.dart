@@ -20,7 +20,6 @@ import '../am/freeze_sheet.dart';
 import '../am/layer_menu.dart';
 import '../am/oficio_sheets.dart';
 import '../am/precomp_sheet.dart';
-import '../am/rastreio_sheet.dart';
 import '../am/speed_sheet.dart';
 import '../am/text_path_sheet.dart';
 import '../widgets/add_layer_sheet.dart' show showCaptionCreationSheet;
@@ -300,16 +299,6 @@ List<QuickAction> quickActionsFor(
       ),
     ],
     if (layer is VideoLayer) ...[
-      // RASTREAR fica ANTES de reenquadrar e estabilizar de proposito:
-      // as tres leem o video do mesmo jeito, mas so esta responde a
-      // pergunta que as pessoas fazem primeiro ("como faco isso seguir
-      // aquilo?"). Escondida no fim da fila, ninguem achava.
-      QuickAction(
-        key: 'rastrear',
-        icon: CupertinoIcons.scope,
-        label: 'Rastrear',
-        onTap: () => pausa(() => showRastreioSheet(context, ref, id)),
-      ),
       QuickAction(
         key: 'legendar',
         icon: CupertinoIcons.captions_bubble,

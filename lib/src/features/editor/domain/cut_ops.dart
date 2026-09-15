@@ -457,23 +457,3 @@ List<Layer> transitionPaintOrder(
   }
   return result;
 }
-
-/// O TRECHO DO ARQUIVO que o clipe mostra de ponta a ponta (instantes
-/// absolutos da fonte): o menor e o maior, varrendo a camada a 60 quadros
-/// por segundo. Com velocidade constante e o [sourceOffset, +span]; com
-/// reverso ou Time Remap, o que a curva realmente visita.
-(Duration, Duration) trechoDaFonteMostrado(VideoLayer layer) {
-  final passo = 1000000 ~/ 60;
-  var menor = 1 << 62, maior = -(1 << 62);
-  for (var us = 0; us <= layer.duration.inMicroseconds; us += passo) {
-    final f = videoAbsoluteSourceTimeAt(layer, Duration(microseconds: us))
-        .inMicroseconds;
-    if (f < menor) menor = f;
-    if (f > maior) maior = f;
-  }
-  final ultimo = videoAbsoluteSourceTimeAt(layer, layer.duration).inMicroseconds;
-  if (ultimo < menor) menor = ultimo;
-  if (ultimo > maior) maior = ultimo;
-  if (maior <= menor) maior = menor + passo;
-  return (Duration(microseconds: menor), Duration(microseconds: maior));
-}

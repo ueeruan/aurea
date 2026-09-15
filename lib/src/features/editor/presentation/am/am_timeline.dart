@@ -2413,8 +2413,11 @@ class _AmBarState extends ConsumerState<_AmBar> {
     );
   }
 
+  // No COMPACTO o losango desce para a borda de baixo da pilula: no
+  // meio ele caia EM CIMA do nome ("Retangulo◆redondado", print do
+  // beta) e a barra parecia mudar de formato do nada.
   double _topoDoLosango(BuildContext context) => compact
-      ? (kAmBarHeight - 16) / 2
+      ? kAmBarHeight - 13
       : _Alturas.barraDe(context) - kAmFaixaKeyframes - 1;
 
   /// O TEMPO DA MARCA NA MAO, num rotulo pequeno: o dedo cobre o losango e

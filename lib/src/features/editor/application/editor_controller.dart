@@ -643,6 +643,27 @@ class EditorController extends Notifier<VideoProject> {
   /// qualquer coisa e no preview ficar a tela cheia de acordo com a
   /// resolucao"). A proporcao do arquivo e lida em seguida, sem decodificar
   /// a foto, e so serve para medir a caixa; quem desenha ja cobre.
+  /// NOME LEGIVEL PARA MIDIA IMPORTADA. Galeria entrega titulo vazio ou
+  /// o nome-hash do arquivo de cache ("3d907d6ca2ca7382...") — era a
+  /// "camada que muda o formato do nada" do beta: a pilula compacta
+  /// mostrando um hash parecia outra camada. Hash e numerao viram
+  /// "Video N"/"Imagem N"; nome de gente so perde a extensao.
+  String _nomeDeMidia(String bruto, {required bool video}) {
+    final semExtensao = bruto
+        .trim()
+        .replaceAll(RegExp(r'\.[A-Za-z0-9]{1,5}$'), '')
+        .trim();
+    final feio =
+        semExtensao.isEmpty ||
+        RegExp(r'^[0-9a-fA-F_\-]{16,}$').hasMatch(semExtensao) ||
+        RegExp(r'^\d{8,}$').hasMatch(semExtensao);
+    if (!feio) return semExtensao;
+    final n = video
+        ? state.layers.whereType<VideoLayer>().length + 1
+        : state.layers.whereType<ImageLayer>().length + 1;
+    return video ? 'Vídeo $n' : 'Imagem $n';
+  }
+
   String addImageLayer(
     Duration at,
     String path,
@@ -650,7 +671,7 @@ class EditorController extends Notifier<VideoProject> {
     double? proporcao,
   }) {
     final layer = ImageLayer(
-      name: name,
+      name: _nomeDeMidia(name, video: false),
       startTime: at,
       duration: const Duration(seconds: 3),
       sourcePath: path,
@@ -676,7 +697,7 @@ class EditorController extends Notifier<VideoProject> {
     double? proporcao,
   }) {
     final layer = VideoLayer(
-      name: name,
+      name: _nomeDeMidia(name, video: true),
       startTime: at,
       duration: duration,
       sourceDuration: fonte,
@@ -5288,16 +5309,23 @@ class EditorController extends Notifier<VideoProject> {
     if (layer is VideoLayer) {
       if (hasTimeRemap(layer) || layer.reverse) {
         final sliced = _sliceVideoTrack(layer, delta, layer.duration);
-        _replace(
+        // OS KEYFRAMES VAO JUNTO — era o "os keyframes nao ficam certos"
+        // do beta: aparar a alca esquerda de um video deslocava toda a
+        // animacao para depois, porque so as camadas sem midia rebaseavam.
+        // O deslocamento vem ANTES da trilha nova de tempo, que ja nasce
+        // relativa ao corte (o mesmo cuidado do splitLayer).
+        var novo = _deslocarAnimacao(
           layer.copyLayer(
             startTime: start,
             duration: layer.endTime - start,
             sourceOffset: sliced.sourceOffset,
             speed: 1,
             reverse: false,
-            effects: replaceTimeRemap(layer, sliced.track),
           ),
+          -delta,
         );
+        novo = novo.copyLayer(effects: replaceTimeRemap(novo as VideoLayer, sliced.track));
+        _replace(novo);
       } else {
         var offset =
             layer.sourceOffset +
@@ -5306,10 +5334,13 @@ class EditorController extends Notifier<VideoProject> {
             );
         if (offset < Duration.zero) offset = Duration.zero;
         _replace(
-          layer.copyLayer(
-            startTime: start,
-            duration: layer.endTime - start,
-            sourceOffset: offset,
+          _deslocarAnimacao(
+            layer.copyLayer(
+              startTime: start,
+              duration: layer.endTime - start,
+              sourceOffset: offset,
+            ),
+            -delta,
           ),
         );
       }
@@ -5319,10 +5350,13 @@ class EditorController extends Notifier<VideoProject> {
           Duration(microseconds: (delta.inMicroseconds * layer.speed).round());
       if (offset < Duration.zero) offset = Duration.zero;
       _replace(
-        layer.copyLayer(
-          startTime: start,
-          duration: layer.endTime - start,
-          sourceOffset: offset,
+        _deslocarAnimacao(
+          layer.copyLayer(
+            startTime: start,
+            duration: layer.endTime - start,
+            sourceOffset: offset,
+          ),
+          -delta,
         ),
       );
     } else if (layer is GroupLayer && layer.timeRemap == null) {

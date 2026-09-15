@@ -573,9 +573,24 @@ LayerTransform vistoPelaCamera(
     pos = centro + Offset(vx, vy) * k;
     z = vz;
     scale *= k;
-    rot -= cam.rotation.valueAt(cl);
-    rotX -= cam.rotationX.valueAt(cl);
-    rotY -= cam.rotationY.valueAt(cl);
+    // A ORIENTACAO vista pela camera e R(camera)^-1 * R(camada) — a
+    // MESMA conta do parenting logo acima. Subtrair angulo por angulo
+    // (como era) so bate quando a camera gira num eixo unico; com dois
+    // eixos, rotacoes nao comutam e cada camada saia com um erro
+    // proprio — era o "rotacoes 3D invertidas com varias camadas".
+    // O sinal do angulo continua perto da conta antiga (nearest turn)
+    // para keyframe existente nao pular de volta.
+    final camX = cam.rotationX.valueAt(cl);
+    final camY = cam.rotationY.valueAt(cl);
+    final camZ = cam.rotation.valueAt(cl);
+    if (camX != 0 || camY != 0 || camZ != 0) {
+      final orientacao = rotationMatrix(camX, camY, camZ)..transpose();
+      orientacao.multiply(rotationMatrix(rotX, rotY, rot));
+      final ang = rotationAngles(orientacao);
+      rot = nearestRotationTurn(ang.$3, rot - camZ);
+      rotX = nearestRotationTurn(ang.$1, rotX - camX);
+      rotY = nearestRotationTurn(ang.$2, rotY - camY);
+    }
   }
 
   return LayerTransform(

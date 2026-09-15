@@ -7596,6 +7596,7 @@ class EditorController extends Notifier<VideoProject> {
     String? fontFamily,
     bool? bold,
     bool clearFont = false,
+    TextAlign? alinhamento,
   }) {
     final layer = _layer(id);
     if (layer is! TextLayer) return;
@@ -7608,6 +7609,7 @@ class EditorController extends Notifier<VideoProject> {
         fontFamily: fontFamily,
         bold: bold,
         clearFont: clearFont,
+        alinhamento: alinhamento,
       ),
     );
     // A forma-conteiner acompanha o texto SOZINHA (PR-X14).

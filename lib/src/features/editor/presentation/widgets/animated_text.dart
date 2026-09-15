@@ -57,7 +57,7 @@ class AnimatedTextView extends StatelessWidget {
     final full = TextPainter(
       text: TextSpan(text: layer.text, style: style),
       textDirection: TextDirection.ltr,
-      textAlign: TextAlign.center,
+      textAlign: layer.alinhamento,
     )..layout();
 
     final units = TextUnits.of(layer.text);

@@ -1000,6 +1000,7 @@ class TextLayer extends Layer {
     this.color = const Color(0xFFFFFFFF),
     this.bold = true,
     this.fontFamily,
+    this.alinhamento = TextAlign.center,
     this.textPath = const TextPathSpec(),
     List<TextAnim>? anims,
     List<TextAnimator>? animators,
@@ -1035,6 +1036,11 @@ class TextLayer extends Layer {
   /// aplicativo, e o projeto continua abrindo mesmo se o .ttf original
   /// sumir da pasta de Downloads.
   final String? fontFamily;
+
+  /// ALINHAMENTO DAS LINHAS dentro da caixa do texto (esquerda, centro,
+  /// direita). A caixa continua centrada na posicao da camada: so as
+  /// linhas mais curtas mudam de lado.
+  final TextAlign alinhamento;
 
   /// TEXTO EM CAMINHO: selo circular, arco, ou seguindo outra forma.
   final TextPathSpec textPath;
@@ -1108,6 +1114,7 @@ class TextLayer extends Layer {
     bool? bold,
     String? fontFamily,
     bool clearFont = false,
+    TextAlign? alinhamento,
     TextPathSpec? textPath,
     List<TextAnim>? anims,
     List<TextAnimator>? animators,
@@ -1127,6 +1134,7 @@ class TextLayer extends Layer {
       color: color ?? this.color,
       bold: bold ?? this.bold,
       fontFamily: clearFont ? null : (fontFamily ?? this.fontFamily),
+      alinhamento: alinhamento ?? this.alinhamento,
       textPath: textPath ?? this.textPath,
       anims: anims ?? this.anims,
       animators: animators ?? this.animators,
@@ -1163,6 +1171,7 @@ class TextLayer extends Layer {
     color: color,
     bold: bold,
     fontFamily: fontFamily,
+    alinhamento: alinhamento,
     textPath: textPath,
     anims: anims,
     animators: animators,

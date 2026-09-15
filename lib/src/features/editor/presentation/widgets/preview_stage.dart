@@ -6631,7 +6631,7 @@ class _LayerContent extends StatelessWidget {
       ),
       TextLayer l => Text(
         l.text,
-        textAlign: TextAlign.center,
+        textAlign: l.alinhamento,
         style: AnimatedTextView.styleFor(l),
       ),
       // Forma vetorial: arvore avaliada no tempo local, pintada por Path.

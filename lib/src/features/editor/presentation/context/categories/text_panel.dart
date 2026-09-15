@@ -10,6 +10,7 @@ import '../../am/am_colors.dart';
 import '../../am/color_picker_sheet.dart';
 import '../../am/font_sheet.dart';
 import '../parameter_row.dart';
+import 'barra_de_estilo_do_texto.dart';
 import '../../../application/ui/pro_mode.dart';
 import '../../../domain/layer_meta.dart';
 
@@ -47,7 +48,9 @@ class TextPanel extends ConsumerWidget {
             texto: layer.text,
             onChanged: (v) => controller.editTextLayer(id, text: v),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 4),
+          BarraDeEstiloDoTexto(layer: layer, playback: playback),
+          const SizedBox(height: 4),
           ParameterCustomRow(
             label: 'Fonte',
             child: Align(

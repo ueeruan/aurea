@@ -319,12 +319,12 @@ class _TransformPanelState extends ConsumerState<TransformPanel> {
               builder: (context, constraints) => Scrollbar(
                 controller: _bodyScroll,
                 thumbVisibility:
-                    constraints.maxHeight < (layer.is3D ? 260 : 160),
+                    constraints.maxHeight < (layer.is3D ? 340 : 160),
                 child: SingleChildScrollView(
                   controller: _bodyScroll,
                   child: SizedBox(
                     height: math.max(
-                      layer.is3D ? 260 : 160,
+                      layer.is3D ? 340 : 160,
                       constraints.maxHeight,
                     ),
                     child: Padding(
@@ -835,10 +835,10 @@ class _RotationControlState extends ConsumerState<_RotationControl> {
         Row(
           children: [
             const SizedBox(
-              width: 44,
+              width: 48,
               child: AppText('3D X',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 12, color: AmColors.muted),
+                style: TextStyle(fontSize: 13, color: AmColors.muted),
               ),
             ),
             Expanded(
@@ -846,17 +846,17 @@ class _RotationControlState extends ConsumerState<_RotationControl> {
                 value: rx,
                 min: -1080,
                 max: 1080,
-                unitsPerPixel: 0.8,
-                height: 40,
+                unitsPerPixel: 0.5,
+                height: 52,
                 onChanged: (v) => controller.editRotationX(layer.id, t, v),
               ),
             ),
             SizedBox(
-              width: 62,
+              width: 70,
               child: AppText(
                 '${amNumber(rx, 0)}°',
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 13, color: AmColors.accent),
+                style: const TextStyle(fontSize: 15, color: AmColors.accent),
               ),
             ),
           ],
@@ -865,10 +865,10 @@ class _RotationControlState extends ConsumerState<_RotationControl> {
         Row(
           children: [
             const SizedBox(
-              width: 44,
+              width: 48,
               child: AppText('3D Y',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 12, color: AmColors.muted),
+                style: TextStyle(fontSize: 13, color: AmColors.muted),
               ),
             ),
             Expanded(
@@ -876,18 +876,18 @@ class _RotationControlState extends ConsumerState<_RotationControl> {
                 value: ry,
                 min: -1080,
                 max: 1080,
-                unitsPerPixel: 0.8,
+                unitsPerPixel: 0.5,
                 accentCenter: false,
-                height: 40,
+                height: 52,
                 onChanged: (v) => controller.editRotationY(layer.id, t, v),
               ),
             ),
             SizedBox(
-              width: 62,
+              width: 70,
               child: AppText(
                 '${amNumber(ry, 0)}°',
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 13, color: AmColors.accent),
+                style: const TextStyle(fontSize: 15, color: AmColors.accent),
               ),
             ),
           ],

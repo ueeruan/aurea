@@ -16,7 +16,7 @@ import 'am_widgets.dart';
 import 'curve_panel.dart';
 import 'gradient_fill_sheet.dart';
 import 'layer_menu.dart' show showReasonToast;
-import 'oficio_sheets.dart' show showLayerStylesSheet;
+import 'borda_e_sombra_sheet.dart' show showBordaESombraSheet;
 import 'panel_chrome.dart';
 import '../widgets/campo_de_valor.dart';
 
@@ -497,7 +497,7 @@ class _ShapePanelState extends ConsumerState<ShapePanel> {
           onDesligar: () => setState(() => controller.removeShapeStroke(id)),
           onUpdate: (fn) => controller.updateShapeStroke(id, fn),
           onSombra: () =>
-              showLayerStylesSheet(context, ref, id, widget.playback),
+              showBordaESombraSheet(context, ref, id, widget.playback),
         );
       case ShapeTool.draw:
         return _Desenhar(
@@ -903,7 +903,7 @@ class _Traco extends StatelessWidget {
             const SizedBox(height: 10),
             _Botao(texto: 'Ligar traco', onTap: onLigar, cheio: true),
             const SizedBox(height: 8),
-            _Botao(texto: 'Sombra e brilho (estilos)', onTap: onSombra),
+            _Botao(texto: 'Bordas, sombra e brilho', onTap: onSombra),
           ],
         ),
       );
@@ -969,7 +969,7 @@ class _Traco extends StatelessWidget {
           const SizedBox(height: 8),
           Row(
             children: [
-              _Botao(texto: 'Sombra e brilho', onTap: onSombra),
+              _Botao(texto: 'Pontas, bordas e sombra', onTap: onSombra),
               const SizedBox(width: 8),
               _Botao(texto: 'Tirar traco', onTap: onDesligar),
             ],

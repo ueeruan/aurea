@@ -50,7 +50,15 @@ class LayerStyles {
     this.colorOverlay,
     this.gradientOverlay,
     this.stroke,
+    this.bordasExtras = const [],
   });
+
+  /// AS BORDAS DEPOIS DA PRIMEIRA ([stroke]): empilhadas de dentro para
+  /// fora na ordem da lista. A lista inteira que a pessoa ve e [bordas].
+  final List<StrokeStyle> bordasExtras;
+
+  /// Todas as bordas, a primeira ([stroke]) na frente.
+  List<StrokeStyle> get bordas => [?stroke, ...bordasExtras];
 
   final ShadowStyle? dropShadow;
   final ShadowStyle? innerShadow;
@@ -65,7 +73,8 @@ class LayerStyles {
       outerGlow == null &&
       colorOverlay == null &&
       gradientOverlay == null &&
-      stroke == null;
+      stroke == null &&
+      bordasExtras.isEmpty;
 
   LayerStyles copyWith({
     ShadowStyle? dropShadow,
@@ -74,6 +83,7 @@ class LayerStyles {
     OverlayStyle? colorOverlay,
     GradientOverlayStyle? gradientOverlay,
     StrokeStyle? stroke,
+    List<StrokeStyle>? bordasExtras,
     bool clearDropShadow = false,
     bool clearInnerShadow = false,
     bool clearOuterGlow = false,
@@ -92,6 +102,7 @@ class LayerStyles {
           ? null
           : (gradientOverlay ?? this.gradientOverlay),
       stroke: clearStroke ? null : (stroke ?? this.stroke),
+      bordasExtras: bordasExtras ?? this.bordasExtras,
     );
   }
 }
@@ -229,12 +240,16 @@ class GradientOverlayStyle {
   );
 }
 
+/// ONDE A BORDA FICA em relacao a silhueta da camada.
+enum PosicaoDaBorda { fora, dentro, centro }
+
 class StrokeStyle {
   StrokeStyle({
     this.enabled = true,
     this.color = const Color(0xFFFFFFFF),
     AnimatedDouble? width,
     AnimatedDouble? opacity,
+    this.posicao = PosicaoDaBorda.fora,
   }) : width = width ?? AnimatedDouble(4),
        opacity = opacity ?? AnimatedDouble(1);
 
@@ -242,19 +257,30 @@ class StrokeStyle {
   final Color color;
   final AnimatedDouble width;
   final AnimatedDouble opacity;
+  final PosicaoDaBorda posicao;
 
   StrokeStyle copyWith({
     bool? enabled,
     Color? color,
     AnimatedDouble? width,
     AnimatedDouble? opacity,
+    PosicaoDaBorda? posicao,
   }) => StrokeStyle(
     enabled: enabled ?? this.enabled,
     color: color ?? this.color,
     width: width ?? this.width,
     opacity: opacity ?? this.opacity,
+    posicao: posicao ?? this.posicao,
   );
 }
+
+/// A LISTA DE BORDAS como a pessoa edita, gravada de volta no estilo: a
+/// primeira vira [LayerStyles.stroke], as outras as extras. Lista vazia
+/// tira todas.
+LayerStyles comBordas(LayerStyles s, List<StrokeStyle> bordas) =>
+    bordas.isEmpty
+    ? s.copyWith(clearStroke: true, bordasExtras: const [])
+    : s.copyWith(stroke: bordas.first, bordasExtras: bordas.sublist(1));
 
 /// PALETA DO PROJETO (PR-X11): cores NOMEADAS. Qualquer campo de cor
 /// pode vincular a uma entrada — trocar a paleta muda o projeto inteiro,

@@ -2877,9 +2877,11 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
       );
     }
 
-    // Contorno: silhueta dilatada por tras.
-    if (s.stroke?.enabled ?? false) {
-      final st = s.stroke!;
+    // AS BORDAS, na ordem da lista: FORA e a silhueta dilatada por tras;
+    // DENTRO e a silhueta tingida menos a silhueta erodida, por cima;
+    // CENTRO e metade de cada.
+    for (final st in s.bordas) {
+      if (!st.enabled) continue;
       // TETO DA DILATACAO. O dilate do Impeller e um laco de 2r+1
       // leituras por pixel, por eixo, na resolucao inteira — nao ha a
       // reducao que o desfoque tem. Sem teto, um contorno largo demais
@@ -2888,25 +2890,69 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
       // espalhamento da sombra, e ja e mais grosso que qualquer contorno
       // legivel.
       final w = st.width.valueAt(local).clamp(0.0, 100.0).toDouble();
-      if (w > 0.01) {
-        out = Stack(
-          clipBehavior: Clip.none,
-          children: [
+      if (w <= 0.01) continue;
+      final opacidade = st.opacity.valueAt(local).clamp(0.0, 1.0);
+      final fora = switch (st.posicao) {
+        PosicaoDaBorda.fora => w,
+        PosicaoDaBorda.centro => w / 2,
+        PosicaoDaBorda.dentro => 0.0,
+      };
+      final dentro = switch (st.posicao) {
+        PosicaoDaBorda.dentro => w,
+        PosicaoDaBorda.centro => w / 2,
+        PosicaoDaBorda.fora => 0.0,
+      };
+      out = Stack(
+        clipBehavior: Clip.none,
+        children: [
+          if (fora > 0.01)
             Positioned.fill(
               child: IgnorePointer(
                 child: Opacity(
-                  opacity: st.opacity.valueAt(local).clamp(0.0, 1.0),
+                  opacity: opacidade,
                   child: ImageFiltered(
-                    imageFilter: ui.ImageFilter.dilate(radiusX: w, radiusY: w),
+                    imageFilter: ui.ImageFilter.dilate(
+                      radiusX: fora,
+                      radiusY: fora,
+                    ),
                     child: _tinted(child, st.color),
                   ),
                 ),
               ),
             ),
-            out,
-          ],
-        );
-      }
+          out,
+          if (dentro > 0.01)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: Opacity(
+                  opacity: opacidade,
+                  child: BlendMask(
+                    blendMode: BlendMode.srcOver,
+                    isolate: true,
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        _tinted(child, st.color),
+                        Positioned.fill(
+                          child: BlendMask(
+                            blendMode: BlendMode.dstOut,
+                            child: ImageFiltered(
+                              imageFilter: ui.ImageFilter.erode(
+                                radiusX: dentro,
+                                radiusY: dentro,
+                              ),
+                              child: child,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      );
     }
 
     // Brilho externo: silhueta borrada e tingida, por tras.

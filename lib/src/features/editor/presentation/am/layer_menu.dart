@@ -31,6 +31,7 @@ import '../../domain/video_project.dart' show descendentesPorParentesco;
 import 'am_colors.dart';
 import '../context/parameter_row.dart';
 import 'audio_sheet.dart';
+import 'borda_e_sombra_sheet.dart';
 import '../../../../core/ui/snack.dart';
 import '../../domain/layer_meta.dart';
 import 'am_widgets.dart';
@@ -39,7 +40,6 @@ import 'caption_style_sheet.dart';
 import 'color_picker_sheet.dart';
 import 'curve_panel.dart';
 import 'gradient_fill_sheet.dart';
-import 'oficio_sheets.dart';
 import 'panel_chrome.dart';
 import 'path_edit_sheet.dart';
 import 'scene3d_sheet.dart';
@@ -425,15 +425,9 @@ _Tile? _tileDaSecao(
     AmSecao.bordaSombra => (
       icone: CupertinoIcons.square_on_square,
       rotulo: 'Borda e sombra',
-      onTap: () {
-        if (layer is ShapeLayer) {
-          fecharCom(LayerMenuAction.stroke);
-        } else {
-          abrirDepois(
-            () => showLayerStylesSheet(context, ref, layer.id, playback),
-          );
-        }
-      },
+      onTap: () => abrirDepois(
+        () => showBordaESombraSheet(context, ref, layer.id, playback),
+      ),
       badge: null,
     ),
     AmSecao.mesclarOpacidade => (

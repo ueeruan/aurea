@@ -780,6 +780,104 @@ class ShapeFill extends ShapeItem {
       );
 }
 
+/// O QUE VAI NA PONTA DE UM TRACO ABERTO.
+enum TerminacaoDoTraco {
+  nenhuma,
+  seta,
+  setaCheia,
+  setaVazada,
+  circuloCheio,
+  circuloVazado,
+  losango,
+  losangoCheio,
+  quadrado,
+  quadradoCheio,
+  gotaCheia,
+  gotaVazada,
+  linhaT,
+}
+
+/// O DESENHO DE UMA TERMINACAO numa ponta em [ponto], olhando para
+/// [direcao] (para fora do traco), com lado [s]. O segundo valor diz se
+/// pinta cheio (true) ou so contorno.
+(Path, bool)? caminhoDaTerminacao(
+  TerminacaoDoTraco tipo,
+  Offset ponto,
+  Offset direcao,
+  double s,
+) {
+  if (tipo == TerminacaoDoTraco.nenhuma || s <= 0) return null;
+  final base = Path();
+  final r = s / 2;
+  final cheia = switch (tipo) {
+    TerminacaoDoTraco.setaCheia ||
+    TerminacaoDoTraco.circuloCheio ||
+    TerminacaoDoTraco.losangoCheio ||
+    TerminacaoDoTraco.quadradoCheio ||
+    TerminacaoDoTraco.gotaCheia => true,
+    _ => false,
+  };
+  switch (tipo) {
+    case TerminacaoDoTraco.nenhuma:
+      return null;
+    case TerminacaoDoTraco.seta:
+      base
+        ..moveTo(-s, -s * .6)
+        ..lineTo(0, 0)
+        ..lineTo(-s, s * .6);
+    case TerminacaoDoTraco.setaCheia:
+    case TerminacaoDoTraco.setaVazada:
+      base
+        ..moveTo(0, 0)
+        ..lineTo(-s, -s * .6)
+        ..lineTo(-s, s * .6)
+        ..close();
+    case TerminacaoDoTraco.circuloCheio:
+    case TerminacaoDoTraco.circuloVazado:
+      base.addOval(Rect.fromCircle(center: Offset.zero, radius: r));
+    case TerminacaoDoTraco.losango:
+    case TerminacaoDoTraco.losangoCheio:
+      base
+        ..moveTo(r, 0)
+        ..lineTo(0, r)
+        ..lineTo(-r, 0)
+        ..lineTo(0, -r)
+        ..close();
+    case TerminacaoDoTraco.quadrado:
+    case TerminacaoDoTraco.quadradoCheio:
+      base.addRect(Rect.fromCircle(center: Offset.zero, radius: r * .8));
+    case TerminacaoDoTraco.gotaCheia:
+    case TerminacaoDoTraco.gotaVazada:
+      base
+        ..moveTo(0, 0)
+        ..cubicTo(-r * .5, -r * .9, -r * 2.6, -r * 1.3, -r * 2.6, 0)
+        ..cubicTo(-r * 2.6, r * 1.3, -r * .5, r * .9, 0, 0)
+        ..close();
+    case TerminacaoDoTraco.linhaT:
+      base
+        ..moveTo(0, -r)
+        ..lineTo(0, r);
+  }
+  final angulo = math.atan2(direcao.dy, direcao.dx);
+  final m = Matrix4Lite.rotacaoETranslacao(angulo, ponto);
+  return (base.transform(m), cheia);
+}
+
+/// Matriz 4x4 (coluna) de rotacao em Z seguida de translacao, no formato
+/// que `Path.transform` aceita.
+abstract final class Matrix4Lite {
+  static Float64List rotacaoETranslacao(double angulo, Offset t) {
+    final c = math.cos(angulo);
+    final s = math.sin(angulo);
+    return Float64List.fromList([
+      c, s, 0, 0, //
+      -s, c, 0, 0, //
+      0, 0, 1, 0, //
+      t.dx, t.dy, 0, 1, //
+    ]);
+  }
+}
+
 class ShapeStroke extends ShapeItem {
   ShapeStroke({
     super.id,
@@ -788,6 +886,9 @@ class ShapeStroke extends ShapeItem {
     this.cap = StrokeCap.round,
     this.join = StrokeJoin.round,
     this.miterLimit = 4,
+    this.inicio = TerminacaoDoTraco.nenhuma,
+    this.fim = TerminacaoDoTraco.nenhuma,
+    this.tamanhoDaTerminacao = 3,
     AnimatedDouble? opacity,
     AnimatedDouble? dashLength,
     AnimatedDouble? gapLength,
@@ -807,6 +908,13 @@ class ShapeStroke extends ShapeItem {
   final StrokeJoin join;
   final double miterLimit;
 
+  /// As pontas de um traco ABERTO (em caminho fechado nao ha ponta).
+  final TerminacaoDoTraco inicio;
+  final TerminacaoDoTraco fim;
+
+  /// O lado da terminacao, em vezes a espessura do traco.
+  final double tamanhoDaTerminacao;
+
   /// Opacidade PROPRIA do contorno (cadeia: camada x preenchimento x
   /// contorno — "vidro com borda" = fill 20% e stroke 100%).
   final AnimatedDouble opacity;
@@ -825,6 +933,9 @@ class ShapeStroke extends ShapeItem {
     StrokeCap? cap,
     StrokeJoin? join,
     double? miterLimit,
+    TerminacaoDoTraco? inicio,
+    TerminacaoDoTraco? fim,
+    double? tamanhoDaTerminacao,
     AnimatedDouble? opacity,
     AnimatedDouble? dashLength,
     AnimatedDouble? gapLength,
@@ -837,6 +948,9 @@ class ShapeStroke extends ShapeItem {
       cap: cap ?? this.cap,
       join: join ?? this.join,
       miterLimit: miterLimit ?? this.miterLimit,
+      inicio: inicio ?? this.inicio,
+      fim: fim ?? this.fim,
+      tamanhoDaTerminacao: tamanhoDaTerminacao ?? this.tamanhoDaTerminacao,
       opacity: opacity ?? this.opacity,
       dashLength: dashLength ?? this.dashLength,
       gapLength: gapLength ?? this.gapLength,
@@ -1865,6 +1979,52 @@ List<ShapeDraw> evaluateShape(
                 ),
             ),
           );
+        }
+        // AS PONTAS: so em contorno aberto, olhando para fora do traco.
+        if (stroke.inicio != TerminacaoDoTraco.nenhuma ||
+            stroke.fim != TerminacaoDoTraco.nenhuma) {
+          final largura = stroke.width.valueAt(t);
+          final lado = largura * stroke.tamanhoDaTerminacao;
+          final cor = stroke.color.withValues(
+            alpha:
+                stroke.color.a *
+                stroke.opacity.valueAt(t).clamp(0.0, 1.0) *
+                opacity,
+          );
+          for (final path in paths) {
+            for (final contorno in path.computeMetrics()) {
+              if (contorno.isClosed || contorno.length <= 0) continue;
+              final comeco = contorno.getTangentForOffset(0);
+              final termino = contorno.getTangentForOffset(contorno.length);
+              for (final (tipo, tangente, sentido) in [
+                (stroke.inicio, comeco, -1.0),
+                (stroke.fim, termino, 1.0),
+              ]) {
+                if (tangente == null) continue;
+                final desenho = caminhoDaTerminacao(
+                  tipo,
+                  tangente.position,
+                  tangente.vector * sentido,
+                  lado,
+                );
+                if (desenho == null) continue;
+                final (caminho, cheia) = desenho;
+                draws.add(
+                  ShapeDraw(
+                    path: caminho,
+                    paint: Paint()
+                      ..style = cheia
+                          ? PaintingStyle.fill
+                          : PaintingStyle.stroke
+                      ..strokeWidth = largura
+                      ..strokeCap = stroke.cap
+                      ..strokeJoin = stroke.join
+                      ..color = cor,
+                  ),
+                );
+              }
+            }
+          }
         }
     }
   }

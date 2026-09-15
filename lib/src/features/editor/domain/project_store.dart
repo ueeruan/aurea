@@ -466,6 +466,9 @@ Map<String, dynamic> _shapeItem(ShapeItem s) => switch (s) {
     'cap': st.cap.index,
     'join': st.join.index,
     'miter': st.miterLimit,
+    if (st.inicio != TerminacaoDoTraco.nenhuma) 'tIni': st.inicio.index,
+    if (st.fim != TerminacaoDoTraco.nenhuma) 'tFim': st.fim.index,
+    if (st.tamanhoDaTerminacao != 3) 'tSz': st.tamanhoDaTerminacao,
     'op': _ad(st.opacity),
     'dash': _ad(st.dashLength),
     'gap': _ad(st.gapLength),
@@ -628,6 +631,9 @@ ShapeItem _asShapeItem(Map<String, dynamic> m) => switch (m['kind']) {
         ? StrokeJoin.round
         : StrokeJoin.values[(m['join'] as num).toInt()],
     miterLimit: (m['miter'] as num?)?.toDouble() ?? 4,
+    inicio: _terminacao(m['tIni']),
+    fim: _terminacao(m['tFim']),
+    tamanhoDaTerminacao: (m['tSz'] as num?)?.toDouble() ?? 3,
     opacity: _asAdOuNumero(m['op'], 1),
     dashLength: _asAdOuNumero(m['dash'], 0),
     gapLength: _asAdOuNumero(m['gap'], 0),
@@ -2557,14 +2563,29 @@ Map<String, dynamic> _styles(LayerStyles s) => {
       'ang': _ad(s.gradientOverlay!.angleDeg),
       'op': _ad(s.gradientOverlay!.opacity),
     },
-  if (s.stroke != null)
-    'st': {
-      'on': s.stroke!.enabled,
-      'c': _col(s.stroke!.color),
-      'w': _ad(s.stroke!.width),
-      'op': _ad(s.stroke!.opacity),
-    },
+  if (s.stroke != null) 'st': _borda(s.stroke!),
+  if (s.bordasExtras.isNotEmpty)
+    'sts': [for (final b in s.bordasExtras) _borda(b)],
 };
+
+Map<String, dynamic> _borda(StrokeStyle b) => {
+  'on': b.enabled,
+  'c': _col(b.color),
+  'w': _ad(b.width),
+  'op': _ad(b.opacity),
+  if (b.posicao != PosicaoDaBorda.fora) 'pos': b.posicao.index,
+};
+
+StrokeStyle _asBorda(Map m) => StrokeStyle(
+  enabled: m['on'] as bool? ?? true,
+  color: _asCol(m['c']),
+  width: _asAd(m['w']),
+  opacity: _asAd(m['op']),
+  posicao: PosicaoDaBorda.values[((m['pos'] as num?)?.toInt() ?? 0).clamp(
+    0,
+    PosicaoDaBorda.values.length - 1,
+  )],
+);
 
 LayerStyles _asStyles(Map<String, dynamic> m) => LayerStyles(
   dropShadow: m['ds'] == null
@@ -2598,14 +2619,10 @@ LayerStyles _asStyles(Map<String, dynamic> m) => LayerStyles(
           angleDeg: _asAd((m['go'] as Map)['ang']),
           opacity: _asAd((m['go'] as Map)['op']),
         ),
-  stroke: m['st'] == null
-      ? null
-      : StrokeStyle(
-          enabled: (m['st'] as Map)['on'] as bool? ?? true,
-          color: _asCol((m['st'] as Map)['c']),
-          width: _asAd((m['st'] as Map)['w']),
-          opacity: _asAd((m['st'] as Map)['op']),
-        ),
+  stroke: m['st'] == null ? null : _asBorda(m['st'] as Map),
+  bordasExtras: [
+    for (final b in (m['sts'] as List? ?? const [])) _asBorda(b as Map),
+  ],
 );
 
 Map<String, dynamic> _meta(LayerMeta m) => {
@@ -3053,6 +3070,11 @@ List<Layer> _camadasDoJson(Object? bruto) {
     }
   }
   return out;
+}
+
+TerminacaoDoTraco _terminacao(Object? v) {
+  final i = v is num ? v.toInt() : 0;
+  return TerminacaoDoTraco.values[i.clamp(0, TerminacaoDoTraco.values.length - 1)];
 }
 
 /// Um instante opcional gravado em microssegundos. Lixo vira nulo.

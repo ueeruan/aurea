@@ -2,6 +2,7 @@ import 'dart:ui' show Color, Offset;
 
 import 'effect.dart';
 import 'keyframe.dart';
+import 'ajuste_da_midia.dart';
 import 'layer.dart';
 import 'video_project.dart';
 
@@ -67,6 +68,10 @@ VideoProject amostraDoEfeito(
         startTime: Duration.zero,
         duration: const Duration(seconds: 4),
         sourcePath: caminhoDaFoto,
+        // O enquadramento LEGADO, cravado: as previas dos efeitos ja
+        // foram geradas com a caixa pela largura, e o padrao novo
+        // (cobrir) mudaria a geometria de 74 tiras prontas.
+        ajuste: AjusteDaMidia.largura,
         position: AnimatedOffset(const Offset(c - 10, c))
             .withKeyframe(Duration.zero, const Offset(c - 10, c))
             .withKeyframe(meio, const Offset(c + 10, c - 6))

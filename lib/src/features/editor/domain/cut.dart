@@ -209,6 +209,12 @@ enum SpeedRampPreset {
   lentoRapido,
   rapidoLento,
   soco,
+
+  /// Rapido -> LENTO -> rapido: entra em disparada, freia em camera
+  /// lenta no corpo do clipe e sai acelerando de novo. E o perfil dos
+  /// microclipes de edit (lido quadro a quadro do video do dono, 15/09)
+  /// — nenhuma das rampas acima tinha as DUAS pontas rapidas.
+  flow,
 }
 
 enum FreezePlacement { insideClip, separateClip }
@@ -222,6 +228,7 @@ extension SpeedRampPresetLabel on SpeedRampPreset {
     SpeedRampPreset.lentoRapido => 'Lento → Rápido',
     SpeedRampPreset.rapidoLento => 'Rápido → Lento',
     SpeedRampPreset.soco => 'Soco',
+    SpeedRampPreset.flow => 'Flow',
   };
 }
 
@@ -281,6 +288,16 @@ AnimatedDouble speedRampTrack(
       (0, 0),
       (0.4, 0.18),
       (0.6, 0.82),
+      (1, 1),
+    ],
+    // As duas pontas em disparada, o corpo em camera lenta (com optical
+    // flow por cima, e o slow-mo liso dos edits).
+    SpeedRampPreset.flow => const <(double, double)>[
+      (0, 0),
+      (0.14, 0.40),
+      (0.30, 0.50),
+      (0.70, 0.58),
+      (0.86, 0.64),
       (1, 1),
     ],
   };

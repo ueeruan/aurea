@@ -534,9 +534,9 @@ class _PresetTile extends StatelessWidget {
                               color: AmColors.accentDim,
                               borderRadius: BorderRadius.circular(5),
                             ),
-                            child: const Text(
-                              '4nas.ftbl',
-                              style: TextStyle(
+                            child: Text(
+                              preset.marca,
+                              style: const TextStyle(
                                 fontSize: 9,
                                 fontWeight: FontWeight.w700,
                                 color: AmColors.accent,

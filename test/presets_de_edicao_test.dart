@@ -32,8 +32,8 @@ void main() {
   });
 
   group('o catalogo de presets', () {
-    test('sao 15, com id unico, nome e o que fazem', () {
-      expect(presetsDeEdicao, hasLength(15));
+    test('sao 16, com id unico, nome e o que fazem', () {
+      expect(presetsDeEdicao, hasLength(16));
       expect(
         presetsDeEdicao.map((p) => p.id).toSet(),
         hasLength(presetsDeEdicao.length),
@@ -160,7 +160,60 @@ void main() {
     });
   });
 
-  testWidgets('a aba Presets da galeria lista os 15 e um toque aplica', (
+  test('Impact Flow: rampa flow + speed blur + zoom lento + flow otico', () {
+    final c = ProviderContainer();
+    addTearDown(c.dispose);
+    final e = c.read(editorControllerProvider.notifier);
+    final v = _video();
+    e.openProject(
+      VideoProject(name: 'p', createdAt: DateTime(2026), layers: [v]),
+    );
+    final p = presetDeEdicaoPorId('impact-flow')!;
+    expect(e.aplicarPresetDeEdicao(v.id, p), 2);
+    final depois =
+        c.read(editorControllerProvider).layerById(v.id)! as VideoLayer;
+    // A rampa das duas pontas rapidas + o blur por velocidade.
+    expect(hasTimeRemap(depois), isTrue);
+    expect(depois.speedBlur, isTrue);
+    // O zoom lento em keyframes de verdade: comeca no 100% e fecha 8%
+    // acima no fim do clipe.
+    expect(depois.scaleX.isAnimated, isTrue);
+    expect(
+      depois.scaleX.valueAt(depois.duration),
+      closeTo(depois.scaleX.valueAt(Duration.zero) * 1.08, 1e-6),
+    );
+    expect(
+      depois.effects.map((x) => x.type),
+      containsAll([EffectType.opticalFlow, EffectType.tremor]),
+    );
+    // Aplicar de novo NAO duplica o optical flow (regra do addEffect);
+    // a escala ja animada e respeitada.
+    expect(e.aplicarPresetDeEdicao(v.id, p), 1);
+    final deNovo =
+        c.read(editorControllerProvider).layerById(v.id)! as VideoLayer;
+    expect(
+      deNovo.effects.where((x) => x.type == EffectType.opticalFlow),
+      hasLength(1),
+    );
+    expect(
+      deNovo.effects.where((x) => x.type == EffectType.tremor),
+      hasLength(2),
+    );
+    expect(deNovo.scaleX.keyframes, hasLength(2));
+    // Em texto, recusa limpa.
+    final t = TextLayer(
+      name: 't',
+      text: 'oi',
+      startTime: Duration.zero,
+      duration: const Duration(seconds: 3),
+    );
+    e.openProject(
+      VideoProject(name: 'p2', createdAt: DateTime(2026), layers: [t]),
+    );
+    expect(e.aplicarPresetDeEdicao(t.id, p), 0);
+  });
+
+  testWidgets('a aba Presets da galeria lista os 16 e um toque aplica', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(1170, 2532);
@@ -212,17 +265,20 @@ void main() {
     );
     expect(find.byKey(const ValueKey('preset-4nas-main-cc-2024')),
         findsOneWidget);
-    await tester.dragUntilVisible(
-      find.byKey(const ValueKey('preset-4nas-x-shake')),
-      find.byKey(const ValueKey('galeria-lista-presets')),
-      const Offset(0, -160),
-    );
-    await tester.tap(find.byKey(const ValueKey('preset-4nas-x-shake')));
+    // O primeiro cartao (Impact Flow) esta a vista: um toque aplica a
+    // pilha inteira — rampa, blur por velocidade, zoom e efeitos.
+    await tester.tap(find.byKey(const ValueKey('preset-impact-flow')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
 
-    final depois = container.read(editorControllerProvider).layerById(v.id)!;
-    expect(depois.effects.map((e) => e.type), [EffectType.tremor]);
+    final depois =
+        container.read(editorControllerProvider).layerById(v.id)!
+            as VideoLayer;
+    expect(
+      depois.effects.map((e) => e.type),
+      containsAll([EffectType.opticalFlow, EffectType.tremor]),
+    );
+    expect(depois.speedBlur, isTrue);
     // O snack de 5 s precisa morrer antes do fim do teste.
     await tester.pump(const Duration(seconds: 6));
   });

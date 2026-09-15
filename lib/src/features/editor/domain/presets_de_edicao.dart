@@ -39,6 +39,9 @@ class PresetDeEdicao {
     required this.receita,
     this.acao = AcaoDoPreset.efeitos,
     this.rampa,
+    this.zoomLento = 0,
+    this.ligarSpeedBlur = false,
+    this.marca = '4nas.ftbl',
   });
 
   final String id;
@@ -51,6 +54,18 @@ class PresetDeEdicao {
 
   /// A rampa de velocidade (so quando [acao] e cameraLenta).
   final SpeedRampPreset? rampa;
+
+  /// ZOOM LENTO: a escala sobe esta fracao do comeco ao fim do clipe
+  /// (0.08 = +8%), em keyframes de verdade. Zero = nada; camada com a
+  /// escala JA animada nao e tocada.
+  final double zoomLento;
+
+  /// Liga o desfoque por velocidade do clipe (o blur das pontas da
+  /// rampa vem de graca, proporcional a taxa).
+  final bool ligarSpeedBlur;
+
+  /// O selo do cartao (de onde o preset veio).
+  final String marca;
 
   /// A pilha, como (tipo, valores, cor, cores extras). Vira instancia em
   /// [montar] — cada aplicacao gera ids novos.
@@ -95,6 +110,36 @@ const _grad4nas = ReceitaDeEfeito(
 );
 
 final presetsDeEdicao = List<PresetDeEdicao>.unmodifiable([
+  // ------------------------------------------------- o edit da casa
+  // Lido QUADRO A QUADRO do video de referencia do dono (72 quadros a
+  // 120 fps): entra em disparada com blur, freia em camera lenta lisa
+  // (optical flow), o zoom sobe devagar com micro-tremor organico, e
+  // sai acelerando de novo — o preset de clipe decupado.
+  PresetDeEdicao(
+    id: 'impact-flow',
+    nome: 'Impact Flow',
+    detalhe:
+        'Entra em disparada, freia em câmera lenta com optical flow, '
+        'zoom sobe devagar e sai acelerando — pra clipe decupado (vídeo).',
+    acao: AcaoDoPreset.cameraLenta,
+    rampa: SpeedRampPreset.flow,
+    zoomLento: 0.08,
+    ligarSpeedBlur: true,
+    marca: 'Edit',
+    receita: const [
+      ReceitaDeEfeito(EffectType.opticalFlow, {}),
+      ReceitaDeEfeito(EffectType.tremor, {
+        'amplitude': 2.2,
+        'frequency': 6,
+        'x_random_amplitude': 0.9,
+        'y_random_amplitude': 0.7,
+        'motion_blur': 0.25,
+        'blur_length': 1.2,
+        'stillness': 0.6,
+        'rgb_randomness': 0.06,
+      }),
+    ],
+  ),
   // ------------------------------------------------------------- CCs
   PresetDeEdicao(
     id: '4nas-main-cc-2024',

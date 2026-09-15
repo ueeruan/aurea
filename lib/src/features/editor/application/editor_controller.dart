@@ -6213,9 +6213,41 @@ class EditorController extends Notifier<VideoProject> {
       if (preset.acao == AcaoDoPreset.cameraLenta && preset.rampa != null) {
         applySpeedRamp(layerId, preset.rampa!);
       }
-      final atual = _layer(layerId);
+      // O BLUR DAS PONTAS da rampa vem de graca: o desfoque por
+      // velocidade e proporcional a taxa do clipe.
+      if (preset.ligarSpeedBlur && layer is VideoLayer) {
+        setClipSpeedBlur(layerId, true);
+      }
+      var atual = _layer(layerId);
       if (atual == null) return;
-      final novos = preset.montar();
+      // ZOOM LENTO: escala sobe do comeco ao fim do clipe, em keyframes
+      // de verdade — a escala JA animada e da pessoa, nao se toca.
+      if (preset.zoomLento > 0 &&
+          !atual.scaleX.isAnimated &&
+          !atual.scaleY.isAnimated) {
+        final sx = atual.scaleX.valueAt(Duration.zero);
+        final sy = atual.scaleY.valueAt(Duration.zero);
+        final fim = atual.duration;
+        atual = atual.copyLayer(
+          scaleX: AnimatedDouble(sx)
+              .withKeyframe(Duration.zero, sx)
+              .withKeyframe(fim, sx * (1 + preset.zoomLento)),
+          scaleY: AnimatedDouble(sy)
+              .withKeyframe(Duration.zero, sy)
+              .withKeyframe(fim, sy * (1 + preset.zoomLento)),
+        );
+      }
+      // O opticalFlow so existe em video, e um por camada (a mesma
+      // regra do addEffect) — aplicar o preset duas vezes nao duplica.
+      final novos = [
+        for (final e in preset.montar())
+          if (e.type != EffectType.opticalFlow ||
+              (atual is VideoLayer &&
+                  !atual.effects.any(
+                    (x) => x.type == EffectType.opticalFlow,
+                  )))
+            e,
+      ];
       quantos = novos.length;
       _replace(atual.copyLayer(effects: [...atual.effects, ...novos]));
     });

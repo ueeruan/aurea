@@ -115,17 +115,11 @@ Future<ProviderContainer> _home(WidgetTester tester, GlobalKey chave) async {
       ),
     ),
   );
-  // A miniatura do heroi decodifica em IO de verdade, ANTES do print.
-  await tester.runAsync(() async {
-    final heroi = c.read(projectsControllerProvider).first;
-    final f = ThumbnailService.instance.fileFor(heroi.id);
-    if (f != null) {
-      await precacheImage(
-        FileImage(f),
-        tester.element(find.byType(ProjectsTab)),
-      );
-    }
-  });
+  // A miniatura decodifica no relogio DE VERDADE (runAsync); esperar o
+  // precacheImage aqui DEADLOCKA o tester — foi o que pendurou a suite.
+  await tester.runAsync(
+    () => Future<void>.delayed(const Duration(milliseconds: 350)),
+  );
   await tester.pump(const Duration(milliseconds: 300));
   await tester.pump(const Duration(milliseconds: 300));
   return c;

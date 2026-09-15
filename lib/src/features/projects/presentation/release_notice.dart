@@ -6,29 +6,29 @@ import '../../../core/ui/am_colors.dart';
 import 'package:aurea/src/core/l10n/app_language.dart';
 
 // Change this revision when publishing a new set of release notes.
-const releaseNoticeRevision = '2026-09-15-beta-84';
+const releaseNoticeRevision = '2026-09-15-beta-85';
 const releaseNoticeSeenKey = 'aurea.releaseNotice.seen';
 
 const releaseHighlights = <(IconData, String, String)>[
   (
-    CupertinoIcons.viewfinder,
-    'Rastreio 3D: motor 2.0',
-    'O rastreio de câmera foi refeito do zero: motor nativo novo com trava anti-fantasma, tripé detectado sozinho, distorção de lente medida e toda análise assinada (motor, quadros, tempo). Estúdio novo: chão, origem, escala real, âncoras e objetos na superfície.',
+    CupertinoIcons.wand_rays,
+    'Aba PRESETS na galeria',
+    '16 presets de um toque: o bundle 4nas.ftbl inteiro convertido pro motor (Main CC, Cold, Aura, Gorgeous, shakes, zooms, Twixtor…) e o novo Impact Flow — entra em disparada, freia em câmera lenta com optical flow e sai acelerando, pronto pros clipes decupados.',
   ),
   (
-    CupertinoIcons.rectangle_split_3x1,
-    'Decupar sozinho',
-    'Toque em Decupar no clipe: o detector de mudança de cena corta o vídeo inteiro nos pontos certos — ou só marca na régua para revisar. E a emenda de cortes não trava mais o play: o pedaço seguinte já entra rodando.',
+    CupertinoIcons.slider_horizontal_3,
+    'Editor numa língua só',
+    'Som, Partículas, Grade, Máscara, Elemento 3D, Formas, Precomp, Legenda e Estilos falam as linhas novas: a linha inteira arrasta, o número digita valor exato e o losango de keyframe mora na própria linha. Na Início, o cartão "Continuar editando" e a barra com blur ao rolar.',
   ),
   (
-    CupertinoIcons.videocam_fill,
-    'Câmera 3D e batidas',
-    'Câmera da composição ao lado do Nulo, com lente animável (dolly-zoom!). Batidas da música com porta própria no menu de marcas, compasso destacado na régua e batidas viram marcas de verdade.',
+    CupertinoIcons.textformat_alt,
+    'Texto 3D animado e iPhone 3D',
+    'Os presets de animação do texto normal agora valem letra a letra no Texto 3D (entrada, ênfase e saída). E o novo iPhone 3D entra com corpo, tela e lentes editáveis — a tela aceita sua imagem.',
   ),
   (
-    CupertinoIcons.sparkles,
-    'Efeitos novos e correções',
-    'Light Sweep, Saber, Lens Blur e 8-Bit. Exportar não falha mais com clipe sem áudio, a galeria mostra as mídias recentes primeiro, projetos abrem muito mais rápido e o Texto 3D aceita suas fontes importadas.',
+    CupertinoIcons.checkmark_seal,
+    'Consertos dos seus relatos',
+    'Keyframes não escapam mais do lugar ao aparar vídeo/áudio; mídia importada com nome-hash vira "Vídeo 1"; rotações 3D coerentes entre camadas sob a câmera; e botões que "não respondiam" (um enfeite roubava o toque) corrigidos na raiz.',
   ),
 ];
 

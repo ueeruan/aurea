@@ -873,7 +873,7 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
       _AbaAdd.midia: ('Mídia', CupertinoIcons.photo_on_rectangle),
       _AbaAdd.audio: ('Áudio', CupertinoIcons.music_note_2),
       _AbaAdd.objeto: ('Objeto / Elemento', CupertinoIcons.circle_grid_hex),
-      _AbaAdd.mais: ('Modelo', CupertinoIcons.rectangle_split_3x1),
+      _AbaAdd.mais: ('Mais', CupertinoIcons.ellipsis_circle),
     };
     return SizedBox(
       height: 54,

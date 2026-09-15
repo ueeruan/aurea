@@ -14,6 +14,7 @@ import '../../domain/cut_ops.dart';
 import '../../domain/layer.dart';
 import 'am_colors.dart';
 import 'am_widgets.dart';
+import 'estudio_do_tempo.dart';
 
 /// Velocidade constante, rampas prontas, reverso e interpolacao, na folha
 /// aberta pelo icone de relogio. O Time Remap (chave, curva e keyframes de
@@ -143,6 +144,55 @@ Future<void> showSpeedSheet(
                   ),
                 ],
                 if (video != null) ...[
+                  // A PORTA DO ESTUDIO DO TEMPO: rampas com keyframes,
+                  // grafo de valor e de velocidade, congelar e reverso.
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4, bottom: 8),
+                    child: GestureDetector(
+                      key: const ValueKey('abrir-estudio-do-tempo'),
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () async {
+                        await showEstudioDoTempo(
+                          sheetContext,
+                          ref,
+                          layerId,
+                          playback,
+                        );
+                        if (sheetContext.mounted) setSheetState(() {});
+                      },
+                      child: Container(
+                        height: 44,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: AmColors.accent,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.show_chart_rounded,
+                              size: 18,
+                              color: AmColors.onAction,
+                            ),
+                            SizedBox(width: 8),
+                            Flexible(
+                              child: AppText(
+                                'Time Remap',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                  color: AmColors.onAction,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
                   _ToggleRow(
                     label: 'Reverso',
                     value: video.reverse,

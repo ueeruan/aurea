@@ -201,7 +201,15 @@ class ClipTransition {
   }
 }
 
-enum SpeedRampPreset { impacto, heroi, bala, montagem }
+enum SpeedRampPreset {
+  impacto,
+  heroi,
+  bala,
+  montagem,
+  lentoRapido,
+  rapidoLento,
+  soco,
+}
 
 enum FreezePlacement { insideClip, separateClip }
 
@@ -211,6 +219,9 @@ extension SpeedRampPresetLabel on SpeedRampPreset {
     SpeedRampPreset.heroi => 'Heroi',
     SpeedRampPreset.bala => 'Bala',
     SpeedRampPreset.montagem => 'Montagem',
+    SpeedRampPreset.lentoRapido => 'Lento → Rápido',
+    SpeedRampPreset.rapidoLento => 'Rápido → Lento',
+    SpeedRampPreset.soco => 'Soco',
   };
 }
 
@@ -251,6 +262,25 @@ AnimatedDouble speedRampTrack(
       (0.4, 0.38),
       (0.6, 0.52),
       (0.8, 0.9),
+      (1, 1),
+    ],
+    // Rampa de subida: comeca em camera lenta e chega acelerado.
+    SpeedRampPreset.lentoRapido => const <(double, double)>[
+      (0, 0),
+      (0.6, 0.25),
+      (1, 1),
+    ],
+    // Rampa de descida: estoura no comeco e assenta em camera lenta.
+    SpeedRampPreset.rapidoLento => const <(double, double)>[
+      (0, 0),
+      (0.4, 0.75),
+      (1, 1),
+    ],
+    // Estouro no meio: lento, dispara, lento — o "punch" de transicao.
+    SpeedRampPreset.soco => const <(double, double)>[
+      (0, 0),
+      (0.4, 0.18),
+      (0.6, 0.82),
       (1, 1),
     ],
   };

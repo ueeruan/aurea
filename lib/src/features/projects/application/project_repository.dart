@@ -54,14 +54,28 @@ class ProjectRepository {
       _writes.values.toList().map((f) => f.catchError((Object _) {})),
     );
     final out = <VideoProject>[];
-    for (final f in dir.listSync()) {
-      if (f is! File || !f.path.endsWith('.json')) continue;
-      try {
-        final json = await compute(_readProjectJson, f.path);
-        out.add(await _comOsPesos(json));
-      } catch (e) {
-        // Arquivo corrompido nao derruba a lista inteira.
-        debugPrint('Projeto ilegivel ${f.path}: $e');
+    // UM ISOLATE PARA A LISTA INTEIRA, nunca um por projeto: abrir um
+    // isolate custa ~1,4 s SINCRONOS no iPhone (medido em 09/2026), e
+    // era um por arquivo — dez projetos seguravam a Home por mais de
+    // dez segundos "carregando". O lote le e decodifica tudo numa
+    // viagem so; arquivo corrompido vira nulo e nao derruba os outros.
+    final paths = [
+      for (final f in dir.listSync())
+        if (f is File && f.path.endsWith('.json')) f.path,
+    ];
+    if (paths.isNotEmpty) {
+      final jsons = await compute(_readProjectJsons, paths);
+      for (var i = 0; i < paths.length; i++) {
+        final json = jsons[i];
+        if (json == null) {
+          debugPrint('Projeto ilegivel ${paths[i]}');
+          continue;
+        }
+        try {
+          out.add(await _comOsPesos(json));
+        } catch (e) {
+          debugPrint('Projeto ilegivel ${paths[i]}: $e');
+        }
       }
     }
     out.sort((a, b) => b.createdAt.compareTo(a.createdAt));
@@ -165,6 +179,19 @@ class ProjectRepository {
 
 Map<String, dynamic> _readProjectJson(String path) =>
     jsonDecode(File(path).readAsStringSync()) as Map<String, dynamic>;
+
+/// O LOTE do [loadAll]: todos os arquivos numa viagem de isolate so.
+/// Nulo na posicao de um arquivo que nao deu para ler.
+List<Map<String, dynamic>?> _readProjectJsons(List<String> paths) => [
+  for (final p in paths)
+    () {
+      try {
+        return _readProjectJson(p);
+      } catch (_) {
+        return null;
+      }
+    }(),
+];
 
 Object _readPeso(String path) => jsonDecode(File(path).readAsStringSync());
 

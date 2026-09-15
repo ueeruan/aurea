@@ -170,5 +170,50 @@ void main() {
       expect(e.audioGraph(1).filter, contains('[1:a]'));
       expect(e.audioGraph(3).filter, contains('[3:a]'));
     });
+
+    test('video SEM trilha de audio no arquivo sai da mixagem', () {
+      // O defeito de campo: um clipe h264 mudo na timeline derrubava a
+      // exportacao inteira com "[N:a] matches no streams" — o grafo
+      // pedia o audio de um arquivo que nunca teve audio.
+      ExportEngine.temAudioDaFonte['/tmp/mudo.mp4'] = false;
+      addTearDown(() => ExportEngine.temAudioDaFonte.remove('/tmp/mudo.mp4'));
+      final e = ExportEngine(_p(layers: [
+        VideoLayer(
+          name: 'Mudo',
+          startTime: Duration.zero,
+          duration: const Duration(seconds: 3),
+          sourcePath: '/tmp/mudo.mp4',
+          volume: 1,
+        ),
+        AudioLayer(
+          name: 'Musica',
+          startTime: Duration.zero,
+          duration: const Duration(seconds: 3),
+          sourcePath: '/tmp/a.mp3',
+        ),
+      ]));
+      final g = e.audioGraph(1);
+      // So a musica entra; nenhuma referencia ao arquivo mudo.
+      expect(e.audioSources.length, 1);
+      expect(g.inputs, isNot(contains('/tmp/mudo.mp4')));
+      expect(g.inputs, contains('/tmp/a.mp3'));
+      expect(g.filter, isNot(contains('[2:a]')));
+      expect(g.outLabel, isNotNull);
+    });
+
+    test('se TODAS as fontes sao mudas, o grafo diz que nao ha audio', () {
+      ExportEngine.temAudioDaFonte['/tmp/mudo2.mp4'] = false;
+      addTearDown(() => ExportEngine.temAudioDaFonte.remove('/tmp/mudo2.mp4'));
+      final e = ExportEngine(_p(layers: [
+        VideoLayer(
+          name: 'Mudo',
+          startTime: Duration.zero,
+          duration: const Duration(seconds: 3),
+          sourcePath: '/tmp/mudo2.mp4',
+          volume: 1,
+        ),
+      ]));
+      expect(e.audioGraph(1).outLabel, isNull);
+    });
   });
 }

@@ -6,6 +6,7 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' show BlendMode, Offset, Size;
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:ffmpeg_kit_flutter_new_full/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter_new_full/ffprobe_kit.dart';
 import 'package:ffmpeg_kit_flutter_new_full/return_code.dart';
@@ -689,13 +690,49 @@ class ExportEngine {
   }
 
   /// Camadas que carregam som. Mudo sai da conta aqui — nao adianta
-  /// mixar uma faixa em volume zero e pagar por ela.
+  /// mixar uma faixa em volume zero e pagar por ela. E um video cujo
+  /// ARQUIVO nao tem trilha de audio sai tambem: pedir `[N:a]` de um
+  /// arquivo sem som derruba o filtergraph inteiro com "matches no
+  /// streams" — a exportacao morria por causa de um clipe mudo.
   List<Layer> get audioSources => [
     // O som de dentro dos grupos entra na mixagem com o tempo absoluto.
     for (final l in midiasAchatadas(project.layers))
       if (_specOf(l) != null && !_specOf(l)!.muted)
-        if (l is AudioLayer || (l is VideoLayer && l.volume > 0.001)) l,
+        if (l is AudioLayer ||
+            (l is VideoLayer &&
+                l.volume > 0.001 &&
+                temAudioDaFonte[l.sourcePath] != false))
+          l,
   ];
+
+  /// O QUE JA SE SABE sobre cada arquivo ter ou nao trilha de audio.
+  /// Vive no processo (estatico): o mesmo arquivo aparece em muitos
+  /// clipes e em muitas exportacoes, e sondar custa uma abertura.
+  @visibleForTesting
+  static final Map<String, bool> temAudioDaFonte = {};
+
+  /// SONDA as fontes de video da mixagem: quem nao tem trilha de audio
+  /// entra no mapa como falso e o grafo o pula. Na duvida (sonda
+  /// indisponivel, arquivo estranho), assume que TEM — que e o
+  /// comportamento antigo, e o ffmpeg decide.
+  Future<void> sondarFontesDeAudio() async {
+    for (final l in midiasAchatadas(project.layers)) {
+      if (l is! VideoLayer) continue;
+      final path = l.sourcePath;
+      if (temAudioDaFonte.containsKey(path)) continue;
+      var tem = true;
+      try {
+        final sessao = await FFprobeKit.getMediaInformation(path);
+        final streams = sessao.getMediaInformation()?.getStreams();
+        if (streams != null) {
+          tem = streams.any((s) => s.getType() == 'audio');
+        }
+      } catch (_) {
+        tem = true;
+      }
+      temAudioDaFonte[path] = tem;
+    }
+  }
 
   static AudioSpec? _specOf(Layer l) => switch (l) {
     AudioLayer a => a.audio,
@@ -1143,6 +1180,7 @@ class ExportEngine {
     if (!silent.existsSync() || silent.lengthSync() < 1024) {
       throw ExportException('O codificador nao produziu video.');
     }
+    await sondarFontesDeAudio();
     await _prepareAudioEffects();
     final audio = audioGraph(1);
     if (audio.outLabel == null) {
@@ -1228,6 +1266,7 @@ class ExportEngine {
       throw ExportException('O codificador nao produziu video.');
     }
 
+    await sondarFontesDeAudio();
     await _prepareAudioEffects();
     final audio = audioGraph(1);
     if (audio.outLabel == null) {

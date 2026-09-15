@@ -3663,6 +3663,23 @@ class EditorController extends Notifier<VideoProject> {
     _mutate(state.copyWith(beats: const []));
   }
 
+  /// AS BATIDAS VIRAM MARCAS de verdade — nomeaveis, arrastaveis, e
+  /// alvo de "cortar em todas". A grade e leve e viva (refeita a cada
+  /// deteccao); a marca e um compromisso: fica onde esta ate alguem
+  /// mexer. Batida que ja tem marca em cima nao duplica.
+  int batidasViramMarcadores() {
+    final novas = [
+      for (final b in state.beats)
+        if (!state.markers.any(
+          (m) => (m.time - b).inMilliseconds.abs() < 2,
+        ))
+          b,
+    ];
+    if (novas.isEmpty) return 0;
+    addMarkers(novas);
+    return novas.length;
+  }
+
   /// CORTA TODAS AS CAMADAS em cada marcador. Devolve quantos cortes
   /// aconteceram.
   int cutAtMarkers({bool usarBatidas = false}) {

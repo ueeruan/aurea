@@ -21,6 +21,7 @@ import '../../application/media_preview_service.dart';
 import '../../application/proxy_service.dart';
 import '../../application/ui/editor_session.dart';
 import '../../../../core/storage/prefs.dart';
+import '../shell/layer_actions.dart' show menuDasMarcas;
 import 'am_colors.dart';
 import 'layer_look.dart';
 import 'clip_preview_painters.dart';
@@ -495,6 +496,18 @@ class _AmTimelineState extends ConsumerState<AmTimeline> {
                                         // ritmo.
                                         onDoubleTapDown: (d) =>
                                             _xDoDuploToque = d.localPosition.dx,
+                                        // SEGURAR NA REGUA abre o menu de
+                                        // marcas e batidas: e na regua que
+                                        // elas moram, entao e nela que se
+                                        // pergunta por elas.
+                                        onLongPress: () {
+                                          HapticFeedback.mediumImpact();
+                                          menuDasMarcas(
+                                            context,
+                                            ref,
+                                            widget.playback,
+                                          );
+                                        },
                                         onDoubleTap: () {
                                           final t = Duration(
                                             microseconds:
@@ -1014,6 +1027,14 @@ class _BeatsPainter extends CustomPainter {
     ..strokeWidth = 1
     ..style = PaintingStyle.stroke;
 
+  /// O TEMPO FORTE (1 de cada 4) desce mais e pesa mais: sem ele a grade
+  /// e um serrilhado uniforme e o olho nao acha o compasso — que e
+  /// exatamente o que um editor de AMV esta procurando na regua.
+  static final Paint _tintaForte = Paint()
+    ..color = AmColors.teal.withValues(alpha: 0.9)
+    ..strokeWidth = 1.6
+    ..style = PaintingStyle.stroke;
+
   @override
   void paint(Canvas canvas, Size size) {
     Perfil3D.fase('pintar.batidas', () => _pintar(canvas, size));
@@ -1023,14 +1044,22 @@ class _BeatsPainter extends CustomPainter {
     if (beats.isEmpty) return;
     // Uma grade densa tem milhares de riscos; num Path so, uma chamada.
     final caminho = Path();
-    for (final b in beats) {
-      final x = b.inMicroseconds / 1e6 * pps;
+    final fortes = Path();
+    for (var i = 0; i < beats.length; i++) {
+      final x = beats[i].inMicroseconds / 1e6 * pps;
       if (x < -2 || x > size.width + 2) continue;
-      caminho
-        ..moveTo(x, size.height * 0.55)
-        ..lineTo(x, size.height);
+      if (i % 4 == 0) {
+        fortes
+          ..moveTo(x, size.height * 0.3)
+          ..lineTo(x, size.height);
+      } else {
+        caminho
+          ..moveTo(x, size.height * 0.55)
+          ..lineTo(x, size.height);
+      }
     }
     canvas.drawPath(caminho, _tinta);
+    canvas.drawPath(fortes, _tintaForte);
   }
 
   @override

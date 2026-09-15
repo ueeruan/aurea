@@ -9,6 +9,7 @@ import '../../domain/layer.dart';
 import '../am/am_colors.dart';
 import '../am/am_timeline.dart' show magneticProvider;
 import '../am/apple_cascade_sheet.dart';
+import '../am/beats_sheet.dart' show showBeatsSheet;
 import '../am/layer_look.dart';
 import '../am/scene3d_studio_ux.dart' show pedirNome;
 import 'package:aurea/src/core/l10n/app_language.dart';
@@ -272,6 +273,64 @@ Future<void> menuDasMarcas(
               final n = controller.distributeAtMarkers();
               Navigator.of(sheetContext).pop();
               AureaSnack.show(context, '$n camadas distribuidas');
+            },
+          ),
+          // -------------------------------------------------- batidas
+          //
+          // A GRADE DO RITMO mora aqui porque e daqui que se navega e se
+          // corta por marca — e batida e a marca que a musica poe.
+          ListTile(
+            key: const ValueKey('marcas-batidas-detectar'),
+            leading: const Icon(
+              CupertinoIcons.music_note_2,
+              size: 19,
+              color: AmColors.text,
+            ),
+            title: const AppText('Batidas da música…',
+              style: TextStyle(color: AmColors.text, fontSize: 15),
+            ),
+            subtitle: const AppText('Detecta o ritmo e risca a régua',
+              style: TextStyle(color: AmColors.muted, fontSize: 11.5),
+            ),
+            onTap: () {
+              Navigator.of(sheetContext).pop();
+              String? comSom;
+              for (final l in project.layers) {
+                if (l is AudioLayer ||
+                    (l is VideoLayer && l.volume > 0.001)) {
+                  comSom = l.id;
+                  break;
+                }
+              }
+              if (comSom == null) {
+                AureaSnack.show(context, 'Adicione uma música primeiro.');
+                return;
+              }
+              showBeatsSheet(context, ref, comSom);
+            },
+          ),
+          ListTile(
+            key: const ValueKey('marcas-batidas-virar'),
+            leading: const Icon(
+              CupertinoIcons.flag,
+              size: 19,
+              color: AmColors.text,
+            ),
+            title: const AppText('Batidas viram marcas',
+              style: TextStyle(color: AmColors.text, fontSize: 15),
+            ),
+            subtitle: const AppText(
+              'Cada batida vira uma marca de verdade na régua',
+              style: TextStyle(color: AmColors.muted, fontSize: 11.5),
+            ),
+            enabled: project.beats.isNotEmpty,
+            onTap: () {
+              final n = controller.batidasViramMarcadores();
+              Navigator.of(sheetContext).pop();
+              AureaSnack.show(
+                context,
+                n == 0 ? 'As batidas já têm marcas.' : '$n marcas no ritmo',
+              );
             },
           ),
           ListTile(

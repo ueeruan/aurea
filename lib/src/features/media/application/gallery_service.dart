@@ -46,7 +46,15 @@ class GalleryService {
   }
 
   Future<List<GalleryAlbum>> albums() async {
-    final paths = await PhotoManager.getAssetPathList(type: RequestType.common);
+    // MAIS NOVAS PRIMEIRO. Sem ordem explicita, varios Androids devolvem
+    // a galeria do mais ANTIGO para o mais novo — e quem importa quer o
+    // video que acabou de filmar, nao a primeira foto do aparelho.
+    final paths = await PhotoManager.getAssetPathList(
+      type: RequestType.common,
+      filterOption: FilterOptionGroup(
+        orders: [const OrderOption(type: OrderOptionType.createDate, asc: false)],
+      ),
+    );
     _albums.clear();
     _assets.clear();
     for (final path in paths) {

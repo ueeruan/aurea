@@ -1250,6 +1250,22 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
                   _controller.addNullLayer(widget.playhead);
                 },
               ),
+              // 3b. Camera 3D — a camera da COMPOSICAO, como no After
+              // Effects: existia inteira no motor (zoom animavel, orbita,
+              // vistoPelaCamera) e nao tinha porta nenhuma.
+              cardItem(
+                key: const ValueKey('add-camera3d'),
+                iconWidget: const Icon(
+                  CupertinoIcons.videocam_fill,
+                  size: 36,
+                  color: Color(0xFF8BD5FF),
+                ),
+                label: 'Câmera 3D',
+                onTap: () {
+                  _fecha();
+                  _controller.addCameraLayer(widget.playhead);
+                },
+              ),
               // 4. Elemento / Projeto
               cardItem(
                 iconWidget: CustomPaint(

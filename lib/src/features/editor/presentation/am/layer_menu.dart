@@ -11,6 +11,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/utils/time_format.dart';
 import '../../application/editor_controller.dart';
+import 'camera_sheet.dart' show showCameraSheet;
 import 'precomp_sheet.dart';
 import 'rastreio_sheet.dart' show showRastreioSheet;
 import '../../../../core/ui/tocavel.dart';
@@ -499,6 +500,13 @@ _Tile? _tileDaSecao(
       icone: CupertinoIcons.viewfinder,
       rotulo: 'Cena 3D',
       onTap: () => abrirDepois(() => showRastreioSheet(context, ref, layer.id)),
+      badge: 'NEW',
+    ),
+    AmSecao.camera => (
+      icone: CupertinoIcons.videocam,
+      rotulo: 'Câmera',
+      onTap: () =>
+          abrirDepois(() => showCameraSheet(context, ref, layer.id, playback)),
       badge: 'NEW',
     ),
     AmSecao.efeitos => (

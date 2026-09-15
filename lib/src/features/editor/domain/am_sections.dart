@@ -40,6 +40,9 @@ enum AmSecao {
 
   /// Video: a porta da Cena 3D rastreada (motor 2.0) e os rastreios 2D.
   rastrear,
+
+  /// Camera da composicao: a lente (zoom animavel).
+  camera,
   efeitos,
 }
 
@@ -70,6 +73,12 @@ Set<AmSecao> secoesDe(Layer layer) {
       AmSecao.cena3d,
       AmSecao.efeitos,
     };
+  }
+  // A CAMERA DA COMPOSICAO: transform (posicao, giro 3D, ponto de
+  // interesse pelo proprio palco) e a lente. Cor, borda e mescla nao
+  // significam nada numa camera.
+  if (layer is CameraLayer) {
+    return const {AmSecao.moverTransformar, AmSecao.camera};
   }
   return {
     AmSecao.moverTransformar,

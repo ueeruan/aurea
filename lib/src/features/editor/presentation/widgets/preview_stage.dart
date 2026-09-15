@@ -5802,16 +5802,24 @@ RenderCamera? cameraDaCena(
   final eff = effectiveTransform(project, pai, global);
   final centro = Offset(project.outputWidth / 2, project.outputHeight / 2);
 
-  // Posicao da composicao (canto superior esquerdo) para a cena (origem
-  // no centro). A ESCALA nao entra: camera nao tem escala, e herdar e o
-  // bug que faz o enquadramento explodir.
+  // Da composicao (Y para baixo, Z afastando) para a CENA (Y para cima,
+  // camera olhando -Z): a MESMA meia-volta dos nos — X igual, Y e Z
+  // trocam de sinal, rotX fica, rotY e rotZ invertem. Era daqui que
+  // vinha o "nao segue o eixo": a camera recebia o nulo em coordenadas
+  // da composicao cruas, entao subir o nulo descia a cena e o giro
+  // orbitava para o lado errado. A ESCALA nao entra: camera nao tem
+  // escala, e herdar e o bug que faz o enquadramento explodir.
   return l.cameraAt(
     local,
     external: NodeTransform(
-      position: Vec3(eff.pos.dx - centro.dx, eff.pos.dy - centro.dy, eff.z),
+      position: Vec3(
+        eff.pos.dx - centro.dx,
+        centro.dy - eff.pos.dy,
+        -eff.z,
+      ),
       rotX: eff.rotX,
-      rotY: eff.rotY,
-      rotZ: eff.rot,
+      rotY: -eff.rotY,
+      rotZ: -eff.rot,
     ),
   );
 }

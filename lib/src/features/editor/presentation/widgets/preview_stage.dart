@@ -22,7 +22,7 @@ export '../../application/freehand_session.dart' show onionSkinProvider;
 import '../../application/playback_controller.dart';
 import '../../application/preview_stats.dart';
 import '../../application/video_layer_manager.dart';
-import '../shell/cromo_am.dart' show zoomDoPalcoProvider;
+import '../shell/cromo_editor.dart' show zoomDoPalcoProvider;
 import '../../domain/ajuste_da_midia.dart';
 import '../../domain/keyframe.dart' show AnimatedDouble;
 import '../../domain/cut.dart';

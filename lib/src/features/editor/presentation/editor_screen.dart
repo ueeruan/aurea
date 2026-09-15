@@ -41,7 +41,7 @@ import 'context/categories/text_panel.dart';
 import 'context/context_sheet.dart';
 import 'context/layer_header.dart';
 import 'shell/layer_actions.dart';
-import 'shell/cromo_am.dart';
+import 'shell/cromo_editor.dart';
 import 'shell/barra_de_tempo_tela_cheia.dart';
 import 'widgets/add_layer_sheet.dart';
 import 'widgets/mask_node_editor.dart';
@@ -935,10 +935,10 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                   expanded: false,
                   onExpand: _session.togglePreviewExpanded,
                 );
-                final transporte = AmPlaybar(playback: _playback);
+                final transporte = BarraDeReproducao(playback: _playback);
                 final barraDoTopo = multi.isNotEmpty
-                    ? AmSelectbar(playback: _playback) as Widget
-                    : AmNavbar(onBack: _back, playback: _playback);
+                    ? BarraDoLote(playback: _playback) as Widget
+                    : BarraDoProjeto(onBack: _back, playback: _playback);
                 Widget timeline(double alturaTimeline) => RepaintBoundary(
                   child: AmTimeline(
                     playback: _playback,
@@ -1066,7 +1066,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                                 shape: BoxShape.circle,
                                 color: const Color(0xFF1E2130),
                                 border: Border.all(
-                                  color: CromoAM.verde,
+                                  color: CromoEditor.acao,
                                   width: 2.2,
                                 ),
                                 boxShadow: const [
@@ -1080,7 +1080,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                               child: const Icon(
                                 Icons.add,
                                 size: 32,
-                                color: CromoAM.verde,
+                                color: CromoEditor.acao,
                               ),
                             ),
                           ),

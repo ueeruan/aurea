@@ -12,6 +12,7 @@ import '../../application/ui/editor_session.dart';
 import '../../domain/layer.dart';
 import '../../domain/layout_ops.dart';
 import '../am/align_sheet.dart';
+import '../am/am_colors.dart';
 import '../am/beats_sheet.dart';
 import '../am/cameras_sheet.dart';
 import '../am/export_sheet.dart';
@@ -19,26 +20,34 @@ import 'layer_actions.dart';
 import 'project_settings_sheet.dart';
 import 'transport_bar.dart' show parseTimecodeInput;
 
-/// O CROMO DO EDITOR NA LINGUA DO ALIGHT MOTION 5 (v1.1.1).
+/// O CROMO DO EDITOR (v1.1.1): as barras que cercam palco e timeline.
 ///
-/// A pedido do dono, a casca de edicao segue a planta do AM 5 lida do
-/// proprio APK (base.apk, layouts decodificados): navbar de 44 no topo
-/// (sair · titulo editavel · tempo · projeto · exportar), selectbar
-/// VERDE no lugar dela quando ha multi-selecao, playbar de 46 sobre a
-/// timeline (desfazer/refazer · quadro-play-quadro · colar · marcas ·
-/// tela cheia), trilho vertical a direita do palco (solo · camera ·
-/// zoom do palco) e a barra flutuante de aparar/dividir quando ha
-/// camada selecionada. Os MOTORES por baixo sao todos nossos; so a
-/// casca fala AM. Nenhum asset do APK foi copiado — icones sao os
-/// nossos (Cupertino/Material) e as cores vem da paleta abaixo.
-abstract final class CromoAM {
-  // A paleta lida do resources.arsc do AM 5 (nomes deles entre aspas).
-  static const Color fundo = Color(0xFF191B27); // "A10" — barras
-  static const Color palco = Color(0xFF141620); // "A11" — atras do palco
-  static const Color trilho = Color(0xFF333750); // "S9" — trilho/pilulas
-  static const Color verde = Color(0xFF00FFA8); // "Y1" — acento/selecao
-  static const Color sobreVerde = Color(0xFF0F1418); // "K2" — icone no verde
-  static const Color branco = Color(0xFFFFFFFF); // "W1"
+/// Barra do projeto de 44 no topo (sair · titulo · tempo · projeto ·
+/// exportar), barra do LOTE no lugar dela quando ha multi-selecao,
+/// barra de reproducao de 46 sobre a timeline (desfazer/refazer ·
+/// quadro-play-quadro · colar · marcas · tela cheia), trilho vertical a
+/// direita do palco (solo · camera · zoom do palco) e a barra flutuante
+/// de aparar/dividir quando ha camada selecionada.
+///
+/// AS CORES SAO AS DA AUREA ([AmColors]): o lima e acao e "ligado", o
+/// teal e keyframe, o violeta e selecao e grupo. Estrutura de editor de
+/// motion se aprende de qualquer referencia; paleta, icones e textos sao
+/// nossos.
+abstract final class CromoEditor {
+  static const Color fundo = AmColors.topBar;
+  static const Color palco = AmColors.bg;
+  static const Color trilho = AmColors.chip;
+
+  /// Acao e estado ligado (o lima da logo).
+  static const Color acao = AmColors.action;
+  static const Color sobreAcao = AmColors.onAction;
+
+  /// Keyframe no cabecote (teal).
+  static const Color keyframe = AmColors.accent;
+
+  /// Selecao e grupo (violeta da logo): a barra do lote e o chip de grupo.
+  static const Color selecao = AmColors.selection;
+  static const Color branco = AmColors.text;
   static const Color apagado = Color(0x66FFFFFF);
 
   static const double navbar = 44;
@@ -94,8 +103,8 @@ class _BotaoDoCromo extends StatelessWidget {
             size: tamanho,
             color: cor ??
                 (onTap == null
-                    ? CromoAM.apagado.withValues(alpha: .25)
-                    : CromoAM.branco),
+                    ? CromoEditor.apagado.withValues(alpha: .25)
+                    : CromoEditor.branco),
           ),
         ),
       ),
@@ -110,11 +119,15 @@ String _tempoCurto(Duration d) {
   return '$m:${s.toString().padLeft(2, '0')}.${cs.toString().padLeft(2, '0')}';
 }
 
-/// A NAVBAR DO AM: sair · titulo (toque renomeia; dentro de grupo, o
-/// chip sai do grupo) · tempo corrente/total (toque digita) · projeto ·
+/// A BARRA DO PROJETO: sair · titulo (toque renomeia; dentro de grupo, o
+/// chip sai do grupo) · tempo corrente (toque digita) · projeto ·
 /// exportar.
-class AmNavbar extends ConsumerWidget {
-  const AmNavbar({super.key, required this.onBack, required this.playback});
+class BarraDoProjeto extends ConsumerWidget {
+  const BarraDoProjeto({
+    super.key,
+    required this.onBack,
+    required this.playback,
+  });
 
   final VoidCallback onBack;
   final PlaybackController playback;
@@ -125,8 +138,8 @@ class AmNavbar extends ConsumerWidget {
     final controller = ref.read(editorControllerProvider.notifier);
     final dentroDeGrupo = controller.dentroDeGrupo;
     return Container(
-      height: CromoAM.navbar,
-      color: CromoAM.fundo,
+      height: CromoEditor.navbar,
+      color: CromoEditor.fundo,
       padding: const EdgeInsets.only(right: 6),
       child: Row(
         children: [
@@ -138,13 +151,13 @@ class AmNavbar extends ConsumerWidget {
               child: SizedBox(
                 width: 44,
                 height: 44,
-                // A porta com a seta do AM: sair do projeto.
+                // A porta com a seta: sair do projeto.
                 child: Transform.flip(
                   flipX: true,
                   child: const Icon(
                     Icons.logout,
                     size: 20,
-                    color: CromoAM.branco,
+                    color: CromoEditor.branco,
                   ),
                 ),
               ),
@@ -161,7 +174,7 @@ class AmNavbar extends ConsumerWidget {
                   height: 26,
                   margin: const EdgeInsets.only(right: 6),
                   decoration: BoxDecoration(
-                    color: CromoAM.trilho,
+                    color: CromoEditor.trilho,
                     borderRadius: BorderRadius.circular(13),
                   ),
                   child: const Row(
@@ -170,13 +183,13 @@ class AmNavbar extends ConsumerWidget {
                       Icon(
                         CupertinoIcons.chevron_left,
                         size: 12,
-                        color: CromoAM.verde,
+                        color: CromoEditor.selecao,
                       ),
                       SizedBox(width: 2),
                       Icon(
                         CupertinoIcons.rectangle_stack,
                         size: 14,
-                        color: CromoAM.verde,
+                        color: CromoEditor.selecao,
                       ),
                     ],
                   ),
@@ -193,14 +206,14 @@ class AmNavbar extends ConsumerWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
-                  color: CromoAM.branco,
+                  color: CromoEditor.branco,
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
                 ),
               ),
             ),
           ),
-          // O editTimeView do AM: o relogio mora na navbar.
+          // O relogio mora na barra do projeto: tocar digita o tempo.
           ValueListenableBuilder<Duration>(
             valueListenable: playback.time,
             builder: (context, t, _) => Tooltip(
@@ -216,7 +229,7 @@ class AmNavbar extends ConsumerWidget {
                   child: AppText(
                     _tempoCurto(t),
                     style: const TextStyle(
-                      color: CromoAM.apagado,
+                      color: CromoEditor.apagado,
                       fontSize: 12.5,
                       fontFeatures: [FontFeature.tabularFigures()],
                     ),
@@ -236,7 +249,7 @@ class AmNavbar extends ConsumerWidget {
             key: const ValueKey('editor-export'),
             icone: CupertinoIcons.square_arrow_up,
             dica: 'Exportar',
-            cor: CromoAM.verde,
+            cor: CromoEditor.acao,
             onTap: () {
               // EXPORTAR DE DENTRO DE UM GRUPO exportava so o grupo: o
               // palco da exportacao le o estado do editor. Sai de todos
@@ -251,11 +264,11 @@ class AmNavbar extends ConsumerWidget {
   }
 }
 
-/// A SELECTBAR VERDE DO AM: quando ha multi-selecao, o topo inteiro
-/// vira verde com as acoes do lote — agrupar, alinhar na tela, excluir.
-/// Toque longo num alinhamento abre a folha completa (distribuir etc.).
-class AmSelectbar extends ConsumerWidget {
-  const AmSelectbar({super.key, required this.playback});
+/// A BARRA DO LOTE: quando ha multi-selecao, o topo inteiro vira
+/// violeta (a cor da selecao) com as acoes do lote — agrupar, alinhar na
+/// tela, excluir. Toque longo num alinhamento abre a folha completa.
+class BarraDoLote extends ConsumerWidget {
+  const BarraDoLote({super.key, required this.playback});
 
   final PlaybackController playback;
 
@@ -271,7 +284,7 @@ class AmSelectbar extends ConsumerWidget {
           key: key,
           icone: icone,
           dica: dica,
-          cor: CromoAM.sobreVerde,
+          cor: CromoEditor.branco,
           tamanho: 18,
           largura: 30,
           onTap: () => controller.alignSelection(ids, edge, t),
@@ -279,15 +292,15 @@ class AmSelectbar extends ConsumerWidget {
         );
 
     return Container(
-      height: CromoAM.navbar,
-      color: CromoAM.verde,
+      height: CromoEditor.navbar,
+      color: CromoEditor.selecao,
       child: Row(
         children: [
           _BotaoDoCromo(
             key: const ValueKey('selectbar-cancelar'),
             icone: CupertinoIcons.xmark,
             dica: 'Cancelar seleção',
-            cor: CromoAM.sobreVerde,
+            cor: CromoEditor.branco,
             onTap: () =>
                 ref.read(multiSelectProvider.notifier).state = const {},
           ),
@@ -297,7 +310,7 @@ class AmSelectbar extends ConsumerWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
-                color: CromoAM.sobreVerde,
+                color: CromoEditor.branco,
                 fontSize: 13,
                 fontWeight: FontWeight.w700,
               ),
@@ -344,7 +357,7 @@ class AmSelectbar extends ConsumerWidget {
             key: const ValueKey('selectbar-agrupar'),
             icone: CupertinoIcons.rectangle_stack,
             dica: 'Agrupar seleção',
-            cor: CromoAM.sobreVerde,
+            cor: CromoEditor.branco,
             largura: 36,
             onTap: multi.length >= 2
                 ? () => agruparSelecao(ref, multi)
@@ -354,7 +367,7 @@ class AmSelectbar extends ConsumerWidget {
             key: const ValueKey('selectbar-excluir'),
             icone: CupertinoIcons.trash,
             dica: 'Excluir seleção',
-            cor: CromoAM.sobreVerde,
+            cor: CromoEditor.branco,
             largura: 36,
             onTap: () => excluirCamadas(context, ref, multi),
           ),
@@ -365,14 +378,15 @@ class AmSelectbar extends ConsumerWidget {
   }
 }
 
-/// A PLAYBAR DO AM (46, sobre a timeline): desfazer/refazer a esquerda,
-/// quadro-play-quadro no centro, colar/marcas/tela-cheia a direita.
+/// A BARRA DE REPRODUCAO (46, sobre a timeline): desfazer/refazer a
+/// esquerda, quadro-play-quadro no centro, colar/marcas/tela-cheia a
+/// direita.
 ///
 /// Os saltos: toque em |◀ ▶| anda por KEYFRAME quando a camada
-/// selecionada tem marcas (o pedido dos testadores), senao UM QUADRO
-/// (como no AM); segurar vai ao inicio/fim.
-class AmPlaybar extends ConsumerWidget {
-  const AmPlaybar({super.key, required this.playback});
+/// selecionada tem marcas (o pedido dos testadores), senao UM QUADRO;
+/// segurar vai ao inicio/fim.
+class BarraDeReproducao extends ConsumerWidget {
+  const BarraDeReproducao({super.key, required this.playback});
 
   final PlaybackController playback;
 
@@ -412,8 +426,8 @@ class AmPlaybar extends ConsumerWidget {
     );
 
     return Container(
-      height: CromoAM.playbar,
-      color: CromoAM.fundo,
+      height: CromoEditor.playbar,
+      color: CromoEditor.fundo,
       child: LayoutBuilder(
         builder: (context, c) {
           // NUM 320 os cinco botoes laterais (2 + 3) em 40 estouravam a
@@ -469,7 +483,7 @@ class AmPlaybar extends ConsumerWidget {
                         : (playback.playing.value
                               ? 'Pausar'
                               : 'Reproduzir · segure para repetir'),
-                    cor: playback.loop.value ? CromoAM.verde : CromoAM.branco,
+                    cor: playback.loop.value ? CromoEditor.acao : CromoEditor.branco,
                     tamanho: 26,
                     largura: 52,
                     onTap: playback.toggle,
@@ -579,9 +593,8 @@ class AmPlaybar extends ConsumerWidget {
   }
 }
 
-/// A BARRA FLUTUANTE DA SELECAO (o select_bottomvar do AM): aparar,
-/// dividir, keyframe, duplicar e excluir da camada selecionada, num
-/// cartao sobre a timeline.
+/// A BARRA FLUTUANTE DA SELECAO: aparar, dividir, keyframe, duplicar e
+/// excluir da camada selecionada, num cartao sobre a timeline.
 class BarraDaSelecao extends ConsumerWidget {
   const BarraDaSelecao({
     super.key,
@@ -606,7 +619,7 @@ class BarraDaSelecao extends ConsumerWidget {
       height: 46,
       padding: const EdgeInsets.symmetric(horizontal: 4),
       decoration: BoxDecoration(
-        color: CromoAM.trilho.withValues(alpha: .97),
+        color: CromoEditor.trilho.withValues(alpha: .97),
         borderRadius: BorderRadius.circular(12),
         boxShadow: const [
           BoxShadow(color: Colors.black45, blurRadius: 10, offset: Offset(0, 3)),
@@ -623,7 +636,7 @@ class BarraDaSelecao extends ConsumerWidget {
             dica: keyframeHere
                 ? 'Remover keyframe no cabeçote'
                 : 'Adicionar keyframe no cabeçote',
-            cor: keyframeHere ? CromoAM.verde : CromoAM.branco,
+            cor: keyframeHere ? CromoEditor.keyframe : CromoEditor.branco,
             onTap: onKeyframe,
           ),
           _BotaoDoCromo(
@@ -662,8 +675,8 @@ class BarraDaSelecao extends ConsumerWidget {
   }
 }
 
-/// O TRILHO DA DIREITA DO PALCO (o previewmode do AM): solo, cameras e
-/// o zoom do palco (− · 100% · +; tocar no numero volta ao ajustado).
+/// O TRILHO DA DIREITA DO PALCO: solo, cameras e o zoom do palco
+/// (− · 100% · +; tocar no numero volta ao ajustado).
 class TrilhoDoPalco extends ConsumerWidget {
   const TrilhoDoPalco({super.key, required this.playback});
 
@@ -696,7 +709,7 @@ class TrilhoDoPalco extends ConsumerWidget {
       width: 40,
       padding: const EdgeInsets.symmetric(vertical: 4),
       decoration: const BoxDecoration(
-        color: CromoAM.trilho,
+        color: CromoEditor.trilho,
         borderRadius: BorderRadius.only(
           topLeft: Radius.circular(12),
           bottomLeft: Radius.circular(12),
@@ -709,7 +722,7 @@ class TrilhoDoPalco extends ConsumerWidget {
             key: const ValueKey('rail-solo'),
             icone: Icons.center_focus_strong,
             dica: soloAtivo ? 'Tirar do solo' : 'Solo da camada selecionada',
-            cor: soloAtivo ? CromoAM.verde : CromoAM.branco,
+            cor: soloAtivo ? CromoEditor.acao : CromoEditor.branco,
             tamanho: 19,
             onTap: selected == null
                 ? null
@@ -738,7 +751,7 @@ class TrilhoDoPalco extends ConsumerWidget {
             width: 22,
             height: 1,
             margin: const EdgeInsets.symmetric(vertical: 3),
-            color: CromoAM.apagado.withValues(alpha: .2),
+            color: CromoEditor.apagado.withValues(alpha: .2),
           ),
           _BotaoDoCromo(
             key: const ValueKey('rail-zoom-mais'),
@@ -762,7 +775,7 @@ class TrilhoDoPalco extends ConsumerWidget {
                     '${(zoom * 100).round()}%',
                     style: TextStyle(
                       fontSize: 9.5,
-                      color: zoom == 1.0 ? CromoAM.apagado : CromoAM.verde,
+                      color: zoom == 1.0 ? CromoEditor.apagado : CromoEditor.acao,
                       fontFeatures: const [FontFeature.tabularFigures()],
                     ),
                   ),
@@ -783,8 +796,8 @@ class TrilhoDoPalco extends ConsumerWidget {
   }
 }
 
-/// O ⋮ DA TIMELINE (canto inferior esquerdo, como no AM): marcas,
-/// batidas, agrupar e o guia.
+/// O ⋮ DA TIMELINE (canto inferior esquerdo): marcas, batidas, agrupar
+/// e o guia.
 Future<void> menuDaTimeline(
   BuildContext context,
   WidgetRef ref,

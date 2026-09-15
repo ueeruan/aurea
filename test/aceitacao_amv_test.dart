@@ -103,10 +103,10 @@ void main() {
         reason: 'tremor + glow + flash + rgb split');
     final tremor = comImpacto.effects
         .firstWhere((x) => x.type == EffectType.tremor);
-    expect(tremor.track('amplitude')!.keyframes.length, 3,
+    expect(tremor.track('amplitude').keyframes.length, 3,
         reason: 'envelope ataque/segura/decai');
     expect(
-      tremor.track('amplitude')!.valueAt(const Duration(milliseconds: 90)),
+      tremor.track('amplitude').valueAt(const Duration(milliseconds: 90)),
       20,
     );
     expect(
@@ -157,7 +157,7 @@ void main() {
     expect(
       impactoVolta.effects
           .firstWhere((x) => x.type == EffectType.tremor)
-          .track('amplitude')!
+          .track('amplitude')
           .keyframes
           .length,
       3,

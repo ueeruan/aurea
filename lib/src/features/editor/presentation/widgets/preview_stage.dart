@@ -2590,11 +2590,15 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
     // Recuar em Z encolhe E leva a camada para o ponto de fuga (centro da
     // composicao), a mesma conta dos solidos 3D. So encolher deixava o Z
     // com cara de zoom: a camada ficava parada no lugar.
+    final camAtiva = (layer.is3D || extraZ != 0) && layer is! CameraLayer
+        ? cameraAtivaEm(project, t)
+        : null;
     if (layer.is3D || extraZ != 0) {
       final vista = projetarProfundidade(
         project,
         pos,
         layer.positionZ.valueAt(local) + extraZ,
+        ortografica: camAtiva?.opcoes.ortografica ?? false,
       );
       // Passou da camera: nao aparece (como no After Effects).
       if (vista == null) {
@@ -2689,6 +2693,36 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
       );
     }
 
+    // FOCO E NEBLINA DA CAMERA, pela distancia da camada ao olho dela. So
+    // quando ligados: cada um e um passe a mais na GPU por camada.
+    if (camAtiva != null && layer.is3D && !camAtiva.opcoes.neutra) {
+      final distancia =
+          CameraLayer.lenteNeutra + layer.positionZ.valueAt(local) + extraZ;
+      final localDaCamera = camAtiva.localTime(t);
+      final sigma = camAtiva.opcoes.desfoqueEm(distancia, localDaCamera);
+      if (sigma > .3) {
+        content = ImageFiltered(
+          key: ValueKey('foco-${layer.id}'),
+          imageFilter: ui.ImageFilter.blur(
+            sigmaX: sigma,
+            sigmaY: sigma,
+            tileMode: TileMode.decal,
+          ),
+          child: content,
+        );
+      }
+      final nevoa = camAtiva.opcoes.neblinaEm(distancia, localDaCamera);
+      if (nevoa > .004) {
+        content = ColorFiltered(
+          key: ValueKey('neblina-${layer.id}'),
+          colorFilter: ColorFilter.matrix(
+            matrizDaNeblina(camAtiva.opcoes.corDaNeblina, nevoa),
+          ),
+          child: content,
+        );
+      }
+    }
+
     // Selecao desenhada DEPOIS dos efeitos: blur/glow nao pegam a borda.
     // Copias de eco (opacityMul < 1) nao ganham borda de selecao.
     final contentSemSelecao = content;
@@ -2736,7 +2770,11 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
 
     if (tilt3D) {
       final pm = Matrix4.identity()
-        ..setEntry(3, 2, -1 / 1200)
+        ..setEntry(
+          3,
+          2,
+          (camAtiva?.opcoes.ortografica ?? false) ? 0 : -1 / 1200,
+        )
         ..rotateZ(rotation)
         ..rotateY(ry)
         ..rotateX(rx);

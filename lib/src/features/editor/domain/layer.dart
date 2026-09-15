@@ -2081,6 +2081,119 @@ class NullLayer extends Layer {
 /// projeta com 1200 (`persp = 1200 / (1200 + z)`), entao 1200 e a lente
 /// neutra: com a camera parada e a lente em 1200, a composicao fica
 /// exatamente como estava antes de existir camera nenhuma.
+/// AS OPCOES DA CAMERA alem da lente: projecao ortografica, desfoque de
+/// foco e neblina. Valem para as camadas planas com o 3D ligado, que sao
+/// as que a camera ve. As distancias contam a partir do OLHO da camera:
+/// o plano da composicao fica a [CameraLayer.lenteNeutra] dele.
+class OpcoesDaCamera {
+  OpcoesDaCamera({
+    this.ortografica = false,
+    this.focoLigado = false,
+    AnimatedDouble? distanciaDoFoco,
+    AnimatedDouble? intensidadeDoFoco,
+    AnimatedDouble? profundidadeDeCampo,
+    this.neblinaLigada = false,
+    this.corDaNeblina = const Color(0xFF12151A),
+    AnimatedDouble? neblinaPerto,
+    AnimatedDouble? neblinaLonge,
+  }) : distanciaDoFoco =
+           distanciaDoFoco ?? AnimatedDouble(CameraLayer.lenteNeutra),
+       intensidadeDoFoco = intensidadeDoFoco ?? AnimatedDouble(8),
+       profundidadeDeCampo = profundidadeDeCampo ?? AnimatedDouble(400),
+       neblinaPerto = neblinaPerto ?? AnimatedDouble(1200),
+       neblinaLonge = neblinaLonge ?? AnimatedDouble(5000);
+
+  /// Sem perspectiva: o que esta longe nao encolhe nem corre para o
+  /// ponto de fuga.
+  final bool ortografica;
+
+  final bool focoLigado;
+
+  /// Onde fica o plano nitido, contado do olho da camera.
+  final AnimatedDouble distanciaDoFoco;
+
+  /// Desfoque (px) a cada profundidade de campo de distancia da faixa
+  /// nitida.
+  final AnimatedDouble intensidadeDoFoco;
+
+  /// A espessura da faixa nitida em volta do foco.
+  final AnimatedDouble profundidadeDeCampo;
+
+  final bool neblinaLigada;
+  final Color corDaNeblina;
+
+  /// A neblina comeca em [neblinaPerto] e cobre tudo em [neblinaLonge].
+  final AnimatedDouble neblinaPerto;
+  final AnimatedDouble neblinaLonge;
+
+  bool get neutra => !ortografica && !focoLigado && !neblinaLigada;
+
+  List<AnimatedDouble> get trilhas => [
+    distanciaDoFoco,
+    intensidadeDoFoco,
+    profundidadeDeCampo,
+    neblinaPerto,
+    neblinaLonge,
+  ];
+
+  OpcoesDaCamera copyWith({
+    bool? ortografica,
+    bool? focoLigado,
+    AnimatedDouble? distanciaDoFoco,
+    AnimatedDouble? intensidadeDoFoco,
+    AnimatedDouble? profundidadeDeCampo,
+    bool? neblinaLigada,
+    Color? corDaNeblina,
+    AnimatedDouble? neblinaPerto,
+    AnimatedDouble? neblinaLonge,
+  }) => OpcoesDaCamera(
+    ortografica: ortografica ?? this.ortografica,
+    focoLigado: focoLigado ?? this.focoLigado,
+    distanciaDoFoco: distanciaDoFoco ?? this.distanciaDoFoco,
+    intensidadeDoFoco: intensidadeDoFoco ?? this.intensidadeDoFoco,
+    profundidadeDeCampo: profundidadeDeCampo ?? this.profundidadeDeCampo,
+    neblinaLigada: neblinaLigada ?? this.neblinaLigada,
+    corDaNeblina: corDaNeblina ?? this.corDaNeblina,
+    neblinaPerto: neblinaPerto ?? this.neblinaPerto,
+    neblinaLonge: neblinaLonge ?? this.neblinaLonge,
+  );
+
+  /// O desfoque (sigma, px) de uma camada a [distancia] do olho, no
+  /// instante [local] da camera. Dentro da faixa nitida, zero; fora dela
+  /// cresce reto, com teto de 40 px (cada pixel de sigma e GPU).
+  double desfoqueEm(double distancia, Duration local) {
+    if (!focoLigado) return 0;
+    final foco = distanciaDoFoco.valueAt(local);
+    final bruta = profundidadeDeCampo.valueAt(local);
+    final prof = bruta < 1 ? 1.0 : bruta;
+    final fora = (distancia - foco).abs() - prof / 2;
+    if (fora <= 0) return 0;
+    final intensidade = intensidadeDoFoco.valueAt(local).clamp(0.0, 100.0);
+    return (intensidade * fora / prof).clamp(0.0, 40.0).toDouble();
+  }
+
+  /// Quanto da neblina (0..1) cobre uma camada a [distancia] do olho.
+  double neblinaEm(double distancia, Duration local) {
+    if (!neblinaLigada) return 0;
+    final perto = neblinaPerto.valueAt(local);
+    final longe = neblinaLonge.valueAt(local);
+    if (longe <= perto) return distancia >= perto ? 1 : 0;
+    return ((distancia - perto) / (longe - perto)).clamp(0.0, 1.0).toDouble();
+  }
+}
+
+/// A matriz de cor que puxa a camada para a [cor] da neblina na medida
+/// [f] (0..1), sem mexer no alfa.
+List<double> matrizDaNeblina(Color cor, double f) {
+  final k = 1 - f;
+  return <double>[
+    k, 0, 0, 0, f * cor.r * 255, //
+    0, k, 0, 0, f * cor.g * 255, //
+    0, 0, k, 0, f * cor.b * 255, //
+    0, 0, 0, 1, 0,
+  ];
+}
+
 class CameraLayer extends Layer {
   CameraLayer({
     super.id,
@@ -2107,16 +2220,53 @@ class CameraLayer extends Layer {
     super.matteMode,
     super.matteSourceId,
     super.transitionIn,
-  }) : zoom = zoom ?? AnimatedDouble(lenteNeutra);
+    OpcoesDaCamera? opcoes,
+  }) : zoom = zoom ?? AnimatedDouble(lenteNeutra),
+       opcoes = opcoes ?? OpcoesDaCamera();
 
   /// A lente que deixa a composicao identica a um projeto sem camera.
   static const double lenteNeutra = 1200;
 
   final AnimatedDouble zoom;
 
-  /// A lente entra na barra da camada como qualquer propriedade animada.
+  /// Projecao, foco e neblina.
+  final OpcoesDaCamera opcoes;
+
+  /// A lente e as opcoes entram na barra da camada como qualquer
+  /// propriedade animada.
   @override
-  Set<int> get moduleTimesUs => _times(zoom.keyframes);
+  Set<int> get moduleTimesUs => {
+    ..._times(zoom.keyframes),
+    for (final trilha in opcoes.trilhas) ..._times(trilha.keyframes),
+  };
+
+  CameraLayer withOpcoes(OpcoesDaCamera o) => CameraLayer(
+    id: id,
+    name: name,
+    startTime: startTime,
+    duration: duration,
+    zoom: zoom,
+    opcoes: o,
+    position: position,
+    scaleX: scaleX,
+    scaleY: scaleY,
+    rotation: rotation,
+    rotationX: rotationX,
+    rotationY: rotationY,
+    opacity: opacity,
+    skewX: skewX,
+    skewY: skewY,
+    pivot: pivot,
+    blendMode: blendMode,
+    customBlend: customBlend,
+    is3D: is3D,
+    positionZ: positionZ,
+    effects: effects,
+    masks: masks,
+    matteMode: matteMode,
+    matteSourceId: matteSourceId,
+    transitionIn: transitionIn,
+  );
 
   CameraLayer withZoom(AnimatedDouble z) => CameraLayer(
     id: id,
@@ -2124,6 +2274,7 @@ class CameraLayer extends Layer {
     startTime: startTime,
     duration: duration,
     zoom: z,
+    opcoes: opcoes,
     position: position,
     scaleX: scaleX,
     scaleY: scaleY,
@@ -2178,6 +2329,7 @@ class CameraLayer extends Layer {
     startTime: startTime ?? this.startTime,
     duration: duration ?? this.duration,
     zoom: zoom,
+    opcoes: opcoes,
     position: position ?? this.position,
     scaleX: scaleX ?? this.scaleX,
     scaleY: scaleY ?? this.scaleY,
@@ -2207,6 +2359,7 @@ class CameraLayer extends Layer {
     startTime: startTime,
     duration: duration,
     zoom: zoom,
+    opcoes: opcoes,
     position: position,
     scaleX: scaleX,
     scaleY: scaleY,

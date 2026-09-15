@@ -1952,6 +1952,25 @@ class EditorController extends Notifier<VideoProject> {
     );
   }
 
+  /// PROJECAO, FOCO E NEBLINA da camera, de uma vez.
+  void atualizarOpcoesDaCamera(
+    String id,
+    OpcoesDaCamera Function(OpcoesDaCamera) fn,
+  ) {
+    final layer = _layer(id);
+    if (layer is! CameraLayer) return;
+    _replace(layer.withOpcoes(fn(layer.opcoes)));
+  }
+
+  /// O ANGULO DE VISAO vira a lente equivalente na largura da composicao
+  /// (e a mesma trilha: o losango da lente crava os dois).
+  void editCameraFov(String id, Duration globalTime, double graus) =>
+      editCameraZoom(
+        id,
+        globalTime,
+        lenteDoAngulo(state.outputWidth.toDouble(), graus),
+      );
+
   /// O losango da lente.
   void toggleCameraZoomKeyframe(String id, Duration globalTime) {
     if (_cravarPendencia(id, globalTime)) return;

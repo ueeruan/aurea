@@ -17,7 +17,12 @@ Matrix4 selectionTransform(VideoProject project, Layer layer, Duration time) {
   var pos = effective.pos;
   if (layer.is3D || effective.z != 0) {
     // A MESMA projecao do palco: encolhe e vai para o ponto de fuga.
-    final vista = projetarProfundidade(project, pos, effective.z);
+    final vista = projetarProfundidade(
+      project,
+      pos,
+      effective.z,
+      ortografica: cameraAtivaEm(project, time)?.opcoes.ortografica ?? false,
+    );
     // Passou da camera: nao desenha, entao nao se toca.
     if (vista == null) return Matrix4.zero();
     pos = vista.pos;

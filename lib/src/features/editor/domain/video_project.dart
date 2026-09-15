@@ -559,12 +559,27 @@ const double zPertoDaCamera = -1100;
 ({Offset pos, double escala})? projetarProfundidade(
   VideoProject project,
   Offset pos,
-  double z,
-) {
-  if (!z.isFinite || z <= zPertoDaCamera) return null;
+  double z, {
+  bool ortografica = false,
+}) {
+  if (!z.isFinite) return null;
+  // CAMERA ORTOGRAFICA: a profundidade so ordena; nada encolhe nem corre
+  // para o ponto de fuga.
+  if (ortografica) return (pos: pos, escala: 1.0);
+  if (z <= zPertoDaCamera) return null;
   final k = focalDaComposicao / (focalDaComposicao + z);
   final centro = Offset(project.outputWidth / 2, project.outputHeight / 2);
   return (pos: centro + (pos - centro) * k, escala: k);
+}
+
+/// O ANGULO DE VISAO (graus, na largura) de uma lente de [lente] px.
+double anguloDaLente(double largura, double lente) =>
+    2 * math.atan((largura / 2) / (lente <= 0 ? 1e-6 : lente)) * 180 / math.pi;
+
+/// A lente (px) que da o angulo de visao de [graus] na largura.
+double lenteDoAngulo(double largura, double graus) {
+  final meio = graus.clamp(1.0, 170.0) * math.pi / 360;
+  return (largura / 2) / math.tan(meio);
 }
 
 /// A CAMERA DA COMPOSICAO aplicada a um transform ja resolvido no mundo

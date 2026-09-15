@@ -917,6 +917,35 @@ Map<String, dynamic>? _audioSpec(AudioSpec a) => a.isNeutral
         if (a.volumeAnimado != null) 'vol': _ad(a.volumeAnimado!),
       };
 
+Map<String, dynamic> _opcoesDaCamera(OpcoesDaCamera o) => {
+  if (o.ortografica) 'orto': true,
+  if (o.focoLigado) 'foco': true,
+  'fd': _ad(o.distanciaDoFoco),
+  'fi': _ad(o.intensidadeDoFoco),
+  'fp': _ad(o.profundidadeDeCampo),
+  if (o.neblinaLigada) 'nev': true,
+  'nc': _col(o.corDaNeblina),
+  'np': _ad(o.neblinaPerto),
+  'nl': _ad(o.neblinaLonge),
+};
+
+OpcoesDaCamera _asOpcoesDaCamera(Object? raw) {
+  if (raw is! Map) return OpcoesDaCamera();
+  final m = raw.cast<String, dynamic>();
+  AnimatedDouble? ad(String k) => m[k] is Map ? _asAd(m[k]) : null;
+  return OpcoesDaCamera(
+    ortografica: m['orto'] == true,
+    focoLigado: m['foco'] == true,
+    distanciaDoFoco: ad('fd'),
+    intensidadeDoFoco: ad('fi'),
+    profundidadeDeCampo: ad('fp'),
+    neblinaLigada: m['nev'] == true,
+    corDaNeblina: m['nc'] is num ? _asCol(m['nc']) : const Color(0xFF12151A),
+    neblinaPerto: ad('np'),
+    neblinaLonge: ad('nl'),
+  );
+}
+
 Map<String, dynamic> _processing(AudioProcessing p) => {
   if (p.denoise != 0) 'dn': p.denoise,
   if (p.voice != 0) 'voz': p.voice,
@@ -1280,6 +1309,7 @@ Map<String, dynamic> layerToJson(Layer l) {
     case CameraLayer cam:
       base['kind'] = 'camera';
       base['zoom'] = _ad(cam.zoom);
+      base['opc'] = _opcoesDaCamera(cam.opcoes);
     case NullLayer nl:
       base['kind'] = 'null';
       if (nl.grid != null) base['grid'] = _rig(nl.grid!);
@@ -2318,6 +2348,7 @@ Layer layerFromJson(Map<String, dynamic> m) {
         // PROJETO ANTIGO NAO TEM LENTE: cair na neutra deixa a
         // composicao exatamente como estava.
         zoom: _asAdOuNumero(m['zoom'], CameraLayer.lenteNeutra),
+        opcoes: _asOpcoesDaCamera(m['opc']),
         position: pos,
         scaleX: sx,
         scaleY: sy,

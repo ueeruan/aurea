@@ -3,6 +3,7 @@ import 'dart:ui';
 
 import 'package:flutter/animation.dart';
 
+import 'animadores.dart';
 import 'expression_engine.dart';
 
 /// Tipo de easing do segmento (taxonomia oficial do Alight Motion).
@@ -60,7 +61,11 @@ class Easing {
   static const easeOut = Easing(x1: 0, y1: 0, x2: 0.58, y2: 1);
   static const easeInOut = Easing(x1: 0.42, y1: 0, x2: 0.58, y2: 1);
   static const overshoot = Easing(x1: 0.34, y1: 1.56, x2: 0.64, y2: 1);
-  static const bounce = Easing(type: EasingType.bounce, count: 4, intensity: .5);
+  static const bounce = Easing(
+    type: EasingType.bounce,
+    count: 4,
+    intensity: .5,
+  );
   static const elastic = Easing(
     type: EasingType.elastic,
     count: 3,
@@ -618,6 +623,7 @@ class AnimatedDouble {
     List<Keyframe<double>>? keyframes,
     this.loop = LoopSpec.none,
     this.expression,
+    this.animador,
   ]) : keyframes = List.unmodifiable(keyframes ?? const <Keyframe<double>>[]);
 
   final double base;
@@ -634,6 +640,11 @@ class AnimatedDouble {
   /// parametro de efeito, transformacao, animador de texto. Quem le
   /// [valueAt] recebe a expressao aplicada sem saber que ela existe.
   final String? expression;
+
+  /// O ANIMADOR AUTOMATICO: a propriedade anda sozinha, sem keyframe
+  /// nenhum. Entra DEPOIS da expressao — quem escreveu uma expressao
+  /// mandou no valor, e o animador so balanca o que ela deu.
+  final AnimadorAutomatico? animador;
 
   bool get isAnimated => keyframes.isNotEmpty;
   bool get hasExpression => expression != null && expression!.trim().isNotEmpty;
@@ -661,8 +672,15 @@ class AnimatedDouble {
     return _cache[fonte] = CompiledExpression.tentar(fonte);
   }
 
-  /// O valor com a expressao aplicada — o que todo consumidor le.
+  /// O valor com a expressao E o animador aplicados — o que todo
+  /// consumidor le.
   double valueAt(Duration t) {
+    final v = _comExpressao(t);
+    final a = animador;
+    return a == null ? v : a.valor(v, t.inMicroseconds / 1000000);
+  }
+
+  double _comExpressao(Duration t) {
     final raw = _rawAt(t);
     if (!hasExpression) return raw;
     final fonte = expression!;
@@ -750,15 +768,19 @@ class AnimatedDouble {
   }
 
   AnimatedDouble withBase(double v) =>
-      AnimatedDouble(v, keyframes, loop, expression);
+      AnimatedDouble(v, keyframes, loop, expression, animador);
 
   /// Poe, troca ou tira (com nulo) a expressao.
   AnimatedDouble withExpression(String? fonte) =>
-      AnimatedDouble(base, keyframes, loop, fonte);
+      AnimatedDouble(base, keyframes, loop, fonte, animador);
+
+  /// Poe, troca ou tira (com nulo) o animador automatico.
+  AnimatedDouble withAnimador(AnimadorAutomatico? a) =>
+      AnimatedDouble(base, keyframes, loop, expression, a);
 
   /// Liga/desliga o loop dos keyframes (PR-X6).
   AnimatedDouble withLoop(LoopSpec spec) =>
-      AnimatedDouble(base, keyframes, spec, expression);
+      AnimatedDouble(base, keyframes, spec, expression, animador);
 
   AnimatedDouble withKeyframe(
     Duration t,
@@ -769,6 +791,7 @@ class AnimatedDouble {
     _insertSorted(keyframes, Keyframe(time: t, value: v, ease: ease)),
     loop,
     expression,
+    animador,
   );
 
   AnimatedDouble withoutKeyframe(Duration t) {
@@ -776,8 +799,10 @@ class AnimatedDouble {
     // Removeu o ultimo keyframe: volta a ser estatico no valor atual.
     // O valor CRU: tirar o ultimo keyframe nao pode assar a expressao
     // dentro da base — ela continua viva, por cima.
-    if (rest.isEmpty) return AnimatedDouble(_rawAt(t), null, loop, expression);
-    return AnimatedDouble(base, rest, loop, expression);
+    if (rest.isEmpty) {
+      return AnimatedDouble(_rawAt(t), null, loop, expression, animador);
+    }
+    return AnimatedDouble(base, rest, loop, expression, animador);
   }
 
   /// A MARCA DE [de] VAI PARA [para], com o valor e a curva dela.
@@ -790,7 +815,7 @@ class AnimatedDouble {
     if (de == para) return this;
     final novas = moverMarcaNaLista(keyframes, de, para);
     if (novas == null) return this;
-    return AnimatedDouble(base, novas, loop, expression);
+    return AnimatedDouble(base, novas, loop, expression, animador);
   }
 
   /// EDITAR UM VALOR NUNCA CRIA KEYFRAME.
@@ -845,6 +870,7 @@ class AnimatedDouble {
     ],
     loop,
     expression,
+    animador,
   );
 
   /// Aplica a curva a TODOS os segmentos ("Paste Curve to All Keyframes").
@@ -853,6 +879,7 @@ class AnimatedDouble {
     [for (final k in keyframes) k.copyWith(ease: ease)],
     loop,
     expression,
+    animador,
   );
 
   /// INVERTER NO TEMPO (assistente PR-X7): espelha os keyframes dentro
@@ -866,7 +893,7 @@ class AnimatedDouble {
       for (final k in keyframes)
         Keyframe(time: first + (last - k.time), value: k.value, ease: k.ease),
     ]..sort((a, b) => a.time.compareTo(b.time));
-    return AnimatedDouble(base, flipped, loop, expression);
+    return AnimatedDouble(base, flipped, loop, expression, animador);
   }
 }
 
@@ -876,6 +903,7 @@ class AnimatedOffset {
     this.base, [
     List<Keyframe<Offset>>? keyframes,
     this.loop = LoopSpec.none,
+    this.animador,
   ]) : keyframes = List.unmodifiable(keyframes ?? const <Keyframe<Offset>>[]);
 
   final Offset base;
@@ -884,12 +912,22 @@ class AnimatedOffset {
   /// Loop dos keyframes (PR-X6).
   final LoopSpec loop;
 
+  /// O ANIMADOR AUTOMATICO do ponto: as duas pontas andam sozinhas, com
+  /// o eixo Y um quarto de volta atrasado (ver [AnimadorAutomatico]).
+  final AnimadorAutomatico? animador;
+
   bool get isAnimated => keyframes.isNotEmpty;
 
   bool hasKeyframeAt(Duration t) =>
       keyframes.any((k) => (k.time - t).abs() < _epsilon);
 
   Offset valueAt(Duration t) {
+    final v = _semAnimador(t);
+    final a = animador;
+    return a == null ? v : a.valorDoPonto(v, t.inMicroseconds / 1000000);
+  }
+
+  Offset _semAnimador(Duration t) {
     if (keyframes.isEmpty) return base;
     final first = keyframes.first;
     final last = keyframes.last;
@@ -942,10 +980,15 @@ class AnimatedOffset {
     return Offset.lerp(a, b, f)!;
   }
 
-  AnimatedOffset withBase(Offset v) => AnimatedOffset(v, keyframes, loop);
+  AnimatedOffset withBase(Offset v) =>
+      AnimatedOffset(v, keyframes, loop, animador);
 
   AnimatedOffset withLoop(LoopSpec spec) =>
-      AnimatedOffset(base, keyframes, spec);
+      AnimatedOffset(base, keyframes, spec, animador);
+
+  /// Poe, troca ou tira (com nulo) o animador automatico.
+  AnimatedOffset withAnimador(AnimadorAutomatico? a) =>
+      AnimatedOffset(base, keyframes, loop, a);
 
   AnimatedOffset withKeyframe(
     Duration t,
@@ -955,12 +998,17 @@ class AnimatedOffset {
     base,
     _insertSorted(keyframes, Keyframe(time: t, value: v, ease: ease)),
     loop,
+    animador,
   );
 
   AnimatedOffset withoutKeyframe(Duration t) {
     final rest = _removeAt(keyframes, t);
-    if (rest.isEmpty) return AnimatedOffset(valueAt(t));
-    return AnimatedOffset(base, rest, loop);
+    // O valor CRU: tirar o ultimo keyframe nao pode assar o balanco do
+    // animador dentro da base — ele continua vivo, por cima.
+    if (rest.isEmpty) {
+      return AnimatedOffset(_semAnimador(t), null, loop, animador);
+    }
+    return AnimatedOffset(base, rest, loop, animador);
   }
 
   /// A mesma regra de [AnimatedDouble.comKeyframeMovido].
@@ -968,7 +1016,7 @@ class AnimatedOffset {
     if (de == para) return this;
     final novas = moverMarcaNaLista(keyframes, de, para);
     if (novas == null) return this;
-    return AnimatedOffset(base, novas, loop);
+    return AnimatedOffset(base, novas, loop, animador);
   }
 
   /// A mesma regra de [AnimatedDouble.edited]: editar valor nunca cria
@@ -988,14 +1036,22 @@ class AnimatedOffset {
     return Easing.linear;
   }
 
-  AnimatedOffset withEase(Duration t, Easing ease) => AnimatedOffset(base, [
-    for (final k in keyframes)
-      if ((k.time - t).abs() < _epsilon) k.copyWith(ease: ease) else k,
-  ], loop);
+  AnimatedOffset withEase(Duration t, Easing ease) => AnimatedOffset(
+    base,
+    [
+      for (final k in keyframes)
+        if ((k.time - t).abs() < _epsilon) k.copyWith(ease: ease) else k,
+    ],
+    loop,
+    animador,
+  );
 
-  AnimatedOffset withEaseAll(Easing ease) => AnimatedOffset(base, [
-    for (final k in keyframes) k.copyWith(ease: ease),
-  ], loop);
+  AnimatedOffset withEaseAll(Easing ease) => AnimatedOffset(
+    base,
+    [for (final k in keyframes) k.copyWith(ease: ease)],
+    loop,
+    animador,
+  );
 
   /// Inverter no tempo (PR-X7).
   AnimatedOffset reversedInTime() {
@@ -1006,6 +1062,6 @@ class AnimatedOffset {
       for (final k in keyframes)
         Keyframe(time: first + (last - k.time), value: k.value, ease: k.ease),
     ]..sort((a, b) => a.time.compareTo(b.time));
-    return AnimatedOffset(base, flipped, loop);
+    return AnimatedOffset(base, flipped, loop, animador);
   }
 }

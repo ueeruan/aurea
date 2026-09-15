@@ -8,6 +8,7 @@ import 'dart:typed_data';
 import 'dart:ui';
 
 import 'ajuste_da_midia.dart';
+import 'animadores.dart';
 import 'aprimoramento_ia.dart';
 import 'camera3d.dart';
 import 'caption.dart';
@@ -89,6 +90,7 @@ Map<String, dynamic> _ad(AnimatedDouble a) => {
   'b': a.base,
   // A expressao e texto: vai como veio. Ausente = sem expressao.
   if (a.hasExpression) 'x': a.expression,
+  if (a.animador != null) 'an': a.animador!.toJson(),
   if (a.keyframes.isNotEmpty)
     'k': [
       for (final k in a.keyframes)
@@ -127,12 +129,14 @@ AnimatedDouble _asAd(dynamic v) {
             count: (loopMap['n'] as num).toInt(),
           ),
     m['x'] as String?,
+    AnimadorAutomatico.fromJson(m['an']),
   );
 }
 
 Map<String, dynamic> _ao(AnimatedOffset a) => {
   'x': a.base.dx,
   'y': a.base.dy,
+  if (a.animador != null) 'an': a.animador!.toJson(),
   if (a.keyframes.isNotEmpty)
     'k': [
       for (final k in a.keyframes)
@@ -157,6 +161,8 @@ AnimatedOffset _asAo(dynamic v) {
           ease: _asEasing(k['e'] as Map<String, dynamic>),
         ),
     ],
+    LoopSpec.none,
+    AnimadorAutomatico.fromJson(m['an']),
   );
 }
 
@@ -596,10 +602,11 @@ ShapeItem _asShapeItem(Map<String, dynamic> m) => switch (m['kind']) {
   ),
   'param' => ShapeParametric(
     id: m['id'] as String,
-    kind: ParamShapeKind.values[(m['pk'] as num).toInt().clamp(
-      0,
-      ParamShapeKind.values.length - 1,
-    )],
+    kind:
+        ParamShapeKind.values[(m['pk'] as num).toInt().clamp(
+          0,
+          ParamShapeKind.values.length - 1,
+        )],
     extras: m['ex'] is Map
         ? {
             for (final e in (m['ex'] as Map).entries)
@@ -634,10 +641,11 @@ ShapeItem _asShapeItem(Map<String, dynamic> m) => switch (m['kind']) {
   'mfill' => ShapeMediaFill(
     id: m['id'] as String,
     sourcePath: m['src'] as String,
-    encaixe: EncaixeNaForma.values[((m['fit'] as num?)?.toInt() ?? 0).clamp(
-      0,
-      EncaixeNaForma.values.length - 1,
-    )],
+    encaixe:
+        EncaixeNaForma.values[((m['fit'] as num?)?.toInt() ?? 0).clamp(
+          0,
+          EncaixeNaForma.values.length - 1,
+        )],
     opacity: (m['op'] as num?)?.toDouble() ?? 1,
   ),
   'fill' => ShapeFill(
@@ -2105,7 +2113,8 @@ Layer layerFromJson(Map<String, dynamic> m) {
           orElse: () => PerfilDoAprimoramento.videoReal,
         ),
         reducaoDeRuido: (() {
-          final r = (m['ruidoAprimoramento'] as num?)?.toDouble() ??
+          final r =
+              (m['ruidoAprimoramento'] as num?)?.toDouble() ??
               reducaoDeRuidoPadrao;
           return r.isFinite ? r.clamp(0.0, 1.0) : reducaoDeRuidoPadrao;
         })(),
@@ -2641,10 +2650,11 @@ StrokeStyle _asBorda(Map m) => StrokeStyle(
   color: _asCol(m['c']),
   width: _asAd(m['w']),
   opacity: _asAd(m['op']),
-  posicao: PosicaoDaBorda.values[((m['pos'] as num?)?.toInt() ?? 0).clamp(
-    0,
-    PosicaoDaBorda.values.length - 1,
-  )],
+  posicao:
+      PosicaoDaBorda.values[((m['pos'] as num?)?.toInt() ?? 0).clamp(
+        0,
+        PosicaoDaBorda.values.length - 1,
+      )],
 );
 
 LayerStyles _asStyles(Map<String, dynamic> m) => LayerStyles(
@@ -3134,7 +3144,10 @@ List<Layer> _camadasDoJson(Object? bruto) {
 
 TerminacaoDoTraco _terminacao(Object? v) {
   final i = v is num ? v.toInt() : 0;
-  return TerminacaoDoTraco.values[i.clamp(0, TerminacaoDoTraco.values.length - 1)];
+  return TerminacaoDoTraco.values[i.clamp(
+    0,
+    TerminacaoDoTraco.values.length - 1,
+  )];
 }
 
 /// Um instante opcional gravado em microssegundos. Lixo vira nulo.

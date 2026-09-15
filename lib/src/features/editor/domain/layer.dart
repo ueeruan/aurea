@@ -162,7 +162,24 @@ sealed class Layer {
 
   Duration localTime(Duration global) => global - startTime;
 
+  /// A camada ANDA SOZINHA por um animador automatico? Sem keyframe
+  /// nenhum, ela ainda evolui com o relogio — e a previa precisa saber
+  /// disso para repintar por quadro.
+  bool get temAnimadorAutomatico =>
+      position.animador != null ||
+      positionZ.animador != null ||
+      scaleX.animador != null ||
+      scaleY.animador != null ||
+      rotation.animador != null ||
+      rotationX.animador != null ||
+      rotationY.animador != null ||
+      opacity.animador != null ||
+      skewX.animador != null ||
+      skewY.animador != null ||
+      pivot.animador != null;
+
   bool get hasAnimation =>
+      temAnimadorAutomatico ||
       position.isAnimated ||
       scaleX.isAnimated ||
       scaleY.isAnimated ||
@@ -1551,7 +1568,9 @@ class GroupLayer extends Layer {
       final tr = r.transitionIn;
       if (tr != null && novoId.containsKey(tr.outgoingLayerId)) {
         r = r.copyLayer(
-          transitionIn: tr.copyWith(outgoingLayerId: novoId[tr.outgoingLayerId]),
+          transitionIn: tr.copyWith(
+            outgoingLayerId: novoId[tr.outgoingLayerId],
+          ),
         );
       }
       return r;
@@ -2350,7 +2369,9 @@ class CameraLayer extends Layer {
     matteSourceId: clearMatteSource
         ? null
         : (matteSourceId ?? this.matteSourceId),
-    transitionIn: clearTransitionIn ? null : (transitionIn ?? this.transitionIn),
+    transitionIn: clearTransitionIn
+        ? null
+        : (transitionIn ?? this.transitionIn),
   );
 
   @override

@@ -50,6 +50,7 @@ class ParameterRow extends StatelessWidget {
     this.keyframe,
     this.onReset,
     this.onExpose,
+    this.onAnimador,
     this.rulerKey,
     this.valueKey,
     this.accentCenter = false,
@@ -63,6 +64,9 @@ class ParameterRow extends StatelessWidget {
   /// aqui so removia. Com [onReset] junto, o toque longo vira um menu
   /// com as duas acoes.
   final VoidCallback? onExpose;
+
+  /// ANIMAR SOZINHO: abre o animador automatico da propriedade.
+  final VoidCallback? onAnimador;
 
   /// A expressao em vigor (Pro): o chip mostra "fx" e o toque longo edita.
   final String? expression;
@@ -108,6 +112,7 @@ class ParameterRow extends StatelessWidget {
         keyframe: keyframe,
         onReset: onReset,
         onExpose: onExpose,
+        onAnimador: onAnimador,
         height: height,
         child: Row(
           children: [
@@ -165,6 +170,7 @@ class ParameterPointRow extends StatelessWidget {
     this.decimals = 1,
     this.keyframe,
     this.onReset,
+    this.onAnimador,
     this.height = AureaTokens.minTap,
   });
 
@@ -179,6 +185,7 @@ class ParameterPointRow extends StatelessWidget {
   final int decimals;
   final KeyframeState? keyframe;
   final VoidCallback? onReset;
+  final VoidCallback? onAnimador;
   final double height;
 
   @override
@@ -220,6 +227,7 @@ class ParameterPointRow extends StatelessWidget {
       label: label,
       keyframe: keyframe,
       onReset: onReset,
+      onAnimador: onAnimador,
       height: height,
       child: Row(
         children: [
@@ -362,6 +370,7 @@ class ParameterFrame extends StatelessWidget {
     this.keyframe,
     this.onReset,
     this.onExpose,
+    this.onAnimador,
     this.height = AureaTokens.minTap,
     this.labelWidth = 76,
   });
@@ -371,19 +380,23 @@ class ParameterFrame extends StatelessWidget {
   final KeyframeState? keyframe;
   final VoidCallback? onReset;
   final VoidCallback? onExpose;
+  final VoidCallback? onAnimador;
   final double height;
   final double labelWidth;
 
   /// O TOQUE LONGO NO NOME: so resetar (como sempre) quando e a unica
-  /// acao; com "expor" junto, um menu curto — resetar continua a um
-  /// toque de distancia, e a lista de ⚙ deixa de ser so-remover.
+  /// acao; com "expor" ou "animar sozinho" junto, um menu curto —
+  /// resetar continua a um toque de distancia, e a lista de ⚙ deixa de
+  /// ser so-remover.
   Future<void> _menuDoNome(BuildContext context) async {
-    if (onExpose == null) {
-      onReset?.call();
-      return;
-    }
-    if (onReset == null) {
-      onExpose!.call();
+    final acoes = <(String, String, VoidCallback)>[
+      if (onReset != null) ('reset', 'Resetar propriedade', onReset!),
+      if (onExpose != null) ('expor', 'Expor no projeto', onExpose!),
+      if (onAnimador != null) ('animador', 'Animar sozinho', onAnimador!),
+    ];
+    if (acoes.isEmpty) return;
+    if (acoes.length == 1) {
+      acoes.single.$3();
       return;
     }
     final acao = await showCupertinoModalPopup<String>(
@@ -391,15 +404,12 @@ class ParameterFrame extends StatelessWidget {
       builder: (c) => CupertinoActionSheet(
         title: AppText(label),
         actions: [
-          CupertinoActionSheetAction(
-            onPressed: () => Navigator.of(c).pop('reset'),
-            child: const AppText('Resetar propriedade'),
-          ),
-          CupertinoActionSheetAction(
-            key: const ValueKey('expor-propriedade'),
-            onPressed: () => Navigator.of(c).pop('expor'),
-            child: const AppText('Expor no projeto'),
-          ),
+          for (final (chave, nome, _) in acoes)
+            CupertinoActionSheetAction(
+              key: ValueKey('$chave-propriedade'),
+              onPressed: () => Navigator.of(c).pop(chave),
+              child: AppText(nome),
+            ),
         ],
         cancelButton: CupertinoActionSheetAction(
           onPressed: () => Navigator.of(c).pop(),
@@ -407,8 +417,9 @@ class ParameterFrame extends StatelessWidget {
         ),
       ),
     );
-    if (acao == 'reset') onReset!.call();
-    if (acao == 'expor') onExpose!.call();
+    for (final (chave, _, correr) in acoes) {
+      if (chave == acao) correr();
+    }
   }
 
   @override
@@ -617,9 +628,12 @@ class TecladoNumerico extends StatefulWidget {
 }
 
 class _TecladoNumericoState extends State<TecladoNumerico> {
-  late final TextEditingController _campo = TextEditingController(
-    text: widget.inicial,
-  )..selection = TextSelection(baseOffset: 0, extentOffset: widget.inicial.length);
+  late final TextEditingController _campo =
+      TextEditingController(text: widget.inicial)
+        ..selection = TextSelection(
+          baseOffset: 0,
+          extentOffset: widget.inicial.length,
+        );
 
   @override
   void initState() {
@@ -935,7 +949,10 @@ Future<String?> showExpressionEditor(
               autofocus: true,
               maxLines: 3,
               minLines: 1,
-              placeholder: translate(context, 'ex.: wiggle(2, 30) ou time * 90'),
+              placeholder: translate(
+                context,
+                'ex.: wiggle(2, 30) ou time * 90',
+              ),
               onSubmitted: (v) => Navigator.pop(ctx, v),
             ),
             if (erro != null) ...[

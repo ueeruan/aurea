@@ -1,4 +1,5 @@
 import 'package:aurea/src/core/l10n/app_language.dart';
+
 import 'dart:math' as math;
 
 import 'package:flutter/cupertino.dart';
@@ -11,6 +12,7 @@ import '../../application/playback_controller.dart';
 import '../../domain/angulo.dart';
 import '../../domain/layer.dart';
 import 'am_colors.dart';
+import 'animador_sheet.dart';
 import 'am_widgets.dart';
 import 'area_de_arrasto.dart';
 import 'panel_chrome.dart';
@@ -47,6 +49,25 @@ KeyframeState _kf(
 }
 
 /// O toque longo no valor (Pro) abre a expressao da propriedade.
+/// ANIMAR SOZINHO: o toque longo no nome da propriedade oferece o
+/// animador automatico — a propriedade balança sem keyframe nenhum.
+VoidCallback _animador(
+  BuildContext context,
+  WidgetRef ref,
+  Layer layer,
+  LayerProp prop,
+  String nome, {
+  String unidade = '',
+}) =>
+    () => showAnimadorSheet(
+      context,
+      ref,
+      layer.id,
+      prop,
+      nome: nome,
+      unidade: unidade,
+    );
+
 VoidCallback? _expressao(
   BuildContext context,
   WidgetRef ref,
@@ -147,7 +168,10 @@ class _TransformPanelState extends ConsumerState<TransformPanel> {
           child: AppText('Keyframe anterior'),
         ),
         const PopupMenuItem(value: 'next', child: AppText('Próximo keyframe')),
-        const PopupMenuItem(value: 'reset', child: AppText('Resetar propriedade')),
+        const PopupMenuItem(
+          value: 'reset',
+          child: AppText('Resetar propriedade'),
+        ),
         CheckedPopupMenuItem(
           value: 'pivot',
           checked: widget.tool == TransformTool.pivot,
@@ -240,8 +264,7 @@ class _TransformPanelState extends ConsumerState<TransformPanel> {
             return AlvoDoRail(
               temKeyframeAqui: hasKfHere,
               animado: times.isNotEmpty,
-              aoAlternarKeyframe: () =>
-                  controller.toggleKeyframe(id, t, prop),
+              aoAlternarKeyframe: () => controller.toggleKeyframe(id, t, prop),
               aoAbrirCurva: times.length >= 2
                   ? () => widget.onOpenCurve(prop)
                   : null,
@@ -410,7 +433,8 @@ class _PositionControlState extends ConsumerState<_PositionControl> {
           children: [
             const Padding(
               padding: EdgeInsets.all(14),
-              child: AppText('Seguir a posicao de...',
+              child: AppText(
+                'Seguir a posicao de...',
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w700,
@@ -490,6 +514,14 @@ class _PositionControlState extends ConsumerState<_PositionControl> {
           onZ: (v) => controller.editPositionZ(layer.id, t, v),
           keyframe: _kf(ref, layer, LayerProp.position, t, null),
           onReset: () => controller.resetProp(layer.id, LayerProp.position),
+          onAnimador: _animador(
+            context,
+            ref,
+            layer,
+            LayerProp.position,
+            'a posição',
+            unidade: 'px',
+          ),
         ),
         const SizedBox(height: 4),
         // A REGUA DE PROFUNDIDADE VEM ANTES DA ALMOFADA. Ela ficava
@@ -544,7 +576,8 @@ class _PositionControlState extends ConsumerState<_PositionControl> {
             child: Container(
               decoration: BoxDecoration(color: AmColors.panel),
               child: const Center(
-                child: AppText('Deslize aqui para mover a camada',
+                child: AppText(
+                  'Deslize aqui para mover a camada',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 12,
@@ -605,7 +638,8 @@ class _PivotControl extends ConsumerWidget {
                       color: AmColors.muted,
                     ),
                     SizedBox(height: 6),
-                    AppText('Arraste o ponto de giro\n(toque duplo = centro)',
+                    AppText(
+                      'Arraste o ponto de giro\n(toque duplo = centro)',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 12,
@@ -836,7 +870,8 @@ class _RotationControlState extends ConsumerState<_RotationControl> {
           children: [
             const SizedBox(
               width: 48,
-              child: AppText('3D X',
+              child: AppText(
+                '3D X',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 13, color: AmColors.muted),
               ),
@@ -866,7 +901,8 @@ class _RotationControlState extends ConsumerState<_RotationControl> {
           children: [
             const SizedBox(
               width: 48,
-              child: AppText('3D Y',
+              child: AppText(
+                '3D Y',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 13, color: AmColors.muted),
               ),
@@ -970,6 +1006,14 @@ class _ScaleControl extends ConsumerWidget {
                   LayerProp.scale,
                   'Escala',
                 ),
+                onAnimador: _animador(
+                  context,
+                  ref,
+                  layer,
+                  LayerProp.scale,
+                  'a escala',
+                  unidade: '%',
+                ),
                 onReset: () => controller.resetProp(layer.id, LayerProp.scale),
                 onChanged: (v) => aplicar(true, v),
               ),
@@ -1049,6 +1093,14 @@ class _SkewControl extends ConsumerWidget {
             LayerProp.skew,
             'Inclinar',
           ),
+          onAnimador: _animador(
+            context,
+            ref,
+            layer,
+            LayerProp.skew,
+            'a inclinação',
+            unidade: '°',
+          ),
           onReset: () => controller.resetProp(layer.id, LayerProp.skew),
           onChanged: (v) => controller.editSkewX(layer.id, t, v),
         ),
@@ -1101,6 +1153,14 @@ class _OpacityControl extends ConsumerWidget {
             layer,
             LayerProp.opacity,
             'Opacidade',
+          ),
+          onAnimador: _animador(
+            context,
+            ref,
+            layer,
+            LayerProp.opacity,
+            'a opacidade',
+            unidade: '%',
           ),
           onReset: () => controller.resetProp(layer.id, LayerProp.opacity),
           onChanged: (v) => controller.editOpacity(

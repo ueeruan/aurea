@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../media/application/media_import_service.dart';
+import '../domain/animadores.dart';
 import '../domain/blend_extra.dart';
 import 'blob_track_service.dart';
 import 'camera_track_service.dart';
@@ -535,10 +536,7 @@ class EditorController extends Notifier<VideoProject> {
     }
     final fim = state.finalInicio;
     _mutate(
-      state.copyWith(
-        introFim: t,
-        limparFinalInicio: fim != null && fim <= t,
-      ),
+      state.copyWith(introFim: t, limparFinalInicio: fim != null && fim <= t),
     );
   }
 
@@ -740,9 +738,8 @@ class EditorController extends Notifier<VideoProject> {
     );
     _push(layer);
     if (layer.proporcaoDaFonte == null) {
-      proporcaoDaFoto(
-        path,
-      ).then((a) => a == null ? null : definirProporcaoDaMidia(layer.id, a));
+      proporcaoDaFoto(path)
+          .then((a) => a == null ? null : definirProporcaoDaMidia(layer.id, a));
     }
     return layer.id;
   }
@@ -798,9 +795,8 @@ class EditorController extends Notifier<VideoProject> {
       file.name,
       const Duration(seconds: 4),
     );
-    _probe(
-      file.path,
-    ).then((r) => _chegouADuracao(id, r.duracao, proporcao: r.proporcao));
+    _probe(file.path)
+        .then((r) => _chegouADuracao(id, r.duracao, proporcao: r.proporcao));
   }
 
   /// O PROBE VOLTOU: a camada aprende quanto o arquivo tem.
@@ -825,10 +821,12 @@ class EditorController extends Notifier<VideoProject> {
     final layer = _layer(id);
     if (a == null) return;
     final Layer? novo = switch (layer) {
-      VideoLayer l when l.proporcaoDaFonte == null =>
-        l.copyLayer(proporcaoDaFonte: a),
-      ImageLayer l when l.proporcaoDaFonte == null =>
-        l.copyLayer(proporcaoDaFonte: a),
+      VideoLayer l when l.proporcaoDaFonte == null => l.copyLayer(
+        proporcaoDaFonte: a,
+      ),
+      ImageLayer l when l.proporcaoDaFonte == null => l.copyLayer(
+        proporcaoDaFonte: a,
+      ),
       _ => null,
     };
     if (novo == null) return;
@@ -1669,11 +1667,20 @@ class EditorController extends Notifier<VideoProject> {
         if (!scaled) return r;
         final sx = layer.scaleX.valueAt(local).abs();
         final sy = layer.scaleY.valueAt(local).abs();
-        return Rect.fromLTRB(r.left * sx, r.top * sy, r.right * sx, r.bottom * sy);
+        return Rect.fromLTRB(
+          r.left * sx,
+          r.top * sy,
+          r.right * sx,
+          r.bottom * sy,
+        );
       }
     }
     final s = layerBoxSize(layer, t, scaled: scaled);
-    return Rect.fromCenter(center: Offset.zero, width: s.width, height: s.height);
+    return Rect.fromCenter(
+      center: Offset.zero,
+      width: s.width,
+      height: s.height,
+    );
   }
 
   /// Onde o CENTRO VISIVEL da camada fica em relacao a posicao: zero para
@@ -1795,6 +1802,53 @@ class EditorController extends Notifier<VideoProject> {
   }
 
   /// A expressao atual de uma propriedade (nula quando nao ha).
+  // ------------------------------------------------- animador automatico
+
+  /// O ANIMADOR AUTOMATICO da propriedade: ela anda sozinha, sem
+  /// keyframe nenhum. Nulo tira.
+  void setPropAnimador(String id, LayerProp prop, AnimadorAutomatico? a) {
+    final layer = _layer(id);
+    if (layer == null) return;
+    final novo = switch (prop) {
+      LayerProp.opacity => layer.copyLayer(
+        opacity: layer.opacity.withAnimador(a),
+      ),
+      LayerProp.rotation => layer.copyLayer(
+        rotation: layer.rotation.withAnimador(a),
+      ),
+      LayerProp.scale => layer.copyLayer(
+        scaleX: layer.scaleX.withAnimador(a),
+        scaleY: layer.scaleY.withAnimador(a),
+      ),
+      LayerProp.skew => layer.copyLayer(
+        skewX: layer.skewX.withAnimador(a),
+        skewY: layer.skewY.withAnimador(a),
+      ),
+      LayerProp.position => layer.copyLayer(
+        position: layer.position.withAnimador(a),
+      ),
+      LayerProp.pivot => layer.copyLayer(pivot: layer.pivot.withAnimador(a)),
+      LayerProp.parent => null,
+    };
+    if (novo != null) _replace(novo);
+  }
+
+  /// O animador em vigor na propriedade, se houver.
+  AnimadorAutomatico? propAnimador(Layer layer, LayerProp prop) =>
+      switch (prop) {
+        LayerProp.opacity => layer.opacity.animador,
+        LayerProp.rotation => layer.rotation.animador,
+        LayerProp.scale => layer.scaleX.animador,
+        LayerProp.skew => layer.skewX.animador,
+        LayerProp.position => layer.position.animador,
+        LayerProp.pivot => layer.pivot.animador,
+        LayerProp.parent => null,
+      };
+
+  /// A propriedade e um PONTO (duas pontas para animar) ou um numero?
+  static bool propEhPonto(LayerProp prop) =>
+      prop == LayerProp.position || prop == LayerProp.pivot;
+
   String? propExpression(Layer layer, LayerProp prop) => switch (prop) {
     LayerProp.opacity => layer.opacity.expression,
     LayerProp.rotation => layer.rotation.expression,
@@ -2688,8 +2742,7 @@ class EditorController extends Notifier<VideoProject> {
       renameLayer(nuloDaComposicao, 'Nulo 3D · iPhone');
       vincularNoANuloDaComposicao(cenaId, raiz!, nuloDaComposicao);
       final depois = _layer(cenaId);
-      if (depois is Scene3DLayer &&
-          depois.scene.panorama.sourcePath == null) {
+      if (depois is Scene3DLayer && depois.scene.panorama.sourcePath == null) {
         updateScene3D(
           cenaId,
           (s) => s.copyWith(environment: EnvironmentKind.estudioMetal),
@@ -3969,10 +4022,7 @@ class EditorController extends Notifier<VideoProject> {
   int batidasViramMarcadores() {
     final novas = [
       for (final b in state.beats)
-        if (!state.markers.any(
-          (m) => (m.time - b).inMilliseconds.abs() < 2,
-        ))
-          b,
+        if (!state.markers.any((m) => (m.time - b).inMilliseconds.abs() < 2)) b,
     ];
     if (novas.isEmpty) return 0;
     addMarkers(novas);
@@ -4212,7 +4262,8 @@ class EditorController extends Notifier<VideoProject> {
     }
     // A proporcao exibida decide a altura dos quadros analisados.
     final proporcao =
-        layer.proporcaoDaFonte ?? (await sondarVideo(layer.sourcePath)).proporcao;
+        layer.proporcaoDaFonte ??
+        (await sondarVideo(layer.sourcePath)).proporcao;
     // O TRECHO DA FONTE QUE O CLIPE MOSTRA: com velocidade, reverso ou Time
     // Remap ele nao e [sourceOffset, sourceOffset + duracao]. Varre o tempo
     // da camada e fica com o menor e o maior instante do arquivo.
@@ -5443,7 +5494,9 @@ class EditorController extends Notifier<VideoProject> {
           ),
           -delta,
         );
-        novo = novo.copyLayer(effects: replaceTimeRemap(novo as VideoLayer, sliced.track));
+        novo = novo.copyLayer(
+          effects: replaceTimeRemap(novo as VideoLayer, sliced.track),
+        );
         _replace(novo);
       } else {
         var offset =
@@ -6361,9 +6414,7 @@ class EditorController extends Notifier<VideoProject> {
         for (final e in preset.montar())
           if (e.type != EffectType.opticalFlow ||
               (atual is VideoLayer &&
-                  !atual.effects.any(
-                    (x) => x.type == EffectType.opticalFlow,
-                  )))
+                  !atual.effects.any((x) => x.type == EffectType.opticalFlow)))
             e,
       ];
       quantos = novos.length;
@@ -7124,11 +7175,7 @@ class EditorController extends Notifier<VideoProject> {
   /// CABER, PREENCHER OU ESTICAR NA COMPOSICAO: a caixa da camada (sem
   /// escala) vai ao centro e a escala e escolhida no instante [t] — com a
   /// propriedade animada, vira keyframe, como qualquer edicao.
-  void encaixarNaComposicao(
-    String id,
-    EncaixeNaComposicao modo,
-    Duration t,
-  ) {
+  void encaixarNaComposicao(String id, EncaixeNaComposicao modo, Duration t) {
     final layer = _layer(id);
     if (layer == null) return;
     final caixa = layerBoxSize(layer, t, scaled: false);
@@ -7169,10 +7216,7 @@ class EditorController extends Notifier<VideoProject> {
       final audio = _layer(novo!);
       if (audio is AudioLayer) {
         _replace(
-          audio.copyLayer(
-            sourceOffset: video.sourceOffset,
-            speed: video.speed,
-          ),
+          audio.copyLayer(sourceOffset: video.sourceOffset, speed: video.speed),
         );
       }
       updateAudioSpec(videoId, (s) => s.copyWith(muted: true));
@@ -8223,7 +8267,9 @@ class EditorController extends Notifier<VideoProject> {
           if (!achou && i is ShapeDesenho && i.tracos.isNotEmpty)
             (() {
               achou = true;
-              return i.copyWith(tracos: i.tracos.sublist(0, i.tracos.length - 1));
+              return i.copyWith(
+                tracos: i.tracos.sublist(0, i.tracos.length - 1),
+              );
             })()
           else
             i,
@@ -8956,11 +9002,10 @@ class EditorController extends Notifier<VideoProject> {
           case CategoriaDeEstilo.bordaESombra:
             if (fonte is ShapeLayer && alvo is ShapeLayer) {
               alvo = alvo.copyLayer(
-                contents: _trocarItens(
-                  alvo.contents,
-                  [for (final i in fonte.contents) if (i is ShapeStroke) i],
-                  (i) => i is ShapeStroke,
-                ),
+                contents: _trocarItens(alvo.contents, [
+                  for (final i in fonte.contents)
+                    if (i is ShapeStroke) i,
+                ], (i) => i is ShapeStroke),
               );
             }
           case CategoriaDeEstilo.estiloDeTexto:

@@ -170,6 +170,9 @@ class ExportEngine {
     if (!project.metaOf(l.id).isEmpty) return null;
 
     // Qualquer transformacao mexida muda o quadro: nao e mais copia.
+    // Um ANIMADOR AUTOMATICO mexe sem keyframe nenhum: copiar o arquivo
+    // exportaria a camada parada.
+    if (l.temAnimadorAutomatico) return null;
     if (l.opacity.isAnimated || l.opacity.base != 1) return null;
     if (l.position.base != Offset.zero) return null;
     if (l.scaleX.isAnimated || l.scaleX.base != 1) return null;
@@ -276,8 +279,10 @@ class ExportEngine {
     if (layer.aprimorar) {
       aprimoramentoUsado[layer.id] = planoIa;
       if (!planoIa.aplica) {
-        avisos.add('"${layer.name}" saiu sem o aprimoramento por IA: '
-            '${planoIa.emPalavras}.');
+        avisos.add(
+          '"${layer.name}" saiu sem o aprimoramento por IA: '
+          '${planoIa.emPalavras}.',
+        );
       }
     }
     // A leitura da fonte: com IA, a entrada da rede; cobrindo, a propria
@@ -289,7 +294,8 @@ class ExportEngine {
         ? areaMaximaDaEntradaDaIa
         : (caixa == null
               ? null
-              : math.min(caixa.width * caixa.height, 2.0 * width * height)
+              : math
+                    .min(caixa.width * caixa.height, 2.0 * width * height)
                     .ceil());
     // QUADROS A MAIS quando o clipe anda mais devagar que a fonte e a
     // pessoa pediu interpolacao: os PNGs saem numa taxa maior, e quem
@@ -381,13 +387,14 @@ class ExportEngine {
     void Function(double p)? onProgress,
     void Function(String detalhe)? onDetalhe,
   }) async {
-    final arquivos = dir
-        .listSync()
-        .whereType<File>()
-        .map((f) => f.path)
-        .where((p) => p.endsWith('.png'))
-        .toList()
-      ..sort();
+    final arquivos =
+        dir
+            .listSync()
+            .whereType<File>()
+            .map((f) => f.path)
+            .where((p) => p.endsWith('.png'))
+            .toList()
+          ..sort();
     try {
       await ia.aprimorar(
         arquivos: arquivos,

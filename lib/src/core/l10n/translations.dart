@@ -2469,6 +2469,10 @@ const appTranslations = <String, Map<String, String>>{
   "Whip para o próximo corte": {"en": "Whip into the next cut", "es": "Whip hacia el siguiente corte", "ar": "انتقال سريع إلى القطع التالي", "ko": "다음 컷으로 휩", "ja": "次のカットへウィップ", "zh": "甩镜到下一个剪辑", "hi": "अगले कट में व्हिप", "id": "Whip ke potongan berikutnya", "ru": "Вип-переход к следующему"},
   "Flash na batida": {"en": "Flash on the beat", "es": "Flash en el beat", "ar": "وميض على الإيقاع", "ko": "비트에 플래시", "ja": "ビートでフラッシュ", "zh": "节拍闪光", "hi": "बीट पर फ़्लैश", "id": "Flash di beat", "ru": "Вспышка в бит"},
   "Batidas…": {"en": "Beats…", "es": "Beats…", "ar": "الإيقاعات…", "ko": "비트…", "ja": "ビート…", "zh": "节拍…", "hi": "बीट्स…", "id": "Beat…", "ru": "Биты…"},
+  "Punch in": {"en": "Punch in", "es": "Punch in", "ar": "تقريب سريع", "ko": "펀치 인", "ja": "パンチイン", "zh": "推近", "hi": "पंच इन", "id": "Punch in", "ru": "Панч-ин"},
+  "Fundo desfocado": {"en": "Blurred background", "es": "Fondo desenfocado", "ar": "خلفية مموهة", "ko": "배경 흐림", "ja": "背景ぼかし", "zh": "模糊背景", "hi": "धुंधली पृष्ठभूमि", "id": "Latar belakang buram", "ru": "Размытый фон"},
+  "Separar áudio": {"en": "Detach audio", "es": "Separar audio", "ar": "فصل الصوت", "ko": "오디오 분리", "ja": "オーディオを分離", "zh": "分离音频", "hi": "ऑडियो अलग करें", "id": "Pisahkan audio", "ru": "Отделить звук"},
+  "Zoom suave": {"en": "Soft zoom", "es": "Zoom suave", "ar": "تقريب ناعم", "ko": "부드러운 줌", "ja": "ソフトズーム", "zh": "柔和缩放", "hi": "सॉफ़्ट ज़ूम", "id": "Zoom halus", "ru": "Плавный зум"},
   "Video": {"en": "Video", "es": "Vídeo", "ar": "فيديو", "ko": "동영상", "ja": "動画", "zh": "视频", "hi": "वीडियो", "id": "Video", "ru": "Видео"},
   "Audio": {"en": "Audio", "es": "Audio", "ar": "صوت", "ko": "오디오", "ja": "音声", "zh": "音频", "hi": "ऑडियो", "id": "Audio", "ru": "Аудио"},
   "Midia": {"en": "Media", "es": "Multimedia", "ar": "الوسائط", "ko": "미디어", "ja": "メディア", "zh": "媒体", "hi": "मीडिया", "id": "Media", "ru": "Медиа"},
@@ -2726,4 +2730,5 @@ const appTranslations = <String, Map<String, String>>{
   "Virar pilula": {"en": "Become a pill", "es": "Convertir en píldora", "ar": "التحول إلى كبسولة", "ko": "알약 모양으로", "ja": "ピル形にする", "zh": "变成胶囊形", "hi": "पिल बनाएं", "id": "Jadikan pil", "ru": "Превратить в капсулу"},
   "Impacto medio": {"en": "Medium impact", "es": "Impacto medio", "ar": "تأثير متوسط", "ko": "중간 임팩트", "ja": "ミディアムインパクト", "zh": "中度冲击", "hi": "मध्यम इम्पैक्ट", "id": "Impak sedang", "ru": "Средний удар"},
   "Whip para o proximo corte": {"en": "Whip into the next cut", "es": "Whip hacia el siguiente corte", "ar": "انتقال سريع إلى القطع التالي", "ko": "다음 컷으로 휩", "ja": "次のカットへウィップ", "zh": "甩镜到下一个剪辑", "hi": "अगले कट में व्हिप", "id": "Whip ke potongan berikutnya", "ru": "Вип-переход к следующему"},
+  "Separar audio": {"en": "Detach audio", "es": "Separar audio", "ar": "فصل الصوت", "ko": "오디오 분리", "ja": "オーディオを分離", "zh": "分离音频", "hi": "ऑडियो अलग करें", "id": "Pisahkan audio", "ru": "Отделить звук"},
 };

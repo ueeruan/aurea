@@ -12,7 +12,8 @@ enum PresetDeMovimento {
   sumir,
   subir,
   pop,
-  soco;
+  soco,
+  zoomSuave;
 
   String get emPalavras => switch (this) {
     PresetDeMovimento.aparecer => 'Aparecer',
@@ -20,6 +21,7 @@ enum PresetDeMovimento {
     PresetDeMovimento.subir => 'Surgir de baixo',
     PresetDeMovimento.pop => 'Pop',
     PresetDeMovimento.soco => 'Soco',
+    PresetDeMovimento.zoomSuave => 'Zoom suave',
   };
 
   String get explicacao => switch (this) {
@@ -28,6 +30,8 @@ enum PresetDeMovimento {
     PresetDeMovimento.subir => 'Sobe 48 px enquanto aparece.',
     PresetDeMovimento.pop => 'Entra pequeno e assenta com overshoot.',
     PresetDeMovimento.soco => 'Incha 12% e volta — o punch de batida.',
+    PresetDeMovimento.zoomSuave =>
+      'Aproxima 8% devagar, do cabeçote ao fim da camada.',
   };
 }
 

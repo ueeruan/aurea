@@ -162,6 +162,57 @@ List<QuickAction> quickActionsFor(
             controller.updateAudioSpec(id, (s) => s.copyWith(muted: !mudo)),
       ),
     ],
+    if (layer is VideoLayer) ...[
+      QuickAction(
+        key: 'punch-in',
+        icon: CupertinoIcons.zoom_in,
+        label: 'Punch in',
+        onTap: () {
+          final novo = controller.punchIn(id, t);
+          AureaSnack.show(
+            context,
+            novo == null
+                ? 'Não deu para cortar aqui.'
+                : 'Corte com aproximação de 18%.',
+            actionLabel: novo == null ? null : 'Desfazer',
+            onAction: controller.undo,
+          );
+        },
+      ),
+      QuickAction(
+        key: 'fundo-desfocado',
+        icon: CupertinoIcons.photo_fill_on_rectangle_fill,
+        label: 'Fundo desfocado',
+        onTap: () {
+          final novo = controller.fundoDesfocado(id);
+          AureaSnack.show(
+            context,
+            novo == null
+                ? 'Só clipe de vídeo tem fundo desfocado.'
+                : 'Fundo desfocado atrás do clipe.',
+            actionLabel: novo == null ? null : 'Desfazer',
+            onAction: controller.undo,
+          );
+        },
+      ),
+      QuickAction(
+        key: 'separar-audio',
+        icon: CupertinoIcons.music_note_2,
+        label: 'Separar áudio',
+        onTap: () {
+          final novo = controller.separarAudio(id);
+          AureaSnack.show(
+            context,
+            novo == null
+                ? 'Sem som para separar (ou o clipe tem reverso/curva '
+                      'de tempo).'
+                : 'Áudio numa camada própria; o vídeo ficou mudo.',
+            actionLabel: novo == null ? null : 'Desfazer',
+            onAction: controller.undo,
+          );
+        },
+      ),
+    ],
     if (layer is VideoLayer)
       QuickAction(
         key: 'congelar',

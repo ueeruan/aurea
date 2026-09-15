@@ -4248,6 +4248,114 @@ class EditorController extends Notifier<VideoProject> {
     );
   }
 
+  // -------------------------------------------------- social rapido
+
+  /// SEPARA O AUDIO do video numa camada propria, sincronizada pelo
+  /// MESMO trecho da fonte (offset, duracao e velocidade iguais) — nada
+  /// de indice de quadro. O video fica mudo; apagar a camada de audio e
+  /// religar o som desfaz na mao, e um undo desfaz tudo junto.
+  /// Devolve o id da camada de audio, ou null (sem som, ou clipe com
+  /// reverso/curva de tempo, que o audio nao acompanha).
+  String? separarAudio(String id) {
+    final layer = _layer(id);
+    if (layer is! VideoLayer ||
+        layer.volume <= 0.001 ||
+        layer.reverse ||
+        hasTimeRemap(layer)) {
+      return null;
+    }
+    final audio = AudioLayer(
+      name: '${layer.name} · áudio',
+      startTime: layer.startTime,
+      duration: layer.duration,
+      sourcePath: layer.sourcePath,
+      sourceOffset: layer.sourceOffset,
+      sourceDuration: layer.sourceDuration,
+      speed: layer.speed,
+      volume: layer.volume,
+      audio: layer.audio,
+      position: AnimatedOffset(_center),
+    );
+    runAsOneUndo(() {
+      final l = _layer(id);
+      if (l is! VideoLayer) return;
+      final idx = state.layers.indexWhere((x) => x.id == id);
+      final lista = [...state.layers]..insert(idx + 1, audio);
+      _mutate(
+        state.copyWith(
+          layers: [
+            for (final x in lista)
+              if (x.id == id && x is VideoLayer)
+                x.copyLayer(audio: x.audio.copyWith(muted: true))
+              else
+                x,
+          ],
+        ),
+      );
+    });
+    return audio.id;
+  }
+
+  /// PUNCH IN de talking head: corta no cabecote e aproxima o segmento
+  /// seguinte — o corte seco que os videos falados usam para respirar.
+  /// Devolve o id do segmento aproximado, ou null.
+  String? punchIn(String id, Duration globalTime, {double fator = 1.18}) {
+    final layer = _layer(id);
+    if (layer is! VideoLayer || !layer.activeAt(globalTime)) return null;
+    String? segundo;
+    runAsOneUndo(() {
+      splitLayer(id, globalTime);
+      segundo = ref.read(selectedLayerProvider);
+      final l = segundo == null ? null : _layer(segundo!);
+      if (l == null || segundo == id) {
+        segundo = null;
+        return;
+      }
+      _replace(
+        l.copyLayer(
+          scaleX: l.scaleX.withBase(l.scaleX.base * fator),
+          scaleY: l.scaleY.withBase(l.scaleY.base * fator),
+        ),
+      );
+    });
+    return segundo;
+  }
+
+  /// FUNDO DESFOCADO (o classico do video vertical): uma copia do clipe
+  /// atras, cobrindo a composicao, ampliada e borrada, sem som. Tudo
+  /// camada normal — da para trocar o desfoque ou apagar o fundo.
+  String? fundoDesfocado(String id) {
+    final layer = _layer(id);
+    if (layer is! VideoLayer) return null;
+    final fundo = layer.duplicated().copyLayer(
+      name: '${layer.name} · fundo',
+      ajuste: AjusteDaMidia.cobrir,
+      volume: 0,
+      audio: layer.audio.copyWith(muted: true),
+      scaleX: AnimatedDouble(1.25),
+      scaleY: AnimatedDouble(1.25),
+      position: AnimatedOffset(_center),
+      effects: [
+        EffectInstance(
+          type: EffectType.gaussianBlur,
+          params: {
+            for (final e
+                in effectSpecs[EffectType.gaussianBlur]!.params.entries)
+              e.key: AnimatedDouble(e.key == 'raio' ? 36 : e.value.initial),
+          },
+        ),
+      ],
+      clearTransitionIn: true,
+    );
+    runAsOneUndo(() {
+      final idx = state.layers.indexWhere((x) => x.id == id);
+      if (idx < 0) return;
+      final lista = [...state.layers]..insert(idx + 1, fundo);
+      _mutate(state.copyWith(layers: lista));
+    });
+    return fundo.id;
+  }
+
   // ------------------------------------------------------ impacto AMV
 
   /// ADD IMPACT (§24 da spec de AMV): a batida visual completa — pulso
@@ -4410,6 +4518,20 @@ class EditorController extends Notifier<VideoProject> {
               scaleY: l.scaleY
                   .withKeyframe(t, sy * 0.6, Easing.overshoot)
                   .withKeyframe(t + dur, sy),
+            ),
+          );
+        case PresetDeMovimento.zoomSuave:
+          // Do cabecote ate o fim da camada (o zoom de talking head).
+          final fim = l.duration;
+          if (fim <= t) return;
+          _replace(
+            l.copyLayer(
+              scaleX: l.scaleX
+                  .withKeyframe(t, sx, Easing.easeInOut)
+                  .withKeyframe(fim, sx * 1.08),
+              scaleY: l.scaleY
+                  .withKeyframe(t, sy, Easing.easeInOut)
+                  .withKeyframe(fim, sy * 1.08),
             ),
           );
         case PresetDeMovimento.soco:

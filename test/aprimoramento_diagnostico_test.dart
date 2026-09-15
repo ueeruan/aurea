@@ -47,13 +47,22 @@ void main() {
     expect(pubspec.contains('tflite_flutter'), isFalse);
   });
 
-  test('CORRIGIDO 5: o aprimoramento entra no editor e na exportacao do projeto', () {
+  test('CORRIGIDO 5: o aprimoramento segue vivo; a PORTA saiu a pedido', () {
     final export = File('lib/src/features/export/application/export_engine.dart').readAsStringSync();
     expect(export.contains('planoDeAprimoramento('), isTrue);
     expect(export.contains('_aprimorarQuadros('), isTrue);
     final tela = File('lib/src/features/export/presentation/export_video_screen.dart').readAsStringSync();
     expect(tela.contains('AprimoradorIa.doAparelho()'), isTrue);
+    // 15/09: o dono pediu a aba "Aprimorar com IA" FORA da UI por
+    // enquanto. O motor e a folha ficam (testados em
+    // aprimoramento_sheet_test); o menu da camada nao pode mais abrir a
+    // folha — e este teste agora PRENDE a remocao, para ela nao voltar
+    // por acidente antes da hora.
     final menu = File('lib/src/features/editor/presentation/am/layer_menu.dart').readAsStringSync();
-    expect(menu.contains('showAprimoramentoSheet('), isTrue);
+    expect(menu.contains('showAprimoramentoSheet('), isFalse,
+        reason: 'a porta da camada saiu a pedido (15/09)');
+    final folha = File('lib/src/features/editor/presentation/am/aprimoramento_sheet.dart').readAsStringSync();
+    expect(folha.contains('showAprimoramentoSheet('), isTrue,
+        reason: 'a folha continua pronta para quando a porta voltar');
   });
 }

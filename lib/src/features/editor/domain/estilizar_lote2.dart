@@ -2,6 +2,8 @@ import 'dart:ui';
 
 import 'effect.dart';
 import 'jpeg_damage.dart';
+import 'pixel_sort_sapphire.dart';
+import 'auto_paint.dart';
 
 /// O QUE O PALCO PRECISA SABER DE UM EFEITO SAPPHIRE DO LOTE 2 de
 /// Estilizar: qual shader, quantas passadas, e como os numeros viram
@@ -34,5 +36,13 @@ final receitasSapphire = <EffectType, ReceitaSapphire>{
     asset: 'shaders/jpeg_damage.frag',
     valores: valoresJpegDamage,
     passadas: 2,
+  ),
+  EffectType.autoPaint: ReceitaSapphire(
+    asset: 'shaders/auto_paint.frag',
+    valores: valoresAutoPaint,
+  ),
+  EffectType.pixelSort: ReceitaSapphire(
+    asset: 'shaders/pixel_sort.frag',
+    valores: valoresPixelSort,
   ),
 };

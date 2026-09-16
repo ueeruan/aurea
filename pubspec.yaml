@@ -111,6 +111,8 @@ flutter:
     - shaders/unsharp_mask.frag
     - shaders/estilizar.frag
     - shaders/jpeg_damage.frag
+    - shaders/pixel_sort.frag
+    - shaders/auto_paint.frag
 
   assets:
     - assets/ai/

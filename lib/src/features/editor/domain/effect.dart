@@ -5,6 +5,8 @@ import 'package:uuid/uuid.dart';
 import 'correcao_de_cor.dart';
 import 'estilizar.dart';
 import 'jpeg_damage.dart';
+import 'pixel_sort_sapphire.dart';
+import 'auto_paint.dart';
 import 'keyframe.dart';
 
 /// Efeitos aplicaveis a uma camada (blocos combinaveis, ordem importa).
@@ -434,6 +436,8 @@ const effectSpecs = <EffectType, EffectSpec>{
   ...efeitosDeCorrecaoDeCor,
   ...efeitosDeEstilizar,
   ...efeitosJpegDamage,
+  ...efeitosPixelSort,
+  ...efeitosAutoPaint,
 };
 
 /// OS EFEITOS DE EDIT, na ordem em que se procura: batida, glitch,

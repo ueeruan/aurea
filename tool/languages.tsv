@@ -2673,3 +2673,46 @@ Deslocar sombras	Offset Darks	Desplazar sombras	إزاحة الظلال	어두�
 Inverter ruído na vertical	Flip Noise Vertically	Voltear ruido verticalmente	قلب الضوضاء رأسيًا	노이즈 세로 뒤집기	ノイズを上下反転	垂直翻转噪点	नॉइज़ को ऊर्ध्वाधर पलटें	Balik derau vertikal	Отразить шум по вертикали
 Compressão forte	Heavy Compression	Compresión fuerte	ضغط قوي	강한 압축	強い圧縮	强压缩	भारी कंप्रेशन	Kompresi berat	Сильное сжатие
 Transmissão ruim	Bad Transmission	Transmisión mala	بث سيئ	나쁜 전송	伝送不良	传输不良	खराब प्रसारण	Transmisi buruk	Плохая передача
+S_AutoPaint	S_AutoPaint	S_AutoPaint	S_AutoPaint	S_AutoPaint	S_AutoPaint	S_AutoPaint	S_AutoPaint	S_AutoPaint	S_AutoPaint
+Van Gogh	Van Gogh	Van Gogh	فان جوخ	반 고흐	ゴッホ	梵高	वैन गॉग	Van Gogh	Ван Гог
+Hairy Paint	Hairy Paint	Pintura peluda	طلاء خشن	거친 붓질	毛筆タッチ	毛刷笔触	रोएँदार पेंट	Cat Berbulu	Ворсистая краска
+Pointalize	Pointalize	Puntillismo	تنقيط	점묘	点描	点彩	बिंदु चित्रण	Pointilis	Пуантилизм
+Comprimento do traço	Stroke length	Longitud del trazo	طول الضربة	획 길이	ストロークの長さ	笔触长度	स्ट्रोक की लंबाई	Panjang goresan	Длина мазка
+Alinhar traços	Stroke align	Alinear trazos	محاذاة الضربات	획 정렬	ストロークを揃える	笔触对齐	स्ट्रोक संरेखण	Selaraskan goresan	Выравнивание мазков
+Suavizar cores	Smooth colors	Suavizar colores	تنعيم الألوان	색상 부드럽게	色を滑らかに	平滑颜色	रंग नरम करें	Haluskan warna	Сгладить цвета
+Re-sortear a cada (quadros)	Jitter frames	Re-sortear cada (cuadros)	إعادة التوزيع كل (إطارات)	다시 무작위화 (프레임마다)	再ランダム化(フレーム毎)	每隔帧重新随机	हर (फ़्रेम) पर फिर से यादृच्छिक	Acak ulang tiap (frame)	Перемешивать каждые (кадров)
+Largura da nitidez	Sharpen width	Ancho de nitidez	عرض الحدة	선명도 너비	シャープの幅	锐化宽度	तीक्ष्णता की चौड़ाई	Lebar ketajaman	Ширина резкости
+Óleo	Oil	Óleo	زيت	유화	油彩	油画	तैल चित्र	Minyak	Масло
+Pinceladas grossas	Thick strokes	Pinceladas gruesas	ضربات سميكة	굵은 붓질	太いストローク	粗笔触	मोटे स्ट्रोक	Goresan tebal	Толстые мазки
+Pontilhismo	Pointillism	Puntillismo	التنقيطية	점묘법	点描画法	点彩画法	बिंदुवाद	Pointilisme	Пуантилизм
+S_PixelSort	S_PixelSort	S_PixelSort	S_PixelSort	S_PixelSort	S_PixelSort	S_PixelSort	S_PixelSort	S_PixelSort	S_PixelSort
+Ângulo inicial (radial)	Start angle (radial)	Ángulo inicial (radial)	زاوية البداية (شعاعي)	시작 각도 (방사형)	開始角度(放射状)	起始角度(径向)	प्रारंभ कोण (रेडियल)	Sudut awal (radial)	Начальный угол (радиальный)
+Graus ordenados (radial)	Degrees sorted (radial)	Grados ordenados (radial)	الدرجات المرتبة (شعاعي)	정렬 각도 (방사형)	ソート角度(放射状)	排序度数(径向)	क्रमबद्ध डिग्री (रेडियल)	Derajat diurutkan (radial)	Градусы сортировки (радиальный)
+Raio interno (radial)	Inner radius (radial)	Radio interno (radial)	نصف القطر الداخلي (شعاعي)	안쪽 반경 (방사형)	内側半径(放射状)	内半径(径向)	आंतरिक त्रिज्या (रेडियल)	Radius dalam (radial)	Внутренний радиус (радиальный)
+Comprimento do raio	Ray length	Longitud del rayo	طول الشعاع	광선 길이	光線の長さ	射线长度	किरण की लंबाई	Panjang sinar	Длина луча
+Variar raio	Vary radius	Variar radio	تغيير نصف القطر	반경 변화	半径を変化	半径变化	त्रिज्या बदलें	Variasi radius	Разброс радиуса
+Ângulo inicial (circular)	Start angle (circular)	Ángulo inicial (circular)	زاوية البداية (دائري)	시작 각도 (원형)	開始角度(円形)	起始角度(圆形)	प्रारंभ कोण (वृत्ताकार)	Sudut awal (melingkar)	Начальный угол (круговой)
+Graus ordenados (circular)	Degrees sorted (circular)	Grados ordenados (circular)	الدرجات المرتبة (دائري)	정렬 각도 (원형)	ソート角度(円形)	排序度数(圆形)	क्रमबद्ध डिग्री (वृत्ताकार)	Derajat diurutkan (melingkar)	Градусы сортировки (круговой)
+Centro do círculo X	Circle center X	Centro del círculo X	مركز الدائرة X	원 중심 X	円の中心 X	圆心 X	वृत्त केंद्र X	Pusat lingkaran X	Центр круга X
+Centro do círculo Y	Circle center Y	Centro del círculo Y	مركز الدائرة Y	원 중심 Y	円の中心 Y	圆心 Y	वृत्त केंद्र Y	Pusat lingkaran Y	Центр круга Y
+Variar início	Vary start	Variar inicio	تغيير البداية	시작 변화	開始を変化	起点变化	प्रारंभ बदलें	Variasi awal	Разброс начала
+Raio interno (circular)	Inner radius (circular)	Radio interno (circular)	نصف القطر الداخلي (دائري)	안쪽 반경 (원형)	内側半径(円形)	内半径(圆形)	आंतरिक त्रिज्या (वृत्ताकार)	Radius dalam (melingkar)	Внутренний радиус (круговой)
+Ordenar	Sort	Ordenar	الفرز	정렬	ソート	排序	क्रमबद्ध करें	Urutkan	Сортировать
+Abaixo do limiar	Below threshold	Debajo del umbral	تحت العتبة	임계값 미만	しきい値より下	低于阈值	सीमा से नीचे	Di bawah ambang	Ниже порога
+Acima do limiar	Above threshold	Encima del umbral	فوق العتبة	임계값 초과	しきい値より上	高于阈值	सीमा से ऊपर	Di atas ambang	Выше порога
+Inverter ordem	Reverse sort direction	Invertir orden	عكس الترتيب	정렬 방향 반전	ソート方向を反転	反转排序方向	क्रम उलटें	Balik urutan	Обратный порядок
+Tipo de ordenação	Sort type	Tipo de ordenación	نوع الفرز	정렬 유형	ソートの種類	排序类型	क्रम का प्रकार	Jenis urutan	Тип сортировки
+Monocromático	Monochrome	Monocromático	أحادي اللون	단색	モノクロ	单色	एकवर्णी	Monokrom	Монохромный
+Reiniciar ao acaso	Randomly restart sort	Reiniciar al azar	إعادة البدء عشوائيًا	무작위 재시작	ランダムに再開	随机重新开始	यादृच्छिक पुनः आरंभ	Mulai ulang acak	Случайный перезапуск
+Suavizar máscara	Soften threshold mask	Suavizar máscara	تنعيم القناع	마스크 부드럽게	マスクをぼかす	柔化阈值蒙版	मास्क नरम करें	Haluskan masker	Смягчить маску
+Reduzir resolução	Downsample	Reducir resolución	تقليل الدقة	해상도 낮추기	解像度を下げる	降低分辨率	रिज़ॉल्यूशन घटाएँ	Turunkan resolusi	Понизить разрешение
+Resolução da ordenação	Sort resolution	Resolución de ordenación	دقة الفرز	정렬 해상도	ソート解像度	排序分辨率	क्रम रिज़ॉल्यूशन	Resolusi urutan	Разрешение сортировки
+Mostrar	Show	Mostrar	عرض	표시	表示	显示	दिखाएँ	Tampilkan	Показать
+Resultado	Result	Resultado	النتيجة	결과	結果	结果	परिणाम	Hasil	Результат
+Valores de ordenação	Raw sort values	Valores de ordenación	قيم الفرز	정렬 값	ソート値	排序值	क्रम मान	Nilai urutan	Значения сортировки
+Máscara do limiar	Threshold mask	Máscara del umbral	قناع العتبة	임계값 마스크	しきい値マスク	阈值蒙版	सीमा मास्क	Masker ambang	Маска порога
+Ruído de reinício	Random restart noise	Ruido de reinicio	ضوضاء إعادة البدء	재시작 노이즈	再開ノイズ	重新开始噪点	पुनः आरंभ शोर	Derau mulai ulang	Шум перезапуска
+Máscara combinada	Combined threshold mask	Máscara combinada	القناع المدمج	결합 마스크	結合マスク	组合蒙版	संयुक्त मास्क	Masker gabungan	Комбинированная маска
+Faixas claras	Bright streaks	Franjas claras	خطوط فاتحة	밝은 줄무늬	明るい筋	亮色条纹	चमकीली धारियाँ	Garis terang	Светлые полосы
+Sombras escorridas	Dripping shadows	Sombras escurridas	ظلال سائلة	흘러내리는 그림자	垂れる影	流淌阴影	बहती परछाइयाँ	Bayangan meleleh	Стекающие тени
+Explosão radial	Radial burst	Explosión radial	انفجار شعاعي	방사형 폭발	放射バースト	径向爆发	रेडियल विस्फोट	Ledakan radial	Радиальный взрыв

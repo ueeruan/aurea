@@ -6,36 +6,35 @@ import '../../../core/ui/am_colors.dart';
 import 'package:aurea/src/core/l10n/app_language.dart';
 
 // Change this revision when publishing a new set of release notes.
-const releaseNoticeRevision = '2026-09-16-beta-88';
+const releaseNoticeRevision = '2026-09-16-beta-89';
 const releaseNoticeSeenKey = 'aurea.releaseNotice.seen';
 
 const releaseHighlights = <(IconData, String, String)>[
   (
-    CupertinoIcons.color_filter,
-    'Efeitos de cor com a conta do After',
-    'Unsharp Mask, Levels, Brightness & Contrast, Hue/Saturation e '
-        'Exposure. Efeitos de cor seguidos viram uma passada so na GPU, '
-        'e a Exposure trabalha em luz linear, como no AE.',
+    CupertinoIcons.textformat,
+    'Texto grande nao quebra mais o app',
+    'Texto muito ampliado no palco corrompia as letras do app inteiro: '
+        'icones viravam quadrados e nomes sumiam ate fechar. Agora ele e '
+        'desenhado sem estourar a memoria de letras da GPU.',
   ),
   (
-    CupertinoIcons.paintbrush,
-    'Aba Estilizar: 12 efeitos',
-    'CC Threshold, Threshold RGB, Vignette e Block Load; S_ScanLines, '
-        'HalfTone, EdgeColorize, JpegDamage, PixelSort, AutoPaint, '
-        'TVDamage e VHSDamage. Medidos contra renders do After Effects.',
+    CupertinoIcons.cube,
+    'Cena 3D mais estavel',
+    'Selecionar a camada, mover o cursor ou dar play nao recriam mais o '
+        'motor 3D, e modelo com muitos materiais nao pede gigas de memoria '
+        'de uma vez.',
   ),
   (
-    CupertinoIcons.wand_stars,
-    'Aba Distorcer: 8 efeitos',
-    'CC Lens, Optics Compensation, Turbulent Displace, S_Shake, '
-        'S_DissolveShake, Glitchify, Twitch e Cross Glitch.',
+    CupertinoIcons.arrow_down_doc,
+    'Importar modelo falha sem derrubar',
+    'Arquivo grande demais, textura acima de 8K ou GLB comprimido '
+        'malformado viram uma mensagem dizendo o que fazer, e nao queda.',
   ),
   (
-    CupertinoIcons.slider_horizontal_3,
-    'A ficha do efeito na planta do AM',
-    'Cada efeito e um cartao com nome, ••• e lixeira; cada parametro tem '
-        'nome, regua e caixa de valor que abre o teclado. Ligar, duplicar, '
-        'ordem e resetar ficam no •••.',
+    CupertinoIcons.speedometer,
+    'Bancada A-E',
+    'Em Ajustes > Teste de estresse do motor 3D, o botao Bancada A-E mede '
+        'o app no seu aparelho. Copie o relatorio e envie.',
   ),
 ];
 

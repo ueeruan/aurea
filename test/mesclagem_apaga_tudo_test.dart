@@ -142,7 +142,7 @@ void main() {
     }
   });
 
-  testWidgets('EXCLUIR no nivel de cima apaga a composicao inteira', (
+  testWidgets('EXCLUIR no nivel de cima NAO apaga mais a composicao', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(_L, _L);
@@ -152,17 +152,20 @@ void main() {
     final solta = await _luzMedia(tester, BlendMode.dstOut, agrupar: false);
     final agrupada = await _luzMedia(tester, BlendMode.dstOut, agrupar: true);
 
-    // O RELATO, medido: solta, a camada leva o quadro a zero.
+    // CONSERTADO (16/09, escolha do dono): recortar so corta quem esta
+    // na mesma pilha. O fundo da composicao sobrevive, e o quadro nunca
+    // mais vai a zero.
     expect(
       solta,
-      lessThan(1),
-      reason: 'era o quadro inteiro apagado que o dono via',
+      greaterThan(20),
+      reason: 'a camada que recorta voltou a apagar a composicao inteira',
     );
-    // Dentro de um grupo o recorte fica entre os irmaos.
+    // E estar num grupo deixou de fazer diferenca — era o sintoma que
+    // fazia "agrupar" parecer o conserto.
     expect(
       agrupada,
-      greaterThan(20),
-      reason: 'o grupo isola o recorte, e por isso agrupar "consertava"',
+      closeTo(solta, 6),
+      reason: 'recortar nao pode depender de estar num grupo',
     );
   });
 }

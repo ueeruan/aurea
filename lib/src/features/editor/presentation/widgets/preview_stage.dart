@@ -91,6 +91,23 @@ bool _containsRasterMedia(List<Layer> layers) => layers.any(
       (layer is GroupLayer && _containsRasterMedia(layer.children)),
 );
 
+/// UMA CAMADA QUE RECORTA (Excluir / Interseccao) SO CORTA QUEM ESTA
+/// NA MESMA PILHA — nunca o fundo da composicao.
+///
+/// Solta no nivel de cima, uma camada em dstOut apagava a composicao
+/// INTEIRA: o quadro ia a zero, o projeto parecia ter sumido, e nem o
+/// desfazer trazia de volta (voltava a camada, que voltava a apagar
+/// tudo). Dentro de um grupo isso ja nao acontecia — o ramo de
+/// GroupLayer isola o recorte entre os irmaos ha tempos. Agora a raiz
+/// faz o mesmo, e recortar deixa de ser um jeito de perder o trabalho.
+///
+/// O dono escolheu este lado (16/09) sabendo que o After Effects deixa
+/// stencil e silhouette cortarem tudo abaixo: la isso se ve e se
+/// desfaz; aqui virava tela preta sem explicacao.
+bool _temRecorte(List<Layer> layers) => layers.any(
+  (l) => l.blendMode == BlendMode.dstIn || l.blendMode == BlendMode.dstOut,
+);
+
 /// Palco: composicao renderizada em coordenadas logicas, escalada para
 /// caber. Gestos editam a camada selecionada.
 /// A alca que o dedo pegou: canto de baixo e a direita redimensiona,
@@ -1748,14 +1765,9 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
         builder: (context, t, _) {
           _tempoVivo = t;
           if (exporting) {
-            return Stack(
-              clipBehavior: Clip.none,
-              children: _buildLayers(
-                project,
-                project.layers,
-                t,
-                resolveLinks: true,
-              ),
+            return _pilhaDaRaiz(
+              project,
+              _buildLayers(project, project.layers, t, resolveLinks: true),
             );
           }
           // MARCHA (PR-G1): o classificador e ESTRUTURAL — roda quando a
@@ -1782,9 +1794,29 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
             resolveLinks: true,
           );
           PreviewStats.tick(kids.length);
-          return Stack(clipBehavior: Clip.none, children: kids);
+          return _pilhaDaRaiz(project, kids);
         },
       ),
+    );
+  }
+
+  /// A PILHA DA RAIZ. Com uma camada que recorta, ela vai isolada, para
+  /// o recorte morrer na propria pilha em vez de comer o fundo.
+  Widget _pilhaDaRaiz(VideoProject project, List<Widget> kids) {
+    final pilha = Stack(clipBehavior: Clip.none, children: kids);
+    if (!_temRecorte(project.layers)) return pilha;
+    // O FUNDO ENTRA AQUI, POR BAIXO DA PILHA ISOLADA.
+    //
+    // O palco pinta o fundo do projeto por fora do CompositionView, e a
+    // EXPORTACAO nao usa o palco: um projeto com recorte saia com o
+    // quadro inteiro vazio. Com o fundo dentro, o recorte come as
+    // camadas e para nele — nunca o quadro.
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Positioned.fill(child: ColoredBox(color: project.backgroundColor)),
+        BlendMask(blendMode: BlendMode.srcOver, isolate: true, child: pilha),
+      ],
     );
   }
 

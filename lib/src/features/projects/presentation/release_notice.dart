@@ -6,46 +6,44 @@ import '../../../core/ui/am_colors.dart';
 import 'package:aurea/src/core/l10n/app_language.dart';
 
 // Change this revision when publishing a new set of release notes.
-const releaseNoticeRevision = '2026-09-16-beta-86';
+const releaseNoticeRevision = '2026-09-16-beta-87';
 const releaseNoticeSeenKey = 'aurea.releaseNotice.seen';
 
 const releaseHighlights = <(IconData, String, String)>[
   (
-    CupertinoIcons.pencil_outline,
-    'Desenho a mao livre e animadores',
-    'Caneta, pincel macio, balde e borracha desenham direto no palco, e o '
-        'traco vira camada de verdade. E qualquer propriedade numerica '
-        'ganha ANIMADOR automatico (onda, vaivem, rampa, sorteio, pulso) '
-        'pelo menu do nome do parametro: movimento sem cravar keyframe.',
+    CupertinoIcons.rectangle_grid_2x2,
+    'O editor desafogou',
+    'A barra que flutuava por cima da linha do tempo foi embora: tudo '
+        'o que ela fazia ja tinha porta a um toque, e ela so tapava os '
+        'clipes. Duplicar subiu para a barra da camada. E as fichas do '
+        'painel agora sao TRES por fileira — as sete cabem sem rolar.',
   ),
   (
-    CupertinoIcons.wand_stars,
-    'Vinte efeitos novos e galeria que sugere',
-    'Dissolver, pena, aparecer e sumir, cortina e cortina radial, quatro '
-        'repeticoes (linha, grade, circulo, espalhar), seis geradores '
-        '(nuvens, xadrez, listras, pontos, estrelas, raios), meio-tom, '
-        'contorno, brilho por dentro e bordas asperas. A galeria abre com '
-        'Sugeridos e Recentes, e segurar um efeito mostra a ficha com '
-        'ajustes prontos.',
+    CupertinoIcons.waveform,
+    'O tremor finalmente treme',
+    'Ele nunca esteve com a conta errada: os EIXOS nasciam em 0,2 e '
+        '0,1, entao "Amplitude 1" entregava 12 px — invisivel. O eixo '
+        'nasce cheio agora e a Amplitude vale o que diz: o padrao saiu '
+        'de 6 px para 32 px de balanco em 1080p, medido.',
   ),
   (
-    CupertinoIcons.square_grid_2x2,
-    'Projetos e midia em lote',
-    'A lista de projetos busca, ordena e trabalha em lote (duplicar ou '
-        'excluir varios). Criar aceita 4:3, QHD 1440p e MEDIDA LIVRE. Na '
-        'galeria da certo marcar varias midias e mandar juntas ou em '
-        'sequencia, com a duracao de cada imagem na barra.',
+    CupertinoIcons.sparkles,
+    'As particulas enxergam a lente',
+    'A nuvem projetava com uma lente propria e nao sabia que existia '
+        'camera: numa grande-angular a cena abria e as particulas '
+        'ficavam paradas, como adesivo num vidro. Agora a profundidade '
+        'da nuvem abre e fecha junto com o resto da cena.',
   ),
   (
-    CupertinoIcons.arrow_up_doc,
-    'O pacote .aurea e uma exportacao que avisa',
-    'O projeto agora viaja COM as midias num arquivo .aurea, e a Aurea '
-        'tambem abre .amproj e cenas em zip. A exportacao lembra seus '
-        'ajustes e mostra quanto tempo falta. Mais: sons recentes com anel '
-        'de escuta, fontes com busca e estrela, duracao padrao de camada '
-        'nova e a tela de boas-vindas na primeira abertura.',
+    CupertinoIcons.globe,
+    'Consertos que voces apontaram',
+    'A aba de som quebrava assim que havia um som recente; o numero da '
+        'ordem no lote da galeria ficava ATRAS da miniatura e nunca '
+        'aparecia; e o painel de adicionar falava duas linguas — quatro '
+        'rotulos nunca tinham sido traduzidos.',
   ),
 ];
+
 
 
 Future<void> showReleaseNotice(BuildContext context) => showDialog<void>(

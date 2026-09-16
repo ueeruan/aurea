@@ -53,6 +53,8 @@ import 'gradient4_painter.dart';
 import 'custom_blend.dart';
 import 'linear_light.dart';
 import 'pixel_effect_engine.dart';
+import 'passe_de_cor.dart';
+import '../../domain/correcao_de_cor.dart';
 import '../../domain/pixel_effect.dart';
 import '../../domain/bloom.dart';
 import '../../domain/coloring.dart';
@@ -3416,8 +3418,58 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
     Duration? duracaoDaCamada,
   }) {
     var out = child;
-    for (final effect in effects) {
+    for (var indice = 0; indice < effects.length; indice++) {
+      final effect = effects[indice];
       if (!effect.enabled) continue;
+      // CORRECAO DE COR (16/09): efeitos de cor em sequencia FUNDEM numa
+      // passada so de GPU — Levels + Hue/Saturation + Exposure e uma
+      // leitura da camada, nao tres texturas. Desligado no meio nao
+      // quebra a sequencia.
+      if (efeitosDeCorPorPixel.contains(effect.type)) {
+        final sequencia = <EffectInstance>[];
+        var fim = indice;
+        while (fim < effects.length &&
+            (!effects[fim].enabled ||
+                efeitosDeCorPorPixel.contains(effects[fim].type))) {
+          if (effects[fim].enabled) sequencia.add(effects[fim]);
+          fim++;
+        }
+        indice = fim - 1;
+        final operacoes = operacoesDeCor(sequencia, local);
+        // Mais de quatro: uma passada por bloco de quatro. A CHAVE e do
+        // primeiro efeito do bloco, e o bloco existe mesmo neutro — a
+        // arvore nao muda quando um numero passa pelo zero.
+        for (var b = 0; b * operacoesPorPassada < sequencia.length; b++) {
+          final bloco = operacoes
+              .skip(b * operacoesPorPassada)
+              .take(operacoesPorPassada)
+              .toList();
+          out = PassadaDeCor(
+            key: ValueKey(
+              'correcao-de-cor-${sequencia[b * operacoesPorPassada].id}',
+            ),
+            operacoes: bloco,
+            child: out,
+          );
+        }
+        continue;
+      }
+      if (effect.type == EffectType.unsharpMask) {
+        out = PassadaDeNitidez(
+          key: ValueKey('unsharp-mask-${effect.id}'),
+          parametros: ParametrosDeNitidez.de(effect, local),
+          escalaRef: math.min(fxWidth, fxHeight) / 1080.0,
+          // Raio pequeno (o uso comum) sai identico nas tres; no raio
+          // grande, tocando gasta menos e exportando gasta mais.
+          amostras: exporting
+              ? AmostrasDeNitidez.exportacao
+              : (_rascunho
+                    ? AmostrasDeNitidez.rascunho
+                    : AmostrasDeNitidez.previa),
+          child: out,
+        );
+        continue;
+      }
       if (PixelEffectEngine.ready && pixelKernels.containsKey(effect.type)) {
         out = PixelEffectPass(
           key: ValueKey('pixel-effect-${effect.id}'),
@@ -3469,6 +3521,13 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
         case EffectType.mathOps:
         // S_Sharpen compara cada pixel com o desfoque em anel: so no shader.
         case EffectType.sSharpen:
+        // A CORRECAO DE COR nova sai antes do switch (passe_de_cor.dart):
+        // nenhum destes chega aqui.
+        case EffectType.levels:
+        case EffectType.brightnessContrast:
+        case EffectType.hueSaturation:
+        case EffectType.exposure:
+        case EffectType.unsharpMask:
           break;
 
         case EffectType.gaussianBlur:
@@ -4332,17 +4391,6 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
         // filtro de foto saem exatos; o que depende da faixa tonal (cor
         // seletiva, sombras x altas, Soft Light) fica aproximado ou
         // neutro, e nunca some com a camada.
-        case EffectType.brightnessContrast:
-          out = ColorFiltered(
-            colorFilter: ColorFilter.matrix(
-              brightnessContrastMatrix(
-                effect.paramAt('brightness', local),
-                effect.paramAt('contrast', local),
-              ),
-            ),
-            child: out,
-          );
-
         case EffectType.channelMixer:
           out = ColorFiltered(
             colorFilter: ColorFilter.matrix(
@@ -4477,23 +4525,6 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
               matrizDoLook(
                 effect.paramAt('look', local).round(),
                 effect.paramAt('forca', local),
-              ),
-            ),
-            child: out,
-          );
-
-        // HUE/SATURATION SEM O MOTOR DE PIXEL: a matriz aproximada. A conta
-        // exata (saturacao pelo croma, colorir pelo HSL) roda no modo 45.
-        case EffectType.hueSaturation:
-          out = ColorFiltered(
-            colorFilter: ColorFilter.matrix(
-              hueSaturationMatrix(
-                matiz: effect.paramAt('master_hue', local),
-                saturacao: effect.paramAt('master_saturation', local),
-                luminosidade: effect.paramAt('master_lightness', local),
-                colorir: effect.paramAt('colorize', local) >= .5,
-                matizColorir: effect.paramAt('colorize_hue', local),
-                saturacaoColorir: effect.paramAt('colorize_saturation', local),
               ),
             ),
             child: out,
@@ -5384,37 +5415,6 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
 
         // ------------------- catalogo, lote 1 -------------------
 
-        case EffectType.levels:
-          // Entrada -> gama -> saida, por canal, em matriz.
-          final inMin = effect.paramAt('entradaMin', local);
-          final inMax = effect.paramAt('entradaMax', local);
-          final gamma = effect.paramAt('gama', local);
-          final outMin = effect.paramAt('saidaMin', local);
-          final outMax = effect.paramAt('saidaMax', local);
-          final span = (inMax - inMin).abs() < 1e-4 ? 1e-4 : inMax - inMin;
-          final scale = (outMax - outMin) / span;
-          final shift = outMin - inMin * scale;
-          // CANAL (avancado): a mesma curva num canal so.
-          final canal = effect.paramAt('canal', local).round().clamp(0, 3);
-          if ((scale - 1).abs() > 1e-4 || shift.abs() > 1e-4) {
-            out = ColorFiltered(
-              colorFilter: ColorFilter.matrix(
-                _scaleShiftMatrix(scale, shift, canal: canal),
-              ),
-              child: out,
-            );
-          }
-          // Gama por aproximacao: uma segunda passada de ganho.
-          if ((gamma - 1).abs() > 0.01) {
-            final g = 1 / gamma;
-            out = ColorFiltered(
-              colorFilter: ColorFilter.matrix(
-                _scaleShiftMatrix(g, (1 - g) * 0.18, canal: canal),
-              ),
-              child: out,
-            );
-          }
-
         case EffectType.corrections:
           // CORRECOES (o "basico" do Lumetri): exposicao e contraste numa
           // matriz, sombras/altas como pe e topo da curva, temperatura e
@@ -6007,19 +6007,6 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
                 angleDeg: effect.paramAt('angulo', local),
                 center: effect.paramAt('centro', local).clamp(0.0, 1.0),
                 softness: effect.paramAt('suavidade', local).clamp(0.0, 1.0),
-              ),
-              child: out,
-            );
-          }
-
-        case EffectType.unsharpMask:
-          final amt = effect.paramAt('quantidade', local);
-          if (amt > 0.01) {
-            out = FxSnapshot(
-              painter: UnsharpMaskPainter(
-                amount: amt,
-                radius: effect.paramAt('raio', local).clamp(0.5, 40.0),
-                threshold: effect.paramAt('limiar', local).clamp(0.0, 0.95),
               ),
               child: out,
             );

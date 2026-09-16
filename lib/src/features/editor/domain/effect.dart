@@ -2,6 +2,7 @@ import 'dart:ui';
 
 import 'package:uuid/uuid.dart';
 
+import 'correcao_de_cor.dart';
 import 'keyframe.dart';
 
 /// Efeitos aplicaveis a uma camada (blocos combinaveis, ordem importa).
@@ -123,6 +124,8 @@ enum EffectType {
   contorno,
   brilhoPorDentro,
   bordasAsperas,
+  // --- recomeco do zero (16/09): correcao de cor com a conta do AE ---
+  exposure,
 }
 
 /// O tipo a partir do IDENTIFICADOR estavel.
@@ -265,13 +268,28 @@ class EffectParam {
     this.kind = ParamKind.number,
     this.options = const [],
     this.relative = false,
+    this.unit = '',
+    this.decimals,
+    this.dragStep,
   });
+
+  /// QUANTO O VALOR ANDA POR PIXEL DE DEDO na fita. Nulo = a faixa
+  /// dividida em 500 px. Raio e gama precisam de passo proprio: 0,1 a 100
+  /// dividido em 500 pula 0,2 px por pixel e ninguem acerta raio 1,3.
+  final double? dragStep;
 
   final String label;
   final double initial;
   final double min;
   final double max;
   final ParamKind kind;
+
+  /// O SUFIXO da caixa de valor ('%', '°'), como o After Effects mostra.
+  final String unit;
+
+  /// Casas decimais da caixa de valor. Nulo = decide pelo tamanho do
+  /// numero (o formato antigo do painel).
+  final int? decimals;
 
   /// Rotulos das opcoes quando [kind] e choice.
   final List<String> options;
@@ -379,23 +397,21 @@ class EffectSpec {
   bool get temProfundidades => presets.isNotEmpty && montar.isNotEmpty;
 }
 
-/// O CATALOGO DE EFEITOS: VAZIO (16/09).
+/// O CATALOGO DE EFEITOS, RECOMECADO DO ZERO (16/09).
 ///
-/// O dono mandou apagar todos os efeitos do app, da aba e do codigo,
-/// para recomecar do zero. Eram 103, com 103 tiras de previa, presets,
-/// receitas e um shader de 62 modos.
+/// O dono mandou apagar os 103 efeitos antigos (tag
+/// `antes-de-apagar-efeitos`) para reconstruir com a conta do After
+/// Effects. O primeiro lote e a correcao de cor, em
+/// `correcao_de_cor.dart`, com shaders proprios.
 ///
-/// COM O MAPA VAZIO, a galeria nao tem o que mostrar e nada novo pode
-/// ser aplicado. Projeto antigo que tenha efeito continua ABRINDO: o
-/// carregador ja pulava efeito desconhecido (`effectTypeFromId`
-/// devolve nulo e o efeito e ignorado), entao o que se perde e o
-/// efeito, nunca o projeto.
+/// Projeto antigo com um efeito que nao voltou continua ABRINDO: o
+/// carregador pula efeito desconhecido (`effectTypeFromId` devolve nulo),
+/// entao o que se perde e o efeito, nunca o projeto.
 ///
-/// O enum `EffectType` e a maquinaria (EffectInstance, o passe de
-/// pixel, a galeria) continuam de pe de proposito: apagar tudo de uma
-/// vez deixaria o app sem compilar no meio do caminho. O corte segue
-/// por partes, cada uma inteira.
-const effectSpecs = <EffectType, EffectSpec>{};
+/// O enum `EffectType` e a maquinaria antiga (o passe de pixel de 62
+/// modos) continuam de pe de proposito: o corte segue por partes, cada
+/// uma inteira.
+const effectSpecs = <EffectType, EffectSpec>{...efeitosDeCorrecaoDeCor};
 
 /// OS EFEITOS DE EDIT, na ordem em que se procura: batida, glitch,
 /// tempo e coloring. E o atalho "Edits" da galeria — quem vem do Alight

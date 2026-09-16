@@ -13,6 +13,7 @@ import 'src/features/editor/application/texture_cache.dart';
 import 'src/features/editor/presentation/widgets/custom_blend.dart';
 import 'src/features/editor/presentation/widgets/linear_light.dart';
 import 'src/features/editor/presentation/widgets/pixel_effect_engine.dart';
+import 'src/features/editor/presentation/widgets/passe_de_cor.dart';
 import 'src/features/editor/application/qualidade3d_controller.dart';
 import 'src/features/editor/application/registro_de_travadas.dart';
 import 'src/features/settings/application/grafico_preferencia.dart';
@@ -63,7 +64,12 @@ Future<void> main() async {
   // A curva do sRGB: sem ela, glow e desfoque somam luz no espaco
   // errado e saem acinzentados.
   // Resolve before opening a project: preview and export start on the same backend.
-  await Future.wait([LinearLight.warmUp(), PixelEffectEngine.warmUp()]);
+  await Future.wait([
+    LinearLight.warmUp(),
+    PixelEffectEngine.warmUp(),
+    // Correcao de cor e Unsharp Mask: shaders proprios, pequenos.
+    MotorDeCorrecao.warmUp(),
+  ]);
   // As fontes importadas precisam ser registradas de novo a cada
   // abertura: o registro do Flutter vive so enquanto o processo vive.
   await FontService.instance.loadAll();

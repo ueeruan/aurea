@@ -1,9 +1,10 @@
-// O CATALOGO DE EFEITOS ESTA VAZIO (16/09, ordem do dono: apagar todos
-// os efeitos do app, da aba e do codigo, para recomecar do zero).
+// O CATALOGO FOI ESVAZIADO (16/09, ordem do dono: apagar todos os efeitos
+// para recomecar do zero) e RECOMECOU pela correcao de cor.
 //
 // O que este teste protege e o unico ponto que nao pode ceder no meio
-// do corte: um projeto salvo com efeitos tem de continuar ABRINDO. O
-// efeito se perde; o projeto, nunca.
+// do corte: um projeto salvo com efeitos que nao voltaram tem de
+// continuar ABRINDO. O efeito se perde; o projeto, nunca. E o que voltou
+// tem de ir e voltar do arquivo inteiro.
 import 'package:aurea/src/features/editor/domain/effect.dart';
 import 'package:aurea/src/features/editor/domain/keyframe.dart';
 import 'package:aurea/src/features/editor/domain/layer.dart';
@@ -13,8 +14,47 @@ import 'package:aurea/src/features/editor/domain/video_project.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('a aba nao tem o que oferecer', () {
-    expect(effectSpecs, isEmpty);
+  test('o catalogo e so a correcao de cor', () {
+    expect(effectSpecs.keys.toSet(), {
+      EffectType.unsharpMask,
+      EffectType.levels,
+      EffectType.brightnessContrast,
+      EffectType.hueSaturation,
+      EffectType.exposure,
+    });
+  });
+
+  test('efeito que voltou vai e volta do arquivo com os numeros', () {
+    final p = VideoProject(
+      name: 'cor',
+      createdAt: DateTime(2026, 9, 16),
+      layers: [
+        ShapeLayer(
+          id: 'f',
+          name: 'Forma',
+          startTime: Duration.zero,
+          duration: const Duration(seconds: 3),
+          position: AnimatedOffset(const Offset(10, 20)),
+          contents: [ShapePath(primitive: ShapePrimitive.rectangle)],
+          effects: [
+            EffectInstance(
+              type: EffectType.unsharpMask,
+            ).withParamEdited('amount', Duration.zero, 180),
+            EffectInstance(
+              type: EffectType.exposure,
+            ).withParamEdited('exposure', Duration.zero, -1.5),
+          ],
+        ),
+      ],
+    );
+    final v = projectFromJson(projectToJson(p));
+    final efeitos = v.layers.single.effects;
+    expect(efeitos.map((e) => e.type), [
+      EffectType.unsharpMask,
+      EffectType.exposure,
+    ]);
+    expect(efeitos.first.paramAt('amount', Duration.zero), 180);
+    expect(efeitos.last.paramAt('exposure', Duration.zero), -1.5);
   });
 
   test('id de efeito que nao existe mais devolve nulo, sem estourar', () {

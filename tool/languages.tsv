@@ -2570,3 +2570,32 @@ Objeto / Elemento	Object / Element	Objeto / Elemento	كائن / عنصر	오브�
 Câmera 3D	3D camera	Cámara 3D	كاميرا ثلاثية الأبعاد	3D 카메라	3Dカメラ	3D 摄像机	3D कैमरा	Kamera 3D	3D-камера
 Desenho à mão livre	Freehand drawing	Dibujo a mano alzada	رسم حر	자유 그리기	フリーハンド描画	手绘	फ्रीहैंड ड्रॉइंग	Gambar bebas	Рисование от руки
 Desenho vetorial	Vector drawing	Dibujo vectorial	رسم متجه	벡터 그리기	ベクター描画	矢量绘图	वेक्टर ड्रॉइंग	Gambar vektor	Векторный рисунок
+Só luminância	Luminance Only	Solo luminancia	الإضاءة فقط	휘도만	輝度のみ	仅亮度	केवल ल्यूमिनेंस	Hanya luminans	Только яркость
+Nitidez leve	Light Sharpen	Nitidez suave	حدة خفيفة	약한 선명도	弱いシャープ	轻度锐化	हल्की शार्पनेस	Ketajaman ringan	Лёгкая резкость
+Nitidez forte	Strong Sharpen	Nitidez fuerte	حدة قوية	강한 선명도	強いシャープ	强力锐化	तेज़ शार्पनेस	Ketajaman kuat	Сильная резкость
+Clareza	Clarity	Claridad	الوضوح	명료도	明瞭度	清晰度	स्पष्टता	Kejernihan	Чёткость
+Entrada preto	Input Black	Negro de entrada	أسود الإدخال	입력 검정	入力の黒	输入黑色	इनपुट ब्लैक	Hitam masukan	Чёрный на входе
+Entrada branco	Input White	Blanco de entrada	أبيض الإدخال	입력 흰색	入力の白	输入白色	इनपुट व्हाइट	Putih masukan	Белый на входе
+Saída preto	Output Black	Negro de salida	أسود الإخراج	출력 검정	出力の黒	输出黑色	आउटपुट ब्लैक	Hitam keluaran	Чёрный на выходе
+Saída branco	Output White	Blanco de salida	أبيض الإخراج	출력 흰색	出力の白	输出白色	आउटपुट व्हाइट	Putih keluaran	Белый на выходе
+Mais contraste	More Contrast	Más contraste	تباين أكثر	대비 높이기	コントラスト強め	增强对比	अधिक कंट्रास्ट	Kontras lebih	Больше контраста
+Clarear meios-tons	Brighten Midtones	Aclarar medios tonos	تفتيح الدرجات المتوسطة	중간 톤 밝게	中間調を明るく	提亮中间调	मिडटोन उजले करें	Cerahkan nada tengah	Осветлить полутона
+Preto lavado	Faded Blacks	Negros lavados	أسود باهت	바랜 검정	浮いた黒	褪色黑	फीका काला	Hitam pudar	Выцветший чёрный
+Modo legado	Use Legacy	Usar heredado	الوضع القديم	레거시 사용	従来方式	使用旧版	लेगेसी मोड	Mode lama	Устаревший режим
+Contraste suave	Soft Contrast	Contraste suave	تباين ناعم	부드러운 대비	柔らかいコントラスト	柔和对比	हल्का कंट्रास्ट	Kontras lembut	Мягкий контраст
+Desbotado	Faded	Desvaído	باهت	바랜	色あせ	褪色	फीका	Pudar	Выцветший
+Luminosidade ao colorir	Colorize Lightness	Luminosidad al colorear	الإضاءة عند التلوين	색상화 밝기	色彩の統一の明度	着色明度	रंग भरने की लाइटनेस	Kecerahan pewarnaan	Яркость тонирования
+Exposição	Exposure	Exposición	التعريض	노출	露出	曝光	एक्सपोज़र	Eksposur	Экспозиция
+Correção de gama	Gamma Correction	Corrección de gamma	تصحيح غاما	감마 보정	ガンマ補正	伽马校正	गामा करेक्शन	Koreksi gamma	Гамма-коррекция
+Ignorar luz linear	Bypass Linear Light	Omitir luz lineal	تجاوز الضوء الخطي	선형 광원 무시	リニアライトを無視	跳过线性光	लीनियर लाइट छोड़ें	Lewati cahaya linear	Без линейного света
+Mais um stop	Plus One Stop	Un paso más	درجة واحدة أكثر	1스톱 올리기	1段明るく	增加一档	एक स्टॉप ज़्यादा	Tambah satu stop	Плюс одна ступень
+Menos um stop	Minus One Stop	Un paso menos	درجة واحدة أقل	1스톱 내리기	1段暗く	降低一档	एक स्टॉप कम	Kurangi satu stop	Минус одна ступень
+Abrir sombras	Lift Shadows	Abrir sombras	تفتيح الظلال	그림자 밝게	シャドウを持ち上げる	提亮阴影	छायाएँ उजली करें	Angkat bayangan	Высветлить тени
+Desativar efeito	Disable Effect	Desactivar efecto	تعطيل التأثير	효과 끄기	エフェクトを無効化	停用效果	इफ़ेक्ट बंद करें	Nonaktifkan efek	Отключить эффект
+Ativar efeito	Enable Effect	Activar efecto	تفعيل التأثير	효과 켜기	エフェクトを有効化	启用效果	इफ़ेक्ट चालू करें	Aktifkan efek	Включить эффект
+Mover para cima	Move Up	Subir	نقل لأعلى	위로 이동	上へ移動	上移	ऊपर ले जाएँ	Pindah ke atas	Переместить вверх
+Mover para baixo	Move Down	Bajar	نقل لأسفل	아래로 이동	下へ移動	下移	नीचे ले जाएँ	Pindah ke bawah	Переместить вниз
+Salvar como preset	Save as Preset	Guardar como preajuste	حفظ كإعداد مسبق	프리셋으로 저장	プリセットとして保存	存为预设	प्रीसेट के रूप में सहेजें	Simpan sebagai preset	Сохранить как пресет
+Meus presets	My Presets	Mis preajustes	إعداداتي المسبقة	내 프리셋	マイプリセット	我的预设	मेरे प्रीसेट	Preset saya	Мои пресеты
+Como usar este efeito	How to Use This Effect	Cómo usar este efecto	كيفية استخدام هذا التأثير	이 효과 사용법	このエフェクトの使い方	如何使用此效果	इस इफ़ेक्ट का उपयोग कैसे करें	Cara memakai efek ini	Как использовать этот эффект
+Movimento assado em keyframes	Motion baked into keyframes	Movimiento convertido en fotogramas clave	تم تحويل الحركة إلى إطارات مفتاحية	움직임을 키프레임으로 변환했습니다	動きをキーフレームに変換しました	运动已烘焙为关键帧	मोशन कीफ़्रेम में बदल दिया गया	Gerakan dijadikan keyframe	Движение запечено в ключевые кадры

@@ -1,9 +1,9 @@
-// A ABA DE EFEITOS FICA (ordem do dono, 16/09: "deixa so a aba add
-// efeito por enquanto").
+// A ABA DE EFEITOS FICOU (ordem do dono, 16/09: "deixa so a aba add
+// efeito por enquanto") e voltou a ter o que mostrar: o lote de correcao
+// de cor, recomecado do zero.
 //
-// Com o catalogo vazio ela nao tem o que listar — e e exatamente por
-// isso que precisa de teste. Uma galeria que estoura ao abrir seria
-// pior do que uma galeria sem nada dentro.
+// O teste nasceu para provar que a galeria vazia nao estourava; agora
+// prova que ela abre com os cinco efeitos e que um toque aplica.
 import 'package:aurea/src/features/editor/application/editor_controller.dart';
 import 'package:aurea/src/features/editor/application/playback_controller.dart';
 import 'package:aurea/src/features/editor/domain/effect.dart';
@@ -20,7 +20,9 @@ void main() {
     EffectPresetStore.semArquivo = true;
   });
 
-  testWidgets('a galeria abre vazia, sem estourar', (tester) async {
+  testWidgets('a galeria abre com a correcao de cor e um toque aplica', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -63,9 +65,21 @@ void main() {
     expect(
       tester.takeException(),
       isNull,
-      reason: 'a aba de efeitos estourou com o catalogo vazio',
+      reason: 'a aba de efeitos estourou ao abrir',
     );
-    expect(effectSpecs, isEmpty);
+    expect(effectSpecs, hasLength(5));
+    for (final spec in effectSpecs.values) {
+      expect(
+        find.byKey(ValueKey('efeito-${spec.id}')),
+        findsOneWidget,
+        reason: '${spec.name} tem de aparecer na galeria',
+      );
+    }
+    await tester.tap(find.byKey(const ValueKey('efeito-unsharp_mask')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    final efeitos = c.read(editorControllerProvider).layerById(id)!.effects;
+    expect(efeitos.map((e) => e.type), [EffectType.unsharpMask]);
     // Deixa a folha fechar antes do fim do teste.
     await tester.pump(const Duration(seconds: 1));
   });

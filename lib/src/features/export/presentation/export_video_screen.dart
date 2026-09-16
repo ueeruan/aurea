@@ -23,6 +23,7 @@ import '../../editor/domain/grupo_ops.dart';
 import '../../../core/ui/am_colors.dart';
 import '../../editor/presentation/widgets/dither_layer.dart';
 import '../../editor/presentation/widgets/pixel_effect_engine.dart';
+import '../../editor/presentation/widgets/passe_de_cor.dart';
 import '../../editor/presentation/widgets/preview_stage.dart';
 import '../../editor/application/duck_service.dart';
 import '../../editor/application/media_preview_service.dart';
@@ -117,7 +118,11 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
     // esperado la na frente, quando a pessoa manda exportar; um shader
     // que nao carrega vira erro DAQUELA fase, com a mensagem certa, e
     // nao uma excecao solta enquanto ela escolhe o tamanho.
-    _aquecendo = Future.wait([DitherLayer.warmUp(), PixelEffectEngine.warmUp()])
+    _aquecendo = Future.wait([
+      DitherLayer.warmUp(),
+      PixelEffectEngine.warmUp(),
+      MotorDeCorrecao.warmUp(),
+    ])
         .catchError((Object _) => const <void>[]);
   }
 

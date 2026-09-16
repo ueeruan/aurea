@@ -124,14 +124,6 @@ const pixelKernels = <EffectType, PixelKernel>{
     'mistura',
     'recortar',
   ]),
-  EffectType.levels: PixelKernel(1, [
-    'entradaMin',
-    'entradaMax',
-    'gama',
-    'saidaMin',
-    'saidaMax',
-    'canal',
-  ]),
   EffectType.posterize: PixelKernel(2, ['niveis']),
   EffectType.curves: PixelKernel(3, [
     'contraste',
@@ -192,7 +184,6 @@ const pixelKernels = <EffectType, PixelKernel>{
   ]),
   EffectType.radialBlur: PixelKernel(15, ['quantidade', 'modo', 'amostras']),
   EffectType.directionalBlur: PixelKernel(16, ['comprimento', 'angulo']),
-  EffectType.unsharpMask: PixelKernel(17, ['quantidade', 'raio', 'limiar']),
   EffectType.lightRays: PixelKernel(18, [
     'comprimento',
     'intensidade',
@@ -333,7 +324,6 @@ const pixelKernels = <EffectType, PixelKernel>{
     'midtones',
     'balance',
   ]),
-  EffectType.brightnessContrast: PixelKernel(42, ['brightness', 'contrast']),
   EffectType.colorTune: PixelKernel(43, [
     'lift_hue',
     'lift_saturation',
@@ -363,14 +353,6 @@ const pixelKernels = <EffectType, PixelKernel>{
   ]),
   // 45 em diante - a camada de ajuste do After: a mesma conta em Dart esta
   // em domain/efeitos_do_after.dart.
-  EffectType.hueSaturation: PixelKernel(45, [
-    'master_hue',
-    'master_saturation',
-    'master_lightness',
-    'colorize',
-    'colorize_hue',
-    'colorize_saturation',
-  ]),
   EffectType.sSharpen: PixelKernel(47, [
     'amount',
     'width',

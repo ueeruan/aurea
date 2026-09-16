@@ -11,6 +11,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'dart:typed_data';
 
+import '../../../../core/storage/prefs.dart';
 import '../../application/editor_controller.dart';
 import '../../../export/domain/export_settings.dart';
 import '../../../export/presentation/export_video_screen.dart';
@@ -92,7 +93,17 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
   final completo = ref.read(proModeProvider);
   String? status;
   var busy = false;
+  // A ULTIMA EXPORTACAO E O PONTO DE PARTIDA desta: formato, tamanho,
+  // codec e taxa voltam como ficaram.
   var ajustes = const ExportSettings();
+  try {
+    final bruto = ref
+        .read(sharedPreferencesProvider)
+        .getString('exportar.ajustes');
+    if (bruto != null) {
+      ajustes = ExportSettings.fromJson(jsonDecode(bruto));
+    }
+  } catch (_) {}
 
   await showParamSheet(
     context,
@@ -108,6 +119,11 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
         // RENDERIZAR: fecha a folha e abre a tela de exportacao com os
         // ajustes dados (um preset ou os ajustes finos).
         void renderizar(ExportSettings s) {
+          try {
+            ref
+                .read(sharedPreferencesProvider)
+                .setString('exportar.ajustes', jsonEncode(s.toJson()));
+          } catch (_) {}
           closeParamSheet(sheetContext);
           Future.microtask(() {
             if (!context.mounted) return;

@@ -9,6 +9,7 @@ class AppSettings {
     this.defaultAspectKey = '16:9',
     this.defaultFps = 30,
     this.defaultResolution = 1080,
+    this.defaultLayerSeconds = 3,
     this.saveToGallery = true,
     this.hapticFeedback = true,
     this.themeMode = 'escuro',
@@ -27,6 +28,9 @@ class AppSettings {
   final int defaultFps;
   final int defaultResolution;
 
+  /// Quantos segundos uma camada nova dura (texto, forma, foto).
+  final int defaultLayerSeconds;
+
   /// Ao exportar, salvar copia na galeria do dispositivo.
   final bool saveToGallery;
 
@@ -36,6 +40,7 @@ class AppSettings {
     String? defaultAspectKey,
     int? defaultFps,
     int? defaultResolution,
+    int? defaultLayerSeconds,
     bool? saveToGallery,
     bool? hapticFeedback,
     String? themeMode,
@@ -45,6 +50,7 @@ class AppSettings {
       defaultAspectKey: defaultAspectKey ?? this.defaultAspectKey,
       defaultFps: defaultFps ?? this.defaultFps,
       defaultResolution: defaultResolution ?? this.defaultResolution,
+      defaultLayerSeconds: defaultLayerSeconds ?? this.defaultLayerSeconds,
       saveToGallery: saveToGallery ?? this.saveToGallery,
       hapticFeedback: hapticFeedback ?? this.hapticFeedback,
       themeMode: themeMode ?? this.themeMode,
@@ -57,6 +63,7 @@ class SettingsController extends Notifier<AppSettings> {
   static const _kAspect = 'settings.defaultAspect';
   static const _kFps = 'settings.defaultFps';
   static const _kResolution = 'settings.defaultResolution';
+  static const _kLayerSeconds = 'settings.defaultLayerSeconds';
   static const _kSaveToGallery = 'settings.saveToGallery';
   static const _kHaptics = 'settings.haptics';
   static const _kTema = 'settings.tema';
@@ -69,6 +76,7 @@ class SettingsController extends Notifier<AppSettings> {
       defaultAspectKey: prefs.getString(_kAspect) ?? '16:9',
       defaultFps: prefs.getInt(_kFps) ?? 30,
       defaultResolution: prefs.getInt(_kResolution) ?? 1080,
+      defaultLayerSeconds: (prefs.getInt(_kLayerSeconds) ?? 3).clamp(1, 30),
       saveToGallery: prefs.getBool(_kSaveToGallery) ?? true,
       hapticFeedback: prefs.getBool(_kHaptics) ?? true,
       themeMode: prefs.getString(_kTema) ?? 'escuro',
@@ -96,6 +104,12 @@ class SettingsController extends Notifier<AppSettings> {
   void setDefaultResolution(int height) {
     state = state.copyWith(defaultResolution: height);
     ref.read(sharedPreferencesProvider).setInt(_kResolution, height);
+  }
+
+  void setDefaultLayerSeconds(int segundos) {
+    final preso = segundos.clamp(1, 30);
+    state = state.copyWith(defaultLayerSeconds: preso);
+    ref.read(sharedPreferencesProvider).setInt(_kLayerSeconds, preso);
   }
 
   void setSaveToGallery(bool value) {

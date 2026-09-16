@@ -1,4 +1,5 @@
 import 'package:aurea/src/features/projects/presentation/release_notice.dart';
+import 'package:aurea/src/features/projects/presentation/boas_vindas.dart';
 import 'package:aurea/src/core/theme/app_theme.dart';
 import 'package:aurea/src/features/projects/presentation/home_shell.dart';
 import 'package:aurea/src/core/storage/prefs.dart';
@@ -24,6 +25,8 @@ void main() {
       addTearDown(tester.view.reset);
       SharedPreferences.setMockInitialValues({
         releaseNoticeSeenKey: releaseNoticeRevision,
+      // A primeira abertura ja passou: estes testes olham o resto.
+      chaveDoAceite: 'ja',
       });
       final prefs = await SharedPreferences.getInstance();
       final theme = AppTheme.dark;

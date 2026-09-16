@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../media/application/media_import_service.dart';
+import '../../../core/storage/prefs.dart';
 import '../domain/animadores.dart';
 import '../domain/blend_extra.dart';
 import 'blob_track_service.dart';
@@ -609,12 +610,24 @@ class EditorController extends Notifier<VideoProject> {
 
   Layer? _layer(String id) => state.layerById(id);
 
+  /// QUANTO DURA UMA CAMADA NOVA: o que a pessoa escolheu nos Ajustes,
+  /// com 3 s quando nunca escolheu (e em testes sem prefs).
+  Duration get _duracaoPadraoDeCamada {
+    try {
+      final s = ref.read(sharedPreferencesProvider).getInt(
+        'settings.defaultLayerSeconds',
+      );
+      if (s != null) return Duration(seconds: s.clamp(1, 30));
+    } catch (_) {}
+    return const Duration(seconds: 3);
+  }
+
   void addTextLayer(Duration at, {String text = 'Seu texto'}) {
     _push(
       TextLayer(
         name: text,
         startTime: at,
-        duration: const Duration(seconds: 3),
+        duration: _duracaoPadraoDeCamada,
         text: text,
         position: AnimatedOffset(_center),
       ),
@@ -631,7 +644,7 @@ class EditorController extends Notifier<VideoProject> {
       ShapeLayer(
         name: '$name $n',
         startTime: at,
-        duration: const Duration(seconds: 3),
+        duration: _duracaoPadraoDeCamada,
         contents: contents,
         position: AnimatedOffset(_center),
       ),
@@ -727,14 +740,15 @@ class EditorController extends Notifier<VideoProject> {
     String path,
     String name, {
     double? proporcao,
-    Duration duracao = const Duration(seconds: 3),
+    Duration? duracao,
   }) {
+    final pedida = duracao ?? _duracaoPadraoDeCamada;
     final layer = ImageLayer(
       name: _nomeDeMidia(name, video: false),
       startTime: at,
-      duration: duracao < const Duration(milliseconds: 100)
+      duration: pedida < const Duration(milliseconds: 100)
           ? const Duration(milliseconds: 100)
-          : duracao,
+          : pedida,
       sourcePath: path,
       ajuste: AjusteDaMidia.cobrir,
       proporcaoDaFonte: proporcaoValida(proporcao),

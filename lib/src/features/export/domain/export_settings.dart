@@ -86,6 +86,35 @@ class ExportSettings {
   /// com alfa so toca em um punhado de programas.
   bool get keepsAlpha => format == ExportFormat.pngSequence;
 
+  /// LEMBRADO ENTRE EXPORTACOES: quem sempre exporta 4K a 60 nao
+  /// deveria reescolher isso toda vez. Vai como JSON simples nas
+  /// prefs; campo desconhecido de versao velha cai no padrao.
+  Map<String, dynamic> toJson() => {
+    's': size.index,
+    if (fps != null) 'f': fps,
+    'q': quality,
+    if (bitrateMbps != null) 'b': bitrateMbps,
+    'c': codec.index,
+    'fm': format.index,
+  };
+
+  static ExportSettings fromJson(Object? raw) {
+    if (raw is! Map) return const ExportSettings();
+    int indice(String k, int teto) =>
+        ((raw[k] as num?)?.toInt() ?? 0).clamp(0, teto);
+    final q = raw['q'];
+    return ExportSettings(
+      size: ExportSize.values[indice('s', ExportSize.values.length - 1)],
+      fps: (raw['f'] as num?)?.toInt(),
+      quality: q is String && const {'baixa', 'media', 'alta'}.contains(q)
+          ? q
+          : 'media',
+      bitrateMbps: (raw['b'] as num?)?.toDouble(),
+      codec: ExportCodec.values[indice('c', ExportCodec.values.length - 1)],
+      format: ExportFormat.values[indice('fm', ExportFormat.values.length - 1)],
+    );
+  }
+
   ExportSettings copyWith({
     ExportSize? size,
     int? fps,

@@ -2,6 +2,7 @@ import 'package:aurea/src/core/storage/prefs.dart';
 import 'package:aurea/src/core/theme/app_theme.dart';
 import 'package:aurea/src/features/projects/presentation/home_shell.dart';
 import 'package:aurea/src/features/projects/presentation/release_notice.dart';
+import 'package:aurea/src/features/projects/presentation/boas_vindas.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -13,6 +14,8 @@ void main() {
     (tester) async {
       SharedPreferences.setMockInitialValues({
         releaseNoticeSeenKey: 'older-release',
+      // A primeira abertura ja passou: estes testes olham o resto.
+      chaveDoAceite: 'ja',
       });
       final prefs = await SharedPreferences.getInstance();
       Widget app() => ProviderScope(

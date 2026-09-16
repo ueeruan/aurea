@@ -1,4 +1,5 @@
 import 'dart:io';
+
 import '../../../core/l10n/app_language.dart';
 
 import 'package:flutter/cupertino.dart';
@@ -74,21 +75,34 @@ class SettingsTab extends ConsumerWidget {
               context: context,
               builder: (dialogContext) => SimpleDialog(
                 title: const AppText('Idioma'),
-                children: [for (final language in appLanguages.entries)
-                  SimpleDialogOption(
-                    key: ValueKey('language-${language.key}'),
-                    onPressed: () async {
-                      try {
-                        await ref.read(appLanguageProvider.notifier).select(language.key);
-                        if (dialogContext.mounted) Navigator.pop(dialogContext);
-                      } catch (_) {
-                        if (dialogContext.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: AppText('Tente novamente')));
+                children: [
+                  for (final language in appLanguages.entries)
+                    SimpleDialogOption(
+                      key: ValueKey('language-${language.key}'),
+                      onPressed: () async {
+                        try {
+                          await ref
+                              .read(appLanguageProvider.notifier)
+                              .select(language.key);
+                          if (dialogContext.mounted)
+                            Navigator.pop(dialogContext);
+                        } catch (_) {
+                          if (dialogContext.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: AppText('Tente novamente'),
+                              ),
+                            );
+                          }
                         }
-                      }
-                    },
-                    child: AppText(language.value, textDirection: language.key == 'ar' ? TextDirection.rtl : TextDirection.ltr),
-                  ),
+                      },
+                      child: AppText(
+                        language.value,
+                        textDirection: language.key == 'ar'
+                            ? TextDirection.rtl
+                            : TextDirection.ltr,
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -115,6 +129,16 @@ class SettingsTab extends ConsumerWidget {
                   _ => '${r}p',
                 },
                 onChanged: controller.setDefaultResolution,
+              ),
+              const _GroupDivider(),
+              // QUANTO DURA UMA CAMADA NOVA: quem faz edit rapido vive
+              // encurtando os 3 s; agora escolhe uma vez.
+              _SegmentedRow<int>(
+                label: 'Camada nova dura',
+                values: const [2, 3, 5],
+                selected: settings.defaultLayerSeconds,
+                labelOf: (v) => '$v s',
+                onChanged: controller.setDefaultLayerSeconds,
               ),
               const _GroupDivider(),
               _SegmentedRow<int>(
@@ -351,7 +375,10 @@ class _SwitchRow extends StatelessWidget {
                 AppText(title, style: Theme.of(context).textTheme.bodyLarge),
                 if (subtitle != null) ...[
                   const SizedBox(height: 1),
-                  AppText(subtitle!, style: Theme.of(context).textTheme.bodySmall),
+                  AppText(
+                    subtitle!,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
                 ],
               ],
             ),
@@ -541,7 +568,8 @@ class _Qualidade3DRowState extends State<_Qualidade3DRow> {
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
           child: ValueListenableBuilder<Qualidade3D>(
             valueListenable: c.nivel,
-            builder: (context, nivel, _) => AppText('Automatica escolhe pelo orcamento de memoria do aparelho e '
+            builder: (context, nivel, _) => AppText(
+              'Automatica escolhe pelo orcamento de memoria do aparelho e '
               'desce um degrau (sombra, MSAA, escala, textura, LOD) antes '
               'de o app travar; sobe de volta quando sobra folga. Agora: '
               '${qualidade3dRotulo(nivel)}.',

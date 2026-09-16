@@ -1,4 +1,5 @@
 import 'package:aurea/src/core/l10n/app_language.dart';
+
 import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -79,6 +80,11 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
   late ExportSettings _ajustes = widget.settings;
   double _progresso = 0;
   String _detalhe = '';
+
+  /// QUANTO FALTA: o relogio parte de quando o render comecou, e a conta
+  /// so aparece depois de 5%% — antes disso ela mente com convicção.
+  DateTime? _comecoDoRender;
+  String? _tempoRestante;
   String? _erro;
   File? _saida;
 
@@ -135,7 +141,24 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
       _fase = f;
       _progresso = p.clamp(0.0, 1.0);
       _detalhe = d;
+      _tempoRestante = _restante(_progresso);
     });
+  }
+
+  String? _restante(double p) {
+    final comeco = _comecoDoRender;
+    if (comeco == null || p < .05 || p >= 1) return null;
+    final gasto = DateTime.now().difference(comeco);
+    final total = gasto.inMilliseconds / p;
+    final falta = Duration(
+      milliseconds: (total - gasto.inMilliseconds).round(),
+    );
+    if (falta.inSeconds < 1) return null;
+    if (falta.inMinutes >= 1) {
+      final s = falta.inSeconds % 60;
+      return 'faltam ~${falta.inMinutes} min ${s.toString().padLeft(2, '0')} s';
+    }
+    return 'faltam ~${falta.inSeconds} s';
   }
 
   Future<void>? _aquecendo;
@@ -143,6 +166,7 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
   Future<void> _rodar() async {
     await _aquecendo;
     if (!mounted) return;
+    _comecoDoRender = DateTime.now();
     _passo(_Fase.preparando, 0, 'Preparando...');
     // O projeto completo (dobrando o que esta aberto dentro de grupos) e
     // sem as camadas de olho fechado.
@@ -207,9 +231,9 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
       // 1. Quadros de cada camada de video.
       // Video dentro de grupo tambem: sem os quadros dele, o arquivo saia
       // com o icone de filme no lugar.
-      final videoLayers = midiasAchatadas(
-        project.layers,
-      ).whereType<VideoLayer>().toList();
+      final videoLayers = midiasAchatadas(project.layers)
+          .whereType<VideoLayer>()
+          .toList();
       for (var i = 0; i < videoLayers.length; i++) {
         if (engine.cancelled) return;
         final l = videoLayers[i];
@@ -345,10 +369,7 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
           _fase = _Fase.pronto;
           _progresso = 1;
           _saida = File('${pasta.path}/000000.png');
-          _detalhe = _comAvisos(
-            engine,
-            '$total imagens em ${pasta.path}',
-          );
+          _detalhe = _comAvisos(engine, '$total imagens em ${pasta.path}');
         });
         return;
       }
@@ -398,7 +419,8 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
 
   /// O detalhe do fim e, embaixo, o que nao saiu como pedido (clipe com
   /// aprimoramento por IA num aparelho sem o motor, por exemplo).
-  String _comAvisos(ExportEngine engine, String detalhe) => engine.avisos.isEmpty
+  String _comAvisos(ExportEngine engine, String detalhe) =>
+      engine.avisos.isEmpty
       ? detalhe
       : '$detalhe\n\n${engine.avisos.join('\n')}';
 
@@ -861,7 +883,8 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
                   color: AmColors.pink,
                 ),
                 SizedBox(width: 8),
-                AppText('Nao deu para exportar',
+                AppText(
+                  'Nao deu para exportar',
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w700,
@@ -913,7 +936,8 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
                   color: AmColors.accent,
                 ),
                 SizedBox(width: 8),
-                AppText('Video pronto',
+                AppText(
+                  'Video pronto',
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w700,
@@ -963,7 +987,8 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
                         ),
                       );
                     },
-                    child: const AppText('Copiar caminho',
+                    child: const AppText(
+                      'Copiar caminho',
                       style: TextStyle(fontSize: 13, color: AmColors.accent),
                     ),
                   ),
@@ -975,7 +1000,8 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
                     borderRadius: BorderRadius.circular(12),
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     onPressed: () => Navigator.of(context).maybePop(),
-                    child: const AppText('Concluir',
+                    child: const AppText(
+                      'Concluir',
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
@@ -1017,6 +1043,15 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
                 ),
               ),
               const Spacer(),
+              if (_tempoRestante != null)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: AppText(
+                    _tempoRestante!,
+                    key: const ValueKey('export-restante'),
+                    style: const TextStyle(fontSize: 11, color: AmColors.muted),
+                  ),
+                ),
               AppText(
                 '${(_progresso * 100).round()}%',
                 style: const TextStyle(fontSize: 13, color: AmColors.accent),
@@ -1041,7 +1076,8 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
             style: const TextStyle(fontSize: 11, color: AmColors.muted),
           ),
           const SizedBox(height: 4),
-          const AppText('Deixe o app aberto nesta tela ate terminar.',
+          const AppText(
+            'Deixe o app aberto nesta tela ate terminar.',
             style: TextStyle(fontSize: 10, color: AmColors.muted),
           ),
         ],
@@ -1076,7 +1112,8 @@ class _Escolhas<T> extends StatelessWidget {
       children: [
         Padding(
           padding: const EdgeInsets.only(bottom: 6),
-          child: AppText(titulo,
+          child: AppText(
+            titulo,
             style: const TextStyle(
               fontSize: 11,
               fontWeight: FontWeight.w700,
@@ -1110,7 +1147,8 @@ class _Escolhas<T> extends StatelessWidget {
                           ? null
                           : Border.all(color: AmColors.hairline),
                     ),
-                    child: AppText(nome,
+                    child: AppText(
+                      nome,
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,

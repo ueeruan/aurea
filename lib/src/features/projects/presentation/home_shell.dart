@@ -1,4 +1,5 @@
 import 'package:aurea/src/core/l10n/app_language.dart';
+
 import 'dart:async';
 import 'dart:ui';
 
@@ -8,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/storage/prefs.dart';
+import 'boas_vindas.dart';
 import 'release_notice.dart';
 
 import '../../../core/theme/app_theme.dart';
@@ -40,6 +42,21 @@ class _HomeShellState extends ConsumerState<HomeShell> {
 
   Future<void> _showUpdateOnce() async {
     final prefs = ref.read(sharedPreferencesProvider);
+    // A PRIMEIRA ABERTURA vem antes de qualquer novidade: quem nunca
+    // entrou ve as boas-vindas (e o combinado), uma vez so.
+    if (prefs.getString(chaveDoAceite) == null) {
+      if (ModalRoute.of(context)?.isCurrent != true) return;
+      await showBoasVindas(context);
+      try {
+        await prefs.setString(chaveDoAceite, DateTime.now().toIso8601String());
+      } catch (_) {}
+      // Quem acabou de conhecer o app nao precisa das novidades da
+      // versao no mesmo instante.
+      try {
+        await prefs.setString(releaseNoticeSeenKey, releaseNoticeRevision);
+      } catch (_) {}
+      return;
+    }
     if (prefs.getString(releaseNoticeSeenKey) == releaseNoticeRevision) return;
     if (ModalRoute.of(context)?.isCurrent != true) return;
     await showReleaseNotice(context);

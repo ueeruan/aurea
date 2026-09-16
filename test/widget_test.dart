@@ -1,4 +1,5 @@
 import 'package:aurea/src/features/projects/presentation/release_notice.dart';
+import 'package:aurea/src/features/projects/presentation/boas_vindas.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -12,6 +13,8 @@ void main() {
   ) async {
     SharedPreferences.setMockInitialValues({
       releaseNoticeSeenKey: releaseNoticeRevision,
+      // A primeira abertura ja passou: estes testes olham o resto.
+      chaveDoAceite: 'ja',
     });
     final prefs = await SharedPreferences.getInstance();
 

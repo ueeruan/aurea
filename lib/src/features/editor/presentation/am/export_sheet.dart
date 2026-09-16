@@ -1,4 +1,6 @@
 import 'package:aurea/src/core/l10n/app_language.dart';
+import 'package:aurea/src/features/projects/domain/pacote_aurea.dart';
+
 import 'dart:convert';
 import 'dart:io';
 
@@ -112,16 +114,15 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
             Navigator.of(context).push(
               MaterialPageRoute<void>(
                 fullscreenDialog: true,
-                builder: (_) =>
-                    ExportVideoScreen(settings: s),
+                builder: (_) => ExportVideoScreen(settings: s),
               ),
             );
           });
         }
 
-        Future<void> writeFile(
+        Future<void> writeBytes(
           String name,
-          String content,
+          Uint8List bytes,
           String label,
         ) async {
           setSheetState(() => busy = true);
@@ -130,7 +131,6 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
               RegExp(r'[<>:"/\\|?*\x00-\x1f]'),
               '_',
             );
-            final bytes = Uint8List.fromList(utf8.encode(content));
             final path = await FilePicker.platform.saveFile(
               dialogTitle: 'Salvar $label',
               fileName: safeName,
@@ -154,6 +154,9 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
             });
           }
         }
+
+        Future<void> writeFile(String name, String content, String label) =>
+            writeBytes(name, Uint8List.fromList(utf8.encode(content)), label);
 
         Future<void> exportSvg() async {
           try {
@@ -249,7 +252,8 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
                 if (!completo)
                   const Padding(
                     padding: EdgeInsets.only(bottom: 6),
-                    child: AppText('Codec, taxa, PNG, Lottie, SVG e template ficam no modo Pro.',
+                    child: AppText(
+                      'Codec, taxa, PNG, Lottie, SVG e template ficam no modo Pro.',
                       style: TextStyle(fontSize: 11.5, color: AmColors.muted),
                     ),
                   ),
@@ -261,7 +265,8 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
                       color: AmColors.accent,
                       borderRadius: BorderRadius.circular(12),
                       onPressed: busy ? null : () => renderizar(ajustes),
-                      child: const AppText('Renderizar com os ajustes abaixo',
+                      child: const AppText(
+                        'Renderizar com os ajustes abaixo',
                         style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.w700,
@@ -389,7 +394,8 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
                         children: [
                           const SizedBox(
                             width: 74,
-                            child: AppText('Taxa',
+                            child: AppText(
+                              'Taxa',
                               style: TextStyle(
                                 fontSize: 12,
                                 color: AmColors.muted,
@@ -463,7 +469,8 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
                     },
                   ),
                   const Divider(color: AmColors.hairline, height: 22),
-                  const AppText('Para produto (Lottie / SVG)',
+                  const AppText(
+                    'Para produto (Lottie / SVG)',
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
@@ -487,7 +494,8 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
                         ),
                       ),
                       const Expanded(
-                        child: AppText('Modo compativel com Lottie: avisa sobre o que '
+                        child: AppText(
+                          'Modo compativel com Lottie: avisa sobre o que '
                           'nao sobrevive enquanto voce monta.',
                           style: TextStyle(fontSize: 11, color: AmColors.muted),
                         ),
@@ -577,7 +585,8 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
                                     '${out.skipped > 0 ? ', ${out.skipped} puladas' : ''})',
                               );
                             },
-                      child: const AppText('Exportar Lottie (.json)',
+                      child: const AppText(
+                        'Exportar Lottie (.json)',
                         style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.w700,
@@ -593,7 +602,8 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
                       color: AmColors.chip,
                       borderRadius: BorderRadius.circular(12),
                       onPressed: busy ? null : exportSvg,
-                      child: const AppText('Exportar SVG animado',
+                      child: const AppText(
+                        'Exportar SVG animado',
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
@@ -603,7 +613,8 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
                     ),
                   ),
                   const Divider(color: AmColors.hairline, height: 22),
-                  const AppText('Template',
+                  const AppText(
+                    'Template',
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
@@ -661,13 +672,40 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
                                       ).encode(),
                                       'Template',
                                     ),
-                              child: AppText('Exportar template',
+                              child: AppText(
+                                'Exportar template',
                                 style: TextStyle(
                                   fontSize: 14,
                                   fontWeight: FontWeight.w600,
                                   color: trava.isEmpty
                                       ? AmColors.accent
                                       : AmColors.muted,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          // O PACOTE: projeto + midias num arquivo
+                          // so, que abre em qualquer aparelho.
+                          SizedBox(
+                            width: double.infinity,
+                            child: CupertinoButton(
+                              key: const ValueKey('exportar-pacote'),
+                              color: AmColors.chip,
+                              borderRadius: BorderRadius.circular(12),
+                              onPressed: busy
+                                  ? null
+                                  : () => writeBytes(
+                                      '${project.name}.aurea',
+                                      PacoteAurea.montar(project),
+                                      'Pacote do projeto',
+                                    ),
+                              child: const AppText(
+                                'Exportar pacote .aurea',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: AmColors.accent,
                                 ),
                               ),
                             ),

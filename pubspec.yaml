@@ -55,6 +55,7 @@ dependencies:
   # codifica H.264 agora e o codificador do aparelho (MediaCodec /
   # AVAssetWriter); o FFmpeg aqui so decodifica e junta audio.
   ffmpeg_kit_flutter_new_full: ^2.5.2
+  archive: ^4.2.0
   file_picker: ^10.3.3
   shared_preferences: ^2.5.5
   characters: ^1.4.1

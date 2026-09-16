@@ -60,7 +60,16 @@ class CenaXmlException implements Exception {
 }
 
 /// Le [xml] e devolve um projeto novo.
-CenaXmlResult importarCenaXml(String xml, {String? nome}) {
+///
+/// [arquivoDaMidia] devolve o caminho LOCAL de uma midia do arquivo
+/// (por uri ou por nome), quando ha — e o caso do pacote, que traz as
+/// midias junto. Sem ele, foto, video e audio continuam avisando que
+/// ficaram de fora, como sempre.
+CenaXmlResult importarCenaXml(
+  String xml, {
+  String? nome,
+  String? Function(String referencia)? arquivoDaMidia,
+}) {
   final root = parseXml(xml);
   final cena = _acharCena(root);
   if (cena == null) {
@@ -72,7 +81,12 @@ CenaXmlResult importarCenaXml(String xml, {String? nome}) {
   final largura = _num(cena.attr(['width', 'exportwidth'])) ?? 1920;
   final altura = _num(cena.attr(['height', 'exportheight'])) ?? 1080;
   final fps = (_num(cena.attr(['fps'])) ?? 30).round().clamp(12, 120);
-  final ctx = _Contexto(largura: largura, altura: altura, fps: fps);
+  final ctx = _Contexto(
+    largura: largura,
+    altura: altura,
+    fps: fps,
+    arquivoDaMidia: arquivoDaMidia,
+  );
 
   // Tabela de midias: uri -> nome do arquivo, so para dizer o que falta.
   for (final m in cena.descendants()) {
@@ -126,11 +140,26 @@ XmlNode? _acharCena(XmlNode root) {
 }
 
 class _Contexto {
-  _Contexto({required this.largura, required this.altura, required this.fps});
+  _Contexto({
+    required this.largura,
+    required this.altura,
+    required this.fps,
+    this.arquivoDaMidia,
+  });
 
   final double largura;
   final double altura;
   final int fps;
+  final String? Function(String referencia)? arquivoDaMidia;
+
+  /// O caminho local de uma referencia de midia, tentando pela uri e
+  /// pelo nome de arquivo da tabela de midias.
+  String? resolveMidia(String? referencia) {
+    final r = arquivoDaMidia;
+    if (r == null || referencia == null || referencia.isEmpty) return null;
+    return r(referencia) ?? r(midias[referencia] ?? '');
+  }
+
   final List<String> ignorados = [];
   final Map<String, String> midias = {};
   final List<PropertyLink> links = [];
@@ -149,7 +178,17 @@ class _Contexto {
   }
 }
 
-const _tagsDeCamada = {'shape', 'text', 'embedscene', 'audio', 'nullobj'};
+const _tagsDeCamada = {
+  'shape',
+  'text',
+  'embedscene',
+  'audio',
+  'nullobj',
+  // Foto e video entram quando a midia vem junto (pacote). A tag
+  // 'media' fica DE FORA: ela e a tabela de midias, nao uma camada.
+  'image',
+  'video',
+};
 
 /// As camadas de uma cena, ja na NOSSA ordem (indice 0 = a de cima).
 List<Layer> _camadasDaCena(XmlNode cena, _Contexto ctx) {
@@ -211,13 +250,67 @@ Layer? _camada(XmlNode e, _Contexto ctx) {
         pivot: t.pivot,
         positionZ: t.z,
       );
+    case 'image' || 'video' || 'media':
+      final src = e.attr(['src', 'uri', 'fillimage']) ?? '';
+      final local = ctx.resolveMidia(src);
+      final nomeDoArquivo = ctx.midias[src] ?? src;
+      final ehVideo =
+          e.tag == 'video' ||
+          RegExp(
+            r'\.(mp4|mov|m4v|webm|3gp|mkv)$',
+            caseSensitive: false,
+          ).hasMatch(nomeDoArquivo);
+      if (local == null) {
+        ctx.ignora(
+          '${ehVideo ? 'video' : 'imagem'} "$nomeDoArquivo" — '
+          'reimporte o arquivo',
+        );
+        return null;
+      }
+      camada = ehVideo
+          ? VideoLayer(
+              name: nome,
+              startTime: inicio,
+              duration: dur,
+              sourcePath: local,
+              position: t.pos,
+              scaleX: t.sx,
+              scaleY: t.sy,
+              rotation: t.rot,
+              opacity: t.op,
+              pivot: t.pivot,
+              positionZ: t.z,
+            )
+          : ImageLayer(
+              name: nome,
+              startTime: inicio,
+              duration: dur,
+              sourcePath: local,
+              position: t.pos,
+              scaleX: t.sx,
+              scaleY: t.sy,
+              rotation: t.rot,
+              opacity: t.op,
+              pivot: t.pivot,
+              positionZ: t.z,
+            );
     case 'audio':
       // O som aponta para um arquivo do celular de origem (content://),
-      // que nao existe aqui: a camada viria muda e quebraria o tocador.
-      final arquivo =
-          ctx.midias[e.attr(['src']) ?? ''] ?? _texto(e.attr(['label']));
-      ctx.ignora('audio "${arquivo ?? nome}" — reimporte o arquivo');
-      return null;
+      // que so existe aqui quando o pacote trouxe a midia junto.
+      final src = e.attr(['src']) ?? '';
+      final local = ctx.resolveMidia(src);
+      if (local != null) {
+        camada = AudioLayer(
+          name: nome,
+          startTime: inicio,
+          duration: dur,
+          sourcePath: local,
+        );
+      } else {
+        final arquivo = ctx.midias[src] ?? _texto(e.attr(['label']));
+        ctx.ignora('audio "${arquivo ?? nome}" — reimporte o arquivo');
+        return null;
+      }
   }
   if (camada == null) return null;
 

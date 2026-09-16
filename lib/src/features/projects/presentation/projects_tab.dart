@@ -26,7 +26,12 @@ import '../application/reference_rebuild_assets.dart';
 import '../application/dnyx_remix_assets.dart';
 import '../application/vhf_motion_assets.dart';
 import '../application/thumbnail_service.dart';
+
+import 'package:path_provider/path_provider.dart';
+
 import '../domain/cena_xml_import.dart';
+import '../domain/pacote_aurea.dart';
+import '../domain/pacote_zip_import.dart';
 import '../domain/abyss_cinematic_template.dart';
 import '../domain/mao_enterrada_template.dart';
 import '../domain/colina_tv_template.dart';
@@ -321,16 +326,42 @@ class ProjectsTab extends ConsumerWidget {
     final caminho = r?.files.single.path;
     if (caminho == null || !context.mounted) return;
     final nomeArquivo = caminho.split(RegExp(r'[\\/]')).last;
+    final nomeLimpo = nomeArquivo.replaceAll(
+      RegExp(r'\.(xml|zip|amproj|aurea)$', caseSensitive: false),
+      '',
+    );
     CenaXmlResult resultado;
     try {
-      final texto = await File(caminho).readAsString();
-      resultado = importarCenaXml(
-        texto,
-        nome: nomeArquivo.replaceAll(
-          RegExp(r'\.xml$', caseSensitive: false),
-          '',
-        ),
-      );
+      // PACOTE (.amproj, zip com XML) ou PACOTE .aurea: as midias vem
+      // junto e entram de verdade. XML solto continua como sempre.
+      final minusculo = nomeArquivo.toLowerCase();
+      if (minusculo.endsWith('.aurea')) {
+        final projeto = PacoteAurea.abrir(
+          await File(caminho).readAsBytes(),
+          await _pastaDasMidiasImportadas(),
+        );
+        if (!context.mounted) return;
+        ref.read(projectsControllerProvider.notifier).add(projeto);
+        ref.read(editorControllerProvider.notifier).openProject(projeto);
+        await Navigator.of(
+          context,
+        ).push(MaterialPageRoute<void>(builder: (_) => const EditorScreen()));
+        return;
+      }
+      if (minusculo.endsWith('.zip') || minusculo.endsWith('.amproj')) {
+        resultado = CenaEmZip.abrir(
+          await File(caminho).readAsBytes(),
+          await _pastaDasMidiasImportadas(),
+          nome: nomeLimpo,
+        );
+      } else {
+        final texto = await File(caminho).readAsString();
+        resultado = importarCenaXml(texto, nome: nomeLimpo);
+      }
+    } on FormatException catch (e) {
+      if (!context.mounted) return;
+      await _aviso(context, 'Nao deu para importar', e.message);
+      return;
     } on CenaXmlException catch (e) {
       if (!context.mounted) return;
       await _aviso(context, 'Nao deu para importar', e.message);
@@ -371,6 +402,14 @@ class ProjectsTab extends ConsumerWidget {
     ref.read(editorControllerProvider.notifier).openProject(novo);
     Navigator.of(context)
         .push(MaterialPageRoute(builder: (_) => const EditorScreen()));
+  }
+
+  /// Onde as midias que chegam em pacote moram no aparelho.
+  static Future<Directory> _pastaDasMidiasImportadas() async {
+    final docs = await getApplicationDocumentsDirectory();
+    return Directory(
+      '${docs.path}/midias_importadas/${DateTime.now().millisecondsSinceEpoch}',
+    );
   }
 
   static String _resumoDaImportacao(CenaXmlResult r) {

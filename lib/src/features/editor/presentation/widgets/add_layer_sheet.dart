@@ -782,8 +782,17 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
                           ),
                           child: _conteudo(),
                         )
-                      : (_abaVisivel == _AbaAdd.midia
-                            ? _conteudo()
+                      // Midia e som cuidam da PROPRIA rolagem (grade e
+                      // lista de recentes): dentro de um scroll de fora,
+                      // o Expanded deles estoura a altura sem fim.
+                      : (_abaVisivel == _AbaAdd.midia ||
+                                _abaVisivel == _AbaAdd.audio
+                            ? Padding(
+                                padding: _abaVisivel == _AbaAdd.audio
+                                    ? const EdgeInsets.all(6)
+                                    : EdgeInsets.zero,
+                                child: _conteudo(),
+                              )
                             : SingleChildScrollView(
                                 padding: const EdgeInsets.all(6),
                                 child: _conteudo(),

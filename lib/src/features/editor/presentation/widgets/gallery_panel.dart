@@ -641,30 +641,6 @@ class _GalleryThumbnailState extends State<_GalleryThumbnail> {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          // A ORDEM DA MARCA: em sequencia, e a ordem em que entram.
-          if (widget.ordem != null)
-            Positioned(
-              left: 3,
-              top: 3,
-              child: Container(
-                key: ValueKey('galeria-ordem-${widget.asset.id}'),
-                width: 20,
-                height: 20,
-                alignment: Alignment.center,
-                decoration: const BoxDecoration(
-                  color: AmColors.accent,
-                  shape: BoxShape.circle,
-                ),
-                child: AppText(
-                  '${widget.ordem}',
-                  style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF0B0E12),
-                  ),
-                ),
-              ),
-            ),
           ColoredBox(
             color: AmColors.chip,
             child: FutureBuilder<Uint8List?>(
@@ -705,6 +681,30 @@ class _GalleryThumbnailState extends State<_GalleryThumbnail> {
               ),
             ),
           ],
+          // A ORDEM DA MARCA: em sequencia, e a ordem em que entram.
+          if (widget.ordem != null)
+            Positioned(
+              left: 3,
+              top: 3,
+              child: Container(
+                key: ValueKey('galeria-ordem-${widget.asset.id}'),
+                width: 20,
+                height: 20,
+                alignment: Alignment.center,
+                decoration: const BoxDecoration(
+                  color: AmColors.accent,
+                  shape: BoxShape.circle,
+                ),
+                child: AppText(
+                  '${widget.ordem}',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF0B0E12),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     ),

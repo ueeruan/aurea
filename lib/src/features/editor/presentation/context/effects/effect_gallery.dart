@@ -208,36 +208,8 @@ Future<void> showEffectGallery(
                                 }),
                                 key: const ValueKey('galeria-todos'),
                               ),
-                              // PRESETS DO BUNDLE: pilhas inteiras, um
-                              // toque aplica tudo.
-                              chip(
-                                'Presets ${presetsDeEdicao.length}',
-                                presets,
-                                () => setSheetState(() {
-                                  presets = !presets;
-                                  category = null;
-                                  favoritos = false;
-                                  edits = false;
-                                  sugeridos = false;
-                                  recentes = false;
-                                }),
-                                key: const ValueKey('galeria-presets'),
-                              ),
-                              // EDITS: batida, glitch, tempo e coloring
-                              // num lugar so.
-                              chip(
-                                '${translate(sheetContext, 'Edits')} ${efeitosDeEdit.length}',
-                                edits,
-                                () => setSheetState(() {
-                                  edits = !edits;
-                                  category = null;
-                                  favoritos = false;
-                                  presets = false;
-                                  sugeridos = false;
-                                  recentes = false;
-                                }),
-                                key: const ValueKey('galeria-edits'),
-                              ),
+                              // PRESETS e EDITS sairam da galeria (beta 89,
+                              // pedido do dono): so ficam abas com efeito.
                               // SUGERIDOS e RECENTES: o que resolve
                               // antes de procurar. Sem eles, quem acabou
                               // de usar um efeito procurava tudo de novo.
@@ -283,19 +255,20 @@ Future<void> showEffectGallery(
                                   key: const ValueKey('galeria-favoritos'),
                                 ),
                               for (final c in effectCategories)
-                                chip(
-                                  '${translate(sheetContext, categoriaDoEfeito(c))} ${effectsInCategory(c).length}',
-                                  category == c,
-                                  () => setSheetState(() {
-                                    category = category == c ? null : c;
-                                    favoritos = false;
-                                    edits = false;
-                                    presets = false;
-                                    sugeridos = false;
-                                    recentes = false;
-                                  }),
-                                  key: ValueKey('galeria-cat-$c'),
-                                ),
+                                if (effectsInCategory(c).isNotEmpty)
+                                  chip(
+                                    '${translate(sheetContext, categoriaDoEfeito(c))} ${effectsInCategory(c).length}',
+                                    category == c,
+                                    () => setSheetState(() {
+                                      category = category == c ? null : c;
+                                      favoritos = false;
+                                      edits = false;
+                                      presets = false;
+                                      sugeridos = false;
+                                      recentes = false;
+                                    }),
+                                    key: ValueKey('galeria-cat-$c'),
+                                  ),
                             ],
                           ),
                         ),
@@ -441,9 +414,8 @@ Future<void> showEffectGallery(
                                                     )
                                                     .registrar(type);
                                                 if (sheetContext.mounted) {
-                                                  Navigator.of(
-                                                    sheetContext,
-                                                  ).pop();
+                                                  Navigator.of(sheetContext)
+                                                      .pop();
                                                 }
                                               case ProcurarPor(:final palavra):
                                                 setSheetState(() {

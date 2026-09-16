@@ -3576,6 +3576,15 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
         case EffectType.opticsCompensation:
         case EffectType.dissolveShake:
         case EffectType.crossGlitch:
+        case EffectType.chromaKeyPro:
+        case EffectType.sRays:
+        case EffectType.deepGlow:
+        case EffectType.brilho:
+        case EffectType.sSpotLight:
+        case EffectType.sGlint:
+        case EffectType.sGlintRainbow:
+        case EffectType.sGlowRings:
+        case EffectType.sEdgeRays:
           break;
 
         case EffectType.gaussianBlur:

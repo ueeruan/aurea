@@ -120,6 +120,8 @@ flutter:
     - shaders/glitchify.frag
     - shaders/twitch.frag
     - shaders/cross_glitch.frag
+    - shaders/luz.frag
+    - shaders/chroma_key.frag
     - shaders/vhs_damage.frag
     - shaders/tv_damage.frag
     - shaders/pixel_sort.frag

@@ -1,3 +1,4 @@
+import 'luz_e_diversos.dart';
 import 'dart:ui';
 
 import 'package:uuid/uuid.dart';
@@ -152,6 +153,15 @@ enum EffectType {
   opticsCompensation,
   dissolveShake,
   crossGlitch,
+  chromaKeyPro,
+  sRays,
+  deepGlow,
+  brilho,
+  sSpotLight,
+  sGlint,
+  sGlintRainbow,
+  sGlowRings,
+  sEdgeRays,
 }
 
 /// O tipo a partir do IDENTIFICADOR estavel.
@@ -453,6 +463,7 @@ const effectSpecs = <EffectType, EffectSpec>{
   ...efeitosTvDamage,
   ...efeitosPixelSort,
   ...efeitosAutoPaint,
+  ...efeitosLuzEDiversos,
 };
 
 /// OS EFEITOS DE EDIT, na ordem em que se procura: batida, glitch,
@@ -489,12 +500,14 @@ const efeitosDeEdit = <EffectType>[
 /// primeira coisa que a pessoa le, e misturar idioma ali confunde mais
 /// do que ajuda.
 const effectCategories = <String>[
+  // A ordem das abas: Cor, Estilizar, Distorcer, Diversos, Glow e Luz.
   'Color',
+  'Stylize',
+  'Distort',
+  'Misc',
   'Light',
   'Lens',
   'Blur',
-  'Distort',
-  'Stylize',
   'Glitch',
   'Time',
   'Generate',
@@ -505,7 +518,8 @@ const effectCategories = <String>[
 /// O ROTULO da categoria, em portugues, para a galeria (Fase 4).
 String categoriaDoEfeito(String categoria) => switch (categoria) {
   'Color' => 'Cor',
-  'Light' => 'Luz',
+  'Light' => 'Glow e Luz',
+  'Misc' => 'Diversos',
   'Lens' => 'Lente',
   'Blur' => 'Desfoque',
   'Distort' => 'Distorcer',

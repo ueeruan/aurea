@@ -9,6 +9,7 @@ import 'vhs_damage.dart';
 import 'tv_damage.dart';
 import 'pixel_sort_sapphire.dart';
 import 'auto_paint.dart';
+import 'luz_e_diversos.dart';
 
 /// O QUE O PALCO PRECISA SABER DE UM EFEITO SAPPHIRE DO LOTE 2 de
 /// Estilizar: qual shader, quantas passadas, e como os numeros viram
@@ -37,6 +38,33 @@ class ReceitaSapphire {
 }
 
 final receitasSapphire = <EffectType, ReceitaSapphire>{
+  // ABA 4 DIVERSOS e ABA 5 GLOW E LUZ (beta 89).
+  EffectType.chromaKeyPro: ReceitaSapphire(
+    asset: 'shaders/chroma_key.frag',
+    valores: valoresChromaKey,
+    usaTempo: false,
+    cores: true,
+  ),
+  for (final t in [
+    EffectType.sRays,
+    EffectType.deepGlow,
+    EffectType.brilho,
+    EffectType.sSpotLight,
+    EffectType.sGlint,
+    EffectType.sGlowRings,
+    EffectType.sEdgeRays,
+  ])
+    t: ReceitaSapphire(
+      asset: 'shaders/luz.frag',
+      valores: valoresLuz,
+      usaTempo: false,
+      cores: true,
+    ),
+  EffectType.sGlintRainbow: ReceitaSapphire(
+    asset: 'shaders/luz.frag',
+    valores: valoresLuz,
+    usaTempo: false,
+  ),
   EffectType.jpegDamage: ReceitaSapphire(
     asset: 'shaders/jpeg_damage.frag',
     valores: valoresJpegDamage,

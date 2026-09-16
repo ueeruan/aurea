@@ -2567,6 +2567,10 @@ const appTranslations = <String, Map<String, String>>{
   "Rasgado": {"en": "Torn", "es": "Rasgado", "ar": "ممزق", "ko": "찢김", "ja": "破れ", "zh": "撕裂", "hi": "फटा", "id": "Robek", "ru": "Рваный"},
   "Carimbo": {"en": "Stamp", "es": "Sello", "ar": "ختم", "ko": "스탬프", "ja": "スタンプ", "zh": "印章", "hi": "मुहर", "id": "Stempel", "ru": "Штамп"},
   "Fogo": {"en": "Fire", "es": "Fuego", "ar": "نار", "ko": "불", "ja": "炎", "zh": "火焰", "hi": "आग", "id": "Api", "ru": "Огонь"},
+  "Objeto / Elemento": {"en": "Object / Element", "es": "Objeto / Elemento", "ar": "كائن / عنصر", "ko": "오브젝트 / 요소", "ja": "オブジェクト / 要素", "zh": "对象 / 元素", "hi": "ऑब्जेक्ट / एलिमेंट", "id": "Objek / Elemen", "ru": "Объект / Элемент"},
+  "Câmera 3D": {"en": "3D camera", "es": "Cámara 3D", "ar": "كاميرا ثلاثية الأبعاد", "ko": "3D 카메라", "ja": "3Dカメラ", "zh": "3D 摄像机", "hi": "3D कैमरा", "id": "Kamera 3D", "ru": "3D-камера"},
+  "Desenho à mão livre": {"en": "Freehand drawing", "es": "Dibujo a mano alzada", "ar": "رسم حر", "ko": "자유 그리기", "ja": "フリーハンド描画", "zh": "手绘", "hi": "फ्रीहैंड ड्रॉइंग", "id": "Gambar bebas", "ru": "Рисование от руки"},
+  "Desenho vetorial": {"en": "Vector drawing", "es": "Dibujo vectorial", "ar": "رسم متجه", "ko": "벡터 그리기", "ja": "ベクター描画", "zh": "矢量绘图", "hi": "वेक्टर ड्रॉइंग", "id": "Gambar vektor", "ru": "Векторный рисунок"},
   "Video": {"en": "Video", "es": "Vídeo", "ar": "فيديو", "ko": "동영상", "ja": "動画", "zh": "视频", "hi": "वीडियो", "id": "Video", "ru": "Видео"},
   "Audio": {"en": "Audio", "es": "Audio", "ar": "صوت", "ko": "오디오", "ja": "音声", "zh": "音频", "hi": "ऑडियो", "id": "Audio", "ru": "Аудио"},
   "Midia": {"en": "Media", "es": "Multimedia", "ar": "الوسائط", "ko": "미디어", "ja": "メディア", "zh": "媒体", "hi": "मीडिया", "id": "Media", "ru": "Медиа"},
@@ -2827,4 +2831,6 @@ const appTranslations = <String, Map<String, String>>{
   "Escala por copia": {"en": "Scale per copy", "es": "Escala por copia", "ar": "تحجيم لكل نسخة", "ko": "복사본당 크기", "ja": "コピーごとの拡大", "zh": "每份缩放", "hi": "प्रति प्रति स्केल", "id": "Skala per salinan", "ru": "Масштаб на копию"},
   "Opacidade por copia": {"en": "Opacity per copy", "es": "Opacidad por copia", "ar": "شفافية لكل نسخة", "ko": "복사본당 불투명도", "ja": "コピーごとの不透明度", "zh": "每份不透明度", "hi": "प्रति प्रति अपारदर्शिता", "id": "Opasitas per salinan", "ru": "Прозрачность на копию"},
   "Relogio": {"en": "Clock", "es": "Reloj", "ar": "ساعة", "ko": "시계", "ja": "時計", "zh": "时钟", "hi": "घड़ी", "id": "Jam", "ru": "Часы"},
+  "Camera 3D": {"en": "3D camera", "es": "Cámara 3D", "ar": "كاميرا ثلاثية الأبعاد", "ko": "3D 카메라", "ja": "3Dカメラ", "zh": "3D 摄像机", "hi": "3D कैमरा", "id": "Kamera 3D", "ru": "3D-камера"},
+  "Desenho a mao livre": {"en": "Freehand drawing", "es": "Dibujo a mano alzada", "ar": "رسم حر", "ko": "자유 그리기", "ja": "フリーハンド描画", "zh": "手绘", "hi": "फ्रीहैंड ड्रॉइंग", "id": "Gambar bebas", "ru": "Рисование от руки"},
 };

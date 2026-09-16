@@ -113,6 +113,9 @@ flutter:
     - shaders/jpeg_damage.frag
     - shaders/distorcao_ae.frag
     - shaders/shake.frag
+    - shaders/glitchify.frag
+    - shaders/twitch.frag
+    - shaders/cross_glitch.frag
     - shaders/vhs_damage.frag
     - shaders/tv_damage.frag
     - shaders/pixel_sort.frag

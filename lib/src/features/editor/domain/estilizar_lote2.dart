@@ -4,6 +4,7 @@ import 'effect.dart';
 import 'jpeg_damage.dart';
 import 'distorcao_ae.dart';
 import 'shake.dart';
+import 'glitch_distorcao.dart';
 import 'vhs_damage.dart';
 import 'tv_damage.dart';
 import 'pixel_sort_sapphire.dart';
@@ -80,5 +81,18 @@ final receitasSapphire = <EffectType, ReceitaSapphire>{
   EffectType.dissolveShake: ReceitaSapphire(
     asset: 'shaders/shake.frag',
     valores: valoresDissolveShake,
+  ),
+  EffectType.glitchify: ReceitaSapphire(
+    asset: 'shaders/glitchify.frag',
+    valores: valoresGlitchify,
+  ),
+  EffectType.twitch: ReceitaSapphire(
+    asset: 'shaders/twitch.frag',
+    valores: valoresTwitch,
+  ),
+  EffectType.crossGlitch: ReceitaSapphire(
+    asset: 'shaders/cross_glitch.frag',
+    valores: valoresCrossGlitch,
+    cores: true,
   ),
 };

@@ -2922,3 +2922,146 @@ Surgir tremendo	Shaky fade in	Aparecer temblando	ظهور مهتز	흔들리며 
 Dissolver suave	Soft dissolve	Disolución suave	تذويب ناعم	부드러운 디졸브	ソフトディゾルブ	柔和溶解	कोमल डिज़ॉल्व	Larut lembut	Мягкое растворение
 S_Shake	S_Shake	S_Shake	S_Shake	S_Shake	S_Shake	S_Shake	S_Shake	S_Shake	S_Shake
 S_DissolveShake	S_DissolveShake	S_DissolveShake	S_DissolveShake	S_DissolveShake	S_DissolveShake	S_DissolveShake	S_DissolveShake	S_DissolveShake	S_DissolveShake
+128 px	128 px	128 px	128 px	128 px	128 px	128 px	128 px	128 px	128 px
+16 px	16 px	16 px	16 px	16 px	16 px	16 px	16 px	16 px	16 px
+32 px	32 px	32 px	32 px	32 px	32 px	32 px	32 px	32 px	32 px
+64 px	64 px	64 px	64 px	64 px	64 px	64 px	64 px	64 px	64 px
+8 px	8 px	8 px	8 px	8 px	8 px	8 px	8 px	8 px	8 px
+Adição	Add	Suma	إضافة	더하기	加算	相加	जोड़	Tambah	Сложение
+Agrupamento dos blocos	Block Grouping	Agrupación de bloques	تجميع الكتل	블록 그룹화	ブロックのまとまり	块分组	ब्लॉक समूहन	Pengelompokan blok	Группировка блоков
+Aleatoriedade da cor	Color Randomness	Aleatoriedad del color	عشوائية اللون	색 무작위성	色のランダムさ	颜色随机性	रंग की यादृच्छिकता	Keacakan warna	Случайность цвета
+Aleatoriedade da duração	Duration Randomness	Aleatoriedad de la duración	عشوائية المدة	지속 시간 무작위성	長さのランダムさ	时长随机性	अवधि की यादृच्छिकता	Keacakan durasi	Случайность длительности
+Aleatoriedade da intensidade	Intensity Randomness	Aleatoriedad de la intensidad	عشوائية الشدة	강도 무작위성	強さのランダムさ	强度随机性	तीव्रता की यादृच्छिकता	Keacakan intensitas	Случайность интенсивности
+Aleatoriedade do intervalo	Interval Randomness	Aleatoriedad del intervalo	عشوائية الفاصل	간격 무작위성	間隔のランダムさ	间隔随机性	अंतराल की यादृच्छिकता	Keacakan interval	Случайность интервала
+Altura dos blocos	Block Height	Altura de bloques	ارتفاع الكتل	블록 높이	ブロックの高さ	块高度	ब्लॉक ऊँचाई	Tinggi blok	Высота блоков
+Ambas	Both	Ambas	كلاهما	둘 다	両方	两者	दोनों	Keduanya	Обе
+Ambos	Both	Ambos	كلاهما	둘 다	両方	两者	दोनों	Keduanya	Оба
+Bordas	Edges	Bordes	الحواف	가장자리	端	边缘	किनारे	Tepi	Края
+Canal escalado	Scaled Channel	Canal escalado	القناة المكبرة	배율 채널	スケールするチャンネル	缩放通道	स्केल किया चैनल	Kanal diskalakan	Масштабируемый канал
+Canal separado	Split Channel	Canal separado	القناة المنفصلة	분리 채널	分離するチャンネル	分离通道	अलग चैनल	Kanal terpisah	Разделённый канал
+Centro da escala	Scale Center	Centro de escala	مركز التحجيم	배율 중심	スケールの中心	缩放中心	स्केल केंद्र	Pusat skala	Центр масштаба
+Chacoalhar	Shake	Sacudir	اهتزاز	흔들기	シェイク	抖动	हिलाना	Guncang	Тряска
+Chacoalhar X	Shake X	Sacudir X	اهتزاز X	흔들기 X	シェイク X	抖动 X	हिलाना X	Guncang X	Тряска X
+Chacoalhar Y	Shake Y	Sacudir Y	اهتزاز Y	흔들기 Y	シェイク Y	抖动 Y	हिलाना Y	Guncang Y	Тряска Y
+Cintilação	Flicker	Parpadeo	وميض	깜빡임	ちらつき	闪烁	झिलमिलाहट	Kedip	Мерцание
+Começar no zero	Start at Zero	Empezar en cero	البدء من الصفر	0에서 시작	ゼロから開始	从零开始	शून्य से शुरू	Mulai dari nol	Начать с нуля
+Complexidade do padrão	Pattern Complexity	Complejidad del patrón	تعقيد النمط	패턴 복잡도	パターンの複雑さ	图案复杂度	पैटर्न जटिलता	Kompleksitas pola	Сложность узора
+Compor sobre o original	Composite Over	Componer sobre el original	تركيب فوق الأصل	원본 위에 합성	元画像に合成	合成到原图上	मूल के ऊपर कंपोज़िट	Komposit di atas asli	Поверх оригинала
+Comportamento da luz	Light Behavior	Comportamiento de la luz	سلوك الضوء	빛 동작	光の挙動	光线行为	प्रकाश व्यवहार	Perilaku cahaya	Поведение света
+Cor de fundo	Background Color	Color de fondo	لون الخلفية	배경색	背景色	背景颜色	पृष्ठभूमि रंग	Warna latar	Цвет фона
+Cortar base	Crop Bottom	Recortar abajo	قص الأسفل	아래 자르기	下を切り取り	裁剪底部	नीचे काटें	Pangkas bawah	Обрезать снизу
+Cortar direita	Crop Right	Recortar derecha	قص اليمين	오른쪽 자르기	右を切り取り	裁剪右侧	दाएँ काटें	Pangkas kanan	Обрезать справа
+Cortar esquerda	Crop Left	Recortar izquierda	قص اليسار	왼쪽 자르기	左を切り取り	裁剪左侧	बाएँ काटें	Pangkas kiri	Обрезать слева
+Cortar topo	Crop Top	Recortar arriba	قص الأعلى	위 자르기	上を切り取り	裁剪顶部	ऊपर काटें	Pangkas atas	Обрезать сверху
+Corte do ruído	Noise Cutoff	Corte del ruido	حد الضوضاء	노이즈 컷오프	ノイズのカットオフ	噪点阈值	नॉइज़ कटऑफ़	Batas derau	Порог шума
+Cross Glitch	Cross Glitch	Cross Glitch	Cross Glitch	Cross Glitch	Cross Glitch	Cross Glitch	Cross Glitch	Cross Glitch	Cross Glitch
+Dano em blocos	Block Damage	Daño en bloques	تلف الكتل	블록 손상	ブロック破損	块损坏	ब्लॉक क्षति	Kerusakan blok	Повреждение блоков
+Degraus da escala	Scale Quantization Steps	Pasos de escala	درجات التحجيم	배율 단계	スケールの段階	缩放步数	स्केल चरण	Langkah skala	Шаги масштаба
+Degraus da oscilação	Wiggle Quantization Steps	Pasos de oscilación	درجات التذبذب	흔들림 단계	揺れの段階	摆动步数	डगमगाहट चरण	Langkah goyang	Шаги колебания
+Degraus das fatias	Slice Quantization Steps	Pasos de rebanadas	درجات الشرائح	조각 단계	スライスの段階	切片步数	स्लाइस चरण	Langkah irisan	Шаги срезов
+Densidade das linhas perdidas	Line Drop Density	Densidad de líneas perdidas	كثافة الخطوط المفقودة	손실 선 밀도	欠落ラインの密度	丢失线密度	गुम लाइनों का घनत्व	Kepadatan garis hilang	Плотность пропавших линий
+Densidade do deslocamento	Shift Density	Densidad del desplazamiento	كثافة الإزاحة	이동 밀도	ずれの密度	偏移密度	खिसकाव घनत्व	Kepadatan geser	Плотность сдвига
+Deslocamento máximo	Max Random Shift	Desplazamiento máximo	أقصى إزاحة	최대 이동	最大ずれ	最大偏移	अधिकतम खिसकाव	Geser maksimum	Максимальный сдвиг
+Deslocar brilho	Brightness Offset	Desplazar brillo	إزاحة السطوع	밝기 오프셋	明るさのオフセット	亮度偏移	चमक ऑफ़सेट	Geser kecerahan	Сдвиг яркости
+Deslocar cor	Color Offset	Desplazar color	إزاحة اللون	색 오프셋	色のオフセット	颜色偏移	रंग ऑफ़सेट	Geser warna	Сдвиг цвета
+Deslocar saturação	Saturation Offset	Desplazar saturación	إزاحة التشبع	채도 오프셋	彩度のオフセット	饱和度偏移	संतृप्ति ऑफ़सेट	Geser saturasi	Сдвиг насыщенности
+Direção do deslize	Slide Direction	Dirección del deslizamiento	اتجاه الانزلاق	슬라이드 방향	スライドの方向	滑动方向	स्लाइड दिशा	Arah geser	Направление сдвига
+Direção dos blocos	Block Direction	Dirección de bloques	اتجاه الكتل	블록 방향	ブロックの方向	块方向	ब्लॉक दिशा	Arah blok	Направление блоков
+Duplicar linhas	Line Duplication	Duplicar líneas	تكرار الخطوط	선 복제	ラインの複製	复制线条	लाइनें दोहराएँ	Gandakan garis	Дублирование линий
+Duração do glitch	Glitch Duration	Duración del glitch	مدة الخلل	글리치 지속 시간	グリッチの長さ	故障时长	ग्लिच अवधि	Durasi glitch	Длительность глитча
+Escala de canal	Channel Scale	Escala de canal	تحجيم القناة	채널 배율	チャンネルのスケール	通道缩放	चैनल स्केल	Skala kanal	Масштаб канала
+Escala vertical	Vertical Scale	Escala vertical	تحجيم رأسي	세로 배율	縦スケール	垂直缩放	ऊर्ध्वाधर स्केल	Skala vertikal	Вертикальный масштаб
+Fatias	Slices	Rebanadas	شرائح	조각	スライス	切片	स्लाइस	Irisan	Срезы
+Ganho do ruído	Noise Gain	Ganancia del ruido	كسب الضوضاء	노이즈 게인	ノイズのゲイン	噪点增益	नॉइज़ गेन	Penguatan derau	Усиление шума
+Glitch cruzado	Cross Glitch	Glitch cruzado	خلل متقاطع	교차 글리치	クロスグリッチ	交叉故障	क्रॉस ग्लिच	Glitch silang	Перекрёстный глитч
+Glitch de canal	Channel Glitch	Glitch de canal	خلل القناة	채널 글리치	チャンネルグリッチ	通道故障	चैनल ग्लिच	Glitch kanal	Глитч канала
+Glitch de compressão	Compression Glitch	Glitch de compresión	خلل الضغط	압축 글리치	圧縮グリッチ	压缩故障	कंप्रेशन ग्लिच	Glitch kompresi	Глитч сжатия
+Glitch de cor	Color Glitch	Glitch de color	خلل اللون	색 글리치	カラーグリッチ	颜色故障	रंग ग्लिच	Glitch warna	Цветовой глитч
+Glitch de imagem	Image Glitch	Glitch de imagen	خلل الصورة	이미지 글리치	画像グリッチ	图像故障	इमेज ग्लिच	Glitch gambar	Глитч изображения
+Glitch de transformação	Transform Glitch	Glitch de transformación	خلل التحويل	변형 글리치	変形グリッチ	变换故障	ट्रांसफ़ॉर्म ग्लिच	Glitch transformasi	Глитч трансформации
+Glitch padrão	Default Glitch	Glitch estándar	خلل افتراضي	기본 글리치	標準グリッチ	默认故障	डिफ़ॉल्ट ग्लिच	Glitch bawaan	Стандартный глитч
+Inclinação do chacoalhar	Shake Skew	Inclinación de la sacudida	ميل الاهتزاز	흔들기 기울기	シェイクの傾き	抖动倾斜	हिलाने का झुकाव	Kemiringan guncang	Наклон тряски
+Intensidade da cintilação	Flicker Intensity	Intensidad del parpadeo	شدة الوميض	깜빡임 강도	ちらつきの強さ	闪烁强度	झिलमिलाहट तीव्रता	Intensitas kedip	Сила мерцания
+Intensidade do chacoalhar	Shake Intensity	Intensidad de la sacudida	شدة الاهتزاز	흔들기 강도	シェイクの強さ	抖动强度	हिलाने की तीव्रता	Intensitas guncang	Сила тряски
+Intensidade do deslocamento	Shift Intensity	Intensidad del desplazamiento	شدة الإزاحة	이동 강도	ずれの強さ	偏移强度	खिसकाव तीव्रता	Intensitas geser	Сила сдвига
+Intensidade do glitch	Glitch Intensity	Intensidad del glitch	شدة الخلل	글리치 강도	グリッチの強さ	故障强度	ग्लिच तीव्रता	Intensitas glitch	Сила глитча
+Intensidade dos blocos	Block Intensity	Intensidad de bloques	شدة الكتل	블록 강도	ブロックの強さ	块强度	ब्लॉक तीव्रता	Intensitas blok	Сила блоков
+Intervalo da cor	Color Interval	Intervalo del color	فاصل اللون	색 간격	色の間隔	颜色间隔	रंग अंतराल	Interval warna	Интервал цвета
+Intervalo da escala	Scale Interval	Intervalo de escala	فاصل التحجيم	배율 간격	スケールの間隔	缩放间隔	स्केल अंतराल	Interval skala	Интервал масштаба
+Intervalo da luz	Light Interval	Intervalo de luz	فاصل الضوء	빛 간격	光の間隔	光线间隔	प्रकाश अंतराल	Interval cahaya	Интервал света
+Intervalo do desfoque	Blur Interval	Intervalo del desenfoque	فاصل الضبابية	블러 간격	ぼかしの間隔	模糊间隔	ब्लर अंतराल	Interval buram	Интервал размытия
+Intervalo do deslize	Slide Interval	Intervalo del deslizamiento	فاصل الانزلاق	슬라이드 간격	スライドの間隔	滑动间隔	स्लाइड अंतराल	Interval geser	Интервал сдвига
+Intervalo do glitch	Glitch Interval	Intervalo del glitch	فاصل الخلل	글리치 간격	グリッチの間隔	故障间隔	ग्लिच अंतराल	Interval glitch	Интервал глитча
+JPEG	JPEG	JPEG	JPEG	JPEG	JPEG	JPEG	JPEG	JPEG	JPEG
+Lacunaridade	Lacunarity	Lacunaridad	الفجوية	래큐너리티	ラクナリティ	空隙度	लैकुनैरिटी	Lakunaritas	Лакунарность
+Ladrilhar	Tile	Mosaico	تبليط	타일	タイル	平铺	टाइल	Ubin	Плитка
+Largura dos blocos	Block Width	Ancho de bloques	عرض الكتل	블록 너비	ブロックの幅	块宽度	ब्लॉक चौड़ाई	Lebar blok	Ширина блоков
+Linhas perdidas	Line Drop	Líneas perdidas	خطوط مفقودة	손실된 선	欠落ライン	丢失线条	गुम लाइनें	Garis hilang	Пропавшие линии
+Luz suave	Soft Light	Luz suave	ضوء ناعم	소프트 라이트	ソフトライト	柔光	सॉफ़्ट लाइट	Cahaya lembut	Мягкий свет
+Mais claro	Lighten	Aclarar	تفتيح	밝게	比較（明）	变亮	हल्का	Terangkan	Замена светлым
+Mais escuro	Darken	Oscurecer	تعتيم	어둡게	比較（暗）	变暗	गहरा	Gelapkan	Замена тёмным
+Modo da cor	Color Mode	Modo de color	وضع اللون	색 모드	色のモード	颜色模式	रंग मोड	Mode warna	Режим цвета
+Modo da transformação	Transform Mode	Modo de transformación	وضع التحويل	변형 모드	変形のモード	变换模式	ट्रांसफ़ॉर्म मोड	Mode transformasi	Режим трансформации
+Modo das fatias	Slice Mode	Modo de rebanadas	وضع الشرائح	조각 모드	スライスのモード	切片模式	स्लाइस मोड	Mode irisan	Режим срезов
+Modo do canal	Channel Mode	Modo de canal	وضع القناة	채널 모드	チャンネルのモード	通道模式	चैनल मोड	Mode kanal	Режим канала
+Modo do desfoque	Blur Mode	Modo del desenfoque	وضع الضبابية	블러 모드	ぼかしのモード	模糊模式	ब्लर मोड	Mode buram	Режим размытия
+Modo dos blocos	Block Mode	Modo de bloques	وضع الكتل	블록 모드	ブロックのモード	块模式	ब्लॉक मोड	Mode blok	Режим блоков
+Multiplicador da compressão	Compression Multiplier	Multiplicador de compresión	مضاعف الضغط	압축 배수	圧縮の倍率	压缩倍数	कंप्रेशन गुणक	Pengali kompresi	Множитель сжатия
+Oitavas	Octaves	Octavas	الأوكتافات	옥타브	オクターブ	倍频	ऑक्टेव	Oktaf	Октавы
+Opacidade da cor	Color Opacity	Opacidad del color	عتامة اللون	색 불투명도	色の不透明度	颜色不透明度	रंग अपारदर्शिता	Opasitas warna	Непрозрачность цвета
+Opacidade da transformação	Transform Opacity	Opacidad de transformación	عتامة التحويل	변형 불투명도	変形の不透明度	变换不透明度	ट्रांसफ़ॉर्म अपारदर्शिता	Opasitas transformasi	Непрозрачность трансформации
+Opacidade das fatias	Slice Opacity	Opacidad de rebanadas	عتامة الشرائح	조각 불투명도	スライスの不透明度	切片不透明度	स्लाइस अपारदर्शिता	Opasitas irisan	Непрозрачность срезов
+Opacidade do desfoque	Blur Opacity	Opacidad del desenfoque	عتامة الضبابية	블러 불투명도	ぼかしの不透明度	模糊不透明度	ब्लर अपारदर्शिता	Opasitas buram	Непрозрачность размытия
+Opacidade do padrão	Pattern Opacity	Opacidad del patrón	عتامة النمط	패턴 불투명도	パターンの不透明度	图案不透明度	पैटर्न अपारदर्शिता	Opasitas pola	Непрозрачность узора
+Origem aleatória	Random Origin	Origen aleatorio	أصل عشوائي	무작위 원점	ランダムな原点	随机原点	यादृच्छिक मूल	Asal acak	Случайная точка
+Oscilação da escala	Scale Wiggle	Oscilación de escala	تذبذب التحجيم	배율 흔들림	スケールの揺れ	缩放摆动	स्केल डगमगाहट	Goyang skala	Колебание масштаба
+Oscilação da posição	Position Wiggle	Oscilación de posición	تذبذب الموضع	위치 흔들림	位置の揺れ	位置摆动	स्थिति डगमगाहट	Goyang posisi	Колебание позиции
+Oscilação do corte	Crop Wiggle	Oscilación del recorte	تذبذب القص	자르기 흔들림	切り取りの揺れ	裁剪摆动	क्रॉप डगमगाहट	Goyang pangkas	Колебание обрезки
+Padrão	Pattern	Patrón	نمط	패턴	パターン	图案	पैटर्न	Pola	Узор
+Pancada	Hit	Golpe	ضربة	히트	ヒット	冲击	झटका	Hentakan	Удар
+Pico do chacoalhar	Shake Peak	Pico de la sacudida	ذروة الاهتزاز	흔들기 최고점	シェイクのピーク	抖动峰值	हिलाने का शिखर	Puncak guncang	Пик тряски
+Pico do deslocamento	Shift Peak	Pico del desplazamiento	ذروة الإزاحة	이동 최고점	ずれのピーク	偏移峰值	खिसकाव शिखर	Puncak geser	Пик сдвига
+Pico dos blocos	Block Peak	Pico de bloques	ذروة الكتل	블록 최고점	ブロックのピーク	块峰值	ब्लॉक शिखर	Puncak blok	Пик блоков
+Pontilhado	Dither	Tramado	تنقيط	디더	ディザ	抖动点	डिदर	Dither	Дизеринг
+Posição X	Position X	Posición X	الموضع X	위치 X	位置 X	位置 X	स्थिति X	Posisi X	Позиция X
+Posição Y	Position Y	Posición Y	الموضع Y	위치 Y	位置 Y	位置 Y	स्थिति Y	Posisi Y	Позиция Y
+Posição das fatias	Slice Position	Posición de rebanadas	موضع الشرائح	조각 위치	スライスの位置	切片位置	स्लाइस स्थिति	Posisi irisan	Позиция срезов
+Preencher vãos	Fill Gaps	Rellenar huecos	ملء الفجوات	틈 채우기	隙間を埋める	填充空隙	खाली जगह भरें	Isi celah	Заполнить пробелы
+Qualidade das fatias	Slice Quality	Calidad de rebanadas	جودة الشرائح	조각 품질	スライスの品質	切片质量	स्लाइस गुणवत्ता	Kualitas irisan	Качество срезов
+Quantidade da escala	Scale Amount	Cantidad de escala	مقدار التحجيم	배율 양	スケールの量	缩放量	स्केल मात्रा	Jumlah skala	Величина масштаба
+Quantidade de cor	Color Amount	Cantidad de color	مقدار اللون	색 양	色の量	颜色量	रंग मात्रा	Jumlah warna	Величина цвета
+Quantidade de luz	Light Amount	Cantidad de luz	مقدار الضوء	빛 양	光の量	光线量	प्रकाश मात्रा	Jumlah cahaya	Величина света
+Quantidade do desfoque	Blur Amount	Cantidad de desenfoque	مقدار الضبابية	블러 양	ぼかしの量	模糊量	ब्लर मात्रा	Jumlah buram	Величина размытия
+Quantidade do deslize	Slide Amount	Cantidad de deslizamiento	مقدار الانزلاق	슬라이드 양	スライドの量	滑动量	स्लाइड मात्रा	Jumlah geser	Величина сдвига
+Quantidade do deslocamento	Shift Amount	Cantidad de desplazamiento	مقدار الإزاحة	이동 양	ずれの量	偏移量	खिसकाव मात्रा	Jumlah pergeseran	Величина смещения
+Refletir	Reflect	Reflejar	انعكاس	반사	反射	反射	प्रतिबिंब	Pantulkan	Отражение
+Reforço do desfoque	Blur Boost	Refuerzo del desenfoque	تعزيز الضبابية	블러 부스트	ぼかしのブースト	模糊增强	ब्लर बूस्ट	Penguat buram	Усиление размытия
+Repetir borda	Repeat Edge	Repetir borde	تكرار الحافة	가장자리 반복	端を繰り返す	重复边缘	किनारा दोहराएँ	Ulangi tepi	Повтор края
+Repetir pixels da borda	Repeat Edge Pixels	Repetir píxeles del borde	تكرار بكسلات الحافة	가장자리 픽셀 반복	端のピクセルを繰り返す	重复边缘像素	किनारे के पिक्सेल दोहराएँ	Ulangi piksel tepi	Повтор пикселей края
+Riscos de pixel	Pixel Streak	Rayas de píxeles	خطوط البكسل	픽셀 줄무늬	ピクセルの筋	像素条纹	पिक्सेल धारियाँ	Goresan piksel	Пиксельные полосы
+Riscos pelo ruído	Use Noise	Rayas por ruido	خطوط بالضوضاء	노이즈 줄무늬	ノイズで筋	噪点条纹	नॉइज़ से धारियाँ	Goresan derau	Полосы по шуму
+Riscos verticais	Vertical Sort	Rayas verticales	خطوط رأسية	세로 줄무늬	縦の筋	垂直条纹	ऊर्ध्वाधर धारियाँ	Goresan vertikal	Вертикальные полосы
+Saturação dos blocos	Block Saturation	Saturación de bloques	تشبع الكتل	블록 채도	ブロックの彩度	块饱和度	ब्लॉक संतृप्ति	Saturasi blok	Насыщенность блоков
+Separação RGB	RGB Split	Separación RGB	فصل RGB	RGB 분리	RGB分離	RGB 分离	RGB विभाजन	Pemisahan RGB	Разделение RGB
+Separação horizontal	Horizontal Split	Separación horizontal	فصل أفقي	가로 분리	水平分離	水平分离	क्षैतिज विभाजन	Pemisahan horizontal	Горизонтальное разделение
+Separação vertical	Vertical Split	Separación vertical	فصل رأسي	세로 분리	垂直分離	垂直分离	ऊर्ध्वाधर विभाजन	Pemisahan vertikal	Вертикальное разделение
+Sequência dos blocos	Block Run Length	Secuencia de bloques	تسلسل الكتل	블록 연속 길이	ブロックの連なり	块连续长度	ब्लॉक क्रम	Urutan blok	Серия блоков
+Sinal quebrado	Broken Signal	Señal rota	إشارة معطلة	깨진 신호	壊れた信号	信号损坏	टूटा सिग्नल	Sinyal rusak	Сломанный сигнал
+Suavidade dos tiques	Twitch Smoothness	Suavidad de los tics	نعومة الارتعاش	트위치 부드러움	ツイッチの滑らかさ	抽动平滑度	झटकों की कोमलता	Kehalusan kedutan	Плавность рывков
+Só blocos	Blocks Only	Solo bloques	الكتل فقط	블록만	ブロックのみ	仅块	केवल ब्लॉक	Hanya blok	Только блоки
+Só cor	Color Only	Solo color	اللون فقط	색만	色のみ	仅颜色	केवल रंग	Hanya warna	Только цвет
+Só deslize	Slide Only	Solo deslizamiento	الانزلاق فقط	슬라이드만	スライドのみ	仅滑动	केवल स्लाइड	Hanya geser	Только сдвиг
+Tamanho dos blocos	Block Size	Tamaño de bloques	حجم الكتل	블록 크기	ブロックのサイズ	块大小	ब्लॉक आकार	Ukuran blok	Размер блоков
+Tendência	Tendency	Tendencia	الميل	경향	傾向	倾向	प्रवृत्ति	Kecenderungan	Тенденция
+Tique padrão	Default Twitch	Tic estándar	ارتعاش افتراضي	기본 트위치	標準ツイッチ	默认抽动	डिफ़ॉल्ट झटका	Kedutan bawaan	Стандартный рывок
+Tremido forte	Heavy Shake	Temblor fuerte	اهتزاز قوي	강한 흔들림	強い揺れ	强烈抖动	तेज़ कंपन	Guncangan kuat	Сильная тряска
+Usar cor de fundo	Use Background Color	Usar color de fondo	استخدام لون الخلفية	배경색 사용	背景色を使用	使用背景颜色	पृष्ठभूमि रंग का उपयोग	Gunakan warna latar	Использовать цвет фона
+Variar cor do padrão	Vary Pattern Color	Variar color del patrón	تنويع لون النمط	패턴 색 변화	パターンの色を変化	改变图案颜色	पैटर्न रंग बदलें	Variasikan warna pola	Менять цвет узора
+Vazio	Empty	Vacío	فارغ	비어 있음	空	空	खाली	Kosong	Пусто
+Velocidade da escala	Scale Speed	Velocidad de escala	سرعة التحجيم	배율 속도	スケールの速度	缩放速度	स्केल गति	Kecepatan skala	Скорость масштаба
+Velocidade da separação	Split Speed	Velocidad de separación	سرعة الفصل	분리 속도	分離の速度	分离速度	विभाजन गति	Kecepatan pemisahan	Скорость разделения
+Velocidade da transformação	Transform Speed	Velocidad de transformación	سرعة التحويل	변형 속도	変形の速度	变换速度	ट्रांसफ़ॉर्म गति	Kecepatan transformasi	Скорость трансформации
+Velocidade dos blocos	Block Speed	Velocidad de bloques	سرعة الكتل	블록 속도	ブロックの速度	块速度	ब्लॉक गति	Kecepatan blok	Скорость блоков
+Verde e azul	Green and Blue	Verde y azul	أخضر وأزرق	초록과 파랑	緑と青	绿和蓝	हरा और नीला	Hijau dan biru	Зелёный и синий
+Vermelho e azul	Red and Blue	Rojo y azul	أحمر وأزرق	빨강과 파랑	赤と青	红和蓝	लाल और नीला	Merah dan biru	Красный и синий
+Vermelho e verde	Red and Green	Rojo y verde	أحمر وأخضر	빨강과 초록	赤と緑	红和绿	लाल और हरा	Merah dan hijau	Красный и зелёный

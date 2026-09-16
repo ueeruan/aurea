@@ -53,7 +53,11 @@ void main() {
             ),
         },
       );
-      final valores = receita.valores(fx, const Duration(milliseconds: 500));
+      // Efeito que dispara em rajadas (Cross Glitch) pode estar quieto num
+      // instante: vale o primeiro instante em que ele aparece.
+      var mudouEmAlgum = 0;
+      for (final ms in [500, 1100, 1700, 2300, 3100]) {
+      final valores = receita.valores(fx, Duration(milliseconds: ms));
       expect(valores.every((v) => v.isFinite), isTrue);
       final prog = await ui.FragmentProgram.fromAsset(receita.asset);
       var img = await _fixture();
@@ -68,7 +72,7 @@ void main() {
           ..setFloat(3, _lado.toDouble())
           ..setFloat(4, _lado.toDouble())
           ..setFloat(5, 1)
-          ..setFloat(6, .5)
+          ..setFloat(6, ms / 1000)
           ..setFloat(7, modo.toDouble());
         for (var i = 0; i < valores.length; i++) {
           s.setFloat(8 + i, valores[i]);
@@ -102,7 +106,10 @@ void main() {
           mudou++;
         }
       }
-      expect(mudou, greaterThan(20), reason: 'o efeito tem de aparecer');
+      mudouEmAlgum = mudou > mudouEmAlgum ? mudou : mudouEmAlgum;
+      if (mudouEmAlgum > 20) break;
+      }
+      expect(mudouEmAlgum, greaterThan(20), reason: 'o efeito tem de aparecer');
     });
   }
 }

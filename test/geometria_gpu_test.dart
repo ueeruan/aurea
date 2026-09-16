@@ -200,6 +200,47 @@ void main() {
     );
   });
 
+  test('150 materiais numa malha lisa: cada grupo reserva so o que usa', () {
+    // O modelo que derrubava o iPhone: muitos materiais. Cada grupo nascia
+    // com espaco para min(65 536, faces do modelo) triangulos e um mapa do
+    // tamanho de todos os vertices. Aqui o que se reserva tem de ser o que
+    // o grupo usa, e os arrays continuam iguais aos da referencia.
+    final esfera = esferaUV(160, 100);
+    final normais = <Vec3?>[
+      for (final v in esfera.verts) Vec3(v[0], v[1], v[2]),
+    ];
+    final paleta = [
+      for (var i = 0; i < 150; i++) Material3D(name: 'm$i', roughness: i / 150),
+    ];
+    final materiais = [
+      for (var f = 0; f < esfera.faces.length; f++) paleta[(f * 7) % 150],
+    ];
+    final grupos = montarGruposGpu(
+      malha: esfera,
+      materiais: materiais,
+      normais: normais,
+    );
+    expect(grupos.length, 150);
+    var reservado = 0;
+    for (final g in grupos.values) {
+      final (vertices, indices) = g.capacidade;
+      expect(indices, g.indices, reason: 'indices exatos');
+      expect(vertices, greaterThanOrEqualTo(g.vertices));
+      expect(vertices, lessThanOrEqualTo(g.indices));
+      reservado += vertices * 32 + indices * 4;
+    }
+    final usado = grupos.values.fold(0, (s, g) => s + g.vertices * 32 + g.indices * 4);
+    // Folga so dos vertices lisos compartilhados (limite superior = um por
+    // canto). A conta antiga reservava min(65536, faces) por grupo.
+    final antigo = 150 * math.min(65536, esfera.faces.length) * 44;
+    expect(reservado, lessThan(usado * 4));
+    expect(reservado, lessThan(antigo ~/ 10));
+    iguais(
+      _referencia(malha: esfera, materiais: materiais, normais: normais),
+      grupos,
+    );
+  });
+
   test('duzentos mil triangulos cabem no tempo', () {
     final grande = esferaUV(400, 250); // ~200 mil
     final materiais = List<Material3D>.filled(grande.faces.length, const Material3D());

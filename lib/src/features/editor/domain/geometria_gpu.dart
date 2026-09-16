@@ -24,11 +24,19 @@ import 'scene3d.dart';
 
 /// Um grupo de faces de um mesmo material: uma primitiva, uma chamada.
 class GrupoGpu {
-  GrupoGpu(this.material, {int capacidadeInicial = 256})
-    : _pos = Float32List(capacidadeInicial * 3),
-      _nor = Float32List(capacidadeInicial * 3),
-      _uv = Float32List(capacidadeInicial * 2),
-      _idx = Uint32List(capacidadeInicial * 3);
+  GrupoGpu(Material3D material, {int capacidadeInicial = 256})
+    : this.exato(
+        material,
+        vertices: capacidadeInicial,
+        indices: capacidadeInicial * 3,
+      );
+
+  /// Com a capacidade ja contada: nada cresce, nada sobra.
+  GrupoGpu.exato(this.material, {required int vertices, required int indices})
+    : _pos = Float32List(vertices * 3),
+      _nor = Float32List(vertices * 3),
+      _uv = Float32List(vertices * 2),
+      _idx = Uint32List(indices);
 
   final Material3D material;
   Float32List _pos, _nor, _uv;
@@ -36,8 +44,8 @@ class GrupoGpu {
   int _vertices = 0;
   int _indices = 0;
 
-  /// Vertice de origem -> indice neste grupo (so nas malhas lisas).
-  Int32List? _mapa;
+  /// Quanto foi reservado (vertices, indices) — o teste de memoria le.
+  (int, int) get capacidade => (_pos.length ~/ 3, _idx.length);
 
   int get vertices => _vertices;
   int get indices => _indices;
@@ -129,7 +137,6 @@ Map<Material3D, GrupoGpu> montarGruposGpu({
   List<Vec3?>? normais,
   List<Offset?>? uvs,
 }) {
-  final grupos = <Material3D, GrupoGpu>{};
   final verts = malha.verts;
   final lisa =
       normais != null &&
@@ -159,60 +166,116 @@ Map<Material3D, GrupoGpu> montarGruposGpu({
     }
   }
 
-  for (var f = 0; f < malha.faces.length; f++) {
-    final face = malha.faces[f];
-    if (face.length < 3) continue;
-    final material = materiais[f];
-    final grupo = grupos[material] ??= GrupoGpu(
-      material,
-      capacidadeInicial: math.max(256, math.min(1 << 16, malha.faces.length)),
-    );
-
-    // Normal da face (Newell): decide o lado e serve as faces planas.
-    var nx = 0.0, ny = 0.0, nz = 0.0;
-    for (var i = 0; i < face.length; i++) {
-      final a = verts[face[i]], b = verts[face[(i + 1) % face.length]];
-      nx += (a[1] - b[1]) * (a[2] + b[2]);
-      ny += (a[2] - b[2]) * (a[0] + b[0]);
-      nz += (a[0] - b[0]) * (a[1] + b[1]);
+  // CONTAR ANTES DE RESERVAR. Cada grupo nascia com espaco para
+  // min(65 536, faces do modelo) triangulos e, na malha lisa, com um mapa
+  // do tamanho de TODOS os vertices do modelo. Um modelo de 2 milhoes de
+  // vertices com 150 materiais pedia ~430 MB de buffers mais 1,2 GB de
+  // mapas de uma vez, dentro do build — o iOS matava o app. Agora uma
+  // passada conta faces e triangulos por material, cada grupo recebe o
+  // tamanho exato e um mapa so serve a todos (os grupos sao montados um
+  // de cada vez, com as faces na ordem original: os arrays saem iguais).
+  final nFaces = malha.faces.length;
+  final ordemDoMaterial = <Material3D, int>{};
+  final facesPorGrupo = <int>[];
+  final triangulosPorGrupo = <int>[];
+  final grupoDaFace = Int32List(nFaces);
+  for (var f = 0; f < nFaces; f++) {
+    final lados = malha.faces[f].length;
+    if (lados < 3) {
+      grupoDaFace[f] = -1;
+      continue;
     }
-    final len = math.sqrt(nx * nx + ny * ny + nz * nz);
-    if (len < 1e-12) continue;
-    nx /= len;
-    ny /= len;
-    nz /= len;
+    final g = ordemDoMaterial.putIfAbsent(materiais[f], () {
+      facesPorGrupo.add(0);
+      triangulosPorGrupo.add(0);
+      return facesPorGrupo.length - 1;
+    });
+    grupoDaFace[f] = g;
+    facesPorGrupo[g]++;
+    triangulosPorGrupo[g] += lados - 2;
+  }
+  final inicio = Int32List(facesPorGrupo.length + 1);
+  for (var g = 0; g < facesPorGrupo.length; g++) {
+    inicio[g + 1] = inicio[g] + facesPorGrupo[g];
+  }
+  final facesEmOrdem = Int32List(inicio.last);
+  final cursor = Int32List.fromList(inicio.sublist(0, facesPorGrupo.length));
+  for (var f = 0; f < nFaces; f++) {
+    final g = grupoDaFace[f];
+    if (g >= 0) facesEmOrdem[cursor[g]++] = f;
+  }
 
-    for (var i = 1; i < face.length - 1; i++) {
-      var ia = face[0], ib = face[i], ic = face[i + 1];
-      // O motor descarta a face de costas pela ordem dos vertices; a
-      // normal manda: se a ordem discorda dela, inverte.
-      final a = verts[ia], b = verts[ib], c = verts[ic];
-      final ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
-      final vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
-      final wx = uy * vz - uz * vy,
-          wy = uz * vx - ux * vz,
-          wz = ux * vy - uy * vx;
-      if (wx * nx + wy * ny + wz * nz < 0) {
-        final tmp = ib;
-        ib = ic;
-        ic = tmp;
+  final grupos = <Material3D, GrupoGpu>{};
+  // Vertice de origem -> indice no grupo atual; `mapaDoGrupo` diz de qual
+  // grupo e a entrada, entao nao ha nada para limpar entre um e outro.
+  final mapa = lisa ? Int32List(verts.length) : null;
+  final mapaDoGrupo = lisa
+      ? (Int32List(verts.length)..fillRange(0, verts.length, -1))
+      : null;
+
+  for (final entrada in ordemDoMaterial.entries) {
+    final g = entrada.value;
+    final indices = triangulosPorGrupo[g] * 3;
+    final grupo = grupos[entrada.key] = GrupoGpu.exato(
+      entrada.key,
+      vertices: lisa ? math.min(indices, verts.length) : indices,
+      indices: indices,
+    );
+    for (var o = inicio[g]; o < inicio[g + 1]; o++) {
+      final face = malha.faces[facesEmOrdem[o]];
+
+      // Normal da face (Newell): decide o lado e serve as faces planas.
+      var nx = 0.0, ny = 0.0, nz = 0.0;
+      for (var i = 0; i < face.length; i++) {
+        final a = verts[face[i]], b = verts[face[(i + 1) % face.length]];
+        nx += (a[1] - b[1]) * (a[2] + b[2]);
+        ny += (a[2] - b[2]) * (a[0] + b[0]);
+        nz += (a[0] - b[0]) * (a[1] + b[1]);
       }
-      for (final vi in [ia, ib, ic]) {
-        final p = verts[vi];
-        if (lisa) {
-          final mapa = grupo._mapa ??= Int32List(verts.length)
-            ..fillRange(0, verts.length, -1);
-          var idx = mapa[vi];
-          if (idx < 0) {
-            final n = normais[vi]!;
+      final len = math.sqrt(nx * nx + ny * ny + nz * nz);
+      if (len < 1e-12) continue;
+      nx /= len;
+      ny /= len;
+      nz /= len;
+
+      for (var i = 1; i < face.length - 1; i++) {
+        var ia = face[0], ib = face[i], ic = face[i + 1];
+        // O motor descarta a face de costas pela ordem dos vertices; a
+        // normal manda: se a ordem discorda dela, inverte.
+        final a = verts[ia], b = verts[ib], c = verts[ic];
+        final ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
+        final vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+        final wx = uy * vz - uz * vy,
+            wy = uz * vx - ux * vz,
+            wz = ux * vy - uy * vx;
+        if (wx * nx + wy * ny + wz * nz < 0) {
+          final tmp = ib;
+          ib = ic;
+          ic = tmp;
+        }
+        for (final vi in [ia, ib, ic]) {
+          final p = verts[vi];
+          if (mapa != null) {
+            if (mapaDoGrupo![vi] != g) {
+              final n = normais![vi]!;
+              uvDe(vi, p, nx, ny, nz);
+              mapa[vi] = grupo._adicionar(
+                p[0],
+                p[1],
+                p[2],
+                n.x,
+                n.y,
+                n.z,
+                u,
+                v,
+              );
+              mapaDoGrupo[vi] = g;
+            }
+            grupo._indice(mapa[vi]);
+          } else {
             uvDe(vi, p, nx, ny, nz);
-            idx = grupo._adicionar(p[0], p[1], p[2], n.x, n.y, n.z, u, v);
-            mapa[vi] = idx;
+            grupo._indice(grupo._adicionar(p[0], p[1], p[2], nx, ny, nz, u, v));
           }
-          grupo._indice(idx);
-        } else {
-          uvDe(vi, p, nx, ny, nz);
-          grupo._indice(grupo._adicionar(p[0], p[1], p[2], nx, ny, nz, u, v));
         }
       }
     }

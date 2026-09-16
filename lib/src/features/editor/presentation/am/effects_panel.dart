@@ -559,13 +559,20 @@ class _CartaoDoEfeito extends StatelessWidget {
         ),
       });
     }
+    final nomes = effect.spec.colorLabels;
     if (effect.spec.hasColor) {
-      linhas.add(_LinhaDeCor(cor: effect.color, aoMudar: onColor));
+      linhas.add(
+        _LinhaDeCor(
+          rotulo: nomes.isNotEmpty ? nomes.first : 'Cor',
+          cor: effect.color,
+          aoMudar: onColor,
+        ),
+      );
     }
     for (var i = 0; i < effect.spec.extraColors; i++) {
       linhas.add(
         _LinhaDeCor(
-          rotulo: 'Cor ${i + 2}',
+          rotulo: i + 1 < nomes.length ? nomes[i + 1] : 'Cor ${i + 2}',
           cor: effect.extraColor(i),
           aoMudar: (c) => onExtraColor(i, c),
         ),

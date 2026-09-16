@@ -3,6 +3,7 @@ import 'dart:ui';
 import 'package:uuid/uuid.dart';
 
 import 'correcao_de_cor.dart';
+import 'estilizar.dart';
 import 'keyframe.dart';
 
 /// Efeitos aplicaveis a uma camada (blocos combinaveis, ordem importa).
@@ -126,6 +127,13 @@ enum EffectType {
   bordasAsperas,
   // --- recomeco do zero (16/09): correcao de cor com a conta do AE ---
   exposure,
+  // --- aba Estilizar, lote 1 (16/09): CC e Sapphire ---
+  threshold,
+  thresholdRgb,
+  blockLoad,
+  scanLines,
+  halfTone,
+  edgeColorize,
 }
 
 /// O tipo a partir do IDENTIFICADOR estavel.
@@ -336,7 +344,12 @@ class EffectSpec {
     this.procedural = false,
     this.montar = const [],
     this.presets = const [],
+    this.colorLabels = const [],
   });
+
+  /// Nomes das cores na ficha (principal primeiro, depois as extras).
+  /// Vazio = "Cor", "Cor 2"...
+  final List<String> colorLabels;
 
   /// IDENTIFICADOR ESTAVEL, em snake_case e em ingles.
   ///
@@ -411,7 +424,10 @@ class EffectSpec {
 /// O enum `EffectType` e a maquinaria antiga (o passe de pixel de 62
 /// modos) continuam de pe de proposito: o corte segue por partes, cada
 /// uma inteira.
-const effectSpecs = <EffectType, EffectSpec>{...efeitosDeCorrecaoDeCor};
+const effectSpecs = <EffectType, EffectSpec>{
+  ...efeitosDeCorrecaoDeCor,
+  ...efeitosDeEstilizar,
+};
 
 /// OS EFEITOS DE EDIT, na ordem em que se procura: batida, glitch,
 /// tempo e coloring. E o atalho "Edits" da galeria — quem vem do Alight

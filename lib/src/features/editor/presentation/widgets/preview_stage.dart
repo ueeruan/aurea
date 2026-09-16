@@ -55,6 +55,7 @@ import 'linear_light.dart';
 import 'pixel_effect_engine.dart';
 import 'passe_de_cor.dart';
 import '../../domain/correcao_de_cor.dart';
+import '../../domain/estilizar.dart';
 import '../../domain/pixel_effect.dart';
 import '../../domain/bloom.dart';
 import '../../domain/coloring.dart';
@@ -3454,6 +3455,20 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
         }
         continue;
       }
+      // ESTILIZAR (lote 1): uma passada por efeito.
+      if (modoDeEstilo.containsKey(effect.type)) {
+        final quadro = QuadroDeEstilo.de(effect, local);
+        if (quadro != null) {
+          out = PassadaDeEstilo(
+            key: ValueKey('estilo-${effect.id}'),
+            quadro: quadro,
+            escalaRef: math.min(fxWidth, fxHeight) / 1080.0,
+            tempo: local.inMicroseconds / 1e6,
+            child: out,
+          );
+        }
+        continue;
+      }
       if (effect.type == EffectType.unsharpMask) {
         out = PassadaDeNitidez(
           key: ValueKey('unsharp-mask-${effect.id}'),
@@ -3528,6 +3543,12 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
         case EffectType.hueSaturation:
         case EffectType.exposure:
         case EffectType.unsharpMask:
+        case EffectType.threshold:
+        case EffectType.thresholdRgb:
+        case EffectType.blockLoad:
+        case EffectType.scanLines:
+        case EffectType.halfTone:
+        case EffectType.edgeColorize:
           break;
 
         case EffectType.gaussianBlur:

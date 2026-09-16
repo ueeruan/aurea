@@ -5,6 +5,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 
 import '../../domain/correcao_de_cor.dart';
+import '../../domain/estilizar.dart';
 import 'fx_lote2.dart';
 
 /// O MOTOR DA CORRECAO DE COR: os dois shaders do lote novo.
@@ -18,6 +19,7 @@ class MotorDeCorrecao {
 
   static ui.FragmentProgram? _cor;
   static ui.FragmentProgram? _nitidez;
+  static ui.FragmentProgram? _estilo;
   static Future<void>? _carregando;
 
   /// O erro de carga, para o teste e o log dizerem o que houve.
@@ -25,6 +27,7 @@ class MotorDeCorrecao {
 
   static bool get corPronta => _cor != null;
   static bool get nitidezPronta => _nitidez != null;
+  static bool get estiloPronto => _estilo != null;
 
   static Future<void> warmUp() => _carregando ??= _carregar();
 
@@ -43,6 +46,64 @@ class MotorDeCorrecao {
       falha = '$erro';
       debugPrint('AUREA unsharp mask indisponivel: $erro');
     }
+    try {
+      _estilo = await ui.FragmentProgram.fromAsset('shaders/estilizar.frag');
+    } catch (erro) {
+      falha = '$erro';
+      debugPrint('AUREA estilizar indisponivel: $erro');
+    }
+  }
+
+  /// Floats 2..43 do shader de Estilizar.
+  static void configurarEstilo(
+    ui.FragmentShader shader,
+    QuadroDeEstilo q, {
+    required bool filtro,
+    required Size logico,
+    required double escalaRef,
+    required double tempo,
+  }) {
+    shader
+      ..setFloat(2, filtro ? 1 : 0)
+      ..setFloat(3, logico.width)
+      ..setFloat(4, logico.height)
+      ..setFloat(5, escalaRef)
+      ..setFloat(6, q.modo.toDouble())
+      ..setFloat(7, tempo);
+    for (var i = 0; i < 16; i++) {
+      shader.setFloat(8 + i, i < q.valores.length ? q.valores[i] : 0);
+    }
+    for (var k = 0; k < 5; k++) {
+      final c = k < q.cores.length ? q.cores[k] : const Color(0xFF000000);
+      shader
+        ..setFloat(24 + 4 * k, c.r)
+        ..setFloat(25 + 4 * k, c.g)
+        ..setFloat(26 + 4 * k, c.b)
+        ..setFloat(27 + 4 * k, c.a);
+    }
+  }
+
+  @visibleForTesting
+  static ui.FragmentShader shaderDeEstilo(
+    QuadroDeEstilo q, {
+    required ui.Image imagem,
+    double escalaRef = 1,
+    double tempo = 0,
+  }) {
+    final shader = _estilo!.fragmentShader();
+    configurarEstilo(
+      shader,
+      q,
+      filtro: false,
+      logico: Size(imagem.width.toDouble(), imagem.height.toDouble()),
+      escalaRef: escalaRef,
+      tempo: tempo,
+    );
+    shader
+      ..setFloat(0, imagem.width.toDouble())
+      ..setFloat(1, imagem.height.toDouble())
+      ..setImageSampler(0, imagem);
+    return shader;
   }
 
   /// Floats 2..35 do shader de cor.
@@ -252,6 +313,79 @@ class _PassadaDeNitidezState extends State<PassadaDeNitidez> {
       );
     }
     if (p == null) return widget.child;
+    return FxSnapshot(
+      painter: _PintorDeShader(
+        shader,
+        assinatura,
+        (s, logico) => configurar(s, logico, false),
+      ),
+      child: widget.child,
+    );
+  }
+}
+
+/// A PASSADA DE UM EFEITO DE ESTILIZAR (CC e Sapphire, lote 1).
+class PassadaDeEstilo extends StatefulWidget {
+  const PassadaDeEstilo({
+    super.key,
+    required this.quadro,
+    required this.escalaRef,
+    required this.tempo,
+    required this.child,
+  });
+
+  final QuadroDeEstilo quadro;
+  final double escalaRef;
+
+  /// Segundos no tempo da camada (o ruido do ScanLines troca por quadro).
+  final double tempo;
+  final Widget child;
+
+  @override
+  State<PassadaDeEstilo> createState() => _PassadaDeEstiloState();
+}
+
+class _PassadaDeEstiloState extends State<PassadaDeEstilo> {
+  ui.FragmentShader? _shader;
+
+  @override
+  void dispose() {
+    _shader?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final programa = MotorDeCorrecao._estilo;
+    if (programa == null) return widget.child;
+    final shader = _shader ??= programa.fragmentShader();
+    final q = widget.quadro;
+    void configurar(ui.FragmentShader s, Size logico, bool filtro) =>
+        MotorDeCorrecao.configurarEstilo(
+          s,
+          q,
+          filtro: filtro,
+          logico: logico,
+          escalaRef: widget.escalaRef,
+          tempo: widget.tempo,
+        );
+    final assinatura = [
+      q.modo.toDouble(),
+      ...q.valores,
+      for (final c in q.cores) ...[c.r, c.g, c.b, c.a],
+      widget.escalaRef,
+      // O ruido do ScanLines anda por quadro; os outros ignoram o tempo.
+      if (q.modo == 5) widget.tempo,
+    ];
+    if (ui.ImageFilter.isShaderFilterSupported) {
+      return FiltroDeShader(
+        shader: shader,
+        ativo: true,
+        assinatura: assinatura,
+        configurar: (s, logico) => configurar(s, logico, true),
+        child: widget.child,
+      );
+    }
     return FxSnapshot(
       painter: _PintorDeShader(
         shader,

@@ -67,8 +67,7 @@ void main() {
       isNull,
       reason: 'a aba de efeitos estourou ao abrir',
     );
-    expect(effectSpecs, hasLength(5));
-    for (final spec in effectSpecs.values) {
+    for (final spec in effectSpecs.values.where((s) => s.category == 'Color')) {
       expect(
         find.byKey(ValueKey('efeito-${spec.id}')),
         findsOneWidget,

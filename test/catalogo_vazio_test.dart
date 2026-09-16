@@ -14,14 +14,14 @@ import 'package:aurea/src/features/editor/domain/video_project.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('o catalogo e so a correcao de cor', () {
-    expect(effectSpecs.keys.toSet(), {
+  test('a correcao de cor esta inteira no catalogo', () {
+    expect(effectSpecs.keys.toSet().containsAll({
       EffectType.unsharpMask,
       EffectType.levels,
       EffectType.brightnessContrast,
       EffectType.hueSaturation,
       EffectType.exposure,
-    });
+    }), isTrue);
   });
 
   test('efeito que voltou vai e volta do arquivo com os numeros', () {

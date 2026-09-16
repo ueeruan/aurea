@@ -95,15 +95,19 @@ void main() {
 
   group('as fichas', () {
     test('cinco efeitos, todos em Cor, com os padroes do After Effects', () {
-      expect(effectSpecs.keys, {
+      final cor = [
+        for (final e in effectSpecs.entries)
+          if (e.value.category == 'Color') e.key,
+      ];
+      expect(cor.toSet(), {
         EffectType.unsharpMask,
         EffectType.levels,
         EffectType.brightnessContrast,
         EffectType.hueSaturation,
         EffectType.exposure,
       });
-      for (final spec in effectSpecs.values) {
-        expect(spec.category, 'Color', reason: spec.id);
+      for (final t in cor) {
+        final spec = effectSpecs[t]!;
         expect(effectTypeFromId(spec.id), isNotNull, reason: spec.id);
         expect(spec.presets, hasLength(3), reason: spec.id);
         for (final k in spec.montar) {

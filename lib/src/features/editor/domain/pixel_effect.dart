@@ -157,14 +157,6 @@ const pixelKernels = <EffectType, PixelKernel>{
   ]),
   EffectType.unmult: PixelKernel(8, ['limiar', 'suavidade']),
   EffectType.tint: PixelKernel(9, ['strength']),
-  EffectType.vignette: PixelKernel(10, [
-    'quantidade',
-    'raio',
-    'suavidade',
-    'forma',
-    'centroX',
-    'centroY',
-  ]),
   EffectType.mosaic: PixelKernel(11, ['blocos']),
   EffectType.filmGrain: PixelKernel(12, ['intensidade', 'tamanho', 'semente']),
   EffectType.fractalNoise: PixelKernel(13, [

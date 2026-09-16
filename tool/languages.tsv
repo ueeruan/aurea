@@ -2599,3 +2599,56 @@ Salvar como preset	Save as Preset	Guardar como preajuste	حفظ كإعداد م�
 Meus presets	My Presets	Mis preajustes	إعداداتي المسبقة	내 프리셋	マイプリセット	我的预设	मेरे प्रीसेट	Preset saya	Мои пресеты
 Como usar este efeito	How to Use This Effect	Cómo usar este efecto	كيفية استخدام هذا التأثير	이 효과 사용법	このエフェクトの使い方	如何使用此效果	इस इफ़ेक्ट का उपयोग कैसे करें	Cara memakai efek ini	Как использовать этот эффект
 Movimento assado em keyframes	Motion baked into keyframes	Movimiento convertido en fotogramas clave	تم تحويل الحركة إلى إطارات مفتاحية	움직임을 키프레임으로 변환했습니다	動きをキーフレームに変換しました	运动已烘焙为关键帧	मोशन कीफ़्रेम में बदल दिया गया	Gerakan dijadikan keyframe	Движение запечено в ключевые кадры
+CC Threshold	CC Threshold	CC Threshold	CC Threshold	CC Threshold	CC Threshold	CC Threshold	CC Threshold	CC Threshold	CC Threshold
+Luminância	Luminance	Luminancia	الإضاءة	휘도	輝度	亮度	ल्यूमिनेंस	Luminans	Яркость
+Misturar com original	Blend w. Original	Mezclar con original	المزج مع الأصل	원본과 혼합	元の画像とブレンド	与原图混合	मूल के साथ मिलाएँ	Campur dengan asli	Смешать с оригиналом
+Tinta	Ink	Tinta	حبر	잉크	インク	墨水	स्याही	Tinta	Чернила
+Meio a meio	Half and Half	Mitad y mitad	نصف ونصف	반반	半々	一半一半	आधा-आधा	Setengah-setengah	Пополам
+Negativo	Negative	Negativo	سلبي	네거티브	ネガ	负片	नेगेटिव	Negatif	Негатив
+CC Threshold RGB	CC Threshold RGB	CC Threshold RGB	CC Threshold RGB	CC Threshold RGB	CC Threshold RGB	CC Threshold RGB	CC Threshold RGB	CC Threshold RGB	CC Threshold RGB
+Limiar vermelho	Red Threshold	Umbral rojo	عتبة الأحمر	빨강 임계값	赤のしきい値	红色阈值	लाल थ्रेशोल्ड	Ambang merah	Порог красного
+Limiar verde	Green Threshold	Umbral verde	عتبة الأخضر	초록 임계값	緑のしきい値	绿色阈值	हरा थ्रेशोल्ड	Ambang hijau	Порог зелёного
+Limiar azul	Blue Threshold	Umbral azul	عتبة الأزرق	파랑 임계값	青のしきい値	蓝色阈值	नीला थ्रेशोल्ड	Ambang biru	Порог синего
+Inverter vermelho	Invert Red Channel	Invertir rojo	عكس الأحمر	빨강 반전	赤を反転	反转红色	लाल उलटें	Balik merah	Инвертировать красный
+Inverter verde	Invert Green Channel	Invertir verde	عكس الأخضر	초록 반전	緑を反転	反转绿色	हरा उलटें	Balik hijau	Инвертировать зелёный
+Inverter azul	Invert Blue Channel	Invertir azul	عكس الأزرق	파랑 반전	青を反転	反转蓝色	नीला उलटें	Balik biru	Инвертировать синий
+Pop	Pop	Pop	بوب	팝	ポップ	流行	पॉप	Pop	Поп
+CC Vignette	CC Vignette	CC Vignette	CC Vignette	CC Vignette	CC Vignette	CC Vignette	CC Vignette	CC Vignette	CC Vignette
+Ângulo de visão	Angle of View	Ángulo de visión	زاوية الرؤية	화각	画角	视角	दृश्य कोण	Sudut pandang	Угол обзора
+Proteger luzes	Pin Highlights	Proteger luces	حماية الإضاءات	하이라이트 보호	ハイライトを保護	保护高光	हाइलाइट बचाएँ	Lindungi sorotan	Защитить света
+Clarear bordas	Lighten Edges	Aclarar bordes	تفتيح الحواف	가장자리 밝게	縁を明るく	提亮边缘	किनारे उजले करें	Terangkan tepi	Осветлить края
+CC Block Load	CC Block Load	CC Block Load	CC Block Load	CC Block Load	CC Block Load	CC Block Load	CC Block Load	CC Block Load	CC Block Load
+Conclusão	Completion	Finalización	الاكتمال	완료	完了度	完成度	पूर्णता	Penyelesaian	Завершение
+Varreduras	Scans	Pasadas	عمليات المسح	스캔	スキャン	扫描次数	स्कैन	Pindaian	Проходы
+Começar vazio	Start Cleared	Empezar vacío	البدء فارغًا	비운 상태로 시작	空から開始	从空白开始	खाली से शुरू	Mulai kosong	Начать с пустого
+Bilinear	Bilinear	Bilineal	ثنائي الخطية	쌍선형	バイリニア	双线性	बाइलिनियर	Bilinear	Билинейный
+Metade	Halfway	Mitad	النصف	절반	半分	一半	आधा	Setengah	Половина
+Blocos grandes	Big Blocks	Bloques grandes	كتل كبيرة	큰 블록	大きなブロック	大块	बड़े ब्लॉक	Blok besar	Крупные блоки
+S_ScanLines	S_ScanLines	S_ScanLines	S_ScanLines	S_ScanLines	S_ScanLines	S_ScanLines	S_ScanLines	S_ScanLines	S_ScanLines
+Frequência	Frequency	Frecuencia	التردد	빈도	周波数	频率	आवृत्ति	Frekuensi	Частота
+Nitidez das linhas	Lines Sharpness	Nitidez de líneas	حدة الخطوط	선 선명도	ラインのシャープさ	线条锐度	लाइनों की शार्पनेस	Ketajaman garis	Резкость линий
+Deslocar linhas	Lines Shift	Desplazar líneas	إزاحة الخطوط	선 이동	ラインをずらす	偏移线条	लाइनें खिसकाएँ	Geser garis	Сдвиг линий
+Deslocar vermelho	Shift Red	Desplazar rojo	إزاحة الأحمر	빨강 이동	赤をずらす	偏移红色	लाल खिसकाएँ	Geser merah	Сдвиг красного
+Deslocar verde	Shift Green	Desplazar verde	إزاحة الأخضر	초록 이동	緑をずらす	偏移绿色	हरा खिसकाएँ	Geser hijau	Сдвиг зелёного
+Deslocar azul	Shift Blue	Desplazar azul	إزاحة الأزرق	파랑 이동	青をずらす	偏移蓝色	नीला खिसकाएँ	Geser biru	Сдвиг синего
+Ruído	Add Noise	Ruido	الضوضاء	노이즈	ノイズ	噪点	नॉइज़	Derau	Шум
+Frequência do ruído	Noise Freq Rel	Frecuencia del ruido	تردد الضوضاء	노이즈 빈도	ノイズの周波数	噪点频率	नॉइज़ आवृत्ति	Frekuensi derau	Частота шума
+Suavizar fonte	Smooth Source	Suavizar fuente	تنعيم المصدر	소스 부드럽게	ソースを滑らかに	平滑源	स्रोत नरम करें	Haluskan sumber	Сгладить источник
+TV desalinhada	Misaligned TV	TV desalineada	تلفاز غير محاذى	어긋난 TV	ずれたテレビ	错位电视	बिगड़ा टीवी	TV tidak sejajar	Сбитый телевизор
+Linhas finas	Fine Lines	Líneas finas	خطوط رفيعة	가는 선	細い線	细线	पतली लाइनें	Garis halus	Тонкие линии
+CRT	CRT	CRT	CRT	CRT	CRT	CRT	CRT	CRT	ЭЛТ
+S_HalfTone	S_HalfTone	S_HalfTone	S_HalfTone	S_HalfTone	S_HalfTone	S_HalfTone	S_HalfTone	S_HalfTone	S_HalfTone
+Pretos	Black	Negros	أسود	검정	黒	黑色	काले	Hitam	Чёрные
+Brancos	White	Blancos	أبيض	흰색	白	白色	सफ़ेद	Putih	Белые
+Largura relativa	Rel Width	Ancho relativo	العرض النسبي	상대 너비	相対幅	相对宽度	सापेक्ष चौड़ाई	Lebar relatif	Относительная ширина
+Nitidez	Sharpness	Nitidez	الحدة	선명도	シャープさ	锐度	शार्पनेस	Ketajaman	Резкость
+Deslocar X	Shift X	Desplazar X	إزاحة X	X 이동	Xをずらす	偏移 X	X खिसकाएँ	Geser X	Сдвиг X
+Deslocar Y	Shift Y	Desplazar Y	إزاحة Y	Y 이동	Yをずらす	偏移 Y	Y खिसकाएँ	Geser Y	Сдвиг Y
+Pontos grandes	Big Dots	Puntos grandes	نقاط كبيرة	큰 점	大きな点	大圆点	बड़े डॉट	Titik besar	Крупные точки
+Pontos brancos	White Dots	Puntos blancos	نقاط بيضاء	흰 점	白い点	白色圆点	सफ़ेद डॉट	Titik putih	Белые точки
+S_EdgeColorize	S_EdgeColorize	S_EdgeColorize	S_EdgeColorize	S_EdgeColorize	S_EdgeColorize	S_EdgeColorize	S_EdgeColorize	S_EdgeColorize	S_EdgeColorize
+Suavizar bordas	Edge Smooth	Suavizar bordes	تنعيم الحواف	가장자리 부드럽게	エッジを滑らかに	平滑边缘	किनारे नरम करें	Haluskan tepi	Сглаживание краёв
+Suavizar subpixel	Subpixel Smooth	Suavizar subpíxel	تنعيم دون البكسل	서브픽셀 부드럽게	サブピクセル平滑化	子像素平滑	सबपिक्सेल नरम	Haluskan subpiksel	Субпиксельное сглаживание
+Girar cores	Rotate Colors	Rotar colores	تدوير الألوان	색 회전	色を回転	旋转颜色	रंग घुमाएँ	Putar warna	Повернуть цвета
+Bordas grossas	Thick Edges	Bordes gruesos	حواف سميكة	굵은 가장자리	太いエッジ	粗边缘	मोटे किनारे	Tepi tebal	Толстые края
+Girado	Rotated	Girado	مُدار	회전됨	回転	旋转	घुमाया हुआ	Diputar	Повёрнуто

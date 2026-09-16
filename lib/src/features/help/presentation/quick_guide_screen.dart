@@ -209,6 +209,33 @@ String effectHelp(EffectType type) => switch (type) {
     'A borda da camada deixa de terminar em faca: o alfa cai suave para '
         'fora, na largura que voce escolher. Serve para encaixar uma '
         'camada em cima de outra sem recorte aparente.',
+  EffectType.cortina =>
+    'A camada e revelada (ou escondida) por uma linha reta no angulo que '
+        'voce escolher. Dois keyframes no avanco e a cortina passa; a '
+        'suavidade decide se a beirada e faca ou degrade.',
+  EffectType.cortinaRadial =>
+    'A mesma cortina dando a volta, como ponteiro de relogio: serve de '
+        'contagem, de carregamento e de revelar em leque. O centro pode '
+        'sair do meio da camada.',
+  EffectType.apertarRecorte =>
+    'Come ou devolve a borda do recorte: positivo tira a franja verde que '
+        'sobra do chroma, negativo devolve o que o recorte comeu demais. '
+        'A suavidade evita a borda serrilhada.',
+  EffectType.meioTom =>
+    'A imagem vira bolinhas de impressao: onde tem luz, a bolota e grande; '
+        'onde tem sombra, e um ponto. Girar a trama evita o padrao de '
+        'moire, e a mistura deixa o efeito a meia forca.',
+  EffectType.contorno =>
+    'Uma linha na sua cor em volta da silhueta da camada — o contorno do '
+        'adesivo, sem precisar de estilo de camada. Com "so o contorno", '
+        'o miolo some e fica a linha.',
+  EffectType.brilhoPorDentro =>
+    'A luz nasce na borda e cai para dentro, sem vazar para fora da '
+        'silhueta. E o que da o neon aceso num texto ou numa forma.',
+  EffectType.bordasAsperas =>
+    'A beirada deixa de ser reta: o ruido come e devolve a borda, como '
+        'carimbo gasto ou papel rasgado. A evolucao faz a franja tremer '
+        'no tempo.',
   EffectType.nuvens =>
     'Nuvem de verdade, feita na hora: ruido em varias escalas entre as '
         'duas cores. A evolucao faz a nuvem andar sozinha, e recortar '

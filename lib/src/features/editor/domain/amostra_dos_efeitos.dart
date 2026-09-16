@@ -4,6 +4,7 @@ import 'effect.dart';
 import 'keyframe.dart';
 import 'ajuste_da_midia.dart';
 import 'layer.dart';
+import 'shape.dart';
 import 'video_project.dart';
 
 /// A PREVIA DE CADA EFEITO NA GALERIA e o efeito de verdade sobre uma foto.
@@ -43,6 +44,7 @@ VideoProject amostraDoEfeito(
   EffectType? tipo, {
   EffectPronto? pronto,
   String caminhoDaFoto = fotoDaAmostra,
+  bool silhueta = false,
 }) {
   const lado = ladoDaAmostra;
   const c = lado / 2;
@@ -87,11 +89,45 @@ VideoProject amostraDoEfeito(
             .withKeyframe(Duration.zero, 2.0)
             .withKeyframe(meio, 2.12)
             .withKeyframe(ciclo, 2.0),
-        effects: efeito(),
+        effects: silhueta ? const [] : efeito(),
       ),
-    ],
+      if (silhueta)
+        ShapeLayer(
+          name: 'estrela',
+          startTime: Duration.zero,
+          duration: const Duration(seconds: 4),
+          position: AnimatedOffset(const Offset(c, c)),
+          scaleX: AnimatedDouble(.62),
+          scaleY: AnimatedDouble(.62),
+          rotation: AnimatedDouble(0)
+              .withKeyframe(Duration.zero, 0)
+              .withKeyframe(ciclo, 24),
+          contents: ShapePresets.paramStar(),
+          effects: efeito(),
+        ),
+    ].reversed.toList(),
   );
 }
+
+/// EFEITOS QUE PRECISAM DE SILHUETA para a previa dizer alguma coisa.
+///
+/// Numa foto de tela cheia o alfa e 1 em todo lugar: contorno, brilho
+/// por dentro, pena, borda aspera e aperto de recorte nao tem beirada
+/// onde trabalhar, e a repeticao poe as copias fora do quadro. Para
+/// estes, a amostra ganha uma ESTRELA por cima da foto, e o efeito vai
+/// na estrela — que e onde eles moram na vida real (texto, forma,
+/// recorte).
+const efeitosComSilhueta = <String>{
+  'feather',
+  'matte_choker',
+  'outline',
+  'inner_glow',
+  'roughen_edges',
+  'repeat_line',
+  'repeat_grid',
+  'repeat_radial',
+  'repeat_scatter',
+};
 
 /// O instante do quadro [i] da tira.
 Duration instanteDoQuadro(int i) =>

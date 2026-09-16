@@ -159,8 +159,7 @@ class _FreehandOverlayState extends ConsumerState<FreehandOverlay> {
 
   void _fimDoTraco() {
     final pts = List<Offset>.of(_pontos);
-    final mesmoProjeto =
-        _projectId == ref.read(editorControllerProvider).id;
+    final mesmoProjeto = _projectId == ref.read(editorControllerProvider).id;
     _pontos.clear();
     _projectId = null;
     // Um gesto interrompido pela troca de projeto nao pode gravar no proximo.

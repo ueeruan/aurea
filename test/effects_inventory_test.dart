@@ -184,6 +184,13 @@ void main() {
         'pontos',
         'estrelas',
         'raios',
+        'cortina',
+        'cortinaRadial',
+        'apertarRecorte',
+        'meioTom',
+        'contorno',
+        'brilhoPorDentro',
+        'bordasAsperas',
       };
 
       final mortos = <String>[];

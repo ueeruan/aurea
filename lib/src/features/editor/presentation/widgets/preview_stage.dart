@@ -3389,6 +3389,14 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
         case EffectType.pontos:
         case EffectType.estrelas:
         case EffectType.raios:
+        // Cortina, recorte e borda: alfa por pixel, so no shader.
+        case EffectType.cortina:
+        case EffectType.cortinaRadial:
+        case EffectType.apertarRecorte:
+        case EffectType.meioTom:
+        case EffectType.contorno:
+        case EffectType.brilhoPorDentro:
+        case EffectType.bordasAsperas:
         // Cor seletiva depende da faixa de CADA pixel (qual canal manda,
         // quanto e branco, neutro ou preto): nao ha matriz honesta.
         case EffectType.selectiveColor:

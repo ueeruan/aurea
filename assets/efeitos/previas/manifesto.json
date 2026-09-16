@@ -260,7 +260,7 @@
       "preset": null
     },
     "feather": {
-      "preset": null
+      "preset": 1
     },
     "fade_in_out": {
       "preset": null
@@ -294,6 +294,29 @@
     },
     "radial_rays": {
       "preset": null
+    },
+    "wipe": {
+      "preset": null
+    },
+    "radial_wipe": {
+      "preset": null
+    },
+    "matte_choker": {
+      "preset": 1,
+      "neutro": true
+    },
+    "halftone": {
+      "preset": null
+    },
+    "outline": {
+      "preset": null
+    },
+    "inner_glow": {
+      "preset": null
+    },
+    "roughen_edges": {
+      "preset": 0,
+      "neutro": true
     }
   }
 }

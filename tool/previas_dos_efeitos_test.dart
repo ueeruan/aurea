@@ -89,11 +89,15 @@ void main() {
         ),
       );
 
-      Future<List<Uint8List>> quadros(EffectType? tipo, EffectPronto? p) async {
+      Future<List<Uint8List>> quadros(
+        EffectType? tipo,
+        EffectPronto? p, {
+        bool silhueta = false,
+      }) async {
         final container = ProviderContainer();
         container
             .read(editorControllerProvider.notifier)
-            .openProject(amostraDoEfeito(tipo, pronto: p));
+            .openProject(amostraDoEfeito(tipo, pronto: p, silhueta: silhueta));
         tempo.value = Duration.zero;
         await tester.pumpWidget(
           UncontrolledProviderScope(
@@ -130,7 +134,8 @@ void main() {
           );
           await tester.pump();
           final boundary =
-              chave.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+              chave.currentContext!.findRenderObject()!
+                  as RenderRepaintBoundary;
           final imagem = boundary.toImageSync(
             pixelRatio: ladoDaPrevia / ladoDaAmostra,
           );
@@ -150,7 +155,8 @@ void main() {
         var n = 0;
         for (var q = 0; q < a.length; q++) {
           for (var i = 0; i < a[q].length; i += 4) {
-            soma += (a[q][i] - b[q][i]).abs() +
+            soma +=
+                (a[q][i] - b[q][i]).abs() +
                 (a[q][i + 1] - b[q][i + 1]).abs() +
                 (a[q][i + 2] - b[q][i + 2]).abs();
             n += 3;
@@ -180,12 +186,18 @@ void main() {
       }
 
       final amostra = await quadros(null, null);
+      // A amostra COM SILHUETA: os efeitos de borda e de repeticao nao
+      // tem o que mostrar numa foto de tela cheia (alfa 1 em todo lugar,
+      // copias fora do quadro). Para eles, a comparacao e com esta.
+      final amostraComForma = await quadros(null, null, silhueta: true);
       gravarTira('_amostra', amostra);
       final manifesto = <String, Object?>{};
       final relatorio = StringBuffer();
       for (final entrada in effectSpecs.entries) {
         final spec = entrada.value;
         if (so != null && !so.contains(spec.id)) continue;
+        final comForma = efeitosComSilhueta.contains(spec.id);
+        final referencia = comForma ? amostraComForma : amostra;
         final candidatos = <int?>[
           null,
           if (spec.presets.length > 1) 1,
@@ -199,8 +211,9 @@ void main() {
           final q = await quadros(
             entrada.key,
             c == null ? null : spec.presets[c],
+            silhueta: comForma,
           );
-          final d = diferenca(q, amostra);
+          final d = diferenca(q, referencia);
           if (d > melhor) {
             melhor = d;
             escolhidos = q;
@@ -210,10 +223,7 @@ void main() {
         }
         gravarTira(spec.id, escolhidos!);
         final neutro = melhor < _limiarNeutro;
-        manifesto[spec.id] = {
-          'preset': preset,
-          if (neutro) 'neutro': true,
-        };
+        manifesto[spec.id] = {'preset': preset, if (neutro) 'neutro': true};
         // ignore: avoid_print
         print('${spec.id}: ${melhor.toStringAsFixed(2)}');
         relatorio.writeln(

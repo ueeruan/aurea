@@ -79,6 +79,40 @@ const pixelKernels = <EffectType, PixelKernel>{
     'mistura',
     'recortar',
   ]),
+  // CORTINA, RECORTE E BORDA (v1.1.1): todos mexem no alfa por pixel.
+  EffectType.cortina: PixelKernel(56, [
+    'progresso',
+    'angulo',
+    'suavidade',
+    'inverter',
+  ]),
+  EffectType.cortinaRadial: PixelKernel(57, [
+    'progresso',
+    'comeco',
+    'suavidade',
+    'sentido',
+    'centro_x',
+    'centro_y',
+  ]),
+  EffectType.apertarRecorte: PixelKernel(58, ['aperto', 'suavidade']),
+  EffectType.meioTom: PixelKernel(59, [
+    'quantidade',
+    'angulo',
+    'suavidade',
+    'mistura',
+  ]),
+  EffectType.contorno: PixelKernel(60, [
+    'espessura',
+    'suavidade',
+    'so_contorno',
+  ]),
+  EffectType.brilhoPorDentro: PixelKernel(61, ['tamanho', 'forca']),
+  EffectType.bordasAsperas: PixelKernel(62, [
+    'tamanho',
+    'escala',
+    'evolucao',
+    'semente',
+  ]),
   EffectType.raios: PixelKernel(55, [
     'quantidade',
     'centro_x',

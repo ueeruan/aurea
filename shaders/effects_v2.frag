@@ -211,6 +211,31 @@ float fbm(vec2 q, float t, int oitavas, float semente) {
   return total < .0001 ? 0.0 : soma / total;
 }
 
+
+// ------------------------------------------------------- borda e recorte
+// O ALFA EM VOLTA do pixel: o menor do anel ENCOLHE a silhueta (choker),
+// o maior ESPALHA. E com isso se faz apertar recorte, contorno, brilho
+// por dentro e borda aspera — tudo mora na mesma vizinhanca.
+float alfaNoAnel(vec2 uv, float raio, float menor) {
+  if (raio < .5) return src(uv).a;
+  float v = menor > .5 ? 1.0 : 0.0;
+  for (int i = 0; i < 12; i++) {
+    vec2 d = rotate2(vec2(1.0, 0.0), float(i) * .523598776);
+    float a1 = src(uv + d * raio / uSize).a;
+    float a2 = src(uv + d * raio * .55 / uSize).a;
+    v = menor > .5 ? min(v, min(a1, a2)) : max(v, max(a1, a2));
+  }
+  return v;
+}
+
+// A direcao da cortina, em espaco quadrado, de -0,5 a 0,5.
+float avancoDaCortina(vec2 uv, float angulo) {
+  vec2 q = vec2((uv.x - .5) * uSize.x / max(1.0, uSize.y), uv.y - .5);
+  vec2 d = vec2(cos(radians(angulo)), sin(radians(angulo)));
+  float meia = .5 * (abs(d.x) * uSize.x / max(1.0, uSize.y) + abs(d.y));
+  return (dot(q, d) + meia) / max(.001, meia * 2.0);
+}
+
 void main() {
   vec2 uv=FlutterFragCoord().xy/uSize;
   vec4 original=src(uv);
@@ -935,6 +960,100 @@ void main() {
     else {
       vec4 cor=mix(uColor,uColor2,v);
       porCima(c,a,cor.rgb,cor.a*clamp(p1.w,0.0,1.0));
+    }
+  }
+
+  // 56 - CORTINA. A camada entra ou sai por uma linha reta, no angulo
+  // que se quiser. A suavidade e a largura da beirada.
+  if(mode==56) {
+    float x=avancoDaCortina(uv,p0.y);
+    float s=max(.001,clamp(p0.z,0.0,1.0)*.5);
+    float v=smoothstep(clamp(p0.x,0.0,1.0)-s,clamp(p0.x,0.0,1.0)+s,1.0-x);
+    if(p0.w>.5) v=1.0-v;
+    a*=clamp(v,0.0,1.0);
+  }
+
+  // 57 - CORTINA RADIAL. A mesma ideia dando a volta: o ponteiro do
+  // relogio varre a camada a partir do angulo de comeco.
+  if(mode==57) {
+    vec2 c2=vec2(p1.x,p1.y);
+    vec2 d=vec2((uv.x-c2.x)*uSize.x/max(1.0,uSize.y),uv.y-c2.y);
+    float ang=fract((atan(d.y,d.x)/6.2831853)-p0.y/360.0+1.0);
+    if(p0.w>.5) ang=1.0-ang;
+    float s=max(.001,clamp(p0.z,0.0,1.0)*.5);
+    a*=clamp(1.0-smoothstep(clamp(p0.x,0.0,1.0)-s,
+                            clamp(p0.x,0.0,1.0)+s,ang),0.0,1.0);
+  }
+
+  // 58 - APERTAR O RECORTE. Positivo come a borda (tira a franja verde
+  // que sobra do chroma); negativo devolve o que o recorte comeu.
+  if(mode==58) {
+    float r=abs(p0.x)*uPixelScale;
+    if(r>.5) {
+      float v=alfaNoAnel(uv,r,p0.x>0.0?1.0:0.0);
+      float s=clamp(p0.y,0.0,1.0);
+      a=s>.001 ? mix(v,smoothstep(0.0,1.0,v),s) : v;
+    }
+  }
+
+  // 59 - MEIO-TOM. A luz da imagem vira bolinha: claro e bolota grande,
+  // escuro e ponto pequeno, como impressao de revista.
+  if(mode==59) {
+    vec2 q=gradeDoPadrao(uv,p0.y,max(1.0,p0.x),1.0);
+    vec2 f=fract(q)-.5;
+    float luz=clamp(lum(c),0.0,1.0);
+    float r=sqrt(luz)*1.05;
+    float s=max(.01,clamp(p0.z,0.0,1.0)*.6);
+    float v=1.0-smoothstep(r-s,r+s,length(f)*2.0);
+    float m=clamp(p0.w,0.0,1.0);
+    vec3 tinta=mix(uColor.rgb,uColor2.rgb,v);
+    c=mix(c,tinta,m);
+  }
+
+  // 60 - CONTORNO. Uma linha na cor escolhida em volta da silhueta —
+  // o que da o adesivo do recorte sem precisar de estilo de camada.
+  if(mode==60) {
+    float w=max(0.0,p0.x)*uPixelScale;
+    if(w>.5) {
+      float fora=alfaNoAnel(uv,w,0.0);
+      float s=clamp(p0.y,0.0,1.0);
+      float anel=clamp(fora-a,0.0,1.0);
+      anel=mix(anel,smoothstep(0.0,1.0,anel),s);
+      float forca=anel*uColor.a;
+      if(p0.z>.5) {
+        // So o contorno: o miolo sai.
+        c=uColor.rgb;
+        a=forca;
+      } else {
+        c=mix(c,uColor.rgb,forca);
+        a=max(a,forca);
+      }
+    }
+  }
+
+  // 61 - BRILHO POR DENTRO. A luz nasce na borda e cai para o miolo,
+  // sem passar da silhueta.
+  if(mode==61) {
+    float w=max(0.0,p0.x)*uPixelScale;
+    if(w>.5 && a>.001) {
+      float dentro=alfaNoAnel(uv,w,1.0);
+      float borda=clamp(a-dentro,0.0,1.0);
+      borda=smoothstep(0.0,1.0,borda);
+      c=mix(c,uColor.rgb,clamp(borda*clamp(p0.y,0.0,4.0)*uColor.a,0.0,1.0));
+    }
+  }
+
+  // 62 - BORDAS ASPERAS. O corte deixa de ser a faca: o ruido come e
+  // devolve a beirada, e a evolucao faz a franja tremer no tempo.
+  if(mode==62) {
+    float w=max(0.0,p0.x)*uPixelScale;
+    if(w>.5) {
+      vec2 q=vec2(uv.x*uSize.x/max(1.0,uSize.y),uv.y)*max(.5,p0.y);
+      float n=fbm(q,uTime*p0.z,3,p0.w);
+      float dentro=alfaNoAnel(uv,w,1.0);
+      float fora=alfaNoAnel(uv,w,0.0);
+      float faixa=clamp(fora-dentro,0.0,1.0);
+      a=clamp(a+(n-.5)*2.0*faixa,0.0,1.0);
     }
   }
 

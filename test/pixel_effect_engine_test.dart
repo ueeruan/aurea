@@ -90,7 +90,9 @@ void main() {
     // coisas de opacidade que so existem por pixel.
     // 47 -> 53 no mesmo dia: os geradores (modos 50 a 55) — nuvem,
     // xadrez, listra, ponto, estrela e raio.
-    expect(pixelKernels.length, 53);
+    // 53 -> 60 no mesmo dia: cortina, cortina radial, apertar recorte,
+    // meio-tom, contorno, brilho por dentro e bordas asperas (56 a 62).
+    expect(pixelKernels.length, 60);
     expect(
       pixelKernels.values.map((k) => k.mode).toSet().length,
       pixelKernels.length,

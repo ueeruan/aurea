@@ -2,6 +2,7 @@ import 'dart:ui';
 
 import 'effect.dart';
 import 'jpeg_damage.dart';
+import 'vhs_damage.dart';
 import 'tv_damage.dart';
 import 'pixel_sort_sapphire.dart';
 import 'auto_paint.dart';
@@ -50,5 +51,9 @@ final receitasSapphire = <EffectType, ReceitaSapphire>{
     asset: 'shaders/tv_damage.frag',
     valores: valoresTvDamage,
     cores: true,
+  ),
+  EffectType.vhsDamage: ReceitaSapphire(
+    asset: 'shaders/vhs_damage.frag',
+    valores: valoresVhsDamage,
   ),
 };

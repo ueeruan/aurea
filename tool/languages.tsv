@@ -2785,3 +2785,65 @@ Sem sinal	No signal	Sin señal	لا توجد إشارة	신호 없음	信号な�
 Desligando	Turning off	Apagándose	جارٍ الإيقاف	꺼지는 중	電源オフ中	正在关机	बंद हो रहा है	Mematikan	Выключается
 Tingir luzes	Tint lights	Teñir luces	تلوين الإضاءات	밝은 영역 색조	ハイライトの色味	亮部着色	रोशनी रंगें	Warnai terang	Тонировать света
 Tingir sombras	Tint darks	Teñir sombras	تلوين الظلال	어두운 영역 색조	暗部の色味	暗部着色	छाया रंगें	Warnai gelap	Тонировать тени
+S_VHSDamage	S_VHSDamage	S_VHSDamage	S_VHSDamage	S_VHSDamage	S_VHSDamage	S_VHSDamage	S_VHSDamage	S_VHSDamage	S_VHSDamage
+Estilo de cor	Color style	Estilo de color	نمط اللون	색 스타일	カラースタイル	色彩风格	रंग शैली	Gaya warna	Цветовой стиль
+LUT 1	LUT 1	LUT 1	LUT 1	LUT 1	LUT 1	LUT 1	LUT 1	LUT 1	LUT 1
+Força da LUT 1	LUT 1 strength	Fuerza de LUT 1	قوة LUT 1	LUT 1 강도	LUT 1 の強さ	LUT 1 强度	LUT 1 की शक्ति	Kekuatan LUT 1	Сила LUT 1
+LUT 2	LUT 2	LUT 2	LUT 2	LUT 2	LUT 2	LUT 2	LUT 2	LUT 2	LUT 2
+Força da LUT 2	LUT 2 strength	Fuerza de LUT 2	قوة LUT 2	LUT 2 강도	LUT 2 の強さ	LUT 2 强度	LUT 2 की शक्ति	Kekuatan LUT 2	Сила LUT 2
+Reduzir cor	Color downsample	Reducir color	تقليل اللون	색 해상도 낮추기	色の解像度を下げる	降低色彩分辨率	रंग घटाएँ	Turunkan warna	Понизить цвет
+Escala da cor	Color scale	Escala del color	مقياس اللون	색 스케일	色のスケール	色彩比例	रंग स्केल	Skala warna	Масштаб цвета
+Altura relativa	Relative height	Altura relativa	الارتفاع النسبي	상대 높이	相対的な高さ	相对高度	सापेक्ष ऊँचाई	Tinggi relatif	Относительная высота
+Aberração de cor	Color aberration	Aberración de color	زيغ اللون	색수차	色収差	色差	रंग विपथन	Aberasi warna	Цветовая аберрация
+Deslocar croma	Shift chroma	Desplazar croma	إزاحة الكروما	크로마 이동	クロマをずらす	偏移色度	क्रोमा खिसकाएँ	Geser kroma	Сдвиг цветности
+Deslocar croma Y	Shift chroma Y	Desplazar croma Y	إزاحة الكروما Y	크로마 Y 이동	クロマを Y にずらす	偏移色度 Y	क्रोमा Y खिसकाएँ	Geser kroma Y	Сдвиг цветности Y
+Desfoque do croma	Chroma blur	Desenfoque del croma	تمويه الكروما	크로마 흐림	クロマのぼかし	色度模糊	क्रोमा धुंधलापन	Buram kroma	Размытие цветности
+Nitidez do croma	Chroma sharpen	Nitidez del croma	حدة الكروما	크로마 선명도	クロマのシャープ	色度锐化	क्रोमा तीक्ष्णता	Ketajaman kroma	Резкость цветности
+Suavizar croma	Chroma soften	Suavizar croma	تنعيم الكروما	크로마 부드럽게	クロマを柔らかく	柔化色度	क्रोमा नरम करें	Haluskan kroma	Смягчение цветности
+Florescer cor	Color bloom	Florecer color	تفتح اللون	색 블룸	カラーブルーム	色彩绽放	रंग ब्लूम	Mekar warna	Цветовое свечение
+Saturação do florescer	Bloom saturation	Saturación del florecer	تشبع التفتح	블룸 채도	ブルームの彩度	绽放饱和度	ब्लूम संतृप्ति	Saturasi mekar	Насыщенность свечения
+Ajustar luma	Luma adjust	Ajustar luma	ضبط الإضاءة	루마 조정	輝度の調整	调整亮度	ल्यूमा समायोजन	Atur luma	Коррекция яркости
+Clarear sombras	Offset darks	Aclarar sombras	تفتيح الظلال	어두운 영역 밝히기	暗部を持ち上げる	提亮暗部	छाया उजली करें	Terangkan bayangan	Поднять тени
+Realçar meios-tons	Boost mids	Realzar medios tonos	تعزيز الدرجات المتوسطة	중간 톤 강화	中間調を強める	增强中间调	मध्य टोन बढ़ाएँ	Kuatkan nada tengah	Усилить средние тона
+Desfoque da luma	Luma blur	Desenfoque de luma	تمويه الإضاءة	루마 흐림	輝度のぼかし	亮度模糊	ल्यूमा धुंधलापन	Buram luma	Размытие яркости
+Desfoque relativo X	Relative blur X	Desenfoque relativo X	تمويه نسبي X	상대 흐림 X	相対ぼかし X	相对模糊 X	सापेक्ष धुंधलापन X	Buram relatif X	Относительное размытие X
+Desfoque relativo Y	Relative blur Y	Desenfoque relativo Y	تمويه نسبي Y	상대 흐림 Y	相対ぼかし Y	相对模糊 Y	सापेक्ष धुंधलापन Y	Buram relatif Y	Относительное размытие Y
+Ruído de fita	Tape noise	Ruido de cinta	ضجيج الشريط	테이프 노이즈	テープノイズ	磁带噪点	टेप शोर	Derau pita	Шум плёнки
+Ruído grosso	Coarse noise	Ruido grueso	ضجيج خشن	거친 노이즈	粗いノイズ	粗噪点	मोटा शोर	Derau kasar	Грубый шум
+Agrupar ruído grosso	Clump coarse noise	Agrupar ruido grueso	تجميع الضجيج الخشن	거친 노이즈 뭉치기	粗いノイズをまとめる	聚集粗噪点	मोटे शोर को समूहित करें	Gumpalkan derau kasar	Сгустить грубый шум
+Ruído fino	Fine noise	Ruido fino	ضجيج دقيق	미세 노이즈	細かいノイズ	细噪点	बारीक शोर	Derau halus	Мелкий шум
+Faixas do avanço	Fast forward bands	Bandas del avance	أشرطة التقديم	빨리 감기 띠	早送りの帯	快进条带	फ़ास्ट फ़ॉरवर्ड पट्टियाँ	Pita maju cepat	Полосы перемотки
+Variar faixas do avanço	Vary fast forward bands	Variar bandas del avance	تنويع أشرطة التقديم	빨리 감기 띠 변화	早送りの帯を変化	快进条带变化	फ़ास्ट फ़ॉरवर्ड पट्टियाँ बदलें	Variasikan pita maju cepat	Разброс полос перемотки
+Variar deslocamento	Vary shift	Variar desplazamiento	تنويع الإزاحة	이동 변화	ずれを変化	偏移变化	खिसकाव बदलें	Variasikan geser	Разброс сдвига
+Intensidade das linhas	Lines intensity	Intensidad de las líneas	شدة الخطوط	선 강도	線の強さ	线条强度	लाइनों की तीव्रता	Intensitas garis	Интенсивность строк
+Velocidade das linhas	Lines speed	Velocidad de las líneas	سرعة الخطوط	선 속도	線の速度	线条速度	लाइनों की गति	Kecepatan garis	Скорость строк
+Ruído nos riscos	Streaks noise	Ruido en las rayas	ضجيج الخدوش	줄무늬 노이즈	筋のノイズ	条痕噪点	धारियों में शोर	Derau goresan	Шум полос
+Quantidade de riscos	Streaks amount	Cantidad de rayas	كمية الخدوش	줄무늬 양	筋の量	条痕数量	धारियों की मात्रा	Jumlah goresan	Количество полос
+Opacidade dos riscos	Streaks opacity	Opacidad de las rayas	عتامة الخدوش	줄무늬 불투명도	筋の不透明度	条痕不透明度	धारियों की अपारदर्शिता	Opasitas goresan	Непрозрачность полос
+Frequência dos riscos	Streaks frequency	Frecuencia de las rayas	تردد الخدوش	줄무늬 빈도	筋の頻度	条痕频率	धारियों की आवृत्ति	Frekuensi goresan	Частота полос
+Comprimento dos riscos	Streaks length	Longitud de las rayas	طول الخدوش	줄무늬 길이	筋の長さ	条痕长度	धारियों की लंबाई	Panjang goresan	Длина полос
+Riscos pretos	Black streaks	Rayas negras	خدوش سوداء	검은 줄무늬	黒い筋	黑色条痕	काली धारियाँ	Goresan hitam	Чёрные полосы
+Faixas de riscos	Streak bands	Bandas de rayas	أشرطة الخدوش	줄무늬 띠	筋の帯	条痕条带	धारियों की पट्टियाँ	Pita goresan	Зоны полос
+Variar faixas de riscos	Vary streak bands	Variar bandas de rayas	تنويع أشرطة الخدوش	줄무늬 띠 변화	筋の帯を変化	条痕条带变化	धारियों की पट्टियाँ बदलें	Variasikan pita goresan	Разброс зон полос
+Tamanho das faixas de riscos	Streak band size	Tamaño de las bandas de rayas	حجم أشرطة الخدوش	줄무늬 띠 크기	筋の帯のサイズ	条痕条带大小	धारियों की पट्टियों का आकार	Ukuran pita goresan	Размер зон полос
+Deslocar faixas de riscos	Streak band shift	Desplazar bandas de rayas	إزاحة أشرطة الخدوش	줄무늬 띠 이동	筋の帯をずらす	偏移条痕条带	धारियों की पट्टियाँ खिसकाएँ	Geser pita goresan	Сдвиг зон полос
+Variar faixas de riscos (desl.)	Vary streak band shift	Variar desplazamiento de rayas	تنويع إزاحة أشرطة الخدوش	줄무늬 띠 이동 변화	筋の帯のずれを変化	条痕条带偏移变化	धारियों की पट्टियों का खिसकाव बदलें	Variasikan geser pita goresan	Разброс сдвига зон полос
+Rolagem dos riscos	Streaks roll speed	Desplazamiento de las rayas	تمرير الخدوش	줄무늬 롤 속도	筋のロール速度	条痕滚动速度	धारियों की रोल गति	Kecepatan gulir goresan	Прокрутка полос
+Faíscas	Sparkles	Destellos	شرارات	반짝임	きらめき	闪点	चमक	Kilauan	Искры
+Quantidade de faíscas	Sparkles amount	Cantidad de destellos	كمية الشرارات	반짝임 양	きらめきの量	闪点数量	चमक की मात्रा	Jumlah kilauan	Количество искр
+Opacidade das faíscas	Sparkles opacity	Opacidad de los destellos	عتامة الشرارات	반짝임 불투명도	きらめきの不透明度	闪点不透明度	चमक की अपारदर्शिता	Opasitas kilauan	Непрозрачность искр
+Frequência das faíscas	Sparkles frequency	Frecuencia de los destellos	تردد الشرارات	반짝임 빈도	きらめきの頻度	闪点频率	चमक की आवृत्ति	Frekuensi kilauan	Частота искр
+Comprimento das faíscas	Sparkles length	Longitud de los destellos	طول الشرارات	반짝임 길이	きらめきの長さ	闪点长度	चमक की लंबाई	Panjang kilauan	Длина искр
+Faíscas pretas	Black sparkles	Destellos negros	شرارات سوداء	검은 반짝임	黒いきらめき	黑色闪点	काली चमक	Kilauan hitam	Чёрные искры
+Faixas de faíscas	Sparkle bands	Bandas de destellos	أشرطة الشرارات	반짝임 띠	きらめきの帯	闪点条带	चमक की पट्टियाँ	Pita kilauan	Зоны искр
+Variar faixas de faíscas	Vary sparkle bands	Variar bandas de destellos	تنويع أشرطة الشرارات	반짝임 띠 변화	きらめきの帯を変化	闪点条带变化	चमक की पट्टियाँ बदलें	Variasikan pita kilauan	Разброс зон искр
+Tamanho das faixas de faíscas	Sparkle band size	Tamaño de las bandas de destellos	حجم أشرطة الشرارات	반짝임 띠 크기	きらめきの帯のサイズ	闪点条带大小	चमक की पट्टियों का आकार	Ukuran pita kilauan	Размер зон искр
+Deslocar faixas de faíscas	Sparkle band shift	Desplazar bandas de destellos	إزاحة أشرطة الشرارات	반짝임 띠 이동	きらめきの帯をずらす	偏移闪点条带	चमक की पट्टियाँ खिसकाएँ	Geser pita kilauan	Сдвиг зон искр
+Variar faixas de faíscas (desl.)	Vary sparkle band shift	Variar desplazamiento de destellos	تنويع إزاحة أشرطة الشرارات	반짝임 띠 이동 변화	きらめきの帯のずれを変化	闪点条带偏移变化	चमक की पट्टियों का खिसकाव बदलें	Variasikan geser pita kilauan	Разброс сдвига зон искр
+Rolagem das faíscas	Sparkles roll speed	Desplazamiento de los destellos	تمرير الشرارات	반짝임 롤 속도	きらめきのロール速度	闪点滚动速度	चमक की रोल गति	Kecepatan gulir kilauan	Прокрутка искр
+VHS cor 01	VHS color 01	VHS color 01	ألوان VHS 01	VHS 색 01	VHS カラー 01	VHS 色彩 01	VHS रंग 01	Warna VHS 01	Цвет VHS 01
+VHS cor 02	VHS color 02	VHS color 02	ألوان VHS 02	VHS 색 02	VHS カラー 02	VHS 色彩 02	VHS रंग 02	Warna VHS 02	Цвет VHS 02
+VHS cor 03	VHS color 03	VHS color 03	ألوان VHS 03	VHS 색 03	VHS カラー 03	VHS 色彩 03	VHS रंग 03	Warna VHS 03	Цвет VHS 03
+VHS cor 04	VHS color 04	VHS color 04	ألوان VHS 04	VHS 색 04	VHS カラー 04	VHS 色彩 04	VHS रंग 04	Warna VHS 04	Цвет VHS 04
+Fita gasta	Worn tape	Cinta gastada	شريط بالٍ	닳은 테이프	すり減ったテープ	磨损磁带	घिसा टेप	Pita usang	Изношенная плёнка
+Só a cor	Color only	Solo el color	اللون فقط	색만	色だけ	仅色彩	केवल रंग	Hanya warna	Только цвет

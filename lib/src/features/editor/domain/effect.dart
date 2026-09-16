@@ -5,6 +5,7 @@ import 'package:uuid/uuid.dart';
 import 'correcao_de_cor.dart';
 import 'estilizar.dart';
 import 'jpeg_damage.dart';
+import 'vhs_damage.dart';
 import 'tv_damage.dart';
 import 'pixel_sort_sapphire.dart';
 import 'auto_paint.dart';
@@ -437,6 +438,7 @@ const effectSpecs = <EffectType, EffectSpec>{
   ...efeitosDeCorrecaoDeCor,
   ...efeitosDeEstilizar,
   ...efeitosJpegDamage,
+  ...efeitosVhsDamage,
   ...efeitosTvDamage,
   ...efeitosPixelSort,
   ...efeitosAutoPaint,

@@ -3570,6 +3570,10 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
         case EffectType.autoPaint:
         case EffectType.tvDamage:
         case EffectType.vhsDamage:
+        case EffectType.ccLens:
+        case EffectType.opticsCompensation:
+        case EffectType.dissolveShake:
+        case EffectType.crossGlitch:
           break;
 
         case EffectType.gaussianBlur:

@@ -5,6 +5,7 @@ import 'package:uuid/uuid.dart';
 import 'correcao_de_cor.dart';
 import 'estilizar.dart';
 import 'jpeg_damage.dart';
+import 'distorcao_ae.dart';
 import 'vhs_damage.dart';
 import 'tv_damage.dart';
 import 'pixel_sort_sapphire.dart';
@@ -144,6 +145,11 @@ enum EffectType {
   autoPaint,
   tvDamage,
   vhsDamage,
+  // --- aba Distorcer (16/09): AE, CC e Sapphire ---
+  ccLens,
+  opticsCompensation,
+  dissolveShake,
+  crossGlitch,
 }
 
 /// O tipo a partir do IDENTIFICADOR estavel.
@@ -438,6 +444,7 @@ const effectSpecs = <EffectType, EffectSpec>{
   ...efeitosDeCorrecaoDeCor,
   ...efeitosDeEstilizar,
   ...efeitosJpegDamage,
+  ...efeitosDistorcaoAe,
   ...efeitosVhsDamage,
   ...efeitosTvDamage,
   ...efeitosPixelSort,

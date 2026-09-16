@@ -2,6 +2,7 @@ import 'dart:ui';
 
 import 'effect.dart';
 import 'jpeg_damage.dart';
+import 'distorcao_ae.dart';
 import 'vhs_damage.dart';
 import 'tv_damage.dart';
 import 'pixel_sort_sapphire.dart';
@@ -55,5 +56,20 @@ final receitasSapphire = <EffectType, ReceitaSapphire>{
   EffectType.vhsDamage: ReceitaSapphire(
     asset: 'shaders/vhs_damage.frag',
     valores: valoresVhsDamage,
+  ),
+  EffectType.ccLens: ReceitaSapphire(
+    asset: 'shaders/distorcao_ae.frag',
+    valores: valoresCcLens,
+    usaTempo: false,
+  ),
+  EffectType.opticsCompensation: ReceitaSapphire(
+    asset: 'shaders/distorcao_ae.frag',
+    valores: valoresOpticsCompensation,
+    usaTempo: false,
+  ),
+  EffectType.turbulentDisplace: ReceitaSapphire(
+    asset: 'shaders/distorcao_ae.frag',
+    valores: valoresTurbulentDisplace,
+    usaTempo: false,
   ),
 };

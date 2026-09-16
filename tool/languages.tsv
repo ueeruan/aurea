@@ -2847,3 +2847,27 @@ VHS cor 03	VHS color 03	VHS color 03	ألوان VHS 03	VHS 색 03	VHS カラー 
 VHS cor 04	VHS color 04	VHS color 04	ألوان VHS 04	VHS 색 04	VHS カラー 04	VHS 色彩 04	VHS रंग 04	Warna VHS 04	Цвет VHS 04
 Fita gasta	Worn tape	Cinta gastada	شريط بالٍ	닳은 테이프	すり減ったテープ	磨损磁带	घिसा टेप	Pita usang	Изношенная плёнка
 Só a cor	Color only	Solo el color	اللون فقط	색만	色だけ	仅色彩	केवल रंग	Hanya warna	Только цвет
+CC Lens	CC Lens	CC Lens	CC Lens	CC Lens	CC Lens	CC Lens	CC Lens	CC Lens	CC Lens
+Convergência	Convergence	Convergencia	التقارب	수렴	収束	汇聚	अभिसरण	Konvergensi	Схождение
+Bolha pequena	Small Bubble	Burbuja pequeña	فقاعة صغيرة	작은 버블	小さな泡	小气泡	छोटा बुलबुला	Gelembung kecil	Маленький пузырь
+Optics Compensation	Optics Compensation	Compensación óptica	تعويض البصريات	광학 보정	光学補正	光学补偿	ऑप्टिक्स कंपेंसेशन	Kompensasi optik	Оптическая компенсация
+Inverter distorção de lente	Reverse Lens Distortion	Invertir distorsión de lente	عكس تشوه العدسة	렌즈 왜곡 반전	レンズ歪みを反転	反转镜头畸变	लेंस विकृति उलटें	Balik distorsi lensa	Обратить искажение линзы
+Orientação do campo de visão	FOV Orientation	Orientación del campo de visión	اتجاه مجال الرؤية	시야 방향	視野の向き	视场方向	दृश्य क्षेत्र दिशा	Orientasi bidang pandang	Ориентация поля зрения
+Centro da exibição X	View Center X	Centro de la vista X	مركز العرض X	보기 중심 X	表示の中心 X	视图中心 X	दृश्य केंद्र X	Pusat tampilan X	Центр обзора X
+Centro da exibição Y	View Center Y	Centro de la vista Y	مركز العرض Y	보기 중심 Y	表示の中心 Y	视图中心 Y	दृश्य केंद्र Y	Pusat tampilan Y	Центр обзора Y
+Barril	Barrel	Barril	برميلي	배럴	樽型	桶形	बैरल	Tong	Бочка
+Zoom de lente	Lens Zoom	Zoom de lente	تكبير العدسة	렌즈 줌	レンズズーム	镜头变焦	लेंस ज़ूम	Zoom lensa	Зум линзы
+Turbulento	Turbulent	Turbulento	مضطرب	난류	乱流	湍流	अशांत	Turbulen	Турбулентный
+Protuberância	Bulge	Protuberancia	انتفاخ	볼록	膨張	凸起	उभार	Tonjolan	Выпуклость
+Torção	Twist	Torsión	التواء	비틀기	ねじれ	扭曲	मरोड़	Puntiran	Скручивание
+Turbulento suave	Turbulent Smoother	Turbulento suave	مضطرب أنعم	부드러운 난류	滑らかな乱流	平滑湍流	चिकना अशांत	Turbulen halus	Мягкая турбулентность
+Protuberância suave	Bulge Smoother	Protuberancia suave	انتفاخ أنعم	부드러운 볼록	滑らかな膨張	平滑凸起	चिकना उभार	Tonjolan halus	Мягкая выпуклость
+Torção suave	Twist Smoother	Torsión suave	التواء أنعم	부드러운 비틀기	滑らかなねじれ	平滑扭曲	चिकना मरोड़	Puntiran halus	Мягкое скручивание
+Cruzado	Cross Displacement	Cruzado	متقاطع	교차	交差	交叉	क्रॉस	Silang	Перекрёстное
+Evolução	Evolution	Evolución	التطور	진화	展開	演化	विकास	Evolusi	Эволюция
+Distribuição aleatória	Random Seed	Semilla aleatoria	البذرة العشوائية	랜덤 시드	ランダムシード	随机种子	रैंडम सीड	Benih acak	Случайное зерно
+Fixação	Pinning	Fijación	التثبيت	고정	固定	固定	पिनिंग	Penyematan	Закрепление
+Fixar cantos	Pin Corners	Fijar esquinas	تثبيت الزوايا	모서리 고정	角を固定	固定角	कोने पिन करें	Sematkan sudut	Закрепить углы
+Fixar todas as bordas	Pin All Edges	Fijar todos los bordes	تثبيت كل الحواف	모든 가장자리 고정	すべての端を固定	固定所有边缘	सभी किनारे पिन करें	Sematkan semua tepi	Закрепить все края
+Água	Water	Agua	ماء	물	水	水	पानी	Air	Вода
+Fumaça	Smoke	Humo	دخان	연기	煙	烟雾	धुआं	Asap	Дым

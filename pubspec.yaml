@@ -111,6 +111,7 @@ flutter:
     - shaders/unsharp_mask.frag
     - shaders/estilizar.frag
     - shaders/jpeg_damage.frag
+    - shaders/distorcao_ae.frag
     - shaders/vhs_damage.frag
     - shaders/tv_damage.frag
     - shaders/pixel_sort.frag

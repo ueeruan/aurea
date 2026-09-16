@@ -39,14 +39,18 @@ void main() {
   for (final entrada in receitasSapphire.entries) {
     final tipo = entrada.key;
     final receita = entrada.value;
-    test('${effectSpecs[tipo]!.name} roda com os padroes do AE', () async {
+    test('${effectSpecs[tipo]!.name} roda com os parametros do AE', () async {
       final spec = effectSpecs[tipo]!;
-      expect(spec.category, 'Stylize');
+      expect(['Stylize', 'Distort'], contains(spec.category));
       final fx = EffectInstance(
         type: tipo,
         params: {
+          // O primeiro preset por cima do padrao: Optics Compensation nasce
+          // com FOV 0, que no AE nao muda nada.
           for (final e in spec.params.entries)
-            e.key: AnimatedDouble(e.value.initial),
+            e.key: AnimatedDouble(
+              spec.presets.first.valores[e.key] ?? e.value.initial,
+            ),
         },
       );
       final valores = receita.valores(fx, const Duration(milliseconds: 500));

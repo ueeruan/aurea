@@ -87,6 +87,8 @@ class PlaybackController {
   /// nunca acumula, entao nunca existe correcao em bloco. Como a imagem
   /// do video vem da textura da plataforma, deslocar o relogio em alguns
   /// ms nao mexe um pixel — ao contrario do seek, que esvazia o decoder.
+  static const _zonaMortaUs = 25000;
+
   void anchorToMedia(Duration mediaTime) {
     if (!playing.value) return;
     final errUs = mediaTime.inMicroseconds - time.value.inMicroseconds;
@@ -103,6 +105,18 @@ class PlaybackController {
     // 25% com teto de 20 ms por amostra chegava a mexer 20% na velocidade
     // do relogio, e o texto por cima do video acelerava e freava. 10% com
     // teto de 8 ms segura a variacao abaixo de 8%.
+    //
+    // ZONA MORTA (beta 89, relato "com musica a variancia entre ticks
+    // aumenta"): a posicao do AUDIO chega em saltos do tamanho do buffer
+    // (20-40 ms), entao o erro medido pula para os dois lados a cada
+    // amostra. Corrigir esse ruido mexia no relogio dez vezes por segundo
+    // e era a variancia que o diagnostico via, com fps intacto. Abaixo de
+    // 25 ms (menos de um quadro a 30 fps) nao ha o que corrigir; a deriva
+    // de verdade cresce ate passar dali e entao e absorvida como antes.
+    if (errUs.abs() < _zonaMortaUs) {
+      debugBaseShiftUs = 0;
+      return;
+    }
     final step = (errUs * 0.1).round().clamp(-8000, 8000);
     debugBaseShiftUs = step;
     if (step != 0) _base += Duration(microseconds: step);

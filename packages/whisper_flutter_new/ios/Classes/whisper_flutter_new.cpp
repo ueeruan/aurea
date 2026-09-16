@@ -103,6 +103,17 @@ json transcribe(json jsonBody) noexcept
 
     // whisper init
     struct whisper_context *ctx = whisper_init_from_file(params.model.c_str());
+    // PATCH Aurea: init pode falhar (modelo corrompido/incompativel ou
+    // memoria insuficiente). Sem esta checagem, whisper_full(NULL, ...)
+    // derruba o processo inteiro — o app "fechava" ao iniciar a
+    // transcricao. Devolve erro tratavel no Dart em vez de SIGSEGV.
+    if (ctx == nullptr)
+    {
+        jsonResult["@type"] = "error";
+        jsonResult["message"] =
+            "failed to load the speech model (corrupted file or not enough memory)";
+        return jsonResult;
+    }
     std::string text_result = "";
     const auto fname_inp = params.audio;
     // WAV input
@@ -113,6 +124,7 @@ json transcribe(json jsonBody) noexcept
         {
             jsonResult["@type"] = "error";
             jsonResult["message"] = " failed to open WAV file ";
+            whisper_free(ctx);
             return jsonResult;
         }
 
@@ -120,6 +132,7 @@ json transcribe(json jsonBody) noexcept
         {
             jsonResult["@type"] = "error";
             jsonResult["message"] = "must be mono or stereo";
+            whisper_free(ctx);
             return jsonResult;
         }
 
@@ -127,6 +140,7 @@ json transcribe(json jsonBody) noexcept
         {
             jsonResult["@type"] = "error";
             jsonResult["message"] = "WAV file  must be 16 kHz";
+            whisper_free(ctx);
             return jsonResult;
         }
 
@@ -134,6 +148,7 @@ json transcribe(json jsonBody) noexcept
         {
             jsonResult["@type"] = "error";
             jsonResult["message"] = "WAV file  must be 16 bit";
+            whisper_free(ctx);
             return jsonResult;
         }
 
@@ -191,6 +206,7 @@ json transcribe(json jsonBody) noexcept
         {
             jsonResult["@type"] = "error";
             jsonResult["message"] = "failed to process audio";
+            whisper_free(ctx);
             return jsonResult;
         }
 

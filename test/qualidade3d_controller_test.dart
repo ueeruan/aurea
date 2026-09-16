@@ -143,7 +143,12 @@ void main() {
       expect(c.nivel.value, Qualidade3D.emergencia);
       expect(c.pressao.value, NivelDePressao.emergencia);
       expect(c.emEmergencia, isTrue);
-      relogio = relogio.add(const Duration(seconds: 9));
+      // Dez segundos depois a memoria ainda pode estar apertada: subir agora
+      // pediria alvos e sombras novos antes de a antiga ser devolvida.
+      relogio = relogio.add(const Duration(seconds: 10));
+      c.atualizarSistema(termico: 0);
+      expect(c.nivel.value, Qualidade3D.emergencia);
+      relogio = relogio.add(const Duration(seconds: 21));
       c.atualizarSistema(termico: 0);
       expect(c.emEmergencia, isFalse);
       // Um degrau a menos que antes, por precaucao.
@@ -162,7 +167,7 @@ void main() {
         memoria: const MemoriaDoSistema(total: 4 * gb, disponivel: 60 * mb, baixa: true),
       );
       expect(c.nivel.value, Qualidade3D.emergencia);
-      relogio = relogio.add(const Duration(seconds: 9));
+      relogio = relogio.add(const Duration(seconds: 31));
       c.atualizarSistema(
         memoria: const MemoriaDoSistema(total: 4 * gb, disponivel: 900 * mb, baixa: false),
       );

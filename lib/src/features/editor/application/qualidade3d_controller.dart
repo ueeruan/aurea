@@ -23,7 +23,7 @@ import 'sistema_nativo.dart';
 ///    volta depois de 120 quadros folgados. Lag e aceitavel; o degrau
 ///    existe para o quadro nao chegar perto do timeout da GPU.
 /// 3. A MEMORIA DO SISTEMA: o aviso de pressao do sistema (o mesmo que
-///    precede o jetsam) manda direto para emergencia por alguns segundos;
+///    precede o jetsam) manda direto para emergencia por 30 segundos;
 ///    a memoria disponivel, lida a cada dois segundos, poe um teto.
 /// 4. O TERMICO: aparelho serio/critico nao ganha ultra nem alta.
 ///
@@ -292,18 +292,28 @@ class ControladorDeQualidade3D with WidgetsBindingObserver {
   @override
   void didHaveMemoryPressure() => pressaoDeMemoria();
 
+  /// Quanto a emergencia segura o nivel depois do ultimo aviso.
+  ///
+  /// Eram oito segundos. Subir de nivel refaz luzes, sombras, malhas de
+  /// LOD e alvos de desenho — memoria nova pedida enquanto a antiga ainda
+  /// espera o coletor, e justamente logo depois de o sistema avisar que
+  /// ela esta acabando. Com a memoria ainda apertada, o aviso voltava, e
+  /// o nivel oscilava. Trinta segundos: um trecho mais simples da cena
+  /// vale mais que o app morto (estabilidade antes de qualidade).
+  static const janelaDeEmergencia = Duration(seconds: 30);
+
   /// O sistema avisou que a memoria esta acabando (iOS: o aviso que
-  /// precede o jetsam; Android: onTrimMemory). Emergencia por oito
-  /// segundos, e um degrau a menos depois.
+  /// precede o jetsam; Android: onTrimMemory). Emergencia por
+  /// [janelaDeEmergencia], e um degrau a menos depois.
   void pressaoDeMemoria() {
     _degrausPorTempo = math.min(2, _degrausPorTempo + 1);
     _emergencia('aviso de memoria do sistema');
   }
 
   void _emergencia(String porQue) {
-    _emergenciaAte = agora().add(const Duration(seconds: 8));
+    _emergenciaAte = agora().add(janelaDeEmergencia);
     _fimDaEmergencia?.cancel();
-    _fimDaEmergencia = Timer(const Duration(seconds: 8), () {
+    _fimDaEmergencia = Timer(janelaDeEmergencia, () {
       _recalcular('emergencia passou');
     });
     _recalcular(porQue);

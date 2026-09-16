@@ -69,7 +69,15 @@ external int _simplify(
 );
 
 @Native<
-  Int32 Function(Uint32, Uint32, Pointer<Uint8>, Uint32, Uint32, Pointer<Uint8>, Uint32)
+  Int32 Function(
+    Uint32,
+    Uint32,
+    Pointer<Uint8>,
+    Uint32,
+    Uint32,
+    Pointer<Uint8>,
+    Uint32,
+  )
 >(symbol: 'aurea_meshopt_decode')
 external int _decode(
   int mode,
@@ -86,9 +94,9 @@ external int _decode(
 )
 external int _encodeBound(int kind, int count, int extra);
 
-@Native<Uint32 Function(Pointer<Uint8>, Uint32, Pointer<Uint8>, Uint32, Uint32)>(
-  symbol: 'aurea_meshopt_encode_vertex',
-)
+@Native<
+  Uint32 Function(Pointer<Uint8>, Uint32, Pointer<Uint8>, Uint32, Uint32)
+>(symbol: 'aurea_meshopt_encode_vertex')
 external int _encodeVertex(
   Pointer<Uint8> out,
   int outSize,
@@ -144,7 +152,8 @@ MeshRemap? weldVertices(
     return null;
   }
   for (var i = 0; i < streams.length; i++) {
-    if (components[i] <= 0 || streams[i].length != vertexCount * components[i]) {
+    if (components[i] <= 0 ||
+        streams[i].length != vertexCount * components[i]) {
       return null;
     }
   }
@@ -289,6 +298,34 @@ abstract final class MeshoptFilter {
   static const color = 4;
 }
 
+/// Whether meshoptimizer can decode [count] x [stride] in [mode] with
+/// [filter]. These are the preconditions the library only ASSERTS: violated
+/// in a release build they write past the output buffer, in a debug build
+/// they abort the process. The native side checks the same rules again.
+bool meshoptDecodeValido(int mode, int filter, int count, int stride) {
+  if (count <= 0 || stride <= 0 || stride > 256) return false;
+  if (count * stride > 1 << 30) return false;
+  if (mode == MeshoptMode.attributes) {
+    if (stride % 4 != 0) return false;
+    return switch (filter) {
+      MeshoptFilter.none || MeshoptFilter.exponential => true,
+      MeshoptFilter.octahedral ||
+      MeshoptFilter.color => stride == 4 || stride == 8,
+      MeshoptFilter.quaternion => stride == 8,
+      _ => false,
+    };
+  }
+  if (mode == MeshoptMode.triangles) {
+    return (stride == 2 || stride == 4) &&
+        count % 3 == 0 &&
+        filter == MeshoptFilter.none;
+  }
+  if (mode == MeshoptMode.indices) {
+    return (stride == 2 || stride == 4) && filter == MeshoptFilter.none;
+  }
+  return false;
+}
+
 /// DECODES one compressed glTF buffer view into [count] x [stride] bytes.
 /// Returns null when the data is malformed (the decoder is safe on
 /// untrusted input).
@@ -299,7 +336,9 @@ Uint8List? decodeMeshopt({
   required int stride,
   required Uint8List source,
 }) {
-  if (count <= 0 || stride <= 0 || source.isEmpty) return null;
+  if (source.isEmpty || !meshoptDecodeValido(mode, filter, count, stride)) {
+    return null;
+  }
   final total = count * stride;
   final dst = calloc<Uint8>(total);
   final src = calloc<Uint8>(source.length);

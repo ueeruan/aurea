@@ -113,22 +113,39 @@ extern "C" API uint32_t aurea_meshopt_simplify(const uint32_t* indices, uint32_t
 // DECODE glTF EXT_meshopt_compression / KHR_meshopt_compression data.
 // mode: 0 ATTRIBUTES, 1 TRIANGLES, 2 INDICES. filter: 0 NONE,
 // 1 OCTAHEDRAL, 2 QUATERNION, 3 EXPONENTIAL, 4 COLOR. Returns 1 on success.
+//
+// The preconditions below are the ones meshoptimizer only ASSERTS. With
+// asserts compiled out (release) a violation writes past [destination];
+// with asserts on it aborts the process. A malformed GLB must fail here,
+// as a return value, instead.
+static bool decode_ok(uint32_t mode, uint32_t filter, uint32_t count, uint32_t stride) {
+  if (!count || !stride || stride > 256) return false;
+  if (uint64_t(count) * uint64_t(stride) > (uint64_t(1) << 30)) return false;
+  switch (mode) {
+    case 0:
+      if (stride % 4) return false;
+      switch (filter) {
+        case 0: case 3: return true;          // NONE, EXPONENTIAL (stride % 4)
+        case 1: case 4: return stride == 4 || stride == 8;  // OCTAHEDRAL, COLOR
+        case 2: return stride == 8;           // QUATERNION
+        default: return false;
+      }
+    case 1: return (stride == 2 || stride == 4) && count % 3 == 0 && filter == 0;
+    case 2: return (stride == 2 || stride == 4) && filter == 0;
+    default: return false;
+  }
+}
+
 extern "C" API int aurea_meshopt_decode(uint32_t mode, uint32_t filter, uint8_t* destination,
                                         uint32_t count, uint32_t stride, const uint8_t* buffer,
                                         uint32_t buffer_size) {
-  if (!destination || !buffer || !count || !stride || stride > 256) return 0;
+  if (!destination || !buffer || !decode_ok(mode, filter, count, stride)) return 0;
   try {
     int rc;
     switch (mode) {
       case 0: rc = meshopt_decodeVertexBuffer(destination, count, stride, buffer, buffer_size); break;
-      case 1:
-        if (stride != 2 && stride != 4) return 0;
-        rc = meshopt_decodeIndexBuffer(destination, count, stride, buffer, buffer_size);
-        break;
-      case 2:
-        if (stride != 2 && stride != 4) return 0;
-        rc = meshopt_decodeIndexSequence(destination, count, stride, buffer, buffer_size);
-        break;
+      case 1: rc = meshopt_decodeIndexBuffer(destination, count, stride, buffer, buffer_size); break;
+      case 2: rc = meshopt_decodeIndexSequence(destination, count, stride, buffer, buffer_size); break;
       default: return 0;
     }
     if (rc != 0) return 0;

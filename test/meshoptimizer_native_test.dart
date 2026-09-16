@@ -35,7 +35,9 @@ double _area(Float32List p, Uint32List idx) {
     final a = idx[i] * 3, b = idx[i + 1] * 3, c = idx[i + 2] * 3;
     final ux = p[b] - p[a], uy = p[b + 1] - p[a + 1], uz = p[b + 2] - p[a + 2];
     final vx = p[c] - p[a], vy = p[c + 1] - p[a + 1], vz = p[c + 2] - p[a + 2];
-    final cx = uy * vz - uz * vy, cy = uz * vx - ux * vz, cz = ux * vy - uy * vx;
+    final cx = uy * vz - uz * vy,
+        cy = uz * vx - ux * vz,
+        cz = ux * vy - uy * vx;
     total += sqrt(cx * cx + cy * cy + cz * cz) / 2;
   }
   return total;
@@ -110,10 +112,18 @@ void main() {
     for (var i = 0; i < g.indices.length; i++) {
       uv[i * 2] = (i % 2).toDouble();
     }
-    final comUv = weldVertices(sequencia, g.indices.length, [soltos, uv], [3, 2])!;
+    final comUv = weldVertices(
+      sequencia,
+      g.indices.length,
+      [soltos, uv],
+      [3, 2],
+    )!;
     expect(comUv.vertexCount, greaterThan(side * side));
     // Entrada invalida nao explode: devolve null.
-    expect(weldVertices(Uint32List.fromList([0, 1, 9]), 3, [soltos], [3]), isNull);
+    expect(
+      weldVertices(Uint32List.fromList([0, 1, 9]), 3, [soltos], [3]),
+      isNull,
+    );
   });
 
   test('busca de vertices: renumera na ordem de uso e larga os sobrando', () {
@@ -125,38 +135,41 @@ void main() {
     expect(r.remap[0], 0xFFFFFFFF, reason: 'vertice sem triangulo sai');
   });
 
-  test('simplificador: chega perto do alvo sem mover vertice nem abrir buraco', () {
-    const side = 60;
-    final g = _grade(side);
-    final alvo = g.indices.length ~/ 4;
-    final r = simplifyMesh(
-      g.indices,
-      g.posicoes,
-      targetIndexCount: alvo,
-      targetError: .05,
-    )!;
-    expect(r.indices.length, lessThanOrEqualTo((alvo * 1.15).round()));
-    expect(r.indices.length, greaterThan(0));
-    expect(r.indices.every((i) => i < side * side), isTrue);
-    // Area quase igual: simplificar nao fura a malha (o "uma face a cada
-    // N" do rascunho antigo perdia 3/4 da area).
-    final antes = _area(g.posicoes, g.indices);
-    final depois = _area(g.posicoes, r.indices);
-    expect(depois, closeTo(antes, antes * .05));
-    debugPrint(
-      'Simplify: ${g.indices.length ~/ 3} -> ${r.indices.length ~/ 3} '
-      'triangles, error ${r.error.toStringAsFixed(4)}',
-    );
-    // O modo desleixado chega a qualquer alvo.
-    final seco = simplifyMesh(
-      g.indices,
-      g.posicoes,
-      targetIndexCount: 300,
-      targetError: 1,
-      sloppy: true,
-    )!;
-    expect(seco.indices.length, lessThanOrEqualTo(600));
-  });
+  test(
+    'simplificador: chega perto do alvo sem mover vertice nem abrir buraco',
+    () {
+      const side = 60;
+      final g = _grade(side);
+      final alvo = g.indices.length ~/ 4;
+      final r = simplifyMesh(
+        g.indices,
+        g.posicoes,
+        targetIndexCount: alvo,
+        targetError: .05,
+      )!;
+      expect(r.indices.length, lessThanOrEqualTo((alvo * 1.15).round()));
+      expect(r.indices.length, greaterThan(0));
+      expect(r.indices.every((i) => i < side * side), isTrue);
+      // Area quase igual: simplificar nao fura a malha (o "uma face a cada
+      // N" do rascunho antigo perdia 3/4 da area).
+      final antes = _area(g.posicoes, g.indices);
+      final depois = _area(g.posicoes, r.indices);
+      expect(depois, closeTo(antes, antes * .05));
+      debugPrint(
+        'Simplify: ${g.indices.length ~/ 3} -> ${r.indices.length ~/ 3} '
+        'triangles, error ${r.error.toStringAsFixed(4)}',
+      );
+      // O modo desleixado chega a qualquer alvo.
+      final seco = simplifyMesh(
+        g.indices,
+        g.posicoes,
+        targetIndexCount: 300,
+        targetError: 1,
+        sloppy: true,
+      )!;
+      expect(seco.indices.length, lessThanOrEqualTo(600));
+    },
+  );
 
   test('codec do EXT_meshopt_compression vai e volta byte a byte', () {
     const side = 30;
@@ -184,8 +197,11 @@ void main() {
     // triangulo, mas preserva o triangulo e o enrolamento.
     final lidos = Uint32List.view(indicesVolta.buffer);
     String rotulo(List<int> t) {
-      final m = [t, [t[1], t[2], t[0]], [t[2], t[0], t[1]]]
-        ..sort((a, b) => a[0].compareTo(b[0]));
+      final m = [
+        t,
+        [t[1], t[2], t[0]],
+        [t[2], t[0], t[1]],
+      ]..sort((a, b) => a[0].compareTo(b[0]));
       return m.first.join(',');
     }
 
@@ -207,6 +223,133 @@ void main() {
         source: Uint8List.fromList(List.filled(40, 7)),
       ),
       isNull,
+    );
+  });
+
+  test('parametros que o meshoptimizer so ASSERTA nao chegam ao C++', () {
+    // Em release o assert some e a escrita passa do buffer; em debug o
+    // processo aborta. Os dois derrubam o app sem nada capturar. Um GLB
+    // malformado tem de voltar null.
+    const side = 12;
+    final g = _grade(side);
+    final tris = encodeMeshoptTriangles(g.indices, side * side)!;
+    final attrs = encodeMeshoptVertices(Uint8List.view(g.posicoes.buffer), 12)!;
+    final casos = <(String, int, int, int, int, Uint8List)>[
+      (
+        'triangulos com contagem fora de 3',
+        MeshoptMode.triangles,
+        MeshoptFilter.none,
+        g.indices.length - 1,
+        4,
+        tris,
+      ),
+      (
+        'indice de 3 bytes',
+        MeshoptMode.triangles,
+        MeshoptFilter.none,
+        g.indices.length,
+        3,
+        tris,
+      ),
+      (
+        'atributo com passo 6',
+        MeshoptMode.attributes,
+        MeshoptFilter.none,
+        side * side,
+        6,
+        attrs,
+      ),
+      (
+        'quaternion em passo 4',
+        MeshoptMode.attributes,
+        MeshoptFilter.quaternion,
+        side * side,
+        4,
+        attrs,
+      ),
+      (
+        'octaedro em passo 12',
+        MeshoptMode.attributes,
+        MeshoptFilter.octahedral,
+        side * side,
+        12,
+        attrs,
+      ),
+      (
+        'cor em passo 12',
+        MeshoptMode.attributes,
+        MeshoptFilter.color,
+        side * side,
+        12,
+        attrs,
+      ),
+      (
+        'filtro em indices',
+        MeshoptMode.indices,
+        MeshoptFilter.exponential,
+        30,
+        4,
+        tris,
+      ),
+      ('modo desconhecido', 9, MeshoptFilter.none, 30, 4, tris),
+      (
+        'saida acima de 1 GiB',
+        MeshoptMode.attributes,
+        MeshoptFilter.none,
+        1 << 28,
+        8,
+        attrs,
+      ),
+    ];
+    for (final (nome, modo, filtro, count, stride, fonte) in casos) {
+      expect(
+        meshoptDecodeValido(modo, filtro, count, stride),
+        isFalse,
+        reason: nome,
+      );
+      expect(
+        decodeMeshopt(
+          mode: modo,
+          filter: filtro,
+          count: count,
+          stride: stride,
+          source: fonte,
+        ),
+        isNull,
+        reason: nome,
+      );
+    }
+    // E os validos continuam validos.
+    expect(
+      meshoptDecodeValido(
+        MeshoptMode.attributes,
+        MeshoptFilter.quaternion,
+        10,
+        8,
+      ),
+      isTrue,
+    );
+    expect(
+      meshoptDecodeValido(
+        MeshoptMode.attributes,
+        MeshoptFilter.octahedral,
+        10,
+        4,
+      ),
+      isTrue,
+    );
+    expect(
+      meshoptDecodeValido(
+        MeshoptMode.attributes,
+        MeshoptFilter.exponential,
+        10,
+        12,
+      ),
+      isTrue,
+    );
+    expect(
+      meshoptDecodeValido(MeshoptMode.triangles, MeshoptFilter.none, 9, 2),
+      isTrue,
     );
   });
 }

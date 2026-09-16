@@ -110,6 +110,7 @@ flutter:
     - shaders/correcao_de_cor.frag
     - shaders/unsharp_mask.frag
     - shaders/estilizar.frag
+    - shaders/jpeg_damage.frag
 
   assets:
     - assets/ai/

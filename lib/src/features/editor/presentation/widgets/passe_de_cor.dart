@@ -397,6 +397,222 @@ class _PassadaDeEstiloState extends State<PassadaDeEstilo> {
   }
 }
 
+/// OS SHADERS DO LOTE 2 DE ESTILIZAR (Sapphire), carregados por asset.
+///
+/// ABI comum: 0,1 tamanho; 2 filtro; 3,4 logico; 5 escalaRef; 6 tempo;
+/// 7 modo (passada); 8.. valores; cores em 72.. quando houver.
+class MotorSapphire {
+  MotorSapphire._();
+
+  static final Map<String, ui.FragmentProgram> _programas = {};
+  static final Map<String, Future<void>> _carregando = {};
+  static String? falha;
+
+  static ui.FragmentProgram? programa(String asset) => _programas[asset];
+
+  static Future<void> carregar(String asset) =>
+      _carregando[asset] ??= () async {
+        try {
+          _programas[asset] = await ui.FragmentProgram.fromAsset(asset);
+        } catch (erro) {
+          falha = '$erro';
+          debugPrint('AUREA $asset indisponivel: $erro');
+        }
+      }();
+
+  static Future<void> warmUp(Iterable<String> assets) =>
+      Future.wait([for (final a in assets) carregar(a)]);
+
+  static void configurar(
+    ui.FragmentShader shader, {
+    required int modo,
+    required List<double> valores,
+    required List<Color> cores,
+    required bool filtro,
+    required Size logico,
+    required double escalaRef,
+    required double tempo,
+  }) {
+    shader
+      ..setFloat(2, filtro ? 1 : 0)
+      ..setFloat(3, logico.width)
+      ..setFloat(4, logico.height)
+      ..setFloat(5, escalaRef)
+      ..setFloat(6, tempo)
+      ..setFloat(7, modo.toDouble());
+    for (var i = 0; i < valores.length; i++) {
+      shader.setFloat(8 + i, valores[i]);
+    }
+    for (var k = 0; k < cores.length; k++) {
+      final c = cores[k];
+      shader
+        ..setFloat(72 + 4 * k, c.r)
+        ..setFloat(73 + 4 * k, c.g)
+        ..setFloat(74 + 4 * k, c.b)
+        ..setFloat(75 + 4 * k, c.a);
+    }
+  }
+}
+
+/// A PASSADA DE UM EFEITO SAPPHIRE DO LOTE 2. [passadas] > 1 roda o mesmo
+/// programa com modo 0, 1, ... encadeados (JpegDamage: codificar e
+/// decodificar).
+class PassadaSapphire extends StatefulWidget {
+  const PassadaSapphire({
+    super.key,
+    required this.asset,
+    required this.valores,
+    required this.cores,
+    required this.escalaRef,
+    required this.tempo,
+    required this.child,
+    this.passadas = 1,
+    this.usaTempo = true,
+  });
+
+  final String asset;
+  final List<double> valores;
+  final List<Color> cores;
+  final double escalaRef;
+  final double tempo;
+  final int passadas;
+
+  /// Efeito que anda sozinho no tempo (ruido, rolagem): refaz a camada a
+  /// cada quadro. Falso = so quando os numeros mudam.
+  final bool usaTempo;
+  final Widget child;
+
+  @override
+  State<PassadaSapphire> createState() => _PassadaSapphireState();
+}
+
+class _PassadaSapphireState extends State<PassadaSapphire> {
+  final List<ui.FragmentShader> _shaders = [];
+
+  @override
+  void dispose() {
+    for (final s in _shaders) {
+      s.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final programa = MotorSapphire.programa(widget.asset);
+    if (programa == null) {
+      MotorSapphire.carregar(widget.asset).then((_) {
+        if (mounted) setState(() {});
+      });
+      return widget.child;
+    }
+    while (_shaders.length < widget.passadas) {
+      _shaders.add(programa.fragmentShader());
+    }
+    void configurar(int modo, ui.FragmentShader s, Size logico, bool filtro) =>
+        MotorSapphire.configurar(
+          s,
+          modo: modo,
+          valores: widget.valores,
+          cores: widget.cores,
+          filtro: filtro,
+          logico: logico,
+          escalaRef: widget.escalaRef,
+          tempo: widget.tempo,
+        );
+    final ultimo = widget.passadas - 1;
+    final assinatura = [
+      ...widget.valores,
+      for (final c in widget.cores) ...[c.r, c.g, c.b, c.a],
+      widget.escalaRef,
+      if (widget.usaTempo) widget.tempo,
+    ];
+    if (ui.ImageFilter.isShaderFilterSupported) {
+      return FiltroDeShader(
+        shader: _shaders[ultimo],
+        antes: _shaders.sublist(0, ultimo),
+        configurarAntes: (i, s, logico) => configurar(i, s, logico, true),
+        ativo: true,
+        assinatura: assinatura,
+        configurar: (s, logico) => configurar(ultimo, s, logico, true),
+        child: widget.child,
+      );
+    }
+    return FxSnapshot(
+      painter: _PintorDePassadas(
+        _shaders.sublist(0, widget.passadas),
+        (i, s, logico) => configurar(i, s, logico, false),
+      ),
+      child: widget.child,
+    );
+  }
+}
+
+/// Sem filtro de shader: cada passada desenha numa imagem e a proxima le.
+class _PintorDePassadas extends SnapshotPainter {
+  _PintorDePassadas(this.shaders, this.configurar);
+
+  final List<ui.FragmentShader> shaders;
+  final void Function(int modo, ui.FragmentShader s, Size logico) configurar;
+
+  @override
+  void paint(
+    PaintingContext context,
+    Offset offset,
+    Size size,
+    PaintingContextCallback painter,
+  ) => painter(context, offset);
+
+  @override
+  void paintSnapshot(
+    PaintingContext context,
+    Offset offset,
+    Size size,
+    ui.Image image,
+    Size sourceSize,
+    double pixelRatio,
+  ) {
+    if (size.isEmpty || image.width == 0 || image.height == 0) return;
+    final w = image.width.toDouble(), h = image.height.toDouble();
+    var entrada = image;
+    final temporarias = <ui.Image>[];
+    for (var i = 0; i < shaders.length; i++) {
+      final s = shaders[i];
+      configurar(i, s, size);
+      s
+        ..setFloat(0, w)
+        ..setFloat(1, h)
+        ..setImageSampler(0, entrada);
+      if (i == shaders.length - 1) {
+        final canvas = context.canvas;
+        canvas.save();
+        canvas.translate(offset.dx, offset.dy);
+        canvas.scale(size.width / w, size.height / h);
+        canvas.drawRect(Rect.fromLTWH(0, 0, w, h), Paint()..shader = s);
+        canvas.restore();
+      } else {
+        final rec = ui.PictureRecorder();
+        Canvas(rec).drawRect(
+          Rect.fromLTWH(0, 0, w, h),
+          Paint()
+            ..blendMode = BlendMode.src
+            ..shader = s,
+        );
+        final foto = rec.endRecording();
+        entrada = foto.toImageSync(image.width, image.height);
+        foto.dispose();
+        temporarias.add(entrada);
+      }
+    }
+    for (final t in temporarias) {
+      t.dispose();
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _PintorDePassadas old) => true;
+}
+
 typedef ConfigurarShader =
     void Function(ui.FragmentShader shader, Size tamanhoLogico);
 
@@ -413,10 +629,18 @@ class FiltroDeShader extends SingleChildRenderObjectWidget {
     required this.configurar,
     required this.assinatura,
     required this.ativo,
+    this.antes = const [],
+    this.configurarAntes,
     super.child,
   });
 
   final ui.FragmentShader shader;
+
+  /// PASSADAS ANTERIORES, na ordem em que rodam (o JpegDamage codifica e
+  /// so depois decodifica). Compostas num filtro so.
+  final List<ui.FragmentShader> antes;
+  final void Function(int indice, ui.FragmentShader shader, Size logico)?
+  configurarAntes;
   final ConfigurarShader configurar;
 
   /// Os numeros que mudam o desenho: so quando mudam a camada e refeita.
@@ -427,11 +651,13 @@ class FiltroDeShader extends SingleChildRenderObjectWidget {
   @override
   RenderFiltroDeShader createRenderObject(BuildContext context) =>
       RenderFiltroDeShader(
-        shader: shader,
-        configurar: configurar,
-        assinatura: assinatura,
-        ativo: ativo,
-      );
+          shader: shader,
+          configurar: configurar,
+          assinatura: assinatura,
+          ativo: ativo,
+        )
+        ..antes = antes
+        ..configurarAntes = configurarAntes;
 
   @override
   void updateRenderObject(
@@ -441,6 +667,8 @@ class FiltroDeShader extends SingleChildRenderObjectWidget {
     renderObject
       ..shader = shader
       ..configurar = configurar
+      ..antes = antes
+      ..configurarAntes = configurarAntes
       ..assinatura = assinatura
       ..ativo = ativo;
   }
@@ -455,6 +683,9 @@ class RenderFiltroDeShader extends RenderProxyBox {
   });
 
   ConfigurarShader configurar;
+  List<ui.FragmentShader> antes = const [];
+  void Function(int indice, ui.FragmentShader shader, Size logico)?
+  configurarAntes;
 
   ui.FragmentShader get shader => _shader;
   ui.FragmentShader _shader;
@@ -495,7 +726,18 @@ class RenderFiltroDeShader extends RenderProxyBox {
     final camada = oldLayer ?? ImageFilterLayer();
     // Um filtro novo a cada montagem: o nativo copia os uniformes na hora
     // em que nasce, entao reaproveitar o velho desenharia numeros velhos.
-    camada.imageFilter = ui.ImageFilter.shader(_shader);
+    ui.ImageFilter? interno;
+    for (var i = 0; i < antes.length; i++) {
+      configurarAntes?.call(i, antes[i], size);
+      final f = ui.ImageFilter.shader(antes[i]);
+      interno = interno == null
+          ? f
+          : ui.ImageFilter.compose(outer: f, inner: interno);
+    }
+    final externo = ui.ImageFilter.shader(_shader);
+    camada.imageFilter = interno == null
+        ? externo
+        : ui.ImageFilter.compose(outer: externo, inner: interno);
     return camada;
   }
 }

@@ -45,12 +45,12 @@ Future<Uint8List> _render(QuadroDeEstilo q, int w, int h, int Function(int x, in
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('sete efeitos na aba Estilizar, com os padroes lidos do AE', () {
+  test('os sete do lote 1 estao na aba Estilizar, com os padroes lidos do AE', () {
     final estilo = [
       for (final e in effectSpecs.entries)
         if (e.value.category == 'Stylize') e.key,
     ];
-    expect(estilo.toSet(), modoDeEstilo.keys.toSet());
+    expect(estilo.toSet().containsAll(modoDeEstilo.keys), isTrue);
     expect(effectSpecs[EffectType.threshold]!.params['threshold']!.initial, 127.5);
     expect(effectSpecs[EffectType.vignette]!.params['angle_of_view']!.initial, 45);
     expect(effectSpecs[EffectType.blockLoad]!.params['scans']!.initial, 4);

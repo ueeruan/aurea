@@ -1,0 +1,38 @@
+import 'dart:ui';
+
+import 'effect.dart';
+import 'jpeg_damage.dart';
+
+/// O QUE O PALCO PRECISA SABER DE UM EFEITO SAPPHIRE DO LOTE 2 de
+/// Estilizar: qual shader, quantas passadas, e como os numeros viram
+/// uniformes (ABI comum em `passe_de_cor.dart`, `MotorSapphire`).
+class ReceitaSapphire {
+  const ReceitaSapphire({
+    required this.asset,
+    required this.valores,
+    this.passadas = 1,
+    this.usaTempo = true,
+    this.cores = false,
+  });
+
+  final String asset;
+  final List<double> Function(EffectInstance e, Duration local) valores;
+  final int passadas;
+
+  /// Anda sozinho no tempo (ruido, rolagem, sorteio por quadro).
+  final bool usaTempo;
+
+  /// Manda a cor principal e as extras para c0, c1.
+  final bool cores;
+
+  List<Color> coresDe(EffectInstance e) =>
+      cores ? [e.color, ...e.extraColors] : const [];
+}
+
+final receitasSapphire = <EffectType, ReceitaSapphire>{
+  EffectType.jpegDamage: ReceitaSapphire(
+    asset: 'shaders/jpeg_damage.frag',
+    valores: valoresJpegDamage,
+    passadas: 2,
+  ),
+};

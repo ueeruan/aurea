@@ -56,6 +56,7 @@ import 'pixel_effect_engine.dart';
 import 'passe_de_cor.dart';
 import '../../domain/correcao_de_cor.dart';
 import '../../domain/estilizar.dart';
+import '../../domain/estilizar_lote2.dart';
 import '../../domain/pixel_effect.dart';
 import '../../domain/bloom.dart';
 import '../../domain/coloring.dart';
@@ -3455,6 +3456,22 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
         }
         continue;
       }
+      // ESTILIZAR, LOTE 2 (Sapphire): shader proprio por efeito.
+      final receita = receitasSapphire[effect.type];
+      if (receita != null) {
+        out = PassadaSapphire(
+          key: ValueKey('sapphire-${effect.id}'),
+          asset: receita.asset,
+          valores: receita.valores(effect, local),
+          cores: receita.coresDe(effect),
+          passadas: receita.passadas,
+          usaTempo: receita.usaTempo,
+          escalaRef: math.min(fxWidth, fxHeight) / 1080.0,
+          tempo: local.inMicroseconds / 1e6,
+          child: out,
+        );
+        continue;
+      }
       // ESTILIZAR (lote 1): uma passada por efeito.
       if (modoDeEstilo.containsKey(effect.type)) {
         final quadro = QuadroDeEstilo.de(effect, local);
@@ -3549,6 +3566,10 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
         case EffectType.scanLines:
         case EffectType.halfTone:
         case EffectType.edgeColorize:
+        case EffectType.jpegDamage:
+        case EffectType.autoPaint:
+        case EffectType.tvDamage:
+        case EffectType.vhsDamage:
           break;
 
         case EffectType.gaussianBlur:

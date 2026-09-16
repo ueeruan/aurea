@@ -4,6 +4,7 @@ import 'package:uuid/uuid.dart';
 
 import 'correcao_de_cor.dart';
 import 'estilizar.dart';
+import 'jpeg_damage.dart';
 import 'keyframe.dart';
 
 /// Efeitos aplicaveis a uma camada (blocos combinaveis, ordem importa).
@@ -134,6 +135,11 @@ enum EffectType {
   scanLines,
   halfTone,
   edgeColorize,
+  // --- aba Estilizar, lote 2 (16/09): Sapphire ---
+  jpegDamage,
+  autoPaint,
+  tvDamage,
+  vhsDamage,
 }
 
 /// O tipo a partir do IDENTIFICADOR estavel.
@@ -427,6 +433,7 @@ class EffectSpec {
 const effectSpecs = <EffectType, EffectSpec>{
   ...efeitosDeCorrecaoDeCor,
   ...efeitosDeEstilizar,
+  ...efeitosJpegDamage,
 };
 
 /// OS EFEITOS DE EDIT, na ordem em que se procura: batida, glitch,

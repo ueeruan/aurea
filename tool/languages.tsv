@@ -2652,3 +2652,24 @@ Suavizar subpixel	Subpixel Smooth	Suavizar subpíxel	تنعيم دون البك�
 Girar cores	Rotate Colors	Rotar colores	تدوير الألوان	색 회전	色を回転	旋转颜色	रंग घुमाएँ	Putar warna	Повернуть цвета
 Bordas grossas	Thick Edges	Bordes gruesos	حواف سميكة	굵은 가장자리	太いエッジ	粗边缘	मोटे किनारे	Tepi tebal	Толстые края
 Girado	Rotated	Girado	مُدار	회전됨	回転	旋转	घुमाया हुआ	Diputar	Повёрнуто
+S_JpegDamage	S_JpegDamage	S_JpegDamage	S_JpegDamage	S_JpegDamage	S_JpegDamage	S_JpegDamage	S_JpegDamage	S_JpegDamage	S_JpegDamage
+Fator de resolução	Res Factor	Factor de resolución	عامل الدقة	해상도 배수	解像度係数	分辨率系数	रिज़ॉल्यूशन गुणक	Faktor resolusi	Коэффициент разрешения
+Resolução relativa X	Res Rel X	Resolución relativa X	الدقة النسبية X	상대 해상도 X	相対解像度 X	相对分辨率 X	सापेक्ष रिज़ॉल्यूशन X	Resolusi relatif X	Относительное разрешение X
+Escala de todas as frequências	All Freq Scale	Escala de todas las frecuencias	مقياس كل الترددات	전체 주파수 배율	全周波数スケール	全部频率缩放	सभी आवृत्तियों का स्केल	Skala semua frekuensi	Масштаб всех частот
+Escala de frequência X	X Freq Scale	Escala de frecuencia X	مقياس التردد X	X 주파수 배율	X周波数スケール	X 频率缩放	X आवृत्ति स्केल	Skala frekuensi X	Масштаб частоты X
+Escala de frequência Y	Y Freq Scale	Escala de frecuencia Y	مقياس التردد Y	Y 주파수 배율	Y周波数スケール	Y 频率缩放	Y आवृत्ति स्केल	Skala frekuensi Y	Масштаб частоты Y
+Escala das baixas	Low Freq Scale	Escala de bajas	مقياس الترددات المنخفضة	저주파 배율	低周波スケール	低频缩放	निम्न आवृत्ति स्केल	Skala frekuensi rendah	Масштаб низких частот
+Escala das médias	Mid Freq Scale	Escala de medias	مقياس الترددات المتوسطة	중간 주파수 배율	中周波スケール	中频缩放	मध्य आवृत्ति स्केल	Skala frekuensi tengah	Масштаб средних частот
+Escala das altas	High Freq Scale	Escala de altas	مقياس الترددات العالية	고주파 배율	高周波スケール	高频缩放	उच्च आवृत्ति स्केल	Skala frekuensi tinggi	Масштаб высоких частот
+Afetar luma	Affect Luma	Afectar luma	التأثير على السطوع	루마에 적용	輝度に適用	影响亮度	ल्यूमा पर असर	Pengaruhi luma	Влиять на яркость
+Afetar croma	Affect Chroma	Afectar croma	التأثير على اللون	크로마에 적용	色差に適用	影响色度	क्रोमा पर असर	Pengaruhi kroma	Влиять на цветность
+Taxa de erros	Error Rate	Tasa de errores	معدل الأخطاء	오류율	エラー率	错误率	त्रुटि दर	Tingkat kesalahan	Частота ошибок
+Densidade de blocos com erro	Err Block Density	Densidad de bloques con error	كثافة الكتل الخاطئة	오류 블록 밀도	エラーブロック密度	错误块密度	त्रुटि ब्लॉक घनत्व	Kepadatan blok galat	Плотность блоков с ошибками
+Amplitude do erro	Error Amp	Amplitud del error	سعة الخطأ	오류 강도	エラーの強さ	错误幅度	त्रुटि आयाम	Amplitudo galat	Амплитуда ошибки
+Coerência do erro	Error Coherence	Coherencia del error	تماسك الخطأ	오류 응집도	エラーのまとまり	错误聚集度	त्रुटि सुसंगतता	Koherensi galat	Связность ошибок
+Variar a cada quadros	Jitter Frames	Variar cada fotogramas	التغيير كل إطارات	프레임마다 변경	フレームごとに変化	每隔帧变化	हर फ्रेम पर बदलें	Ubah tiap bingkai	Менять каждые кадры
+Escalar luzes	Scale Lights	Escalar luces	تكبير الإضاءات	밝은 영역 배율	ハイライトを拡大	缩放亮部	रोशनी स्केल करें	Skala terang	Масштаб светов
+Deslocar sombras	Offset Darks	Desplazar sombras	إزاحة الظلال	어두운 영역 오프셋	シャドウのオフセット	偏移暗部	छाया ऑफ़सेट	Geser gelap	Сдвиг теней
+Inverter ruído na vertical	Flip Noise Vertically	Voltear ruido verticalmente	قلب الضوضاء رأسيًا	노이즈 세로 뒤집기	ノイズを上下反転	垂直翻转噪点	नॉइज़ को ऊर्ध्वाधर पलटें	Balik derau vertikal	Отразить шум по вертикали
+Compressão forte	Heavy Compression	Compresión fuerte	ضغط قوي	강한 압축	強い圧縮	强压缩	भारी कंप्रेशन	Kompresi berat	Сильное сжатие
+Transmissão ruim	Bad Transmission	Transmisión mala	بث سيئ	나쁜 전송	伝送不良	传输不良	खराब प्रसारण	Transmisi buruk	Плохая передача

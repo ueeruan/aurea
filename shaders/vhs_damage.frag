@@ -151,8 +151,10 @@ void main() {
     float s = .9 * max(p6.y, 0.0) * esc;
     float cel = max(s * 3.0, 1.0);
     float stdC = (193.0 * p6.x * esc / 1.732) / max(1.0, 3.545 * s);
-    float n = vnoise(p / cel, frame + 1.7) * stdC / .38;
-    n += (h31(vec3(p, frame + 91.0)) * 2.0 - 1.0) * 184.0 * p6.z * esc;
+    // 0,6 e 0,3: ajustados contra o quadro do AE (o sorteio nunca coincide,
+    // e a amplitude medida sozinha deixava a borda mais serrilhada que no AE).
+    float n = vnoise(p / cel, frame + 1.7) * stdC / .38 * .6;
+    n += (h31(vec3(p, frame + 91.0)) * 2.0 - 1.0) * 184.0 * p6.z * esc * .3;
     q = p + vec2(p6.w * n, -p7.x * n);
   }
   // Fast Forward: faixas rasgadas

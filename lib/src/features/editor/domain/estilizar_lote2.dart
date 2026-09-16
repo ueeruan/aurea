@@ -3,6 +3,7 @@ import 'dart:ui';
 import 'effect.dart';
 import 'jpeg_damage.dart';
 import 'distorcao_ae.dart';
+import 'shake.dart';
 import 'vhs_damage.dart';
 import 'tv_damage.dart';
 import 'pixel_sort_sapphire.dart';
@@ -71,5 +72,13 @@ final receitasSapphire = <EffectType, ReceitaSapphire>{
     asset: 'shaders/distorcao_ae.frag',
     valores: valoresTurbulentDisplace,
     usaTempo: false,
+  ),
+  EffectType.tremor: ReceitaSapphire(
+    asset: 'shaders/shake.frag',
+    valores: valoresShake,
+  ),
+  EffectType.dissolveShake: ReceitaSapphire(
+    asset: 'shaders/shake.frag',
+    valores: valoresDissolveShake,
   ),
 };

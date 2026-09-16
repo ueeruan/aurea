@@ -2871,3 +2871,54 @@ Fixar cantos	Pin Corners	Fijar esquinas	تثبيت الزوايا	모서리 고�
 Fixar todas as bordas	Pin All Edges	Fijar todos los bordes	تثبيت كل الحواف	모든 가장자리 고정	すべての端を固定	固定所有边缘	सभी किनारे पिन करें	Sematkan semua tepi	Закрепить все края
 Água	Water	Agua	ماء	물	水	水	पानी	Air	Вода
 Fumaça	Smoke	Humo	دخان	연기	煙	烟雾	धुआं	Asap	Дым
+Tremido	Twitchy	Nervioso	متشنج	경련	ぴくぴく	抽动	झटकेदार	Berkedut	Дёрганый
+Saltos	Jumpy	Saltos	قفزات	점프	ジャンプ	跳跃	उछाल	Melompat	Скачки
+Quietude	Stillness	Quietud	السكون	정지	静止	静止	स्थिरता	Diam	Неподвижность
+Frequência dos trancos	Twitch frequency	Frecuencia de sacudidas	تردد الارتعاش	경련 빈도	けいれんの頻度	抽动频率	झटकों की आवृत्ति	Frekuensi kedutan	Частота рывков
+Deriva	Drift	Deriva	الانجراف	드리프트	ドリフト	漂移	बहाव	Hanyut	Дрейф
+Tendência ao centro	Center bias	Tendencia al centro	الميل للمركز	중앙 편향	中央への偏り	中心偏向	केंद्र की ओर झुकाव	Kecenderungan ke tengah	Тяга к центру
+Distância Z	Z distance	Distancia Z	مسافة Z	Z 거리	Z 距離	Z 距离	Z दूरी	Jarak Z	Расстояние Z
+Borrão de movimento	Motion blur	Desenfoque de movimiento	ضبابية الحركة	모션 블러	モーションブラー	运动模糊	मोशन ब्लर	Blur gerak	Размытие движения
+Comprimento do borrão	Blur length	Longitud del desenfoque	طول الضبابية	블러 길이	ブラーの長さ	模糊长度	ब्लर की लंबाई	Panjang blur	Длина размытия
+Borda X	Edge X	Borde X	الحافة X	가장자리 X	端 X	边缘 X	किनारा X	Tepi X	Край X
+Borda Y	Edge Y	Borde Y	الحافة Y	가장자리 Y	端 Y	边缘 Y	किनारा Y	Tepi Y	Край Y
+X aleatório	Random X	X aleatorio	X عشوائي	랜덤 X	ランダム X	随机 X	यादृच्छिक X	X acak	Случайный X
+Frequência X aleatória	Random X frequency	Frecuencia X aleatoria	تردد X العشوائي	랜덤 X 빈도	ランダム X の頻度	随机 X 频率	यादृच्छिक X आवृत्ति	Frekuensi X acak	Частота случайного X
+X em onda	Wave X	X en onda	X موجي	웨이브 X	波 X	波动 X	तरंग X	X gelombang	Волна X
+Frequência X da onda	Wave X frequency	Frecuencia X de onda	تردد موجة X	웨이브 X 빈도	波 X の周波数	波动 X 频率	तरंग X आवृत्ति	Frekuensi gelombang X	Частота волны X
+Fase X	X phase	Fase X	طور X	X 위상	X 位相	X 相位	X फ़ेज़	Fase X	Фаза X
+Y aleatório	Random Y	Y aleatorio	Y عشوائي	랜덤 Y	ランダム Y	随机 Y	यादृच्छिक Y	Y acak	Случайный Y
+Frequência Y aleatória	Random Y frequency	Frecuencia Y aleatoria	تردد Y العشوائي	랜덤 Y 빈도	ランダム Y の頻度	随机 Y 频率	यादृच्छिक Y आवृत्ति	Frekuensi Y acak	Частота случайного Y
+Y em onda	Wave Y	Y en onda	Y موجي	웨이브 Y	波 Y	波动 Y	तरंग Y	Y gelombang	Волна Y
+Frequência Y da onda	Wave Y frequency	Frecuencia Y de onda	تردد موجة Y	웨이브 Y 빈도	波 Y の周波数	波动 Y 频率	तरंग Y आवृत्ति	Frekuensi gelombang Y	Частота волны Y
+Fase Y	Y phase	Fase Y	طور Y	Y 위상	Y 位相	Y 相位	Y फ़ेज़	Fase Y	Фаза Y
+Zoom aleatório	Random zoom	Zoom aleatorio	تكبير عشوائي	랜덤 줌	ランダムズーム	随机缩放	यादृच्छिक ज़ूम	Zoom acak	Случайный зум
+Frequência Z aleatória	Random Z frequency	Frecuencia Z aleatoria	تردد Z العشوائي	랜덤 Z 빈도	ランダム Z の頻度	随机 Z 频率	यादृच्छिक Z आवृत्ति	Frekuensi Z acak	Частота случайного Z
+Zoom em onda	Wave zoom	Zoom en onda	تكبير موجي	웨이브 줌	波ズーム	波动缩放	तरंग ज़ूम	Zoom gelombang	Волна зума
+Frequência Z da onda	Wave Z frequency	Frecuencia Z de onda	تردد موجة Z	웨이브 Z 빈도	波 Z の周波数	波动 Z 频率	तरंग Z आवृत्ति	Frekuensi gelombang Z	Частота волны Z
+Fase Z	Z phase	Fase Z	طور Z	Z 위상	Z 位相	Z 相位	Z फ़ेज़	Fase Z	Фаза Z
+Inclinação aleatória	Random tilt	Inclinación aleatoria	ميل عشوائي	랜덤 기울기	ランダム傾き	随机倾斜	यादृच्छिक झुकाव	Kemiringan acak	Случайный наклон
+Frequência da inclinação aleatória	Random tilt frequency	Frecuencia de inclinación aleatoria	تردد الميل العشوائي	랜덤 기울기 빈도	ランダム傾きの頻度	随机倾斜频率	यादृच्छिक झुकाव आवृत्ति	Frekuensi kemiringan acak	Частота случайного наклона
+Inclinação em onda	Wave tilt	Inclinación en onda	ميل موجي	웨이브 기울기	波の傾き	波动倾斜	तरंग झुकाव	Kemiringan gelombang	Волна наклона
+Frequência da inclinação em onda	Wave tilt frequency	Frecuencia de inclinación en onda	تردد الميل الموجي	웨이브 기울기 빈도	波の傾きの周波数	波动倾斜频率	तरंग झुकाव आवृत्ति	Frekuensi kemiringan gelombang	Частота волны наклона
+Fase da inclinação	Tilt phase	Fase de inclinación	طور الميل	기울기 위상	傾きの位相	倾斜相位	झुकाव फ़ेज़	Fase kemiringan	Фаза наклона
+Amplitude do vermelho	Red amplitude	Amplitud del rojo	سعة الأحمر	빨강 진폭	赤の振幅	红色振幅	लाल आयाम	Amplitudo merah	Амплитуда красного
+Amplitude do verde	Green amplitude	Amplitud del verde	سعة الأخضر	초록 진폭	緑の振幅	绿色振幅	हरा आयाम	Amplitudo hijau	Амплитуда зелёного
+Amplitude do azul	Blue amplitude	Amplitud del azul	سعة الأزرق	파랑 진폭	青の振幅	蓝色振幅	नीला आयाम	Amplitudo biru	Амплитуда синего
+Fase do vermelho	Red phase	Fase del rojo	طور الأحمر	빨강 위상	赤の位相	红色相位	लाल फ़ेज़	Fase merah	Фаза красного
+Fase do verde	Green phase	Fase del verde	طور الأخضر	초록 위상	緑の位相	绿色相位	हरा फ़ेज़	Fase hijau	Фаза зелёного
+Fase do azul	Blue phase	Fase del azul	طور الأزرق	파랑 위상	青の位相	蓝色相位	नीला फ़ेज़	Fase biru	Фаза синего
+Aleatoriedade RGB	RGB randomness	Aleatoriedad RGB	عشوائية RGB	RGB 무작위성	RGB のランダム性	RGB 随机度	RGB यादृच्छिकता	Keacakan RGB	Случайность RGB
+Frequência RGB	RGB frequency	Frecuencia RGB	تردد RGB	RGB 빈도	RGB の周波数	RGB 频率	RGB आवृत्ति	Frekuensi RGB	Частота RGB
+Câmera na mão	Handheld camera	Cámara en mano	كاميرا محمولة	핸드헬드 카메라	手持ちカメラ	手持镜头	हाथ में कैमरा	Kamera genggam	Камера с рук
+Trancos	Jolts	Sacudidas	هزات	덜컹임	揺れ	颠簸	झटके	Sentakan	Толчки
+Terremoto RGB	RGB earthquake	Terremoto RGB	زلزال RGB	RGB 지진	RGB 地震	RGB 地震	RGB भूकंप	Gempa RGB	RGB-землетрясение
+Direção	Direction	Dirección	الاتجاه	방향	方向	方向	दिशा	Arah	Направление
+Sumir	Fade out	Desaparecer	اختفاء	사라지기	消える	消失	गायब होना	Menghilang	Исчезновение
+Surgir	Fade in	Aparecer	ظهور	나타나기	現れる	出现	प्रकट होना	Muncul	Появление
+Velocidade do dissolver	Dissolve speed	Velocidad de disolución	سرعة التذويب	디졸브 속도	ディゾルブの速さ	溶解速度	डिज़ॉल्व गति	Kecepatan larut	Скорость растворения
+Sumir tremendo	Shaky fade out	Desaparecer temblando	اختفاء مهتز	흔들리며 사라지기	揺れながら消える	抖动消失	कांपते हुए गायब	Menghilang bergetar	Исчезновение с тряской
+Surgir tremendo	Shaky fade in	Aparecer temblando	ظهور مهتز	흔들리며 나타나기	揺れながら現れる	抖动出现	कांपते हुए प्रकट	Muncul bergetar	Появление с тряской
+Dissolver suave	Soft dissolve	Disolución suave	تذويب ناعم	부드러운 디졸브	ソフトディゾルブ	柔和溶解	कोमल डिज़ॉल्व	Larut lembut	Мягкое растворение
+S_Shake	S_Shake	S_Shake	S_Shake	S_Shake	S_Shake	S_Shake	S_Shake	S_Shake	S_Shake
+S_DissolveShake	S_DissolveShake	S_DissolveShake	S_DissolveShake	S_DissolveShake	S_DissolveShake	S_DissolveShake	S_DissolveShake	S_DissolveShake	S_DissolveShake

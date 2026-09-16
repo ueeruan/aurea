@@ -6,6 +6,7 @@ import 'correcao_de_cor.dart';
 import 'estilizar.dart';
 import 'jpeg_damage.dart';
 import 'distorcao_ae.dart';
+import 'shake.dart';
 import 'vhs_damage.dart';
 import 'tv_damage.dart';
 import 'pixel_sort_sapphire.dart';
@@ -445,6 +446,7 @@ const effectSpecs = <EffectType, EffectSpec>{
   ...efeitosDeEstilizar,
   ...efeitosJpegDamage,
   ...efeitosDistorcaoAe,
+  ...efeitosShake,
   ...efeitosVhsDamage,
   ...efeitosTvDamage,
   ...efeitosPixelSort,

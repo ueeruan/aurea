@@ -64,7 +64,13 @@ class ProjectRepository {
         if (f is File && f.path.endsWith('.json')) f.path,
     ];
     if (paths.isNotEmpty) {
-      final jsons = await compute(_readProjectJsons, paths);
+      // O PEDACO SINCRONO do compute (abrir o isolate e copiar a mensagem)
+      // vai para o registro de travadas: no iPhone 13 abrir isolate ja
+      // custou 1,4 s no fio da interface, e este caminho nunca foi medido.
+      final jsons = await RegistroDeTravadas.marcando(
+        'projetos: abrir isolate de leitura',
+        () => compute(_readProjectJsons, paths),
+      );
       for (var i = 0; i < paths.length; i++) {
         final json = jsons[i];
         if (json == null) {
@@ -129,7 +135,10 @@ class ProjectRepository {
       final f = File('${d.path}/${_safeId(id)}.json');
       if (!f.existsSync()) continue;
       try {
-        pesados[id] = await compute(_readPeso, f.path);
+        pesados[id] = await RegistroDeTravadas.marcando(
+          'projetos: abrir isolate do modelo',
+          () => compute(_readPeso, f.path),
+        );
       } catch (e) {
         // Um modelo ilegivel tira o modelo, nao o projeto.
         debugPrint('Modelo do projeto nao carregou ($id): $e');
@@ -160,13 +169,21 @@ class ProjectRepository {
       // sobra e um modelo orfao ocupando espaco — nunca um projeto
       // apontando para um modelo que nao existe.
       for (final e in pesados.entries) {
-        await compute(_writePeso, (
-          '${pastaDosPesos.path}/${_safeId(e.key)}.json',
-          e.value,
-        ));
+        // O modelo inteiro e COPIADO para o isolate aqui, de forma
+        // sincrona. Uma vez por modelo, mas no fio da interface.
+        await RegistroDeTravadas.marcando(
+          'gravando o projeto: copiar modelo para o isolate',
+          () => compute(_writePeso, (
+            '${pastaDosPesos.path}/${_safeId(e.key)}.json',
+            e.value,
+          )),
+        );
         jaTem.add(e.key);
       }
-      await compute(_writeProjectJson, (path, mapa));
+      await RegistroDeTravadas.marcando(
+        'gravando o projeto: abrir isolate',
+        () => compute(_writeProjectJson, (path, mapa)),
+      );
     },
   );
 

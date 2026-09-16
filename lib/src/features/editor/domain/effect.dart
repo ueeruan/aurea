@@ -163,6 +163,8 @@ enum EffectType {
   sGlintRainbow,
   sGlowRings,
   sEdgeRays,
+  sGlowAura,
+  sGlowDarks,
 }
 
 /// O tipo a partir do IDENTIFICADOR estavel.

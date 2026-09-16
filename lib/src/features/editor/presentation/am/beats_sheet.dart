@@ -1,4 +1,5 @@
 import 'package:aurea/src/core/l10n/app_language.dart';
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -25,6 +26,8 @@ Future<void> showBeatsSheet(
   var sensibilidade = 50.0;
   var denominador = 4;
   var rodando = false;
+  // Marcar na timeline assim que detectar (o pedido do beta 89).
+  var marcarAoDetectar = true;
 
   await showParamSheet(
     context,
@@ -44,10 +47,17 @@ Future<void> showBeatsSheet(
             denominador: denominador,
           );
           if (!sheetContext.mounted) return;
+          final marcados = n != null && marcarAoDetectar
+              ? controller.batidasViramMarcadores()
+              : 0;
           setSheetState(() => rodando = false);
           AureaSnack.show(
             sheetContext,
-            n == null ? 'Nao achei ritmo nessa faixa' : '$n marcas de batida',
+            n == null
+                ? 'Nao achei ritmo nessa faixa'
+                : (marcarAoDetectar
+                      ? '$n batidas, $marcados marcadores na timeline'
+                      : '$n marcas de batida'),
           );
         }
 
@@ -58,7 +68,8 @@ Future<void> showBeatsSheet(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const AppText('FAIXA DE FREQUENCIA',
+                const AppText(
+                  'FAIXA DE FREQUENCIA',
                   style: TextStyle(
                     fontSize: 10.5,
                     letterSpacing: 0.6,
@@ -84,7 +95,8 @@ Future<void> showBeatsSheet(
                   ],
                 ),
                 const SizedBox(height: 4),
-                const AppText('Bumbo e chimbal atacam em instantes diferentes. Cortar '
+                const AppText(
+                  'Bumbo e chimbal atacam em instantes diferentes. Cortar '
                   'no grave e cortar no pulso; no agudo, na levada.',
                   style: TextStyle(
                     fontSize: 11,
@@ -103,7 +115,8 @@ Future<void> showBeatsSheet(
                 ),
 
                 const SizedBox(height: 10),
-                const AppText('SUBDIVISAO',
+                const AppText(
+                  'SUBDIVISAO',
                   style: TextStyle(
                     fontSize: 10.5,
                     letterSpacing: 0.6,
@@ -132,7 +145,8 @@ Future<void> showBeatsSheet(
                   ],
                 ),
                 const SizedBox(height: 4),
-                const AppText('Em compasso 4/4: 1/4 poe uma marca em cada tempo, 1/8 '
+                const AppText(
+                  'Em compasso 4/4: 1/4 poe uma marca em cada tempo, 1/8 '
                   'duas, 1/1 uma por compasso.',
                   style: TextStyle(
                     fontSize: 11,
@@ -146,7 +160,8 @@ Future<void> showBeatsSheet(
                   children: [
                     const SizedBox(
                       width: 110,
-                      child: AppText('Andamento',
+                      child: AppText(
+                        'Andamento',
                         style: TextStyle(fontSize: 12, color: AmColors.muted),
                       ),
                     ),
@@ -181,7 +196,34 @@ Future<void> showBeatsSheet(
                   ],
                 ),
 
-                const SizedBox(height: 16),
+                const SizedBox(height: 12),
+                GestureDetector(
+                  key: const ValueKey('batidas-marcar-ao-detectar'),
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () =>
+                      setSheetState(() => marcarAoDetectar = !marcarAoDetectar),
+                  child: Row(
+                    children: [
+                      Icon(
+                        marcarAoDetectar
+                            ? CupertinoIcons.checkmark_square_fill
+                            : CupertinoIcons.square,
+                        size: 20,
+                        color: marcarAoDetectar
+                            ? AmColors.accent
+                            : AmColors.muted,
+                      ),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: AppText(
+                          'Marcar as batidas na timeline',
+                          style: TextStyle(fontSize: 13, color: AmColors.text),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
                 GestureDetector(
                   onTap: rodando ? null : analisar,
                   child: Container(
@@ -209,6 +251,16 @@ Future<void> showBeatsSheet(
                   const SizedBox(height: 8),
                   Row(
                     children: [
+                      Expanded(
+                        child: _Secundario(
+                          label: 'Marcar na timeline',
+                          onTap: () {
+                            final n = controller.batidasViramMarcadores();
+                            AureaSnack.show(sheetContext, '$n marcadores');
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 8),
                       Expanded(
                         child: _Secundario(
                           label: 'Cortar nas batidas',

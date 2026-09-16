@@ -33,6 +33,10 @@ class CaptionHighlightPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    if (estilo.layout == HighlightLayout.viral) {
+      _pintarViral(canvas, size);
+      return;
+    }
     final ativa = frase.ativaEm(tempo);
     final visiveis = _visiveis(ativa);
     if (visiveis.isEmpty) return;
@@ -118,6 +122,136 @@ class CaptionHighlightPainter extends CustomPainter {
 
   static const double _espaco = 14;
 
+  // ----------------------------------------------------------- VIRAL
+
+  /// Palavra-chave do estilo viral: a longa (8+ letras) e a ultima da frase
+  /// (4+ letras) — o que o olho procura num edit, sem pedir marcacao.
+  bool _chave(int i) {
+    final letras = frase.palavras[i].text.replaceAll(
+      RegExp(r'[^A-Za-zÀ-ÿ0-9]'),
+      '',
+    );
+    return letras.length >= 8 ||
+        (i == frase.palavras.length - 1 && letras.length >= 4);
+  }
+
+  /// O ESTILO VIRAL: a frase inteira e diagramada de uma vez (nada pula
+  /// quando uma palavra chega), cada palavra aparece no instante em que e
+  /// dita com fade e subida, todas com brilho e a chave com brilho forte na
+  /// cor de destaque. Terminada a ultima palavra, a frase apaga em fade.
+  void _pintarViral(Canvas canvas, Size size) {
+    final palavras = frase.palavras;
+    if (palavras.isEmpty) return;
+    const entrada = 220000, saida = 280000;
+    final depois = (tempo - palavras.last.end).inMicroseconds;
+    final some = depois <= 0 ? 1.0 : 1 - (depois / saida).clamp(0.0, 1.0);
+    if (some <= 0) return;
+
+    final corpoV = corpo * 0.62;
+    final espaco = corpoV * 0.55;
+    final k = reducaoDoCorpo(corpoV);
+
+    ui.Paragraph construir(int i, double reducao, Color cor, double brilho) {
+      final texto = frase.palavras[i].text.toUpperCase();
+      final chave = _chave(i);
+      final b =
+          ui.ParagraphBuilder(
+              ui.ParagraphStyle(
+                fontSize: corpoV / reducao,
+                fontWeight: FontWeight.w700,
+                fontFamily: estilo.fonteContexto,
+              ),
+            )
+            ..pushStyle(
+              ui.TextStyle(
+                color: cor,
+                fontSize: corpoV / reducao,
+                fontWeight: FontWeight.w700,
+                fontFamily: estilo.fonteContexto,
+                letterSpacing: corpoV * 0.2 / reducao,
+                shadows: brilho <= 0
+                    ? null
+                    : [
+                        Shadow(
+                          color: cor.withValues(alpha: .9 * brilho),
+                          blurRadius: corpoV * .35 / reducao,
+                        ),
+                        if (chave)
+                          Shadow(
+                            color: cor.withValues(alpha: .85 * brilho),
+                            blurRadius: corpoV * 1.1 / reducao,
+                          ),
+                      ],
+              ),
+            )
+            ..addText(texto);
+      return b.build()
+        ..layout(const ui.ParagraphConstraints(width: double.infinity));
+    }
+
+    // 1. MEDIR a frase inteira e quebrar em linhas (80% da largura).
+    final medidos = [
+      for (var i = 0; i < palavras.length; i++)
+        (indice: i, paragrafo: construir(i, 1, const Color(0xFFFFFFFF), 0)),
+    ];
+    final linhas = <List<({int indice, ui.Paragraph paragrafo})>>[];
+    var atual = <({int indice, ui.Paragraph paragrafo})>[];
+    var largura = 0.0;
+    for (final m in medidos) {
+      final w = m.paragrafo.maxIntrinsicWidth + espaco;
+      if (atual.isNotEmpty && largura + w > size.width * .8) {
+        linhas.add(atual);
+        atual = [];
+        largura = 0;
+      }
+      atual.add(m);
+      largura += w;
+    }
+    if (atual.isNotEmpty) linhas.add(atual);
+    final alturaLinha = medidos.first.paragrafo.height * 1.05;
+    var y = size.height * .5 - linhas.length * alturaLinha / 2;
+
+    // 2. DESENHAR o que ja foi dito.
+    for (final linha in linhas) {
+      final larguraDaLinha =
+          linha.fold<double>(
+            0,
+            (a, m) => a + m.paragrafo.maxIntrinsicWidth + espaco,
+          ) -
+          espaco;
+      var x = (size.width - larguraDaLinha) / 2;
+      for (final m in linha) {
+        final w = m.paragrafo.maxIntrinsicWidth;
+        final entrou =
+            (tempo - palavras[m.indice].start).inMicroseconds / entrada;
+        if (entrou > 0) {
+          final p = Curves.easeOutCubic.transform(entrou.clamp(0.0, 1.0));
+          final alfa = p * some;
+          final base = _chave(m.indice)
+              ? estilo.corDestaque
+              : estilo.corContexto;
+          final cor = base.withValues(alpha: base.a * alfa);
+          final cheio = construir(m.indice, 1, cor, alfa);
+          final reduzido = k > 1 ? construir(m.indice, k, cor, alfa) : null;
+          desenharParagrafoNoAtlas(
+            canvas,
+            cheio,
+            reduzido,
+            k,
+            Offset(x, y + (1 - p) * corpoV * .3),
+          );
+          reduzido?.dispose();
+          cheio.dispose();
+        }
+        x += w + espaco;
+      }
+      y += alturaLinha;
+    }
+    for (final m in medidos) {
+      m.paragrafo.dispose();
+    }
+  }
+
   /// Quais palavras entram na tela: a ativa mais o contexto que o arranjo
   /// comporta, nunca mais que o teto.
   List<int> _visiveis(int? ativa) {
@@ -193,6 +327,7 @@ class CaptionHighlightPainter extends CustomPainter {
         ];
       case HighlightLayout.atravessada:
       case HighlightLayout.costura:
+      case HighlightLayout.viral:
         // Uma fileira so, quebrando quando estoura a largura.
         final out = <List<({int indice, ui.Paragraph paragrafo})>>[];
         var atual = <({int indice, ui.Paragraph paragrafo})>[];

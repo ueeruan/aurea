@@ -3585,6 +3585,8 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
         case EffectType.sGlintRainbow:
         case EffectType.sGlowRings:
         case EffectType.sEdgeRays:
+        case EffectType.sGlowAura:
+        case EffectType.sGlowDarks:
           break;
 
         case EffectType.gaussianBlur:

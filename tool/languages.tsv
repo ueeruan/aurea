@@ -3117,3 +3117,15 @@ Deslocamento de fase horizontal	Horizontal Phase Shift	Desplazamiento de fase ho
 Tijolos	Bricks	Ladrillos	طوب	벽돌	レンガ	砖块	ईंटें	Bata	Кирпичи
 Espelho	Mirror	Espejo	مرآة	거울	ミラー	镜像	दर्पण	Cermin	Зеркало
 Parede de telas	Video Wall	Pared de pantallas	جدار الشاشات	비디오 월	ビデオウォール	电视墙	वीडियो वॉल	Dinding layar	Видеостена
+Largura do brilho	Glow Width	Ancho del brillo	عرض التوهج	글로우 너비	グローの幅	辉光宽度	ग्लो चौड़ाई	Lebar glow	Ширина свечения
+Fase vermelho	Red Phase	Fase rojo	طور الأحمر	빨강 위상	赤の位相	红色相位	लाल फेज़	Fase merah	Фаза красного
+Fase verde	Green Phase	Fase verde	طور الأخضر	초록 위상	緑の位相	绿色相位	हरा फेज़	Fase hijau	Фаза зелёного
+Fase azul	Blue Phase	Fase azul	طور الأزرق	파랑 위상	青の位相	蓝色相位	नीला फेज़	Fase biru	Фаза синего
+Psicodélico	Psychedelic	Psicodélico	مخدر	사이키델릭	サイケデリック	迷幻	साइकेडेलिक	Psikedelik	Психоделика
+Aura suave	Soft Aura	Aura suave	هالة ناعمة	부드러운 오라	柔らかなオーラ	柔和光晕	नरम आभा	Aura lembut	Мягкая аура
+S_GlowAura	S_GlowAura	S_GlowAura	S_GlowAura	S_GlowAura	S_GlowAura	S_GlowAura	S_GlowAura	S_GlowAura	S_GlowAura
+S_GlowDarks	S_GlowDarks	S_GlowDarks	S_GlowDarks	S_GlowDarks	S_GlowDarks	S_GlowDarks	S_GlowDarks	S_GlowDarks	S_GlowDarks
+Escuridão	Darkness	Oscuridad	الظلام	어두움	暗さ	暗度	अंधेरा	Kegelapan	Темнота
+Sombra densa	Dense Shadow	Sombra densa	ظل كثيف	짙은 그림자	濃い影	浓重阴影	घनी छाया	Bayangan pekat	Густая тень
+Marcar as batidas na timeline	Mark beats on the timeline	Marcar los beats en la línea de tiempo	تمييز الإيقاعات على الخط الزمني	타임라인에 비트 표시	タイムラインにビートをマーク	在时间线上标记节拍	टाइमलाइन पर बीट चिह्नित करें	Tandai ketukan di timeline	Отметить биты на таймлайне
+Marcar na timeline	Mark on timeline	Marcar en la línea de tiempo	تمييز على الخط الزمني	타임라인에 표시	タイムラインにマーク	标记到时间线	टाइमलाइन पर चिह्नित करें	Tandai di timeline	Отметить на таймлайне

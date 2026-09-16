@@ -220,5 +220,38 @@ void main() {
     return;
   }
 
+  if (efeito == 9.0 || efeito == 10.0) {
+    // Campo de brilho (9, S_GlowAura) ou de escuridao (10, S_GlowDarks)
+    // espalhado pela largura: disco de 96 amostras em espiral de ouro.
+    float raio = max(p0.y * k, .001);
+    float lim = efeito == 9.0 ? p1.y : p0.w;
+    float campo = 0.0;
+    for (int i = 0; i < 96; i++) {
+      float f = (float(i) + .5) / 96.0;
+      float a = float(i) * OURO;
+      vec4 c = amostra(p + raio * sqrt(f) * vec2(cos(a), sin(a)));
+      float y = luma(c.rgb);
+      campo += efeito == 9.0 ? max(y - lim, 0.0) / max(1.0 - lim, .001)
+                             : clamp((lim - y) / max(lim, .001), 0.0, 1.0);
+    }
+    campo /= 96.0;
+    if (efeito == 9.0) {
+      // S_GlowAura: faixas de cor pelo campo — cada canal numa fase, a
+      // frequencia conta quantas voltas o espectro da ao longo do brilho.
+      vec3 fases = vec3(p1.z, p1.w, p2.x) + vec3(p1.x);
+      // O campo do AE varia mais por pixel que um disco borrado: 1,8x mais
+      // voltas por unidade de campo da a mesma densidade de faixas.
+      vec3 faixas = .5 + .5 * cos(6.2831853 * (p0.w * 1.8 * campo + fases));
+      faixas = mix(vec3(luma(faixas)), faixas, p2.y) * c0.rgb;
+      float peso = smoothstep(0.0, .08, campo);
+      fragColor = somar(base, faixas * p0.z * peso);
+    } else {
+      // S_GlowDarks: a escuridao se espalha e escurece em volta.
+      float escurecer = clamp(campo * p0.z * 1.6, 0.0, 1.0);
+      fragColor = vec4(base.rgb * (1.0 - escurecer), base.a);
+    }
+    return;
+  }
+
   fragColor = base;
 }

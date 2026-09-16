@@ -1,3 +1,7 @@
+import 'package:flutter/material.dart';
+import 'package:aurea/src/features/editor/presentation/widgets/caption_highlight_painter.dart';
+
+import 'dart:ui' as ui;
 import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -6,18 +10,18 @@ import 'package:aurea/src/features/editor/domain/caption.dart';
 import 'package:aurea/src/features/editor/domain/caption_highlight.dart';
 
 Cue _p(int deMs, int ateMs, String texto) => Cue(
-      start: Duration(milliseconds: deMs),
-      end: Duration(milliseconds: ateMs),
-      text: texto,
-    );
+  start: Duration(milliseconds: deMs),
+  end: Duration(milliseconds: ateMs),
+  text: texto,
+);
 
 /// "nos nao buscamos Ele" — quatro palavras coladas.
 List<Cue> _frase() => [
-      _p(0, 300, 'nos'),
-      _p(320, 600, 'nao'),
-      _p(620, 1100, 'buscamos'),
-      _p(1120, 1400, 'Ele'),
-    ];
+  _p(0, 300, 'nos'),
+  _p(320, 600, 'nao'),
+  _p(620, 1100, 'buscamos'),
+  _p(1120, 1400, 'Ele'),
+];
 
 void main() {
   group('A frase e diagramada uma vez', () {
@@ -213,8 +217,8 @@ void main() {
   });
 
   group('Os cinco layouts e os cinco presets', () {
-    test('sao cinco arranjos', () {
-      expect(HighlightLayout.values, hasLength(5));
+    test('sao seis arranjos (o Viral entrou no beta 89)', () {
+      expect(HighlightLayout.values, hasLength(6));
       for (final l in HighlightLayout.values) {
         expect(l.rotulo, isNotEmpty);
         expect(l.contextoPorLado, lessThanOrEqualTo(kMaxContextoPorLado));
@@ -225,8 +229,8 @@ void main() {
       expect(HighlightLayout.sozinha.contextoPorLado, 0);
     });
 
-    test('sao cinco presets, todos ativos', () {
-      expect(HighlightPresets.todos, hasLength(5));
+    test('sao seis presets, todos ativos', () {
+      expect(HighlightPresets.todos, hasLength(6));
       for (final (nome, estilo) in HighlightPresets.todos) {
         expect(nome, isNotEmpty);
         expect(estilo.ativo, isTrue);
@@ -257,4 +261,60 @@ void main() {
       expect(depois.maiusculas, antes.maiusculas);
     });
   });
+
+  test(
+    'Viral: a frase aparece palavra a palavra e apaga depois da ultima',
+    () async {
+      final frase = CaptionPhrase([
+        Cue(
+          start: const Duration(milliseconds: 500),
+          end: const Duration(milliseconds: 900),
+          text: 'Entao',
+        ),
+        Cue(
+          start: const Duration(milliseconds: 900),
+          end: const Duration(milliseconds: 1300),
+          text: 'primeiro',
+        ),
+        Cue(
+          start: const Duration(milliseconds: 1300),
+          end: const Duration(milliseconds: 1800),
+          text: 'resposta',
+        ),
+      ]);
+      Future<int> acesos(Duration t) async {
+        final rec = ui.PictureRecorder();
+        CaptionHighlightPainter(
+          frase: frase,
+          tempo: t,
+          estilo: HighlightPresets.viral,
+          corpo: 60,
+        ).paint(Canvas(rec), const Size(400, 300));
+        final img = await rec.endRecording().toImage(400, 300);
+        final px = (await img.toByteData(format: ui.ImageByteFormat.rawRgba))!
+            .buffer
+            .asUint8List();
+        var n = 0;
+        for (var i = 3; i < px.length; i += 4) {
+          if (px[i] > 40) n++;
+        }
+        return n;
+      }
+
+      expect(
+        await acesos(const Duration(milliseconds: 400)),
+        0,
+        reason: 'antes de falar',
+      );
+      final uma = await acesos(const Duration(milliseconds: 800));
+      final todas = await acesos(const Duration(milliseconds: 1700));
+      expect(uma, greaterThan(0));
+      expect(todas, greaterThan(uma), reason: 'as palavras vao entrando');
+      expect(
+        await acesos(const Duration(milliseconds: 2200)),
+        0,
+        reason: 'apagou depois da ultima',
+      );
+    },
+  );
 }

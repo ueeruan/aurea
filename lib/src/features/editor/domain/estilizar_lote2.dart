@@ -53,6 +53,8 @@ final receitasSapphire = <EffectType, ReceitaSapphire>{
     EffectType.sGlint,
     EffectType.sGlowRings,
     EffectType.sEdgeRays,
+    EffectType.sGlowAura,
+    EffectType.sGlowDarks,
   ])
     t: ReceitaSapphire(
       asset: 'shaders/luz.frag',

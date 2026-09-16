@@ -30,6 +30,11 @@ enum HighlightLayout {
 
   /// So a palavra, centralizada.
   sozinha,
+
+  /// O estilo VIRAL de edit: caixa alta pequena e espacada no meio da tela,
+  /// palavra entrando quando e dita (fade e subida), brilho branco, e as
+  /// palavras-chave na cor de destaque com brilho forte.
+  viral,
 }
 
 extension HighlightLayoutX on HighlightLayout {
@@ -39,6 +44,7 @@ extension HighlightLayoutX on HighlightLayout {
     HighlightLayout.dupla => 'Dupla',
     HighlightLayout.costura => 'Costura',
     HighlightLayout.sozinha => 'Sozinha',
+    HighlightLayout.viral => 'Viral',
   };
 
   /// Quantas palavras de contexto o arranjo comporta de cada lado.
@@ -242,7 +248,9 @@ class CaptionHighlightStyle {
   /// Usa a mascara de segmentacao para a palavra passar ATRAS do sujeito.
   final bool atrasDaPessoa;
 
-  bool get isNeutro => !ativo || destaque == 1.0;
+  // O Viral nao infla a palavra (destaque 1,0) e mesmo assim e um estilo.
+  bool get isNeutro =>
+      !ativo || (destaque == 1.0 && layout != HighlightLayout.viral);
 
   CaptionHighlightStyle copyWith({
     bool? ativo,
@@ -330,7 +338,20 @@ abstract final class HighlightPresets {
     duracaoInflar: Duration(milliseconds: 150),
   );
 
+  /// O estilo dos edits virais: a frase se monta palavra a palavra, com
+  /// brilho, e a palavra forte acende na cor.
+  static const viral = CaptionHighlightStyle(
+    ativo: true,
+    layout: HighlightLayout.viral,
+    destaque: 1.0,
+    corDestaque: Color(0xFF3DFF7A),
+    corContexto: Color(0xFFFFFFFF),
+    maiusculas: true,
+    duracaoInflar: Duration(milliseconds: 220),
+  );
+
   static const todos = <(String, CaptionHighlightStyle)>[
+    ('Viral', viral),
     ('Editorial', editorial),
     ('Manifesto', manifesto),
     ('Impacto', impacto),

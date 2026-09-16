@@ -463,6 +463,98 @@ const efeitosLuzEDiversos = <EffectType, EffectSpec>{
       }),
     ],
   ),
+  EffectType.sGlowAura: EffectSpec(
+    id: 's_glow_aura',
+    name: 'S_GlowAura',
+    category: 'Light',
+    hasColor: true,
+    defaultColor: Color(0xFFFFFFFF),
+    colorLabels: ['Cor'],
+    synonyms: ['glow aura', 'aura', 'psicodelico', 'arco iris', 'sapphire'],
+    params: {
+      'brilho': EffectParam('Brilho', 80, 0, 400, unit: '%', decimals: 0),
+      'largura': EffectParam(
+        'Largura do brilho',
+        96,
+        0,
+        1000,
+        unit: 'px',
+        decimals: 0,
+        dragStep: .5,
+      ),
+      'frequencia': EffectParam(
+        'Frequência',
+        8,
+        0,
+        60,
+        decimals: 1,
+        dragStep: .05,
+      ),
+      'fase': EffectParam(
+        'Fase',
+        0,
+        -36000,
+        36000,
+        unit: '°',
+        decimals: 1,
+        dragStep: .5,
+      ),
+      'limiar': EffectParam('Limiar', 0, 0, 100, unit: '%', decimals: 1),
+      'fase_r': EffectParam(
+        'Fase vermelho',
+        72,
+        -360,
+        360,
+        unit: '°',
+        decimals: 1,
+      ),
+      'fase_g': EffectParam(
+        'Fase verde',
+        36,
+        -360,
+        360,
+        unit: '°',
+        decimals: 1,
+      ),
+      'fase_b': EffectParam('Fase azul', 0, -360, 360, unit: '°', decimals: 1),
+      'saturacao': EffectParam(
+        'Saturação',
+        100,
+        0,
+        200,
+        unit: '%',
+        decimals: 0,
+      ),
+    },
+    montar: ['brilho', 'largura', 'frequencia', 'fase'],
+    presets: [
+      EffectPronto('Psicodélico', {'frequencia': 8, 'brilho': 80}),
+      EffectPronto('Aura suave', {'frequencia': 2, 'brilho': 45, 'limiar': 40}),
+    ],
+  ),
+  EffectType.sGlowDarks: EffectSpec(
+    id: 's_glow_darks',
+    name: 'S_GlowDarks',
+    category: 'Light',
+    synonyms: ['glow darks', 'glow escuro', 'sombra', 'escurecer', 'sapphire'],
+    params: {
+      'escuridao': EffectParam('Escuridão', 50, 0, 200, unit: '%', decimals: 0),
+      'limiar': EffectParam('Limiar', 50, 0, 100, unit: '%', decimals: 1),
+      'largura': EffectParam(
+        'Largura do brilho',
+        240,
+        0,
+        1000,
+        unit: 'px',
+        decimals: 0,
+        dragStep: .5,
+      ),
+    },
+    montar: ['escuridao', 'largura'],
+    presets: [
+      EffectPronto('Sombra densa', {'escuridao': 110, 'largura': 300}),
+    ],
+  ),
   EffectType.sEdgeRays: EffectSpec(
     id: 's_edge_rays',
     name: 'S_EdgeRays',
@@ -532,6 +624,28 @@ double _r(EffectInstance e, String k, Duration t) =>
     _v(e, k, t) * math.pi / 180;
 
 List<double> valoresLuz(EffectInstance e, Duration t) {
+  if (e.type == EffectType.sGlowAura) {
+    return [
+      9,
+      _v(e, 'largura', t),
+      _v(e, 'brilho', t) / 100,
+      _v(e, 'frequencia', t),
+      _v(e, 'fase', t) / 360,
+      _v(e, 'limiar', t) / 100,
+      _v(e, 'fase_r', t) / 360,
+      _v(e, 'fase_g', t) / 360,
+      _v(e, 'fase_b', t) / 360,
+      _v(e, 'saturacao', t) / 100,
+    ];
+  }
+  if (e.type == EffectType.sGlowDarks) {
+    return [
+      10,
+      _v(e, 'largura', t),
+      _v(e, 'escuridao', t) / 100,
+      _v(e, 'limiar', t) / 100,
+    ];
+  }
   double v(String k) => _v(e, k, t);
   double p(String k) => _v(e, k, t) / 100;
   return switch (e.type) {

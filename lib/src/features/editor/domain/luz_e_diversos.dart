@@ -157,7 +157,7 @@ const efeitosLuzEDiversos = <EffectType, EffectSpec>{
         decimals: 1,
       ),
       'limiar': EffectParam('Limiar', 50, 0, 100, unit: '%', decimals: 1),
-      'brilho': EffectParam('Brilho', 100, 0, 400, unit: '%', decimals: 0),
+      'brilho': EffectParam('Brilho', 60, 0, 400, unit: '%', decimals: 0),
       'decaimento': EffectParam(
         'Decaimento',
         50,
@@ -188,7 +188,7 @@ const efeitosLuzEDiversos = <EffectType, EffectSpec>{
     params: {
       'raio': EffectParam(
         'Raio',
-        120,
+        200,
         0,
         1000,
         unit: 'px',
@@ -326,10 +326,10 @@ const efeitosLuzEDiversos = <EffectType, EffectSpec>{
     colorLabels: ['Cor'],
     synonyms: ['glint', 'estrela', 'star', 'cintilar', 'brilho', 'sapphire'],
     params: {
-      'limiar': EffectParam('Limiar', 70, 0, 100, unit: '%', decimals: 1),
+      'limiar': EffectParam('Limiar', 40, 0, 100, unit: '%', decimals: 1),
       'comprimento': EffectParam(
         'Comprimento',
-        120,
+        300,
         0,
         1000,
         unit: 'px',
@@ -345,7 +345,7 @@ const efeitosLuzEDiversos = <EffectType, EffectSpec>{
         options: ['2', '4', '6', '8'],
       ),
       'rotacao': EffectParam('Rotação', 45, -360, 360, unit: '°', decimals: 1),
-      'brilho': EffectParam('Brilho', 150, 0, 600, unit: '%', decimals: 0),
+      'brilho': EffectParam('Brilho', 100, 0, 600, unit: '%', decimals: 0),
       'decaimento': EffectParam(
         'Decaimento',
         50,
@@ -371,10 +371,10 @@ const efeitosLuzEDiversos = <EffectType, EffectSpec>{
     category: 'Light',
     synonyms: ['glint rainbow', 'arco iris', 'estrela', 'prisma', 'sapphire'],
     params: {
-      'limiar': EffectParam('Limiar', 70, 0, 100, unit: '%', decimals: 1),
+      'limiar': EffectParam('Limiar', 40, 0, 100, unit: '%', decimals: 1),
       'comprimento': EffectParam(
         'Comprimento',
-        160,
+        300,
         0,
         1000,
         unit: 'px',
@@ -390,7 +390,7 @@ const efeitosLuzEDiversos = <EffectType, EffectSpec>{
         options: ['2', '4', '6', '8'],
       ),
       'rotacao': EffectParam('Rotação', 45, -360, 360, unit: '°', decimals: 1),
-      'brilho': EffectParam('Brilho', 150, 0, 600, unit: '%', decimals: 0),
+      'brilho': EffectParam('Brilho', 100, 0, 600, unit: '%', decimals: 0),
       'decaimento': EffectParam(
         'Decaimento',
         40,
@@ -426,7 +426,7 @@ const efeitosLuzEDiversos = <EffectType, EffectSpec>{
     name: 'S_GlowRings',
     category: 'Light',
     hasColor: true,
-    defaultColor: Color(0xFFFFD28A),
+    defaultColor: Color(0xFF9FDCFF),
     colorLabels: ['Cor dos anéis'],
     synonyms: ['glow rings', 'aneis', 'halo', 'lens', 'sapphire'],
     params: {
@@ -451,7 +451,7 @@ const efeitosLuzEDiversos = <EffectType, EffectSpec>{
         decimals: 0,
         dragStep: .5,
       ),
-      'brilho': EffectParam('Brilho', 120, 0, 600, unit: '%', decimals: 0),
+      'brilho': EffectParam('Brilho', 70, 0, 600, unit: '%', decimals: 0),
     },
     montar: ['raio_dos_aneis', 'aneis', 'brilho'],
     presets: [
@@ -504,7 +504,7 @@ const efeitosLuzEDiversos = <EffectType, EffectSpec>{
         unit: '%',
         decimals: 1,
       ),
-      'brilho': EffectParam('Brilho', 150, 0, 600, unit: '%', decimals: 0),
+      'brilho': EffectParam('Brilho', 90, 0, 600, unit: '%', decimals: 0),
       'decaimento': EffectParam(
         'Decaimento',
         50,

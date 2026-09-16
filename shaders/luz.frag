@@ -76,8 +76,11 @@ vec3 matiz(float h) {
   return clamp(k, 0.0, 1.0);
 }
 
+// Mistura em modo TELA (1-(1-a)(1-b)), como os renders do AE: a luz clareia
+// sem estourar em branco chapado e o detalhe por baixo continua visivel.
 vec4 somar(vec4 base, vec3 luz) {
-  vec3 rgb = base.rgb + max(luz, vec3(0.0));
+  vec3 l = clamp(luz, 0.0, 1.0);
+  vec3 rgb = base.rgb + l * (1.0 - base.rgb);
   float a = clamp(max(base.a, max(rgb.r, max(rgb.g, rgb.b))), 0.0, 1.0);
   return vec4(min(rgb, vec3(a)), a);
 }
@@ -87,6 +90,14 @@ vec3 tingir(vec3 luz, float quanto) {
 }
 
 const float OURO = 2.39996323;
+
+// Ruido por pixel: desloca as amostras ao longo do traco para a estrela nao
+// virar uma trama de pontos quando o braco e muito mais longo que o passo.
+float ruido(vec2 p) {
+  vec3 q = fract(vec3(p.xyx) * vec3(.1031, .1030, .0973));
+  q += dot(q, q.yxz + 33.33);
+  return fract((q.x + q.y) * q.z);
+}
 
 void main() {
   vec2 p = FlutterFragCoord().xy;
@@ -108,7 +119,7 @@ void main() {
       soma += fonte(p + r * vec2(cos(a), sin(a)), p0.w, p1.x) * w;
       peso += w;
     }
-    vec3 luz = soma / peso * p0.z * (efeito == 2.0 ? 2.5 : 1.5);
+    vec3 luz = soma / peso * p0.z * (efeito == 2.0 ? 3.0 : 1.2);
     fragColor = somar(base, tingir(luz, p1.y));
     return;
   }
@@ -133,19 +144,22 @@ void main() {
     float comp = p0.z * k;
     float bracos = clamp(p0.w, 1.0, 4.0);
     vec3 soma = vec3(0.0);
+    float salto = ruido(p);
     for (int b = 0; b < 4; b++) {
       float ativo = step(float(b) + .5, bracos);
       float ang = p1.x + float(b) * 3.14159265 / bracos;
       vec2 dir = vec2(cos(ang), sin(ang));
-      for (int s = 1; s <= 16; s++) {
-        float f = float(s) / 16.0;
-        float queda = pow(1.0 - f, 1.0 + p1.z * 4.0);
-        vec3 cor = efeito == 5.0 ? matiz(f * p1.w + p2.x / 6.2831853) * 1.6 : c0.rgb;
+      for (int s = 0; s < 24; s++) {
+        float f = (float(s) + salto) / 24.0;
+        // Traco fino e longo: pouco peso colado ao ponto (senao vira mancha)
+        // e queda suave ate a ponta, como o S_Glint do AE.
+        float queda = pow(1.0 - f, 1.0 + p1.z * 2.0) * smoothstep(0.0, .35, f);
+        vec3 cor = efeito == 5.0 ? mix(vec3(1.0), matiz(f * p1.w + p2.x / 6.2831853), .6) * 1.2 : c0.rgb;
         vec3 l = fonte(p + dir * f * comp, p0.y, .08) + fonte(p - dir * f * comp, p0.y, .08);
         soma += l * cor * queda * ativo;
       }
     }
-    fragColor = somar(base, soma / 8.0 * p1.y);
+    fragColor = somar(base, soma / (efeito == 5.0 ? 6.2 : 8.5) * p1.y);
     return;
   }
 
@@ -162,7 +176,9 @@ void main() {
         float ang = float(a) * 6.2831853 / 20.0;
         vec2 dir = vec2(cos(ang), sin(ang));
         float rr = r + espessura * (mod(float(a), 2.0) - .5);
-        soma += fonte(p + dir * rr, p0.y, .08) * w * c0.rgb;
+        // Cada anel puxa a cor para um lado do espectro, como a franja
+        // colorida dos aneis do AE.
+        soma += fonte(p + dir * rr, p0.y, .08) * w * mix(c0.rgb, matiz(float(j) * .17 + .5), .45);
       }
     }
     vec3 halo = vec3(0.0);
@@ -172,7 +188,7 @@ void main() {
       float a = float(i) * OURO;
       halo += fonte(p + rh * sqrt(f) * vec2(cos(a), sin(a)), p0.y, .08);
     }
-    fragColor = somar(base, (soma / 20.0 + halo / 16.0) * p1.z);
+    fragColor = somar(base, (soma / 14.0 + halo / 16.0 * .8) * p1.z);
     return;
   }
 
@@ -200,7 +216,7 @@ void main() {
       peso += w;
       w *= decai;
     }
-    fragColor = somar(base, soma / max(peso, 1e-4) * p1.y * 2.0 * c0.rgb);
+    fragColor = somar(base, soma / max(peso, 1e-4) * p1.y * (efeito == 7.0 ? 3.0 : 1.45) * c0.rgb);
     return;
   }
 

@@ -1,4 +1,5 @@
 import 'luz_e_diversos.dart';
+import 'motion_tile.dart';
 import 'dart:ui';
 
 import 'package:uuid/uuid.dart';
@@ -464,6 +465,7 @@ const effectSpecs = <EffectType, EffectSpec>{
   ...efeitosPixelSort,
   ...efeitosAutoPaint,
   ...efeitosLuzEDiversos,
+  ...efeitosMotionTile,
 };
 
 /// OS EFEITOS DE EDIT, na ordem em que se procura: batida, glitch,

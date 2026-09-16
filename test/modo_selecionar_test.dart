@@ -40,7 +40,20 @@ void main() {
     expect(c.read(modoSelecionarProvider), isTrue);
 
     for (final id in ids) {
-      await tester.tap(find.byKey(ValueKey('clip-content-$id')));
+      // PERTO DA BORDA ESQUERDA do clipe, e nao no centro: o clipe e
+      // largo, e com o palco no tamanho da planta o centro dele cai
+      // debaixo do botao "+" flutuante, que intercepta o toque. O dedo
+      // de verdade tem a barra inteira para acertar.
+      // O PRIMEIRO TOQUE ABRE O PAINEL, e o painel come o pe da linha
+      // do tempo — com o palco no tamanho da planta, a segunda barra
+      // pode ficar debaixo dele. Traz para a vista antes de tocar,
+      // como o dedo faria, e mira um terco para dentro (a beirada e a
+      // alca de aparar, o canto e o "+").
+      final alvo = find.byKey(ValueKey('clip-content-$id'));
+      await tester.ensureVisible(alvo);
+      await tester.pumpAndSettle();
+      final r = tester.getRect(alvo);
+      await tester.tapAt(Offset(r.left + r.width / 3, r.center.dy));
       await tester.pumpAndSettle();
     }
     expect(c.read(multiSelectProvider), ids.toSet());

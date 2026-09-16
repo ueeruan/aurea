@@ -848,23 +848,39 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                 final proporcao = ref
                     .watch(editorControllerProvider)
                     .aspectRatio;
-                // O aspecto so pode ENCOLHER o preview, nunca aumentar.
+                // O PALCO TEM TAMANHO PROPRIO; a composicao encaixa
+                // DENTRO dele.
                 //
-                // Encolher e o que resolve a queixa (composicao larga
-                // dentro de um retangulo alto = duas tarjas pretas).
-                // Aumentar seria pedir mais tela para um projeto
-                // vertical, e ai a timeline e o painel e que ficam sem
-                // espaco — num aparelho pequeno isso estoura o layout.
+                // Ate 16/09 o palco encolhia ate colar na composicao.
+                // A intencao era boa — tirava as tarjas pretas de um
+                // projeto largo — mas o preco era um editor apertado:
+                // um 16:9 num celular de 390 dava 219 px de composicao,
+                // e com o palco colado nela o preview virava 26% da
+                // tela, contra 40% de um 9:16. A mesma tela mudava de
+                // cara conforme o formato do projeto.
+                //
+                // O dono mandou a planta com os dois formatos lado a
+                // lado: la o palco tem SEMPRE a mesma altura, e o que
+                // muda e onde sobra folga — em cima e embaixo no 16:9,
+                // nas laterais no 9:16. A folga nao e preta: e a cor do
+                // painel, entao le como moldura de palco e nao como
+                // video quebrado (ver a cor do fundo em preview_stage).
+                //
+                // A proporcao do projeto nao entra mais nesta conta.
                 final fracaoDaComposicao =
                     constraints.maxHeight <= 0 || proporcao <= 0
                     ? EditorSession.alturaDoPreview
                     : math.min(
-                        math.min(
-                          EditorSession.alturaDoPreview,
-                          math.max(96, ws - 90 - (ws * .42).clamp(230, 320)) /
-                              constraints.maxHeight,
-                        ),
-                        (constraints.maxWidth / proporcao) /
+                        EditorSession.alturaDoPreview,
+                        // A RESERVA DO PAINEL: 250 px, e nao 230.
+                        //
+                        // Num celular de 667 o palco novo tomava 16 px
+                        // a mais, e 16 px bastaram para o trilho do
+                        // painel de transformacao perder um botao. Numa
+                        // tela alta a conta nem encosta neste piso (a
+                        // fracao de 42% e maior), entao o palco
+                        // generoso continua igual onde ha espaco.
+                        math.max(96, ws - 90 - (ws * .42).clamp(250, 320)) /
                             constraints.maxHeight,
                       );
                 final m = EditorLayoutMetrics.solve(

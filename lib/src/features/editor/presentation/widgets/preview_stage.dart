@@ -779,8 +779,14 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
         child: Stack(
           fit: StackFit.expand,
           children: [
+            // A FOLGA EM VOLTA DA COMPOSICAO usa a cor do painel, e
+            // nao preto. Preto ao redor de um video preto nao tem
+            // beirada: a pessoa nao sabe onde a composicao acaba, e um
+            // projeto largo parecia "video que nao cobre". Com a cor do
+            // painel, a composicao ganha contorno e o conjunto le como
+            // um palco emoldurado — que e o que a planta mostra.
             ColoredBox(
-              color: Colors.black,
+              color: AmColors.panel,
               child: LayoutBuilder(
                 builder: (context, constraints) {
                   final frame = compositionRect(

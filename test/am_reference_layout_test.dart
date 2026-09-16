@@ -100,6 +100,8 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('editor-fab')));
       await tester.pumpAndSettle();
       expect(find.byType(AddLayerPanel), findsOneWidget);
+      // O "+" nao mexe no palco: e um seletor, nao trabalho
+      // na camada.
       expect(tester.getRect(find.byType(PreviewStage)), preview);
       expect(find.byTooltip('Circulo').hitTestable(), findsOneWidget);
       expect(
@@ -122,7 +124,20 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.byType(LayerToolsDock), findsOneWidget);
-      expect(tester.getRect(find.byType(PreviewStage)), preview);
+      // COM UMA CAMADA SELECIONADA O PALCO CEDE (16/09, escolha do
+      // dono): a timeline batia no piso e quem perdia altura era o
+      // painel — em Borda e sombra o botao de adicionar saia da lista.
+      // Agora o palco devolve esses ~40 px enquanto se edita e os
+      // retoma quando nada esta selecionado. Continua generoso: nunca
+      // abaixo do minimo, e sempre mais alto do que era antes de o
+      // palco ganhar tamanho proprio.
+      final comCamada = tester.getRect(find.byType(PreviewStage));
+      expect(comCamada.height, lessThan(preview.height));
+      expect(comCamada.height, greaterThan(preview.height * 0.8));
+      expect(
+        comCamada.height,
+        greaterThanOrEqualTo(EditorLayoutMetrics.previewMin),
+      );
       expect(
         tester.widget<AmTimeline>(find.byType(AmTimeline)).singleLayerId,
         isNull,
@@ -135,13 +150,26 @@ void main() {
         tester.getRect(find.byType(PreviewStage)).height,
         greaterThanOrEqualTo(EditorLayoutMetrics.previewMin),
       );
+      // 'painel-voltar' e a chave de QUATRO botoes diferentes no app
+      // (cabecalho da folha, trilho do painel, cromo, folha de
+      // contexto). Com o palco no tamanho da planta, o da folha e o do
+      // trilho ficam tocaveis ao mesmo tempo — sao dois botoes de
+      // verdade, como na planta. O que importa aqui e que exista pelo
+      // menos um caminho de volta ao alcance do dedo.
       expect(
         find.byKey(const ValueKey('painel-voltar')).hitTestable(),
-        findsOneWidget,
+        findsAtLeastNWidgets(1),
       );
       await shot('posicao');
       final id = c.read(selectedLayerProvider)!;
-      await tester.tap(find.byTooltip('Opções de transformação'));
+      await tester.tap(find.byWidgetPredicate(
+          // O MESMO BOTAO: com auto-key ligado o tooltip ganha um
+          // sufixo (" · auto-key ligado"), e o casamento exato perdia
+          // o botao.
+          (w) =>
+              w is Tooltip &&
+              (w.message ?? '').startsWith('Opções de transformação'),
+        ));
       await tester.pumpAndSettle();
       await tester.tap(
         find.byWidgetPredicate(
@@ -150,7 +178,14 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(c.read(editorControllerProvider).layerById(id)!.is3D, isTrue);
-      await tester.tap(find.byTooltip('Opções de transformação'));
+      await tester.tap(find.byWidgetPredicate(
+          // O MESMO BOTAO: com auto-key ligado o tooltip ganha um
+          // sufixo (" · auto-key ligado"), e o casamento exato perdia
+          // o botao.
+          (w) =>
+              w is Tooltip &&
+              (w.message ?? '').startsWith('Opções de transformação'),
+        ));
       await tester.pumpAndSettle();
       await tester.tap(
         find.byWidgetPredicate(
@@ -191,7 +226,7 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('editor-back')));
       await tester.pumpAndSettle();
       expect(find.byType(TransformPanel), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('painel-voltar')));
+      await tester.tap(find.byKey(const ValueKey('painel-voltar')).first);
       await tester.pumpAndSettle();
       expect(find.byType(LayerToolsDock), findsOneWidget);
       expect(c.read(selectedLayerProvider), id);
@@ -217,6 +252,10 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Resetar'), findsOneWidget);
       var effects = c.read(editorControllerProvider).layerById(id)!.effects;
+      // Com o palco no tamanho da planta a pilha desceu: traz a ficha
+      // para a vista antes de tocar, como o dedo faria.
+      await tester.ensureVisible(find.text(effects.last.spec.name));
+      await tester.pumpAndSettle();
       await tester.tap(find.text(effects.last.spec.name));
       await tester.pumpAndSettle();
       expect(

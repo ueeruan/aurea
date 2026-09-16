@@ -2766,6 +2766,7 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
     final skewX = layer.skewX.valueAt(local) * math.pi / 180;
     final skewY = layer.skewY.valueAt(local) * math.pi / 180;
     final pivot = layer.pivot.valueAt(local);
+    final pivotZ = layer.pivotZ.valueAt(local);
     final metade = _metadeNaSelecao && layer.id == selectedId ? .5 : 1.0;
     final opacity = (opacityV * opacityMul * metade).clamp(0.0, 1.0);
 
@@ -2932,15 +2933,22 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
     );
 
     if (tilt3D) {
+      // A ANCORA EM Z entra AQUI, envolvendo as rotacoes: a camada
+      // gira em torno de um ponto a `pivotZ` de profundidade, e nao
+      // em torno do proprio plano. Com zero, a conta e identica a de
+      // sempre — as duas translacoes se cancelam.
       final pm = Matrix4.identity()
         ..setEntry(
           3,
           2,
           (camAtiva?.opcoes.ortografica ?? false) ? 0 : -1 / 1200,
-        )
+        );
+      if (pivotZ != 0) pm.translateByDouble(0, 0, pivotZ, 1);
+      pm
         ..rotateZ(rotation)
         ..rotateY(ry)
         ..rotateX(rx);
+      if (pivotZ != 0) pm.translateByDouble(0, 0, -pivotZ, 1);
       // EXTRUDE 3D: fatias da camada empilhadas em Z atras da frente,
       // escurecidas — a espessura aparece quando a camada inclina. Video
       // e particulas ficam de fora (textura e simulacao nao se repetem).

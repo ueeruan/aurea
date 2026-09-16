@@ -1247,6 +1247,10 @@ Map<String, dynamic> layerToJson(Layer l) {
     'skx': _ad(l.skewX),
     'sky': _ad(l.skewY),
     'pivot': _ao(l.pivot),
+    // So grava quando sai do zero: projeto antigo nao incha, e abrir um
+    // projeto sem a chave da exatamente o que dava antes.
+    if (l.pivotZ.base != 0 || l.pivotZ.isAnimated)
+      'pivotZ': _ad(l.pivotZ),
     'blend': l.blendMode.index,
     // So sai no arquivo quando a camada usa um modo proprio.
     if (l.customBlend != null) 'blendX': l.customBlend!.index,
@@ -2080,6 +2084,7 @@ Layer layerFromJson(Map<String, dynamic> m) {
   final skx = _asAd(m['skx']);
   final sky = _asAd(m['sky']);
   final pivot = _asAo(m['pivot']);
+  final pivotZ = m['pivotZ'] == null ? null : _asAd(m['pivotZ']);
   final blend = BlendMode.values[(m['blend'] as num).toInt()];
   final blendX = m['blendX'] == null
       ? null
@@ -2140,6 +2145,7 @@ Layer layerFromJson(Map<String, dynamic> m) {
         skewX: skx,
         skewY: sky,
         pivot: pivot,
+        pivotZ: pivotZ,
         blendMode: blend,
         customBlend: blendX,
         is3D: is3D,
@@ -2169,6 +2175,7 @@ Layer layerFromJson(Map<String, dynamic> m) {
         skewX: skx,
         skewY: sky,
         pivot: pivot,
+        pivotZ: pivotZ,
         blendMode: blend,
         customBlend: blendX,
         is3D: is3D,
@@ -2211,6 +2218,7 @@ Layer layerFromJson(Map<String, dynamic> m) {
         skewX: skx,
         skewY: sky,
         pivot: pivot,
+        pivotZ: pivotZ,
         blendMode: blend,
         customBlend: blendX,
         is3D: is3D,
@@ -2241,6 +2249,7 @@ Layer layerFromJson(Map<String, dynamic> m) {
         skewX: skx,
         skewY: sky,
         pivot: pivot,
+        pivotZ: pivotZ,
         blendMode: blend,
         customBlend: blendX,
         is3D: is3D,
@@ -2280,6 +2289,7 @@ Layer layerFromJson(Map<String, dynamic> m) {
         skewX: skx,
         skewY: sky,
         pivot: pivot,
+        pivotZ: pivotZ,
         blendMode: blend,
         customBlend: blendX,
         is3D: is3D,
@@ -2312,6 +2322,7 @@ Layer layerFromJson(Map<String, dynamic> m) {
         skewX: skx,
         skewY: sky,
         pivot: pivot,
+        pivotZ: pivotZ,
         blendMode: blend,
         customBlend: blendX,
         is3D: is3D,
@@ -2344,6 +2355,7 @@ Layer layerFromJson(Map<String, dynamic> m) {
         skewX: skx,
         skewY: sky,
         pivot: pivot,
+        pivotZ: pivotZ,
         blendMode: blend,
         customBlend: blendX,
         is3D: is3D,
@@ -2370,6 +2382,7 @@ Layer layerFromJson(Map<String, dynamic> m) {
         skewX: skx,
         skewY: sky,
         pivot: pivot,
+        pivotZ: pivotZ,
         blendMode: blend,
         customBlend: blendX,
         is3D: is3D,
@@ -2400,6 +2413,7 @@ Layer layerFromJson(Map<String, dynamic> m) {
         skewX: skx,
         skewY: sky,
         pivot: pivot,
+        pivotZ: pivotZ,
         blendMode: blend,
         customBlend: blendX,
         is3D: is3D,
@@ -2429,6 +2443,7 @@ Layer layerFromJson(Map<String, dynamic> m) {
         skewX: skx,
         skewY: sky,
         pivot: pivot,
+        pivotZ: pivotZ,
         blendMode: blend,
         customBlend: blendX,
         is3D: is3D,
@@ -2494,6 +2509,7 @@ Layer layerFromJson(Map<String, dynamic> m) {
         skewX: skx,
         skewY: sky,
         pivot: pivot,
+        pivotZ: pivotZ,
         blendMode: blend,
         customBlend: blendX,
         is3D: is3D,
@@ -2539,6 +2555,7 @@ Layer layerFromJson(Map<String, dynamic> m) {
         skewX: skx,
         skewY: sky,
         pivot: pivot,
+        pivotZ: pivotZ,
         blendMode: blend,
         customBlend: blendX,
         is3D: is3D,
@@ -2582,6 +2599,7 @@ Layer layerFromJson(Map<String, dynamic> m) {
         skewX: skx,
         skewY: sky,
         pivot: pivot,
+        pivotZ: pivotZ,
         blendMode: blend,
         customBlend: blendX,
         is3D: is3D,

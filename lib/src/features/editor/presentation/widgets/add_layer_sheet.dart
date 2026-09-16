@@ -31,7 +31,9 @@ import '../../domain/shape_library.dart';
 import '../am/points_panel.dart' show editPointsRequestProvider;
 import 'freehand_overlay.dart' show freehandRequestProvider;
 import '../am/am_colors.dart';
+import '../../../media/application/sons_recentes.dart';
 import 'gallery_panel.dart';
+import 'linha_de_som_recente.dart';
 import '../context/add_toolbar.dart' show AddTarget;
 
 /// Sheet "+" do editor: escolher o tipo de camada.
@@ -1133,20 +1135,79 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
             ),
           );
         }
-        return Row(
+        final recentes = ref.watch(sonsRecentesProvider);
+        return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _AddOption(
-              icon: CupertinoIcons.music_note,
-              label: 'Arquivo de audio',
-              onTap: () => _importAudio(),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _AddOption(
+                  icon: CupertinoIcons.music_note,
+                  label: 'Arquivo de audio',
+                  onTap: () => _importAudio(),
+                ),
+                _AddOption(
+                  icon: CupertinoIcons.film,
+                  label: 'Extrair de video',
+                  onTap: () => _importAudio(fromVideo: true),
+                ),
+                const Spacer(flex: 5),
+              ],
             ),
-            _AddOption(
-              icon: CupertinoIcons.film,
-              label: 'Extrair de video',
-              onTap: () => _importAudio(fromVideo: true),
-            ),
-            const Spacer(flex: 5),
+            // OS SONS RECENTES: a mesma trilha em outro projeto entra
+            // com um toque, e o play deixa OUVIR antes de entrar.
+            if (recentes.isNotEmpty) ...[
+              const Padding(
+                padding: EdgeInsets.fromLTRB(4, 10, 4, 6),
+                child: AppText(
+                  'Recentes',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: AmColors.muted,
+                  ),
+                ),
+              ),
+              Expanded(
+                child: ListView(
+                  padding: EdgeInsets.zero,
+                  children: [
+                    for (final som in recentes)
+                      LinhaDeSomRecente(
+                        key: ValueKey('som-recente-${som.caminho}'),
+                        som: som,
+                        onAdicionar: () async {
+                          setState(() => _importingAudio = true);
+                          try {
+                            await _controller.addAudioRecente(
+                              widget.playhead,
+                              som.caminho,
+                              som.nome,
+                            );
+                            if (mounted) _fecha();
+                          } catch (_) {
+                            if (mounted) {
+                              AureaSnack.show(
+                                context,
+                                'Nao consegui usar esse som. '
+                                'Importe o arquivo de novo.',
+                              );
+                              ref
+                                  .read(sonsRecentesProvider.notifier)
+                                  .tirar(som.caminho);
+                            }
+                          } finally {
+                            if (mounted) {
+                              setState(() => _importingAudio = false);
+                            }
+                          }
+                        },
+                      ),
+                  ],
+                ),
+              ),
+            ],
           ],
         );
       case _AbaAdd.objeto:

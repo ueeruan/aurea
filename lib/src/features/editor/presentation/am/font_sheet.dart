@@ -6,8 +6,10 @@ import '../../../../core/ui/snack.dart';
 import '../../application/editor_controller.dart';
 import '../../application/font_service.dart';
 import '../../domain/layer.dart';
+import '../context/categories/barra_de_estilo_do_texto.dart';
 import 'am_colors.dart';
 import 'am_widgets.dart';
+
 import 'package:aurea/src/core/l10n/app_language.dart';
 
 /// ESCOLHER A FONTE — e trazer a sua.
@@ -22,6 +24,7 @@ Future<void> showFontSheet(
   String layerId,
 ) async {
   var importing = false;
+  var busca = '';
   await showParamSheet(
     context,
     title: 'Fonte',
@@ -34,8 +37,22 @@ Future<void> showFontSheet(
         if (layer is! TextLayer) return const SizedBox.shrink();
 
         final servico = FontService.instance;
-        final fontes = servico.families;
         final atual = layer.fontFamily;
+        // A BUSCA filtra pelo nome; as FAVORITAS (a estrela do mini
+        // navegador da barra de texto) vem primeiro.
+        final favoritas = fontesFavoritas(ref);
+        final q = busca.trim().toLowerCase();
+        final fontes =
+            [
+              for (final f in servico.families)
+                if (q.isEmpty || f.toLowerCase().contains(q)) f,
+            ]..sort((a, b) {
+              final fa = favoritas.contains(a) ? 0 : 1;
+              final fb = favoritas.contains(b) ? 0 : 1;
+              return fa != fb
+                  ? fa.compareTo(fb)
+                  : a.toLowerCase().compareTo(b.toLowerCase());
+            });
 
         Future<void> importar() async {
           if (importing) return;
@@ -80,7 +97,8 @@ Future<void> showFontSheet(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const AppText('Arquivos .ttf e .otf. A fonte e copiada para dentro do '
+                const AppText(
+                  'Arquivos .ttf e .otf. A fonte e copiada para dentro do '
                   'Aurea — o projeto continua abrindo mesmo se o arquivo '
                   'original sumir.',
                   style: TextStyle(
@@ -90,19 +108,47 @@ Future<void> showFontSheet(
                   ),
                 ),
                 const SizedBox(height: 12),
-
-                _Linha(
-                  nome: 'Fonte do Aurea',
-                  sample: layer.text,
-                  familia: null,
-                  aceso: atual == null,
-                  onTap: () {
-                    controller.editTextLayer(layerId, clearFont: true);
-                    setSheetState(() {});
-                  },
+                // PROCURAR PELO NOME: quem importou quarenta fontes nao
+                // rola a lista inteira toda vez.
+                CupertinoTextField(
+                  key: const ValueKey('fontes-busca'),
+                  placeholder: 'Procurar fonte',
+                  style: const TextStyle(fontSize: 13, color: AmColors.text),
+                  placeholderStyle: const TextStyle(
+                    fontSize: 13,
+                    color: AmColors.muted,
+                  ),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 9,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AmColors.chip,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  onChanged: (v) => setSheetState(() => busca = v),
                 ),
+                const SizedBox(height: 10),
+
+                if (q.isEmpty)
+                  _Linha(
+                    nome: 'Fonte do Aurea',
+                    sample: layer.text,
+                    familia: null,
+                    aceso: atual == null,
+                    onTap: () {
+                      controller.editTextLayer(layerId, clearFont: true);
+                      setSheetState(() {});
+                    },
+                  ),
                 for (final f in fontes)
                   _Linha(
+                    key: ValueKey('fonte-linha-$f'),
+                    favorita: favoritas.contains(f),
+                    onFavorita: () {
+                      alternarFonteFavorita(ref, f);
+                      setSheetState(() {});
+                    },
                     nome: f,
                     sample: layer.text,
                     familia: f,
@@ -169,13 +215,19 @@ Future<void> showFontSheet(
 
 class _Linha extends StatelessWidget {
   const _Linha({
+    super.key,
     required this.nome,
     required this.sample,
     required this.familia,
     required this.aceso,
     required this.onTap,
     this.onRemove,
+    this.favorita = false,
+    this.onFavorita,
   });
+
+  final bool favorita;
+  final VoidCallback? onFavorita;
 
   final String nome;
   final String sample;
@@ -198,7 +250,8 @@ class _Linha extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                AppText(nome,
+                AppText(
+                  nome,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontSize: 11, color: AmColors.muted),
@@ -216,6 +269,21 @@ class _Linha extends StatelessWidget {
               ],
             ),
           ),
+          // A ESTRELA: a mesma favorita do mini navegador da barra
+          // de texto, agora tambem daqui.
+          if (onFavorita != null)
+            GestureDetector(
+              key: ValueKey('fonte-estrela-folha-$nome'),
+              onTap: onFavorita,
+              child: Padding(
+                padding: const EdgeInsets.only(left: 10),
+                child: Icon(
+                  favorita ? CupertinoIcons.star_fill : CupertinoIcons.star,
+                  size: 15,
+                  color: favorita ? AmColors.action : AmColors.muted,
+                ),
+              ),
+            ),
           if (aceso)
             const Icon(
               CupertinoIcons.checkmark_alt,

@@ -9,6 +9,7 @@ import 'package:video_player/video_player.dart';
 
 import '../../media/application/media_import_service.dart';
 import '../../../core/storage/prefs.dart';
+import '../../media/application/sons_recentes.dart';
 import '../domain/animadores.dart';
 import '../domain/blend_extra.dart';
 import 'blob_track_service.dart';
@@ -614,9 +615,9 @@ class EditorController extends Notifier<VideoProject> {
   /// com 3 s quando nunca escolheu (e em testes sem prefs).
   Duration get _duracaoPadraoDeCamada {
     try {
-      final s = ref.read(sharedPreferencesProvider).getInt(
-        'settings.defaultLayerSeconds',
-      );
+      final s = ref
+          .read(sharedPreferencesProvider)
+          .getInt('settings.defaultLayerSeconds');
       if (s != null) return Duration(seconds: s.clamp(1, 30));
     } catch (_) {}
     return const Duration(seconds: 3);
@@ -960,6 +961,24 @@ class EditorController extends Notifier<VideoProject> {
     // como duracao de clipe e ninguem mais sabia quanto o arquivo
     // tinha. Sem isso, `trimLayerEnd` nao tem contra o que travar.
     addAudioLayer(at, file.path, file.name, duration, fonte: duration);
+    // O SOM FICA NOS RECENTES: a mesma trilha em outro projeto entra
+    // sem abrir o seletor de arquivos de novo.
+    try {
+      ref.read(sonsRecentesProvider.notifier).registrar(file.path, file.name);
+    } catch (_) {}
+  }
+
+  /// UM SOM DOS RECENTES entra direto, com a duracao lida na hora.
+  Future<void> addAudioRecente(Duration at, String caminho, String nome) async {
+    final projectId = state.id;
+    final duration = await ref
+        .read(mediaImportServiceProvider)
+        .audioDuration(caminho);
+    if (_disposed || state.id != projectId) return;
+    addAudioLayer(at, caminho, nome, duration, fonte: duration);
+    try {
+      ref.read(sonsRecentesProvider.notifier).registrar(caminho, nome);
+    } catch (_) {}
   }
 
   // ------------------------------------------ oficio: meta da camada

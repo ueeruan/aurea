@@ -129,8 +129,12 @@ void main() {
       expect(p['stillness']!.initial, 0.7);
       expect(p['twitch_frequency']!.initial, 2);
       expect(p['drift']!.initial, 0.3);
-      expect(p['x_random_amplitude']!.initial, 0.2);
-      expect(p['y_random_amplitude']!.initial, 0.1);
+      // 16/09: o eixo passou a nascer CHEIO. Com 0,2 e 0,1 a
+      // Amplitude entregava 12 px no X e 6 px no Y em 1080p — o dono
+      // relatou o efeito como "nao funciona", e estava certo. Quem
+      // dosa agora e a Amplitude; ver tremor_mexe_test.dart.
+      expect(p['x_random_amplitude']!.initial, 1.0);
+      expect(p['y_random_amplitude']!.initial, 0.7);
       expect(p['z_random_amplitude']!.initial, 0);
       expect(p['x_wave_frequency']!.initial, 0.5);
       expect(p['rgb_frequency']!.initial, 2);

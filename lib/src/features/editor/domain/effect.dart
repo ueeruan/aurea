@@ -648,7 +648,7 @@ const effectSpecs = <EffectType, EffectSpec>{
   // a frequencia acelera de verdade, sem salto.
   EffectType.tremor: EffectSpec(
     id: 'shake',
-    name: 'Tremor de câmera',
+    name: 'Camera Shake',
     category: 'Distort',
     synonyms: [
       'tremor',

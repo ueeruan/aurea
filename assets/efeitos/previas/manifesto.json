@@ -276,6 +276,24 @@
     },
     "repeat_scatter": {
       "preset": null
+    },
+    "clouds": {
+      "preset": null
+    },
+    "checker": {
+      "preset": null
+    },
+    "stripes": {
+      "preset": null
+    },
+    "dots": {
+      "preset": null
+    },
+    "starfield": {
+      "preset": null
+    },
+    "radial_rays": {
+      "preset": null
     }
   }
 }

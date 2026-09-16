@@ -176,6 +176,41 @@ vec3 operacaoMath(int op,vec3 a,vec3 b) {
   return a+b;
 }
 
+
+// ---------------------------------------------------------------- geradores
+// O DESENHO POR CIMA: o padrao entra como uma camada propria em cima da
+// imagem (over), e nao como uma media. E o que faz o mesmo gerador
+// servir de fundo numa camada vazia e de textura em cima de uma cheia.
+void porCima(inout vec3 c, inout float a, vec3 cor, float alfa) {
+  float na = alfa + a * (1.0 - alfa);
+  c = na < .00001 ? c : (cor * alfa + c * a * (1.0 - alfa)) / na;
+  a = na;
+}
+
+// O padrao vira RECORTE: em vez de pintar, decide o que fica da camada.
+void recortar(inout float a, float v, float m) { a *= mix(1.0, v, m); }
+
+// Coordenada do padrao: quadrada (sem esticar em tela deitada), girada
+// e escalada pela contagem.
+vec2 gradeDoPadrao(vec2 uv, float angulo, float quantidade, float esticar) {
+  vec2 q = vec2(uv.x * uSize.x / max(1.0, uSize.y), uv.y);
+  q -= vec2(.5 * uSize.x / max(1.0, uSize.y), .5);
+  q = rotate2(q, radians(angulo));
+  return vec2(q.x, q.y / max(.01, esticar)) * max(.01, quantidade);
+}
+
+float fbm(vec2 q, float t, int oitavas, float semente) {
+  float soma = 0.0, peso = 0.5, total = 0.0;
+  for (int i = 0; i < 8; i++) {
+    if (i >= oitavas) break;
+    soma += noise(vec3(q, t + semente * 13.0)) * peso;
+    total += peso;
+    q *= 2.03;
+    peso *= .55;
+  }
+  return total < .0001 ? 0.0 : soma / total;
+}
+
 void main() {
   vec2 uv=FlutterFragCoord().xy/uSize;
   vec4 original=src(uv);
@@ -789,6 +824,117 @@ void main() {
       float s=clamp(p0.y,0.0,1.0);
       float k=mix(vizinhos,vizinhos*vizinhos*(3.0-2.0*vizinhos),s);
       a*=clamp(k,0.0,1.0);
+    }
+  }
+
+  // 50 - NUVENS. Ruido em varias escalas entre as duas cores. A
+  // evolucao anda no tempo; o contraste aperta o meio-tom.
+  if(mode==50) {
+    vec2 q=vec2(uv.x*uSize.x/max(1.0,uSize.y),uv.y)*max(.2,p0.x);
+    float v=fbm(q,uTime*p0.z,int(clamp(p0.y,1.0,8.0)+.5),p1.x);
+    float k=clamp(p0.w,0.0,1.0);
+    v=clamp(mix(v,smoothstep(.35,.65,v),k),0.0,1.0);
+    if(p1.z>.5) recortar(a,v,clamp(p1.y,0.0,1.0));
+    else {
+      vec4 cor=mix(uColor,uColor2,v);
+      porCima(c,a,cor.rgb,cor.a*clamp(p1.y,0.0,1.0));
+    }
+  }
+
+  // 51 - XADREZ. Dois quadros alternados; esticar deixa retangular.
+  if(mode==51) {
+    vec2 q=gradeDoPadrao(uv,p0.z,p0.x,p0.y);
+    float v=mod(floor(q.x)+floor(q.y),2.0);
+    if(p1.x>.5) recortar(a,v,clamp(p0.w,0.0,1.0));
+    else {
+      vec4 cor=mix(uColor,uColor2,v);
+      porCima(c,a,cor.rgb,cor.a*clamp(p0.w,0.0,1.0));
+    }
+  }
+
+  // 52 - LISTRAS. A proporcao e quanto da volta e a segunda cor; a
+  // suavidade vai da barra dura ao degrade.
+  if(mode==52) {
+    vec2 q=gradeDoPadrao(uv,p0.y,p0.x,1.0);
+    float f=fract(q.x+p1.x);
+    float prop=clamp(p0.z,.05,.95);
+    float s=max(.001,clamp(p0.w,0.0,1.0)*.5);
+    float v=smoothstep(prop-s,prop+s,f);
+    v*=1.0-smoothstep(1.0-s,1.0,f);
+    if(p1.z>.5) recortar(a,v,clamp(p1.y,0.0,1.0));
+    else {
+      vec4 cor=mix(uColor,uColor2,v);
+      porCima(c,a,cor.rgb,cor.a*clamp(p1.y,0.0,1.0));
+    }
+  }
+
+  // 53 - PONTOS. Uma bolinha por celula; o tamanho e a fracao da
+  // celula, e a suavidade decide a borda.
+  if(mode==53) {
+    vec2 q=gradeDoPadrao(uv,p0.w,p0.x,1.0);
+    vec2 f=fract(q)-.5;
+    float d=length(f)*2.0;
+    float r=clamp(p0.y,.05,1.4);
+    float s=max(.002,clamp(p0.z,0.0,1.0)*.9);
+    float v=1.0-smoothstep(r-s,r+s,d);
+    if(p1.y>.5) recortar(a,v,clamp(p1.x,0.0,1.0));
+    else {
+      vec4 cor=mix(uColor,uColor2,v);
+      porCima(c,a,cor.rgb,cor.a*clamp(p1.x,0.0,1.0));
+    }
+  }
+
+  // 54 - ESTRELAS. Uma por celula, em posicao e brilho sorteados; o
+  // cintilar pisca cada uma na sua fase, e a velocidade arrasta o ceu.
+  if(mode==54) {
+    float n=max(4.0,p0.x);
+    vec2 base=vec2(uv.x*uSize.x/max(1.0,uSize.y),uv.y);
+    base.y+=uTime*p0.w*.05;
+    vec2 q=base*n;
+    vec2 cel=floor(q), f=fract(q);
+    float v=0.0;
+    for(int dy=-1;dy<=1;dy++) {
+      for(int dx=-1;dx<=1;dx++) {
+        vec2 viz=vec2(float(dx),float(dy));
+        vec2 id=cel+viz;
+        float h1=hash(vec3(id,p1.x));
+        float h2=hash(vec3(id.yx,p1.x+7.0));
+        float h3=hash(vec3(id,p1.x+19.0));
+        if(h3>.55) continue;
+        vec2 pos=viz+vec2(h1,h2);
+        float d=length(f-pos);
+        float raio=clamp(p0.y,.05,1.0)*.28*(.4+h3);
+        float brilho=1.0-smoothstep(0.0,raio,d);
+        float pisca=mix(1.0,.35+.65*abs(sin(uTime*(1.0+h1*3.0)+h2*6.28)),
+                        clamp(p0.z,0.0,1.0));
+        v=max(v,brilho*pisca);
+      }
+    }
+    if(p1.z>.5) recortar(a,v,clamp(p1.y,0.0,1.0));
+    else {
+      vec4 cor=mix(uColor,uColor2,v);
+      porCima(c,a,cor.rgb,cor.a*clamp(p1.y,0.0,1.0));
+    }
+  }
+
+  // 55 - RAIOS. Leque saindo de um ponto: a largura e quanto de cada
+  // fatia e raio, o alcance decide ate onde ele chega.
+  if(mode==55) {
+    vec2 centro=vec2(p0.y,p0.z);
+    vec2 d=vec2((uv.x-centro.x)*uSize.x/max(1.0,uSize.y),uv.y-centro.y);
+    float ang=atan(d.y,d.x)/6.2831853+.5;
+    float n=max(2.0,p0.x);
+    float f=fract(ang*n+p1.y/360.0*n);
+    float larg=clamp(p0.w,.05,.95);
+    float s=max(.002,clamp(p1.x,0.0,1.0)*.5);
+    float v=smoothstep(.5-larg*.5-s,.5-larg*.5+s,f)
+           *(1.0-smoothstep(.5+larg*.5-s,.5+larg*.5+s,f));
+    float dist=length(d)/max(.1,p1.z);
+    v*=1.0-smoothstep(.2,1.0,dist);
+    if(p2.x>.5) recortar(a,v,clamp(p1.w,0.0,1.0));
+    else {
+      vec4 cor=mix(uColor,uColor2,v);
+      porCima(c,a,cor.rgb,cor.a*clamp(p1.w,0.0,1.0));
     }
   }
 

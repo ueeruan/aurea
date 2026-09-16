@@ -3382,6 +3382,13 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
         // Dissolver e Pena tambem: os dois so existem no shader.
         case EffectType.dissolver:
         case EffectType.pena:
+        // Os GERADORES tambem nascem no shader: sem ele, nada a desenhar.
+        case EffectType.nuvens:
+        case EffectType.xadrez:
+        case EffectType.listras:
+        case EffectType.pontos:
+        case EffectType.estrelas:
+        case EffectType.raios:
         // Cor seletiva depende da faixa de CADA pixel (qual canal manda,
         // quanto e branco, neutro ou preto): nao ha matriz honesta.
         case EffectType.selectiveColor:

@@ -209,6 +209,30 @@ String effectHelp(EffectType type) => switch (type) {
     'A borda da camada deixa de terminar em faca: o alfa cai suave para '
         'fora, na largura que voce escolher. Serve para encaixar uma '
         'camada em cima de outra sem recorte aparente.',
+  EffectType.nuvens =>
+    'Nuvem de verdade, feita na hora: ruido em varias escalas entre as '
+        'duas cores. A evolucao faz a nuvem andar sozinha, e recortar '
+        'transforma a nuvem no recorte da camada.',
+  EffectType.xadrez =>
+    'Tabuleiro nas duas cores, com quantos quadros voce quiser, esticado '
+        'e girado. Com recortar, o xadrez vira buraco na camada em vez '
+        'de pintura por cima.',
+  EffectType.listras =>
+    'Listras nas duas cores: quantidade, angulo, proporcao entre clara e '
+        'escura e suavidade, que vai da barra dura ao degrade. O '
+        'deslocamento anima com dois keyframes.',
+  EffectType.pontos =>
+    'Trama de pontos, como meio-tom de revista: quantos cabem, o tamanho '
+        'de cada um e a borda dura ou macia. Girar a trama evita o '
+        'padrao de moire.',
+  EffectType.estrelas =>
+    'Um ceu de estrelas sorteadas com tamanho e brilho proprios. O '
+        'cintilar pisca cada uma no seu tempo, a velocidade arrasta o '
+        'ceu, e a semente guarda o mesmo ceu.',
+  EffectType.raios =>
+    'Raios saindo de um ponto, como sol atras da nuvem ou explosao de '
+        'quadrinho. Largura, suavidade e alcance decidem se e um leque '
+        'discreto ou uma explosao inteira.',
   EffectType.repetirEmLinha =>
     'A camada vira uma fileira de copias: o passo diz o quanto cada uma '
         'anda, e giro, escala e opacidade por copia constroem o rastro. '

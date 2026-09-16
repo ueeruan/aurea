@@ -176,6 +176,14 @@ void main() {
         // alfa por pixel, como o recorte.
         'dissolver',
         'pena',
+        // Os geradores desenham no shader; a ficha deles e cobrada em
+        // pixel_effect_engine_test, como a dos recortes.
+        'nuvens',
+        'xadrez',
+        'listras',
+        'pontos',
+        'estrelas',
+        'raios',
       };
 
       final mortos = <String>[];

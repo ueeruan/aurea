@@ -88,7 +88,9 @@ void main() {
     // 44 -> 45: S_Sharpen (modo 47).
     // 45 -> 47 em 2026-09-15: Dissolver e Pena (modos 48 e 49), as duas
     // coisas de opacidade que so existem por pixel.
-    expect(pixelKernels.length, 47);
+    // 47 -> 53 no mesmo dia: os geradores (modos 50 a 55) — nuvem,
+    // xadrez, listra, ponto, estrela e raio.
+    expect(pixelKernels.length, 53);
     expect(
       pixelKernels.values.map((k) => k.mode).toSet().length,
       pixelKernels.length,

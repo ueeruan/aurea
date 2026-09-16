@@ -11,6 +11,7 @@ import 'package:aurea/src/features/editor/domain/project_store.dart';
 import 'package:aurea/src/features/editor/domain/video_project.dart';
 import 'package:aurea/src/features/editor/presentation/context/categories/barra_de_estilo_do_texto.dart';
 import 'package:aurea/src/features/editor/presentation/editor_screen.dart';
+import 'package:aurea/src/features/editor/presentation/widgets/texto_no_atlas.dart';
 import 'package:aurea/src/features/projects/application/projects_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -83,7 +84,12 @@ void main() {
     // O palco desenha as linhas com o alinhamento da camada.
     expect(
       find.byWidgetPredicate(
-        (w) => w is Text && w.data == 'Um\nTítulo maior' && w.textAlign == TextAlign.right,
+        // TextoDoPalco: o texto do palco vai pelo corpo de desenho
+        // (texto_no_atlas.dart), nao por um Text cru.
+        (w) =>
+            w is TextoDoPalco &&
+            w.texto == 'Um\nTítulo maior' &&
+            w.alinhamento == TextAlign.right,
       ),
       findsOneWidget,
     );

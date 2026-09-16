@@ -82,6 +82,7 @@ import 'particles_painter.dart';
 import '../../application/scene3d_gpu.dart';
 import 'scene3d_painter.dart';
 import 'scene3d_gpu_view.dart';
+import 'texto_no_atlas.dart';
 
 import 'package:aurea/src/core/l10n/app_language.dart';
 
@@ -6929,8 +6930,14 @@ class _LayerContent extends StatelessWidget {
           return SizedBox(
             width: caixa.width,
             height: caixa.height,
+            // Icone de fonte no palco escala com a camada: vai pelo corpo de
+            // desenho, como o texto (ver texto_no_atlas.dart).
             child: const Center(
-              child: Icon(CupertinoIcons.film, size: 60, color: Colors.white24),
+              child: IconeDoPalco(
+                CupertinoIcons.film,
+                tamanho: 60,
+                cor: Colors.white24,
+              ),
             ),
           );
         }
@@ -6987,10 +6994,14 @@ class _LayerContent extends StatelessWidget {
           localTime,
         ),
       ),
-      TextLayer l => Text(
+      // O TEXTO DO PALCO VAI PELO CORPO DE DESENHO: uma camada ampliada
+      // (escala, Z, camera, zoom do palco) pedia ao Impeller glifos de
+      // milhares de pixels e corrompia o atlas de glifos do app inteiro
+      // (bug de 16/09, ver texto_no_atlas.dart).
+      TextLayer l => TextoDoPalco(
         l.text,
-        textAlign: l.alinhamento,
-        style: AnimatedTextView.styleFor(l),
+        alinhamento: l.alinhamento,
+        estilo: AnimatedTextView.styleFor(l),
       ),
       // Forma vetorial: arvore avaliada no tempo local, pintada por Path.
       ShapeLayer l => _ShapeView(layer: l, localTime: localTime),
@@ -7213,10 +7224,10 @@ class _LayerContent extends StatelessWidget {
               ),
               borderRadius: BorderRadius.circular(14),
             ),
-            child: Text(
+            child: TextoDoPalco(
               cue.text,
-              textAlign: TextAlign.center,
-              style: TextStyle(
+              alinhamento: TextAlign.center,
+              estilo: TextStyle(
                 color: l.style.color,
                 fontSize: l.style.fontSize,
                 fontWeight: l.style.bold ? FontWeight.w700 : FontWeight.w400,
@@ -7236,9 +7247,11 @@ class _LayerContent extends StatelessWidget {
     width: 400,
     height: 300,
     color: Colors.white10,
-    child: const Icon(
-      CupertinoIcons.exclamationmark_triangle,
-      color: Colors.white38,
+    child: const Center(
+      child: IconeDoPalco(
+        CupertinoIcons.exclamationmark_triangle,
+        cor: Colors.white38,
+      ),
     ),
   );
 }

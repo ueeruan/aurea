@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 
 import '../../domain/blob_track.dart';
 import '../../domain/pixel_sort.dart';
+import 'texto_no_atlas.dart';
 
 import 'package:flutter/rendering.dart';
 
@@ -1945,16 +1946,13 @@ class BlobTrackerPainter extends CustomPainter {
           2 => 'ID ${b.id} · ${r.left.round()},${r.top.round()}',
           _ => 'ID ${b.id}',
         };
-        final tp = TextPainter(
-          text: TextSpan(
-            text: texto,
-            style: TextStyle(
-              fontSize: fontSize,
-              color: cor,
-              fontWeight: FontWeight.w600,
-            ),
+        final tp = TextoNoAtlas(
+          texto: texto,
+          estilo: TextStyle(
+            fontSize: fontSize,
+            color: cor,
+            fontWeight: FontWeight.w600,
           ),
-          textDirection: TextDirection.ltr,
         )..layout();
         final pos = switch (captionPosition) {
           1 => Offset(r.right - tp.width, r.top - tp.height - 3),
@@ -1962,7 +1960,9 @@ class BlobTrackerPainter extends CustomPainter {
           3 => Offset(r.left + 4, r.top + 4),
           _ => Offset(r.left, r.top - tp.height - 3),
         };
-        tp.paint(canvas, pos);
+        tp
+          ..paint(canvas, pos)
+          ..dispose();
       }
     }
   }

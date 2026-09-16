@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import '../../domain/layer.dart';
 import '../../domain/text_animator.dart';
 import '../../domain/text_path.dart';
+import 'texto_no_atlas.dart';
 
 /// Render por unidade (PR-T2): segmenta em grapheme clusters, mede o
 /// avanco pela LINHA INTEIRA (getBoxesForRange no layout completo) e pinta
@@ -197,12 +198,11 @@ class _AnimatedTextPainter extends CustomPainter {
         brightP,
       ).withValues(alpha: style.color!.a * opacity);
 
-      final unitPainter = TextPainter(
-        text: TextSpan(
-          text: cluster,
-          style: style.copyWith(color: unitColor),
-        ),
-        textDirection: TextDirection.ltr,
+      // Pelo corpo de desenho: a letra ampliada pelo animador e pela camada
+      // nao pode pedir glifo gigante ao atlas (ver texto_no_atlas.dart).
+      final unitPainter = TextoNoAtlas(
+        texto: cluster,
+        estilo: style.copyWith(color: unitColor),
       )..layout();
 
       // Sobre o caminho, a posicao vem do AVANCO acumulado ao longo da
@@ -221,7 +221,10 @@ class _AnimatedTextPainter extends CustomPainter {
           spec: spec,
           glyphHeight: unitPainter.height,
         );
-        if (posto == null) continue;
+        if (posto == null) {
+          unitPainter.dispose();
+          continue;
+        }
         center = posto.position + Offset(size.width / 2, size.height / 2);
         pathAngle = posto.angleRad;
       } else {
@@ -271,6 +274,7 @@ class _AnimatedTextPainter extends CustomPainter {
         canvas,
         Offset(-unitPainter.width / 2, -unitPainter.height / 2),
       );
+      unitPainter.dispose();
       canvas.restore();
       if (blurring) canvas.restore();
     }

@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/widgets.dart';
 
 import '../../domain/caption_highlight.dart';
+import 'texto_no_atlas.dart';
 
 /// DESENHA A FRASE COM DESTAQUE.
 ///
@@ -101,7 +102,12 @@ class CaptionHighlightPainter extends CustomPainter {
         canvas.translate(cx, cy);
         canvas.scale(s);
         canvas.translate(-cx, -cy);
-        canvas.drawParagraph(p, Offset(x, y));
+        // Pelo corpo de desenho: a palavra ativa infla e a camada amplia, e
+        // um glifo gigante corromperia o atlas do Impeller.
+        final k = reducaoDoCorpo(corpo);
+        final reduzido = k > 1 ? _paragrafo(m.indice, corpo / k, cor, k) : null;
+        desenharParagrafoNoAtlas(canvas, p, reduzido, k, Offset(x, y));
+        reduzido?.dispose();
         canvas.restore();
 
         x += largura + _espaco;
@@ -129,7 +135,14 @@ class CaptionHighlightPainter extends CustomPainter {
     return [for (var i = de; i <= ate; i++) i];
   }
 
-  ui.Paragraph _paragrafo(int indice, double tamanho, Color cor) {
+  /// [reducao] divide as medidas absolutas (o espacamento) junto com o
+  /// corpo, para o paragrafo no corpo de desenho.
+  ui.Paragraph _paragrafo(
+    int indice,
+    double tamanho,
+    Color cor, [
+    double reducao = 1,
+  ]) {
     final texto = estilo.maiusculas
         ? frase.palavras[indice].text.toUpperCase()
         : frase.palavras[indice].text.toLowerCase();
@@ -150,7 +163,7 @@ class CaptionHighlightPainter extends CustomPainter {
               fontSize: tamanho,
               fontWeight: FontWeight.w800,
               fontFamily: destaque,
-              letterSpacing: estilo.tracking,
+              letterSpacing: estilo.tracking / reducao,
             ),
           )
           ..addText(texto);

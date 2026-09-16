@@ -389,7 +389,9 @@ List<EffectPreset> factoryPresets() => [
       EffectInstance(
         type: EffectType.tremor,
         params: {
-          'amplitude': AnimatedDouble(18),
+          // AMPLITUDE reajustada quando o eixo passou a nascer cheio
+          // (era 18 x 0,2 de eixo): o tremor entregue e o mesmo.
+          'amplitude': AnimatedDouble(3.6),
           'frequency': AnimatedDouble(3.5),
           'style': AnimatedDouble(0),
           'tilt_random_amplitude': AnimatedDouble(0.05),

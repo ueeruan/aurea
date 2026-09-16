@@ -189,7 +189,7 @@ void main() {
       );
 
       // Favoritar na galeria (Pro).
-      await tester.tap(find.text('S_Shake').last);
+      await tester.tap(find.text('Tremor de câmera').last);
       await tester.pumpAndSettle();
       await tester.ensureVisible(find.text('Adicionar efeito'));
       await tester.tap(find.text('Adicionar efeito'));

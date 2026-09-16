@@ -648,7 +648,7 @@ const effectSpecs = <EffectType, EffectSpec>{
   // a frequencia acelera de verdade, sem salto.
   EffectType.tremor: EffectSpec(
     id: 'shake',
-    name: 'S_Shake',
+    name: 'Tremor de câmera',
     category: 'Distort',
     synonyms: [
       'tremor',
@@ -704,13 +704,13 @@ const effectSpecs = <EffectType, EffectSpec>{
 
       // --- Por eixo: a componente ALEATORIA e a de ONDA sao separadas.
       // E o que faz parecer camera na mao em vez de senoide.
-      'x_random_amplitude': EffectParam('X Random Amplitude', 0.2, 0.0, 5.0),
+      'x_random_amplitude': EffectParam('X Random Amplitude', 1.0, 0.0, 5.0),
       'x_random_frequency': EffectParam('X Random Frequency', 1.0, 0.0, 10.0),
       'x_wave_amplitude': EffectParam('X Wave Amplitude', 0.0, 0.0, 5.0),
       'x_wave_frequency': EffectParam('X Wave Frequency', 0.5, 0.0, 20.0),
       'x_phase': EffectParam('X Phase', 0.0, -360.0, 360.0),
 
-      'y_random_amplitude': EffectParam('Y Random Amplitude', 0.1, 0.0, 5.0),
+      'y_random_amplitude': EffectParam('Y Random Amplitude', 0.7, 0.0, 5.0),
       'y_random_frequency': EffectParam('Y Random Frequency', 1.0, 0.0, 10.0),
       'y_wave_amplitude': EffectParam('Y Wave Amplitude', 0.0, 0.0, 5.0),
       'y_wave_frequency': EffectParam('Y Wave Frequency', 0.5, 0.0, 20.0),
@@ -776,8 +776,10 @@ const effectSpecs = <EffectType, EffectSpec>{
     presets: [
       EffectPronto('Camera na mao', {
         'style': 0,
-        'amplitude': 1.4,
-        'frequency': 3.5,
+        'amplitude': 0.55,
+        'frequency': 3.0,
+        'y_random_amplitude': 0.55,
+        'tilt_random_amplitude': 0.12,
         'stillness': 0.55,
         'drift': 0.45,
         'twitch_frequency': 1.2,
@@ -787,7 +789,7 @@ const effectSpecs = <EffectType, EffectSpec>{
       // inclinacao) com o envelope de impacto e um zoom de soco.
       EffectPronto('Impacto', {
         'style': 0,
-        'amplitude': 3.0,
+        'amplitude': 1.5,
         'frequency': 15.0,
         'envelope': 1,
         'half_life': 5.0,
@@ -800,7 +802,7 @@ const effectSpecs = <EffectType, EffectSpec>{
       }),
       EffectPronto('Nervoso', {
         'style': 0,
-        'amplitude': 3.2,
+        'amplitude': 0.75,
         'frequency': 26.0,
         'stillness': 0.2,
         'drift': 0.15,

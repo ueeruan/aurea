@@ -138,10 +138,16 @@ class BarraDoProjeto extends ConsumerWidget {
     super.key,
     required this.onBack,
     required this.playback,
+    this.onMenu,
   });
 
   final VoidCallback onBack;
   final PlaybackController playback;
+
+  /// O ⋮ DO PROJETO. Este menu morava num botao redondo flutuando no
+  /// canto da linha do tempo, por cima dos clipes — o mesmo vicio da
+  /// barra de acoes que saiu antes dele. Menu e coisa de barra.
+  final VoidCallback? onMenu;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -202,6 +208,14 @@ class BarraDoProjeto extends ConsumerWidget {
               ),
             ),
           ),
+          if (onMenu != null)
+            _BotaoDoCromo(
+              key: const ValueKey('editor-menu'),
+              icone: Icons.more_vert,
+              dica: 'Mais da linha do tempo',
+              tamanho: 19,
+              onTap: onMenu!,
+            ),
           _BotaoDoCromo(
             key: const ValueKey('editor-settings'),
             icone: CupertinoIcons.gear_alt_fill,
@@ -441,7 +455,10 @@ class _TrilhaDeGrupos extends StatelessWidget {
     ];
     return ConstrainedBox(
       constraints: BoxConstraints(
-        maxWidth: MediaQuery.sizeOf(context).width * .38,
+        // 30%, e nao 38%: a barra ganhou o ⋮ do menu e o teto antigo
+        // estourava 29 px num celular de 390. A trilha rola por dentro,
+        // entao nenhuma migalha se perde — so aparecem menos de uma vez.
+        maxWidth: MediaQuery.sizeOf(context).width * .30,
       ),
       child: SingleChildScrollView(
         key: const ValueKey('navbar-trilha-de-grupos'),
@@ -1105,34 +1122,13 @@ class BarraDeReproducao extends ConsumerWidget {
                     largura: lado,
                     onTap: () => menuDeCopiarEColar(context, ref, playback),
                   ),
-                  ValueListenableBuilder<Duration>(
-                    valueListenable: playback.time,
-                    builder: (context, t, _) {
-                      // A MESMA TOLERANCIA do toggleMarker: o desenho diz
-                      // "ha marca aqui" exatamente quando o toque tira.
-                      final aqui = project.markerNear(
-                        t,
-                        const Duration(milliseconds: 120),
-                      );
-                      return _BotaoDoCromo(
-                        key: const ValueKey('playbar-marcador'),
-                        icone: aqui == null
-                            ? CupertinoIcons.bookmark
-                            : CupertinoIcons.bookmark_fill,
-                        dica: aqui == null
-                            ? 'Marcar este instante · segure para as marcas'
-                            : 'Tirar a marca · segure para as marcas',
-                        cor: aqui?.color,
-                        largura: lado,
-                        // O TEMPO SAI NA HORA DO TOQUE, como na barra da
-                        // selecao: o construtor so decide o desenho.
-                        onTap: () =>
-                            controller.toggleMarker(playback.time.value),
-                        onLongPress: () =>
-                            menuDasMarcas(context, ref, playback),
-                      );
-                    },
-                  ),
+                  // O MARCADOR SAIU DAQUI (16/09). Ele chamava
+                  // `toggleMarker` no cabecote — exatamente o que tocar
+                  // no relogio grande da regua ja faz, e o que o menu ⋮
+                  // tambem oferece. Era a terceira porta para a mesma
+                  // acao, ocupando um lugar na barra de reproducao. O
+                  // relogio continua marcando com um toque e abrindo as
+                  // marcas com um toque longo.
                   _BotaoDoCromo(
                     key: const ValueKey('playbar-visualizacao'),
                     icone: !opcoes.visaoDaCamera

@@ -511,6 +511,25 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
     }
   }
 
+  /// O MENU DA LINHA DO TEMPO, agora aberto pelo ⋮ da barra do projeto.
+  void _abrirMenuDaTimeline(BuildContext context, WidgetRef ref) {
+    menuDaTimeline(
+      context,
+      ref,
+      _playback,
+      onDefinirMiniatura: _usarQuadroComoMiniatura,
+      onAgrupar: _agruparPorEscolha,
+      onGuia: () {
+        _playback.pause();
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => const QuickGuideScreen(initialQuery: ''),
+          ),
+        );
+      },
+    );
+  }
+
   /// GRUPO sem selecao: escolher as camadas numa lista.
   Future<void> _agruparPorEscolha() async {
     final layers = ref.read(editorControllerProvider).layers;
@@ -938,7 +957,11 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                               onBack: _back,
                               playback: _playback,
                             )
-                          : BarraDoProjeto(onBack: _back, playback: _playback));
+                          : BarraDoProjeto(
+                            onBack: _back,
+                            playback: _playback,
+                            onMenu: () => _abrirMenuDaTimeline(context, ref),
+                          ));
                 Widget timeline(double alturaTimeline) => RepaintBoundary(
                   child: AmTimeline(
                     playback: _playback,
@@ -1080,50 +1103,6 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                                 Icons.add,
                                 size: 32,
                                 color: CromoEditor.acao,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    if (!s.previewExpanded &&
-                        !s.adding &&
-                        s.panel == EditorPanel.none &&
-                        !largo)
-                      Positioned(
-                        left: 14,
-                        bottom: 24 + (conteudo == null ? 0 : m.sheet),
-                        child: Tooltip(
-                          message: 'Mais da timeline',
-                          child: GestureDetector(
-                            key: const ValueKey('timeline-overflow'),
-                            onTap: () => menuDaTimeline(
-                              context,
-                              ref,
-                              _playback,
-                              onDefinirMiniatura: _usarQuadroComoMiniatura,
-                              onAgrupar: _agruparPorEscolha,
-                              onGuia: () {
-                                _playback.pause();
-                                Navigator.of(context).push(
-                                  MaterialPageRoute<void>(
-                                    builder: (_) => const QuickGuideScreen(
-                                      initialQuery: '',
-                                    ),
-                                  ),
-                                );
-                              },
-                            ),
-                            child: Container(
-                              width: 38,
-                              height: 38,
-                              decoration: const BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: Color(0xE6262A3E),
-                              ),
-                              child: const Icon(
-                                Icons.more_vert,
-                                size: 22,
-                                color: Colors.white,
                               ),
                             ),
                           ),

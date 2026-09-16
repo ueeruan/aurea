@@ -58,9 +58,13 @@ void main() {
     // As pecas no lugar: relogio na barra do projeto, reproducao, trilho.
     expect(find.byKey(const ValueKey('navbar-tempo')), findsOneWidget);
     expect(find.byKey(const ValueKey('editor-undo')), findsOneWidget);
-    expect(find.byKey(const ValueKey('playbar-marcador')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('playbar-marcador')),
+      findsNothing,
+      reason: 'o marcador saiu da barra: o relogio da regua ja marca',
+    );
     expect(find.byKey(const ValueKey('editor-fab')), findsOneWidget);
-    expect(find.byKey(const ValueKey('timeline-overflow')), findsOneWidget);
+    expect(find.byKey(const ValueKey('editor-menu')), findsOneWidget);
     // A coluna de visualizacao nasce fechada: o palco fica livre.
     expect(find.byKey(const ValueKey('coluna-de-visualizacao')), findsNothing);
     await gravarPrint(tester, chave, 'cromo-editor');
@@ -96,14 +100,18 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('o marcador da barra marca e desmarca o cabecote', (
+  testWidgets('o relogio da regua marca e desmarca o cabecote', (
     tester,
   ) async {
-    final (c, _) = await _editor(tester);
-    await tester.tap(find.byKey(const ValueKey('playbar-marcador')));
+    // 16/09: o marcador saiu da barra de reproducao. Tocar no relogio
+    // grande, que e onde o instante esta escrito, faz a mesma coisa —
+    // e sempre fez.
+    final c = (await _editor(tester)).$1;
+    final relogio = find.byKey(const ValueKey('timeline-selo-do-tempo'));
+    await tester.tap(relogio);
     await tester.pumpAndSettle();
     expect(c.read(editorControllerProvider).markers, hasLength(1));
-    await tester.tap(find.byKey(const ValueKey('playbar-marcador')));
+    await tester.tap(relogio);
     await tester.pumpAndSettle();
     expect(c.read(editorControllerProvider).markers, isEmpty);
     // O salvamento adiado do projeto termina antes do teste acabar.

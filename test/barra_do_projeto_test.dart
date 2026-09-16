@@ -90,6 +90,11 @@ void main() {
     await tester.pumpAndSettle();
     expect(e.profundidadeDoGrupo, 2);
     expect(find.byKey(const ValueKey('navbar-migalha-0')), findsOneWidget);
+    // A trilha rola por dentro (o teto dela encolheu quando o ⋮ do menu
+    // chegou a barra): traz a migalha para a vista antes de tocar, como
+    // o dedo faria.
+    await tester.ensureVisible(find.byKey(const ValueKey('navbar-migalha-0')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('navbar-migalha-0')));
     await tester.pumpAndSettle();
     expect(e.profundidadeDoGrupo, 0);

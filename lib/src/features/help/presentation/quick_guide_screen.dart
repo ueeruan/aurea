@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../editor/domain/effect.dart';
+
 import 'package:aurea/src/core/l10n/app_language.dart';
 
 /// Offline, shipped in the executable: no network or external PDF viewer.
@@ -44,7 +45,8 @@ class _QuickGuideScreenState extends State<QuickGuideScreen> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 40),
           children: [
-            AppText('Do zero ao primeiro motion',
+            AppText(
+              'Do zero ao primeiro motion',
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 8),
@@ -71,7 +73,8 @@ class _QuickGuideScreenState extends State<QuickGuideScreen> {
               children: [
                 Padding(
                   padding: EdgeInsets.only(bottom: 16),
-                  child: AppText('Adicione um texto. Em Mover e transformar, crie uma posição inicial fora da tela e outra no centro após 1 segundo. Escolha uma curva de desaceleração. Em Efeitos, adicione Glow; comece com intensidade 80, raio 20 e limite 60. Ajuste a cor do brilho. Use o interruptor do efeito para comparar antes/depois e exporte um trecho curto.',
+                  child: AppText(
+                    'Adicione um texto. Em Mover e transformar, crie uma posição inicial fora da tela e outra no centro após 1 segundo. Escolha uma curva de desaceleração. Em Efeitos, adicione Glow; comece com intensidade 80, raio 20 e limite 60. Ajuste a cor do brilho. Use o interruptor do efeito para comparar antes/depois e exporte um trecho curto.',
                   ),
                 ),
               ],
@@ -82,7 +85,8 @@ class _QuickGuideScreenState extends State<QuickGuideScreen> {
               children: [
                 Padding(
                   padding: EdgeInsets.only(bottom: 16),
-                  child: AppText('Muitos ecos, desfoques grandes, Pixel Sort e cenas 3D custam mais. Reduza amostras, raio ou qualidade enquanto edita. Exporte um trecho de teste antes do vídeo inteiro. O motor FX V2 trabalha em SDR; não reproduz o pipeline HDR/32 bits do After Effects. Nomes semelhantes não significam algoritmos, plugins ou resultados idênticos. Projetos antigos continuam abrindo, mas efeitos reescritos podem mudar o visual. A prévia em aparelhos sem o backend gráfico nativo pode ter limitações com vídeo ao vivo.',
+                  child: AppText(
+                    'Muitos ecos, desfoques grandes, Pixel Sort e cenas 3D custam mais. Reduza amostras, raio ou qualidade enquanto edita. Exporte um trecho de teste antes do vídeo inteiro. O motor FX V2 trabalha em SDR; não reproduz o pipeline HDR/32 bits do After Effects. Nomes semelhantes não significam algoritmos, plugins ou resultados idênticos. Projetos antigos continuam abrindo, mas efeitos reescritos podem mudar o visual. A prévia em aparelhos sem o backend gráfico nativo pode ter limitações com vídeo ao vivo.',
                   ),
                 ),
               ],
@@ -111,7 +115,8 @@ class _QuickGuideScreenState extends State<QuickGuideScreen> {
             if (entries.isEmpty)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 24),
-                child: AppText('Nenhum efeito encontrado. Tente brilho, cor ou distorção.',
+                child: AppText(
+                  'Nenhum efeito encontrado. Tente brilho, cor ou distorção.',
                 ),
               ),
             for (final entry in entries)
@@ -184,12 +189,9 @@ String effectHelp(EffectType type) => switch (type) {
   EffectType.mathOps => 'Combina a camada (A) com uma fonte B numa operação de pixel: somar, subtrair, multiplicar, tela, média, sobrepor, mínimo, máximo ou diferença. Luzes escala, sombras desloca os escuros e saturação ajusta A, B e o resultado. A máscara de luma limita onde o resultado aparece. Precisa da GPU.',
   EffectType.sSharpen => 'Afia o detalhe em duas escalas sem estourar as bordas que já são fortes. Limiar alto afia menos; Nitidez da cor afia também as bordas coloridas.',
   EffectType.looks => 'Um look de cinema pronto sobre a camada, com a força que você quiser. Use numa camada de ajuste para colorir o edit inteiro.',
-  EffectType.lightSweep =>
-    'Uma faixa de luz atravessa a camada. Anime a Posição com dois keyframes para o brilho passar uma vez; ângulo e largura moldam a faixa. Clássico para logos e texto.',
-  EffectType.saber =>
-    'Núcleo branco com aura colorida a partir da própria silhueta da camada — texto e formas viram lâmina de energia. Matiz escolhe a cor; raio espalha; núcleo controla o miolo branco.',
-  EffectType.lensBlur =>
-    'Desfoque de lente: além de borrar, estoura os pontos claros como bokeh. Limiar decide o que conta como realce; brilho controla o estouro.',
+  EffectType.lightSweep => 'Uma faixa de luz atravessa a camada. Anime a Posição com dois keyframes para o brilho passar uma vez; ângulo e largura moldam a faixa. Clássico para logos e texto.',
+  EffectType.saber => 'Núcleo branco com aura colorida a partir da própria silhueta da camada — texto e formas viram lâmina de energia. Matiz escolhe a cor; raio espalha; núcleo controla o miolo branco.',
+  EffectType.lensBlur => 'Desfoque de lente: além de borrar, estoura os pontos claros como bokeh. Limiar decide o que conta como realce; brilho controla o estouro.',
   EffectType.smear =>
     'A camada escorre numa direcao: copias esticadas e cada vez mais '
         'transparentes atras da original. Anime o angulo ou o comprimento '
@@ -198,8 +200,36 @@ String effectHelp(EffectType type) => switch (type) {
     'Bolhas de vidro fosco sobre a camada: dentro de cada uma a imagem '
         'aparece ampliada e desfocada. A fase anda as bolhas — dois '
         'keyframes e elas derivam.',
-  EffectType.bit8 =>
-    'Pixel grande, poucas cores e saturação de fliperama num efeito só. Pixel e Cores definem a época: 4 cores para NES, 8 para 16-bit.',
+  EffectType.dissolver =>
+    'A camada some em chuvisco: cada pixel tem um sorteio fixo e a '
+        'quantidade e o corte. O grao decide o tamanho do pontinho, de '
+        'pixel a areia grossa, e a semente mantem o mesmo chuvisco ao '
+        'voltar na timeline e ao exportar.',
+  EffectType.pena =>
+    'A borda da camada deixa de terminar em faca: o alfa cai suave para '
+        'fora, na largura que voce escolher. Serve para encaixar uma '
+        'camada em cima de outra sem recorte aparente.',
+  EffectType.repetirEmLinha =>
+    'A camada vira uma fileira de copias: o passo diz o quanto cada uma '
+        'anda, e giro, escala e opacidade por copia constroem o rastro. '
+        'Uma camada so — nada de duplicar na linha do tempo.',
+  EffectType.repetirEmGrade =>
+    'Copias em colunas e linhas, como uma folha de contato. O passo e em '
+        'por cento do tamanho da camada: 100% encosta uma na outra, mais '
+        'que isso abre espaco entre elas.',
+  EffectType.repetirEmCirculo =>
+    'As copias dao a volta: raio, abertura e comeco desenham de uma '
+        'mandala fechada a um leque. Cada copia se inclina junto com o '
+        'circulo.',
+  EffectType.espalharCopias =>
+    'Copias sorteadas dentro de um raio, com giro e tamanho variados. A '
+        'semente guarda o sorteio: o mesmo espalhamento ao voltar na '
+        'timeline e ao exportar.',
+  EffectType.aparecerSumir =>
+    'Entrar e sair sem keyframe nenhum: a camada aparece nos primeiros '
+        'segundos e some nos ultimos, no tempo que voce der para cada '
+        'ponta. Camada curta demais divide o que tem entre as duas.',
+  EffectType.bit8 => 'Pixel grande, poucas cores e saturação de fliperama num efeito só. Pixel e Cores definem a época: 4 cores para NES, 8 para 16-bit.',
   EffectType.opticalFlow => 'Estima o movimento entre quadros para suavizar câmera lenta. A prévia é preparada em segundo plano; a exportação calcula os quadros a partir do original. Cortes de cena não são misturados.',
   EffectType.twirl => 'Torce a imagem ao redor de um centro. Angulo controla o giro e raio delimita a area afetada. As bordas sao espelhadas.',
   EffectType.fisheye => 'Deforma a imagem como uma lente grande angular. Valores positivos ampliam o centro; negativos comprimem.',

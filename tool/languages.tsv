@@ -2478,3 +2478,36 @@ Bolhas	Bubbles	Burbujas	فقاعات	거품	バブル	气泡	बुलबुल�
 Aumento	Magnification	Aumento	تكبير	확대	拡大	放大	आवर्धन	Perbesaran	Увеличение
 Lupa	Magnifier	Lupa	عدسة مكبرة	돋보기	ルーペ	放大镜	आवर्धक	Kaca pembesar	Лупа
 Espuma	Foam	Espuma	رغوة	거품	泡	泡沫	झाग	Busa	Пена
+Grão	Grain	Grano	الحبيبات	입자	粒子	颗粒	दाना	Butiran	Зерно
+Chuvisco fino	Fine speckle	Llovizna fina	رذاذ ناعم	고운 점	細かい粒	细颗粒	महीन छींटे	Bintik halus	Мелкая крупа
+Areia	Sand	Arena	رمل	모래	砂	沙粒	रेत	Pasir	Песок
+Sumindo	Fading out	Desvaneciendo	يتلاشى	사라짐	消えていく	渐隐	मिटता हुआ	Memudar	Исчезает
+Feather	Feather	Difuminar	تنعيم الحواف	페더	ぼかし	羽化	फेदर	Feather	Растушёвка
+Beirada leve	Soft edge	Borde suave	حافة ناعمة	부드러운 가장자리	やわらかい縁	柔和边缘	हल्का किनारा	Tepi lembut	Мягкий край
+Encaixe	Blend in	Encaje	اندماج	맞물림	なじませる	融入	समायोजन	Menyatu	Подгонка
+Fade In/Out	Fade In/Out	Aparecer/Desaparecer	ظهور/اختفاء	페이드 인/아웃	フェードイン／アウト	淡入淡出	फेड इन/आउट	Fade In/Out	Появление/исчезание
+Reta	Straight	Recta	مستقيم	직선	直線	直线	सीधा	Lurus	Прямая
+Só no fim	Only at the end	Solo al final	في النهاية فقط	끝에만	最後だけ	仅结尾	सिर्फ अंत में	Hanya di akhir	Только в конце
+Demorado	Slow	Lento	بطيء	느리게	ゆっくり	缓慢	धीमा	Lambat	Медленно
+Linear Repeat	Linear Repeat	Repetir en línea	تكرار خطي	선형 반복	直線リピート	线性重复	रैखिक दोहराव	Ulang Linear	Линейный повтор
+Cópias	Copies	Copias	النسخ	복사본	コピー数	副本数	प्रतियाँ	Salinan	Копии
+Passo X	Step X	Paso X	الخطوة X	간격 X	ステップ X	步进 X	स्टेप X	Langkah X	Шаг X
+Passo Y	Step Y	Paso Y	الخطوة Y	간격 Y	ステップ Y	步进 Y	स्टेप Y	Langkah Y	Шаг Y
+Giro por cópia	Turn per copy	Giro por copia	دوران لكل نسخة	복사본당 회전	コピーごとの回転	每份旋转	प्रति प्रति घुमाव	Putaran per salinan	Поворот на копию
+Escala por cópia	Scale per copy	Escala por copia	تحجيم لكل نسخة	복사본당 크기	コピーごとの拡大	每份缩放	प्रति प्रति स्केल	Skala per salinan	Масштаб на копию
+Opacidade por cópia	Opacity per copy	Opacidad por copia	شفافية لكل نسخة	복사본당 불투명도	コピーごとの不透明度	每份不透明度	प्रति प्रति अपारदर्शिता	Opasitas per salinan	Прозрачность на копию
+Escada	Stairs	Escalera	درج	계단	階段	阶梯	सीढ़ी	Tangga	Лестница
+Fuga	Vanishing	Fuga	تلاشٍ	소실	遠ざかる	渐远	लोप	Menjauh	Уход
+Grid Repeat	Grid Repeat	Repetir en cuadrícula	تكرار شبكي	격자 반복	グリッドリピート	网格重复	ग्रिड दोहराव	Ulang Kisi	Повтор сеткой
+Contato	Contact sheet	Hoja de contacto	ورقة تلامس	인덱스 시트	コンタクトシート	印样	कॉन्टैक्ट शीट	Lembar kontak	Контактный лист
+Par	Pair	Par	زوج	한 쌍	ペア	一对	जोड़ा	Pasangan	Пара
+Radial Repeat	Radial Repeat	Repetir en círculo	تكرار دائري	원형 반복	円形リピート	环形重复	वृत्ताकार दोहराव	Ulang Radial	Радиальный повтор
+Começo	Start	Inicio	البداية	시작	開始	起点	शुरुआत	Awal	Начало
+Mandala	Mandala	Mandala	ماندالا	만다라	マンダラ	曼陀罗	मंडल	Mandala	Мандала
+Leque	Fan	Abanico	مروحة	부채	扇	扇形	पंखा	Kipas	Веер
+Relógio	Clock	Reloj	ساعة	시계	時計	时钟	घड़ी	Jam	Часы
+Scatter Repeat	Scatter Repeat	Repetir disperso	تكرار متناثر	흩뿌림 반복	散らしリピート	散布重复	बिखरा दोहराव	Ulang Sebar	Разброс копий
+Espalhamento	Spread	Dispersión	الانتشار	퍼짐	広がり	扩散	फैलाव	Sebaran	Разброс
+Confete	Confetti	Confeti	قصاصات	색종이	紙吹雪	彩纸	कॉन्फ़ेटी	Konfeti	Конфетти
+Solto	Loose	Suelto	متفرق	느슨하게	まばら	松散	बिखरा	Longgar	Свободно
+Enxame	Swarm	Enjambre	سرب	군집	群れ	群集	झुंड	Kawanan	Рой

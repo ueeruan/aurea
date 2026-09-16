@@ -86,7 +86,9 @@ void main() {
     // 42 -> 43: Hue/Saturation da camada de ajuste do After (modo 45).
     // 43 -> 44: S_MathOps (modo 46).
     // 44 -> 45: S_Sharpen (modo 47).
-    expect(pixelKernels.length, 45);
+    // 45 -> 47 em 2026-09-15: Dissolver e Pena (modos 48 e 49), as duas
+    // coisas de opacidade que so existem por pixel.
+    expect(pixelKernels.length, 47);
     expect(
       pixelKernels.values.map((k) => k.mode).toSet().length,
       pixelKernels.length,

@@ -26,6 +26,15 @@ const pixelKernels = <EffectType, PixelKernel>{
   ]),
   EffectType.colorKey: PixelKernel(35, ['tolerancia', 'suavidade']),
   EffectType.findEdges: PixelKernel(36, ['inverter', 'mistura']),
+  // OPACIDADE (v1.1.1): dissolver por chuvisco e borda de pena. Os dois
+  // mexem no ALFA, como o recorte — por isso moram aqui.
+  EffectType.dissolver: PixelKernel(48, [
+    'quantidade',
+    'grao',
+    'suavidade',
+    'semente',
+  ]),
+  EffectType.pena: PixelKernel(49, ['tamanho', 'suavidade']),
   EffectType.levels: PixelKernel(1, [
     'entradaMin',
     'entradaMax',

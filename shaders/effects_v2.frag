@@ -758,5 +758,39 @@ void main() {
     c=clamp(c+(vec3(dl)*p0.w+(det-vec3(dl))*p1.x)*p0.x*w,0.0,1.0);
   }
 
+  // 48 - DISSOLVER. Cada pixel tem um numero sorteado fixo (a semente
+  // manda); a quantidade e o corte. Quem fica abaixo do corte some, e a
+  // suavidade da uma faixa de meio-termo em vez de um liga-desliga. O
+  // grao e o TAMANHO do quadradinho sorteado: 1 e chuvisco de pixel,
+  // 40 e areia grossa.
+  if(mode==48) {
+    float grao=max(1.0,p0.y*uPixelScale);
+    vec2 cel=floor(FlutterFragCoord().xy/grao);
+    float r=hash(vec3(cel,floor(p0.w)*17.0+.5));
+    float corte=clamp(p0.x,0.0,1.0);
+    float meio=max(.0001,clamp(p0.z,0.0,1.0)*.5);
+    a*=smoothstep(corte-meio,corte+meio,r);
+  }
+
+  // 49 - PENA. A borda da camada deixa de terminar em faca: o alfa de
+  // um anel em volta do pixel entra na conta, e quem esta na beirada
+  // (vizinhos vazios) perde forca. A suavidade decide se a queda e
+  // reta ou em S.
+  if(mode==49) {
+    float raio=max(0.0,p0.x)*uPixelScale;
+    if(raio>.5) {
+      float soma=0.0;
+      for(int i=0;i<12;i++) {
+        vec2 d=rotate2(vec2(1.0,0.0),float(i)*.523598776);
+        soma+=src(uv+d*raio*.45/uSize).a*.6;
+        soma+=src(uv+rotate2(d,.261799388)*raio/uSize).a;
+      }
+      float vizinhos=soma/19.2;
+      float s=clamp(p0.y,0.0,1.0);
+      float k=mix(vizinhos,vizinhos*vizinhos*(3.0-2.0*vizinhos),s);
+      a*=clamp(k,0.0,1.0);
+    }
+  }
+
   fragColor=premul(c,a);
 }

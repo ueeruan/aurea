@@ -172,6 +172,10 @@ void main() {
         'posterizeTime',
         'mathOps',
         'sSharpen',
+        // Dissolver e Pena (v1.1.1) tambem sao so do shader: mexem no
+        // alfa por pixel, como o recorte.
+        'dissolver',
+        'pena',
       };
 
       final mortos = <String>[];
@@ -215,6 +219,20 @@ void main() {
         }
         if (nome == 'oscillate') {
           texto += File('lib/src/features/editor/domain/oscillate.dart')
+              .readAsStringSync();
+        }
+        if (const {
+          'repetirEmLinha',
+          'repetirEmGrade',
+          'repetirEmCirculo',
+          'espalharCopias',
+        }.contains(nome)) {
+          texto += File(
+            'lib/src/features/editor/presentation/widgets/repeticao_pass.dart',
+          ).readAsStringSync().replaceAll("p('", "paramAt('");
+        }
+        if (nome == 'aparecerSumir') {
+          texto += File('lib/src/features/editor/domain/aparecer_sumir.dart')
               .readAsStringSync();
         }
         if (nome == 'blobTracker') {

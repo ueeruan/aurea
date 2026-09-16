@@ -255,6 +255,27 @@
     },
     "bubble_blur": {
       "preset": null
+    },
+    "dissolve": {
+      "preset": null
+    },
+    "feather": {
+      "preset": null
+    },
+    "fade_in_out": {
+      "preset": null
+    },
+    "repeat_line": {
+      "preset": null
+    },
+    "repeat_grid": {
+      "preset": null
+    },
+    "repeat_radial": {
+      "preset": null
+    },
+    "repeat_scatter": {
+      "preset": null
     }
   }
 }

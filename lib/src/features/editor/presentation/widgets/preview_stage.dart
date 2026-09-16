@@ -25,6 +25,7 @@ import '../am/am_colors.dart';
 import '../../application/preview_stats.dart';
 import '../../application/video_layer_manager.dart';
 import '../shell/cromo_editor.dart' show zoomDoPalcoProvider;
+import '../../domain/aparecer_sumir.dart';
 import '../../domain/ajuste_da_midia.dart';
 import '../../domain/keyframe.dart' show AnimatedDouble;
 import '../../domain/cut.dart';
@@ -33,6 +34,7 @@ import '../../domain/effect.dart';
 import '../../domain/fx.dart';
 import '../../domain/oscillate.dart';
 import 'motion_tile_pass.dart';
+import 'repeticao_pass.dart';
 import '../../domain/gear.dart';
 import '../../domain/text_animator.dart' show valueNoise01;
 import '../../domain/caption_highlight.dart';
@@ -76,6 +78,7 @@ import 'particles_painter.dart';
 import '../../application/scene3d_gpu.dart';
 import 'scene3d_painter.dart';
 import 'scene3d_gpu_view.dart';
+
 import 'package:aurea/src/core/l10n/app_language.dart';
 
 // Photos decode asynchronously and videos update their external textures.
@@ -403,7 +406,8 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
           chave: a.chave,
           ponto:
               _stageOrigin +
-              MatrixUtils.transformPoint(matriz, a.ponto - centro) * _stageScale,
+              MatrixUtils.transformPoint(matriz, a.ponto - centro) *
+                  _stageScale,
         ),
     ];
   }
@@ -418,7 +422,8 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
         if ((d.localFocalPoint - a.ponto).distance <= 24) {
           _alcaDaForma = a.chave;
           final id = ref.read(selectedLayerProvider)!;
-          final l = ref.read(editorControllerProvider).layerById(id)! as ShapeLayer;
+          final l =
+              ref.read(editorControllerProvider).layerById(id)! as ShapeLayer;
           _centroDoDesenho = shapeBounds(
             evaluateShape(l.contents, l.localTime(widget.playback.time.value)),
           ).center;
@@ -714,7 +719,10 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
     }
     ref.read(infobarProvider.notifier).state = DadosDaInfobar.pares([
       for (final e in valores.entries)
-        (fichaDoParametroDaForma(e.key, forma.kind).rotulo, e.value.toStringAsFixed(0)),
+        (
+          fichaDoParametroDaForma(e.key, forma.kind).rotulo,
+          e.value.toStringAsFixed(0),
+        ),
     ]);
   }
 
@@ -747,366 +755,388 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
       onPointerUp: _dedoSubiu,
       onPointerCancel: _dedoSubiu,
       child: GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onScaleStart: drawing ? null : _onScaleStart,
-      onScaleUpdate: drawing ? null : _onScaleUpdate,
-      // SOLTOU O DEDO, SOME A LINHA. Ela e um sinal do gesto em
-      // andamento; deixada na tela depois vira decoracao que confunde.
-      //
-      // SO `onScaleEnd`. Um `onTapUp` aqui parecia inofensivo e nao era:
-      // ele poe um reconhecedor de toque na mesma arena, e o toque
-      // simples passava a ser dele em vez de chegar ao `onScaleStart` —
-      // que e quem seleciona a camada embaixo do dedo. O palco parou de
-      // selecionar por causa de uma limpeza que ja acontecia sozinha.
-      onScaleEnd: drawing
-          ? null
-          : (_) {
-              if (_alcaDaForma != null) {
-                _alcaDaForma = null;
-                ref.read(editorControllerProvider.notifier).endGesture();
-              }
-              _limparEncaixe();
-              _limparInfobar();
-            },
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          ColoredBox(
-            color: Colors.black,
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final frame = compositionRect(
-                  constraints.biggest,
-                  Size(compW, compH),
-                );
-                // O ZOOM DO PALCO (trilho da direita) multiplica o
-                // ajuste; com 1.0 o quadro fica identico ao de sempre.
-                final zoomDoPalco = ref.watch(zoomDoPalcoProvider);
-                final ajuste = frame.width / compW;
-                final scale = ajuste * zoomDoPalco;
-                // O passeio nao deixa a composicao fugir da janela.
-                final folgaX =
-                    ((compW * scale - constraints.maxWidth) / 2).clamp(
-                          0.0,
-                          double.infinity,
-                        ) +
-                        48;
-                final folgaY =
-                    ((compH * scale - constraints.maxHeight) / 2).clamp(
-                          0.0,
-                          double.infinity,
-                        ) +
-                        48;
-                final pan = zoomDoPalco == 1.0
-                    ? Offset.zero
-                    : Offset(
-                        _panDoPalco.dx.clamp(-folgaX, folgaX),
-                        _panDoPalco.dy.clamp(-folgaY, folgaY),
-                      );
-                _stageScale = scale;
-                _stageOrigin =
-                    Offset(
-                      (constraints.maxWidth - compW * scale) / 2,
-                      (constraints.maxHeight - compH * scale) / 2,
-                    ) +
-                    pan;
-                _tamanhoDoPalco = Size(
-                  constraints.maxWidth,
-                  constraints.maxHeight,
-                );
-                return Stack(
-                  clipBehavior: Clip.hardEdge,
-                  children: [
-                    Positioned(
-                      left: _stageOrigin.dx,
-                      top: _stageOrigin.dy,
-                      width: compW * scale,
-                      height: compH * scale,
-                      child: CompositionFrame(
-                      key: const ValueKey('composition-frame'),
-                      // O filho precisa ter também a área de toque da
-                      // composição. Transform + OverflowBox só escalava a
-                      // pintura e descartava gestos fora do canto superior.
-                      child: FittedBox(
-                        fit: BoxFit.contain,
-                        alignment: Alignment.topLeft,
-                        child: MediaQuery(
-                          // FOTOS NA RESOLUCAO DA TELA. Tudo que fotografa a
-                          // composicao (efeitos, mescla, dithering) le a razao
-                          // de pixels daqui: com a do aparelho, cada foto saia
-                          // em 1080x1920 x DPR — 75 MB por efeito por quadro no
-                          // iPhone, e o iOS fechava o app na primeira animacao.
-                          data: MediaQuery.of(context).copyWith(
-                            devicePixelRatio: previewRasterRatio(
-                              maxSidePx: widget.playback.playing.value
-                                  ? 1080
-                                  : 2160,
-                              compWidth: compW,
-                              compHeight: compH,
-                              stageScale: scale * resolution.scale,
-                              devicePixelRatio: MediaQuery.devicePixelRatioOf(
-                                context,
+        behavior: HitTestBehavior.opaque,
+        onScaleStart: drawing ? null : _onScaleStart,
+        onScaleUpdate: drawing ? null : _onScaleUpdate,
+        // SOLTOU O DEDO, SOME A LINHA. Ela e um sinal do gesto em
+        // andamento; deixada na tela depois vira decoracao que confunde.
+        //
+        // SO `onScaleEnd`. Um `onTapUp` aqui parecia inofensivo e nao era:
+        // ele poe um reconhecedor de toque na mesma arena, e o toque
+        // simples passava a ser dele em vez de chegar ao `onScaleStart` —
+        // que e quem seleciona a camada embaixo do dedo. O palco parou de
+        // selecionar por causa de uma limpeza que ja acontecia sozinha.
+        onScaleEnd: drawing
+            ? null
+            : (_) {
+                if (_alcaDaForma != null) {
+                  _alcaDaForma = null;
+                  ref.read(editorControllerProvider.notifier).endGesture();
+                }
+                _limparEncaixe();
+                _limparInfobar();
+              },
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            ColoredBox(
+              color: Colors.black,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final frame = compositionRect(
+                    constraints.biggest,
+                    Size(compW, compH),
+                  );
+                  // O ZOOM DO PALCO (trilho da direita) multiplica o
+                  // ajuste; com 1.0 o quadro fica identico ao de sempre.
+                  final zoomDoPalco = ref.watch(zoomDoPalcoProvider);
+                  final ajuste = frame.width / compW;
+                  final scale = ajuste * zoomDoPalco;
+                  // O passeio nao deixa a composicao fugir da janela.
+                  final folgaX =
+                      ((compW * scale - constraints.maxWidth) / 2).clamp(
+                        0.0,
+                        double.infinity,
+                      ) +
+                      48;
+                  final folgaY =
+                      ((compH * scale - constraints.maxHeight) / 2).clamp(
+                        0.0,
+                        double.infinity,
+                      ) +
+                      48;
+                  final pan = zoomDoPalco == 1.0
+                      ? Offset.zero
+                      : Offset(
+                          _panDoPalco.dx.clamp(-folgaX, folgaX),
+                          _panDoPalco.dy.clamp(-folgaY, folgaY),
+                        );
+                  _stageScale = scale;
+                  _stageOrigin =
+                      Offset(
+                        (constraints.maxWidth - compW * scale) / 2,
+                        (constraints.maxHeight - compH * scale) / 2,
+                      ) +
+                      pan;
+                  _tamanhoDoPalco = Size(
+                    constraints.maxWidth,
+                    constraints.maxHeight,
+                  );
+                  return Stack(
+                    clipBehavior: Clip.hardEdge,
+                    children: [
+                      Positioned(
+                        left: _stageOrigin.dx,
+                        top: _stageOrigin.dy,
+                        width: compW * scale,
+                        height: compH * scale,
+                        child: CompositionFrame(
+                          key: const ValueKey('composition-frame'),
+                          // O filho precisa ter também a área de toque da
+                          // composição. Transform + OverflowBox só escalava a
+                          // pintura e descartava gestos fora do canto superior.
+                          child: FittedBox(
+                            fit: BoxFit.contain,
+                            alignment: Alignment.topLeft,
+                            child: MediaQuery(
+                              // FOTOS NA RESOLUCAO DA TELA. Tudo que fotografa a
+                              // composicao (efeitos, mescla, dithering) le a razao
+                              // de pixels daqui: com a do aparelho, cada foto saia
+                              // em 1080x1920 x DPR — 75 MB por efeito por quadro no
+                              // iPhone, e o iOS fechava o app na primeira animacao.
+                              data: MediaQuery.of(context).copyWith(
+                                devicePixelRatio: previewRasterRatio(
+                                  maxSidePx: widget.playback.playing.value
+                                      ? 1080
+                                      : 2160,
+                                  compWidth: compW,
+                                  compHeight: compH,
+                                  stageScale: scale * resolution.scale,
+                                  devicePixelRatio:
+                                      MediaQuery.devicePixelRatioOf(context),
+                                ),
                               ),
-                            ),
-                          ),
-                          child: SizedBox(
-                            width: compW,
-                            height: compH,
-                            // O FUNDO DA COMPOSICAO (⚙ Projeto): a cor
-                            // escolhida, atras de todas as camadas.
-                            child: ColoredBox(
-                              color: project.backgroundColor,
-                              child: Stack(
-                                clipBehavior: Clip.none,
-                                children: [
-                                  // Automatic dithering is only a live GPU pass
-                                  // for graphics. Never snapshot the preview:
-                                  // asynchronous image decoding and nested video
-                                  // textures must repaint without a clock change.
-                                  // Export still dithers fully decoded frames.
-                                  ValueListenableBuilder<Duration>(
-                                    valueListenable: widget.playback.time,
-                                    builder: (context, t, child) => !useDither
-                                        ? child!
-                                        : DitherLayer(
-                                            time: t,
-                                            // Escala do palco x DPR de verdade: e o
-                                            // tamanho da textura do filtro. O AJUSTE
-                                            // (sem o zoom do trilho) — aproximar o
-                                            // palco nao pode quadruplicar a textura.
-                                            pixelRatio:
-                                                ajuste *
-                                                MediaQuery.devicePixelRatioOf(
-                                                  context,
-                                                ),
-                                            child: child!,
-                                          ),
-                                    child: CompositionView(
-                                      time: widget.playback.time,
-                                      videos: widget.videos,
-                                      selectedId: selectedId,
-                                      vistaDoPalco: true,
-                                    ),
-                                  ),
-                                  // CASCA DE CEBOLA: os quadros vizinhos,
-                                  // fantasmas, ATRAS do quadro atual. Passado
-                                  // puxado para o vermelho, futuro para o
-                                  // verde — e como se sabe de que lado esta.
-                                  if (onion > 0)
-                                    Positioned.fill(
-                                      child: IgnorePointer(
-                                        child: ValueListenableBuilder<Duration>(
-                                          valueListenable: widget.playback.time,
-                                          builder: (context, t, _) {
-                                            final passo = Duration(
-                                              microseconds:
-                                                  1000000 ~/
-                                                  (project.fps < 1
-                                                      ? 30
-                                                      : project.fps),
-                                            );
-                                            return Stack(
-                                              clipBehavior: Clip.none,
-                                              children: [
-                                                for (var k = onion; k >= 1; k--)
-                                                  for (final lado in const [
-                                                    -1,
-                                                    1,
-                                                  ])
-                                                    _Fantasma(
-                                                      time:
-                                                          t +
-                                                          passo * (k * lado),
-                                                      videos: widget.videos,
-                                                      opacity: 0.34 / k,
-                                                      futuro: lado > 0,
+                              child: SizedBox(
+                                width: compW,
+                                height: compH,
+                                // O FUNDO DA COMPOSICAO (⚙ Projeto): a cor
+                                // escolhida, atras de todas as camadas.
+                                child: ColoredBox(
+                                  color: project.backgroundColor,
+                                  child: Stack(
+                                    clipBehavior: Clip.none,
+                                    children: [
+                                      // Automatic dithering is only a live GPU pass
+                                      // for graphics. Never snapshot the preview:
+                                      // asynchronous image decoding and nested video
+                                      // textures must repaint without a clock change.
+                                      // Export still dithers fully decoded frames.
+                                      ValueListenableBuilder<Duration>(
+                                        valueListenable: widget.playback.time,
+                                        builder: (context, t, child) =>
+                                            !useDither
+                                            ? child!
+                                            : DitherLayer(
+                                                time: t,
+                                                // Escala do palco x DPR de verdade: e o
+                                                // tamanho da textura do filtro. O AJUSTE
+                                                // (sem o zoom do trilho) — aproximar o
+                                                // palco nao pode quadruplicar a textura.
+                                                pixelRatio:
+                                                    ajuste *
+                                                    MediaQuery.devicePixelRatioOf(
+                                                      context,
                                                     ),
-                                              ],
-                                            );
-                                          },
+                                                child: child!,
+                                              ),
+                                        child: CompositionView(
+                                          time: widget.playback.time,
+                                          videos: widget.videos,
+                                          selectedId: selectedId,
+                                          vistaDoPalco: true,
                                         ),
                                       ),
-                                    ),
-                                  // GUIAS, GRADE, AREAS SEGURAS e mascara de
-                                  // enquadramento (PR-X3): vivem ACIMA da
-                                  // composicao e nunca entram no render final.
-                                  Positioned.fill(
-                                    child: IgnorePointer(
-                                      child: CustomPaint(
-                                        key: const ValueKey(
-                                          'composition-guides',
+                                      // CASCA DE CEBOLA: os quadros vizinhos,
+                                      // fantasmas, ATRAS do quadro atual. Passado
+                                      // puxado para o vermelho, futuro para o
+                                      // verde — e como se sabe de que lado esta.
+                                      if (onion > 0)
+                                        Positioned.fill(
+                                          child: IgnorePointer(
+                                            child:
+                                                ValueListenableBuilder<
+                                                  Duration
+                                                >(
+                                                  valueListenable:
+                                                      widget.playback.time,
+                                                  builder: (context, t, _) {
+                                                    final passo = Duration(
+                                                      microseconds:
+                                                          1000000 ~/
+                                                          (project.fps < 1
+                                                              ? 30
+                                                              : project.fps),
+                                                    );
+                                                    return Stack(
+                                                      clipBehavior: Clip.none,
+                                                      children: [
+                                                        for (
+                                                          var k = onion;
+                                                          k >= 1;
+                                                          k--
+                                                        )
+                                                          for (final lado
+                                                              in const [-1, 1])
+                                                            _Fantasma(
+                                                              time:
+                                                                  t +
+                                                                  passo *
+                                                                      (k *
+                                                                          lado),
+                                                              videos:
+                                                                  widget.videos,
+                                                              opacity: 0.34 / k,
+                                                              futuro: lado > 0,
+                                                            ),
+                                                      ],
+                                                    );
+                                                  },
+                                                ),
+                                          ),
                                         ),
-                                        painter: _GuidesPainter(
-                                          previewScale: scale,
-                                          guides: project.guides,
-                                          compSize: Size(compW, compH),
-                                          encaixeX: _encaixeX ?? padGuides.x,
-                                          encaixeY: _encaixeY ?? padGuides.y,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  // GRADE E PIXELS (opcoes de visualizacao):
-                                  // ajudas por cima, fora do render final.
-                                  if (opcoes.grade ||
-                                      (opcoes.pixels && scale >= 6))
-                                    Positioned.fill(
-                                      child: IgnorePointer(
-                                        child: CustomPaint(
-                                          key: const ValueKey('palco-grade'),
-                                          painter: _GradeDoPalcoPainter(
-                                            compSize: Size(compW, compH),
-                                            escala: scale,
-                                            grade: opcoes.grade,
-                                            pixels:
-                                                opcoes.pixels && scale >= 6,
+                                      // GUIAS, GRADE, AREAS SEGURAS e mascara de
+                                      // enquadramento (PR-X3): vivem ACIMA da
+                                      // composicao e nunca entram no render final.
+                                      Positioned.fill(
+                                        child: IgnorePointer(
+                                          child: CustomPaint(
+                                            key: const ValueKey(
+                                              'composition-guides',
+                                            ),
+                                            painter: _GuidesPainter(
+                                              previewScale: scale,
+                                              guides: project.guides,
+                                              compSize: Size(compW, compH),
+                                              encaixeX:
+                                                  _encaixeX ?? padGuides.x,
+                                              encaixeY:
+                                                  _encaixeY ?? padGuides.y,
+                                            ),
                                           ),
                                         ),
                                       ),
-                                    ),
-                                  // NOS DA MASCARA: quando alguem esta editando
-                                  // o caminho, o dedo passa a mexer nos nos em
-                                  // vez de mover a camada. Fora disso o widget
-                                  // nao existe e nao intercepta nada.
-                                  Positioned.fill(
-                                    child: MaskNodeEditor(
-                                      time: widget.playback.time,
-                                      stageScale: () => _stageScale,
-                                    ),
-                                  ),
-                                  // DESENHO LIVRE: por cima de tudo enquanto o
-                                  // pedido do menu estiver ligado.
-                                  Positioned.fill(
-                                    child: FreehandOverlay(
-                                      key: ValueKey(project.id),
-                                      playback: widget.playback,
-                                    ),
-                                  ),
-                                ],
-                              ), // fechado-bg
+                                      // GRADE E PIXELS (opcoes de visualizacao):
+                                      // ajudas por cima, fora do render final.
+                                      if (opcoes.grade ||
+                                          (opcoes.pixels && scale >= 6))
+                                        Positioned.fill(
+                                          child: IgnorePointer(
+                                            child: CustomPaint(
+                                              key: const ValueKey(
+                                                'palco-grade',
+                                              ),
+                                              painter: _GradeDoPalcoPainter(
+                                                compSize: Size(compW, compH),
+                                                escala: scale,
+                                                grade: opcoes.grade,
+                                                pixels:
+                                                    opcoes.pixels && scale >= 6,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      // NOS DA MASCARA: quando alguem esta editando
+                                      // o caminho, o dedo passa a mexer nos nos em
+                                      // vez de mover a camada. Fora disso o widget
+                                      // nao existe e nao intercepta nada.
+                                      Positioned.fill(
+                                        child: MaskNodeEditor(
+                                          time: widget.playback.time,
+                                          stageScale: () => _stageScale,
+                                        ),
+                                      ),
+                                      // DESENHO LIVRE: por cima de tudo enquanto o
+                                      // pedido do menu estiver ligado.
+                                      Positioned.fill(
+                                        child: FreehandOverlay(
+                                          key: ValueKey(project.id),
+                                          playback: widget.playback,
+                                        ),
+                                      ),
+                                    ],
+                                  ), // fechado-bg
+                                ),
+                              ),
                             ),
                           ),
                         ),
                       ),
-                    ),
-                  ),
-                  ],
-                );
-              },
+                    ],
+                  );
+                },
+              ),
             ),
-          ),
-          // A RESOLUCAO DA PREVIA sai do caminho enquanto se desenha: a
-          // faixa de cima e da barra do desenho.
-          if (!drawing)
-            Positioned(
-            right: 4,
-            top: 4,
-            child: Material(
-              color: const Color(0xCC171D25),
-              borderRadius: BorderRadius.circular(6),
-              child: PopupMenuButton<PreviewResolution>(
-                key: const ValueKey('preview-resolution'),
-                tooltip: 'Resolução da prévia',
-                initialValue: resolution,
-                onSelected: (v) =>
-                    ref.read(previewResolutionProvider.notifier).state = v,
-                itemBuilder: (_) => [
-                  for (final v in PreviewResolution.values)
-                    PopupMenuItem(value: v, child: AppText(v.label)),
-                ],
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 8,
-                  ),
-                  child: AppText(resolution.label,
-                    style: const TextStyle(color: Colors.white, fontSize: 12),
+            // A RESOLUCAO DA PREVIA sai do caminho enquanto se desenha: a
+            // faixa de cima e da barra do desenho.
+            if (!drawing)
+              Positioned(
+                right: 4,
+                top: 4,
+                child: Material(
+                  color: const Color(0xCC171D25),
+                  borderRadius: BorderRadius.circular(6),
+                  child: PopupMenuButton<PreviewResolution>(
+                    key: const ValueKey('preview-resolution'),
+                    tooltip: 'Resolução da prévia',
+                    initialValue: resolution,
+                    onSelected: (v) =>
+                        ref.read(previewResolutionProvider.notifier).state = v,
+                    itemBuilder: (_) => [
+                      for (final v in PreviewResolution.values)
+                        PopupMenuItem(value: v, child: AppText(v.label)),
+                    ],
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 8,
+                      ),
+                      child: AppText(
+                        resolution.label,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ),
-            ),
-          ),
-          // AS ALCAS DA FORMA VIVA: pontos brancos com borda na cor do
-          // keyframe, onde cada numero da forma se puxa com o dedo.
-          if (!drawing && ref.watch(editorSessionProvider.select((s) => s.panel)) == EditorPanel.editShape)
-            ValueListenableBuilder<Duration>(
-              valueListenable: widget.playback.time,
-              builder: (context, _, _) {
-                ref.watch(editorControllerProvider);
-                return Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    for (final a in _alcasDaFormaNoPalco())
-                      Positioned(
-                        left: a.ponto.dx - 9,
-                        top: a.ponto.dy - 9,
-                        child: IgnorePointer(
-                          child: Container(
-                            key: ValueKey('alca-forma-${a.chave}'),
-                            width: 18,
-                            height: 18,
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: AmColors.accent,
-                                width: 3,
+            // AS ALCAS DA FORMA VIVA: pontos brancos com borda na cor do
+            // keyframe, onde cada numero da forma se puxa com o dedo.
+            if (!drawing &&
+                ref.watch(editorSessionProvider.select((s) => s.panel)) ==
+                    EditorPanel.editShape)
+              ValueListenableBuilder<Duration>(
+                valueListenable: widget.playback.time,
+                builder: (context, _, _) {
+                  ref.watch(editorControllerProvider);
+                  return Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      for (final a in _alcasDaFormaNoPalco())
+                        Positioned(
+                          left: a.ponto.dx - 9,
+                          top: a.ponto.dy - 9,
+                          child: IgnorePointer(
+                            child: Container(
+                              key: ValueKey('alca-forma-${a.chave}'),
+                              width: 18,
+                              height: 18,
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: AmColors.accent,
+                                  width: 3,
+                                ),
+                                boxShadow: const [
+                                  BoxShadow(
+                                    color: Colors.black54,
+                                    blurRadius: 4,
+                                  ),
+                                ],
                               ),
-                              boxShadow: const [
-                                BoxShadow(color: Colors.black54, blurRadius: 4),
-                              ],
                             ),
                           ),
                         ),
+                    ],
+                  );
+                },
+              ),
+            // ALCAS DA SELECAO: marcadores sem desenho visivel
+            if (!drawing)
+              Builder(
+                builder: (context) {
+                  final a = _alcasDaSelecao();
+                  if (a == null) return const SizedBox.shrink();
+                  Widget alca(Offset p, IconData icone, String chave) =>
+                      Positioned(
+                        left: p.dx,
+                        top: p.dy,
+                        child: SizedBox(
+                          key: ValueKey(chave),
+                          width: 0,
+                          height: 0,
+                        ),
+                      );
+                  return Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      alca(
+                        a.escala,
+                        CupertinoIcons.arrow_up_left_arrow_down_right,
+                        'alca-escala',
                       ),
-                  ],
-                );
-              },
-            ),
-          // ALCAS DA SELECAO: marcadores sem desenho visivel
-          if (!drawing)
-            Builder(
-              builder: (context) {
-                final a = _alcasDaSelecao();
-                if (a == null) return const SizedBox.shrink();
-                Widget alca(Offset p, IconData icone, String chave) =>
-                    Positioned(
-                      left: p.dx,
-                      top: p.dy,
-                      child: SizedBox(
-                        key: ValueKey(chave),
-                        width: 0,
-                        height: 0,
+                      alca(
+                        a.giro,
+                        CupertinoIcons.arrow_2_circlepath,
+                        'alca-giro',
                       ),
-                    );
-                return Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    alca(
-                      a.escala,
-                      CupertinoIcons.arrow_up_left_arrow_down_right,
-                      'alca-escala',
-                    ),
-                    alca(
-                      a.giro,
-                      CupertinoIcons.arrow_2_circlepath,
-                      'alca-giro',
-                    ),
-                  ],
-                );
-              },
-            ),
-          // A BARRA DO DESENHO fica AQUI, no palco: dentro da composicao
-          // o zoom da previa mudaria o tamanho dos botoes.
-          if (drawing)
-            Positioned(
-              top: 4,
-              left: 8,
-              right: 8,
-              child: BarraDoDesenho(playback: widget.playback),
-            ),
-        ],
-      ),
+                    ],
+                  );
+                },
+              ),
+            // A BARRA DO DESENHO fica AQUI, no palco: dentro da composicao
+            // o zoom da previa mudaria o tamanho dos botoes.
+            if (drawing)
+              Positioned(
+                top: 4,
+                left: 8,
+                right: 8,
+                child: BarraDoDesenho(playback: widget.playback),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -1681,7 +1711,9 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
       clipBehavior: Clip.none,
       children: [
         atual,
-        Positioned.fill(child: Opacity(opacity: mistura, child: fatiado)),
+        Positioned.fill(
+          child: Opacity(opacity: mistura, child: fatiado),
+        ),
       ],
     );
   }
@@ -1697,9 +1729,7 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
         : ref.watch(projetoVisivelProvider);
     _metadeNaSelecao =
         widget.vistaDoPalco &&
-        ref.watch(
-              opcoesDeVisualizacaoProvider.select((o) => o.modo),
-            ) ==
+        ref.watch(opcoesDeVisualizacaoProvider.select((o) => o.modo)) ==
             ModoDePrevia.meioTransparente;
 
     // O RASCUNHO PRECISA DE QUEM O ESCUTE. Sem este ouvinte, a
@@ -1897,7 +1927,12 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
             ),
           );
         }
-        adjusted = _applyEffects(layer.effects, adjusted, local);
+        adjusted = _applyEffects(
+          layer.effects,
+          adjusted,
+          local,
+          duracaoDaCamada: layer.duration,
+        );
         if (layer.masks.isNotEmpty) {
           final pos = layer.position.valueAt(local);
           final compCenter = Offset(
@@ -2791,7 +2826,12 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
       );
     }
 
-    content = _applyEffects(layer.effects, content, local);
+    content = _applyEffects(
+      layer.effects,
+      content,
+      local,
+      duracaoDaCamada: layer.duration,
+    );
 
     // ESTILOS DE CAMADA (PR-X10): aplicam DEPOIS dos efeitos e
     // acompanham a forma da camada — e o que os diferencia de efeito.
@@ -3250,7 +3290,11 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
     }
     for (final e in layer.effects) {
       if (!e.enabled || e.type != EffectType.timeRemap) continue;
-      return remappedContentTime(e.track('tempo'), local, bakeUntil: layer.duration);
+      return remappedContentTime(
+        e.track('tempo'),
+        local,
+        bakeUntil: layer.duration,
+      );
     }
     return local;
   }
@@ -3278,7 +3322,11 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
         Transform.scale(scaleX: -1, alignment: Alignment.centerLeft, child: c),
         Transform.scale(scaleX: -1, alignment: Alignment.centerRight, child: c),
         Transform.scale(scaleY: -1, alignment: Alignment.topCenter, child: c),
-        Transform.scale(scaleY: -1, alignment: Alignment.bottomCenter, child: c),
+        Transform.scale(
+          scaleY: -1,
+          alignment: Alignment.bottomCenter,
+          child: c,
+        ),
         c,
       ],
     ),
@@ -3300,8 +3348,11 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
   Widget _applyEffects(
     List<EffectInstance> effects,
     Widget child,
-    Duration local,
-  ) {
+    Duration local, {
+    // APARECER E SUMIR precisa saber quanto a camada dura: a conta e do
+    // tempo dela, e nao de um numero que a pessoa tenha de repetir.
+    Duration? duracaoDaCamada,
+  }) {
     var out = child;
     for (final effect in effects) {
       if (!effect.enabled) continue;
@@ -3328,6 +3379,9 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
         case EffectType.lumaKey:
         case EffectType.colorKey:
         case EffectType.findEdges:
+        // Dissolver e Pena tambem: os dois so existem no shader.
+        case EffectType.dissolver:
+        case EffectType.pena:
         // Cor seletiva depende da faixa de CADA pixel (qual canal manda,
         // quanto e branco, neutro ou preto): nao ha matriz honesta.
         case EffectType.selectiveColor:
@@ -4248,7 +4302,8 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
             colorFilter: ColorFilter.matrix(
               photoFilterMatrix(
                 temperatura: effect.paramAt('mode', local) >= .5,
-                densidade: effect.paramAt('density', local) *
+                densidade:
+                    effect.paramAt('density', local) *
                     (preservaFiltro >= .5 ? .8 : 1),
                 kelvin: effect.paramAt('temperature', local),
                 cor: (r: effect.color.r, g: effect.color.g, b: effect.color.b),
@@ -4332,8 +4387,7 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
                       )
                     : (r: luz.r, g: luz.g, b: luz.b),
                 opacidade:
-                    effect.paramAt('opacity', local) *
-                    (modoMapa == 0 ? 1 : .5),
+                    effect.paramAt('opacity', local) * (modoMapa == 0 ? 1 : .5),
               ),
             ),
             child: out,
@@ -4423,7 +4477,8 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
                     r: effect.color.r,
                     g: effect.color.g,
                     b: effect.color.b,
-                    stops: effect.paramAt('stops', local).clamp(0.0, 6.0) *
+                    stops:
+                        effect.paramAt('stops', local).clamp(0.0, 6.0) *
                         envelope,
                   ),
                 ),
@@ -4447,10 +4502,10 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
               1.0,
             );
             final forca = 1 - original;
-            final operacao = effect.paramAt('operation', local).round().clamp(
-              0,
-              4,
-            );
+            final operacao = effect
+                .paramAt('operation', local)
+                .round()
+                .clamp(0, 4);
             final stopsStrobe = effect.paramAt('stops', local).clamp(0.0, 6.0);
             if (operacao == 0) {
               out = Opacity(opacity: original, child: out);
@@ -4488,13 +4543,19 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
           );
           if (quadrosPunch != null) {
             final picoPunch = effect.paramAt('peak', local);
-            final ataquePunch = effect.paramAt('attack', local).round().clamp(0, 8);
+            final ataquePunch = effect
+                .paramAt('attack', local)
+                .round()
+                .clamp(0, 8);
             final holdPunch = effect.paramAt('hold', local).round().clamp(0, 8);
-            final solturaPunch = effect.paramAt('release', local).round().clamp(
-              0,
-              30,
-            );
-            final curvaPunch = effect.paramAt('curve', local).round().clamp(0, 2);
+            final solturaPunch = effect
+                .paramAt('release', local)
+                .round()
+                .clamp(0, 30);
+            final curvaPunch = effect
+                .paramAt('curve', local)
+                .round()
+                .clamp(0, 2);
             double escalaEm(int tau) => escalaDoSoco(
               tau,
               pico: picoPunch,
@@ -4517,7 +4578,8 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
                 // a de agora. Opacidade 1/(k+1) em ordem da a MEDIA exata
                 // das copias sobre fundo opaco.
                 const copias = 5;
-                final inicio = escalaAgora + (escalaAntes - escalaAgora) * rastro;
+                final inicio =
+                    escalaAgora + (escalaAntes - escalaAgora) * rastro;
                 out = Stack(
                   clipBehavior: Clip.none,
                   children: [
@@ -4525,7 +4587,9 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
                       Opacity(
                         opacity: 1 / (k + 1),
                         child: Transform.scale(
-                          scale: inicio + (escalaAgora - inicio) * k / (copias - 1),
+                          scale:
+                              inicio +
+                              (escalaAgora - inicio) * k / (copias - 1),
                           alignment: ancora,
                           child: out,
                         ),
@@ -4551,19 +4615,19 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
           if (quantidadeTwitch > .001) {
             final tTwitch = local.inMicroseconds / 1e6;
             final velocidadeTwitch = effect.paramAt('speed', local);
-            final quietudeTwitch = effect.paramAt('stillness', local).clamp(
-              0.0,
-              1.0,
-            );
+            final quietudeTwitch = effect
+                .paramAt('stillness', local)
+                .clamp(0.0, 1.0);
             final minimoTwitch = (effect.paramAt('randomize_min', local) / 100)
                 .clamp(0.0, 1.0);
             final duracaoTwitch =
                 effect.paramAt('duration', local).clamp(1.0, 12.0) / fxFps;
-            final subidaTwitch = effect.paramAt('ease_in', local).clamp(0.0, 1.0);
-            final descidaTwitch = effect.paramAt('ease_out', local).clamp(
-              0.0,
-              1.0,
-            );
+            final subidaTwitch = effect
+                .paramAt('ease_in', local)
+                .clamp(0.0, 1.0);
+            final descidaTwitch = effect
+                .paramAt('ease_out', local)
+                .clamp(0.0, 1.0);
             final sementeTwitch = effect.paramAt('seed', local).round();
             PulsoTwitch pulso(int operador) => pulsoTwitch(
               semente: sementeTwitch,
@@ -4577,10 +4641,10 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
               easeOut: descidaTwitch,
               fps: fxFps,
             );
-            final bordasTwitch = effect.paramAt('edges', local).round().clamp(
-              0,
-              2,
-            );
+            final bordasTwitch = effect
+                .paramAt('edges', local)
+                .round()
+                .clamp(0, 2);
 
             if (effect.paramAt('enable_slide', local) >= .5) {
               final p = pulso(2);
@@ -4601,13 +4665,19 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
                     : -1.0;
                 final angulo =
                     (effect.paramAt('slide_direction', local) +
-                        effect.paramAt('slide_spread', local).clamp(0.0, 180.0) *
+                        effect
+                                .paramAt('slide_spread', local)
+                                .clamp(0.0, 180.0) *
                             p.sorteio4) *
                     math.pi /
                     180;
                 final d =
-                    Offset(math.cos(angulo), math.sin(angulo)) * distancia * lado;
-                final k = effect.paramAt('slide_rgb_split', local).clamp(0.0, 1.0);
+                    Offset(math.cos(angulo), math.sin(angulo)) *
+                    distancia *
+                    lado;
+                final k = effect
+                    .paramAt('slide_rgb_split', local)
+                    .clamp(0.0, 1.0);
                 if (k > .01) {
                   final alcance = distancia * (1 + k) + 4;
                   out = Stack(
@@ -4648,7 +4718,11 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
                 out = Transform.scale(
                   scale:
                       1 +
-                      v * effect.paramAt('scale_amount', local).clamp(0.0, 100.0) / 100,
+                      v *
+                          effect
+                              .paramAt('scale_amount', local)
+                              .clamp(0.0, 100.0) /
+                          100,
                   child: out,
                 );
               }
@@ -4662,7 +4736,9 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
                 fxHeight,
               );
               if (raio > .3) {
-                final aspecto = effect.paramAt('blur_aspect', local).clamp(-1.0, 1.0);
+                final aspecto = effect
+                    .paramAt('blur_aspect', local)
+                    .clamp(-1.0, 1.0);
                 final sx = raio * (1 - math.max(0.0, aspecto));
                 final sy = raio * (1 - math.max(0.0, -aspecto));
                 out = ImageFiltered(
@@ -4691,7 +4767,9 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
                     .pow(
                       2,
                       v *
-                          effect.paramAt('light_amount', local).clamp(0.0, 4.0) *
+                          effect
+                              .paramAt('light_amount', local)
+                              .clamp(0.0, 4.0) *
                           sentido,
                     )
                     .toDouble();
@@ -4712,15 +4790,18 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
               final v = p.v * quantidadeTwitch;
               if (v > .001) {
                 final sorteada = corDoMatiz(p.sorteio7);
-                final mistura = effect.paramAt('color_randomize', local).clamp(
-                  0.0,
-                  1.0,
-                );
+                final mistura = effect
+                    .paramAt('color_randomize', local)
+                    .clamp(0.0, 1.0);
                 final c = effect.color;
                 out = ColorFiltered(
                   colorFilter: ColorFilter.matrix(
                     matrizDeColorir(
-                      v * effect.paramAt('color_amount', local).clamp(0.0, 100.0) / 100,
+                      v *
+                          effect
+                              .paramAt('color_amount', local)
+                              .clamp(0.0, 100.0) /
+                          100,
                       r: c.r + (sorteada.r - c.r) * mistura,
                       g: c.g + (sorteada.g - c.g) * mistura,
                       b: c.b + (sorteada.b - c.b) * mistura,
@@ -4741,6 +4822,27 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
         case EffectType.invert:
         case EffectType.waveWarp:
           out = EssentialWarpPass(effect: effect, time: local, child: out);
+
+        // REPETICAO: a camada aparece varias vezes num passe so.
+        case EffectType.repetirEmLinha:
+        case EffectType.repetirEmGrade:
+        case EffectType.repetirEmCirculo:
+        case EffectType.espalharCopias:
+          out = RepeticaoPass(
+            key: ValueKey('repeticao-${effect.id}'),
+            effect: effect,
+            time: local,
+            child: out,
+          );
+
+        // APARECER E SUMIR: a opacidade sai do tempo da camada.
+        case EffectType.aparecerSumir:
+          if (duracaoDaCamada != null) {
+            out = Opacity(
+              opacity: opacidadeDoAparecerSumir(effect, local, duracaoDaCamada),
+              child: out,
+            );
+          }
 
         case EffectType.oscillate:
           out = Transform.translate(
@@ -4774,10 +4876,10 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
           // ENVELOPE DE EDIT: continuo (como sempre foi), impacto no inicio
           // da camada, ou impacto a cada N quadros. O soco de zoom anda
           // junto com o mesmo relogio de quadros.
-          final envelopeShake = effect.paramAt('envelope', local).round().clamp(
-            0,
-            2,
-          );
+          final envelopeShake = effect
+              .paramAt('envelope', local)
+              .round()
+              .clamp(0, 2);
           final quadroShake = quadroLocal(local, fxFps);
           final tauShake = envelopeShake == 2
               ? quadroShake %
@@ -5986,7 +6088,9 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
                       time: local,
                       seed: seed,
                       hairs: effect.paramAt('fios', local).clamp(0.0, 10.0),
-                      vignette: effect.paramAt('vinheta', local).clamp(0.0, 1.0),
+                      vignette: effect
+                          .paramAt('vinheta', local)
+                          .clamp(0.0, 1.0),
                       dustSize: effect
                           .paramAt('tamanho_poeira', local)
                           .clamp(0.5, 3.0),
@@ -6032,8 +6136,9 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
           if (inten > 0.02) {
             final posicao = effect.paramAt('posicao', local);
             final anguloVar = effect.paramAt('angulo', local) * math.pi / 180;
-            final larguraFaixa =
-                effect.paramAt('largura', local).clamp(0.02, 0.6);
+            final larguraFaixa = effect
+                .paramAt('largura', local)
+                .clamp(0.02, 0.6);
             final alfaFaixa = (0.55 * inten).clamp(0.0, 1.0);
             // A SILHUETA BRANCA da camada: a luz so existe onde a camada
             // existe — e o que faz parecer varredura NELA, e nao um
@@ -6074,18 +6179,15 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
               clipBehavior: Clip.none,
               children: [
                 out,
-                BlendMask(
-                  blendMode: BlendMode.plus,
-                  margem: 4,
-                  child: faixa,
-                ),
+                BlendMask(blendMode: BlendMode.plus, margem: 4, child: faixa),
               ],
             );
           }
 
         case EffectType.saber:
-          final intenSabre =
-              effect.paramAt('intensidade', local).clamp(0.0, 4.0);
+          final intenSabre = effect
+              .paramAt('intensidade', local)
+              .clamp(0.0, 4.0);
           if (intenSabre > 0.02) {
             final matiz = effect.paramAt('matiz', local).clamp(0.0, 360.0);
             final raioSabre = pxAt1080(
@@ -6172,8 +6274,8 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
               // O ESTOURO DOS CLAROS: passa-altas de cor (o que passa do
               // limiar sobra; o resto zera) borrado e SOMADO por cima.
               // E o estouro que separa "lente" de "borrao".
-              final ganho = (1 / math.max(0.05, 1 - limiar)) *
-                  brilho.clamp(0.0, 3.0);
+              final ganho =
+                  (1 / math.max(0.05, 1 - limiar)) * brilho.clamp(0.0, 3.0);
               final realces = ImageFiltered(
                 imageFilter: ui.ImageFilter.blur(
                   sigmaX: raioLente * 1.4,
@@ -6514,11 +6616,7 @@ RenderCamera? cameraDaCena(
   return l.cameraAt(
     local,
     external: NodeTransform(
-      position: Vec3(
-        eff.pos.dx - centro.dx,
-        centro.dy - eff.pos.dy,
-        -eff.z,
-      ),
+      position: Vec3(eff.pos.dx - centro.dx, centro.dy - eff.pos.dy, -eff.z),
       rotX: eff.rotX,
       rotY: -eff.rotY,
       rotZ: -eff.rot,
@@ -6552,11 +6650,7 @@ Scene3D cenaComNulosDaComposicao(
     final eff = effectiveTransform(project, pai, global);
     final r = composeTransforms(
       NodeTransform(
-        position: Vec3(
-          eff.pos.dx - centro.dx,
-          centro.dy - eff.pos.dy,
-          -eff.z,
-        ),
+        position: Vec3(eff.pos.dx - centro.dx, centro.dy - eff.pos.dy, -eff.z),
         rotX: eff.rotX,
         rotY: -eff.rotY,
         rotZ: -eff.rot,
@@ -6663,8 +6757,7 @@ class _LayerContent extends StatelessWidget {
   /// contida, a caixa sai da proporcao guardada na importacao — e, sem
   /// ela, da propria composicao, com o encaixe feito pelo Image.
   Widget _imagem(ImageLayer l) {
-    Widget quebrada(BuildContext _, Object _, StackTrace? _) =>
-        _brokenMedia();
+    Widget quebrada(BuildContext _, Object _, StackTrace? _) => _brokenMedia();
     if (l.ajuste == AjusteDaMidia.largura) {
       return Image.file(
         File(l.sourcePath),
@@ -6879,7 +6972,8 @@ class _LayerContent extends StatelessWidget {
           // GRUPO DE MASCARA / EXCLUSAO: um filho em dstIn/dstOut recorta
           // SO os irmaos. Sem o grupo isolado, recortava tambem o que ja
           // estava pintado por baixo do grupo.
-          child: l.children.any(
+          child:
+              l.children.any(
                 (c) =>
                     c.blendMode == BlendMode.dstIn ||
                     c.blendMode == BlendMode.dstOut,
@@ -6914,8 +7008,10 @@ class _LayerContent extends StatelessWidget {
               quadroEm?.call(l, tempoAlheio!) != null =>
         _quadroFixo(l, quadroEm!(l, tempoAlheio!)!),
       // OUTRO INSTANTE, NA PREVIA: o quadro extraido (ou o ao vivo).
-      VideoLayer l when !exporting && tempoAlheio != null =>
-        _videoDeOutroTempo(l, tempoAlheio!),
+      VideoLayer l when !exporting && tempoAlheio != null => _videoDeOutroTempo(
+        l,
+        tempoAlheio!,
+      ),
       VideoLayer l when exportFrames != null && exportFrames![l.id] != null =>
         _quadroFixo(l, exportFrames![l.id]!),
       VideoLayer l => _videoAoVivo(l),
@@ -7079,10 +7175,7 @@ class _ShapePainter extends CustomPainter {
         );
         continue;
       }
-      final tamanho = Size(
-        imagem.width.toDouble(),
-        imagem.height.toDouble(),
-      );
+      final tamanho = Size(imagem.width.toDouble(), imagem.height.toDouble());
       final destino = destinoDaMidiaNaForma(
         d.path.getBounds(),
         tamanho,

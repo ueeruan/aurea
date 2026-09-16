@@ -99,6 +99,15 @@ enum EffectType {
   bit8,
   smear,
   bubbleBlur,
+  // --- v1.1.1: o que faltava em opacidade e visibilidade ---
+  dissolver,
+  pena,
+  aparecerSumir,
+  // --- v1.1.1: repetir a camada sem duplicar camada ---
+  repetirEmLinha,
+  repetirEmGrade,
+  repetirEmCirculo,
+  espalharCopias,
 }
 
 /// O tipo a partir do IDENTIFICADOR estavel.
@@ -2612,13 +2621,7 @@ const effectSpecs = <EffectType, EffectSpec>{
       'blue_green': EffectParam('Blue-Green', 0, -200, 200),
       'blue_blue': EffectParam('Blue-Blue', 100, -200, 200),
       'blue_const': EffectParam('Blue-Const', 0, -200, 200),
-      'monochrome': EffectParam(
-        'Monochrome',
-        0,
-        0,
-        1,
-        kind: ParamKind.toggle,
-      ),
+      'monochrome': EffectParam('Monochrome', 0, 0, 1, kind: ParamKind.toggle),
     },
     montar: ['red_red', 'green_green', 'blue_blue'],
     presets: [
@@ -2690,11 +2693,10 @@ const effectSpecs = <EffectType, EffectSpec>{
         'density': 60,
       }),
       EffectPronto('Cool', {'mode': 1, 'temperature': 9000, 'density': 50}),
-      EffectPronto(
-        'Warming Filter',
-        {'mode': 0, 'density': 25},
-        cor: Color(0xFFEC8A00),
-      ),
+      EffectPronto('Warming Filter', {
+        'mode': 0,
+        'density': 25,
+      }, cor: Color(0xFFEC8A00)),
     ],
   ),
 
@@ -2738,23 +2740,13 @@ const effectSpecs = <EffectType, EffectSpec>{
         ],
       ),
       'opacity': EffectParam('Opacity', 35, 0, 100),
-      'midtones': EffectParam(
-        'Use Midtones',
-        1,
-        0,
-        1,
-        kind: ParamKind.toggle,
-      ),
+      'midtones': EffectParam('Use Midtones', 1, 0, 1, kind: ParamKind.toggle),
       'balance': EffectParam('Midpoint', 50, 5, 95),
     },
     montar: ['opacity', 'balance'],
     presets: [
       EffectPronto('Soft Light', {'blend_mode': 1, 'opacity': 30}),
-      EffectPronto('Duotone', {
-        'blend_mode': 0,
-        'opacity': 100,
-        'midtones': 0,
-      }),
+      EffectPronto('Duotone', {'blend_mode': 0, 'opacity': 100, 'midtones': 0}),
       EffectPronto('Tritone', {'blend_mode': 0, 'opacity': 88}),
     ],
   ),
@@ -2886,13 +2878,7 @@ const effectSpecs = <EffectType, EffectSpec>{
       'decay': EffectParam('Decay Frames', 2, 0, 24),
       'curve': EffectParam('Decay Curve', 1.5, 1, 3),
       'blur': EffectParam('Blur', 0, 0, 60, relative: true),
-      'dark_first': EffectParam(
-        'Dark First',
-        0,
-        0,
-        1,
-        kind: ParamKind.toggle,
-      ),
+      'dark_first': EffectParam('Dark First', 0, 0, 1, kind: ParamKind.toggle),
       'trigger': EffectParam(
         'Trigger',
         0,
@@ -3049,11 +3035,7 @@ const effectSpecs = <EffectType, EffectSpec>{
         'release': 0,
         'zoom_blur': 0,
       }),
-      EffectPronto('Soft Punch', {
-        'peak': 112,
-        'release': 8,
-        'zoom_blur': .6,
-      }),
+      EffectPronto('Soft Punch', {'peak': 112, 'release': 8, 'zoom_blur': .6}),
       EffectPronto('Hard Beat', {
         'peak': 140,
         'attack': 1,
@@ -3390,13 +3372,7 @@ const effectSpecs = <EffectType, EffectSpec>{
       'master_hue': EffectParam('Matiz', 0, -180, 180),
       'master_saturation': EffectParam('Saturação', 0, -100, 100),
       'master_lightness': EffectParam('Luminosidade', 0, -100, 100),
-      'colorize': EffectParam(
-        'Colorir',
-        0,
-        0,
-        1,
-        kind: ParamKind.toggle,
-      ),
+      'colorize': EffectParam('Colorir', 0, 0, 1, kind: ParamKind.toggle),
       'colorize_hue': EffectParam('Matiz ao colorir', 0, 0, 360),
       'colorize_saturation': EffectParam('Saturação ao colorir', 25, 0, 100),
     },
@@ -3713,8 +3689,12 @@ const effectSpecs = <EffectType, EffectSpec>{
     presets: [
       EffectPronto('Jedi', {'matiz': 200, 'raio': 16, 'intensidade': 1.4}),
       EffectPronto('Sith', {'matiz': 0, 'raio': 22, 'intensidade': 1.8}),
-      EffectPronto('Neon', {'matiz': 300, 'raio': 30, 'intensidade': 2.2,
-        'nucleo': 0.6}),
+      EffectPronto('Neon', {
+        'matiz': 300,
+        'raio': 30,
+        'intensidade': 2.2,
+        'nucleo': 0.6,
+      }),
     ],
   ),
   // LENS BLUR aproximado: desfoque grande com os REALCES estourando —
@@ -3810,11 +3790,213 @@ const effectSpecs = <EffectType, EffectSpec>{
     presets: [
       EffectPronto('Vidro', {'quantidade': 4, 'desfoque': 16}),
       EffectPronto('Lupa', {'quantidade': 3, 'aumento': 1.45, 'desfoque': 4}),
-      EffectPronto('Espuma', {
-        'quantidade': 10,
-        'tamanho': 70,
-        'desfoque': 20,
-      }),
+      EffectPronto('Espuma', {'quantidade': 10, 'tamanho': 70, 'desfoque': 20}),
+    ],
+  ),
+
+  // ---------------------------------------------------------------
+  // OPACIDADE E VISIBILIDADE (v1.1.1). Tres coisas que o editor pedia
+  // e nao tinha: sumir em chuvisco, borda que nao termina em faca, e
+  // entrar e sair sem precisar de keyframe nenhum.
+  // ---------------------------------------------------------------
+  EffectType.dissolver: EffectSpec(
+    id: 'dissolve',
+    name: 'Dissolve',
+    category: 'Keying',
+    synonyms: [
+      'dissolver',
+      'chuvisco',
+      'granulado',
+      'sumir',
+      'desaparecer',
+      'ruido',
+      'dissolve',
+    ],
+    params: {
+      'quantidade': EffectParam('Quantidade', .5, 0, 1),
+      'grao': EffectParam('Grão', 2.0, 1.0, 64.0, relative: true),
+      'suavidade': EffectParam('Suavidade', .1, 0, 1),
+      'semente': EffectParam('Semente', 1.0, 1.0, 99.0),
+    },
+    montar: ['quantidade'],
+    presets: [
+      EffectPronto('Chuvisco fino', {'grao': 1.5, 'quantidade': .6}),
+      EffectPronto('Areia', {'grao': 12, 'suavidade': .35}),
+      EffectPronto('Sumindo', {'quantidade': .85, 'suavidade': .6}),
+    ],
+  ),
+  EffectType.pena: EffectSpec(
+    id: 'feather',
+    name: 'Feather',
+    category: 'Stylize',
+    synonyms: [
+      'pena',
+      'borda macia',
+      'suavizar borda',
+      'esfumar',
+      'feather',
+      'desvanecer',
+    ],
+    cost: 2,
+    params: {
+      'tamanho': EffectParam('Tamanho', 40.0, 0.0, 300.0, relative: true),
+      'suavidade': EffectParam('Suavidade', .6, 0, 1),
+    },
+    montar: ['tamanho'],
+    presets: [
+      EffectPronto('Beirada leve', {'tamanho': 18}),
+      EffectPronto('Nuvem', {'tamanho': 140, 'suavidade': 1}),
+      EffectPronto('Encaixe', {'tamanho': 70, 'suavidade': .3}),
+    ],
+  ),
+  EffectType.aparecerSumir: EffectSpec(
+    id: 'fade_in_out',
+    name: 'Fade In/Out',
+    category: 'Time',
+    synonyms: [
+      'aparecer',
+      'sumir',
+      'fade',
+      'entrada',
+      'saida',
+      'fade in',
+      'fade out',
+      'surgir',
+    ],
+    params: {
+      'entrada': EffectParam('Entrada', .5, 0, 10),
+      'saida': EffectParam('Saída', .5, 0, 10),
+      'curva': EffectParam(
+        'Curva',
+        1,
+        0,
+        1,
+        kind: ParamKind.choice,
+        options: ['Reta', 'Suave'],
+      ),
+    },
+    montar: ['entrada', 'saida'],
+    presets: [
+      EffectPronto('Rápido', {'entrada': .2, 'saida': .2}),
+      EffectPronto('Só no fim', {'entrada': 0, 'saida': 1}),
+      EffectPronto('Demorado', {'entrada': 1.5, 'saida': 1.5, 'curva': 1}),
+    ],
+  ),
+
+  // ---------------------------------------------------------------
+  // REPETICAO (v1.1.1). A camada aparece varias vezes sem virar varias
+  // camadas: o passe amplia o alvo e cada pixel procura de qual copia
+  // veio. Tudo em % DO TAMANHO DA CAMADA, para o mesmo numero valer em
+  // qualquer resolucao.
+  // ---------------------------------------------------------------
+  EffectType.repetirEmLinha: EffectSpec(
+    id: 'repeat_line',
+    name: 'Linear Repeat',
+    category: 'Stylize',
+    synonyms: [
+      'repetir',
+      'linha',
+      'fileira',
+      'copias',
+      'duplicar',
+      'rastro',
+      'repeat',
+    ],
+    cost: 2,
+    params: {
+      'copias': EffectParam('Cópias', 5, 1, 64),
+      'passo_x': EffectParam('Passo X', 60, -300, 300),
+      'passo_y': EffectParam('Passo Y', 0, -300, 300),
+      'giro': EffectParam('Giro por cópia', 0, -180, 180),
+      'escala': EffectParam('Escala por cópia', 100, 10, 200),
+      'opacidade': EffectParam('Opacidade por cópia', 100, 0, 100),
+    },
+    montar: ['copias', 'passo_x'],
+    presets: [
+      EffectPronto('Rastro', {'copias': 8, 'passo_x': 18, 'opacidade': 72}),
+      EffectPronto('Escada', {'passo_x': 40, 'passo_y': 40, 'giro': 6}),
+      EffectPronto('Fuga', {'copias': 10, 'passo_x': 25, 'escala': 88}),
+    ],
+  ),
+  EffectType.repetirEmGrade: EffectSpec(
+    id: 'repeat_grid',
+    name: 'Grid Repeat',
+    category: 'Stylize',
+    synonyms: ['grade', 'repetir', 'mosaico', 'quadros', 'copias', 'grid'],
+    cost: 3,
+    params: {
+      'colunas': EffectParam('Colunas', 3, 1, 8),
+      'linhas': EffectParam('Linhas', 3, 1, 8),
+      'passo_x': EffectParam('Passo X', 100, 10, 300),
+      'passo_y': EffectParam('Passo Y', 100, 10, 300),
+      'giro': EffectParam('Giro por cópia', 0, -180, 180),
+      'escala': EffectParam('Escala por cópia', 100, 10, 200),
+      'opacidade': EffectParam('Opacidade por cópia', 100, 0, 100),
+    },
+    montar: ['colunas', 'linhas'],
+    presets: [
+      EffectPronto('Contato', {'colunas': 4, 'linhas': 4, 'passo_x': 102}),
+      EffectPronto('Par', {'colunas': 2, 'linhas': 1, 'passo_x': 110}),
+      EffectPronto('Parede', {'colunas': 6, 'linhas': 6, 'passo_x': 100}),
+    ],
+  ),
+  EffectType.repetirEmCirculo: EffectSpec(
+    id: 'repeat_radial',
+    name: 'Radial Repeat',
+    category: 'Stylize',
+    synonyms: [
+      'circulo',
+      'radial',
+      'roda',
+      'volta',
+      'repetir',
+      'mandala',
+      'leque',
+    ],
+    cost: 3,
+    params: {
+      'copias': EffectParam('Cópias', 8, 1, 64),
+      'raio': EffectParam('Raio', 40, 0, 300),
+      'abertura': EffectParam('Abertura', 360, 10, 360),
+      'orientacao': EffectParam('Começo', -90, -180, 180),
+      'giro': EffectParam('Giro por cópia', 0, -180, 180),
+      'escala': EffectParam('Escala por cópia', 100, 10, 200),
+      'opacidade': EffectParam('Opacidade por cópia', 100, 0, 100),
+    },
+    montar: ['copias', 'raio'],
+    presets: [
+      EffectPronto('Mandala', {'copias': 12, 'raio': 60}),
+      EffectPronto('Leque', {'copias': 6, 'abertura': 120, 'raio': 90}),
+      EffectPronto('Relógio', {'copias': 12, 'raio': 110, 'escala': 92}),
+    ],
+  ),
+  EffectType.espalharCopias: EffectSpec(
+    id: 'repeat_scatter',
+    name: 'Scatter Repeat',
+    category: 'Stylize',
+    synonyms: [
+      'espalhar',
+      'sortear',
+      'confete',
+      'copias',
+      'aleatorio',
+      'scatter',
+      'campo',
+    ],
+    cost: 3,
+    params: {
+      'copias': EffectParam('Cópias', 12, 1, 64),
+      'raio': EffectParam('Espalhamento', 90, 0, 300),
+      'giro': EffectParam('Giro por cópia', 0, -180, 180),
+      'escala': EffectParam('Escala por cópia', 100, 10, 200),
+      'opacidade': EffectParam('Opacidade por cópia', 100, 0, 100),
+      'semente': EffectParam('Semente', 1, 1, 99),
+    },
+    montar: ['copias', 'raio'],
+    presets: [
+      EffectPronto('Confete', {'copias': 24, 'escala': 45, 'giro': 180}),
+      EffectPronto('Solto', {'copias': 6, 'raio': 140, 'escala': 80}),
+      EffectPronto('Enxame', {'copias': 40, 'raio': 60, 'escala': 35}),
     ],
   ),
 };
@@ -3913,10 +4095,10 @@ List<EffectType> searchEffects(String query) {
     for (final e in effectSpecs.entries)
       if (!efeitosInternos.contains(e.key) &&
           (contem(e.value.name) ||
-          contem(e.value.id) ||
-          contem(e.value.category) ||
-          contem(_categoriaEmPortugues[e.value.category] ?? '') ||
-          e.value.synonyms.any(contem)))
+              contem(e.value.id) ||
+              contem(e.value.category) ||
+              contem(_categoriaEmPortugues[e.value.category] ?? '') ||
+              e.value.synonyms.any(contem)))
         e.key,
   ];
 }
@@ -3967,8 +4149,7 @@ const _semAcento = <String, String>{
 
 List<EffectType> effectsInCategory(String category) => [
   for (final e in effectSpecs.entries)
-    if (e.value.category == category && !efeitosInternos.contains(e.key))
-      e.key,
+    if (e.value.category == category && !efeitosInternos.contains(e.key)) e.key,
 ];
 
 /// TIME REMAP SAIU DO APP (14/09, pedido do dono). A trilha continua sendo

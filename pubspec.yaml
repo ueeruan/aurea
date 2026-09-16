@@ -105,6 +105,7 @@ flutter:
     - shaders/blend.frag
     - shaders/gamma.frag
     - shaders/effects_v2.frag
+    - shaders/repeticao.frag
 
   assets:
     - assets/ai/

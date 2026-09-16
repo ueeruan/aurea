@@ -265,6 +265,7 @@ class EnhancementJob {
           height: outH,
           fps: fps,
           bitrate: (outW * outH * fps * .2).round().clamp(4000000, 80000000),
+          pelaMemoria: true,
         );
         _encoding = true;
       }

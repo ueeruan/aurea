@@ -302,6 +302,7 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
           fps: engine.fps,
           bitrate: engine.taxaDeBits(),
           hevc: _ajustes.codec == ExportCodec.hevc,
+          pelaMemoria: true,
         );
       }
 

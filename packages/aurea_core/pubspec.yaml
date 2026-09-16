@@ -1,0 +1,11 @@
+name: aurea_core
+description: Nucleo nativo C++ do Aurea (trabalho pesado atras da UI Flutter). Primeira fatia, o codificador de video do Android.
+version: 0.1.0
+publish_to: none
+environment:
+  sdk: ^3.13.2
+dependencies:
+  ffi: ^2.1.3
+  hooks: ^2.0.2
+  code_assets: ^1.2.1
+  native_toolchain_c: 0.19.3

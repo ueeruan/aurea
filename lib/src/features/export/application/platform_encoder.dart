@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:aurea_core/aurea_core.dart';
 import 'package:flutter/services.dart';
 
 /// CODIFICADOR DA PLATAFORMA — a ponte para o MediaCodec (Android) e o
@@ -20,6 +23,22 @@ class PlatformEncoder {
 
   static bool? _available;
 
+  /// O fluxo aberto esta no NUCLEO C++ (Android): quadros por FFI, sem
+  /// canal de plataforma, conversao de cor e codificacao numa thread
+  /// nativa enquanto o Dart ja desenha o proximo quadro. Quando o nucleo
+  /// nao abre (codificador recusou a configuracao), o fluxo vai pelo
+  /// caminho antigo, em Kotlin — a exportacao nunca fica sem codificador.
+  static bool _noNucleo = false;
+
+  /// A CHAVE A/B DO NUCLEO. Desligada por padrao: o codificador em C++ so
+  /// entra na exportacao depois de validado em aparelho (no emulador de
+  /// 16/09 o Codec2 de software recusou a configuracao pelo NDK e o fluxo
+  /// voltou ao Kotlin, como deve). A bancada e os testes ligam.
+  static bool nucleoLigado = false;
+
+  /// Se o fluxo aberto agora esta no nucleo C++ (para o teste e o relatorio).
+  static bool get noNucleo => _noNucleo;
+
   /// Se o aparelho tem o codificador. Consultado uma vez.
   static Future<bool> get available async {
     if (_available != null) return _available!;
@@ -41,7 +60,25 @@ class PlatformEncoder {
     required int fps,
     required int bitrate,
     bool hevc = false,
+
+    /// Quem chama vai mandar os quadros por [frameRgba] (e nao por PNG):
+    /// so assim o fluxo pode ir para o nucleo.
+    bool pelaMemoria = false,
   }) async {
+    _noNucleo =
+        nucleoLigado &&
+        pelaMemoria &&
+        Platform.isAndroid &&
+        CodificadorNativo.disponivel &&
+        CodificadorNativo.abrir(
+          caminho: path,
+          largura: width,
+          altura: height,
+          fps: fps,
+          bitrate: bitrate,
+          hevc: hevc,
+        );
+    if (_noNucleo) return;
     await _channel.invokeMethod<bool>('start', {
       'path': path,
       'width': width,
@@ -80,6 +117,15 @@ class PlatformEncoder {
   /// Agora os bytes crus atravessam a ponte uma vez e entram no
   /// codificador. Sem compressao, sem disco, sem segunda passada.
   static Future<void> frameRgba(Uint8List rgba, int width, int height) async {
+    if (_noNucleo) {
+      if (!CodificadorNativo.quadro(rgba, width, height)) {
+        throw PlatformException(
+          code: 'nucleo',
+          message: 'O codificador do nucleo recusou o quadro.',
+        );
+      }
+      return;
+    }
     await _channel.invokeMethod<bool>('frameRgba', {
       'bytes': rgba,
       'width': width,
@@ -106,10 +152,20 @@ class PlatformEncoder {
     }
   }
 
-  static Future<bool> finish() async =>
-      await _channel.invokeMethod<bool>('finish') ?? false;
+  static Future<bool> finish() async {
+    if (_noNucleo) {
+      _noNucleo = false;
+      return CodificadorNativo.terminar();
+    }
+    return await _channel.invokeMethod<bool>('finish') ?? false;
+  }
 
   static Future<void> cancel() async {
+    if (_noNucleo) {
+      _noNucleo = false;
+      CodificadorNativo.cancelar();
+      return;
+    }
     try {
       await _channel.invokeMethod<bool>('cancel');
     } catch (_) {}

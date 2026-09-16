@@ -152,12 +152,17 @@ class _Chip extends StatelessWidget {
           color: escolhida ? AmColors.chip : null,
           borderRadius: BorderRadius.circular(8),
         ),
+        // DUAS LINHAS antes das reticencias: "Entrada branco" e "Saturacao
+        // ao colorir" nao cabem em 94 px, e cortar o nome de um
+        // parametro de cor deixava dois chips iguais na mesma ficha.
         child: AppText(
           rotulo,
-          maxLines: 1,
+          maxLines: 2,
+          textAlign: TextAlign.center,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
             fontSize: 12,
+            height: 1.05,
             fontWeight: FontWeight.w600,
             // ESCOLHIDA FICA VERDE E SUBLINHADA, como na referencia: e o
             // mesmo par de sinais que o campo de valor usa para dizer

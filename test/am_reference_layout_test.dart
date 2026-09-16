@@ -10,6 +10,7 @@ import 'package:aurea/src/features/editor/presentation/am/layer_menu.dart';
 import 'package:aurea/src/features/editor/presentation/am/transform_panel.dart';
 import 'package:aurea/src/features/editor/presentation/widgets/add_layer_sheet.dart';
 import 'package:aurea/src/features/editor/presentation/widgets/preview_stage.dart';
+import 'package:aurea/src/features/editor/presentation/widgets/linha_de_parametro.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -244,48 +245,39 @@ void main() {
       final c = await openEditor(tester);
       final controller = c.read(editorControllerProvider.notifier);
       final id = c.read(editorControllerProvider).layers.first.id;
-      controller.addEffect(id, EffectType.gaussianBlur);
-      controller.addEffect(id, EffectType.lightGlow);
+      controller.addEffect(id, EffectType.brightnessContrast);
+      controller.addEffect(id, EffectType.unsharpMask);
       c.read(selectedLayerProvider.notifier).state = id;
       await tester.pumpAndSettle();
       c.read(editorSessionProvider.notifier).openPanel(EditorPanel.effects);
       await tester.pumpAndSettle();
-      expect(find.text('Resetar'), findsOneWidget);
+      // UM CARTAO ABERTO POR VEZ: cada parametro e uma LinhaDeParametro
+      // (chip, fita, caixa de valor), e so o cartao aberto tem linhas.
+      Finder linhasDe(String effectId) => find.descendant(
+        of: find.byKey(ValueKey(effectId)),
+        matching: find.byType(LinhaDeParametro),
+      );
       var effects = c.read(editorControllerProvider).layerById(id)!.effects;
+      expect(linhasDe(effects.first.id), findsNWidgets(2));
       // Com o palco no tamanho da planta a pilha desceu: traz a ficha
       // para a vista antes de tocar, como o dedo faria.
-      await tester.ensureVisible(find.text(effects.last.spec.name));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text(effects.last.spec.name));
-      await tester.pumpAndSettle();
-      expect(
-        find.descendant(
-          of: find.byKey(ValueKey(effects.first.id)),
-          matching: find.text('Resetar'),
-        ),
-        findsNothing,
+      final cabecalho = find.byKey(
+        ValueKey('efeito-cabecalho-${effects.last.id}'),
       );
-      expect(
-        find.descendant(
-          of: find.byKey(ValueKey(effects.last.id)),
-          matching: find.text('Resetar'),
-        ),
-        findsOneWidget,
-      );
-      controller.addEffect(id, EffectType.vignette);
+      await tester.ensureVisible(cabecalho);
+      await tester.pumpAndSettle();
+      await tester.tap(cabecalho);
+      await tester.pumpAndSettle();
+      expect(linhasDe(effects.first.id), findsNothing);
+      expect(linhasDe(effects.last.id), findsNWidgets(3));
+      controller.addEffect(id, EffectType.exposure);
       await tester.pumpAndSettle();
       effects = c.read(editorControllerProvider).layerById(id)!.effects;
-      expect(
-        find.descendant(
-          of: find.byKey(ValueKey(effects.last.id)),
-          matching: find.text('Resetar'),
-        ),
-        findsOneWidget,
-      );
-      expect(find.text('Resetar'), findsOneWidget);
+      expect(linhasDe(effects.last.id), findsNWidgets(3));
+      expect(find.byType(LinhaDeParametro), findsNWidgets(3));
       controller.removeEffect(id, effects.last.id);
       await tester.pumpAndSettle();
-      expect(find.text('Resetar'), findsNothing);
+      expect(find.byType(LinhaDeParametro), findsNothing);
       expect(tester.takeException(), isNull);
     },
   );

@@ -128,6 +128,12 @@ void main() {
         // aplicar, exportar, renomear, excluir. Nenhuma delas liga modo
         // nenhum, e todas tambem se alcancam pelo toque longo no cartao.
         'presets_screen.dart',
+        // O ••• DE CADA EFEITO (2026-09-16), da planta do AM pedida pelo
+        // dono: "▼ nome ••• lixeira". Guarda ACOES sobre um cartao —
+        // ligar, duplicar, ordem, resetar, presets. O unico estado ali
+        // (efeito desligado) aparece no proprio cartao: nome esmaecido e
+        // olho riscado ao lado.
+        'effects_panel.dart',
       };
       // O ESTUDIO 3D tem o terceiro (a barra "Cena | Camera | menu" da
       // missao de 2026-09-07). Ele nao usa o icone cru: usa o AmMenuIcon,

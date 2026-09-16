@@ -84,9 +84,11 @@ vec3 gradacao(vec3 c, float k) {
     ch += vec3(.012, -.012, .006);
     y = .02 + .98 * y;
   } else if (k < 3.5) { // 03: pele quente, croma sobe com a luz
-    float g = .85 + 1.05 * smoothstep(.25, .75, y) - .35 * smoothstep(.8, 1.0, y);
+    // Ganho e desvio ajustados contra o quadro padrao do AE: as medias de
+    // R, G e B batem (87,1 69,4 67,3 contra 86,7 69,1 67,4).
+    float g = .85 + .35 * smoothstep(.25, .75, y) - .1 * smoothstep(.8, 1.0, y);
     ch *= g;
-    ch += vec3(.035, -.012, -.03) * y * y;
+    ch += vec3(0.0, -.012, -.03) * y * y;
   } else { // 04: desbotado esverdeado
     ch *= .8;
     ch += vec3(-.01, .015, -.01);

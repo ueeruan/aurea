@@ -1,4 +1,5 @@
 import 'package:aurea/src/core/l10n/app_language.dart';
+
 import '../../../domain/layer.dart';
 
 import 'package:flutter/cupertino.dart';
@@ -11,10 +12,12 @@ import '../../../application/playback_controller.dart';
 import '../../../../../core/ui/snack.dart';
 import '../../../../../core/ui/tocavel.dart';
 import '../../../application/ui/effect_favorites.dart';
+import '../../../application/ui/effect_recents.dart';
 import '../../../application/ui/pro_mode.dart';
 import '../../../domain/effect.dart';
 import '../../../domain/presets_de_edicao.dart';
 import '../../am/am_colors.dart';
+import 'effect_detail_sheet.dart';
 import 'previa_do_efeito.dart';
 
 /// A GALERIA DE EFEITOS (Fase 4): previa animada de verdade por efeito,
@@ -40,6 +43,8 @@ Future<void> showEffectGallery(
   var favoritos = false;
   var edits = false;
   var presets = false;
+  var sugeridos = false;
+  var recentes = false;
   await PreviasDosEfeitos.instance.manifesto();
   if (!context.mounted) return;
 
@@ -57,6 +62,18 @@ Future<void> showEffectGallery(
       builder: (sheetContext, ref, _) {
         final pro = ref.watch(proModeProvider);
         final favs = ref.watch(effectFavoritesProvider);
+        ref.watch(effectRecentsProvider);
+        final recentesDoAparelho = ref
+            .read(effectRecentsProvider.notifier)
+            .tipos;
+        final camadaDaGaleria = ref
+            .read(editorControllerProvider)
+            .layerById(layerId);
+        final recomendados = efeitosRecomendados(
+          ehMidia:
+              camadaDaGaleria is VideoLayer || camadaDaGaleria is ImageLayer,
+          recentes: recentesDoAparelho,
+        );
         return StatefulBuilder(
           builder: (sheetContext, setSheetState) {
             var results = query.isNotEmpty
@@ -73,6 +90,18 @@ Future<void> showEffectGallery(
             if (edits && query.isEmpty && !favoritos) {
               results = [
                 for (final t in efeitosDeEdit)
+                  if (results.contains(t)) t,
+              ];
+            }
+            if (sugeridos && query.isEmpty) {
+              results = [
+                for (final t in recomendados)
+                  if (results.contains(t)) t,
+              ];
+            }
+            if (recentes && query.isEmpty) {
+              results = [
+                for (final t in recentesDoAparelho)
                   if (results.contains(t)) t,
               ];
             }
@@ -104,7 +133,8 @@ Future<void> showEffectGallery(
                     borderRadius: BorderRadius.circular(9),
                     border: aceso ? Border.all(color: AmColors.action) : null,
                   ),
-                  child: AppText(texto,
+                  child: AppText(
+                    texto,
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
@@ -144,7 +174,10 @@ Future<void> showEffectGallery(
                     CupertinoSearchTextField(
                       key: const ValueKey('galeria-busca'),
                       controller: search,
-                      placeholder: translate(context, 'glow, rgb split, pixelate...'),
+                      placeholder: translate(
+                        context,
+                        'glow, rgb split, pixelate...',
+                      ),
                       style: const TextStyle(
                         fontSize: 14,
                         color: AmColors.text,
@@ -170,6 +203,8 @@ Future<void> showEffectGallery(
                                   favoritos = false;
                                   edits = false;
                                   presets = false;
+                                  sugeridos = false;
+                                  recentes = false;
                                 }),
                                 key: const ValueKey('galeria-todos'),
                               ),
@@ -183,6 +218,8 @@ Future<void> showEffectGallery(
                                   category = null;
                                   favoritos = false;
                                   edits = false;
+                                  sugeridos = false;
+                                  recentes = false;
                                 }),
                                 key: const ValueKey('galeria-presets'),
                               ),
@@ -196,9 +233,41 @@ Future<void> showEffectGallery(
                                   category = null;
                                   favoritos = false;
                                   presets = false;
+                                  sugeridos = false;
+                                  recentes = false;
                                 }),
                                 key: const ValueKey('galeria-edits'),
                               ),
+                              // SUGERIDOS e RECENTES: o que resolve
+                              // antes de procurar. Sem eles, quem acabou
+                              // de usar um efeito procurava tudo de novo.
+                              chip(
+                                '${translate(sheetContext, 'Sugeridos')} ${recomendados.length}',
+                                sugeridos,
+                                () => setSheetState(() {
+                                  sugeridos = !sugeridos;
+                                  category = null;
+                                  favoritos = false;
+                                  edits = false;
+                                  presets = false;
+                                  recentes = false;
+                                }),
+                                key: const ValueKey('galeria-sugeridos'),
+                              ),
+                              if (recentesDoAparelho.isNotEmpty)
+                                chip(
+                                  '${translate(sheetContext, 'Recentes')} ${recentesDoAparelho.length}',
+                                  recentes,
+                                  () => setSheetState(() {
+                                    recentes = !recentes;
+                                    category = null;
+                                    favoritos = false;
+                                    edits = false;
+                                    presets = false;
+                                    sugeridos = false;
+                                  }),
+                                  key: const ValueKey('galeria-recentes'),
+                                ),
                               if (pro)
                                 chip(
                                   '★ Favoritos ${favs.length}',
@@ -208,6 +277,8 @@ Future<void> showEffectGallery(
                                     category = null;
                                     edits = false;
                                     presets = false;
+                                    sugeridos = false;
+                                    recentes = false;
                                   }),
                                   key: const ValueKey('galeria-favoritos'),
                                 ),
@@ -220,6 +291,8 @@ Future<void> showEffectGallery(
                                     favoritos = false;
                                     edits = false;
                                     presets = false;
+                                    sugeridos = false;
+                                    recentes = false;
                                   }),
                                   key: ValueKey('galeria-cat-$c'),
                                 ),
@@ -275,71 +348,117 @@ Future<void> showEffectGallery(
                         ),
                       )
                     else
-                    Expanded(
-                      child: results.isEmpty
-                          ? Center(
-                              child: Padding(
-                                padding: const EdgeInsets.all(24),
-                                child: AppText(
-                                  favoritos && query.isEmpty
-                                      ? 'Nenhum favorito ainda. Toque na estrela de um efeito.'
-                                      : 'Nada encontrado. Tente "glow", "rgb", "pixel" ou "shake".',
-                                  textAlign: TextAlign.center,
-                                  style: const TextStyle(
-                                    fontSize: 13,
-                                    height: 1.4,
-                                    color: AmColors.muted,
+                      Expanded(
+                        child: results.isEmpty
+                            ? Center(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(24),
+                                  child: AppText(
+                                    favoritos && query.isEmpty
+                                        ? 'Nenhum favorito ainda. Toque na estrela de um efeito.'
+                                        : 'Nada encontrado. Tente "glow", "rgb", "pixel" ou "shake".',
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      height: 1.4,
+                                      color: AmColors.muted,
+                                    ),
                                   ),
                                 ),
-                              ),
-                            )
-                          : LayoutBuilder(
-                              builder: (context, c) {
-                                final colunas = (c.maxWidth / 118)
-                                    .floor()
-                                    .clamp(2, 5);
-                                return RelogioDasPrevias(
-                                  child: GridView.builder(
-                                  key: const ValueKey('galeria-grade'),
-                                  padding: const EdgeInsets.only(bottom: 8),
-                                  gridDelegate:
-                                      SliverGridDelegateWithFixedCrossAxisCount(
-                                        crossAxisCount: colunas,
-                                        mainAxisSpacing: 10,
-                                        crossAxisSpacing: 10,
-                                        childAspectRatio: 0.7,
-                                      ),
-                                  itemCount: results.length,
-                                  itemBuilder: (context, i) {
-                                    final type = results[i];
-                                    final spec = effectSpecs[type]!;
-                                    return _EffectTile(
-                                      key: ValueKey('efeito-${spec.id}'),
-                                      spec: spec,
-                                      type: type,
-                                      pro: pro,
-                                      favorito: favs.contains(spec.id),
-                                      onFavorito: () => ref
-                                          .read(
-                                            effectFavoritesProvider.notifier,
-                                          )
-                                          .toggle(spec.id),
-                                      onTap: () {
-                                        controller.addEffect(
-                                          layerId,
-                                          type,
-                                          pronto: PreviasDosEfeitos.instance
-                                              .prontoDaPrevia(type),
+                              )
+                            : LayoutBuilder(
+                                builder: (context, c) {
+                                  final colunas = (c.maxWidth / 118)
+                                      .floor()
+                                      .clamp(2, 5);
+                                  return RelogioDasPrevias(
+                                    child: GridView.builder(
+                                      key: const ValueKey('galeria-grade'),
+                                      padding: const EdgeInsets.only(bottom: 8),
+                                      gridDelegate:
+                                          SliverGridDelegateWithFixedCrossAxisCount(
+                                            crossAxisCount: colunas,
+                                            mainAxisSpacing: 10,
+                                            crossAxisSpacing: 10,
+                                            childAspectRatio: 0.7,
+                                          ),
+                                      itemCount: results.length,
+                                      itemBuilder: (context, i) {
+                                        final type = results[i];
+                                        final spec = effectSpecs[type]!;
+                                        return _EffectTile(
+                                          key: ValueKey('efeito-${spec.id}'),
+                                          spec: spec,
+                                          type: type,
+                                          pro: pro,
+                                          favorito: favs.contains(spec.id),
+                                          onFavorito: () => ref
+                                              .read(
+                                                effectFavoritesProvider
+                                                    .notifier,
+                                              )
+                                              .toggle(spec.id),
+                                          onTap: () {
+                                            controller.addEffect(
+                                              layerId,
+                                              type,
+                                              pronto: PreviasDosEfeitos.instance
+                                                  .prontoDaPrevia(type),
+                                            );
+                                            ref
+                                                .read(
+                                                  effectRecentsProvider
+                                                      .notifier,
+                                                )
+                                                .registrar(type);
+                                            Navigator.of(sheetContext).pop();
+                                          },
+                                          // O TOQUE LONGO EXPLICA antes de
+                                          // aplicar: previa grande, o que o
+                                          // efeito faz, os prontos e as
+                                          // palavras que acham parecidos.
+                                          onDetalhe: () async {
+                                            final escolha =
+                                                await showEffectDetail(
+                                                  sheetContext,
+                                                  type,
+                                                );
+                                            if (escolha == null) return;
+                                            switch (escolha) {
+                                              case AplicarEfeito(:final pronto):
+                                                controller.addEffect(
+                                                  layerId,
+                                                  type,
+                                                  pronto:
+                                                      pronto ??
+                                                      PreviasDosEfeitos.instance
+                                                          .prontoDaPrevia(type),
+                                                );
+                                                ref
+                                                    .read(
+                                                      effectRecentsProvider
+                                                          .notifier,
+                                                    )
+                                                    .registrar(type);
+                                                if (sheetContext.mounted) {
+                                                  Navigator.of(
+                                                    sheetContext,
+                                                  ).pop();
+                                                }
+                                              case ProcurarPor(:final palavra):
+                                                setSheetState(() {
+                                                  search.text = palavra;
+                                                  query = palavra;
+                                                });
+                                            }
+                                          },
                                         );
-                                        Navigator.of(sheetContext).pop();
                                       },
-                                    );
-                                  },
-                                ),
-                                );
-                              },
-                            ),
-                    ),
+                                    ),
+                                  );
+                                },
+                              ),
+                      ),
                   ],
                 ),
               ),
@@ -361,6 +480,7 @@ class _EffectTile extends StatelessWidget {
     required this.favorito,
     required this.onFavorito,
     required this.onTap,
+    required this.onDetalhe,
   });
 
   final EffectSpec spec;
@@ -369,6 +489,7 @@ class _EffectTile extends StatelessWidget {
   final bool favorito;
   final VoidCallback onFavorito;
   final VoidCallback onTap;
+  final VoidCallback onDetalhe;
 
   @override
   Widget build(BuildContext context) {
@@ -376,6 +497,7 @@ class _EffectTile extends StatelessWidget {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
+      onLongPress: onDetalhe,
       child: LayoutBuilder(
         builder: (context, c) {
           final lado = c.maxWidth;

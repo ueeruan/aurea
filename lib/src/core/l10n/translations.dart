@@ -2536,6 +2536,7 @@ const appTranslations = <String, Map<String, String>>{
   "Raios": {"en": "Rays", "es": "Rayos", "ar": "أشعة", "ko": "광선", "ja": "光線", "zh": "光线", "hi": "किरणें", "id": "Sinar", "ru": "Лучи"},
   "Explosao": {"en": "Burst", "es": "Explosión", "ar": "انفجار", "ko": "폭발", "ja": "バースト", "zh": "爆发", "hi": "विस्फोट", "id": "Ledakan", "ru": "Взрыв"},
   "Holofote": {"en": "Spotlight", "es": "Foco", "ar": "كشاف", "ko": "스포트라이트", "ja": "スポットライト", "zh": "聚光", "hi": "स्पॉटलाइट", "id": "Sorot", "ru": "Прожектор"},
+  "Sugeridos": {"en": "Suggested", "es": "Sugeridos", "ar": "مقترحات", "ko": "추천", "ja": "おすすめ", "zh": "推荐", "hi": "सुझाए गए", "id": "Disarankan", "ru": "Рекомендуемые"},
   "Video": {"en": "Video", "es": "Vídeo", "ar": "فيديو", "ko": "동영상", "ja": "動画", "zh": "视频", "hi": "वीडियो", "id": "Video", "ru": "Видео"},
   "Audio": {"en": "Audio", "es": "Audio", "ar": "صوت", "ko": "오디오", "ja": "音声", "zh": "音频", "hi": "ऑडियो", "id": "Audio", "ru": "Аудио"},
   "Midia": {"en": "Media", "es": "Multimedia", "ar": "الوسائط", "ko": "미디어", "ja": "メディア", "zh": "媒体", "hi": "मीडिया", "id": "Media", "ru": "Медиа"},

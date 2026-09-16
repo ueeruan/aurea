@@ -554,6 +554,31 @@ double escalaDoPreview(
   );
 }
 
+/// A ESCALA DO ALVO DA CENA 3D NO PREVIEW — e ela NAO sabe se o video
+/// esta tocando.
+///
+/// O teto era 720 px tocando e 1080 parado. So que o flutter_scene joga
+/// fora todas as texturas de trabalho quando o tamanho do alvo muda (cor,
+/// profundidade, MSAA, bloom) e cria outras enquanto as antigas ainda
+/// estao em voo; o lado da sombra sai desse tamanho, entao as luzes eram
+/// refeitas junto. Cada play e cada pausa era esse pico de memoria e um
+/// engasgo — com um cubo so. O rascunho continua cortando o que e caro
+/// (profundidade de campo, reflexos); quem baixa a resolucao quando o
+/// quadro pesa e o nivel de qualidade, que muda devagar e com folga.
+double escalaDoAlvoDoPreview3D(
+  double largura,
+  double altura,
+  ReceitaDeQualidade receita,
+  double resolucaoDoPreview,
+) {
+  final maior = math.max(largura, altura);
+  final teto = !maior.isFinite || maior <= 0
+      ? 1.0
+      : math.min(1.0, 1080 / maior);
+  return math.min(teto, escalaDoPreview(largura, altura, receita)) *
+      resolucaoDoPreview.clamp(.125, 1).toDouble();
+}
+
 /// ESCOLHE o nivel mais alto que cabe na fracao segura do orcamento,
 /// nunca acima de [teto]. Se nem a emergencia cabe, e emergencia mesmo:
 /// o motor desenha o que der, e o controlador vai ler a pressao real.

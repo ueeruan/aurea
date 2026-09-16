@@ -16,7 +16,6 @@ import '../domain/geometria_gpu.dart';
 import '../domain/orcamento_render.dart';
 import '../domain/panorama3d.dart';
 import '../domain/scene3d.dart';
-import '../domain/preview_quality.dart';
 import 'motor3d_modo.dart';
 import 'preview_stats.dart';
 import 'qualidade3d_controller.dart';
@@ -393,8 +392,9 @@ class Scene3DGpu {
 
   /// Desenha a cena em [canvas], dentro de [area].
   ///
-  /// No preview a escala do alvo e a menor entre a do rascunho (720 no
-  /// lado maior enquanto toca), a da receita e o teto de 1080/1440. Na
+  /// No preview a escala do alvo e [escalaDoAlvoDoPreview3D]: a da receita
+  /// com teto de 1080, a MESMA tocando ou parado (mudar o tamanho do alvo
+  /// recria todas as texturas de trabalho do motor). Na
   /// EXPORTACAO a resolucao e a da composicao, salvo quando nem a
   /// receita de emergencia cabe na memoria — ai a escala desce ate
   /// caber, e o quadro e ampliado de volta: um quadro menos nitido vale
@@ -425,17 +425,13 @@ class Scene3DGpu {
       }
       escala = ex.escala;
     } else {
-      escala = math.min(
-        scenePreviewScale(
-          area.width,
-          area.height,
-          interacting: rascunho,
-          exporting: false,
-        ),
-        escalaDoPreview(area.width, area.height, _receita),
+      escala = escalaDoAlvoDoPreview3D(
+        area.width,
+        area.height,
+        _receita,
+        previewScale,
       );
     }
-    if (!exporting) escala *= previewScale.clamp(.125, 1);
     cena.renderScale = escala;
     _ultimoAlvo = area.size;
     _ultimaEscala = escala;

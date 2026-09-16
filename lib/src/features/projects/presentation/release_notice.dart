@@ -6,41 +6,36 @@ import '../../../core/ui/am_colors.dart';
 import 'package:aurea/src/core/l10n/app_language.dart';
 
 // Change this revision when publishing a new set of release notes.
-const releaseNoticeRevision = '2026-09-16-beta-87';
+const releaseNoticeRevision = '2026-09-16-beta-88';
 const releaseNoticeSeenKey = 'aurea.releaseNotice.seen';
 
 const releaseHighlights = <(IconData, String, String)>[
   (
-    CupertinoIcons.rectangle_grid_2x2,
-    'O editor desafogou',
-    'A barra que flutuava por cima da linha do tempo foi embora: tudo '
-        'o que ela fazia ja tinha porta a um toque, e ela so tapava os '
-        'clipes. Duplicar subiu para a barra da camada. E as fichas do '
-        'painel agora sao TRES por fileira — as sete cabem sem rolar.',
+    CupertinoIcons.color_filter,
+    'Efeitos de cor com a conta do After',
+    'Unsharp Mask, Levels, Brightness & Contrast, Hue/Saturation e '
+        'Exposure. Efeitos de cor seguidos viram uma passada so na GPU, '
+        'e a Exposure trabalha em luz linear, como no AE.',
   ),
   (
-    CupertinoIcons.waveform,
-    'O tremor finalmente treme',
-    'Ele nunca esteve com a conta errada: os EIXOS nasciam em 0,2 e '
-        '0,1, entao "Amplitude 1" entregava 12 px — invisivel. O eixo '
-        'nasce cheio agora e a Amplitude vale o que diz: o padrao saiu '
-        'de 6 px para 32 px de balanco em 1080p, medido.',
+    CupertinoIcons.paintbrush,
+    'Aba Estilizar: 12 efeitos',
+    'CC Threshold, Threshold RGB, Vignette e Block Load; S_ScanLines, '
+        'HalfTone, EdgeColorize, JpegDamage, PixelSort, AutoPaint, '
+        'TVDamage e VHSDamage. Medidos contra renders do After Effects.',
   ),
   (
-    CupertinoIcons.sparkles,
-    'As particulas enxergam a lente',
-    'A nuvem projetava com uma lente propria e nao sabia que existia '
-        'camera: numa grande-angular a cena abria e as particulas '
-        'ficavam paradas, como adesivo num vidro. Agora a profundidade '
-        'da nuvem abre e fecha junto com o resto da cena.',
+    CupertinoIcons.wand_stars,
+    'Aba Distorcer: 8 efeitos',
+    'CC Lens, Optics Compensation, Turbulent Displace, S_Shake, '
+        'S_DissolveShake, Glitchify, Twitch e Cross Glitch.',
   ),
   (
-    CupertinoIcons.globe,
-    'Consertos que voces apontaram',
-    'A aba de som quebrava assim que havia um som recente; o numero da '
-        'ordem no lote da galeria ficava ATRAS da miniatura e nunca '
-        'aparecia; e o painel de adicionar falava duas linguas — quatro '
-        'rotulos nunca tinham sido traduzidos.',
+    CupertinoIcons.slider_horizontal_3,
+    'A ficha do efeito na planta do AM',
+    'Cada efeito e um cartao com nome, ••• e lixeira; cada parametro tem '
+        'nome, regua e caixa de valor que abre o teclado. Ligar, duplicar, '
+        'ordem e resetar ficam no •••.',
   ),
 ];
 

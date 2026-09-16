@@ -30,6 +30,7 @@ class ParticlesPainter extends CustomPainter {
     this.rotXDeg = 0,
     this.rotYDeg = 0,
     this.rotZDeg = 0,
+    this.focal = _focalPadrao,
   });
 
   final ParticlesLayer layer;
@@ -40,7 +41,17 @@ class ParticlesPainter extends CustomPainter {
   final double rotYDeg;
   final double rotZDeg;
 
-  static const double _focal = 1200;
+  /// A LENTE COM QUE AS PARTICULAS SAO PROJETADAS.
+  ///
+  /// Era cravada em 1200 e a nuvem nao sabia que existia camera: o
+  /// resto da cena abria ou fechava o angulo com a lente e o campo de
+  /// particulas ficava com o dele. Numa camera grande-angular as
+  /// particulas pareciam coladas num vidro na frente da lente. Agora
+  /// chega a lente ATIVA, e a profundidade da nuvem abre junto com o
+  /// resto.
+  final double focal;
+
+  static const double _focalPadrao = 1200;
 
   /// xorshift32 de (seed, i, canal) -> [0,1).
   double _rand(int i, int channel) {
@@ -250,9 +261,10 @@ class ParticlesPainter extends CustomPainter {
         final wx = x1 * czr - y1 * szr;
         final wy = x1 * szr + y1 * czr;
         final wz = z2;
-        final denom = _focal + wz;
+        final f = focal.isFinite && focal > 60 ? focal : _focalPadrao;
+        final denom = f + wz;
         if (denom < 60) return null;
-        final proj = (_focal / denom).clamp(0.02, 6.0);
+        final proj = (f / denom).clamp(0.02, 6.0);
         final p = center + Offset(wx, wy) * proj;
 
         // OPACIDADE NA VIDA.
@@ -483,7 +495,9 @@ class ParticlesPainter extends CustomPainter {
       old.time != time ||
       old.rotXDeg != rotXDeg ||
       old.rotYDeg != rotYDeg ||
-      old.rotZDeg != rotZDeg;
+      old.rotZDeg != rotZDeg ||
+      // Sem isto, mexer no zoom da camera nao repintava a nuvem.
+      old.focal != focal;
 }
 
 class _Proj {

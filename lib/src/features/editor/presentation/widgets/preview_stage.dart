@@ -2777,6 +2777,11 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
       compWidth: project.outputWidth.toDouble(),
       videos: videos,
       localTime: contentLocal,
+      particlesFocal: isParticles && camAtiva != null
+          ? camAtiva.zoom
+                .valueAt(camAtiva.localTime(t))
+                .clamp(60.0, 12000.0)
+          : CameraLayer.lenteNeutra,
       particlesRotX: isParticles
           ? layer.rotationX.valueAt(local) + extraRotX
           : 0,
@@ -6724,6 +6729,7 @@ class _LayerContent extends StatelessWidget {
     required this.buildChildren,
     this.particlesRotX = 0,
     this.particlesRotY = 0,
+    this.particlesFocal = CameraLayer.lenteNeutra,
   });
 
   final Layer layer;
@@ -6733,6 +6739,10 @@ class _LayerContent extends StatelessWidget {
   final Duration localTime;
 
   /// Rotacao 3D do sistema de particulas (graus), ja com o delta do pai.
+  /// A LENTE ATIVA, para a nuvem de particulas abrir o mesmo angulo
+  /// que o resto da cena.
+  final double particlesFocal;
+
   final double particlesRotX;
   final double particlesRotY;
 
@@ -7051,6 +7061,7 @@ class _LayerContent extends StatelessWidget {
           time: localTime,
           rotXDeg: particlesRotX,
           rotYDeg: particlesRotY,
+          focal: particlesFocal,
         ),
       ),
       // Elemento 3D: vertices girados no espaco dentro do pintor (como

@@ -55,13 +55,12 @@ class AnimatedTextView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final style = styleFor(layer, animated: true);
-    final full = TextPainter(
-      text: TextSpan(text: layer.text, style: style),
-      textDirection: TextDirection.ltr,
-      textAlign: layer.alinhamento,
-    )..layout();
-
-    final units = TextUnits.of(layer.text);
+    // O LAYOUT DA LINHA nao muda com o tempo: vem do cache, e nao de um
+    // TextPainter novo, uma segmentacao nova e uma consulta de caixa por
+    // letra a cada quadro.
+    final diagrama = _Diagrama.de(layer.text, style, layer.alinhamento);
+    final full = diagrama.cheio;
+    final units = diagrama.unidades;
 
     // TEXTO EM CAMINHO: o caminho decide o tamanho da area, nao a linha
     // de texto — um selo circular ocupa um quadrado, nao uma tira.
@@ -78,11 +77,83 @@ class AnimatedTextView extends StatelessWidget {
         style: style,
         full: full,
         units: units,
+        diagrama: diagrama,
         localTime: localTime,
         path: path,
       ),
     );
   }
+}
+
+/// A linha medida uma vez por (texto, estilo, alinhamento): o painter da
+/// linha, as unidades e a caixa de cada unidade. Cache pequeno, o mais
+/// antigo sai.
+class _Diagrama {
+  _Diagrama._(this.texto, this.estilo, this.alinhamento)
+    : cheio = TextPainter(
+        text: TextSpan(text: texto, style: estilo),
+        textDirection: TextDirection.ltr,
+        textAlign: alinhamento,
+      )..layout(),
+      unidades = TextUnits.of(texto);
+
+  final String texto;
+  final TextStyle estilo;
+  final TextAlign alinhamento;
+  final TextPainter cheio;
+  final TextUnits unidades;
+  final Map<int, Rect?> _caixas = {};
+
+  static final Map<Object, _Diagrama> _cache = {};
+
+  static _Diagrama de(String texto, TextStyle estilo, TextAlign alinhamento) {
+    final chave = Object.hash(texto, estilo, alinhamento);
+    final achado = _cache.remove(chave);
+    if (achado != null &&
+        achado.texto == texto &&
+        achado.estilo == estilo &&
+        achado.alinhamento == alinhamento) {
+      _cache[chave] = achado;
+      return achado;
+    }
+    if (_cache.length >= 32) _cache.remove(_cache.keys.first);
+    return _cache[chave] = _Diagrama._(texto, estilo, alinhamento);
+  }
+
+  /// A caixa da unidade [i] na linha inteira (nulo quando nao ha).
+  Rect? caixa(int i) => _caixas.putIfAbsent(i, () {
+    final boxes = cheio.getBoxesForSelection(
+      TextSelection(
+        baseOffset: unidades.codeUnitStart[i],
+        extentOffset: unidades.codeUnitEnd[i],
+      ),
+      boxHeightStyle: BoxHeightStyle.tight,
+    );
+    if (boxes.isEmpty) return null;
+    var rect = boxes.first.toRect();
+    for (final b in boxes.skip(1)) {
+      rect = rect.expandToInclude(b.toRect());
+    }
+    return rect;
+  });
+}
+
+/// A letra desenhada, por (grafema, estilo com a cor): so a cor animada
+/// cria entrada nova. O mais antigo sai SEM dispose — pode estar em uso no
+/// mesmo quadro; o paragrafo nativo e liberado pelo coletor.
+final Map<Object, (String, TextStyle, TextoNoAtlas)> _letras = {};
+
+TextoNoAtlas _letra(String grafema, TextStyle estilo) {
+  final chave = Object.hash(grafema, estilo);
+  final achada = _letras.remove(chave);
+  if (achada != null && achada.$1 == grafema && achada.$2 == estilo) {
+    _letras[chave] = achada;
+    return achada.$3;
+  }
+  if (_letras.length >= 384) _letras.remove(_letras.keys.first);
+  final nova = TextoNoAtlas(texto: grafema, estilo: estilo)..layout();
+  _letras[chave] = (grafema, estilo, nova);
+  return nova;
 }
 
 class _AnimatedTextPainter extends CustomPainter {
@@ -91,9 +162,12 @@ class _AnimatedTextPainter extends CustomPainter {
     required this.style,
     required this.full,
     required this.units,
+    required this.diagrama,
     required this.localTime,
     this.path,
   });
+
+  final _Diagrama diagrama;
 
   final TextLayer layer;
   final TextStyle style;
@@ -172,18 +246,8 @@ class _AnimatedTextPainter extends CustomPainter {
       if (units.isWhitespace[i]) continue;
 
       // Avanco SEMPRE da medicao da linha completa (§3.4).
-      final boxes = full.getBoxesForSelection(
-        TextSelection(
-          baseOffset: units.codeUnitStart[i],
-          extentOffset: units.codeUnitEnd[i],
-        ),
-        boxHeightStyle: BoxHeightStyle.tight,
-      );
-      if (boxes.isEmpty) continue;
-      var rect = boxes.first.toRect();
-      for (final b in boxes.skip(1)) {
-        rect = rect.expandToInclude(b.toRect());
-      }
+      final rect = diagrama.caixa(i);
+      if (rect == null) continue;
 
       final opacity = (opacityP / 100).clamp(0.0, 1.0);
       if (opacity <= 0.001) continue;
@@ -200,10 +264,7 @@ class _AnimatedTextPainter extends CustomPainter {
 
       // Pelo corpo de desenho: a letra ampliada pelo animador e pela camada
       // nao pode pedir glifo gigante ao atlas (ver texto_no_atlas.dart).
-      final unitPainter = TextoNoAtlas(
-        texto: cluster,
-        estilo: style.copyWith(color: unitColor),
-      )..layout();
+      final unitPainter = _letra(cluster, style.copyWith(color: unitColor));
 
       // Sobre o caminho, a posicao vem do AVANCO acumulado ao longo da
       // curva, nao da caixa da linha — e a diferenca entre letras
@@ -221,10 +282,7 @@ class _AnimatedTextPainter extends CustomPainter {
           spec: spec,
           glyphHeight: unitPainter.height,
         );
-        if (posto == null) {
-          unitPainter.dispose();
-          continue;
-        }
+        if (posto == null) continue;
         center = posto.position + Offset(size.width / 2, size.height / 2);
         pathAngle = posto.angleRad;
       } else {
@@ -274,7 +332,6 @@ class _AnimatedTextPainter extends CustomPainter {
         canvas,
         Offset(-unitPainter.width / 2, -unitPainter.height / 2),
       );
-      unitPainter.dispose();
       canvas.restore();
       if (blurring) canvas.restore();
     }

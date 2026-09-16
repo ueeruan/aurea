@@ -700,7 +700,14 @@ class EffectInstance {
   EffectSpec get spec => effectSpecs[type]!;
 
   AnimatedDouble track(String key) =>
-      params[key] ?? AnimatedDouble(spec.params[key]?.initial ?? 0);
+      params[key] ?? _padroes.putIfAbsent(
+        spec.params[key]?.initial ?? 0,
+        () => AnimatedDouble(spec.params[key]?.initial ?? 0),
+      );
+
+  /// Um AnimatedDouble constante por valor padrao, reaproveitado: parametro
+  /// que o projeto nao guardou criava um objeto novo por leitura, por quadro.
+  static final Map<double, AnimatedDouble> _padroes = {};
 
   /// Valor do parametro no tempo local da camada.
   double paramAt(String key, Duration local) => track(key).valueAt(local);

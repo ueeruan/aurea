@@ -1,3 +1,4 @@
+import '../../application/playback_controller.dart';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -127,7 +128,15 @@ class _DitherLayerState extends State<DitherLayer> {
             filtro = null;
           }
           if (filtro == null) return widget.child;
-          return ImageFiltered(imageFilter: filtro, child: widget.child);
+          // TOCANDO, SEM DITHER: e um passe de GPU da composicao inteira por
+          // quadro, com ruido novo a cada quadro, invisivel em movimento. O
+          // `enabled` mantem a arvore igual — tirar o ImageFiltered recriaria
+          // a composicao inteira a cada play e pausa.
+          return ImageFiltered(
+            imageFilter: filtro,
+            enabled: !PlaybackController.tocandoAgora.value,
+            child: widget.child,
+          );
         },
       );
     }

@@ -6,35 +6,35 @@ import '../../../core/ui/am_colors.dart';
 import 'package:aurea/src/core/l10n/app_language.dart';
 
 // Change this revision when publishing a new set of release notes.
-const releaseNoticeRevision = '2026-09-16-beta-89';
+const releaseNoticeRevision = '2026-09-16-beta-90';
 const releaseNoticeSeenKey = 'aurea.releaseNotice.seen';
 
 const releaseHighlights = <(IconData, String, String)>[
   (
-    CupertinoIcons.textformat,
-    'Texto grande nao quebra mais o app',
-    'Texto muito ampliado no palco corrompia as letras do app inteiro: '
-        'icones viravam quadrados e nomes sumiam ate fechar. Agora ele e '
-        'desenhado sem estourar a memoria de letras da GPU.',
+    CupertinoIcons.play_circle,
+    'Previa mais leve',
+    'Texto animado, curvas de keyframe e efeitos sem keyframe deixaram de '
+        'refazer trabalho a cada quadro, e o pontilhado pausa enquanto toca.',
   ),
   (
-    CupertinoIcons.cube,
-    'Cena 3D mais estavel',
-    'Selecionar a camada, mover o cursor ou dar play nao recriam mais o '
-        'motor 3D, e modelo com muitos materiais nao pede gigas de memoria '
-        'de uma vez.',
+    CupertinoIcons.sparkles,
+    'Glow e Luz e Diversos',
+    'Chroma Key, S_Rays, Deep Glow, Brilho, S_SpotLight, S_Glint, '
+        'S_GlintRainbow, S_GlowRings, S_EdgeRays, S_GlowAura e S_GlowDarks, '
+        'conferidos contra o After Effects. Motion Tile voltou.',
   ),
   (
-    CupertinoIcons.arrow_down_doc,
-    'Importar modelo falha sem derrubar',
-    'Arquivo grande demais, textura acima de 8K ou GLB comprimido '
-        'malformado viram uma mensagem dizendo o que fazer, e nao queda.',
+    CupertinoIcons.captions_bubble,
+    'Legenda viral e batidas',
+    'Novo estilo Viral nas legendas automaticas, e as batidas da musica '
+        'viram marcadores na timeline.',
   ),
   (
-    CupertinoIcons.speedometer,
-    'Bancada A-E',
-    'Em Ajustes > Teste de estresse do motor 3D, o botao Bancada A-E mede '
-        'o app no seu aparelho. Copie o relatorio e envie.',
+    CupertinoIcons.checkmark_seal,
+    'Correcoes do beta',
+    'Legenda automatica nao fecha mais o app no iPhone, a musica nao '
+        'balanca mais o relogio da previa e a selecao de varias camadas '
+        'deixa as faixas a vista.',
   ),
 ];
 

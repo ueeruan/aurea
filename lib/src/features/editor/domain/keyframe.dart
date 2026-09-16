@@ -40,6 +40,25 @@ enum EasingType {
 
 /// Easing do SEGMENTO que sai de um keyframe (modelo Alight: N keyframes =
 /// N-1 curvas; a curva remapeia tempo->tempo dentro do trecho).
+/// A MESMA CONTA DO `Cubic.transform` do Flutter (bissecao ate 0,001), sem
+/// criar um objeto por avaliacao: toda curva bezier de todo keyframe passava
+/// por um `Cubic` novo a cada quadro.
+double _bezier(double a, double b, double c, double d, double t) {
+  double avaliar(double p, double q, double m) =>
+      3 * p * (1 - m) * (1 - m) * m + 3 * q * (1 - m) * m * m + m * m * m;
+  var inicio = 0.0, fim = 1.0;
+  while (true) {
+    final meio = (inicio + fim) / 2;
+    final estimativa = avaliar(a, c, meio);
+    if ((t - estimativa).abs() < 0.001) return avaliar(b, d, meio);
+    if (estimativa < t) {
+      inicio = meio;
+    } else {
+      fim = meio;
+    }
+  }
+}
+
 class Easing {
   const Easing({
     this.type = EasingType.cubicBezier,
@@ -170,12 +189,7 @@ class Easing {
     switch (type) {
       case EasingType.cubicBezier:
         if (isLinear) return t;
-        return Cubic(
-          x1.clamp(0.0, 1.0),
-          y1,
-          x2.clamp(0.0, 1.0),
-          y2,
-        ).transform(t);
+        return _bezier(x1.clamp(0.0, 1.0), y1, x2.clamp(0.0, 1.0), y2, t);
       case EasingType.bounce:
         // QUICAR PARAMETRICO. `count` e quantos toques no chao; `intensity`
         // e quanto cada quique perde de altura (mais intensidade, quiques

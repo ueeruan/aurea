@@ -2,34 +2,37 @@ import 'dart:ui';
 
 /// A PALETA DO EDITOR.
 ///
-/// Os tons neutros foram MEDIDOS numa gravacao do Alight Motion em uso,
-/// e nao escolhidos no olho (`docs/linha-do-tempo-alight.md`): fundo da
-/// previa #121218, cromo #18181E, pilula de camada #242436, capsula do
-/// tempo #242430. A diferenca entre eles e pequena de proposito — o
-/// editor inteiro e quase preto para que a composicao, que e o unico
-/// conteudo colorido da tela, seja a coisa mais brilhante que se ve.
+/// OS NEUTROS SAO NOSSOS (16/09). Ate hoje eles vinham MEDIDOS de uma
+/// gravacao do app de referencia — o comentario que ficava aqui dizia
+/// isso com todas as letras. Medir estrutura, medida e comportamento e
+/// aprender; herdar a cor do cromo e herdar identidade, e foi o que o
+/// dono viu ao dizer que estava "muito parecido".
 ///
-/// AS CORES DE MARCA SAO AS DA AUREA, e nao as da referencia. Copiar
-/// estrutura, medida e comportamento e aprender; copiar o verde da
-/// concorrencia seria copiar identidade. O lima da logo ocupa o mesmo
-/// lugar que o verde ocupa la: o botao de exportar.
+/// A escala agora e da Aurea e mais FUNDA: o cromo desceu cerca de um
+/// terco em luminancia, o que aumenta a distancia entre a ferramenta
+/// (quase preta) e a composicao (o unico conteudo colorido da tela).
+/// Os degraus entre os tons continuam pequenos de proposito — o que
+/// tem de saltar e o trabalho, nao o painel.
+///
+/// AS CORES DE MARCA SEGUEM AS DA AUREA: o lima da logo ocupa o lugar
+/// da acao, o violeta marca selecao.
 abstract final class AmColors {
   /// O FUNDO ATRAS DA COMPOSICAO. Mais escuro que o cromo, para o quadro
   /// do projeto se destacar do que e ferramenta.
-  static const Color bg = Color(0xFF121218);
+  static const Color bg = Color(0xFF08080C);
 
   /// O CROMO: cabecalho, transporte, linha do tempo. Tudo que e
   /// ferramenta usa este tom, e por isso os tres blocos parecem uma peca
   /// so, que e o que eles sao.
-  static const Color topBar = Color(0xFF18181E);
-  static const Color panel = Color(0xFF18181E);
-  static const Color panelHigh = Color(0xFF1E1E28);
+  static const Color topBar = Color(0xFF0E0E13);
+  static const Color panel = Color(0xFF0E0E13);
+  static const Color panelHigh = Color(0xFF15151D);
 
   /// A CAPSULA DO TEMPO e os chips em geral.
-  static const Color chip = Color(0xFF242430);
+  static const Color chip = Color(0xFF1A1A24);
 
   /// A PILULA DA CAMADA: o olho e a cor, flutuando sobre a trilha.
-  static const Color pilula = Color(0xFF242436);
+  static const Color pilula = Color(0xFF1A1A28);
 
   /// A CAIXA DE VALOR e os chips do painel de transformacao. Medido em
   /// #242436 (`docs/painel-de-transformacao-alight.md`, secao "Cores").
@@ -40,7 +43,7 @@ abstract final class AmColors {
   /// tons quase iguais — fundi-los num so pouparia uma constante hoje e
   /// faria a proxima medida discordar do codigo sem ninguem saber qual
   /// das duas telas estava errada.
-  static const Color campo = Color(0xFF242436);
+  static const Color campo = Color(0xFF1A1A28);
 
   /// Keyframe, curva e realce de contexto (teal).
   static const Color accent = Color(0xFF1ED6B1);

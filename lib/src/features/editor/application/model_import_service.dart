@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
 
+import '../domain/limites_de_importacao.dart';
 import '../domain/malha_importada.dart';
 import '../domain/model_asset3d.dart';
 import '../domain/model_import3d.dart';
@@ -15,11 +16,41 @@ import '../domain/obj_import3d.dart';
 Future<ModelAsset3D> readModel3DFiles(List<String> paths) =>
     Isolate.run(() async {
       final asset = await _read(paths);
+      // O MODELO LIDO ANTES DE CUSTAR MAIS: as contagens reais (o FBX so
+      // se conhece depois de lido) e as texturas pelo cabecalho, antes do
+      // LOD em C++ e antes de alguma delas ser decodificada inteira.
+      conferirModeloLido(asset.data);
       // Solda, cache de vertices, busca e niveis de detalhe em C++ — aqui,
       // no isolate da importacao, uma vez so (ver malha_importada.dart).
       otimizarMalhasImportadas(asset.data);
       return asset;
     });
+
+/// Malha e texturas do modelo ja lido, contra [limitesDeImportacao].
+void conferirModeloLido(Map<String, dynamic> data) {
+  final c = contarModelo(data);
+  conferirMalha(vertices: c.vertices, triangulos: c.triangulos);
+  var pixels = 0;
+  final vistas = <String>{};
+  final materiais = data['materials'];
+  for (final m in materiais is List ? materiais : const []) {
+    if (m is! Map) continue;
+    final uri = m['image'];
+    if (uri is! String || !uri.startsWith('data:') || !vistas.add(uri)) {
+      continue;
+    }
+    final virgula = uri.indexOf(',');
+    if (virgula < 0) continue;
+    final Uint8List bytes;
+    try {
+      bytes = base64Decode(uri.substring(virgula + 1));
+    } on FormatException {
+      continue;
+    }
+    pixels += conferirImagem('${m['name'] ?? 'do material'}', bytes);
+  }
+  conferirPixelsDasImagens(pixels);
+}
 
 Future<ModelAsset3D> _read(List<String> paths) async {
   final models = paths
@@ -36,7 +67,30 @@ Future<ModelAsset3D> _read(List<String> paths) async {
   final file = File(models.single);
   final root = await file.parent.resolveSymbolicLinks();
   final resources = <String, Uint8List>{};
+  // O TAMANHO ANTES DA LEITURA: um arquivo grande demais nao chega a
+  // entrar na memoria. O FBX de texto tem teto proprio (o leitor o separa
+  // inteiro em palavras), e so o cabecalho diz qual e.
+  final nomeDoModelo = file.uri.pathSegments.last;
+  var fbxDeTexto = false;
+  if (nomeDoModelo.toLowerCase().endsWith('.fbx')) {
+    final raf = await file.open();
+    try {
+      fbxDeTexto = !fbxBinario(await raf.read(23));
+    } finally {
+      await raf.close();
+    }
+  }
+  conferirArquivoDoModelo(
+    nomeDoModelo,
+    await file.length(),
+    fbxDeTexto: fbxDeTexto,
+  );
+  final tamanhosDosRecursos = <String, int>{};
   Future<Uint8List> read(File f) async {
+    if (f.path != file.path) {
+      tamanhosDosRecursos[f.uri.pathSegments.last] = await f.length();
+      conferirRecursos(tamanhosDosRecursos);
+    }
     return f.readAsBytes();
   }
 
@@ -104,10 +158,15 @@ Future<ModelAsset3D> _read(List<String> paths) async {
       bytes,
       name: file.uri.pathSegments.last,
       resources: resources,
+      maxTriangles: limitesDeImportacao.triangulos,
     );
   }
   if (lower.endsWith('.obj')) {
-    final source = utf8.decode(bytes);
+    final contagem = contarObj(bytes);
+    conferirMalha(vertices: contagem.vertices, triangulos: contagem.triangulos);
+    // Texto que nao e UTF-8 valido (nome de material em Latin-1, comum em
+    // exportadores antigos) nao pode recusar a geometria inteira.
+    final source = utf8.decode(bytes, allowMalformed: true);
     // MTL E TEXTURA SAO OPCIONAIS: o que faltar vira aviso no importador,
     // e a geometria entra com material padrao.
     Future<Uint8List?> talvez(String uri, {Directory? relativeTo}) async {
@@ -155,6 +214,11 @@ Future<ModelAsset3D> _read(List<String> paths) async {
     }
   }
   if (doc != null) {
+    final declarado = contarGltf(doc);
+    conferirMalha(
+      vertices: declarado.vertices,
+      triangulos: declarado.triangulos,
+    );
     for (final entry in [
       ...doc['buffers'] as List? ?? [],
       ...doc['images'] as List? ?? [],

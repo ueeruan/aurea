@@ -213,7 +213,8 @@ void main() {
     if (imgOn > .5) {
       // --- Glitch Slice: faixas horizontais deslocadas ---
       float grosso = floor(q.y / (96.0 * esc));
-      float alt = mix(6.0, 48.0 + slQual * .4, h3(vec3(grosso, stG, seed + 51.0))) * esc;
+      // Faixas largas como no render do AE (uma banda clara de ~100 px).
+      float alt = mix(24.0, 140.0 + slQual * .4, h3(vec3(grosso, stG, seed + 51.0))) * esc;
       float fatia = floor(q.y / alt);
       if (h3(vec3(fatia, grosso, stG + seed + 52.0)) < slAmt * g * .35) {
         float r = h3(vec3(fatia, grosso, stG + seed + 53.0));
@@ -227,7 +228,7 @@ void main() {
       vec2 cel = floor(q / vec2(blW, blH));
       float grupo = max(blGroup, 1.0);
       vec2 celG = floor(cel / vec2(1.0 + floor(h3(vec3(cel.y, stB, seed + 61.0)) * min(grupo, 8.0)), 1.0));
-      if (h3(vec3(celG, stB + seed + 62.0)) < blAmt * g * .05) {
+      if (h3(vec3(celG, stB + seed + 62.0)) < blAmt * g * .15) {
         vec2 r = vec2(h3(vec3(celG, stB + 63.0)), h3(vec3(celG, stB + 64.0))) * 2.0 - 1.0;
         vec2 d = vec2(r.x * blW * 2.0, r.y * blH * 2.0);
         if (blDir < .5) d.y = 0.0; else if (blDir < 1.5) d.x = 0.0;
@@ -238,13 +239,14 @@ void main() {
 
     // --- Color Glitch: quadrados de cor ---
     if (colOn > .5) {
-      float lado = 16.0 * esc;
+      float lado = 8.0 * esc;
       vec2 cq = floor(q / lado);
       float dens = vruido(cq / 6.0, seed + 71.0);
       if (h3(vec3(cq, seed + 72.0)) < colAmt * g * .09 * smoothstep(.35, .75, dens)) {
         float lum = dot(bs, vec3(.299, .587, .114));
-        vec3 cc = hsv(colOff + (h3(vec3(cq, seed + 73.0)) - .5) * .06, colAmt, mix(.55, .75, lum));
-        bs = mix(bs, mistura(bs, cc, colMode), clamp(colOp * 3.2, 0.0, 1.0));
+        // Pontos de cor de matiz sorteada e fracos (Opacity 25 % do AE).
+        vec3 cc = hsv(colOff + h3(vec3(cq, seed + 73.0)), colAmt, mix(.55, .75, lum));
+        bs = mix(bs, mistura(bs, cc, colMode), clamp(colOp * 1.4, 0.0, 1.0));
       }
     }
 

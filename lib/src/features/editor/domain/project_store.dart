@@ -2607,6 +2607,12 @@ ShadowStyle _asShadow(Map<String, dynamic> m) => ShadowStyle(
   spread: m['spread'] == null ? AnimatedDouble(0) : _asAd(m['spread']),
 );
 
+/// O ACABAMENTO da camada em JSON — o mesmo formato do projeto, aberto
+/// para quem guarda estilo fora dele (os presets de estilo).
+Map<String, dynamic> layerStylesToJson(LayerStyles s) => _styles(s);
+
+LayerStyles layerStylesFromJson(Map<String, dynamic> m) => _asStyles(m);
+
 Map<String, dynamic> _styles(LayerStyles s) => {
   if (s.dropShadow != null) 'ds': _shadow(s.dropShadow!),
   if (s.innerShadow != null) 'is': _shadow(s.innerShadow!),

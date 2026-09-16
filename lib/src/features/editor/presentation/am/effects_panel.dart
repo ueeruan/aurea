@@ -1,4 +1,5 @@
 import 'package:aurea/src/core/l10n/app_language.dart';
+
 import '../../application/optical_flow_preview.dart';
 
 import 'package:flutter/cupertino.dart';
@@ -20,6 +21,7 @@ import 'color_picker_sheet.dart';
 import 'am_widgets.dart';
 import 'curve_panel.dart';
 import '../../application/effect_preset_store.dart';
+import 'presets_screen.dart';
 import '../../application/ui/pro_mode.dart';
 import '../context/effects/effect_gallery.dart';
 import '../../../help/presentation/quick_guide_screen.dart';
@@ -233,6 +235,22 @@ class _EffectsPanelState extends ConsumerState<EffectsPanel> {
                         filled: selKfAqui,
                       ),
                     ),
+                    // A LISTA DE PRESETS: dava para salvar e nunca mais
+                    // achar — a lista nao aparecia em lugar nenhum.
+                    AmRailButton(
+                      key: const ValueKey('efeitos-presets'),
+                      tooltip: 'Presets',
+                      onTap: () => abrirTelaDePresets(
+                        context,
+                        layerId: id,
+                        at: widget.playback.time.value,
+                      ),
+                      child: const Icon(
+                        CupertinoIcons.square_grid_2x2,
+                        size: 21,
+                        color: AmColors.text,
+                      ),
+                    ),
                     AmRailButton(
                       tooltip: 'Como usar os efeitos',
                       onTap: () => Navigator.of(context).push(
@@ -378,8 +396,7 @@ class _EffectsPanelState extends ConsumerState<EffectsPanel> {
                         key: ValueKey(layer.effects[i].id),
                         temporalControls:
                             layer is VideoLayer &&
-                                  layer.effects[i].type ==
-                                      EffectType.opticalFlow
+                                layer.effects[i].type == EffectType.opticalFlow
                             ? OpticalFlowStatus(layer: layer)
                             : null,
                         index: v,
@@ -1182,7 +1199,8 @@ class _SeedRow extends StatelessWidget {
                     color: AmColors.accent,
                   ),
                   SizedBox(width: 6),
-                  AppText('Sortear',
+                  AppText(
+                    'Sortear',
                     style: TextStyle(fontSize: 12, color: AmColors.accent),
                   ),
                 ],

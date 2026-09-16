@@ -37,6 +37,7 @@ import '../domain/rotation_math.dart';
 import '../domain/effect.dart';
 import '../domain/oscillate.dart';
 import '../domain/effect_preset.dart';
+import '../domain/estilo_preset.dart';
 import '../domain/element3d.dart';
 import '../domain/extrude3d.dart';
 import '../domain/glb_import.dart';
@@ -1374,6 +1375,15 @@ class EditorController extends Notifier<VideoProject> {
 
   void updateLayerStyles(String id, LayerStyles Function(LayerStyles) fn) =>
       _updateMeta(id, (m) => m.copyWith(styles: fn(m.styles)));
+
+  /// O ACABAMENTO da camada: o que um preset de estilo guarda.
+  LayerStyles estiloDaCamada(String id) => state.metaOf(id).styles;
+
+  /// APLICAR UM ESTILO: troca o acabamento inteiro da camada. Trocar, e
+  /// nao somar — dois contornos brancos empilhados nao sao "aplicar o
+  /// estilo", sao um acidente.
+  void aplicarEstilo(String id, EstiloPreset estilo) =>
+      updateLayerStyles(id, (_) => estilo.estilos);
 
   /// PALETA (PR-X11): trocar uma entrada muda TODAS as camadas
   /// vinculadas a ela, e nenhuma outra.

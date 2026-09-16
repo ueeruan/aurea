@@ -123,6 +123,11 @@ void main() {
         // excluir" que ninguem descobria. Nao ha estado a mostrar; o
         // que a regra cobra (nada de modo escondido) continua valendo.
         'projects_tab.dart',
+        // O MENU DE CADA PRESET na tela de presets (2026-09-15). Mesmo
+        // caso do menu de projeto: acoes sobre UM cartao da lista —
+        // aplicar, exportar, renomear, excluir. Nenhuma delas liga modo
+        // nenhum, e todas tambem se alcancam pelo toque longo no cartao.
+        'presets_screen.dart',
       };
       // O ESTUDIO 3D tem o terceiro (a barra "Cena | Camera | menu" da
       // missao de 2026-09-07). Ele nao usa o icone cru: usa o AmMenuIcon,

@@ -3,8 +3,11 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/ui/snack.dart';
 import '../../../../core/ui/tocavel.dart';
 import '../../application/editor_controller.dart';
+import '../../application/estilo_preset_store.dart';
+import '../../domain/estilo_preset.dart';
 import '../../application/playback_controller.dart';
 import '../../domain/keyframe.dart';
 import '../../domain/layer.dart';
@@ -13,6 +16,7 @@ import '../../domain/shape.dart';
 import '../context/parameter_row.dart';
 import 'am_colors.dart';
 import 'am_widgets.dart';
+import 'presets_screen.dart';
 import 'color_picker_sheet.dart';
 
 /// BORDA E SOMBRA (v1.1.1): o traco da forma com pontas e juncoes, as
@@ -32,6 +36,95 @@ Future<void> showBordaESombraSheet(
     builder: (_) => ValueListenableBuilder<Duration>(
       valueListenable: playback.time,
       builder: (_, t, _) => BordaESombra(layerId: layerId, tempo: t),
+    ),
+  );
+}
+
+/// SALVAR O ACABAMENTO da camada como estilo, com nome, para qualquer
+/// outra camada de qualquer projeto.
+Future<void> _salvarEstilo(
+  BuildContext context,
+  LayerStyles estilos,
+  String sugestao,
+) async {
+  if (estilos.isEmpty) {
+    AureaSnack.show(context, 'Esta camada ainda não tem acabamento a salvar');
+    return;
+  }
+  final campo = TextEditingController(text: sugestao);
+  final nome = await showCupertinoDialog<String>(
+    context: context,
+    builder: (dialogo) => CupertinoAlertDialog(
+      title: const AppText('Nome do estilo'),
+      content: Padding(
+        padding: const EdgeInsets.only(top: 10),
+        child: CupertinoTextField(
+          key: const ValueKey('estilo-nome-campo'),
+          controller: campo,
+          autofocus: true,
+        ),
+      ),
+      actions: [
+        CupertinoDialogAction(
+          onPressed: () => Navigator.of(dialogo).pop(),
+          child: const AppText('Cancelar'),
+        ),
+        CupertinoDialogAction(
+          key: const ValueKey('estilo-nome-ok'),
+          onPressed: () => Navigator.of(dialogo).pop(campo.text.trim()),
+          child: const AppText('Salvar'),
+        ),
+      ],
+    ),
+  );
+  if (nome == null || nome.isEmpty) return;
+  await EstiloPresetStore.instance.add(
+    EstiloPreset(nome: nome, estilos: estilos),
+  );
+  if (!context.mounted) return;
+  AureaSnack.show(context, 'Estilo "$nome" salvo para todos os projetos');
+}
+
+/// Um dos dois botoes do topo da folha.
+class _BotaoDeEstilo extends StatelessWidget {
+  const _BotaoDeEstilo({
+    required this.chave,
+    required this.icone,
+    required this.rotulo,
+    required this.onTap,
+  });
+
+  final String chave;
+  final IconData icone;
+  final String rotulo;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Tocavel(
+    key: ValueKey(chave),
+    onTap: onTap,
+    child: Container(
+      height: 38,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: AmColors.chip,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icone, size: 15, color: AmColors.text),
+          const SizedBox(width: 6),
+          AppText(
+            rotulo,
+            style: const TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
+              color: AmColors.text,
+            ),
+          ),
+        ],
+      ),
     ),
   );
 }
@@ -120,6 +213,35 @@ class BordaESombra extends ConsumerWidget {
       key: const ValueKey('borda-e-sombra'),
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
       children: [
+        // O ACABAMENTO INTEIRO VIRA PRESET: e o que a pessoa refaz mais
+        // vezes — contorno branco com sombra, neon, adesivo.
+        Row(
+          children: [
+            Expanded(
+              child: _BotaoDeEstilo(
+                chave: 'estilo-galeria',
+                icone: CupertinoIcons.square_grid_2x2,
+                rotulo: 'Estilos prontos',
+                onTap: () => abrirTelaDePresets(
+                  context,
+                  layerId: layerId,
+                  at: tempo,
+                  aba: AbaDosPresets.estilos,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _BotaoDeEstilo(
+                chave: 'estilo-salvar',
+                icone: CupertinoIcons.bookmark,
+                rotulo: 'Salvar estilo',
+                onTap: () => _salvarEstilo(context, estilos, layer.name),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
         if (layer is ShapeLayer) ...[
           _Titulo(
             'Traço',
@@ -354,9 +476,8 @@ class BordaESombra extends ConsumerWidget {
             prefixo: 'sombra-interna',
             sombra: estilos.innerShadow!,
             local: local,
-            onMudar: (f) => mudarEstilos(
-              (s) => s.copyWith(innerShadow: f(s.innerShadow!)),
-            ),
+            onMudar: (f) =>
+                mudarEstilos((s) => s.copyWith(innerShadow: f(s.innerShadow!))),
           ),
         const SizedBox(height: 16),
         _Titulo(
@@ -425,7 +546,10 @@ class BordaESombra extends ConsumerWidget {
 /// mais larga que a ultima.
 StrokeStyle novaBorda(List<StrokeStyle> bordas, Duration local) {
   if (bordas.isEmpty) {
-    return StrokeStyle(color: const Color(0xFFFFFFFF), width: AnimatedDouble(6));
+    return StrokeStyle(
+      color: const Color(0xFFFFFFFF),
+      width: AnimatedDouble(6),
+    );
   }
   final ultima = bordas.last;
   const cores = [Color(0xFFFFFFFF), Color(0xFF12151A)];

@@ -6,31 +6,47 @@ import '../../../core/ui/am_colors.dart';
 import 'package:aurea/src/core/l10n/app_language.dart';
 
 // Change this revision when publishing a new set of release notes.
-const releaseNoticeRevision = '2026-09-15-beta-85';
+const releaseNoticeRevision = '2026-09-16-beta-86';
 const releaseNoticeSeenKey = 'aurea.releaseNotice.seen';
 
 const releaseHighlights = <(IconData, String, String)>[
   (
-    CupertinoIcons.wand_rays,
-    'Aba PRESETS na galeria',
-    '16 presets de um toque: o bundle 4nas.ftbl inteiro convertido pro motor (Main CC, Cold, Aura, Gorgeous, shakes, zooms, Twixtor…) e o novo Impact Flow — entra em disparada, freia em câmera lenta com optical flow e sai acelerando, pronto pros clipes decupados.',
+    CupertinoIcons.pencil_outline,
+    'Desenho a mao livre e animadores',
+    'Caneta, pincel macio, balde e borracha desenham direto no palco, e o '
+        'traco vira camada de verdade. E qualquer propriedade numerica '
+        'ganha ANIMADOR automatico (onda, vaivem, rampa, sorteio, pulso) '
+        'pelo menu do nome do parametro: movimento sem cravar keyframe.',
   ),
   (
-    CupertinoIcons.slider_horizontal_3,
-    'Editor numa língua só',
-    'Som, Partículas, Grade, Máscara, Elemento 3D, Formas, Precomp, Legenda e Estilos falam as linhas novas: a linha inteira arrasta, o número digita valor exato e o losango de keyframe mora na própria linha. Na Início, o cartão "Continuar editando" e a barra com blur ao rolar.',
+    CupertinoIcons.wand_stars,
+    'Vinte efeitos novos e galeria que sugere',
+    'Dissolver, pena, aparecer e sumir, cortina e cortina radial, quatro '
+        'repeticoes (linha, grade, circulo, espalhar), seis geradores '
+        '(nuvens, xadrez, listras, pontos, estrelas, raios), meio-tom, '
+        'contorno, brilho por dentro e bordas asperas. A galeria abre com '
+        'Sugeridos e Recentes, e segurar um efeito mostra a ficha com '
+        'ajustes prontos.',
   ),
   (
-    CupertinoIcons.textformat_alt,
-    'Texto 3D animado e iPhone 3D',
-    'Os presets de animação do texto normal agora valem letra a letra no Texto 3D (entrada, ênfase e saída). E o novo iPhone 3D entra com corpo, tela e lentes editáveis — a tela aceita sua imagem.',
+    CupertinoIcons.square_grid_2x2,
+    'Projetos e midia em lote',
+    'A lista de projetos busca, ordena e trabalha em lote (duplicar ou '
+        'excluir varios). Criar aceita 4:3, QHD 1440p e MEDIDA LIVRE. Na '
+        'galeria da certo marcar varias midias e mandar juntas ou em '
+        'sequencia, com a duracao de cada imagem na barra.',
   ),
   (
-    CupertinoIcons.checkmark_seal,
-    'Consertos dos seus relatos',
-    'Keyframes não escapam mais do lugar ao aparar vídeo/áudio; mídia importada com nome-hash vira "Vídeo 1"; rotações 3D coerentes entre camadas sob a câmera; e botões que "não respondiam" (um enfeite roubava o toque) corrigidos na raiz.',
+    CupertinoIcons.arrow_up_doc,
+    'O pacote .aurea e uma exportacao que avisa',
+    'O projeto agora viaja COM as midias num arquivo .aurea, e a Aurea '
+        'tambem abre .amproj e cenas em zip. A exportacao lembra seus '
+        'ajustes e mostra quanto tempo falta. Mais: sons recentes com anel '
+        'de escuta, fontes com busca e estrela, duracao padrao de camada '
+        'nova e a tela de boas-vindas na primeira abertura.',
   ),
 ];
+
 
 Future<void> showReleaseNotice(BuildContext context) => showDialog<void>(
   context: context,

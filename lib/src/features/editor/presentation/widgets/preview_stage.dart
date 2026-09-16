@@ -2206,7 +2206,10 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
         continue;
       }
 
-      children.add(w);
+      // CHAVE PELA CAMADA: sem ela, uma camada entrando ou saindo do tempo
+      // deslocava as vizinhas na lista, e cada uma herdava o elemento da
+      // outra — o conteudo (e o motor de uma Cena 3D) era recriado.
+      children.add(KeyedSubtree(key: ValueKey('camada-${layer.id}'), child: w));
     }
     return children;
   }
@@ -2926,24 +2929,22 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
 
     // Selecao desenhada DEPOIS dos efeitos: blur/glow nao pegam a borda.
     // Copias de eco (opacityMul < 1) nao ganham borda de selecao.
+    //
+    // A MOLDURA NAO MUDA A FORMA DA ARVORE. Ela era um Stack que so existia
+    // com a camada selecionada: selecionar trocava o pai do conteudo, e o
+    // Flutter destruia e recriava tudo embaixo — numa Cena 3D, o motor
+    // inteiro (geometria e texturas subindo de novo, alvos novos, a
+    // memoria antiga esperando o coletor). Agora e sempre o mesmo
+    // DecoratedBox, com ou sem borda.
     final contentSemSelecao = content;
-    if (layer.id == selectedId && opacityMul == 1) {
-      content = Stack(
-        clipBehavior: Clip.none,
-        children: [
-          content,
-          Positioned.fill(
-            child: IgnorePointer(
-              child: Container(
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.white, width: 4),
-                ),
-              ),
-            ),
-          ),
-        ],
-      );
-    }
+    final selecionada = layer.id == selectedId && opacityMul == 1;
+    content = DecoratedBox(
+      position: DecorationPosition.foreground,
+      decoration: selecionada
+          ? BoxDecoration(border: Border.all(color: Colors.white, width: 4))
+          : const BoxDecoration(),
+      child: content,
+    );
 
     // Rotacao 3D (eixos X/Y) — inclui o delta herdado do pai 3D.
     // Particulas NAO entram aqui: a rotacao delas e 3D real no painter.
@@ -3023,7 +3024,7 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
           ),
           child: contentSemSelecao,
         );
-        if (!identical(content, contentSemSelecao)) {
+        if (selecionada) {
           // A borda de selecao fica so na frente, sem virar caixa 3D.
           composed = Stack(
             clipBehavior: Clip.none,

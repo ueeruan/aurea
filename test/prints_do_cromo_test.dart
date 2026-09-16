@@ -173,7 +173,8 @@ void main() {
     expect(find.byKey(const ValueKey('selectbar-agrupar')), findsOneWidget);
     expect(find.byKey(const ValueKey('selectbar-mascarar')), findsOneWidget);
     expect(find.byKey(const ValueKey('selectbar-recortar')), findsOneWidget);
-    expect(find.byKey(const ValueKey('barra-do-lote-no-tempo')), findsOneWidget);
+    // A barra flutuante do lote saiu (cobria as trilhas selecionadas).
+    expect(find.byKey(const ValueKey('barra-do-lote-no-tempo')), findsNothing);
     await gravarPrint(tester, chave, 'cromo-editor-multi');
     // A segunda pagina: alinhar e distribuir.
     await tester.tap(find.byKey(const ValueKey('selectbar-pagina-layout')));

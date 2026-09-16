@@ -47,6 +47,7 @@ import 'shell/barra_de_tempo_tela_cheia.dart';
 import 'widgets/add_layer_sheet.dart';
 import 'widgets/mask_node_editor.dart';
 import 'widgets/preview_stage.dart';
+
 import 'package:aurea/src/core/l10n/app_language.dart';
 
 /// O EDITOR — cinco zonas fixas (secao 4 do prompt):
@@ -94,6 +95,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
         if (l is GroupLayer) coletar(l.children, out);
       }
     }
+
     final midias = <String>[];
     coletar(ref.read(editorControllerProvider).layers, midias);
     MediaPreviewService.instance.preparar(midias);
@@ -553,7 +555,8 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
               children: [
                 const Padding(
                   padding: EdgeInsets.fromLTRB(18, 14, 18, 6),
-                  child: AppText('Agrupar quais camadas?',
+                  child: AppText(
+                    'Agrupar quais camadas?',
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w700,
@@ -606,8 +609,6 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
     }
   }
 
-
-
   // ------------------------------------------------------- build
 
   @override
@@ -618,13 +619,13 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
 
     // TELA CHEIA DE VERDADE: some a barra de status e a de navegacao
     // enquanto a previa ocupa a tela; voltam ao sair.
-    ref.listen<bool>(
-      editorSessionProvider.select((s) => s.previewExpanded),
-      (antes, agora) {
-        if (antes == agora) return;
-        _modoDeSistema(agora);
-      },
-    );
+    ref.listen<bool>(editorSessionProvider.select((s) => s.previewExpanded), (
+      antes,
+      agora,
+    ) {
+      if (antes == agora) return;
+      _modoDeSistema(agora);
+    });
 
     ref.listen<String?>(selectedLayerProvider, (previous, next) {
       if (previous == next) return;
@@ -894,7 +895,12 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                   // cabecalho tinha 18. Com o cabecalho em 34 (o Voltar
                   // ganhou tamanho de alvo), sobravam 14 px para o texto
                   // e a dica saia cortada pela metade.
-                  sheetFraction: folhaFina && ws > 0
+                  // O PAINEL DO LOTE ("N camadas") e um cabecalho e uma
+                  // fileira de botoes: com a altura de painel inteiro, ele
+                  // comia a timeline e as outras camadas nao apareciam.
+                  sheetFraction: conteudo is MultiSelectionPanel && ws > 0
+                      ? (ContextSheet.handleHeight + 124) / ws
+                      : folhaFina && ws > 0
                       ? (ContextSheet.handleHeight + (semCamadas ? 86 : 30)) /
                             ws
                       : (mostrandoDicas && ws > 0
@@ -974,10 +980,10 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                               playback: _playback,
                             )
                           : BarraDoProjeto(
-                            onBack: _back,
-                            playback: _playback,
-                            onMenu: () => _abrirMenuDaTimeline(context, ref),
-                          ));
+                              onBack: _back,
+                              playback: _playback,
+                              onMenu: () => _abrirMenuDaTimeline(context, ref),
+                            ));
                 Widget timeline(double alturaTimeline) => RepaintBoundary(
                   child: AmTimeline(
                     playback: _playback,
@@ -1124,20 +1130,9 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                           ),
                         ),
                       ),
-                    if (!s.previewExpanded && !s.adding && multi.length >= 2)
-                      Positioned(
-                        left: largo ? 12 : 60,
-                        right: (largo ? larguraFolha : 0) + 76,
-                        bottom: largo
-                            ? 12
-                            : 6 + (conteudo == null ? 12 : m.sheet),
-                        child: Center(
-                          child: FittedBox(
-                            fit: BoxFit.scaleDown,
-                            child: BarraDoLoteNoTempo(playback: _playback),
-                          ),
-                        ),
-                      ),
+                    // A BARRA FLUTUANTE DO LOTE (aparar, dividir, alinhar no
+                    // tempo) saiu da selecao multipla (beta 89): ficava em
+                    // cima das trilhas e escondia as camadas selecionadas.
                     if (s.previewExpanded)
                       Positioned(
                         right: 10,
@@ -1305,7 +1300,8 @@ class _Diag3D extends StatelessWidget {
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: AmColors.hairline),
                 ),
-                child: AppText('── 3D ──\n'
+                child: AppText(
+                  '── 3D ──\n'
                   'nivel ${qualidade3dRotulo(nivel)} · pressao '
                   '${nivelDePressaoRotulo(pressao)} · ${c.motivo.value}\n'
                   'GPU estimada ${bytesLegiveis(est.total)} de '
@@ -1366,7 +1362,8 @@ class _RascunhoBadge extends ConsumerWidget {
               color: const Color(0xCC12151A),
               borderRadius: BorderRadius.circular(999),
             ),
-            child: const AppText('Rascunho · pause para ver a qualidade final',
+            child: const AppText(
+              'Rascunho · pause para ver a qualidade final',
               style: TextStyle(fontSize: 10.5, color: AmColors.muted),
             ),
           ),

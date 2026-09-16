@@ -45,15 +45,27 @@ class LinearLight {
   static bool get ready =>
       _ligado && _program != null && ui.ImageFilter.isShaderFilterSupported;
 
+  /// AS CURVAS PRONTAS, por modo e tamanho. Criar as duas a cada quadro
+  /// era um FragmentShader novo por chamada (nunca descartado) e um filtro
+  /// sempre diferente do anterior: o motor refazia a camada de filtro de
+  /// toda sombra e todo brilho mesmo com a imagem parada. O mesmo filtro
+  /// devolvido de novo deixa a camada inalterada.
+  static final Map<String, ui.ImageFilter> _curvas = {};
+
   static ui.ImageFilter? _curva(double mode, ui.Size size) {
     final p = _program;
     if (p == null) return null;
+    final chave =
+        '$mode:${size.width.toStringAsFixed(1)}:${size.height.toStringAsFixed(1)}';
+    final pronta = _curvas[chave];
+    if (pronta != null) return pronta;
+    if (_curvas.length >= 64) _curvas.remove(_curvas.keys.first);
     try {
       final shader = p.fragmentShader()
         ..setFloat(0, size.width <= 0 ? 1 : size.width)
         ..setFloat(1, size.height <= 0 ? 1 : size.height)
         ..setFloat(2, mode);
-      return ui.ImageFilter.shader(shader);
+      return _curvas[chave] = ui.ImageFilter.shader(shader);
     } catch (_) {
       // Aparelho sem suporte a shader como filtro.
       return null;

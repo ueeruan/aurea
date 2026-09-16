@@ -2446,6 +2446,12 @@ class ParticlesLayer extends Layer {
     this.trail = 0,
     this.lifeRandom = 0,
     this.glow = 0.25,
+    this.auxCount = 0,
+    this.auxLifeMs = 700,
+    this.auxInherit = 0.35,
+    this.auxSpeed = 60,
+    this.auxSize = 0.45,
+    this.auxStart = 0,
     super.position,
     super.scaleX,
     super.scaleY,
@@ -2522,6 +2528,32 @@ class ParticlesLayer extends Layer {
   /// Turbulencia: amplitude (px), tamanho do detalhe (px) e velocidade
   /// de evolucao do campo (ciclos/s).
   final double turbulence;
+  /// AS FAISCAS: quantas particulas nascem de CADA particula ao longo
+  /// do caminho dela. Zero desliga o sistema inteiro — e o padrao, para
+  /// projeto antigo abrir igual.
+  ///
+  /// E o que separa uma chuva de pontos de um fogo de artificio: a
+  /// faisca herda parte da velocidade de quem a soltou, ganha a sua
+  /// propria, e morre antes. A simulacao continua PURA: a faisca e
+  /// funcao de (semente, indice do pai, indice da faisca, tempo), entao
+  /// arrastar o cabecote para tras da o mesmo quadro.
+  final int auxCount;
+
+  /// Quanto tempo a faisca vive, em ms.
+  final double auxLifeMs;
+
+  /// Quanto da velocidade do pai a faisca leva junto (0..1).
+  final double auxInherit;
+
+  /// A velocidade PROPRIA da faisca, sorteada em todas as direcoes.
+  final double auxSpeed;
+
+  /// O tamanho da faisca, como fracao do tamanho do pai.
+  final double auxSize;
+
+  /// A partir de que fracao da vida do pai as faiscas comecam a sair.
+  final double auxStart;
+
   final double turbulenceScale;
   final double turbulenceSpeed;
 
@@ -2589,6 +2621,12 @@ class ParticlesLayer extends Layer {
     double? trail,
     double? lifeRandom,
     double? glow,
+    int? auxCount,
+    double? auxLifeMs,
+    double? auxInherit,
+    double? auxSpeed,
+    double? auxSize,
+    double? auxStart,
   }) {
     return ParticlesLayer(
       id: id,
@@ -2629,6 +2667,12 @@ class ParticlesLayer extends Layer {
       trail: trail ?? this.trail,
       lifeRandom: lifeRandom ?? this.lifeRandom,
       glow: glow ?? this.glow,
+      auxCount: auxCount ?? this.auxCount,
+      auxLifeMs: auxLifeMs ?? this.auxLifeMs,
+      auxInherit: auxInherit ?? this.auxInherit,
+      auxSpeed: auxSpeed ?? this.auxSpeed,
+      auxSize: auxSize ?? this.auxSize,
+      auxStart: auxStart ?? this.auxStart,
       position: position,
       scaleX: scaleX,
       scaleY: scaleY,
@@ -2715,6 +2759,12 @@ class ParticlesLayer extends Layer {
       trail: trail,
       lifeRandom: lifeRandom,
       glow: glow,
+      auxCount: auxCount,
+      auxLifeMs: auxLifeMs,
+      auxInherit: auxInherit,
+      auxSpeed: auxSpeed,
+      auxSize: auxSize,
+      auxStart: auxStart,
       position: position ?? this.position,
       scaleX: scaleX ?? this.scaleX,
       scaleY: scaleY ?? this.scaleY,
@@ -2776,6 +2826,12 @@ class ParticlesLayer extends Layer {
     trail: trail,
     lifeRandom: lifeRandom,
     glow: glow,
+    auxCount: auxCount,
+    auxLifeMs: auxLifeMs,
+    auxInherit: auxInherit,
+    auxSpeed: auxSpeed,
+    auxSize: auxSize,
+    auxStart: auxStart,
     position: position,
     scaleX: scaleX,
     scaleY: scaleY,

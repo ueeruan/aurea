@@ -1371,6 +1371,14 @@ Map<String, dynamic> layerToJson(Layer l) {
       base['drag'] = p.drag;
       base['turb'] = p.turbulence;
       base['turbScale'] = p.turbulenceScale;
+      if (p.auxCount > 0) {
+        base['auxN'] = p.auxCount;
+        base['auxLife'] = p.auxLifeMs;
+        base['auxInh'] = p.auxInherit;
+        base['auxSpd'] = p.auxSpeed;
+        base['auxSize'] = p.auxSize;
+        base['auxStart'] = p.auxStart;
+      }
       base['turbSpeed'] = p.turbulenceSpeed;
       base['sizeLife'] = p.sizeOverLife;
       base['sizeRnd'] = p.sizeRandom;
@@ -2459,6 +2467,12 @@ Layer layerFromJson(Map<String, dynamic> m) {
         drag: (m['drag'] as num?)?.toDouble() ?? 0,
         turbulence: (m['turb'] as num?)?.toDouble() ?? 0,
         turbulenceScale: (m['turbScale'] as num?)?.toDouble() ?? 300,
+        auxCount: (m['auxN'] as num?)?.toInt() ?? 0,
+        auxLifeMs: (m['auxLife'] as num?)?.toDouble() ?? 700,
+        auxInherit: (m['auxInh'] as num?)?.toDouble() ?? 0.35,
+        auxSpeed: (m['auxSpd'] as num?)?.toDouble() ?? 60,
+        auxSize: (m['auxSize'] as num?)?.toDouble() ?? 0.45,
+        auxStart: (m['auxStart'] as num?)?.toDouble() ?? 0,
         turbulenceSpeed: (m['turbSpeed'] as num?)?.toDouble() ?? 1,
         sizeOverLife: (m['sizeLife'] as num?)?.toInt() ?? 0,
         sizeRandom: (m['sizeRnd'] as num?)?.toDouble() ?? 0.5,

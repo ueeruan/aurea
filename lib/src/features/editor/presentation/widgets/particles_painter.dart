@@ -156,6 +156,10 @@ class ParticlesPainter extends CustomPainter {
     final turbF = 1 / math.max(8.0, layer.turbulenceScale);
     final turbT = tSec * layer.turbulenceSpeed * 0.35;
     final nGhost = layer.trail <= 0.001 ? 0 : (layer.trail * 6).ceil();
+    // AS FAISCAS: teto de 24 por particula para nao explodir o custo do
+    // quadro num campo grande.
+    final auxN = layer.auxCount.clamp(0, 24);
+    final auxLife = math.max(0.05, layer.auxLifeMs / 1000.0);
     final ghostGap = 0.05 * (0.5 + layer.trail);
 
     // 1a passada: simula + projeta; 2a: desenha do fundo pra frente.
@@ -233,11 +237,20 @@ class ParticlesPainter extends CustomPainter {
           vz = (_rand(i, 10) - 0.5) * layer.speed;
       }
 
-      // TRAJETORIA (forma fechada) em uma idade qualquer.
-      (double, double, double) posAt(double a) {
-        var px = _integra(bx, vx, 0, layer.windX, k, a);
-        var py = _integra(by, vy, layer.gravity, layer.windY, k, a);
-        var pz = _integra(bz, vz, 0, 0, k, a);
+      // TRAJETORIA (forma fechada) de UM nascimento e UMA velocidade
+      // quaisquer — a particula usa a dela, a faisca usa a sua.
+      (double, double, double) trajetoria(
+        double ox,
+        double oy,
+        double oz,
+        double ux,
+        double uy,
+        double uz,
+        double a,
+      ) {
+        var px = _integra(ox, ux, 0, layer.windX, k, a);
+        var py = _integra(oy, uy, layer.gravity, layer.windY, k, a);
+        var pz = _integra(oz, uz, 0, 0, k, a);
         if (turb > 0) {
           // Campo de ruido lido na posicao: cada particula sente uma
           // direcao diferente, e o campo evolui no tempo. Entra com
@@ -250,6 +263,9 @@ class ParticlesPainter extends CustomPainter {
         }
         return (px, py, pz);
       }
+
+      (double, double, double) posAt(double a) =>
+          trajetoria(bx, by, bz, vx, vy, vz, a);
 
       // Rotacao do sistema + projecao por particula.
       _Proj? projeta(double a, double alphaMul, double radiusMul) {
@@ -341,6 +357,85 @@ class ParticlesPainter extends CustomPainter {
         final f = 1 - g / (nGhost + 1);
         final ghost = projeta(a, 0.6 * f, 0.5 + 0.5 * f);
         if (ghost != null) drawList.add(ghost);
+      }
+
+      final inicioAux = lifeI * layer.auxStart.clamp(0.0, 0.95);
+
+      // AS FAISCAS: cada particula solta as suas ao longo do caminho.
+      //
+      // A faisca e funcao de (semente, pai, indice da faisca, tempo) —
+      // nada acumula, entao arrastar o cabecote para tras devolve o
+      // mesmo quadro. Ela nasce onde o pai estava, leva um tanto da
+      // velocidade dele e ganha a sua propria em qualquer direcao.
+      if (auxN > 0) {
+        for (var s = 0; s < auxN; s++) {
+          // Quando esta faisca sai: espalhadas pela vida do pai, a
+          // partir de `auxStart`, com um empurrao aleatorio para nao
+          // sairem todas no mesmo instante.
+          final fatia = (s + _rand(i, 40 + s)) / auxN;
+          final ta = inicioAux + (lifeI - inicioAux) * fatia;
+          final idade = age - ta;
+          if (idade < 0 || idade > auxLife) continue;
+
+          final (nx0, ny0, nz0) = posAt(ta);
+          // A velocidade do pai no instante do parto, por diferenca
+          // finita da propria trajetoria (a conta ja existe e continua
+          // pura).
+          const h = 1 / 90;
+          final (nx1, ny1, nz1) = posAt(ta + h);
+          final hx = (nx1 - nx0) / h * layer.auxInherit;
+          final hy = (ny1 - ny0) / h * layer.auxInherit;
+          final hz = (nz1 - nz0) / h * layer.auxInherit;
+
+          // A sua propria, sorteada numa esfera.
+          final cz = 2 * _rand(i, 60 + s) - 1;
+          final ph = 2 * math.pi * _rand(i, 80 + s);
+          final rr = math.sqrt(1 - cz * cz);
+          final vv = layer.auxSpeed * (0.4 + 0.6 * _rand(i, 100 + s));
+
+          final (fx, fy, fz) = trajetoria(
+            nx0,
+            ny0,
+            nz0,
+            hx + rr * math.cos(ph) * vv,
+            hy + rr * math.sin(ph) * vv,
+            hz + cz * vv,
+            idade,
+          );
+
+          final y1 = fy * cxr - fz * sxr;
+          final z1 = fy * sxr + fz * cxr;
+          final x1 = fx * cyr + z1 * syr;
+          final z2 = -fx * syr + z1 * cyr;
+          final wx = x1 * czr - y1 * szr;
+          final wy = x1 * szr + y1 * czr;
+          final f = focal.isFinite && focal > 60 ? focal : _focalPadrao;
+          final denom = f + z2;
+          if (denom < 60) continue;
+          final proj = (f / denom).clamp(0.02, 6.0);
+
+          // A faisca acende e apaga dentro da propria vida.
+          final uf = (idade / auxLife).clamp(0.0, 1.0);
+          final alphaF =
+              (uf / 0.12).clamp(0.0, 1.0) * (1 - uf) * (1 - uf);
+          if (alphaF <= 0.01) continue;
+          final rF = layer.size * layer.auxSize * (1 - 0.5 * uf) * proj * 0.5;
+          if (rF < 0.3) continue;
+
+          drawList.add(
+            _Proj(
+              z: z2,
+              pos: center + Offset(wx, wy) * proj,
+              radius: rF,
+              alpha: alphaF,
+              variant: _rand(i, 120 + s),
+              u: uf,
+              angle: (layer.spin * idade + _rand(i, 140 + s) * 360) *
+                  math.pi /
+                  180,
+            ),
+          );
+        }
       }
     }
 

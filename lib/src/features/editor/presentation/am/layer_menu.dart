@@ -2146,6 +2146,67 @@ Future<void> showParticlesSheet(
                   amNumber(layer.turbulenceSpeed, 2),
                   (v) => up((p) => p.copyParticles(turbulenceSpeed: v)),
                 ),
+                // AS FAISCAS: em zero o sistema inteiro dorme, e a
+                // camada se comporta como sempre se comportou. Os
+                // controles abaixo so aparecem depois de acender.
+                row(
+                  'Faiscas',
+                  layer.auxCount.toDouble(),
+                  0,
+                  24,
+                  1,
+                  amNumber(layer.auxCount.toDouble(), 0),
+                  (v) => up(
+                    (p) => p.copyParticles(auxCount: v.round()),
+                  ),
+                ),
+                if (layer.auxCount > 0) ...[
+                  row(
+                    'Vida da faisca',
+                    layer.auxLifeMs,
+                    80,
+                    4000,
+                    10,
+                    amNumber(layer.auxLifeMs, 0),
+                    (v) => up((p) => p.copyParticles(auxLifeMs: v)),
+                  ),
+                  row(
+                    'Herda do pai',
+                    layer.auxInherit,
+                    0,
+                    1,
+                    0.01,
+                    amNumber(layer.auxInherit, 2),
+                    (v) => up((p) => p.copyParticles(auxInherit: v)),
+                  ),
+                  row(
+                    'Forca da faisca',
+                    layer.auxSpeed,
+                    0,
+                    600,
+                    1,
+                    amNumber(layer.auxSpeed, 0),
+                    (v) => up((p) => p.copyParticles(auxSpeed: v)),
+                  ),
+                  row(
+                    'Tamanho da faisca',
+                    layer.auxSize,
+                    0.05,
+                    2,
+                    0.01,
+                    amNumber(layer.auxSize, 2),
+                    (v) => up((p) => p.copyParticles(auxSize: v)),
+                  ),
+                  row(
+                    'Comeca em',
+                    layer.auxStart,
+                    0,
+                    0.95,
+                    0.01,
+                    amNumber(layer.auxStart, 2),
+                    (v) => up((p) => p.copyParticles(auxStart: v)),
+                  ),
+                ],
                 row(
                   'Giro',
                   layer.spin,

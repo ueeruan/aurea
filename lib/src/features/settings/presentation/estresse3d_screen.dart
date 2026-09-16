@@ -22,11 +22,13 @@ import '../../editor/application/preview_stats.dart';
 import '../../editor/application/qualidade3d_controller.dart';
 import '../../editor/application/scene3d_gpu.dart';
 import '../../editor/application/video_layer_manager.dart';
+import '../../editor/domain/bancada_do_nucleo.dart';
 import '../../editor/domain/effect.dart';
 import '../../editor/domain/estresse3d.dart';
 import '../../editor/domain/keyframe.dart';
 import '../../editor/domain/layer.dart';
 import '../../editor/domain/orcamento_render.dart';
+import '../../editor/domain/video_project.dart';
 import '../../editor/presentation/widgets/preview_stage.dart';
 
 /// O TESTE DE ESTRESSE DO MOTOR 3D — roda no aparelho de verdade, e
@@ -140,6 +142,12 @@ class _Estresse3DScreenState extends State<Estresse3DScreen>
   TimingsCallback? _cb;
   Timer? _amostrador;
 
+  // A BANCADA DO NUCLEO (cenas A-E): o motor atual medido no aparelho,
+  // antes de cada pedaco ir para o C++.
+  bool _modoBancada = false;
+  final List<String> _linhasDaBancada = [];
+  Ticker? _arrasto;
+
   @override
   void initState() {
     super.initState();
@@ -164,9 +172,14 @@ class _Estresse3DScreenState extends State<Estresse3DScreen>
     if (mounted) setState(() {});
   }
 
+  /// Durante o dispose o State ainda esta montado, mas setState nele ja e
+  /// erro: sair da tela no meio de uma cena disparava a assercao.
+  bool _descartando = false;
+
   @override
   void dispose() {
     _cancelar = true;
+    _descartando = true;
     _desmontar();
     super.dispose();
   }
@@ -256,6 +269,193 @@ class _Estresse3DScreenState extends State<Estresse3DScreen>
     return null;
   }
 
+  // ------------------------------------------------- bancada do nucleo
+
+  /// Monta [projeto] no palco desta tela, num container so dele.
+  Future<void> _montarProjeto(VideoProject projeto) async {
+    final container = ProviderContainer(
+      overrides: [sharedPreferencesProvider.overrideWithValue(_prefs!)],
+    );
+    container.read(editorControllerProvider.notifier).openProject(projeto);
+    _layers = container.read(editorControllerProvider).layers;
+    final playback = PlaybackController(
+      vsync: this,
+      durationOf: () => duracaoDaBancada,
+    );
+    final videos = VideoLayerManager();
+    _ouvinteDoTempo = () {
+      videos.sync(_layers, playback.time.value, playback.playing.value);
+    };
+    playback.time.addListener(_ouvinteDoTempo!);
+    playback.loop.value = true;
+    setState(() {
+      _container = container;
+      _playback = playback;
+      _videos = videos;
+    });
+    await Future<void>.delayed(const Duration(milliseconds: 800));
+  }
+
+  Future<void> _rodarBancada() async {
+    if (_rodando) return;
+    final prefs = _prefs;
+    if (prefs == null) return;
+    setState(() {
+      _rodando = true;
+      _cancelar = false;
+      _modoBancada = true;
+      _resultados.clear();
+      _linhasDaBancada.clear();
+      _status = 'Preparando o video de teste...';
+    });
+    await prefs.remove(_kRelatorio);
+    try {
+      _video = await _gerarVideo();
+    } catch (_) {
+      _video = null;
+    }
+    for (var i = 0; i < receitasDaBancada.length; i++) {
+      if (_cancelar || !mounted) break;
+      final r = receitasDaBancada[i];
+      setState(() {
+        _indice = i;
+        _status = 'Bancada ${r.letra}: ${r.titulo}';
+      });
+      await prefs.setString(_kRodando, 'bancada ${r.letra} (${r.titulo})');
+      _linhasDaBancada.addAll(await _medirCenaDaBancada(r));
+      await prefs.remove(_kRodando);
+      await prefs.setString(_kRelatorio, _relatorioDaBancada());
+      if (mounted) setState(() {});
+    }
+
+    // VAZAMENTO: a mesma cena montada e desmontada oito vezes. O que se le
+    // e a tendencia da memoria, nao o valor.
+    if (!_cancelar && mounted) {
+      setState(() {
+        _indice = receitasDaBancada.length;
+        _status = 'Ciclos de memoria: cena D montada e desmontada 8 vezes';
+      });
+      await prefs.setString(_kRodando, 'bancada: ciclos de memoria (cena D)');
+      final rss = <int>[];
+      for (var k = 0; k < 8 && !_cancelar && mounted; k++) {
+        await _montarProjeto(
+          montarCenaDaBancada(CenaDaBancada.d, video: _video),
+        );
+        _playback?.play();
+        await Future<void>.delayed(const Duration(seconds: 2));
+        _playback?.pause();
+        _desmontar();
+        await Future<void>.delayed(const Duration(milliseconds: 1500));
+        rss.add(_rssMb());
+      }
+      await prefs.remove(_kRodando);
+      _linhasDaBancada.add(CiclosDeMemoria(rss).linha);
+    }
+    await prefs.setString(_kRelatorio, _relatorioDaBancada());
+    if (mounted) {
+      setState(() {
+        _rodando = false;
+        _indice = -1;
+        _status = _cancelar
+            ? 'Cancelado.'
+            : 'Terminado. Copie o relatorio e envie.';
+      });
+    }
+  }
+
+  /// Uma cena: oito segundos tocando, seis arrastando o cursor.
+  Future<List<String>> _medirCenaDaBancada(ReceitaDaBancada r) async {
+    final controlador = ControladorDeQualidade3D.instancia;
+    controlador.zerar();
+    final semVideo = r.video && _video == null;
+    await _montarProjeto(montarCenaDaBancada(r.id, video: _video));
+    final playback = _playback!;
+    final rssInicio = _rssMb();
+    _rssPico = rssInicio;
+    _amostrador = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      final rss = _rssMb();
+      if (rss > _rssPico) _rssPico = rss;
+    });
+
+    var fase = <QuadroMedido>[];
+    _cb = (timings) {
+      for (final t in timings) {
+        fase.add(
+          QuadroMedido(
+            buildMs: t.buildDuration.inMicroseconds / 1000.0,
+            rasterMs: t.rasterDuration.inMicroseconds / 1000.0,
+            totalMs: t.totalSpan.inMicroseconds / 1000.0,
+          ),
+        );
+      }
+    };
+    SchedulerBinding.instance.addTimingsCallback(_cb!);
+
+    // Os tempos de quadro chegam em lote (no release, cerca de um por
+    // segundo): depois de cada fase o palco fica parado ate o lote dela
+    // chegar, e so entao a lista troca.
+    Future<MedidaDaBancada> medir(Future<void> Function() corpo) async {
+      final quadros = <QuadroMedido>[];
+      fase = quadros;
+      final relogio = Stopwatch()..start();
+      await corpo();
+      relogio.stop();
+      await Future<void>.delayed(const Duration(milliseconds: 1600));
+      return MedidaDaBancada(
+        quadros,
+        segundos: relogio.elapsedMicroseconds / 1e6,
+      );
+    }
+
+    final tocando = await medir(() async {
+      playback.play();
+      await Future<void>.delayed(const Duration(seconds: 8));
+      playback.pause();
+    });
+    final arrastando = await medir(() async {
+      final arrasto = createTicker(
+        (decorrido) => playback.seek(tempoDoArrasto(decorrido)),
+      );
+      _arrasto = arrasto;
+      arrasto.start();
+      await Future<void>.delayed(const Duration(seconds: 6));
+      arrasto.dispose();
+      _arrasto = null;
+    });
+    final motor = r.id == CenaDaBancada.d || r.id == CenaDaBancada.e
+        ? (PreviewStats.cena3d.value?.toString() ?? Scene3DGpu.comoDesenha)
+        : null;
+    _desmontar();
+    await Future<void>.delayed(const Duration(milliseconds: 1500));
+    return [
+      '${r.letra} — ${r.titulo}${semVideo ? ' (SEM VIDEO: o FFmpeg nao gerou)' : ''}',
+      '   ${tocando.linha('tocando')}',
+      '   ${arrastando.linha('arrastando')}',
+      '   memoria: inicio $rssInicio MB · pico $_rssPico MB · fim ${_rssMb()} MB',
+      if (motor != null) '   3D: $motor',
+    ];
+  }
+
+  String _relatorioDaBancada() {
+    final c = ControladorDeQualidade3D.instancia;
+    final b = StringBuffer()
+      ..writeln('AUREA — BANCADA DO NUCLEO (motor atual)')
+      ..writeln(
+        '${Platform.operatingSystem} ${Platform.operatingSystemVersion}',
+      )
+      ..writeln(
+        'RAM ${c.ramBytes > 0 ? bytesLegiveis(c.ramBytes) : '?'} · '
+        'motor 3D ${Scene3DGpu.comoDesenha} · '
+        'video de teste: ${_video != null ? 'sim' : 'nao'}',
+      )
+      ..writeln('UI = fio da interface (build); raster = fio da GPU')
+      ..writeln('');
+    for (final l in _linhasDaBancada) {
+      b.writeln(l);
+    }
+    return b.toString();
+  }
+
   // ------------------------------------------------------------ o laco
 
   Future<void> _rodarTudo() async {
@@ -265,6 +465,7 @@ class _Estresse3DScreenState extends State<Estresse3DScreen>
     setState(() {
       _rodando = true;
       _cancelar = false;
+      _modoBancada = false;
       _resultados.clear();
       _status = 'Preparando texturas e video de teste...';
     });
@@ -342,20 +543,15 @@ class _Estresse3DScreenState extends State<Estresse3DScreen>
             for (final l in p.layers)
               if (l is ShapeLayer && l.name.startsWith('Estresse'))
                 l.copyLayer(
+                  // Efeitos que EXISTEM no catalogo de hoje. Light Glow, Glow
+                  // Volumetrico e Film Grain sairam dele quando o catalogo foi
+                  // refeito, e o EffectInstance deles lancava: as cenas com
+                  // efeito paravam no meio sem relatorio.
                   effects: receita.efeitos
                       ? [
-                          EffectInstance(
-                            type: EffectType.lightGlow,
-                            params: const {},
-                          ),
-                          EffectInstance(
-                            type: EffectType.glowVol,
-                            params: const {},
-                          ),
-                          EffectInstance(
-                            type: EffectType.filmGrain,
-                            params: const {},
-                          ),
+                          EffectInstance(type: EffectType.unsharpMask),
+                          EffectInstance(type: EffectType.vignette),
+                          EffectInstance(type: EffectType.vhsDamage),
                         ]
                       : const [],
                   rotation: receita.motionGraph
@@ -473,6 +669,8 @@ class _Estresse3DScreenState extends State<Estresse3DScreen>
   }
 
   void _desmontar() {
+    _arrasto?.dispose();
+    _arrasto = null;
     final cb = _cb;
     if (cb != null) SchedulerBinding.instance.removeTimingsCallback(cb);
     _cb = null;
@@ -486,7 +684,7 @@ class _Estresse3DScreenState extends State<Estresse3DScreen>
       playback.time.removeListener(ouvinte);
     }
     _ouvinteDoTempo = null;
-    if (mounted) {
+    if (mounted && !_descartando) {
       setState(() {
         _container = null;
         _playback = null;
@@ -549,7 +747,9 @@ class _Estresse3DScreenState extends State<Estresse3DScreen>
     final container = _container;
     final playback = _playback;
     final videos = _videos;
-    final relatorio = _resultados.isEmpty
+    final relatorio = _modoBancada && _linhasDaBancada.isNotEmpty
+        ? _relatorioDaBancada()
+        : _resultados.isEmpty
         ? (_relatorioAnterior ?? '')
         : _relatorio();
     return Scaffold(
@@ -583,25 +783,53 @@ class _Estresse3DScreenState extends State<Estresse3DScreen>
             ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-            child: Row(
+            // Status numa linha, botoes na de baixo: dois botoes e o status
+            // na mesma linha nao cabem num celular estreito.
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Expanded(
-                  child: AppText(
-                    _status,
-                    style: TextStyle(fontSize: 13, color: AppColors.muted),
-                  ),
+                AppText(
+                  _status,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 13, color: AppColors.muted),
                 ),
+                const SizedBox(height: 8),
                 if (_rodando)
-                  TextButton(
-                    onPressed: () => _cancelar = true,
-                    child: const AppText('Cancelar'),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: () => _cancelar = true,
+                      child: const AppText('Cancelar'),
+                    ),
                   )
                 else
-                  FilledButton(
-                    onPressed: _prefs == null ? null : _rodarTudo,
-                    child: AppText(
-                      _resultados.isEmpty ? 'Rodar os nove' : 'Rodar de novo',
-                    ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: _prefs == null ? null : _rodarBancada,
+                          child: const AppText(
+                            'Bancada A-E',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: FilledButton(
+                          onPressed: _prefs == null ? null : _rodarTudo,
+                          child: AppText(
+                            _resultados.isEmpty
+                                ? 'Rodar os nove'
+                                : 'Rodar de novo',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
               ],
             ),
@@ -609,7 +837,11 @@ class _Estresse3DScreenState extends State<Estresse3DScreen>
           if (_indice >= 0)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: LinearProgressIndicator(value: (_indice + 1) / 9),
+              child: LinearProgressIndicator(
+                value:
+                    (_indice + 1) /
+                    (_modoBancada ? receitasDaBancada.length + 1 : 9),
+              ),
             ),
           Expanded(
             child: SingleChildScrollView(

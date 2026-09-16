@@ -53,7 +53,7 @@ class ReceitaDeEstresse {
   /// A tela poe uma camada de texto por cima.
   final bool texto;
 
-  /// A tela poe uma forma com glow, glow volumetrico e grao.
+  /// A tela poe uma forma com Unsharp Mask, Vignette e VHS Damage.
   final bool efeitos;
 
   /// A tela poe uma forma com cinquenta keyframes e uma expressao.

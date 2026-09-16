@@ -63,6 +63,12 @@ class _NewProjectSheetState extends ConsumerState<_NewProjectSheet> {
   late int _fps;
   late int _resolution;
 
+  /// MEDIDA LIVRE: quem sabe exatamente o quadro que quer digita os dois
+  /// numeros, e a proporcao sai deles.
+  bool _livre = false;
+  final _larguraLivre = TextEditingController(text: '1080');
+  final _alturaLivre = TextEditingController(text: '1350');
+
   @override
   void initState() {
     super.initState();
@@ -76,16 +82,29 @@ class _NewProjectSheetState extends ConsumerState<_NewProjectSheet> {
   @override
   void dispose() {
     _nameController.dispose();
+    _larguraLivre.dispose();
+    _alturaLivre.dispose();
     super.dispose();
+  }
+
+  ({int largura, int altura}) _quadroLivre() {
+    final w = (int.tryParse(_larguraLivre.text) ?? 1080).clamp(64, 7680);
+    final h = (int.tryParse(_alturaLivre.text) ?? 1350).clamp(64, 7680);
+    return (largura: w, altura: h);
   }
 
   void _create() {
     final name = _nameController.text.trim();
+    final livre = _quadroLivre();
     final project = VideoProject.empty(
       name.isEmpty ? (widget.nomeSugerido ?? 'Projeto sem titulo') : name,
-      aspectRatio: ProjectPresets.aspectByKey(_aspectKey).ratio,
+      aspectRatio: _livre
+          ? livre.largura / livre.altura
+          : ProjectPresets.aspectByKey(_aspectKey).ratio,
       fps: _fps,
-      resolutionHeight: _resolution,
+      resolutionHeight: _livre
+          ? (livre.largura < livre.altura ? livre.largura : livre.altura)
+          : _resolution,
     );
     Navigator.of(context).pop(project);
   }
@@ -94,7 +113,11 @@ class _NewProjectSheetState extends ConsumerState<_NewProjectSheet> {
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
     final aspect = ProjectPresets.aspectByKey(_aspectKey);
-    final quadro = quadroDoFormato(aspect.ratio, _resolution);
+    final livre = _quadroLivre();
+    final quadro = _livre ? livre : quadroDoFormato(aspect.ratio, _resolution);
+    final ratioNaTela = _livre
+        ? (livre.largura / livre.altura).clamp(0.2, 5.0).toDouble()
+        : aspect.ratio;
 
     return Padding(
       padding: EdgeInsets.fromLTRB(20, 12, 20, 16 + bottomInset),
@@ -133,9 +156,11 @@ class _NewProjectSheetState extends ConsumerState<_NewProjectSheet> {
             ),
             const SizedBox(height: 16),
             _Moldura(
-              ratio: aspect.ratio,
-              label: aspect.label,
-              hint: aspect.hint,
+              ratio: ratioNaTela,
+              label: _livre
+                  ? '${livre.largura} × ${livre.altura}'
+                  : aspect.label,
+              hint: _livre ? 'Medida livre' : aspect.hint,
             ),
             const SizedBox(height: 12),
             Row(
@@ -145,12 +170,58 @@ class _NewProjectSheetState extends ConsumerState<_NewProjectSheet> {
                     child: _FormatoItem(
                       key: ValueKey('formato-${option.key}'),
                       option: option,
-                      selected: option.key == _aspectKey,
-                      onTap: () => setState(() => _aspectKey = option.key),
+                      selected: !_livre && option.key == _aspectKey,
+                      onTap: () => setState(() {
+                        _livre = false;
+                        _aspectKey = option.key;
+                      }),
                     ),
                   ),
+                // MEDIDA LIVRE: os dois numeros na mao, para quem sabe o
+                // quadro exato que quer (banner, tela de LED, thumb).
+                Expanded(
+                  child: _FormatoItem(
+                    key: const ValueKey('formato-livre'),
+                    option: const AspectOption(
+                      key: 'livre',
+                      label: 'Livre',
+                      hint: 'Você escolhe',
+                      ratio: 1,
+                      icon: CupertinoIcons.pencil_outline,
+                    ),
+                    selected: _livre,
+                    onTap: () => setState(() => _livre = true),
+                  ),
+                ),
               ],
             ),
+            if (_livre) ...[
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: _CampoDeMedida(
+                      chave: 'livre-largura',
+                      rotulo: 'Largura',
+                      controller: _larguraLivre,
+                      onMudou: () => setState(() {}),
+                    ),
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 10),
+                    child: AppText('×', style: TextStyle(fontSize: 16)),
+                  ),
+                  Expanded(
+                    child: _CampoDeMedida(
+                      chave: 'livre-altura',
+                      rotulo: 'Altura',
+                      controller: _alturaLivre,
+                      onMudou: () => setState(() {}),
+                    ),
+                  ),
+                ],
+              ),
+            ],
             const SizedBox(height: 20),
             const _SectionLabel('Nome'),
             const SizedBox(height: 8),
@@ -176,15 +247,17 @@ class _NewProjectSheetState extends ConsumerState<_NewProjectSheet> {
               ),
               onSubmitted: (_) => _create(),
             ),
-            const SizedBox(height: 18),
-            const _SectionLabel('Resolução'),
-            const SizedBox(height: 8),
-            _Segmented<int>(
-              values: ProjectPresets.resolutions,
-              selected: _resolution,
-              labelOf: ProjectPresets.resolutionLabel,
-              onChanged: (v) => setState(() => _resolution = v),
-            ),
+            if (!_livre) ...[
+              const SizedBox(height: 18),
+              const _SectionLabel('Resolução'),
+              const SizedBox(height: 8),
+              _Segmented<int>(
+                values: ProjectPresets.resolutions,
+                selected: _resolution,
+                labelOf: ProjectPresets.resolutionLabel,
+                onChanged: (v) => setState(() => _resolution = v),
+              ),
+            ],
             const SizedBox(height: 18),
             const _SectionLabel('Quadros por segundo'),
             const SizedBox(height: 8),
@@ -254,24 +327,30 @@ class _Moldura extends StatelessWidget {
               child: child,
             ),
           ),
+          // Uma medida livre bem magra (64 x 1350) deixa a moldura com
+          // 30 px de largura: o texto ENCOLHE em vez de estourar.
           child: Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                AppText(
-                  label,
-                  key: const ValueKey('moldura-formato'),
-                  style: TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: -0.3,
-                    color: AppColors.onDark,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  AppText(
+                    label,
+                    key: const ValueKey('moldura-formato'),
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -0.3,
+                      color: AppColors.onDark,
+                    ),
                   ),
-                ),
-                AppText(hint,
-                  style: TextStyle(fontSize: 12, color: AppColors.muted),
-                ),
-              ],
+                  AppText(
+                    hint,
+                    style: TextStyle(fontSize: 12, color: AppColors.muted),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -326,7 +405,8 @@ class _FormatoItem extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 7),
-            AppText(option.label,
+            AppText(
+              option.label,
               style: TextStyle(
                 fontSize: 12.5,
                 fontWeight: FontWeight.w600,
@@ -334,7 +414,8 @@ class _FormatoItem extends StatelessWidget {
                 color: selected ? AppColors.lime : AppColors.onDark,
               ),
             ),
-            AppText(option.hint,
+            AppText(
+              option.hint,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: 10, color: AppColors.muted),
@@ -407,4 +488,40 @@ class _Segmented<T extends Object> extends StatelessWidget {
       ),
     );
   }
+}
+
+/// UM DOS DOIS NUMEROS da medida livre.
+class _CampoDeMedida extends StatelessWidget {
+  const _CampoDeMedida({
+    required this.chave,
+    required this.rotulo,
+    required this.controller,
+    required this.onMudou,
+  });
+
+  final String chave;
+  final String rotulo;
+  final TextEditingController controller;
+  final VoidCallback onMudou;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      AppText(rotulo, style: TextStyle(fontSize: 11, color: AppColors.muted)),
+      const SizedBox(height: 4),
+      CupertinoTextField(
+        key: ValueKey(chave),
+        controller: controller,
+        keyboardType: TextInputType.number,
+        style: TextStyle(fontSize: 16, color: AppColors.onDark),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: AppColors.surfaceHigh,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        onChanged: (_) => onMudou(),
+      ),
+    ],
+  );
 }

@@ -136,6 +136,13 @@ void main() {
         find.byKey(const ValueKey('projeto-areas-seguras')),
         findsOneWidget,
       );
+      // A linha de proporcao ganhou o 4:3 (v1.1.1) e a folha ficou um
+      // pouco mais alta: garantir que o interruptor esta na tela antes
+      // de tocar.
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('projeto-areas-seguras')),
+      );
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('projeto-areas-seguras')));
       await tester.pumpAndSettle();
       expect(c.read(editorControllerProvider).guides.showSafeAreas, isTrue);

@@ -727,11 +727,14 @@ class EditorController extends Notifier<VideoProject> {
     String path,
     String name, {
     double? proporcao,
+    Duration duracao = const Duration(seconds: 3),
   }) {
     final layer = ImageLayer(
       name: _nomeDeMidia(name, video: false),
       startTime: at,
-      duration: const Duration(seconds: 3),
+      duration: duracao < const Duration(milliseconds: 100)
+          ? const Duration(milliseconds: 100)
+          : duracao,
       sourcePath: path,
       ajuste: AjusteDaMidia.cobrir,
       proporcaoDaFonte: proporcaoValida(proporcao),

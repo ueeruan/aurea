@@ -47,9 +47,16 @@ abstract final class ProjectPresets {
       ratio: 4 / 5,
       icon: CupertinoIcons.photo,
     ),
+    AspectOption(
+      key: '4:3',
+      label: '4:3',
+      hint: 'Clássico',
+      ratio: 4 / 3,
+      icon: CupertinoIcons.photo_on_rectangle,
+    ),
   ];
 
-  static const resolutions = <int>[720, 1080, 2160];
+  static const resolutions = <int>[720, 1080, 1440, 2160];
   static const fpsOptions = <int>[24, 30, 60];
 
   static AspectOption aspectByKey(String key) =>
@@ -58,6 +65,7 @@ abstract final class ProjectPresets {
   static String resolutionLabel(int height) => switch (height) {
     720 => 'HD 720p',
     1080 => 'Full HD 1080p',
+    1440 => 'QHD 1440p',
     2160 => '4K 2160p',
     _ => '${height}p',
   };

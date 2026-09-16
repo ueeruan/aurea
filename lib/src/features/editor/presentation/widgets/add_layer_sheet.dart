@@ -1,4 +1,5 @@
 import 'package:aurea/src/core/l10n/app_language.dart';
+
 import 'dart:math' as math;
 import 'dart:io';
 
@@ -7,8 +8,11 @@ import 'package:flutter/cupertino.dart';
 
 import '../../domain/modelo_do_texto3d.dart';
 import '../am/scene3d_studio_ux.dart' show pedirNome;
+
 import 'package:flutter/material.dart';
+
 import '../../../../core/ui/tocavel.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../application/editor_controller.dart';
@@ -205,7 +209,8 @@ class _SecaoFormasState extends State<_SecaoFormas> {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  AppText('Mais formas',
+                  AppText(
+                    'Mais formas',
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
@@ -244,7 +249,8 @@ class _SecaoFormasState extends State<_SecaoFormas> {
                       children: [
                         Icon(icone, size: 15, color: AmColors.accent),
                         const SizedBox(width: 6),
-                        AppText(nome,
+                        AppText(
+                          nome,
                           style: const TextStyle(
                             fontSize: 13,
                             color: AmColors.text,
@@ -356,7 +362,8 @@ Future<void> showCaptionCreationSheet(
                   Row(
                     children: [
                       const Expanded(
-                        child: AppText('Legendas',
+                        child: AppText(
+                          'Legendas',
                           style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w700,
@@ -475,7 +482,8 @@ Future<void> showCaptionCreationSheet(
                       key: const ValueKey('segundo-plano'),
                       padding: EdgeInsets.zero,
                       onPressed: () => Navigator.of(sheetContext).pop(),
-                      child: const AppText('Continuar em segundo plano',
+                      child: const AppText(
+                        'Continuar em segundo plano',
                         style: TextStyle(fontSize: 12, color: AmColors.accent),
                       ),
                     ),
@@ -483,7 +491,8 @@ Future<void> showCaptionCreationSheet(
                   if (falha != null) ...[
                     Padding(
                       padding: const EdgeInsets.only(top: 8),
-                      child: AppText(falha.mensagem,
+                      child: AppText(
+                        falha.mensagem,
                         style: const TextStyle(
                           fontSize: 12,
                           color: AmColors.pink,
@@ -527,7 +536,8 @@ Future<void> showCaptionCreationSheet(
                       ),
                     ),
                   const SizedBox(height: 14),
-                  const AppText('ou cole um SRT:',
+                  const AppText(
+                    'ou cole um SRT:',
                     style: TextStyle(fontSize: 12, color: AmColors.muted),
                   ),
                   const SizedBox(height: 8),
@@ -536,7 +546,10 @@ Future<void> showCaptionCreationSheet(
                     maxLines: 6,
                     minLines: 3,
                     enabled: !busy,
-                    placeholder: translate(context, '1\n00:00:00,000 --> 00:00:02,000\nSua primeira fala...'),
+                    placeholder: translate(
+                      context,
+                      '1\n00:00:00,000 --> 00:00:02,000\nSua primeira fala...',
+                    ),
                     style: const TextStyle(fontSize: 13, color: AmColors.text),
                     placeholderStyle: const TextStyle(
                       fontSize: 13,
@@ -562,7 +575,8 @@ Future<void> showCaptionCreationSheet(
                               );
                               Navigator.of(sheetContext).pop();
                             },
-                      child: const AppText('Criar do SRT colado',
+                      child: const AppText(
+                        'Criar do SRT colado',
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w700,
@@ -756,17 +770,22 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
               children: [
                 _abas(),
                 Expanded(
-                  child: (_abaVisivel == _AbaAdd.forma || _abaVisivel == _AbaAdd.objeto)
+                  child:
+                      (_abaVisivel == _AbaAdd.forma ||
+                          _abaVisivel == _AbaAdd.objeto)
                       ? Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
                           child: _conteudo(),
                         )
                       : (_abaVisivel == _AbaAdd.midia
-                          ? _conteudo()
-                          : SingleChildScrollView(
-                              padding: const EdgeInsets.all(6),
-                              child: _conteudo(),
-                            )),
+                            ? _conteudo()
+                            : SingleChildScrollView(
+                                padding: const EdgeInsets.all(6),
+                                child: _conteudo(),
+                              )),
                 ),
                 if (_abaVisivel == _AbaAdd.objeto && _explicando != null)
                   _faixaDeDescricao(),
@@ -846,7 +865,8 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
           ),
           const SizedBox(width: 6),
           Expanded(
-            child: AppText(texto,
+            child: AppText(
+              texto,
               maxLines: 2,
               style: TextStyle(
                 fontSize: 11,
@@ -1062,6 +1082,40 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
             }
             if (mounted) _fecha();
           },
+          // VARIAS DE UMA VEZ: juntas no cabecote, ou uma comecando onde
+          // a outra acaba — na ordem em que foram marcadas.
+          onImportLote: (midias, {required emSequencia}) async {
+            var t = widget.playhead;
+            for (final m in midias) {
+              if (m.video) {
+                if (m.duration > Duration.zero) {
+                  _controller.addVideoLayer(
+                    t,
+                    m.file.path,
+                    m.file.name,
+                    m.duration,
+                  );
+                } else {
+                  await _controller.importVideoAwaitingDuration(
+                    t,
+                    m.file.path,
+                    m.file.name,
+                  );
+                }
+              } else {
+                _controller.addImageLayer(
+                  t,
+                  m.file.path,
+                  m.file.name,
+                  duracao: m.duration,
+                );
+              }
+              if (emSequencia && m.duration > Duration.zero) {
+                t += m.duration;
+              }
+            }
+            if (mounted) _fecha();
+          },
         );
       case _AbaAdd.audio:
         if (_importingAudio) {
@@ -1071,7 +1125,8 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
               children: [
                 CupertinoActivityIndicator(),
                 SizedBox(height: 12),
-                AppText('Preparando audio...',
+                AppText(
+                  'Preparando audio...',
                   style: TextStyle(color: AmColors.text),
                 ),
               ],
@@ -1193,11 +1248,7 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
           child: Stack(
             alignment: Alignment.center,
             children: [
-              if (badge != null)
-                Positioned(
-                  top: 6,
-                  child: badge,
-                ),
+              if (badge != null) Positioned(top: 6, child: badge),
               Padding(
                 padding: const EdgeInsets.all(4),
                 child: FittedBox(
@@ -1228,134 +1279,135 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
     }
 
     final cartoes = <Widget>[
-              // 1. Scene 3D com badge PROVAR
-              cardItem(
-                badge: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF00FFB2),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: const AppText('PROVAR',
-                    style: TextStyle(
-                      color: Colors.black,
-                      fontSize: 8.5,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                ),
-                iconWidget: const Icon(
-                  CupertinoIcons.videocam,
-                  size: 38,
-                  color: Colors.white,
-                ),
-                label: 'Scene 3D',
-                onTap: () {
-                  _fecha();
-                  final cena = _cena;
-                  if (cena != null) {
-                    _controller.addScene3DCamera(cena.id);
-                  } else {
-                    _controller.addScene3DLayer(widget.playhead);
-                  }
-                },
-              ),
-              // 2. Grupo Vazio
-              cardItem(
-                iconWidget: CustomPaint(
-                  size: const Size(36, 36),
-                  painter: _DashedRectWithHandlesPainter(),
-                ),
-                label: 'Grupo Vazio',
-                onTap: () {
-                  _fecha();
-                  _controller.addEmptyGroup(widget.playhead);
-                },
-              ),
-              // 3. Nulo
-              cardItem(
-                iconWidget: CustomPaint(
-                  size: const Size(34, 34),
-                  painter: _NullLayerIconPainter(),
-                ),
-                label: 'Nulo',
-                onTap: () {
-                  _fecha();
-                  _controller.addNullLayer(widget.playhead);
-                },
-              ),
-              // 3b. Camera 3D — a camera da COMPOSICAO, como no After
-              // Effects: existia inteira no motor (zoom animavel, orbita,
-              // vistoPelaCamera) e nao tinha porta nenhuma.
-              cardItem(
-                key: const ValueKey('add-camera3d'),
-                iconWidget: const Icon(
-                  CupertinoIcons.videocam_fill,
-                  size: 36,
-                  color: Color(0xFF8BD5FF),
-                ),
-                label: 'Câmera 3D',
-                onTap: () {
-                  _fecha();
-                  _controller.addCameraLayer(widget.playhead);
-                },
-              ),
-              // 4. Elemento / Projeto
-              cardItem(
-                iconWidget: CustomPaint(
-                  size: const Size(36, 36),
-                  painter: _ElementProjectIconPainter(),
-                ),
-                label: 'Elemento / Projeto',
-                onTap: () {
-                  _fecha();
-                  _controller.addElement3DLayer(widget.playhead, Element3DKind.cube);
-                },
-              ),
-              // 5. Particulas. O botao sumiu quando esta folha foi refeita
-              // (c7216c9) e a camada ficou sem porta de entrada, embora o
-              // codigo dela continuasse inteiro. Testadores pediram de volta.
-              cardItem(
-                key: const ValueKey('add-particulas'),
-                iconWidget: const Icon(
-                  CupertinoIcons.sparkles,
-                  size: 36,
-                  color: Colors.white,
-                ),
-                label: 'Partículas',
-                onTap: () {
-                  _fecha();
-                  _controller.addParticlesLayer(widget.playhead);
-                },
-              ),
-              // 6. Texto 3D estilo Element 3D: pede o texto e o metal e
-              // cria as letras extrudadas na cena, presas a um nulo.
-              cardItem(
-                key: const ValueKey('add-texto3d'),
-                iconWidget: const Icon(
-                  CupertinoIcons.textformat_alt,
-                  size: 36,
-                  color: Color(0xFFFFD36B),
-                ),
-                label: 'Texto 3D',
-                onTap: _criarTexto3D,
-              ),
-              // 7. iPhone 3D — o aparelho parametrico: pecas de verdade
-              // na cena (corpo, tela, ilha, lentes), tela que aceita
-              // imagem/camada, e um nulo na linha do tempo para animar.
-              cardItem(
-                key: const ValueKey('add-iphone3d'),
-                iconWidget: const Icon(
-                  CupertinoIcons.device_phone_portrait,
-                  size: 36,
-                  color: Color(0xFFC9CDD4),
-                ),
-                label: 'iPhone 3D',
-                onTap: () {
-                  _fecha();
-                  _controller.addIphone3D(widget.playhead);
-                },
-              ),
+      // 1. Scene 3D com badge PROVAR
+      cardItem(
+        badge: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+          decoration: BoxDecoration(
+            color: const Color(0xFF00FFB2),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: const AppText(
+            'PROVAR',
+            style: TextStyle(
+              color: Colors.black,
+              fontSize: 8.5,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ),
+        iconWidget: const Icon(
+          CupertinoIcons.videocam,
+          size: 38,
+          color: Colors.white,
+        ),
+        label: 'Scene 3D',
+        onTap: () {
+          _fecha();
+          final cena = _cena;
+          if (cena != null) {
+            _controller.addScene3DCamera(cena.id);
+          } else {
+            _controller.addScene3DLayer(widget.playhead);
+          }
+        },
+      ),
+      // 2. Grupo Vazio
+      cardItem(
+        iconWidget: CustomPaint(
+          size: const Size(36, 36),
+          painter: _DashedRectWithHandlesPainter(),
+        ),
+        label: 'Grupo Vazio',
+        onTap: () {
+          _fecha();
+          _controller.addEmptyGroup(widget.playhead);
+        },
+      ),
+      // 3. Nulo
+      cardItem(
+        iconWidget: CustomPaint(
+          size: const Size(34, 34),
+          painter: _NullLayerIconPainter(),
+        ),
+        label: 'Nulo',
+        onTap: () {
+          _fecha();
+          _controller.addNullLayer(widget.playhead);
+        },
+      ),
+      // 3b. Camera 3D — a camera da COMPOSICAO, como no After
+      // Effects: existia inteira no motor (zoom animavel, orbita,
+      // vistoPelaCamera) e nao tinha porta nenhuma.
+      cardItem(
+        key: const ValueKey('add-camera3d'),
+        iconWidget: const Icon(
+          CupertinoIcons.videocam_fill,
+          size: 36,
+          color: Color(0xFF8BD5FF),
+        ),
+        label: 'Câmera 3D',
+        onTap: () {
+          _fecha();
+          _controller.addCameraLayer(widget.playhead);
+        },
+      ),
+      // 4. Elemento / Projeto
+      cardItem(
+        iconWidget: CustomPaint(
+          size: const Size(36, 36),
+          painter: _ElementProjectIconPainter(),
+        ),
+        label: 'Elemento / Projeto',
+        onTap: () {
+          _fecha();
+          _controller.addElement3DLayer(widget.playhead, Element3DKind.cube);
+        },
+      ),
+      // 5. Particulas. O botao sumiu quando esta folha foi refeita
+      // (c7216c9) e a camada ficou sem porta de entrada, embora o
+      // codigo dela continuasse inteiro. Testadores pediram de volta.
+      cardItem(
+        key: const ValueKey('add-particulas'),
+        iconWidget: const Icon(
+          CupertinoIcons.sparkles,
+          size: 36,
+          color: Colors.white,
+        ),
+        label: 'Partículas',
+        onTap: () {
+          _fecha();
+          _controller.addParticlesLayer(widget.playhead);
+        },
+      ),
+      // 6. Texto 3D estilo Element 3D: pede o texto e o metal e
+      // cria as letras extrudadas na cena, presas a um nulo.
+      cardItem(
+        key: const ValueKey('add-texto3d'),
+        iconWidget: const Icon(
+          CupertinoIcons.textformat_alt,
+          size: 36,
+          color: Color(0xFFFFD36B),
+        ),
+        label: 'Texto 3D',
+        onTap: _criarTexto3D,
+      ),
+      // 7. iPhone 3D — o aparelho parametrico: pecas de verdade
+      // na cena (corpo, tela, ilha, lentes), tela que aceita
+      // imagem/camada, e um nulo na linha do tempo para animar.
+      cardItem(
+        key: const ValueKey('add-iphone3d'),
+        iconWidget: const Icon(
+          CupertinoIcons.device_phone_portrait,
+          size: 36,
+          color: Color(0xFFC9CDD4),
+        ),
+        label: 'iPhone 3D',
+        onTap: () {
+          _fecha();
+          _controller.addIphone3D(widget.playhead);
+        },
+      ),
     ];
 
     return LayoutBuilder(
@@ -1370,8 +1422,7 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
         final largura =
             (constraints.maxWidth - 16 - espaco * (colunas - 1)) / colunas;
         final altura = constraints.hasBoundedHeight
-            ? ((constraints.maxHeight - 8 - espaco * (fileiras - 1)) /
-                      fileiras)
+            ? ((constraints.maxHeight - 8 - espaco * (fileiras - 1)) / fileiras)
                   .clamp(52.0, 118.0)
             : 100.0;
         return Padding(
@@ -1481,11 +1532,7 @@ class _TileForma extends StatelessWidget {
 }
 
 class _FormaPainter extends CustomPainter {
-  const _FormaPainter(
-    this.path, {
-    required this.stroke,
-    this.nome = '',
-  });
+  const _FormaPainter(this.path, {required this.stroke, this.nome = ''});
 
   final Path path;
   final bool stroke;

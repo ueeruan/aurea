@@ -1,4 +1,5 @@
 import 'package:aurea/src/core/l10n/app_language.dart';
+
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
@@ -573,7 +574,8 @@ class _Estresse3DScreenState extends State<Estresse3DScreen>
               child: ColoredBox(
                 color: Color(0xFF0B0E14),
                 child: Center(
-                  child: AppText('O palco aparece aqui durante cada cena',
+                  child: AppText(
+                    'O palco aparece aqui durante cada cena',
                     style: TextStyle(color: AppColors.muted),
                   ),
                 ),

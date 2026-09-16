@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../editor/application/registro_de_travadas.dart';
+
 import 'package:aurea/src/core/l10n/app_language.dart';
 
 /// O REGISTRO DE TRAVADAS, para ler no aparelho e me mandar.
@@ -52,9 +53,9 @@ class _TravadasScreenState extends State<TravadasScreen> {
                 ClipboardData(text: RegistroDeTravadas.emTexto()),
               );
               if (!context.mounted) return;
-              ScaffoldMessenger.of(
-                context,
-              ).showSnackBar(const SnackBar(content: AppText('Registro copiado')));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: AppText('Registro copiado')),
+              );
             },
           ),
           IconButton(
@@ -102,7 +103,10 @@ class _TravadasScreenState extends State<TravadasScreen> {
               key: const ValueKey('travadas-vazio'),
             )
           else ...[
-            AppText('${travadas.length} travadas, da mais recente', style: titulo),
+            AppText(
+              '${travadas.length} travadas, da mais recente',
+              style: titulo,
+            ),
             const SizedBox(height: 6),
             for (final t in travadas)
               Padding(

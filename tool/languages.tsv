@@ -2716,3 +2716,72 @@ Máscara combinada	Combined threshold mask	Máscara combinada	القناع ال�
 Faixas claras	Bright streaks	Franjas claras	خطوط فاتحة	밝은 줄무늬	明るい筋	亮色条纹	चमकीली धारियाँ	Garis terang	Светлые полосы
 Sombras escorridas	Dripping shadows	Sombras escurridas	ظلال سائلة	흘러내리는 그림자	垂れる影	流淌阴影	बहती परछाइयाँ	Bayangan meleleh	Стекающие тени
 Explosão radial	Radial burst	Explosión radial	انفجار شعاعي	방사형 폭발	放射バースト	径向爆发	रेडियल विस्फोट	Ledakan radial	Радиальный взрыв
+S_TVDamage	S_TVDamage	S_TVDamage	S_TVDamage	S_TVDamage	S_TVDamage	S_TVDamage	S_TVDamage	S_TVDamage	S_TVDamage
+Recepção geral	Reception master	Recepción general	الاستقبال العام	수신 마스터	受信マスター	接收总控	रिसेप्शन मास्टर	Penerimaan utama	Общий приём
+Interferência	Interference	Interferencia	التداخل	간섭	干渉	干扰	व्यवधान	Interferensi	Помехи
+Fantasmas	Ghosts	Fantasmas	الأشباح	고스트	ゴースト	重影	घोस्ट	Bayangan	Двоение
+Sincronismo horizontal	Horizontal hold	Sincronía horizontal	التزامن الأفقي	수평 동기	水平同期	水平同步	क्षैतिज सिंक	Sinkron horizontal	Строчная синхронизация
+Sincronismo vertical	Vertical hold	Sincronía vertical	التزامن العمودي	수직 동기	垂直同期	垂直同步	ऊर्ध्वाधर सिंक	Sinkron vertikal	Кадровая синхронизация
+Barras	Bars	Barras	الأشرطة	막대	バー	横条	पट्टियाँ	Batang	Полосы
+Listras de cor	Color stripes	Franjas de color	خطوط ملونة	컬러 줄무늬	カラーストライプ	彩色条纹	रंगीन धारियाँ	Garis warna	Цветные полосы
+Avanço rápido	Fast forward	Avance rápido	التقديم السريع	빨리 감기	早送り	快进	फास्ट फॉरवर्ड	Maju cepat	Перемотка вперёд
+Falhas de fita	Tape dropouts	Fallos de cinta	أعطال الشريط	테이프 드롭아웃	テープドロップアウト	磁带失落	टेप ड्रॉपआउट	Dropout pita	Выпадения ленты
+Estático	Static	Estática	التشويش	노이즈	砂嵐	雪花噪点	स्टैटिक	Statis	Шум
+Densidade do estático	Static density	Densidad de estática	كثافة التشويش	노이즈 밀도	砂嵐の密度	雪花密度	स्टैटिक घनत्व	Kepadatan statis	Плотность шума
+Frequência da interferência	Interference frequency	Frecuencia de interferencia	تردد التداخل	간섭 주파수	干渉の周波数	干扰频率	व्यवधान आवृत्ति	Frekuensi interferensi	Частота помех
+Velocidade dos pontos X	Dots speed X	Velocidad de puntos X	سرعة النقاط X	점 속도 X	ドットの速度 X	点速度 X	बिंदु गति X	Kecepatan titik X	Скорость точек X
+Velocidade dos pontos Y	Dots speed Y	Velocidad de puntos Y	سرعة النقاط Y	점 속도 Y	ドットの速度 Y	点速度 Y	बिंदु गति Y	Kecepatan titik Y	Скорость точек Y
+Tremulação	Jitter	Temblor	الارتعاش	지터	ジッター	抖动	कंपन	Getaran	Дрожание
+Número de fantasmas	Number of ghosts	Número de fantasmas	عدد الأشباح	고스트 수	ゴーストの数	重影数量	घोस्ट की संख्या	Jumlah bayangan	Число повторов
+Fantasmas negativos	Negative ghosts	Fantasmas negativos	أشباح سالبة	네거티브 고스트	ネガティブゴースト	负片重影	नकारात्मक घोस्ट	Bayangan negatif	Негативные повторы
+Espaçamento	Spacing	Espaciado	التباعد	간격	間隔	间距	अंतराल	Jarak	Интервал
+Variar posição	Vary position	Variar posición	تغيير الموضع	위치 변화	位置のばらつき	位置变化	स्थिति बदलें	Variasi posisi	Разброс положения
+Deslocar fantasmas	Shift ghosts	Desplazar fantasmas	إزاحة الأشباح	고스트 이동	ゴーストをずらす	偏移重影	घोस्ट खिसकाएँ	Geser bayangan	Сдвиг повторов
+Desfocar fantasmas	Blur ghosts	Desenfocar fantasmas	تمويه الأشباح	고스트 흐림	ゴーストをぼかす	模糊重影	घोस्ट धुंधला करें	Buramkan bayangan	Размытие повторов
+Frequência H	H frequency	Frecuencia H	التردد الأفقي	H 주파수	H 周波数	水平频率	H आवृत्ति	Frekuensi H	Частота H
+Variação no tempo H	H time vary	Variación temporal H	التغير الزمني الأفقي	H 시간 변화	H 時間変化	水平时间变化	H समय परिवर्तन	Variasi waktu H	Изменение H во времени
+Oitavas H	H octaves	Octavas H	الأوكتافات الأفقية	H 옥타브	H オクターブ	水平倍频	H ऑक्टेव	Oktaf H	Октавы H
+Largura da borda	Border width	Ancho del borde	عرض الحافة	테두리 너비	境界の幅	边框宽度	किनारे की चौड़ाई	Lebar tepi	Ширина рамки
+Frequência V	V frequency	Frecuencia V	التردد العمودي	V 주파수	V 周波数	垂直频率	V आवृत्ति	Frekuensi V	Частота V
+Velocidade V	V speed	Velocidad V	السرعة العمودية	V 속도	V 速度	垂直速度	V गति	Kecepatan V	Скорость V
+Aleatoriedade V	V random	Aleatoriedad V	العشوائية العمودية	V 무작위	V ランダム	垂直随机	V यादृच्छिकता	Acak V	Случайность V
+Altura da borda	Border height	Altura del borde	ارتفاع الحافة	테두리 높이	境界の高さ	边框高度	किनारे की ऊँचाई	Tinggi tepi	Высота рамки
+Dados na borda	Border data	Datos en el borde	بيانات الحافة	테두리 데이터	境界のデータ	边框数据	किनारे का डेटा	Data tepi	Данные в рамке
+Rolagem das barras	Bar roll speed	Desplazamiento de barras	تمرير الأشرطة	막대 롤 속도	バーのロール速度	横条滚动速度	पट्टी रोल गति	Gulir batang	Прокрутка полос
+Nitidez das barras	Bar sharpness	Nitidez de barras	حدة الأشرطة	막대 선명도	バーのシャープさ	横条锐度	पट्टी तीक्ष्णता	Ketajaman batang	Резкость полос
+Frequência das barras	Bar frequency	Frecuencia de barras	تردد الأشرطة	막대 주파수	バーの周波数	横条频率	पट्टी आवृत्ति	Frekuensi batang	Частота полос
+Largura da barra 1	Bar 1 width	Ancho de barra 1	عرض الشريط 1	막대 1 너비	バー1の幅	横条1宽度	पट्टी 1 चौड़ाई	Lebar batang 1	Ширина полосы 1
+Frequência relativa da barra 2	Bar 2 relative frequency	Frecuencia relativa de barra 2	التردد النسبي للشريط 2	막대 2 상대 주파수	バー2の相対周波数	横条2相对频率	पट्टी 2 सापेक्ष आवृत्ति	Frekuensi relatif batang 2	Относительная частота полосы 2
+Nitidez da barra 2	Bar 2 sharpness	Nitidez de barra 2	حدة الشريط 2	막대 2 선명도	バー2のシャープさ	横条2锐度	पट्टी 2 तीक्ष्णता	Ketajaman batang 2	Резкость полосы 2
+Frequência das listras	Stripes frequency	Frecuencia de franjas	تردد الخطوط	줄무늬 주파수	ストライプの周波数	条纹频率	धारियों की आवृत्ति	Frekuensi garis	Частота полос цвета
+Ângulo das listras	Stripes angle	Ángulo de franjas	زاوية الخطوط	줄무늬 각도	ストライプの角度	条纹角度	धारियों का कोण	Sudut garis	Угол полос цвета
+Rolagem das listras	Stripes roll speed	Desplazamiento de franjas	تمرير الخطوط	줄무늬 롤 속도	ストライプのロール速度	条纹滚动速度	धारियों की रोल गति	Gulir garis	Прокрутка полос цвета
+Frequência das faixas	Band frequency	Frecuencia de bandas	تردد النطاقات	밴드 주파수	バンドの周波数	带频率	बैंड आवृत्ति	Frekuensi pita	Частота полос перемотки
+Deslocar faixas	Band shift	Desplazar bandas	إزاحة النطاقات	밴드 이동	バンドをずらす	偏移带	बैंड खिसकाएँ	Geser pita	Сдвиг полос перемотки
+Altura das faixas	Band height	Altura de bandas	ارتفاع النطاقات	밴드 높이	バンドの高さ	带高度	बैंड ऊँचाई	Tinggi pita	Высота полос перемотки
+Comprimento das falhas	Dropout length	Longitud de fallos	طول الأعطال	드롭아웃 길이	ドロップアウトの長さ	失落长度	ड्रॉपआउट लंबाई	Panjang dropout	Длина выпадений
+Intervalo das falhas	Dropout gap length	Intervalo de fallos	فجوة الأعطال	드롭아웃 간격	ドロップアウトの間隔	失落间隔	ड्रॉपआउट अंतराल	Jarak dropout	Интервал выпадений
+Frequência Y das falhas	Dropout Y frequency	Frecuencia Y de fallos	تردد الأعطال العمودي	드롭아웃 Y 주파수	ドロップアウトの Y 周波数	失落 Y 频率	ड्रॉपआउट Y आवृत्ति	Frekuensi Y dropout	Частота выпадений по Y
+Limiar Y das falhas	Dropout Y threshold	Umbral Y de fallos	عتبة الأعطال العمودية	드롭아웃 Y 임계값	ドロップアウトの Y しきい値	失落 Y 阈值	ड्रॉपआउट Y सीमा	Ambang Y dropout	Порог выпадений по Y
+Frequência das falhas no tempo	Dropouts over time	Frecuencia de fallos en el tiempo	تكرار الأعطال زمنياً	시간별 드롭아웃 빈도	時間あたりのドロップアウト	失落时间频率	समय में ड्रॉपआउट आवृत्ति	Frekuensi dropout dari waktu	Частота выпадений во времени
+Raio da vinheta	Vignette radius	Radio de viñeta	نصف قطر التظليل	비네트 반경	ビネットの半径	暗角半径	विनेट त्रिज्या	Radius vinyet	Радиус виньетки
+Suavidade da vinheta	Vignette edge softness	Suavidad de viñeta	نعومة حافة التظليل	비네트 가장자리 부드러움	ビネットの柔らかさ	暗角边缘柔和度	विनेट किनारे की कोमलता	Kelembutan tepi vinyet	Мягкость виньетки
+Altura relativa da vinheta	Vignette relative height	Altura relativa de viñeta	الارتفاع النسبي للتظليل	비네트 상대 높이	ビネットの相対高さ	暗角相对高度	विनेट सापेक्ष ऊँचाई	Tinggi relatif vinyet	Относительная высота виньетки
+Linhas de varredura	Scanlines	Líneas de escaneo	خطوط المسح	스캔라인	走査線	扫描线	स्कैनलाइन	Garis pindai	Строки развёртки
+Frequência das linhas	Scanlines relative frequency	Frecuencia de líneas	تردد خطوط المسح	스캔라인 상대 주파수	走査線の相対周波数	扫描线相对频率	स्कैनलाइन सापेक्ष आवृत्ति	Frekuensi garis pindai	Частота строк
+Orthicon	Orthicon	Orthicon	أورثيكون	오르티콘	オルシコン	正析像管	ऑर्थिकॉन	Orthicon	Ортикон
+Limiar do orthicon	Orthicon threshold	Umbral del orthicon	عتبة الأورثيكون	오르티콘 임계값	オルシコンのしきい値	正析像管阈值	ऑर्थिकॉन सीमा	Ambang orthicon	Порог ортикона
+Largura do escuro	Darks width	Ancho de oscuros	عرض الظلال	어두운 영역 너비	暗部の幅	暗部宽度	अंधेरे की चौड़ाई	Lebar gelap	Ширина затемнения
+Girar matiz	Hue shift	Girar tono	إزاحة التدرج	색조 회전	色相シフト	色相偏移	ह्यू शिफ्ट	Geser rona	Сдвиг оттенка
+Escala das luzes	Scale lights	Escala de luces	تكبير الإضاءة	밝은 영역 배율	ハイライトの倍率	亮部缩放	रोशनी का स्केल	Skala terang	Масштаб светов
+Desligar	Turn off	Apagar	إيقاف التشغيل	전원 끄기	電源オフ	关机	बंद करें	Matikan	Выключение
+Largura do clarão	Flare width	Ancho del destello	عرض الوميض	플레어 너비	フレアの幅	闪光宽度	फ्लेयर चौड़ाई	Lebar kilatan	Ширина вспышки
+Brilho do clarão	Flare brightness	Brillo del destello	سطوع الوميض	플레어 밝기	フレアの明るさ	闪光亮度	फ्लेयर चमक	Kecerahan kilatan	Яркость вспышки
+Tempo do apagar	Fade out time	Tiempo de desvanecido	مدة التلاشي	페이드아웃 시간	フェードアウト時間	淡出时间	फेड आउट समय	Waktu memudar	Время затухания
+Olho de peixe	Fish eye	Ojo de pez	عين السمكة	어안	魚眼	鱼眼	फ़िश आई	Mata ikan	Рыбий глаз
+Pixels da TV	TV pixels	Píxeles de TV	بكسلات التلفاز	TV 픽셀	TV ピクセル	电视像素	टीवी पिक्सेल	Piksel TV	Пиксели ТВ
+TV velha	Old TV	TV vieja	تلفاز قديم	오래된 TV	古いテレビ	老电视	पुराना टीवी	TV tua	Старый телевизор
+Sem sinal	No signal	Sin señal	لا توجد إشارة	신호 없음	信号なし	无信号	कोई सिग्नल नहीं	Tanpa sinyal	Нет сигнала
+Desligando	Turning off	Apagándose	جارٍ الإيقاف	꺼지는 중	電源オフ中	正在关机	बंद हो रहा है	Mematikan	Выключается
+Tingir luzes	Tint lights	Teñir luces	تلوين الإضاءات	밝은 영역 색조	ハイライトの色味	亮部着色	रोशनी रंगें	Warnai terang	Тонировать света
+Tingir sombras	Tint darks	Teñir sombras	تلوين الظلال	어두운 영역 색조	暗部の色味	暗部着色	छाया रंगें	Warnai gelap	Тонировать тени

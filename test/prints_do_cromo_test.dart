@@ -129,17 +129,27 @@ void main() {
     expect(find.byKey(const ValueKey('editor-undo')), findsOneWidget);
   });
 
-  testWidgets('camada selecionada: a barra flutuante de aparar/dividir', (
+  testWidgets('camada selecionada: nada flutua sobre a linha do tempo', (
     tester,
   ) async {
+    // 16/09: o dono mostrou a planta e a barra flutuante de
+    // ◇ / aparar / dividir / duplicar / excluir NAO existe la — e
+    // cada acao dela ja tinha outra porta (o painel tem a tesoura e
+    // o aparar, a barra da camada tem duplicar e excluir, o losango
+    // mora no painel de transformacao). Ela so tapava a timeline.
     final (c, chave) = await _editor(tester);
     final id = c.read(editorControllerProvider).layers.first.id;
     c.read(selectedLayerProvider.notifier).state = id;
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    expect(find.byType(BarraDaSelecao), findsOneWidget);
-    expect(find.byKey(const ValueKey('camada-aparar-esq')), findsOneWidget);
-    expect(find.byKey(const ValueKey('transport-keyframe')), findsOneWidget);
+    for (final k in [
+      'camada-aparar-esq',
+      'camada-aparar-dir',
+      'transport-keyframe',
+    ]) {
+      expect(find.byKey(ValueKey(k)), findsNothing, reason: k);
+    }
+    expect(find.byKey(const ValueKey('camada-duplicar')), findsOneWidget);
     await gravarPrint(tester, chave, 'cromo-editor-selecao');
   });
 

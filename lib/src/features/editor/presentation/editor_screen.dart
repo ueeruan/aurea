@@ -587,49 +587,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
     }
   }
 
-  // ------------------------------------------------------- keyframe
 
-  /// O ◆ DO TRANSPORTE: com uma categoria aberta, crava na propriedade
-  /// dela; sem categoria, nas quatro de transformar de uma vez.
-  Set<LayerProp> _propsDoDiamante(EditorSession s) => switch (s.panel) {
-    EditorPanel.transform => {propOfTool(s.tool)},
-    EditorPanel.curve => {s.curveProp},
-    EditorPanel.blending => {LayerProp.opacity},
-    _ => {
-      LayerProp.position,
-      LayerProp.scale,
-      LayerProp.rotation,
-      LayerProp.opacity,
-    },
-  };
-
-  bool _keyframeAqui(Layer layer, EditorSession s) {
-    final local = layer.localTime(_playback.time.value).inMicroseconds;
-    for (final prop in _propsDoDiamante(s)) {
-      for (final us in _timesForProp(layer, prop)) {
-        if ((us - local).abs() < 8000) return true;
-      }
-    }
-    return false;
-  }
-
-  void _toggleKeyframe(Layer layer, EditorSession s) {
-    final controller = ref.read(editorControllerProvider.notifier);
-    final t = _playback.time.value;
-    final props = _propsDoDiamante(s);
-    final tem = _keyframeAqui(layer, s);
-    controller.runAsOneUndo(() {
-      for (final prop in props) {
-        final local = layer.localTime(t).inMicroseconds;
-        final temEste = _timesForProp(
-          layer,
-          prop,
-        ).any((us) => (us - local).abs() < 8000);
-        // Tirando: so as que tem. Pondo: so as que nao tem.
-        if (tem == temEste) controller.toggleKeyframe(layer.id, t, prop);
-      }
-    });
-  }
 
   // ------------------------------------------------------- build
 
@@ -1167,35 +1125,6 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                                 size: 22,
                                 color: Colors.white,
                               ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    // A BARRA DA SELECAO: aparar, dividir, ◆,
-                    // duplicar e excluir flutuam no pe da timeline
-                    // enquanto ha UMA camada selecionada — com painel
-                    // aberto tambem, porque o ◆ crava na propriedade da
-                    // categoria (a regra do _propsDoDiamante).
-                    if (!s.previewExpanded &&
-                        !s.adding &&
-                        layer != null &&
-                        targets.length < 2)
-                      Positioned(
-                        // ENTRE O ⋮ E O "+": por cima deles a barra tapava
-                        // o botao de adicionar. Sem largura, encolhe.
-                        left: largo ? 12 : 60,
-                        right: (largo ? larguraFolha : 0) + 76,
-                        bottom: largo
-                            ? 12
-                            : 6 + (conteudo == null ? 12 : m.sheet),
-                        child: Center(
-                          child: FittedBox(
-                            fit: BoxFit.scaleDown,
-                            child: BarraDaSelecao(
-                              playback: _playback,
-                              layerId: layer.id,
-                              keyframeHere: _keyframeAqui(layer, s),
-                              onKeyframe: () => _toggleKeyframe(layer, s),
                             ),
                           ),
                         ),

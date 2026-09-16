@@ -26,12 +26,13 @@ void main() {
     }
   });
 
-  testWidgets('a tesoura esta na barra da selecao e divide no cabecote', (
+  testWidgets('a tesoura esta na linha de acoes e divide no cabecote', (
     tester,
   ) async {
-    // NA PLANTA DO AM (v1.1.1): a tesoura mora na barra flutuante que
-    // aparece com a camada selecionada — um toque no clipe e ela esta
-    // na tela, sempre no mesmo lugar.
+    // 16/09: a tesoura mora na LINHA DE ACOES do painel da camada,
+    // junto de velocidade e aparar — que e onde a planta a poe. A
+    // barra flutuante que a hospedava antes tapava a linha do tempo
+    // e foi embora.
     final c = await openEditor(tester);
     final tesoura = find.byKey(const ValueKey('camada-dividir'));
     final antes = c.read(editorControllerProvider).layers.length;

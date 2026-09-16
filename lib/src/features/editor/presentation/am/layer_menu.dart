@@ -205,6 +205,7 @@ class LayerToolsDock extends ConsumerWidget {
                     ),
                     Expanded(
                       child: IconButton(
+                        key: const ValueKey('camada-dividir'),
                         tooltip: 'Dividir camada',
                         onPressed: () {
                           HapticFeedback.lightImpact();
@@ -349,7 +350,14 @@ typedef _Tile = ({
   String? badge,
 });
 
-/// AS FILEIRAS: 2 colunas por fileira conforme Screenshot 3 do Alight Motion real.
+/// AS FILEIRAS DE FICHAS.
+///
+/// Eram DUAS por fileira, e o dono apontou a planta: sao TRES. Com duas
+/// a ficha ficava larga e baixa (uma tarja), a lista descia por quatro
+/// fileiras e o painel virava rolagem. Com tres, o mesmo conjunto cabe
+/// em tres fileiras e cada ficha tem a proporcao da planta.
+const int _colunasDeFichas = 3;
+
 List<Widget> _fileiras(
   Set<AmSecao> secoes,
   _Tile? Function(AmSecao) tile, {
@@ -362,32 +370,29 @@ List<Widget> _fileiras(
   if (visiveis.isEmpty) return const [];
 
   final List<Widget> linhas = [];
-  for (var i = 0; i < visiveis.length; i += 2) {
-    final t1 = visiveis[i];
-    final t2 = (i + 1 < visiveis.length) ? visiveis[i + 1] : null;
+  for (var i = 0; i < visiveis.length; i += _colunasDeFichas) {
+    final daLinha = visiveis.skip(i).take(_colunasDeFichas).toList();
     linhas.add(
       Padding(
         padding: const EdgeInsets.only(bottom: 8),
         child: Row(
           children: [
-            _MenuTile(
-              height: tileHeight,
-              icon: t1.icone,
-              label: t1.rotulo,
-              onTap: t1.onTap,
-              badge: t1.badge,
-            ),
-            const SizedBox(width: 8),
-            if (t2 != null)
-              _MenuTile(
-                height: tileHeight,
-                icon: t2.icone,
-                label: t2.rotulo,
-                onTap: t2.onTap,
-                badge: t2.badge,
-              )
-            else
-              const Spacer(),
+            for (var k = 0; k < _colunasDeFichas; k++) ...[
+              if (k > 0) const SizedBox(width: 8),
+              if (k < daLinha.length)
+                _MenuTile(
+                  height: tileHeight,
+                  icon: daLinha[k].icone,
+                  label: daLinha[k].rotulo,
+                  onTap: daLinha[k].onTap,
+                  badge: daLinha[k].badge,
+                )
+              // A COLUNA VAZIA guarda o lugar: sem ela a ultima ficha
+              // de uma fileira incompleta esticava e ficava do tamanho
+              // de tres.
+              else
+                const Spacer(),
+            ],
           ],
         ),
       ),
@@ -3539,8 +3544,8 @@ class _MenuTile extends StatelessWidget {
         child: Container(
           height: height,
           padding: EdgeInsets.symmetric(
-            horizontal: 6,
-            vertical: height < 65 ? 2 : 5,
+            horizontal: 4,
+            vertical: height < 65 ? 2 : 4,
           ),
           decoration: BoxDecoration(
             color: const Color(0xFF222634),
@@ -3555,18 +3560,21 @@ class _MenuTile extends StatelessWidget {
                   children: [
                     Icon(
                       icon,
-                      size: height < 65 ? 18 : 22,
+                      size: height < 65 ? 18 : 21,
                       color: const Color(0xFFD4D8E2),
                     ),
                     SizedBox(height: height < 65 ? 2 : 4),
+                    // TRES LINHAS: em tres colunas a ficha e estreita, e
+                    // "Movimentacao e transformacao" nao cabe em duas —
+                    // saia cortado com reticencias.
                     AppText(
                       label,
                       textAlign: TextAlign.center,
-                      maxLines: 2,
+                      maxLines: 3,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: height < 65 ? 10.5 : 11.5,
-                        height: 1.1,
+                        fontSize: height < 65 ? 9.5 : 10.5,
+                        height: 1.12,
                         fontWeight: FontWeight.w500,
                         color: const Color(0xFFD4D8E2),
                       ),

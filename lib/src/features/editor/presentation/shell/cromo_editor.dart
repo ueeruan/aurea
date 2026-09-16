@@ -278,16 +278,29 @@ class BarraDaCamada extends ConsumerWidget {
             child: Icon(layerTypeIcon(layer), size: 14, color: Colors.white),
           ),
           Expanded(child: _NomeDaCamadaEditavel(layerId: layerId)),
+          // PARENTESCO so acende quando ESTA ligado: e informacao, nao
+          // acao de todo dia — o lugar dele e o menu ⋮.
+          if (temPai)
+            _BotaoDoCromo(
+              key: const ValueKey('camada-parentesco'),
+              icone: CupertinoIcons.link_circle_fill,
+              dica: 'Segue outra camada',
+              cor: CromoEditor.keyframe,
+              tamanho: 20,
+              onTap: () {
+                playback.pause();
+                showParentSheet(context, ref, layer, playback.time.value);
+              },
+            ),
+          // DUPLICAR sobe para a barra: era a unica acao da barra
+          // flutuante que nao tinha outra porta a um toque.
           _BotaoDoCromo(
-            key: const ValueKey('camada-parentesco'),
-            icone: temPai ? CupertinoIcons.link_circle_fill : CupertinoIcons.link,
-            dica: temPai ? 'Segue outra camada' : 'Seguir outra camada',
-            cor: temPai ? CromoEditor.keyframe : CromoEditor.branco,
-            tamanho: 20,
-            onTap: () {
-              playback.pause();
-              showParentSheet(context, ref, layer, playback.time.value);
-            },
+            key: const ValueKey('camada-duplicar'),
+            icone: CupertinoIcons.plus_square_on_square,
+            dica: 'Duplicar camada',
+            tamanho: 19,
+            onTap: () =>
+                ref.read(editorControllerProvider.notifier).duplicateLayer(layerId),
           ),
           _BotaoDoCromo(
             key: const ValueKey('camada-lixeira'),
@@ -1295,86 +1308,6 @@ class _PintorDoMedidor extends CustomPainter {
 
 /// A BARRA FLUTUANTE DA SELECAO: aparar, dividir, keyframe, duplicar e
 /// excluir da camada selecionada, num cartao sobre a timeline.
-class BarraDaSelecao extends ConsumerWidget {
-  const BarraDaSelecao({
-    super.key,
-    required this.playback,
-    required this.layerId,
-    required this.keyframeHere,
-    required this.onKeyframe,
-  });
-
-  final PlaybackController playback;
-  final String layerId;
-  final bool keyframeHere;
-  final VoidCallback onKeyframe;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final controller = ref.read(editorControllerProvider.notifier);
-    // O TEMPO SAI NA HORA DO TOQUE: lido no build, a barra cortava no
-    // cabecote de QUANDO ELA APARECEU (a selecao), nao no de agora.
-    Duration t() => playback.time.value;
-    return Container(
-      height: 46,
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      decoration: BoxDecoration(
-        color: CromoEditor.trilho.withValues(alpha: .97),
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: const [
-          BoxShadow(color: Colors.black45, blurRadius: 10, offset: Offset(0, 3)),
-        ],
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _BotaoDoCromo(
-            key: const ValueKey('transport-keyframe'),
-            icone: keyframeHere
-                ? CupertinoIcons.rhombus_fill
-                : CupertinoIcons.rhombus,
-            dica: keyframeHere
-                ? 'Remover keyframe no cabeçote'
-                : 'Adicionar keyframe no cabeçote',
-            cor: keyframeHere ? CromoEditor.keyframe : CromoEditor.branco,
-            onTap: onKeyframe,
-          ),
-          _BotaoDoCromo(
-            key: const ValueKey('camada-aparar-esq'),
-            icone: CupertinoIcons.arrow_right_to_line,
-            dica: 'Aparar o início até o cabeçote',
-            onTap: () => controller.trimLayerStart(layerId, t()),
-          ),
-          _BotaoDoCromo(
-            key: const ValueKey('camada-dividir'),
-            icone: CupertinoIcons.scissors,
-            dica: 'Dividir a camada no cabeçote',
-            onTap: () => controller.splitLayer(layerId, t()),
-          ),
-          _BotaoDoCromo(
-            key: const ValueKey('camada-aparar-dir'),
-            icone: CupertinoIcons.arrow_left_to_line,
-            dica: 'Aparar o fim até o cabeçote',
-            onTap: () => controller.trimLayerEnd(layerId, t()),
-          ),
-          _BotaoDoCromo(
-            key: const ValueKey('camada-duplicar'),
-            icone: CupertinoIcons.plus_square_on_square,
-            dica: 'Duplicar camada',
-            onTap: () => controller.duplicateLayer(layerId),
-          ),
-          _BotaoDoCromo(
-            key: const ValueKey('camada-excluir'),
-            icone: CupertinoIcons.trash,
-            dica: 'Excluir camada',
-            onTap: () => excluirCamadas(context, ref, {layerId}),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 /// A COLUNA DE OPCOES DE VISUALIZACAO (borda direita do palco, aberta
 /// pelo olho da barra de reproducao): pixels, grade, solo, visao da
 /// camera e o zoom do palco (+ · 100% · −; tocar no numero volta ao

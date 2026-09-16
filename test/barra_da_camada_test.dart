@@ -60,10 +60,15 @@ void main() {
     c.read(selectedLayerProvider.notifier).state = id;
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('barra-da-camada')), findsOneWidget);
-    for (final k in ['camada-nome', 'camada-parentesco', 'camada-lixeira', 'camada-menu']) {
+    for (final k in ['camada-nome', 'camada-duplicar', 'camada-lixeira', 'camada-menu']) {
       expect(find.byKey(ValueKey(k)), findsOneWidget, reason: k);
     }
     expect(find.byKey(const ValueKey('editor-project-name')), findsNothing);
+    expect(
+      find.byKey(const ValueKey('camada-parentesco')),
+      findsNothing,
+      reason: 'sem pai, o elo nao ocupa lugar na barra',
+    );
 
     // Renomear ali mesmo.
     await tester.tap(find.byKey(const ValueKey('camada-nome')));

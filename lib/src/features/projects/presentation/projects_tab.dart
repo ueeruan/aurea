@@ -1,5 +1,7 @@
 import 'package:aurea/src/core/l10n/app_language.dart';
+
 import 'dart:io';
+import 'dart:ui' show ImageFilter;
 import 'dart:ui' as ui;
 
 import '../../../core/ui/tocavel.dart';
@@ -18,6 +20,7 @@ import '../../editor/domain/template_pack.dart';
 import '../../editor/domain/video_project.dart';
 import '../../editor/presentation/editor_screen.dart';
 import '../application/projects_controller.dart';
+import '../application/projects_view.dart';
 import '../application/campo_assets.dart';
 import '../application/reference_rebuild_assets.dart';
 import '../application/dnyx_remix_assets.dart';
@@ -89,8 +92,9 @@ class ProjectsTab extends ConsumerWidget {
 
   /// Prepara o campo com suas texturas embutidas antes de abrir.
   Future<void> _openCampo(BuildContext context, WidgetRef ref) async {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(const SnackBar(content: AppText('Preparando o campo 3D…')));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: AppText('Preparando o campo 3D…')));
     try {
       final model = await prepareCampoArvore();
       if (!context.mounted) return;
@@ -114,7 +118,9 @@ class ProjectsTab extends ConsumerWidget {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: AppText('Nao consegui preparar o motion VHF. Tente novamente.'),
+          content: AppText(
+            'Nao consegui preparar o motion VHF. Tente novamente.',
+          ),
         ),
       );
     }
@@ -170,7 +176,8 @@ class ProjectsTab extends ConsumerWidget {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: AppText('Nao consegui preparar o motion. Tente abrir novamente.',
+          content: AppText(
+            'Nao consegui preparar o motion. Tente abrir novamente.',
           ),
         ),
       );
@@ -189,7 +196,8 @@ class ProjectsTab extends ConsumerWidget {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: AppText('Nao consegui preparar a trilha. Tente abrir o modelo novamente.',
+          content: AppText(
+            'Nao consegui preparar a trilha. Tente abrir o modelo novamente.',
           ),
         ),
       );
@@ -250,12 +258,21 @@ class ProjectsTab extends ConsumerWidget {
       final nome = r?.files.single.name ?? 'Mídia Importada';
       final controller = ref.read(editorControllerProvider.notifier);
       final ext = caminho.split('.').last.toLowerCase();
-      final video = ['mp4', 'mov', 'm4v', 'avi', 'mkv', 'webm', '3gp']
-          .contains(ext);
+      final video = [
+        'mp4',
+        'mov',
+        'm4v',
+        'avi',
+        'mkv',
+        'webm',
+        '3gp',
+      ].contains(ext);
       // O PROJETO TEM A PROPORCAO DA MIDIA: a previa abre cheia, sem faixa.
       // Era 9:16 sempre, e o video deitado ficava pequeno no meio da tela.
       final sonda = video ? await controller.sondarVideo(caminho) : null;
-      final proporcao = video ? sonda!.proporcao : await proporcaoDaFoto(caminho);
+      final proporcao = video
+          ? sonda!.proporcao
+          : await proporcaoDaFoto(caminho);
       if (!context.mounted) return;
       final projeto = VideoProject(
         id: 'projeto-${DateTime.now().millisecondsSinceEpoch}',
@@ -433,6 +450,46 @@ class ProjectsTab extends ConsumerWidget {
   }
 
   /// DUPLICAR: o mesmo projeto com id novo, na frente da lista.
+  /// MARCAR/DESMARCAR um projeto (e sair do modo ao desmarcar o ultimo).
+  void _marcar(WidgetRef ref, String id) {
+    final atual = {...ref.read(selecaoDeProjetosProvider)};
+    if (!atual.add(id)) atual.remove(id);
+    ref.read(selecaoDeProjetosProvider.notifier).state = atual;
+  }
+
+  /// EXCLUIR OS ESCOLHIDOS, com uma pergunta so para o lote inteiro.
+  Future<void> _excluirEscolhidos(
+    BuildContext context,
+    WidgetRef ref,
+    Set<String> ids,
+  ) async {
+    final apaga = await showCupertinoModalPopup<bool>(
+      context: context,
+      builder: (c) => CupertinoActionSheet(
+        title: AppText('Excluir ${ids.length} projetos?'),
+        message: const AppText('Nao da para desfazer.'),
+        actions: [
+          CupertinoActionSheetAction(
+            key: const ValueKey('projetos-excluir-lote'),
+            isDestructiveAction: true,
+            onPressed: () => Navigator.of(c).pop(true),
+            child: const AppText('Excluir'),
+          ),
+        ],
+        cancelButton: CupertinoActionSheetAction(
+          onPressed: () => Navigator.of(c).pop(false),
+          child: const AppText('Cancelar'),
+        ),
+      ),
+    );
+    if (apaga != true) return;
+    final controlador = ref.read(projectsControllerProvider.notifier);
+    for (final id in ids) {
+      controlador.remove(id);
+    }
+    ref.read(selecaoDeProjetosProvider.notifier).state = const {};
+  }
+
   void _duplicar(WidgetRef ref, VideoProject project) {
     final copia = project.copyWith(name: '${project.name} (cópia)').comIdNovo();
     ref.read(projectsControllerProvider.notifier).add(copia);
@@ -513,15 +570,34 @@ class ProjectsTab extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final projects = ref.watch(projectsControllerProvider);
+    final todos = ref.watch(projectsControllerProvider);
     final mostrarTodos = ref.watch(_mostrarTodosProvider);
+    final ordem = ref.watch(ordemDosProjetosProvider);
+    final busca = ref.watch(buscaDeProjetosProvider);
+    final selecao = ref.watch(selecaoDeProjetosProvider);
+    final selecionando = selecao.isNotEmpty;
+    final projects = projetosArrumados(todos, ordem, busca);
     ThumbnailService.instance.init();
     // O HEROI "Continuar editando": o projeto mais recente vira um cartao
-    // largo em cima; a grade mostra o resto, sem repetir.
-    final heroi = projects.isEmpty ? null : projects.first;
+    // largo em cima; a grade mostra o resto, sem repetir. Procurando,
+    // ordenando por outra coisa ou escolhendo varios, nao ha heroi: a
+    // lista inteira e o assunto.
+    final heroi =
+        projects.isEmpty ||
+            selecionando ||
+            busca.trim().isNotEmpty ||
+            ordem != OrdemDosProjetos.recentes
+        ? null
+        : projects.first;
+    // Com busca, ordem ou selecao, a lista nao esconde nada atras do
+    // "mostrar todos".
+    final abertos =
+        mostrarTodos ||
+        selecionando ||
+        busca.trim().isNotEmpty ||
+        ordem != OrdemDosProjetos.recentes;
     final visiveis = [
-      for (final p
-          in mostrarTodos ? projects : projects.take(_recentesNaInicio))
+      for (final p in abertos ? projects : projects.take(_recentesNaInicio))
         if (p.id != heroi?.id) p,
     ];
     final largura = MediaQuery.sizeOf(context).width;
@@ -529,304 +605,351 @@ class ProjectsTab extends ConsumerWidget {
 
     return SafeArea(
       bottom: false,
-      child: _BarraAoRolar(
-        onTemplate: () => _openTemplate(context, ref),
-        onPerfil: () => ref.read(homeTabProvider.notifier).state = 3,
-        child: CustomScrollView(
-        slivers: [
-          SliverToBoxAdapter(
-            child: _Cabecalho(onTemplate: () => _openTemplate(context, ref)),
-          ),
-          // UM BOTAO DE CRIAR, na largura inteira.
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 6, 20, 0),
-              child: SizedBox(
-                height: 54,
-                width: double.infinity,
-                child: FilledButton.icon(
-                  key: const ValueKey('novo-projeto'),
-                  style: FilledButton.styleFrom(
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                  ),
-                  icon: const Icon(CupertinoIcons.plus, size: 20),
-                  label: const AppText('Novo projeto'),
-                  onPressed: () => _createProject(
-                    context,
-                    ref,
-                    nomeSugerido: 'Projeto ${projects.length + 1}',
+      child: Stack(
+        children: [
+          // A BARRA DAS ACOES EM LOTE fica por cima da lista, e so
+          // existe enquanto ha projeto escolhido.
+          _BarraAoRolar(
+            onTemplate: () => _openTemplate(context, ref),
+            onPerfil: () => ref.read(homeTabProvider.notifier).state = 3,
+            child: CustomScrollView(
+              slivers: [
+                SliverToBoxAdapter(
+                  child: _Cabecalho(
+                    onTemplate: () => _openTemplate(context, ref),
                   ),
                 ),
-              ),
-            ),
-          ),
-          // ATALHOS: icone num circulo e o nome embaixo. Sem caixa, sem borda.
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 18, 12, 0),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: _Atalho(
-                      icon: CupertinoIcons.photo_on_rectangle,
-                      rotulo: 'Mídia',
-                      onTap: () => _importarMidia(context, ref),
+                // UM BOTAO DE CRIAR, na largura inteira.
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 6, 20, 0),
+                    child: SizedBox(
+                      height: 54,
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        key: const ValueKey('novo-projeto'),
+                        style: FilledButton.styleFrom(
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                        ),
+                        icon: const Icon(CupertinoIcons.plus, size: 20),
+                        label: const AppText('Novo projeto'),
+                        onPressed: () => _createProject(
+                          context,
+                          ref,
+                          nomeSugerido: 'Projeto ${projects.length + 1}',
+                        ),
+                      ),
                     ),
                   ),
-                  Expanded(
-                    child: _Atalho(
-                      icon: CupertinoIcons.doc_on_doc,
-                      rotulo: 'Template',
-                      onTap: () => _openTemplate(context, ref),
-                    ),
-                  ),
-                  Expanded(
-                    child: _Atalho(
-                      icon: CupertinoIcons.cube,
-                      rotulo: 'Cena 3D',
-                      onTap: () => _importarCena(context, ref),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          if (heroi != null)
-            SliverToBoxAdapter(
-              child: ValueListenableBuilder<int>(
-                valueListenable: ThumbnailService.instance.revision,
-                builder: (_, rev, _) => _CartaoContinuar(
-                  key: ValueKey('projeto-${heroi.id}'),
-                  project: heroi,
-                  thumb: ThumbnailService.instance.fileFor(heroi.id),
-                  revision: rev,
-                  onOpen: () => _openProject(context, ref, heroi),
-                  onMenu: () => _menuDoProjeto(context, ref, heroi),
                 ),
-              ),
-            ),
-          if (projects.length > 1)
-            SliverToBoxAdapter(
-              child: _TituloSecao(
-                'Recentes',
-                detalhe:
-                    '${projects.length} ${translate(context, 'projetos')}',
-              ),
-            ),
-          if (projects.isEmpty)
-            const SliverToBoxAdapter(child: _SemProjetos())
-          else
-            SliverPadding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              sliver: ValueListenableBuilder<int>(
-                valueListenable: ThumbnailService.instance.revision,
-                builder: (_, rev, _) => SliverGrid(
-                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: colunas,
-                    mainAxisSpacing: 16,
-                    crossAxisSpacing: 12,
-                    // miniatura 16:10 + duas linhas de texto
-                    childAspectRatio: 1.12,
+                // ATALHOS: icone num circulo e o nome embaixo. Sem caixa, sem borda.
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 18, 12, 0),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: _Atalho(
+                            icon: CupertinoIcons.photo_on_rectangle,
+                            rotulo: 'Mídia',
+                            onTap: () => _importarMidia(context, ref),
+                          ),
+                        ),
+                        Expanded(
+                          child: _Atalho(
+                            icon: CupertinoIcons.doc_on_doc,
+                            rotulo: 'Template',
+                            onTap: () => _openTemplate(context, ref),
+                          ),
+                        ),
+                        Expanded(
+                          child: _Atalho(
+                            icon: CupertinoIcons.cube,
+                            rotulo: 'Cena 3D',
+                            onTap: () => _importarCena(context, ref),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                  delegate: SliverChildBuilderDelegate(
-                    (context, i) {
-                      final project = visiveis[i];
-                      return _CartaoProjeto(
-                        key: ValueKey('projeto-${project.id}'),
-                        project: project,
-                        thumb: ThumbnailService.instance.fileFor(project.id),
+                ),
+                if (heroi != null)
+                  SliverToBoxAdapter(
+                    child: ValueListenableBuilder<int>(
+                      valueListenable: ThumbnailService.instance.revision,
+                      builder: (_, rev, _) => _CartaoContinuar(
+                        key: ValueKey('projeto-${heroi.id}'),
+                        project: heroi,
+                        thumb: ThumbnailService.instance.fileFor(heroi.id),
                         revision: rev,
-                        onOpen: () => _openProject(context, ref, project),
-                        onMenu: () => _menuDoProjeto(context, ref, project),
-                      );
-                    },
-                    childCount: visiveis.length,
-                  ),
-                ),
-              ),
-            ),
-          if (projects.length > _recentesNaInicio)
-            SliverToBoxAdapter(
-              child: _Linha(
-                key: const ValueKey('projetos-todos'),
-                icon: mostrarTodos
-                    ? CupertinoIcons.chevron_up
-                    : CupertinoIcons.square_grid_2x2,
-                texto: mostrarTodos
-                    ? 'Mostrar menos'
-                    : 'Mostrar todos os ${projects.length} projetos',
-                onTap: () => ref.read(_mostrarTodosProvider.notifier).state =
-                    !mostrarTodos,
-              ),
-            ),
-          // MODELOS: motions inteiros montados camada por camada.
-          const SliverToBoxAdapter(child: _TituloSecao('Modelos')),
-          SliverToBoxAdapter(
-            child: SizedBox(
-              height: 196,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                children: [
-                  _CartaoModelo(
-                    imagem: 'assets/templates/campo.jpg',
-                    titulo: 'CAMPO · A árvore da manhã',
-                    detalhe: '25 s · cinco tomadas · cenário 3D editável',
-                    onTap: () => _openCampo(context, ref),
-                  ),
-                  _CartaoModelo(
-                    imagem: 'assets/templates/flor.png',
-                    titulo: 'FLOR · Dez segundos de manhã',
-                    detalhe: '10 s · três tomadas · câmera na mão',
-                    onTap: () =>
-                        _abrirModelo(context, ref, buildFlorTemplate()),
-                  ),
-                  _CartaoModelo(
-                    imagem: 'assets/templates/prisma.jpg',
-                    titulo: 'PRISMA · Dezessete segundos em loop',
-                    detalhe: '17 s · seis cenas 3D · loop abstrato',
-                    onTap: () =>
-                        _abrirModelo(context, ref, buildPrismaTemplate()),
-                  ),
-                  _CartaoModelo(
-                    imagem: 'assets/templates/deriva.jpg',
-                    titulo: 'DERIVA · O astronauta perdido',
-                    detalhe: '18 s · tres tomadas · luz de vacuo',
-                    onTap: () => _openDeriva(context, ref),
-                  ),
-                  _CartaoModelo(
-                    imagem: 'assets/templates/monolito.jpg',
-                    titulo: 'MONOLITO · O astronauta e a porta',
-                    detalhe: '16 s · noite, neblina e luz magenta',
-                    onTap: () => _openMonolito(context, ref),
-                  ),
-                  _CartaoModelo(
-                    imagem: 'assets/templates/colina.jpg',
-                    titulo: 'COLINA · A TV no morro',
-                    detalhe: '6 s · cena 3D realista · orbita rasteira',
-                    onTap: () =>
-                        _abrirModelo(context, ref, buildColinaTvTemplate()),
-                  ),
-                  _CartaoModelo(
-                    imagem: 'assets/templates/mao-enterrada.png',
-                    titulo: 'MÃO ENTERRADA · Deserto ao entardecer',
-                    detalhe: '15 s · 4 câmeras · malha orgânica e céu',
-                    onTap: () =>
-                        _abrirModelo(context, ref, buildMaoEnterradaTemplate()),
-                  ),
-                  _CartaoModelo(
-                    imagem: 'assets/templates/abyss.jpg',
-                    titulo: 'ABISMO · Cinema 3D',
-                    detalhe: '14 s · 4 cameras · personagem com rig',
-                    onTap: () => _abrirModelo(
-                      context,
-                      ref,
-                      buildAbyssCinematicTemplate(),
+                        onOpen: () => _openProject(context, ref, heroi),
+                        onMenu: () => _menuDoProjeto(context, ref, heroi),
+                      ),
                     ),
                   ),
-                  _CartaoModelo(
-                    imagem: 'assets/templates/vhf/thumbnail.jpg',
-                    titulo: 'VHF · Neon Orbit',
-                    detalhe: '12 cenas · vetores e gradientes animados',
-                    onTap: () => _openVhfMotion(context, ref),
-                  ),
-                  _CartaoModelo(
-                    imagem: 'assets/templates/dnyx/thumbnail.jpg',
-                    titulo: 'Aurea App · RMK Dnyx',
-                    detalhe: 'Texto, fotos, cursores e audio editaveis',
-                    onTap: () => _openDnyxRemix(context, ref),
-                  ),
-                  _CartaoModelo(
-                    imagem: 'assets/templates/reference-rebuild.jpg',
-                    titulo: 'Nova recriacao · Codex',
-                    detalhe: '5 cenas · 280 quadros · camadas editaveis',
-                    onTap: () => _openReferenceRebuild(context, ref),
-                  ),
-                  _CartaoModelo(
-                    imagem: 'assets/templates/notes.jpg',
-                    titulo: 'Notes',
-                    detalhe: 'Icone, botao, listas, whip e glow',
-                    onTap: () =>
-                        _abrirModelo(context, ref, buildNotesMotionTemplate()),
-                  ),
-                  _CartaoModelo(
-                    imagem: 'assets/templates/notes.jpg',
-                    titulo: 'Pindown',
-                    detalhe: 'Casa, faisca medida e coroas 3D',
-                    onTap: () => _abrirModelo(
-                      context,
-                      ref,
-                      buildPindownMotionTemplate(),
+                if (todos.length > 1)
+                  SliverToBoxAdapter(
+                    child: _BarraDaLista(
+                      total: projects.length,
+                      ordem: ordem,
+                      busca: busca,
+                      selecao: selecao,
+                      projetos: projects,
                     ),
                   ),
-                ],
-              ),
-            ),
-          ),
-          const SliverToBoxAdapter(child: _TituloSecao('Comunidade')),
-          SliverToBoxAdapter(
-            child: _LinhaGrande(
-              icon: CupertinoIcons.person_2_fill,
-              titulo: 'Veja o que a galera está criando',
-              subtitulo: 'Poste o seu projeto, responda e reposte',
-              // A ABA DA COMUNIDADE E A 1. O atalho antigo mandava para a
-              // 2 — que e Ajustes.
-              onTap: () => ref.read(homeTabProvider.notifier).state = 1,
-            ),
-          ),
-          const SliverToBoxAdapter(child: _TituloSecao('Aprender')),
-          SliverToBoxAdapter(
-            child: Column(
-              children: [
-                _Linha(
-                  key: const ValueKey('inicio-tutorial-cena3d'),
-                  icon: CupertinoIcons.play_rectangle,
-                  texto: 'Tutorial em vídeo: sua primeira cena 3D',
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => const TutorialScreen(id: 'cena3d'),
+                if (projects.isEmpty)
+                  const SliverToBoxAdapter(child: _SemProjetos())
+                else
+                  SliverPadding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    sliver: ValueListenableBuilder<int>(
+                      valueListenable: ThumbnailService.instance.revision,
+                      builder: (_, rev, _) => SliverGrid(
+                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: colunas,
+                          mainAxisSpacing: 16,
+                          crossAxisSpacing: 12,
+                          // miniatura 16:10 + duas linhas de texto
+                          childAspectRatio: 1.12,
+                        ),
+                        delegate: SliverChildBuilderDelegate((context, i) {
+                          final project = visiveis[i];
+                          final marcado = selecao.contains(project.id);
+                          return _CartaoProjeto(
+                            key: ValueKey('projeto-${project.id}'),
+                            project: project,
+                            thumb: ThumbnailService.instance.fileFor(
+                              project.id,
+                            ),
+                            revision: rev,
+                            marcado: marcado,
+                            escolhendo: selecionando,
+                            onOpen: () => selecionando
+                                ? _marcar(ref, project.id)
+                                : _openProject(context, ref, project),
+                            onMenu: () => selecionando
+                                ? _marcar(ref, project.id)
+                                : _menuDoProjeto(context, ref, project),
+                            onMarcar: () => _marcar(ref, project.id),
+                          );
+                        }, childCount: visiveis.length),
+                      ),
+                    ),
+                  ),
+                if (!abertos && projects.length > _recentesNaInicio)
+                  SliverToBoxAdapter(
+                    child: _Linha(
+                      key: const ValueKey('projetos-todos'),
+                      icon: mostrarTodos
+                          ? CupertinoIcons.chevron_up
+                          : CupertinoIcons.square_grid_2x2,
+                      texto: mostrarTodos
+                          ? 'Mostrar menos'
+                          : 'Mostrar todos os ${projects.length} projetos',
+                      onTap: () =>
+                          ref.read(_mostrarTodosProvider.notifier).state =
+                              !mostrarTodos,
+                    ),
+                  ),
+                // MODELOS: motions inteiros montados camada por camada.
+                const SliverToBoxAdapter(child: _TituloSecao('Modelos')),
+                SliverToBoxAdapter(
+                  child: SizedBox(
+                    height: 196,
+                    child: ListView(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      children: [
+                        _CartaoModelo(
+                          imagem: 'assets/templates/campo.jpg',
+                          titulo: 'CAMPO · A árvore da manhã',
+                          detalhe: '25 s · cinco tomadas · cenário 3D editável',
+                          onTap: () => _openCampo(context, ref),
+                        ),
+                        _CartaoModelo(
+                          imagem: 'assets/templates/flor.png',
+                          titulo: 'FLOR · Dez segundos de manhã',
+                          detalhe: '10 s · três tomadas · câmera na mão',
+                          onTap: () =>
+                              _abrirModelo(context, ref, buildFlorTemplate()),
+                        ),
+                        _CartaoModelo(
+                          imagem: 'assets/templates/prisma.jpg',
+                          titulo: 'PRISMA · Dezessete segundos em loop',
+                          detalhe: '17 s · seis cenas 3D · loop abstrato',
+                          onTap: () =>
+                              _abrirModelo(context, ref, buildPrismaTemplate()),
+                        ),
+                        _CartaoModelo(
+                          imagem: 'assets/templates/deriva.jpg',
+                          titulo: 'DERIVA · O astronauta perdido',
+                          detalhe: '18 s · tres tomadas · luz de vacuo',
+                          onTap: () => _openDeriva(context, ref),
+                        ),
+                        _CartaoModelo(
+                          imagem: 'assets/templates/monolito.jpg',
+                          titulo: 'MONOLITO · O astronauta e a porta',
+                          detalhe: '16 s · noite, neblina e luz magenta',
+                          onTap: () => _openMonolito(context, ref),
+                        ),
+                        _CartaoModelo(
+                          imagem: 'assets/templates/colina.jpg',
+                          titulo: 'COLINA · A TV no morro',
+                          detalhe: '6 s · cena 3D realista · orbita rasteira',
+                          onTap: () => _abrirModelo(
+                            context,
+                            ref,
+                            buildColinaTvTemplate(),
+                          ),
+                        ),
+                        _CartaoModelo(
+                          imagem: 'assets/templates/mao-enterrada.png',
+                          titulo: 'MÃO ENTERRADA · Deserto ao entardecer',
+                          detalhe: '15 s · 4 câmeras · malha orgânica e céu',
+                          onTap: () => _abrirModelo(
+                            context,
+                            ref,
+                            buildMaoEnterradaTemplate(),
+                          ),
+                        ),
+                        _CartaoModelo(
+                          imagem: 'assets/templates/abyss.jpg',
+                          titulo: 'ABISMO · Cinema 3D',
+                          detalhe: '14 s · 4 cameras · personagem com rig',
+                          onTap: () => _abrirModelo(
+                            context,
+                            ref,
+                            buildAbyssCinematicTemplate(),
+                          ),
+                        ),
+                        _CartaoModelo(
+                          imagem: 'assets/templates/vhf/thumbnail.jpg',
+                          titulo: 'VHF · Neon Orbit',
+                          detalhe: '12 cenas · vetores e gradientes animados',
+                          onTap: () => _openVhfMotion(context, ref),
+                        ),
+                        _CartaoModelo(
+                          imagem: 'assets/templates/dnyx/thumbnail.jpg',
+                          titulo: 'Aurea App · RMK Dnyx',
+                          detalhe: 'Texto, fotos, cursores e audio editaveis',
+                          onTap: () => _openDnyxRemix(context, ref),
+                        ),
+                        _CartaoModelo(
+                          imagem: 'assets/templates/reference-rebuild.jpg',
+                          titulo: 'Nova recriacao · Codex',
+                          detalhe: '5 cenas · 280 quadros · camadas editaveis',
+                          onTap: () => _openReferenceRebuild(context, ref),
+                        ),
+                        _CartaoModelo(
+                          imagem: 'assets/templates/notes.jpg',
+                          titulo: 'Notes',
+                          detalhe: 'Icone, botao, listas, whip e glow',
+                          onTap: () => _abrirModelo(
+                            context,
+                            ref,
+                            buildNotesMotionTemplate(),
+                          ),
+                        ),
+                        _CartaoModelo(
+                          imagem: 'assets/templates/notes.jpg',
+                          titulo: 'Pindown',
+                          detalhe: 'Casa, faisca medida e coroas 3D',
+                          onTap: () => _abrirModelo(
+                            context,
+                            ref,
+                            buildPindownMotionTemplate(),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
-                _Linha(
-                  key: const ValueKey('inicio-tutorial-cena-completa'),
-                  icon: CupertinoIcons.cube_box,
-                  texto: 'Tutorial em vídeo: cena 3D com modelos e câmeras',
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) =>
-                          const TutorialScreen(id: 'cena-completa'),
-                    ),
+                const SliverToBoxAdapter(child: _TituloSecao('Comunidade')),
+                SliverToBoxAdapter(
+                  child: _LinhaGrande(
+                    icon: CupertinoIcons.person_2_fill,
+                    titulo: 'Veja o que a galera está criando',
+                    subtitulo: 'Poste o seu projeto, responda e reposte',
+                    // A ABA DA COMUNIDADE E A 1. O atalho antigo mandava para a
+                    // 2 — que e Ajustes.
+                    onTap: () => ref.read(homeTabProvider.notifier).state = 1,
                   ),
                 ),
-                _Linha(
-                  key: const ValueKey('inicio-tutorial-texto-bounce'),
-                  icon: CupertinoIcons.textformat,
-                  texto: 'Tutorial em vídeo: texto que quica, do seu jeito',
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => const TutorialScreen(id: 'texto-bounce'),
-                    ),
+                const SliverToBoxAdapter(child: _TituloSecao('Aprender')),
+                SliverToBoxAdapter(
+                  child: Column(
+                    children: [
+                      _Linha(
+                        key: const ValueKey('inicio-tutorial-cena3d'),
+                        icon: CupertinoIcons.play_rectangle,
+                        texto: 'Tutorial em vídeo: sua primeira cena 3D',
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => const TutorialScreen(id: 'cena3d'),
+                          ),
+                        ),
+                      ),
+                      _Linha(
+                        key: const ValueKey('inicio-tutorial-cena-completa'),
+                        icon: CupertinoIcons.cube_box,
+                        texto:
+                            'Tutorial em vídeo: cena 3D com modelos e câmeras',
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) =>
+                                const TutorialScreen(id: 'cena-completa'),
+                          ),
+                        ),
+                      ),
+                      _Linha(
+                        key: const ValueKey('inicio-tutorial-texto-bounce'),
+                        icon: CupertinoIcons.textformat,
+                        texto:
+                            'Tutorial em vídeo: texto que quica, do seu jeito',
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) =>
+                                const TutorialScreen(id: 'texto-bounce'),
+                          ),
+                        ),
+                      ),
+                      _Linha(
+                        icon: CupertinoIcons.sparkles,
+                        texto: 'O que ha de novo nesta versao',
+                        onTap: () => showWhatsNewSheet(context),
+                      ),
+                      _Linha(
+                        icon: CupertinoIcons.exclamationmark_bubble,
+                        texto:
+                            'Versao beta: achou um problema? Conte pra gente',
+                        onTap: () => showReportSheet(context),
+                      ),
+                    ],
                   ),
                 ),
-                _Linha(
-                  icon: CupertinoIcons.sparkles,
-                  texto: 'O que ha de novo nesta versao',
-                  onTap: () => showWhatsNewSheet(context),
-                ),
-                _Linha(
-                  icon: CupertinoIcons.exclamationmark_bubble,
-                  texto: 'Versao beta: achou um problema? Conte pra gente',
-                  onTap: () => showReportSheet(context),
-                ),
+                const SliverToBoxAdapter(child: SizedBox(height: 120)),
               ],
             ),
           ),
-          const SliverToBoxAdapter(child: SizedBox(height: 120)),
+          if (selecionando)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: _AcoesEmLote(
+                quantos: selecao.length,
+                onDuplicar: () {
+                  for (final p in todos) {
+                    if (selecao.contains(p.id)) _duplicar(ref, p);
+                  }
+                  ref.read(selecaoDeProjetosProvider.notifier).state = const {};
+                },
+                onExcluir: () => _excluirEscolhidos(context, ref, selecao),
+              ),
+            ),
         ],
-        ),
       ),
     );
   }
@@ -880,42 +1003,42 @@ class _BarraAoRolarState extends State<_BarraAoRolar> {
           child: !_visivel
               ? const SizedBox.shrink()
               : ClipRect(
-              child: BackdropFilter(
-                filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-                child: Container(
-                  height: 52,
-                  padding: const EdgeInsets.fromLTRB(20, 0, 12, 0),
-                  color: AppColors.background.withValues(alpha: .62),
-                  child: Row(
-                    children: [
-                      const AureaLogo(size: 22),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Aurea',
-                        style: TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: -0.4,
-                          color: AppColors.onDark,
-                        ),
+                  child: BackdropFilter(
+                    filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+                    child: Container(
+                      height: 52,
+                      padding: const EdgeInsets.fromLTRB(20, 0, 12, 0),
+                      color: AppColors.background.withValues(alpha: .62),
+                      child: Row(
+                        children: [
+                          const AureaLogo(size: 22),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Aurea',
+                            style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: -0.4,
+                              color: AppColors.onDark,
+                            ),
+                          ),
+                          const Spacer(),
+                          _BotaoRedondo(
+                            icon: CupertinoIcons.doc_on_doc,
+                            tooltip: translate(context, 'Template'),
+                            onTap: widget.onTemplate,
+                          ),
+                          const SizedBox(width: 2),
+                          _BotaoRedondo(
+                            icon: CupertinoIcons.person_crop_circle,
+                            tooltip: translate(context, 'Perfil'),
+                            onTap: widget.onPerfil,
+                          ),
+                        ],
                       ),
-                      const Spacer(),
-                      _BotaoRedondo(
-                        icon: CupertinoIcons.doc_on_doc,
-                        tooltip: translate(context, 'Template'),
-                        onTap: widget.onTemplate,
-                      ),
-                      const SizedBox(width: 2),
-                      _BotaoRedondo(
-                        icon: CupertinoIcons.person_crop_circle,
-                        tooltip: translate(context, 'Perfil'),
-                        onTap: widget.onPerfil,
-                      ),
-                    ],
+                    ),
                   ),
                 ),
-              ),
-            ),
         ),
       ),
     ],
@@ -1232,7 +1355,8 @@ class _Cabecalho extends ConsumerWidget {
               width: 44,
               height: 44,
               child: Center(
-                child: conta?.avatar != null && File(conta!.avatar!).existsSync()
+                child:
+                    conta?.avatar != null && File(conta!.avatar!).existsSync()
                     ? CircleAvatar(
                         radius: 17,
                         backgroundImage: FileImage(File(conta.avatar!)),
@@ -1294,7 +1418,11 @@ class _BotaoRedondo extends StatelessWidget {
 }
 
 class _Atalho extends StatelessWidget {
-  const _Atalho({required this.icon, required this.rotulo, required this.onTap});
+  const _Atalho({
+    required this.icon,
+    required this.rotulo,
+    required this.onTap,
+  });
 
   final IconData icon;
   final String rotulo;
@@ -1332,10 +1460,9 @@ class _Atalho extends StatelessWidget {
 }
 
 class _TituloSecao extends StatelessWidget {
-  const _TituloSecao(this.titulo, {this.detalhe});
+  const _TituloSecao(this.titulo);
 
   final String titulo;
-  final String? detalhe;
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -1354,11 +1481,6 @@ class _TituloSecao extends StatelessWidget {
             ),
           ),
         ),
-        if (detalhe != null)
-          Text(
-            detalhe!,
-            style: TextStyle(fontSize: 13, color: AppColors.muted),
-          ),
       ],
     ),
   );
@@ -1395,6 +1517,9 @@ class _CartaoProjeto extends StatelessWidget {
     required this.revision,
     required this.onOpen,
     required this.onMenu,
+    this.marcado = false,
+    this.escolhendo = false,
+    this.onMarcar,
   });
 
   final VideoProject project;
@@ -1403,13 +1528,19 @@ class _CartaoProjeto extends StatelessWidget {
   final VoidCallback onOpen;
   final VoidCallback onMenu;
 
+  /// ESCOLHENDO VARIOS: o cartao mostra a marca e o toque passa a
+  /// marcar, em vez de abrir.
+  final bool marcado;
+  final bool escolhendo;
+  final VoidCallback? onMarcar;
+
   @override
   Widget build(BuildContext context) {
     final t = thumb;
     final ratio = project.aspectRatio <= 0 ? 16 / 9 : project.aspectRatio;
     return Tocavel(
       onTap: onOpen,
-      onLongPress: onMenu,
+      onLongPress: escolhendo ? onMarcar : onMenu,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1434,7 +1565,9 @@ class _CartaoProjeto extends StatelessWidget {
                             aspectRatio: ratio,
                             child: DecoratedBox(
                               decoration: BoxDecoration(
-                                color: AppColors.background.withValues(alpha: .55),
+                                color: AppColors.background.withValues(
+                                  alpha: .55,
+                                ),
                                 borderRadius: BorderRadius.circular(4),
                               ),
                               child: Icon(
@@ -1460,6 +1593,18 @@ class _CartaoProjeto extends StatelessWidget {
           const SizedBox(height: 6),
           Row(
             children: [
+              if (escolhendo)
+                Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: Icon(
+                    key: ValueKey('projeto-marca-${project.id}'),
+                    marcado
+                        ? CupertinoIcons.checkmark_circle_fill
+                        : CupertinoIcons.circle,
+                    size: 18,
+                    color: marcado ? AppColors.lime : AppColors.muted,
+                  ),
+                ),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1487,9 +1632,10 @@ class _CartaoProjeto extends StatelessWidget {
               ),
               // O MENU TEM 40 PX de alvo: e por onde se apaga, duplica e
               // renomeia — nada disso pode depender de um gesto escondido.
+              // Escolhendo varios, o mesmo alvo marca e desmarca.
               Tocavel(
                 key: ValueKey('projeto-menu-${project.id}'),
-                onTap: onMenu,
+                onTap: escolhendo ? onMarcar : onMenu,
                 child: SizedBox(
                   width: 40,
                   height: 40,
@@ -1676,7 +1822,9 @@ Future<void> apagarTodosOsProjetos(BuildContext context, WidgetRef ref) async {
     context: context,
     builder: (c) => CupertinoAlertDialog(
       title: const AppText('Apagar todos os projetos?'),
-      content: Text('$total projeto(s) serao apagados. Isso nao pode ser desfeito.'),
+      content: Text(
+        '$total projeto(s) serao apagados. Isso nao pode ser desfeito.',
+      ),
       actions: [
         CupertinoDialogAction(
           onPressed: () => Navigator.of(c).pop(false),
@@ -1696,4 +1844,278 @@ Future<void> apagarTodosOsProjetos(BuildContext context, WidgetRef ref) async {
   for (final id in ids) {
     ThumbnailService.instance.delete(id);
   }
+}
+
+/// A BARRA DA LISTA: quantos sao, como estao ordenados, a busca e o
+/// modo de escolher varios.
+class _BarraDaLista extends ConsumerStatefulWidget {
+  const _BarraDaLista({
+    required this.total,
+    required this.ordem,
+    required this.busca,
+    required this.selecao,
+    required this.projetos,
+  });
+
+  final int total;
+  final OrdemDosProjetos ordem;
+  final String busca;
+  final Set<String> selecao;
+  final List<VideoProject> projetos;
+
+  @override
+  ConsumerState<_BarraDaLista> createState() => _BarraDaListaState();
+}
+
+class _BarraDaListaState extends ConsumerState<_BarraDaLista> {
+  final _campo = TextEditingController();
+  var _procurando = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _campo.text = widget.busca;
+    _procurando = widget.busca.isNotEmpty;
+  }
+
+  @override
+  void dispose() {
+    _campo.dispose();
+    super.dispose();
+  }
+
+  Future<void> _escolherOrdem() async {
+    final escolha = await showCupertinoModalPopup<OrdemDosProjetos>(
+      context: context,
+      builder: (c) => CupertinoActionSheet(
+        title: const AppText('Ordenar os projetos'),
+        actions: [
+          for (final o in OrdemDosProjetos.values)
+            CupertinoActionSheetAction(
+              key: ValueKey('projetos-ordem-${o.name}'),
+              onPressed: () => Navigator.of(c).pop(o),
+              child: AppText(rotuloDaOrdem(o)),
+            ),
+        ],
+        cancelButton: CupertinoActionSheetAction(
+          onPressed: () => Navigator.of(c).pop(),
+          child: const AppText('Cancelar'),
+        ),
+      ),
+    );
+    if (escolha != null) {
+      ref.read(ordemDosProjetosProvider.notifier).escolher(escolha);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final selecionando = widget.selecao.isNotEmpty;
+    if (selecionando) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(20, 18, 12, 6),
+        child: Row(
+          children: [
+            Expanded(
+              child: AppText(
+                '${widget.selecao.length} escolhidos',
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            _BotaoDaBarra(
+              chave: 'projetos-marcar-todos',
+              icone: CupertinoIcons.checkmark_circle,
+              onTap: () => ref.read(selecaoDeProjetosProvider.notifier).state =
+                  {for (final p in widget.projetos) p.id},
+            ),
+            _BotaoDaBarra(
+              chave: 'projetos-selecao-sair',
+              icone: CupertinoIcons.xmark,
+              onTap: () =>
+                  ref.read(selecaoDeProjetosProvider.notifier).state = const {},
+            ),
+          ],
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 18, 12, 6),
+      child: Row(
+        children: [
+          if (!_procurando) ...[
+            Expanded(
+              child: AppText(
+                '${widget.total} ${translate(context, 'projetos')}',
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            _BotaoDaBarra(
+              chave: 'projetos-buscar',
+              icone: CupertinoIcons.search,
+              onTap: () => setState(() => _procurando = true),
+            ),
+          ] else
+            Expanded(
+              child: SizedBox(
+                height: 34,
+                child: CupertinoTextField(
+                  key: const ValueKey('projetos-busca-campo'),
+                  controller: _campo,
+                  autofocus: true,
+                  placeholder: 'Procurar pelo nome',
+                  suffix: Tocavel(
+                    key: const ValueKey('projetos-busca-limpar'),
+                    onTap: () {
+                      _campo.clear();
+                      ref.read(buscaDeProjetosProvider.notifier).state = '';
+                      setState(() => _procurando = false);
+                    },
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 8),
+                      child: Icon(CupertinoIcons.xmark_circle_fill, size: 16),
+                    ),
+                  ),
+                  onChanged: (v) =>
+                      ref.read(buscaDeProjetosProvider.notifier).state = v,
+                ),
+              ),
+            ),
+          _BotaoDaBarra(
+            chave: 'projetos-ordenar',
+            icone: CupertinoIcons.arrow_up_arrow_down,
+            onTap: _escolherOrdem,
+          ),
+          _BotaoDaBarra(
+            chave: 'projetos-selecionar',
+            icone: CupertinoIcons.checkmark_circle,
+            onTap: () {
+              final primeiro = widget.projetos.firstOrNull;
+              if (primeiro == null) return;
+              ref.read(selecaoDeProjetosProvider.notifier).state = {
+                primeiro.id,
+              };
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BotaoDaBarra extends StatelessWidget {
+  const _BotaoDaBarra({
+    required this.chave,
+    required this.icone,
+    required this.onTap,
+  });
+
+  final String chave;
+  final IconData icone;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Tocavel(
+    key: ValueKey(chave),
+    onTap: onTap,
+    child: Padding(
+      padding: const EdgeInsets.all(8),
+      child: Icon(icone, size: 19, color: AppColors.muted),
+    ),
+  );
+}
+
+/// AS ACOES DO LOTE: duplicar e excluir o que estiver marcado.
+class _AcoesEmLote extends StatelessWidget {
+  const _AcoesEmLote({
+    required this.quantos,
+    required this.onDuplicar,
+    required this.onExcluir,
+  });
+
+  final int quantos;
+  final VoidCallback onDuplicar;
+  final VoidCallback onExcluir;
+
+  @override
+  Widget build(BuildContext context) => ClipRect(
+    child: BackdropFilter(
+      filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppColors.surface.withValues(alpha: .88),
+          border: Border(top: BorderSide(color: AppColors.outline, width: .5)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: AppText(
+                    '$quantos escolhidos',
+                    style: TextStyle(fontSize: 13, color: AppColors.muted),
+                  ),
+                ),
+                Tocavel(
+                  key: const ValueKey('projetos-lote-duplicar'),
+                  onTap: onDuplicar,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 8,
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          CupertinoIcons.plus_square_on_square,
+                          size: 18,
+                          color: AppColors.onDark,
+                        ),
+                        const SizedBox(width: 6),
+                        const AppText(
+                          'Duplicar',
+                          style: TextStyle(fontSize: 13),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                Tocavel(
+                  key: const ValueKey('projetos-lote-excluir'),
+                  onTap: onExcluir,
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    child: Row(
+                      children: [
+                        Icon(
+                          CupertinoIcons.delete,
+                          size: 18,
+                          color: Color(0xFFFF6B6B),
+                        ),
+                        SizedBox(width: 6),
+                        AppText(
+                          'Excluir',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Color(0xFFFF6B6B),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
 }

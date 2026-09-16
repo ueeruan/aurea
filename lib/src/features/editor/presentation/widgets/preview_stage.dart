@@ -2944,7 +2944,13 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
     // Particulas NAO entram aqui: a rotacao delas e 3D real no painter.
     final rx = (layer.rotationX.valueAt(local) + extraRotX) * math.pi / 180;
     final ry = (layer.rotationY.valueAt(local) + extraRotY) * math.pi / 180;
-    final tilt3D = (rx != 0 || ry != 0) && !isParticles;
+    // A ORIENTACAO tambem inclina: sem entrar aqui, uma camada so
+    // orientada continuava sendo desenhada como cartao plano.
+    final ox = layer.orientX.valueAt(local) * math.pi / 180;
+    final oy = layer.orientY.valueAt(local) * math.pi / 180;
+    final oz = layer.orientZ.valueAt(local) * math.pi / 180;
+    final tilt3D =
+        (rx != 0 || ry != 0 || ox != 0 || oy != 0 || oz != 0) && !isParticles;
 
     // ORDEM CONSISTENTE (triagem 3D §5 itens 7/11): o vetor recebe
     // S -> Skew -> Rx -> Ry -> Rz — a MESMA ordem da matematica de
@@ -2979,7 +2985,12 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
       pm
         ..rotateZ(rotation)
         ..rotateY(ry)
-        ..rotateX(rx);
+        ..rotateX(rx)
+        // A ORIENTACAO VEM DEPOIS NA CADEIA, entao chega ANTES ao vetor
+        // — a ordem do After Effects: primeiro a pose, depois o giro.
+        ..rotateZ(oz)
+        ..rotateY(oy)
+        ..rotateX(ox);
       if (pivotZ != 0) pm.translateByDouble(0, 0, -pivotZ, 1);
       // EXTRUDE 3D: fatias da camada empilhadas em Z atras da frente,
       // escurecidas — a espessura aparece quando a camada inclina. Video

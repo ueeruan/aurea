@@ -28,6 +28,12 @@ void main(List<String> args) async {
         'src/gerenciador_de_shaders.cpp',
         'src/avaliador_da_timeline.cpp',
         'src/backend_vulkan.cpp',
+        'src/vulkan_superficie.cpp',
+        // O `jni_android.cpp` se protege sozinho com `#if __ANDROID__`:
+        // fora do Android ele vira um arquivo vazio. Listar sempre e mais
+        // simples do que um ramo no hook que so serve para nao compilar
+        // nada.
+        'src/jni_android.cpp',
         'src/relogio_do_quadro.cpp',
         'src/nucleo.cpp',
         'src/api.cpp',

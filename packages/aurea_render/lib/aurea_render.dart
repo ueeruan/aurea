@@ -289,6 +289,31 @@ external Pointer<Void> _abrir(
 )
 external int _vulkanSonda(Pointer<Utf8> saida, int capacidade);
 
+// ------------------------------------------------- V1: o preview na tela
+//
+// A JANELA NAO PASSA POR AQUI. Quem a entrega ao C++ e o `jni_android.cpp`,
+// pelo lado Kotlin, uma vez, quando a superficie nasce. O que atravessa
+// por FFI e o caminho quente: um numero por quadro.
+
+@Native<Int32 Function(Uint32)>(symbol: 'aurea_render_preview_apresentar')
+external int _previewApresentar(int corArgb);
+
+@Native<Int32 Function(Uint32, Uint32)>(symbol: 'aurea_render_preview_redimensionar')
+external int _previewRedimensionar(int largura, int altura);
+
+@Native<Int32 Function()>(symbol: 'aurea_render_preview_estado', isLeaf: true)
+external int _previewEstado();
+
+@Native<Int32 Function(Pointer<Utf8>, Uint32)>(
+  symbol: 'aurea_render_preview_motivo',
+)
+external int _previewMotivo(Pointer<Utf8> saida, int capacidade);
+
+@Native<Uint32 Function(Pointer<Double>, Uint32)>(
+  symbol: 'aurea_render_preview_estatisticas',
+)
+external int _previewEstatisticas(Pointer<Double> saida, int capacidade);
+
 /// O PORQUE DA ULTIMA ABERTURA TER FALHADO. Vazio = deu certo.
 @Native<Pointer<Utf8> Function()>(symbol: 'aurea_render_ultimo_erro', isLeaf: true)
 external Pointer<Utf8> _ultimoErro();
@@ -603,6 +628,82 @@ class NucleoRender {
     if (_fechado) return;
     _fechado = true;
     _fechar(_nucleo);
+  }
+}
+
+// ------------------------------------------------------ o preview (V1)
+
+/// O QUE A SUPERFICIE VULKAN ESTA FAZENDO. Os indices sao contrato com o
+/// `api.cpp`, como os das estatisticas do nucleo.
+class EstatisticasDoPreview {
+  const EstatisticasDoPreview(this._campos);
+
+  final List<double> _campos;
+  double _em(int i) => i < _campos.length ? _campos[i] : 0;
+
+  int get largura => _em(0).toInt();
+  int get altura => _em(1).toInt();
+  int get formato => _em(2).toInt();
+  int get modo => _em(3).toInt();
+  int get imagens => _em(4).toInt();
+  int get apresentados => _em(5).toInt();
+  int get recriacoes => _em(6).toInt();
+  int get outOfDate => _em(7).toInt();
+  int get suboptimal => _em(8).toInt();
+  int get falhas => _em(9).toInt();
+  int get descartados => _em(10).toInt();
+
+  @override
+  String toString() =>
+      '${largura}x$altura fmt=$formato imagens=$imagens '
+      'apresentados=$apresentados recriacoes=$recriacoes '
+      'out_of_date=$outOfDate suboptimal=$suboptimal falhas=$falhas '
+      'descartados=$descartados';
+}
+
+/// O PREVIEW DESENHADO PELO RENDERCORE C++.
+///
+/// NAO CRIA A SUPERFICIE. Quem faz isso e o lado Kotlin, pelo
+/// `SurfaceProducer` do Flutter, porque o `ANativeWindow` so nasce de um
+/// `jobject`. Esta classe e o que o Dart faz com ela: apresentar quadros,
+/// redimensionar, e perguntar o estado quando algo nao aparece na tela.
+abstract final class PreviewVulkan {
+  /// 0 = sem superficie, 1 = pronta, 2 = erro.
+  static int get estado => _previewEstado();
+
+  static bool get pronta => estado == 1;
+
+  static String get motivo {
+    final buffer = calloc<Uint8>(256);
+    try {
+      if (_previewMotivo(buffer.cast<Utf8>(), 256) < 0) return '';
+      return buffer.cast<Utf8>().toDartString();
+    } catch (_) {
+      return '';
+    } finally {
+      calloc.free(buffer);
+    }
+  }
+
+  /// APRESENTA UM QUADRO DE COR SOLIDA. Devolve 0 quando apresentou.
+  ///
+  /// NEGATIVO NAO E TRAGEDIA: `-2` e "a swapchain foi refeita e este quadro
+  /// foi descartado" — a resposta certa para uma rotacao no meio do play e
+  /// desenhar o proximo.
+  static int apresentar(int corArgb) => _previewApresentar(corArgb);
+
+  static int redimensionar(int largura, int altura) =>
+      _previewRedimensionar(largura, altura);
+
+  static EstatisticasDoPreview estatisticas() {
+    const campos = 11;
+    final ptr = calloc<Double>(campos);
+    try {
+      final n = _previewEstatisticas(ptr, campos);
+      return EstatisticasDoPreview(ptr.asTypedList(campos).sublist(0, n));
+    } finally {
+      calloc.free(ptr);
+    }
   }
 }
 

@@ -9,8 +9,7 @@
 #if defined(__ANDROID__)
 // O CABECALHO DO VULKAN VEM DO NDK. `VK_USE_PLATFORM_ANDROID_KHR` liga as
 // partes especificas do Android (superficie a partir de `ANativeWindow`) e
-// tem de vir ANTES do `vulkan.h`, senao a declaracao nao existe e o erro
-// que aparece e "unknown type" numa struct que a plataforma nao tem.
+// tem de vir ANTES do `vulkan.h`, senao a declaracao nao existe.
 #define VK_USE_PLATFORM_ANDROID_KHR 1
 #include <vulkan/vulkan.h>
 
@@ -24,141 +23,44 @@ namespace {
 
 constexpr const char* kEtiqueta = "AureaVulkan";
 
-/// OS NOMES QUE INTERESSAM, para o resumo caber numa linha.
-constexpr const char* kExtensoesDeInteresse[] = {
-    "VK_KHR_android_surface",
-    "VK_ANDROID_external_memory_android_hardware_buffer",
-    "VK_KHR_swapchain",
-};
+/// AS EXTENSOES DE INSTANCIA QUE A SUPERFICIE PRECISA.
+constexpr const char* kExtensoesObrigatorias[] = {"VK_KHR_surface",
+                                                  "VK_KHR_android_surface"};
 
-bool tem_extensao(const std::vector<VkExtensionProperties>& lista,
-                  const char* nome) noexcept {
+bool tem_extensao_de_instancia(const char* nome) noexcept {
+  std::uint32_t quantas = 0;
+  if (vkEnumerateInstanceExtensionProperties(nullptr, &quantas, nullptr) !=
+          VK_SUCCESS ||
+      quantas == 0) {
+    return false;
+  }
+  std::vector<VkExtensionProperties> lista(quantas);
+  if (vkEnumerateInstanceExtensionProperties(nullptr, &quantas, lista.data()) !=
+      VK_SUCCESS) {
+    return false;
+  }
   return std::any_of(lista.begin(), lista.end(), [nome](const auto& e) {
     return std::string_view(e.extensionName) == nome;
   });
 }
 
-/// A INSTANCIA COM POSSE. Criada por `vkCreateInstance`, destruida no
-/// destrutor — e nao ha caminho em que alguem esqueca de destruir, que e
-/// o que uma instancia de Vulkan vazada significa (o driver fica carregado
-/// ate o processo morrer).
-class Instancia {
- public:
-  Instancia() = default;
-  ~Instancia() { destruir(); }
-  Instancia(const Instancia&) = delete;
-  Instancia& operator=(const Instancia&) = delete;
-
-  [[nodiscard]] bool criar() noexcept {
-    std::uint32_t quantas = 0;
-    if (vkEnumerateInstanceExtensionProperties(nullptr, &quantas, nullptr) !=
-            VK_SUCCESS ||
-        quantas == 0) {
-      return false;
-    }
-    std::vector<VkExtensionProperties> disponiveis(quantas);
-    if (vkEnumerateInstanceExtensionProperties(nullptr, &quantas,
-                                               disponiveis.data()) !=
-        VK_SUCCESS) {
-      return false;
-    }
-
-    // SO AS EXTENSOES QUE EXISTEM. Pedir uma que o aparelho nao tem faz
-    // `vkCreateInstance` devolver VK_ERROR_EXTENSION_NOT_PRESENT e a
-    // sonda inteira morre por causa de um extra opcional.
-    std::vector<const char*> pedidas;
-    for (const char* nome : kExtensoesDeInteresse) {
-      if (tem_extensao(disponiveis, nome)) pedidas.push_back(nome);
-    }
-
-    VkApplicationInfo app{};
-    app.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    app.pApplicationName = "Aurea";
-    app.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
-    app.pEngineName = "Aurea RenderCore";
-    app.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-    app.apiVersion = VK_API_VERSION_1_1;
-
-    VkInstanceCreateInfo info{};
-    info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-    info.pApplicationInfo = &app;
-    info.enabledExtensionCount = static_cast<std::uint32_t>(pedidas.size());
-    info.ppEnabledExtensionNames = pedidas.empty() ? nullptr : pedidas.data();
-
-    if (vkCreateInstance(&info, nullptr, &instancia_) != VK_SUCCESS) {
-      instancia_ = VK_NULL_HANDLE;
-      return false;
-    }
-    return true;
+bool tem_extensao_de_dispositivo(VkPhysicalDevice fisico,
+                                 const char* nome) noexcept {
+  std::uint32_t quantas = 0;
+  if (vkEnumerateDeviceExtensionProperties(fisico, nullptr, &quantas, nullptr) !=
+          VK_SUCCESS ||
+      quantas == 0) {
+    return false;
   }
-
-  void destruir() noexcept {
-    if (instancia_ != VK_NULL_HANDLE) {
-      vkDestroyInstance(instancia_, nullptr);
-      instancia_ = VK_NULL_HANDLE;
-    }
+  std::vector<VkExtensionProperties> lista(quantas);
+  if (vkEnumerateDeviceExtensionProperties(fisico, nullptr, &quantas,
+                                           lista.data()) != VK_SUCCESS) {
+    return false;
   }
-
-  [[nodiscard]] VkInstance valor() const noexcept { return instancia_; }
-
- private:
-  VkInstance instancia_ = VK_NULL_HANDLE;
-};
-
-/// O DISPOSITOR LOGICO COM POSSE. Destroi a fila logica junto — a fila
-/// nao tem destruicao propria, ela morre com o dispositivo.
-class Dispositivo {
- public:
-  Dispositivo() = default;
-  ~Dispositivo() { destruir(); }
-  Dispositivo(const Dispositivo&) = delete;
-  Dispositivo& operator=(const Dispositivo&) = delete;
-
-  [[nodiscard]] bool criar(VkPhysicalDevice fisico, std::uint32_t familia,
-                           bool com_extensao_de_swapchain) noexcept {
-    const float prioridade = 1.0F;
-    VkDeviceQueueCreateInfo fila{};
-    fila.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-    fila.queueFamilyIndex = familia;
-    fila.queueCount = 1;
-    fila.pQueuePriorities = &prioridade;
-
-    const char* extensoes[1] = {"VK_KHR_swapchain"};
-    VkDeviceCreateInfo info{};
-    info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    info.queueCreateInfoCount = 1;
-    info.pQueueCreateInfos = &fila;
-    // O V1 PRECISA DA SWAPCHAIN. Ela e pedida OPTATIVAMENTE: um aparelho
-    // que ainda nao a oferece (raro, mas existe) nao pode impedir a sonda
-    // de dizer o nome do dispositivo.
-    info.enabledExtensionCount = com_extensao_de_swapchain ? 1 : 0;
-    info.ppEnabledExtensionNames = com_extensao_de_swapchain ? extensoes
-                                                             : nullptr;
-
-    if (vkCreateDevice(fisico, &info, nullptr, &dispositivo_) != VK_SUCCESS) {
-      dispositivo_ = VK_NULL_HANDLE;
-      return false;
-    }
-    vkGetDeviceQueue(dispositivo_, familia, 0, &fila_);
-    return true;
-  }
-
-  void destruir() noexcept {
-    if (dispositivo_ != VK_NULL_HANDLE) {
-      vkDestroyDevice(dispositivo_, nullptr);
-      dispositivo_ = VK_NULL_HANDLE;
-      fila_ = VK_NULL_HANDLE;
-    }
-  }
-
-  [[nodiscard]] bool vivo() const noexcept {
-    return dispositivo_ != VK_NULL_HANDLE;
-  }
-
- private:
-  VkDevice dispositivo_ = VK_NULL_HANDLE;
-  VkQueue fila_ = VK_NULL_HANDLE;
-};
+  return std::any_of(lista.begin(), lista.end(), [nome](const auto& e) {
+    return std::string_view(e.extensionName) == nome;
+  });
+}
 
 /// A FAMILIA DE FILA QUE COMPOE. Sem ela nao ha desenho nenhum, e o
 /// numero dela muda de aparelho para aparelho — por isso se procura, e
@@ -180,73 +82,182 @@ bool achar_familia_grafica(VkPhysicalDevice fisico,
 }
 }  // namespace
 
-std::string SondaVulkan::resumo() const {
-  if (!disponivel) {
-    return "Vulkan indisponivel: " + motivo;
+std::string DispositivoVulkan::abrir() noexcept {
+  if (viva()) return {};
+  try {
+    // ------------------------------- a instancia
+    //
+    // AS DUAS EXTENSOES DE SUPERFICIE SAO OBRIGATORIAS PARA O V1. Sem
+    // `VK_KHR_android_surface` nao ha o que apresentar — e o `vkCreateInstance`
+    // devolve VK_ERROR_EXTENSION_NOT_PRESENT, que e um erro claro e
+    // imediato. Falhar aqui e melhor do que falhar no primeiro quadro.
+    for (const char* nome : kExtensoesObrigatorias) {
+      if (!tem_extensao_de_instancia(nome)) {
+        return std::string("extensao de instancia ausente: ") + nome;
+      }
+    }
+
+    VkApplicationInfo app{};
+    app.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+    app.pApplicationName = "Aurea";
+    app.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
+    app.pEngineName = "Aurea RenderCore";
+    app.engineVersion = VK_MAKE_VERSION(1, 0, 0);
+    app.apiVersion = VK_API_VERSION_1_1;
+
+    const char* pedidas[] = {"VK_KHR_surface", "VK_KHR_android_surface"};
+    VkInstanceCreateInfo info{};
+    info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+    info.pApplicationInfo = &app;
+    info.enabledExtensionCount = 2;
+    info.ppEnabledExtensionNames = pedidas;
+    // A VARIAVEL LOCAL E TIPADA; O MEMBRO E `void*`.
+    //
+    // O cabecalho guarda os handles como `void*` para poder ser incluido
+    // onde o `vulkan.h` nao existe (o PC). A conversao fica toda aqui, e o
+    // compilador do Android NAO aceita `&void*` no lugar de `VkInstance*`
+    // — o que e um favor: sem a variavel local, o erro apareceria longe
+    // daqui.
+    VkInstance instancia = VK_NULL_HANDLE;
+    if (vkCreateInstance(&info, nullptr, &instancia) != VK_SUCCESS) {
+      return "vkCreateInstance falhou";
+    }
+    instancia_ = instancia;
+
+    // ------------------------------- o dispositivo fisico
+    std::uint32_t quantos = 0;
+    if (vkEnumeratePhysicalDevices(static_cast<VkInstance>(instancia_),
+                                   &quantos, nullptr) != VK_SUCCESS ||
+        quantos == 0) {
+      fechar();
+      return "nenhum dispositivo Vulkan";
+    }
+    std::vector<VkPhysicalDevice> fisicos(quantos);
+    vkEnumeratePhysicalDevices(static_cast<VkInstance>(instancia_), &quantos,
+                               fisicos.data());
+    fisico_ = fisicos.front();
+    VkPhysicalDeviceProperties props{};
+    vkGetPhysicalDeviceProperties(static_cast<VkPhysicalDevice>(fisico_),
+                                  &props);
+    nome_ = props.deviceName;
+
+    if (!achar_familia_grafica(static_cast<VkPhysicalDevice>(fisico_),
+                               familia_)) {
+      fechar();
+      return "nenhuma familia de fila grafica";
+    }
+
+    // ------------------------------- o dispositivo logico
+    if (!tem_extensao_de_dispositivo(static_cast<VkPhysicalDevice>(fisico_),
+                                     "VK_KHR_swapchain")) {
+      fechar();
+      return "VK_KHR_swapchain indisponivel";
+    }
+
+    const float prioridade = 1.0F;
+    VkDeviceQueueCreateInfo fila{};
+    fila.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+    fila.queueFamilyIndex = familia_;
+    fila.queueCount = 1;
+    fila.pQueuePriorities = &prioridade;
+
+    const char* extensoes[] = {"VK_KHR_swapchain"};
+    VkDeviceCreateInfo dev{};
+    dev.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    dev.queueCreateInfoCount = 1;
+    dev.pQueueCreateInfos = &fila;
+    dev.enabledExtensionCount = 1;
+    dev.ppEnabledExtensionNames = extensoes;
+
+    VkDevice criado = VK_NULL_HANDLE;
+    if (vkCreateDevice(static_cast<VkPhysicalDevice>(fisico_), &dev, nullptr,
+                       &criado) != VK_SUCCESS) {
+      fechar();
+      return "vkCreateDevice recusado";
+    }
+    dispositivo_ = criado;
+    VkQueue q = VK_NULL_HANDLE;
+    vkGetDeviceQueue(criado, familia_, 0, &q);
+    fila_ = q;
+
+    __android_log_print(ANDROID_LOG_INFO, kEtiqueta,
+                        "dispositivo pronto: %s (familia %u)", nome_.c_str(),
+                        familia_);
+    return {};
+  } catch (const std::exception& e) {
+    fechar();
+    return std::string("excecao: ") + e.what();
+  } catch (...) {
+    fechar();
+    return "excecao desconhecida";
   }
+}
+
+void DispositivoVulkan::fechar() noexcept {
+  // A ORDEM IMPORTA: o dispositivo logico morre ANTES da instancia. Ao
+  // contrario, a instancia leva junto um dispositivo que ainda existe e o
+  // driver reclama (ou pior, deixa memoria presa).
+  if (dispositivo_ != nullptr) {
+    vkDestroyDevice(static_cast<VkDevice>(dispositivo_), nullptr);
+    dispositivo_ = nullptr;
+    fila_ = nullptr;
+  }
+  if (instancia_ != nullptr) {
+    vkDestroyInstance(static_cast<VkInstance>(instancia_), nullptr);
+    instancia_ = nullptr;
+  }
+  fisico_ = nullptr;
+}
+
+std::string SondaVulkan::resumo() const {
+  if (!disponivel) return "Vulkan indisponivel: " + motivo;
   char texto[256];
   std::snprintf(texto, sizeof(texto),
                 "Vulkan %u.%u.%u | %s | driver %u.%u.%u | %u dispositivo(s) | "
-                "fila grafica: %s | swapchain: %s | textura max %u | AHardwareBuffer: %s",
+                "fila grafica: %s | swapchain: %s | textura max %u | "
+                "AHardwareBuffer: %s",
                 VK_VERSION_MAJOR(versao_da_api), VK_VERSION_MINOR(versao_da_api),
                 VK_VERSION_PATCH(versao_da_api), nome_do_dispositivo.c_str(),
                 VK_VERSION_MAJOR(versao_do_driver),
                 VK_VERSION_MINOR(versao_do_driver),
                 VK_VERSION_PATCH(versao_do_driver), dispositivos_encontrados,
                 tem_fila_grafica ? "sim" : "NAO", tem_swapchain ? "sim" : "NAO",
-                textura_maxima,
-                extensao_hardware_buffer ? "sim" : "nao");
+                textura_maxima, extensao_hardware_buffer ? "sim" : "nao");
   return texto;
 }
 
 SondaVulkan sondar_vulkan() noexcept {
   SondaVulkan s;
   try {
-    Instancia instancia;
-    if (!instancia.criar()) {
-      s.motivo = "vkCreateInstance falhou (driver ausente ou camada recusada)";
+    DispositivoVulkan d;
+    const std::string erro = d.abrir();
+    if (!erro.empty()) {
+      s.motivo = erro;
       return s;
     }
+    s.disponivel = true;
+    s.tem_fila_grafica = true;
+    s.tem_swapchain = true;
+    s.nome_do_dispositivo = d.nome();
 
+    const auto fisico = static_cast<VkPhysicalDevice>(d.fisico());
+    VkPhysicalDeviceProperties props{};
+    vkGetPhysicalDeviceProperties(fisico, &props);
+    s.versao_do_driver = props.driverVersion;
+    s.versao_da_api = props.apiVersion;
+    s.tipo_do_dispositivo = static_cast<std::uint32_t>(props.deviceType);
+    s.textura_maxima = props.limits.maxImageDimension2D;
+
+    std::uint32_t quantos = 0;
+    if (vkEnumeratePhysicalDevices(static_cast<VkInstance>(d.instancia()),
+                                   &quantos, nullptr) == VK_SUCCESS) {
+      s.dispositivos_encontrados = quantos;
+    }
     std::uint32_t versao = 0;
     if (vkEnumerateInstanceVersion(&versao) == VK_SUCCESS) {
       s.versao_da_instancia = versao;
     }
 
-    std::uint32_t quantos = 0;
-    if (vkEnumeratePhysicalDevices(instancia.valor(), &quantos, nullptr) !=
-            VK_SUCCESS ||
-        quantos == 0) {
-      s.motivo = "nenhum dispositivo Vulkan no aparelho";
-      return s;
-    }
-    std::vector<VkPhysicalDevice> fisicos(quantos);
-    if (vkEnumeratePhysicalDevices(instancia.valor(), &quantos,
-                                   fisicos.data()) != VK_SUCCESS) {
-      s.motivo = "vkEnumeratePhysicalDevices falhou";
-      return s;
-    }
-    s.dispositivos_encontrados = quantos;
-
-    // O PRIMEIRO, MAS COM AS PROPRIEDADES LIDAS DE VERDADE. Escolher
-    // "o melhor" agora seria chute: com um dispositivo so (o caso de todo
-    // celular) nao ha o que escolher, e com dois ainda nao se sabe qual
-    // tem a superficie que o Flutter vai entregar.
-    const VkPhysicalDevice fisico = fisicos.front();
-    VkPhysicalDeviceProperties props{};
-    vkGetPhysicalDeviceProperties(fisico, &props);
-
-    s.nome_do_dispositivo = props.deviceName;
-    s.tipo_do_dispositivo = static_cast<std::uint32_t>(props.deviceType);
-    s.versao_do_driver = props.driverVersion;
-    s.versao_da_api = props.apiVersion;
-    s.textura_maxima = props.limits.maxImageDimension2D;
-
-    std::uint32_t familia = 0;
-    s.tem_fila_grafica = achar_familia_grafica(fisico, familia);
-
-    // A MEMORIA, POR TIPO. E o que decide se a imagem pode ficar na GPU e
-    // ser entregue ao Flutter sem passar pela CPU.
     VkPhysicalDeviceMemoryProperties memoria{};
     vkGetPhysicalDeviceMemoryProperties(fisico, &memoria);
     for (std::uint32_t i = 0; i < memoria.memoryTypeCount; ++i) {
@@ -258,40 +269,8 @@ SondaVulkan sondar_vulkan() noexcept {
         s.memoria_visivel_ao_host = true;
       }
     }
-
-    std::uint32_t quantas_ext = 0;
-    if (vkEnumerateDeviceExtensionProperties(fisico, nullptr, &quantas_ext,
-                                             nullptr) == VK_SUCCESS &&
-        quantas_ext > 0) {
-      std::vector<VkExtensionProperties> lista(quantas_ext);
-      if (vkEnumerateDeviceExtensionProperties(fisico, nullptr, &quantas_ext,
-                                               lista.data()) == VK_SUCCESS) {
-        s.extensao_hardware_buffer = tem_extensao(
-            lista, "VK_ANDROID_external_memory_android_hardware_buffer");
-      }
-    }
-
-    // ================= O DISPOSITOR LOGICO E CRIADO E DESTRUIDO =========
-    //
-    // ESTE E O TESTE QUE IMPORTA. `vkCreateDevice` e onde o driver real
-    // recusa: fila inexistente, extensao pedida sem suporte, limite
-    // estourado. Uma sonda que para em `vkEnumeratePhysicalDevices` conta
-    // metade da historia, e a metade facil.
-    s.disponivel = true;
-    if (s.tem_fila_grafica) {
-      Dispositivo dispositivo;
-      // A SWAPCHAIN PRIMEIRO, e sem ela depois: um aparelho que ainda nao
-      // expoe `VK_KHR_swapchain` nao pode impedir a sonda de dizer o nome
-      // do dispositivo — mas o fato fica registrado, porque sem swapchain
-      // o V1 nao tem como apresentar.
-      if (dispositivo.criar(fisico, familia, /*com_extensao_de_swapchain=*/true)) {
-        s.tem_swapchain = true;
-      } else if (!dispositivo.criar(fisico, familia,
-                                    /*com_extensao_de_swapchain=*/false)) {
-        s.tem_fila_grafica = false;
-        s.motivo = "vkCreateDevice recusado";
-      }
-    }
+    s.extensao_hardware_buffer = tem_extensao_de_dispositivo(
+        fisico, "VK_ANDROID_external_memory_android_hardware_buffer");
 
     __android_log_print(ANDROID_LOG_INFO, kEtiqueta, "%s", s.resumo().c_str());
     return s;
@@ -308,6 +287,12 @@ SondaVulkan sondar_vulkan() noexcept {
 
 #else  // !__ANDROID__
 
+std::string DispositivoVulkan::abrir() noexcept {
+  return "backend Vulkan so e compilado para Android";
+}
+
+void DispositivoVulkan::fechar() noexcept {}
+
 std::string SondaVulkan::resumo() const {
   return "Vulkan indisponivel: " + motivo;
 }
@@ -316,8 +301,7 @@ SondaVulkan sondar_vulkan() noexcept {
   SondaVulkan s;
   // NO PC NAO HA VULKAN NESTE BUILD, E ISSO NAO E FALHA. O backend e
   // compilado so para Android hoje; devolver "nao existe aqui" e a
-  // resposta honesta, e o teste no PC cobra exatamente isso — a sonda nao
-  // pode dizer que subiu um Vulkan que nao existe.
+  // resposta honesta, e o teste no PC cobra exatamente isso.
   s.disponivel = false;
   s.motivo = "backend Vulkan so e compilado para Android";
   return s;

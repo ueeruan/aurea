@@ -74,6 +74,48 @@ struct SondaVulkan {
   [[nodiscard]] std::string resumo() const;
 };
 
+/// O DISPOSITOR VIVO — instancia, dispositivo fisico, dispositivo logico e
+/// a fila grafica, com posse.
+///
+/// A SONDA CRIA ISTO E DESTROI. A SUPERFICIE (V1) SEGURA. Sao o mesmo
+/// objeto porque subir um dispositivo Vulkan e caro (dezenas de
+/// milissegundos num celular) e nao pode acontecer duas vezes.
+class DispositivoVulkan {
+ public:
+  DispositivoVulkan() = default;
+  ~DispositivoVulkan() { fechar(); }
+  DispositivoVulkan(const DispositivoVulkan&) = delete;
+  DispositivoVulkan& operator=(const DispositivoVulkan&) = delete;
+  DispositivoVulkan(DispositivoVulkan&&) = delete;
+  DispositivoVulkan& operator=(DispositivoVulkan&&) = delete;
+
+  /// SOBE TUDO. Devolve o motivo da falha, ou string vazia.
+  [[nodiscard]] std::string abrir() noexcept;
+
+  /// DESCE TUDO. Idempotente: pode ser chamado no destrutor e no
+  /// fechamento explicito sem destruir duas vezes.
+  void fechar() noexcept;
+
+  [[nodiscard]] bool viva() const noexcept { return dispositivo_ != nullptr; }
+
+  [[nodiscard]] void* instancia() const noexcept { return instancia_; }
+  [[nodiscard]] void* fisico() const noexcept { return fisico_; }
+  [[nodiscard]] void* dispositivo() const noexcept { return dispositivo_; }
+  [[nodiscard]] void* fila() const noexcept { return fila_; }
+  [[nodiscard]] std::uint32_t familia_da_fila() const noexcept {
+    return familia_;
+  }
+  [[nodiscard]] const std::string& nome() const noexcept { return nome_; }
+
+ private:
+  void* instancia_ = nullptr;   // VkInstance
+  void* fisico_ = nullptr;      // VkPhysicalDevice
+  void* dispositivo_ = nullptr; // VkDevice
+  void* fila_ = nullptr;        // VkQueue
+  std::uint32_t familia_ = 0;
+  std::string nome_;
+};
+
 /// SOBE O VULKAN, PERGUNTA E DESCE.
 ///
 /// Em plataforma sem Vulkan (o PC de desenvolvimento) devolve

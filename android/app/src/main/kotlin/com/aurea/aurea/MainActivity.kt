@@ -6,7 +6,9 @@ import android.media.MediaFormat
 import android.media.MediaMuxer
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterShellArgs
+import android.util.Log
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.view.TextureRegistry
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.nio.ByteBuffer
@@ -15,6 +17,39 @@ import kotlin.concurrent.thread
 class MainActivity : FlutterActivity() {
 
     private val encoder = VideoEncoder()
+
+    /**
+     * O PREVIEW VULKAN (V1).
+     *
+     * O `SurfaceProducer` e quem entrega uma janela nativa com o caminho
+     * RECOMENDADO do Flutter: no Android novo ele usa um `ImageReader`,
+     * que funciona direto nos backends graficos atuais (incluindo o Vulkan
+     * do Impeller). O caminho antigo (`createSurfaceTexture`) nao serve —
+     * ele passa por um `SurfaceTexture` de GLES.
+     *
+     * OS DOIS CALLBACKS SAO O LIFECYCLE, e nao enfeite:
+     *   onSurfaceCreated  a janela existe (primeira vez, volta do segundo
+     *                     plano, rotacao). E aqui que a swapchain nasce.
+     *   onSurfaceDestroyed a janela VAI SUMIR. Soltar a swapchain ANTES e
+     *                     obrigatorio: o Vulkan fica com uma referencia a
+     *                     uma janela morta e o proximo quadro e um erro de
+     *                     driver (ou pior, memoria de GPU presa).
+     */
+    private var produtor: TextureRegistry.SurfaceProducer? = null
+    private val callbackDaSuperficie = object : TextureRegistry.SurfaceProducer.Callback {
+        override fun onSurfaceCreated() {
+            val p = produtor ?: return
+            val ok = RenderNativo.anexar(p.surface, p.width, p.height)
+            Log.i("AureaVulkan", "superficie criada ${p.width}x${p.height} -> $ok")
+        }
+
+        override fun onSurfaceDestroyed() {
+            // SOLTA ANTES DE A JANELA MORRER. Inverter esta ordem e o erro
+            // que so aparece quando a pessoa troca de app no meio do play.
+            RenderNativo.desanexar()
+            Log.i("AureaVulkan", "superficie destruida")
+        }
+    }
 
     /**
      * A API DE DESENHO E ESCOLHIDA AQUI, antes de o motor subir.
@@ -53,6 +88,48 @@ class MainActivity : FlutterActivity() {
 
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
+            "aurea/render"
+        ).setMethodCallHandler { call, result ->
+            try {
+                when (call.method) {
+                    // CRIA O PRODUTOR E DEVOLVE O ID DA TEXTURA. O Dart
+                    // desenha `Texture(textureId: id)` e o conteudo passa a
+                    // ser o que o C++ apresentar.
+                    "criar" -> {
+                        val largura = call.argument<Int>("largura") ?: 0
+                        val altura = call.argument<Int>("altura") ?: 0
+                        if (largura <= 0 || altura <= 0) {
+                            result.error("render", "tamanho invalido", null)
+                            return@setMethodCallHandler
+                        }
+                        liberarProdutor()
+                        val p = flutterEngine.renderer.createSurfaceProducer()
+                        p.setSize(largura, altura)
+                        p.setCallback(callbackDaSuperficie)
+                        produtor = p
+                        // O `setSize` pode disparar `onSurfaceCreated`
+                        // sozinho; anexar aqui tambem cobre o caso em que
+                        // ele nao dispara (superficie ja existente).
+                        val ok = RenderNativo.anexar(p.surface, largura, altura)
+                        result.success(
+                            mapOf("id" to p.id(), "ok" to ok,
+                                  "estado" to RenderNativo.estado())
+                        )
+                    }
+                    "liberar" -> {
+                        liberarProdutor()
+                        result.success(null)
+                    }
+                    "estado" -> result.success(RenderNativo.estado())
+                    else -> result.notImplemented()
+                }
+            } catch (e: Exception) {
+                result.error("render", e.message ?: "$e", null)
+            }
+        }
+
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
             "aurea/encoder"
         ).setMethodCallHandler { call, result ->
             // Codificar bloqueia; a thread da interface nao pode parar.
@@ -67,6 +144,25 @@ class MainActivity : FlutterActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * SOLTA O PRODUTOR E A SUPERFICIE. Chamado ao trocar de preview e no
+     * `onDestroy` — um `SurfaceProducer` nao liberado mantem uma janela
+     * nativa viva e a GPU presa a ela.
+     */
+    private fun liberarProdutor() {
+        RenderNativo.desanexar()
+        produtor?.let {
+            it.setCallback(null)
+            it.release()
+        }
+        produtor = null
+    }
+
+    override fun onDestroy() {
+        liberarProdutor()
+        super.onDestroy()
     }
 
     private fun handle(method: String, call: io.flutter.plugin.common.MethodCall): Any? =

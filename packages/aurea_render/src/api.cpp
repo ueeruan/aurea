@@ -15,6 +15,7 @@
 // `fechar`. Um ponteiro guardado do lado do Dart para um `vector` que
 // realocou e a segunda forma classica de derrubar o app por aqui.
 #include "backend_vulkan.h"
+#include "vulkan_superficie.h"
 #include "nucleo.h"
 
 #include <cstring>
@@ -290,6 +291,87 @@ AUREA_API std::int32_t aurea_render_vulkan_sonda(char* saida,
 AUREA_API std::int32_t aurea_render_vulkan_disponivel(void) {
   try {
     return sondar_vulkan().disponivel ? 1 : 0;
+  } catch (...) {
+    return 0;
+  }
+}
+
+/// ============================== V1: O PREVIEW ======================
+///
+/// A JANELA NAO VEM POR AQUI. O `ANativeWindow` nasce de um `jobject` e
+/// exige um `JNIEnv*`, que o `dart:ffi` nao tem — quem a entrega e o
+/// `jni_android.cpp`, uma vez, quando a superficie nasce. O que atravessa
+/// por aqui e o CAMINHO QUENTE: apresentar, redimensionar e ler estado.
+AUREA_API std::int32_t aurea_render_preview_apresentar(std::uint32_t cor_argb) {
+  try {
+    return PreviewVulkan::instancia().apresentar(cor_argb);
+  } catch (...) {
+    return -100;
+  }
+}
+
+AUREA_API std::int32_t aurea_render_preview_redimensionar(std::uint32_t largura,
+                                                          std::uint32_t altura) {
+  try {
+    return PreviewVulkan::instancia().redimensionar(largura, altura);
+  } catch (...) {
+    return -100;
+  }
+}
+
+/// 0 = sem superficie, 1 = pronta, 2 = erro.
+AUREA_API std::int32_t aurea_render_preview_estado(void) {
+  try {
+    return PreviewVulkan::instancia().estado();
+  } catch (...) {
+    return -1;
+  }
+}
+
+/// O MOTIVO EM TEXTO. Nunca devolve vazio: "ok" quando nao ha erro.
+AUREA_API std::int32_t aurea_render_preview_motivo(char* saida,
+                                                   std::uint32_t capacidade) {
+  try {
+    if (saida == nullptr || capacidade == 0) return -1;
+    const std::string texto = PreviewVulkan::instancia().motivo();
+    const std::uint32_t cabem = capacidade - 1;
+    const auto n = static_cast<std::uint32_t>(
+        texto.size() < cabem ? texto.size() : cabem);
+    for (std::uint32_t i = 0; i < n; ++i) saida[i] = texto[i];
+    saida[n] = 0;
+    return static_cast<std::int32_t>(n);
+  } catch (...) {
+    if (saida != nullptr && capacidade > 0) saida[0] = 0;
+    return -2;
+  }
+}
+
+/// AS ESTATISTICAS DA SUPERFICIE NUM VETOR DE DOUBLES, na ordem fixa:
+///  0 largura   1 altura   2 formato   3 modo   4 imagens
+///  5 apresentados  6 recriacoes  7 out_of_date  8 suboptimal  9 falhas
+/// 10 descartados
+AUREA_API std::uint32_t aurea_render_preview_estatisticas(double* saida,
+                                                          std::uint32_t cap) {
+  constexpr std::uint32_t kCampos = 11;
+  try {
+    if (saida == nullptr) return 0;
+    const auto e = PreviewVulkan::instancia().estatisticas();
+    const double valores[kCampos] = {
+        static_cast<double>(e.largura),
+        static_cast<double>(e.altura),
+        static_cast<double>(e.formato),
+        static_cast<double>(e.modo_de_apresentacao),
+        static_cast<double>(e.imagens),
+        static_cast<double>(e.quadros_apresentados),
+        static_cast<double>(e.recriacoes),
+        static_cast<double>(e.out_of_date),
+        static_cast<double>(e.suboptimal),
+        static_cast<double>(e.falhas),
+        static_cast<double>(e.quadros_descartados),
+    };
+    const std::uint32_t n = kCampos < cap ? kCampos : cap;
+    for (std::uint32_t i = 0; i < n; ++i) saida[i] = valores[i];
+    return n;
   } catch (...) {
     return 0;
   }

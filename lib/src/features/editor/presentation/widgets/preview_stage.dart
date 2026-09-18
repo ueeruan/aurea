@@ -931,8 +931,27 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
                                       if (onion > 0)
                                         Positioned.fill(
                                           child: IgnorePointer(
-                                            child:
-                                                ValueListenableBuilder<
+                                            // A CASCA SOME ENQUANTO TOCA. Cada
+                                            // fantasma e uma composicao INTEIRA
+                                            // (todas as camadas, todos os
+                                            // efeitos) num instante proprio: em
+                                            // 2 quadros sao quatro composicoes
+                                            // por quadro de video. E trabalho
+                                            // que nao se aproveita — 30 vezes
+                                            // por segundo cinco quadros
+                                            // sobrepostos nao se leem, e a
+                                            // casca existe para POSAR (ver o
+                                            // comentario de _Fantasma). Parado
+                                            // ela volta na hora, no instante em
+                                            // que a pessoa parou.
+                                            child: ValueListenableBuilder<bool>(
+                                              valueListenable:
+                                                  widget.playback.playing,
+                                              builder: (context, tocando, _) {
+                                                if (tocando) {
+                                                  return const SizedBox.shrink();
+                                                }
+                                                return ValueListenableBuilder<
                                                   Duration
                                                 >(
                                                   valueListenable:
@@ -969,7 +988,9 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
                                                       ],
                                                     );
                                                   },
-                                                ),
+                                                );
+                                              },
+                                            ),
                                           ),
                                         ),
                                       // GUIAS, GRADE, AREAS SEGURAS e mascara de
@@ -1537,11 +1558,20 @@ class _CompositionGate {
 /// mesma arvore usada no preview e na EXPORTACAO: exportar renderiza
 /// exatamente o que se ve, porque e o mesmo codigo.
 /// CASCA DE CEBOLA: quantos quadros fantasma aparecem de cada lado.
-/// Zero = desligada.
+/// Zero = desligada. E uma ajuda de POSICAO — o fantasma e a composicao
+/// inteira num instante vizinho, entao ele custa um quadro inteiro; por
+/// isso a casca some enquanto toca (ver o portao em `PreviewStage`).
 ///
 /// Animar a mao sem ver o quadro anterior e desenhar no escuro: o
 /// espacamento entre poses e o que da o ritmo, e ele so se enxerga
 /// vendo os quadros vizinhos ao mesmo tempo.
+///
+/// PASSADO PUXADO PARA O VERMELHO, FUTURO PARA O VERDE — e assim que se
+/// sabe de que lado do quadro atual cada fantasma esta. O alfa 0x66 e o
+/// peso base; a opacidade de cada anel entra multiplicando ele.
+const Color _tintaPassado = Color(0x66FF6B6B);
+const Color _tintaFuturo = Color(0x666BFF8A);
+
 /// Um quadro vizinho, esmaecido e tingido.
 class _Fantasma extends StatefulWidget {
   const _Fantasma({
@@ -1578,20 +1608,20 @@ class _FantasmaState extends State<_Fantasma> {
   @override
   Widget build(BuildContext context) {
     if (widget.time < Duration.zero) return const SizedBox.shrink();
+    // UMA CAMADA, NAO DUAS. `Opacity` e `ColorFiltered` sao, cada um, um
+    // `saveLayer` com alvo de render proprio — o fantasma custava dois.
+    // `modulate` JA multiplica o alfa pela cor do filtro, entao a
+    // opacidade do fantasma cabe no alfa da propria tinta: o resultado e
+    // o mesmo (alfa final = alfa da camada x 0x66 x opacidade) e sobra
+    // uma camada. Com a casca em 2 sao quatro camadas a menos por quadro.
+    final tinta = widget.futuro ? _tintaFuturo : _tintaPassado;
     return Positioned.fill(
-      child: Opacity(
-        opacity: widget.opacity.clamp(0.05, 0.6),
-        child: ColorFiltered(
-          colorFilter: ColorFilter.mode(
-            widget.futuro ? const Color(0x666BFF8A) : const Color(0x66FF6B6B),
-            BlendMode.modulate,
-          ),
-          child: CompositionView(
-            time: _t,
-            videos: widget.videos,
-            selectedId: null,
-          ),
+      child: ColorFiltered(
+        colorFilter: ColorFilter.mode(
+          tinta.withValues(alpha: tinta.a * widget.opacity.clamp(0.05, 0.6)),
+          BlendMode.modulate,
         ),
+        child: CompositionView(time: _t, videos: widget.videos, selectedId: null),
       ),
     );
   }
@@ -3357,7 +3387,18 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
     if (layer is VideoLayer) {
       return hasTimeRemap(layer) ? videoSourceTimeAt(layer, local) : local;
     }
-    if (layer is GroupLayer) return layer.contentTimeAt(local);
+    // PRECOMP: so a TRILHA DE TEMPO propria entra aqui. O `contentOffset`
+    // NAO entra — ele ja e aplicado uma vez, onde os filhos do grupo sao
+    // montados (`buildChildren(l.children, l.contentTimeAt(localTime))`).
+    // Pedir `contentTimeAt` aqui somava o deslocamento DUAS vezes: aparar
+    // o inicio de um precomp tirava o conteudo do lugar (o teste
+    // "aparar o inicio e dividir um grupo nao mexem no conteudo" media
+    // 20 px de erro depois do aparo).
+    if (layer is GroupLayer) {
+      final r = layer.timeRemap;
+      if (r == null) return local;
+      return remappedContentTime(r, local, bakeUntil: layer.duration);
+    }
     return local;
   }
 

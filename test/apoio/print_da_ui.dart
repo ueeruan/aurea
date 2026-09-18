@@ -42,6 +42,10 @@ String? get pastaDePrint {
 Future<void> gravarPrint(WidgetTester tester, GlobalKey chave, String nome) async {
   final pasta = pastaDePrint;
   if (pasta == null) return;
+  // A PASTA PODE NAO EXISTIR AINDA: apontar AUREA_PRINT_DIR para uma pasta
+  // nova e o uso normal da ferramenta, e sem isto a primeira gravacao
+  // morria com PathNotFoundException em vez de criar o destino.
+  Directory(pasta).createSync(recursive: true);
   await tester.pump();
   await tester.runAsync(() async {
     final boundary = chave.currentContext!.findRenderObject()! as RenderRepaintBoundary;

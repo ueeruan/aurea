@@ -20,6 +20,7 @@ import 'dobra_de_pagina.dart';
 import 'luz_na_faixa.dart';
 import 'sombra_projetada.dart';
 import 'sombra_longa.dart';
+import 'time_slice.dart';
 import 'keyframe.dart';
 
 /// Efeitos aplicaveis a uma camada (blocos combinaveis, ordem importa).
@@ -582,6 +583,7 @@ const effectSpecs = <EffectType, EffectSpec>{
   ...efeitosLuzNaFaixa,
   ...efeitosDobraDePagina,
   ...efeitosSombraLonga,
+  ...efeitosTimeSlice,
   ...efeitosLuzEDiversos,
   ...efeitosMotionTile,
 };

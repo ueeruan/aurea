@@ -53,6 +53,11 @@ List<int> atrasosDasFaixas({
 }) {
   final n = faixas.clamp(1, 256);
   final m = maximo.isFinite ? maximo : 0.0;
+  // UMA FAIXA SO NAO SE DESLOCA, em distribuicao nenhuma: ela cobre o
+  // quadro inteiro, entao nao ha "outra faixa" para comparar — um quadro
+  // inteiro num instante sorteado nao e fatia, e salto de tempo. Quem
+  // quer isso usa o Posterize Time, que e o efeito dessa conta.
+  if (n == 1) return const [0];
   return [
     for (var k = 0; k < n; k++)
       (() {
@@ -67,7 +72,7 @@ List<int> atrasosDasFaixas({
                 math.sin(
                   2 * math.pi * (ciclos * x + fase + varredura * segundos / n),
                 ),
-          _ => n == 1 ? 0.0 : (k - (n - 1) / 2) * (m / ((n - 1) / 2)),
+          _ => (k - (n - 1) / 2) * (m / ((n - 1) / 2)),
         };
         return (atraso + deslocamento).round();
       })(),
@@ -217,3 +222,137 @@ Set<Duration> instantesDeOutroTempo(
   out.remove(t);
   return out;
 }
+
+/// A FICHA DO TIME SLICE, E OS PARAMETROS DO PLUGIN DE VERDADE.
+///
+/// ELA FALTAVA. O motor do Time Slice estava inteiro aqui e ligado no
+/// palco desde 14/09 — mas sem ficha a pessoa nao tinha como pedir o
+/// efeito nem como mexer num parametro, entao o caminho existia e nao
+/// saia do lugar. A ficha entrou em 18/09.
+///
+/// OS QUATRO PRIMEIROS SAO OS DO S_TimeSlice, com os valores de fabrica
+/// lidos do plugin no AE do dono (`Slice Direction` -90, `Slice Number`
+/// 12, `Frame Offset` 0, `Interp Frames` 0). OS NOMES DAS CHAVES sao os
+/// que o MOTOR le — trocar 'slices' por 'slice_number' aqui deixaria o
+/// parametro mudo, e e por isso que o teste cobra os dois lados.
+///
+/// NAO ENTROU O `Interp Frames`: ele pede um quadro INTERPOLADO entre
+/// dois, e o que o compositor sabe entregar e a camada montada num
+/// instante — a interpolacao de verdade mora na exportacao (RIFE), nao
+/// aqui. Prometer o parametro sem a conta seria pior do que nao te-lo.
+///
+/// OS DEMAIS SAO NOSSOS: a distribuicao dos atrasos entre as faixas, a
+/// curva, a onda com ciclos e fase, e a semente. O plugin so tem a escada
+/// (um quadro por faixa), que aqui e a `DistribuicaoDoTimeSlice.escada`.
+const efeitosTimeSlice = <EffectType, EffectSpec>{
+  EffectType.timeSlice: EffectSpec(
+    id: 's_timeslice',
+    name: 'Fatias no tempo',
+    category: 'Time',
+    synonyms: [
+      'fatias no tempo',
+      'time slice',
+      'timeslice',
+      'slit scan',
+      'fatias',
+      'cortina de tempo',
+    ],
+    params: {
+      'mix': EffectParam('Mistura', 100, 0, 100, unit: '%', decimals: 1),
+      'angle': EffectParam(
+        'Direção das fatias',
+        -90,
+        -180,
+        180,
+        unit: '°',
+        decimals: 1,
+      ),
+      'slices': EffectParam('Fatias', 12, 1, 64, decimals: 0),
+      'frame_offset': EffectParam(
+        'Deslocamento',
+        0,
+        -120,
+        120,
+        unit: 'q',
+        decimals: 0,
+        dragStep: .2,
+      ),
+      'gap': EffectParam('Vão', 0, 0, 10, decimals: 2, dragStep: .05),
+      'distribution': EffectParam(
+        'Distribuição',
+        0,
+        0,
+        4,
+        kind: ParamKind.choice,
+        options: ['Escada', 'Linear', 'Centro', 'Aleatória', 'Onda'],
+      ),
+      'max_offset': EffectParam(
+        'Atraso máximo',
+        12,
+        -120,
+        120,
+        unit: 'q',
+        decimals: 0,
+        dragStep: .2,
+      ),
+      'curve': EffectParam(
+        'Curva',
+        0,
+        0,
+        3,
+        kind: ParamKind.choice,
+        options: ['Reta', 'Quadrática', 'Raiz', 'S'],
+      ),
+      'cycles': EffectParam('Ciclos', 1, 0, 8, decimals: 2, dragStep: .05),
+      'phase': EffectParam('Fase', 0, 0, 1, decimals: 2, dragStep: .01),
+      'sweep': EffectParam('Varredura', 0, -4, 4, decimals: 2, dragStep: .05),
+      'seed': EffectParam('Semente', 0, 0, 999, kind: ParamKind.seed),
+    },
+    presets: [
+      // Os do plugin: a escada de um quadro por faixa.
+      EffectPronto('Escada', {'distribution': 0, 'slices': 12, 'max_offset': 6}),
+      EffectPronto('Escada larga', {
+        'distribution': 0,
+        'slices': 24,
+        'max_offset': 12,
+      }),
+      EffectPronto('Chegando', {
+        'distribution': 1,
+        'slices': 16,
+        'max_offset': 24,
+        'curve': 1,
+      }),
+      EffectPronto('Saindo', {
+        'distribution': 1,
+        'slices': 16,
+        'max_offset': -24,
+        'curve': 2,
+      }),
+      EffectPronto('Do centro', {
+        'distribution': 2,
+        'slices': 20,
+        'max_offset': 18,
+      }),
+      EffectPronto('Onda', {
+        'distribution': 4,
+        'slices': 24,
+        'max_offset': 12,
+        'cycles': 2,
+        'sweep': 0.7,
+      }),
+      EffectPronto('Quadro a quadro', {
+        'distribution': 0,
+        'slices': 8,
+        'max_offset': 4,
+        'gap': 0.12,
+      }),
+      EffectPronto('Sortido', {
+        'distribution': 3,
+        'slices': 20,
+        'max_offset': 16,
+        'seed': 7,
+      }),
+    ],
+    montar: ['slices', 'max_offset', 'distribution'],
+  ),
+};

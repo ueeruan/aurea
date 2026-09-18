@@ -34,6 +34,7 @@ import 'am/property_keyframe_context.dart';
 import 'am/shape_panel.dart';
 import 'am/transform_panel.dart';
 import '../domain/estilizar_lote2.dart';
+import 'am/aviso_de_bloqueio.dart';
 import 'context/add_toolbar.dart';
 import 'shell/onboarding.dart';
 import '../../help/presentation/quick_guide_screen.dart';
@@ -406,6 +407,21 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
     final id = layerId ?? ref.read(selectedLayerProvider);
     if (id == null) return;
     final controller = ref.read(editorControllerProvider.notifier);
+    // BLOQUEADA NAO ABRE O EDITOR DE NOS, e diz por que.
+    //
+    // `ensureShapeBezierGeometry` cria o contorno quando a forma ainda
+    // nao tem um — e o cadeado recusa a criacao, entao o caminho de erro
+    // diria "esta camada nao tem caminho editavel", que e falso: ela nao
+    // tem porque o cadeado nao deixou criar.
+    if (controller.isLocked(id)) {
+      avisarCamadaBloqueada(
+        context,
+        ref,
+        fraseDeBloqueio('editar os pontos'),
+        id,
+      );
+      return;
+    }
     final itemId = controller.ensureShapeBezierGeometry(
       id,
       _playback.time.value,

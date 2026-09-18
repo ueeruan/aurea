@@ -1,7 +1,6 @@
 // NUCLEO TEMPORAL EM C++ (packages/aurea_timecore): paridade com a
 // implementacao Dart que ele substituiu e os casos que ela errava.
 import 'package:aurea/src/features/editor/domain/cut_ops.dart';
-import 'package:aurea/src/features/editor/domain/effect.dart';
 import 'package:aurea/src/features/editor/domain/keyframe.dart';
 import 'package:aurea/src/features/editor/domain/layer.dart';
 import 'package:aurea/src/features/editor/domain/time_core.dart';
@@ -22,10 +21,7 @@ VideoLayer _video({
   sourceOffset: offset,
   speed: speed,
   reverse: reverse,
-  effects: [
-    if (track != null)
-      EffectInstance(type: EffectType.timeRemap, params: {'tempo': track}),
-  ],
+  timeRemap: track,
 );
 
 // A implementacao Dart ANTIGA (cut_ops antes do nucleo), guardada so aqui

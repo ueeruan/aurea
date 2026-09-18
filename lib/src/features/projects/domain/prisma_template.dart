@@ -385,7 +385,7 @@ EffectInstance _glow(
   double forca = 120,
 }) => EffectInstance(
   id: id,
-  type: EffectType.lightGlow,
+  type: EffectType.brilho,
   color: const Color(0xfffff3e4),
   params: {
     'threshold': _ad(limiar),
@@ -895,10 +895,10 @@ Scene3DLayer _cenaCones() {
       // O GLITCH em listras, so enquanto a esfera treme.
       EffectInstance(
         id: 'prisma_fx_glitch',
-        type: EffectType.glitch,
+        type: EffectType.glitchify,
         params: {
-          'quantidade': _keys([(2.45, 0), (2.7, 1.6), (3.4, 1.4), (3.62, 0)]),
-          'velocidade': _ad(6),
+          'amount': _keys([(2.45, 0), (2.7, 1.6), (3.4, 1.4), (3.62, 0)]),
+          'speed': _ad(6),
           'intervalo': _ad(.1),
           'deslize': _ad(.2),
           'escala': _ad(.6),
@@ -906,15 +906,6 @@ Scene3DLayer _cenaCones() {
           'luz': _ad(.5),
           'desfoque': _ad(.3),
           'rgb': _ad(.6),
-        },
-      ),
-      EffectInstance(
-        id: 'prisma_fx_rgb',
-        type: EffectType.rgbSplit,
-        params: {
-          'deslocamento': _keys([(2.45, 0), (2.7, 34), (3.45, 30), (3.65, 0)]),
-          'angulo': _ad(0),
-          'suavizar': _ad(.2),
         },
       ),
     ],
@@ -1103,11 +1094,6 @@ Scene3DLayer _fundo() {
     cena: cena,
     camera: _cameraFixa('prisma_cam_fundo', 'Fundo / 40 mm'),
     efeitos: [
-      EffectInstance(
-        id: 'prisma_fx_fundo_blur',
-        type: EffectType.gaussianBlur,
-        params: {'raio': _ad(190)},
-      ),
     ],
   );
 }
@@ -1145,24 +1131,13 @@ VideoProject buildPrismaTemplate() {
         position: AnimatedOffset(_centro),
         effects: [
           EffectInstance(
-            id: 'prisma_fx_correcoes',
-            type: EffectType.corrections,
-            params: {'contraste': _ad(.07), 'saturacao': _ad(.08)},
-          ),
-          EffectInstance(
-            id: 'prisma_fx_vinheta',
-            type: EffectType.vignette,
-            params: {
-              'quantidade': _ad(.34),
-              'raio': _ad(.9),
-              'suavidade': _ad(.82),
-            },
-          ),
-          EffectInstance(
-            id: 'prisma_fx_grao',
-            type: EffectType.filmGrain,
-            params: {'intensidade': _ad(.035), 'tamanho': _ad(1.2)},
-          ),
+              type: EffectType.brightnessContrast,
+              params: { 'contrast': _ad(7) },
+            ),
+            EffectInstance(
+              type: EffectType.hueSaturation,
+              params: { 'master_saturation': _ad(8) },
+            ),
         ],
       ),
       // As cenas, da ultima para a primeira: a lista e de cima para

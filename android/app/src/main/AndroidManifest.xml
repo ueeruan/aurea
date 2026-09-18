@@ -18,7 +18,17 @@
     <application
         android:label="Aurea"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules">
+        <!-- O CODIGO DE ACESSO DO MURAL NAO VAI PARA O GOOGLE DRIVE.
+             O codigo e a UNICA credencial da conta (nao ha e-mail nem
+             recuperacao: ver conta_da_comunidade.dart), e ele mora em
+             SharedPreferences — texto claro, que o Auto Backup do Android
+             copiava para a nuvem do usuario por padrao. Quem obtivesse a
+             copia assumia a identidade no mural, sem segundo fator.
+             Ver android/app/src/main/res/xml/data_extraction_rules.xml. -->
         <!-- Flutter GPU: o motor 3D (flutter_scene) renderiza em Vulkan/GLES. -->
         <meta-data
             android:name="io.flutter.embedding.android.EnableFlutterGPU"

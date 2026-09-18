@@ -46,6 +46,15 @@
  */
 
 const LIMITE_POR_HORA = 20;
+
+/// Contas por IP e por hora. Alto porque um IP pode ser uma casa inteira
+/// atras do mesmo roteador; baixo o bastante para nao dar para criar
+/// contas em serie e usar cada uma como cota nova de transcricao.
+const CONTAS_POR_HORA = 30;
+
+/// Arquivos por conta e por hora. O portao por requisicao ja limita o
+/// tamanho; este limita a QUANTIDADE, que e o que enche o KV.
+const MIDIAS_POR_HORA = 40;
 const TAMANHO_MAXIMO = 16 * 1024;
 const MIDIA_MAXIMA = 40 * 1024 * 1024;
 
@@ -387,6 +396,17 @@ async function quemFala(request, env) {
 }
 
 /** Um contador por hora, para qualquer coisa que tenha ritmo maximo. */
+/// O IP de quem pediu, para os tetos que valem antes de haver conta.
+/// O Cloudflare sempre manda `cf-connecting-ip`; `x-forwarded-for` fica de
+/// reserva. Sem nenhum dos dois, "desconhecido" — que agrupa todo mundo, e
+/// por isso mesmo o teto tem de ser folgado.
+function ipDoPedido(request) {
+  return (
+    request.headers.get('cf-connecting-ip') ??
+    (request.headers.get('x-forwarded-for') ?? 'desconhecido').split(',')[0].trim()
+  );
+}
+
 async function passouDoLimiteDe(env, prefixo, teto) {
   const hora = new Date().toISOString().slice(0, 13);
   const chave = `${prefixo}:${hora}`;
@@ -467,6 +487,21 @@ export default {
     // =========================================================== conta
 
     if (request.method === 'POST' && caminho === '/conta') {
+      // TETO DE CRiacao DE CONTA, por IP e por hora.
+      //
+      // Nao havia nenhum. Criar conta nao pede nada — sem e-mail, sem
+      // senha, sem captcha — e por isso e o primeiro passo de qualquer
+      // abuso do mural: cada conta nova abre uma cota propria de
+      // transcricao e um espaco proprio de midia. Sem este teto, dava
+      // para criar contas sem parar e usar cada uma para consumir o poco
+      // COMPARTILHADO da conta Groq do dono, deixando os usuarios de
+      // verdade sem transcricao no meio do dia.
+      //
+      // O teto e alto de proposito: um aparelho atras de NAT compartilha
+      // o IP com a casa inteira, e uma familia nao pode ser barrada.
+      if (await passouDoLimiteDe(env, `limite:conta:${ipDoPedido(request)}`, CONTAS_POR_HORA)) {
+        return erro('Muitas contas criadas deste aparelho. Tente mais tarde.', 429);
+      }
       let corpo;
       try {
         corpo = await request.json();
@@ -916,6 +951,20 @@ export default {
     if (request.method === 'POST' && caminho === '/midia') {
       const conta = await quemFala(request, env);
       if (!conta) return erro('Crie sua conta antes de enviar arquivo.', 401);
+
+      // TETO DE ENVIO POR CONTA. Antes so havia o limite por REQUISICAO
+      // (2 MB): uma conta podia mandar 2 MB quantas vezes quisesse, e o KV
+      // tem 1 GB no plano gratuito — quando ele enche, o mural para para
+      // TODO MUNDO, nao so para quem abusou.
+      if (
+        await passouDoLimiteDe(
+          env,
+          `limite:midia:${conta.id}`,
+          MIDIAS_POR_HORA,
+        )
+      ) {
+        return erro('Muitos arquivos desta conta. Tente mais tarde.', 429);
+      }
 
       const tipo = (request.headers.get('content-type') ?? '').split(';')[0];
       const permitidos = {

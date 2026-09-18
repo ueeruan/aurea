@@ -920,15 +920,17 @@ VideoProject buildFlorTemplate() {
         position: AnimatedOffset(centro),
         effects: [
           EffectInstance(
-            type: EffectType.corrections,
-            params: {
-              'contraste': _ad(.12),
-              'sombras': _ad(.07),
-              'altas': _ad(-.04),
-              'temperatura': _ad(.10),
-              'saturacao': _ad(.06),
-            },
-          ),
+              type: EffectType.brightnessContrast,
+              params: { 'contrast': _ad(12) },
+            ),
+            EffectInstance(
+              type: EffectType.levels,
+              params: { 'output_black': _ad(17.85), 'output_white': _ad(244.8) },
+            ),
+            EffectInstance(
+              type: EffectType.hueSaturation,
+              params: { 'master_saturation': _ad(6) },
+            ),
           EffectInstance(
             type: EffectType.vignette,
             params: {
@@ -936,10 +938,6 @@ VideoProject buildFlorTemplate() {
               'raio': _ad(.92),
               'suavidade': _ad(.85),
             },
-          ),
-          EffectInstance(
-            type: EffectType.filmGrain,
-            params: {'intensidade': _ad(.055), 'tamanho': _ad(1.25)},
           ),
         ],
       ),
@@ -963,7 +961,7 @@ VideoProject buildFlorTemplate() {
           // petala no contraluz e as bolas do fundo. Raio pequeno de
           // proposito — halo grande le como sonho, e isto e manha.
           EffectInstance(
-            type: EffectType.lightGlow,
+            type: EffectType.brilho,
             color: const Color(0xfffff2e0),
             params: {
               'threshold': _ad(80),

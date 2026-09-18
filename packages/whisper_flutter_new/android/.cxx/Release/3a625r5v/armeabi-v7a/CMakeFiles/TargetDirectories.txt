@@ -1,4 +1,0 @@
-C:/Users/SnyX/Documents/Projetos - Claude/Aurea/packages/whisper_flutter_new/android/.cxx/Release/3a625r5v/armeabi-v7a/CMakeFiles/whisper_flutter.dir
-C:/Users/SnyX/Documents/Projetos - Claude/Aurea/packages/whisper_flutter_new/android/.cxx/Release/3a625r5v/armeabi-v7a/CMakeFiles/whisper.dir
-C:/Users/SnyX/Documents/Projetos - Claude/Aurea/packages/whisper_flutter_new/android/.cxx/Release/3a625r5v/armeabi-v7a/CMakeFiles/edit_cache.dir
-C:/Users/SnyX/Documents/Projetos - Claude/Aurea/packages/whisper_flutter_new/android/.cxx/Release/3a625r5v/armeabi-v7a/CMakeFiles/rebuild_cache.dir

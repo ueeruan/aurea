@@ -17,6 +17,9 @@ Size measureLayerBox(
   double fallbackWidth = 1080,
   double? compHeight,
   bool scaled = true,
+  /// Familia JA RESOLVIDA para a camada de texto. Sem ela a medida usa a
+  /// fonte do aplicativo enquanto o palco desenha a importada.
+  String? Function(String?)? resolveFamily,
 }) {
   final sx = layer.scaleX.valueAt(local).abs();
   final sy = layer.scaleY.valueAt(local).abs();
@@ -24,11 +27,19 @@ Size measureLayerBox(
     ShapeLayer l => shapeBounds(evaluateShape(l.contents, local)).size,
     Element3DLayer l => Size(l.size * 2, l.size * 2),
     ParticlesLayer _ => const Size(420, 420),
-    TextLayer l => measureText(l.text, l.fontSize, l.bold),
+    TextLayer l => measureText(
+      l.text,
+      l.fontSize,
+      l.bold,
+      fontFamily: resolveFamily?.call(l.fontFamily),
+    ),
     CameraLayer _ => Size.zero,
     NullLayer _ => Size.zero,
     AudioLayer _ => Size.zero,
     AdjustmentLayer _ => const Size(220, 220),
+    // A legenda NAO tem familia propria (CaptionStyle so guarda corpo,
+    // cor e negrito): ela sempre sai na fonte do aplicativo, e medir com
+    // ela e o certo.
     CaptionLayer l => measureText(
       l.cueAt(local)?.text ?? '',
       l.style.fontSize,
@@ -116,16 +127,42 @@ Rect? groupContentRect(
   return uniao;
 }
 
+/// OS MESMOS NUMEROS COM QUE O PALCO DESENHA O TEXTO.
+///
+/// Estes tres valores viviam escritos a mao aqui e DIFERENTES do desenho
+/// (`AnimatedTextView.styleFor`, em `animated_text.dart`): a medida usava
+/// altura de linha 1,2 e espacamento zero, e o palco usa 1,1 e
+/// -2% do corpo. A caixa de selecao, as alcas de arrasto e a area de
+/// toque de uma camada de texto saiam sistematicamente MAIORES que o texto
+/// desenhado — e com fonte importada o erro era outro, porque a medida
+/// nem pedia a familia.
+///
+/// Agora o numero mora num lugar so e os dois lados leem daqui.
+const double kTextHeightFactor = 1.1;
+const double kTextTrackingFactor = -0.02;
+
 /// Caixa do texto medida de verdade (nao estimada).
-Size measureText(String text, double fontSize, bool bold) {
-  if (text.isEmpty) return Size(0, fontSize * 1.2);
+///
+/// [fontFamily] deve vir ja resolvido (ver `resolveFontFamily`): fonte
+/// importada que sumiu cai na do aplicativo, e medir com um nome que nao
+/// existe da a metrica errada.
+Size measureText(
+  String text,
+  double fontSize,
+  bool bold, {
+  String? fontFamily,
+  double height = kTextHeightFactor,
+}) {
+  if (text.isEmpty) return Size(0, fontSize * height);
   final painter = TextPainter(
     text: TextSpan(
       text: text,
       style: TextStyle(
         fontSize: fontSize,
+        fontFamily: fontFamily,
         fontWeight: bold ? FontWeight.w700 : FontWeight.w400,
-        height: 1.2,
+        letterSpacing: fontSize * kTextTrackingFactor,
+        height: height,
       ),
     ),
     textDirection: TextDirection.ltr,

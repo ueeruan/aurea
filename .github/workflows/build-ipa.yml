@@ -56,8 +56,6 @@ jobs:
           name: ios-build-diagnostics
           path: |
             build-ios.log
-            packages/thermion_dart/build.log
-            packages/thermion_flutter/build.log
           if-no-files-found: ignore
 
       - name: Empacotar IPA

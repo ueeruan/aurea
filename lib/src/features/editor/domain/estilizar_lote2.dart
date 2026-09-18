@@ -126,3 +126,15 @@ final receitasSapphire = <EffectType, ReceitaSapphire>{
     cores: true,
   ),
 };
+
+
+/// OS SHADERS QUE ESTE LOTE USA, para aquecer de uma vez.
+///
+/// Sem esta lista, quem aquecia escolhia os arquivos a mao — e nao
+/// escolhia nenhum destes: `MotorSapphire.warmUp` existia e nao tinha
+/// chamador. O preco aparecia no primeiro uso de cada efeito (um engasgo)
+/// e, na exportacao, em QUADROS GRAVADOS SEM O EFEITO: o laco exporta um
+/// quadro por vez, e o shader que ainda nao chegou devolve a camada crua.
+Set<String> get assetsDosShadersSapphire => {
+  for (final r in receitasSapphire.values) r.asset,
+};

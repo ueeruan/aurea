@@ -765,14 +765,17 @@ VideoProject buildMonolitoTemplate({MonolitoModelos? modelos}) {
         position: AnimatedOffset(centro),
         effects: [
           EffectInstance(
-            type: EffectType.corrections,
-            params: {
-              'contraste': _ad(.10),
-              'sombras': _ad(-.04),
-              'temperatura': _ad(-.12),
-              'saturacao': _ad(.12),
-            },
-          ),
+              type: EffectType.brightnessContrast,
+              params: { 'contrast': _ad(10) },
+            ),
+            EffectInstance(
+              type: EffectType.levels,
+              params: { 'output_black': _ad(-10.2) },
+            ),
+            EffectInstance(
+              type: EffectType.hueSaturation,
+              params: { 'master_saturation': _ad(12) },
+            ),
           EffectInstance(
             type: EffectType.vignette,
             params: {
@@ -780,10 +783,6 @@ VideoProject buildMonolitoTemplate({MonolitoModelos? modelos}) {
               'raio': _ad(.9),
               'suavidade': _ad(.8),
             },
-          ),
-          EffectInstance(
-            type: EffectType.filmGrain,
-            params: {'intensidade': _ad(.08), 'tamanho': _ad(1.3)},
           ),
         ],
       ),
@@ -799,7 +798,7 @@ VideoProject buildMonolitoTemplate({MonolitoModelos? modelos}) {
         // BLOOM da porta e do volume de luz.
         effects: [
           EffectInstance(
-            type: EffectType.lightGlow,
+            type: EffectType.brilho,
             color: const Color(0xfff0b0ff),
             params: {
               'threshold': _ad(78),

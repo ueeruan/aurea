@@ -1,31 +1,28 @@
 import 'dart:math' as math;
 
 import 'cut.dart';
-import 'effect.dart';
 import 'keyframe.dart';
 import 'layer.dart';
 import 'time_core.dart';
 
 const _junctionTolerance = Duration(milliseconds: 8);
 
-EffectInstance? timeRemapEffectOf(VideoLayer layer) {
-  for (final effect in layer.effects) {
-    if (effect.enabled && effect.type == EffectType.timeRemap) return effect;
-  }
-  return null;
-}
+/// A trilha de tempo do clipe, ou nulo quando ele anda em [speed] fixa.
+///
+/// Ate 17/09 isto procurava um `EffectInstance` de tipo `timeRemap` dentro
+/// da lista de efeitos. O Time Remap saiu do catalogo e a trilha virou
+/// campo da camada — onde o precomp ja a guardava. Nada mais aqui precisa
+/// saber o que e um efeito.
+AnimatedDouble? timeRemapTrackOf(VideoLayer layer) => layer.timeRemap;
 
-AnimatedDouble? timeRemapTrackOf(VideoLayer layer) =>
-    timeRemapEffectOf(layer)?.track('tempo');
-
-bool hasTimeRemap(VideoLayer layer) => timeRemapTrackOf(layer) != null;
+bool hasTimeRemap(VideoLayer layer) => layer.timeRemap != null;
 
 CoreLayer _core(VideoLayer layer) => (
   sourceOffsetUs: layer.sourceOffset.inMicroseconds,
   durationUs: layer.duration.inMicroseconds,
   speed: layer.speed,
   reverse: layer.reverse,
-  track: timeRemapTrackOf(layer),
+  track: layer.timeRemap,
 );
 
 /// Recorta a funcao fonte-tempo entre dois instantes locais. O resultado
@@ -78,28 +75,16 @@ Duration remappedContentTime(AnimatedDouble track, Duration local, {Duration? ba
   return Duration(microseconds: us < 0 ? 0 : us);
 }
 
-EffectInstance withTimeRemapTrack(VideoLayer layer, AnimatedDouble track) {
-  final current = timeRemapEffectOf(layer);
-  if (current != null) {
-    return current.copyWith(params: {...current.params, 'tempo': track});
-  }
-  return EffectInstance(type: EffectType.timeRemap, params: {'tempo': track});
-}
-
-List<EffectInstance> replaceTimeRemap(VideoLayer layer, AnimatedDouble? track) {
-  final out = <EffectInstance>[];
-  var inserted = false;
-  for (final effect in layer.effects) {
-    if (effect.type != EffectType.timeRemap) {
-      out.add(effect);
-    } else if (track != null && !inserted) {
-      out.add(withTimeRemapTrack(layer, track));
-      inserted = true;
-    }
-  }
-  if (track != null && !inserted) out.add(withTimeRemapTrack(layer, track));
-  return out;
-}
+/// O clipe com a trilha de tempo trocada. `null` LIMPA o remapeamento e
+/// devolve o clipe a velocidade constante de [VideoLayer.speed].
+///
+/// Antes isto montava e devolvia uma LISTA de efeitos, porque a trilha
+/// morava num deles. Agora e o que sempre deveria ter sido: uma copia da
+/// camada com o campo trocado.
+/// Nao mexe em `reverse` nem em `speed`: quem chama decide o que fazer
+/// com eles. O nucleo ([coreLayerSourceUs]) ja sabe combinar os tres.
+VideoLayer withTimeRemapTrack(VideoLayer layer, AnimatedDouble? track) =>
+    layer.copyLayer(timeRemap: track, clearTimeRemap: track == null);
 
 bool _touches(Duration a, Duration b) => (a - b).abs() <= _junctionTolerance;
 

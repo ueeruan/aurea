@@ -12,7 +12,6 @@ import 'package:aurea/src/features/community/application/conta_da_comunidade.dar
 import 'package:aurea/src/features/community/domain/post_da_comunidade.dart';
 import 'package:aurea/src/features/community/presentation/community_tab.dart';
 import 'package:aurea/src/features/editor/domain/video_project.dart';
-import 'package:aurea/src/features/projects/application/project_repository.dart';
 import 'package:aurea/src/features/projects/application/projects_controller.dart';
 import 'package:aurea/src/features/projects/presentation/projects_tab.dart';
 import 'package:flutter/material.dart';

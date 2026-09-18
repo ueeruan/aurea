@@ -1,6 +1,7 @@
 import 'package:aurea/src/core/l10n/app_language.dart';
 
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -23,7 +24,9 @@ import '../../editor/domain/grupo_ops.dart';
 import '../../../core/ui/am_colors.dart';
 import '../../editor/presentation/widgets/dither_layer.dart';
 import '../../editor/presentation/widgets/pixel_effect_engine.dart';
+import '../../editor/domain/estilizar_lote2.dart';
 import '../../editor/presentation/widgets/passe_de_cor.dart';
+import '../../editor/presentation/widgets/preview_raster.dart';
 import '../../editor/presentation/widgets/preview_stage.dart';
 import '../../editor/application/duck_service.dart';
 import '../../editor/application/media_preview_service.dart';
@@ -122,6 +125,14 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
       DitherLayer.warmUp(),
       PixelEffectEngine.warmUp(),
       MotorDeCorrecao.warmUp(),
+      // OS DOZE SHADERS DE ESTILIZAR, DISTORCER E LUZ.
+      //
+      // Sem eles aqui, o primeiro quadro que usa um desses efeitos sai
+      // SEM o efeito, e o arquivo fica errado no comeco — porque o laco
+      // de exportacao grava um quadro por vez e nao espera shader. O
+      // `await` deste Future ja acontece antes do laco (e o que o
+      // comentario acima promete); faltava a lista certa.
+      MotorSapphire.warmUp(assetsDosShadersSapphire),
     ])
         .catchError((Object _) => const <void>[]);
   }
@@ -705,22 +716,58 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
                     // FittedBox so encolhe o que aparece na tela.
                     child: RepaintBoundary(
                       key: _boundary,
-                      child: SizedBox(
-                        width: w,
-                        height: h,
-                        child: ClipRect(
-                          key: const ValueKey('export-composition-clip'),
-                          child: ColoredBox(
-                            color: project.backgroundColor,
-                            child: DitherLayer(
-                              time: _time.value,
-                              child: CompositionView(
-                                time: _time,
-                                videos: _videos,
-                                selectedId: null,
-                                exportFrames: _quadroAtual,
-                                exporting: true,
-                                quadroDeVideoEm: _quadroDeOutroTempo,
+                      child: MediaQuery(
+                        // AS FOTOS DA EXPORTACAO TINHAM O TAMANHO DE TELA
+                        // CHEIA.
+                        //
+                        // Todo ponto que fotografa uma camada para aplicar
+                        // efeito — BlendMask, MaskedBox, CustomBlendBox e o
+                        // proprio SnapshotWidget do Flutter — le a razao de
+                        // pixels daqui, do MediaQuery. O palco troca essa
+                        // razao por uma conta que cabe na tela e tem teto
+                        // (previewRasterRatio), e por isso nunca sofreu. A
+                        // exportacao NAO trocava: herdava o DPR do aparelho.
+                        //
+                        // A conta, em 1080x1920: com DPR 3 cada foto saia
+                        // 3240x5760 = 18,7 megapixels = 75 MB — o MESMO
+                        // numero que o comentario de preview_raster.dart
+                        // descreve como causa do fechamento no iPhone, e que
+                        // a correcao do palco resolveu so de um lado. Com
+                        // margem de mascara (ate 720 px), a foto unica
+                        // chegava a 305 MB.
+                        //
+                        // Aqui nao ha tela: o que importa e a resolucao de
+                        // SAIDA. A razao 1 da exatamente um pixel de
+                        // dispositivo por pixel logico da composicao, que e
+                        // o que vai para o arquivo. O teto de 12 megapixels
+                        // continua valendo por dentro, para o caso de
+                        // projeto 4K com margem grande.
+                        data: MediaQuery.of(context).copyWith(
+                          devicePixelRatio: previewRasterRatio(
+                            maxSidePx: math.max(w, h),
+                            compWidth: w,
+                            compHeight: h,
+                            stageScale: 1,
+                            devicePixelRatio: 1,
+                          ),
+                        ),
+                        child: SizedBox(
+                          width: w,
+                          height: h,
+                          child: ClipRect(
+                            key: const ValueKey('export-composition-clip'),
+                            child: ColoredBox(
+                              color: project.backgroundColor,
+                              child: DitherLayer(
+                                time: _time.value,
+                                child: CompositionView(
+                                  time: _time,
+                                  videos: _videos,
+                                  selectedId: null,
+                                  exportFrames: _quadroAtual,
+                                  exporting: true,
+                                  quadroDeVideoEm: _quadroDeOutroTempo,
+                                ),
                               ),
                             ),
                           ),

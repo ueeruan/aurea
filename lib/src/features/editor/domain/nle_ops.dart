@@ -158,7 +158,8 @@ Layer _avancarFonte(Layer l, Duration quanto) => switch (l) {
       sourceOffset: sliced.sourceOffset,
       speed: 1,
       reverse: false,
-      effects: replaceTimeRemap(v, sliced.track),
+      effects: v.effects,
+      timeRemap: sliced.track,
       clearTransitionIn: true,
     );
   }(),
@@ -204,7 +205,8 @@ List<Layer> _cortar1(Layer l, Duration from, Duration to) {
           sourceOffset: sliced.sourceOffset,
           speed: 1,
           reverse: false,
-          effects: replaceTimeRemap(l, sliced.track),
+          effects: l.effects,
+          timeRemap: sliced.track,
         ),
       ];
     }
@@ -230,7 +232,8 @@ List<Layer> _cortar1(Layer l, Duration from, Duration to) {
       sourceOffset: sliced.sourceOffset,
       speed: 1,
       reverse: false,
-      effects: replaceTimeRemap(l, sliced.track),
+      effects: l.effects,
+      timeRemap: sliced.track,
     );
   }
   return [

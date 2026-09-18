@@ -222,14 +222,18 @@ void main() {
     test('a profundidade sobrevive ao salvar e abrir', () {
       final fx = EffectInstance(type: EffectType.vignette)
           .withDepth(EffectDepth.montar);
-      final volta = effectFromJson(effectToJson(fx));
+      final volta = effectFromJson(effectToJson(fx))!;
       expect(volta.depth, EffectDepth.montar);
     });
   });
 
-  group('projeto antigo abre com o mesmo resultado', () {
-    test('o raio do desfoque vira pixel sem mudar o desfoque', () {
-      // Arquivo velho: sem 'v', com o parametro 'amount' de 0 a 1.
+  group('projeto antigo abre sem derrubar nada', () {
+    test('efeito que saiu do catalogo abre INERTE, e nao estoura', () {
+      // O desfoque era um efeito oficial com migracao de unidade propria
+      // (nivel 3). Ele saiu do catalogo em 16/09. O que se cobra agora
+      // NAO e mais a conversao do raio — e que o arquivo que o contem
+      // continue abrindo: a instancia nasce, marca-se como desconhecida,
+      // e nem a camada nem o projeto vao embora com ela.
       final antigo = <String, dynamic>{
         'id': 'x',
         'kind': 'gaussian_blur',
@@ -240,10 +244,15 @@ void main() {
           'amount': {'b': 0.5},
         },
       };
-      final fx = effectFromJson(antigo);
-      // 0.5 * 0.04 do menor lado = 2% -> 21.6 px em 1080.
-      expect(fx.paramAt('raio', Duration.zero), closeTo(21.6, 1e-9));
-      expect(fx.params.containsKey('amount'), isFalse);
+      final fx = effectFromJson(antigo)!;
+      expect(fx, isNotNull);
+      expect(
+        fx.conhecido,
+        isFalse,
+        reason: 'gaussianBlur nao esta no catalogo de agora',
+      );
+      // O id continua estavel, entao o projeto salvo de novo sai igual.
+      expect(effectIdOf(fx.type), 'gaussian_blur');
     });
 
     test('o glow converte raio, limite e intensidade', () {
@@ -259,7 +268,7 @@ void main() {
           'intensity': {'b': 1.0},
         },
       };
-      final fx = effectFromJson(antigo);
+      final fx = effectFromJson(antigo)!;
       expect(fx.paramAt('raio', Duration.zero), closeTo(14.85, 1e-9));
       expect(fx.paramAt('threshold', Duration.zero), closeTo(70, 1e-9));
       expect(fx.paramAt('intensity', Duration.zero), closeTo(100, 1e-9));
@@ -280,7 +289,7 @@ void main() {
       json['params'] = params;
       json.remove('v');
 
-      final lido = effectFromJson(json);
+      final lido = effectFromJson(json)!;
       expect(lido.paramAt('raio', const Duration(seconds: 1)),
           closeTo(43.2, 1e-9));
       expect(lido.paramAt('raio', Duration.zero), 0);
@@ -289,7 +298,7 @@ void main() {
     test('arquivo novo nao e convertido duas vezes', () {
       final fx = EffectInstance(type: EffectType.gaussianBlur)
           .withParamEdited('raio', Duration.zero, 200);
-      final volta = effectFromJson(effectToJson(fx));
+      final volta = effectFromJson(effectToJson(fx))!;
       expect(volta.paramAt('raio', Duration.zero), 200);
     });
   });

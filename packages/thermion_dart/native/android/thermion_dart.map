@@ -1,6 +1,0 @@
-THERMION_DART {
-  global:
-    [A-Za-z]*;
-  local:
-    *;
-};

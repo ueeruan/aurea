@@ -100,14 +100,12 @@ class ReceitaDeEfeito {
   final List<Color>? coresExtras;
 }
 
-/// As quatro cores do 4-Color Gradient extraidas dos .ffx do bundle
-/// (rosa-magenta, laranja, amarelo, ambar) — em overlay a 10%, como la.
-const _grad4nas = ReceitaDeEfeito(
-  EffectType.gradient4,
-  {'opacity': 0.10, 'blend': 3, 'angle': 0},
-  cor: Color(0xFFFF00D8),
-  coresExtras: [Color(0xFFFFAE00), Color(0xFFFFFF00), Color(0xFFFFC000)],
-);
+// O 4-Color Gradient SAIU (17/09): nao existe no catalogo oficial de 37,
+// e nao ha gradiente equivalente para por no lugar. As quatro cores do
+// bundle (rosa-magenta, laranja, amarelo, ambar, em overlay a 10%) estao
+// registradas aqui — quem reautorar a familia de gradiente parte delas.
+//
+// const Color(0xFFFF00D8), Color(0xFFFFAE00), Color(0xFFFFFF00), Color(0xFFFFC000)
 
 final presetsDeEdicao = List<PresetDeEdicao>.unmodifiable([
   // ------------------------------------------------- o edit da casa
@@ -127,7 +125,6 @@ final presetsDeEdicao = List<PresetDeEdicao>.unmodifiable([
     ligarSpeedBlur: true,
     marca: 'Edit',
     receita: const [
-      ReceitaDeEfeito(EffectType.opticalFlow, {}),
       ReceitaDeEfeito(EffectType.tremor, {
         'amplitude': 2.2,
         'frequency': 6,
@@ -146,23 +143,14 @@ final presetsDeEdicao = List<PresetDeEdicao>.unmodifiable([
     nome: 'Main CC 2024',
     detalhe: 'O look principal: teal e laranja, saturação e brilho limpo.',
     receita: const [
-      ReceitaDeEfeito(EffectType.colorBalance, {
-        'shadow_blue': 18,
-        'shadow_red': -8,
-        'midtone_blue': 6,
-        'highlight_red': 10,
-        'highlight_blue': -8,
-        'preserve_luminosity': 1,
-      }),
       ReceitaDeEfeito(EffectType.hueSaturation, {'master_saturation': 20}),
       ReceitaDeEfeito(EffectType.brightnessContrast, {'contrast': 14}),
-      ReceitaDeEfeito(EffectType.sSharpen, {'amount': 1.2}),
-      ReceitaDeEfeito(EffectType.lightGlow, {
+      ReceitaDeEfeito(EffectType.unsharpMask, {'amount': 1.2}),
+      ReceitaDeEfeito(EffectType.brilho, {
         'threshold': 82,
-        'raio': 40,
+        'radius': 40,
         'intensity': 60,
       }),
-      _grad4nas,
     ],
   ),
   PresetDeEdicao(
@@ -170,14 +158,10 @@ final presetsDeEdicao = List<PresetDeEdicao>.unmodifiable([
     nome: '4K CC',
     detalhe: 'Nitidez de “upscale”: sharpen duplo, contraste e grão fino.',
     receita: const [
-      ReceitaDeEfeito(EffectType.sSharpen, {'amount': 1.6, 'width': 1.2}),
-      ReceitaDeEfeito(EffectType.unsharpMask, {'quantidade': 0.6, 'raio': 2}),
+      ReceitaDeEfeito(EffectType.unsharpMask, {'amount': 1.6, 'width': 1.2}),
+      ReceitaDeEfeito(EffectType.unsharpMask, {'amount': 0.6, 'radius': 2}),
       ReceitaDeEfeito(EffectType.brightnessContrast, {'contrast': 18}),
       ReceitaDeEfeito(EffectType.hueSaturation, {'master_saturation': 12}),
-      ReceitaDeEfeito(EffectType.filmGrain, {
-        'intensidade': 0.12,
-        'tamanho': 1.2,
-      }),
       ReceitaDeEfeito(EffectType.vignette, {
         'quantidade': 0.25,
         'raio': 0.9,
@@ -190,17 +174,9 @@ final presetsDeEdicao = List<PresetDeEdicao>.unmodifiable([
     nome: 'Cold CC',
     detalhe: 'Sombras azuladas, saturação +25 (o número do arquivo) e grão.',
     receita: const [
-      ReceitaDeEfeito(EffectType.colorBalance, {
-        'shadow_blue': 25,
-        'midtone_blue': 10,
-        'highlight_red': -10,
-        'preserve_luminosity': 1,
-      }),
       ReceitaDeEfeito(EffectType.hueSaturation, {'master_saturation': 25}),
       ReceitaDeEfeito(EffectType.brightnessContrast, {'contrast': 12}),
-      ReceitaDeEfeito(EffectType.sSharpen, {'amount': 1.3}),
-      ReceitaDeEfeito(EffectType.filmGrain, {'intensidade': 0.10}),
-      _grad4nas,
+      ReceitaDeEfeito(EffectType.unsharpMask, {'amount': 1.3}),
     ],
   ),
   PresetDeEdicao(
@@ -208,18 +184,18 @@ final presetsDeEdicao = List<PresetDeEdicao>.unmodifiable([
     nome: 'Aura CC',
     detalhe: 'Glow quente na pele da imagem — o brilho de aura do bundle.',
     receita: const [
-      ReceitaDeEfeito(EffectType.lightGlow, {
+      ReceitaDeEfeito(EffectType.brilho, {
         'threshold': 68,
-        'raio': 60,
+        'radius': 60,
         'intensity': 85,
         'mult_r': 1.15,
         'mult_b': 0.85,
       }),
       ReceitaDeEfeito(EffectType.hueSaturation, {'master_saturation': 15}),
       ReceitaDeEfeito(EffectType.brightnessContrast, {'contrast': 10}),
-      ReceitaDeEfeito(EffectType.sSharpen, {'amount': 1.1}),
+      ReceitaDeEfeito(EffectType.unsharpMask, {'amount': 1.1}),
       ReceitaDeEfeito(EffectType.vignette, {
-        'quantidade': 0.2,
+        'amount': 0.2,
         'suavidade': 0.8,
       }),
     ],
@@ -229,16 +205,15 @@ final presetsDeEdicao = List<PresetDeEdicao>.unmodifiable([
     nome: 'Gorgeous CC',
     detalhe: 'O dourado vistoso: gradiente do bundle, glow e saturação.',
     receita: const [
-      _grad4nas,
-      ReceitaDeEfeito(EffectType.lightGlow, {
+      ReceitaDeEfeito(EffectType.brilho, {
         'threshold': 75,
-        'raio': 45,
+        'radius': 45,
         'intensity': 70,
         'mult_r': 1.1,
       }),
       ReceitaDeEfeito(EffectType.hueSaturation, {'master_saturation': 22}),
       ReceitaDeEfeito(EffectType.brightnessContrast, {'contrast': 12}),
-      ReceitaDeEfeito(EffectType.sSharpen, {'amount': 1.2}),
+      ReceitaDeEfeito(EffectType.unsharpMask, {'amount': 1.2}),
     ],
   ),
   PresetDeEdicao(
@@ -246,24 +221,17 @@ final presetsDeEdicao = List<PresetDeEdicao>.unmodifiable([
     nome: 'Soft Emerald CC',
     detalhe: 'Verdes suaves nas sombras, brilho leve — o look esmeralda.',
     receita: const [
-      ReceitaDeEfeito(EffectType.colorBalance, {
-        'shadow_green': 15,
-        'midtone_green': 8,
-        'highlight_green': 5,
-        'shadow_blue': 8,
-        'preserve_luminosity': 1,
-      }),
       ReceitaDeEfeito(EffectType.hueSaturation, {'master_saturation': 10}),
       ReceitaDeEfeito(EffectType.brightnessContrast, {
         'brightness': 4,
         'contrast': 8,
       }),
-      ReceitaDeEfeito(EffectType.lightGlow, {
+      ReceitaDeEfeito(EffectType.brilho, {
         'threshold': 88,
         'raio': 30,
         'intensity': 40,
       }),
-      ReceitaDeEfeito(EffectType.sSharpen, {'amount': 1.0}),
+      ReceitaDeEfeito(EffectType.unsharpMask, {'amount': 1.0}),
     ],
   ),
   PresetDeEdicao(
@@ -273,19 +241,12 @@ final presetsDeEdicao = List<PresetDeEdicao>.unmodifiable([
     receita: const [
       ReceitaDeEfeito(EffectType.brightnessContrast, {'contrast': 30}),
       ReceitaDeEfeito(EffectType.hueSaturation, {'master_saturation': 18}),
-      ReceitaDeEfeito(EffectType.colorBalance, {
-        'shadow_red': 15,
-        'shadow_blue': 10,
-        'highlight_red': 8,
-        'preserve_luminosity': 1,
-      }),
       ReceitaDeEfeito(EffectType.vignette, {
         'quantidade': 0.45,
         'raio': 0.75,
         'suavidade': 0.55,
       }),
-      ReceitaDeEfeito(EffectType.filmGrain, {'intensidade': 0.18}),
-      ReceitaDeEfeito(EffectType.sSharpen, {'amount': 1.4}),
+      ReceitaDeEfeito(EffectType.unsharpMask, {'amount': 1.4}),
     ],
   ),
   PresetDeEdicao(
@@ -294,12 +255,12 @@ final presetsDeEdicao = List<PresetDeEdicao>.unmodifiable([
     detalhe: 'Pele lisa com definição: máscara de nitidez larga e bloom.',
     receita: const [
       ReceitaDeEfeito(EffectType.unsharpMask, {
-        'quantidade': 1.2,
-        'raio': 6,
+        'amount': 1.2,
+        'radius': 6,
       }),
       ReceitaDeEfeito(EffectType.brightnessContrast, {'contrast': 8}),
       ReceitaDeEfeito(EffectType.hueSaturation, {'master_saturation': 8}),
-      ReceitaDeEfeito(EffectType.lightGlow, {
+      ReceitaDeEfeito(EffectType.brilho, {
         'threshold': 90,
         'raio': 25,
         'intensity': 35,
@@ -311,14 +272,14 @@ final presetsDeEdicao = List<PresetDeEdicao>.unmodifiable([
     nome: 'Sharpen CC',
     detalhe: 'Só nitidez, com força: o sharpen assinatura do bundle.',
     receita: const [
-      ReceitaDeEfeito(EffectType.sSharpen, {
+      ReceitaDeEfeito(EffectType.unsharpMask, {
         'amount': 2.2,
         'width': 1.1,
         'luma': 1.4,
       }),
       ReceitaDeEfeito(EffectType.unsharpMask, {
-        'quantidade': 0.8,
-        'raio': 2.5,
+        'amount': 0.8,
+        'radius': 2.5,
       }),
       ReceitaDeEfeito(EffectType.brightnessContrast, {'contrast': 6}),
     ],
@@ -382,14 +343,6 @@ final presetsDeEdicao = List<PresetDeEdicao>.unmodifiable([
     nome: 'Zoom In',
     detalhe: 'Punch-in com blur radial, no gatilho — pronto pra batida.',
     receita: const [
-      ReceitaDeEfeito(EffectType.zoomPunch, {
-        'peak': 135,
-        'attack': 2,
-        'hold': 2,
-        'release': 10,
-        'zoom_blur': 0.8,
-        'curve': 1,
-      }),
     ],
   ),
   PresetDeEdicao(
@@ -397,11 +350,6 @@ final presetsDeEdicao = List<PresetDeEdicao>.unmodifiable([
     nome: 'Zoom Out',
     detalhe: 'A imagem recua com rastro — o respiro depois do impacto.',
     receita: const [
-      ReceitaDeEfeito(EffectType.zoomWarp, {
-        'quantidade': -0.35,
-        'rastro': 0.6,
-        'amostras': 9,
-      }),
     ],
   ),
   // --------------------------------------------------------- twixtor
@@ -412,10 +360,6 @@ final presetsDeEdicao = List<PresetDeEdicao>.unmodifiable([
     acao: AcaoDoPreset.cameraLenta,
     rampa: SpeedRampPreset.heroi,
     receita: const [
-      ReceitaDeEfeito(EffectType.forceMotionBlur, {
-        'samples': 24,
-        'shutter_angle': 270,
-      }),
     ],
   ),
 ]);

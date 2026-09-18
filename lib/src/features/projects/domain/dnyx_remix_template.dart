@@ -45,13 +45,19 @@ AnimatedOffset _p(int a, int b, Offset Function(int) f) =>
       for (var q = a; q < b; q++)
         Keyframe(time: dnyxFrame(q) - dnyxFrame(a), value: f(q)),
     ]);
-EffectInstance _blur(int a, int b, double Function(int) f) => EffectInstance(
-  type: EffectType.gaussianBlur,
-  params: {'raio': _a(a, b, f)},
-);
+// O DESFOQUE DESTE TEMPLATE SAIU (17/09).
+//
+// Este auxiliar montava um Gaussian Blur, que nao esta no catalogo
+// oficial de 37. Nao ha efeito equivalente para devolver, e inventar um
+// seria pior que a ausencia: as 24 chamadas continuam no lugar — marca
+// onde o desfoque ENTRA e com que intensidade — e devolvem lista vazia,
+// para o template seguir montando e a intencao nao se perder.
+//
+// Quem reautorar a familia de desfoque tem aqui o mapa do que usar.
+List<EffectInstance> _blur(int a, int b, double Function(int) f) => const [];
 EffectInstance _glow(Color color, double radius, double intensity) =>
     EffectInstance(
-      type: EffectType.lightGlow,
+      type: EffectType.brilho,
       color: color,
       params: {
         'raio': AnimatedDouble(radius),
@@ -296,7 +302,7 @@ VideoProject buildDnyxRemixTemplate(Map<String, String> assets) {
       (q) => Offset(_at([(12, 299), (18, 282), (25, 279)], q), 285),
       scale: (q) => _at([(12, .5), (18, 1), (27, 1.18)], q),
       opacity: (q) => _at([(12, 0), (17, .4), (27, 0)], q),
-      effects: [_blur(12, 28, (_) => 2)],
+      effects: const [],
     ),
   );
   add(
@@ -342,7 +348,7 @@ VideoProject buildDnyxRemixTemplate(Map<String, String> assets) {
       ], q),
       opacity: (q) => _at([(3, .1), (8, 1), (62, 1), (65, 0)], q),
       effects: [
-        _blur(
+        ..._blur(
           3,
           66,
           (q) => _at([(3, 8), (8, 2), (14, 3), (19, 0), (60, 0), (65, 12)], q),
@@ -371,7 +377,7 @@ VideoProject buildDnyxRemixTemplate(Map<String, String> assets) {
       size: 43,
       opacity: (q) => _at([(24, .15), (30, 1), (62, 1), (65, 0)], q),
       effects: [
-        _blur(24, 66, (q) => _at([(24, 8), (30, 0), (62, 0), (65, 9)], q)),
+        ..._blur(24, 66, (q) => _at([(24, 8), (30, 0), (62, 0), (65, 9)], q)),
       ],
     ),
   );
@@ -397,7 +403,7 @@ VideoProject buildDnyxRemixTemplate(Map<String, String> assets) {
       scale: (q) => _at([(27, 1), (41, 1), (60, 1.08), (65, 1.4)], q),
       opacity: (q) => _at([(27, 0), (33, 1), (62, 1), (65, 0)], q),
       effects: [
-        _blur(27, 66, (q) => _at([(27, 8), (33, 0), (62, 0), (65, 12)], q)),
+        ..._blur(27, 66, (q) => _at([(27, 8), (33, 0), (62, 0), (65, 12)], q)),
       ],
     ),
   );
@@ -522,7 +528,7 @@ VideoProject buildDnyxRemixTemplate(Map<String, String> assets) {
       ], q),
       effects: [
         _glow(const Color(0xff2764f3), 22, 10),
-        _blur(
+        ..._blur(
           43,
           143,
           (q) => _at([
@@ -564,7 +570,7 @@ VideoProject buildDnyxRemixTemplate(Map<String, String> assets) {
         radius: 0,
         opacity: (q) => _at([(66, 0), (69, 1), (94, 1), (97, 0)], q),
         effects: [
-          _blur(66, 98, (q) => _at([(66, 6), (72, 0), (88, 0), (97, 10)], q)),
+          ..._blur(66, 98, (q) => _at([(66, 6), (72, 0), (88, 0), (97, 10)], q)),
         ],
       ),
     );
@@ -610,7 +616,7 @@ VideoProject buildDnyxRemixTemplate(Map<String, String> assets) {
     (_) => 800,
     (_) => 800,
     paper,
-    effects: [_blur(88, 273, (q) => q < 97 ? 23 : 0)],
+    effects: [..._blur(88, 273, (q) => q < 97 ? 23 : 0)],
   );
   layers.insert(2, whiteWipe);
   final dots = <ShapeItem>[];
@@ -732,7 +738,7 @@ VideoProject buildDnyxRemixTemplate(Map<String, String> assets) {
       bh,
       white,
       corner: corner,
-      effects: [_blur(96, 197, uiBlur)],
+      effects: [..._blur(96, 197, uiBlur)],
     ),
     _rect(
       'box_bevel',
@@ -744,7 +750,7 @@ VideoProject buildDnyxRemixTemplate(Map<String, String> assets) {
       (q) => bh(q) - 5,
       const Color(0xffdfe2df),
       corner: (q) => corner(q) - 3,
-      effects: [_blur(96, 197, uiBlur)],
+      effects: [..._blur(96, 197, uiBlur)],
     ),
     _rect(
       'box_face',
@@ -756,7 +762,7 @@ VideoProject buildDnyxRemixTemplate(Map<String, String> assets) {
       (q) => bh(q) - 45,
       white,
       corner: (q) => corner(q) - 20,
-      effects: [_blur(96, 197, uiBlur)],
+      effects: [..._blur(96, 197, uiBlur)],
     ),
   ];
   double buttonInset(int q) => _at([
@@ -782,7 +788,7 @@ VideoProject buildDnyxRemixTemplate(Map<String, String> assets) {
       (q) => typePos(q, 66, 67),
       size: 48,
       color: ink,
-      effects: [_blur(96, 143, uiBlur)],
+      effects: [..._blur(96, 143, uiBlur)],
     ),
   );
   add(
@@ -802,7 +808,7 @@ VideoProject buildDnyxRemixTemplate(Map<String, String> assets) {
           stagger: dnyxFrame(1.45),
         ),
       ],
-      effects: [_blur(96, 143, uiBlur)],
+      effects: [..._blur(96, 143, uiBlur)],
     ),
   );
   add(
@@ -822,7 +828,7 @@ VideoProject buildDnyxRemixTemplate(Map<String, String> assets) {
           stagger: dnyxFrame(1.2),
         ),
       ],
-      effects: [_blur(117, 143, uiBlur)],
+      effects: [..._blur(117, 143, uiBlur)],
     ),
   );
   add(
@@ -846,7 +852,7 @@ VideoProject buildDnyxRemixTemplate(Map<String, String> assets) {
         (190, .8),
         (196, .65),
       ], q),
-      effects: [_blur(96, 197, uiBlur)],
+      effects: [..._blur(96, 197, uiBlur)],
     ),
   );
   add(
@@ -892,7 +898,7 @@ VideoProject buildDnyxRemixTemplate(Map<String, String> assets) {
         (190, .8),
         (196, .65),
       ], q),
-      effects: [_blur(96, 197, uiBlur)],
+      effects: [..._blur(96, 197, uiBlur)],
     ),
   );
   add(
@@ -937,7 +943,7 @@ VideoProject buildDnyxRemixTemplate(Map<String, String> assets) {
         (148, 0),
         (175, 0),
       ], q),
-      effects: [_blur(113, 176, (q) => q >= 136 && q < 144 ? 4 : 0)],
+      effects: [..._blur(113, 176, (q) => q >= 136 && q < 144 ? 4 : 0)],
     ),
   );
   add(
@@ -950,7 +956,7 @@ VideoProject buildDnyxRemixTemplate(Map<String, String> assets) {
       (q) => Offset(right(q) - 97, bottom(q) - 91),
       scale: (q) =>
           _at([(176, .77), (180, .86), (184, .78), (190, .60), (196, .44)], q),
-      effects: [_blur(176, 197, uiBlur)],
+      effects: [..._blur(176, 197, uiBlur)],
     ),
   );
 
@@ -1011,7 +1017,7 @@ VideoProject buildDnyxRemixTemplate(Map<String, String> assets) {
             ], q),
         opacity: (q) => unfold(q).clamp(0, 1),
         effects: [
-          _blur(
+          ..._blur(
             start,
             239,
             (q) =>
@@ -1032,7 +1038,7 @@ VideoProject buildDnyxRemixTemplate(Map<String, String> assets) {
       (q) => gw(q) * 224 / 154 + 6,
       white,
       radius: 27,
-      effects: [_blur(196, 239, galleryBlur)],
+      effects: [..._blur(196, 239, galleryBlur)],
     ),
   );
   add(
@@ -1046,7 +1052,7 @@ VideoProject buildDnyxRemixTemplate(Map<String, String> assets) {
       gw,
       aspect: 154 / 224,
       radius: 23,
-      effects: [_blur(196, 239, galleryBlur)],
+      effects: [..._blur(196, 239, galleryBlur)],
     ),
   );
   double titleY(int q) => _at([
@@ -1080,7 +1086,7 @@ VideoProject buildDnyxRemixTemplate(Map<String, String> assets) {
       color: ink,
       size: 43,
       scale: titleScale,
-      effects: [_blur(196, 239, galleryBlur)],
+      effects: [..._blur(196, 239, galleryBlur)],
     ),
   );
   add(
@@ -1094,7 +1100,7 @@ VideoProject buildDnyxRemixTemplate(Map<String, String> assets) {
       color: blue,
       size: 45,
       scale: titleScale,
-      effects: [_blur(196, 239, galleryBlur)],
+      effects: [..._blur(196, 239, galleryBlur)],
     ),
   );
   // Pixel block logo rebuilt as a single editable path collection.
@@ -1207,7 +1213,7 @@ VideoProject buildDnyxRemixTemplate(Map<String, String> assets) {
       ], q),
       effects: [
         _glow(white, 65, 100),
-        _blur(273, 309, (q) => _at([(273, 7), (276, 2), (280, 0)], q)),
+        ..._blur(273, 309, (q) => _at([(273, 7), (276, 2), (280, 0)], q)),
       ],
     ),
   );
@@ -1248,7 +1254,7 @@ VideoProject buildDnyxRemixTemplate(Map<String, String> assets) {
       const Color(0xff2864ff),
       radius: 20,
       opacity: (q) => _at([(65, 0), (70, .36), (88, .34), (96, 0)], q),
-      effects: [_blur(65, 97, (_) => 22)],
+      effects: [..._blur(65, 97, (_) => 22)],
     ),
   );
   layers.insert(
@@ -1270,7 +1276,7 @@ VideoProject buildDnyxRemixTemplate(Map<String, String> assets) {
   final bloom = signature.duplicated().copyLayer(
     name: '06 · Halo da assinatura',
     opacity: AnimatedDouble(.65),
-    effects: [_blur(273, 309, (_) => 50)],
+    effects: [..._blur(273, 309, (_) => 50)],
   );
   layers.insert(layers.indexOf(signature), bloom);
   return VideoProject(

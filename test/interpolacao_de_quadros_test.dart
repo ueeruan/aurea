@@ -75,7 +75,7 @@ void main() {
           .withKeyframe(const Duration(seconds: 2), 0.5)
           .withKeyframe(const Duration(seconds: 3), 0.5)
           .withKeyframe(const Duration(seconds: 4), 1.5);
-      final remap = base.copyLayer(effects: replaceTimeRemap(base, track));
+      final remap = base.copyLayer(timeRemap: track);
       expect(hasTimeRemap(remap), isTrue);
       expect(velocidadeMaisLenta(remap), closeTo(0.25, 1e-9));
       expect(fatorDeInterpolacao(remap), 4);

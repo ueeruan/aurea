@@ -33,10 +33,20 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
-  test('all 47 catalog entries have concrete offline instructions', () {
-    expect(effectSpecs.length, EffectType.values.length);
+  test('todo efeito do catalogo tem instrucao concreta', () {
+    // O QUE SE COBRA E O CATALOGO, e nao o enum.
+    //
+    // Antes isto exigia `effectSpecs.length == EffectType.values.length`.
+    // Era verdade ate 16/09, quando o dono cortou o catalogo de 102 para 37
+    // e deixou o enum inteiro de pe de proposito: o enum guarda POSICOES
+    // antigas (compatibilidade de indice de arquivo) e por isso tem mais
+    // variantes do que fichas. Cobrar igualdade aqui seria cobrar de volta
+    // o catalogo velho.
+    //
+    // A invariante que importa: quem aparece na galeria sabe se explicar.
+    expect(efeitosDoCatalogo, isNotEmpty);
     expect(quickStartSteps.length, 6);
-    for (final type in EffectType.values) {
+    for (final type in efeitosDoCatalogo) {
       expect(effectHelp(type).length, greaterThan(65), reason: type.name);
     }
   });

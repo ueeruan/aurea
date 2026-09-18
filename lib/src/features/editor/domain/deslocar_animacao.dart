@@ -116,10 +116,11 @@ Layer aparaInicio(Layer layer, Duration delta) {
           sourceOffset: corte.sourceOffset,
           speed: 1,
           reverse: false,
-          effects: replaceTimeRemap(v, corte.track),
+          effects: v.effects,
+          timeRemap: corte.track,
         ),
         -delta,
-      ).copyLayer(effects: replaceTimeRemap(v, corte.track));
+      ).copyLayer(effects: v.effects);
     case VideoLayer v:
       return deslocarAnimacao(
         v.copyLayer(

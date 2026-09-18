@@ -178,6 +178,27 @@ class _EffectsPanelState extends ConsumerState<EffectsPanel> {
           onPressed: () => Navigator.of(c).pop(id),
           child: AppText(rotulo),
         );
+        // EFEITO REMOVIDO DO CATALOGO: o menu inteiro (duplicar, assar,
+        // salvar como preset, guia) nao faz sentido — nao ha ficha para
+        // descrever nem parametro para mexer. Sobra o que a pessoa
+        // precisa: entender o que aconteceu e tirar dali.
+        if (!effect.conhecido) {
+          return CupertinoActionSheet(
+            title: const AppText('Efeito removido'),
+            message: const AppText(
+              'Este efeito saiu do Aurea e nao desenha mais nada. '
+              'Ele ficou guardado aqui para voce decidir — o resto da '
+              'camada esta intacto.',
+            ),
+            actions: [
+              item('remover', 'Remover efeito', destrutivo: true),
+            ],
+            cancelButton: CupertinoActionSheetAction(
+              onPressed: () => Navigator.of(c).pop(),
+              child: const AppText('Manter'),
+            ),
+          );
+        }
         return CupertinoActionSheet(
           title: AppText(effect.spec.name),
           actions: [
@@ -246,6 +267,13 @@ class _EffectsPanelState extends ConsumerState<EffectsPanel> {
             builder: (_) => QuickGuideScreen(initialQuery: effect.spec.name),
           ),
         );
+      case 'remover':
+        // O EFEITO QUE NAO EXISTE MAIS e removido AQUI, por escolha da
+        // pessoa — nunca pelo carregador, que nao tem como saber se o
+        // resto da camada depende dele.
+        ref
+            .read(editorControllerProvider.notifier)
+            .removeEffect(layer.id, effect.id);
     }
   }
 

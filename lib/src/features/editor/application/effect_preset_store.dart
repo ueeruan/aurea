@@ -132,6 +132,8 @@ EffectPreset effectPresetFromJson(Map<String, dynamic> m) => EffectPreset(
   author: m['author'] as String? ?? '',
   effects: [
     for (final e in (m['effects'] as List? ?? const []))
-      if (e is Map<String, dynamic>) effectFromJson(e),
+      // Efeito que saiu do catalogo nao entra no preset: o preset e do
+      // usuario, mas nao ha o que aplicar. O resto do preset fica.
+      if (e is Map<String, dynamic>) ?effectFromJson(e),
   ],
 );

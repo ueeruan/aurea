@@ -726,18 +726,27 @@ VideoProject buildMaoEnterradaTemplate() {
         startTime: Duration.zero,
         duration: maoDuracao,
         effects: [
-          EffectInstance(type: EffectType.corrections)
-              .withParamEdited('contraste', Duration.zero, .20)
-              .withParamEdited('saturacao', Duration.zero, .12)
-              .withParamEdited('temperatura', Duration.zero, .14)
-              .withParamEdited('altas', Duration.zero, -.12)
-              .withParamEdited('sombras', Duration.zero, .06),
+          // A GRADACAO vinha de um efeito so, "Corrections", que saiu do
+          // catalogo em 16/09. As tres partes dele viraram os tres efeitos
+          // oficiais que fazem o mesmo, com a unidade convertida do
+          // normalizado (-1..1) para a faixa de cada ficha:
+          //   contraste .20  -> Contraste 20      (0..100)
+          //   sombras   .06  -> Saida preto 15,3   (0..255)
+          //   altas    -.12  -> Saida branco 224,4 (0..255)
+          //   saturacao .12  -> Saturacao 12       (-100..100)
+          // `temperatura` (.14, quente) NAO tem equivalente no catalogo
+          // oficial e caiu. O plano perde o calorzinho ate alguem
+          // reescrever a gradacao com o catalogo de agora.
+          EffectInstance(type: EffectType.brightnessContrast)
+              .withParamEdited('contrast', Duration.zero, 20),
+          EffectInstance(type: EffectType.levels)
+              .withParamEdited('output_black', Duration.zero, 15.3)
+              .withParamEdited('output_white', Duration.zero, 224.4),
+          EffectInstance(type: EffectType.hueSaturation)
+              .withParamEdited('master_saturation', Duration.zero, 12),
           EffectInstance(type: EffectType.vignette)
               .withParamEdited('quantidade', Duration.zero, .40)
               .withParamEdited('suavidade', Duration.zero, .75),
-          EffectInstance(type: EffectType.filmGrain)
-              .withParamEdited('intensidade', Duration.zero, .15)
-              .withParamEdited('tamanho', Duration.zero, 1.4),
         ],
       ),
       // POEIRA no ar: parte da atmosfera, nao decoracao.

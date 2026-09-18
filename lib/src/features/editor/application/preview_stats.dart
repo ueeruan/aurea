@@ -12,9 +12,15 @@ import '../domain/orcamento_render.dart';
 /// adivinhacao.
 final debugOverlayProvider = StateProvider<bool>((ref) => false);
 
-/// Medidores do preview. O compositor chama [tick] a cada frame que ele
-/// REALMENTE compoe — com o portao de marchas, cena estatica compoe ~0/s
-/// (o analogo Flutter de "o player nao compoe, so toca").
+/// Medidores do preview. O compositor chama [tick] a cada quadro que ele
+/// compoe — e ele compoe TODOS.
+///
+/// O texto que estava aqui dizia que "com o portao de marchas, cena
+/// estatica compoe ~0/s". Esse portao EXISTIU e foi REMOVIDO de proposito
+/// (ver o comentario em `preview_stage.dart`, na montagem do palco): a
+/// lista do que varia com o tempo nunca ficava completa, e o preco do erro
+/// era o preview congelar. Havia tambem um `idle()` para fechar a janela
+/// de contagem quando nenhum tick chegava; ficou sem chamador e saiu junto.
 abstract final class PreviewStats {
   /// TRAVADAS DE INTERFACE: quadros que passaram de 34 ms do inicio da
   /// construcao ao fim da rasterizacao, contados pelo proprio motor.
@@ -79,17 +85,6 @@ abstract final class PreviewStats {
     final span = now - _windowStartMs;
     if (span >= 1000) {
       compsPerSec.value = (_count * 1000 / span).round();
-      _count = 0;
-      _windowStartMs = now;
-    }
-  }
-
-  /// Janela deslizante de comps/s zera sozinha quando o portao segura as
-  /// recomposicoes (nenhum tick chega para fechar a janela).
-  static void idle() {
-    final now = DateTime.now().millisecondsSinceEpoch;
-    if (_windowStartMs != 0 && now - _windowStartMs >= 1000) {
-      compsPerSec.value = (_count * 1000 / (now - _windowStartMs)).round();
       _count = 0;
       _windowStartMs = now;
     }

@@ -2,6 +2,7 @@ import 'luz_e_diversos.dart';
 import 'motion_tile.dart';
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:uuid/uuid.dart';
 
 import 'correcao_de_cor.dart';
@@ -47,7 +48,12 @@ enum EffectType {
   posterize,
   curves,
   // --- lote 2 ---
-  timeRemap,
+  //
+  // ATENCAO: `timeRemap` MORAVA AQUI (indice 26) ate 17/09 e foi removido.
+  // O enum perdeu uma variante no MEIO, entao todo indice depois deste
+  // anda uma casa para tras. Arquivo antigo guardou o indice, nao o nome:
+  // quem le esse arquivo passa por [_ordemLegada] antes de virar tipo.
+  // Ver `_tipoDoEfeito` em `project_store.dart`.
   pixelSort,
   blobTracker,
   turbulentDisplace,
@@ -167,11 +173,76 @@ enum EffectType {
   sGlowDarks,
 }
 
+/// A ORDEM DO ENUM ANTES DE O TIME REMAP SAIR (17/09).
+///
+/// O arquivo de projeto guarda o INDICE do tipo quando ele e antigo o
+/// bastante para nao ter o `kind` (a chave estavel entrou em 01/09). O
+/// timeRemap ocupava a posicao 26, entao tirar ele do enum deslocou 101
+/// tipos uma casa — e um arquivo antigo passaria a abrir "Pixel Sort"
+/// onde havia "Efeitos de cor", em silencio.
+///
+/// A posicao 26 e `null` de proposito: ali nao havia um efeito a
+/// recuperar, havia o Time Remap, que virou campo proprio da camada. Quem
+/// le um indice antigo e encontra nulo sabe que precisa MIGRAR a trilha
+/// de tempo para o campo, e nao descartar.
+///
+/// Ela e a unica memoria do enum antigo e nao deve ser editada: so serve
+/// para ler arquivo velho. Tipo novo entra no enum, nunca aqui.
+const List<EffectType?> _ordemLegada = [
+  EffectType.gaussianBlur, EffectType.lightGlow, EffectType.tint, EffectType.glowVol,
+  EffectType.tremor, EffectType.glitch, EffectType.rgbSplit, EffectType.echo,
+  EffectType.spatialEcho, EffectType.radialAberration, EffectType.levels, EffectType.vibrance,
+  EffectType.whiteBalance, EffectType.colorWheels, EffectType.unmult, EffectType.vignette,
+  EffectType.directionalBlur, EffectType.radialBlur, EffectType.lightRays, EffectType.mosaic,
+  EffectType.filmGrain, EffectType.fractalNoise, EffectType.digitalDamage, EffectType.zoomWarp,
+  EffectType.posterize, EffectType.curves,
+  // era o timeRemap: virou campo da camada, nao e mais efeito
+  null,
+  EffectType.pixelSort,
+  EffectType.blobTracker, EffectType.turbulentDisplace, EffectType.unsharpMask, EffectType.motionTile,
+  EffectType.bend, EffectType.ccScatterize, EffectType.ccSplit, EffectType.vhs,
+  EffectType.filmDamage, EffectType.glitchify, EffectType.forceMotionBlur, EffectType.flicker,
+  EffectType.gradient4, EffectType.liquidGlass, EffectType.corrections, EffectType.chromaKey,
+  EffectType.lumaKey, EffectType.colorKey, EffectType.findEdges, EffectType.oscillate,
+  EffectType.twirl, EffectType.fisheye, EffectType.kaleidoscope, EffectType.venetianBlinds,
+  EffectType.blockDissolve, EffectType.offset, EffectType.invert, EffectType.waveWarp,
+  EffectType.opticalFlow, EffectType.colorBalance, EffectType.selectiveColor, EffectType.channelMixer,
+  EffectType.photoFilter, EffectType.gradientMap, EffectType.brightnessContrast, EffectType.colorTune,
+  EffectType.flash, EffectType.strobe, EffectType.zoomPunch, EffectType.sliceGlitch,
+  EffectType.twitch, EffectType.timeSlice, EffectType.posterizeTime, EffectType.hueSaturation,
+  EffectType.sFlicker, EffectType.mathOps, EffectType.sSharpen, EffectType.looks,
+  EffectType.lightSweep, EffectType.saber, EffectType.lensBlur, EffectType.bit8,
+  EffectType.smear, EffectType.bubbleBlur, EffectType.dissolver, EffectType.pena,
+  EffectType.aparecerSumir, EffectType.repetirEmLinha, EffectType.repetirEmGrade, EffectType.repetirEmCirculo,
+  EffectType.espalharCopias, EffectType.nuvens, EffectType.xadrez, EffectType.listras,
+  EffectType.pontos, EffectType.estrelas, EffectType.raios, EffectType.cortina,
+  EffectType.cortinaRadial, EffectType.apertarRecorte, EffectType.meioTom, EffectType.contorno,
+  EffectType.brilhoPorDentro, EffectType.bordasAsperas, EffectType.exposure, EffectType.threshold,
+  EffectType.thresholdRgb, EffectType.blockLoad, EffectType.scanLines, EffectType.halfTone,
+  EffectType.edgeColorize, EffectType.jpegDamage, EffectType.autoPaint, EffectType.tvDamage,
+  EffectType.vhsDamage, EffectType.ccLens, EffectType.opticsCompensation, EffectType.dissolveShake,
+  EffectType.crossGlitch, EffectType.chromaKeyPro, EffectType.sRays, EffectType.deepGlow,
+  EffectType.brilho, EffectType.sSpotLight, EffectType.sGlint, EffectType.sGlintRainbow,
+  EffectType.sGlowRings, EffectType.sEdgeRays, EffectType.sGlowAura, EffectType.sGlowDarks,
+];
+
+/// Posicao do Time Remap no enum antigo.
+const int indiceLegadoDoTimeRemap = 26;
+
 /// O tipo a partir do IDENTIFICADOR estavel.
 ///
 /// E o caminho de leitura do arquivo. Guardar o efeito pelo INDICE do
 /// enum era uma bomba-relogio: bastava alguem inserir um efeito no meio
 /// da lista para todo projeto salvo virar outro efeito. O id nunca muda.
+
+/// Tipo pelo indice que o enum tinha ANTES de o Time Remap sair.
+///
+/// Fora da faixa devolve nulo: indice inventado nao pode virar efeito.
+/// Tipo que voltou a existir por outro caminho (nome/`kind`) nem chega
+/// aqui — quem chama tenta o nome primeiro.
+EffectType? tipoPorIndiceLegado(int indice) =>
+    indice >= 0 && indice < _ordemLegada.length ? _ordemLegada[indice] : null;
+
 EffectType? effectTypeFromId(String id) {
   for (final e in effectSpecs.entries) {
     if (e.value.id == id) return e.key;
@@ -277,7 +348,26 @@ double migrateParamValue(
 }
 
 /// O identificador de um tipo.
-String effectIdOf(EffectType t) => effectSpecs[t]!.id;
+///
+/// UM EFEITO REMOVIDO TAMBEM TEM IDENTIFICADOR. Ele nao esta mais no
+/// catalogo, mas continua DENTRO de projetos salvos: se gravar estourasse,
+/// quem abrisse um projeto antigo nao conseguiria salvar de novo — perderia
+/// o arquivo inteiro por causa de um efeito que nem desenha. O id derivado
+/// do nome do enum e o mesmo que o efeito tinha quando era oficial
+/// (camelCase -> snake_case), entao o arquivo sai igual e volta a ser lido.
+String effectIdOf(EffectType t) =>
+    effectSpecs[t]?.id ?? _idDerivado(t.name);
+
+String _idDerivado(String nome) {
+  final sb = StringBuffer();
+  for (var i = 0; i < nome.length; i++) {
+    final c = nome[i];
+    final maiuscula = c != c.toLowerCase() && c == c.toUpperCase();
+    if (maiuscula && i > 0) sb.write('_');
+    sb.write(c.toLowerCase());
+  }
+  return sb.toString();
+}
 
 /// TIPO do parametro (PR-C1). Sem isto, todo efeito que precisa de uma
 /// cor ou de um ponto fica morto na tela: a UI so sabia desenhar numero.
@@ -448,9 +538,13 @@ class EffectSpec {
 /// Effects. O primeiro lote e a correcao de cor, em
 /// `correcao_de_cor.dart`, com shaders proprios.
 ///
-/// Projeto antigo com um efeito que nao voltou continua ABRINDO: o
-/// carregador pula efeito desconhecido (`effectTypeFromId` devolve nulo),
-/// entao o que se perde e o efeito, nunca o projeto.
+/// Projeto antigo com um efeito que nao voltou continua ABRINDO — mas nao
+/// porque o carregador pula o desconhecido, e sim porque a INSTANCIA
+/// sobrevive: ela nasce inerte (sem ficha, sem parametros), o palco nao a
+/// desenha e o painel a mostra como removivel. O texto anterior dizia que
+/// o carregador "pula efeito desconhecido", o que nao era verdade — o
+/// `_tipoDoEfeito` caia no indice do enum e devolvia um tipo qualquer,
+/// silenciosamente errado.
 ///
 /// O enum `EffectType` e a maquinaria antiga (o passe de pixel de 62
 /// modos) continuam de pe de proposito: o corte segue por partes, cada
@@ -627,8 +721,21 @@ List<EffectType> effectsInCategory(String category) => [
 /// TIME REMAP SAIU DO APP (14/09, pedido do dono). A trilha continua sendo
 /// o jeito INTERNO de congelar quadro, fazer rampa pronta e cortar clipe em
 /// reverso, entao o tipo e a spec ficam; o que some e a porta: galeria,
-/// busca, guia, cartao no painel e losango na linha do tempo.
-const efeitosInternos = <EffectType>{EffectType.timeRemap};
+/// Tipos que existem no enum por COMPATIBILIDADE DE INDICE, mas nao sao
+/// efeitos de verdade: nao aparecem na galeria, na busca nem no guia.
+///
+/// Ficou vazio quando o Time Remap saiu de vez (a trilha de tempo virou
+/// campo proprio de [VideoLayer]). O conjunto continua existindo porque
+/// e ele que diz "isto nao e escolhivel" — e porque a lista de exclusao
+/// precisa de um lugar unico.
+const efeitosInternos = <EffectType>{};
+
+/// A ficha de [t], ou nulo quando o tipo nao tem mais ficha no catalogo.
+///
+/// NULO E UM RESULTADO LEGITIMO: projeto salvo antes do corte do catalogo
+/// (16/09) pode trazer um efeito que nao voltou. Quem trata precisa
+/// decidir entre migrar, ignorar ou avisar — nunca estourar.
+EffectSpec? specDe(EffectType t) => effectSpecs[t];
 
 /// O que a pessoa pode escolher na galeria.
 List<EffectType> get efeitosDoCatalogo => [
@@ -639,6 +746,20 @@ List<EffectType> get efeitosDoCatalogo => [
 /// Instancia de efeito numa camada. TODO parametro numerico e animavel
 /// (trilha de keyframes propria, avaliada no tempo local da camada).
 class EffectInstance {
+  /// Construir um efeito SEM FICHA nao estoura.
+  ///
+  /// Ate 17/09 este construtor fazia `effectSpecs[type]!` quatro vezes. Um
+  /// tipo removido do catalogo (o corte de 16/09 tirou 91) derrubava
+  /// qualquer caminho que o construisse: seis templates empacotados, a
+  /// folha de transicao, "Meus presets", a importacao de XML, os presets
+  /// de edicao e as operacoes de tempo da camada. Nao era um efeito
+  /// quebrado: era a tela inteira.
+  ///
+  /// A instancia agora nasce INERTE — sem parametros, sem cores extras e
+  /// com cor neutra (branco multiplica sem tingir) — e [conhecido] diz
+  /// que ela nao tem mais ficha. O palco a pula, o painel a mostra como
+  /// removivel. O que se perde e o efeito; nunca a camada, o projeto ou
+  /// a tela.
   EffectInstance({
     String? id,
     required this.type,
@@ -648,23 +769,45 @@ class EffectInstance {
     this.depth = EffectDepth.pronto,
     List<Color>? extraColors,
   }) : id = id ?? const Uuid().v4(),
-       color = color ?? effectSpecs[type]!.defaultColor,
+       _spec = effectSpecs[type],
+       color = color ?? effectSpecs[type]?.defaultColor ?? _corNeutra,
        extraColors = List.unmodifiable(
          extraColors ??
-             List<Color>.generate(
-               effectSpecs[type]!.extraColors,
-               (i) => i < effectSpecs[type]!.defaultExtraColors.length
-                   ? effectSpecs[type]!.defaultExtraColors[i]
-                   : _coresExtrasPadrao[i % _coresExtrasPadrao.length],
-             ),
+             _coresPadraoDe(effectSpecs[type]),
        ),
        params = Map.unmodifiable(
          params ??
              {
-               for (final e in effectSpecs[type]!.params.entries)
+               for (final e in effectSpecs[type]?.params.entries ??
+                   const Iterable<MapEntry<String, EffectParam>>.empty())
                  e.key: AnimatedDouble(e.value.initial),
              },
-       );
+       ) {
+    if (_spec == null && !_avisados.contains(type)) {
+      _avisados.add(type);
+      debugPrint(
+        'AUREA: efeito "${type.name}" nao existe mais no catalogo. '
+        'A instancia fica inerte ate ser removida.',
+      );
+    }
+  }
+
+  /// A ficha do tipo, guardada na construcao. Nula = efeito removido.
+  final EffectSpec? _spec;
+  static final Set<EffectType> _avisados = <EffectType>{};
+
+  /// Cor neutra: multiplicar por branco nao tinge, nada muda na tela.
+  static const _corNeutra = Color(0xFFFFFFFF);
+
+  static List<Color> _coresPadraoDe(EffectSpec? spec) {
+    if (spec == null) return const [];
+    return List<Color>.generate(
+      spec.extraColors,
+      (i) => i < spec.defaultExtraColors.length
+          ? spec.defaultExtraColors[i]
+          : _coresExtrasPadrao[i % _coresExtrasPadrao.length],
+    );
+  }
 
   final String id;
   final EffectType type;
@@ -697,7 +840,27 @@ class EffectInstance {
     return copyWith(extraColors: lista);
   }
 
-  EffectSpec get spec => effectSpecs[type]!;
+  /// Este efeito ainda existe no catalogo?
+  ///
+  /// Falso = tipo removido pelo corte de 16/09 que sobreviveu no projeto.
+  /// O palco pula, o painel mostra como removivel.
+  bool get conhecido => _spec != null;
+
+  /// A ficha, ou nulo quando o efeito foi removido do catalogo. Use este
+  /// quando a diferenca entre "existe" e "nao existe" mudar a decisao.
+  EffectSpec? get specOuNulo => _spec;
+
+  /// A FICHA DE UM EFEITO REMOVIDO, para o codigo que so quer desenhar um
+  /// rotulo e nao tem como tratar nulo. O nome diz o que aconteceu, entao
+  /// esquecer de checar [conhecido] aparece na tela em vez de estourar.
+  static final EffectSpec _fichaInerte = EffectSpec(
+    id: 'efeito_removido',
+    name: 'Efeito removido',
+    category: 'Indisponivel',
+    params: const {},
+  );
+
+  EffectSpec get spec => _spec ?? _fichaInerte;
 
   AnimatedDouble track(String key) =>
       params[key] ?? _padroes.putIfAbsent(

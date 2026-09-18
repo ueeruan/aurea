@@ -561,15 +561,17 @@ VideoProject buildDerivaTemplate({ModelAsset3D? astronauta}) {
         position: AnimatedOffset(centro),
         effects: [
           EffectInstance(
-            type: EffectType.corrections,
-            params: {
-              'contraste': _ad(.16),
-              'sombras': _ad(-.10),
-              'altas': _ad(-.05),
-              'temperatura': _ad(-.16),
-              'saturacao': _ad(-.14),
-            },
-          ),
+              type: EffectType.brightnessContrast,
+              params: { 'contrast': _ad(16) },
+            ),
+            EffectInstance(
+              type: EffectType.levels,
+              params: { 'output_black': _ad(-25.5), 'output_white': _ad(242.25) },
+            ),
+            EffectInstance(
+              type: EffectType.hueSaturation,
+              params: { 'master_saturation': _ad(-14) },
+            ),
           EffectInstance(
             type: EffectType.vignette,
             params: {
@@ -577,10 +579,6 @@ VideoProject buildDerivaTemplate({ModelAsset3D? astronauta}) {
               'raio': _ad(.88),
               'suavidade': _ad(.8),
             },
-          ),
-          EffectInstance(
-            type: EffectType.filmGrain,
-            params: {'intensidade': _ad(.07), 'tamanho': _ad(1.4)},
           ),
         ],
       ),
@@ -603,7 +601,7 @@ VideoProject buildDerivaTemplate({ModelAsset3D? astronauta}) {
         scene: scene,
         effects: [
           EffectInstance(
-            type: EffectType.lightGlow,
+            type: EffectType.brilho,
             color: const Color(0xffdfe8ff),
             params: {
               'threshold': _ad(82),

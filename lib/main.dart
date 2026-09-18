@@ -13,6 +13,7 @@ import 'src/features/editor/application/texture_cache.dart';
 import 'src/features/editor/presentation/widgets/custom_blend.dart';
 import 'src/features/editor/presentation/widgets/linear_light.dart';
 import 'src/features/editor/presentation/widgets/pixel_effect_engine.dart';
+import 'src/features/editor/domain/estilizar_lote2.dart';
 import 'src/features/editor/presentation/widgets/passe_de_cor.dart';
 import 'src/features/editor/application/qualidade3d_controller.dart';
 import 'src/features/editor/application/registro_de_travadas.dart';
@@ -69,6 +70,15 @@ Future<void> main() async {
     PixelEffectEngine.warmUp(),
     // Correcao de cor e Unsharp Mask: shaders proprios, pequenos.
     MotorDeCorrecao.warmUp(),
+    // ESTILIZAR, DISTORCER E LUZ: doze shaders proprios, um por familia
+    // de efeito. `MotorSapphire.warmUp` existia desde que o lote 2 entrou
+    // e NUNCA foi chamado — cada efeito compilava o seu na primeira vez
+    // que aparecia. No editor isso e um engasgo; na exportacao e pior,
+    // porque o laco grava um quadro por vez e o shader que ainda nao
+    // chegou devolve a camada CRUA: os primeiros quadros do arquivo saem
+    // sem o efeito. A lista vem das proprias receitas, entao nao ha como
+    // ficar desatualizada.
+    MotorSapphire.warmUp(assetsDosShadersSapphire),
   ]);
   // As fontes importadas precisam ser registradas de novo a cada
   // abertura: o registro do Flutter vive so enquanto o processo vive.

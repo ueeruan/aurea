@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../editor/domain/video_project.dart';
@@ -12,7 +13,8 @@ final projectRepositoryProvider = Provider<ProjectRepository>(
 /// Lista de projetos, espelhada em disco (um JSON por projeto). As
 /// gravacoes vindas do editor chegam a cada mutacao, entao o save por
 /// projeto e debounced — mas criacao/exclusao gravam na hora.
-class ProjectsController extends Notifier<List<VideoProject>> {
+class ProjectsController extends Notifier<List<VideoProject>>
+    with WidgetsBindingObserver {
   final Map<String, Timer> _saveTimers = {};
   bool _loaded = false;
   bool _disposed = false, _lifecycleRegistered = false;
@@ -22,10 +24,26 @@ class ProjectsController extends Notifier<List<VideoProject>> {
     if (_lifecycleRegistered) return;
     _lifecycleRegistered = true;
     _disposed = false;
+    // O APP INDIO PARA SEGUNDO PLANO: GRAVA AGORA.
+    //
+    // A gravacao e debounced em 900 ms por projeto, e o unico caminho que
+    // esvaziava a fila era o `onDispose` abaixo — que so roda quando o
+    // container do Riverpod e destruido, ou seja numa saida ORDEIRA. O
+    // sistema operacional nao avisa antes de matar: no Android e no iOS a
+    // suspensao em segundo plano e o preludio comum do fim do processo, e
+    // o que estivesse na janela de 900 ms ia embora — a ultima edicao, que
+    // e justamente a que a pessoa acabou de fazer.
+    //
+    // `paused` e o ultimo estado em que ainda da para escrever. `hidden`
+    // cobre o caminho do iOS, que passa por ele antes de `paused` em
+    // algumas versoes; gravar duas vezes e barato porque a segunda nao
+    // acha nada pendente.
+    WidgetsBinding.instance.addObserver(this);
     final repository = ref.read(projectRepositoryProvider);
     ref.onDispose(() {
       _disposed = true;
       _lifecycleRegistered = false;
+      WidgetsBinding.instance.removeObserver(this);
       for (final timer in _saveTimers.values) {
         timer.cancel();
       }
@@ -50,6 +68,17 @@ class ProjectsController extends Notifier<List<VideoProject>> {
       await repository.save(project);
     }
     await repository.flush();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // So `paused` e `hidden` importam: sao os ultimos instantes em que o
+    // processo ainda tem CPU garantida. Em `resumed` nao ha o que fazer —
+    // a fila ja foi esvaziada antes de sair.
+    if (state != AppLifecycleState.paused && state != AppLifecycleState.hidden) {
+      return;
+    }
+    unawaited(flush());
   }
 
   @override

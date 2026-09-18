@@ -666,6 +666,7 @@ class VideoLayer extends Layer {
     this.sourceDuration,
     this.speed = 1.0,
     this.reverse = false,
+    this.timeRemap,
     this.speedBlur = false,
     this.interpolacao = InterpolacaoDeQuadros.nenhuma,
     this.aprimorar = false,
@@ -729,6 +730,24 @@ class VideoLayer extends Layer {
 
   /// Reproducao da mesma faixa de fonte do fim para o inicio.
   final bool reverse;
+
+  /// A TRILHA DE TEMPO do clipe: qual instante da FONTE aparece em cada
+  /// instante da composicao, em segundos.
+  ///
+  /// Nula = o clipe anda em [speed] constante. Com trilha, e ela que
+  /// manda: e assim que existem rampa de velocidade, congelamento,
+  /// reverso e corte no meio sem depender do sinal da velocidade.
+  ///
+  /// MORAVA DENTRO DE UM EFEITO ate 17/09 (o tipo `timeRemap`, com um
+  /// parametro `tempo`). O precomp ja usava um campo para a mesma coisa —
+  /// [GroupLayer.timeRemap] —, e o video era a excecao. Trazer o video
+  /// para o mesmo desenho tirou o Time Remap do catalogo de efeitos sem
+  /// tirar nenhuma funcionalidade: quem calcula continua sendo o mesmo
+  /// nucleo (`time_core`), que nunca soube o que era um efeito.
+  ///
+  /// Arquivo antigo traz a trilha dentro do efeito; o carregador a move
+  /// para ca. Ver `_eOTimeRemapAntigo` em `project_store.dart`.
+  final AnimatedDouble? timeRemap;
 
   /// Borrao adicional proporcional ao modulo da velocidade instantanea.
   final bool speedBlur;
@@ -811,6 +830,8 @@ class VideoLayer extends Layer {
     Duration? sourceDuration,
     double? speed,
     bool? reverse,
+    AnimatedDouble? timeRemap,
+    bool clearTimeRemap = false,
     bool? speedBlur,
     InterpolacaoDeQuadros? interpolacao,
     bool? aprimorar,
@@ -834,6 +855,7 @@ class VideoLayer extends Layer {
       sourceDuration: sourceDuration ?? this.sourceDuration,
       speed: speed ?? this.speed,
       reverse: reverse ?? this.reverse,
+      timeRemap: clearTimeRemap ? null : (timeRemap ?? this.timeRemap),
       speedBlur: speedBlur ?? this.speedBlur,
       interpolacao: interpolacao ?? this.interpolacao,
       aprimorar: aprimorar ?? this.aprimorar,
@@ -885,6 +907,7 @@ class VideoLayer extends Layer {
     sourceDuration: sourceDuration,
     speed: speed,
     reverse: reverse,
+    timeRemap: timeRemap,
     speedBlur: speedBlur,
     interpolacao: interpolacao,
     aprimorar: aprimorar,

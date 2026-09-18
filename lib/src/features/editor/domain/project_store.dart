@@ -365,8 +365,28 @@ AnimatedDouble _migrarTrilha(
   );
 }
 
-EffectInstance _asEffect(Map<String, dynamic> m) {
+/// O id que o Time Remap tinha quando ainda era efeito.
+const String _idTimeRemapAntigo = 'time_remap';
+
+/// Este item da lista de efeitos e o Time Remap de antes?
+///
+/// Ele saiu do catalogo em 16/09 e virou campo da camada. O arquivo
+/// antigo continua trazendo o efeito, e reconhece-lo aqui e o que permite
+/// MIGRAR a trilha em vez de descartar: quem tinha rampa de velocidade,
+/// congelamento ou reverso abre o projeto com eles no lugar.
+bool _eOTimeRemapAntigo(Map<String, dynamic> m) {
+  if ((m['kind'] as String?) == _idTimeRemapAntigo) return true;
+  // Arquivo antigo o bastante para nao ter `kind`: o indice 26 era ele.
+  if (m['kind'] == null && (m['type'] as num?)?.toInt() == indiceLegadoDoTimeRemap) {
+    return true;
+  }
+  return false;
+}
+
+/// Nulo quando o tipo nao existe mais: nao ha efeito a construir.
+EffectInstance? _asEffect(Map<String, dynamic> m) {
   final tipo = _tipoDoEfeito(m);
+  if (tipo == null) return null;
   final versao = (m['v'] as num?)?.toInt() ?? 0;
   return EffectInstance(
     id: m['id'] as String,
@@ -396,19 +416,20 @@ EffectInstance _asEffect(Map<String, dynamic> m) {
   );
 }
 
-/// O tipo do efeito: pelo id quando ha, pelo indice do enum quando o
-/// arquivo e antigo.
-EffectType _tipoDoEfeito(Map<String, dynamic> m) {
+/// O tipo do efeito: pelo id quando ha, pelo indice do enum antigo quando
+/// o arquivo e antigo. NULO = nao existe mais, e quem chama decide.
+///
+/// O indice NAO pode ser lido contra o enum de hoje: tirar o Time Remap
+/// do meio deslocou 101 tipos uma casa, e um arquivo de 31/08 abriria
+/// "Pixel Sort" onde havia outro efeito, sem aviso nenhum. [tipoPorIndiceLegado]
+/// e a ponte.
+EffectType? _tipoDoEfeito(Map<String, dynamic> m) {
   final kind = m['kind'] as String?;
   if (kind != null) {
     final t = effectTypeFromId(kind);
     if (t != null) return t;
   }
-  final idx = (m['type'] as num?)?.toInt() ?? 0;
-  if (idx >= 0 && idx < EffectType.values.length) {
-    return EffectType.values[idx];
-  }
-  return EffectType.gaussianBlur;
+  return tipoPorIndiceLegado((m['type'] as num?)?.toInt() ?? 0);
 }
 
 // --------------------------------------------------------------- formas
@@ -1102,6 +1123,18 @@ TransitionAlignment _transitionAlignment(Object? raw) {
   return TransitionAlignment.center;
 }
 
+/// O efeito de uma transicao: nulo quando o tipo saiu do catalogo ou o
+/// item esta ilegivel. A transicao continua existindo sem ele — cai no
+/// desenho padrao, que e melhor do que perder o clipe.
+EffectInstance? _asEffectDaTransicao(Object? bruto) {
+  if (bruto is! Map) return null;
+  try {
+    return _asEffect(bruto.cast<String, dynamic>());
+  } catch (_) {
+    return null;
+  }
+}
+
 ClipTransition? _asTransition(Object? raw) {
   if (raw is! Map) return null;
   final m = raw.cast<String, dynamic>();
@@ -1118,9 +1151,12 @@ ClipTransition? _asTransition(Object? raw) {
     rippleLayerIds: [
       for (final id in (m['ripple'] as List?) ?? const []) id as String,
     ],
-    effect: m['effect'] == null
-        ? null
-        : _asEffect((m['effect'] as Map).cast<String, dynamic>()),
+    // O EFEITO DA TRANSICAO, com a mesma tolerancia dos efeitos de
+    // camada. Sem isto, uma transicao apontando para um efeito que saiu do
+    // catalogo lancava AQUI — dentro de `layerFromJson` —, o `catch` de
+    // camada engolia e a CAMADA INTEIRA ia embora junto com o clipe. O
+    // aviso certo e "a transicao perdeu o efeito", nao "o clipe sumiu".
+    effect: _asEffectDaTransicao(m['effect']),
     effectAmount: m['amount'] == null ? null : _asAd(m['amount']),
   );
 }
@@ -1278,6 +1314,9 @@ Map<String, dynamic> layerToJson(Layer l) {
       }
       if (v.speed != 1.0) base['speed'] = v.speed;
       if (v.reverse) base['reverse'] = true;
+      // A MESMA chave do precomp (`remap`): a trilha de tempo e uma so,
+      // e quem a le nao precisa saber se a camada e video ou grupo.
+      if (v.timeRemap != null) base['remap'] = _ad(v.timeRemap!);
       if (v.speedBlur) base['speedBlur'] = true;
       if (v.interpolacao != InterpolacaoDeQuadros.nenhuma) {
         base['interpolacao'] = v.interpolacao.name;
@@ -2036,22 +2075,97 @@ Camera3D _asCamera(Map<String, dynamic> m) {
   );
 }
 
-/// Os EFEITOS da camada, pulando o que nao da para ler.
+/// Os EFEITOS da camada, pulando o que nao da para ler — e SEPARANDO a
+/// trilha de tempo que morava dentro deles.
 ///
 /// Um efeito ilegivel — de uma versao mais nova, com um parametro que
 /// mudou de forma, com um pedaco do arquivo corrompido — levava a
 /// CAMADA INTEIRA junto: a pessoa perdia o texto, a forma, os
 /// keyframes e o trabalho todo por causa de um item da lista de
 /// efeitos. Perder o efeito e um arranhao; perder a camada nao.
-List<EffectInstance> _efeitosDoJson(Object? bruto) {
-  if (bruto is! List) return const [];
+///
+/// O Time Remap e o caso especial: ele NAO e descartado, e MIGRADO. A
+/// trilha `tempo` sai do efeito e vai para o campo [VideoLayer.timeRemap]
+/// / [GroupLayer.timeRemap], que ja era o desenho do precomp. Quem tinha
+/// uma rampa de velocidade continua com ela.
+({List<EffectInstance> efeitos, AnimatedDouble? remap}) _efeitosDoJson(
+  Object? bruto,
+) {
+  if (bruto is! List) return (efeitos: const <EffectInstance>[], remap: null);
   final out = <EffectInstance>[];
+  AnimatedDouble? remap;
   for (final e in bruto) {
     if (e is! Map) continue;
+    final mapa = e.cast<String, dynamic>();
+    if (_eOTimeRemapAntigo(mapa)) {
+      try {
+        final params = mapa['params'];
+        if (params is Map && params['tempo'] != null) {
+          remap ??= _asAd(params['tempo']);
+        }
+      } catch (_) {
+        // Trilha ilegivel: a camada abre sem remapeamento, e nao some.
+      }
+      continue;
+    }
     try {
-      out.add(_asEffect(e.cast<String, dynamic>()));
+      final efeito = _asEffect(mapa);
+      if (efeito != null) out.add(efeito);
     } catch (_) {
       // Efeito ilegivel: fica de fora, a camada abre.
+    }
+  }
+  return (efeitos: out, remap: remap);
+}
+
+/// Os VINCULOS do projeto, cada um por sua conta.
+///
+/// Um vinculo e um par de ids e um indice de propriedade. O indice vinha
+/// de `LayerProp.values[...]` SEM LIMITE: um numero fora da faixa, de um
+/// arquivo mais novo ou corrompido, lancava dentro de `projectFromJson`.
+/// A excecao subia ate o `loadAll`, que registra "projeto ilegivel" e
+/// SEGUE — e o projeto sumia da lista para sempre, com o arquivo intacto
+/// no disco. Era a pior falha possivel do carregador: nao perdia o
+/// efeito, perdia o projeto inteiro, calado.
+///
+/// Agora o indice e limitado, um vinculo ilegivel fica de fora sozinho e
+/// os que apontam para camada que nao existe (porque a camada caiu por
+/// outro erro) sao descartados: vinculo sem dono nao e dado, e lixo que
+/// faria a interface procurar para sempre.
+List<PropertyLink> _linksDoJson(Object? bruto, Set<String> idsVivos) {
+  if (bruto is! List) return const [];
+  final out = <PropertyLink>[];
+  for (final l in bruto) {
+    if (l is! Map) continue;
+    try {
+      final m = l.cast<String, dynamic>();
+      final alvo = m['target'] as String;
+      final fonte = m['source'] as String;
+      if (!idsVivos.contains(alvo) || !idsVivos.contains(fonte)) continue;
+      out.add(
+        PropertyLink(
+          id: m['id'] as String,
+          targetLayerId: m['target'] as String,
+          targetProp: LayerProp.values[((m['prop'] as num).toInt()).clamp(
+            0,
+            LayerProp.values.length - 1,
+          )],
+          sourceLayerId: m['source'] as String,
+          scale: (m['scale'] as num).toDouble(),
+          offsetX: (m['ox'] as num).toDouble(),
+          offsetY: (m['oy'] as num).toDouble(),
+          baseRotation: (m['bRot'] as num?)?.toDouble() ?? 0,
+          baseScale: (m['bScale'] as num?)?.toDouble() ?? 1,
+          baseRotationX: (m['bRotX'] as num?)?.toDouble() ?? 0,
+          baseRotationY: (m['bRotY'] as num?)?.toDouble() ?? 0,
+          baseZ: (m['bZ'] as num?)?.toDouble() ?? 0,
+          delay: Duration(
+            microseconds: (m['delayUs'] as num?)?.toInt() ?? 0,
+          ),
+        ),
+      );
+    } catch (_) {
+      // Vinculo ilegivel: fica de fora, o projeto abre.
     }
   }
   return out;
@@ -2097,7 +2211,11 @@ Layer layerFromJson(Map<String, dynamic> m) {
       : AureaBlend.values[(m['blendX'] as num).toInt()];
   final is3D = m['is3D'] as bool;
   final z = _asAd(m['z']);
-  final effects = _efeitosDoJson(m['effects']);
+  final lidos = _efeitosDoJson(m['effects']);
+  final effects = lidos.efeitos;
+  // A trilha de tempo da camada: o campo do arquivo novo, ou a que veio
+  // de dentro do Time Remap no arquivo antigo. Nula nas duas ausencias.
+  final remap = m['remap'] != null ? _asAd(m['remap']) : lidos.remap;
   final masks = _mascarasDoJson(m['masks']);
   final matte = m['matte'] == null
       ? MatteMode.none
@@ -2116,6 +2234,9 @@ Layer layerFromJson(Map<String, dynamic> m) {
         sourceDuration: _asDurOuNulo(m['srcDur']),
         speed: (m['speed'] as num?)?.toDouble() ?? 1.0,
         reverse: m['reverse'] as bool? ?? false,
+        // A trilha vem do campo (arquivo novo) ou do Time Remap que
+        // morava na lista de efeitos (arquivo antigo) — ver [_efeitosDoJson].
+        timeRemap: remap,
         speedBlur: m['speedBlur'] as bool? ?? false,
         interpolacao: InterpolacaoDeQuadros.values.firstWhere(
           (i) => i.name == m['interpolacao'],
@@ -2291,7 +2412,9 @@ Layer layerFromJson(Map<String, dynamic> m) {
         sourceDuration: m['innerDur'] == null
             ? null
             : Duration(microseconds: (m['innerDur'] as num).toInt()),
-        timeRemap: m['remap'] == null ? null : _asAd(m['remap']),
+        // Grupo e video leem a MESMA trilha, inclusive a que veio de
+        // dentro do Time Remap no arquivo antigo.
+        timeRemap: remap,
         collapse: m['collapse'] as bool? ?? false,
         clipToComp: !(m['noClip'] as bool? ?? false),
         contentOffset: Duration(
@@ -3239,7 +3362,21 @@ Duration? _duracaoOpcional(Object? v) {
   return Duration(microseconds: v.toInt());
 }
 
-VideoProject projectFromJson(Map<String, dynamic> m) => VideoProject(
+VideoProject projectFromJson(Map<String, dynamic> m) {
+  // As camadas primeiro: os VINCULOS precisam saber quais ids
+  // sobreviveram. Camada que caiu por erro proprio deixa o vinculo dela
+  // orfao, e vinculo orfao faria a interface procurar um dono que nao
+  // existe mais.
+  final camadas = _camadasDoJson(m['layers']);
+  final idsVivos = {for (final c in camadas) c.id};
+  return projectFromJsonComCamadas(m, camadas, idsVivos);
+}
+
+VideoProject projectFromJsonComCamadas(
+  Map<String, dynamic> m,
+  List<Layer> camadas,
+  Set<String> idsVivos,
+) => VideoProject(
   // Sem id no arquivo, um id novo — dois projetos sem id nao podem
   // virar o mesmo projeto na lista de recentes.
   id: (m['id'] as String?) ?? 'p${DateTime.now().microsecondsSinceEpoch}',
@@ -3252,25 +3389,8 @@ VideoProject projectFromJson(Map<String, dynamic> m) => VideoProject(
   thumbTime: _duracaoOpcional(m['thumbUs']),
   introFim: _duracaoOpcional(m['introUs']),
   finalInicio: _duracaoOpcional(m['outroUs']),
-  layers: _camadasDoJson(m['layers']),
-  links: [
-    for (final l in (m['links'] as List? ?? const []))
-      PropertyLink(
-        id: l['id'] as String,
-        targetLayerId: l['target'] as String,
-        targetProp: LayerProp.values[(l['prop'] as num).toInt()],
-        sourceLayerId: l['source'] as String,
-        scale: (l['scale'] as num).toDouble(),
-        offsetX: (l['ox'] as num).toDouble(),
-        offsetY: (l['oy'] as num).toDouble(),
-        baseRotation: (l['bRot'] as num?)?.toDouble() ?? 0,
-        baseScale: (l['bScale'] as num?)?.toDouble() ?? 1,
-        baseRotationX: (l['bRotX'] as num?)?.toDouble() ?? 0,
-        baseRotationY: (l['bRotY'] as num?)?.toDouble() ?? 0,
-        baseZ: (l['bZ'] as num?)?.toDouble() ?? 0,
-        delay: Duration(microseconds: (l['delayUs'] as num?)?.toInt() ?? 0),
-      ),
-  ],
+  layers: camadas,
+  links: _linksDoJson(m['links'], idsVivos),
   meta: {
     for (final e in (m['meta'] as Map<String, dynamic>? ?? const {}).entries)
       e.key: _asMeta(e.value as Map<String, dynamic>),
@@ -3381,7 +3501,9 @@ VideoProject projectFromJson(Map<String, dynamic> m) => VideoProject(
 /// guardar, o preset sabe.
 Map<String, dynamic> effectToJson(EffectInstance e) => _effect(e);
 
-EffectInstance effectFromJson(Map<String, dynamic> m) => _asEffect(m);
+/// Nulo quando o efeito guardado nao existe mais no catalogo — quem
+/// chama decide entre ignorar e avisar. Era `!` disfarcado de garantia.
+EffectInstance? effectFromJson(Map<String, dynamic> m) => _asEffect(m);
 
 /// O AJUSTE DA MIDIA no arquivo. `largura` (o de antes) nao e gravado:
 /// projeto antigo continua identico, byte a byte.

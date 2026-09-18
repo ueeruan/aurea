@@ -84,8 +84,9 @@ class SettingsTab extends ConsumerWidget {
                           await ref
                               .read(appLanguageProvider.notifier)
                               .select(language.key);
-                          if (dialogContext.mounted)
+                          if (dialogContext.mounted) {
                             Navigator.pop(dialogContext);
+                          }
                         } catch (_) {
                           if (dialogContext.mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(

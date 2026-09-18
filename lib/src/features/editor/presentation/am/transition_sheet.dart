@@ -110,8 +110,7 @@ Future<void> showTransitionSheet(
                         ),
                       ),
                       for (final type in effectSpecs.keys)
-                        if (type != EffectType.timeRemap &&
-                            type != EffectType.echo &&
+                        if (type != EffectType.echo &&
                             type != EffectType.forceMotionBlur)
                           ListTile(
                             dense: true,
@@ -180,23 +179,24 @@ Future<void> showTransitionSheet(
                   spacing: 6,
                   runSpacing: 6,
                   children: [
-                    for (final type in [
-                      EffectType.twirl,
-                      EffectType.fisheye,
-                      EffectType.kaleidoscope,
-                      EffectType.waveWarp,
-                      EffectType.venetianBlinds,
-                      EffectType.blockDissolve,
-                      EffectType.offset,
-                      EffectType.invert,
-                    ])
+                    // A LISTA E DERIVADA DO CATALOGO, e nao escrita a mao.
+                    //
+                    // Ela era uma lista fixa de oito tipos (twirl, fisheye,
+                    // kaleidoscope, waveWarp, venetianBlinds, blockDissolve,
+                    // offset, invert) e lia `effectSpecs[type]!.name` para
+                    // montar o rotulo. Quando o catalogo foi cortado, os oito
+                    // sairam — e o `!` derrubava a folha inteira ao ABRIR:
+                    // transicao nenhuma podia ser aplicada.
+                    //
+                    // Aqui nao ha como errar: se o tipo tem ficha, aparece.
+                    for (final tipo in _tiposDeTransicao)
                       _ChoiceChip(
-                        label: effectSpecs[type]!.name,
+                        label: effectSpecs[tipo]!.name,
                         selected:
                             transition?.type == ClipTransitionType.effect &&
-                            transition?.effect?.type == type,
+                            transition?.effect?.type == tipo,
                         onTap: () =>
-                            apply(ClipTransitionType.effect, effectType: type),
+                            apply(ClipTransitionType.effect, effectType: tipo),
                       ),
                   ],
                 ),
@@ -362,6 +362,28 @@ Future<void> showTransitionSheet(
     ),
   );
 }
+
+/// Os efeitos oferecidos como TRANSICAO entre dois clipes.
+///
+/// Sao os que deformam a imagem inteira — a lista e filtrada contra o
+/// catalogo na hora de montar os chips, entao tipo que sair do catalogo
+/// amanha simplesmente deixa de aparecer, em vez de derrubar a folha.
+const _candidatosDeTransicao = <EffectType>[
+  EffectType.turbulentDisplace,
+  EffectType.ccLens,
+  EffectType.opticsCompensation,
+  EffectType.glitchify,
+  EffectType.crossGlitch,
+  EffectType.twitch,
+  EffectType.dissolveShake,
+  EffectType.motionTile,
+  EffectType.tremor,
+  EffectType.pixelSort,
+];
+
+/// So os que existem de fato no catalogo de agora.
+List<EffectType> get _tiposDeTransicao =>
+    [for (final t in _candidatosDeTransicao) if (effectSpecs.containsKey(t)) t];
 
 class _ChoiceChip extends StatelessWidget {
   const _ChoiceChip({

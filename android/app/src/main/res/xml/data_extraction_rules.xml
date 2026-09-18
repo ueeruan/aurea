@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  O QUE SAI DO APARELHO NO BACKUP DO ANDROID.
+
+  Regra: NADA por padrao. O Aurea nao tem servidor proprio de conta e o
+  que ele guarda de mais sensivel e o CODIGO DE ACESSO do mural
+  (SharedPreferences), que e a unica credencial da conta — nao ha e-mail
+  para recuperar. Uma copia dele no Google Drive do usuario e uma copia
+  fora do controle dele.
+
+  Os projetos ficam de fora de proposito tambem: podem somar centenas de
+  megabytes entre midia importada e modelos 3D, e o backup do Android
+  falha em silencio quando passa da cota — levando junto o que estava
+  funcionando.
+
+  Referencia: developer.android.com/guide/topics/data/autobackup
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="external" />
+    </cloud-backup>
+    <device-transfer>
+        <!-- Transferencia entre aparelhos do usuario (cabo/proximidade):
+             esta continua, porque e o usuario movendo os proprios dados. -->
+        <include domain="file" />
+    </device-transfer>
+</data-extraction-rules>

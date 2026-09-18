@@ -146,6 +146,23 @@ class TranscriptionService {
   /// O teto do servidor (e da Groq): acima disso nem sobe.
   static const audioMaximo = 25 * 1024 * 1024;
 
+  /// A REVISAO EXATA dos modelos, e nao `main`.
+  ///
+  /// O download apontava para `resolve/main`: a ponta movel do repositorio.
+  /// Dois riscos concretos, e nenhum e teorico neste app:
+  ///
+  ///   1. o conteudo pode mudar sem aviso, e nada aqui detectaria — o
+  ///      arquivo vai direto para o motor nativo, que faz PARSING DE
+  ///      FORMATO BINARIO. O patch em `packages/whisper_flutter_new/src/main.cpp`
+  ///      existe justamente porque esse caminho ja derrubou o app com SIGSEGV;
+  ///   2. duas instalacoes do mesmo app podiam rodar modelos DIFERENTES, o
+  ///      que torna qualquer defeito de transcricao irreproduzivel.
+  ///
+  /// Fixar o commit resolve os dois: o conteudo daquela revisao nao muda.
+  /// O repositorio dos modelos e MIT (o GPL-3.0 esta no pacote wrapper,
+  /// que e outro assunto e outra correcao).
+  static const _revisaoDoModelo = '5359861c739e955e79d9a303bcbc70fb988958b1';
+
   static const _minModelBytes = <WhisperModel, int>{
     WhisperModel.tiny: 70 * 1024 * 1024,
     WhisperModel.base: 135 * 1024 * 1024,
@@ -542,7 +559,7 @@ class TranscriptionService {
     try {
       final request = await client.getUrl(
         Uri.parse(
-          'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/'
+          'https://huggingface.co/ggerganov/whisper.cpp/resolve/$_revisaoDoModelo/'
           'ggml-${model.modelName}.bin',
         ),
       );

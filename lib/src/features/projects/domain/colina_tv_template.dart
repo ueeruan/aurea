@@ -810,15 +810,21 @@ VideoProject buildColinaTvTemplate() {
         position: AnimatedOffset(centro),
         effects: [
           EffectInstance(
-            type: EffectType.corrections,
-            params: {
-              'exposicao': _ad(.08),
-              'contraste': _ad(.12),
-              'sombras': _ad(.05),
-              'temperatura': _ad(.06),
-              'saturacao': _ad(.18),
-            },
-          ),
+              type: EffectType.brightnessContrast,
+              params: { 'contrast': _ad(12) },
+            ),
+            EffectInstance(
+              type: EffectType.brightnessContrast,
+              params: { 'brightness': _ad(8) },
+            ),
+            EffectInstance(
+              type: EffectType.levels,
+              params: { 'output_black': _ad(12.75) },
+            ),
+            EffectInstance(
+              type: EffectType.hueSaturation,
+              params: { 'master_saturation': _ad(18) },
+            ),
           EffectInstance(
             type: EffectType.vignette,
             params: {
@@ -826,10 +832,6 @@ VideoProject buildColinaTvTemplate() {
               'raio': _ad(.95),
               'suavidade': _ad(.75),
             },
-          ),
-          EffectInstance(
-            type: EffectType.filmGrain,
-            params: {'intensidade': _ad(.05), 'tamanho': _ad(1.2)},
           ),
         ],
       ),
@@ -845,7 +847,7 @@ VideoProject buildColinaTvTemplate() {
         // BLOOM: a tela da TV queima para fora da propria borda.
         effects: [
           EffectInstance(
-            type: EffectType.lightGlow,
+            type: EffectType.brilho,
             color: const Color(0xffffe6c0),
             params: {
               'threshold': _ad(80),

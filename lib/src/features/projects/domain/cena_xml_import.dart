@@ -808,7 +808,12 @@ List<EffectInstance> _efeitos(XmlNode e, _Contexto ctx) {
     // Ja tratados fora daqui.
     if (curto.startsWith('motionblur') || curto == 'fade') continue;
     final tipo = _efeitoPorNome(curto);
-    if (tipo == null) {
+    // A TABELA de nomes ainda aponta para efeitos que sairam do catalogo
+    // (ela e historica: descreve o que o Alight Motion chama do que). O
+    // que vale e o que existe HOJE — sem esta checagem o importador
+    // criaria um efeito sem ficha, que so apareceria como "removido"
+    // dentro do painel do usuario.
+    if (tipo == null || !effectSpecs.containsKey(tipo)) {
       ctx.ignora('efeito "$curto" nao existe aqui');
       continue;
     }

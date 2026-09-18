@@ -13,7 +13,6 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
-import 'package:aurea/src/features/editor/domain/effect.dart';
 import 'package:aurea/src/features/editor/domain/keyframe.dart';
 import 'package:aurea/src/features/editor/domain/layer.dart';
 import 'package:aurea/src/features/editor/domain/onda_no_clipe.dart';
@@ -49,10 +48,7 @@ VideoLayer _video({
   sourcePath: '/x.mp4',
   sourceOffset: offset,
   reverse: reverse,
-  effects: [
-    if (remap != null)
-      EffectInstance(type: EffectType.timeRemap, params: {'tempo': remap}),
-  ],
+  timeRemap: remap,
 );
 
 void main() {

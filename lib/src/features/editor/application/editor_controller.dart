@@ -1688,6 +1688,10 @@ class EditorController extends Notifier<VideoProject> {
   // ------------------------------------------------ precisao e layout
 
   /// Caixa renderizada da camada (px logicos).
+  ///
+  /// A familia da fonte vai JUNTO: sem ela a medida usa a fonte do
+  /// aplicativo enquanto o palco desenha a importada, e as alcas de uma
+  /// camada de texto com fonte propria ficam do tamanho errado.
   Size layerBoxSize(Layer layer, Duration t, {bool scaled = true}) =>
       measureLayerBox(
         layer,
@@ -1695,6 +1699,7 @@ class EditorController extends Notifier<VideoProject> {
         fallbackWidth: state.outputWidth.toDouble(),
         compHeight: state.outputHeight.toDouble(),
         scaled: scaled,
+        resolveFamily: resolveFontFamily,
       );
 
   /// A CAIXA no espaco da camada (origem na posicao). Centrada na origem
@@ -4621,7 +4626,9 @@ class EditorController extends Notifier<VideoProject> {
         startTime: e.inicio,
         duration: e.duracao,
         sourceOffset: e.deslocamento,
-        effects: replaceTimeRemap(l, null),
+        effects: l.effects,
+        timeRemap: null,
+          clearTimeRemap: true,
       ),
       AudioLayer l => l.copyLayer(
         speed: v,
@@ -4679,7 +4686,8 @@ class EditorController extends Notifier<VideoProject> {
     final span = videoSourceSpan(layer);
     final track = speedRampTrack(preset, layer.duration, span);
     _replace(
-      layer.copyLayer(speed: 1, effects: replaceTimeRemap(layer, track)),
+      layer.copyLayer(speed: 1, effects: layer.effects,
+          timeRemap: track),
     );
   }
 
@@ -4704,17 +4712,17 @@ class EditorController extends Notifier<VideoProject> {
       _replace(
         layer.copyLayer(
           speed: 1,
-          effects: replaceTimeRemap(
-            layer,
-            curvaIdentidade(layer.duration, span),
-          ),
+          effects: layer.effects,
+          timeRemap: curvaIdentidade(layer.duration, span),
         ),
       );
       return;
     }
     final media = clipSpeedOf(id).clamp(0.1, 10.0);
     _replace(
-      layer.copyLayer(speed: media, effects: replaceTimeRemap(layer, null)),
+      layer.copyLayer(speed: media, effects: layer.effects,
+          timeRemap: null,
+          clearTimeRemap: true),
     );
   }
 
@@ -4724,7 +4732,8 @@ class EditorController extends Notifier<VideoProject> {
     final layer = _layer(id);
     if (layer is! VideoLayer) return;
     _replace(
-      layer.copyLayer(speed: 1, effects: replaceTimeRemap(layer, track)),
+      layer.copyLayer(speed: 1, effects: layer.effects,
+          timeRemap: track),
     );
   }
 
@@ -4742,7 +4751,8 @@ class EditorController extends Notifier<VideoProject> {
       layer.copyLayer(
         speed: 1,
         reverse: false,
-        effects: replaceTimeRemap(layer, curvaEspelhada(atual, span)),
+        effects: layer.effects,
+        timeRemap: curvaEspelhada(atual, span),
       ),
     );
   }
@@ -5045,6 +5055,10 @@ class EditorController extends Notifier<VideoProject> {
   }
 
   void setTransitionEffect(String outgoingId, EffectType effectType) {
+    // So entra efeito que existe. A lista da folha ja vem do catalogo,
+    // mas esta e a porta que grava no projeto — um tipo sem ficha aqui
+    // viraria uma transicao que nao desenha nada e nao explica por que.
+    if (!effectSpecs.containsKey(effectType)) return;
     updateTransition(
       outgoingId,
       (t) => t.copyWith(
@@ -5130,7 +5144,8 @@ class EditorController extends Notifier<VideoProject> {
         duration: layer.duration + duration,
         speed: 1,
         reverse: false,
-        effects: replaceTimeRemap(layer, track),
+        effects: layer.effects,
+        timeRemap: track,
       );
       _mutate(
         state.copyWith(
@@ -5155,7 +5170,8 @@ class EditorController extends Notifier<VideoProject> {
       sourceOffset: firstSlice.sourceOffset,
       speed: 1,
       reverse: false,
-      effects: replaceTimeRemap(layer, firstSlice.track),
+      effects: layer.effects,
+      timeRemap: firstSlice.track,
     );
     final second = layer.duplicated().copyLayer(
       name: layer.name,
@@ -5164,7 +5180,8 @@ class EditorController extends Notifier<VideoProject> {
       sourceOffset: secondSlice.sourceOffset,
       speed: 1,
       reverse: false,
-      effects: replaceTimeRemap(layer, secondSlice.track),
+      effects: layer.effects,
+      timeRemap: secondSlice.track,
       clearTransitionIn: true,
     );
     final frozenSource = videoAbsoluteSourceTimeAt(layer, at);
@@ -5180,7 +5197,8 @@ class EditorController extends Notifier<VideoProject> {
       reverse: false,
       volume: 0,
       audio: layer.audio.copyWith(muted: true),
-      effects: replaceTimeRemap(layer, hold),
+      effects: layer.effects,
+      timeRemap: hold,
       clearTransitionIn: true,
     );
 
@@ -5540,9 +5558,7 @@ class EditorController extends Notifier<VideoProject> {
           ),
           -delta,
         );
-        novo = novo.copyLayer(
-          effects: replaceTimeRemap(novo as VideoLayer, sliced.track),
-        );
+        novo = (novo as VideoLayer).copyLayer(timeRemap: sliced.track);
         _replace(novo);
       } else {
         var offset =
@@ -5676,7 +5692,8 @@ class EditorController extends Notifier<VideoProject> {
           sourceOffset: slice.sourceOffset,
           speed: 1,
           reverse: false,
-          effects: replaceTimeRemap(layer, slice.track),
+          effects: layer.effects,
+          timeRemap: slice.track,
         ),
       );
       return;
@@ -5708,13 +5725,15 @@ class EditorController extends Notifier<VideoProject> {
           sourceOffset: a.sourceOffset,
           speed: 1,
           reverse: false,
-          effects: replaceTimeRemap(layer, a.track),
+          effects: layer.effects,
+          timeRemap: a.track,
         );
         second = second.copyLayer(
           sourceOffset: b.sourceOffset,
           speed: 1,
           reverse: false,
-          effects: replaceTimeRemap(layer, b.track),
+          effects: layer.effects,
+          timeRemap: b.track,
           clearTransitionIn: true,
         );
       } else {
@@ -5755,7 +5774,8 @@ class EditorController extends Notifier<VideoProject> {
         layer is VideoLayer &&
         (hasTimeRemap(layer) || layer.reverse)) {
       final b = _sliceVideoTrack(layer, firstDur, layer.duration);
-      second = second.copyLayer(effects: replaceTimeRemap(second, b.track));
+      second = second.copyLayer(effects: second.effects,
+          timeRemap: b.track);
     }
 
     final layers = <Layer>[];
@@ -6533,8 +6553,7 @@ class EditorController extends Notifier<VideoProject> {
     final idx = layer.effects.indexWhere((e) => e.id == effectId);
     if (idx < 0) return;
     final original = layer.effects[idx];
-    if (original.type == EffectType.timeRemap ||
-        original.type == EffectType.opticalFlow) {
+    if (original.type == EffectType.opticalFlow) {
       return;
     }
     // Sem id: a instancia nova sorteia o proprio. Os keyframes vao junto
@@ -9038,8 +9057,7 @@ class EditorController extends Notifier<VideoProject> {
             alvo = alvo.copyLayer(
               effects: [
                 for (final e in fonte.effects)
-                  if (e.type != EffectType.timeRemap &&
-                      e.type != EffectType.opticalFlow)
+                  if (e.type != EffectType.opticalFlow)
                     e.duplicated(),
               ],
             );
@@ -9180,8 +9198,7 @@ class EditorController extends Notifier<VideoProject> {
     if (layer == null) return 0;
     _efeitosCopiados = [
       for (final e in layer.effects)
-        if (e.type != EffectType.timeRemap && e.type != EffectType.opticalFlow)
-          e.duplicated(),
+        if (e.type != EffectType.opticalFlow) e.duplicated(),
     ];
     return _efeitosCopiados.length;
   }

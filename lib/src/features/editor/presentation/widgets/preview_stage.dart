@@ -3351,19 +3351,13 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
   /// Tempo de CONTEUDO da camada depois do remapeamento (se houver).
   static Duration _remappedTime(Layer layer, Duration local) {
     // Video pergunta ao MESMO mapeamento da previa e da exportacao
-    // (velocidade, reverso e extrapolacao inclusos); as demais camadas
-    // seguram as pontas. As duas respostas vem do nucleo C++.
+    // (velocidade, reverso e extrapolacao inclusos); o precomp usa o
+    // tempo proprio que ja tinha; as demais camadas seguram as pontas.
+    // As tres respostas vem do mesmo nucleo (time_core).
     if (layer is VideoLayer) {
       return hasTimeRemap(layer) ? videoSourceTimeAt(layer, local) : local;
     }
-    for (final e in layer.effects) {
-      if (!e.enabled || e.type != EffectType.timeRemap) continue;
-      return remappedContentTime(
-        e.track('tempo'),
-        local,
-        bakeUntil: layer.duration,
-      );
-    }
+    if (layer is GroupLayer) return layer.contentTimeAt(local);
     return local;
   }
 
@@ -3425,6 +3419,13 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
     for (var indice = 0; indice < effects.length; indice++) {
       final effect = effects[indice];
       if (!effect.enabled) continue;
+      // EFEITO QUE NAO EXISTE MAIS: fica no projeto, mas nao desenha.
+      //
+      // Projeto salvo antes do corte do catalogo (16/09) pode trazer um
+      // efeito que nao voltou. Ele NAO e apagado sozinho — some do
+      // desenho, aparece no painel como removivel, e a pessoa decide. E
+      // melhor guardar um resto visivel do que apagar trabalho calado.
+      if (!effect.conhecido) continue;
       // CORRECAO DE COR (16/09): efeitos de cor em sequencia FUNDEM numa
       // passada so de GPU — Levels + Hue/Saturation + Exposure e uma
       // leitura da camada, nao tres texturas. Desligado no meio nao
@@ -5935,9 +5936,9 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
           }
 
         // O remapeamento de tempo nao pinta nada: ele ja mudou QUAL
-        // instante da camada foi montado, la em cima.
+        // instante da camada foi montado, la em cima. E nao e mais um
+        // efeito — virou campo da camada em 17/09.
         case EffectType.opticalFlow:
-        case EffectType.timeRemap:
         // TIME SLICE e POSTERIZE TIME remontam a camada inteira em outros
         // instantes: quem os aplica e o compositor (_buildLayers).
         case EffectType.timeSlice:

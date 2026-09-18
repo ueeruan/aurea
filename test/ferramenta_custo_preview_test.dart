@@ -1,3 +1,4 @@
+import 'dart:ui' as ui;
 import 'package:aurea/src/features/editor/application/editor_controller.dart';
 import 'package:aurea/src/features/editor/application/playback_controller.dart';
 import 'package:aurea/src/features/editor/application/video_layer_manager.dart';
@@ -5,6 +6,7 @@ import 'package:aurea/src/features/editor/domain/effect.dart';
 import 'package:aurea/src/features/editor/domain/element3d.dart';
 import 'package:aurea/src/features/editor/domain/keyframe.dart';
 import 'package:aurea/src/features/editor/domain/layer.dart';
+import 'package:aurea/src/features/editor/presentation/widgets/passe_de_cor.dart';
 import 'package:aurea/src/features/editor/presentation/widgets/preview_stage.dart';
 import 'package:flutter/material.dart' hide Easing;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -258,6 +260,70 @@ void main() {
         c.addShapeLayer(Duration.zero);
       }
     }, quadros: 16);
+  });
+
+  testWidgets('custo dos GLOW NOVOS (shaders/luz.frag)', (tester) async {
+    // Os de cima sao do catalogo antigo. Estes nasceram depois, todos no
+    // mesmo shader (estilizar_lote2.dart: receitasSapphire -> luz.frag), e
+    // nunca foram medidos: o caso por efeito acima nao os inclui.
+    //
+    // A ABI e a mesma para todos; o que muda e quantas amostras o shader
+    // dispara por pixel. Por isso a comparacao entre eles e a medida util.
+    //
+    // ACORDAR O SHADER ANTES DE MEDIR. Sem isto o programa e nulo,
+    // `PassadaSapphire` devolve o filho intacto e a medida sai igual ao
+    // controle — foi o que aconteceu na primeira tentativa. `runAsync`
+    // porque carregar asset e I/O de verdade, e o relogio do teste e falso.
+    await tester.runAsync(
+      () => MotorSapphire.carregar('shaders/luz.frag'),
+    );
+    final carregou = MotorSapphire.programa('shaders/luz.frag') != null;
+    // ignore: avoid_print
+    print(
+      'shaders/luz.frag carregado: $carregou'
+      '${MotorSapphire.falha == null ? '' : ' | falha: ${MotorSapphire.falha}'}'
+      ' | ImageFilter.shader suportado: ${ui.ImageFilter.isShaderFilterSupported}',
+    );
+
+    void quatro(EditorController c, EffectType tipo) {
+      for (var i = 0; i < 4; i++) {
+        c.addShapeLayer(Duration.zero);
+      }
+      mapear(c, (l) => l.copyLayer(effects: [efeito(tipo)]));
+    }
+
+    await medir(tester, '  (controle: sem efeito)', (c) {
+      for (var i = 0; i < 4; i++) {
+        c.addShapeLayer(Duration.zero);
+      }
+    }, quadros: 16);
+
+    for (final tipo in [
+      EffectType.brilho,
+      EffectType.deepGlow,
+      EffectType.sGlowAura,
+      EffectType.sGlowDarks,
+      EffectType.sGlowRings,
+      EffectType.sGlint,
+      EffectType.sGlintRainbow,
+      EffectType.sRays,
+      EffectType.sEdgeRays,
+      EffectType.sSpotLight,
+    ]) {
+      await medir(
+        tester,
+        '  ${tipo.name}',
+        (c) => quatro(c, tipo),
+        quadros: 16,
+      );
+      await medir(
+        tester,
+        '  ${tipo.name}',
+        (c) => quatro(c, tipo),
+        tocando: false,
+        quadros: 16,
+      );
+    }
   });
 }
 

@@ -1,5 +1,3 @@
-import 'package:aurea/src/core/l10n/app_language.dart';
-
 import 'dart:async';
 import 'dart:ui';
 
@@ -8,22 +6,29 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/l10n/app_language.dart';
 import '../../../core/storage/prefs.dart';
-import 'boas_vindas.dart';
-import 'release_notice.dart';
-
 import '../../../core/theme/app_theme.dart';
 import '../../about/presentation/about_tab.dart';
 import '../../community/presentation/community_tab.dart';
 import '../../settings/presentation/settings_tab.dart';
 import '../../user/presentation/user_tab.dart';
 import 'aviso_ao_vivo.dart';
+import 'boas_vindas.dart';
 import 'projects_tab.dart';
+import 'release_notice.dart';
 
 final homeTabProvider = StateProvider<int>((ref) => 0);
 
 /// Casca principal: abas com tab bar translucida estilo iOS
 /// (blur + hairline, conteudo rolando por baixo).
+///
+/// Otimizacoes vs. versao anterior:
+/// - filhos do [IndexedStack] com [PageStorageKey]: o scroll de cada aba
+///   sobrevive a troca sem reconstruir a lista do zero;
+/// - o blur da tab bar vive dentro de um [RepaintBoundary]: o backdrop
+///   so repinta quando a barreira muda, nao a cada frame do conteudo;
+/// - [_TabItem] e const e nao aloca estilo por build (estilos estaticos).
 class HomeShell extends ConsumerStatefulWidget {
   const HomeShell({super.key});
 
@@ -32,6 +37,30 @@ class HomeShell extends ConsumerStatefulWidget {
 }
 
 class _HomeShellState extends ConsumerState<HomeShell> {
+  // Record const: nome, icone, icone ativo. Uma alocacao so, na classe.
+  static const _tabs = <({IconData icon, IconData active, String label})>[
+    (icon: CupertinoIcons.house, active: CupertinoIcons.house_fill, label: 'Inicio'),
+    // A COMUNIDADE FICA EM SEGUNDO, ao lado do Inicio: e para onde se
+    // vai depois de terminar um trabalho, e nao um canto de ajustes.
+    (icon: CupertinoIcons.person_2, active: CupertinoIcons.person_2_fill, label: 'Comunidade'),
+    (
+      icon: CupertinoIcons.slider_horizontal_3,
+      active: CupertinoIcons.slider_horizontal_3,
+      label: 'Ajustes',
+    ),
+    (icon: CupertinoIcons.person, active: CupertinoIcons.person_fill, label: 'Perfil'),
+    (icon: CupertinoIcons.info_circle, active: CupertinoIcons.info_circle_fill, label: 'Sobre'),
+  ];
+
+  // PageStorageKey preserva o CustomScrollView de cada aba entre trocas.
+  static const _tabBodies = <Widget>[
+    ProjectsTab(key: PageStorageKey('tab-inicio')),
+    CommunityTab(key: PageStorageKey('tab-comunidade')),
+    SettingsTab(key: PageStorageKey('tab-ajustes')),
+    UserTab(key: PageStorageKey('tab-perfil')),
+    AboutTab(key: PageStorageKey('tab-sobre')),
+  ];
+
   @override
   void initState() {
     super.initState();
@@ -45,7 +74,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     // A PRIMEIRA ABERTURA vem antes de qualquer novidade: quem nunca
     // entrou ve as boas-vindas (e o combinado), uma vez so.
     if (prefs.getString(chaveDoAceite) == null) {
-      if (ModalRoute.of(context)?.isCurrent != true) return;
+      if (!mounted || ModalRoute.of(context)?.isCurrent != true) return;
       await showBoasVindas(context);
       try {
         await prefs.setString(chaveDoAceite, DateTime.now().toIso8601String());
@@ -58,7 +87,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       return;
     }
     if (prefs.getString(releaseNoticeSeenKey) == releaseNoticeRevision) return;
-    if (ModalRoute.of(context)?.isCurrent != true) return;
+    if (!mounted || ModalRoute.of(context)?.isCurrent != true) return;
     await showReleaseNotice(context);
     // Persist after dismissal, so an interrupted launch can show it again.
     try {
@@ -67,20 +96,6 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       // A preferences failure must never prevent opening the editor.
     }
   }
-
-  static const _tabs = [
-    (CupertinoIcons.house, CupertinoIcons.house_fill, 'Inicio'),
-    // A COMUNIDADE FICA EM SEGUNDO, ao lado do Inicio: e para onde se
-    // vai depois de terminar um trabalho, e nao um canto de ajustes.
-    (CupertinoIcons.person_2, CupertinoIcons.person_2_fill, 'Comunidade'),
-    (
-      CupertinoIcons.slider_horizontal_3,
-      CupertinoIcons.slider_horizontal_3,
-      'Ajustes',
-    ),
-    (CupertinoIcons.person, CupertinoIcons.person_fill, 'Perfil'),
-    (CupertinoIcons.info_circle, CupertinoIcons.info_circle_fill, 'Sobre'),
-  ];
 
   void _select(int i) {
     if (i == ref.read(homeTabProvider)) return;
@@ -100,46 +115,39 @@ class _HomeShellState extends ConsumerState<HomeShell> {
           // de qualquer aba.
           const AvisoAoVivo(),
           Expanded(
-            child: IndexedStack(
-              index: index,
-              children: const [
-                ProjectsTab(),
-                CommunityTab(),
-                SettingsTab(),
-                UserTab(),
-                AboutTab(),
-              ],
-            ),
+            child: IndexedStack(index: index, children: _tabBodies),
           ),
         ],
       ),
-      bottomNavigationBar: ClipRect(
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-          child: Container(
-            decoration: BoxDecoration(
-              color: AppColors.background.withValues(alpha: 0.72),
-              border: Border(
-                top: BorderSide(color: AppColors.hairline, width: 0.5),
+      bottomNavigationBar: RepaintBoundary(
+        child: ClipRect(
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+            child: Container(
+              decoration: BoxDecoration(
+                color: AppColors.background.withValues(alpha: 0.72),
+                border: Border(
+                  top: BorderSide(color: AppColors.hairline, width: 0.5),
+                ),
               ),
-            ),
-            child: SafeArea(
-              top: false,
-              child: SizedBox(
-                height: 54,
-                child: Row(
-                  children: [
-                    for (var i = 0; i < _tabs.length; i++)
-                      Expanded(
-                        child: _TabItem(
-                          icon: _tabs[i].$1,
-                          activeIcon: _tabs[i].$2,
-                          label: _tabs[i].$3,
-                          selected: i == index,
-                          onTap: () => _select(i),
+              child: SafeArea(
+                top: false,
+                child: SizedBox(
+                  height: 54,
+                  child: Row(
+                    children: [
+                      for (var i = 0; i < _tabs.length; i++)
+                        Expanded(
+                          child: _TabItem(
+                            icon: _tabs[i].icon,
+                            activeIcon: _tabs[i].active,
+                            label: _tabs[i].label,
+                            selected: i == index,
+                            onTap: () => _select(i),
+                          ),
                         ),
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -165,6 +173,18 @@ class _TabItem extends StatelessWidget {
   final bool selected;
   final VoidCallback onTap;
 
+  // Estilos estaticos: zero alocacao de TextStyle por build.
+  static const _selectedStyle = TextStyle(
+    fontSize: 10.5,
+    fontWeight: FontWeight.w500,
+    letterSpacing: 0.1,
+  );
+  static const _idleStyle = TextStyle(
+    fontSize: 10.5,
+    fontWeight: FontWeight.w500,
+    letterSpacing: 0.1,
+  );
+
   @override
   Widget build(BuildContext context) {
     final color = selected ? AppColors.lime : AppColors.muted;
@@ -181,12 +201,7 @@ class _TabItem extends StatelessWidget {
               label,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 10.5,
-                fontWeight: FontWeight.w500,
-                letterSpacing: 0.1,
-                color: color,
-              ),
+              style: (selected ? _selectedStyle : _idleStyle).copyWith(color: color),
             ),
           ),
         ],

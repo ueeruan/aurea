@@ -1,6 +1,0 @@
-# ninja log v5
-2	2966	8098983617517332	CMakeFiles/whisper.dir/whisper.cpp/ggml.c.o	76cbf990dcc759e8
-0	5437	8098983642129284	CMakeFiles/whisper_flutter.dir/main.cpp.o	f53565eaa99f97a5
-3	7756	8098983665264618	CMakeFiles/whisper.dir/whisper.cpp/whisper.cpp.o	67e6028b8da4c397
-7757	7813	8098983665939102	libwhisper.a	50d9f2fd612b94ca
-7813	14005	8098983727822910	C:/Users/SnyX/Documents/Projetos - Claude/Aurea/build/whisper_flutter_new/intermediates/cxx/Release/3a625r5v/obj/arm64-v8a/libwhisper.so	466f90d0e3bae420

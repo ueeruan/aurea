@@ -120,3 +120,67 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+---
+
+# Avisos que faltavam (levantados em 17/09/2026)
+
+Este arquivo cobria 4 dos ~14 componentes efetivamente embarcados. A
+auditoria de 17/09 levantou os demais. **Este documento não é parecer
+jurídico: REVISÃO JURÍDICA NECESSÁRIA antes de distribuir.**
+
+## FFmpeg (via `ffmpeg_kit_flutter_new_full`)
+
+- **Projeto:** https://ffmpeg.org
+- **Licença: GNU LESSER GENERAL PUBLIC LICENSE, versão 3.**
+- **Por que não é GPL:** a variante escolhida é a `full`, que exclui os
+  codecs GPL (`x264`, `x265`, `xvidcore`, `vid.stab`). A escolha está
+  correta e o comentário do `pubspec.yaml` confere com o README do pacote.
+- **O que a LGPL-3 exige e NÃO está sendo cumprido:** o §4 pede que quem
+  recebe o binário possa RELIGAR o aplicativo com uma versão modificada da
+  biblioteca. No Android isso é possível em tese; **no iOS os frameworks
+  entram estáticos dentro de um IPA assinado**, o que torna a religação
+  impraticável. Também falta o próprio texto da licença acompanhando a
+  distribuição.
+- **Caminhos de correção, em ordem:** (1) escrever esta seção com o texto
+  completo e a oferta de código-fonte; (2) no iOS, avaliar se o
+  `AVFoundation` — que o app já usa em `ios/Runner/VideoEncoderPlugin.swift`
+  — não cobre o que o FFmpeg faz lá, deixando o FFmpeg só no Android.
+
+## whisper.cpp (via `whisper_flutter_new`, vendorizado em `packages/`)
+
+- **Projeto:** https://github.com/ggerganov/whisper.cpp — **licença MIT**
+- **O MODELO de voz** vem de https://huggingface.co/ggerganov/whisper.cpp —
+  **licença MIT**, fixado no commit
+  `5359861c739e955e79d9a303bcbc70fb988958b1`.
+- **O PROBLEMA É O WRAPPER.** `packages/whisper_flutter_new/LICENSE` é
+  **GNU GPL versão 3**, e não há nenhum outro arquivo de licença no pacote:
+  o `whisper.cpp` vendorizado dentro dele não preserva o cabeçalho MIT. O
+  pacote foi **modificado por este projeto** (o patch de checagem de nulo em
+  `src/main.cpp`) e é ligado **estaticamente** no APK e no IPA.
+- **Consequência:** um aplicativo fechado que incorpora e modifica código
+  GPL-3 precisa liberar o conjunto sob GPL-3. Não é uma questão de crédito:
+  é a licença do produto.
+- **Correção:** como o `whisper.cpp` de origem é MIT, o caminho é trocar o
+  wrapper por uma ligação própria compilada pelo *build hook* do Dart — o
+  mesmo padrão que `packages/aurea_core` já usa. Não é feito nesta rodada
+  porque exige reescrever a ponte e revalidar a transcrição no aparelho.
+
+## Avisos de atribuição que também faltavam
+
+Todos exigem que o texto da licença acompanhe o binário. Sugestão: uma tela
+em **Ajustes › Sobre** (`lib/src/features/about/presentation/report_sheet.dart`)
+com a íntegra — o arquivo do repositório não acompanha o aplicativo.
+
+| Componente | Onde | Licença |
+| --- | --- | --- |
+| meshoptimizer | `packages/aurea_meshopt` | MIT (Arseny Kapoulkine) |
+| flutter_scene | `pubspec.yaml` | MIT (Brandon DeRosier) |
+| Real-ESRGAN e os 4 modelos | `assets/ai/` | BSD-3 |
+| nlohmann/json | `packages/whisper_flutter_new/src/json/` | MIT |
+| dr_wav | `packages/whisper_flutter_new/src/whisper.cpp/examples/` | domínio público |
+| stb_image / stb_image_write | `native/enhance/tools/` | MIT / domínio público |
+| photo_manager | `pubspec.yaml` | Apache-2.0 |
+| gal | `pubspec.yaml` | Apache-2.0 |
+| ncnn | baixado no configure do CMake | BSD-3 |
+| Pacotes Dart restantes (archive, image, file_picker, vector_math, crypto, uuid, url_launcher, shared_preferences, path, riverpod, video_player, image_picker, characters, cupertino_icons, ffi, flutter_scene, whisper) | `pubspec.lock` | MIT/BSD/Apache-2.0 |

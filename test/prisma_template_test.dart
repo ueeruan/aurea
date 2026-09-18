@@ -117,13 +117,23 @@ void main() {
 
     test('os cones: o glitch so enquanto a esfera treme', () {
       final cones = cenas[4];
-      final glitch = cones.effects.singleWhere((e) => e.type == EffectType.glitch);
-      expect(glitch.paramAt('quantidade', t(1.0)), 0);
-      expect(glitch.paramAt('quantidade', t(3.0)), greaterThan(1.0));
-      expect(glitch.paramAt('quantidade', t(4.0)), 0);
-      final rgb = cones.effects.singleWhere((e) => e.type == EffectType.rgbSplit);
-      expect(rgb.paramAt('deslocamento', t(3.0)), greaterThan(20));
-      expect(rgb.paramAt('deslocamento', t(4.0)), 0);
+      // O efeito era `glitch`, que saiu do catalogo; virou `glitchify`, e
+      // os dois parametros com equivalente claro foram renomeados junto
+      // (quantidade -> amount, velocidade -> speed). A curva de entrada e
+      // saida veio inteira: e ela que diz "so enquanto a esfera treme".
+      final glitch = cones.effects.singleWhere(
+        (e) => e.type == EffectType.glitchify,
+      );
+      expect(glitch.paramAt('amount', t(1.0)), 0);
+      expect(glitch.paramAt('amount', t(3.0)), greaterThan(1.0));
+      expect(glitch.paramAt('amount', t(4.0)), 0);
+      // `rgbSplit` NAO tem equivalente no catalogo oficial e saiu do
+      // template. O que se cobra agora e a ausencia: um tipo que nao
+      // existe mais nao pode voltar para dentro do projeto.
+      expect(
+        cones.effects.any((e) => e.type == EffectType.rgbSplit),
+        isFalse,
+      );
       // A esfera cromada nasce na juncao e da lugar a esfera de glitch.
       final cromo = cones.scene.nodes.singleWhere((n) => n.id == 'prisma_esfera_cromo');
       expect(cromo.scale.valueAt(t(1.0)), 0);

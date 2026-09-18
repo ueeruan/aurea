@@ -1,1 +1,0 @@
-C:\Users\SnyX\Documents\Projetos - Claude\Aurea\packages\whisper_flutter_new\src\CMakeLists.txt

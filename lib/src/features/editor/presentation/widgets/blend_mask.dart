@@ -218,8 +218,16 @@ class _RenderBlendMask extends RenderProxyBox {
 /// de pixels, quatro bytes cada. Um Deep Glow de raio grande pedia dois
 /// mil pixels de margem numa composicao 1080x1920 a 3x — 284
 /// megapixels, 1,1 GB — e o app fechava antes de desenhar o quadro.
-/// Corrigir os efeitos um a um nao basta: um efeito novo pode pedir o
-/// mesmo amanha, e este e o unico ponto por onde todos passam.
+///
+/// ESTE NAO E O UNICO PONTO POR ONDE TODOS PASSAM, ao contrario do que
+/// este comentario afirmava. `kFotoTetoMegapixels` so e consultado aqui,
+/// no `BlendMask`; `MaskedBox`, `CustomBlendBox` e o proprio
+/// `SnapshotWidget` do Flutter rasterizam sem passar por ele. Quem os
+/// segura e o `devicePixelRatio` do `MediaQuery` — o palco o troca por
+/// uma razao que cabe na tela, e a exportacao passou a fazer o mesmo em
+/// 17/09 (ver o comentario no `RepaintBoundary` de `export_video_screen`).
+/// Antes disso, a exportacao herdava o DPR do aparelho e a mesma foto de
+/// 75 MB que este teto veio impedir voltava por outra porta.
 const double kFotoTetoMegapixels = 12;
 
 /// Margem maxima da foto, em pixels logicos. Acima disto o halo ja saiu

@@ -61,3 +61,9 @@ android/.kotlin/
 android/key.properties
 *.jks
 *.keystore
+
+# Configuracao local do Claude Code (caminhos da maquina), nao do projeto.
+.claude/settings.local.json
+
+# Saida de build do Gradle (relatorios, intermediates).
+android/build/

@@ -67,22 +67,10 @@ AnimatedOffset _ao(Offset base, [List<(double, Offset, Easing)>? kfs]) =>
 
 /// ENTRADA com desfoque: o desfoque some enquanto a opacidade sobe.
 List<EffectInstance> _blurIn(double t0, double t1, {double forca = 0.6}) => [
-  EffectInstance(
-    type: EffectType.gaussianBlur,
-    params: {
-      'amount': _ad(forca, [(t0, forca, _suave), (t1, 0.0, _suave)]),
-    },
-  ),
 ];
 
 /// SAIDA com desfoque: cresce ate sumir.
 List<EffectInstance> _blurOut(double t0, double t1, {double forca = 0.6}) => [
-  EffectInstance(
-    type: EffectType.gaussianBlur,
-    params: {
-      'amount': _ad(0, [(t0, 0.0, _sai), (t1, forca, _sai)]),
-    },
-  ),
 ];
 
 List<EffectInstance> _blurInOut(
@@ -92,36 +80,19 @@ List<EffectInstance> _blurInOut(
   double b1, {
   double forca = 0.6,
 }) => [
-  EffectInstance(
-    type: EffectType.gaussianBlur,
-    params: {
-      'amount': _ad(forca, [
-        (a0, forca, _suave),
-        (a1, 0.0, _suave),
-        (b0, 0.0, _sai),
-        (b1, forca, _sai),
-      ]),
-    },
-  ),
 ];
 
-/// WHIP: desfoque direcional que sobe e desce com o deslocamento.
-EffectInstance _whip(
+// O CHICOTE SAIU (17/09).
+//
+// Este auxiliar montava um Directional Blur, que nao esta no catalogo
+// oficial de 37. Sem equivalente, as chamadas viram lista vazia — o
+// lugar do chicote fica marcado, e o template segue montando.
+List<EffectInstance> _whip(
   double t0,
   double t1,
   double angulo, {
   double comprimento = 70,
-}) => EffectInstance(
-  type: EffectType.directionalBlur,
-  params: {
-    'comprimento': _ad(0, [
-      (t0, 0.0, _suave),
-      ((t0 + t1) / 2, comprimento, _suave),
-      (t1, 0.0, _suave),
-    ]),
-    'angulo': _ad(angulo),
-  },
-);
+}) => const [];
 
 AnimatedDouble _opacidade(List<(double, double)> pontos) =>
     _ad(pontos.first.$2, [for (final p in pontos) (p.$1, p.$2, _suave)]);
@@ -269,7 +240,7 @@ VideoProject buildNotesMotionTemplate() {
       scaleX: entraIcone.x,
       scaleY: entraIcone.y,
       opacity: _opacidade([(1.35, 1), (1.7, 0)]),
-      effects: [..._blurOut(1.3, 1.7, forca: 0.5), _whip(1.3, 1.7, 90)],
+      effects: [..._blurOut(1.3, 1.7, forca: 0.5)],
       children: [
         // As tres linhas do papel.
         for (var i = 0; i < 3; i++)
@@ -339,8 +310,7 @@ VideoProject buildNotesMotionTemplate() {
         opacidade: _opacidade([(0.25, 0), (0.45, 1), (1.35, 1), (1.7, 0)]),
         efeitos: [
           ..._blurInOut(0.25, 0.7, 1.3, 1.7, forca: 0.5),
-          _whip(0.25, 0.7, 0, comprimento: 90),
-          _whip(1.3, 1.7, 90),
+          ..._whip(0.25, 0.7, 0, comprimento: 90),
         ],
       ),
     );
@@ -449,7 +419,7 @@ VideoProject buildNotesMotionTemplate() {
         opacidade: _opacidade([(2.55, 0), (2.85, 1), (3.65, 1), (4.0, 0)]),
         efeitos: [
           ..._blurInOut(2.55, 2.95, 3.65, 4.0, forca: 0.5),
-          _whip(2.55, 2.95, 0, comprimento: 50),
+          ..._whip(2.55, 2.95, 0, comprimento: 50),
         ],
       ),
     );
@@ -647,7 +617,7 @@ VideoProject buildNotesMotionTemplate() {
         opacity: _opacidade([(3.9, 0), (4.2, 1), (5.9, 1), (6.35, 0)]),
         effects: [
           ..._blurInOut(3.9, 4.4, 5.85, 6.4, forca: 0.5),
-          _whip(6.0, 6.45, 0, comprimento: 120),
+          ..._whip(6.0, 6.45, 0, comprimento: 120),
         ],
         children: filhos,
       ),
@@ -748,7 +718,7 @@ VideoProject buildNotesMotionTemplate() {
         opacity: _opacidade([(5.0, 0), (5.3, 1), (6.4, 1), (6.6, 0)]),
         effects: [
           ..._blurIn(5.0, 5.4, forca: 0.5),
-          _whip(6.2, 6.65, 0, comprimento: 140),
+          ..._whip(6.2, 6.65, 0, comprimento: 140),
         ],
         children: filhos,
       ),
@@ -901,9 +871,9 @@ VideoProject buildNotesMotionTemplate() {
         ]),
         opacity: _opacidade([(6.35, 0), (6.55, 1), (7.95, 1), (8.25, 0)]),
         effects: [
-          _whip(6.35, 6.75, 0, comprimento: 120),
+          ..._whip(6.35, 6.75, 0, comprimento: 120),
           ..._blurOut(7.9, 8.25, forca: 0.5),
-          _whip(7.9, 8.3, 90, comprimento: 90),
+          ..._whip(7.9, 8.3, 90, comprimento: 90),
         ],
         children: filhos,
       ),
@@ -949,7 +919,7 @@ VideoProject buildNotesMotionTemplate() {
           cor: i == 5 ? const Color(0xFFF4F4F6) : _branco,
           posicao: pos,
           opacidade: op,
-          efeitos: [_whip(8.0 + atraso, 8.5 + atraso, 90, comprimento: 60)],
+          efeitos: [..._whip(8.0 + atraso, 8.5 + atraso, 90, comprimento: 60)],
         ),
       );
       meta['f_corpo$i'] = _sombra(opacidade: 0.14, dist: 8, tam: 22);
@@ -1092,7 +1062,7 @@ VideoProject buildNotesMotionTemplate() {
         efeitos: [
           ..._blurIn(10.8, 11.3, forca: 0.7),
           EffectInstance(
-            type: EffectType.lightGlow,
+            type: EffectType.brilho,
             color: _branco,
             params: {
               'diffusion': _ad(0.55),

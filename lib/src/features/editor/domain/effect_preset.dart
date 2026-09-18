@@ -302,28 +302,11 @@ List<EffectPreset> factoryPresets() => [
     tags: ['cor', 'cinema'],
     effects: [
       EffectInstance(
-        type: EffectType.curves,
-        params: {
-          'contraste': AnimatedDouble(0.18),
-          'brilho': AnimatedDouble(-0.04),
-          'sombras': AnimatedDouble(0.12),
-          'altas': AnimatedDouble(0.05),
-        },
-      ),
-      EffectInstance(
-        type: EffectType.vibrance,
+        type: EffectType.hueSaturation,
         params: {
           'vibracao': AnimatedDouble(0.25),
-          'saturacao': AnimatedDouble(-0.08),
+          'master_saturation': AnimatedDouble(-0.08),
           'protecaoPele': AnimatedDouble(0.8),
-        },
-      ),
-      EffectInstance(
-        type: EffectType.filmGrain,
-        params: {
-          'intensidade': AnimatedDouble(0.18),
-          'tamanho': AnimatedDouble(1.4),
-          'semente': AnimatedDouble(7),
         },
       ),
     ],
@@ -335,7 +318,7 @@ List<EffectPreset> factoryPresets() => [
     tags: ['glow', 'sonho'],
     effects: [
       EffectInstance(
-        type: EffectType.glowVol,
+        type: EffectType.deepGlow,
         params: {
           'radius': AnimatedDouble(0.06),
           'exposure': AnimatedDouble(0.9),
@@ -360,7 +343,7 @@ List<EffectPreset> factoryPresets() => [
     suggestedDuration: const Duration(milliseconds: 600),
     effects: [
       EffectInstance(
-        type: EffectType.glitch,
+        type: EffectType.glitchify,
         params: {
           'quantidade': AnimatedDouble(1)
               .withKeyframe(Duration.zero, 1.6)
@@ -368,14 +351,6 @@ List<EffectPreset> factoryPresets() => [
           'velocidade': AnimatedDouble(6),
           'rgb': AnimatedDouble(0.8),
           'semente': AnimatedDouble(11),
-        },
-      ),
-      EffectInstance(
-        type: EffectType.digitalDamage,
-        params: {
-          'blocos': AnimatedDouble(10),
-          'intervalo': AnimatedDouble(0.08),
-          'semente': AnimatedDouble(3),
         },
       ),
     ],
@@ -407,14 +382,7 @@ List<EffectPreset> factoryPresets() => [
     tags: ['unmult', 'overlay', 'fogo'],
     effects: [
       EffectInstance(
-        type: EffectType.unmult,
-        params: {
-          'limiar': AnimatedDouble(0.05),
-          'suavidade': AnimatedDouble(0.6),
-        },
-      ),
-      EffectInstance(
-        type: EffectType.lightGlow,
+        type: EffectType.brilho,
         params: {
           'diffusion': AnimatedDouble(0.3),
           'intensity': AnimatedDouble(0.6),
@@ -430,16 +398,6 @@ List<EffectPreset> factoryPresets() => [
     tags: ['zoom', 'impacto'],
     suggestedDuration: const Duration(milliseconds: 400),
     effects: [
-      EffectInstance(
-        type: EffectType.zoomWarp,
-        params: {
-          'quantidade': AnimatedDouble(0)
-              .withKeyframe(Duration.zero, 0.35)
-              .withKeyframe(const Duration(milliseconds: 400), 0),
-          'rastro': AnimatedDouble(0.5),
-          'amostras': AnimatedDouble(6),
-        },
-      ),
     ],
   ),
   // ---------------------------------------------------------------
@@ -458,30 +416,18 @@ List<EffectPreset> factoryPresets() => [
     tags: ['coloring', 'cc', 'hdr'],
     effects: [
       EffectInstance(
-        type: EffectType.corrections,
-        params: {'exposicao': AnimatedDouble(0.15)},
-      ),
-      EffectInstance(
-        type: EffectType.curves,
-        params: {
-          'contraste': AnimatedDouble(0.25),
-          'sombras': AnimatedDouble(0.2),
-          'altas': AnimatedDouble(0.15),
-        },
-      ),
-      EffectInstance(
-        type: EffectType.vibrance,
+        type: EffectType.hueSaturation,
         params: {'vibracao': AnimatedDouble(0.45)},
       ),
       EffectInstance(
         type: EffectType.unsharpMask,
         params: {
-          'quantidade': AnimatedDouble(0.6),
-          'raio': AnimatedDouble(1.5),
+          'amount': AnimatedDouble(0.6),
+          'radius': AnimatedDouble(1.5),
         },
       ),
       EffectInstance(
-        type: EffectType.lightGlow,
+        type: EffectType.brilho,
         params: {
           'threshold': AnimatedDouble(90),
           'raio': AnimatedDouble(60),
@@ -507,33 +453,8 @@ List<EffectPreset> factoryPresets() => [
     tags: ['coloring', 'cc', 'teal', 'azul'],
     effects: [
       EffectInstance(
-        type: EffectType.colorBalance,
-        params: {
-          'shadow_red': AnimatedDouble(-10),
-          'shadow_green': AnimatedDouble(2),
-          'shadow_blue': AnimatedDouble(14),
-          'highlight_red': AnimatedDouble(6),
-          'highlight_green': AnimatedDouble(2),
-          'highlight_blue': AnimatedDouble(-5),
-        },
-      ),
-      EffectInstance(
-        type: EffectType.curves,
-        params: {'contraste': AnimatedDouble(0.3)},
-      ),
-      EffectInstance(
-        type: EffectType.vibrance,
-        params: {'saturacao': AnimatedDouble(-0.12)},
-      ),
-      EffectInstance(
-        type: EffectType.gradientMap,
-        params: {
-          'blend_mode': AnimatedDouble(1),
-          'opacity': AnimatedDouble(25),
-          'midtones': AnimatedDouble(0),
-        },
-        color: const Color(0xFF0B2A3A),
-        extraColors: const [Color(0xFF4EABCD), Color(0xFFE8F4FF)],
+        type: EffectType.hueSaturation,
+        params: {'master_saturation': AnimatedDouble(-0.12)},
       ),
     ],
   ),
@@ -544,36 +465,12 @@ List<EffectPreset> factoryPresets() => [
     tags: ['coloring', 'cc', 'vintage', 'quente'],
     effects: [
       EffectInstance(
-        type: EffectType.curves,
-        params: {
-          'contraste': AnimatedDouble(0.12),
-          'sombras': AnimatedDouble(0.15),
-          'altas': AnimatedDouble(0.1),
-        },
-      ),
-      EffectInstance(
-        type: EffectType.photoFilter,
-        params: {
-          'mode': AnimatedDouble(1),
-          'temperature': AnimatedDouble(4800),
-          'density': AnimatedDouble(60),
-        },
-      ),
-      EffectInstance(
-        type: EffectType.vibrance,
-        params: {'saturacao': AnimatedDouble(-0.1)},
+        type: EffectType.hueSaturation,
+        params: {'master_saturation': AnimatedDouble(-0.1)},
       ),
       EffectInstance(
         type: EffectType.levels,
         params: {'saidaMin': AnimatedDouble(0.05)},
-      ),
-      EffectInstance(
-        type: EffectType.filmGrain,
-        params: {
-          'intensidade': AnimatedDouble(0.16),
-          'tamanho': AnimatedDouble(1.4),
-          'semente': AnimatedDouble(9),
-        },
       ),
       EffectInstance(
         type: EffectType.vignette,
@@ -589,24 +486,8 @@ List<EffectPreset> factoryPresets() => [
     tags: ['coloring', 'cc', 'dark', 'contraste'],
     effects: [
       EffectInstance(
-        type: EffectType.corrections,
-        params: {'exposicao': AnimatedDouble(-0.3)},
-      ),
-      EffectInstance(
-        type: EffectType.curves,
-        params: {'contraste': AnimatedDouble(0.45)},
-      ),
-      EffectInstance(
-        type: EffectType.vibrance,
-        params: {'saturacao': AnimatedDouble(-0.2)},
-      ),
-      EffectInstance(
-        type: EffectType.photoFilter,
-        params: {
-          'mode': AnimatedDouble(1),
-          'temperature': AnimatedDouble(7500),
-          'density': AnimatedDouble(50),
-        },
+        type: EffectType.hueSaturation,
+        params: {'master_saturation': AnimatedDouble(-0.2)},
       ),
       EffectInstance(
         type: EffectType.vignette,
@@ -615,7 +496,7 @@ List<EffectPreset> factoryPresets() => [
       ),
       EffectInstance(
         type: EffectType.unsharpMask,
-        params: {'quantidade': AnimatedDouble(0.7)},
+        params: {'amount': AnimatedDouble(0.7)},
       ),
     ],
   ),
@@ -626,32 +507,11 @@ List<EffectPreset> factoryPresets() => [
     tags: ['coloring', 'cc', 'anime'],
     effects: [
       EffectInstance(
-        type: EffectType.colorBalance,
-        params: {
-          'shadow_red': AnimatedDouble(-10),
-          'shadow_green': AnimatedDouble(30),
-          'shadow_blue': AnimatedDouble(40),
-          'midtone_red': AnimatedDouble(-5),
-          'midtone_green': AnimatedDouble(-5),
-          'midtone_blue': AnimatedDouble(20),
-          'highlight_red': AnimatedDouble(20),
-          'highlight_green': AnimatedDouble(10),
-          'highlight_blue': AnimatedDouble(20),
-        },
-      ),
-      EffectInstance(
-        type: EffectType.curves,
-        params: {
-          'sombras': AnimatedDouble(0.05),
-          'altas': AnimatedDouble(0.35),
-        },
-      ),
-      EffectInstance(
-        type: EffectType.vibrance,
+        type: EffectType.hueSaturation,
         params: {'vibracao': AnimatedDouble(0.5)},
       ),
       EffectInstance(
-        type: EffectType.lightGlow,
+        type: EffectType.brilho,
         params: {
           'threshold': AnimatedDouble(75),
           'raio': AnimatedDouble(30),
@@ -668,38 +528,10 @@ List<EffectPreset> factoryPresets() => [
     tags: ['coloring', 'cc', 'psd', 'suave'],
     effects: [
       EffectInstance(
-        type: EffectType.vibrance,
+        type: EffectType.hueSaturation,
         params: {
           'vibracao': AnimatedDouble(0.6),
-          'saturacao': AnimatedDouble(0.08),
-        },
-      ),
-      EffectInstance(
-        type: EffectType.gradientMap,
-        params: {
-          'blend_mode': AnimatedDouble(1),
-          'opacity': AnimatedDouble(50),
-          'midtones': AnimatedDouble(0),
-        },
-        color: const Color(0xFFDCC7AE),
-        extraColors: const [Color(0xFFE5BDB0), Color(0xFFEEB3B3)],
-      ),
-      EffectInstance(
-        type: EffectType.colorBalance,
-        params: {
-          'midtone_red': AnimatedDouble(3),
-          'midtone_green': AnimatedDouble(-10),
-          'midtone_blue': AnimatedDouble(-24),
-        },
-      ),
-      EffectInstance(
-        type: EffectType.channelMixer,
-        params: {
-          'red_red': AnimatedDouble(113),
-          'red_green': AnimatedDouble(-15),
-          'green_red': AnimatedDouble(-8),
-          'green_green': AnimatedDouble(104),
-          'green_blue': AnimatedDouble(3),
+          'master_saturation': AnimatedDouble(0.08),
         },
       ),
       EffectInstance(

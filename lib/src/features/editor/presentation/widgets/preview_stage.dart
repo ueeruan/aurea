@@ -3176,6 +3176,13 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
       content,
       local,
       duracaoDaCamada: layer.duration,
+      escalaX: sx.abs(),
+      escalaY: sy.abs(),
+      posicaoNaComposicao: pos,
+      tamanhoDaComposicao: Size(
+        project.outputWidth.toDouble(),
+        project.outputHeight.toDouble(),
+      ),
     );
 
     // ESTILOS DE CAMADA (PR-X10): aplicam DEPOIS dos efeitos e
@@ -3718,6 +3725,18 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
     // APARECER E SUMIR precisa saber quanto a camada dura: a conta e do
     // tempo dela, e nao de um numero que a pessoa tenha de repetir.
     Duration? duracaoDaCamada,
+    // A GEOMETRIA EFETIVA DA CAMADA NA COMPOSICAO.
+    //
+    // Um efeito age na FONTE, e o transform da camada vem depois — a mesma
+    // ordem do After Effects. Quem precisa saber onde a camada cai, e de
+    // que tamanho ela esta, e o Motion Tile: ele tem de ladrilhar o
+    // suficiente para o quadro continuar coberto DEPOIS da escala. Sem
+    // estes tres numeros ele ladrilha so a caixa da camada, e encolher a
+    // camada deixa a composicao com a moldura vazia.
+    double? escalaX,
+    double? escalaY,
+    Offset? posicaoNaComposicao,
+    Size? tamanhoDaComposicao,
   }) {
     var out = child;
     for (var indice = 0; indice < effects.length; indice++) {
@@ -6369,8 +6388,22 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
               (effect.paramAt('tile_center_y', local) - 0.5).abs() < 0.001 &&
               fase.abs() < 0.01 &&
               !espelha;
-          if (!identidade) {
-            out = MotionTilePass(effect: effect, time: local, child: out);
+          // A ESCALA ENTRA NA IDENTIDADE: com a camada reduzida, um
+          // ladrilho de 100% num quadro de 100% JA NAO e a propria
+          // camada — e a parede que cobre o quadro. Tratar como
+          // identidade ali devolveria o defeito do relato.
+          final escalaNeutra =
+              (escalaX ?? 1).abs() >= 0.999 && (escalaY ?? 1).abs() >= 0.999;
+          if (!identidade || !escalaNeutra) {
+            out = MotionTilePass(
+              effect: effect,
+              time: local,
+              escalaX: escalaX ?? 1,
+              escalaY: escalaY ?? 1,
+              posicao: posicaoNaComposicao,
+              composicao: tamanhoDaComposicao,
+              child: out,
+            );
           }
 
         case EffectType.ccSplit:

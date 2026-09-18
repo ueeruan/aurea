@@ -1,4 +1,3 @@
-import 'editor_audit_helpers.dart';
 import 'package:aurea/src/features/editor/application/editor_controller.dart';
 import 'package:aurea/src/features/editor/application/effect_preset_store.dart';
 import 'package:aurea/src/features/editor/application/playback_controller.dart';
@@ -8,11 +7,12 @@ import 'package:aurea/src/features/editor/domain/layer.dart';
 import 'package:aurea/src/features/editor/domain/video_project.dart';
 import 'package:aurea/src/features/editor/presentation/am/am_widgets.dart';
 import 'package:aurea/src/features/editor/presentation/am/layer_menu.dart';
-import 'package:aurea/src/features/editor/presentation/am/scene3d_studio.dart';
+import 'package:aurea/src/features/editor/presentation/estudio/estudio_da_cena.dart';
 import 'package:aurea/src/features/editor/presentation/am/param_sheet_shell.dart'
     show ParamSheetShell;
 import 'package:aurea/src/features/editor/presentation/widgets/add_layer_sheet.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -45,6 +45,18 @@ void main() {
         container: container,
         child: MaterialApp(
           theme: ThemeData(platform: TargetPlatform.iOS),
+          // IDIOMA FIXO, e nao o da maquina.
+          //
+          // Parte dos rotulos da doca passa por `translate()`: 'Câmera' e
+          // 'Partículas' saem em ingles quando o locale resolvido nao e
+          // pt ('Camera', 'Particles'), enquanto os rotulos que ainda nao
+          // foram para o dicionario continuam em portugues. Sem fixar o
+          // idioma, a mesma expectativa passava ou falhava conforme o
+          // locale do computador que rodou a suite. O aplicativo e pt por
+          // padrao (`appLanguageProvider`), entao e pt que se testa.
+          locale: const Locale('pt'),
+          supportedLocales: const [Locale('pt')],
+          localizationsDelegates: GlobalMaterialLocalizations.delegates,
           navigatorObservers: [observer],
           home: Builder(
             builder: (context) => Scaffold(
@@ -65,6 +77,7 @@ void main() {
   }
 
   void scene(EditorController c) => c.addScene3DLayer(Duration.zero);
+  void camera(EditorController c) => c.addCameraLayer(Duration.zero);
   void text(EditorController c) => c.addTextLayer(Duration.zero);
   void grid(EditorController c) {
     c.addNullLayer(Duration.zero);
@@ -81,23 +94,29 @@ void main() {
 
   // A secao da cena 3D nao entra neste laco: ela abre o ESTUDIO (uma
   // rota), nao uma ficha de parametros. O teste dela vem logo abaixo.
+  // OS ROTULOS AQUI SAO OS DA GRADE DE HOJE.
+  //
+  // Eles mudaram desde que este laco foi escrito e o laco ficou vermelho
+  // por isso: 'Cor e\npreench.' e abreviacao de uma grade antiga, 'Fonte'
+  // e 'Caminho' viraram abas de dentro de "Editar texto" (a grade nao tem
+  // mais secao para elas), 'Particulas' ganhou acento quando a interface
+  // passou a ser traduzida, e a secao da cena 3D deixou de oferecer cor —
+  // `secoesDe` da cor a forma, ao texto e ao elemento, e a cor da cena
+  // mora no Estudio.
   final cases = <(String, void Function(EditorController), String)>[
-    ('cor da cena 3D', scene, 'Cor e\npreench.'),
-    ('cameras', scene, 'Câmeras'),
+    ('camera da composicao', camera, 'Câmera'),
     ('Grid / Clonar', grid, 'Clonar'),
-    ('Elemento 3D', element, 'Elemento\n3D'),
-    ('cor do elemento 3D', element, 'Cor e\npreench.'),
-    ('borda e sombra', text, 'Borda e\nsombra'),
-    ('fonte', text, 'Fonte'),
-    ('texto em caminho', text, 'Caminho'),
+    ('Elemento 3D', element, 'Elemento 3D'),
+    ('cor do elemento 3D', element, 'Cor e preenchimento'),
+    ('borda e sombra', text, 'Borda e sombra'),
     ('volume', audio, 'Volume'),
     ('fade', audio, 'Fade'),
-    ('particulas', (c) => c.addParticulasLayer(Duration.zero), 'Particulas'),
+    ('particulas', (c) => c.addParticulasLayer(Duration.zero), 'Partículas'),
     (
       'legendas',
       (c) =>
           c.addCaptionLayerFromSrt('1\n00:00:00,000 --> 00:00:02,000\nTeste\n'),
-      'Editar\nlegendas',
+      'Editar legendas',
     ),
     (
       'tempo da precomp',
@@ -128,7 +147,11 @@ void main() {
         // Acao rapida e tile podem ter o mesmo rotulo (Volume): o primeiro
         // serve — os dois abrem a mesma ficha.
         // 'Tempo' saiu da lista: a porta do grupo mora na doca (14/09).
-        if (['Câmeras', 'Fonte', 'Caminho'].contains(button)) await openLayerActions(tester);
+        //
+        // O DESVIO PELO "Mais" SAIU (16/09): as tres secoes que moravam
+        // atras dele — Câmeras, Fonte e Caminho — viraram a secao 'Câmera'
+        // da grade, as abas de dentro de "Editar texto" e a ficha do
+        // Estudio. Nenhum caso deste laco precisa mais de dois toques.
         final target = find.text(button).evaluate().isNotEmpty
             ? find.text(button).first
             : find.byTooltip(button).first;
@@ -170,7 +193,7 @@ void main() {
     expect(observer.pagesPopped, 0);
     // Um toque duplo nao pode empilhar dois Estudios — nem retirar o
     // editor com um segundo pop.
-    expect(find.byType(Scene3DStudio), findsOneWidget);
+    expect(find.byType(EstudioDaCena), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -184,7 +207,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Cena 3D'));
       await tester.pumpAndSettle();
-      expect(find.byType(Scene3DStudio), findsOneWidget);
+      expect(find.byType(EstudioDaCena), findsOneWidget);
       expect(
         observer.pagesPopped,
         volta,
@@ -194,27 +217,33 @@ void main() {
       // Voltar do Estudio devolve o editor inteiro.
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
-      expect(find.byType(Scene3DStudio), findsNothing);
+      expect(find.byType(EstudioDaCena), findsNothing);
       expect(find.text('editor aberto'), findsOneWidget);
     }
     expect(container.read(editorControllerProvider), same(project));
   });
 
-  for (final name in ['Grid', 'Cena 3D']) {
+  // O "Grid" DA GRADE DE ADICIONAR VIROU O "NULO".
+  //
+  // A aba chama-se "Objeto / Elemento" (nao "Objeto") e a grade de clones
+  // deixou de ser um tipo de camada proprio: quem carrega o modulo e o
+  // Nulo, e a grade se liga depois, na secao "Clonar" da doca. A cena 3D
+  // continua sendo um tipo.
+  for (final name in ['Nulo', 'Scene 3D']) {
     testWidgets('adicionar $name mantem a composicao aberta', (tester) async {
       final (observer, container) = await openEditor(tester, (_) {});
       await tester.tap(find.text('adicionar'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Objeto'));
+      await tester.tap(find.text('Objeto / Elemento'));
       await tester.pumpAndSettle();
       await tester.tap(find.text(name));
       await tester.pumpAndSettle();
       expect(observer.pagesPopped, 0);
       final layers = container.read(editorControllerProvider).layers;
       expect(layers, hasLength(1));
-      if (name == 'Grid') {
+      if (name == 'Nulo') {
         expect(layers.single, isA<NullLayer>());
-        expect((layers.single as NullLayer).grid, isNotNull);
+        expect((layers.single as NullLayer).is3D, isTrue);
       } else {
         expect(layers.single, isA<Scene3DLayer>());
       }

@@ -110,17 +110,30 @@ class _BotaoDeEstilo extends StatelessWidget {
         color: AmColors.chip,
         borderRadius: BorderRadius.circular(10),
       ),
+      // O ROTULO QUEBRA EM VEZ DE ESTOURAR A PILULA.
+      //
+      // Os dois botoes do topo dividem a largura da folha, e o rotulo
+      // ficava com a largura que sobrasse: "Estilos prontos" num aparelho
+      // estreito (ou com a fonte do sistema ampliada, ou numa lingua com
+      // palavra mais longa que o portugues) passa da largura do botao e o
+      // Row estoura — a tarja amarela e preta que aparece na folha. Com
+      // Flexible + ellipsis o texto cede, que e o que a pilula promete:
+      // caber.
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(icone, size: 15, color: AmColors.text),
           const SizedBox(width: 6),
-          AppText(
-            rotulo,
-            style: const TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w600,
-              color: AmColors.text,
+          Flexible(
+            child: AppText(
+              rotulo,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: AmColors.text,
+              ),
             ),
           ),
         ],

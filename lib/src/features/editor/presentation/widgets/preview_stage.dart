@@ -42,6 +42,7 @@ import 'luz_na_faixa_pass.dart';
 import 'sombra_projetada_pass.dart';
 import 'sombra_longa_pass.dart';
 import 'time_warp_rgb_pass.dart';
+import '../../domain/desfoque_forcado.dart';
 import 'repeticao_pass.dart';
 import '../../domain/gear.dart';
 import '../../domain/text_animator.dart' show valueNoise01;
@@ -2638,7 +2639,7 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
   ) {
     final local = layer.localTime(t);
     final nativo = fx.paramAt('native_motion_blur', local).round();
-    if (nativo == 2) {
+    if (nativo >= 1) {
       // "Only": quem borra e a composicao.
       return _buildLayer(project, layer, t, resolveLinks, rig: rig);
     }
@@ -2650,14 +2651,13 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
     }
 
     final fps = project.fps < 1 ? 30 : project.fps;
-    final quadroUs = 1000000 / fps;
-    // Centrado no quadro, como a fase -90 da composicao.
-    final metadeUs = angulo / 360 / 2 * quadroUs;
+    // A JANELA VEM DA FASE, e nao de um centro fixo: fase 0 (o padrao do
+    // plugin) comeca no quadro e arrasta para frente; fase -90 centra.
+    final janela = janelaDoEfeito(fx, local, t, fps);
 
     final copias = <Widget>[];
     for (var i = 0; i < n; i++) {
-      final f = n == 1 ? 0.0 : (i / (n - 1)) * 2 - 1;
-      final ti = t + Duration(microseconds: (f * metadeUs).round());
+      final ti = instanteDaAmostra(janela, i, n);
       final amostra = ti < Duration.zero
           ? _buildLayer(project, layer, t, resolveLinks, rig: rig)
           : _buildLayer(project, layer, ti, resolveLinks, rig: rig);

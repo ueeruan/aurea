@@ -183,6 +183,8 @@ String effectHelp(EffectType type) => switch (type) {
   EffectType.timeSlice => 'Divide o quadro em faixas e cada faixa mostra a camada num instante diferente. Escada imita o S_TimeSlice; linear com ease out vira a transição de faixas dos edits. Numa camada de ajuste, fatia tudo que está embaixo.',
   EffectType.timeWarpRgb =>
       'Cada canal de cor mostra a camada num instante diferente: o vermelho adiantado, o azul atrasado, o verde no lugar. Da a separacao de cor que corre nas bordas do movimento — quanto maior o deslocamento em quadros, mais largo o fantasma. Custa tres montagens da camada por quadro, então é um efeito de acabamento, e não de rascunho.',
+  EffectType.forceMotionBlur =>
+      'Borra o que se move, montando a camada várias vezes dentro da janela de exposição e tirando a média. Como cada amostra é a camada no seu instante, o desfoque vale também para o CONTEÚDO de um vídeo — o objeto que anda dentro do quadro. O Ângulo do obturador é o quanto de quadro a exposição pega (180 graus é meia exposição, o padrão do cinema) e a Fase decide para onde o arrasto cai: 0 arrasta para frente, -90 centra no quadro, -180 pega o que já passou.',
   EffectType.posterizeTime => 'Faz a camada inteira andar em degraus de N quadros por segundo: 12 para o visual de anime, 8 para stop motion, 4 para travado. Numa camada de ajuste, quantiza tudo que está embaixo.',
   EffectType.flash => 'Clarão de um ou poucos quadros na batida: branco, somar, tela, exposição ou negativo. Segura N quadros e cai em M; o gatilho repete a cada N quadros ou dispara ao acaso. Evite flashes rápidos em conteúdo sensível.',
   EffectType.strobe => 'Pisca por quadros: a camada some, vira cor, negativo, estoura ou apaga. Periódico acende a cada período; aleatório sorteia blocos. Ótimo para texto piscando. Evite flashes rápidos em conteúdo sensível.',
@@ -370,7 +372,6 @@ String effectHelp(EffectType type) => switch (type) {
   EffectType.vhs => 'Combina linhas de varredura, sangramento de cor, instabilidade e ruído. Intensidade mistura o conjunto; reduza desbotar para conservar a cor.',
   EffectType.filmDamage => 'Simula poeira, riscos, cintilação, grão, queimado e salto; fios, balanço, desfoque, vinheta, saturação e tom sépia completam a cópia gasta. Reduza os controles que não precisa para um filme antigo mais sutil.',
   EffectType.glitchify => 'Glitchify imita o plugin do After Effects: separa os canais de cor, desloca fatias horizontais, estica riscos de pixel, joga blocos deslocados e quadrados de cor sobre a imagem, mudando a cada passo de tempo. Intensidade e Velocidade controlam tudo de uma vez; Conclusao faz o glitch sumir aos poucos.',
-  EffectType.forceMotionBlur => 'Reamostra a animação da camada em vários instantes. Mais amostras melhoram o rastro, mas aumentam o trabalho de renderização.',
   EffectType.flicker => 'Modula brilho ou opacidade. Escolha aleatório, strobe ou senoide; frequência controla a repetição. Evite flashes intensos ou rápidos em conteúdo para o público.',
   EffectType.gradient4 => 'Gradiente de quatro cantos. Escolha as quatro cores, opacidade, ângulo e modo de mistura. Pode colorir a imagem sem apagar sua forma.',
   EffectType.liquidGlass => 'Look de vidro com refração, luz e bordas. Ajuste diretamente os parâmetros de refração e iluminação; o resultado depende do conteúdo disponível atrás da camada.',

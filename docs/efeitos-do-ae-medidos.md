@@ -287,3 +287,34 @@ verdade mora na exportação.
 
 18 testes em `test/time_slice_test.dart`, incluindo o que cobra os dois
 lados da ficha: toda chave que o motor lê tem de existir no catálogo.
+
+## CC Force Motion Blur — FEITO (18/09), e é o parente próximo do RSMB
+
+**O RSMB (RE:Vision) não está instalado** e não há o que medir dele. O que
+existe na máquina do dono é o `CC Force Motion Blur`, e ele já estava
+**implementado** no palco desde 14/09 — sem ficha, exatamente como o Time
+Slice: o caminho existia e não saía do lugar.
+
+Parâmetros lidos do AE: `Motion Blur Samples` 8, `Override Shutter
+Settings` 1, `Shutter Angle` 180, `Shutter Phase` 0, `Native Motion Blur`
+2.
+
+O `Override Shutter Settings` **não entrou**: aqui o desfoque da
+composição é ajuste do projeto, separado do efeito, então não há o que
+sobrepor. O `Native Motion Blur` entrou como escolha, e é o único
+parâmetro em que não seguimos o valor de fábrica do AE: lá o 2 quer dizer
+"quem borra é a composição", ou seja o efeito entra sem fazer nada.
+
+**O que mudou no motor:** a janela de exposição agora vem da FASE, e não de
+um centro fixo. Fase 0 (o padrão do plugin) começa no quadro e arrasta para
+frente; −90 centra; −180 pega o que passou. Antes o efeito estava preso ao
+centro, que é a fase −90.
+
+**A diferença para o RSMB, escrita para não se perder:** o RSMB estima o
+fluxo entre quadros e acumula ao longo do movimento estimado. Isso lhe dá
+duas coisas que este não faz — borrar a partir de um quadro só (sintetizar
+movimento que não foi filmado) e não fantasmear onde o movimento não é
+uniforme. Aqui cada amostra é um quadro de verdade: com poucas amostras o
+risco é a escada, e um quadro parado continua parado.
+
+12 testes em `test/desfoque_forcado_test.dart`.

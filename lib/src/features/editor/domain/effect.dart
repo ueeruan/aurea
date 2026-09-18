@@ -21,6 +21,7 @@ import 'luz_na_faixa.dart';
 import 'sombra_projetada.dart';
 import 'sombra_longa.dart';
 import 'time_slice.dart';
+import 'desfoque_forcado.dart';
 import 'time_warp_rgb.dart';
 import 'keyframe.dart';
 
@@ -587,6 +588,7 @@ const effectSpecs = <EffectType, EffectSpec>{
   ...efeitosSombraLonga,
   ...efeitosTimeSlice,
   ...efeitosTimeWarpRgb,
+  ...efeitosDesfoqueForcado,
   ...efeitosLuzEDiversos,
   ...efeitosMotionTile,
 };

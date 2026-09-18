@@ -134,7 +134,7 @@ void main() {
       container.read(selectedLayerProvider.notifier).state = id;
       await tester.pumpAndSettle();
       expect(tester.getRect(find.byType(PreviewStage)), before);
-      await tester.tap(find.text('Mover e\ntransf.'));
+      await tester.tap(find.text('Movimentação e transformação'));
       await tester.pumpAndSettle();
       expect(find.byType(TransformPanel), findsOneWidget);
       expect(tester.getRect(find.byType(PreviewStage)), before);

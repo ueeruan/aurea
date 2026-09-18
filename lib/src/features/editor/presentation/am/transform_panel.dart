@@ -117,6 +117,67 @@ class TransformPanel extends ConsumerStatefulWidget {
   ConsumerState<TransformPanel> createState() => _TransformPanelState();
 }
 
+/// QUEM A POSICAO DEVE SEGUIR.
+///
+/// Era um metodo privado do controle de posicao, chamado pelo menu de
+/// opcoes por `GlobalKey.currentState?._pickLinkSource(...)`. O menu
+/// nasceu ligado a um controle que o painel deixou de montar, entao o
+/// `currentState` ficou sempre nulo e o item "Vincular posicao" — que
+/// continua VISIVEL no menu — nao fazia absolutamente nada. Um controle
+/// visivel e inerte em silencio e o defeito que este projeto nao aceita.
+///
+/// Aqui a escolha nao depende de quem esta montado: a funcao e chamada
+/// direto pelo menu, com o id da camada.
+Future<void> escolherOrigemDoVinculo(
+  BuildContext context,
+  WidgetRef ref,
+  String layerId,
+  Duration t,
+) async {
+  final project = ref.read(editorControllerProvider);
+  final controller = ref.read(editorControllerProvider.notifier);
+  await showModalBottomSheet<void>(
+    context: context,
+    backgroundColor: AmColors.panel,
+    builder: (sheetContext) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Padding(
+            padding: EdgeInsets.all(14),
+            child: AppText(
+              'Seguir a posicao de...',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: AmColors.text,
+              ),
+            ),
+          ),
+          for (final other in project.layers)
+            if (other.id != layerId)
+              ListTile(
+                title: AppText(
+                  other.name,
+                  style: const TextStyle(color: AmColors.text),
+                ),
+                onTap: () {
+                  controller.linkProperty(
+                    layerId,
+                    LayerProp.position,
+                    other.id,
+                    t,
+                  );
+                  Navigator.of(sheetContext).pop();
+                },
+              ),
+          const SizedBox(height: 8),
+        ],
+      ),
+    ),
+  );
+}
+
 class _TransformPanelState extends ConsumerState<TransformPanel> {
   bool _scaleLinked = true;
   final _bodyScroll = ScrollController();
@@ -193,9 +254,10 @@ class _TransformPanelState extends ConsumerState<TransformPanel> {
           if (linked) {
             controller.unlinkProperty(id, LayerProp.position);
           } else {
-            _positionKey.currentState?._pickLinkSource(
+            escolherOrigemDoVinculo(
               context,
               ref,
+              id,
               widget.playback.time.value,
             );
           }
@@ -416,55 +478,6 @@ class _PositionControlState extends ConsumerState<_PositionControl> {
 
   Offset _dragStart = Offset.zero;
   Offset _accum = Offset.zero;
-
-  Future<void> _pickLinkSource(
-    BuildContext context,
-    WidgetRef ref,
-    Duration t,
-  ) async {
-    final project = ref.read(editorControllerProvider);
-    final controller = ref.read(editorControllerProvider.notifier);
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: AmColors.panel,
-      builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Padding(
-              padding: EdgeInsets.all(14),
-              child: AppText(
-                'Seguir a posicao de...',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                  color: AmColors.text,
-                ),
-              ),
-            ),
-            for (final other in project.layers)
-              if (other.id != layer.id)
-                ListTile(
-                  title: AppText(
-                    other.name,
-                    style: const TextStyle(color: AmColors.text),
-                  ),
-                  onTap: () {
-                    controller.linkProperty(
-                      layer.id,
-                      LayerProp.position,
-                      other.id,
-                      t,
-                    );
-                    Navigator.of(sheetContext).pop();
-                  },
-                ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
-  }
 
   /// Arrasto com trava de eixo (gesto claramente horizontal/vertical nao
   /// "sai torto") + snap no centro da composicao.

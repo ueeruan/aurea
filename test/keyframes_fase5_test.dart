@@ -102,7 +102,7 @@ void main() {
     c.read(proModeProvider.notifier).set(true);
     c.read(selectedLayerProvider.notifier).state = id;
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Mover e\ntransf.'));
+    await tester.tap(find.text('Movimentação e transformação'));
     await tester.pumpAndSettle();
     await selectTransformTool(tester, 'Opacid.');
     await tester.pumpAndSettle();

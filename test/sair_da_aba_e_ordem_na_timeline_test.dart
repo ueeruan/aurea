@@ -31,7 +31,7 @@ void main() {
     final id = c.read(editorControllerProvider).layers.first.id;
     c.read(selectedLayerProvider.notifier).state = id;
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Mover e\ntransf.'));
+    await tester.tap(find.text('Movimentação e transformação'));
     await tester.pumpAndSettle();
     expect(find.byTooltip('Girar'), findsOneWidget, reason: 'o painel abriu');
 
@@ -41,7 +41,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byTooltip('Girar'), findsNothing, reason: 'o painel fechou');
     expect(
-      find.text('Mover e\ntransf.'),
+      find.text('Movimentação e transformação'),
       findsOneWidget,
       reason: 'as ferramentas voltaram',
     );
@@ -54,7 +54,7 @@ void main() {
       final id = c.read(editorControllerProvider).layers.first.id;
       c.read(selectedLayerProvider.notifier).state = id;
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Mover e\ntransf.'));
+      await tester.tap(find.text('Movimentação e transformação'));
       await tester.pumpAndSettle();
       expect(find.byTooltip('Girar'), findsOneWidget);
 
@@ -72,7 +72,7 @@ void main() {
         id,
         reason: 'a camada continua selecionada',
       );
-      expect(find.text('Mover e\ntransf.'), findsOneWidget);
+      expect(find.text('Movimentação e transformação'), findsOneWidget);
     },
   );
 
@@ -83,7 +83,7 @@ void main() {
       final id = c.read(editorControllerProvider).layers.first.id;
       c.read(selectedLayerProvider.notifier).state = id;
       await tester.pumpAndSettle();
-      expect(find.text('Mover e\ntransf.'), findsOneWidget);
+      expect(find.text('Movimentação e transformação'), findsOneWidget);
 
       // A faixa de baixo da linha, fora da barra (a barra tem 30 dos 38 px).
       final linha = tester.getRect(find.byKey(ValueKey(id)));
@@ -95,7 +95,7 @@ void main() {
         reason: 'o vazio tirou a selecao',
       );
       expect(
-        find.text('Mover e\ntransf.'),
+        find.text('Movimentação e transformação'),
         findsNothing,
         reason: 'sem selecao, sem ferramentas',
       );

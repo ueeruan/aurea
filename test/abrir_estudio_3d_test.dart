@@ -8,6 +8,7 @@ import 'package:aurea/src/features/editor/application/playback_controller.dart';
 import 'package:aurea/src/features/editor/domain/layer.dart';
 import 'package:aurea/src/features/editor/presentation/am/layer_menu.dart';
 import 'package:aurea/src/features/editor/presentation/am/scene3d_sheet.dart';
+import 'package:aurea/src/features/editor/presentation/estudio/estudio_da_cena.dart';
 import 'package:aurea/src/features/editor/presentation/am/scene3d_studio.dart';
 import 'package:aurea/src/features/projects/domain/deriva_template.dart';
 
@@ -93,7 +94,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(
-      find.byType(Scene3DStudio),
+      find.byType(EstudioDaCena),
       findsOneWidget,
       reason: 'tocar em Cena 3D tem de abrir o Estudio',
     );
@@ -112,6 +113,13 @@ void main() {
     await tester.tap(botao);
     await tester.pumpAndSettle();
 
+    // DOIS ESTUDIOS, DUAS PORTAS — e isto esta errado.
+    //
+    // O "+" da grade de adicionar leva ao EstudioDaCena; a ficha da cena
+    // (esta porta) ainda leva ao Scene3DStudio antigo, que continua
+    // montado em `openScene3DStudio`. O teste fica com o que o aplicativo
+    // faz HOJE, para nao ficar vermelho enquanto a decisao nao vem: a
+    // intencao registrada e que sobre um Estudio so.
     expect(find.byType(Scene3DStudio), findsOneWidget);
   });
 }

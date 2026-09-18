@@ -80,7 +80,7 @@ void main() {
       tester,
     ) async {
       await abrirEditor(tester, tamanho);
-      await tester.tap(find.text('Mover e\ntransf.'));
+      await tester.tap(find.text('Movimentação e transformação'));
       await tester.pumpAndSettle();
       expect(find.byType(TransformPanel), findsOneWidget);
 
@@ -112,7 +112,7 @@ void main() {
       tester,
     ) async {
       await abrirEditor(tester, tamanho);
-      await tester.tap(find.text('Mover e\ntransf.'));
+      await tester.tap(find.text('Movimentação e transformação'));
       await tester.pumpAndSettle();
       final painel = tester.getRect(find.byType(TransformPanel));
       for (final aba in [
@@ -121,7 +121,7 @@ void main() {
         'Escalar',
         'Inclinar',
       ]) {
-        final alvo = find.byTooltip(aba);
+        final alvo = abaDoTrilho(aba);
         expect(alvo, findsWidgets, reason: '$aba sumiu do trilho no $nome');
         final caixa = tester.getRect(alvo.first);
         // Existir na arvore nao basta: uma aba abaixo da borda so

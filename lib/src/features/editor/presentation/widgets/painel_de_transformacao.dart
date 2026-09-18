@@ -374,6 +374,11 @@ class _PainelDeTransformacaoState extends ConsumerState<PainelDeTransformacao> {
       case ModoDeTransformacao.girar:
         if (!l.is3D) {
           return DialDeAngulo(
+            // A CHAVE E O ANCORADOURO DOS TESTES DE GESTO do dial. Ela
+            // existia no controle antigo do painel e sumiu quando o
+            // corpo passou a ser este — dois testes de gesto ficaram
+            // procurando um dial que nao se acha mais por chave.
+            key: const ValueKey('rotation-dial'),
             angulo: l.rotation.valueAt(_local),
             aoComecar: _abrirLote,
             aoMudar: (g) => _c.editRotation(l.id, widget.tempo, g),

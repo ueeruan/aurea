@@ -49,7 +49,7 @@ void main() {
       c.read(selectedLayerProvider.notifier).state = id;
       await tester.pumpAndSettle();
       final preview = tester.getRect(find.byType(PreviewStage));
-      await tester.tap(find.text('Mover e\ntransf.'));
+      await tester.tap(find.text('Movimentação e transformação'));
       await tester.pumpAndSettle();
       Future<void> capture(String name) async {
         if (size.width != 430 ||

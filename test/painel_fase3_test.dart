@@ -115,7 +115,7 @@ void main() {
     final id = c.read(editorControllerProvider).layers.first.id;
     c.read(selectedLayerProvider.notifier).state = id;
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Mover e\ntransf.'));
+    await tester.tap(find.text('Movimentação e transformação'));
     await tester.pumpAndSettle();
     await selectTransformTool(tester, 'Opacid.');
     await tester.pumpAndSettle();
@@ -161,7 +161,7 @@ void main() {
     c.read(selectedLayerProvider.notifier).state = id;
     await tester.pumpAndSettle();
     for (final tile in [
-      'Mover e\ntransf.',
+      'Movimentação e transformação',
       'Mesclar e\nopacidade',
       'Cor e\npreench.',
       'Efeitos',
@@ -184,7 +184,7 @@ void main() {
         EditorPanel.none,
         reason: '$tile fechou',
       );
-      expect(find.text('Mover e\ntransf.'), findsOneWidget);
+      expect(find.text('Movimentação e transformação'), findsOneWidget);
     }
   });
 

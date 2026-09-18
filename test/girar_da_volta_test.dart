@@ -32,7 +32,7 @@ void main() {
     final id = c.read(editorControllerProvider).layers.first.id;
     c.read(selectedLayerProvider.notifier).state = id;
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Mover e\ntransf.'));
+    await tester.tap(find.text('Movimentação e transformação'));
     await tester.pumpAndSettle();
     await selectTransformTool(tester, 'Girar');
     await tester.pumpAndSettle();

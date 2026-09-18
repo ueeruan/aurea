@@ -42,7 +42,7 @@ void main() {
       reason: 'a de cima ganha',
     );
     // E as ferramentas da camada apareceram sozinhas.
-    expect(find.text('Mover e\ntransf.'), findsOneWidget);
+    expect(find.text('Movimentação e transformação'), findsOneWidget);
 
     // Canto do palco: nao ha camada ali.
     final palco = tester.getRect(find.byType(PreviewStage));

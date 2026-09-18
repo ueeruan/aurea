@@ -44,7 +44,7 @@ void main() {
     expect(folha.left, greaterThanOrEqualTo(preview.right - 1), reason: 'painel a direita');
     expect(folha.width, closeTo(380, 1));
     expect(folha.height, greaterThan(500), reason: 'painel de altura inteira');
-    expect(find.text('Mover e\ntransf.'), findsOneWidget);
+    expect(find.text('Movimentação e transformação'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -82,7 +82,7 @@ void main() {
     expect(find.text('Efeitos'), findsOneWidget);
     // Keyframe: 1 toque no ◆ da transporte.
     final sel = c.read(selectedLayerProvider)!;
-    await tester.tap(find.text('Mover e\ntransf.'));
+    await tester.tap(find.text('Movimentação e transformação'));
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Adicionar keyframe neste instante'));
     await tester.pumpAndSettle();

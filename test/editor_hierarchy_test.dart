@@ -13,7 +13,7 @@ import 'package:aurea/src/features/editor/presentation/am/param_sheet_shell.dart
     show ParamSheetShell;
 import 'package:aurea/src/features/editor/presentation/am/property_keyframe_context.dart';
 import 'package:aurea/src/features/editor/presentation/am/transform_panel.dart';
-import 'package:aurea/src/features/editor/presentation/am/scene3d_studio.dart';
+import 'package:aurea/src/features/editor/presentation/estudio/estudio_da_cena.dart';
 import 'package:aurea/src/features/editor/presentation/editor_screen.dart';
 import 'package:aurea/src/features/projects/application/projects_controller.dart';
 import 'package:flutter/material.dart' hide Easing;
@@ -137,7 +137,7 @@ void main() {
         expect(find.byType(BottomSheet), findsNothing);
         await capture(tester, 'selected-${size.width.toInt()}');
         expect(tester.takeException(), isNull, reason: 'selected layer');
-        await tester.tap(find.text('Mover e\ntransf.'));
+        await tester.tap(find.text('Movimentação e transformação'));
         await tester.pumpAndSettle();
         final transform = tester.widget<TransformPanel>(
           find.byType(TransformPanel),
@@ -221,7 +221,7 @@ void main() {
       final layers = c.read(editorControllerProvider).layers;
       c.read(selectedLayerProvider.notifier).state = layers.first.id;
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Mover e\ntransf.'));
+      await tester.tap(find.text('Movimentação e transformação'));
       await tester.pumpAndSettle();
       c.read(selectedLayerProvider.notifier).state = layers.last.id;
       await tester.pumpAndSettle();
@@ -248,7 +248,7 @@ void main() {
         .first
         .id;
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Mover e\ntransf.'));
+    await tester.tap(find.text('Movimentação e transformação'));
     await tester.pumpAndSettle();
     for (final tool in TransformTool.values) {
       tester
@@ -277,10 +277,10 @@ void main() {
       await tester.tap(find.text('Cena 3D'));
       await tester.pumpAndSettle();
       // A cena 3D abre o ESTUDIO — e la que ela se edita.
-      expect(find.byType(Scene3DStudio), findsOneWidget);
+      expect(find.byType(EstudioDaCena), findsOneWidget);
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
-      expect(find.byType(Scene3DStudio), findsNothing);
+      expect(find.byType(EstudioDaCena), findsNothing);
       expect(find.byType(EditorScreen), findsOneWidget);
       expect(tester.takeException(), isNull);
     },

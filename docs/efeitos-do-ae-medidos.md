@@ -221,3 +221,31 @@ medido não cai no centro do vinco que o render mostra, e o `Fold Radius` de
 50 rende um raio de ~0,8 vez o parâmetro. Preferi entregar o modelo limpo,
 com a geometria certa e o raio em pixels, a enterrar um deslocamento mágico
 que só valeria para esta bancada.
+
+## Long Shadow — FEITO (18/09), E ESTE É NOSSO
+
+**O AE do dono não tem Long Shadow.** O `S_LongShadow` do Sapphire não está
+instalado, e o `S_Shadow` e o `S_EdgeShadow` também não existem na máquina
+dele. Então este não é um efeito portado: é implementação nossa, e a ficha
+(`sombra_longa`) não finge um id do After Effects.
+
+O que ele faz é o long shadow clássico do motion design — a silhueta
+esticada numa direção até um comprimento, chapada numa cor só. A conta é a
+união de todas as cópias da silhueta deslocadas de 0 até o comprimento, e é
+por isso que ela não vira centenas de `saveLayer`: o shader marcha de trás
+para diante por pixel, uma leitura de textura por passo, com teto de 96
+passos.
+
+Duas heranças da Sombra projetada, de propósito: a **direção** (135° é a
+luz em cima à esquerda) e a **margem da caixa**, que é literalmente a mesma
+função.
+
+19 testes em `test/sombra_longa_test.dart`. A leitura de pixel é feita no
+shader cru, e não pela árvore de widgets: `isShaderFilterSupported` é false
+no ambiente de teste, o passe cai na reserva do `SnapshotWidget`, e essa
+foto é assíncrona de verdade — o teste passava sozinho e falhava em fila.
+
+**A armadilha que o teste pegou:** o sampler **não** devolve zero fora da
+textura. Sem uma guarda explícita em uv, o outro lado da textura volta pelo
+modo de repetição e a sombra sai um quadrado cheio em vez do losango da
+união de cópias.

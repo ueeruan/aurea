@@ -130,6 +130,7 @@ flutter:
     - shaders/auto_paint.frag
     - shaders/luz_na_faixa.frag
     - shaders/dobra_de_pagina.frag
+    - shaders/sombra_longa.frag
 
   assets:
     - assets/ai/

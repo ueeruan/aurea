@@ -19,6 +19,7 @@ import 'preenchimento.dart';
 import 'dobra_de_pagina.dart';
 import 'luz_na_faixa.dart';
 import 'sombra_projetada.dart';
+import 'sombra_longa.dart';
 import 'keyframe.dart';
 
 /// Efeitos aplicaveis a uma camada (blocos combinaveis, ordem importa).
@@ -184,6 +185,9 @@ enum EffectType {
   preenchimento,
   sombraProjetada,
   dobraDePagina,
+  // NAO TEM id DO AE: o Long Shadow nao existe no AE do dono (nem o
+  // S_LongShadow do Sapphire, nem o S_Shadow). A ficha e nossa.
+  sombraLonga,
 }
 
 /// A ORDEM DO ENUM ANTES DE O TIME REMAP SAIR (17/09).
@@ -577,6 +581,7 @@ const effectSpecs = <EffectType, EffectSpec>{
   ...efeitosSombraProjetada,
   ...efeitosLuzNaFaixa,
   ...efeitosDobraDePagina,
+  ...efeitosSombraLonga,
   ...efeitosLuzEDiversos,
   ...efeitosMotionTile,
 };

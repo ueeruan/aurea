@@ -40,6 +40,7 @@ import '../../domain/sombra_projetada.dart';
 import 'dobra_de_pagina_pass.dart';
 import 'luz_na_faixa_pass.dart';
 import 'sombra_projetada_pass.dart';
+import 'sombra_longa_pass.dart';
 import 'repeticao_pass.dart';
 import '../../domain/gear.dart';
 import '../../domain/text_animator.dart' show valueNoise01;
@@ -6431,6 +6432,15 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
           // que passou do topo do rolo vira transparente, entao a caixa da
           // camada continua a mesma — sem regiao extra, sem segunda copia.
           out = DobraDePaginaPass(
+            effect: effect,
+            time: local,
+            child: out,
+          );
+
+        case EffectType.sombraLonga:
+          // AO CONTRARIO DA DOBRA, ESTA CRESCE: a sombra sai da camada
+          // pelos lados em que a marcha anda, e o passe abre a caixa.
+          out = SombraLongaPass(
             effect: effect,
             time: local,
             child: out,

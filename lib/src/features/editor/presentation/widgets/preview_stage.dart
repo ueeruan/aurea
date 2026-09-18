@@ -37,11 +37,7 @@ import '../../domain/fx.dart';
 import '../../domain/oscillate.dart';
 import 'motion_tile_pass.dart';
 import '../../domain/sombra_projetada.dart';
-import 'dobra_de_pagina_pass.dart';
-import 'luz_na_faixa_pass.dart';
 import 'sombra_projetada_pass.dart';
-import 'sombra_longa_pass.dart';
-import 'time_warp_rgb_pass.dart';
 import '../../domain/desfoque_forcado.dart';
 import 'repeticao_pass.dart';
 import '../../domain/gear.dart';
@@ -2531,20 +2527,6 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
         );
       }
 
-      // RGB NO TEMPO na propria camada: tres montagens da camada, uma por
-      // canal, somadas. Mesma familia de custo do Time Slice.
-      final rgbFx = efeitoDeTempo(layer, EffectType.timeWarpRgb);
-      if (rgbFx != null) {
-        w = TimeWarpRgbPass(
-          effect: rgbFx,
-          time: tCamada,
-          child: w,
-          emTempo: (tempo) => _emOutroTempo(() => montar(tempo)),
-          tempoDeslocado: (quadros) =>
-              layer.startTime + localDeslocado(layer, tCamada, quadros, fxFps),
-        );
-      }
-
       // MOTION BLUR DA COMPOSICAO (nivel 1): a camada e desenhada varias
       // vezes ao longo da JANELA DE EXPOSICAO e as copias sao mediadas.
       //
@@ -3877,11 +3859,6 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
         // compilador saber que o tipo foi visto. Sem o motor, ele fica
         // NEUTRO — como os outros —, e a ficha avisa que precisa da GPU.
         case EffectType.preenchimento:
-        // O RGB NO TEMPO e montado ANTES, como o Time Slice: ele precisa
-        // da camada em tres instantes, e nao de um passe de pixel. O caso
-        // existe para o compilador saber que o tipo foi visto.
-        case EffectType.timeWarpRgb:
-          break;
         // EFEITOS QUE SO EXISTEM NO SHADER. Recorte por pixel e contorno
         // por vizinhanca nao tem versao em CPU que valha: seria um laco
         // sobre dois milhoes de pixels por quadro, na thread de UI — o
@@ -6437,33 +6414,12 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
           }
 
         case EffectType.lightSweep:
-          // A VARREDURA DE LUZ E UM SHADER DE UMA PASSADA: cada pixel
-          // calcula a propria luz, sem vizinhanca. Nao ha regiao para
-          // expandir nem foto da camada — so a camada, uma vez.
-          out = LuzNaFaixaPass(
-            effect: effect,
-            time: local,
-            child: out,
-          );
-
-        case EffectType.dobraDePagina:
-          // A DOBRA NAO CRESCE: ela so tira. O lado plano fica intacto e o
-          // que passou do topo do rolo vira transparente, entao a caixa da
-          // camada continua a mesma — sem regiao extra, sem segunda copia.
-          out = DobraDePaginaPass(
-            effect: effect,
-            time: local,
-            child: out,
-          );
-
-        case EffectType.sombraLonga:
-          // AO CONTRARIO DA DOBRA, ESTA CRESCE: a sombra sai da camada
-          // pelos lados em que a marcha anda, e o passe abre a caixa.
-          out = SombraLongaPass(
-            effect: effect,
-            time: local,
-            child: out,
-          );
+          // A VARREDURA DE LUZ SAIU DO CATALOGO (a pedido do dono, 18/09).
+          // O caso existe porque o TIPO continua no enum — tirar um tipo
+          // do meio do enum deslocaria o indice de todos os seguintes, e
+          // e o indice que o arquivo antigo guarda. Sem ficha ele nao
+          // aparece na galeria, e aqui ele nao desenha nada.
+          break;
 
         case EffectType.ccSplit:
           final sp = effect.paramAt('divisao', local);

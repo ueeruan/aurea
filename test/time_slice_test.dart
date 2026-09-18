@@ -9,7 +9,6 @@
 // Slice Direction -90, Slice Number 12, Frame Offset 0, Interp Frames 0.
 import 'dart:ui';
 
-import 'package:aurea/src/features/editor/domain/effect.dart';
 import 'package:aurea/src/features/editor/domain/layer.dart';
 import 'package:aurea/src/features/editor/domain/shape.dart';
 import 'package:aurea/src/features/editor/domain/time_slice.dart';
@@ -234,57 +233,9 @@ void main() {
     });
   });
 
-  group('a ficha', () {
-    test('esta registrada e diz de que plugin ela veio', () {
-      final spec = effectSpecs[EffectType.timeSlice];
-      expect(spec, isNotNull);
-      expect(spec!.id, 's_timeslice');
-      expect(spec.category, 'Time');
-    });
+/// A FICHA DO TIME SLICE SAIU DA GALERIA (a pedido do dono, 18/09). O
+/// MOTOR continua aqui inteiro e testado — o que saiu foi a porta.
 
-    test('os valores de fabrica sao os do S_TimeSlice lidos do AE', () {
-      final p = effectSpecs[EffectType.timeSlice]!.params;
-      expect(p['angle']!.initial, -90);
-      expect(p['slices']!.initial, 12);
-      expect(p['frame_offset']!.initial, 0);
-    });
-
-    /// O TESTE QUE MAIS IMPORTA: o motor le um punhado de chaves soltas
-    /// (`paramAt('slices', ...)`), e nenhuma delas e conferida pelo
-    /// compilador. Uma ficha com o nome trocado deixa o parametro mudo —
-    /// o efeito abre, o controle aparece, e nao muda nada.
-    test('TODAS as chaves que o motor le existem na ficha', () {
-      const lidas = [
-        'mix',
-        'angle',
-        'gap',
-        'slices',
-        'distribution',
-        'max_offset',
-        'curve',
-        'cycles',
-        'phase',
-        'sweep',
-        'seed',
-        'frame_offset',
-      ];
-      final spec = effectSpecs[EffectType.timeSlice]!;
-      for (final chave in lidas) {
-        expect(spec.params.containsKey(chave), isTrue,
-            reason: 'o motor le "$chave" e a ficha nao tem essa chave');
-      }
-    });
-
-    test('os presets usam as chaves que existem na ficha', () {
-      final spec = effectSpecs[EffectType.timeSlice]!;
-      for (final pronto in spec.presets) {
-        for (final chave in pronto.valores.keys) {
-          expect(spec.params.containsKey(chave), isTrue,
-              reason: 'preset "${pronto.nome}" mexe em "$chave"');
-        }
-      }
-    });
-  });
 }
 
 /// Uma camada minima, so para o `localDeslocado` ter duracao.

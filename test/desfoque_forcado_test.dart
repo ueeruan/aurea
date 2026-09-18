@@ -149,38 +149,7 @@ void main() {
     });
   });
 
-  group('a ficha', () {
-    test('esta registrada com o id do plugin e os valores de fabrica', () {
-      final spec = effectSpecs[EffectType.forceMotionBlur];
-      expect(spec, isNotNull);
-      expect(spec!.id, 'cc_force_motion_blur');
-      expect(spec.params['samples']!.initial, 8);
-      expect(spec.params['shutter_angle']!.initial, 180);
-      expect(spec.params['shutter_phase']!.initial, 0);
-    });
+/// A FICHA SAIU DA GALERIA (a pedido do dono, 18/09). A JANELA de
+/// exposicao continua aqui: e ela que o motor do palco usa.
 
-    test('TODAS as chaves que o motor le existem na ficha', () {
-      const lidas = [
-        'samples',
-        'shutter_angle',
-        'shutter_phase',
-        'native_motion_blur',
-      ];
-      final spec = effectSpecs[EffectType.forceMotionBlur]!;
-      for (final chave in lidas) {
-        expect(spec.params.containsKey(chave), isTrue,
-            reason: 'o motor le "$chave" e a ficha nao tem essa chave');
-      }
-    });
-
-    test('os presets usam as chaves que existem na ficha', () {
-      final spec = effectSpecs[EffectType.forceMotionBlur]!;
-      for (final pronto in spec.presets) {
-        for (final chave in pronto.valores.keys) {
-          expect(spec.params.containsKey(chave), isTrue,
-              reason: 'preset "${pronto.nome}" mexe em "$chave"');
-        }
-      }
-    });
-  });
 }

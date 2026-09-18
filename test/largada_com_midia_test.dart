@@ -27,7 +27,6 @@
 // antes — o que mudou e so a PRIMEIRA amostra, que e alinhamento e nao
 // deriva.
 import 'package:aurea/src/features/editor/application/playback_controller.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {

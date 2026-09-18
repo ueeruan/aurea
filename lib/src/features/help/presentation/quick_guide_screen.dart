@@ -174,16 +174,12 @@ String effectHelp(EffectType type) => switch (type) {
 
   EffectType.sombraProjetada => 'Copia o alfa da camada, pinta essa silhueta com a cor escolhida, desfoca e joga para o lado oposto ao da luz. Não é a sombra de uma caixa: é a sombra da forma, então um recorte vazado projeta sombra vazada. A camada abre para fora para a sombra caber.',
 
-  EffectType.lightSweep => 'Passa um facho reto de luz pela camada e SOMA luz ao que estiver embaixo. Não é um brilho no meio: é uma faixa que atravessa o quadro inteiro, inclusive o que for transparente. A intensidade é absoluta — 25% soma 25% de branco sobre qualquer cor —, e o perfil da faixa é reto, do centro até 1,8 vez a Largura. É o reflexo correndo num logo e o clarão que varre a cena.',
+      EffectType.forceMotionBlur => 'Reamostra a animacao da camada em varios instantes. Mais amostras melhoram o rastro, mas aumentam o trabalho de renderizacao. Sem ficha na galeria desde 18/09.',
+EffectType.lightSweep => 'Varredura de luz: um facho reto atravessa a camada e soma luz. Saiu da galeria a pedido do dono.',
 
-  EffectType.dobraDePagina => 'Levanta um lado da camada e enrola esse lado num cilindro, como quem vira a folha de um livro. O lado de lá do vinco continua plano e intacto; o lado de cá sobe, curva, comprime o conteúdo e projeta de volta por cima — e o que passou do topo do rolo deixa de cobrir. O Raio é o raio do rolo em pixels: pequeno faz um canto dobrado, grande faz meia folha virando. A Direção da luz é o que dá o reflexo correndo pela dobra.',
-  EffectType.sombraLonga =>
-      'Estica a silhueta da camada numa direcao ate um comprimento, chapada numa cor so — o long shadow do motion design. Diferente da Sombra projetada, que e uma copia deslocada, aqui sao centenas de copias em fila, uma por passo da marcha, e a camada fica inteira por cima. O Angulo e o mesmo da Sombra projetada (135 põe a luz em cima a esquerda). A Queda faz a sombra desvanecer ate a ponta em vez de acabar de repente.',
-
+    
   EffectType.timeSlice => 'Divide o quadro em faixas e cada faixa mostra a camada num instante diferente. Escada imita o S_TimeSlice; linear com ease out vira a transição de faixas dos edits. Numa camada de ajuste, fatia tudo que está embaixo.',
-  EffectType.timeWarpRgb =>
-      'Cada canal de cor mostra a camada num instante diferente: o vermelho adiantado, o azul atrasado, o verde no lugar. Da a separacao de cor que corre nas bordas do movimento — quanto maior o deslocamento em quadros, mais largo o fantasma. Custa tres montagens da camada por quadro, então é um efeito de acabamento, e não de rascunho.',
-  EffectType.forceMotionBlur =>
+    EffectType.forceMotionBlur =>
       'Borra o que se move, montando a camada várias vezes dentro da janela de exposição e tirando a média. Como cada amostra é a camada no seu instante, o desfoque vale também para o CONTEÚDO de um vídeo — o objeto que anda dentro do quadro. O Ângulo do obturador é o quanto de quadro a exposição pega (180 graus é meia exposição, o padrão do cinema) e a Fase decide para onde o arrasto cai: 0 arrasta para frente, -90 centra no quadro, -180 pega o que já passou.',
   EffectType.posterizeTime => 'Faz a camada inteira andar em degraus de N quadros por segundo: 12 para o visual de anime, 8 para stop motion, 4 para travado. Numa camada de ajuste, quantiza tudo que está embaixo.',
   EffectType.flash => 'Clarão de um ou poucos quadros na batida: branco, somar, tela, exposição ou negativo. Segura N quadros e cai em M; o gatilho repete a cada N quadros ou dispara ao acaso. Evite flashes rápidos em conteúdo sensível.',

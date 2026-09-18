@@ -84,25 +84,48 @@ quadrado deslocado (159, não 160,3).
 **A sombra usa o ALFA da camada**, não a caixa dela. A cor vem do
 parâmetro 1 e a opacidade do 2 (0..255 no AE; aqui em %).
 
-### Onde eu parei
+### Onde eu parei, e o que ja foi DESCARTADO com prova
 
-A conta está pronta e testada em 6 testes puros (deslocamento nos quatro
-quadrantes, distância zero, sigma). **O desenho não funciona**: o passe
-montado com `Stack` + `Positioned.fill` + `ColorFiltered(srcIn)` +
-`ImageFiltered(blur)` + `Transform.translate` **não pinta nada** — o
-diagnóstico mostrou só o quadrado branco na linha y=120, sem um pixel de
-vermelho. Revertido em vez de commitado.
+A conta esta pronta (deslocamento nos quatro quadrantes, distancia zero,
+sigma). **O desenho nao funciona**, e ja tentei tres mecanismos:
 
-O que tentar em seguida, em ordem:
+1. **ARVORE DE WIDGETS** — `Stack` + `Positioned.fill` + `ColorFiltered` +
+   `ImageFiltered` + `Transform.translate`. Nao pintou NADA: o diagnostico
+   mostrou so a camada, sem um pixel de sombra. Tres arranjos de layout
+   depois, desisti.
 
-1. `Stack` com o filho **não posicionado** para a sombra e a camada por
-   cima num `Positioned.fill` (hoje é o inverso);
-2. `ColorFiltered` com `BlendMode.srcATop` em vez de `srcIn` — o `srcIn`
-   já me deu saída vazia uma vez neste projeto;
-3. se as duas falharem, desenhar a sombra num `PictureRecorder` e
-   `drawPicture` — é o caminho que o Motion Tile usa e que está provado.
+2. **`Paint.colorFilter` no `drawImage`** — a sombra saiu BRANCA, com a
+   cor de origem. O filtro nao tingiu.
 
----
+3. **`saveLayer` com o filtro na camada** — a sombra saiu branca com
+   **ALFA ZERO**: o RGB sobreviveu e a transparencia sumiu. Pior que o
+   anterior, porque o efeito desaparece sem erro nenhum.
+
+4. **`drawRect` com `srcIn` por cima** — mesmo resultado do 3.
+
+### O ACHADO QUE IMPORTA, e que veio no fim
+
+Numa caneta LIMPA, com o canvas transladado e a MESMA imagem:
+
+```
+c.drawImage(im, Offset(21,21), Paint());   //  -> RGB branco, ALFA 0
+c.drawImage(im, Offset.zero,  Paint());    //  -> correto, alfa 255
+```
+
+E desenhando **so** a do offset, ela tambem sai com alfa 0. Ou seja: nesta
+bancada, `drawImage` com deslocamento NAO COMPOE — so os canais de cor
+chegam, e o alfa sai zerado.
+
+Isso explica os tres fracassos de uma vez: TODOS eles dependiam de desenhar
+a imagem deslocada. E e o proximo lugar a olhar — antes de tentar um quarto
+mecanismo, vale conferir se o problema e a imagem de teste (criada por
+`ImageDescriptor.raw` + codec descartado) ou o `drawImage` deslocado.
+
+**Sugestao de proximo passo:** refazer o mesmo diagnostico com uma imagem
+carregada por `ui.instantiateImageCodec` de bytes PNG (o caminho que o app
+usa), e com um `RepaintBoundary` em vez de `PictureRecorder`. Se o alfa
+voltar, o problema era a bancada, e o mecanismo 1 — a arvore de widgets —
+merece uma segunda chance.
 
 ## TimeSlice e TimeWarpRGB — bloqueados por arquitetura
 

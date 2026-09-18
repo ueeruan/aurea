@@ -100,7 +100,7 @@ Set<AmSecao> secoesDe(Layer layer) {
     // seu tipo, e nenhum tipo passa de sete.
     if (layer is TextLayer) AmSecao.editarTexto,
     if (layer is CaptionLayer) AmSecao.editarLegendas,
-    if (layer is ParticlesLayer) AmSecao.particulas,
+    if (layer is ParticulasLayer) AmSecao.particulas,
     if (layer is Element3DLayer || layer is Scene3DLayer) AmSecao.cena3d,
     // SEM "PRESETS" NA GRADE (relato do beta 1.0.5): o quadrado com o selo
     // NEW vinha antes de "Efeitos" e empurrava os efeitos para uma fileira

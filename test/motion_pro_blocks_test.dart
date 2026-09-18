@@ -357,7 +357,7 @@ void main() {
             startTime: Duration.zero,
             duration: const Duration(seconds: 2),
             sourcePath: '/v.mp4'),
-        ParticlesLayer(
+        ParticulasLayer(
             name: 'particulas',
             startTime: Duration.zero,
             duration: const Duration(seconds: 2)),
@@ -463,7 +463,7 @@ void main() {
     test('camada bloqueante e PULADA, nunca exportada quebrada', () {
       final out = exportLottie(_p([
         _shape('ok'),
-        ParticlesLayer(
+        ParticulasLayer(
             name: 'p',
             startTime: Duration.zero,
             duration: const Duration(seconds: 1)),

@@ -1,3 +1,4 @@
+import 'package:aurea_render/aurea_render.dart';
 import 'package:aurea/src/features/editor/domain/model_asset3d.dart';
 
 import 'dart:convert';
@@ -179,12 +180,17 @@ void main() {
   test('new particles start as a quiet fine white 3D field', () {
     final c = ProviderContainer();
     addTearDown(c.dispose);
-    c.read(editorControllerProvider.notifier).addParticlesLayer(Duration.zero);
+    c.read(editorControllerProvider.notifier).addParticulasLayer(Duration.zero);
     final layer =
-        c.read(editorControllerProvider).layers.first as ParticlesLayer;
+        c.read(editorControllerProvider).layers.first as ParticulasLayer;
     expect(layer.is3D, isTrue);
-    expect(layer.count, 5000);
-    expect(layer.size, 1);
-    expect(layer.glow, 0);
+    // A NUVEM PADRAO CONTINUA SENDO O CAMPO FINO E CLARO: pontos de
+    // tamanho 1, sem brilho, cobrindo a composicao.
+    final q = layer.parametros;
+    expect(q.tamanho, 1);
+    expect(q.brilho, 0);
+    expect(q.forma, FormaDaParticula.esfera);
+    expect(q.maximo, 1200);
+    expect(q.velocidade, 0);
   });
 }

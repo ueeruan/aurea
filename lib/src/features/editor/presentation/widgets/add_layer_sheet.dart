@@ -1447,7 +1447,7 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
         label: 'Partículas',
         onTap: () {
           _fecha();
-          _controller.addParticlesLayer(widget.playhead);
+          _controller.addParticulasLayer(widget.playhead);
         },
       ),
       // 6. Texto 3D estilo Element 3D: pede o texto e o metal e

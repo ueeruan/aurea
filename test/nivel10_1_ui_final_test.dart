@@ -20,7 +20,7 @@ List<Layer> _todasAsCamadas() => [
       AudioLayer(name: 'a', startTime: Duration.zero, duration: _d,
           sourcePath: '/tmp/a.wav'),
       NullLayer(name: 'n', startTime: Duration.zero, duration: _d),
-      ParticlesLayer(name: 'p', startTime: Duration.zero, duration: _d),
+      ParticulasLayer(name: 'p', startTime: Duration.zero, duration: _d),
       Element3DLayer(name: 'e', startTime: Duration.zero, duration: _d),
       Scene3DLayer(name: 'c', startTime: Duration.zero, duration: _d),
       AdjustmentLayer(name: 'j', startTime: Duration.zero, duration: _d),
@@ -103,7 +103,7 @@ void main() {
       final porSecao = <AmSecao, Type>{
         AmSecao.editarTexto: TextLayer,
         AmSecao.editarLegendas: CaptionLayer,
-        AmSecao.particulas: ParticlesLayer,
+        AmSecao.particulas: ParticulasLayer,
       };
       for (final entrada in porSecao.entries) {
         for (final camada in _todasAsCamadas()) {

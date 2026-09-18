@@ -1,5 +1,6 @@
 import 'dart:ui';
 
+import 'package:aurea_render/aurea_render.dart';
 import 'package:uuid/uuid.dart';
 
 import 'ajuste_da_midia.dart';
@@ -2542,56 +2543,30 @@ class CameraLayer extends Layer {
   );
 }
 
-/// Sistema de particulas 3D (estilo CC Particle World do AE): o emissor e a
-/// propria camada; a simulacao e funcao PURA de (seed, indice, tempo) —
-/// scrub-estavel, nada acumula estado entre frames. Cada particula nasce
-/// com velocidade/fase/profundidade proprias derivadas do seed; a camada
-/// inteira pode ser movida individualmente ou por um objeto nulo 3D (pai).
-class ParticlesLayer extends Layer {
-  ParticlesLayer({
+/// A CAMADA DE PARTICULAS.
+///
+/// ELA NAO SIMULA MAIS NADA. A nuvem inteira — trajetoria, turbulencia,
+/// rastro, faiscas, projecao — vive no motor em C++ (`aurea_render`), e
+/// esta camada e o ENVELOPE: guarda os parametros, aparece na timeline e
+/// entra na composicao como qualquer outra.
+///
+/// POR QUE A SIMULACAO SAIU DAQUI: ela rodava na thread da UI, a cada
+/// quadro, junto com a arvore de widgets — e a exportacao repetia a MESMA
+/// conta num segundo lugar, com a chance de os dois discordarem. Uma
+/// simulacao so serve os dois. Nao ha nenhum estado de particula neste
+/// objeto: [parametros] e uma receita, e quem a resolve e o motor.
+///
+/// O QUE ISTO AINDA GUARDA: a posicao, a escala, o giro e o Z, que vao
+/// para o motor como o CENTRO e a ROTACAO do sistema. Um nulo 3D continua
+/// arrastando a nuvem inteira, porque o transform da camada continua sendo
+/// resolvido pelo mesmo `effectiveTransform` de todo mundo.
+class ParticulasLayer extends Layer {
+  ParticulasLayer({
     super.id,
     required super.name,
     required super.startTime,
     required super.duration,
-    this.count = 90,
-    this.seed = 7,
-    this.uniformDistribution = false,
-    this.speed = 40,
-    this.spreadDeg = 360,
-    this.directionDeg = -90,
-    this.gravity = 0,
-    this.size = 26,
-    this.lifetimeMs = 4000,
-    this.depth = 1400,
-    this.emitW = 980,
-    this.emitH = 980,
-    this.twinkle = true,
-    this.color = const Color(0xFFFF3B52),
-    this.star = true,
-    this.emitter = 0,
-    this.emitMode = 0,
-    this.windX = 0,
-    this.windY = 0,
-    this.drag = 0,
-    this.turbulence = 0,
-    this.turbulenceScale = 300,
-    this.turbulenceSpeed = 1,
-    this.sizeOverLife = 0,
-    this.sizeRandom = 0.5,
-    this.opacityOverLife = 0,
-    this.opacityRandom = 0,
-    this.colorEnd,
-    int? shape,
-    this.spin = 0,
-    this.trail = 0,
-    this.lifeRandom = 0,
-    this.glow = 0.25,
-    this.auxCount = 0,
-    this.auxLifeMs = 700,
-    this.auxInherit = 0.35,
-    this.auxSpeed = 60,
-    this.auxSize = 0.45,
-    this.auxStart = 0,
+    ParametrosDeParticulas? parametros,
     super.position,
     super.scaleX,
     super.scaleY,
@@ -2614,230 +2589,46 @@ class ParticlesLayer extends Layer {
     super.masks,
     super.matteMode,
     super.matteSourceId,
-  }) : shape = shape ?? (star ? 1 : 0);
+  }) : parametros = parametros ?? receitaPadraoDeParticulas();
 
-  /// Numero de particulas vivas por ciclo.
-  final int count;
-  final int seed;
-  final bool uniformDistribution;
+  /// A RECEITA DA NUVEM. E um objeto imutavel do motor: trocar um
+  /// parametro e `withParametros(parametros.clonar()..tamanho = 40)`, e
+  /// nao um `set` no meio da simulacao.
+  final ParametrosDeParticulas parametros;
 
-  /// Velocidade inicial (px/s), direcao media e abertura do cone (graus).
-  final double speed;
-  final double spreadDeg;
-  final double directionDeg;
-
-  /// Gravidade (px/s^2, positivo = para baixo).
-  final double gravity;
-
-  /// Tamanho base da particula (px) e vida (ms).
-  final double size;
-  final int lifetimeMs;
-
-  /// Espalhamento em Z: cada particula nasce com profundidade propria e
-  /// ganha perspectiva (3D de verdade na ordenacao visual).
-  final double depth;
-
-  /// Area do emissor (estilo CC Particle World): 0 = ponto; maior = as
-  /// particulas nascem espalhadas num retangulo em volta do centro.
-  final double emitW;
-  final double emitH;
-
-  /// Cintilar: alfa oscila por particula (fase propria, deterministica).
-  final bool twinkle;
-
-  final Color color;
-
-  /// true = sparkles de 4 pontas; false = pontos.
-  final bool star;
-
-  // ---- Particular-like (V1.1): emissor, fisica, vida e aparencia.
-
-  /// Emissor: 0 caixa (area X/Y + fundo Z), 1 ponto, 2 esfera (raio =
-  /// area X / 2), 3 anel (raio = area X / 2, no plano XY).
-  final int emitter;
-
-  /// Direcao de saida: 0 cone (direcao + abertura), 1 todas as direcoes
-  /// (esfera), 2 para fora do centro do emissor.
-  final int emitMode;
-
-  /// Vento (px/s): deriva constante somada ao movimento.
-  final double windX;
-  final double windY;
-
-  /// Resistencia do ar (1/s): a velocidade inicial decai; com gravidade,
-  /// a particula atinge velocidade terminal.
-  final double drag;
-
-  /// Turbulencia: amplitude (px), tamanho do detalhe (px) e velocidade
-  /// de evolucao do campo (ciclos/s).
-  final double turbulence;
-  /// AS FAISCAS: quantas particulas nascem de CADA particula ao longo
-  /// do caminho dela. Zero desliga o sistema inteiro — e o padrao, para
-  /// projeto antigo abrir igual.
-  ///
-  /// E o que separa uma chuva de pontos de um fogo de artificio: a
-  /// faisca herda parte da velocidade de quem a soltou, ganha a sua
-  /// propria, e morre antes. A simulacao continua PURA: a faisca e
-  /// funcao de (semente, indice do pai, indice da faisca, tempo), entao
-  /// arrastar o cabecote para tras da o mesmo quadro.
-  final int auxCount;
-
-  /// Quanto tempo a faisca vive, em ms.
-  final double auxLifeMs;
-
-  /// Quanto da velocidade do pai a faisca leva junto (0..1).
-  final double auxInherit;
-
-  /// A velocidade PROPRIA da faisca, sorteada em todas as direcoes.
-  final double auxSpeed;
-
-  /// O tamanho da faisca, como fracao do tamanho do pai.
-  final double auxSize;
-
-  /// A partir de que fracao da vida do pai as faiscas comecam a sair.
-  final double auxStart;
-
-  final double turbulenceScale;
-  final double turbulenceSpeed;
-
-  /// Tamanho ao longo da vida: 0 fixo, 1 cresce, 2 encolhe, 3 sobe e
-  /// desce. [sizeRandom] 0..1 espalha o tamanho entre particulas.
-  final int sizeOverLife;
-  final double sizeRandom;
-
-  /// Opacidade ao longo da vida: 0 entra e sai, 1 some, 2 aparece,
-  /// 3 fixa. [opacityRandom] 0..1 espalha a opacidade.
-  final int opacityOverLife;
-  final double opacityRandom;
-
-  /// Cor no fim da vida (null = cor fixa).
-  final Color? colorEnd;
-
-  /// Forma: 0 esfera, 1 estrela, 2 risco (streak), 3 nuvem, 4 quadrado,
-  /// 5 anel. Sem valor salvo, vem de [star].
-  final int shape;
-
-  /// Giro proprio (graus/s) — visivel nas formas com orientacao.
-  final double spin;
-
-  /// Rastro 0..1: copias fantasmas em idades anteriores (cauda).
-  final double trail;
-
-  /// Vida aleatoria 0..1: encurta a vida de parte das particulas.
-  final double lifeRandom;
-
-  /// Brilho (halo) 0..1.
-  final double glow;
-
-  ParticlesLayer copyParticles({
-    int? count,
-    int? seed,
-    bool? uniformDistribution,
-    double? speed,
-    double? spreadDeg,
-    double? directionDeg,
-    double? gravity,
-    double? size,
-    int? lifetimeMs,
-    double? depth,
-    double? emitW,
-    double? emitH,
-    bool? twinkle,
-    Color? color,
-    bool? star,
-    int? emitter,
-    int? emitMode,
-    double? windX,
-    double? windY,
-    double? drag,
-    double? turbulence,
-    double? turbulenceScale,
-    double? turbulenceSpeed,
-    int? sizeOverLife,
-    double? sizeRandom,
-    int? opacityOverLife,
-    double? opacityRandom,
-    Color? colorEnd,
-    bool clearColorEnd = false,
-    int? shape,
-    double? spin,
-    double? trail,
-    double? lifeRandom,
-    double? glow,
-    int? auxCount,
-    double? auxLifeMs,
-    double? auxInherit,
-    double? auxSpeed,
-    double? auxSize,
-    double? auxStart,
-  }) {
-    return ParticlesLayer(
-      id: id,
-      name: name,
-      startTime: startTime,
-      duration: duration,
-      count: count ?? this.count,
-      seed: seed ?? this.seed,
-      uniformDistribution: uniformDistribution ?? this.uniformDistribution,
-      speed: speed ?? this.speed,
-      spreadDeg: spreadDeg ?? this.spreadDeg,
-      directionDeg: directionDeg ?? this.directionDeg,
-      gravity: gravity ?? this.gravity,
-      size: size ?? this.size,
-      lifetimeMs: lifetimeMs ?? this.lifetimeMs,
-      depth: depth ?? this.depth,
-      emitW: emitW ?? this.emitW,
-      emitH: emitH ?? this.emitH,
-      twinkle: twinkle ?? this.twinkle,
-      color: color ?? this.color,
-      star: star ?? this.star,
-      emitter: emitter ?? this.emitter,
-      emitMode: emitMode ?? this.emitMode,
-      windX: windX ?? this.windX,
-      windY: windY ?? this.windY,
-      drag: drag ?? this.drag,
-      turbulence: turbulence ?? this.turbulence,
-      turbulenceScale: turbulenceScale ?? this.turbulenceScale,
-      turbulenceSpeed: turbulenceSpeed ?? this.turbulenceSpeed,
-      sizeOverLife: sizeOverLife ?? this.sizeOverLife,
-      sizeRandom: sizeRandom ?? this.sizeRandom,
-      opacityOverLife: opacityOverLife ?? this.opacityOverLife,
-      opacityRandom: opacityRandom ?? this.opacityRandom,
-      colorEnd: clearColorEnd ? null : (colorEnd ?? this.colorEnd),
-      shape: shape ?? this.shape,
-      spin: spin ?? this.spin,
-      trail: trail ?? this.trail,
-      lifeRandom: lifeRandom ?? this.lifeRandom,
-      glow: glow ?? this.glow,
-      auxCount: auxCount ?? this.auxCount,
-      auxLifeMs: auxLifeMs ?? this.auxLifeMs,
-      auxInherit: auxInherit ?? this.auxInherit,
-      auxSpeed: auxSpeed ?? this.auxSpeed,
-      auxSize: auxSize ?? this.auxSize,
-      auxStart: auxStart ?? this.auxStart,
-      position: position,
-      scaleX: scaleX,
-      scaleY: scaleY,
-      rotation: rotation,
-      rotationX: rotationX,
-      rotationY: rotationY,
-      opacity: opacity,
-      skewX: skewX,
-      skewY: skewY,
-      pivot: pivot,
-      pivotZ: pivotZ,
-      orientX: orientX,
-      orientY: orientY,
-      orientZ: orientZ,
-      blendMode: blendMode,
-      is3D: is3D,
-      positionZ: positionZ,
-      effects: effects,
-    );
-  }
+  /// A MESMA CAMADA COM OUTRA RECEITA.
+  ParticulasLayer withParametros(ParametrosDeParticulas p) => ParticulasLayer(
+    id: id,
+    name: name,
+    startTime: startTime,
+    duration: duration,
+    parametros: p,
+    position: position,
+    scaleX: scaleX,
+    scaleY: scaleY,
+    rotation: rotation,
+    rotationX: rotationX,
+    rotationY: rotationY,
+    opacity: opacity,
+    skewX: skewX,
+    skewY: skewY,
+    pivot: pivot,
+    pivotZ: pivotZ,
+    orientX: orientX,
+    orientY: orientY,
+    orientZ: orientZ,
+    blendMode: blendMode,
+    customBlend: customBlend,
+    is3D: is3D,
+    positionZ: positionZ,
+    effects: effects,
+    masks: masks,
+    matteMode: matteMode,
+    matteSourceId: matteSourceId,
+  );
 
   @override
-  ParticlesLayer copyLayer({
+  ParticulasLayer copyLayer({
     String? name,
     Duration? startTime,
     Duration? duration,
@@ -2865,122 +2656,44 @@ class ParticlesLayer extends Layer {
     MatteMode? matteMode,
     String? matteSourceId,
     bool clearMatteSource = false,
-  }) {
-    return ParticlesLayer(
-      id: id,
-      name: name ?? this.name,
-      startTime: startTime ?? this.startTime,
-      duration: duration ?? this.duration,
-      count: count,
-      seed: seed,
-      uniformDistribution: uniformDistribution,
-      speed: speed,
-      spreadDeg: spreadDeg,
-      directionDeg: directionDeg,
-      gravity: gravity,
-      size: size,
-      lifetimeMs: lifetimeMs,
-      depth: depth,
-      emitW: emitW,
-      emitH: emitH,
-      twinkle: twinkle,
-      color: color,
-      star: star,
-      emitter: emitter,
-      emitMode: emitMode,
-      windX: windX,
-      windY: windY,
-      drag: drag,
-      turbulence: turbulence,
-      turbulenceScale: turbulenceScale,
-      turbulenceSpeed: turbulenceSpeed,
-      sizeOverLife: sizeOverLife,
-      sizeRandom: sizeRandom,
-      opacityOverLife: opacityOverLife,
-      opacityRandom: opacityRandom,
-      colorEnd: colorEnd,
-      shape: shape,
-      spin: spin,
-      trail: trail,
-      lifeRandom: lifeRandom,
-      glow: glow,
-      auxCount: auxCount,
-      auxLifeMs: auxLifeMs,
-      auxInherit: auxInherit,
-      auxSpeed: auxSpeed,
-      auxSize: auxSize,
-      auxStart: auxStart,
-      position: position ?? this.position,
-      scaleX: scaleX ?? this.scaleX,
-      scaleY: scaleY ?? this.scaleY,
-      rotation: rotation ?? this.rotation,
-      rotationX: rotationX ?? this.rotationX,
-      rotationY: rotationY ?? this.rotationY,
-      opacity: opacity ?? this.opacity,
-      skewX: skewX ?? this.skewX,
-      skewY: skewY ?? this.skewY,
-      pivot: pivot ?? this.pivot,
-      pivotZ: pivotZ ?? this.pivotZ,
-      orientX: orientX ?? this.orientX,
-      orientY: orientY ?? this.orientY,
-      orientZ: orientZ ?? this.orientZ,
-      blendMode: blendMode ?? this.blendMode,
-      customBlend: clearCustomBlend ? null : (customBlend ?? this.customBlend),
-      is3D: is3D ?? this.is3D,
-      positionZ: positionZ ?? this.positionZ,
-      effects: effects ?? this.effects,
-      masks: masks ?? this.masks,
-      matteMode: matteMode ?? this.matteMode,
-      matteSourceId: clearMatteSource
-          ? null
-          : (matteSourceId ?? this.matteSourceId),
-    );
-  }
+  }) => ParticulasLayer(
+    id: id,
+    name: name ?? this.name,
+    startTime: startTime ?? this.startTime,
+    duration: duration ?? this.duration,
+    parametros: parametros,
+    position: position ?? this.position,
+    scaleX: scaleX ?? this.scaleX,
+    scaleY: scaleY ?? this.scaleY,
+    rotation: rotation ?? this.rotation,
+    rotationX: rotationX ?? this.rotationX,
+    rotationY: rotationY ?? this.rotationY,
+    opacity: opacity ?? this.opacity,
+    skewX: skewX ?? this.skewX,
+    skewY: skewY ?? this.skewY,
+    pivot: pivot ?? this.pivot,
+    pivotZ: pivotZ ?? this.pivotZ,
+    orientX: orientX ?? this.orientX,
+    orientY: orientY ?? this.orientY,
+    orientZ: orientZ ?? this.orientZ,
+    blendMode: blendMode ?? this.blendMode,
+    customBlend: clearCustomBlend ? null : (customBlend ?? this.customBlend),
+    is3D: is3D ?? this.is3D,
+    positionZ: positionZ ?? this.positionZ,
+    effects: effects ?? this.effects,
+    masks: masks ?? this.masks,
+    matteMode: matteMode ?? this.matteMode,
+    matteSourceId: clearMatteSource
+        ? null
+        : (matteSourceId ?? this.matteSourceId),
+  );
 
   @override
-  ParticlesLayer duplicated() => ParticlesLayer(
+  ParticulasLayer duplicated() => ParticulasLayer(
     name: name,
     startTime: startTime,
     duration: duration,
-    count: count,
-    seed: seed,
-    uniformDistribution: uniformDistribution,
-    speed: speed,
-    spreadDeg: spreadDeg,
-    directionDeg: directionDeg,
-    gravity: gravity,
-    size: size,
-    lifetimeMs: lifetimeMs,
-    depth: depth,
-    emitW: emitW,
-    emitH: emitH,
-    twinkle: twinkle,
-    color: color,
-    star: star,
-    emitter: emitter,
-    emitMode: emitMode,
-    windX: windX,
-    windY: windY,
-    drag: drag,
-    turbulence: turbulence,
-    turbulenceScale: turbulenceScale,
-    turbulenceSpeed: turbulenceSpeed,
-    sizeOverLife: sizeOverLife,
-    sizeRandom: sizeRandom,
-    opacityOverLife: opacityOverLife,
-    opacityRandom: opacityRandom,
-    colorEnd: colorEnd,
-    shape: shape,
-    spin: spin,
-    trail: trail,
-    lifeRandom: lifeRandom,
-    glow: glow,
-    auxCount: auxCount,
-    auxLifeMs: auxLifeMs,
-    auxInherit: auxInherit,
-    auxSpeed: auxSpeed,
-    auxSize: auxSize,
-    auxStart: auxStart,
+    parametros: parametros.clonar(),
     position: position,
     scaleX: scaleX,
     scaleY: scaleY,
@@ -3006,10 +2719,104 @@ class ParticlesLayer extends Layer {
   );
 }
 
-/// Elemento 3D nativo: um solido (cubo, esfera, diamante...) gerado por
-/// codigo e girado DE VERDADE no espaco — os vertices sao rotacionados e
-/// projetados por face dentro do pintor, como as particulas. Vinculado a
-/// um nulo 3D (pai), herda a rotacao da cadeia inteira.
+/// A RECEITA PADRAO de uma camada de particulas nova: o preset "Estrelas"
+/// com a lente neutra. Um campo de pontos cintilantes e o que se espera ao
+/// inserir "Particulas" — um emissor de fogo cairia como surpresa.
+ParametrosDeParticulas receitaPadraoDeParticulas() =>
+    MotorDeParticulasRender.preset(4) ??
+    ParametrosDeParticulas(maximo: 260, vidaS: 6);
+
+/// OS PARAMETROS DE UMA CAMADA A PARTIR DO QUE UM PROJETO ANTIGO GUARDOU.
+///
+/// O ARQUIVO NAO MUDOU DE FORMA: as chaves continuam as mesmas, e o que
+/// esta aqui e a TRADUCAO delas para a receita do motor novo. Um projeto
+/// salvo antes desta versao abre com a nuvem que ele mostrava — nao com
+/// um campo vazio, e nao com um erro.
+///
+/// O QUE NAO TEM EQUIVALENTE EXATO: o emissor 3 (anel) virou um emissor de
+/// ANEL de verdade no motor (o motor ganhou esse caso justamente por
+/// causa disto), e a distribuicao uniforme do sorteio antigo virou a
+/// avalanche do novo — o campo muda de desenho, mas nao de forma.
+ParametrosDeParticulas parametrosDeParticulasDoProjeto(
+  Map<dynamic, dynamic> m,
+) {
+  double n(Object? v, double padrao) => (v as num?)?.toDouble() ?? padrao;
+  int i(Object? v, int padrao) => (v as num?)?.toInt() ?? padrao;
+  int cor(Object? v, int padrao) {
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    return padrao;
+  }
+
+  final vidaMs = n(m['life'], 4000);
+  final novo = i(m['pv'], 0) >= 2;
+  final bruto = i(m['emitter'], 0);
+  // O NUMERO DO EMISSOR MUDOU DE SENTIDO: no motor antigo, 3 era um ANEL
+  // no plano XY; no novo, 3 e uma LINHA e o anel foi para 4. Sem a marca
+  // `pv`, `emitter: 3` viraria uma linha — o projeto abriria com as
+  // particulas nascendo ao longo de um risco em vez de um circulo.
+  final emissor = novo ? bruto.clamp(0, 4) : const [0, 1, 2, 4][bruto.clamp(0, 3)];
+  final forma = i(m['shape'], (m['star'] as bool? ?? true) ? 1 : 0);
+  final temFim = m['colorEnd'] != null;
+  final largura = n(m['emitW'], 980);
+
+  return ParametrosDeParticulas(
+    emissor: EmissorDeParticulas.values[emissor],
+    centroX: 0,
+    centroY: 0,
+    largura: largura,
+    altura: n(m['emitH'], 980),
+    profundidade: n(m['depth'], 1400),
+    // O ANEL E A ESFERA DO MOTOR NOVO USAM `raio`; os dois antigos
+    // usavam metade da largura do emissor.
+    raio: n(m['emitterR'], emissor == 4 || emissor == 2 ? largura / 2 : 200),
+    // SEM TAXA: o projeto antigo era pre-roll, e `count` era quantas
+    // ficavam vivas ao mesmo tempo.
+    taxaDeNascimento: n(m['rate'], 0),
+    vidaS: vidaMs / 1000,
+    vidaVariacao: n(m['lifeRnd'], 0),
+    maximo: i(m['count'], 90),
+    semente: i(m['seed'], 7),
+    velocidade: n(m['speed'], 40),
+    direcaoGraus: n(m['dir'], -90),
+    aberturaGraus: n(m['spread'], 360),
+    modoDeEmissao: ModoDeEmissao.values[i(m['emitMode'], 0).clamp(0, 2)],
+    gravidade: n(m['gravity'], 0),
+    ventoX: n(m['windX'], 0),
+    ventoY: n(m['windY'], 0),
+    ventoZ: n(m['windZ'], 0),
+    arrasto: n(m['drag'], 0),
+    atracao: n(m['attract'], 0),
+    atracaoX: n(m['attractX'], 0),
+    atracaoY: n(m['attractY'], 0),
+    atracaoZ: n(m['attractZ'], 0),
+    turbulencia: n(m['turb'], 0),
+    turbulenciaEscala: n(m['turbScale'], 300),
+    turbulenciaVelocidade: n(m['turbSpeed'], 1),
+    tamanho: n(m['size'], 26),
+    tamanhoVariacao: n(m['sizeRnd'], 0.5),
+    tamanhoNaVida: TamanhoNaVida.values[i(m['sizeLife'], 0).clamp(0, 3)],
+    opacidade: n(m['opacity'], 1),
+    opacidadeVariacao: n(m['opRnd'], 0),
+    opacidadeNaVida: OpacidadeNaVida.values[i(m['opLife'], 0).clamp(0, 3)],
+    corInicio: cor(m['color'], 0xFFFF3B52),
+    corFim: temFim ? cor(m['colorEnd'], 0xFFFF3B52) : cor(m['color'], 0xFFFF3B52),
+    temCorFim: temFim,
+    forma: FormaDaParticula.values[forma.clamp(0, 5)],
+    giroGrausS: n(m['spin'], 0),
+    brilho: n(m['glow'], 0.25),
+    cintilar: m['twinkle'] as bool? ?? false,
+    rastro: n(m['trail'], 0),
+    faiscas: i(m['auxN'], 0),
+    faiscaVidaS: n(m['auxLife'], 700) / 1000,
+    faiscaHeranca: n(m['auxInh'], 0.35),
+    faiscaVelocidade: n(m['auxSpd'], 60),
+    faiscaTamanho: n(m['auxSize'], 0.45),
+    faiscaInicio: n(m['auxStart'], 0),
+    focal: n(m['focal'], 1200),
+  );
+}
+
 class Element3DLayer extends Layer {
   Element3DLayer({
     super.id,

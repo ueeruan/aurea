@@ -220,7 +220,7 @@ void main() {
       conferir('forma', () => ctrl().addShapeLayer(Duration.zero));
       conferir('nulo', () => ctrl().addNullLayer(Duration.zero));
       conferir('ajuste', () => ctrl().addAdjustmentLayer(Duration.zero));
-      conferir('particulas', () => ctrl().addParticlesLayer(Duration.zero));
+      conferir('particulas', () => ctrl().addParticulasLayer(Duration.zero));
       conferir('cena3d', () => ctrl().addScene3DLayer(Duration.zero));
       conferir(
         'elemento3d',

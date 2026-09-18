@@ -3,6 +3,7 @@ import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:aurea_render/aurea_render.dart';
 import 'package:aurea/src/features/editor/domain/caption.dart';
 import 'package:aurea/src/features/editor/domain/effect.dart';
 import 'package:aurea/src/features/editor/domain/keyframe.dart';
@@ -108,17 +109,25 @@ void main() {
             ],
             style: const CaptionStyle(fontSize: 64, bold: false),
           ),
-          ParticlesLayer(
+          ParticulasLayer(
             name: 'Particulas',
             startTime: Duration.zero,
             duration: const Duration(seconds: 5),
-            count: 200,
-            seed: 42,
-            star: true,
-            emitW: 800,
-            emitH: 600,
-            twinkle: true,
-            color: const Color(0xFF35C4E7),
+            parametros: ParametrosDeParticulas(
+              maximo: 200,
+              semente: 42,
+              forma: FormaDaParticula.estrela,
+              largura: 800,
+              altura: 600,
+              cintilar: true,
+              corInicio: 0x35C4E7FF,
+              // O QUE SO O MOTOR NOVO TEM: para o ida-e-volta do arquivo
+              // provar que estes campos sobrevivem tambem.
+              taxaDeNascimento: 45,
+              atracao: 1.5,
+              atracaoY: -30,
+              turbulencia: 12,
+            ),
           ),
           VideoLayer(
             name: 'Video',
@@ -185,13 +194,25 @@ void main() {
       expect(captions.cues.single.locked, true);
       expect(captions.style.fontSize, 64);
 
-      final particles = restored.layers[4] as ParticlesLayer;
-      expect(particles.count, 200);
-      expect(particles.seed, 42);
-      expect(particles.star, true);
-      expect(particles.emitW, 800);
-      expect(particles.emitH, 600);
-      expect(particles.twinkle, true);
+      final particles = restored.layers[4] as ParticulasLayer;
+      final pq = particles.parametros;
+      expect(pq.maximo, 200);
+      expect(pq.semente, 42);
+      expect(pq.forma, FormaDaParticula.estrela);
+      expect(pq.largura, 800);
+      expect(pq.altura, 600);
+      expect(pq.cintilar, true);
+      expect(pq.corInicio, 0x35C4E7FF);
+      // ---- o que so o motor novo tem ----
+      //
+      // ESTES TRES NAO EXISTIAM NO ARQUIVO ANTIGO. Se eles nao
+      // atravessassem o ida-e-volta, a nuvem abriria com a metade dos
+      // parametros que a pessoa deixou — e o defeito so apareceria
+      // depois de salvar, fechar e abrir.
+      expect(pq.taxaDeNascimento, 45);
+      expect(pq.atracao, 1.5);
+      expect(pq.atracaoY, -30);
+      expect(pq.turbulencia, 12);
 
       final video = restored.layers[5] as VideoLayer;
       expect(video.sourceOffset, const Duration(milliseconds: 250));

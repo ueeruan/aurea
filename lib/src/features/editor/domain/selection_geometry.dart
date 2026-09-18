@@ -32,7 +32,7 @@ Matrix4 selectionTransform(VideoProject project, Layer layer, Duration time) {
   final pivot = layer.pivot.valueAt(local);
   final tilt =
       (effective.rotX != 0 || effective.rotY != 0) &&
-      layer is! ParticlesLayer &&
+      layer is! ParticulasLayer &&
       layer is! Element3DLayer;
   final matrix = Matrix4.identity()..translateByDouble(pos.dx, pos.dy, 0, 1);
   if (tilt) {

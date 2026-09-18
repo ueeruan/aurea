@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:aurea_render/aurea_render.dart';
 import 'package:uuid/uuid.dart';
 
 import 'audio_effect.dart';
@@ -1337,49 +1338,72 @@ Map<String, dynamic> layerToJson(Layer l) {
       if (nl.grid != null) base['grid'] = _rig(nl.grid!);
     case AdjustmentLayer _:
       base['kind'] = 'adjust';
-    case ParticlesLayer p:
+    case ParticulasLayer p:
+      // AS CHAVES SAO AS MESMAS DE ANTES, e de proposito: um projeto
+      // gravado por esta versao continua abrindo numa anterior (menos os
+      // parametros que so o motor novo tem, que ela ignora). O que mudou
+      // foi a ORIGEM dos numeros — eles saem da receita do motor, e nao
+      // mais de campos soltos na camada.
+      final q = p.parametros;
       base['kind'] = 'particles';
-      base['count'] = p.count;
-      base['seed'] = p.seed;
-      if (p.uniformDistribution) base['uniformDistribution'] = true;
-      base['speed'] = p.speed;
-      base['spread'] = p.spreadDeg;
-      base['dir'] = p.directionDeg;
-      base['gravity'] = p.gravity;
-      base['size'] = p.size;
-      base['life'] = p.lifetimeMs;
-      base['depth'] = p.depth;
-      base['emitW'] = p.emitW;
-      base['emitH'] = p.emitH;
-      base['twinkle'] = p.twinkle;
-      base['color'] = _col(p.color);
-      base['star'] = p.star;
-      base['emitter'] = p.emitter;
-      base['emitMode'] = p.emitMode;
-      base['windX'] = p.windX;
-      base['windY'] = p.windY;
-      base['drag'] = p.drag;
-      base['turb'] = p.turbulence;
-      base['turbScale'] = p.turbulenceScale;
-      if (p.auxCount > 0) {
-        base['auxN'] = p.auxCount;
-        base['auxLife'] = p.auxLifeMs;
-        base['auxInh'] = p.auxInherit;
-        base['auxSpd'] = p.auxSpeed;
-        base['auxSize'] = p.auxSize;
-        base['auxStart'] = p.auxStart;
+      // MARCA DE VERSAO: sem ela nao da para saber se `emitter: 3` quer
+      // dizer "anel" (o motor antigo) ou "linha" (o novo).
+      base['pv'] = 2;
+      base['count'] = q.maximo;
+      base['seed'] = q.semente;
+      base['speed'] = q.velocidade;
+      base['spread'] = q.aberturaGraus;
+      base['dir'] = q.direcaoGraus;
+      base['gravity'] = q.gravidade;
+      base['size'] = q.tamanho;
+      base['life'] = (q.vidaS * 1000).round();
+      base['depth'] = q.profundidade;
+      base['emitW'] = q.largura;
+      base['emitH'] = q.altura;
+      base['twinkle'] = q.cintilar;
+      base['color'] = q.corInicio;
+      base['star'] = q.forma == FormaDaParticula.estrela;
+      base['emitter'] = q.emissor.index;
+      base['emitMode'] = q.modoDeEmissao.index;
+      base['windX'] = q.ventoX;
+      base['windY'] = q.ventoY;
+      base['drag'] = q.arrasto;
+      base['turb'] = q.turbulencia;
+      base['turbScale'] = q.turbulenciaEscala;
+      if (q.faiscas > 0) {
+        base['auxN'] = q.faiscas;
+        base['auxLife'] = (q.faiscaVidaS * 1000).round();
+        base['auxInh'] = q.faiscaHeranca;
+        base['auxSpd'] = q.faiscaVelocidade;
+        base['auxSize'] = q.faiscaTamanho;
+        base['auxStart'] = q.faiscaInicio;
       }
-      base['turbSpeed'] = p.turbulenceSpeed;
-      base['sizeLife'] = p.sizeOverLife;
-      base['sizeRnd'] = p.sizeRandom;
-      base['opLife'] = p.opacityOverLife;
-      base['opRnd'] = p.opacityRandom;
-      if (p.colorEnd != null) base['colorEnd'] = _col(p.colorEnd!);
-      base['shape'] = p.shape;
-      base['spin'] = p.spin;
-      base['trail'] = p.trail;
-      base['lifeRnd'] = p.lifeRandom;
-      base['glow'] = p.glow;
+      base['turbSpeed'] = q.turbulenciaVelocidade;
+      base['sizeLife'] = q.tamanhoNaVida.index;
+      base['sizeRnd'] = q.tamanhoVariacao;
+      base['opLife'] = q.opacidadeNaVida.index;
+      base['opRnd'] = q.opacidadeVariacao;
+      if (q.temCorFim) base['colorEnd'] = q.corFim;
+      base['shape'] = q.forma.index;
+      base['spin'] = q.giroGrausS;
+      base['trail'] = q.rastro;
+      base['lifeRnd'] = q.vidaVariacao;
+      base['glow'] = q.brilho;
+      // ---- o que so o motor novo tem ----
+      if (q.taxaDeNascimento > 0) base['rate'] = q.taxaDeNascimento;
+      if (q.ventoZ != 0) base['windZ'] = q.ventoZ;
+      if (q.atracao != 0) {
+        base['attract'] = q.atracao;
+        base['attractX'] = q.atracaoX;
+        base['attractY'] = q.atracaoY;
+        base['attractZ'] = q.atracaoZ;
+      }
+      if (q.raio != 200) base['emitterR'] = q.raio;
+      if (q.tamanhoNaVida != TamanhoNaVida.fixo) {
+        base['sizeLife'] = q.tamanhoNaVida.index;
+      }
+      if (!q.cintilar) base['twinkle'] = false;
+      if (q.focal != 1200) base['focal'] = q.focal;
     case Element3DLayer e:
       base['kind'] = 'el3d';
       base['el'] = e.kind.index;
@@ -2548,50 +2572,15 @@ Layer layerFromJson(Map<String, dynamic> m) {
         matteSourceId: matteSrc,
       );
     case 'particles':
-      return ParticlesLayer(
+      // A TRADUCAO DO QUE O PROJETO GUARDOU VIVE EM `layer.dart`, junto
+      // da camada: e ela que sabe que `emitter: 3` de um arquivo antigo
+      // quer dizer ANEL, e que `count` era quantas viviam ao mesmo tempo.
+      return ParticulasLayer(
         id: id,
         name: name,
         startTime: start,
         duration: dur,
-        count: (m['count'] as num).toInt(),
-        uniformDistribution: m['uniformDistribution'] == true,
-        seed: (m['seed'] as num).toInt(),
-        speed: (m['speed'] as num).toDouble(),
-        spreadDeg: (m['spread'] as num).toDouble(),
-        directionDeg: (m['dir'] as num).toDouble(),
-        gravity: (m['gravity'] as num).toDouble(),
-        size: (m['size'] as num).toDouble(),
-        lifetimeMs: (m['life'] as num).toInt(),
-        depth: (m['depth'] as num).toDouble(),
-        emitW: (m['emitW'] as num?)?.toDouble() ?? 0,
-        emitH: (m['emitH'] as num?)?.toDouble() ?? 0,
-        twinkle: m['twinkle'] as bool? ?? false,
-        color: _asCol(m['color']),
-        star: m['star'] as bool,
-        emitter: (m['emitter'] as num?)?.toInt() ?? 0,
-        emitMode: (m['emitMode'] as num?)?.toInt() ?? 0,
-        windX: (m['windX'] as num?)?.toDouble() ?? 0,
-        windY: (m['windY'] as num?)?.toDouble() ?? 0,
-        drag: (m['drag'] as num?)?.toDouble() ?? 0,
-        turbulence: (m['turb'] as num?)?.toDouble() ?? 0,
-        turbulenceScale: (m['turbScale'] as num?)?.toDouble() ?? 300,
-        auxCount: (m['auxN'] as num?)?.toInt() ?? 0,
-        auxLifeMs: (m['auxLife'] as num?)?.toDouble() ?? 700,
-        auxInherit: (m['auxInh'] as num?)?.toDouble() ?? 0.35,
-        auxSpeed: (m['auxSpd'] as num?)?.toDouble() ?? 60,
-        auxSize: (m['auxSize'] as num?)?.toDouble() ?? 0.45,
-        auxStart: (m['auxStart'] as num?)?.toDouble() ?? 0,
-        turbulenceSpeed: (m['turbSpeed'] as num?)?.toDouble() ?? 1,
-        sizeOverLife: (m['sizeLife'] as num?)?.toInt() ?? 0,
-        sizeRandom: (m['sizeRnd'] as num?)?.toDouble() ?? 0.5,
-        opacityOverLife: (m['opLife'] as num?)?.toInt() ?? 0,
-        opacityRandom: (m['opRnd'] as num?)?.toDouble() ?? 0,
-        colorEnd: m['colorEnd'] == null ? null : _asCol(m['colorEnd']),
-        shape: (m['shape'] as num?)?.toInt(),
-        spin: (m['spin'] as num?)?.toDouble() ?? 0,
-        trail: (m['trail'] as num?)?.toDouble() ?? 0,
-        lifeRandom: (m['lifeRnd'] as num?)?.toDouble() ?? 0,
-        glow: (m['glow'] as num?)?.toDouble() ?? 0.25,
+        parametros: parametrosDeParticulasDoProjeto(m),
         position: pos,
         scaleX: sx,
         scaleY: sy,

@@ -107,7 +107,7 @@ void main() {
       expect(projectNeedsClockRebuild(_p([animated])), isTrue);
       expect(
           projectNeedsClockRebuild(_p([
-            ParticlesLayer(
+            ParticulasLayer(
                 name: 'P',
                 startTime: Duration.zero,
                 duration: const Duration(seconds: 5)),

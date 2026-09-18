@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui';
 
+import 'package:aurea_render/aurea_render.dart';
 import 'package:flutter/foundation.dart' show immutable;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:video_player/video_player.dart';
@@ -1216,7 +1217,7 @@ class EditorController extends Notifier<VideoProject> {
       CameraLayer _ => 'camera',
       AudioLayer _ => 'audio',
       CaptionLayer _ => 'legenda',
-      ParticlesLayer _ => 'particulas',
+      ParticulasLayer _ => 'particulas',
       AdjustmentLayer _ => 'ajuste',
       Element3DLayer _ => '3d',
       Scene3DLayer _ => 'cena 3d',
@@ -2134,38 +2135,54 @@ class EditorController extends Notifier<VideoProject> {
     );
   }
 
-  void addParticlesLayer(Duration at) {
-    final n = state.layers.whereType<ParticlesLayer>().length + 1;
+  /// UMA CAMADA DE PARTICULAS NOVA — o campo de estrelas do preset.
+  ///
+  /// E a MESMA nuvem que sempre nasceu daqui (pontos minusculos cobrindo a
+  /// composicao), agora montada pela receita do motor. O tamanho do
+  /// emissor sai da composicao: um campo de 1920 px nao cobre um projeto
+  /// vertical.
+  void addParticulasLayer(Duration at) {
+    final n = state.layers.whereType<ParticulasLayer>().length + 1;
+    final receita =
+        MotorDeParticulasRender.preset(4) ??
+        ParametrosDeParticulas(maximo: 400, vidaS: 6);
     _push(
-      ParticlesLayer(
+      ParticulasLayer(
         name: 'Particulas $n',
         startTime: at,
         duration: const Duration(seconds: 5),
-        count: 5000,
-        uniformDistribution: true,
-        size: 1,
-        sizeRandom: 0.8,
-        color: const Color(0xffeef4ff),
-        star: false,
-        shape: 0,
-        speed: 0,
-        depth: 1800,
-        emitW: state.outputWidth * 1.4,
-        emitH: state.outputHeight * 1.4,
-        lifetimeMs: 120000,
-        opacityRandom: 0.75,
-        glow: 0,
+        parametros: receita
+          ..largura = state.outputWidth * 1.4
+          ..altura = state.outputHeight * 1.4
+          ..profundidade = 1800
+          ..tamanho = 1
+          ..tamanhoVariacao = 0.8
+          ..corInicio = 0xFFEEF4FF
+          ..forma = FormaDaParticula.esfera
+          ..velocidade = 0
+          ..opacidadeVariacao = 0.75
+          ..brilho = 0
+          ..cintilar = true
+          ..maximo = 1200,
         is3D: true,
         position: AnimatedOffset(_center),
       ),
     );
   }
 
-  /// Edita parametros do sistema de particulas.
-  void updateParticles(String id, ParticlesLayer Function(ParticlesLayer) fn) {
+  /// EDITA A RECEITA DA NUVEM.
+  ///
+  /// O PARAMETRO E UMA FUNCAO QUE DEVOLVE A RECEITA NOVA, e nao um campo
+  /// por vez: a receita e imutavel do lado do motor, e um `set` campo a
+  /// campo deixaria a nuvem com metade dos parametros de uma versao e
+  /// metade de outra no meio de um arrasto.
+  void updateParticulas(
+    String id,
+    ParametrosDeParticulas Function(ParametrosDeParticulas) fn,
+  ) {
     final layer = _layer(id);
-    if (layer is! ParticlesLayer) return;
-    _replace(fn(layer));
+    if (layer is! ParticulasLayer) return;
+    _replace(layer.withParametros(fn(layer.parametros)));
   }
 
   /// Elemento 3D nativo (cubo, esfera, diamante...): solido girado de

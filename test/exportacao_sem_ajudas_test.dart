@@ -1,11 +1,12 @@
 import 'dart:ui' as ui;
 
+import 'package:aurea_render/aurea_render.dart';
 import 'package:aurea/src/features/editor/application/editor_controller.dart';
 import 'package:aurea/src/features/editor/application/video_layer_manager.dart';
 import 'package:aurea/src/features/editor/domain/keyframe.dart';
 import 'package:aurea/src/features/editor/domain/layer.dart';
 import 'package:aurea/src/features/editor/domain/video_project.dart';
-import 'package:aurea/src/features/editor/presentation/widgets/particles_painter.dart';
+import 'package:aurea/src/features/editor/presentation/widgets/null_gizmo_painter.dart';
 import 'package:aurea/src/features/editor/presentation/widgets/preview_stage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -31,12 +32,12 @@ VideoProject _projeto() {
     duration: const Duration(seconds: 5),
     position: AnimatedOffset(const Offset(150, 150)),
   );
-  final particulas = ParticlesLayer(
+  final particulas = ParticulasLayer(
     id: 'p',
     name: 'Particulas',
     startTime: Duration.zero,
     duration: const Duration(seconds: 5),
-    count: 12,
+    parametros: ParametrosDeParticulas(maximo: 12, vidaS: 4),
     position: AnimatedOffset(const Offset(150, 150)),
   );
   return VideoProject(

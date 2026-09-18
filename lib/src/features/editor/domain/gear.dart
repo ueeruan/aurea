@@ -70,7 +70,7 @@ bool _simpleTransform(Layer l) =>
 /// precomp, particulas.
 String? _m4Trigger(Layer l) {
   if (l is AdjustmentLayer) return 'camada de ajuste "${l.name}"';
-  if (l is ParticlesLayer) return 'particulas "${l.name}"';
+  if (l is ParticulasLayer) return 'particulas "${l.name}"';
   if (l is GroupLayer) {
     for (final c in l.children) {
       final t = _m4Trigger(c);
@@ -174,7 +174,7 @@ GearDecision classifyGear(VideoProject project) {
 bool projectNeedsClockRebuild(VideoProject project) {
   bool needs(Layer l) {
     if (l.hasAnimation) return true;
-    if (l is ParticlesLayer) return true;
+    if (l is ParticulasLayer) return true;
     // Animadores de texto evoluem com o tempo mesmo sem keyframe
     // (wiggly/fase); efeitos de ruido idem (fase integrada).
     if (l is TextLayer && (l.anims.isNotEmpty || l.animators.isNotEmpty)) {

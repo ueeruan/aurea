@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:ui' as ui;
+import 'package:aurea_render/aurea_render.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:aurea/src/features/editor/application/editor_controller.dart';
@@ -11,7 +12,7 @@ import 'package:aurea/src/features/editor/domain/camera3d.dart';
 import 'package:aurea/src/features/editor/domain/panorama3d.dart';
 import 'package:aurea/src/features/editor/domain/scene3d.dart';
 import 'package:aurea/src/features/editor/presentation/widgets/scene3d_painter.dart';
-import 'package:aurea/src/features/editor/presentation/widgets/particles_painter.dart';
+import 'package:aurea/src/features/editor/presentation/widgets/particulas_painter.dart';
 void main() {
  TestWidgetsFlutterBinding.ensureInitialized();
  test('capture reflection and star field with actual application painters', () async {
@@ -33,11 +34,17 @@ void main() {
   ]);
   await capture('urban-chrome',(canvas)=>Scene3DPainter(scene:scene,camera:Camera3D(posZ:AnimatedDouble(1000)),view:SceneView.camera,time:Duration.zero).paint(canvas,const ui.Size(640,360)));
   final c=ProviderContainer();c.read(editorControllerProvider.notifier).setComposition(aspectRatio:16/9,resolutionHeight:360);
-  c.read(editorControllerProvider.notifier).addParticlesLayer(Duration.zero);
-  final particles=c.read(editorControllerProvider).layers.first as ParticlesLayer;
+  c.read(editorControllerProvider.notifier).addParticulasLayer(Duration.zero);
+  final particles=c.read(editorControllerProvider).layers.first as ParticulasLayer;
   final watch=Stopwatch()..start();
-  await capture('star-field',(canvas)=>ParticlesPainter(layer:particles,time:const Duration(seconds:2)).paint(canvas,const ui.Size(640,360)));
+  // A SIMULACAO E O DESENHO AGORA SAO PASSOS SEPARADOS: o motor gera o
+  // LOTE, o pintor poe na tela. A bancada mede a SOMA dos dois — que e o
+  // que a pessoa sente.
+  final lote=LoteDeParticulas(particles.parametros..centroX=0..centroY=0);
+  lote.gerar(2.0);
+  await capture('star-field',(canvas)=>ParticulasPainter(lote:lote,centroDoQuadro:const ui.Offset(320,180)).paint(canvas,const ui.Size(640,360)));
   // ignore: avoid_print
-  print('5000 particles paint + PNG encode: ${watch.elapsedMilliseconds} ms');c.dispose();
+  print('${lote.quantas} particulas: simular + pintar + PNG = ${watch.elapsedMilliseconds} ms');
+  lote.liberar();c.dispose();
  });
 }

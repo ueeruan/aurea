@@ -24,6 +24,8 @@ void main(List<String> args) async {
       assetName: 'aurea_render.dart',
       sources: const [
         'src/compositor.cpp',
+        'src/particulas.cpp',
+        'src/api_particulas.cpp',
         'src/gerenciador_de_recursos.cpp',
         'src/gerenciador_de_shaders.cpp',
         'src/avaliador_da_timeline.cpp',

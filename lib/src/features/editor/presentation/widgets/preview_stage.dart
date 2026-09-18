@@ -83,7 +83,8 @@ import 'preview_raster.dart';
 import '../../application/ui/preview_resolution.dart';
 import '../../application/ui/opcoes_de_visualizacao.dart';
 import 'fx_lote2.dart';
-import 'particles_painter.dart';
+import 'null_gizmo_painter.dart';
+import 'particulas_painter.dart';
 import '../../application/scene3d_gpu.dart';
 import 'scene3d_painter.dart';
 import 'scene3d_gpu_view.dart';
@@ -3104,7 +3105,7 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
     // Particulas vivem em espaco 3D proprio: a rotacao do sistema (da
     // camada + herdada do nulo pai) e resolvida DENTRO do simulador — a
     // nuvem gira no espaco, nada de inclinar o canvas como um cartao.
-    final isParticles = layer is ParticlesLayer || layer is Element3DLayer;
+    final isParticles = layer is ParticulasLayer || layer is Element3DLayer;
     Widget content = _LayerContent(
       layer: layer,
       project: project,
@@ -3126,6 +3127,7 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
       particlesRotY: isParticles
           ? layer.rotationY.valueAt(local) + extraRotY
           : 0,
+      particlesTeto: ref.watch(nivelDasParticulasProvider),
       // VINCULOS DENTRO DO GRUPO: os filhos resolvem pai e pickwhip entre
       // eles. Com `resolveLinks: false` o filho preso a um nulo do mesmo
       // grupo seguia o nulo so enquanto se estava "dentro" do grupo — fora,
@@ -3295,7 +3297,7 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
       final extrude = project.metaOf(layer.id).extrude;
       if (extrude > 0.5 &&
           layer is! VideoLayer &&
-          layer is! ParticlesLayer &&
+          layer is! ParticulasLayer &&
           layer is! Element3DLayer) {
         // Uma FOTO da camada, desenhada N vezes recuando em Z num canvas
         // so (sem camadas do compositor — ver ExtrudeSnapshotPainter).
@@ -7147,6 +7149,7 @@ class _LayerContent extends StatelessWidget {
     this.particlesRotX = 0,
     this.particlesRotY = 0,
     this.particlesFocal = CameraLayer.lenteNeutra,
+    this.particlesTeto = 3,
   });
 
   final Layer layer;
@@ -7162,6 +7165,11 @@ class _LayerContent extends StatelessWidget {
 
   final double particlesRotX;
   final double particlesRotY;
+
+  /// O TETO DE PARTICULAS do nivel de qualidade da previa (0..3). Vem de
+  /// fora porque este widget nao tem `ref`: quem monta a arvore e o
+  /// `_PreviewStageState`, que tem.
+  final int particlesTeto;
 
   /// Quadro ja decodificado por camada de video (so na exportacao).
   final Map<String, ui.Image>? exportFrames;
@@ -7480,16 +7488,16 @@ class _LayerContent extends StatelessWidget {
       // Ajuste nao tem conteudo proprio: age no composto (interceptado
       // em _buildLayers); aqui rende so o gizmo de selecao.
       AdjustmentLayer _ => const SizedBox(width: 220, height: 220),
-      // Particulas em espaco 3D: simulacao + projecao por particula.
-      ParticlesLayer l => CustomPaint(
-        size: const Size(420, 420),
-        painter: ParticlesPainter(
-          layer: l,
-          time: localTime,
-          rotXDeg: particlesRotX,
-          rotYDeg: particlesRotY,
-          focal: particlesFocal,
-        ),
+      // PARTICULAS: a simulacao inteira acontece no motor em C++. Aqui
+      // so se pede o LOTE do instante e se poe na tela — nenhuma conta de
+      // fisica nesta arvore.
+      ParticulasLayer l => ParticulasDoPalco(
+        layer: l,
+        tempo: localTime,
+        focal: particlesFocal,
+        rotX: particlesRotX,
+        rotY: particlesRotY,
+        teto: particlesTeto,
       ),
       // Elemento 3D: vertices girados no espaco dentro do pintor (como
       // as particulas) — nada de inclinar o canvas como um cartao.

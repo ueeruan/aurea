@@ -26,7 +26,7 @@ Size measureLayerBox(
   final base = switch (layer) {
     ShapeLayer l => shapeBounds(evaluateShape(l.contents, local)).size,
     Element3DLayer l => Size(l.size * 2, l.size * 2),
-    ParticlesLayer _ => const Size(420, 420),
+    ParticulasLayer _ => const Size(420, 420),
     TextLayer l => measureText(
       l.text,
       l.fontSize,

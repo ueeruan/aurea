@@ -382,7 +382,7 @@ List<QuickAction> quickActionsFor(
     ),
     if (layer is! NullLayer &&
         layer is! VideoLayer &&
-        layer is! ParticlesLayer &&
+        layer is! ParticulasLayer &&
         layer is! Element3DLayer &&
         layer is! AudioLayer)
       QuickAction(

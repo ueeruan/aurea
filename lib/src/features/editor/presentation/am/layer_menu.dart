@@ -1,3 +1,4 @@
+import 'package:aurea_render/aurea_render.dart';
 import 'package:aurea/src/core/l10n/app_language.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:file_picker/file_picker.dart';
@@ -490,7 +491,7 @@ _Tile? _tileDaSecao(
       icone: CupertinoIcons.sparkles,
       rotulo: 'Partículas',
       onTap: () =>
-          abrirDepois(() => showParticlesSheet(context, ref, layer.id)),
+          abrirDepois(() => showParticulasSheet(context, ref, layer.id)),
       badge: null,
     ),
     AmSecao.cena3d => (
@@ -1823,8 +1824,14 @@ Future<void> showParentSheet(
   );
 }
 
-/// Painel de parametros do sistema de particulas.
-Future<void> showParticlesSheet(
+/// Painel da NUVEM DE PARTICULAS.
+///
+/// ELE EDITA UMA RECEITA, E NAO CAMPOS DA CAMADA. A simulacao vive no
+/// motor em C++; o que a camada guarda e o conjunto de parametros, que e
+/// imutavel. Cada linha daqui troca a receita inteira por uma copia com um
+/// campo diferente — e por isso que `up` recebe uma funcao, e nao um nome
+/// de campo: nao existe "meio parametro" aplicado no meio de um arrasto.
+Future<void> showParticulasSheet(
   BuildContext context,
   WidgetRef ref,
   String layerId,
@@ -1836,11 +1843,13 @@ Future<void> showParticlesSheet(
     builder: (sheetContext) => StatefulBuilder(
       builder: (sheetContext, setSheetState) {
         final layer = ref.read(editorControllerProvider).layerById(layerId);
-        if (layer is! ParticlesLayer) return const SizedBox.shrink();
+        if (layer is! ParticulasLayer) return const SizedBox.shrink();
+        // NAO NULO, e o tipo do motor: `layer.parametros` ja e uma
+        // `ParametrosDeParticulas` (o Dart a infere sozinho), mas sem a
+        // anotacao o `p.clonar()` de dentro do `up` perderia o tipo e o
+        // `mexer(copia)` nao compilaria.
+        final ParametrosDeParticulas q = layer.parametros;
 
-        // A LINGUA NOVA DO PAINEL (ParameterRow): a linha inteira
-        // arrasta e o numero digita o valor exato. A unidade e as casas
-        // saem do display de sempre — as chamadas nao mudam.
         Widget row(
           String label,
           double value,
@@ -1851,8 +1860,9 @@ Future<void> showParticlesSheet(
           ValueChanged<double> onChanged,
         ) {
           final numero = RegExp(r'^-?[\d.,]+').firstMatch(display);
-          final casas =
-              RegExp(r'[.,](\d+)\$').firstMatch(numero?.group(0) ?? '');
+          final casas = RegExp(
+            r'[.,](\d+)$',
+          ).firstMatch(numero?.group(0) ?? '');
           return ParameterRow(
             label: label,
             value: value.clamp(min, max),
@@ -1878,42 +1888,38 @@ Future<void> showParticlesSheet(
             padding: const EdgeInsets.only(bottom: 4),
             child: ParameterCustomRow(
               label: label,
-              height: 44,
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    for (var i = 0; i < nomes.length; i++)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 6),
-                        child: Tocavel(
-                          onTap: () {
-                            onPick(i);
-                            setSheetState(() {});
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 11,
-                              vertical: 7,
-                            ),
-                            decoration: BoxDecoration(
-                              color: atual == i
-                                  ? AmColors.accentDim
-                                  : AmColors.chip,
-                              borderRadius: BorderRadius.circular(9),
-                            ),
-                            child: AppText(
-                              nomes[i],
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: AmColors.accent,
-                              ),
-                            ),
+              child: Wrap(
+                spacing: 7,
+                runSpacing: 7,
+                alignment: WrapAlignment.end,
+                children: [
+                  for (var i = 0; i < nomes.length; i++)
+                    Tocavel(
+                      onTap: () {
+                        onPick(i);
+                        setSheetState(() {});
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 11,
+                          vertical: 7,
+                        ),
+                        decoration: BoxDecoration(
+                          color: atual == i
+                              ? AmColors.accentDim
+                              : AmColors.chip,
+                          borderRadius: BorderRadius.circular(9),
+                        ),
+                        child: AppText(
+                          nomes[i],
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AmColors.accent,
                           ),
                         ),
                       ),
-                  ],
-                ),
+                    ),
+                ],
               ),
             ),
           );
@@ -1932,8 +1938,95 @@ Future<void> showParticlesSheet(
           ),
         );
 
-        void up(ParticlesLayer Function(ParticlesLayer) f) =>
-            controller.updateParticles(layerId, f);
+        /// TROCA A RECEITA por uma copia com o campo mexido. O `clonar` e
+        /// o que impede a edicao de alcancar a receita que a camada ja
+        /// tinha — sem ele, o desfazer guardaria o MESMO objeto que a
+        /// camada nova, e voltar atras nao voltaria nada.
+        void up(void Function(ParametrosDeParticulas) mexer) {
+          controller.updateParticulas(layerId, (p) {
+            final copia = p.clonar();
+            mexer(copia);
+            return copia;
+          });
+          setSheetState(() {});
+        }
+
+        // AS CORES DA PALETA DE SEMPRE, para o seletor de cor nao mudar
+        // de forma ao trocar de motor.
+        const paleta = [
+          Color(0xFFFF3B52),
+          Color(0xFFB8FF3D),
+          Color(0xFF7C62FF),
+          Color(0xFFFFFFFF),
+          Color(0xFFFFB020),
+          Color(0xFF35C4E7),
+        ];
+
+        Widget linhaDeCores({
+          required String label,
+          required int? atual,
+          required bool nenhuma,
+          required ValueChanged<int> onPick,
+          VoidCallback? onLimpar,
+        }) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 86,
+                  child: AppText(
+                    label,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: AmColors.muted,
+                    ),
+                  ),
+                ),
+                if (onLimpar != null)
+                  Tocavel(
+                    onTap: onLimpar,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 11,
+                        vertical: 7,
+                      ),
+                      decoration: BoxDecoration(
+                        color: nenhuma ? AmColors.accentDim : AmColors.chip,
+                        borderRadius: BorderRadius.circular(9),
+                      ),
+                      child: const AppText(
+                        'Nenhuma',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: AmColors.accent,
+                        ),
+                      ),
+                    ),
+                  ),
+                const Spacer(),
+                for (final c in paleta)
+                  Tocavel(
+                    onTap: () => onPick(c.toARGB32()),
+                    child: Container(
+                      width: 26,
+                      height: 26,
+                      margin: const EdgeInsets.only(left: 7),
+                      decoration: BoxDecoration(
+                        color: c,
+                        shape: BoxShape.circle,
+                        border: atual == c.toARGB32()
+                            ? Border.all(color: Colors.white, width: 2.5)
+                            : null,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          );
+        }
+
+        final nomesDosPresets = MotorDeParticulasRender.nomesDosPresets;
 
         return SafeArea(
           child: SingleChildScrollView(
@@ -1947,7 +2040,8 @@ Future<void> showParticlesSheet(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const AppText('Particulas 3D',
+                const AppText(
+                  'Particulas',
                   style: TextStyle(
                     fontSize: 17,
                     fontWeight: FontWeight.w700,
@@ -1955,307 +2049,331 @@ Future<void> showParticlesSheet(
                   ),
                 ),
                 const SizedBox(height: 14),
+
+                // ---- PRESETS ----
+                //
+                // UMA RECEITA E UM PONTO DE PARTIDA. Os nomes sao os que
+                // se procura ("Fogo", "Neve"), e o que o preset nao mexe
+                // — a cor, o tamanho, a semente — fica como esta.
+                if (nomesDosPresets.isNotEmpty) ...[
+                  titulo('RECEITA'),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: Wrap(
+                      spacing: 7,
+                      runSpacing: 7,
+                      children: [
+                        for (var i = 0; i < nomesDosPresets.length; i++)
+                          Tocavel(
+                            onTap: () {
+                              final nova = MotorDeParticulasRender.aplicarPreset(
+                                i,
+                                q,
+                              );
+                              if (nova == null) return;
+                              controller.updateParticulas(layerId, (_) => nova);
+                              setSheetState(() {});
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 11,
+                                vertical: 7,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AmColors.chip,
+                                borderRadius: BorderRadius.circular(9),
+                              ),
+                              child: AppText(
+                                nomesDosPresets[i],
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: AmColors.accent,
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+
+                titulo('FLUXO'),
+                row(
+                  'Nascimentos/s',
+                  q.taxaDeNascimento,
+                  0,
+                  600,
+                  1.2,
+                  amNumber(q.taxaDeNascimento, 0),
+                  (v) => up((p) => p.taxaDeNascimento = v),
+                ),
                 row(
                   'Quantidade',
-                  layer.count.toDouble(),
+                  q.maximo.toDouble(),
                   1,
-                  2000,
-                  3,
-                  '${layer.count}',
-                  (v) => controller.updateParticles(
-                    layerId,
-                    (p) => p.copyParticles(count: v.round()),
-                  ),
-                ),
-                row(
-                  'Velocidade',
-                  layer.speed,
-                  0,
-                  2000,
-                  3,
-                  amNumber(layer.speed, 0),
-                  (v) => controller.updateParticles(
-                    layerId,
-                    (p) => p.copyParticles(speed: v),
-                  ),
-                ),
-                row(
-                  'Abertura',
-                  layer.spreadDeg,
-                  0,
-                  360,
-                  0.9,
-                  '${amNumber(layer.spreadDeg, 0)}°',
-                  (v) => controller.updateParticles(
-                    layerId,
-                    (p) => p.copyParticles(spreadDeg: v),
-                  ),
-                ),
-                row(
-                  'Direcao',
-                  layer.directionDeg,
-                  -180,
-                  180,
-                  0.9,
-                  '${amNumber(layer.directionDeg, 0)}°',
-                  (v) => controller.updateParticles(
-                    layerId,
-                    (p) => p.copyParticles(directionDeg: v),
-                  ),
-                ),
-                row(
-                  'Gravidade',
-                  layer.gravity,
-                  -2000,
-                  2000,
-                  4,
-                  amNumber(layer.gravity, 0),
-                  (v) => controller.updateParticles(
-                    layerId,
-                    (p) => p.copyParticles(gravity: v),
-                  ),
-                ),
-                row(
-                  'Tamanho',
-                  layer.size,
-                  1,
-                  120,
-                  0.3,
-                  amNumber(layer.size, 0),
-                  (v) => controller.updateParticles(
-                    layerId,
-                    (p) => p.copyParticles(size: v),
-                  ),
+                  6000,
+                  8,
+                  '${q.maximo}',
+                  (v) => up((p) => p.maximo = v.round()),
                 ),
                 row(
                   'Vida (s)',
-                  layer.lifetimeMs / 1000,
-                  0.3,
-                  10,
-                  0.02,
-                  amNumber(layer.lifetimeMs / 1000, 1),
-                  (v) => controller.updateParticles(
-                    layerId,
-                    (p) => p.copyParticles(lifetimeMs: (v * 1000).round()),
-                  ),
+                  q.vidaS,
+                  0.2,
+                  30,
+                  0.03,
+                  amNumber(q.vidaS, 1),
+                  (v) => up((p) => p.vidaS = v),
                 ),
+                row(
+                  'Vida aleat.',
+                  q.vidaVariacao,
+                  0,
+                  1,
+                  0.003,
+                  amNumber(q.vidaVariacao * 100, 0),
+                  (v) => up((p) => p.vidaVariacao = v),
+                ),
+                row(
+                  'Semente',
+                  q.semente.toDouble(),
+                  0,
+                  9999,
+                  14,
+                  '${q.semente}',
+                  (v) => up((p) => p.semente = v.round()),
+                ),
+
                 titulo('EMISSOR'),
                 chips(
-                  'Emissor',
-                  const ['Caixa', 'Ponto', 'Esfera', 'Anel'],
-                  layer.emitter,
-                  (i) => up((p) => p.copyParticles(emitter: i)),
+                  'Forma',
+                  const ['Caixa', 'Ponto', 'Esfera', 'Linha', 'Anel'],
+                  q.emissor.index,
+                  (i) => up((p) => p.emissor = EmissorDeParticulas.values[i]),
                 ),
                 chips(
                   'Saida',
                   const ['Cone', 'Todas', 'Para fora'],
-                  layer.emitMode,
-                  (i) => up((p) => p.copyParticles(emitMode: i)),
-                ),
-                row(
-                  '3D (Z)',
-                  layer.depth,
-                  0,
-                  3000,
-                  5,
-                  amNumber(layer.depth, 0),
-                  (v) => controller.updateParticles(
-                    layerId,
-                    (p) => p.copyParticles(depth: v),
-                  ),
+                  q.modoDeEmissao.index,
+                  (i) => up((p) => p.modoDeEmissao = ModoDeEmissao.values[i]),
                 ),
                 row(
                   'Area X',
-                  layer.emitW,
+                  q.largura,
                   0,
-                  2400,
-                  4,
-                  amNumber(layer.emitW, 0),
-                  (v) => controller.updateParticles(
-                    layerId,
-                    (p) => p.copyParticles(emitW: v),
-                  ),
+                  4000,
+                  5,
+                  amNumber(q.largura, 0),
+                  (v) => up((p) => p.largura = v),
                 ),
                 row(
                   'Area Y',
-                  layer.emitH,
+                  q.altura,
                   0,
-                  2400,
-                  4,
-                  amNumber(layer.emitH, 0),
-                  (v) => controller.updateParticles(
-                    layerId,
-                    (p) => p.copyParticles(emitH: v),
-                  ),
+                  4000,
+                  5,
+                  amNumber(q.altura, 0),
+                  (v) => up((p) => p.altura = v),
                 ),
-                titulo('FISICA'),
+                row(
+                  'Z (fundo)',
+                  q.profundidade,
+                  0,
+                  4000,
+                  5,
+                  amNumber(q.profundidade, 0),
+                  (v) => up((p) => p.profundidade = v),
+                ),
+                row(
+                  'Raio',
+                  q.raio,
+                  0,
+                  2000,
+                  4,
+                  amNumber(q.raio, 0),
+                  (v) => up((p) => p.raio = v),
+                ),
+
+                titulo('MOVIMENTO'),
+                row(
+                  'Velocidade',
+                  q.velocidade,
+                  0,
+                  3000,
+                  4,
+                  amNumber(q.velocidade, 0),
+                  (v) => up((p) => p.velocidade = v),
+                ),
+                row(
+                  'Direcao',
+                  q.direcaoGraus,
+                  -180,
+                  180,
+                  0.9,
+                  '${amNumber(q.direcaoGraus, 0)}°',
+                  (v) => up((p) => p.direcaoGraus = v),
+                ),
+                row(
+                  'Abertura',
+                  q.aberturaGraus,
+                  0,
+                  360,
+                  0.9,
+                  '${amNumber(q.aberturaGraus, 0)}°',
+                  (v) => up((p) => p.aberturaGraus = v),
+                ),
+                row(
+                  'Gravidade',
+                  q.gravidade,
+                  -3000,
+                  3000,
+                  6,
+                  amNumber(q.gravidade, 0),
+                  (v) => up((p) => p.gravidade = v),
+                ),
                 row(
                   'Vento X',
-                  layer.windX,
-                  -1500,
-                  1500,
-                  3,
-                  amNumber(layer.windX, 0),
-                  (v) => up((p) => p.copyParticles(windX: v)),
+                  q.ventoX,
+                  -2000,
+                  2000,
+                  4,
+                  amNumber(q.ventoX, 0),
+                  (v) => up((p) => p.ventoX = v),
                 ),
                 row(
                   'Vento Y',
-                  layer.windY,
-                  -1500,
-                  1500,
-                  3,
-                  amNumber(layer.windY, 0),
-                  (v) => up((p) => p.copyParticles(windY: v)),
+                  q.ventoY,
+                  -2000,
+                  2000,
+                  4,
+                  amNumber(q.ventoY, 0),
+                  (v) => up((p) => p.ventoY = v),
                 ),
                 row(
-                  'Ar',
-                  layer.drag,
-                  0,
-                  8,
-                  0.02,
-                  amNumber(layer.drag, 2),
-                  (v) => up((p) => p.copyParticles(drag: v)),
+                  'Vento Z',
+                  q.ventoZ,
+                  -2000,
+                  2000,
+                  4,
+                  amNumber(q.ventoZ, 0),
+                  (v) => up((p) => p.ventoZ = v),
                 ),
+                row(
+                  'Ar (freio)',
+                  q.arrasto,
+                  0,
+                  12,
+                  0.03,
+                  amNumber(q.arrasto, 2),
+                  (v) => up((p) => p.arrasto = v),
+                ),
+
+                titulo('FORCAS'),
                 row(
                   'Turbulencia',
-                  layer.turbulence,
+                  q.turbulencia,
                   0,
-                  600,
-                  1.2,
-                  amNumber(layer.turbulence, 0),
-                  (v) => up((p) => p.copyParticles(turbulence: v)),
+                  900,
+                  1.6,
+                  amNumber(q.turbulencia, 0),
+                  (v) => up((p) => p.turbulencia = v),
                 ),
                 row(
                   'Detalhe',
-                  layer.turbulenceScale,
+                  q.turbulenciaEscala,
                   20,
-                  1200,
-                  2,
-                  amNumber(layer.turbulenceScale, 0),
-                  (v) => up((p) => p.copyParticles(turbulenceScale: v)),
+                  1600,
+                  2.6,
+                  amNumber(q.turbulenciaEscala, 0),
+                  (v) => up((p) => p.turbulenciaEscala = v),
                 ),
                 row(
                   'Evolucao',
-                  layer.turbulenceSpeed,
+                  q.turbulenciaVelocidade,
                   0,
-                  5,
-                  0.01,
-                  amNumber(layer.turbulenceSpeed, 2),
-                  (v) => up((p) => p.copyParticles(turbulenceSpeed: v)),
+                  6,
+                  0.012,
+                  amNumber(q.turbulenciaVelocidade, 2),
+                  (v) => up((p) => p.turbulenciaVelocidade = v),
                 ),
-                // AS FAISCAS: em zero o sistema inteiro dorme, e a
-                // camada se comporta como sempre se comportou. Os
-                // controles abaixo so aparecem depois de acender.
+                // A ATRACAO E A REPULSAO: o campo puxa para um ponto, ou
+                // empurra para longe dele. Zero desliga — e o padrao, para
+                // projeto antigo abrir igual.
                 row(
-                  'Faiscas',
-                  layer.auxCount.toDouble(),
-                  0,
-                  24,
-                  1,
-                  amNumber(layer.auxCount.toDouble(), 0),
-                  (v) => up(
-                    (p) => p.copyParticles(auxCount: v.round()),
-                  ),
+                  'Atracao',
+                  q.atracao,
+                  -8,
+                  8,
+                  0.015,
+                  amNumber(q.atracao, 2),
+                  (v) => up((p) => p.atracao = v),
                 ),
-                if (layer.auxCount > 0) ...[
+                if (q.atracao != 0) ...[
                   row(
-                    'Vida da faisca',
-                    layer.auxLifeMs,
-                    80,
-                    4000,
-                    10,
-                    amNumber(layer.auxLifeMs, 0),
-                    (v) => up((p) => p.copyParticles(auxLifeMs: v)),
+                    'Centro X',
+                    q.atracaoX,
+                    -2000,
+                    2000,
+                    4,
+                    amNumber(q.atracaoX, 0),
+                    (v) => up((p) => p.atracaoX = v),
                   ),
                   row(
-                    'Herda do pai',
-                    layer.auxInherit,
-                    0,
-                    1,
-                    0.01,
-                    amNumber(layer.auxInherit, 2),
-                    (v) => up((p) => p.copyParticles(auxInherit: v)),
+                    'Centro Y',
+                    q.atracaoY,
+                    -2000,
+                    2000,
+                    4,
+                    amNumber(q.atracaoY, 0),
+                    (v) => up((p) => p.atracaoY = v),
                   ),
                   row(
-                    'Forca da faisca',
-                    layer.auxSpeed,
-                    0,
-                    600,
-                    1,
-                    amNumber(layer.auxSpeed, 0),
-                    (v) => up((p) => p.copyParticles(auxSpeed: v)),
-                  ),
-                  row(
-                    'Tamanho da faisca',
-                    layer.auxSize,
-                    0.05,
-                    2,
-                    0.01,
-                    amNumber(layer.auxSize, 2),
-                    (v) => up((p) => p.copyParticles(auxSize: v)),
-                  ),
-                  row(
-                    'Comeca em',
-                    layer.auxStart,
-                    0,
-                    0.95,
-                    0.01,
-                    amNumber(layer.auxStart, 2),
-                    (v) => up((p) => p.copyParticles(auxStart: v)),
+                    'Centro Z',
+                    q.atracaoZ,
+                    -2000,
+                    2000,
+                    4,
+                    amNumber(q.atracaoZ, 0),
+                    (v) => up((p) => p.atracaoZ = v),
                   ),
                 ],
-                row(
-                  'Giro',
-                  layer.spin,
-                  -720,
-                  720,
-                  2,
-                  '${amNumber(layer.spin, 0)}°/s',
-                  (v) => up((p) => p.copyParticles(spin: v)),
-                ),
+
                 titulo('VIDA'),
                 chips(
                   'Tamanho',
                   const ['Fixo', 'Cresce', 'Encolhe', 'Sobe e desce'],
-                  layer.sizeOverLife,
-                  (i) => up((p) => p.copyParticles(sizeOverLife: i)),
+                  q.tamanhoNaVida.index,
+                  (i) => up((p) => p.tamanhoNaVida = TamanhoNaVida.values[i]),
                 ),
                 chips(
                   'Opacidade',
                   const ['Entra e sai', 'Some', 'Aparece', 'Fixa'],
-                  layer.opacityOverLife,
-                  (i) => up((p) => p.copyParticles(opacityOverLife: i)),
-                ),
-                row(
-                  'Vida aleat.',
-                  layer.lifeRandom,
-                  0,
-                  1,
-                  0.003,
-                  amNumber(layer.lifeRandom * 100, 0),
-                  (v) => up((p) => p.copyParticles(lifeRandom: v)),
+                  q.opacidadeNaVida.index,
+                  (i) =>
+                      up((p) => p.opacidadeNaVida = OpacidadeNaVida.values[i]),
                 ),
                 row(
                   'Tam. aleat.',
-                  layer.sizeRandom,
+                  q.tamanhoVariacao,
                   0,
                   1,
                   0.003,
-                  amNumber(layer.sizeRandom * 100, 0),
-                  (v) => up((p) => p.copyParticles(sizeRandom: v)),
+                  amNumber(q.tamanhoVariacao * 100, 0),
+                  (v) => up((p) => p.tamanhoVariacao = v),
                 ),
                 row(
                   'Opac. aleat.',
-                  layer.opacityRandom,
+                  q.opacidadeVariacao,
                   0,
                   1,
                   0.003,
-                  amNumber(layer.opacityRandom * 100, 0),
-                  (v) => up((p) => p.copyParticles(opacityRandom: v)),
+                  amNumber(q.opacidadeVariacao * 100, 0),
+                  (v) => up((p) => p.opacidadeVariacao = v),
                 ),
+
                 titulo('APARENCIA'),
                 chips(
-                  'Forma',
+                  'Desenho',
                   const [
                     'Esfera',
                     'Estrela',
@@ -2264,129 +2382,83 @@ Future<void> showParticlesSheet(
                     'Quadrado',
                     'Anel',
                   ],
-                  layer.shape,
-                  (i) => up((p) => p.copyParticles(shape: i)),
+                  q.forma.index,
+                  (i) => up((p) => p.forma = FormaDaParticula.values[i]),
+                ),
+                row(
+                  'Tamanho',
+                  q.tamanho,
+                  0.5,
+                  400,
+                  0.6,
+                  amNumber(q.tamanho, 1),
+                  (v) => up((p) => p.tamanho = v),
+                ),
+                row(
+                  'Opacidade',
+                  q.opacidade,
+                  0,
+                  1,
+                  0.003,
+                  amNumber(q.opacidade * 100, 0),
+                  (v) => up((p) => p.opacidade = v),
                 ),
                 row(
                   'Brilho',
-                  layer.glow,
+                  q.brilho,
                   0,
                   1,
                   0.003,
-                  amNumber(layer.glow * 100, 0),
-                  (v) => up((p) => p.copyParticles(glow: v)),
+                  amNumber(q.brilho * 100, 0),
+                  (v) => up((p) => p.brilho = v),
                 ),
                 row(
                   'Rastro',
-                  layer.trail,
+                  q.rastro,
                   0,
                   1,
                   0.003,
-                  amNumber(layer.trail * 100, 0),
-                  (v) => up((p) => p.copyParticles(trail: v)),
+                  amNumber(q.rastro * 100, 0),
+                  (v) => up((p) => p.rastro = v),
                 ),
-                // COR FINAL: a particula muda de cor ao longo da vida.
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Row(
-                    children: [
-                      const SizedBox(
-                        width: 86,
-                        child: AppText('Cor final',
-                          style: TextStyle(fontSize: 13, color: AmColors.muted),
-                        ),
-                      ),
-                      Tocavel(
-                        onTap: () {
-                          up((p) => p.copyParticles(clearColorEnd: true));
-                          setSheetState(() {});
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 11,
-                            vertical: 7,
-                          ),
-                          decoration: BoxDecoration(
-                            color: layer.colorEnd == null
-                                ? AmColors.accentDim
-                                : AmColors.chip,
-                            borderRadius: BorderRadius.circular(9),
-                          ),
-                          child: const AppText('Nenhuma',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: AmColors.accent,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const Spacer(),
-                      for (final c in const [
-                        Color(0xFFFF3B52),
-                        Color(0xFFB8FF3D),
-                        Color(0xFF7C62FF),
-                        Color(0xFFFFFFFF),
-                        Color(0xFFFFB020),
-                        Color(0xFF35C4E7),
-                      ])
-                        Tocavel(
-                          onTap: () {
-                            up((p) => p.copyParticles(colorEnd: c));
-                            setSheetState(() {});
-                          },
-                          child: Container(
-                            width: 26,
-                            height: 26,
-                            margin: const EdgeInsets.only(left: 7),
-                            decoration: BoxDecoration(
-                              color: c,
-                              shape: BoxShape.circle,
-                              border: layer.colorEnd == c
-                                  ? Border.all(color: Colors.white, width: 2.5)
-                                  : null,
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
+                row(
+                  'Giro',
+                  q.giroGrausS,
+                  -720,
+                  720,
+                  2.4,
+                  '${amNumber(q.giroGrausS, 0)}°/s',
+                  (v) => up((p) => p.giroGrausS = v),
+                ),
+                linhaDeCores(
+                  label: 'Cor final',
+                  atual: q.temCorFim ? q.corFim : null,
+                  nenhuma: !q.temCorFim,
+                  onPick: (c) => up((p) {
+                    p.corFim = c;
+                    p.temCorFim = true;
+                  }),
+                  onLimpar: () => up((p) => p.temCorFim = false),
                 ),
                 const SizedBox(height: 4),
                 Row(
                   children: [
-                    const AppText('Cintilar',
+                    const AppText(
+                      'Cintilar',
                       style: TextStyle(fontSize: 13, color: AmColors.muted),
                     ),
                     Transform.scale(
                       scale: 0.72,
                       child: CupertinoSwitch(
-                        value: layer.twinkle,
+                        value: q.cintilar,
                         activeTrackColor: AmColors.accent,
-                        onChanged: (v) {
-                          controller.updateParticles(
-                            layerId,
-                            (p) => p.copyParticles(twinkle: v),
-                          );
-                          setSheetState(() {});
-                        },
+                        onChanged: (v) => up((p) => p.cintilar = v),
                       ),
                     ),
                     const Spacer(),
-                    for (final c in const [
-                      Color(0xFFFF3B52),
-                      Color(0xFFB8FF3D),
-                      Color(0xFF7C62FF),
-                      Color(0xFFFFFFFF),
-                      Color(0xFFFFB020),
-                      Color(0xFF35C4E7),
-                    ])
+                    for (final c in paleta)
                       Tocavel(
-                        onTap: () {
-                          controller.updateParticles(
-                            layerId,
-                            (p) => p.copyParticles(color: c),
-                          );
-                          setSheetState(() {});
-                        },
+                        onTap: () => up((p) => p.corInicio = c.toARGB32()),
                         child: Container(
                           width: 30,
                           height: 30,
@@ -2394,7 +2466,7 @@ Future<void> showParticlesSheet(
                           decoration: BoxDecoration(
                             color: c,
                             shape: BoxShape.circle,
-                            border: layer.color == c
+                            border: q.corInicio == c.toARGB32()
                                 ? Border.all(color: Colors.white, width: 2.5)
                                 : null,
                           ),
@@ -2402,6 +2474,66 @@ Future<void> showParticlesSheet(
                       ),
                   ],
                 ),
+
+                titulo('FAISCAS'),
+                // EM ZERO O SISTEMA INTEIRO DORME, e o resto do painel nem
+                // aparece — a camada se comporta como qualquer outra.
+                row(
+                  'Por particula',
+                  q.faiscas.toDouble(),
+                  0,
+                  24,
+                  1.4,
+                  amNumber(q.faiscas.toDouble(), 0),
+                  (v) => up((p) => p.faiscas = v.round()),
+                ),
+                if (q.faiscas > 0) ...[
+                  row(
+                    'Vida (s)',
+                    q.faiscaVidaS,
+                    0.08,
+                    6,
+                    0.012,
+                    amNumber(q.faiscaVidaS, 2),
+                    (v) => up((p) => p.faiscaVidaS = v),
+                  ),
+                  row(
+                    'Herda do pai',
+                    q.faiscaHeranca,
+                    0,
+                    1,
+                    0.012,
+                    amNumber(q.faiscaHeranca, 2),
+                    (v) => up((p) => p.faiscaHeranca = v),
+                  ),
+                  row(
+                    'Forca',
+                    q.faiscaVelocidade,
+                    0,
+                    900,
+                    1.6,
+                    amNumber(q.faiscaVelocidade, 0),
+                    (v) => up((p) => p.faiscaVelocidade = v),
+                  ),
+                  row(
+                    'Tamanho',
+                    q.faiscaTamanho,
+                    0.05,
+                    3,
+                    0.012,
+                    amNumber(q.faiscaTamanho, 2),
+                    (v) => up((p) => p.faiscaTamanho = v),
+                  ),
+                  row(
+                    'Comeca em',
+                    q.faiscaInicio,
+                    0,
+                    0.95,
+                    0.012,
+                    amNumber(q.faiscaInicio, 2),
+                    (v) => up((p) => p.faiscaInicio = v),
+                  ),
+                ],
               ],
             ),
           ),

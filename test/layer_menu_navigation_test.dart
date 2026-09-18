@@ -92,7 +92,7 @@ void main() {
     ('texto em caminho', text, 'Caminho'),
     ('volume', audio, 'Volume'),
     ('fade', audio, 'Fade'),
-    ('particulas', (c) => c.addParticlesLayer(Duration.zero), 'Particulas'),
+    ('particulas', (c) => c.addParticulasLayer(Duration.zero), 'Particulas'),
     (
       'legendas',
       (c) =>

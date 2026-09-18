@@ -18,6 +18,8 @@ import 'dart:typed_data';
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
 
+part 'particulas.dart';
+
 // --------------------------------------------------------------- a ABI
 
 /// A VERSAO DA PORTA. O C++ responde [versaoDaPorta] e o Dart confere: um

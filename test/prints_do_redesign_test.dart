@@ -224,7 +224,7 @@ void main() {
   });
 
   testWidgets('Ficha de Particulas na lingua nova', (tester) async {
-    final p = ParticlesLayer(
+    final p = ParticulasLayer(
       name: 'Faíscas',
       startTime: Duration.zero,
       duration: const Duration(seconds: 8),
@@ -232,10 +232,12 @@ void main() {
     final (_, chave) = await editorLite(
       tester,
       [p],
-      (context, ref) => showParticlesSheet(context, ref, p.id),
+      (context, ref) => showParticulasSheet(context, ref, p.id),
     );
     expect(tester.takeException(), isNull);
     expect(find.text('Quantidade'), findsOneWidget);
+    // A RECEITA DO MOTOR aparece: sao os presets que o painel abre.
+    expect(find.text('RECEITA'), findsOneWidget);
     await gravarPrint(tester, chave, 'redesign-ficha-particulas');
     await tester.pump(const Duration(seconds: 1));
   });

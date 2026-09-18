@@ -1,6 +1,8 @@
 import 'dart:math' as math;
 import 'dart:ui';
 
+
+import 'package:aurea_render/aurea_render.dart';
 import '../../editor/domain/camera3d.dart';
 import '../../editor/domain/camera_cuts.dart';
 import '../../editor/domain/effect.dart';
@@ -750,19 +752,31 @@ VideoProject buildMaoEnterradaTemplate() {
         ],
       ),
       // POEIRA no ar: parte da atmosfera, nao decoracao.
-      ParticlesLayer(
+      //
+      // A RECEITA E A DO PRESET "Poeira", ajustada para o grão quente
+      // deste deserto. Antes eram doze campos soltos na camada; agora e
+      // um objeto do motor — e uma receita nova so muda o que ela quer.
+      ParticulasLayer(
         name: 'Poeira no ar',
         startTime: Duration.zero,
         duration: maoDuracao,
-        count: 80,
-        color: const Color(0xffe8c9a0),
+        parametros: ParametrosDeParticulas(
+          emissor: EmissorDeParticulas.caixa,
+          largura: 2200,
+          altura: 1200,
+          profundidade: 1400,
+          vidaS: 9,
+          velocidade: 12,
+          gravidade: -2.5,
+          tamanho: 3,
+          forma: FormaDaParticula.esfera,
+          corInicio: 0xE8C9A0FF,
+          brilho: 0.15,
+          opacidade: 0.26,
+          opacidadeNaVida: OpacidadeNaVida.entraESai,
+          maximo: 80,
+        ),
         opacity: AnimatedDouble(.26),
-        size: 3,
-        speed: 12,
-        gravity: -2.5,
-        star: false,
-        glow: .15,
-        lifetimeMs: 9000,
       ),
       // A CENA 3D.
       Scene3DLayer(

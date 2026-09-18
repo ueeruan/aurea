@@ -41,6 +41,7 @@ import '../../domain/gear.dart';
 import '../../domain/text_animator.dart' show valueNoise01;
 import '../../domain/caption_highlight.dart';
 import '../../domain/grid_rig.dart';
+import '../../domain/gizmo3d.dart';
 import '../../domain/layer.dart';
 import '../../domain/layer_meta.dart';
 import '../../domain/mask.dart';
@@ -86,6 +87,7 @@ import 'particles_painter.dart';
 import '../../application/scene3d_gpu.dart';
 import 'scene3d_painter.dart';
 import 'scene3d_gpu_view.dart';
+import 'gizmo3d_painter.dart';
 import 'texto_no_atlas.dart';
 
 import 'package:aurea/src/core/l10n/app_language.dart';
@@ -179,6 +181,25 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
   Offset _dragStartPivot = Offset.zero;
   Offset _dragAccum = Offset.zero;
 
+  // ---- GIZMO 3D: o eixo (ou o anel) que o dedo pegou neste gesto ----
+  //
+  // SAO DOIS ESTADOS, e nao um: o eixo MOVE e o anel GIRA. Guardar qual
+  // dos dois foi pego e o que impede o mesmo arrasto de virar movimento
+  // quando a pessoa queria girar.
+  EixoDoGizmo? _eixoDoGizmo;
+  EixoDoGizmo? _anelDoGizmo;
+
+  /// O gizmo no instante em que o gesto comecou. Recalculado a cada
+  /// quadro ele mudaria debaixo do dedo — o eixo tem de ficar onde foi
+  /// pego enquanto o arrasto dura.
+  GizmoNaTela? _gizmoInicial;
+  Offset _posNoInicioDoEixo = Offset.zero;
+  double _zNoInicioDoEixo = 0;
+  double _rotNoInicioDoAnel = 0;
+  double _giroAcumulado = 0;
+  Offset _deltaAcumuladoDoEixo = Offset.zero;
+  Offset _dedoAnterior = Offset.zero;
+
   /// O ponto tocado, em coordenadas da COMPOSICAO.
   Offset _naComposicao(Offset local) =>
       (local - _stageOrigin) / (_stageScale <= 0 ? 1 : _stageScale);
@@ -227,6 +248,148 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
       }
     }
     return null;
+  }
+
+  /// O COMPRIMENTO DO BRACO E O RAIO DO ANEL, EM PIXELS DE TELA.
+  ///
+  /// Constantes de tela, e nao da composicao: um gizmo que encolhesse
+  /// junto com o zoom sumiria exatamente quando a pessoa se aproxima para
+  /// mirar. O anel fica FORA do braco (118 contra 86) para o dedo nao
+  /// pegar o anel quando queria o eixo — os dois se sobrepoem na mesma
+  /// regiao da tela.
+  static const double _kBracoDoGizmo = 86;
+  static const double _kRaioDoAnel = 118;
+
+  /// O GIZMO DA CAMADA SELECIONADA — nulo quando nao ha um.
+  ///
+  /// So camada com o 3D LIGADO: e o 3D que da sentido a profundidade, e
+  /// um gizmo de Z numa camada plana prometeria um eixo que nao existe.
+  /// Bloqueada tambem nao tem: ver [_camadaSelecionadaBloqueada].
+  GizmoNaTela? _gizmoDaSelecao() {
+    final id = ref.read(selectedLayerProvider);
+    if (id == null) return null;
+    final project = ref.read(editorControllerProvider);
+    final l = project.layerById(id);
+    if (l == null || !l.is3D || l is AudioLayer || l is AdjustmentLayer) {
+      return null;
+    }
+    final t = widget.playback.time.value;
+    if (!l.activeAt(t)) return null;
+    return gizmoDaCamada(project, l, t);
+  }
+
+  /// O DEDO CAIU NUM EIXO DO GIZMO? Devolve o eixo e ja guarda o estado do
+  /// gesto (o gizmo congelado e os valores de partida).
+  bool _pegarDoGizmo(Offset noPalco) {
+    _eixoDoGizmo = null;
+    _anelDoGizmo = null;
+    final g = _gizmoDaSelecao();
+    if (g == null) return false;
+    final dedo = _naComposicao(noPalco);
+    final braco = _kBracoDoGizmo / _stageScale;
+    final raio = _kRaioDoAnel / _stageScale;
+    final folga = 22 / _stageScale;
+
+    // O ANEL PRIMEIRO: ele passa por fora do braco, e quem mira a
+    // circunferencia nao quer o eixo.
+    final anel = anelNoDedo(g, dedo, raio, tolerancia: 26 / _stageScale);
+    final eixo = eixoNoDedo(g, dedo, braco, tolerancia: folga);
+    if (anel == null && eixo == null) return false;
+
+    final id = ref.read(selectedLayerProvider)!;
+    final layer = ref.read(editorControllerProvider).layerById(id)!;
+    final t = widget.playback.time.value;
+    final local = layer.localTime(t);
+    _gizmoInicial = g;
+    _posNoInicioDoEixo = layer.position.valueAt(local);
+    _zNoInicioDoEixo = layer.positionZ.valueAt(local);
+    _deltaAcumuladoDoEixo = Offset.zero;
+    // O DEDO ANTERIOR FICA EM COORDENADAS DA COMPOSICAO, igual ao centro
+    // do anel: guardar um em palco e o outro em composicao faria o
+    // primeiro passo do giro valer o zoom do palco.
+    _dedoAnterior = dedo;
+    _giroAcumulado = 0;
+    if (anel != null) {
+      _anelDoGizmo = anel;
+      final e = anel;
+      _rotNoInicioDoAnel = switch (e) {
+        EixoDoGizmo.x => layer.rotationX.valueAt(local),
+        EixoDoGizmo.y => layer.rotationY.valueAt(local),
+        EixoDoGizmo.z => layer.rotation.valueAt(local),
+      };
+    } else {
+      _eixoDoGizmo = eixo;
+    }
+    ref.read(editorControllerProvider.notifier).beginGesture();
+    return true;
+  }
+
+  /// O ARRASTO DENTRO DO GIZMO. Devolve `true` quando consumiu o gesto.
+  bool _arrastarNoGizmo(ScaleUpdateDetails d) {
+    final eixo = _eixoDoGizmo;
+    final anel = _anelDoGizmo;
+    final g = _gizmoInicial;
+    if (g == null || (eixo == null && anel == null)) return false;
+    final id = ref.read(selectedLayerProvider);
+    if (id == null) return true;
+    final t = widget.playback.time.value;
+
+    if (eixo != null) {
+      // O DELTA E ACUMULADO DESDE O INICIO, e nao somado evento a evento:
+      // a posicao vem sempre de `inicial + total`, e um evento perdido
+      // nao deixa erro permanente no objeto.
+      _deltaAcumuladoDoEixo += d.focalPointDelta;
+      final v = valorArrastado(
+        eixo: eixo,
+        gizmo: g,
+        deltaTela: _deltaAcumuladoDoEixo / _stageScale,
+        posInicial: _posNoInicioDoEixo,
+        zInicial: _zNoInicioDoEixo,
+      );
+      final c = ref.read(editorControllerProvider.notifier);
+      if (v.z != null) {
+        c.editPositionZ(id, t, v.z!);
+      } else if (v.pos != null) {
+        c.editPosition(id, t, v.pos!);
+      }
+      ref.read(infobarProvider.notifier).state = DadosDaInfobar.pares([
+        (
+          'Eixo ${nomeDoEixo(eixo)}',
+          (v.z ?? (eixo == EixoDoGizmo.x ? v.pos!.dx : v.pos!.dy))
+              .toStringAsFixed(0),
+        ),
+      ]);
+      return true;
+    }
+
+    // ANEL: o angulo varrido em volta do centro, com o sinal que a
+    // orientacao dos eixos na tela manda. Sem o sinal, girar com a camera
+    // atras da camada girava ao contrario.
+    final alvo = anel!;
+    final centro = g.origem;
+    final atual = _naComposicao(d.localFocalPoint);
+    _giroAcumulado +=
+        giroEntre(centro, _dedoAnterior, atual) * sinalDoGiro(g, alvo);
+    // O DEDO ANTERIOR GUARDA O PONTO EM COORDENADAS DA COMPOSICAO, igual
+    // ao centro: guardar o do palco aqui — que foi o primeiro jeito —
+    // fazia o angulo do segundo evento em diante sair de dois pontos em
+    // espacos diferentes, e o objeto disparava centenas de graus por
+    // passo.
+    _dedoAnterior = atual;
+    final c = ref.read(editorControllerProvider.notifier);
+    final valor = _rotNoInicioDoAnel + _giroAcumulado;
+    switch (alvo) {
+      case EixoDoGizmo.x:
+        c.editRotationX(id, t, valor);
+      case EixoDoGizmo.y:
+        c.editRotationY(id, t, valor);
+      case EixoDoGizmo.z:
+        c.editRotation(id, t, valor);
+    }
+    ref.read(infobarProvider.notifier).state = DadosDaInfobar.pares([
+      ('Giro ${nomeDoEixo(alvo)}', '${valor.toStringAsFixed(1)}°'),
+    ]);
+    return true;
   }
 
   /// Onde ficam as alcas da selecao, em coordenadas do PALCO.
@@ -463,6 +626,10 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
         }
       }
     }
+    // O GIZMO 3D VEM PRIMEIRO. Ele vive no centro da camada e as alcas 2D
+    // nos cantos da caixa; num objeto pequeno os dois se encostam, e quem
+    // mira o eixo do Z nao quer redimensionar a camada.
+    if (d.pointerCount < 2 && _pegarDoGizmo(d.localFocalPoint)) return;
     // O dedo pegou uma alca? (raio generoso: 28 px)
     _alca = null;
     final alcas = _alcasDaSelecao();
@@ -527,6 +694,9 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
 
   void _onScaleUpdate(ScaleUpdateDetails d) {
     if (_selecionandoNoPalco) return;
+    // O GIZMO TEM PRIORIDADE SOBRE O ARRASTO LIVRE: quem pegou o eixo
+    // quer andar NAQUELE eixo, e nao em qualquer direcao.
+    if (_arrastarNoGizmo(d)) return;
     final chaveDaAlca = _alcaDaForma;
     if (chaveDaAlca != null) {
       _arrastarAlcaDaForma(chaveDaAlca, d.localFocalPoint);
@@ -831,6 +1001,13 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
                   _alcaDaForma = null;
                   ref.read(editorControllerProvider.notifier).endGesture();
                 }
+                if (_eixoDoGizmo != null || _anelDoGizmo != null) {
+                  _eixoDoGizmo = null;
+                  _anelDoGizmo = null;
+                  _gizmoInicial = null;
+                  ref.read(editorControllerProvider.notifier).endGesture();
+                  setState(() {});
+                }
                 _limparEncaixe();
                 _limparInfobar();
               },
@@ -1069,6 +1246,51 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
                                               ),
                                             ),
                                           ),
+                                        ),
+                                      // O GIZMO 3D: os eixos da camada
+                                      // selecionada, na viewport.
+                                      //
+                                      // DEPOIS DAS GUIAS e ANTES da
+                                      // mascara: ele e uma ajuda de
+                                      // edicao como elas, e nunca entra
+                                      // no render (o `IgnorePointer`
+                                      // garante que o dedo continua
+                                      // chegando ao gesto do palco, que
+                                      // e quem faz o teste de toque).
+                                      if (!drawing)
+                                        ValueListenableBuilder<Duration>(
+                                          valueListenable:
+                                              widget.playback.time,
+                                          builder: (context, _, _) {
+                                            ref.watch(
+                                              editorControllerProvider,
+                                            );
+                                            ref.watch(selectedLayerProvider);
+                                            final g = _gizmoDaSelecao();
+                                            if (g == null) {
+                                              return const SizedBox.shrink();
+                                            }
+                                            return Positioned.fill(
+                                              child: IgnorePointer(
+                                                child: CustomPaint(
+                                                  key: const ValueKey(
+                                                    'gizmo-3d',
+                                                  ),
+                                                  painter: Gizmo3DPainter(
+                                                    gizmo: g,
+                                                    escala: scale,
+                                                    comprimento:
+                                                        _kBracoDoGizmo,
+                                                    raio: _kRaioDoAnel,
+                                                    eixoAtivo: _eixoDoGizmo,
+                                                    anelAtivo: _anelDoGizmo,
+                                                    ativo:
+                                                        !_camadaSelecionadaBloqueada(),
+                                                  ),
+                                                ),
+                                              ),
+                                            );
+                                          },
                                         ),
                                       // NOS DA MASCARA: quando alguem esta editando
                                       // o caminho, o dedo passa a mexer nos nos em

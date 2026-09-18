@@ -427,6 +427,24 @@ Set<String> descendentesPorParentesco(VideoProject projeto, String id) {
   return saida;
 }
 
+/// UM DESLOCAMENTO POR CIMA DO QUE A CAMADA TEM GRAVADO.
+///
+/// Existe para o gizmo 3D: para saber PARA ONDE VAI o eixo, e preciso
+/// perguntar a projecao "e se esta camada estivesse um passo adiante?" —
+/// e a resposta tem de passar pela MESMA cadeia do desenho (parentesco,
+/// camera, projecao), senao o eixo aponta para um lugar e a camada esta
+/// noutro. Copiar a camada a cada pergunta custaria quatro alocacoes por
+/// quadro so para ler tres direcoes.
+class AjusteDeTransform {
+  const AjusteDeTransform({this.pos, this.z});
+
+  /// A posicao autoral no lugar da gravada (nulo = a gravada).
+  final Offset? pos;
+
+  /// A profundidade autoral no lugar da gravada (nulo = a gravada).
+  final double? z;
+}
+
 /// Transform efetivo de uma camada apos resolver a CADEIA de parenting.
 class LayerTransform {
   const LayerTransform({
@@ -468,6 +486,7 @@ LayerTransform effectiveTransform(
   Layer layer,
   Duration t, [
   Set<String>? visited,
+  AjusteDeTransform? ajuste,
 ]) {
   // SO A CHAMADA DE FORA APLICA A CAMERA. As chamadas recursivas
   // resolvem o PAI em coordenadas de mundo: parentesco acontece no
@@ -475,12 +494,12 @@ LayerTransform effectiveTransform(
   // transformaria a cena duas vezes.
   final raiz = visited == null;
   final local = layer.localTime(t);
-  var pos = layer.position.valueAt(local);
+  var pos = ajuste?.pos ?? layer.position.valueAt(local);
   var rot = layer.rotation.valueAt(local);
   var rotX = layer.rotationX.valueAt(local);
   var rotY = layer.rotationY.valueAt(local);
   var scale = layer.scaleX.valueAt(local);
-  var z = layer.positionZ.valueAt(local);
+  var z = ajuste?.z ?? layer.positionZ.valueAt(local);
 
   final par = project.linkFor(layer.id, LayerProp.parent);
   if (par != null) {

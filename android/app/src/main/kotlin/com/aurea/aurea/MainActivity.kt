@@ -110,6 +110,29 @@ class MainActivity : FlutterActivity() {
 
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
+            "aurea/atualizacao"
+        ).setMethodCallHandler { call, result ->
+            try {
+                when (call.method) {
+                    // A VERSAO INSTALADA, do proprio sistema. E daqui que
+                    // sai o numero que o app compara com o do servidor —
+                    // ler do pubspec seria ler o que foi COMPILADO, e nao
+                    // o que esta instalado, e depois de uma atualizacao
+                    // recusada os dois discordam.
+                    "versao" -> result.success(versaoInstalada())
+                    "podeInstalar" -> result.success(podeInstalar())
+                    "instalar" -> result.success(
+                        instalar(call.argument<String>("caminho"))
+                    )
+                    else -> result.notImplemented()
+                }
+            } catch (e: Exception) {
+                result.error("atualizacao", e.message ?: "$e", null)
+            }
+        }
+
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
             "aurea/render"
         ).setMethodCallHandler { call, result ->
             try {
@@ -205,6 +228,73 @@ class MainActivity : FlutterActivity() {
     override fun onDestroy() {
         liberarProdutor()
         super.onDestroy()
+    }
+
+    // =========================================================== atualizacao
+
+    private fun versaoInstalada(): Map<String, Any> {
+        val info = packageManager.getPackageInfo(packageName, 0)
+        // `longVersionCode` existe desde a API 28 e e o numero que o
+        // Android usa para decidir se uma instalacao e mais NOVA. O
+        // `versionCode` antigo e um Int e estoura em apps grandes.
+        val codigo = if (android.os.Build.VERSION.SDK_INT >= 28) {
+            info.longVersionCode
+        } else {
+            @Suppress("DEPRECATION")
+            info.versionCode.toLong()
+        }
+        return mapOf("codigo" to codigo, "nome" to (info.versionName ?: ""))
+    }
+
+    /// O Android so deixa instalar pacote de fora da loja com esta
+    /// permissao ligada, e ela e POR APLICATIVO: quem decide nao e o app,
+    /// e a pessoa, numa tela de Ajustes. Sem esta pergunta o app tentaria
+    /// instalar e o sistema recusaria em silencio.
+    private fun podeInstalar(): Boolean =
+        if (android.os.Build.VERSION.SDK_INT >= 26) {
+            packageManager.canRequestPackageInstalls()
+        } else {
+            true
+        }
+
+    /**
+     * ABRE O INSTALADOR DO SISTEMA para o APK em [caminho].
+     *
+     * O ARQUIVO NAO VAI CRU. Desde o Android 7 o instalador so aceita um
+     * `content://` que o proprio app autoriza; um `file://` faz o sistema
+     * recusar a instalacao com um erro que nao explica nada. Quem converte
+     * e o `FileProvider`, e o `caminhos_do_apk.xml` diz qual pasta ele
+     * alcanca.
+     *
+     * Devolve "abriu", "permissao" (falta ligar o ajuste) ou "erro: ...".
+     */
+    private fun instalar(caminho: String?): String {
+        if (caminho == null || caminho.isBlank()) return "erro: caminho vazio"
+        val arquivo = File(caminho)
+        if (!arquivo.exists() || arquivo.length() == 0L) {
+            return "erro: o arquivo baixado nao esta la"
+        }
+        if (!podeInstalar()) {
+            // LEVA A PESSOA ATE O AJUSTE. Um aviso dizendo "ligue a
+            // permissao" sem dizer onde deixa o app sem saida.
+            val intent = android.content.Intent(
+                android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                android.net.Uri.parse("package:$packageName")
+            ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(intent)
+            return "permissao"
+        }
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            this, "$packageName.arquivos", arquivo
+        )
+        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW)
+            .setDataAndType(
+                uri, "application/vnd.android.package-archive"
+            )
+            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        startActivity(intent)
+        return "abriu"
     }
 
     private fun handle(method: String, call: io.flutter.plugin.common.MethodCall): Any? =

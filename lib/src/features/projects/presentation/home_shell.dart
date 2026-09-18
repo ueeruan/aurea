@@ -14,6 +14,7 @@ import '../../community/presentation/community_tab.dart';
 import '../../settings/presentation/settings_tab.dart';
 import '../../user/presentation/user_tab.dart';
 import 'aviso_ao_vivo.dart';
+import 'faixa_de_atualizacao.dart';
 import 'boas_vindas.dart';
 import 'projects_tab.dart';
 import 'release_notice.dart';
@@ -114,6 +115,11 @@ class _HomeShellState extends ConsumerState<HomeShell> {
           // app inteiro mostra sem ninguem pedir, e por isso vive fora
           // de qualquer aba.
           const AvisoAoVivo(),
+          // A VERSAO NOVA fica embaixo dos avisos e acima das abas, pelo
+          // mesmo motivo: e coisa que o app inteiro mostra sem ninguem
+          // pedir. O aviso vem primeiro porque ele e sobre o que esta
+          // acontecendo AGORA; a atualizacao pode esperar um minuto.
+          const FaixaDeAtualizacao(),
           Expanded(
             child: IndexedStack(index: index, children: _tabBodies),
           ),

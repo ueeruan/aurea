@@ -134,6 +134,9 @@ const diaDeHoje = () => new Date().toISOString().slice(0, 10);
 const AVISOS_NO_AR = 3;
 const CHAVE_AVISOS = 'aviso:lista';
 
+/// Onde mora a ultima versao publicada do aplicativo.
+const CHAVE_VERSAO = 'versao:atual';
+
 /**
  * Os avisos no ar, do mais antigo para o mais novo (a ordem em que
  * aparecem na tela), ja sem os vencidos.
@@ -352,6 +355,22 @@ function recusarApelido(apelido) {
     return 'Esse apelido e reservado — ele passaria por conta oficial.';
   }
   return null;
+}
+
+/// A ULTIMA VERSAO PUBLICADA. Nulo = ninguem publicou nada ainda, e o
+/// aplicativo NAO mostra faixa nenhuma — nunca "atualize" sem ter o que.
+async function lerVersao(env) {
+  try {
+    const bruto = await env.MURAL.get(CHAVE_VERSAO);
+    if (!bruto) return null;
+    const v = JSON.parse(bruto);
+    if (!v || !Number.isInteger(v.codigo) || typeof v.apk !== 'string') {
+      return null;
+    }
+    return v;
+  } catch {
+    return null;
+  }
 }
 
 // ------------------------------------------------------------- ajudantes
@@ -811,6 +830,72 @@ export default {
         : [aviso];
       await gravarAvisos(env, lista);
       return json({ ok: true, aviso, avisos: lista }, 201);
+    }
+
+    // ========================================================== versao
+    //
+    // A ULTIMA VERSAO DO APLICATIVO, para o aparelho se ATUALIZAR
+    // SOZINHO. O app pergunta ao abrir; se o que esta aqui for mais novo
+    // do que o que esta instalado, ele mostra a faixa e baixa o APK.
+    //
+    // LER E PUBLICO. Publicar pede a senha de moderacao, como o aviso —
+    // e pelo mesmo motivo: o endereco do arquivo mora FORA do APK, e um
+    // endereco que qualquer um troca e um aplicativo que qualquer um
+    // troca.
+    //
+    // O `codigo` e o versionCode do Android, e nao o nome: e ele que o
+    // sistema usa para decidir se uma instalacao e mais nova, e comparar
+    // "1.1.10" com "1.1.9" por texto diria que 1.1.9 vem depois.
+    if (request.method === 'GET' && caminho === '/versao') {
+      const atual = await lerVersao(env);
+      return json({ versao: atual });
+    }
+
+    if (request.method === 'PUT' && caminho === '/versao') {
+      const senha = (request.headers.get('x-moderacao') ?? '').trim();
+      if (!env.SENHA_DE_MODERACAO || senha !== env.SENHA_DE_MODERACAO) {
+        return erro('Sem permissao.', 401);
+      }
+      let corpo;
+      try {
+        corpo = await request.json();
+      } catch {
+        return erro('Corpo invalido.', 400);
+      }
+      const codigo = Number(corpo.codigo);
+      const nome = String(corpo.versao ?? '').trim().slice(0, 24);
+      const apk = String(corpo.apk ?? '').trim();
+      if (!Number.isInteger(codigo) || codigo <= 0) {
+        return erro('Falta o codigo da versao (inteiro).', 422);
+      }
+      if (nome.length < 3) return erro('Falta o nome da versao.', 422);
+      if (!apk.startsWith('https://')) {
+        return erro('O endereco do APK tem de ser https.', 422);
+      }
+      const versao = {
+        codigo,
+        versao: nome,
+        apk: apk.slice(0, 400),
+        // As notas sao o que a pessoa le na faixa. Curtas de proposito:
+        // a faixa e uma linha, e a tela de novidades do app e que conta
+        // o resto.
+        notas: String(corpo.notas ?? '').trim().slice(0, 400),
+        // OBRIGATORIA: a faixa nao fecha e o app so deixa seguir depois
+        // de atualizar. Para a versao que conserta algo que impede usar.
+        obrigatoria: corpo.obrigatoria === true,
+        tamanho: Number.isFinite(Number(corpo.tamanho))
+          ? Number(corpo.tamanho)
+          : 0,
+        // O SHA-256 do arquivo. O aparelho confere depois de baixar: sem
+        // isto, um download cortado no meio vira uma instalacao que
+        // falha — ou pior, um arquivo trocado no caminho.
+        sha256: /^[0-9a-f]{64}$/i.test(String(corpo.sha256 ?? ''))
+          ? String(corpo.sha256).toLowerCase()
+          : '',
+        quando: new Date().toISOString(),
+      };
+      await env.MURAL.put(CHAVE_VERSAO, JSON.stringify(versao));
+      return json({ ok: true, versao }, 201);
     }
 
     if (request.method === 'GET' && (caminho === '/feed' || caminho === '/')) {

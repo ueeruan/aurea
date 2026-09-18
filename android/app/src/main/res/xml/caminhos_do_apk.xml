@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  O QUE O INSTALADOR PODE ALCANCAR.
+
+  Uma pasta so, e ela e a unica coisa que o provedor expoe: o APK que o
+  proprio app baixou. `cache` some quando o sistema precisa de espaco —
+  e um APK ja instalado nao precisa mais existir —, e e por isso que ele
+  e o lugar certo, e nao os Documentos do usuario.
+
+  A REGRA E ESTREITA DE PROPOSITO. Um provedor apontando para a raiz
+  interna entregaria qualquer arquivo do aplicativo a quem pedisse um
+  `content://`; aqui so sai o que estiver nesta pasta.
+-->
+<paths>
+    <cache-path name="apk-baixado" path="atualizacao/" />
+</paths>

@@ -547,6 +547,70 @@ confere(
   [...env.MURAL.dados.keys()].some((k) => /audio|transcricao:corpo/.test(k)),
   false,
 );
+// ======================================================== versao
+//
+// O APARELHO SE ATUALIZA SOZINHO por este endereco. O que ele NAO pode
+// fazer e mostrar "atualize" sem ter o que oferecer, nem aceitar
+// endereco de APK que nao seja https — o endereco vive fora do APK, e um
+// endereco que qualquer um troca e um aplicativo que qualquer um troca.
+
+r = await chamar('GET', '/versao');
+confere('sem ninguem publicar, a versao e nula', (await r.json()).versao, null);
+
+r = await chamar('PUT', '/versao', {
+  corpo: { codigo: 92, versao: '1.1.7-beta', apk: 'https://exemplo/apk' },
+});
+confere('publicar sem senha nao passa', r.status, 401);
+
+r = await chamar('PUT', '/versao', {
+  cabecalhos: { 'x-moderacao': 'senha-de-teste' },
+  corpo: { versao: '1.1.7-beta', apk: 'https://exemplo/apk' },
+});
+confere('sem o codigo da versao nao passa', r.status, 422);
+
+r = await chamar('PUT', '/versao', {
+  cabecalhos: { 'x-moderacao': 'senha-de-teste' },
+  corpo: { codigo: 92, versao: '1.1.7-beta', apk: 'http://exemplo/apk' },
+});
+confere('endereco que nao e https nao passa', r.status, 422);
+
+r = await chamar('PUT', '/versao', {
+  cabecalhos: { 'x-moderacao': 'senha-de-teste' },
+  corpo: {
+    codigo: 92,
+    versao: '1.1.7-beta',
+    apk: 'https://exemplo/aurea.apk',
+    notas: 'O texto arabe voltou a ligar.',
+    sha256: 'A'.repeat(64),
+    tamanho: 93700000,
+  },
+});
+confere('publicar com senha passa', r.status, 201);
+
+r = await chamar('GET', '/versao');
+const publicada = (await r.json()).versao;
+confere('e o aparelho le o que foi publicado', publicada.codigo, 92);
+confere('com o nome da versao', publicada.versao, '1.1.7-beta');
+confere('e o endereco do arquivo', publicada.apk, 'https://exemplo/aurea.apk');
+confere('sem obrigatoriedade por padrao', publicada.obrigatoria, false);
+confere('o sha256 entra em minusculas', publicada.sha256, 'a'.repeat(64));
+
+r = await chamar('PUT', '/versao', {
+  cabecalhos: { 'x-moderacao': 'senha-de-teste' },
+  corpo: {
+    codigo: 93,
+    versao: '1.1.8-beta',
+    apk: 'https://exemplo/aurea.apk',
+    obrigatoria: true,
+    sha256: 'nem-e-hash',
+  },
+});
+confere('a versao obrigatoria e publicada', r.status, 201);
+r = await chamar('GET', '/versao');
+const obrigatoria = (await r.json()).versao;
+confere('com a marca de obrigatoria', obrigatoria.obrigatoria, true);
+confere('e sha invalido vira vazio, e nao lixo', obrigatoria.sha256, '');
+
 globalThis.fetch = fetchDeVerdade;
 
 console.log(falhas === 0 ? '\nTudo certo.' : `\n${falhas} falha(s).`);

@@ -34,7 +34,9 @@ jobs:
       - name: Build APK (Release)
         run: |
           set -o pipefail
-          flutter build apk --release -v 2>&1 | tee build-apk.log
+          # UM APK POR ARQUITETURA. O "fat" carrega as tres e sai com o
+          # triplo do tamanho; o aparelho do testador instala só a dele.
+          flutter build apk --release --split-per-abi -v 2>&1 | tee build-apk.log
 
       - name: Guardar diagnostico da compilacao
         if: always()
@@ -48,4 +50,51 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: aurea-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: build/app/outputs/flutter-apk/app-*-release.apk
+          if-no-files-found: ignore
+
+      # ================================================== release publica
+      #
+      # E DAQUI que o aplicativo baixa a versao nova. O endereco do
+      # arquivo tem de ser PUBLICO e estavel: e ele que vai no servidor do
+      # mural, e o aparelho o abre sozinho. O anexo do `actions/upload-
+      # artifact` nao serve — baixar de la exige estar logado no GitHub.
+      - name: Publicar o APK como release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Aurea ${{ github.ref_name }}
+          body: |
+            APK de release, por arquitetura. O aplicativo se atualiza por
+            aqui: o servidor do mural aponta para este anexo.
+          files: build/app/outputs/flutter-apk/app-*-release.apk
+          fail_on_unmatched_files: true
+
+      # =========================================== avisar os aparelhos
+      #
+      # O APARELHO SO SABE QUE EXISTE VERSAO NOVA POR ESTE PASSO. Sem
+      # ele, o APK fica publicado e ninguem recebe o aviso — que e o
+      # mesmo que nao ter publicado nada.
+      #
+      # SE O SEGREDO NAO ESTIVER CONFIGURADO, ele avisa e segue: uma
+      # compilacao que falha por falta de um segredo opcional e pior do
+      # que uma compilacao que entrega o APK e diz o que faltou.
+      - name: Avisar o servidor do mural
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          SENHA: ${{ secrets.SENHA_DE_MODERACAO }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SENHA:-}" ]; then
+            echo "::warning::Falta o segredo SENHA_DE_MODERACAO. O APK saiu, e nenhum aparelho vai saber."
+            exit 0
+          fi
+          NOME=$(grep -m1 '^version:' pubspec.yaml | sed 's/version: *//' | cut -d+ -f1)
+          CODIGO=$(grep -m1 '^version:' pubspec.yaml | sed 's/version: *//' | cut -d+ -f2)
+          ARQUIVO=build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+          URL="https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/app-arm64-v8a-release.apk"
+          TAMANHO=$(stat -c%s "$ARQUIVO")
+          SHA=$(sha256sum "$ARQUIVO" | cut -d' ' -f1)
+          curl -sS -f -X PUT "https://mural-do-aurea.aureaapp.workers.dev/versao"             -H "x-moderacao: $SENHA"             -H 'content-type: application/json'             -d "{\"codigo\":$CODIGO,\"versao\":\"$NOME\",\"apk\":\"$URL\",\"notas\":\"\",\"tamanho\":$TAMANHO,\"sha256\":\"$SHA\"}"
+          echo "Publicado: $NOME ($CODIGO) -> $URL"

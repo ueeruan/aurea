@@ -13,6 +13,11 @@
          o MediaStore nao pede permissao nenhuma. -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28"/>
+    <!-- ATUALIZAR DENTRO DO APP: o aparelho baixa o APK novo e abre o
+         instalador do sistema. Sem esta permissao o Android recusa a
+         instalacao, e o unico caminho seria mandar a pessoa procurar o
+         arquivo na mao. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <application
@@ -55,6 +60,21 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- O INSTALADOR NAO LE ARQUIVO CRU. Desde o Android 7 o
+             instalador so aceita um `content://` que o proprio app
+             autoriza; entregar um `file://` da pasta interna faz o
+             sistema recusar a instalacao com um erro que nao diz nada.
+             Quem converte e este provedor, e `caminhos_do_apk.xml` diz
+             quais pastas ele alcanca — so a do APK baixado. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.arquivos"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/caminhos_do_apk" />
+        </provider>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

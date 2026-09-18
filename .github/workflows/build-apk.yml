@@ -9,6 +9,12 @@ jobs:
   build-apk:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # PUBLICAR RELEASE PRECISA DE ESCRITA, e o token do GitHub Actions
+    # nasce so com leitura na maioria dos repositorios. Sem esta linha o
+    # passo de publicar falha com um 403 que nao diz o que falta — foi o
+    # que aconteceu na primeira vez.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 

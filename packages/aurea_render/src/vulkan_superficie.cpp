@@ -1,6 +1,7 @@
 #include "vulkan_superficie.h"
 
 #include <algorithm>
+#include <cstring>
 #include <exception>
 #include <vector>
 
@@ -46,6 +47,13 @@ void PreviewVulkan::desanexar() noexcept { superficie_.desanexar(); }
 
 std::int32_t PreviewVulkan::apresentar(std::uint32_t cor) noexcept {
   return superficie_.apresentar(cor);
+}
+
+std::int32_t PreviewVulkan::apresentar_imagem(const std::uint8_t* rgba,
+                                              std::uint32_t l,
+                                              std::uint32_t a) noexcept {
+  if (!dispositivo_aberto_) return -1;
+  return superficie_.apresentar_imagem(rgba, l, a);
 }
 
 std::int32_t PreviewVulkan::redimensionar(std::uint32_t l,
@@ -175,6 +183,10 @@ std::string SuperficieVulkan::anexar(void* janela, std::uint32_t largura,
 
 void SuperficieVulkan::desanexar() noexcept {
   destruir_swapchain();
+  // A ORIGEM E NOSSA, NAO DA SWAPCHAIN. Ela sobrevive a uma troca de
+  // tamanho (e por isso o buffer de staging nao e alocado por quadro) e
+  // some junto com a superficie, nao com a swapchain.
+  destruir_origem();
   if (superficie_ != nullptr && dispositivo_.viva()) {
     vkDestroySurfaceKHR(static_cast<VkInstance>(dispositivo_.instancia()),
                         static_cast<VkSurfaceKHR>(superficie_), nullptr);
@@ -271,6 +283,33 @@ std::string SuperficieVulkan::criar_sincronizacao() noexcept {
   semaforo_pronto_ = pronto;
   cerca_ = cerca;
   return {};
+}
+
+/// A JANELA AINDA TEM O TAMANHO DA SWAPCHAIN?
+///
+/// `VK_SUBOPTIMAL_KHR` quer dizer "ainda serve, mas o tamanho ja nao
+/// bate". O rotulo e honesto e a acao obvia — refazer —, mas o driver
+/// repete o aviso ENQUANTO os tamanhos nao batem, e cada refazer custa
+/// `vkDeviceWaitIdle` mais uma swapchain nova. Com o aviso virado em
+/// "refaz sempre", o preview entra numa tempestade: sete recriacoes em
+/// dois quadros, e algumas delas caindo no meio de uma mudanca de
+/// janela — falhando.
+///
+/// A pergunta certa nao e "o driver reclamou?", e "ha o que consertar?".
+/// Se o tamanho ja bate, o aviso e ruido e a swapchain fica.
+bool SuperficieVulkan::tamanho_mudou() const noexcept {
+  if (superficie_ == nullptr || !dispositivo_.viva()) return false;
+  VkSurfaceCapabilitiesKHR capacidades{};
+  if (vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
+          static_cast<VkPhysicalDevice>(dispositivo_.fisico()),
+          static_cast<VkSurfaceKHR>(superficie_), &capacidades) != VK_SUCCESS) {
+    return false;
+  }
+  // `0xFFFFFFFF` e "escolha voce": o tamanho e o que esta la, e nao ha
+  // divergencia a corrigir.
+  if (capacidades.currentExtent.width == 0xFFFFFFFFU) return false;
+  return capacidades.currentExtent.width != largura_ ||
+         capacidades.currentExtent.height != altura_;
 }
 
 std::string SuperficieVulkan::garantir_swapchain() noexcept {
@@ -550,10 +589,14 @@ std::int32_t SuperficieVulkan::apresentar(std::uint32_t cor_argb) noexcept {
       return -2;
     }
     if (adquiriu == VK_SUBOPTIMAL_KHR) {
-      // AINDA SERVE. Marca para refazer DEPOIS de apresentar: descartar
-      // aqui perderia um quadro bom por causa de um aviso.
+      // AINDA SERVE: descartar aqui perderia um quadro bom por causa de
+      // um aviso.
       ++stats_.suboptimal;
-      precisa_refazer_ = true;
+      // SO REFAZ SE HOUVER O QUE REFAZER. O aviso se repete
+      // enquanto o tamanho nao bate, e cada refazer custa um
+      // `vkDeviceWaitIdle` mais uma swapchain nova — a tempestade
+      // de recriacoes que este `if` evita. Ver [tamanho_mudou].
+      if (tamanho_mudou()) precisa_refazer_ = true;
     } else if (adquiriu != VK_SUCCESS) {
       ++stats_.falhas;
       return -3;
@@ -663,7 +706,390 @@ std::int32_t SuperficieVulkan::apresentar(std::uint32_t cor_argb) noexcept {
     }
     if (apresentou == VK_SUBOPTIMAL_KHR) {
       ++stats_.suboptimal;
+      // SO REFAZ SE HOUVER O QUE REFAZER. O aviso se repete
+      // enquanto o tamanho nao bate, e cada refazer custa um
+      // `vkDeviceWaitIdle` mais uma swapchain nova — a tempestade
+      // de recriacoes que este `if` evita. Ver [tamanho_mudou].
+      if (tamanho_mudou()) precisa_refazer_ = true;
+    } else if (apresentou != VK_SUCCESS) {
+      ++stats_.falhas;
+      return -8;
+    }
+
+    ++stats_.quadros_apresentados;
+    return 0;
+  } catch (const std::exception&) {
+    ++stats_.falhas;
+    return -9;
+  } catch (...) {
+    ++stats_.falhas;
+    return -10;
+  }
+}
+
+// ======================== V1.1: O QUADRO DO MOTOR ======================
+//
+// O QUE FALTAVA PARA O COMPOSITOR C++ APARECER. Ate aqui o quadro que
+// chegava a tela era uma constante escolhida pelo Dart: a tubulacao
+// (superficie, swapchain, sincronizacao, apresentacao) estava provada, e
+// nada do motor. Aqui os PIXELS que o `Nucleo` escreveu sobem para a GPU.
+//
+// O CAMINHO, e por que ele e este:
+//
+//   memoria do motor
+//     -> vkMapMemory + memcpy        um buffer de transferencia (staging)
+//     -> vkCmdCopyBufferToImage      uma imagem de origem RGBA8
+//     -> vkCmdBlitImage (linear)     a imagem da swapchain
+//     -> vkQueuePresentKHR           a tela
+//
+// PODERIA SER sem o staging? Nao: buffer e imagem sao espacos diferentes,
+// e a copia entre eles e o unico caminho. PODERIA SER `vkCmdCopyImage`
+// direto? Nao: o tamanho do quadro do motor e o da superficie quase nunca
+// coincidem, e o copy exige dimensoes iguais. E o BLIT que escala — e
+// escalar e o comportamento certo para um preview que muda de tamanho com
+// a rotacao.
+
+std::string SuperficieVulkan::garantir_origem(std::uint32_t largura,
+                                              std::uint32_t altura) noexcept {
+  if (largura == 0 || altura == 0) return "quadro sem tamanho";
+  if (origem_imagem_ != nullptr && origem_largura_ == largura &&
+      origem_altura_ == altura) {
+    return {};  // mesmo tamanho: nada a alocar
+  }
+  destruir_origem();
+  if (!dispositivo_.viva()) return "dispositivo morto";
+  const auto dev = static_cast<VkDevice>(dispositivo_.dispositivo());
+
+  // A IMAGEM DE ORIGEM, em RGBA8 linear: e o que o compositor escreve, e
+  // nao ha conversao no meio do caminho — converter aqui custaria uma
+  // passada de GPU por quadro para corrigir um dado que ja esta certo.
+  VkImageCreateInfo ci{};
+  ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+  ci.imageType = VK_IMAGE_TYPE_2D;
+  ci.format = VK_FORMAT_R8G8B8A8_UNORM;
+  ci.extent = {largura, altura, 1};
+  ci.mipLevels = 1;
+  ci.arrayLayers = 1;
+  ci.samples = VK_SAMPLE_COUNT_1_BIT;
+  ci.tiling = VK_IMAGE_TILING_OPTIMAL;
+  ci.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+  ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+  ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+  VkImage imagem = VK_NULL_HANDLE;
+  if (vkCreateImage(dev, &ci, nullptr, &imagem) != VK_SUCCESS) {
+    return "imagem de origem recusada";
+  }
+  VkMemoryRequirements req{};
+  vkGetImageMemoryRequirements(dev, imagem, &req);
+  VkMemoryAllocateInfo ai{};
+  ai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+  ai.allocationSize = req.size;
+  ai.memoryTypeIndex = dispositivo_.tipo_de_memoria(
+      req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+  VkDeviceMemory memoria = VK_NULL_HANDLE;
+  if (ai.memoryTypeIndex == kTipoDeMemoriaInvalido ||
+      vkAllocateMemory(dev, &ai, nullptr, &memoria) != VK_SUCCESS) {
+    vkDestroyImage(dev, imagem, nullptr);
+    return "sem memoria de GPU para a imagem de origem";
+  }
+  if (vkBindImageMemory(dev, imagem, memoria, 0) != VK_SUCCESS) {
+    vkDestroyImage(dev, imagem, nullptr);
+    vkFreeMemory(dev, memoria, nullptr);
+    return "nao consegui ligar a imagem de origem a memoria";
+  }
+
+  // O STAGING. Visivel pela CPU e pela GPU ao mesmo tempo, porque e por
+  // ele que a memoria do motor entra. Escolher o tipo de memoria certo
+  // aqui e o que evita uma copia extra feita pelo driver.
+  const VkDeviceSize bytes = static_cast<VkDeviceSize>(largura) * altura * 4U;
+  VkBufferCreateInfo bi{};
+  bi.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+  bi.size = bytes;
+  bi.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+  bi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+  VkBuffer buffer = VK_NULL_HANDLE;
+  if (vkCreateBuffer(dev, &bi, nullptr, &buffer) != VK_SUCCESS) {
+    vkDestroyImage(dev, imagem, nullptr);
+    vkFreeMemory(dev, memoria, nullptr);
+    return "staging recusado";
+  }
+  VkMemoryRequirements breq{};
+  vkGetBufferMemoryRequirements(dev, buffer, &breq);
+  VkMemoryAllocateInfo bai{};
+  bai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+  bai.allocationSize = breq.size;
+  bai.memoryTypeIndex = dispositivo_.tipo_de_memoria(
+      breq.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                               VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  VkDeviceMemory bmem = VK_NULL_HANDLE;
+  if (bai.memoryTypeIndex == kTipoDeMemoriaInvalido ||
+      vkAllocateMemory(dev, &bai, nullptr, &bmem) != VK_SUCCESS) {
+    vkDestroyBuffer(dev, buffer, nullptr);
+    vkDestroyImage(dev, imagem, nullptr);
+    vkFreeMemory(dev, memoria, nullptr);
+    return "sem memoria visivel pela CPU";
+  }
+  if (vkBindBufferMemory(dev, buffer, bmem, 0) != VK_SUCCESS) {
+    vkDestroyBuffer(dev, buffer, nullptr);
+    vkFreeMemory(dev, bmem, nullptr);
+    vkDestroyImage(dev, imagem, nullptr);
+    vkFreeMemory(dev, memoria, nullptr);
+    return "nao consegui ligar o buffer de transferencia a memoria";
+  }
+
+  origem_imagem_ = imagem;
+  origem_memoria_ = memoria;
+  origem_buffer_ = buffer;
+  origem_buffer_memoria_ = bmem;
+  origem_largura_ = largura;
+  origem_altura_ = altura;
+  __android_log_print(ANDROID_LOG_INFO, kEtiqueta,
+                      "origem %ux%u (%llu bytes de staging)", largura, altura,
+                      static_cast<unsigned long long>(bytes));
+  return {};
+}
+
+void SuperficieVulkan::destruir_origem() noexcept {
+  origem_largura_ = 0;
+  origem_altura_ = 0;
+  if (!dispositivo_.viva()) {
+    origem_imagem_ = nullptr;
+    origem_memoria_ = nullptr;
+    origem_buffer_ = nullptr;
+    origem_buffer_memoria_ = nullptr;
+    return;
+  }
+  const auto dev = static_cast<VkDevice>(dispositivo_.dispositivo());
+  // O BUFFER E A IMAGEM NAO PERTENCEM A SWAPCHAIN. E por isso que eles
+  // sobrevivem a uma troca de tamanho de janela — e so sao soltos aqui,
+  // ou quando o tamanho do QUADRO DO MOTOR muda. Confundir os dois donos e
+  // o que deixa memoria de GPU presa depois de uma rotacao.
+  if (origem_buffer_ != nullptr) {
+    vkDestroyBuffer(dev, static_cast<VkBuffer>(origem_buffer_), nullptr);
+    origem_buffer_ = nullptr;
+  }
+  if (origem_buffer_memoria_ != nullptr) {
+    vkFreeMemory(dev, static_cast<VkDeviceMemory>(origem_buffer_memoria_),
+                 nullptr);
+    origem_buffer_memoria_ = nullptr;
+  }
+  if (origem_imagem_ != nullptr) {
+    vkDestroyImage(dev, static_cast<VkImage>(origem_imagem_), nullptr);
+    origem_imagem_ = nullptr;
+  }
+  if (origem_memoria_ != nullptr) {
+    vkFreeMemory(dev, static_cast<VkDeviceMemory>(origem_memoria_), nullptr);
+    origem_memoria_ = nullptr;
+  }
+}
+
+std::int32_t SuperficieVulkan::apresentar_imagem(const std::uint8_t* rgba,
+                                                 std::uint32_t largura,
+                                                 std::uint32_t altura) noexcept {
+  if (rgba == nullptr) return -1;
+  if (estado_ != EstadoDaSuperficie::pronta || superficie_ == nullptr) {
+    return -1;
+  }
+  if (swapchain_ == nullptr && !garantir_swapchain().empty()) {
+    ++stats_.quadros_descartados;
+    return -1;
+  }
+  if (precisa_refazer_) {
+    precisa_refazer_ = false;
+    destruir_swapchain();
+    if (!garantir_swapchain().empty() || swapchain_ == nullptr) {
+      ++stats_.quadros_descartados;
+      return -1;
+    }
+  }
+  if (!garantir_origem(largura, altura).empty()) {
+    ++stats_.falhas;
+    return -11;
+  }
+
+  const auto dev = static_cast<VkDevice>(dispositivo_.dispositivo());
+  const auto fila = static_cast<VkQueue>(dispositivo_.fila());
+
+  try {
+    const VkFence cerca = static_cast<VkFence>(cerca_);
+    vkWaitForFences(dev, 1, &cerca, VK_TRUE, UINT64_MAX);
+
+    std::uint32_t indice = 0;
+    const VkResult adquiriu = vkAcquireNextImageKHR(
+        dev, static_cast<VkSwapchainKHR>(swapchain_), UINT64_MAX,
+        static_cast<VkSemaphore>(semaforo_imagem_), VK_NULL_HANDLE, &indice);
+    if (adquiriu == VK_ERROR_OUT_OF_DATE_KHR) {
+      ++stats_.out_of_date;
+      stats_.quadros_descartados++;
       precisa_refazer_ = true;
+      return -2;
+    }
+    if (adquiriu == VK_SUBOPTIMAL_KHR) {
+      ++stats_.suboptimal;
+      // SO REFAZ SE HOUVER O QUE REFAZER. O aviso se repete
+      // enquanto o tamanho nao bate, e cada refazer custa um
+      // `vkDeviceWaitIdle` mais uma swapchain nova — a tempestade
+      // de recriacoes que este `if` evita. Ver [tamanho_mudou].
+      if (tamanho_mudou()) precisa_refazer_ = true;
+    } else if (adquiriu != VK_SUCCESS) {
+      ++stats_.falhas;
+      return -3;
+    }
+    vkResetFences(dev, 1, &cerca);
+
+    auto* imagens = static_cast<std::vector<VkImage>*>(imagens_);
+    auto* comandos = static_cast<std::vector<VkCommandBuffer>*>(comandos_);
+    if (indice >= imagens->size() || indice >= comandos->size()) {
+      ++stats_.falhas;
+      return -4;
+    }
+
+    // A SUBIDA. O `memcpy` acontece com a GPU parada — a cerca acabou de
+    // esperar —, entao nao ha corrida entre a CPU escrevendo e a fila
+    // lendo. O mapa e do MESMO buffer todas as vezes: nao ha alocacao por
+    // quadro.
+    const VkDeviceSize bytes = static_cast<VkDeviceSize>(largura) * altura * 4U;
+    void* destino = nullptr;
+    if (vkMapMemory(dev, static_cast<VkDeviceMemory>(origem_buffer_memoria_), 0,
+                    bytes, 0, &destino) != VK_SUCCESS) {
+      ++stats_.falhas;
+      return -12;
+    }
+    std::memcpy(destino, rgba, static_cast<std::size_t>(bytes));
+    vkUnmapMemory(dev, static_cast<VkDeviceMemory>(origem_buffer_memoria_));
+
+    const VkCommandBuffer cmd = (*comandos)[indice];
+    vkResetCommandBuffer(cmd, 0);
+    VkCommandBufferBeginInfo b{};
+    b.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    b.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    if (vkBeginCommandBuffer(cmd, &b) != VK_SUCCESS) {
+      ++stats_.falhas;
+      return -5;
+    }
+
+    const VkImageSubresourceRange faixa{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+    // A ORIGEM VAI PARA DESTINO DE TRANSFERENCIA. `UNDEFINED` no layout
+    // antigo: a copia escreve todos os pixels, nao ha conteudo a preservar
+    // — e declarar isso deixa o driver descartar a leitura.
+    VkImageMemoryBarrier paraDestino{};
+    paraDestino.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    paraDestino.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    paraDestino.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    paraDestino.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    paraDestino.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    paraDestino.image = static_cast<VkImage>(origem_imagem_);
+    paraDestino.subresourceRange = faixa;
+    paraDestino.srcAccessMask = 0;
+    paraDestino.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                         nullptr, 1, &paraDestino);
+
+    // E A IMAGEM DA SWAPCHAIN TAMBEM.
+    VkImageMemoryBarrier swapDestino = paraDestino;
+    swapDestino.image = (*imagens)[indice];
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                         nullptr, 1, &swapDestino);
+
+    // Buffer -> imagem de origem.
+    VkBufferImageCopy regiao{};
+    regiao.bufferOffset = 0;
+    regiao.bufferRowLength = 0;
+    regiao.bufferImageHeight = 0;
+    regiao.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    regiao.imageOffset = {0, 0, 0};
+    regiao.imageExtent = {largura, altura, 1};
+    vkCmdCopyBufferToImage(cmd, static_cast<VkBuffer>(origem_buffer_),
+                           static_cast<VkImage>(origem_imagem_),
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &regiao);
+
+    // A ORIGEM PASSA A SER FONTE. Sem esta barreira o blit pode ler antes
+    // de a copia terminar, e o defeito e intermitente — o pior tipo.
+    VkImageMemoryBarrier paraFonte = paraDestino;
+    paraFonte.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    paraFonte.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    paraFonte.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    paraFonte.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                         nullptr, 1, &paraFonte);
+
+    // O BLIT, com FILTRO LINEAR de proposito: o quadro do motor e o da
+    // superficie quase nunca tem o mesmo tamanho, e um filtro NEAREST aqui
+    // serrilha a previa inteira — o que se le como "a imagem perdeu
+    // qualidade".
+    VkImageBlit blit{};
+    blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    blit.srcOffsets[0] = {0, 0, 0};
+    blit.srcOffsets[1] = {static_cast<std::int32_t>(largura),
+                          static_cast<std::int32_t>(altura), 1};
+    blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    blit.dstOffsets[0] = {0, 0, 0};
+    blit.dstOffsets[1] = {static_cast<std::int32_t>(largura_),
+                          static_cast<std::int32_t>(altura_), 1};
+    vkCmdBlitImage(cmd, static_cast<VkImage>(origem_imagem_),
+                   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, (*imagens)[indice],
+                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit,
+                   VK_FILTER_LINEAR);
+
+    // E a swapchain vai para apresentacao.
+    VkImageMemoryBarrier depois = swapDestino;
+    depois.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    depois.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    depois.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    depois.dstAccessMask = 0;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr,
+                         0, nullptr, 1, &depois);
+
+    if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
+      ++stats_.falhas;
+      return -6;
+    }
+
+    VkSubmitInfo sub{};
+    sub.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    const VkSemaphore esperar[] = {static_cast<VkSemaphore>(semaforo_imagem_)};
+    const VkPipelineStageFlags estagios[] = {VK_PIPELINE_STAGE_TRANSFER_BIT};
+    sub.waitSemaphoreCount = 1;
+    sub.pWaitSemaphores = esperar;
+    sub.pWaitDstStageMask = estagios;
+    sub.commandBufferCount = 1;
+    sub.pCommandBuffers = &cmd;
+    const VkSemaphore sinalizar[] = {
+        static_cast<VkSemaphore>(semaforo_pronto_)};
+    sub.signalSemaphoreCount = 1;
+    sub.pSignalSemaphores = sinalizar;
+    if (vkQueueSubmit(fila, 1, &sub, cerca) != VK_SUCCESS) {
+      ++stats_.falhas;
+      return -7;
+    }
+
+    VkPresentInfoKHR ap{};
+    ap.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+    ap.waitSemaphoreCount = 1;
+    ap.pWaitSemaphores = sinalizar;
+    const VkSwapchainKHR alvo = static_cast<VkSwapchainKHR>(swapchain_);
+    ap.swapchainCount = 1;
+    ap.pSwapchains = &alvo;
+    ap.pImageIndices = &indice;
+    const VkResult apresentou = vkQueuePresentKHR(fila, &ap);
+    if (apresentou == VK_ERROR_OUT_OF_DATE_KHR) {
+      ++stats_.out_of_date;
+      precisa_refazer_ = true;
+      return -2;
+    }
+    if (apresentou == VK_SUBOPTIMAL_KHR) {
+      ++stats_.suboptimal;
+      // SO REFAZ SE HOUVER O QUE REFAZER. O aviso se repete
+      // enquanto o tamanho nao bate, e cada refazer custa um
+      // `vkDeviceWaitIdle` mais uma swapchain nova — a tempestade
+      // de recriacoes que este `if` evita. Ver [tamanho_mudou].
+      if (tamanho_mudou()) precisa_refazer_ = true;
     } else if (apresentou != VK_SUCCESS) {
       ++stats_.falhas;
       return -8;

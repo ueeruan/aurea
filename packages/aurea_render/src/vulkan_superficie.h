@@ -81,6 +81,23 @@ class SuperficieVulkan {
   /// do play e desenhar o proximo, e nao derrubar o app.
   [[nodiscard]] std::int32_t apresentar(std::uint32_t cor_argb) noexcept;
 
+  /// APRESENTA UM QUADRO COMPOSTO PELO MOTOR, em RGBA8 premultiplicado.
+  ///
+  /// E O PASSO QUE FAZ O COMPOSITOR C++ APARECER. `apresentar(cor)` prova
+  /// a tubulacao — superficie, swapchain, sincronizacao —, mas o que chega
+  /// a tela e uma constante que o Dart escolheu. Aqui o que chega sao os
+  /// PIXELS que o `Nucleo` escreveu: eles sobem por um buffer de
+  /// transferencia (staging), sao copiados para uma imagem de origem e
+  /// ampliados para a swapchain com `vkCmdBlitImage`.
+  ///
+  /// O BUFFER E A IMAGEM SAO REAPROVEITADOS. Trocar o tamanho do quadro
+  /// recria os dois; o mesmo tamanho nao aloca nada. Sem isso seria uma
+  /// alocacao de GPU por quadro — o caminho mais rapido para o driver
+  /// passar a fragmentar memoria.
+  [[nodiscard]] std::int32_t apresentar_imagem(const std::uint8_t* rgba,
+                                               std::uint32_t largura,
+                                               std::uint32_t altura) noexcept;
+
   /// REDIMENSIONA. O tamanho vem do `SurfaceProducer`; um valor diferente
   /// do atual marca a swapchain para refazer.
   [[nodiscard]] std::int32_t redimensionar(std::uint32_t largura,
@@ -109,7 +126,16 @@ class SuperficieVulkan {
   /// que so aparece quando alguem le o numero. Por isso a criacao e
   /// PREGUICOSA: quem chama apresentar e que a dispara, quando o tamanho
   /// ja existe.
+  /// A janela ainda tem o tamanho da swapchain? Ver o comentario longo no
+  /// `.cpp`: e o que impede a tempestade de recriacoes que o
+  /// `VK_SUBOPTIMAL_KHR` repetido provoca.
+  [[nodiscard]] bool tamanho_mudou() const noexcept;
   [[nodiscard]] std::string garantir_swapchain() noexcept;
+  /// CRIA (OU REAPROVEITA) O BUFFER E A IMAGEM DE ORIGEM do quadro
+  /// composto. Devolve o motivo, ou string vazia.
+  [[nodiscard]] std::string garantir_origem(std::uint32_t largura,
+                                            std::uint32_t altura) noexcept;
+  void destruir_origem() noexcept;
   void destruir_swapchain() noexcept;
   [[nodiscard]] std::string criar_sincronizacao() noexcept;
   void destruir_sincronizacao() noexcept;
@@ -131,6 +157,12 @@ class SuperficieVulkan {
   void* semaforo_imagem_ = nullptr;   // VkSemaphore
   void* semaforo_pronto_ = nullptr;   // VkSemaphore
   void* cerca_ = nullptr;             // VkFence
+  void* origem_imagem_ = nullptr;     // VkImage   — o quadro do motor
+  void* origem_memoria_ = nullptr;    // VkDeviceMemory da imagem
+  void* origem_buffer_ = nullptr;     // VkBuffer  — o staging
+  void* origem_buffer_memoria_ = nullptr;  // VkDeviceMemory do staging
+  std::uint32_t origem_largura_ = 0;
+  std::uint32_t origem_altura_ = 0;
 
   std::uint32_t largura_ = 0;
   std::uint32_t altura_ = 0;
@@ -162,6 +194,9 @@ class PreviewVulkan {
   void desanexar() noexcept;
 
   [[nodiscard]] std::int32_t apresentar(std::uint32_t cor_argb) noexcept;
+  [[nodiscard]] std::int32_t apresentar_imagem(const std::uint8_t* rgba,
+                                               std::uint32_t largura,
+                                               std::uint32_t altura) noexcept;
   [[nodiscard]] std::int32_t redimensionar(std::uint32_t largura,
                                            std::uint32_t altura) noexcept;
 

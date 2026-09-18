@@ -197,8 +197,7 @@ void DispositivoVulkan::fechar() noexcept {
   // A ORDEM IMPORTA: o dispositivo logico morre ANTES da instancia. Ao
   // contrario, a instancia leva junto um dispositivo que ainda existe e o
   // driver reclama (ou pior, deixa memoria presa).
-  if (dispositivo_ != nullptr) {
-    vkDestroyDevice(static_cast<VkDevice>(dispositivo_), nullptr);
+  if (dispositivo_ != nullptr) {    vkDestroyDevice(static_cast<VkDevice>(dispositivo_), nullptr);
     dispositivo_ = nullptr;
     fila_ = nullptr;
   }
@@ -224,6 +223,26 @@ std::string SondaVulkan::resumo() const {
                 tem_fila_grafica ? "sim" : "NAO", tem_swapchain ? "sim" : "NAO",
                 textura_maxima, extensao_hardware_buffer ? "sim" : "nao");
   return texto;
+}
+
+/// ESCOLHER O TIPO DE MEMORIA E OBRIGACAO, NAO PREFERENCIA.
+///
+/// O Vulkan nao aloca memoria "generica": da uma lista de tipos, cada um
+/// com um conjunto de propriedades, e usar um tipo que nao as tem e falha
+/// de validacao. O `bits` e quem diz quais servem para ESTE recurso.
+std::uint32_t DispositivoVulkan::tipo_de_memoria(std::uint32_t bits,
+                                                 std::uint32_t exigidas) const
+    noexcept {
+  VkPhysicalDeviceMemoryProperties props{};
+  vkGetPhysicalDeviceMemoryProperties(static_cast<VkPhysicalDevice>(fisico_),
+                                      &props);
+  for (std::uint32_t i = 0; i < props.memoryTypeCount; ++i) {
+    if ((bits & (1U << i)) == 0) continue;
+    if ((props.memoryTypes[i].propertyFlags & exigidas) == exigidas) {
+      return i;
+    }
+  }
+  return kTipoDeMemoriaInvalido;
 }
 
 SondaVulkan sondar_vulkan() noexcept {
@@ -292,6 +311,11 @@ std::string DispositivoVulkan::abrir() noexcept {
 }
 
 void DispositivoVulkan::fechar() noexcept {}
+
+std::uint32_t DispositivoVulkan::tipo_de_memoria(std::uint32_t,
+                                                 std::uint32_t) const noexcept {
+  return kTipoDeMemoriaInvalido;
+}
 
 std::string SondaVulkan::resumo() const {
   return "Vulkan indisponivel: " + motivo;

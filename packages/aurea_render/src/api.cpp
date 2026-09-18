@@ -119,7 +119,12 @@ extern "C" {
 /// confere antes de usar qualquer coisa.
 AUREA_API std::int32_t aurea_render_versao(void) {
   try {
-    return 4;
+    // 5: entrou `aurea_render_preview_apresentar_imagem`, o caminho que
+    // sobe o quadro COMPOSTO pelo motor para a tela. Um Dart antigo nao
+    // chama esta porta e um C++ antigo nao a exporta — sem a conferencia
+    // de versao, o primeiro caso seria um simbolo ausente (que estoura) e
+    // o segundo um simbolo a mais (que passa em silencio).
+    return 5;
   } catch (...) {
     return -1;
   }
@@ -314,6 +319,23 @@ AUREA_API std::int32_t aurea_render_preview_redimensionar(std::uint32_t largura,
                                                           std::uint32_t altura) {
   try {
     return PreviewVulkan::instancia().redimensionar(largura, altura);
+  } catch (...) {
+    return -100;
+  }
+}
+
+/// O QUADRO COMPOSTO PELO MOTOR, EM RGBA8.
+///
+/// [rgba] aponta para a memoria que o `Nucleo` escreveu. O PONTEIRO NAO E
+/// GUARDADO: os bytes sao copiados para o buffer de transferencia dentro
+/// desta chamada, e quem chamou pode liberar a memoria ao voltar. Guardar
+/// o ponteiro seria uma corrida com o coletor do Dart — e um travamento
+/// que so aparece sob pressao de memoria.
+AUREA_API std::int32_t aurea_render_preview_apresentar_imagem(
+    const std::uint8_t* rgba, std::uint32_t largura, std::uint32_t altura) {
+  try {
+    if (rgba == nullptr) return -1;
+    return PreviewVulkan::instancia().apresentar_imagem(rgba, largura, altura);
   } catch (...) {
     return -100;
   }

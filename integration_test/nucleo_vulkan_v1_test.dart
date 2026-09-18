@@ -49,13 +49,19 @@ Future<void> _montarPreview(WidgetTester tester, int id, int l, int a) async {
 }
 
 /// APRESENTA ATE A SWAPCHAIN EXISTIR. Devolve quantas tentativas custou.
+///
+/// O PLACAR E CUMULATIVO NA VIDA DO PROCESSO. Esperar por
+/// `apresentados != 0` funcionava no primeiro teste e nao esperava nada nos
+/// seguintes: o numero ja vinha cheio da superficie anterior. O que vale e
+/// o DELTA — quantos quadros ESTA superficie apresentou.
 Future<int> _apresentarAte(
   WidgetTester tester,
   int cor, {
   int limite = 300,
 }) async {
+  final base = PreviewVulkan.estatisticas().apresentados;
   var n = 0;
-  while (n < limite && PreviewVulkan.estatisticas().apresentados == 0) {
+  while (n < limite && PreviewVulkan.estatisticas().apresentados == base) {
     PreviewVulkan.apresentar(cor);
     await tester.pump(const Duration(milliseconds: 16));
     n++;
@@ -80,10 +86,20 @@ void main() {
     expect(PreviewVulkan.estado, 1, reason: 'estado 1 = pronta');
     await _montarPreview(tester, resposta['id']! as int, 640, 360);
 
+    // A SWAPCHAIN NASCE NO PRIMEIRO QUADRO, NAO NO `criar`.
+    //
+    // Este teste lia `estatisticas()` logo depois de montar o `Texture` e
+    // exigia largura > 0 — e via 0x0. Nao era o motor: a janela nasce sem
+    // tamanho (quem da um e o layout do `Texture`), entao a swapchain e
+    // criada PREGUICOSAMENTE, no primeiro `apresentar`. Ler o tamanho
+    // antes disso mede uma janela que ainda nao existe.
+    final tentativas = await _apresentarAte(tester, 0xFF204060);
+
     final e0 = PreviewVulkan.estatisticas();
     // ignore: avoid_print
-    print('== V1 ESTADO INICIAL ==\n$e0');
+    print('== V1 ESTADO INICIAL (apresentou em $tentativas tentativas) ==\n$e0');
 
+    expect(e0.apresentados, greaterThan(0), reason: 'nada chegou na tela');
     // O TAMANHO QUE VALE E O DA SUPERFICIE, e nao o que o Flutter pediu:
     // o sistema pode discordar (barra de navegacao, corte).
     expect(e0.largura, greaterThan(0));
@@ -167,6 +183,149 @@ void main() {
     expect(depois.falhas, 0, reason: 'a recriacao nao pode deixar falhas');
 
     await _canal.invokeMethod<void>('liberar');
+  });
+
+  testWidgets('V1.1: o quadro COMPOSTO pelo motor chega na tela', (
+    tester,
+  ) async {
+    // ESTE E O TESTE QUE FECHA A LACUNA DO V1.
+    //
+    // Ate aqui o que chegava a tela era uma constante que o Dart escolhia:
+    // a tubulacao estava provada e o MOTOR nao. Agora o compositor C++
+    // escreve os pixels, o `Nucleo` os devolve e eles sobem para a GPU.
+    final r = await _criar(tester, 320, 240);
+    expect(r['ok'], isTrue);
+    await _montarPreview(tester, r['id']! as int, 320, 240);
+    await _apresentarAte(tester, 0xFF101010);
+
+    final nucleo = NucleoRender.abrir(
+      largura: 32,
+      altura: 32,
+      comThread: false,
+      orcamentoMs: 200,
+    );
+    expect(nucleo, isNotNull, reason: NucleoRender.ultimoErro);
+    addTearDown(nucleo!.fechar);
+
+    // DUAS CAMADAS DE COR: o compositor tem de MISTURAR, e nao so copiar.
+    expect(
+      nucleo.publicarCena(
+        [
+          const CamadaDeRender(
+            x: 16,
+            y: 16,
+            largura: 32,
+            altura: 32,
+            cor: 0xFF000000,
+          ),
+          const CamadaDeRender(
+            x: 16,
+            y: 16,
+            largura: 32,
+            altura: 32,
+            cor: 0xFFFF0000,
+            opacidade: 0.5,
+          ),
+        ],
+        largura: 32,
+        altura: 32,
+      ),
+      isTrue,
+    );
+    // `desenharAgora` devolve QUANTAS CAMADAS COMPOZERAM — e nao 0 para
+    // "deu certo". Duas camadas na cena, duas compostas.
+    expect(
+      nucleo.desenharAgora(),
+      2,
+      reason: 'as duas camadas tinham de ser compostas',
+    );
+    final pixels = nucleo.lerPixels();
+    expect(pixels, isNotNull);
+    expect(pixels!.length, 32 * 32 * 4);
+
+    // O MIOLO DA IMAGEM: vermelho a meia opacidade sobre preto. Amostrar o
+    // centro e de proposito — a borda carrega a cobertura do retangulo, e
+    // ali o numero mede antialias, nao composicao.
+    const meio = (16 * 32 + 16) * 4;
+    expect(pixels[meio], greaterThan(100), reason: 'o vermelho da camada');
+    expect(pixels[meio], lessThan(160), reason: 'metade da opacidade');
+    expect(pixels[meio + 1], lessThan(20), reason: 'sem verde');
+
+    // E SOBE PARA A TELA. Tres quadros com o mesmo conteudo: o primeiro
+    // cria a imagem de origem, os outros REAPROVEITAM — e e o
+    // reaproveitamento que prova que nao ha alocacao por quadro.
+    for (var i = 0; i < 3; i++) {
+      expect(
+        PreviewVulkan.apresentarImagem(pixels, 32, 32),
+        0,
+        reason: 'o quadro do motor nao chegou na swapchain',
+      );
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+
+    final e = PreviewVulkan.estatisticas();
+    // ignore: avoid_print
+    print('== V1.1 QUADRO DO MOTOR ==\n$e');
+    expect(e.apresentados, greaterThan(0));
+    expect(e.falhas, 0, reason: 'subir o quadro do motor nao pode falhar');
+  });
+
+  testWidgets('V1.1: trocar o tamanho do quadro nao vaza recurso', (
+    tester,
+  ) async {
+    final r = await _criar(tester, 320, 240);
+    expect(r['ok'], isTrue);
+    await _montarPreview(tester, r['id']! as int, 320, 240);
+    await _apresentarAte(tester, 0xFF101010);
+
+    // QUATRO QUADROS DE TAMANHOS DIFERENTES, um nucleo por tamanho: o
+    // tamanho do quadro e fixado no `abrir` — `publicarCena` recebe um
+    // tamanho, mas quem devolve os pixels e o nucleo, e ele nao muda de
+    // tamanho por conta propria. Cada troca obriga o lado Vulkan a
+    // RECRIAR a imagem de origem e o buffer; se a troca vazasse, o
+    // SwiftShader (memoria de sistema) recusaria antes do fim, e o placar
+    // de falhas diria isso.
+    var n = 0;
+    for (final lado in [16, 24, 32, 48]) {
+      final nucleo = NucleoRender.abrir(
+        largura: lado,
+        altura: lado,
+        comThread: false,
+        orcamentoMs: 200,
+      );
+      expect(nucleo, isNotNull, reason: 'nucleo de $lado');
+      nucleo!.publicarCena(
+        [
+          CamadaDeRender(
+            x: lado / 2,
+            y: lado / 2,
+            largura: lado.toDouble(),
+            altura: lado.toDouble(),
+            cor: 0xFF00FF00,
+          ),
+        ],
+        largura: lado,
+        altura: lado,
+      );
+      expect(nucleo.desenharAgora(), 1, reason: 'lado $lado');
+      final pixels = nucleo.lerPixels()!;
+      expect(pixels.length, lado * lado * 4, reason: 'lado $lado');
+      expect(
+        PreviewVulkan.apresentarImagem(pixels, lado, lado),
+        0,
+        reason: 'lado $lado',
+      );
+      await tester.pump(const Duration(milliseconds: 16));
+      nucleo.fechar();
+      n++;
+    }
+    expect(n, 4);
+
+    final e = PreviewVulkan.estatisticas();
+    // ignore: avoid_print
+    print('== V1.1 TROCA DE TAMANHO == $e');
+    expect(e.falhas, 0, reason: 'trocar o tamanho do quadro nao pode falhar');
+    expect(e.apresentados, greaterThan(0));
   });
 
   testWidgets('V1: a sonda continua respondendo neste aparelho',

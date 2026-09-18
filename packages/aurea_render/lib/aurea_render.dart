@@ -23,7 +23,7 @@ import 'package:flutter/foundation.dart' show debugPrint;
 /// A VERSAO DA PORTA. O C++ responde [versaoDaPorta] e o Dart confere: um
 /// descompasso entre a biblioteca compilada e este arquivo e a causa mais
 /// comum de "leu o campo errado" depois de uma atualizacao parcial.
-const int versaoEsperadaDaPorta = 4;
+const int versaoEsperadaDaPorta = 5;
 
 final class _CamadaC extends Struct {
   @Uint32()
@@ -297,6 +297,21 @@ external int _vulkanSonda(Pointer<Utf8> saida, int capacidade);
 
 @Native<Int32 Function(Uint32)>(symbol: 'aurea_render_preview_apresentar')
 external int _previewApresentar(int corArgb);
+
+/// O QUADRO COMPOSTO PELO MOTOR — o RGBA8 que o `Nucleo` escreveu.
+///
+/// O PONTEIRO NAO SOBREVIVE A CHAMADA. O C++ copia os bytes para o buffer
+/// de transferencia e volta; depois disso a memoria e so do Dart, e o
+/// coletor pode leva-la. Quem chama passa uma lista emprestada e nao
+/// guarda nada.
+@Native<
+  Int32 Function(Pointer<Uint8>, Uint32, Uint32)
+>(symbol: 'aurea_render_preview_apresentar_imagem')
+external int _previewApresentarImagem(
+  Pointer<Uint8> rgba,
+  int largura,
+  int altura,
+);
 
 @Native<Int32 Function(Uint32, Uint32)>(symbol: 'aurea_render_preview_redimensionar')
 external int _previewRedimensionar(int largura, int altura);
@@ -691,6 +706,24 @@ abstract final class PreviewVulkan {
   /// foi descartado" — a resposta certa para uma rotacao no meio do play e
   /// desenhar o proximo.
   static int apresentar(int corArgb) => _previewApresentar(corArgb);
+
+  /// APRESENTA O QUADRO COMPOSTO PELO MOTOR.
+  ///
+  /// E o passo que faz o compositor C++ aparecer: os pixels que o `Nucleo`
+  /// escreveu sobem por um buffer de transferencia e chegam a swapchain.
+  /// [rgba] e uma lista emprestada — o C++ copia e volta.
+  static int apresentarImagem(Uint8List rgba, int largura, int altura) {
+    if (largura <= 0 || altura <= 0) return -1;
+    final esperado = largura * altura * 4;
+    if (rgba.length < esperado) return -1;
+    final ptr = calloc<Uint8>(esperado);
+    try {
+      ptr.asTypedList(esperado).setAll(0, rgba);
+      return _previewApresentarImagem(ptr, largura, altura);
+    } finally {
+      calloc.free(ptr);
+    }
+  }
 
   static int redimensionar(int largura, int altura) =>
       _previewRedimensionar(largura, altura);

@@ -36,16 +36,38 @@ class MainActivity : FlutterActivity() {
      *                     driver (ou pior, memoria de GPU presa).
      */
     private var produtor: TextureRegistry.SurfaceProducer? = null
+
+    /**
+     * O TAMANHO PEDIDO PELO DART, guardado.
+     *
+     * `onSurfaceCreated` pode chegar com `p.width == 0`: a janela nasce
+     * ANTES do layout do `Texture` na arvore Flutter, e e o layout que da
+     * tamanho a ela. Preso a zero, o Vulkan recusa a swapchain (extensao
+     * 0x0) e o preview nunca aparece — foi assim que o PRIMEIRO
+     * `SurfaceProducer` do processo deixava de apresentar. O tamanho
+     * pedido e o melhor palpite que existe nesse instante, e a swapchain
+     * se refaz sozinha quando o tamanho de verdade chega.
+     */
+    private var larguraPedida = 0
+    private var alturaPedida = 0
+
+    /** Se o callback ja anexou; a rede de seguranca no `criar` le isto. */
+    private var anexadoPeloCallback = false
+
     private val callbackDaSuperficie = object : TextureRegistry.SurfaceProducer.Callback {
         override fun onSurfaceCreated() {
             val p = produtor ?: return
-            val ok = RenderNativo.anexar(p.surface, p.width, p.height)
-            Log.i("AureaVulkan", "superficie criada ${p.width}x${p.height} -> $ok")
+            val l = if (p.width > 0) p.width else larguraPedida
+            val a = if (p.height > 0) p.height else alturaPedida
+            anexadoPeloCallback = true
+            val ok = RenderNativo.anexar(p.surface, l, a)
+            Log.i("AureaVulkan", "superficie criada ${p.width}x${p.height} (pedido $l x $a) -> $ok")
         }
 
         override fun onSurfaceDestroyed() {
             // SOLTA ANTES DE A JANELA MORRER. Inverter esta ordem e o erro
             // que so aparece quando a pessoa troca de app no meio do play.
+            anexadoPeloCallback = false
             RenderNativo.desanexar()
             Log.i("AureaVulkan", "superficie destruida")
         }
@@ -103,14 +125,31 @@ class MainActivity : FlutterActivity() {
                             return@setMethodCallHandler
                         }
                         liberarProdutor()
+                        larguraPedida = largura
+                        alturaPedida = altura
                         val p = flutterEngine.renderer.createSurfaceProducer()
-                        p.setSize(largura, altura)
-                        p.setCallback(callbackDaSuperficie)
+                        // A ORDEM AQUI E O DEFEITO QUE O V1 DEIXOU ABERTO.
+                        //
+                        // Antes: setSize -> setCallback -> produtor = p.
+                        // O `setSize` dispara `onSurfaceCreated` na hora, e
+                        // o callback lia `produtor`, que ainda era NULO —
+                        // entao a primeira superficie do processo nunca era
+                        // anexada pelo caminho certo. `produtor` tem de
+                        // estar posto ANTES de qualquer coisa que possa
+                        // chamar o callback.
                         produtor = p
-                        // O `setSize` pode disparar `onSurfaceCreated`
-                        // sozinho; anexar aqui tambem cobre o caso em que
-                        // ele nao dispara (superficie ja existente).
-                        val ok = RenderNativo.anexar(p.surface, largura, altura)
+                        anexadoPeloCallback = false
+                        p.setCallback(callbackDaSuperficie)
+                        p.setSize(largura, altura)
+                        // REDE DE SEGURANCA: em aparelho onde a superficie
+                        // ja existe, o `setSize` nao transiciona e o
+                        // callback nao vem. Anexar aqui so quando ele NAO
+                        // veio evita anexar duas vezes a mesma janela.
+                        val ok = if (anexadoPeloCallback) {
+                            true
+                        } else {
+                            RenderNativo.anexar(p.surface, largura, altura)
+                        }
                         result.success(
                             mapOf("id" to p.id(), "ok" to ok,
                                   "estado" to RenderNativo.estado())
@@ -158,6 +197,9 @@ class MainActivity : FlutterActivity() {
             it.release()
         }
         produtor = null
+        anexadoPeloCallback = false
+        larguraPedida = 0
+        alturaPedida = 0
     }
 
     override fun onDestroy() {

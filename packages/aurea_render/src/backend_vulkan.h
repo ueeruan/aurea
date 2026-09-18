@@ -31,6 +31,11 @@
 
 namespace aurea::render {
 
+/// RESPOSTA DE [DispositivoVulkan::tipo_de_memoria] QUANDO NENHUM SERVE.
+/// Nao e um indice valido: `VK_MAX_MEMORY_TYPES` e 32, e um tipo que nao
+/// existe e a unica resposta honesta para "nao da".
+inline constexpr std::uint32_t kTipoDeMemoriaInvalido = 0xFFFFFFFFU;
+
 /// O QUE A SONDA DESCOBRIU. Tudo opcional: um aparelho sem Vulkan
 /// devolve [disponivel] falso e o resto vazio, e isso NAO e um erro —
 /// e uma resposta.
@@ -102,6 +107,16 @@ class DispositivoVulkan {
   [[nodiscard]] void* fisico() const noexcept { return fisico_; }
   [[nodiscard]] void* dispositivo() const noexcept { return dispositivo_; }
   [[nodiscard]] void* fila() const noexcept { return fila_; }
+
+  /// QUAL TIPO DE MEMORIA SERVE PARA ESTES BITS E ESTAS EXIGENCIAS.
+  ///
+  /// O Vulkan nao tem "alocar memoria": tem uma lista de tipos, cada um com
+  /// um conjunto de propriedades, e escolher o tipo errado e uma falha de
+  /// validacao — nao um erro de alocacao. Devolve
+  /// [kTipoDeMemoriaInvalido] quando nenhum serve, e quem chamou trata.
+  [[nodiscard]] std::uint32_t tipo_de_memoria(std::uint32_t bits,
+                                              std::uint32_t exigidas) const
+      noexcept;
   [[nodiscard]] std::uint32_t familia_da_fila() const noexcept {
     return familia_;
   }

@@ -1,0 +1,21 @@
+# CHAVES DE INTERFACE SEM TRADUCAO — A DIVIDA CONHECIDA, CONGELADA.
+#
+# O teste `traducao_completa_test.dart` falha quando aparece uma chave
+# NOVA fora do catalogo, e falha tambem quando uma chave DESTA lista
+# passa a ter traducao — para ela encolher de verdade em vez de virar
+# paisagem.
+#
+# SO TEXTO SIMPLES ENTRA AQUI. Texto com interpolacao (`$n`) nao tem
+# como ser traduzido pelo catalogo: a string chega montada e nunca casa
+# com chave nenhuma. O conserto e outro, e esta anotado no teste.
+#
+# Gerado por tool/chaves_faltando.py.
+×
+Exportar para um arquivo
+Acha onde a cena muda e corta o clipe em todos os pontos — o mesmo detector do Scene Edit Detection.
+Nada aqui ainda. Salve um preset a partir de uma camada e ele aparece nesta lista, em todos os projetos.
+O plano da composição fica a 1200 do olho da câmera: camadas mais longe ou mais perto que a faixa nítida desfocam.
+Ao continuar, você combina usar a Aurea com mídias que pode usar: o que você importa e publica é responsabilidade sua.
+Este efeito saiu do Aurea e nao desenha mais nada. Ele ficou guardado aqui para voce decidir — o resto da camada esta intacto.
+A velocidade vale para vídeo e áudio. Nas outras camadas, aproxime ou afaste os keyframes para animar mais rápido ou mais devagar.
+Posição, giro 3D e Z da câmera moram em Mover/Transformar. Só camadas com o 3D ligado são vistas pela câmera — e só elas ganham foco e neblina.

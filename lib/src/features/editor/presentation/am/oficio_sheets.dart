@@ -142,7 +142,7 @@ Future<void> showOrganizeSheet(
                   'Bloquear',
                   meta.locked,
                   () => controller.toggleLocked(layerId),
-                  'nao aceita edicao no palco',
+                  'nao anda, nao apara, nao edita nem apaga',
                 ),
                 toggle(
                   'Motion blur',

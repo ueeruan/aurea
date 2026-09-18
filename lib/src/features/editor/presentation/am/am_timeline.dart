@@ -23,6 +23,7 @@ import '../../application/ui/opcoes_de_visualizacao.dart';
 import '../../../../core/storage/prefs.dart';
 import '../shell/layer_actions.dart' show menuDasMarcas;
 import 'am_colors.dart';
+import 'aviso_de_bloqueio.dart';
 import 'layer_look.dart';
 import 'clip_preview_painters.dart';
 import '../../application/registro_de_travadas.dart';
@@ -1934,7 +1935,17 @@ Positioned(
     // conjunto).
     onLongPressCancel: _terminarArrasto,
     onLongPressStart: locked
-        ? null
+        ? (_) {
+            if (compact) return;
+            ref.read(multiSelectProvider.notifier).state = const {};
+            ref.read(selectedLayerProvider.notifier).state = layer.id;
+            avisarCamadaBloqueada(
+              context,
+              ref,
+              fraseDeBloqueio('mover ou reordenar'),
+              layer.id,
+            );
+          }
         : (_) {
             _moveuNoToqueLongo = false;
             _ultimoDyLongo = 0;
@@ -2039,13 +2050,13 @@ Positioned(
                             ),
                           ),
                         ),
-                      if (locked && width > 70)
-                        const Padding(
-                          padding: EdgeInsets.only(right: 5),
-                          child: Icon(
+                      if (locked)
+                        Padding(
+                          padding: EdgeInsets.only(right: width > 70 ? 5 : 0),
+                          child: const Icon(
                             CupertinoIcons.lock_fill,
                             size: 10,
-                            color: Colors.white70,
+                            color: Colors.white,
                           ),
                         ),
                       if (width > 52)

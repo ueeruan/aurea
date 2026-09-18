@@ -599,6 +599,17 @@ class EditorController extends Notifier<VideoProject> {
   }
 
   void _replace(Layer layer) {
+    // O CADEADO FECHA A PORTA POR ONDE TODA EDICAO DE CAMADA PASSA.
+    //
+    // Quase tudo que muda uma camada — posicao, escala, giro, corte,
+    // movimento no tempo, parametro de efeito, mascara, forma — termina
+    // aqui, com a camada nova no lugar da velha. O desfazer NAO passa por
+    // aqui (ele troca o projeto inteiro), entao travar isto nao impede
+    // desfazer um bloqueio nem desfazer com a camada bloqueada.
+    //
+    // O aviso nao mora aqui: quem recusa avisa na tela. O controlador so
+    // garante que a mutacao nao acontece.
+    if (state.metaOf(layer.id).locked) return;
     // De quem era a trilha que recusou a edicao. O losango de outra
     // camada nao crava esta pendencia.
     if (_recusaLocal != null) _recusaCamada = layer.id;
@@ -3814,7 +3825,14 @@ class EditorController extends Notifier<VideoProject> {
     addImageLayer(at, file.path, file.name);
   }
 
-  void removeLayer(String id) {
+  /// APAGA A CAMADA. Devolve falso quando o cadeado recusou.
+  ///
+  /// Apagar e a alteracao mais acidental de todas — a barra fica embaixo
+  /// do dedo e o menu de contexto abre com um toque longo. Camada
+  /// bloqueada nao some por engano: o caminho e o mesmo do resto, e quem
+  /// chamou avisa na tela.
+  bool removeLayer(String id) {
+    if (isLocked(id)) return false;
     _mutate(
       state.copyWith(
         layers: [
@@ -3827,6 +3845,7 @@ class EditorController extends Notifier<VideoProject> {
     if (ref.read(selectedLayerProvider) == id) {
       ref.read(selectedLayerProvider.notifier).state = null;
     }
+    return true;
   }
 
   /// As fichas de camada (solo, olho, cadeado, rotulo) SEM as das
@@ -3846,9 +3865,18 @@ class EditorController extends Notifier<VideoProject> {
 
   /// Exclui VARIAS camadas numa unica mutacao (um "Desfazer" restaura
   /// tudo — efeitos, keyframes e vinculos intactos).
-  void removeLayers(Iterable<String> ids) {
-    final set = ids.toSet();
-    if (set.isEmpty) return;
+  ///
+  /// AS BLOQUEADAS FICAM, e o resto vai. Recusar o lote inteiro por causa
+  /// de uma camada travada seria pior: a pessoa selecionou doze, travou
+  /// uma sem lembrar, e nao entenderia por que nada aconteceu. Devolve
+  /// quantas ficaram de fora, para quem chamou poder dizer.
+  int removeLayers(Iterable<String> ids) {
+    final set = {
+      for (final id in ids)
+        if (!isLocked(id)) id,
+    };
+    final presas = ids.toSet().length - set.length;
+    if (set.isEmpty) return presas;
     _mutate(
       state.copyWith(
         layers: [
@@ -3862,6 +3890,7 @@ class EditorController extends Notifier<VideoProject> {
       ref.read(selectedLayerProvider.notifier).state = null;
     }
     ref.read(multiSelectProvider.notifier).state = const {};
+    return presas;
   }
 
   // ------------------------------------------------------- audio
@@ -5086,7 +5115,7 @@ class EditorController extends Notifier<VideoProject> {
   /// depois. E a diferenca entre "apaguei um trecho" e "apaguei um
   /// trecho e agora tenho um silencio no meio".
   void rippleDeleteLayer(String id) {
-    if (_layer(id) == null) return;
+    if (_layer(id) == null || isLocked(id)) return;
     final deleted = rippleDelete(state.layers, id);
     _mutate(
       state.copyWith(
@@ -5159,6 +5188,7 @@ class EditorController extends Notifier<VideoProject> {
   }
 
   void reorderLayer(String id, int delta) {
+    if (isLocked(id)) return;
     final layers = [...state.layers];
     final idx = layers.indexWhere((l) => l.id == id);
     if (idx < 0) return;
@@ -5177,7 +5207,13 @@ class EditorController extends Notifier<VideoProject> {
   void reorderLayers(Iterable<String> ids, int delta) {
     if (delta == 0) return;
     final layers = [...state.layers];
-    final alvo = ids.toSet();
+    // Bloqueada fica onde esta: o bloco anda sem ela, e nao se recusa o
+    // movimento das outras por causa de uma.
+    final alvo = {
+      for (final id in ids)
+        if (!state.metaOf(id).locked) id,
+    };
+    if (alvo.isEmpty) return;
     final passo = delta.sign;
     var mudou = false;
     for (var k = 0; k < delta.abs(); k++) {

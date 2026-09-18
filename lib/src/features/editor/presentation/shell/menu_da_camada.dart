@@ -36,6 +36,7 @@ class ItemDoMenu extends StatelessWidget {
     this.marcado,
     this.radio = false,
     this.perigo = false,
+    this.desabilitado = false,
   });
 
   final String chave;
@@ -45,22 +46,28 @@ class ItemDoMenu extends StatelessWidget {
   final bool? marcado;
   final bool radio;
   final bool perigo;
+
+  /// Fica a vista, mas apagado e sem toque. Diferente de :
+  /// aqui a linha EXISTE para dizer que a acao existe e nao esta
+  /// disponivel agora — e o detalhe explica o motivo. Sumir com ela
+  /// faria a pessoa procurar.
+  final bool desabilitado;
   final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    final ativo = onTap != null;
+    final ativo = onTap != null && !desabilitado;
     final cor = !ativo
         ? AmColors.muted.withValues(alpha: .6)
         : (perigo ? AmColors.pink : AmColors.text);
     return Tocavel(
       key: ValueKey(chave),
-      onTap: onTap == null
-          ? null
-          : () {
+      onTap: ativo
+          ? () {
               HapticFeedback.selectionClick();
               onTap!();
-            },
+            }
+          : null,
       child: ConstrainedBox(
         constraints: const BoxConstraints(minHeight: 48),
         child: Padding(
@@ -231,6 +238,7 @@ class _ItensDaCamada extends ConsumerWidget {
     final base = c.baseDeRecorteAbaixo(layerId);
     final recortada = layer.matteMode == MatteMode.recorte;
     final etiqueta = projeto.metaOf(layerId).label;
+    final bloqueada = projeto.metaOf(layerId).locked;
     final idx = projeto.layers.indexWhere((l) => l.id == layerId);
 
     return Column(
@@ -242,6 +250,23 @@ class _ItensDaCamada extends ConsumerWidget {
           icone: CupertinoIcons.pencil,
           rotulo: 'Renomear',
           onTap: () => fecharE(() => renomearCamada(ctx, ref, layer)),
+          // Bloqueada nao se renomeia: o cadeado fecha a edicao inteira,
+          // e uma excecao obrigaria a lembrar de qual campo escapou.
+          desabilitado: bloqueada,
+        ),
+        // O CADEADO, no menu da camada — que e onde estao todas as acoes
+        // dela. Ele existia so no toque longo da etiqueta de cor, um
+        // gesto que ninguem descobre sozinho.
+        ItemDoMenu(
+          chave: 'camada-menu-bloquear',
+          icone: bloqueada
+              ? CupertinoIcons.lock_open_fill
+              : CupertinoIcons.lock_fill,
+          rotulo: bloqueada ? 'Desbloquear camada' : 'Bloquear camada',
+          detalhe: bloqueada
+              ? 'Volta a aceitar movimento e edição'
+              : 'Não aceita movimento, corte nem edição',
+          onTap: () => c.toggleLocked(layerId),
         ),
         ItemDoMenu(
           chave: 'camada-menu-duplicar',

@@ -9,6 +9,7 @@ import '../../domain/layer.dart';
 import '../am/am_colors.dart';
 import '../am/am_timeline.dart' show magneticProvider;
 import '../am/apple_cascade_sheet.dart';
+import '../am/aviso_de_bloqueio.dart';
 import '../am/beats_sheet.dart' show showBeatsSheet;
 import '../am/layer_look.dart';
 import '../am/scene3d_studio_ux.dart' show pedirNome;
@@ -29,15 +30,32 @@ import 'package:aurea/src/core/l10n/app_language.dart';
 void excluirCamadas(BuildContext context, WidgetRef ref, Set<String> targets) {
   if (targets.isEmpty) return;
   final controller = ref.read(editorControllerProvider.notifier);
+  // A BLOQUEADA NAO VAI. Antes de qualquer coisa: quantas do alvo estao
+  // travadas. Elas ficam, o resto some, e a tela diz quantas ficaram.
+  final travadas = [
+    for (final id in targets)
+      if (controller.isLocked(id)) id,
+  ];
   // MAGNETICO: excluir FECHA o buraco e puxa o que vinha depois.
   final magnetico = ref.read(magneticProvider);
   if (magnetico) {
     for (final id in targets) {
+      if (controller.isLocked(id)) continue;
       controller.rippleDeleteLayer(id);
     }
     ref.read(multiSelectProvider.notifier).state = const {};
   } else {
     controller.removeLayers(targets);
+  }
+  if (travadas.isNotEmpty) {
+    avisarCamadaBloqueada(
+      context,
+      ref,
+      travadas.length == 1
+          ? 'Camada bloqueada: desbloqueie para apagar'
+          : '${travadas.length} camadas bloqueadas: desbloqueie para apagar',
+      travadas.first,
+    );
   }
 }
 

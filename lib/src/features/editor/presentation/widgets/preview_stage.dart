@@ -22,6 +22,8 @@ export '../../application/freehand_session.dart' show onionSkinProvider;
 import '../../application/playback_controller.dart';
 import '../../application/ui/editor_session.dart';
 import '../am/am_colors.dart';
+import '../am/aviso_de_bloqueio.dart';
+import 'faixa_de_bloqueio.dart';
 import '../../application/preview_stats.dart';
 import '../../application/video_layer_manager.dart';
 import '../shell/cromo_editor.dart' show zoomDoPalcoProvider;
@@ -231,6 +233,9 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
     final project = ref.read(editorControllerProvider);
     final l = project.layerById(id);
     if (l == null || l is AudioLayer) return null;
+    // BLOQUEADA NAO TEM ALCA: a alca promete um gesto que o cadeado
+    // recusa, e alca que nao obedece e pior do que alca nenhuma.
+    if (project.metaOf(id).locked) return null;
     final t = widget.playback.time.value;
     if (!l.activeAt(t)) return null;
     final matrix = selectionTransform(project, l, t);
@@ -415,6 +420,8 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
     if (l is! ShapeLayer) return const [];
     final t = widget.playback.time.value;
     if (!l.activeAt(t)) return const [];
+    // Bloqueada nao tem alca de forma pela mesma razao das de selecao.
+    if (project.metaOf(id).locked) return const [];
     final forma = l.contents.whereType<ShapeParametric>().firstOrNull;
     if (forma == null) return const [];
     final local = l.localTime(t);
@@ -504,6 +511,17 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
   /// O toque atual comecou no modo Selecionar: nao move camada nenhuma.
   bool _selecionandoNoPalco = false;
 
+  /// Ja avisou do cadeado neste gesto (um aviso por arrasto, nao por
+  /// quadro: `onScaleUpdate` chega dezenas de vezes por segundo).
+  bool _avisouBloqueio = false;
+
+  /// A camada selecionada esta bloqueada? (falso quando nao ha selecao)
+  bool _camadaSelecionadaBloqueada() {
+    final id = ref.watch(selectedLayerProvider);
+    if (id == null) return false;
+    return ref.watch(editorControllerProvider).metaOf(id).locked;
+  }
+
   void _onScaleUpdate(ScaleUpdateDetails d) {
     if (_selecionandoNoPalco) return;
     final chaveDaAlca = _alcaDaForma;
@@ -535,6 +553,22 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
     }
     final controller = ref.read(editorControllerProvider.notifier);
     final project = ref.read(editorControllerProvider);
+    // O TOQUE PEGOU UMA CAMADA BLOQUEADA. O controlador recusaria a
+    // mutacao em silencio e o dedo ficaria arrastando o nada — o palco
+    // diz o que houve, uma vez por gesto.
+    if (project.metaOf(id).locked) {
+      if (!_avisouBloqueio) {
+        _avisouBloqueio = true;
+        avisarCamadaBloqueada(
+          context,
+          ref,
+          fraseDeBloqueio('mover'),
+          id,
+        );
+      }
+      return;
+    }
+    _avisouBloqueio = false;
     final t = widget.playback.time.value;
 
     if (d.pointerCount >= 2) {
@@ -1173,6 +1207,27 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
                     ],
                   );
                 },
+              ),
+            // A FAIXA DO CADEADO, no lugar das alcas que sumiram.
+            //
+            // Sem ela, selecionar uma camada bloqueada no palco daria a
+            // mesma imagem de uma camada normal — e o dedo descobriria a
+            // diferenca tentando arrastar. A faixa diz antes.
+            if (!drawing && _camadaSelecionadaBloqueada())
+              Positioned(
+                top: 8,
+                left: 8,
+                right: 8,
+                child: Align(
+                  alignment: Alignment.topCenter,
+                  child: FaixaDeBloqueio(
+                    camadaId: ref.watch(selectedLayerProvider)!,
+                    compacta: true,
+                    aoDesbloquear: () => ref
+                        .read(editorControllerProvider.notifier)
+                        .toggleLocked(ref.read(selectedLayerProvider)!),
+                  ),
+                ),
               ),
             // A BARRA DO DESENHO fica AQUI, no palco: dentro da composicao
             // o zoom da previa mudaria o tamanho dos botoes.

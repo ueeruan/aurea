@@ -12,6 +12,7 @@ import '../../domain/layer.dart';
 import 'almofada_de_arrasto.dart';
 import 'campo_de_valor.dart';
 import 'dial_de_angulo.dart';
+import 'faixa_de_bloqueio.dart';
 import 'fita_de_ajuste.dart';
 import 'rails_do_painel.dart';
 
@@ -87,6 +88,15 @@ class _PainelDeTransformacaoState extends ConsumerState<PainelDeTransformacao> {
   @override
   Widget build(BuildContext context) {
     final modo = ref.watch(modoDeTransformacaoProvider);
+    // A CAMADA BLOQUEADA MOSTRA O CADEADO NO LUGAR DOS CONTROLES.
+    //
+    // O portao do controlador ja recusa toda edicao, e uma superficie que
+    // aceita o arrasto e nao move nada e a pior resposta possivel: parece
+    // travamento. Aqui a superficie nem recebe o dedo, a faixa diz por que
+    // e o botao desbloqueia sem sair do painel.
+    final bloqueada = ref.watch(
+      editorControllerProvider.select((p) => p.metaOf(widget.camada.id).locked),
+    );
     return Row(
       children: [
         RailEsquerdo(
@@ -97,9 +107,23 @@ class _PainelDeTransformacaoState extends ConsumerState<PainelDeTransformacao> {
         Expanded(
           child: Column(
             children: [
+              if (bloqueada)
+                FaixaDeBloqueio(
+                  camadaId: widget.camada.id,
+                  aoDesbloquear: () =>
+                      _c.toggleLocked(widget.camada.id),
+                ),
               if (modo != ModoDeTransformacao.mover)
                 SizedBox(height: 44, child: Center(child: _campos(modo))),
-              Expanded(child: _superficie(modo)),
+              Expanded(
+                child: IgnorePointer(
+                  ignoring: bloqueada,
+                  child: Opacity(
+                    opacity: bloqueada ? 0.45 : 1,
+                    child: _superficie(modo),
+                  ),
+                ),
+              ),
               const SizedBox(height: 10),
             ],
           ),

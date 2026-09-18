@@ -92,14 +92,13 @@ class AtualizacaoService {
     HttpClient? http,
     MethodChannel? canal,
     this.endereco = ComunidadeService.enderecoPadrao,
-    bool? soAndroid,
+    this.soAndroid,
     Future<Directory> Function()? pastaDeDownload,
   }) : _pasta = pastaDeDownload ?? _pastaDoCache,
        _http =
            http ??
            (HttpClient()..connectionTimeout = const Duration(seconds: 15)),
-       _canal = canal ?? const MethodChannel('aurea/atualizacao'),
-       _soAndroid = soAndroid;
+       _canal = canal ?? const MethodChannel('aurea/atualizacao');
 
   static final instance = AtualizacaoService();
 
@@ -117,8 +116,10 @@ class AtualizacaoService {
 
   /// Nulo = pergunta ao sistema. O teste roda no PC, onde
   /// `Platform.isAndroid` e falso — e sem poder dizer "finja que e
-  /// Android" o caminho inteiro ficaria sem teste nenhum.
-  final bool? _soAndroid;
+  /// Android" o caminho inteiro ficaria sem teste nenhum. Publico de
+  /// proposito: um parametro nomeado nao pode preencher um campo privado
+  /// sem uma linha a mais de cerimonia.
+  final bool? soAndroid;
 
   /// ONDE O APK E BAIXADO. E `cache/atualizacao/`, e nao os Documentos: e
   /// a pasta que o provedor de arquivos expoe ao instalador, e o sistema
@@ -152,7 +153,7 @@ class AtualizacaoService {
 
   static bool get suportado => Platform.isAndroid;
 
-  bool get _suportado => _soAndroid ?? Platform.isAndroid;
+  bool get _suportado => soAndroid ?? Platform.isAndroid;
 
   Future<void> iniciar() async {
     if (!_suportado || _iniciado) return;

@@ -6,10 +6,17 @@ import '../../../core/ui/am_colors.dart';
 import 'package:aurea/src/core/l10n/app_language.dart';
 
 // Change this revision when publishing a new set of release notes.
-const releaseNoticeRevision = '2026-09-18-beta-91';
+const releaseNoticeRevision = '2026-09-18-beta-92';
 const releaseNoticeSeenKey = 'aurea.releaseNotice.seen';
 
 const releaseHighlights = <(IconData, String, String)>[
+  (
+    CupertinoIcons.arrow_down_circle_fill,
+    'Atualizar sem sair do app',
+    'Quando sair versao nova, aparece uma faixa na Inicio. Toque em '
+        'Atualizar: o app baixa, confere o arquivo e abre o instalador. '
+        'Nao precisa procurar APK nem entrar em grupo.',
+  ),
   (
     CupertinoIcons.sparkles,
     'O brilho parou de travar',
@@ -39,7 +46,6 @@ const releaseHighlights = <(IconData, String, String)>[
         'abrindo.',
   ),
 ];
-
 
 Future<void> showReleaseNotice(BuildContext context) => showDialog<void>(
   context: context,

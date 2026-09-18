@@ -569,6 +569,12 @@ class NucleoRender {
   int desenharAgora() => _fechado ? -1 : _desenharAgora(_nucleo);
 
   /// LE O ULTIMO QUADRO. TESTE E BANCADA — ver a regra no `api.cpp`.
+  /// LE O ULTIMO QUADRO. TESTE E BANCADA — ver a regra no `api.cpp`.
+  ///
+  /// ALOCA 64 MB A CADA CHAMADA, e isso e de proposito: este e o caminho
+  /// de quem le UM quadro e olha o resultado. Quem le a cada quadro chama
+  /// [lerPixelsEm] com um buffer proprio — em producao, alocar 64 MB por
+  /// quadro derruba o app em segundos.
   Uint8List? lerPixels() {
     if (_fechado) return null;
     final capacidade = 4096 * 4096 * 4;
@@ -580,6 +586,42 @@ class NucleoRender {
     } finally {
       calloc.free(ptr);
     }
+  }
+
+  /// LE O ULTIMO QUADRO PARA UM BUFFER JA ALOCADO.
+  ///
+  /// E O CAMINHO DO PREVIEW. O buffer nativo e do proprio nucleo, crescido
+  /// sob demanda e reaproveitado: NAO HA ALOCACAO POR QUADRO. O que o
+  /// chamador entrega e a lista Dart que recebe os bytes.
+  ///
+  /// Devolve quantos bytes foram escritos no inicio de [destino].
+  int lerPixelsEm(Uint8List destino) {
+    if (_fechado || destino.isEmpty) return 0;
+    final ptr = _garantirLeitura(destino.length);
+    final escritos = _lerPixels(_nucleo, ptr, _capacidadeDeLeitura);
+    if (escritos <= 0) return 0;
+    destino.setRange(0, escritos, ptr.asTypedList(escritos));
+    return escritos;
+  }
+
+  /// O buffer nativo de leitura, reaproveitado entre quadros.
+  Pointer<Uint8>? _leitura;
+  int _capacidadeDeLeitura = 0;
+
+  Pointer<Uint8> _garantirLeitura(int bytes) {
+    final atual = _leitura;
+    if (atual != null && _capacidadeDeLeitura >= bytes) return atual;
+    if (atual != null) calloc.free(atual);
+    _leitura = calloc<Uint8>(bytes);
+    _capacidadeDeLeitura = bytes;
+    return _leitura!;
+  }
+
+  void _soltarLeitura() {
+    final p = _leitura;
+    if (p != null) calloc.free(p);
+    _leitura = null;
+    _capacidadeDeLeitura = 0;
   }
 
   EstatisticasDeRender estatisticas() {
@@ -642,6 +684,10 @@ class NucleoRender {
   void fechar() {
     if (_fechado) return;
     _fechado = true;
+    // O BUFFER DE LEITURA E NOSSO, e nao do nucleo: ele morre aqui, e nao
+    // no `_fechar` do C++ — senao sobraria memoria presa a cada nucleo
+    // aberto e fechado (o preview abre um por projeto).
+    _soltarLeitura();
     _fechar(_nucleo);
   }
 }

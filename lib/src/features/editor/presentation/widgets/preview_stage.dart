@@ -69,6 +69,8 @@ import '../../application/quadros_de_video.dart';
 import '../../application/proxy_service.dart';
 import '../../domain/color_space.dart';
 import 'mask_node_editor.dart';
+import 'package:aurea_render/aurea_render.dart';
+import 'preview_vulkan.dart';
 import 'world3d_painter.dart';
 import 'extrude_painter.dart';
 import 'vignette_painter.dart';
@@ -1872,6 +1874,23 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
           // preview congela, e sem preview vivo nao da para animar, que e
           // para o que o aplicativo serve. Montar a arvore e barato;
           // congelar o preview nao tem preco que pague.
+          // O MOTOR C++ DESENHA, O FLUTTER NAO.
+          //
+          // Com o interruptor ligado, a arvore de widgets da composicao
+          // NAO e montada: quem compoe e o `Nucleo` (C++), quem sobe o
+          // quadro para a GPU e o `apresentarImagem`, e o que fica na
+          // tela e um `Texture`. O Flutter continua com a interface
+          // inteira — paineis, timeline, gestos — e perde so a
+          // composicao, que e exatamente a parte que migrou.
+          //
+          // `vistaDoPalco` fica de fora: o palco precisa dos enfeites
+          // (alcas, guias, mascara) que sao do editor, e nao do filme.
+          if (!exporting &&
+              widget.vistaDoPalco == false &&
+              ref.watch(motorDoPreviewProvider) &&
+              PreviewNativo.suportado) {
+            return _motorDaCena(project, t);
+          }
           if (!identical(project, _gate.project)) {
             _gate.project = project;
             _gate.decision = classifyGear(project);
@@ -1889,6 +1908,86 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
       ),
     );
   }
+
+  /// A CENA PARA O MOTOR C++, NO INSTANTE [t].
+  ///
+  /// UM MAPA DE COMPOSICAO, e nao a imagem: cada camada visivel vira uma
+  /// CAIXA com a cor, a posicao, a escala, o giro e a opacidade que ela
+  /// tem agora. E o que o `Nucleo` sabe compor hoje — ele tem o
+  /// compositor 2D, o avaliador de timeline e as misturas, e ainda nao
+  /// tem textura de video, glifo de texto nem malha 3D.
+  ///
+  /// DITO DE OUTRO JEITO: o caminho INTEIRO esta ligado (estado ->
+  /// avaliador -> compositor -> GPU -> Texture) e o CONTEUDO de cada
+  /// camada e que ainda e uma caixa. Trocar a caixa pela textura de cada
+  /// tipo de camada e a proxima fase, e nao precisa mexer em nada daqui
+  /// para tras.
+  Widget _motorDaCena(VideoProject project, Duration t) {
+    final w = project.outputWidth.toDouble();
+    final h = project.outputHeight.toDouble();
+    final controller = ref.read(editorControllerProvider.notifier);
+    final projeto = widget.vistaDoPalco
+        ? ref.read(projetoDoPalcoProvider)
+        : ref.read(projetoVisivelProvider);
+    return PreviewNativo(
+      key: const ValueKey('preview-motor-cpp'),
+      largura: project.outputWidth,
+      altura: project.outputHeight,
+      ativo: !exporting,
+      cena: () {
+        final agora = _tempoVivo;
+        final camadas = <CamadaDeRender>[];
+        for (final l in projeto.layers.reversed) {
+          if (l is AudioLayer) continue;
+          if (!l.activeAt(agora)) continue;
+          if (projeto.isHidden(l.id)) continue;
+          final caixa = controller.layerBoxRect(l, agora);
+          if (caixa.isEmpty) continue;
+          final local = l.localTime(agora);
+          camadas.add(
+            CamadaDeRender(
+              x: caixa.center.dx,
+              y: caixa.center.dy,
+              largura: caixa.width,
+              altura: caixa.height,
+              escalaX: l.scaleX.valueAt(local),
+              escalaY: l.scaleY.valueAt(local),
+              rotacaoGraus: l.rotation.valueAt(local),
+              opacidade: l.opacity.valueAt(local).clamp(0.0, 1.0),
+              cor: _corDaCamada(l),
+            ),
+          );
+          if (camadas.length >= 64) break;  // teto: o motor nao tem fila
+        }
+        // O FUNDO DA COMPOSICAO, sempre: sem ele a cena vazia apresenta
+        // lixo do quadro anterior da swapchain.
+        camadas.insert(
+          0,
+          CamadaDeRender(
+            x: w / 2,
+            y: h / 2,
+            largura: w,
+            altura: h,
+            cor: project.backgroundColor.toARGB32(),
+          ),
+        );
+        return camadas;
+      },
+    );
+  }
+
+  /// A COR DE UMA CAMADA no mapa. E um rotulo, nao a imagem: forma usa o
+  /// proprio preenchimento, texto usa a cor do texto, e midia usa um cinza
+  /// que diz "aqui tem imagem" sem fingir mostra-la.
+  static int _corDaCamada(Layer l) => switch (l) {
+    ShapeLayer s => s.primaryColor.toARGB32(),
+    TextLayer s => s.color.toARGB32(),
+    VideoLayer _ => 0xFF3A4152,
+    ImageLayer _ => 0xFF4A5568,
+    GroupLayer _ => 0x33FFFFFF,
+    NullLayer _ => 0x22FFFFFF,
+    _ => 0x33AAB4C4,
+  };
 
   /// A PILHA DA RAIZ. Com uma camada que recorta, ela vai isolada, para
   /// o recorte morrer na propria pilha em vez de comer o fundo.

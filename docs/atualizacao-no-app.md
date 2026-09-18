@@ -59,6 +59,42 @@ oferecer atualização).
 Sem nada publicado, `GET /versao` devolve `null` e **o app não mostra
 faixa nenhuma**. Nunca "atualize" sem ter o que oferecer.
 
+## A CHAVE DE ASSINATURA: o CI e a maquina NAO assinam igual
+
+Medido em 18/09/2026, e é a pegadinha que quase estragou a publicação do
+apk-93.
+
+O Android **recusa instalar por cima** um APK assinado com outra chave: ou
+desinstala (e a pessoa perde os projetos) ou não instala. Então a chave
+não é detalhe de build, é a condição para a atualização existir.
+
+| build | chave (SHA-256 do certificado) |
+|---|---|
+| local, `flutter build apk --release` nesta máquina | `55bf3cc8…b5c8` |
+| CI, `build-apk.yml` no runner | `eaf9baae…8e5c` |
+
+São chaves de debug **diferentes**: `android/key.properties` não existe em
+nenhum dos dois, então o Gradle cai na debug de cada um — a daqui e a do
+runner. Um APK do CI **não instala** sobre um instalado a partir do arquivo
+local, e foi assim que os betas chegaram aos testadores (arquivo local).
+
+**O que se faz hoje:** o APK que o app baixa é o **construído aqui**
+(`flutter build apk --release --split-per-abi`), conferido com
+`tool/verify_beta_package.py --certificate 55bf3cc8…`, publicado num
+release com tag que **não** dispara o workflow (`beta-93`, porque o
+workflow escuta `apk-*` e `v*`) e anunciado no servidor com o `versao.mjs`.
+O release do CI continua valendo como artefato de build, mas **não** é o
+que vai para o aparelho.
+
+**O conserto de verdade**, para o dia em que valer: pôr a chave de debug
+desta máquina nos secrets do repositório (base64) e o workflow escrever o
+`key.properties` e o keystore antes de compilar. Aí o `apk-*` volta a
+fechar o ciclo sozinho. Não foi feito porque a chave em Secrets é decisão
+do dono, e porque gravar a chave em repositório público está fora de
+questão.
+
+---
+
 ## O que o app confere antes de instalar
 
 1. **Tamanho** — um download cortado no meio vira uma instalação que falha

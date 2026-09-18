@@ -41,7 +41,7 @@ with zipfile.ZipFile(path) as z:
         assert args.abi and args.android_tools, 'APK needs ABI and Android build tools'
         assert f'lib/{args.abi}/libapp.so' in names, 'Wrong ABI'
         assert z.read(f'lib/{args.abi}/libapp.so')[:4] == b'\x7fELF'
-        for lib in ['libflutter.so', 'libaurea_native.so']:
+        for lib in ['libflutter.so', 'libaurea_core.so']:
             assert f'lib/{args.abi}/{lib}' in names, f'Missing {lib}'
         badging = subprocess.check_output([str(args.android_tools/'aapt2.exe'), 'dump', 'badging', str(path)], text=True, encoding='utf-8')
         expected_code = {'armeabi-v7a': 1000, 'arm64-v8a': 2000, 'x86_64': 4000}[args.abi] + args.build

@@ -185,8 +185,8 @@ class MultiSelectionPanel extends ConsumerWidget {
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: AppText(
-                  '$n camadas',
+                child: AppTextMoldado(
+                  '{0} camadas', [n],
                   key: const ValueKey('selecao-contagem'),
                   style: TextStyle(
                     fontSize: 15,

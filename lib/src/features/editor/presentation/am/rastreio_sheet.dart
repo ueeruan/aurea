@@ -611,8 +611,8 @@ class _ListaDeBlobs extends StatelessWidget {
                     color: id == escolhido ? AmColors.accentDim : AmColors.chip,
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: AppText(
-                    'Objeto $id · ${dados.duracaoDe(id)} q',
+                  child: AppTextMoldado(
+                    'Objeto {0} · {1} q', [id, dados.duracaoDe(id)],
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,

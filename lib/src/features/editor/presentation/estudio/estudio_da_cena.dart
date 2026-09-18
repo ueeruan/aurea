@@ -208,8 +208,8 @@ class _EstudioDaCenaState extends ConsumerState<EstudioDaCena> {
                                       for (final cam in layer.allCameras)
                                         DropdownMenuItem(
                                           value: cam.id,
-                                          child: AppText(
-                                            'No vídeo: ${cam.name}',
+                                          child: AppTextMoldado(
+                                            'No vídeo: {0}', [cam.name],
                                             overflow: TextOverflow.ellipsis,
                                           ),
                                         ),
@@ -474,8 +474,8 @@ class _EstudioDaCenaState extends ConsumerState<EstudioDaCena> {
                               canParent(parent.id))
                             DropdownMenuItem(
                               value: parent.id,
-                              child: AppText(
-                                'Nulo: ${parent.name}',
+                              child: AppTextMoldado(
+                                'Nulo: {0}', [parent.name],
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),

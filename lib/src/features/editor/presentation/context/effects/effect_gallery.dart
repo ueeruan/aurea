@@ -492,8 +492,8 @@ class _EffectTile extends StatelessWidget {
                           color: Colors.black.withValues(alpha: .55),
                           borderRadius: BorderRadius.circular(6),
                         ),
-                        child: AppText(
-                          'custo ${spec.cost}',
+                        child: AppTextMoldado(
+                          'custo {0}', [spec.cost],
                           style: const TextStyle(
                             fontSize: 9,
                             color: Colors.white,

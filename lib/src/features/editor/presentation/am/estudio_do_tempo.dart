@@ -522,7 +522,7 @@ class _EstudioDoTempoState extends ConsumerState<EstudioDoTempo> {
     showCupertinoModalPopup<void>(
       context: context,
       builder: (menuContext) => CupertinoActionSheet(
-        title: AppText('Keyframe · ${formatTime(kf.time)}'),
+        title: AppTextMoldado('Keyframe · {0}', [formatTime(kf.time)]),
         actions: [
           for (final (rotulo, faz) in <(String, VoidCallback)>[
             ('Suavizar (easy ease)', () => aplica(trilhaSuavizada(curva, indice))),

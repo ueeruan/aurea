@@ -67,8 +67,8 @@ class _Animador extends ConsumerWidget {
               Row(
                 children: [
                   Expanded(
-                    child: AppText(
-                      'Animar $nome sozinho',
+                    child: AppTextMoldado(
+                      'Animar {0} sozinho', [nome],
                       style: const TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w700,

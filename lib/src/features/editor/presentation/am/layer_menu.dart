@@ -614,8 +614,8 @@ Future<void> showGridSheet(
                       controller.setGridAssets(nullId, picked.toList());
                       Navigator.of(c2).pop();
                     },
-                    child: AppText(
-                      'Usar ${picked.length} camada(s)',
+                    child: AppTextMoldado(
+                      'Usar {0} camada(s)', [picked.length],
                       style: const TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
@@ -4530,8 +4530,8 @@ class _BlendingPanelState extends ConsumerState<BlendingPanel> {
           }
         }),
         const SizedBox(height: 8),
-        AppText(
-          'Montar · ${mask.name}',
+        AppTextMoldado(
+          'Montar · {0}', [mask.name],
           style: const TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.w700,

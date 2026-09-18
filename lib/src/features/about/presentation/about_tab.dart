@@ -113,8 +113,8 @@ class _AboutTabState extends ConsumerState<AboutTab> {
                   color: AppColors.lime.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(20),
                 ),
-                child: AppText(
-                  'Versao $_appVersion',
+                child: AppTextMoldado(
+                  'Versao {0}', [_appVersion],
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
@@ -144,8 +144,8 @@ class _AboutTabState extends ConsumerState<AboutTab> {
                       size: 21,
                     ),
                     title: const AppText('Ferramentas de desenvolvedor'),
-                    subtitle: AppText(
-                      'Versao $_appVersion · build $buildDoApp',
+                    subtitle: AppTextMoldado(
+                      'Versao {0} · build {1}', [_appVersion, buildDoApp],
                       style: TextStyle(fontSize: 12, color: AppColors.muted),
                     ),
                   ),

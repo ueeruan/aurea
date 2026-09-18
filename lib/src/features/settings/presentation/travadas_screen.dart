@@ -103,8 +103,8 @@ class _TravadasScreenState extends State<TravadasScreen> {
               key: const ValueKey('travadas-vazio'),
             )
           else ...[
-            AppText(
-              '${travadas.length} travadas, da mais recente',
+            AppTextMoldado(
+              '{0} travadas, da mais recente', [travadas.length],
               style: titulo,
             ),
             const SizedBox(height: 6),

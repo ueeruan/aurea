@@ -661,8 +661,8 @@ class _EstudioDoRastreioState extends ConsumerState<EstudioDoRastreio> {
                       const SizedBox(width: 6),
                     ],
                     if (selecionados > 0)
-                      AppText(
-                        '$selecionados na mão',
+                      AppTextMoldado(
+                        '{0} na mão', [selecionados],
                         key: const ValueKey('estudio-rastreio-selecao'),
                         style: const TextStyle(
                           fontSize: 11,

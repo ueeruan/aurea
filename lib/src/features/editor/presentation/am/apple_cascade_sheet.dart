@@ -96,8 +96,8 @@ Future<void> showAppleCascadeSheet(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                AppText(
-                  'Cascata · $selectionCount camadas',
+                AppTextMoldado(
+                  'Cascata · {0} camadas', [selectionCount],
                   style: const TextStyle(
                     fontSize: 17,
                     fontWeight: FontWeight.w700,

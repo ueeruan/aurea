@@ -87,7 +87,7 @@ class _ModelAnimationScreenState extends ConsumerState<ModelAnimationScreen>
     selected = selected.clamp(0, asset.nodes.length - 1);
     return Scaffold(
       appBar: AppBar(
-        title: AppText('Animar · ${node.name}'),
+        title: AppTextMoldado('Animar · {0}', [node.name]),
         actions: [
           IconButton(
             tooltip: 'Mostrar rig',

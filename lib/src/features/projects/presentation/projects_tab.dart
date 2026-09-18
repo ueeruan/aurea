@@ -1855,8 +1855,8 @@ class _BarraDaListaState extends ConsumerState<_BarraDaLista> {
         child: Row(
           children: [
             Expanded(
-              child: AppText(
-                '${widget.selecao.length} escolhidos',
+              child: AppTextMoldado(
+                '{0} escolhidos', [widget.selecao.length],
                 style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
               ),
             ),
@@ -1980,8 +1980,8 @@ class _AcoesEmLote extends StatelessWidget {
                   child: Row(
                     children: [
                       Expanded(
-                        child: AppText(
-                          '$quantos escolhidos',
+                        child: AppTextMoldado(
+                          '{0} escolhidos', [quantos],
                           style: TextStyle(fontSize: 13, color: AppColors.muted),
                         ),
                       ),

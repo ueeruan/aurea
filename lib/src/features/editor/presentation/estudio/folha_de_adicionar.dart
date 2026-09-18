@@ -77,7 +77,7 @@ class _FolhaDeAdicionarState extends ConsumerState<FolhaDeAdicionar> {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: AppText('Não foi possível importar o modelo: $error'),
+                content: AppTextMoldado('Não foi possível importar o modelo: {0}', [error]),
               ),
             );
           }

@@ -136,8 +136,8 @@ Future<void> vincularSelecao(
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(18, 14, 18, 6),
-              child: AppText(
-                '${targets.length} camadas seguirem...',
+              child: AppTextMoldado(
+                '{0} camadas seguirem...', [targets.length],
                 style: const TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w700,

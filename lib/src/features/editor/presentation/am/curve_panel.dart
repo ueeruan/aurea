@@ -610,8 +610,8 @@ Future<void> showTrackCurveSheet(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      AppText(
-                        'Curva — $label',
+                      AppTextMoldado(
+                        'Curva — {0}', [label],
                         style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w700,

@@ -336,8 +336,8 @@ class _TextAnimatorsPanelState extends ConsumerState<TextAnimatorsPanel> {
               ),
             ),
             const Spacer(),
-            AppText(
-              'total ${_ms(anim.totalFor(n))}',
+            AppTextMoldado(
+              'total {0}', [_ms(anim.totalFor(n))],
               style: const TextStyle(fontSize: 11, color: AmColors.muted),
             ),
           ],

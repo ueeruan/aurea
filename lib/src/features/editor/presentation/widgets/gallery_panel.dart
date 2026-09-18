@@ -295,8 +295,8 @@ class _GalleryPanelState extends ConsumerState<GalleryPanel>
                 child: Row(
                   children: [
                     Expanded(
-                      child: AppText(
-                        '${_marcados.length} marcadas',
+                      child: AppTextMoldado(
+                        '{0} marcadas', [_marcados.length],
                         key: const ValueKey('galeria-marcadas'),
                         style: const TextStyle(
                           color: AmColors.text,
@@ -501,8 +501,8 @@ class _GalleryPanelState extends ConsumerState<GalleryPanel>
                 onTap: _refresh,
                 child: Padding(
                   padding: const EdgeInsets.all(4),
-                  child: AppText(
-                    '$_error Tentar novamente',
+                  child: AppTextMoldado(
+                    '{0} Tentar novamente', [_error],
                     maxLines: 3,
                     style: const TextStyle(color: AmColors.pink, fontSize: 11),
                   ),

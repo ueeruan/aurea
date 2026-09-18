@@ -88,8 +88,8 @@ Future<void> showPathEditSheet(
                         ),
                       ),
                     ),
-                    AppText(
-                      '${caminho.vertices.length} nos',
+                    AppTextMoldado(
+                      '{0} nos', [caminho.vertices.length],
                       style: const TextStyle(
                         fontSize: 12,
                         color: AmColors.muted,

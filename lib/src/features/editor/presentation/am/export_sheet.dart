@@ -244,8 +244,8 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
                                         : AmColors.text,
                                   ),
                                 ),
-                                AppText(
-                                  'MP4 · ${project.fps} fps',
+                                AppTextMoldado(
+                                  'MP4 · {0} fps', [project.fps],
                                   style: TextStyle(
                                     fontSize: 10.5,
                                     color: rotulo == '1080p'
@@ -323,8 +323,8 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
                                     'legendas (.srt)',
                                   );
                                 },
-                          child: AppText(
-                            'Legendas (.srt) · ${legenda.name}',
+                          child: AppTextMoldado(
+                            'Legendas (.srt) · {0}', [legenda.name],
                             style: const TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w600,

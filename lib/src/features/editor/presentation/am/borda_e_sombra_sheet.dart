@@ -995,8 +995,8 @@ class _CartaoDaBorda extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            AppText(
-              'Borda ${indice + 1}',
+            AppTextMoldado(
+              'Borda {0}', [indice + 1],
               style: const TextStyle(fontSize: 13, color: AmColors.text),
             ),
             const Spacer(),

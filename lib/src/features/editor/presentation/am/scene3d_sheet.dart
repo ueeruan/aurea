@@ -1082,8 +1082,8 @@ class _ObjectsTab extends StatelessWidget {
           ),
           if (!node.credit.isEmpty) ...[
             const SizedBox(height: 8),
-            AppText(
-              'Modelo · ${node.credit.badge}',
+            AppTextMoldado(
+              'Modelo · {0}', [node.credit.badge],
               style: const TextStyle(fontSize: 10, color: AmColors.muted),
             ),
           ],

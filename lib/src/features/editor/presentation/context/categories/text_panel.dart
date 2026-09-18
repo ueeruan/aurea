@@ -224,7 +224,7 @@ class _EdicaoDeTexto extends ConsumerWidget {
                     final coluna = await showCupertinoModalPopup<String?>(
                       context: context,
                       builder: (ctx) => CupertinoActionSheet(
-                        title: AppText('Coluna de ${dados.name}'),
+                        title: AppTextMoldado('Coluna de {0}', [dados.name]),
                         actions: [
                           for (final col in dados.columns)
                             CupertinoActionSheetAction(

@@ -529,8 +529,8 @@ Future<void> showCaptionCreationSheet(
                   if (estado is TranscricaoPronta)
                     Padding(
                       padding: const EdgeInsets.only(top: 8),
-                      child: AppText(
-                        'Legendas prontas: ${estado.falas} falas.',
+                      child: AppTextMoldado(
+                        'Legendas prontas: {0} falas.', [estado.falas],
                         style: const TextStyle(
                           fontSize: 12,
                           color: AmColors.accent,

@@ -57,8 +57,8 @@ Future<void> showAlignSheet(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                AppText(
-                  'Alinhar — ${ids.length} camada(s)',
+                AppTextMoldado(
+                  'Alinhar — {0} camada(s)', [ids.length],
                   style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w700,

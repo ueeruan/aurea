@@ -60,9 +60,7 @@ Resulta<std::unique_ptr<Nucleo>> Nucleo::abrir(const Configuracao& c) {
   auto r = n->abrir_recursos();
   if (r.tem_erro()) return r.erro();
   if (c.com_thread) {
-    n->thread_ = std::jthread([p = n.get()](std::stop_token) {
-      p->laco_da_thread();
-    });
+    n->thread_ = std::thread([p = n.get()] { p->laco_da_thread(); });
   }
   return n;
 }

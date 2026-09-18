@@ -85,6 +85,16 @@ void main() {
       expect(NucleoRender.ultimoErro, isEmpty);
       n.fechar();
     });
+
+    test('a sonda de Vulkan responde sempre, e nao mente no PC', () {
+      // NO PC O BACKEND NAO E COMPILADO. A sonda tem de DIZER ISSO, e
+      // nao devolver vazio nem fingir que subiu um Vulkan que nao existe
+      // nesta plataforma — o mesmo codigo roda no emulador e responde
+      // outra coisa, e e essa diferenca que a torna util.
+      final texto = NucleoRender.sondarVulkan();
+      expect(texto, isNotEmpty);
+      expect(texto, contains('Vulkan'));
+    });
   });
 
   group('composicao', () {

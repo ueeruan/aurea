@@ -164,7 +164,7 @@ class Compositor {
 ///
 /// Co = (1 - ab)*Cs + (1 - as)*Cb + as*ab*B(Cs/as, Cb/ab)
 /// ao = as + ab*(1 - as)
-[[nodiscard]] void misturar_pixel(float* destino, const float* fonte,
+void misturar_pixel(float* destino, const float* fonte,
                                   Mistura modo) noexcept;
 
 }  // namespace aurea::render

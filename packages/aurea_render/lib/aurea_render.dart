@@ -284,6 +284,11 @@ external Pointer<Void> _abrir(
   double orcamentoMs,
 );
 
+@Native<Int32 Function(Pointer<Utf8>, Uint32)>(
+  symbol: 'aurea_render_vulkan_sonda',
+)
+external int _vulkanSonda(Pointer<Utf8> saida, int capacidade);
+
 /// O PORQUE DA ULTIMA ABERTURA TER FALHADO. Vazio = deu certo.
 @Native<Pointer<Utf8> Function()>(symbol: 'aurea_render_ultimo_erro', isLeaf: true)
 external Pointer<Utf8> _ultimoErro();
@@ -405,6 +410,29 @@ class NucleoRender {
       return p == nullptr ? '' : p.toDartString();
     } catch (_) {
       return '';
+    }
+  }
+
+  /// A SONDA DO VULKAN: o que o aparelho tem, em texto.
+  ///
+  /// Nao compoe nada e nao abre nucleo nenhum — ela sobe o Vulkan,
+  /// pergunta o nome do dispositivo, o driver, a fila grafica e o teto de
+  /// textura, e desce. Serve para nao se escrever swapchain em cima de um
+  /// chute, e para um relatorio de bug dizer o que falta naquele aparelho.
+  ///
+  /// Sempre responde: num aparelho sem Vulkan (ou no PC) o texto diz o
+  /// motivo em vez de devolver vazio.
+  static String sondarVulkan() {
+    const capacidade = 512;
+    final buffer = calloc<Uint8>(capacidade);
+    try {
+      final n = _vulkanSonda(buffer.cast<Utf8>(), capacidade);
+      if (n <= 0) return '';
+      return buffer.cast<Utf8>().toDartString();
+    } catch (e) {
+      return 'sonda indisponivel: $e';
+    } finally {
+      calloc.free(buffer);
     }
   }
 

@@ -218,7 +218,16 @@ class Nucleo {
   bool pedido_ = false;
   std::atomic<bool> automatica_{true};
   Qualidade qualidade_{};
-  std::jthread thread_;
+
+  /// `std::thread`, E NAO `std::jthread`.
+  ///
+  /// O `jthread` promete juntar-se sozinho e parar por `stop_token`, e
+  /// seria a escolha moderna — mas a libc++ do NDK 28 NAO O TEM: o
+  /// compilador do Android recusa `std::jthread` e `std::stop_token`, e o
+  /// build para arm64 para ali. A parada ja e explicita aqui (`parar_`
+  /// sob a trava, e `join` no `fechar`), entao o que se perde e o
+  /// acucar, e nao o comportamento.
+  std::thread thread_;
 
   std::uint32_t quadros_reaproveitados_ = 0;
   std::uint32_t quadros_falhos_ = 0;

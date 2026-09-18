@@ -27,12 +27,16 @@ void main(List<String> args) async {
         'src/gerenciador_de_recursos.cpp',
         'src/gerenciador_de_shaders.cpp',
         'src/avaliador_da_timeline.cpp',
+        'src/backend_vulkan.cpp',
         'src/relogio_do_quadro.cpp',
         'src/nucleo.cpp',
         'src/api.cpp',
       ],
       includes: const ['src'],
-      libraries: [if (android) 'log'],
+      // `vulkan` E `android`: a sonda sobe o Vulkan de verdade e usa o
+      // `__android_log_print`. Em plataforma que nao seja Android o
+      // arquivo compila pelo ramo `#else` e nao puxa biblioteca nenhuma.
+      libraries: [if (android) ...['vulkan', 'log', 'android']],
       language: Language.cpp,
       // C++20, e nao 23: `std::expected` e `std::format` nao existem em
       // todas as libc++ que o Aurea encontra (NDK 28 tem; o aparelho de

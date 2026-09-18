@@ -14,6 +14,7 @@
 // `void*` do handle e a unica coisa que sobrevive, e ele so morre em
 // `fechar`. Um ponteiro guardado do lado do Dart para um `vector` que
 // realocou e a segunda forma classica de derrubar o app por aqui.
+#include "backend_vulkan.h"
 #include "nucleo.h"
 
 #include <cstring>
@@ -245,6 +246,52 @@ AUREA_API void* aurea_render_abrir(std::uint32_t largura, std::uint32_t altura,
   } catch (...) {
     anotar_motivo("excecao desconhecida ao abrir");
     return nullptr;
+  }
+}
+
+/// A SONDA DO VULKAN — O QUE O APARELHO TEM, EM TEXTO.
+///
+/// NAO COMPOE NADA E NAO ABRE NUCLEO NENHUM. Ela sobe o Vulkan, pergunta
+/// o nome do dispositivo, o driver, a fila grafica, o teto de textura e a
+/// extensao de `AHardwareBuffer`, e desce. Existe para nao se escrever
+/// swapchain em cima de um chute — e para o relatorio de bug de um
+/// aparelho que nao roda poder dizer o que falta.
+///
+/// Devolve os bytes escritos (sem contar o terminador), ou negativo:
+/// -1 sem buffer, -2 sem Vulkan.
+AUREA_API std::int32_t aurea_render_vulkan_sonda(char* saida,
+                                                 std::uint32_t capacidade) {
+  try {
+    if (saida == nullptr || capacidade == 0) return -1;
+    const SondaVulkan s = sondar_vulkan();
+    const std::string texto = s.resumo();
+    const std::uint32_t cabem = capacidade - 1;
+    const auto n = static_cast<std::uint32_t>(
+        texto.size() < cabem ? texto.size() : cabem);
+    for (std::uint32_t i = 0; i < n; ++i) saida[i] = texto[i];
+    saida[n] = 0;
+    return static_cast<std::int32_t>(n);
+  } catch (const std::exception& e) {
+    if (saida != nullptr && capacidade > 0) {
+      std::string m = std::string("excecao na sonda: ") + e.what();
+      const std::uint32_t cabem = capacidade - 1;
+      const auto n = static_cast<std::uint32_t>(
+          m.size() < cabem ? m.size() : cabem);
+      for (std::uint32_t i = 0; i < n; ++i) saida[i] = m[i];
+      saida[n] = 0;
+    }
+    return -3;
+  } catch (...) {
+    return -4;
+  }
+}
+
+/// A SONDA RESPONDEU QUE HA VULKAN DE VERDADE?
+AUREA_API std::int32_t aurea_render_vulkan_disponivel(void) {
+  try {
+    return sondar_vulkan().disponivel ? 1 : 0;
+  } catch (...) {
+    return 0;
   }
 }
 

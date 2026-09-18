@@ -26,10 +26,48 @@
 #define AUREA_RENDER_BACKEND_VULKAN_H
 
 #include <cstdint>
+#include <type_traits>
 #include <string>
 #include <string_view>
 
 namespace aurea::render {
+
+/// ==================== ALCAS DO VULKAN E `void*` =======================
+///
+/// O `vulkan.h` NAO tem um jeito so de representar as alcas que nao sao de
+/// despacho (superficie, swapchain, imagem, semaforo...). O padrao e
+/// `VK_USE_64_BIT_PTR_DEFINES = 1` em plataforma de 64 bits, e ai a alca e
+/// um PONTEIRO; em 32 bits — `armeabi-v7a` e `x86`, que entram no APK
+/// multi-ABI — ela e um INTEIRO de 64 bits.
+///
+/// Guardar em `void*` e o que mantem este cabecalho utilizavel onde o
+/// `vulkan.h` nao existe (o PC), mas a conversao depende do tipo: um
+/// `static_cast` de `void*` para inteiro nao compila, e o de inteiro para
+/// `void*` tampouco. Passou despercebido enquanto so se compilava x86_64:
+/// o aparelho de teste e o emulador sao 64 bits. A primeira build
+/// `--split-per-abi` derrubou a compilacao inteira em `armeabi-v7a`.
+///
+/// [paraVoid] e [deVoid] resolvem os dois mundos com `if constexpr`, sem
+/// `reinterpret_cast` ilegal e sem macro.
+template <typename T>
+void* paraVoid(T alca) noexcept {
+  if constexpr (std::is_same_v<T, std::nullptr_t>) {
+    return nullptr;
+  } else if constexpr (std::is_pointer_v<T>) {
+    return reinterpret_cast<void*>(alca);
+  } else {
+    return reinterpret_cast<void*>(static_cast<std::uintptr_t>(alca));
+  }
+}
+
+template <typename T>
+T deVoid(void* bruto) noexcept {
+  if constexpr (std::is_pointer_v<T>) {
+    return reinterpret_cast<T>(bruto);
+  } else {
+    return static_cast<T>(reinterpret_cast<std::uintptr_t>(bruto));
+  }
+}
 
 /// RESPOSTA DE [DispositivoVulkan::tipo_de_memoria] QUANDO NENHUM SERVE.
 /// Nao e um indice valido: `VK_MAX_MEMORY_TYPES` e 32, e um tipo que nao

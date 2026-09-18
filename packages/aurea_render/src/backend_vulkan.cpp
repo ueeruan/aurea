@@ -122,33 +122,33 @@ std::string DispositivoVulkan::abrir() noexcept {
     if (vkCreateInstance(&info, nullptr, &instancia) != VK_SUCCESS) {
       return "vkCreateInstance falhou";
     }
-    instancia_ = instancia;
+    instancia_ = paraVoid(instancia);
 
     // ------------------------------- o dispositivo fisico
     std::uint32_t quantos = 0;
-    if (vkEnumeratePhysicalDevices(static_cast<VkInstance>(instancia_),
+    if (vkEnumeratePhysicalDevices(deVoid<VkInstance>(instancia_),
                                    &quantos, nullptr) != VK_SUCCESS ||
         quantos == 0) {
       fechar();
       return "nenhum dispositivo Vulkan";
     }
     std::vector<VkPhysicalDevice> fisicos(quantos);
-    vkEnumeratePhysicalDevices(static_cast<VkInstance>(instancia_), &quantos,
+    vkEnumeratePhysicalDevices(deVoid<VkInstance>(instancia_), &quantos,
                                fisicos.data());
-    fisico_ = fisicos.front();
+    fisico_ = paraVoid(fisicos.front());
     VkPhysicalDeviceProperties props{};
-    vkGetPhysicalDeviceProperties(static_cast<VkPhysicalDevice>(fisico_),
+    vkGetPhysicalDeviceProperties(deVoid<VkPhysicalDevice>(fisico_),
                                   &props);
     nome_ = props.deviceName;
 
-    if (!achar_familia_grafica(static_cast<VkPhysicalDevice>(fisico_),
+    if (!achar_familia_grafica(deVoid<VkPhysicalDevice>(fisico_),
                                familia_)) {
       fechar();
       return "nenhuma familia de fila grafica";
     }
 
     // ------------------------------- o dispositivo logico
-    if (!tem_extensao_de_dispositivo(static_cast<VkPhysicalDevice>(fisico_),
+    if (!tem_extensao_de_dispositivo(deVoid<VkPhysicalDevice>(fisico_),
                                      "VK_KHR_swapchain")) {
       fechar();
       return "VK_KHR_swapchain indisponivel";
@@ -170,15 +170,15 @@ std::string DispositivoVulkan::abrir() noexcept {
     dev.ppEnabledExtensionNames = extensoes;
 
     VkDevice criado = VK_NULL_HANDLE;
-    if (vkCreateDevice(static_cast<VkPhysicalDevice>(fisico_), &dev, nullptr,
+    if (vkCreateDevice(deVoid<VkPhysicalDevice>(fisico_), &dev, nullptr,
                        &criado) != VK_SUCCESS) {
       fechar();
       return "vkCreateDevice recusado";
     }
-    dispositivo_ = criado;
+    dispositivo_ = paraVoid(criado);
     VkQueue q = VK_NULL_HANDLE;
     vkGetDeviceQueue(criado, familia_, 0, &q);
-    fila_ = q;
+    fila_ = paraVoid(q);
 
     __android_log_print(ANDROID_LOG_INFO, kEtiqueta,
                         "dispositivo pronto: %s (familia %u)", nome_.c_str(),
@@ -197,15 +197,15 @@ void DispositivoVulkan::fechar() noexcept {
   // A ORDEM IMPORTA: o dispositivo logico morre ANTES da instancia. Ao
   // contrario, a instancia leva junto um dispositivo que ainda existe e o
   // driver reclama (ou pior, deixa memoria presa).
-  if (dispositivo_ != nullptr) {    vkDestroyDevice(static_cast<VkDevice>(dispositivo_), nullptr);
-    dispositivo_ = nullptr;
-    fila_ = nullptr;
+  if (dispositivo_ != nullptr) {    vkDestroyDevice(deVoid<VkDevice>(dispositivo_), nullptr);
+    dispositivo_ = paraVoid(nullptr);
+    fila_ = paraVoid(nullptr);
   }
   if (instancia_ != nullptr) {
-    vkDestroyInstance(static_cast<VkInstance>(instancia_), nullptr);
-    instancia_ = nullptr;
+    vkDestroyInstance(deVoid<VkInstance>(instancia_), nullptr);
+    instancia_ = paraVoid(nullptr);
   }
-  fisico_ = nullptr;
+  fisico_ = paraVoid(nullptr);
 }
 
 std::string SondaVulkan::resumo() const {
@@ -234,7 +234,7 @@ std::uint32_t DispositivoVulkan::tipo_de_memoria(std::uint32_t bits,
                                                  std::uint32_t exigidas) const
     noexcept {
   VkPhysicalDeviceMemoryProperties props{};
-  vkGetPhysicalDeviceMemoryProperties(static_cast<VkPhysicalDevice>(fisico_),
+  vkGetPhysicalDeviceMemoryProperties(deVoid<VkPhysicalDevice>(fisico_),
                                       &props);
   for (std::uint32_t i = 0; i < props.memoryTypeCount; ++i) {
     if ((bits & (1U << i)) == 0) continue;
@@ -259,7 +259,7 @@ SondaVulkan sondar_vulkan() noexcept {
     s.tem_swapchain = true;
     s.nome_do_dispositivo = d.nome();
 
-    const auto fisico = static_cast<VkPhysicalDevice>(d.fisico());
+    const auto fisico = deVoid<VkPhysicalDevice>(d.fisico());
     VkPhysicalDeviceProperties props{};
     vkGetPhysicalDeviceProperties(fisico, &props);
     s.versao_do_driver = props.driverVersion;
@@ -268,7 +268,7 @@ SondaVulkan sondar_vulkan() noexcept {
     s.textura_maxima = props.limits.maxImageDimension2D;
 
     std::uint32_t quantos = 0;
-    if (vkEnumeratePhysicalDevices(static_cast<VkInstance>(d.instancia()),
+    if (vkEnumeratePhysicalDevices(deVoid<VkInstance>(d.instancia()),
                                    &quantos, nullptr) == VK_SUCCESS) {
       s.dispositivos_encontrados = quantos;
     }

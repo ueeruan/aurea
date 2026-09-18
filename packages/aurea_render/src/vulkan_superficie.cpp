@@ -144,7 +144,7 @@ std::string SuperficieVulkan::anexar(void* janela, std::uint32_t largura,
   desanexar();
 
   try {
-    const auto instancia = static_cast<VkInstance>(dispositivo_.instancia());
+    const auto instancia = deVoid<VkInstance>(dispositivo_.instancia());
     VkAndroidSurfaceCreateInfoKHR info{};
     info.sType = VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR;
     info.window = static_cast<ANativeWindow*>(janela);
@@ -161,7 +161,7 @@ std::string SuperficieVulkan::anexar(void* janela, std::uint32_t largura,
       estado_ = EstadoDaSuperficie::erro;
       return motivo_;
     }
-    superficie_ = superficie;
+    superficie_ = paraVoid(superficie);
     largura_ = largura;
     altura_ = altura;
 
@@ -188,24 +188,24 @@ void SuperficieVulkan::desanexar() noexcept {
   // some junto com a superficie, nao com a swapchain.
   destruir_origem();
   if (superficie_ != nullptr && dispositivo_.viva()) {
-    vkDestroySurfaceKHR(static_cast<VkInstance>(dispositivo_.instancia()),
-                        static_cast<VkSurfaceKHR>(superficie_), nullptr);
+    vkDestroySurfaceKHR(deVoid<VkInstance>(dispositivo_.instancia()),
+                        deVoid<VkSurfaceKHR>(superficie_), nullptr);
   }
-  superficie_ = nullptr;
+  superficie_ = paraVoid(nullptr);
   estado_ = EstadoDaSuperficie::sem_superficie;
   precisa_refazer_ = false;
 }
 
 void SuperficieVulkan::destruir_swapchain() noexcept {
   if (!dispositivo_.viva()) {
-    swapchain_ = nullptr;
+    swapchain_ = paraVoid(nullptr);
     imagens_ = nullptr;
     vistas_ = nullptr;
-    pool_ = nullptr;
+    pool_ = paraVoid(nullptr);
     comandos_ = nullptr;
     return;
   }
-  const auto dev = static_cast<VkDevice>(dispositivo_.dispositivo());
+  const auto dev = deVoid<VkDevice>(dispositivo_.dispositivo());
 
   // ESPERA A GPU PARAR ANTES DE SOLTAR QUALQUER COISA. Sem isto, um
   // `vkDestroySwapchainKHR` pode cair no meio de um quadro que a fila
@@ -220,8 +220,8 @@ void SuperficieVulkan::destruir_swapchain() noexcept {
     comandos_ = nullptr;
   }
   if (pool_ != nullptr) {
-    vkDestroyCommandPool(dev, static_cast<VkCommandPool>(pool_), nullptr);
-    pool_ = nullptr;
+    vkDestroyCommandPool(dev, deVoid<VkCommandPool>(pool_), nullptr);
+    pool_ = paraVoid(nullptr);
   }
   // AS VISTAS SAO NOSSAS; AS IMAGENS NAO. A imagem pertence a swapchain —
   // destruir a mao e o erro classico que so aparece no fechamento do app.
@@ -236,29 +236,29 @@ void SuperficieVulkan::destruir_swapchain() noexcept {
     imagens_ = nullptr;
   }
   if (swapchain_ != nullptr) {
-    vkDestroySwapchainKHR(dev, static_cast<VkSwapchainKHR>(swapchain_),
+    vkDestroySwapchainKHR(dev, deVoid<VkSwapchainKHR>(swapchain_),
                           nullptr);
-    swapchain_ = nullptr;
+    swapchain_ = paraVoid(nullptr);
   }
 }
 
 void SuperficieVulkan::destruir_sincronizacao() noexcept {
   if (!dispositivo_.viva()) return;
-  const auto dev = static_cast<VkDevice>(dispositivo_.dispositivo());
+  const auto dev = deVoid<VkDevice>(dispositivo_.dispositivo());
   if (cerca_ != nullptr) {
-    vkDestroyFence(dev, static_cast<VkFence>(cerca_), nullptr);
-    cerca_ = nullptr;
+    vkDestroyFence(dev, deVoid<VkFence>(cerca_), nullptr);
+    cerca_ = paraVoid(nullptr);
   }
   for (void** sem : {&semaforo_pronto_, &semaforo_imagem_}) {
     if (*sem != nullptr) {
-      vkDestroySemaphore(dev, static_cast<VkSemaphore>(*sem), nullptr);
+      vkDestroySemaphore(dev, deVoid<VkSemaphore>(*sem), nullptr);
       *sem = nullptr;
     }
   }
 }
 
 std::string SuperficieVulkan::criar_sincronizacao() noexcept {
-  const auto dev = static_cast<VkDevice>(dispositivo_.dispositivo());
+  const auto dev = deVoid<VkDevice>(dispositivo_.dispositivo());
   VkSemaphoreCreateInfo s{};
   s.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
   VkFenceCreateInfo f{};
@@ -279,9 +279,9 @@ std::string SuperficieVulkan::criar_sincronizacao() noexcept {
     if (cerca != VK_NULL_HANDLE) vkDestroyFence(dev, cerca, nullptr);
     return "sincronizacao recusada";
   }
-  semaforo_imagem_ = img;
-  semaforo_pronto_ = pronto;
-  cerca_ = cerca;
+  semaforo_imagem_ = paraVoid(img);
+  semaforo_pronto_ = paraVoid(pronto);
+  cerca_ = paraVoid(cerca);
   return {};
 }
 
@@ -301,8 +301,8 @@ bool SuperficieVulkan::tamanho_mudou() const noexcept {
   if (superficie_ == nullptr || !dispositivo_.viva()) return false;
   VkSurfaceCapabilitiesKHR capacidades{};
   if (vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
-          static_cast<VkPhysicalDevice>(dispositivo_.fisico()),
-          static_cast<VkSurfaceKHR>(superficie_), &capacidades) != VK_SUCCESS) {
+          deVoid<VkPhysicalDevice>(dispositivo_.fisico()),
+          deVoid<VkSurfaceKHR>(superficie_), &capacidades) != VK_SUCCESS) {
     return false;
   }
   // `0xFFFFFFFF` e "escolha voce": o tamanho e o que esta la, e nao ha
@@ -325,9 +325,9 @@ std::string SuperficieVulkan::garantir_swapchain() noexcept {
 }
 
 std::string SuperficieVulkan::criar_swapchain() noexcept {
-  const auto dev = static_cast<VkDevice>(dispositivo_.dispositivo());
-  const auto fisico = static_cast<VkPhysicalDevice>(dispositivo_.fisico());
-  const auto superficie = static_cast<VkSurfaceKHR>(superficie_);
+  const auto dev = deVoid<VkDevice>(dispositivo_.dispositivo());
+  const auto fisico = deVoid<VkPhysicalDevice>(dispositivo_.fisico());
+  const auto superficie = deVoid<VkSurfaceKHR>(superficie_);
 
   VkSurfaceCapabilitiesKHR capacidades{};
   if (vkGetPhysicalDeviceSurfaceCapabilitiesKHR(fisico, superficie,
@@ -441,7 +441,7 @@ std::string SuperficieVulkan::criar_swapchain() noexcept {
                   std::to_string(static_cast<int>(r)) + ")");
     return motivo_;
   }
-  swapchain_ = swapchain;
+  swapchain_ = paraVoid(swapchain);
   stats_.recriacoes++;
   formato_ = escolhido.format;
   stats_.formato = formato_;
@@ -513,7 +513,7 @@ std::string SuperficieVulkan::criar_swapchain() noexcept {
     anotar_motivo("vkCreateCommandPool falhou");
     return motivo_;
   }
-  pool_ = pool;
+  pool_ = paraVoid(pool);
 
   auto* comandos = new std::vector<VkCommandBuffer>(quantas, VK_NULL_HANDLE);
   VkCommandBufferAllocateInfo a{};
@@ -566,13 +566,13 @@ std::int32_t SuperficieVulkan::apresentar(std::uint32_t cor_argb) noexcept {
       return -1;
     }
   }
-  const auto dev = static_cast<VkDevice>(dispositivo_.dispositivo());
-  const auto fila = static_cast<VkQueue>(dispositivo_.fila());
+  const auto dev = deVoid<VkDevice>(dispositivo_.dispositivo());
+  const auto fila = deVoid<VkQueue>(dispositivo_.fila());
 
   try {
     // 1. ESPERA O QUADRO ANTERIOR. A cerca nasce sinalizada, entao o
     //    primeiro quadro nao espera por nada.
-    const VkFence cerca = static_cast<VkFence>(cerca_);
+    const VkFence cerca = deVoid<VkFence>(cerca_);
     vkWaitForFences(dev, 1, &cerca, VK_TRUE, UINT64_MAX);
 
     // 2. A IMAGEM. `OUT_OF_DATE` aqui e rotacao, resize ou a janela indo
@@ -580,8 +580,8 @@ std::int32_t SuperficieVulkan::apresentar(std::uint32_t cor_argb) noexcept {
     //    apresentar, e insistir daria erro em cascata.
     std::uint32_t indice = 0;
     const VkResult adquiriu = vkAcquireNextImageKHR(
-        dev, static_cast<VkSwapchainKHR>(swapchain_), UINT64_MAX,
-        static_cast<VkSemaphore>(semaforo_imagem_), VK_NULL_HANDLE, &indice);
+        dev, deVoid<VkSwapchainKHR>(swapchain_), UINT64_MAX,
+        deVoid<VkSemaphore>(semaforo_imagem_), VK_NULL_HANDLE, &indice);
     if (adquiriu == VK_ERROR_OUT_OF_DATE_KHR) {
       ++stats_.out_of_date;
       stats_.quadros_descartados++;
@@ -673,7 +673,7 @@ std::int32_t SuperficieVulkan::apresentar(std::uint32_t cor_argb) noexcept {
 
     VkSubmitInfo sub{};
     sub.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    const VkSemaphore esperar[] = {static_cast<VkSemaphore>(semaforo_imagem_)};
+    const VkSemaphore esperar[] = {deVoid<VkSemaphore>(semaforo_imagem_)};
     const VkPipelineStageFlags estagios[] = {
         VK_PIPELINE_STAGE_TRANSFER_BIT};
     sub.waitSemaphoreCount = 1;
@@ -681,7 +681,7 @@ std::int32_t SuperficieVulkan::apresentar(std::uint32_t cor_argb) noexcept {
     sub.pWaitDstStageMask = estagios;
     sub.commandBufferCount = 1;
     sub.pCommandBuffers = &cmd;
-    const VkSemaphore sinalizar[] = {static_cast<VkSemaphore>(semaforo_pronto_)};
+    const VkSemaphore sinalizar[] = {deVoid<VkSemaphore>(semaforo_pronto_)};
     sub.signalSemaphoreCount = 1;
     sub.pSignalSemaphores = sinalizar;
     if (vkQueueSubmit(fila, 1, &sub, cerca) != VK_SUCCESS) {
@@ -693,7 +693,7 @@ std::int32_t SuperficieVulkan::apresentar(std::uint32_t cor_argb) noexcept {
     ap.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     ap.waitSemaphoreCount = 1;
     ap.pWaitSemaphores = sinalizar;
-    const VkSwapchainKHR alvo = static_cast<VkSwapchainKHR>(swapchain_);
+    const VkSwapchainKHR alvo = deVoid<VkSwapchainKHR>(swapchain_);
     ap.swapchainCount = 1;
     ap.pSwapchains = &alvo;
     ap.pImageIndices = &indice;
@@ -758,7 +758,7 @@ std::string SuperficieVulkan::garantir_origem(std::uint32_t largura,
   }
   destruir_origem();
   if (!dispositivo_.viva()) return "dispositivo morto";
-  const auto dev = static_cast<VkDevice>(dispositivo_.dispositivo());
+  const auto dev = deVoid<VkDevice>(dispositivo_.dispositivo());
 
   // A IMAGEM DE ORIGEM, em RGBA8 linear: e o que o compositor escreve, e
   // nao ha conversao no meio do caminho — converter aqui custaria uma
@@ -838,10 +838,10 @@ std::string SuperficieVulkan::garantir_origem(std::uint32_t largura,
     return "nao consegui ligar o buffer de transferencia a memoria";
   }
 
-  origem_imagem_ = imagem;
-  origem_memoria_ = memoria;
-  origem_buffer_ = buffer;
-  origem_buffer_memoria_ = bmem;
+  origem_imagem_ = paraVoid(imagem);
+  origem_memoria_ = paraVoid(memoria);
+  origem_buffer_ = paraVoid(buffer);
+  origem_buffer_memoria_ = paraVoid(bmem);
   origem_largura_ = largura;
   origem_altura_ = altura;
   __android_log_print(ANDROID_LOG_INFO, kEtiqueta,
@@ -854,33 +854,33 @@ void SuperficieVulkan::destruir_origem() noexcept {
   origem_largura_ = 0;
   origem_altura_ = 0;
   if (!dispositivo_.viva()) {
-    origem_imagem_ = nullptr;
-    origem_memoria_ = nullptr;
-    origem_buffer_ = nullptr;
-    origem_buffer_memoria_ = nullptr;
+    origem_imagem_ = paraVoid(nullptr);
+    origem_memoria_ = paraVoid(nullptr);
+    origem_buffer_ = paraVoid(nullptr);
+    origem_buffer_memoria_ = paraVoid(nullptr);
     return;
   }
-  const auto dev = static_cast<VkDevice>(dispositivo_.dispositivo());
+  const auto dev = deVoid<VkDevice>(dispositivo_.dispositivo());
   // O BUFFER E A IMAGEM NAO PERTENCEM A SWAPCHAIN. E por isso que eles
   // sobrevivem a uma troca de tamanho de janela — e so sao soltos aqui,
   // ou quando o tamanho do QUADRO DO MOTOR muda. Confundir os dois donos e
   // o que deixa memoria de GPU presa depois de uma rotacao.
   if (origem_buffer_ != nullptr) {
-    vkDestroyBuffer(dev, static_cast<VkBuffer>(origem_buffer_), nullptr);
-    origem_buffer_ = nullptr;
+    vkDestroyBuffer(dev, deVoid<VkBuffer>(origem_buffer_), nullptr);
+    origem_buffer_ = paraVoid(nullptr);
   }
   if (origem_buffer_memoria_ != nullptr) {
-    vkFreeMemory(dev, static_cast<VkDeviceMemory>(origem_buffer_memoria_),
+    vkFreeMemory(dev, deVoid<VkDeviceMemory>(origem_buffer_memoria_),
                  nullptr);
-    origem_buffer_memoria_ = nullptr;
+    origem_buffer_memoria_ = paraVoid(nullptr);
   }
   if (origem_imagem_ != nullptr) {
-    vkDestroyImage(dev, static_cast<VkImage>(origem_imagem_), nullptr);
-    origem_imagem_ = nullptr;
+    vkDestroyImage(dev, deVoid<VkImage>(origem_imagem_), nullptr);
+    origem_imagem_ = paraVoid(nullptr);
   }
   if (origem_memoria_ != nullptr) {
-    vkFreeMemory(dev, static_cast<VkDeviceMemory>(origem_memoria_), nullptr);
-    origem_memoria_ = nullptr;
+    vkFreeMemory(dev, deVoid<VkDeviceMemory>(origem_memoria_), nullptr);
+    origem_memoria_ = paraVoid(nullptr);
   }
 }
 
@@ -908,17 +908,17 @@ std::int32_t SuperficieVulkan::apresentar_imagem(const std::uint8_t* rgba,
     return -11;
   }
 
-  const auto dev = static_cast<VkDevice>(dispositivo_.dispositivo());
-  const auto fila = static_cast<VkQueue>(dispositivo_.fila());
+  const auto dev = deVoid<VkDevice>(dispositivo_.dispositivo());
+  const auto fila = deVoid<VkQueue>(dispositivo_.fila());
 
   try {
-    const VkFence cerca = static_cast<VkFence>(cerca_);
+    const VkFence cerca = deVoid<VkFence>(cerca_);
     vkWaitForFences(dev, 1, &cerca, VK_TRUE, UINT64_MAX);
 
     std::uint32_t indice = 0;
     const VkResult adquiriu = vkAcquireNextImageKHR(
-        dev, static_cast<VkSwapchainKHR>(swapchain_), UINT64_MAX,
-        static_cast<VkSemaphore>(semaforo_imagem_), VK_NULL_HANDLE, &indice);
+        dev, deVoid<VkSwapchainKHR>(swapchain_), UINT64_MAX,
+        deVoid<VkSemaphore>(semaforo_imagem_), VK_NULL_HANDLE, &indice);
     if (adquiriu == VK_ERROR_OUT_OF_DATE_KHR) {
       ++stats_.out_of_date;
       stats_.quadros_descartados++;
@@ -951,13 +951,13 @@ std::int32_t SuperficieVulkan::apresentar_imagem(const std::uint8_t* rgba,
     // quadro.
     const VkDeviceSize bytes = static_cast<VkDeviceSize>(largura) * altura * 4U;
     void* destino = nullptr;
-    if (vkMapMemory(dev, static_cast<VkDeviceMemory>(origem_buffer_memoria_), 0,
+    if (vkMapMemory(dev, deVoid<VkDeviceMemory>(origem_buffer_memoria_), 0,
                     bytes, 0, &destino) != VK_SUCCESS) {
       ++stats_.falhas;
       return -12;
     }
     std::memcpy(destino, rgba, static_cast<std::size_t>(bytes));
-    vkUnmapMemory(dev, static_cast<VkDeviceMemory>(origem_buffer_memoria_));
+    vkUnmapMemory(dev, deVoid<VkDeviceMemory>(origem_buffer_memoria_));
 
     const VkCommandBuffer cmd = (*comandos)[indice];
     vkResetCommandBuffer(cmd, 0);
@@ -980,7 +980,7 @@ std::int32_t SuperficieVulkan::apresentar_imagem(const std::uint8_t* rgba,
     paraDestino.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     paraDestino.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     paraDestino.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    paraDestino.image = static_cast<VkImage>(origem_imagem_);
+    paraDestino.image = deVoid<VkImage>(origem_imagem_);
     paraDestino.subresourceRange = faixa;
     paraDestino.srcAccessMask = 0;
     paraDestino.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -1003,8 +1003,8 @@ std::int32_t SuperficieVulkan::apresentar_imagem(const std::uint8_t* rgba,
     regiao.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
     regiao.imageOffset = {0, 0, 0};
     regiao.imageExtent = {largura, altura, 1};
-    vkCmdCopyBufferToImage(cmd, static_cast<VkBuffer>(origem_buffer_),
-                           static_cast<VkImage>(origem_imagem_),
+    vkCmdCopyBufferToImage(cmd, deVoid<VkBuffer>(origem_buffer_),
+                           deVoid<VkImage>(origem_imagem_),
                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &regiao);
 
     // A ORIGEM PASSA A SER FONTE. Sem esta barreira o blit pode ler antes
@@ -1031,7 +1031,7 @@ std::int32_t SuperficieVulkan::apresentar_imagem(const std::uint8_t* rgba,
     blit.dstOffsets[0] = {0, 0, 0};
     blit.dstOffsets[1] = {static_cast<std::int32_t>(largura_),
                           static_cast<std::int32_t>(altura_), 1};
-    vkCmdBlitImage(cmd, static_cast<VkImage>(origem_imagem_),
+    vkCmdBlitImage(cmd, deVoid<VkImage>(origem_imagem_),
                    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, (*imagens)[indice],
                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit,
                    VK_FILTER_LINEAR);
@@ -1053,7 +1053,7 @@ std::int32_t SuperficieVulkan::apresentar_imagem(const std::uint8_t* rgba,
 
     VkSubmitInfo sub{};
     sub.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    const VkSemaphore esperar[] = {static_cast<VkSemaphore>(semaforo_imagem_)};
+    const VkSemaphore esperar[] = {deVoid<VkSemaphore>(semaforo_imagem_)};
     const VkPipelineStageFlags estagios[] = {VK_PIPELINE_STAGE_TRANSFER_BIT};
     sub.waitSemaphoreCount = 1;
     sub.pWaitSemaphores = esperar;
@@ -1061,7 +1061,7 @@ std::int32_t SuperficieVulkan::apresentar_imagem(const std::uint8_t* rgba,
     sub.commandBufferCount = 1;
     sub.pCommandBuffers = &cmd;
     const VkSemaphore sinalizar[] = {
-        static_cast<VkSemaphore>(semaforo_pronto_)};
+        deVoid<VkSemaphore>(semaforo_pronto_)};
     sub.signalSemaphoreCount = 1;
     sub.pSignalSemaphores = sinalizar;
     if (vkQueueSubmit(fila, 1, &sub, cerca) != VK_SUCCESS) {
@@ -1073,7 +1073,7 @@ std::int32_t SuperficieVulkan::apresentar_imagem(const std::uint8_t* rgba,
     ap.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     ap.waitSemaphoreCount = 1;
     ap.pWaitSemaphores = sinalizar;
-    const VkSwapchainKHR alvo = static_cast<VkSwapchainKHR>(swapchain_);
+    const VkSwapchainKHR alvo = deVoid<VkSwapchainKHR>(swapchain_);
     ap.swapchainCount = 1;
     ap.pSwapchains = &alvo;
     ap.pImageIndices = &indice;

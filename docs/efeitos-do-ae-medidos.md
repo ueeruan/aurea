@@ -141,24 +141,83 @@ deslocado nao compoe" era falso; o motor nunca teve esse defeito.
 testes, com leitura de pixel do quadro montado). O mecanismo e a arvore
 de widgets, que era o primeiro que eu tinha descartado.
 
-## TimeSlice e TimeWarpRGB — bloqueados por arquitetura
+## TimeSlice e TimeWarpRGB — o bloqueio era falso
 
 Os dois são **temporais**: precisam de quadros vizinhos. O `S_TimeSlice`
 mostra um instante por faixa horizontal; o `S_TimeWarpRGB` desloca R, G e
-B no tempo. O pipeline entrega **um quadro** ao efeito
-(`_applyEffects(effects, child, local)`).
+B no tempo.
 
-Não é shader novo em cima do que existe: é uma segunda fonte de imagem, com
-cache de quadros, e um teto de custo por quadro — a mesma conversa do
-"puxar quadro em tela cheia por quadro" que já congelou a camada neste
-projeto.
+O bloqueio era falso. O que faltava não é o pipeline: é que o compositor
+**já sabe montar a camada noutro instante** — `_emOutroTempo<T>()` em
+`preview_stage.dart` monta a mesma camada em qualquer tempo do projeto, e é
+por isso que o TimeSlice já está implementado (`time_slice.dart` + a
+chamada em `preview_stage.dart`) e funciona. O TimeWarpRGB é o mesmo
+caminho, três vezes, uma por canal: `ColorFilter.matrix` com uma matriz que
+zera dois canais, um por instante, os três somados.
 
----
+O custo é que cada instante é um render a mais da camada. Fica no mesmo
+teto que o TimeSlice já respeita.
 
-## Light Sweep e Page Curl — a bancada estava errada
+## Light Sweep — FEITO (18/09)
 
-Os dois renders saíram **chapados** porque usei um sólido liso de 48×48
-como fonte. Nenhum dos dois tem o que fazer com superfície uniforme: o
-Light Sweep precisa de uma faixa atravessando, e o Page Turn precisa da
-dobra cruzando a camada. Refazer com uma fonte que **preenche o quadro e
-tem conteúdo** (um gradiente com formas, por exemplo).
+Refeito com uma fonte que **preenche o quadro e tem conteúdo** (gradiente
+de canto a canto com dois quadrados), quatro variantes em
+`build/qa/ae-novos/R3_ls_*.png`. O render anterior tinha saído chapado
+porque a fonte era um sólido liso de 48×48.
+
+O que a medição fixou (`tool/medir_luz_e_dobra.py`):
+
+* **a luz soma um valor absoluto.** O mesmo `+63` aparece sobre um cinza
+  102 e sobre um cinza 146 — não é fator da cor de origem;
+* **o valor somado é `255 × Intensidade/100`** (25% → 63; 60% → 153, que o
+  corte em 255 comeu até 155 no pixel mais claro);
+* **a cor entra por inteiro**: o delta medido é R+63 G+61 B+59, que é o
+  branco quente padrão do AE (1 / 0,9804 / 0,9412) vezes 63;
+* **a faixa é uma reta**, não uma mancha: com a direção em 0 a luz é a
+  mesma em toda a altura do quadro;
+* **a normal é a própria direção** — o ajuste do ângulo devolveu −29,5°
+  para uma Direção de −30°, ou seja, a faixa corre perpendicular à direção;
+* **o perfil é quadrático**, `(1 − d/semi)²`, com a semi-extensão em
+  **2 vezes a Largura** e o pico em `255 × Intensidade`. Ajuste sobre 22
+  mil pixels de dois renders: pico 63,4 e 62,6 (teórico 63,75), semi 98,5
+  e 101,5 px com Largura 50, erro médio 0,6 e 2,1 níveis. Reta, cosseno,
+  gaussiana e smoothstep erram de 2 a 7 vezes mais — a reta que estava no
+  shader caía rápido demais no meio e devagar demais na ponta.
+
+Ficha: `cc_light_sweep`, "Varredura de luz", Light, com Centro, Direção,
+Largura, Intensidade e Recepção. 10 testes em `test/luz_na_faixa_test.dart`.
+
+O realce de **borda** do CC não foi reproduzido: nos quatro renders não
+sobrou degrau nenhum que separe a borda da faixa.
+
+**Armadilha da bancada:** os quatro renders trazem um borrão claro nas ~20
+primeiras linhas (pico +224, sempre em x≈50, em todos os quatro) que não
+acompanha parâmetro nenhum do efeito. Não é da faixa — é da bancada. Quem
+for medir de novo comece em `y ≥ 22`.
+
+## Page Turn — FEITO (18/09)
+
+Mesma bancada nova (`build/qa/ae-novos/R3_pt_*.png`), quatro variantes de
+Fold Point, Direction e Fold Radius.
+
+O que a medição fixou:
+
+* o vinco é uma **reta** e o lado plano fica **intacto** — a mudança começa
+  exatamente na reta, sem um pixel alterado do outro lado;
+* o rolo **comprime** o desenho e o projeta de volta por cima do plano: no
+  render de `Fold(110,100)`, o canto do quadrado sai de (167,167) para
+  (163,140) — mais perto do vinco do que estava. É a assinatura de um
+  cilindro, e não de um deslocamento;
+* há **reflexo correndo pela dobra**, e o ponto mais claro do quadro não
+  está no meio dela.
+
+O modelo implementado é o do cilindro: um ponto a `s` da dobra aparece na
+tela a `raio × sin(s/raio)`, e a folha vira para o **verso** passando de
+90°. Ficha `cc_page_turn`, "Dobra de página", Distort, com Posição, Ângulo,
+Raio, Luz, Verso e Brilho. 16 testes em `test/dobra_de_pagina_test.dart`.
+
+**O que NÃO foi fixado:** a convenção dos parâmetros do AE. O `Fold Point`
+medido não cai no centro do vinco que o render mostra, e o `Fold Radius` de
+50 rende um raio de ~0,8 vez o parâmetro. Preferi entregar o modelo limpo,
+com a geometria certa e o raio em pixels, a enterrar um deslocamento mágico
+que só valeria para esta bancada.

@@ -174,6 +174,10 @@ String effectHelp(EffectType type) => switch (type) {
 
   EffectType.sombraProjetada => 'Copia o alfa da camada, pinta essa silhueta com a cor escolhida, desfoca e joga para o lado oposto ao da luz. Não é a sombra de uma caixa: é a sombra da forma, então um recorte vazado projeta sombra vazada. A camada abre para fora para a sombra caber.',
 
+  EffectType.lightSweep => 'Passa um facho reto de luz pela camada e SOMA luz ao que estiver embaixo. Não é um brilho no meio: é uma faixa que atravessa o quadro inteiro, inclusive o que for transparente. A intensidade é absoluta — 25% soma 25% de branco sobre qualquer cor —, e o perfil da faixa é reto, do centro até 1,8 vez a Largura. É o reflexo correndo num logo e o clarão que varre a cena.',
+
+  EffectType.dobraDePagina => 'Levanta um lado da camada e enrola esse lado num cilindro, como quem vira a folha de um livro. O lado de lá do vinco continua plano e intacto; o lado de cá sobe, curva, comprime o conteúdo e projeta de volta por cima — e o que passou do topo do rolo deixa de cobrir. O Raio é o raio do rolo em pixels: pequeno faz um canto dobrado, grande faz meia folha virando. A Direção da luz é o que dá o reflexo correndo pela dobra.',
+
   EffectType.timeSlice => 'Divide o quadro em faixas e cada faixa mostra a camada num instante diferente. Escada imita o S_TimeSlice; linear com ease out vira a transição de faixas dos edits. Numa camada de ajuste, fatia tudo que está embaixo.',
   EffectType.posterizeTime => 'Faz a camada inteira andar em degraus de N quadros por segundo: 12 para o visual de anime, 8 para stop motion, 4 para travado. Numa camada de ajuste, quantiza tudo que está embaixo.',
   EffectType.flash => 'Clarão de um ou poucos quadros na batida: branco, somar, tela, exposição ou negativo. Segura N quadros e cai em M; o gatilho repete a cada N quadros ou dispara ao acaso. Evite flashes rápidos em conteúdo sensível.',
@@ -193,7 +197,6 @@ String effectHelp(EffectType type) => switch (type) {
   EffectType.mathOps => 'Combina a camada (A) com uma fonte B numa operação de pixel: somar, subtrair, multiplicar, tela, média, sobrepor, mínimo, máximo ou diferença. Luzes escala, sombras desloca os escuros e saturação ajusta A, B e o resultado. A máscara de luma limita onde o resultado aparece. Precisa da GPU.',
   EffectType.sSharpen => 'Afia o detalhe em duas escalas sem estourar as bordas que já são fortes. Limiar alto afia menos; Nitidez da cor afia também as bordas coloridas.',
   EffectType.looks => 'Um look de cinema pronto sobre a camada, com a força que você quiser. Use numa camada de ajuste para colorir o edit inteiro.',
-  EffectType.lightSweep => 'Uma faixa de luz atravessa a camada. Anime a Posição com dois keyframes para o brilho passar uma vez; ângulo e largura moldam a faixa. Clássico para logos e texto.',
   EffectType.saber => 'Núcleo branco com aura colorida a partir da própria silhueta da camada — texto e formas viram lâmina de energia. Matiz escolhe a cor; raio espalha; núcleo controla o miolo branco.',
   EffectType.lensBlur => 'Desfoque de lente: além de borrar, estoura os pontos claros como bokeh. Limiar decide o que conta como realce; brilho controla o estouro.',
   EffectType.smear =>

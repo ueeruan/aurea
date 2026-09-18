@@ -128,6 +128,8 @@ flutter:
     - shaders/tv_damage.frag
     - shaders/pixel_sort.frag
     - shaders/auto_paint.frag
+    - shaders/luz_na_faixa.frag
+    - shaders/dobra_de_pagina.frag
 
   assets:
     - assets/ai/

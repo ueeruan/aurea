@@ -16,6 +16,8 @@ import 'tv_damage.dart';
 import 'pixel_sort_sapphire.dart';
 import 'auto_paint.dart';
 import 'preenchimento.dart';
+import 'dobra_de_pagina.dart';
+import 'luz_na_faixa.dart';
 import 'sombra_projetada.dart';
 import 'keyframe.dart';
 
@@ -181,6 +183,7 @@ enum EffectType {
   // salvo abrir com outro efeito.
   preenchimento,
   sombraProjetada,
+  dobraDePagina,
 }
 
 /// A ORDEM DO ENUM ANTES DE O TIME REMAP SAIR (17/09).
@@ -572,6 +575,8 @@ const effectSpecs = <EffectType, EffectSpec>{
   ...efeitosAutoPaint,
   ...efeitosPreenchimento,
   ...efeitosSombraProjetada,
+  ...efeitosLuzNaFaixa,
+  ...efeitosDobraDePagina,
   ...efeitosLuzEDiversos,
   ...efeitosMotionTile,
 };

@@ -37,6 +37,8 @@ import '../../domain/fx.dart';
 import '../../domain/oscillate.dart';
 import 'motion_tile_pass.dart';
 import '../../domain/sombra_projetada.dart';
+import 'dobra_de_pagina_pass.dart';
+import 'luz_na_faixa_pass.dart';
 import 'sombra_projetada_pass.dart';
 import 'repeticao_pass.dart';
 import '../../domain/gear.dart';
@@ -6414,6 +6416,26 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
             );
           }
 
+        case EffectType.lightSweep:
+          // A VARREDURA DE LUZ E UM SHADER DE UMA PASSADA: cada pixel
+          // calcula a propria luz, sem vizinhanca. Nao ha regiao para
+          // expandir nem foto da camada — so a camada, uma vez.
+          out = LuzNaFaixaPass(
+            effect: effect,
+            time: local,
+            child: out,
+          );
+
+        case EffectType.dobraDePagina:
+          // A DOBRA NAO CRESCE: ela so tira. O lado plano fica intacto e o
+          // que passou do topo do rolo vira transparente, entao a caixa da
+          // camada continua a mesma — sem regiao extra, sem segunda copia.
+          out = DobraDePaginaPass(
+            effect: effect,
+            time: local,
+            child: out,
+          );
+
         case EffectType.ccSplit:
           final sp = effect.paramAt('divisao', local);
           if (sp.abs() > 0.5) {
@@ -6611,59 +6633,6 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
           }
 
         // --------------------------- lote AE do dono (15/09/2026)
-        case EffectType.lightSweep:
-          final inten = effect.paramAt('intensidade', local).clamp(0.0, 3.0);
-          if (inten > 0.02) {
-            final posicao = effect.paramAt('posicao', local);
-            final anguloVar = effect.paramAt('angulo', local) * math.pi / 180;
-            final larguraFaixa = effect
-                .paramAt('largura', local)
-                .clamp(0.02, 0.6);
-            final alfaFaixa = (0.55 * inten).clamp(0.0, 1.0);
-            // A SILHUETA BRANCA da camada: a luz so existe onde a camada
-            // existe — e o que faz parecer varredura NELA, e nao um
-            // retangulo passando por cima.
-            final silhueta = ColorFiltered(
-              colorFilter: const ColorFilter.matrix(<double>[
-                0, 0, 0, 0, 255, //
-                0, 0, 0, 0, 255, //
-                0, 0, 0, 0, 255, //
-                0, 0, 0, 1, 0,
-              ]),
-              child: out,
-            );
-            final dir = Offset(math.cos(anguloVar), math.sin(anguloVar));
-            final faixa = ShaderMask(
-              shaderCallback: (rect) {
-                final c = rect.center;
-                final alcance = rect.longestSide;
-                final centroDaFaixa =
-                    c + dir * ((posicao - 0.5) * 1.5 * alcance);
-                final metade = alcance * larguraFaixa;
-                return ui.Gradient.linear(
-                  centroDaFaixa - dir * metade,
-                  centroDaFaixa + dir * metade,
-                  [
-                    const Color(0x00FFFFFF),
-                    Colors.white.withValues(alpha: alfaFaixa),
-                    Colors.white.withValues(alpha: alfaFaixa),
-                    const Color(0x00FFFFFF),
-                  ],
-                  const [0.0, 0.38, 0.62, 1.0],
-                );
-              },
-              blendMode: BlendMode.srcIn,
-              child: silhueta,
-            );
-            out = Stack(
-              clipBehavior: Clip.none,
-              children: [
-                out,
-                BlendMask(blendMode: BlendMode.plus, margem: 4, child: faixa),
-              ],
-            );
-          }
-
         case EffectType.saber:
           final intenSabre = effect
               .paramAt('intensidade', local)

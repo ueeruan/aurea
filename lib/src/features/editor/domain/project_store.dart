@@ -13,7 +13,6 @@ import 'aprimoramento_ia.dart';
 import 'camera3d.dart';
 import 'caption.dart';
 import 'caption_highlight.dart';
-import 'cut.dart';
 import 'desenho_livre.dart';
 import 'effect.dart';
 import 'element3d.dart';
@@ -1094,72 +1093,18 @@ CaptionHighlightStyle _asHighlight(Object? raw) {
   );
 }
 
-Map<String, dynamic> _transition(ClipTransition t) => {
-  'out': t.outgoingLayerId,
-  'type': t.type.name,
-  'dur': t.duration.inMicroseconds,
-  'align': t.alignment.name,
-  'curve': _easing(t.curve),
-  if (!t.crossfadeAudio) 'audio': false,
-  if (t.freezeEdges) 'freeze': true,
-  if (t.rippleLayerIds.isNotEmpty) 'ripple': t.rippleLayerIds,
-  if (t.effect != null) 'effect': _effect(t.effect!),
-  'amount': _ad(t.effectAmount),
-};
-
-ClipTransitionType _transitionType(Object? raw) {
-  final name = raw as String?;
-  for (final type in ClipTransitionType.values) {
-    if (type.name == name) return type;
-  }
-  return ClipTransitionType.dissolve;
-}
-
-TransitionAlignment _transitionAlignment(Object? raw) {
-  final name = raw as String?;
-  for (final alignment in TransitionAlignment.values) {
-    if (alignment.name == name) return alignment;
-  }
-  return TransitionAlignment.center;
-}
-
-/// O efeito de uma transicao: nulo quando o tipo saiu do catalogo ou o
-/// item esta ilegivel. A transicao continua existindo sem ele — cai no
-/// desenho padrao, que e melhor do que perder o clipe.
-EffectInstance? _asEffectDaTransicao(Object? bruto) {
-  if (bruto is! Map) return null;
-  try {
-    return _asEffect(bruto.cast<String, dynamic>());
-  } catch (_) {
-    return null;
-  }
-}
-
-ClipTransition? _asTransition(Object? raw) {
-  if (raw is! Map) return null;
-  final m = raw.cast<String, dynamic>();
-  return ClipTransition(
-    outgoingLayerId: m['out'] as String,
-    type: _transitionType(m['type']),
-    duration: Duration(microseconds: (m['dur'] as num?)?.toInt() ?? 0),
-    alignment: _transitionAlignment(m['align']),
-    curve: m['curve'] == null
-        ? Easing.easeInOut
-        : _asEasing((m['curve'] as Map).cast<String, dynamic>()),
-    crossfadeAudio: m['audio'] as bool? ?? true,
-    freezeEdges: m['freeze'] as bool? ?? false,
-    rippleLayerIds: [
-      for (final id in (m['ripple'] as List?) ?? const []) id as String,
-    ],
-    // O EFEITO DA TRANSICAO, com a mesma tolerancia dos efeitos de
-    // camada. Sem isto, uma transicao apontando para um efeito que saiu do
-    // catalogo lancava AQUI — dentro de `layerFromJson` —, o `catch` de
-    // camada engolia e a CAMADA INTEIRA ia embora junto com o clipe. O
-    // aviso certo e "a transicao perdeu o efeito", nao "o clipe sumiu".
-    effect: _asEffectDaTransicao(m['effect']),
-    effectAmount: m['amount'] == null ? null : _asAd(m['amount']),
-  );
-}
+// AS TRANSICOES DE CLIPE FORAM REMOVIDAS DO PRODUTO (17/09).
+//
+// Nao ha mais escrita: o campo `transitionIn` nao existe na camada. E nao ha
+// mais leitura: o carregador simplesmente IGNORA a chave, porque o projeto
+// antigo continua sendo lido campo a campo e uma chave desconhecida nunca
+// chega a lugar nenhum. Era o comportamento seguro que ja existia para
+// efeito removido do catalogo, e vale igual aqui.
+//
+// O que NAO pode acontecer, e o teste de projeto antigo cobre: a chave
+// sobrar em algum ponto do arquivo e derrubar o carregamento. O `catch` de
+// camada engoliria a excecao e a CAMADA INTEIRA iria embora junto. Meio
+// segundo de transicao nao vale um clipe.
 
 Map<String, dynamic> _textAnim(TextAnim a) => {
   'id': a.id,
@@ -1293,7 +1238,6 @@ Map<String, dynamic> layerToJson(Layer l) {
     'blend': l.blendMode.index,
     // So sai no arquivo quando a camada usa um modo proprio.
     if (l.customBlend != null) 'blendX': l.customBlend!.index,
-    if (l.transitionIn != null) 'transitionIn': _transition(l.transitionIn!),
     'is3D': l.is3D,
     'z': _ad(l.positionZ),
     'effects': [for (final e in l.effects) _effect(e)],
@@ -2284,7 +2228,6 @@ Layer layerFromJson(Map<String, dynamic> m) {
         masks: masks,
         matteMode: matte,
         matteSourceId: matteSrc,
-        transitionIn: _asTransition(m['transitionIn']),
       );
     case 'image':
       return ImageLayer(
@@ -2317,7 +2260,6 @@ Layer layerFromJson(Map<String, dynamic> m) {
         masks: masks,
         matteMode: matte,
         matteSourceId: matteSrc,
-        transitionIn: _asTransition(m['transitionIn']),
       );
     case 'text':
       return TextLayer(
@@ -2363,7 +2305,6 @@ Layer layerFromJson(Map<String, dynamic> m) {
         masks: masks,
         matteMode: matte,
         matteSourceId: matteSrc,
-        transitionIn: _asTransition(m['transitionIn']),
       );
     case 'shape':
       return ShapeLayer(
@@ -2397,7 +2338,6 @@ Layer layerFromJson(Map<String, dynamic> m) {
         masks: masks,
         matteMode: matte,
         matteSourceId: matteSrc,
-        transitionIn: _asTransition(m['transitionIn']),
       );
     case 'group':
       return GroupLayer(
@@ -2442,7 +2382,6 @@ Layer layerFromJson(Map<String, dynamic> m) {
         masks: masks,
         matteMode: matte,
         matteSourceId: matteSrc,
-        transitionIn: _asTransition(m['transitionIn']),
       );
     case 'caption':
       return CaptionLayer(
@@ -2478,7 +2417,6 @@ Layer layerFromJson(Map<String, dynamic> m) {
         masks: masks,
         matteMode: matte,
         matteSourceId: matteSrc,
-        transitionIn: _asTransition(m['transitionIn']),
       );
     case 'audio':
       return AudioLayer(
@@ -2514,7 +2452,6 @@ Layer layerFromJson(Map<String, dynamic> m) {
         masks: masks,
         matteMode: matte,
         matteSourceId: matteSrc,
-        transitionIn: _asTransition(m['transitionIn']),
       );
     case 'adjust':
       return AdjustmentLayer(
@@ -2544,7 +2481,6 @@ Layer layerFromJson(Map<String, dynamic> m) {
         masks: masks,
         matteMode: matte,
         matteSourceId: matteSrc,
-        transitionIn: _asTransition(m['transitionIn']),
       );
     case 'camera':
       return CameraLayer(
@@ -2578,7 +2514,6 @@ Layer layerFromJson(Map<String, dynamic> m) {
         masks: masks,
         matteMode: matte,
         matteSourceId: matteSrc,
-        transitionIn: _asTransition(m['transitionIn']),
       );
     case 'null':
       return NullLayer(
@@ -2611,7 +2546,6 @@ Layer layerFromJson(Map<String, dynamic> m) {
         masks: masks,
         matteMode: matte,
         matteSourceId: matteSrc,
-        transitionIn: _asTransition(m['transitionIn']),
       );
     case 'particles':
       return ParticlesLayer(
@@ -2680,7 +2614,6 @@ Layer layerFromJson(Map<String, dynamic> m) {
         masks: masks,
         matteMode: matte,
         matteSourceId: matteSrc,
-        transitionIn: _asTransition(m['transitionIn']),
       );
     case 'scene3d':
       return Scene3DLayer(
@@ -2729,7 +2662,6 @@ Layer layerFromJson(Map<String, dynamic> m) {
         masks: masks,
         matteMode: matte,
         matteSourceId: matteSrc,
-        transitionIn: _asTransition(m['transitionIn']),
       );
     case 'el3d':
       return Element3DLayer(
@@ -2776,7 +2708,6 @@ Layer layerFromJson(Map<String, dynamic> m) {
         masks: masks,
         matteMode: matte,
         matteSourceId: matteSrc,
-        transitionIn: _asTransition(m['transitionIn']),
       );
     default:
       throw FormatException('Camada desconhecida: ${m['kind']}');

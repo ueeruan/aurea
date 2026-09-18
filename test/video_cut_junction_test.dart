@@ -10,7 +10,6 @@ import 'dart:ui';
 
 import 'package:aurea/src/features/editor/application/playback_controller.dart';
 import 'package:aurea/src/features/editor/application/video_layer_manager.dart';
-import 'package:aurea/src/features/editor/domain/cut.dart';
 import 'package:aurea/src/features/editor/domain/layer.dart';
 import 'package:flutter_test/flutter_test.dart';
 // Tests replace the native player underneath our video_player dependency.
@@ -107,7 +106,6 @@ VideoLayer _pedaco(
   String path = 'mesmo.mp4',
   double speed = 1,
   bool reverse = false,
-  ClipTransition? transitionIn,
 }) => VideoLayer(
   id: id,
   name: id,
@@ -117,7 +115,6 @@ VideoLayer _pedaco(
   sourceOffset: Duration(milliseconds: fonteMs),
   speed: speed,
   reverse: reverse,
-  transitionIn: transitionIn,
 );
 
 const _quadro = Duration(milliseconds: 33);
@@ -152,23 +149,6 @@ void main() {
       expect(chaves['e'], 'e');
       expect(chaves['f'], 'f');
       expect(chaves['g'], 'g');
-    });
-
-    test('transicao entre os pedacos exige dois tocadores', () {
-      final chaves = VideoLayerManager.trilhosContinuos([
-        _pedaco('a', 0, 5000, 0),
-        _pedaco(
-          'b',
-          5000,
-          9000,
-          5000,
-          transitionIn: ClipTransition(
-            duration: const Duration(milliseconds: 500),
-            outgoingLayerId: 'a',
-          ),
-        ),
-      ], caminho);
-      expect(chaves['b'], 'b');
     });
 
     test('duas copias coladas no mesmo ponto: so uma herda o tocador', () {

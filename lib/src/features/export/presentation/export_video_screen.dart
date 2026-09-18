@@ -564,7 +564,7 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
       final count = _contagem[l.id] ?? 0;
       if (dir == null || count == 0) continue;
 
-      final dentro = visibleForCut(exportLayers, l, t);
+      final dentro = l.activeAt(t);
       if (!dentro) {
         _quadroAtual.remove(l.id)?.dispose();
         continue;
@@ -589,7 +589,7 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
     final usados = <String>{};
     for (final outro in extras) {
       for (final l in videoLayers) {
-        if (!visibleForCut(exportLayers, l, outro)) continue;
+        if (!l.activeAt(outro)) continue;
         final idx = _indiceDoQuadro(l, outro, exportLayers);
         if (idx == null) continue;
         final chave = '${l.id}@$idx';
@@ -615,9 +615,7 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
   int? _indiceDoQuadro(VideoLayer l, Duration t, List<Layer> layers) {
     final count = _contagem[l.id] ?? 0;
     if (_pastas[l.id] == null || count == 0) return null;
-    final transition = transitionContextAt(layers, t);
-    final local = localTimeForCut(l, t, transition);
-    final source = videoAbsoluteSourceTimeAt(l, local);
+    final source = videoAbsoluteSourceTimeAt(l, l.localTime(t));
     final extractedFrom = _inicioDosQuadros[l.id] ?? l.sourceOffset;
     // A MESMA TAXA DA EXTRACAO: com interpolacao ligada ha mais quadros
     // no disco do que a composicao tem, e o indice segue a taxa em que

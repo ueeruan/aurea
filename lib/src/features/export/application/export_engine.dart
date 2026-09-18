@@ -14,7 +14,6 @@ import 'package:path_provider/path_provider.dart';
 
 import '../../editor/domain/ajuste_da_midia.dart';
 import '../../editor/domain/aprimoramento_ia.dart';
-import '../../editor/domain/cut.dart';
 import '../../editor/domain/cut_ops.dart';
 import '../../editor/domain/audio_mix.dart';
 import '../../editor/application/audio_render_service.dart';
@@ -156,7 +155,6 @@ class ExportEngine {
     // Velocidade diferente de 1 nao e copia: tem de renderizar.
     if (l.speed != 1.0) return null;
     if (l.reverse || l.speedBlur || hasTimeRemap(l)) return null;
-    if (l.transitionIn != null) return null;
     // Aprimoramento por IA redesenha cada quadro: copiar o arquivo pularia
     // o efeito em silencio.
     if (l.aprimorar) return null;
@@ -553,30 +551,10 @@ class ExportEngine {
   /// Trecho bruto necessario. A escolha de quadro fica para a funcao pura
   /// de Time Remap; extrair sem setpts cobre rampa, reverso e handles.
   (Duration, Duration) videoFrameRange(VideoLayer layer) {
-    var firstLocal = Duration.zero;
-    var lastLocal = layer.duration;
-    final incoming = layer.transitionIn;
-    if (incoming != null &&
-        incoming.enabled &&
-        videoAfter(project.layers, incoming.outgoingLayerId)?.id == layer.id) {
-      final w = incoming.windowAt(layer.startTime);
-      if (w.start < layer.startTime && !incoming.freezeEdges) {
-        firstLocal = w.start - layer.startTime;
-      }
-    }
-    for (final candidate in project.layers.whereType<VideoLayer>()) {
-      final transition = candidate.transitionIn;
-      if (transition?.outgoingLayerId != layer.id ||
-          transition == null ||
-          !transition.enabled ||
-          videoAfter(project.layers, layer.id)?.id != candidate.id) {
-        continue;
-      }
-      final w = transition.windowAt(candidate.startTime);
-      if (w.end > layer.endTime && !transition.freezeEdges) {
-        lastLocal = w.end - layer.startTime;
-      }
-    }
+    // Sem transicoes o trecho bruto e o do proprio clipe: o handle que
+    // uma juncao pedia antes nao existe mais.
+    final firstLocal = Duration.zero;
+    final lastLocal = layer.duration;
 
     Duration? lo;
     Duration? hi;
@@ -603,10 +581,8 @@ class ExportEngine {
         .toInt();
     for (var i = firstFrame; i <= lastFrame; i++) {
       final global = timeOfFrame(i);
-      if (!visibleForCut(project.layers, layer, global)) continue;
-      final transition = transitionContextAt(project.layers, global);
-      final local = localTimeForCut(layer, global, transition);
-      include(videoAbsoluteSourceTimeAt(layer, local));
+      if (!layer.activeAt(global)) continue;
+      include(videoAbsoluteSourceTimeAt(layer, layer.localTime(global)));
     }
     // Fallback para camadas menores que um quadro e inclui os limites
     // matematicos usados por handles fora da area visivel.
@@ -657,10 +633,8 @@ class ExportEngine {
   _audioRemapSegments(
     VideoLayer layer,
     Duration localStart,
-    Duration localEnd, {
-    bool freezeBefore = false,
-    bool freezeAfter = false,
-  }) {
+    Duration localEnd,
+  ) {
     if (localEnd <= localStart) return const [];
     final times = <Duration>{localStart, localEnd};
     final track = timeRemapTrackOf(layer);
@@ -679,12 +653,7 @@ class ExportEngine {
       );
     }
     final sorted = times.toList()..sort();
-    Duration sourceAt(Duration local) {
-      var value = local;
-      if (freezeBefore && value < Duration.zero) value = Duration.zero;
-      if (freezeAfter && value > layer.duration) value = layer.duration;
-      return videoAbsoluteSourceTimeAt(layer, value);
-    }
+    Duration sourceAt(Duration local) => videoAbsoluteSourceTimeAt(layer, local);
 
     return [
       for (var i = 0; i + 1 < sorted.length; i++)
@@ -784,49 +753,11 @@ class ExportEngine {
         ({Duration timelineDuration, Duration sourceStart, Duration sourceEnd})
       >?
       remapSegments;
-      ClipTransition? transitionIn;
-      ClipTransition? transitionOut;
       if (l is VideoLayer) {
-        final linkedIncoming = l.transitionIn;
-        transitionIn =
-            linkedIncoming != null &&
-                linkedIncoming.enabled &&
-                linkedIncoming.crossfadeAudio &&
-                videoAfter(
-                      project.layers,
-                      linkedIncoming.outgoingLayerId,
-                    )?.id ==
-                    l.id
-            ? linkedIncoming
-            : null;
-        if (transitionIn != null && transitionIn.enabled) {
-          final w = transitionIn.windowAt(l.startTime);
-          if (w.start < timelineStart) timelineStart = w.start;
-        }
-        for (final incoming in project.layers.whereType<VideoLayer>()) {
-          final candidate = incoming.transitionIn;
-          if (candidate?.outgoingLayerId == l.id &&
-              candidate!.crossfadeAudio &&
-              candidate.enabled &&
-              videoAfter(project.layers, l.id)?.id == incoming.id) {
-            transitionOut = candidate;
-            final w = candidate.windowAt(incoming.startTime);
-            if (w.end > timelineEnd) timelineEnd = w.end;
-            break;
-          }
-        }
-        var localStart = timelineStart - l.startTime;
-        var localEnd = timelineEnd - l.startTime;
-        final freezeBefore = transitionIn?.freezeEdges == true;
-        final freezeAfter = transitionOut?.freezeEdges == true;
-        if (hasTimeRemap(l) || l.reverse || freezeBefore || freezeAfter) {
-          remapSegments = _audioRemapSegments(
-            l,
-            localStart,
-            localEnd,
-            freezeBefore: freezeBefore,
-            freezeAfter: freezeAfter,
-          );
+        final localStart = timelineStart - l.startTime;
+        final localEnd = timelineEnd - l.startTime;
+        if (hasTimeRemap(l) || l.reverse) {
+          remapSegments = _audioRemapSegments(l, localStart, localEnd);
           if (remapSegments.isNotEmpty) {
             var lo = remapSegments.first.sourceStart;
             var hi = lo;
@@ -901,30 +832,6 @@ class ExportEngine {
           'afade=t=out:st=${st.toStringAsFixed(3)}'
           ':d=${d.toStringAsFixed(3)}:curve=qsin',
         );
-      }
-      if (transitionIn != null) {
-        final w = transitionIn.windowAt(l.startTime);
-        final st = (w.start - timelineStart).inMicroseconds / 1000000.0;
-        final d = w.duration.inMicroseconds / 1000000.0;
-        fades.add(
-          'afade=t=in:st=${st.toStringAsFixed(3)}'
-          ':d=${d.toStringAsFixed(3)}:curve=qsin',
-        );
-      }
-      if (transitionOut != null) {
-        VideoLayer? incoming;
-        for (final candidate in project.layers.whereType<VideoLayer>()) {
-          if (candidate.transitionIn == transitionOut) incoming = candidate;
-        }
-        if (incoming != null) {
-          final w = transitionOut.windowAt(incoming.startTime);
-          final st = (w.start - timelineStart).inMicroseconds / 1000000.0;
-          final d = w.duration.inMicroseconds / 1000000.0;
-          fades.add(
-            'afade=t=out:st=${st.toStringAsFixed(3)}'
-            ':d=${d.toStringAsFixed(3)}:curve=qsin',
-          );
-        }
       }
 
       final vel = switch (l) {

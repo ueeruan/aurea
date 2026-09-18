@@ -13,7 +13,6 @@ import '../../application/editor_controller.dart';
 import '../../application/playback_controller.dart';
 import '../../domain/layer.dart';
 import '../../domain/mask.dart';
-import '../../domain/cut.dart';
 import '../../domain/cut_ops.dart';
 import '../../domain/onda_no_clipe.dart';
 import '../../domain/video_project.dart' as proj;
@@ -26,7 +25,6 @@ import '../shell/layer_actions.dart' show menuDasMarcas;
 import 'am_colors.dart';
 import 'layer_look.dart';
 import 'clip_preview_painters.dart';
-import 'transition_sheet.dart';
 import '../../application/registro_de_travadas.dart';
 import '../../application/perfil3d.dart';
 
@@ -1456,7 +1454,7 @@ _AmBar(
   );
 }
 
-/// A BARRA de um pedaco: gestos, alcas, transicao, keyframes.
+/// A BARRA de um pedaco: gestos, alcas, keyframes.
 class _AmBar extends ConsumerStatefulWidget {
   const _AmBar({
     super.key,
@@ -1545,8 +1543,7 @@ class _AmBarState extends ConsumerState<_AmBar> {
   ///
   /// Os tratadores de FIM do arrasto so existem enquanto a condicao do
   /// build vale: `selected && !compact` para mover e para as alcas de
-  /// trim, `transition != null` para a transicao. Se a camada e
-  /// desselecionada, a timeline vira compacta ou a transicao some NO
+  /// trim. Se a camada e desselecionada ou a timeline vira compacta NO
   /// MEIO do arrasto, o fim nunca chega — e a timeline fica presa em
   /// "editando barra".
   ///
@@ -1798,8 +1795,6 @@ class _AmBarState extends ConsumerState<_AmBar> {
   Duration _dragStart0 = Duration.zero;
   Duration _trimStart0 = Duration.zero;
   double _trimAccumPx = 0;
-  Duration _transitionDuration0 = Duration.zero;
-  double _transitionAccumPx = 0;
 
   /// Ultimo alvo de snap: o tique haptico dispara UMA vez por encaixe.
   Duration? _lastSnapTarget;
@@ -2124,100 +2119,6 @@ Positioned(
             ),
           ),
             ),
-          ),
-          // A juncao e o botao da TRANSICAO. Toque longo preserva o gesto
-          // antigo de juntar novamente dois pedacos da mesma fonte.
-          Consumer(
-            builder: (context, ref, _) {
-              final ctrl = ref.read(editorControllerProvider.notifier);
-              if (!isTransitionLayer(layer) ||
-                  ctrl.clipAfter(layer.id) == null) {
-                return const SizedBox.shrink();
-              }
-              final transition = ctrl.transitionAfter(layer.id);
-              final x = left + (layer.duration.inMicroseconds / 1e6 * pps);
-              final markerWidth = transition == null ? 40.0 : 66.0;
-              return Positioned(
-                left: x - markerWidth / 2,
-                top: 0,
-                width: markerWidth,
-                height: _Alturas.barraDe(context),
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () => showTransitionSheet(context, ref, layer.id),
-                  onLongPress: ctrl.hasJoinableNeighbour(layer.id)
-                      ? () {
-                          if (ctrl.joinWithNeighbour(layer.id)) {
-                            AureaSnack.show(
-                              context,
-                              'Pedacos juntados',
-                              actionLabel: 'Desfazer',
-                              onAction: ctrl.undo,
-                            );
-                          }
-                        }
-                      : null,
-                  onHorizontalDragStart: transition == null
-                      ? null
-                      : (_) {
-                          _comecarArrasto();
-                          _transitionDuration0 = transition.duration;
-                          _transitionAccumPx = 0;
-                        },
-                  onHorizontalDragUpdate: transition == null
-                      ? null
-                      : (details) {
-                          _transitionAccumPx += details.delta.dx;
-                          final delta = _pxToDur(_transitionAccumPx);
-                          var duration = _transitionDuration0 + delta;
-                          if (duration < Duration.zero) {
-                            duration = Duration.zero;
-                          }
-                          if (duration > const Duration(milliseconds: 2500)) {
-                            duration = const Duration(milliseconds: 2500);
-                          }
-                          ctrl.setTransitionDuration(layer.id, duration);
-                        },
-                  onHorizontalDragEnd: transition == null
-                      ? null
-                      : (_) => _terminarArrasto(),
-                  onHorizontalDragCancel: transition == null
-                      ? null
-                      : _terminarArrasto,
-                  child: Center(
-                    child: Container(
-                      key: ValueKey('level5-transition-${layer.id}'),
-                      constraints: const BoxConstraints(minWidth: 4),
-                      height: _Alturas.barraDe(context) - 10,
-                      padding: transition == null
-                          ? EdgeInsets.zero
-                          : const EdgeInsets.symmetric(horizontal: 5),
-                      decoration: BoxDecoration(
-                        color: AmColors.accent.withValues(alpha: 0.85),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      alignment: Alignment.center,
-                      child: transition == null
-                          ? const Icon(
-                              CupertinoIcons.timer,
-                              size: 12,
-                              color: Colors.black,
-                            )
-                          : AppText(
-                              '${transition.type.shortLabel} '
-                              '${transition.duration.inMilliseconds}ms',
-                              maxLines: 1,
-                              style: const TextStyle(
-                                color: Colors.black,
-                                fontSize: 8,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                    ),
-                  ),
-                ),
-              );
-            },
           ),
           // JUNTAR a vista na juncao: dois pedacos do mesmo arquivo,
           // encostados, voltam a ser um clipe (alem do toque longo).

@@ -160,14 +160,12 @@ Layer _avancarFonte(Layer l, Duration quanto) => switch (l) {
       reverse: false,
       effects: v.effects,
       timeRemap: sliced.track,
-      clearTransitionIn: true,
     );
   }(),
   VideoLayer v => v.copyLayer(
     sourceOffset:
         v.sourceOffset +
         Duration(microseconds: (quanto.inMicroseconds * v.speed).round()),
-    clearTransitionIn: true,
   ),
   AudioLayer a => a.copyLayer(
     sourceOffset:

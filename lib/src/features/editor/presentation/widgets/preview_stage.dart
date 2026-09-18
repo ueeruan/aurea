@@ -28,7 +28,6 @@ import '../shell/cromo_editor.dart' show zoomDoPalcoProvider;
 import '../../domain/aparecer_sumir.dart';
 import '../../domain/ajuste_da_midia.dart';
 import '../../domain/keyframe.dart' show AnimatedDouble;
-import '../../domain/cut.dart';
 import '../../domain/cut_ops.dart';
 import '../../domain/effect.dart';
 import '../../domain/fx.dart';
@@ -1870,23 +1869,16 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
         if (matteEscondeAFonte(l.matteMode) && l.matteSourceId != null)
           l.matteSourceId!,
     };
-    final transitions = transitionContextsAt(layers, t);
     final paintOrder = [
       for (final layer in layers.reversed)
         if (layer is! AudioLayer &&
-            visibleForCut(layers, layer, t, contexts: transitions) &&
+            layer.activeAt(t) &&
             !matteSourceIds.contains(layer.id) &&
             // SOLO (PR-X26): havendo solo, so os solos renderizam.
             project.rendersInPreview(layer.id))
           layer,
     ];
-    final sorted = transitionPaintOrder(
-      depthSortPaintOrder(paintOrder, t, project: project),
-      transitions,
-    );
-    final transitionIds = {
-      for (final c in transitions) ...[c.outgoing.id, c.incoming.id],
-    };
+    final sorted = depthSortPaintOrder(paintOrder, t, project: project);
 
     // MUNDO 3D: solidos VIZINHOS na pilha viram uma cena so, com a
     // profundidade compartilhada — um entra dentro do outro, passa por
@@ -1899,13 +1891,10 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
       var i = 0;
       while (i < sorted.length) {
         final l = sorted[i];
-        if (l is Element3DLayer &&
-            !transitionIds.contains(l.id) &&
-            _mundoElegivel(project, l)) {
+        if (l is Element3DLayer && _mundoElegivel(project, l)) {
           var j = i + 1;
           while (j < sorted.length &&
               sorted[j] is Element3DLayer &&
-              !transitionIds.contains(sorted[j].id) &&
               _mundoElegivel(project, sorted[j] as Element3DLayer)) {
             j++;
           }
@@ -2157,15 +2146,6 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
         );
       }
 
-      // Uma camada curta pode participar de duas janelas ao mesmo tempo
-      // (entra de A e ja sai para C). Cada contexto precisa ser composto;
-      // usar o primeiro contexto global deixava uma das juncoes sem efeito.
-      for (final transition in transitions) {
-        if (transition.isParticipant(layer.id)) {
-          w = _transitionVisual(project, transition, layer, t, w);
-        }
-      }
-
       // MOTION BLUR DA COMPOSICAO (nivel 1): a camada e desenhada varias
       // vezes ao longo da JANELA DE EXPOSICAO e as copias sao mediadas.
       //
@@ -2242,102 +2222,6 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
       children.add(KeyedSubtree(key: ValueKey('camada-${layer.id}'), child: w));
     }
     return children;
-  }
-
-  Widget _transitionVisual(
-    VideoProject project,
-    ClipTransitionContext context,
-    Layer layer,
-    Duration globalTime,
-    Widget child,
-  ) {
-    final incoming = layer.id == context.incoming.id;
-    final p = context.progress;
-    final canvas = Stack(clipBehavior: Clip.none, children: [child]);
-    Widget out = Opacity(
-      opacity: context.opacityFor(layer.id).clamp(0.0, 1.0),
-      child: canvas,
-    );
-    switch (context.transition.type) {
-      case ClipTransitionType.dissolve:
-      case ClipTransitionType.black:
-        break;
-      case ClipTransitionType.wipe:
-        if (incoming) {
-          out = ClipRect(
-            child: Align(
-              alignment: Alignment.centerLeft,
-              widthFactor: p.clamp(0.001, 1.0),
-              child: out,
-            ),
-          );
-        }
-      case ClipTransitionType.zoomWarp:
-        final scale = incoming ? 0.82 + p * 0.18 : 1 + p * 0.2;
-        out = Transform.scale(scale: scale, child: out);
-      case ClipTransitionType.whip:
-        final distance = project.outputWidth.toDouble();
-        out = Transform.translate(
-          offset: Offset(incoming ? (1 - p) * distance : -p * distance, 0),
-          child: out,
-        );
-      case ClipTransitionType.glitch:
-        final phase = globalTime.inMicroseconds / 1000000.0;
-        final envelope = 1 - (2 * p - 1).abs();
-        final jump = math.sin(phase * 97.0) * envelope * 24;
-        out = Transform.translate(offset: Offset(jump, 0), child: out);
-      case ClipTransitionType.effect:
-        final effect = context.transition.effect;
-        if (effect != null) {
-          final amount = context.transition.amountAt(
-            globalTime,
-            context.incoming.startTime,
-          );
-          final local = globalTime - context.window.start;
-          if (essentialWarpTypes.contains(effect.type)) {
-            final reveal =
-                effect.type == EffectType.venetianBlinds ||
-                effect.type == EffectType.blockDissolve;
-            if (reveal && !incoming) {
-              out = canvas;
-            } else {
-              final params = {...effect.params};
-              if (effect.type == EffectType.offset) {
-                for (final key in ['center_x', 'center_y']) {
-                  params[key] = AnimatedDouble(
-                    .5 + (effect.paramAt(key, local) - .5) * amount,
-                  );
-                }
-              } else {
-                params['amount'] = AnimatedDouble(
-                  reveal ? 1 - p : effect.paramAt('amount', local) * amount,
-                );
-              }
-              out = Opacity(
-                opacity: reveal ? 1 : context.opacityFor(layer.id),
-                child: _applyEffects(
-                  [effect.copyWith(params: params)],
-                  canvas,
-                  local,
-                ),
-              );
-            }
-            break;
-          }
-          final effected = _applyEffects([effect], canvas, local);
-          out = Opacity(
-            opacity: context.opacityFor(layer.id).clamp(0.0, 1.0),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                canvas,
-                Opacity(opacity: amount, child: effected),
-              ],
-            ),
-          );
-        }
-    }
-    return Positioned.fill(child: out);
   }
 
   /// FORCE MOTION BLUR: borra a camada com as amostras que o efeito

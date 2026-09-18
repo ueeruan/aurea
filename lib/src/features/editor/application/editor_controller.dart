@@ -3819,11 +3819,7 @@ class EditorController extends Notifier<VideoProject> {
       state.copyWith(
         layers: [
           for (final l in state.layers)
-            if (l.id != id)
-              if (l.transitionIn?.outgoingLayerId == id)
-                l.copyLayer(clearTransitionIn: true)
-              else
-                l,
+            if (l.id != id) l,
         ],
         meta: _semAsFichasDe(state, {id}),
       ),
@@ -3857,11 +3853,7 @@ class EditorController extends Notifier<VideoProject> {
       state.copyWith(
         layers: [
           for (final l in state.layers)
-            if (!set.contains(l.id))
-              if (set.contains(l.transitionIn?.outgoingLayerId))
-                l.copyLayer(clearTransitionIn: true)
-              else
-                l,
+            if (!set.contains(l.id)) l,
         ],
         meta: _semAsFichasDe(state, set),
       ),
@@ -4821,264 +4813,6 @@ class EditorController extends Notifier<VideoProject> {
     return true;
   }
 
-  // --------------------------------------------------------- transicoes
-
-  Layer? clipAfter(String outgoingId) => layerAfter(state.layers, outgoingId);
-
-  ClipTransition? transitionAfter(String outgoingId) =>
-      clipAfter(outgoingId)?.transitionIn;
-
-  TransitionHandleReport? transitionHandleReport(
-    String outgoingId, {
-    ClipTransitionType type = ClipTransitionType.dissolve,
-    Duration duration = const Duration(milliseconds: 300),
-    TransitionAlignment alignment = TransitionAlignment.center,
-  }) => transitionHandles(
-    state.layers,
-    outgoingId,
-    ClipTransition(
-      outgoingLayerId: outgoingId,
-      type: type,
-      duration: duration,
-      alignment: alignment,
-    ),
-  );
-
-  Duration _endATrim(ClipTransition? transition) =>
-      transition != null &&
-          transition.enabled &&
-          transition.alignment == TransitionAlignment.endA
-      ? transition.duration
-      : Duration.zero;
-
-  ClipTransition _fitEndATrim(
-    Layer outgoing,
-    ClipTransition requested,
-    ClipTransition? previous,
-  ) {
-    if (requested.alignment != TransitionAlignment.endA) return requested;
-    final restoredDuration = outgoing.duration + _endATrim(previous);
-    final maximum = restoredDuration - const Duration(milliseconds: 50);
-    if (maximum <= Duration.zero) {
-      return requested.copyWith(duration: Duration.zero);
-    }
-    if (requested.duration <= maximum) {
-      return requested;
-    }
-    return requested.copyWith(duration: maximum);
-  }
-
-  /// Grava a transicao e o ajuste magnetico numa unica mutacao. Em
-  /// "Fim de A", a janela inteira ocupa o fim do primeiro clipe: A e
-  /// encurtado e tudo a direita acompanha. Trocar alinhamento, duracao ou
-  /// remover a transicao restaura exatamente o ajuste anterior antes de
-  /// aplicar o novo, portanto a operacao nunca acumula trims ocultos.
-  void _commitTransition(
-    Layer outgoing,
-    Layer incoming,
-    ClipTransition? previous,
-    ClipTransition? next,
-  ) {
-    final durationDelta = _endATrim(previous) - _endATrim(next);
-    final junction = incoming.startTime;
-    final previousWasEndA = previous?.alignment == TransitionAlignment.endA;
-    final nextIsEndA = next?.alignment == TransitionAlignment.endA;
-    final rippleIds =
-        previousWasEndA && (previous?.rippleLayerIds.isNotEmpty ?? false)
-        ? previous!.rippleLayerIds.toSet()
-        : nextIsEndA
-        ? {
-            incoming.id,
-            for (final layer in state.layers)
-              if (layer.startTime >= junction) layer.id,
-          }
-        : <String>{};
-    final storedNext = nextIsEndA
-        ? next!.copyWith(rippleLayerIds: rippleIds.toList(growable: false))
-        : next;
-    final shiftedOutgoing = outgoing.copyLayer(
-      duration: outgoing.duration + durationDelta,
-    );
-    // A tolerancia serve para encontrar a juncao, mas ao grava-la o
-    // magnetico faz snap exato. Assim preview e export nao herdam um gap
-    // ou overlap de poucos milissegundos.
-    final snappedJunction = shiftedOutgoing.endTime;
-    final timelineDelta = snappedJunction - incoming.startTime;
-    final shiftedIncoming = incoming.copyLayer(
-      startTime: snappedJunction,
-      transitionIn: storedNext,
-      clearTransitionIn: storedNext == null,
-    );
-    _mutate(
-      state.copyWith(
-        layers: [
-          for (final layer in state.layers)
-            if (layer.id == outgoing.id)
-              shiftedOutgoing
-            else if (layer.id == incoming.id)
-              shiftedIncoming
-            else if (timelineDelta != Duration.zero &&
-                rippleIds.contains(layer.id))
-              layer.copyLayer(startTime: layer.startTime + timelineDelta)
-            else
-              layer,
-        ],
-      ),
-    );
-  }
-
-  /// Cria/atualiza a transicao na juncao depois de [outgoingId]. Quando
-  /// faltam handles, nao altera nada ate a interface escolher encurtar ou
-  /// congelar as pontas.
-  bool applyTransition(
-    String outgoingId,
-    ClipTransitionType type, {
-    Duration duration = const Duration(milliseconds: 300),
-    TransitionAlignment alignment = TransitionAlignment.center,
-    Easing curve = Easing.easeInOut,
-    TransitionEdgeFallback fallback = TransitionEdgeFallback.none,
-    EffectType? effectType,
-  }) {
-    var requested = ClipTransition(
-      outgoingLayerId: outgoingId,
-      type: type,
-      duration: duration < Duration.zero ? Duration.zero : duration,
-      alignment: alignment,
-      curve: curve,
-      effect: type == ClipTransitionType.effect && effectType != null
-          ? EffectInstance(
-              type: effectType,
-              params: effectType == EffectType.offset
-                  ? {'center_x': AnimatedDouble(1)}
-                  : null,
-            )
-          : null,
-    );
-    final report = transitionHandles(state.layers, outgoingId, requested);
-    if (report == null) return false;
-    if (!report.hasEnough) {
-      switch (fallback) {
-        case TransitionEdgeFallback.none:
-          return false;
-        case TransitionEdgeFallback.shorten:
-          final shortened = report.maximumDuration;
-          if (shortened < const Duration(milliseconds: 50)) return false;
-          requested = requested.copyWith(duration: shortened);
-        case TransitionEdgeFallback.freeze:
-          requested = requested.copyWith(freezeEdges: true);
-      }
-    }
-    requested = _fitEndATrim(
-      report.outgoing,
-      requested,
-      report.incoming.transitionIn,
-    );
-    if (duration > Duration.zero && requested.duration == Duration.zero) {
-      return false;
-    }
-    if (requested.duration < const Duration(milliseconds: 50) &&
-        requested.duration > Duration.zero) {
-      return false;
-    }
-    runAsOneUndo(
-      () => _commitTransition(
-        report.outgoing,
-        report.incoming,
-        report.incoming.transitionIn,
-        requested,
-      ),
-    );
-    return true;
-  }
-
-  void removeTransition(String outgoingId) {
-    final incoming = clipAfter(outgoingId);
-    if (incoming == null || incoming.transitionIn == null) return;
-    final outgoing = _layer(outgoingId);
-    if (outgoing == null || !isTransitionLayer(outgoing)) return;
-    runAsOneUndo(
-      () => _commitTransition(outgoing, incoming, incoming.transitionIn, null),
-    );
-  }
-
-  void updateTransition(
-    String outgoingId,
-    ClipTransition Function(ClipTransition) update,
-  ) {
-    final incoming = clipAfter(outgoingId);
-    final current = incoming?.transitionIn;
-    if (incoming == null || current == null) return;
-    _replace(incoming.copyLayer(transitionIn: update(current)));
-  }
-
-  void setTransitionDuration(String outgoingId, Duration duration) {
-    final incoming = clipAfter(outgoingId);
-    final current = incoming?.transitionIn;
-    if (incoming == null || current == null) return;
-    var next = current.copyWith(
-      duration: duration < Duration.zero ? Duration.zero : duration,
-    );
-    final report = transitionHandles(state.layers, outgoingId, next);
-    if (report != null && !report.hasEnough && !next.freezeEdges) {
-      next = next.copyWith(duration: report.maximumDuration);
-    }
-    final outgoing = _layer(outgoingId);
-    if (outgoing == null || !isTransitionLayer(outgoing)) return;
-    next = _fitEndATrim(outgoing, next, current);
-    _commitTransition(outgoing, incoming, current, next);
-  }
-
-  void setTransitionAlignment(
-    String outgoingId,
-    TransitionAlignment alignment,
-  ) {
-    final incoming = clipAfter(outgoingId);
-    final current = incoming?.transitionIn;
-    if (incoming == null || current == null) return;
-    var next = current.copyWith(alignment: alignment);
-    final report = transitionHandles(state.layers, outgoingId, next);
-    if (report != null && !report.hasEnough && !next.freezeEdges) {
-      next = next.copyWith(duration: report.maximumDuration);
-    }
-    final outgoing = _layer(outgoingId);
-    if (outgoing == null || !isTransitionLayer(outgoing)) return;
-    next = _fitEndATrim(outgoing, next, current);
-    _commitTransition(outgoing, incoming, current, next);
-  }
-
-  void setTransitionCurve(String outgoingId, Easing curve) {
-    updateTransition(outgoingId, (t) => t.copyWith(curve: curve));
-  }
-
-  void setTransitionAudioCrossfade(String outgoingId, bool enabled) {
-    updateTransition(outgoingId, (t) => t.copyWith(crossfadeAudio: enabled));
-  }
-
-  void setTransitionEffect(String outgoingId, EffectType effectType) {
-    // So entra efeito que existe. A lista da folha ja vem do catalogo,
-    // mas esta e a porta que grava no projeto — um tipo sem ficha aqui
-    // viraria uma transicao que nao desenha nada e nao explica por que.
-    if (!effectSpecs.containsKey(effectType)) return;
-    updateTransition(
-      outgoingId,
-      (t) => t.copyWith(
-        type: ClipTransitionType.effect,
-        effect: EffectInstance(type: effectType),
-      ),
-    );
-  }
-
-  void setTransitionEffectParam(String outgoingId, String key, double value) {
-    updateTransition(outgoingId, (t) {
-      final effect = t.effect;
-      if (effect == null) return t;
-      return t.copyWith(
-        effect: effect.copyWith(
-          params: {...effect.params, key: effect.track(key).withBase(value)},
-        ),
-      );
-    });
-  }
 
   // ------------------------------------------------------------ congelar
 
@@ -5182,7 +4916,6 @@ class EditorController extends Notifier<VideoProject> {
       reverse: false,
       effects: layer.effects,
       timeRemap: secondSlice.track,
-      clearTransitionIn: true,
     );
     final frozenSource = videoAbsoluteSourceTimeAt(layer, at);
     final hold = AnimatedDouble(0)
@@ -5199,7 +4932,6 @@ class EditorController extends Notifier<VideoProject> {
       audio: layer.audio.copyWith(muted: true),
       effects: layer.effects,
       timeRemap: hold,
-      clearTransitionIn: true,
     );
 
     _mutate(
@@ -5210,16 +4942,7 @@ class EditorController extends Notifier<VideoProject> {
               second,
               frozen,
               first,
-            ] else if (l.transitionIn?.outgoingLayerId == id)
-              l.copyLayer(
-                startTime: l.startTime >= globalTime
-                    ? l.startTime + duration
-                    : l.startTime,
-                transitionIn: l.transitionIn!.copyWith(
-                  outgoingLayerId: second.id,
-                ),
-              )
-            else if (l.startTime >= globalTime)
+            ] else if (l.startTime >= globalTime)
               l.copyLayer(startTime: l.startTime + duration)
             else
               l,
@@ -5369,10 +5092,7 @@ class EditorController extends Notifier<VideoProject> {
       state.copyWith(
         layers: [
           for (final l in deleted)
-            if (l.transitionIn?.outgoingLayerId == id)
-              l.copyLayer(clearTransitionIn: true)
-            else
-              l,
+            if (l.id != id) l,
         ],
       ),
     );
@@ -5734,8 +5454,7 @@ class EditorController extends Notifier<VideoProject> {
           reverse: false,
           effects: layer.effects,
           timeRemap: b.track,
-          clearTransitionIn: true,
-        );
+            );
       } else {
         second = second.copyLayer(
           sourceOffset:
@@ -5743,8 +5462,7 @@ class EditorController extends Notifier<VideoProject> {
               Duration(
                 microseconds: (firstDur.inMicroseconds * layer.speed).round(),
               ),
-          clearTransitionIn: true,
-        );
+            );
       }
     } else if (second is AudioLayer && layer is AudioLayer) {
       second = second.copyLayer(
@@ -5783,14 +5501,6 @@ class EditorController extends Notifier<VideoProject> {
       if (l.id == id) {
         layers.add(second);
         layers.add(first);
-      } else if (l is VideoLayer &&
-          second is VideoLayer &&
-          l.transitionIn?.outgoingLayerId == id) {
-        layers.add(
-          l.copyLayer(
-            transitionIn: l.transitionIn!.copyWith(outgoingLayerId: second.id),
-          ),
-        );
       } else {
         layers.add(l);
       }
@@ -7458,7 +7168,6 @@ class EditorController extends Notifier<VideoProject> {
         // Mescla propria e transicao de entrada nao podem sumir por causa
         // de uma mudanca de tempo da precomp.
         customBlend: layer.customBlend,
-        transitionIn: layer.transitionIn,
         contentOffset: layer.contentOffset,
         is3D: layer.is3D,
         positionZ: layer.positionZ,

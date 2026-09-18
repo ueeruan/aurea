@@ -2,7 +2,6 @@ import 'optical_flow_preview.dart';
 
 import 'dart:async';
 import 'dart:io';
-import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:video_player/video_player.dart';
@@ -317,9 +316,8 @@ class VideoLayerManager {
   /// So encadeia o que e continuo de verdade: mesmo arquivo de reproducao,
   /// a segunda comeca onde a primeira termina (na linha do tempo e na
   /// fonte), mesma velocidade dentro da faixa nativa (0,5..2x), sem
-  /// reverso, sem Time Remap e sem transicao envolvendo as duas. Decupagem
-  /// (trecho tirado do meio) nao e continua: essa troca de tocador, com
-  /// pre-roll e tocador reaproveitado.
+  /// reverso e sem Time Remap. Decupagem (trecho tirado do meio) nao e
+  /// continua: essa troca de tocador, com pre-roll e tocador reaproveitado.
   ///
   /// Devolve a chave de TODA camada de midia aceita por [caminhoDe] (a
   /// propria id quando nao encadeia).
@@ -328,16 +326,7 @@ class VideoLayerManager {
     List<Layer> layers,
     String? Function(Layer layer) caminhoDe,
   ) {
-    final emTransicao = <String>{};
-    for (final l in layers) {
-      final tr = l.transitionIn;
-      if (tr == null || !tr.enabled) continue;
-      emTransicao
-        ..add(l.id)
-        ..add(tr.outgoingLayerId);
-    }
     bool encadeavel(Layer l) {
-      if (emTransicao.contains(l.id)) return false;
       return switch (l) {
         VideoLayer v =>
           !v.reverse && v.speed >= 0.5 && v.speed <= 2.0 && !hasTimeRemap(v),
@@ -659,17 +648,11 @@ class VideoLayerManager {
     }
     final mediaLayers = _media;
     final n = mediaLayers.length;
-    final transitions = transitionContextsAt(layers, t);
 
     // QUEM APARECE NESTE QUADRO (uma vez por midia, e nao duas).
     if (_ativo.length != n) _ativo = List<bool>.filled(n, false);
     for (var i = 0; i < n; i++) {
-      _ativo[i] = visibleForCut(
-        layers,
-        mediaLayers[i].layer,
-        t,
-        contexts: transitions,
-      );
+      _ativo[i] = mediaLayers[i].layer.activeAt(t);
     }
 
     // QUEM DIRIGE CADA TOCADOR: o pedaco ativo; senao, o proximo a entrar
@@ -759,12 +742,6 @@ class VideoLayerManager {
       if (controller == null) continue;
       final isAudio = layer is AudioLayer;
 
-      final layerTransitions = transitionContextsForLayer(
-        layers,
-        layer.id,
-        t,
-        contexts: transitions,
-      );
       // O GANHO VEM DA MESMA CONTA QUE A EXPORTACAO USA: volume, ganho,
       // mudo, fade e o envelope de ducking ja calculado. Ate aqui o
       // preview tocava so o volume da camada, e o arquivo saia com fade e
@@ -783,20 +760,13 @@ class VideoLayerManager {
           audioService.ready(layer) != null) {
         effectiveVolume = 0;
       }
-      for (final transition in layerTransitions) {
-        if (!transition.transition.crossfadeAudio) continue;
-        final angle = transition.progress * math.pi / 2;
-        effectiveVolume *= layer.id == transition.incoming.id
-            ? math.sin(angle)
-            : math.cos(angle);
-      }
       if (((_appliedVolume[key] ?? -1) - effectiveVolume).abs() > 0.001) {
         _appliedVolume[key] = effectiveVolume;
         controller.setVolume(effectiveVolume.clamp(0.0, 1.0));
       }
       // A VELOCIDADE estica a leitura da fonte: um segundo na linha
       // consome [speed] segundos de arquivo.
-      final timelineLocal = localTimeForCutContexts(layer, t, layerTransitions);
+      final timelineLocal = layer.localTime(t);
       final vel = switch (layer) {
         VideoLayer v => videoPlaybackRateAt(v, timelineLocal),
         AudioLayer a => a.speed,

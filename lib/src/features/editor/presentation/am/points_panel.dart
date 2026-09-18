@@ -14,13 +14,6 @@ import '../widgets/mask_node_editor.dart';
 import 'am_colors.dart';
 import 'am_widgets.dart';
 
-/// O que o dedo faz no trackpad.
-enum PointsMode { move, handle, add }
-
-final pathEditModeProvider = StateProvider<PointsMode>(
-  (ref) => PointsMode.move,
-);
-
 /// As duas abas do Edit Points: mexer nos PONTOS ou nos KEYFRAMES deles.
 enum AbaDosPontos { pontos, keyframes }
 

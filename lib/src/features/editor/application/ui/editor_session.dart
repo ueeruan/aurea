@@ -160,20 +160,33 @@ class EditorSession {
     Duration? inPoint,
     Duration? outPoint,
     bool clearInOut = false,
-  }) => EditorSession(
-    panel: panel ?? this.panel,
-    tool: tool ?? this.tool,
-    shapeTool: shapeTool ?? this.shapeTool,
-    curveProp: curveProp ?? this.curveProp,
-    curveReturn: curveReturn ?? this.curveReturn,
-    pointsReturn: pointsReturn ?? this.pointsReturn,
-    pointsItemId: clearPointsItem ? null : (pointsItemId ?? this.pointsItemId),
-    textSection: textSection ?? this.textSection,
-    previewExpanded: previewExpanded ?? this.previewExpanded,
-    timelineExpanded: timelineExpanded ?? this.timelineExpanded,
-    inPoint: clearInOut ? null : (inPoint ?? this.inPoint),
-    outPoint: clearInOut ? null : (outPoint ?? this.outPoint),
-  );
+  }) {
+    final novoPainel = panel ?? this.panel;
+    return EditorSession(
+      panel: novoPainel,
+      tool: tool ?? this.tool,
+      shapeTool: shapeTool ?? this.shapeTool,
+      curveProp: curveProp ?? this.curveProp,
+      curveReturn: curveReturn ?? this.curveReturn,
+      pointsReturn: pointsReturn ?? this.pointsReturn,
+      // O CAMINHO EM EDICAO SO EXISTE COM O PAINEL DE PONTOS ABERTO.
+      //
+      // Sem esta regra o item ficava guardado depois de SAIR do painel por
+      // outro caminho que nao o Voltar — tocar noutra coisa da tela, abrir
+      // outra ferramenta. O editor de nos do palco se acha pela sessao, e
+      // com o item velho de pe ele voltava aceso apontando para um
+      // contorno que ninguem estava editando: o toque no palco INSERIA
+      // ponto em vez de selecionar a camada.
+      pointsItemId: clearPointsItem || novoPainel != EditorPanel.editPoints
+          ? null
+          : (pointsItemId ?? this.pointsItemId),
+      textSection: textSection ?? this.textSection,
+      previewExpanded: previewExpanded ?? this.previewExpanded,
+      timelineExpanded: timelineExpanded ?? this.timelineExpanded,
+      inPoint: clearInOut ? null : (inPoint ?? this.inPoint),
+      outPoint: clearInOut ? null : (outPoint ?? this.outPoint),
+    );
+  }
 
   /// O trecho entre Entrada e Saida, quando as duas existem e fazem sentido.
   (Duration, Duration)? get inOut {

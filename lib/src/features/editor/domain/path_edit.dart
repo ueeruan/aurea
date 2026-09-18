@@ -127,11 +127,20 @@ Offset _oposta(Offset movida, Offset antiga) {
   return -movida / d * comprimento;
 }
 
-/// TIRAR UM NO. Abaixo de tres o caminho deixa de ser area, entao o
-/// ultimo triangulo nao se desfaz.
+/// TIRAR UM NO.
+///
+/// O PISO DEPENDE DE O CAMINHO SER FECHADO, e antes nao dependia.
+///
+/// Num caminho FECHADO, tres nos e o minimo: com dois so ha uma ida e
+/// volta, nao ha area, e o "poligono" deixa de existir. Num caminho
+/// ABERTO dois nos ja sao um traco — e o traco e o caso de uso (o
+/// contorno que vira animacao, o risco que vira morph). O piso unico de
+/// tres proibia apagar o terceiro no de um traco, sem nada acontecendo na
+/// tela: apertar a lixeira e a curva nao mudar e o que parece travamento.
 BezierPath removeVertex(BezierPath path, int index) {
   if (index < 0 || index >= path.vertices.length) return path;
-  if (path.vertices.length <= 3) return path;
+  final piso = path.closed ? 3 : 2;
+  if (path.vertices.length <= piso) return path;
   final out = [...path.vertices]..removeAt(index);
   return BezierPath(vertices: out, closed: path.closed);
 }
@@ -194,9 +203,33 @@ BezierPath toggleCorner(BezierPath path, int index) {
     return BezierPath(vertices: out, closed: path.closed);
   }
 
+  // OS VIZINHOS DE UM CAMINHO ABERTO NAO DÃO A VOLTA.
+  //
+  // Com o `% n` dos dois lados, a PONTA de um traco aberto usava o outro
+  // extremo como vizinho: a corda atravessava o desenho inteiro de ponta
+  // a ponta, e a alca nascia apontando para o lado errado — no sentido
+  // contrario ao traco. O `% n` so vale no caminho fechado, onde o
+  // primeiro e o ultimo sao vizinhos de verdade.
   final n = path.vertices.length;
-  final antes = path.vertices[(index - 1 + n) % n].p;
-  final depois = path.vertices[(index + 1) % n].p;
+  final int iAntes, iDepois;
+  if (path.closed) {
+    iAntes = (index - 1 + n) % n;
+    iDepois = (index + 1) % n;
+  } else {
+    iAntes = index > 0 ? index - 1 : 0;
+    iDepois = index < n - 1 ? index + 1 : n - 1;
+  }
+  final antes = path.vertices[iAntes].p;
+  final depois = path.vertices[iDepois].p;
+  // A PONTA tem um vizinho so: a corda e o proprio trecho ate ele, e a
+  // alca sai na direcao dele (antes saia em diagonal, porque o "antes"
+  // era o outro extremo).
+  if (!path.closed && n >= 2 && (index == 0 || index == n - 1)) {
+    final corda = index == 0 ? depois - v.p : v.p - antes;
+    final t = corda / 3;
+    out[index] = PathVertex(p: v.p, inT: -t, outT: t, corner: false);
+    return BezierPath(vertices: out, closed: path.closed);
+  }
   final corda = depois - antes;
   final t = corda / 6;
   out[index] = PathVertex(p: v.p, inT: -t, outT: t, corner: false);

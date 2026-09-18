@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../application/editor_controller.dart';
+import '../../application/ui/editor_session.dart';
 import '../../domain/layer.dart';
 import '../../domain/mask.dart';
 import '../../domain/shape.dart';
@@ -36,8 +37,35 @@ class PathEditTarget {
 
 final pathEditTargetProvider = StateProvider<PathEditTarget?>((ref) => null);
 
+/// O que o dedo faz no trackpad do Edit Points.
+enum PointsMode { move, handle, add }
+
+/// O modo vigente. Mora aqui, e nao no painel, porque quem decide se um
+/// toque no palco CRIA um ponto e este modo — o painel so desenha o
+/// botao. Enquanto ele morava no painel, os dois lados discordavam.
+final pathEditModeProvider = StateProvider<PointsMode>(
+  (ref) => PointsMode.move,
+);
+
 /// Qual no esta selecionado (o unico que mostra alcas).
 final pathEditSelectedProvider = StateProvider<int?>((ref) => null);
+
+/// O EDITOR DE NOS ESTA ATIVO NESTE PALCO?
+///
+/// A decisao mora numa funcao pura porque ela e O ponto onde o editor
+/// ficava aceso fora do painel. O alvo (`pathEditTargetProvider`) e um
+/// provider global que ninguem limpa quando a sessao muda de painel por
+/// outro caminho que nao o Voltar; a sessao e quem abre e fecha a tela.
+/// Sem esta pergunta, tocar num objeto do palco INSERIA um no no contorno
+/// antigo em vez de selecionar a camada.
+bool editorDeNosAtivo({
+  required EditorPanel painel,
+  required String? itemDaSessao,
+  required PathEditTarget? alvo,
+}) =>
+    alvo != null &&
+    painel == EditorPanel.editPoints &&
+    itemDaSessao == alvo.maskId;
 
 /// O CURSOR do trackpad (Edit Points), em coordenadas do caminho: onde
 /// o proximo ponto cai. Desenhado como ⊹ no preview; null = sem cursor.
@@ -142,6 +170,28 @@ class _MaskNodeEditorState extends ConsumerState<MaskNodeEditor> {
     final alvo = ref.watch(pathEditTargetProvider);
     if (alvo == null) return const SizedBox.shrink();
 
+    // O EDITOR DE NOS SÓ EXISTE COM O PAINEL DE PONTOS ABERTO.
+    //
+    // Sem esta trava ele ficava LIGADO no palco depois de sair do painel
+    // por qualquer caminho que nao fosse o Voltar — tocar numa barra da
+    // timeline, abrir outra ferramenta, o "+". E o alvo sobrevive porque
+    // `pathEditTargetProvider` e um provider global: ninguem o limpa
+    // quando a sessao muda de painel.
+    //
+    // O resultado era o pior possivel: com o alvo velho ainda de pe, o
+    // palco inteiro virava editor de nos. Tocar num objeto INSERIA um no
+    // no contorno antigo em vez de selecionar a camada, e arrastar mexia
+    // num no invisivel em vez de mover a camada — "o editor vetorial esta
+    // bugado", que foi o relato. Ele nao estava errado: estava aceso.
+    final sessao = ref.watch(editorSessionProvider);
+    if (!editorDeNosAtivo(
+      painel: sessao.panel,
+      itemDaSessao: sessao.pointsItemId,
+      alvo: alvo,
+    )) {
+      return const SizedBox.shrink();
+    }
+
     // Redesenha quando a mascara muda.
     ref.watch(editorControllerProvider);
     final selecionado = ref.watch(pathEditSelectedProvider);
@@ -170,10 +220,21 @@ class _MaskNodeEditorState extends ConsumerState<MaskNodeEditor> {
               ref.read(pathEditSelectedProvider.notifier).state = no;
               return;
             }
-            // Toque EM CIMA da linha insere um no ali — e como se
-            // acrescenta detalhe sem recomecar a mascara.
+            // Toque EM CIMA da linha insere um no ali — mas SO no modo
+            // Adicionar, que e o modo que diz isso.
+            //
+            // Antes, qualquer modo inseria. O painel e um TRACKPAD: o
+            // dedo nunca cobre o desenho, e o ponto nasce onde o cursor
+            // esta, cravado pelo botao de adicionar. Com o toque
+            // inserindo em todo modo, encostar na linha para SELECIONAR
+            // um ponto vizinho acrescentava um ponto novo na curva, e a
+            // curva ia ficando cheia de nos que ninguem pediu — o
+            // "criacao de pontos" do relato, do lado de la do que se
+            // queria.
             final hit = nearestOnPath(caminho, p);
-            if (hit != null && hit.distance <= _raio) {
+            if (hit != null &&
+                hit.distance <= _raio &&
+                ref.read(pathEditModeProvider) == PointsMode.add) {
               _editar(alvo, (c) => insertVertex(c, hit.segment, hit.t));
               ref.read(pathEditSelectedProvider.notifier).state =
                   hit.segment + 1;

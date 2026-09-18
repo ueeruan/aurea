@@ -164,18 +164,63 @@ AUREA_API const char* aurea_render_backend(void* n) {
   }
 }
 
+/// O MOTIVO DA ULTIMA FALHA, EM TEXTO.
+///
+/// UM `nullptr` NAO E UM DIAGNOSTICO. Quando a GPU nao sobe, alguem
+/// precisa dizer POR QUE — e o "por que" tem de chegar ate a tela ou ate
+/// o relatorio de bug, e nao morrer num `if (n == nullptr)` que so sabe
+/// cair no caminho antigo. Custa duzentos bytes estaticos e transforma
+/// "nao abriu" em "backend nao implementado: vulkan".
+///
+/// NAO E THREAD-SAFE, e nao precisa ser: a abertura acontece uma vez, na
+/// thread que monta o editor, antes de qualquer render.
+char g_motivo[192] = "";
+
+void anotar_motivo(const char* texto) noexcept {
+  std::size_t i = 0;
+  if (texto != nullptr) {
+    for (; texto[i] != 0 && i + 1 < sizeof(g_motivo); ++i) {
+      g_motivo[i] = texto[i];
+    }
+  }
+  g_motivo[i] = 0;
+}
+
+/// O NOME DO BACKEND PEDIDO, para o motivo ficar legivel.
+const char* nome_do_backend_pedido(std::uint32_t b) noexcept {
+  switch (b) {
+    case 0: return "referencia";
+    case 1: return "metal";
+    case 2: return "vulkan";
+    case 3: return "gles";
+    default: return "desconhecido";
+  }
+}
+
 /// ABRE O NUCLEO. Devolve 0 quando falha.
 ///
 /// [backend]: 0 referencia (CPU), 1 metal, 2 vulkan, 3 gles. SO O 0 EXISTE
 /// HOJE. Pedir outro devolve 0 — e nao um nucleo de mentira que diz ser
-/// de GPU. O chamador cai no caminho antigo, e o relatorio diz por que.
+/// de GPU. O chamador cai no caminho antigo, e [aurea_render_ultimo_erro]
+/// diz por que.
 AUREA_API void* aurea_render_abrir(std::uint32_t largura, std::uint32_t altura,
                          std::uint64_t orcamento_de_recursos,
                          std::uint32_t backend, std::int32_t com_thread,
                          std::uint32_t amostras, double escala_interna,
                          double orcamento_ms) {
   try {
-    if (backend != 0) return nullptr;
+    if (backend != 0) {
+      // A MENSAGEM DIZ O NOME DO BACKEND, e nao um numero: quem le o
+      // relatorio nao tem a tabela de codigos na mao.
+      std::string m = "backend nao implementado: ";
+      m += nome_do_backend_pedido(backend);
+      anotar_motivo(m.c_str());
+      return nullptr;
+    }
+    if (largura == 0 || altura == 0) {
+      anotar_motivo("largura ou altura zero");
+      return nullptr;
+    }
     Configuracao c;
     c.largura = largura;
     c.altura = altura;
@@ -186,10 +231,30 @@ AUREA_API void* aurea_render_abrir(std::uint32_t largura, std::uint32_t altura,
     c.qualidade.escala_interna = escala_interna;
     c.qualidade.orcamento_ms = orcamento_ms;
     auto r = Nucleo::abrir(c);
-    if (r.tem_erro()) return nullptr;
+    if (r.tem_erro()) {
+      std::string m = "o nucleo nao abriu: ";
+      m += std::string(nome_do_erro(r.erro()));
+      anotar_motivo(m.c_str());
+      return nullptr;
+    }
+    anotar_motivo("");
     return static_cast<void*>(std::move(r).valor().release());
-  } catch (...) {
+  } catch (const std::exception& e) {
+    anotar_motivo(e.what());
     return nullptr;
+  } catch (...) {
+    anotar_motivo("excecao desconhecida ao abrir");
+    return nullptr;
+  }
+}
+
+/// O PORQUE DA ULTIMA ABERTURA TER FALHADO. String vazia = deu certo.
+/// Ponteiro para memoria estatica: nao pertence a quem chama.
+AUREA_API const char* aurea_render_ultimo_erro(void) {
+  try {
+    return g_motivo;
+  } catch (...) {
+    return "";
   }
 }
 

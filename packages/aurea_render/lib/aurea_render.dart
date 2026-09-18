@@ -284,6 +284,10 @@ external Pointer<Void> _abrir(
   double orcamentoMs,
 );
 
+/// O PORQUE DA ULTIMA ABERTURA TER FALHADO. Vazio = deu certo.
+@Native<Pointer<Utf8> Function()>(symbol: 'aurea_render_ultimo_erro', isLeaf: true)
+external Pointer<Utf8> _ultimoErro();
+
 @Native<Void Function(Pointer<Void>)>(symbol: 'aurea_render_fechar')
 external void _fechar(Pointer<Void> n);
 
@@ -388,6 +392,19 @@ class NucleoRender {
     } catch (e) {
       debugPrint('AUREA: RenderCore indisponivel ($e). Caminho antigo.');
       return false;
+    }
+  }
+
+  /// POR QUE A ULTIMA ABERTURA FALHOU, EM TEXTO.
+  ///
+  /// Um `null` nao e um diagnostico: sem isto, "a GPU nao subiu" chega na
+  /// tela como "nao abriu", e o relatorio de bug nao tem o que dizer.
+  static String get ultimoErro {
+    try {
+      final p = _ultimoErro();
+      return p == nullptr ? '' : p.toDartString();
+    } catch (_) {
+      return '';
     }
   }
 

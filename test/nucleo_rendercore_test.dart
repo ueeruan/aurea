@@ -74,6 +74,16 @@ void main() {
         comThread: false,
       );
       expect(gpu, isNull);
+      // E O MOTIVO CHEGA EM TEXTO. Um nulo mudo obriga quem esta com o
+      // aparelho na mao a adivinhar se foi orcamento, tamanho ou falta de
+      // backend — e as tres tem conserto diferente.
+      expect(NucleoRender.ultimoErro, contains('vulkan'));
+    });
+
+    test('quando abre, nao fica motivo pendurado da tentativa anterior', () {
+      final n = abrir();
+      expect(NucleoRender.ultimoErro, isEmpty);
+      n.fechar();
     });
   });
 

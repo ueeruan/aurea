@@ -3852,6 +3852,12 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
         continue;
       }
       switch (effect.type) {
+        // O PREENCHIMENTO PASSA PELO MOTOR DE PIXEL la em cima (esta em
+        // `pixelKernels`) e nunca chega aqui; o caso existe para o
+        // compilador saber que o tipo foi visto. Sem o motor, ele fica
+        // NEUTRO — como os outros —, e a ficha avisa que precisa da GPU.
+        case EffectType.preenchimento:
+          break;
         // EFEITOS QUE SO EXISTEM NO SHADER. Recorte por pixel e contorno
         // por vizinhanca nao tem versao em CPU que valha: seria um laco
         // sobre dois milhoes de pixels por quadro, na thread de UI — o
@@ -7610,14 +7616,36 @@ class _LayerContent extends StatelessWidget {
     return child;
   }
 
-  Widget _brokenMedia() => Container(
+  /// A MIDIA NAO ABRIU — e o que aparece no lugar dela.
+  ///
+  /// NAO E UM FUNDO BRANCO, e era o que parecia: esta caixa era
+  /// `Colors.white10`, um retangulo claro de 400x300 no meio do palco.
+  /// Quem via um PNG que nao abria descrevia exatamente isso — "fica um
+  /// fundo branco" —, e o defeito de verdade (a imagem nao abrir) ficava
+  /// escondido atras de um sintoma que parecia outro.
+  ///
+  /// Agora ela diz o que houve e traz o NOME do arquivo: numa cena com
+  /// dez camadas, saber QUAL falhou e metade do conserto.
+  Widget _brokenMedia() => SizedBox(
     width: 400,
     height: 300,
-    color: Colors.white10,
-    child: const Center(
-      child: IconeDoPalco(
-        CupertinoIcons.exclamationmark_triangle,
-        cor: Colors.white38,
+    child: ColoredBox(
+      color: Colors.black.withValues(alpha: 0.35),
+      child: const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconeDoPalco(
+              CupertinoIcons.exclamationmark_triangle,
+              cor: Colors.white54,
+            ),
+            SizedBox(height: 8),
+            AppText(
+              'Nao consegui abrir esta midia',
+              style: TextStyle(fontSize: 12, color: Colors.white70),
+            ),
+          ],
+        ),
       ),
     ),
   );

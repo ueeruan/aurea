@@ -10,6 +10,12 @@ class PixelKernel {
 }
 
 const pixelKernels = <EffectType, PixelKernel>{
+  // PREENCHIMENTO (ADBE Fill): troca a cor e preserva o alfa.
+  EffectType.preenchimento: PixelKernel(63, [
+    'difusao_h',
+    'difusao_v',
+    'opacidade',
+  ]),
   // RECORTE (keying). Os tres mexem no alfa: e o que faz o fundo sumir
   // de verdade, e nao virar preto.
   EffectType.chromaKey: PixelKernel(33, [

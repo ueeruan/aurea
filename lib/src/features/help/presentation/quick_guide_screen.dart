@@ -170,6 +170,8 @@ const quickStartSteps = <(String, String)>[
 ];
 
 String effectHelp(EffectType type) => switch (type) {
+  EffectType.preenchimento => 'Troca a cor de tudo o que a camada desenha, preservando o alfa: o que era transparente continua transparente. É o que vira um logo colorido na versão de uma cor só, e o que faz um recorte virar silhueta chapada. As difusões espalham a máscara para fora da beirada; a opacidade mistura com o original.',
+
   EffectType.timeSlice => 'Divide o quadro em faixas e cada faixa mostra a camada num instante diferente. Escada imita o S_TimeSlice; linear com ease out vira a transição de faixas dos edits. Numa camada de ajuste, fatia tudo que está embaixo.',
   EffectType.posterizeTime => 'Faz a camada inteira andar em degraus de N quadros por segundo: 12 para o visual de anime, 8 para stop motion, 4 para travado. Numa camada de ajuste, quantiza tudo que está embaixo.',
   EffectType.flash => 'Clarão de um ou poucos quadros na batida: branco, somar, tela, exposição ou negativo. Segura N quadros e cai em M; o gatilho repete a cada N quadros ou dispara ao acaso. Evite flashes rápidos em conteúdo sensível.',

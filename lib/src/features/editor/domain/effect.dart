@@ -15,6 +15,7 @@ import 'vhs_damage.dart';
 import 'tv_damage.dart';
 import 'pixel_sort_sapphire.dart';
 import 'auto_paint.dart';
+import 'preenchimento.dart';
 import 'keyframe.dart';
 
 /// Efeitos aplicaveis a uma camada (blocos combinaveis, ordem importa).
@@ -171,6 +172,13 @@ enum EffectType {
   sEdgeRays,
   sGlowAura,
   sGlowDarks,
+
+  // ---- LOTE LIDO DO AFTER EFFECTS (18/09) ----
+  //
+  // NO FIM, e nao no meio: o indice do enum e o que o arquivo antigo
+  // guarda quando nao acha o id, e inserir no meio faria todo projeto
+  // salvo abrir com outro efeito.
+  preenchimento,
 }
 
 /// A ORDEM DO ENUM ANTES DE O TIME REMAP SAIR (17/09).
@@ -560,6 +568,7 @@ const effectSpecs = <EffectType, EffectSpec>{
   ...efeitosTvDamage,
   ...efeitosPixelSort,
   ...efeitosAutoPaint,
+  ...efeitosPreenchimento,
   ...efeitosLuzEDiversos,
   ...efeitosMotionTile,
 };

@@ -1057,5 +1057,55 @@ void main() {
     }
   }
 
+  // 63 - PREENCHIMENTO (ADBE Fill). Troca a COR e PRESERVA O ALFA.
+  //
+  // Nao e pintar um retangulo por cima: o que e transparente continua
+  // transparente, e o que tem meia opacidade continua com meia opacidade.
+  // E o que transforma um logo colorido na versao de uma cor so, e o que
+  // faz um recorte virar silhueta chapada.
+  //
+  // MEDIDO CONTRA RENDER DO AE (128x128, solido branco de 48x48 em
+  // (44,44), cor azul, opacidade 1): o quadrado inteiro saiu
+  // `(0,0,255,255)` — a cor pedida, e nao uma mistura com o branco de
+  // origem — e o pixel FORA dele saiu `(0,0,0,0)`, ou seja o alfa de
+  // origem sobreviveu e o preenchimento nao pintou o quadro.
+  if(mode==63) {
+    float m=a;
+    // A DIFUSAO ESPALHA A MASCARA nos dois eixos: o preenchimento entra
+    // tambem um pouco para fora de onde a camada chega. E o unico lugar
+    // deste efeito onde a cor nao entra chapada — e o alfa que manda.
+    float oh=max(0.0,p0.x)*uPixelScale;
+    float ov=max(0.0,p0.y)*uPixelScale;
+    if(oh>.5||ov>.5) {
+      float espalhado=m;
+      float passoU=oh/max(1.0,uSize.x);
+      float passoV=ov/max(1.0,uSize.y);
+      for(int i=-4;i<=4;i++){
+        if(i==0) continue;
+        float f=abs(float(i))/4.0;
+        float peso=1.0-f;
+        if(peso<=0.0) continue;
+        if(passoU>0.0 && uv.x+float(i)*passoU/4.0>=0.0
+           && uv.x+float(i)*passoU/4.0<=1.0){
+          espalhado=max(espalhado,texture(uImage,vec2(uv.x+float(i)*passoU/4.0,uv.y)).a*peso);
+        }
+        if(passoV>0.0 && uv.y+float(i)*passoV/4.0>=0.0
+           && uv.y+float(i)*passoV/4.0<=1.0){
+          espalhado=max(espalhado,texture(uImage,vec2(uv.x,uv.y+float(i)*passoV/4.0)).a*peso);
+        }
+      }
+      m=max(m,espalhado);
+    }
+    float k=clamp(m,0.0,1.0)*clamp(p0.z/100.0,0.0,1.0)*uColor.a;
+    c=mix(c,uColor.rgb,k);
+    // O ALFA SOBE COM A DIFUSAO, E NUNCA DESCE.
+    //
+    // Sem esta linha a difusao pintava a cor FORA da camada num pixel que
+    // continuava transparente — ou seja, nao aparecia. E o alfa nunca
+    // pode cair: "preserva o alfa" e a definicao do efeito, e baixar ali
+    // apagaria a camada onde o preenchimento e fraco.
+    a=clamp(max(a,k),0.0,1.0);
+  }
+
   fragColor=premul(c,a);
 }

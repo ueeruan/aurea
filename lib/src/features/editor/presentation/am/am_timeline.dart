@@ -2845,7 +2845,15 @@ class _ClipPreviewState extends State<_ClipPreview> {
                           ? const Color(0xE60B0E12)
                           : Colors.transparent,
                     ),
-                    child: CustomPaint(
+                    // A ONDA GANHA FRONTEIRA PROPRIA. A linha do tempo
+                    // rola atras do cabecote com um `jumpTo` por quadro, e
+                    // o conteudo horizontal NAO tem `RepaintBoundary` por
+                    // clipe (nao e um `ListView`). Sem a fronteira, rolar
+                    // — que e so transladar — obrigava a repintar a onda
+                    // inteira sessenta vezes por segundo.
+                    child: RepaintBoundary(
+                      child: CustomPaint(
+                      key: ValueKey('onda-pintura-${l.id}'),
                       painter: ClipWaveformPainter(
                         pyramid: piramide,
                         fonte: fonte,
@@ -2857,6 +2865,7 @@ class _ClipPreviewState extends State<_ClipPreview> {
                             : Colors.white,
                         gain: _service.ganhoDaOnda(path),
                         muted: mudo,
+                      ),
                       ),
                     ),
                   ),

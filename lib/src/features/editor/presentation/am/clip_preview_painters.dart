@@ -263,6 +263,19 @@ class FilmstripPainter extends CustomPainter {
 ///     baixa continua visivel e um estalo nao achata o resto;
 ///   * le a piramide pela janela fracionaria, sem arredondar o comeco
 ///     para o balde (antes a onda podia ficar ate 640 ms fora do lugar).
+/// A GRAVACAO DA ONDA, guardada entre quadros.
+///
+/// POR QUE UM CACHE, E NAO SO UM CAMPO: durante a rolagem TODOS os clipes
+/// visiveis repintam, um depois do outro. Um cache de uma entrada so
+/// seria jogado fora antes de servir — o clipe seguinte o substituiria, e
+/// o anterior voltaria a construir o caminho. Dai a fila com teto.
+class _OndaGravada {
+  _OndaGravada(this.picture, this.assinatura);
+
+  final ui.Picture picture;
+  final Object assinatura;
+}
+
 class ClipWaveformPainter extends CustomPainter {
   const ClipWaveformPainter({
     required this.pyramid,
@@ -272,6 +285,52 @@ class ClipWaveformPainter extends CustomPainter {
     this.gain = 1,
     this.muted = false,
   });
+
+  /// O TETO DO CACHE. Cada clipe visivel ocupa uma entrada; 32 cobre uma
+  /// linha do tempo cheia com folga e nao guarda a sessao inteira.
+  static const int _tetoDoCache = 32;
+
+  static final Map<Object, _OndaGravada> _cache = <Object, _OndaGravada>{};
+
+  /// A CHAVE DA GRAVACAO: tudo o que muda o desenho. A piramide entra por
+  /// IDENTIDADE (ela e imutavel depois de pronta); a fonte, pelos
+  /// instantes das pontas — comparar os milhares de amostras do meio a
+  /// cada quadro custaria mais caro do que redesenhar.
+  Object _assinatura(Size size) => Object.hash(
+    identityHashCode(pyramid),
+    size.width,
+    size.height,
+    color,
+    contorno,
+    gain,
+    muted,
+    fonte.length,
+    fonte.isEmpty ? 0 : fonte.first,
+    fonte.length < 2 ? 0 : fonte.last,
+    _colunas(size),
+  );
+
+  static int _colunas(Size size) => size.width.floor();
+
+  /// ESVAZIA O CACHE. Chamado quando o projeto troca (outra linha do
+  /// tempo, outro conjunto de clipes): manter gravacoes de uma sessao que
+  /// acabou e memoria parada.
+  static void limparCache() {
+    for (final g in _cache.values) {
+      g.picture.dispose();
+    }
+    _cache.clear();
+    construcoes = 0;
+  }
+
+  static int get entradasNoCache => _cache.length;
+
+  /// QUANTAS VEZES A ONDA FOI DE FATO CONSTRUIDA. E o numero que prova o
+  /// cache: ele sobe uma vez por desenho NOVO, e nao uma vez por quadro.
+  /// Sem ele, "o cache funciona" seria uma afirmacao sem medida — as
+  /// chamadas que a gravacao faz nao passam pela caneta de fora.
+  @visibleForTesting
+  static int construcoes = 0;
 
   final PeakPyramid pyramid;
 
@@ -305,6 +364,29 @@ class ClipWaveformPainter extends CustomPainter {
     if (pyramid.isEmpty || fonte.length < 2 || size.width < 2 || size.height < 6) {
       return;
     }
+    // O DESENHO PRONTO MANDA: enquanto nada na onda mudou, o que se faz
+    // aqui e reexecutar a gravacao — e nao reconstruir milhares de pontos.
+    final chave = _assinatura(size);
+    final guardada = _cache[chave];
+    if (guardada != null) {
+      canvas.drawPicture(guardada.picture);
+      return;
+    }
+    final gravador = ui.PictureRecorder();
+    _desenhar(Canvas(gravador), size);
+    final nova = _OndaGravada(gravador.endRecording(), chave);
+    // Teto: a entrada mais antiga sai. O `Map` do Dart preserva a ordem de
+    // insercao, entao a primeira chave e a mais velha.
+    while (_cache.length >= _tetoDoCache) {
+      final primeira = _cache.keys.first;
+      _cache.remove(primeira)?.picture.dispose();
+    }
+    _cache[chave] = nova;
+    canvas.drawPicture(nova.picture);
+  }
+
+  void _desenhar(Canvas canvas, Size size) {
+    construcoes++;
     final colunas = size.width.floor();
     final mid = size.height / 2;
     final half = size.height / 2 - 1;

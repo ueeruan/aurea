@@ -424,7 +424,10 @@ void main() {
     final b = StringBuffer()
       ..writeln('# Auditoria do motor 3D — a bancada do pior caso')
       ..writeln()
-      ..writeln('Gerado por `test/motor3d_auditoria_test.dart`. Cada linha é')
+      ..writeln('Gerado por `test/motor3d_auditoria_test.dart`, rodado com')
+      ..writeln('`AUREA_ESCREVER_AUDITORIA=1` (sem isso o teste mede e não')
+      ..writeln('grava, para a suíte não reescrever números de outra máquina).')
+      ..writeln('Cada linha é')
       ..writeln('um GLB fabricado no próprio teste e levado pelo caminho')
       ..writeln('real do aplicativo: importador → formato interno → ponte')
       ..writeln('GLB → (Filament).')
@@ -458,6 +461,15 @@ void main() {
     for (final r in resultados.where((r) => r.avisos.isNotEmpty)) {
       b.writeln('- **${r.nome}**: ${r.avisos.join(" / ")}');
     }
+    // A TABELA SO SE GRAVA A PEDIDO.
+    //
+    // Os numeros desta bancada sao os da MAQUINA que a rodou: import e
+    // ponte sao milissegundos de CPU local. Gravar sempre fazia cada
+    // `flutter test` reescrever um arquivo versionado com os numeros de
+    // quem rodou — a suite nunca deixava a arvore limpa, e o documento
+    // virava um retrato de notebook em vez da medicao de referencia.
+    // Rodar com AUREA_ESCREVER_AUDITORIA=1 continua gravando.
+    if (Platform.environment['AUREA_ESCREVER_AUDITORIA'] != '1') return;
     final f = File('docs/motor3d-auditoria.md');
     f.parent.createSync(recursive: true);
     f.writeAsStringSync(b.toString());

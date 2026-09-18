@@ -1,6 +1,8 @@
 # Auditoria do motor 3D — a bancada do pior caso
 
-Gerado por `test/motor3d_auditoria_test.dart`. Cada linha é
+Gerado por `test/motor3d_auditoria_test.dart`, rodado com
+`AUREA_ESCREVER_AUDITORIA=1` (sem isso o teste mede e não grava, para a
+suíte não reescrever números de outra máquina). Cada linha é
 um GLB fabricado no próprio teste e levado pelo caminho
 real do aplicativo: importador → formato interno → ponte
 GLB → (Filament).

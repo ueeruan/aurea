@@ -82,8 +82,16 @@ float tpp() { return .5 * (uSize.x / max(uLogico.x, 1.0) + uSize.y / max(uLogico
 float luma(vec3 c) { return dot(c, vec3(.2126, .7152, .0722)); }
 
 // Quantas amostras este quadro paga, dentro do maximo do kernel.
+//
+// NAO-ESCRITO = O MAXIMO, e nao o minimo.
+//
+// Um uniforme que ninguem escreveu chega como ZERO. Com o zero virando a
+// fracao minima, quem esquecesse de mandar o orcamento recebia 6% das
+// amostras: o efeito saia fraco, e o defeito aparecia como "o brilho nao
+// faz nada" — longe da causa. A economia e uma ESCOLHA de quem chama;
+// quem nao escolhe paga o preco e ve o efeito certo.
 int amostras(int maximo) {
-  float f = clamp(uAmostras, 0.0625, 1.0);
+  float f = uAmostras <= 0.0 ? 1.0 : clamp(uAmostras, 0.0625, 1.0);
   return int(max(4.0, floor(float(maximo) * f + 0.5)));
 }
 

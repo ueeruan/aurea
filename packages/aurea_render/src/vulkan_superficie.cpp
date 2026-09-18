@@ -1146,6 +1146,26 @@ std::int32_t SuperficieVulkan::apresentar(std::uint32_t) noexcept {
   return -1;
 }
 
+// O QUADRO DO MOTOR TAMBEM NAO EXISTE NO PC — e a AUSENCIA precisa ser uma
+// recusa explicita, e nao um simbolo faltando: sem estas tres, quem
+// compilasse o pacote no PC levava um erro de LINK (`LNK2019`) em vez de um
+// `-1` que o Dart trata como "nao deu, siga pelo caminho antigo".
+std::int32_t SuperficieVulkan::apresentar_imagem(const std::uint8_t*,
+                                                 std::uint32_t,
+                                                 std::uint32_t) noexcept {
+  ++stats_.falhas;
+  return -1;
+}
+
+std::string SuperficieVulkan::garantir_origem(std::uint32_t,
+                                              std::uint32_t) noexcept {
+  return "sem GPU: a origem do quadro so existe no Android";
+}
+
+void SuperficieVulkan::destruir_origem() noexcept {}
+
+bool SuperficieVulkan::tamanho_mudou() const noexcept { return false; }
+
 std::int32_t SuperficieVulkan::redimensionar(std::uint32_t, std::uint32_t) noexcept {
   return -1;
 }

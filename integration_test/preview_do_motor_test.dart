@@ -144,6 +144,50 @@ void main() {
     expect(find.byType(CompositionView), findsOneWidget);
   });
 
+  testWidgets('segundo plano: soltar e refazer a janela nao derruba nada', (
+    tester,
+  ) async {
+    // O CAMINHO DO BOTAO HOME, pelo mesmo par de chamadas que o lifecycle
+    // usa: `onSurfaceDestroyed` solta a superficie, `onSurfaceCreated`
+    // refaz. Desmontar a arvore libera o produtor (o `dispose` do
+    // `PreviewNativo` chama `liberar`), e montar de novo anexa outra.
+    //
+    // O QUE ELE NAO PROVA: o HOME de verdade. Quem aperta o botao e o
+    // sistema; esta e a mesma API, e a passada manual continua anotada no
+    // fim do `nucleo_vulkan_v1_test.dart`.
+    final c = containerComProjeto();
+    addTearDown(c.dispose);
+    c.read(motorDoPreviewProvider.notifier).state = true;
+
+    await tester.pumpWidget(palco(c));
+    for (var i = 0; i < 12; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    final antes = PreviewVulkan.estatisticas();
+    expect(antes.apresentados, greaterThan(0));
+
+    // SAI PARA SEGUNDO PLANO.
+    await tester.pumpWidget(const MaterialApp(home: SizedBox()));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('preview-motor-cpp')), findsNothing);
+
+    // E VOLTA.
+    await tester.pumpWidget(palco(c));
+    for (var i = 0; i < 12; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    final depois = PreviewVulkan.estatisticas();
+    // ignore: avoid_print
+    print('== SEGUNDO PLANO == antes: $antes depois: $depois');
+
+    expect(
+      depois.apresentados,
+      greaterThan(antes.apresentados),
+      reason: 'a janela voltou e o motor nao voltou a apresentar',
+    );
+    expect(depois.falhas, antes.falhas, reason: 'a volta nao pode falhar');
+  });
+
   testWidgets('o projeto continua inteiro depois de passar pelo motor', (
     tester,
   ) async {

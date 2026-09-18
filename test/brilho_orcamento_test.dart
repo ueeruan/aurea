@@ -98,6 +98,36 @@ void main() {
       expect(s, contains('max(4.0,'));
     });
 
+    test('orcamento NAO escrito vale o maximo, e nao o minimo', () {
+      // UM UNIFORME QUE NINGUEM ESCREVEU CHEGA COMO ZERO. Com o zero
+      // virando a fracao minima, quem esquecesse de mandar o orcamento
+      // recebia 6% das amostras e via um brilho fraco — um defeito que
+      // aparece longe da causa. A economia tem de ser uma ESCOLHA.
+      //
+      // Este teste nasceu de um defeito de verdade: o
+      // `test/estilizar_sapphire_test.dart` escreve os uniformes a mao e
+      // NAO conhece o orcamento. Ele passou a falhar de vez em quando
+      // (16 pixels mudados onde exigia mais de 20) — intermitente, que e
+      // como um efeito fraco demais se manifesta.
+      expect(_shader(), contains('uAmostras <= 0.0 ? 1.0'));
+
+      // E a conta: nao escrito (0) tem de dar o mesmo que cheio (1).
+      int amostrasDoShader(double escrito, int maximo) {
+        final f = escrito <= 0 ? 1.0 : escrito.clamp(0.0625, 1.0);
+        final n = (maximo * f + 0.5).floor();
+        return n < 4 ? 4 : n;
+      }
+
+      for (final maximo in [16, 20, 24, 40, 64, 96]) {
+        expect(
+          amostrasDoShader(0, maximo),
+          amostrasDoShader(1, maximo),
+          reason: 'kernel de $maximo',
+        );
+        expect(amostrasDoShader(0, maximo), maximo);
+      }
+    });
+
     test('os kernels sairam do numero fixo para o numero medido', () {
       final s = _shader();
       // Cada laco constante sobreviveu como TETO (o GLSL do runtime effect

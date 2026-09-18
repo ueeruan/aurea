@@ -4,6 +4,7 @@ import 'dart:ui';
 import 'effect.dart';
 import 'fx.dart' show fxHash01;
 import 'layer.dart';
+import 'time_warp_rgb.dart';
 
 /// TIME SLICE: o quadro vira faixas paralelas e cada faixa mostra a mesma
 /// camada num instante diferente (S_TimeSlice, Time Displacement, slit
@@ -207,6 +208,18 @@ Set<Duration> instantesDeOutroTempo(
       for (final atraso in atrasosDoEfeito(fatias, local).toSet()) {
         if (atraso == 0 && base == local) continue;
         out.add(layer.startTime + localDeslocado(layer, base, atraso, fps));
+      }
+    }
+    final rgb = efeitoDeTempo(layer, EffectType.timeWarpRgb);
+    if (rgb != null) {
+      final d = deslocamentosDoTimeWarp(rgb, local);
+      for (final instante in instantesDoTimeWarp(
+        layer: layer,
+        local: local,
+        deslocamentos: d,
+        fps: fps,
+      )) {
+        if (instante != t) out.add(instante);
       }
     }
     final eco = efeitoDeTempo(layer, EffectType.echo);

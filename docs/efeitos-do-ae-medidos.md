@@ -249,3 +249,41 @@ foto é assíncrona de verdade — o teste passava sozinho e falhava em fila.
 textura. Sem uma guarda explícita em uv, o outro lado da textura volta pelo
 modo de repetição e a sombra sai um quadrado cheio em vez do losango da
 união de cópias.
+
+## TimeWarpRGB — FEITO (18/09), com uma medida que NÃO deu
+
+**Os parâmetros são do plugin, lidos do AE** pelo painel: `S_TimeWarpRGB`
+tem `Red Shift Frames` = 1, `Green Shift Frames` = 0, `Blue Shift Frames`
+= -1, e mais `Clamp Chroma`, `Input Opacity`, `Output Opacity` e o bloco
+de máscara do Sapphire.
+
+**O que não deu para medir, e fica escrito:** com o efeito LIGADO o render
+sai **byte a byte igual** ao render com ele desligado. A bancada tinha um
+quadrado vermelho andando 14 px por quadro e um deslocamento de +2/−2
+quadros, o que daria 28 px de separação entre os canais — impossível de
+não ver. Os pares de PNG saíram com o mesmo md5. O Sapphire não renderiza
+por `saveFrameToPng` nesta máquina.
+
+**Consequência:** a convenção do sinal é NOSSA (positivo = quadro mais
+tarde) e está declarada como tal. O `Clamp Chroma` ficou de fora: sem
+saber o que ele faz, um interruptor com o nome dele seria promessa vazia.
+
+Feito com três montagens da mesma camada, uma por canal
+(`ColorFilter.matrix`), somadas com `BlendMode.plus` por `BlendMask`. Os
+instantes entram em `instantesDeOutroTempo`, senão a exportação mostraria
+o mesmo quadro nos três canais. 14 testes em
+`test/time_warp_rgb_test.dart`.
+
+## TimeSlice — FEITO (18/09)
+
+O motor existia e estava ligado no palco desde 14/09; **faltava a ficha**,
+e sem ficha o efeito não aparecia na galeria nem tinha como ser ajustado.
+Os parâmetros de fábrica são os do `S_TimeSlice` lidos do AE (`Slice
+Direction` −90, `Slice Number` 12, `Frame Offset` 0, `Interp Frames` 0).
+
+O `Interp Frames` não entrou: ele pede um quadro interpolado entre dois, e
+o compositor entrega a camada montada num instante — a interpolação de
+verdade mora na exportação.
+
+18 testes em `test/time_slice_test.dart`, incluindo o que cobra os dois
+lados da ficha: toda chave que o motor lê tem de existir no catálogo.

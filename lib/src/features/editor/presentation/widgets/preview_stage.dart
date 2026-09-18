@@ -36,6 +36,8 @@ import '../../domain/effect.dart';
 import '../../domain/fx.dart';
 import '../../domain/oscillate.dart';
 import 'motion_tile_pass.dart';
+import '../../domain/sombra_projetada.dart';
+import 'sombra_projetada_pass.dart';
 import 'repeticao_pass.dart';
 import '../../domain/gear.dart';
 import '../../domain/text_animator.dart' show valueNoise01;
@@ -6852,6 +6854,24 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
                 phase: effect.paramAt('fase', local),
                 seed: effect.paramAt('semente', local).round(),
               ),
+              child: out,
+            );
+          }
+
+        // A GUARDA E OBRIGATORIA AQUI: os casos deste `switch` CAEM um no
+        // outro, e cada um se protege com um teste neutro. Sem ela, todo
+        // efeito do catalogo montaria a sombra — e `paramAt` de uma chave
+        // que o efeito nao tem devolve zero, entao a margem sai vazia e o
+        // passe vira identidade. Melhor nem montar.
+        case EffectType.sombraProjetada:
+          if (!margemDaSombra(
+            distancia: effect.paramAt('distancia', local),
+            direcao: effect.paramAt('direcao', local),
+            suavidade: effect.paramAt('suavidade', local),
+          ).vazia) {
+            out = SombraProjetadaPass(
+              effect: effect,
+              time: local,
               child: out,
             );
           }

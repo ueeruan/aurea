@@ -55,7 +55,7 @@ shader `effects_v2.frag` modo 63. Medido e testado.
 
 ---
 
-## Drop Shadow — medido, implementação pendente
+## Drop Shadow — FEITO (18/09)
 
 Referência: comp 200×200, sólido branco 80×80 centrado em (100,100),
 direção 135, distância 30, cor vermelha, opacidade 255.
@@ -84,10 +84,12 @@ quadrado deslocado (159, não 160,3).
 **A sombra usa o ALFA da camada**, não a caixa dela. A cor vem do
 parâmetro 1 e a opacidade do 2 (0..255 no AE; aqui em %).
 
-### Onde eu parei, e o que ja foi DESCARTADO com prova
+### Os tres mecanismos descartados — e por que o descarte era injusto
 
-A conta esta pronta (deslocamento nos quatro quadrantes, distancia zero,
-sigma). **O desenho nao funciona**, e ja tentei tres mecanismos:
+A conta sempre esteve certa. **O desenho nao funcionava** por causa da
+bancada, e nao dos mecanismos: os tres dependiam de desenhar a imagem
+deslocada, e a imagem de teste nao tinha alfa nenhum. O que cada um fez,
+para o registro:
 
 1. **ARVORE DE WIDGETS** — `Stack` + `Positioned.fill` + `ColorFiltered` +
    `ImageFiltered` + `Transform.translate`. Nao pintou NADA: o diagnostico
@@ -121,11 +123,23 @@ a imagem deslocada. E e o proximo lugar a olhar — antes de tentar um quarto
 mecanismo, vale conferir se o problema e a imagem de teste (criada por
 `ImageDescriptor.raw` + codec descartado) ou o `drawImage` deslocado.
 
-**Sugestao de proximo passo:** refazer o mesmo diagnostico com uma imagem
-carregada por `ui.instantiateImageCodec` de bytes PNG (o caminho que o app
-usa), e com um `RepaintBoundary` em vez de `PictureRecorder`. Se o alfa
-voltar, o problema era a bancada, e o mecanismo 1 — a arvore de widgets —
-merece uma segunda chance.
+**RESOLVIDO EM 18/09 — E A BANCADA ESTAVA ERRADA.**
+
+O diagnostico foi refeito (`test/drawimage_deslocado_test.dart`) com a
+imagem vinda de BYTES PNG por `ui.instantiateImageCodec`, em tres
+superficies: o canvas do gravador, um segundo gravador por `drawPicture`,
+e um `RepaintBoundary` de verdade. **Seis testes, alfa 255 nos seis.**
+
+A imagem da bancada antiga vinha de `ImageDescriptor.raw` com o codec
+descartado logo depois — os pixels iam embora com ele, e o desenho sem
+deslocamento ainda acertava porque chegava a copiar antes. "`drawImage`
+deslocado nao compoe" era falso; o motor nunca teve esse defeito.
+
+**A sombra projetada esta IMPLEMENTADA e medida** — ver
+`lib/src/features/editor/domain/sombra_projetada.dart`,
+`sombra_projetada_pass.dart` e `test/sombra_projetada_test.dart` (23
+testes, com leitura de pixel do quadro montado). O mecanismo e a arvore
+de widgets, que era o primeiro que eu tinha descartado.
 
 ## TimeSlice e TimeWarpRGB — bloqueados por arquitetura
 

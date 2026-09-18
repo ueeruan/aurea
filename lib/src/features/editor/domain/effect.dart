@@ -16,6 +16,7 @@ import 'tv_damage.dart';
 import 'pixel_sort_sapphire.dart';
 import 'auto_paint.dart';
 import 'preenchimento.dart';
+import 'sombra_projetada.dart';
 import 'keyframe.dart';
 
 /// Efeitos aplicaveis a uma camada (blocos combinaveis, ordem importa).
@@ -179,6 +180,7 @@ enum EffectType {
   // guarda quando nao acha o id, e inserir no meio faria todo projeto
   // salvo abrir com outro efeito.
   preenchimento,
+  sombraProjetada,
 }
 
 /// A ORDEM DO ENUM ANTES DE O TIME REMAP SAIR (17/09).
@@ -569,6 +571,7 @@ const effectSpecs = <EffectType, EffectSpec>{
   ...efeitosPixelSort,
   ...efeitosAutoPaint,
   ...efeitosPreenchimento,
+  ...efeitosSombraProjetada,
   ...efeitosLuzEDiversos,
   ...efeitosMotionTile,
 };

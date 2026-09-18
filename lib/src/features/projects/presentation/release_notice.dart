@@ -6,38 +6,39 @@ import '../../../core/ui/am_colors.dart';
 import 'package:aurea/src/core/l10n/app_language.dart';
 
 // Change this revision when publishing a new set of release notes.
-const releaseNoticeRevision = '2026-09-16-beta-90';
+const releaseNoticeRevision = '2026-09-18-beta-91';
 const releaseNoticeSeenKey = 'aurea.releaseNotice.seen';
 
 const releaseHighlights = <(IconData, String, String)>[
   (
-    CupertinoIcons.play_circle,
-    'Previa mais leve',
-    'Texto animado, curvas de keyframe e efeitos sem keyframe deixaram de '
-        'refazer trabalho a cada quadro, e o pontilhado pausa enquanto toca.',
-  ),
-  (
     CupertinoIcons.sparkles,
-    'Glow e Luz e Diversos',
-    'Chroma Key, S_Rays, Deep Glow, Brilho, S_SpotLight, S_Glint, '
-        'S_GlintRainbow, S_GlowRings, S_EdgeRays, S_GlowAura e S_GlowDarks, '
-        'conferidos contra o After Effects. Motion Tile voltou.',
+    'O brilho parou de travar',
+    'Deep Glow, Brilho, S_GlowAura e os outros da aba Glow e Luz pediam '
+        'centenas de leituras de textura por pixel a cada quadro. Agora a '
+        'previa paga uma fracao disso e a exportacao continua no maximo — '
+        'o resultado salvo nao mudou.',
   ),
   (
-    CupertinoIcons.captions_bubble,
-    'Legenda viral e batidas',
-    'Novo estilo Viral nas legendas automaticas, e as batidas da musica '
-        'viram marcadores na timeline.',
+    CupertinoIcons.textformat,
+    'Texto arabe ligado',
+    'Com animacao por letra, cada letra arabe saia solta. A forma de cada '
+        'letra vem dos vizinhos, e agora o desenho mantem a ligacao.',
+  ),
+  (
+    CupertinoIcons.lock_fill,
+    'Camada bloqueada de verdade',
+    'O cadeado ganhou botao no menu da camada e uma faixa com '
+        'Desbloquear. Bloqueada nao anda, nao apara, nao edita e nao some '
+        'por engano.',
   ),
   (
     CupertinoIcons.checkmark_seal,
-    'Correcoes do beta',
-    'Legenda automatica nao fecha mais o app no iPhone, a musica nao '
-        'balanca mais o relogio da previa e a selecao de varias camadas '
-        'deixa as faixas a vista.',
+    'Editor de pontos e transicoes',
+    'Editar pontos voltou a desenhar e editar o mesmo caminho, e o '
+        'sistema de transicoes saiu do app — projetos antigos continuam '
+        'abrindo.',
   ),
 ];
-
 
 
 Future<void> showReleaseNotice(BuildContext context) => showDialog<void>(

@@ -221,7 +221,7 @@ class LayerToolsDock extends ConsumerWidget {
                     ),
                     Expanded(
                       child: IconButton(
-                        tooltip: 'Mover fim para o cabeçote',
+                        tooltip: translate(context, 'Mover fim para o cabeçote'),
                         onPressed: () {
                           HapticFeedback.lightImpact();
                           playback.pause();
@@ -490,7 +490,7 @@ _Tile? _tileDaSecao(
     ),
     AmSecao.particulas => (
       icone: CupertinoIcons.sparkles,
-      rotulo: 'Partículas',
+      rotulo: translate(context, 'Partículas'),
       onTap: () =>
           abrirDepois(() => showParticulasSheet(context, ref, layer.id)),
       badge: null,
@@ -513,7 +513,7 @@ _Tile? _tileDaSecao(
     ),
     AmSecao.camera => (
       icone: CupertinoIcons.videocam,
-      rotulo: 'Câmera',
+      rotulo: translate(context, 'Câmera'),
       onTap: () =>
           abrirDepois(() => showCameraSheet(context, ref, layer.id, playback)),
       badge: 'NEW',
@@ -3900,6 +3900,11 @@ const categoriasDeMescla = <({String nome, List<ModoDeMescla> modos})>[
     ],
   ),
   (
+    // ESTE ROTULO FICA EM PORTUGUES AQUI, e o motivo esta escrito: ele
+    // mora numa TABELA de dados no topo do arquivo, onde nao ha
+    // `context`. Traduzir exige o caminho de dado (a chave viaja e a
+    // traducao acontece na hora de desenhar), que e o mesmo trabalho que
+    // falta nos nomes de preset e nos rotulos do catalogo de efeitos.
     nome: 'Máscara',
     modos: [
       ModoDeMescla('Máscara', nativo: BlendMode.dstIn),
@@ -4122,7 +4127,7 @@ class _BlendingPanelState extends ConsumerState<BlendingPanel> {
                         ),
                         ParamTab(
                           id: _BlendTab.mask.name,
-                          label: 'Máscara',
+                          label: translate(context, 'Máscara'),
                           animated: layer.masks.any((m) => m.hasAnimation),
                         ),
                         ParamTab(

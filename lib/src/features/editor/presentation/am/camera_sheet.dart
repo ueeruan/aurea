@@ -32,7 +32,7 @@ Future<void> showCameraSheet(
   PlaybackController playback,
 ) => showParamSheet(
   context,
-  title: 'Câmera',
+  title: translate(context, 'Câmera'),
   heightFactor: 0.62,
   builder: (sheetContext) => _Camera(layerId: layerId, playback: playback),
 );

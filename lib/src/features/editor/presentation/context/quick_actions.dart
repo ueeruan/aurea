@@ -360,7 +360,7 @@ List<QuickAction> quickActionsFor(
       QuickAction(
         key: 'cameras',
         icon: CupertinoIcons.videocam,
-        label: 'Câmeras',
+        label: translate(context, 'Câmeras'),
         pro: true,
         onTap: () => pausa(() => showCamerasSheet(context, ref, id, playback)),
       ),

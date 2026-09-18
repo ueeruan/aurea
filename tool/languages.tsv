@@ -3178,3 +3178,42 @@ Feito por ${AureaAutor.nome} com Flutter	Made by ${AureaAutor.nome} with Flutter
 Guia dos ${efeitosDoCatalogo.length} efeitos	Guide to all ${efeitosDoCatalogo.length} effects	Guía de los ${efeitosDoCatalogo.length} efectos	دليل ${efeitosDoCatalogo.length} تأثيرًا	${efeitosDoCatalogo.length}개 효과 안내	全${efeitosDoCatalogo.length}エフェクトのガイド	全部 ${efeitosDoCatalogo.length} 个效果指南	सभी ${efeitosDoCatalogo.length} इफ़ेक्ट की गाइड	Panduan ${efeitosDoCatalogo.length} efek	Гид по ${efeitosDoCatalogo.length} эффектам
 Rastreio ${s.qualidade.toLowerCase()}	Tracking ${s.qualidade.toLowerCase()}	Seguimiento ${s.qualidade.toLowerCase()}	تتبع ${s.qualidade.toLowerCase()}	트래킹 ${s.qualidade.toLowerCase()}	トラッキング ${s.qualidade.toLowerCase()}	跟踪 ${s.qualidade.toLowerCase()}	ट्रैकिंग ${s.qualidade.toLowerCase()}	Pelacakan ${s.qualidade.toLowerCase()}	Трекинг ${s.qualidade.toLowerCase()}
 Excluir ${ids.length} projetos?	Delete ${ids.length} projects?	¿Eliminar ${ids.length} proyectos?	حذف ${ids.length} مشاريع؟	프로젝트 ${ids.length}개를 삭제할까요?	${ids.length} 件のプロジェクトを削除しますか？	删除 ${ids.length} 个项目？	${ids.length} प्रोजेक्ट हटाएँ?	Hapus ${ids.length} proyek?	Удалить проекты (${ids.length})?
+Excluir {0} projetos?	Delete {0} projects?	¿Eliminar {0} proyectos?	حذف {0} مشاريع؟	프로젝트 {0}개를 삭제할까요?	{0} 件のプロジェクトを削除しますか？	删除 {0} 个项目？	{0} प्रोजेक्ट हटाएँ?	Hapus {0} proyek?	Удалить проекты ({0})?
+{0} camadas	{0} layers	{0} capas	{0} طبقات	레이어 {0}개	{0} レイヤー	{0} 个图层	{0} लेयर	{0} lapisan	Слоёв: {0}
+{0} camada	{0} layer	{0} capa	طبقة {0}	레이어 {0}개	{0} レイヤー	{0} 个图层	{0} लेयर	{0} lapisan	Слоёв: {0}
+Curva — {0}	Curve — {0}	Curva — {0}	منحنى — {0}	커브 — {0}	カーブ — {0}	曲线 — {0}	कर्व — {0}	Kurva — {0}	Кривая — {0}
+custo {0}	cost {0}	coste {0}	التكلفة {0}	비용 {0}	コスト {0}	开销 {0}	लागत {0}	biaya {0}	цена {0}
+{0} escolhidos	{0} selected	{0} seleccionados	تم اختيار {0}	{0}개 선택됨	{0} 件選択	已选 {0}	{0} चयनित	{0} dipilih	Выбрано: {0}
+{0} marcadas	{0} marked	{0} marcadas	تم تعليم {0}	{0}개 표시됨	{0} 件にマーク	已标记 {0}	{0} चिह्नित	{0} ditandai	Отмечено: {0}
+Borda {0}	Border {0}	Borde {0}	الحدود {0}	테두리 {0}	境界線 {0}	边框 {0}	बॉर्डर {0}	Tepi {0}	Граница {0}
+Versao {0}	Version {0}	Versión {0}	الإصدار {0}	버전 {0}	バージョン {0}	版本 {0}	वर्शन {0}	Versi {0}	Версия {0}
+Versao {0} · build {1}	Version {0} · build {1}	Versión {0} · build {1}	الإصدار {0} · build {1}	버전 {0} · 빌드 {1}	バージョン {0} · ビルド {1}	版本 {0} · 构建 {1}	वर्शन {0} · बिल्ड {1}	Versi {0} · build {1}	Версия {0} · сборка {1}
+{0} na mão	{0} in hand	{0} en la mano	{0} في اليد	손에 {0}개	手に {0}	手持 {0}	हाथ में {0}	{0} di tangan	В руке: {0}
+Animar {0} sozinho	Animate {0} alone	Animar {0} solo	تحريك {0} وحده	{0} 단독 애니메이션	{0} を単独でアニメーション	单独动画 {0}	{0} को अकेले एनिमेट करें	Animasikan {0} sendiri	Анимировать {0} отдельно
+Nulo: {0}	Null: {0}	Nulo: {0}	فارغ: {0}	널: {0}	ヌル: {0}	空对象: {0}	नल: {0}	Null: {0}	Ноль: {0}
+Animar · {0}	Animate · {0}	Animar · {0}	تحريك · {0}	애니메이션 · {0}	アニメーション · {0}	动画 · {0}	एनिमेट · {0}	Animasikan · {0}	Анимация · {0}
+Montar · {0}	Build · {0}	Montar · {0}	تركيب · {0}	구성 · {0}	構築 · {0}	组合 · {0}	बनाएँ · {0}	Susun · {0}	Сборка · {0}
+No vídeo: {0}	In the video: {0}	En el vídeo: {0}	في الفيديو: {0}	영상에서: {0}	動画内: {0}	在视频中: {0}	वीडियो में: {0}	Di video: {0}	В видео: {0}
+Coluna de {0}	Column of {0}	Columna de {0}	عمود {0}	{0} 열	{0} の列	{0} 的列	{0} का कॉलम	Kolom {0}	Столбец {0}
+{0} Tentar novamente	{0} Try again	{0} Inténtalo de nuevo	{0} حاول مرة أخرى	{0} 다시 시도하세요	{0} もう一度お試しください	{0} 请重试	{0} फिर कोशिश करें	{0} Coba lagi	{0} Повторите попытку
+Organizar — {0}	Arrange — {0}	Organizar — {0}	ترتيب — {0}	정렬 — {0}	整列 — {0}	排列 — {0}	व्यवस्थित — {0}	Susun — {0}	Упорядочить — {0}
+Modelo · {0}	Model · {0}	Modelo · {0}	نموذج · {0}	모델 · {0}	モデル · {0}	模型 · {0}	मॉडल · {0}	Model · {0}	Модель · {0}
+{0} nós	{0} nodes	{0} nodos	{0} عقدة	노드 {0}개	{0} ノード	{0} 个节点	{0} नोड	{0} node	Узлов: {0}
+total {0}	total {0}	total {0}	الإجمالي {0}	합계 {0}	合計 {0}	合计 {0}	कुल {0}	total {0}	всего {0}
+Usar {0} camada(s)	Use {0} layer(s)	Usar {0} capa(s)	استخدام {0} طبقة	레이어 {0}개 사용	{0} レイヤーを使用	使用 {0} 个图层	{0} लेयर इस्तेमाल करें	Pakai {0} lapisan	Использовать слоёв: {0}
+Alinhar — {0} camada(s)	Align — {0} layer(s)	Alinear — {0} capa(s)	محاذاة — {0} طبقة	정렬 — 레이어 {0}개	整列 — {0} レイヤー	对齐 — {0} 个图层	संरेखित — {0} लेयर	Rata — {0} lapisan	Выровнять — слоёв: {0}
+Cascata · {0} camadas	Cascade · {0} layers	Cascada · {0} capas	شلال · {0} طبقة	캐스케이드 · 레이어 {0}개	カスケード · {0} レイヤー	层叠 · {0} 个图层	कैस्केड · {0} लेयर	Kaskade · {0} lapisan	Каскад · слоёв: {0}
+Keyframe · {0}	Keyframe · {0}	Fotograma clave · {0}	إطار مفتاحي · {0}	키프레임 · {0}	キーフレーム · {0}	关键帧 · {0}	कीफ़्रेम · {0}	Keyframe · {0}	Ключевой кадр · {0}
+Legendas (.srt) · {0}	Subtitles (.srt) · {0}	Subtítulos (.srt) · {0}	ترجمات (.srt) · {0}	자막 (.srt) · {0}	字幕 (.srt) · {0}	字幕 (.srt) · {0}	सबटाइटल (.srt) · {0}	Subtitle (.srt) · {0}	Субтитры (.srt) · {0}
+MP4 · {0} fps	MP4 · {0} fps	MP4 · {0} fps	MP4 · {0} إطار/ث	MP4 · {0} fps	MP4 · {0} fps	MP4 · {0} fps	MP4 · {0} fps	MP4 · {0} fps	MP4 · {0} fps
+Legendas · {0} cues	Subtitles · {0} cues	Subtítulos · {0} entradas	ترجمات · {0} مقطعًا	자막 · {0}개	字幕 · {0} 件	字幕 · {0} 条	सबटाइटल · {0} क्यू	Subtitle · {0} cue	Субтитры · {0} реплик
+Legendas prontas: {0} falas.	Subtitles ready: {0} lines.	Subtítulos listos: {0} líneas.	الترجمات جاهزة: {0} سطرًا.	자막 준비됨: {0}개 대사.	字幕の準備完了：{0} 行。	字幕已就绪：{0} 行。	सबटाइटल तैयार: {0} पंक्तियाँ।	Subtitle siap: {0} baris.	Субтитры готовы: {0} реплик.
+Não foi possível importar o modelo: {0}	Could not import the model: {0}	No se pudo importar el modelo: {0}	تعذّر استيراد النموذج: {0}	모델을 가져오지 못했습니다: {0}	モデルを読み込めませんでした: {0}	无法导入模型：{0}	मॉडल आयात नहीं हो सका: {0}	Gagal mengimpor model: {0}	Не удалось импортировать модель: {0}
+Ligado a {0}	Linked to {0}	Vinculado a {0}	مرتبط بـ {0}	{0}에 연결됨	{0} にリンク	已链接到 {0}	{0} से जुड़ा	Tertaut ke {0}	Связано с {0}
+{0} travadas, da mais recente	{0} stutters, most recent first	{0} bloqueos, del más reciente	{0} تعليق، من الأحدث	{0}건 끊김, 최근 순	{0} 件の引っかかり（新しい順）	{0} 次卡顿，从最近开始	{0} रुकावटें, सबसे नई पहले	{0} tersendat, terbaru dulu	Зависаний: {0}, начиная с последнего
+Objeto {0} · {1} q	Object {0} · {1} f	Objeto {0} · {1} f	كائن {0} · {1} إطار	객체 {0} · {1}프레임	オブジェクト {0} · {1} コマ	对象 {0} · {1} 帧	ऑब्जेक्ट {0} · {1} फ़्रेम	Objek {0} · {1} f	Объект {0} · {1} кадр.
+{0} objetos · {1} luzes · {2} cameras	{0} objects · {1} lights · {2} cameras	{0} objetos · {1} luces · {2} cámaras	{0} كائنات · {1} أضواء · {2} كاميرات	객체 {0} · 조명 {1} · 카메라 {2}	オブジェクト {0} · ライト {1} · カメラ {2}	对象 {0} · 灯光 {1} · 相机 {2}	{0} ऑब्जेक्ट · {1} लाइट · {2} कैमरा	{0} objek · {1} lampu · {2} kamera	Объектов: {0} · источников света: {1} · камер: {2}
+{0} quadros analisados	{0} frames analysed	{0} fotogramas analizados	تم تحليل {0} إطارًا	프레임 {0}개 분석됨	{0} フレームを解析	已分析 {0} 帧	{0} फ़्रेम का विश्लेषण	{0} frame dianalisis	Кадров проанализировано: {0}
+{0} camadas seguirem...	{0} layers to follow...	{0} capas a seguir...	{0} طبقة للمتابعة...	따를 레이어 {0}개...	追従するレイヤー {0} 件...	要跟随的 {0} 个图层...	{0} लेयर का अनुसरण...	{0} lapisan untuk diikuti...	Слоёв для отслеживания: {0}...
+{0} posições de câmera, {1} pontos no espaço, lente de {2} mm.	{0} camera positions, {1} points in space, {2} mm lens.	{0} posiciones de cámara, {1} puntos en el espacio, lente de {2} mm.	{0} موضع كاميرا، {1} نقطة في الفضاء، عدسة {2} مم.	카메라 위치 {0}개, 공간의 점 {1}개, {2} mm 렌즈.	カメラ位置 {0} 点、空間の点 {1} 点、{2} mm レンズ。	{0} 个相机位置，{1} 个空间点，{2} mm 镜头。	{0} कैमरा स्थितियाँ, अंतरिक्ष में {1} बिंदु, {2} mm लेंस।	{0} posisi kamera, {1} titik di ruang, lensa {2} mm.	Позиций камеры: {0}, точек в пространстве: {1}, объектив {2} мм.
+"{0}" cresce um tiquinho em cada ataque da musica.	"{0}" grows a little on every beat of the music.	"{0}" crece un poquito en cada golpe de la música.	"{0}" ينمو قليلًا مع كل ضربة في الموسيقى.	"{0}"이(가) 음악의 박자마다 조금씩 커집니다.	「{0}」は音楽の拍ごとに少しずつ大きくなります。	"{0}" 会随音乐的每一拍略微变大。	"{0}" संगीत की हर बीट पर थोड़ा बढ़ता है।	"{0}" membesar sedikit di setiap ketukan musik.	«{0}» немного растёт на каждый удар музыки.

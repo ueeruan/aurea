@@ -178,7 +178,7 @@ class _Animador extends ConsumerWidget {
                 onChanged: (v) => aplicar(a.copyWith(periodo: v)),
               ),
               ParameterRow(
-                label: 'Começo',
+                label: translate(context, 'Começo'),
                 value: a.fase * 100,
                 min: 0,
                 max: 100,

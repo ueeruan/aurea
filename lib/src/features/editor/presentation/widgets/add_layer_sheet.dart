@@ -1416,7 +1416,7 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
           size: 36,
           color: Color(0xFF8BD5FF),
         ),
-        label: 'Câmera 3D',
+        label: translate(context, 'Câmera 3D'),
         onTap: () {
           _fecha();
           _controller.addCameraLayer(widget.playhead);
@@ -1444,7 +1444,7 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
           size: 36,
           color: Colors.white,
         ),
-        label: 'Partículas',
+        label: translate(context, 'Partículas'),
         onTap: () {
           _fecha();
           _controller.addParticulasLayer(widget.playhead);

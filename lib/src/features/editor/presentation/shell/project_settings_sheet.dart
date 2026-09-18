@@ -64,7 +64,7 @@ Future<void> showProjectSettingsSheet(BuildContext context, WidgetRef ref) {
           const SecaoDoEstudio('Composicao'),
           _Chips<String>(
             chave: 'projeto-proporcao',
-            rotulo: 'Proporção',
+            rotulo: translate(context, 'Proporção'),
             opcoes: [for (final a in ProjectPresets.aspects) a.key],
             rotuloDe: (k) => k,
             selecionado: proporcaoAtual,
@@ -77,7 +77,7 @@ Future<void> showProjectSettingsSheet(BuildContext context, WidgetRef ref) {
           ),
           _Chips<int>(
             chave: 'projeto-resolucao',
-            rotulo: 'Resolução',
+            rotulo: translate(context, 'Resolução'),
             opcoes: ProjectPresets.resolutions,
             rotuloDe: ProjectPresets.resolutionLabel,
             selecionado: p.resolutionHeight,
@@ -146,7 +146,7 @@ Future<void> showProjectSettingsSheet(BuildContext context, WidgetRef ref) {
             LinhaDoEstudio(
               key: const ValueKey('projeto-areas-seguras'),
               icone: CupertinoIcons.rectangle_dock,
-              titulo: 'Áreas seguras',
+              titulo: translate(context, 'Áreas seguras'),
               subtitulo: 'Margens de titulo e acao no preview',
               ligado: p.guides.showSafeAreas,
               onTap: () {

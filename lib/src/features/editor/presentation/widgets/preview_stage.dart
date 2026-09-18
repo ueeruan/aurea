@@ -1335,7 +1335,7 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
                   borderRadius: BorderRadius.circular(6),
                   child: PopupMenuButton<PreviewResolution>(
                     key: const ValueKey('preview-resolution'),
-                    tooltip: 'Resolução da prévia',
+                    tooltip: translate(context, 'Resolução da prévia'),
                     initialValue: resolution,
                     onSelected: (v) =>
                         ref.read(previewResolutionProvider.notifier).state = v,

@@ -604,7 +604,7 @@ class _ProjectsTabState extends ConsumerState<ProjectsTab> {
                         Expanded(
                           child: _Atalho(
                             icon: CupertinoIcons.photo_on_rectangle,
-                            rotulo: 'Mídia',
+                            rotulo: translate(context, 'Mídia'),
                             onTap: () => _importarMidia(context),
                           ),
                         ),

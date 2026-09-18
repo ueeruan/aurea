@@ -1025,7 +1025,7 @@ class _CartaoDaBorda extends StatelessWidget {
         ),
         _Segmentos<PosicaoDaBorda>(
           chave: 'borda-posicao-$indice',
-          rotulo: 'Posição',
+          rotulo: translate(context, 'Posição'),
           valor: borda.posicao,
           opcoes: const {
             PosicaoDaBorda.fora: 'Fora',

@@ -19,7 +19,7 @@ Future<void> abrirFolhaDeCameraNova(
   required Duration tempo,
 }) => mostrarFolhaScene3D<void>(
   context,
-  title: 'Câmera',
+  title: translate(context, 'Câmera'),
   body: FolhaDeCamera(layerId: layerId, tempo: tempo),
 );
 
@@ -59,7 +59,7 @@ class _FolhaDeCameraState extends ConsumerState<FolhaDeCamera> {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: _buildVectorRow(
-            label: 'Posição',
+            label: translate(context, 'Posição'),
             x: cam.posX.valueAt(local),
             y: cam.posY.valueAt(local),
             z: cam.posZ.valueAt(local),

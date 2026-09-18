@@ -467,7 +467,7 @@ class _GalleryPanelState extends ConsumerState<GalleryPanel>
                     ),
                   ),
                   IconButton(
-                    tooltip: 'Vídeos do sistema',
+                    tooltip: translate(context, 'Vídeos do sistema'),
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(minWidth: 36),
                     iconSize: 18,

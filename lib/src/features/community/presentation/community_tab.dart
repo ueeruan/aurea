@@ -2084,7 +2084,7 @@ class _CompositorState extends ConsumerState<_Compositor> {
               child: _AcaoDoCartao(
                 chave: 'comunidade-video',
                 icone: CupertinoIcons.videocam,
-                rotulo: 'Vídeo',
+                rotulo: translate(context, 'Vídeo'),
                 onTap: _escolherVideo,
               ),
             ),

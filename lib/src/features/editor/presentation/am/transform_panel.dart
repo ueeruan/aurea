@@ -505,7 +505,7 @@ class _PositionControlState extends ConsumerState<_PositionControl> {
       children: [
         ParameterPointRow(
           compact: true,
-          label: 'Posição',
+          label: translate(context, 'Posição'),
           x: pos.dx,
           y: pos.dy,
           z: z,
@@ -611,7 +611,7 @@ class _PivotControl extends ConsumerWidget {
       children: [
         ParameterPointRow(
           compact: true,
-          label: 'Pivô',
+          label: translate(context, 'Pivô'),
           x: pivot.dx,
           y: pivot.dy,
           onX: (v) => controller.editPivot(layer.id, t, Offset(v, pivot.dy)),

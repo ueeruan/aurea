@@ -1,0 +1,15 @@
+name: aurea_render
+description: RenderCore do Aurea em C++ — agendador de quadro, recursos de GPU, shaders, avaliador de timeline e compositor 2D atras da UI Flutter.
+version: 0.1.0
+publish_to: none
+environment:
+  sdk: ^3.13.2
+dependencies:
+  # `debugPrint` vem do Flutter: o RenderCore e uma biblioteca do app,
+  # e avisar no log do Flutter e o que se espera dela.
+  flutter:
+    sdk: flutter
+  ffi: ^2.1.3
+  hooks: ^2.0.2
+  code_assets: ^1.2.1
+  native_toolchain_c: 0.19.3

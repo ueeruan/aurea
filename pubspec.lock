@@ -39,6 +39,13 @@ packages:
       relative: true
     source: path
     version: "1.0.0"
+  aurea_render:
+    dependency: "direct main"
+    description:
+      path: "packages/aurea_render"
+      relative: true
+    source: path
+    version: "0.1.0"
   aurea_timecore:
     dependency: "direct main"
     description:

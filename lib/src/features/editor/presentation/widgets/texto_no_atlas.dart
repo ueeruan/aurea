@@ -228,6 +228,37 @@ class TextoNoAtlas {
     canvas.restore();
   }
 
+  /// DESENHA A PALAVRA COM UM FILTRO DE COR. QUEM RECORTA E QUEM CHAMA.
+  ///
+  /// O RECORTE NAO MORA AQUI DE PROPOSITO. Quem desenha a unidade precisa
+  /// recortar ANTES de aplicar o giro e a escala dela — depois disso o
+  /// recorte deixaria de ser um retangulo alinhado com a linha, e recortar
+  /// uma letra girada com um retangulo torto nao e a mesma coisa. Como a
+  /// transformacao acontece entre os dois, o recorte tem de ser aplicado
+  /// la, no espaco da LINHA.
+  ///
+  /// [matrizDeCor] entra como filtro, e nao como `TextStyle` novo: um
+  /// estilo por letra obrigaria a um paragrafo por (palavra, cor), e
+  /// refazer o paragrafo a cada quadro desfaz a juncao da escrita cursiva
+  /// — que e justamente o que este caminho veio consertar.
+  void paintDaPalavra(
+    Canvas canvas,
+    Offset offset, {
+    List<double>? matrizDeCor,
+  }) {
+    assert(_diagramado, 'layout antes de paint');
+    if (matrizDeCor == null) {
+      paint(canvas, offset);
+      return;
+    }
+    canvas.saveLayer(
+      offset & size,
+      Paint()..colorFilter = ColorFilter.matrix(matrizDeCor),
+    );
+    paint(canvas, offset);
+    canvas.restore();
+  }
+
   void _soltarPedacos() {
     for (final (pedaco, _) in _pedacos) {
       pedaco.dispose();

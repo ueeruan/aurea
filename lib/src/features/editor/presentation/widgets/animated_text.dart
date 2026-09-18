@@ -8,6 +8,8 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 
 import '../../domain/layer.dart';
+import '../../domain/cor_da_unidade.dart';
+import '../../domain/direcao_do_texto.dart';
 import '../../domain/text_animator.dart';
 import '../../domain/text_path.dart';
 import 'texto_no_atlas.dart';
@@ -85,6 +87,36 @@ class AnimatedTextView extends StatelessWidget {
   }
 }
 
+/// O PAINTER DO TEXTO ANIMADO, PARA O TESTE DESENHAR NUM CANVAS PROPRIO.
+///
+/// O caminho de desenho nao e observavel de fora — passa por dentro de um
+/// `CustomPaint`. Quem precisa dele (o teste que prova que a letra e
+/// desenhada DENTRO DO RECORTE DA PALAVRA, em vez de um paragrafo por
+/// letra) pega por aqui e desenha num canvas que grava as chamadas.
+@visibleForTesting
+CustomPainter painterDoTextoAnimado(
+  TextLayer layer,
+  Duration localTime, {
+  Path? path,
+}) {
+  final estilo = AnimatedTextView.styleFor(layer, animated: true);
+  final diagrama = _Diagrama.de(layer.text, estilo, layer.alinhamento);
+  final spec = layer.textPath;
+  final caminho = spec.active ? (path ?? buildTextPath(spec)) : null;
+  final size = caminho == null || caminho.getBounds().isEmpty
+      ? diagrama.cheio.size
+      : caminho.getBounds().inflate(layer.fontSize).size;
+  return _AnimatedTextPainter(
+    layer: layer,
+    style: estilo,
+    full: diagrama.cheio,
+    units: diagrama.unidades,
+    diagrama: diagrama,
+    localTime: localTime,
+    path: caminho,
+  ).._tamanhoDoTeste = size;
+}
+
 /// A linha medida uma vez por (texto, estilo, alinhamento): o painter da
 /// linha, as unidades e a caixa de cada unidade. Cache pequeno, o mais
 /// antigo sai.
@@ -92,17 +124,22 @@ class _Diagrama {
   _Diagrama._(this.texto, this.estilo, this.alinhamento)
     : cheio = TextPainter(
         text: TextSpan(text: texto, style: estilo),
-        textDirection: TextDirection.ltr,
+        textDirection: direcaoDoTexto(texto),
         textAlign: alinhamento,
       )..layout(),
-      unidades = TextUnits.of(texto);
+      unidades = TextUnits.of(texto),
+      direcao = direcaoDoTexto(texto);
 
   final String texto;
   final TextStyle estilo;
   final TextAlign alinhamento;
+
+  /// A DIRECAO BASE, tirada do proprio texto. Ver [direcaoDoTexto].
+  final TextDirection direcao;
   final TextPainter cheio;
   final TextUnits unidades;
   final Map<int, Rect?> _caixas = {};
+  final Map<int, Rect?> _recortes = {};
 
   static final Map<Object, _Diagrama> _cache = {};
 
@@ -136,23 +173,70 @@ class _Diagrama {
     }
     return rect;
   });
+
+  /// O PEDACO DA LINHA QUE PERTENCE A UNIDADE [i].
+  ///
+  /// A CAIXA DA UNIDADE NAO SERVE COMO RECORTE quando a escrita e cursiva:
+  /// a caixa e a TINTA da letra, e em arabe a tinta de duas letras vizinhas
+  /// se ENCOSTA — recortar pela tinta traria um pedaco da vizinha junto. A
+  /// divisa vai no MEIO da distancia entre as duas, que e o unico lugar
+  /// onde nao ha tinta de ninguem.
+  ///
+  /// Verticalmente o problema nao existe: a caixa ja e a faixa da linha, e
+  /// crescer um pixel para cima e para baixo so pega antialias.
+  Rect? recorte(int i) => _recortes.putIfAbsent(i, () {
+    final r = caixa(i);
+    if (r == null) return null;
+    var esq = r.left;
+    var dir = r.right;
+    for (var j = 0; j < unidades.length; j++) {
+      if (j == i) continue;
+      final o = caixa(j);
+      if (o == null || o.isEmpty) continue;
+      if (o.bottom <= r.top || o.top >= r.bottom) continue;
+      if (o.right <= r.left) esq = math.max(esq, (o.right + r.left) / 2);
+      if (o.left >= r.right) dir = math.min(dir, (o.left + r.right) / 2);
+    }
+    return Rect.fromLTRB(esq, r.top - 1, dir, r.bottom + 1);
+  });
 }
 
-/// A letra desenhada, por (grafema, estilo com a cor): so a cor animada
-/// cria entrada nova. O mais antigo sai SEM dispose — pode estar em uso no
-/// mesmo quadro; o paragrafo nativo e liberado pelo coletor.
-final Map<Object, (String, TextStyle, TextoNoAtlas)> _letras = {};
+/// A PALAVRA desenhada, por (texto, estilo, alinhamento, direcao).
+///
+/// ERA A LETRA, e essa era a causa do relato. Uma letra arabe construida
+/// sozinha recebe a forma ISOLADA — o Shaper nao tem com quem ligar — e o
+/// texto inteiro saia com as letras soltas depois de aplicar o animador.
+/// A juncao vem do contexto dentro da palavra; a palavra e a menor unidade
+/// que pode ser moldada sozinha.
+///
+/// O mais antigo sai SEM dispose: pode estar em uso no mesmo quadro, e o
+/// paragrafo nativo e liberado pelo coletor.
+final Map<Object, (String, TextStyle, TextoNoAtlas)> _palavras = {};
 
-TextoNoAtlas _letra(String grafema, TextStyle estilo) {
-  final chave = Object.hash(grafema, estilo);
-  final achada = _letras.remove(chave);
-  if (achada != null && achada.$1 == grafema && achada.$2 == estilo) {
-    _letras[chave] = achada;
+TextoNoAtlas _palavraNoAtlas(
+  String texto,
+  TextStyle estilo,
+  TextAlign alinhamento,
+  TextDirection direcao,
+) {
+  final chave = Object.hash(texto, estilo, alinhamento, direcao);
+  final achada = _palavras.remove(chave);
+  if (achada != null &&
+      achada.$1 == texto &&
+      achada.$2 == estilo &&
+      achada.$3.cheio.textAlign == alinhamento &&
+      achada.$3.cheio.textDirection == direcao) {
+    _palavras[chave] = achada;
     return achada.$3;
   }
-  if (_letras.length >= 384) _letras.remove(_letras.keys.first);
-  final nova = TextoNoAtlas(texto: grafema, estilo: estilo)..layout();
-  _letras[chave] = (grafema, estilo, nova);
+  if (_palavras.length >= 512) _palavras.remove(_palavras.keys.first);
+  final nova = TextoNoAtlas(
+    texto: texto,
+    estilo: estilo,
+    alinhamento: alinhamento,
+    direcao: direcao,
+  )..layout();
+  _palavras[chave] = (texto, estilo, nova);
   return nova;
 }
 
@@ -176,6 +260,10 @@ class _AnimatedTextPainter extends CustomPainter {
   final Duration localTime;
   final Path? path;
 
+  /// Tamanho usado quando quem chama nao passa um (o caso do teste).
+  Size _tamanhoDoTeste = Size.zero;
+  Size get tamanhoDeTeste => _tamanhoDoTeste;
+
   @override
   void paint(Canvas canvas, Size size) {
     final t = localTime;
@@ -187,7 +275,6 @@ class _AnimatedTextPainter extends CustomPainter {
     var runningTracking = 0.0;
 
     for (var i = 0; i < units.length; i++) {
-      final cluster = units.clusters[i];
       final trackingShift = runningTracking;
 
       // Acumula o transform desta unidade pelos animadores em pilha.
@@ -255,16 +342,19 @@ class _AnimatedTextPainter extends CustomPainter {
       final sy = math.max(0.0, (scaleP / 100) * (scaleYP / 100));
       if (sx <= 0.001 || sy <= 0.001) continue;
 
-      final unitColor = _shiftColor(
-        style.color!,
-        hue,
-        satP,
-        brightP,
-      ).withValues(alpha: style.color!.a * opacity);
-
-      // Pelo corpo de desenho: a letra ampliada pelo animador e pela camada
-      // nao pode pedir glifo gigante ao atlas (ver texto_no_atlas.dart).
-      final unitPainter = _letra(cluster, style.copyWith(color: unitColor));
+      // A PALAVRA INTEIRA, e nao a letra — ver [_palavraNoAtlas]. O que
+      // recorta esta unidade e o `clipRect` do desenho.
+      final unidade = _palavraNoAtlas(
+        units.palavraDe(i),
+        style,
+        layer.alinhamento,
+        diagrama.direcao,
+      );
+      final recorte = diagrama.recorte(i) ?? rect;
+      // A COR DA UNIDADE VIROU FILTRO, e nao estilo. Trocar a cor do
+      // `TextStyle` obrigaria a um paragrafo por (palavra, cor) — e o
+      // paragrafo e justamente quem carrega a juncao da escrita cursiva.
+      final matriz = matrizDaUnidade(hue, satP, brightP, style.color!.a * opacity);
 
       // Sobre o caminho, a posicao vem do AVANCO acumulado ao longo da
       // curva, nao da caixa da linha — e a diferenca entre letras
@@ -280,7 +370,7 @@ class _AnimatedTextPainter extends CustomPainter {
           path!,
           d,
           spec: spec,
-          glyphHeight: unitPainter.height,
+          glyphHeight: rect.height,
         );
         if (posto == null) continue;
         center = posto.position + Offset(size.width / 2, size.height / 2);
@@ -290,6 +380,10 @@ class _AnimatedTextPainter extends CustomPainter {
       }
 
       canvas.save();
+      // O RECORTE VEM PRIMEIRO, no espaco da LINHA: depois dos giros ele
+      // nao seria mais um retangulo alinhado, e recortar uma letra girada
+      // com um retangulo torto nao e a mesma coisa.
+      canvas.clipRect(recorte);
       // DESFOQUE POR UNIDADE: e o que faz "aparecer em desfoque" existir.
       // Sem isto so da para borrar a camada inteira, que e outra coisa.
       final blurring = blur > 0.05;
@@ -328,10 +422,12 @@ class _AnimatedTextPainter extends CustomPainter {
         );
       }
       if (sx != 1 || sy != 1) canvas.scale(sx, sy);
-      unitPainter.paint(
-        canvas,
-        Offset(-unitPainter.width / 2, -unitPainter.height / 2),
-      );
+      // VOLTA PARA O ESPACO DA LINHA. Toda a transformacao acima age em
+      // torno do centro DESTA unidade, entao desenhar a palavra no lugar
+      // de sempre move esta letra e deixa as vizinhas paradas — que e o
+      // ponto: movimento por letra, forma por palavra.
+      canvas.translate(-center.dx, -center.dy);
+      unidade.paintDaPalavra(canvas, Offset.zero, matrizDeCor: matriz);
       canvas.restore();
       if (blurring) canvas.restore();
     }
@@ -339,17 +435,4 @@ class _AnimatedTextPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_AnimatedTextPainter old) => true;
-}
-
-/// Deslocamento de MATIZ, SATURACAO e BRILHO por unidade — e o que
-/// permite varrer cor letra a letra sem trocar a cor da camada.
-Color _shiftColor(Color base, double hueDeg, double satPct, double brightPct) {
-  if (hueDeg == 0 && satPct == 100 && brightPct == 100) return base;
-  final hsl = HSLColor.fromColor(base);
-  final h = (hsl.hue + hueDeg) % 360;
-  return hsl
-      .withHue(h < 0 ? h + 360 : h)
-      .withSaturation((hsl.saturation * satPct / 100).clamp(0.0, 1.0))
-      .withLightness((hsl.lightness * brightPct / 100).clamp(0.0, 1.0))
-      .toColor();
 }

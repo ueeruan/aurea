@@ -586,6 +586,31 @@ class TextUnits {
 
   int get length => clusters.length;
 
+  /// O TEXTO DA PALAVRA a que a unidade [i] pertence.
+  ///
+  /// E O QUE PERMITE ANIMAR POR LETRA SEM QUEBRAR A ESCRITA CURSIVA. Uma
+  /// letra arabe desenhada sozinha sai na forma ISOLADA: as letras param
+  /// de se ligar, que foi o relato ("cada letra virou separada e sem
+  /// ligacao com o que vem depois"). Quem carrega a forma e o contexto
+  /// dentro da palavra; desenhar a palavra inteira e recortar a letra da
+  /// as duas coisas — forma certa e movimento proprio.
+  ///
+  /// Fora de palavra (espaco, quebra de linha) devolve a propria unidade.
+  String palavraDe(int i) {
+    if (i < 0 || i >= clusters.length) return '';
+    final w = wordIndex[i];
+    if (w < 0) return clusters[i];
+    var a = i;
+    var b = i;
+    while (a > 0 && wordIndex[a - 1] == w) {
+      a--;
+    }
+    while (b + 1 < clusters.length && wordIndex[b + 1] == w) {
+      b++;
+    }
+    return clusters.sublist(a, b + 1).join();
+  }
+
   /// (indice, total) da unidade [i] na base pedida; indice -1 = a unidade
   /// nao conta nessa base (ex.: espaco em charactersNoSpaces) -> c = 0.
   (int, int) indexFor(int i, SelectorBasedOn basedOn) => switch (basedOn) {

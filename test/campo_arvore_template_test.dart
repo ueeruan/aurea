@@ -7,7 +7,6 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:aurea/src/features/editor/application/editor_controller.dart';
-import 'package:aurea/src/features/editor/application/model_import_service.dart';
 import 'package:aurea/src/features/editor/application/texture_cache.dart';
 import 'package:aurea/src/features/editor/application/video_layer_manager.dart';
 import 'package:aurea/src/features/editor/domain/layer.dart';
@@ -24,17 +23,10 @@ void main() {
     (tester) async {
       final sky =
           'data:image/png;base64,${base64Encode(File('assets/templates/campo-sky.png').readAsBytesSync())}';
-      final scanned = await tester.runAsync(
-        () => readModel3DFiles([
-          'assets/models/monolito/arvore.obj',
-          'assets/models/monolito/arvore.mtl',
-          'assets/models/monolito/arvore.jpg',
-        ]),
-      );
-      final project = buildCampoArvoreTemplate(
-        skyTexture: sky,
-        scannedTree: scanned,
-      );
+      // O CARVALHO DO PRIMEIRO PLANO E GERADO EM CODIGO. Aqui havia um
+      // scan de terceiro lido do bundle e importado antes da cena montar —
+      // a espera de "Preparando o campo 3D" existia por causa dele.
+      final project = buildCampoArvoreTemplate(skyTexture: sky);
       final scene = project.layers.whereType<Scene3DLayer>().first;
       expect(project.duration, campoDuration);
       expect(scene.allCameras.length, 5);

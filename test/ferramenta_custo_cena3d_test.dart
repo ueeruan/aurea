@@ -8,7 +8,6 @@ import 'package:aurea/src/features/editor/domain/layer.dart';
 import 'package:aurea/src/features/editor/domain/scene3d.dart';
 import 'package:aurea/src/features/editor/domain/video_project.dart';
 import 'package:aurea/src/features/editor/presentation/widgets/scene3d_painter.dart';
-import 'package:aurea/src/features/projects/application/modelos_empacotados.dart';
 import 'package:aurea/src/features/projects/domain/deriva_template.dart';
 import 'package:aurea/src/features/projects/domain/flor_template.dart';
 import 'package:aurea/src/features/projects/domain/monolito_template.dart';
@@ -69,23 +68,23 @@ void main() {
   }
 
   test('custo do quadro no pintor em CPU', () async {
-    final astronauta = await carregarAstronautaDe('assets/models/monolito');
+    final astronauta = null;
     await medir('DERIVA sem modelo ', buildDerivaTemplate());
-    await medir('DERIVA com modelo ', buildDerivaTemplate(astronauta: astronauta));
-    final modelos = await carregarMonolitoModelosDe('assets/models/monolito');
+    await medir('DERIVA com modelo ', buildDerivaTemplate());
+    final modelos = null;
     await medir('MONOLITO sem modelos', buildMonolitoTemplate());
-    await medir('MONOLITO com modelos', buildMonolitoTemplate(modelos: modelos));
+    await medir('MONOLITO com modelos', buildMonolitoTemplate());
     await medir('FLOR             ', buildFlorTemplate());
     await medir('FLOR tocando     ', buildFlorTemplate(), rascunho: true);
     // O MESMO, EM RASCUNHO — que e como o preview desenha enquanto toca.
     await medir(
       'DERIVA tocando   ',
-      buildDerivaTemplate(astronauta: astronauta),
+      buildDerivaTemplate(),
       rascunho: true,
     );
     await medir(
       'MONOLITO tocando ',
-      buildMonolitoTemplate(modelos: modelos),
+      buildMonolitoTemplate(),
       rascunho: true,
     );
   }, timeout: const Timeout(Duration(minutes: 5)));

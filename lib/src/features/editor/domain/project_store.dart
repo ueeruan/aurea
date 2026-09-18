@@ -1,3 +1,4 @@
+import 'acabamento3d.dart';
 import 'dart:convert';
 
 import 'package:aurea_render/aurea_render.dart';
@@ -1406,7 +1407,13 @@ Map<String, dynamic> layerToJson(Layer l) {
       if (q.focal != 1200) base['focal'] = q.focal;
     case Element3DLayer e:
       base['kind'] = 'el3d';
+      // POR NOME, e nao so pelo indice do enum: tirar um tipo do meio da
+      // lista deslocaria todos os seguintes, e um projeto salvo abriria
+      // com outra forma — sem erro, sem aviso, so errado. O `el` continua
+      // sendo gravado para uma versao anterior conseguir ler.
       base['el'] = e.kind.index;
+      base['eln'] = nomeDoElemento3D(e.kind);
+      base['acab'] = nomeDoAcabamentoArquivo(e.acabamento);
       base['size'] = e.size;
       base['color'] = _col(e.color);
       base['edges'] = e.edges;
@@ -2658,7 +2665,16 @@ Layer layerFromJson(Map<String, dynamic> m) {
         name: name,
         startTime: start,
         duration: dur,
-        kind: Element3DKind.values[(m['el'] as num).toInt()],
+        // O NOME MANDA. O indice e o caminho de um arquivo gravado antes
+        // desta versao — e um nome desconhecido (projeto de uma versao
+        // mais nova) cai no indice, em vez de virar um cubo qualquer.
+        kind:
+            elemento3DPorNome(m['eln'] as String?) ??
+            Element3DKind.values[(m['el'] as num).toInt().clamp(
+              0,
+              Element3DKind.values.length - 1,
+            )],
+        acabamento: acabamentoPorNome(m['acab'] as String?),
         size: (m['size'] as num).toDouble(),
         color: _asCol(m['color']),
         edges: m['edges'] as bool? ?? true,

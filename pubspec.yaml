@@ -146,7 +146,6 @@ flutter:
     - assets/templates/
     - assets/templates/dnyx/
     - assets/templates/vhf/
-    - assets/models/monolito/
     - assets/tutoriais/
 
   fonts:

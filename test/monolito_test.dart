@@ -5,7 +5,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:aurea/src/features/editor/domain/layer.dart';
 import 'package:aurea/src/features/editor/domain/project_store.dart';
 import 'package:aurea/src/features/editor/domain/scene3d.dart';
-import 'package:aurea/src/features/projects/application/modelos_empacotados.dart';
 import 'package:aurea/src/features/projects/domain/monolito_template.dart';
 
 /// O MONOLITO tem de caber num iPhone e sobreviver ao JSON: orcamento
@@ -54,19 +53,25 @@ void main() {
     }
   });
 
-  test('com os modelos reais fica abaixo do teto da GPU', () async {
-    final modelos = await carregarMonolitoModelosDe('assets/models/monolito');
-    final p = buildMonolitoTemplate(modelos: modelos);
+  test('fica abaixo do teto da GPU, com tudo gerado em codigo', () async {
+    // OS TRES SCANS SAIRAM DO APLICATIVO (astronauta, portal e arvore):
+    // eram modelos de terceiros viajando dentro do APK. O explorador, a
+    // floresta e o bloco sao malha propria — e o Portal, que era um
+    // modelo voxel importado, deixou de existir junto com o arquivo dele.
+    final p = buildMonolitoTemplate();
     final total = monolitoTriangles(p);
     expect(total, lessThanOrEqualTo(monolitoTriangleBudgetComModelos),
         reason: '$total triangulos');
     final c = p.layers.whereType<Scene3DLayer>().single;
-    expect(c.scene.nodeById('monolito_portal'), isNotNull);
-    expect(c.scene.nodeById('monolito_astronauta')!.modelAsset,
-        same(modelos.astronauta));
-    // O portal tem faces acesas: e o roxo emissivo.
-    final mats = modelos.portal.data['materials'] as List;
-    expect(mats.any((m) => (m['emissive'] as num? ?? 0) > 0), isTrue);
+    expect(c.scene.nodeById('monolito_portal'), isNull);
+    final astronauta = c.scene.nodeById('monolito_astronauta')!;
+    expect(astronauta.modelAsset, isNotNull);
+    expect(astronauta.modelAsset!.triangleCount, greaterThan(200));
+    // A FLORESTA INTEIRA E PROCEDURAL: nao ha mais nenhum no de scan.
+    expect(
+      c.scene.nodes.where((n) => n.id.contains('arvore_real')),
+      isEmpty,
+    );
   });
 
   test('vai e volta do JSON', () {

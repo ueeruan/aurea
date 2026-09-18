@@ -10,7 +10,6 @@ import '../../editor/domain/panorama3d.dart';
 import '../../editor/domain/scene3d.dart';
 import '../../editor/domain/shape.dart';
 import '../../editor/domain/video_project.dart';
-import '../application/modelos_empacotados.dart';
 import 'abyss_cinematic_template.dart' show buildAbyssExplorer;
 import 'malha_codigo.dart';
 import 'textura_procedural.dart';
@@ -354,18 +353,24 @@ SceneNode _volumeDeLuz() {
   return m.no('monolito_volume_de_luz', 'Volume de luz · camadas');
 }
 
-/// O ASTRONAUTA (o explorador do Abismo ate o seu modelo chegar): flutua
-/// diante da porta, de frente para ela, subindo e descendo devagar.
-SceneNode _astronauta(MonolitoModelos? modelos) {
+/// O ASTRONAUTA — o explorador do Abismo, gerado em codigo.
+///
+/// O SCAN IMPORTADO QUE ELE SUBSTITUI saiu do aplicativo: era um modelo
+/// de terceiro, com a textura do modelo, usado como provisorio enquanto o
+/// explorador do Abismo nao chegava. Ele chegou. O que esta aqui e malha
+/// propria, material proprio e a mesma silhueta — e nao ha mais um
+/// asset de terceiro viajando dentro do APK.
+///
+/// Ele flutua diante da porta, de frente para ela, subindo e descendo
+/// devagar, em branco: o contraluz magenta precisa de branco para
+/// desenhar.
+SceneNode _astronauta() {
   final base = _mundo(Vec3(_portaCentroLocal.x - 165, 118, _bd / 2 + 150));
   return SceneNode(
     id: 'monolito_astronauta',
-    name: modelos == null ? 'Astronauta · provisorio' : 'Astronauta',
+    name: 'Astronauta',
     size: 92,
-    modelAsset: modelos?.astronauta ?? buildAbyssExplorer(),
-    // Sem o modelo real, o explorador do Abismo em branco: o dele e
-    // vermelho, e o contraluz magenta precisa de branco para desenhar.
-    useModelMaterials: modelos != null,
+    modelAsset: buildAbyssExplorer(),
     material: const Material3D(baseColor: Color(0xffe9e6df), roughness: .5),
     x: _ad(base.x),
     y: _sample((t) => base.y + 8 * math.sin(2 * math.pi * t / 5.2)),
@@ -376,42 +381,6 @@ SceneNode _astronauta(MonolitoModelos? modelos) {
     rotZ: _ad(-6),
   );
 }
-
-/// O PORTAL (o modelo voxel importado) parado na abertura da porta, com
-/// o roxo aceso pelo material emissivo que [acenderPortal] separou.
-SceneNode _portal(MonolitoModelos modelos) {
-  final p = _mundo(Vec3(_portaCentroLocal.x, 125, _bd / 2 + 22));
-  return SceneNode(
-    id: 'monolito_portal',
-    name: 'Portal',
-    size: 125,
-    modelAsset: modelos.portal,
-    x: _ad(p.x),
-    y: _ad(p.y),
-    z: _ad(p.z),
-    rotY: _ad(_giro),
-  );
-}
-
-/// A ARVORE ESCANEADA na posicao mais proxima da camera. Uma so: no
-/// pintor em CPU cada copia custa a malha inteira de novo, e uma arvore
-/// de verdade em primeiro plano ja faz o trabalho que as procedurais do
-/// fundo nao fazem. O escaneamento e Z-para-cima: deitar em X poe o
-/// tronco de pe.
-List<SceneNode> _arvoresReais(MonolitoModelos modelos) => [
-  for (var k = 0; k < 1; k++)
-    SceneNode(
-      id: 'monolito_arvore_real_$k',
-      name: 'Arvore escaneada ${k + 1}',
-      size: 420,
-      modelAsset: modelos.arvore,
-      x: _ad(_arvores[k].$1),
-      y: _ad(420),
-      z: _ad(_arvores[k].$2),
-      rotX: _ad(-90),
-      rotZ: _ad(ruido(k + 600) * 360),
-    ),
-];
 
 /// Uma HASTE afunilada (tronco, galho): cilindro de [r0] a [r1].
 void _haste(
@@ -690,7 +659,7 @@ Camera3D _camera() {
 
 // ============================================================== PROJETO
 
-VideoProject buildMonolitoTemplate({MonolitoModelos? modelos}) {
+VideoProject buildMonolitoTemplate() {
   final luzDaPorta = _mundo(Vec3(_portaCentroLocal.x, 130, _bd / 2 + 12));
   final scene = Scene3D(
     showFloorGrid: false,
@@ -738,12 +707,13 @@ VideoProject buildMonolitoTemplate({MonolitoModelos? modelos}) {
       _mata(),
       _chao(),
       _monolito(),
-      if (modelos != null) ..._arvoresReais(modelos),
-      ..._arvoresDaFloresta(desde: modelos == null ? 0 : 1),
+      // A FLORESTA INTEIRA E PROCEDURAL — nao ha mais um scan no meio
+      // dela. A primeira arvore entra no lugar que o scan ocupava, que era
+      // o mais proximo da camera.
+      ..._arvoresDaFloresta(desde: 0),
       _arbusto(),
       ..._grama(),
-      _astronauta(modelos),
-      if (modelos != null) _portal(modelos),
+      _astronauta(),
       _volumeDeLuz(),
     ],
   );

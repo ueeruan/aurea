@@ -11,7 +11,6 @@ import 'package:aurea/src/features/editor/application/texture_cache.dart';
 import 'package:aurea/src/features/editor/application/video_layer_manager.dart';
 import 'package:aurea/src/features/editor/domain/layer.dart';
 import 'package:aurea/src/features/editor/presentation/widgets/preview_stage.dart';
-import 'package:aurea/src/features/projects/application/modelos_empacotados.dart';
 import 'package:aurea/src/features/projects/domain/monolito_template.dart';
 
 /// RENDER DE MESA do MONOLITO: os quadros do modelo, pintados pelo mesmo
@@ -24,10 +23,7 @@ void main() {
   testWidgets('renderiza o Monolito em quadros', (tester) async {
     if (Platform.environment['AUREA_RENDER'] != '1') return;
 
-    final modelos = await tester.runAsync(
-      () => carregarMonolitoModelosDe('assets/models/monolito'),
-    );
-    final project = buildMonolitoTemplate(modelos: modelos);
+    final project = buildMonolitoTemplate();
     // As texturas sao data URIs: precisam estar decodificadas antes do
     // primeiro quadro, senao as faces saem lisas.
     await tester.runAsync(() async {

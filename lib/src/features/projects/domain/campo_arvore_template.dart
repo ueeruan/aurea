@@ -25,27 +25,18 @@ Duration _time(double s) => Duration(microseconds: (s * 1e6).round());
 
 /// A single shared landscape, five real cameras and editable geometry.
 /// Seeded generation makes opening, seeking and export reproducible.
-VideoProject buildCampoArvoreTemplate({
-  String? skyTexture,
-  ModelAsset3D? scannedTree,
-}) {
+/// O CAMPO — sem o scan de arvore.
+///
+/// O `scannedTree` era um asset de terceiro copiado do bundle para o
+/// disco e importado em isolate ANTES da cena abrir: a espera de
+/// "Preparando o campo 3D" existia por causa dele, e quando o arquivo
+/// faltava a cena perdia o primeiro plano. O carvalho daqui e gerado em
+/// codigo, como o resto da paisagem.
+VideoProject buildCampoArvoreTemplate({String? skyTexture}) {
   final base = buildColinaTvTemplate();
   final landscape = base.layers.whereType<Scene3DLayer>().single.scene;
   final ground = colinaAltura(0, 40);
   final tree = _tree(ground);
-  final warmTree = scannedTree == null
-      ? null
-      : ModelAsset3D({
-          ...scannedTree.data,
-          'materials': [
-            for (final m in scannedTree.data['materials'] as List)
-              {
-                ...m as Map,
-                'color': [1.0, .88, .46, 1.0],
-                'unlit': true,
-              },
-          ],
-        });
   final cameras = <Camera3D>[];
   for (var shot = 0; shot < 5; shot++) {
     Vec3 eye(double u) => switch (shot) {
@@ -114,18 +105,7 @@ VideoProject buildCampoArvoreTemplate({
         else if (n.id.startsWith('colina_flor'))
           n,
       _meadow(),
-      if (scannedTree == null)
-        tree.first
-      else
-        SceneNode(
-          id: 'campo_tronco',
-          name: 'Carvalho · tronco escaneado',
-          modelAsset: warmTree,
-          size: 205,
-          y: AnimatedDouble(ground + 168),
-          z: AnimatedDouble(40),
-          rotX: AnimatedDouble(-90),
-        ),
+      tree.first,
       tree.last,
     ],
   );

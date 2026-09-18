@@ -20,14 +20,13 @@ import '../../editor/domain/video_project.dart';
 import '../../editor/presentation/editor_screen.dart';
 import '../../media/application/media_import_service.dart' show proporcaoDaFoto;
 import '../../tutoriais/presentation/tutorial_screen.dart';
-import '../application/campo_assets.dart';
 import '../application/dnyx_remix_assets.dart';
-import '../application/modelos_empacotados.dart';
 import '../application/projects_controller.dart';
 import '../application/projects_view.dart';
 import '../application/reference_rebuild_assets.dart';
 import '../application/thumbnail_service.dart';
 import '../application/vhf_motion_assets.dart';
+import '../domain/campo_arvore_template.dart';
 import '../domain/abyss_cinematic_template.dart';
 import '../domain/cena_xml_import.dart';
 import '../domain/colina_tv_template.dart';
@@ -107,19 +106,14 @@ class _ProjectsTabState extends ConsumerState<ProjectsTab> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: AppText(texto)));
   }
 
-  /// Prepara o campo com suas texturas embutidas antes de abrir.
-  Future<void> _openCampo(BuildContext context) async {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: AppText('Preparando o campo 3D…')),
-    );
-    try {
-      final model = await prepareCampoArvore();
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).hideCurrentSnackBar();
-      _abrirModelo(context, model);
-    } catch (_) {
-      _falha(context, 'Não consegui preparar o campo. Tente novamente.');
-    }
+  /// O CAMPO ABRE DIRETO — sem a espera de "Preparando o campo 3D".
+  ///
+  /// A ESPERA EXISTIA POR CAUSA DE UM ARQUIVO: o campo copiava um scan de
+  /// arvore do bundle para o disco e o importava em isolate antes de
+  /// montar a cena. A arvore do campo e gerada em codigo desde antes — o
+  /// scan era o primeiro plano. Sem ele, nao ha o que preparar.
+  void _openCampo(BuildContext context) {
+    _abrirModelo(context, buildCampoArvoreTemplate());
   }
 
   Future<void> _openVhfMotion(BuildContext context) async {
@@ -132,27 +126,18 @@ class _ProjectsTabState extends ConsumerState<ProjectsTab> {
     }
   }
 
-  /// A Deriva usa so o astronauta: prepara o modelo e abre.
-  Future<void> _openDeriva(BuildContext context) async {
-    try {
-      final astronauta = await carregarAstronauta();
-      if (!context.mounted) return;
-      _abrirModelo(context, buildDerivaTemplate(astronauta: astronauta));
-    } catch (e) {
-      _falha(context, 'Nao consegui preparar o astronauta: $e');
-    }
+  /// A Deriva abre DIRETO: o explorador e malha propria, gerada em
+  /// codigo. Antes daqui saia uma espera para converter um arquivo
+  /// importado em disco — e, quando ele faltava, a cena abria com uma
+  /// capsula no lugar do astronauta.
+  void _openDeriva(BuildContext context) {
+    _abrirModelo(context, buildDerivaTemplate());
   }
 
-  /// Os modelos do Monolito (astronauta, portal, arvore) viram arquivos
-  /// e passam pelo importador antes do projeto abrir.
-  Future<void> _openMonolito(BuildContext context) async {
-    try {
-      final modelos = await carregarMonolitoModelos();
-      if (!context.mounted) return;
-      _abrirModelo(context, buildMonolitoTemplate(modelos: modelos));
-    } catch (e) {
-      _falha(context, 'Nao consegui preparar os modelos do Monolito: $e');
-    }
+  /// O Monolito abre DIRETO, pelo mesmo motivo: a floresta, o explorador
+  /// e o bloco sao gerados em codigo.
+  void _openMonolito(BuildContext context) {
+    _abrirModelo(context, buildMonolitoTemplate());
   }
 
   /// Prepara a trilha empacotada antes de abrir a nova recriacao.

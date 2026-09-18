@@ -8,6 +8,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 
 import '../../application/texture_cache.dart';
+import '../../domain/acabamento3d.dart';
 import '../../domain/element3d.dart';
 import '../../domain/layer.dart';
 
@@ -78,6 +79,9 @@ class Element3DPainter extends CustomPainter {
       ..strokeJoin = StrokeJoin.round;
     final base = layer.color;
     final edgeColor = Color.lerp(base, Colors.black, 0.55)!;
+    // O MATERIAL: os metais do texto 3D, ou a cor lisa de sempre.
+    final material = materialDoElemento3D(layer.acabamento, layer.color);
+    final metal = !material.sombreamentoLegado;
 
     // IMAGEM: chega do cache; se ainda nao chegou, a face sai lisa e o
     // cache avisa quando carregar.
@@ -149,7 +153,10 @@ class Element3DPainter extends CustomPainter {
       // mapa tem Y para cima e a malha tem Y para baixo, por isso o -ry.
       Color? reflexo;
       var amount = 0.0;
-      if (layer.reflect > 0 && len > 1e-9) {
+      // O REFLEXO LEGADO E SO DA COR LISA. Num acabamento metalico quem
+      // responde pelo ambiente e o MATERIAL, e somar os dois contaria a
+      // mesma luz duas vezes — o objeto ficaria lavado.
+      if (!metal && layer.reflect > 0 && len > 1e-9) {
         // A face virada para tras tambem e desenhada (nao ha descarte
         // aqui): a normal virada para a camera e a que conta.
         final sinal = nnz < 0 ? 1.0 : -1.0;
@@ -237,7 +244,17 @@ class Element3DPainter extends CustomPainter {
           Paint()..shader = shader,
         );
       } else {
-        fill.color = Color.lerp(Colors.black, base, shade)!;
+        // A COR DA FACE SAI DO MATERIAL. `corLisa` cai no ramo legado
+        // (a cor da camada com `0.34 + 0.66*|dot|`, byte a byte o que o
+        // pintor ja fazia); os metais saem do material, da luz e do MAPA
+        // DE AMBIENTE — a mesma conta e o mesmo mapa do texto 3D.
+        fill.color = corDaFaceDoElemento3D(
+          material: material,
+          ambiente: layer.environment,
+          nx: nnx,
+          ny: nny,
+          nz: nnz,
+        );
         canvas.drawPath(path, fill);
       }
       if (reflexo != null && amount > 0.002) {

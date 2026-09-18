@@ -11,7 +11,6 @@ import 'package:aurea/src/features/editor/application/texture_cache.dart';
 import 'package:aurea/src/features/editor/application/video_layer_manager.dart';
 import 'package:aurea/src/features/editor/domain/layer.dart';
 import 'package:aurea/src/features/editor/presentation/widgets/preview_stage.dart';
-import 'package:aurea/src/features/projects/application/modelos_empacotados.dart';
 import 'package:aurea/src/features/projects/domain/deriva_template.dart';
 
 /// RENDER DE MESA da DERIVA: os quadros do modelo, pintados pelo mesmo
@@ -24,10 +23,7 @@ void main() {
   testWidgets('renderiza a Deriva em quadros', (tester) async {
     if (Platform.environment['AUREA_RENDER'] != '1') return;
 
-    final astronauta = await tester.runAsync(
-      () => carregarAstronautaDe('assets/models/monolito'),
-    );
-    final project = buildDerivaTemplate(astronauta: astronauta);
+    final project = buildDerivaTemplate();
     // As texturas sao data URIs: precisam estar decodificadas antes do
     // primeiro quadro, senao as faces saem lisas.
     await tester.runAsync(() async {

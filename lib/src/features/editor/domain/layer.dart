@@ -1,3 +1,4 @@
+import 'acabamento3d.dart';
 import 'dart:ui';
 
 import 'package:aurea_render/aurea_render.dart';
@@ -2838,6 +2839,7 @@ class Element3DLayer extends Layer {
       Color(0xFFFF4FD8),
     ],
     this.shininess = 0.5,
+    this.acabamento = AcabamentoDoElemento3D.corLisa,
     super.position,
     super.scaleX,
     super.scaleY,
@@ -2893,6 +2895,15 @@ class Element3DLayer extends Layer {
   /// Brilho especular 0..1 (tamanho do ponto de luz).
   final double shininess;
 
+  /// O ACABAMENTO — o MESMO sistema de materiais do texto 3D.
+  ///
+  /// `corLisa` e o comportamento de sempre (a cor da camada, sombreada a
+  /// lambert), e por isso um projeto salvo antes disto abre IDENTICO. Os
+  /// outros quatro sao os metais do texto 3D, com metalico e rugosidade
+  /// de verdade e o mapa de ambiente respondendo por eles — um cubo de
+  /// cromo e uma letra de cromo passam a sair do mesmo material.
+  final AcabamentoDoElemento3D acabamento;
+
   Element3DLayer copyElement3D({
     Element3DKind? kind,
     double? size,
@@ -2907,6 +2918,7 @@ class Element3DLayer extends Layer {
     int? material,
     List<Color>? gradient,
     double? shininess,
+    AcabamentoDoElemento3D? acabamento,
   }) {
     return Element3DLayer(
       id: id,
@@ -2924,6 +2936,7 @@ class Element3DLayer extends Layer {
       material: material ?? this.material,
       gradient: gradient ?? this.gradient,
       shininess: shininess ?? this.shininess,
+      acabamento: acabamento ?? this.acabamento,
       position: position,
       scaleX: scaleX,
       scaleY: scaleY,
@@ -2994,6 +3007,7 @@ class Element3DLayer extends Layer {
       material: material,
       gradient: gradient,
       shininess: shininess,
+    acabamento: acabamento,
       position: position ?? this.position,
       scaleX: scaleX ?? this.scaleX,
       scaleY: scaleY ?? this.scaleY,
@@ -3037,6 +3051,7 @@ class Element3DLayer extends Layer {
     material: material,
     gradient: gradient,
     shininess: shininess,
+    acabamento: acabamento,
     position: position,
     scaleX: scaleX,
     scaleY: scaleY,

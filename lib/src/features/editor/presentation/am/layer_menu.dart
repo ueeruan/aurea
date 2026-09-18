@@ -1,3 +1,4 @@
+import '../../domain/acabamento3d.dart';
 import 'package:aurea_render/aurea_render.dart';
 import 'package:aurea/src/core/l10n/app_language.dart';
 import 'package:flutter/cupertino.dart';
@@ -2749,7 +2750,18 @@ Future<void> showElement3DSheet(
                   ],
                 ),
                 const SizedBox(height: 12),
-                // MATERIAL: como a luz toca o solido.
+                // ACABAMENTO: O MESMO SISTEMA DE MATERIAIS DO TEXTO 3D.
+                //
+                // O QUE MUDOU, E POR QUE: aqui havia cinco botoes
+                // ("Solido", "Brilhante", "Vidro", "Metal", "Fosco"). Nenhum
+                // dos cinco era um material — "metal" nao dizia quanto de
+                // metal nem quao rugoso, "brilhante" era um degrade que nao
+                // respondia a luz, e "vidro" era uma transparencia. Um cubo
+                // e uma esfera com o mesmo "Metal" saiam com o mesmo
+                // aspecto chapado, e nenhum dos dois lembrava a letra de
+                // metal que fica ao lado. Agora sao os metais do texto 3D,
+                // com metalico e rugosidade de verdade, e o mesmo mapa de
+                // ambiente respondendo por eles.
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -2758,7 +2770,7 @@ Future<void> showElement3DSheet(
                       child: Padding(
                         padding: EdgeInsets.only(top: 8),
                         child: AppText(
-                          'Material',
+                          'Acabamento',
                           style: TextStyle(fontSize: 13, color: AmColors.muted),
                         ),
                       ),
@@ -2768,18 +2780,12 @@ Future<void> showElement3DSheet(
                         spacing: 6,
                         runSpacing: 6,
                         children: [
-                          for (final (i, nome) in const [
-                            'Solido',
-                            'Brilhante',
-                            'Vidro',
-                            'Metal',
-                            'Fosco',
-                          ].indexed)
+                          for (final acab in AcabamentoDoElemento3D.values)
                             Tocavel(
                               onTap: () {
                                 controller.updateElement3D(
                                   layerId,
-                                  (e) => e.copyElement3D(material: i),
+                                  (e) => e.copyElement3D(acabamento: acab),
                                 );
                                 setSheetState(() {});
                               },
@@ -2789,12 +2795,12 @@ Future<void> showElement3DSheet(
                                   vertical: 7,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: layer.material == i
+                                  color: layer.acabamento == acab
                                       ? AmColors.accentDim
                                       : AmColors.chip,
                                   borderRadius: BorderRadius.circular(9),
                                 ),
-                                child: AppText(nome,
+                                child: AppText(nomeDoAcabamento(acab),
                                   style: const TextStyle(
                                     fontSize: 12,
                                     color: AmColors.accent,

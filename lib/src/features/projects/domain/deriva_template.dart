@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'abyss_cinematic_template.dart' show buildAbyssExplorer;
 import 'dart:ui';
 
 import '../../editor/domain/camera3d.dart';
@@ -75,14 +76,17 @@ double _giroX(double t) => 12 + 7.4 * t;
 double _giroY(double t) => -140 - 11.7 * t;
 double _giroZ(double t) => 5 + 4.3 * t;
 
-SceneNode _astronauta(ModelAsset3D? modelo) => SceneNode(
+/// O ASTRONAUTA — o explorador do Abismo, gerado em codigo.
+///
+/// O SCAN IMPORTADO SAIU: era um asset de terceiro viajando dentro do
+/// APK, usado enquanto a malha propria nao existia. Agora existe, e a
+/// Deriva abre sem depender de um arquivo que pode faltar — o que
+/// acontecia, e deixava uma capsula no lugar do explorador.
+SceneNode _astronauta() => SceneNode(
   id: 'deriva_astronauta',
   name: 'Astronauta',
   size: 58,
-  // Sem o modelo importado, uma capsula: a cena continua legivel.
-  kind: Element3DKind.capsule,
-  modelAsset: modelo,
-  useModelMaterials: modelo != null,
+  modelAsset: buildAbyssExplorer(),
   material: const Material3D(baseColor: Color(0xffe6e3dc), roughness: .55),
   x: _sample((t) => astronautaEm(t).x),
   y: _sample((t) => astronautaEm(t).y),
@@ -486,7 +490,7 @@ List<Camera3D> _cameras() => [
 
 // ============================================================= PROJETO
 
-VideoProject buildDerivaTemplate({ModelAsset3D? astronauta}) {
+VideoProject buildDerivaTemplate() {
   final cameras = _cameras();
   final scene = Scene3D(
     showFloorGrid: false,
@@ -534,7 +538,7 @@ VideoProject buildDerivaTemplate({ModelAsset3D? astronauta}) {
       _sol(),
       ..._destrocos(),
       _cabo(),
-      _astronauta(astronauta),
+      _astronauta(),
     ],
   );
 

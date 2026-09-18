@@ -4,7 +4,6 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:aurea/src/features/editor/domain/layer.dart';
 import 'package:aurea/src/features/editor/domain/project_store.dart';
-import 'package:aurea/src/features/projects/application/modelos_empacotados.dart';
 import 'package:aurea/src/features/projects/domain/deriva_template.dart';
 
 /// A DERIVA e um filme de tres tomadas numa cena so: o que este teste
@@ -92,14 +91,19 @@ void main() {
     expect(ids.toSet().length, ids.length);
   });
 
-  test('com o astronauta importado continua abaixo do teto', () async {
-    final modelo = await carregarAstronautaDe('assets/models/monolito');
-    final p = buildDerivaTemplate(astronauta: modelo);
+  test('continua abaixo do teto, com o explorador gerado em codigo', () async {
+    // O SCAN IMPORTADO SAIU DO APLICATIVO. O que se confere aqui nao e
+    // mais "o arquivo importado chegou": e que o explorador continua
+    // sendo um modelo DE VERDADE (a malha propria, e nao uma capsula de
+    // reserva) e que a cena segue dentro do teto de triangulos.
+    final p = buildDerivaTemplate();
     final total = derivaTriangles(p);
     expect(total, lessThanOrEqualTo(derivaTriangleBudget),
         reason: '$total triangulos');
     final c = p.layers.whereType<Scene3DLayer>().single;
-    expect(c.scene.nodeById('deriva_astronauta')!.modelAsset, same(modelo));
+    final astronauta = c.scene.nodeById('deriva_astronauta')!;
+    expect(astronauta.modelAsset, isNotNull);
+    expect(astronauta.modelAsset!.triangleCount, greaterThan(200));
   });
 
   test('vai e volta do JSON', () {

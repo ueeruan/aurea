@@ -22,6 +22,29 @@ enum Element3DKind {
   dome,
   crown,
   crownFine,
+
+  // ---- MODELOS DO AUREA ----
+  //
+  // OS NUMEROS DOS ANTERIORES NAO MUDAM: o arquivo guarda o indice do
+  // enum, e mexer no meio deles faria todo projeto salvo abrir com outra
+  // forma. Os novos entram no FIM, e a leitura passou a ser por NOME
+  // (ver `project_store`), que e o que permite um dia tirar os que nao
+  // servem mais.
+
+  /// A LENTE: cupula e barril. O motivo do proprio aplicativo.
+  lente,
+
+  /// O ANEL DE LUZ: um toro com a face de dentro acesa. E o que da
+  /// contraluz em retrato sem studio.
+  anelDeLuz,
+
+  /// O DIAFRAGMA: seis laminas em volta de uma abertura. Le como camera
+  /// em qualquer tamanho, e e feito de doze faces.
+  diafragma,
+
+  /// A PLACA: um bloco baixo de quina chanfrada, para deitar texto em
+  /// cima. E o objeto que faltava para uma cena de estudo.
+  placa,
 }
 
 /// AMBIENTE que os objetos refletem — e que colore o reflexo.
@@ -334,6 +357,18 @@ Element3DMesh _build(Element3DKind kind) {
       return crownMesh(vale: 0.32);
     case Element3DKind.crownFine:
       return crownMesh(segments: 120, inner: 0.985, vale: 0.4, altura: 0.36);
+
+    case Element3DKind.lente:
+      return _lente();
+
+    case Element3DKind.anelDeLuz:
+      return _anelDeLuz();
+
+    case Element3DKind.diafragma:
+      return _diafragma();
+
+    case Element3DKind.placa:
+      return _placa();
 
     case Element3DKind.octahedron:
       return Element3DMesh(
@@ -679,7 +714,51 @@ String element3DLabel(Element3DKind kind) => switch (kind) {
   Element3DKind.dome => 'Cupula',
   Element3DKind.crown => 'Coroa',
   Element3DKind.crownFine => 'Coroa fina',
+  Element3DKind.lente => 'Lente',
+  Element3DKind.anelDeLuz => 'Anel de luz',
+  Element3DKind.diafragma => 'Diafragma',
+  Element3DKind.placa => 'Placa',
 };
+
+/// O NOME ESTAVEL DE UM TIPO, para o arquivo.
+///
+/// O INDICE DO ENUM NAO SERVE: tirar um tipo do meio da lista deslocaria
+/// todos os seguintes, e um projeto salvo abriria com outra forma — sem
+/// erro, sem aviso, so errado. O nome sobrevive a reordenacao, e e o que
+/// a cena 3D ja usava (`SceneNode.k`).
+String nomeDoElemento3D(Element3DKind kind) => switch (kind) {
+  Element3DKind.cube => 'cube',
+  Element3DKind.pyramid => 'pyramid',
+  Element3DKind.cone => 'cone',
+  Element3DKind.sphere => 'sphere',
+  Element3DKind.cylinder => 'cylinder',
+  Element3DKind.prism => 'prism',
+  Element3DKind.diamond => 'diamond',
+  Element3DKind.torus => 'torus',
+  Element3DKind.star => 'star',
+  Element3DKind.plane => 'plane',
+  Element3DKind.capsule => 'capsule',
+  Element3DKind.tube => 'tube',
+  Element3DKind.octahedron => 'octahedron',
+  Element3DKind.wedge => 'wedge',
+  Element3DKind.dome => 'dome',
+  Element3DKind.crown => 'crown',
+  Element3DKind.crownFine => 'crownFine',
+  Element3DKind.lente => 'lente',
+  Element3DKind.anelDeLuz => 'anelDeLuz',
+  Element3DKind.diafragma => 'diafragma',
+  Element3DKind.placa => 'placa',
+};
+
+/// O TIPO A PARTIR DO NOME. Nulo quando o arquivo traz um nome que esta
+/// versao nao conhece — quem chama decide o que fazer.
+Element3DKind? elemento3DPorNome(String? nome) {
+  if (nome == null) return null;
+  for (final k in Element3DKind.values) {
+    if (nomeDoElemento3D(k) == nome) return k;
+  }
+  return null;
+}
 
 /// CUBO COM CHANFRO nas arestas.
 ///
@@ -822,5 +901,155 @@ Element3DMesh _smoothCone() {
     normals: [
       for (final n in normals) [n[0], -n[1], n[2]],
     ],
+  );
+}
+
+/// A LENTE — o motivo do aplicativo, em tres pecas: o barril, o aro e a
+/// cupula. Nao e um solido de catalogo: existe para ser reconhecido.
+///
+/// O ARO SALIENTE e o que faz a peca ler como lente; sem ele o barril e
+/// um cilindro e a cupula e meia esfera, e o conjunto parece um botao.
+Element3DMesh _lente() {
+  final verts = <List<double>>[];
+  final faces = <List<int>>[];
+
+  const segmentos = 28;
+  const raioExterno = 0.92;
+  const raioInterno = 0.80;
+  const meiaAltura = 0.30;
+
+  // ---- BARRIL: tubo curto, de fora e de dentro ----
+  final baseBarril = verts.length;
+  for (var i = 0; i < segmentos; i++) {
+    final a = 2 * math.pi * i / segmentos;
+    final c = math.cos(a), sn = math.sin(a);
+    verts.add([c * raioExterno, meiaAltura, sn * raioExterno]);
+    verts.add([c * raioInterno, meiaAltura, sn * raioInterno]);
+    verts.add([c * raioExterno, -meiaAltura, sn * raioExterno]);
+    verts.add([c * raioInterno, -meiaAltura, sn * raioInterno]);
+  }
+  int b(int i, int k) => baseBarril + (i % segmentos) * 4 + k;
+  for (var i = 0; i < segmentos; i++) {
+    faces.add([b(i, 0), b(i + 1, 0), b(i + 1, 2), b(i, 2)]);
+    faces.add([b(i, 3), b(i + 1, 3), b(i + 1, 1), b(i, 1)]);
+    faces.add([b(i, 1), b(i + 1, 1), b(i + 1, 0), b(i, 0)]);
+    faces.add([b(i, 2), b(i + 1, 2), b(i + 1, 3), b(i, 3)]);
+  }
+
+  // ---- ARO: a borda saliente na frente ----
+  final baseAro = verts.length;
+  for (var i = 0; i < segmentos; i++) {
+    final a = 2 * math.pi * i / segmentos;
+    final c = math.cos(a), sn = math.sin(a);
+    verts.add([c * 1.0, -meiaAltura - 0.10, sn * 1.0]);
+    verts.add([c * 1.0, -meiaAltura - 0.24, sn * 1.0]);
+  }
+  int r(int i, int k) => baseAro + (i % segmentos) * 2 + k;
+  for (var i = 0; i < segmentos; i++) {
+    faces.add([r(i, 0), r(i + 1, 0), r(i + 1, 1), r(i, 1)]);
+  }
+
+  // ---- CUPULA: meia esfera para dentro do aro ----
+  const arcos = 10;
+  final baseCupula = verts.length;
+  for (var j = 0; j <= arcos; j++) {
+    final phi = (j / arcos) * math.pi / 2;
+    final anel = math.cos(phi) * raioInterno;
+    final yy = -meiaAltura - 0.10 + math.sin(phi) * 0.62;
+    for (var i = 0; i < segmentos; i++) {
+      final a = 2 * math.pi * i / segmentos;
+      verts.add([math.cos(a) * anel, yy, math.sin(a) * anel]);
+    }
+  }
+  int q(int i, int j) => baseCupula + j * segmentos + (i % segmentos);
+  for (var j = 0; j < arcos; j++) {
+    for (var i = 0; i < segmentos; i++) {
+      faces.add([q(i, j), q(i + 1, j), q(i + 1, j + 1), q(i, j + 1)]);
+    }
+  }
+  return Element3DMesh(verts, faces);
+}
+
+/// O ANEL DE LUZ: um toro DEITADO no plano XZ, como um anel de estudio
+/// visto de frente. Um toro em pe seria um pneu; deitado, a luz que ele
+/// devolve cai em quem esta dentro dele.
+Element3DMesh _anelDeLuz() {
+  const maior = 0.92;
+  const menor = 0.14;
+  const voltas = 32;
+  const tubo = 12;
+  final verts = <List<double>>[];
+  for (var i = 0; i < voltas; i++) {
+    final u = 2 * math.pi * i / voltas;
+    for (var j = 0; j < tubo; j++) {
+      final v = 2 * math.pi * j / tubo;
+      final rr = maior + menor * math.cos(v);
+      verts.add([
+        rr * math.cos(u),
+        menor * math.sin(v) * 1.7,
+        rr * math.sin(u),
+      ]);
+    }
+  }
+  final faces = <List<int>>[];
+  int at(int i, int j) => (i % voltas) * tubo + j % tubo;
+  for (var i = 0; i < voltas; i++) {
+    for (var j = 0; j < tubo; j++) {
+      faces.add([at(i, j), at(i + 1, j), at(i + 1, j + 1), at(i, j + 1)]);
+    }
+  }
+  return Element3DMesh(verts, faces);
+}
+
+/// O DIAFRAGMA: seis laminas em volta de uma abertura. Doze faces no
+/// total — a forma mais reconhecivel do catalogo pelo menor custo.
+Element3DMesh _diafragma() {
+  const laminas = 6;
+  const rExterno = 1.0;
+  const rInterno = 0.44;
+  const espessura = 0.06;
+  final verts = <List<double>>[];
+  final faces = <List<int>>[];
+
+  for (var i = 0; i < laminas; i++) {
+    final a = 2 * math.pi * i / laminas;
+    final b = 2 * math.pi * (i + 1) / laminas;
+    // A LAMINA AVANCA SOBRE A SEGUINTE: o canto de dentro de uma cai
+    // depois do canto de dentro da outra, e o que se ve no meio e o
+    // FUNDO, e nao o vazio. Um buraco de verdade pediria parede interna
+    // em cada lamina.
+    final base = verts.length;
+    final cantos = [
+      [math.cos(a) * rExterno, math.sin(a) * rExterno],
+      [math.cos(b) * rExterno, math.sin(b) * rExterno],
+      [math.cos(b - 0.30) * rInterno, math.sin(b - 0.30) * rInterno],
+      [math.cos(a + 0.30) * rInterno, math.sin(a + 0.30) * rInterno],
+    ];
+    for (final c in cantos) {
+      verts.add([c[0], -espessura, c[1]]);
+    }
+    for (final c in cantos) {
+      verts.add([c[0], espessura, c[1]]);
+    }
+    faces.add([base + 0, base + 1, base + 2, base + 3]);
+    faces.add([base + 7, base + 6, base + 5, base + 4]);
+    for (var k = 0; k < 4; k++) {
+      final n = (k + 1) % 4;
+      faces.add([base + k, base + n, base + 4 + n, base + 4 + k]);
+    }
+  }
+  return Element3DMesh(verts, faces);
+}
+
+/// A PLACA: um bloco baixo e largo — o objeto em que se apoia um texto ou
+/// um logo. Reusa o cubo chanfrado e achata em Y, para a quina continuar
+/// tendo a faixa de luz que a faz ler como volume.
+Element3DMesh _placa() {
+  final base = _cuboChanfrado(chanfro: 0.06);
+  return Element3DMesh(
+    [
+      for (final v in base.verts) [v[0] * 1.30, v[1] * 0.10, v[2] * 0.85],
+    ],
+    base.faces,
   );
 }

@@ -23,7 +23,6 @@ import '../../application/ui/opcoes_de_visualizacao.dart';
 import '../../../../core/storage/prefs.dart';
 import '../shell/layer_actions.dart' show menuDasMarcas;
 import 'am_colors.dart';
-import 'aviso_de_bloqueio.dart';
 import 'layer_look.dart';
 import 'clip_preview_painters.dart';
 import '../../application/registro_de_travadas.dart';
@@ -1934,17 +1933,18 @@ Positioned(
     // multipla (a barra de acoes agrupa/duplica/exclui o
     // conjunto).
     onLongPressCancel: _terminarArrasto,
+    // BLOQUEADA: o toque longo seleciona e para por ai.
+    //
+    // Nada de aviso em faixa aqui. O aviso da casa e um `SnackBar`, e ele
+    // cai JUSTAMENTE sobre a linha do tempo — o app ja aprendeu isso com
+    // o aviso de "excluida", que os testadores mandaram tirar por cobrir a
+    // timeline. Quem explica o bloqueio e o painel, que abre com a faixa
+    // do cadeado e o botao de desbloquear.
     onLongPressStart: locked
         ? (_) {
             if (compact) return;
             ref.read(multiSelectProvider.notifier).state = const {};
             ref.read(selectedLayerProvider.notifier).state = layer.id;
-            avisarCamadaBloqueada(
-              context,
-              ref,
-              fraseDeBloqueio('mover ou reordenar'),
-              layer.id,
-            );
           }
         : (_) {
             _moveuNoToqueLongo = false;

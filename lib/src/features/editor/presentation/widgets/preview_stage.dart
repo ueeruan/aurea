@@ -29,6 +29,7 @@ import '../../application/video_layer_manager.dart';
 import '../shell/cromo_editor.dart' show zoomDoPalcoProvider;
 import '../../domain/aparecer_sumir.dart';
 import '../../domain/ajuste_da_midia.dart';
+import '../../domain/amostras_do_brilho.dart';
 import '../../domain/keyframe.dart' show AnimatedDouble;
 import '../../domain/cut_ops.dart';
 import '../../domain/effect.dart';
@@ -3449,6 +3450,17 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
           cores: receita.coresDe(effect),
           passadas: receita.passadas,
           usaTempo: receita.usaTempo,
+          // O BRILHO NAO PAGA O MAXIMO DO KERNEL EM TODA TELA. E o unico
+          // efeito do lote cujo custo passa de duas centenas de leituras
+          // de textura por pixel, e sem este freio um quadro de previa
+          // passa de quatro bilhoes de leituras — o app nao trava por
+          // erro, trava esperando. Ver [AmostrasDoBrilho].
+          orcamentoDeAmostras: receita.usaOrcamentoDeAmostras
+              ? AmostrasDoBrilho.para(
+                  exportando: exporting,
+                  tocando: _rascunho,
+                )
+              : null,
           escalaRef: math.min(fxWidth, fxHeight) / 1080.0,
           tempo: local.inMicroseconds / 1e6,
           child: out,

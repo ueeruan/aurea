@@ -21,6 +21,7 @@ class ReceitaSapphire {
     this.passadas = 1,
     this.usaTempo = true,
     this.cores = false,
+    this.usaOrcamentoDeAmostras = false,
   });
 
   final String asset;
@@ -32,6 +33,14 @@ class ReceitaSapphire {
 
   /// Manda a cor principal e as extras para c0, c1.
   final bool cores;
+
+  /// O shader tem o uniforme de orcamento de amostras (float 80).
+  ///
+  /// So o `luz.frag` tem: o kernel do brilho e o unico do lote que custa
+  /// centenas de leituras de textura por pixel. Os outros shaders NAO
+  /// declaram o uniforme, e escrever o float 80 neles cairia no meio de
+  /// outra coisa — por isso o opt-in, e nao um `setFloat` geral.
+  final bool usaOrcamentoDeAmostras;
 
   List<Color> coresDe(EffectInstance e) =>
       cores ? [e.color, ...e.extraColors] : const [];
@@ -61,11 +70,13 @@ final receitasSapphire = <EffectType, ReceitaSapphire>{
       valores: valoresLuz,
       usaTempo: false,
       cores: true,
+      usaOrcamentoDeAmostras: true,
     ),
   EffectType.sGlintRainbow: ReceitaSapphire(
     asset: 'shaders/luz.frag',
     valores: valoresLuz,
     usaTempo: false,
+    usaOrcamentoDeAmostras: true,
   ),
   EffectType.jpegDamage: ReceitaSapphire(
     asset: 'shaders/jpeg_damage.frag',

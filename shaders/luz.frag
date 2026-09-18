@@ -30,6 +30,24 @@ uniform vec4 p14;
 uniform vec4 p15;
 uniform vec4 c0;
 uniform vec4 c1;
+// ORCAMENTO DE AMOSTRAS (float 80, o ultimo do bloco).
+//
+// Este e o kernel MAIS CARO do app, e era o unico sem freio. Cada amostra
+// aqui e um `amostra()`, que e um bilinear de QUATRO leituras — o
+// `ImageFilter.shader` entrega a entrada sem interpolar, entao o bilinear
+// e na mao (`docs` / memoria `impeller-filtro-le-sem-interpolar`). Com 64
+// amostras sao 256 leituras de textura POR PIXEL; com 96, 384.
+//
+// Numa previa de 1080x1920 a 3x isso e 18,6 milhoes de pixels vezes 256 —
+// quatro bilhoes e setecentas milhoes de leituras por QUADRO. O quadro
+// seguinte so comeca quando esse acaba, e e isso que os testadores
+// relataram como "travou": nao e erro, e o app esperando a GPU.
+//
+// uAmostras e a FRACAO do maximo de cada kernel. A previa roda com uma
+// fracao, a exportacao com o maximo. Todos os kernels normalizam por n
+// (dividem pelo peso somado ou por n), entao menos amostras escurecem ou
+// clareiam NADA — mudam so o quao liso o halo sai.
+uniform float uAmostras;
 uniform sampler2D uImage;
 
 out vec4 fragColor;
@@ -62,6 +80,12 @@ vec4 amostra(vec2 p) {
 float tpp() { return .5 * (uSize.x / max(uLogico.x, 1.0) + uSize.y / max(uLogico.y, 1.0)); }
 
 float luma(vec3 c) { return dot(c, vec3(.2126, .7152, .0722)); }
+
+// Quantas amostras este quadro paga, dentro do maximo do kernel.
+int amostras(int maximo) {
+  float f = clamp(uAmostras, 0.0625, 1.0);
+  return int(max(4.0, floor(float(maximo) * f + 0.5)));
+}
 
 // A parte da imagem que acende: luminancia acima do limiar, com rampa.
 vec3 fonte(vec2 p, float limiar, float suave) {
@@ -111,8 +135,11 @@ void main() {
     float raio = max(p0.y * k, .001);
     vec3 soma = vec3(0.0);
     float peso = 0.0;
+    int n = amostras(64);
+    float fn = float(n);
     for (int i = 0; i < 64; i++) {
-      float f = (float(i) + .5) / 64.0;
+      if (i >= n) break;
+      float f = (float(i) + .5) / fn;
       float r = efeito == 1.0 ? raio * sqrt(f) : raio * f * f;
       float w = efeito == 1.0 ? exp(-2.5 * f) : 1.0;
       float a = float(i) * OURO;
@@ -149,8 +176,11 @@ void main() {
       float ativo = step(float(b) + .5, bracos);
       float ang = p1.x + float(b) * 3.14159265 / bracos;
       vec2 dir = vec2(cos(ang), sin(ang));
+      int n = amostras(24);
+      float fn = float(n);
       for (int s = 0; s < 24; s++) {
-        float f = (float(s) + salto) / 24.0;
+        if (s >= n) break;
+        float f = (float(s) + salto) / fn;
         // Traco fino e longo: pouco peso colado ao ponto (senao vira mancha)
         // e queda suave ate a ponta, como o S_Glint do AE.
         float queda = pow(1.0 - f, 1.0 + p1.z * 2.0) * smoothstep(0.0, .35, f);
@@ -172,8 +202,11 @@ void main() {
     for (int j = 1; j <= 5; j++) {
       float r = raioAnel * float(j);
       float w = step(float(j) - .5, aneis) / float(j);
+      int n = amostras(20);
+      float fn = float(n);
       for (int a = 0; a < 20; a++) {
-        float ang = float(a) * 6.2831853 / 20.0;
+        if (a >= n) break;
+        float ang = float(a) * 6.2831853 / fn;
         vec2 dir = vec2(cos(ang), sin(ang));
         float rr = r + espessura * (mod(float(a), 2.0) - .5);
         // Cada anel puxa a cor para um lado do espectro, como a franja
@@ -183,8 +216,11 @@ void main() {
     }
     vec3 halo = vec3(0.0);
     float rh = max(p1.y * k, .001);
+    int nh = amostras(16);
+    float fnh = float(nh);
     for (int i = 0; i < 16; i++) {
-      float f = (float(i) + .5) / 16.0;
+      if (i >= nh) break;
+      float f = (float(i) + .5) / fnh;
       float a = float(i) * OURO;
       halo += fonte(p + rh * sqrt(f) * vec2(cos(a), sin(a)), p0.y, .08);
     }
@@ -199,8 +235,11 @@ void main() {
     float decai = mix(.99, .9, p1.z);
     vec3 soma = vec3(0.0);
     float peso = 0.0, w = 1.0;
+    int n = amostras(40);
+    float fn = float(n);
     for (int i = 0; i < 40; i++) {
-      float f = float(i) / 40.0;
+      if (i >= n) break;
+      float f = float(i) / fn;
       vec2 q = p + (c - p) * f * comp;
       vec3 l;
       if (efeito == 8.0) {
@@ -226,15 +265,18 @@ void main() {
     float raio = max(p0.y * k, .001);
     float lim = efeito == 9.0 ? p1.y : p0.w;
     float campo = 0.0;
+    int n = amostras(96);
+    float fn = float(n);
     for (int i = 0; i < 96; i++) {
-      float f = (float(i) + .5) / 96.0;
+      if (i >= n) break;
+      float f = (float(i) + .5) / fn;
       float a = float(i) * OURO;
       vec4 c = amostra(p + raio * sqrt(f) * vec2(cos(a), sin(a)));
       float y = luma(c.rgb);
       campo += efeito == 9.0 ? max(y - lim, 0.0) / max(1.0 - lim, .001)
                              : clamp((lim - y) / max(lim, .001), 0.0, 1.0);
     }
-    campo /= 96.0;
+    campo /= fn;
     if (efeito == 9.0) {
       // S_GlowAura: faixas de cor pelo campo — cada canal numa fase, a
       // frequencia conta quantas voltas o espectro da ao longo do brilho.

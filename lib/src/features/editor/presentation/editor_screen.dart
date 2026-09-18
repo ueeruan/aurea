@@ -33,6 +33,7 @@ import 'am/points_panel.dart';
 import 'am/property_keyframe_context.dart';
 import 'am/shape_panel.dart';
 import 'am/transform_panel.dart';
+import '../domain/estilizar_lote2.dart';
 import 'context/add_toolbar.dart';
 import 'shell/onboarding.dart';
 import '../../help/presentation/quick_guide_screen.dart';
@@ -1331,7 +1332,15 @@ class _Diag3D extends StatelessWidget {
 }
 
 /// "Rascunho" sobre o preview enquanto toca — so quando ha algo que o
-/// rascunho simplifica (cena 3D, glow), para nao virar ruido.
+/// rascunho simplifica (cena 3D, brilho, nitidez), para nao virar ruido.
+///
+/// A LISTA SAI DO PROPRIO MOTOR. Ela era escrita a mao e listava
+/// `lightGlow` e `glowVol` — dois efeitos que sairam do catalogo em 16/09.
+/// O aviso passou a NUNCA aparecer, inclusive nos efeitos de brilho que
+/// HOJE sao simplificados ao tocar: quem dava play via um halo mais cru e
+/// nao tinha como saber que a qualidade final era outra. Derivar de
+/// `receitasSapphire` e `passadasDeNitidez` faz o aviso acompanhar o
+/// motor sozinho.
 class _RascunhoBadge extends ConsumerWidget {
   const _RascunhoBadge();
 
@@ -1345,8 +1354,9 @@ class _RascunhoBadge extends ConsumerWidget {
               l.effects.any(
                 (e) =>
                     e.enabled &&
-                    (e.type == EffectType.lightGlow ||
-                        e.type == EffectType.glowVol),
+                    ((receitasSapphire[e.type]?.usaOrcamentoDeAmostras ??
+                            false) ||
+                        e.type == EffectType.unsharpMask),
               ),
         ),
       ),

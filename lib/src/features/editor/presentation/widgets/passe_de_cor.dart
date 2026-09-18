@@ -432,6 +432,7 @@ class MotorSapphire {
     required Size logico,
     required double escalaRef,
     required double tempo,
+    double? orcamentoDeAmostras,
   }) {
     shader
       ..setFloat(2, filtro ? 1 : 0)
@@ -451,6 +452,14 @@ class MotorSapphire {
         ..setFloat(74 + 4 * k, c.b)
         ..setFloat(75 + 4 * k, c.a);
     }
+    // O ORCAMENTO E O ULTIMO FLOAT DO BLOCO (80), e so o shader que o
+    // declara pode recebe-lo — ver `ReceitaSapphire.usaOrcamentoDeAmostras`.
+    // A posicao foi conferida com o `impellerc --reflection-json`: os
+    // uniforms de runtime effect sao indexados por ORDEM DE DECLARACAO,
+    // sem contar o preenchimento de alinhamento do std140.
+    if (orcamentoDeAmostras != null) {
+      shader.setFloat(80, orcamentoDeAmostras);
+    }
   }
 }
 
@@ -468,6 +477,7 @@ class PassadaSapphire extends StatefulWidget {
     required this.child,
     this.passadas = 1,
     this.usaTempo = true,
+    this.orcamentoDeAmostras,
   });
 
   final String asset;
@@ -476,6 +486,10 @@ class PassadaSapphire extends StatefulWidget {
   final double escalaRef;
   final double tempo;
   final int passadas;
+
+  /// Fracao das amostras do kernel que este quadro paga (0..1). Nulo nos
+  /// shaders que nao tem o uniforme. Ver [AmostrasDoBrilho].
+  final double? orcamentoDeAmostras;
 
   /// Efeito que anda sozinho no tempo (ruido, rolagem): refaz a camada a
   /// cada quadro. Falso = so quando os numeros mudam.
@@ -519,6 +533,7 @@ class _PassadaSapphireState extends State<PassadaSapphire> {
           logico: logico,
           escalaRef: widget.escalaRef,
           tempo: widget.tempo,
+          orcamentoDeAmostras: widget.orcamentoDeAmostras,
         );
     final ultimo = widget.passadas - 1;
     final assinatura = [
@@ -526,6 +541,10 @@ class _PassadaSapphireState extends State<PassadaSapphire> {
       for (final c in widget.cores) ...[c.r, c.g, c.b, c.a],
       widget.escalaRef,
       if (widget.usaTempo) widget.tempo,
+      // O orcamento muda o desenho: trocar de qualidade tem de refazer a
+      // camada, senao o preview ficava com o numero de amostras da
+      // exportacao (ou o contrario) depois de dar play/pause.
+      if (widget.orcamentoDeAmostras != null) widget.orcamentoDeAmostras!,
     ];
     if (ui.ImageFilter.isShaderFilterSupported) {
       return FiltroDeShader(

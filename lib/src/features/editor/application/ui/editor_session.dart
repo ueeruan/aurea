@@ -17,6 +17,25 @@ LayerProp propOfTool(TransformTool tool) => switch (tool) {
 /// AS SUB-ABAS DO PAINEL EDITAR FORMA.
 enum ShapeTool { size, corners, points, angle, rotation, stroke, draw, nodes }
 
+/// AS TRES AREAS DA EDICAO DE TEXTO.
+///
+/// O animador manual e os presets eram portas SEPARADAS, abertas de
+/// fora (um botao no painel de texto e outro no menu da camada): quem
+/// queria animar saia do texto, animava as cegas e voltava para corrigir
+/// uma virgula. Sao as mesmas tres coisas que se faz com um texto, entao
+/// viram tres abas do mesmo painel — e o texto fica visivel enquanto se
+/// anima.
+enum TextSection {
+  /// Conteudo, fonte, tamanho, cor: o que o texto DIZ.
+  edit,
+
+  /// O animador manual inteiro (catalogo por posicao + controles).
+  animation,
+
+  /// Pilhas de animadores prontas ([textPresets]).
+  presets,
+}
+
 /// O QUE O PAINEL CONTEXTUAL (zona E) ESTA MOSTRANDO.
 ///
 /// `none` = a acao segue a selecao (E1 sem selecao, E2 com selecao).
@@ -30,7 +49,6 @@ enum EditorPanel {
   colorFill,
   effects,
   curve,
-  animators,
   editText,
   editShape,
   editPoints,
@@ -50,6 +68,7 @@ class EditorSession {
     this.curveReturn = EditorPanel.transform,
     this.pointsReturn = EditorPanel.editShape,
     this.pointsItemId,
+    this.textSection = TextSection.edit,
     this.previewExpanded = false,
     this.timelineExpanded = false,
     this.inPoint,
@@ -70,6 +89,9 @@ class EditorSession {
   final EditorPanel curveReturn;
   final EditorPanel pointsReturn;
   final String? pointsItemId;
+
+  /// Qual das tres areas do painel de texto esta aberta.
+  final TextSection textSection;
 
   /// Preview em tela cheia (esconde o resto).
   final bool previewExpanded;
@@ -92,8 +114,36 @@ class EditorSession {
   static const double alturaDoPreview = 0.50;
   static const double alturaDaFolha = 0.40;
 
+  /// A ABA DE ANIMACAO E A FERRAMENTA, NAO UMA FICHA.
+  ///
+  /// O painel de texto comum e uma lista de ajustes: 46% chega e sobra.
+  /// A animacao tem a grade do catalogo MAIS os controles da animacao
+  /// escolhida empilhados — em 46% a grade comia a tela e os controles
+  /// ficavam atras de uma rolagem de duas telas.
+  static const double alturaDaAnimacaoDeTexto = 0.60;
+
+  /// QUEM CEDE E A TIMELINE.
+  ///
+  /// A FRACAO ACIMA NAO BASTA. O painel nao pode passar de
+  /// `workspace - preview - piso da timeline`, e com o piso de 90 px de
+  /// um painel comum a conta fecha exatamente na altura do painel ANTIGO
+  /// — a aba de animacao abriria do mesmo tamanho, que e justamente o
+  /// que nao se quer. O preview nao entra na conta: ele nunca cede a um
+  /// painel (regra cobrada em teste), e a composicao continua do mesmo
+  /// tamanho no palco.
+  ///
+  /// A timeline fica com uma tira: a regua, o cabo do cabecote e a
+  /// faixa da camada escolhida ainda cabem, e o que se esta animando e
+  /// o texto, nao a montagem. Sair da aba devolve os 90 px.
+  static const double pisoDaTimelineAoAnimar = 44.0;
+
   bool get panelOpen => panel != EditorPanel.none && panel != EditorPanel.add;
   bool get adding => panel == EditorPanel.add;
+
+  /// A area de texto esta aberta E e a de animacao (o painel pede mais
+  /// altura, e o cabecalho muda de nome).
+  bool get animandoTexto =>
+      panel == EditorPanel.editText && textSection == TextSection.animation;
 
   EditorSession copyWith({
     EditorPanel? panel,
@@ -103,6 +153,7 @@ class EditorSession {
     EditorPanel? curveReturn,
     EditorPanel? pointsReturn,
     String? pointsItemId,
+    TextSection? textSection,
     bool clearPointsItem = false,
     bool? previewExpanded,
     bool? timelineExpanded,
@@ -117,6 +168,7 @@ class EditorSession {
     curveReturn: curveReturn ?? this.curveReturn,
     pointsReturn: pointsReturn ?? this.pointsReturn,
     pointsItemId: clearPointsItem ? null : (pointsItemId ?? this.pointsItemId),
+    textSection: textSection ?? this.textSection,
     previewExpanded: previewExpanded ?? this.previewExpanded,
     timelineExpanded: timelineExpanded ?? this.timelineExpanded,
     inPoint: clearInOut ? null : (inPoint ?? this.inPoint),
@@ -164,6 +216,17 @@ class EditorSessionNotifier extends AutoDisposeNotifier<EditorSession> {
 
   void openShape(ShapeTool tool) =>
       state = state.copyWith(panel: EditorPanel.editShape, shapeTool: tool);
+
+  /// ABRE A EDICAO DE TEXTO, opcionalmente ja numa das tres areas. E o
+  /// unico caminho para o animador manual: nao existe mais painel
+  /// proprio dele, e sim a aba de dentro do texto.
+  void openText([TextSection? section]) => state = state.copyWith(
+    panel: EditorPanel.editText,
+    textSection: section ?? state.textSection,
+  );
+
+  void setTextSection(TextSection section) =>
+      state = state.copyWith(textSection: section);
 
   void openCurve(LayerProp prop) => state = state.copyWith(
     curveProp: prop,

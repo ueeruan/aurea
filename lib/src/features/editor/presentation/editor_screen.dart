@@ -32,7 +32,6 @@ import 'am/layer_menu.dart';
 import 'am/points_panel.dart';
 import 'am/property_keyframe_context.dart';
 import 'am/shape_panel.dart';
-import 'am/text_animators_panel.dart';
 import 'am/transform_panel.dart';
 import 'context/add_toolbar.dart';
 import 'shell/onboarding.dart';
@@ -270,8 +269,11 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
     EditorPanel.colorFill => 'Cor e preenchimento',
     EditorPanel.effects => 'Efeitos',
     EditorPanel.curve => 'Curva de gradação',
-    EditorPanel.animators => 'Animacao de texto',
-    EditorPanel.editText => 'Editar texto',
+    EditorPanel.editText => switch (s.textSection) {
+      TextSection.edit => 'Editar texto',
+      TextSection.animation => 'Animação de texto',
+      TextSection.presets => 'Presets de texto',
+    },
     EditorPanel.editShape => 'Editar forma',
     EditorPanel.editPoints => 'Editar pontos',
   };
@@ -386,9 +388,10 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
       case LayerMenuAction.effects:
         _session.openPanel(EditorPanel.effects);
       case LayerMenuAction.editText:
-        _session.openPanel(EditorPanel.editText);
-      case LayerMenuAction.textAnimators:
-        _session.openPanel(EditorPanel.animators);
+        // A FICHA DIZ "EDITAR TEXTO", entao abre no que ela promete: a
+        // aba de conteudo. A animacao tem porta propria (a acao rapida
+        // "Animar"), e a ultima aba visitada nao decide por ninguem.
+        _session.openText(TextSection.edit);
       case LayerMenuAction.editShape:
         _session.openShape(ShapeTool.size);
       case LayerMenuAction.stroke:
@@ -696,14 +699,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
         prop: s.curveProp,
         onBack: _back,
       ),
-      EditorPanel.animators => TextAnimatorsPanel(
-        playback: _playback,
-        onBack: _back,
-      ),
-      EditorPanel.editText => TextPanel(
-        playback: _playback,
-        onAnimar: () => _session.openPanel(EditorPanel.animators),
-      ),
+      EditorPanel.editText => TextPanel(playback: _playback),
       EditorPanel.editShape => ShapePanel(
         playback: _playback,
         tool: s.shapeTool,
@@ -723,7 +719,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
     final pinkPlayhead =
         s.panel == EditorPanel.effects ||
         s.panel == EditorPanel.curve ||
-        s.panel == EditorPanel.animators;
+        s.animandoTexto;
 
     // Diamantes da propriedade ativa acendem; os demais ficam apagados.
     final Set<int>? activeTimesUs = layer == null
@@ -738,7 +734,6 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
             },
             EditorPanel.effects => layer.effectTimesUs,
             EditorPanel.colorFill => const <int>{},
-            EditorPanel.animators => null,
             EditorPanel.editText => null,
             EditorPanel.editShape => layer.moduleTimesUs,
             EditorPanel.editPoints =>
@@ -900,6 +895,10 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                   // comia a timeline e as outras camadas nao apareciam.
                   sheetFraction: conteudo is MultiSelectionPanel && ws > 0
                       ? (ContextSheet.handleHeight + 124) / ws
+                      : s.animandoTexto
+                      // A ABA DE ANIMACAO E A FERRAMENTA: ela pede o teto
+                      // que o layout permite, e quem cede e a timeline.
+                      ? EditorSession.alturaDaAnimacaoDeTexto
                       : folhaFina && ws > 0
                       ? (ContextSheet.handleHeight + (semCamadas ? 86 : 30)) /
                             ws
@@ -913,7 +912,9 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                   previewExpanded: s.previewExpanded,
                   timelineExpanded: s.timelineExpanded,
                   sheetVisible: conteudo != null,
-                  timelineFloor: layer != null || s.panel != EditorPanel.none
+                  timelineFloor: s.animandoTexto
+                      ? EditorSession.pisoDaTimelineAoAnimar
+                      : layer != null || s.panel != EditorPanel.none
                       ? 90
                       : 120,
                   sheetMayCoverTimeline: s.adding,

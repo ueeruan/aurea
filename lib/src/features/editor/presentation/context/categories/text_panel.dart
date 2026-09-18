@@ -5,22 +5,100 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../../core/theme/tokens.dart';
 import '../../../application/editor_controller.dart';
 import '../../../application/playback_controller.dart';
+import '../../../application/ui/editor_session.dart';
 import '../../../domain/layer.dart';
 import '../../am/am_colors.dart';
 import '../../am/color_picker_sheet.dart';
 import '../../am/font_sheet.dart';
+import '../../am/panel_chrome.dart';
+import '../../am/text_animators_panel.dart';
 import '../parameter_row.dart';
 import 'barra_de_estilo_do_texto.dart';
+import 'presets_do_texto.dart';
 import '../../../application/ui/pro_mode.dart';
 import '../../../domain/layer_meta.dart';
 
-/// E3 · EDITAR TEXTO (Fase 3): conteudo, fonte, tamanho, negrito, cor e
-/// a porta para as animacoes. Tudo em `ParameterRow`, sem folha modal.
+/// E3 · EDITAR TEXTO — UM PAINEL, TRES AREAS.
+///
+/// Editar o texto e animar o texto eram dois lugares: o painel de texto
+/// (conteudo, fonte, cor) e o animador, que se abria por um botao que
+/// FECHAVA este painel. Quem queria conferir como ficou a animacao saia
+/// do texto, animava as cegas e voltava para corrigir uma virgula — e a
+/// cada volta recomecava de uma lista.
+///
+/// Sao as tres coisas que se fazem com um texto, entao sao tres abas do
+/// mesmo painel: o texto fica ali enquanto se anima, e trocar de ideia e
+/// um toque lateral em vez de uma ida e volta.
 class TextPanel extends ConsumerWidget {
-  const TextPanel({super.key, required this.playback, required this.onAnimar});
+  const TextPanel({super.key, required this.playback});
 
   final PlaybackController playback;
-  final VoidCallback onAnimar;
+
+  static const _abas = [
+    ParamTab(
+      id: 'edit',
+      label: 'Editar texto',
+      chave: ValueKey('texto-aba-editar'),
+    ),
+    // A CHAVE ANTIGA VEM JUNTO. O gravador do tutorial procura
+    // 'texto-animar' para chegar na animacao; o botao saiu do corpo, mas
+    // o caminho ate ele continua sendo um toque — entao a chave segue o
+    // caminho ate a aba.
+    ParamTab(
+      id: 'animation',
+      label: 'Animação',
+      chave: ValueKey('texto-animar'),
+    ),
+    ParamTab(
+      id: 'presets',
+      label: 'Presets',
+      chave: ValueKey('texto-aba-presets'),
+    ),
+  ];
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final secao = ref.watch(editorSessionProvider).textSection;
+    final id = ref.watch(selectedLayerProvider);
+    if (id == null) return const ColoredBox(color: AmColors.panel);
+
+    return ColoredBox(
+      color: AmColors.panel,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          AmParamTabs(
+            abas: _abas,
+            ativa: secao.name,
+            onAba: (nome) => ref
+                .read(editorSessionProvider.notifier)
+                .setTextSection(TextSection.values.byName(nome)),
+          ),
+          Expanded(
+            child: switch (secao) {
+              TextSection.edit => _EdicaoDeTexto(
+                key: ValueKey('texto-edicao-$id'),
+                playback: playback,
+              ),
+              TextSection.animation => TextAnimatorsPanel(
+                playback: playback,
+                embutido: true,
+              ),
+              TextSection.presets => const PresetsDoTexto(),
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A ABA "EDITAR TEXTO": conteudo, fonte, tamanho, negrito e cor.
+/// Tudo em `ParameterRow`, sem folha modal.
+class _EdicaoDeTexto extends ConsumerWidget {
+  const _EdicaoDeTexto({super.key, required this.playback});
+
+  final PlaybackController playback;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -195,45 +273,6 @@ class TextPanel extends ConsumerWidget {
                 ),
               ),
             ),
-          ParameterCustomRow(
-            label: 'Animação',
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: GestureDetector(
-                key: const ValueKey('texto-animar'),
-                behavior: HitTestBehavior.opaque,
-                onTap: onAnimar,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AmColors.action,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: const [
-                      Icon(
-                        CupertinoIcons.sparkles,
-                        size: 14,
-                        color: AmColors.onAction,
-                      ),
-                      SizedBox(width: 6),
-                      AppText('Animar texto',
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w700,
-                          color: AmColors.onAction,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
         ],
       ),
     );

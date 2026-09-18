@@ -15,20 +15,32 @@ import 'am_colors.dart';
 import 'am_widgets.dart';
 import '../../../tutoriais/presentation/tutorial_screen.dart';
 
-/// ANIMACAO DE TEXTO — painel no modelo do Alight Motion.
+/// ANIMACAO DE TEXTO — o animador manual, no modelo do Alight Motion.
 ///
 /// Escolhe-se a animacao numa grade que MOSTRA cada uma se mexendo, e
 /// depois mexe-se em seis controles. O modelo do After Effects (animador
 /// + seletor na mao) continua acessivel em "Avancado".
+///
+/// MORA DENTRO DA EDICAO DE TEXTO (aba Animacao). Antes era um painel
+/// com porta propria, aberto de fora; virou aba porque animar texto e
+/// uma das tres coisas que se faz com um texto, e nao um lugar aonde se
+/// vai e de onde se volta. Com [embutido] o cabecalho proprio some (a
+/// fileira de abas ja diz onde se esta) e o corpo ocupa a area inteira.
 class TextAnimatorsPanel extends ConsumerStatefulWidget {
   const TextAnimatorsPanel({
     super.key,
     required this.playback,
-    required this.onBack,
+    this.onBack,
+    this.embutido = false,
   });
 
   final PlaybackController playback;
-  final VoidCallback onBack;
+
+  /// Nulo dentro das abas: a seta de voltar e do painel de texto.
+  final VoidCallback? onBack;
+
+  /// Sem cabecalho proprio (titulo e seta), para uso embutido.
+  final bool embutido;
 
   @override
   ConsumerState<TextAnimatorsPanel> createState() => _TextAnimatorsPanelState();
@@ -105,22 +117,24 @@ class _TextAnimatorsPanelState extends ConsumerState<TextAnimatorsPanel> {
     children: [
       Row(
         children: [
-          CupertinoButton(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            onPressed: widget.onBack,
-            child: const Icon(
-              CupertinoIcons.chevron_left,
-              size: 20,
-              color: AmColors.text,
+          if (widget.onBack != null)
+            CupertinoButton(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              onPressed: widget.onBack,
+              child: const Icon(
+                CupertinoIcons.chevron_left,
+                size: 20,
+                color: AmColors.text,
+              ),
             ),
-          ),
-          const AppText('Animacao de texto',
-            style: TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w600,
-              color: AmColors.text,
+          if (!widget.embutido)
+            const AppText('Animacao de texto',
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: AmColors.text,
+              ),
             ),
-          ),
           const Spacer(),
           // O TUTORIAL, onde a duvida nasce: a mola tem tres numeros
           // e nenhum deles se entende so pelo nome.
@@ -771,17 +785,74 @@ class _AnimPreviewState extends State<_AnimPreview>
         );
         return CustomPaint(
           size: Size.infinite,
-          painter: _PreviewPainter(animator: compiled, time: t),
+          painter: _PreviewPainter(animators: [compiled], time: t),
         );
       },
     );
   }
 }
 
-class _PreviewPainter extends CustomPainter {
-  _PreviewPainter({required this.animator, required this.time});
+/// PREVIA VIVA DE UMA PILHA DE ANIMADORES, em loop.
+///
+/// E a mesma previa da grade do catalogo, com a pilha inteira no lugar
+/// da animacao escolhida: e o que a aba PRESETS mostra antes de aplicar,
+/// para escolher olhando em vez de ler o nome. Nao ha uma segunda
+/// implementacao de desenho — quem pinta e `_PreviewPainter`, o mesmo.
+class PreviaDeAnimador extends StatefulWidget {
+  const PreviaDeAnimador({
+    super.key,
+    required this.animadores,
+    this.ciclo = const Duration(milliseconds: 2000),
+  });
 
-  final TextAnimator animator;
+  final List<TextAnimator> animadores;
+
+  /// Uma volta completa da previa (a animacao mais um respiro).
+  final Duration ciclo;
+
+  @override
+  State<PreviaDeAnimador> createState() => _PreviaDeAnimadorState();
+}
+
+class _PreviaDeAnimadorState extends State<PreviaDeAnimador>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c;
+
+  @override
+  void initState() {
+    super.initState();
+    _c = AnimationController(vsync: this, duration: widget.ciclo)..repeat();
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _c,
+      builder: (context, _) => CustomPaint(
+        size: Size.infinite,
+        painter: _PreviewPainter(
+          animators: widget.animadores,
+          time: Duration(
+            microseconds: (_c.value * widget.ciclo.inMicroseconds).round(),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PreviewPainter extends CustomPainter {
+  _PreviewPainter({required this.animators, required this.time});
+
+  /// A pilha, na ordem: o deslocamento de uma entra como base da
+  /// seguinte, que e exatamente como o texto composto as soma.
+  final List<TextAnimator> animators;
   final Duration time;
 
   static const _glyphs = ['A', 'b', 'c'];
@@ -795,44 +866,45 @@ class _PreviewPainter extends CustomPainter {
     final cy = size.height / 2;
 
     for (var i = 0; i < n; i++) {
-      final c = animator.coverageAt(i, n, time);
-
       var dx = 0.0, dy = 0.0, rot = 0.0, blur = 0.0, skew = 0.0, hue = 0.0;
       var sc = 100.0, op = 100.0, scx = 100.0, scy = 100.0;
       var sat = 100.0, bri = 100.0, track = 0.0;
-      for (final p in animator.properties) {
-        switch (p.type) {
-          case TextAnimProp.positionX:
-            dx = p.apply(dx, time, c);
-          case TextAnimProp.positionY:
-            dy = p.apply(dy, time, c);
-          case TextAnimProp.rotation:
-            rot = p.apply(rot, time, c);
-          case TextAnimProp.tracking:
-            track = p.apply(track, time, c);
-          case TextAnimProp.scale:
-            sc = p.apply(sc, time, c);
-          case TextAnimProp.opacity:
-            op = p.apply(op, time, c);
-          case TextAnimProp.scaleX:
-            scx = p.apply(scx, time, c);
-          case TextAnimProp.scaleY:
-            scy = p.apply(scy, time, c);
-          case TextAnimProp.blur:
-            blur = p.apply(blur, time, c);
-          case TextAnimProp.skew:
-            skew = p.apply(skew, time, c);
-          case TextAnimProp.hue:
-            hue = p.apply(hue, time, c);
-          case TextAnimProp.saturation:
-            sat = p.apply(sat, time, c);
-          case TextAnimProp.brightness:
-            bri = p.apply(bri, time, c);
-          case TextAnimProp.rotationX:
-          case TextAnimProp.rotationY:
-          case TextAnimProp.positionZ:
-            // A miniatura do painel e 2D; o 3D aparece no preview.
-            break;
+      for (final animator in animators) {
+        final c = animator.coverageAt(i, n, time);
+        for (final p in animator.properties) {
+          switch (p.type) {
+            case TextAnimProp.positionX:
+              dx = p.apply(dx, time, c);
+            case TextAnimProp.positionY:
+              dy = p.apply(dy, time, c);
+            case TextAnimProp.rotation:
+              rot = p.apply(rot, time, c);
+            case TextAnimProp.tracking:
+              track = p.apply(track, time, c);
+            case TextAnimProp.scale:
+              sc = p.apply(sc, time, c);
+            case TextAnimProp.opacity:
+              op = p.apply(op, time, c);
+            case TextAnimProp.scaleX:
+              scx = p.apply(scx, time, c);
+            case TextAnimProp.scaleY:
+              scy = p.apply(scy, time, c);
+            case TextAnimProp.blur:
+              blur = p.apply(blur, time, c);
+            case TextAnimProp.skew:
+              skew = p.apply(skew, time, c);
+            case TextAnimProp.hue:
+              hue = p.apply(hue, time, c);
+            case TextAnimProp.saturation:
+              sat = p.apply(sat, time, c);
+            case TextAnimProp.brightness:
+              bri = p.apply(bri, time, c);
+            case TextAnimProp.rotationX:
+            case TextAnimProp.rotationY:
+            case TextAnimProp.positionZ:
+              // A miniatura do painel e 2D; o 3D aparece no preview.
+              break;
+          }
         }
       }
 

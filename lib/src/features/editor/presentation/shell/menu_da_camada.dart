@@ -529,7 +529,7 @@ class _ItensDaCamada extends ConsumerWidget {
                 pro: ref.read(proModeProvider),
                 onAnimarTexto: () => ref
                     .read(editorSessionProvider.notifier)
-                    .openPanel(EditorPanel.animators),
+                    .openText(TextSection.animation),
               ),
             ),
           ),

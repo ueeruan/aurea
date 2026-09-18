@@ -53,7 +53,6 @@ enum LayerMenuAction {
   colorFill,
   effects,
   editText,
-  textAnimators,
 
   /// Nivel 1: o painel "Editar forma" (numeros da forma, traco,
   /// desenhar, pontos) e o mesmo painel aberto na aba do traco.
@@ -67,13 +66,11 @@ class LayerToolsDock extends ConsumerWidget {
     required this.layer,
     required this.playback,
     required this.onAction,
-    this.onAnimarTexto,
   });
 
   final Layer layer;
   final PlaybackController playback;
   final ValueChanged<LayerMenuAction> onAction;
-  final VoidCallback? onAnimarTexto;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

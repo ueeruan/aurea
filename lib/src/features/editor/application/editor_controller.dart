@@ -7409,6 +7409,15 @@ class EditorController extends Notifier<VideoProject> {
     _updateTextLayer(id, (l) => l.copyLayer(animators: preset.build()));
   }
 
+  /// Tira a pilha inteira de animadores — o "Nenhuma" dos presets.
+  ///
+  /// Sem isto, um preset aplicado so saia por outro preset: a aba nao
+  /// teria como devolver o texto ao estado parado. Uma escrita so, um
+  /// passo de desfazer.
+  void clearTextAnimators(String id) {
+    _updateTextLayer(id, (l) => l.copyLayer(animators: const []));
+  }
+
   /// PRECOMP: duracao interna, remapeamento de tempo, colapsar e
   /// recortar.
   void updatePrecomp(

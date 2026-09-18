@@ -213,10 +213,15 @@ class ParamTab {
     required this.label,
     this.icone,
     this.animated = false,
+    this.chave,
   });
 
   final String id;
   final String label;
+
+  /// Chave de teste da aba. Sem ela a fileira so se acha por texto — e
+  /// dois rotulos diferentes podem conter o mesmo pedaco.
+  final Key? chave;
 
   /// O icone da sub-aba no trilho direito. Sem ele a aba mostra so o
   /// rotulo, em duas linhas.
@@ -315,6 +320,7 @@ class _AmParamTabsState extends State<AmParamTabs> {
                       for (final aba in widget.abas)
                         Expanded(
                           child: _Aba(
+                            key: aba.chave,
                             aba: aba,
                             selecionada: aba.id == widget.ativa,
                             onTap: () => widget.onAba(aba.id),
@@ -335,6 +341,7 @@ class _AmParamTabsState extends State<AmParamTabs> {
                       children: [
                         for (final aba in widget.abas)
                           _Aba(
+                            key: aba.chave,
                             aba: aba,
                             selecionada: aba.id == widget.ativa,
                             onTap: () => widget.onAba(aba.id),
@@ -381,6 +388,7 @@ class _Ponta extends StatelessWidget {
 
 class _Aba extends StatelessWidget {
   const _Aba({
+    super.key,
     required this.aba,
     required this.selecionada,
     required this.onTap,
@@ -397,7 +405,11 @@ class _Aba extends StatelessWidget {
       onTap: onTap,
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 3),
-        padding: const EdgeInsets.symmetric(horizontal: 10),
+        // OITO, E NAO DEZ. Tres abas dividem a linha por igual, e o
+        // rotulo mais longo ("Editar texto") estourava a conta por tres
+        // pixels — a faixa amarela e preta por cima da aba. Dois pixels
+        // de cada lado devolvem a folga.
+        padding: const EdgeInsets.symmetric(horizontal: 8),
         constraints: const BoxConstraints(minWidth: 64, minHeight: 36),
         alignment: Alignment.center,
         decoration: BoxDecoration(
@@ -407,11 +419,17 @@ class _Aba extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            AppText(aba.label,
-              style: TextStyle(
-                fontSize: 12.5,
-                fontWeight: selecionada ? FontWeight.w700 : FontWeight.w500,
-                color: selecionada ? AmColors.accent : AmColors.text,
+            // FLEXIVEL COMO REDE: um rotulo mais longo que a conta do
+            // `_larguraDe` corta com reticencias em vez de estourar.
+            Flexible(
+              child: AppText(aba.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: selecionada ? FontWeight.w700 : FontWeight.w500,
+                  color: selecionada ? AmColors.accent : AmColors.text,
+                ),
               ),
             ),
             if (aba.animated) ...[

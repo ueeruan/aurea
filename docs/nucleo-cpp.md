@@ -78,3 +78,71 @@ importador), Diligent (Metal pago), The Forge (glTF offline), LibGodot
 1. Relatorios da Bancada A-E no iPhone 17, iPhone 13 e Android (o "antes").
 2. Destravar o codificador do nucleo em aparelho (ou Surface de entrada).
 3. S0/S1: ponte de comandos + decodificacao nativa como Texture.
+
+## 17/09 — RenderCore: fundacao, e o Vulkan no aparelho
+
+Pedido do dono: o mesmo, executado. `packages/aurea_render` (build hook do
+Dart, C++20) com a primeira fatia de verdade atras da UI.
+
+**O que existe.** Fila de comandos sem trava entre UI e render; relogio de
+quadro com p50/p95/max e orcamento; gerenciador de recursos com dono, alca,
+orcamento em bytes e despejo LRU (300 quadros, uma alocacao de alvo);
+gerenciador de shaders com cache, pre-aquecimento e deteccao de fonte
+trocada; avaliador de timeline que e copia fiel do `AnimatedDouble.valueAt`
+do Dart; compositor 2D com ancora, escala, rotacao, opacidade, oito modos
+de mistura em Porter-Duff e supermuestreamento, sobre um backend de
+REFERENCIA em CPU (o gabarito do Metal e do Vulkan que vierem); nucleo com
+thread propria e qualidade adaptativa por degraus.
+
+**A ponte.** `api.cpp`: todo simbolo fecha o corpo num `catch (...)`, as
+estatisticas saem num vetor de `double` (struct com `double` e `int`
+misturados tem preenchimento, e preenchimento faz os dois lados lerem o
+campo do vizinho). Publicar 20 camadas custa p50 0,012 ms / p99 0,088 ms.
+
+**A REGRA DO ZERO-COPY VIROU CODIGO.** `ler_pixels` RECUSA num nucleo
+aberto com thread propria — que e o de producao. Comentario nao impede
+nada; a linha impede.
+
+**O QUE AINDA NAO EXISTE, E O RELATORIO DIZ.** Video, texto, efeitos, 3D e
+particulas nao estao no compositor. O backend de GPU nao esta escrito:
+`abrir` RECUSA Vulkan em vez de devolver um motor que diz ser o que nao e —
+um nucleo que se diz de GPU e compoe na CPU seria a camada falsa sobre o
+renderizador antigo.
+
+### V0 — o dispositor, medido no emulador
+
+`flutter test integration_test/nucleo_vulkan_test.dart -d emulator-5554`:
+
+```
+Vulkan 1.2.0 | SwiftShader Device (LLVM 10.0.0) | driver 5.0.0
+1 dispositivo(s) | fila grafica: sim | swapchain: sim
+textura max 16384 | AHardwareBuffer: sim
+```
+
+A sonda sobe a instancia, escolhe o dispositivo fisico, acha a familia de
+fila grafica, cria o DISPOSITOR LOGICO (onde o driver real recusa) e
+desce. **Isto e SOFTWARE Vulkan (SwiftShader) num emulador**: prova o
+caminho da API, nao o desempenho de GPU num celular. NUMERO DE APARELHO:
+NAO TESTADO — REQUER DISPOSITIVO.
+
+### O portao que pegou, e o build do Android
+
+- **arm64 recusou `std::jthread`**: a libc++ do NDK 28 nao o tem (nem
+  `std::stop_token`). Trocado por `std::thread`; a parada ja era explicita.
+  Provado: `libaurea_render.so` ELF64 AArch64, 21 simbolos, ligado contra
+  `libvulkan.so`.
+- **O build do Android estava quebrado, e nao era o RenderCore** (medido:
+  sem o pacote, a falha e identica). O daemon do Kotlin guarda os `.tab` do
+  cache incremental num mapa global e estatico, e plugins que aplicam o KGP
+  por conta propria registram o mesmo caminho duas vezes. `flutter clean`
+  nao resolvia porque nao era cache velho. Corrigido com
+  `kotlin.incremental=false` em `android/gradle.properties`, que desliga o
+  COMPONENTE que falha e nao um recurso.
+
+### Proximo
+
+1. V1: superficie pelo `ANativeWindow` do `SurfaceProducer`, swapchain e um
+   clear na tela.
+2. V2: o compositor em shader — e o unico ponto em que `abrir(backend: 2)`
+   pode passar a responder sim.
+3. Metal depende de uma maquina Apple: nao compila no PC do projeto.

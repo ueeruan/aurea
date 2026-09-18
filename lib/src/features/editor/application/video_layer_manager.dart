@@ -46,6 +46,74 @@ typedef _Midia = ({
 ///      o corte chegava cedo e o pre-roll ja nao servia ([_maturidadeMs]);
 ///   4. um projeto cortado em pedacos curtos pre-rolava todos os pedacos
 ///      dos proximos dois segundos de uma vez ([_tetoPreRoll]).
+/// CONTADORES DE DIAGNOSTICO DO AUDIO.
+///
+/// NAO DECIDEM NADA. Existem porque "o som engasga" nao diz ONDE o tempo
+/// vai: o relato pode ser seek demais, play demais, volume demais ou cena
+/// remontada demais, e cada um desses tem uma correcao diferente. Medido
+/// no aparelho, o numero escolhe a correcao em vez de adivinhar.
+///
+/// Sao incrementos de `int` num caminho que ja faz chamada de plataforma:
+/// o custo e o de um contador de CPU, e nao o de um relogio.
+abstract final class DiagnosticoDoAudio {
+  static int seeks = 0;
+  static int plays = 0;
+  static int pauses = 0;
+  static int volumes = 0;
+  static int tocadoresCriados = 0;
+  static int tocadoresDescartados = 0;
+
+  /// Quantas vezes o bloco PESADO do `sync` rodou (remontar a lista de
+  /// midias + preparar audio). Uma vez por mudanca de cena e o normal;
+  /// a cada tique seria o pior caso.
+  static int cenasRemontadas = 0;
+
+  /// Amostras NOVAS de posicao que viraram referencia do relogio.
+  static int amostrasDeRelogio = 0;
+
+  /// A TRILHA CRUA DE UMA ANCORAGEM, em texto: o relogio da composicao,
+  /// a posicao que o tocador publicou, o alvo local e o erro que sobrou.
+  /// E ela que diz QUAL e o defeito: rampa lenta e diferenca de taxa;
+  /// degrau constante e latencia de saida; pico isolado e amostra ruim.
+  static final List<String> trilha = <String>[];
+
+  /// A trilha so e preenchida quando alguem PEDE (a bancada do emulador).
+  /// Em producao ela fica desligada: escrever uma linha por amostra nao e
+  /// caro, mas nao ha por que pagar por um dado que ninguem vai ler.
+  static bool trilhaLigada = false;
+
+  static void registrar(double relogioMs, double midiaMs, double alvoMs,
+      double erroMs, double viesMs) {
+    if (!trilhaLigada || trilha.length >= 400) return;
+    trilha.add('${relogioMs.toStringAsFixed(0)};'
+        '${midiaMs.toStringAsFixed(0)};${alvoMs.toStringAsFixed(0)};'
+        '${erroMs.toStringAsFixed(0)};${viesMs.toStringAsFixed(0)}');
+  }
+
+  static void zerar() {
+    trilha.clear();
+    seeks = 0;
+    plays = 0;
+    pauses = 0;
+    volumes = 0;
+    tocadoresCriados = 0;
+    tocadoresDescartados = 0;
+    cenasRemontadas = 0;
+    amostrasDeRelogio = 0;
+  }
+
+  static Map<String, int> ler() => {
+    'seeks': seeks,
+    'plays': plays,
+    'pauses': pauses,
+    'volumes': volumes,
+    'criados': tocadoresCriados,
+    'descartados': tocadoresDescartados,
+    'cenas': cenasRemontadas,
+    'amostras': amostrasDeRelogio,
+  };
+}
+
 class VideoLayerManager {
   /// [relogioMs] so existe para teste: o relogio de parede nao anda junto
   /// com o tempo simulado do teste de widget.
@@ -162,10 +230,14 @@ class VideoLayerManager {
     final estavaTocando = _tocouEm.remove(id) != null;
     unawaited(() async {
       try {
-        if (estavaTocando || c.value.isPlaying) await c.pause();
+        if (estavaTocando || c.value.isPlaying) {
+          DiagnosticoDoAudio.pauses++;
+          await c.pause();
+        }
         while (live()) {
           final target = _positionTargets.remove(id);
           if (target == null) break;
+          DiagnosticoDoAudio.seeks++;
           await c.seekTo(target.time);
           if (!live()) return;
           if (_semQuadro.remove(id)) revision.value++;
@@ -184,6 +256,7 @@ class VideoLayerManager {
             if (_positionTargets.containsKey(id)) continue;
             if (_lastPlaying || _scrubbing) {
               _tocouEm[id] = _msAgora;
+              DiagnosticoDoAudio.plays++;
               await c.play();
             }
           }
@@ -397,6 +470,7 @@ class VideoLayerManager {
   ///
   /// Um controller PRONTO nao e descartado: vai para o estacionamento.
   void _evict(String id) {
+    if (_controllers.containsKey(id)) DiagnosticoDoAudio.tocadoresDescartados++;
     final path = _controllerPath[id];
     _positioning.remove(id);
     _starting.remove(id);
@@ -455,6 +529,9 @@ class VideoLayerManager {
   }
 
   void _ensure(String id, String path, double volume) {
+    if (!_controllers.containsKey(id) && !_initializing.containsKey(id)) {
+      DiagnosticoDoAudio.tocadoresCriados++;
+    }
     final currentPath = _controllerPath[id];
     if (currentPath != null && currentPath != path) {
       // O proxy (ou o fluxo optico) ficou pronto no MEIO da reproducao:
@@ -539,6 +616,12 @@ class VideoLayerManager {
   /// por isso a resposta vem de fora.
   bool Function(String id)? soaAgora;
 
+  /// Ha midia ATIVA (video ou som) neste instante da composicao.
+  ///
+  /// O relogio usa isto para saber se vale esperar o tocador na largada
+  /// (ver `PlaybackController.temMidiaAtiva`).
+  bool get temMidiaAtiva => _ativo.any((a) => a);
+
   Duration? sync(
     List<Layer> layers,
     Duration t,
@@ -574,6 +657,7 @@ class VideoLayerManager {
       _lastProxyRevision = proxyRevision;
       _lastFlowRevision = flowRevision;
       _lastAudioRevision = audioRevision;
+      DiagnosticoDoAudio.cenasRemontadas++;
       _prepareAudio();
 
       // PROXY quando ha: quadro-chave a cada 6 quadros faz o scrub ficar
@@ -762,6 +846,7 @@ class VideoLayerManager {
       }
       if (((_appliedVolume[key] ?? -1) - effectiveVolume).abs() > 0.001) {
         _appliedVolume[key] = effectiveVolume;
+        DiagnosticoDoAudio.volumes++;
         controller.setVolume(effectiveVolume.clamp(0.0, 1.0));
       }
       // A VELOCIDADE estica a leitura da fonte: um segundo na linha
@@ -830,6 +915,7 @@ class VideoLayerManager {
           // continuacao. O volume real entra no tique em que o pedaco
           // fica ativo, pela mesma conta de sempre.
           _appliedVolume[key] = 0;
+          DiagnosticoDoAudio.volumes++;
           controller.setVolume(0);
           _setNativeRate(key, controller, rate);
           _tocouEm[key] = agoraMs;
@@ -942,6 +1028,14 @@ class VideoLayerManager {
               final timelineErrorUs =
                   (sourceErrorUs / vel.abs().clamp(0.1, 10.0).toDouble())
                       .round();
+              DiagnosticoDoAudio.amostrasDeRelogio++;
+              DiagnosticoDoAudio.registrar(
+                t.inMilliseconds.toDouble(),
+                pos.inMilliseconds.toDouble(),
+                local.inMilliseconds.toDouble(),
+                timelineErrorUs / 1000.0,
+                bias / 1000.0,
+              );
               master = t + Duration(microseconds: timelineErrorUs);
               FrameLog.reportDrift(-timelineErrorUs / 1000.0);
             }

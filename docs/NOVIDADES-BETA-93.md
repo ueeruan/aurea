@@ -202,6 +202,50 @@ traduzido**. O número real são duas listas diferentes — 366 que só
 precisavam ser envolvidos (tradução já existia) e 463 que precisam de
 tradução nova. Os 366 já foram.
 
+
+## 11. O som parava de andar junto no Android (o "lag do áudio")
+
+**O relato:** com música na linha do tempo, o play engasga no Android — e
+no iPhone vai tranquilo.
+
+A correção anterior (a onda da música sendo reconstruída a cada quadro)
+resolveu uma parte e **não era esse o defeito**. O que sobrou foi medido
+no emulador, com a trilha crua da ancoragem impressa amostra a amostra:
+
+```
+ANTES   relógio=1866 ms   áudio=1396 ms   erro=-411 ms
+        e o erro ficou entre -309 e -546 ms os 8 segundos inteiros
+
+DEPOIS  relógio=266 ms    áudio=223 ms    erro=0 ms
+        e o erro ficou entre -69 e +40 ms
+```
+
+**A causa era a largada do play.** O relógio da composição começava a
+contar no instante do TOQUE. No Android o som começa a andar algumas
+centenas de milissegundos depois (busca no decodificador + buffer), então
+a composição nascia ~400 ms **à frente** do som: imagem adiantada, áudio
+atrasado. Daí em diante a correção puxava o relógio de volta a 8 ms por
+amostra — dez amostras por segundo, 80 ms por segundo —, o que levaria
+**dezenas de segundos** para fechar uma conta de 400 ms. Era isso que se
+via e se ouvia.
+
+**O conserto:** com mídia na cena, o relógio **segura** no instante do
+toque até a primeira amostra real de posição chegar, e então **se alinha a
+ela de uma vez**. A deriva pequena continua sendo absorvida em fração, como
+antes: o que mudou foi só a PRIMEIRA amostra, que é alinhamento e não
+deriva. Composição só de formas (sem mídia) não espera nada — não há o que
+esperar. E um tocador que nunca apareça não congela a prévia: há um teto de
+1 segundo.
+
+No iPhone o som começa em ~15 ms, então a espera é de um ou dois quadros e
+não se vê: por isso o sintoma era só no Android.
+
+Nove testes novos em `test/largada_com_midia_test.dart`, e duas bancadas de
+medição que ficam no repositório: `integration_test/sonda_do_audio_test.dart`
+(como o Android publica a posição do áudio) e
+`integration_test/lag_do_audio_test.dart` (o editor de verdade tocando, com
+os contadores por segundo).
+
 ---
 
 ## O que ainda NÃO está pronto
@@ -249,6 +293,11 @@ Se algo travar, fechar sozinho, a nuvem não voltar igual ao arrastar o
 cabeçote, ou a atualização falhar no meio, é isso que interessa saber — e
 nesse último caso me diga em que tela parou.
 
+* **O conserto do áudio foi medido no EMULADOR**, que é Android de
+  verdade para comportamento (chamadas, alinhamento, cadência) mas não
+  para desempenho: ele roda em software e faz 3 quadros por segundo. O
+  número que vale é o erro entre o relógio e o áudio (−411 ms antes,
+  ±40 ms depois), e não o tempo de quadro.
 * **Dos efeitos novos, nada foi medido em celular** — a conta foi conferida
   contra o render do After Effects no computador, e o custo por quadro é
   estimado pela quantidade de montagens da camada (o RGB no tempo faz três,

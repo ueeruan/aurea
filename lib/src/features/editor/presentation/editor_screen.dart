@@ -106,6 +106,10 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
         PlaybackController(
           vsync: this,
           durationOf: () => ref.read(editorControllerProvider).duration,
+          // Com midia na cena o relogio espera o tocador comecar a andar;
+          // sem midia ele anda direto, que e o caso das composicoes so de
+          // formas.
+          temMidiaAtiva: () => _videos.temMidiaAtiva,
         );
     _playback.time.addListener(_syncVideos);
     _playback.playing.addListener(_syncVideos);

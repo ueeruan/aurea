@@ -12,11 +12,19 @@ class PlaybackController {
   PlaybackController({
     required TickerProvider vsync,
     required this.durationOf,
+    this.temMidiaAtiva,
   }) {
     _ticker = vsync.createTicker(_onTick);
   }
 
   final Duration Function() durationOf;
+
+  /// Ha midia (video ou som) para ancorar o relogio neste instante?
+  ///
+  /// E o que decide se a largada espera o tocador. Numa composicao so de
+  /// formas nao ha o que esperar — e esperar ali seria um atraso inventado
+  /// por nos, de meio segundo, toda vez que se aperta o play.
+  final bool Function()? temMidiaAtiva;
   late final Ticker _ticker;
 
   final ValueNotifier<Duration> time = ValueNotifier(Duration.zero);
@@ -48,6 +56,29 @@ class PlaybackController {
   bool _podeVoltar = false;
 
   void _onTick(Duration elapsed) {
+    // A LARGADA ESPERA A MIDIA.
+    //
+    // O relogio da composicao historico comeca a contar no TOQUE. No
+    // Android o som comeca a andar algumas centenas de ms depois (busca no
+    // decodificador + buffer), e a partir dai a composicao ficava ~400 ms
+    // A FRENTE da midia — a imagem adiantada e o som atrasado, que e o
+    // "lag do audio" do relato. A correcao fracionada nao fecha essa
+    // conta: 8 ms por amostra, dez amostras por segundo, davam 80 ms por
+    // segundo para fechar 400 ms — com a imagem fora de sincronia por
+    // muitos segundos.
+    //
+    // A saida e nao deixar a conta nascer: com midia na cena, o relogio
+    // SEGURA no instante do toque ate a primeira amostra real chegar, e
+    // entao se alinha a ela (ver [anchorToMedia]). O limite existe para um
+    // tocador que nunca apareca nao congelar a previa.
+    if (_aguardandoLargada) {
+      if (elapsed.inMicroseconds > _tetoDaLargadaUs) {
+        _aguardandoLargada = false;
+      } else {
+        _base = time.value - elapsed;
+        return;
+      }
+    }
     final t = _base + elapsed;
     final end = durationOf();
     if (t >= end) {
@@ -79,6 +110,13 @@ class PlaybackController {
     }
   }
 
+  /// O relogio esta parado esperando a midia comecar a andar.
+  bool _aguardandoLargada = false;
+
+  /// Quanto tempo o relogio pode esperar a midia sem congelar a previa.
+  /// (O `elapsed` do ticker comeca em zero a cada `play`.)
+  static const int _tetoDaLargadaUs = 1000000;
+
   /// ANCORAGEM CONTINUA na midia (PR-J1, fim da deriva por construcao).
   ///
   /// O padrao "se a diferenca passar de X, corrige" corrige em BLOCO — e
@@ -92,6 +130,17 @@ class PlaybackController {
   void anchorToMedia(Duration mediaTime) {
     if (!playing.value) return;
     final errUs = mediaTime.inMicroseconds - time.value.inMicroseconds;
+    // A PRIMEIRA AMOSTRA E ALINHAMENTO, E NAO DERIVA. Ela chega quando a
+    // midia comeca a andar de verdade, e diz exatamente onde ela esta: o
+    // relogio vai para la de uma vez. Insistir na fracao aqui era o que
+    // deixava a composicao centenas de ms a frente do som.
+    if (_aguardandoLargada) {
+      _aguardandoLargada = false;
+      _base += Duration(microseconds: errUs);
+      debugBaseShiftUs = errUs;
+      _podeVoltar = errUs < 0;
+      return;
+    }
     if (errUs.abs() > 1000000) {
       // Dessincronia REAL (app em background, midia reiniciada): nao e
       // deriva — realinha de uma vez.
@@ -126,6 +175,13 @@ class PlaybackController {
   /// diagnostico: mostra que a correcao e fracionada, nunca em bloco.
   int debugBaseShiftUs = 0;
 
+  /// O proximo tick pode publicar um instante anterior (realinhamento
+  /// para tras) — so para teste.
+  bool get debugPodeVoltar => _podeVoltar;
+
+  /// O relogio esta esperando a midia comecar a andar — so para teste.
+  bool get debugAguardandoMidia => _aguardandoLargada;
+
   void play() {
     if (playing.value) return;
     final end = durationOf();
@@ -135,6 +191,7 @@ class PlaybackController {
       time.value = Duration.zero;
     }
     _base = time.value;
+    _aguardandoLargada = temMidiaAtiva?.call() ?? false;
     _ticker.start();
     playing.value = true;
     tocandoAgora.value = true;
@@ -143,6 +200,7 @@ class PlaybackController {
 
   void pause() {
     if (_ticker.isActive) _ticker.stop();
+    _aguardandoLargada = false;
     playing.value = false;
     tocandoAgora.value = false;
     // Intervalo atravessando a pausa nao e jitter.
@@ -204,6 +262,11 @@ class PlaybackController {
       Duration(microseconds: (quadro * 1000000 / f).ceil());
 
   void seek(Duration t) {
+    // UM SEEK E UM PEDIDO DELIBERADO: quem reposiciona e o dedo (ou o
+    // codigo), e a midia segue. Segurar o relogio aqui seria a "trava ao
+    // chegar onde decupei" que ja custou uma correcao — o tocador so
+    // demora a achar o ponto, e a previa tem de continuar andando.
+    _aguardandoLargada = false;
     seekRevision++;
     final end = durationOf();
     var v = _naGrade(t);

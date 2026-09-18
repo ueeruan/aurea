@@ -466,8 +466,12 @@ void main() {
         quadros = n.estatisticas().quadros;
       }
       expect(quadros, greaterThan(0), reason: 'a thread do render nao andou');
-      final p = n.lerPixels()!;
-      expect([p[0], p[1], p[2], p[3]], [255, 136, 0, 255]);
+
+      // E O QUADRO NAO SAI DA GPU. Um nucleo com thread e o nucleo de
+      // producao, e nele a leitura de pixels e RECUSADA: se esta chamada
+      // passasse, o caminho GPU->CPU->GPU que o motor existe para evitar
+      // estaria de volta num play de verdade.
+      expect(n.lerPixels(), isNull);
     });
   });
 }

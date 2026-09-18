@@ -304,6 +304,21 @@ Resulta<std::uint32_t> Nucleo::pre_aquecer(
 
 Resulta<std::uint32_t> Nucleo::ler_pixels(
     std::vector<std::uint8_t>& destino) {
+  // ======================= A REGRA DO ZERO-COPY, EM CODIGO ==============
+  //
+  // ESTA FUNCAO TRAZ O QUADRO INTEIRO DA MEMORIA DE VOLTA PARA A CPU. Ela
+  // existe para o teste e para a bancada — e, se algum dia entrar num
+  // play, o caminho GPU→CPU→GPU que o motor inteiro foi feito para
+  // evitar esta de volta, a 60 Hz, com oito megabytes por quadro.
+  //
+  // POR ISSO ELA E RECUSADA NO NUCLEO DE PRODUCAO. Um nucleo com thread
+  // propria e o nucleo de producao; um nucleo sem thread e o da bancada,
+  // onde o resultado tem de ser deterministico. A distincao ja existia e
+  // agora ela PROTEGE: nao ha como ler pixels de um nucleo que esta
+  // desenhando para a tela sem antes ter escolhido o modo de bancada. Um
+  // aviso em comentario nao impede nada; esta linha impede.
+  if (cfg_.com_thread) return Erro::nao_suportado;
+
   if (!alvo_.viva()) return Erro::estado_invalido;
   auto* alvo = dynamic_cast<CargaDeAlvo*>(alvo_.carga());
   if (alvo == nullptr) return Erro::estado_invalido;

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:code_assets/code_assets.dart';
 import 'package:hooks/hooks.dart';
 import 'package:native_toolchain_c/native_toolchain_c.dart';
@@ -38,5 +40,27 @@ void main(List<String> args) async {
       std: 'c++20',
       flags: [if (input.config.code.targetOS == OS.windows) '/EHsc'],
     ).run(input: input, output: output);
+
+    // OS CABECALHOS TAMBEM SAO ENTRADA DO BUILD.
+    //
+    // O `CBuilder` so olha para os `.cpp` da lista: mexer num `.h` nao
+    // invalidava o cache, e o binario continuava com o codigo velho — o
+    // sintoma e o pior possivel, porque o fonte que esta na tela nao e o
+    // que esta rodando. Aconteceu nesta sessao: um ajuste em
+    // `avaliador_da_timeline.h` nao entrou, o teste falhou por um motivo
+    // que o codigo ja tinha corrigido, e a cacada foi atras de um erro
+    // que nao existia mais.
+    //
+    // `output.dependencies` e o mecanismo do proprio hook: qualquer
+    // arquivo listado ali derruba o build quando muda depois dele.
+    //
+    // A URI TEM DE SER DE ARQUIVO, e nao `package:`. O `hooks` guarda a
+    // lista em JSON e chama `toFilePath()`, que nao sabe ler uma URI de
+    // pacote — e o erro que sai dali ("Cannot extract a file path from a
+    // package URI") nao diz nada sobre o que estava sendo registrado.
+    for (final arquivo in Directory('src').listSync()) {
+      if (arquivo is! File || !arquivo.path.endsWith('.h')) continue;
+      output.dependencies.add(File(arquivo.path).absolute.uri);
+    }
   });
 }

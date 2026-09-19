@@ -127,6 +127,7 @@ flutter:
     - shaders/tv_damage.frag
     - shaders/pixel_sort.frag
     - shaders/auto_paint.frag
+    - shaders/preto_e_branco.frag
 
   assets:
     - assets/ai/

@@ -10,6 +10,8 @@ import 'correcao_de_cor.dart';
 import 'estilizar.dart';
 import 'jpeg_damage.dart';
 import 'distorcao_ae.dart';
+import 'posterize_time.dart';
+import 'preto_e_branco.dart';
 import 'shake.dart';
 import 'glitch_distorcao.dart';
 import 'vhs_damage.dart';
@@ -182,6 +184,9 @@ enum EffectType {
   // salvo abrir com outro efeito.
   preenchimento,
   sombraProjetada,
+
+  // ---- 19/09: efeitos temporais e de cor ----
+  pretoEBranco,
 }
 
 /// A ORDEM DO ENUM ANTES DE O TIME REMAP SAIR (17/09).
@@ -611,6 +616,8 @@ const effectSpecs = <EffectType, EffectSpec>{
   ...efeitosSombraProjetada,
   ...efeitosLuzEDiversos,
   ...efeitosMotionTile,
+  ...efeitosPretoEBranco,
+  ...efeitosPosterizeTime,
 };
 
 /// OS EFEITOS DE EDIT, na ordem em que se procura: batida, glitch,

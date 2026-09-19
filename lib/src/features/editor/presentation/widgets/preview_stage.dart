@@ -6190,6 +6190,12 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
             );
           }
 
+        case EffectType.pretoEBranco:
+          // DESENHA NA RECEITA SAPPHIRE, antes do switch. O caso existe
+          // so para o switch continuar exaustivo — como os outros do
+          // lote lido do After Effects.
+          break;
+
         case EffectType.lightSweep:
           // A VARREDURA DE LUZ SAIU DO CATALOGO (a pedido do dono, 18/09).
           // O caso existe porque o TIPO continua no enum — tirar um tipo

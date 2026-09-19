@@ -6,6 +6,7 @@ import 'package:aurea_render/aurea_render.dart';
 import 'package:uuid/uuid.dart';
 
 import 'ajuste_da_midia.dart';
+import 'posterize_time.dart';
 import 'aprimoramento_ia.dart';
 import 'camera3d.dart';
 import 'camera_cuts.dart';
@@ -193,7 +194,20 @@ sealed class Layer {
 
   bool activeAt(Duration t) => t >= startTime && t < endTime;
 
-  Duration localTime(Duration global) => global - startTime;
+  /// O TEMPO DESTA CAMADA, ja quantizado pelo Posterize Time quando ele
+  /// esta ligado.
+  ///
+  /// E AQUI, E NAO NO DESENHO, porque este e o unico lugar por onde todo
+  /// mundo pergunta "que horas sao nesta camada": o quadro do video, os
+  /// keyframes, a transformacao e todos os efeitos leem daqui. Quantizar
+  /// num so ponto faz a camada inteira andar em degraus de uma vez, sem
+  /// nenhum caminho que fique de fora.
+  Duration localTime(Duration global) {
+    final bruto = global - startTime;
+    if (effects.isEmpty) return bruto;
+    final taxa = taxaDePosterizacao(effects, bruto);
+    return taxa <= 0 ? bruto : quantizarTempo(bruto, taxa);
+  }
 
   /// A camada ANDA SOZINHA por um animador automatico? Sem keyframe
   /// nenhum, ela ainda evolui com o relogio — e a previa precisa saber

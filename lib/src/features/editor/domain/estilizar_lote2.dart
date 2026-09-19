@@ -10,6 +10,7 @@ import 'tv_damage.dart';
 import 'pixel_sort_sapphire.dart';
 import 'auto_paint.dart';
 import 'luz_e_diversos.dart';
+import 'preto_e_branco.dart';
 
 /// O QUE O PALCO PRECISA SABER DE UM EFEITO SAPPHIRE DO LOTE 2 de
 /// Estilizar: qual shader, quantas passadas, e como os numeros viram
@@ -130,6 +131,15 @@ final receitasSapphire = <EffectType, ReceitaSapphire>{
   EffectType.twitch: ReceitaSapphire(
     asset: 'shaders/twitch.frag',
     valores: valoresTwitch,
+  ),
+  // BLACK & WHITE: cor por faixa, e nao `rgb -> luminancia`. Um shader
+  // proprio porque a ficha dele tem doze numeros, e nao os quatro de uma
+  // operacao da passada de cor fundida.
+  EffectType.pretoEBranco: ReceitaSapphire(
+    asset: 'shaders/preto_e_branco.frag',
+    valores: valoresPretoEBranco,
+    usaTempo: false,
+    cores: true,
   ),
   EffectType.crossGlitch: ReceitaSapphire(
     asset: 'shaders/cross_glitch.frag',

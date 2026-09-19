@@ -1,4 +1,5 @@
 import 'essential_warp_pass.dart';
+import 'package:aurea/src/core/theme/aurea_colors.dart';
 import 'composition_frame.dart';
 
 import 'dart:io';
@@ -1741,7 +1742,7 @@ class _GuidesPainter extends CustomPainter {
 
     // Grade de layout.
     if (guides.columns > 0) {
-      final paint = Paint()..color = const Color(0x22B8FF3D);
+      final paint = Paint()..color = AureaColors.accent.withValues(alpha: 0.13);
       final usable = w - guides.margin * 2;
       final colW =
           (usable - guides.gutter * (guides.columns - 1)) / guides.columns;
@@ -1804,7 +1805,7 @@ class _GuidesPainter extends CustomPainter {
         Paint()
           ..style = PaintingStyle.stroke
           ..strokeWidth = 2
-          ..color = const Color(0xCCB8FF3D),
+          ..color = AureaColors.accent.withValues(alpha: 0.80),
       );
     }
   }
@@ -3181,6 +3182,7 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
         project.outputWidth.toDouble(),
         project.outputHeight.toDouble(),
       ),
+      rotacaoGraus: rotationDeg,
     );
 
     // ESTILOS DE CAMADA (PR-X10): aplicam DEPOIS dos efeitos e
@@ -3735,6 +3737,11 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
     double? escalaY,
     Offset? posicaoNaComposicao,
     Size? tamanhoDaComposicao,
+    // A ROTACAO EFETIVA da camada, em GRAUS. O Motion Tile e o unico
+    // efeito que precisa dela hoje: ele tem de ladrilhar o suficiente
+    // para cobrir o quadro depois que a camada roda, e um losango cobre
+    // menos canto que um retangulo do mesmo lado.
+    double? rotacaoGraus,
   }) {
     var out = child;
     for (var indice = 0; indice < effects.length; indice++) {
@@ -6378,6 +6385,7 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
           final saidaH = effect.paramAt('output_height', local);
           final fase = effect.paramAt('phase', local);
           final espelha = effect.paramAt('mirror_edges', local) >= 0.5;
+          final estica = effect.paramAt('clamp_edges', local) >= 0.5;
           // IDENTIDADE do After Effects: ladrilho de 100% num quadro de
           // 100%, sem fase e sem espelho, e a propria camada. Passar por
           // aqui assim mesmo custava uma FOTO da camada inteira por
@@ -6390,14 +6398,20 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
               (effect.paramAt('tile_center', local) - 0.5).abs() < 0.001 &&
               (effect.paramAt('tile_center_y', local) - 0.5).abs() < 0.001 &&
               fase.abs() < 0.01 &&
-              !espelha;
+              !espelha &&
+              !estica;
           // A ESCALA ENTRA NA IDENTIDADE: com a camada reduzida, um
           // ladrilho de 100% num quadro de 100% JA NAO e a propria
           // camada — e a parede que cobre o quadro. Tratar como
           // identidade ali devolveria o defeito do relato.
           final escalaNeutra =
               (escalaX ?? 1).abs() >= 0.999 && (escalaY ?? 1).abs() >= 0.999;
-          if (!identidade || !escalaNeutra) {
+          // A ROTACAO ENTRA PELA MESMA RAZAO QUE A ESCALA: uma camada
+          // girada precisa de mais ladrilho que a mesma camada reta, e o
+          // caminho de identidade nao sabe crescer. Sem isto, girar uma
+          // camada com Motion Tile deixava os quatro cantos vazios.
+          final semGiro = (rotacaoGraus ?? 0).abs() < 0.01;
+          if (!identidade || !escalaNeutra || !semGiro) {
             out = MotionTilePass(
               effect: effect,
               time: local,
@@ -6405,6 +6419,7 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
               escalaY: escalaY ?? 1,
               posicao: posicaoNaComposicao,
               composicao: tamanhoDaComposicao,
+              rotacaoGraus: rotacaoGraus ?? 0,
               child: out,
             );
           }

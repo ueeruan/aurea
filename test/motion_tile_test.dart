@@ -19,6 +19,7 @@
 //   2. O PASSE — montado como widget, com a escala e a composicao que o
 //      palco entrega. Aqui se prova o RELATO: com a camada em 50%, o
 //      quadro sai coberto, e nao com moldura vazia.
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -114,6 +115,7 @@ Future<_Quadro> _desenharShader({
   double outputH = 1,
   double espelho = 0,
   double fase = 0,
+  double estica = 0,
 }) async {
   final programa = await ui.FragmentProgram.fromAsset(
     'shaders/motion_tile.frag',
@@ -133,6 +135,9 @@ Future<_Quadro> _desenharShader({
       ..setFloat(9, fase)
       ..setFloat(10, 0) // uHorizontal
       ..setFloat(11, 0) // uFilter (host sem Impeller: orientacao ja certa)
+      // uClamp E O ULTIMO, e nao pode sair do lugar: `setFloat` endereca
+      // por ordem de declaracao.
+      ..setFloat(12, estica)
       ..setImageSampler(0, fonte);
     final gravador = ui.PictureRecorder();
     ui.Canvas(gravador).drawRect(
@@ -148,6 +153,24 @@ Future<_Quadro> _desenharShader({
   }
 }
 
+/// O PONTO ESTA DENTRO DO CONVEXO? Produto vetorial com o mesmo sinal nas
+/// quatro arestas.
+///
+/// A CONTA E OUTRA, E DE PROPOSITO. Conferir a cobertura repetindo a inversa
+/// da transformacao so provaria que ela concorda consigo mesma; o produto
+/// vetorial pega sinal trocado, eixo trocado e quina fora de ordem.
+bool _dentroDoConvexo(List<Offset> quinas, Offset ponto) {
+  var positivo = false, negativo = false;
+  for (var i = 0; i < quinas.length; i++) {
+    final a = quinas[i], b = quinas[(i + 1) % quinas.length];
+    final cruz =
+        (b.dx - a.dx) * (ponto.dy - a.dy) - (b.dy - a.dy) * (ponto.dx - a.dx);
+    if (cruz > 1e-6) positivo = true;
+    if (cruz < -1e-6) negativo = true;
+  }
+  return !(positivo && negativo);
+}
+
 /// UMA INSTANCIA DO EFEITO com os parametros pedidos.
 EffectInstance _efeito({
   double tileW = 100,
@@ -156,6 +179,7 @@ EffectInstance _efeito({
   double outputH = 100,
   double espelho = 0,
   double fase = 0,
+  double estica = 0,
 }) {
   var e = EffectInstance(type: EffectType.motionTile);
   for (final (chave, valor) in [
@@ -164,6 +188,7 @@ EffectInstance _efeito({
     ('output_width', outputW),
     ('output_height', outputH),
     ('mirror_edges', espelho),
+    ('clamp_edges', estica),
     ('phase', fase),
   ]) {
     e = e.withParamEdited(chave, Duration.zero, valor);
@@ -173,6 +198,7 @@ EffectInstance _efeito({
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  _grupoDoGiroEDasEmendas();
 
   late ui.Image fonte;
   setUpAll(() async => fonte = await _padrao());
@@ -500,4 +526,251 @@ class _Listras extends CustomPainter {
 
   @override
   bool shouldRepaint(_Listras old) => false;
+}
+
+// ==========================================================================
+// A REGIAO COM A CAMADA GIRADA, E AS TRES EMENDAS.
+// ==========================================================================
+//
+// O SEGUNDO RELATO: girar a camada deixava os QUATRO CANTOS vazios. O
+// ladrilho existia, cobria o meio, e as quinas ficavam pretas — porque a
+// conta da regiao so olhava escala e posicao, e tratava a area coberta como
+// um retangulo alinhado ao quadro. Uma camada girada cobre um LOSANGO, e o
+// losango nao alcanca os cantos.
+//
+// Aqui se prova a CONTA, com a inversa da transformacao. A prova de pixel
+// fica no passo do widget, que ja existe acima.
+void _grupoDoGiroEDasEmendas() {
+  group('a regiao cresce quando a camada gira', () {
+    ({double x, double y}) cobrir({
+      double pedidoX = 1,
+      double pedidoY = 1,
+      Size camada = const Size(120, 120),
+      double escalaX = 1,
+      double escalaY = 1,
+      Offset? posicao = const Offset(60, 60),
+      Size? composicao = const Size(120, 120),
+      double giro = 0,
+    }) => fatoresQueCobremMotionTile(
+      pedidoX: pedidoX,
+      pedidoY: pedidoY,
+      ladoDaCamada: camada,
+      escalaX: escalaX,
+      escalaY: escalaY,
+      posicao: posicao,
+      composicao: composicao,
+      rotacaoGraus: giro,
+    );
+
+    test('sem giro, a conta e a de antes', () {
+      // A DIAGONAL: as duas formulas tem de concordar exatamente aqui,
+      // senao uma das duas esta errada e nao se sabe qual.
+      final r = cobrir();
+      expect(r.x, 1);
+      expect(r.y, 1);
+      expect(
+        r.x,
+        fatorQueCobreMotionTile(
+          pedido: 1,
+          ladoDaCamada: 120,
+          escala: 1,
+          posicao: 60,
+          ladoDaComposicao: 120,
+        ),
+      );
+      // A MESMA CONTA, AGORA COM ESCALA. E aqui que a inversa se separa da
+      // formula antiga se esquecer de desfazer a escala: com a camada em
+      // 50%, o mesmo quadro pede o DOBRO de ladrilho.
+      final r2 = cobrir(escalaX: .5, escalaY: .5);
+      expect(
+        r2.x,
+        fatorQueCobreMotionTile(
+          pedido: 1,
+          ladoDaCamada: 120,
+          escala: .5,
+          posicao: 60,
+          ladoDaComposicao: 120,
+        ),
+      );
+    });
+
+    test('GIRAR 45 GRAUS PEDE MAIS LADRILHO QUE NAO GIRAR — o relato', () {
+      // E ESTE E O DEFEITO: sem isto, o canto fica vazio. Quanto mais
+      // gira, mais area o losango deixa de fora.
+      for (final giro in [15.0, 30.0, 45.0, 60.0, 90.0, 180.0, 270.0]) {
+        final reto = cobrir();
+        final girado = cobrir(giro: giro);
+        expect(
+          girado.x >= reto.x - 1e-9 && girado.y >= reto.y - 1e-9,
+          isTrue,
+          reason: 'giro $giro pediu menos que o reto',
+        );
+      }
+      // 45 E O PIOR CASO de um quadrado: o losango esta na diagonal.
+      final q45 = cobrir(giro: 45);
+      expect(q45.x, greaterThan(cobrir().x + 0.2));
+    });
+
+    test('45 GRAUS NUM QUADRADO: o numero exato', () {
+      // Num quadro 120x120 com a camada 120x120 centrada e escala 1, os
+      // cantos caem em (+-60, +-60) do centro. Rodando -45 graus, o
+      // deslocamento em espaco de camada e
+      //   60*cos45 + 60*sen45 = 60*1.4142 = 84,85
+      // e o fator e 2*84,85/120 = 1,4142 — a raiz de 2, que e o quanto a
+      // diagonal de um quadrado excede o lado. Um numero redondo aqui
+      // seria sinal de conta errada.
+      final r = cobrir(giro: 45);
+      expect(r.x, closeTo(1.41421356, 1e-6));
+      expect(r.y, closeTo(1.41421356, 1e-6));
+    });
+
+    test('90 GRAUS NUM QUADRADO VOLTA AO MESMO TAMANHO', () {
+      // Simetria: girar um quadrado em 90 graus deixa o quadrado igual. Se
+      // este teste falhar, a inversa da rotacao tem sinal trocado.
+      final r = cobrir(giro: 90);
+      expect(r.x, closeTo(1.0, 1e-6));
+      expect(r.y, closeTo(1.0, 1e-6));
+    });
+
+    test('180 graus tambem: a area girada sobre si mesma e a mesma', () {
+      final r = cobrir(giro: 180);
+      expect(r.x, closeTo(1.0, 1e-6));
+      expect(r.y, closeTo(1.0, 1e-6));
+    });
+
+    test('o quadro LARGO pede mais na largura, e nao na altura', () {
+      // Composicao 240x120, camada 120x120 centrada em (120,60): o quadro
+      // tem o dobro da largura, entao a largura e que precisa crescer.
+      final r = cobrir(
+        posicao: const Offset(120, 60),
+        composicao: const Size(240, 120),
+        camada: const Size(120, 120),
+      );
+      expect(r.x, closeTo(2.0, 1e-6));
+      expect(r.y, closeTo(1.0, 1e-6));
+    });
+
+    test('a POSICAO extrema entra na conta, girada ou nao', () {
+      final reto = cobrir(posicao: const Offset(0, 0));
+      expect(reto.x, closeTo(2.0, 1e-6));
+      final girado = cobrir(posicao: const Offset(0, 0), giro: 45);
+      // GIRAR NAO CRESCE NOS DOIS EIXOS. O losango ganha num eixo e perde no
+      // outro: o que se conserva e a AREA coberta, redistribuida. Exigir
+      // crescimento nos dois seria exigir que a rotacao inventasse area.
+      expect(girado.x, greaterThan(reto.x));
+      expect(
+        girado.x * girado.y,
+        greaterThanOrEqualTo(reto.x * reto.y - 1e-9),
+      );
+    });
+
+    test('escala 50% com giro: as duas coisas se somam', () {
+      final r = cobrir(escalaX: .5, escalaY: .5, giro: 45);
+      // 2 * 84.8528 / (0.5 * 120) = 2.8284
+      expect(r.x, closeTo(2.82842712, 1e-6));
+    });
+
+    test('sem saber posicao, nao chuta: devolve o pedido', () {
+      final r = cobrir(posicao: null);
+      expect(r.x, 1);
+      expect(r.y, 1);
+      final r2 = cobrir(composicao: null, giro: 45);
+      expect(r2.x, 1);
+      expect(r2.y, 1);
+    });
+
+    test('escala ZERO nao vira infinito', () {
+      // Divisao por escala: zero tem de ser recusado, e nao propagado.
+      expect(cobrir(escalaX: 0, escalaY: 0).x, 1);
+      expect(cobrir(escalaX: 0, escalaY: 0, giro: 45).x, 1);
+    });
+
+    test('o pedido da pessoa manda quando e MAIOR', () {
+      final r = cobrir(pedidoX: 3, pedidoY: 4, giro: 45);
+      expect(r.x, closeTo(3.0, 1e-6));
+      expect(r.y, closeTo(4.0, 1e-6));
+    });
+
+    test('com o fator calculado, os QUATRO CANTOS do quadro ficam dentro', () {
+      // ESTA E A PROVA DE QUE NAO SOBRA CANTO PRETO — o pedido do dono.
+      //
+      // A regiao que o passe desenha e um retangulo de `w*fator` por
+      // `h*fator` em espaco de CAMADA, girado e escalado junto com ela. Aqui
+      // esse retangulo e montado no espaco do QUADRO e cada canto do quadro e
+      // perguntado contra ele. Se a conta estiver curta em qualquer giro, o
+      // canto cai fora e o teste acusa.
+      const camada = Size(120, 120);
+      const composicao = Size(120, 120);
+      const quinasDoQuadro = [
+        Offset.zero,
+        Offset(120, 0),
+        Offset(0, 120),
+        Offset(120, 120),
+      ];
+      for (var g = 0; g < 360; g += 15) {
+        for (final e in [0.3, 1.0, 2.5]) {
+          for (final pos in const [
+            Offset(60, 60),
+            Offset(0, 0),
+            Offset(120, 120),
+            Offset(31, 97),
+          ]) {
+            final r = cobrir(
+              giro: g.toDouble(),
+              escalaX: e,
+              escalaY: e,
+              posicao: pos,
+              camada: camada,
+              composicao: composicao,
+            );
+            final theta = g * math.pi / 180;
+            final cos = math.cos(theta), sen = math.sin(theta);
+            // A meia-largura da regiao, ja escalada, nos DOIS eixos da
+            // camada — e depois girada para o espaco do quadro.
+            final a = r.x * camada.width * e / 2;
+            final b = r.y * camada.height * e / 2;
+            final quinas = [
+              for (final (sx, sy) in const [(-1, -1), (1, -1), (1, 1), (-1, 1)])
+                pos +
+                    Offset(
+                      sx * a * cos - sy * b * sen,
+                      sx * a * sen + sy * b * cos,
+                    ),
+            ];
+            for (final canto in quinasDoQuadro) {
+              expect(
+                _dentroDoConvexo(quinas, canto),
+                isTrue,
+                reason: 'canto $canto descoberto: giro=$g escala=$e pos=$pos',
+              );
+            }
+          }
+        }
+      }
+    });
+
+    test('nunca devolve NaN nem infinito, em 3.600 combinações', () {
+      // A CONTA DIVIDE POR ESCALA E MULTIPLICA POR SENO: os dois jeitos
+      // faceis de produzir NaN. Um NaN aqui nao da erro — vira um
+      // `SizedBox` de largura NaN e a tela some. Vale varrer.
+      for (var g = 0; g < 360; g += 3) {
+        for (final e in [.05, .5, 1.0, 3.0]) {
+          for (final p in [0.0, 1.0, 60.0, 119.0]) {
+            final r = cobrir(
+              giro: g.toDouble(),
+              escalaX: e,
+              escalaY: e,
+              posicao: Offset(p, p),
+            );
+            expect(r.x.isFinite, isTrue, reason: 'x NaN: g=$g e=$e p=$p');
+            expect(r.y.isFinite, isTrue, reason: 'y NaN: g=$g e=$e p=$p');
+            expect(r.x, greaterThanOrEqualTo(0.01));
+            expect(r.x, lessThanOrEqualTo(24.0));
+            expect(r.y, greaterThanOrEqualTo(0.01));
+            expect(r.y, lessThanOrEqualTo(24.0));
+          }
+        }
+      }
+    });
+  });
 }

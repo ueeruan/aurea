@@ -45,6 +45,7 @@ class MotionTilePass extends StatefulWidget {
     this.escalaY = 1,
     this.posicao,
     this.composicao,
+    this.rotacaoGraus = 0,
   });
 
   final EffectInstance effect;
@@ -63,6 +64,13 @@ class MotionTilePass extends StatefulWidget {
   /// chute errado.
   final Offset? posicao;
   final Size? composicao;
+
+  /// A ROTACAO EFETIVA da camada, em graus. Ela entra na conta da regiao
+  /// pelo mesmo motivo que a escala: uma camada girada 45 graus cobre o
+  /// quadro com um retangulo MUITO maior do que o lado do quadro — e sem
+  /// contar isso o ladrilho fica curto nos quatro cantos e aparece o canto
+  /// preto que o relato descreve.
+  final double rotacaoGraus;
 
   @override
   State<MotionTilePass> createState() => _MotionTilePassState();
@@ -105,22 +113,24 @@ class _MotionTilePassState extends State<MotionTilePass> {
       }
       double p(String key) => widget.effect.paramAt(key, widget.time);
       final size = sourceSize!;
+      final clampa = p('clamp_edges') >= 0.5;
       // A REGIAO DA SAIDA: o que a pessoa pediu, ou o que for preciso para
-      // cobrir a composicao — o maior dos dois.
-      final fw = fatorQueCobreMotionTile(
-        pedido: (p('output_width') / 100).clamp(0.01, 6.0),
-        ladoDaCamada: size.width,
-        escala: widget.escalaX,
-        posicao: widget.posicao?.dx,
-        ladoDaComposicao: widget.composicao?.width,
+      // cobrir a composicao — o maior dos dois, NOS DOIS EIXOS DE UMA VEZ.
+      //
+      // OS DOIS EIXOS JUNTOS porque a rotacao os mistura: um quadro girado
+      // 45 graus precisa de mais ladrilho na largura E na altura ao mesmo
+      // tempo, e o quanto de cada um depende do outro lado do quadro.
+      final cobertura = fatoresQueCobremMotionTile(
+        pedidoX: (p('output_width') / 100).clamp(0.01, 6.0),
+        pedidoY: (p('output_height') / 100).clamp(0.01, 6.0),
+        ladoDaCamada: size,
+        escalaX: widget.escalaX,
+        escalaY: widget.escalaY,
+        posicao: widget.posicao,
+        composicao: widget.composicao,
+        rotacaoGraus: widget.rotacaoGraus,
       );
-      final fh = fatorQueCobreMotionTile(
-        pedido: (p('output_height') / 100).clamp(0.01, 6.0),
-        ladoDaCamada: size.height,
-        escala: widget.escalaY,
-        posicao: widget.posicao?.dy,
-        ladoDaComposicao: widget.composicao?.height,
-      );
+      final fw = cobertura.x, fh = cobertura.y;
       // A ENTRADA DO FILTRO tem de conter a FONTE INTEIRA, mesmo quando a
       // saida e um recorte (<100%). Por isso ela nunca e menor que 1.
       final gw = fw < 1 ? 1.0 : fw, gh = fh < 1 ? 1.0 : fh;
@@ -136,10 +146,12 @@ class _MotionTilePassState extends State<MotionTilePass> {
         ..setFloat(5, (p('tile_height') / 100).clamp(0.01, 3.0))
         ..setFloat(6, p('tile_center'))
         ..setFloat(7, p('tile_center_y'))
-        ..setFloat(8, p('mirror_edges'))
+        ..setFloat(8, clampa ? 0 : p('mirror_edges'))
         ..setFloat(9, p('phase') / 360)
         ..setFloat(10, p('horizontal_phase_shift'))
-        ..setFloat(11, filter ? 1 : 0);
+        ..setFloat(11, filter ? 1 : 0)
+        // O ULTIMO DA LISTA, na ordem da declaracao (ver o .frag).
+        ..setFloat(12, clampa ? 1 : 0);
       final source = SizedBox(
         width: size.width * gw,
         height: size.height * gh,
@@ -225,6 +237,86 @@ double fatorQueCobreMotionTile({
   // camada ja cobre uma composicao com a camada em 1/6 do quadro — abaixo
   // disso nao ha o que salvar sem custo desproporcional.
   return math.max(pedido, preciso).clamp(0.01, 24.0);
+}
+
+/// ==========================================================================
+/// A REGIAO QUE COBRE O QUADRO QUANDO A CAMADA ESTA GIRADA.
+/// ==========================================================================
+///
+/// O defeito que este calculo fecha: girar a camada num efeito de ladrilho
+/// deixava os QUATRO CANTOS com buraco. A conta anterior olhava so a escala
+/// e a posicao, e por isso tratava a area coberta como um retangulo alinhado
+/// aos eixos do quadro. A camada girada cobre um losango — e o losango nao
+/// alcanca os cantos do retangulo.
+///
+/// A CONTA E A INVERSA DA TRANSFORMACAO, e nao uma aproximacao.
+///
+/// A camada vai ao quadro por `q = R(theta) * S(escala) * d + posicao`, onde
+/// `d` e o deslocamento em espaco de camada. Para a regiao ladrilhada cobrir
+/// TODO o quadro, basta que os QUATRO CANTOS do quadro caibam dentro dela.
+/// Entao inverte-se a conta: para cada canto, `d = S^-1 * R(-theta) * (canto
+/// - posicao)`, e a regiao tem de alcancar o maior `|d|` que aparecer.
+///
+/// SAO OS CANTOS, E NAO O CENTRO. Um canto e sempre o pior caso de uma
+/// transformacao linear: a distancia maxima a origem de um retangulo esta
+/// num vertice. Medir pelo centro subestimaria justamente a quina onde o
+/// buraco aparece.
+///
+/// COM ROTACAO ZERO ISTO E A CONTA ANTIGA. `max(|0-p|, |w-p|)` e o mesmo que
+/// `max(p, w-p)` — as duas formulas concordam na diagonal, e por isso a
+/// funcao de um eixo so ([fatorQueCobreMotionTile]) continua valendo e
+/// continua testada.
+({double x, double y}) fatoresQueCobremMotionTile({
+  required double pedidoX,
+  required double pedidoY,
+  required Size ladoDaCamada,
+  required double escalaX,
+  required double escalaY,
+  required Offset? posicao,
+  required Size? composicao,
+  double rotacaoGraus = 0,
+}) {
+  final pedido = (x: pedidoX.clamp(0.01, 6.0), y: pedidoY.clamp(0.01, 6.0));
+  // Sem saber onde a camada cai, ou de que tamanho e o quadro, nao ha o que
+  // crescer: devolver o pedido e melhor que chutar.
+  if (posicao == null || composicao == null) return pedido;
+  if (!ladoDaCamada.width.isFinite || ladoDaCamada.width <= 0) return pedido;
+  if (!ladoDaCamada.height.isFinite || ladoDaCamada.height <= 0) return pedido;
+  if (!escalaX.isFinite || escalaX <= 0.001) return pedido;
+  if (!escalaY.isFinite || escalaY <= 0.001) return pedido;
+  if (!composicao.width.isFinite || composicao.width <= 0) return pedido;
+  if (!composicao.height.isFinite || composicao.height <= 0) return pedido;
+  final theta = (rotacaoGraus.isFinite ? rotacaoGraus : 0) * math.pi / 180;
+  final cos = math.cos(theta), sen = math.sin(theta);
+  var maxX = 0.0, maxY = 0.0;
+  for (final canto in [
+    Offset.zero,
+    Offset(composicao.width, 0),
+    Offset(0, composicao.height),
+    Offset(composicao.width, composicao.height),
+  ]) {
+    final v = canto - posicao;
+    // R(-theta) * v, e depois desfaz a escala: e a volta completa, em
+    // espaco de camada.
+    final dx = (v.dx * cos + v.dy * sen) / escalaX;
+    final dy = (-v.dx * sen + v.dy * cos) / escalaY;
+    if (dx.abs() > maxX) maxX = dx.abs();
+    if (dy.abs() > maxY) maxY = dy.abs();
+  }
+  double fator(double meio, double lado) {
+    if (lado <= 0) return 0;
+    final f = 2 * meio / lado;
+    return f.isFinite && f > 0 ? f : 0;
+  }
+
+  // O TETO E O MESMO DO CASO SEM GIRO, pelo mesmo motivo: cada fator a mais
+  // e area que o shader preenche por quadro.
+  double junto(double a, double b) =>
+      (a > b ? a : b).clamp(0.01, 24.0);
+  return (
+    x: junto(pedido.x, fator(maxX, ladoDaCamada.width)),
+    y: junto(pedido.y, fator(maxY, ladoDaCamada.height)),
+  );
 }
 
 class _BoundsPainter extends CustomPainter {

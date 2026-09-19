@@ -77,6 +77,27 @@ const efeitosMotionTile = <EffectType, EffectSpec>{
         1,
         kind: ParamKind.toggle,
       ),
+      // AS TRES FORMAS DE TRATAR A EMENDA ENTRE LADRILHOS.
+      //
+      // Repetir (padrao) e o que o After Effects faz. Espelhar inverte cada
+      // celula vizinha, o que esconde a costura quando a imagem tem
+      // gradiente. ESTICAR (clamp) nao repete nada: a ultima coluna e a
+      // ultima linha de ladrilhos puxam a cor da borda da fonte ate o fim.
+      //
+      // ESTICAR E O QUE SALVA O CASO EM QUE O LADRILHO DENUNCIA O TRUQUE —
+      // um ceu, uma parede de cor lisa, um fundo com degrade. Repetir ali
+      // vira uma grade visivel; esticar vira continuacao. E, como as outras
+      // duas, nunca deixa buraco: a regiao ladrilhada cobre o quadro
+      // inteiro do mesmo jeito.
+      //
+      // Ele VENCE o espelho: com os dois ligados, estica.
+      'clamp_edges': EffectParam(
+        'Esticar bordas',
+        0,
+        0,
+        1,
+        kind: ParamKind.toggle,
+      ),
       'phase': EffectParam(
         'Fase',
         0,

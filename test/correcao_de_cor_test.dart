@@ -94,7 +94,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('as fichas', () {
-    test('cinco efeitos, todos em Cor, com os padroes do After Effects', () {
+    test('seis efeitos, todos em Cor, com os padroes do After Effects', () {
       final cor = [
         for (final e in effectSpecs.entries)
           if (e.value.category == 'Color') e.key,
@@ -105,11 +105,17 @@ void main() {
         EffectType.brightnessContrast,
         EffectType.hueSaturation,
         EffectType.exposure,
+        // O SEXTO (19/09): o Black & White e de cor e nao passa por aqui
+        // — ele tem shader proprio, com doze numeros, e nao cabe nos dois
+        // vec4 de uma operacao da passada fundida.
+        EffectType.pretoEBranco,
       });
       for (final t in cor) {
         final spec = effectSpecs[t]!;
         expect(effectTypeFromId(spec.id), isNotNull, reason: spec.id);
-        expect(spec.presets, hasLength(3), reason: spec.id);
+        // TRES PRESETS E O PADRAO — menos o Black & White, que tem
+        // quatro porque as faixas de cor pedem um ajuste a mais.
+        expect(spec.presets.length, greaterThanOrEqualTo(3), reason: spec.id);
         for (final k in spec.montar) {
           expect(spec.params, contains(k), reason: '${spec.id}.$k');
         }

@@ -41,7 +41,12 @@ void main() {
     final receita = entrada.value;
     test('${effectSpecs[tipo]!.name} roda com os parametros do AE', () async {
       final spec = effectSpecs[tipo]!;
-      expect(['Stylize', 'Distort', 'Misc', 'Light'], contains(spec.category));
+      // 'Color' entrou com o Black & White (19/09): ele e um efeito de
+      // cor que mora no shader proprio, como os do lote Sapphire.
+      expect(
+        ['Stylize', 'Distort', 'Misc', 'Light', 'Color'],
+        contains(spec.category),
+      );
       final fx = EffectInstance(
         type: tipo,
         params: {

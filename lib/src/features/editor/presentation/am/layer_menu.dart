@@ -4,6 +4,7 @@ import 'package:aurea/src/core/l10n/app_language.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart';
+import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import '../../application/mesh_cache.dart';
 import '../../domain/mesh_import.dart';
@@ -577,7 +578,7 @@ Future<void> showGridSheet(
                             dense: true,
                             value: picked.contains(l.id),
                             activeColor: AmColors.accent,
-                            checkColor: const Color(0xFF0B0E12),
+                            checkColor: AureaColors.onAccent,
                             controlAffinity: ListTileControlAffinity.leading,
                             title: AppText(
                               l.name,
@@ -614,7 +615,7 @@ Future<void> showGridSheet(
                       style: const TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
-                        color: Color(0xFF0B0E12),
+                        color: AureaColors.onAccent,
                       ),
                     ),
                   ),
@@ -779,7 +780,7 @@ Future<void> showGridSheet(
                           fontSize: 14,
                           fontWeight: FontWeight.w700,
                           color: rig == null
-                              ? const Color(0xFF0B0E12)
+                              ? AureaColors.onAccent
                               : AmColors.accent,
                         ),
                       ),
@@ -1951,8 +1952,8 @@ Future<void> showParticulasSheet(
         // de forma ao trocar de motor.
         const paleta = [
           Color(0xFFFF3B52),
-          Color(0xFFB8FF3D),
-          Color(0xFF7C62FF),
+          AureaColors.accent,
+          AureaColors.selectionText,
           Color(0xFFFFFFFF),
           Color(0xFFFFB020),
           Color(0xFF35C4E7),
@@ -2661,8 +2662,8 @@ Future<void> showElement3DSheet(
                       },
                     ),
                     for (final c in const [
-                      Color(0xFF7C62FF),
-                      Color(0xFFB8FF3D),
+                      AureaColors.selectionText,
+                      AureaColors.accent,
                       Color(0xFFFF3B52),
                       Color(0xFFFFFFFF),
                     ])
@@ -3293,7 +3294,7 @@ Future<void> showShapeParamsSheet(
                           style: TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.w700,
-                            color: Color(0xFF0B0E12),
+                            color: AureaColors.onAccent,
                           ),
                         ),
                       ),
@@ -4903,7 +4904,7 @@ class ColorFillPanel extends ConsumerWidget {
     Color(0xFFFFB020),
     Color(0xFF2BE3A0),
     Color(0xFF35C4E7),
-    Color(0xFF7C62FF),
+    AureaColors.selectionText,
     Color(0xFFFFFFFF),
     Color(0xFF10151D),
   ];
@@ -5443,7 +5444,7 @@ class _SobreposicaoDeCor extends ConsumerWidget {
               if (aba == 1)
                 _escolhaDeCor(
                   context,
-                  atual: estilos.colorOverlay?.color ?? const Color(0xFFB8FF3D),
+                  atual: estilos.colorOverlay?.color ?? AureaColors.accent,
                   swatches: swatches,
                   rotulo: 'Cor por cima da camada',
                   onCor: (cor) => c.updateLayerStyles(
@@ -6166,10 +6167,10 @@ class _ShapeOperators extends ConsumerWidget {
 const kGlossyGradients = <List<Color>>[
   [Color(0xFF7A3FF2), Color(0xFF2F7BFF), Color(0xFFFF4FD8)],
   [Color(0xFFFF7A18), Color(0xFFFF2D95), Color(0xFF7A3FF2)],
-  [Color(0xFF00E5A8), Color(0xFF2F7BFF), Color(0xFF7A3FF2)],
+  [Color(0xFF2F7BFF), Color(0xFF6FAED9), Color(0xFFA9D3EC)],
   [Color(0xFF7A4A00), Color(0xFFFFD36A), Color(0xFFFFF4C2)],
   [Color(0xFF3A3F4A), Color(0xFFC9D1DC), Color(0xFFFFFFFF)],
-  [Color(0xFFB8FF3D), Color(0xFF35C4E7), Color(0xFFFF4FD8)],
+  [AureaColors.accent, Color(0xFF35C4E7), Color(0xFFFF4FD8)],
 ];
 
 bool _mesmasCores(List<Color> a, List<Color> b) {

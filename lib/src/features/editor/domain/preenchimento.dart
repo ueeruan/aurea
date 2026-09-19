@@ -1,4 +1,5 @@
 import 'dart:ui' show Color;
+import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import 'effect.dart';
 
@@ -33,7 +34,7 @@ const efeitosPreenchimento = <EffectType, EffectSpec>{
     name: 'Preenchimento',
     category: 'Generate',
     hasColor: true,
-    defaultColor: Color(0xFF7C62FF),
+    defaultColor: AureaColors.selectionText,
     synonyms: [
       'fill',
       'preenchimento',

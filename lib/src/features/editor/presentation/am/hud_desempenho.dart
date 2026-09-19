@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import '../../application/perfil3d.dart';
 import '../../application/preview_stats.dart';
@@ -88,7 +89,7 @@ class _HudDesempenhoState extends State<HudDesempenho> {
     final fps = _media <= 0 ? 0 : (1000 / _media).clamp(0, 120);
     final cor = _pior > 33
         ? const Color(0xFFFF7A7A)
-        : (_pior > 20 ? const Color(0xFFFFC978) : const Color(0xFFB8FF3D));
+        : (_pior > 20 ? const Color(0xFFFFC978) : AureaColors.accent);
     final linhas = <String>[
       'FPS ${fps.toStringAsFixed(0)}   quadro ${_media.toStringAsFixed(1)} ms',
       'PIOR ${_pior.toStringAsFixed(1)} ms   perdidos $_perdidos',

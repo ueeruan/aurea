@@ -6,7 +6,12 @@
 //   p0..p2  R, G, B no inicio do obturador: (tx, ty em px do AE, escala, angulo)
 //   p3..p5  R, G, B no fim do obturador
 //   p6      (borda X, borda Y [0 nenhuma, 1 repetir, 2 espelhar], amostras, mono)
-//   p7      (opacidade, -, -, -)
+//   p7      (opacidade, MISTURA, -, -)
+//
+// MISTURA (Advanced Shake): 0 deixa a imagem como ela chegou e 1 entrega o
+// tremor inteiro. E o unico parametro que dosa o efeito sem mexer nos
+// numeros dos eixos. O atalho abaixo evita a leitura a mais quando a
+// mistura esta cheia, que e o caso comum.
 // Aqui so se reamostra a imagem (bilinear manual: a entrada chega nearest).
 
 uniform vec2 uSize;
@@ -103,5 +108,7 @@ void main() {
     }
   }
   acc /= n;
+  float mistura = clamp(p7.y, 0.0, 1.0);
+  if (mistura < .999) acc = mix(bilinear(p), acc, mistura);
   fragColor = acc * clamp(p7.x, 0.0, 1.0);
 }

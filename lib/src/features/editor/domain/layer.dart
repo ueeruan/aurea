@@ -1,5 +1,6 @@
 import 'acabamento3d.dart';
 import 'dart:ui';
+import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import 'package:aurea_render/aurea_render.dart';
 import 'package:uuid/uuid.dart';
@@ -2242,7 +2243,7 @@ class OpcoesDaCamera {
     AnimatedDouble? intensidadeDoFoco,
     AnimatedDouble? profundidadeDeCampo,
     this.neblinaLigada = false,
-    this.corDaNeblina = const Color(0xFF12151A),
+    this.corDaNeblina = AureaColors.bg,
     AnimatedDouble? neblinaPerto,
     AnimatedDouble? neblinaLonge,
   }) : distanciaDoFoco =
@@ -2826,7 +2827,7 @@ class Element3DLayer extends Layer {
     required super.duration,
     this.kind = Element3DKind.cube,
     this.size = 200,
-    this.color = const Color(0xFF7C62FF),
+    this.color = AureaColors.selectionText,
     this.edges = true,
     this.reflect = 0,
     this.environment = EnvironmentKind.estudio,

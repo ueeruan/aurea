@@ -1,4 +1,5 @@
 import 'rotation_math.dart';
+import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -413,7 +414,7 @@ class SceneNode {
     this.parentId,
     this.isNull = false,
     this.locked = false,
-    this.colorTag = const Color(0xFF7C62FF),
+    this.colorTag = AureaColors.selectionText,
     this.lod = MeshLod3D.auto,
     this.mediumMesh,
     this.lowMesh,
@@ -826,7 +827,7 @@ class Scene3D {
         kind: Element3DKind.cube,
         size: 90,
         x: AnimatedDouble(-70),
-        material: const Material3D(baseColor: Color(0xFF7C62FF)),
+        material: const Material3D(baseColor: AureaColors.selectionText),
       ),
       SceneNode(
         name: 'Esfera',

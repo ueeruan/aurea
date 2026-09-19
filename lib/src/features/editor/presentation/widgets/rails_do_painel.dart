@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import '../../../../core/ui/am_colors.dart';
 import '../../application/editor_controller.dart';
@@ -178,7 +179,7 @@ class RailDireito extends StatelessWidget {
                       size: math.min(20.0, altura * .6),
                       color: i == vigente
                           ? AmColors.accent
-                          : const Color(0xFF8B94A3),
+                          : AureaColors.muted,
                     ),
                   ),
                 ),
@@ -344,7 +345,7 @@ class _CurveIconPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final color = !ativo
         ? const Color(0xFF434956)
-        : (isAnimated ? AmColors.accent : const Color(0xFF8B94A3));
+        : (isAnimated ? AmColors.accent : AureaColors.muted);
 
     final rrect = RRect.fromRectAndRadius(
       Rect.fromLTWH(1, 1, size.width - 2, size.height - 2),

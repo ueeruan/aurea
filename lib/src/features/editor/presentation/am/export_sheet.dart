@@ -1,5 +1,6 @@
 import 'package:aurea/src/core/l10n/app_language.dart';
 import 'package:aurea/src/features/projects/domain/pacote_aurea.dart';
+import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import 'dart:convert';
 import 'dart:io';
@@ -286,7 +287,7 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
                         style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.w700,
-                          color: Color(0xFF0B0E12),
+                          color: AureaColors.onAccent,
                         ),
                       ),
                     ),
@@ -606,7 +607,7 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
                         style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.w700,
-                          color: Color(0xFF0B0E12),
+                          color: AureaColors.onAccent,
                         ),
                       ),
                     ),

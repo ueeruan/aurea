@@ -1,4 +1,5 @@
 import 'package:aurea/src/core/l10n/app_language.dart';
+import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import 'dart:math' as math;
 import 'dart:io';
@@ -442,7 +443,7 @@ Future<void> showCaptionCreationSheet(
                             const Padding(
                               padding: EdgeInsets.only(right: 10),
                               child: CupertinoActivityIndicator(
-                                color: Color(0xFF0B0E12),
+                                color: AureaColors.onAccent,
                               ),
                             )
                           else
@@ -451,7 +452,7 @@ Future<void> showCaptionCreationSheet(
                               child: Icon(
                                 CupertinoIcons.waveform,
                                 size: 18,
-                                color: Color(0xFF0B0E12),
+                                color: AureaColors.onAccent,
                               ),
                             ),
                           AppText(
@@ -459,7 +460,7 @@ Future<void> showCaptionCreationSheet(
                             style: const TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w700,
-                              color: Color(0xFF0B0E12),
+                              color: AureaColors.onAccent,
                             ),
                           ),
                         ],
@@ -1354,7 +1355,7 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
         badge: Container(
           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
           decoration: BoxDecoration(
-            color: const Color(0xFF00FFB2),
+            color: AureaColors.accent,
             borderRadius: BorderRadius.circular(4),
           ),
           child: const AppText(

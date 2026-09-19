@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#12151A</color>
+    <!-- O FUNDO DA MARCA (AureaColors.bg). Ele pinta o fundo do icone
+         adaptativo e a tela de abertura — os dois tem de ser o mesmo tom,
+         senao a passagem do icone para o app pisca. -->
+    <color name="aurea_background">#0F141A</color>
+    <color name="ic_launcher_background">#0F141A</color>
 </resources>

@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'dart:ui';
+import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import 'keyframe.dart';
 
@@ -25,10 +26,10 @@ class LayerLabel {
   static const palette = <LayerLabel>[
     LayerLabel(color: Color(0xFFE85B81), name: 'Rosa'),
     LayerLabel(color: Color(0xFFFFB020), name: 'Ambar'),
-    LayerLabel(color: Color(0xFFB8FF3D), name: 'Lima'),
+    LayerLabel(color: AureaColors.accent, name: 'Azul claro'),
     LayerLabel(color: Color(0xFF2BE3A0), name: 'Verde'),
     LayerLabel(color: Color(0xFF35C4E7), name: 'Ciano'),
-    LayerLabel(color: Color(0xFF7C62FF), name: 'Violeta'),
+    LayerLabel(color: AureaColors.selectionText, name: 'Azul suave'),
     LayerLabel(color: Color(0xFF3D7BFF), name: 'Azul'),
     LayerLabel(color: Color(0xFFFF7A3D), name: 'Laranja'),
     LayerLabel(color: Color(0xFFFF4D5E), name: 'Vermelho'),
@@ -186,7 +187,7 @@ class GlowStyle {
 class OverlayStyle {
   OverlayStyle({
     this.enabled = true,
-    this.color = const Color(0xFFB8FF3D),
+    this.color = AureaColors.accent,
     AnimatedDouble? opacity,
     this.blend = BlendMode.srcATop,
   }) : opacity = opacity ?? AnimatedDouble(1);
@@ -212,8 +213,8 @@ class OverlayStyle {
 class GradientOverlayStyle {
   GradientOverlayStyle({
     this.enabled = true,
-    this.colorA = const Color(0xFFB8FF3D),
-    this.colorB = const Color(0xFF7C62FF),
+    this.colorA = AureaColors.accent,
+    this.colorB = AureaColors.selectionText,
     AnimatedDouble? angleDeg,
     AnimatedDouble? opacity,
   }) : angleDeg = angleDeg ?? AnimatedDouble(90),
@@ -299,9 +300,9 @@ class Palette {
 
   static const aurea = Palette(
     entries: {
-      'primaria': Color(0xFFB8FF3D),
-      'fundo': Color(0xFF12151A),
-      'destaque': Color(0xFF7C62FF),
+      'primaria': AureaColors.accent,
+      'fundo': AureaColors.bg,
+      'destaque': AureaColors.selectionText,
       'texto': Color(0xFFE7ECF3),
     },
   );
@@ -717,7 +718,7 @@ class TubeLimb {
     this.thickStart = 40,
     this.thickEnd = 24,
     this.bend = 0.35,
-    this.color = const Color(0xFFB8FF3D),
+    this.color = AureaColors.accent,
   });
 
   final String rootId;

@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:ui' as ui;
+import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -137,7 +138,7 @@ VideoProject cartelaDoEfeito(EffectType type, {int lado = 240}) {
             sizeY: AnimatedDouble(lado.toDouble()),
           ),
           ShapeGradientFill(
-            colorA: const Color(0xFF12151A),
+            colorA: AureaColors.bg,
             colorB: const Color(0xFF6A7BA8),
             angleDeg: 90,
           ),
@@ -265,7 +266,7 @@ class _EffectThumbnailState extends State<EffectThumbnail> {
         height: lado,
         child: DecoratedBox(
           decoration: BoxDecoration(
-            color: const Color(0xFF262C36),
+            color: AureaColors.chip,
             borderRadius: BorderRadius.circular(10),
           ),
         ),
@@ -281,7 +282,7 @@ class _EffectThumbnailState extends State<EffectThumbnail> {
             width: lado,
             height: lado,
             child: ColoredBox(
-              color: const Color(0xFF12151A),
+              color: AureaColors.bg,
               // A composicao tem o tamanho da cartela (240 px); o FittedBox
               // encolhe para o tile sem cortar.
               child: FittedBox(

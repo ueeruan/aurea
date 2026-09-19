@@ -1,6 +1,7 @@
 import 'package:aurea/src/core/l10n/app_language.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import '../../../core/avisos/avisos_service.dart';
 import '../../../core/theme/app_theme.dart';
@@ -139,7 +140,7 @@ class _Faixa extends StatelessWidget {
               style: TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w900,
-                color: Color(0xFF0B0E12),
+                color: AureaColors.onAccent,
               ),
             ),
           ),

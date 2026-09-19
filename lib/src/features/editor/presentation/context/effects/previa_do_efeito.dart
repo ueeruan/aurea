@@ -3,6 +3,7 @@ import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
+import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/scheduler.dart';
@@ -222,7 +223,7 @@ class _PreviaDoEfeitoState extends State<PreviaDoEfeito> {
         height: lado,
         child: const DecoratedBox(
           decoration: BoxDecoration(
-            color: Color(0xFF262C36),
+            color: AureaColors.chip,
             borderRadius: BorderRadius.all(Radius.circular(10)),
           ),
         ),

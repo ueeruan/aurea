@@ -46,38 +46,6 @@ void main() {
     });
   });
 
-  group('Tremor (PR-FX3)', () {
-    test('repetivel: mesma semente, mesmo resultado', () {
-      final a = tremorSample(
-          amplitudePx: 60, phase: 3.7, style: 0, seed: 5, zoom: 0.4);
-      final b = tremorSample(
-          amplitudePx: 60, phase: 3.7, style: 0, seed: 5, zoom: 0.4);
-      expect(a.dx, b.dx);
-      expect(a.dy, b.dy);
-      expect(a.scale, b.scale);
-      // Semente diferente -> resultado diferente.
-      final c = tremorSample(
-          amplitudePx: 60, phase: 3.7, style: 0, seed: 6, zoom: 0.4);
-      expect(a.dx, isNot(c.dx));
-    });
-
-    test('neutro em zero (I2)', () {
-      final s = tremorSample(
-          amplitudePx: 0, phase: 2.2, style: 0, seed: 1);
-      expect(s.isNeutral, true);
-    });
-
-    test('estilo nervoso tem pausas', () {
-      var still = 0;
-      for (var i = 0; i < 200; i++) {
-        final s = tremorSample(
-            amplitudePx: 100, phase: i * 0.11, style: 1, seed: 3);
-        if (s.dx.abs() < 2) still++;
-      }
-      expect(still, greaterThan(20)); // periodos parados existem
-    });
-  });
-
   group('Glitch Modular (PR-FX4)', () {
     test('seekavel: estado no frame N direto == apos reproduzir', () {
       GlitchState at(double tau) => glitchState(

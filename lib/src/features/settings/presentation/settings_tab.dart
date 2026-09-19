@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import '../../../core/l10n/app_language.dart';
 
@@ -384,7 +385,7 @@ class _SwitchRow extends StatelessWidget {
           CupertinoSwitch(
             value: value,
             activeTrackColor: AppColors.lime,
-            thumbColor: value ? const Color(0xFF0B0E12) : null,
+            thumbColor: value ? AureaColors.onAccent : null,
             onChanged: onChanged,
           ),
         ],

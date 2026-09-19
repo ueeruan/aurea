@@ -1,5 +1,6 @@
 import 'package:aurea/src/core/l10n/app_language.dart';
 import 'dart:math' as math;
+import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
@@ -88,16 +89,16 @@ class _SeletorDeCorState extends State<SeletorDeCor> {
   static const _rapidas = <Color>[
     Color(0xFFFFFFFF),
     Color(0xFF000000),
-    Color(0xFFB8FF3D),
-    Color(0xFF7C62FF),
+    AureaColors.accent,
+    AureaColors.selectionText,
     Color(0xFF35C4E7),
     Color(0xFF2BE3A0),
     Color(0xFFFFB020),
     Color(0xFFFF6B6B),
     Color(0xFFFF4FA3),
-    Color(0xFF8B94A3),
-    Color(0xFF1E242E),
-    Color(0xFFE9EDF2),
+    AureaColors.muted,
+    AureaColors.surfaceHigh,
+    AureaColors.text,
   ];
 
   @override

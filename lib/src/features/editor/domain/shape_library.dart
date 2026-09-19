@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'dart:ui';
+import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import 'keyframe.dart';
 import 'mask.dart';
@@ -175,7 +176,7 @@ class ShapeLibrary {
       roundness: AnimatedDouble(0),
       roundnessPercent: true,
     ),
-    ShapeFill(color: const Color(0xFF7C62FF)),
+    ShapeFill(color: AureaColors.selectionText),
   ];
 
   /// Pizza: um setor de 90 graus sem miolo.

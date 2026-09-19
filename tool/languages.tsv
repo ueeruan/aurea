@@ -3222,3 +3222,19 @@ Difusão vertical	Vertical softness	Difusión vertical	انتشار رأسي	세
 Silhueta	Silhouette	Silueta	ظلّ	실루엣	シルエット	剪影	सिल्हूट	Siluet	Силуэт
 Sombra chapada	Flat shadow	Sombra plana	ظل مسطّح	평면 그림자	フラットシャドウ	平涂阴影	सपाट छाया	Bayangan datar	Плоская тень
 Troca a cor de tudo o que a camada desenha, preservando o alfa	Replaces the color of everything the layer draws, keeping alpha	Cambia el color de todo lo que dibuja la capa, conservando el alfa	يستبدل لون كل ما ترسمه الطبقة مع الحفاظ على الشفافية	레이어가 그리는 모든 것의 색을 바꾸고 알파는 유지합니다	レイヤーが描くすべての色を置き換え、アルファは保持します	替换图层绘制的所有内容的颜色，并保留透明度	लेयर जो भी बनाती है उसका रंग बदलता है, पारदर्शिता बनाए रखता है	Mengganti warna semua yang digambar lapisan, menjaga alfa	Меняет цвет всего, что рисует слой, сохраняя прозрачность
+Advanced Shake	Advanced Shake	Sacudida avanzada	اهتزاز متقدم	고급 흔들림	アドバンスドシェイク	高级抖动	एडवांस्ड शेक	Guncangan Lanjutan	Продвинутая тряска
+Amplitude aleatória	Random amplitude	Amplitud aleatoria	سعة عشوائية	무작위 진폭	ランダム振幅	随机振幅	यादृच्छिक आयाम	Amplitudo acak	Случайная амплитуда
+Global	Global	Global	عام	전역	全体	全局	वैश्विक	Global	Общие
+X Shake	X Shake	Sacudida X	اهتزاز X	X 흔들림	X シェイク	X 抖动	X शेक	Guncangan X	Тряска X
+Y Shake	Y Shake	Sacudida Y	اهتزاز Y	Y 흔들림	Y シェイク	Y 抖动	Y शेक	Guncangan Y	Тряска Y
+Z Shake	Z Shake	Sacudida Z	اهتزاز Z	Z 흔들림	Z シェイク	Z 抖动	Z शेक	Guncangan Z	Тряска Z
+Tilt Shake	Tilt Shake	Sacudida de inclinación	اهتزاز الميل	기울기 흔들림	チルトシェイク	倾斜抖动	टिल्ट शेक	Guncangan Kemiringan	Тряска наклона
+Câmera na mão sutil	Subtle handheld	Cámara en mano sutil	كاميرا محمولة خفيفة	미세한 핸드헬드	控えめなハンドヘルド	轻微手持	हल्का हैंडहेल्ड	Handheld halus	Лёгкая ручная
+Câmera na mão média	Medium handheld	Cámara en mano media	كاميرا محمولة متوسطة	중간 핸드헬드	中程度のハンドヘルド	中等手持	मध्यम हैंडहेल्ड	Handheld sedang	Средняя ручная
+Câmera pesada	Heavy camera	Cámara pesada	كاميرا ثقيلة	무거운 카메라	ヘビーカメラ	重型摄像机	भारी कैमरा	Kamera berat	Тяжёлая камера
+Terremoto	Earthquake	Terremoto	زلزال	지진	地震	地震	भूकंप	Gempa	Землетрясение
+Vibração	Vibration	Vibración	اهتزاز	진동	振動	振动	कंपन	Getaran	Вибрация
+Tremor horizontal	Horizontal shake	Sacudida horizontal	اهتزاز أفقي	수평 흔들림	横シェイク	水平抖动	क्षैतिज शेक	Guncangan horizontal	Горизонтальная тряска
+Tremor vertical	Vertical shake	Sacudida vertical	اهتزاز عمودي	수직 흔들림	縦シェイク	垂直抖动	ऊर्ध्वाधर शेक	Guncangan vertikal	Вертикальная тряска
+Flutuação suave	Smooth float	Flotación suave	طفو ناعم	부드러운 부유	スムーズフロート	平滑漂浮	स्मूद फ्लोट	Apungan halus	Плавное покачивание
+Tranco rápido	Fast twitch	Sacudida rápida	نتشة سريعة	빠른 경련	ファストツイッチ	快速抽动	तेज़ झटका	Sentakan cepat	Быстрый рывок

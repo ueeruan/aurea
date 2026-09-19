@@ -47,7 +47,7 @@ import '../domain/glb_import.dart';
 import '../domain/model_asset3d.dart';
 import 'tracking_service.dart';
 import '../domain/tracker2d.dart';
-import '../domain/fx.dart';
+import '../domain/shake.dart';
 import '../domain/grid_rig.dart';
 import '../domain/grupo_ops.dart';
 import '../domain/ajuste_da_midia.dart';
@@ -1374,17 +1374,32 @@ class EditorController extends Notifier<VideoProject> {
       return;
     }
 
-    // Amostra o MESMO calculo que o compositor faz, frame a frame — por
-    // isso o assado bate com o procedural.
+    // Amostra o MESMO calculo que o shader faz, frame a frame — por isso
+    // o assado bate com o procedural.
+    //
+    // AS CHAVES ANTIGAS NAO EXISTEM MAIS. Este trecho lia 'frequencia',
+    // 'estilo', 'semente', 'zoom' e 'inclinacao' — nomes que o Shake
+    // tinha antes de virar Advanced Shake — e `paramAt` devolvia zero em
+    // silencio: a frequencia zerava, a fase congelava, e "Assar em
+    // keyframes" devolvia UM deslocamento estatico e apagava o efeito.
+    // Agora le `instantDoShake`, que e a conta que o shader usa.
     final fx = effect;
-    TremorSample sampleAt(Duration t) => tremorSample(
-      amplitudePx: fx.paramAt('amplitude', t),
-      phase: integratedPhase(fx.track('frequencia'), t),
-      style: fx.paramAt('estilo', t).round().clamp(0, 2),
-      seed: fx.paramAt('semente', t).round(),
-      zoom: fx.paramAt('zoom', t).clamp(0.0, 1.0),
-      tiltDeg: fx.paramAt('inclinacao', t),
-    );
+    // A AMPLITUDE E EM PIXEL DE REFERENCIA (1080), como no passe: o
+    // deslocamento vira pixel de camada pela escala da camada e pixel de
+    // quadro pela razao do quadro.
+    final ref = math.min(state.outputWidth, state.outputHeight) / 1080;
+    Offset shakeOffset(Duration t) {
+      final s = instantDoShake(fx, t);
+      final x = s.dx * ref * layer.scaleX.valueAt(t);
+      final y = s.dy * ref * layer.scaleY.valueAt(t);
+      // O efeito mora DENTRO do transform: o deslocamento sai girado junto
+      // com a camada, senao um tremor numa camada girada assa reto.
+      final a = layer.rotation.valueAt(t) * math.pi / 180;
+      return Offset(
+        x * math.cos(a) - y * math.sin(a),
+        x * math.sin(a) + y * math.cos(a),
+      );
+    }
 
     final baked = bakeProceduralMotion(
       effect: effect,
@@ -1393,12 +1408,9 @@ class EditorController extends Notifier<VideoProject> {
       basePosition: layer.position.valueAt(Duration.zero),
       baseRotation: layer.rotation.valueAt(Duration.zero),
       baseScale: layer.scaleX.valueAt(Duration.zero),
-      sampleOffset: (t) {
-        final s = sampleAt(t);
-        return Offset(s.dx, s.dy);
-      },
-      sampleRotation: (t) => sampleAt(t).rotationDeg,
-      sampleScale: (t) => sampleAt(t).scale,
+      sampleOffset: shakeOffset,
+      sampleRotation: (t) => instantDoShake(fx, t).giroGraus,
+      sampleScale: (t) => instantDoShake(fx, t).escala,
     );
 
     _replace(

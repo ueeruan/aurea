@@ -1,5 +1,6 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import '../../../core/l10n/app_language.dart';
 import '../../../core/theme/app_theme.dart';
@@ -85,7 +86,7 @@ Future<void> showBoasVindas(BuildContext context) => showModalBottomSheet<void>(
                     fontWeight: FontWeight.w700,
                     color: AppColors.modoClaro
                         ? const Color(0xFFFFFFFF)
-                        : const Color(0xFF0B0E12),
+                        : AureaColors.onAccent,
                   ),
                 ),
               ),

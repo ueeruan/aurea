@@ -2,6 +2,7 @@ import 'package:aurea/src/core/l10n/app_language.dart';
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' show ImageFilter;
+import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -914,7 +915,7 @@ class _PreviewPainter extends CustomPainter {
       final sy = math.max(0.0, sc / 100 * scy / 100);
       if (sx <= 0.01 || sy <= 0.01) continue;
 
-      var color = const Color(0xFFE9EDF2);
+      var color = AureaColors.text;
       if (hue != 0 || sat != 100 || bri != 100) {
         final hsl = HSLColor.fromColor(color);
         final h = (hsl.hue + hue) % 360;

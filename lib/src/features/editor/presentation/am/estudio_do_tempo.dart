@@ -14,6 +14,7 @@
 //
 // Abrir nao cria curva: a primeira edicao cria (e, num clipe com o
 // Reverso ligado, grava antes a curva que a previa ja toca).
+import 'package:aurea/src/core/theme/aurea_colors.dart';
 import 'dart:math' as math;
 
 import 'package:aurea/src/core/l10n/app_language.dart';
@@ -1379,7 +1380,7 @@ class _PintorDoGrafico extends CustomPainter {
   void _batidas(Canvas canvas) {
     final tinta = Paint()
       ..strokeWidth = 1
-      ..color = const Color(0x33B8FF3D);
+      ..color = AureaColors.accent.withValues(alpha: 0.20);
     for (final b in batidas) {
       if (b < t0 || b > t1) continue;
       final x = _x(b);

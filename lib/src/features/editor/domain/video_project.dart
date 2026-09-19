@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'dart:ui';
+import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import 'package:uuid/uuid.dart';
 import 'package:vector_math/vector_math_64.dart' as vm;
@@ -75,7 +76,7 @@ class Marker {
   const Marker({
     required this.time,
     this.label = '',
-    this.color = const Color(0xFFB8FF3D),
+    this.color = AureaColors.accent,
   });
 
   final Duration time;

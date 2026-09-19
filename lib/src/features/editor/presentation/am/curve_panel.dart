@@ -1,5 +1,6 @@
 import 'package:aurea/src/core/l10n/app_language.dart';
 import 'dart:math' as math;
+import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart' hide Easing;
@@ -1321,7 +1322,7 @@ class _AmCurvePainter extends CustomPainter {
     canvas.drawPath(
       buildPath(0, 1),
       Paint()
-        ..color = const Color(0xFF1ED6B1)
+        ..color = AureaColors.accent
         ..strokeWidth = 3.5
         ..style = PaintingStyle.stroke
         ..strokeCap = StrokeCap.round,
@@ -1411,7 +1412,7 @@ class _AmCurvePainter extends CustomPainter {
     }
 
     // Pontos de ancoragem verdes nos cantos
-    final endDot = Paint()..color = const Color(0xFF1ED6B1);
+    final endDot = Paint()..color = AureaColors.accent;
     canvas.drawCircle(p0, 4.5, endDot);
     canvas.drawCircle(p1, 4.5, endDot);
   }
@@ -1595,7 +1596,7 @@ class _AmCurvePresetCard extends StatelessWidget {
           color: const Color(0xFF1E222D),
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
-            color: selected ? const Color(0xFF1ED6B1) : const Color(0xFF333B4F),
+            color: selected ? AureaColors.accent : const Color(0xFF333B4F),
             width: selected ? 1.8 : 1,
           ),
         ),

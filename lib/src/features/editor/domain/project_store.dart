@@ -1,5 +1,6 @@
 import 'acabamento3d.dart';
 import 'dart:convert';
+import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import 'package:aurea_render/aurea_render.dart';
 import 'package:uuid/uuid.dart';
@@ -994,7 +995,7 @@ OpcoesDaCamera _asOpcoesDaCamera(Object? raw) {
     intensidadeDoFoco: ad('fi'),
     profundidadeDeCampo: ad('fp'),
     neblinaLigada: m['nev'] == true,
-    corDaNeblina: m['nc'] is num ? _asCol(m['nc']) : const Color(0xFF12151A),
+    corDaNeblina: m['nc'] is num ? _asCol(m['nc']) : AureaColors.bg,
     neblinaPerto: ad('np'),
     neblinaLonge: ad('nl'),
   );
@@ -1894,7 +1895,7 @@ SceneNode _asSceneNode(Map<String, dynamic> n) {
     compParentLayerId: n['compPai'] as String?,
     isNull: n['null3d'] as bool? ?? false,
     locked: n['locked'] as bool? ?? false,
-    colorTag: n['tag'] == null ? const Color(0xFF7C62FF) : _asCol(n['tag']),
+    colorTag: n['tag'] == null ? AureaColors.selectionText : _asCol(n['tag']),
     lod: _enumValue(n['lod'], MeshLod3D.values, MeshLod3D.auto),
     subdivisions: (n['subdivisions'] as num?)?.toInt() ?? 0,
     credit: _asCredit(n['credit']),

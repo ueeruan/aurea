@@ -1,4 +1,5 @@
 import 'dart:ui';
+import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import 'package:uuid/uuid.dart';
 
@@ -124,7 +125,7 @@ List<EstiloPreset> estilosDeFabrica() => [
         width: AnimatedDouble(16),
       ),
       bordasExtras: [
-        StrokeStyle(color: const Color(0xFF12151A), width: AnimatedDouble(22)),
+        StrokeStyle(color: AureaColors.bg, width: AnimatedDouble(22)),
       ],
       dropShadow: ShadowStyle(
         opacity: AnimatedDouble(.3),

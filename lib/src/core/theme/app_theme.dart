@@ -1,7 +1,20 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
-/// Paleta extraida do logo: fundo grafite, verde-lima e violeta.
+import 'aurea_colors.dart';
+
+/// A PALETA DO APP — um apelido para [AureaColors], e nada mais.
+///
+/// ESTE ARQUIVO JA GUARDOU HEXADECIMAIS. Ele era uma das três listas da
+/// marca (as outras eram `AmColors` e `AureaTokens`), com o verde-lima
+/// escrito à mão em cada uma. Agora ele só TRADUZ nome antigo para papel
+/// novo, e o hexadecimal existe num lugar só.
+///
+/// OS NOMES ANTIGOS FICARAM DE PROPOSITO. `lime` e `violet` descrevem a
+/// cor de 2025, e há mais de cem lugares no app escritos assim. Renomeá-los
+/// seria uma tarde de substituição mecânica com risco de errar uma chamada,
+/// em troca de nada que a pessoa que usa o app perceba. O comentário de cada
+/// um diz o papel — que é o que importa quando a identidade mudar de novo.
 ///
 /// TEMA CLARO (Fase 6, decisao Q6): os mesmos NOMES trocam de valor com
 /// [modoClaro]. Quem pintava com AppColors continua pintando com o papel
@@ -11,36 +24,44 @@ abstract final class AppColors {
   /// Ligado pelo tema em vigor (ver [AppTheme.tema]).
   static bool modoClaro = false;
 
-  static Color get background =>
-      modoClaro ? const Color(0xFFF4F5F7) : const Color(0xFF12151A);
+  static Color get background => modoClaro ? AureaColors.lightBg : AureaColors.bg;
   static Color get surface =>
-      modoClaro ? const Color(0xFFFFFFFF) : const Color(0xFF171C23);
+      modoClaro ? AureaColors.lightSurface : AureaColors.surface;
   static Color get surfaceHigh =>
-      modoClaro ? const Color(0xFFEDEFF3) : const Color(0xFF1E242E);
-  static Color get lime =>
-      modoClaro ? const Color(0xFF7BC300) : const Color(0xFFB8FF3D);
-  static Color get violet =>
-      modoClaro ? const Color(0xFF6A4FF0) : const Color(0xFF7C62FF);
-  static Color get onDark =>
-      modoClaro ? const Color(0xFF14171C) : const Color(0xFFE9EDF2);
-  static Color get muted =>
-      modoClaro ? const Color(0xFF6B7280) : const Color(0xFF8B94A3);
-  static Color get outline =>
-      modoClaro ? const Color(0xFFD5D9E0) : const Color(0xFF2A313C);
+      modoClaro ? AureaColors.lightSurfaceHigh : AureaColors.surfaceHigh;
 
-  /// O verde da marca APAGADO, para fundo de chip aceso — o mesmo papel
-  /// que `AmColors.accentDim` faz no editor.
+  /// AÇÃO. Era o lima da logo; hoje é o azul claro dela.
+  static Color get lime =>
+      modoClaro ? AureaColors.lightAccent : AureaColors.accent;
+
+  /// SELEÇÃO. Era o violeta; hoje é o azul suave.
+  static Color get violet =>
+      modoClaro ? AureaColors.lightSelection : AureaColors.selectionText;
+
+  static Color get onDark =>
+      modoClaro ? AureaColors.lightText : AureaColors.text;
+  static Color get muted =>
+      modoClaro ? AureaColors.lightMuted : AureaColors.muted;
+  static Color get outline =>
+      modoClaro ? AureaColors.lightBorder : AureaColors.border;
+
+  /// A ação APAGADA, para fundo de chip aceso — o mesmo papel que
+  /// `AmColors.accentDim` faz no editor.
   static Color get accentDim =>
-      modoClaro ? const Color(0xFFE3F5C2) : const Color(0xFF2A3A16);
+      modoClaro ? AureaColors.lightAccentDim : AureaColors.accentDim;
 
   /// Linha fina estilo iOS (separadores e borda do chrome translucido).
+  ///
+  /// UMA LINHA FINA É MEIA TRANSPARÊNCIA, e não a cor da borda cheia: ela
+  /// passa por cima de fundo, de superfície e de chip, e a #273442 sólida
+  /// ficaria pesada sobre o fundo mais escuro. A 42% ela rende os três.
   static Color get hairline => modoClaro
-      ? Colors.black.withValues(alpha: 0.08)
-      : Colors.white.withValues(alpha: 0.08);
+      ? Colors.black.withValues(alpha: 0.10)
+      : AureaColors.border.withValues(alpha: 0.72);
 }
 
 abstract final class AppTheme {
-  static const Color timelineBackground = Color(0xFF171C23);
+  static const Color timelineBackground = AureaColors.surface;
 
   static ThemeData get dark => tema(claro: false);
   static ThemeData get light => tema(claro: true);
@@ -52,10 +73,10 @@ abstract final class AppTheme {
     final scheme = ColorScheme(
       brightness: claro ? Brightness.light : Brightness.dark,
       primary: AppColors.lime,
-      onPrimary: Color(0xFF0B0E12),
+      onPrimary: AureaColors.onAccent,
       secondary: AppColors.violet,
       onSecondary: Colors.white,
-      error: Color(0xFFFF6B6B),
+      error: AureaColors.danger,
       onError: Colors.white,
       surface: AppColors.background,
       onSurface: AppColors.onDark,
@@ -152,7 +173,7 @@ abstract final class AppTheme {
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
           backgroundColor: AppColors.lime,
-          foregroundColor: const Color(0xFF0B0E12),
+          foregroundColor: AureaColors.onAccent,
           textStyle: const TextStyle(
             fontSize: 17,
             fontWeight: FontWeight.w600,

@@ -1,6 +1,7 @@
 import 'luz_e_diversos.dart';
 import 'motion_tile.dart';
 import 'dart:ui';
+import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:uuid/uuid.dart';
@@ -286,11 +287,27 @@ const _aliasesDeId = <String, EffectType>{
 const effectParamAliases = <EffectType, Map<String, String>>{
   EffectType.tremor: {
     'frequencia': 'frequency',
-    'estilo': 'style',
-    'inclinacao': 'tilt_random_amplitude',
     'semente': 'seed',
     'fase': 'phase',
-    'rgb': 'rgb_randomness',
+    // O S_Shake ANTIGO tinha estes com outros nomes. O que sobrou com
+    // significado igual atravessa; o que nao tem mais lugar (Estilo,
+    // Quietude, Deriva, Tendencia ao centro, canais de cor) simplesmente
+    // nao e lido — o Advanced Shake nao os tem, e o valor guardado fica
+    // no arquivo sem fazer nada.
+    'inclinacao': 'tilt_rand_amp',
+    'tilt_random_amplitude': 'tilt_rand_amp',
+    'zoom': 'z_rand_amp',
+    'rand_amp': 'x_rand_amp',
+    'rand_freq': 'x_rand_freq',
+    'wave_amp': 'x_wave_amp',
+    'wave_freq': 'x_wave_freq',
+    'x_random_amplitude': 'x_rand_amp',
+    'y_random_amplitude': 'y_rand_amp',
+    'x_random_frequency': 'x_rand_freq',
+    'y_random_frequency': 'y_rand_freq',
+    'x_wave_amplitude': 'x_wave_amp',
+    'y_wave_amplitude': 'y_wave_amp',
+    'blur_length': 'mo_blur_length',
   },
   EffectType.blobTracker: {
     'quantidade': 'max_blobs',
@@ -460,6 +477,14 @@ class EffectPronto {
   final Color? cor;
 }
 
+/// Um bloco recolhivel da ficha: um rotulo e as chaves que moram nele.
+class EffectGrupo {
+  const EffectGrupo(this.rotulo, this.chaves);
+
+  final String rotulo;
+  final List<String> chaves;
+}
+
 class EffectSpec {
   const EffectSpec({
     required this.id,
@@ -476,7 +501,19 @@ class EffectSpec {
     this.montar = const [],
     this.presets = const [],
     this.colorLabels = const [],
+    this.grupos = const [],
   });
+
+  /// GRUPOS RECOLHIVEIS NA FICHA, na ordem em que aparecem.
+  ///
+  /// Existe por causa do Shake: com 34 numeros numa lista corrida, a
+  /// pessoa nao acha o eixo que quer. Agrupado em Global / X / Y / Z /
+  /// Tilt, a ficha abre no Global e os eixos ficam a um toque.
+  ///
+  /// A REGRA E NAO PERDER PARAMETRO: chave que nao estiver em nenhum
+  /// grupo e desenhada ANTES dos grupos, solta — um numero escondido por
+  /// esquecimento e pior que um numero fora de lugar.
+  final List<EffectGrupo> grupos;
 
   /// Nomes das cores na ficha (principal primeiro, depois as extras).
   /// Vazio = "Cor", "Cor 2"...
@@ -834,7 +871,7 @@ class EffectInstance {
   final List<Color> extraColors;
 
   static const _coresExtrasPadrao = [
-    Color(0xFF7C62FF),
+    AureaColors.selectionText,
     Color(0xFF35C4E7),
     Color(0xFFFFB020),
   ];

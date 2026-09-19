@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'dart:ui';
+import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import 'algebra_numerica.dart';
 import 'camera3d.dart';
@@ -355,7 +356,7 @@ SceneNode noNoPlano(
   ObjetoNoPlano tipo, {
   String? nome,
   String? textureLayerId,
-  Color cor = const Color(0xFF7C62FF),
+  Color cor = AureaColors.selectionText,
 }) {
   final (rx, ry, rz) = plano.anglesEmGraus;
   // Metade da extensao dos pontos, com um piso: um plano formado por

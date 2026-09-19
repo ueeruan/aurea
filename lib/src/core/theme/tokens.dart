@@ -1,5 +1,7 @@
 import 'package:flutter/widgets.dart';
 
+import 'aurea_colors.dart';
+
 /// OS TOKENS DO DESIGN SYSTEM (Fase 1 do redesign).
 ///
 /// Uma paleta escura e uma clara com os MESMOS nomes: quem desenha com
@@ -7,11 +9,18 @@ import 'package:flutter/widgets.dart';
 /// acao, keyframe, selecao). O palco de preview continua escuro nos dois
 /// temas — video se avalia sobre fundo escuro.
 ///
-/// Papeis das tres cores da marca:
-///   acao      lima    — o que a pessoa toca para fazer algo: Exportar,
-///                       o "+", chips ativos, botao principal
-///   keyframe  teal    — diamantes, curvas, o cabecote em contexto
-///   selecao   violeta — a camada selecionada e os grupos
+/// OS HEXES MORAOM EM [AureaColors], E SÓ LÁ. Este arquivo dá os mesmos
+/// valores por dois caminhos porque a base foi escrita em duas épocas: os
+/// widgets novos leem `AureaTokens.of(context).accent` (que respeita o tema
+/// em vigor) e os antigos leem `AmColors.action` (que é fixo). Os dois agora
+/// apontam para a mesma tabela, e é isso que impede o editor e o resto do
+/// app de se separarem de novo.
+///
+/// Papéis da marca azul:
+///   acao      azul claro — o que a pessoa toca para fazer algo: Exportar,
+///                          o "+", chips ativos, botao principal
+///   keyframe  azul suave — diamantes, curvas, o cabecote em contexto
+///   selecao   azul medio — fundo da camada selecionada e dos grupos
 class AureaTokens {
   const AureaTokens({
     required this.brightness,
@@ -46,16 +55,16 @@ class AureaTokens {
   final Color muted;
   final Color hairline;
 
-  /// Acao (lima da logo).
+  /// Acao (o azul claro da marca).
   final Color accent;
   final Color onAccent;
   final Color accentDim;
 
-  /// Keyframe, curva, cabecote em contexto (teal).
+  /// Keyframe, curva, cabecote em contexto (azul suave).
   final Color keyframe;
   final Color keyframeDim;
 
-  /// Selecao e grupos (violeta da logo).
+  /// Selecao e grupos (azul medio).
   final Color selection;
 
   /// Excluir, erro.
@@ -65,20 +74,20 @@ class AureaTokens {
 
   static const dark = AureaTokens(
     brightness: Brightness.dark,
-    bg: Color(0xFF12151A),
-    surface: Color(0xFF171C23),
-    surfaceHigh: Color(0xFF1E242E),
-    chip: Color(0xFF262C36),
-    text: Color(0xFFE9EDF2),
-    muted: Color(0xFF8B94A3),
-    hairline: Color(0x14FFFFFF),
-    accent: Color(0xFFB8FF3D),
-    onAccent: Color(0xFF0B0E12),
-    accentDim: Color(0xFF2A3A16),
-    keyframe: Color(0xFF1ED6B1),
-    keyframeDim: Color(0xFF183F3C),
-    selection: Color(0xFF7C62FF),
-    danger: Color(0xFFFF6B6B),
+    bg: AureaColors.bg,
+    surface: AureaColors.surface,
+    surfaceHigh: AureaColors.surfaceHigh,
+    chip: AureaColors.chip,
+    text: AureaColors.text,
+    muted: AureaColors.muted,
+    hairline: AureaColors.border,
+    accent: AureaColors.accent,
+    onAccent: AureaColors.onAccent,
+    accentDim: AureaColors.accentDim,
+    keyframe: AureaColors.keyframe,
+    keyframeDim: AureaColors.keyframeDim,
+    selection: AureaColors.selection,
+    danger: AureaColors.danger,
   );
 
   /// Editor and studio retain the Aurea brand palette.
@@ -86,20 +95,20 @@ class AureaTokens {
 
   static const light = AureaTokens(
     brightness: Brightness.light,
-    bg: Color(0xFFF4F5F7),
-    surface: Color(0xFFFFFFFF),
-    surfaceHigh: Color(0xFFEDEFF3),
-    chip: Color(0xFFE4E7EC),
-    text: Color(0xFF14171C),
-    muted: Color(0xFF6B7280),
-    hairline: Color(0x14000000),
-    accent: Color(0xFF7BC300),
-    onAccent: Color(0xFFFFFFFF),
-    accentDim: Color(0xFFE3F5C2),
-    keyframe: Color(0xFF0FA88C),
-    keyframeDim: Color(0xFFCDEFE7),
-    selection: Color(0xFF6A4FF0),
-    danger: Color(0xFFD94B4B),
+    bg: AureaColors.lightBg,
+    surface: AureaColors.lightSurface,
+    surfaceHigh: AureaColors.lightSurfaceHigh,
+    chip: AureaColors.lightChip,
+    text: AureaColors.lightText,
+    muted: AureaColors.lightMuted,
+    hairline: AureaColors.lightBorder,
+    accent: AureaColors.lightAccent,
+    onAccent: AureaColors.lightOnAccent,
+    accentDim: AureaColors.lightAccentDim,
+    keyframe: AureaColors.lightKeyframe,
+    keyframeDim: AureaColors.lightKeyframeDim,
+    selection: AureaColors.lightSelection,
+    danger: AureaColors.lightDanger,
   );
 
   /// Os tokens em vigor neste ponto da arvore (escuro por padrao).
@@ -107,28 +116,32 @@ class AureaTokens {
       context.dependOnInheritedWidgetOfExactType<AureaTheme>()?.tokens ?? dark;
 
   // ----------------------------------------------------- medidas
+  //
+  // AS MEDIDAS MORAOM EM [AureaSpacing] E [AureaRadius]. Estes apelidos
+  // ficam porque centenas de chamadas ja escrevem `AureaTokens.s4`, e
+  // renomear chamada nao muda pixel nenhum — so o risco de errar uma.
 
-  /// Grade de 8 pt.
-  static const double s1 = 4;
-  static const double s2 = 8;
-  static const double s3 = 12;
-  static const double s4 = 16;
-  static const double s5 = 24;
+  /// Grade de 4 pt.
+  static const double s1 = AureaSpacing.x1;
+  static const double s2 = AureaSpacing.x2;
+  static const double s3 = AureaSpacing.x3;
+  static const double s4 = AureaSpacing.x4;
+  static const double s5 = AureaSpacing.x5;
 
   /// Alvo de toque minimo (regra 6 do prompt).
-  static const double minTap = 44;
+  static const double minTap = AureaSpacing.minTap;
 
   /// Alturas das zonas fixas.
   // As barras do editor na medida do AM 5: navbar 44, playbar 46.
-  static const double topBar = 44;
-  static const double transport = 46;
+  static const double topBar = AureaSpacing.topBar;
+  static const double transport = AureaSpacing.transport;
 
   /// Regua de arrasto e tile de categoria.
-  static const double ruler = 52;
-  static const double tile = 56;
+  static const double ruler = AureaSpacing.ruler;
+  static const double tile = AureaSpacing.tile;
 
-  static const double radius = 12;
-  static const double radiusChip = 10;
+  static const double radius = AureaRadius.card;
+  static const double radiusChip = AureaRadius.chip;
 }
 
 /// Entrega os tokens a subarvore.

@@ -1,4 +1,5 @@
 import 'package:aurea/src/core/l10n/app_language.dart';
+import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import 'dart:typed_data';
 
@@ -700,7 +701,7 @@ class _GalleryThumbnailState extends State<_GalleryThumbnail> {
                   style: const TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
-                    color: Color(0xFF0B0E12),
+                    color: AureaColors.onAccent,
                   ),
                 ),
               ),

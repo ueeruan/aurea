@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import 'package:aurea/src/core/l10n/app_language.dart';
 import 'package:flutter/cupertino.dart';
@@ -978,21 +979,21 @@ children: [
             ? const Icon(
                 CupertinoIcons.lock_fill,
                 size: 11,
-                color: Color(0xFF12151A),
+                color: AureaColors.bg,
               )
             : naMulti
             ? Icon(
                 CupertinoIcons.checkmark_alt,
                 key: ValueKey('visto-${layer.id}'),
                 size: 13,
-                color: const Color(0xFF12151A),
+                color: AureaColors.bg,
               )
             : recortada
             ? Icon(
                 CupertinoIcons.arrow_turn_left_down,
                 key: ValueKey('recorte-${layer.id}'),
                 size: 11,
-                color: const Color(0xFF12151A),
+                color: AureaColors.bg,
               )
             : null,
       ),
@@ -1257,8 +1258,8 @@ Future<void> _menuDaMarca(
 ) async {
   final controller = ref.read(editorControllerProvider.notifier);
   const cores = [
-    Color(0xFFB8FF3D),
-    Color(0xFF7C62FF),
+    AureaColors.accent,
+    AureaColors.selectionText,
     Color(0xFFFF6B6B),
     Color(0xFFFFC53D),
     Color(0xFF4DD0E1),

@@ -1,5 +1,6 @@
 import 'package:aurea/src/core/l10n/app_language.dart';
 import 'dart:io';
+import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
@@ -226,7 +227,7 @@ class _UserTabState extends ConsumerState<UserTab> {
                       width: 7,
                       height: 7,
                       decoration: const BoxDecoration(
-                        color: Color(0xFF1ED6B1),
+                        color: AureaColors.accent,
                         shape: BoxShape.circle,
                       ),
                     ),
@@ -799,7 +800,7 @@ class _UserTabState extends ConsumerState<UserTab> {
                   style: const TextStyle(
                     fontFamily: 'monospace',
                     fontSize: 12.5,
-                    color: Color(0xFF1ED6B1),
+                    color: AureaColors.accent,
                     letterSpacing: 0.5,
                   ),
                 ),

@@ -2,6 +2,7 @@ import 'package:aurea/src/core/l10n/app_language.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import '../../../../core/ui/snack.dart';
 import '../../../../core/ui/tocavel.dart';
@@ -565,7 +566,7 @@ StrokeStyle novaBorda(List<StrokeStyle> bordas, Duration local) {
     );
   }
   final ultima = bordas.last;
-  const cores = [Color(0xFFFFFFFF), Color(0xFF12151A)];
+  const cores = [Color(0xFFFFFFFF), AureaColors.bg];
   return StrokeStyle(
     color: cores[bordas.length % 2],
     width: AnimatedDouble(

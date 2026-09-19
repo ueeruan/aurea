@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
+import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/cupertino.dart';
@@ -566,7 +567,7 @@ class _PintorDoEstilo extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     canvas.drawRect(
       Offset.zero & size,
-      Paint()..color = const Color(0xFF1E242E),
+      Paint()..color = AureaColors.surfaceHigh,
     );
     final lado = math.min(size.width, size.height) * .52;
     final corpo = RRect.fromRectAndRadius(

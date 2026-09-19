@@ -2,6 +2,7 @@ import 'package:aurea/src/core/l10n/app_language.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart' hide Easing;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import '../../application/editor_controller.dart';
 import '../../application/freehand_session.dart';
@@ -961,12 +962,12 @@ class _Traco extends StatelessWidget {
               ),
               for (final c in const [
                 Color(0xFFFFFFFF),
-                Color(0xFFB8FF3D),
+                AureaColors.accent,
                 Color(0xFFFF3B52),
-                Color(0xFF7C62FF),
+                AureaColors.selectionText,
                 Color(0xFF35C4E7),
                 Color(0xFFFFB020),
-                Color(0xFF0B0E12),
+                AureaColors.onAccent,
               ])
                 GestureDetector(
                   onTap: () => onUpdate((x) => x.copyWith(color: c)),
@@ -1161,7 +1162,7 @@ class _Botao extends StatelessWidget {
           style: TextStyle(
             fontSize: 13,
             fontWeight: FontWeight.w600,
-            color: cheio ? const Color(0xFF0B0E12) : AmColors.accent,
+            color: cheio ? AureaColors.onAccent : AmColors.accent,
           ),
         ),
       ),

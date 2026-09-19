@@ -507,7 +507,7 @@ class _Rodape extends ConsumerWidget {
   );
 }
 
-class _CartaoDoEfeito extends StatelessWidget {
+class _CartaoDoEfeito extends StatefulWidget {
   const _CartaoDoEfeito({
     super.key,
     required this.index,
@@ -542,12 +542,44 @@ class _CartaoDoEfeito extends StatelessWidget {
   final ValueChanged<Color> onColor;
   final void Function(int index, Color color) onExtraColor;
 
-  List<Widget> _linhas() {
-    final linhas = <Widget>[];
-    for (final entry in effect.spec.params.entries) {
-      final p = entry.value;
-      final chave = '${effect.id}/${entry.key}';
-      linhas.add(switch (p.kind) {
+  @override
+  State<_CartaoDoEfeito> createState() => _CartaoDoEfeitoState();
+}
+
+class _CartaoDoEfeitoState extends State<_CartaoDoEfeito> {
+  /// Os grupos ABERTOS desta ficha, por rotulo.
+  ///
+  /// FECHA POR PADRAO, MENOS O PRIMEIRO. O Shake abre no Global — os
+  /// numeros que a pessoa procura primeiro — e os quatro eixos ficam a um
+  /// toque, em vez de empurrar 34 linhas para a tela.
+  final _abertos = <String>{};
+
+  @override
+  void initState() {
+    super.initState();
+    final grupos = widget.effect.spec.grupos;
+    if (grupos.isNotEmpty) _abertos.add(grupos.first.rotulo);
+  }
+
+  EffectInstance get effect => widget.effect;
+  Duration get local => widget.local;
+  bool get expanded => widget.expanded;
+  int get index => widget.index;
+  String? get selectedParam => widget.selectedParam;
+  VoidCallback get onToggleExpanded => widget.onToggleExpanded;
+  VoidCallback get onMenu => widget.onMenu;
+  VoidCallback get onRemove => widget.onRemove;
+  ValueChanged<String> get onSelectParam => widget.onSelectParam;
+  void Function(String key, double value) get onParam => widget.onParam;
+  VoidCallback get onBeginGesture => widget.onBeginGesture;
+  VoidCallback get onEndGesture => widget.onEndGesture;
+  ValueChanged<Color> get onColor => widget.onColor;
+  void Function(int index, Color color) get onExtraColor => widget.onExtraColor;
+
+  Widget _linhaDe(MapEntry<String, EffectParam> entry) {
+    final p = entry.value;
+    final chave = '${effect.id}/${entry.key}';
+    return switch (p.kind) {
         ParamKind.toggle => _LinhaDeInterruptor(
           key: ValueKey('efeito-param-$chave'),
           rotulo: p.label,
@@ -585,7 +617,42 @@ class _CartaoDoEfeito extends StatelessWidget {
           aoMudar: (v) => onParam(entry.key, v.clamp(p.min, p.max)),
           aoDigitar: (v) => onParam(entry.key, v.clamp(p.min, p.max)),
         ),
-      });
+    };
+  }
+
+  List<Widget> _linhas() {
+    final linhas = <Widget>[];
+    final grupos = effect.spec.grupos;
+    // O QUE NAO ESTA EM GRUPO NENHUM VAI SOLTO, ANTES DOS GRUPOS. Um
+    // numero escondido por esquecimento de arrumacao e pior que um numero
+    // fora de lugar.
+    final emGrupo = <String>{for (final g in grupos) ...g.chaves};
+    for (final entry in effect.spec.params.entries) {
+      if (!emGrupo.contains(entry.key)) linhas.add(_linhaDe(entry));
+    }
+    for (final g in grupos) {
+      final linhas_ = [
+        for (final k in g.chaves)
+          if (effect.spec.params[k] != null)
+            MapEntry<String, EffectParam>(k, effect.spec.params[k]!),
+      ];
+      if (linhas_.isEmpty) continue;
+      final aberto = _abertos.contains(g.rotulo);
+      linhas.add(
+        _CabecaDeGrupo(
+          key: ValueKey('efeito-grupo-${effect.id}-${g.rotulo}'),
+          rotulo: g.rotulo,
+          aberto: aberto,
+          aoTocar: () => setState(() {
+            if (aberto) {
+              _abertos.remove(g.rotulo);
+            } else {
+              _abertos.add(g.rotulo);
+            }
+          }),
+        ),
+      );
+      if (aberto) linhas.addAll(linhas_.map(_linhaDe));
     }
     final nomes = effect.spec.colorLabels;
     if (effect.spec.hasColor) {
@@ -731,6 +798,63 @@ class _BotaoDoCabecalho extends StatelessWidget {
         width: 44,
         height: 44,
         child: Icon(icone, size: 22, color: AmColors.text),
+      ),
+    ),
+  );
+}
+
+/// A CABECA DE UM GRUPO DA FICHA (Global, X Shake, Y Shake...).
+///
+/// Discreta de proposito: ela nao e um botao de acao, e uma divisoria que
+/// abre e fecha. Por isso o triangulo pequeno e o texto em caixa alta
+/// apagada, e nao o peso do nome do efeito.
+class _CabecaDeGrupo extends StatelessWidget {
+  const _CabecaDeGrupo({
+    super.key,
+    required this.rotulo,
+    required this.aberto,
+    required this.aoTocar,
+  });
+
+  final String rotulo;
+  final bool aberto;
+  final VoidCallback aoTocar;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    button: true,
+    expanded: aberto,
+    label: rotulo,
+    child: Tocavel(
+      onTap: aoTocar,
+      child: SizedBox(
+        height: 42,
+        child: Row(
+          children: [
+            Icon(
+              aberto
+                  ? CupertinoIcons.chevron_down
+                  : CupertinoIcons.chevron_right,
+              size: 13,
+              color: AmColors.muted,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: AppText(
+                rotulo,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: .6,
+                  color: AmColors.muted,
+                ),
+              ),
+            ),
+            Container(height: 1, width: 40, color: AmColors.hairline),
+          ],
+        ),
       ),
     ),
   );

@@ -1,5 +1,6 @@
 import 'package:aurea/src/core/l10n/app_language.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import '../../../core/atualizacao/atualizacao_service.dart';
 import '../../../core/theme/app_theme.dart';
@@ -135,7 +136,7 @@ class _Faixa extends StatelessWidget {
             child: const Icon(
               CupertinoIcons.arrow_down_circle_fill,
               size: 14,
-              color: Color(0xFF0B0E12),
+              color: AureaColors.onAccent,
             ),
           ),
           const SizedBox(width: 10),
@@ -171,7 +172,7 @@ class _Faixa extends StatelessWidget {
                   style: const TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w800,
-                    color: Color(0xFF0B0E12),
+                    color: AureaColors.onAccent,
                   ),
                 ),
               ),

@@ -1,77 +1,95 @@
 import 'dart:ui';
 
-/// A PALETA DO EDITOR.
+import '../theme/aurea_colors.dart';
+
+/// A PALETA DO EDITOR — o cromo do editor e do estudio.
 ///
-/// OS NEUTROS SAO NOSSOS (16/09). Ate hoje eles vinham MEDIDOS de uma
-/// gravacao do app de referencia — o comentario que ficava aqui dizia
-/// isso com todas as letras. Medir estrutura, medida e comportamento e
-/// aprender; herdar a cor do cromo e herdar identidade, e foi o que o
-/// dono viu ao dizer que estava "muito parecido".
+/// ==========================================================================
+/// HAVIA DOIS [AmColors] NO PROJETO, E ELES DISCORDAVAM.
+/// ==========================================================================
 ///
-/// A escala agora e da Aurea e mais FUNDA: o cromo desceu cerca de um
-/// terco em luminancia, o que aumenta a distancia entre a ferramenta
-/// (quase preta) e a composicao (o unico conteudo colorido da tela).
-/// Os degraus entre os tons continuam pequenos de proposito — o que
-/// tem de saltar e o trabalho, nao o painel.
+/// Este arquivo e o irmao em `features/editor/presentation/am/am_colors.dart`
+/// declaravam a MESMA classe com valores diferentes para `bg`, `topBar`,
+/// `panel`, `panelHigh` e `chip` — o fundo do editor era #08080C num caminho
+/// de import e #12151A no outro. Quem importasse um ou outro pintava um tom
+/// diferente para o mesmo papel, e nenhum dos dois sabia do terceiro.
 ///
-/// AS CORES DE MARCA SEGUEM AS DA AUREA: o lima da logo ocupa o lugar
-/// da acao, o violeta marca selecao.
+/// Agora existe um dono so: ESTE. O outro virou `export` deste, entao os
+/// quarenta arquivos que escrevem `import 'am_colors.dart'` continuam certos
+/// sem tocar em uma linha.
+///
+/// ==========================================================================
+/// A MARCA MUDOU DE VERDE PARA AZUL (18/09/2026)
+/// ==========================================================================
+///
+/// Os neutros ja eram nossos (16/09): antes vinham MEDIDOS de uma gravacao
+/// do app de referencia, e medir estrutura e aprender enquanto herdar a cor e
+/// herdar identidade. A escala continua funda — o cromo fica bem abaixo da
+/// composicao em luminancia, e o que tem de saltar e o trabalho, nao o
+/// painel.
+///
+/// O que mudou foi a FAMILIA: de grafite quase neutro para o azul da marca,
+/// no mesmo degrau. Os papeis de marca (acao, keyframe, selecao) agora saem
+/// de [AureaColors], e nao ha hexadecimal escrito aqui.
+///
+/// OS CAMPOS SAO `static const` E NAO GETTERS, de proposito: `CromoEditor`
+/// escreve `static const Color acao = AmColors.action;`, e um getter
+/// quebraria a compilacao de todo o cromo.
 abstract final class AmColors {
   /// O FUNDO ATRAS DA COMPOSICAO. Mais escuro que o cromo, para o quadro
   /// do projeto se destacar do que e ferramenta.
-  static const Color bg = Color(0xFF08080C);
+  static const Color bg = AureaColors.stage;
 
-  /// O CROMO: cabecalho, transporte, linha do tempo. Tudo que e
-  /// ferramenta usa este tom, e por isso os tres blocos parecem uma peca
-  /// so, que e o que eles sao.
-  static const Color topBar = Color(0xFF0E0E13);
-  static const Color panel = Color(0xFF0E0E13);
-  static const Color panelHigh = Color(0xFF15151D);
+  /// O CROMO: cabecalho, transporte, linha do tempo. Tudo que e ferramenta
+  /// usa este tom, e por isso os tres blocos parecem uma peca so, que e o
+  /// que eles sao.
+  static const Color topBar = AureaColors.chrome;
+  static const Color panel = AureaColors.chrome;
+  static const Color panelHigh = AureaColors.chromeHigh;
 
   /// A CAPSULA DO TEMPO e os chips em geral.
-  static const Color chip = Color(0xFF1A1A24);
+  static const Color chip = AureaColors.chip;
 
   /// A PILULA DA CAMADA: o olho e a cor, flutuando sobre a trilha.
-  static const Color pilula = Color(0xFF1A1A28);
+  static const Color pilula = AureaColors.pill;
 
-  /// A CAIXA DE VALOR e os chips do painel de transformacao. Medido em
-  /// #242436 (`docs/painel-de-transformacao-alight.md`, secao "Cores").
+  /// A CAIXA DE VALOR e os chips do painel de transformacao.
+  static const Color campo = AureaColors.field;
+
+  /// Keyframe, curva e realce de contexto: o que esta LIGADO na tela.
+  static const Color accent = AureaColors.accent;
+  static const Color accentDim = AureaColors.accentDim;
+
+  /// ACAO: Exportar, o "+", chips de acao.
   ///
-  /// SEIS PONTOS DE AZUL ACIMA DE [chip], e nao um descuido de copiar e
-  /// colar: [chip] foi medido na capsula do tempo, noutra tela e noutra
-  /// gravacao. Sao dois tons quase iguais porque a referencia tem dois
-  /// tons quase iguais — fundi-los num so pouparia uma constante hoje e
-  /// faria a proxima medida discordar do codigo sem ninguem saber qual
-  /// das duas telas estava errada.
-  static const Color campo = Color(0xFF1A1A28);
+  /// E O AZUL FUNDO, e nao o claro, porque este e um PREENCHIMENTO cheio com
+  /// texto claro por cima (#F7F9FB sobre #245D8C da 6,8:1). O realce do que
+  /// esta ligado usa o claro, que e um TRACO fino sobre o fundo escuro e
+  /// precisa de 7,8:1 contra ele. Um so azul nao serve aos dois: o que se ve
+  /// sobre o preto e claro demais para levar texto em cima.
+  static const Color action = AureaColors.brand;
+  static const Color onAction = AureaColors.text;
+  static const Color actionDim = Color(0xFF16304A);
 
-  /// Keyframe, curva e realce de contexto (teal).
-  static const Color accent = Color(0xFF1ED6B1);
-  static const Color accentDim = Color(0xFF183F3C);
+  /// Selecao e grupos: o fundo da camada escolhida e o chip de grupo.
+  static const Color selection = AureaColors.brandDeep;
 
-  /// ACAO (o lima da logo): Exportar, o "+", chips de acao. O teal fica
-  /// com keyframe e curva; a acao e outra cor para nao se confundir com
-  /// "esta animado".
-  static const Color action = Color(0xFFB8FF3D);
-  static const Color onAction = Color(0xFF0B0E12);
-  static const Color actionDim = Color(0xFF2A3A16);
-
-  /// Selecao e grupos (violeta da logo).
-  static const Color selection = Color(0xFF7C62FF);
+  /// Selecao em TEXTO e em TRACO, onde [selection] seria escuro demais.
+  static const Color selectionText = AureaColors.selectionText;
 
   /// Barras de camada com contraste para texto e keyframes.
-  static const Color teal = Color(0xFF43B7C6);
-  static const Color tealBright = Color(0xFF81D8E0);
+  static const Color teal = AureaColors.brandLight;
+  static const Color tealBright = AureaColors.brandSoft;
 
-  /// Marca de keyframe na regua.
-  static const Color pink = Color(0xFFFF6B6B);
+  /// Excluir, erro, e a marca de alerta na regua.
+  static const Color pink = AureaColors.danger;
 
   /// O CABECOTE E BRANCO, como na referencia. Ele cruza trilhas de todas
   /// as cores: qualquer cor propria brigaria com alguma delas, e branco
   /// puro nao e usado em mais nada grande na tela.
-  static const Color cabecote = Color(0xFFFFFFFF);
+  static const Color cabecote = AureaColors.playhead;
 
-  static const Color text = Color(0xFFE9EDF2);
-  static const Color muted = Color(0xFF8B94A3);
-  static const Color hairline = Color(0x14FFFFFF);
+  static const Color text = AureaColors.text;
+  static const Color muted = AureaColors.muted;
+  static const Color hairline = AureaColors.border;
 }

@@ -1,5 +1,6 @@
 import 'package:aurea/src/core/l10n/app_language.dart';
 import 'package:flutter/material.dart';
+import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import '../../../../core/ui/am_colors.dart';
 import 'linha_de_parametro.dart';
@@ -45,11 +46,11 @@ class EscolhaDeCor extends StatelessWidget {
     Color(0xFFFF3B30),
     Color(0xFFFF9500),
     Color(0xFFFFD60A),
-    Color(0xFF1ED6B1),
+    AureaColors.accent,
     Color(0xFF34C759),
     Color(0xFF35C4E7),
     Color(0xFF0A84FF),
-    Color(0xFF7C62FF),
+    AureaColors.selectionText,
     Color(0xFFFF2D95),
     Color(0xFF8E8E93),
   ];

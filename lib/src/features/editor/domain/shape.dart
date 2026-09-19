@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui';
+import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import 'package:uuid/uuid.dart';
 
@@ -1622,8 +1623,8 @@ Rect destinoDaMidiaNaForma(Rect caixa, Size tamanho, EncaixeNaForma encaixe) {
 class ShapeGradientFill extends ShapeItem {
   ShapeGradientFill({
     super.id,
-    this.colorA = const Color(0xFFB8FF3D),
-    this.colorB = const Color(0xFF7C62FF),
+    this.colorA = AureaColors.accent,
+    this.colorB = AureaColors.selectionText,
     this.angleDeg = 0,
     this.radial = false,
     this.varredura = false,
@@ -2795,7 +2796,7 @@ abstract final class ShapePresets {
       startAngle: AnimatedDouble(-110),
       sweep: AnimatedDouble(220),
     ),
-    ShapeFill(color: const Color(0xFF7C62FF)),
+    ShapeFill(color: AureaColors.selectionText),
   ];
 
   // ------ legados (paths cozidos; projetos antigos continuam iguais) ---
@@ -2822,7 +2823,7 @@ abstract final class ShapePresets {
 
   static List<ShapeItem> arc() => [
     ShapePath(primitive: ShapePrimitive.arc),
-    ShapeFill(color: const Color(0xFF7C62FF)),
+    ShapeFill(color: AureaColors.selectionText),
   ];
 
   static List<ShapeItem> wave() => [
@@ -2847,7 +2848,7 @@ abstract final class ShapePresets {
 
   static List<ShapeItem> arrow() => [
     ShapePath(primitive: ShapePrimitive.arrow, width: 520, height: 300),
-    ShapeFill(color: const Color(0xFFB8FF3D)),
+    ShapeFill(color: AureaColors.accent),
   ];
 
   static List<ShapeItem> check() => [
@@ -2859,7 +2860,7 @@ abstract final class ShapePresets {
     ShapePath(primitive: ShapePrimitive.drop, width: 320, height: 440),
     ShapeGradientFill(
       colorA: const Color(0xFF35C4E7),
-      colorB: const Color(0xFF7C62FF),
+      colorB: AureaColors.selectionText,
       angleDeg: 90,
     ),
   ];

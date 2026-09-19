@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'dart:ui';
+import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import 'caption.dart';
 
@@ -303,7 +304,7 @@ abstract final class HighlightPresets {
     ativo: true,
     layout: HighlightLayout.empilhada,
     destaque: 1.7,
-    corDestaque: Color(0xFFB8FF3D),
+    corDestaque: AureaColors.accent,
     maiusculas: false,
     tracking: -1.2,
     entrelinha: 0.92,
@@ -333,7 +334,7 @@ abstract final class HighlightPresets {
     ativo: true,
     layout: HighlightLayout.dupla,
     destaque: 1.9,
-    corDestaque: Color(0xFF7C62FF),
+    corDestaque: AureaColors.selectionText,
     maiusculas: true,
     duracaoInflar: Duration(milliseconds: 150),
   );

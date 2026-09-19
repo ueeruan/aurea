@@ -1,6 +1,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
+import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../domain/tutorial.dart';
@@ -232,7 +233,7 @@ class _TutorialScreenState extends State<TutorialScreen> {
                                     fontSize: 12,
                                     fontWeight: FontWeight.w700,
                                     color: c.n == _cenaAtual
-                                        ? const Color(0xFF0B0E12)
+                                        ? AureaColors.onAccent
                                         : AppColors.muted,
                                   ),
                                 ),

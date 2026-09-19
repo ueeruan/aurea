@@ -7,7 +7,6 @@ import 'package:aurea/src/features/editor/domain/layer.dart';
 import 'package:aurea/src/features/editor/domain/video_project.dart';
 import 'package:aurea/src/features/editor/presentation/am/am_widgets.dart';
 import 'package:aurea/src/features/editor/presentation/am/layer_menu.dart';
-import 'package:aurea/src/features/editor/presentation/estudio/estudio_da_cena.dart';
 import 'package:aurea/src/features/editor/presentation/am/param_sheet_shell.dart'
     show ParamSheetShell;
 import 'package:aurea/src/features/editor/presentation/widgets/add_layer_sheet.dart';
@@ -171,57 +170,10 @@ void main() {
     });
   }
 
-  testWidgets('toque duplo em Cena 3D fecha apenas o menu uma vez', (
-    tester,
-  ) async {
-    final (observer, _) = await openEditor(tester, scene);
-    await tester.tap(find.text('abrir menu'));
-    await tester.pumpAndSettle();
-    final oldTap = tester
-        .widget<GestureDetector>(
-          find
-              .ancestor(
-                of: find.text('Cena 3D'),
-                matching: find.byType(GestureDetector),
-              )
-              .first,
-        )
-        .onTap!;
-    await tester.tap(find.text('Cena 3D'));
-    oldTap();
-    await tester.pumpAndSettle();
-    expect(observer.pagesPopped, 0);
-    // Um toque duplo nao pode empilhar dois Estudios — nem retirar o
-    // editor com um segundo pop.
-    expect(find.byType(EstudioDaCena), findsOneWidget);
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('Cena 3D abre o Estudio sem retirar o editor', (tester) async {
-    final (observer, container) = await openEditor(tester, scene);
-    final project = container.read(editorControllerProvider);
-    // Duas voltas: abrir, voltar, abrir de novo — e o que pega um
-    // callback que continua fechando o menu antigo.
-    for (var volta = 0; volta < 2; volta++) {
-      await tester.tap(find.text('abrir menu'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Cena 3D'));
-      await tester.pumpAndSettle();
-      expect(find.byType(EstudioDaCena), findsOneWidget);
-      expect(
-        observer.pagesPopped,
-        volta,
-        reason: 'abrir o Estudio nao pode retirar o editor',
-      );
-      expect(tester.takeException(), isNull);
-      // Voltar do Estudio devolve o editor inteiro.
-      await tester.binding.handlePopRoute();
-      await tester.pumpAndSettle();
-      expect(find.byType(EstudioDaCena), findsNothing);
-      expect(find.text('editor aberto'), findsOneWidget);
-    }
-    expect(container.read(editorControllerProvider), same(project));
-  });
+  // OS DOIS TESTES DE "CENA 3D ABRE O ESTUDIO" SAIRAM COM O ESTUDIO:
+  // o motor 3D antigo foi apagado inteiro (docs/3d-diligent.md) e nao ha
+  // mais estudio para abrir. O que ficou no lugar e uma camada que nao
+  // desenha, ate o backend novo entrar.
 
   // O "Grid" DA GRADE DE ADICIONAR VIROU O "NULO".
   //

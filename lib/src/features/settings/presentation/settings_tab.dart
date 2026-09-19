@@ -9,7 +9,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../editor/application/motor3d_modo.dart';
 import '../../editor/application/qualidade3d_controller.dart';
 import '../../editor/domain/orcamento_render.dart';
-import 'estresse3d_screen.dart';
 import 'travadas_screen.dart';
 import '../../editor/application/proxy_service.dart';
 import '../../editor/application/media_preview_service.dart';
@@ -207,8 +206,6 @@ class SettingsTab extends ConsumerWidget {
               _Motor3DRow(),
               _GroupDivider(),
               _Qualidade3DRow(),
-              _GroupDivider(),
-              _EstresseRow(),
               _GroupDivider(),
               _TravadasRow(),
             ],
@@ -604,15 +601,3 @@ class _TravadasRow extends StatelessWidget {
   );
 }
 
-class _EstresseRow extends StatelessWidget {
-  const _EstresseRow();
-
-  @override
-  Widget build(BuildContext context) => _TapRow(
-    title: 'Teste de estresse do motor 3D',
-    subtitle: 'Nove cenas pesadas, com relatorio para enviar',
-    onTap: () => Navigator.of(
-      context,
-    ).push(MaterialPageRoute<void>(builder: (_) => const Estresse3DScreen())),
-  );
-}

@@ -5,7 +5,6 @@ import 'package:flutter/widgets.dart';
 
 import '../../../core/utils/versao_do_app.dart';
 import 'motor3d_modo.dart';
-import 'scene3d_gpu.dart';
 
 /// O QUE TRAVOU O APARELHO, ANOTADO PELO PROPRIO APARELHO.
 ///
@@ -363,13 +362,11 @@ String descreverMotor3D() {
   final pref = Motor3DPreferencia.instancia;
   final partes = <String>[
     'app=$versaoCompleta',
-    'motor=${Scene3DGpu.comoDesenha}',
-    'pronto=${Scene3DGpu.pronto}',
-    'indisponivel=${Scene3DGpu.indisponivel}',
+    // O MOTOR 3D SAIU DA CONTA: o antigo foi apagado e o novo ainda
+    // nao existe. O cracha do motor voltara quando houver um motor para
+    // descrever.
+    'motor=nenhum',
   ];
-  if (Scene3DGpu.motivo.isNotEmpty) {
-    partes.add('motivo="${Scene3DGpu.motivo}"');
-  }
   if (RegistroDeTravadas.trianglesNoPintorDeCpu > 0) {
     partes.add('PINTOU-EM-CPU=${RegistroDeTravadas.trianglesNoPintorDeCpu}tri');
   }

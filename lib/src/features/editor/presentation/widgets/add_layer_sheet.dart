@@ -7,7 +7,6 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/cupertino.dart';
 
 import '../../domain/modelo_do_texto3d.dart';
-import '../am/scene3d_studio_ux.dart' show pedirNome;
 
 import 'package:flutter/material.dart';
 
@@ -35,6 +34,7 @@ import '../../../media/application/sons_recentes.dart';
 import 'gallery_panel.dart';
 import 'linha_de_som_recente.dart';
 import '../context/add_toolbar.dart' show AddTarget;
+import '../../../../core/ui/pedir_nome.dart';
 
 /// Sheet "+" do editor: escolher o tipo de camada.
 Future<void> showAddLayerSheet(

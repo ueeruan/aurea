@@ -19,7 +19,6 @@ import 'package:aurea/src/features/editor/domain/scene3d.dart';
 import 'package:aurea/src/features/editor/domain/shape.dart';
 import 'package:aurea/src/features/editor/domain/video_project.dart';
 import 'package:aurea/src/features/editor/presentation/editor_screen.dart';
-import 'package:aurea/src/features/editor/presentation/estudio/estudio_da_cena.dart';
 import 'package:aurea/src/features/editor/presentation/widgets/painel_de_transformacao.dart';
 import 'package:aurea/src/features/projects/application/projects_controller.dart';
 
@@ -212,18 +211,6 @@ void main() {
     container.read(modoDeTransformacaoProvider.notifier).state = ModoDeTransformacao.escalar;
     await tester.pumpAndSettle();
     await gravar('05_transform_escala');
-
-    // 6. PRINT DO NOVO ESTÚDIO DA CENA 3D (Preservado e funcionando perfeitamente)
-    await tester.pumpWidget(
-      appWrap(
-        EstudioDaCena(
-          layerId: sceneLayer.id,
-          playback: playback,
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    await gravar('06_novo_estudio_cena3d');
 
     // 7. PRINT DA PÍLULA DA CAMADA NA TIMELINE (Screenshot 1 do usuário: pílula escura com olho e thumbnail amarela + cápsula contínua branca com chevrons e texto + agulha vertical)
     await tester.pumpWidget(appWrap(EditorScreen(playback: playback)));

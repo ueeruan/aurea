@@ -44,9 +44,7 @@ import 'curve_panel.dart';
 import 'gradient_fill_sheet.dart';
 import 'panel_chrome.dart';
 import 'path_edit_sheet.dart';
-import 'scene3d_sheet.dart';
 import 'speed_sheet.dart';
-import '../estudio/estudio_da_cena.dart';
 
 /// Acao escolhida no menu da camada.
 enum LayerMenuAction {
@@ -421,9 +419,9 @@ _Tile? _tileDaSecao(
       icone: CupertinoIcons.paintbrush,
       rotulo: 'Cor e preenchimento',
       onTap: () {
-        if (layer is Scene3DLayer) {
-          abrirDepois(() => showScene3DSheet(context, ref, layer.id));
-        } else if (layer is Element3DLayer) {
+        // A CENA 3D NAO TEM MAIS FICHA: o container saiu com o motor.
+        // O ELEMENTO 3D continua — ele e uma peca, e peca vira clip.
+        if (layer is Element3DLayer) {
           abrirDepois(() => showElement3DSheet(context, ref, layer.id));
         } else {
           fecharCom(LayerMenuAction.colorFill);
@@ -498,11 +496,8 @@ _Tile? _tileDaSecao(
     AmSecao.cena3d => (
       icone: CupertinoIcons.videocam,
       rotulo: layer is Scene3DLayer ? 'Cena 3D' : 'Elemento 3D',
-      onTap: () => abrirDepois(
-        () => layer is Scene3DLayer
-            ? abrirEstudioDaCena(context, layerId: layer.id, playback: playback)
-            : showElement3DSheet(context, ref, layer.id),
-      ),
+      onTap: () =>
+          abrirDepois(() => showElement3DSheet(context, ref, layer.id)),
       badge: null,
     ),
     AmSecao.rastrear => (

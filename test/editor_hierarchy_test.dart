@@ -13,7 +13,6 @@ import 'package:aurea/src/features/editor/presentation/am/param_sheet_shell.dart
     show ParamSheetShell;
 import 'package:aurea/src/features/editor/presentation/am/property_keyframe_context.dart';
 import 'package:aurea/src/features/editor/presentation/am/transform_panel.dart';
-import 'package:aurea/src/features/editor/presentation/estudio/estudio_da_cena.dart';
 import 'package:aurea/src/features/editor/presentation/editor_screen.dart';
 import 'package:aurea/src/features/projects/application/projects_controller.dart';
 import 'package:flutter/material.dart' hide Easing;
@@ -259,33 +258,7 @@ void main() {
     }
   });
 
-  testWidgets(
-    '3D and Grid open directly from the dock without popping editor',
-    (tester) async {
-      final c = await openEditor(tester);
-      final editor = c.read(editorControllerProvider.notifier);
-      editor.addNullLayer(Duration.zero);
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Clonar'));
-      await tester.pumpAndSettle();
-      expect(find.byType(ParamSheetShell), findsOneWidget);
-      closeParamSheet(tester.element(find.byType(ParamSheetShell)));
-      await tester.pumpAndSettle();
-      expect(find.byType(EditorScreen), findsOneWidget);
-      editor.addScene3DLayer(Duration.zero);
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Cena 3D'));
-      await tester.pumpAndSettle();
-      // A cena 3D abre o ESTUDIO — e la que ela se edita.
-      expect(find.byType(EstudioDaCena), findsOneWidget);
-      await tester.binding.handlePopRoute();
-      await tester.pumpAndSettle();
-      expect(find.byType(EstudioDaCena), findsNothing);
-      expect(find.byType(EditorScreen), findsOneWidget);
-      expect(tester.takeException(), isNull);
-    },
-  );
-
+  
   testWidgets(
     'property navigation uses Y keys and layer-local time, not other properties',
     (tester) async {

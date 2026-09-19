@@ -67,12 +67,11 @@ Set<AmSecao> secoesDe(Layer layer) {
   if (layer is NullLayer) {
     return const {AmSecao.moverTransformar, AmSecao.clonar};
   }
+  // A CENA 3D ficou so com o transform e os efeitos: o editor dela saiu
+  // junto com o motor, e uma secao que abre uma folha que nao existe e
+  // pior do que nao ter secao.
   if (layer is Scene3DLayer) {
-    return const {
-      AmSecao.moverTransformar,
-      AmSecao.cena3d,
-      AmSecao.efeitos,
-    };
+    return const {AmSecao.moverTransformar, AmSecao.efeitos};
   }
   // A CAMERA DA COMPOSICAO: transform (posicao, giro 3D, ponto de
   // interesse pelo proprio palco) e a lente. Cor, borda e mescla nao

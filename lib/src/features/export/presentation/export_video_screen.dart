@@ -13,7 +13,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:gal/gal.dart';
 
 import '../../editor/application/editor_controller.dart';
-import '../../editor/application/panorama_cache.dart';
 import '../../editor/application/texture_cache.dart';
 import '../../editor/application/video_layer_manager.dart';
 import '../../editor/domain/cut_ops.dart';
@@ -520,8 +519,6 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
             : 'textura "$path"',
     ];
     final jobs = <Future<bool>>[
-      for (final layer in panoramas)
-        PanoramaCache.instance.prepare(layer.scene.panorama),
       for (final path in texturePaths) TextureCache.instance.prepare(path),
     ];
 

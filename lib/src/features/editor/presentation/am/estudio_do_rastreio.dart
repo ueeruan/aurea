@@ -8,13 +8,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/ui/snack.dart';
 import '../../application/camera_track_service.dart';
 import '../../application/editor_controller.dart';
+import 'package:file_picker/file_picker.dart';
+
 import '../../application/model_import_service.dart';
 import '../../application/tracking_service.dart';
 import '../../domain/camera_solver3d.dart';
 import '../../domain/cena_do_rastreio.dart';
 import '../../domain/layer.dart';
 import '../../domain/plano_do_rastreio.dart';
-import '../estudio/folhas_do_estudio.dart' show escolherModeloProvider;
 import 'am_colors.dart';
 import 'layer_menu.dart' show showReasonToast;
 
@@ -932,4 +933,28 @@ class _PontosPainter extends CustomPainter {
       old.escolhidos.length != escolhidos.length ||
       old.escala != escala ||
       old.solucao != solucao;
+}
+
+/// O SELETOR DE ARQUIVO DE MODELO, COMO PORTA TROCAVEL.
+///
+/// Provider, e nao chamada direta: em teste o seletor do sistema nao
+/// existe, e sem uma porta de troca o caminho inteiro de importacao
+/// ficaria sem cobertura. Ele morava na folha do estudio 3D, que saiu
+/// junto com o motor; o unico consumidor e esta tela, entao veio junto.
+final escolherModeloProvider = Provider<Future<List<String>> Function()>(
+  (ref) => _escolherModeloDoSistema,
+);
+
+Future<List<String>> _escolherModeloDoSistema() async {
+  final r = await FilePicker.platform.pickFiles(
+    type: FileType.custom,
+    allowedExtensions: const [
+      'glb', 'gltf', 'obj', 'fbx', 'bin', 'mtl', 'png', 'jpg', 'jpeg',
+    ],
+    allowMultiple: true,
+  );
+  return [
+    for (final f in r?.files ?? const <PlatformFile>[])
+      if (f.path != null) f.path!,
+  ];
 }

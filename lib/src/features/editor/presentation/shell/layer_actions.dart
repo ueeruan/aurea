@@ -15,8 +15,8 @@ import '../am/apple_cascade_sheet.dart';
 import '../am/aviso_de_bloqueio.dart';
 import '../am/beats_sheet.dart' show showBeatsSheet;
 import '../am/layer_look.dart';
-import '../am/scene3d_studio_ux.dart' show pedirNome;
 import 'package:aurea/src/core/l10n/app_language.dart';
+import '../../../../core/ui/pedir_nome.dart';
 
 /// AS ACOES ESTRUTURAIS SOBRE CAMADAS, num lugar so.
 ///

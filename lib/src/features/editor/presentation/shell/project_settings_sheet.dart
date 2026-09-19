@@ -16,10 +16,10 @@ import '../../application/ui/pro_mode.dart';
 import '../../domain/layer_meta.dart';
 import '../am/am_colors.dart';
 import '../am/color_picker_sheet.dart';
-import '../am/scene3d_studio_ux.dart'
-    show LinhaDoEstudio, SecaoDoEstudio, folhaDoEstudio, pedirNome;
 import 'layer_actions.dart';
 import 'onboarding.dart';
+import '../../../../core/ui/pedir_nome.dart';
+import 'folha_de_ajustes.dart';
 
 /// ⚙ PROJETO (Fase 6) — o lugar das configuracoes, como nos tres apps
 /// de referencia.

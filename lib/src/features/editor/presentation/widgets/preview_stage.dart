@@ -48,7 +48,6 @@ import '../../domain/gizmo3d.dart';
 import '../../domain/layer.dart';
 import '../../domain/layer_meta.dart';
 import '../../domain/mask.dart';
-import '../../domain/camera3d.dart';
 import '../../domain/scene3d.dart';
 import '../../domain/shape.dart';
 import '../../domain/selection_geometry.dart';
@@ -88,9 +87,6 @@ import '../../application/ui/opcoes_de_visualizacao.dart';
 import 'fx_lote2.dart';
 import 'null_gizmo_painter.dart';
 import 'particulas_painter.dart';
-import '../../application/scene3d_gpu.dart';
-import 'scene3d_painter.dart';
-import 'scene3d_gpu_view.dart';
 import 'gizmo3d_painter.dart';
 import 'texto_no_atlas.dart';
 
@@ -7355,84 +7351,12 @@ class _LayerContent extends StatelessWidget {
       // CONTEINER CENA 3D: por fora e uma camada; por dentro roda o
       // proprio renderizador, com passe opaco e passe transparente
       // ordenados POR TRIANGULO.
-      Scene3DLayer l => SizedBox(
-        width: compWidth,
-        height: project.outputHeight.toDouble(),
-        child: ValueListenableBuilder<int>(
-          valueListenable: TextureCache.instance.revision,
-          builder: (_, _, _) {
-            // A PONTE ENTRE AS DUAS HIERARQUIAS: o nulo da composicao
-            // vira pai externo da camera da cena. Quem conhece a
-            // cadeia de parenting de fora e o compositor, entao o
-            // transform chega pronto aqui.
-            final resolvida = cameraDaCena(
-              project,
-              l,
-              localTime,
-              layer.startTime + localTime,
-            );
-            final cena = cenaComNulosDaComposicao(
-              project,
-              l,
-              localTime,
-              layer.startTime + localTime,
-            );
-            // Ajudas NUNCA entram na exportacao — so no preview.
-            final ajudas = !exporting && l.showHelpers;
-            // RASCUNHO ENQUANTO TOCA. Em 33 ms nao cabe reflexo no
-            // chao, sombra de contato e profundidade de campo de uma
-            // cena inteira; num celular a conta passa de 300 ms por
-            // quadro, e uma thread bloqueada por 300 ms e o que faz o
-            // iOS matar o app. Quem aperta o play quer ver o
-            // MOVIMENTO — a qualidade cheia volta na pausa e na
-            // exportacao, que e onde ela e olhada de perto.
-            return ValueListenableBuilder<bool>(
-              valueListenable: PlaybackController.tocandoAgora,
-              builder: (_, tocando, _) {
-                final rascunho = tocando && !exporting;
-                // O MOTOR EM GPU desenha a cena quando existe; sem ele
-                // fica o pintor em CPU de sempre.
-                //
-                // AS AJUDAS NAO DESQUALIFICAM MAIS A GPU. A porta antiga
-                // exigia `!ajudas`, e `showHelpers` nasce ligado em toda
-                // cena nova: cada cena 3D recem-criada ia parar no
-                // pintor de CPU sem ninguem saber por que — e um modelo
-                // de loja no pintor de CPU e o app a 1 fps num iPhone 13.
-                // As ajudas (grade, frustum, caixa) sao desenhadas por
-                // cima do quadro da GPU, como o Filament ja fazia.
-                if (!Scene3DGpu.indisponivel) {
-                  return Scene3DGpuView(
-                    exporting: exporting,
-                    scene: cena,
-                    camera: l.camera,
-                    renderCamera: l.view == SceneView.camera
-                        ? (resolvida ?? l.camera.renderAt(localTime))
-                        : orthoViewCamera(l.view),
-                    view: l.view,
-                    time: localTime,
-                    rascunho: rascunho,
-                    showHelpers: ajudas,
-                  );
-                }
-                return CustomPaint(
-                  painter: Scene3DPainter(
-                    scene: rascunho ? cena.copyWith(draftMode: true) : cena,
-                    camera: l.camera,
-                    resolvedCamera: resolvida,
-                    view: l.view,
-                    time: localTime,
-                    showHelpers: ajudas,
-                    // NA EXPORTACAO o quadro pode demorar o que precisar:
-                    // ninguem esta esperando resposta ao dedo, e o
-                    // arquivo entregue nunca leva substituto.
-                    respeitarOrcamento: !exporting,
-                  ),
-                );
-              },
-            );
-          },
-        ),
-      ),
+      // A CENA 3D NAO DESENHA. O motor antigo foi apagado inteiro (ver
+      // docs/3d-diligent.md): nao ha GPU nem pintor de CPU atras desta
+      // porta, e nao ha substituto silencioso — uma camada de cena some
+      // do quadro em vez de aparecer com outra cara. Quem a substitui e
+      // o backend novo (Diligent), que entra AQUI.
+      Scene3DLayer _ => const SizedBox.shrink(),
       // Precomp: filhos compostos no tempo local do grupo.
       // PRECOMP: tempo proprio (com remapeamento), quadro proprio e a
       // opcao de colapsar — que e o que evita a forma vetorial pixelar

@@ -114,11 +114,17 @@ void main() {
       }
     });
 
-    test('Cena 3D aparece no elemento e na cena', () {
+    test('a secao Cena 3D aparece so no elemento', () {
+      // A SEÇÃO DA CENA SAIU JUNTO COM O ESTUDIO: o container nao tem
+      // mais editor (docs/3d-diligent.md). Quem ainda tem ficha propria e
+      // o ELEMENTO 3D — a peca, que e o que vira clip na arquitetura
+      // nova. Enquanto isso, a cena fica so com o transform e os efeitos.
       for (final camada in _todasAsCamadas()) {
-        expect(secoesDe(camada).contains(AmSecao.cena3d),
-            camada is Element3DLayer || camada is Scene3DLayer,
-            reason: '${camada.runtimeType}');
+        expect(
+          secoesDe(camada).contains(AmSecao.cena3d),
+          camada is Element3DLayer,
+          reason: '${camada.runtimeType}',
+        );
       }
     });
   });

@@ -1,10 +1,22 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+/// AS FAIXAS DO PREVIEW ADAPTATIVO.
+///
+/// A ESCALA E O QUE A COMPOSICAO VIRA ANTES DE SER DESENHADA — e o botao
+/// que a pessoa gira quando o aparelho esta sofrendo. Entre o cheio e a
+/// metade havia um vazio grande demais: 75% e 33% existem para o celular
+/// que aguenta quase tudo, mas nao tudo — antes dele so havia dois
+/// extremos, e quem baixava para 1/2 perdia nitidez sem precisar.
+///
+/// O EXPORT NAO LE ISTO. Ele sempre desenha no tamanho final: a previa
+/// pode ser reduzida, o tempo e as animacoes nao.
 enum PreviewResolution {
   full('Full', 1),
-  half('1/2', .5),
-  quarter('1/4', .25),
-  eighth('1/8', .125);
+  p75('75%', .75),
+  half('50%', .5),
+  p33('33%', .33),
+  quarter('25%', .25),
+  eighth('12,5%', .125);
 
   const PreviewResolution(this.label, this.scale);
   final String label;
@@ -30,8 +42,8 @@ final previewResolutionProvider = StateProvider<PreviewResolution>(
 final nivelDasParticulasProvider = Provider<int>((ref) {
   final r = ref.watch(previewResolutionProvider);
   return switch (r) {
-    PreviewResolution.full => 3,
-    PreviewResolution.half => 2,
+    PreviewResolution.full || PreviewResolution.p75 => 3,
+    PreviewResolution.half || PreviewResolution.p33 => 2,
     PreviewResolution.quarter => 1,
     PreviewResolution.eighth => 0,
   };

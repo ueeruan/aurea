@@ -6835,7 +6835,7 @@ const _luma = <double>[
 /// A linha do alfa fica intacta: o que sai tem a forma e a transparencia
 /// da imagem, e so uma das tres cores. E o que permite somar os tres
 /// canais depois sem que um apague o outro.
-Widget _isoDeCanal(Widget filho, int canal) {
+Widget isoDeCanal(Widget filho, int canal) {
   const zeros = [0.0, 0.0, 0.0, 0.0, 0.0];
   final linhas = [
     canal == 0 ? const [1.0, 0.0, 0.0, 0.0, 0.0] : zeros,
@@ -7101,7 +7101,7 @@ class _LayerContent extends StatelessWidget {
     final fps = project.fps < 1 ? 30 : project.fps;
     final d = deslocamentosDoTimeWarp(l.effects, localTime);
     final segundos = [d.r / fps, d.g / fps, d.b / fps];
-    Widget canal(int c) => _isoDeCanal(
+    Widget canal(int c) => isoDeCanal(
       _videoNoDeslocamento(l, segundos[c]),
       c,
     );

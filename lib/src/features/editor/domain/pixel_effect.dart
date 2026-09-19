@@ -403,14 +403,22 @@ class PixelEffectFrame {
     double pixelScale = 1,
   }) {
     final kernel = pixelKernels[effect.type]!;
-    final spec = effectSpecs[effect.type]!;
+    // CHAVE QUE NAO ESTA NA FICHA NAO ESTOURA. Era `params[key]!`: um
+    // renomeio na ficha (ou um kernel que ficou para tras) derrubava o
+    // quadro em vez de simplesmente nao desenhar. Sem ficha para a chave,
+    // o valor passa como veio — quem sabe a faixa e a ficha, e ela nao
+    // tem essa chave.
+    final spec = effectSpecs[effect.type];
     final values = [
       for (final key in kernel.keys)
-        effect.paramAt(key, time).isFinite
-            ? effect
-                  .paramAt(key, time)
-                  .clamp(spec.params[key]!.min, spec.params[key]!.max)
-            : spec.params[key]!.initial,
+        switch (spec?.params[key]) {
+          final p? => effect.paramAt(key, time).isFinite
+              ? effect.paramAt(key, time).clamp(p.min, p.max)
+              : p.initial,
+          _ => effect.paramAt(key, time).isFinite
+              ? effect.paramAt(key, time)
+              : 0.0,
+        },
     ];
     final c = effect.color;
     return PixelEffectFrame(

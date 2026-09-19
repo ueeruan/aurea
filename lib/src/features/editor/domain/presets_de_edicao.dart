@@ -72,17 +72,24 @@ class PresetDeEdicao {
   final List<ReceitaDeEfeito> receita;
 
   /// Instancias NOVAS da pilha (ids proprios a cada aplicacao).
+  ///
+  /// RECEITA COM EFEITO QUE SAIU DO CATALOGO NAO ESTOURA. O `!` aqui
+  /// derrubava a tela inteira quando um tipo da receita perdia a ficha —
+  /// o mesmo defeito que o construtor de `EffectInstance` ja tinha sido
+  /// corrigido para nao ter. Receita sem ficha simplesmente nao entra na
+  /// pilha: quem aplica avisa, e o resto da receita continua valendo.
   List<EffectInstance> montar() => [
     for (final r in receita)
-      EffectInstance(
-        type: r.tipo,
-        params: {
-          for (final e in effectSpecs[r.tipo]!.params.entries)
-            e.key: AnimatedDouble(r.valores[e.key] ?? e.value.initial),
-        },
-        color: r.cor,
-        extraColors: r.coresExtras,
-      ),
+      if (effectSpecs[r.tipo] case final spec?)
+        EffectInstance(
+          type: r.tipo,
+          params: {
+            for (final e in spec.params.entries)
+              e.key: AnimatedDouble(r.valores[e.key] ?? e.value.initial),
+          },
+          color: r.cor,
+          extraColors: r.coresExtras,
+        ),
   ];
 }
 

@@ -62,27 +62,39 @@ Future<void> main() async {
   // O shader das mesclas proprias sobe uma vez, no comeco: compilar no
   // meio da edicao apareceria como engasgo no primeiro quadro.
   unawaited(CustomBlendBox.warmUp());
-  // A curva do sRGB: sem ela, glow e desfoque somam luz no espaco
-  // errado e saem acinzentados.
-  // Resolve before opening a project: preview and export start on the same backend.
-  await Future.wait([
-    LinearLight.warmUp(),
-    PixelEffectEngine.warmUp(),
-    // Correcao de cor e Unsharp Mask: shaders proprios, pequenos.
-    MotorDeCorrecao.warmUp(),
-    // ESTILIZAR, DISTORCER E LUZ: doze shaders proprios, um por familia
-    // de efeito. `MotorSapphire.warmUp` existia desde que o lote 2 entrou
-    // e NUNCA foi chamado — cada efeito compilava o seu na primeira vez
-    // que aparecia. No editor isso e um engasgo; na exportacao e pior,
-    // porque o laco grava um quadro por vez e o shader que ainda nao
-    // chegou devolve a camada CRUA: os primeiros quadros do arquivo saem
-    // sem o efeito. A lista vem das proprias receitas, entao nao ha como
-    // ficar desatualizada.
-    MotorSapphire.warmUp(assetsDosShadersSapphire),
-  ]);
   // As fontes importadas precisam ser registradas de novo a cada
   // abertura: o registro do Flutter vive so enquanto o processo vive.
+  //
+  // ESTA E A UNICA COISA QUE A ABERTURA ESPERA. Tudo o mais — a curva do
+  // sRGB, os shaders de cor, os treze shaders do Sapphire — sobe DEPOIS
+  // do primeiro quadro.
+  //
+  // POR QUE MUDOU: a abertura esperava a compilacao de TODOS os shaders
+  // antes de chamar `runApp`. Compilar shader e trabalho de driver, e num
+  // aparelho de entrada isso custa segundos; enquanto nao terminasse, o
+  // que estava na tela era a LOGO do sistema — o app parecia travado, e
+  // o dono relatou exatamente isso. Nada aqui e necessario para o
+  // primeiro quadro: quem espera por eles e o efeito que os usa, e o
+  // motor ja sabe esperar (quem pede um shader que ainda nao chegou
+  // redesenha quando ele chega).
   await FontService.instance.loadAll();
+  // O PRIMEIRO QUADRO NAO ESPERA SHADER NENHUM.
+  unawaited(
+    Future.wait([
+      LinearLight.warmUp(),
+      PixelEffectEngine.warmUp(),
+      MotorDeCorrecao.warmUp(),
+      MotorSapphire.warmUp(assetsDosShadersSapphire),
+    ]).timeout(
+      // TETO DE SEGURANCA: se um driver travar numa compilacao, isso nao
+      // pode segurar nada — nem a abertura, nem a memoria do app.
+      const Duration(seconds: 20),
+      onTimeout: () {
+        debugPrint('AUREA: warm-up de shader passou do teto');
+        return const <void>[];
+      },
+    ),
+  );
   runApp(
     ProviderScope(
       overrides: [sharedPreferencesProvider.overrideWithValue(prefs)],

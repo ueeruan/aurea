@@ -670,13 +670,62 @@ void _grupoDoGiroEDasEmendas() {
       expect(r.x, closeTo(2.82842712, 1e-6));
     });
 
-    test('sem saber posicao, nao chuta: devolve o pedido', () {
-      final r = cobrir(posicao: null);
+    test('SEM SABER A POSICAO, a regiao ainda cobre o quadro', () {
+      // O RELATO: camada menor que o quadro, com o mosaico em 91,5%. Sem
+      // a posicao da camada, a conta dos cantos nao existe — e o efeito
+      // ladrilhava SO a caixa da camada: a imagem pequena no meio do
+      // preto. Com o tamanho do QUADRO conhecido da para cobri-lo mesmo
+      // assim: a regiao tem de ser, no minimo, o quadro dividido pela
+      // escala.
+      final r = cobrir(
+        pedidoX: .915,
+        pedidoY: 1,
+        posicao: null,
+        camada: const Size(248, 442),
+        composicao: const Size(1080, 1920),
+      );
+      // 1080/248 = 4,35: a regiao passa a cobrir o quadro.
+      expect(r.x, closeTo(4.35, .01));
+      expect(r.y, closeTo(4.34, .01));
+    });
+
+    test('o piso vale tambem com a camada AMPLIADA', () {
+      final r = cobrir(
+        pedidoX: .915,
+        posicao: null,
+        camada: const Size(1080, 1920),
+        composicao: const Size(1080, 1920),
+        escalaX: 2,
+        escalaY: 2,
+      );
+      // A camada ampliada 2x ja cobre o quadro: o piso e 0,5, e o pedido
+      // (0,915) manda.
+      expect(r.x, closeTo(.915, 1e-9));
+    });
+
+    test('sem o tamanho do quadro, nao chuta: devolve o pedido', () {
+      final r = cobrir(composicao: null);
       expect(r.x, 1);
       expect(r.y, 1);
       final r2 = cobrir(composicao: null, giro: 45);
       expect(r2.x, 1);
       expect(r2.y, 1);
+    });
+
+    test('o piso NAO muda nada quando a posicao e conhecida', () {
+      // A conta dos cantos ja cobre o piso: o piso so serve para quando
+      // nao ha posicao. Aqui ele nao pode ter encolhido nem crescido.
+      for (final pos in const [Offset(60, 60), Offset(0, 0), Offset(120, 120)]) {
+        final comPiso = cobrir(posicao: pos);
+        final semPiso = fatorQueCobreMotionTile(
+          pedido: 1,
+          ladoDaCamada: 120,
+          escala: 1,
+          posicao: pos.dx,
+          ladoDaComposicao: 120,
+        );
+        expect(comPiso.x, closeTo(semPiso, 1e-6), reason: 'pos $pos');
+      }
     });
 
     test('escala ZERO nao vira infinito', () {

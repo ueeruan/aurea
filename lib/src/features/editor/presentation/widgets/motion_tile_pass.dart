@@ -277,15 +277,40 @@ double fatorQueCobreMotionTile({
   double rotacaoGraus = 0,
 }) {
   final pedido = (x: pedidoX.clamp(0.01, 6.0), y: pedidoY.clamp(0.01, 6.0));
-  // Sem saber onde a camada cai, ou de que tamanho e o quadro, nao ha o que
-  // crescer: devolver o pedido e melhor que chutar.
-  if (posicao == null || composicao == null) return pedido;
   if (!ladoDaCamada.width.isFinite || ladoDaCamada.width <= 0) return pedido;
   if (!ladoDaCamada.height.isFinite || ladoDaCamada.height <= 0) return pedido;
   if (!escalaX.isFinite || escalaX <= 0.001) return pedido;
   if (!escalaY.isFinite || escalaY <= 0.001) return pedido;
-  if (!composicao.width.isFinite || composicao.width <= 0) return pedido;
-  if (!composicao.height.isFinite || composicao.height <= 0) return pedido;
+
+  double fator(double meio, double lado) {
+    if (lado <= 0) return 0;
+    final f = 2 * meio / lado;
+    return f.isFinite && f > 0 ? f : 0;
+  }
+
+  double junto(double a, double b) => (a > b ? a : b).clamp(0.01, 24.0);
+
+  // O PISO QUE NAO DEPENDE DE SABER ONDE A CAMADA CAI.
+  //
+  // Sem a posicao, a conta dos cantos nao existe — e o efeito ficava
+  // ladrilhando SO A CAIXA DA CAMADA. Numa camada menor que o quadro
+  // isso e a imagem pequena no meio do preto, que e o relato. Com o
+  // tamanho do quadro conhecido, da para cobri-lo mesmo sem saber onde a
+  // camada esta: a regiao tem de ser, no minimo, o quadro inteiro
+  // dividido pela escala. E o caso do centro, que e o pior que a conta
+  // dos cantos tambem cobre.
+  if (composicao == null ||
+      !composicao.width.isFinite ||
+      !composicao.height.isFinite ||
+      composicao.width <= 0 ||
+      composicao.height <= 0) {
+    return pedido;
+  }
+  final pisoX = composicao.width / (ladoDaCamada.width * escalaX);
+  final pisoY = composicao.height / (ladoDaCamada.height * escalaY);
+  if (posicao == null) {
+    return (x: junto(pedido.x, pisoX), y: junto(pedido.y, pisoY));
+  }
   final theta = (rotacaoGraus.isFinite ? rotacaoGraus : 0) * math.pi / 180;
   final cos = math.cos(theta), sen = math.sin(theta);
   var maxX = 0.0, maxY = 0.0;
@@ -303,19 +328,11 @@ double fatorQueCobreMotionTile({
     if (dx.abs() > maxX) maxX = dx.abs();
     if (dy.abs() > maxY) maxY = dy.abs();
   }
-  double fator(double meio, double lado) {
-    if (lado <= 0) return 0;
-    final f = 2 * meio / lado;
-    return f.isFinite && f > 0 ? f : 0;
-  }
-
   // O TETO E O MESMO DO CASO SEM GIRO, pelo mesmo motivo: cada fator a mais
   // e area que o shader preenche por quadro.
-  double junto(double a, double b) =>
-      (a > b ? a : b).clamp(0.01, 24.0);
   return (
-    x: junto(pedido.x, fator(maxX, ladoDaCamada.width)),
-    y: junto(pedido.y, fator(maxY, ladoDaCamada.height)),
+    x: junto(junto(pedido.x, pisoX), fator(maxX, ladoDaCamada.width)),
+    y: junto(junto(pedido.y, pisoY), fator(maxY, ladoDaCamada.height)),
   );
 }
 

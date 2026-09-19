@@ -350,7 +350,27 @@ class _AnimatedTextPainter extends CustomPainter {
         layer.alinhamento,
         diagrama.direcao,
       );
-      final recorte = diagrama.recorte(i) ?? rect;
+      // O RECORTE NAO PODE CORTAR A PROPRIA LETRA.
+      //
+      // A caixa da unidade e a TINTA da letra, e o recorte saia exatamente
+      // dela. Tudo o que a animacao desenha FORA da tinta era decepado: a
+      // letra ampliada, a letra girada, a letra que entra pela lateral, o
+      // desfoque e o traco. Era esse o "texto cortado".
+      //
+      // O recorte agora cresce pelo que ESTA unidade ocupa de verdade —
+      // escala, deslocamento, giro e desfoque — e sempre pela faixa da
+      // linha, para acento, cedilha e descendente caberem. E conta, nao
+      // chute: sai dos proprios numeros lidos acima.
+      final raioDaLetra = rect.longestSide * math.max(sx, sy) / 2;
+      final margemDoRecorte =
+          (math.max(sx, sy) - 1).clamp(0.0, 4.0) * rect.longestSide / 2 +
+          dx.abs() +
+          dy.abs() +
+          (rotation.abs() > 0.01 ? raioDaLetra : 0) +
+          ((rotX ?? 0).abs() + (rotY ?? 0).abs()) * raioDaLetra / 45 +
+          blur * 3 +
+          (style.fontSize ?? 16) * .3;
+      final recorte = (diagrama.recorte(i) ?? rect).inflate(margemDoRecorte);
       // A COR DA UNIDADE VIROU FILTRO, e nao estilo. Trocar a cor do
       // `TextStyle` obrigaria a um paragrafo por (palavra, cor) — e o
       // paragrafo e justamente quem carrega a juncao da escrita cursiva.

@@ -521,10 +521,16 @@ class RenderTextoDoPalco extends RenderBox {
       maxWidth: _larguraMaxima(constraints.maxWidth),
     );
     size = constraints.constrain(_texto.size);
+    // SO E ESTOURO DE VERDADE. O `.01` era tolerancia de arredondamento
+    // e virava RECORTE: um texto que passava da caixa por um decimo de
+    // pixel ganhava `clipRect` e a ultima letra saia cortada — sem crop,
+    // sem mascara, sem nada que justificasse cortar. Agora o corte so
+    // acontece quando o texto realmente nao cabe (linha a mais, ou caixa
+    // menor que o texto por um pixel inteiro).
     _estourou =
         _texto.cheio.didExceedMaxLines ||
-        _texto.width > size.width + .01 ||
-        _texto.height > size.height + .01;
+        _texto.width > size.width + 1 ||
+        _texto.height > size.height + 1;
   }
 
   @override

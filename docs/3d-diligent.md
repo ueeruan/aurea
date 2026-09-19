@@ -1,7 +1,15 @@
 # O 3D NOVO — Diligent + Assimp no núcleo C++, com o 3D na timeline
 
 Plano de trabalho para substituir o motor 3D. Escrito depois de medir o
-que existe, em 18/09/2026. **Nada aqui foi implementado ainda.**
+que existe, em 18/09/2026.
+
+**A FASE 0 (DEMOLICAO) ESTA FEITA** — commit `96496bc`. O motor antigo
+saiu inteiro (flutter_scene, a ponte de GPU, o pintor de CPU, os dois
+estudios, a pasta do estudio, o importador antigo) e o que ficou esta
+listado naquele commit. O **backend novo (Diligent + Assimp) NAO foi
+comecado**: as duas bibliotecas compiladas para NDK sao a proxima sessao
+inteira. O `Scene3DLayer` continua existindo como TIPO (872 referencias
+em 65 arquivos) e nao desenha nada — tira-lo e a Fase 5.
 
 ---
 

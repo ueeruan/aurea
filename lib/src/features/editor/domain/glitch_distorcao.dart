@@ -145,7 +145,12 @@ const efeitosGlitchDistorcao = <EffectType, EffectSpec>{
     },
     montar: ['amount', 'speed', 'slide_amount'],
     presets: [
-      EffectPronto('Tique padrão', {}),
+      EffectPronto('Tique padrão', {
+        'amount': 60, 'speed': 45, 'behavior': 25,
+        'rgb_split': 35, 'light_enable': 1, 'light_amount': 40,
+        'scale_enable': 1, 'scale_amount': 25,
+        'slide_enable': 1, 'slide_amount': 35,
+      }),
       EffectPronto('Só deslize', {'blur_enable': 0, 'light_enable': 0, 'scale_enable': 0, 'rgb_split': 60}),
       EffectPronto('Pancada', {'amount': 90, 'speed': 30, 'behavior': 0, 'color_enable': 1}),
     ],
@@ -210,7 +215,10 @@ const efeitosGlitchDistorcao = <EffectType, EffectSpec>{
     },
     montar: ['intensity', 'interval', 'duration'],
     presets: [
-      EffectPronto('Glitch cruzado', {}),
+      EffectPronto('Glitch cruzado', {
+        'shift_intensity': 140, 'shake_x': 45, 'shake_y': 25,
+        'rgb_split': 55, 'line_duplication': 40, 'jitter': 25,
+      }),
       EffectPronto('Só blocos', {'shift_enable': 0, 'shake_enable': 0, 'flicker_enable': 0, 'block_intensity': 150}),
       EffectPronto('Tremido forte', {'shake_x': 80, 'rgb_split': 40, 'interval': 8}),
     ],
@@ -350,21 +358,102 @@ List<double> valoresTwitch(EffectInstance e, Duration local) {
   ];
 }
 
+/// A AGENDA DOS GLITCHES do Cross Glitch.
+///
+/// A CONTA ANTIGA ERA O(t) POR QUADRO E DESISTIA NO MEIO DO CLIPE. Para
+/// saber em que glitch o quadro [q] cai, ela somava o passo de todos os
+/// glitches desde o comeco: o custo do primeiro quadro era zero e o do
+/// milesimo era mil somas — a mesma cena ficava mais lenta quanto mais
+/// longa, e a previa engasgava justamente no fim. Pior: havia um teto de
+/// 20.000 iteracoes (onze minutos a 30 fps) e, estourando o teto, a
+/// funcao devolvia "fora de um glitch" para sempre — o efeito SUMIA
+/// sozinho no meio de um clipe longo.
+///
+/// A agenda resolve as duas coisas de uma vez: os inicios sao calculados
+/// UMA vez por combinacao de parametros e guardados em ordem, e achar o
+/// glitch de um quadro vira busca binaria. O total gasto ao longo de um
+/// clipe passa a ser o numero de glitches, e nao esse numero multiplicado
+/// pelo numero de quadros.
+class _AgendaDoCross {
+  _AgendaDoCross(this.seed, this.intervalo, this.rInt, this.comecaZero) {
+    _inicios.add(comecaZero ? 0.0 : intervalo * _hash(seed, 1));
+  }
+
+  final double seed;
+  final double intervalo;
+  final double rInt;
+  final bool comecaZero;
+
+  /// Os inicios, em ordem CRESCENTE: cada passo e no minimo 1 quadro.
+  final _inicios = <double>[];
+
+  /// O passo com que cada um comeca — e o que define a vida, e nao pode
+  /// ser recalculado depois sem repetir a mesma soma.
+  final _passos = <double>[];
+
+  /// Cresce a agenda ate passar de [q].
+  void _ate(double q) {
+    while (_inicios.last <= q) {
+      final k = _inicios.length - 1;
+      var passo = intervalo *
+          (1 + rInt * (_hash(k.toDouble(), seed + 2) - .5) * 2);
+      if (passo < 1) passo = 1;
+      _passos.add(passo);
+      _inicios.add(_inicios.last + passo);
+    }
+  }
+
+  /// O ultimo glitch que ja comecou no quadro [q].
+  int indiceDe(double q) {
+    _ate(q);
+    var baixo = 0, alto = _inicios.length - 2, achado = 0;
+    while (baixo <= alto) {
+      final meio = (baixo + alto) >> 1;
+      if (_inicios[meio] <= q) {
+        achado = meio;
+        baixo = meio + 1;
+      } else {
+        alto = meio - 1;
+      }
+    }
+    return achado;
+  }
+
+  double inicioDe(int k) => _inicios[k];
+  double passoDe(int k) => _passos[k];
+}
+
+/// A ULTIMA AGENDA USADA. Uma so: quem desenha le uma camada por vez, e
+/// guardar mais que isso seria memoria parada. Chave trocada, agenda nova.
+_AgendaDoCross? _agendaCross;
+String? _chaveDaAgenda;
+
+_AgendaDoCross _agendaPara(
+    double seed, double intervalo, double rInt, bool comecaZero) {
+  final chave = '$seed|$intervalo|$rInt|$comecaZero';
+  if (_chaveDaAgenda == chave) return _agendaCross!;
+  final nova = _AgendaDoCross(seed, intervalo, rInt, comecaZero);
+  _chaveDaAgenda = chave;
+  return _agendaCross = nova;
+}
+
 /// Envelope do Cross Glitch no quadro [q]: (indice do glitch, fracao 0..1 da
 /// vida dele, fator de intensidade) ou fracao < 0 fora de um glitch.
 (double, double, double) _glitchCruzado(double q, double seed, double intervalo, double rInt, double dur,
     double rDur, double rInten, bool comecaZero) {
-  var inicio = comecaZero ? 0.0 : intervalo * _hash(seed, 1);
-  for (var k = 0; k < 20000; k++) {
-    final passo = math.max(1.0, intervalo * (1 + rInt * (_hash(k.toDouble(), seed + 2) - .5) * 2));
-    final vida = math.max(1.0, passo * dur * (1 + rDur * (_hash(k.toDouble(), seed + 3) - .5)));
-    if (q < inicio) return (k.toDouble(), -1, 0);
-    if (q < inicio + vida) {
-      return (k.toDouble(), (q - inicio) / vida, 1 - rInten * _hash(k.toDouble(), seed + 4));
-    }
-    inicio += passo;
-  }
-  return (0, -1, 0);
+  final agenda = _agendaPara(seed, intervalo, rInt, comecaZero);
+  final k = agenda.indiceDe(q);
+  final inicio = agenda.inicioDe(k);
+  final vida = math.max(
+    1.0,
+    agenda.passoDe(k) * dur * (1 + rDur * (_hash(k.toDouble(), seed + 3) - .5)),
+  );
+  if (q < inicio || q >= inicio + vida) return (k.toDouble(), -1, 0);
+  return (
+    k.toDouble(),
+    (q - inicio) / vida,
+    1 - rInten * _hash(k.toDouble(), seed + 4),
+  );
 }
 
 double _pico(double u, double pico) {

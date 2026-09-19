@@ -120,7 +120,10 @@ const efeitosTvDamage = <EffectType, EffectSpec>{
     },
     montar: ['reception_master', 'static_amplitude', 'tv_pixels'],
     presets: [
-      EffectPronto('TV velha', {}),
+      EffectPronto('TV velha', {
+        'reception_master': .9, 'static_amplitude': .7,
+        'vignette_darkness': .35, 'fish_eye': 2, 'tv_pixels': 480,
+      }),
       EffectPronto('Sem sinal', {'reception_master': 1.5, 'static_amplitude': 1.2, 'static_density': 1}),
       EffectPronto('Desligando', {'reception_master': .2, 'turn_off': .8, 'vignette_darkness': .6}),
     ],

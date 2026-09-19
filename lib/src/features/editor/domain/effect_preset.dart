@@ -304,9 +304,8 @@ List<EffectPreset> factoryPresets() => [
       EffectInstance(
         type: EffectType.hueSaturation,
         params: {
-          'vibracao': AnimatedDouble(0.25),
-          'master_saturation': AnimatedDouble(-0.08),
-          'protecaoPele': AnimatedDouble(0.8),
+          'master_saturation': AnimatedDouble(14),
+          'master_lightness': AnimatedDouble(-2),
         },
       ),
     ],
@@ -320,17 +319,17 @@ List<EffectPreset> factoryPresets() => [
       EffectInstance(
         type: EffectType.deepGlow,
         params: {
-          'radius': AnimatedDouble(0.06),
-          'exposure': AnimatedDouble(0.9),
-          'red_radius_multiplier': AnimatedDouble(1.15),
-          'threshold': AnimatedDouble(0.7),
+          'raio': AnimatedDouble(110),
+          'exposicao': AnimatedDouble(120),
+          'limiar': AnimatedDouble(60),
+          'suavidade': AnimatedDouble(30),
         },
       ),
       EffectInstance(
         type: EffectType.vignette,
         params: {
-          'quantidade': AnimatedDouble(0.35),
-          'raio': AnimatedDouble(0.9),
+          'amount': AnimatedDouble(35),
+          'angle_of_view': AnimatedDouble(45),
         },
       ),
     ],
@@ -345,12 +344,15 @@ List<EffectPreset> factoryPresets() => [
       EffectInstance(
         type: EffectType.glitchify,
         params: {
-          'quantidade': AnimatedDouble(1)
-              .withKeyframe(Duration.zero, 1.6)
+          'amount': AnimatedDouble(80)
+              .withKeyframe(Duration.zero, 80)
               .withKeyframe(const Duration(milliseconds: 600), 0),
-          'velocidade': AnimatedDouble(6),
-          'rgb': AnimatedDouble(0.8),
-          'semente': AnimatedDouble(11),
+          'speed': AnimatedDouble(45),
+          // A SEPARACAO DE CANAIS e o "rgb" do preset antigo: o numero
+          // que faz a imagem estourar em vermelho e azul.
+          'split_channel': AnimatedDouble(1),
+          'channel_scale': AnimatedDouble(90),
+          'seed': AnimatedDouble(11),
         },
       ),
     ],
@@ -364,12 +366,16 @@ List<EffectPreset> factoryPresets() => [
       EffectInstance(
         type: EffectType.tremor,
         params: {
-          // AMPLITUDE reajustada quando o eixo passou a nascer cheio
-          // (era 18 x 0,2 de eixo): o tremor entregue e o mesmo.
-          'amplitude': AnimatedDouble(3.6),
+          // O NUMERO DE CADA EIXO E QUE MANDA, e nao um estilo: quem
+          // quiser mais tremor mexe na Amplitude do eixo, nao numa
+          // enumeracao de comportamento.
+          'amplitude': AnimatedDouble(1),
           'frequency': AnimatedDouble(3.5),
-          'style': AnimatedDouble(0),
-          'tilt_random_amplitude': AnimatedDouble(0.05),
+          'x_rand_amp': AnimatedDouble(150),
+          'y_rand_amp': AnimatedDouble(90),
+          'tilt_rand_amp': AnimatedDouble(0.6),
+          'motion_blur': AnimatedDouble(1),
+          'mo_blur_length': AnimatedDouble(0.4),
           'seed': AnimatedDouble(4),
         },
       ),
@@ -384,20 +390,13 @@ List<EffectPreset> factoryPresets() => [
       EffectInstance(
         type: EffectType.brilho,
         params: {
-          'diffusion': AnimatedDouble(0.3),
-          'intensity': AnimatedDouble(0.6),
+          'raio': AnimatedDouble(70),
+          'intensidade': AnimatedDouble(70),
+          'limiar': AnimatedDouble(45),
+          'tingimento': AnimatedDouble(70),
         },
         color: const Color(0xFFFF8A2B),
       ),
-    ],
-  ),
-  EffectPreset(
-    name: 'Zoom de soco',
-    category: 'Distorcao',
-    builtIn: true,
-    tags: ['zoom', 'impacto'],
-    suggestedDuration: const Duration(milliseconds: 400),
-    effects: [
     ],
   ),
   // ---------------------------------------------------------------
@@ -417,7 +416,7 @@ List<EffectPreset> factoryPresets() => [
     effects: [
       EffectInstance(
         type: EffectType.hueSaturation,
-        params: {'vibracao': AnimatedDouble(0.45)},
+        params: {'master_saturation': AnimatedDouble(45)},
       ),
       EffectInstance(
         type: EffectType.unsharpMask,
@@ -429,18 +428,17 @@ List<EffectPreset> factoryPresets() => [
       EffectInstance(
         type: EffectType.brilho,
         params: {
-          'threshold': AnimatedDouble(90),
+          'limiar': AnimatedDouble(90),
           'raio': AnimatedDouble(60),
-          'intensity': AnimatedDouble(40),
+          'intensidade': AnimatedDouble(40),
         },
         color: const Color(0xFFFFFFFF),
       ),
       EffectInstance(
         type: EffectType.vignette,
         params: {
-          'quantidade': AnimatedDouble(0.2),
-          'raio': AnimatedDouble(0.95),
-          'suavidade': AnimatedDouble(0.75),
+          'amount': AnimatedDouble(20),
+          'angle_of_view': AnimatedDouble(45),
         },
         color: const Color(0xFF000000),
       ),
@@ -454,7 +452,7 @@ List<EffectPreset> factoryPresets() => [
     effects: [
       EffectInstance(
         type: EffectType.hueSaturation,
-        params: {'master_saturation': AnimatedDouble(-0.12)},
+        params: {'master_saturation': AnimatedDouble(-12)},
       ),
     ],
   ),
@@ -466,15 +464,17 @@ List<EffectPreset> factoryPresets() => [
     effects: [
       EffectInstance(
         type: EffectType.hueSaturation,
-        params: {'master_saturation': AnimatedDouble(-0.1)},
+        params: {'master_saturation': AnimatedDouble(-10)},
       ),
       EffectInstance(
         type: EffectType.levels,
-        params: {'saidaMin': AnimatedDouble(0.05)},
+        // O PRETO NAO DESCE MAIS ABAIXO QUE ISTO: e o que poe a nevoa
+        // quente do vintage, no lugar do preto puro.
+        params: {'output_black': AnimatedDouble(13)},
       ),
       EffectInstance(
         type: EffectType.vignette,
-        params: {'quantidade': AnimatedDouble(0.25)},
+        params: {'amount': AnimatedDouble(25)},
         color: const Color(0xFF000000),
       ),
     ],
@@ -487,11 +487,11 @@ List<EffectPreset> factoryPresets() => [
     effects: [
       EffectInstance(
         type: EffectType.hueSaturation,
-        params: {'master_saturation': AnimatedDouble(-0.2)},
+        params: {'master_saturation': AnimatedDouble(-20)},
       ),
       EffectInstance(
         type: EffectType.vignette,
-        params: {'quantidade': AnimatedDouble(0.45)},
+        params: {'amount': AnimatedDouble(45)},
         color: const Color(0xFF000000),
       ),
       EffectInstance(
@@ -508,14 +508,14 @@ List<EffectPreset> factoryPresets() => [
     effects: [
       EffectInstance(
         type: EffectType.hueSaturation,
-        params: {'vibracao': AnimatedDouble(0.5)},
+        params: {'master_saturation': AnimatedDouble(50)},
       ),
       EffectInstance(
         type: EffectType.brilho,
         params: {
-          'threshold': AnimatedDouble(75),
+          'limiar': AnimatedDouble(75),
           'raio': AnimatedDouble(30),
-          'intensity': AnimatedDouble(60),
+          'intensidade': AnimatedDouble(60),
         },
         color: const Color(0xFFFFFFFF),
       ),
@@ -530,8 +530,8 @@ List<EffectPreset> factoryPresets() => [
       EffectInstance(
         type: EffectType.hueSaturation,
         params: {
-          'vibracao': AnimatedDouble(0.6),
-          'master_saturation': AnimatedDouble(0.08),
+          'master_saturation': AnimatedDouble(52),
+          'master_lightness': AnimatedDouble(6),
         },
       ),
       EffectInstance(

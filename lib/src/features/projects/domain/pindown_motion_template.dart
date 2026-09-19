@@ -88,13 +88,18 @@ AnimatedOffset _ao(Offset base, [List<(double, Offset, Easing)>? kfs]) =>
     ]);
 
 /// Glow. O original inteiro e desenhado com ele: nada tem borda dura.
+///
+/// ERA `lightGlow`, QUE NAO EXISTE MAIS. O catalogo antigo foi apagado em
+/// 16/09 e o brilho de hoje e o `brilho` (Sapphire), com outros nomes de
+/// parametro. Sem esta troca o template abria com um efeito fantasma: o
+/// painel dizia "efeito removido" e a cena saia de borda dura.
 EffectInstance _glow({double raio = 60, double intensidade = 0.9}) =>
     EffectInstance(
-      type: EffectType.lightGlow,
+      type: EffectType.brilho,
       params: {
         'raio': _ad(raio),
-        'intensity': _ad(intensidade * 100),
-        'threshold': _ad(28),
+        'intensidade': _ad(intensidade * 100),
+        'limiar': _ad(28),
       },
     );
 

@@ -81,18 +81,17 @@ ShapeGradientFill _gradient(
   radiusScale: radius,
 );
 
+/// O GLOW DO TEMPLATE TROCOU DE EFEITO junto com o catalogo (16/09): o
+/// `lightGlow` saiu e ficou o `brilho`. Os nomes dos numeros mudaram —
+/// `intensity` virou `intensidade`, `threshold` virou `limiar` — e os que
+/// nao tem equivalente na ficha de hoje (piramide, mult_r/g/b) sairam.
 EffectInstance _glow(Color color, double radius, double gain) => EffectInstance(
-  type: EffectType.lightGlow,
+  type: EffectType.brilho,
   color: color,
   params: {
     'raio': AnimatedDouble(radius),
-    'intensity': AnimatedDouble(gain),
-    'threshold': AnimatedDouble(40),
-    'piramide': AnimatedDouble(3),
-    'mult_r': AnimatedDouble(1),
-    'mult_g': AnimatedDouble(1),
-    'mult_b': AnimatedDouble(1),
-    'mesclagem': AnimatedDouble(1),
+    'intensidade': AnimatedDouble(gain),
+    'limiar': AnimatedDouble(40),
   },
 );
 

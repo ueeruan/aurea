@@ -67,3 +67,8 @@ android/key.properties
 
 # Saida de build do Gradle (relatorios, intermediates).
 android/build/
+
+# As dependencias do 3D (Diligent, Assimp) sao clonadas, nao versionadas:
+# sao 58 MB de fonte de terceiro. O hook as le do disco quando o 3D for
+# ligado de verdade — ver docs/3d-diligent.md, secao 7.
+packages/aurea_render/third_party/

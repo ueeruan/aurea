@@ -195,3 +195,61 @@ O critério é sempre o mesmo formato: **o que se mede, e com o quê.**
 
 O tamanho do passo 1 é a razão deste documento: as duas bibliotecas
 sozinhas são a sessão inteira.
+
+### 7.1 Onde o passo 1 parou (18/09, mesma noite)
+
+As duas dependências foram **clonadas** para
+`packages/aurea_render/third_party/` (`diligent/` da tag `v2.5.6`,
+`assimp/` da `v5.4.3`, com `test/`, `tools/`, `doc/`, `port/`, `samples/`
+podados): 32 MB e 26 MB. Elas **não estão versionadas** — o `.gitignore`
+as exclui, e o hook as lê do disco quando o 3D for ligado.
+
+O que já foi resolvido, para não ser refeito:
+
+- **`hook/diligent.dart`** lista as fontes por pasta (o Diligent sozinho
+  passa de 150 `.cpp`) e monta os `includes`. Ele existe e está escrito.
+- Os cabeçalhos do Diligent ficam em `include/` **e** `interface/`
+  (as duas entram), mais `Primitives/interface`, `Platforms/Basic/…` e a
+  pasta da plataforma (`Win32`, `Android`, `Apple`).
+- O Assimp precisa de `contrib/`: `rapidjson/include`, `zlib`, `stb`,
+  `utf8cpp/source`, `unzip`, `zip/src`, `openddlparser/include`,
+  `pugixml/src`, `poly2tri`, `clipper`, `draco/src`, `Open3DGC`.
+- O Assimp **não compila sem `include/assimp/config.h` e
+  `include/assimp/revision.h`**: os dois são gerados pelo CMake dele e o
+  build hook não passa por CMake. Os dois foram escritos à mão (o
+  `config.h` sai do `config.h.in` trocando o único `#cmakedefine`).
+
+**O que ainda falta, e é onde parou:**
+
+1. **`Graphics/ShaderTools/src` não compila sem os submodules.** Ele
+   inclui `SPIRV/GlslangToSpv.h`, `spirv_cross.hpp`, `spirv_parser.hpp` —
+   glslang, SPIRV-Cross e SPIRV-Tools. Os submodules do Diligent vêm
+   VAZIOS num `git clone --depth 1`: é preciso buscá-los (ou tirar o
+   ShaderTools da lista e ligar `DILIGENT_NO_HLSL` +
+   `DILIGENT_DISABLE_INTERNAL_SHADER_COMPILATION` de verdade — foi o que
+   se tentou e ainda puxava símbolo).
+2. **Os nomes sem prefixo.** Esta versão do Diligent renomeou as
+   constantes para `DILIGENT_...` e os cabeçalhos internos dele ainda
+   usam `MAX_RENDER_TARGETS`, `MAX_RESOURCE_SIGNATURES`,
+   `TEXTURE_COMPONENT_SWIZZLE` — **sem nenhuma definição em lugar
+   nenhum do repositório**. Ou os submodules traziam a camada de
+   compatibilidade, ou a tag escolhida está no meio de uma renomeação.
+   O caminho mais curto: `-DMAX_RENDER_TARGETS=DILIGENT_MAX_RENDER_TARGETS`
+   e companhia (foi tentado; `TEXTURE_COMPONENT_SWIZZLE` é um TIPO e não
+   aceita o mesmo truque — precisa do nome certo, escrito à mão).
+3. As opções de backend desta versão são `DILIGENT_NO_DIRECT3D11` /
+   `DILIGENT_NO_DIRECT3D12` (por extenso), e não `DILIGENT_NO_D3D11`.
+
+**O que já está escrito e pronto para entrar:** `src/api_3d.cpp` e
+`src/api_3d.h` — a porta do 3D com `preparar`/`pronto`/`motivo`/`backend`
+e os cinco símbolos `extern "C"` já com `AUREA_API` e `catch (...)`. É a
+fatia que prova dispositivo abrindo, e é a primeira coisa a compilar
+quando os três pontos acima fecharem. **Ela NÃO está na lista do hook**,
+de propósito: com ela lá e o Diligent sem compilar, `flutter test`
+inteiro para — a árvore fica verde sem ela.
+
+**A ordem sugerida para a próxima sessão:** buscar os submodules que
+faltam (`SPIRV-Cross`, `glslang`, `SPIRV-Tools`) com `--depth 1`; escrever
+à mão a camada de nomes sem prefixo; pôr `fontes3d` e `src/api_3d.cpp` na
+lista do hook; e o aceite é o de sempre — dispositivo de pé e um quadro
+lido por `lerPixels`.

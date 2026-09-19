@@ -11,6 +11,7 @@ import 'estilizar.dart';
 import 'jpeg_damage.dart';
 import 'distorcao_ae.dart';
 import 'posterize_time.dart';
+import 'rgb_time_warp.dart';
 import 'preto_e_branco.dart';
 import 'shake.dart';
 import 'glitch_distorcao.dart';
@@ -187,6 +188,7 @@ enum EffectType {
 
   // ---- 19/09: efeitos temporais e de cor ----
   pretoEBranco,
+  rgbTimeWarp,
 }
 
 /// A ORDEM DO ENUM ANTES DE O TIME REMAP SAIR (17/09).
@@ -618,6 +620,7 @@ const effectSpecs = <EffectType, EffectSpec>{
   ...efeitosMotionTile,
   ...efeitosPretoEBranco,
   ...efeitosPosterizeTime,
+  ...efeitosRgbTimeWarp,
 };
 
 /// OS EFEITOS DE EDIT, na ordem em que se procura: batida, glitch,

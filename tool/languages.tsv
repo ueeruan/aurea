@@ -3256,3 +3256,12 @@ Alto contraste	High contrast	Alto contraste	تباين عالٍ	고대비	ハイ
 Taxa de quadros	Frame rate	Tasa de fotogramas	معدل الإطارات	프레임 레이트	フレームレート	帧率	फ़्रेम दर	Tingkat bingkai	Частота кадров
 Stop motion	Stop motion	Stop motion	إيقاف الحركة	스톱 모션	ストップモーション	定格动画	स्टॉप मोशन	Stop motion	Стоп-моушен
 Travado	Choppy	Trabado	متقطع	끊김	カクカク	卡顿	झटकेदार	Patah-patah	Рывками
+RGB Time Warp	RGB Time Warp	Desfase RGB temporal	انحراف RGB الزمني	RGB 타임 워프	RGBタイムワープ	RGB时间扭曲	RGB टाइम वार्प	RGB Time Warp	Временной сдвиг RGB
+Quadros do vermelho	Red shift frames	Fotogramas del rojo	إطارات الأحمر	레드 시프트 프레임	レッドシフトフレーム	红色偏移帧	लाल शिफ़्ट फ़्रेम	Bingkai geser merah	Кадры сдвига красного
+Quadros do verde	Green shift frames	Fotogramas del verde	إطارات الأخضر	그린 시프트 프레임	グリーンシフトフレーム	绿色偏移帧	हरा शिफ़्ट फ़्रेम	Bingkai geser hijau	Кадры сдвига зелёного
+Quadros do azul	Blue shift frames	Fotogramas del azul	إطارات الأزرق	블루 시프트 프레임	ブルーシフトフレーム	蓝色偏移帧	नीला शिफ़्ट फ़्रेम	Bingkai geser biru	Кадры сдвига синего
+Limitar croma	Clamp chroma	Limitar croma	تحديد التشبع	크로마 제한	クロマ制限	限制色度	क्रोमा सीमित करें	Batasi kroma	Ограничить цветность
+Rastro sutil	Subtle trail	Estela sutil	أثر خفيف	은은한 잔상	控えめな残像	轻微拖影	हल्का ट्रेल	Jejak halus	Лёгкий шлейф
+Arco-íris	Rainbow	Arcoíris	قوس قزح	무지개	レインボー	彩虹	इंद्रधनुष	Pelangi	Радуга
+Fantasma	Ghost	Fantasma	شبح	고스트	ゴースト	残影	भूत	Hantu	Призрак
+Glitch temporal	Temporal glitch	Glitch temporal	خلل زمني	시간 글리치	テンポラルグリッチ	时间故障	टेम्पोरल ग्लिच	Glitch temporal	Временной глитч

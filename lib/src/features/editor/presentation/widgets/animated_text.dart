@@ -367,7 +367,7 @@ class _AnimatedTextPainter extends CustomPainter {
           dx.abs() +
           dy.abs() +
           (rotation.abs() > 0.01 ? raioDaLetra : 0) +
-          ((rotX ?? 0).abs() + (rotY ?? 0).abs()) * raioDaLetra / 45 +
+          (rotX.abs() + rotY.abs()) * raioDaLetra / 45 +
           blur * 3 +
           (style.fontSize ?? 16) * .3;
       final recorte = (diagrama.recorte(i) ?? rect).inflate(margemDoRecorte);

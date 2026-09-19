@@ -315,6 +315,8 @@ EffectType.lightSweep => 'Varredura de luz: um facho reto atravessa a camada e s
   EffectType.echo => 'Reamostra a camada em instantes anteriores. Ecos define as cópias; intervalo separa os instantes; decaimento enfraquece o rastro. O comportamento temporal não é uma equivalência exata ao Echo da Adobe.',
   EffectType.spatialEcho => 'Repete a imagem no espaço, não no passado. Ajuste deslocamento, escala, rotação e decaimento por cópia.',
   EffectType.radialAberration => 'Franja cromática que cresce em direção às bordas. Quantidades pequenas simulam uma lente; valores altos estilizam.',
+  EffectType.rgbTimeWarp => 'Cada canal de cor vem de um instante diferente do vídeo: o vermelho pode mostrar o quadro de três quadros atrás e o azul o de três à frente. Onde a imagem se move, o rastro colorido nasce do movimento de verdade — não é um deslocamento fixo. Os deslocamentos são em QUADROS, então valem igual a 24, 30 ou 60 fps. Vale só para camadas de vídeo. Limitar croma é o freio: em 100% a separação vira só luminância.',
+
   EffectType.pretoEBranco => 'Tira a cor com seis faixas: vermelhos, amarelos, verdes, ciano, azuis e magentas. Cada faixa diz quanto aquela família de cor entra no cinza — 40 deixa escuro, 100 entrega a cor como ela é, 200 clareia e negativo vai ao preto. Cinza puro não se mexe, seja qual for a faixa. Tingir tinge o resultado com a cor escolhida (o padrão é sépia) e Mistura dosa o efeito contra a imagem colorida.',
 
   EffectType.levels => 'Os níveis do After Effects, de 0 a 255. Entrada preto e Entrada branco escolhem o que vira preto e branco puros; Gama acima de 1 clareia os meios-tons; Saída preto e Saída branco lavam o preto ou apagam o branco. Entrada invertida inverte a imagem.',

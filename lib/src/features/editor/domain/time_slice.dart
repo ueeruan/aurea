@@ -4,6 +4,7 @@ import 'dart:ui';
 import 'effect.dart';
 import 'fx.dart' show fxHash01;
 import 'layer.dart';
+import 'rgb_time_warp.dart';
 
 /// TIME SLICE: o quadro vira faixas paralelas e cada faixa mostra a mesma
 /// camada num instante diferente (S_TimeSlice, Time Displacement, slit
@@ -201,6 +202,22 @@ Set<Duration> instantesDeOutroTempo(
         poster.paramAt('phase', local),
       );
       if (base != local) out.add(layer.startTime + base);
+    }
+    // RGB TIME WARP: os tres canais vem de instantes diferentes, e a
+    // exportacao precisa decodificar os tres quadros antes de desenhar.
+    // O deslocamento e em QUADROS, entao vira tempo pela taxa que o
+    // chamador passou.
+    final torcido = deslocamentosDoTimeWarp(layer.effects, local);
+    if (torcido.r != 0 || torcido.g != 0 || torcido.b != 0) {
+      final taxa = fps < 1 ? 30 : fps;
+      for (final d in [torcido.r, torcido.g, torcido.b]) {
+        if (d == 0) continue;
+        out.add(
+          layer.startTime +
+              base +
+              Duration(microseconds: (d / taxa * 1e6).round()),
+        );
+      }
     }
     final fatias = efeitoDeTempo(layer, EffectType.timeSlice);
     if (fatias != null) {

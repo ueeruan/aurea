@@ -37,6 +37,7 @@ import '../../domain/effect.dart';
 import '../../domain/fx.dart';
 import '../../domain/oscillate.dart';
 import 'motion_tile_pass.dart';
+import '../../domain/rgb_time_warp.dart';
 import '../../domain/sombra_projetada.dart';
 import 'sombra_projetada_pass.dart';
 import '../../domain/desfoque_forcado.dart';
@@ -6052,6 +6053,13 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
         // TIME SLICE e POSTERIZE TIME remontam a camada inteira em outros
         // instantes: quem os aplica e o compositor (_buildLayers).
         case EffectType.timeSlice:
+        case EffectType.rgbTimeWarp:
+          // O DESENHO ACONTECE NO CONTEUDO DA CAMADA, e nao aqui: e la
+          // que os quadros de outros instantes existem (o
+          // `QuadrosDeVideo` na previa, o `quadroEm` na exportacao). Este
+          // caso existe para o switch continuar exaustivo.
+          break;
+
         case EffectType.posterizeTime:
         // FORCE MOTION BLUR nao acontece aqui: ele precisa re-renderizar
         // a camada em outros instantes, e a pilha de efeitos so recebe o
@@ -6812,6 +6820,35 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
   }
 }
 
+/// A LUMINANCIA DE UMA IMAGEM, com o alfa intacto. E o que o freio de
+/// croma usa: aplicado sobre o resultado torcido, devolve o mesmo
+/// desenho sem cor nenhuma.
+const _luma = <double>[
+  .2126, .7152, .0722, 0, 0,
+  .2126, .7152, .0722, 0, 0,
+  .2126, .7152, .0722, 0, 0,
+  0, 0, 0, 1, 0,
+];
+
+/// UM CANAL DE COR, E SO ELE.
+///
+/// A linha do alfa fica intacta: o que sai tem a forma e a transparencia
+/// da imagem, e so uma das tres cores. E o que permite somar os tres
+/// canais depois sem que um apague o outro.
+Widget _isoDeCanal(Widget filho, int canal) {
+  const zeros = [0.0, 0.0, 0.0, 0.0, 0.0];
+  final linhas = [
+    canal == 0 ? const [1.0, 0.0, 0.0, 0.0, 0.0] : zeros,
+    canal == 1 ? const [0.0, 1.0, 0.0, 0.0, 0.0] : zeros,
+    canal == 2 ? const [0.0, 0.0, 1.0, 0.0, 0.0] : zeros,
+    const [0.0, 0.0, 0.0, 1.0, 0.0],
+  ];
+  return ColorFiltered(
+    colorFilter: ColorFilter.matrix([for (final l in linhas) ...l]),
+    child: filho,
+  );
+}
+
 /// A camera de uma Cena 3D com o nulo da COMPOSICAO ja aplicado.
 ///
 /// A ponte entre as duas hierarquias: a arvore de camadas da composicao
@@ -7048,6 +7085,106 @@ class _LayerContent extends StatelessWidget {
         },
       );
 
+  /// OS TRES CANAIS, CADA UM DE UM INSTANTE.
+  ///
+  /// O deslocamento e em QUADROS e vira tempo pela taxa da composicao:
+  /// um quadro de video e a unidade em que o movimento existe, entao
+  /// "tres quadros para tras" anda a mesma coisa em 24, 30 ou 60 fps.
+  ///
+  /// A ORDEM DO EMPILHAMENTO E CONTA. O vermelho entra normal (srcOver)
+  /// e so ele: o alfa dele e 1 e as outras duas cores estao zeradas pelo
+  /// filtro. Verde e azul entram por SOMA, com o alfa ja em 1 — somar
+  /// premultiplicado com alfa 1 devolve exatamente o canal, sem escurecer
+  /// nem estourar. Trocar a ordem faria o segundo canal apagar o
+  /// primeiro.
+  Widget _videoComTimeWarp(VideoLayer l) {
+    final fps = project.fps < 1 ? 30 : project.fps;
+    final d = deslocamentosDoTimeWarp(l.effects, localTime);
+    final segundos = [d.r / fps, d.g / fps, d.b / fps];
+    Widget canal(int c) => _isoDeCanal(
+      _videoNoDeslocamento(l, segundos[c]),
+      c,
+    );
+    final torto = Stack(
+      fit: StackFit.passthrough,
+      children: [
+        canal(0),
+        BlendMask(blendMode: BlendMode.plus, child: canal(1)),
+        BlendMask(blendMode: BlendMode.plus, child: canal(2)),
+      ],
+    );
+    final spec = efeitosRgbTimeWarp[EffectType.rgbTimeWarp]!.params;
+    double v(String k) {
+      for (final e in l.effects) {
+        if (e.type != EffectType.rgbTimeWarp || !e.enabled) continue;
+        final p = spec[k]!;
+        final bruto = e.paramAt(k, localTime);
+        if (!bruto.isFinite) return p.initial;
+        return bruto.clamp(p.min, p.max).toDouble();
+      }
+      return spec[k]!.initial;
+    }
+
+    // LIMITAR CROMA: o freio de seguranca. Mistura o resultado torcido
+    // com a versao em LUMINANCIA dele mesmo — em 100% a separacao vira
+    // cinza e o efeito deixa de colorir. E o que salva um clipe cujo
+    // movimento e rapido demais para a distancia escolhida.
+    final freio = (v('clamp_chroma') / 100).clamp(0.0, 1.0);
+    final resultado = freio <= .0001
+        ? torto
+        : Stack(
+            fit: StackFit.passthrough,
+            children: [
+              torto,
+              Opacity(
+                opacity: freio,
+                child: ColorFiltered(
+                  colorFilter: const ColorFilter.matrix(_luma),
+                  child: torto,
+                ),
+              ),
+            ],
+          );
+
+    final mistura = (v('mix') / 100).clamp(0.0, 1.0);
+    if (mistura >= .999) return resultado;
+    // MISTURA: o quadro de agora por baixo, o torcido por cima. Em 0% o
+    // efeito nao aparece; em 100% nem se paga a passada extra.
+    return Stack(
+      fit: StackFit.passthrough,
+      children: [
+        _videoNoDeslocamento(l, 0),
+        Opacity(opacity: mistura, child: resultado),
+      ],
+    );
+  }
+
+  /// O quadro do video [segundos] depois (ou antes) do instante desta
+  /// camada — pela mesma fonte que os outros efeitos de tempo usam.
+  Widget _videoNoDeslocamento(VideoLayer l, double segundos) {
+    if (segundos == 0) {
+      return exporting && exportFrames?[l.id] != null
+          ? _quadroFixo(l, exportFrames![l.id]!)
+          : _videoAoVivo(l);
+    }
+    final tempo = l.startTime + localTime +
+        Duration(microseconds: (segundos * 1e6).round());
+    if (exporting) {
+      final img = quadroEm?.call(l, tempo);
+      return img == null ? _videoAoVivo(l) : _quadroFixo(l, img);
+    }
+    final arquivo = ProxyService.instance.playbackPath(l.sourcePath);
+    final fonte = videoAbsoluteSourceTimeAt(l, l.localTime(tempo));
+    final img = QuadrosDeVideo.instance.quadro(arquivo, fonte);
+    if (img != null) return _quadroFixo(l, img);
+    QuadrosDeVideo.instance.preparar(
+      arquivo,
+      l.sourceOffset,
+      l.sourceOffset + videoSourceSpan(l),
+    );
+    return _videoAoVivo(l);
+  }
+
   Widget _videoAoVivo(VideoLayer l) => RepaintBoundary(
     child: ValueListenableBuilder<int>(
       valueListenable: videos.revision,
@@ -7196,6 +7333,14 @@ class _LayerContent extends StatelessWidget {
         l,
         tempoAlheio!,
       ),
+      // RGB TIME WARP: cada canal de cor vem de um INSTANTE diferente
+      // do video. Vem antes dos casos comuns de video porque ele nao
+      // desenha o quadro de agora — desenha tres.
+      VideoLayer l
+          when tempoAlheio == null &&
+              timeWarpAtivo(l.effects, localTime) &&
+              (exporting ? quadroEm != null : true) =>
+        _videoComTimeWarp(l),
       VideoLayer l when exportFrames != null && exportFrames![l.id] != null =>
         _quadroFixo(l, exportFrames![l.id]!),
       VideoLayer l => _videoAoVivo(l),

@@ -6,6 +6,7 @@ import 'package:aurea/src/features/editor/application/ui/pro_mode.dart';
 import 'package:aurea/src/features/editor/domain/keyframe.dart';
 import 'package:aurea/src/features/editor/presentation/am/am_widgets.dart';
 import 'package:aurea/src/features/editor/presentation/am/transform_panel.dart';
+import 'package:aurea/src/features/editor/presentation/widgets/fita_de_ajuste.dart';
 import 'package:aurea/src/features/editor/presentation/widgets/preview_stage.dart';
 import 'package:flutter/material.dart' hide Easing;
 import 'package:flutter/rendering.dart';
@@ -74,7 +75,15 @@ void main() {
       final pad = find.byKey(const ValueKey('position-drag-pad'));
       expect(tester.getSize(pad).width, greaterThan(size.width - 145));
       expect(tester.getRect(find.byType(PreviewStage)), preview);
-      await tester.tap(find.byTooltip('Opções de transformação'));
+      // O TOOLTIP CARREGA O ESTADO DO AUTO-KEY ("· auto-key ligado") e o
+      // ajuste nasce LIGADO: casar pelo texto exato nunca acha o botao.
+      await tester.tap(
+        find.byWidgetPredicate(
+          (w) =>
+              w is Tooltip &&
+              (w.message ?? '').startsWith('Opções de transformação'),
+        ),
+      );
       await tester.pumpAndSettle();
       final autoBefore = c.read(autoKeyframeProvider);
       await tester.tap(
@@ -99,11 +108,14 @@ void main() {
           .widget<TransformPanel>(find.byType(TransformPanel))
           .onToolChanged(TransformTool.scale);
       await tester.pumpAndSettle();
-      final width = find.byKey(const ValueKey('scale-width-ruler'));
-      final height = find.byKey(const ValueKey('scale-height-ruler'));
-      expect(width.hitTestable(), findsOneWidget);
-      expect(height.hitTestable(), findsOneWidget);
-      tester.widget<AmTickRuler>(height).onChanged(125);
+      // AS FITAS DO PAINEL NOVO, pelo rotulo escrito nelas: as chaves
+      // `scale-*-ruler` eram do controle antigo.
+      Finder fita(String rotulo) => find.byWidgetPredicate(
+        (w) => w is FitaDeAjuste && w.rotulo == rotulo,
+      );
+      expect(fita('Largura').hitTestable(), findsOneWidget);
+      expect(fita('Altura').hitTestable(), findsOneWidget);
+      tester.widget<FitaDeAjuste>(fita('Altura')).aoMudar(125 * 1.0);
       await tester.pumpAndSettle();
       var layer = c.read(editorControllerProvider).layerById(id)!;
       expect(layer.scaleX.base, 1.25);
@@ -122,7 +134,12 @@ void main() {
         find.byKey(const ValueKey('curve-edit-area')),
       );
       expect(graph.height, greaterThan(140));
-      expect(graph.width, greaterThan(size.width - 130));
+      // O GRAFICO PERDE A LARGURA DO TRILHO ESQUERDO (46), que o painel
+      // ganhou depois que este numero foi escrito: o trilho do `‹`, do
+      // losango e da curva e o mesmo em toda ferramenta, e a curva nao
+      // abre excecao. O que o teste guarda e que o grafico NAO encolhe
+      // por causa da coluna de presets — ela e a mesma nos dois lados.
+      expect(graph.width, greaterThanOrEqualTo(size.width - 176));
       expect(tester.getRect(find.byType(PreviewStage)), preview);
       await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 50)),

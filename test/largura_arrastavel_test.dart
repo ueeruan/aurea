@@ -1,6 +1,6 @@
 import 'package:aurea/src/features/editor/application/editor_controller.dart';
 import 'package:aurea/src/features/editor/application/ui/editor_session.dart';
-import 'package:aurea/src/features/editor/presentation/am/am_widgets.dart';
+import 'package:aurea/src/features/editor/presentation/widgets/fita_de_ajuste.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -21,8 +21,14 @@ void main() {
       c.read(editorSessionProvider.notifier).openTransform(TransformTool.scale);
       await tester.pumpAndSettle();
 
-      final largura = find.byKey(const ValueKey('scale-width-ruler'));
-      final altura = find.byKey(const ValueKey('scale-height-ruler'));
+      // AS DUAS FITAS DO PAINEL NOVO, achadas pelo rotulo que esta
+      // escrito nelas. As chaves `scale-width-ruler`/`scale-height-ruler`
+      // eram do controle antigo, que nao esta mais na tela.
+      Finder fita(String rotulo) => find.byWidgetPredicate(
+        (w) => w is FitaDeAjuste && w.rotulo == rotulo,
+      );
+      final largura = fita('Largura');
+      final altura = fita('Altura');
       expect(largura.hitTestable(), findsOneWidget, reason: 'regua de largura');
       expect(altura.hitTestable(), findsOneWidget, reason: 'regua de altura');
 
@@ -30,8 +36,10 @@ void main() {
       // faixa de riscos. Abaixo de uns cem pixels o gesto vira toque, e
       // a pessoa jura que o controle esta quebrado — foi o que
       // aconteceu com a linha "Largura", que sobrava com vinte e tres.
-      Finder superficieDe(Finder regua) =>
-          find.ancestor(of: regua, matching: find.byType(AmArrastoDeValor));
+      // A SUPERFICIE E A PROPRIA FITA: o detector de arrasto mora
+      // dentro dela, ocupando a altura inteira. Nao ha um widget
+      // separado entre os dois.
+      Finder superficieDe(Finder regua) => regua;
       for (final (nome, regua) in [('largura', largura), ('altura', altura)]) {
         expect(superficieDe(regua), findsOneWidget, reason: nome);
         expect(

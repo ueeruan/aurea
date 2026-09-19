@@ -56,6 +56,7 @@ class AlmofadaDeArrasto extends StatefulWidget {
     this.dica = 'Deslize aqui para mover a camada',
     this.rotulo = 'Mover a camada',
     this.cabecalho,
+    this.aoToqueDuplo,
     super.key,
   });
 
@@ -82,6 +83,20 @@ class AlmofadaDeArrasto extends StatefulWidget {
   /// O rotulo de acessibilidade, e o ancoradouro dos testes.
   final String rotulo;
 
+  /// O TOQUE DUPLO NA ALMOFADA. Existe para uma coisa so: devolver o
+  /// que a almofada move ao estado neutro — no pivo, o centro. Sem ele,
+  /// quem arrasta o ponto de giro para longe so tem o botao da fileira
+  /// de cima para voltar, e o gesto de "voltar ao de sempre" e o mesmo
+  /// em toda a casa: dois toques.
+  ///
+  /// ELE NAO E UM `onDoubleTap` DO `GestureDetector`, e o motivo esta
+  /// medido: um reconhecedor de arrasto na mesma arena ENGole os toques
+  /// — o `PanGestureRecognizer` ganha a varredura e o toque duplo nunca
+  /// chega a ver o primeiro toque. A casa ja resolveu isso uma vez, em
+  /// [AreaDeArrasto]: o toque e reconhecido na SOLTA, por tempo, e nao
+  /// pela arena.
+  final VoidCallback? aoToqueDuplo;
+
   @override
   State<AlmofadaDeArrasto> createState() => _AlmofadaDeArrastoState();
 }
@@ -106,8 +121,14 @@ class _AlmofadaDeArrastoState extends State<AlmofadaDeArrasto> {
   /// e o desfazer ficaria com um passo que nao desfaz nada.
   bool _loteAberto = false;
 
+  /// QUANTO O DEDO ANDOU, e quando ele encostou antes. E o que separa um
+  /// TOQUE de um ARRASTO — o arrasto tem lote, o toque nao.
+  double _andou = 0;
+  DateTime? _toqueAnterior;
+
   void _comecar(DragStartDetails _) {
     _acumulado = Offset.zero;
+    _andou = 0;
     setState(() => _dedoNaAlmofada = true);
   }
 
@@ -120,12 +141,25 @@ class _AlmofadaDeArrastoState extends State<AlmofadaDeArrasto> {
       // uma posicao que ninguem anotou.
       widget.aoComecar?.call();
     }
+    _andou += d.delta.distance;
     _acumulado += d.delta;
     widget.aoMover(_acumulado);
   }
 
   void _terminar() {
     if (_dedoNaAlmofada) setState(() => _dedoNaAlmofada = false);
+    // UM TOQUE E NAO UM ARRASTO: o dedo encostou e saiu sem andar. Dois
+    // deles, perto no tempo, sao o toque duplo.
+    if (widget.aoToqueDuplo != null && _andou < 8) {
+      final agora = DateTime.now();
+      final anterior = _toqueAnterior;
+      _toqueAnterior = agora;
+      if (anterior != null &&
+          agora.difference(anterior) < const Duration(milliseconds: 320)) {
+        _toqueAnterior = null;
+        widget.aoToqueDuplo!.call();
+      }
+    }
     if (!_loteAberto) return;
     _loteAberto = false;
     widget.aoTerminar?.call();

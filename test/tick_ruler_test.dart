@@ -27,9 +27,13 @@ void main() {
     final gesto = await tester.startGesture(centro);
     // Tres movimentos de 100 px SEM pump entre eles: chegam no mesmo
     // quadro, como um arrasto rapido de verdade.
-    await gesto.moveBy(const Offset(-100, 0));
-    await gesto.moveBy(const Offset(-100, 0));
-    await gesto.moveBy(const Offset(-100, 0));
+    // PARA A DIREITA AUMENTA. A regua seguia o dedo ao contrario (um
+    // "papel" que se puxa para a esquerda); as fitas do painel sempre
+    // andaram com o dedo, e duas reguas do mesmo painel indo para lados
+    // opostos e a pior resposta possivel. Agora todas andam junto.
+    await gesto.moveBy(const Offset(100, 0));
+    await gesto.moveBy(const Offset(100, 0));
+    await gesto.moveBy(const Offset(100, 0));
     await gesto.up();
     await tester.pump();
 
@@ -51,13 +55,13 @@ void main() {
     ));
     final centro = tester.getCenter(find.byType(AmTickRuler));
     var g = await tester.startGesture(centro);
-    await g.moveBy(const Offset(-40, 0));
+    await g.moveBy(const Offset(40, 0));
     await g.up();
     await tester.pump();
     expect(valor, closeTo(30, 1e-6));
 
     g = await tester.startGesture(centro);
-    await g.moveBy(const Offset(20, 0));
+    await g.moveBy(const Offset(-20, 0));
     await g.up();
     await tester.pump();
     expect(valor, closeTo(20, 1e-6));
@@ -80,7 +84,7 @@ void main() {
     ));
     final centro = tester.getCenter(find.byType(AmTickRuler));
     final g = await tester.startGesture(centro);
-    await g.moveBy(const Offset(-200, 0));
+    await g.moveBy(const Offset(200, 0));
     await g.up();
     await tester.pump();
     expect(valor, 1.0);

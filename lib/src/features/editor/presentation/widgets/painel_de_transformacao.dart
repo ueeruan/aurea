@@ -470,6 +470,10 @@ class _PainelDeTransformacaoState extends ConsumerState<PainelDeTransformacao> {
             // corpo passou a ser este — dois testes de gesto ficaram
             // procurando um dial que nao se acha mais por chave.
             key: const ValueKey('rotation-dial'),
+            passosDeVolta: (
+              mais: 'rotation-turn-plus',
+              menos: 'rotation-turn-minus',
+            ),
             angulo: l.rotation.valueAt(_local),
             aoComecar: _abrirLote,
             aoMudar: (g) => _c.editRotation(l.id, widget.tempo, g),
@@ -592,11 +596,13 @@ class _PainelDeTransformacaoState extends ConsumerState<PainelDeTransformacao> {
         return AlmofadaDeArrasto(
           key: const ValueKey('pivot-drag-pad'),
           rotulo: 'Pivô da camada',
-          dica: 'Deslize o ponto de giro · o botão Centro devolve o zero',
+          dica: 'Deslize o ponto de giro · toque duplo = centro',
           // SEM CABECALHO AQUI: a fileira de campos ja esta na linha de
           // cima, como nas outras faces que nao sao o mover. Com o
           // cabecalho, os mesmos dois campos apareciam DUAS vezes — um
           // em cima do outro, com o mesmo rotulo.
+          aoToqueDuplo: () =>
+              _c.editPivot(l.id, widget.tempo, Offset.zero),
           aoComecar: () {
             _pivoAoComecar = l.pivot.valueAt(_local);
             _abrirLote();

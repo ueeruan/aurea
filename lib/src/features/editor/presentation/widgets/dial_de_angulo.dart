@@ -1,6 +1,6 @@
 import 'dart:math' as math;
 
-import 'package:flutter/widgets.dart';
+import 'package:flutter/cupertino.dart';
 
 import '../../../../core/ui/am_colors.dart';
 import 'campo_de_valor.dart';
@@ -64,6 +64,7 @@ class DialDeAngulo extends StatefulWidget {
     this.aoTerminar,
     this.rotulo = 'Girar a camada',
     this.compacto = false,
+    this.passosDeVolta,
     super.key,
   });
 
@@ -98,6 +99,16 @@ class DialDeAngulo extends StatefulWidget {
   /// pixel.
   final bool compacto;
 
+  /// OS CHIPS DE VOLTA INTEIRA, um para cada lado.
+  ///
+  /// CIRCULAR UMA VOLTA COM O DEDO E CARO: o dedo sai do dial, a mao
+  /// cobre o numero e o gesto termina longe de onde comecou. Quem quer
+  /// "mais uma volta" quer um toque, e nao um circulo de 360 graus. O
+  /// par so aparece quando quem monta diz o nome das chaves — sao os
+  /// testes que ancoram neles, e um dial de tres nao tem largura para
+  /// dois chips.
+  final ({String mais, String menos})? passosDeVolta;
+
   double get _raio => compacto ? 10 : _raioDoBotao;
   double get _folga => folgaParaBotao(_raio);
   double get _miolo => compacto ? 12 : _mioloSurdo;
@@ -123,8 +134,24 @@ class _DialDeAnguloState extends State<DialDeAngulo> {
   /// mandando.
   double _total = 0;
 
+  /// QUANTO O DEDO ANDOU, EM PIXELS. Separa o TOQUE SECO do giro: o
+  /// giro escreve a cada quadro, o toque so escreve na solta.
+  ///
+  /// E A DISTANCIA PERCORRIDA, e nao a soma dos angulos: um dedo que
+  /// atravessa o miolo em linha reta anda 160 px e nao muda angulo
+  /// nenhum — e o teste que guarda isso e exatamente esse caso.
+  double _andou = 0;
+  Offset _localAnterior = Offset.zero;
+
+  /// A POSICAO DO ULTIMO TOQUE, para saber onde o dedo parou quando ele
+  /// nao andou.
+  Offset _ultimoToque = Offset.zero;
+
   void _comecar(Offset toque, Offset centro) {
     _arrastando = true;
+    _andou = 0;
+    _localAnterior = toque;
+    _ultimoToque = toque;
     // COMECAR EM CIMA DO NUMERO NAO DA REFERENCIA: a caixa do valor
     // fica no centro do dial, e o angulo de um toque a dois pixels do
     // centro e ruido. Nulo aqui adia a partida para o primeiro quadro
@@ -136,6 +163,8 @@ class _DialDeAnguloState extends State<DialDeAngulo> {
 
   void _mover(Offset toque, Offset centro) {
     if (!_arrastando) return;
+    _andou += (toque - _localAnterior).distance;
+    _localAnterior = toque;
     if (!_foraDoMiolo(toque, centro)) {
       _cruAnterior = null;
       return;
@@ -159,10 +188,22 @@ class _DialDeAnguloState extends State<DialDeAngulo> {
     widget.aoMudar(_total);
   }
 
-  void _terminar() {
+  void _terminar(Offset centro) {
     if (!_arrastando) return;
     _arrastando = false;
     _cruAnterior = null;
+    // TOQUE SECO: o dedo encostou e saiu sem girar. Ele poe o angulo
+    // TOCADO NA VOLTA EM QUE A CAMADA JA ESTA — 390 e "30 graus, 1x";
+    // tocar nas 3 horas da 360+0, e nao zero. Sem isso, mirar num
+    // angulo exato exigia girar o dedo ate a marcacao acertar.
+    if (_andou < 2 && _foraDoMiolo(_ultimoToque, centro)) {
+      final voltas = (widget.angulo / 360).floorToDouble();
+      final tocado = _cru(_ultimoToque, centro);
+      widget.aoComecar?.call();
+      widget.aoMudar(voltas * 360 + tocado);
+      widget.aoTerminar?.call();
+      return;
+    }
     widget.aoTerminar?.call();
   }
 
@@ -208,7 +249,11 @@ class _DialDeAnguloState extends State<DialDeAngulo> {
         0.0,
         (math.min(largura, altura) - widget._folga) / 2,
       );
+      // O ULTIMO TOQUE VALE PARA A SOLTA: e por ele que o toque seco
+      // sabe que angulo foi apontado.
+      void anotar(Offset local) => _ultimoToque = local;
       final texto = _texto(widget.angulo);
+      final chaves = widget.passosDeVolta;
       return Semantics(
         container: true,
         excludeSemantics: true,
@@ -217,10 +262,16 @@ class _DialDeAnguloState extends State<DialDeAngulo> {
         value: texto,
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onPanStart: (d) => _comecar(d.localPosition, centro),
-          onPanUpdate: (d) => _mover(d.localPosition, centro),
-          onPanEnd: (_) => _terminar(),
-          onPanCancel: _terminar,
+          onPanStart: (d) {
+            anotar(d.localPosition);
+            _comecar(d.localPosition, centro);
+          },
+          onPanUpdate: (d) {
+            anotar(d.localPosition);
+            _mover(d.localPosition, centro);
+          },
+          onPanEnd: (_) => _terminar(centro),
+          onPanCancel: () => _terminar(centro),
           child: SizedBox(
             width: largura,
             height: altura,
@@ -237,12 +288,83 @@ class _DialDeAnguloState extends State<DialDeAngulo> {
                   ),
                 ),
                 _CaixaDoAngulo(texto: texto, compacto: widget.compacto),
+                // OS DOIS CHIPS DE VOLTA, nas pontas do dial: um tira
+                // uma volta, o outro poe. Ficam FORA do anel para nao
+                // roubar o gesto de girar.
+                if (chaves != null) ...[
+                  Positioned(
+                    left: 0,
+                    child: _ChipDeVolta(
+                      chave: chaves.mais,
+                      icone: CupertinoIcons.plus,
+                      dica: 'Mais uma volta',
+                      aoTocar: () {
+                        widget.aoComecar?.call();
+                        widget.aoMudar(widget.angulo + 360);
+                        widget.aoTerminar?.call();
+                      },
+                    ),
+                  ),
+                  Positioned(
+                    right: 0,
+                    child: _ChipDeVolta(
+                      chave: chaves.menos,
+                      icone: CupertinoIcons.minus,
+                      dica: 'Menos uma volta',
+                      aoTocar: () {
+                        widget.aoComecar?.call();
+                        widget.aoMudar(widget.angulo - 360);
+                        widget.aoTerminar?.call();
+                      },
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
         ),
       );
     },
+  );
+}
+
+/// UM CHIP DE VOLTA INTEIRA: um alvo pequeno, redondo e sempre visivel
+/// na ponta do dial. Ele nao some quando o dial esta parado — some-lo
+/// seria esconder a unica saida de quem nao consegue circular o dedo.
+class _ChipDeVolta extends StatelessWidget {
+  const _ChipDeVolta({
+    required this.chave,
+    required this.icone,
+    required this.dica,
+    required this.aoTocar,
+  });
+
+  final String chave;
+  final IconData icone;
+  final String dica;
+  final VoidCallback aoTocar;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    container: true,
+    excludeSemantics: true,
+    button: true,
+    label: dica,
+    child: GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: aoTocar,
+      child: Container(
+        key: ValueKey(chave),
+        width: 24,
+        height: 24,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: AmColors.chip,
+          borderRadius: BorderRadius.circular(7),
+        ),
+        child: Icon(icone, size: 13, color: AmColors.text),
+      ),
+    ),
   );
 }
 

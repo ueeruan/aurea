@@ -283,5 +283,23 @@ void main() {
     await tester.pumpWidget(appWrap(EditorScreen(playback: playback)));
     await tester.pumpAndSettle();
     await gravar('11_curva_de_gradacao');
+
+    // 12. PRINT DO PIVO — A QUINTA FACE DO PAINEL TRANSFORMAR. O ponto de
+    // giro ganhou superficie propria: dois campos e uma almofada de
+    // arrasto, no lugar de digitar dois numeros e torcer.
+    controller.editPivot(
+      shapeLayer.id,
+      const Duration(milliseconds: 333),
+      const Offset(120, -80),
+    );
+    container.read(selectedLayerProvider.notifier).state = shapeLayer.id;
+    container.read(editorSessionProvider.notifier).openPanel(EditorPanel.transform);
+    container.read(editorSessionProvider.notifier).setTool(TransformTool.pivot);
+    container.read(modoDeTransformacaoProvider.notifier).state =
+        ModoDeTransformacao.pivo;
+    playback.seek(const Duration(milliseconds: 333));
+    await tester.pumpWidget(appWrap(EditorScreen(playback: playback)));
+    await tester.pumpAndSettle();
+    await gravar('12_pivo_quinta_face');
   });
 }

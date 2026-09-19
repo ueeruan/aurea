@@ -3,7 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/ui/snack.dart';
+import '../../../../core/utils/time_format.dart';
 import '../../application/editor_controller.dart';
+import '../../application/ui/editor_session.dart';
+import '../../application/ui/pro_mode.dart';
 import '../../application/playback_controller.dart';
 import '../../domain/layer.dart';
 import '../am/am_colors.dart';
@@ -293,6 +296,66 @@ Future<void> menuDasMarcas(
               AureaSnack.show(context, '$n camadas distribuidas');
             },
           ),
+          // --------------------------------------- Entrada e Saida (Pro)
+          //
+          // AS DUAS PONTAS DA EDICAO DE 3 PONTOS. Elas so existiam como
+          // DESENHO: a regua ja pintava as marcas `I` e `O` quando a
+          // sessao tinha os pontos, e as acoes rapidas da camada ja
+          // ofereciam Levantar e Extrair — mas nao havia NENHUM jeito de
+          // marcar os pontos. Os dois botoes diziam "Marque Entrada (I) e
+          // Saida (O) na regua" e a regua nao tinha onde.
+          //
+          // ELAS MORAM AQUI, e nao na regua: o dono mandou tirar da
+          // regua tudo o que a atravancava, e ha teste guardando isso.
+          // Este e o menu das marcas — o lugar do assunto.
+          if (ref.read(proModeProvider))
+            for (final (chave, rotulo, dica, tempo, marcar) in [
+              (
+                'timeline-entrada',
+                'Marcar Entrada (I)',
+                'O comeco do trecho que Levantar e Extrair usam',
+                ref.read(editorSessionProvider).inPoint,
+                () => ref
+                    .read(editorSessionProvider.notifier)
+                    .setInPoint(playback.time.value),
+              ),
+              (
+                'timeline-saida',
+                'Marcar Saida (O)',
+                'O fim do trecho que Levantar e Extrair usam',
+                ref.read(editorSessionProvider).outPoint,
+                () => ref
+                    .read(editorSessionProvider.notifier)
+                    .setOutPoint(playback.time.value),
+              ),
+            ])
+              ListTile(
+                key: ValueKey(chave),
+                leading: Icon(
+                  tempo == null
+                      ? CupertinoIcons.arrow_right_to_line
+                      : CupertinoIcons.checkmark_circle_fill,
+                  size: 19,
+                  color: tempo == null ? AmColors.text : AmColors.accent,
+                ),
+                title: AppText(
+                  rotulo,
+                  style: const TextStyle(color: AmColors.text, fontSize: 15),
+                ),
+                subtitle: AppText(
+                  tempo == null
+                      ? dica
+                      : 'ja marcado em ${formatTimecode(tempo, 30)}',
+                  style: const TextStyle(
+                    color: AmColors.muted,
+                    fontSize: 11.5,
+                  ),
+                ),
+                onTap: () {
+                  marcar();
+                  Navigator.of(sheetContext).pop();
+                },
+              ),
           // -------------------------------------------------- batidas
           //
           // A GRADE DO RITMO mora aqui porque e daqui que se navega e se

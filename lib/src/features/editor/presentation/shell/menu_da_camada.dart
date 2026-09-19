@@ -544,15 +544,19 @@ class _ItensDaCamada extends ConsumerWidget {
           icone: CupertinoIcons.square_grid_2x2,
           rotulo: 'Todas as ações…',
           onTap: () => fecharE(
+            // A LISTA VAI COMO RECEITA, e nao pronta: quem monta e a
+            // folha, com um `ref` que vive enquanto ela viver. Montar
+            // aqui usaria o `ref` deste menu, que este mesmo toque
+            // acabou de fechar.
             () => showAllActionsSheet(
               ctx,
-              quickActionsFor(
+              (refDaFolha) => quickActionsFor(
                 ctx,
-                ref,
+                refDaFolha,
                 layer,
                 playback,
-                pro: ref.read(proModeProvider),
-                onAnimarTexto: () => ref
+                pro: refDaFolha.read(proModeProvider),
+                onAnimarTexto: () => refDaFolha
                     .read(editorSessionProvider.notifier)
                     .openText(TextSection.animation),
               ),

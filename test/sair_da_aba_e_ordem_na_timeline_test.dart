@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'editor_audit_helpers.dart';
 import 'editor_hierarchy_test.dart' show openEditor;
 
 /// OS PEDIDOS DO BETA SOBRE A TIMELINE E AS ABAS:
@@ -33,13 +34,18 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Movimentação e transformação'));
     await tester.pumpAndSettle();
-    expect(find.byTooltip('Girar'), findsOneWidget, reason: 'o painel abriu');
+    expect(abaDoTrilho('Girar'), findsOneWidget, reason: 'o painel abriu');
 
-    final voltar = find.byKey(const ValueKey('painel-voltar'));
-    expect(voltar, findsOneWidget);
+    // DOIS VOLTARES NO PAINEL, e os dois sao de verdade: o do
+    // CABECALHO da zona E (a casca do painel) fecha a ferramenta
+    // inteira, e o do TRILHO esquerdo volta um nivel, para a grade de
+    // categorias. Sao duas perguntas diferentes. Este caso mede o do
+    // cabecalho — o primeiro na arvore.
+    final voltar = find.byKey(const ValueKey('painel-voltar')).first;
+    expect(voltar, findsWidgets);
     await tester.tap(voltar);
     await tester.pumpAndSettle();
-    expect(find.byTooltip('Girar'), findsNothing, reason: 'o painel fechou');
+    expect(abaDoTrilho('Girar'), findsNothing, reason: 'o painel fechou');
     expect(
       find.text('Movimentação e transformação'),
       findsOneWidget,
@@ -56,14 +62,19 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Movimentação e transformação'));
       await tester.pumpAndSettle();
-      expect(find.byTooltip('Girar'), findsOneWidget);
+      expect(abaDoTrilho('Girar'), findsOneWidget);
 
-      // A barra fica no comeco da linha (a camada comeca em 0 s).
-      final linha = tester.getRect(find.byKey(ValueKey(id)));
-      await tester.tapAt(Offset(linha.left + 30, linha.top + kAmBarHeight / 2));
+      // A BARRA E O PROPRIO ALVO, e nao um ponto adivinhado dentro da
+      // linha: `ValueKey(id)` e a LINHA inteira (barra + faixa de
+      // keyframes + o vazio ao lado), e um offset fixo a partir da
+      // esquerda dela cai no vazio — o toque de la DESMARCA, que e o
+      // caso do teste seguinte. A barra tem chave propria.
+      final barra = find.byKey(ValueKey('clip-content-$id'));
+      expect(barra, findsOneWidget);
+      await tester.tap(barra);
       await tester.pumpAndSettle();
       expect(
-        find.byTooltip('Girar'),
+        abaDoTrilho('Girar'),
         findsNothing,
         reason: 'o toque na barra fechou o painel',
       );
@@ -112,16 +123,17 @@ void main() {
     c.read(selectedLayerProvider.notifier).state = deBaixo;
     await tester.pumpAndSettle();
 
-    final linha = tester.getRect(find.byKey(ValueKey(deBaixo)));
-    final pegada = Offset(linha.left + 30, linha.top + kAmBarHeight / 2);
-    // UMA LINHA E MEIA para cima, devagar (varios passos, como um dedo).
-    //
-    // Uma linha exata nao basta e nunca bastou: o reconhecedor de arrasto
-    // so entra depois da folga de 18 px, e o degrau da pilha so troca
-    // depois de meia linha ACEITA. Um gesto de 38 px fica na divisa, e o
-    // teste passava ou nao conforme o arredondamento do layout. Quem
-    // arrasta com o dedo anda bem mais que isso.
-    final dedo = await tester.startGesture(pegada);
+    // O GESTO E TOQUE LONGO + ARRASTAR, e nao um arrasto simples: o
+    // degrau da pilha mora no `onLongPressMoveUpdate` da barra. Enquanto
+    // o teste so arrastava, ele media um gesto que o aplicativo nao
+    // atende — e o `kAmBarHeight` do papel nao valia nada, porque a
+    // pegada caia fora da barra.
+    final dedo = await tester.startGesture(
+      tester.getCenter(find.byKey(ValueKey('clip-content-$deBaixo'))),
+    );
+    // O RECONHECEDOR DE TOQUE LONGO precisa do tempo parado antes do
+    // primeiro pixel: `longPressTimeout` e 500 ms.
+    await tester.pump(const Duration(milliseconds: 600));
     for (var i = 1; i <= 9; i++) {
       await dedo.moveBy(const Offset(0, -kAmRowHeight / 6));
       await tester.pump(const Duration(milliseconds: 16));
@@ -135,10 +147,10 @@ void main() {
     );
 
     // E para baixo, de volta.
-    final linhaNova = tester.getRect(find.byKey(ValueKey(deBaixo)));
     final dedo2 = await tester.startGesture(
-      Offset(linhaNova.left + 30, linhaNova.top + kAmBarHeight / 2),
+      tester.getCenter(find.byKey(ValueKey('clip-content-$deBaixo'))),
     );
+    await tester.pump(const Duration(milliseconds: 600));
     for (var i = 1; i <= 9; i++) {
       await dedo2.moveBy(const Offset(0, kAmRowHeight / 6));
       await tester.pump(const Duration(milliseconds: 16));
@@ -155,11 +167,20 @@ void main() {
     final id = c.read(editorControllerProvider).layers.first.id;
     c.read(selectedLayerProvider.notifier).state = id;
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Mesclar e\nopacidade'));
+    await tester.tap(find.text('Mistura e opacidade'));
     await tester.pumpAndSettle();
     // A aba de modos de mescla.
     await tester.tap(find.text('Mesclagem'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('por baixo desta'), findsOneWidget);
+    // A NOTA E A ULTIMA LINHA DA LISTA, e a lista e preguicosa: ela so
+    // existe depois de rolada ate o fim. Procurar sem rolar mediria a
+    // altura do painel, e nao a presenca do aviso.
+    await tester.dragUntilVisible(
+      find.textContaining('camadas abaixo'),
+      find.byKey(const ValueKey('mescla-categorias')),
+      const Offset(0, -80),
+    );
+    await tester.pumpAndSettle();
+    expect(find.textContaining('camadas abaixo'), findsOneWidget);
   });
 }

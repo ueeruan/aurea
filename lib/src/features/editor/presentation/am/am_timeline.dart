@@ -189,6 +189,11 @@ class _AmTimelineState extends ConsumerState<AmTimeline> {
   String? _revealedSingleLayer;
   int _revealedKeyCount = -1;
 
+  /// A LINHA em que a selecao estava na ultima revelacao. Reordenar
+  /// troca a linha sem trocar a selecao, e era por isso que a camada
+  /// movida saia pela borda.
+  int _revealedLinha = -1;
+
   void _syncRows(ScrollController source, ScrollController target) {
     if (_syncingRows || !source.hasClients || !target.hasClients) return;
     _syncingRows = true;
@@ -377,13 +382,25 @@ class _AmTimelineState extends ConsumerState<AmTimeline> {
     final sessao = ref.watch(editorSessionProvider);
     final selected = selectedId == null ? null : project.layerById(selectedId);
     final keyCount = selected?.keyframeTimes.length ?? 0;
+    final linhaDaSelecao =
+        trilhas.indexWhere((t) => t.any((l) => l.id == selectedId));
+    // A LINHA TAMBEM CONTA, e nao so a selecao.
+    //
+    // Revelar so quando a selecao muda deixa um buraco exatamente no
+    // gesto de REORDENAR: arrastar a camada um degrau para cima troca a
+    // linha dela, a rolagem antiga fica como estava, e a camada que
+    // acabou de ser movida sai pela borda de cima — meia escondida
+    // atras da regua. Quem arrasta perde de vista justamente o que
+    // arrastou.
     if (_revealedSelection != selectedId ||
         _revealedKeyCount != keyCount ||
+        _revealedLinha != linhaDaSelecao ||
         _revealedSingleLayer != widget.singleLayerId) {
       _revealedSelection = selectedId;
       _revealedKeyCount = keyCount;
+      _revealedLinha = linhaDaSelecao;
       _revealedSingleLayer = widget.singleLayerId;
-      final index = trilhas.indexWhere((t) => t.any((l) => l.id == selectedId));
+      final index = linhaDaSelecao;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted ||
             !_rowsScroll.hasClients ||

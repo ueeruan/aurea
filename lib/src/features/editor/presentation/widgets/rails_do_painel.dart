@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -135,38 +136,56 @@ class RailDireito extends StatelessWidget {
   @override
   Widget build(BuildContext context) => SizedBox(
     width: largura,
-    child: Column(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-      children: [
-        for (var i = 0; i < modos.length; i++)
-          Semantics(
-            container: true,
-            excludeSemantics: true,
-            button: true,
-            selected: i == vigente,
-            label: modos[i].$2,
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () => aoEscolher(i),
-              child: Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: i == vigente ? const Color(0xFF1E222D) : Colors.transparent,
-                  borderRadius: BorderRadius.circular(8),
-                  border: i == vigente
-                      ? Border.all(color: AmColors.accent, width: 1.5)
-                      : null,
-                ),
-                child: Icon(
-                  modos[i].$1,
-                  size: 20,
-                  color: i == vigente ? AmColors.accent : const Color(0xFF8B94A3),
+    // O BOTAO ENCOLHE QUANDO A COLUNA NAO CABE.
+    //
+    // Sao cinco modos e um painel baixo (um 320x568 com o painel no
+    // minimo): cinco botoes de 36 nao cabem, e a coluna estourava por
+    // 8,8 px. O trilho e uma fileira de icones — encolher mantem os
+    // cinco ALCANCAVEIS, e um trilho que rola para mostrar o quinto
+    // esconde justamente a face que ele veio oferecer.
+    child: LayoutBuilder(
+      builder: (context, restricoes) {
+        final altura = restricoes.maxHeight.isFinite && modos.isNotEmpty
+            ? math.min(36.0, restricoes.maxHeight / modos.length)
+            : 36.0;
+        return Column(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            for (var i = 0; i < modos.length; i++)
+              Semantics(
+                container: true,
+                excludeSemantics: true,
+                button: true,
+                selected: i == vigente,
+                label: modos[i].$2,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => aoEscolher(i),
+                  child: Container(
+                    width: math.min(36.0, altura),
+                    height: altura,
+                    decoration: BoxDecoration(
+                      color: i == vigente
+                          ? const Color(0xFF1E222D)
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(8),
+                      border: i == vigente
+                          ? Border.all(color: AmColors.accent, width: 1.5)
+                          : null,
+                    ),
+                    child: Icon(
+                      modos[i].$1,
+                      size: math.min(20.0, altura * .6),
+                      color: i == vigente
+                          ? AmColors.accent
+                          : const Color(0xFF8B94A3),
+                    ),
+                  ),
                 ),
               ),
-            ),
-          ),
-      ],
+          ],
+        );
+      },
     ),
   );
 }

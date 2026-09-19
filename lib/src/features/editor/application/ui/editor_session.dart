@@ -14,6 +14,47 @@ LayerProp propOfTool(TransformTool tool) => switch (tool) {
   TransformTool.opacity => LayerProp.opacity,
 };
 
+/// AS CINCO FACES DO PAINEL TRANSFORMAR, na ordem do trilho direito.
+///
+/// O PIVO E A QUINTA. Ele voltou a ter superficie propria: o ponto de
+/// giro se ajusta ARRASTANDO, no lugar de digitar dois numeros e torcer
+/// para o ponto cair onde o olho queria. Sem uma face para ele, o item
+/// "Editar pivo" do menu trocava o titulo do painel e nao abria nada —
+/// um controle que mentia.
+enum ModoDeTransformacao { mover, girar, escalar, inclinar, pivo }
+
+/// A FACE DE CADA FERRAMENTA. Uma tabela, e nao tres interruptores
+/// iguais espalhados: o corpo do painel, o titulo do cabecalho e o
+/// losango do trilho precisam concordar, e concordam porque leem daqui.
+///
+/// A OPACIDADE NAO TEM FACE. Ela mora em "Mistura e opacidade" desde o
+/// redesign; enquanto o menu Transformar oferecia "Opacidade", a escolha
+/// trocava o titulo para "Transformar · Opacidade" e deixava o corpo na
+/// face anterior — o controle parecia quebrado, e era.
+ModoDeTransformacao? modoDoTool(TransformTool tool) => switch (tool) {
+  TransformTool.position => ModoDeTransformacao.mover,
+  TransformTool.rotation => ModoDeTransformacao.girar,
+  TransformTool.scale => ModoDeTransformacao.escalar,
+  TransformTool.skew => ModoDeTransformacao.inclinar,
+  TransformTool.pivot => ModoDeTransformacao.pivo,
+  TransformTool.opacity => null,
+};
+
+TransformTool toolDoModo(ModoDeTransformacao modo) => switch (modo) {
+  ModoDeTransformacao.mover => TransformTool.position,
+  ModoDeTransformacao.girar => TransformTool.rotation,
+  ModoDeTransformacao.escalar => TransformTool.scale,
+  ModoDeTransformacao.inclinar => TransformTool.skew,
+  ModoDeTransformacao.pivo => TransformTool.pivot,
+};
+
+LayerProp propDoModo(ModoDeTransformacao modo) => propOfTool(toolDoModo(modo));
+
+/// A face escolhida no trilho direito. Vive aqui, e nao no widget, porque
+/// o titulo do painel e o losango do trilho sao de fora do widget.
+final modoDeTransformacaoProvider =
+    StateProvider<ModoDeTransformacao>((_) => ModoDeTransformacao.mover);
+
 /// AS SUB-ABAS DO PAINEL EDITAR FORMA.
 enum ShapeTool { size, corners, points, angle, rotation, stroke, draw, nodes }
 
@@ -218,14 +259,28 @@ class EditorSessionNotifier extends AutoDisposeNotifier<EditorSession> {
     }
   }
 
-  void setTool(TransformTool tool) => state = state.copyWith(tool: tool);
+  void setTool(TransformTool tool) {
+    state = state.copyWith(tool: tool);
+    _seguirFerramenta(tool);
+  }
+
+  /// QUEM ESCOLHE A FERRAMENTA ESCOLHE A FACE. O trilho direito e a
+  /// unica coisa que muda a face DEPOIS que o painel esta aberto; toda
+  /// outra porta (o aviso "este keyframe e de Pivo", a ficha, o menu)
+  /// entra por aqui, e por isso nao existe mais o caso de o titulo
+  /// dizer uma propriedade e o corpo mostrar outra.
+  void _seguirFerramenta(TransformTool tool) {
+    final modo = modoDoTool(tool);
+    if (modo != null) ref.read(modoDeTransformacaoProvider.notifier).state = modo;
+  }
 
   void setShapeTool(ShapeTool tool) => state = state.copyWith(shapeTool: tool);
 
-  void openTransform([TransformTool? tool]) => state = state.copyWith(
-    panel: EditorPanel.transform,
-    tool: tool ?? state.tool,
-  );
+  void openTransform([TransformTool? tool]) {
+    final escolhida = tool ?? state.tool;
+    state = state.copyWith(panel: EditorPanel.transform, tool: escolhida);
+    _seguirFerramenta(escolhida);
+  }
 
   void openShape(ShapeTool tool) =>
       state = state.copyWith(panel: EditorPanel.editShape, shapeTool: tool);

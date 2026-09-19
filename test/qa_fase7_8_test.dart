@@ -49,15 +49,60 @@ void main() {
   });
 
   testWidgets('alvos de toque: barras de cima e de transporte com 44 pt', (tester) async {
-    await openEditor(tester);
-    for (final k in [
-      'editor-back', 'editor-undo', 'editor-redo', 'editor-settings', 'editor-export',
-      'transport-start', 'transport-play', 'transport-end', 'camada-duplicar', 'transport-expand', 'editor-fab',
-    ]) {
-      final r = tester.getSize(find.byKey(ValueKey(k)));
-      expect(r.height, greaterThanOrEqualTo(44), reason: '$k altura ${r.height}');
-      expect(r.width, greaterThanOrEqualTo(40), reason: '$k largura ${r.width}');
+    final c = await openEditor(tester);
+
+    Future<void> medir(List<String> chaves, String quando) async {
+      for (final k in chaves) {
+        expect(
+          find.byKey(ValueKey(k)),
+          findsOneWidget,
+          reason: '$k na tela ($quando)',
+        );
+        final r = tester.getSize(find.byKey(ValueKey(k)));
+        expect(
+          r.height,
+          greaterThanOrEqualTo(44),
+          reason: '$k altura ${r.height} ($quando)',
+        );
+        expect(
+          r.width,
+          greaterThanOrEqualTo(40),
+          reason: '$k largura ${r.width} ($quando)',
+        );
+      }
     }
+
+    // SEM SELECAO: a barra de cima e a DO PROJETO — voltar, desfazer,
+    // refazer, projeto e exportar.
+    await medir(const [
+      'editor-back',
+      'editor-undo',
+      'editor-redo',
+      'editor-settings',
+      'editor-export',
+      'transport-start',
+      'transport-play',
+      'transport-end',
+      'transport-expand',
+      'editor-fab',
+    ], 'sem selecao');
+
+    // COM SELECAO: a barra da camada TOMA O LUGAR da do projeto (o
+    // comentario esta escrito na propria `BarraDaCamada`). Projeto e
+    // exportar saem de cena — procurar os dois aqui acusaria o aplicativo
+    // por uma troca que ele faz de proposito.
+    c.read(selectedLayerProvider.notifier).state =
+        c.read(editorControllerProvider).layers.first.id;
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('editor-settings')), findsNothing);
+    await medir(const [
+      'editor-back',
+      'camada-duplicar',
+      'transport-start',
+      'transport-play',
+      'transport-end',
+      'transport-expand',
+    ], 'com selecao');
   });
 
   testWidgets('fluxos da secao 10: dividir em 1 toque, categoria em 2, keyframe em 1', (tester) async {
@@ -84,7 +129,7 @@ void main() {
     final sel = c.read(selectedLayerProvider)!;
     await tester.tap(find.text('Movimentação e transformação'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Adicionar keyframe neste instante'));
+    await tester.tap(find.bySemanticsLabel('Marcar keyframe aqui'));
     await tester.pumpAndSettle();
     expect(c.read(editorControllerProvider).layerById(sel)!.keyframeTimes, isNotEmpty);
   });
@@ -119,9 +164,17 @@ void main() {
       final playback = tester.widget<PreviewStage>(find.byType(PreviewStage)).playback;
       playback.seek(const Duration(seconds: 1));
       await tester.pumpAndSettle();
+      // AS MARCAS MORAM NO MENU DAS MARCAS. Elas ficaram um tempo na
+      // regua, e o dono mandou tirar da regua tudo o que a atravanca —
+      // ha teste guardando isso. Entrada e Saida sao assunto de marca,
+      // e o menu de marcas e onde o assunto mora.
+      await tester.tap(find.byKey(const ValueKey('timeline-selo-do-tempo')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('timeline-entrada')));
       await tester.pumpAndSettle();
       playback.seek(const Duration(seconds: 2));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('timeline-selo-do-tempo')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('timeline-saida')));
       await tester.pumpAndSettle();
@@ -166,9 +219,17 @@ void main() {
     final texto = c.read(editorControllerProvider).layers.whereType<TextLayer>().single;
     c.read(selectedLayerProvider.notifier).state = texto.id;
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Editar\ntexto'));
+    await tester.tap(find.text('Editar texto'));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.byKey(const ValueKey('texto-dados')));
+    // A LINHA DE DADOS E A ULTIMA DA LISTA, e a lista e preguicosa: ela
+    // so existe depois de rolada ate o fim. `ensureVisible` exige o
+    // elemento na arvore, e antes de rolar ele nao esta.
+    await tester.dragUntilVisible(
+      find.byKey(const ValueKey('texto-dados')),
+      find.byType(ListView).last,
+      const Offset(0, -60),
+    );
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('texto-dados')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('texto-dados-nome')));

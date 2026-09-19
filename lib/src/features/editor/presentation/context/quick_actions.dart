@@ -521,9 +521,19 @@ class QuickActionsRow extends StatelessWidget {
 
 /// O botao "MAIS" do cabecalho abre TODAS as acoes com rotulo, em lista
 /// — nao e menu escondido: cada uma tambem esta na linha rolavel.
+///
+/// AS ACOES SAO MONTADAS DENTRO DA FOLHA, com o `ref` DELA.
+///
+/// Elas eram montadas do lado de fora, pelo `ref` do menu da camada — e
+/// o menu se fecha justamente para abrir esta folha. O `ref` morria no
+/// mesmo gesto que pedia as acoes: "Dividir" funcionava (ele carrega o
+/// controller junto) e "Levantar" e "Extrair" estouravam
+/// `Cannot use "ref" after the widget was disposed`, porque leem a
+/// sessao na hora do toque. Um menu cujas acoes dependem de quem o
+/// abriu so funciona enquanto ele estiver aberto.
 Future<void> showAllActionsSheet(
   BuildContext context,
-  List<QuickAction> actions,
+  List<QuickAction> Function(WidgetRef ref) montar,
 ) {
   return showModalBottomSheet<void>(
     context: context,
@@ -539,33 +549,35 @@ Future<void> showAllActionsSheet(
           constraints: BoxConstraints(
             maxHeight: MediaQuery.of(ctx).size.height * .7,
           ),
-          child: ListView(
-            shrinkWrap: true,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(18, 14, 18, 6),
-                child: AppText('Acoes da camada',
-                  style: TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w700,
-                    color: t.text,
+          child: Consumer(
+            builder: (_, ref, _) => ListView(
+              shrinkWrap: true,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 14, 18, 6),
+                  child: AppText('Acoes da camada',
+                    style: TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700,
+                      color: t.text,
+                    ),
                   ),
                 ),
-              ),
-              for (final a in actions)
-                ListTile(
-                  key: ValueKey('mais-${a.key}'),
-                  leading: Icon(a.icon, color: a.aceso ? t.accent : t.text),
-                  title: AppText(a.label, style: TextStyle(color: t.text)),
-                  enabled: a.enabled,
-                  onTap: () {
-                    HapticFeedback.lightImpact();
-                    Navigator.pop(ctx);
-                    a.onTap();
-                  },
-                ),
-              const SizedBox(height: 8),
-            ],
+                for (final a in montar(ref))
+                  ListTile(
+                    key: ValueKey('mais-${a.key}'),
+                    leading: Icon(a.icon, color: a.aceso ? t.accent : t.text),
+                    title: AppText(a.label, style: TextStyle(color: t.text)),
+                    enabled: a.enabled,
+                    onTap: () {
+                      HapticFeedback.lightImpact();
+                      Navigator.pop(ctx);
+                      a.onTap();
+                    },
+                  ),
+                const SizedBox(height: 8),
+              ],
+            ),
           ),
         ),
       );

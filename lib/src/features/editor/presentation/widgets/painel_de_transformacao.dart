@@ -6,6 +6,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/ui/am_colors.dart';
 import '../../application/editor_controller.dart';
 import '../../application/playback_controller.dart';
+import '../../application/ui/editor_session.dart'
+    show ModoDeTransformacao, modoDeTransformacaoProvider;
 import '../../application/ui/preview_resolution.dart';
 import '../../domain/ajuste_da_midia.dart';
 import '../../domain/layer.dart';
@@ -16,13 +18,6 @@ import 'faixa_de_bloqueio.dart';
 import 'fita_de_ajuste.dart';
 import 'rails_do_painel.dart';
 
-/// OS QUATRO MODOS, na ordem do rail direito da referencia.
-enum ModoDeTransformacao { mover, girar, escalar, inclinar }
-
-final modoDeTransformacaoProvider = StateProvider<ModoDeTransformacao>(
-  (ref) => ModoDeTransformacao.mover,
-);
-
 /// LARGURA E ALTURA ANDAM JUNTAS?
 ///
 /// Travado e o padrao porque e o que quase toda edicao quer: aumentar
@@ -32,7 +27,7 @@ final escalaTravadaProvider = StateProvider<bool>((ref) => true);
 
 /// O PAINEL DE TRANSFORMACAO.
 ///
-/// Quatro modos, quatro superficies, um rail de cada lado. Nenhum
+/// Cinco modos, cinco superficies, um rail de cada lado. Nenhum
 /// deslizante — ver `docs/painel-de-transformacao-alight.md`, "A regra
 /// que muda tudo": posicao e 2D, angulo e circular, e escala nao tem
 /// intervalo natural. Um `Slider` mente sobre as tres.
@@ -45,7 +40,22 @@ class PainelDeTransformacao extends ConsumerStatefulWidget {
     required this.aoVoltar,
     required this.alvoDoRail,
     this.mais,
+    this.aoTrocarModo,
+    this.aoSegurarCampo,
   });
+
+  /// O QUE O TOQUE LONGO NO NUMERO FAZ. Vem de fora porque as duas
+  /// coisas que moram ali — a expressao e o animador automatico — sao
+  /// do painel das ferramentas, que ja tem a conta e o projeto em maos.
+  final void Function(LayerProp prop, String nome, String unidade)?
+  aoSegurarCampo;
+
+  /// AVISA QUEM MANDA NO TITULO. O modo vigente e um estado DESTE
+  /// painel, mas o cabecalho da zona E escreve "Transformar · <nome da
+  /// propriedade>" a partir da sessao. Sem este aviso os dois se
+  /// separam: o corpo mostra Escalar e o titulo continua dizendo
+  /// Posicao — foi o que acontecia antes de o pivo existir.
+  final ValueChanged<ModoDeTransformacao>? aoTrocarModo;
 
   final Layer camada;
   final Duration tempo;
@@ -70,6 +80,7 @@ class _PainelDeTransformacaoState extends ConsumerState<PainelDeTransformacao> {
   /// quadro. Somar quadro a quadro arredondaria em cada soma e a camada
   /// terminaria alguns pixels longe de onde o dedo parou.
   Offset _posicaoAoComecar = Offset.zero;
+  Offset _pivoAoComecar = Offset.zero;
   bool _moverZ = false;
   double _zAoComecar = 0;
 
@@ -84,6 +95,13 @@ class _PainelDeTransformacaoState extends ConsumerState<PainelDeTransformacao> {
   void _abrirLote() => _c.beginGesture();
 
   void _fecharLote() => _c.endGesture();
+
+  /// O SEGURAR DE UM CAMPO, quando o painel das ferramentas ofereceu um.
+  /// Nulo devolve o campo ao segurar antigo (o atalho para digitar).
+  VoidCallback? _segurar(LayerProp prop, String nome, [String unidade = '']) {
+    final f = widget.aoSegurarCampo;
+    return f == null ? null : () => f(prop, nome, unidade);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -134,11 +152,14 @@ class _PainelDeTransformacaoState extends ConsumerState<PainelDeTransformacao> {
             (Icons.rotate_right_rounded, 'Girar'),
             (Icons.aspect_ratio_rounded, 'Escalar'),
             (Icons.transform_rounded, 'Inclinar'),
+            (Icons.filter_center_focus_rounded, 'Pivô'),
           ],
           vigente: modo.index,
-          aoEscolher: (i) =>
-              ref.read(modoDeTransformacaoProvider.notifier).state =
-                  ModoDeTransformacao.values[i],
+          aoEscolher: (i) {
+            final escolhido = ModoDeTransformacao.values[i];
+            ref.read(modoDeTransformacaoProvider.notifier).state = escolhido;
+            widget.aoTrocarModo?.call(escolhido);
+          },
         ),
       ],
     );
@@ -157,8 +178,10 @@ class _PainelDeTransformacaoState extends ConsumerState<PainelDeTransformacao> {
             Flexible(
               child: CampoDeValor(
                 rotulo: 'x',
+                nome: 'Posição X',
                 valor: p.dx,
                 cor: AmColors.accent,
+                aoSegurar: _segurar(LayerProp.position, 'Posição X'),
                 aoDigitar: (v) =>
                     _c.editPosition(l.id, widget.tempo, Offset(v, p.dy)),
               ),
@@ -167,8 +190,10 @@ class _PainelDeTransformacaoState extends ConsumerState<PainelDeTransformacao> {
             Flexible(
               child: CampoDeValor(
                 rotulo: 'y',
+                nome: 'Posição Y',
                 valor: p.dy,
                 cor: AmColors.accent,
+                aoSegurar: _segurar(LayerProp.position, 'Posição Y'),
                 aoDigitar: (v) =>
                     _c.editPosition(l.id, widget.tempo, Offset(p.dx, v)),
               ),
@@ -203,6 +228,7 @@ class _PainelDeTransformacaoState extends ConsumerState<PainelDeTransformacao> {
               valor: l.rotationX.valueAt(_local),
               casas: 1,
               sufixo: '°',
+              aoSegurar: _segurar(LayerProp.rotation, 'Giro em X', '°'),
               aoDigitar: (v) => _c.editRotationX(l.id, widget.tempo, v),
             ),
             const SizedBox(width: 6),
@@ -212,6 +238,7 @@ class _PainelDeTransformacaoState extends ConsumerState<PainelDeTransformacao> {
               valor: l.rotationY.valueAt(_local),
               casas: 1,
               sufixo: '°',
+              aoSegurar: _segurar(LayerProp.rotation, 'Giro em Y', '°'),
               aoDigitar: (v) => _c.editRotationY(l.id, widget.tempo, v),
             ),
             const SizedBox(width: 6),
@@ -221,6 +248,7 @@ class _PainelDeTransformacaoState extends ConsumerState<PainelDeTransformacao> {
               valor: l.rotation.valueAt(_local),
               casas: 1,
               sufixo: '°',
+              aoSegurar: _segurar(LayerProp.rotation, 'Giro em Z', '°'),
               aoDigitar: (v) => _c.editRotation(l.id, widget.tempo, v),
             ),
           ],
@@ -232,9 +260,11 @@ class _PainelDeTransformacaoState extends ConsumerState<PainelDeTransformacao> {
           children: [
             CampoDeValor(
               rotulo: 'Largura',
+              nome: 'Largura',
               valor: l.scaleX.valueAt(_local) * 100,
               cor: AmColors.accent,
-              sufixo: '',
+              sufixo: '%',
+              aoSegurar: _segurar(LayerProp.scale, 'Largura', '%'),
               aoDigitar: (v) => _escalar(v / 100),
             ),
             _Corrente(
@@ -244,10 +274,67 @@ class _PainelDeTransformacaoState extends ConsumerState<PainelDeTransformacao> {
             ),
             CampoDeValor(
               rotulo: 'Altura',
+              nome: 'Altura',
               valor: l.scaleY.valueAt(_local) * 100,
               cor: Colors.white,
-              sufixo: '',
+              sufixo: '%',
+              aoSegurar: _segurar(LayerProp.scale, 'Altura', '%'),
               aoDigitar: (v) => _escalar(v / 100, eixoY: true),
+            ),
+          ],
+        );
+      case ModoDeTransformacao.pivo:
+        // O PONTO DE GIRO ANDA EM DOIS EIXOS, e o desenho do palco o
+        // mostra em pixels da composicao — por isso dois campos com
+        // sinal, e nao um par de 0 a 1. Zero e o centro.
+        final pv = l.pivot.valueAt(_local);
+        return Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Flexible(
+              child: CampoDeValor(
+                rotulo: 'x',
+                nome: 'Pivô em X · 0 é o centro',
+                valor: pv.dx,
+                cor: AmColors.accent,
+                aoSegurar: _segurar(LayerProp.pivot, 'Pivô em X'),
+                aoDigitar: (v) =>
+                    _c.editPivot(l.id, widget.tempo, Offset(v, pv.dy)),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Flexible(
+              child: CampoDeValor(
+                rotulo: 'y',
+                nome: 'Pivô em Y · 0 é o centro',
+                valor: pv.dy,
+                cor: AmColors.accent,
+                aoSegurar: _segurar(LayerProp.pivot, 'Pivô em Y'),
+                aoDigitar: (v) =>
+                    _c.editPivot(l.id, widget.tempo, Offset(pv.dx, v)),
+              ),
+            ),
+            const SizedBox(width: 14),
+            Tocavel(
+              key: const ValueKey('pivot-centro'),
+              onTap: () => _c.editPivot(l.id, widget.tempo, Offset.zero),
+              child: Container(
+                height: 30,
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF434A60),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const AppText(
+                  'Centro',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
             ),
           ],
         );
@@ -257,17 +344,21 @@ class _PainelDeTransformacaoState extends ConsumerState<PainelDeTransformacao> {
           children: [
             CampoDeValor(
               rotulo: 'X Skew',
+              nome: 'Inclinação X',
               valor: l.skewX.valueAt(_local),
               casas: 2,
               sufixo: '°',
+              aoSegurar: _segurar(LayerProp.skew, 'Inclinação X', '°'),
               aoDigitar: (v) => _c.editSkewX(l.id, widget.tempo, v),
             ),
             const SizedBox(width: 8),
             CampoDeValor(
               rotulo: 'Y Skew',
+              nome: 'Inclinação Y',
               valor: l.skewY.valueAt(_local),
               casas: 2,
               sufixo: '°',
+              aoSegurar: _segurar(LayerProp.skew, 'Inclinação Y', '°'),
               aoDigitar: (v) => _c.editSkewY(l.id, widget.tempo, v),
             ),
           ],
@@ -485,6 +576,37 @@ class _PainelDeTransformacaoState extends ConsumerState<PainelDeTransformacao> {
               ),
             ),
           ],
+        );
+      case ModoDeTransformacao.pivo:
+        // O PONTO DE GIRO E UM LUGAR, NAO UM PAR DE NUMEROS. Arrastar e
+        // o gesto certo: ninguem sabe de cabeca quanto vale o pivo em
+        // pixels, mas todo mundo sabe onde ele deveria estar. Os campos
+        // de cima ficam para o ajuste fino.
+        //
+        // O GANHO E O DA POSICAO (`largura/360`): o pivo e escrito em
+        // pixels da composicao, os mesmos de `position`, e duas escalas
+        // diferentes para dois valores do mesmo espaco fariam o ponto
+        // andar mais rapido que a camada.
+        final projeto = ref.watch(projetoVisivelProvider);
+        final ganho = projeto.outputWidth / 360;
+        return AlmofadaDeArrasto(
+          key: const ValueKey('pivot-drag-pad'),
+          rotulo: 'Pivô da camada',
+          dica: 'Deslize o ponto de giro · o botão Centro devolve o zero',
+          // SEM CABECALHO AQUI: a fileira de campos ja esta na linha de
+          // cima, como nas outras faces que nao sao o mover. Com o
+          // cabecalho, os mesmos dois campos apareciam DUAS vezes — um
+          // em cima do outro, com o mesmo rotulo.
+          aoComecar: () {
+            _pivoAoComecar = l.pivot.valueAt(_local);
+            _abrirLote();
+          },
+          aoMover: (d) => _c.editPivot(
+            l.id,
+            widget.tempo,
+            _pivoAoComecar + d * ganho,
+          ),
+          aoTerminar: _fecharLote,
         );
     }
   }

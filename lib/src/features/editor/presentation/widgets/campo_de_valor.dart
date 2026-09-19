@@ -93,10 +93,19 @@ class CampoDeValor extends StatelessWidget {
     this.nome,
     this.cor,
     this.aoSelecionar,
+    this.aoSegurar,
   });
 
   final Color? cor;
   final VoidCallback? aoSelecionar;
+
+  /// O TOQUE LONGO NO NUMERO, quando ele faz outra coisa alem de digitar.
+  ///
+  /// Duas coisas moram aqui: a EXPRESSAO (Pro) e o ANIMADOR automatico.
+  /// No painel antigo as duas pendiam do nome da propriedade numa linha
+  /// de parametro; a linha saiu, e com ela as duas portas — o campo e
+  /// onde elas voltam.
+  final VoidCallback? aoSegurar;
 
   /// A ALTURA DA CAIXA e o RAIO, medidos na referencia. Publicos porque
   /// quem monta a fila precisa reservar a linha sem adivinhar.
@@ -170,9 +179,14 @@ class CampoDeValor extends StatelessWidget {
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: tocar,
-        onLongPress: aoSelecionar != null && _digitavel
-            ? () => _abrirDialogo(context)
-            : null,
+        // O SEGURAR EXPLICITO GANHA DO IMPLICITO: quem passa [aoSegurar]
+        // esta dizendo o que o dedo longo faz ali (abrir a expressao,
+        // oferecer o animador). Sem ele, o segurar continua sendo o
+        // atalho para digitar, que e o que o campo Z do mover usa.
+        onLongPress: aoSegurar ??
+            (aoSelecionar != null && _digitavel
+                ? () => _abrirDialogo(context)
+                : null),
         child: SizedBox(
           width: largura,
           child: Column(

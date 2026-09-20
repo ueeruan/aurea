@@ -33,9 +33,7 @@ void main() {
     tamanhosDeQuadro = [];
 
     // path_provider: as pastas de trabalho e de saida vivem aqui.
-    TestDefaultBinaryMessengerBinding
-        .instance
-        .defaultBinaryMessenger
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
           const MethodChannel('plugins.flutter.io/path_provider'),
           (call) async => temp.path,
@@ -43,9 +41,7 @@ void main() {
 
     // O codificador da plataforma, de mentira: ele so anota o que
     // recebeu. E o que se quer verificar.
-    TestDefaultBinaryMessengerBinding
-        .instance
-        .defaultBinaryMessenger
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(const MethodChannel('aurea/encoder'), (
           call,
         ) async {
@@ -61,9 +57,8 @@ void main() {
               return true;
             case 'finish':
               // O codificador "produz" o arquivo mudo que o motor espera.
-              for (final f in temp
-                  .listSync(recursive: true)
-                  .whereType<Directory>()) {
+              for (final f
+                  in temp.listSync(recursive: true).whereType<Directory>()) {
                 final mudo = File('${f.path}/mudo.mp4');
                 if (f.path.endsWith('aurea_export')) {
                   mudo.writeAsBytesSync(List.filled(4096, 7));
@@ -116,6 +111,8 @@ void main() {
         child: const MaterialApp(home: ExportVideoScreen()),
       ),
     );
+    await tester.tap(find.text('Exportar'));
+    await tester.pump();
     // O laco de quadros e assincrono e espera `endOfFrame` a cada passo.
     for (var i = 0; i < 240; i++) {
       await tester.pump(const Duration(milliseconds: 16));
@@ -146,7 +143,8 @@ void main() {
     expect(
       chamadas,
       isNot(contains('frame')),
-      reason: 'o caminho por arquivo PNG e so a reserva; nao devia rodar '
+      reason:
+          'o caminho por arquivo PNG e so a reserva; nao devia rodar '
           'num aparelho com codificador',
     );
     // A ordem importa: conferir espaco depois de comecar a gravar nao
@@ -157,10 +155,7 @@ void main() {
       lessThan(chamadas.indexOf('start')),
       reason: 'o espaco foi conferido depois de abrir o codificador',
     );
-    expect(
-      chamadas.indexOf('available'),
-      lessThan(chamadas.indexOf('start')),
-    );
+    expect(chamadas.indexOf('available'), lessThan(chamadas.indexOf('start')));
   });
 
   testWidgets('nenhum quadro em PNG e gravado antes do laco', (tester) async {
@@ -174,7 +169,8 @@ void main() {
     expect(
       quadros,
       isEmpty,
-      reason: 'a exportacao voltou a gravar quadros no disco: '
+      reason:
+          'a exportacao voltou a gravar quadros no disco: '
           '${quadros.take(3)}',
     );
   });

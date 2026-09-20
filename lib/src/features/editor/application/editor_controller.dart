@@ -806,10 +806,6 @@ class EditorController extends Notifier<VideoProject> {
         if (a != null) definirProporcaoDaMidia(layer.id, a);
       });
     }
-    // A ONDA DO SOM JA NA IMPORTACAO: quando a barra aparecer, ela esta
-    // pronta para decupar (antes so era pedida quando a linha rolava para
-    // dentro da tela).
-    MediaPreviewService.instance.preparar([path]);
     return layer.id;
   }
 
@@ -950,10 +946,6 @@ class EditorController extends Notifier<VideoProject> {
       position: AnimatedOffset(_center),
     );
     _push(layer);
-    // A ONDA DO SOM JA NA IMPORTACAO: quando a barra aparecer, ela esta
-    // pronta para decupar (antes so era pedida quando a linha rolava para
-    // dentro da tela).
-    MediaPreviewService.instance.preparar([path]);
     return layer.id;
   }
 
@@ -4678,7 +4670,7 @@ class EditorController extends Notifier<VideoProject> {
         sourceOffset: e.deslocamento,
         effects: l.effects,
         timeRemap: null,
-          clearTimeRemap: true,
+        clearTimeRemap: true,
       ),
       AudioLayer l => l.copyLayer(
         speed: v,
@@ -4736,8 +4728,7 @@ class EditorController extends Notifier<VideoProject> {
     final span = videoSourceSpan(layer);
     final track = speedRampTrack(preset, layer.duration, span);
     _replace(
-      layer.copyLayer(speed: 1, effects: layer.effects,
-          timeRemap: track),
+      layer.copyLayer(speed: 1, effects: layer.effects, timeRemap: track),
     );
   }
 
@@ -4770,9 +4761,12 @@ class EditorController extends Notifier<VideoProject> {
     }
     final media = clipSpeedOf(id).clamp(0.1, 10.0);
     _replace(
-      layer.copyLayer(speed: media, effects: layer.effects,
-          timeRemap: null,
-          clearTimeRemap: true),
+      layer.copyLayer(
+        speed: media,
+        effects: layer.effects,
+        timeRemap: null,
+        clearTimeRemap: true,
+      ),
     );
   }
 
@@ -4782,9 +4776,41 @@ class EditorController extends Notifier<VideoProject> {
     final layer = _layer(id);
     if (layer is! VideoLayer) return;
     _replace(
-      layer.copyLayer(speed: 1, effects: layer.effects,
-          timeRemap: track),
+      layer.copyLayer(speed: 1, effects: layer.effects, timeRemap: track),
     );
+  }
+
+  /// Crava um keyframe de Time Remap no cabecote. Se a curva ainda não
+  /// existe, parte da identidade, portanto ativar o recurso não troca nenhum
+  /// quadro. Este é o caminho curto usado pelo cartão da aba Efeitos.
+  void adicionarKeyframeDeTempo(String id, Duration global) {
+    final inicial = _layer(id);
+    if (inicial is! VideoLayer) return;
+    var video = inicial;
+    runAsOneUndo(() {
+      if (video.reverse) {
+        assarReversoNaCurva(id);
+        video = _layer(id) as VideoLayer;
+      }
+      final local = Duration(
+        microseconds: (global - video.startTime).inMicroseconds.clamp(
+          0,
+          video.duration.inMicroseconds,
+        ),
+      );
+      final span = videoSourceSpan(video).inMicroseconds / 1000000.0;
+      final existente = timeRemapTrackOf(video);
+      final track = existente ?? curvaIdentidade(video.duration, span);
+      if (existente != null && track.hasKeyframeAt(local)) return;
+      definirTrilhaDeTempo(
+        id,
+        track.withKeyframe(
+          local,
+          valorDaCurva(track, local),
+          track.easeAt(local),
+        ),
+      );
+    });
   }
 
   /// O REVERSO VIRA CURVA. Com o interruptor Reverso ligado, grava o que
@@ -4870,7 +4896,6 @@ class EditorController extends Notifier<VideoProject> {
     _replace(layer.copyLayer(reverse: reverse));
     return true;
   }
-
 
   // ------------------------------------------------------------ congelar
 
@@ -5519,7 +5544,7 @@ class EditorController extends Notifier<VideoProject> {
           reverse: false,
           effects: layer.effects,
           timeRemap: b.track,
-            );
+        );
       } else {
         second = second.copyLayer(
           sourceOffset:
@@ -5527,7 +5552,7 @@ class EditorController extends Notifier<VideoProject> {
               Duration(
                 microseconds: (firstDur.inMicroseconds * layer.speed).round(),
               ),
-            );
+        );
       }
     } else if (second is AudioLayer && layer is AudioLayer) {
       second = second.copyLayer(
@@ -5557,8 +5582,7 @@ class EditorController extends Notifier<VideoProject> {
         layer is VideoLayer &&
         (hasTimeRemap(layer) || layer.reverse)) {
       final b = _sliceVideoTrack(layer, firstDur, layer.duration);
-      second = second.copyLayer(effects: second.effects,
-          timeRemap: b.track);
+      second = second.copyLayer(effects: second.effects, timeRemap: b.track);
     }
 
     final layers = <Layer>[];
@@ -6267,6 +6291,11 @@ class EditorController extends Notifier<VideoProject> {
   void addEffect(String layerId, EffectType type, {EffectPronto? pronto}) {
     final layer = _layer(layerId);
     if (layer == null) return;
+    if (type == EffectType.timeRemap) {
+      if (layer is! VideoLayer || layer.effects.any((e) => e.type == type)) return;
+      ligarCurvaDeTempo(layerId, true);
+      return;
+    }
     // Time Remap saiu do app: a curva interna so nasce de congelar,
     // rampa pronta e corte.
     if (efeitosInternos.contains(type)) return;
@@ -6328,7 +6357,7 @@ class EditorController extends Notifier<VideoProject> {
     final idx = layer.effects.indexWhere((e) => e.id == effectId);
     if (idx < 0) return;
     final original = layer.effects[idx];
-    if (original.type == EffectType.opticalFlow) {
+    if (original.type == EffectType.opticalFlow || original.type == EffectType.timeRemap) {
       return;
     }
     // Sem id: a instancia nova sorteia o proprio. Os keyframes vao junto
@@ -6392,7 +6421,8 @@ class EditorController extends Notifier<VideoProject> {
   ) {
     final layer = _layer(layerId);
     if (layer == null) return;
-    final local = layer.localTime(globalTime);
+    final remap = layer.effects.any((e) => e.id == effectId && e.type == EffectType.timeRemap);
+    final local = remap ? globalTime - layer.startTime : layer.localTime(globalTime);
     _replace(
       layer.copyLayer(
         effects: [
@@ -6412,7 +6442,8 @@ class EditorController extends Notifier<VideoProject> {
     if (_cravarPendencia(layerId, globalTime)) return;
     final layer = _layer(layerId);
     if (layer == null) return;
-    final local = layer.localTime(globalTime);
+    final remap = layer.effects.any((e) => e.id == effectId && e.type == EffectType.timeRemap);
+    final local = remap ? globalTime - layer.startTime : layer.localTime(globalTime);
     _replace(
       layer.copyLayer(
         effects: [
@@ -6487,7 +6518,8 @@ class EditorController extends Notifier<VideoProject> {
     if (_cravarPendencia(layerId, globalTime)) return;
     final layer = _layer(layerId);
     if (layer == null) return;
-    final local = layer.localTime(globalTime);
+    final remap = layer.effects.any((e) => e.id == effectId && e.type == EffectType.timeRemap);
+    final local = remap ? globalTime - layer.startTime : layer.localTime(globalTime);
     _replace(
       layer.copyLayer(
         effects: [
@@ -8840,8 +8872,7 @@ class EditorController extends Notifier<VideoProject> {
             alvo = alvo.copyLayer(
               effects: [
                 for (final e in fonte.effects)
-                  if (e.type != EffectType.opticalFlow)
-                    e.duplicated(),
+                  if (e.type != EffectType.opticalFlow) e.duplicated(),
               ],
             );
           case CategoriaDeEstilo.corEPreenchimento:

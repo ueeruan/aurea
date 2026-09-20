@@ -157,5 +157,6 @@ final receitasSapphire = <EffectType, ReceitaSapphire>{
 /// e, na exportacao, em QUADROS GRAVADOS SEM O EFEITO: o laco exporta um
 /// quadro por vez, e o shader que ainda nao chegou devolve a camada crua.
 Set<String> get assetsDosShadersSapphire => {
+  'shaders/glow_source.frag',
   for (final r in receitasSapphire.values) r.asset,
 };

@@ -74,10 +74,13 @@ Offset _noGrafico(
   double seg,
   double v,
 ) {
-  final r = tester.getRect(
-    find.byKey(const ValueKey('estudio-tempo-grafico')),
+  final r = tester.getRect(find.byKey(const ValueKey('estudio-tempo-grafico')));
+  final quadro = Rect.fromLTRB(
+    r.left + 44,
+    r.top + 8,
+    r.right - 8,
+    r.bottom - 18,
   );
-  final quadro = Rect.fromLTRB(r.left + 44, r.top + 8, r.right - 8, r.bottom - 18);
   final dur = l.duration.inMicroseconds / 1e6;
   final (lo, hi) = faixaDaCurva(curva);
   final folga = math.max(.25, (hi - lo) * .12);
@@ -102,10 +105,31 @@ void main() {
       contains(const Duration(seconds: 1)),
     );
     // Velocidade era 2x: o instante mostrado nao muda ao ligar a curva.
-    expect(videoSourceTimeAt(l, const Duration(seconds: 1)),
-        const Duration(seconds: 2));
-    expect(videoSourceTimeAt(l, const Duration(seconds: 4)),
-        const Duration(seconds: 8));
+    expect(
+      videoSourceTimeAt(l, const Duration(seconds: 1)),
+      const Duration(seconds: 2),
+    );
+    expect(
+      videoSourceTimeAt(l, const Duration(seconds: 4)),
+      const Duration(seconds: 8),
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('abre com os graficos de valor e velocidade do Time Remap', (
+    tester,
+  ) async {
+    await _abrir(tester);
+    expect(find.text('Editor de curva · Time Remap'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('estudio-tempo-aba-valor')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('estudio-tempo-aba-velocidade')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('estudio-tempo-grafico')), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -162,10 +186,7 @@ void main() {
     final l = _clipe(c, id);
     expect(l.duration, const Duration(seconds: 5));
     final parado = videoSourceTimeAt(l, const Duration(seconds: 1));
-    expect(
-      videoSourceTimeAt(l, const Duration(milliseconds: 1500)),
-      parado,
-    );
+    expect(videoSourceTimeAt(l, const Duration(milliseconds: 1500)), parado);
     expect(
       videoSourceTimeAt(l, const Duration(milliseconds: 2500)),
       isNot(parado),
@@ -223,8 +244,10 @@ void main() {
       find.byKey(const ValueKey('estudio-tempo-preset-impacto')),
     );
     await tester.pump();
-    expect(timeRemapTrackOf(_clipe(c, id))!.keyframes.length,
-        greaterThanOrEqualTo(4));
+    expect(
+      timeRemapTrackOf(_clipe(c, id))!.keyframes.length,
+      greaterThanOrEqualTo(4),
+    );
     c.read(editorControllerProvider.notifier).undo();
     expect(hasTimeRemap(_clipe(c, id)), isFalse);
     expect(tester.takeException(), isNull);
@@ -253,7 +276,8 @@ void main() {
     l = _clipe(c, id);
     final pontos = pontosDaTrilha(timeRemapTrackOf(l)!);
     final ponto = pontos.firstWhere(
-      (p) => (p.tempo - const Duration(seconds: 1)).abs() <
+      (p) =>
+          (p.tempo - const Duration(seconds: 1)).abs() <
           const Duration(milliseconds: 20),
     );
     expect(ponto.entrada!.velocidade, closeTo(0, 1e-6));

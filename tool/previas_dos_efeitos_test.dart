@@ -14,6 +14,7 @@
 //   AUREA_GERAR_PREVIAS=1 flutter test tool/previas_dos_efeitos_test.dart
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -21,7 +22,15 @@ import 'package:aurea/src/features/editor/application/editor_controller.dart';
 import 'package:aurea/src/features/editor/application/video_layer_manager.dart';
 import 'package:aurea/src/features/editor/domain/amostra_dos_efeitos.dart';
 import 'package:aurea/src/features/editor/domain/effect.dart';
+import 'package:aurea/src/features/editor/domain/layer.dart';
+import 'package:aurea/src/features/editor/domain/keyframe.dart';
+import 'package:aurea/src/features/editor/domain/cut_ops.dart';
+import 'package:aurea/src/features/editor/presentation/widgets/motion_tile_pass.dart';
+import 'package:aurea/src/features/editor/presentation/widgets/owned_video_frame.dart';
+import 'package:aurea/src/features/editor/domain/estilizar_lote2.dart';
 import 'package:aurea/src/features/editor/presentation/widgets/pixel_effect_engine.dart';
+import 'package:aurea/src/features/editor/presentation/widgets/passe_de_cor.dart';
+import 'package:aurea/src/features/editor/presentation/widgets/soft_glow_pass.dart';
 import 'package:aurea/src/features/editor/presentation/widgets/preview_stage.dart';
 import 'package:flutter/foundation.dart' show SynchronousFuture;
 import 'package:flutter/material.dart';
@@ -41,11 +50,17 @@ void main() {
   // Fonte e shader carregam em IO de verdade: dentro do corpo do
   // testWidgets (relogio falso) o await nunca volta.
   ui.Image? foto;
+  final movimento = <ui.Image>[];
   setUpAll(() async {
     if (!gerar) return;
     TestWidgetsFlutterBinding.ensureInitialized();
     await carregarFontesReais();
     await PixelEffectEngine.warmUp();
+    await MotorDeCorrecao.warmUp();
+    await MotorSapphire.carregar(SoftGlowPass.asset);
+    await MotorSapphire.warmUp(assetsDosShadersSapphire);
+    await MotionTilePass.warmUp();
+    await RgbFramesPainter.prepare();
     // A FOTO DECODIFICA AQUI, e nao com precacheImage dentro do teste: la
     // o carregamento de arquivo trava o relogio falso (ja travou o teste
     // de print da Comunidade).
@@ -53,6 +68,29 @@ void main() {
       File(fotoDaAmostra).readAsBytesSync(),
     );
     foto = (await codec.getNextFrame()).image;
+    codec.dispose();
+    // A real animated source for effects which require video frames. The
+    // production renderer requests each channel/time from this same sequence.
+    for (var i = 0; i < 32; i++) {
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder);
+      final x = 25 * math.sin(i * math.pi / 16);
+      canvas.drawImageRect(
+        foto!,
+        Rect.fromLTWH(0, 0, foto!.width.toDouble(), foto!.height.toDouble()),
+        Rect.fromLTWH(-35 + x, -35, 470, 470),
+        Paint()..filterQuality = FilterQuality.low,
+      );
+      final picture = recorder.endRecording();
+      movimento.add(await picture.toImage(400, 400));
+      picture.dispose();
+    }
+  });
+  tearDownAll(() {
+    foto?.dispose();
+    for (final frame in movimento) {
+      frame.dispose();
+    }
   });
 
   testWidgets(
@@ -95,9 +133,45 @@ void main() {
         bool silhueta = false,
       }) async {
         final container = ProviderContainer();
-        container
-            .read(editorControllerProvider.notifier)
-            .openProject(amostraDoEfeito(tipo, pronto: p, silhueta: silhueta));
+        var project = amostraDoEfeito(tipo, pronto: p, silhueta: silhueta);
+        VideoLayer? video;
+        if (tipo == EffectType.rgbTimeWarp || tipo == EffectType.timeRemap) {
+          var effect = EffectInstance(type: tipo!);
+          if (p != null) effect = effect.withPreset(p);
+          if (tipo == EffectType.timeRemap) {
+            effect = effect.copyWith(
+              params: {
+                'tempo': AnimatedDouble(0)
+                    .withKeyframe(Duration.zero, 0)
+                    .withKeyframe(const Duration(milliseconds: 500), .1)
+                    .withKeyframe(const Duration(seconds: 1), .9),
+              },
+            );
+          }
+          video = VideoLayer(
+            name: 'amostra temporal',
+            startTime: Duration.zero,
+            duration: const Duration(seconds: 4),
+            sourceDuration: const Duration(seconds: 4),
+            sourcePath: 'generated-preview-frames',
+            proporcaoDaFonte: 1,
+            position: AnimatedOffset(const Offset(200, 200)),
+            effects: [effect],
+          );
+          project = project.copyWith(layers: [video]);
+        }
+        final frames = <String, ui.Image>{};
+        ui.Image frameAt(VideoLayer layer, Duration time) {
+          final source = videoAbsoluteSourceTimeAt(
+            layer,
+            time - layer.startTime,
+          );
+          return movimento[(source.inMicroseconds * 32 ~/ 1000000) %
+              movimento.length];
+        }
+
+        if (video != null) frames[video.id] = frameAt(video, Duration.zero);
+        container.read(editorControllerProvider.notifier).openProject(project);
         tempo.value = Duration.zero;
         await tester.pumpWidget(
           UncontrolledProviderScope(
@@ -116,6 +190,8 @@ void main() {
                       videos: videos,
                       selectedId: null,
                       exporting: true,
+                      exportFrames: frames,
+                      quadroDeVideoEm: frameAt,
                     ),
                   ),
                 ),
@@ -125,7 +201,9 @@ void main() {
         );
         final out = <Uint8List>[];
         for (var i = 0; i < quadrosDaPrevia; i++) {
-          tempo.value = instanteDoQuadro(i);
+          final instant = instanteDoQuadro(i);
+          if (video != null) frames[video.id] = frameAt(video, instant);
+          tempo.value = instant;
           await tester.pump();
           // Warp e ordenacao de pixel carregam programa e isolate fora do
           // quadro: da tempo de chegar e pinta de novo.

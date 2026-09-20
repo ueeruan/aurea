@@ -228,11 +228,17 @@ void main() {
       c.read(selectedLayerProvider.notifier).state = id;
       await tester.pumpAndSettle();
       final antes = c.read(editorControllerProvider).layerById(id)!.startTime;
-      final linha = tester.getRect(find.byKey(ValueKey(id)));
-      await tester.dragFrom(
-        Offset(linha.left + 30, linha.top + kAmBarHeight / 2),
-        const Offset(120, 0),
-      );
+      // Drag the clip body, not the left eye/lock column of its row.
+      final linha = tester.getRect(find.byKey(ValueKey('clip-content-$id')));
+      Future<void> moverBarra() async {
+        final gesture = await tester.startGesture(Offset(linha.left + 90, linha.center.dy));
+        // The editor uses hold-and-drag for clips; a short drag scrubs time.
+        await tester.pump(const Duration(milliseconds: 600));
+        await gesture.moveBy(const Offset(120, 0));
+        await tester.pump();
+        await gesture.up();
+      }
+      await moverBarra();
       await tester.pumpAndSettle();
       expect(
         c.read(editorControllerProvider).layerById(id)!.startTime,
@@ -242,10 +248,7 @@ void main() {
 
       await tester.longPress(find.byKey(ValueKey('kf-$id')));
       await tester.pumpAndSettle();
-      await tester.dragFrom(
-        Offset(linha.left + 30, linha.top + kAmBarHeight / 2),
-        const Offset(120, 0),
-      );
+      await moverBarra();
       await tester.pumpAndSettle();
       expect(
         c.read(editorControllerProvider).layerById(id)!.startTime,
@@ -364,22 +367,23 @@ void main() {
     );
   });
 
-  testWidgets('expandir a timeline pelo canto da regua encolhe o preview', (
+  testWidgets('estado expandido ainda encolhe o preview sem icone na regua', (
     tester,
   ) async {
     final c = await openEditor(tester);
     final preview = tester
         .getRect(find.byKey(const ValueKey('preview-resize-handle')))
         .top;
-    await tester.tap(find.byKey(const ValueKey('timeline-expandir')));
+    expect(find.byKey(const ValueKey('timeline-expandir')), findsNothing);
+    c.read(editorSessionProvider.notifier).toggleTimelineExpanded();
     await tester.pumpAndSettle();
     expect(c.read(editorSessionProvider).timelineExpanded, isTrue);
     expect(
       tester.getRect(find.byKey(const ValueKey('preview-resize-handle'))).top,
       lessThan(preview),
     );
-    expect(find.byTooltip('Recolher timeline'), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('timeline-expandir')));
+    expect(find.byTooltip('Recolher timeline'), findsNothing);
+    c.read(editorSessionProvider.notifier).toggleTimelineExpanded();
     await tester.pumpAndSettle();
     expect(c.read(editorSessionProvider).timelineExpanded, isFalse);
   });
@@ -397,6 +401,7 @@ void main() {
     ]) {
       expect(find.byKey(ValueKey(key)), findsNothing);
     }
-    expect(find.byKey(const ValueKey('timeline-expandir')), findsOneWidget);
+    expect(find.byKey(const ValueKey('timeline-expandir')), findsNothing);
+    expect(find.byKey(const ValueKey('timeline-selecionar')), findsNothing);
   });
 }

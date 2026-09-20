@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:typed_data';
+
 import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import 'package:aurea/src/core/l10n/app_language.dart';
@@ -18,7 +20,6 @@ import '../../domain/cut_ops.dart';
 import '../../domain/onda_no_clipe.dart';
 import '../../domain/video_project.dart' as proj;
 import '../../application/media_preview_service.dart';
-import '../../application/proxy_service.dart';
 import '../../application/ui/editor_session.dart';
 import '../../application/ui/opcoes_de_visualizacao.dart';
 import '../../../../core/storage/prefs.dart';
@@ -38,8 +39,8 @@ const double kAmBarHeight = 36;
 /// 36 px ela tinha 12 px. As alturas continuam UNIFORMES na timeline — as
 /// duas listas sincronizadas, o revelar da selecao e o arrasto de pilha
 /// dependem disso — e so crescem quando o projeto tem midia com som.
-const double kAmRowHeightMidia = 78;
-const double kAmBarHeightMidia = 68;
+const double kAmRowHeightMidia = kAmRowHeight;
+const double kAmBarHeightMidia = kAmBarHeight;
 
 class _Alturas extends InheritedWidget {
   const _Alturas({
@@ -208,6 +209,7 @@ class _AmTimelineState extends ConsumerState<AmTimeline> {
   double _focalAtGestureStart = 0;
   bool _syncingScroll = false;
   bool _editingBar = false;
+  String? _autoFitProjectId;
 
   /// O DEDO (ou a inercia dele) esta no comando da rolagem.
   ///
@@ -335,9 +337,15 @@ class _AmTimelineState extends ConsumerState<AmTimeline> {
         widget.playback.pause();
       }
       if (!widget.playback.playing.value) {
+        // O gerenciador de video precisa saber que isto e scrub ANTES do
+        // seek publicar o novo tempo. O listener do tempo e sincrono; na
+        // ordem antiga cada pixel parecia um seek isolado e esvaziava o
+        // decoder, tornando a regua pesada e atrasada.
+        // Inclui a inercia depois que o dedo solta. Ela ainda e parte do
+        // mesmo gesto; sem renovar o modo scrub, apos 160 ms voltavam os
+        // seeks nativos sem limite no meio do fling.
+        if (_rolagemDoDedo) widget.onScrub?.call();
         widget.playback.seek(_pxToTime(n.metrics.pixels));
-        // Ouvir onde se esta enquanto arrasta.
-        if (n.dragDetails != null) widget.onScrub?.call();
       }
     }
     return false;
@@ -370,6 +378,16 @@ class _AmTimelineState extends ConsumerState<AmTimeline> {
         maxEndUs = l.endTime.inMicroseconds;
       }
     }
+    // Um clipe longo nao deve nascer como uma barra de milhares de
+    // pixels. Na primeira abertura do projeto enquadramos a duracao na
+    // largura disponivel; a partir dai a pinça do usuario manda.
+    if (maxEndUs / 1e6 >= 20 && _autoFitProjectId != project.id) {
+      _autoFitProjectId = project.id;
+      final seconds = maxEndUs / 1e6;
+      final available = MediaQuery.sizeOf(context).width - 32;
+      _pps = (available / seconds).clamp(4.0, 80.0);
+      _ppsAtGestureStart = _pps;
+    }
     final totalWidth = (maxEndUs / 1e6 * _pps) + 200.0;
     final trilhas = empacotarTrilhas(layers);
     final comMidia =
@@ -383,8 +401,9 @@ class _AmTimelineState extends ConsumerState<AmTimeline> {
     final sessao = ref.watch(editorSessionProvider);
     final selected = selectedId == null ? null : project.layerById(selectedId);
     final keyCount = selected?.keyframeTimes.length ?? 0;
-    final linhaDaSelecao =
-        trilhas.indexWhere((t) => t.any((l) => l.id == selectedId));
+    final linhaDaSelecao = trilhas.indexWhere(
+      (t) => t.any((l) => l.id == selectedId),
+    );
     // A LINHA TAMBEM CONTA, e nao so a selecao.
     //
     // Revelar so quando a selecao muda deixa um buraco exatamente no
@@ -427,452 +446,412 @@ class _AmTimelineState extends ConsumerState<AmTimeline> {
       linha: alturaLinha,
       barra: alturaBarra,
       child: Listener(
-      behavior: HitTestBehavior.deferToChild,
-      // "Clicar na timeline fecha essa e qualquer outra aba": o toque
-      // aqui fecha a barra de adicionar, sem disputar o gesto com a
-      // rolagem, o arrasto da barra ou o encaixe do cabecote.
-      onPointerDown: (_) {
-        if (ref.read(editorSessionProvider).adding) {
-          ref.read(editorSessionProvider.notifier).closeAdd();
-        }
-      },
-      child: SizedBox(
-        height: widget.height,
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final pad = constraints.maxWidth / 2;
-            return GestureDetector(
-              onScaleStart: (d) {
-                if (d.pointerCount >= 2) {
-                  HapticFeedback.selectionClick();
-                }
-                _ppsAtGestureStart = _pps;
-                _scrollAtGestureStart = _scroll.hasClients ? _scroll.offset : 0;
-                _focalAtGestureStart = d.localFocalPoint.dx;
-              },
-              onScaleUpdate: (d) {
-                if (d.pointerCount < 2) return;
-                setState(() {
-                  // Zoom ancorado no CENTROIDE da pinca (AUREA §3.1-5):
-                  // o conteudo sob os dedos fica sob os dedos.
-                  final newPps = (_ppsAtGestureStart * d.scale).clamp(
-                    16.0,
-                    400.0,
-                  );
-                  final k = newPps / _ppsAtGestureStart;
-                  final contentAtFocal =
-                      _scrollAtGestureStart + (_focalAtGestureStart - pad);
-                  final newOffset =
-                      contentAtFocal * k - (_focalAtGestureStart - pad);
-                  _pps = newPps;
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    if (_scroll.hasClients) {
-                      // Sem suprimir o seek: o tempo sob o playhead central
-                      // continua verdadeiro durante o zoom.
-                      _scroll.jumpTo(
-                        newOffset.clamp(0.0, _scroll.position.maxScrollExtent),
-                      );
-                    }
+        behavior: HitTestBehavior.deferToChild,
+        // "Clicar na timeline fecha essa e qualquer outra aba": o toque
+        // aqui fecha a barra de adicionar, sem disputar o gesto com a
+        // rolagem, o arrasto da barra ou o encaixe do cabecote.
+        onPointerDown: (_) {
+          if (ref.read(editorSessionProvider).adding) {
+            ref.read(editorSessionProvider.notifier).closeAdd();
+          }
+        },
+        child: SizedBox(
+          height: widget.height,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final pad = constraints.maxWidth / 2;
+              return GestureDetector(
+                onScaleStart: (d) {
+                  if (d.pointerCount >= 2) {
+                    HapticFeedback.selectionClick();
+                  }
+                  _ppsAtGestureStart = _pps;
+                  _scrollAtGestureStart = _scroll.hasClients
+                      ? _scroll.offset
+                      : 0;
+                  _focalAtGestureStart = d.localFocalPoint.dx;
+                },
+                onScaleUpdate: (d) {
+                  if (d.pointerCount < 2) return;
+                  setState(() {
+                    // Zoom ancorado no CENTROIDE da pinca (AUREA §3.1-5):
+                    // o conteudo sob os dedos fica sob os dedos.
+                    final newPps = (_ppsAtGestureStart * d.scale).clamp(
+                      4.0,
+                      400.0,
+                    );
+                    final k = newPps / _ppsAtGestureStart;
+                    final contentAtFocal =
+                        _scrollAtGestureStart + (_focalAtGestureStart - pad);
+                    final newOffset =
+                        contentAtFocal * k - (_focalAtGestureStart - pad);
+                    _pps = newPps;
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (_scroll.hasClients) {
+                        // Sem suprimir o seek: o tempo sob o playhead central
+                        // continua verdadeiro durante o zoom.
+                        _scroll.jumpTo(
+                          newOffset.clamp(
+                            0.0,
+                            _scroll.position.maxScrollExtent,
+                          ),
+                        );
+                      }
+                    });
                   });
-                });
-              },
-              child: Stack(
-                children: [
-                  // Conteudo rolavel: regua + linhas de camada.
-                  NotificationListener<ScrollNotification>(
-                    onNotification: _onScroll,
-                    child: SingleChildScrollView(
-                      controller: _scroll,
-                      scrollDirection: Axis.horizontal,
-                      // Rubber-band nas pontas em vez de parede seca
-                      // (AUREA §3.1-4: "parecer iOS").
-                      physics: const BouncingScrollPhysics(),
-                      child: Padding(
-                        padding: EdgeInsets.symmetric(horizontal: pad),
-                        child: SizedBox(
-                          width: totalWidth,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              SizedBox(
-                                height: 20,
-                                width: totalWidth,
-                                // As marcas vivem NA REGUA: e onde a pessoa
-                                // olha para achar o instante.
-                                child: Stack(
-                                  clipBehavior: Clip.none,
-                                  children: [
-                                    Positioned.fill(
-                                      child: GestureDetector(
-                                        behavior: HitTestBehavior.opaque,
-                                        // TOQUE DUPLO cria a marca onde o
-                                        // dedo esta — nao no cabecote. Quem
-                                        // ouve a musica aponta o lugar; ter
-                                        // de levar o cabecote ate la antes
-                                        // e um passo a mais no meio do
-                                        // ritmo.
-                                        onDoubleTapDown: (d) =>
-                                            _xDoDuploToque = d.localPosition.dx,
-                                        // SEGURAR NA REGUA abre o menu de
-                                        // marcas e batidas: e na regua que
-                                        // elas moram, entao e nela que se
-                                        // pergunta por elas.
-                                        onLongPress: () {
-                                          HapticFeedback.mediumImpact();
-                                          menuDasMarcas(
-                                            context,
-                                            ref,
-                                            widget.playback,
-                                          );
-                                        },
-                                        onDoubleTap: () {
-                                          final t = Duration(
-                                            microseconds:
-                                                (_xDoDuploToque / _pps * 1e6)
-                                                    .round(),
-                                          );
-                                          ref
+                },
+                child: Stack(
+                  children: [
+                    // Conteudo rolavel: regua + linhas de camada.
+                    NotificationListener<ScrollNotification>(
+                      onNotification: _onScroll,
+                      child: SingleChildScrollView(
+                        controller: _scroll,
+                        scrollDirection: Axis.horizontal,
+                        // Rubber-band nas pontas em vez de parede seca
+                        // (AUREA §3.1-4: "parecer iOS").
+                        physics: const BouncingScrollPhysics(),
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(horizontal: pad),
+                          child: SizedBox(
+                            width: totalWidth,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                SizedBox(
+                                  height: 20,
+                                  width: totalWidth,
+                                  // As marcas vivem NA REGUA: e onde a pessoa
+                                  // olha para achar o instante.
+                                  child: Stack(
+                                    clipBehavior: Clip.none,
+                                    children: [
+                                      Positioned.fill(
+                                        child: GestureDetector(
+                                          behavior: HitTestBehavior.opaque,
+                                          // TOQUE DUPLO cria a marca onde o
+                                          // dedo esta — nao no cabecote. Quem
+                                          // ouve a musica aponta o lugar; ter
+                                          // de levar o cabecote ate la antes
+                                          // e um passo a mais no meio do
+                                          // ritmo.
+                                          onDoubleTapDown: (d) =>
+                                              _xDoDuploToque =
+                                                  d.localPosition.dx,
+                                          // SEGURAR NA REGUA abre o menu de
+                                          // marcas e batidas: e na regua que
+                                          // elas moram, entao e nela que se
+                                          // pergunta por elas.
+                                          onLongPress: () {
+                                            HapticFeedback.mediumImpact();
+                                            menuDasMarcas(
+                                              context,
+                                              ref,
+                                              widget.playback,
+                                            );
+                                          },
+                                          onDoubleTap: () {
+                                            final t = Duration(
+                                              microseconds:
+                                                  (_xDoDuploToque / _pps * 1e6)
+                                                      .round(),
+                                            );
+                                            ref
+                                                .read(
+                                                  editorControllerProvider
+                                                      .notifier,
+                                                )
+                                                .toggleMarker(t);
+                                            HapticFeedback.selectionClick();
+                                          },
+                                          child: CustomPaint(
+                                            painter: _AmRulerPainter(pps: _pps),
+                                            // BATIDAS: risquinhos finos, e nao
+                                            // bandeiras. Sao centenas contra
+                                            // as poucas marcas postas a mao —
+                                            // desenhadas iguais, apagariam
+                                            // justamente as que alguem
+                                            // escolheu.
+                                            foregroundPainter: _BeatsPainter(
+                                              beats: project.beats,
+                                              pps: _pps,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      for (final (rotulo, tempo) in [
+                                        ('I', sessao.inPoint),
+                                        ('O', sessao.outPoint),
+                                      ])
+                                        if (tempo != null)
+                                          Positioned(
+                                            key: ValueKey('marca-$rotulo'),
+                                            left: _timeToPx(tempo) - 1,
+                                            top: 0,
+                                            bottom: 0,
+                                            child: IgnorePointer(
+                                              child: Row(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Container(
+                                                    width: 2,
+                                                    color: AmColors.action,
+                                                  ),
+                                                  AppText(
+                                                    rotulo,
+                                                    style: const TextStyle(
+                                                      fontSize: 9,
+                                                      fontWeight:
+                                                          FontWeight.w800,
+                                                      color: AmColors.action,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                      // INTRODUCAO, FINAL E MINIATURA (menu ⋮):
+                                      // marcas do projeto, na cor do tempo.
+                                      for (final (chave, rotulo, tempo) in [
+                                        ('intro', 'intro', project.introFim),
+                                        ('final', 'final', project.finalInicio),
+                                        ('miniatura', '▣', project.thumbTime),
+                                      ])
+                                        if (tempo != null)
+                                          Positioned(
+                                            key: ValueKey('regua-$chave'),
+                                            left: _timeToPx(tempo) - 1,
+                                            top: 0,
+                                            bottom: 0,
+                                            child: IgnorePointer(
+                                              child: Row(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Container(
+                                                    width: 2,
+                                                    color: AmColors.accent,
+                                                  ),
+                                                  AppText(
+                                                    rotulo,
+                                                    style: const TextStyle(
+                                                      fontSize: 9,
+                                                      fontWeight:
+                                                          FontWeight.w800,
+                                                      color: AmColors.accent,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                      for (final m in project.markers)
+                                        _MarcaNaRegua(
+                                          marca: m,
+                                          pps: _pps,
+                                          onMover: (dx) => ref
                                               .read(
                                                 editorControllerProvider
                                                     .notifier,
                                               )
-                                              .toggleMarker(t);
-                                          HapticFeedback.selectionClick();
-                                        },
-                                        child: CustomPaint(
-                                painter: _AmRulerPainter(pps: _pps),
-                                // BATIDAS: risquinhos finos, e nao
-                                // bandeiras. Sao centenas contra
-                                // as poucas marcas postas a mao —
-                                // desenhadas iguais, apagariam
-                                // justamente as que alguem
-                                // escolheu.
-                                foregroundPainter: _BeatsPainter(
-                                  beats: project.beats,
-                                  pps: _pps,
+                                              .moveMarker(
+                                                m.time,
+                                                m.time +
+                                                    Duration(
+                                                      microseconds:
+                                                          (dx / _pps * 1e6)
+                                                              .round(),
+                                                    ),
+                                              ),
+                                          onMenu: () =>
+                                              _menuDaMarca(context, ref, m),
+                                        ),
+                                    ],
+                                  ),
                                 ),
-                              ),
+                                const SizedBox(height: 18),
+                                Expanded(
+                                  // O FUNDO E UM ALVO. As barras sao opacas
+                                  // e ficam com o toque delas; o que sobra
+                                  // — o vazio abaixo das linhas — e o toque
+                                  // de voltar.
+                                  child: GestureDetector(
+                                    key: const ValueKey('timeline-fundo'),
+                                    behavior: HitTestBehavior.translucent,
+                                    onTap: widget.onTapBackground,
+                                    child: ListView.builder(
+                                      controller: _rowsScroll,
+                                      padding: EdgeInsets.zero,
+                                      itemExtent: alturaLinha,
+                                      itemCount: trilhas.length,
+                                      itemBuilder: (context, index) {
+                                        final trilha = trilhas[index];
+                                        return _AmLayerRow(
+                                          key: ValueKey(trilha.first.id),
+                                          trilha: trilha,
+                                          pps: _pps,
+                                          totalWidth: totalWidth,
+                                          selectedIds: selecionadas,
+                                          compact: widget.singleLayerId != null,
+                                          playback: widget.playback,
+                                          onTapLayer: widget.onTapLayer,
+                                          activeTimesUs: widget.activeTimesUs,
+                                          onForeignKeyframe:
+                                              widget.onForeignKeyframe,
+                                          onKeyframeTap: widget.onKeyframeTap,
+                                          onEditStart: () => _editingBar = true,
+                                          onEditEnd: _terminarEdicaoDaBarra,
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                          for (final (rotulo, tempo) in [
-                            ('I', sessao.inPoint),
-                            ('O', sessao.outPoint),
-                          ])
-                            if (tempo != null)
-                              Positioned(
-                                key: ValueKey('marca-$rotulo'),
-                                left: _timeToPx(tempo) - 1,
-                                top: 0,
-                                bottom: 0,
-                                child: IgnorePointer(
-                                  child: Row(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Container(
-                                        width: 2,
-                                        color: AmColors.action,
-                                      ),
-                                      AppText(
-                                        rotulo,
-                                        style: const TextStyle(
-                                          fontSize: 9,
-                                          fontWeight: FontWeight.w800,
-                                          color: AmColors.action,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                          // INTRODUCAO, FINAL E MINIATURA (menu ⋮):
-                          // marcas do projeto, na cor do tempo.
-                          for (final (chave, rotulo, tempo) in [
-                            ('intro', 'intro', project.introFim),
-                            ('final', 'final', project.finalInicio),
-                            ('miniatura', '▣', project.thumbTime),
-                          ])
-                            if (tempo != null)
-                              Positioned(
-                                key: ValueKey('regua-$chave'),
-                                left: _timeToPx(tempo) - 1,
-                                top: 0,
-                                bottom: 0,
-                                child: IgnorePointer(
-                                  child: Row(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Container(
-                                        width: 2,
-                                        color: AmColors.accent,
-                                      ),
-                                      AppText(
-                                        rotulo,
-                                        style: const TextStyle(
-                                          fontSize: 9,
-                                          fontWeight: FontWeight.w800,
-                                          color: AmColors.accent,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                          for (final m in project.markers)
-                            _MarcaNaRegua(
-                              marca: m,
-                              pps: _pps,
-                              onMover: (dx) => ref
-                                  .read(
-                                    editorControllerProvider.notifier,
-                                  )
-                                  .moveMarker(
-                                    m.time,
-                                    m.time +
-                                        Duration(
-                                          microseconds:
-                                              (dx / _pps * 1e6)
-                                                  .round(),
-                                        ),
-                                  ),
-                              onMenu: () =>
-                                  _menuDaMarca(context, ref, m),
-                            ),
-                        ],
+                        ),
                       ),
                     ),
-                    const SizedBox(height: 18),
-                    Expanded(
-                      // O FUNDO E UM ALVO. As barras sao opacas
-                      // e ficam com o toque delas; o que sobra
-                      // — o vazio abaixo das linhas — e o toque
-                      // de voltar.
-                      child: GestureDetector(
-                        key: const ValueKey('timeline-fundo'),
-                        behavior: HitTestBehavior.translucent,
-                        onTap: widget.onTapBackground,
-                        child: ListView.builder(
-                        controller: _rowsScroll,
-                        padding: EdgeInsets.zero,
-                        itemExtent: alturaLinha,
-                        itemCount: trilhas.length,
-                        itemBuilder: (context, index) {
-                          final trilha = trilhas[index];
-                          return _AmLayerRow(
-                            key: ValueKey(trilha.first.id),
-                            trilha: trilha,
-                            pps: _pps,
-                            totalWidth: totalWidth,
-                            selectedIds: selecionadas,
-                            compact: widget.singleLayerId != null,
-                            playback: widget.playback,
-                            onTapLayer: widget.onTapLayer,
-                            activeTimesUs: widget.activeTimesUs,
-                            onForeignKeyframe:
-                                widget.onForeignKeyframe,
-                            onKeyframeTap: widget.onKeyframeTap,
-                            onEditStart: () => _editingBar = true,
-                            onEditEnd: _terminarEdicaoDaBarra,
-                          );
-                        },
+                    // Relogio central sob a regua. TOCAR marca o instante
+                    // do cabecote; SEGURAR abre as marcas.
+                    Positioned(
+                      top: 8,
+                      left: 0,
+                      right: 0,
+                      child: Center(
+                        child: GestureDetector(
+                          key: const ValueKey('timeline-selo-do-tempo'),
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () {
+                            HapticFeedback.selectionClick();
+                            ref
+                                .read(editorControllerProvider.notifier)
+                                .toggleMarker(widget.playback.timeForInput());
+                          },
+                          onLongPress: () {
+                            HapticFeedback.mediumImpact();
+                            menuDasMarcas(context, ref, widget.playback);
+                          },
+                          child: ValueListenableBuilder<Duration>(
+                            valueListenable: widget.playback.time,
+                            builder: (context, t, _) => Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                AppText(
+                                  formatTimecode(t, project.fps),
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.white,
+                                    letterSpacing: 0.5,
+                                    fontFeatures: [
+                                      FontFeature.tabularFigures(),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Container(
+                                  width: 58,
+                                  height: 1.5,
+                                  color: Colors.white,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
                       ),
+                    ),
+                    // Playhead central.
+                    IgnorePointer(
+                      child: Center(
+                        child: Container(
+                          width: 1.6,
+                          color: widget.playheadColor,
+                        ),
+                      ),
+                    ),
+                    if (widget.playheadColor != Colors.white)
+                      IgnorePointer(
+                        child: Align(
+                          alignment: Alignment.topCenter,
+                          child: Container(
+                            width: 8,
+                            height: 8,
+                            margin: const EdgeInsets.only(top: 0),
+                            decoration: BoxDecoration(
+                              color: widget.playheadColor,
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                        ),
+                      ),
+                    // Dividir e Congelar moram nas acoes rapidas da camada (E2);
+                    // nada flutua sobre as linhas da timeline (Fase 2).
+                    // CAMINHO DO GRUPO: Projeto › Grupo. Tocar em Projeto sai.
+                    if (caminho.isNotEmpty)
+                      Positioned(
+                        left: 4,
+                        top: 25,
+                        height: 24,
+                        width: constraints.maxWidth / 2 - 56,
+                        child: _Breadcrumb(
+                          key: const ValueKey('timeline-breadcrumb'),
+                          caminho: caminho,
+                          onNivel: (nivel) {
+                            // nivel 0 = Projeto; n = o grupo n (1-based).
+                            var sair = caminho.length - nivel;
+                            while (sair-- > 0) {
+                              controller.exitGroup();
+                            }
+                          },
+                        ),
+                      ),
+                    // COLUNA ESQUERDA FIXA: olho, cadeado, keyframe — uma por
+                    // linha (Fase 2). A miniatura mora dentro da barra.
+                    Positioned(
+                      left: 0,
+                      top: 38,
+                      bottom: 0,
+                      width: 66,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.centerLeft,
+                            end: Alignment.centerRight,
+                            colors: [
+                              AmColors.bg,
+                              AmColors.bg.withValues(alpha: 0.95),
+                              AmColors.bg.withValues(alpha: 0.0),
+                            ],
+                            stops: const [0.0, 0.78, 1.0],
+                          ),
+                        ),
+                        child: ListView.builder(
+                          controller: _pillsScroll,
+                          padding: EdgeInsets.zero,
+                          itemExtent: alturaLinha,
+                          itemCount: trilhas.length,
+                          itemBuilder: (context, index) {
+                            final trilha = trilhas[index];
+                            return _ControlesDaTrilha(
+                              trilha: trilha,
+                              playback: widget.playback,
+                              isMatteSource: trilha.any(
+                                (l) => matteSourceIds.contains(l.id),
+                              ),
+                            );
+                          },
+                        ),
                       ),
                     ),
                   ],
                 ),
-              ),
-            ),
+              );
+            },
           ),
-        ),
-        // Relogio central sob a regua. TOCAR marca o instante
-        // do cabecote; SEGURAR abre as marcas.
-        Positioned(
-          top: 8,
-          left: 0,
-          right: 0,
-          child: Center(
-            child: GestureDetector(
-              key: const ValueKey('timeline-selo-do-tempo'),
-              behavior: HitTestBehavior.opaque,
-              onTap: () {
-                HapticFeedback.selectionClick();
-                ref
-                    .read(editorControllerProvider.notifier)
-                    .toggleMarker(widget.playback.time.value);
-              },
-              onLongPress: () {
-                HapticFeedback.mediumImpact();
-                menuDasMarcas(context, ref, widget.playback);
-              },
-              child: ValueListenableBuilder<Duration>(
-              valueListenable: widget.playback.time,
-              builder: (context, t, _) => Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  AppText(
-                    formatTimecode(t, project.fps),
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
-                      letterSpacing: 0.5,
-                      fontFeatures: [FontFeature.tabularFigures()],
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Container(
-                    width: 58,
-                    height: 1.5,
-                    color: Colors.white,
-                  ),
-                ],
-              ),
-            ),
-            ),
-          ),
-        ),
-        // Playhead central.
-        IgnorePointer(
-          child: Center(
-            child: Container(width: 1.6, color: widget.playheadColor),
-          ),
-        ),
-        if (widget.playheadColor != Colors.white)
-          IgnorePointer(
-            child: Align(
-              alignment: Alignment.topCenter,
-              child: Container(
-                width: 8,
-                height: 8,
-                margin: const EdgeInsets.only(top: 0),
-                decoration: BoxDecoration(
-                  color: widget.playheadColor,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-          ),
-        // Dividir e Congelar moram nas acoes rapidas da camada (E2);
-        // nada flutua sobre as linhas da timeline (Fase 2).
-        // CANTO DIREITO: expandir a timeline (preview vira janela).
-        // SELECIONAR: ao lado do expandir, sempre a vista.
-        if (widget.singleLayerId == null)
-          Positioned(
-            right: widget.onExpand != null ? 34 : 0,
-            top: 0,
-            height: 22,
-            child: Consumer(
-              builder: (context, ref, _) {
-                final ligado = ref.watch(modoSelecionarProvider);
-                return _BotaoDaRegua(
-                  key: const ValueKey('timeline-selecionar'),
-                  tooltip: ligado
-                      ? 'Sair do modo Selecionar'
-                      : 'Selecionar varias camadas',
-                  ativo: ligado,
-                  onTap: () {
-                    ref.read(modoSelecionarProvider.notifier).state =
-                        !ligado;
-                  },
-                  child: Icon(
-                    ligado
-                        ? CupertinoIcons.checkmark_square_fill
-                        : CupertinoIcons.checkmark_square,
-                    size: 14,
-                    color: ligado ? AmColors.action : AmColors.text,
-                  ),
-                );
-              },
-            ),
-          ),
-        if (widget.onExpand != null)
-          Positioned(
-            right: 0,
-            top: 0,
-            height: 22,
-            child: _BotaoDaRegua(
-              key: const ValueKey('timeline-expandir'),
-              tooltip: widget.expanded
-                  ? 'Recolher timeline'
-                  : 'Expandir timeline',
-              ativo: widget.expanded,
-              onTap: widget.onExpand!,
-              child: Icon(
-                widget.expanded
-                    ? CupertinoIcons.arrow_down_right_arrow_up_left
-                    : CupertinoIcons.arrow_up_left_arrow_down_right,
-                size: 14,
-                color: widget.expanded
-                    ? AmColors.action
-                    : AmColors.text,
-              ),
-            ),
-          ),
-        // CAMINHO DO GRUPO: Projeto › Grupo. Tocar em Projeto sai.
-        if (caminho.isNotEmpty)
-          Positioned(
-            left: 4,
-            top: 25,
-            height: 24,
-            width: constraints.maxWidth / 2 - 56,
-            child: _Breadcrumb(
-              key: const ValueKey('timeline-breadcrumb'),
-              caminho: caminho,
-              onNivel: (nivel) {
-                // nivel 0 = Projeto; n = o grupo n (1-based).
-                var sair = caminho.length - nivel;
-                while (sair-- > 0) {
-                  controller.exitGroup();
-                }
-              },
-            ),
-          ),
-        // COLUNA ESQUERDA FIXA: olho, cadeado, keyframe — uma por
-        // linha (Fase 2). A miniatura mora dentro da barra.
-        Positioned(
-          left: 0,
-          top: 38,
-          bottom: 0,
-          width: 66,
-          child: Container(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.centerLeft,
-                end: Alignment.centerRight,
-                colors: [
-                  AmColors.bg,
-                  AmColors.bg.withValues(alpha: 0.95),
-                  AmColors.bg.withValues(alpha: 0.0),
-                ],
-                stops: const [0.0, 0.78, 1.0],
-              ),
-            ),
-            child: ListView.builder(
-              controller: _pillsScroll,
-              padding: EdgeInsets.zero,
-              itemExtent: alturaLinha,
-              itemCount: trilhas.length,
-              itemBuilder: (context, index) {
-                final trilha = trilhas[index];
-                return _ControlesDaTrilha(
-                  trilha: trilha,
-                  playback: widget.playback,
-                  isMatteSource: trilha.any(
-                    (l) => matteSourceIds.contains(l.id),
-                  ),
-                );
-              },
-            ),
-          ),
-        ),
-      ],
-    ),
-  );
-},
         ),
       ),
-    ),
     );
   }
 }
@@ -913,137 +892,97 @@ class _ControlesDaTrilha extends ConsumerWidget {
         width: 58,
         margin: const EdgeInsets.only(left: 4),
         decoration: BoxDecoration(
-color: const Color(0xFF1E222D),
-borderRadius: BorderRadius.circular(14),
+          color: const Color(0xFF1E222D),
+          borderRadius: BorderRadius.circular(14),
         ),
         child: Row(
-mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-children: [
-  Tooltip(
-    message: hidden ? 'Mostrar camada' : 'Ocultar camada',
-    child: GestureDetector(
-      key: ValueKey('olho-${layer.id}'),
-      behavior: HitTestBehavior.opaque,
-      onTap: () {
-        HapticFeedback.lightImpact();
-        controller.runAsOneUndo(() {
-          for (final l in trilha) {
-            controller.toggleHidden(l.id);
-          }
-        });
-      },
-      child: SizedBox(
-        width: 26,
-        height: _Alturas.linhaDe(context),
-        child: Icon(
-          hidden ? CupertinoIcons.eye_slash : CupertinoIcons.eye,
-          size: 16,
-          color: Colors.white70,
-        ),
-      ),
-    ),
-  ),
-  Tooltip(
-    message: locked
-        ? 'Bloqueada · segure para desbloquear'
-        : 'Selecionar · segure para bloquear',
-    child: GestureDetector(
-      key: ValueKey('kf-${layer.id}'),
-      behavior: HitTestBehavior.opaque,
-      onTap: () {
-        HapticFeedback.selectionClick();
-        ref.read(multiSelectProvider.notifier).state = const {};
-        ref.read(selectedLayerProvider.notifier).state = layer.id;
-      },
-      onLongPress: () {
-        HapticFeedback.mediumImpact();
-        controller.runAsOneUndo(() {
-          for (final l in trilha) {
-            controller.toggleLocked(l.id);
-          }
-        });
-      },
-      child: Container(
-        key: ValueKey('etiqueta-${layer.id}'),
-        width: 18,
-        height: 18,
-        decoration: BoxDecoration(
-          color: etiqueta ?? const Color(0xFFFFE899),
-          borderRadius: BorderRadius.circular(4),
-          border: isMatteSource
-              ? Border.all(color: AmColors.accent)
-              : null,
-        ),
-        alignment: Alignment.center,
-        child: locked
-            ? const Icon(
-                CupertinoIcons.lock_fill,
-                size: 11,
-                color: AureaColors.bg,
-              )
-            : naMulti
-            ? Icon(
-                CupertinoIcons.checkmark_alt,
-                key: ValueKey('visto-${layer.id}'),
-                size: 13,
-                color: AureaColors.bg,
-              )
-            : recortada
-            ? Icon(
-                CupertinoIcons.arrow_turn_left_down,
-                key: ValueKey('recorte-${layer.id}'),
-                size: 11,
-                color: AureaColors.bg,
-              )
-            : null,
-      ),
-    ),
-  ),
-],
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            Tooltip(
+              message: hidden ? 'Mostrar camada' : 'Ocultar camada',
+              child: GestureDetector(
+                key: ValueKey('olho-${layer.id}'),
+                behavior: HitTestBehavior.opaque,
+                onTap: () {
+                  HapticFeedback.lightImpact();
+                  controller.runAsOneUndo(() {
+                    for (final l in trilha) {
+                      controller.toggleHidden(l.id);
+                    }
+                  });
+                },
+                child: SizedBox(
+                  width: 26,
+                  height: _Alturas.linhaDe(context),
+                  child: Icon(
+                    hidden ? CupertinoIcons.eye_slash : CupertinoIcons.eye,
+                    size: 16,
+                    color: Colors.white70,
+                  ),
+                ),
+              ),
+            ),
+            Tooltip(
+              message: locked
+                  ? 'Bloqueada · segure para desbloquear'
+                  : 'Selecionar · segure para bloquear',
+              child: GestureDetector(
+                key: ValueKey('kf-${layer.id}'),
+                behavior: HitTestBehavior.opaque,
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  ref.read(multiSelectProvider.notifier).state = const {};
+                  ref.read(selectedLayerProvider.notifier).state = layer.id;
+                },
+                onLongPress: () {
+                  HapticFeedback.mediumImpact();
+                  controller.runAsOneUndo(() {
+                    for (final l in trilha) {
+                      controller.toggleLocked(l.id);
+                    }
+                  });
+                },
+                child: Container(
+                  key: ValueKey('etiqueta-${layer.id}'),
+                  width: 18,
+                  height: 18,
+                  decoration: BoxDecoration(
+                    color: etiqueta ?? const Color(0xFFFFE899),
+                    borderRadius: BorderRadius.circular(4),
+                    border: isMatteSource
+                        ? Border.all(color: AmColors.accent)
+                        : null,
+                  ),
+                  alignment: Alignment.center,
+                  child: locked
+                      ? const Icon(
+                          CupertinoIcons.lock_fill,
+                          size: 11,
+                          color: AureaColors.bg,
+                        )
+                      : naMulti
+                      ? Icon(
+                          CupertinoIcons.checkmark_alt,
+                          key: ValueKey('visto-${layer.id}'),
+                          size: 13,
+                          color: AureaColors.bg,
+                        )
+                      : recortada
+                      ? Icon(
+                          CupertinoIcons.arrow_turn_left_down,
+                          key: ValueKey('recorte-${layer.id}'),
+                          size: 11,
+                          color: AureaColors.bg,
+                        )
+                      : null,
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
-}
-
-/// Botaozinho da regua (ima, busca, expandir).
-class _BotaoDaRegua extends StatelessWidget {
-  const _BotaoDaRegua({
-    super.key,
-    required this.tooltip,
-    required this.onTap,
-    required this.child,
-    this.ativo = false,
-  });
-
-  final String tooltip;
-  final VoidCallback onTap;
-  final Widget child;
-  final bool ativo;
-
-  @override
-  Widget build(BuildContext context) => Tooltip(
-    message: tooltip,
-    child: GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: () {
-        HapticFeedback.lightImpact();
-        onTap();
-      },
-      child: Container(
-        width: 30,
-        height: 22,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-color: ativo
-    ? AmColors.actionDim
-    : AmColors.bg.withValues(alpha: .85),
-borderRadius: BorderRadius.circular(6),
-        ),
-        child: child,
-      ),
-    ),
-  );
 }
 
 /// Projeto › Grupo › Subgrupo. Cada nivel e tocavel; o ultimo e o atual.
@@ -1065,35 +1004,35 @@ class _Breadcrumb extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-for (var i = 0; i < nomes.length; i++) ...[
-  if (i > 0)
-    const Padding(
-      padding: EdgeInsets.symmetric(horizontal: 3),
-      child: AppText(
-        '›',
-        style: TextStyle(color: AmColors.muted, fontSize: 12),
-      ),
-    ),
-  Flexible(
-    child: GestureDetector(
-      key: ValueKey('timeline-breadcrumb-$i'),
-      behavior: HitTestBehavior.opaque,
-      onTap: i == nomes.length - 1 ? null : () => onNivel(i),
-      child: AppText(
-        nomes[i],
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          color: i == nomes.length - 1
-              ? AmColors.text
-              : AmColors.selection,
-          fontSize: 11.5,
-          fontWeight: FontWeight.w700,
-        ),
-      ),
-    ),
-  ),
-],
+          for (var i = 0; i < nomes.length; i++) ...[
+            if (i > 0)
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 3),
+                child: AppText(
+                  '›',
+                  style: TextStyle(color: AmColors.muted, fontSize: 12),
+                ),
+              ),
+            Flexible(
+              child: GestureDetector(
+                key: ValueKey('timeline-breadcrumb-$i'),
+                behavior: HitTestBehavior.opaque,
+                onTap: i == nomes.length - 1 ? null : () => onNivel(i),
+                child: AppText(
+                  nomes[i],
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: i == nomes.length - 1
+                        ? AmColors.text
+                        : AmColors.selection,
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -1139,12 +1078,12 @@ class _BeatsPainter extends CustomPainter {
       if (x < -2 || x > size.width + 2) continue;
       if (i % 4 == 0) {
         fortes
-..moveTo(x, size.height * 0.3)
-..lineTo(x, size.height);
+          ..moveTo(x, size.height * 0.3)
+          ..lineTo(x, size.height);
       } else {
         caminho
-..moveTo(x, size.height * 0.55)
-..lineTo(x, size.height);
+          ..moveTo(x, size.height * 0.55)
+          ..lineTo(x, size.height);
       }
     }
     canvas.drawPath(caminho, _tinta);
@@ -1193,23 +1132,23 @@ class _MarcaNaReguaState extends State<_MarcaNaRegua> {
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onLongPress: () {
-HapticFeedback.mediumImpact();
-widget.onMenu();
+          HapticFeedback.mediumImpact();
+          widget.onMenu();
         },
         onHorizontalDragStart: (_) {
-HapticFeedback.lightImpact();
-_acumulado = 0;
+          HapticFeedback.lightImpact();
+          _acumulado = 0;
         },
         onHorizontalDragUpdate: (d) {
-_acumulado += d.delta.dx;
-widget.onMover(_acumulado);
-_acumulado = 0;
+          _acumulado += d.delta.dx;
+          widget.onMover(_acumulado);
+          _acumulado = 0;
         },
         child: CustomPaint(
-painter: _UmaMarcaPainter(
-  color: widget.marca.color,
-  label: widget.marca.label,
-),
+          painter: _UmaMarcaPainter(
+            color: widget.marca.color,
+            label: widget.marca.label,
+          ),
         ),
       ),
     );
@@ -1275,66 +1214,67 @@ Future<void> _menuDaMarca(
       ),
       child: SafeArea(
         child: Column(
-mainAxisSize: MainAxisSize.min,
-children: [
-  Padding(
-    padding: const EdgeInsets.fromLTRB(14, 14, 14, 8),
-    child: TextField(
-      controller: texto,
-      autofocus: true,
-      style: const TextStyle(color: AmColors.text),
-      decoration: InputDecoration(
-        hintText: translate(context, 'Nome da marca'),
-        hintStyle: TextStyle(color: AmColors.muted),
-      ),
-      onSubmitted: (v) {
-        controller.renameMarker(m.time, v);
-        Navigator.of(sheetContext).pop();
-      },
-    ),
-  ),
-  Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 10),
-    child: Row(
-      children: [
-        for (final c in cores)
-          GestureDetector(
-            onTap: () {
-              controller.setMarkerColor(m.time, c);
-              Navigator.of(sheetContext).pop();
-            },
-            child: Container(
-              width: 34,
-              height: 34,
-              margin: const EdgeInsets.all(5),
-              decoration: BoxDecoration(
-                color: c,
-                shape: BoxShape.circle,
-                border: m.color == c
-                    ? Border.all(color: Colors.white, width: 2)
-                    : null,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 14, 14, 8),
+              child: TextField(
+                controller: texto,
+                autofocus: true,
+                style: const TextStyle(color: AmColors.text),
+                decoration: InputDecoration(
+                  hintText: translate(context, 'Nome da marca'),
+                  hintStyle: TextStyle(color: AmColors.muted),
+                ),
+                onSubmitted: (v) {
+                  controller.renameMarker(m.time, v);
+                  Navigator.of(sheetContext).pop();
+                },
               ),
             ),
-          ),
-      ],
-    ),
-  ),
-  ListTile(
-    leading: const Icon(
-      CupertinoIcons.delete,
-      color: AmColors.pink,
-      size: 20,
-    ),
-    title: const AppText('Apagar a marca',
-      style: TextStyle(color: AmColors.pink, fontSize: 15),
-    ),
-    onTap: () {
-      controller.removeMarker(m.time);
-      Navigator.of(sheetContext).pop();
-    },
-  ),
-  const SizedBox(height: 6),
-],
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: Row(
+                children: [
+                  for (final c in cores)
+                    GestureDetector(
+                      onTap: () {
+                        controller.setMarkerColor(m.time, c);
+                        Navigator.of(sheetContext).pop();
+                      },
+                      child: Container(
+                        width: 34,
+                        height: 34,
+                        margin: const EdgeInsets.all(5),
+                        decoration: BoxDecoration(
+                          color: c,
+                          shape: BoxShape.circle,
+                          border: m.color == c
+                              ? Border.all(color: Colors.white, width: 2)
+                              : null,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            ListTile(
+              leading: const Icon(
+                CupertinoIcons.delete,
+                color: AmColors.pink,
+                size: 20,
+              ),
+              title: const AppText(
+                'Apagar a marca',
+                style: TextStyle(color: AmColors.pink, fontSize: 15),
+              ),
+              onTap: () {
+                controller.removeMarker(m.time);
+                Navigator.of(sheetContext).pop();
+              },
+            ),
+            const SizedBox(height: 6),
+          ],
         ),
       ),
     ),
@@ -1441,32 +1381,32 @@ class _AmLayerRow extends ConsumerWidget {
         // TOCAR NO VAZIO DA TIMELINE FECHA TUDO: tira a selecao (e com ela
         // as ferramentas da camada) e fecha a barra de adicionar.
         Positioned.fill(
-child: GestureDetector(
-  behavior: HitTestBehavior.translucent,
-  onTap: () {
-    HapticFeedback.selectionClick();
-    ref.read(multiSelectProvider.notifier).state = const {};
-    ref.read(selectedLayerProvider.notifier).state = null;
-    ref.read(editorSessionProvider.notifier).closeAdd();
-  },
-),
+          child: GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onTap: () {
+              HapticFeedback.selectionClick();
+              ref.read(multiSelectProvider.notifier).state = const {};
+              ref.read(selectedLayerProvider.notifier).state = null;
+              ref.read(editorSessionProvider.notifier).closeAdd();
+            },
+          ),
         ),
         for (final l in trilha)
-_AmBar(
-  key: ValueKey('bar-${l.id}'),
-  layer: l,
-  pps: pps,
-  totalWidth: totalWidth,
-  selected: compact || selectedIds.contains(l.id),
-  compact: compact,
-  playback: playback,
-  onEditStart: onEditStart,
-  onEditEnd: onEditEnd,
-  onTapLayer: onTapLayer,
-  activeTimesUs: activeTimesUs,
-  onForeignKeyframe: onForeignKeyframe,
-  onKeyframeTap: onKeyframeTap,
-),
+          _AmBar(
+            key: ValueKey('bar-${l.id}'),
+            layer: l,
+            pps: pps,
+            totalWidth: totalWidth,
+            selected: compact || selectedIds.contains(l.id),
+            compact: compact,
+            playback: playback,
+            onEditStart: onEditStart,
+            onEditEnd: onEditEnd,
+            onTapLayer: onTapLayer,
+            activeTimesUs: activeTimesUs,
+            onForeignKeyframe: onForeignKeyframe,
+            onKeyframeTap: onKeyframeTap,
+          ),
       ],
     ),
   );
@@ -1866,9 +1806,9 @@ class _AmBarState extends ConsumerState<_AmBar> {
       while (lo < hi) {
         final mid = (lo + hi) ~/ 2;
         if (beats[mid] < v) {
-lo = mid + 1;
+          lo = mid + 1;
         } else {
-hi = mid;
+          hi = mid;
         }
       }
       for (var i = lo - 1; i <= lo + 1; i++) {
@@ -1905,248 +1845,249 @@ hi = mid;
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-Positioned(
-  left: left,
-  top: 0,
-  width: width.toDouble(),
-  height: _Alturas.barraDe(context),
-  child: GestureDetector(
-    key: ValueKey('clip-content-${layer.id}'),
-    behavior: HitTestBehavior.opaque,
-    onTap: () {
-      HapticFeedback.selectionClick();
-      // No modo compacto (a timeline de um painel aberto) o
-      // toque na barra e a saida do painel: quem decide e o
-      // editor, pelo mesmo onTapLayer.
-      if (compact) {
-        onTapLayer?.call(layer);
-        return;
-      }
-      // MODO SELECIONAR: o toque marca e desmarca.
-      if (ref.read(modoSelecionarProvider)) {
-        final r = alternarNaSelecao(
-          ref.read(multiSelectProvider),
-          ref.read(selectedLayerProvider),
-          layer.id,
-        );
-        ref.read(multiSelectProvider.notifier).state = r.multi;
-        ref.read(selectedLayerProvider.notifier).state = r.principal;
-        return;
-      }
-      // Toque simples limpa a selecao multipla.
-      ref.read(multiSelectProvider.notifier).state = const {};
-      if (ref.read(selectedLayerProvider) == layer.id) {
-        onTapLayer?.call(layer);
-      } else {
-        ref.read(selectedLayerProvider.notifier).state = layer.id;
-      }
-    },
-    // TOQUE DUPLO num grupo entra nele (Fase 2). So em grupos:
-    // o reconhecedor de toque duplo atrasa o toque simples.
-    onDoubleTap: layer is GroupLayer && !compact
-        ? () => controller.enterGroup(layer.id)
-        : null,
-    // TOQUE LONGO + ARRASTAR reordena (um degrau por linha);
-    // toque longo SEM mover alterna a camada na selecao
-    // multipla (a barra de acoes agrupa/duplica/exclui o
-    // conjunto).
-    onLongPressCancel: _terminarArrasto,
-    // BLOQUEADA: o toque longo seleciona e para por ai.
-    //
-    // Nada de aviso em faixa aqui. O aviso da casa e um `SnackBar`, e ele
-    // cai JUSTAMENTE sobre a linha do tempo — o app ja aprendeu isso com
-    // o aviso de "excluida", que os testadores mandaram tirar por cobrir a
-    // timeline. Quem explica o bloqueio e o painel, que abre com a faixa
-    // do cadeado e o botao de desbloquear.
-    onLongPressStart: locked
-        ? (_) {
-            if (compact) return;
-            ref.read(multiSelectProvider.notifier).state = const {};
-            ref.read(selectedLayerProvider.notifier).state = layer.id;
-          }
-        : (_) {
-            _moveuNoToqueLongo = false;
-            _ultimoDyLongo = 0;
-            _acumuladoVertical = 0;
-            _eixoDoArrasto = null;
-            _dragStart0 = layer.startTime;
-            HapticFeedback.mediumImpact();
-          },
-    onLongPressMoveUpdate: locked
-        ? null
-        : (d) {
-            final dy = d.offsetFromOrigin.dy;
-            if (!_moveuNoToqueLongo &&
-                d.offsetFromOrigin.distance < 8) {
-              return;
-            }
-            if (locked) return;
-            if (!_moveuNoToqueLongo) _comecarArrasto();
-            _moveuNoToqueLongo = true;
-            // O EIXO SE DECIDE UMA VEZ, no primeiro movimento.
-            //
-            // Era decidido a CADA atualizacao: um tremor do
-            // dedo no meio de uma subida vertical virava um
-            // deslocamento no tempo, e a camada que so devia
-            // trocar de degrau saia do lugar. "Arrastar a
-            // camada sem modificar a posicao" e o que a
-            // referencia faz — e o que a trava garante.
-            _eixoDoArrasto ??=
-                d.offsetFromOrigin.dx.abs() > dy.abs() || compact
-                ? _EixoDoArrasto.tempo
-                : _EixoDoArrasto.pilha;
-            if (_eixoDoArrasto == _EixoDoArrasto.tempo) {
-              final desired =
-                  _dragStart0 + _pxToDur(d.offsetFromOrigin.dx);
-              final novo = _snapMove(desired);
-              controller.moveLayer(layer.id, novo);
-              _informarTempo(novo, _dragStart0);
-            } else {
-              _reordenarPorArrasto(dy - _ultimoDyLongo);
-            }
-            _ultimoDyLongo = dy;
-          },
-    onLongPressEnd: locked
-        ? null
-        : (_) {
-            _terminarArrasto();
-            if (!_moveuNoToqueLongo && !compact) {
-              _alternarNaSelecaoMultipla();
-            }
-          },
-    child: CustomPaint(
-            painter: _AmBarPainter(
-              selected: selected,
-              hidden: hidden,
-              color: layerTypeColor(layer),
-            ),
-            foregroundPainter: _AmBarFrentePainter(
-              selected: selected,
-              hidden: hidden,
-              color: layerTypeColor(layer),
-            ),
-            // FORMA DE ONDA e TIRA DE MINIATURAS dentro da barra:
-            // sem elas, achar o corte e tatear.
-            child: _ClipPreview(
-              layer: layer,
-              // CLIPE CURTO: um pedaco de 266 ms tem 20 px de barra. O
-              // conteudo some por ordem de importancia em vez de
-              // estourar a linha (o projeto importado esta cheio deles).
-              child: ClipRect(
-                child: Padding(
-                  padding: EdgeInsets.fromLTRB(
-                    // A faixa de cor ocupa os primeiros 4 px.
-                    width < 46 ? 7 : 14,
-                    0,
-                    width < 46 ? 3 : 10,
-                    // O espaco de baixo e dos keyframes.
-                    kAmFaixaKeyframes,
-                  ),
-                  child: Row(
-                    children: [
-                      // MODO COMPACTO (painel aberto): as setas de camada
-                      // vizinha ficam NA barra. A camada tem UM desenho so,
-                      // com painel ou sem ele.
-                      if (compact)
-                        _SetaDeVizinho(
-                          chave: 'barra-vizinha-anterior',
-                          icone: CupertinoIcons.chevron_left,
-                          onTap: () {
-                            HapticFeedback.selectionClick();
-                            controller.selectNeighbor(1);
-                          },
-                        ),
-                      // ICONE DO TIPO na ponta: reconhecer sem ler.
-                      if (width > 28)
-                        Padding(
-                          padding: const EdgeInsets.only(right: 6),
-                          child: Icon(
-                            layerTypeIcon(layer),
-                            size: 11,
-                            color: Colors.white.withValues(
-                              alpha: hidden ? 0.45 : 0.85,
+          Positioned(
+            left: left,
+            top: 0,
+            width: width.toDouble(),
+            height: _Alturas.barraDe(context),
+            child: GestureDetector(
+              key: ValueKey('clip-content-${layer.id}'),
+              behavior: HitTestBehavior.opaque,
+              onTap: () {
+                HapticFeedback.selectionClick();
+                // No modo compacto (a timeline de um painel aberto) o
+                // toque na barra e a saida do painel: quem decide e o
+                // editor, pelo mesmo onTapLayer.
+                if (compact) {
+                  onTapLayer?.call(layer);
+                  return;
+                }
+                // MODO SELECIONAR: o toque marca e desmarca.
+                if (ref.read(modoSelecionarProvider)) {
+                  final r = alternarNaSelecao(
+                    ref.read(multiSelectProvider),
+                    ref.read(selectedLayerProvider),
+                    layer.id,
+                  );
+                  ref.read(multiSelectProvider.notifier).state = r.multi;
+                  ref.read(selectedLayerProvider.notifier).state = r.principal;
+                  return;
+                }
+                // Toque simples limpa a selecao multipla.
+                ref.read(multiSelectProvider.notifier).state = const {};
+                if (ref.read(selectedLayerProvider) == layer.id) {
+                  onTapLayer?.call(layer);
+                } else {
+                  ref.read(selectedLayerProvider.notifier).state = layer.id;
+                }
+              },
+              // TOQUE DUPLO num grupo entra nele (Fase 2). So em grupos:
+              // o reconhecedor de toque duplo atrasa o toque simples.
+              onDoubleTap: layer is GroupLayer && !compact
+                  ? () => controller.enterGroup(layer.id)
+                  : null,
+              // TOQUE LONGO + ARRASTAR reordena (um degrau por linha);
+              // toque longo SEM mover alterna a camada na selecao
+              // multipla (a barra de acoes agrupa/duplica/exclui o
+              // conjunto).
+              onLongPressCancel: _terminarArrasto,
+              // BLOQUEADA: o toque longo seleciona e para por ai.
+              //
+              // Nada de aviso em faixa aqui. O aviso da casa e um `SnackBar`, e ele
+              // cai JUSTAMENTE sobre a linha do tempo — o app ja aprendeu isso com
+              // o aviso de "excluida", que os testadores mandaram tirar por cobrir a
+              // timeline. Quem explica o bloqueio e o painel, que abre com a faixa
+              // do cadeado e o botao de desbloquear.
+              onLongPressStart: locked
+                  ? (_) {
+                      if (compact) return;
+                      ref.read(multiSelectProvider.notifier).state = const {};
+                      ref.read(selectedLayerProvider.notifier).state = layer.id;
+                    }
+                  : (_) {
+                      _moveuNoToqueLongo = false;
+                      _ultimoDyLongo = 0;
+                      _acumuladoVertical = 0;
+                      _eixoDoArrasto = null;
+                      _dragStart0 = layer.startTime;
+                      HapticFeedback.mediumImpact();
+                    },
+              onLongPressMoveUpdate: locked
+                  ? null
+                  : (d) {
+                      final dy = d.offsetFromOrigin.dy;
+                      if (!_moveuNoToqueLongo &&
+                          d.offsetFromOrigin.distance < 8) {
+                        return;
+                      }
+                      if (locked) return;
+                      if (!_moveuNoToqueLongo) _comecarArrasto();
+                      _moveuNoToqueLongo = true;
+                      // O EIXO SE DECIDE UMA VEZ, no primeiro movimento.
+                      //
+                      // Era decidido a CADA atualizacao: um tremor do
+                      // dedo no meio de uma subida vertical virava um
+                      // deslocamento no tempo, e a camada que so devia
+                      // trocar de degrau saia do lugar. "Arrastar a
+                      // camada sem modificar a posicao" e o que a
+                      // referencia faz — e o que a trava garante.
+                      _eixoDoArrasto ??=
+                          d.offsetFromOrigin.dx.abs() > dy.abs() || compact
+                          ? _EixoDoArrasto.tempo
+                          : _EixoDoArrasto.pilha;
+                      if (_eixoDoArrasto == _EixoDoArrasto.tempo) {
+                        final desired =
+                            _dragStart0 + _pxToDur(d.offsetFromOrigin.dx);
+                        final novo = _snapMove(desired);
+                        controller.moveLayer(layer.id, novo);
+                        _informarTempo(novo, _dragStart0);
+                      } else {
+                        _reordenarPorArrasto(dy - _ultimoDyLongo);
+                      }
+                      _ultimoDyLongo = dy;
+                    },
+              onLongPressEnd: locked
+                  ? null
+                  : (_) {
+                      _terminarArrasto();
+                      if (!_moveuNoToqueLongo && !compact) {
+                        _alternarNaSelecaoMultipla();
+                      }
+                    },
+              child: CustomPaint(
+                painter: _AmBarPainter(
+                  selected: selected,
+                  hidden: hidden,
+                  color: layerTypeColor(layer),
+                ),
+                foregroundPainter: _AmBarFrentePainter(
+                  selected: selected,
+                  hidden: hidden,
+                  color: layerTypeColor(layer),
+                ),
+                // FORMA DE ONDA e TIRA DE MINIATURAS dentro da barra:
+                // sem elas, achar o corte e tatear.
+                child: _ClipPreview(
+                  layer: layer,
+                  playback: playback,
+                  // CLIPE CURTO: um pedaco de 266 ms tem 20 px de barra. O
+                  // conteudo some por ordem de importancia em vez de
+                  // estourar a linha (o projeto importado esta cheio deles).
+                  child: ClipRect(
+                    child: Padding(
+                      padding: EdgeInsets.fromLTRB(
+                        // A faixa de cor ocupa os primeiros 4 px.
+                        width < 46 ? 7 : 14,
+                        0,
+                        width < 46 ? 3 : 10,
+                        // O espaco de baixo e dos keyframes.
+                        kAmFaixaKeyframes,
+                      ),
+                      child: Row(
+                        children: [
+                          // MODO COMPACTO (painel aberto): as setas de camada
+                          // vizinha ficam NA barra. A camada tem UM desenho so,
+                          // com painel ou sem ele.
+                          if (compact)
+                            _SetaDeVizinho(
+                              chave: 'barra-vizinha-anterior',
+                              icone: CupertinoIcons.chevron_left,
+                              onTap: () {
+                                HapticFeedback.selectionClick();
+                                controller.selectNeighbor(1);
+                              },
                             ),
-                          ),
-                        ),
-                      if (locked)
-                        Padding(
-                          padding: EdgeInsets.only(right: width > 70 ? 5 : 0),
-                          child: const Icon(
-                            CupertinoIcons.lock_fill,
-                            size: 10,
-                            color: Colors.white,
-                          ),
-                        ),
-                      if (width > 52)
-                        Flexible(
-                          child: AppText(
-                            layer.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: -0.1,
+                          // ICONE DO TIPO na ponta: reconhecer sem ler.
+                          if (width > 28)
+                            Padding(
+                              padding: const EdgeInsets.only(right: 6),
+                              child: Icon(
+                                layerTypeIcon(layer),
+                                size: 11,
+                                color: Colors.white.withValues(
+                                  alpha: hidden ? 0.45 : 0.85,
+                                ),
+                              ),
+                            ),
+                          if (locked)
+                            Padding(
+                              padding: EdgeInsets.only(
+                                right: width > 70 ? 5 : 0,
+                              ),
+                              child: const Icon(
+                                CupertinoIcons.lock_fill,
+                                size: 10,
+                                color: Colors.white,
+                              ),
+                            ),
+                          if (width > 52)
+                            Flexible(
+                              child: AppText(
+                                layer.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: -0.1,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
+                          if (layer.hasAnimation && width > 120) ...[
+                            const SizedBox(width: 6),
+                            const Icon(
+                              CupertinoIcons.rhombus,
+                              size: 12,
                               color: Colors.white,
                             ),
-                          ),
-                        ),
-                      if (layer.hasAnimation && width > 120) ...[
-                        const SizedBox(width: 6),
-                        const Icon(
-                          CupertinoIcons.rhombus,
-                          size: 12,
-                          color: Colors.white,
-                        ),
-                      ],
-                      // GRUPO: a contagem de filhos, e o toque duplo
-                      // entra.
-                      if (layer is GroupLayer && width > 100) ...[
-                        const SizedBox(width: 6),
-                        Container(
-                          key: ValueKey('grupo-contagem-${layer.id}'),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 5,
-                            vertical: 1,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(
-                              alpha: .35,
+                          ],
+                          // GRUPO: a contagem de filhos, e o toque duplo
+                          // entra.
+                          if (layer is GroupLayer && width > 100) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              key: ValueKey('grupo-contagem-${layer.id}'),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 5,
+                                vertical: 1,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: .35),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: AppText(
+                                '${(layer as GroupLayer).children.length}',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 9.5,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
                             ),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: AppText(
-                            '${(layer as GroupLayer).children.length}',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 9.5,
-                              fontWeight: FontWeight.w800,
+                          ],
+                          const Spacer(),
+                          if (compact)
+                            _SetaDeVizinho(
+                              chave: 'barra-vizinha-proxima',
+                              icone: CupertinoIcons.chevron_right,
+                              onTap: () {
+                                HapticFeedback.selectionClick();
+                                controller.selectNeighbor(-1);
+                              },
+                            )
+                          else if (width > 150)
+                            const Icon(
+                              CupertinoIcons.line_horizontal_3,
+                              size: 14,
+                              color: Colors.white70,
                             ),
-                          ),
-                        ),
-                      ],
-                      const Spacer(),
-                      if (compact)
-                        _SetaDeVizinho(
-                          chave: 'barra-vizinha-proxima',
-                          icone: CupertinoIcons.chevron_right,
-                          onTap: () {
-                            HapticFeedback.selectionClick();
-                            controller.selectNeighbor(-1);
-                          },
-                        )
-                      else if (width > 150)
-                        const Icon(
-                          CupertinoIcons.line_horizontal_3,
-                          size: 14,
-                          color: Colors.white70,
-                        ),
-                    ],
+                        ],
+                      ),
+                    ),
                   ),
                 ),
               ),
-            ),
-          ),
             ),
           ),
           // JUNTAR a vista na juncao: dois pedacos do mesmo arquivo,
@@ -2177,7 +2118,8 @@ Positioned(
                     color: AmColors.action,
                     borderRadius: BorderRadius.circular(6),
                   ),
-                  child: const AppText('Juntar',
+                  child: const AppText(
+                    'Juntar',
                     style: TextStyle(
                       color: AmColors.onAction,
                       fontSize: 9.5,
@@ -2725,9 +2667,14 @@ class _TrimHandle extends StatelessWidget {
 /// depois — a barra aparece na hora e ganha a previa quando fica pronta,
 /// em vez de segurar a interface esperando o FFmpeg.
 class _ClipPreview extends StatefulWidget {
-  const _ClipPreview({required this.layer, required this.child});
+  const _ClipPreview({
+    required this.layer,
+    required this.playback,
+    required this.child,
+  });
 
   final Layer layer;
+  final PlaybackController playback;
   final Widget child;
 
   @override
@@ -2736,6 +2683,7 @@ class _ClipPreview extends StatefulWidget {
 
 class _ClipPreviewState extends State<_ClipPreview> {
   final _service = MediaPreviewService.instance;
+  Timer? _pedido;
 
   @override
   void initState() {
@@ -2757,6 +2705,19 @@ class _ClipPreviewState extends State<_ClipPreview> {
   }
 
   void _pedir() {
+    _pedido?.cancel();
+    // Onda e miniaturas sao auxiliares. Decodificar o arquivo no mesmo
+    // instante da importacao/abertura roubava CPU do preview e do gesto.
+    // So comecam quando a interface ficou ociosa e nunca durante play.
+    _pedido = Timer(const Duration(milliseconds: 900), _pedirQuandoOcioso);
+  }
+
+  void _pedirQuandoOcioso() {
+    if (!mounted) return;
+    if (widget.playback.playing.value) {
+      _pedido = Timer(const Duration(milliseconds: 500), _pedirQuandoOcioso);
+      return;
+    }
     final l = widget.layer;
     if (l is AudioLayer) {
       _service.ensureWaveform(l.sourcePath);
@@ -2769,11 +2730,13 @@ class _ClipPreviewState extends State<_ClipPreview> {
         l.sourcePath,
         l.sourceDuration ?? l.sourceOffset + videoSourceSpan(l),
       );
-      // PROXY: pedido daqui porque a barra do clipe sempre monta —
-      // pendurar no caminho de sincronia do player era fragil, ele so
-      // roda quando o relogio anda.
-      ProxyService.instance.ensureProxy(l.sourcePath);
     }
+  }
+
+  @override
+  void dispose() {
+    _pedido?.cancel();
+    super.dispose();
   }
 
   /// O instante do arquivo ao longo da barra, calculado uma vez por
@@ -2821,7 +2784,7 @@ class _ClipPreviewState extends State<_ClipPreview> {
                   left: 0,
                   right: 0,
                   top: 0,
-                  height: temOnda && alta ? barra - alturaOnda : barra,
+                  height: temOnda ? barra - alturaOnda : barra,
                   child: CustomPaint(
                     painter: FilmstripPainter(
                       frames: strip,
@@ -2871,19 +2834,19 @@ class _ClipPreviewState extends State<_ClipPreview> {
                     // inteira sessenta vezes por segundo.
                     child: RepaintBoundary(
                       child: CustomPaint(
-                      key: ValueKey('onda-pintura-${l.id}'),
-                      painter: ClipWaveformPainter(
-                        pyramid: piramide,
-                        fonte: fonte,
-                        color: temStrip
-                            ? AmColors.accent
-                            : Colors.white.withValues(alpha: 0.92),
-                        contorno: temStrip
-                            ? const Color(0xFFB9FFF0)
-                            : Colors.white,
-                        gain: _service.ganhoDaOnda(path),
-                        muted: mudo,
-                      ),
+                        key: ValueKey('onda-pintura-${l.id}'),
+                        painter: ClipWaveformPainter(
+                          pyramid: piramide,
+                          fonte: fonte,
+                          color: temStrip
+                              ? AmColors.accent
+                              : Colors.white.withValues(alpha: 0.92),
+                          contorno: temStrip
+                              ? const Color(0xFFB9FFF0)
+                              : Colors.white,
+                          gain: _service.ganhoDaOnda(path),
+                          muted: mudo,
+                        ),
                       ),
                     ),
                   ),

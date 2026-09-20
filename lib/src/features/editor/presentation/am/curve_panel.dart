@@ -558,6 +558,7 @@ Future<void> showTrackCurveSheet(
   required AnimatedDouble? Function(Layer layer) trackOf,
   required void Function(Duration segStartLocal, Easing ease) onSetEase,
   required void Function(Easing ease) onSetEaseAll,
+  bool rawTime = false,
   VoidCallback? onClosed,
 }) async {
   final myGen = paramSheetGeneration + 1;
@@ -575,7 +576,7 @@ Future<void> showTrackCurveSheet(
               if (layer == null) return const SizedBox.shrink();
               final track = trackOf(layer);
               if (track == null) return const SizedBox.shrink();
-              final local = layer.localTime(t);
+              final local = rawTime ? t - layer.startTime : layer.localTime(t);
               final times = [for (final k in track.keyframes) k.time];
 
               (Duration, Duration)? seg;

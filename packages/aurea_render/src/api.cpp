@@ -124,7 +124,13 @@ AUREA_API std::int32_t aurea_render_versao(void) {
     // chama esta porta e um C++ antigo nao a exporta — sem a conferencia
     // de versao, o primeiro caso seria um simbolo ausente (que estoura) e
     // o segundo um simbolo a mais (que passa em silencio).
-    return 5;
+    //
+    // 6: entrou `aurea_render_registrar_textura_premultiplicada`. O alvo do
+    // motor 3D sai do rasterizador JA multiplicado pelo alfa, e entrar na
+    // composicao pela porta antiga o multiplicaria de novo — a borda suave
+    // do modelo sairia com um halo escuro. E um simbolo NOVO, e nao uma
+    // assinatura mudada: um Dart antigo continua funcionando igual.
+    return 6;
   } catch (...) {
     return -1;
   }
@@ -474,6 +480,29 @@ AUREA_API std::uint32_t aurea_render_registrar_textura(void* n, const std::uint8
     std::vector<std::uint8_t> copia(rgba, rgba + bytes);
     auto r = como_nucleo(n)->registrar_textura(largura, altura,
                                                std::move(copia));
+    if (r.tem_erro()) return 0;
+    return r.valor();
+  } catch (...) {
+    return 0;
+  }
+}
+
+/// REGISTRA UMA TEXTURA CUJA COR JA ESTA MULTIPLICADA PELO ALFA.
+///
+/// E a porta do quadro 3D: o alvo do Diligent tem mistura `ONE,
+/// INV_SRC_ALPHA`, entao o que sai dele ja esta premultiplicado. Copia os
+/// pixels, como a porta irma — o buffer do Dart pode morrer depois da
+/// chamada.
+AUREA_API std::uint32_t aurea_render_registrar_textura_premultiplicada(
+    void* n, const std::uint8_t* rgba, std::uint32_t largura,
+    std::uint32_t altura) {
+  try {
+    if (n == nullptr || rgba == nullptr) return 0;
+    const std::size_t bytes =
+        static_cast<std::size_t>(largura) * altura * 4;
+    std::vector<std::uint8_t> copia(rgba, rgba + bytes);
+    auto r = como_nucleo(n)->registrar_textura_premultiplicada(
+        largura, altura, std::move(copia));
     if (r.tem_erro()) return 0;
     return r.valor();
   } catch (...) {

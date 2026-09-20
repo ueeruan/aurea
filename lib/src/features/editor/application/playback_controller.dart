@@ -1,4 +1,4 @@
-﻿import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
 
 import 'preview_stats.dart';
@@ -13,8 +13,11 @@ class PlaybackController {
     required TickerProvider vsync,
     required this.durationOf,
     this.temMidiaAtiva,
+    int Function()? relogioUs,
   }) {
+    _relogioUs = relogioUs;
     _ticker = vsync.createTicker(_onTick);
+    _inputWallUs = _agoraUs;
   }
 
   final Duration Function() durationOf;
@@ -26,6 +29,27 @@ class PlaybackController {
   /// por nos, de meio segundo, toda vez que se aperta o play.
   final bool Function()? temMidiaAtiva;
   late final Ticker _ticker;
+
+  /// Relogio monotonicamente crescente para carimbar gestos. O ticker
+  /// publica apenas na taxa do projeto e pode ficar um frame sem rodar se
+  /// a UI estiver ocupada; a batida nao pode herdar esse ultimo frame.
+  final Stopwatch _relogioDeEntrada = Stopwatch()..start();
+  late final int Function()? _relogioUs;
+  int get _agoraUs =>
+      _relogioUs?.call() ?? _relogioDeEntrada.elapsedMicroseconds;
+  int _inputWallUs = 0;
+  int _inputTimeUs = 0;
+
+  void _ancorarEntrada(Duration t) {
+    _inputTimeUs = t.inMicroseconds;
+    _inputWallUs = _agoraUs;
+  }
+
+  void _deslocarEntrada(int deltaUs) {
+    final agora = _agoraUs;
+    _inputTimeUs += agora - _inputWallUs + deltaUs;
+    _inputWallUs = agora;
+  }
 
   final ValueNotifier<Duration> time = ValueNotifier(Duration.zero);
   final ValueNotifier<bool> playing = ValueNotifier(false);
@@ -87,6 +111,7 @@ class PlaybackController {
         _base = Duration.zero - elapsed;
         seekRevision++;
         time.value = Duration.zero;
+        _ancorarEntrada(Duration.zero);
         return;
       }
       time.value = end;
@@ -115,7 +140,10 @@ class PlaybackController {
 
   /// Quanto tempo o relogio pode esperar a midia sem congelar a previa.
   /// (O `elapsed` do ticker comeca em zero a cada `play`.)
-  static const int _tetoDaLargadaUs = 1000000;
+  // Um segundo era percebido como atraso em TODO play. O clock ainda da
+  // ao decoder uma janela curta para ancorar audio/video, mas a interface
+  // nunca fica visualmente parada esperando a plataforma.
+  static const int _tetoDaLargadaUs = 80000;
 
   /// ANCORAGEM CONTINUA na midia (PR-J1, fim da deriva por construcao).
   ///
@@ -137,6 +165,7 @@ class PlaybackController {
     if (_aguardandoLargada) {
       _aguardandoLargada = false;
       _base += Duration(microseconds: errUs);
+      _ancorarEntrada(mediaTime);
       debugBaseShiftUs = errUs;
       _podeVoltar = errUs < 0;
       return;
@@ -145,6 +174,7 @@ class PlaybackController {
       // Dessincronia REAL (app em background, midia reiniciada): nao e
       // deriva — realinha de uma vez.
       _base += Duration(microseconds: errUs);
+      _ancorarEntrada(mediaTime);
       debugBaseShiftUs = errUs;
       _podeVoltar = errUs < 0;
       return;
@@ -168,7 +198,10 @@ class PlaybackController {
     }
     final step = (errUs * 0.1).round().clamp(-8000, 8000);
     debugBaseShiftUs = step;
-    if (step != 0) _base += Duration(microseconds: step);
+    if (step != 0) {
+      _base += Duration(microseconds: step);
+      _deslocarEntrada(step);
+    }
   }
 
   /// Ultimo deslocamento aplicado pela ancoragem (us) — so para teste e
@@ -191,6 +224,7 @@ class PlaybackController {
       time.value = Duration.zero;
     }
     _base = time.value;
+    _ancorarEntrada(time.value);
     _aguardandoLargada = temMidiaAtiva?.call() ?? false;
     _ticker.start();
     playing.value = true;
@@ -199,15 +233,31 @@ class PlaybackController {
   }
 
   void pause() {
+    final instanteDoToque = timeForInput();
     if (_ticker.isActive) _ticker.stop();
     _aguardandoLargada = false;
     playing.value = false;
     tocandoAgora.value = false;
+    if (instanteDoToque != time.value) time.value = instanteDoToque;
+    _ancorarEntrada(time.value);
     // Intervalo atravessando a pausa nao e jitter.
     PreviewStats.clockReset();
   }
 
   void toggle() => playing.value ? pause() : play();
+
+  /// Instante correto para uma acao humana disparada AGORA.
+  ///
+  /// [time] e a fotografia do ultimo quadro publicado. Durante um frame
+  /// caro, o audio continua e o toque para marcar uma batida pode entrar
+  /// antes do proximo ticker. Esta leitura projeta o mesmo relogio pelo
+  /// tempo monotonicamente decorrido, sem esperar a timeline redesenhar.
+  Duration timeForInput() {
+    if (!playing.value || _aguardandoLargada) return time.value;
+    final us = _inputTimeUs + (_agoraUs - _inputWallUs);
+    final endUs = durationOf().inMicroseconds;
+    return _naGrade(Duration(microseconds: us.clamp(0, endUs)));
+  }
 
   /// UM QUADRO PARA A FRENTE OU PARA TRAS.
   ///
@@ -276,9 +326,12 @@ class PlaybackController {
       _ticker.stop();
       _base = v;
       time.value = v;
+      _ancorarEntrada(v);
       _ticker.start();
     } else {
+      _base = v;
       time.value = v;
+      _ancorarEntrada(v);
     }
   }
 

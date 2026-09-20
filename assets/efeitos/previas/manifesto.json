@@ -1,0 +1,137 @@
+{
+  "versao": 2,
+  "quadros": 8,
+  "lado": 200,
+  "fps": 8,
+  "efeitos": {
+    "unsharp_mask": {
+      "preset": null
+    },
+    "levels": {
+      "preset": 1
+    },
+    "brightness_contrast": {
+      "preset": 1
+    },
+    "hue_saturation": {
+      "preset": 1
+    },
+    "exposure": {
+      "preset": 1
+    },
+    "cc_threshold": {
+      "preset": null
+    },
+    "cc_threshold_rgb": {
+      "preset": null
+    },
+    "cc_vignette": {
+      "preset": null
+    },
+    "cc_block_load": {
+      "preset": null
+    },
+    "s_scanlines": {
+      "preset": null
+    },
+    "s_halftone": {
+      "preset": null
+    },
+    "s_edge_colorize": {
+      "preset": null
+    },
+    "s_jpeg_damage": {
+      "preset": null
+    },
+    "cc_lens": {
+      "preset": null
+    },
+    "optics_compensation": {
+      "preset": null
+    },
+    "turbulent_displace": {
+      "preset": null
+    },
+    "advanced_shake": {
+      "preset": null
+    },
+    "s_dissolve_shake": {
+      "preset": null
+    },
+    "glitchify": {
+      "preset": null
+    },
+    "twitch": {
+      "preset": null
+    },
+    "cross_glitch": {
+      "preset": null
+    },
+    "s_vhs_damage": {
+      "preset": null
+    },
+    "s_tv_damage": {
+      "preset": null
+    },
+    "s_pixel_sort": {
+      "preset": null
+    },
+    "s_auto_paint": {
+      "preset": null
+    },
+    "adbe_fill": {
+      "preset": null
+    },
+    "adbe_drop_shadow": {
+      "preset": 1
+    },
+    "chroma_key_pro": {
+      "preset": null
+    },
+    "s_rays": {
+      "preset": null
+    },
+    "deep_glow": {
+      "preset": null
+    },
+    "brilho": {
+      "preset": null
+    },
+    "s_spotlight": {
+      "preset": null
+    },
+    "s_glint": {
+      "preset": null
+    },
+    "s_glint_rainbow": {
+      "preset": null
+    },
+    "s_glow_rings": {
+      "preset": null
+    },
+    "s_glow_aura": {
+      "preset": null
+    },
+    "s_glow_darks": {
+      "preset": null
+    },
+    "s_edge_rays": {
+      "preset": null
+    },
+    "motion_tile": {
+      "preset": 1
+    },
+    "black_and_white": {
+      "preset": null
+    },
+    "posterize_time": {
+      "preset": null
+    },
+    "rgb_time_warp": {
+      "preset": null
+    },
+    "time_remap": {
+      "preset": null
+    }
+  }
+}

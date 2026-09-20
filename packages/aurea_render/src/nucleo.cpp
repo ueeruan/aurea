@@ -272,6 +272,18 @@ bool Nucleo::automatica() const noexcept {
 Resulta<IdDeRecurso> Nucleo::registrar_textura(
     std::uint32_t largura, std::uint32_t altura,
     std::vector<std::uint8_t> rgba) {
+  return registrar_textura_com(largura, altura, std::move(rgba), false);
+}
+
+Resulta<IdDeRecurso> Nucleo::registrar_textura_premultiplicada(
+    std::uint32_t largura, std::uint32_t altura,
+    std::vector<std::uint8_t> rgba) {
+  return registrar_textura_com(largura, altura, std::move(rgba), true);
+}
+
+Resulta<IdDeRecurso> Nucleo::registrar_textura_com(
+    std::uint32_t largura, std::uint32_t altura,
+    std::vector<std::uint8_t> rgba, bool premultiplicada) {
   if (largura == 0 || altura == 0 ||
       rgba.size() < static_cast<std::size_t>(largura) * altura * 4) {
     return Erro::argumento;
@@ -288,7 +300,8 @@ Resulta<IdDeRecurso> Nucleo::registrar_textura(
   // leitura para quem desenha.
   Recurso* recurso = alca.ponteiro().get();
   recurso->carga = std::make_unique<CargaDeTextura>(largura, altura,
-                                                    std::move(rgba));
+                                                    std::move(rgba),
+                                                    premultiplicada);
   const IdDeRecurso id = alca.id();
   // A ALCA MORRE AQUI E O RECURSO FICA: o mapa do gerenciador e o dono
   // enquanto ele existir, e quem desenha o alcanca pelo id.

@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+
 import 'core/l10n/app_language.dart';
 
 import 'core/theme/app_theme.dart';
+import 'features/community/presentation/cadastro_obrigatorio.dart';
 import 'features/projects/presentation/home_shell.dart';
 import 'features/settings/application/settings_controller.dart';
 
@@ -40,7 +42,7 @@ class AureaApp extends ConsumerWidget {
       ),
       debugShowCheckedModeBanner: false,
       theme: AppTheme.tema(claro: claro),
-      home: const HomeShell(),
+      home: const CadastroObrigatorioGate(child: HomeShell()),
     );
   }
 }

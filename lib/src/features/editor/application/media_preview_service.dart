@@ -168,6 +168,8 @@ class MediaPreviewService {
 
       final session = await FFmpegKit.executeWithArguments([
         '-y',
+        '-threads',
+        '1',
         '-v',
         'error',
         '-nostats',
@@ -312,7 +314,7 @@ class MediaPreviewService {
 
   /// Quantas miniaturas por clipe. Mais que isso vira memoria sem virar
   /// informacao — a barra tem poucos pixels de altura.
-  static const stripCount = 12;
+  static const stripCount = 6;
 
   Future<void> ensureFilmstrip(String path, Duration duration) {
     final k = 'strip:$path';
@@ -339,6 +341,8 @@ class MediaPreviewService {
         final fps = stripCount / total;
         final session = await FFmpegKit.executeWithArguments([
           '-y',
+          '-threads',
+          '1',
           '-i',
           path,
           '-vf',

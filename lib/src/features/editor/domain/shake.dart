@@ -56,98 +56,162 @@ const efeitosShake = <EffectType, EffectSpec>{
     procedural: true,
     cost: 2,
     synonyms: [
-      'shake', 'tremor', 'tremer', 'advanced shake', 's_shake',
-      'camera shake', 'camera na mao', 'handheld', 'terremoto',
-      'vibracao', 'sacudida',
+      'shake',
+      'tremor',
+      'tremer',
+      'advanced shake',
+      's_shake',
+      'camera shake',
+      'camera na mao',
+      'handheld',
+      'terremoto',
+      'vibracao',
+      'sacudida',
     ],
-    params: {
-      ..._globais,
-      ..._eixoX,
-      ..._eixoY,
-      ..._eixoZ,
-      ..._eixoTilt,
-    },
+    params: {..._globais, ..._eixoX, ..._eixoY, ..._eixoZ, ..._eixoTilt},
+    // A ficha abre só com o que realmente descreve um shake. Os números
+    // matemáticos continuam disponíveis em "Ajustes finos", recolhidos, para
+    // preservar projetos e presets antigos sem transformar o uso comum numa
+    // parede de 34 controles.
     grupos: [
-      EffectGrupo('Global', [
-        'amplitude', 'frequency', 'phase', 'seed', 'mix',
-        'motion_blur', 'mo_blur_length', 'wrap_x', 'wrap_y',
+      EffectGrupo('Shake', [
+        'amplitude',
+        'frequency',
+        'x_rand_amp',
+        'y_rand_amp',
+        'z_rand_amp',
+        'tilt_rand_amp',
+        'mix',
+        'motion_blur',
+        'mo_blur_length',
       ]),
-      EffectGrupo('X Shake', [
-        'x_rand_amp', 'x_rand_freq', 'x_wave_amp', 'x_wave_freq', 'x_phase',
-      ]),
-      EffectGrupo('Y Shake', [
-        'y_rand_amp', 'y_rand_freq', 'y_wave_amp', 'y_wave_freq', 'y_phase',
-      ]),
-      EffectGrupo('Z Shake', [
-        'z_dist', 'z_rand_amp', 'z_rand_freq', 'z_wave_amp', 'z_wave_freq',
+      EffectGrupo('Ajustes finos', [
+        'phase',
+        'seed',
+        'wrap_x',
+        'wrap_y',
+        'x_rand_freq',
+        'x_wave_amp',
+        'x_wave_freq',
+        'x_phase',
+        'y_rand_freq',
+        'y_wave_amp',
+        'y_wave_freq',
+        'y_phase',
+        'z_dist',
+        'z_rand_freq',
+        'z_wave_amp',
+        'z_wave_freq',
         'z_phase',
-      ]),
-      EffectGrupo('Tilt Shake', [
-        'tilt_rand_amp', 'tilt_rand_freq', 'tilt_wave_amp', 'tilt_wave_freq',
+        'tilt_rand_freq',
+        'tilt_wave_amp',
+        'tilt_wave_freq',
         'tilt_phase',
       ]),
     ],
     montar: ['amplitude', 'frequency', 'mo_blur_length'],
     presets: [
       EffectPronto('Câmera na mão sutil', {
-        'amplitude': .3, 'frequency': 5,
-        'x_rand_amp': 70, 'y_rand_amp': 50, 'z_rand_amp': .002,
+        'amplitude': .3,
+        'frequency': 5,
+        'x_rand_amp': 70,
+        'y_rand_amp': 50,
+        'z_rand_amp': .002,
         'tilt_rand_amp': .3,
-        'motion_blur': 1, 'mo_blur_length': .3,
+        'motion_blur': 1,
+        'mo_blur_length': .3,
       }),
       EffectPronto('Câmera na mão média', {
-        'amplitude': .7, 'frequency': 7,
-        'x_rand_amp': 140, 'y_rand_amp': 90, 'z_rand_amp': .006,
+        'amplitude': .7,
+        'frequency': 7,
+        'x_rand_amp': 140,
+        'y_rand_amp': 90,
+        'z_rand_amp': .006,
         'tilt_rand_amp': .8,
-        'motion_blur': 1, 'mo_blur_length': .5,
+        'motion_blur': 1,
+        'mo_blur_length': .5,
       }),
       EffectPronto('Câmera pesada', {
-        'amplitude': 1.4, 'frequency': 9,
-        'x_rand_amp': 240, 'y_rand_amp': 150, 'z_rand_amp': .015,
+        'amplitude': 1.4,
+        'frequency': 9,
+        'x_rand_amp': 240,
+        'y_rand_amp': 150,
+        'z_rand_amp': .015,
         'tilt_rand_amp': 1.8,
-        'motion_blur': 1, 'mo_blur_length': .7,
+        'motion_blur': 1,
+        'mo_blur_length': .7,
       }),
       EffectPronto('Impacto', {
-        'amplitude': 1.2, 'frequency': 3.5,
-        'x_rand_amp': 300, 'y_rand_amp': 200, 'z_rand_amp': .03,
+        'amplitude': 1.2,
+        'frequency': 3.5,
+        'x_rand_amp': 300,
+        'y_rand_amp': 200,
+        'z_rand_amp': .03,
         'tilt_rand_amp': 2.5,
-        'x_wave_amp': 40, 'x_wave_freq': 1.5,
-        'motion_blur': 1, 'mo_blur_length': 1.2,
+        'x_wave_amp': 40,
+        'x_wave_freq': 1.5,
+        'motion_blur': 1,
+        'mo_blur_length': 1.2,
       }),
       EffectPronto('Terremoto', {
-        'amplitude': 1.6, 'frequency': 12,
-        'x_rand_amp': 320, 'y_rand_amp': 300, 'z_rand_amp': .025,
+        'amplitude': 1.6,
+        'frequency': 12,
+        'x_rand_amp': 320,
+        'y_rand_amp': 300,
+        'z_rand_amp': .025,
         'tilt_rand_amp': 3,
-        'motion_blur': 1, 'mo_blur_length': 1,
+        'motion_blur': 1,
+        'mo_blur_length': 1,
       }),
       EffectPronto('Vibração', {
-        'amplitude': .35, 'frequency': 40,
-        'x_rand_amp': 60, 'y_rand_amp': 60,
-        'x_rand_freq': 1.6, 'y_rand_freq': 1.6,
+        'amplitude': .35,
+        'frequency': 40,
+        'x_rand_amp': 60,
+        'y_rand_amp': 60,
+        'x_rand_freq': 1.6,
+        'y_rand_freq': 1.6,
       }),
       EffectPronto('Tremor horizontal', {
-        'amplitude': 1, 'frequency': 8,
-        'x_rand_amp': 300, 'x_wave_amp': 30, 'x_wave_freq': .6,
+        'amplitude': 1,
+        'frequency': 8,
+        'x_rand_amp': 300,
+        'x_wave_amp': 30,
+        'x_wave_freq': .6,
       }),
       EffectPronto('Tremor vertical', {
-        'amplitude': 1, 'frequency': 8,
-        'y_rand_amp': 300, 'y_wave_amp': 30, 'y_wave_freq': .45,
+        'amplitude': 1,
+        'frequency': 8,
+        'y_rand_amp': 300,
+        'y_wave_amp': 30,
+        'y_wave_freq': .45,
       }),
       // SO ONDA, ZERO ALEATORIO: e o unico jeito de o movimento ficar
       // previsivel e liso — o ruido, por definicao, nao e.
       EffectPronto('Flutuação suave', {
-        'amplitude': .5, 'frequency': 2,
-        'x_rand_amp': 0, 'y_rand_amp': 0,
-        'x_wave_amp': 90, 'x_wave_freq': .18,
-        'y_wave_amp': 60, 'y_wave_freq': .13,
-        'z_wave_amp': .006, 'z_wave_freq': .1,
-        'tilt_wave_amp': .5, 'tilt_wave_freq': .07,
-        'motion_blur': 1, 'mo_blur_length': .4,
+        'amplitude': .5,
+        'frequency': 2,
+        'x_rand_amp': 0,
+        'y_rand_amp': 0,
+        'x_wave_amp': 90,
+        'x_wave_freq': .18,
+        'y_wave_amp': 60,
+        'y_wave_freq': .13,
+        'z_wave_amp': .006,
+        'z_wave_freq': .1,
+        'tilt_wave_amp': .5,
+        'tilt_wave_freq': .07,
+        'motion_blur': 1,
+        'mo_blur_length': .4,
       }),
       EffectPronto('Tranco rápido', {
-        'amplitude': .9, 'frequency': 26,
-        'x_rand_amp': 180, 'y_rand_amp': 120, 'tilt_rand_amp': 2,
-        'x_rand_freq': 2.2, 'y_rand_freq': 1.7, 'tilt_rand_freq': 2,
+        'amplitude': .9,
+        'frequency': 26,
+        'x_rand_amp': 180,
+        'y_rand_amp': 120,
+        'tilt_rand_amp': 2,
+        'x_rand_freq': 2.2,
+        'y_rand_freq': 1.7,
+        'tilt_rand_freq': 2,
       }),
     ],
   ),
@@ -157,26 +221,104 @@ const efeitosShake = <EffectType, EffectSpec>{
     category: 'Distort',
     procedural: true,
     cost: 2,
-    synonyms: ['dissolve shake', 's_dissolveshake', 'dissolver tremendo', 'transicao', 'tremor', 'sumir', 'sapphire'],
+    synonyms: [
+      'dissolve shake',
+      's_dissolveshake',
+      'dissolver tremendo',
+      'transicao',
+      'tremor',
+      'sumir',
+      'sapphire',
+    ],
     params: {
-      'transition_dir': EffectParam('Direção', 0, 0, 1, kind: ParamKind.choice, options: ['Sumir', 'Surgir']),
-      'dissolve_percent': EffectParam('Dissolver', 0, 0, 100, unit: '%', decimals: 1, dragStep: .2),
-      'dissolve_speed': EffectParam('Velocidade do dissolver', 3, 1, 100, decimals: 2, dragStep: .01),
-      'amplitude': EffectParam('Amplitude', 3, 0, 100, decimals: 3, dragStep: .005),
-      'frequency': EffectParam('Frequência', 10, 0, 200, decimals: 2, dragStep: .02),
-      'motion_blur': EffectParam('Borrão de movimento', 1, 0, 1, kind: ParamKind.toggle),
-      'mo_blur_length': EffectParam('Comprimento do borrão', .5, 0, 10, decimals: 3, dragStep: .005),
+      'transition_dir': EffectParam(
+        'Direção',
+        0,
+        0,
+        1,
+        kind: ParamKind.choice,
+        options: ['Sumir', 'Surgir'],
+      ),
+      'dissolve_percent': EffectParam(
+        'Dissolver',
+        0,
+        0,
+        100,
+        unit: '%',
+        decimals: 1,
+        dragStep: .2,
+      ),
+      'dissolve_speed': EffectParam(
+        'Velocidade do dissolver',
+        3,
+        1,
+        100,
+        decimals: 2,
+        dragStep: .01,
+      ),
+      'amplitude': EffectParam(
+        'Amplitude',
+        3,
+        0,
+        100,
+        decimals: 3,
+        dragStep: .005,
+      ),
+      'frequency': EffectParam(
+        'Frequência',
+        10,
+        0,
+        200,
+        decimals: 2,
+        dragStep: .02,
+      ),
+      'motion_blur': EffectParam(
+        'Borrão de movimento',
+        1,
+        0,
+        1,
+        kind: ParamKind.toggle,
+      ),
+      'mo_blur_length': EffectParam(
+        'Comprimento do borrão',
+        .5,
+        0,
+        10,
+        decimals: 3,
+        dragStep: .005,
+      ),
       'seed': EffectParam('Semente', 0, 0, 32767, kind: ParamKind.seed),
-      'wrap_x': EffectParam('Borda X', 2, 0, 2, kind: ParamKind.choice, options: ['Nenhuma', 'Repetir', 'Espelhar']),
-      'wrap_y': EffectParam('Borda Y', 2, 0, 2, kind: ParamKind.choice, options: ['Nenhuma', 'Repetir', 'Espelhar']),
+      'wrap_x': EffectParam(
+        'Borda X',
+        2,
+        0,
+        2,
+        kind: ParamKind.choice,
+        options: ['Nenhuma', 'Repetir', 'Espelhar'],
+      ),
+      'wrap_y': EffectParam(
+        'Borda Y',
+        2,
+        0,
+        2,
+        kind: ParamKind.choice,
+        options: ['Nenhuma', 'Repetir', 'Espelhar'],
+      ),
       ..._eixos,
       ..._canais,
     },
     montar: ['dissolve_percent', 'amplitude', 'transition_dir'],
     presets: [
       EffectPronto('Sumir tremendo', {'dissolve_percent': 50}),
-      EffectPronto('Surgir tremendo', {'transition_dir': 1, 'dissolve_percent': 50}),
-      EffectPronto('Dissolver suave', {'dissolve_percent': 50, 'amplitude': 1, 'dissolve_speed': 1.5}),
+      EffectPronto('Surgir tremendo', {
+        'transition_dir': 1,
+        'dissolve_percent': 50,
+      }),
+      EffectPronto('Dissolver suave', {
+        'dissolve_percent': 50,
+        'amplitude': 1,
+        'dissolve_speed': 1.5,
+      }),
     ],
   ),
 };
@@ -190,29 +332,113 @@ const _globais = <String, EffectParam>{
   // MISTURA: 100% e o tremor inteiro, 0% e a camada parada. Serve para
   // dosar o tremor contra a imagem que ja esta na tela — e e o unico
   // parametro que da para animar de 0 a 100 sem tocar em mais nada.
-  'mix': EffectParam('Mistura', 100, 0, 100, unit: '%', decimals: 1, dragStep: .2),
-  'motion_blur': EffectParam('Borrão de movimento', 0, 0, 1, kind: ParamKind.toggle),
-  'mo_blur_length': EffectParam('Comprimento do borrão', 1, 0, 10, decimals: 3, dragStep: .005),
+  'mix': EffectParam(
+    'Mistura',
+    100,
+    0,
+    100,
+    unit: '%',
+    decimals: 1,
+    dragStep: .2,
+  ),
+  'motion_blur': EffectParam(
+    'Borrão de movimento',
+    0,
+    0,
+    1,
+    kind: ParamKind.toggle,
+  ),
+  'mo_blur_length': EffectParam(
+    'Comprimento do borrão',
+    1,
+    0,
+    10,
+    decimals: 3,
+    dragStep: .005,
+  ),
   // A BORDA NUNCA COMECA EM "NENHUMA". Repetir ou espelhar e o que impede
   // a faixa preta na beirada quando o tremor empurra a imagem para fora —
   // "nenhuma" fica para quem quer justamente o vazio.
-  'wrap_x': EffectParam('Borda X', 2, 0, 2, kind: ParamKind.choice, options: ['Nenhuma', 'Repetir', 'Espelhar']),
-  'wrap_y': EffectParam('Borda Y', 2, 0, 2, kind: ParamKind.choice, options: ['Nenhuma', 'Repetir', 'Espelhar']),
+  'wrap_x': EffectParam(
+    'Borda X',
+    2,
+    0,
+    2,
+    kind: ParamKind.choice,
+    options: ['Nenhuma', 'Repetir', 'Espelhar'],
+  ),
+  'wrap_y': EffectParam(
+    'Borda Y',
+    2,
+    0,
+    2,
+    kind: ParamKind.choice,
+    options: ['Nenhuma', 'Repetir', 'Espelhar'],
+  ),
 };
 
 const _eixoX = <String, EffectParam>{
-  'x_rand_amp': EffectParam('Amplitude aleatória', 192, 0, 5000, decimals: 1, dragStep: .5),
-  'x_rand_freq': EffectParam('Frequência aleatória', 1, 0, 100, decimals: 3, dragStep: .005),
-  'x_wave_amp': EffectParam('Amplitude da onda', 0, 0, 5000, decimals: 1, dragStep: .5),
-  'x_wave_freq': EffectParam('Frequência da onda', .5, 0, 100, decimals: 3, dragStep: .005),
+  'x_rand_amp': EffectParam(
+    'Horizontal',
+    192,
+    0,
+    5000,
+    decimals: 1,
+    dragStep: .5,
+  ),
+  'x_rand_freq': EffectParam(
+    'Frequência aleatória',
+    1,
+    0,
+    100,
+    decimals: 3,
+    dragStep: .005,
+  ),
+  'x_wave_amp': EffectParam(
+    'Amplitude da onda',
+    0,
+    0,
+    5000,
+    decimals: 1,
+    dragStep: .5,
+  ),
+  'x_wave_freq': EffectParam(
+    'Frequência da onda',
+    .5,
+    0,
+    100,
+    decimals: 3,
+    dragStep: .005,
+  ),
   'x_phase': EffectParam('Fase', 0, -1000, 1000, decimals: 3, dragStep: .005),
 };
 
 const _eixoY = <String, EffectParam>{
-  'y_rand_amp': EffectParam('Amplitude aleatória', 96, 0, 5000, decimals: 1, dragStep: .5),
-  'y_rand_freq': EffectParam('Frequência aleatória', 1, 0, 100, decimals: 3, dragStep: .005),
-  'y_wave_amp': EffectParam('Amplitude da onda', 0, 0, 5000, decimals: 1, dragStep: .5),
-  'y_wave_freq': EffectParam('Frequência da onda', .5, 0, 100, decimals: 3, dragStep: .005),
+  'y_rand_amp': EffectParam('Vertical', 96, 0, 5000, decimals: 1, dragStep: .5),
+  'y_rand_freq': EffectParam(
+    'Frequência aleatória',
+    1,
+    0,
+    100,
+    decimals: 3,
+    dragStep: .005,
+  ),
+  'y_wave_amp': EffectParam(
+    'Amplitude da onda',
+    0,
+    0,
+    5000,
+    decimals: 1,
+    dragStep: .5,
+  ),
+  'y_wave_freq': EffectParam(
+    'Frequência da onda',
+    .5,
+    0,
+    100,
+    decimals: 3,
+    dragStep: .005,
+  ),
   'y_phase': EffectParam('Fase', 0, -1000, 1000, decimals: 3, dragStep: .005),
 };
 
@@ -222,20 +448,85 @@ const _eixoY = <String, EffectParam>{
 /// [z_dist] e a distancia de repouso; com ela em 1 e o Z em zero, o eixo
 /// nao faz nada.
 const _eixoZ = <String, EffectParam>{
-  'z_dist': EffectParam('Distância Z', 1, .001, 100, decimals: 3, dragStep: .002),
-  'z_rand_amp': EffectParam('Zoom aleatório', 0, 0, 10, decimals: 3, dragStep: .002),
-  'z_rand_freq': EffectParam('Frequência aleatória', 1, 0, 100, decimals: 3, dragStep: .005),
-  'z_wave_amp': EffectParam('Zoom em onda', 0, 0, 10, decimals: 3, dragStep: .002),
-  'z_wave_freq': EffectParam('Frequência da onda', .5, 0, 100, decimals: 3, dragStep: .005),
+  'z_dist': EffectParam(
+    'Distância Z',
+    1,
+    .001,
+    100,
+    decimals: 3,
+    dragStep: .002,
+  ),
+  'z_rand_amp': EffectParam('Zoom', 0, 0, 10, decimals: 3, dragStep: .002),
+  'z_rand_freq': EffectParam(
+    'Frequência aleatória',
+    1,
+    0,
+    100,
+    decimals: 3,
+    dragStep: .005,
+  ),
+  'z_wave_amp': EffectParam(
+    'Zoom em onda',
+    0,
+    0,
+    10,
+    decimals: 3,
+    dragStep: .002,
+  ),
+  'z_wave_freq': EffectParam(
+    'Frequência da onda',
+    .5,
+    0,
+    100,
+    decimals: 3,
+    dragStep: .005,
+  ),
   'z_phase': EffectParam('Fase', 0, -1000, 1000, decimals: 3, dragStep: .005),
 };
 
 const _eixoTilt = <String, EffectParam>{
-  'tilt_rand_amp': EffectParam('Inclinação aleatória', 0, 0, 360, unit: '°', decimals: 2, dragStep: .05),
-  'tilt_rand_freq': EffectParam('Frequência aleatória', 1, 0, 100, decimals: 3, dragStep: .005),
-  'tilt_wave_amp': EffectParam('Inclinação em onda', 0, 0, 360, unit: '°', decimals: 2, dragStep: .05),
-  'tilt_wave_freq': EffectParam('Frequência da onda', .5, 0, 100, decimals: 3, dragStep: .005),
-  'tilt_phase': EffectParam('Fase', 0, -1000, 1000, decimals: 3, dragStep: .005),
+  'tilt_rand_amp': EffectParam(
+    'Rotação',
+    0,
+    0,
+    360,
+    unit: '°',
+    decimals: 2,
+    dragStep: .05,
+  ),
+  'tilt_rand_freq': EffectParam(
+    'Frequência aleatória',
+    1,
+    0,
+    100,
+    decimals: 3,
+    dragStep: .005,
+  ),
+  'tilt_wave_amp': EffectParam(
+    'Inclinação em onda',
+    0,
+    0,
+    360,
+    unit: '°',
+    decimals: 2,
+    dragStep: .05,
+  ),
+  'tilt_wave_freq': EffectParam(
+    'Frequência da onda',
+    .5,
+    0,
+    100,
+    decimals: 3,
+    dragStep: .005,
+  ),
+  'tilt_phase': EffectParam(
+    'Fase',
+    0,
+    -1000,
+    1000,
+    decimals: 3,
+    dragStep: .005,
+  ),
 };
 
 /// Os quatro eixos, na ordem X, Y, Z, TILT. E o que o S_DissolveShake
@@ -248,14 +539,70 @@ const _eixos = <String, EffectParam>{
 };
 
 const _canais = <String, EffectParam>{
-  'red_amplitude': EffectParam('Amplitude do vermelho', 1, 0, 10, decimals: 3, dragStep: .005),
-  'green_amplitude': EffectParam('Amplitude do verde', 1, 0, 10, decimals: 3, dragStep: .005),
-  'blue_amplitude': EffectParam('Amplitude do azul', 1, 0, 10, decimals: 3, dragStep: .005),
-  'red_phase': EffectParam('Fase do vermelho', 0, -1000, 1000, decimals: 3, dragStep: .005),
-  'green_phase': EffectParam('Fase do verde', 0, -1000, 1000, decimals: 3, dragStep: .005),
-  'blue_phase': EffectParam('Fase do azul', 0, -1000, 1000, decimals: 3, dragStep: .005),
-  'rgb_randomness': EffectParam('Aleatoriedade RGB', 0, 0, 10, decimals: 3, dragStep: .005),
-  'rgb_frequency': EffectParam('Frequência RGB', 2, 0, 100, decimals: 3, dragStep: .005),
+  'red_amplitude': EffectParam(
+    'Amplitude do vermelho',
+    1,
+    0,
+    10,
+    decimals: 3,
+    dragStep: .005,
+  ),
+  'green_amplitude': EffectParam(
+    'Amplitude do verde',
+    1,
+    0,
+    10,
+    decimals: 3,
+    dragStep: .005,
+  ),
+  'blue_amplitude': EffectParam(
+    'Amplitude do azul',
+    1,
+    0,
+    10,
+    decimals: 3,
+    dragStep: .005,
+  ),
+  'red_phase': EffectParam(
+    'Fase do vermelho',
+    0,
+    -1000,
+    1000,
+    decimals: 3,
+    dragStep: .005,
+  ),
+  'green_phase': EffectParam(
+    'Fase do verde',
+    0,
+    -1000,
+    1000,
+    decimals: 3,
+    dragStep: .005,
+  ),
+  'blue_phase': EffectParam(
+    'Fase do azul',
+    0,
+    -1000,
+    1000,
+    decimals: 3,
+    dragStep: .005,
+  ),
+  'rgb_randomness': EffectParam(
+    'Aleatoriedade RGB',
+    0,
+    0,
+    10,
+    decimals: 3,
+    dragStep: .005,
+  ),
+  'rgb_frequency': EffectParam(
+    'Frequência RGB',
+    2,
+    0,
+    100,
+    decimals: 3,
+    dragStep: .005,
+  ),
 };
 
 double _hash(double a, double b) {
@@ -278,7 +625,9 @@ double _ruido(double x, double semente) {
     return a + (b - a) * u;
   }
 
-  return .45 * (oit(x, semente) * .75 + oit(x * 2.13 + 17.1, semente + 7.7) * .35) / 1.1;
+  return .45 *
+      (oit(x, semente) * .75 + oit(x * 2.13 + 17.1, semente + 7.7) * .35) /
+      1.1;
 }
 
 /// Leitor de parametro com trava na faixa.
@@ -320,9 +669,15 @@ List<double> _deslocamento(
     final taxa = freq * v('${n}_rand_freq') * .25;
     var r = _ruido((t + fase) * taxa, semente + ei * 13.1) * v('${n}_rand_amp');
     if (rgbAleat > 0) {
-      r += rgbAleat * .5 * v('${n}_rand_amp') * _ruido((t + fase) * rgbFreq, semente + 31.7 * (canal + 1) + ei);
+      r +=
+          rgbAleat *
+          .5 *
+          v('${n}_rand_amp') *
+          _ruido((t + fase) * rgbFreq, semente + 31.7 * (canal + 1) + ei);
     }
-    final w = v('${n}_wave_amp') * math.sin(2 * math.pi * v('${n}_wave_freq') * (t + fase));
+    final w =
+        v('${n}_wave_amp') *
+        math.sin(2 * math.pi * v('${n}_wave_freq') * (t + fase));
     out.add((r + w) * ampCanal);
   }
   return out;
@@ -354,16 +709,25 @@ List<double> _pacote(
   // obturaco, e o shader reamostra ao longo das duas. Um tremor rapido sai
   // borrado no sentido em que se move — e so nele.
   final tA = t - blur / 60, tB = t + blur / 60;
-  final mono = amplitudes[0] == amplitudes[1] && amplitudes[1] == amplitudes[2] &&
-      fases[0] == fases[1] && fases[1] == fases[2] && rgbAleat == 0;
+  final mono =
+      amplitudes[0] == amplitudes[1] &&
+      amplitudes[1] == amplitudes[2] &&
+      fases[0] == fases[1] &&
+      fases[1] == fases[2] &&
+      rgbAleat == 0;
   List<double> ponta(double tt) => [
     for (var c = 0; c < 3; c++)
       ..._transf(
         _deslocamento(
-          v, tt,
-          freq: freq, semente: semente,
-          ampCanal: amplitudes[c], faseCanal: fases[c],
-          rgbAleat: rgbAleat, rgbFreq: rgbFreq, canal: c,
+          v,
+          tt,
+          freq: freq,
+          semente: semente,
+          ampCanal: amplitudes[c],
+          faseCanal: fases[c],
+          rgbAleat: rgbAleat,
+          rgbFreq: rgbFreq,
+          canal: c,
         ),
         amp,
         zDist,
@@ -417,9 +781,15 @@ List<double> valoresShake(EffectInstance e, Duration local) {
   // keyframe de posicao chega de um tremor RGB.
   final d = _transf(
     _deslocamento(
-      v, t,
-      freq: v('frequency'), semente: semente,
-      ampCanal: 1, faseCanal: 0, rgbAleat: 0, rgbFreq: 2, canal: 0,
+      v,
+      t,
+      freq: v('frequency'),
+      semente: semente,
+      ampCanal: 1,
+      faseCanal: 0,
+      rgbAleat: 0,
+      rgbFreq: 2,
+      canal: 0,
     ),
     v('amplitude'),
     v('z_dist'),
@@ -453,8 +823,12 @@ List<double> valoresDissolveShake(EffectInstance e, Duration local) {
     zDist: 1,
     opacidade: 1 - some,
     mistura: 1,
-    amplitudes: [for (final c in const ['red', 'green', 'blue']) v('${c}_amplitude')],
-    fases: [for (final c in const ['red', 'green', 'blue']) v('${c}_phase')],
+    amplitudes: [
+      for (final c in const ['red', 'green', 'blue']) v('${c}_amplitude'),
+    ],
+    fases: [
+      for (final c in const ['red', 'green', 'blue']) v('${c}_phase'),
+    ],
     rgbAleat: v('rgb_randomness'),
     rgbFreq: v('rgb_frequency'),
   );

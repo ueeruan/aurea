@@ -13,6 +13,7 @@
 import 'package:aurea/src/features/editor/domain/effect.dart';
 import 'package:aurea/src/features/editor/domain/layer.dart';
 import 'package:aurea/src/features/editor/domain/posterize_time.dart';
+import 'package:aurea/src/features/editor/domain/time_slice.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -49,10 +50,7 @@ void main() {
       expect(quantizarTempo(_ms(80), 12), Duration.zero);
       expect(quantizarTempo(_ms(90), 12), const Duration(microseconds: 83333));
       // 166 ms ainda esta DENTRO do segundo degrau (que vai ate 166,67).
-      expect(
-        quantizarTempo(_ms(166), 12),
-        const Duration(microseconds: 83333),
-      );
+      expect(quantizarTempo(_ms(166), 12), const Duration(microseconds: 83333));
       expect(
         quantizarTempo(_ms(167), 12),
         const Duration(microseconds: 166667),
@@ -121,10 +119,7 @@ void main() {
       final l = _camada(taxa: 24);
       expect(l.localTime(_ms(0)), Duration.zero);
       expect(l.localTime(_ms(40)), Duration.zero);
-      expect(
-        l.localTime(_ms(42)),
-        const Duration(microseconds: 41667),
-      );
+      expect(l.localTime(_ms(42)), const Duration(microseconds: 41667));
     });
 
     test('SEM o efeito o tempo passa intacto', () {
@@ -158,11 +153,16 @@ void main() {
       );
       // 1090 - 1000 = 90 ms de tempo local: ja passou do primeiro degrau
       // (83,33 ms), e nao chegou no segundo (166,67).
-      expect(
-        l.localTime(_ms(1090)),
-        const Duration(microseconds: 83333),
-      );
+      expect(l.localTime(_ms(1090)), const Duration(microseconds: 83333));
       expect(l.localTime(_ms(1080)), Duration.zero);
+    });
+
+    test('exportacao pede o mesmo degrau da previa, sem quantizar de novo', () {
+      final l = _camada(taxa: 12);
+      final t = _ms(90);
+      final degrauDaPrevia = l.localTime(t);
+      expect(degrauDaPrevia, const Duration(microseconds: 83333));
+      expect(instantesDeOutroTempo([l], t, 60), {degrauDaPrevia});
     });
   });
 
@@ -194,7 +194,12 @@ void main() {
       var e = EffectInstance(type: EffectType.posterizeTime);
       e = e.withParamEdited('frame_rate', Duration.zero, 4);
       e = e.withKeyframeToggled(Duration.zero);
-      e = e.withParamEdited('frame_rate', const Duration(seconds: 2), 24, forcar: true);
+      e = e.withParamEdited(
+        'frame_rate',
+        const Duration(seconds: 2),
+        24,
+        forcar: true,
+      );
       final l = ShapeLayer(
         name: 'c',
         startTime: Duration.zero,
@@ -214,7 +219,10 @@ void main() {
         for (final ms in [0, 16, 100, 1000]) {
           final q = l.localTime(_ms(ms));
           expect(q.inMicroseconds.isFinite, isTrue);
-          expect(q.inMicroseconds.abs(), lessThanOrEqualTo(_ms(ms).inMicroseconds.abs() + 1000000));
+          expect(
+            q.inMicroseconds.abs(),
+            lessThanOrEqualTo(_ms(ms).inMicroseconds.abs() + 1000000),
+          );
         }
       }
     });

@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/storage/prefs.dart';
 import '../domain/moderacao.dart';
 import 'comunidade_service.dart';
+import 'social_service.dart';
 
 /// A CONTA DO MURAL.
 ///
@@ -30,9 +31,16 @@ class ContaDaComunidade {
     required this.codigo,
     required this.criadaEm,
     this.avatar,
+    this.nome = '',
+    this.bio = '',
+    this.verificado = false,
+    this.oficial = false,
+    this.criador = false,
   });
 
   final String id;
+  final String nome, bio;
+  final bool verificado, oficial, criador;
   final String apelido;
 
   /// O que prova quem e. Nunca sai daqui a nao ser no cabecalho de uma
@@ -49,6 +57,11 @@ class ContaDaComunidade {
 
   Map<String, dynamic> toJson() => {
     'id': id,
+    'nome': nome,
+    'bio': bio,
+    'verificado': verificado,
+    'oficial': oficial,
+    'criador': criador,
     'apelido': apelido,
     'codigo': codigo,
     'criadaEm': criadaEm.toUtc().toIso8601String(),
@@ -60,7 +73,11 @@ class ContaDaComunidade {
       final m = (jsonDecode(fonte) as Map).cast<String, dynamic>();
       final apelido = '${m['apelido'] ?? ''}';
       final codigo = '${m['codigo'] ?? ''}';
-      if (apelido.trim().isEmpty || codigo.trim().isEmpty) return null;
+      if (apelido.trim().isEmpty ||
+          !RegExp(r'^[a-f0-9]{48}$').hasMatch(codigo) ||
+          '${m['id'] ?? ''}'.isEmpty) {
+        return null;
+      }
       return ContaDaComunidade(
         id: '${m['id'] ?? ''}',
         apelido: apelido,
@@ -68,6 +85,11 @@ class ContaDaComunidade {
         criadaEm:
             DateTime.tryParse('${m['criadaEm']}')?.toLocal() ?? DateTime.now(),
         avatar: m['avatar'] as String?,
+        nome: '${m['nome'] ?? ''}',
+        bio: '${m['bio'] ?? ''}',
+        verificado: m['verificado'] == true,
+        oficial: m['oficial'] == true,
+        criador: m['criador'] == true,
       );
     } catch (_) {
       return null;
@@ -81,7 +103,25 @@ class ContaDaComunidade {
         codigo: codigo,
         criadaEm: criadaEm,
         avatar: avatar ?? this.avatar,
+        nome: nome,
+        bio: bio,
+        verificado: verificado,
+        oficial: oficial,
+        criador: criador,
       );
+
+  ContaDaComunidade withPerfil(Map<String, dynamic> p) => ContaDaComunidade(
+    id: id,
+    codigo: codigo,
+    criadaEm: criadaEm,
+    apelido: '${p['apelido'] ?? apelido}',
+    avatar: p['avatar'] as String?,
+    nome: '${p['nome'] ?? ''}',
+    bio: '${p['bio'] ?? ''}',
+    verificado: p['verificado'] == true,
+    oficial: p['oficial'] == true,
+    criador: p['criador'] == true,
+  );
 }
 
 class ContaDaComunidadeController extends Notifier<ContaDaComunidade?> {
@@ -116,7 +156,7 @@ class ContaDaComunidadeController extends Notifier<ContaDaComunidade?> {
         codigo: resposta.codigo!,
         criadaEm: DateTime.now(),
         avatar: avatar,
-      ),
+      ).withPerfil(resposta.perfil ?? const {}),
     );
     return null;
   }
@@ -136,25 +176,58 @@ class ContaDaComunidadeController extends Notifier<ContaDaComunidade?> {
         apelido: resposta.apelido!,
         codigo: limpo,
         criadaEm: DateTime.now(),
-      ),
+      ).withPerfil(resposta.perfil ?? const {}),
     );
     return null;
   }
 
   /// Troca o apelido no servidor, ou so a foto (que e local).
-  Future<String?> atualizar({String? apelido, String? avatar}) async {
+  Future<String?> atualizar({
+    String? apelido,
+    String? avatar,
+    String? nome,
+    String? bio,
+    bool removerFoto = false,
+  }) async {
     final atual = state;
     if (atual == null) return 'Crie a conta primeiro.';
-    if (apelido != null && apelido.trim() != atual.apelido) {
-      final veredito = moderarApelido(apelido);
-      if (veredito.bloqueia) return veredito.motivo;
-      final resposta = await _servico.trocarApelido(atual.codigo, apelido);
-      if (resposta.erro != null) return resposta.erro;
-      _gravar(atual.copyWith(apelido: resposta.apelido, avatar: avatar));
+    try {
+      var foto = avatar;
+      if (foto != null && !foto.startsWith('https://')) {
+        final uploaded = await _servico.subirArquivo(
+          File(foto),
+          foto.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg',
+          atual.codigo,
+        );
+        if (!uploaded.deuCerto) return uploaded.erro;
+        foto = uploaded.url;
+      }
+      final p = await ref
+          .read(socialServiceProvider)
+          .request(
+            '/social/me',
+            atual.codigo,
+            method: 'PATCH',
+            data: {
+              'apelido': ?apelido,
+              'nome': ?nome,
+              'bio': ?bio,
+              if (foto != null || removerFoto)
+                'avatar': removerFoto ? null : foto,
+            },
+          );
+      _gravar(atual.withPerfil(p));
       return null;
+    } catch (e) {
+      return '$e';
     }
-    _gravar(atual.copyWith(avatar: avatar));
-    return null;
+  }
+
+  void sincronizarPerfil(Map<String, dynamic> perfil) {
+    final atual = state;
+    if (atual != null && perfil['id'] == atual.id) {
+      _gravar(atual.withPerfil(perfil));
+    }
   }
 
   /// Sai DESTE APARELHO. A conta continua no servidor, e o codigo faz
@@ -188,7 +261,14 @@ final comunidadeServiceProvider = Provider<ComunidadeService>(
 
 /// O que o servidor devolve ao criar conta ou entrar.
 class RespostaDaConta {
-  const RespostaDaConta({this.id, this.apelido, this.codigo, this.erro});
+  const RespostaDaConta({
+    this.id,
+    this.apelido,
+    this.codigo,
+    this.erro,
+    this.perfil,
+  });
+  final Map<String, dynamic>? perfil;
 
   final String? id;
   final String? apelido;
@@ -207,6 +287,7 @@ class RespostaDaConta {
           id: '${m['id']}',
           apelido: '${m['apelido']}',
           codigo: m['codigo'] as String?,
+          perfil: m,
         );
       }
       final erro = m['erro'];

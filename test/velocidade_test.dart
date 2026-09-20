@@ -3,6 +3,8 @@
 // esquerda para camera lenta, valor digitado; camada sem midia explica
 // em vez de mostrar controle que nao faz nada.
 import 'package:aurea/src/features/editor/application/editor_controller.dart';
+import 'package:aurea/src/features/editor/domain/cut_ops.dart';
+import 'package:aurea/src/features/editor/domain/keyframe.dart';
 import 'package:aurea/src/features/editor/domain/layer.dart';
 import 'package:aurea/src/features/editor/domain/velocidade.dart';
 import 'package:aurea/src/features/editor/domain/video_project.dart';
@@ -45,19 +47,26 @@ ProviderContainer _container(Layer clipe) {
   c
       .read(editorControllerProvider.notifier)
       .openProject(
-        VideoProject(name: 'p', createdAt: DateTime(2026, 9, 15), layers: [clipe]),
+        VideoProject(
+          name: 'p',
+          createdAt: DateTime(2026, 9, 15),
+          layers: [clipe],
+        ),
       );
   return c;
 }
 
 void main() {
   group('a conta dos quatro modos', () {
-    test('estender fim: o comeco fica e a barra dobra na metade da velocidade', () {
-      final e = _conta(CompensacaoDaVelocidade.estenderFim, .5);
-      expect(e.inicio, _seg(10));
-      expect(e.duracao, _seg(8));
-      expect(e.deslocamento, _seg(2));
-    });
+    test(
+      'estender fim: o comeco fica e a barra dobra na metade da velocidade',
+      () {
+        final e = _conta(CompensacaoDaVelocidade.estenderFim, .5);
+        expect(e.inicio, _seg(10));
+        expect(e.duracao, _seg(8));
+        expect(e.deslocamento, _seg(2));
+      },
+    );
 
     test('estender inicio: o fim fica no lugar', () {
       final e = _conta(CompensacaoDaVelocidade.estenderInicio, 2);
@@ -83,7 +92,11 @@ void main() {
       expect(rapido.duracao, const Duration(milliseconds: 2250));
       expect(rapido.inicio, _seg(10));
       // Projeto antigo, sem medida da fonte: sem teto.
-      final semFonte = _conta(CompensacaoDaVelocidade.cortarFim, 8, fonte: null);
+      final semFonte = _conta(
+        CompensacaoDaVelocidade.cortarFim,
+        8,
+        fonte: null,
+      );
       expect(semFonte.duracao, _seg(4));
     });
 
@@ -156,86 +169,139 @@ void main() {
     expect(a.sourceOffset, _seg(4), reason: 'saida em 6 s, 2 s de fonte a 1x');
   });
 
-  testWidgets('a folha: modos, regua e numero mudam o clipe; sem midia explica', (
+  testWidgets(
+    'a folha: modos, regua e numero mudam o clipe; sem midia explica',
+    (tester) async {
+      tester.view.physicalSize = const Size(400, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final c = _container(
+        AudioLayer(
+          id: 'a',
+          name: 'musica',
+          startTime: _seg(10),
+          duration: _seg(4),
+          sourcePath: '/a.m4a',
+          sourceDuration: _seg(20),
+        ),
+      );
+      c.read(editorControllerProvider.notifier).addTextLayer(Duration.zero);
+      final texto = c
+          .read(editorControllerProvider)
+          .layers
+          .firstWhere((l) => l is TextLayer)
+          .id;
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: c,
+          child: MaterialApp(
+            home: Scaffold(
+              body: Consumer(
+                builder: (context, ref, _) => Column(
+                  children: [
+                    TextButton(
+                      onPressed: () => showSpeedSheet(context, ref, 'a'),
+                      child: const Text('abrir'),
+                    ),
+                    TextButton(
+                      onPressed: () => showSpeedSheet(context, ref, texto),
+                      child: const Text('texto'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('abrir'));
+      await tester.pumpAndSettle();
+      for (final m in CompensacaoDaVelocidade.values) {
+        expect(
+          find.byKey(ValueKey('velocidade-modo-${m.name}')),
+          findsOneWidget,
+        );
+      }
+      AudioLayer audio() =>
+          c.read(editorControllerProvider).layerById('a')! as AudioLayer;
+
+      await tester.tap(
+        find.byKey(const ValueKey('velocidade-modo-estenderInicio')),
+      );
+      await tester.pumpAndSettle();
+      // Tocar na regua a tres quartos da largura: 2,5x.
+      final regua = tester.getRect(
+        find.byKey(const ValueKey('velocidade-regua')),
+      );
+      await tester.tapAt(
+        Offset(regua.left + regua.width * .75, regua.center.dy),
+      );
+      await tester.pumpAndSettle();
+      expect(audio().speed, 2.5);
+      expect(audio().endTime, _seg(14), reason: 'estender inicio segura o fim');
+
+      await tester.tap(find.byKey(const ValueKey('velocidade-valor')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const ValueKey('valor-campo')), '0,5');
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+      expect(audio().speed, .5);
+      expect(audio().endTime, _seg(14));
+      expect(find.text('0.50x'), findsWidgets);
+
+      Navigator.of(
+        tester.element(find.byKey(const ValueKey('velocidade-regua'))),
+      ).pop();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('texto'));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('velocidade-sem-midia')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('velocidade-regua')), findsNothing);
+      expect(tester.takeException(), isNull);
+      await tester.pump(const Duration(seconds: 1));
+    },
+  );
+
+  testWidgets('Time Remap nao duplica controles no menu de velocidade', (
     tester,
   ) async {
-    tester.view.physicalSize = const Size(400, 900);
+    tester.view.physicalSize = const Size(430, 932);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     final c = _container(
-      AudioLayer(
-        id: 'a',
-        name: 'musica',
-        startTime: _seg(10),
-        duration: _seg(4),
-        sourcePath: '/a.m4a',
-        sourceDuration: _seg(20),
+      VideoLayer(
+        id: 'v',
+        name: 'video',
+        startTime: Duration.zero,
+        duration: const Duration(seconds: 4),
+        sourcePath: '/video.mp4',
+        sourceDuration: const Duration(seconds: 8),
+        position: AnimatedOffset(Offset.zero),
       ),
     );
-    c
-        .read(editorControllerProvider.notifier)
-        .addTextLayer(Duration.zero);
-    final texto = c
-        .read(editorControllerProvider)
-        .layers
-        .firstWhere((l) => l is TextLayer)
-        .id;
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: c,
         child: MaterialApp(
           home: Scaffold(
             body: Consumer(
-              builder: (context, ref, _) => Column(
-                children: [
-                  TextButton(
-                    onPressed: () => showSpeedSheet(context, ref, 'a'),
-                    child: const Text('abrir'),
-                  ),
-                  TextButton(
-                    onPressed: () => showSpeedSheet(context, ref, texto),
-                    child: const Text('texto'),
-                  ),
-                ],
+              builder: (context, ref, _) => TextButton(
+                onPressed: () => showSpeedSheet(context, ref, 'v'),
+                child: const Text('abrir tempo'),
               ),
             ),
           ),
         ),
       ),
     );
-    await tester.tap(find.text('abrir'));
+    await tester.tap(find.text('abrir tempo'));
     await tester.pumpAndSettle();
-    for (final m in CompensacaoDaVelocidade.values) {
-      expect(find.byKey(ValueKey('velocidade-modo-${m.name}')), findsOneWidget);
-    }
-    AudioLayer audio() =>
-        c.read(editorControllerProvider).layerById('a')! as AudioLayer;
-
-    await tester.tap(find.byKey(const ValueKey('velocidade-modo-estenderInicio')));
-    await tester.pumpAndSettle();
-    // Tocar na regua a tres quartos da largura: 2,5x.
-    final regua = tester.getRect(find.byKey(const ValueKey('velocidade-regua')));
-    await tester.tapAt(Offset(regua.left + regua.width * .75, regua.center.dy));
-    await tester.pumpAndSettle();
-    expect(audio().speed, 2.5);
-    expect(audio().endTime, _seg(14), reason: 'estender inicio segura o fim');
-
-    await tester.tap(find.byKey(const ValueKey('velocidade-valor')));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byKey(const ValueKey('valor-campo')), '0,5');
-    await tester.tap(find.text('OK'));
-    await tester.pumpAndSettle();
-    expect(audio().speed, .5);
-    expect(audio().endTime, _seg(14));
-    expect(find.text('0.50x'), findsWidgets);
-
-    Navigator.of(tester.element(find.byKey(const ValueKey('velocidade-regua')))).pop();
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('texto'));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('velocidade-sem-midia')), findsOneWidget);
-    expect(find.byKey(const ValueKey('velocidade-regua')), findsNothing);
+    expect(find.text('Time Remap'), findsNothing);
+    expect(find.text('Editor de curva'), findsNothing);
+    expect(find.byKey(const ValueKey('velocidade-regua')), findsOneWidget);
     expect(tester.takeException(), isNull);
-    await tester.pump(const Duration(seconds: 1));
   });
 }

@@ -150,6 +150,13 @@ class Nucleo {
       std::uint32_t largura, std::uint32_t altura,
       std::vector<std::uint8_t> rgba);
 
+  /// A MESMA COISA, COM A COR JA MULTIPLICADA PELO ALFA. O alvo do motor 3D
+  /// sai premultiplicado do rasterizador; sem esta porta ele entraria na
+  /// composicao sendo multiplicado uma segunda vez.
+  [[nodiscard]] Resulta<IdDeRecurso> registrar_textura_premultiplicada(
+      std::uint32_t largura, std::uint32_t altura,
+      std::vector<std::uint8_t> rgba);
+
   /// COMPILA EM LOTE, FORA DO QUADRO. Devolve quantos ficaram prontos.
   Resulta<std::uint32_t> pre_aquecer(
       std::span<const DescricaoDoShader> descricoes);
@@ -174,6 +181,13 @@ class Nucleo {
  private:
   explicit Nucleo(const Configuracao& c) noexcept;
   Resulta<std::uint32_t> abrir_recursos();
+
+  /// O CORPO DE `registrar_textura`, COM O `premultiplicada` NO FIM. As
+  /// duas portas publicas sao a mesma funcao com um booleano diferente, e
+  /// nao duas copias da mesma validacao.
+  [[nodiscard]] Resulta<IdDeRecurso> registrar_textura_com(
+      std::uint32_t largura, std::uint32_t altura,
+      std::vector<std::uint8_t> rgba, bool premultiplicada);
 
   /// PEDE UM ALVO E GARANTE QUE ELE TENHA PIXELS.
   ///

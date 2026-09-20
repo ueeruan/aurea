@@ -60,7 +60,7 @@ Set<AmSecao> secoesDe(Layer layer) {
   // na tela nao faz nada, e um controle que nao faz nada nao pode
   // aparecer. Ela mostra tres secoes.
   if (layer is AudioLayer) {
-    return const {AmSecao.volume, AmSecao.fade, AmSecao.efeitos};
+    return const {AmSecao.volume, AmSecao.efeitos};
   }
   // O NULO nao tem aparencia nenhuma. Tem o transform (que e para o que
   // ele existe) e a grade de clones que ele controla.
@@ -89,7 +89,7 @@ Set<AmSecao> secoesDe(Layer layer) {
     AmSecao.mesclarOpacidade,
     // Video com som ganha as duas do audio — e a razao de a grade do
     // video bater exatamente em sete, e nao em oito.
-    if (layer is VideoLayer) ...[AmSecao.volume, AmSecao.fade],
+    if (layer is VideoLayer) AmSecao.volume,
     // A PORTA DA CENA 3D RASTREADA: rastrear a camera do clipe e povoar
     // o espaco com objetos, texto e nulos.
     if (layer is VideoLayer) AmSecao.rastrear,

@@ -678,7 +678,7 @@ class VideoLayer extends Layer {
     this.sourceDuration,
     this.speed = 1.0,
     this.reverse = false,
-    this.timeRemap,
+    AnimatedDouble? timeRemap,
     this.speedBlur = false,
     this.interpolacao = InterpolacaoDeQuadros.nenhuma,
     this.aprimorar = false,
@@ -710,11 +710,19 @@ class VideoLayer extends Layer {
     super.customBlend,
     super.is3D,
     super.positionZ,
-    super.effects,
+    List<EffectInstance>? effects,
     super.masks,
     super.matteMode,
     super.matteSourceId,
-  });
+  }) : super(effects: _withTimeRemap(effects ?? const [], timeRemap));
+
+  static List<EffectInstance> _withTimeRemap(List<EffectInstance> effects, AnimatedDouble? track) {
+    if (track == null) return effects;
+    final index = effects.indexWhere((e) => e.type == EffectType.timeRemap);
+    if (index < 0) return [...effects, EffectInstance(type: EffectType.timeRemap, params: {'tempo': track})];
+    return [for (var i = 0; i < effects.length; i++)
+      i == index ? effects[i].copyWith(params: {...effects[i].params, 'tempo': track}) : effects[i]];
+  }
 
   final String sourcePath;
   final Duration sourceOffset;
@@ -742,23 +750,13 @@ class VideoLayer extends Layer {
   /// Reproducao da mesma faixa de fonte do fim para o inicio.
   final bool reverse;
 
-  /// A TRILHA DE TEMPO do clipe: qual instante da FONTE aparece em cada
-  /// instante da composicao, em segundos.
-  ///
-  /// Nula = o clipe anda em [speed] constante. Com trilha, e ela que
-  /// manda: e assim que existem rampa de velocidade, congelamento,
-  /// reverso e corte no meio sem depender do sinal da velocidade.
-  ///
-  /// MORAVA DENTRO DE UM EFEITO ate 17/09 (o tipo `timeRemap`, com um
-  /// parametro `tempo`). O precomp ja usava um campo para a mesma coisa —
-  /// [GroupLayer.timeRemap] —, e o video era a excecao. Trazer o video
-  /// para o mesmo desenho tirou o Time Remap do catalogo de efeitos sem
-  /// tirar nenhuma funcionalidade: quem calcula continua sendo o mesmo
-  /// nucleo (`time_core`), que nunca soube o que era um efeito.
-  ///
-  /// Arquivo antigo traz a trilha dentro do efeito; o carregador a move
-  /// para ca. Ver `_eOTimeRemapAntigo` em `project_store.dart`.
-  final AnimatedDouble? timeRemap;
+  /// Compatibility accessor: the real track is stored in the effect stack.
+  AnimatedDouble? get timeRemap {
+    for (final e in effects) {
+      if (e.type == EffectType.timeRemap && e.enabled) return e.params['tempo'];
+    }
+    return null;
+  }
 
   /// Borrao adicional proporcional ao modulo da velocidade instantanea.
   final bool speedBlur;
@@ -864,7 +862,7 @@ class VideoLayer extends Layer {
       sourceDuration: sourceDuration ?? this.sourceDuration,
       speed: speed ?? this.speed,
       reverse: reverse ?? this.reverse,
-      timeRemap: clearTimeRemap ? null : (timeRemap ?? this.timeRemap),
+      timeRemap: clearTimeRemap ? null : timeRemap,
       speedBlur: speedBlur ?? this.speedBlur,
       interpolacao: interpolacao ?? this.interpolacao,
       aprimorar: aprimorar ?? this.aprimorar,
@@ -894,7 +892,9 @@ class VideoLayer extends Layer {
       customBlend: clearCustomBlend ? null : (customBlend ?? this.customBlend),
       is3D: is3D ?? this.is3D,
       positionZ: positionZ ?? this.positionZ,
-      effects: effects ?? this.effects,
+      effects: clearTimeRemap
+          ? (effects ?? this.effects).where((e) => e.type != EffectType.timeRemap).toList()
+          : effects ?? this.effects,
       masks: masks ?? this.masks,
       matteMode: matteMode ?? this.matteMode,
       matteSourceId: clearMatteSource

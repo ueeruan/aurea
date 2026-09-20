@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 // ignore: depend_on_referenced_packages
 import 'package:video_player_platform_interface/video_player_platform_interface.dart';
 import 'package:aurea/src/features/editor/application/video_layer_manager.dart';
+import 'package:aurea/src/features/editor/domain/keyframe.dart';
 import 'package:aurea/src/features/editor/domain/layer.dart';
 
 class _NativePlayer extends VideoPlayerPlatform {
@@ -67,6 +68,32 @@ class _NativePlayer extends VideoPlayerPlatform {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  testWidgets('Time Remap nao segura a timeline esperando ancora impossivel', (
+    tester,
+  ) async {
+    final native = _NativePlayer();
+    VideoPlayerPlatform.instance = native;
+    final manager = VideoLayerManager();
+    final remapeado = VideoLayer(
+      id: 'remap',
+      name: 'remap',
+      startTime: Duration.zero,
+      duration: const Duration(seconds: 10),
+      sourcePath: 'fixture.mp4',
+      timeRemap: AnimatedDouble(0),
+    );
+    manager.sync([remapeado], Duration.zero, false);
+    expect(
+      manager.temMidiaAtiva,
+      isFalse,
+      reason: 'sem ancora linear, o clock deve partir imediatamente',
+    );
+    manager.dispose();
+    await tester.pumpAndSettle();
+    unawaited(native.events.close());
+  });
+
   testWidgets('native play waits for the requested first frame after rewind', (
     tester,
   ) async {
@@ -186,4 +213,54 @@ void main() {
       unawaited(native.events.close());
     },
   );
+
+  testWidgets('scrub limita seeks nativos mesmo mudando seekRevision', (
+    tester,
+  ) async {
+    final native = _NativePlayer();
+    VideoPlayerPlatform.instance = native;
+    var ms = 0;
+    final manager = VideoLayerManager(relogioMs: () => ms);
+    final layers = [
+      VideoLayer(
+        id: 'clip',
+        name: 'clip',
+        startTime: Duration.zero,
+        duration: const Duration(seconds: 10),
+        sourcePath: 'fixture.mp4',
+      ),
+    ];
+    manager.sync(layers, Duration.zero, false);
+    await tester.pumpAndSettle();
+    native.calls.clear();
+    manager.scrub();
+    for (var i = 1; i <= 20; i++) {
+      manager.sync(
+        layers,
+        Duration(milliseconds: i * 10),
+        false,
+        seekRevision: i,
+      );
+    }
+    await tester.pump();
+    expect(
+      native.calls.where((c) => c.startsWith('seek@')).length,
+      lessThanOrEqualTo(1),
+      reason: 'cada pixel do arrasto nao pode esvaziar o decoder',
+    );
+    await tester.pump(const Duration(milliseconds: 55));
+    ms = 55;
+    manager.sync(
+      layers,
+      const Duration(milliseconds: 300),
+      false,
+      seekRevision: 21,
+    );
+    await tester.pump();
+    final seeks = native.calls.where((c) => c.startsWith('seek@')).length;
+    expect(seeks, inInclusiveRange(1, 2));
+    manager.dispose();
+    await tester.pumpAndSettle();
+    unawaited(native.events.close());
+  });
 }

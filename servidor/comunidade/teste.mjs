@@ -30,13 +30,15 @@ function kvFalsa() {
     async delete(k) {
       dados.delete(k);
     },
-    async list({ prefix = '', limit = 1000 } = {}) {
+    async list({ prefix = '', limit = 1000, cursor } = {}) {
+      const todas = [...dados.keys()].filter((k) => k.startsWith(prefix)).sort();
+      const inicio = cursor ? Number(cursor) : 0;
+      const pagina = todas.slice(inicio, inicio + limit);
+      const proximo = inicio + pagina.length;
       return {
-        keys: [...dados.keys()]
-          .filter((k) => k.startsWith(prefix))
-          .sort()
-          .slice(0, limit)
-          .map((name) => ({ name })),
+        keys: pagina.map((name) => ({ name })),
+        list_complete: proximo >= todas.length,
+        ...(proximo < todas.length ? { cursor: String(proximo) } : {}),
       };
     },
   };
@@ -115,6 +117,9 @@ confere('apelido ofensivo e recusado', r.status, 422);
 r = await chamar('POST', '/conta', { corpo: { apelido: 'Bruno 3D' } });
 const bruno = await r.json();
 confere('segunda conta', r.status, 201);
+
+r = await chamar('GET', '/estatisticas');
+confere('estatisticas contam todas as contas', (await r.json()).usuarios, 2);
 
 r = await chamar('POST', '/conta/entrar', { codigo: ana.codigo });
 confere('entrar com o codigo', (await r.json()).apelido, 'Ana Motion');

@@ -69,7 +69,7 @@ void main() {
         overrides: [
           projectsControllerProvider.overrideWith(_MemoryProjects.new),
           projectRepositoryProvider.overrideWithValue(
-            ProjectRepository(directory: pasta, installBundledExamples: false),
+            ProjectRepository(directory: pasta),
           ),
         ],
       );

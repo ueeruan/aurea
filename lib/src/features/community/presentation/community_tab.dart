@@ -1,5 +1,7 @@
 import 'package:aurea/src/core/l10n/app_language.dart';
+
 import 'dart:io';
+
 import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import 'package:flutter/cupertino.dart';
@@ -24,6 +26,66 @@ import '../application/comunidade_service.dart';
 import '../application/conta_da_comunidade.dart';
 import '../domain/moderacao.dart';
 import '../domain/post_da_comunidade.dart';
+import '../application/social_service.dart';
+import 'social_pages.dart';
+import 'social_widgets.dart';
+
+/// The same post/media renderer on a public profile and in the main feed.
+class CommunityPostView extends ConsumerWidget {
+  const CommunityPostView({super.key, required this.post, this.onDeleted});
+  final PostDaComunidade post;
+  final VoidCallback? onDeleted;
+  Future<void> _delete(BuildContext context, WidgetRef ref) async {
+    final account = ref.read(contaDaComunidadeProvider);
+    if (account == null) return;
+    final error = await ref
+        .read(comunidadeServiceProvider)
+        .apagarNoServidor(post.id, account.codigo);
+    if (!context.mounted) return;
+    if (error != null) {
+      AureaSnack.show(context, error);
+    } else {
+      onDeleted?.call();
+    }
+  }
+
+  Future<void> _reply(BuildContext context, WidgetRef ref) async {
+    final account = ref.read(contaDaComunidadeProvider);
+    if (account == null) return;
+    final response = await showModalBottomSheet<PostDaComunidade>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => _Compositor(conta: account, responderA: post),
+    );
+    if (response == null) return;
+    final service = ref.read(comunidadeServiceProvider);
+    await service.publicar(response);
+    final error = await service.enviar(
+      response,
+      account.codigo,
+      respondeA: post.id,
+    );
+    if (context.mounted && error != null) AureaSnack.show(context, error);
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) => _Cartao(
+    post: post,
+    onApagar:
+        post.autorId == ref.watch(contaDaComunidadeProvider)?.id ||
+            ref.watch(contaDaComunidadeProvider)?.criador == true
+        ? () => _delete(context, ref)
+        : null,
+    onResponder: () => _reply(context, ref),
+    onAbrir: () => Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            _Conversa(post: post, aoResponder: () => _reply(context, ref)),
+      ),
+    ),
+  );
+}
 
 /// A ABA COMUNIDADE — o mural do beta.
 ///
@@ -42,6 +104,10 @@ class CommunityTab extends ConsumerStatefulWidget {
 class _CommunityTabState extends ConsumerState<CommunityTab> {
   List<PostDaComunidade> _posts = const [];
   bool _carregando = true;
+  int? _totalDeUsuarios;
+  bool _seguindo = false;
+  String? _cursor;
+  String? _socialError;
 
   ComunidadeService get _s => ref.read(comunidadeServiceProvider);
 
@@ -53,12 +119,49 @@ class _CommunityTabState extends ConsumerState<CommunityTab> {
 
   Future<void> _atualizar({required bool daRede}) async {
     if (mounted) setState(() => _carregando = true);
-    final posts = await _s.carregar(daRede: daRede);
+    // Feed e total saem juntos: o contador nao acrescenta uma segunda
+    // espera a quem puxou a tela para atualizar.
+    final totalPendente = _s.totalDeUsuarios();
+    var posts = await _s.carregar(daRede: daRede);
+    if (!mounted) return;
+    final account = ref.read(contaDaComunidadeProvider);
+    if (account != null && daRede) {
+      try {
+        final page = await ref
+            .read(socialServiceProvider)
+            .request(
+              '/social/feed${_seguindo ? '?seguindo=1' : ''}',
+              account.codigo,
+            );
+        final remote = [
+          for (final raw in page['posts'] as List)
+            ?PostDaComunidade.deJson(raw),
+        ];
+        final ids = remote.map((p) => p.id).toSet();
+        posts = [
+          for (final p in posts)
+            if (p.meu && !ids.contains(p.id)) p,
+          ...remote,
+        ];
+        _cursor = page['cursor'] as String?;
+        _socialError = null;
+      } catch (e) {
+        _socialError = '$e';
+      }
+    }
     if (!mounted) return;
     setState(() {
       _posts = posts;
       _carregando = false;
     });
+    final total = await totalPendente;
+    if (!mounted || total == null) return;
+    setState(() => _totalDeUsuarios = total);
+  }
+
+  String _formatarTotal(int total) {
+    final texto = total.toString();
+    return texto.replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (_) => '.');
   }
 
   /// Sem conta nao se publica — e a conta se cria em um passo, aqui
@@ -338,6 +441,11 @@ class _CommunityTabState extends ConsumerState<CommunityTab> {
   static String _chaveDoAutor(PostDaComunidade p) => p.autorId ?? p.autor;
 
   Future<void> _abrirConta() async {
+    final account = ref.read(contaDaComunidadeProvider);
+    if (account != null) {
+      openProfile(context, account.id);
+      return;
+    }
     await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
@@ -377,14 +485,53 @@ class _CommunityTabState extends ConsumerState<CommunityTab> {
               child: Row(
                 children: [
                   Expanded(
-                    child: AppText(
-                      'Comunidade',
-                      style: TextStyle(
-                        fontSize: 28,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.7,
-                        color: AppColors.onDark,
-                      ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        AppText(
+                          'Comunidade',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.7,
+                            color: AppColors.onDark,
+                          ),
+                        ),
+                        if (_totalDeUsuarios != null)
+                          Semantics(
+                            key: const ValueKey('comunidade-total-usuarios'),
+                            label:
+                                '${_totalDeUsuarios!} usuários cadastrados no Aurea',
+                            child: Padding(
+                              padding: const EdgeInsets.only(top: 2),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    CupertinoIcons.person_2_fill,
+                                    size: 13,
+                                    color: AppColors.lime,
+                                  ),
+                                  const SizedBox(width: 5),
+                                  Flexible(
+                                    child: AppText(
+                                      '${_formatarTotal(_totalDeUsuarios!)} '
+                                      '${_totalDeUsuarios == 1 ? 'usuário cadastrado' : 'usuários cadastrados'}',
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 12.5,
+                                        fontWeight: FontWeight.w600,
+                                        color: AppColors.muted,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                   ),
                   _BotaoRedondoDaComunidade(
@@ -392,6 +539,26 @@ class _CommunityTabState extends ConsumerState<CommunityTab> {
                     icone: CupertinoIcons.plus_app,
                     dica: translate(context, 'Publicar'),
                     onTap: _compor,
+                  ),
+                  IconButton(
+                    tooltip: 'Encontrar pessoas',
+                    icon: const Icon(Icons.search),
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) => const SocialPeoplePage(),
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Mensagens',
+                    icon: const Icon(Icons.chat_bubble_outline),
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) => const SocialInboxPage(),
+                      ),
+                    ),
                   ),
                   GestureDetector(
                     key: const ValueKey('comunidade-conta'),
@@ -401,10 +568,10 @@ class _CommunityTabState extends ConsumerState<CommunityTab> {
                       width: 44,
                       height: 44,
                       child: Center(
-                        child: _Avatar(
-                          nome: conta?.apelido ?? '?',
-                          arquivo: conta?.avatar,
-                          raio: 16,
+                        child: ProfileAvatar(
+                          name: conta?.apelido ?? '?',
+                          url: conta?.avatar,
+                          radius: 16,
                         ),
                       ),
                     ),
@@ -412,6 +579,35 @@ class _CommunityTabState extends ConsumerState<CommunityTab> {
                 ],
               ),
             ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+              child: Row(
+                children: [
+                  ChoiceChip(
+                    label: const Text('Para voce'),
+                    selected: !_seguindo,
+                    onSelected: (_) {
+                      setState(() => _seguindo = false);
+                      _atualizar(daRede: true);
+                    },
+                  ),
+                  const SizedBox(width: 8),
+                  ChoiceChip(
+                    label: const Text('Seguindo'),
+                    selected: _seguindo,
+                    onSelected: (_) {
+                      setState(() => _seguindo = true);
+                      _atualizar(daRede: true);
+                    },
+                  ),
+                ],
+              ),
+            ),
+            if (_socialError != null)
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(_socialError!),
+              ),
             SizedBox(
               height: 102,
               child: ListView(
@@ -492,7 +688,9 @@ class _CommunityTabState extends ConsumerState<CommunityTab> {
                     // mural, e so quem escreveu ve o botao.
                     onApagar: p.meu
                         ? () => _apagar(p)
-                        : (_euEscrevi(p) ? () => _apagarPublicado(p) : null),
+                        : (_euEscrevi(p) || conta?.criador == true
+                              ? () => _apagarPublicado(p)
+                              : null),
                     // O que ainda nao entrou no mural nao pode receber
                     // resposta nem repost: o post nao existe la.
                     onResponder: p.meu ? null : () => _compor(responderA: p),
@@ -503,6 +701,32 @@ class _CommunityTabState extends ConsumerState<CommunityTab> {
                         : null,
                   ),
                 ),
+            if (_cursor != null)
+              TextButton(
+                onPressed: () async {
+                  try {
+                    final page = await ref
+                        .read(socialServiceProvider)
+                        .request(
+                          '/social/feed?cursor=${Uri.encodeQueryComponent(_cursor!)}${_seguindo ? '&seguindo=1' : ''}',
+                          ref.read(contaDaComunidadeProvider)!.codigo,
+                        );
+                    if (mounted) {
+                      setState(() {
+                        final ids = _posts.map((p) => p.id).toSet();
+                        for (final raw in page['posts'] as List) {
+                          final p = PostDaComunidade.deJson(raw);
+                          if (p != null && !ids.contains(p.id)) _posts.add(p);
+                        }
+                        _cursor = page['cursor'] as String?;
+                      });
+                    }
+                  } catch (e) {
+                    if (context.mounted) AureaSnack.show(context, '$e');
+                  }
+                },
+                child: const Text('Carregar mais'),
+              ),
           ],
         ),
       ),
@@ -760,20 +984,46 @@ class _Cartao extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(16, 0, 4, 8),
           child: Row(
             children: [
-              _Avatar(nome: post.autor, raio: 17),
+              GestureDetector(
+                onTap: post.autorId == null
+                    ? null
+                    : () => openProfile(context, post.autorId!),
+                child: ProfileAvatar(
+                  name: post.autor,
+                  url: post.perfil?['avatar'] as String?,
+                  radius: 19,
+                ),
+              ),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      post.autor,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.onDark,
+                    InkWell(
+                      onTap: post.autorId == null
+                          ? null
+                          : () => openProfile(context, post.autorId!),
+                      child: Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              '${post.perfil?['nome'] ?? post.autor}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.onDark,
+                              ),
+                            ),
+                          ),
+                          if (post.perfil?['verificado'] == true) ...[
+                            const SizedBox(width: 5),
+                            VerifiedBadge(
+                              official: post.perfil?['oficial'] == true,
+                            ),
+                          ],
+                        ],
                       ),
                     ),
                     Text(
@@ -935,6 +1185,7 @@ class _BarraDoCartao extends StatelessWidget {
     padding: const EdgeInsets.fromLTRB(6, 2, 6, 0),
     child: Row(
       children: [
+        if (onResponder != null) PostLikeButton(post: post),
         if (onResponder != null)
           _BotaoDaBarra(
             chave: 'post-responder-${post.id}',
@@ -1033,7 +1284,8 @@ class _Citacao extends StatelessWidget {
         if (original.texto.trim().isNotEmpty)
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
-            child: Text(original.texto,
+            child: Text(
+              original.texto,
               maxLines: 6,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
@@ -1155,7 +1407,7 @@ class _ConversaState extends ConsumerState<_Conversa> {
     appBar: AppBar(
       backgroundColor: AppColors.background,
       elevation: 0,
-      title: const AppText('Conversa'),
+      title: const AppText('Comentários'),
     ),
     body: RefreshIndicator(
       onRefresh: _buscar,
@@ -1486,7 +1738,8 @@ class _Aviso extends StatelessWidget {
         ),
         const SizedBox(width: 10),
         Expanded(
-          child: AppText(texto,
+          child: AppText(
+            texto,
             style: TextStyle(
               fontSize: 12.5,
               height: 1.35,
@@ -1514,7 +1767,8 @@ class _Vazio extends StatelessWidget {
           color: AppColors.muted.withValues(alpha: .6),
         ),
         const SizedBox(height: 14),
-        AppText('O mural ainda está vazio',
+        AppText(
+          'O mural ainda está vazio',
           style: TextStyle(
             fontSize: 15,
             fontWeight: FontWeight.w700,
@@ -1522,7 +1776,8 @@ class _Vazio extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 6),
-        AppText('Seja quem começa. Toque em Publicar e mostre o que você fez '
+        AppText(
+          'Seja quem começa. Toque em Publicar e mostre o que você fez '
           'no Aurea.',
           textAlign: TextAlign.center,
           style: TextStyle(fontSize: 13, height: 1.4, color: AppColors.muted),
@@ -1622,7 +1877,9 @@ class _FolhaDaContaState extends ConsumerState<_FolhaDaConta> {
             obscureText: true,
             textInputAction: TextInputAction.done,
             onSubmitted: (_) => _salvar(),
-            decoration: InputDecoration(labelText: translate(context, 'Código de acesso')),
+            decoration: InputDecoration(
+              labelText: translate(context, 'Código de acesso'),
+            ),
           )
         else
           Row(
@@ -2217,7 +2474,8 @@ class _Folha extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 14),
-                AppText(titulo,
+                AppText(
+                  titulo,
                   style: TextStyle(
                     fontSize: 17,
                     fontWeight: FontWeight.w700,
@@ -2225,7 +2483,8 @@ class _Folha extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 3),
-                AppText(subtitulo,
+                AppText(
+                  subtitulo,
                   style: TextStyle(fontSize: 12, color: AppColors.muted),
                 ),
                 const SizedBox(height: 14),

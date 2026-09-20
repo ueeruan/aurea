@@ -39,10 +39,9 @@ EffectInstance _warp({
 void main() {
   group('os deslocamentos', () {
     test('tres canais independentes, com sinal', () {
-      final d = deslocamentosDoTimeWarp(
-        [_warp(r: -3, g: 0, b: 3)],
-        Duration.zero,
-      );
+      final d = deslocamentosDoTimeWarp([
+        _warp(r: -3, g: 0, b: 3),
+      ], Duration.zero);
       expect(d.r, -3);
       expect(d.g, 0);
       expect(d.b, 3);
@@ -69,10 +68,7 @@ void main() {
       final a = deslocamentosDoTimeWarp(e, const Duration(milliseconds: 500));
       deslocamentosDoTimeWarp(e, Duration.zero);
       deslocamentosDoTimeWarp(e, const Duration(seconds: 3));
-      expect(
-        deslocamentosDoTimeWarp(e, const Duration(milliseconds: 500)),
-        a,
-      );
+      expect(deslocamentosDoTimeWarp(e, const Duration(milliseconds: 500)), a);
     });
 
     test('fora da faixa nao estoura', () {
@@ -126,6 +122,23 @@ void main() {
       final t = const Duration(seconds: 2);
       expect(instantesDeOutroTempo([camada(_warp())], t, 30), isEmpty);
     });
+
+    test('offset fora do clipe segura o primeiro ou o ultimo quadro', () {
+      final l = camada(_warp(r: -120, b: 120));
+      final noInicio = instantesDeOutroTempo(
+        [l],
+        l.startTime + const Duration(milliseconds: 10),
+        30,
+      );
+      expect(noInicio, contains(l.startTime));
+
+      final fim = l.startTime + l.duration - const Duration(milliseconds: 10);
+      final noFim = instantesDeOutroTempo([l], fim, 30);
+      expect(
+        noFim,
+        contains(l.startTime + l.duration - const Duration(microseconds: 1)),
+      );
+    });
   });
 
   group('a ficha', () {
@@ -135,7 +148,11 @@ void main() {
       expect(spec.name, 'RGB Time Warp');
       expect(spec.id, 'rgb_time_warp');
       for (final k in [
-        'red_frames', 'green_frames', 'blue_frames', 'clamp_chroma', 'mix',
+        'red_frames',
+        'green_frames',
+        'blue_frames',
+        'clamp_chroma',
+        'mix',
       ]) {
         expect(spec.params.containsKey(k), isTrue, reason: 'falta $k');
       }
@@ -153,8 +170,11 @@ void main() {
       for (final p in spec.presets) {
         expect(p.valores, isNotEmpty);
         for (final k in p.valores.keys) {
-          expect(spec.params.containsKey(k), isTrue,
-              reason: '${p.nome} pede $k, que nao existe');
+          expect(
+            spec.params.containsKey(k),
+            isTrue,
+            reason: '${p.nome} pede $k, que nao existe',
+          );
         }
       }
       expect(spec.montar.length, lessThanOrEqualTo(3));

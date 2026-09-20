@@ -1,4 +1,5 @@
 import 'package:aurea/src/core/l10n/app_language.dart';
+
 import 'dart:async';
 
 import 'package:flutter/cupertino.dart';
@@ -18,7 +19,6 @@ import '../context/parameter_row.dart' show showNumberInput;
 import 'am_colors.dart';
 import '../../../../core/ui/tocavel.dart';
 import 'am_widgets.dart';
-import 'estudio_do_tempo.dart';
 
 const _chaveDaCompensacao = 'velocidade.compensacao';
 
@@ -39,9 +39,8 @@ void _lembrarCompensacao(WidgetRef ref, CompensacaoDaVelocidade c) {
   } catch (_) {}
 }
 
-/// Velocidade constante com o modo de compensacao, rampas prontas,
-/// reverso e interpolacao, na folha aberta pelo icone de relogio. O Time
-/// Remap (chave, curva e keyframes de tempo) mora no Estudio do tempo.
+/// Velocidade constante, reverso e blur temporal.
+/// Time Remap e interpolacao ficam no painel de efeitos.
 Future<void> showSpeedSheet(
   BuildContext context,
   WidgetRef ref,
@@ -51,8 +50,8 @@ Future<void> showSpeedSheet(
   var modo = compensacaoLembrada(ref);
   await showParamSheet(
     context,
-    title: 'Velocidade',
-    heightFactor: 0.76,
+    title: 'Tempo e velocidade',
+    heightFactor: 0.84,
     builder: (sheetContext) => StatefulBuilder(
       builder: (sheetContext, setSheetState) {
         final project = ref.read(editorControllerProvider);
@@ -68,7 +67,11 @@ Future<void> showSpeedSheet(
               'A velocidade vale para vídeo e áudio. Nas outras camadas, '
               'aproxime ou afaste os keyframes para animar mais rápido ou '
               'mais devagar.',
-              style: TextStyle(fontSize: 13, height: 1.4, color: AmColors.muted),
+              style: TextStyle(
+                fontSize: 13,
+                height: 1.4,
+                color: AmColors.muted,
+              ),
             ),
           );
         }
@@ -188,8 +191,7 @@ Future<void> showSpeedSheet(
                     for (final preset in const [0.5, 1.0, 2.0])
                       _SpeedChip(
                         label: preset == 1 ? '1x' : '${preset}x',
-                        selected:
-                            !temCurva && (speed - preset).abs() < 0.01,
+                        selected: !temCurva && (speed - preset).abs() < 0.01,
                         onTap: () => setSpeed(preset),
                       ),
                     if (video != null)
@@ -216,55 +218,6 @@ Future<void> showSpeedSheet(
                   ),
                 ],
                 if (video != null) ...[
-                  // A PORTA DO ESTUDIO DO TEMPO: rampas com keyframes,
-                  // grafo de valor e de velocidade, congelar e reverso.
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4, bottom: 8),
-                    child: Tocavel(
-                      key: const ValueKey('abrir-estudio-do-tempo'),
-                      haptico: true,
-                      onTap: () async {
-                        await showEstudioDoTempo(
-                          sheetContext,
-                          ref,
-                          layerId,
-                          playback,
-                        );
-                        if (sheetContext.mounted) setSheetState(() {});
-                      },
-                      child: Container(
-                        height: 44,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: AmColors.accent,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: const Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.show_chart_rounded,
-                              size: 18,
-                              color: AmColors.onAction,
-                            ),
-                            SizedBox(width: 8),
-                            Flexible(
-                              child: AppText(
-                                'Time Remap',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w700,
-                                  color: AmColors.onAction,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
                   _ToggleRow(
                     label: 'Reverso',
                     value: video.reverse,
@@ -277,43 +230,6 @@ Future<void> showSpeedSheet(
                       controller.setClipSpeedBlur(layerId, value);
                       setSheetState(() {});
                     },
-                  ),
-                  const SizedBox(height: 12),
-                  // INTERPOLACAO DE QUADROS: so faz diferenca na camera
-                  // lenta, e so na exportacao — o preview mostra o quadro
-                  // mais proximo. Dito aqui, para ninguem procurar o
-                  // efeito no palco.
-                  const AppText('Interpolação de quadros (câmera lenta, na exportação)',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: AmColors.text,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      for (final interp in InterpolacaoDeQuadros.values)
-                        _SpeedChip(
-                          key: ValueKey('interpolacao-${interp.name}'),
-                          label: interp.emPalavras,
-                          selected: video.interpolacao == interp,
-                          onTap: () {
-                            controller.setClipInterpolacao(layerId, interp);
-                            setSheetState(() {});
-                          },
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  const AppText('No Android, "Movimento" usa IA (RIFE) quando o aparelho tem GPU; vídeos de 60 fps ou mais usam os quadros reais.',
-                    style: TextStyle(
-                      fontSize: 10,
-                      height: 1.35,
-                      color: AmColors.muted,
-                    ),
                   ),
                 ],
               ],
@@ -525,6 +441,7 @@ class _SpeedChip extends StatelessWidget {
 
 class _ToggleRow extends StatelessWidget {
   const _ToggleRow({
+    super.key,
     required this.label,
     required this.value,
     required this.onChanged,

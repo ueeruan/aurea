@@ -24,6 +24,7 @@ void main() {
         resolutionHeight: 1080,
         layers: [
           TextLayer(
+            id: 'a',
             name: 'Titulo',
             startTime: const Duration(milliseconds: 500),
             duration: const Duration(seconds: 3),
@@ -69,6 +70,7 @@ void main() {
             ],
           ),
           ShapeLayer(
+            id: 'b',
             name: 'Estrela',
             startTime: Duration.zero,
             duration: const Duration(seconds: 5),

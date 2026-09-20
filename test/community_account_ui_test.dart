@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:aurea/src/core/storage/prefs.dart';
 import 'package:aurea/src/features/community/application/comunidade_service.dart';
 import 'package:aurea/src/features/community/application/conta_da_comunidade.dart';
+import 'package:aurea/src/features/community/application/social_service.dart';
 import 'package:aurea/src/features/community/domain/post_da_comunidade.dart';
 import 'package:aurea/src/features/community/presentation/community_tab.dart';
 import 'package:flutter/material.dart';
@@ -11,10 +12,33 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+class _Social extends SocialService {
+  _Social() : super('https://test.local');
+  @override
+  Future<Map<String, dynamic>> request(
+    String path,
+    String code, {
+    String method = 'GET',
+    Map<String, dynamic>? data,
+  }) async => path.startsWith('/social/feed')
+      ? {'posts': []}
+      : {
+          'id': 'account-id',
+          'apelido': 'ana_motion',
+          'nome': 'Ana Motion',
+          'bio': '',
+          'verificado': false,
+          'seguidores': 0,
+          'seguindo': 0,
+        };
+}
+
 class _Mural extends ComunidadeService {
   static final code = 'ab' * 24;
   String? sentCode;
   PostDaComunidade? sentPost;
+  @override
+  Future<int?> totalDeUsuarios() async => 27;
   @override
   Future<List<PostDaComunidade>> carregar({bool daRede = true}) async => [];
   @override
@@ -61,6 +85,7 @@ void main() {
         overrides: [
           sharedPreferencesProvider.overrideWithValue(prefs),
           comunidadeServiceProvider.overrideWithValue(service),
+          socialServiceProvider.overrideWithValue(_Social()),
         ],
       );
       addTearDown(c.dispose);
@@ -87,12 +112,19 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      expect(find.text('27 usuários cadastrados'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('comunidade-conta')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('perfil-menu')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Codigo de acesso'));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('conta-copiar-codigo')));
       await tester.pumpAndSettle();
       expect(clipboard, _Mural.code);
       expect(find.text('Apagar conta'), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('perfil-menu')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('conta-sair')));
       await tester.pumpAndSettle();
       expect(c.read(contaDaComunidadeProvider), isNull);

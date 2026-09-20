@@ -26,7 +26,6 @@ import 'dart:ui' as ui;
 import 'package:aurea/src/features/editor/domain/effect.dart';
 import 'package:aurea/src/features/editor/presentation/widgets/motion_tile_pass.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// A IMAGEM DE ENTRADA: 64x64, quatro quadrantes.
@@ -378,6 +377,36 @@ void main() {
     });
   });
 
+  group('o passe cobre a composicao como os Azulejos do Alight Motion', () {
+    testWidgets('a camada em 50% entrega uma saida real de 200% ao transform', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Center(
+            child: MotionTilePass(
+              effect: _efeito(),
+              time: Duration.zero,
+              escalaX: .5,
+              escalaY: .5,
+              posicao: const Offset(60, 60),
+              composicao: const Size(120, 120),
+              child: const SizedBox(width: 120, height: 120),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final viewport = find.byKey(const ValueKey('motion-tile-viewport'));
+      expect(viewport, findsOneWidget);
+      final box = tester.renderObject<RenderBox>(viewport);
+      expect(box.size, const Size(240, 240));
+      expect(box.paintBounds, const Rect.fromLTWH(0, 0, 240, 240));
+    });
+  });
+
   group('a regiao ladrilhada cresce para cobrir o quadro', () {
     // ESTES TESTES SEGURAM O CONSERTO DO RELATO, e sao PUROS de proposito.
     //
@@ -401,29 +430,47 @@ void main() {
     );
 
     test('em 100%, a regiao e a propria camada', () {
-      expect(fator(pedido: 1, escala: 1, posicao: 60, ladoDaComposicao: 120), 1);
+      expect(
+        fator(pedido: 1, escala: 1, posicao: 60, ladoDaComposicao: 120),
+        1,
+      );
     });
 
     test('EM 50%, A REGIAO DOBRA — o relato', () {
       // A camada em 50% precisa de uma regiao de 2x em espaco de camada
       // para cobrir o quadro depois de encolher. Sem isto, a composicao
       // fica com a moldura vazia em volta — o defeito relatado.
-      expect(fator(pedido: 1, escala: .5, posicao: 60, ladoDaComposicao: 120), 2);
+      expect(
+        fator(pedido: 1, escala: .5, posicao: 60, ladoDaComposicao: 120),
+        2,
+      );
     });
 
     test('em 25%, a regiao quadruplica', () {
-      expect(fator(pedido: 1, escala: .25, posicao: 60, ladoDaComposicao: 120), 4);
+      expect(
+        fator(pedido: 1, escala: .25, posicao: 60, ladoDaComposicao: 120),
+        4,
+      );
     });
 
     test('em 200%, a regiao NAO encolhe', () {
       // AUMENTAR ja cobre: crescer aqui seria area por quadro sem nada do
       // outro lado.
-      expect(fator(pedido: 1, escala: 2, posicao: 60, ladoDaComposicao: 120), 1);
+      expect(
+        fator(pedido: 1, escala: 2, posicao: 60, ladoDaComposicao: 120),
+        1,
+      );
     });
 
     test('a saida pedida manda quando e MAIOR que o necessario', () {
-      expect(fator(pedido: 2, escala: 1, posicao: 60, ladoDaComposicao: 120), 2);
-      expect(fator(pedido: 3, escala: .5, posicao: 60, ladoDaComposicao: 120), 3);
+      expect(
+        fator(pedido: 2, escala: 1, posicao: 60, ladoDaComposicao: 120),
+        2,
+      );
+      expect(
+        fator(pedido: 3, escala: .5, posicao: 60, ladoDaComposicao: 120),
+        3,
+      );
     });
 
     test('a CAMADA DESLOCADA pede mais do lado para onde foi', () {
@@ -434,13 +481,26 @@ void main() {
       // Camada de 120 em 50% com o quadro de 120, centrada em x=90:
       // o lado direito precisa alcancar 120 - 90 = 30, o esquerdo 90 —
       // ou seja, 90 de meia-extensao contra 60 do caso centrado.
-      final centrada = fator(pedido: 1, escala: .5, posicao: 60, ladoDaComposicao: 120);
-      final naDireita = fator(pedido: 1, escala: .5, posicao: 90, ladoDaComposicao: 120);
+      final centrada = fator(
+        pedido: 1,
+        escala: .5,
+        posicao: 60,
+        ladoDaComposicao: 120,
+      );
+      final naDireita = fator(
+        pedido: 1,
+        escala: .5,
+        posicao: 90,
+        ladoDaComposicao: 120,
+      );
       expect(naDireita, greaterThan(centrada));
       // 2 * 90 / (0.5 * 120) = 3
       expect(naDireita, 3);
       // E a encostada na esquerda pede o mesmo, pelo outro lado.
-      expect(fator(pedido: 1, escala: .5, posicao: 30, ladoDaComposicao: 120), 3);
+      expect(
+        fator(pedido: 1, escala: .5, posicao: 30, ladoDaComposicao: 120),
+        3,
+      );
     });
 
     test('o ladrilho NAO entra nesta conta', () {
@@ -468,7 +528,12 @@ void main() {
       // como se esconde uma camada). Dividir por ela daria `infinito`, e
       // um tamanho infinito derruba a montagem da arvore.
       for (final e in [0.0, -1.0, double.nan, double.infinity]) {
-        final f = fator(pedido: 1, escala: e, posicao: 60, ladoDaComposicao: 120);
+        final f = fator(
+          pedido: 1,
+          escala: e,
+          posicao: 60,
+          ladoDaComposicao: 120,
+        );
         expect(f.isFinite, isTrue, reason: 'escala $e');
         expect(f, 1);
       }
@@ -488,44 +553,6 @@ void main() {
       expect(f.isFinite, isTrue);
     });
   });
-}
-
-/// RASTERIZA A FRONTEIRA DE REPINTURA.
-///
-/// DENTRO DE `runAsync`, e nao fora: no host de teste nao ha a thread de
-/// rasterizacao do aparelho, e um `toImage` fora dali devolve uma Future
-/// que NUNCA completa — o teste pendura em vez de falhar, que e o pior
-/// jeito de um teste dar errado.
-Future<_Quadro> _rasterizar(
-  WidgetTester tester,
-  GlobalKey chave,
-  int lado,
-) async {
-  final quadro = await tester.runAsync(() async {
-    final limite = tester.renderObject<RenderRepaintBoundary>(
-      find.byKey(chave),
-    );
-    final imagem = await limite.toImage();
-    final dados = await imagem.toByteData(format: ui.ImageByteFormat.rawRgba);
-    imagem.dispose();
-    return dados!.buffer.asUint8List();
-  });
-  return _Quadro(quadro!, lado);
-}
-
-/// LISTRAS, para o quadro nao ser uma cor lisa: numa cor lisa um ladrilho
-/// errado e indistinguivel de um certo.
-class _Listras extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final tinta = Paint()..color = const Color(0xFFFFFFFF);
-    for (var x = 0.0; x < size.width; x += 16) {
-      canvas.drawRect(Rect.fromLTWH(x, 0, 8, size.height), tinta);
-    }
-  }
-
-  @override
-  bool shouldRepaint(_Listras old) => false;
 }
 
 // ==========================================================================
@@ -658,10 +685,7 @@ void _grupoDoGiroEDasEmendas() {
       // outro: o que se conserva e a AREA coberta, redistribuida. Exigir
       // crescimento nos dois seria exigir que a rotacao inventasse area.
       expect(girado.x, greaterThan(reto.x));
-      expect(
-        girado.x * girado.y,
-        greaterThanOrEqualTo(reto.x * reto.y - 1e-9),
-      );
+      expect(girado.x * girado.y, greaterThanOrEqualTo(reto.x * reto.y - 1e-9));
     });
 
     test('escala 50% com giro: as duas coisas se somam', () {
@@ -715,7 +739,11 @@ void _grupoDoGiroEDasEmendas() {
     test('o piso NAO muda nada quando a posicao e conhecida', () {
       // A conta dos cantos ja cobre o piso: o piso so serve para quando
       // nao ha posicao. Aqui ele nao pode ter encolhido nem crescido.
-      for (final pos in const [Offset(60, 60), Offset(0, 0), Offset(120, 120)]) {
+      for (final pos in const [
+        Offset(60, 60),
+        Offset(0, 0),
+        Offset(120, 120),
+      ]) {
         final comPiso = cobrir(posicao: pos);
         final semPiso = fatorQueCobreMotionTile(
           pedido: 1,

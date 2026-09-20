@@ -50,9 +50,10 @@ void main() {
     if(uMirror>0.5) f=mix(f,1.0-f,mod(cell,2.0));
   }
 
-  vec2 sampleUv=0.5+(f-0.5)/uOutput;
-  vec2 halfPixel=0.5/uSize;
-  sampleUv=clamp(sampleUv,0.5-0.5/uOutput+halfPixel,0.5+0.5/uOutput-halfPixel);
+  // The input is now the source itself, never a padded transparent FBO.
+  // Half-texel clamping prevents filtering a tile edge into transparency.
+  vec2 halfPixel=0.5*uOutput/uSize;
+  vec2 sampleUv=clamp(f,halfPixel,1.0-halfPixel);
   #if defined(IMPELLER_TARGET_OPENGLES) && !defined(IMPELLER_OPENGLES_UNFLIPPED_DEPRECATED)
   if(uFilter>0.5) sampleUv.y=1.0-sampleUv.y;
   #endif

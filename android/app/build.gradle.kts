@@ -93,3 +93,46 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+// ============================================================================
+// O REGISTRANTE NAO PODE CITAR O `integration_test`.
+// ============================================================================
+//
+// O `flutter pub get` gera `GeneratedPluginRegistrant.java` com TODOS os
+// plugins, inclusive os de desenvolvimento — e o `integration_test` e um
+// deles. No build de RELEASE o plugin nao entra no classpath (a Flutter
+// Gradle plugin so inclui os de producao), entao a linha
+//
+//   new dev.flutter.plugins.integration_test.IntegrationTestPlugin()
+//
+// nao compila: `package dev.flutter.plugins.integration_test does not
+// exist`. Era o unico erro do build de release.
+//
+// APAGAR O ARQUIVO NAO RESOLVE, e foi o que se tentou: sem ele o app fica
+// SEM REGISTRAR PLUGIN NENHUM, o `SharedPreferences` estoura na abertura
+// e a tela fica presa na logo. O arquivo e gerado, entao a correcao nao
+// pode ser feita nele — ela e feita AQUI, antes de compilar, e vale para
+// todo build daqui para a frente.
+tasks.configureEach {
+    if (name == "preBuild") {
+        doFirst {
+            val f = file(
+                "src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java",
+            )
+            if (f.exists()) {
+                val texto = f.readText()
+                if (texto.contains("integration_test")) {
+                    f.writeText(
+                        texto.lines()
+                            .filterNot { it.contains("integration_test") }
+                            .joinToString("\n"),
+                    )
+                    logger.lifecycle(
+                        "Aurea: integration_test fora do registrante " +
+                            "(so existe em build de teste).",
+                    )
+                }
+            }
+        }
+    }
+}

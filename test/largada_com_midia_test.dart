@@ -70,9 +70,13 @@ void main() {
       // O som do Android comeca a andar ~400 ms depois do toque: quando a
       // primeira amostra real chega, ele ainda esta em 500 ms.
       pc.anchorToMedia(const Duration(milliseconds: 500));
-      expect(pc.debugBaseShiftUs, -400000,
-          reason: 'o relogio vai para a midia de uma vez, e nao 8 ms por '
-              'amostra (que era o defeito)');
+      expect(
+        pc.debugBaseShiftUs,
+        -400000,
+        reason:
+            'o relogio vai para a midia de uma vez, e nao 8 ms por '
+            'amostra (que era o defeito)',
+      );
     });
 
     test('pela regra antiga isto teria sido absorvido em fracao', () {
@@ -83,8 +87,9 @@ void main() {
       pc.play();
       pc.anchorToMedia(const Duration(seconds: 3));
       expect(pc.debugBaseShiftUs, 0, reason: 'a primeira amostra alinhou');
-      pc.anchorToMedia(const Duration(seconds: 3) -
-          const Duration(milliseconds: 100));
+      pc.anchorToMedia(
+        const Duration(seconds: 3) - const Duration(milliseconds: 100),
+      );
       expect(pc.debugBaseShiftUs.abs(), lessThanOrEqualTo(20000));
       expect(pc.debugBaseShiftUs, lessThan(0));
     });
@@ -102,11 +107,17 @@ void main() {
       pc.play();
       pc.anchorToMedia(Duration.zero);
       pc.seek(const Duration(seconds: 4));
-      expect(pc.debugAguardandoMidia, isFalse,
-          reason: 'quem reposiciona e o dedo: a previa continua andando');
+      expect(
+        pc.debugAguardandoMidia,
+        isFalse,
+        reason: 'quem reposiciona e o dedo: a previa continua andando',
+      );
       pc.anchorToMedia(const Duration(seconds: 3, milliseconds: 900));
-      expect(pc.debugBaseShiftUs.abs(), lessThanOrEqualTo(20000),
-          reason: 'e o que chega depois do seek e deriva, nao largada');
+      expect(
+        pc.debugBaseShiftUs.abs(),
+        lessThanOrEqualTo(20000),
+        reason: 'e o que chega depois do seek e deriva, nao largada',
+      );
     });
 
     test('o alinhamento para tras libera o relogio para voltar', () {
@@ -119,26 +130,33 @@ void main() {
       expect(pc.debugPodeVoltar, isTrue);
     });
 
-    testWidgets('enquanto a midia nao chega, o relogio fica parado',
-        (tester) async {
+    testWidgets('a espera da midia e curta e nao vira atraso no play', (
+      tester,
+    ) async {
       final c = comMidia();
       addTearDown(c.dispose);
       c.play();
-      for (var i = 0; i < 10; i++) {
+      for (var i = 0; i < 2; i++) {
         await tester.pump(const Duration(milliseconds: 30));
       }
-      expect(c.time.value, Duration.zero,
-          reason: 'o relogio e a MIDIA: com tocador na cena ele nao sai '
-              'andando antes dela');
-      c.anchorToMedia(const Duration(milliseconds: 200));
-      await tester.pump(const Duration(milliseconds: 30));
-      expect(c.time.value, greaterThanOrEqualTo(const Duration(milliseconds: 200)),
-          reason: 'alinhado a midia, ele anda de la');
+      expect(
+        c.time.value,
+        Duration.zero,
+        reason: 'a janela curta ainda permite a primeira ancora da midia',
+      );
+      await tester.pump(const Duration(milliseconds: 60));
+      expect(
+        c.time.value,
+        greaterThan(Duration.zero),
+        reason: 'sem amostra, a previa parte em ate 80 ms e nao parece travada',
+      );
+      expect(c.debugAguardandoMidia, isFalse);
       c.pause();
     });
 
-    testWidgets('tocador que nunca aparece nao congela a previa',
-        (tester) async {
+    testWidgets('tocador que nunca aparece nao congela a previa', (
+      tester,
+    ) async {
       final c = comMidia();
       addTearDown(c.dispose);
       c.play();
@@ -158,8 +176,11 @@ void main() {
       pc.anchorToMedia(const Duration(seconds: 1, milliseconds: 500));
       expect(pc.debugBaseShiftUs, -500000, reason: 'a primeira alinhou');
       pc.anchorToMedia(const Duration(seconds: 1, milliseconds: 400));
-      expect(pc.debugBaseShiftUs.abs(), lessThanOrEqualTo(20000),
-          reason: 'a segunda e deriva de 100 ms: fracionada');
+      expect(
+        pc.debugBaseShiftUs.abs(),
+        lessThanOrEqualTo(20000),
+        reason: 'a segunda e deriva de 100 ms: fracionada',
+      );
     });
   });
 }

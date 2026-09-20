@@ -16,6 +16,11 @@ compatibility_date = "2026-09-01"
 # alguem le esse aviso e acha que ficou algo por configurar.
 workers_dev = true
 
+[[d1_databases]]
+binding = "SOCIAL"
+database_name = "aurea-social"
+database_id = "fabc820e-ac53-4f1e-9967-fba57f01e307"
+
 # O armazenamento. `binding` e o nome pelo qual o codigo enxerga o KV
 # (env.MURAL), e `id` e qual KV da sua conta ele e.
 [[kv_namespaces]]

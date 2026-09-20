@@ -72,7 +72,10 @@ Duration quantizarTempo(Duration tempo, double taxa) {
   // `t * taxa` de um instante que cai EXATAMENTE na divisa pode sair
   // 2,9999999999 em vez de 3, e o `floor` devolveria o degrau anterior —
   // a camada ficaria um quadro atrasada so nas divisas exatas.
-  final degrau = (us / 1e6 * taxa + 1e-9).floorToDouble();
+  // Duration guarda microssegundos inteiros. Um degrau como 1/12 s
+  // arredonda para 83333 us; requantiza-lo deve continuar no mesmo
+  // degrau, nao voltar a zero. Meio microssegundo cobre so esse erro.
+  final degrau = ((us + .5) / 1e6 * taxa + 1e-9).floorToDouble();
   final quantizado = (degrau / taxa * 1e6).round();
   // NEGATIVO (camada antes do proprio inicio) tambem tem degrau: o floor
   // ja o leva para tras, e nao para o zero.

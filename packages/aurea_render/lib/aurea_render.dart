@@ -19,13 +19,14 @@ import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
 
 part 'particulas.dart';
+part 'tresd.dart';
 
 // --------------------------------------------------------------- a ABI
 
 /// A VERSAO DA PORTA. O C++ responde [versaoDaPorta] e o Dart confere: um
 /// descompasso entre a biblioteca compilada e este arquivo e a causa mais
 /// comum de "leu o campo errado" depois de uma atualizacao parcial.
-const int versaoEsperadaDaPorta = 5;
+const int versaoEsperadaDaPorta = 6;
 
 final class _CamadaC extends Struct {
   @Uint32()
@@ -360,6 +361,16 @@ external int _registrarTextura(
   int altura,
 );
 
+@Native<
+  Uint32 Function(Pointer<Void>, Pointer<Uint8>, Uint32, Uint32)
+>(symbol: 'aurea_render_registrar_textura_premultiplicada')
+external int _registrarTexturaPremultiplicada(
+  Pointer<Void> n,
+  Pointer<Uint8> rgba,
+  int largura,
+  int altura,
+);
+
 @Native<Void Function(Pointer<Void>)>(symbol: 'aurea_render_pedir_quadro')
 external void _pedirQuadro(Pointer<Void> n);
 
@@ -557,6 +568,29 @@ class NucleoRender {
     try {
       ptr.asTypedList(rgba.length).setAll(0, rgba);
       return _registrarTextura(_nucleo, ptr, largura, altura);
+    } finally {
+      calloc.free(ptr);
+    }
+  }
+
+  /// REGISTRA UM QUADRO CUJA COR JA ESTA MULTIPLICADA PELO ALFA.
+  ///
+  /// E PORTA DO 3D, e nao uma variacao de gosto: o alvo do motor 3D sai do
+  /// rasterizador premultiplicado (a mistura e `ONE, INV_SRC_ALPHA`), e
+  /// entrar pela porta comum multiplicaria a cor pelo alfa uma segunda vez
+  /// — a silhueta do modelo ganharia um halo escuro. Os pixels vem de
+  /// [Ponte3D.pixels] e sao copiados aqui: o buffer do motor so vale ate o
+  /// proximo desenho.
+  int registrarTexturaPremultiplicada(
+    Uint8List rgba,
+    int largura,
+    int altura,
+  ) {
+    if (_fechado) return 0;
+    final ptr = calloc<Uint8>(rgba.length);
+    try {
+      ptr.asTypedList(rgba.length).setAll(0, rgba);
+      return _registrarTexturaPremultiplicada(_nucleo, ptr, largura, altura);
     } finally {
       calloc.free(ptr);
     }

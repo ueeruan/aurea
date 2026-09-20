@@ -189,6 +189,7 @@ enum EffectType {
   // ---- 19/09: efeitos temporais e de cor ----
   pretoEBranco,
   rgbTimeWarp,
+  timeRemap,
 }
 
 /// A ORDEM DO ENUM ANTES DE O TIME REMAP SAIR (17/09).
@@ -621,6 +622,12 @@ const effectSpecs = <EffectType, EffectSpec>{
   ...efeitosPretoEBranco,
   ...efeitosPosterizeTime,
   ...efeitosRgbTimeWarp,
+  EffectType.timeRemap: EffectSpec(
+    id: 'time_remap', name: 'Time Remap', category: 'Time',
+    synonyms: ['tempo', 'velocidade', 'remapear tempo'],
+    params: {'tempo': EffectParam('Time Remap', 0, 0, 86400,
+      unit: 's', decimals: 3, dragStep: 1 / 30)},
+  ),
 };
 
 /// OS EFEITOS DE EDIT, na ordem em que se procura: batida, glitch,

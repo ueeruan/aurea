@@ -26,9 +26,15 @@ class PostDaComunidade {
     this.link,
     this.etiquetas = const [],
     this.estado = EstadoDoPost.publicado,
+    this.perfil,
+    this.curtidas = 0,
+    this.curtiu = false,
   });
 
   final String id;
+  final Map<String, dynamic>? perfil;
+  final int curtidas;
+  final bool curtiu;
   final String autor;
   final String texto;
   final DateTime quando;
@@ -100,6 +106,9 @@ class PostDaComunidade {
 
   Map<String, dynamic> toJson() => {
     'id': id,
+    if (perfil != null) 'perfil': perfil,
+    'curtidas': curtidas,
+    'curtiu': curtiu,
     'autor': autor,
     'texto': texto,
     'quando': quando.toUtc().toIso8601String(),
@@ -136,6 +145,9 @@ class PostDaComunidade {
     }
     return PostDaComunidade(
       id: '${m['id'] ?? quando.microsecondsSinceEpoch}',
+      perfil: (m['perfil'] as Map?)?.cast<String, dynamic>(),
+      curtidas: (m['curtidas'] as num?)?.toInt() ?? 0,
+      curtiu: m['curtiu'] == true,
       autor: '${m['autor'] ?? 'Anônimo'}',
       texto: texto,
       quando: quando,
@@ -171,6 +183,9 @@ class PostDaComunidade {
     bool? imagemLocal,
   }) => PostDaComunidade(
     id: id ?? this.id,
+    perfil: perfil,
+    curtidas: curtidas,
+    curtiu: curtiu,
     autor: autor,
     texto: texto,
     quando: quando,

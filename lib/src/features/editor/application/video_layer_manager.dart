@@ -82,12 +82,19 @@ abstract final class DiagnosticoDoAudio {
   /// caro, mas nao ha por que pagar por um dado que ninguem vai ler.
   static bool trilhaLigada = false;
 
-  static void registrar(double relogioMs, double midiaMs, double alvoMs,
-      double erroMs, double viesMs) {
+  static void registrar(
+    double relogioMs,
+    double midiaMs,
+    double alvoMs,
+    double erroMs,
+    double viesMs,
+  ) {
     if (!trilhaLigada || trilha.length >= 400) return;
-    trilha.add('${relogioMs.toStringAsFixed(0)};'
-        '${midiaMs.toStringAsFixed(0)};${alvoMs.toStringAsFixed(0)};'
-        '${erroMs.toStringAsFixed(0)};${viesMs.toStringAsFixed(0)}');
+    trilha.add(
+      '${relogioMs.toStringAsFixed(0)};'
+      '${midiaMs.toStringAsFixed(0)};${alvoMs.toStringAsFixed(0)};'
+      '${erroMs.toStringAsFixed(0)};${viesMs.toStringAsFixed(0)}',
+    );
   }
 
   static void zerar() {
@@ -158,10 +165,9 @@ class VideoLayerManager {
   final Map<String, String> _controllerPath = {};
   final Map<String, Object> _controllerTicket = {};
   final Map<String, Future<void>> _initializing = {};
-  final Map<String, DateTime> _lastSeek = {};
+  final Map<String, int> _lastSeek = {};
   int _lastProxyRevision = -1;
   int _lastFlowRevision = -1;
-  final Set<String> _remapProxiesRequested = {};
   int _seekRevision = 0;
   final Map<String, Object> _positioning = {};
   final Set<String> _starting = {};
@@ -292,6 +298,14 @@ class VideoLayerManager {
   Map<String, DuckEnvelope> duckEnvelopes = const {};
   final Map<String, double> _appliedRate = {};
   final Map<String, double> _failedNativeRate = {};
+  final Map<String, int> _rateChangedAt = {};
+
+  /// Atualizar a velocidade do ExoPlayer/AVPlayer e uma chamada de
+  /// plataforma. Numa curva Bezier a derivada muda em todo quadro; mandar
+  /// 30 chamadas por segundo cria fila no canal nativo e a textura perde
+  /// quadros. Doze atualizacoes por segundo ainda seguem a rampa sem degrau
+  /// perceptivel e deixam o decoder trabalhar.
+  static const int _intervaloDaVelocidadeMs = 80;
 
   /// Notifica quando um controller termina de inicializar (para o preview
   /// trocar o placeholder pelo video).
@@ -593,6 +607,7 @@ class VideoLayerManager {
     double rate,
   ) {
     _appliedRate[id] = rate;
+    _rateChangedAt[id] = _msAgora;
     _failedNativeRate.remove(id);
     unawaited(
       controller.setPlaybackSpeed(rate).catchError((Object _) {
@@ -616,11 +631,34 @@ class VideoLayerManager {
   /// por isso a resposta vem de fora.
   bool Function(String id)? soaAgora;
 
-  /// Ha midia ATIVA (video ou som) neste instante da composicao.
+  /// Ha midia ATIVA capaz de ANCORAR o relogio neste instante.
   ///
   /// O relogio usa isto para saber se vale esperar o tocador na largada
-  /// (ver `PlaybackController.temMidiaAtiva`).
-  bool get temMidiaAtiva => _ativo.any((a) => a);
+  /// (ver `PlaybackController.temMidiaAtiva`). Time Remap, reverso e
+  /// reproducao dirigida por frame nao publicam uma posicao linear que
+  /// possa ancorar a timeline. Dizer apenas "ha um video" fazia o cabecote
+  /// esperar o timeout inteiro (1 s) por uma ancora que nunca viria.
+  bool get temMidiaAtiva {
+    for (var i = 0; i < _ativo.length && i < _media.length; i++) {
+      if (!_ativo[i]) continue;
+      final m = _media[i];
+      final layer = m.layer;
+      if (layer is AudioLayer) return true;
+      if (layer is! VideoLayer || hasTimeRemap(layer) || layer.reverse) {
+        continue;
+      }
+      final local = layer.localTime(_lastT);
+      final vel = videoPlaybackRateAt(layer, local);
+      final rate = vel.abs();
+      if (vel > 0 &&
+          rate >= 0.5 &&
+          rate <= 2.0 &&
+          ((_failedNativeRate[m.key] ?? -1) - rate).abs() >= 0.001) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   Duration? sync(
     List<Layer> layers,
@@ -782,19 +820,13 @@ class VideoLayerManager {
       final m = mediaLayers[i];
       if (_condutor[m.key] == i) _ensure(m.key, m.path, m.volume);
       final ate = m.layer.startTime - t;
-      final perto =
-          _ativo[i] || (ate > Duration.zero && ate <= _janelaPreRoll);
+      final perto = _ativo[i] || (ate > Duration.zero && ate <= _janelaPreRoll);
       if (!perto) continue;
-      if (m.layer is VideoLayer) {
-        final video = m.layer as VideoLayer;
-        unawaited(OpticalFlowPreview.instance.ensure(video));
-        if (hasTimeRemap(video) &&
-            _remapProxiesRequested.add(video.sourcePath)) {
-          unawaited(
-            ProxyService.instance.ensureProxy(video.sourcePath, force: true),
-          );
-        }
-      }
+      // Nao inicia FFmpeg nem transcodificacao enquanto a pessoa edita.
+      // Um cache de fluxo optico/proxy que ja esteja pronto continua sendo
+      // usado na montagem acima; preparar um novo e uma acao explicita da
+      // UI. Antes, so ligar Time Remap iniciava dois encoders em segundo
+      // plano e roubava CPU/decoder exatamente durante o preview.
       if (AudioRenderService.needed(m.layer) &&
           audioService.ready(m.layer) == null &&
           !audioService.busy(m.layer) &&
@@ -851,7 +883,10 @@ class VideoLayerManager {
       }
       // A VELOCIDADE estica a leitura da fonte: um segundo na linha
       // consome [speed] segundos de arquivo.
-      final timelineLocal = layer.localTime(t);
+      // Efeitos temporais quantizam a imagem, nunca o relogio do player
+      // nem o audio que ancora a timeline. Usar localTime aqui fazia o
+      // clock seguir os degraus do Posterize e pedir correcoes repetidas.
+      final timelineLocal = t - layer.startTime;
       final vel = switch (layer) {
         VideoLayer v => videoPlaybackRateAt(v, timelineLocal),
         AudioLayer a => a.speed,
@@ -948,11 +983,9 @@ class VideoLayerManager {
           _preRolled.remove(key);
           _parar(key, controller);
           final last = _lastSeek[key];
-          if (last == null ||
-              DateTime.now().difference(last) >
-                  const Duration(milliseconds: 25)) {
+          if (last == null || agoraMs - last > 25) {
             _position(key, controller, local);
-            _lastSeek[key] = DateTime.now();
+            _lastSeek[key] = agoraMs;
           }
           _lastPos[key] = null;
           _biasUs.remove(key);
@@ -990,7 +1023,10 @@ class VideoLayerManager {
           _lastPos[key] = null;
           _biasUs.remove(key);
         } else {
-          if ((rate - (_appliedRate[key] ?? 0)).abs() > 0.015) {
+          final deltaRate = (rate - (_appliedRate[key] ?? 0)).abs();
+          final desdeRate = agoraMs - (_rateChangedAt[key] ?? -1000000);
+          if (deltaRate > 0.04 &&
+              (desdeRate >= _intervaloDaVelocidadeMs || deltaRate > 0.25)) {
             _setNativeRate(key, controller, rate);
           }
           // PR-J1: NENHUM seek durante a reproducao. O antigo "se a
@@ -1049,12 +1085,10 @@ class VideoLayerManager {
         //
         // Sem esta saida, o proprio sync pausaria no tique seguinte e o
         // scrub nao sairia do lugar.
-        final agora = DateTime.now();
         final ultimo = _lastSeek[key];
-        if (ultimo == null ||
-            agora.difference(ultimo) > const Duration(milliseconds: 90)) {
+        if (ultimo == null || agoraMs - ultimo >= 50) {
           _position(key, controller, local, play: true, rate: rate);
-          _lastSeek[key] = agora;
+          _lastSeek[key] = agoraMs;
         }
       } else {
         _preRolled.remove(key);
@@ -1065,12 +1099,16 @@ class VideoLayerManager {
         // play. Era o que afogava o preview ao arrastar a timeline.
         if (active && !isAudio) {
           final last = _lastSeek[key];
-          if (jumped ||
-              last == null ||
-              DateTime.now().difference(last) >
-                  const Duration(milliseconds: 66)) {
+          // Durante scrub `seekRevision` muda em todo pixel. Tratar
+          // `jumped` como permissao imediata fazia dezenas de seeks
+          // nativos por segundo e afogava o decoder. Um toque/seek
+          // discreto continua imediato; o arrasto e limitado a 20 fps.
+          final podeReposicionar = _scrubbing
+              ? last == null || agoraMs - last >= 50
+              : jumped || last == null || agoraMs - last >= 66;
+          if (podeReposicionar) {
             _position(key, controller, local);
-            _lastSeek[key] = DateTime.now();
+            _lastSeek[key] = agoraMs;
           }
         }
         _lastPos[key] = null;
@@ -1126,6 +1164,7 @@ class VideoLayerManager {
     _lastSeek.clear();
     _appliedVolume.clear();
     _appliedRate.clear();
+    _rateChangedAt.clear();
     _failedNativeRate.clear();
     _lastPos.clear();
     _biasUs.clear();

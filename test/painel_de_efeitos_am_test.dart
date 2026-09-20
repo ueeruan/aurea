@@ -12,6 +12,7 @@ import 'dart:ui' as ui;
 import 'package:aurea/src/features/editor/application/editor_controller.dart';
 import 'package:aurea/src/features/editor/application/ui/editor_session.dart';
 import 'package:aurea/src/features/editor/domain/effect.dart';
+import 'package:aurea/src/features/editor/domain/layer.dart';
 import 'package:aurea/src/features/editor/presentation/am/effects_panel.dart';
 import 'package:aurea/src/features/editor/presentation/widgets/fita_de_ajuste.dart';
 import 'package:aurea/src/features/editor/presentation/widgets/linha_de_parametro.dart';
@@ -33,9 +34,9 @@ Future<void> _print(WidgetTester tester, String nome) async {
       find.byKey(const ValueKey('editor-capture')),
     );
     final image = await boundary.toImage(pixelRatio: 2);
-    final bytes = (await image.toByteData(
-      format: ui.ImageByteFormat.png,
-    ))!.buffer.asUint8List();
+    final bytes = (await image.toByteData(format: ui.ImageByteFormat.png))!
+        .buffer
+        .asUint8List();
     image.dispose();
     await File('$pasta/$nome.png').writeAsBytes(bytes);
   });
@@ -97,7 +98,10 @@ void main() {
       final usm = efeitos.last;
       // Ao abrir o painel, o primeiro efeito vem aberto e os outros
       // recolhidos: um controle por vez.
-      expect(_noCartao(niveis.id, find.byType(LinhaDeParametro)), findsNWidgets(5));
+      expect(
+        _noCartao(niveis.id, find.byType(LinhaDeParametro)),
+        findsNWidgets(5),
+      );
       expect(_noCartao(usm.id, find.byType(LinhaDeParametro)), findsNothing);
       await _print(tester, 'efeitos-levels-${tamanho.width.round()}');
 
@@ -107,7 +111,10 @@ void main() {
       await tester.tap(cabecalho);
       await tester.pumpAndSettle();
       expect(_noCartao(niveis.id, find.byType(LinhaDeParametro)), findsNothing);
-      expect(_noCartao(usm.id, find.byType(LinhaDeParametro)), findsNWidgets(3));
+      expect(
+        _noCartao(usm.id, find.byType(LinhaDeParametro)),
+        findsNWidgets(3),
+      );
       expect(_noCartao(usm.id, find.text('Quantidade')), findsOneWidget);
       expect(_noCartao(usm.id, find.text('50%')), findsOneWidget);
       expect(_noCartao(usm.id, find.text('1,0')), findsOneWidget);
@@ -119,10 +126,15 @@ void main() {
       await _print(tester, 'efeitos-unsharp-${tamanho.width.round()}');
 
       // Adicionar com o painel aberto: o novo abre sozinho.
-      c.read(editorControllerProvider.notifier).addEffect(id, EffectType.exposure);
+      c
+          .read(editorControllerProvider.notifier)
+          .addEffect(id, EffectType.exposure);
       await tester.pumpAndSettle();
       final novo = c.read(editorControllerProvider).layerById(id)!.effects.last;
-      expect(_noCartao(novo.id, find.byType(LinhaDeParametro)), findsNWidgets(3));
+      expect(
+        _noCartao(novo.id, find.byType(LinhaDeParametro)),
+        findsNWidgets(3),
+      );
       expect(_noCartao(usm.id, find.byType(LinhaDeParametro)), findsNothing);
       expect(tester.takeException(), isNull);
       await tester.pump(const Duration(seconds: 1));
@@ -153,6 +165,67 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
   });
 
+  testWidgets('Time Remap aparece na pilha quando adicionado e permite editar curva', (
+    tester,
+  ) async {
+    final c = await openEditor(tester, size: const Size(430, 932));
+    final controller = c.read(editorControllerProvider.notifier);
+    final id = controller.addVideoLayer(
+      Duration.zero,
+      'video-de-teste.mp4',
+      'Video',
+      const Duration(seconds: 6),
+      fonte: const Duration(seconds: 6),
+    );
+    c.read(selectedLayerProvider.notifier).state = id;
+    c.read(editorSessionProvider.notifier).openPanel(EditorPanel.effects);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('efeito-time-remap')), findsNothing);
+    expect(find.text('Adicionar efeito'), findsOneWidget);
+      controller.addEffect(id, EffectType.timeRemap);
+      await tester.pumpAndSettle();
+      final remap = c.read(editorControllerProvider).layerById(id)!.effects.single;
+      expect(remap.type, EffectType.timeRemap);
+      expect(find.byKey(ValueKey('efeito-cabecalho-${remap.id}')), findsOneWidget);
+      expect(find.byKey(ValueKey('efeito-param-${remap.id}/tempo')), findsOneWidget);
+      await tester.tap(find.byTooltip('Editar curva da propriedade'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Time Remap'), findsWidgets);
+      expect(find.text('Ir ao primeiro trecho'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('camada de ajuste controla opacidade ao lado do Halftone', (
+    tester,
+  ) async {
+    final c = await openEditor(tester, size: const Size(430, 932));
+    final controller = c.read(editorControllerProvider.notifier);
+    controller.addAdjustmentLayer(Duration.zero);
+    final id = c.read(editorControllerProvider).layers.first.id;
+    expect(
+      c.read(editorControllerProvider).layerById(id),
+      isA<AdjustmentLayer>(),
+    );
+    controller.addEffect(id, EffectType.halfTone);
+    c.read(selectedLayerProvider.notifier).state = id;
+    c.read(editorSessionProvider.notifier).openPanel(EditorPanel.effects);
+    await tester.pumpAndSettle();
+
+    final control = find.byKey(const ValueKey('adjustment-opacity-effects'));
+    await _rolarAte(tester, control);
+    expect(control, findsOneWidget);
+    expect(find.text('Intensidade da camada de ajuste'), findsOneWidget);
+    await tester.drag(
+      find.descendant(of: control, matching: find.byType(FitaDeAjuste)),
+      const Offset(-100, 0),
+    );
+    await tester.pumpAndSettle();
+    final layer = c.read(editorControllerProvider).layerById(id)!;
+    expect(layer.opacity.base, lessThan(1));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('interruptor, menu e lixeira fazem o que dizem', (tester) async {
     final (c, id) = await _abrirEfeitos(tester, const Size(430, 932), [
       EffectType.exposure,
@@ -179,10 +252,7 @@ void main() {
     expect(efeitos().first.id, bc.id);
 
     // ••• > Desativar efeito. O cartao subiu: rola ate ele de novo.
-    await tester.drag(
-      find.byType(Scrollable).last,
-      const Offset(0, 400),
-    );
+    await tester.drag(find.byType(Scrollable).last, const Offset(0, 400));
     await tester.pumpAndSettle();
     await _rolarAte(tester, find.byKey(ValueKey('efeito-menu-${bc.id}')));
     await tester.tap(find.byKey(ValueKey('efeito-menu-${bc.id}')));

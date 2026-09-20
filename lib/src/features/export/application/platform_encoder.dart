@@ -41,15 +41,20 @@ class PlatformEncoder {
 
   /// Se o aparelho tem o codificador. Consultado uma vez.
   static Future<bool> get available async {
-    if (_available != null) return _available!;
+    // `true` e estavel durante a sessao. `false` nao: a primeira consulta
+    // pode acontecer enquanto o Flutter ainda registra o plugin nativo.
+    // Guardar esse falso para sempre desativava a exportacao ate fechar o
+    // app — e tambem contaminava a tentativa seguinte depois de um erro.
+    if (_available == true) return true;
     try {
-      _available = await _channel.invokeMethod<bool>('available') ?? false;
+      final ok = await _channel.invokeMethod<bool>('available') ?? false;
+      if (ok) _available = true;
+      return ok;
     } on MissingPluginException {
-      _available = false;
+      return false;
     } catch (_) {
-      _available = false;
+      return false;
     }
-    return _available!;
   }
 
   /// Abre o fluxo. [bitrate] em bits por segundo.

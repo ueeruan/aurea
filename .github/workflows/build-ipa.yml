@@ -36,7 +36,9 @@ jobs:
           xcodebuild -version
 
       - name: Dependencias
-        run: flutter pub get
+        run: |
+          bash packages/aurea_render/tool/preparar_3d.sh --ios
+          flutter pub get
 
       # SEM o Filament no beta. O preview 3D tem de mostrar o que a
       # exportacao produz, e a exportacao desenha com o flutter_scene —

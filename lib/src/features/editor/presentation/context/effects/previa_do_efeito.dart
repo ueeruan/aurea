@@ -3,6 +3,7 @@ import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
+
 import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import 'package:flutter/foundation.dart' show ValueListenable;
@@ -76,32 +77,34 @@ class PreviasDosEfeitos {
   ui.Image? imagemPronta(String id) {
     final img = _imagens.remove(id);
     if (img != null) _imagens[id] = img;
-    return img;
+    return img?.clone();
   }
 
   Future<ui.Image?> imagem(String id) {
     final pronta = imagemPronta(id);
     if (pronta != null) return Future.value(pronta);
-    return _lendo.putIfAbsent(id, () async {
-      try {
-        final dados = await rootBundle.load('$pastaDasPrevias/$id.jpg');
-        final codec = await ui.instantiateImageCodec(
-          dados.buffer.asUint8List(),
-        );
-        final quadro = await codec.getNextFrame();
-        codec.dispose();
-        _imagens[id] = quadro.image;
-        while (_imagens.length > _teto) {
-          final velho = _imagens.keys.first;
-          _imagens.remove(velho)?.dispose();
-        }
-        return quadro.image;
-      } catch (_) {
-        return null;
-      } finally {
-        _lendo.remove(id);
-      }
-    });
+    return _lendo
+        .putIfAbsent(id, () async {
+          try {
+            final dados = await rootBundle.load('$pastaDasPrevias/$id.jpg');
+            final codec = await ui.instantiateImageCodec(
+              dados.buffer.asUint8List(),
+            );
+            final quadro = await codec.getNextFrame();
+            codec.dispose();
+            _imagens[id] = quadro.image;
+            while (_imagens.length > _teto) {
+              final velho = _imagens.keys.first;
+              _imagens.remove(velho)?.dispose();
+            }
+            return quadro.image;
+          } catch (_) {
+            return null;
+          } finally {
+            _lendo.remove(id);
+          }
+        })
+        .then((image) => image?.clone());
   }
 }
 
@@ -112,9 +115,8 @@ class RelogioDasPrevias extends StatefulWidget {
 
   final Widget child;
 
-  static ValueListenable<int>? de(BuildContext context) => context
-      .dependOnInheritedWidgetOfExactType<_RelogioHerdado>()
-      ?.quadro;
+  static ValueListenable<int>? de(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<_RelogioHerdado>()?.quadro;
 
   @override
   State<RelogioDasPrevias> createState() => _RelogioDasPreviasState();
@@ -188,24 +190,39 @@ class _PreviaDoEfeitoState extends State<PreviaDoEfeito> {
   void didUpdateWidget(PreviaDoEfeito old) {
     super.didUpdateWidget(old);
     if (old.tipo != widget.tipo) {
+      _tira?.dispose();
       _tira = null;
       _carregar();
     }
   }
 
   void _carregar() {
+    final id = _id;
     final previas = PreviasDosEfeitos.instance;
     _tira = previas.imagemPronta(_id);
     if (_tira != null) return;
     previas.manifesto().then((m) {
-      if (m == null || !m.containsKey(_id) || !mounted) {
+      if (m == null || !m.containsKey(id) || !mounted || _id != id) {
         if (mounted) setState(() {});
         return;
       }
-      previas.imagem(_id).then((img) {
-        if (mounted) setState(() => _tira = img);
+      previas.imagem(id).then((img) {
+        if (mounted && _id == id) {
+          setState(() {
+            _tira?.dispose();
+            _tira = img;
+          });
+        } else {
+          img?.dispose();
+        }
       });
     });
+  }
+
+  @override
+  void dispose() {
+    _tira?.dispose();
+    super.dispose();
   }
 
   @override

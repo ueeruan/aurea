@@ -368,7 +368,6 @@ AnimatedDouble _migrarTrilha(
 }
 
 /// O id que o Time Remap tinha quando ainda era efeito.
-const String _idTimeRemapAntigo = 'time_remap';
 
 /// Este item da lista de efeitos e o Time Remap de antes?
 ///
@@ -377,7 +376,7 @@ const String _idTimeRemapAntigo = 'time_remap';
 /// MIGRAR a trilha em vez de descartar: quem tinha rampa de velocidade,
 /// congelamento ou reverso abre o projeto com eles no lugar.
 bool _eOTimeRemapAntigo(Map<String, dynamic> m) {
-  if ((m['kind'] as String?) == _idTimeRemapAntigo) return true;
+  // Named Time Remap is a normal effect again; retain id/order/enabled.
   // Arquivo antigo o bastante para nao ter `kind`: o indice 26 era ele.
   if (m['kind'] == null && (m['type'] as num?)?.toInt() == indiceLegadoDoTimeRemap) {
     return true;
@@ -1263,7 +1262,6 @@ Map<String, dynamic> layerToJson(Layer l) {
       if (v.reverse) base['reverse'] = true;
       // A MESMA chave do precomp (`remap`): a trilha de tempo e uma so,
       // e quem a le nao precisa saber se a camada e video ou grupo.
-      if (v.timeRemap != null) base['remap'] = _ad(v.timeRemap!);
       if (v.speedBlur) base['speedBlur'] = true;
       if (v.interpolacao != InterpolacaoDeQuadros.nenhuma) {
         base['interpolacao'] = v.interpolacao.name;

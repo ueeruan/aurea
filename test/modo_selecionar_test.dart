@@ -35,7 +35,8 @@ void main() {
     final ids = [for (final l in c.read(editorControllerProvider).layers) l.id];
     expect(ids, hasLength(2));
 
-    await tester.tap(find.byKey(const ValueKey('timeline-selecionar')));
+    expect(find.byKey(const ValueKey('timeline-selecionar')), findsNothing);
+    c.read(modoSelecionarProvider.notifier).state = true;
     await tester.pumpAndSettle();
     expect(c.read(modoSelecionarProvider), isTrue);
 

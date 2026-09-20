@@ -1122,12 +1122,13 @@ static_assert(sizeof(Aurea3DCamera) == 72, "Aurea3DCamera mudou de tamanho");
 static_assert(sizeof(Aurea3DMaterial) == 40, "Aurea3DMaterial mudou de tamanho");
 static_assert(sizeof(Aurea3DCamada) == 128, "Aurea3DCamada mudou de tamanho");
 static_assert(sizeof(Aurea3DLuz) == 60, "Aurea3DLuz mudou de tamanho");
-static_assert(sizeof(Aurea3DCena) == 128, "Aurea3DCena mudou de tamanho");
+static_assert(sizeof(Aurea3DCena) == (sizeof(void*) == 8 ? 128 : 120),
+              "Aurea3DCena mudou de tamanho");
 static_assert(sizeof(Aurea3DOpcoes) == 24, "Aurea3DOpcoes mudou de tamanho");
 static_assert(sizeof(Aurea3DRelato) == 56, "Aurea3DRelato mudou de tamanho");
 static_assert(sizeof(Aurea3DFicha) == 80, "Aurea3DFicha mudou de tamanho");
-// CINCO PONTEIROS (40), DOIS `uint32_t` (8), TRES CAMPOS DE QUATRO BYTES
-// (12), UMA COR (4), TRES FLOATS (12) E OUTRA COR (4): 80, sem folga
-// nenhuma. O numero esta aqui porque o Dart declara a mesma struct a mao, e
-// um campo a mais de um lado desloca todos os que vem depois.
-static_assert(sizeof(Aurea3DMalhaCrua) == 80, "Aurea3DMalhaCrua mudou de tamanho");
+// OS PONTEIROS MUDAM COM A ABI: sao 40 bytes no arm64 e 20 no armv7. O
+// restante da struct nao muda. Conferir os dois tamanhos aqui impede o APK
+// 32-bit de ser recusado sem enfraquecer a garantia do layout.
+static_assert(sizeof(Aurea3DMalhaCrua) == (sizeof(void*) == 8 ? 80 : 60),
+              "Aurea3DMalhaCrua mudou de tamanho");

@@ -169,7 +169,9 @@ void _trabalhoRife(_Pedido p) {
         p.porta.send('Cancelado');
         return;
       }
-      final i = p.passos[k * 3], a = p.passos[k * 3 + 1], b = p.passos[k * 3 + 2];
+      final i = p.passos[k * 3],
+          a = p.passos[k * 3 + 1],
+          b = p.passos[k * 3 + 2];
       final t = p.instantes[k];
       final origem = '${p.base}/${_nome(a)}.png';
       final destino = '${p.saida}/${_nome(i)}.png';
@@ -206,7 +208,18 @@ NativeInterpolator _abrirMotor(_Pedido p, String primeiro) {
       throw StateError('Quadro ilegível para o RIFE');
     }
     final minimo = memoriaMinimaDaGpuMb(tamanho.$1, tamanho.$2);
-    if (info.heapBudgetMb > 0 && info.heapBudgetMb < minimo) {
+    // Budget desconhecido NAO e permissao para tentar. Em alguns Vulkan
+    // (inclusive Codec2/SwiftShader e GPUs Android antigas) o driver
+    // devolve zero e mata o processo inteiro na primeira inferencia — nao
+    // ha excecao Dart para capturar porque o app ja morreu. Nessa situacao
+    // voltamos ao minterpolate, que e mais lento mas termina a exportacao.
+    if (info.heapBudgetMb <= 0) {
+      motor.close();
+      throw StateError(
+        'A GPU não informou memória segura para o RIFE; usando movimento',
+      );
+    }
+    if (info.heapBudgetMb < minimo) {
       motor.close();
       throw StateError(
         'GPU com pouca memória para o RIFE em ${tamanho.$1}x${tamanho.$2} '

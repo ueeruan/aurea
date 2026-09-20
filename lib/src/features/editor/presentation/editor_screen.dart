@@ -9,7 +9,6 @@ import '../../../core/ui/snack.dart';
 import '../../projects/application/projects_controller.dart';
 import '../../projects/application/thumbnail_service.dart';
 import '../application/editor_controller.dart';
-import '../application/media_preview_service.dart';
 import '../application/freehand_session.dart';
 import '../application/playback_controller.dart';
 import '../application/preview_stats.dart';
@@ -88,18 +87,6 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
   @override
   void initState() {
     super.initState();
-    // Ondas de todos os audios e videos do projeto, ja ao abrir.
-    void coletar(List<Layer> ls, List<String> out) {
-      for (final l in ls) {
-        if (l is VideoLayer) out.add(l.sourcePath);
-        if (l is AudioLayer) out.add(l.sourcePath);
-        if (l is GroupLayer) coletar(l.children, out);
-      }
-    }
-
-    final midias = <String>[];
-    coletar(ref.read(editorControllerProvider).layers, midias);
-    MediaPreviewService.instance.preparar(midias);
     RecentSheets.instance.clear();
     _playback =
         widget.playback ??

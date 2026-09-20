@@ -125,10 +125,8 @@ Future<_Quadro> _desenhar({
       shader.setFloat(8 + i, valores[i]);
     }
     final gravador = ui.PictureRecorder();
-    ui.Canvas(gravador).drawRect(
-      ui.Rect.fromLTWH(0, 0, l, l),
-      ui.Paint()..shader = shader,
-    );
+    ui.Canvas(gravador)
+        .drawRect(ui.Rect.fromLTWH(0, 0, l, l), ui.Paint()..shader = shader);
     final imagem = await gravador.endRecording().toImage(lado, lado);
     final dados = await imagem.toByteData(format: ui.ImageByteFormat.rawRgba);
     imagem.dispose();
@@ -266,11 +264,17 @@ void main() {
     test('a fase da onda desloca a onda no tempo', () {
       const amp = 100.0, freq = .25, fase = 90.0;
       final sem = _shake(
-        amplitude: 1, frequency: 1, xRandAmp: 0, yRandAmp: 0,
+        amplitude: 1,
+        frequency: 1,
+        xRandAmp: 0,
+        yRandAmp: 0,
         extras: {'x_wave_amp': amp, 'x_wave_freq': freq},
       );
       final com = _shake(
-        amplitude: 1, frequency: 1, xRandAmp: 0, yRandAmp: 0,
+        amplitude: 1,
+        frequency: 1,
+        xRandAmp: 0,
+        yRandAmp: 0,
         extras: {'x_wave_amp': amp, 'x_wave_freq': freq, 'x_phase': fase},
       );
       // Deslocar a fase em 90 e ver a onda de agora e ver a de antes um
@@ -313,10 +317,7 @@ void main() {
         _shake(extras: {'z_rand_amp': .5, 'z_dist': 4}),
         _s(1.4),
       );
-      expect(
-        (longe.escala - 1 / 4).abs(),
-        lessThan((perto.escala - 1).abs()),
-      );
+      expect((longe.escala - 1 / 4).abs(), lessThan((perto.escala - 1).abs()));
     });
   });
 
@@ -335,15 +336,25 @@ void main() {
 
     test('os nove globais e os cinco de cada eixo existem', () {
       for (final k in [
-        'amplitude', 'frequency', 'phase', 'seed', 'mix',
-        'motion_blur', 'mo_blur_length', 'wrap_x', 'wrap_y',
+        'amplitude',
+        'frequency',
+        'phase',
+        'seed',
+        'mix',
+        'motion_blur',
+        'mo_blur_length',
+        'wrap_x',
+        'wrap_y',
       ]) {
         expect(spec.params.containsKey(k), isTrue, reason: 'falta $k');
       }
       for (final eixo in ['x', 'y', 'z', 'tilt']) {
         for (final p in [
-          '${eixo}_rand_amp', '${eixo}_rand_freq',
-          '${eixo}_wave_amp', '${eixo}_wave_freq', '${eixo}_phase',
+          '${eixo}_rand_amp',
+          '${eixo}_rand_freq',
+          '${eixo}_wave_amp',
+          '${eixo}_wave_freq',
+          '${eixo}_phase',
         ]) {
           expect(spec.params.containsKey(p), isTrue, reason: 'falta $p');
         }
@@ -361,20 +372,40 @@ void main() {
       }
     });
 
-    test('TODO parametro esta num grupo, e todo grupo so aponta para o que existe', () {
-      final emGrupo = <String>{for (final g in spec.grupos) ...g.chaves};
-      for (final k in spec.params.keys) {
-        expect(emGrupo.contains(k), isTrue,
-            reason: 'o parametro $k nao aparece em grupo nenhum');
-      }
-      for (final k in emGrupo) {
-        expect(spec.params.containsKey(k), isTrue,
-            reason: 'o grupo pede $k, que nao existe na ficha');
-      }
-      expect(spec.grupos.map((g) => g.rotulo), [
-        'Global', 'X Shake', 'Y Shake', 'Z Shake', 'Tilt Shake',
-      ]);
-    });
+    test(
+      'TODO parametro esta num grupo, e todo grupo so aponta para o que existe',
+      () {
+        final emGrupo = <String>{for (final g in spec.grupos) ...g.chaves};
+        for (final k in spec.params.keys) {
+          expect(
+            emGrupo.contains(k),
+            isTrue,
+            reason: 'o parametro $k nao aparece em grupo nenhum',
+          );
+        }
+        for (final k in emGrupo) {
+          expect(
+            spec.params.containsKey(k),
+            isTrue,
+            reason: 'o grupo pede $k, que nao existe na ficha',
+          );
+        }
+        expect(spec.grupos.map((g) => g.rotulo), ['Shake', 'Ajustes finos']);
+        expect(
+          spec.grupos.first.chaves,
+          containsAll([
+            'amplitude',
+            'frequency',
+            'x_rand_amp',
+            'y_rand_amp',
+            'z_rand_amp',
+            'tilt_rand_amp',
+            'mix',
+          ]),
+          reason: 'a ficha aberta deve mostrar só o shake que a pessoa usa',
+        );
+      },
+    );
 
     test('os dez presets existem, e so apontam para chave que existe', () {
       // O DEFEITO DO SHAKE ANTIGO, virado teste: preset que pedia
@@ -383,8 +414,11 @@ void main() {
       for (final pronto in spec.presets) {
         expect(pronto.valores, isNotEmpty, reason: '${pronto.nome} vazio');
         for (final k in pronto.valores.keys) {
-          expect(spec.params.containsKey(k), isTrue,
-              reason: '${pronto.nome} pede $k, que nao existe');
+          expect(
+            spec.params.containsKey(k),
+            isTrue,
+            reason: '${pronto.nome} pede $k, que nao existe',
+          );
         }
       }
     });
@@ -406,8 +440,11 @@ void main() {
           e = e.withParamEdited(entry.key, Duration.zero, valor);
           final v = valoresShake(e, _s(1.7));
           expect(v.length, 32);
-          expect(v.every((x) => x.isFinite), isTrue,
-              reason: '${entry.key} = $valor produziu NaN');
+          expect(
+            v.every((x) => x.isFinite),
+            isTrue,
+            reason: '${entry.key} = $valor produziu NaN',
+          );
         }
       }
     });
@@ -434,45 +471,57 @@ void main() {
         valores: valoresShake(_shake(amplitude: 0), Duration.zero),
       );
       for (final (x, y) in [(2, 2), (61, 2), (2, 61), (61, 61), (31, 40)]) {
-        expect(q.canal(x, y, 0), await _daFonte(fonte, 64, x, y, 0),
-            reason: 'r em ($x,$y)');
-        expect(q.canal(x, y, 1), await _daFonte(fonte, 64, x, y, 1),
-            reason: 'g em ($x,$y)');
+        expect(
+          q.canal(x, y, 0),
+          await _daFonte(fonte, 64, x, y, 0),
+          reason: 'r em ($x,$y)',
+        );
+        expect(
+          q.canal(x, y, 1),
+          await _daFonte(fonte, 64, x, y, 1),
+          reason: 'g em ($x,$y)',
+        );
       }
     });
 
-    test('MISTURA 0 devolve a imagem intacta mesmo com o tremor ligado', () async {
-      // O CAMINHO NOVO DO SHADER. Sem ele, mistura nao fazia nada e o
-      // unico jeito de "desligar" o Shake era zerar eixo por eixo.
-      final e = _shake(amplitude: 4, xRandAmp: 400, mix: 0);
-      final t = _s(1.4);
-      expect(instantDoShake(e, t).dx.abs(), closeTo(0, 1e-9));
-      final q = await _desenhar(
-        fonte: fonte,
-        lado: 64,
-        valores: valoresShake(e, t),
-      );
-      for (final (x, y) in [(4, 4), (60, 60), (10, 50)]) {
-        expect(q.canal(x, y, 0), await _daFonte(fonte, 64, x, y, 0));
-        expect(q.canal(x, y, 1), await _daFonte(fonte, 64, x, y, 1));
-      }
-    });
+    test(
+      'MISTURA 0 devolve a imagem intacta mesmo com o tremor ligado',
+      () async {
+        // O CAMINHO NOVO DO SHADER. Sem ele, mistura nao fazia nada e o
+        // unico jeito de "desligar" o Shake era zerar eixo por eixo.
+        final e = _shake(amplitude: 4, xRandAmp: 400, mix: 0);
+        final t = _s(1.4);
+        expect(instantDoShake(e, t).dx.abs(), closeTo(0, 1e-9));
+        final q = await _desenhar(
+          fonte: fonte,
+          lado: 64,
+          valores: valoresShake(e, t),
+        );
+        for (final (x, y) in [(4, 4), (60, 60), (10, 50)]) {
+          expect(q.canal(x, y, 0), await _daFonte(fonte, 64, x, y, 0));
+          expect(q.canal(x, y, 1), await _daFonte(fonte, 64, x, y, 1));
+        }
+      },
+    );
 
-    test('com o tremor ligado a imagem MUDA, e a borda nao abre buraco', () async {
-      final e = _shake(amplitude: 4, xRandAmp: 4001, yRandAmp: 0);
-      final t = _s(1.4);
-      // Um instante em que o tremor de fato empurra.
-      final s = instantDoShake(e, t);
-      expect(s.dx.abs(), greaterThan(1));
-      final q = await _desenhar(
-        fonte: fonte,
-        lado: 64,
-        valores: valoresShake(e, t),
-      );
-      // TODOS OS PIXELS OPAQUE: a borda repete (o padrao da ficha), entao
-      // nao sobra faixa transparente por onde o tremor empurrou.
-      expect(q.opacos, 64 * 64);
-    });
+    test(
+      'com o tremor ligado a imagem MUDA, e a borda nao abre buraco',
+      () async {
+        final e = _shake(amplitude: 4, xRandAmp: 4001, yRandAmp: 0);
+        final t = _s(1.4);
+        // Um instante em que o tremor de fato empurra.
+        final s = instantDoShake(e, t);
+        expect(s.dx.abs(), greaterThan(1));
+        final q = await _desenhar(
+          fonte: fonte,
+          lado: 64,
+          valores: valoresShake(e, t),
+        );
+        // TODOS OS PIXELS OPAQUE: a borda repete (o padrao da ficha), entao
+        // nao sobra faixa transparente por onde o tremor empurrou.
+        expect(q.opacos, 64 * 64);
+      },
+    );
   });
 }
 

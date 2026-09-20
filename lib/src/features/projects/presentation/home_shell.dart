@@ -12,7 +12,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../about/presentation/about_tab.dart';
 import '../../community/presentation/community_tab.dart';
 import '../../settings/presentation/settings_tab.dart';
-import '../../user/presentation/user_tab.dart';
+import '../../community/presentation/social_pages.dart';
 import 'aviso_ao_vivo.dart';
 import 'faixa_de_atualizacao.dart';
 import 'boas_vindas.dart';
@@ -20,6 +20,7 @@ import 'projects_tab.dart';
 import 'release_notice.dart';
 
 final homeTabProvider = StateProvider<int>((ref) => 0);
+final novoProjetoSolicitadoProvider = StateProvider<int>((ref) => 0);
 
 /// Casca principal: abas com tab bar translucida estilo iOS
 /// (blur + hairline, conteudo rolando por baixo).
@@ -40,17 +41,33 @@ class HomeShell extends ConsumerStatefulWidget {
 class _HomeShellState extends ConsumerState<HomeShell> {
   // Record const: nome, icone, icone ativo. Uma alocacao so, na classe.
   static const _tabs = <({IconData icon, IconData active, String label})>[
-    (icon: CupertinoIcons.house, active: CupertinoIcons.house_fill, label: 'Inicio'),
+    (
+      icon: CupertinoIcons.house,
+      active: CupertinoIcons.house_fill,
+      label: 'Inicio',
+    ),
     // A COMUNIDADE FICA EM SEGUNDO, ao lado do Inicio: e para onde se
     // vai depois de terminar um trabalho, e nao um canto de ajustes.
-    (icon: CupertinoIcons.person_2, active: CupertinoIcons.person_2_fill, label: 'Comunidade'),
+    (
+      icon: CupertinoIcons.person_2,
+      active: CupertinoIcons.person_2_fill,
+      label: 'Comunidade',
+    ),
     (
       icon: CupertinoIcons.slider_horizontal_3,
       active: CupertinoIcons.slider_horizontal_3,
       label: 'Ajustes',
     ),
-    (icon: CupertinoIcons.person, active: CupertinoIcons.person_fill, label: 'Perfil'),
-    (icon: CupertinoIcons.info_circle, active: CupertinoIcons.info_circle_fill, label: 'Sobre'),
+    (
+      icon: CupertinoIcons.person,
+      active: CupertinoIcons.person_fill,
+      label: 'Perfil',
+    ),
+    (
+      icon: CupertinoIcons.info_circle,
+      active: CupertinoIcons.info_circle_fill,
+      label: 'Sobre',
+    ),
   ];
 
   // PageStorageKey preserva o CustomScrollView de cada aba entre trocas.
@@ -58,7 +75,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     ProjectsTab(key: PageStorageKey('tab-inicio')),
     CommunityTab(key: PageStorageKey('tab-comunidade')),
     SettingsTab(key: PageStorageKey('tab-ajustes')),
-    UserTab(key: PageStorageKey('tab-perfil')),
+    SocialProfilePage(key: PageStorageKey('tab-perfil'), embedded: true),
     AboutTab(key: PageStorageKey('tab-sobre')),
   ];
 
@@ -142,15 +159,36 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                   height: 54,
                   child: Row(
                     children: [
-                      for (var i = 0; i < _tabs.length; i++)
+                      for (final i in const [0, 1, -1, 3, 2])
                         Expanded(
-                          child: _TabItem(
-                            icon: _tabs[i].icon,
-                            activeIcon: _tabs[i].active,
-                            label: _tabs[i].label,
-                            selected: i == index,
-                            onTap: () => _select(i),
-                          ),
+                          child: i == -1
+                              ? Center(
+                                  child: SizedBox(
+                                    width: 46,
+                                    height: 46,
+                                    child: IconButton.filled(
+                                      key: const ValueKey('home-criar'),
+                                      tooltip: 'Criar projeto',
+                                      onPressed: () {
+                                        _select(0);
+                                        ref
+                                            .read(
+                                              novoProjetoSolicitadoProvider
+                                                  .notifier,
+                                            )
+                                            .state++;
+                                      },
+                                      icon: const Icon(Icons.add, size: 29),
+                                    ),
+                                  ),
+                                )
+                              : _TabItem(
+                                  icon: _tabs[i].icon,
+                                  activeIcon: _tabs[i].active,
+                                  label: _tabs[i].label,
+                                  selected: i == index,
+                                  onTap: () => _select(i),
+                                ),
                         ),
                     ],
                   ),
@@ -207,7 +245,9 @@ class _TabItem extends StatelessWidget {
               label,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: (selected ? _selectedStyle : _idleStyle).copyWith(color: color),
+              style: (selected ? _selectedStyle : _idleStyle).copyWith(
+                color: color,
+              ),
             ),
           ),
         ],

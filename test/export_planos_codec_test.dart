@@ -27,6 +27,28 @@ void main() {
     final image = kt.indexOf('getInputImage(inIndex)');
     expect(capacidade, greaterThan(-1));
     expect(capacidade, lessThan(image));
+    expect(
+      kt,
+      contains('val yBase = yb.position()'),
+      reason: 'o primeiro pixel valido do plano pode nao comecar no zero',
+    );
+    expect(kt, contains('val base = dst.position()'));
+    expect(
+      kt.indexOf('image.close()'),
+      lessThan(kt.indexOf('c.queueInputBuffer(inIndex, 0, capacidade')),
+      reason: 'a Image precisa ser devolvida antes de enfileirar o buffer',
+    );
+  });
+
+  test('esperas do codec tem prazo e o EOS e tentado ate entrar', () {
+    expect(kt, contains('O codificador parou de aceitar quadros'));
+    expect(kt, contains('O codificador nao aceitou o encerramento'));
+    expect(kt, contains('O codificador nao concluiu o arquivo'));
+    final finish = kt.indexOf('fun finish(): Boolean');
+    final eos = kt.indexOf('BUFFER_FLAG_END_OF_STREAM', finish);
+    final loop = kt.lastIndexOf('while (true)', eos);
+    expect(loop, greaterThan(finish));
+    expect(loop, lessThan(eos));
   });
 
   test('sem Image o caminho antigo continua la', () {

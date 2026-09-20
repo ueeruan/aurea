@@ -17,6 +17,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// solto. Na tela as duas coisas sao iguais — um cartao com texto — e so
 /// o `respondeA` na requisicao diz qual das duas foi.
 class _Mural extends ComunidadeService {
+  @override
+  Future<int?> totalDeUsuarios() async => 2;
   _Mural(this.feed);
 
   static final codigo = 'cd' * 24;
@@ -176,8 +178,14 @@ void main() {
 
     // O post nao existe no servidor: responder a ele daria 404, e
     // mostrar o botao seria prometer uma coisa que nao acontece.
-    expect(find.byKey(const ValueKey('post-responder-meu-rascunho')), findsNothing);
-    expect(find.byKey(const ValueKey('post-repostar-meu-rascunho')), findsNothing);
+    expect(
+      find.byKey(const ValueKey('post-responder-meu-rascunho')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('post-repostar-meu-rascunho')),
+      findsNothing,
+    );
     expect(find.byKey(const ValueKey('post-enviar-meu-rascunho')), findsOne);
   });
 }

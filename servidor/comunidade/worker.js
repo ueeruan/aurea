@@ -11,6 +11,7 @@
  *   POST   /conta          cria a conta, devolve o codigo de acesso
  *   POST   /conta/entrar   volta a entrar com o codigo, noutro aparelho
  *   PATCH  /conta          troca o apelido
+ *   GET    /estatisticas   total de contas criadas no Aurea
  *   GET    /feed           os posts de cima (sem as respostas)
  *   GET    /respostas/:id  as respostas de um post
  *   POST   /post           publica (post, resposta ou repost)
@@ -44,6 +45,8 @@
  *   4. LIMITE. Por conta, por hora.
  *   5. FORMATO. So sai o que o aplicativo sabe ler.
  */
+
+import { socialRoutes, socialAuth, enrichPosts, indexPost } from './social.js';
 
 const LIMITE_POR_HORA = 20;
 
@@ -400,6 +403,7 @@ function codigoNovo() {
  * manda seria o mesmo que nao ter conta nenhuma.
  */
 async function quemFala(request, env) {
+  if (env.SOCIAL) return socialAuth(request, env);
   const cabecalho = request.headers.get('authorization') ?? '';
   const codigo = cabecalho.replace(/^Bearer\s+/i, '').trim();
   if (!/^[0-9a-f]{48}$/.test(codigo)) return null;
@@ -460,6 +464,30 @@ async function lerLista(env, prefixo, limite) {
   return saida;
 }
 
+/**
+ * Conta TODAS as contas, inclusive as que ja existiam antes do contador.
+ *
+ * A KV nao tem incremento atomico: guardar um numero e fazer
+ * ler-somar-gravar perderia cadastros quando duas pessoas criassem conta
+ * quase juntas. Listar as chaves `conta:` evita esse erro e tambem faz a
+ * primeira versao deste endpoint nascer com o total historico correto.
+ */
+async function contarContas(env) {
+  let total = 0;
+  let cursor;
+  do {
+    const pagina = await env.MURAL.list({
+      prefix: 'conta:',
+      limit: 1000,
+      ...(cursor ? { cursor } : {}),
+    });
+    total += pagina.keys.length;
+    if (pagina.list_complete !== false || !pagina.cursor) break;
+    cursor = pagina.cursor;
+  } while (true);
+  return total;
+}
+
 /** O post que o aplicativo recebe. Campo desconhecido nao passa daqui. */
 function montarPost(corpo, conta, extras = {}) {
   const quando = new Date().toISOString();
@@ -487,7 +515,7 @@ function montarPost(corpo, conta, extras = {}) {
 
 // ------------------------------------------------------------------ rotas
 
-export default {
+const legacyWorker = {
   async fetch(request, env) {
     const url = new URL(request.url);
     const caminho = url.pathname.replace(/\/+$/, '') || '/';
@@ -496,12 +524,15 @@ export default {
       return new Response(null, {
         headers: {
           'access-control-allow-origin': '*',
-          'access-control-allow-methods': 'GET,POST,PATCH,DELETE,OPTIONS',
+          'access-control-allow-methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
           'access-control-allow-headers':
             'content-type,authorization,x-aurea-midia,x-moderacao,x-duracao,x-idioma',
         },
       });
     }
+
+    const social = await socialRoutes(request, env, {recusarApelido, ofensivo, gravarAvisos});
+    if (social) return social;
 
     // =========================================================== conta
 
@@ -581,6 +612,14 @@ export default {
     }
 
     // ============================================================ ler
+
+    if (request.method === 'GET' && caminho === '/estatisticas') {
+      if (env.SOCIAL) {
+        const r = await env.SOCIAL.prepare('SELECT count(*) usuarios FROM profiles WHERE deleted_at IS NULL').first();
+        return json(r);
+      }
+      return json({ usuarios: await contarContas(env) });
+    }
 
     // ===================================================== transcricao
 
@@ -899,6 +938,7 @@ export default {
     }
 
     if (request.method === 'GET' && (caminho === '/feed' || caminho === '/')) {
+      if (env.SOCIAL) return json({posts: await enrichPosts(env, await lerLista(env, 'post:', 30), await quemFala(request,env))});
       const cache = await env.MURAL.get('cache:feed');
       const corpo = cache ?? JSON.stringify({
         posts: await lerLista(env, 'post:', POSTS_NO_FEED),
@@ -924,7 +964,7 @@ export default {
         `resp:${pai}:`,
         RESPOSTAS_POR_POST,
       );
-      return json({ posts: respostas });
+      return json({ posts: await enrichPosts(env, respostas, await quemFala(request,env)) });
     }
 
     // ======================================================== publicar
@@ -989,6 +1029,7 @@ export default {
           original: {
             id: original.id,
             autor: original.autor,
+            autorId: original.autorId,
             texto: original.texto,
             quando: original.quando,
             ...(original.imagem ? { imagem: original.imagem } : {}),
@@ -1021,8 +1062,8 @@ export default {
       const senha = (request.headers.get('x-moderacao') ?? '').trim();
       const conta = await quemFala(request, env);
       const eDono = conta && conta.id === post.autorId;
-      const eModerador =
-        env.SENHA_DE_MODERACAO && senha === env.SENHA_DE_MODERACAO;
+      const eModerador = conta?.role === 'owner' ||
+        (env.SENHA_DE_MODERACAO && senha === env.SENHA_DE_MODERACAO);
       if (!eDono && !eModerador) return erro('Sem permissao.', 401);
 
       await env.MURAL.delete(chave);
@@ -1150,5 +1191,26 @@ export default {
     }
 
     return erro('Endereco desconhecido.', 404);
+  },
+};
+
+export default {
+  async fetch(request, env) {
+    const response = await legacyWorker.fetch(request, env);
+    if (env.SOCIAL && response.ok) {
+      const path = new URL(request.url).pathname;
+      if (request.method === 'POST' && path === '/post') {
+        const result = await response.clone().json();
+        await indexPost(env, result.post);
+      }
+      if (request.method === 'DELETE' && path.startsWith('/post/')) {
+        const id=decodeURIComponent(path.slice(6));
+        await env.SOCIAL.batch([
+          env.SOCIAL.prepare('DELETE FROM social_posts WHERE id=? OR parent=?').bind(id,id),
+          env.SOCIAL.prepare('DELETE FROM likes WHERE post_id=?').bind(id),
+        ]);
+      }
+    }
+    return response;
   },
 };

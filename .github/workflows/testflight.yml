@@ -61,7 +61,9 @@ jobs:
           chmod 600 ~/private_keys/AuthKey_${ASC_KEY_ID}.p8
 
       - name: Dependencias
-        run: flutter pub get
+        run: |
+          bash packages/aurea_render/tool/preparar_3d.sh --ios
+          flutter pub get
 
       # O Flutter gera o Generated.xcconfig, os pods e o motor em release;
       # a assinatura fica para o archive do Xcode, que sabe falar com a

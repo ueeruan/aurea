@@ -66,6 +66,24 @@ class ComunidadeService {
   Future<RespostaDaConta> trocarApelido(String codigo, String apelido) =>
       _conta('PATCH', '/conta', codigo: codigo, corpo: {'apelido': apelido});
 
+  /// Total de contas criadas no Aurea. Nulo significa apenas que o numero
+  /// nao pôde ser atualizado agora; nunca inventamos zero numa falha de rede.
+  Future<int?> totalDeUsuarios() async {
+    try {
+      final req = await _http.getUrl(Uri.parse('$endereco/estatisticas'));
+      final res = await req.close().timeout(_tempoLimite);
+      final corpo = await res.transform(utf8.decoder).join();
+      if (res.statusCode != 200) return null;
+      final mapa = (jsonDecode(corpo) as Map).cast<String, dynamic>();
+      final total = mapa['usuarios'];
+      if (total is int && total >= 0) return total;
+      if (total is num && total >= 0) return total.toInt();
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<RespostaDaConta> _conta(
     String metodo,
     String caminho, {

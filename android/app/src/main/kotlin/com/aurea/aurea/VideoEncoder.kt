@@ -205,6 +205,7 @@ class VideoEncoder {
 
         // Enfileira o quadro.
         var queued = false
+        val limite = System.nanoTime() + 15_000_000_000L
         while (!queued) {
             val inIndex = c.dequeueInputBuffer(10_000)
             if (inIndex >= 0) {
@@ -230,12 +231,19 @@ class VideoEncoder {
                     null
                 }
                 if (image != null && capacidade > 0) {
-                    copyIntoPlanes(image)
+                    try {
+                        copyIntoPlanes(image)
+                    } finally {
+                        // A Image deixa de pertencer ao app ANTES de o
+                        // buffer voltar para o codec. Fechar depois de
+                        // queueInputBuffer deixava alguns Codec2 esperando
+                        // indefinidamente pelo proprio buffer.
+                        image.close()
+                    }
                     // O tamanho e o do buffer inteiro: com stride o quadro
                     // ocupa mais que w*h*3/2, e foi o codec quem definiu o
                     // buffer do tamanho exato do quadro que ele espera.
                     c.queueInputBuffer(inIndex, 0, capacidade, ptsUs, 0)
-                    image.close()
                 } else {
                     val buf: ByteBuffer = c.getInputBuffer(inIndex)!!
                     buf.clear()
@@ -246,6 +254,11 @@ class VideoEncoder {
                 queued = true
             }
             drain(false)
+            if (!queued && System.nanoTime() >= limite) {
+                throw IllegalStateException(
+                    "O codificador parou de aceitar quadros por 15 segundos"
+                )
+            }
         }
     }
 
@@ -269,14 +282,18 @@ class VideoEncoder {
         // bloco.
         val y = planes[0]
         val yb = y.buffer
+        // O ByteBuffer pode comecar DEPOIS do indice zero. A posicao
+        // inicial e o offset do primeiro pixel valido do plano; ignorar
+        // isso escrevia no padding e entregava quadros pretos em Codec2.
+        val yBase = yb.position()
         if (y.pixelStride == 1) {
             for (row in 0 until h) {
-                yb.position(row * y.rowStride)
+                yb.position(yBase + row * y.rowStride)
                 yb.put(src, row * w, w)
             }
         } else {
             for (row in 0 until h) {
-                var d = row * y.rowStride
+                var d = yBase + row * y.rowStride
                 var sIdx = row * w
                 for (col in 0 until w) {
                     yb.put(d, src[sIdx++])
@@ -293,6 +310,7 @@ class VideoEncoder {
             val dst = pl.buffer
             val rs = pl.rowStride
             val ps = pl.pixelStride
+            val base = dst.position()
             val offset = plane - 1 // 0 = Cb, 1 = Cr
             if (ps == 1) {
                 // Planar (I420): desintercala uma linha e copia em bloco.
@@ -302,12 +320,12 @@ class VideoEncoder {
                         linha[col] = src[sIdx]
                         sIdx += 2
                     }
-                    dst.position(row * rs)
+                    dst.position(base + row * rs)
                     dst.put(linha, 0, cw)
                 }
             } else {
                 for (row in 0 until ch) {
-                    var d = row * rs
+                    var d = base + row * rs
                     var sIdx = uvBase + row * w + offset
                     for (col in 0 until cw) {
                         dst.put(d, src[sIdx])
@@ -322,13 +340,25 @@ class VideoEncoder {
     /** Fecha o fluxo e devolve o caminho do arquivo escrito. */
     fun finish(): Boolean {
         val c = codec ?: return false
-        val inIndex = c.dequeueInputBuffer(10_000)
-        if (inIndex >= 0) {
-            c.queueInputBuffer(
-                inIndex, 0, 0,
-                frameIndex * 1_000_000L / fps,
-                MediaCodec.BUFFER_FLAG_END_OF_STREAM
-            )
+        // Nao basta tentar uma vez. Se todos os buffers estiverem cheios,
+        // o EOS nao entra e drain(true) esperaria por ele para sempre.
+        val limite = System.nanoTime() + 15_000_000_000L
+        while (true) {
+            val inIndex = c.dequeueInputBuffer(10_000)
+            if (inIndex >= 0) {
+                c.queueInputBuffer(
+                    inIndex, 0, 0,
+                    frameIndex * 1_000_000L / fps,
+                    MediaCodec.BUFFER_FLAG_END_OF_STREAM
+                )
+                break
+            }
+            drain(false)
+            if (System.nanoTime() >= limite) {
+                throw IllegalStateException(
+                    "O codificador nao aceitou o encerramento em 15 segundos"
+                )
+            }
         }
         drain(true)
         stop(discard = false)
@@ -338,11 +368,21 @@ class VideoEncoder {
     private fun drain(endOfStream: Boolean) {
         val c = codec ?: return
         val info = MediaCodec.BufferInfo()
+        val limite = if (endOfStream) {
+            System.nanoTime() + 15_000_000_000L
+        } else {
+            Long.MAX_VALUE
+        }
         while (true) {
             val outIndex = c.dequeueOutputBuffer(info, if (endOfStream) 10_000 else 0)
             when {
                 outIndex == MediaCodec.INFO_TRY_AGAIN_LATER -> {
                     if (!endOfStream) return
+                    if (System.nanoTime() >= limite) {
+                        throw IllegalStateException(
+                            "O codificador nao concluiu o arquivo em 15 segundos"
+                        )
+                    }
                 }
 
                 outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {

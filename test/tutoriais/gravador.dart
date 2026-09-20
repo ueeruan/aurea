@@ -32,7 +32,7 @@ class ProjetosNaMemoria extends ProjectsController {
 /// anda no relogio de mentira do testWidgets.
 class RepositorioNulo extends ProjectRepository {
   RepositorioNulo()
-    : super(directory: Directory.systemTemp, installBundledExamples: false);
+    : super(directory: Directory.systemTemp);
 
   @override
   Future<List<VideoProject>> loadAll() async => const [];

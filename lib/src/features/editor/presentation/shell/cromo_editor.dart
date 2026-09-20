@@ -1807,7 +1807,9 @@ class _MenuDaTimeline extends ConsumerWidget {
               'timeline-menu-marcador',
               CupertinoIcons.bookmark,
               'Marcar este instante',
-              onTap: () => fecharE(() => controller.toggleMarker(agora)),
+              onTap: () => fecharE(
+                () => controller.toggleMarker(playback.timeForInput()),
+              ),
             ),
             item(
               'timeline-menu-marcas',

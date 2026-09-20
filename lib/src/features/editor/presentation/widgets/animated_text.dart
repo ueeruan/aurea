@@ -345,7 +345,7 @@ class _AnimatedTextPainter extends CustomPainter {
       // A PALAVRA INTEIRA, e nao a letra — ver [_palavraNoAtlas]. O que
       // recorta esta unidade e o `clipRect` do desenho.
       final unidade = _palavraNoAtlas(
-        units.palavraDe(i),
+        layer.text,
         style,
         layer.alinhamento,
         diagrama.direcao,
@@ -361,20 +361,14 @@ class _AnimatedTextPainter extends CustomPainter {
       // escala, deslocamento, giro e desfoque — e sempre pela faixa da
       // linha, para acento, cedilha e descendente caberem. E conta, nao
       // chute: sai dos proprios numeros lidos acima.
-      final raioDaLetra = rect.longestSide * math.max(sx, sy) / 2;
-      final margemDoRecorte =
-          (math.max(sx, sy) - 1).clamp(0.0, 4.0) * rect.longestSide / 2 +
-          dx.abs() +
-          dy.abs() +
-          (rotation.abs() > 0.01 ? raioDaLetra : 0) +
-          (rotX.abs() + rotY.abs()) * raioDaLetra / 45 +
-          blur * 3 +
-          (style.fontSize ?? 16) * .3;
-      final recorte = (diagrama.recorte(i) ?? rect).inflate(margemDoRecorte);
+      // Isolar a letra no espaco da fonte, DEPOIS do transform. Inflar
+      // este recorte incluia letras vizinhas e duplicava a palavra; fazer
+      // o clip antes do transform prendia a letra na caixa original.
+      final recorte = diagrama.recorte(i) ?? rect;
       // A COR DA UNIDADE VIROU FILTRO, e nao estilo. Trocar a cor do
       // `TextStyle` obrigaria a um paragrafo por (palavra, cor) — e o
       // paragrafo e justamente quem carrega a juncao da escrita cursiva.
-      final matriz = matrizDaUnidade(hue, satP, brightP, style.color!.a * opacity);
+      final matriz = matrizDaUnidade(hue, satP, brightP, opacity);
 
       // Sobre o caminho, a posicao vem do AVANCO acumulado ao longo da
       // curva, nao da caixa da linha — e a diferenca entre letras
@@ -403,14 +397,12 @@ class _AnimatedTextPainter extends CustomPainter {
       // O RECORTE VEM PRIMEIRO, no espaco da LINHA: depois dos giros ele
       // nao seria mais um retangulo alinhado, e recortar uma letra girada
       // com um retangulo torto nao e a mesma coisa.
-      canvas.clipRect(recorte);
       // DESFOQUE POR UNIDADE: e o que faz "aparecer em desfoque" existir.
       // Sem isto so da para borrar a camada inteira, que e outra coisa.
       final blurring = blur > 0.05;
       if (blurring) {
-        final pad = blur * 3 + rect.longestSide;
         canvas.saveLayer(
-          Rect.fromCenter(center: center, width: pad * 2, height: pad * 2),
+          null,
           Paint()
             ..imageFilter = ui.ImageFilter.blur(sigmaX: blur, sigmaY: blur),
         );
@@ -446,7 +438,8 @@ class _AnimatedTextPainter extends CustomPainter {
       // torno do centro DESTA unidade, entao desenhar a palavra no lugar
       // de sempre move esta letra e deixa as vizinhas paradas — que e o
       // ponto: movimento por letra, forma por palavra.
-      canvas.translate(-center.dx, -center.dy);
+      canvas.translate(-rect.center.dx, -rect.center.dy);
+      canvas.clipRect(recorte, doAntiAlias: false);
       unidade.paintDaPalavra(canvas, Offset.zero, matrizDeCor: matriz);
       canvas.restore();
       if (blurring) canvas.restore();

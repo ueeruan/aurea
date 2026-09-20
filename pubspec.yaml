@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.2.1-beta+96
+version: 1.2.1-beta-a01+100
 
 environment:
   sdk: ^3.13.2
@@ -106,6 +106,7 @@ flutter:
   # Shader de saida: dithering que mata o banding.
   shaders:
     - shaders/motion_tile.frag
+    - shaders/rgb_time_warp.frag
     - shaders/essential_warp.frag
     - shaders/dither.frag
     - shaders/blend.frag
@@ -122,6 +123,7 @@ flutter:
     - shaders/twitch.frag
     - shaders/cross_glitch.frag
     - shaders/luz.frag
+    - shaders/glow_source.frag
     - shaders/chroma_key.frag
     - shaders/vhs_damage.frag
     - shaders/tv_damage.frag
@@ -147,6 +149,8 @@ flutter:
     - assets/templates/dnyx/
     - assets/templates/vhf/
     - assets/tutoriais/
+    - assets/efeitos/modelo.png
+    - assets/efeitos/previas/
 
   fonts:
     - family: Aurea Motion Sans

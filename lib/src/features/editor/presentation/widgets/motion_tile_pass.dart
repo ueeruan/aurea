@@ -1,40 +1,14 @@
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
-import 'package:flutter/widgets.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/widgets.dart';
 
 import '../../domain/effect.dart';
-import 'fx_lote2.dart';
 
-/// Enlarges the actual filter input, so output beyond the original layer is
-/// retained. A shader samples repeated tiles in one pass, including live video
-/// on Impeller, without thousands of widget copies or CPU pixel readback.
-///
-/// ==========================================================================
-/// A REGIAO DA REPETICAO COBRE A COMPOSICAO, E NAO A CAIXA DA CAMADA.
-/// ==========================================================================
-///
-/// O DEFEITO DO RELATO, e ele nao era a matematica do ladrilho — era ONDE a
-/// repeticao acontecia.
-///
-/// O Motion Tile mora DENTRO do transform da camada (efeito age na fonte, e
-/// o transform vem depois — a mesma ordem do After Effects). Entao a regiao
-/// ladrilhada era a caixa da camada: com a camada em 50%, a parede de
-/// ladrilhos saia junto, encolhida, e a composicao ficava com a moldura
-/// vazia em volta. A repeticao estava certa; ela so nao cobria nada.
-///
-/// O CONSERTO: a regiao que se ladrilha e calculada para cobrir a
-/// COMPOSICAO depois da escala. Com a camada em 50%, ela tem o dobro do
-/// tamanho em espaco de camada — e, encolhida de volta, cobre o quadro
-/// inteiro. A conta e exata, e nao um numero grande chutado: sobra
-/// ladrilho o suficiente e nem um pixel a mais, porque cada pixel a mais e
-/// area para o shader preencher por quadro.
-///
-/// A POSICAO ENTRA NA CONTA. Uma camada jogada para a direita nao precisa
-/// de uma regiao simetrica: o lado esquerdo dela precisa alcancar a borda
-/// esquerda do quadro, e o direito, a direita. Calcular pelos dois lados
-/// evita tanto a faixa vazia quanto o desperdicio.
+/// One source-sized capture, then UV wrapping over the expanded output.
+/// The output is drawn directly: no giant transparent input surface whose
+/// bounds an ImageFilter can collapse back to the original video texture.
 class MotionTilePass extends StatefulWidget {
   const MotionTilePass({
     super.key,
@@ -47,156 +21,161 @@ class MotionTilePass extends StatefulWidget {
     this.composicao,
     this.rotacaoGraus = 0,
   });
-
   final EffectInstance effect;
   final Duration time;
   final Widget child;
-
-  /// A ESCALA EFETIVA da camada no instante — a propria, mais a que veio
-  /// do pai, mais a da camera. E ela que decide o quanto a regiao precisa
-  /// crescer para o quadro continuar coberto.
-  final double escalaX;
-  final double escalaY;
-
-  /// Onde a camada cai na composicao, e o tamanho da composicao. Nulos
-  /// significam "nao sei": nesse caso a regiao volta a ser a da camada, e
-  /// o comportamento e o de antes — melhor um ladrilho menor do que um
-  /// chute errado.
+  final double escalaX, escalaY, rotacaoGraus;
   final Offset? posicao;
   final Size? composicao;
-
-  /// A ROTACAO EFETIVA da camada, em graus. Ela entra na conta da regiao
-  /// pelo mesmo motivo que a escala: uma camada girada 45 graus cobre o
-  /// quadro com um retangulo MUITO maior do que o lado do quadro — e sem
-  /// contar isso o ladrilho fica curto nos quatro cantos e aparece o canto
-  /// preto que o relato descreve.
-  final double rotacaoGraus;
-
+  static Future<ui.FragmentProgram>? _program;
+  static ui.FragmentProgram? _loaded;
+  static Future<ui.FragmentProgram> warmUp() =>
+      _program ??= ui.FragmentProgram.fromAsset('shaders/motion_tile.frag')
+          .then((p) => _loaded = p);
   @override
   State<MotionTilePass> createState() => _MotionTilePassState();
 }
 
 class _MotionTilePassState extends State<MotionTilePass> {
-  static Future<ui.FragmentProgram>? _program;
-  ui.FragmentShader? shader;
-  Size? sourceSize;
-  void measure(Size size) {
-    if (size == sourceSize || size.isEmpty || !size.isFinite) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && sourceSize != size) setState(() => sourceSize = size);
+  ui.FragmentShader? _shader;
+  @override
+  void initState() {
+    super.initState();
+    final loaded = MotionTilePass._loaded;
+    if (loaded != null) {
+      _shader = loaded.fragmentShader();
+      return;
+    }
+    MotionTilePass.warmUp().then((p) {
+      if (mounted) setState(() => _shader = p.fragmentShader());
     });
   }
 
   @override
-  void initState() {
-    super.initState();
-    (_program ??= ui.FragmentProgram.fromAsset('shaders/motion_tile.frag'))
-        .then((p) {
-          if (mounted) setState(() => shader = p.fragmentShader());
-        })
-        .catchError((Object e) {
-          debugPrint('Motion Tile shader: $e');
-        });
-  }
-
-  @override
   void dispose() {
-    shader?.dispose();
+    _shader?.dispose();
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) {
-      if (shader == null || sourceSize == null) {
-        return _Measure(onSize: measure, child: widget.child);
-      }
-      double p(String key) => widget.effect.paramAt(key, widget.time);
-      final size = sourceSize!;
-      final clampa = p('clamp_edges') >= 0.5;
-      // A REGIAO DA SAIDA: o que a pessoa pediu, ou o que for preciso para
-      // cobrir a composicao — o maior dos dois, NOS DOIS EIXOS DE UMA VEZ.
-      //
-      // OS DOIS EIXOS JUNTOS porque a rotacao os mistura: um quadro girado
-      // 45 graus precisa de mais ladrilho na largura E na altura ao mesmo
-      // tempo, e o quanto de cada um depende do outro lado do quadro.
-      final cobertura = fatoresQueCobremMotionTile(
-        pedidoX: (p('output_width') / 100).clamp(0.01, 6.0),
-        pedidoY: (p('output_height') / 100).clamp(0.01, 6.0),
-        ladoDaCamada: size,
-        escalaX: widget.escalaX,
-        escalaY: widget.escalaY,
-        posicao: widget.posicao,
-        composicao: widget.composicao,
-        rotacaoGraus: widget.rotacaoGraus,
-      );
-      final fw = cobertura.x, fh = cobertura.y;
-      // A ENTRADA DO FILTRO tem de conter a FONTE INTEIRA, mesmo quando a
-      // saida e um recorte (<100%). Por isso ela nunca e menor que 1.
-      final gw = fw < 1 ? 1.0 : fw, gh = fh < 1 ? 1.0 : fh;
-      final filter = ui.ImageFilter.isShaderFilterSupported;
-      // uOutput E O FATOR DA ENTRADA, e nao o da saida: o shader mapeia a
-      // entrada ampliada de volta para o espaco da fonte usando este
-      // numero. Trocar por `fw` faria a amostragem escorregar sempre que a
-      // saida fosse um recorte.
-      shader!
-        ..setFloat(2, gw)
-        ..setFloat(3, gh)
-        ..setFloat(4, (p('tile_width') / 100).clamp(0.01, 3.0))
-        ..setFloat(5, (p('tile_height') / 100).clamp(0.01, 3.0))
-        ..setFloat(6, p('tile_center'))
-        ..setFloat(7, p('tile_center_y'))
-        ..setFloat(8, clampa ? 0 : p('mirror_edges'))
-        ..setFloat(9, p('phase') / 360)
-        ..setFloat(10, p('horizontal_phase_shift'))
-        ..setFloat(11, filter ? 1 : 0)
-        // O ULTIMO DA LISTA, na ordem da declaracao (ver o .frag).
-        ..setFloat(12, clampa ? 1 : 0);
-      final source = SizedBox(
-        width: size.width * gw,
-        height: size.height * gh,
-        child: Stack(
-          children: [
-            Positioned.fill(child: CustomPaint(painter: _BoundsPainter())),
-            Center(
-              child: UnconstrainedBox(
-                child: SizedBox(
-                  width: size.width,
-                  height: size.height,
-                  child: widget.child,
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-      final rendered = filter
-          ? ImageFiltered(
-              imageFilter: ui.ImageFilter.shader(shader!),
-              child: source,
-            )
-          : FxSnapshot(painter: _TileSnapshot(shader!), child: source);
-      return SizedBox(
-        width: size.width,
-        height: size.height,
-        child: OverflowBox(
-          minWidth: size.width * fw,
-          maxWidth: size.width * fw,
-          minHeight: size.height * fh,
-          maxHeight: size.height * fh,
-          child: ClipRect(
-            child: OverflowBox(
-              minWidth: size.width * gw,
-              maxWidth: size.width * gw,
-              minHeight: size.height * gh,
-              maxHeight: size.height * gh,
-              child: rendered,
-            ),
-          ),
-        ),
-      );
-    },
+  Widget build(BuildContext context) => _TileOutput(
+    key: const ValueKey('motion-tile-viewport'),
+    config: widget,
+    shader: _shader,
+    pixelRatio: MediaQuery.maybeDevicePixelRatioOf(context) ?? 1,
+    child: widget.child,
   );
+}
+
+class _TileOutput extends SingleChildRenderObjectWidget {
+  const _TileOutput({
+    super.key,
+    required this.config,
+    required this.shader,
+    required this.pixelRatio,
+    required super.child,
+  });
+  final MotionTilePass config;
+  final ui.FragmentShader? shader;
+  final double pixelRatio;
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _TileRender(config, shader, pixelRatio);
+  @override
+  void updateRenderObject(BuildContext context, _TileRender renderObject) {
+    renderObject.config = config;
+    renderObject.shader = shader;
+    renderObject.pixelRatio = pixelRatio;
+    renderObject.markNeedsLayout();
+    renderObject.markNeedsPaint();
+  }
+}
+
+class _TileRender extends RenderProxyBox {
+  _TileRender(this.config, this.shader, this.pixelRatio);
+  MotionTilePass config;
+  ui.FragmentShader? shader;
+  double pixelRatio;
+  double _p(String key) => config.effect.paramAt(key, config.time);
+  @override
+  void performLayout() {
+    child?.layout(const BoxConstraints(), parentUsesSize: true);
+    final source = child?.size ?? Size.zero;
+    if (source.isEmpty) {
+      size = constraints.smallest;
+      return;
+    }
+    final coverage = fatoresQueCobremMotionTile(
+      pedidoX: _p('output_width') / 100,
+      pedidoY: _p('output_height') / 100,
+      ladoDaCamada: source,
+      escalaX: config.escalaX,
+      escalaY: config.escalaY,
+      posicao: config.posicao,
+      composicao: config.composicao,
+      rotacaoGraus: config.rotacaoGraus,
+    );
+    size = constraints.constrain(
+      Size(source.width * coverage.x, source.height * coverage.y),
+    );
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    final input = child;
+    final fx = shader;
+    if (input == null || input.size.isEmpty || size.isEmpty) return;
+    if (fx == null) {
+      context.paintChild(
+        input,
+        offset +
+            Offset(
+              (size.width - input.size.width) / 2,
+              (size.height - input.size.height) / 2,
+            ),
+      );
+      return;
+    }
+    final bounds = Offset.zero & input.size;
+    // Only the source is rasterized. Scaling down adds tiles without
+    // increasing source texture dimensions or multiplying CPU bitmaps.
+    final ratio = math
+        .min(
+          pixelRatio,
+          math.sqrt(2e6 / (input.size.width * input.size.height)),
+        )
+        .clamp(.05, 3.0);
+    final layer = OffsetLayer();
+    final capture = PaintingContext(layer, bounds);
+    capture.paintChild(input, Offset.zero);
+    // ignore: invalid_use_of_protected_member
+    capture.stopRecordingIfNeeded();
+    final image = layer.toImageSync(bounds, pixelRatio: ratio);
+    layer.dispose();
+    fx
+      ..setFloat(0, size.width)
+      ..setFloat(1, size.height)
+      ..setFloat(2, size.width / input.size.width)
+      ..setFloat(3, size.height / input.size.height)
+      ..setFloat(4, (_p('tile_width') / 100).clamp(.01, 3))
+      ..setFloat(5, (_p('tile_height') / 100).clamp(.01, 3))
+      ..setFloat(6, _p('tile_center'))
+      ..setFloat(7, _p('tile_center_y'))
+      ..setFloat(8, _p('mirror_edges'))
+      ..setFloat(9, _p('phase') / 360)
+      ..setFloat(10, _p('horizontal_phase_shift'))
+      ..setFloat(11, 0)
+      ..setFloat(12, _p('clamp_edges'))
+      ..setImageSampler(0, image);
+    context.canvas.save();
+    context.canvas.translate(offset.dx, offset.dy);
+    context.canvas.drawRect(Offset.zero & size, Paint()..shader = fx);
+    context.canvas.restore();
+    image.dispose();
+  }
+
+  @override
+  void applyPaintTransform(RenderBox child, Matrix4 transform) {}
 }
 
 /// O FATOR PELA LARGURA (ou altura) QUE FAZ A REPETICAO COBRIR A COMPOSICAO.
@@ -230,7 +209,9 @@ double fatorQueCobreMotionTile({
   if (!ladoDaCamada.isFinite || ladoDaCamada <= 0) return pedido;
   if (!escala.isFinite || escala <= 0.001) return pedido;
   if (!ladoDaComposicao.isFinite || ladoDaComposicao <= 0) return pedido;
-  final preciso = 2 * math.max(posicao, ladoDaComposicao - posicao) /
+  final preciso =
+      2 *
+      math.max(posicao, ladoDaComposicao - posicao) /
       (escala * ladoDaCamada);
   if (!preciso.isFinite || preciso <= 0) return pedido;
   // O TETO EXISTE porque cada fator a mais e area por quadro. Seis vezes a
@@ -334,70 +315,4 @@ double fatorQueCobreMotionTile({
     x: junto(junto(pedido.x, pisoX), fator(maxX, ladoDaCamada.width)),
     y: junto(junto(pedido.y, pisoY), fator(maxY, ladoDaCamada.height)),
   );
-}
-
-class _BoundsPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    canvas.drawRect(
-      Offset.zero & size,
-      Paint()..color = const Color(0x00000000),
-    );
-  }
-
-  @override
-  bool shouldRepaint(_BoundsPainter old) => false;
-}
-
-class _TileSnapshot extends SnapshotPainter {
-  _TileSnapshot(this.shader);
-  final ui.FragmentShader shader;
-  @override
-  bool shouldRepaint(_TileSnapshot old) => true;
-  @override
-  void paint(
-    PaintingContext context,
-    Offset offset,
-    Size size,
-    PaintingContextCallback painter,
-  ) => painter(context, offset);
-  @override
-  void paintSnapshot(
-    PaintingContext context,
-    Offset offset,
-    Size size,
-    ui.Image image,
-    Size sourceSize,
-    double pixelRatio,
-  ) {
-    shader
-      ..setFloat(0, size.width)
-      ..setFloat(1, size.height)
-      ..setImageSampler(0, image);
-    context.canvas.save();
-    context.canvas.translate(offset.dx, offset.dy);
-    context.canvas.drawRect(Offset.zero & size, Paint()..shader = shader);
-    context.canvas.restore();
-  }
-}
-
-class _Measure extends SingleChildRenderObjectWidget {
-  const _Measure({required this.onSize, required super.child});
-  final ValueChanged<Size> onSize;
-  @override
-  RenderObject createRenderObject(BuildContext context) => _MeasureBox(onSize);
-  @override
-  void updateRenderObject(BuildContext context, _MeasureBox renderObject) {
-    renderObject.onSize = onSize;
-  }
-}
-
-class _MeasureBox extends RenderProxyBox {
-  _MeasureBox(this.onSize);
-  ValueChanged<Size> onSize;
-  @override
-  void performLayout() {
-    super.performLayout();
-    onSize(size);
-  }
 }

@@ -1,4 +1,5 @@
 import '../../domain/acabamento3d.dart';
+
 import 'package:aurea_render/aurea_render.dart';
 import 'package:aurea/src/core/l10n/app_language.dart';
 import 'package:flutter/cupertino.dart';
@@ -163,27 +164,27 @@ class LayerToolsDock extends ConsumerWidget {
                         ),
                       ),
                     ],
-                    if (layer is! GroupLayer)
-                    Expanded(
-                      child: IconButton(
-                        tooltip: 'Velocidade',
-                        onPressed: () {
-                          HapticFeedback.lightImpact();
-                          playback.pause();
-                          showSpeedSheet(
-                            context,
-                            ref,
-                            layer.id,
-                            playback: playback,
-                          );
-                        },
-                        icon: const Icon(
-                          CupertinoIcons.speedometer,
-                          size: 20,
-                          color: AmColors.text,
+                    if (layer is AudioLayer)
+                      Expanded(
+                        child: IconButton(
+                          tooltip: 'Velocidade',
+                          onPressed: () {
+                            HapticFeedback.lightImpact();
+                            playback.pause();
+                            showSpeedSheet(
+                              context,
+                              ref,
+                              layer.id,
+                              playback: playback,
+                            );
+                          },
+                          icon: const Icon(
+                            CupertinoIcons.speedometer,
+                            size: 20,
+                            color: AmColors.text,
+                          ),
                         ),
                       ),
-                    ),
                     Expanded(
                       child: IconButton(
                         tooltip: 'Mover início para o cabeçote',
@@ -220,7 +221,10 @@ class LayerToolsDock extends ConsumerWidget {
                     ),
                     Expanded(
                       child: IconButton(
-                        tooltip: translate(context, 'Mover fim para o cabeçote'),
+                        tooltip: translate(
+                          context,
+                          'Mover fim para o cabeçote',
+                        ),
                         onPressed: () {
                           HapticFeedback.lightImpact();
                           playback.pause();
@@ -240,26 +244,26 @@ class LayerToolsDock extends ConsumerWidget {
                       ),
                     ),
                     if (layer is! GroupLayer)
-                    Expanded(
-                      child: IconButton(
-                        tooltip: 'Volume / Áudio',
-                        onPressed: () {
-                          HapticFeedback.lightImpact();
-                          playback.pause();
-                          showAudioSheet(
-                            context,
-                            ref,
-                            layer.id,
-                            playback: playback,
-                          );
-                        },
-                        icon: const Icon(
-                          CupertinoIcons.speaker_2,
-                          size: 20,
-                          color: AmColors.text,
+                      Expanded(
+                        child: IconButton(
+                          tooltip: 'Volume / Áudio',
+                          onPressed: () {
+                            HapticFeedback.lightImpact();
+                            playback.pause();
+                            showAudioSheet(
+                              context,
+                              ref,
+                              layer.id,
+                              playback: playback,
+                            );
+                          },
+                          icon: const Icon(
+                            CupertinoIcons.speaker_2,
+                            size: 20,
+                            color: AmColors.text,
+                          ),
                         ),
                       ),
-                    ),
                     Expanded(
                       child: IconButton(
                         tooltip: 'Vincular (Parentear)',
@@ -558,7 +562,8 @@ Future<void> showGridSheet(
             children: [
               const Padding(
                 padding: EdgeInsets.all(14),
-                child: AppText('Camadas da grade (ordem = indice)',
+                child: AppText(
+                  'Camadas da grade (ordem = indice)',
                   style: TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w700,
@@ -611,7 +616,8 @@ Future<void> showGridSheet(
                       Navigator.of(c2).pop();
                     },
                     child: AppTextMoldado(
-                      'Usar {0} camada(s)', [picked.length],
+                      'Usar {0} camada(s)',
+                      [picked.length],
                       style: const TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
@@ -632,590 +638,637 @@ Future<void> showGridSheet(
   await showParamSheet(
     context,
     builder: (sheetContext) => StatefulBuilder(
-      builder: (sheetContext, setSheetState) => ValueListenableBuilder<Duration>(
-        valueListenable: playback.time,
-        builder: (sheetContext, t, _) {
-          final layer = ref.read(editorControllerProvider).layerById(nullId);
-          if (layer is! NullLayer) return const SizedBox.shrink();
-          final rig = layer.grid;
-          final local = layer.localTime(t);
+      builder: (sheetContext, setSheetState) =>
+          ValueListenableBuilder<Duration>(
+            valueListenable: playback.time,
+            builder: (sheetContext, t, _) {
+              final layer = ref
+                  .read(editorControllerProvider)
+                  .layerById(nullId);
+              if (layer is! NullLayer) return const SizedBox.shrink();
+              final rig = layer.grid;
+              final local = layer.localTime(t);
 
-          Widget ruler(
-            String label,
-            double value,
-            double min,
-            double max,
-            String display,
-            ValueChanged<double> onChanged,
-          ) {
-            final numero = RegExp(r'^-?[\d.,]+').firstMatch(display);
-            final casas =
-                RegExp(r'[.,](\d+)$').firstMatch(numero?.group(0) ?? '');
-            return ParameterRow(
-              label: label,
-              value: value.clamp(min, max),
-              min: min,
-              max: max,
-              unitsPerPixel: (max - min) / 420,
-              decimals: casas?.group(1)?.length ?? 0,
-              unit: numero == null ? '' : display.substring(numero.end),
-              onChanged: (v) {
-                onChanged(v.clamp(min, max));
-                setSheetState(() {});
-              },
-            );
-          }
+              Widget ruler(
+                String label,
+                double value,
+                double min,
+                double max,
+                String display,
+                ValueChanged<double> onChanged,
+              ) {
+                final numero = RegExp(r'^-?[\d.,]+').firstMatch(display);
+                final casas = RegExp(r'[.,](\d+)$')
+                    .firstMatch(numero?.group(0) ?? '');
+                return ParameterRow(
+                  label: label,
+                  value: value.clamp(min, max),
+                  min: min,
+                  max: max,
+                  unitsPerPixel: (max - min) / 420,
+                  decimals: casas?.group(1)?.length ?? 0,
+                  unit: numero == null ? '' : display.substring(numero.end),
+                  onChanged: (v) {
+                    onChanged(v.clamp(min, max));
+                    setSheetState(() {});
+                  },
+                );
+              }
 
-          // Linha ANIMAVEL: cada parametro da grade tem sua trilha de
-          // keyframes propria, com diamante no playhead atual.
-          Widget animRow(
-            String label,
-            String key,
-            AnimatedDouble track,
-            double min,
-            double max,
-            String display, {
-            double scale = 1,
-          }) {
-            // Na lingua nova, o diamante mora na propria linha: toque
-            // poe/tira o keyframe; toque LONGO abre a curva (2+ kfs).
-            final numero = RegExp(r'^-?[\d.,]+').firstMatch(display);
-            final casas =
-                RegExp(r'[.,](\d+)$').firstMatch(numero?.group(0) ?? '');
-            return ParameterRow(
-              label: label,
-              value: (track.valueAt(local) * scale).clamp(min, max),
-              min: min,
-              max: max,
-              unitsPerPixel: (max - min) / 420,
-              decimals: casas?.group(1)?.length ?? 0,
-              unit: numero == null ? '' : display.substring(numero.end),
-              keyframe: KeyframeState(
-                animated: track.isAnimated,
-                here: track.hasKeyframeAt(local),
-                onToggle: () {
-                  controller.toggleGridParamKeyframe(nullId, key, t);
-                  setSheetState(() {});
-                },
-                onCurve: track.keyframes.length < 2
-                    ? null
-                    : () => showGridCurveSheet(
-                        context,
-                        ref,
-                        playback,
-                        nullId,
-                        key,
-                        label,
-                        onClosed: () {
-                          if (context.mounted) {
-                            showGridSheet(context, ref, nullId, playback);
-                          }
-                        },
-                      ),
-              ),
-              onChanged: (v) {
-                controller.editGridParam(nullId, key, t, v / scale);
-                setSheetState(() {});
-              },
-            );
-          }
+              // Linha ANIMAVEL: cada parametro da grade tem sua trilha de
+              // keyframes propria, com diamante no playhead atual.
+              Widget animRow(
+                String label,
+                String key,
+                AnimatedDouble track,
+                double min,
+                double max,
+                String display, {
+                double scale = 1,
+              }) {
+                // Na lingua nova, o diamante mora na propria linha: toque
+                // poe/tira o keyframe; toque LONGO abre a curva (2+ kfs).
+                final numero = RegExp(r'^-?[\d.,]+').firstMatch(display);
+                final casas = RegExp(r'[.,](\d+)$')
+                    .firstMatch(numero?.group(0) ?? '');
+                return ParameterRow(
+                  label: label,
+                  value: (track.valueAt(local) * scale).clamp(min, max),
+                  min: min,
+                  max: max,
+                  unitsPerPixel: (max - min) / 420,
+                  decimals: casas?.group(1)?.length ?? 0,
+                  unit: numero == null ? '' : display.substring(numero.end),
+                  keyframe: KeyframeState(
+                    animated: track.isAnimated,
+                    here: track.hasKeyframeAt(local),
+                    onToggle: () {
+                      controller.toggleGridParamKeyframe(nullId, key, t);
+                      setSheetState(() {});
+                    },
+                    onCurve: track.keyframes.length < 2
+                        ? null
+                        : () => showGridCurveSheet(
+                            context,
+                            ref,
+                            playback,
+                            nullId,
+                            key,
+                            label,
+                            onClosed: () {
+                              if (context.mounted) {
+                                showGridSheet(context, ref, nullId, playback);
+                              }
+                            },
+                          ),
+                  ),
+                  onChanged: (v) {
+                    controller.editGridParam(nullId, key, t, v / scale);
+                    setSheetState(() {});
+                  },
+                );
+              }
 
-          return SafeArea(
-            child: SingleChildScrollView(
-              padding: EdgeInsets.fromLTRB(
-                18,
-                14,
-                18,
-                14 + MediaQuery.of(sheetContext).viewInsets.bottom,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
+              return SafeArea(
+                child: SingleChildScrollView(
+                  padding: EdgeInsets.fromLTRB(
+                    18,
+                    14,
+                    18,
+                    14 + MediaQuery.of(sheetContext).viewInsets.bottom,
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Expanded(
-                        child: AppText('Modulo Grade',
-                          style: TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w700,
-                            color: AmColors.text,
+                      Row(
+                        children: [
+                          const Expanded(
+                            child: AppText(
+                              'Modulo Grade',
+                              style: TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.w700,
+                                color: AmColors.text,
+                              ),
+                            ),
+                          ),
+                          if (rig != null)
+                            Tocavel(
+                              onTap: () {
+                                controller.removeGrid(nullId);
+                                setSheetState(() {});
+                              },
+                              child: const AppText(
+                                'Remover',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: AmColors.muted,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      // Mini-transporte: anime keyframes SEM fechar o painel.
+                      SheetTransport(
+                        playback: playback,
+                        duration: ref.read(editorControllerProvider).duration,
+                        fps: ref.read(editorControllerProvider).fps,
+                      ),
+                      const SizedBox(height: 6),
+                      SizedBox(
+                        width: double.infinity,
+                        child: CupertinoButton(
+                          color: rig == null ? AmColors.accent : AmColors.chip,
+                          borderRadius: BorderRadius.circular(12),
+                          onPressed: () =>
+                              pickAssets(sheetContext, setSheetState),
+                          child: AppText(
+                            rig == null
+                                ? 'Escolher camadas da grade...'
+                                : 'Camadas: ${rig.assets.length}  (editar)',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              color: rig == null
+                                  ? AureaColors.onAccent
+                                  : AmColors.accent,
+                            ),
                           ),
                         ),
                       ),
-                      if (rig != null)
-                        Tocavel(
-                          onTap: () {
-                            controller.removeGrid(nullId);
-                            setSheetState(() {});
-                          },
-                          child: const AppText(
-                            'Remover',
+                      if (rig != null) ...[
+                        const SizedBox(height: 12),
+                        // Modo / morph: 1 Retangular, 2 Radial, 3 Esferico.
+                        Row(
+                          children: [
+                            for (final (label, mode) in const [
+                              ('Retangular', 1.0),
+                              ('Radial', 2.0),
+                              ('Esferico', 3.0),
+                            ])
+                              Padding(
+                                padding: const EdgeInsets.only(right: 8),
+                                child: Tocavel(
+                                  onTap: () {
+                                    // Com o morph ANIMADO, escolher um modo
+                                    // cria keyframe no playhead (nao apaga a
+                                    // animacao); sem animacao, so troca o modo.
+                                    if (rig.transition.isAnimated) {
+                                      controller.editGridTransition(
+                                        nullId,
+                                        playback.time.value,
+                                        mode,
+                                      );
+                                    } else {
+                                      controller.updateGrid(
+                                        nullId,
+                                        (g) => g.copyWith(
+                                          transition: AnimatedDouble(mode),
+                                        ),
+                                      );
+                                    }
+                                    setSheetState(() {});
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 8,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color:
+                                          (!rig.transition.isAnimated &&
+                                              rig.transition
+                                                      .valueAt(local)
+                                                      .round() ==
+                                                  mode.round())
+                                          ? AmColors.accentDim
+                                          : AmColors.chip,
+                                      borderRadius: BorderRadius.circular(9),
+                                    ),
+                                    child: AppText(
+                                      label,
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        color: AmColors.accent,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            const Spacer(),
+                            // Diamante do MORPH (transition animavel).
+                            CupertinoButton(
+                              padding: const EdgeInsets.all(4),
+                              onPressed: () {
+                                controller.toggleGridTransitionKeyframe(
+                                  nullId,
+                                  t,
+                                );
+                                setSheetState(() {});
+                              },
+                              child: Icon(
+                                rig.transition.hasKeyframeAt(local)
+                                    ? CupertinoIcons.rhombus_fill
+                                    : CupertinoIcons.rhombus,
+                                size: 18,
+                                color: rig.transition.isAnimated
+                                    ? AmColors.accent
+                                    : AmColors.muted,
+                              ),
+                            ),
+                            // Curva do MORPH.
+                            CupertinoButton(
+                              padding: const EdgeInsets.all(4),
+                              onPressed: () {
+                                if (rig.transition.keyframes.length < 2) {
+                                  showReasonToast(
+                                    context,
+                                    'Crie 2+ keyframes no morph para editar a curva',
+                                  );
+                                  return;
+                                }
+                                showGridCurveSheet(
+                                  context,
+                                  ref,
+                                  playback,
+                                  nullId,
+                                  'transition',
+                                  'Morph',
+                                  onClosed: () {
+                                    if (context.mounted) {
+                                      showGridSheet(
+                                        context,
+                                        ref,
+                                        nullId,
+                                        playback,
+                                      );
+                                    }
+                                  },
+                                );
+                              },
+                              child: Icon(
+                                CupertinoIcons.graph_square,
+                                size: 18,
+                                color: rig.transition.keyframes.length >= 2
+                                    ? AmColors.accent
+                                    : AmColors.muted,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        ruler(
+                          'Morph',
+                          rig.transition.valueAt(local),
+                          1,
+                          3,
+                          amNumber(rig.transition.valueAt(local), 1),
+                          (v) => controller.editGridTransition(nullId, t, v),
+                        ),
+                        ruler(
+                          'Colunas',
+                          rig.columns.toDouble(),
+                          1,
+                          12,
+                          '${rig.columns}',
+                          (v) => controller.updateGrid(
+                            nullId,
+                            (g) => g.copyWith(columns: v.round()),
+                          ),
+                        ),
+                        animRow(
+                          'Espaco X',
+                          'spacingX',
+                          rig.spacingX,
+                          20,
+                          800,
+                          amNumber(rig.spacingX.valueAt(local), 0),
+                        ),
+                        animRow(
+                          'Espaco Y',
+                          'spacingY',
+                          rig.spacingY,
+                          20,
+                          800,
+                          amNumber(rig.spacingY.valueAt(local), 0),
+                        ),
+                        animRow(
+                          'Raio',
+                          'radius',
+                          rig.radius,
+                          40,
+                          1200,
+                          amNumber(rig.radius.valueAt(local), 0),
+                        ),
+                        animRow(
+                          'Rotacao',
+                          'rotation',
+                          rig.gridRotationDeg,
+                          -180,
+                          180,
+                          '${amNumber(rig.gridRotationDeg.valueAt(local), 0)}°',
+                        ),
+                        animRow(
+                          'Twist',
+                          'twist',
+                          rig.twistDeg,
+                          -180,
+                          180,
+                          '${amNumber(rig.twistDeg.valueAt(local), 0)}°',
+                        ),
+                        animRow(
+                          'Stagger',
+                          'stagger',
+                          rig.staggerDeg,
+                          -360,
+                          360,
+                          '${amNumber(rig.staggerDeg.valueAt(local), 0)}°',
+                        ),
+                        animRow(
+                          'Prof. Z',
+                          'zDepth',
+                          rig.zDepth,
+                          -400,
+                          400,
+                          amNumber(rig.zDepth.valueAt(local), 0),
+                        ),
+                        animRow(
+                          'Esc. frente',
+                          'scaleFront',
+                          rig.scaleFront,
+                          10,
+                          300,
+                          amNumber(rig.scaleFront.valueAt(local) * 100, 0),
+                          scale: 100,
+                        ),
+                        animRow(
+                          'Esc. tras',
+                          'scaleBack',
+                          rig.scaleBack,
+                          10,
+                          300,
+                          amNumber(rig.scaleBack.valueAt(local) * 100, 0),
+                          scale: 100,
+                        ),
+                        animRow(
+                          'Aleatorio',
+                          'randomOffset',
+                          rig.randomOffset,
+                          0,
+                          300,
+                          amNumber(rig.randomOffset.valueAt(local), 0),
+                        ),
+                        ruler(
+                          'Semente',
+                          rig.seed.toDouble(),
+                          0,
+                          100,
+                          '${rig.seed}',
+                          (v) => controller.updateGrid(
+                            nullId,
+                            (g) => g.copyWith(seed: v.round()),
+                          ),
+                        ),
+                        Row(
+                          children: [
+                            const AppText(
+                              'Embaralhar',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: AmColors.muted,
+                              ),
+                            ),
+                            Transform.scale(
+                              scale: 0.68,
+                              child: CupertinoSwitch(
+                                value: rig.shuffle,
+                                activeTrackColor: AmColors.accent,
+                                onChanged: (v) {
+                                  controller.updateGrid(
+                                    nullId,
+                                    (g) => g.copyWith(shuffle: v),
+                                  );
+                                  setSheetState(() {});
+                                },
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            const AppText(
+                              'Proximidade',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: AmColors.muted,
+                              ),
+                            ),
+                            Transform.scale(
+                              scale: 0.68,
+                              child: CupertinoSwitch(
+                                value: rig.proximity?.enabled ?? false,
+                                activeTrackColor: AmColors.accent,
+                                onChanged: (v) {
+                                  controller.updateGrid(nullId, (g) {
+                                    if (v) {
+                                      return g.copyWith(
+                                        proximity:
+                                            (g.proximity ?? ProximityGroup())
+                                                .copyWith(enabled: true),
+                                      );
+                                    }
+                                    return g.copyWith(
+                                      proximity: g.proximity?.copyWith(
+                                        enabled: false,
+                                      ),
+                                    );
+                                  });
+                                  setSheetState(() {});
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        // Nulo CONTROLADOR: um SEGUNDO nulo cujo transform
+                        // modula a grade — animar/curvar o nulo anima a grade.
+                        Row(
+                          children: [
+                            const AppText(
+                              'Nulo controlador',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: AmColors.muted,
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Tocavel(
+                                onTap: () async {
+                                  final pickedId = await _pickControllerNull(
+                                    sheetContext,
+                                    ref,
+                                    nullId,
+                                  );
+                                  if (pickedId == '') {
+                                    controller.setGridController(nullId, null);
+                                  } else if (pickedId != null) {
+                                    controller.setGridController(
+                                      nullId,
+                                      pickedId,
+                                    );
+                                  }
+                                  setSheetState(() {});
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 8,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: rig.controllerId != null
+                                        ? AmColors.accentDim
+                                        : AmColors.chip,
+                                    borderRadius: BorderRadius.circular(9),
+                                  ),
+                                  child: AppText(
+                                    rig.controllerId == null
+                                        ? 'Nenhum'
+                                        : (ref
+                                                  .read(
+                                                    editorControllerProvider,
+                                                  )
+                                                  .layerById(rig.controllerId!)
+                                                  ?.name ??
+                                              'Nulo removido'),
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: AmColors.accent,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (rig.controllerId != null)
+                          const Padding(
+                            padding: EdgeInsets.only(top: 4),
+                            child: AppText(
+                              'Escala do nulo -> espacamento/raio · Rotacao Z '
+                              '-> rotacao da grade · Rotacao Y -> twist.',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: AmColors.muted,
+                              ),
+                            ),
+                          ),
+                        if (rig.proximity?.enabled ?? false) ...[
+                          const SizedBox(height: 6),
+                          const AppText(
+                            'O effector e uma ESFERA 3D: raio 200 tambem '
+                            'alcanca 200 de profundidade.',
                             style: TextStyle(
-                              fontSize: 13,
+                              fontSize: 11,
                               color: AmColors.muted,
                             ),
                           ),
-                        ),
-                    ],
-                  ),
-                  // Mini-transporte: anime keyframes SEM fechar o painel.
-                  SheetTransport(
-                    playback: playback,
-                    duration: ref.read(editorControllerProvider).duration,
-                    fps: ref.read(editorControllerProvider).fps,
-                  ),
-                  const SizedBox(height: 6),
-                  SizedBox(
-                    width: double.infinity,
-                    child: CupertinoButton(
-                      color: rig == null ? AmColors.accent : AmColors.chip,
-                      borderRadius: BorderRadius.circular(12),
-                      onPressed: () => pickAssets(sheetContext, setSheetState),
-                      child: AppText(
-                        rig == null
-                            ? 'Escolher camadas da grade...'
-                            : 'Camadas: ${rig.assets.length}  (editar)',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: rig == null
-                              ? AureaColors.onAccent
-                              : AmColors.accent,
-                        ),
-                      ),
-                    ),
-                  ),
-                  if (rig != null) ...[
-                    const SizedBox(height: 12),
-                    // Modo / morph: 1 Retangular, 2 Radial, 3 Esferico.
-                    Row(
-                      children: [
-                        for (final (label, mode) in const [
-                          ('Retangular', 1.0),
-                          ('Radial', 2.0),
-                          ('Esferico', 3.0),
-                        ])
-                          Padding(
-                            padding: const EdgeInsets.only(right: 8),
-                            child: Tocavel(
-                              onTap: () {
-                                // Com o morph ANIMADO, escolher um modo
-                                // cria keyframe no playhead (nao apaga a
-                                // animacao); sem animacao, so troca o modo.
-                                if (rig.transition.isAnimated) {
-                                  controller.editGridTransition(
-                                    nullId,
-                                    playback.time.value,
-                                    mode,
-                                  );
-                                } else {
-                                  controller.updateGrid(
-                                    nullId,
-                                    (g) => g.copyWith(
-                                      transition: AnimatedDouble(mode),
-                                    ),
-                                  );
-                                }
-                                setSheetState(() {});
-                              },
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 8,
-                                ),
-                                decoration: BoxDecoration(
-                                  color:
-                                      (!rig.transition.isAnimated &&
-                                          rig.transition
-                                                  .valueAt(local)
-                                                  .round() ==
-                                              mode.round())
-                                      ? AmColors.accentDim
-                                      : AmColors.chip,
-                                  borderRadius: BorderRadius.circular(9),
-                                ),
-                                child: AppText(
-                                  label,
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    color: AmColors.accent,
+                          const SizedBox(height: 6),
+                          ruler(
+                            'Effector X',
+                            rig.proximity!.effector.valueAt(local).dx,
+                            -800,
+                            800,
+                            amNumber(
+                              rig.proximity!.effector.valueAt(local).dx,
+                              0,
+                            ),
+                            (v) => controller.updateGrid(nullId, (g) {
+                              final p = g.proximity!;
+                              final cur = p.effector.valueAt(local);
+                              return g.copyWith(
+                                proximity: p.copyWith(
+                                  effector: p.effector.edited(
+                                    local,
+                                    Offset(v, cur.dy),
                                   ),
                                 ),
-                              ),
+                              );
+                            }),
+                          ),
+                          ruler(
+                            'Effector Y',
+                            rig.proximity!.effector.valueAt(local).dy,
+                            -800,
+                            800,
+                            amNumber(
+                              rig.proximity!.effector.valueAt(local).dy,
+                              0,
                             ),
-                          ),
-                        const Spacer(),
-                        // Diamante do MORPH (transition animavel).
-                        CupertinoButton(
-                          padding: const EdgeInsets.all(4),
-                          onPressed: () {
-                            controller.toggleGridTransitionKeyframe(nullId, t);
-                            setSheetState(() {});
-                          },
-                          child: Icon(
-                            rig.transition.hasKeyframeAt(local)
-                                ? CupertinoIcons.rhombus_fill
-                                : CupertinoIcons.rhombus,
-                            size: 18,
-                            color: rig.transition.isAnimated
-                                ? AmColors.accent
-                                : AmColors.muted,
-                          ),
-                        ),
-                        // Curva do MORPH.
-                        CupertinoButton(
-                          padding: const EdgeInsets.all(4),
-                          onPressed: () {
-                            if (rig.transition.keyframes.length < 2) {
-                              showReasonToast(
-                                context,
-                                'Crie 2+ keyframes no morph para editar a curva',
-                              );
-                              return;
-                            }
-                            showGridCurveSheet(
-                              context,
-                              ref,
-                              playback,
-                              nullId,
-                              'transition',
-                              'Morph',
-                              onClosed: () {
-                                if (context.mounted) {
-                                  showGridSheet(context, ref, nullId, playback);
-                                }
-                              },
-                            );
-                          },
-                          child: Icon(
-                            CupertinoIcons.graph_square,
-                            size: 18,
-                            color: rig.transition.keyframes.length >= 2
-                                ? AmColors.accent
-                                : AmColors.muted,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    ruler(
-                      'Morph',
-                      rig.transition.valueAt(local),
-                      1,
-                      3,
-                      amNumber(rig.transition.valueAt(local), 1),
-                      (v) => controller.editGridTransition(nullId, t, v),
-                    ),
-                    ruler(
-                      'Colunas',
-                      rig.columns.toDouble(),
-                      1,
-                      12,
-                      '${rig.columns}',
-                      (v) => controller.updateGrid(
-                        nullId,
-                        (g) => g.copyWith(columns: v.round()),
-                      ),
-                    ),
-                    animRow(
-                      'Espaco X',
-                      'spacingX',
-                      rig.spacingX,
-                      20,
-                      800,
-                      amNumber(rig.spacingX.valueAt(local), 0),
-                    ),
-                    animRow(
-                      'Espaco Y',
-                      'spacingY',
-                      rig.spacingY,
-                      20,
-                      800,
-                      amNumber(rig.spacingY.valueAt(local), 0),
-                    ),
-                    animRow(
-                      'Raio',
-                      'radius',
-                      rig.radius,
-                      40,
-                      1200,
-                      amNumber(rig.radius.valueAt(local), 0),
-                    ),
-                    animRow(
-                      'Rotacao',
-                      'rotation',
-                      rig.gridRotationDeg,
-                      -180,
-                      180,
-                      '${amNumber(rig.gridRotationDeg.valueAt(local), 0)}°',
-                    ),
-                    animRow(
-                      'Twist',
-                      'twist',
-                      rig.twistDeg,
-                      -180,
-                      180,
-                      '${amNumber(rig.twistDeg.valueAt(local), 0)}°',
-                    ),
-                    animRow(
-                      'Stagger',
-                      'stagger',
-                      rig.staggerDeg,
-                      -360,
-                      360,
-                      '${amNumber(rig.staggerDeg.valueAt(local), 0)}°',
-                    ),
-                    animRow(
-                      'Prof. Z',
-                      'zDepth',
-                      rig.zDepth,
-                      -400,
-                      400,
-                      amNumber(rig.zDepth.valueAt(local), 0),
-                    ),
-                    animRow(
-                      'Esc. frente',
-                      'scaleFront',
-                      rig.scaleFront,
-                      10,
-                      300,
-                      amNumber(rig.scaleFront.valueAt(local) * 100, 0),
-                      scale: 100,
-                    ),
-                    animRow(
-                      'Esc. tras',
-                      'scaleBack',
-                      rig.scaleBack,
-                      10,
-                      300,
-                      amNumber(rig.scaleBack.valueAt(local) * 100, 0),
-                      scale: 100,
-                    ),
-                    animRow(
-                      'Aleatorio',
-                      'randomOffset',
-                      rig.randomOffset,
-                      0,
-                      300,
-                      amNumber(rig.randomOffset.valueAt(local), 0),
-                    ),
-                    ruler(
-                      'Semente',
-                      rig.seed.toDouble(),
-                      0,
-                      100,
-                      '${rig.seed}',
-                      (v) => controller.updateGrid(
-                        nullId,
-                        (g) => g.copyWith(seed: v.round()),
-                      ),
-                    ),
-                    Row(
-                      children: [
-                        const AppText('Embaralhar',
-                          style: TextStyle(fontSize: 13, color: AmColors.muted),
-                        ),
-                        Transform.scale(
-                          scale: 0.68,
-                          child: CupertinoSwitch(
-                            value: rig.shuffle,
-                            activeTrackColor: AmColors.accent,
-                            onChanged: (v) {
-                              controller.updateGrid(
-                                nullId,
-                                (g) => g.copyWith(shuffle: v),
-                              );
-                              setSheetState(() {});
-                            },
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        const AppText('Proximidade',
-                          style: TextStyle(fontSize: 13, color: AmColors.muted),
-                        ),
-                        Transform.scale(
-                          scale: 0.68,
-                          child: CupertinoSwitch(
-                            value: rig.proximity?.enabled ?? false,
-                            activeTrackColor: AmColors.accent,
-                            onChanged: (v) {
-                              controller.updateGrid(nullId, (g) {
-                                if (v) {
-                                  return g.copyWith(
-                                    proximity: (g.proximity ?? ProximityGroup())
-                                        .copyWith(enabled: true),
-                                  );
-                                }
-                                return g.copyWith(
-                                  proximity: g.proximity?.copyWith(
-                                    enabled: false,
+                            (v) => controller.updateGrid(nullId, (g) {
+                              final p = g.proximity!;
+                              final cur = p.effector.valueAt(local);
+                              return g.copyWith(
+                                proximity: p.copyWith(
+                                  effector: p.effector.edited(
+                                    local,
+                                    Offset(cur.dx, v),
                                   ),
-                                );
-                              });
-                              setSheetState(() {});
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    // Nulo CONTROLADOR: um SEGUNDO nulo cujo transform
-                    // modula a grade — animar/curvar o nulo anima a grade.
-                    Row(
-                      children: [
-                        const AppText('Nulo controlador',
-                          style: TextStyle(fontSize: 13, color: AmColors.muted),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Tocavel(
-                            onTap: () async {
-                              final pickedId = await _pickControllerNull(
-                                sheetContext,
-                                ref,
-                                nullId,
-                              );
-                              if (pickedId == '') {
-                                controller.setGridController(nullId, null);
-                              } else if (pickedId != null) {
-                                controller.setGridController(nullId, pickedId);
-                              }
-                              setSheetState(() {});
-                            },
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 8,
-                              ),
-                              decoration: BoxDecoration(
-                                color: rig.controllerId != null
-                                    ? AmColors.accentDim
-                                    : AmColors.chip,
-                                borderRadius: BorderRadius.circular(9),
-                              ),
-                              child: AppText(
-                                rig.controllerId == null
-                                    ? 'Nenhum'
-                                    : (ref
-                                              .read(editorControllerProvider)
-                                              .layerById(rig.controllerId!)
-                                              ?.name ??
-                                          'Nulo removido'),
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  color: AmColors.accent,
                                 ),
-                              ),
-                            ),
+                              );
+                            }),
                           ),
-                        ),
+                          ruler(
+                            'Raio prox.',
+                            rig.proximity!.radius.valueAt(local),
+                            20,
+                            800,
+                            amNumber(rig.proximity!.radius.valueAt(local), 0),
+                            (v) => controller.updateGrid(nullId, (g) {
+                              final p = g.proximity!;
+                              return g.copyWith(
+                                proximity: p.copyWith(
+                                  radius: p.radius.edited(local, v),
+                                ),
+                              );
+                            }),
+                          ),
+                          ruler(
+                            'Escala max',
+                            rig.proximity!.scaleMax * 100,
+                            20,
+                            400,
+                            amNumber(rig.proximity!.scaleMax * 100, 0),
+                            (v) => controller.updateGrid(nullId, (g) {
+                              return g.copyWith(
+                                proximity: g.proximity!.copyWith(
+                                  scaleMax: v / 100,
+                                ),
+                              );
+                            }),
+                          ),
+                          ruler(
+                            'Atrair',
+                            rig.proximity!.attract.valueAt(local),
+                            -300,
+                            300,
+                            amNumber(rig.proximity!.attract.valueAt(local), 0),
+                            (v) => controller.updateGrid(nullId, (g) {
+                              final p = g.proximity!;
+                              return g.copyWith(
+                                proximity: p.copyWith(
+                                  attract: p.attract.edited(local, v),
+                                ),
+                              );
+                            }),
+                          ),
+                        ],
                       ],
-                    ),
-                    if (rig.controllerId != null)
-                      const Padding(
-                        padding: EdgeInsets.only(top: 4),
-                        child: AppText('Escala do nulo -> espacamento/raio · Rotacao Z '
-                          '-> rotacao da grade · Rotacao Y -> twist.',
-                          style: TextStyle(fontSize: 11, color: AmColors.muted),
-                        ),
-                      ),
-                    if (rig.proximity?.enabled ?? false) ...[
-                      const SizedBox(height: 6),
-                      const AppText('O effector e uma ESFERA 3D: raio 200 tambem '
-                        'alcanca 200 de profundidade.',
-                        style: TextStyle(fontSize: 11, color: AmColors.muted),
-                      ),
-                      const SizedBox(height: 6),
-                      ruler(
-                        'Effector X',
-                        rig.proximity!.effector.valueAt(local).dx,
-                        -800,
-                        800,
-                        amNumber(rig.proximity!.effector.valueAt(local).dx, 0),
-                        (v) => controller.updateGrid(nullId, (g) {
-                          final p = g.proximity!;
-                          final cur = p.effector.valueAt(local);
-                          return g.copyWith(
-                            proximity: p.copyWith(
-                              effector: p.effector.edited(
-                                local,
-                                Offset(v, cur.dy),
-                              ),
-                            ),
-                          );
-                        }),
-                      ),
-                      ruler(
-                        'Effector Y',
-                        rig.proximity!.effector.valueAt(local).dy,
-                        -800,
-                        800,
-                        amNumber(rig.proximity!.effector.valueAt(local).dy, 0),
-                        (v) => controller.updateGrid(nullId, (g) {
-                          final p = g.proximity!;
-                          final cur = p.effector.valueAt(local);
-                          return g.copyWith(
-                            proximity: p.copyWith(
-                              effector: p.effector.edited(
-                                local,
-                                Offset(cur.dx, v),
-                              ),
-                            ),
-                          );
-                        }),
-                      ),
-                      ruler(
-                        'Raio prox.',
-                        rig.proximity!.radius.valueAt(local),
-                        20,
-                        800,
-                        amNumber(rig.proximity!.radius.valueAt(local), 0),
-                        (v) => controller.updateGrid(nullId, (g) {
-                          final p = g.proximity!;
-                          return g.copyWith(
-                            proximity: p.copyWith(
-                              radius: p.radius.edited(local, v),
-                            ),
-                          );
-                        }),
-                      ),
-                      ruler(
-                        'Escala max',
-                        rig.proximity!.scaleMax * 100,
-                        20,
-                        400,
-                        amNumber(rig.proximity!.scaleMax * 100, 0),
-                        (v) => controller.updateGrid(nullId, (g) {
-                          return g.copyWith(
-                            proximity: g.proximity!.copyWith(scaleMax: v / 100),
-                          );
-                        }),
-                      ),
-                      ruler(
-                        'Atrair',
-                        rig.proximity!.attract.valueAt(local),
-                        -300,
-                        300,
-                        amNumber(rig.proximity!.attract.valueAt(local), 0),
-                        (v) => controller.updateGrid(nullId, (g) {
-                          final p = g.proximity!;
-                          return g.copyWith(
-                            proximity: p.copyWith(
-                              attract: p.attract.edited(local, v),
-                            ),
-                          );
-                        }),
-                      ),
                     ],
-                  ],
-                ],
-              ),
-            ),
-          );
-        },
-      ),
+                  ),
+                ),
+              );
+            },
+          ),
     ),
   );
 }
@@ -1268,8 +1321,8 @@ Future<void> showMasksSheet(
             ValueChanged<double> onChanged,
           ) {
             final numero = RegExp(r'^-?[\d.,]+').firstMatch(display);
-            final casas =
-                RegExp(r'[.,](\d+)$').firstMatch(numero?.group(0) ?? '');
+            final casas = RegExp(r'[.,](\d+)$')
+                .firstMatch(numero?.group(0) ?? '');
             return ParameterRow(
               label: label,
               value: value.clamp(min, max),
@@ -1331,7 +1384,8 @@ Future<void> showMasksSheet(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const AppText('Máscaras',
+                  const AppText(
+                    'Máscaras',
                     style: TextStyle(
                       fontSize: 17,
                       fontWeight: FontWeight.w700,
@@ -1344,7 +1398,8 @@ Future<void> showMasksSheet(
                     fps: ref.read(editorControllerProvider).fps,
                   ),
                   const SizedBox(height: 4),
-                  const AppText('A primeira corta o alfa da camada; as seguintes '
+                  const AppText(
+                    'A primeira corta o alfa da camada; as seguintes '
                     'operam sobre as de cima.',
                     style: TextStyle(fontSize: 12, color: AmColors.muted),
                   ),
@@ -1497,7 +1552,8 @@ Future<void> showMasksSheet(
                           Row(
                             children: [
                               const Expanded(
-                                child: AppText('Inverter',
+                                child: AppText(
+                                  'Inverter',
                                   style: TextStyle(
                                     fontSize: 12,
                                     color: AmColors.muted,
@@ -1521,14 +1577,16 @@ Future<void> showMasksSheet(
                             ],
                           ),
                           if (!m.path.valueAt(local).closed)
-                            const AppText('Caminho aberto nao corta; pode servir de entrada de efeito.',
+                            const AppText(
+                              'Caminho aberto nao corta; pode servir de entrada de efeito.',
                               style: TextStyle(
                                 fontSize: 11,
                                 color: AmColors.accent,
                               ),
                             ),
                           if (maskFeatherExceedsBounds(m, local, maskSize))
-                            const AppText('Aviso: caminho + feather/2 + expansao passa do limite.',
+                            const AppText(
+                              'Aviso: caminho + feather/2 + expansao passa do limite.',
                               style: TextStyle(
                                 fontSize: 11,
                                 color: AmColors.accent,
@@ -1677,7 +1735,8 @@ Future<void> showParentSheet(
         children: [
           const Padding(
             padding: EdgeInsets.all(14),
-            child: AppText('Seguir a camada (pai)...',
+            child: AppText(
+              'Seguir a camada (pai)...',
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w700,
@@ -1695,10 +1754,12 @@ Future<void> showParentSheet(
                 size: 20,
                 color: AmColors.muted,
               ),
-              title: const AppText('Nenhum',
+              title: const AppText(
+                'Nenhum',
                 style: TextStyle(color: AmColors.text),
               ),
-              subtitle: const AppText('Solta a camada do pai',
+              subtitle: const AppText(
+                'Solta a camada do pai',
                 style: TextStyle(fontSize: 11, color: AmColors.muted),
               ),
               trailing: currentParentId == null
@@ -1724,8 +1785,7 @@ Future<void> showParentSheet(
                 // A PROPRIA CAMADA aparece esmaecida em vez de sumir da
                 // lista: sumir faz procurar o que nao existe. Parentear em
                 // si mesma nao da, e a lista diz isso.
-                opacity:
-                    other.id == child.id || descendentes.contains(other.id)
+                opacity: other.id == child.id || descendentes.contains(other.id)
                     ? 0.35
                     : 1,
                 child: ListTile(
@@ -1765,11 +1825,13 @@ Future<void> showParentSheet(
                     style: const TextStyle(color: AmColors.text),
                   ),
                   subtitle: other.id == child.id
-                      ? const AppText('É a própria camada',
+                      ? const AppText(
+                          'É a própria camada',
                           style: TextStyle(fontSize: 11, color: AmColors.muted),
                         )
                       : descendentes.contains(other.id)
-                      ? const AppText('Já segue esta camada',
+                      ? const AppText(
+                          'Já segue esta camada',
                           style: TextStyle(fontSize: 11, color: AmColors.muted),
                         )
                       : other is NullLayer
@@ -1793,8 +1855,7 @@ Future<void> showParentSheet(
                           size: 20,
                         )
                       : null,
-                  onTap:
-                      other.id == child.id || descendentes.contains(other.id)
+                  onTap: other.id == child.id || descendentes.contains(other.id)
                       ? null
                       : () {
                           controller.linkProperty(
@@ -1834,6 +1895,7 @@ Future<void> showParticulasSheet(
   String layerId,
 ) async {
   final controller = ref.read(editorControllerProvider.notifier);
+  var mostrarAvancado = false;
 
   await showParamSheet(
     context,
@@ -1857,9 +1919,8 @@ Future<void> showParticulasSheet(
           ValueChanged<double> onChanged,
         ) {
           final numero = RegExp(r'^-?[\d.,]+').firstMatch(display);
-          final casas = RegExp(
-            r'[.,](\d+)$',
-          ).firstMatch(numero?.group(0) ?? '');
+          final casas = RegExp(r'[.,](\d+)$')
+              .firstMatch(numero?.group(0) ?? '');
           return ParameterRow(
             label: label,
             value: value.clamp(min, max),
@@ -1882,42 +1943,49 @@ Future<void> showParticulasSheet(
           ValueChanged<int> onPick,
         ) {
           return Padding(
-            padding: const EdgeInsets.only(bottom: 4),
-            child: ParameterCustomRow(
-              label: label,
-              child: Wrap(
-                spacing: 7,
-                runSpacing: 7,
-                alignment: WrapAlignment.end,
-                children: [
-                  for (var i = 0; i < nomes.length; i++)
-                    Tocavel(
-                      onTap: () {
-                        onPick(i);
-                        setSheetState(() {});
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 11,
-                          vertical: 7,
-                        ),
-                        decoration: BoxDecoration(
-                          color: atual == i
-                              ? AmColors.accentDim
-                              : AmColors.chip,
-                          borderRadius: BorderRadius.circular(9),
-                        ),
-                        child: AppText(
-                          nomes[i],
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: AmColors.accent,
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                AppText(
+                  label,
+                  style: const TextStyle(fontSize: 13, color: AmColors.muted),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 7,
+                  runSpacing: 7,
+                  alignment: WrapAlignment.start,
+                  children: [
+                    for (var i = 0; i < nomes.length; i++)
+                      Tocavel(
+                        onTap: () {
+                          onPick(i);
+                          setSheetState(() {});
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 11,
+                            vertical: 7,
+                          ),
+                          decoration: BoxDecoration(
+                            color: atual == i
+                                ? AmColors.accentDim
+                                : AmColors.chip,
+                            borderRadius: BorderRadius.circular(9),
+                          ),
+                          child: AppText(
+                            nomes[i],
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: AmColors.accent,
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                ],
-              ),
+                  ],
+                ),
+              ],
             ),
           );
         }
@@ -1968,17 +2036,14 @@ Future<void> showParticulasSheet(
         }) {
           return Padding(
             padding: const EdgeInsets.only(bottom: 8),
-            child: Row(
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 10,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                SizedBox(
-                  width: 86,
-                  child: AppText(
-                    label,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      color: AmColors.muted,
-                    ),
-                  ),
+                AppText(
+                  label,
+                  style: const TextStyle(fontSize: 13, color: AmColors.muted),
                 ),
                 if (onLimpar != null)
                   Tocavel(
@@ -1994,21 +2059,16 @@ Future<void> showParticulasSheet(
                       ),
                       child: const AppText(
                         'Nenhuma',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: AmColors.accent,
-                        ),
+                        style: TextStyle(fontSize: 12, color: AmColors.accent),
                       ),
                     ),
                   ),
-                const Spacer(),
                 for (final c in paleta)
                   Tocavel(
                     onTap: () => onPick(c.toARGB32()),
                     child: Container(
-                      width: 26,
-                      height: 26,
-                      margin: const EdgeInsets.only(left: 7),
+                      width: 32,
+                      height: 32,
                       decoration: BoxDecoration(
                         color: c,
                         shape: BoxShape.circle,
@@ -2063,10 +2123,8 @@ Future<void> showParticulasSheet(
                         for (var i = 0; i < nomesDosPresets.length; i++)
                           Tocavel(
                             onTap: () {
-                              final nova = MotorDeParticulasRender.aplicarPreset(
-                                i,
-                                q,
-                              );
+                              final nova =
+                                  MotorDeParticulasRender.aplicarPreset(i, q);
                               if (nova == null) return;
                               controller.updateParticulas(layerId, (_) => nova);
                               setSheetState(() {});
@@ -2094,18 +2152,23 @@ Future<void> showParticulasSheet(
                   ),
                 ],
 
-                titulo('FLUXO'),
+                // A tela principal fica curta de propósito: estes são os
+                // controles que mudam imediatamente o resultado em qualquer
+                // preset. A receita completa continua disponível abaixo para
+                // projetos antigos e ajustes específicos.
+                titulo('PRINCIPAL'),
+                if (q.taxaDeNascimento > 0)
+                  row(
+                    'Emissao/s',
+                    q.taxaDeNascimento,
+                    1,
+                    600,
+                    1.2,
+                    amNumber(q.taxaDeNascimento, 0),
+                    (v) => up((p) => p.taxaDeNascimento = v),
+                  ),
                 row(
-                  'Nascimentos/s',
-                  q.taxaDeNascimento,
-                  0,
-                  600,
-                  1.2,
-                  amNumber(q.taxaDeNascimento, 0),
-                  (v) => up((p) => p.taxaDeNascimento = v),
-                ),
-                row(
-                  'Quantidade',
+                  q.taxaDeNascimento > 0 ? 'Limite' : 'Quantidade',
                   q.maximo.toDouble(),
                   1,
                   6000,
@@ -2123,76 +2186,6 @@ Future<void> showParticulasSheet(
                   (v) => up((p) => p.vidaS = v),
                 ),
                 row(
-                  'Vida aleat.',
-                  q.vidaVariacao,
-                  0,
-                  1,
-                  0.003,
-                  amNumber(q.vidaVariacao * 100, 0),
-                  (v) => up((p) => p.vidaVariacao = v),
-                ),
-                row(
-                  'Semente',
-                  q.semente.toDouble(),
-                  0,
-                  9999,
-                  14,
-                  '${q.semente}',
-                  (v) => up((p) => p.semente = v.round()),
-                ),
-
-                titulo('EMISSOR'),
-                chips(
-                  'Forma',
-                  const ['Caixa', 'Ponto', 'Esfera', 'Linha', 'Anel'],
-                  q.emissor.index,
-                  (i) => up((p) => p.emissor = EmissorDeParticulas.values[i]),
-                ),
-                chips(
-                  'Saida',
-                  const ['Cone', 'Todas', 'Para fora'],
-                  q.modoDeEmissao.index,
-                  (i) => up((p) => p.modoDeEmissao = ModoDeEmissao.values[i]),
-                ),
-                row(
-                  'Area X',
-                  q.largura,
-                  0,
-                  4000,
-                  5,
-                  amNumber(q.largura, 0),
-                  (v) => up((p) => p.largura = v),
-                ),
-                row(
-                  'Area Y',
-                  q.altura,
-                  0,
-                  4000,
-                  5,
-                  amNumber(q.altura, 0),
-                  (v) => up((p) => p.altura = v),
-                ),
-                row(
-                  'Z (fundo)',
-                  q.profundidade,
-                  0,
-                  4000,
-                  5,
-                  amNumber(q.profundidade, 0),
-                  (v) => up((p) => p.profundidade = v),
-                ),
-                row(
-                  'Raio',
-                  q.raio,
-                  0,
-                  2000,
-                  4,
-                  amNumber(q.raio, 0),
-                  (v) => up((p) => p.raio = v),
-                ),
-
-                titulo('MOVIMENTO'),
-                row(
                   'Velocidade',
                   q.velocidade,
                   0,
@@ -2200,24 +2193,6 @@ Future<void> showParticulasSheet(
                   4,
                   amNumber(q.velocidade, 0),
                   (v) => up((p) => p.velocidade = v),
-                ),
-                row(
-                  'Direcao',
-                  q.direcaoGraus,
-                  -180,
-                  180,
-                  0.9,
-                  '${amNumber(q.direcaoGraus, 0)}°',
-                  (v) => up((p) => p.direcaoGraus = v),
-                ),
-                row(
-                  'Abertura',
-                  q.aberturaGraus,
-                  0,
-                  360,
-                  0.9,
-                  '${amNumber(q.aberturaGraus, 0)}°',
-                  (v) => up((p) => p.aberturaGraus = v),
                 ),
                 row(
                   'Gravidade',
@@ -2229,44 +2204,6 @@ Future<void> showParticulasSheet(
                   (v) => up((p) => p.gravidade = v),
                 ),
                 row(
-                  'Vento X',
-                  q.ventoX,
-                  -2000,
-                  2000,
-                  4,
-                  amNumber(q.ventoX, 0),
-                  (v) => up((p) => p.ventoX = v),
-                ),
-                row(
-                  'Vento Y',
-                  q.ventoY,
-                  -2000,
-                  2000,
-                  4,
-                  amNumber(q.ventoY, 0),
-                  (v) => up((p) => p.ventoY = v),
-                ),
-                row(
-                  'Vento Z',
-                  q.ventoZ,
-                  -2000,
-                  2000,
-                  4,
-                  amNumber(q.ventoZ, 0),
-                  (v) => up((p) => p.ventoZ = v),
-                ),
-                row(
-                  'Ar (freio)',
-                  q.arrasto,
-                  0,
-                  12,
-                  0.03,
-                  amNumber(q.arrasto, 2),
-                  (v) => up((p) => p.arrasto = v),
-                ),
-
-                titulo('FORCAS'),
-                row(
                   'Turbulencia',
                   q.turbulencia,
                   0,
@@ -2275,100 +2212,6 @@ Future<void> showParticulasSheet(
                   amNumber(q.turbulencia, 0),
                   (v) => up((p) => p.turbulencia = v),
                 ),
-                row(
-                  'Detalhe',
-                  q.turbulenciaEscala,
-                  20,
-                  1600,
-                  2.6,
-                  amNumber(q.turbulenciaEscala, 0),
-                  (v) => up((p) => p.turbulenciaEscala = v),
-                ),
-                row(
-                  'Evolucao',
-                  q.turbulenciaVelocidade,
-                  0,
-                  6,
-                  0.012,
-                  amNumber(q.turbulenciaVelocidade, 2),
-                  (v) => up((p) => p.turbulenciaVelocidade = v),
-                ),
-                // A ATRACAO E A REPULSAO: o campo puxa para um ponto, ou
-                // empurra para longe dele. Zero desliga — e o padrao, para
-                // projeto antigo abrir igual.
-                row(
-                  'Atracao',
-                  q.atracao,
-                  -8,
-                  8,
-                  0.015,
-                  amNumber(q.atracao, 2),
-                  (v) => up((p) => p.atracao = v),
-                ),
-                if (q.atracao != 0) ...[
-                  row(
-                    'Centro X',
-                    q.atracaoX,
-                    -2000,
-                    2000,
-                    4,
-                    amNumber(q.atracaoX, 0),
-                    (v) => up((p) => p.atracaoX = v),
-                  ),
-                  row(
-                    'Centro Y',
-                    q.atracaoY,
-                    -2000,
-                    2000,
-                    4,
-                    amNumber(q.atracaoY, 0),
-                    (v) => up((p) => p.atracaoY = v),
-                  ),
-                  row(
-                    'Centro Z',
-                    q.atracaoZ,
-                    -2000,
-                    2000,
-                    4,
-                    amNumber(q.atracaoZ, 0),
-                    (v) => up((p) => p.atracaoZ = v),
-                  ),
-                ],
-
-                titulo('VIDA'),
-                chips(
-                  'Tamanho',
-                  const ['Fixo', 'Cresce', 'Encolhe', 'Sobe e desce'],
-                  q.tamanhoNaVida.index,
-                  (i) => up((p) => p.tamanhoNaVida = TamanhoNaVida.values[i]),
-                ),
-                chips(
-                  'Opacidade',
-                  const ['Entra e sai', 'Some', 'Aparece', 'Fixa'],
-                  q.opacidadeNaVida.index,
-                  (i) =>
-                      up((p) => p.opacidadeNaVida = OpacidadeNaVida.values[i]),
-                ),
-                row(
-                  'Tam. aleat.',
-                  q.tamanhoVariacao,
-                  0,
-                  1,
-                  0.003,
-                  amNumber(q.tamanhoVariacao * 100, 0),
-                  (v) => up((p) => p.tamanhoVariacao = v),
-                ),
-                row(
-                  'Opac. aleat.',
-                  q.opacidadeVariacao,
-                  0,
-                  1,
-                  0.003,
-                  amNumber(q.opacidadeVariacao * 100, 0),
-                  (v) => up((p) => p.opacidadeVariacao = v),
-                ),
-
-                titulo('APARENCIA'),
                 chips(
                   'Desenho',
                   const [
@@ -2393,143 +2236,486 @@ Future<void> showParticulasSheet(
                 ),
                 row(
                   'Opacidade',
-                  q.opacidade,
+                  q.opacidade * 100,
                   0,
-                  1,
-                  0.003,
-                  amNumber(q.opacidade * 100, 0),
-                  (v) => up((p) => p.opacidade = v),
-                ),
-                row(
-                  'Brilho',
-                  q.brilho,
-                  0,
-                  1,
-                  0.003,
-                  amNumber(q.brilho * 100, 0),
-                  (v) => up((p) => p.brilho = v),
-                ),
-                row(
-                  'Rastro',
-                  q.rastro,
-                  0,
-                  1,
-                  0.003,
-                  amNumber(q.rastro * 100, 0),
-                  (v) => up((p) => p.rastro = v),
-                ),
-                row(
-                  'Giro',
-                  q.giroGrausS,
-                  -720,
-                  720,
-                  2.4,
-                  '${amNumber(q.giroGrausS, 0)}°/s',
-                  (v) => up((p) => p.giroGrausS = v),
+                  100,
+                  0.3,
+                  '${amNumber(q.opacidade * 100, 0)}%',
+                  (v) => up((p) => p.opacidade = v / 100),
                 ),
                 linhaDeCores(
-                  label: 'Cor final',
-                  atual: q.temCorFim ? q.corFim : null,
-                  nenhuma: !q.temCorFim,
-                  onPick: (c) => up((p) {
-                    p.corFim = c;
-                    p.temCorFim = true;
-                  }),
-                  onLimpar: () => up((p) => p.temCorFim = false),
+                  label: 'Cor',
+                  atual: q.corInicio,
+                  nenhuma: false,
+                  onPick: (c) => up((p) => p.corInicio = c),
                 ),
-                const SizedBox(height: 4),
-                Row(
-                  children: [
-                    const AppText(
-                      'Cintilar',
-                      style: TextStyle(fontSize: 13, color: AmColors.muted),
+                Tocavel(
+                  key: const ValueKey('particulas-mais-controles'),
+                  onTap: () =>
+                      setSheetState(() => mostrarAvancado = !mostrarAvancado),
+                  child: Container(
+                    margin: const EdgeInsets.only(top: 4, bottom: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 11,
                     ),
-                    Transform.scale(
-                      scale: 0.72,
-                      child: CupertinoSwitch(
-                        value: q.cintilar,
-                        activeTrackColor: AmColors.accent,
-                        onChanged: (v) => up((p) => p.cintilar = v),
-                      ),
+                    decoration: BoxDecoration(
+                      color: AmColors.chip,
+                      borderRadius: BorderRadius.circular(10),
                     ),
-                    const Spacer(),
-                    for (final c in paleta)
-                      Tocavel(
-                        onTap: () => up((p) => p.corInicio = c.toARGB32()),
-                        child: Container(
-                          width: 30,
-                          height: 30,
-                          margin: const EdgeInsets.only(left: 8),
-                          decoration: BoxDecoration(
-                            color: c,
-                            shape: BoxShape.circle,
-                            border: q.corInicio == c.toARGB32()
-                                ? Border.all(color: Colors.white, width: 2.5)
-                                : null,
-                          ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          CupertinoIcons.slider_horizontal_3,
+                          size: 17,
+                          color: AmColors.accent,
                         ),
-                      ),
-                  ],
+                        const SizedBox(width: 8),
+                        Expanded(child: AppText(
+                          mostrarAvancado
+                              ? 'Ocultar controles avancados'
+                              : 'Mais controles',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: AmColors.text,
+                          ),
+                        )),
+                        Icon(
+                          mostrarAvancado
+                              ? CupertinoIcons.chevron_up
+                              : CupertinoIcons.chevron_down,
+                          size: 15,
+                          color: AmColors.muted,
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
 
-                titulo('FAISCAS'),
-                // EM ZERO O SISTEMA INTEIRO DORME, e o resto do painel nem
-                // aparece — a camada se comporta como qualquer outra.
-                row(
-                  'Por particula',
-                  q.faiscas.toDouble(),
-                  0,
-                  24,
-                  1.4,
-                  amNumber(q.faiscas.toDouble(), 0),
-                  (v) => up((p) => p.faiscas = v.round()),
-                ),
-                if (q.faiscas > 0) ...[
+                if (mostrarAvancado) ...[
+                  titulo('TODOS OS PARAMETROS'),
+                  titulo('FLUXO'),
+                  row(
+                    'Nascimentos/s',
+                    q.taxaDeNascimento,
+                    0,
+                    600,
+                    1.2,
+                    amNumber(q.taxaDeNascimento, 0),
+                    (v) => up((p) => p.taxaDeNascimento = v),
+                  ),
+                  row(
+                    'Quantidade',
+                    q.maximo.toDouble(),
+                    1,
+                    6000,
+                    8,
+                    '${q.maximo}',
+                    (v) => up((p) => p.maximo = v.round()),
+                  ),
                   row(
                     'Vida (s)',
-                    q.faiscaVidaS,
-                    0.08,
-                    6,
-                    0.012,
-                    amNumber(q.faiscaVidaS, 2),
-                    (v) => up((p) => p.faiscaVidaS = v),
+                    q.vidaS,
+                    0.2,
+                    30,
+                    0.03,
+                    amNumber(q.vidaS, 1),
+                    (v) => up((p) => p.vidaS = v),
                   ),
                   row(
-                    'Herda do pai',
-                    q.faiscaHeranca,
+                    'Vida aleat.',
+                    q.vidaVariacao * 100,
                     0,
-                    1,
-                    0.012,
-                    amNumber(q.faiscaHeranca, 2),
-                    (v) => up((p) => p.faiscaHeranca = v),
+                    100,
+                    0.3,
+                    '${amNumber(q.vidaVariacao * 100, 0)}%',
+                    (v) => up((p) => p.vidaVariacao = v / 100),
                   ),
                   row(
-                    'Forca',
-                    q.faiscaVelocidade,
+                    'Semente',
+                    q.semente.toDouble(),
+                    0,
+                    9999,
+                    14,
+                    '${q.semente}',
+                    (v) => up((p) => p.semente = v.round()),
+                  ),
+
+                  titulo('EMISSOR'),
+                  chips(
+                    'Forma',
+                    const ['Caixa', 'Ponto', 'Esfera', 'Linha', 'Anel'],
+                    q.emissor.index,
+                    (i) => up((p) => p.emissor = EmissorDeParticulas.values[i]),
+                  ),
+                  chips(
+                    'Saida',
+                    const ['Cone', 'Todas', 'Para fora'],
+                    q.modoDeEmissao.index,
+                    (i) => up((p) => p.modoDeEmissao = ModoDeEmissao.values[i]),
+                  ),
+                  row(
+                    'Area X',
+                    q.largura,
+                    0,
+                    4000,
+                    5,
+                    amNumber(q.largura, 0),
+                    (v) => up((p) => p.largura = v),
+                  ),
+                  row(
+                    'Area Y',
+                    q.altura,
+                    0,
+                    4000,
+                    5,
+                    amNumber(q.altura, 0),
+                    (v) => up((p) => p.altura = v),
+                  ),
+                  row(
+                    'Z (fundo)',
+                    q.profundidade,
+                    0,
+                    4000,
+                    5,
+                    amNumber(q.profundidade, 0),
+                    (v) => up((p) => p.profundidade = v),
+                  ),
+                  row(
+                    'Raio',
+                    q.raio,
+                    0,
+                    2000,
+                    4,
+                    amNumber(q.raio, 0),
+                    (v) => up((p) => p.raio = v),
+                  ),
+
+                  titulo('MOVIMENTO'),
+                  row(
+                    'Velocidade',
+                    q.velocidade,
+                    0,
+                    3000,
+                    4,
+                    amNumber(q.velocidade, 0),
+                    (v) => up((p) => p.velocidade = v),
+                  ),
+                  row(
+                    'Direcao',
+                    q.direcaoGraus,
+                    -180,
+                    180,
+                    0.9,
+                    '${amNumber(q.direcaoGraus, 0)}°',
+                    (v) => up((p) => p.direcaoGraus = v),
+                  ),
+                  row(
+                    'Abertura',
+                    q.aberturaGraus,
+                    0,
+                    360,
+                    0.9,
+                    '${amNumber(q.aberturaGraus, 0)}°',
+                    (v) => up((p) => p.aberturaGraus = v),
+                  ),
+                  row(
+                    'Gravidade',
+                    q.gravidade,
+                    -3000,
+                    3000,
+                    6,
+                    amNumber(q.gravidade, 0),
+                    (v) => up((p) => p.gravidade = v),
+                  ),
+                  row(
+                    'Vento X',
+                    q.ventoX,
+                    -2000,
+                    2000,
+                    4,
+                    amNumber(q.ventoX, 0),
+                    (v) => up((p) => p.ventoX = v),
+                  ),
+                  row(
+                    'Vento Y',
+                    q.ventoY,
+                    -2000,
+                    2000,
+                    4,
+                    amNumber(q.ventoY, 0),
+                    (v) => up((p) => p.ventoY = v),
+                  ),
+                  row(
+                    'Vento Z',
+                    q.ventoZ,
+                    -2000,
+                    2000,
+                    4,
+                    amNumber(q.ventoZ, 0),
+                    (v) => up((p) => p.ventoZ = v),
+                  ),
+                  row(
+                    'Ar (freio)',
+                    q.arrasto,
+                    0,
+                    12,
+                    0.03,
+                    amNumber(q.arrasto, 2),
+                    (v) => up((p) => p.arrasto = v),
+                  ),
+
+                  titulo('FORCAS'),
+                  row(
+                    'Turbulencia',
+                    q.turbulencia,
                     0,
                     900,
                     1.6,
-                    amNumber(q.faiscaVelocidade, 0),
-                    (v) => up((p) => p.faiscaVelocidade = v),
+                    amNumber(q.turbulencia, 0),
+                    (v) => up((p) => p.turbulencia = v),
+                  ),
+                  row(
+                    'Detalhe',
+                    q.turbulenciaEscala,
+                    20,
+                    1600,
+                    2.6,
+                    amNumber(q.turbulenciaEscala, 0),
+                    (v) => up((p) => p.turbulenciaEscala = v),
+                  ),
+                  row(
+                    'Evolucao',
+                    q.turbulenciaVelocidade,
+                    0,
+                    6,
+                    0.012,
+                    amNumber(q.turbulenciaVelocidade, 2),
+                    (v) => up((p) => p.turbulenciaVelocidade = v),
+                  ),
+                  // A ATRACAO E A REPULSAO: o campo puxa para um ponto, ou
+                  // empurra para longe dele. Zero desliga — e o padrao, para
+                  // projeto antigo abrir igual.
+                  row(
+                    'Atracao',
+                    q.atracao,
+                    -8,
+                    8,
+                    0.015,
+                    amNumber(q.atracao, 2),
+                    (v) => up((p) => p.atracao = v),
+                  ),
+                  if (q.atracao != 0) ...[
+                    row(
+                      'Centro X',
+                      q.atracaoX,
+                      -2000,
+                      2000,
+                      4,
+                      amNumber(q.atracaoX, 0),
+                      (v) => up((p) => p.atracaoX = v),
+                    ),
+                    row(
+                      'Centro Y',
+                      q.atracaoY,
+                      -2000,
+                      2000,
+                      4,
+                      amNumber(q.atracaoY, 0),
+                      (v) => up((p) => p.atracaoY = v),
+                    ),
+                    row(
+                      'Centro Z',
+                      q.atracaoZ,
+                      -2000,
+                      2000,
+                      4,
+                      amNumber(q.atracaoZ, 0),
+                      (v) => up((p) => p.atracaoZ = v),
+                    ),
+                  ],
+
+                  titulo('VIDA'),
+                  chips(
+                    'Tamanho',
+                    const ['Fixo', 'Cresce', 'Encolhe', 'Sobe e desce'],
+                    q.tamanhoNaVida.index,
+                    (i) => up((p) => p.tamanhoNaVida = TamanhoNaVida.values[i]),
+                  ),
+                  chips(
+                    'Opacidade',
+                    const ['Entra e sai', 'Some', 'Aparece', 'Fixa'],
+                    q.opacidadeNaVida.index,
+                    (i) => up(
+                      (p) => p.opacidadeNaVida = OpacidadeNaVida.values[i],
+                    ),
+                  ),
+                  row(
+                    'Tam. aleat.',
+                    q.tamanhoVariacao * 100,
+                    0,
+                    100,
+                    0.3,
+                    '${amNumber(q.tamanhoVariacao * 100, 0)}%',
+                    (v) => up((p) => p.tamanhoVariacao = v / 100),
+                  ),
+                  row(
+                    'Opac. aleat.',
+                    q.opacidadeVariacao * 100,
+                    0,
+                    100,
+                    0.3,
+                    '${amNumber(q.opacidadeVariacao * 100, 0)}%',
+                    (v) => up((p) => p.opacidadeVariacao = v / 100),
+                  ),
+
+                  titulo('APARENCIA'),
+                  chips(
+                    'Desenho',
+                    const [
+                      'Esfera',
+                      'Estrela',
+                      'Risco',
+                      'Nuvem',
+                      'Quadrado',
+                      'Anel',
+                    ],
+                    q.forma.index,
+                    (i) => up((p) => p.forma = FormaDaParticula.values[i]),
                   ),
                   row(
                     'Tamanho',
-                    q.faiscaTamanho,
-                    0.05,
-                    3,
-                    0.012,
-                    amNumber(q.faiscaTamanho, 2),
-                    (v) => up((p) => p.faiscaTamanho = v),
+                    q.tamanho,
+                    0.5,
+                    400,
+                    0.6,
+                    amNumber(q.tamanho, 1),
+                    (v) => up((p) => p.tamanho = v),
                   ),
                   row(
-                    'Comeca em',
-                    q.faiscaInicio,
+                    'Opacidade',
+                    q.opacidade * 100,
                     0,
-                    0.95,
-                    0.012,
-                    amNumber(q.faiscaInicio, 2),
-                    (v) => up((p) => p.faiscaInicio = v),
+                    100,
+                    0.3,
+                    '${amNumber(q.opacidade * 100, 0)}%',
+                    (v) => up((p) => p.opacidade = v / 100),
                   ),
+                  row(
+                    'Brilho',
+                    q.brilho * 100,
+                    0,
+                    100,
+                    0.3,
+                    '${amNumber(q.brilho * 100, 0)}%',
+                    (v) => up((p) => p.brilho = v / 100),
+                  ),
+                  row(
+                    'Rastro',
+                    q.rastro * 100,
+                    0,
+                    100,
+                    0.3,
+                    '${amNumber(q.rastro * 100, 0)}%',
+                    (v) => up((p) => p.rastro = v / 100),
+                  ),
+                  row(
+                    'Giro',
+                    q.giroGrausS,
+                    -720,
+                    720,
+                    2.4,
+                    '${amNumber(q.giroGrausS, 0)}°/s',
+                    (v) => up((p) => p.giroGrausS = v),
+                  ),
+                  linhaDeCores(
+                    label: 'Cor final',
+                    atual: q.temCorFim ? q.corFim : null,
+                    nenhuma: !q.temCorFim,
+                    onPick: (c) => up((p) {
+                      p.corFim = c;
+                      p.temCorFim = true;
+                    }),
+                    onLimpar: () => up((p) => p.temCorFim = false),
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      const AppText(
+                        'Cintilar',
+                        style: TextStyle(fontSize: 13, color: AmColors.muted),
+                      ),
+                      Transform.scale(
+                        scale: 0.72,
+                        child: CupertinoSwitch(
+                          value: q.cintilar,
+                          activeTrackColor: AmColors.accent,
+                          onChanged: (v) => up((p) => p.cintilar = v),
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  titulo('FAISCAS'),
+                  // EM ZERO O SISTEMA INTEIRO DORME, e o resto do painel nem
+                  // aparece — a camada se comporta como qualquer outra.
+                  row(
+                    'Por particula',
+                    q.faiscas.toDouble(),
+                    0,
+                    24,
+                    1.4,
+                    amNumber(q.faiscas.toDouble(), 0),
+                    (v) => up((p) => p.faiscas = v.round()),
+                  ),
+                  if (q.faiscas > 0) ...[
+                    row(
+                      'Vida (s)',
+                      q.faiscaVidaS,
+                      0.08,
+                      6,
+                      0.012,
+                      amNumber(q.faiscaVidaS, 2),
+                      (v) => up((p) => p.faiscaVidaS = v),
+                    ),
+                    row(
+                      'Herda do pai',
+                      q.faiscaHeranca,
+                      0,
+                      1,
+                      0.012,
+                      amNumber(q.faiscaHeranca, 2),
+                      (v) => up((p) => p.faiscaHeranca = v),
+                    ),
+                    row(
+                      'Forca',
+                      q.faiscaVelocidade,
+                      0,
+                      900,
+                      1.6,
+                      amNumber(q.faiscaVelocidade, 0),
+                      (v) => up((p) => p.faiscaVelocidade = v),
+                    ),
+                    row(
+                      'Tamanho',
+                      q.faiscaTamanho,
+                      0.05,
+                      3,
+                      0.012,
+                      amNumber(q.faiscaTamanho, 2),
+                      (v) => up((p) => p.faiscaTamanho = v),
+                    ),
+                    row(
+                      'Comeca em',
+                      q.faiscaInicio,
+                      0,
+                      0.95,
+                      0.012,
+                      amNumber(q.faiscaInicio, 2),
+                      (v) => up((p) => p.faiscaInicio = v),
+                    ),
+                  ],
                 ],
               ],
             ),
@@ -2569,7 +2755,8 @@ Future<void> showElement3DSheet(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const AppText('Elemento 3D',
+                const AppText(
+                  'Elemento 3D',
                   style: TextStyle(
                     fontSize: 17,
                     fontWeight: FontWeight.w700,
@@ -2631,7 +2818,8 @@ Future<void> showElement3DSheet(
                 const SizedBox(height: 8),
                 Row(
                   children: [
-                    const AppText('Arestas',
+                    const AppText(
+                      'Arestas',
                       style: TextStyle(fontSize: 13, color: AmColors.muted),
                     ),
                     Transform.scale(
@@ -2796,7 +2984,8 @@ Future<void> showElement3DSheet(
                                       : AmColors.chip,
                                   borderRadius: BorderRadius.circular(9),
                                 ),
-                                child: AppText(nomeDoAcabamento(acab),
+                                child: AppText(
+                                  nomeDoAcabamento(acab),
                                   style: const TextStyle(
                                     fontSize: 12,
                                     color: AmColors.accent,
@@ -2819,7 +3008,8 @@ Future<void> showElement3DSheet(
                         width: 86,
                         child: Padding(
                           padding: EdgeInsets.only(top: 6),
-                          child: AppText('Degrade',
+                          child: AppText(
+                            'Degrade',
                             style: TextStyle(
                               fontSize: 13,
                               color: AmColors.muted,
@@ -2885,7 +3075,8 @@ Future<void> showElement3DSheet(
                   children: [
                     const SizedBox(
                       width: 86,
-                      child: AppText('Modelo',
+                      child: AppText(
+                        'Modelo',
                         style: TextStyle(fontSize: 13, color: AmColors.muted),
                       ),
                     ),
@@ -2923,7 +3114,8 @@ Future<void> showElement3DSheet(
                               color: AmColors.accent,
                             ),
                             SizedBox(width: 6),
-                            AppText('OBJ / FBX',
+                            AppText(
+                              'OBJ / FBX',
                               style: TextStyle(
                                 fontSize: 12,
                                 color: AmColors.accent,
@@ -3008,7 +3200,8 @@ Future<void> showElement3DSheet(
                               color: AmColors.accent,
                             ),
                             SizedBox(width: 6),
-                            AppText('Escolher',
+                            AppText(
+                              'Escolher',
                               style: TextStyle(
                                 fontSize: 12,
                                 color: AmColors.accent,
@@ -3039,7 +3232,8 @@ Future<void> showElement3DSheet(
                   ],
                 ),
                 const SizedBox(height: 6),
-                const AppText('Gire com a rotacao X/Y/Z normal da camada — ou '
+                const AppText(
+                  'Gire com a rotacao X/Y/Z normal da camada — ou '
                   'vincule a um nulo 3D e gire o nulo.',
                   style: TextStyle(fontSize: 11, color: AmColors.muted),
                 ),
@@ -3067,439 +3261,453 @@ Future<void> showShapeParamsSheet(
   await showParamSheet(
     context,
     builder: (sheetContext) => StatefulBuilder(
-      builder: (sheetContext, setSheetState) => ValueListenableBuilder<Duration>(
-        valueListenable: playback.time,
-        builder: (sheetContext, t, _) {
-          final layer = ref.read(editorControllerProvider).layerById(layerId);
-          if (layer is! ShapeLayer) return const SizedBox.shrink();
-          final local = layer.localTime(t);
-          ShapeParametric? sp;
-          for (final item in layer.contents) {
-            if (item is ShapeParametric) {
-              sp = item;
-              break;
-            }
-          }
+      builder: (sheetContext, setSheetState) =>
+          ValueListenableBuilder<Duration>(
+            valueListenable: playback.time,
+            builder: (sheetContext, t, _) {
+              final layer = ref
+                  .read(editorControllerProvider)
+                  .layerById(layerId);
+              if (layer is! ShapeLayer) return const SizedBox.shrink();
+              final local = layer.localTime(t);
+              ShapeParametric? sp;
+              for (final item in layer.contents) {
+                if (item is ShapeParametric) {
+                  sp = item;
+                  break;
+                }
+              }
 
-          Widget animRow(
-            String label,
-            String key,
-            double min,
-            double max,
-            String display, {
-            double scale = 1,
-          }) {
-            final track = shapeParamTrackOf(sp!, key)!;
-            // Na lingua nova o diamante mora na linha: toque poe/tira o
-            // keyframe; toque LONGO abre a curva (2+ kfs).
-            final numero = RegExp(r'^-?[\d.,]+').firstMatch(display);
-            final casas =
-                RegExp(r'[.,](\d+)$').firstMatch(numero?.group(0) ?? '');
-            return ParameterRow(
-              label: label,
-              value: (track.valueAt(local) * scale).clamp(min, max),
-              min: min,
-              max: max,
-              unitsPerPixel: (max - min) / 420,
-              decimals: casas?.group(1)?.length ?? 0,
-              unit: numero == null ? '' : display.substring(numero.end),
-              keyframe: KeyframeState(
-                animated: track.isAnimated,
-                here: track.hasKeyframeAt(local),
-                onToggle: () {
-                  controller.toggleShapeParamKeyframe(layerId, key, t);
-                  setSheetState(() {});
-                },
-                onCurve: track.keyframes.length < 2
-                    ? null
-                    : () => showTrackCurveSheet(
-                        context,
-                        ref,
-                        playback,
-                        label: label,
-                        layerId: layerId,
-                        trackOf: (l) {
-                          if (l is! ShapeLayer) return null;
-                          for (final item in l.contents) {
-                            if (item is ShapeParametric) {
-                              return shapeParamTrackOf(item, key);
-                            }
-                          }
-                          return null;
-                        },
-                        onSetEase: (segStart, ease) =>
-                            controller.setShapeParamSegmentEase(
-                              layerId,
-                              key,
-                              segStart,
-                              ease,
-                            ),
-                        onSetEaseAll: (ease) =>
-                            controller.applyEaseToAllShapeParamSegments(
-                              layerId,
-                              key,
-                              ease,
-                            ),
-                        onClosed: () {
-                          if (context.mounted) {
-                            showShapeParamsSheet(
-                              context,
-                              ref,
-                              layerId,
-                              playback,
-                            );
-                          }
-                        },
-                      ),
-              ),
-              onChanged: (v) {
-                controller.editShapeParam(layerId, key, t, v / scale);
-                setSheetState(() {});
-              },
-            );
-          }
+              Widget animRow(
+                String label,
+                String key,
+                double min,
+                double max,
+                String display, {
+                double scale = 1,
+              }) {
+                final track = shapeParamTrackOf(sp!, key)!;
+                // Na lingua nova o diamante mora na linha: toque poe/tira o
+                // keyframe; toque LONGO abre a curva (2+ kfs).
+                final numero = RegExp(r'^-?[\d.,]+').firstMatch(display);
+                final casas = RegExp(r'[.,](\d+)$')
+                    .firstMatch(numero?.group(0) ?? '');
+                return ParameterRow(
+                  label: label,
+                  value: (track.valueAt(local) * scale).clamp(min, max),
+                  min: min,
+                  max: max,
+                  unitsPerPixel: (max - min) / 420,
+                  decimals: casas?.group(1)?.length ?? 0,
+                  unit: numero == null ? '' : display.substring(numero.end),
+                  keyframe: KeyframeState(
+                    animated: track.isAnimated,
+                    here: track.hasKeyframeAt(local),
+                    onToggle: () {
+                      controller.toggleShapeParamKeyframe(layerId, key, t);
+                      setSheetState(() {});
+                    },
+                    onCurve: track.keyframes.length < 2
+                        ? null
+                        : () => showTrackCurveSheet(
+                            context,
+                            ref,
+                            playback,
+                            label: label,
+                            layerId: layerId,
+                            trackOf: (l) {
+                              if (l is! ShapeLayer) return null;
+                              for (final item in l.contents) {
+                                if (item is ShapeParametric) {
+                                  return shapeParamTrackOf(item, key);
+                                }
+                              }
+                              return null;
+                            },
+                            onSetEase: (segStart, ease) =>
+                                controller.setShapeParamSegmentEase(
+                                  layerId,
+                                  key,
+                                  segStart,
+                                  ease,
+                                ),
+                            onSetEaseAll: (ease) =>
+                                controller.applyEaseToAllShapeParamSegments(
+                                  layerId,
+                                  key,
+                                  ease,
+                                ),
+                            onClosed: () {
+                              if (context.mounted) {
+                                showShapeParamsSheet(
+                                  context,
+                                  ref,
+                                  layerId,
+                                  playback,
+                                );
+                              }
+                            },
+                          ),
+                  ),
+                  onChanged: (v) {
+                    controller.editShapeParam(layerId, key, t, v / scale);
+                    setSheetState(() {});
+                  },
+                );
+              }
 
-          return SafeArea(
-            child: SingleChildScrollView(
-              padding: EdgeInsets.fromLTRB(
-                18,
-                14,
-                18,
-                14 + MediaQuery.of(sheetContext).viewInsets.bottom,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const AppText('Forma — geometria',
-                    style: TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700,
-                      color: AmColors.text,
-                    ),
+              return SafeArea(
+                child: SingleChildScrollView(
+                  padding: EdgeInsets.fromLTRB(
+                    18,
+                    14,
+                    18,
+                    14 + MediaQuery.of(sheetContext).viewInsets.bottom,
                   ),
-                  SheetTransport(
-                    playback: playback,
-                    duration: ref.read(editorControllerProvider).duration,
-                    fps: ref.read(editorControllerProvider).fps,
-                  ),
-                  const SizedBox(height: 6),
-                  if (layer.contents.any((item) => item is ShapeGradientFill))
-                    CupertinoButton(
-                      onPressed: () => showGradientFillSheet(
-                        context,
-                        layerId,
-                        playback: playback,
-                      ),
-                      child: const AppText('Gradiente: cores, posicoes e alcance'),
-                    ),
-                  // EDITAR NOS: a forma vira caminho bezier (se ainda nao
-                  // e) e os nos aparecem sobre o preview. E daqui que sai
-                  // o retangulo que vira card: dois keyframes do caminho.
-                  SizedBox(
-                    width: double.infinity,
-                    child: CupertinoButton(
-                      color: AmColors.chip,
-                      borderRadius: BorderRadius.circular(12),
-                      onPressed: () {
-                        ShapeItem? geo;
-                        for (final i in layer.contents) {
-                          if (i is ShapeBezier ||
-                              i is ShapePath ||
-                              i is ShapeParametric ||
-                              i is ShapeSvgPath ||
-                              i is ShapeMorph) {
-                            geo = i;
-                            break;
-                          }
-                        }
-                        if (geo == null) {
-                          showReasonToast(
-                            context,
-                            'Esta forma nao tem geometria',
-                          );
-                          return;
-                        }
-                        if (geo is! ShapeBezier &&
-                            !controller.convertShapeItemToBezier(
-                              layerId,
-                              geo.id,
-                              t,
-                            )) {
-                          showReasonToast(
-                            context,
-                            'Nao consegui converter esta geometria',
-                          );
-                          return;
-                        }
-                        final idGeo = geo.id;
-                        closeParamSheet(sheetContext);
-                        Future.microtask(() {
-                          if (context.mounted) {
-                            showPathEditSheet(
-                              context,
-                              ref,
-                              layerId,
-                              idGeo,
-                              playback,
-                              forma: true,
-                            );
-                          }
-                        });
-                      },
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            CupertinoIcons.pencil_outline,
-                            size: 17,
-                            color: AmColors.accent,
-                          ),
-                          SizedBox(width: 8),
-                          AppText('Editar nos do caminho',
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: AmColors.accent,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  if (sp == null) ...[
-                    const AppText('Esta forma e um caminho desenhado (sem '
-                      'parametros). Converta para editar Tamanho, '
-                      'Arredondamento, Pontas e afins — animaveis.',
-                      style: TextStyle(fontSize: 13, color: AmColors.muted),
-                    ),
-                    const SizedBox(height: 10),
-                    SizedBox(
-                      width: double.infinity,
-                      child: CupertinoButton(
-                        color: AmColors.accent,
-                        borderRadius: BorderRadius.circular(12),
-                        onPressed: () {
-                          controller.convertShapeToParametric(layerId);
-                          if (controller.shapeParametricOf(layerId) == null) {
-                            showReasonToast(
-                              context,
-                              'Esta forma nao tem equivalente parametrico',
-                            );
-                          }
-                          setSheetState(() {});
-                        },
-                        child: const AppText('Converter para parametrica',
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                            color: AureaColors.onAccent,
-                          ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const AppText(
+                        'Forma — geometria',
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w700,
+                          color: AmColors.text,
                         ),
                       ),
-                    ),
-                  ] else ...[
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        for (final (label, kind) in const [
-                          ('Retangulo', ParamShapeKind.rect),
-                          ('Elipse', ParamShapeKind.ellipse),
-                          ('Poligono', ParamShapeKind.polygon),
-                          ('Estrela', ParamShapeKind.star),
-                          ('Setor', ParamShapeKind.sector),
-                        ])
-                          Tocavel(
-                            onTap: () {
-                              controller.setShapeParamKind(layerId, kind);
-                              setSheetState(() {});
-                            },
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 8,
+                      SheetTransport(
+                        playback: playback,
+                        duration: ref.read(editorControllerProvider).duration,
+                        fps: ref.read(editorControllerProvider).fps,
+                      ),
+                      const SizedBox(height: 6),
+                      if (layer.contents.any(
+                        (item) => item is ShapeGradientFill,
+                      ))
+                        CupertinoButton(
+                          onPressed: () => showGradientFillSheet(
+                            context,
+                            layerId,
+                            playback: playback,
+                          ),
+                          child: const AppText(
+                            'Gradiente: cores, posicoes e alcance',
+                          ),
+                        ),
+                      // EDITAR NOS: a forma vira caminho bezier (se ainda nao
+                      // e) e os nos aparecem sobre o preview. E daqui que sai
+                      // o retangulo que vira card: dois keyframes do caminho.
+                      SizedBox(
+                        width: double.infinity,
+                        child: CupertinoButton(
+                          color: AmColors.chip,
+                          borderRadius: BorderRadius.circular(12),
+                          onPressed: () {
+                            ShapeItem? geo;
+                            for (final i in layer.contents) {
+                              if (i is ShapeBezier ||
+                                  i is ShapePath ||
+                                  i is ShapeParametric ||
+                                  i is ShapeSvgPath ||
+                                  i is ShapeMorph) {
+                                geo = i;
+                                break;
+                              }
+                            }
+                            if (geo == null) {
+                              showReasonToast(
+                                context,
+                                'Esta forma nao tem geometria',
+                              );
+                              return;
+                            }
+                            if (geo is! ShapeBezier &&
+                                !controller.convertShapeItemToBezier(
+                                  layerId,
+                                  geo.id,
+                                  t,
+                                )) {
+                              showReasonToast(
+                                context,
+                                'Nao consegui converter esta geometria',
+                              );
+                              return;
+                            }
+                            final idGeo = geo.id;
+                            closeParamSheet(sheetContext);
+                            Future.microtask(() {
+                              if (context.mounted) {
+                                showPathEditSheet(
+                                  context,
+                                  ref,
+                                  layerId,
+                                  idGeo,
+                                  playback,
+                                  forma: true,
+                                );
+                              }
+                            });
+                          },
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                CupertinoIcons.pencil_outline,
+                                size: 17,
+                                color: AmColors.accent,
                               ),
-                              decoration: BoxDecoration(
-                                color: sp.kind == kind
-                                    ? AmColors.accentDim
-                                    : AmColors.chip,
-                                borderRadius: BorderRadius.circular(9),
-                              ),
-                              child: AppText(
-                                label,
-                                style: const TextStyle(
-                                  fontSize: 12,
+                              SizedBox(width: 8),
+                              AppText(
+                                'Editar nos do caminho',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
                                   color: AmColors.accent,
                                 ),
                               ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      if (sp == null) ...[
+                        const AppText(
+                          'Esta forma e um caminho desenhado (sem '
+                          'parametros). Converta para editar Tamanho, '
+                          'Arredondamento, Pontas e afins — animaveis.',
+                          style: TextStyle(fontSize: 13, color: AmColors.muted),
+                        ),
+                        const SizedBox(height: 10),
+                        SizedBox(
+                          width: double.infinity,
+                          child: CupertinoButton(
+                            color: AmColors.accent,
+                            borderRadius: BorderRadius.circular(12),
+                            onPressed: () {
+                              controller.convertShapeToParametric(layerId);
+                              if (controller.shapeParametricOf(layerId) ==
+                                  null) {
+                                showReasonToast(
+                                  context,
+                                  'Esta forma nao tem equivalente parametrico',
+                                );
+                              }
+                              setSheetState(() {});
+                            },
+                            child: const AppText(
+                              'Converter para parametrica',
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                color: AureaColors.onAccent,
+                              ),
                             ),
                           ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    if (sp.kind == ParamShapeKind.rect ||
-                        sp.kind == ParamShapeKind.ellipse) ...[
-                      animRow(
-                        'Tamanho X',
-                        'sizeX',
-                        4,
-                        1000,
-                        amNumber(sp.sizeX.valueAt(local), 0),
-                      ),
-                      animRow(
-                        'Tamanho Y',
-                        'sizeY',
-                        4,
-                        1000,
-                        amNumber(sp.sizeY.valueAt(local), 0),
-                      ),
-                    ],
-                    if (sp.kind == ParamShapeKind.rect) ...[
-                      animRow(
-                        'Arredond.',
-                        'roundness',
-                        0,
-                        sp.roundnessPercent ? 100 : 300,
-                        amNumber(sp.roundness.valueAt(local), 0),
-                      ),
-                      Row(
-                        children: [
-                          const AppText('Unidade do canto',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: AmColors.muted,
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          for (final (label, pct) in const [
-                            ('% do lado', true),
-                            ('px fixo', false),
-                          ])
-                            Padding(
-                              padding: const EdgeInsets.only(right: 8),
-                              child: Tocavel(
+                        ),
+                      ] else ...[
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            for (final (label, kind) in const [
+                              ('Retangulo', ParamShapeKind.rect),
+                              ('Elipse', ParamShapeKind.ellipse),
+                              ('Poligono', ParamShapeKind.polygon),
+                              ('Estrela', ParamShapeKind.star),
+                              ('Setor', ParamShapeKind.sector),
+                            ])
+                              Tocavel(
                                 onTap: () {
-                                  controller.setShapeRoundnessUnit(
-                                    layerId,
-                                    percent: pct,
-                                  );
+                                  controller.setShapeParamKind(layerId, kind);
                                   setSheetState(() {});
                                 },
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 6,
+                                    horizontal: 12,
+                                    vertical: 8,
                                   ),
                                   decoration: BoxDecoration(
-                                    color: sp.roundnessPercent == pct
+                                    color: sp.kind == kind
                                         ? AmColors.accentDim
                                         : AmColors.chip,
-                                    borderRadius: BorderRadius.circular(8),
+                                    borderRadius: BorderRadius.circular(9),
                                   ),
                                   child: AppText(
                                     label,
                                     style: const TextStyle(
-                                      fontSize: 11,
+                                      fontSize: 12,
                                       color: AmColors.accent,
                                     ),
                                   ),
                                 ),
                               ),
-                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        if (sp.kind == ParamShapeKind.rect ||
+                            sp.kind == ParamShapeKind.ellipse) ...[
+                          animRow(
+                            'Tamanho X',
+                            'sizeX',
+                            4,
+                            1000,
+                            amNumber(sp.sizeX.valueAt(local), 0),
+                          ),
+                          animRow(
+                            'Tamanho Y',
+                            'sizeY',
+                            4,
+                            1000,
+                            amNumber(sp.sizeY.valueAt(local), 0),
+                          ),
                         ],
-                      ),
-                      const SizedBox(height: 6),
+                        if (sp.kind == ParamShapeKind.rect) ...[
+                          animRow(
+                            'Arredond.',
+                            'roundness',
+                            0,
+                            sp.roundnessPercent ? 100 : 300,
+                            amNumber(sp.roundness.valueAt(local), 0),
+                          ),
+                          Row(
+                            children: [
+                              const AppText(
+                                'Unidade do canto',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: AmColors.muted,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              for (final (label, pct) in const [
+                                ('% do lado', true),
+                                ('px fixo', false),
+                              ])
+                                Padding(
+                                  padding: const EdgeInsets.only(right: 8),
+                                  child: Tocavel(
+                                    onTap: () {
+                                      controller.setShapeRoundnessUnit(
+                                        layerId,
+                                        percent: pct,
+                                      );
+                                      setSheetState(() {});
+                                    },
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 6,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: sp.roundnessPercent == pct
+                                            ? AmColors.accentDim
+                                            : AmColors.chip,
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: AppText(
+                                        label,
+                                        style: const TextStyle(
+                                          fontSize: 11,
+                                          color: AmColors.accent,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                        ],
+                        if (sp.kind == ParamShapeKind.polygon ||
+                            sp.kind == ParamShapeKind.star) ...[
+                          animRow(
+                            'Pontas',
+                            'points',
+                            2,
+                            16,
+                            amNumber(sp.points.valueAt(local), 1),
+                          ),
+                          animRow(
+                            'Raio',
+                            'outerRadius',
+                            10,
+                            600,
+                            amNumber(sp.outerRadius.valueAt(local), 0),
+                          ),
+                          animRow(
+                            'Arred. ext',
+                            'outerRoundness',
+                            -100,
+                            200,
+                            amNumber(sp.outerRoundness.valueAt(local), 0),
+                          ),
+                          animRow(
+                            'Rotacao',
+                            'shapeRotation',
+                            -180,
+                            180,
+                            '${amNumber(sp.shapeRotation.valueAt(local), 0)}°',
+                          ),
+                        ],
+                        if (sp.kind == ParamShapeKind.star) ...[
+                          animRow(
+                            'Raio int',
+                            'innerRadius',
+                            0,
+                            600,
+                            amNumber(sp.innerRadius.valueAt(local), 0),
+                          ),
+                          animRow(
+                            'Arred. int',
+                            'innerRoundness',
+                            -100,
+                            200,
+                            amNumber(sp.innerRoundness.valueAt(local), 0),
+                          ),
+                        ],
+                        if (sp.kind == ParamShapeKind.sector) ...[
+                          animRow(
+                            'Raio',
+                            'outerRadius',
+                            10,
+                            600,
+                            amNumber(sp.outerRadius.valueAt(local), 0),
+                          ),
+                          animRow(
+                            'Raio int',
+                            'sectorInner',
+                            0,
+                            600,
+                            amNumber(sp.sectorInner.valueAt(local), 0),
+                          ),
+                          animRow(
+                            'Ang. inicial',
+                            'startAngle',
+                            -180,
+                            360,
+                            '${amNumber(sp.startAngle.valueAt(local), 0)}°',
+                          ),
+                          animRow(
+                            'Varredura',
+                            'sweep',
+                            0,
+                            360,
+                            '${amNumber(sp.sweep.valueAt(local), 0)}°',
+                          ),
+                        ],
+                        const AppText(
+                          'Tamanho muda a GEOMETRIA (traco constante). '
+                          'Escala, em Mover, engorda tudo junto.',
+                          style: TextStyle(fontSize: 11, color: AmColors.muted),
+                        ),
+                      ],
                     ],
-                    if (sp.kind == ParamShapeKind.polygon ||
-                        sp.kind == ParamShapeKind.star) ...[
-                      animRow(
-                        'Pontas',
-                        'points',
-                        2,
-                        16,
-                        amNumber(sp.points.valueAt(local), 1),
-                      ),
-                      animRow(
-                        'Raio',
-                        'outerRadius',
-                        10,
-                        600,
-                        amNumber(sp.outerRadius.valueAt(local), 0),
-                      ),
-                      animRow(
-                        'Arred. ext',
-                        'outerRoundness',
-                        -100,
-                        200,
-                        amNumber(sp.outerRoundness.valueAt(local), 0),
-                      ),
-                      animRow(
-                        'Rotacao',
-                        'shapeRotation',
-                        -180,
-                        180,
-                        '${amNumber(sp.shapeRotation.valueAt(local), 0)}°',
-                      ),
-                    ],
-                    if (sp.kind == ParamShapeKind.star) ...[
-                      animRow(
-                        'Raio int',
-                        'innerRadius',
-                        0,
-                        600,
-                        amNumber(sp.innerRadius.valueAt(local), 0),
-                      ),
-                      animRow(
-                        'Arred. int',
-                        'innerRoundness',
-                        -100,
-                        200,
-                        amNumber(sp.innerRoundness.valueAt(local), 0),
-                      ),
-                    ],
-                    if (sp.kind == ParamShapeKind.sector) ...[
-                      animRow(
-                        'Raio',
-                        'outerRadius',
-                        10,
-                        600,
-                        amNumber(sp.outerRadius.valueAt(local), 0),
-                      ),
-                      animRow(
-                        'Raio int',
-                        'sectorInner',
-                        0,
-                        600,
-                        amNumber(sp.sectorInner.valueAt(local), 0),
-                      ),
-                      animRow(
-                        'Ang. inicial',
-                        'startAngle',
-                        -180,
-                        360,
-                        '${amNumber(sp.startAngle.valueAt(local), 0)}°',
-                      ),
-                      animRow(
-                        'Varredura',
-                        'sweep',
-                        0,
-                        360,
-                        '${amNumber(sp.sweep.valueAt(local), 0)}°',
-                      ),
-                    ],
-                    const AppText('Tamanho muda a GEOMETRIA (traco constante). '
-                      'Escala, em Mover, engorda tudo junto.',
-                      style: TextStyle(fontSize: 11, color: AmColors.muted),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          );
-        },
-      ),
+                  ),
+                ),
+              );
+            },
+          ),
     ),
   );
 }
@@ -3588,7 +3796,8 @@ Future<void> showCaptionCuesSheet(
                               : AmColors.chip,
                           borderRadius: BorderRadius.circular(9),
                         ),
-                        child: AppText('Estilo',
+                        child: AppText(
+                          'Estilo',
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
@@ -3607,7 +3816,8 @@ Future<void> showCaptionCuesSheet(
                   fps: project.fps,
                 ),
                 const SizedBox(height: 4),
-                const AppText('Toque no tempo para ouvir o trecho; corrija o texto '
+                const AppText(
+                  'Toque no tempo para ouvir o trecho; corrija o texto '
                   'direto. Editar trava o cue.',
                   style: TextStyle(fontSize: 11, color: AmColors.muted),
                 ),
@@ -3615,7 +3825,8 @@ Future<void> showCaptionCuesSheet(
                 Expanded(
                   child: cues.isEmpty
                       ? const Center(
-                          child: AppText('Sem cues nesta camada.',
+                          child: AppText(
+                            'Sem cues nesta camada.',
                             style: TextStyle(
                               fontSize: 13,
                               color: AmColors.muted,
@@ -4249,8 +4460,8 @@ class _BlendingPanelState extends ConsumerState<BlendingPanel> {
         for (final m in cat.modos)
           if (ligado(m)) (cat, m),
     ].firstOrNull;
-    final abertas = ref.watch(_mesclaAbertasProvider) ??
-        {if (atual != null) atual.$1.nome};
+    final abertas =
+        ref.watch(_mesclaAbertasProvider) ?? {if (atual != null) atual.$1.nome};
     return ListView(
       key: const ValueKey('mescla-categorias'),
       padding: const EdgeInsets.fromLTRB(8, 4, 12, 12),
@@ -4331,7 +4542,8 @@ class _BlendingPanelState extends ConsumerState<BlendingPanel> {
         // camada sozinha em Multiplicar (que some no preto) ou em Tela
         // (que nao muda) vira "a mesclagem nao funciona" — o relato do
         // beta. A conta esta certa; faltava dizer com o que ela conta.
-        const AppText('A mescla combina esta camada com as camadas abaixo. Branco em '
+        const AppText(
+          'A mescla combina esta camada com as camadas abaixo. Branco em '
           'Clarear cobre a imagem; em Escurecer deixa a imagem aparecer. '
           'Ajuste também a opacidade para reduzir a intensidade.',
           maxLines: 3,
@@ -4451,7 +4663,8 @@ class _BlendingPanelState extends ConsumerState<BlendingPanel> {
               }
             }),
             const SizedBox(height: 14),
-            const AppText('Sete modos, pilha, feather X/Y, opacidade e caminho.',
+            const AppText(
+              'Sete modos, pilha, feather X/Y, opacidade e caminho.',
               style: TextStyle(fontSize: 12, color: AmColors.muted),
             ),
             const SizedBox(height: 12),
@@ -4473,7 +4686,8 @@ class _BlendingPanelState extends ConsumerState<BlendingPanel> {
       return ListView(
         padding: const EdgeInsets.fromLTRB(10, 7, 14, 12),
         children: [
-          const AppText('Pronto · Revelar',
+          const AppText(
+            'Pronto · Revelar',
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w700,
@@ -4481,7 +4695,8 @@ class _BlendingPanelState extends ConsumerState<BlendingPanel> {
             ),
           ),
           const SizedBox(height: 4),
-          const AppText('Um toque cria mascara e keyframes reais com mola.',
+          const AppText(
+            'Um toque cria mascara e keyframes reais com mola.',
             style: TextStyle(fontSize: 12, color: AmColors.muted),
           ),
           const SizedBox(height: 9),
@@ -4532,7 +4747,8 @@ class _BlendingPanelState extends ConsumerState<BlendingPanel> {
         }),
         const SizedBox(height: 8),
         AppTextMoldado(
-          'Montar · {0}', [mask.name],
+          'Montar · {0}',
+          [mask.name],
           style: const TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.w700,
@@ -4584,7 +4800,8 @@ class _BlendingPanelState extends ConsumerState<BlendingPanel> {
         Row(
           children: [
             const Expanded(
-              child: AppText('Inverter',
+              child: AppText(
+                'Inverter',
                 style: TextStyle(fontSize: 12, color: AmColors.muted),
               ),
             ),
@@ -4610,11 +4827,13 @@ class _BlendingPanelState extends ConsumerState<BlendingPanel> {
           (v) => c.editMaskParam(id, mask.id, 'expansion', t, v),
         ),
         if (!mask.path.valueAt(local).closed)
-          const AppText('Caminho aberto nao recorta. Feche no Edit Points.',
+          const AppText(
+            'Caminho aberto nao recorta. Feche no Edit Points.',
             style: TextStyle(fontSize: 11, color: AmColors.accent),
           ),
         if (maskFeatherExceedsBounds(mask, local, size))
-          const AppText('Aviso: feather e expansao passam do limite.',
+          const AppText(
+            'Aviso: feather e expansao passam do limite.',
             style: TextStyle(fontSize: 11, color: AmColors.accent),
           ),
       ],
@@ -4668,7 +4887,8 @@ class _BlendingPanelState extends ConsumerState<BlendingPanel> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const AppText('Pronto · Recortar',
+            const AppText(
+              'Pronto · Recortar',
               style: TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w700,
@@ -4754,7 +4974,8 @@ class _BlendingPanelState extends ConsumerState<BlendingPanel> {
             },
           ),
           const SizedBox(height: 7),
-          const AppText('A fonte some enquanto o recorte estiver ligado, volta ao '
+          const AppText(
+            'A fonte some enquanto o recorte estiver ligado, volta ao '
             'desligar e a transparencia abaixo e preservada.',
             style: TextStyle(fontSize: 11, color: AmColors.muted),
           ),
@@ -4788,7 +5009,8 @@ Future<String?> _pickControllerNull(
         children: [
           const Padding(
             padding: EdgeInsets.all(14),
-            child: AppText('Nulo controlador da grade',
+            child: AppText(
+              'Nulo controlador da grade',
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w700,
@@ -4799,7 +5021,8 @@ Future<String?> _pickControllerNull(
           if (nulls.isEmpty)
             const Padding(
               padding: EdgeInsets.fromLTRB(20, 0, 20, 12),
-              child: AppText('Crie outro Nulo 3D para usar como controlador '
+              child: AppText(
+                'Crie outro Nulo 3D para usar como controlador '
                 '(o proprio nulo da grade nao conta).',
                 style: TextStyle(fontSize: 13, color: AmColors.muted),
               ),
@@ -4807,7 +5030,8 @@ Future<String?> _pickControllerNull(
           Material(
             color: Colors.transparent,
             child: ListTile(
-              title: const AppText('Nenhum',
+              title: const AppText(
+                'Nenhum',
                 style: TextStyle(color: AmColors.muted),
               ),
               onTap: () => Navigator.of(sheetContext).pop(''),
@@ -4821,7 +5045,8 @@ Future<String?> _pickControllerNull(
                   other.name,
                   style: const TextStyle(color: AmColors.text),
                 ),
-                subtitle: const AppText('Escala/rotacao dele passam a modular a grade',
+                subtitle: const AppText(
+                  'Escala/rotacao dele passam a modular a grade',
                   style: TextStyle(fontSize: 11, color: AmColors.muted),
                 ),
                 onTap: () => Navigator.of(sheetContext).pop(other.id),
@@ -4852,7 +5077,8 @@ Future<String?> _pickMatteSource(
         children: [
           const Padding(
             padding: EdgeInsets.all(14),
-            child: AppText('Usar como matte...',
+            child: AppText(
+              'Usar como matte...',
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w700,
@@ -4872,7 +5098,8 @@ Future<String?> _pickMatteSource(
                     other.name,
                     style: const TextStyle(color: AmColors.text),
                   ),
-                  subtitle: const AppText('A fonte fica oculta na cena',
+                  subtitle: const AppText(
+                    'A fonte fica oculta na cena',
                     style: TextStyle(fontSize: 11, color: AmColors.muted),
                   ),
                   onTap: () => Navigator.of(sheetContext).pop(other.id),
@@ -5119,10 +5346,30 @@ class _PreenchimentoDaForma extends ConsumerWidget {
       children: [
         _AbasDeCor<TipoDePreenchimento>(
           abas: const [
-            (TipoDePreenchimento.nenhum, 'Nenhum', CupertinoIcons.nosign, 'cor-aba-nenhum'),
-            (TipoDePreenchimento.cor, 'Cor', CupertinoIcons.drop_fill, 'cor-aba-cor'),
-            (TipoDePreenchimento.degrade, 'Degradê', CupertinoIcons.color_filter, 'cor-aba-degrade'),
-            (TipoDePreenchimento.midia, 'Mídia', CupertinoIcons.photo, 'cor-aba-midia'),
+            (
+              TipoDePreenchimento.nenhum,
+              'Nenhum',
+              CupertinoIcons.nosign,
+              'cor-aba-nenhum',
+            ),
+            (
+              TipoDePreenchimento.cor,
+              'Cor',
+              CupertinoIcons.drop_fill,
+              'cor-aba-cor',
+            ),
+            (
+              TipoDePreenchimento.degrade,
+              'Degradê',
+              CupertinoIcons.color_filter,
+              'cor-aba-degrade',
+            ),
+            (
+              TipoDePreenchimento.midia,
+              'Mídia',
+              CupertinoIcons.photo,
+              'cor-aba-midia',
+            ),
           ],
           ativa: tipo,
           onAba: (novo) {
@@ -5204,15 +5451,27 @@ class _PreenchimentoDaForma extends ConsumerWidget {
                         children: const {
                           EncaixeNaForma.preencher: Padding(
                             padding: EdgeInsets.symmetric(vertical: 8),
-                            child: AppText('Preencher',
-                              style: TextStyle(color: AmColors.text, fontSize: 13),
+                            child: AppText(
+                              'Preencher',
+                              style: TextStyle(
+                                color: AmColors.text,
+                                fontSize: 13,
+                              ),
                             ),
                           ),
-                          EncaixeNaForma.caber: AppText('Caber',
-                            style: TextStyle(color: AmColors.text, fontSize: 13),
+                          EncaixeNaForma.caber: AppText(
+                            'Caber',
+                            style: TextStyle(
+                              color: AmColors.text,
+                              fontSize: 13,
+                            ),
                           ),
-                          EncaixeNaForma.esticar: AppText('Esticar',
-                            style: TextStyle(color: AmColors.text, fontSize: 13),
+                          EncaixeNaForma.esticar: AppText(
+                            'Esticar',
+                            style: TextStyle(
+                              color: AmColors.text,
+                              fontSize: 13,
+                            ),
                           ),
                         },
                         onValueChanged: (e) {
@@ -5259,7 +5518,9 @@ class _EdicaoDoDegrade extends ConsumerWidget {
             key: ValueKey(chave),
             onTap: () async {
               void aplicar(Color nova) => editar(
-                (x) => inicio ? x.copyWith(colorA: nova) : x.copyWith(colorB: nova),
+                (x) => inicio
+                    ? x.copyWith(colorA: nova)
+                    : x.copyWith(colorB: nova),
               );
               final escolhida = await showColorPicker(
                 context,
@@ -5309,14 +5570,17 @@ class _EdicaoDoDegrade extends ConsumerWidget {
           children: const {
             0: Padding(
               padding: EdgeInsets.symmetric(vertical: 8),
-              child: AppText('Linear',
+              child: AppText(
+                'Linear',
                 style: TextStyle(color: AmColors.text, fontSize: 13),
               ),
             ),
-            1: AppText('Radial',
+            1: AppText(
+              'Radial',
               style: TextStyle(color: AmColors.text, fontSize: 13),
             ),
-            2: AppText('Varredura',
+            2: AppText(
+              'Varredura',
               style: TextStyle(color: AmColors.text, fontSize: 13),
             ),
           },
@@ -5331,10 +5595,7 @@ class _EdicaoDoDegrade extends ConsumerWidget {
           height: 26,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(8),
-            gradient: LinearGradient(
-              colors: g.paradas,
-              stops: g.resolvedStops,
-            ),
+            gradient: LinearGradient(colors: g.paradas, stops: g.resolvedStops),
           ),
         ),
         const SizedBox(height: 12),
@@ -5414,7 +5675,12 @@ class _SobreposicaoDeCor extends ConsumerWidget {
       children: [
         _AbasDeCor<int>(
           abas: [
-            (0, texto ? 'Cor do texto' : 'Intrínseca', texto ? CupertinoIcons.textformat : CupertinoIcons.photo, 'cor-aba-intrinseca'),
+            (
+              0,
+              texto ? 'Cor do texto' : 'Intrínseca',
+              texto ? CupertinoIcons.textformat : CupertinoIcons.photo,
+              'cor-aba-intrinseca',
+            ),
             (1, 'Cor', CupertinoIcons.drop_fill, 'cor-aba-cor'),
             (2, 'Degradê', CupertinoIcons.color_filter, 'cor-aba-degrade'),
           ],
@@ -5450,8 +5716,10 @@ class _SobreposicaoDeCor extends ConsumerWidget {
                   onCor: (cor) => c.updateLayerStyles(
                     layerId,
                     (s) => s.copyWith(
-                      colorOverlay: (s.colorOverlay ?? OverlayStyle())
-                          .copyWith(color: cor, enabled: true),
+                      colorOverlay: (s.colorOverlay ?? OverlayStyle()).copyWith(
+                        color: cor,
+                        enabled: true,
+                      ),
                     ),
                   ),
                 ),
@@ -5466,13 +5734,15 @@ class _SobreposicaoDeCor extends ConsumerWidget {
                         child: Tocavel(
                           key: ValueKey(chave),
                           onTap: () async {
-                            final atual = estilos.gradientOverlay ??
+                            final atual =
+                                estilos.gradientOverlay ??
                                 GradientOverlayStyle();
                             void aplicar(Color nova) => c.updateLayerStyles(
                               layerId,
                               (s) => s.copyWith(
                                 gradientOverlay:
-                                    (s.gradientOverlay ?? GradientOverlayStyle())
+                                    (s.gradientOverlay ??
+                                            GradientOverlayStyle())
                                         .copyWith(
                                           colorA: inicio ? nova : null,
                                           colorB: inicio ? null : nova,
@@ -5592,7 +5862,8 @@ class _ShapeOperators extends ConsumerWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const SizedBox(height: 16),
-        const AppText('OPERADORES',
+        const AppText(
+          'OPERADORES',
           style: TextStyle(
             fontSize: 11,
             letterSpacing: 1,
@@ -5616,7 +5887,8 @@ class _ShapeOperators extends ConsumerWidget {
                   Row(
                     children: [
                       const Expanded(
-                        child: AppText('Trim Paths',
+                        child: AppText(
+                          'Trim Paths',
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
@@ -5717,7 +5989,8 @@ class _ShapeOperators extends ConsumerWidget {
                   Row(
                     children: [
                       const Expanded(
-                        child: AppText('Repeater',
+                        child: AppText(
+                          'Repeater',
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
@@ -5826,7 +6099,8 @@ class _ShapeOperators extends ConsumerWidget {
                   Row(
                     children: [
                       Expanded(
-                        child: AppText('Morph  '
+                        child: AppText(
+                          'Morph  '
                           '${_primName(item.from.primitive)} -> '
                           '${_primName(item.to.primitive)}',
                           style: const TextStyle(
@@ -5996,7 +6270,8 @@ class _ShapeOperators extends ConsumerWidget {
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
               onPressed: () =>
                   controller.addShapeOperator(layerId, repeater: false),
-              child: const AppText('+ Trim Paths',
+              child: const AppText(
+                '+ Trim Paths',
                 style: TextStyle(fontSize: 12, color: AmColors.accent),
               ),
             ),
@@ -6004,14 +6279,16 @@ class _ShapeOperators extends ConsumerWidget {
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
               onPressed: () =>
                   controller.addShapeOperator(layerId, repeater: true),
-              child: const AppText('+ Repeater',
+              child: const AppText(
+                '+ Repeater',
                 style: TextStyle(fontSize: 12, color: AmColors.accent),
               ),
             ),
             CupertinoButton(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
               onPressed: () => _pickMorphTarget(context, ref),
-              child: const AppText('+ Morfar',
+              child: const AppText(
+                '+ Morfar',
                 style: TextStyle(fontSize: 12, color: AmColors.accent),
               ),
             ),
@@ -6110,7 +6387,8 @@ class _ShapeOperators extends ConsumerWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const AppText('Morfar para...',
+              const AppText(
+                'Morfar para...',
                 style: TextStyle(
                   fontSize: 17,
                   fontWeight: FontWeight.w700,
@@ -6118,7 +6396,8 @@ class _ShapeOperators extends ConsumerWidget {
                 ),
               ),
               const SizedBox(height: 6),
-              const AppText('A forma atual vira a origem; anime o Progresso com '
+              const AppText(
+                'A forma atual vira a origem; anime o Progresso com '
                 'keyframes para ver a transformacao.',
                 style: TextStyle(fontSize: 12, color: AmColors.muted),
               ),
@@ -6209,7 +6488,8 @@ Future<void> showExtrudeSheet(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const AppText('Extrude 3D',
+                const AppText(
+                  'Extrude 3D',
                   style: TextStyle(
                     fontSize: 17,
                     fontWeight: FontWeight.w700,

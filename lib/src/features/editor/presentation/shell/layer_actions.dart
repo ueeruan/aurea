@@ -238,7 +238,7 @@ Future<void> menuDasMarcas(
               style: TextStyle(color: AmColors.text, fontSize: 15),
             ),
             onTap: () {
-              controller.toggleMarker(playback.time.value);
+              controller.toggleMarker(playback.timeForInput());
               Navigator.of(sheetContext).pop();
             },
           ),

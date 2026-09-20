@@ -15,6 +15,7 @@
 // Abrir nao cria curva: a primeira edicao cria (e, num clipe com o
 // Reverso ligado, grava antes a curva que a previa ja toca).
 import 'package:aurea/src/core/theme/aurea_colors.dart';
+
 import 'dart:math' as math;
 
 import 'package:aurea/src/core/l10n/app_language.dart';
@@ -81,6 +82,8 @@ class EstudioDoTempo extends ConsumerStatefulWidget {
 }
 
 class _EstudioDoTempoState extends ConsumerState<EstudioDoTempo> {
+  // O AE abre o Time Remap como grafico de valor; o grafico de velocidade
+  // fica ao lado para editar rampas e influencia sem sair do editor.
   _Aba _aba = _Aba.valor;
   int? _selecionado;
   bool _grudarNasBatidas = true;
@@ -103,9 +106,7 @@ class _EstudioDoTempoState extends ConsumerState<EstudioDoTempo> {
   EditorController get _c => ref.read(editorControllerProvider.notifier);
 
   VideoLayer? get _video {
-    final l = ref
-        .read(editorControllerProvider)
-        .layerById(widget.layerId);
+    final l = ref.read(editorControllerProvider).layerById(widget.layerId);
     return l is VideoLayer ? l : null;
   }
 
@@ -260,8 +261,7 @@ class _EstudioDoTempoState extends ConsumerState<EstudioDoTempo> {
     Offset? saida, entrada;
     final s = p.saida;
     if (s != null && indice < pontos.length - 1) {
-      final dt =
-          (pontos[indice + 1].tempo - p.tempo).inMicroseconds / 1e6;
+      final dt = (pontos[indice + 1].tempo - p.tempo).inMicroseconds / 1e6;
       final dx = s.influencia * dt;
       saida = Offset(_xDe(t + dx), _yDoValor(p.valor + s.velocidade * dx));
     }
@@ -343,8 +343,8 @@ class _EstudioDoTempoState extends ConsumerState<EstudioDoTempo> {
           (d.localFocalPoint.dx - _focoDoGesto.dx) /
           math.max(1e-9, _quadro.width) *
           duracaoT;
-      final fracFoco = (_focoDoGesto.dx - _quadro.left) /
-          math.max(1e-9, _quadro.width);
+      final fracFoco =
+          (_focoDoGesto.dx - _quadro.left) / math.max(1e-9, _quadro.width);
       _t0 = focoT - duracaoT * fracFoco - dxSeg;
       _t1 = _t0 + duracaoT;
       final dur = math.max(0.1, l.duration.inMicroseconds / 1e6);
@@ -359,7 +359,8 @@ class _EstudioDoTempoState extends ConsumerState<EstudioDoTempo> {
       final fracY =
           (_quadro.bottom - _focoDoGesto.dy) / math.max(1e-9, _quadro.height);
       final focoV = lo0 + fracY * (hi0 - lo0);
-      final dyV = (d.localFocalPoint.dy - _focoDoGesto.dy) /
+      final dyV =
+          (d.localFocalPoint.dy - _focoDoGesto.dy) /
           math.max(1e-9, _quadro.height) *
           faixa;
       final novoLo = focoV - faixa * fracY + dyV;
@@ -404,8 +405,7 @@ class _EstudioDoTempoState extends ConsumerState<EstudioDoTempo> {
       case _Gesto.alcaEntrada:
         final entrada = _gesto == _Gesto.alcaEntrada;
         final vizinho = entrada ? pontos[sel - 1] : pontos[sel + 1];
-        final dtTrecho =
-            ((vizinho.tempo - p.tempo).inMicroseconds / 1e6).abs();
+        final dtTrecho = ((vizinho.tempo - p.tempo).inMicroseconds / 1e6).abs();
         if (dtTrecho <= 0) return;
         final dxSeg = entrada
             ? p.tempo.inMicroseconds / 1e6 - _segDe(pos.dx)
@@ -445,8 +445,8 @@ class _EstudioDoTempoState extends ConsumerState<EstudioDoTempo> {
             : (sel < pontos.length - 1 ? pontos[sel + 1] : null);
         var influencia = lado.influencia;
         if (vizinho != null) {
-          final dtTrecho =
-              ((vizinho.tempo - p.tempo).inMicroseconds / 1e6).abs();
+          final dtTrecho = ((vizinho.tempo - p.tempo).inMicroseconds / 1e6)
+              .abs();
           final dxSeg = (_segDe(pos.dx) - p.tempo.inMicroseconds / 1e6).abs();
           if (dtTrecho > 0 && dxSeg > 0.01 * dtTrecho) {
             influencia = (dxSeg / dtTrecho).clamp(0.01, 1.0);
@@ -518,15 +518,17 @@ class _EstudioDoTempoState extends ConsumerState<EstudioDoTempo> {
     final curva = _curvaDe(l);
     if (indice >= curva.keyframes.length) return;
     final kf = curva.keyframes[indice];
-    void aplica(AnimatedDouble nova) =>
-        _escrever(nova, dentroDeGesto: false);
+    void aplica(AnimatedDouble nova) => _escrever(nova, dentroDeGesto: false);
     showCupertinoModalPopup<void>(
       context: context,
       builder: (menuContext) => CupertinoActionSheet(
         title: AppTextMoldado('Keyframe · {0}', [formatTime(kf.time)]),
         actions: [
           for (final (rotulo, faz) in <(String, VoidCallback)>[
-            ('Suavizar (easy ease)', () => aplica(trilhaSuavizada(curva, indice))),
+            (
+              'Suavizar (easy ease)',
+              () => aplica(trilhaSuavizada(curva, indice)),
+            ),
             ('Auto bezier', () => aplica(trilhaAutoBezier(curva, indice))),
             ('Continuo', () => aplica(trilhaContinua(curva, indice))),
             (
@@ -672,7 +674,9 @@ class _EstudioDoTempoState extends ConsumerState<EstudioDoTempo> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
           decoration: BoxDecoration(
-            color: acesa ? AmColors.accent.withValues(alpha: .18) : AmColors.chip,
+            color: acesa
+                ? AmColors.accent.withValues(alpha: .18)
+                : AmColors.chip,
             borderRadius: BorderRadius.circular(15),
           ),
           child: AppText(
@@ -693,7 +697,7 @@ class _EstudioDoTempoState extends ConsumerState<EstudioDoTempo> {
         children: [
           const Flexible(
             child: AppText(
-              'Time Remap',
+              'Editor de curva · Time Remap',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
@@ -724,11 +728,7 @@ class _EstudioDoTempoState extends ConsumerState<EstudioDoTempo> {
             onTap: () => Navigator.of(context).maybePop(),
             child: const Padding(
               padding: EdgeInsets.all(13),
-              child: Icon(
-                CupertinoIcons.xmark,
-                size: 18,
-                color: AmColors.text,
-              ),
+              child: Icon(CupertinoIcons.xmark, size: 18, color: AmColors.text),
             ),
           ),
         ],
@@ -784,8 +784,7 @@ class _EstudioDoTempoState extends ConsumerState<EstudioDoTempo> {
                   t1: _t1,
                   v0: _aba == _Aba.valor ? _v0 : _s0,
                   v1: _aba == _Aba.valor ? _v1 : _s1,
-                  cabecoteSeg:
-                      (agora - l.startTime).inMicroseconds / 1e6,
+                  cabecoteSeg: (agora - l.startTime).inMicroseconds / 1e6,
                   batidas: [
                     for (final b in projeto.beats)
                       (b - l.startTime).inMicroseconds / 1e6,
@@ -911,45 +910,45 @@ class _EstudioDoTempoState extends ConsumerState<EstudioDoTempo> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-          _campo(
-            'Entrada',
-            p.entrada == null ? null : p.entrada!.velocidade * 100,
-            '%',
-            (v) => muda(velEntrada: v / 100),
-          ),
-          _campo(
-            'Infl. entrada',
-            p.entrada == null ? null : p.entrada!.influencia * 100,
-            '%',
-            (v) => muda(infEntrada: v / 100),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            child: AppText(
-              switch (p.tipo) {
-                TipoDoPontoDeTempo.manter => 'Manter',
-                TipoDoPontoDeTempo.linear => 'Linear',
-                TipoDoPontoDeTempo.bezier => 'Bezier',
-              },
-              style: const TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                color: AmColors.accent,
+            _campo(
+              'Entrada',
+              p.entrada == null ? null : p.entrada!.velocidade * 100,
+              '%',
+              (v) => muda(velEntrada: v / 100),
+            ),
+            _campo(
+              'Infl. entrada',
+              p.entrada == null ? null : p.entrada!.influencia * 100,
+              '%',
+              (v) => muda(infEntrada: v / 100),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: AppText(
+                switch (p.tipo) {
+                  TipoDoPontoDeTempo.manter => 'Manter',
+                  TipoDoPontoDeTempo.linear => 'Linear',
+                  TipoDoPontoDeTempo.bezier => 'Bezier',
+                },
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: AmColors.accent,
+                ),
               ),
             ),
-          ),
-          _campo(
-            'Saída',
-            p.saida == null ? null : p.saida!.velocidade * 100,
-            '%',
-            (v) => muda(velSaida: v / 100),
-          ),
-          _campo(
-            'Infl. saída',
-            p.saida == null ? null : p.saida!.influencia * 100,
-            '%',
-            (v) => muda(infSaida: v / 100),
-          ),
+            _campo(
+              'Saída',
+              p.saida == null ? null : p.saida!.velocidade * 100,
+              '%',
+              (v) => muda(velSaida: v / 100),
+            ),
+            _campo(
+              'Infl. saída',
+              p.saida == null ? null : p.saida!.influencia * 100,
+              '%',
+              (v) => muda(infSaida: v / 100),
+            ),
           ],
         ),
       ),
@@ -976,8 +975,12 @@ class _EstudioDoTempoState extends ConsumerState<EstudioDoTempo> {
 
   Widget _acoes(VideoLayer l) {
     final projeto = ref.read(editorControllerProvider);
-    Widget botao(String rotulo, String chave, VoidCallback? faz,
-        {bool aceso = false}) {
+    Widget botao(
+      String rotulo,
+      String chave,
+      VoidCallback? faz, {
+      bool aceso = false,
+    }) {
       return Tocavel(
         key: ValueKey(chave),
         onTap: faz,
@@ -1015,57 +1018,57 @@ class _EstudioDoTempoState extends ConsumerState<EstudioDoTempo> {
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Row(
-              children: [
-                botao('+ Keyframe', 'estudio-tempo-keyframe', _keyframeAqui),
-                const SizedBox(width: 6),
-                botao('Congelar', 'estudio-tempo-congelar', _congelarAqui),
-                const SizedBox(width: 6),
-                botao('Reverso', 'estudio-tempo-reverso', _reverso),
-                const SizedBox(width: 6),
-                Tocavel(
-                  key: const ValueKey('estudio-tempo-batidas'),
-                  onTap: () =>
-                      setState(() => _grudarNasBatidas = !_grudarNasBatidas),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 9,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: _grudarNasBatidas
-                          ? AmColors.accent.withValues(alpha: .18)
-                          : AmColors.chip,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Icon(
-                      CupertinoIcons.metronome,
-                      size: 16,
-                      color: _grudarNasBatidas
-                          ? AmColors.accent
-                          : AmColors.text,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                for (final preset in SpeedRampPreset.values) ...[
-                  _ChipDePreset(
-                    preset: preset,
-                    aoTocar: () {
-                      _c.runAsOneUndo(() {
-                        if (_video?.reverse ?? false) {
-                          _c.assarReversoNaCurva(widget.layerId);
-                        }
-                        _c.applySpeedRamp(widget.layerId, preset);
-                      });
-                      setState(() {
-                        _selecionado = null;
-                        _enquadrado = false;
-                      });
-                    },
-                  ),
+                children: [
+                  botao('+ Keyframe', 'estudio-tempo-keyframe', _keyframeAqui),
                   const SizedBox(width: 6),
+                  botao('Congelar', 'estudio-tempo-congelar', _congelarAqui),
+                  const SizedBox(width: 6),
+                  botao('Reverso', 'estudio-tempo-reverso', _reverso),
+                  const SizedBox(width: 6),
+                  Tocavel(
+                    key: const ValueKey('estudio-tempo-batidas'),
+                    onTap: () =>
+                        setState(() => _grudarNasBatidas = !_grudarNasBatidas),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 9,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: _grudarNasBatidas
+                            ? AmColors.accent.withValues(alpha: .18)
+                            : AmColors.chip,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(
+                        CupertinoIcons.metronome,
+                        size: 16,
+                        color: _grudarNasBatidas
+                            ? AmColors.accent
+                            : AmColors.text,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  for (final preset in SpeedRampPreset.values) ...[
+                    _ChipDePreset(
+                      preset: preset,
+                      aoTocar: () {
+                        _c.runAsOneUndo(() {
+                          if (_video?.reverse ?? false) {
+                            _c.assarReversoNaCurva(widget.layerId);
+                          }
+                          _c.applySpeedRamp(widget.layerId, preset);
+                        });
+                        setState(() {
+                          _selecionado = null;
+                          _enquadrado = false;
+                        });
+                      },
+                    ),
+                    const SizedBox(width: 6),
+                  ],
                 ],
-              ],
               ),
             ),
           ),
@@ -1170,9 +1173,7 @@ class _CampoDoEstudio extends StatelessWidget {
                   ],
                 ),
               );
-              final novo = double.tryParse(
-                (texto ?? '').replaceAll(',', '.'),
-              );
+              final novo = double.tryParse((texto ?? '').replaceAll(',', '.'));
               if (novo != null && novo.isFinite) aoMudar!(novo);
             },
       child: Column(
@@ -1310,9 +1311,8 @@ class _PintorDoGrafico extends CustomPainter {
   double _y(double v) =>
       quadro.bottom - (v - v0) / math.max(1e-9, v1 - v0) * quadro.height;
 
-  double _amostra(Duration t) => aba == _Aba.valor
-      ? valorDaCurva(curva, t)
-      : velocidadeDaCurva(curva, t);
+  double _amostra(Duration t) =>
+      aba == _Aba.valor ? valorDaCurva(curva, t) : velocidadeDaCurva(curva, t);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1364,11 +1364,7 @@ class _PintorDoGrafico extends CustomPainter {
     } else {
       for (var i = 1; i < 4; i++) {
         final y = quadro.top + quadro.height * i / 4;
-        canvas.drawLine(
-          Offset(quadro.left, y),
-          Offset(quadro.right, y),
-          tinta,
-        );
+        canvas.drawLine(Offset(quadro.left, y), Offset(quadro.right, y), tinta);
       }
     }
     for (var i = 1; i < 6; i++) {
@@ -1476,7 +1472,12 @@ class _PintorDoGrafico extends CustomPainter {
     }
   }
 
-  void _losango(Canvas canvas, Offset c, bool selecionado, {bool meio = false}) {
+  void _losango(
+    Canvas canvas,
+    Offset c,
+    bool selecionado, {
+    bool meio = false,
+  }) {
     final lado = meio ? 5.5 : 7.0;
     final caminho = Path()
       ..moveTo(c.dx, c.dy - lado)
@@ -1535,7 +1536,10 @@ class _PintorDoGrafico extends CustomPainter {
         textDirection: TextDirection.ltr,
         textAlign: align,
       )..layout();
-      tp.paint(canvas, onde - Offset(align == TextAlign.right ? tp.width : 0, tp.height / 2));
+      tp.paint(
+        canvas,
+        onde - Offset(align == TextAlign.right ? tp.width : 0, tp.height / 2),
+      );
     }
 
     if (aba == _Aba.velocidade) {

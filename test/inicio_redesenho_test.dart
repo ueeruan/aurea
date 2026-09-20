@@ -22,7 +22,7 @@ class _MemoryProjects extends ProjectsController {
 /// isolate (compute), e isolate nao anda no relogio de mentira do
 /// testWidgets: o flush esperaria para sempre.
 class _RepoNulo extends ProjectRepository {
-  _RepoNulo() : super(directory: Directory.systemTemp, installBundledExamples: false);
+  _RepoNulo() : super(directory: Directory.systemTemp);
 
   @override
   Future<List<VideoProject>> loadAll() async => const [];

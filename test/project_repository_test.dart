@@ -11,7 +11,6 @@ void main() {
     addTearDown(() => dir.delete(recursive: true));
     final repo = ProjectRepository(
       directory: dir,
-      installBundledExamples: false,
     );
     final project = VideoProject.empty('First');
     await Future.wait([

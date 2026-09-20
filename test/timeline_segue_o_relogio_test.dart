@@ -116,6 +116,40 @@ void main() {
     );
   });
 
+  testWidgets('video longo entra enquadrado em vez de virar barra gigante', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    final id = container
+        .read(editorControllerProvider.notifier)
+        .addVideoLayer(
+          Duration.zero,
+          'video-longo.mp4',
+          'Video longo',
+          const Duration(seconds: 57),
+          fonte: const Duration(seconds: 57),
+        );
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          home: _Host(builder: (p) => AmTimeline(playback: p, height: 280)),
+        ),
+      ),
+    );
+    await tester.pump();
+    final box = tester.renderObject<RenderBox>(
+      find.byKey(ValueKey('clip-content-$id')),
+    );
+    expect(box.size.width, lessThanOrEqualTo(390));
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets(
     'desselecionar no meio do arrasto nao trava a timeline no tempo',
     (tester) async {

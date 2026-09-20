@@ -102,4 +102,25 @@ void main() {
       expect(pc.debugBaseShiftUs, 0);
     });
   });
+
+  test('gesto ao vivo usa o relogio atual, nao o ultimo frame da UI', () {
+    var agoraUs = 0;
+    final pc = PlaybackController(
+      vsync: _FakeVsync(),
+      durationOf: () => const Duration(seconds: 30),
+      relogioUs: () => agoraUs,
+    );
+    addTearDown(pc.dispose);
+    pc.play();
+
+    // Simula a UI ocupada: nenhum ticker publicou outro quadro, mas o
+    // audio/tempo real continuou por 250 ms antes do toque de marcar.
+    agoraUs = 250000;
+    expect(pc.time.value, Duration.zero);
+    expect(
+      pc.timeForInput(),
+      const Duration(microseconds: 233334),
+      reason: 'a marca cai no quadro corrente de 30 fps, nao no zero velho',
+    );
+  });
 }

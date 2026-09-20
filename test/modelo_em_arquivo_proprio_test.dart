@@ -91,7 +91,7 @@ void main() {
 
   setUp(() {
     pasta = Directory.systemTemp.createTempSync('aurea-pesos');
-    repo = ProjectRepository(directory: pasta, installBundledExamples: false);
+    repo = ProjectRepository(directory: pasta);
   });
   tearDown(() {
     if (pasta.existsSync()) pasta.deleteSync(recursive: true);

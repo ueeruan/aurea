@@ -82,17 +82,32 @@ struct Camada {
   Cor cor{};
 };
 
-/// OS PIXELS DE UMA TEXTURA. Nao-premultiplicado na entrada — e o que um
-/// PNG ou um quadro decodificado entrega —, premultiplicado ao amostrar.
+/// OS PIXELS DE UMA TEXTURA.
+///
+/// NAO-PREMULTIPLICADO NA ENTRADA, no caso comum — e o que um PNG ou um
+/// quadro de video decodificado entrega, com a cor ainda cheia nos pixels
+/// transparentes. A multiplicacao pelo alfa acontece ao amostrar.
+///
+/// `premultiplicada` EXISTE PARA O 3D. O alvo do motor 3D sai do
+/// rasterizador JA PREMULTIPLICADO (a mistura e `ONE, INV_SRC_ALPHA`), e
+/// multiplicar de novo na entrada da composicao escureceria toda borda
+/// suave — o halo escuro classico, agora na silhueta do modelo. Sao quatro
+/// linhas de diferenca e um caminho inteiro de cor errada sem elas.
 class CargaDeTextura final : public CargaDoRecurso {
  public:
   CargaDeTextura(std::uint32_t largura, std::uint32_t altura,
-                 std::vector<std::uint8_t> rgba)
-      : largura(largura), altura(altura), rgba(std::move(rgba)) {}
+                 std::vector<std::uint8_t> rgba,
+                 bool premultiplicada = false)
+      : largura(largura),
+        altura(altura),
+        rgba(std::move(rgba)),
+        premultiplicada(premultiplicada) {}
 
   std::uint32_t largura;
   std::uint32_t altura;
   std::vector<std::uint8_t> rgba;  // 4 bytes por pixel
+  /// A cor ja esta multiplicada pelo alfa?
+  bool premultiplicada = false;
 
   [[nodiscard]] bool valida() const noexcept {
     return largura > 0 && altura > 0 &&

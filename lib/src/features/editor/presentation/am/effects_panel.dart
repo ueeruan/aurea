@@ -190,9 +190,7 @@ class _EffectsPanelState extends ConsumerState<EffectsPanel> {
               'Ele ficou guardado aqui para voce decidir — o resto da '
               'camada esta intacto.',
             ),
-            actions: [
-              item('remover', 'Remover efeito', destrutivo: true),
-            ],
+            actions: [item('remover', 'Remover efeito', destrutivo: true)],
             cancelButton: CupertinoActionSheetAction(
               onPressed: () => Navigator.of(c).pop(),
               child: const AppText('Manter'),
@@ -202,7 +200,10 @@ class _EffectsPanelState extends ConsumerState<EffectsPanel> {
         return CupertinoActionSheet(
           title: AppText(effect.spec.name),
           actions: [
-            item('ligar', effect.enabled ? 'Desativar efeito' : 'Ativar efeito'),
+            item(
+              'ligar',
+              effect.enabled ? 'Desativar efeito' : 'Ativar efeito',
+            ),
             item('duplicar', 'Duplicar'),
             if (posicao > 0) item('subir', 'Mover para cima'),
             if (posicao < total - 1) item('descer', 'Mover para baixo'),
@@ -331,7 +332,8 @@ class _EffectsPanelState extends ConsumerState<EffectsPanel> {
           }
           final alvoFinal = alvo;
           final rail = AlvoDoRail(
-            temKeyframeAqui: alvoFinal != null && alvoFinal.hasKeyframeAt(local),
+            temKeyframeAqui:
+                alvoFinal != null && alvoFinal.hasKeyframeAt(local),
             animado: alvoFinal != null && alvoFinal.hasAnimation,
             // O instante e lido NO TOQUE, nunca o do build.
             aoAlternarKeyframe: alvoFinal == null
@@ -348,6 +350,7 @@ class _EffectsPanelState extends ConsumerState<EffectsPanel> {
                     ref,
                     widget.playback,
                     label: alvoFinal.spec.name,
+                    rawTime: alvoFinal.type == EffectType.timeRemap,
                     layerId: id,
                     trackOf: (l) {
                       for (final e in l.effects) {
@@ -398,7 +401,10 @@ class _EffectsPanelState extends ConsumerState<EffectsPanel> {
                         key: ValueKey(layer.effects[i].id),
                         index: v,
                         effect: layer.effects[i],
-                        local: local,
+                        extra: layer.effects[i].type == EffectType.timeRemap
+                            ? _OpcoesTimeRemap(layerId: id) : null,
+                        local: layer.effects[i].type == EffectType.timeRemap
+                            ? t - layer.startTime : local,
                         expanded: _openEffectId == layer.effects[i].id,
                         selectedParam: _selectedParam,
                         onToggleExpanded: () =>
@@ -429,8 +435,12 @@ class _EffectsPanelState extends ConsumerState<EffectsPanel> {
                           layer.effects[i].id,
                           c,
                         ),
-                        onExtraColor: (k, c) => _controller
-                            .setEffectExtraColor(id, layer.effects[i].id, k, c),
+                        onExtraColor: (k, c) => _controller.setEffectExtraColor(
+                          id,
+                          layer.effects[i].id,
+                          k,
+                          c,
+                        ),
                       ),
                   ],
                 ),
@@ -456,55 +466,155 @@ class _Rodape extends ConsumerWidget {
   final PlaybackController playback;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) => Column(
-    children: [
-      if (video)
-        TextButton.icon(
-          icon: const Icon(CupertinoIcons.music_note),
-          label: const AppText('Efeitos de audio'),
-          onPressed: () => showModalBottomSheet<void>(
-            context: context,
-            backgroundColor: AmColors.panel,
-            isScrollControlled: true,
-            builder: (context) => SafeArea(
-              child: SizedBox(
-                height: MediaQuery.sizeOf(context).height * 0.6,
-                child: AudioEffectsPanel(layerId: layerId),
+  Widget build(BuildContext context, WidgetRef ref) {
+    final layer = ref.watch(
+      editorControllerProvider.select((p) => p.layerById(layerId)),
+    );
+    final t = playback.time.value;
+    final local = layer?.localTime(t) ?? Duration.zero;
+    final controller = ref.read(editorControllerProvider.notifier);
+    return Column(
+      children: [
+        if (layer is AdjustmentLayer)
+          Container(
+            key: const ValueKey('adjustment-opacity-effects'),
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
+            decoration: BoxDecoration(
+              color: AmColors.chip.withValues(alpha: 0.55),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Expanded(
+                      child: AppText(
+                        'Intensidade da camada de ajuste',
+                        style: TextStyle(fontSize: 12, color: AmColors.muted),
+                      ),
+                    ),
+                    IconButton(
+                      key: const ValueKey('adjustment-opacity-keyframe'),
+                      tooltip: 'Keyframe de opacidade',
+                      visualDensity: VisualDensity.compact,
+                      onPressed: () => controller.toggleKeyframe(
+                        layerId,
+                        playback.time.value,
+                        LayerProp.opacity,
+                      ),
+                      icon: Icon(
+                        layer.opacity.hasKeyframeAt(local)
+                            ? Icons.diamond
+                            : Icons.diamond_outlined,
+                        size: 16,
+                        color: layer.opacity.hasKeyframeAt(local)
+                            ? AmColors.action
+                            : AmColors.muted,
+                      ),
+                    ),
+                  ],
+                ),
+                LinhaDeParametro(
+                  rotulo: 'Opacidade',
+                  nome: 'Opacidade da camada de ajuste',
+                  valor: layer.opacity.valueAt(local) * 100,
+                  porPixel: 0.35,
+                  casas: 0,
+                  sufixo: '%',
+                  aoMudar: (v) => controller.editOpacity(
+                    layerId,
+                    playback.time.value,
+                    v.clamp(0.0, 100.0) / 100,
+                  ),
+                  aoDigitar: (v) => controller.editOpacity(
+                    layerId,
+                    playback.time.value,
+                    v.clamp(0.0, 100.0) / 100,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        if (video)
+          TextButton.icon(
+            icon: const Icon(CupertinoIcons.music_note),
+            label: const AppText('Efeitos de audio'),
+            onPressed: () => showModalBottomSheet<void>(
+              context: context,
+              backgroundColor: AmColors.panel,
+              isScrollControlled: true,
+              builder: (context) => SafeArea(
+                child: SizedBox(
+                  height: MediaQuery.sizeOf(context).height * 0.6,
+                  child: AudioEffectsPanel(layerId: layerId),
+                ),
               ),
             ),
           ),
-        ),
-      const SizedBox(height: 8),
-      Tocavel(
-        key: const ValueKey('efeitos-adicionar'),
-        haptico: true,
-        onTap: () => showEffectGallery(context, ref, layerId, playback),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 13),
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: AmColors.chip,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: const Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(CupertinoIcons.plus, size: 17, color: AmColors.action),
-              SizedBox(width: 8),
-              AppText(
-                'Adicionar efeito',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: AmColors.action,
+        const SizedBox(height: 8),
+        Tocavel(
+          key: const ValueKey('efeitos-adicionar'),
+          haptico: true,
+          onTap: () => showEffectGallery(context, ref, layerId, playback),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 13),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: AmColors.chip,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(CupertinoIcons.plus, size: 17, color: AmColors.action),
+                SizedBox(width: 8),
+                AppText(
+                  'Adicionar efeito',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: AmColors.action,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
-      ),
-    ],
-  );
+      ],
+    );
+  }
+}
+
+/// The time curve remains in the layer model, with the same parameter rows
+/// and colors as the other effects. The graph editor edits this exact track.
+class _OpcoesTimeRemap extends ConsumerWidget {
+  const _OpcoesTimeRemap({required this.layerId});
+  final String layerId;
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final layer = ref.watch(editorControllerProvider).layerById(layerId);
+    if (layer is! VideoLayer) return const SizedBox.shrink();
+    final c = ref.read(editorControllerProvider.notifier);
+    return Column(children: [
+      Material(color: Colors.transparent, child: SwitchListTile.adaptive(
+        dense: true, contentPadding: EdgeInsets.zero,
+        title: const AppText('Manter tom do áudio', style: TextStyle(fontSize: 12, color: AmColors.text)),
+        value: layer.audio.preservePitch,
+        onChanged: (v) => c.setClipPreservePitch(layerId, v),
+      )),
+      Row(children: [
+        const Expanded(child: AppText('Interpolação', style: TextStyle(fontSize: 12, color: AmColors.text))),
+        DropdownButton<InterpolacaoDeQuadros>(
+          value: layer.interpolacao, dropdownColor: AmColors.panelHigh,
+          style: const TextStyle(color: AmColors.text, fontSize: 12),
+          items: [for (final v in InterpolacaoDeQuadros.values) DropdownMenuItem(value: v, child: AppText(v.emPalavras))],
+          onChanged: (v) { if (v != null) c.setClipInterpolacao(layerId, v); },
+        ),
+      ]),
+    ]);
+  }
 }
 
 class _CartaoDoEfeito extends StatefulWidget {
@@ -524,9 +634,11 @@ class _CartaoDoEfeito extends StatefulWidget {
     required this.onEndGesture,
     required this.onColor,
     required this.onExtraColor,
+    this.extra,
   });
 
   /// Posicao entre os visiveis: e o que o arrasto entrega ao reordenar.
+  final Widget? extra;
   final int index;
   final EffectInstance effect;
   final Duration local;
@@ -580,43 +692,43 @@ class _CartaoDoEfeitoState extends State<_CartaoDoEfeito> {
     final p = entry.value;
     final chave = '${effect.id}/${entry.key}';
     return switch (p.kind) {
-        ParamKind.toggle => _LinhaDeInterruptor(
-          key: ValueKey('efeito-param-$chave'),
-          rotulo: p.label,
-          valor: effect.paramAt(entry.key, local) >= .5,
-          aoMudar: (v) => onParam(entry.key, v ? 1 : 0),
-        ),
-        ParamKind.choice => _LinhaDeEscolha(
-          key: ValueKey('efeito-param-$chave'),
-          rotulo: p.label,
-          opcoes: p.options,
-          valor: effect
-              .paramAt(entry.key, local)
-              .round()
-              .clamp(0, p.options.isEmpty ? 0 : p.options.length - 1),
-          aoMudar: (i) => onParam(entry.key, i.toDouble()),
-        ),
-        ParamKind.seed => _LinhaDeSemente(
-          key: ValueKey('efeito-param-$chave'),
-          rotulo: p.label,
-          valor: effect.paramAt(entry.key, local),
-          aoMudar: (v) => onParam(entry.key, v),
-        ),
-        // Numero e ponto: a linha medida da referencia.
-        _ => LinhaDeParametro(
-          key: ValueKey('efeito-param-$chave'),
-          rotulo: p.label,
-          valor: effect.paramAt(entry.key, local),
-          porPixel: p.dragStep ?? (p.max - p.min) / 500,
-          casas: p.decimals ?? _casasAutomaticas(p),
-          sufixo: p.unit,
-          escolhida: selectedParam == chave,
-          aoEscolher: () => onSelectParam(chave),
-          aoComecar: onBeginGesture,
-          aoTerminar: onEndGesture,
-          aoMudar: (v) => onParam(entry.key, v.clamp(p.min, p.max)),
-          aoDigitar: (v) => onParam(entry.key, v.clamp(p.min, p.max)),
-        ),
+      ParamKind.toggle => _LinhaDeInterruptor(
+        key: ValueKey('efeito-param-$chave'),
+        rotulo: p.label,
+        valor: effect.paramAt(entry.key, local) >= .5,
+        aoMudar: (v) => onParam(entry.key, v ? 1 : 0),
+      ),
+      ParamKind.choice => _LinhaDeEscolha(
+        key: ValueKey('efeito-param-$chave'),
+        rotulo: p.label,
+        opcoes: p.options,
+        valor: effect
+            .paramAt(entry.key, local)
+            .round()
+            .clamp(0, p.options.isEmpty ? 0 : p.options.length - 1),
+        aoMudar: (i) => onParam(entry.key, i.toDouble()),
+      ),
+      ParamKind.seed => _LinhaDeSemente(
+        key: ValueKey('efeito-param-$chave'),
+        rotulo: p.label,
+        valor: effect.paramAt(entry.key, local),
+        aoMudar: (v) => onParam(entry.key, v),
+      ),
+      // Numero e ponto: a linha medida da referencia.
+      _ => LinhaDeParametro(
+        key: ValueKey('efeito-param-$chave'),
+        rotulo: p.label,
+        valor: effect.paramAt(entry.key, local),
+        porPixel: p.dragStep ?? (p.max - p.min) / 500,
+        casas: p.decimals ?? _casasAutomaticas(p),
+        sufixo: p.unit,
+        escolhida: selectedParam == chave,
+        aoEscolher: () => onSelectParam(chave),
+        aoComecar: onBeginGesture,
+        aoTerminar: onEndGesture,
+        aoMudar: (v) => onParam(entry.key, v.clamp(p.min, p.max)),
+        aoDigitar: (v) => onParam(entry.key, v.clamp(p.min, p.max)),
+      ),
     };
   }
 
@@ -767,7 +879,7 @@ class _CartaoDoEfeitoState extends State<_CartaoDoEfeito> {
               opacity: effect.enabled ? 1 : .45,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: _linhas(),
+                children: [..._linhas(), if (widget.extra != null) widget.extra!],
               ),
             ),
         ],

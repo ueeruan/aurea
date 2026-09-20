@@ -12,7 +12,7 @@ import 'package:aurea/src/features/projects/application/project_repository.dart'
 /// Quem quer cobrar a GRAVACAO usa [gravados]; quem so quer montar a
 /// tela ignora, e o teste deixa de depender de plugin nenhum.
 class RepositorioSemDisco extends ProjectRepository {
-  RepositorioSemDisco() : super(installBundledExamples: false);
+  RepositorioSemDisco() : super();
 
   final List<VideoProject> gravados = [];
 

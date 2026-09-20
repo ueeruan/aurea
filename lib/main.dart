@@ -31,13 +31,40 @@ Future<void> main() async {
   FlutterError.onError = (details) {
     FlutterError.presentError(details);
     debugPrint('FlutterError interceptado: ${details.exceptionAsString()}');
+    // A mensagem sozinha escondia o widget que causou a falha. Manter a
+    // stack no log torna erros de ciclo de vida reproduzidos no aparelho
+    // diagnosticaveis, sem alterar o tratamento resiliente acima.
+    if (details.stack != null) {
+      debugPrintStack(stackTrace: details.stack, label: 'AUREA Flutter stack');
+    }
   };
   PlatformDispatcher.instance.onError = (error, stack) {
     debugPrint('PlatformDispatcher erro interceptado: $error\n$stack');
     return true; // Retornar true marca o erro como tratado e impede o encerramento do app
   };
   TextureCache.instance.observeMemoryPressure(WidgetsBinding.instance);
-  final prefs = await SharedPreferences.getInstance();
+  // A ABERTURA NAO PODE MORRER AQUI.
+  //
+  // `SharedPreferences.getInstance()` conversa com o lado nativo por um
+  // canal. Se o canal nao responder — plugin que nao registrou, build
+  // torto — isso estoura ANTES do `runApp`, e o que fica na tela e a logo
+  // do sistema, para sempre: o app parece travado, e nao da nem para ver
+  // o erro. Aconteceu, e o relato foi exatamente "travado na logo".
+  //
+  // Sem preferencias o app abre com os padroes. Perder as preferencias e
+  // ruim; nao abrir e pior.
+  SharedPreferences prefs;
+  try {
+    prefs = await SharedPreferences.getInstance();
+  } catch (erro) {
+    debugPrint('AUREA: preferencias indisponiveis ($erro); abrindo no padrao');
+    // O MESMO OBJETO, COM UM ARMAZEM EM MEMORIA no lugar do canal: o app
+    // abre inteiro, com os padroes, e o que a pessoa mudar nesta sessao
+    // vale ate fechar. Sem isto nao haveria `prefs` nenhum para passar ao
+    // provider, e a abertura nao teria como continuar.
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    prefs = await SharedPreferences.getInstance();
+  }
   // Resolve a migalha do motor 3D antes de qualquer cena desenhar:
   // uma sessao que nao voltou de um quadro em GPU desliga a GPU
   // nesta.

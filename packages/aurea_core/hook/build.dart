@@ -4,6 +4,11 @@ import 'package:native_toolchain_c/native_toolchain_c.dart';
 
 void main(List<String> args) async {
   await build(args, (input, output) async {
+    // O Flutter tambem executa hooks numa passagem que nao constroi code
+    // assets (por exemplo ao preparar o hot reload). Nessa passagem acessar
+    // `config.code` e invalido e derrubava o app logo depois da instalacao.
+    if (!input.config.buildCodeAssets) return;
+
     final android = input.config.code.targetOS == OS.android;
     await CBuilder.library(
       name: 'aurea_core',

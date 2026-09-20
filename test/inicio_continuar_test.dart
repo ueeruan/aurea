@@ -20,7 +20,7 @@ class _MemoryProjects extends ProjectsController {
 
 class _RepoNulo extends ProjectRepository {
   _RepoNulo()
-    : super(directory: Directory.systemTemp, installBundledExamples: false);
+    : super(directory: Directory.systemTemp);
 
   @override
   Future<List<VideoProject>> loadAll() async => const [];

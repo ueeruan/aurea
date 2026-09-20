@@ -170,6 +170,7 @@ const quickStartSteps = <(String, String)>[
 ];
 
 String effectHelp(EffectType type) => switch (type) {
+  EffectType.timeRemap => 'Anime o tempo da fonte com keyframes. Use o editor de curvas do Aurea para ajustar os trechos.',
   EffectType.preenchimento => 'Troca a cor de tudo o que a camada desenha, preservando o alfa: o que era transparente continua transparente. É o que vira um logo colorido na versão de uma cor só, e o que faz um recorte virar silhueta chapada. As difusões espalham a máscara para fora da beirada; a opacidade mistura com o original.',
 
   EffectType.sombraProjetada => 'Copia o alfa da camada, pinta essa silhueta com a cor escolhida, desfoca e joga para o lado oposto ao da luz. Não é a sombra de uma caixa: é a sombra da forma, então um recorte vazado projeta sombra vazada. A camada abre para fora para a sombra caber.',

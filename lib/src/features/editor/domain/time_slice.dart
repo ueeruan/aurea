@@ -65,7 +65,8 @@ List<int> atrasosDasFaixas({
         final x = n == 1 ? 0.0 : k / (n - 1);
         final double atraso = switch (distribuicao) {
           DistribuicaoDoTimeSlice.linear => m * _curva(curva, x),
-          DistribuicaoDoTimeSlice.centro => m * _curva(curva, (2 * x - 1).abs()),
+          DistribuicaoDoTimeSlice.centro =>
+            m * _curva(curva, (2 * x - 1).abs()),
           DistribuicaoDoTimeSlice.aleatoria =>
             m * (fxHash01(semente, 0x7153, k) * 2 - 1),
           DistribuicaoDoTimeSlice.onda =>
@@ -138,11 +139,25 @@ Path faixaDoTimeSlice(
 /// intervalo dela ("segurar": antes do inicio vale o primeiro quadro,
 /// depois do fim, o ultimo).
 Duration localDeslocado(Layer layer, Duration local, int quadros, int fps) {
+  return localDeslocadoEmQuadros(layer, local, quadros.toDouble(), fps);
+}
+
+/// Igual a [localDeslocado], aceitando subquadros para efeitos temporais
+/// com parametros animados (como RGB Time Warp em 0,5 quadro).
+Duration localDeslocadoEmQuadros(
+  Layer layer,
+  Duration local,
+  double quadros,
+  int fps,
+) {
   final f = fps < 1 ? 30 : fps;
+  if (!quadros.isFinite) return local;
   final alvo = local + Duration(microseconds: (quadros * 1000000 / f).round());
   if (alvo < Duration.zero) return Duration.zero;
   final ultimo = layer.duration - const Duration(microseconds: 1);
-  return alvo > ultimo ? (ultimo < Duration.zero ? Duration.zero : ultimo) : alvo;
+  return alvo > ultimo
+      ? (ultimo < Duration.zero ? Duration.zero : ultimo)
+      : alvo;
 }
 
 /// POSTERIZE TIME: o instante local preso a uma grade de [taxa] quadros
@@ -166,29 +181,24 @@ EffectInstance? efeitoDeTempo(Layer layer, EffectType tipo) {
 }
 
 /// Os atrasos (em quadros) do Time Slice [e] no instante local [local].
-List<int> atrasosDoEfeito(EffectInstance e, Duration local) =>
-    atrasosDasFaixas(
-      faixas: e.paramAt('slices', local).round().clamp(1, 64),
-      distribuicao: e.paramAt('distribution', local).round().clamp(0, 4),
-      maximo: e.paramAt('max_offset', local).clamp(-120.0, 120.0),
-      curva: e.paramAt('curve', local).round().clamp(0, 3),
-      ciclos: e.paramAt('cycles', local),
-      fase: e.paramAt('phase', local),
-      varredura: e.paramAt('sweep', local),
-      segundos: local.inMicroseconds / 1e6,
-      semente: e.paramAt('seed', local).round(),
-      deslocamento: e.paramAt('frame_offset', local),
-    );
+List<int> atrasosDoEfeito(EffectInstance e, Duration local) => atrasosDasFaixas(
+  faixas: e.paramAt('slices', local).round().clamp(1, 64),
+  distribuicao: e.paramAt('distribution', local).round().clamp(0, 4),
+  maximo: e.paramAt('max_offset', local).clamp(-120.0, 120.0),
+  curva: e.paramAt('curve', local).round().clamp(0, 3),
+  ciclos: e.paramAt('cycles', local),
+  fase: e.paramAt('phase', local),
+  varredura: e.paramAt('sweep', local),
+  segundos: local.inMicroseconds / 1e6,
+  semente: e.paramAt('seed', local).round(),
+  deslocamento: e.paramAt('frame_offset', local),
+);
 
 /// OS OUTROS INSTANTES DA COMPOSICAO que um quadro em [t] vai pedir as
 /// camadas de video: as faixas do Time Slice, o degrau do Posterize Time
 /// e as copias do Echo. A exportacao decodifica esses quadros antes de
 /// desenhar; sem isso, cada faixa mostraria o mesmo quadro do video.
-Set<Duration> instantesDeOutroTempo(
-  List<Layer> layers,
-  Duration t,
-  int fps,
-) {
+Set<Duration> instantesDeOutroTempo(List<Layer> layers, Duration t, int fps) {
   final out = <Duration>{};
   for (final layer in layers) {
     if (!layer.activeAt(t)) continue;
@@ -196,12 +206,11 @@ Set<Duration> instantesDeOutroTempo(
     var base = local;
     final poster = efeitoDeTempo(layer, EffectType.posterizeTime);
     if (poster != null) {
-      base = localPosterizado(
-        local,
-        poster.paramAt('rate', local),
-        poster.paramAt('phase', local),
-      );
-      if (base != local) out.add(layer.startTime + base);
+      // `localTime` ja aplicou `frame_rate`. Repetir a conta aqui usava
+      // chaves inexistentes (`rate`/`phase`) e fazia o exportador preparar
+      // o quadro zero em vez do mesmo degrau mostrado na previa.
+      final globalPosterizado = layer.startTime + base;
+      if (globalPosterizado != t) out.add(globalPosterizado);
     }
     // RGB TIME WARP: os tres canais vem de instantes diferentes, e a
     // exportacao precisa decodificar os tres quadros antes de desenhar.
@@ -213,9 +222,7 @@ Set<Duration> instantesDeOutroTempo(
       for (final d in [torcido.r, torcido.g, torcido.b]) {
         if (d == 0) continue;
         out.add(
-          layer.startTime +
-              base +
-              Duration(microseconds: (d / taxa * 1e6).round()),
+          layer.startTime + localDeslocadoEmQuadros(layer, base, d, taxa),
         );
       }
     }

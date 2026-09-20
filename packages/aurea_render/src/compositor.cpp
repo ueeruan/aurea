@@ -66,9 +66,12 @@ constexpr float kEpsilonDeEscala = 1e-6F;
     const std::size_t i =
         (static_cast<std::size_t>(cy) * t.largura + static_cast<std::size_t>(cx)) * 4;
     const float a = de_byte(t.rgba[i + 3]);
-    out[0] = de_byte(t.rgba[i + 0]) * a;
-    out[1] = de_byte(t.rgba[i + 1]) * a;
-    out[2] = de_byte(t.rgba[i + 2]) * a;
+    // A COR JA VEM MULTIPLICADA QUANDO A TEXTURA E O ALVO DO 3D. Multiplicar
+    // de novo apagaria a cor das bordas suaves duas vezes.
+    const float escala = t.premultiplicada ? 1.0F : a;
+    out[0] = de_byte(t.rgba[i + 0]) * escala;
+    out[1] = de_byte(t.rgba[i + 1]) * escala;
+    out[2] = de_byte(t.rgba[i + 2]) * escala;
     out[3] = a;
   };
 

@@ -22,10 +22,10 @@ const int fpsDaPrevia = 8;
 
 /// Sobe quando a amostra, a receita ou o motor mudam: o teste-guarda cobra
 /// que o manifesto foi gerado com esta versao.
-const int versaoDasPrevias = 1;
+const int versaoDasPrevias = 2;
 
-/// A foto da amostra (ja no pacote do app, 640x360).
-const String fotoDaAmostra = 'assets/templates/campo.jpg';
+/// Retrato fornecido para as previas, incluido no pacote do app.
+const String fotoDaAmostra = 'assets/efeitos/modelo.png';
 
 /// Onde as tiras moram.
 const String pastaDasPrevias = 'assets/efeitos/previas';
@@ -78,17 +78,15 @@ VideoProject amostraDoEfeito(
             .withKeyframe(Duration.zero, const Offset(c - 10, c))
             .withKeyframe(meio, const Offset(c + 10, c - 6))
             .withKeyframe(ciclo, const Offset(c - 10, c)),
-        // A foto e 16:9 e a composicao quadrada: pela largura ela ocupa
-        // 56% da altura; 2,0 cobre com folga para o vaivem nao mostrar
-        // borda preta.
-        scaleX: AnimatedDouble(2.0)
-            .withKeyframe(Duration.zero, 2.0)
-            .withKeyframe(meio, 2.12)
-            .withKeyframe(ciclo, 2.0),
-        scaleY: AnimatedDouble(2.0)
-            .withKeyframe(Duration.zero, 2.0)
-            .withKeyframe(meio, 2.12)
-            .withKeyframe(ciclo, 2.0),
+        // A foto quadrada cobre a composicao durante o movimento.
+        scaleX: AnimatedDouble(1.08)
+            .withKeyframe(Duration.zero, 1.08)
+            .withKeyframe(meio, 1.15)
+            .withKeyframe(ciclo, 1.08),
+        scaleY: AnimatedDouble(1.08)
+            .withKeyframe(Duration.zero, 1.08)
+            .withKeyframe(meio, 1.15)
+            .withKeyframe(ciclo, 1.08),
         effects: silhueta ? const [] : efeito(),
       ),
       if (silhueta)
@@ -127,6 +125,7 @@ const efeitosComSilhueta = <String>{
   'repeat_grid',
   'repeat_radial',
   'repeat_scatter',
+  'adbe_drop_shadow',
 };
 
 /// O instante do quadro [i] da tira.

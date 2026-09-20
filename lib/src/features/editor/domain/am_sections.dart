@@ -81,6 +81,9 @@ Set<AmSecao> secoesDe(Layer layer) {
     return {
       AmSecao.moverTransformar,
       if (temTexto) AmSecao.texto3d,
+      // A CENA VOLTOU A TER EDITOR (`cena3d_sheet.dart`): ambiente, reflexo,
+      // luz e o material de cada objeto importado.
+      AmSecao.cena3d,
       AmSecao.efeitos,
     };
   }

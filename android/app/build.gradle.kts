@@ -131,7 +131,13 @@ flutter {
 // pode ser feita nele — ela e feita AQUI, antes de compilar, e vale para
 // todo build daqui para a frente.
 tasks.configureEach {
-    if (name == "preBuild") {
+    // TAMBEM LOGO ANTES DO `javac`, e nao so no `preBuild`: o Flutter
+    // regenera o registrante DEPOIS do `preBuild` quando um teste de
+    // integracao acabou de rodar, e o build de release falhava na primeira
+    // tentativa e passava na segunda. Limpar na boca do compilador fecha a
+    // janela.
+    if (name == "preBuild" ||
+        (name.startsWith("compile") && name.endsWith("JavaWithJavac"))) {
         doFirst {
             val f = file(
                 "src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java",

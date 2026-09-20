@@ -1196,7 +1196,20 @@ String chaveDaCena({
       ..write(',')
       ..write(camera.orthographic ? 1 : 0)
       ..write(',')
-      ..write(camera.orthoScale);
+      ..write(camera.orthoScale)
+      // O "PARA CIMA" DA CAMERA TAMBEM MUDA A IMAGEM: o giro da camada orbita
+      // a camera e gira o `up` junto. Fora da chave, dois estados que so
+      // diferem nele devolviam a mesma imagem guardada.
+      ..write(',')
+      ..write(camera.up.x)
+      ..write(',')
+      ..write(camera.up.y)
+      ..write(',')
+      ..write(camera.up.z)
+      ..write(',')
+      ..write(camera.near)
+      ..write(',')
+      ..write(camera.far);
   }
   for (final no in cena.nodes) {
     if (!no.visible) continue;
@@ -1267,7 +1280,9 @@ String chaveDaCena({
       ..write(':r')
       ..write(no.rotX.valueAt(local))
       ..write(',')
+      ..write(',')
       ..write(no.rotY.valueAt(local))
+      ..write(',')
       ..write(',')
       ..write(no.rotZ.valueAt(local))
       ..write(':s')
@@ -1289,12 +1304,16 @@ String chaveDaCena({
     b
       ..write('|l')
       ..write(luz.id)
+      ..write(';')
       ..write(':')
       ..write(luz.kind.index)
+      ..write(';')
       ..write(':')
       ..write(luz.color.toARGB32())
+      ..write(';')
       ..write(':')
       ..write(forca)
+      ..write(';')
       ..write(':')
       ..write(luz.position.x)
       ..write(',')
@@ -1309,10 +1328,13 @@ String chaveDaCena({
       ..write(luz.direction.z)
       ..write(':')
       ..write(luz.range)
+      ..write(';')
       ..write(':')
       ..write(luz.coneDegrees)
+      ..write(';')
       ..write(':')
       ..write(luz.softness)
+      ..write(';')
       ..write(':')
       ..write(luz.castsShadow ? 1 : 0);
   }

@@ -2697,6 +2697,9 @@ class EditorController extends Notifier<VideoProject> {
   /// A FONTE IMPORTADA AUSENTE NAO DEIXA O TEXTO SEM GEOMETRIA: quem chama
   /// refaz com a fonte empacotada. Aqui, uma fonte que nao abre devolve
   /// nulo — e nao um texto vazio.
+  /// Por que a ultima fonte pedida para um texto 3D foi recusada (ou nulo).
+  String? ultimoMotivoDoTexto3D;
+
   Future<ModelAsset3D?> _modeloDoTexto3D(
     Texto3D texto3D,
     EstiloDoTexto3D estilo,
@@ -2715,7 +2718,19 @@ class EditorController extends Notifier<VideoProject> {
         texto3D.texto,
         estilo,
       );
+    } on FonteNaoSuportada catch (e) {
+      // O MOTIVO FICA GUARDADO. Antes a recusa virava nulo, o chamador caia
+      // na fonte padrao e o dono via "troquei a fonte e nada mudou" — sem
+      // saber que a fonte era OpenType de contorno CFF, que o extrusor do
+      // texto 3D (que le `glyf`) nao sabe abrir.
+      ultimoMotivoDoTexto3D = e.recusa == RecusaDaFonte.contornoCff
+          ? 'A fonte "${texto3D.familia}" e OpenType (CFF). O Texto 3D '
+                'aceita fontes TrueType (.ttf).'
+          : 'A fonte "${texto3D.familia}" nao pode ser lida pelo Texto 3D.';
+      return null;
     } catch (_) {
+      ultimoMotivoDoTexto3D =
+          'A fonte "${texto3D.familia}" nao pode ser lida pelo Texto 3D.';
       return null;
     }
   }
@@ -2734,12 +2749,13 @@ class EditorController extends Notifier<VideoProject> {
   ) async {
     final limpo = texto3d.texto.trim();
     if (limpo.isEmpty) return false;
-    var params = texto3d.copyWith(texto: limpo);
-    var modelo = await _modeloDoTexto3D(params, estilo);
-    if (modelo == null && params.familia != 'Aurea Motion Sans') {
-      params = params.copyWith(familia: 'Aurea Motion Sans');
-      modelo = await _modeloDoTexto3D(params, estilo);
-    }
+    final params = texto3d.copyWith(texto: limpo);
+    // EDITAR NAO TROCA DE FONTE EM SILENCIO. Se a fonte pedida nao abre, a
+    // edicao FALHA e o texto fica como estava — com o motivo guardado para a
+    // folha mostrar. (Criar um texto novo continua caindo na fonte padrao:
+    // la nao ha "como estava".)
+    ultimoMotivoDoTexto3D = null;
+    final modelo = await _modeloDoTexto3D(params, estilo);
     if (modelo == null) return false;
     final camada = _layer(sceneId);
     if (camada is! Scene3DLayer) return false;

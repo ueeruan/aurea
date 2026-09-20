@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
@@ -11,6 +13,7 @@ import '../../domain/layer.dart';
 import '../../domain/modelo_do_texto3d.dart';
 import '../../domain/video_project.dart';
 import '../../domain/texto3d.dart';
+import '../context/parameter_row.dart';
 import '../widgets/preview_stage.dart' show estado3DDoQuadro;
 import 'am_colors.dart';
 
@@ -99,6 +102,7 @@ class _Texto3DSheetState extends ConsumerState<_Texto3DSheet> {
 
   @override
   void dispose() {
+    _esperaDoControle?.cancel();
     _campo.dispose();
     super.dispose();
   }
@@ -108,15 +112,34 @@ class _Texto3DSheetState extends ConsumerState<_Texto3DSheet> {
   /// APLICA E ESPERA. Cada mudanca refaz a geometria (extrusao, chanfro e
   /// material) e sobe para o motor; o botao fica travado enquanto isso para
   /// um segundo toque nao enfileirar outra construcao pela metade.
+  String? _aviso;
+
   Future<void> _aplicar(Texto3D novo) async {
+    final anterior = _params;
     setState(() {
       _params = novo;
       _montando = true;
+      _aviso = null;
     });
-    await ref
-        .read(editorControllerProvider.notifier)
-        .editarTexto3D(widget.sceneId, widget.nodeId, novo, _estilo);
-    if (mounted) setState(() => _montando = false);
+    final controlador = ref.read(editorControllerProvider.notifier);
+    final deuCerto = await controlador.editarTexto3D(
+      widget.sceneId,
+      widget.nodeId,
+      novo,
+      _estilo,
+    );
+    if (!mounted) return;
+    setState(() {
+      _montando = false;
+      if (!deuCerto) {
+        // A EDICAO FALHOU: a folha VOLTA ao que estava e DIZ por que. Ficar
+        // mostrando a fonte nova marcada com o texto na fonte velha e o
+        // "troquei e nao mudou nada" do relato.
+        _params = anterior;
+        _aviso = controlador.ultimoMotivoDoTexto3D ??
+            'Nao foi possivel aplicar essa mudanca ao texto 3D.';
+      }
+    });
   }
 
   Future<void> _trocarEstilo(EstiloDoTexto3D estilo) async {
@@ -266,6 +289,15 @@ class _Texto3DSheetState extends ConsumerState<_Texto3DSheet> {
 
   List<Widget> _linhas() {
     return [
+      if (_aviso != null)
+        Padding(
+          key: const ValueKey('texto3d-aviso'),
+          padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+          child: Text(
+            _aviso!,
+            style: const TextStyle(fontSize: 12.5, color: Color(0xFFFFB454)),
+          ),
+        ),
       Padding(
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
         child: Align(
@@ -291,6 +323,7 @@ class _Texto3DSheetState extends ConsumerState<_Texto3DSheet> {
           (f) => _aplicar(_atual.copyWith(familia: f)),
           chave: (f) => ValueKey('texto3d-fonte-$f'),
         ),
+      _secao('Material'),
       _fileiraDeOpcoes<EstiloDoTexto3D>(
         'Metal',
         EstiloDoTexto3D.values,
@@ -299,6 +332,7 @@ class _Texto3DSheetState extends ConsumerState<_Texto3DSheet> {
         _trocarEstilo,
         chave: (e) => ValueKey('texto3d-estilo-${e.name}'),
       ),
+      _secao('Forma'),
       _controle(
         'Espessura',
         _atual.espessura,
@@ -339,6 +373,7 @@ class _Texto3DSheetState extends ConsumerState<_Texto3DSheet> {
       // GIRO POR LETRA, como o "Per-character 3D" do After Effects: cada
       // letra gira em torno do proprio centro. O giro do texto INTEIRO e o
       // da camada (Transformar > Rotacao), e nao este.
+      _secao('Letras'),
       _controle(
         'Girar letras X',
         _atual.rotLetraX,
@@ -369,6 +404,7 @@ class _Texto3DSheetState extends ConsumerState<_Texto3DSheet> {
         aoArrastar: (v) =>
             setState(() => _params = _atual.copyWith(rotLetraZ: v)),
       ),
+      _secao('Qualidade'),
       _fileiraDeOpcoes<QualidadeDoTexto3D>(
         'Qualidade',
         QualidadeDoTexto3D.values,
@@ -437,6 +473,18 @@ class _Texto3DSheetState extends ConsumerState<_Texto3DSheet> {
     );
   }
 
+  Timer? _esperaDoControle;
+
+  /// UMA LINHA DE PARAMETRO DA CASA — a mesma `ParameterRow` das fichas do
+  /// editor (nome, valor e regua de arrastar), e nao um slider avulso.
+  ///
+  /// A folha tinha componentes proprios (rotulo solto + slider do Material),
+  /// e por isso nao parecia com o resto do Aurea. Com a linha da casa ela
+  /// herda o toque, a tipografia e a regua que o dono ja conhece.
+  ///
+  /// O VALOR APARECE NA HORA E A MALHA ESPERA O DEDO. Refazer extrusao e
+  /// chanfro a cada pixel de arrasto travaria a folha; o numero muda a cada
+  /// passo e a geometria e refeita 140 ms depois do ultimo.
   Widget _controle(
     String rotulo,
     double valor,
@@ -446,54 +494,43 @@ class _Texto3DSheetState extends ConsumerState<_Texto3DSheet> {
     String sufixo = '',
     ValueChanged<double>? aoArrastar,
   }) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: AppText(
-                  rotulo,
-                  style: const TextStyle(color: AmColors.muted, fontSize: 12),
-                ),
-              ),
-              AppText(
-                '${valor.toStringAsFixed(valor.abs() < 10 ? 1 : 0)}$sufixo',
-                style: const TextStyle(color: AmColors.text, fontSize: 12),
-              ),
-            ],
-          ),
-          SliderTheme(
-            data: SliderThemeData(
-              trackHeight: 3,
-              activeTrackColor: AmColors.accent,
-              inactiveTrackColor: AmColors.chip,
-              thumbColor: Colors.white,
-              overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
-              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
-            ),
-            child: Slider(
-              value: valor.clamp(minimo, maximo),
-              min: minimo,
-              max: maximo,
-              // O NUMERO ACOMPANHA O DEDO, E A GEOMETRIA NAO.
-              //
-              // Refazer a extrusao a cada quadro do arrasto travaria a
-              // folha; nao fazer NADA no arrasto e pior ainda, e foi o que
-              // estava aqui: o botao ficava parado, o rotulo nao mudava, e
-              // o controle parecia morto ate o dedo soltar. O valor anda no
-              // estado local e a letra so e refeita no fim.
-              onChanged: (v) =>
-                  aoArrastar != null ? aoArrastar(v) : setState(() {}),
-              onChangeEnd: (v) => aoMudar(v),
-            ),
-          ),
-        ],
-      ),
+    final faixa = (maximo - minimo).abs();
+    return ParameterRow(
+      key: ValueKey('texto3d-controle-$rotulo'),
+      label: rotulo,
+      value: valor,
+      min: minimo,
+      max: maximo,
+      unit: sufixo,
+      decimals: faixa <= 2 ? 2 : (faixa <= 30 ? 1 : 0),
+      unitsPerPixel: faixa / 260,
+      onChanged: (v) {
+        final limitado = v.clamp(minimo, maximo).toDouble();
+        aoArrastar?.call(limitado);
+        _esperaDoControle?.cancel();
+        _esperaDoControle = Timer(
+          const Duration(milliseconds: 140),
+          () {
+            if (mounted) aoMudar(limitado);
+          },
+        );
+      },
     );
   }
+
+  /// O TITULO DE UM GRUPO DE LINHAS, no tom das fichas do editor.
+  Widget _secao(String titulo) => Padding(
+    padding: const EdgeInsets.fromLTRB(2, 14, 2, 6),
+    child: AppText(
+      titulo.toUpperCase(),
+      style: const TextStyle(
+        color: AmColors.muted,
+        fontSize: 11,
+        fontWeight: FontWeight.w600,
+        letterSpacing: 0.8,
+      ),
+    ),
+  );
 }
 
 /// A PREVIA AO VIVO — a cena de verdade, no motor de verdade.

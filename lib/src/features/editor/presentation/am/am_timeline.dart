@@ -63,7 +63,9 @@ class _Alturas extends InheritedWidget {
 }
 
 /// A TIRA DE BAIXO DA BARRA, so dos keyframes.
-const double kAmFaixaKeyframes = 15;
+// 15 -> 19: o losango cresceu (pedido do beta: "maior, para ter facilidade
+// pra puxar") e a diagonal dele tem de caber na tira sem cortar.
+const double kAmFaixaKeyframes = 19;
 
 /// TIMELINE MAGNETICA — ligada por padrao.
 ///
@@ -2246,8 +2248,8 @@ class _AmBarState extends ConsumerState<_AmBar> {
         ? Transform.rotate(
             angle: 0.785398,
             child: Container(
-              width: 11,
-              height: 11,
+              width: 13,
+              height: 13,
               decoration: BoxDecoration(
                 color: cor,
                 borderRadius: BorderRadius.circular(2),
@@ -2278,7 +2280,9 @@ class _AmBarState extends ConsumerState<_AmBar> {
             ),
           );
 
-    final largura = grupo.times.length == 1 ? 28.0 : (x1 - x0) + 28;
+    // O ALVO DO DEDO E MAIOR DO QUE O DESENHO: 40 px de largura para um
+    // losango de 13. Com 28 o toque longo errava o losango em tela pequena.
+    final largura = grupo.times.length == 1 ? 40.0 : (x1 - x0) + 40;
     final Widget alvo = GestureDetector(
       key: ValueKey(
         'layer-keyframe-${layer.id}-${grupo.times.first.inMicroseconds}',
@@ -2301,9 +2305,9 @@ class _AmBarState extends ConsumerState<_AmBar> {
             'keyframe-glyph-${layer.id}-${grupo.times.first.inMicroseconds}',
           ),
           width: grupo.times.length == 1
-              ? 16
-              : (x1 - x0).clamp(16.0, double.infinity),
-          height: 16,
+              ? 20
+              : (x1 - x0).clamp(20.0, double.infinity),
+          height: 20,
           // NA MAO, O LOSANGO CRESCE: e o sinal de que o toque longo pegou,
           // visivel mesmo com o dedo em cima.
           child: Center(
@@ -2315,7 +2319,7 @@ class _AmBarState extends ConsumerState<_AmBar> {
       ),
     );
     return Positioned(
-      left: left + x0 - 14,
+      left: left + x0 - 20,
       top: _topoDoLosango(context),
       width: largura,
       height: compact ? 16 : kAmFaixaKeyframes + 2,

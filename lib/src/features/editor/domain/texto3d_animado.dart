@@ -304,7 +304,9 @@ List<vm.Matrix4?>? matrizesDoTextoAnimado(
     for (final a in compilado.$2)
       if (a.enabled && a.properties.isNotEmpty) a,
   ];
-  if (animators.isEmpty) return null;
+  // SEM ANIMADOR ATIVO AINDA PODE HAVER O GIRO POR LETRA, que e pose de
+  // repouso: sair aqui o jogava fora, e o controle ficava morto.
+  if (animators.isEmpty && !temRot) return null;
 
   // A pilha de cada unidade, com o espacamento acumulado como no 2D:
   // a unidade i desloca pela soma do tracking das anteriores.

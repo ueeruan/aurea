@@ -2223,11 +2223,6 @@ bool Renderizador3D::desenhar(const Quadro3D& quadro,
   // composicao 2D ve isso como "aqui nao tem 3D" e deixa passar o que esta
   // atras — um limpo opaco taparia o video inteiro com um retangulo preto.
   const float preto[4] = {0.0F, 0.0F, 0.0F, 0.0F};
-  s.contexto->ClearRenderTarget(alvo_cor, preto,
-                                Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
-  s.contexto->ClearDepthStencil(alvo_profundidade, Diligent::CLEAR_DEPTH_FLAG,
-                                1.0F, 0,
-                                Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
 
   // ------------------------------------------------------------ a sombra
   //
@@ -2246,13 +2241,14 @@ bool Renderizador3D::desenhar(const Quadro3D& quadro,
             Diligent::TEXTURE_VIEW_DEPTH_STENCIL);
     if (vista_sombra != nullptr && vista_sombra_prof != nullptr) {
       const float um[4] = {1.0F, 0.0F, 0.0F, 0.0F};
+      // LIGAR, DEPOIS LIMPAR — nesta ordem, nos dois passes.
+      s.contexto->SetRenderTargets(
+          1, &vista_sombra, vista_sombra_prof,
+          Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
       s.contexto->ClearRenderTarget(
           vista_sombra, um, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
       s.contexto->ClearDepthStencil(
           vista_sombra_prof, Diligent::CLEAR_DEPTH_FLAG, 1.0F, 0,
-          Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
-      s.contexto->SetRenderTargets(
-          1, &vista_sombra, vista_sombra_prof,
           Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
       s.desenhar_lista(quadro, quadro.opacos, 0, false, true);
     }
@@ -2261,6 +2257,25 @@ bool Renderizador3D::desenhar(const Quadro3D& quadro,
   // -------------------------------------------------------------- o desenho
   s.contexto->SetRenderTargets(1, &alvo_cor, alvo_profundidade,
                                Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+  // A LIMPEZA VEM DEPOIS DE LIGAR O ALVO, E NAO ANTES.
+  //
+  // Antes o quadro limpava cor e profundidade com NADA ligado, desenhava a
+  // sombra em outro alvo, e so entao ligava o alvo de cor — que entra no
+  // passe com `LOAD`. Numa placa de computador (e no emulador) a limpeza
+  // fora do passe vale do mesmo jeito. Numa placa de CELULAR, que desenha por
+  // ladrilhos, a limpeza fora do passe e o caso classico que se perde: o alvo
+  // chega ao passe com o conteudo do QUADRO ANTERIOR e o desenho novo vai por
+  // cima. O relato do testador e exatamente isso — "o texto duplica em varias
+  // camadas quando eu mexo na rotacao" — e a profundidade velha ainda cortava
+  // pedacos da pose nova ("corta do nada").
+  //
+  // Com o alvo ligado, o Diligent limpa DENTRO do passe, que e o caminho que
+  // todo driver honra.
+  s.contexto->ClearRenderTarget(alvo_cor, preto,
+                                Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+  s.contexto->ClearDepthStencil(alvo_profundidade, Diligent::CLEAR_DEPTH_FLAG,
+                                1.0F, 0,
+                                Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
   s.desenhar_lista(quadro, quadro.opacos, 0, false, false);
   s.desenhar_lista(quadro, quadro.transparentes, quadro.opacos.size(), true,
                    false);

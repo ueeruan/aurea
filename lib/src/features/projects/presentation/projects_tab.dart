@@ -506,11 +506,12 @@ class _ProjectsTabState extends ConsumerState<ProjectsTab> {
             child: const AppText('Excluir projeto'),
           ),
           CupertinoActionSheetAction(
+            key: const ValueKey('projeto-apagar-todos'),
             isDestructiveAction: true,
-            onPressed: () {
-              Navigator.of(c).pop(false);
-              apagarTodosOsProjetos(context, ref);
-            },
+            // A FOLHA E DE `String`: devolver `false` aqui estourava erro de
+            // tipo dentro do toque, ANTES de o apagar ser chamado — o botao
+            // parecia morto. A acao volta pelo nome, como as outras.
+            onPressed: () => Navigator.of(c).pop('apagar-todos'),
             child: const AppText('Apagar todos os projetos'),
           ),
         ],
@@ -530,6 +531,8 @@ class _ProjectsTabState extends ConsumerState<ProjectsTab> {
         await _renomear(context, project);
       case 'excluir':
         await _confirmarExclusao(context, project);
+      case 'apagar-todos':
+        await apagarTodosOsProjetos(context, ref);
     }
   }
 

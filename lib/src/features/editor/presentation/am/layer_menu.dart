@@ -19,6 +19,7 @@ import '../../application/editor_controller.dart';
 import 'camera_sheet.dart' show showCameraSheet;
 import 'precomp_sheet.dart';
 import 'rastreio_sheet.dart' show showRastreioSheet;
+import 'cena3d_sheet.dart' show showCena3DSheet;
 import 'texto3d_sheet.dart' show showTexto3DSheet;
 import '../../../../core/ui/tocavel.dart';
 import '../../application/playback_controller.dart';
@@ -522,8 +523,11 @@ _Tile? _tileDaSecao(
     AmSecao.cena3d => (
       icone: CupertinoIcons.videocam,
       rotulo: layer is Scene3DLayer ? 'Cena 3D' : 'Elemento 3D',
-      onTap: () =>
-          abrirDepois(() => showElement3DSheet(context, ref, layer.id)),
+      onTap: () => abrirDepois(
+        () => layer is Scene3DLayer
+            ? showCena3DSheet(context, ref, sceneId: layer.id)
+            : showElement3DSheet(context, ref, layer.id),
+      ),
       badge: null,
     ),
     AmSecao.rastrear => (

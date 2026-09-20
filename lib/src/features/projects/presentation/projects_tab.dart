@@ -26,19 +26,11 @@ import '../application/projects_view.dart';
 import '../application/reference_rebuild_assets.dart';
 import '../application/thumbnail_service.dart';
 import '../application/vhf_motion_assets.dart';
-import '../domain/campo_arvore_template.dart';
-import '../domain/abyss_cinematic_template.dart';
 import '../domain/cena_xml_import.dart';
-import '../domain/colina_tv_template.dart';
-import '../domain/deriva_template.dart';
-import '../domain/flor_template.dart';
-import '../domain/mao_enterrada_template.dart';
-import '../domain/monolito_template.dart';
 import '../domain/notes_motion_template.dart';
 import '../domain/pacote_aurea.dart';
 import '../domain/pacote_zip_import.dart';
 import '../domain/pindown_motion_template.dart';
-import '../domain/prisma_template.dart';
 import '../domain/project_presets.dart';
 import 'home_shell.dart';
 import 'new_project_sheet.dart';
@@ -106,16 +98,6 @@ class _ProjectsTabState extends ConsumerState<ProjectsTab> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: AppText(texto)));
   }
 
-  /// O CAMPO ABRE DIRETO — sem a espera de "Preparando o campo 3D".
-  ///
-  /// A ESPERA EXISTIA POR CAUSA DE UM ARQUIVO: o campo copiava um scan de
-  /// arvore do bundle para o disco e o importava em isolate antes de
-  /// montar a cena. A arvore do campo e gerada em codigo desde antes — o
-  /// scan era o primeiro plano. Sem ele, nao ha o que preparar.
-  void _openCampo(BuildContext context) {
-    _abrirModelo(context, buildCampoArvoreTemplate());
-  }
-
   Future<void> _openVhfMotion(BuildContext context) async {
     try {
       final model = await prepareVhfMotion();
@@ -124,20 +106,6 @@ class _ProjectsTabState extends ConsumerState<ProjectsTab> {
     } catch (_) {
       _falha(context, 'Nao consegui preparar o motion VHF. Tente novamente.');
     }
-  }
-
-  /// A Deriva abre DIRETO: o explorador e malha propria, gerada em
-  /// codigo. Antes daqui saia uma espera para converter um arquivo
-  /// importado em disco — e, quando ele faltava, a cena abria com uma
-  /// capsula no lugar do astronauta.
-  void _openDeriva(BuildContext context) {
-    _abrirModelo(context, buildDerivaTemplate());
-  }
-
-  /// O Monolito abre DIRETO, pelo mesmo motivo: a floresta, o explorador
-  /// e o bloco sao gerados em codigo.
-  void _openMonolito(BuildContext context) {
-    _abrirModelo(context, buildMonolitoTemplate());
   }
 
   /// Prepara a trilha empacotada antes de abrir a nova recriacao.
@@ -164,22 +132,6 @@ class _ProjectsTabState extends ConsumerState<ProjectsTab> {
 
   void _openModeloId(BuildContext context, String id) {
     switch (id) {
-      case 'campo':
-        _openCampo(context);
-      case 'flor':
-        _abrirModelo(context, buildFlorTemplate());
-      case 'prisma':
-        _abrirModelo(context, buildPrismaTemplate());
-      case 'deriva':
-        _openDeriva(context);
-      case 'monolito':
-        _openMonolito(context);
-      case 'colina':
-        _abrirModelo(context, buildColinaTvTemplate());
-      case 'mao':
-        _abrirModelo(context, buildMaoEnterradaTemplate());
-      case 'abismo':
-        _abrirModelo(context, buildAbyssCinematicTemplate());
       case 'vhf':
         _openVhfMotion(context);
       case 'dnyx':
@@ -803,56 +755,8 @@ class _ProjectsTabState extends ConsumerState<ProjectsTab> {
   }
 }
 
-/// Os 13 modelos prontos: so dados const — a abertura resolve por id.
+/// Os modelos prontos: so dados const — a abertura resolve por id.
 const _modelos = [
-  (
-    id: 'campo',
-    imagem: 'assets/templates/campo.jpg',
-    titulo: 'CAMPO · A árvore da manhã',
-    detalhe: '25 s · cinco tomadas · cenário 3D editável',
-  ),
-  (
-    id: 'flor',
-    imagem: 'assets/templates/flor.png',
-    titulo: 'FLOR · Dez segundos de manhã',
-    detalhe: '10 s · três tomadas · câmera na mão',
-  ),
-  (
-    id: 'prisma',
-    imagem: 'assets/templates/prisma.jpg',
-    titulo: 'PRISMA · Dezessete segundos em loop',
-    detalhe: '17 s · seis cenas 3D · loop abstrato',
-  ),
-  (
-    id: 'deriva',
-    imagem: 'assets/templates/deriva.jpg',
-    titulo: 'DERIVA · O astronauta perdido',
-    detalhe: '18 s · tres tomadas · luz de vacuo',
-  ),
-  (
-    id: 'monolito',
-    imagem: 'assets/templates/monolito.jpg',
-    titulo: 'MONOLITO · O astronauta e a porta',
-    detalhe: '16 s · noite, neblina e luz magenta',
-  ),
-  (
-    id: 'colina',
-    imagem: 'assets/templates/colina.jpg',
-    titulo: 'COLINA · A TV no morro',
-    detalhe: '6 s · cena 3D realista · orbita rasteira',
-  ),
-  (
-    id: 'mao',
-    imagem: 'assets/templates/mao-enterrada.png',
-    titulo: 'MÃO ENTERRADA · Deserto ao entardecer',
-    detalhe: '15 s · 4 câmeras · malha orgânica e céu',
-  ),
-  (
-    id: 'abismo',
-    imagem: 'assets/templates/abyss.jpg',
-    titulo: 'ABISMO · Cinema 3D',
-    detalhe: '14 s · 4 cameras · personagem com rig',
-  ),
   (
     id: 'vhf',
     imagem: 'assets/templates/vhf/thumbnail.jpg',

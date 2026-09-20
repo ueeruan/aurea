@@ -95,7 +95,7 @@ Future<ProviderContainer> _home(WidgetTester tester, GlobalKey chave) async {
     PathProviderPlatform.instance = _Docs(tmp.path);
     final thumbs = Directory('${tmp.path}/thumbs')..createSync(recursive: true);
     final heroi = c.read(projectsControllerProvider).first;
-    File('assets/templates/campo.jpg')
+    File('assets/templates/notes.jpg')
         .copySync('${thumbs.path}/${_safe(heroi.id)}.png');
     await ThumbnailService.instance.init();
   });

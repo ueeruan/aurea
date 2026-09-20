@@ -1,5 +1,7 @@
 import 'essential_warp_pass.dart';
+
 import 'package:aurea/src/core/theme/aurea_colors.dart';
+
 import 'composition_frame.dart';
 
 import 'dart:io';
@@ -17,6 +19,9 @@ import 'package:video_player/video_player.dart';
 
 import '../../application/texture_cache.dart';
 import '../../application/blob_track_service.dart';
+import '../../application/motor3d_nativo.dart';
+import '../../application/qualidade3d_controller.dart';
+import '../../domain/orcamento_render.dart';
 import '../../application/editor_controller.dart';
 import '../../application/freehand_session.dart' show onionSkinProvider;
 export '../../application/freehand_session.dart' show onionSkinProvider;
@@ -37,6 +42,7 @@ import '../../domain/effect.dart';
 import '../../domain/fx.dart';
 import '../../domain/oscillate.dart';
 import 'motion_tile_pass.dart';
+import 'owned_video_frame.dart';
 import '../../domain/rgb_time_warp.dart';
 import '../../domain/sombra_projetada.dart';
 import 'sombra_projetada_pass.dart';
@@ -61,9 +67,11 @@ import 'custom_blend.dart';
 import 'linear_light.dart';
 import 'pixel_effect_engine.dart';
 import 'passe_de_cor.dart';
+import 'soft_glow_pass.dart';
 import '../../domain/correcao_de_cor.dart';
 import '../../domain/estilizar.dart';
 import '../../domain/estilizar_lote2.dart';
+import '../../domain/shake.dart';
 import '../../domain/pixel_effect.dart';
 import '../../domain/bloom.dart';
 import '../../domain/coloring.dart';
@@ -74,7 +82,9 @@ import '../../application/quadros_de_video.dart';
 import '../../application/proxy_service.dart';
 import '../../domain/color_space.dart';
 import 'mask_node_editor.dart';
+
 import 'package:aurea_render/aurea_render.dart';
+
 import 'preview_vulkan.dart';
 import 'world3d_painter.dart';
 import 'extrude_painter.dart';
@@ -734,12 +744,7 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
     if (project.metaOf(id).locked) {
       if (!_avisouBloqueio) {
         _avisouBloqueio = true;
-        avisarCamadaBloqueada(
-          context,
-          ref,
-          fraseDeBloqueio('mover'),
-          id,
-        );
+        avisarCamadaBloqueada(context, ref, fraseDeBloqueio('mover'), id);
       }
       return;
     }
@@ -1261,12 +1266,9 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
                                       // e quem faz o teste de toque).
                                       if (!drawing)
                                         ValueListenableBuilder<Duration>(
-                                          valueListenable:
-                                              widget.playback.time,
+                                          valueListenable: widget.playback.time,
                                           builder: (context, _, _) {
-                                            ref.watch(
-                                              editorControllerProvider,
-                                            );
+                                            ref.watch(editorControllerProvider);
                                             ref.watch(selectedLayerProvider);
                                             final g = _gizmoDaSelecao();
                                             if (g == null) {
@@ -1281,8 +1283,7 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
                                                   painter: Gizmo3DPainter(
                                                     gizmo: g,
                                                     escala: scale,
-                                                    comprimento:
-                                                        _kBracoDoGizmo,
+                                                    comprimento: _kBracoDoGizmo,
                                                     raio: _kRaioDoAnel,
                                                     eixoAtivo: _eixoDoGizmo,
                                                     anelAtivo: _anelDoGizmo,
@@ -1902,7 +1903,11 @@ class _FantasmaState extends State<_Fantasma> {
           tinta.withValues(alpha: tinta.a * widget.opacity.clamp(0.05, 0.6)),
           BlendMode.modulate,
         ),
-        child: CompositionView(time: _t, videos: widget.videos, selectedId: null),
+        child: CompositionView(
+          time: _t,
+          videos: widget.videos,
+          selectedId: null,
+        ),
       ),
     );
   }
@@ -1917,6 +1922,10 @@ class CompositionView extends ConsumerStatefulWidget {
     this.exportFrames,
     this.exporting = false,
     this.quadroDeVideoEm,
+    this.quadroDeCena3D,
+    this.sombra3D,
+    this.amostras3D,
+    this.escalaDaCena3D = 1,
     this.vistaDoPalco = false,
   });
 
@@ -1938,6 +1947,16 @@ class CompositionView extends ConsumerStatefulWidget {
   /// textura de plataforma nao entra em `toImage`, entao o video chega
   /// aqui como imagem.
   final Map<String, ui.Image>? exportFrames;
+
+  /// Exportando: o quadro da CENA 3D ja desenhado pelo motor nativo e
+  /// esperado para a chave do estado (§33). O preview deixa nulo e
+  /// pergunta ao motor na hora.
+  final ui.Image? Function(String chave)? quadroDeCena3D;
+
+  /// A qualidade 3D fixada pela exportacao (nulos no preview).
+  final int? sombra3D;
+  final int? amostras3D;
+  final double escalaDaCena3D;
 
   /// Exportando: nunca reusa arvore em cache, porque cada quadro e
   /// diferente mesmo quando a "assinatura" da cena nao muda.
@@ -1970,6 +1989,10 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
   String? get selectedId => widget.selectedId;
   Map<String, ui.Image>? get exportFrames => widget.exportFrames;
   bool get exporting => widget.exporting;
+  ui.Image? Function(String chave)? get quadroDaCena3D => widget.quadroDeCena3D;
+  int? get sombraDaCena3D => widget.sombra3D;
+  int? get amostrasDaCena3D => widget.amostras3D;
+  double get escalaDaCena3D => widget.escalaDaCena3D;
 
   /// O instante que o relogio mostra agora. Camada montada em OUTRO
   /// instante (e com [_pedindoQuadros]) pede o quadro de video daquele
@@ -2181,7 +2204,7 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
               cor: _corDaCamada(l),
             ),
           );
-          if (camadas.length >= 64) break;  // teto: o motor nao tem fila
+          if (camadas.length >= 64) break; // teto: o motor nao tem fila
         }
         // O FUNDO DA COMPOSICAO, sempre: sem ele a cena vazia apresenta
         // lixo do quadro anterior da swapchain.
@@ -2327,13 +2350,14 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
         var tAjuste = t;
         final posterAjuste = efeitoDeTempo(layer, EffectType.posterizeTime);
         if (posterAjuste != null) {
-          final degrau = localPosterizado(
-            local,
-            posterAjuste.paramAt('rate', local),
-            posterAjuste.paramAt('phase', local),
-          );
-          if (degrau != local) {
-            tAjuste = layer.startTime + degrau;
+          // `Layer.localTime` e a fonte unica do tempo posterizado. Antes
+          // este ponto quantizava de novo usando `rate`/`phase`, parametros
+          // que nem existem no Posterize Time (`frame_rate` e a chave
+          // correta). O fallback desses nomes virava 0,1 fps e segurava o
+          // primeiro quadro por dez segundos, parecendo travamento.
+          final degrau = local;
+          tAjuste = layer.startTime + degrau;
+          if (tAjuste != t) {
             adjusted = Stack(
               clipBehavior: Clip.none,
               children: _emOutroTempo(
@@ -2486,17 +2510,8 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
       // POSTERIZE TIME: a camada INTEIRA (conteudo, efeitos e
       // transformacao) anda em degraus, como no After Effects.
       var tCamada = t;
-      final posterFx = efeitoDeTempo(layer, EffectType.posterizeTime);
-      if (posterFx != null) {
-        final localCamada = layer.localTime(t);
-        tCamada =
-            layer.startTime +
-            localPosterizado(
-              localCamada,
-              posterFx.paramAt('rate', localCamada),
-              posterFx.paramAt('phase', localCamada),
-            );
-      }
+      // _buildLayer consulta Layer.localTime uma vez; nao remonta a
+      // subarvore como outro instante a cada degrau do Posterize.
       Widget montar(Duration tempo) => forceMb == null
           ? _buildLayer(project, layer, tempo, resolveLinks, rig: rigMembers)
           : _forceMotionBlur(
@@ -3116,10 +3131,13 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
       compWidth: project.outputWidth.toDouble(),
       videos: videos,
       localTime: contentLocal,
+      globalTime: t,
+      quadroDaCena3D: quadroDaCena3D,
+      sombra3D: sombraDaCena3D,
+      amostras3D: amostrasDaCena3D,
+      escalaDaCena3D: escalaDaCena3D,
       particlesFocal: isParticles && camAtiva != null
-          ? camAtiva.zoom
-                .valueAt(camAtiva.localTime(t))
-                .clamp(60.0, 12000.0)
+          ? camAtiva.zoom.valueAt(camAtiva.localTime(t)).clamp(60.0, 12000.0)
           : CameraLayer.lenteNeutra,
       particlesRotX: isParticles
           ? layer.rotationX.valueAt(local) + extraRotX
@@ -3385,6 +3403,42 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
   ) {
     var out = child;
 
+    // ImageFiltered pinta dentro dos limites do proprio filho. Uma
+    // silhueta borrada em Positioned.fill, portanto, era cortada no
+    // retangulo da forma (bem visivel em retangulos arredondados). Esta
+    // moldura reserva pixels reais ao redor sem alterar o tamanho do
+    // conteudo original.
+    Widget halo({
+      required Color color,
+      required double extent,
+      required double opacity,
+      required ui.ImageFilter filter,
+      Offset offset = Offset.zero,
+    }) {
+      final margin = extent.clamp(1.0, 400.0).toDouble();
+      return Positioned(
+        left: -margin,
+        right: -margin,
+        top: -margin,
+        bottom: -margin,
+        child: IgnorePointer(
+          child: Transform.translate(
+            offset: offset,
+            child: Opacity(
+              opacity: opacity,
+              child: ImageFiltered(
+                imageFilter: filter,
+                child: Padding(
+                  padding: EdgeInsets.all(margin),
+                  child: _tinted(child, color),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     // Sobreposicoes pintam POR CIMA, respeitando o alfa.
     if (s.colorOverlay?.enabled ?? false) {
       final o = s.colorOverlay!;
@@ -3522,19 +3576,14 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
         out = Stack(
           clipBehavior: Clip.none,
           children: [
-            Positioned.fill(
-              child: IgnorePointer(
-                child: Opacity(
-                  opacity: g.opacity.valueAt(local).clamp(0.0, 1.0),
-                  child: ImageFiltered(
-                    imageFilter: ui.ImageFilter.blur(
-                      sigmaX: size / 2,
-                      sigmaY: size / 2,
-                      tileMode: TileMode.decal,
-                    ),
-                    child: _tinted(child, g.color),
-                  ),
-                ),
+            halo(
+              color: g.color,
+              extent: size * 1.6,
+              opacity: g.opacity.valueAt(local).clamp(0.0, 1.0),
+              filter: ui.ImageFilter.blur(
+                sigmaX: size / 2,
+                sigmaY: size / 2,
+                tileMode: TileMode.decal,
               ),
             ),
             out,
@@ -3553,26 +3602,27 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
       out = Stack(
         clipBehavior: Clip.none,
         children: [
-          Positioned.fill(
-            child: IgnorePointer(
-              child: Transform.translate(
-                offset: off,
-                child: Opacity(
-                  opacity: d.opacity.valueAt(local).clamp(0.0, 1.0),
-                  child: filtered
-                      ? ImageFiltered(
-                          imageFilter: _shadowImageFilter(
-                            size,
-                            spread,
-                            compositionSize,
-                          ),
-                          child: _tinted(child, d.color),
-                        )
-                      : _tinted(child, d.color),
+          if (filtered)
+            halo(
+              color: d.color,
+              extent:
+                  size * 1.6 + spread + math.max(off.dx.abs(), off.dy.abs()),
+              opacity: d.opacity.valueAt(local).clamp(0.0, 1.0),
+              filter: _shadowImageFilter(size, spread, compositionSize),
+              offset: off,
+            )
+          else
+            Positioned.fill(
+              child: IgnorePointer(
+                child: Transform.translate(
+                  offset: off,
+                  child: Opacity(
+                    opacity: d.opacity.valueAt(local).clamp(0.0, 1.0),
+                    child: _tinted(child, d.color),
+                  ),
                 ),
               ),
             ),
-          ),
           out,
         ],
       );
@@ -3717,6 +3767,72 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
     _ => c,
   };
 
+  /// Shake que funciona também sobre a textura nativa do player.
+  ///
+  /// O caminho antigo fotografava a subárvore para entregar uma imagem ao
+  /// shader. Uma Texture de vídeo não entra nessa fotografia; na prática o
+  /// painel respondia, mas o vídeo vivo ficava parado ou desaparecia. O
+  /// Advanced Shake é uma transformação de câmera, então aplicá-la direto na
+  /// árvore preserva o decoder e produz a mesma posição usada por "Assar em
+  /// keyframes". A exportação continua recebendo exatamente essa árvore.
+  Widget _shakeDireto(EffectInstance effect, Duration local, Widget child) {
+    final estado = instantDoShake(effect, local);
+    final escalaRef = math.min(fxWidth, fxHeight) / 1080.0;
+
+    // Repete/espelha antes de mover, para a transformação não abrir preto nas
+    // bordas. A infraestrutura atual replica os dois eixos em conjunto; se os
+    // eixos diferirem, espelhar vence por ser a opção sem emenda visível.
+    final wrapX = effect.paramAt('wrap_x', local).round().clamp(0, 2);
+    final wrapY = effect.paramAt('wrap_y', local).round().clamp(0, 2);
+    final modoBorda = wrapX == 2 || wrapY == 2
+        ? 0
+        : wrapX == 1 || wrapY == 1
+        ? 1
+        : 2;
+    var out = _comBordas(child, modoBorda);
+
+    // O borrão acompanha quanto a câmera percorre durante o obturador. É um
+    // filtro de camada e, diferente do SnapshotWidget, funciona em Texture.
+    if (effect.paramAt('motion_blur', local) >= .5) {
+      final comprimento = effect
+          .paramAt('mo_blur_length', local)
+          .clamp(0.0, 10.0);
+      if (comprimento > .001) {
+        final dt = Duration(microseconds: (comprimento / 60 * 1000000).round());
+        final antes = instantDoShake(
+          effect,
+          local > dt ? local - dt : Duration.zero,
+        );
+        final depois = instantDoShake(effect, local + dt);
+        final sigmaX = ((depois.dx - antes.dx).abs() * escalaRef / 5).clamp(
+          0.0,
+          18.0,
+        );
+        final sigmaY = ((depois.dy - antes.dy).abs() * escalaRef / 5).clamp(
+          0.0,
+          18.0,
+        );
+        if (sigmaX > .05 || sigmaY > .05) {
+          out = ImageFiltered(
+            imageFilter: ui.ImageFilter.blur(
+              sigmaX: math.max(.05, sigmaX),
+              sigmaY: math.max(.05, sigmaY),
+              tileMode: TileMode.clamp,
+            ),
+            child: out,
+          );
+        }
+      }
+    }
+
+    out = Transform.scale(scale: estado.escala.clamp(.05, 20.0), child: out);
+    out = Transform.rotate(angle: estado.giroGraus * math.pi / 180, child: out);
+    return Transform.translate(
+      offset: Offset(estado.dx * escalaRef, estado.dy * escalaRef),
+      child: out,
+    );
+  }
+
   Size get fxSize => Size(fxWidth.toDouble(), fxHeight.toDouble());
 
   Widget _applyEffects(
@@ -3788,8 +3904,24 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
         }
         continue;
       }
+      // Advanced Shake não pode passar pelo SnapshotWidget: vídeo vivo é
+      // Texture e não sobrevive à captura. A transformação direta também
+      // elimina o atraso de um quadro que fazia o tremor parecer travado.
+      if (effect.type == EffectType.tremor) {
+        out = _shakeDireto(effect, local, out);
+        continue;
+      }
       // ESTILIZAR, LOTE 2 (Sapphire): shader proprio por efeito.
       final receita = receitasSapphire[effect.type];
+      if (effect.type == EffectType.deepGlow || effect.type == EffectType.brilho) {
+        out = SoftGlowPass(
+          key: ValueKey('soft-glow-${effect.id}'),
+          values: receita!.valores(effect, local),
+          color: receita.coresDe(effect).first,
+          child: out,
+        );
+        continue;
+      }
       if (receita != null) {
         out = PassadaSapphire(
           key: ValueKey('sapphire-${effect.id}'),
@@ -3804,10 +3936,7 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
           // passa de quatro bilhoes de leituras — o app nao trava por
           // erro, trava esperando. Ver [AmostrasDoBrilho].
           orcamentoDeAmostras: receita.usaOrcamentoDeAmostras
-              ? AmostrasDoBrilho.para(
-                  exportando: exporting,
-                  tocando: _rascunho,
-                )
+              ? AmostrasDoBrilho.para(exportando: exporting, tocando: _rascunho)
               : null,
           escalaRef: math.min(fxWidth, fxHeight) / 1080.0,
           tempo: local.inMicroseconds / 1e6,
@@ -6060,6 +6189,7 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
           // caso existe para o switch continuar exaustivo.
           break;
 
+        case EffectType.timeRemap:
         case EffectType.posterizeTime:
         // FORCE MOTION BLUR nao acontece aqui: ele precisa re-renderizar
         // a camada em outros instantes, e a pilha de efeitos so recebe o
@@ -6614,11 +6744,7 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
             direcao: effect.paramAt('direcao', local),
             suavidade: effect.paramAt('suavidade', local),
           ).vazia) {
-            out = SombraProjetadaPass(
-              effect: effect,
-              time: local,
-              child: out,
-            );
+            out = SombraProjetadaPass(effect: effect, time: local, child: out);
           }
 
         case EffectType.blobTracker:
@@ -6824,10 +6950,26 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
 /// croma usa: aplicado sobre o resultado torcido, devolve o mesmo
 /// desenho sem cor nenhuma.
 const _luma = <double>[
-  .2126, .7152, .0722, 0, 0,
-  .2126, .7152, .0722, 0, 0,
-  .2126, .7152, .0722, 0, 0,
-  0, 0, 0, 1, 0,
+  .2126,
+  .7152,
+  .0722,
+  0,
+  0,
+  .2126,
+  .7152,
+  .0722,
+  0,
+  0,
+  .2126,
+  .7152,
+  .0722,
+  0,
+  0,
+  0,
+  0,
+  0,
+  1,
+  0,
 ];
 
 /// UM CANAL DE COR, E SO ELE.
@@ -6836,18 +6978,35 @@ const _luma = <double>[
 /// da imagem, e so uma das tres cores. E o que permite somar os tres
 /// canais depois sem que um apague o outro.
 Widget isoDeCanal(Widget filho, int canal) {
-  const zeros = [0.0, 0.0, 0.0, 0.0, 0.0];
-  final linhas = [
-    canal == 0 ? const [1.0, 0.0, 0.0, 0.0, 0.0] : zeros,
-    canal == 1 ? const [0.0, 1.0, 0.0, 0.0, 0.0] : zeros,
-    canal == 2 ? const [0.0, 0.0, 1.0, 0.0, 0.0] : zeros,
-    const [0.0, 0.0, 0.0, 1.0, 0.0],
-  ];
   return ColorFiltered(
-    colorFilter: ColorFilter.matrix([for (final l in linhas) ...l]),
+    colorFilter: ColorFilter.matrix(_matrizDoCanal(canal)),
     child: filho,
   );
 }
+
+List<double> _matrizDoCanal(int canal) => [
+  canal == 0 ? 1 : 0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  canal == 1 ? 1 : 0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  canal == 2 ? 1 : 0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  1,
+  0,
+];
+
 
 /// A camera de uma Cena 3D com o nulo da COMPOSICAO ja aplicado.
 ///
@@ -6967,6 +7126,226 @@ Scene3D _cenaComFimDaCamada(Scene3DLayer l) {
   return l.scene.copyWith(fimDaCamada: l.duration);
 }
 
+/// O ESTADO 3D DE UM QUADRO: a cena no espaco do motor, a camera de
+/// composicao e a CHAVE que identifica esse estado.
+///
+/// Preview e exportacao chamam ISTO, e e por isso que os dois desenham o
+/// mesmo (§33): a chave sai da mesma conta, entao a imagem que a
+/// exportacao espera e exatamente a que o preview ja mostrou.
+class Estado3DDoQuadro {
+  const Estado3DDoQuadro({
+    required this.cena,
+    required this.camera,
+    required this.chave,
+    required this.largura,
+    required this.altura,
+  });
+
+  final Scene3D cena;
+  final RenderCamera? camera;
+  final String chave;
+  final int largura;
+  final int altura;
+}
+
+Estado3DDoQuadro estado3DDoQuadro({
+  required VideoProject project,
+  required Scene3DLayer l,
+  required Duration local,
+  required Duration global,
+  required int largura,
+  required int altura,
+  int sombra = 0,
+  int amostras = 1,
+}) {
+  // A CENA PRIMEIRO: a camera segue o nulo da composicao, e o nulo da
+  // composicao e uma camada da timeline (§1) — quem monta a imagem
+  // precisa do transform efetivo dele, que so o compositor conhece.
+  final cena = cenaComNulosDaComposicao(project, l, local, global);
+  // A CAMERA DA CENA SEMPRE VAI. O `cameraDaCena` devolve nulo quando
+  // nao ha nulo da composicao para resolver — e ali a camera autoral
+  // ainda e a que manda: a padrao do projeto fica a 800 unidades do
+  // alvo, e a padrao do motor a 5, o que poria a camera DENTRO da cena.
+  final camera = cameraDaCena(project, l, local, global) ?? l.cameraAt(local);
+  return Estado3DDoQuadro(
+    cena: cena,
+    camera: camera,
+    chave: chaveDaCena(
+      cena: cena,
+      camera: camera,
+      local: local,
+      largura: largura,
+      altura: altura,
+      sombra: sombra,
+      amostras: amostras,
+    ),
+    largura: largura,
+    altura: altura,
+  );
+}
+
+/// O nivel de sombra da receita na ABI do motor (0 desligada, 3 alta): a
+/// resolucao do tile, e nao a intencao — um tile de 2048 num alvo de 720
+/// nao fica mais nitido, so custa memoria.
+int nivelDeSombra3D(ReceitaDeQualidade receita, int maiorLado) {
+  final px = sombraEfetiva(receita, maiorLado);
+  if (px <= 0) return 0;
+  if (px <= 512) return 1;
+  if (px <= 1024) return 2;
+  return 3;
+}
+
+/// A CAMADA DE CENA 3D DESENHADA PELO MOTOR NATIVO.
+///
+/// NAO HA CENA SEPARADA AQUI (§1). O que entra e a camada da timeline ja
+/// resolvida no tempo; o que sai e uma imagem do tamanho do alvo, pintada
+/// na caixa da composicao como qualquer outro conteudo. Os modelos, as
+/// luzes, a camera e os keyframes continuam sendo os objetos que o editor
+/// ja move — este widget so pergunta ao motor "como esta isso agora".
+///
+/// SEM MOTOR, A CAMADA NAO DESENHA — e nao ha substituto (§43): a cena
+/// nao aparece com outra cara nem pinta um retangulo preto no lugar. E o
+/// caso do PC (o motor 3D nao e compilado la) e o da GPU desligada nos
+/// Ajustes.
+class _Cena3DView extends StatefulWidget {
+  const _Cena3DView({
+    required this.layer,
+    required this.project,
+    required this.localTime,
+    required this.globalTime,
+    required this.compWidth,
+    required this.compHeight,
+    required this.exporting,
+    this.sombra,
+    this.amostras,
+    this.escalaDaExportacao = 1,
+    this.quadroEsperado,
+  });
+
+  final Scene3DLayer layer;
+  final VideoProject project;
+  final Duration localTime;
+  final Duration globalTime;
+  final double compWidth;
+  final double compHeight;
+  final bool exporting;
+
+  /// Na exportacao, o desenho foi ESPERADO antes (§33) e estes numeros
+  /// vem do mesmo lugar que a espera usou. Nulos = decide a receita.
+  final int? sombra;
+  final int? amostras;
+  final double escalaDaExportacao;
+
+  /// Exportando: a imagem ja pronta deste estado, ou nula enquanto ela
+  /// nao chegou. Um quadro atrasado na exportacao e um quadro ERRADO no
+  /// arquivo, entao la nunca se pinta a imagem anterior.
+  final ui.Image? Function(String chave)? quadroEsperado;
+
+  @override
+  State<_Cena3DView> createState() => _Cena3DViewState();
+}
+
+class _Cena3DViewState extends State<_Cena3DView> {
+  @override
+  void initState() {
+    super.initState();
+    Motor3DNativo.instance.revision.addListener(_acordar);
+    ControladorDeQualidade3D.instancia.entrou();
+    // A CENA SE APRESENTA ao controlador de qualidade: o orcamento e
+    // decidido ANTES do primeiro quadro, e nao depois de a memoria ja
+    // ter sido gasta.
+    ControladorDeQualidade3D.instancia.registrarCena(
+      PerfilDaCena.de(widget.layer.scene),
+      widget.compWidth,
+      widget.compHeight,
+    );
+  }
+
+  @override
+  void didUpdateWidget(_Cena3DView old) {
+    super.didUpdateWidget(old);
+    if (!identical(old.layer.scene, widget.layer.scene)) {
+      ControladorDeQualidade3D.instancia.registrarCena(
+        PerfilDaCena.de(widget.layer.scene),
+        widget.compWidth,
+        widget.compHeight,
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    Motor3DNativo.instance.revision.removeListener(_acordar);
+    ControladorDeQualidade3D.instancia.saiu();
+    super.dispose();
+  }
+
+  void _acordar() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final motor = Motor3DNativo.instance;
+    if (!motor.ligado) return const SizedBox.shrink();
+
+    final receita = ControladorDeQualidade3D.instancia.receita;
+    final compLargura = widget.compWidth <= 0 ? 1.0 : widget.compWidth;
+    final compAltura = widget.compHeight <= 0 ? 1.0 : widget.compHeight;
+    // O ALVO NAO E O TAMANHO DA CAIXA: a 3D e uma camada, entao ela
+    // desenha na resolucao que o orcamento permite (nivel adaptativo do
+    // preview, §23) e a caixa amplia. Na exportacao a resolucao e a da
+    // composicao vezes a escala que coube na memoria.
+    final alvo = widget.exporting
+        ? (
+            largura: (compLargura * widget.escalaDaExportacao).round(),
+            altura: (compAltura * widget.escalaDaExportacao).round(),
+          )
+        : alvoDoPreview(compLargura, compAltura, receita);
+    if (alvo.largura <= 0 || alvo.altura <= 0) {
+      return const SizedBox.shrink();
+    }
+    final maior = math.max(alvo.largura, alvo.altura);
+    final sombra = widget.sombra ?? nivelDeSombra3D(receita, maior);
+    final amostras = widget.amostras ?? (receita.msaa ? 4 : 1);
+
+    final estado = estado3DDoQuadro(
+      project: widget.project,
+      l: widget.layer,
+      local: widget.localTime,
+      global: widget.globalTime,
+      largura: alvo.largura,
+      altura: alvo.altura,
+      sombra: sombra,
+      amostras: amostras,
+    );
+
+    // MONTAR ANTES DE PEDIR: a chave descreve o estado, mas quem o entrega
+    // ao motor e esta chamada. Sem ela o desenho sairia do quadro anterior.
+    motor.montar(
+      cena: estado.cena,
+      camera: estado.camera,
+      local: widget.localTime,
+      largura: alvo.largura,
+      altura: alvo.altura,
+      aspectoDaComposicao: compLargura / compAltura,
+      sombra: sombra,
+      amostras: amostras,
+    );
+
+    final imagem = widget.exporting
+        ? widget.quadroEsperado?.call(estado.chave)
+        : motor.quadro(estado.chave);
+    if (imagem == null) return const SizedBox.shrink();
+
+    return SizedBox(
+      width: widget.compWidth,
+      height: widget.compHeight,
+      child: OwnedVideoFrame(image: imagem),
+    );
+  }
+}
+
 class _LayerContent extends StatelessWidget {
   const _LayerContent({
     this.exportFrames,
@@ -6978,6 +7357,11 @@ class _LayerContent extends StatelessWidget {
     required this.compWidth,
     required this.videos,
     required this.localTime,
+    this.globalTime = Duration.zero,
+    this.quadroDaCena3D,
+    this.sombra3D,
+    this.amostras3D,
+    this.escalaDaCena3D = 1,
     required this.buildChildren,
     this.particlesRotX = 0,
     this.particlesRotY = 0,
@@ -6990,6 +7374,20 @@ class _LayerContent extends StatelessWidget {
   final double compWidth;
   final VideoLayerManager videos;
   final Duration localTime;
+
+  /// O instante na COMPOSICAO — o que a Cena 3D precisa para resolver o
+  /// nulo da composicao a que a camera (ou os nos) esta presa.
+  final Duration globalTime;
+
+  /// Exportando: a imagem 3D ja desenhada e ESPERADA para a chave do
+  /// estado. Nulo = o preview pergunta ao motor na hora.
+  final ui.Image? Function(String chave)? quadroDaCena3D;
+
+  /// A qualidade 3D que a exportacao fixou para este projeto; nulos no
+  /// preview, que decide pela receita do controlador.
+  final int? sombra3D;
+  final int? amostras3D;
+  final double escalaDaCena3D;
 
   /// Rotacao 3D do sistema de particulas (graus), ja com o delta do pai.
   /// A LENTE ATIVA, para a nuvem de particulas abrir o mesmo angulo
@@ -7028,11 +7426,7 @@ class _LayerContent extends StatelessWidget {
     return SizedBox(
       width: caixa.width,
       height: caixa.height,
-      child: RawImage(
-        image: img,
-        fit: BoxFit.fill,
-        filterQuality: FilterQuality.medium,
-      ),
+      child: OwnedVideoFrame(image: img),
     );
   }
 
@@ -7068,22 +7462,15 @@ class _LayerContent extends StatelessWidget {
 
   /// PREVIA de outro instante: o quadro extraido do arquivo, se ja veio;
   /// senao o tocador ao vivo, e a extracao e pedida.
-  Widget _videoDeOutroTempo(VideoLayer l, Duration tempo) =>
-      ValueListenableBuilder<int>(
-        valueListenable: QuadrosDeVideo.instance.revision,
-        builder: (context, _, _) {
-          final arquivo = ProxyService.instance.playbackPath(l.sourcePath);
-          final fonte = videoAbsoluteSourceTimeAt(l, l.localTime(tempo));
-          final img = QuadrosDeVideo.instance.quadro(arquivo, fonte);
-          if (img != null) return _quadroFixo(l, img);
-          QuadrosDeVideo.instance.preparar(
-            arquivo,
-            l.sourceOffset,
-            l.sourceOffset + videoSourceSpan(l),
-          );
-          return _videoAoVivo(l);
-        },
-      );
+  Widget _videoDeOutroTempo(VideoLayer l, Duration tempo, {bool sampled = false}) {
+    final arquivo = ProxyService.instance.playbackPath(l.sourcePath);
+    final fonte = videoAbsoluteSourceTimeAt(l, sampled ? tempo - l.startTime : l.localTime(tempo));
+    return TemporalFrameSet(
+      key: ValueKey('temporal-${l.id}'), source: arquivo, times: [fonte],
+      builder: (images) => _quadroFixo(l, images.first),
+      fallback: _videoAoVivo(l),
+    );
+  }
 
   /// OS TRES CANAIS, CADA UM DE UM INSTANTE.
   ///
@@ -7101,18 +7488,6 @@ class _LayerContent extends StatelessWidget {
     final fps = project.fps < 1 ? 30 : project.fps;
     final d = deslocamentosDoTimeWarp(l.effects, localTime);
     final segundos = [d.r / fps, d.g / fps, d.b / fps];
-    Widget canal(int c) => isoDeCanal(
-      _videoNoDeslocamento(l, segundos[c]),
-      c,
-    );
-    final torto = Stack(
-      fit: StackFit.passthrough,
-      children: [
-        canal(0),
-        BlendMask(blendMode: BlendMode.plus, child: canal(1)),
-        BlendMask(blendMode: BlendMode.plus, child: canal(2)),
-      ],
-    );
     final spec = efeitosRgbTimeWarp[EffectType.rgbTimeWarp]!.params;
     double v(String k) {
       for (final e in l.effects) {
@@ -7125,38 +7500,91 @@ class _LayerContent extends StatelessWidget {
       return spec[k]!.initial;
     }
 
-    // LIMITAR CROMA: o freio de seguranca. Mistura o resultado torcido
-    // com a versao em LUMINANCIA dele mesmo — em 100% a separacao vira
-    // cinza e o efeito deixa de colorir. E o que salva um clipe cujo
-    // movimento e rapido demais para a distancia escolhida.
-    final freio = (v('clamp_chroma') / 100).clamp(0.0, 1.0);
-    final resultado = freio <= .0001
-        ? torto
-        : Stack(
-            fit: StackFit.passthrough,
-            children: [
-              torto,
-              Opacity(
-                opacity: freio,
-                child: ColorFiltered(
-                  colorFilter: const ColorFilter.matrix(_luma),
-                  child: torto,
-                ),
-              ),
-            ],
-          );
+    Widget montar([List<ui.Image>? ready]) {
+      final quadros = ready ?? <ui.Image?>[
+        for (final s in segundos) _quadroDoTimeWarp(l, s),
+      ];
 
-    final mistura = (v('mix') / 100).clamp(0.0, 1.0);
-    if (mistura >= .999) return resultado;
-    // MISTURA: o quadro de agora por baixo, o torcido por cima. Em 0% o
-    // efeito nao aparece; em 100% nem se paga a passada extra.
-    return Stack(
-      fit: StackFit.passthrough,
-      children: [
-        _videoNoDeslocamento(l, 0),
-        Opacity(opacity: mistura, child: resultado),
-      ],
+      // Uma Texture do player e uma camada externa do compositor. Ela nao
+      // participa de `saveLayer(BlendMode.plus)`: o ultimo filho (azul)
+      // acabava pintado por cima dos outros e deixava o clipe inteiro azul.
+      // O RGB temporal so e composto quando os tres `ui.Image` estao
+      // prontos; ate la mantemos o quadro original, sem cor de fallback.
+      if (quadros.any((q) => q == null)) return _videoNoDeslocamento(l, 0);
+      final imagens = quadros.cast<ui.Image>();
+      final caixa = _caixa(
+        l.ajuste,
+        imagens.first.width / imagens.first.height,
+      );
+      final torto = OwnedRgbFrames(images: imagens, size: caixa);
+
+      // LIMITAR CROMA: o freio de seguranca. Mistura o resultado torcido
+      // com a versao em LUMINANCIA dele mesmo — em 100% a separacao vira
+      // cinza e o efeito deixa de colorir.
+      final freio = (v('clamp_chroma') / 100).clamp(0.0, 1.0);
+      final resultado = freio <= .0001
+          ? torto
+          : Stack(
+              fit: StackFit.passthrough,
+              children: [
+                torto,
+                Opacity(
+                  opacity: freio,
+                  child: ColorFiltered(
+                    colorFilter: const ColorFilter.matrix(_luma),
+                    child: torto,
+                  ),
+                ),
+              ],
+            );
+
+      final mistura = (v('mix') / 100).clamp(0.0, 1.0);
+      if (mistura >= .999) return resultado;
+      return Stack(
+        fit: StackFit.passthrough,
+        children: [
+          _videoNoDeslocamento(l, 0),
+          Opacity(opacity: mistura, child: resultado),
+        ],
+      );
+    }
+
+    if (exporting) return montar();
+    // Ao pausar sobre o efeito, a chegada assincrona dos tres quadros
+    // tambem precisa repintar; nao depender do proximo tick do playback.
+    return TemporalFrameSet(
+      key: ValueKey('rgb-temporal-${l.id}'),
+      source: ProxyService.instance.playbackPath(l.sourcePath),
+      times: [for (final s in segundos) videoAbsoluteSourceTimeAt(l, _localDoTimeWarp(l, s))],
+      builder: montar, fallback: _videoNoDeslocamento(l, 0),
     );
+  }
+
+  Duration _localDoTimeWarp(VideoLayer l, double segundos) {
+    var alvo = localTime + Duration(microseconds: (segundos * 1000000).round());
+    if (alvo < Duration.zero) return Duration.zero;
+    final ultimo = l.duration - const Duration(microseconds: 1);
+    if (ultimo <= Duration.zero) return Duration.zero;
+    if (alvo > ultimo) alvo = ultimo;
+    return alvo;
+  }
+
+  ui.Image? _quadroDoTimeWarp(VideoLayer l, double segundos) {
+    final local = _localDoTimeWarp(l, segundos);
+    if (exporting) {
+      if (segundos.abs() < 1e-9) return exportFrames?[l.id];
+      return quadroEm?.call(l, l.startTime + local);
+    }
+    final arquivo = ProxyService.instance.playbackPath(l.sourcePath);
+    final fonte = videoAbsoluteSourceTimeAt(l, local);
+    final img = QuadrosDeVideo.instance.quadro(arquivo, fonte);
+    if (img != null) return img;
+    QuadrosDeVideo.instance.preparar(
+      arquivo,
+      l.sourceOffset,
+      l.sourceOffset + videoSourceSpan(l),
+    );
+    return null;
   }
 
   /// O quadro do video [segundos] depois (ou antes) do instante desta
@@ -7167,7 +7595,9 @@ class _LayerContent extends StatelessWidget {
           ? _quadroFixo(l, exportFrames![l.id]!)
           : _videoAoVivo(l);
     }
-    final tempo = l.startTime + localTime +
+    final tempo =
+        l.startTime +
+        localTime +
         Duration(microseconds: (segundos * 1e6).round());
     if (exporting) {
       final img = quadroEm?.call(l, tempo);
@@ -7272,15 +7702,24 @@ class _LayerContent extends StatelessWidget {
       ),
       // Forma vetorial: arvore avaliada no tempo local, pintada por Path.
       ShapeLayer l => _ShapeView(layer: l, localTime: localTime),
-      // CONTEINER CENA 3D: por fora e uma camada; por dentro roda o
-      // proprio renderizador, com passe opaco e passe transparente
-      // ordenados POR TRIANGULO.
-      // A CENA 3D NAO DESENHA. O motor antigo foi apagado inteiro (ver
-      // docs/3d-diligent.md): nao ha GPU nem pintor de CPU atras desta
-      // porta, e nao ha substituto silencioso — uma camada de cena some
-      // do quadro em vez de aparecer com outra cara. Quem a substitui e
-      // o backend novo (Diligent), que entra AQUI.
-      Scene3DLayer _ => const SizedBox.shrink(),
+      // A CENA 3D E UMA CAMADA DA TIMELINE (§1), e a imagem dela vem do
+      // motor nativo — o MESMO desenho no preview e na exportacao, porque
+      // os dois montam o estado pela mesma funcao e pedem a mesma chave
+      // (§33). Sem motor disponivel a camada nao desenha, em vez de
+      // aparecer com outra cara (§43).
+      Scene3DLayer l => _Cena3DView(
+        layer: l,
+        project: project,
+        localTime: localTime,
+        globalTime: globalTime,
+        compWidth: compWidth,
+        compHeight: project.outputHeight.toDouble(),
+        exporting: exporting,
+        sombra: sombra3D,
+        amostras: amostras3D,
+        escalaDaExportacao: escalaDaCena3D,
+        quadroEsperado: quadroDaCena3D,
+      ),
       // Precomp: filhos compostos no tempo local do grupo.
       // PRECOMP: tempo proprio (com remapeamento), quadro proprio e a
       // opcao de colapsar — que e o que evita a forma vetorial pixelar
@@ -7320,6 +7759,16 @@ class _LayerContent extends StatelessWidget {
         ),
       ),
       ImageLayer l => RepaintBoundary(child: _imagem(l)),
+      // Temporal channels must run before the generic other-time branch;
+      // otherwise Posterize/Time Slice silently bypass RGB Time Warp.
+      VideoLayer l
+          when timeWarpAtivo(l.effects, localTime) &&
+              (exporting ? quadroEm != null : true) =>
+        _videoComTimeWarp(l),
+      VideoLayer l when !exporting && l.effects.any((e) => e.enabled &&
+          (e.type == EffectType.posterizeTime || e.type == EffectType.motionTile ||
+           e.type == EffectType.deepGlow || e.type == EffectType.brilho)) =>
+        _videoDeOutroTempo(l, l.startTime + localTime, sampled: true),
       // EXPORTANDO: o quadro vem decodificado do disco. A textura do
       // player nunca entra num `toImage`, entao o video sairia preto.
       // OUTRO INSTANTE, EXPORTANDO: o quadro decodificado para ele.
@@ -7333,14 +7782,6 @@ class _LayerContent extends StatelessWidget {
         l,
         tempoAlheio!,
       ),
-      // RGB TIME WARP: cada canal de cor vem de um INSTANTE diferente
-      // do video. Vem antes dos casos comuns de video porque ele nao
-      // desenha o quadro de agora — desenha tres.
-      VideoLayer l
-          when tempoAlheio == null &&
-              timeWarpAtivo(l.effects, localTime) &&
-              (exporting ? quadroEm != null : true) =>
-        _videoComTimeWarp(l),
       VideoLayer l when exportFrames != null && exportFrames![l.id] != null =>
         _quadroFixo(l, exportFrames![l.id]!),
       VideoLayer l => _videoAoVivo(l),

@@ -56,7 +56,7 @@ with zipfile.ZipFile(path) as z:
         prefix = 'assets/flutter_assets/'
     for shader in ['effects_v2.frag', 'blend.frag']:
         assert z.getinfo(prefix+'shaders/'+shader).file_size > 1000, f'Missing shader {shader}'
-    for asset in ['assets/templates/abyss.jpg', 'assets/templates/dnyx/gallery-left.png']:
+    for asset in ['assets/templates/notes.jpg', 'assets/templates/dnyx/gallery-left.png']:
         assert z.read(prefix+asset) == Path(asset).read_bytes(), f'Mismatched asset {asset}'
     result['shaders_and_sample_assets'] = 'valid'
 report = path.with_suffix(path.suffix+'.verification.json')

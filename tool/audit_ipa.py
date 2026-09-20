@@ -31,19 +31,16 @@ def main():
         binary=z.read(aot)
         assert b'vhf_neon_native_v1' in binary, 'VHF project factory not found in AOT'
         assert b'Animar cores' in binary, 'Animated-gradient UI not found in AOT'
-        assert b'abyss_cinematic_template' in binary, 'Bundled ABISMO installation missing'
         assert b'Como usar o AUREA' in binary, 'Offline guide missing from AOT'
         shader_key=next(n for n in names if n.endswith('/flutter_assets/shaders/effects_v2.frag'))
         assert len(z.read(shader_key)) > 1000, 'FX V2 shader missing/empty'
-        preview_key=next(n for n in names if n.endswith('/flutter_assets/assets/templates/abyss.jpg'))
-        assert z.read(preview_key)==Path('assets/templates/abyss.jpg').read_bytes()
         result={'file':str(args.ipa.resolve()),'bytes':args.ipa.stat().st_size,
             'sha256':hashlib.sha256(args.ipa.read_bytes()).hexdigest(),
             'version':p['CFBundleShortVersionString'],'build':p['CFBundleVersion'],
             'minimum_os':p.get('MinimumOSVersion'),'bundle_id':p['CFBundleIdentifier'],
             'architecture':'arm64','zip_crc':'valid','bundled_assets_verified':matched,
             'native_vhf_factory':True,'animated_gradient_ui':True,
-            'fx_v2_shader':True,'offline_guide':True,'bundled_abyss':True,
+            'fx_v2_shader':True,'offline_guide':True,
             'has_provision_profile':root+'embedded.mobileprovision' in names}
         print(json.dumps(result,indent=2))
         (args.ipa.parent/'verification.json').write_text(json.dumps(result,indent=2))

@@ -16,11 +16,11 @@ with zipfile.ZipFile(args.apk) as archive:
     for name in native:
         code = archive.read(name)
         assert code[:4] == b'\x7fELF', name
-        for marker in [b'Como usar o AUREA', b'abyss_cinematic_template', b'vhf_neon_native_v1']:
+        for marker in [b'Como usar o AUREA', b'vhf_neon_native_v1']:
             assert marker in code, f'Missing {marker!r} in {name}'
     shader = archive.read('assets/flutter_assets/shaders/effects_v2.frag')
     assert len(shader) > 1000, 'FX V2 shader missing/empty'
-    assets = [Path('assets/templates/abyss.jpg')]
+    assets = []
     for folder in ['assets/templates/vhf', 'assets/templates/dnyx']:
         assets.extend(path for path in Path(folder).iterdir() if path.is_file())
     for path in assets:
@@ -33,7 +33,6 @@ with zipfile.ZipFile(args.apk) as archive:
         'architectures': [name.split('/')[1] for name in native],
         'fx_v2_shader': True,
         'offline_guide': True,
-        'bundled_abyss': True,
         'native_vhf_factory': True,
         'assets_verified': [path.as_posix() for path in assets],
         'note': 'Manifest and signing verified separately with aapt2 and apksigner.',

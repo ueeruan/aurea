@@ -32,6 +32,8 @@ class _Projetos extends ProjectsController {
 }
 
 class _Mural extends ComunidadeService {
+  @override
+  Future<int?> totalDeUsuarios() async => 128;
   _Mural(this.feed);
   final List<PostDaComunidade> feed;
   @override
@@ -40,7 +42,12 @@ class _Mural extends ComunidadeService {
   Future<List<PostDaComunidade>> respostas(String postId) async => const [];
 }
 
-Future<ProviderContainer> _montar(WidgetTester tester, Size tamanho, Widget tela, List<PostDaComunidade> feed) async {
+Future<ProviderContainer> _montar(
+  WidgetTester tester,
+  Size tamanho,
+  Widget tela,
+  List<PostDaComunidade> feed,
+) async {
   tester.view.physicalSize = tamanho;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
@@ -84,7 +91,9 @@ Future<ProviderContainer> _montar(WidgetTester tester, Size tamanho, Widget tela
 ThemeData _temaDeTeste() {
   final theme = AppTheme.dark;
   final button = theme.filledButtonTheme.style!;
-  final resolved = button.textStyle!.resolve({})!.copyWith(fontFamily: 'Roboto');
+  final resolved = button.textStyle!
+      .resolve({})!
+      .copyWith(fontFamily: 'Roboto');
   return theme.copyWith(
     filledButtonTheme: FilledButtonThemeData(
       style: button.copyWith(textStyle: WidgetStatePropertyAll(resolved)),
@@ -100,7 +109,7 @@ Widget _comFundo(GlobalKey chave, Widget tela) => RepaintBoundary(
 void main() {
   setUpAll(carregarFontesReais);
 
-  final imagem = File('assets/templates/campo.jpg').absolute.path;
+  final imagem = File('assets/templates/dnyx/portrait.png').absolute.path;
   final feed = [
     PostDaComunidade(
       id: 'p1',
@@ -124,22 +133,44 @@ void main() {
     'se': Size(375, 667),
     'pro-max': Size(430, 932),
   }.entries) {
-    testWidgets('Inicio em $nome: sem estouro e nomes intactos', (tester) async {
+    testWidgets('Inicio em $nome: sem estouro e nomes intactos', (
+      tester,
+    ) async {
       final chave = GlobalKey();
-      await _montar(tester, tamanho, _comFundo(chave, const ProjectsTab()), feed);
+      await _montar(
+        tester,
+        tamanho,
+        _comFundo(chave, const ProjectsTab()),
+        feed,
+      );
       expect(tester.takeException(), isNull);
       expect(find.text('Novo projeto'), findsOneWidget);
       // O nome da pessoa nao passa pelo dicionario: "Projeto" continua
       // "Projeto" mesmo sendo uma chave de traducao.
       expect(find.text('Projeto'), findsWidgets);
-      expect(find.byType(AppText).evaluate().where((e) => (e.widget as AppText).data == 'Vinheta do canal — versão final'), isEmpty);
+      expect(
+        find
+            .byType(AppText)
+            .evaluate()
+            .where(
+              (e) =>
+                  (e.widget as AppText).data ==
+                  'Vinheta do canal — versão final',
+            ),
+        isEmpty,
+      );
       await gravarPrint(tester, chave, 'inicio-$nome');
       await tester.pump(const Duration(seconds: 1));
     });
 
     testWidgets('Comunidade em $nome: feed sem estouro', (tester) async {
       final chave = GlobalKey();
-      await _montar(tester, tamanho, _comFundo(chave, const CommunityTab()), feed);
+      await _montar(
+        tester,
+        tamanho,
+        _comFundo(chave, const CommunityTab()),
+        feed,
+      );
       await tester.pump(const Duration(milliseconds: 600));
       // A imagem do post decodifica fora do relogio falso do teste.
       // Com teto: no segundo tamanho a imagem ja esta no cache do teste

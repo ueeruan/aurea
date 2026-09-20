@@ -13,10 +13,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:gal/gal.dart';
 
 import '../../editor/application/editor_controller.dart';
+import '../../editor/application/motor3d_nativo.dart';
+import '../../editor/application/qualidade3d_controller.dart';
 import '../../editor/application/texture_cache.dart';
 import '../../editor/application/video_layer_manager.dart';
 import '../../editor/domain/cut_ops.dart';
 import '../../editor/domain/layer.dart';
+import '../../editor/domain/orcamento_render.dart';
+import '../../editor/domain/video_project.dart';
 import '../../editor/domain/shape.dart' show ShapeMediaFill;
 import '../../editor/domain/time_slice.dart';
 import '../../editor/domain/grupo_ops.dart';
@@ -27,6 +31,8 @@ import '../../editor/domain/estilizar_lote2.dart';
 import '../../editor/presentation/widgets/passe_de_cor.dart';
 import '../../editor/presentation/widgets/preview_raster.dart';
 import '../../editor/presentation/widgets/preview_stage.dart';
+import '../../editor/presentation/widgets/motion_tile_pass.dart';
+import '../../editor/presentation/widgets/owned_video_frame.dart';
 import '../../editor/application/duck_service.dart';
 import '../../editor/application/media_preview_service.dart';
 import '../application/aprimoramento_export.dart';
@@ -110,6 +116,19 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
   /// `camada@indice`. Sem eles, cada faixa sairia com o mesmo quadro.
   final Map<String, ui.Image> _quadrosExtras = {};
 
+  /// AS CENAS 3D DO QUADRO, desenhadas pelo motor nativo e ESPERADAS —
+  /// por chave de estado (§33). Na exportacao um quadro atrasado e um
+  /// quadro ERRADO no arquivo, entao aqui o desenho nunca e o anterior.
+  ///
+  /// As imagens sao NOSSAS (clones): o motor guarda um numero pequeno de
+  /// quadros e descarta os antigos, e uma imagem descartada no meio de um
+  /// quadro com varias cenas chegaria invalida ao desenho.
+  final Map<String, ui.Image> _quadrosCena3D = {};
+  List<Scene3DLayer> _camadas3D = const [];
+  int _sombra3D = 0;
+  int _amostras3D = 1;
+  double _escala3D = 1;
+
   @override
   void initState() {
     super.initState();
@@ -121,6 +140,8 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
     // que nao carrega vira erro DAQUELA fase, com a mensagem certa, e
     // nao uma excecao solta enquanto ela escolhe o tamanho.
     _aquecendo = Future.wait([
+      MotionTilePass.warmUp(),
+      RgbFramesPainter.prepare(),
       DitherLayer.warmUp(),
       PixelEffectEngine.warmUp(),
       MotorDeCorrecao.warmUp(),
@@ -142,6 +163,9 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
       img.dispose();
     }
     for (final img in _quadrosExtras.values) {
+      img.dispose();
+    }
+    for (final img in _quadrosCena3D.values) {
       img.dispose();
     }
     _engine?.cancel();
@@ -243,6 +267,13 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
       await _prepararRecursos3D(project.layers);
       if (engine.cancelled) return;
 
+      // A QUALIDADE 3D DESTA EXPORTACAO, fixada antes do primeiro quadro.
+      _fixarQualidade3D(
+        project,
+        midiasAchatadas(project.layers).whereType<Scene3DLayer>().toList(),
+      );
+      if (engine.cancelled) return;
+
       // 1. Quadros de cada camada de video.
       // Video dentro de grupo tambem: sem os quadros dele, o arquivo saia
       // com o icone de filme no lugar.
@@ -322,6 +353,9 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
         if (engine.cancelled) return;
         final t = engine.timeOfFrame(i);
         await _prepararQuadrosDeVideo(videoLayers, t);
+        // AS CENAS 3D ANTES DE TROCAR O TEMPO: o widget pede a imagem
+        // pela chave do estado, e a chave ja esta pronta aqui.
+        await _prepararQuadros3D(t);
         _time.value = t;
         if (!mounted) return;
         setState(() {});
@@ -546,6 +580,88 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
     }
   }
 
+  /// FIXA A QUALIDADE 3D DESTA EXPORTACAO, uma vez so.
+  ///
+  /// Uma vez, e nao por quadro: o tamanho do alvo do motor decide os
+  /// recursos de GPU (cor, profundidade, sombra) — mudar esse tamanho no
+  /// meio do arquivo refaria tudo a cada quadro, e o video sairia com
+  /// quadros de qualidades diferentes.
+  void _fixarQualidade3D(VideoProject project, List<Scene3DLayer> camadas) {
+    _camadas3D = camadas;
+    if (camadas.isEmpty || !Motor3DNativo.instance.ligado) return;
+    final largura = project.outputWidth.toDouble();
+    final altura = project.outputHeight.toDouble();
+    // A CENA SE APRESENTA ao controlador: o orcamento e a memoria do
+    // aparelho decidem o nivel antes de o primeiro quadro ser pedido.
+    ControladorDeQualidade3D.instancia.registrarCena(
+      PerfilDaCena.de(camadas.first.scene),
+      largura,
+      altura,
+    );
+    final r = ControladorDeQualidade3D.instancia.paraExportacao(largura, altura);
+    final receita = ReceitaDeQualidade.de(r.nivel);
+    final maior = math.max(largura, altura).round();
+    _sombra3D = nivelDeSombra3D(receita, maior);
+    _amostras3D = receita.msaa ? 4 : 1;
+    _escala3D = r.escala;
+  }
+
+  /// DESENHA E ESPERA AS CENAS 3D DO INSTANTE [t].
+  ///
+  /// O mesmo estado que o preview monta, pela mesma funcao — a diferenca
+  /// e so a espera. E o que faz o arquivo sair igual ao que se viu (§33):
+  /// nao ha um segundo caminho de desenho para a exportacao manter em
+  /// dia.
+  Future<void> _prepararQuadros3D(Duration t) async {
+    for (final img in _quadrosCena3D.values) {
+      img.dispose();
+    }
+    _quadrosCena3D.clear();
+    if (_camadas3D.isEmpty) return;
+    final motor = Motor3DNativo.instance;
+    if (!motor.ligado) return;
+
+    final project = ref
+        .read(editorControllerProvider.notifier)
+        .projetoParaExportar;
+    final largura = project.outputWidth.toDouble();
+    final altura = project.outputHeight.toDouble();
+    final alvo = (
+      largura: (largura * _escala3D).round(),
+      altura: (altura * _escala3D).round(),
+    );
+    if (alvo.largura <= 0 || alvo.altura <= 0) return;
+
+    for (final l in _camadas3D) {
+      final estado = estado3DDoQuadro(
+        project: project,
+        l: l,
+        local: l.localTime(t),
+        global: t,
+        largura: alvo.largura,
+        altura: alvo.altura,
+        sombra: _sombra3D,
+        amostras: _amostras3D,
+      );
+      motor.montar(
+        cena: estado.cena,
+        camera: estado.camera,
+        local: l.localTime(t),
+        largura: alvo.largura,
+        altura: alvo.altura,
+        aspectoDaComposicao: alvo.largura / alvo.altura,
+        sombra: _sombra3D,
+        amostras: _amostras3D,
+      );
+      final imagem = await motor.quadroEsperando(estado.chave);
+      // O CLONE E NOSSO: o motor descarta os quadros antigos quando o
+      // cache enche, e um deles pode ser exatamente o desta cena.
+      if (imagem != null) _quadrosCena3D[estado.chave] = imagem.clone();
+    }
+  }
+
+  ui.Image? _quadroDaCena3D(String chave) => _quadrosCena3D[chave];
+
   /// Decodifica o quadro certo de cada camada de video para o instante
   /// [t] — so o que a camada esta mostrando agora.
   Future<void> _prepararQuadrosDeVideo(
@@ -587,7 +703,7 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
     for (final outro in extras) {
       for (final l in videoLayers) {
         if (!l.activeAt(outro)) continue;
-        final idx = _indiceDoQuadro(l, outro, exportLayers);
+        final idx = _indiceDoQuadro(l, outro, exportLayers, sampled: true);
         if (idx == null) continue;
         final chave = '${l.id}@$idx';
         usados.add(chave);
@@ -609,10 +725,10 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
 
   /// O indice do PNG que a camada [l] mostra no instante [t] da
   /// composicao (null se a camada nao tem quadros extraidos).
-  int? _indiceDoQuadro(VideoLayer l, Duration t, List<Layer> layers) {
+  int? _indiceDoQuadro(VideoLayer l, Duration t, List<Layer> layers, {bool sampled = false}) {
     final count = _contagem[l.id] ?? 0;
     if (_pastas[l.id] == null || count == 0) return null;
-    final source = videoAbsoluteSourceTimeAt(l, l.localTime(t));
+    final source = videoAbsoluteSourceTimeAt(l, sampled ? t - l.startTime : l.localTime(t));
     final extractedFrom = _inicioDosQuadros[l.id] ?? l.sourceOffset;
     // A MESMA TAXA DA EXTRACAO: com interpolacao ligada ha mais quadros
     // no disco do que a composicao tem, e o indice segue a taxa em que
@@ -626,7 +742,7 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
   ui.Image? _quadroDeOutroTempo(VideoLayer l, Duration t) {
     final engine = _engine;
     if (engine == null) return null;
-    final idx = _indiceDoQuadro(l, t, engine.project.layers);
+    final idx = _indiceDoQuadro(l, t, engine.project.layers, sampled: true);
     return idx == null ? null : _quadrosExtras['${l.id}@$idx'];
   }
 
@@ -762,6 +878,10 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
                                   exportFrames: _quadroAtual,
                                   exporting: true,
                                   quadroDeVideoEm: _quadroDeOutroTempo,
+                                  quadroDeCena3D: _quadroDaCena3D,
+                                  sombra3D: _sombra3D,
+                                  amostras3D: _amostras3D,
+                                  escalaDaCena3D: _escala3D,
                                 ),
                               ),
                             ),

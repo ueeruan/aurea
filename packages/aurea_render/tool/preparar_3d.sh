@@ -58,4 +58,15 @@ if [[ "${1:-}" == "--ios" && ! -f "$MOLTENVK" ]]; then
   cp "$MOLTEN_TEMP/MoltenVK/LICENSE" "$TERCEIROS/moltenvk/LICENSE"
 fi
 
+# O REMENDO DO OBJECTIVE-C++. O motor compila no iOS como Objective-C++ (os
+# dois `.mm` do Diligent pedem, e o clang recusa `-std=c++20` em Objective-C
+# puro). Nesse modo `CAMetalLayer` e um tipo de verdade e `void*` nao vira
+# ponteiro dele sozinho — o `SwapChainVkImpl.cpp` deixa de compilar. A pasta
+# `third_party` nao vai para o git, entao o remendo mora aqui e e idempotente.
+TROCA="$DILIGENT/Graphics/GraphicsEngineVulkan/src/SwapChainVkImpl.cpp"
+if [[ -f "$TROCA" ]] && grep -q 'surfaceCreateInfo.pLayer = pLayer;' "$TROCA"; then
+  perl -0pi -e 's/surfaceCreateInfo\.pLayer = pLayer;/surfaceCreateInfo.pLayer = (decltype(surfaceCreateInfo.pLayer))pLayer;/' "$TROCA"
+  echo 'Diligent: remendo do CAMetalLayer aplicado.'
+fi
+
 echo 'Dependencias do motor 3D prontas.'

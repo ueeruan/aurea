@@ -94,7 +94,13 @@ void main(List<String> args) async {
         if (ios) ...['MoltenVK', 'c++'],
         if (tresD) 'z',
       ],
-      libraryDirectories: [if (ios) moltenVk],
+      // CAMINHO ABSOLUTO. O linker roda na pasta de build do hook
+      // (`.dart_tool/hooks_runner/...`), e um caminho relativo era procurado
+      // LA: "search path ... not found", "library 'MoltenVK' not found" —
+      // com todo o C++ ja compilado.
+      libraryDirectories: [
+        if (ios) input.packageRoot.resolve(moltenVk).toFilePath(),
+      ],
       // No iOS, os dois arquivos de plataforma do Diligent sao Objective-C++
       // (.mm). As fontes .cpp continuam sendo inferidas como C++ pelo clang.
       // SEMPRE C++ PARA O `CBuilder`, E OBJECTIVE-C++ POR BANDEIRA NO iOS.

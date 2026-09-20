@@ -30,10 +30,14 @@ Matrix4 selectionTransform(VideoProject project, Layer layer, Duration time) {
     sy *= vista.escala;
   }
   final pivot = layer.pivot.valueAt(local);
+  // A CAMADA DE CENA NAO INCLINA: o giro dela orbita a camera DO MOTOR
+  // (`estado3DDoQuadro`), e a imagem chega reta. Inclinar a moldura aqui
+  // deixaria a alca de selecao longe do que se ve.
   final tilt =
       (effective.rotX != 0 || effective.rotY != 0) &&
       layer is! ParticulasLayer &&
-      layer is! Element3DLayer;
+      layer is! Element3DLayer &&
+      layer is! Scene3DLayer;
   final matrix = Matrix4.identity()..translateByDouble(pos.dx, pos.dy, 0, 1);
   if (tilt) {
     matrix.multiply(

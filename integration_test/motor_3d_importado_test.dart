@@ -20,21 +20,28 @@
 // se mede aqui e COBERTURA — quantos pixels de objeto existem, e de que cor —
 // e isso nao depende de a placa ser rapida.
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:aurea/src/features/editor/application/editor_controller.dart';
 import 'package:aurea/src/features/editor/application/motor3d_nativo.dart';
 import 'package:aurea/src/features/editor/domain/element3d.dart';
 import 'package:aurea/src/features/editor/domain/keyframe.dart';
+import 'package:aurea/src/features/editor/domain/layer.dart';
 import 'package:aurea/src/features/editor/domain/modelo_do_texto3d.dart';
 import 'package:aurea/src/features/editor/domain/fonte_truetype.dart';
 import 'package:aurea/src/features/editor/domain/texto3d.dart';
 import 'package:aurea/src/features/editor/domain/texto3d_animado.dart';
 import 'package:aurea/src/features/editor/domain/model_import3d.dart';
 import 'package:aurea/src/features/editor/domain/scene3d.dart';
+import 'package:aurea/src/features/editor/domain/video_project.dart';
+import 'package:aurea/src/features/editor/presentation/widgets/preview_stage.dart'
+    show estado3DDoQuadro;
 import 'package:aurea_render/aurea_render.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:integration_test/integration_test.dart';
 
 // ------------------------------------------------------------- um GLB real
@@ -218,27 +225,48 @@ Uint8List _glb(Map<String, dynamic> gltf, Uint8List bin) {
 // ------------------------------------------------------------- a medida
 
 /// O QUE A IMAGEM TEM: quantos pixels sairam do fundo, o quanto o objeto
-/// cobre do quadro e a cor media do que apareceu.
+/// cobre do quadro, a cor media do que apareceu e a CAIXA do que apareceu
+/// (a silhueta — e por ela que se ve um objeto girar de lado).
 class Medida {
-  Medida(this.diferentes, this.total, this.media);
+  Medida(this.diferentes, this.total, this.media, {this.largura = 0, this.altura = 0});
 
   final int diferentes;
   final int total;
   final (int, int, int) media;
+  final int largura;
+  final int altura;
 
   double get cobertura => total == 0 ? 0 : diferentes / total;
 
   @override
   String toString() =>
       '$diferentes/$total pixels (${(cobertura * 100).toStringAsFixed(1)}%) '
-      'cor media rgb$media';
+      'caixa ${largura}x$altura cor media rgb$media';
+}
+
+/// GUARDA O QUADRO NO APARELHO, para o dono poder OLHAR o antes e o depois
+/// (`adb pull /sdcard/Download/aurea_giro_*.png`). Nao poder salvar nao
+/// derruba a medida.
+Future<void> _salvar(ui.Image imagem, String nome) async {
+  try {
+    final png = await imagem.toByteData(format: ui.ImageByteFormat.png);
+    if (png == null) return;
+    File('/sdcard/Download/$nome').writeAsBytesSync(png.buffer.asUint8List());
+    // ignore: avoid_print
+    print('  PNG salvo em /sdcard/Download/$nome');
+  } catch (e) {
+    // ignore: avoid_print
+    print('  nao deu para salvar o PNG: $e');
+  }
 }
 
 Future<Medida> _medir(ui.Image imagem, (int, int, int) fundo) async {
   final dados = await imagem.toByteData(format: ui.ImageByteFormat.rawRgba);
   final bytes = dados!.buffer.asUint8List();
+  final largura = imagem.width;
   var diferentes = 0;
   var sr = 0, sg = 0, sb = 0;
+  var minX = largura, maxX = -1, minY = imagem.height, maxY = -1;
   for (var i = 0; i + 3 < bytes.length; i += 4) {
     final r = bytes[i], g = bytes[i + 1], b = bytes[i + 2];
     final dr = (r - fundo.$1).abs();
@@ -249,12 +277,20 @@ Future<Medida> _medir(ui.Image imagem, (int, int, int) fundo) async {
     sr += r;
     sg += g;
     sb += b;
+    final p = i ~/ 4;
+    final x = p % largura, y = p ~/ largura;
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
   }
   if (diferentes == 0) return Medida(0, bytes.length ~/ 4, (0, 0, 0));
   return Medida(
     diferentes,
     bytes.length ~/ 4,
     (sr ~/ diferentes, sg ~/ diferentes, sb ~/ diferentes),
+    largura: maxX - minX + 1,
+    altura: maxY - minY + 1,
   );
 }
 
@@ -480,8 +516,7 @@ void main() {
     motor.limpar();
   });
 
-  test('dois objetos 3D desenham no mesmo quadro', () async {
-    final motor = Motor3DNativo.instance;
+  test('dois objetos 3D desenham no mesmo quadro', () async {    final motor = Motor3DNativo.instance;
     final asset = importGltf3D(_glb(_cuboTex().gltf, _cuboTex().bin));
     final um = SceneNode(
       name: 'Cubo',
@@ -525,5 +560,79 @@ void main() {
     expect(comUm.cobertura, greaterThan(0));
     expect(comDois.cobertura, greaterThan(0));
     motor.limpar();
+  });
+
+  test('o DIAL de giro da camada gira o texto 3D de verdade', () async {
+    // O RELATO DO DONO, com print: um "Texto 3D" girado em -64 graus em Y
+    // continuava chapado — "um fake 3D". O giro da camada era aplicado
+    // como perspectiva de CARTAO sobre a imagem pronta, e o motor recebia
+    // sempre o mesmo estado: o dial nao mudava UM pixel do desenho.
+    //
+    // Aqui o caminho e o de producao inteiro — o botao "Texto 3D", o
+    // estado que o palco monta e a ponte do motor — e a medida e a
+    // SILHUETA: girando de lado, a letra encurta na horizontal.
+    final motor = Motor3DNativo.instance;
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    final controller = container.read(editorControllerProvider.notifier);
+    controller.openProject(VideoProject.empty('giro do texto 3d'));
+    final noId = await controller.addTexto3D(
+      Duration.zero,
+      'AUREA',
+      EstiloDoTexto3D.ouro,
+    );
+    expect(noId, isNotNull, reason: 'o botao nao montou o texto');
+    final projeto = container.read(editorControllerProvider);
+    final cena = projeto.layers.whereType<Scene3DLayer>().single;
+
+    Future<Medida> comGiro(double grausY) async {
+      final camada = cena.copyLayer(rotationY: AnimatedDouble(grausY));
+      final estado = estado3DDoQuadro(
+        project: projeto,
+        l: camada,
+        local: Duration.zero,
+        global: Duration.zero,
+        largura: 512,
+        altura: 512,
+      );
+      motor.montar(
+        cena: estado.cena,
+        camera: estado.camera,
+        local: Duration.zero,
+        largura: 512,
+        altura: 512,
+        aspectoDaComposicao: 1,
+        sombra: 0,
+        amostras: 1,
+      );
+      final imagem = await motor.quadroEsperando('giro$grausY');
+      expect(imagem, isNotNull, reason: 'o motor nao devolveu imagem');
+      final numeros = motor.numeros;
+      // ignore: avoid_print
+      print('  GIRO $grausY: triangulos=${numeros.triangulos} '
+          'desenhadas=${numeros.desenhadas}');
+      await _salvar(imagem!, 'aurea_giro_${grausY.toInt()}.png');
+      return _medir(imagem, (0, 0, 0));
+    }
+
+    final deFrente = await comGiro(0);
+    final deLado = await comGiro(-64.1);
+    // ignore: avoid_print
+    print('TEXTO 3D DE FRENTE: $deFrente');
+    // ignore: avoid_print
+    print('TEXTO 3D GIRADO -64 EM Y: $deLado');
+    motor.limpar();
+
+    expect(deFrente.cobertura, greaterThan(0.005), reason: 'nao desenhou');
+    // A SILHUETA MUDOU — e esse o defeito que o dono viu: antes, os dois
+    // numeros eram identicos, porque o motor nunca via o giro.
+    expect(
+      deLado.largura,
+      lessThan(deFrente.largura * 0.85),
+      reason: 'o dial girou a imagem, mas nao o objeto',
+    );
+    // E nao e so uma imagem esticada: a ALTURA fica — quem encurta na
+    // horizontal e a letra vista de lado.
+    expect(deLado.altura, greaterThan(deFrente.altura * 0.6));
   });
 }

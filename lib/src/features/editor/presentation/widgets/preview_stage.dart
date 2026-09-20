@@ -2986,11 +2986,17 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
         sx *= ratio;
         sy *= ratio;
       } else if (layer.is3D &&
+          layer is! Scene3DLayer &&
           layer is! CameraLayer &&
           rig?[layer.id] == null) {
         // CAMADA 3D SEM PAI tambem ve a camera da composicao. So o
         // caminho do pai passava por ela: mover a camera nao mexia na
         // camada solta, e a moldura de selecao ficava em outro lugar.
+        //
+        // A CAMADA DE CENA FICA DE FORA: projetar a IMAGEM dela pela
+        // camera da composicao e outro cartao inclinado. Quem projeta a
+        // cena e o motor, com a camera DO MOTOR (`estado3DDoQuadro`), e
+        // a camada da composicao so poe a imagem no lugar.
         final cam = cameraAtivaEm(project, t);
         if (cam != null) {
           final vista = vistoPelaCamera(
@@ -3267,6 +3273,12 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
 
     // Rotacao 3D (eixos X/Y) — inclui o delta herdado do pai 3D.
     // Particulas NAO entram aqui: a rotacao delas e 3D real no painter.
+    //
+    // A CAMADA DE CENA TAMBEM NAO. Ela nao e um retangulo com profundidade
+    // pintada: e a imagem de uma cena de verdade, e inclinar essa imagem
+    // produzia o "3D de mentira" do texto extrudado — girava e a letra
+    // continuava chapada. O giro dela vira ORBITA da camera DO MOTOR
+    // (`estado3DDoQuadro`), que desenha o objeto de lado de verdade.
     final rx = (layer.rotationX.valueAt(local) + extraRotX) * math.pi / 180;
     final ry = (layer.rotationY.valueAt(local) + extraRotY) * math.pi / 180;
     // A ORIENTACAO tambem inclina: sem entrar aqui, uma camada so
@@ -3275,7 +3287,9 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
     final oy = layer.orientY.valueAt(local) * math.pi / 180;
     final oz = layer.orientZ.valueAt(local) * math.pi / 180;
     final tilt3D =
-        (rx != 0 || ry != 0 || ox != 0 || oy != 0 || oz != 0) && !isParticles;
+        (rx != 0 || ry != 0 || ox != 0 || oy != 0 || oz != 0) &&
+        !isParticles &&
+        layer is! Scene3DLayer;
 
     // ORDEM CONSISTENTE (triagem 3D §5 itens 7/11): o vetor recebe
     // S -> Skew -> Rx -> Ry -> Rz — a MESMA ordem da matematica de
@@ -3319,12 +3333,15 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
       if (pivotZ != 0) pm.translateByDouble(0, 0, -pivotZ, 1);
       // EXTRUDE 3D: fatias da camada empilhadas em Z atras da frente,
       // escurecidas — a espessura aparece quando a camada inclina. Video
-      // e particulas ficam de fora (textura e simulacao nao se repetem).
+      // e particulas ficam de fora (textura e simulacao nao se repetem), e
+      // a cena tambem: quem tem volume ali e o objeto do motor, e nao um
+      // empilhamento da imagem pronta.
       final extrude = project.metaOf(layer.id).extrude;
       if (extrude > 0.5 &&
           layer is! VideoLayer &&
           layer is! ParticulasLayer &&
-          layer is! Element3DLayer) {
+          layer is! Element3DLayer &&
+          layer is! Scene3DLayer) {
         // Uma FOTO da camada, desenhada N vezes recuando em Z num canvas
         // so (sem camadas do compositor — ver ExtrudeSnapshotPainter).
         // Fatias a ~1,5 px na tela: quanto mais de lado a camada esta,
@@ -7166,7 +7183,19 @@ Estado3DDoQuadro estado3DDoQuadro({
   // nao ha nulo da composicao para resolver — e ali a camera autoral
   // ainda e a que manda: a padrao do projeto fica a 800 unidades do
   // alvo, e a padrao do motor a 5, o que poria a camera DENTRO da cena.
-  final camera = cameraDaCena(project, l, local, global) ?? l.cameraAt(local);
+  final base = cameraDaCena(project, l, local, global) ?? l.cameraAt(local);
+  // O GIRO DA PROPRIA CAMADA VIRA GIRO DA CENA, e nao um cartao inclinado.
+  // A camada de cena nao e um retangulo com profundidade pintada: e uma
+  // janela para a cena. Girar em X/Y a imagem ja desenhada e o "3D de
+  // mentira" que o dono relatou — o texto extrudado ficava chapado. Aqui
+  // os dois angulos orbitam a camera em volta do alvo, e o objeto aparece
+  // de lado de verdade. E o MESMO caminho que o nulo da composicao ja usa
+  // (`cameraDaCena`); o que faltava era o giro da propria camada entrar nele.
+  final camera = orbitarCamera(
+    base,
+    -l.rotationX.valueAt(local),
+    -l.rotationY.valueAt(local),
+  );
   return Estado3DDoQuadro(
     cena: cena,
     camera: camera,

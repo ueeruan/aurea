@@ -1329,6 +1329,40 @@ RenderCamera applyParentToCamera(RenderCamera cam, NodeTransform pai) {
   );
 }
 
+/// ORBITA A CAMERA EM VOLTA DO PONTO QUE ELA OLHA.
+///
+/// Girar a camada de cena em X/Y NAO e inclinar o desenho: e andar em
+/// volta do assunto. Inclinar a imagem pronta e o "3D de mentira" — o
+/// texto extrudado continua chapado, so esticado em perspectiva. Orbitando,
+/// o objeto aparece de lado DE VERDADE, com a extrusao, e o metal corre na
+/// superficie como num giro de mesa.
+///
+/// A ORBITA E EM VOLTA DO ALVO, e nao da origem da cena: o enquadramento
+/// fica onde o dono deixou e o objeto nao escorrega para fora do quadro.
+///
+/// Os angulos chegam em GRAUS da composicao (Y para baixo, Z afastando).
+/// A cena e Y para cima: as duas sao uma meia-volta em X, entao girar +64
+/// em Y na camada e orbitar -64 em Y aqui — e o lado que aparece e o mesmo
+/// que o cartao mostrava antes.
+RenderCamera orbitarCamera(RenderCamera cam, double grausX, double grausY) {
+  if (grausX == 0 && grausY == 0) return cam;
+  final rx = grausX * math.pi / 180;
+  final ry = grausY * math.pi / 180;
+  final alvo = cam.target;
+  Vec3 gira(Vec3 p) => alvo + _rotate(p - alvo, rx, ry, 0);
+  return RenderCamera(
+    position: gira(cam.position),
+    target: alvo,
+    up: _rotate(cam.up, rx, ry, 0),
+    focalLength: cam.focalLength,
+    filmWidth: cam.filmWidth,
+    orthographic: cam.orthographic,
+    orthoScale: cam.orthoScale,
+    near: cam.near,
+    far: cam.far,
+  );
+}
+
 class _RasterVertex {
   const _RasterVertex(this.position, this.uv, this.color);
   final Vec3 position;

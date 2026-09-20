@@ -3,6 +3,8 @@ import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
 
+import 'package:archive/archive.dart';
+
 import '../domain/limites_de_importacao.dart';
 import '../domain/malha_importada.dart';
 import '../domain/model_asset3d.dart';
@@ -17,6 +19,83 @@ Future<ModelAsset3D> readModel3DFiles(
   List<String> paths, {
   bool permitirModeloGrande = false,
 }) => Isolate.run(() async {
+  // UM .ZIP E UMA PASTA: o modelo e as texturas dele juntos. Sozinho, um OBJ
+  // ou FBX costuma chegar sem textura — elas moram em arquivos ao lado, e o
+  // seletor do celular deixa escolher um arquivo so. Com o pacote, o que o
+  // autor mandou chega inteiro.
+  final pastas = <Directory>[];
+  final abertos = <String>[];
+  try {
+    for (final caminho in paths) {
+      if (caminho.toLowerCase().endsWith('.zip')) {
+        final pasta = Directory.systemTemp.createTempSync('aurea_modelo_zip_');
+        pastas.add(pasta);
+        abertos.addAll(_abrirZip(caminho, pasta));
+      } else {
+        abertos.add(caminho);
+      }
+    }
+    if (abertos.isEmpty) {
+      modelFail('O .zip nao tem nenhum modelo (GLB, glTF, OBJ ou FBX).');
+    }
+    return await _lerEOtimizar(abertos, permitirModeloGrande);
+  } finally {
+    // O modelo lido ja carrega as texturas por dentro (data: URI): a pasta
+    // temporaria pode ir embora.
+    for (final pasta in pastas) {
+      try {
+        pasta.deleteSync(recursive: true);
+      } catch (_) {}
+    }
+  }
+});
+
+/// DESEMPACOTA SO O QUE SERVE, em UMA pasta plana.
+///
+/// PLANA DE PROPOSITO: o `.mtl` e o FBX procuram a textura pelo NOME do
+/// arquivo, e os pacotes da internet trazem `textures/`, `source/` e pastas
+/// com o nome do autor. Achatar faz `map_Kd textures/pedra.png` encontrar
+/// `pedra.png` sem depender de como o autor arrumou o zip.
+///
+/// O CAMINHO DE DENTRO DO ZIP NUNCA VIRA CAMINHO DE DISCO: so o nome final
+/// e usado, entao um `../../` malicioso nao escreve fora da pasta.
+List<String> _abrirZip(String caminho, Directory pasta) {
+  const modelos = {'glb', 'gltf', 'obj', 'fbx'};
+  const apoio = {'bin', 'mtl', 'png', 'jpg', 'jpeg', 'webp', 'bmp', 'tga'};
+  final arquivo = ZipDecoder().decodeBytes(File(caminho).readAsBytesSync());
+  final saida = <String>[];
+  var total = 0;
+  for (final f in arquivo.files) {
+    if (!f.isFile) continue;
+    final nome = f.name.replaceAll(r'\', '/').split('/').last;
+    if (nome.isEmpty || nome.startsWith('.')) continue;
+    final ponto = nome.lastIndexOf('.');
+    final ext = ponto < 0 ? '' : nome.substring(ponto + 1).toLowerCase();
+    if (!modelos.contains(ext) && !apoio.contains(ext)) continue;
+    total += f.size;
+    // 1 GB desempacotado: um zip-bomba nao enche o disco do aparelho.
+    if (total > 1024 * 1024 * 1024) {
+      modelFail('O .zip e grande demais depois de aberto.');
+    }
+    final destino = File('${pasta.path}/$nome');
+    destino.writeAsBytesSync(f.content as List<int>);
+    saida.add(destino.path);
+  }
+  // O MODELO VAI NA FRENTE: e o primeiro caminho que decide o formato.
+  int peso(String p) {
+    final e = p.substring(p.lastIndexOf('.') + 1).toLowerCase();
+    return modelos.contains(e) ? 0 : 1;
+  }
+
+  saida.sort((a, b) => peso(a).compareTo(peso(b)));
+  if (saida.isEmpty || peso(saida.first) != 0) return const [];
+  return saida;
+}
+
+Future<ModelAsset3D> _lerEOtimizar(
+  List<String> paths,
+  bool permitirModeloGrande,
+) async {
   final asset = await _read(paths, conferirLimites: !permitirModeloGrande);
   // O MODELO LIDO ANTES DE CUSTAR MAIS: as contagens reais (o FBX so
   // se conhece depois de lido) e as texturas pelo cabecalho, antes do
@@ -26,7 +105,7 @@ Future<ModelAsset3D> readModel3DFiles(
   // no isolate da importacao, uma vez so (ver malha_importada.dart).
   otimizarMalhasImportadas(asset.data);
   return asset;
-});
+}
 
 /// Malha e texturas do modelo ja lido, contra [limitesDeImportacao].
 void conferirModeloLido(Map<String, dynamic> data) {

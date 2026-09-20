@@ -113,10 +113,10 @@ class _ModelImportButtonState extends ConsumerState<ModelImportButton> {
               )
             : const Icon(Icons.file_open),
         label: AppText(
-          busy ? 'Importando modelo...' : 'Importar GLB / glTF / OBJ / FBX',
+          busy ? 'Importando modelo...' : 'Importar GLB / glTF / OBJ / FBX / ZIP',
         ),
       ),
-      const AppText('Selecione o modelo e, se necessario, .bin, .mtl e texturas juntos.',
+      const AppText('Selecione o modelo com .bin, .mtl e texturas — ou um .zip com tudo dentro.',
         style: TextStyle(fontSize: 11),
       ),
       if (status != null)

@@ -2687,6 +2687,88 @@ class EditorController extends Notifier<VideoProject> {
     return base.copyWith(posZ: AnimatedDouble(distancia));
   }
 
+  /// A MALHA DE UM TEXTO 3D, a partir dos parametros.
+  ///
+  /// E O UNICO LUGAR QUE CONSTRoi geometria de texto: o botao "Texto 3D" e
+  /// a folha que edita um texto ja criado passam os dois por aqui, entao
+  /// mudar a espessura depois da exatamente a mesma malha que criar do
+  /// zero com aquela espessura.
+  ///
+  /// A FONTE IMPORTADA AUSENTE NAO DEIXA O TEXTO SEM GEOMETRIA: quem chama
+  /// refaz com a fonte empacotada. Aqui, uma fonte que nao abre devolve
+  /// nulo — e nao um texto vazio.
+  Future<ModelAsset3D?> _modeloDoTexto3D(
+    Texto3D texto3D,
+    EstiloDoTexto3D estilo,
+  ) async {
+    try {
+      final bytes = await FontService.instance.bytesDaFonte(texto3D.familia);
+      if (bytes == null) return null;
+      final fonte = FonteTrueType.ler(bytes);
+      // UM NO POR LETRA: mesma geometria de sempre, mas com esqueleto —
+      // e o que deixa os presets de animacao do texto normal valerem
+      // letra a letra na malha extrudada.
+      return modeloDoTexto3DPorLetra(
+        disporTexto3D(texto3D, fonte),
+        texto3D,
+        fonte.unidadesPorEm,
+        texto3D.texto,
+        estilo,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// MUDA UM TEXTO 3D JA CRIADO: o texto, a fonte, a espessura, o chanfro,
+  /// o metal. A camada, a posicao, os keyframes e a camera ficam como
+  /// estavam — so a GEOMETRIA e o material do no mudam.
+  ///
+  /// Devolve falso quando a fonte nao abre; a camada fica com o texto
+  /// anterior em vez de ficar vazia.
+  Future<bool> editarTexto3D(
+    String sceneId,
+    String nodeId,
+    Texto3D texto3d,
+    EstiloDoTexto3D estilo,
+  ) async {
+    final limpo = texto3d.texto.trim();
+    if (limpo.isEmpty) return false;
+    var params = texto3d.copyWith(texto: limpo);
+    var modelo = await _modeloDoTexto3D(params, estilo);
+    if (modelo == null && params.familia != 'Aurea Motion Sans') {
+      params = params.copyWith(familia: 'Aurea Motion Sans');
+      modelo = await _modeloDoTexto3D(params, estilo);
+    }
+    if (modelo == null) return false;
+    final camada = _layer(sceneId);
+    if (camada is! Scene3DLayer) return false;
+    final no = camada.scene.nodeById(nodeId);
+    if (no == null) return false;
+    final novo = modelo;
+    final novos = params;
+    runAsOneUndo(() {
+      _replace(
+        camada.withScene(
+          camada.scene.copyWith(
+            nodes: [
+              for (final n in camada.scene.nodes)
+                n.id == nodeId
+                    ? n.copyWith(
+                        name: novo.name,
+                        modelAsset: novo,
+                        texto3d: novos,
+                        estiloTexto3d: estilo,
+                      )
+                    : n,
+            ],
+          ),
+        ),
+      );
+    });
+    return true;
+  }
+
   /// TEXTO 3D ESTILO ELEMENT 3D: letras extrudadas com chanfro, em metal,
   /// dentro da cena 3D (criada se nao houver) e filhas de um nulo da cena —
   /// girar, mover e animar o nulo leva o texto junto. Metal so parece metal
@@ -2703,36 +2785,13 @@ class EditorController extends Notifier<VideoProject> {
     var params = familia == null
         ? Texto3D(texto: limpo)
         : Texto3D(texto: limpo, familia: familia);
-    ModelAsset3D modelo;
-    Future<ModelAsset3D?> montar(Texto3D texto3D) async {
-      try {
-        final bytes = await FontService.instance.bytesDaFonte(texto3D.familia);
-        if (bytes == null) return null;
-        final fonte = FonteTrueType.ler(bytes);
-        // UM NO POR LETRA: mesma geometria de sempre, mas com esqueleto —
-        // e o que deixa os presets de animacao do texto normal valerem
-        // letra a letra na malha extrudada.
-        return modeloDoTexto3DPorLetra(
-          disporTexto3D(texto3D, fonte),
-          texto3D,
-          fonte.unidadesPorEm,
-          limpo,
-          estilo,
-        );
-      } catch (_) {
-        return null;
-      }
-    }
-
-    // Fonte importada ausente/corrompida nao pode tornar o botao inerte:
-    // refaz com a fonte empacotada, que viaja no mesmo AssetManifest.
-    var pronto = await montar(params);
+    var pronto = await _modeloDoTexto3D(params, estilo);
     if (pronto == null && params.familia != 'Aurea Motion Sans') {
       params = params.copyWith(familia: 'Aurea Motion Sans');
-      pronto = await montar(params);
+      pronto = await _modeloDoTexto3D(params, estilo);
     }
     if (pronto == null) return null;
-    modelo = pronto;
+    final modelo = pronto;
     if (modelo.triangleCount == 0) return null;
     // UMA CAMADA SO NA TIMELINE. O texto continua sendo desenhado pelo
     // motor 3D nativo, mas nao fica pendurado numa "Scene 3D" generica e
@@ -2740,7 +2799,13 @@ class EditorController extends Notifier<VideoProject> {
     // contaminar camera, escala ou orientacao do texto novo.
     // Uma leve perspectiva inicial deixa a extrusao imediatamente visivel;
     // de frente, qualquer texto extrudado parece apenas texto 2D.
-    final node = _nodeDoModelo(modelo, rotXInicial: -8, rotYInicial: 15);
+    final node = _nodeDoModelo(
+      modelo,
+      rotXInicial: -8,
+      rotYInicial: 15,
+      texto3d: params,
+      estiloTexto3d: estilo,
+    );
     _push(
       Scene3DLayer(
         name: 'Texto 3D · $limpo',
@@ -2965,6 +3030,8 @@ class EditorController extends Notifier<VideoProject> {
     bool orientarParaCamera = false,
     double rotXInicial = 0,
     double rotYInicial = 0,
+    Texto3D? texto3d,
+    EstiloDoTexto3D? estiloTexto3d,
   }) {
     var rotX = rotXInicial;
     var rotY = rotYInicial;
@@ -2991,6 +3058,8 @@ class EditorController extends Notifier<VideoProject> {
       rotX: AnimatedDouble(rotX),
       rotY: AnimatedDouble(rotY),
       modelAsset: model,
+      texto3d: texto3d,
+      estiloTexto3d: estiloTexto3d,
       modelSource: ModelSource3D(
         path: '',
         triangles: model.triangleCount,

@@ -65,6 +65,124 @@ class TextureCache with WidgetsBindingObserver {
     return _images.containsKey(path);
   }
 
+  // ==================== OS MESMOS PIXELS, EM BYTES =====================
+  //
+  // O MOTOR NAO ACEITA `ui.Image`: a porta do 3D quer RGBA8 cru para copiar
+  // para a placa. E `toByteData` e ASSINCRONO, enquanto quem monta a malha
+  // (`malhasCruas3DDe`) e sincrono, no meio da construcao do quadro.
+  //
+  // ENTAO O CAMINHO E O MESMO DO PINTOR: quem pede recebe o que ja esta
+  // aqui, ou nulo; o nulo dispara a leitura, e quando ela termina o
+  // [revision] muda e o palco remonta a malha — agora com o mapa. O modelo
+  // aparece sem textura por um quadro e vestido no seguinte, que e o que o
+  // dono ja ve para a textura de cor no pintor.
+  //
+  // O TETO E SEPARADO do [maxBytes] das imagens porque o que mora aqui e
+  // outra coisa: um mapa de 1024 sao 4 MB, e sao os cinco mapas de cada
+  // material do modelo. Sem teto, importar tres modelos texturizados numa
+  // sessao segurava meio giga de RGBA que ninguem mais desenhava.
+  final _rgba = <String, Uint8List>{};
+  final _tamanhos = <String, (int, int)>{};
+  static const int maxBytesRgba = 96 * 1024 * 1024;
+  int _bytesRgba = 0;
+  final Map<String, Future<void>> _pendingRgba = {};
+  int get rgbaBytes => _bytesRgba;
+
+  /// OS PIXELS DE [path] EM RGBA8, ou nulo enquanto eles nao chegam.
+  ///
+  /// Devolve `(pixels, largura, altura)`. Nulo NAO e erro: e "ainda nao" —
+  /// a leitura foi disparada e [revision] avisa quando terminar.
+  (Uint8List, int, int)? rgbaFor(String path) {
+    if (path.isEmpty) return null;
+    final pronto = _rgba.remove(path);
+    if (pronto != null) {
+      // REINSERIR PARA O FIM: o mapa e a fila do descarte, e o que se usa
+      // agora nao pode ser o primeiro a sair.
+      _rgba[path] = pronto;
+      final tamanho = _tamanhos[path]!;
+      return (pronto, tamanho.$1, tamanho.$2);
+    }
+    if (!_failed.contains(path)) unawaited(_loadRgbaOnce(path));
+    return null;
+  }
+
+  /// Decodifica [path] para RGBA8 e so conclui quando ele pode ser usado
+  /// pelo motor. Chamadas concorrentes dividem a mesma leitura.
+  Future<bool> prepareRgba(String path) async {
+    if (path.isEmpty) return false;
+    if (_rgba.containsKey(path)) return true;
+    if (_failed.contains(path)) return false;
+    await _loadRgbaOnce(path);
+    return _rgba.containsKey(path);
+  }
+
+  Future<void> _loadRgbaOnce(String path) {
+    final running = _pendingRgba[path];
+    if (running != null) return running;
+    final generation = _generation;
+    final future = _queue.then((_) => _loadRgba(path, generation));
+    _queue = future;
+    _pendingRgba[path] = future;
+    return future.whenComplete(() {
+      if (identical(_pendingRgba[path], future)) _pendingRgba.remove(path);
+    });
+  }
+
+  Future<void> _loadRgba(String path, int generation) async {
+    if (generation != _generation || _rgba.containsKey(path)) return;
+    try {
+      // A IMAGEM JA DECODIFICADA E REAPROVEITADA. Quando o pintor de CPU ja
+      // pediu este mesmo caminho, o PNG nao e decodificado duas vezes: sai
+      // do `ui.Image` que esta aqui, que ja veio limitado a 1024.
+      final pronta = _images[path];
+      var imagem = pronta;
+      if (imagem == null) {
+        await _load(path, generation);
+        if (generation != _generation) return;
+        imagem = _images[path];
+        // A IMAGEM PODE TER SIDO DESCARTADA pelo teto do cache entre o
+        // `_load` e esta linha. Sem esta conferencia, `toByteData` de uma
+        // imagem ja liberada estoura dentro do motor de render.
+        if (imagem == null) {
+          if (_failed.length >= 128) _failed.remove(_failed.first);
+          _failed.add(path);
+          return;
+        }
+      }
+      final dados = await imagem.toByteData(
+        format: ui.ImageByteFormat.rawRgba,
+      );
+      if (dados == null || generation != _generation) return;
+      putRgba(
+        path,
+        dados.buffer.asUint8List(),
+        imagem.width,
+        imagem.height,
+      );
+    } catch (_) {
+      if (generation == _generation) {
+        if (_failed.length >= 128) _failed.remove(_failed.first);
+        _failed.add(path);
+      }
+    }
+  }
+
+  /// Guarda pixels prontos. Para testes e para quem ja decodificou.
+  void putRgba(String path, Uint8List pixels, int largura, int altura) {
+    final anterior = _rgba.remove(path);
+    if (anterior != null) _bytesRgba -= anterior.length;
+    _rgba[path] = pixels;
+    _tamanhos[path] = (largura, altura);
+    _bytesRgba += pixels.length;
+    while (_bytesRgba > maxBytesRgba && _rgba.length > 1) {
+      final velho = _rgba.keys.first;
+      _bytesRgba -= _rgba.remove(velho)!.length;
+      _tamanhos.remove(velho);
+    }
+    _failed.remove(path);
+    revision.value++;
+  }
+
   /// Para testes e para trocar a imagem de um caminho reaproveitado.
   void put(String path, ui.Image image) {
     final previous = _images.remove(path);
@@ -136,11 +254,15 @@ class TextureCache with WidgetsBindingObserver {
   void clear() {
     _generation++;
     _pending.clear();
+    _pendingRgba.clear();
     for (final img in _images.values) {
       img.dispose();
     }
     _images.clear();
     _bytes = 0;
+    _rgba.clear();
+    _tamanhos.clear();
+    _bytesRgba = 0;
     _failed.clear();
   }
 

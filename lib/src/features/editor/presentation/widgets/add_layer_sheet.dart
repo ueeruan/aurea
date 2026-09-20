@@ -8,6 +8,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/cupertino.dart';
 
 import '../../domain/modelo_do_texto3d.dart';
+import '../am/texto3d_sheet.dart';
 
 import 'package:flutter/material.dart';
 
@@ -1296,9 +1297,30 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
       estilo,
       familia: familia,
     );
-    if (no == null && raiz.mounted) {
-      AureaSnack.show(raiz, 'Não consegui criar o texto 3D com essa fonte.');
+    if (no == null) {
+      if (raiz.mounted) {
+        AureaSnack.show(raiz, 'Não consegui criar o texto 3D com essa fonte.');
+      }
+      return;
     }
+    if (!raiz.mounted) return;
+    // A FOLHA DO TEXTO 3D ABRE EM CIMA DO QUE ACABOU DE NASCER: e onde o
+    // dono ve a letra e muda o metal, a espessura e o chanfro com a previa
+    // ao vivo. Antes, criar um texto 3D era responder tres perguntas e
+    // ficar com o que saiu.
+    final projeto = ref.read(editorControllerProvider);
+    final camada = projeto.layers
+        .whereType<Scene3DLayer>()
+        .where((l) => l.scene.nodeById(no) != null)
+        .firstOrNull;
+    if (camada == null) return;
+    await showTexto3DSheet(
+      raiz,
+      ref,
+      sceneId: camada.id,
+      nodeId: no,
+      playhead: playhead,
+    );
   }
 
   Future<void> _importarModelo3D() async {

@@ -10,7 +10,9 @@ import 'package:uuid/uuid.dart';
 import 'element3d.dart';
 import 'keyframe.dart';
 import 'model_asset3d.dart';
+import 'modelo_do_texto3d.dart';
 import 'panorama3d.dart';
+import 'texto3d.dart';
 
 /// CENA 3D (spec AUREA-cena-3d): um CONTEINER que, por fora, e UMA
 /// camada do compositor e, por dentro, tem seu proprio renderizador.
@@ -39,6 +41,11 @@ class Material3D {
     this.textureLayerId,
     this.reflectivity = 0.0,
     this.imagePath,
+    this.normalPath,
+    this.metalRoughPath,
+    this.emissivePath,
+    this.occlusionPath,
+    this.emissiveColor,
     this.faceImagePaths = const {},
     this.normalStrength = 1,
     this.occlusionStrength = 1,
@@ -66,6 +73,28 @@ class Material3D {
   /// IMAGEM NA SUPERFICIE: um arquivo vestindo o objeto, projetado por
   /// caixa (cada face recebe a imagem pelo eixo que ela mais encara).
   final String? imagePath;
+
+  /// OS OUTROS QUATRO MAPAS DO PBR, no mesmo formato de [imagePath]: um
+  /// caminho de arquivo ou um `data:` URI, resolvido pelo `TextureCache`.
+  ///
+  /// POR QUE QUATRO CAMPOS E NAO UM MAPA DE NOMES. Cada um deles tem um
+  /// SIGNIFICADO fixo no shader — o verde do [metalRoughPath] e a
+  /// rugosidade, o vermelho do [occlusionPath] e a oclusao — e um mapa de
+  /// strings deixaria isso combinado por convencao em vez de pelo tipo.
+  /// Quem le o codigo aqui ve quais mapas existem sem abrir o shader.
+  ///
+  /// O PINTOR DE CPU IGNORA OS QUATRO, e isso e proposital: ele nao tem
+  /// base tangente e nem passada de reflexo. Eles valem no motor, e o
+  /// cracha GPU/CPU da ficha ja diz ao dono qual dos dois esta desenhando.
+  final String? normalPath;
+  final String? metalRoughPath;
+  final String? emissivePath;
+  final String? occlusionPath;
+
+  /// A COR DO BRILHO PROPRIO, quando o arquivo traz uma. Nulo quer dizer
+  /// "use a cor base", que e como o aplicativo sempre se comportou para os
+  /// materiais montados no painel.
+  final Color? emissiveColor;
 
   /// Textura opcional por indice de face; a imagem geral continua sendo o
   /// fallback. Isso cobre embalagem/tela sem multiplicar objetos.
@@ -99,6 +128,11 @@ class Material3D {
     String? textureLayerId,
     double? reflectivity,
     String? imagePath,
+    String? normalPath,
+    String? metalRoughPath,
+    String? emissivePath,
+    String? occlusionPath,
+    Color? emissiveColor,
     Map<int, String>? faceImagePaths,
     double? normalStrength,
     double? occlusionStrength,
@@ -122,6 +156,11 @@ class Material3D {
         : (textureLayerId ?? this.textureLayerId),
     reflectivity: reflectivity ?? this.reflectivity,
     imagePath: clearImage ? null : (imagePath ?? this.imagePath),
+    normalPath: clearImage ? null : (normalPath ?? this.normalPath),
+    metalRoughPath: clearImage ? null : (metalRoughPath ?? this.metalRoughPath),
+    emissivePath: clearImage ? null : (emissivePath ?? this.emissivePath),
+    occlusionPath: clearImage ? null : (occlusionPath ?? this.occlusionPath),
+    emissiveColor: emissiveColor ?? this.emissiveColor,
     faceImagePaths: faceImagePaths ?? this.faceImagePaths,
     normalStrength: normalStrength ?? this.normalStrength,
     occlusionStrength: occlusionStrength ?? this.occlusionStrength,
@@ -426,6 +465,8 @@ class SceneNode {
     this.modelMotion = const ModelMotion3D(),
     this.useModelMaterials = true,
     this.compParentLayerId,
+    this.texto3d,
+    this.estiloTexto3d,
   }) : id = id ?? const Uuid().v4(),
        x = x ?? AnimatedDouble(0),
        y = y ?? AnimatedDouble(0),
@@ -467,6 +508,8 @@ class SceneNode {
     modelAsset: modelAsset,
     modelMotion: modelMotion,
     useModelMaterials: useModelMaterials,
+    texto3d: texto3d,
+    estiloTexto3d: estiloTexto3d,
   );
 
   final String id;
@@ -517,6 +560,18 @@ class SceneNode {
   final ModelMotion3D modelMotion;
   final bool useModelMaterials;
 
+  /// OS PARAMETROS DE UM TEXTO 3D, quando este no e um.
+  ///
+  /// A geometria de um texto 3D mora no [modelAsset], que e uma MALHA ja
+  /// construida — dela nao se tira de volta o texto, a fonte, a espessura
+  /// nem o chanfro. Sem estes parametros, reabrir o texto para mudar uma
+  /// palavra exigiria jogar a camada fora e refazer, e o que o dono tinha
+  /// ajustado (a posicao, o giro, os keyframes) iria junto.
+  final Texto3D? texto3d;
+
+  /// O METAL escolhido para este texto (frente, chanfro e lateral).
+  final EstiloDoTexto3D? estiloTexto3d;
+
   /// PAI NA COMPOSICAO: um nulo da linha do tempo (camada) que este no
   /// segue — o "linkavel a nulo 3D" do Element 3D. O compositor resolve o
   /// transform do nulo e compoe por fora do no (ver preview_stage,
@@ -560,6 +615,8 @@ class SceneNode {
     bool? useModelMaterials,
     String? compParentLayerId,
     bool clearCompParent = false,
+    Texto3D? texto3d,
+    EstiloDoTexto3D? estiloTexto3d,
   }) => SceneNode(
     id: id,
     name: name ?? this.name,
@@ -594,6 +651,8 @@ class SceneNode {
     modelAsset: modelAsset ?? this.modelAsset,
     modelMotion: modelMotion ?? this.modelMotion,
     useModelMaterials: useModelMaterials ?? this.useModelMaterials,
+    texto3d: texto3d ?? this.texto3d,
+    estiloTexto3d: estiloTexto3d ?? this.estiloTexto3d,
     compParentLayerId: clearCompParent
         ? null
         : (compParentLayerId ?? this.compParentLayerId),

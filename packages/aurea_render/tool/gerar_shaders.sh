@@ -105,7 +105,7 @@ compilar sombra.frag        "$TMP/sombra_frag.spv"
 conferir_nomes "$TMP/pbr_vert.spv"      Quadro Desenho Ossos
 conferir_nomes "$TMP/pbr_vert_pele.spv" Quadro Desenho Ossos
 conferir_nomes "$TMP/pbr_frag.spv"      Quadro Luzes Desenho \
-  tex_cor tex_normal tex_metalico_rugosidade tex_emissiva tex_oclusao tex_sombra
+  tex_cor tex_normal tex_metalico_rugosidade tex_emissiva tex_oclusao tex_sombra \n  tex_ambiente
 conferir_nomes "$TMP/sombra_vert.spv"      Quadro Desenho
 conferir_nomes "$TMP/sombra_vert_pele.spv" Quadro Desenho Ossos
 conferir_nomes "$TMP/sombra_frag.spv"  profundidade

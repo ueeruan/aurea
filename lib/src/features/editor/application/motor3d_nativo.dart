@@ -7,10 +7,13 @@ import 'dart:ui' as ui;
 import 'package:aurea_render/aurea_render.dart';
 import 'package:flutter/foundation.dart';
 
+import '../domain/environment_radiance.dart';
+import '../domain/element3d.dart' show EnvironmentKind;
 import '../domain/model_asset3d.dart';
 import '../domain/scene3d.dart';
 import 'fonte_de_malha.dart';
 import 'motor3d_modo.dart';
+import 'texture_cache.dart';
 import '../domain/orcamento_render.dart';
 
 /// A CENA 3D DESENHADA PELO MOTOR NATIVO (DILIGENT).
@@ -158,6 +161,17 @@ class Motor3DNativo {
   /// trocar a forma, nem o material.
   final CacheDeMalhas _malhas = CacheDeMalhas();
 
+  /// OS ESTUDIOS JA ASSADOS, um por ambiente.
+  ///
+  /// O mapa tem uns 340 KB e assar custa dezenas de milissegundos: guardar
+  /// por tipo de cena faz o estudo ser pago UMA vez, e nao a cada camada 3D
+  /// que o dono cria. O motor copia o mapa para a placa so quando ele troca
+  /// (§ `Ponte3D`), entao passar o mesmo buffer todo quadro nao custa nada.
+  final Map<EnvironmentKind, MapaDeAmbiente3D> _estudios = {};
+
+  MapaDeAmbiente3D _estudioDe(EnvironmentKind kind) =>
+      _estudios.putIfAbsent(kind, () => mapaDeAmbiente3D(kind));
+
   /// A ALCA DO MODELO DESTE NO, ou -1 enquanto ele nao esta pronto.
   ///
   /// UM NO NULO NAO TEM GEOMETRIA, e devolver -1 para ele e o certo: a
@@ -202,6 +216,7 @@ class Motor3DNativo {
         // que o orcamento de GPU usa para estimar a cena.
         lodDaReceita: (n) => lodAutomatico(n, false),
         assinaturaDoMaterial: assinaturaDoMaterial3D,
+        prontidaoDosMapas: prontidaoDosMapasDe,
         fimDaCamada: fimDaCamada,
       );
     } catch (e) {
@@ -370,6 +385,7 @@ class Motor3DNativo {
     _camadas.clear();
     _luzes.clear();
     _malhas.limpar();
+    _estudios.clear();
     for (final imagem in _imagens.values) {
       imagem.dispose();
     }
@@ -423,6 +439,20 @@ class Motor3DNativo {
     _cena.chaoR = chao.r;
     _cena.chaoG = chao.g;
     _cena.chaoB = chao.b;
+
+    // O ESTUDIO QUE O METAL REFLETE. Sem ele, o reflexo sai do ceu e do chao
+    // — duas cores, um gradiente liso — e o ouro fica um bronze fosco. Com
+    // ele, o que a superficie devolve e o que esta NAQUELA direcao: as
+    // softboxes do estudio esticadas pela quina da letra. E a diferenca
+    // entre um metal e um adesivo metalizado.
+    //
+    // O ESTUDIO VEM DO TIPO DA CENA, e nao das duas cores: o ceu e o chao
+    // seguem sendo a luz que vem de cima e de baixo (o que acende o lado
+    // escuro de um modelo), e o mapa e o ambiente que a superficie espelha.
+    final estudio = _estudioDe(cena.environment);
+    _cena.ambienteMapa = estudio.pixels;
+    _cena.ambienteMapaLargura = estudio.largura;
+    _cena.ambienteMapaNiveis = estudio.niveis;
 
     final cam = _cena.camera;
     if (camera != null) {
@@ -877,6 +907,13 @@ List<MalhaCrua3D> malhasCruas3DDe(MalhaDoNo fonte) {
     final semLuz = m.kind == MaterialKind.unlit;
     final transparencia = m.opacity < 0.999 ||
         m.kind == MaterialKind.transparent;
+    // A COR DO BRILHO PROPRIO E A DO ARQUIVO, quando ele traz uma.
+    //
+    // Sem isto, um `emissiveFactor` laranja saia com a cor BASE do material:
+    // um letreiro de neon vermelho sobre plastico branco acendia branco. Sem
+    // cor declarada o comportamento e o de sempre — a cor base —, que e o
+    // que os materiais montados no painel esperam.
+    final corEmissiva = m.emissiveColor ?? m.baseColor;
     saida.add(
       MalhaCrua3D(
         posicoes: posicoes,
@@ -892,16 +929,78 @@ List<MalhaCrua3D> malhasCruas3DDe(MalhaDoNo fonte) {
         // SEM ILUMINACAO E EMISSIVO CHEIO: e o que um material `unlit` quer
         // dizer, e a cor do material ja e a cor final.
         forcaEmissiva: semLuz ? 1.0 : m.emissive.clamp(0.0, 4.0),
-        emissivo: Motor3DNativo._cor(m.baseColor, 255),
+        emissivo: Motor3DNativo._cor(corEmissiva, 255),
         modo: m.kind == MaterialKind.cutout
             ? 1
             : (transparencia ? 2 : 0),
         alfaCorte: m.alphaCutoff.clamp(0.0, 1.0),
         faceDupla: m.doubleSided || m.kind == MaterialKind.cutout,
+        // OS CINCO MAPAS, do cache que o pintor de CPU ja usa. O que ainda
+        // nao foi decodificado volta NULO e a malha sai sem aquele mapa —
+        // e quando a decodificacao termina, a revisao do cache remonta a
+        // malha com ele. Um mapa que nunca chega deixa o material com os
+        // numeros do arquivo, que e degradar e nao quebrar.
+        texturaCor: _mapa(m.imagePath),
+        texturaNormal: _mapa(m.normalPath),
+        texturaMetalicoRugosidade: _mapa(m.metalRoughPath),
+        texturaEmissiva: _mapa(m.emissivePath),
+        texturaOclusao: _mapa(m.occlusionPath),
+        forcaDaOclusao: m.occlusionStrength.clamp(0.0, 1.0),
       ),
     );
   }
   return saida;
+}
+
+/// QUAIS MAPAS DESTE MODELO JA ESTAO EM RGBA8, como uma palavra curta.
+///
+/// Um caractere por mapa de cada material do ARQUIVO: `-` quando o material
+/// nao declara aquele mapa, `0` quando ele foi declarado e ainda nao chegou,
+/// `1` quando esta pronto. Um modelo de tres materiais vira quinze
+/// caracteres — barato de montar e barato de comparar.
+///
+/// E O SINAL DE "REMONTE A MALHA". Enquanto a palavra muda, a malha e
+/// reconstruida e sobe com os mapas que ja existem; quando ela para de
+/// mudar, o cache volta a valer. Sem isso, o modelo que nasceu antes da
+/// decodificacao ficava sem textura para sempre (ver `CacheDeMalhas.doNo`).
+String prontidaoDosMapasDe(ModelAsset3D asset) {
+  final materiais = asset.data['materials'];
+  if (materiais is! List || materiais.isEmpty) return '';
+  final b = StringBuffer();
+  for (final m in materiais) {
+    if (m is! Map) {
+      b.write('-----');
+      continue;
+    }
+    for (final chave in const [
+      'image',
+      'normalImage',
+      'metalRoughImage',
+      'emissiveImage',
+      'occlusionImage',
+    ]) {
+      final caminho = m[chave];
+      if (caminho is! String || caminho.isEmpty) {
+        b.write('-');
+      } else {
+        b.write(TextureCache.instance.rgbaFor(caminho) == null ? '0' : '1');
+      }
+    }
+  }
+  return b.toString();
+}
+
+/// UM MAPA DO MATERIAL EM RGBA8, ou nulo enquanto ele nao foi decodificado.
+///
+/// A MESMA `Uint8List` VOLTA PARA O MESMO CAMINHO, e isso importa: o motor
+/// reconhece o ponteiro repetido e sobe o mapa UMA vez para as varias
+/// malhas que dividem o material. Devolver uma copia por chamada faria um
+/// modelo de vinte pecas guardar vinte copias do mesmo atlas na placa.
+TexturaCrua3D? _mapa(String? caminho) {
+  if (caminho == null || caminho.isEmpty) return null;
+  final pronto = TextureCache.instance.rgbaFor(caminho);
+  if (pronto == null) return null;
+  return TexturaCrua3D(pronto.$1, pronto.$2, pronto.$3);
 }
 
 /// O MAPA DE UM PEDACO: quais vertices aquele material usa, na ordem em
@@ -939,7 +1038,41 @@ String assinaturaDoMaterial3D(Material3D m) => '${m.kind.index}|'
     '${m.emissive}|${m.opacity}|${m.reflectivity}|${m.alphaCutoff}|'
     '${m.doubleSided}|${m.imagePath ?? ''}|'
     '${m.faceImagePaths.entries.map((e) => '${e.key}=${e.value}').join(',')}|'
-    '${m.textureLayerId ?? ''}|${m.normalStrength}|${m.occlusionStrength}';
+    '${m.textureLayerId ?? ''}|${m.normalStrength}|${m.occlusionStrength}|'
+    // OS MAPAS ENTRAM NA ASSINATURA, e nao so na malha.
+    //
+    // A assinatura decide se a geometria que ESTA na placa ainda serve. Um
+    // mapa que chega depois (o caminho normal: a malha nasce sem ele e o
+    // cache o entrega um quadro adiante) nao muda um vertice — mas muda o
+    // DESENHO. Sem estas linhas a chave continuava igual, o motor
+    // devolvia o modelo sem textura para sempre, e o defeito parecia
+    // "o mapa nao carrega" quando ele ja estava decodificado na memoria.
+    '${m.normalPath ?? ''}|${m.metalRoughPath ?? ''}|'
+    '${m.emissivePath ?? ''}|${m.occlusionPath ?? ''}|'
+    '${m.emissiveColor?.toARGB32() ?? 0}|'
+    // O PROPRIO CONTEUDO PRONTO, e nao so o caminho: dois quadros com o
+    // mesmo caminho, um antes e outro depois da decodificacao, tem de dar
+    // chaves diferentes.
+    '${_prontos(m)}';
+
+/// QUANTOS DOS MAPAS DESTE MATERIAL JA ESTAO DECODIFICADOS.
+String _prontos(Material3D m) {
+  final b = StringBuffer();
+  for (final caminho in [
+    m.imagePath,
+    m.normalPath,
+    m.metalRoughPath,
+    m.emissivePath,
+    m.occlusionPath,
+  ]) {
+    b.write(
+      caminho == null || caminho.isEmpty
+          ? '-'
+          : (TextureCache.instance.rgbaFor(caminho) == null ? '0' : '1'),
+    );
+  }
+  return b.toString();
+}
 
 /// A CHAVE DE UM QUADRO DE CENA. Tudo o que muda o desenho entra aqui, e
 /// nada que nao mude: e ela que decide se o motor desenha de novo.
@@ -962,6 +1095,58 @@ String chaveDaCena({
     ..write(amostras)
     ..write('|')
     ..write(local.inMicroseconds);
+  // O AMBIENTE INTEIRO ENTRA AQUI, e nao so o que esta na lista de nos.
+  //
+  // Ele nao esta em nenhum no: e um ajuste da cena, aplicado por cima de
+  // todos os materiais. Sem esta linha, trocar o estudio no painel nao
+  // mudava UM pixel — a chave continuava igual, e o motor devolvia o quadro
+  // guardado dizendo "nada mudou". O sintoma aparecia como um controle
+  // morto, que e pior do que um controle feio.
+  b
+    ..write('|e')
+    ..write(cena.environment.index)
+    ..write(':')
+    ..write(cena.envReflect)
+    ..write(':')
+    ..write(cena.ambient)
+    ..write(':')
+    ..write(cena.skyColor.toARGB32())
+    ..write(':')
+    ..write(cena.groundColor.toARGB32())
+    ..write(':')
+    ..write(cena.tonemap ? 1 : 0)
+    ..write(':')
+    ..write(cena.background?.toARGB32() ?? -1)
+    ..write(':')
+    ..write(cena.showFloorGrid ? 1 : 0)
+    ..write(':')
+    ..write(cena.panorama.sourcePath ?? '')
+    ..write(':')
+    ..write(cena.panorama.preset.index)
+    ..write(':')
+    ..write(cena.panorama.rotationDegrees)
+    ..write(':')
+    ..write(cena.panorama.intensity)
+    ..write(':')
+    ..write(cena.panorama.highlightBoost)
+    ..write(':')
+    ..write(cena.panorama.backgroundBlur)
+    ..write(':')
+    ..write(cena.panorama.showBackground ? 1 : 0)
+    ..write(':')
+    ..write(cena.reflectionProbe.enabled ? 1 : 0)
+    ..write(':')
+    ..write(cena.reflectionProbe.quality.index)
+    ..write(':')
+    ..write(cena.planarFloorReflection ? 1 : 0)
+    ..write(':')
+    ..write(cena.planarFloorRoughness)
+    ..write(':')
+    ..write(cena.fogDensity)
+    ..write(':')
+    ..write(cena.fogStart)
+    ..write(':')
+    ..write(cena.fogColor.toARGB32());
   if (camera != null) {
     b
       ..write('|c')

@@ -38,6 +38,9 @@ enum AmSecao {
   /// Cena 3D e Elemento 3D: objetos, materiais, luzes, cameras e cortes.
   cena3d,
 
+  /// Texto 3D: a letra, a fonte, o metal, a espessura e o chanfro.
+  texto3d,
+
   /// Video: a porta da Cena 3D rastreada (motor 2.0) e os rastreios 2D.
   rastrear,
 
@@ -71,7 +74,15 @@ Set<AmSecao> secoesDe(Layer layer) {
   // junto com o motor, e uma secao que abre uma folha que nao existe e
   // pior do que nao ter secao.
   if (layer is Scene3DLayer) {
-    return const {AmSecao.moverTransformar, AmSecao.efeitos};
+    // A CAMADA DE TEXTO 3D ganha a folha do texto: e por ela que o dono
+    // muda a palavra, a fonte e o metal DEPOIS de criar — antes disso,
+    // "Texto 3D" era um botao que so sabia criar.
+    final temTexto = layer.scene.nodes.any((n) => n.texto3d != null);
+    return {
+      AmSecao.moverTransformar,
+      if (temTexto) AmSecao.texto3d,
+      AmSecao.efeitos,
+    };
   }
   // A CAMERA DA COMPOSICAO: transform (posicao, giro 3D, ponto de
   // interesse pelo proprio palco) e a lente. Cor, borda e mescla nao

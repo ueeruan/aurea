@@ -22,6 +22,7 @@ class MalhaDoNo {
     this.quadroDoModelo,
     this.materialDoNo,
     this.usouMateriaisDoModelo = false,
+    this.prontidaoDosMapas = '',
   });
 
   final Element3DMesh malha;
@@ -42,6 +43,10 @@ class MalhaDoNo {
   final ModelFrame3D? quadroDoModelo;
   final Material3D? materialDoNo;
   final bool usouMateriaisDoModelo;
+
+  /// QUAIS MAPAS DO MODELO JA ESTAVAM DECODIFICADOS quando esta malha foi
+  /// montada. Ver [CacheDeMalhas.doNo] para o porque.
+  final String prontidaoDosMapas;
 }
 
 /// DE ONDE VEM A MALHA DE CADA NO, COM MEMORIA.
@@ -68,6 +73,13 @@ class CacheDeMalhas {
     Duration t, {
     required Element3DMesh? Function(SceneNode node) lodDaReceita,
     required String Function(Material3D m) assinaturaDoMaterial,
+    /// QUAIS MAPAS DESTE MODELO JA ESTAO PRONTOS PARA A PLACA.
+    ///
+    /// Quem responde e o dono do cache de texturas; aqui so se compara a
+    /// resposta com a do quadro anterior. Nulo quer dizer "nao pergunte" —
+    /// e o que o pintor de CPU passa, porque ele le a textura na hora de
+    /// pintar e nao precisa reconstruir nada.
+    String Function(ModelAsset3D asset)? prontidaoDosMapas,
     Duration? fimDaCamada,
   }) {
     final asset = node.modelAsset;
@@ -87,12 +99,32 @@ class CacheDeMalhas {
           () => asset.evaluate(t, motion, fimDaCamada: fimDaCamada),
         ),
       );
+      // OS MAPAS QUE JA CHEGARAM FAZEM PARTE DO ESTADO DESTA MALHA.
+      //
+      // UM MODELO TEXTURIZADO NASCE SEM TEXTURA. As imagens sao decodificadas
+      // fora do fio da interface: no primeiro quadro o material tem o caminho
+      // do mapa e nao tem os pixels, e a malha que sobe para a placa sobe
+      // crua. Quando a decodificacao termina, o modelo NAO muda — o
+      // `ModelFrame3D` e o mesmo objeto, o material do no e o mesmo — e sem
+      // esta linha a comparacao abaixo dizia "nada mudou" e devolvia a malha
+      // sem textura. Para sempre.
+      //
+      // O sintoma era exatamente "importa, aparece, e fica cinza": o mapa
+      // estava decodificado na memoria e nunca voltava a ser oferecido.
+      //
+      // A PERGUNTA E BARATA: ela olha a lista de materiais do ARQUIVO (uma
+      // duzia de entradas), e nao a lista por face (centenas de milhares).
+      final prontidao = prontidaoDosMapas == null
+          ? ''
+          : prontidaoDosMapas(asset);
+
       // O MESMO QUADRO DO MODELO: nada a refazer. Modelo parado devolve
       // sempre o mesmo objeto (o `evaluate` guarda o ultimo).
       final guardada = _porNo[node.id];
       if (guardada != null &&
           identical(guardada.quadroDoModelo, frame) &&
           guardada.materialDoNo == node.material &&
+          guardada.prontidaoDosMapas == prontidao &&
           guardada.usouMateriaisDoModelo == node.useModelMaterials) {
         Perfil3D.contar('malha.reaproveitada');
         return guardada;
@@ -112,6 +144,7 @@ class CacheDeMalhas {
         quadroDoModelo: frame,
         materialDoNo: node.material,
         usouMateriaisDoModelo: node.useModelMaterials,
+        prontidaoDosMapas: prontidao,
         malha: frame.mesh,
         normais: frame.normals,
         uvs: frame.uvs,
@@ -130,9 +163,14 @@ class CacheDeMalhas {
         //
         // Agora a assinatura pergunta pelo VALOR. Mudar de animacao
         // continua reconstruindo; reconstruir o widget, nao.
+        // A PRONTIDAO ENTRA NA ASSINATURA TAMBEM, e nao so na comparacao
+        // acima: a assinatura e a chave do modelo na PLACA. Sem ela, a
+        // malha nova (com mapa) encontraria a alca da antiga (sem mapa)
+        // guardada com a mesma chave, e o motor devolveria a geometria
+        // velha achando que ja a tinha.
         assinatura:
             'm${identityHashCode(asset)}:${motion.hashCode}:'
-            '${node.instances.isNotEmpty}:'
+            '${node.instances.isNotEmpty}:$prontidao:'
             '${node.useModelMaterials ? 'a' : assinaturaDoMaterial(node.material)}',
       );
     }

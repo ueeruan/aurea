@@ -67,6 +67,15 @@
 #define AUREA_LOG(...) ((void)0)
 #endif
 
+// O LOG POR DESENHO E DESLIGADO POR PADRAO: seis linhas por chamada de
+// desenho sao centenas de syscalls por quadro num texto de cinquenta letras.
+// Ligar com -DAUREA_3D_LOG_DESENHOS=1 quando for preciso provar o binding.
+#if defined(AUREA_3D_LOG_DESENHOS) && AUREA_3D_LOG_DESENHOS
+#define AUREA_LOG_DESENHO(...) AUREA_LOG(__VA_ARGS__)
+#else
+#define AUREA_LOG_DESENHO(...) ((void)0)
+#endif
+
 namespace aurea::render::tresd {
 
 // ======================================================= o dispositivo
@@ -164,13 +173,20 @@ struct BlocoQuadro {
   // lineares da cena.
   float ceu[4];
   float chao[4];
+  // O MAPA DE AMBIENTE. `x` e 1 quando existe um estudio para refletir, `y`
+  // e o nivel de desfoque mais alto da cadeia (o teto do LOD), e `z`/`w`
+  // ficam de reserva. Ele vem NO FIM porque o bloco e lido por ordem de
+  // declaracao dos dois lados — um campo no meio deslocaria tudo o que vem
+  // depois, e o defeito seria a camera mudando de lugar.
+  float mapa[4];
 };
-static_assert(sizeof(BlocoQuadro) == 336, "o bloco do quadro mudou de tamanho");
+static_assert(sizeof(BlocoQuadro) == 352, "o bloco do quadro mudou de tamanho");
 static_assert(offsetof(BlocoQuadro, olho) == 256, "olho fora de lugar");
 static_assert(offsetof(BlocoQuadro, ambiente) == 272, "ambiente fora de lugar");
 static_assert(offsetof(BlocoQuadro, ajustes) == 288, "ajustes fora de lugar");
 static_assert(offsetof(BlocoQuadro, ceu) == 304, "ceu fora de lugar");
 static_assert(offsetof(BlocoQuadro, chao) == 320, "chao fora de lugar");
+static_assert(offsetof(BlocoQuadro, mapa) == 336, "mapa fora de lugar");
 
 /// O BLOCO DE UM DESENHO. Um por chamada de desenho.
 struct BlocoDesenho {
@@ -312,6 +328,19 @@ struct Renderizador3D::Interno {
   Diligent::RefCntAutoPtr<Diligent::ITexture> sombra_profundidade;
   std::uint32_t sombra_lado = 0;
 
+  // --------------------------------------------------- o mapa de ambiente
+  //
+  // O ESTUDIO QUE O METAL REFLETE. Ele e uma textura so, com a cadeia de
+  // desfoque nos niveis, e sobe uma vez por ambiente — nao por quadro.
+  Diligent::RefCntAutoPtr<Diligent::ITexture> ambiente;
+  // A VISTA E FEITA A MAO, e nao pedida com `GetDefaultView`. A vista padrao
+  // e um atalho que depende de a placa ter montado a vista quando a textura
+  // nasceu — e o shader ficava lendo a NEUTRA de um pixel com o mapa na
+  // memoria, sem erro nenhum. Uma vista explicita, com os oito niveis
+  // declarados, nao tem esse caminho.
+  Diligent::RefCntAutoPtr<Diligent::ITextureView> vista_ambiente;
+  std::uint64_t impressao_do_mapa = 0;
+
   // ------------------------------------------------------ o intermediario
   Diligent::RefCntAutoPtr<Diligent::ITexture> leitura;
   std::vector<std::uint8_t> pixels;
@@ -358,11 +387,22 @@ struct Renderizador3D::Interno {
   Diligent::RefCntAutoPtr<Diligent::ITextureView> branca;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> branca_srgb;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> normal_neutra;
+  Diligent::RefCntAutoPtr<Diligent::ITextureView> ambiente_neutro;
 
   // --------------------------------------------------------- os pipelines
   struct PsoGpu {
     Diligent::RefCntAutoPtr<Diligent::IPipelineState> pso;
+    /// O CONJUNTO DE RESERVA. Ele existe para o caminho que so tem um
+    /// desenho e para nao deixar ninguem sem recurso; os desenhos de
+    /// verdade usam a lista abaixo.
     Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> srb;
+    /// UM CONJUNTO DE RECURSOS POR DESENHO DO QUADRO.
+    ///
+    /// Eles NASCEM UMA VEZ e ficam. A lista so cresce — uma cena que ja teve
+    /// quarenta pedacos guarda quarenta conjuntos, e a proxima que tiver
+    /// trinta reaproveita os trinta primeiros. Criar e destruir conjuntos a
+    /// cada quadro seria alocacao de objeto no caminho do dedo.
+    std::vector<Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>> srbs;
   };
   /// A CHAVE E UM BITMAPA, e nao uma lista de combinacoes: deformada, duas
   /// faces, mistura e sombra sao quatro perguntas de sim ou nao, e uma chave
@@ -378,6 +418,11 @@ struct Renderizador3D::Interno {
                    std::uint32_t amostras);
   bool criar_sombra(std::uint32_t lado);
   bool criar_neutras();
+  void garantir_tudo_ligado(Diligent::IShaderResourceBinding* srb);
+  Diligent::IShaderResourceVariable* exigir_variavel(
+      Diligent::IShaderResourceBinding* srb, Diligent::SHADER_TYPE estagio,
+      const char* nome);
+  bool subir_mapa_de_ambiente(const Quadro3D& quadro);
   bool garantir_modelo(std::int32_t alca, const AcervoDeModelos& acervo);
   bool pegar_pso(std::uint32_t chave);
   bool preparar_blocos(const Quadro3D& quadro, const AcervoDeModelos& acervo,
@@ -533,7 +578,305 @@ bool Renderizador3D::Interno::criar_neutras() {
         tp->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
   }
 
-  return branca && normal_neutra;
+  // O AMBIENTE NEUTRO E UM MAPA DE UM PIXEL BRANCO. Ele nao desenha nada: e
+  // o que se liga no lugar do mapa quando a cena nao tem estudio, e o shader
+  // nem o amostra (o `mapa.x` do quadro manda). Ele existe porque uma
+  // variavel mutavel SEM recurso faz o Diligent recusar o desenho inteiro —
+  // e a cena sumiria por causa de um ambiente que ninguem pediu.
+  const std::uint16_t meio_um[4] = {0x3C00, 0x3C00, 0x3C00, 0x3C00};
+  auto ta = nova_textura(dispositivo, "3d ambiente neutro", 1, 1,
+                         Diligent::TEX_FORMAT_RGBA16_FLOAT,
+                         Diligent::BIND_SHADER_RESOURCE, meio_um, 8);
+  if (ta) {
+    ambiente_neutro =
+        ta->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
+  }
+
+  return branca && normal_neutra && ambiente_neutro;
+}
+
+/// A VARIAVEL PELO NOME — OU UMA LINHA DE LOG QUE NAO DA PARA IGNORAR.
+///
+/// `GetVariableByName` devolve nulo quando o nome nao existe no pipeline, e
+/// o padrao `if (auto* v = ...)` transforma isso em "textura nunca ligada":
+/// o shader le branco, o material vira cinza liso, e nada acusa. Aqui um
+/// nome errado grita no log com o estagio e o nome — que e o unico jeito de
+/// uma renomeacao de shader ser encontrada no mesmo dia.
+Diligent::IShaderResourceVariable* Renderizador3D::Interno::exigir_variavel(
+    Diligent::IShaderResourceBinding* srb, Diligent::SHADER_TYPE estagio,
+    const char* nome) {
+  if (srb == nullptr) return nullptr;
+  auto* v = srb->GetVariableByName(estagio, nome);
+  if (v == nullptr) {
+    AUREA_LOG("RECURSO DO SHADER NAO ENCONTRADO: estagio=%s nome=\"%s\"",
+              estagio == Diligent::SHADER_TYPE_VERTEX ? "vs" : "ps", nome);
+  }
+  return v;
+}
+
+/// NENHUMA VARIAVEL DO SHADER FICA SEM RECURSO.
+///
+/// ===================== POR QUE ISTO E UMA FUNCAO ======================
+///
+/// Com o layout DINAMICO, o Diligent monta um `VkDescriptorSet` NOVO a cada
+/// `CommitShaderResources` e escreve nele TODAS as variaveis declaradas no
+/// shader — inclusive as que ninguem ligou. Uma variavel sem recurso vira
+/// um `VkWriteDescriptorSet` com ponteiro invalido, e o driver estoura
+/// dentro do `vkUpdateDescriptorSets`: SIGSEGV, sem mensagem, com o
+/// backtrace apontando para dentro do driver.
+///
+/// O CUSTO DE ESQUECER UMA E O APLICATIVO INTEIRO. E "esquecer uma" e facil:
+/// a sombra so existe quando ha sombra, os ossos so quando ha esqueleto, o
+/// mapa de ambiente so quando ha estudio. Cada um desses `if` e uma chance
+/// de o desenho nao acontecer — e, pior, de acontecer no aparelho de quem
+/// programa e cair no de quem usa, porque a lista de variaveis muda com o
+/// shader.
+///
+/// ENTAO A REGRA MORA AQUI, e nao nos dez lugares que ligam recursos. O que
+/// tiver ficado para tras recebe um recurso valido e NEUTRO — uma textura
+/// branca, um bloco qualquer — e o shader nem chega a ler (as bandeiras do
+/// bloco de desenho e o `mapa.x` do quadro decidem isso). O que se compra e
+/// a garantia de que o quadro DESENHA.
+void Renderizador3D::Interno::garantir_tudo_ligado(
+    Diligent::IShaderResourceBinding* srb) {
+  if (srb == nullptr) return;
+  constexpr Diligent::SHADER_TYPE estagios[] = {
+      Diligent::SHADER_TYPE_VERTEX, Diligent::SHADER_TYPE_PIXEL};
+  for (const Diligent::SHADER_TYPE estagio : estagios) {
+    const Diligent::Uint32 quantas = srb->GetVariableCount(estagio);
+    for (Diligent::Uint32 i = 0; i < quantas; ++i) {
+      Diligent::IShaderResourceVariable* v = srb->GetVariableByIndex(estagio, i);
+      if (v == nullptr) continue;
+      Diligent::ShaderResourceDesc desc;
+      v->GetResourceDesc(desc);
+      const Diligent::Uint32 elementos = desc.ArraySize > 0 ? desc.ArraySize : 1;
+      for (Diligent::Uint32 k = 0; k < elementos; ++k) {
+        if (v->Get(k) != nullptr) continue;
+        switch (desc.Type) {
+          case Diligent::SHADER_RESOURCE_TYPE_CONSTANT_BUFFER: {
+            // QUALQUER BLOCO SERVE DE TAPA-BURACO: o shader que nao ligou
+            // este bloco tambem nao o le. O do quadro existe sempre.
+            Diligent::IDeviceObject* o = bloco_quadro.RawPtr();
+            if (o != nullptr) v->SetArray(&o, k, 1, Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
+            break;
+          }
+          case Diligent::SHADER_RESOURCE_TYPE_TEXTURE_SRV: {
+            Diligent::IDeviceObject* o = branca.RawPtr();
+            if (o != nullptr) v->SetArray(&o, k, 1, Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
+            break;
+          }
+          case Diligent::SHADER_RESOURCE_TYPE_BUFFER_SRV: {
+            Diligent::IDeviceObject* o = vista_ossos.RawPtr();
+            if (o != nullptr) v->SetArray(&o, k, 1, Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
+            break;
+          }
+          default:
+            break;
+        }
+      }
+    }
+  }
+}
+
+/// DE UM FLOAT PARA MEIA PRECISAO.
+///
+/// A PLACA PRECISA DE 16 BITS, e nao e economia minha: filtrar uma textura
+/// de 32 bits por pixel com interpolacao e um recurso OPCIONAL na Vulkan —
+/// metade dos celulares nao tem, e o defeito apareceria como um reflexo
+/// quadriculado so em alguns aparelhos. Em 16 bits a interpolacao e
+/// obrigatoria em todo mundo.
+///
+/// Os valores do estudio vao de 0,02 a 14: todos normais, nenhum denormal.
+/// O que nao couber vira zero (o muito pequeno) ou infinito (o muito
+/// grande), e nenhum dos dois aparece num ambiente de estudio.
+std::uint16_t meia_precisao(float v) noexcept {
+  std::uint32_t bits = 0;
+  std::memcpy(&bits, &v, sizeof(bits));
+  const std::uint32_t sinal = (bits >> 16) & 0x8000U;
+  const std::int32_t expoente =
+      static_cast<std::int32_t>((bits >> 23) & 0xFFU) - 127 + 15;
+  if (expoente <= 0) return static_cast<std::uint16_t>(sinal);
+  if (expoente >= 31) return static_cast<std::uint16_t>(sinal | 0x7C00U);
+  const std::uint32_t mantissa = (bits & 0x7FFFFFU) >> 13;
+  return static_cast<std::uint16_t>(sinal |
+                                    (static_cast<std::uint32_t>(expoente) << 10) |
+                                    mantissa);
+}
+
+/// A ASSINATURA DO MAPA DE AMBIENTE: o ponteiro, o tamanho e uma AMOSTRA do
+/// conteudo.
+///
+/// O PONTEIRO SOZINHO NAO BASTA. O aplicativo guarda um buffer por ambiente,
+/// e trocar de estudio pode reaproveitar o mesmo endereco — e ai o motor
+/// acharia que o mapa nao mudou e o metal continuaria refletindo o estudio
+/// anterior. Trinta e dois valores espalhados por toda a cadeia fazem essa
+/// coincidencia deixar de existir.
+std::uint64_t assinatura_do_mapa(const Quadro3D& quadro) {
+  const float* mapa = quadro.mapa_de_ambiente;
+  const std::uint32_t largura = quadro.mapa_de_ambiente_largura;
+  const std::uint32_t niveis = quadro.mapa_de_ambiente_niveis;
+  if (mapa == nullptr || largura < 4 || niveis == 0 || niveis > 16) return 0;
+
+  std::uint32_t l = largura, a = largura / 2;
+  std::uint64_t total = 0;
+  for (std::uint32_t k = 0; k < niveis; ++k) {
+    total += static_cast<std::uint64_t>(l) * a * 4;
+    l = l < 4 ? l : l >> 1;
+    a = a < 2 ? a : a >> 1;
+  }
+  if (total == 0) return 0;
+
+  std::uint64_t h = 0xCBF29CE484222325ULL;
+  const auto misturar_valor = [&h](const void* dado, std::size_t bytes) {
+    const auto* p = static_cast<const std::uint8_t*>(dado);
+    for (std::size_t i = 0; i < bytes; ++i) {
+      h ^= p[i];
+      h *= 0x100000001B3ULL;
+    }
+  };
+  misturar_valor(&mapa, sizeof(mapa));
+  misturar_valor(&largura, sizeof(largura));
+  misturar_valor(&niveis, sizeof(niveis));
+  const std::uint64_t passo = total / 32 > 0 ? total / 32 : 1;
+  for (std::uint64_t i = 0; i < total; i += passo) {
+    const float v = mapa[i];
+    misturar_valor(&v, sizeof(v));
+  }
+  return h;
+}
+
+bool Renderizador3D::Interno::subir_mapa_de_ambiente(const Quadro3D& quadro) {
+  const std::uint64_t assinatura = assinatura_do_mapa(quadro);
+  if (assinatura == 0) {
+    if (ambiente) ambiente.Release();
+    if (vista_ambiente) vista_ambiente.Release();
+    impressao_do_mapa = 0;
+    return false;
+  }
+  // JA ESTA NA PLACA: nao sobe de novo. O mapa so muda quando o dono troca
+  // de ambiente, e refazer a subida a cada quadro seria copiar 340 KB por
+  // quadro sem nada mudar.
+  if (ambiente && impressao_do_mapa == assinatura) return true;
+
+  const float* fonte = quadro.mapa_de_ambiente;
+  const std::uint32_t largura = quadro.mapa_de_ambiente_largura;
+  const std::uint32_t niveis = quadro.mapa_de_ambiente_niveis;
+
+  // O TAMANHO DE TUDO ANTES DE PREENCHER, e um vetor so para a cadeia
+  // inteira. Um `resize` por nivel realoca o vetor e invalida o que ja foi
+  // apontado para dentro dele — e o defeito apareceria como um reflexo
+  // lido de memoria reciclada.
+  std::vector<std::pair<std::uint32_t, std::uint32_t>> tamanhos;
+  std::uint64_t total_de_pixels = 0;
+  {
+    std::uint32_t l = largura, a = largura / 2;
+    for (std::uint32_t k = 0; k < niveis; ++k) {
+      tamanhos.emplace_back(l, a);
+      total_de_pixels += static_cast<std::uint64_t>(l) * a;
+      l = l <= 2 ? l : l >> 1;
+      a = a <= 1 ? a : a >> 1;
+    }
+  }
+  // A TEXTURA NASCE VAZIA E RECEBE NIVEL A NIVEL.
+  //
+  // O CAMINHO DE DADOS INICIAIS (`USAGE_IMMUTABLE` com todos os niveis de uma
+  // vez) parece o certo e nao e: nesta placa o mapa chegava a existir, o
+  // `GetDefaultView` devolvia uma vista boa e o shader continuava lendo o
+  // BRANCO NEUTRO de um pixel — trocar de estudio nao mudava UM pixel do
+  // metal. Sem erro, sem aviso, com o desenho acontecendo. Subir por
+  // `UpdateTexture` e o caminho comum, o que todo mundo usa, e o unico que
+  // esta placa honra.
+  Diligent::TextureDesc td;
+  td.Name = "3d ambiente";
+  td.Type = Diligent::RESOURCE_DIM_TEX_2D;
+  td.Width = largura;
+  td.Height = largura / 2;
+  td.Format = Diligent::TEX_FORMAT_RGBA16_FLOAT;
+  td.MipLevels = niveis;
+  td.SampleCount = 1;
+  td.Usage = Diligent::USAGE_DEFAULT;
+  td.BindFlags = Diligent::BIND_SHADER_RESOURCE;
+  Diligent::ITexture* bruto = nullptr;
+  dispositivo->CreateTexture(td, nullptr, &bruto);
+  ambiente.Release();
+  ambiente = Diligent::RefCntAutoPtr<Diligent::ITexture>{bruto};
+  if (!ambiente) {
+    // UM MAPA QUE NAO SUBIU NAO DERRUBA A CENA: o reflexo volta a sair do
+    // ceu e do chao, que e o comportamento de antes daqui existir.
+    impressao_do_mapa = 0;
+    AUREA_LOG("ambiente: o mapa de %ux%u nao subiu", largura, largura / 2);
+    return false;
+  }
+
+  // A VISTA EXPLICITA, com o nivel mais detalhado na frente e a cadeia
+  // inteira atras. `NumMipLevels` em zero significaria "todos", e o
+  // `textureLod` do shader depende de os niveis existirem de verdade.
+  vista_ambiente.Release();
+  {
+    Diligent::TextureViewDesc vd;
+    vd.Name = "3d ambiente srv";
+    vd.ViewType = Diligent::TEXTURE_VIEW_SHADER_RESOURCE;
+    vd.TextureDim = Diligent::RESOURCE_DIM_TEX_2D;
+    vd.Format = td.Format;
+    vd.MostDetailedMip = 0;
+    vd.NumMipLevels = niveis;
+    vd.NumArraySlices = 1;
+    Diligent::ITextureView* vista = nullptr;
+    ambiente->CreateView(vd, &vista);
+    if (vista != nullptr) vista_ambiente = Diligent::RefCntAutoPtr<Diligent::ITextureView>{vista};
+  }
+  if (!vista_ambiente) {
+    // SEM VISTA NAO HA MAPA. Ligar a neutra e o certo: o reflexo volta a
+    // sair do ceu e do chao, e a cena nao some por causa disso.
+    ambiente.Release();
+    impressao_do_mapa = 0;
+    AUREA_LOG("ambiente: a vista do mapa de %ux%u nao saiu", largura, largura / 2);
+    return false;
+  }
+
+  std::vector<std::uint16_t> meias(static_cast<std::size_t>(total_de_pixels) * 4);
+  std::size_t base = 0;
+  std::uint64_t deslocamento = 0;
+  std::uint32_t nivel = 0;
+  for (const auto& [l, a] : tamanhos) {
+    const std::uint64_t pixels = static_cast<std::uint64_t>(l) * a;
+    std::uint16_t* destino = meias.data() + base;
+    for (std::uint64_t i = 0; i < pixels * 4; ++i) {
+      destino[i] = meia_precisao(fonte[deslocamento + i]);
+    }
+    Diligent::Box caixa;
+    caixa.MinX = 0;
+    caixa.MinY = 0;
+    caixa.MinZ = 0;
+    caixa.MaxX = static_cast<Diligent::Int32>(l);
+    caixa.MaxY = static_cast<Diligent::Int32>(a);
+    caixa.MaxZ = 1;
+    // O PASSO DA LINHA E EM BYTES: quatro canais de dois bytes por texel, e
+    // nao o numero de texels. Trocar os dois le a textura em diagonal.
+    Diligent::TextureSubResData sub{destino,
+                                    static_cast<Diligent::Uint32>(l * 8)};
+    contexto->UpdateTexture(ambiente, nivel, 0, caixa, sub,
+                            Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION,
+                            Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+    base += static_cast<std::size_t>(pixels) * 4;
+    deslocamento += pixels * 4;
+    ++nivel;
+  }
+
+  impressao_do_mapa = assinatura;
+  AUREA_LOG("ambiente: nivel0 meio=(%.3f,%.3f,%.3f) canto=(%.3f,%.3f,%.3f)",
+            static_cast<double>(fonte[(static_cast<std::size_t>(largura / 4) *
+                                       largura + largura / 2) * 4]),
+            static_cast<double>(fonte[(static_cast<std::size_t>(largura / 4) *
+                                       largura + largura / 2) * 4 + 1]),
+            static_cast<double>(fonte[(static_cast<std::size_t>(largura / 4) *
+                                       largura + largura / 2) * 4 + 2]),
+            static_cast<double>(fonte[0]), static_cast<double>(fonte[1]),
+            static_cast<double>(fonte[2]));
+  AUREA_LOG("ambiente: mapa %ux%u em %u niveis subiu (assinatura %llu)",
+            largura, largura / 2, niveis,
+            static_cast<unsigned long long>(assinatura));
+  return true;
 }
 
 bool Renderizador3D::Interno::criar_alvos(std::uint32_t largura,
@@ -759,6 +1102,24 @@ bool Renderizador3D::Interno::garantir_modelo(std::int32_t alca,
         tex->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
     gpu.bytes += static_cast<std::uint64_t>(t.largura) * t.altura * 4;
   }
+  {
+    std::uint32_t subiram = 0;
+    for (const auto& v : gpu.texturas) {
+      if (v) ++subiram;
+    }
+    AUREA_LOG("modelo %d: %u malhas, %u texturas no modelo, %u subiram",
+              alca, static_cast<unsigned>(gpu.malhas.size()),
+              static_cast<unsigned>(m->texturas.size()), subiram);
+    for (std::size_t k = 0; k < m->materiais.size(); ++k) {
+      const Material& mat = m->materiais[k];
+      AUREA_LOG("  material %u: cor=%d normal=%d mr=%d emi=%d ocl=%d "
+                "metalico=%.2f rugosidade=%.2f",
+                static_cast<unsigned>(k), mat.textura_cor, mat.textura_normal,
+                mat.textura_metalico_rugosidade, mat.textura_emissiva,
+                mat.textura_oclusao, static_cast<double>(mat.metalico),
+                static_cast<double>(mat.rugosidade));
+    }
+  }
 
   modelos.emplace(alca, std::move(gpu));
   return true;
@@ -845,9 +1206,37 @@ bool Renderizador3D::Interno::pegar_pso(std::uint32_t chave) {
   ci.pVS = vs;
   ci.pPS = fs;
 
-  // TODAS AS VARIAVEIS SAO MUTAVEIS, e nao estaticas: uma estatica e fixada
-  // uma vez no PSO e nao pode mudar entre desenhos — e a textura de cor muda
-  // a cada material.
+  // TODAS AS VARIAVEIS SAO MUTAVEIS, E CADA DESENHO TEM O SEU CONJUNTO.
+  //
+  // ============ POR QUE ISTO NAO E UM DETALHE DE CONFIGURACAO ===========
+  //
+  // O renderizador troca de material por chamada de desenho: liga o bloco
+  // daquele pedaco, liga as cinco texturas daquele material, desenha, e
+  // repete. Os desenhos de um quadro vao todos para o MESMO command buffer
+  // e so rodam no fim.
+  //
+  // COM UM CONJUNTO DE RECURSOS SO, ISSO NAO FUNCIONA — E NAO DA ERRO. Uma
+  // variavel mutavel mora num descriptor set que o Diligent aloca uma vez
+  // por conjunto e reescreve no lugar. Quando a placa finalmente le o set,
+  // o que esta la e o conteudo do ULTIMO `Set`: os desenhos anteriores leem
+  // o material de outro pedaco.
+  //
+  // O SINTOMA MEDIDO: um GLB com tres cubos (vermelho fosco, verde metal,
+  // azul emissivo) desenhava OS TRES DA MESMA COR, e trocar o material do
+  // texto 3D nao mudava um pixel. Nada acusa: os recursos estao ligados, o
+  // desenho acontece, e a imagem e plausivel.
+  //
+  // A SAIDA NAO E `DYNAMIC`, E FOI TENTADA. Com variaveis dinamicas o
+  // Diligent monta um descriptor set novo a cada commit — que e o contrato
+  // certo — mas ele passa a escrever TODAS as variaveis declaradas em todo
+  // commit, e o driver do emulador (gfxstream) estoura dentro do
+  // `vkUpdateDescriptorSets` com SIGSEGV. Um caminho que derruba o
+  // aplicativo no aparelho de teste nao e um caminho.
+  //
+  // A SAIDA E UM CONJUNTO POR DESENHO (ver `srbs` em `PsoGpu`): cada
+  // chamada escreve no proprio descriptor set, e nenhum desenho pisa no do
+  // vizinho. Eles nascem uma vez e sao reaproveitados quadro a quadro,
+  // entao o custo e de memoria e nao de alocacao por quadro.
   ci.PSODesc.ResourceLayout.DefaultVariableType =
       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE;
 
@@ -871,6 +1260,18 @@ bool Renderizador3D::Interno::pegar_pso(std::uint32_t chave) {
   sd_dado.AddressV = Diligent::TEXTURE_ADDRESS_CLAMP;
   sd_dado.AddressW = Diligent::TEXTURE_ADDRESS_CLAMP;
 
+  // O MAPA DE AMBIENTE: bilinear E entre niveis. O segundo e o que faz a
+  // rugosidade virar desfoque — sem ele, o reflexo de uma superficie
+  // rugosa saltaria de um nivel para o outro e apareceria em degraus.
+  // Ele da a volta na horizontal (a esfera fecha em x) e nao na vertical.
+  Diligent::SamplerDesc sd_ambiente;
+  sd_ambiente.MinFilter = Diligent::FILTER_TYPE_LINEAR;
+  sd_ambiente.MagFilter = Diligent::FILTER_TYPE_LINEAR;
+  sd_ambiente.MipFilter = Diligent::FILTER_TYPE_LINEAR;
+  sd_ambiente.AddressU = Diligent::TEXTURE_ADDRESS_WRAP;
+  sd_ambiente.AddressV = Diligent::TEXTURE_ADDRESS_CLAMP;
+  sd_ambiente.AddressW = Diligent::TEXTURE_ADDRESS_CLAMP;
+
   Diligent::SamplerDesc sd_sombra;
   // EM PONTO, E NAO EM BILINEAR. O PCF do shader ja tira as amostras nas
   // posicoes certas, e o bilinear numa textura de 32 bits custaria uma
@@ -882,7 +1283,7 @@ bool Renderizador3D::Interno::pegar_pso(std::uint32_t chave) {
   sd_sombra.AddressV = Diligent::TEXTURE_ADDRESS_CLAMP;
   sd_sombra.AddressW = Diligent::TEXTURE_ADDRESS_CLAMP;
 
-  Diligent::ImmutableSamplerDesc amostradores[6];
+  Diligent::ImmutableSamplerDesc amostradores[7];
   std::uint32_t quantos_amostradores = 0;
   if (!eh_sombra) {
     amostradores[quantos_amostradores++] = Diligent::ImmutableSamplerDesc{
@@ -897,6 +1298,8 @@ bool Renderizador3D::Interno::pegar_pso(std::uint32_t chave) {
         Diligent::SHADER_TYPE_PIXEL, "tex_oclusao", sd_dado};
     amostradores[quantos_amostradores++] = Diligent::ImmutableSamplerDesc{
         Diligent::SHADER_TYPE_PIXEL, "tex_sombra", sd_sombra};
+    amostradores[quantos_amostradores++] = Diligent::ImmutableSamplerDesc{
+        Diligent::SHADER_TYPE_PIXEL, "tex_ambiente", sd_ambiente};
   }
   ci.PSODesc.ResourceLayout.NumImmutableSamplers = quantos_amostradores;
   ci.PSODesc.ResourceLayout.ImmutableSamplers =
@@ -909,7 +1312,11 @@ bool Renderizador3D::Interno::pegar_pso(std::uint32_t chave) {
   g.PrimitiveTopology = Diligent::PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
   // AS AMOSTRAS DO PIPELINE TEM DE CASAR COM AS DO ALVO. Um pipeline de uma
   // amostra desenhando num alvo de quatro nao da erro: da lixo.
-  g.SmplDesc.Count = static_cast<Diligent::Uint8>(eh_sombra ? 1 : alvo_amostras);
+  // A CONTAGEM VEM DA CHAVE, e nao do estado do momento: a chave e o que
+  // identifica este pipeline no cache, e os dois nao podem divergir.
+  const std::uint32_t amostras_da_chave = (chave >> 8) & 0xFFU;
+  g.SmplDesc.Count = static_cast<Diligent::Uint8>(
+      eh_sombra || amostras_da_chave == 0 ? 1U : amostras_da_chave);
   g.SmplDesc.Quality = 0;
   g.InputLayout.LayoutElements = elementos;
   g.InputLayout.NumElements = quantos;
@@ -975,6 +1382,28 @@ bool Renderizador3D::Interno::pegar_pso(std::uint32_t chave) {
   if (!entrada.srb) {
     erro = "nao foi possivel criar o conjunto de recursos do pipeline 3D";
     return false;
+  }
+
+  // O QUE O SHADER REALMENTE DECLARA, uma vez por pipeline. E a unica
+  // lista em que os nomes do SPIR-V aparecem de verdade — e o que se compara
+  // com os nomes que `exigir_variavel` procura.
+  {
+    constexpr Diligent::SHADER_TYPE estagios[] = {
+        Diligent::SHADER_TYPE_VERTEX, Diligent::SHADER_TYPE_PIXEL};
+    for (const Diligent::SHADER_TYPE estagio : estagios) {
+      const Diligent::Uint32 n = entrada.srb->GetVariableCount(estagio);
+      AUREA_LOG("=== pso %u %s: %u recursos ===", chave,
+                estagio == Diligent::SHADER_TYPE_VERTEX ? "VERTEX" : "PIXEL", n);
+      for (Diligent::Uint32 i = 0; i < n; ++i) {
+        auto* v = entrada.srb->GetVariableByIndex(estagio, i);
+        if (v == nullptr) continue;
+        Diligent::ShaderResourceDesc d;
+        v->GetResourceDesc(d);
+        AUREA_LOG("  [%u] nome=%s tipo=%d n=%u", i,
+                  d.Name != nullptr ? d.Name : "(sem nome)",
+                  static_cast<int>(d.Type), d.ArraySize);
+      }
+    }
   }
 
   pipelines.emplace(chave, std::move(entrada));
@@ -1139,6 +1568,31 @@ bool Renderizador3D::Interno::preparar_blocos(const Quadro3D& quadro,
   bloco.chao[1] = quadro.chao[1];
   bloco.chao[2] = quadro.chao[2];
   bloco.chao[3] = 1.0F;
+  // O MAPA DE AMBIENTE, que e o que faz o metal refletir o estudio. Ele sobe
+  // AQUI, antes do desenho, e a assinatura dele entra na conta do que mudou:
+  // trocar de estudio sem mexer em mais nada tem de redesenhar.
+  const bool tem_mapa = subir_mapa_de_ambiente(quadro);
+  bloco.mapa[0] = tem_mapa ? 1.0F : 0.0F;
+  bloco.mapa[1] = tem_mapa
+                      ? static_cast<float>(quadro.mapa_de_ambiente_niveis - 1)
+                      : 0.0F;
+  // O QUE O C++ TEM EM MAOS, para quem for depurar de novo: `z` diz que a
+  // textura do mapa existe e `w` que a vista dela saiu. O shader nao le
+  // nenhum dos dois — eles ficam no bloco porque custam nada e porque a
+  // pergunta "o mapa chegou?" ja custou uma tarde uma vez.
+  bloco.mapa[2] = ambiente ? 1.0F : 0.0F;
+  bloco.mapa[3] = vista_ambiente ? 1.0F : 0.0F;
+
+  AUREA_LOG_DESENHO("quadro: mapa=(%.0f,%.0f,%.0f,%.0f) ambiente=%.3f reflexo=%.2f "
+            "ceu=(%.2f,%.2f,%.2f) chao=(%.2f,%.2f,%.2f) luzes=%.0f",
+            static_cast<double>(bloco.mapa[0]), static_cast<double>(bloco.mapa[1]),
+            static_cast<double>(bloco.mapa[2]), static_cast<double>(bloco.mapa[3]),
+            static_cast<double>(bloco.ambiente[0]),
+            static_cast<double>(bloco.ceu[3]),
+            static_cast<double>(bloco.ceu[0]), static_cast<double>(bloco.ceu[1]),
+            static_cast<double>(bloco.ceu[2]), static_cast<double>(bloco.chao[0]),
+            static_cast<double>(bloco.chao[1]), static_cast<double>(bloco.chao[2]),
+            static_cast<double>(bloco.ajustes[0]));
 
   if (!bloco_quadro) {
     bloco_quadro = novo_buffer(dispositivo, "3d quadro",
@@ -1153,6 +1607,11 @@ bool Renderizador3D::Interno::preparar_blocos(const Quadro3D& quadro,
   contexto->UpdateBuffer(bloco_quadro, 0, sizeof(bloco), &bloco,
                          Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
   impressao = misturar(impressao, &bloco, sizeof(bloco));
+  // O CONTEUDO DO MAPA ENTRA NA CONTA PELO LADO DE FORA DO BLOCO: os dois
+  // primeiros campos dele so dizem "existe" e "quantos niveis", e trocar de
+  // estudio mantendo o tamanho nao mudaria nenhum dos dois.
+  impressao = misturar(impressao, &impressao_do_mapa,
+                       sizeof(impressao_do_mapa));
 
   // -------------------------------------------------------------- as luzes
   BlocoLuzes luzes;
@@ -1342,6 +1801,35 @@ bool Renderizador3D::Interno::preparar_blocos(const Quadro3D& quadro,
 
 // ======================================================== o desenho
 
+/// ================= POR QUE TODO `Set` LEVA `ALLOW_OVERWRITE` ==============
+///
+/// UMA VARIAVEL MUTAVEL SO ACEITA O PRIMEIRO `Set`. E a regra do Diligent,
+/// escrita no `ShaderResourceVariable.h`: "static and mutable variables
+/// can't be changed once initialized to a non-null resource" — e sem a
+/// bandeira o segundo `Set` e IGNORADO EM SILENCIO, sem aviso em release.
+///
+/// FOI ISSO QUE FEZ TODA TEXTURA SAIR BRANCA. Os blocos uniformes sao o
+/// MESMO `IBuffer` quadro apos quadro (so o conteudo muda, por
+/// `UpdateBuffer`), entao o `Set` repetido e um no-op legitimo e os fatores
+/// numericos sempre funcionaram. As texturas e o mapa de ambiente sao
+/// OBJETOS DIFERENTES a cada modelo e a cada estudio: o primeiro `Set` de
+/// cada conjunto grudava — a branca neutra do primeiro desenho sem textura
+/// — e todos os seguintes eram descartados. Medido: `1 texturas no modelo,
+/// 1 subiram, cor=0` e o pixel cinza liso; dois estudios distintos com
+/// zero bytes de diferenca no metal.
+///
+/// A CONDICAO DE SEGURANCA A DOC TAMBEM DIZ: "an application must ensure
+/// that the GPU is not accessing the SRB". Este renderizador desenha para
+/// um alvo fora da tela e LE O QUADRO DE VOLTA a cada chamada, com `Flush`
+/// e `WaitForIdle` antes do `Map` (ver `ler_pixels`). Quando o proximo
+/// `desenhar` comeca, nao existe comando em voo apontando para conjunto
+/// nenhum. E um quadro em voo, drenado por completo, e e isso que torna a
+/// sobrescrita segura — nao um `WaitForIdle` colocado para esconder uma
+/// corrida, mas o `WaitForIdle` que a leitura de volta ja exigia.
+///
+/// SE UM DIA A LEITURA DE VOLTA DEIXAR DE ESPERAR A PLACA, este invariante
+/// quebra e a resposta certa e um conjunto por desenho POR QUADRO EM VOO —
+/// nao tirar a bandeira.
 void Renderizador3D::Interno::desenhar_lista(const Quadro3D& quadro,
                                              const std::vector<Desenho>& lista,
                                              std::size_t base, bool mistura,
@@ -1364,100 +1852,90 @@ void Renderizador3D::Interno::desenhar_lista(const Quadro3D& quadro,
     const MalhaGpu& malha = gpu.malhas[static_cast<std::size_t>(d.malha)];
     if (!malha.vertices || !malha.indices) continue;
 
+    // AS AMOSTRAS DO ALVO ENTRAM NA CHAVE DO PIPELINE.
+    //
+    // O pipeline grava a contagem de amostras (MSAA) na criacao, e a Vulkan
+    // exige que ela seja a MESMA do alvo em que ele desenha. A chave era so
+    // `pele|mistura|sombra`: o primeiro pipeline nascia com o MSAA daquele
+    // quadro e ficava guardado — e a qualidade adaptativa do palco TROCA o
+    // MSAA sozinha (4x numa cena leve, 1x quando entra um modelo pesado ou o
+    // texto 3D). O quadro seguinte usava um pipeline de 4 amostras num alvo
+    // de 1, ou o contrario.
+    //
+    // ISSO NAO DA ERRO NO CODIGO: DA FALHA NA PLACA. O driver registrou
+    // "Graphics Exception: 3D WIDTH ZT Violation" e reiniciou (TDR,
+    // nvlddmkm 153) — o emulador inteiro morria, e num celular e o processo
+    // que cai. Era o "fechou ao editar o texto 3D" e o "caiu ao importar o
+    // modelo maior": os dois mudam a carga e disparam a troca de qualidade.
+    //
+    // O passe de sombra e sempre de 1 amostra, entao a chave dele nao muda.
+    const std::uint32_t amostras_do_pso = eh_sombra ? 1U : alvo_amostras;
     const std::uint32_t chave =
         (d.pele >= 0 ? kPsoPele : 0U) | (mistura ? kPsoMistura : 0U) |
-        (eh_sombra ? kPsoSombra : 0U);
+        (eh_sombra ? kPsoSombra : 0U) | (amostras_do_pso << 8);
     if (chave != ultima_chave) {
       if (!pegar_pso(chave)) return;
-      auto achado = pipelines.find(chave);
-      if (achado == pipelines.end()) return;
-      pso_atual = achado->second.pso;
-      srb_atual = achado->second.srb;
-      contexto->SetPipelineState(pso_atual);
       ultima_chave = chave;
     }
-    if (pso_atual == nullptr || srb_atual == nullptr) continue;
+    auto achado = pipelines.find(chave);
+    if (achado == pipelines.end()) return;
+    PsoGpu& entrada = achado->second;
+    if (entrada.pso != pso_atual) {
+      pso_atual = entrada.pso;
+      contexto->SetPipelineState(pso_atual);
+    }
+    if (pso_atual == nullptr) continue;
+
+    // O CONJUNTO DESTE DESENHO. O indice e o do desenho no quadro, entao
+    // dois pedacos nunca dividem o mesmo descriptor set — que e a coisa
+    // toda (ver o comentario do `DefaultVariableType`).
+    if (entrada.srbs.size() <= meu) entrada.srbs.resize(meu + 1);
+    if (!entrada.srbs[meu]) {
+      Diligent::IShaderResourceBinding* bruto = nullptr;
+      entrada.pso->CreateShaderResourceBinding(&bruto, true);
+      entrada.srbs[meu] =
+          Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>{bruto};
+    }
+    srb_atual = entrada.srbs[meu] ? entrada.srbs[meu].RawPtr()
+                                  : entrada.srb.RawPtr();
+    if (srb_atual == nullptr) continue;
 
     // ------------------------------------------------------ os blocos fixos
     //
     // O MESMO NOME EM DOIS ESTAGIOS SAO DUAS VARIAVEIS. O `Quadro` existe no
     // vertice e no fragmento, e o Diligent os trata como separados: ligar so
     // um deixaria o outro sem recurso e o desenho seria recusado.
-    if (auto* v = srb_atual->GetVariableByName(Diligent::SHADER_TYPE_VERTEX,
-                                               "Quadro")) {
-      v->Set(bloco_quadro);
+    if (auto* v = exigir_variavel(srb_atual, Diligent::SHADER_TYPE_VERTEX,
+                                   "Quadro")) {
+      v->Set(bloco_quadro, Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
     }
-    if (auto* v = srb_atual->GetVariableByName(Diligent::SHADER_TYPE_PIXEL,
-                                               "Quadro")) {
-      v->Set(bloco_quadro);
+    if (auto* v = exigir_variavel(srb_atual, Diligent::SHADER_TYPE_PIXEL,
+                                   "Quadro")) {
+      v->Set(bloco_quadro, Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
     }
-    if (auto* v = srb_atual->GetVariableByName(Diligent::SHADER_TYPE_PIXEL,
-                                               "Luzes")) {
-      v->Set(bloco_luzes);
+    if (auto* v = exigir_variavel(srb_atual, Diligent::SHADER_TYPE_PIXEL,
+                                   "Luzes")) {
+      v->Set(bloco_luzes, Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
     }
-    if (vista_ossos) {
-      if (auto* v = srb_atual->GetVariableByName(Diligent::SHADER_TYPE_VERTEX,
-                                                 "Ossos")) {
-        v->Set(vista_ossos);
-      }
+    // O BLOCO DE OSSOS TAMBEM E SEMPRE LIGADO, pelo mesmo motivo do
+    // `tex_sombra`: o shader sem pele nao le o bloco, mas a variavel esta
+    // declarada, e uma variavel dinamica declarada e nao ligada derruba o
+    // commit. O bloco existe sempre — quando nao ha esqueleto ele guarda uma
+    // identidade so.
+    if (auto* v = exigir_variavel(srb_atual, Diligent::SHADER_TYPE_VERTEX,
+                                   "Ossos")) {
+      if (vista_ossos) v->Set(vista_ossos, Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
     }
 
     // ------------------------------------------------ o que muda por pedaco
     auto* bloco = blocos_de_desenho[meu].RawPtr();
-    if (auto* v = srb_atual->GetVariableByName(Diligent::SHADER_TYPE_VERTEX,
-                                               "Desenho")) {
-      v->Set(bloco);
+    if (auto* v = exigir_variavel(srb_atual, Diligent::SHADER_TYPE_VERTEX,
+                                   "Desenho")) {
+      v->Set(bloco, Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
     }
-    if (auto* v = srb_atual->GetVariableByName(Diligent::SHADER_TYPE_PIXEL,
-                                               "Desenho")) {
-      v->Set(bloco);
-    }
-
-    if (!eh_sombra) {
-      // AS SEIS TEXTURAS SAO SEMPRE LIGADAS, e as ausentes caem na neutra.
-      // Deixar uma sem ligar faria o Diligent recusar o desenho inteiro — e o
-      // material sem mapa de normais e a maioria, nao a excecao (§43).
-      const Material& m = d.material;
-      const auto escolher = [&](std::int32_t qual,
-                                Diligent::ITextureView* neutra,
-                                Diligent::ITextureView* neutra_srgb,
-                                const char* nome) {
-        Diligent::ITextureView* vista = nullptr;
-        if (qual >= 0 && static_cast<std::size_t>(qual) < gpu.texturas.size()) {
-          vista = gpu.texturas[static_cast<std::size_t>(qual)].RawPtr();
-        }
-        if (vista == nullptr) {
-          vista = neutra_srgb != nullptr ? neutra_srgb : neutra;
-        }
-        if (vista == nullptr) return;
-        if (auto* v = srb_atual->GetVariableByName(Diligent::SHADER_TYPE_PIXEL,
-                                                   nome)) {
-          v->Set(vista);
-        }
-      };
-      // COR E EMISSIVO CAEM NA BRANCA EM sRGB, E OS DADOS NA BRANCA LINEAR.
-      // A diferenca aparece no emissivo: uma textura branca lida como linear
-      // vale 1, e lida como sRGB vale 0,21 na pratica — e o mesmo material
-      // sairia com dois brilhos diferentes conforme ele tivesse ou nao o
-      // mapa, que e o tipo de incoerencia que ninguem liga a causa.
-      escolher(m.textura_cor, branca.RawPtr(), branca_srgb.RawPtr(),
-               "tex_cor");
-      escolher(m.textura_normal, normal_neutra.RawPtr(), nullptr,
-               "tex_normal");
-      escolher(m.textura_metalico_rugosidade, branca.RawPtr(), nullptr,
-               "tex_metalico_rugosidade");
-      escolher(m.textura_emissiva, branca.RawPtr(), branca_srgb.RawPtr(),
-               "tex_emissiva");
-      escolher(m.textura_oclusao, branca.RawPtr(), nullptr, "tex_oclusao");
-      if (auto* v = srb_atual->GetVariableByName(Diligent::SHADER_TYPE_PIXEL,
-                                                 "tex_sombra")) {
-        auto* vista =
-            sombra_cor
-                ? sombra_cor->GetDefaultView(
-                      Diligent::TEXTURE_VIEW_SHADER_RESOURCE)
-                : nullptr;
-        if (vista != nullptr) v->Set(vista);
-      }
+    if (auto* v = exigir_variavel(srb_atual, Diligent::SHADER_TYPE_PIXEL,
+                                   "Desenho")) {
+      v->Set(bloco, Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
     }
 
     if (!eh_sombra) {
@@ -1473,20 +1951,36 @@ void Renderizador3D::Interno::desenhar_lista(const Quadro3D& quadro,
         if (qual >= 0 && static_cast<std::size_t>(qual) < gpu.texturas.size()) {
           vista = gpu.texturas[static_cast<std::size_t>(qual)].RawPtr();
         }
+        const bool real = vista != nullptr;
         if (vista == nullptr) {
           vista = neutra_srgb != nullptr ? neutra_srgb : neutra;
         }
+        // A ULTIMA REDE: se ate a neutra faltar, vai a branca. Sair daqui
+        // sem ligar nada derruba o commit inteiro (ver `tex_sombra`).
+        if (vista == nullptr) vista = branca.RawPtr();
         if (vista == nullptr) return;
-        if (auto* v = srb_atual->GetVariableByName(Diligent::SHADER_TYPE_PIXEL,
-                                                   nome)) {
-          v->Set(vista);
-        }
+        auto* v = exigir_variavel(srb_atual, Diligent::SHADER_TYPE_PIXEL, nome);
+        if (v == nullptr) return;
+        // REAL OU RESERVA, dito com todas as letras. "Ligado" sozinho
+        // esconderia um renderizador que liga a branca o tempo inteiro.
+        AUREA_LOG_DESENHO("    %-24s -> %s %p", nome, real ? "REAL    " : "RESERVA ",
+                  static_cast<const void*>(vista));
+        v->Set(vista, Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
       };
       // COR E EMISSIVO CAEM NA BRANCA EM sRGB, E OS DADOS NA BRANCA LINEAR.
       // A diferenca aparece no emissivo: uma textura branca lida como linear
       // vale 1, e lida como sRGB vale 0,21 na pratica — e o mesmo material
       // sairia com dois brilhos diferentes conforme ele tivesse ou nao o
       // mapa, que e o tipo de incoerencia que ninguem liga a causa.
+      AUREA_LOG_DESENHO("  desenho[%u] modelo=%d malha=%d cor=%d normal=%d mr=%d "
+                "emi=%d ocl=%d metalico=%.2f rug=%.2f base=(%u,%u,%u) "
+                "texturasNoModelo=%u",
+                static_cast<unsigned>(meu), d.modelo, d.malha, m.textura_cor,
+                m.textura_normal, m.textura_metalico_rugosidade,
+                m.textura_emissiva, m.textura_oclusao,
+                static_cast<double>(m.metalico),
+                static_cast<double>(m.rugosidade), m.cor_base.r, m.cor_base.g,
+                m.cor_base.b, static_cast<unsigned>(gpu.texturas.size()));
       escolher(m.textura_cor, branca.RawPtr(), branca_srgb.RawPtr(),
                "tex_cor");
       escolher(m.textura_normal, normal_neutra.RawPtr(), nullptr,
@@ -1496,17 +1990,48 @@ void Renderizador3D::Interno::desenhar_lista(const Quadro3D& quadro,
       escolher(m.textura_emissiva, branca.RawPtr(), branca_srgb.RawPtr(),
                "tex_emissiva");
       escolher(m.textura_oclusao, branca.RawPtr(), nullptr, "tex_oclusao");
-      if (auto* v = srb_atual->GetVariableByName(Diligent::SHADER_TYPE_PIXEL,
-                                                 "tex_sombra")) {
-        auto* vista =
+      // A SOMBRA TAMBEM CAI NA NEUTRA QUANDO NAO HA MAPA.
+      //
+      // NAO LIGAR NAO E NEUTRO: E UMA QUEDA. Com as variaveis dinamicas, o
+      // Diligent monta um descriptor set NOVO a cada desenho e escreve TODAS
+      // as variaveis declaradas — inclusive as que ninguem ligou. Uma
+      // variavel sem recurso vira um `VkWriteDescriptorSet` com ponteiro
+      // invalido, e o driver estoura dentro do `vkUpdateDescriptorSets`.
+      //
+      // Foi exatamente o que aconteceu: com a sombra desligada (`sombra: 0`,
+      // que e o caso do palco e o dos testes) o `sombra_cor` e nulo, o
+      // `tex_sombra` ficava solto e o aplicativo caia com SIGSEGV no
+      // primeiro desenho. A branca no lugar dela quer dizer "tudo aceso",
+      // que e o mesmo resultado de nao ter sombra.
+      if (auto* v = exigir_variavel(srb_atual, Diligent::SHADER_TYPE_PIXEL,
+                                     "tex_sombra")) {
+        Diligent::ITextureView* vista =
             sombra_cor
                 ? sombra_cor->GetDefaultView(
                       Diligent::TEXTURE_VIEW_SHADER_RESOURCE)
                 : nullptr;
-        if (vista != nullptr) v->Set(vista);
+        if (vista == nullptr) vista = branca.RawPtr();
+        if (vista != nullptr) v->Set(vista, Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
+      }
+      // O ESTUDIO QUE O METAL REFLETE. Sem mapa, vai o neutro de um pixel —
+      // o shader nao o amostra, mas a variavel precisa de recurso.
+      if (auto* v = exigir_variavel(srb_atual, Diligent::SHADER_TYPE_PIXEL,
+                                     "tex_ambiente")) {
+        // SEMPRE UM RECURSO, nunca "deixa como estava": uma variavel deixada
+        // para tras guarda a textura do quadro anterior, e trocar de estudio
+        // continuaria refletindo o estudio antigo sem nada acusar.
+        Diligent::ITextureView* vista = vista_ambiente.RawPtr();
+        if (vista == nullptr && ambiente) {
+          vista = ambiente->GetDefaultView(
+              Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
+        }
+        if (vista == nullptr) vista = ambiente_neutro.RawPtr();
+        if (vista != nullptr) v->Set(vista, Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
       }
     }
 
+    // A ULTIMA CONFERENCIA ANTES DE ENTREGAR O DESENHO AO DRIVER.
+    garantir_tudo_ligado(srb_atual);
     contexto->CommitShaderResources(
         srb_atual, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
 
@@ -1528,7 +2053,7 @@ void Renderizador3D::Interno::desenhar_lista(const Quadro3D& quadro,
     da.FirstIndexLocation = d.primeiro_indice;
     da.BaseVertex = d.base_do_vertice;
     contexto->DrawIndexed(da);
-    AUREA_LOG("  draw modelo=%d malha=%d idx=%u prim=%u base=%u",
+    AUREA_LOG_DESENHO("  draw modelo=%d malha=%d idx=%u prim=%u base=%u",
               d.modelo, d.malha, da.NumIndices, da.FirstIndexLocation,
               da.BaseVertex);
 

@@ -57,6 +57,7 @@ layout(binding = 0) uniform Quadro {
   vec4 ajustes;     // x = quantas luzes, y = PCF, z = tamanho do mapa, w = inclinacao
   vec4 ceu;         // rgb = cor de cima (linear), w = reflexo do ambiente
   vec4 chao;        // rgb = cor de baixo (linear)
+  vec4 mapa;        // x = tem mapa de ambiente, y = nivel mais alto da cadeia
 } u_quadro;
 
 layout(binding = 1) uniform Luzes {
@@ -84,6 +85,21 @@ layout(binding = 6) uniform sampler2D tex_metalico_rugosidade;
 layout(binding = 7) uniform sampler2D tex_emissiva;
 layout(binding = 8) uniform sampler2D tex_oclusao;
 layout(binding = 9) uniform sampler2D tex_sombra;
+// O ESTUDIO INTEIRO, numa faixa esferica. As softboxes que desenham a quina
+// da letra saem daqui, e nao de duas cores.
+layout(binding = 10) uniform sampler2D tex_ambiente;
+
+/// A DIRECAO VIRA UM PONTO NA FAIXA ESFERICA (equirretangular).
+///
+/// `x` da a volta (0..1 na horizontal, e o `atan` fecha nas duas pontas),
+/// `y` vai do polo norte ao sul. O `acos` do Y e o que mantem a proporcao:
+/// usar o proprio Y deixaria o ceu esticado no meio da imagem.
+vec2 direcao_para_uv(vec3 d) {
+  const float kUmSobreDuasPi = 0.15915494309;
+  const float kUmSobrePi = 0.31830988618;
+  return vec2(atan(d.z, d.x) * kUmSobreDuasPi + 0.5,
+              acos(clamp(d.y, -1.0, 1.0)) * kUmSobrePi);
+}
 
 // -------------------------------------------------------------- a sombra
 
@@ -297,9 +313,7 @@ void main() {
     direta += (kd * difusa / PI + brdf) * cor_da_luz * n_dot_l * atenuacao;
   }
 
-  // O AMBIENTE, COM DIRECAO. Nao e uma imagem de ambiente — isso e um degrau
-  // posterior, e esta declarado como tal. O que existe resolve as duas
-  // coisas que o ambiente plano nao resolvia:
+  // O AMBIENTE, COM DIRECAO.
   //
   //  a) UM METAL PRECISA DE DIRECAO PARA PARECER METAL. Um metal nao tem
   //     difusa: ele responde inteiro pelo que reflete. Refletindo uma cor so,
@@ -309,10 +323,17 @@ void main() {
   //     sombra fica do mesmo tom do que esta na luz, e a peca parece um
   //     adesivo recortado.
   //
-  // A CONTA E A MESMA DO PINTOR DE CPU (o `environmentColor` do
+  // E COM O MAPA DE ESTUDIO, o que a superficie devolve deixa de ser um
+  // gradiente de duas cores e passa a ser O QUE ESTA NAQUELA DIRECAO: a
+  // softbox esticada na lateral do chanfro, a tira clara correndo pela
+  // quina, o escuro entre uma luz e outra. E assim que o olho reconhece
+  // metal — e e o que faltava para o texto 3D parecer do Element 3D.
+  //
+  // A CONTA DO CEU/CHAO E A MESMA DO PINTOR DE CPU (o `environmentColor` do
   // `scene3d.dart`), e nao uma invencao deste shader: o mesmo material tem de
   // sair parecido nos dois caminhos, senao o dono ve a cena mudar de tom
-  // quando ela cai na GPU.
+  // quando ela cai na GPU. O MAPA SAI DESSE MESMO `environmentColor` — ele
+  // nao e uma foto de terceiros, e o estudio que o aplicativo ja desenhava.
   float oclusao = oclusao_de_ambiente();
 
   // O AMBIENTE DA CENA E A ESCALA, E O CEU/CHAO SO DAO A DIRECAO.
@@ -339,12 +360,31 @@ void main() {
   // ceu, a que aponta para o chao devolve chao, e o olho le isso como
   // reflexo.
   vec3 espelhado = reflect(-v, n);
-  vec3 refletido =
-      mix(u_quadro.chao.rgb / media, u_quadro.ceu.rgb / media,
-          espelhado.y * 0.5 + 0.5);
+  vec3 refletido;
+  if (u_quadro.mapa.x > 0.5) {
+    // O ESTUDIO. O NIVEL DO DESFOQUE E A RUGOSIDADE, e nao um borrado
+    // generico: cromo (rugosidade quase zero) devolve a softbox com a quina
+    // reta, e o aco escovado devolve a media de tudo — que e a diferenca
+    // entre um espelho e um metal fosco.
+    //
+    // O MAPA JA VEM COM A MEDIA EM 1 (quem cuida disso e o aplicativo) e
+    // entra multiplicado pelo ambiente da cena, que e quem diz QUANTA luz
+    // existe. Sem essa divisao, um estudio com picos de 14 estouraria a cena
+    // inteira para branco.
+    // O NIVEL DO DESFOQUE E A RUGOSIDADE, e nao zero. Com `lod` fixo em
+    // zero todo metal virava espelho: o aco escovado devolvia a softbox com
+    // a quina reta, que e o oposto do que a rugosidade quer dizer.
+    float lod = rugosidade * u_quadro.mapa.y;
+    refletido =
+        textureLod(tex_ambiente, direcao_para_uv(espelhado), lod).rgb * escala;
+  } else {
+    refletido = mix(u_quadro.chao.rgb / media, u_quadro.ceu.rgb / media,
+                    espelhado.y * 0.5 + 0.5) *
+                escala;
+  }
   // O REFLEXO TEM UMA FORCA PROPRIA, e ela vem da cena (`envReflect`). Em
   // zero, o especular do ambiente volta a ser o piso plano — o de antes.
-  vec3 devolvido = mix(u_quadro.ambiente.rgb, refletido * escala,
+  vec3 devolvido = mix(u_quadro.ambiente.rgb, refletido,
                        clamp(u_quadro.ceu.w, 0.0, 1.0));
   vec3 especular_ambiente = f0 * devolvido * mix(1.0, oclusao, 0.5);
 

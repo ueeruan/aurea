@@ -400,6 +400,28 @@ class ModelAsset3D {
       alphaCutoff: (m['cutoff'] as num? ?? .5).toDouble(),
       doubleSided: m['doubleSided'] == true,
       imagePath: m['image'] as String?,
+      normalPath: m['normalImage'] as String?,
+      metalRoughPath: m['metalRoughImage'] as String?,
+      emissivePath: m['emissiveImage'] as String?,
+      occlusionPath: m['occlusionImage'] as String?,
+      // A COR DO BRILHO PROPRIO SO EXISTE QUANDO NAO E PRETA. Um
+      // `emissiveFactor` de (0,0,0) — o padrao do glTF, e o que 90% dos
+      // arquivos trazem — viraria um `Color` preto, e preto nao e "sem
+      // emissivo": e "emissivo preto", que apaga a cor base do brilho.
+      emissiveColor: () {
+        final e = m['emissiveColor'];
+        if (e is! List || e.length < 3) return null;
+        final v = modelDoubles(e);
+        if (v[0] <= 0 && v[1] <= 0 && v[2] <= 0) return null;
+        return Color.from(
+          alpha: 1,
+          red: v[0].clamp(0.0, 1.0),
+          green: v[1].clamp(0.0, 1.0),
+          blue: v[2].clamp(0.0, 1.0),
+        );
+      }(),
+      normalStrength: (m['normalScale'] as num? ?? 1).toDouble(),
+      occlusionStrength: (m['occlusionStrength'] as num? ?? 1).toDouble(),
       textureWrapX: switch (m['wrapS'] ?? 10497) {
         33071 => TileMode.clamp,
         33648 => TileMode.mirror,

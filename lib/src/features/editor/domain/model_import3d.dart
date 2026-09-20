@@ -447,8 +447,38 @@ class _GltfReader {
     final materials = <Map<String, dynamic>>[];
     for (final m in list('materials')) {
       final pbr = m['pbrMetallicRoughness'] ?? {};
+
+      // OS CINCO MAPAS SAIEM PELO MESMO CAMINHO.
+      //
+      // Antes so o `baseColorTexture` era lido, e os outros quatro viravam
+      // um aviso — o modelo importava, aparecia, e o relevo, o metal por
+      // regiao e o brilho proprio simplesmente nao existiam. Como o arquivo
+      // ainda assim desenhava, nao havia nada a que ligar a diferenca entre
+      // o Aurea e o Blender do autor.
+      //
+      // A IMAGEM VIRA UM `data:` URI e nao um arquivo em disco: e a mesma
+      // chave que o `TextureCache` ja usa, entao o mesmo PNG e decodificado
+      // uma vez para o pintor de CPU e para a placa.
+      String? imagemDaTextura(Object? info) {
+        if (info is! Map) return null;
+        final indice = info['index'];
+        if (indice is! int) return null;
+        final texturas = list('textures');
+        if (indice < 0 || indice >= texturas.length) return null;
+        final td = texturas[indice];
+        final fonte = td['source'];
+        if (fonte is! int) return null;
+        final imagens = list('images');
+        if (fonte < 0 || fonte >= imagens.length) return null;
+        final im = imagens[fonte];
+        final pixels = im['uri'] != null
+            ? resource(im['uri'] as String)
+            : view(im['bufferView'] as int);
+        return 'data:${im['mimeType'] ?? 'application/octet-stream'};'
+            'base64,${base64Encode(pixels)}';
+      }
+
       final tex = pbr['baseColorTexture'];
-      String? image;
       var wrapS = 10497, wrapT = 10497;
       if (tex != null) {
         final td = list('textures')[tex['index'] as int];
@@ -457,21 +487,34 @@ class _GltfReader {
           wrapS = sampler['wrapS'] as int? ?? 10497;
           wrapT = sampler['wrapT'] as int? ?? 10497;
         }
-        final im = list('images')[td['source'] as int];
-        final pixels = im['uri'] != null
-            ? resource(im['uri'] as String)
-            : view(im['bufferView'] as int);
-        image =
-            'data:${im['mimeType'] ?? 'application/octet-stream'};base64,${base64Encode(pixels)}';
       }
-      if (m['normalTexture'] != null ||
-          m['occlusionTexture'] != null ||
-          pbr['metallicRoughnessTexture'] != null ||
-          m['emissiveTexture'] != null) {
-        warnings.add(
-          'Mapas normal/oclusao/metal-rugosidade/emissivo nao sao aplicados; fatores e textura de cor preservados.',
-        );
+      final image = imagemDaTextura(tex);
+      final normal = imagemDaTextura(m['normalTexture']);
+      final metalRug = imagemDaTextura(pbr['metallicRoughnessTexture']);
+      final emissiva = imagemDaTextura(m['emissiveTexture']);
+      final oclusao = imagemDaTextura(m['occlusionTexture']);
+
+      // O AVISO SOBROU SO PARA O QUE REALMENTE NAO ENTRA: um mapa declarado
+      // no arquivo cuja imagem nao pode ser resolvida (fonte fora da lista,
+      // `bufferView` quebrado). Avisar sobre o que JA funciona treinaria o
+      // dono a ignorar o aviso.
+      void conferir(Object? declarado, String? saiu, String nome) {
+        if (declarado != null && saiu == null) {
+          warnings.add('O mapa $nome do material nao pode ser lido.');
+        }
       }
+
+      conferir(m['normalTexture'], normal, 'de relevo');
+      conferir(pbr['metallicRoughnessTexture'], metalRug, 'de metal/rugosidade');
+      conferir(m['emissiveTexture'], emissiva, 'de brilho proprio');
+      conferir(m['occlusionTexture'], oclusao, 'de oclusao');
+
+      // O EMISSIVO E UMA COR, E NAO UM NUMERO.
+      //
+      // O `reduce(max)` de antes transformava (1; 0,2; 0) — um laranja — em
+      // "1", e o brilho proprio saia com a cor base em vez da cor que o
+      // autor escolheu. A forca continua existindo para o painel mexer; o
+      // que muda e que a COR agora atravessa.
       final emissive = modelDoubles(m['emissiveFactor'] ?? [0, 0, 0]);
       materials.add({
         'name': m['name'] ?? 'Material ${materials.length + 1}',
@@ -479,11 +522,19 @@ class _GltfReader {
         'metallic': pbr['metallicFactor'] ?? 1,
         'roughness': pbr['roughnessFactor'] ?? 1,
         'emissive': emissive.reduce(math.max),
+        'emissiveColor': emissive,
         'alpha': m['alphaMode'] ?? 'OPAQUE',
         'cutoff': m['alphaCutoff'] ?? .5,
         'doubleSided': m['doubleSided'] ?? false,
         'unlit': m['extensions']?['KHR_materials_unlit'] != null,
         'image': ?image,
+        'normalImage': ?normal,
+        'metalRoughImage': ?metalRug,
+        'emissiveImage': ?emissiva,
+        'occlusionImage': ?oclusao,
+        'normalScale': (m['normalTexture']?['scale'] as num? ?? 1).toDouble(),
+        'occlusionStrength':
+            (m['occlusionTexture']?['strength'] as num? ?? 1).toDouble(),
         'wrapS': wrapS,
         'wrapT': wrapT,
       });

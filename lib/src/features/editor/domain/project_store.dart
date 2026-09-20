@@ -31,7 +31,9 @@ import 'layer_meta.dart';
 import 'mask.dart';
 import 'model_asset3d.dart';
 import 'panorama3d.dart';
+import 'modelo_do_texto3d.dart';
 import 'scene3d.dart';
+import 'texto3d.dart';
 import 'shape.dart';
 import 'shape_ops.dart';
 import 'text_anim.dart';
@@ -1649,6 +1651,51 @@ ReflectionProbe3D _asProbe(Object? raw) {
   );
 }
 
+/// OS PARAMETROS DE UM TEXTO 3D, no projeto.
+///
+/// Eles NAO substituem a malha (`modelAsset`) — quem desenha e ela. Estes
+/// campos existem para a folha do texto 3D poder reabrir o que o dono
+/// escolheu e refazer a geometria quando ele mexer: da malha pronta nao se
+/// tira de volta o texto, a fonte nem a espessura.
+Map<String, dynamic> _texto3d(Texto3D t) => {
+  'texto': t.texto,
+  'familia': t.familia,
+  'tamanho': t.tamanho,
+  'espessura': t.espessura,
+  'chanfro': t.chanfro.name,
+  'larguraDoChanfro': t.larguraDoChanfro,
+  'segmentosDoChanfro': t.segmentosDoChanfro,
+  'espacamento': t.espacamento,
+  'qualidade': t.qualidade.name,
+  'separarLetras': t.separarLetras,
+};
+
+Texto3D? _asTexto3D(Object? json) {
+  if (json is! Map) return null;
+  final texto = json['texto'] as String?;
+  if (texto == null) return null;
+  return Texto3D(
+    texto: texto,
+    familia: json['familia'] as String? ?? 'Aurea Motion Sans',
+    tamanho: (json['tamanho'] as num?)?.toDouble() ?? 100,
+    espessura: (json['espessura'] as num?)?.toDouble() ?? 24,
+    chanfro: _enumValue(
+      json['chanfro'],
+      TipoDeChanfro.values,
+      TipoDeChanfro.redondo,
+    ),
+    larguraDoChanfro: (json['larguraDoChanfro'] as num?)?.toDouble() ?? 3,
+    segmentosDoChanfro: (json['segmentosDoChanfro'] as num?)?.toInt() ?? 3,
+    espacamento: (json['espacamento'] as num?)?.toDouble() ?? 0,
+    qualidade: _enumValue(
+      json['qualidade'],
+      QualidadeDoTexto3D.values,
+      QualidadeDoTexto3D.media,
+    ),
+    separarLetras: json['separarLetras'] as bool? ?? false,
+  );
+}
+
 Map<String, dynamic> _material(Material3D mat) => {
   'n': mat.name,
   'c': _col(mat.baseColor),
@@ -1660,6 +1707,15 @@ Map<String, dynamic> _material(Material3D mat) => {
   if (mat.textureLayerId != null) 'tex': mat.textureLayerId,
   if (mat.reflectivity != 0) 'refl': mat.reflectivity,
   if (mat.imagePath != null) 'img': mat.imagePath,
+  // OS OUTROS QUATRO MAPAS. Um projeto salvo com relevo e metal por regiao
+  // tem de reabrir com eles: sem estas linhas, fechar e abrir devolvia o
+  // material aos numeros do painel e o modelo ficava liso — um "funcionou
+  // ate eu salvar" que so aparece no dia seguinte.
+  if (mat.normalPath != null) 'imgN': mat.normalPath,
+  if (mat.metalRoughPath != null) 'imgMR': mat.metalRoughPath,
+  if (mat.emissivePath != null) 'imgE': mat.emissivePath,
+  if (mat.occlusionPath != null) 'imgO': mat.occlusionPath,
+  if (mat.emissiveColor != null) 'emiC': _col(mat.emissiveColor!),
   if (mat.faceImagePaths.isNotEmpty)
     'faces': {
       for (final entry in mat.faceImagePaths.entries)
@@ -1685,6 +1741,11 @@ Material3D _asMaterial(Map<String, dynamic> m) => Material3D(
   textureLayerId: m['tex'] as String?,
   reflectivity: (m['refl'] as num?)?.toDouble() ?? 0,
   imagePath: m['img'] as String?,
+  normalPath: m['imgN'] as String?,
+  metalRoughPath: m['imgMR'] as String?,
+  emissivePath: m['imgE'] as String?,
+  occlusionPath: m['imgO'] as String?,
+  emissiveColor: m['emiC'] == null ? null : _asCol(m['emiC']),
   textureWrapX: _enumValue(m['wrapX'], TileMode.values, TileMode.clamp),
   textureWrapY: _enumValue(m['wrapY'], TileMode.values, TileMode.clamp),
   faceImagePaths: {
@@ -1804,6 +1865,10 @@ Map<String, dynamic> _scene(Scene3D s) => {
         if (!n.credit.isEmpty) 'credit': _credit(n.credit),
         if (n.modelSource != null) 'modelSource': _modelSource(n.modelSource!),
         if (n.animationClip != null) 'animationClip': n.animationClip,
+        if (n.texto3d != null) ...{
+          'texto3d': _texto3d(n.texto3d!),
+          'estilo3d': n.estiloTexto3d?.index,
+        },
         if (n.modelAsset != null) ...{
           'modelAsset': _peso(n.modelAsset!, () => n.modelAsset!.data),
           'modelMotion': n.modelMotion.toJson(),
@@ -1901,6 +1966,14 @@ SceneNode _asSceneNode(Map<String, dynamic> n) {
     subdivisions: (n['subdivisions'] as num?)?.toInt() ?? 0,
     credit: _asCredit(n['credit']),
     modelSource: _asModelSource(n['modelSource']),
+    texto3d: _asTexto3D(n['texto3d']),
+    estiloTexto3d: n['estilo3d'] == null
+        ? null
+        : _enumValue(
+            n['estilo3d'],
+            EstiloDoTexto3D.values,
+            EstiloDoTexto3D.ouro,
+          ),
     animationClip: n['animationClip'] as String?,
     modelAsset: _asModelAsset(n['modelAsset']),
     modelMotion: ModelMotion3D.fromJson(n['modelMotion']),

@@ -223,6 +223,16 @@ struct Cena3D {
   /// com a cor da reflexao ambiente chapada.
   float reflexo_do_ambiente = 0.0F;
 
+  /// O MAPA DE AMBIENTE: o estudio inteiro em radiancia linear, com a
+  /// cadeia de niveis ja desfocada. Nulo mantem o reflexo de duas cores
+  /// (ceu e chao), que e o comportamento antigo.
+  ///
+  /// O PONTEIRO VALE ATE O FIM DO DESENHO DAQUELE QUADRO. Quem chama e o
+  /// aplicativo, e ele mantem o buffer vivo enquanto o motor copia.
+  const float* mapa_de_ambiente = nullptr;
+  std::uint32_t mapa_de_ambiente_largura = 0;
+  std::uint32_t mapa_de_ambiente_niveis = 0;
+
   QualidadeDaSombra sombra = QualidadeDaSombra::desligada;
   /// Amostras por eixo do antisserrilhado da 3D (§29). 1 = sem.
   std::uint32_t amostras = 1;
@@ -292,6 +302,10 @@ struct Quadro3D {
   float ceu[3] = {1.0F, 1.0F, 1.0F};
   float chao[3] = {1.0F, 1.0F, 1.0F};
   float reflexo_do_ambiente = 0.0F;
+  /// O estudio que o metal reflete. Nulo = reflexo de duas cores.
+  const float* mapa_de_ambiente = nullptr;
+  std::uint32_t mapa_de_ambiente_largura = 0;
+  std::uint32_t mapa_de_ambiente_niveis = 0;
   QualidadeDaSombra sombra = QualidadeDaSombra::desligada;
   std::uint32_t amostras = 1;
   std::uint32_t largura = 0;

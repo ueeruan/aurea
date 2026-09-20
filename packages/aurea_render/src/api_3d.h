@@ -144,6 +144,19 @@ typedef struct Aurea3DCena {
   float reflexo_do_ambiente;
   float chao[3];
   float chao_reserva;
+
+  /// O MAPA DE AMBIENTE (o estudio que o metal reflete), em radiancia
+  /// LINEAR e ja normalizado — a media dele vale 1, e quem cuida disso e o
+  /// aplicativo. Nulo = "nao ha mapa": o reflexo volta a sair do ceu e do
+  /// chao, que e o comportamento de antes.
+  ///
+  /// OS NIVEIS VEM CONCATENADOS, do maior para o menor: o nivel `k` tem
+  /// `largura >> k` de largura por metade disso de altura, quatro floats
+  /// por pixel. O motor copia tudo antes de desenhar — o ponteiro so
+  /// precisa valer ate o retorno.
+  const float* ambiente_mapa;
+  uint32_t ambiente_mapa_largura;
+  uint32_t ambiente_mapa_niveis;
 } Aurea3DCena;
 
 typedef struct Aurea3DOpcoes {
@@ -236,6 +249,53 @@ typedef struct Aurea3DMalhaCrua {
   float rugosidade;
   float forca_emissiva;
   uint8_t emissivo[4];
+
+  // ===================== OS CINCO MAPAS DO PBR =========================
+  //
+  // RGBA8 CRU, `largura * altura * 4` bytes, sem cadeia de desfoque. NULO
+  // quer dizer "esta malha nao tem este mapa" — e o shader cai na neutra
+  // daquele canal (branca para a cor, plana para a normal), que e o mesmo
+  // caminho de um material feito so de numeros.
+  //
+  // POR QUE RGBA8 CRU, E NAO O PNG DE DENTRO DO ARQUIVO. Quem ja decodificou
+  // foi o Dart: o `TextureCache` do aplicativo precisa da mesma imagem para
+  // o pintor de CPU, e decodificar de novo aqui seria a segunda copia do
+  // mesmo PNG na memoria. O caminho do Assimp (`importar`) continua
+  // decodificando por conta propria, porque la ninguem decodificou antes.
+  //
+  // O PONTEIRO REPETIDO E UMA TEXTURA SO. Um modelo com quatro malhas que
+  // dividem o mesmo mapa de cor sobe UMA vez: o `criar_modelo` reconhece o
+  // ponteiro e reaproveita o indice. Sem isso, um atlas de 2048 quadrados
+  // viraria 64 MB na placa por causa de quatro chamadas de desenho.
+  //
+  // O ESPACO DE COR E DECIDIDO AQUI, e nao pelo chamador: cor e emissiva
+  // sao sRGB (sao cor), normal, metalico-rugosidade e oclusao sao lineares
+  // (sao dado). Deixar isso para quem chama daria a mesma textura em dois
+  // tons conforme o caminho (§6).
+  const uint8_t* textura_cor;
+  uint32_t textura_cor_largura;
+  uint32_t textura_cor_altura;
+
+  const uint8_t* textura_normal;
+  uint32_t textura_normal_largura;
+  uint32_t textura_normal_altura;
+
+  /// O VERDE E A RUGOSIDADE E O AZUL E O METALICO — a ordem do glTF.
+  const uint8_t* textura_metalico_rugosidade;
+  uint32_t textura_metalico_rugosidade_largura;
+  uint32_t textura_metalico_rugosidade_altura;
+
+  const uint8_t* textura_emissiva;
+  uint32_t textura_emissiva_largura;
+  uint32_t textura_emissiva_altura;
+
+  /// O VERMELHO E O VALOR — tambem a ordem do glTF.
+  const uint8_t* textura_oclusao;
+  uint32_t textura_oclusao_largura;
+  uint32_t textura_oclusao_altura;
+
+  /// Quanto da oclusao do mapa vale. 1 e o padrao do glTF.
+  float forca_da_oclusao;
 } Aurea3DMalhaCrua;
 
 /// QUAL STRUCT SE QUER MEDIR. O teste do lado Dart compara cada resposta

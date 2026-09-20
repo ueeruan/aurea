@@ -36,9 +36,11 @@
 
 #include <cmath>
 #include <cstring>
+#include <map>
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "base.h"
 #include "cena_3d.h"
@@ -72,7 +74,8 @@ namespace {
 //   1: preparar/pronto/motivo/backend. Nao desenhava nada.
 //   2: a cena inteira, o acervo, a importacao em dois tempos, as
 //      estatisticas e os pixels.
-constexpr std::int32_t kVersaoDaPorta = 2;
+//   3: o mapa de ambiente na cena (o estudio que o metal reflete).
+constexpr std::int32_t kVersaoDaPorta = 3;
 
 // OS TETOS DE SANIDADE DA ENTRADA. Nao sao limites de projeto: sao a
 // defesa contra um contador corrompido, que sem eles faria o motor varrer
@@ -285,6 +288,15 @@ NumerosDoQuadro& numeros() {
   saida.chao_verde = do_ceu(c->chao[1]);
   saida.chao_azul = do_ceu(c->chao[2]);
   saida.reflexo_do_ambiente = entre(c->reflexo_do_ambiente, 0.0F, 1.0F, 0.0F);
+  // O MAPA DE AMBIENTE. Ele e recusado inteiro quando a descricao nao fecha
+  // — um mapa pela metade desenharia um reflexo pela metade, e o defeito
+  // apareceria como "o metal ficou estranho" em vez de "o mapa nao subiu".
+  if (c->ambiente_mapa != nullptr && c->ambiente_mapa_largura >= 4 &&
+      c->ambiente_mapa_niveis > 0 && c->ambiente_mapa_niveis <= 16) {
+    saida.mapa_de_ambiente = c->ambiente_mapa;
+    saida.mapa_de_ambiente_largura = c->ambiente_mapa_largura;
+    saida.mapa_de_ambiente_niveis = c->ambiente_mapa_niveis;
+  }
   saida.sombra = (c->sombra >= 0 && c->sombra <= 3)
                      ? static_cast<QualidadeDaSombra>(c->sombra)
                      : QualidadeDaSombra::desligada;
@@ -630,6 +642,15 @@ AUREA_API std::int64_t aurea_render_3d_importar_memoria(
 /// chamador, e nao uma cena: o teto existe para recusar antes de percorrer.
 constexpr std::uint32_t kMaxMalhasCruas = 4096;
 
+/// O MAIOR LADO DE UM MAPA QUE ENTRA PELA PORTA DAS MALHAS CRUAS.
+///
+/// Oito mil e o teto de textura 2D de toda placa que roda Vulkan 1.1, e um
+/// mapa maior do que isso nao subiria de qualquer forma — recusar aqui da
+/// um codigo de erro em vez de uma textura nula que o desenho descobre tres
+/// camadas adiante. O numero tambem serve de peneira: um tamanho absurdo
+/// vindo de um arquivo corrompido nao vira uma multiplicacao que estoura.
+constexpr std::uint32_t kMaxLadoDeTextura = 8192;
+
 AUREA_API std::int64_t aurea_render_3d_criar_modelo(
     const Aurea3DMalhaCrua* malhas, std::uint32_t quantas,
     Aurea3DRelato* relato) {
@@ -676,6 +697,40 @@ AUREA_API std::int64_t aurea_render_3d_criar_modelo(
               sizeof(Vertice) +
           static_cast<std::uint64_t>(crua.quantidade_de_indices) *
               sizeof(std::uint32_t);
+      // OS MAPAS CONTAM NO ORCAMENTO, e nao so a geometria. Um modelo com
+      // cinco atlas de 2048 sao 84 MB de textura contra 2 MB de malha:
+      // conferir so a malha deixaria o teto do acervo (§21) sem efeito
+      // exatamente no caso em que ele importa.
+      const struct {
+        const std::uint8_t* pixels;
+        std::uint32_t largura;
+        std::uint32_t altura;
+      } mapas[5] = {
+          {crua.textura_cor, crua.textura_cor_largura,
+           crua.textura_cor_altura},
+          {crua.textura_normal, crua.textura_normal_largura,
+           crua.textura_normal_altura},
+          {crua.textura_metalico_rugosidade,
+           crua.textura_metalico_rugosidade_largura,
+           crua.textura_metalico_rugosidade_altura},
+          {crua.textura_emissiva, crua.textura_emissiva_largura,
+           crua.textura_emissiva_altura},
+          {crua.textura_oclusao, crua.textura_oclusao_largura,
+           crua.textura_oclusao_altura},
+      };
+      for (const auto& mapa : mapas) {
+        if (mapa.pixels == nullptr) continue;
+        // ZERO OU ABSURDO NAO E TEXTURA. Um tamanho invalido com ponteiro
+        // valido leria memoria alheia na copia — e a copia acontece logo
+        // abaixo, sem outra chance de conferir.
+        if (mapa.largura == 0 || mapa.altura == 0 ||
+            mapa.largura > kMaxLadoDeTextura ||
+            mapa.altura > kMaxLadoDeTextura) {
+          return -static_cast<std::int64_t>(Erro::argumento);
+        }
+        bytes_previstos += static_cast<std::uint64_t>(mapa.largura) *
+                           mapa.altura * 4ULL;
+      }
     }
     if (bytes_previstos > acervo().espaco_livre()) {
       return -static_cast<std::int64_t>(Erro::orcamento_estourado);
@@ -684,6 +739,59 @@ AUREA_API std::int64_t aurea_render_3d_criar_modelo(
     Modelo modelo;
     modelo.malhas.reserve(quantas);
     modelo.materiais.reserve(quantas);
+
+    // ================== OS MAPAS, UMA VEZ CADA =========================
+    //
+    // A CHAVE E O PONTEIRO. Quem monta as malhas do lado do Dart entrega o
+    // MESMO buffer para as malhas que dividem o material — e um modelo com
+    // vinte pecas e um atlas so entao paga o atlas uma vez. Comparar o
+    // CONTEUDO seria o certo em teoria e caro na pratica: dezesseis
+    // megabytes de memcmp por malha, num caminho que roda quando o dono
+    // aperta "Importar".
+    std::map<const std::uint8_t*, std::int32_t> mapas_vistos;
+    const auto adotar_mapa = [&](const std::uint8_t* pixels,
+                                 std::uint32_t largura, std::uint32_t altura,
+                                 bool srgb, const char* nome) -> std::int32_t {
+      if (pixels == nullptr || largura == 0 || altura == 0) return -1;
+      const auto visto = mapas_vistos.find(pixels);
+      if (visto != mapas_vistos.end()) return visto->second;
+      Textura textura;
+      textura.nome = nome;
+      textura.largura = largura;
+      textura.altura = altura;
+      textura.srgb = srgb;
+      const std::size_t bytes =
+          static_cast<std::size_t>(largura) * altura * 4U;
+      textura.pixels.assign(pixels, pixels + bytes);
+      // O ALFA DE VERDADE E CONFERIDO, e nao presumido pelo formato. O RGBA8
+      // sempre TEM quatro canais; o que decide se o material precisa de uma
+      // passada de transparencia e se algum pixel nao e opaco.
+      textura.tem_alfa = false;
+      for (std::size_t i = 3; i < bytes; i += 4) {
+        if (textura.pixels[i] != 255) {
+          textura.tem_alfa = true;
+          break;
+        }
+      }
+      const auto indice = static_cast<std::int32_t>(modelo.texturas.size());
+      // O CONTEUDO, E NAO SO O TAMANHO. "A textura subiu" nao quer dizer
+      // "a textura tem a imagem": um canal trocado ou um buffer branco
+      // sobem igualzinho. O canto e o meio bastam para reconhecer.
+      {
+        const std::size_t meio =
+            (static_cast<std::size_t>(altura / 2) * largura + largura / 2) * 4;
+        AUREA_LOG("    mapa %s %ux%u srgb=%d canto=(%u,%u,%u,%u) "
+                  "meio=(%u,%u,%u,%u)",
+                  nome, largura, altura, srgb ? 1 : 0, textura.pixels[0],
+                  textura.pixels[1], textura.pixels[2], textura.pixels[3],
+                  textura.pixels[meio], textura.pixels[meio + 1],
+                  textura.pixels[meio + 2], textura.pixels[meio + 3]);
+      }
+      modelo.bytes_de_textura += bytes;
+      modelo.texturas.push_back(std::move(textura));
+      mapas_vistos.emplace(pixels, indice);
+      return indice;
+    };
 
     for (std::uint32_t i = 0; i < quantas; ++i) {
       const Aurea3DMalhaCrua& crua = malhas[i];
@@ -799,6 +907,126 @@ AUREA_API std::int64_t aurea_render_3d_criar_modelo(
       material.alfa_corte = entre(crua.alfa_corte, 0.0F, 1.0F, 0.5F);
       material.face_dupla = crua.face_dupla != 0;
 
+      // OS MAPAS. O ESPACO DE COR E DECIDIDO AQUI: cor e emissiva sao COR e
+      // sobem em sRGB; normal, metalico-rugosidade e oclusao sao DADO e
+      // sobem crus. Converter um dado como se fosse cor deixa a rugosidade
+      // de 0,5 valendo 0,21 na placa — um modelo inteiro sai mais liso do
+      // que o autor desenhou, e nada acusa.
+      material.textura_cor =
+          adotar_mapa(crua.textura_cor, crua.textura_cor_largura,
+                      crua.textura_cor_altura, true, "cor");
+      material.textura_normal =
+          adotar_mapa(crua.textura_normal, crua.textura_normal_largura,
+                      crua.textura_normal_altura, false, "normal");
+      material.textura_metalico_rugosidade =
+          adotar_mapa(crua.textura_metalico_rugosidade,
+                      crua.textura_metalico_rugosidade_largura,
+                      crua.textura_metalico_rugosidade_altura, false,
+                      "metalico-rugosidade");
+      material.textura_emissiva =
+          adotar_mapa(crua.textura_emissiva, crua.textura_emissiva_largura,
+                      crua.textura_emissiva_altura, true, "emissiva");
+      material.textura_oclusao =
+          adotar_mapa(crua.textura_oclusao, crua.textura_oclusao_largura,
+                      crua.textura_oclusao_altura, false, "oclusao");
+      material.forca_da_oclusao =
+          entre(crua.forca_da_oclusao, 0.0F, 1.0F, 1.0F);
+
+      // ===================== A TANGENTE, QUANDO HA NORMAL ================
+      //
+      // UM MAPA DE NORMAL SEM TANGENTE NAO E UM RELEVO FRACO: E NaN.
+      //
+      // O shader monta a base com `normalize(t - n * dot(n, t))`. Com a
+      // tangente em (0,0,0) — que e como o `Vertice` nasce — isso e
+      // `normalize(vec3(0))`, ou seja divisao por zero: a normal vira NaN, e
+      // com ela a luz, o reflexo e a cor. O pixel sai preto ou branco
+      // conforme o driver, e nem a placa nem a validacao acusam nada.
+      //
+      // O CAMINHO DO ASSIMP JA TRAZ A TANGENTE do arquivo. Esta porta nao
+      // tem de onde trazer: quem monta a malha do lado do Dart tem posicao,
+      // normal e UV, e a tangente SAI DESSES TRES. E a conta classica — a
+      // derivada da posicao em relacao ao U, ortogonalizada contra a normal
+      // — acumulada por vertice para a costura entre dois triangulos nao
+      // aparecer como um vinco.
+      if (material.textura_normal >= 0 && crua.uvs != nullptr) {
+        std::vector<Vec3> acumulado(nv, Vec3{0.0F, 0.0F, 0.0F});
+        std::vector<Vec3> acumulado_b(nv, Vec3{0.0F, 0.0F, 0.0F});
+        for (std::uint32_t t = 0; t + 2 < ni; t += 3) {
+          const std::uint32_t i0 = crua.indices[t + 0];
+          const std::uint32_t i1 = crua.indices[t + 1];
+          const std::uint32_t i2 = crua.indices[t + 2];
+          const Vec3& p0 = malha.vertices[i0].posicao;
+          const Vec3& p1 = malha.vertices[i1].posicao;
+          const Vec3& p2 = malha.vertices[i2].posicao;
+          const Vec2& w0 = malha.vertices[i0].uv0;
+          const Vec2& w1 = malha.vertices[i1].uv0;
+          const Vec2& w2 = malha.vertices[i2].uv0;
+          const Vec3 e1{p1.x - p0.x, p1.y - p0.y, p1.z - p0.z};
+          const Vec3 e2{p2.x - p0.x, p2.y - p0.y, p2.z - p0.z};
+          const float du1 = w1.x - w0.x, dv1 = w1.y - w0.y;
+          const float du2 = w2.x - w0.x, dv2 = w2.y - w0.y;
+          const float determinante = du1 * dv2 - du2 * dv1;
+          // UM TRIANGULO COM UV DEGENERADA NAO TEM TANGENTE. Tres vertices
+          // no mesmo ponto do mapa (acontece em face de cor lisa) dariam uma
+          // divisao por zero; deixar de fora e o certo, porque os vizinhos
+          // de UV boa resolvem o vertice.
+          if (determinante > -1.0e-12F && determinante < 1.0e-12F) continue;
+          const float inverso = 1.0F / determinante;
+          const Vec3 tangente{(e1.x * dv2 - e2.x * dv1) * inverso,
+                              (e1.y * dv2 - e2.y * dv1) * inverso,
+                              (e1.z * dv2 - e2.z * dv1) * inverso};
+          const Vec3 bitangente{(e2.x * du1 - e1.x * du2) * inverso,
+                                (e2.y * du1 - e1.y * du2) * inverso,
+                                (e2.z * du1 - e1.z * du2) * inverso};
+          const std::uint32_t tres[3] = {i0, i1, i2};
+          for (const std::uint32_t indice : tres) {
+            acumulado[indice] = Vec3{acumulado[indice].x + tangente.x,
+                                     acumulado[indice].y + tangente.y,
+                                     acumulado[indice].z + tangente.z};
+            acumulado_b[indice] = Vec3{acumulado_b[indice].x + bitangente.x,
+                                       acumulado_b[indice].y + bitangente.y,
+                                       acumulado_b[indice].z + bitangente.z};
+          }
+        }
+        for (std::uint32_t j = 0; j < nv; ++j) {
+          Vertice& v = malha.vertices[j];
+          const Vec3& n = v.normal;
+          Vec3 t = acumulado[j];
+          // Gram-Schmidt: a tangente fica no plano da superficie.
+          const float projecao = t.x * n.x + t.y * n.y + t.z * n.z;
+          t = Vec3{t.x - n.x * projecao, t.y - n.y * projecao,
+                   t.z - n.z * projecao};
+          float comprimento2 = t.x * t.x + t.y * t.y + t.z * t.z;
+          if (comprimento2 < 1.0e-20F) {
+            // SEM TANGENTE UTIL, UMA PERPENDICULAR QUALQUER — e nunca o
+            // vetor nulo. O relevo sai na direcao errada naquele vertice, e
+            // isso e visivel; um NaN apaga o pixel inteiro, e isso e um bug.
+            const Vec3 eixo = (n.x * n.x > 0.9F) ? Vec3{0.0F, 1.0F, 0.0F}
+                                                 : Vec3{1.0F, 0.0F, 0.0F};
+            t = Vec3{n.y * eixo.z - n.z * eixo.y, n.z * eixo.x - n.x * eixo.z,
+                     n.x * eixo.y - n.y * eixo.x};
+            comprimento2 = t.x * t.x + t.y * t.y + t.z * t.z;
+            if (comprimento2 < 1.0e-20F) {
+              t = Vec3{1.0F, 0.0F, 0.0F};
+              comprimento2 = 1.0F;
+            }
+          }
+          const float escala = 1.0F / std::sqrt(comprimento2);
+          // O SINAL DIZ PARA QUE LADO APONTA A BITANGENTE. Um modelo
+          // espelhado (UV invertida de um lado) fica com o relevo ao
+          // contrario sem ele — o classico "a costura de um lado funda e do
+          // outro alta".
+          const Vec3 cruzado{n.y * t.z - n.z * t.y, n.z * t.x - n.x * t.z,
+                             n.x * t.y - n.y * t.x};
+          const Vec3& b = acumulado_b[j];
+          const float sinal =
+              (cruzado.x * b.x + cruzado.y * b.y + cruzado.z * b.z) < 0.0F
+                  ? -1.0F
+                  : 1.0F;
+          v.tangente = Vec4{t.x * escala, t.y * escala, t.z * escala, sinal};
+        }
+      }
+
       Faixa faixa;
       faixa.primeiro_indice = 0;
       faixa.quantidade = ni;
@@ -830,6 +1058,17 @@ AUREA_API std::int64_t aurea_render_3d_criar_modelo(
       if (!malha.limites.vazia) modelo.limites.incluir(malha.limites);
     }
 
+    AUREA_LOG("criar_modelo: %u malhas, %u texturas adotadas",
+              quantas, static_cast<unsigned>(modelo.texturas.size()));
+    for (std::size_t k = 0; k < modelo.materiais.size(); ++k) {
+      const Material& mat = modelo.materiais[k];
+      AUREA_LOG("  crua %u: cor=%d normal=%d mr=%d emi=%d ocl=%d "
+                "metalico=%.2f rug=%.2f",
+                static_cast<unsigned>(k), mat.textura_cor, mat.textura_normal,
+                mat.textura_metalico_rugosidade, mat.textura_emissiva,
+                mat.textura_oclusao, static_cast<double>(mat.metalico),
+                static_cast<double>(mat.rugosidade));
+    }
     const std::int32_t alca = acervo().guardar(std::move(modelo));
     if (relato != nullptr) {
       const Modelo* guardado = acervo().obter(alca);
@@ -1162,7 +1401,9 @@ static_assert(sizeof(Aurea3DCamada) == 128, "Aurea3DCamada mudou de tamanho");
 static_assert(sizeof(Aurea3DLuz) == 60, "Aurea3DLuz mudou de tamanho");
 // 32 bytes a mais desde que a cena ganhou ceu, chao e a forca do reflexo do
 // ambiente — o ambiente plano nao faz metal (§ o ambiente com direcao).
-static_assert(sizeof(Aurea3DCena) == (sizeof(void*) == 8 ? 160 : 152),
+// 16 a mais desde o mapa de ambiente: o ponteiro (8 no arm64, 4 no armv7) e
+// os dois inteiros que dizem o tamanho e quantos niveis ele tem.
+static_assert(sizeof(Aurea3DCena) == (sizeof(void*) == 8 ? 176 : 164),
               "Aurea3DCena mudou de tamanho");
 static_assert(sizeof(Aurea3DOpcoes) == 24, "Aurea3DOpcoes mudou de tamanho");
 static_assert(sizeof(Aurea3DRelato) == 56, "Aurea3DRelato mudou de tamanho");
@@ -1170,5 +1411,5 @@ static_assert(sizeof(Aurea3DFicha) == 80, "Aurea3DFicha mudou de tamanho");
 // OS PONTEIROS MUDAM COM A ABI: sao 40 bytes no arm64 e 20 no armv7. O
 // restante da struct nao muda. Conferir os dois tamanhos aqui impede o APK
 // 32-bit de ser recusado sem enfraquecer a garantia do layout.
-static_assert(sizeof(Aurea3DMalhaCrua) == (sizeof(void*) == 8 ? 80 : 60),
+static_assert(sizeof(Aurea3DMalhaCrua) == (sizeof(void*) == 8 ? 168 : 124),
               "Aurea3DMalhaCrua mudou de tamanho");

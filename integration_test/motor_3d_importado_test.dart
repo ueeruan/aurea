@@ -562,6 +562,88 @@ void main() {
     motor.limpar();
   });
 
+  Future<String> _contraste(VideoProject projeto, Scene3DLayer cena, Motor3DNativo motor) async {
+    final valores = <int>[];
+    final cru = <Uint8List>[];
+    // AS QUATRO VARIANTES. As duas primeiras trocam o MAPA; as duas ultimas
+    // nao mexem no mapa e sim em dois campos do bloco `Quadro` (o reflexo e o
+    // ambiente). Se NENHUMA das quatro mudar um pixel, o defeito nao esta no
+    // mapa: esta no bloco, que nao chega ao shader.
+    final variantes = <(String, EnvironmentKind, double?, double?)>[
+      ('estudio', EnvironmentKind.estudioMetal, 0.9, null),
+      ('branco', EnvironmentKind.branco, 0.9, null),
+      ('reflexo-zero', EnvironmentKind.estudioMetal, 0.0, null),
+      ('ambiente-um', EnvironmentKind.estudioMetal, 0.9, 1.0),
+    ];
+    for (final (rotulo, kind, reflexo, ambiente) in variantes) {
+      final camada = cena.copyScene(
+        scene: cena.scene.copyWith(
+          environment: kind,
+          envReflect: reflexo ?? 0.9,
+          ambient: ambiente,
+        ),
+      );
+      final estado = estado3DDoQuadro(
+        project: projeto,
+        l: camada,
+        local: Duration.zero,
+        global: Duration.zero,
+        largura: 512,
+        altura: 512,
+      );
+      motor.montar(
+        cena: estado.cena,
+        camera: estado.camera,
+        local: Duration.zero,
+        largura: 512,
+        altura: 512,
+        aspectoDaComposicao: 1,
+        sombra: 0,
+        amostras: 1,
+      );
+      final imagem = (await motor.quadroEsperando('var$rotulo'))!;
+      final d = (await imagem.toByteData(format: ui.ImageByteFormat.rawRgba))!;
+      final b = d.buffer.asUint8List();
+      cru.add(b);
+      final lum = <int>[];
+      var somaR = 0, somaG = 0, somaB = 0;
+      for (var i = 0; i + 3 < b.length; i += 4) {
+        if (b[i + 3] < 8) continue;
+        lum.add((b[i] * 299 + b[i + 1] * 587 + b[i + 2] * 114) ~/ 1000);
+        somaR += b[i];
+        somaG += b[i + 1];
+        somaB += b[i + 2];
+      }
+      lum.sort();
+      final p05 = lum[(lum.length * 0.05).round()];
+      final p95 = lum[(lum.length * 0.95).round()];
+      valores.add(p95 - p05);
+      final centro = (256 * 512 + 256) * 4;
+      // ignore: avoid_print
+      print('  $rotulo: pixels=${lum.length} p05=$p05 p95=$p95 '
+          'media=rgb(${somaR ~/ lum.length}, ${somaG ~/ lum.length}, '
+          '${somaB ~/ lum.length}) '
+          'centro=rgb(${b[centro]}, ${b[centro + 1]}, ${b[centro + 2]}) '
+          'alfa=${b[centro + 3]} '
+          'erro="${Motor3D.ultimoErro}"');
+    }
+    for (var v = 1; v < cru.length; v++) {
+      var diferentes = 0;
+      final menor =
+          cru[0].length < cru[v].length ? cru[0].length : cru[v].length;
+      for (var i = 0; i < menor; i++) {
+        if (cru[0][i] != cru[v][i]) diferentes++;
+      }
+      // ignore: avoid_print
+      print('  PIXELS DIFERENTES contra estudio: '
+          '${variantes[v].$1} = $diferentes de $menor');
+    }
+    motor.limpar();
+    // O NUMERO QUE VALE: trocar de estudio tem de mexer na imagem. Zero aqui
+    // significa metal refletindo o mesmo estudio em todos os casos.
+    return 'estudio=${valores[0]} branco=${valores[1]}';
+  }
+
   test('o DIAL de giro da camada gira o texto 3D de verdade', () async {
     // O RELATO DO DONO, com print: um "Texto 3D" girado em -64 graus em Y
     // continuava chapado — "um fake 3D". O giro da camada era aplicado
@@ -617,6 +699,13 @@ void main() {
 
     final deFrente = await comGiro(0);
     final deLado = await comGiro(-64.1);
+
+    // O ESTUDIO DO METAL: com o mapa, a letra deixa de ser um degrade liso e
+    // ganha as softboxes refletidas — o brilho se espalha por uma faixa
+    // larga de valores. Medido pelo contraste do que apareceu.
+    final contraste = await _contraste(projeto, cena, motor);
+    // ignore: avoid_print
+    print('CONTRASTE DO TEXTO: $contraste');
     // ignore: avoid_print
     print('TEXTO 3D DE FRENTE: $deFrente');
     // ignore: avoid_print

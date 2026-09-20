@@ -48,6 +48,9 @@ layout(binding = 0) uniform Quadro {
   vec4 olho;        // xyz = olho, w = sombra ligada (0/1)
   vec4 ambiente;    // rgb = ambiente linear
   vec4 ajustes;     // x = quantas luzes, y = PCF, z = tamanho do mapa, w = inclinacao
+  vec4 ceu;         // rgb = cor de cima (linear), w = reflexo do ambiente
+  vec4 chao;        // rgb = cor de baixo (linear)
+  vec4 mapa;        // x = tem mapa de ambiente, y = nivel mais alto da cadeia
 } u_quadro;
 
 // O BLOCO E O MESMO NO VERTICE E NO FRAGMENTO, CAMPO A CAMPO. O std140

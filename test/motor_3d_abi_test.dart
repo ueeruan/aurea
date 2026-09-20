@@ -22,12 +22,16 @@ void main() {
       'material': 40,
       'camada': 128,
       'luz': 60,
-      // 32 bytes a mais: o ceu, o chao e a forca do reflexo do ambiente.
-      'cena': 160,
+      // O CEU, O CHAO, A FORCA DO REFLEXO E O MAPA DE AMBIENTE (ponteiro,
+      // largura e niveis). Em 64 bits, 176; o `static_assert` do
+      // `api_3d.cpp` diz 164 em 32 bits, e o teste roda em 64.
+      'cena': 176,
       'relato': 56,
       'ficha': 80,
       'opcoes': 24,
-      'malhaCrua': 80,
+      // OS CINCO MAPAS DO PBR entraram no fim da malha crua: cinco
+      // ponteiros, dez tamanhos e a forca da oclusao. 80 -> 168.
+      'malhaCrua': 168,
     };
 
     test('o Dart declara cada struct do tamanho do C++', () {

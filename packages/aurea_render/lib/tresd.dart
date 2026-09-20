@@ -30,7 +30,7 @@ part of 'aurea_render.dart';
 
 /// A VERSAO DESTA PORTA. Separada da versao do 2D: o 3D entra e sai sem
 /// mexer no que ja funciona, e um Dart antigo simplesmente nao chama.
-const int versaoEsperadaDaPorta3D = 2;
+const int versaoEsperadaDaPorta3D = 3;
 
 /// OS INDICES DE [Motor3D.tamanhos], na mesma ordem do enum do C++.
 abstract final class Tamanho3D {
@@ -386,6 +386,21 @@ final class _Cena3DC extends Struct {
   external double chaoB;
   @Float()
   external double chaoReserva;
+
+  // -------------------------------------------------- o mapa de ambiente
+  //
+  // O CEU E O CHAO NAO FAZEM METAL SOZINHOS. Duas cores dao um gradiente
+  // liso: o ouro fica um bronze fosco, sem nenhuma softbox desenhando a
+  // quina. O mapa e o estudio inteiro, e o reflexo passa a ser o que esta
+  // naquela direcao.
+  //
+  // O ponteiro so aponta para os floats; o motor copia tudo antes de
+  // desenhar. Zero quer dizer "nao ha mapa", e ai vale o ceu e o chao.
+  external Pointer<Float> ambienteMapa;
+  @Uint32()
+  external int ambienteMapaLargura;
+  @Uint32()
+  external int ambienteMapaNiveis;
 }
 
 /// A MALHA CRUA. CINCO PONTEIROS E OS CAMPOS DO MATERIAL.
@@ -436,6 +451,42 @@ final class _MalhaCrua3DC extends Struct {
   external int emissivoB;
   @Uint8()
   external int emissivoA;
+
+  // OS CINCO MAPAS. A ORDEM E O TIPO SAO OS DO `Aurea3DMalhaCrua` — um
+  // campo fora de lugar aqui nao da erro nenhum: a placa le o tamanho de
+  // uma textura no ponteiro da seguinte.
+  external Pointer<Uint8> texturaCor;
+  @Uint32()
+  external int texturaCorLargura;
+  @Uint32()
+  external int texturaCorAltura;
+
+  external Pointer<Uint8> texturaNormal;
+  @Uint32()
+  external int texturaNormalLargura;
+  @Uint32()
+  external int texturaNormalAltura;
+
+  external Pointer<Uint8> texturaMetalicoRugosidade;
+  @Uint32()
+  external int texturaMetalicoRugosidadeLargura;
+  @Uint32()
+  external int texturaMetalicoRugosidadeAltura;
+
+  external Pointer<Uint8> texturaEmissiva;
+  @Uint32()
+  external int texturaEmissivaLargura;
+  @Uint32()
+  external int texturaEmissivaAltura;
+
+  external Pointer<Uint8> texturaOclusao;
+  @Uint32()
+  external int texturaOclusaoLargura;
+  @Uint32()
+  external int texturaOclusaoAltura;
+
+  @Float()
+  external double forcaDaOclusao;
 }
 
 final class _Opcoes3DC extends Struct {
@@ -921,6 +972,27 @@ class MaterialDaCamada3D {
   }
 }
 
+/// UM MAPA JA DECODIFICADO, do jeito que a placa quer.
+///
+/// RGBA8, `largura * altura * 4` bytes, sem cadeia de desfoque. Quem
+/// decodifica e o aplicativo (o `CacheDeTexturas3D`), porque ele ja precisa
+/// da mesma imagem para o pintor de CPU — decodificar de novo dentro do
+/// motor seria a segunda copia do mesmo PNG na memoria.
+///
+/// A MESMA INSTANCIA EM DUAS MALHAS SOBE UMA VEZ SO. O motor reconhece o
+/// ponteiro repetido: um modelo de vinte pecas com um atlas so paga o atlas
+/// uma vez, e nao vinte.
+class TexturaCrua3D {
+  const TexturaCrua3D(this.pixels, this.largura, this.altura);
+
+  final Uint8List pixels;
+  final int largura;
+  final int altura;
+
+  bool get valida =>
+      largura > 0 && altura > 0 && pixels.length >= largura * altura * 4;
+}
+
 /// UMA MALHA QUE NAO VEIO DE ARQUIVO.
 ///
 /// CINCO VETORES, e todos no formato que a GPU ja quer. [normais] em nulo
@@ -945,6 +1017,12 @@ class MalhaCrua3D {
     this.modo = 0,
     this.alfaCorte = 0.5,
     this.faceDupla = false,
+    this.texturaCor,
+    this.texturaNormal,
+    this.texturaMetalicoRugosidade,
+    this.texturaEmissiva,
+    this.texturaOclusao,
+    this.forcaDaOclusao = 1,
     int? quantidadeDeVertices,
     int? quantidadeDeIndices,
   }) : quantidadeDeVertices = quantidadeDeVertices ?? posicoes.length ~/ 3,
@@ -974,6 +1052,21 @@ class MalhaCrua3D {
   final int modo;
   final double alfaCorte;
   final bool faceDupla;
+
+  /// OS CINCO MAPAS DO PBR. Nulo quer dizer "este material nao tem este
+  /// mapa", e o shader cai na neutra do canal — o mesmo caminho de um
+  /// material feito so de numeros.
+  ///
+  /// A COR E A EMISSIVA SOBEM EM sRGB e as outras tres cruas; quem decide
+  /// isso e o motor, e nao quem chama, para a mesma imagem nao sair em dois
+  /// tons conforme o caminho.
+  final TexturaCrua3D? texturaCor;
+  final TexturaCrua3D? texturaNormal;
+  final TexturaCrua3D? texturaMetalicoRugosidade;
+  final TexturaCrua3D? texturaEmissiva;
+  final TexturaCrua3D? texturaOclusao;
+
+  final double forcaDaOclusao;
 }
 
 /// UMA CAMADA 3D DA TIMELINE, JA RESOLVIDA PELO AVALIADOR DO DART.
@@ -1136,6 +1229,20 @@ class Cena3D {
   /// Quanto do ambiente volta no reflexo espelhado. E o que separa um metal
   /// de um plastico: em 1 o metal espelha o ambiente inteiro.
   double reflexoDoAmbiente = 0.0;
+
+  /// O MAPA DE AMBIENTE — o estudio que o metal reflete (§IBL).
+  ///
+  /// Nulo e o caminho de antes: o reflexo sai do ceu e do chao, duas cores.
+  /// Com o mapa, o que a superficie devolve e o que esta NAQUELA direcao —
+  /// a softbox esticada na lateral do chanfro, o escuro entre uma luz e
+  /// outra. E a diferenca entre bronze fosco e metal.
+  ///
+  /// Os niveis vem CONCATENADOS e ja normalizados (media 1), do maior para
+  /// o menor; [ambienteMapaLargura] e o lado do maior e a altura e sempre
+  /// a metade. Quem monta isso e o [mapaDeAmbiente3D] do aplicativo.
+  Float32List? ambienteMapa;
+  int ambienteMapaLargura = 0;
+  int ambienteMapaNiveis = 0;
 
   /// 0 desligada, 1 baixa, 2 media, 3 alta.
   int sombra = 0;
@@ -1445,6 +1552,8 @@ abstract final class Motor3D {
     // cinco vetores por malha, e um `return` no meio sem passar pelo
     // `finally` vazaria todos eles.
     final alocados = <Pointer<Uint8>>[];
+    // O MESMO MAPA EMPRESTADO UMA VEZ SO, pela IDENTIDADE da lista de bytes.
+    final vistos = <Uint8List, Pointer<Uint8>>{};
     try {
       for (var i = 0; i < malhas.length; i++) {
         final m = malhas[i];
@@ -1487,6 +1596,53 @@ abstract final class Motor3D {
         d.emissivoG = m.emissivo.g;
         d.emissivoB = m.emissivo.b;
         d.emissivoA = m.emissivo.a;
+
+        // OS MAPAS. A MESMA `Uint8List` EM DUAS MALHAS SO E COPIADA UMA VEZ
+        // — e o mesmo endereco chega ao motor nas duas, que e como ele
+        // reconhece que o atlas e o mesmo. Sem o `vistos`, um modelo de
+        // vinte pecas mandaria vinte copias do mesmo mapa pela porta e a
+        // placa guardaria vinte texturas iguais.
+        void mapa(
+          TexturaCrua3D? t,
+          void Function(Pointer<Uint8> p, int l, int a) grava,
+        ) {
+          if (t == null || !t.valida) {
+            grava(nullptr, 0, 0);
+            return;
+          }
+          final ponteiro = vistos.putIfAbsent(
+            t.pixels,
+            () => _emprestar(alocados, t.pixels),
+          );
+          grava(ponteiro, t.largura, t.altura);
+        }
+
+        mapa(m.texturaCor, (p, l, a) {
+          d.texturaCor = p;
+          d.texturaCorLargura = l;
+          d.texturaCorAltura = a;
+        });
+        mapa(m.texturaNormal, (p, l, a) {
+          d.texturaNormal = p;
+          d.texturaNormalLargura = l;
+          d.texturaNormalAltura = a;
+        });
+        mapa(m.texturaMetalicoRugosidade, (p, l, a) {
+          d.texturaMetalicoRugosidade = p;
+          d.texturaMetalicoRugosidadeLargura = l;
+          d.texturaMetalicoRugosidadeAltura = a;
+        });
+        mapa(m.texturaEmissiva, (p, l, a) {
+          d.texturaEmissiva = p;
+          d.texturaEmissivaLargura = l;
+          d.texturaEmissivaAltura = a;
+        });
+        mapa(m.texturaOclusao, (p, l, a) {
+          d.texturaOclusao = p;
+          d.texturaOclusaoLargura = l;
+          d.texturaOclusaoAltura = a;
+        });
+        d.forcaDaOclusao = m.forcaDaOclusao.clamp(0.0, 1.0);
       }
 
       final r = _tresdCriarModelo(pMalhas, malhas.length, pRelato);
@@ -1752,6 +1908,14 @@ class Ponte3D {
   Pointer<_Luz3DC>? _luzes;
   int _luzesReservadas = 0;
 
+  /// O MAPA DE AMBIENTE COPIADO PARA A MEMORIA DO MOTOR, e o mapa de onde
+  /// ele veio. A copia so acontece quando o mapa TROCA — ele e o mesmo em
+  /// todo quadro de uma mesma cena, e copiar 170 KB por quadro seria pagar
+  /// por nada.
+  Pointer<Float>? _ambiente;
+  int _ambienteReservado = 0;
+  Float32List? _ambienteDeOnde;
+
   bool _desenhou = false;
   bool _semGeometria = true;
   int _largura = 0;
@@ -1811,6 +1975,26 @@ class Ponte3D {
     c.chaoG = cena.chaoG;
     c.chaoB = cena.chaoB;
     c.chaoReserva = 1.0;
+
+    // O MAPA DE AMBIENTE: uma copia, e so quando ele troca.
+    final mapa = cena.ambienteMapa;
+    if (mapa == null || mapa.isEmpty || cena.ambienteMapaNiveis <= 0) {
+      c.ambienteMapa = nullptr;
+      c.ambienteMapaLargura = 0;
+      c.ambienteMapaNiveis = 0;
+      _ambienteDeOnde = null;
+    } else {
+      if (!identical(_ambienteDeOnde, mapa) || _ambienteReservado < mapa.length) {
+        if (_ambiente != null) calloc.free(_ambiente!);
+        _ambienteReservado = mapa.length;
+        _ambiente = calloc<Float>(_ambienteReservado);
+        _ambiente!.asTypedList(mapa.length).setAll(0, mapa);
+        _ambienteDeOnde = mapa;
+      }
+      c.ambienteMapa = _ambiente!;
+      c.ambienteMapaLargura = cena.ambienteMapaLargura;
+      c.ambienteMapaNiveis = cena.ambienteMapaNiveis;
+    }
     final cam = cena.camera;
     c.cameraPosicaoX = cam.posicaoX;
     c.cameraPosicaoY = cam.posicaoY;
@@ -1870,6 +2054,12 @@ class Ponte3D {
     if (_luzes != null) {
       calloc.free(_luzes!);
       _luzes = null;
+    }
+    if (_ambiente != null) {
+      calloc.free(_ambiente!);
+      _ambiente = null;
+      _ambienteReservado = 0;
+      _ambienteDeOnde = null;
     }
     if (_cena != null) {
       calloc.free(_cena!);

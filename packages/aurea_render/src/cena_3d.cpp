@@ -407,6 +407,9 @@ void avaliar(const Cena3D& cena, const AcervoDeModelos& acervo,
   saida.chao[1] = cena.chao_verde;
   saida.chao[2] = cena.chao_azul;
   saida.reflexo_do_ambiente = cena.reflexo_do_ambiente;
+  saida.mapa_de_ambiente = cena.mapa_de_ambiente;
+  saida.mapa_de_ambiente_largura = cena.mapa_de_ambiente_largura;
+  saida.mapa_de_ambiente_niveis = cena.mapa_de_ambiente_niveis;
 
   montar_camera(cena.camera, cena.largura, cena.altura, saida.vista,
                 saida.projecao, saida.olho);
@@ -437,6 +440,19 @@ void avaliar(const Cena3D& cena, const AcervoDeModelos& acervo,
   misturar_float(impressao, cena.chao_verde);
   misturar_float(impressao, cena.chao_azul);
   misturar_float(impressao, cena.reflexo_do_ambiente);
+  // O MAPA DE AMBIENTE ENTRA PELO ENDERECO, E NAO PELO CONTEUDO.
+  //
+  // O aplicativo assa um mapa por estudio e guarda cada um num buffer
+  // proprio; trocar de estudio troca o endereco, e o mesmo estudio reusa o
+  // mesmo. Hashear os 700 KB a cada quadro diria a mesma coisa custando uma
+  // varredura inteira por quadro — e a impressao existe justamente para
+  // evitar trabalho repetido.
+  misturar_impressao(
+      impressao,
+      static_cast<std::uint64_t>(
+          reinterpret_cast<std::uintptr_t>(cena.mapa_de_ambiente)));
+  misturar_impressao(impressao, cena.mapa_de_ambiente_largura);
+  misturar_impressao(impressao, cena.mapa_de_ambiente_niveis);
   misturar_camera(impressao, cena.camera);
   for (const Luz& l : cena.luzes) misturar_luz(impressao, l);
   // A QUANTIDADE DE CAMADAS ENTRA AQUI, e nao so o conteudo de cada uma:

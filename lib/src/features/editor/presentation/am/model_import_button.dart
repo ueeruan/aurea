@@ -48,11 +48,34 @@ class _ModelImportButtonState extends ConsumerState<ModelImportButton> {
         if (!mounted || ref.read(editorControllerProvider).id != projectId) {
           return;
         }
-        if (m['image'] != null &&
-            !await TextureCache.instance.prepare(m['image'] as String)) {
-          modelFail(
-            'Uma textura nao pode ser decodificada. Use PNG/JPEG/WebP.',
-          );
+        // OS CINCO MAPAS SAO PREPARADOS ANTES DE A CAMADA NASCER.
+        //
+        // O `prepare` deixa a imagem no cache do pintor e o `prepareRgba`
+        // deixa os pixels prontos para a placa. Sem o segundo, o modelo
+        // nasceria sem mapa nenhum e so se vestiria um quadro depois — o
+        // dono veria um cinza aparecer e virar textura, que parece defeito.
+        //
+        // SO A TEXTURA DE COR DERRUBA A IMPORTACAO. Um relevo ilegivel e um
+        // modelo sem relevo, e nao um modelo que nao entra: recusar o
+        // arquivo inteiro por causa de um mapa secundario seria trocar um
+        // resultado bom por nenhum.
+        for (final chave in const [
+          'image',
+          'normalImage',
+          'metalRoughImage',
+          'emissiveImage',
+          'occlusionImage',
+        ]) {
+          final caminho = m[chave];
+          if (caminho is! String || caminho.isEmpty) continue;
+          final deuCerto =
+              await TextureCache.instance.prepare(caminho) &&
+              await TextureCache.instance.prepareRgba(caminho);
+          if (!deuCerto && chave == 'image') {
+            modelFail(
+              'Uma textura nao pode ser decodificada. Use PNG/JPEG/WebP.',
+            );
+          }
         }
       }
       if (!mounted || ref.read(editorControllerProvider).id != projectId) {

@@ -19,6 +19,7 @@ import '../../application/editor_controller.dart';
 import 'camera_sheet.dart' show showCameraSheet;
 import 'precomp_sheet.dart';
 import 'rastreio_sheet.dart' show showRastreioSheet;
+import 'texto3d_sheet.dart' show showTexto3DSheet;
 import '../../../../core/ui/tocavel.dart';
 import '../../application/playback_controller.dart';
 import '../../domain/blend_extra.dart';
@@ -496,6 +497,26 @@ _Tile? _tileDaSecao(
       rotulo: translate(context, 'Partículas'),
       onTap: () =>
           abrirDepois(() => showParticulasSheet(context, ref, layer.id)),
+      badge: null,
+    ),
+    AmSecao.texto3d => (
+      icone: CupertinoIcons.textformat,
+      rotulo: 'Texto 3D',
+      onTap: () {
+        final no = layer is Scene3DLayer
+            ? layer.scene.nodes.where((n) => n.texto3d != null).firstOrNull
+            : null;
+        if (no == null) return;
+        abrirDepois(
+          () => showTexto3DSheet(
+            context,
+            ref,
+            sceneId: layer.id,
+            nodeId: no.id,
+            playhead: playback.time.value,
+          ),
+        );
+      },
       badge: null,
     ),
     AmSecao.cena3d => (

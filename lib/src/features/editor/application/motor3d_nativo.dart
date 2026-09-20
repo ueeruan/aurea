@@ -295,6 +295,51 @@ class Motor3DNativo {
     }
   }
 
+  /// A IMPORTACAO SO PODE DIZER "PRONTO" DEPOIS DISTO.
+  ///
+  /// Um modelo pode ser LIDO e mesmo assim nao virar desenho: o avaliador
+  /// pode nao produzir malha nenhuma, e o acervo pode recusar a geometria
+  /// por memoria. Sem esta conferencia o aplicativo fechava a folha de
+  /// importacao como sucesso, a camada nascia vazia, e nao havia uma linha
+  /// dizendo por que — o "sucesso falso" que o dono relata.
+  ///
+  /// Devolve nulo quando o modelo REALMENTE entrou (e o deixa pronto na
+  /// GPU, que e o mesmo caminho do desenho), ou o codigo do defeito:
+  ///
+  ///   3D_NO_VALID_MESH     o avaliador nao tirou malha nenhuma do arquivo
+  ///   3D_GPU_BUFFER_FAILED o acervo recusou a geometria
+  String? conferirModelo(ModelAsset3D modelo) {
+    // SEM MOTOR NAO HA O QUE CONFERIR: quem desenha e o pintor de CPU, e
+    // recusar a importacao por causa de um motor que este binario nem tem
+    // seria proibir a importacao em metade dos aparelhos.
+    if (!ligado) return null;
+    if (modelo.triangleCount <= 0) return '3D_NO_VALID_MESH';
+    final no = SceneNode(name: modelo.name, modelAsset: modelo, size: 120);
+    final fonte = _fonteDoNo(no, Duration.zero, null);
+    if (fonte == null) return '3D_NO_VALID_MESH';
+    if (fonte.malha.verts.isEmpty || fonte.malha.faces.isEmpty) {
+      return '3D_NO_VALID_MESH';
+    }
+    final chave = 'm${fonte.assinatura}';
+    // JA ESTAVA NO ACERVO: o caminho normal de quem importa duas vezes o
+    // mesmo arquivo. Nada a conferir de novo.
+    if (_alcaPorChave.containsKey(chave)) return null;
+    final malhas = malhasCruas3DDe(fonte);
+    if (malhas.isEmpty) return '3D_NO_VALID_MESH';
+    try {
+      final resultado = Motor3D.criarModelo(malhas);
+      if (!resultado.deuCerto) return '3D_GPU_BUFFER_FAILED';
+      // FICA NO ACERVO, com a MESMA chave que o desenho vai pedir: conferir
+      // e subir viram um passo so, e o primeiro quadro com o modelo nao
+      // paga a subida.
+      _alcaPorChave[chave] = resultado.alca;
+      return null;
+    } catch (e) {
+      debugPrint('Motor 3D nativo: a conferencia do modelo estourou: $e');
+      return '3D_GPU_BUFFER_FAILED';
+    }
+  }
+
   /// A FICHA DE UM NO, para a barra de estado: quantos triangulos, quanta
   /// memoria, se ja subiu para a GPU.
   FichaDeModelo3D? fichaDe(SceneNode no) {

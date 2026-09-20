@@ -2628,6 +2628,60 @@ class EditorController extends Notifier<VideoProject> {
     return no.id;
   }
 
+  /// O RAIO DO OBJETO JA NORMALIZADO, em unidades dele mesmo.
+  ///
+  /// O modelo entra normalizado pela propria caixa (a maior aresta vira 2,
+  /// de -1 a 1), entao a meia-diagonal e no maximo a raiz de tres. E ela que
+  /// diz de que distancia a camera precisa estar para o objeto inteiro caber.
+  double _raioDoModelo(ModelAsset3D modelo) {
+    try {
+      final frame = modelo.evaluate(
+        Duration.zero,
+        const ModelMotion3D(clip: -1),
+        comAnimacaoDeTexto: false,
+      );
+      final verts = frame.mesh.verts;
+      if (verts.isEmpty) return 0;
+      final lo = [1e30, 1e30, 1e30], hi = [-1e30, -1e30, -1e30];
+      for (final v in verts) {
+        for (var i = 0; i < 3; i++) {
+          final x = v.length > i ? v[i] : 0.0;
+          if (x < lo[i]) lo[i] = x;
+          if (x > hi[i]) hi[i] = x;
+        }
+      }
+      var soma = 0.0;
+      for (var i = 0; i < 3; i++) {
+        final meio = (hi[i] - lo[i]) / 2;
+        soma += meio * meio;
+      }
+      return math.sqrt(soma);
+    } catch (_) {
+      // Modelo que nao se deixa medir nao impede a importacao: sem raio, a
+      // camera fica na padrao e o objeto aparece menor — e nao desaparece.
+      return 0;
+    }
+  }
+
+  /// A CAMERA QUE ENQUADRA O OBJETO RECEM-IMPORTADO.
+  ///
+  /// Sem isto o modelo entrava a 800 unidades de distancia — o padrao da
+  /// camera autoral, pensado para uma cena montada a mao — e ocupava um
+  /// quinto do quadro, no meio de um vazio preto. Quem importa ve "nao
+  /// apareceu nada", e o defeito nao estava na importacao.
+  Camera3D _cameraQueEnquadra(double raioNoMundo) {
+    final base = Camera3D();
+    if (raioNoMundo <= 0) return base;
+    final fov = base.renderAt(Duration.zero).fovRadians * 180 / math.pi;
+    final distancia = distanciaParaEnquadrar(
+      raio: raioNoMundo,
+      fovGraus: fov,
+      aspecto: state.aspectRatio,
+    );
+    if (distancia <= 0) return base;
+    return base.copyWith(posZ: AnimatedDouble(distancia));
+  }
+
   /// TEXTO 3D ESTILO ELEMENT 3D: letras extrudadas com chanfro, em metal,
   /// dentro da cena 3D (criada se nao houver) e filhas de um nulo da cena —
   /// girar, mover e animar o nulo leva o texto junto. Metal so parece metal
@@ -2692,6 +2746,10 @@ class EditorController extends Notifier<VideoProject> {
           envReflect: 0.9,
           showFloorGrid: false,
         ),
+        // A CAMERA ENQUADRA O TEXTO. A padrao fica a 800 unidades e o texto
+        // entraria ocupando um quinto do quadro — o metal, que so aparece no
+        // reflexo, sumiria com ele.
+        camera: _cameraQueEnquadra(_raioDoModelo(modelo) * 120),
         position: AnimatedOffset(_center),
       ),
     );
@@ -2982,7 +3040,11 @@ class EditorController extends Notifier<VideoProject> {
           environment: EnvironmentKind.estudioMetal,
           envReflect: 0.9,
           showFloorGrid: false,
+          // A CAIXA DO MODELO DIZ DE ONDE A CAMERA OLHA. Ver
+          // `_cameraQueEnquadra`: sem isto, "importei" e "nao apareceu" eram
+          // a mesma tela.
         ),
+        camera: _cameraQueEnquadra(_raioDoModelo(model) * 120),
         position: AnimatedOffset(_center),
       ),
     );

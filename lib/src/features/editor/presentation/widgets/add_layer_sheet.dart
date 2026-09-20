@@ -20,6 +20,7 @@ import '../../application/font_service.dart';
 import '../../application/model_import_service.dart';
 import '../../application/texture_cache.dart';
 import '../../application/transcription_service.dart';
+import '../../application/motor3d_nativo.dart';
 import '../../application/transcricao_em_andamento.dart';
 import '../../../settings/application/settings_controller.dart';
 import '../../domain/caption.dart';
@@ -1350,9 +1351,23 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
       if (!mounted || ref.read(editorControllerProvider).id != projectId) {
         return;
       }
+      // A IMPORTACAO CONFERE ANTES DE DIZER QUE DEU CERTO. Um modelo pode
+      // ser lido e mesmo assim nao virar desenho (o avaliador nao tira
+      // malha, ou o acervo recusa a geometria) — e fechar a folha como
+      // sucesso com a camada vazia e o "importei e nao apareceu nada".
+      final falha = Motor3DNativo.instance.conferirModelo(model);
+      if (falha != null) {
+        throw ModelImportException(
+          falha == '3D_GPU_BUFFER_FAILED'
+              ? '$falha: o motor 3D não aceitou a geometria deste modelo '
+                    '(memória ou malha degenerada).'
+              : '$falha: o modelo não tem geometria que o motor 3D desenhe.',
+        );
+      }
       final nodeId = _controller.addImportedModel3D(widget.playhead, model);
       if (nodeId.isEmpty) {
-        throw const ModelImportException('Não foi possível criar a cena 3D.');
+        throw const ModelImportException('3D_SCENE_ATTACH_FAILED: não foi '
+            'possível criar a cena 3D.');
       }
       _fecha();
     } on ModelImportException catch (error) {

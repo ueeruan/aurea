@@ -287,6 +287,44 @@ Element3DMesh _smoothNative(Element3DKind kind, Element3DMesh mesh) {
   return Element3DMesh(vertices, faces, normals: normals);
 }
 
+/// VIRA AS FACES DE UM SOLIDO PARA FORA.
+///
+/// O ENROLAMENTO E A UNICA COISA DA GEOMETRIA QUE NAO SE VE NO PINTOR DE CPU.
+/// Ele nao descarta face nenhuma: acende a normal virada para quem olha, entao
+/// um solido inteiro enrolado ao contrario sai igualzinho na tela. Na GPU, que
+/// descarta a face de tras, o mesmo solido virava um buraco — e foi assim que
+/// "o cubo nao aparece" chegou como relato.
+///
+/// A CONTA QUE DECIDE E O VOLUME ASSINADO (divergencia): um solido fechado com
+/// as faces para fora tem volume POSITIVO. Ele e medido e, se estiver ao
+/// contrario, todas as faces sao invertidas de uma vez — a orientacao de um
+/// solido e uma escolha so, e nao uma por face.
+///
+/// O QUE ELE NAO CONSERTA, de proposito: um solido de enrolamento MISTO (o
+/// cubo chanfrado monta cada face por ordem de angulo) e os abertos, que nao
+/// delimitam volume nenhum. Esses o motor desenha dos dois lados, com a normal
+/// virada no shader — ver `pbr.frag`.
+Element3DMesh _paraFora(Element3DMesh m) {
+  if (m.faces.isEmpty) return m;
+  var volume = 0.0;
+  for (final f in m.faces) {
+    if (f.length < 3) continue;
+    final a = m.verts[f[0]];
+    for (var i = 1; i + 1 < f.length; i++) {
+      final b = m.verts[f[i]], c = m.verts[f[i + 1]];
+      volume += a[0] * (b[1] * c[2] - b[2] * c[1]) -
+          a[1] * (b[0] * c[2] - b[2] * c[0]) +
+          a[2] * (b[0] * c[1] - b[1] * c[0]);
+    }
+  }
+  if (volume >= 0) return m;
+  return Element3DMesh(
+    m.verts,
+    [for (final f in m.faces) f.reversed.toList(growable: false)],
+    normals: m.normals,
+  );
+}
+
 Element3DMesh _build(Element3DKind kind) {
   switch (kind) {
     case Element3DKind.cube:
@@ -314,10 +352,10 @@ Element3DMesh _build(Element3DKind kind) {
       return _smoothCone();
 
     case Element3DKind.sphere:
-      return _sphere(stacks: 20, slices: 32);
+      return _paraFora(_sphere(stacks: 20, slices: 32));
 
     case Element3DKind.cylinder:
-      return _cylinder(segments: 40);
+      return _paraFora(_cylinder(segments: 40));
 
     case Element3DKind.prism:
       return _extrude(
@@ -330,10 +368,10 @@ Element3DMesh _build(Element3DKind kind) {
       );
 
     case Element3DKind.diamond:
-      return _diamond();
+      return _paraFora(_diamond());
 
     case Element3DKind.torus:
-      return _torus(major: 0.72, minor: 0.3, around: 36, tube: 16);
+      return _paraFora(_torus(major: 0.72, minor: 0.3, around: 36, tube: 16));
 
     case Element3DKind.star:
       final pts = <List<double>>[];
@@ -348,27 +386,29 @@ Element3DMesh _build(Element3DKind kind) {
       return _plane();
 
     case Element3DKind.capsule:
-      return _capsule(slices: 32, arcos: 10);
+      return _paraFora(_capsule(slices: 32, arcos: 10));
 
     case Element3DKind.tube:
-      return _tube(segments: 24, inner: 0.62);
+      return _paraFora(_tube(segments: 24, inner: 0.62));
 
     case Element3DKind.crown:
-      return crownMesh(vale: 0.32);
+      return _paraFora(crownMesh(vale: 0.32));
     case Element3DKind.crownFine:
-      return crownMesh(segments: 120, inner: 0.985, vale: 0.4, altura: 0.36);
+      return _paraFora(
+        crownMesh(segments: 120, inner: 0.985, vale: 0.4, altura: 0.36),
+      );
 
     case Element3DKind.lente:
-      return _lente();
+      return _paraFora(_lente());
 
     case Element3DKind.anelDeLuz:
-      return _anelDeLuz();
+      return _paraFora(_anelDeLuz());
 
     case Element3DKind.diafragma:
-      return _diafragma();
+      return _paraFora(_diafragma());
 
     case Element3DKind.placa:
-      return _placa();
+      return _paraFora(_placa());
 
     case Element3DKind.octahedron:
       return Element3DMesh(
@@ -394,17 +434,21 @@ Element3DMesh _build(Element3DKind kind) {
 
     case Element3DKind.wedge:
       // Uma rampa: triangulo retangulo extrudado.
-      return _extrude(
-        outline: const [
-          [-1.0, 1.0],
-          [1.0, 1.0],
-          [1.0, -1.0],
-        ],
-        halfDepth: 1.0,
+      // O CONTORNO DA RAMPA E HORARIO; a extrusao preserva o sentido do
+      // contorno, e por isso ela sai virada para dentro.
+      return _paraFora(
+        _extrude(
+          outline: const [
+            [-1.0, 1.0],
+            [1.0, 1.0],
+            [1.0, -1.0],
+          ],
+          halfDepth: 1.0,
+        ),
       );
 
     case Element3DKind.dome:
-      return _dome(slices: 18, arcos: 6);
+      return _paraFora(_dome(slices: 18, arcos: 6));
   }
 }
 

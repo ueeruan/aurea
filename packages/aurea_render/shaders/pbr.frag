@@ -210,7 +210,22 @@ void main() {
   float rugosidade = clamp(metalico_rugosidade.y, 0.045, 1.0);
 
   // ---------------------------------------------------------- a normal
+  //
+  // A FACE DE TRAS ACENDE COMO A DE FRENTE, COM A NORMAL VIRADA.
+  //
+  // Um objeto 3D aqui e de DUAS FACES: a geometria nao vem so de arquivo com
+  // a convencao do glTF. Os solidos de dentro do aplicativo — o cubo, a
+  // esfera, o toro — nasceram para um pintor que nao descarta nada, e o
+  // enrolamento deles nao segue convencao nenhuma; uma camada com escala Z
+  // negativa ESPELHA o objeto e troca o sinal de todas as faces; e um modelo
+  // baixado da internet as vezes vem com metade das faces ao contrario.
+  //
+  // Com o descarte de costas ligado isso virava "nao aparece nada" — o
+  // defeito exato do relato. O que decide o que se ve passa a ser a
+  // PROFUNDIDADE, que ja estava certa, e a normal e virada para o lado de
+  // quem olha: a luz, o reflexo e o sombreamento passam a valer nas duas.
   vec3 n = normalize(v_normal);
+  if (!gl_FrontFacing) n = -n;
   if (u_desenho.bandeiras.y > 0.5) {
     vec3 guardada = texture(tex_normal, v_uv0).xyz * 2.0 - 1.0;
     // A BASE TANGENTE SAI DA GEOMETRIA, e o sinal da quarta componente e o

@@ -718,6 +718,42 @@ Camera3D frameBounds(
   );
 }
 
+/// A DISTANCIA QUE ENQUADRA UM OBJETO INTEIRO NO QUADRO.
+///
+/// O PROBLEMA QUE ISTO RESOLVE: a camera autoral padrao fica a 800 unidades
+/// do alvo, e essa distancia foi escolhida para uma cena montada a mao. Um
+/// modelo importado entra normalizado e desenhado em 120 — ou seja, ocupa
+/// cerca de um quinto da altura do quadro, no meio de um vazio preto. Quem
+/// importa ve "nao apareceu nada" e a conclusao e a pior possivel: que a
+/// importacao falhou.
+///
+/// A CONTA E A DE UMA ESFERA QUE ENVOLVE O OBJETO: o raio [raio] tem de
+/// caber no meio-angulo da camera. O MENOR dos dois meio-angulos e o que
+/// manda, porque um objeto cabe quando cabe no eixo apertado — num filme
+/// retrato o horizontal e o apertado, e usar o vertical cortaria as laterais.
+///
+/// [folga] e a margem: 1.25 deixa um quarto de raio de respiro em volta, que
+/// e o que separa "enquadrado" de "colado na borda".
+double distanciaParaEnquadrar({
+  required double raio,
+  required double fovGraus,
+  required double aspecto,
+  double folga = 1.25,
+}) {
+  if (!raio.isFinite || raio <= 0) return 0;
+  final fov = fovGraus.clamp(1.0, 179.0) * math.pi / 180;
+  final tanH = math.tan(fov / 2);
+  final a = aspecto.isFinite && aspecto > 1e-6 ? aspecto : 1.0;
+  final tanV = tanH / a;
+  final tanMenor = math.min(tanH, tanV);
+  if (tanMenor <= 1e-9) return 0;
+  return folga * raio / tanMenor;
+}
+
+/// O RAIO DO OBJETO DE UMA CAIXA, em unidades do mundo: a meia-diagonal.
+double raioDaCaixa3D(Bounds3D caixa, double escala) =>
+    caixa.radius.isFinite && caixa.radius > 0 ? caixa.radius * escala : 0;
+
 /// ALINHAR CAMERA A VISTA — o comando mais usado de todos: navega-se
 /// livre ate achar o enquadramento, e so entao a camera assume ele.
 Camera3D alignToView(Camera3D cam, RenderCamera view) {

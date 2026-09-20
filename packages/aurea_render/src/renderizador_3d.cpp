@@ -770,7 +770,9 @@ namespace {
 
 /// AS CHAVES DE PIPELINE. Quatro perguntas de sim ou nao.
 constexpr std::uint32_t kPsoPele = 1U << 0;
-constexpr std::uint32_t kPsoDuasFaces = 1U << 1;
+// O BIT 1 ERA O "DUAS FACES". Ele saiu da chave quando o descarte de costas
+// deixou de existir: sem descarte, material de duas faces e material de uma —
+// e manter o bit criava DOIS pipelines iguais, um por variante do material.
 constexpr std::uint32_t kPsoMistura = 1U << 2;
 constexpr std::uint32_t kPsoSombra = 1U << 3;
 
@@ -780,7 +782,6 @@ bool Renderizador3D::Interno::pegar_pso(std::uint32_t chave) {
   if (pipelines.count(chave) != 0) return true;
 
   const bool pele = (chave & kPsoPele) != 0;
-  const bool duas_faces = (chave & kPsoDuasFaces) != 0;
   const bool mistura = (chave & kPsoMistura) != 0;
   const bool eh_sombra = (chave & kPsoSombra) != 0;
   if (eh_sombra && !sombra_cor) {
@@ -913,13 +914,23 @@ bool Renderizador3D::Interno::pegar_pso(std::uint32_t chave) {
   g.InputLayout.LayoutElements = elementos;
   g.InputLayout.NumElements = quantos;
 
-  // O LADO DE FORA E O DE DENTRO. O glTF define o triangulo com enrolamento
-  // anti-horario visto de fora, e o Diligent nega a altura do viewport para
-  // casar com a convencao do D3D — o que inverte o enrolamento aparente. Com
-  // `FrontCounterClockwise = false` (o padrao) e `CULL_MODE_BACK`, o que
-  // sobra desenhado e a face de fora, que e o certo.
-  g.RasterizerDesc.CullMode =
-      duas_faces ? Diligent::CULL_MODE_NONE : Diligent::CULL_MODE_BACK;
+  // NAO SE DESCARTA FACE NENHUMA. O QUE DECIDE O QUE APARECE E A PROFUNDIDADE.
+  //
+  // Havia aqui um `CULL_MODE_BACK` com o argumento de que o glTF define o
+  // triangulo anti-horario visto de fora. O argumento esta certo sobre o
+  // glTF e errado sobre esta cena: a geometria daqui tem TRES origens que
+  // nao seguem essa convencao — os solidos de dentro do aplicativo (nasceram
+  // para um pintor que nao descarta nada), as camadas com escala negativa
+  // (que espelham o objeto e trocam o sinal de todas as faces) e os modelos
+  // baixados com metade das faces ao contrario. Com o descarte ligado, esses
+  // tres casos davam o MESMO sintoma: "importei e nao aparece nada".
+  //
+  // O preco e o preenchimento das faces de tras, que num celular e pequeno
+  // perto do custo de o objeto sumir. O `pbr.frag` vira a normal de quem
+  // esta de costas, entao a luz e o reflexo valem nas duas.
+  g.RasterizerDesc.CullMode = Diligent::CULL_MODE_NONE;
+  // O enrolamento continua declarado porque ele ainda decide o
+  // `gl_FrontFacing` — que e o que o shader usa para saber de que lado esta.
   g.RasterizerDesc.FrontCounterClockwise = false;
 
   // O TESTE DE PROFUNDIDADE ESTA SEMPRE LIGADO; o que muda e a ESCRITA. Um
@@ -1354,9 +1365,8 @@ void Renderizador3D::Interno::desenhar_lista(const Quadro3D& quadro,
     if (!malha.vertices || !malha.indices) continue;
 
     const std::uint32_t chave =
-        (d.pele >= 0 ? kPsoPele : 0U) |
-        (d.material.face_dupla ? kPsoDuasFaces : 0U) |
-        (mistura ? kPsoMistura : 0U) | (eh_sombra ? kPsoSombra : 0U);
+        (d.pele >= 0 ? kPsoPele : 0U) | (mistura ? kPsoMistura : 0U) |
+        (eh_sombra ? kPsoSombra : 0U);
     if (chave != ultima_chave) {
       if (!pegar_pso(chave)) return;
       auto achado = pipelines.find(chave);
@@ -1450,6 +1460,53 @@ void Renderizador3D::Interno::desenhar_lista(const Quadro3D& quadro,
       }
     }
 
+    if (!eh_sombra) {
+      // AS SEIS TEXTURAS SAO SEMPRE LIGADAS, e as ausentes caem na neutra.
+      // Deixar uma sem ligar faria o Diligent recusar o desenho inteiro — e o
+      // material sem mapa de normais e a maioria, nao a excecao (§43).
+      const Material& m = d.material;
+      const auto escolher = [&](std::int32_t qual,
+                                Diligent::ITextureView* neutra,
+                                Diligent::ITextureView* neutra_srgb,
+                                const char* nome) {
+        Diligent::ITextureView* vista = nullptr;
+        if (qual >= 0 && static_cast<std::size_t>(qual) < gpu.texturas.size()) {
+          vista = gpu.texturas[static_cast<std::size_t>(qual)].RawPtr();
+        }
+        if (vista == nullptr) {
+          vista = neutra_srgb != nullptr ? neutra_srgb : neutra;
+        }
+        if (vista == nullptr) return;
+        if (auto* v = srb_atual->GetVariableByName(Diligent::SHADER_TYPE_PIXEL,
+                                                   nome)) {
+          v->Set(vista);
+        }
+      };
+      // COR E EMISSIVO CAEM NA BRANCA EM sRGB, E OS DADOS NA BRANCA LINEAR.
+      // A diferenca aparece no emissivo: uma textura branca lida como linear
+      // vale 1, e lida como sRGB vale 0,21 na pratica — e o mesmo material
+      // sairia com dois brilhos diferentes conforme ele tivesse ou nao o
+      // mapa, que e o tipo de incoerencia que ninguem liga a causa.
+      escolher(m.textura_cor, branca.RawPtr(), branca_srgb.RawPtr(),
+               "tex_cor");
+      escolher(m.textura_normal, normal_neutra.RawPtr(), nullptr,
+               "tex_normal");
+      escolher(m.textura_metalico_rugosidade, branca.RawPtr(), nullptr,
+               "tex_metalico_rugosidade");
+      escolher(m.textura_emissiva, branca.RawPtr(), branca_srgb.RawPtr(),
+               "tex_emissiva");
+      escolher(m.textura_oclusao, branca.RawPtr(), nullptr, "tex_oclusao");
+      if (auto* v = srb_atual->GetVariableByName(Diligent::SHADER_TYPE_PIXEL,
+                                                 "tex_sombra")) {
+        auto* vista =
+            sombra_cor
+                ? sombra_cor->GetDefaultView(
+                      Diligent::TEXTURE_VIEW_SHADER_RESOURCE)
+                : nullptr;
+        if (vista != nullptr) v->Set(vista);
+      }
+    }
+
     contexto->CommitShaderResources(
         srb_atual, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
 
@@ -1471,6 +1528,9 @@ void Renderizador3D::Interno::desenhar_lista(const Quadro3D& quadro,
     da.FirstIndexLocation = d.primeiro_indice;
     da.BaseVertex = d.base_do_vertice;
     contexto->DrawIndexed(da);
+    AUREA_LOG("  draw modelo=%d malha=%d idx=%u prim=%u base=%u",
+              d.modelo, d.malha, da.NumIndices, da.FirstIndexLocation,
+              da.BaseVertex);
 
     if (!eh_sombra) {
       ++stats.desenhos;
@@ -1514,6 +1574,17 @@ bool Renderizador3D::Interno::ler_pixels() {
   // os comandos, e o quadro sairia vazio em alguns aparelhos e certo em
   // outros — o pior tipo de defeito, porque some na bancada.
   contexto->Flush();
+  // E ESPERA A PLACA TERMINAR, e nao apenas submete.
+  //
+  // O CONTRATO DO `Map` DIZ QUE ELE ESPERA, e neste aparelho ele nao
+  // esperava: `Flush` so ENFILEIRA, o `Map` devolvia a textura de releitura
+  // ainda intocada, e o quadro inteiro saia preto — com o desenho tendo
+  // acontecido, o contador de triangulos certo e o erro vazio. Era o defeito
+  // exato do "importei e nao aparece nada": nada que dependesse de LER o
+  // quadro de volta funcionava, e como toda a 3D vira imagem para a
+  // composicao, NADA da 3D aparecia. O `WaitForIdle` custa uma espera por
+  // quadro; a alternativa era uma tela preta que parecia defeito de modelo.
+  contexto->WaitForIdle();
 
   Diligent::MappedTextureSubresource mapeado;
   contexto->MapTextureSubresource(leitura, 0, 0, Diligent::MAP_READ,

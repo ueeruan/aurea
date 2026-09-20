@@ -46,6 +46,9 @@ class Texto3D {
     this.espacamento = 0,
     this.qualidade = QualidadeDoTexto3D.media,
     this.separarLetras = false,
+    this.rotLetraX = 0,
+    this.rotLetraY = 0,
+    this.rotLetraZ = 0,
   });
 
   final String texto;
@@ -58,6 +61,21 @@ class Texto3D {
   final double espacamento;
   final QualidadeDoTexto3D qualidade;
   final bool separarLetras;
+
+  /// A ROTACAO DE CADA LETRA, em graus, EM TORNO DO CENTRO DELA — o
+  /// "Per-character 3D" do After Effects. Nao e o giro do texto inteiro (esse
+  /// e o da camada): aqui cada letra gira no proprio lugar, e e o que faz uma
+  /// palavra virar uma fileira de placas ou de dominos.
+  ///
+  /// NAO MUDA A MALHA: a geometria da letra e a mesma, quem muda e a matriz
+  /// do no dela. Por isso fica fora do [soGeometria] e mexer aqui nao refaz
+  /// extrusao nem chanfro.
+  final double rotLetraX;
+  final double rotLetraY;
+  final double rotLetraZ;
+
+  bool get temRotacaoPorLetra =>
+      rotLetraX != 0 || rotLetraY != 0 || rotLetraZ != 0;
 
   /// Quantos aneis o perfil do chanfro tem. Angular e um corte so;
   /// redondo precisa de tres ou quatro para a luz correr sem degrau.
@@ -98,6 +116,9 @@ class Texto3D {
     double? espacamento,
     QualidadeDoTexto3D? qualidade,
     bool? separarLetras,
+    double? rotLetraX,
+    double? rotLetraY,
+    double? rotLetraZ,
   }) => Texto3D(
     texto: texto ?? this.texto,
     familia: familia ?? this.familia,
@@ -109,6 +130,9 @@ class Texto3D {
     espacamento: espacamento ?? this.espacamento,
     qualidade: qualidade ?? this.qualidade,
     separarLetras: separarLetras ?? this.separarLetras,
+    rotLetraX: rotLetraX ?? this.rotLetraX,
+    rotLetraY: rotLetraY ?? this.rotLetraY,
+    rotLetraZ: rotLetraZ ?? this.rotLetraZ,
   );
 
   @override
@@ -124,7 +148,10 @@ class Texto3D {
           other.segmentosDoChanfro == segmentosDoChanfro &&
           other.espacamento == espacamento &&
           other.qualidade == qualidade &&
-          other.separarLetras == separarLetras;
+          other.separarLetras == separarLetras &&
+          other.rotLetraX == rotLetraX &&
+          other.rotLetraY == rotLetraY &&
+          other.rotLetraZ == rotLetraZ;
 
   @override
   int get hashCode => Object.hash(
@@ -138,6 +165,9 @@ class Texto3D {
     espacamento,
     qualidade,
     separarLetras,
+    rotLetraX,
+    rotLetraY,
+    rotLetraZ,
   );
 
   Map<String, Object> toJson() => {

@@ -99,7 +99,12 @@ class ModelAsset3D {
   /// quadro. Imutavel por modelo — editar a animacao troca o modelo.
   late final bool temAnimacaoDeTexto = () {
     final texto = data['texto'];
-    return texto is Map && (texto['anims'] as List? ?? const []).isNotEmpty;
+    if (texto is! Map) return false;
+    // A ROTACAO POR LETRA usa o mesmo caminho dos animadores: uma matriz
+    // por no de letra. Sem isto o `rot` ficaria gravado e nunca aplicado.
+    final rot = texto['rot'];
+    final temRot = rot is List && rot.any((v) => v is num && v != 0);
+    return temRot || (texto['anims'] as List? ?? const []).isNotEmpty;
   }();
 
   ModelMotion3D? _lastMotion;

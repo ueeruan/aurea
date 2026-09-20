@@ -1,3 +1,4 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -231,8 +232,56 @@ class _Texto3DSheetState extends ConsumerState<_Texto3DSheet> {
     );
   }
 
+  bool _importandoFonte = false;
+
+  /// TRAZ UMA FONTE .ttf/.otf E JA A APLICA AO TEXTO.
+  ///
+  /// A fileira de fontes so aparece quando ha mais de uma familia, e o
+  /// aplicativo vem com UMA: sem este botao nao havia por onde trocar a
+  /// fonte de um texto 3D — a opcao existia e ficava escondida.
+  Future<void> _importarFonte() async {
+    if (_importandoFonte) return;
+    setState(() => _importandoFonte = true);
+    try {
+      final r = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['ttf', 'otf'],
+        allowMultiple: true,
+      );
+      if (r == null) return;
+      final result = await FontService.instance.importMany(
+        r.files.map((f) => f.path).whereType<String>(),
+      );
+      if (!mounted) return;
+      setState(() => _familias = FontService.instance.families);
+      if (result.imported.isNotEmpty) {
+        await _aplicar(_atual.copyWith(familia: result.imported.first));
+      }
+    } catch (_) {
+      // Fonte ilegivel: o texto fica com a fonte que tinha.
+    } finally {
+      if (mounted) setState(() => _importandoFonte = false);
+    }
+  }
+
   List<Widget> _linhas() {
     return [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: CupertinoButton(
+            key: const ValueKey('texto3d-importar-fonte'),
+            padding: EdgeInsets.zero,
+            minimumSize: const Size(0, 32),
+            onPressed: _importandoFonte ? null : _importarFonte,
+            child: AppText(
+              _importandoFonte ? 'Importando fonte...' : 'Importar fonte (.ttf / .otf)',
+              style: const TextStyle(fontSize: 13),
+            ),
+          ),
+        ),
+      ),
       if (_familias.length > 1)
         _fileiraDeOpcoes<String>(
           'Fonte',
@@ -286,6 +335,39 @@ class _Texto3DSheetState extends ConsumerState<_Texto3DSheet> {
         (v) => _aplicar(_atual.copyWith(espacamento: v)),
         aoArrastar: (v) =>
             setState(() => _params = _atual.copyWith(espacamento: v)),
+      ),
+      // GIRO POR LETRA, como o "Per-character 3D" do After Effects: cada
+      // letra gira em torno do proprio centro. O giro do texto INTEIRO e o
+      // da camada (Transformar > Rotacao), e nao este.
+      _controle(
+        'Girar letras X',
+        _atual.rotLetraX,
+        -180,
+        180,
+        (v) => _aplicar(_atual.copyWith(rotLetraX: v)),
+        sufixo: '°',
+        aoArrastar: (v) =>
+            setState(() => _params = _atual.copyWith(rotLetraX: v)),
+      ),
+      _controle(
+        'Girar letras Y',
+        _atual.rotLetraY,
+        -180,
+        180,
+        (v) => _aplicar(_atual.copyWith(rotLetraY: v)),
+        sufixo: '°',
+        aoArrastar: (v) =>
+            setState(() => _params = _atual.copyWith(rotLetraY: v)),
+      ),
+      _controle(
+        'Girar letras Z',
+        _atual.rotLetraZ,
+        -180,
+        180,
+        (v) => _aplicar(_atual.copyWith(rotLetraZ: v)),
+        sufixo: '°',
+        aoArrastar: (v) =>
+            setState(() => _params = _atual.copyWith(rotLetraZ: v)),
       ),
       _fileiraDeOpcoes<QualidadeDoTexto3D>(
         'Qualidade',

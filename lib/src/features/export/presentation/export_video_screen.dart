@@ -818,7 +818,9 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
           children: [
             _barra(),
             Expanded(
-              child: Center(
+              child: Stack(
+                children: [
+                  Center(
                 child: Padding(
                   padding: const EdgeInsets.all(16),
                   child: FittedBox(
@@ -891,6 +893,46 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
                     ),
                   ),
                 ),
+              ),
+                  // A TELA PISCAVA DURANTE O RENDER, e nao era defeito do
+                  // arquivo: era a MESA DE TRABALHO aparecendo. A exportacao
+                  // salta quadro a quadro, troca o quadro de cada video e
+                  // espera a cena 3D chegar — entre um passo e outro a
+                  // composicao fica meio montada, e era isso que o dono via.
+                  //
+                  // A CAPA FICA POR CIMA, E A FOTO NAO A VE. O
+                  // `RepaintBoundary` fotografa so a propria camada; um
+                  // widget empilhado acima dele nao entra no `toImage`. A
+                  // composicao continua pintando por baixo (escondida com
+                  // `Offstage` ela nao pintaria e a foto sairia vazia).
+                  if (_fase == _Fase.preparando ||
+                      _fase == _Fase.lendoVideos ||
+                      _fase == _Fase.desenhando ||
+                      _fase == _Fase.codificando)
+                    Positioned.fill(
+                      key: const ValueKey('export-capa-do-render'),
+                      child: ColoredBox(
+                        color: AmColors.bg,
+                        child: Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const CupertinoActivityIndicator(radius: 14),
+                              const SizedBox(height: 14),
+                              Text(
+                                '${(_progresso * 100).round()}%',
+                                style: const TextStyle(
+                                  fontSize: 28,
+                                  fontWeight: FontWeight.w700,
+                                  color: AmColors.text,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
             _rodape(),

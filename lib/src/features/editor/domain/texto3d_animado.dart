@@ -158,6 +158,7 @@ ModelAsset3D modeloDoTexto3DPorLetra(
       'u': unidades,
       'c': centros,
       'tam': t.tamanho,
+      if (t.temRotacaoPorLetra) 'rot': [t.rotLetraX, t.rotLetraY, t.rotLetraZ],
       'anims': <Map<String, dynamic>>[],
       'fim': 0,
     },
@@ -257,7 +258,14 @@ List<vm.Matrix4?>? matrizesDoTextoAnimado(
   final texto = data['texto'];
   if (texto is! Map) return null;
   final brutas = texto['anims'] as List? ?? const [];
-  if (brutas.isEmpty) return null;
+  // A ROTACAO POR LETRA VALE MESMO SEM ANIMADOR NENHUM: ela e a pose de
+  // repouso de cada letra, e os animadores somam por cima dela.
+  final rot = texto['rot'] as List?;
+  final rotX = rot != null && rot.isNotEmpty ? (rot[0] as num).toDouble() : 0.0;
+  final rotY = rot != null && rot.length > 1 ? (rot[1] as num).toDouble() : 0.0;
+  final rotZ = rot != null && rot.length > 2 ? (rot[2] as num).toDouble() : 0.0;
+  final temRot = rotX != 0 || rotY != 0 || rotZ != 0;
+  if (brutas.isEmpty && !temRot) return null;
   final s = texto['t'];
   final u = texto['u'] as List?;
   final c = texto['c'] as List?;
@@ -268,7 +276,7 @@ List<vm.Matrix4?>? matrizesDoTextoAnimado(
     for (final a in brutas)
       if (a is Map) ?textAnimDeJson(a),
   ];
-  if (anims.isEmpty) return null;
+  if (anims.isEmpty && !temRot) return null;
 
   final units = _unitsGuardadas[data] ??= TextUnits.of(s);
   final fim =
@@ -305,7 +313,10 @@ List<vm.Matrix4?>? matrizesDoTextoAnimado(
   var acumulado = 0.0;
   for (var ci = 0; ci < units.length; ci++) {
     desvioDoTracking[ci] = acumulado;
-    final e = _EstadoDaUnidade();
+    final e = _EstadoDaUnidade()
+      ..rotX = rotX
+      ..rotY = rotY
+      ..rotacao = rotZ;
     for (final a in animators) {
       final cobertura = units.coverageFor(
         a.selectors,

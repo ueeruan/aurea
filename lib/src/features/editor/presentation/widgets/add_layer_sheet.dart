@@ -110,9 +110,13 @@ Future<void> showAddLayerSheet(
                 // atras — a timeline — e justamente o que a pessoa esta
                 // olhando quando escolhe onde inserir a camada. A grade
                 // encolhe antes de a folha invadir.
+                // 31% CORTAVA A TERCEIRA FILEIRA: as formas sao quadradas e a
+                // grade nao rola, entao o que nao cabia sumia pela metade. 40%
+                // ainda deixa a linha do tempo inteira a vista, e a grade de
+                // formas agora se mede pela altura que recebe (ver `_formas`).
                 height: math.min(
-                  270.0,
-                  MediaQuery.sizeOf(context).height * 0.31,
+                  340.0,
+                  MediaQuery.sizeOf(context).height * 0.40,
                 ),
                 child: AddLayerPanel(
                   onClose: () => Navigator.of(sheetContext).pop(),
@@ -1564,22 +1568,6 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
         label: 'Texto 3D',
         onTap: _criarTexto3D,
       ),
-      // 7. iPhone 3D — o aparelho parametrico: pecas de verdade
-      // na cena (corpo, tela, ilha, lentes), tela que aceita
-      // imagem/camada, e um nulo na linha do tempo para animar.
-      cardItem(
-        key: const ValueKey('add-iphone3d'),
-        iconWidget: const Icon(
-          CupertinoIcons.device_phone_portrait,
-          size: 36,
-          color: Color(0xFFC9CDD4),
-        ),
-        label: 'iPhone 3D',
-        onTap: () {
-          _fecha();
-          _controller.addIphone3D(widget.playhead);
-        },
-      ),
     ];
 
     return LayoutBuilder(
@@ -1627,10 +1615,18 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
             itemBuilder: (context, pagina) {
               final ini = pagina * _porPagina;
               final fim = (ini + _porPagina).clamp(0, total);
-              return GridView.count(
+              return LayoutBuilder(
+                builder: (context, c) {
+                  // O LADRILHO SE MEDE PELO ESPACO, e nao o contrario. A grade
+                  // nao rola: com ladrilho quadrado fixo, a ultima fileira
+                  // saia cortada em toda tela mais baixa que a do projeto.
+                  final larg = (c.maxWidth - 6 * (_porLinha - 1)) / _porLinha;
+                  final alt = (c.maxHeight - 6 * (_linhas - 1)) / _linhas;
+                  return GridView.count(
                 crossAxisCount: _porLinha,
                 mainAxisSpacing: 6,
                 crossAxisSpacing: 6,
+                childAspectRatio: alt <= 0 ? 1 : (larg / alt).clamp(0.6, 3.0),
                 physics: const NeverScrollableScrollPhysics(),
                 children: [
                   for (var i = ini; i < fim; i++)
@@ -1643,6 +1639,8 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
                       },
                     ),
                 ],
+              );
+                },
               );
             },
           ),

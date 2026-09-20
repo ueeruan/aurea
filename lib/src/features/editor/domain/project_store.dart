@@ -1668,6 +1668,7 @@ Map<String, dynamic> _texto3d(Texto3D t) => {
   'espacamento': t.espacamento,
   'qualidade': t.qualidade.name,
   'separarLetras': t.separarLetras,
+  if (t.temRotacaoPorLetra) 'rotLetra': [t.rotLetraX, t.rotLetraY, t.rotLetraZ],
 };
 
 Texto3D? _asTexto3D(Object? json) {
@@ -1693,8 +1694,14 @@ Texto3D? _asTexto3D(Object? json) {
       QualidadeDoTexto3D.media,
     ),
     separarLetras: json['separarLetras'] as bool? ?? false,
+    rotLetraX: _rotLetra(json['rotLetra'], 0),
+    rotLetraY: _rotLetra(json['rotLetra'], 1),
+    rotLetraZ: _rotLetra(json['rotLetra'], 2),
   );
 }
+
+double _rotLetra(Object? v, int i) =>
+    v is List && v.length > i && v[i] is num ? (v[i] as num).toDouble() : 0;
 
 Map<String, dynamic> _material(Material3D mat) => {
   'n': mat.name,

@@ -1,5 +1,5 @@
 // A FOLHA DO TEXTO 3D: o texto deixa de ser tres perguntas e vira um objeto
-// que se edita, com a previa ao vivo no topo.
+// que se edita — na metade de baixo da tela, com o palco a vista por cima.
 //
 // O QUE ESTES TESTES PRENDEM, e que era o buraco antes da folha:
 //
@@ -7,14 +7,18 @@
 //     keyframes continuam, e so o material muda;
 //   * trocar o TEXTO refaz a geometria e mantem o metal escolhido;
 //   * a ESPESSURA acompanha o dedo no rotulo enquanto o dedo arrasta (o
-//     controle ficava parado ate soltar) e refaz a letra no fim.
+//     controle ficava parado ate soltar) e refaz a letra no fim;
+//   * NAO HA PREVIA INTERNA: o unico preview e o palco (a previa propria
+//     alternava o alvo do motor com o palco e recriava os alvos duas vezes
+//     por toque), e a folha nasce com `Material` — sem ele os textos saiam
+//     com o sublinhado amarelo do "texto sem estilo".
 import 'package:aurea/src/features/editor/application/editor_controller.dart';
 import 'package:aurea/src/features/editor/domain/layer.dart';
 import 'package:aurea/src/features/editor/domain/modelo_do_texto3d.dart';
 import 'package:aurea/src/features/editor/domain/scene3d.dart';
 import 'package:aurea/src/features/editor/domain/video_project.dart';
 import 'package:aurea/src/features/editor/presentation/am/texto3d_sheet.dart';
-import 'package:flutter/cupertino.dart';
+import 'package:aurea/src/features/editor/presentation/context/parameter_row.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -83,8 +87,36 @@ void main() {
         reason: 'o metal ${e.name} tem de estar na folha',
       );
     }
-    // SEM MOTOR, A PREVIA DIZ QUE ELE NAO ESTA ALI — e nao inventa um desenho.
-    expect(find.textContaining('aparece no aparelho'), findsOneWidget);
+    expect(find.byKey(const ValueKey('texto3d-importar-fonte')), findsOneWidget);
+  });
+
+  testWidgets('sem previa interna, na metade de baixo, com Material', (tester) async {
+    await abrir(tester);
+    // UM PREVIEW SO: o palco. Nada de imagem do motor dentro da folha, nem
+    // do aviso que a previa antiga mostrava no PC.
+    expect(find.byType(RawImage), findsNothing);
+    expect(find.textContaining('aparece no aparelho'), findsNothing);
+
+    // A METADE DE BAIXO: a folha nao passa de 52% da tela.
+    final folha = find.byKey(const ValueKey('texto3d-folha'));
+    expect(folha, findsOneWidget);
+    final altura = tester.getSize(folha).height;
+    // ignore: avoid_print
+    print('ALTURA DA FOLHA: $altura de 1600');
+    expect(altura, lessThanOrEqualTo(1600 * 0.52 + 0.5));
+    expect(altura, greaterThan(200));
+
+    // O `Material` acima dos textos: sem ele, sublinhado amarelo.
+    expect(
+      find.ancestor(
+        of: find.byKey(const ValueKey('texto3d-campo')),
+        matching: find.byType(Material),
+      ),
+      findsWidgets,
+    );
+    // OS CONTROLES SAO OS DA CASA, e nao sliders do Material.
+    expect(find.byType(Slider), findsNothing);
+    expect(find.byType(ParameterRow), findsWidgets);
   });
 
   testWidgets('trocar o metal troca so o material e mantem a malha', (tester) async {
@@ -138,20 +170,22 @@ void main() {
   testWidgets('a espessura anda no rotulo durante o arrasto', (tester) async {
     await abrir(tester);
     final inicio = no().texto3d!.espessura;
-    final controle = find.byType(Slider).first;
+    final controle = find.byKey(const ValueKey('texto3d-controle-Espessura'));
+    await tester.ensureVisible(controle);
+    await tester.pumpAndSettle();
+    final linha = tester.widget<ParameterRow>(controle);
+    expect(linha.value, inicio);
+
+    // A LINHA INTEIRA E A REGUA: arrastar na horizontal puxa o valor.
     final meio = tester.getCenter(controle);
     final gesto = await tester.startGesture(meio);
     await gesto.moveBy(const Offset(90, 0));
     await tester.pump();
     // AINDA COM O DEDO NA TELA: o numero ja tem de ter mudado. Era aqui que
     // o controle parecia morto — nada mudava ate soltar.
-    final rotulo = tester
-        .widgetList<Text>(find.byType(Text))
-        .map((t) => t.data ?? '')
-        .toList();
     expect(
-      rotulo.any((t) => t == inicio.toStringAsFixed(0) || t == inicio.toStringAsFixed(1)),
-      isFalse,
+      tester.widget<ParameterRow>(controle).value,
+      isNot(inicio),
       reason: 'o rotulo ficou parado com o dedo na tela',
     );
     await gesto.up();

@@ -78,7 +78,7 @@ class _Cena3DSheetState extends ConsumerState<_Cena3DSheet> {
       constraints: BoxConstraints(
         maxHeight: MediaQuery.sizeOf(context).height * 0.52,
       ),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: AmColors.panel,
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),

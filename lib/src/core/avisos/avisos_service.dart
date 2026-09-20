@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../features/community/application/comunidade_service.dart';
@@ -81,7 +81,7 @@ class Aviso {
 
 enum NivelDoAviso { info, atencao, problema }
 
-class AvisosService {
+class AvisosService with WidgetsBindingObserver {
   AvisosService({
     HttpClient? http,
     this.endereco = ComunidadeService.enderecoPadrao,
@@ -114,13 +114,69 @@ class AvisosService {
   final Set<String> _dispensados = {};
   final Set<String> _vistosEmJanela = {};
   bool _leuPrefs = false;
+  bool _ligado = false;
+  bool _emSegundoPlano = false;
+  DateTime? _ultimaBusca;
+
+  /// Quem pergunta ao sistema que horas são (o teste injeta).
+  @visibleForTesting
+  DateTime Function() agora = DateTime.now;
+
+  /// O relógio das buscas está rodando agora? (diagnóstico e testes)
+  bool get buscando => _relogio != null;
+
+  /// Quando foi a última ida ao servidor (só o teste da janela precisa).
+  @visibleForTesting
+  DateTime? get ultimaBuscaParaTeste => _ultimaBusca;
 
   /// Chamar uma vez, na Início: lê os últimos guardados (aparecem na
   /// hora, mesmo sem rede) e vai buscar os de agora.
   Future<void> iniciar() async {
+    _ligado = true;
+    _observar(true);
     await _lerPrefs();
-    unawaited(atualizar());
-    _relogio ??= Timer.periodic(intervalo, (_) => atualizar());
+    _acertarRelogio();
+  }
+
+  /// O APP EM SEGUNDO PLANO NÃO PERGUNTA NADA.
+  ///
+  /// A faixa vive na Início, que nunca sai da árvore: na prática este
+  /// relógio nascia junto com o app e batia no servidor de dez em dez
+  /// minutos para sempre — inclusive com o app fora da tela, gastando
+  /// rádio e bateria para atualizar um aviso que ninguém está vendo.
+  /// Ao voltar, se a janela já passou, busca uma vez.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final fundo =
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.detached;
+    if (state != AppLifecycleState.resumed && !fundo) return;
+    if (fundo == _emSegundoPlano) return;
+    _emSegundoPlano = fundo;
+    _acertarRelogio();
+  }
+
+  void _acertarRelogio() {
+    if (_ligado && !_emSegundoPlano) {
+      final desde = _ultimaBusca;
+      if (desde == null || agora().difference(desde) >= intervalo) {
+        unawaited(atualizar());
+      }
+      _relogio ??= Timer.periodic(intervalo, (_) => atualizar());
+    } else {
+      _relogio?.cancel();
+      _relogio = null;
+    }
+  }
+
+  void _observar(bool ligar) {
+    final binding = WidgetsBinding.instance;
+    if (ligar) {
+      binding.addObserver(this);
+    } else {
+      binding.removeObserver(this);
+    }
   }
 
   Future<void> _lerPrefs() async {
@@ -148,6 +204,7 @@ class AvisosService {
   }
 
   Future<void> atualizar() async {
+    _ultimaBusca = agora();
     await _lerPrefs();
     try {
       final req = await _http.getUrl(Uri.parse('$endereco/aviso'));
@@ -230,6 +287,8 @@ class AvisosService {
 
   /// Para o relogio das buscas. Quem chama e a faixa, ao sair da tela.
   void parar() {
+    _ligado = false;
+    _observar(false);
     _relogio?.cancel();
     _relogio = null;
   }

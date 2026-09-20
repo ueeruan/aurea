@@ -18,10 +18,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../application/editor_controller.dart';
 import '../../application/font_service.dart';
-import '../../application/model_import_service.dart';
-import '../../application/texture_cache.dart';
 import '../../application/transcription_service.dart';
-import '../../application/motor3d_nativo.dart';
 import '../../application/transcricao_em_andamento.dart';
 import '../../../settings/application/settings_controller.dart';
 import '../../domain/caption.dart';
@@ -29,6 +26,9 @@ import '../../domain/element3d.dart';
 import '../../domain/layer.dart';
 import '../../domain/keyframe.dart';
 import '../../domain/model_import3d.dart';
+import '../../domain/scene3d.dart' show ModelCredit3D;
+import 'importacao_3d.dart';
+import '../sketchfab/sketchfab_screen.dart';
 import '../../../../core/ui/snack.dart';
 import '../../domain/shape.dart';
 import '../../domain/svg_document.dart';
@@ -89,7 +89,7 @@ Future<void> showAddLayerSheet(
                   GestureDetector(
                     behavior: HitTestBehavior.opaque,
                     onTap: () => Navigator.of(sheetContext).pop(),
-                    child: const SizedBox(
+                    child: SizedBox(
                       width: 28,
                       height: 28,
                       child: Icon(
@@ -216,7 +216,7 @@ class _SecaoFormasState extends State<_SecaoFormas> {
           GestureDetector(
             onTap: () => setState(() => _mais = true),
             behavior: HitTestBehavior.opaque,
-            child: const Padding(
+            child: Padding(
               padding: EdgeInsets.symmetric(vertical: 6),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -344,7 +344,7 @@ Future<void> showCaptionCreationSheet(
       ),
       child: AppText(
         rotulo,
-        style: const TextStyle(fontSize: 12, color: AmColors.accent),
+        style: TextStyle(fontSize: 12, color: AmColors.accent),
       ),
     ),
   );
@@ -494,7 +494,7 @@ Future<void> showCaptionCreationSheet(
                       key: const ValueKey('segundo-plano'),
                       padding: EdgeInsets.zero,
                       onPressed: () => Navigator.of(sheetContext).pop(),
-                      child: const AppText(
+                      child: AppText(
                         'Continuar em segundo plano',
                         style: TextStyle(fontSize: 12, color: AmColors.accent),
                       ),
@@ -505,7 +505,7 @@ Future<void> showCaptionCreationSheet(
                       padding: const EdgeInsets.only(top: 8),
                       child: AppText(
                         falha.mensagem,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 12,
                           color: AmColors.pink,
                         ),
@@ -542,7 +542,7 @@ Future<void> showCaptionCreationSheet(
                       child: AppTextMoldado(
                         'Legendas prontas: {0} falas.',
                         [estado.falas],
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 12,
                           color: AmColors.accent,
                         ),
@@ -924,7 +924,7 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
                   _explicando = null;
                 }),
                 child: Container(
-                  decoration: const BoxDecoration(color: AmColors.panel),
+                  decoration: BoxDecoration(color: AmColors.panel),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
@@ -1327,33 +1327,60 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
     );
   }
 
-  Future<void> _importarModelo3D() async {
+  /// DE ONDE VEM O MODELO 3D: do aparelho ou do Sketchfab.
+  ///
+  /// A GRADE NAO GANHOU UM SETIMO CARTAO. Ela tem seis, em duas fileiras de
+  /// tres, e a altura da folha sai do numero de fileiras — um cartao a mais
+  /// abriria uma terceira fileira so para ele. O toque em "Importar 3D"
+  /// pergunta a origem e o resto do caminho e o mesmo nos dois casos.
+  Future<void> _escolherOrigemDoModelo3D() async {
     if (_importing3D) return;
-    final continuar = await showCupertinoDialog<bool>(
+    final origem = await showCupertinoModalPopup<String>(
       context: context,
-      builder: (dialogContext) => CupertinoAlertDialog(
-        title: const AppText('Importar modelo 3D'),
-        content: const AppText(
-          'O Aurea aceita modelos de qualquer tamanho e não vai reduzir o '
-          'arquivo. Modelos muito grandes podem travar ou fechar o app em '
-          'celulares com pouca memória. Salve o projeto antes de continuar.',
-        ),
+      builder: (folha) => CupertinoActionSheet(
+        key: const ValueKey('add-origem-3d'),
+        title: const AppText('Importar 3D'),
         actions: [
-          CupertinoDialogAction(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const AppText('Cancelar'),
+          CupertinoActionSheetAction(
+            key: const ValueKey('add-3d-aparelho'),
+            onPressed: () => Navigator.of(folha).pop('aparelho'),
+            child: const AppText('Do aparelho'),
           ),
-          CupertinoDialogAction(
-            isDefaultAction: true,
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const AppText('Escolher modelo'),
+          CupertinoActionSheetAction(
+            key: const ValueKey('add-3d-sketchfab'),
+            onPressed: () => Navigator.of(folha).pop('sketchfab'),
+            child: const AppText('Sketchfab'),
           ),
         ],
+        cancelButton: CupertinoActionSheetAction(
+          onPressed: () => Navigator.of(folha).pop(),
+          child: const AppText('Cancelar'),
+        ),
       ),
     );
-    if (continuar != true || !mounted) return;
+    if (origem == null || !mounted) return;
+    if (origem == 'sketchfab') {
+      final nodeId = await abrirTelaDoSketchfab(
+        context,
+        playhead: widget.playhead,
+      );
+      if (nodeId == null || !mounted) return;
+      _fecha();
+      return;
+    }
+    await _importarModelo3D();
+  }
+
+  /// Do seletor do aparelho ate a camada de cena.
+  ///
+  /// NAO HA MAIS AVISO ANTES DE ESCOLHER. O aviso fixo aparecia em toda
+  /// importacao — ate de um cubo — e dizia que o app nao reduziria o
+  /// arquivo. Agora o modelo e lido, e so o que e pesado DE VERDADE
+  /// pergunta, com a ficha dele e a opcao de otimizar (ver
+  /// `importacao_3d.dart`).
+  Future<void> _importarModelo3D() async {
+    if (_importing3D) return;
     setState(() => _importing3D = true);
-    final projectId = ref.read(editorControllerProvider).id;
     try {
       final selection = await FilePicker.platform.pickFiles(
         allowMultiple: true,
@@ -1364,37 +1391,8 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
           selection?.files.map((f) => f.path).whereType<String>().toList() ??
           const <String>[];
       if (paths.isEmpty || !mounted) return;
-      final model = await readModel3DFiles(paths, permitirModeloGrande: true);
-      if (!mounted || ref.read(editorControllerProvider).id != projectId) {
-        return;
-      }
-      for (final material in model.data['materials'] as List) {
-        if (material is! Map || material['image'] is! String) continue;
-        if (!await TextureCache.instance.prepare(material['image'] as String)) {
-          modelFail('Uma textura não pôde ser aberta. Use PNG, JPEG ou WebP.');
-        }
-      }
-      if (!mounted || ref.read(editorControllerProvider).id != projectId) {
-        return;
-      }
-      // A IMPORTACAO CONFERE ANTES DE DIZER QUE DEU CERTO. Um modelo pode
-      // ser lido e mesmo assim nao virar desenho (o avaliador nao tira
-      // malha, ou o acervo recusa a geometria) — e fechar a folha como
-      // sucesso com a camada vazia e o "importei e nao apareceu nada".
-      final falha = Motor3DNativo.instance.conferirModelo(model);
-      if (falha != null) {
-        throw ModelImportException(
-          falha == '3D_GPU_BUFFER_FAILED'
-              ? '$falha: o motor 3D não aceitou a geometria deste modelo '
-                    '(memória ou malha degenerada).'
-              : '$falha: o modelo não tem geometria que o motor 3D desenhe.',
-        );
-      }
-      final nodeId = _controller.addImportedModel3D(widget.playhead, model);
-      if (nodeId.isEmpty) {
-        throw const ModelImportException('3D_SCENE_ATTACH_FAILED: não foi '
-            'possível criar a cena 3D.');
-      }
+      final nodeId = await _concluirImportacao3D(paths);
+      if (nodeId == null || !mounted) return;
       _fecha();
     } on ModelImportException catch (error) {
       if (mounted) AureaSnack.show(context, error.message);
@@ -1409,6 +1407,23 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
       if (mounted) setState(() => _importing3D = false);
     }
   }
+
+  /// A porta unica da importacao 3D, vista desta folha: o que vem DEPOIS de
+  /// ter os arquivos em disco. O trabalho mora em [concluirImportacao3D],
+  /// que a tela do Sketchfab chama com o download dela, o credito do autor
+  /// e o mostrador de etapas.
+  Future<String?> _concluirImportacao3D(
+    List<String> paths, {
+    ModelCredit3D? credito,
+    ValueNotifier<EtapaDaImportacao3D>? etapa,
+  }) => concluirImportacao3D(
+    context,
+    ref,
+    paths,
+    playhead: widget.playhead,
+    credito: credito,
+    etapa: etapa,
+  );
 
   Widget _objetos() {
     Widget cardItem({
@@ -1471,7 +1486,7 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
           color: const Color(0xFF8BD5FF),
         ),
         label: _importing3D ? 'Importando 3D...' : 'Importar 3D',
-        onTap: _importarModelo3D,
+        onTap: _escolherOrigemDoModelo3D,
       ),
       // 2. Grupo Vazio
       cardItem(

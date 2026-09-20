@@ -220,7 +220,7 @@ Future<void> showCamerasSheet(
                       color: AmColors.accentDim,
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const AppText('Nova camera (enquadramento atual)',
+                    child: AppText('Nova camera (enquadramento atual)',
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
@@ -262,7 +262,7 @@ Future<void> showCamerasSheet(
                       controller.clearCameraShots(layerId);
                       setSheetState(() {});
                     },
-                    child: const AppText('Limpar tomadas',
+                    child: AppText('Limpar tomadas',
                       style: TextStyle(fontSize: 12, color: AmColors.pink),
                     ),
                   ),
@@ -381,7 +381,7 @@ class _LinhaTomada extends StatelessWidget {
             width: 74,
             child: AppText(
               tempo,
-              style: const TextStyle(fontSize: 12, color: AmColors.accent),
+              style: TextStyle(fontSize: 12, color: AmColors.accent),
             ),
           ),
           Expanded(

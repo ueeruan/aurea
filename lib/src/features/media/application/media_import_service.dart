@@ -10,6 +10,8 @@ import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 
+import 'seletor_do_sistema.dart';
+
 /// A PASTA ONDE A MIDIA IMPORTADA MORA — UMA SO, PARA ESCREVER E PARA LER.
 ///
 /// Eram DUAS: a importacao gravava em `getApplicationSupportDirectory` e a
@@ -18,16 +20,35 @@ import 'package:uuid/uuid.dart';
 /// nunca aparecia na galeria, e o defeito nao dava erro nenhum.
 const subpastaDaMidia = 'imported_media';
 
+/// E VIDEO? Pela extensao do nome — a mesma lista que a Inicio usa para
+/// decidir entre camada de video e de imagem.
+bool pareceVideo(String nome) {
+  final ponto = nome.lastIndexOf('.');
+  if (ponto < 0) return false;
+  return const {
+    'mp4',
+    'mov',
+    'm4v',
+    'avi',
+    'mkv',
+    'webm',
+    '3gp',
+  }.contains(nome.substring(ponto + 1).toLowerCase());
+}
+
 /// Importacao de midia do dispositivo (galeria/camera/arquivos).
 class MediaImportService {
   MediaImportService([
     ImagePicker? picker,
     Future<Directory> Function()? directory,
+    SeletorDoSistema? seletor,
   ]) : _picker = picker ?? ImagePicker(),
-       _directory = directory ?? getApplicationSupportDirectory;
+       _directory = directory ?? getApplicationSupportDirectory,
+       _seletor = seletor ?? const SeletorDoSistema();
 
   final ImagePicker _picker;
   final Future<Directory> Function() _directory;
+  final SeletorDoSistema _seletor;
 
   Future<XFile?> pickVideoFromGallery() async {
     final file = await _picker.pickVideo(source: ImageSource.gallery);
@@ -164,15 +185,47 @@ class MediaImportService {
   }
 
   /// Audio via seletor de ARQUIVOS do sistema (galeria nao lista audio).
+  ///
+  /// No Android o seletor reabre na pasta da ultima trilha escolhida (canal
+  /// `aurea/seletor`); em qualquer erro, e no iOS, e o file_picker de antes.
   Future<XFile?> pickAudioFile() async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.audio,
-      allowMultiple: false,
-      withData: false,
+    final f = await _seletor.escolher(
+      TipoDeSeletor.audio,
+      reserva: SeletorDoSistema.peloFilePicker(FileType.audio),
     );
-    final f = result?.files.single;
-    if (f == null || f.path == null) return null;
-    return persist(XFile(f.path!, name: f.name));
+    if (f == null) return null;
+    return persist(XFile(f.caminho, name: f.nome));
+  }
+
+  /// IMAGEM pelo navegador de documentos: devolve o CAMINHO DURAVEL da
+  /// copia dentro do app (a textura do solido 3D so precisa disso), ou nulo
+  /// se a pessoa cancelou. No Android reabre na pasta da ultima imagem
+  /// escolhida por aqui; levanta se o arquivo nao abre como imagem.
+  Future<String?> pickImageFile() async {
+    final f = await _seletor.escolher(
+      TipoDeSeletor.imagem,
+      reserva: SeletorDoSistema.peloFilePicker(FileType.image),
+    );
+    if (f == null) return null;
+    return (await persist(XFile(f.caminho, name: f.nome), image: true)).path;
+  }
+
+  /// FOTO OU VIDEO pelo navegador de documentos, ja copiado para o app.
+  ///
+  /// E a porta do "Importar midia" da Inicio: la o caminho do seletor ia
+  /// direto para a camada, e o seletor devolve um arquivo em CACHE — o
+  /// Android limpa o cache quando quer e o projeto abria sem a midia.
+  /// No Android reabre na pasta da ultima midia escolhida por aqui.
+  Future<XFile?> pickMediaFile() async {
+    final f = await _seletor.escolher(
+      TipoDeSeletor.midia,
+      reserva: SeletorDoSistema.peloFilePicker(FileType.media),
+    );
+    if (f == null) return null;
+    return persist(
+      XFile(f.caminho, name: f.nome),
+      image: !pareceVideo(f.nome) && !pareceVideo(f.caminho),
+    );
   }
 
   /// Metadata only: opening an AVPlayer/ExoPlayer here allocates an unnecessary
@@ -197,7 +250,9 @@ class MediaImportService {
     if (video == null) return null;
     await audioDuration(video.path);
     final root = await _directory();
-    final folder = await Directory('${root.path}/imported_media')
+    // Pela constante, e nao pelo literal: era assim que as DUAS pastas
+    // nasceram, e o audio extraido nao pode escapar da que o app le.
+    final folder = await Directory('${root.path}/$subpastaDaMidia')
         .create(recursive: true);
     final output = File('${folder.path}/${const Uuid().v4()}.m4a');
     try {
@@ -241,22 +296,17 @@ class _ImportedFile extends XFile {
   final String name;
 }
 
+/// UM ARQUIVO QUE JA MORA EM `imported_media` (um recente reusado), com o
+/// nome legivel de quando entrou. Nao copia nada: e so o embrulho que os
+/// chamadores de importacao esperam receber.
+XFile arquivoJaImportado(String caminho, String nome) =>
+    _ImportedFile(caminho, nome);
+
 final mediaImportServiceProvider = Provider<MediaImportService>(
   (ref) => MediaImportService(),
 );
 
 
-/// O QUE JA FOI IMPORTADO PARA ESTE APARELHO.
-///
-/// A aba Midia do seletor mostra miniaturas, e o unico carretel que a
-/// Aurea pode ler sem pedir permissao ao sistema e o proprio: a pasta
-/// imported_media, para onde `persist` copia tudo que entra. E
-/// conteudo real do app — nada de galeria inventada.
-///
-/// Mais recentes primeiro, com teto: uma grade de dez linhas de
-/// miniaturas dentro de um seletor de 300 px nao seria olhada, e ler a
-/// pasta inteira num aparelho com centenas de arquivos custaria o tempo
-/// de abrir o menu.
 /// A PROPORCAO DE UMA FOTO (largura / altura) sem decodificar a imagem.
 ///
 /// O descritor do Flutter ja entrega a medida com a orientacao EXIF
@@ -276,41 +326,5 @@ Future<double?> proporcaoDaFoto(String path) async {
   } finally {
     descritor?.dispose();
     buffer?.dispose();
-  }
-}
-
-/// AS DUAS PASTAS, e nao uma.
-///
-/// A importacao SEMPRE gravou em `getApplicationSupportDirectory` e esta
-/// leitura olhava so `getApplicationDocumentsDirectory` — o que entrava
-/// nunca aparecia. Passar a ler as duas conserta o que ja foi importado
-/// antes, sem mover arquivo nenhum de lugar.
-Future<List<Directory>> _pastasDeMidia() async {
-  final pastas = <Directory>[];
-  for (final raiz in [
-    await getApplicationSupportDirectory(),
-    await getApplicationDocumentsDirectory(),
-  ]) {
-    final p = Directory('${raiz.path}/$subpastaDaMidia');
-    if (p.existsSync()) pastas.add(p);
-  }
-  return pastas;
-}
-
-Future<List<File>> midiaRecente({int teto = 20}) async {
-  try {
-    final pastas = await _pastasDeMidia();
-    if (pastas.isEmpty) return const [];
-    final arquivos = [
-      for (final pasta in pastas) ...pasta.listSync().whereType<File>(),
-    ].toList()
-      ..sort(
-        (a, b) => b.statSync().modified.compareTo(a.statSync().modified),
-      );
-    return arquivos.take(teto).toList();
-  } on Object {
-    // Pasta inacessivel nao e defeito: o seletor mostra o vazio util e
-    // os dois caminhos de importacao continuam la.
-    return const [];
   }
 }

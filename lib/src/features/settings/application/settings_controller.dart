@@ -1,6 +1,9 @@
+import 'dart:ui' show Brightness;
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/storage/prefs.dart';
+import '../../../core/theme/aurea_paleta.dart';
 import '../../editor/domain/modo_de_transcricao.dart';
 
 /// Preferencias do app, persistidas em SharedPreferences.
@@ -20,8 +23,21 @@ class AppSettings {
   /// automatico (pela internet).
   final ModoDeTranscricao modoDeTranscricao;
 
-  /// 'escuro' | 'claro' | 'sistema' (Fase 6).
+  /// O TEMA ESCOLHIDO, do jeito que vai para o disco.
+  ///
+  /// 'escuro' (= Aurea) | 'claro' (= Light) | 'sistema' | o `name` de um
+  /// [AureaTemaId] ('aureaDark', 'midnight', 'oled', 'graphite'). Os dois
+  /// primeiros sao os nomes de quando so havia dois temas, e ficaram para
+  /// ninguem perder a escolha na atualizacao. Continua `String` (e nao o
+  /// enum) porque 'sistema' nao e um tema, e uma regra.
   final String themeMode;
+
+  /// O tema que [themeMode] da, com o brilho do aparelho para 'sistema'.
+  /// Valor desconhecido cai no padrao.
+  AureaTemaId temaId(Brightness sistema) =>
+      AureaPaleta.resolver(themeMode, sistema);
+
+  bool get temaSegueOSistema => themeMode == AureaPaleta.modoSistema;
 
   /// Valores padrao usados ao criar um projeto novo.
   final String defaultAspectKey;
@@ -90,6 +106,13 @@ class SettingsController extends Notifier<AppSettings> {
     state = state.copyWith(themeMode: modo);
     ref.read(sharedPreferencesProvider).setString(_kTema, modo);
   }
+
+  /// Escolhe um dos temas. A raiz do app observa [AppSettings.themeMode] e
+  /// remonta a arvore com a paleta nova — nao precisa reabrir o app.
+  void setTema(AureaTemaId id) => setThemeMode(AureaPaleta.modoDe(id));
+
+  /// Volta a seguir o brilho do aparelho (Aurea ou Light).
+  void seguirOSistema() => setThemeMode(AureaPaleta.modoSistema);
 
   void setDefaultAspect(String key) {
     state = state.copyWith(defaultAspectKey: key);

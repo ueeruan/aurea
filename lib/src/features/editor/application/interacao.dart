@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
@@ -25,10 +26,18 @@ class Interacao {
   /// Verdadeiro do primeiro [marcar] ate [_folga] depois do ultimo.
   static final ValueNotifier<bool> agora = ValueNotifier<bool>(false);
 
+  /// NOS TESTES O SINAL NASCE DESLIGADO. Toda mutacao do projeto e todo
+  /// seek com o relogio parado chamam [marcar], e o Timer da folga que fica
+  /// pendente derruba qualquer `testWidgets` que termine antes de 260 ms
+  /// ("A Timer is still pending"). Os testes que prendem o rascunho da
+  /// interacao ligam isto de proposito e chamam [zerar] no fim.
+  static bool ligada = !Platform.environment.containsKey('FLUTTER_TEST');
+
   static Timer? _fim;
 
   /// Chamar a cada passo do gesto. Barato: um Timer rearmado.
   static void marcar() {
+    if (!ligada) return;
     _fim?.cancel();
     _fim = Timer(_folga, _soltar);
     if (!agora.value) agora.value = true;

@@ -60,7 +60,7 @@ class TextPanel extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final secao = ref.watch(editorSessionProvider).textSection;
     final id = ref.watch(selectedLayerProvider);
-    if (id == null) return const ColoredBox(color: AmColors.panel);
+    if (id == null) return ColoredBox(color: AmColors.panel);
 
     return ColoredBox(
       color: AmColors.panel,
@@ -103,18 +103,26 @@ class _EdicaoDeTexto extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final t = AureaTokens.of(context);
-    final project = ref.watch(projetoVisivelProvider);
     final id = ref.watch(selectedLayerProvider);
-    final layer = id == null ? null : project.layerById(id);
+    // TRES RECORTES, NAO O PROJETO: a camada de texto, a tabela de dados e
+    // o vinculo desta camada. Observar o projeto inteiro refazia o painel
+    // (e os campos de texto dentro dele) a cada mutacao.
+    final layer = id == null
+        ? null
+        : ref.watch(projetoVisivelProvider.select((p) => p.layerById(id)));
     if (layer is! TextLayer || id == null) {
-      return const ColoredBox(color: AmColors.panel);
+      return ColoredBox(color: AmColors.panel);
     }
     final controller = ref.read(editorControllerProvider.notifier);
     final pro = ref.watch(proModeProvider);
-    final dados = project.data;
-    final vinculo = project.bindings
-        .where((b) => b.layerId == id && b.property == 'text')
-        .firstOrNull;
+    final dados = ref.watch(projetoVisivelProvider.select((p) => p.data));
+    final vinculo = ref.watch(
+      projetoVisivelProvider.select(
+        (p) => p.bindings
+            .where((b) => b.layerId == id && b.property == 'text')
+            .firstOrNull,
+      ),
+    );
 
     return ColoredBox(
       color: AmColors.panel,

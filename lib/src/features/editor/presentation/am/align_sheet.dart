@@ -94,7 +94,7 @@ Future<void> showAlignSheet(
                             ),
                             child: AppText(
                               label,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 12,
                                 color: AmColors.accent,
                               ),
@@ -170,7 +170,7 @@ Future<void> showAlignSheet(
                     ),
                   ],
                 ),
-                const Divider(color: AmColors.hairline, height: 20),
+                Divider(color: AmColors.hairline, height: 20),
                 const AppText('Distribuir',
                   style: TextStyle(
                     fontSize: 13,
@@ -235,7 +235,7 @@ Future<void> showAlignSheet(
                             ),
                             child: AppText(
                               label,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 12,
                                 color: AmColors.accent,
                               ),
@@ -273,7 +273,7 @@ Future<void> showAlignSheet(
                             ),
                             child: AppText(
                               '${gap.round()}px',
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 11,
                                 color: AmColors.accent,
                               ),

@@ -1,6 +1,7 @@
 import 'package:aurea/src/core/l10n/app_language.dart';
 import 'package:aurea/src/core/theme/aurea_colors.dart';
 
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/cupertino.dart';
@@ -12,6 +13,7 @@ import 'package:image_picker/image_picker.dart';
 import '../../../../core/storage/prefs.dart';
 import '../../../media/application/gallery_service.dart';
 import '../../../media/application/media_import_service.dart';
+import '../../../media/application/midias_recentes.dart';
 import '../am/am_colors.dart';
 
 /// Embedded media browser; opening albums never covers or resizes the preview.
@@ -51,6 +53,24 @@ class _GalleryPanelState extends ConsumerState<GalleryPanel>
   final _marcados = <GalleryAsset>[];
   double _duracaoDaImagem = 3.0;
   static const _kDuracaoDaImagem = 'galeria.duracao_da_imagem';
+
+  /// O ALBUM LEMBRADO. O estado do painel morre quando a folha fecha (o
+  /// provedor da galeria e autoDispose), e toda abertura caia em "Todos":
+  /// quem monta um projeto com dez fotos da mesma pasta voltava a procurar
+  /// a pasta dez vezes. O id do album e estavel (bucket do MediaStore no
+  /// Android, localIdentifier no iOS), entao basta guardar o id. Um so: a
+  /// galeria propria mistura foto e video no mesmo album.
+  static const _kUltimoAlbum = 'galeria.ultimo_album';
+  String? _albumLembrado;
+
+  /// OS RECENTES DA AUREA como album virtual. Nao e um album de verdade (o
+  /// [_album] continua sendo o real, para o relogio devolver a pessoa a
+  /// ele) e por isso nao e o que fica lembrado entre aberturas.
+  static const _albumRecentes = GalleryAlbum('aurea:recentes', 'Recentes');
+  bool _recentes = false;
+
+  /// Um recado que NAO pede "tentar novamente" (o [_error] pede).
+  String? _aviso;
   int _generation = 0, _page = 0;
   bool _refreshing = false;
   static const _pageSize = 60;
@@ -60,9 +80,9 @@ class _GalleryPanelState extends ConsumerState<GalleryPanel>
   void initState() {
     super.initState();
     try {
-      _duracaoDaImagem =
-          ref.read(sharedPreferencesProvider).getDouble(_kDuracaoDaImagem) ??
-          3.0;
+      final prefs = ref.read(sharedPreferencesProvider);
+      _duracaoDaImagem = prefs.getDouble(_kDuracaoDaImagem) ?? 3.0;
+      _albumLembrado = prefs.getString(_kUltimoAlbum);
     } catch (_) {}
     WidgetsBinding.instance.addObserver(this);
     _scroll.addListener(() {
@@ -107,8 +127,11 @@ class _GalleryPanelState extends ConsumerState<GalleryPanel>
         _loading = false;
       });
       if (albums.isNotEmpty) {
+        // O que estava aberto; na primeira carga, o lembrado. Album que
+        // sumiu do aparelho nao casa com nenhum e cai no primeiro.
+        final alvo = _album?.id ?? _albumLembrado;
         await _chooseAlbum(
-          albums.where((a) => a.id == _album?.id).firstOrNull ?? albums.first,
+          albums.where((a) => a.id == alvo).firstOrNull ?? albums.first,
         );
       } else {
         setState(() {
@@ -128,10 +151,29 @@ class _GalleryPanelState extends ConsumerState<GalleryPanel>
     }
   }
 
+  /// A ESCOLHA DA PESSOA no menu: e ela que fica lembrada, e nao o album
+  /// em que o painel caiu sozinho.
+  Future<void> _escolhidoNoMenu(GalleryAlbum album) async {
+    if (album.id == _albumRecentes.id) {
+      setState(() {
+        _recentes = true;
+        _aviso = null;
+      });
+      return;
+    }
+    _recentes = false;
+    _albumLembrado = album.id;
+    try {
+      ref.read(sharedPreferencesProvider).setString(_kUltimoAlbum, album.id);
+    } catch (_) {}
+    await _chooseAlbum(album);
+  }
+
   Future<void> _chooseAlbum(GalleryAlbum album) async {
     _generation++;
     setState(() {
       _album = album;
+      _aviso = null;
       _assets.clear();
       _page = 0;
       _more = true;
@@ -171,23 +213,45 @@ class _GalleryPanelState extends ConsumerState<GalleryPanel>
     bool video,
     Duration duration, {
     bool persisted = false,
+    GalleryAsset? asset,
   }) async {
     if (_importing) return;
     setState(() {
       _importing = true;
       _error = null;
+      _aviso = null;
     });
+    // LIDOS ANTES DE IMPORTAR: `onImport` costuma fechar a folha, e o `ref`
+    // de um painel desmontado nao pode mais ser usado.
+    final recentes = ref.read(midiasRecentesProvider.notifier);
+    final servico = _service;
     try {
-      final file = await pick();
-      if (file == null) return;
-      if (!mounted) return;
-      final saved = persisted
-          ? file
-          : await ref
-                .read(mediaImportServiceProvider)
-                .persist(file, image: !video);
-      if (!mounted) return;
+      // JA COPIEI ESTA? A mesma foto em dez projetos ocupa o espaco de uma.
+      final jaTenho = recentes.daOrigem(asset?.origem);
+      final XFile saved;
+      if (jaTenho != null) {
+        saved = arquivoJaImportado(jaTenho.caminho, jaTenho.nome);
+      } else {
+        final file = await pick();
+        if (file == null) return;
+        if (!mounted) return;
+        saved = persisted
+            ? file
+            : await ref
+                  .read(mediaImportServiceProvider)
+                  .persist(file, image: !video);
+        if (!mounted) return;
+      }
       await widget.onImport(saved, video, duration);
+      await registrarMidiaImportada(
+        recentes,
+        caminho: saved.path,
+        nome: saved.name,
+        video: video,
+        duracao: duration,
+        origem: asset?.origem,
+        miniaturaPronta: asset == null ? null : () => servico.thumbnail(asset),
+      );
     } catch (_) {
       if (mounted) {
         setState(
@@ -231,15 +295,26 @@ class _GalleryPanelState extends ConsumerState<GalleryPanel>
     setState(() {
       _importing = true;
       _error = null;
+      _aviso = null;
     });
+    final recentes = ref.read(midiasRecentesProvider.notifier);
+    final servico = _service;
     try {
       final midias = <MidiaDoLote>[];
+      final origens = <GalleryAsset>[];
       for (final asset in List.of(_marcados)) {
-        final file = await _service.file(asset);
-        if (file == null) continue;
-        final saved = await ref
-            .read(mediaImportServiceProvider)
-            .persist(XFile(file.path), image: !asset.video);
+        final XFile saved;
+        final jaTenho = recentes.daOrigem(asset.origem);
+        if (jaTenho != null) {
+          saved = arquivoJaImportado(jaTenho.caminho, jaTenho.nome);
+        } else {
+          final file = await servico.file(asset);
+          if (file == null) continue;
+          saved = await ref
+              .read(mediaImportServiceProvider)
+              .persist(XFile(file.path), image: !asset.video);
+        }
+        origens.add(asset);
         midias.add((
           file: saved,
           video: asset.video,
@@ -251,6 +326,20 @@ class _GalleryPanelState extends ConsumerState<GalleryPanel>
       if (!mounted || midias.isEmpty) return;
       await lote(midias, emSequencia: emSequencia);
       if (mounted) setState(_marcados.clear);
+      // De tras para a frente: a PRIMEIRA marcada termina na frente da
+      // lista, que e a ordem em que a pessoa pensou o lote.
+      for (var i = midias.length - 1; i >= 0; i--) {
+        final asset = origens[i];
+        await registrarMidiaImportada(
+          recentes,
+          caminho: midias[i].file.path,
+          nome: midias[i].file.name,
+          video: asset.video,
+          duracao: asset.video ? asset.duration : Duration.zero,
+          origem: asset.origem,
+          miniaturaPronta: () => servico.thumbnail(asset),
+        );
+      }
     } catch (_) {
       if (mounted) {
         setState(() => _error = 'Não foi possível importar as marcadas.');
@@ -268,7 +357,42 @@ class _GalleryPanelState extends ConsumerState<GalleryPanel>
     },
     asset.video,
     asset.duration,
+    asset: asset,
   );
+
+  /// UM RECENTE ENTRA DIRETO: o arquivo ja esta copiado dentro do app, entao
+  /// nao ha seletor, nem `persist`, nem arquivo novo em disco.
+  Future<void> _usarRecente(MidiaRecente midia) async {
+    if (_importing) return;
+    final recentes = ref.read(midiasRecentesProvider.notifier);
+    if (!File(midia.caminho).existsSync()) {
+      recentes.tirar(midia.caminho);
+      setState(() => _aviso = 'Essa mídia não está mais no aparelho.');
+      return;
+    }
+    setState(() {
+      _importing = true;
+      _error = null;
+      _aviso = null;
+    });
+    try {
+      await widget.onImport(
+        arquivoJaImportado(midia.caminho, midia.nome),
+        midia.video,
+        midia.duracao,
+      );
+      // Usou de novo: volta para a frente da fila.
+      try {
+        recentes.registrar(midia);
+      } catch (_) {}
+    } catch (_) {
+      if (mounted) {
+        setState(() => _error = 'Não foi possível importar.');
+      }
+    } finally {
+      if (mounted) setState(() => _importing = false);
+    }
+  }
 
   Future<void> _selectMore() async {
     try {
@@ -285,6 +409,9 @@ class _GalleryPanelState extends ConsumerState<GalleryPanel>
   Widget build(BuildContext context) {
     ref.watch(galleryServiceProvider);
     final importer = ref.read(mediaImportServiceProvider);
+    final listaDeRecentes = ref.watch(midiasRecentesProvider);
+    // Lista que esvaziou (tudo apagado do disco) devolve a grade normal.
+    final vendoRecentes = _recentes && listaDeRecentes.isNotEmpty;
     if (_selecionando && widget.onImportLote != null) {
       final temImagem = _marcados.any((a) => !a.video);
       return Stack(
@@ -369,7 +496,7 @@ class _GalleryPanelState extends ConsumerState<GalleryPanel>
                       AppText(
                         '${_duracaoDaImagem.toStringAsFixed(1)} s',
                         key: const ValueKey('galeria-imagem-duracao'),
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: AmColors.accent,
                           fontSize: 12,
                           fontWeight: FontWeight.w700,
@@ -406,17 +533,23 @@ class _GalleryPanelState extends ConsumerState<GalleryPanel>
                 children: [
                   Expanded(
                     child: _albums.isEmpty
-                        ? const AppText(
-                            'Galeria',
-                            style: TextStyle(
+                        ? AppText(
+                            vendoRecentes ? 'Recentes' : 'Galeria',
+                            style: const TextStyle(
                               color: AmColors.text,
                               fontSize: 12,
                             ),
                           )
                         : PopupMenuButton<GalleryAlbum>(
                             tooltip: 'Selecionar álbum',
-                            onSelected: _chooseAlbum,
+                            onSelected: _escolhidoNoMenu,
                             itemBuilder: (_) => [
+                              if (listaDeRecentes.isNotEmpty)
+                                PopupMenuItem(
+                                  key: const ValueKey('galeria-album-recentes'),
+                                  value: _albumRecentes,
+                                  child: AppText(_albumRecentes.name),
+                                ),
                               for (final album in _albums)
                                 PopupMenuItem(
                                   value: album,
@@ -433,7 +566,9 @@ class _GalleryPanelState extends ConsumerState<GalleryPanel>
                                 const SizedBox(width: 5),
                                 Expanded(
                                   child: AppText(
-                                    _album?.name ?? 'Todos',
+                                    vendoRecentes
+                                        ? _albumRecentes.name
+                                        : _album?.name ?? 'Todos',
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: const TextStyle(
@@ -451,6 +586,25 @@ class _GalleryPanelState extends ConsumerState<GalleryPanel>
                             ),
                           ),
                   ),
+                  // ACESSO RAPIDO AOS RECENTES: um toque, sem abrir o menu
+                  // de albuns. O mesmo botao devolve ao album de antes. So
+                  // existe quando ha o que mostrar.
+                  if (listaDeRecentes.isNotEmpty)
+                    IconButton(
+                      key: const ValueKey('galeria-recentes'),
+                      tooltip: translate(context, 'Recentes'),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(minWidth: 36),
+                      iconSize: 18,
+                      onPressed: () => setState(() {
+                        _recentes = !vendoRecentes;
+                        _aviso = null;
+                      }),
+                      icon: Icon(
+                        CupertinoIcons.clock,
+                        color: vendoRecentes ? AmColors.accent : AmColors.text,
+                      ),
+                    ),
                   IconButton(
                     tooltip: 'Fotos do sistema',
                     padding: EdgeInsets.zero,
@@ -489,7 +643,7 @@ class _GalleryPanelState extends ConsumerState<GalleryPanel>
             if (_access == GalleryAccess.limited)
               InkWell(
                 onTap: _selectMore,
-                child: const Padding(
+                child: Padding(
                   padding: EdgeInsets.symmetric(vertical: 4),
                   child: AppText(
                     'Acesso limitado · Selecionar mais fotos',
@@ -505,17 +659,54 @@ class _GalleryPanelState extends ConsumerState<GalleryPanel>
                   child: AppTextMoldado(
                     '{0} Tentar novamente', [_error],
                     maxLines: 3,
-                    style: const TextStyle(color: AmColors.pink, fontSize: 11),
+                    style: TextStyle(color: AmColors.pink, fontSize: 11),
                   ),
                 ),
               ),
-            Expanded(child: _grade()),
+            if (_aviso != null)
+              Padding(
+                padding: const EdgeInsets.all(4),
+                child: AppText(
+                  _aviso!,
+                  key: const ValueKey('galeria-aviso'),
+                  maxLines: 2,
+                  style: const TextStyle(color: AmColors.muted, fontSize: 11),
+                ),
+              ),
+            Expanded(
+              child: vendoRecentes
+                  ? _gradeDeRecentes(listaDeRecentes)
+                  : _grade(),
+            ),
           ],
         ),
         if (_importing) _veuDeImportacao(),
       ],
     );
   }
+
+  /// A mesma grade de tres colunas, com o que ja esta dentro do app. Sem
+  /// lote aqui: marcar varias e coisa da galeria do aparelho.
+  Widget _gradeDeRecentes(List<MidiaRecente> lista) => GridView.builder(
+    key: const ValueKey('galeria-grade-recentes'),
+    padding: EdgeInsets.zero,
+    scrollCacheExtent: const ScrollCacheExtent.pixels(100),
+    addAutomaticKeepAlives: false,
+    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+      crossAxisCount: 3,
+      mainAxisSpacing: 1,
+      crossAxisSpacing: 1,
+    ),
+    itemCount: lista.length,
+    itemBuilder: (context, index) {
+      final midia = lista[index];
+      return _MiniaturaRecente(
+        key: ValueKey('recente-${midia.caminho}'),
+        midia: midia,
+        onTap: () => _usarRecente(midia),
+      );
+    },
+  );
 
   Widget _grade() => _loading
       ? const Center(child: CupertinoActivityIndicator())
@@ -692,7 +883,7 @@ class _GalleryThumbnailState extends State<_GalleryThumbnail> {
                 width: 20,
                 height: 20,
                 alignment: Alignment.center,
-                decoration: const BoxDecoration(
+                decoration: BoxDecoration(
                   color: AmColors.accent,
                   shape: BoxShape.circle,
                 ),
@@ -710,4 +901,74 @@ class _GalleryThumbnailState extends State<_GalleryThumbnail> {
       ),
     ),
   );
+}
+
+/// A miniatura de um recente. Imagem usa o proprio arquivo (reduzido na
+/// decodificacao); video usa o jpg guardado na importacao, e sem ele fica o
+/// icone — miniatura que falhou nao esconde o item.
+class _MiniaturaRecente extends StatelessWidget {
+  const _MiniaturaRecente({
+    super.key,
+    required this.midia,
+    required this.onTap,
+  });
+  final MidiaRecente midia;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final imagem = midia.video ? midia.miniatura : midia.caminho;
+    final d = midia.duracao;
+    return Semantics(
+      label: midia.video ? 'Reusar vídeo' : 'Reusar foto',
+      button: true,
+      child: InkWell(
+        onTap: onTap,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            ColoredBox(
+              color: AmColors.chip,
+              child: imagem == null
+                  ? const Icon(
+                      CupertinoIcons.videocam,
+                      color: AmColors.muted,
+                      size: 22,
+                    )
+                  : Image.file(
+                      File(imagem),
+                      fit: BoxFit.cover,
+                      cacheWidth: 200,
+                      gaplessPlayback: true,
+                      errorBuilder: (_, _, _) => Icon(
+                        midia.video
+                            ? CupertinoIcons.videocam
+                            : Icons.broken_image_outlined,
+                        color: AmColors.muted,
+                      ),
+                    ),
+            ),
+            if (midia.video) ...[
+              const Center(
+                child: Icon(Icons.play_arrow, color: Colors.white, size: 26),
+              ),
+              if (d > Duration.zero)
+                Positioned(
+                  right: 3,
+                  bottom: 2,
+                  child: AppText(
+                    '${d.inMinutes}:${(d.inSeconds % 60).toString().padLeft(2, '0')}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      shadows: [Shadow(blurRadius: 3, color: Colors.black)],
+                    ),
+                  ),
+                ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
 }

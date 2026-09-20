@@ -23,6 +23,11 @@ enum AmSecao {
   // preve. Nenhum tipo passa de sete.
   volume,
   fade,
+
+  /// Video: velocidade, reverso, interpolacao de quadros e a porta do
+  /// Time Remap (o Estudio do tempo). Fica logo depois do som porque a
+  /// ordem do enum E a ordem da grade — e tempo anda junto com o audio.
+  tempo,
   editarForma,
 
   /// O Modulo Grade do nulo — clonar em grade, circulo, esfera ou caminho.
@@ -104,6 +109,11 @@ Set<AmSecao> secoesDe(Layer layer) {
     // Video com som ganha as duas do audio — e a razao de a grade do
     // video bater exatamente em sete, e nao em oito.
     if (layer is VideoLayer) AmSecao.volume,
+    // TEMPO NA GRADE, e nao atras do "⋮": o Time Remap tinha ficado sem
+    // porta nenhuma (a da folha Velocidade e a da galeria foram apagadas
+    // em commits seguidos) e o dono nao achava mais o recurso. Com esta,
+    // a grade do video bate em sete — o teto exato.
+    if (layer is VideoLayer) AmSecao.tempo,
     // A PORTA DA CENA 3D RASTREADA: rastrear a camera do clipe e povoar
     // o espaco com objetos, texto e nulos.
     if (layer is VideoLayer) AmSecao.rastrear,

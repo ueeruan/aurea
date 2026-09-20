@@ -389,7 +389,7 @@ class BordaESombra extends ConsumerWidget {
                 color: AmColors.chip,
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Row(
+              child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Icon(CupertinoIcons.plus, size: 16, color: AmColors.accent),

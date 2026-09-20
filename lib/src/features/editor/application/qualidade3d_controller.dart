@@ -56,6 +56,11 @@ class ControladorDeQualidade3D with WidgetsBindingObserver {
   /// Toda mudanca de nivel, para o relatorio de estresse.
   final List<String> historico = [];
 
+  /// Sobe um a cada leitura da sonda e a cada aviso de memoria. Quem
+  /// deriva coisas de [termico]/[disponivelBytes] (o gerente de
+  /// desempenho) escuta isto em vez de abrir uma segunda sonda.
+  final ValueNotifier<int> revisaoDosSinais = ValueNotifier(0);
+
   int orcamentoBytes = orcamentoGpuBytes(0);
   int ramBytes = 0;
   int disponivelBytes = -1;
@@ -67,6 +72,10 @@ class ControladorDeQualidade3D with WidgetsBindingObserver {
   Qualidade3D _tetoDoOrcamento = Qualidade3D.ultra;
   Qualidade3D _tetoTermico = Qualidade3D.ultra;
   Qualidade3D _tetoDeMemoria = Qualidade3D.ultra;
+
+  /// O teto que o PERFIL de desempenho pede para a previa. Fica de fora
+  /// da exportacao de proposito (ver [paraExportacao]).
+  Qualidade3D _tetoDaPolitica = Qualidade3D.ultra;
   int _degrausPorTempo = 0;
   double? _ema;
   int _lentos = 0;
@@ -78,6 +87,13 @@ class ControladorDeQualidade3D with WidgetsBindingObserver {
   Timer? _sonda;
   bool _observando = false;
   bool _timingsLigados = false;
+
+  /// Quem, alem das cenas 3D, precisa das sondas ligadas (o gerente de
+  /// desempenho, enquanto o editor esta aberto).
+  final Set<Object> _interessados = {};
+
+  /// O app esta em segundo plano: nada de sonda nem de medicao.
+  bool _emSegundoPlano = false;
   PerfilDaCena _perfil = PerfilDaCena.nada;
   double _larguraPx = 0, _alturaPx = 0;
 
@@ -156,18 +172,32 @@ class ControladorDeQualidade3D with WidgetsBindingObserver {
       larguraPx: larguraPx,
       alturaPx: alturaPx,
     );
-    final tetoDoPreview = _nivelEstatico();
+    // O PERFIL DE DESEMPENHO NAO ENTRA AQUI. Ele e uma escolha sobre a
+    // PREVIA (bateria, calor, fluidez ao editar); o arquivo exportado nao
+    // pode sair pior por causa dela.
+    final tetoDoPreview = _nivelEstatico(comPolitica: false);
     final n = Qualidade3D.values[math.max(r.nivel.index, tetoDoPreview.index)];
     return (nivel: n, escala: r.escala, estimativa: r.estimativa);
   }
 
-  Qualidade3D _nivelEstatico() {
+  Qualidade3D _nivelEstatico({bool comPolitica = true}) {
     var i = tetoComoNivel(teto).index;
     i = math.max(i, _tetoDoOrcamento.index);
     i = math.max(i, _tetoTermico.index);
     i = math.max(i, _tetoDeMemoria.index);
+    if (comPolitica) i = math.max(i, _tetoDaPolitica.index);
     return Qualidade3D.values[i];
   }
+
+  /// O teto que o perfil de desempenho pede a PREVIA 3D. So para baixo, e
+  /// nunca para a exportacao.
+  void definirTetoDaPolitica(Qualidade3D t) {
+    if (t == _tetoDaPolitica) return;
+    _tetoDaPolitica = t;
+    _recalcular('perfil de desempenho');
+  }
+
+  Qualidade3D get tetoDaPolitica => _tetoDaPolitica;
 
   // ------------------------------------------------------------ sinais
 
@@ -175,26 +205,90 @@ class ControladorDeQualidade3D with WidgetsBindingObserver {
   void entrou() {
     _cenasNaTela++;
     if (_cenasNaTela > 1) return;
-    if (!_observando) {
-      _observando = true;
-      WidgetsBinding.instance.addObserver(this);
-    }
-    if (!_timingsLigados) {
-      _timingsLigados = true;
-      SchedulerBinding.instance.addTimingsCallback(_quadros);
-    }
-    _sonda ??= Timer.periodic(const Duration(seconds: 2), (_) => sondar());
-    unawaited(sondar());
+    _acertarSondas();
   }
 
   void saiu() {
     _cenasNaTela = math.max(0, _cenasNaTela - 1);
     if (_cenasNaTela > 0) return;
-    _sonda?.cancel();
-    _sonda = null;
+    _acertarSondas();
   }
 
   int get cenasNaTela => _cenasNaTela;
+
+  /// [quem] precisa de termico e memoria mesmo sem cena 3D na tela (o
+  /// gerente de desempenho, com o editor aberto). Devolver com
+  /// [dispensarSondas] — e o par que desliga tudo.
+  void manterSondas(Object quem) {
+    if (!_interessados.add(quem)) return;
+    _acertarSondas();
+  }
+
+  void dispensarSondas(Object quem) {
+    if (!_interessados.remove(quem)) return;
+    _acertarSondas();
+  }
+
+  bool get _alguemPrecisa => _cenasNaTela > 0 || _interessados.isNotEmpty;
+
+  /// A sonda de dois segundos esta rodando agora? (diagnostico e testes)
+  bool get sondando => _sonda != null;
+
+  /// A medicao de quadro esta ligada agora? (diagnostico e testes)
+  bool get medindoQuadros => _timingsLigados;
+
+  /// LIGA E DESLIGA DE FORMA SIMETRICA.
+  ///
+  /// `saiu()` so cancelava o Timer: o `addTimingsCallback` e o observador
+  /// ficavam para sempre depois da primeira cena 3D — um callback por lote
+  /// de quadros, no app inteiro, para nao medir nada. E nada disto olhava
+  /// o ciclo de vida: com o app em segundo plano a sonda seguia batendo no
+  /// canal nativo a cada dois segundos.
+  ///
+  /// O observador fica enquanto alguem precisa (e ele que ouve o
+  /// `resumed` para religar); Timer e medicao de quadro so com o app na
+  /// frente.
+  void _acertarSondas() {
+    final precisa = _alguemPrecisa;
+    if (precisa && !_observando) {
+      _observando = true;
+      WidgetsBinding.instance.addObserver(this);
+    } else if (!precisa && _observando) {
+      _observando = false;
+      WidgetsBinding.instance.removeObserver(this);
+    }
+    final medir = precisa && !_emSegundoPlano;
+    // A medicao de quadro e do 3D: sem cena na tela nao ha o que medir.
+    final medirQuadros = medir && _cenasNaTela > 0;
+    if (medirQuadros && !_timingsLigados) {
+      _timingsLigados = true;
+      SchedulerBinding.instance.addTimingsCallback(_quadros);
+    } else if (!medirQuadros && _timingsLigados) {
+      _timingsLigados = false;
+      SchedulerBinding.instance.removeTimingsCallback(_quadros);
+    }
+    if (medir && _sonda == null) {
+      _sonda = Timer.periodic(const Duration(seconds: 2), (_) => sondar());
+      unawaited(sondar());
+    } else if (!medir && _sonda != null) {
+      _sonda?.cancel();
+      _sonda = null;
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // `inactive` nao conta: e a central de notificacoes por cima do app,
+    // que continua na tela.
+    final fundo =
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.detached;
+    if (state != AppLifecycleState.resumed && !fundo) return;
+    if (fundo == _emSegundoPlano) return;
+    _emSegundoPlano = fundo;
+    _acertarSondas();
+  }
 
   /// Le memoria e termico do sistema, e o RSS do processo.
   Future<void> sondar() async {
@@ -247,6 +341,7 @@ class ControladorDeQualidade3D with WidgetsBindingObserver {
           ? 'pouca memoria disponivel'
           : 'sinais do sistema',
     );
+    revisaoDosSinais.value++;
   }
 
   void _quadros(List<FrameTiming> timings) {
@@ -308,6 +403,7 @@ class ControladorDeQualidade3D with WidgetsBindingObserver {
   void pressaoDeMemoria() {
     _degrausPorTempo = math.min(2, _degrausPorTempo + 1);
     _emergencia('aviso de memoria do sistema');
+    revisaoDosSinais.value++;
   }
 
   void _emergencia(String porQue) {
@@ -315,6 +411,7 @@ class ControladorDeQualidade3D with WidgetsBindingObserver {
     _fimDaEmergencia?.cancel();
     _fimDaEmergencia = Timer(janelaDeEmergencia, () {
       _recalcular('emergencia passou');
+      revisaoDosSinais.value++;
     });
     _recalcular(porQue);
   }
@@ -384,6 +481,7 @@ class ControladorDeQualidade3D with WidgetsBindingObserver {
     _tetoDoOrcamento = Qualidade3D.ultra;
     _tetoTermico = Qualidade3D.ultra;
     _tetoDeMemoria = Qualidade3D.ultra;
+    _tetoDaPolitica = Qualidade3D.ultra;
     _perfil = PerfilDaCena.nada;
     _larguraPx = 0;
     _alturaPx = 0;

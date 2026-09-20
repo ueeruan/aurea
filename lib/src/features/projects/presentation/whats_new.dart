@@ -531,7 +531,7 @@ class WhatsNewCard extends StatelessWidget {
                 color: AmColors.accent.withValues(alpha: 0.16),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: const Icon(
+              child: Icon(
                 CupertinoIcons.sparkles,
                 color: AmColors.accent,
                 size: 22,

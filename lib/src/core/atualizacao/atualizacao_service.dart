@@ -3,8 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -87,7 +87,7 @@ enum FaseDaAtualizacao { parada, baixando, conferindo, instalando, pronto }
 ///
 /// ISTO E SO PARA ANDROID. O iOS nao instala aplicativo fora da loja; la
 /// o caminho e o TestFlight, e o service responde que nao da.
-class AtualizacaoService {
+class AtualizacaoService with WidgetsBindingObserver {
   AtualizacaoService({
     HttpClient? http,
     MethodChannel? canal,
@@ -147,6 +147,12 @@ class AtualizacaoService {
 
   Timer? _relogio;
   bool _iniciado = false;
+  bool _emSegundoPlano = false;
+  DateTime? _ultimaVerificacao;
+
+  /// Quem pergunta ao sistema que horas sao (o teste injeta).
+  @visibleForTesting
+  DateTime Function() agora = DateTime.now;
 
   /// O caminho do APK ja baixado e conferido, quando ha um.
   String? _arquivoBaixado;
@@ -158,14 +164,49 @@ class AtualizacaoService {
   Future<void> iniciar() async {
     if (!_suportado || _iniciado) return;
     _iniciado = true;
-    unawaited(verificar());
-    _relogio ??= Timer.periodic(intervalo, (_) => verificar());
+    WidgetsBinding.instance.addObserver(this);
+    _acertarRelogio();
   }
 
   void parar() {
+    if (_iniciado) WidgetsBinding.instance.removeObserver(this);
     _relogio?.cancel();
     _relogio = null;
     _iniciado = false;
+  }
+
+  /// O relogio de duas horas esta rodando agora? (diagnostico e testes)
+  bool get verificando => _relogio != null;
+
+  /// EM SEGUNDO PLANO NAO SE PROCURA VERSAO NOVA.
+  ///
+  /// A faixa vive na Inicio, que nunca sai da arvore: este relogio nascia
+  /// com o app e ficava para sempre, batendo no servidor a cada duas horas
+  /// mesmo com o app fora da tela. Ao voltar, se ja passou o intervalo,
+  /// verifica uma vez.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final fundo =
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.detached;
+    if (state != AppLifecycleState.resumed && !fundo) return;
+    if (fundo == _emSegundoPlano) return;
+    _emSegundoPlano = fundo;
+    _acertarRelogio();
+  }
+
+  void _acertarRelogio() {
+    if (_iniciado && !_emSegundoPlano) {
+      final desde = _ultimaVerificacao;
+      if (desde == null || agora().difference(desde) >= intervalo) {
+        unawaited(verificar());
+      }
+      _relogio ??= Timer.periodic(intervalo, (_) => verificar());
+    } else {
+      _relogio?.cancel();
+      _relogio = null;
+    }
   }
 
   /// A VERSAO INSTALADA, do sistema — e nao do pubspec.
@@ -186,6 +227,7 @@ class AtualizacaoService {
   /// PERGUNTA AO SERVIDOR E DECIDE SE HA O QUE OFERECER.
   Future<void> verificar() async {
     if (!_suportado) return;
+    _ultimaVerificacao = agora();
     try {
       final req = await _http.getUrl(Uri.parse('$endereco/versao'));
       final res = await req.close().timeout(const Duration(seconds: 10));

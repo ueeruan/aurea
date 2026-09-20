@@ -126,7 +126,7 @@ Future<void> showAudioSheet(
               children: [
                 Row(
                   children: [
-                    const Icon(
+                    Icon(
                       CupertinoIcons.speaker_2,
                       size: 18,
                       color: AmColors.accent,
@@ -144,7 +144,7 @@ Future<void> showAudioSheet(
                       spec.muted
                           ? 'mudo'
                           : '${db.isFinite ? db.toStringAsFixed(1) : '-∞'} dB',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 13,
                         color: AmColors.accent,
                       ),
@@ -581,7 +581,7 @@ class _Action extends StatelessWidget {
           const SizedBox(width: 6),
           AppText(
             label,
-            style: const TextStyle(fontSize: 12, color: AmColors.accent),
+            style: TextStyle(fontSize: 12, color: AmColors.accent),
           ),
         ],
       ),

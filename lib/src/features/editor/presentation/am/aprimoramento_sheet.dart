@@ -153,7 +153,7 @@ class _FolhaDoAprimoramentoState extends ConsumerState<_FolhaDoAprimoramento> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Row(
+            Row(
               children: [
                 Icon(CupertinoIcons.sparkles, size: 18, color: AmColors.accent),
                 SizedBox(width: 8),
@@ -181,7 +181,7 @@ class _FolhaDoAprimoramentoState extends ConsumerState<_FolhaDoAprimoramento> {
             ),
             if (!motor) ...[
               const SizedBox(height: 10),
-              const AppText(
+              AppText(
                 'O motor de IA ainda não existe neste aparelho. O clipe exporta sem aprimoramento.',
                 key: ValueKey('aprimorar-ia-indisponivel'),
                 style: TextStyle(fontSize: 12, height: 1.35, color: AmColors.accent),
@@ -372,7 +372,7 @@ class _FolhaDoAprimoramentoState extends ConsumerState<_FolhaDoAprimoramento> {
       return Text(
         erro,
         key: const ValueKey('aprimorar-ia-erro'),
-        style: const TextStyle(fontSize: 12, color: AmColors.accent),
+        style: TextStyle(fontSize: 12, color: AmColors.accent),
       );
     }
     final c = _comparacao;

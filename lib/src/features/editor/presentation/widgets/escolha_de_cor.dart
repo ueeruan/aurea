@@ -162,7 +162,7 @@ class _Cabecalho extends StatelessWidget {
           const Spacer(),
           AppText(
             '$r $g $b',
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 12,
               color: AmColors.accent,
               fontFeatures: [FontFeature.tabularFigures()],

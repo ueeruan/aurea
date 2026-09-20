@@ -246,9 +246,12 @@ class _TransformPanelState extends ConsumerState<TransformPanel> {
 
   Widget _options(EditorController controller, String id, Layer layer) {
     final autoKey = ref.watch(autoKeyframeProvider);
-    final linked =
-        ref.watch(editorControllerProvider).linkFor(id, LayerProp.position) !=
-        null;
+    // So o vinculo, nao o projeto: o painel fica aberto durante o arrasto.
+    final linked = ref.watch(
+      editorControllerProvider.select(
+        (p) => p.linkFor(id, LayerProp.position) != null,
+      ),
+    );
     return PopupMenuButton<String>(
       tooltip: autoKey
           ? 'Opções de transformação · auto-key ligado'
@@ -342,11 +345,15 @@ class _TransformPanelState extends ConsumerState<TransformPanel> {
   @override
   Widget build(BuildContext context) {
     ref.watch(autoKeyframeProvider);
-    final project = ref.watch(projetoVisivelProvider);
     final id = ref.watch(selectedLayerProvider);
-    final layer = id == null ? null : project.layerById(id);
+    // A CAMADA, NAO O PROJETO. Este painel e o que mais fica aberto
+    // enquanto o dedo arrasta: observar o projeto inteiro o refazia a cada
+    // mutacao, inclusive as de outra camada.
+    final layer = id == null
+        ? null
+        : ref.watch(projetoVisivelProvider.select((p) => p.layerById(id)));
     if (layer == null || id == null) {
-      return const ColoredBox(color: AmColors.panel);
+      return ColoredBox(color: AmColors.panel);
     }
     final controller = ref.read(editorControllerProvider.notifier);
 
@@ -374,7 +381,10 @@ class _TransformPanelState extends ConsumerState<TransformPanel> {
           alvoDoRail: (modo) {
             final prop = propDoModo(modo);
             final realLayer =
-                ref.watch(editorControllerProvider).layerById(id) ?? layer;
+                ref.watch(
+                  editorControllerProvider.select((p) => p.layerById(id)),
+                ) ??
+                layer;
             final local = realLayer.localTime(t);
             final times = keyframeTimesForProp(realLayer, prop);
             final hasKfHere = times.any(

@@ -2,12 +2,16 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../application/editor_controller.dart';
-import '../../application/model_import_service.dart';
-import '../../application/texture_cache.dart';
 import '../../domain/model_import3d.dart';
+import '../widgets/importacao_3d.dart';
 import 'package:aurea/src/core/l10n/app_language.dart';
 
+/// Acrescenta um modelo do aparelho a uma cena que JA existe.
+///
+/// O que vem depois de ter os arquivos e o MESMO da folha de adicionar —
+/// aviso de modelo pesado, os cinco mapas preparados, conferencia do motor
+/// — porque os dois chamam [concluirImportacao3D]. Antes havia duas copias
+/// desse trecho, e so esta preparava os cinco mapas.
 class ModelImportButton extends ConsumerStatefulWidget {
   const ModelImportButton({
     super.key,
@@ -29,7 +33,6 @@ class _ModelImportButtonState extends ConsumerState<ModelImportButton> {
       busy = true;
       status = null;
     });
-    final projectId = ref.read(editorControllerProvider).id;
     try {
       final selection = await FilePicker.platform.pickFiles(
         allowMultiple: true,
@@ -40,51 +43,14 @@ class _ModelImportButtonState extends ConsumerState<ModelImportButton> {
           selection?.files.map((f) => f.path).whereType<String>().toList() ??
           [];
       if (paths.isEmpty || !mounted) return;
-      final model = await readModel3DFiles(paths);
-      if (!mounted || ref.read(editorControllerProvider).id != projectId) {
-        return;
-      }
-      for (final m in model.data['materials'] as List) {
-        if (!mounted || ref.read(editorControllerProvider).id != projectId) {
-          return;
-        }
-        // OS CINCO MAPAS SAO PREPARADOS ANTES DE A CAMADA NASCER.
-        //
-        // O `prepare` deixa a imagem no cache do pintor e o `prepareRgba`
-        // deixa os pixels prontos para a placa. Sem o segundo, o modelo
-        // nasceria sem mapa nenhum e so se vestiria um quadro depois — o
-        // dono veria um cinza aparecer e virar textura, que parece defeito.
-        //
-        // SO A TEXTURA DE COR DERRUBA A IMPORTACAO. Um relevo ilegivel e um
-        // modelo sem relevo, e nao um modelo que nao entra: recusar o
-        // arquivo inteiro por causa de um mapa secundario seria trocar um
-        // resultado bom por nenhum.
-        for (final chave in const [
-          'image',
-          'normalImage',
-          'metalRoughImage',
-          'emissiveImage',
-          'occlusionImage',
-        ]) {
-          final caminho = m[chave];
-          if (caminho is! String || caminho.isEmpty) continue;
-          final deuCerto =
-              await TextureCache.instance.prepare(caminho) &&
-              await TextureCache.instance.prepareRgba(caminho);
-          if (!deuCerto && chave == 'image') {
-            modelFail(
-              'Uma textura nao pode ser decodificada. Use PNG/JPEG/WebP.',
-            );
-          }
-        }
-      }
-      if (!mounted || ref.read(editorControllerProvider).id != projectId) {
-        return;
-      }
-      final id = ref
-          .read(editorControllerProvider.notifier)
-          .addModel3D(widget.layerId, model);
-      if (id.isEmpty) return;
+      final id = await concluirImportacao3D(
+        context,
+        ref,
+        paths,
+        playhead: Duration.zero,
+        sceneId: widget.layerId,
+      );
+      if (id == null || id.isEmpty || !mounted) return;
       widget.onImported(id);
       setState(() => status = null);
     } on ModelImportException catch (e) {

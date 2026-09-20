@@ -302,7 +302,7 @@ Future<void> showProjectSettingsSheet(BuildContext context, WidgetRef ref) {
                 icone: CupertinoIcons.slider_horizontal_3,
                 titulo: ex.label,
                 subtitulo: '${ex.group} · ${ex.property}',
-                trailing: const Icon(
+                trailing: Icon(
                   CupertinoIcons.minus_circle,
                   size: 18,
                   color: AmColors.pink,

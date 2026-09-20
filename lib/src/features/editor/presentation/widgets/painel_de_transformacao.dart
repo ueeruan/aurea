@@ -86,8 +86,12 @@ class _PainelDeTransformacaoState extends ConsumerState<PainelDeTransformacao> {
 
   EditorController get _c => ref.read(editorControllerProvider.notifier);
 
+  // A CAMADA, NAO O PROJETO: este getter e lido no build do painel, que
+  // fica aberto justamente enquanto o dedo arrasta.
   Layer get _camada =>
-      ref.watch(projetoVisivelProvider).layerById(widget.camada.id) ??
+      ref.watch(
+        projetoVisivelProvider.select((p) => p.layerById(widget.camada.id)),
+      ) ??
       widget.camada;
 
   Duration get _local => _camada.localTime(widget.tempo);
@@ -391,7 +395,7 @@ class _PainelDeTransformacaoState extends ConsumerState<PainelDeTransformacao> {
             decoration: BoxDecoration(
               color: aceso
                   ? AmColors.accent.withValues(alpha: .18)
-                  : const Color(0xFF1E222D),
+                  : AmColors.chip,
               borderRadius: BorderRadius.circular(15),
             ),
             child: AppText(

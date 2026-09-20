@@ -1,4 +1,6 @@
 import 'package:aurea/src/core/l10n/app_language.dart';
+import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' show ImageFilter;
@@ -152,7 +154,7 @@ class _TextAnimatorsPanelState extends ConsumerState<TextAnimatorsPanel> {
                 ),
               );
             },
-            child: const Row(
+            child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(
@@ -209,7 +211,7 @@ class _TextAnimatorsPanelState extends ConsumerState<TextAnimatorsPanel> {
                         Container(
                           width: 5,
                           height: 5,
-                          decoration: const BoxDecoration(
+                          decoration: BoxDecoration(
                             color: AmColors.accent,
                             shape: BoxShape.circle,
                           ),
@@ -535,7 +537,7 @@ class _TextAnimatorsPanelState extends ConsumerState<TextAnimatorsPanel> {
                 if (layer.animators.isNotEmpty)
                   AppText(
                     '${layer.animators.length}',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 11,
                       color: AmColors.accent,
                     ),
@@ -617,7 +619,7 @@ class _TextAnimatorsPanelState extends ConsumerState<TextAnimatorsPanel> {
                 color: AmColors.chip,
                 borderRadius: BorderRadius.circular(9),
               ),
-              child: const Row(
+              child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(CupertinoIcons.plus, size: 13, color: AmColors.accent),
@@ -733,6 +735,51 @@ class _TextAnimatorsPanelState extends ConsumerState<TextAnimatorsPanel> {
       '${(d.inMilliseconds / 1000).toStringAsFixed(2)}s';
 }
 
+/// O RELOGIO DAS PREVIAS DE TEXTO: UM para todos os tiles, a 12 quadros
+/// por segundo, e so enquanto houver tile na tela.
+///
+/// ============================ POR QUE NAO UM TICKER POR TILE ==========
+///
+/// Cada tile tinha um `AnimationController..repeat()`: um Ticker por tile,
+/// cada um agendando um quadro a CADA vsync (60-120 por segundo). Sem
+/// raster cache no Impeller, cada quadro agendado e a composicao INTEIRA
+/// rasterizada de novo — e o palco fica montado atras do painel. A grade
+/// aberta punha a GPU a toda com nada mudando no palco.
+///
+/// Um Timer so, na taxa da previa, acorda todos os tiles juntos: 12
+/// quadros por segundo em vez de 120, e um quadro por tick em vez de um
+/// por tile. Nos testes ele nao corre (a previa fica no quadro zero).
+class _RelogioDasPreviasDeTexto {
+  _RelogioDasPreviasDeTexto._();
+
+  static final ValueNotifier<Duration> tempo = ValueNotifier(Duration.zero);
+
+  /// Nos testes a animacao nao corre: um relogio que nunca para impede o
+  /// `pumpAndSettle` de terminar.
+  static bool animar = !Platform.environment.containsKey('FLUTTER_TEST');
+
+  static const Duration _passo = Duration(microseconds: 1000000 ~/ 12);
+  static final Stopwatch _cronometro = Stopwatch();
+  static Timer? _timer;
+  static int _ouvintes = 0;
+
+  static void entrou() {
+    if (_ouvintes++ > 0 || !animar) return;
+    _cronometro
+      ..reset()
+      ..start();
+    _timer = Timer.periodic(_passo, (_) => tempo.value = _cronometro.elapsed);
+  }
+
+  static void saiu() {
+    if (--_ouvintes > 0) return;
+    _ouvintes = 0;
+    _timer?.cancel();
+    _timer = null;
+    _cronometro.stop();
+  }
+}
+
 /// PREVIA VIVA de uma animacao do catalogo: tres letras rodando o efeito
 /// em loop. E o que faz escolher olhando, em vez de ler nome.
 class _AnimPreview extends StatefulWidget {
@@ -744,22 +791,18 @@ class _AnimPreview extends StatefulWidget {
   State<_AnimPreview> createState() => _AnimPreviewState();
 }
 
-class _AnimPreviewState extends State<_AnimPreview>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _c;
-
+class _AnimPreviewState extends State<_AnimPreview> {
   static const _units = 3;
 
   @override
   void initState() {
     super.initState();
-    _c = AnimationController(vsync: this, duration: const Duration(seconds: 2))
-      ..repeat();
+    _RelogioDasPreviasDeTexto.entrou();
   }
 
   @override
   void dispose() {
-    _c.dispose();
+    _RelogioDasPreviasDeTexto.saiu();
     super.dispose();
   }
 
@@ -778,11 +821,11 @@ class _AnimPreviewState extends State<_AnimPreview>
       unitCount: _units,
     );
 
-    return AnimatedBuilder(
-      animation: _c,
-      builder: (context, _) {
+    return ValueListenableBuilder<Duration>(
+      valueListenable: _RelogioDasPreviasDeTexto.tempo,
+      builder: (context, agora, _) {
         final t = Duration(
-          microseconds: (_c.value * cycle.inMicroseconds).round(),
+          microseconds: agora.inMicroseconds % cycle.inMicroseconds,
         );
         return CustomPaint(
           size: Size.infinite,
@@ -815,32 +858,29 @@ class PreviaDeAnimador extends StatefulWidget {
   State<PreviaDeAnimador> createState() => _PreviaDeAnimadorState();
 }
 
-class _PreviaDeAnimadorState extends State<PreviaDeAnimador>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _c;
-
+class _PreviaDeAnimadorState extends State<PreviaDeAnimador> {
   @override
   void initState() {
     super.initState();
-    _c = AnimationController(vsync: this, duration: widget.ciclo)..repeat();
+    _RelogioDasPreviasDeTexto.entrou();
   }
 
   @override
   void dispose() {
-    _c.dispose();
+    _RelogioDasPreviasDeTexto.saiu();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _c,
-      builder: (context, _) => CustomPaint(
+    return ValueListenableBuilder<Duration>(
+      valueListenable: _RelogioDasPreviasDeTexto.tempo,
+      builder: (context, agora, _) => CustomPaint(
         size: Size.infinite,
         painter: _PreviewPainter(
           animators: widget.animadores,
           time: Duration(
-            microseconds: (_c.value * widget.ciclo.inMicroseconds).round(),
+            microseconds: agora.inMicroseconds % widget.ciclo.inMicroseconds,
           ),
         ),
       ),

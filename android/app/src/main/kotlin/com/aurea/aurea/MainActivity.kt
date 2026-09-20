@@ -192,6 +192,25 @@ class MainActivity : FlutterActivity() {
 
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
+            "aurea/seletor"
+        ).setMethodCallHandler { call, result ->
+            try {
+                when (call.method) {
+                    "escolher" -> abrirSeletor(
+                        call.argument<List<String>>("mimes") ?: emptyList(),
+                        call.argument<String>("uriInicial"),
+                        result
+                    )
+                    else -> result.notImplemented()
+                }
+            } catch (e: Exception) {
+                seletorPendente = null
+                result.error("seletor", e.message ?: "$e", null)
+            }
+        }
+
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
             "aurea/encoder"
         ).setMethodCallHandler { call, result ->
             // Codificar bloqueia; a thread da interface nao pode parar.
@@ -227,7 +246,184 @@ class MainActivity : FlutterActivity() {
 
     override fun onDestroy() {
         liberarProdutor()
+        // O Dart nao pode ficar esperando um seletor que nao volta mais.
+        seletorPendente?.let {
+            seletorPendente = null
+            try {
+                it.error("seletor", "a tela fechou com o seletor aberto", null)
+            } catch (_: Exception) {
+            }
+        }
         super.onDestroy()
+    }
+
+    // =============================================================== seletor
+
+    /**
+     * O SELETOR DE DOCUMENTOS QUE ABRE ONDE A PESSOA ESTAVA.
+     *
+     * O plugin `file_picker` monta o mesmo `ACTION_OPEN_DOCUMENT`, mas sem
+     * lugar inicial: o `initialDirectory` dele so vale para salvar. Aqui a
+     * dica vai no `EXTRA_INITIAL_URI` (API 26+). Ela aceita a URI de um
+     * ARQUIVO — o navegador abre na pasta que o contem — entao o Dart so
+     * guarda a URI do ultimo escolhido, por tipo de midia.
+     *
+     * E SO UMA DICA: URI que sumiu, provedor que nao a acha ou Android
+     * antigo abrem no lugar de sempre, sem erro. Qualquer excecao aqui vira
+     * `result.error`, e o Dart cai no `file_picker` de antes.
+     */
+    private var seletorPendente: MethodChannel.Result? = null
+    private var seletorUriAnterior: String? = null
+
+    private companion object {
+        /** Codigo do pedido: longe dos que os plugins de seletor usam. */
+        const val PEDIDO_DO_SELETOR = 0xA17E
+    }
+
+    private fun abrirSeletor(
+        mimes: List<String>,
+        uriInicial: String?,
+        result: MethodChannel.Result
+    ) {
+        if (seletorPendente != null) {
+            result.error("seletor", "ja existe um seletor aberto", null)
+            return
+        }
+        val tipos = mimes.filter { it.isNotBlank() }
+        val intent = android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT)
+            .addCategory(android.content.Intent.CATEGORY_OPENABLE)
+            .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            .addFlags(android.content.Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+        if (tipos.size == 1) {
+            intent.type = tipos[0]
+        } else {
+            // Com mais de um tipo o `type` tem de ser o curinga, e a lista
+            // vai no extra — e assim que "foto OU video" se pede.
+            intent.type = "*/*"
+            if (tipos.isNotEmpty() && !tipos.contains("*/*")) {
+                intent.putExtra(
+                    android.content.Intent.EXTRA_MIME_TYPES, tipos.toTypedArray()
+                )
+            }
+        }
+        if (android.os.Build.VERSION.SDK_INT >= 26 && !uriInicial.isNullOrBlank()) {
+            try {
+                intent.putExtra(
+                    android.provider.DocumentsContract.EXTRA_INITIAL_URI,
+                    android.net.Uri.parse(uriInicial)
+                )
+            } catch (_: Exception) {
+            }
+        }
+        seletorPendente = result
+        seletorUriAnterior = uriInicial
+        // Se nao houver navegador de documentos, a excecao sobe ate o
+        // `setMethodCallHandler`, que solta o pendente e responde com erro.
+        startActivityForResult(intent, PEDIDO_DO_SELETOR)
+    }
+
+    override fun onActivityResult(
+        requestCode: Int,
+        resultCode: Int,
+        data: android.content.Intent?
+    ) {
+        if (requestCode != PEDIDO_DO_SELETOR) {
+            // Os plugins (file_picker, image_picker) recebem o resultado
+            // deles por aqui; engolir isto quebraria todos.
+            super.onActivityResult(requestCode, resultCode, data)
+            return
+        }
+        val result = seletorPendente ?: return
+        seletorPendente = null
+        val anterior = seletorUriAnterior
+        seletorUriAnterior = null
+        val uri = data?.data
+        if (resultCode != RESULT_OK || uri == null) {
+            // CANCELAR NAO E ERRO: nulo, e o Dart nao abre outro seletor.
+            result.success(null)
+            return
+        }
+        // Copiar um video de centenas de MB bloqueia; fora da thread da UI.
+        thread {
+            try {
+                val mapa = copiarDoSeletor(uri, anterior)
+                runOnUiThread { result.success(mapa) }
+            } catch (e: Exception) {
+                runOnUiThread { result.error("seletor", e.message ?: "$e", null) }
+            }
+        }
+    }
+
+    /**
+     * COPIA O ESCOLHIDO PARA O CACHE e devolve caminho, nome e URI.
+     *
+     * O Dart trabalha com caminho de arquivo (FFmpeg, `Image.file`), e nao
+     * com `content://`. A copia daqui e descartavel: quem guarda a midia
+     * passa pelo `persist`, que a leva para `imported_media`.
+     */
+    private fun copiarDoSeletor(uri: android.net.Uri, anterior: String?): Map<String, Any?> {
+        // A PERMISSAO PERSISTENTE mantem a URI valida entre sessoes, para a
+        // dica da proxima vez. O Android limita quantas um app segura, por
+        // isso a do mesmo tipo, que esta sendo trocada, e devolvida. Nem
+        // todo provedor oferece a permissao — sem ela a dica costuma valer
+        // do mesmo jeito, e a copia abaixo nao depende dela.
+        try {
+            contentResolver.takePersistableUriPermission(
+                uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+            if (!anterior.isNullOrBlank() && anterior != uri.toString()) {
+                try {
+                    contentResolver.releasePersistableUriPermission(
+                        android.net.Uri.parse(anterior),
+                        android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                } catch (_: Exception) {
+                }
+            }
+        } catch (_: Exception) {
+        }
+
+        var nome: String? = null
+        try {
+            contentResolver.query(
+                uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
+                null, null, null
+            )?.use { c ->
+                if (c.moveToFirst() && !c.isNull(0)) nome = c.getString(0)
+            }
+        } catch (_: Exception) {
+        }
+        val limpo = (nome ?: uri.lastPathSegment ?: "arquivo")
+            .substringAfterLast('/')
+            .replace(Regex("[\\\\/:*?\"<>|]"), "_")
+            .ifBlank { "arquivo" }
+
+        val raiz = File(cacheDir, "aurea_seletor")
+        // As copias de ontem ja foram para `imported_media` (ou nao serviram
+        // para nada): nao acumular video em cache a cada importacao.
+        val limite = System.currentTimeMillis() - 24L * 60 * 60 * 1000
+        raiz.listFiles()?.forEach {
+            if (it.lastModified() < limite) it.deleteRecursively()
+        }
+        val pasta = File(raiz, System.currentTimeMillis().toString())
+        pasta.mkdirs()
+        val alvo = File(pasta, limpo)
+        try {
+            val entrada = contentResolver.openInputStream(uri)
+                ?: throw java.io.IOException("o provedor nao abriu o arquivo")
+            entrada.use { e ->
+                alvo.outputStream().use { s -> e.copyTo(s, 1 shl 16) }
+            }
+            if (alvo.length() == 0L) throw java.io.IOException("arquivo vazio")
+        } catch (e: Exception) {
+            pasta.deleteRecursively()
+            throw e
+        }
+        return mapOf(
+            "caminho" to alvo.absolutePath,
+            "nome" to limpo,
+            "uri" to uri.toString()
+        )
     }
 
     // =========================================================== atualizacao

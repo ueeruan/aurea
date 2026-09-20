@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:aurea/src/core/storage/prefs.dart';
 import 'package:aurea/src/features/editor/application/editor_controller.dart';
 import 'package:aurea/src/features/editor/domain/video_project.dart';
 import 'package:aurea/src/features/editor/presentation/editor_screen.dart';
@@ -10,6 +12,7 @@ import 'package:aurea/src/features/editor/presentation/widgets/gallery_panel.dar
 import 'package:aurea/src/features/editor/presentation/widgets/preview_stage.dart';
 import 'package:aurea/src/features/media/application/gallery_service.dart';
 import 'package:aurea/src/features/media/application/media_import_service.dart';
+import 'package:aurea/src/features/media/application/midias_recentes.dart';
 import 'package:aurea/src/features/projects/application/projects_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -17,6 +20,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class _Projects extends ProjectsController {
   @override
@@ -65,8 +69,10 @@ class _Gallery extends GalleryService {
 
 class _Importer extends MediaImportService {
   bool fail = false;
+  int copias = 0;
   @override
   Future<XFile> persist(XFile file, {bool image = false}) async {
+    copias++;
     if (fail) throw StateError('unavailable');
     return XFile('saved-photo.png');
   }
@@ -296,4 +302,146 @@ void main() {
       expect(find.byKey(const ValueKey('stale')), findsNothing);
     },
   );
+
+  group('álbum lembrado e Recentes da Aurea', () {
+    late Directory temp;
+    late SharedPreferences prefs;
+
+    setUp(() => temp = Directory.systemTemp.createTempSync('galeria-ui'));
+    tearDown(() {
+      try {
+        temp.deleteSync(recursive: true);
+      } catch (_) {}
+    });
+
+    Future<Widget> painel(
+      Map<String, Object> valores, {
+      _Importer? importer,
+      void Function(XFile file)? aoImportar,
+    }) async {
+      SharedPreferences.setMockInitialValues(valores);
+      prefs = await SharedPreferences.getInstance();
+      return ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          galleryServiceProvider.overrideWith((ref) => _Gallery()),
+          mediaImportServiceProvider.overrideWithValue(
+            importer ?? _Importer(),
+          ),
+        ],
+        child: MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 320,
+              height: 320,
+              child: GalleryPanel(
+                onImport: (file, _, _) async => aoImportar?.call(file),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    testWidgets('a galeria reabre no álbum da última vez', (tester) async {
+      // REGRESSAO: o estado do painel morre quando a folha fecha, e toda
+      // abertura caia em "Todos" — dez fotos da mesma pasta, dez buscas.
+      await tester.pumpWidget(await painel({'galeria.ultimo_album': 'photos'}));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('photos-0-0')), findsOneWidget);
+      expect(find.text('Fotos'), findsOneWidget);
+    });
+
+    testWidgets('escolher no menu grava o álbum', (tester) async {
+      await tester.pumpWidget(await painel(const {}));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('all-0-0')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('galeria-recentes')),
+        findsNothing,
+        reason: 'sem recentes, sem botão do relógio',
+      );
+      await tester.tap(find.byTooltip('Selecionar álbum'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Fotos').last);
+      await tester.pumpAndSettle();
+      expect(prefs.getString('galeria.ultimo_album'), 'photos');
+      expect(find.byKey(const ValueKey('photos-0-0')), findsOneWidget);
+    });
+
+    testWidgets('álbum que sumiu do aparelho cai no primeiro', (tester) async {
+      await tester.pumpWidget(await painel({'galeria.ultimo_album': 'sumiu'}));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('all-0-0')), findsOneWidget);
+      expect(find.text('Todos'), findsOneWidget);
+    });
+
+    testWidgets('um recente entra sem copiar o arquivo de novo', (
+      tester,
+    ) async {
+      final png = File('${temp.path}/logo.png')
+        ..writeAsBytesSync(
+          (await rootBundle.load(
+            'assets/templates/dnyx/gallery-left.png',
+          )).buffer.asUint8List(),
+        );
+      final importer = _Importer();
+      XFile? importado;
+      await tester.pumpWidget(
+        await painel(
+          {
+            MidiasRecentesNotifier.kChave: jsonEncode([
+              {'c': png.path, 'n': 'logo.png', 'v': false},
+            ]),
+          },
+          importer: importer,
+          aoImportar: (f) => importado = f,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('galeria-recentes')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('galeria-grade-recentes')),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(ValueKey('recente-${png.path}')));
+      await tester.pumpAndSettle();
+      expect(importado?.path, png.path);
+      expect(importado?.name, 'logo.png');
+      expect(
+        importer.copias,
+        0,
+        reason: 'o arquivo já mora dentro do app: nada de segunda cópia',
+      );
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('recente que sumiu do disco sai da lista com recado', (
+      tester,
+    ) async {
+      final sumido = '${temp.path}/foi-embora.png';
+      final vivo = File('${temp.path}/vivo.png')
+        ..writeAsBytesSync(
+          (await rootBundle.load(
+            'assets/templates/dnyx/gallery-left.png',
+          )).buffer.asUint8List(),
+        );
+      await tester.pumpWidget(
+        await painel({
+          MidiasRecentesNotifier.kChave: jsonEncode([
+            {'c': vivo.path, 'n': 'vivo.png', 'v': false},
+            {'c': sumido, 'n': 'foi-embora.png', 'v': false},
+          ]),
+        }),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('galeria-recentes')));
+      await tester.pumpAndSettle();
+      // O que nao esta mais no disco ja e peneirado na leitura das prefs.
+      expect(find.byKey(ValueKey('recente-${vivo.path}')), findsOneWidget);
+      expect(find.byKey(ValueKey('recente-$sumido')), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+  });
 }

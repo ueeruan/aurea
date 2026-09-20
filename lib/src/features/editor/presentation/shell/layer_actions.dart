@@ -415,12 +415,12 @@ Future<void> menuDasMarcas(
             },
           ),
           ListTile(
-            leading: const Icon(
+            leading: Icon(
               CupertinoIcons.delete,
               size: 19,
               color: AmColors.pink,
             ),
-            title: const AppText('Limpar as marcas',
+            title: AppText('Limpar as marcas',
               style: TextStyle(color: AmColors.pink, fontSize: 15),
             ),
             enabled: quantas > 0,

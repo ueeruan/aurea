@@ -94,7 +94,7 @@ class LayerToolsDock extends ConsumerWidget {
                 height: 44,
                 margin: const EdgeInsets.fromLTRB(10, 8, 10, 8),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF1E222D),
+                  color: AmColors.chip,
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Row(
@@ -463,6 +463,16 @@ _Tile? _tileDaSecao(
       rotulo: 'Fade',
       onTap: () => abrirDepois(
         () => showAudioSheet(context, ref, layer.id, playback: playback),
+      ),
+      badge: null,
+    ),
+    // TEMPO -> TIME REMAP. A folha abre com o botao do Estudio do tempo
+    // no topo; velocidade, reverso e interpolacao vem logo abaixo.
+    AmSecao.tempo => (
+      icone: CupertinoIcons.timer,
+      rotulo: 'Tempo',
+      onTap: () => abrirDepois(
+        () => showSpeedSheet(context, ref, layer.id, playback: playback),
       ),
       badge: null,
     ),
@@ -873,7 +883,7 @@ Future<void> showGridSheet(
                                     ),
                                     child: AppText(
                                       label,
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                         fontSize: 12,
                                         color: AmColors.accent,
                                       ),
@@ -1165,7 +1175,7 @@ Future<void> showGridSheet(
                                                   ?.name ??
                                               'Nulo removido'),
                                     overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       fontSize: 12,
                                       color: AmColors.accent,
                                     ),
@@ -1387,7 +1397,7 @@ Future<void> showMasksSheet(
                 ),
                 child: AppText(
                   '+ $label',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
                     color: AmColors.accent,
@@ -1602,7 +1612,7 @@ Future<void> showMasksSheet(
                             ],
                           ),
                           if (!m.path.valueAt(local).closed)
-                            const AppText(
+                            AppText(
                               'Caminho aberto nao corta; pode servir de entrada de efeito.',
                               style: TextStyle(
                                 fontSize: 11,
@@ -1610,7 +1620,7 @@ Future<void> showMasksSheet(
                               ),
                             ),
                           if (maskFeatherExceedsBounds(m, local, maskSize))
-                            const AppText(
+                            AppText(
                               'Aviso: caminho + feather/2 + expansao passa do limite.',
                               style: TextStyle(
                                 fontSize: 11,
@@ -1788,7 +1798,7 @@ Future<void> showParentSheet(
                 style: TextStyle(fontSize: 11, color: AmColors.muted),
               ),
               trailing: currentParentId == null
-                  ? const Icon(
+                  ? Icon(
                       CupertinoIcons.checkmark_alt,
                       color: AmColors.accent,
                       size: 20,
@@ -1874,7 +1884,7 @@ Future<void> showParentSheet(
                         )
                       : null,
                   trailing: other.id == currentParentId
-                      ? const Icon(
+                      ? Icon(
                           CupertinoIcons.checkmark_alt,
                           color: AmColors.accent,
                           size: 20,
@@ -2001,7 +2011,7 @@ Future<void> showParticulasSheet(
                           ),
                           child: AppText(
                             nomes[i],
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 12,
                               color: AmColors.accent,
                             ),
@@ -2082,7 +2092,7 @@ Future<void> showParticulasSheet(
                         color: nenhuma ? AmColors.accentDim : AmColors.chip,
                         borderRadius: BorderRadius.circular(9),
                       ),
-                      child: const AppText(
+                      child: AppText(
                         'Nenhuma',
                         style: TextStyle(fontSize: 12, color: AmColors.accent),
                       ),
@@ -2165,7 +2175,7 @@ Future<void> showParticulasSheet(
                               ),
                               child: AppText(
                                 nomesDosPresets[i],
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 12,
                                   color: AmColors.accent,
                                 ),
@@ -2290,7 +2300,7 @@ Future<void> showParticulasSheet(
                     ),
                     child: Row(
                       children: [
-                        const Icon(
+                        Icon(
                           CupertinoIcons.slider_horizontal_3,
                           size: 17,
                           color: AmColors.accent,
@@ -2815,7 +2825,7 @@ Future<void> showElement3DSheet(
                           ),
                           child: AppText(
                             element3DLabel(kind),
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 12,
                               color: AmColors.accent,
                             ),
@@ -2949,7 +2959,7 @@ Future<void> showElement3DSheet(
                           ),
                           child: AppText(
                             environmentLabel(k),
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 12,
                               color: AmColors.accent,
                             ),
@@ -3011,7 +3021,7 @@ Future<void> showElement3DSheet(
                                 ),
                                 child: AppText(
                                   nomeDoAcabamento(acab),
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 12,
                                     color: AmColors.accent,
                                   ),
@@ -3130,7 +3140,7 @@ Future<void> showElement3DSheet(
                           color: AmColors.chip,
                           borderRadius: BorderRadius.circular(9),
                         ),
-                        child: const Row(
+                        child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Icon(
@@ -3196,10 +3206,24 @@ Future<void> showElement3DSheet(
                     ),
                     Tocavel(
                       onTap: () async {
-                        final r = await FilePicker.platform.pickFiles(
-                          type: FileType.image,
-                        );
-                        final caminho = r?.files.single.path;
+                        // COPIA PARA O APP ANTES DE GUARDAR: o seletor
+                        // devolve um arquivo em CACHE, que o Android apaga
+                        // quando quer — e o solido abria sem a imagem.
+                        // (No Android o seletor reabre na ultima pasta.)
+                        final String? caminho;
+                        try {
+                          caminho = await ref
+                              .read(mediaImportServiceProvider)
+                              .pickImageFile();
+                        } catch (_) {
+                          if (sheetContext.mounted) {
+                            showReasonToast(
+                              sheetContext,
+                              'Não consegui abrir essa imagem.',
+                            );
+                          }
+                          return;
+                        }
                         if (caminho == null) return;
                         controller.updateElement3D(
                           layerId,
@@ -3216,7 +3240,7 @@ Future<void> showElement3DSheet(
                           color: AmColors.chip,
                           borderRadius: BorderRadius.circular(9),
                         ),
-                        child: const Row(
+                        child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Icon(
@@ -3474,7 +3498,7 @@ Future<void> showShapeParamsSheet(
                               }
                             });
                           },
-                          child: const Row(
+                          child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Icon(
@@ -3560,7 +3584,7 @@ Future<void> showShapeParamsSheet(
                                   ),
                                   child: AppText(
                                     label,
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       fontSize: 12,
                                       color: AmColors.accent,
                                     ),
@@ -3632,7 +3656,7 @@ Future<void> showShapeParamsSheet(
                                       ),
                                       child: AppText(
                                         label,
-                                        style: const TextStyle(
+                                        style: TextStyle(
                                           fontSize: 11,
                                           color: AmColors.accent,
                                         ),
@@ -4281,7 +4305,7 @@ class _BlendingPanelState extends ConsumerState<BlendingPanel> {
     final id = ref.watch(selectedLayerProvider);
     final layer = id == null ? null : project.layerById(id);
     if (layer == null || id == null) {
-      return const ColoredBox(color: AmColors.panel);
+      return ColoredBox(color: AmColors.panel);
     }
     final realLayer =
         ref.watch(editorControllerProvider).layerById(id) ?? layer;
@@ -4523,13 +4547,13 @@ class _BlendingPanelState extends ConsumerState<BlendingPanel> {
                   if (atual != null && atual.$1 == cat) ...[
                     AppText(
                       atual.$2.rotulo,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
                         color: AmColors.accent,
                       ),
                     ),
                     const SizedBox(width: 6),
-                    const Icon(
+                    Icon(
                       CupertinoIcons.checkmark_circle_fill,
                       size: 16,
                       color: AmColors.accent,
@@ -4852,12 +4876,12 @@ class _BlendingPanelState extends ConsumerState<BlendingPanel> {
           (v) => c.editMaskParam(id, mask.id, 'expansion', t, v),
         ),
         if (!mask.path.valueAt(local).closed)
-          const AppText(
+          AppText(
             'Caminho aberto nao recorta. Feche no Edit Points.',
             style: TextStyle(fontSize: 11, color: AmColors.accent),
           ),
         if (maskFeatherExceedsBounds(mask, local, size))
-          const AppText(
+          AppText(
             'Aviso: feather e expansao passam do limite.',
             style: TextStyle(fontSize: 11, color: AmColors.accent),
           ),
@@ -5167,7 +5191,7 @@ class ColorFillPanel extends ConsumerWidget {
     final id = ref.watch(selectedLayerProvider);
     final layer = id == null ? null : project.layerById(id);
     if (layer == null || id == null || layer is AudioLayer) {
-      return const ColoredBox(color: AmColors.panel);
+      return ColoredBox(color: AmColors.panel);
     }
     return ColoredBox(
       color: AmColors.panel,
@@ -5940,7 +5964,7 @@ class _ShapeOperators extends ConsumerWidget {
                           ),
                           child: AppText(
                             item.individually ? 'Individual' : 'Continuo',
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 11,
                               color: AmColors.accent,
                             ),
@@ -6054,7 +6078,7 @@ class _ShapeOperators extends ConsumerWidget {
                           globalTime,
                           copies: item.copies + 1,
                         ),
-                        child: const Icon(
+                        child: Icon(
                           CupertinoIcons.plus_circle,
                           size: 18,
                           color: AmColors.accent,
@@ -6224,7 +6248,7 @@ class _ShapeOperators extends ConsumerWidget {
                             ),
                             child: AppText(
                               mergeModeLabel(item.mode),
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 11,
                                 color: AmColors.accent,
                               ),
@@ -6279,7 +6303,7 @@ class _ShapeOperators extends ConsumerWidget {
                   ),
                   child: AppText(
                     '+ ${shapePathOpLabel(op)}',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 11,
                       color: AmColors.accent,
                     ),
@@ -6295,7 +6319,7 @@ class _ShapeOperators extends ConsumerWidget {
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
               onPressed: () =>
                   controller.addShapeOperator(layerId, repeater: false),
-              child: const AppText(
+              child: AppText(
                 '+ Trim Paths',
                 style: TextStyle(fontSize: 12, color: AmColors.accent),
               ),
@@ -6304,7 +6328,7 @@ class _ShapeOperators extends ConsumerWidget {
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
               onPressed: () =>
                   controller.addShapeOperator(layerId, repeater: true),
-              child: const AppText(
+              child: AppText(
                 '+ Repeater',
                 style: TextStyle(fontSize: 12, color: AmColors.accent),
               ),
@@ -6312,7 +6336,7 @@ class _ShapeOperators extends ConsumerWidget {
             CupertinoButton(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
               onPressed: () => _pickMorphTarget(context, ref),
-              child: const AppText(
+              child: AppText(
                 '+ Morfar',
                 style: TextStyle(fontSize: 12, color: AmColors.accent),
               ),
@@ -6448,7 +6472,7 @@ class _ShapeOperators extends ConsumerWidget {
                         ),
                         child: AppText(
                           label,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w600,
                             color: AmColors.accent,
@@ -6568,7 +6592,7 @@ Future<void> showExtrudeSheet(
                           ),
                           child: AppText(
                             v == 0 ? 'Desligado' : amNumber(v, 0),
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 12,
                               color: AmColors.accent,
                             ),

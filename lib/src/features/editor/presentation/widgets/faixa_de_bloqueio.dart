@@ -44,7 +44,7 @@ class FaixaDeBloqueio extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(
+          Icon(
             CupertinoIcons.lock_fill,
             size: 13,
             color: AmColors.accent,
@@ -73,7 +73,7 @@ class FaixaDeBloqueio extends StatelessWidget {
                 color: AmColors.accent,
                 borderRadius: BorderRadius.circular(999),
               ),
-              child: const AppText(
+              child: AppText(
                 'Desbloquear',
                 style: TextStyle(
                   fontSize: 11.5,

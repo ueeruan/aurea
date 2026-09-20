@@ -28,18 +28,82 @@ import 'packed_model_vectors.dart';
 /// Nada disso muda o que o modelo e: as mesmas superficies, os mesmos
 /// materiais, a mesma animacao. Qualquer falha nativa deixa a primitiva
 /// como veio.
-void otimizarMalhasImportadas(Map<String, dynamic> data) {
+///
+/// COM [alvoDeTriangulos] A MALHA PRINCIPAL TAMBEM DESCE ("Otimizar
+/// automaticamente" do aviso de modelo pesado). E o UNICO caso em que a
+/// importacao muda o que o modelo e, e so quando o dono pediu: entre a
+/// SOLDA e o CACHE, o mesmo simplificador dos niveis de detalhe troca os
+/// indices da primitiva. Os vertices nao se movem — so deixam de ser
+/// usados, e a BUSCA os larga levando ossos, pesos e morphs junto —, entao
+/// rig e animacao continuam valendo. O formato que o motor recebe e o
+/// mesmo: posicoes, normais, UV e indices, so que menos.
+void otimizarMalhasImportadas(
+  Map<String, dynamic> data, {
+  int? alvoDeTriangulos,
+}) {
   final materiais = data['materials'] as List? ?? const [];
   final primitivas = data['primitives'] as List? ?? const [];
-  for (final bruta in primitivas) {
+  final alvos = alvosPorPrimitiva([
+    for (final p in primitivas)
+      p is Map && p['indices'] is List ? (p['indices'] as List).length ~/ 3 : 0,
+  ], alvoDeTriangulos);
+  var aproximada = false;
+  for (final (i, bruta) in primitivas.indexed) {
     final p = bruta as Map<String, dynamic>;
     try {
-      _otimizar(p, materiais);
+      final alvo = alvos[i];
+      if (_otimizar(
+        p,
+        materiais,
+        alvoDeIndices: alvo == null ? null : alvo * 3,
+      )) {
+        aproximada = true;
+      }
     } catch (_) {
       // Primitiva estranha (atributo com contagem diferente, indice fora):
       // fica como veio. O importador ja validou o que precisava.
     }
   }
+  if (aproximada) {
+    const aviso =
+        'Parte da malha só chegou ao alvo no modo aproximado da redução: '
+        'confira as bordas e as costuras do modelo.';
+    final avisos = data['warnings'];
+    if (avisos is List && !avisos.contains(aviso)) avisos.add(aviso);
+  }
+}
+
+/// QUANTO CADA PRIMITIVA DESCE para o modelo inteiro chegar a [alvo].
+///
+/// Proporcional a fatia de cada uma no total, com uma excecao: primitiva
+/// pequena (abaixo de [trianguloMinimoParaLod]) fica como esta — botoes,
+/// olhos e parafusos somem inteiros quando o simplificador tira deles a
+/// mesma fracao que tira do corpo. O que elas nao cedem sai das grandes.
+/// `null` na posicao = nao reduzir aquela primitiva.
+List<int?> alvosPorPrimitiva(List<int> triangulos, int? alvo) {
+  final nada = List<int?>.filled(triangulos.length, null);
+  if (alvo == null || alvo <= 0) return nada;
+  final total = triangulos.fold<int>(0, (a, b) => a + b);
+  if (total <= alvo) return nada;
+  var pequenas = 0, grandes = 0;
+  for (final t in triangulos) {
+    if (t < trianguloMinimoParaLod) {
+      pequenas += t;
+    } else {
+      grandes += t;
+    }
+  }
+  if (grandes == 0) return nada;
+  // O PISO DE 10%: um modelo feito de mil pecas pequenas e uma grande nao
+  // pode zerar a grande para pagar a conta das outras.
+  final verba = math.max(alvo - pequenas, grandes ~/ 10);
+  return [
+    for (final t in triangulos)
+      if (t < trianguloMinimoParaLod)
+        null
+      else
+        math.max(trianguloMinimoParaLod ~/ 2, (t * verba / grandes).round()),
+  ];
 }
 
 /// Triangulos a partir dos quais vale gerar niveis de detalhe.
@@ -49,17 +113,23 @@ List<double> _numeros(Object? v) => [
   for (final n in v as List) (n as num).toDouble(),
 ];
 
-void _otimizar(Map<String, dynamic> p, List materiais) {
+/// Devolve `true` quando a reducao pedida so chegou perto do alvo no modo
+/// aproximado (o chamador avisa o dono).
+bool _otimizar(
+  Map<String, dynamic> p,
+  List materiais, {
+  int? alvoDeIndices,
+}) {
   final posicoes = p['positions'] as List;
   final n = posicoes.length;
   final indicesBrutos = p['indices'] as List;
   if (n < 3 || indicesBrutos.length < 3 || indicesBrutos.length % 3 != 0) {
-    return;
+    return false;
   }
   var indices = Uint32List.fromList([
     for (final i in indicesBrutos) i as int,
   ]);
-  if (indices.any((i) => i >= n)) return;
+  if (indices.any((i) => i >= n)) return false;
 
   // ------------------------------------------------------ atributos
   // Cada atributo por vertice vira um fluxo de floats para a solda, e
@@ -76,7 +146,7 @@ void _otimizar(Map<String, dynamic> p, List materiais) {
           _Atributo.vetores(alvo.cast<String, dynamic>(), chave, 3, n,
               rotulo: 'targets[$i].$chave'),
   ];
-  if (atributos.any((a) => a.fluxo.length != n * a.componentes)) return;
+  if (atributos.any((a) => a.fluxo.length != n * a.componentes)) return false;
 
   // 1. SOLDA
   var total = n;
@@ -94,6 +164,66 @@ void _otimizar(Map<String, dynamic> p, List materiais) {
     total = soldada.vertexCount;
   } else if (soldada != null) {
     indices = soldada.indices;
+  }
+
+  // 1b. REDUCAO DA MALHA PRINCIPAL (so quando o dono pediu).
+  //
+  // DEPOIS DA SOLDA, obrigatoriamente: o simplificador anda pela
+  // topologia, e o vertice-por-canto do FBX e uma sopa de triangulos
+  // soltos que ele nao consegue juntar. ANTES do cache e da busca: os
+  // dois passam a trabalhar na malha que vai ficar, e a busca larga os
+  // vertices que sobraram sem dono.
+  var aproximada = false;
+  if (alvoDeIndices != null && alvoDeIndices < indices.length) {
+    final pos = atributos.first.fluxo;
+    final normais = atributos.length > 1 && atributos[1].chave == 'normals'
+        ? atributos[1].fluxo
+        : null;
+    ({Uint32List indices, double error})? melhor;
+    // O ERRO SOBE AOS POUCOS: 2% do tamanho do modelo resolve a malha
+    // escaneada (densa e lisa); a malha de pecas e costuras precisa de
+    // mais folga para chegar ao alvo. Para no primeiro que chega perto.
+    for (final erro in const [.02, .05, .12]) {
+      final r = simplifyMesh(
+        indices,
+        pos,
+        normals: normais,
+        targetIndexCount: alvoDeIndices,
+        targetError: erro,
+      );
+      if (r == null || r.indices.isEmpty) break;
+      if (melhor == null || r.indices.length < melhor.indices.length) {
+        melhor = r;
+      }
+      if (r.indices.length <= alvoDeIndices * 1.25) break;
+    }
+    // ULTIMO RECURSO, o modo que ignora a topologia: so quando o resultado
+    // ainda passa do DOBRO do alvo. O dono pediu a reducao porque o modelo
+    // nao cabe; devolver a malha quase cheia seria nao atender. O chamador
+    // avisa que houve aproximacao.
+    if (melhor == null || melhor.indices.length > alvoDeIndices * 2) {
+      final r = simplifyMesh(
+        indices,
+        pos,
+        targetIndexCount: alvoDeIndices,
+        targetError: .1,
+        sloppy: true,
+      );
+      if (r != null &&
+          r.indices.isNotEmpty &&
+          (melhor == null || r.indices.length < melhor.indices.length)) {
+        melhor = r;
+        aproximada = true;
+      }
+    }
+    if (melhor != null &&
+        melhor.indices.length >= 3 &&
+        melhor.indices.length < indices.length &&
+        !melhor.indices.any((i) => i >= total)) {
+      indices = melhor.indices;
+    } else {
+      aproximada = false;
+    }
   }
 
   // 2. CACHE (so opaco)
@@ -159,6 +289,7 @@ void _otimizar(Map<String, dynamic> p, List materiais) {
     }
     if (lods.isNotEmpty) p['lods'] = lods;
   }
+  return aproximada;
 }
 
 class _Atributo {

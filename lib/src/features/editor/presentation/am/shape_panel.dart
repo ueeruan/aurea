@@ -397,11 +397,14 @@ class _ShapePanelState extends ConsumerState<ShapePanel> {
 
   @override
   Widget build(BuildContext context) {
-    final project = ref.watch(projetoVisivelProvider);
     final id = ref.watch(selectedLayerProvider);
-    final layer = id == null ? null : project.layerById(id);
+    // A CAMADA, NAO O PROJETO: com o painel aberto, qualquer mutacao
+    // (inclusive de outra camada, ou um passo de arrasto) o refazia.
+    final layer = id == null
+        ? null
+        : ref.watch(projetoVisivelProvider.select((p) => p.layerById(id)));
     if (layer is! ShapeLayer || id == null) {
-      return const ColoredBox(color: AmColors.panel);
+      return ColoredBox(color: AmColors.panel);
     }
     final controller = ref.read(editorControllerProvider.notifier);
     final sp = _param(layer);
@@ -1132,7 +1135,7 @@ class _Linha extends StatelessWidget {
             child: AppText(
               display,
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 13, color: AmColors.accent),
+              style: TextStyle(fontSize: 13, color: AmColors.accent),
             ),
           ),
         ],

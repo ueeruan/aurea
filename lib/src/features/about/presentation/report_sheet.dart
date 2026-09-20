@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/ui/snack.dart';
 import '../../../core/utils/versao_do_app.dart';
+import '../../../core/theme/aurea_paleta.dart';
 import '../../../core/ui/am_colors.dart';
 
 /// Dados do criador — usados no Sobre e no envio do relato.
@@ -150,7 +151,7 @@ class _ReportSheetState extends State<_ReportSheet> {
             children: [
               Row(
                 children: [
-                  const Icon(
+                  Icon(
                     CupertinoIcons.exclamationmark_bubble,
                     size: 20,
                     color: AmColors.accent,
@@ -257,17 +258,17 @@ class _ReportSheetState extends State<_ReportSheet> {
                   color: AmColors.accent,
                   borderRadius: BorderRadius.circular(12),
                   onPressed: _enviar,
-                  child: const AppText('Enviar',
+                  child: AppText('Enviar',
                     style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w700,
-                      color: Color(0xFF10151D),
+                      color: AureaPaleta.ativa.onAccent,
                     ),
                   ),
                 ),
               ),
               const SizedBox(height: 16),
-              const Divider(color: AmColors.hairline, height: 1),
+              Divider(color: AmColors.hairline, height: 1),
               const SizedBox(height: 14),
               const AppText('Criador',
                 style: TextStyle(

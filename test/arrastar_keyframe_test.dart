@@ -22,8 +22,11 @@ void main() {
   setUp(() {
     c = ProviderContainer();
     e = c.read(editorControllerProvider.notifier);
+    // `levels` porque e um efeito do CATALOGO de hoje: `gaussianBlur`
+    // saiu na reescrita dos efeitos e a instancia nascia inerte, sem
+    // parametro animavel — o teste do arrasto media uma trilha vazia.
     final fx = EffectInstance(
-      type: EffectType.gaussianBlur,
+      type: EffectType.levels,
     ).withKeyframeToggled(_umSeg);
     e.openProject(
       VideoProject(

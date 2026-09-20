@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 
 import 'aurea_colors.dart';
+import 'aurea_paleta.dart';
 
 /// OS TOKENS DO DESIGN SYSTEM (Fase 1 do redesign).
 ///
@@ -90,8 +91,46 @@ class AureaTokens {
     danger: AureaColors.danger,
   );
 
-  /// Editor and studio retain the Aurea brand palette.
-  static const motion = dark;
+  /// OS TOKENS DO EDITOR E DO ESTUDIO: a paleta em vigor, na versao que o
+  /// editor usa ([AureaPaleta.editor] — escura mesmo sob o tema claro).
+  ///
+  /// Era `const motion = dark`. Virou getter para o unico `AureaTheme(` do
+  /// app (no editor) acompanhar o tema sem que ninguem precise trocar a
+  /// chamada.
+  static AureaTokens get motion => dePaleta(AureaPaleta.ativa.editor);
+
+  /// Os tokens de uma paleta.
+  ///
+  /// GUARDADOS POR TEMA, e nao montados a cada chamada: [AureaTheme] avisa
+  /// os dependentes quando `tokens` muda, e uma instancia nova por `build`
+  /// faria o editor inteiro se reconstruir a cada quadro por nada.
+  ///
+  /// `selection` e [AureaPaleta.primary] (o azul de PREENCHIMENTO), que e o
+  /// que `AureaTokens.dark.selection` sempre foi; o fundo de camada
+  /// selecionada do cromo antigo (`AmColors.selection`) e outro papel,
+  /// [AureaPaleta.selected].
+  static AureaTokens dePaleta(AureaPaleta p) {
+    if (p.id == AureaTemaId.aurea) return dark;
+    return _porTema[p.id] ??= AureaTokens(
+      brightness: p.brightness,
+      bg: p.background,
+      surface: p.surface,
+      surfaceHigh: p.panel,
+      chip: p.chip,
+      text: p.textPrimary,
+      muted: p.textSecondary,
+      hairline: p.divider,
+      accent: p.accent,
+      onAccent: p.onAccent,
+      accentDim: p.accentDim,
+      keyframe: p.keyframe,
+      keyframeDim: p.keyframeDim,
+      selection: p.primary,
+      danger: p.danger,
+    );
+  }
+
+  static final Map<AureaTemaId, AureaTokens> _porTema = {};
 
   static const light = AureaTokens(
     brightness: Brightness.light,
@@ -111,9 +150,14 @@ class AureaTokens {
     danger: AureaColors.lightDanger,
   );
 
-  /// Os tokens em vigor neste ponto da arvore (escuro por padrao).
+  /// Os tokens em vigor neste ponto da arvore.
+  ///
+  /// SEM ANCESTRAL, OS DO EDITOR ([motion]), e nao `dark` fixo: as folhas do
+  /// editor abrem pelo Navigator, FORA do `AureaTheme` da tela, e pintariam
+  /// o tema Aurea por cima de um editor Midnight.
   static AureaTokens of(BuildContext context) =>
-      context.dependOnInheritedWidgetOfExactType<AureaTheme>()?.tokens ?? dark;
+      context.dependOnInheritedWidgetOfExactType<AureaTheme>()?.tokens ??
+      motion;
 
   // ----------------------------------------------------- medidas
   //

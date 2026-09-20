@@ -8,13 +8,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/l10n/app_language.dart';
 import '../../application/editor_controller.dart';
 import '../../application/font_service.dart';
-import '../../application/motor3d_nativo.dart';
 import '../../domain/layer.dart';
 import '../../domain/modelo_do_texto3d.dart';
-import '../../domain/video_project.dart';
 import '../../domain/texto3d.dart';
 import '../context/parameter_row.dart';
-import '../widgets/preview_stage.dart' show estado3DDoQuadro;
 import 'am_colors.dart';
 
 /// A FOLHA DO TEXTO 3D — onde a letra e feita e refeita.
@@ -27,16 +24,21 @@ import 'am_colors.dart';
 /// giro, os keyframes e a camera que ja tinha ajustado.
 ///
 /// Aqui o texto e um objeto que se edita: o campo do texto, a fonte, o
-/// metal, a espessura, o chanfro e o espacamento, com a A PREVIA AO VIVO
-/// em cima — a mesma cena que o palco desenha, pelo mesmo caminho
-/// (`estado3DDoQuadro` + a ponte do motor), so que num quadro menor.
+/// metal, a espessura, o chanfro e o espacamento.
 ///
-/// ============================ O QUE A PREVIA E ========================
+/// ============================ UM PREVIEW SO ============================
 ///
-/// A CENA DE VERDADE, e nao um desenho parecido. Um texto 3D e metal: um
-/// desenho de mentira mostraria a geometria certa com o brilho errado, e a
-/// decisao de ouro ou cromo seria tomada olhando a coisa errada. Sem motor
-/// (§43) a previa diz que ele nao esta ali, e nao inventa um substituto.
+/// A folha OCUPA A METADE DE BAIXO e o palco fica a vista por cima: cada
+/// toque aqui aparece na cena de verdade, no unico preview do aplicativo.
+/// Ela ja teve uma previa propria (a mesma cena, pelo mesmo motor, num
+/// quadro de 320x320) e isso custava caro de um jeito que nao se via: o
+/// motor tem UM alvo, e alternar o tamanho dele entre a folha e o palco
+/// recriava cor, profundidade, MSAA e staging DUAS vezes por toque — pico
+/// de memoria, dois desenhos e dois readbacks para mostrar a mesma coisa
+/// duas vezes. O dono exige um preview oficial, e ele e o palco.
+///
+/// [playhead] fica na assinatura por compatibilidade com quem chama; o
+/// instante que se ve e o do palco, que ja e o do cabecote.
 Future<void> showTexto3DSheet(
   BuildContext context,
   WidgetRef ref, {
@@ -46,24 +48,17 @@ Future<void> showTexto3DSheet(
 }) async {
   await showCupertinoModalPopup<void>(
     context: context,
-    builder: (_) => _Texto3DSheet(
-      sceneId: sceneId,
-      nodeId: nodeId,
-      playhead: playhead,
-    ),
+    // O ESCURECIMENTO E LEVE de proposito: o palco atras e o preview.
+    barrierColor: const Color(0x33000000),
+    builder: (_) => _Texto3DSheet(sceneId: sceneId, nodeId: nodeId),
   );
 }
 
 class _Texto3DSheet extends ConsumerStatefulWidget {
-  const _Texto3DSheet({
-    required this.sceneId,
-    required this.nodeId,
-    required this.playhead,
-  });
+  const _Texto3DSheet({required this.sceneId, required this.nodeId});
 
   final String sceneId;
   final String nodeId;
-  final Duration playhead;
 
   @override
   ConsumerState<_Texto3DSheet> createState() => _Texto3DSheetState();
@@ -149,48 +144,44 @@ class _Texto3DSheetState extends ConsumerState<_Texto3DSheet> {
 
   @override
   Widget build(BuildContext context) {
-    // A CAMADA E RELIDA A CADA QUADRO: a folha nao guarda copia da cena —
-    // quem manda e a timeline, e a previa desenha o que ela diz.
-    final projeto = ref.watch(editorControllerProvider);
-    final camada = projeto.layerById(widget.sceneId);
-
-    return Container(
-      decoration: const BoxDecoration(
-        color: AmColors.panel,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
-      ),
-      padding: const EdgeInsets.fromLTRB(14, 10, 14, 18),
-      child: SafeArea(
-        top: false,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _cabecalho(),
-            const SizedBox(height: 8),
-            SizedBox(
-              height: 190,
-              child: camada is Scene3DLayer
-                  ? _PreviaDoTexto3D(
-                      layer: camada,
-                      project: projeto,
-                      playhead: widget.playhead,
-                    )
-                  : const SizedBox.shrink(),
-            ),
-            const SizedBox(height: 10),
-            Flexible(
-              child: SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _campoDeTexto(),
-                    const SizedBox(height: 10),
-                    ..._linhas(),
-                  ],
+    // A FOLHA NASCE NUMA ROTA CUPERTINO, sem `Material` acima: os `Text`
+    // sairiam com o sublinhado amarelo do "texto sem estilo". O `Material`
+    // transparente da o `DefaultTextStyle` e o chao dos toques sem pintar
+    // nada por cima do painel.
+    return Material(
+      type: MaterialType.transparency,
+      child: Container(
+        key: const ValueKey('texto3d-folha'),
+        // A METADE DE BAIXO, como a folha da Cena 3D: o palco fica a vista.
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * 0.52,
+        ),
+        decoration: BoxDecoration(
+          color: AmColors.panel,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+        ),
+        padding: const EdgeInsets.fromLTRB(14, 10, 14, 18),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _cabecalho(),
+              const SizedBox(height: 8),
+              Flexible(
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _campoDeTexto(),
+                      const SizedBox(height: 10),
+                      ..._linhas(),
+                    ],
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -217,7 +208,7 @@ class _Texto3DSheetState extends ConsumerState<_Texto3DSheet> {
         CupertinoButton(
           padding: EdgeInsets.zero,
           onPressed: () => Navigator.of(context).pop(),
-          child: const AppText(
+          child: AppText(
             'Pronto',
             style: TextStyle(color: AmColors.accent, fontSize: 15),
           ),
@@ -531,85 +522,6 @@ class _Texto3DSheetState extends ConsumerState<_Texto3DSheet> {
       ),
     ),
   );
-}
-
-/// A PREVIA AO VIVO — a cena de verdade, no motor de verdade.
-class _PreviaDoTexto3D extends StatefulWidget {
-  const _PreviaDoTexto3D({
-    required this.layer,
-    required this.project,
-    required this.playhead,
-  });
-
-  final Scene3DLayer layer;
-  final VideoProject project;
-
-  /// O INSTANTE DO PALCO, e nao o comeco da camada.
-  ///
-  /// A previa mostrava sempre o primeiro quadro: um texto com posicao
-  /// animada aparecia parado no lugar de onde ele saiu, e o dono ajustava a
-  /// folha olhando uma cena que nao e a que esta no palco.
-  final Duration playhead;
-
-  @override
-  State<_PreviaDoTexto3D> createState() => _PreviaDoTexto3DState();
-}
-
-class _PreviaDoTexto3DState extends State<_PreviaDoTexto3D> {
-  @override
-  void initState() {
-    super.initState();
-    Motor3DNativo.instance.revision.addListener(_acordar);
-  }
-
-  @override
-  void dispose() {
-    Motor3DNativo.instance.revision.removeListener(_acordar);
-    super.dispose();
-  }
-
-  void _acordar() {
-    if (mounted) setState(() {});
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final motor = Motor3DNativo.instance;
-    if (!motor.ligado) {
-      return const Center(
-        child: AppText(
-          'A prévia do 3D aparece no aparelho.',
-          style: TextStyle(color: AmColors.muted, fontSize: 12),
-        ),
-      );
-    }
-    final estado = estado3DDoQuadro(
-      project: widget.project,
-      l: widget.layer,
-      local: widget.layer.localTime(widget.playhead),
-      global: widget.playhead,
-      largura: 320,
-      altura: 320,
-    );
-    motor.montar(
-      cena: estado.cena,
-      camera: estado.camera,
-      local: widget.layer.localTime(widget.playhead),
-      largura: 320,
-      altura: 320,
-      aspectoDaComposicao: 1,
-    );
-    final imagem = motor.quadro(estado.chave);
-    if (imagem == null) return const SizedBox.shrink();
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.black,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: RawImage(image: imagem, fit: BoxFit.contain),
-    );
-  }
 }
 
 String _nomeDoChanfro(TipoDeChanfro c) => switch (c) {

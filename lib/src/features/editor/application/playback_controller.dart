@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
 
+import 'interacao.dart';
 import 'preview_stats.dart';
 
 /// Clock mestre da composicao.
@@ -329,6 +330,10 @@ class PlaybackController {
       _ancorarEntrada(v);
       _ticker.start();
     } else {
+      // ESFREGAR A TIMELINE COM O RELOGIO PARADO E UMA INTERACAO: o quadro
+      // sai em rascunho enquanto o dedo anda, e um quadro cheio ao soltar.
+      // Tocando, o rascunho ja vale pelo proprio play.
+      Interacao.marcar();
       _base = v;
       time.value = v;
       _ancorarEntrada(v);

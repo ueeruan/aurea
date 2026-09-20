@@ -186,7 +186,7 @@ class _DecuparState extends State<_Decupar> {
                   color: AmColors.accentDim,
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const AppText(
+                child: AppText(
                   'Decupar agora',
                   style: TextStyle(
                     fontSize: 13,

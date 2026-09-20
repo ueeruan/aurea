@@ -665,7 +665,7 @@ class _EstudioDoRastreioState extends ConsumerState<EstudioDoRastreio> {
                       AppTextMoldado(
                         '{0} na mão', [selecionados],
                         key: const ValueKey('estudio-rastreio-selecao'),
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 11,
                           color: AmColors.accent,
                           fontWeight: FontWeight.w600,

@@ -201,7 +201,7 @@ class _AudioEffectsPanelState extends ConsumerState<AudioEffectsPanel> {
                                       effects[i]
                                           .value(entry.key)
                                           .toStringAsFixed(2),
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                         color: AmColors.accent,
                                       ),
                                     ),

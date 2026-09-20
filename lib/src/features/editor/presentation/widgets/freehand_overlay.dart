@@ -503,7 +503,7 @@ class BarraDoDesenho extends ConsumerWidget {
               constraints: const BoxConstraints.tightFor(width: 34, height: 34),
               onPressed: () =>
                   ref.read(freehandRequestProvider.notifier).state = false,
-              icon: const Icon(
+              icon: Icon(
                 CupertinoIcons.checkmark_alt,
                 size: 19,
                 color: AmColors.accent,

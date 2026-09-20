@@ -19,6 +19,7 @@ import '../context/parameter_row.dart' show showNumberInput;
 import 'am_colors.dart';
 import '../../../../core/ui/tocavel.dart';
 import 'am_widgets.dart';
+import 'estudio_do_tempo.dart';
 
 const _chaveDaCompensacao = 'velocidade.compensacao';
 
@@ -39,8 +40,15 @@ void _lembrarCompensacao(WidgetRef ref, CompensacaoDaVelocidade c) {
   } catch (_) {}
 }
 
-/// Velocidade constante, reverso e blur temporal.
-/// Time Remap e interpolacao ficam no painel de efeitos.
+/// A FOLHA "TEMPO" da camada: a porta do Time Remap no topo, e abaixo a
+/// velocidade constante com o modo de compensacao, as rampas prontas, o
+/// reverso, o blur temporal e a interpolacao de quadros.
+///
+/// O Time Remap (curva, keyframes de tempo, congelar, reverso por trecho)
+/// mora no Estudio do tempo; esta folha e o caminho ate ele. A porta ja
+/// foi apagada duas vezes (da folha em `aba36bb`, da galeria em `7e7c294`)
+/// e o recurso ficou sem chamador nenhum — `time_remap_porta_test.dart`
+/// existe para isso nao se repetir em silencio.
 Future<void> showSpeedSheet(
   BuildContext context,
   WidgetRef ref,
@@ -114,8 +122,25 @@ Future<void> showSpeedSheet(
               children: [
                 AppText(
                   '${speed.toStringAsFixed(2)}x · ${formatTime(layer.duration)}',
-                  style: const TextStyle(fontSize: 12, color: AmColors.accent),
+                  style: TextStyle(fontSize: 12, color: AmColors.accent),
                 ),
+                if (video != null) ...[
+                  const SizedBox(height: 10),
+                  // NO TOPO, e nao no fim da folha: quem entra em "Tempo"
+                  // atras do Time Remap nao pode ter de rolar para acha-lo.
+                  _PortaDoTimeRemap(
+                    video: video,
+                    onTap: () async {
+                      await showEstudioDoTempo(
+                        sheetContext,
+                        ref,
+                        layerId,
+                        playback,
+                      );
+                      if (sheetContext.mounted) setSheetState(() {});
+                    },
+                  ),
+                ],
                 const SizedBox(height: 10),
                 _LinhaDeCompensacao(
                   modo: modo,
@@ -172,7 +197,7 @@ Future<void> showSpeedSheet(
                         ),
                         child: AppText(
                           '${speed.toStringAsFixed(2)}x',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w700,
                             color: AmColors.accent,
@@ -231,6 +256,60 @@ Future<void> showSpeedSheet(
                       setSheetState(() {});
                     },
                   ),
+                  const SizedBox(height: 12),
+                  // INTERPOLACAO DE QUADROS, aqui e nao so dentro da curva:
+                  // uma camera lenta de velocidade CONSTANTE (0,25x sem
+                  // nenhum keyframe) tambem precisa escolher como os
+                  // quadros do meio nascem, e sem este bloco o seletor so
+                  // aparecia depois de existir uma curva.
+                  AppText(
+                    'Interpolação de quadros',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: AmColors.text,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final interp in InterpolacaoDeQuadros.values)
+                        _SpeedChip(
+                          key: ValueKey('interpolacao-${interp.name}'),
+                          label: rotuloDaInterpolacao(interp),
+                          selected: video.interpolacao == interp,
+                          onTap: () {
+                            controller.setClipInterpolacao(layerId, interp);
+                            setSheetState(() {});
+                          },
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  if (seloDaInterpolacao(video.interpolacao) case final selo?)
+                    AppText(
+                      selo,
+                      key: const ValueKey('interpolacao-selo-da-previa'),
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w600,
+                        color: AmColors.accent,
+                      ),
+                    ),
+                  const SizedBox(height: 4),
+                  AppText(
+                    'Vale para câmera lenta. Vídeos de 60 fps ou mais usam '
+                    'os quadros reais; o fluxo óptico com IA (RIFE) roda no '
+                    'Android com GPU, e nos outros aparelhos cai no fluxo '
+                    'óptico comum.',
+                    style: TextStyle(
+                      fontSize: 10,
+                      height: 1.35,
+                      color: AmColors.muted,
+                    ),
+                  ),
                 ],
               ],
             ),
@@ -239,6 +318,81 @@ Future<void> showSpeedSheet(
       },
     ),
   );
+}
+
+/// A PORTA DO ESTUDIO DO TEMPO: uma faixa cheia, com o nome do recurso e o
+/// estado da curva — quem ja remapeou o clipe ve isso antes de abrir.
+class _PortaDoTimeRemap extends StatelessWidget {
+  const _PortaDoTimeRemap({required this.video, required this.onTap});
+
+  final VideoLayer video;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final trilha = timeRemapTrackOf(video);
+    final estiloDoEstado = TextStyle(fontSize: 11, color: AmColors.onAction);
+    return Tocavel(
+      key: const ValueKey('abrir-estudio-do-tempo'),
+      haptico: true,
+      onTap: onTap,
+      child: Container(
+        height: 48,
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        decoration: BoxDecoration(
+          color: AmColors.action,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              Icons.show_chart_rounded,
+              size: 18,
+              color: AmColors.onAction,
+            ),
+            const SizedBox(width: 8),
+            AppText(
+              'Time Remap',
+              maxLines: 1,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: AmColors.onAction,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: trilha == null
+                    ? AppText(
+                        'Curva, keyframes, congelar, reverso',
+                        key: const ValueKey('time-remap-estado'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: estiloDoEstado,
+                      )
+                    : AppTextMoldado(
+                        'Curva ativa · {0} keyframes',
+                        [trilha.keyframes.length],
+                        key: const ValueKey('time-remap-estado'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: estiloDoEstado,
+                      ),
+              ),
+            ),
+            const SizedBox(width: 4),
+            Icon(
+              CupertinoIcons.chevron_right,
+              size: 14,
+              color: AmColors.onAction,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 /// OS QUATRO MODOS lado a lado, cada um com o desenho do que acontece com
@@ -441,7 +595,6 @@ class _SpeedChip extends StatelessWidget {
 
 class _ToggleRow extends StatelessWidget {
   const _ToggleRow({
-    super.key,
     required this.label,
     required this.value,
     required this.onChanged,

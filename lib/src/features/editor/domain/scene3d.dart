@@ -382,14 +382,58 @@ class Bounds3D {
 
 enum MeshLod3D { auto, high, medium, low }
 
+/// O CREDITO ACOMPANHA O MODELO. As licencas Creative Commons pedem titulo,
+/// autor, origem e licenca (TASL) em todo lugar onde a obra aparece: por
+/// isso o credito mora no no da cena, e nao numa lista a parte que se perde
+/// quando o no e copiado para outro projeto.
 class ModelCredit3D {
-  const ModelCredit3D({this.author, this.license, this.url});
+  const ModelCredit3D({
+    this.author,
+    this.license,
+    this.url,
+    this.title,
+    this.source,
+    this.authorUrl,
+  });
 
   final String? author;
   final String? license;
+
+  /// A pagina do modelo.
   final String? url;
 
-  bool get isEmpty => author == null && license == null && url == null;
+  /// O nome que o autor deu a obra (nao o nome do arquivo).
+  final String? title;
+
+  /// De onde veio: "Sketchfab", por exemplo.
+  final String? source;
+
+  /// O perfil do autor.
+  final String? authorUrl;
+
+  bool get isEmpty =>
+      author == null &&
+      license == null &&
+      url == null &&
+      title == null &&
+      source == null &&
+      authorUrl == null;
+
+  /// A linha de atribuicao por extenso, no formato TASL:
+  /// `"Titulo" (url) por Autor, licenca X, via Origem`. So entra o que
+  /// existe; credito vazio devolve texto vazio.
+  String get porExtenso {
+    final b = StringBuffer();
+    if (title != null) b.write('"$title"');
+    if (url != null) b.write(b.isEmpty ? url : ' ($url)');
+    if (author != null) b.write(b.isEmpty ? 'por $author' : ' por $author');
+    if (license != null) {
+      b.write(b.isEmpty ? 'licença $license' : ', licença $license');
+    }
+    if (source != null) b.write(b.isEmpty ? 'via $source' : ', via $source');
+    return b.toString();
+  }
+
   String get badge => [
     author,
     license,

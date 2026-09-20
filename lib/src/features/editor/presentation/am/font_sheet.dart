@@ -186,7 +186,7 @@ Future<void> showFontSheet(
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(
+                        Icon(
                           CupertinoIcons.add,
                           size: 15,
                           color: AmColors.accent,
@@ -194,7 +194,7 @@ Future<void> showFontSheet(
                         const SizedBox(width: 6),
                         AppText(
                           importing ? 'Importando…' : 'Importar fontes',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
                             color: AmColors.accent,
@@ -285,7 +285,7 @@ class _Linha extends StatelessWidget {
               ),
             ),
           if (aceso)
-            const Icon(
+            Icon(
               CupertinoIcons.checkmark_alt,
               size: 16,
               color: AmColors.accent,

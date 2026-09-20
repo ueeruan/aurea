@@ -485,7 +485,7 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
                       );
                     },
                   ),
-                  const Divider(color: AmColors.hairline, height: 22),
+                  Divider(color: AmColors.hairline, height: 22),
                   const AppText(
                     'Para produto (Lottie / SVG)',
                     style: TextStyle(
@@ -519,7 +519,7 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
                       ),
                     ],
                   ),
-                  const Divider(color: AmColors.hairline, height: 18),
+                  Divider(color: AmColors.hairline, height: 18),
 
                   // VALIDADOR: o que nao sobrevive, camada por camada.
                   AppText(
@@ -619,7 +619,7 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
                       color: AmColors.chip,
                       borderRadius: BorderRadius.circular(12),
                       onPressed: busy ? null : exportSvg,
-                      child: const AppText(
+                      child: AppText(
                         'Exportar SVG animado',
                         style: TextStyle(
                           fontSize: 14,
@@ -629,7 +629,7 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
                       ),
                     ),
                   ),
-                  const Divider(color: AmColors.hairline, height: 22),
+                  Divider(color: AmColors.hairline, height: 22),
                   const AppText(
                     'Template',
                     style: TextStyle(
@@ -717,7 +717,7 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
                                       PacoteAurea.montar(project),
                                       'Pacote do projeto',
                                     ),
-                              child: const AppText(
+                              child: AppText(
                                 'Exportar pacote .aurea',
                                 style: TextStyle(
                                   fontSize: 14,
@@ -736,7 +736,7 @@ Future<void> showExportSheet(BuildContext context, WidgetRef ref) async {
                   const SizedBox(height: 10),
                   AppText(
                     status!,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 11,
                       color: AmColors.accent,
                     ),

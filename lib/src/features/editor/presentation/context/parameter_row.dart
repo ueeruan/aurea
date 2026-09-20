@@ -866,7 +866,7 @@ class _TecladoNumericoState extends State<TecladoNumerico> {
                     onPressed: _resultado == null
                         ? null
                         : () => Navigator.pop(context, _campo.text),
-                    child: const AppText(
+                    child: AppText(
                       'OK',
                       style: TextStyle(
                         color: AmColors.onAction,

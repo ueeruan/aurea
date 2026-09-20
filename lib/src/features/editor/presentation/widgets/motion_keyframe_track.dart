@@ -58,11 +58,18 @@ class MotionKeyframePainter extends CustomPainter {
   const MotionKeyframePainter(this.keysUs, this.durationUs, this.timeUs);
   final List<int> keysUs;
   final int durationUs, timeUs;
+
+  // Reaproveitados: o cabecote deste trilho e o tempo, entao `paint` roda
+  // a cada quadro de play — alocar aqui dentro e lixo por quadro.
+  static final Paint _tinta = Paint();
+
   @override
   void paint(Canvas canvas, Size size) {
     double x(int t) =>
         12 + (size.width - 24) * (t / durationUs).clamp(0.0, 1.0);
-    final paint = Paint()..color = AmColors.chip;
+    final paint = _tinta
+      ..color = AmColors.chip
+      ..strokeWidth = 0;
     canvas.drawRRect(
       RRect.fromRectAndRadius(
         Rect.fromLTWH(8, 7, math.max(0, size.width - 16), 22),
@@ -70,6 +77,12 @@ class MotionKeyframePainter extends CustomPainter {
       ),
       paint,
     );
+    // DOIS CAMINHOS, DUAS CHAMADAS. Antes era um `Path` novo por losango;
+    // uma trilha densa alocava dezenas deles a cada quadro so para
+    // desenhar a mesma figura. Os losangos sob o cabecote vao num
+    // caminho, os demais noutro.
+    final aqui = Path();
+    final longe = Path();
     var lastPixel = -100.0;
     for (final key in keysUs) {
       if (key < 0 || key > durationUs) continue;
@@ -77,21 +90,16 @@ class MotionKeyframePainter extends CustomPainter {
       // Several keys at the same physical pixel need only one diamond.
       if ((dx - lastPixel).abs() < 1) continue;
       lastPixel = dx;
-      final here = (key - timeUs).abs() <= 8000;
-      paint.color = here ? AmColors.accent : AmColors.text;
-      canvas.drawPath(
-        Path()
-          ..moveTo(dx, 11)
-          ..lineTo(dx + 5, 18)
-          ..lineTo(dx, 25)
-          ..lineTo(dx - 5, 18)
-          ..close(),
-        paint,
-      );
+      ((key - timeUs).abs() <= 8000 ? aqui : longe)
+        ..moveTo(dx, 11)
+        ..lineTo(dx + 5, 18)
+        ..lineTo(dx, 25)
+        ..lineTo(dx - 5, 18)
+        ..close();
     }
-    paint
-      ..color = AmColors.accent
-      ..strokeWidth = 1.5;
+    canvas.drawPath(longe, paint..color = AmColors.text);
+    canvas.drawPath(aqui, paint..color = AmColors.accent);
+    paint.strokeWidth = 1.5;
     canvas.drawLine(
       Offset(x(timeUs), 1),
       Offset(x(timeUs), size.height),
@@ -103,5 +111,5 @@ class MotionKeyframePainter extends CustomPainter {
   bool shouldRepaint(MotionKeyframePainter old) =>
       old.timeUs != timeUs ||
       old.durationUs != durationUs ||
-      old.keysUs != keysUs;
+      !identical(old.keysUs, keysUs);
 }

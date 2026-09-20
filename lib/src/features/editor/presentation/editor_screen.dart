@@ -8,6 +8,7 @@ import '../../../core/theme/tokens.dart';
 import '../../../core/ui/snack.dart';
 import '../../projects/application/projects_controller.dart';
 import '../../projects/application/thumbnail_service.dart';
+import '../application/desempenho/aurea_performance_manager.dart';
 import '../application/editor_controller.dart';
 import '../application/freehand_session.dart';
 import '../application/playback_controller.dart';
@@ -71,7 +72,7 @@ class EditorScreen extends ConsumerStatefulWidget {
 }
 
 class _EditorScreenState extends ConsumerState<EditorScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late final PlaybackController _playback;
   final VideoLayerManager _videos = VideoLayerManager();
 
@@ -88,6 +89,11 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
   void initState() {
     super.initState();
     RecentSheets.instance.clear();
+    WidgetsBinding.instance.addObserver(this);
+    // O EDITOR ABRIU: o gerente de desempenho liga as sondas (temperatura,
+    // memoria, tempo de quadro) e passa a publicar a politica da previa.
+    // Fora do editor ele nao custa nada — ver [editorFechou].
+    AureaPerformanceManager.instancia.editorAbriu();
     _playback =
         widget.playback ??
         PlaybackController(
@@ -143,6 +149,8 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
   void dispose() {
     // Saiu do editor em tela cheia: devolve as barras do sistema.
     if (_telaCheiaAtiva) _modoDeSistema(false);
+    WidgetsBinding.instance.removeObserver(this);
+    AureaPerformanceManager.instancia.editorFechou();
     RecentSheets.instance.clear();
     // Sem ref no dispose: o controlador foi guardado na montagem.
     _controladorDoNivel?.aoMudarDeNivel = null;
@@ -153,6 +161,22 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
     }
     _videos.dispose();
     super.dispose();
+  }
+
+  /// O APP FOI PARA O SEGUNDO PLANO: para de tocar.
+  ///
+  /// Ninguem fazia isto. O `Ticker` do relogio parava sozinho por falta de
+  /// vsync, mas os TOCADORES de video e audio nao: ao trocar de app com a
+  /// previa tocando, o som continuava e a midia seguia andando por conta
+  /// propria — e ao voltar, o relogio parado e a midia adiantada davam um
+  /// salto. Pausar de verdade tambem devolve o decodificador ao sistema.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.detached) {
+      if (_playback.playing.value) _playback.pause();
+    }
   }
 
   bool _telaCheiaAtiva = false;
@@ -653,6 +677,10 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
         RecentSheets.instance.clear();
         closeActiveParamSheet(context);
       }
+      // Mutacao com o dedo ARRASTANDO na tela e passo de gesto: o gerente
+      // liga [Interacao.agora], e a lista de projetos (e a Inicio atras da
+      // rota) para de ser refeita a cada evento de ponteiro.
+      AureaPerformanceManager.instancia.houveMutacao();
       // Dentro de um grupo o estado e o grupo; o que se salva e o todo.
       ref
           .read(projectsControllerProvider.notifier)
@@ -673,9 +701,15 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
       editorControllerProvider.select((p) => p.fps),
     );
 
+    // A CAMADA, NAO O PROJETO. Observar o projeto inteiro aqui remarcava a
+    // RAIZ do editor (palco, timeline, barras e o painel aberto) a cada
+    // mutacao — inclusive a cada passo de um arrasto. A camada e imutavel:
+    // o select so dispara quando ELA muda de identidade.
     final layer = selectedId == null
         ? null
-        : ref.watch(editorControllerProvider).layerById(selectedId);
+        : ref.watch(
+            editorControllerProvider.select((p) => p.layerById(selectedId)),
+          );
     final targets = <String>{...multi, ?selectedId};
     final semCamadas = ref.watch(
       editorControllerProvider.select((p) => p.layers.isEmpty),
@@ -771,9 +805,12 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
     if (panel != null) {
       conteudo = panel;
       titulo = _tituloDoPainel(s);
+      final nomeDoProjeto = ref.watch(
+        editorControllerProvider.select((p) => p.name),
+      );
       trilha = layer == null
-          ? ref.watch(editorControllerProvider).name
-          : '${ref.watch(editorControllerProvider).name} › ${layer.name}';
+          ? nomeDoProjeto
+          : '$nomeDoProjeto › ${layer.name}';
     } else if (s.adding) {
       conteudo = AddLayerPanel(
         key: const ValueKey('adicionar-camada'),
@@ -1134,7 +1171,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                                   ),
                                 ],
                               ),
-                              child: const Icon(
+                              child: Icon(
                                 Icons.add,
                                 size: 32,
                                 color: CromoEditor.acao,
@@ -1158,8 +1195,8 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                             child: Container(
                               width: 40,
                               height: 40,
-                              decoration: const BoxDecoration(
-                                color: Color(0xCC12151A),
+                              decoration: BoxDecoration(
+                                color: AmColors.panel.withValues(alpha: 0.8),
                                 shape: BoxShape.circle,
                               ),
                               child: const Icon(
@@ -1231,7 +1268,7 @@ class _DiagOverlay extends ConsumerWidget {
                         vertical: 6,
                       ),
                       decoration: BoxDecoration(
-                        color: const Color(0xCC12151A),
+                        color: AmColors.panel.withValues(alpha: 0.8),
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(color: AmColors.hairline),
                       ),
@@ -1256,7 +1293,7 @@ class _DiagOverlay extends ConsumerWidget {
                                   'travadas ${r?.stutters ?? 0} · '
                                   'intervalo ${r?.gapS ?? 0}s (±${r?.gapSdS ?? 0})\n'
                                   'deriva video-audio ${r?.driftMs ?? 0} ms',
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 11,
                                     color: AmColors.accent,
                                     height: 1.4,
@@ -1276,8 +1313,43 @@ class _DiagOverlay extends ConsumerWidget {
           ),
         ),
         const SizedBox(height: 4),
+        const _DiagDesempenho(),
+        const SizedBox(height: 4),
         const _Diag3D(),
       ],
+    );
+  }
+}
+
+/// A POLITICA DE DESEMPENHO EM VIGOR, no overlay de diagnostico.
+///
+/// Sem isto, "por que a previa ficou borrada?" so se responde adivinhando:
+/// a escada desce por temperatura, memoria ou tempo de quadro, e as tres
+/// causas terminam no mesmo pixel maior. A linha diz o perfil, o motivo e
+/// os numeros que estao valendo AGORA.
+class _DiagDesempenho extends StatelessWidget {
+  const _DiagDesempenho();
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<PoliticaDeDesempenho>(
+      valueListenable: AureaPerformanceManager.instancia.politica,
+      builder: (context, politica, _) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: AmColors.panel.withValues(alpha: 0.8),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: AppText(
+          '── desempenho ──\n$politica',
+          style: TextStyle(
+            fontSize: 11,
+            color: AmColors.accent,
+            height: 1.4,
+            fontFeatures: [FontFeature.tabularFigures()],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -1309,7 +1381,7 @@ class _Diag3D extends StatelessWidget {
                   vertical: 6,
                 ),
                 decoration: BoxDecoration(
-                  color: const Color(0xCC12151A),
+                  color: AmColors.panel.withValues(alpha: 0.8),
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: AmColors.hairline),
                 ),
@@ -1326,7 +1398,7 @@ class _Diag3D extends StatelessWidget {
                   '${c.disponivelBytes >= 0 ? bytesLegiveis(c.disponivelBytes) : '?'} · '
                   'termico ${c.termico}\n'
                   '${e ?? 'sem quadro em GPU'}',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 11,
                     color: AmColors.accent,
                     height: 1.4,
@@ -1381,7 +1453,7 @@ class _RascunhoBadge extends ConsumerWidget {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(
-              color: const Color(0xCC12151A),
+              color: AmColors.panel.withValues(alpha: 0.8),
               borderRadius: BorderRadius.circular(999),
             ),
             child: const AppText(

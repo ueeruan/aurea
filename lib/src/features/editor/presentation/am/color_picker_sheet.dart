@@ -278,7 +278,7 @@ class _SeletorDeCorState extends State<SeletorDeCor> {
                     key: const ValueKey('cor-pronto'),
                     padding: const EdgeInsets.only(left: 6),
                     onPressed: () => Navigator.of(context).pop(cor),
-                    child: const AppText(
+                    child: AppText(
                       'Pronto',
                       style: TextStyle(
                         fontSize: 15,
@@ -497,7 +497,7 @@ class _SeletorDeCorState extends State<SeletorDeCor> {
                                 : AmColors.pink.withValues(alpha: .35),
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(
+                          child: Icon(
                             CupertinoIcons.trash,
                             size: 18,
                             color: AmColors.pink,
@@ -511,11 +511,11 @@ class _SeletorDeCorState extends State<SeletorDeCor> {
                         child: Container(
                           width: 40,
                           height: 40,
-                          decoration: const BoxDecoration(
+                          decoration: BoxDecoration(
                             color: AmColors.chip,
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(
+                          child: Icon(
                             CupertinoIcons.plus,
                             size: 18,
                             color: AmColors.accent,
@@ -860,7 +860,7 @@ class _ValorTocavel extends StatelessWidget {
       ),
       child: Text(
         texto,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 13,
           fontWeight: FontWeight.w700,
           color: AmColors.accent,

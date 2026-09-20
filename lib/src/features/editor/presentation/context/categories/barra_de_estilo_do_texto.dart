@@ -216,7 +216,7 @@ class BarraDeEstiloDoTexto extends ConsumerWidget {
               FocusScope.of(context).unfocus();
               ref.read(editorSessionProvider.notifier).closePanel();
             },
-            child: const Icon(
+            child: Icon(
               CupertinoIcons.checkmark_alt,
               size: 20,
               color: AmColors.accent,
@@ -453,7 +453,7 @@ class _MiniNavegadorDeFontesState extends State<_MiniNavegadorDeFontes> {
               ),
             ),
             if (familia == atual)
-              const Padding(
+              Padding(
                 padding: EdgeInsets.only(right: 4),
                 child: Icon(
                   CupertinoIcons.checkmark_alt,
@@ -519,7 +519,7 @@ class _MiniNavegadorDeFontesState extends State<_MiniNavegadorDeFontes> {
                   key: const ValueKey('fontes-ver-todas'),
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                   onPressed: () => Navigator.of(context).pop(true),
-                  child: const AppText(
+                  child: AppText(
                     'Ver todas e importar',
                     style: TextStyle(fontSize: 13, color: AmColors.accent),
                   ),

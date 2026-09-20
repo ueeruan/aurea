@@ -1,7 +1,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
-import 'aurea_colors.dart';
+import 'aurea_paleta.dart';
 
 /// A PALETA DO APP — um apelido para [AureaColors], e nada mais.
 ///
@@ -16,67 +16,62 @@ import 'aurea_colors.dart';
 /// em troca de nada que a pessoa que usa o app perceba. O comentário de cada
 /// um diz o papel — que é o que importa quando a identidade mudar de novo.
 ///
-/// TEMA CLARO (Fase 6, decisao Q6): os mesmos NOMES trocam de valor com
-/// [modoClaro]. Quem pintava com AppColors continua pintando com o papel
-/// certo — fundo, superficie, texto — e o app inteiro (fora do editor,
-/// que fica escuro por ser palco de video) acompanha o ajuste.
+/// TEMAS: os mesmos NOMES trocam de valor com a paleta em vigor
+/// ([AureaPaleta.ativa]). Quem pintava com AppColors continua pintando com
+/// o papel certo — fundo, superficie, texto — e o app inteiro acompanha o
+/// ajuste. Como tudo aqui ja era getter (o tema claro ja existia), os seis
+/// temas chegaram a estas telas sem tocar em nenhuma delas.
 abstract final class AppColors {
-  /// Ligado pelo tema em vigor (ver [AppTheme.tema]).
-  static bool modoClaro = false;
+  static AureaPaleta get _p => AureaPaleta.ativa;
 
-  static Color get background => modoClaro ? AureaColors.lightBg : AureaColors.bg;
-  static Color get surface =>
-      modoClaro ? AureaColors.lightSurface : AureaColors.surface;
-  static Color get surfaceHigh =>
-      modoClaro ? AureaColors.lightSurfaceHigh : AureaColors.surfaceHigh;
+  /// O tema em vigor e claro? Derivado da paleta: nao ha mais uma segunda
+  /// bandeira para divergir dela.
+  static bool get modoClaro => _p.claro;
+
+  static Color get background => _p.background;
+  static Color get surface => _p.surface;
+  static Color get surfaceHigh => _p.panel;
 
   /// AÇÃO. Era o lima da logo; hoje é o azul claro dela.
-  static Color get lime =>
-      modoClaro ? AureaColors.lightAccent : AureaColors.accent;
+  static Color get lime => _p.accent;
 
   /// SELEÇÃO. Era o violeta; hoje é o azul suave.
-  static Color get violet =>
-      modoClaro ? AureaColors.lightSelection : AureaColors.selectionText;
+  static Color get violet => _p.selectedText;
 
-  static Color get onDark =>
-      modoClaro ? AureaColors.lightText : AureaColors.text;
-  static Color get muted =>
-      modoClaro ? AureaColors.lightMuted : AureaColors.muted;
-  static Color get outline =>
-      modoClaro ? AureaColors.lightBorder : AureaColors.border;
+  static Color get onDark => _p.textPrimary;
+  static Color get muted => _p.textSecondary;
+  static Color get outline => _p.divider;
 
   /// A ação APAGADA, para fundo de chip aceso — o mesmo papel que
   /// `AmColors.accentDim` faz no editor.
-  static Color get accentDim =>
-      modoClaro ? AureaColors.lightAccentDim : AureaColors.accentDim;
+  static Color get accentDim => _p.accentDim;
 
   /// Linha fina estilo iOS (separadores e borda do chrome translucido).
   ///
   /// UMA LINHA FINA É MEIA TRANSPARÊNCIA, e não a cor da borda cheia: ela
-  /// passa por cima de fundo, de superfície e de chip, e a #273442 sólida
-  /// ficaria pesada sobre o fundo mais escuro. A 42% ela rende os três.
-  static Color get hairline => modoClaro
+  /// passa por cima de fundo, de superfície e de chip, e a borda sólida
+  /// ficaria pesada sobre o fundo mais escuro. A 72% ela rende os três.
+  static Color get hairline => _p.claro
       ? Colors.black.withValues(alpha: 0.10)
-      : AureaColors.border.withValues(alpha: 0.72);
+      : _p.divider.withValues(alpha: 0.72);
 }
 
 abstract final class AppTheme {
-  static const Color timelineBackground = AureaColors.surface;
+  static ThemeData get dark => tema(paleta: AureaPaleta.aurea);
+  static ThemeData get light => tema(paleta: AureaPaleta.light);
 
-  static ThemeData get dark => tema(claro: false);
-  static ThemeData get light => tema(claro: true);
-
-  /// O tema em vigor. Liga [AppColors.modoClaro] antes de montar, para
-  /// as cores fixas das telas de Projetos e Ajustes acompanharem.
-  static ThemeData tema({required bool claro}) {
-    AppColors.modoClaro = claro;
+  /// O tema em vigor. Escreve [AureaPaleta.ativa] ANTES de montar, para as
+  /// cores lidas sem contexto (AppColors, AmColors, pintores) acompanharem.
+  static ThemeData tema({required AureaPaleta paleta}) {
+    AureaPaleta.ativa = paleta;
+    final claro = paleta.claro;
     final scheme = ColorScheme(
       brightness: claro ? Brightness.light : Brightness.dark,
       primary: AppColors.lime,
-      onPrimary: AureaColors.onAccent,
+      onPrimary: paleta.onAccent,
       secondary: AppColors.violet,
       onSecondary: Colors.white,
-      error: AureaColors.danger,
+      error: paleta.danger,
       onError: Colors.white,
       surface: AppColors.background,
       onSurface: AppColors.onDark,
@@ -173,7 +168,7 @@ abstract final class AppTheme {
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
           backgroundColor: AppColors.lime,
-          foregroundColor: AureaColors.onAccent,
+          foregroundColor: paleta.onAccent,
           textStyle: const TextStyle(
             fontSize: 17,
             fontWeight: FontWeight.w600,

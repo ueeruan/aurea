@@ -265,7 +265,11 @@ void main() {
     },
   );
 
-  testWidgets('Time Remap nao duplica controles no menu de velocidade', (
+  // A REGRA MUDOU DE PROPOSITO (20/09): a folha voltou a ter A PORTA do
+  // Time Remap, porque sem ela o recurso tinha ficado sem chamador nenhum
+  // no aplicativo inteiro. O que continua proibido e DUPLICAR o editor —
+  // uma porta so, e ela abre o Estudio do tempo.
+  testWidgets('a folha tem UMA porta do Time Remap, e nao um segundo editor', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(430, 932);
@@ -299,9 +303,19 @@ void main() {
     );
     await tester.tap(find.text('abrir tempo'));
     await tester.pumpAndSettle();
-    expect(find.text('Time Remap'), findsNothing);
+    expect(
+      find.byKey(const ValueKey('abrir-estudio-do-tempo')),
+      findsOneWidget,
+    );
+    expect(find.text('Time Remap'), findsOneWidget);
+    // Nada de um segundo editor de curva dentro da propria folha.
     expect(find.text('Editor de curva'), findsNothing);
     expect(find.byKey(const ValueKey('velocidade-regua')), findsOneWidget);
+    // Sem curva ainda: a faixa convida em vez de contar keyframes.
+    final clipe =
+        c.read(editorControllerProvider).layerById('v')! as VideoLayer;
+    expect(hasTimeRemap(clipe), isFalse);
+    expect(find.text('Curva, keyframes, congelar, reverso'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

@@ -359,7 +359,7 @@ class _FichaDaSolucao extends StatelessWidget {
               ),
               AppText(
                 estrelas,
-                style: const TextStyle(fontSize: 12, color: AmColors.accent),
+                style: TextStyle(fontSize: 12, color: AmColors.accent),
               ),
             ],
           ),
@@ -389,7 +389,7 @@ class _FichaDaSolucao extends StatelessWidget {
           ],
           if (ruim) ...[
             const SizedBox(height: 4),
-            const AppText(
+            AppText(
               'A cena vai escorregar. Um plano com mais textura e com a '
               'câmera andando de lado costuma resolver.',
               style: TextStyle(
@@ -446,7 +446,7 @@ class _Andamento extends StatelessWidget {
             value: fracao.clamp(0.0, 1.0),
             minHeight: 5,
             backgroundColor: AmColors.hairline,
-            valueColor: const AlwaysStoppedAnimation(AmColors.accent),
+            valueColor: AlwaysStoppedAnimation(AmColors.accent),
           ),
         ),
       ],
@@ -656,7 +656,7 @@ class _LinhaDeCamada extends StatelessWidget {
               style: const TextStyle(fontSize: 13, color: AmColors.text),
             ),
           ),
-          const Icon(CupertinoIcons.link, size: 15, color: AmColors.accent),
+          Icon(CupertinoIcons.link, size: 15, color: AmColors.accent),
         ],
       ),
     ),
@@ -708,7 +708,7 @@ class _Aviso extends StatelessWidget {
     ),
     child: AppText(
       texto,
-      style: const TextStyle(
+      style: TextStyle(
         fontSize: 11.5,
         height: 1.35,
         color: AmColors.pink,

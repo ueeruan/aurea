@@ -86,7 +86,7 @@ class SheetTransport extends StatelessWidget {
           child: AppText(
             formatTimecode(t, fps),
             textAlign: TextAlign.center,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 13,
               color: AmColors.accent,
               fontFeatures: [FontFeature.tabularFigures()],
@@ -491,7 +491,7 @@ class AmMenuIcon extends StatelessWidget {
           child: Container(
             width: 6,
             height: 6,
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: AmColors.accent,
             ),

@@ -133,7 +133,7 @@ class _DetalheDoEfeito extends ConsumerWidget {
                                 color: AmColors.action,
                                 borderRadius: BorderRadius.circular(9),
                               ),
-                              child: const AppText(
+                              child: AppText(
                                 'Aplicar',
                                 style: TextStyle(
                                   fontSize: 13,

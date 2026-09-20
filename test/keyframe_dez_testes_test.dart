@@ -206,25 +206,49 @@ void main() {
     expect(_l(b.c, b.id).opacity.easeAt(t0), Easing.softSpring);
   });
 
-  test('TESTE 10 — nao ha "Auto Keyframe" em lugar nenhum do codigo', () {
-    // Comentario nao conta: a lapide que explica por que o interruptor
-    // saiu tem de poder dizer o nome dele.
-    final proibido = RegExp(r'autoKeyframeProvider|autoKey\s*:');
-    final culpados = <String>[];
-    for (final f in Directory('lib').listSync(recursive: true)) {
-      if (f is! File || !f.path.endsWith('.dart')) continue;
-      final vivo = f
-          .readAsLinesSync()
-          .where((l) => !l.trimLeft().startsWith('//'))
-          .join(' ');
-      if (proibido.hasMatch(vivo)) culpados.add(f.path);
-    }
-    expect(
-      culpados,
-      isEmpty,
-      reason:
-          'o interruptor saiu, e nao pode voltar por descuido: se um dia '
-          'voltar como recurso, nasce desligado e sai com um toque',
-    );
+  // TESTE 10 — o interruptor VOLTOU como recurso, e o proprio doc diz
+  // com que condicoes: "nasce desligado, e anunciado enquanto ligado, sai
+  // com um toque". Exigir a ausencia do nome nao protegia mais nada — o
+  // que protege e o padrao e o anuncio, e e isso que se cobra aqui.
+  group('TESTE 10 — "Auto Keyframe" so existe sob tres condicoes', () {
+    test('nasce desligado', () {
+      final c = ProviderContainer();
+      addTearDown(c.dispose);
+      expect(c.read(autoKeyframeProvider), isFalse);
+      // E no codigo, nao so em tempo de execucao: um `=> true` de volta
+      // por descuido ja aconteceu uma vez (4cf6177).
+      final fonte = File(
+        'lib/src/features/editor/application/editor_controller.dart',
+      ).readAsStringSync();
+      expect(
+        fonte,
+        contains('final autoKeyframeProvider = StateProvider<bool>((ref) => false)'),
+      );
+    });
+
+    test('desligado, editar nunca cria marca', () {
+      final b = _bancada();
+      addTearDown(b.c.dispose);
+      _animarOpacidade(b.e, b.id);
+      final antes = _l(b.c, b.id).opacity.keyframes.length;
+      b.e.editOpacity(b.id, t1, .5);
+      expect(_l(b.c, b.id).opacity.keyframes, hasLength(antes));
+      expect(b.c.read(edicaoPendenteProvider), isNotNull);
+    });
+
+    test('ligado, e anunciado na tela e sai com um toque', () {
+      // O selo mora no rail de TODA ferramenta que tem losango — e ali
+      // que a marca criada sozinha aparece.
+      final rail = File(
+        'lib/src/features/editor/presentation/widgets/rails_do_painel.dart',
+      ).readAsStringSync();
+      expect(rail, contains('class SeloAutoKeyframe'));
+      expect(rail, contains('ref.watch(autoKeyframeProvider)'));
+      expect(
+        rail,
+        contains('ref.read(autoKeyframeProvider.notifier).state = false'),
+        reason: 'o selo desliga num toque; ligar continua sendo pelo menu',
+      );
+    });
   });
 }

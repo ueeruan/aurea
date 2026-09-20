@@ -1,18 +1,22 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import 'package:aurea/src/core/l10n/app_language.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart' show ValueListenable, setEquals;
 import 'package:flutter/gestures.dart' show LongPressGestureRecognizer;
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/utils/time_format.dart';
 import '../../../../core/ui/snack.dart';
 import '../../application/editor_controller.dart';
+import '../../application/interacao.dart';
 import '../../application/playback_controller.dart';
 import '../../domain/layer.dart';
 import '../../domain/mask.dart';
@@ -27,6 +31,7 @@ import '../shell/layer_actions.dart' show menuDasMarcas;
 import 'am_colors.dart';
 import 'layer_look.dart';
 import 'clip_preview_painters.dart';
+import 'janela_da_timeline.dart';
 import '../../application/registro_de_travadas.dart';
 import '../../application/perfil3d.dart';
 
@@ -126,6 +131,89 @@ String? _fonteDe(Layer l) => switch (l) {
   _ => null,
 };
 
+/// OS INSTANTES DOS KEYFRAMES, calculados UMA vez por instancia de camada.
+///
+/// `Layer.keyframeTimes` e um getter sem memoria: junta nove conjuntos,
+/// ordena e aloca uma `Duration` por marca. A barra pedia isso a cada
+/// montagem, e a timeline inteira remontava a cada passo de arrasto ou de
+/// pinca — a conta era refeita para camadas que nao tinham mudado em nada.
+///
+/// A camada e imutavel (editou, e outra instancia), entao a identidade e a
+/// chave certa, e o `Expando` solta a entrada junto com a camada. A lista
+/// ja sai ORDENADA do getter; quem usa nao ordena de novo.
+final Expando<List<Duration>> _temposGuardados = Expando(
+  'tempos-dos-keyframes',
+);
+
+List<Duration> _temposDosKeyframes(Layer l) =>
+    _temposGuardados[l] ??= List<Duration>.unmodifiable(l.keyframeTimes);
+
+/// Os grupos de losangos de uma camada, no zoom em que foram calculados.
+class _GruposMemo {
+  const _GruposMemo(this.pps, this.grupos);
+  final double pps;
+  final List<_GrupoDeKeyframes> grupos;
+}
+
+final Expando<_GruposMemo> _gruposGuardados = Expando('grupos-de-losangos');
+
+/// Os losangos de [l] no zoom [pps] — refeitos so quando a camada ou o
+/// zoom mudam.
+List<_GrupoDeKeyframes> _gruposDe(Layer l, double pps) {
+  final memo = _gruposGuardados[l];
+  if (memo != null && memo.pps == pps) return memo.grupos;
+  final grupos = _agrupaKeyframes(_temposDosKeyframes(l), pps);
+  _gruposGuardados[l] = _GruposMemo(pps, grupos);
+  return grupos;
+}
+
+/// O que uma linha ja montada lembra: com as MESMAS entradas, a linha do
+/// tempo devolve o MESMO widget, e o Flutter nem desce naquela linha.
+class _LinhaMemo {
+  _LinhaMemo({
+    required this.camadas,
+    required this.pps,
+    required this.totalWidth,
+    required this.compact,
+    required this.playback,
+    required this.selecionadas,
+    required this.ativos,
+    required this.widget,
+  });
+
+  final List<Layer> camadas;
+  final double pps;
+  final double totalWidth;
+  final bool compact;
+  final PlaybackController playback;
+  final Set<String> selecionadas;
+  final Set<int>? ativos;
+  final Widget widget;
+}
+
+/// O mesmo, para a coluna de controles a esquerda.
+class _PilulaMemo {
+  _PilulaMemo({
+    required this.camadas,
+    required this.playback,
+    required this.isMatteSource,
+    required this.widget,
+  });
+
+  final List<Layer> camadas;
+  final PlaybackController playback;
+  final bool isMatteSource;
+  final Widget widget;
+}
+
+bool _mesmasCamadas(List<Layer> a, List<Layer> b) {
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (!identical(a[i], b[i])) return false;
+  }
+  return true;
+}
+
 /// Timeline do editor: regua com relogio central, playhead fixo no centro,
 /// pilulas de camada (olho + miniatura) fixas a esquerda e barras teal.
 ///
@@ -224,11 +312,98 @@ class _AmTimelineState extends ConsumerState<AmTimeline> {
   /// unica acomodacao na grade, e pronto.
   bool _rolagemDoDedo = false;
 
+  /// DOIS DEDOS NA TELA. A pinca reposiciona a rolagem com um `jumpTo` por
+  /// quadro, e cada `jumpTo` termina num aviso de FIM de rolagem — que e
+  /// onde mora o encaixe do cabecote nas marcas. Com o ima ligado, o zoom
+  /// "grudava" na marca mais proxima a cada quadro da pinca.
+  bool _pincando = false;
+
+  // --------------------------------------------------------- a janela visivel
+
+  /// O pedaco do conteudo que esta na tela (mais a folga). Instancia
+  /// ESTAVEL: as linhas memorizadas seguram este aviso, nao um valor.
+  final AvisoDaJanela _janela = AvisoDaJanela();
+
+  /// A largura da area rolavel, medida na ultima montagem.
+  double _larguraDaTela = 0;
+
+  bool _janelaAgendada = false;
+
+  /// Recalcula a janela a partir da rolagem. So troca o valor quando o
+  /// balde muda — entre uma troca e outra, rolar nao acorda ninguem.
+  void _atualizarJanela() {
+    if (_larguraDaTela <= 0) return;
+    final offset = _scroll.hasClients
+        ? _scroll.offset
+        : _timeToPx(widget.playback.time.value);
+    final nova = JanelaDaTimeline.de(
+      offset: offset,
+      viewport: _larguraDaTela,
+      recuo: _larguraDaTela / 2,
+    );
+    if (nova == _janela.value) return;
+    // AVISAR NO MEIO DA MONTAGEM E PROIBIDO. A rolagem anda em tres
+    // lugares: no evento do dedo e no tique do relogio (fora do quadro —
+    // troca na hora, e as barras novas nascem no MESMO quadro) e, mais
+    // raro, durante o layout (o conteudo encolheu e a posicao foi
+    // corrigida). Nesse ultimo caso a troca espera o quadro acabar.
+    final fase = SchedulerBinding.instance.schedulerPhase;
+    final noQuadro =
+        fase == SchedulerPhase.persistentCallbacks ||
+        fase == SchedulerPhase.midFrameMicrotasks;
+    if (!noQuadro || !_janela.temOuvintes) {
+      _janela.value = nova;
+      return;
+    }
+    if (_janelaAgendada) return;
+    _janelaAgendada = true;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      _janelaAgendada = false;
+      if (mounted) _atualizarJanela();
+    });
+    SchedulerBinding.instance.ensureVisualUpdate();
+  }
+
+  // ------------------------------------------------------ linhas memorizadas
+
+  final Map<String, _LinhaMemo> _memoDasLinhas = {};
+  final Map<String, _PilulaMemo> _memoDasPilulas = {};
+
+  /// O projeto cujas gravacoes de onda estao no cache.
+  ///
+  /// ESTATICO de proposito: o cache da onda e um so para o app, e ha mais
+  /// de uma linha do tempo viva ao mesmo tempo (a compacta, dentro de um
+  /// painel aberto). Como campo de instancia, abrir um painel esvaziava
+  /// o cache que a linha principal acabara de encher.
+  static String? _projetoDoCache;
+
+  // CALLBACKS ESTAVEIS. O editor recria o `AmTimeline` a cada montagem com
+  // closures novas (a de `onTapLayer` captura o painel aberto). Uma linha
+  // memorizada seguraria a closure VELHA; estes metodos sao sempre os
+  // mesmos e leem o `widget` na hora do toque.
+  void _aoTocarCamada(Layer l) => widget.onTapLayer?.call(l);
+  void _aoTocarLosangoDeFora(Duration t) => widget.onForeignKeyframe?.call(t);
+  void _aoTocarLosango(Layer l, Duration t) => widget.onKeyframeTap?.call(l, t);
+  void _comecarEdicaoDaBarra() => _editingBar = true;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Tema, idioma ou tamanho de tela mudaram: a linha guardada foi
+    // montada com os de antes.
+    _memoDasLinhas.clear();
+    _memoDasPilulas.clear();
+  }
+
   @override
   void initState() {
     super.initState();
     _rowsScroll.addListener(() => _syncRows(_rowsScroll, _pillsScroll));
     _pillsScroll.addListener(() => _syncRows(_pillsScroll, _rowsScroll));
+    // No CONTROLADOR, e nao em `_onScroll`: aquele sai cedo quando e o
+    // relogio que rola (`_syncingScroll`), e a janela tem de andar nos
+    // dois casos.
+    _scroll.addListener(_atualizarJanela);
     widget.playback.time.addListener(_onClock);
     // Sem isso, uma timeline recem-criada (ex.: ao abrir um painel) fica
     // com scroll 0 enquanto o tempo real esta em outro ponto — e o
@@ -242,6 +417,7 @@ class _AmTimelineState extends ConsumerState<AmTimeline> {
     _scroll.dispose();
     _rowsScroll.dispose();
     _pillsScroll.dispose();
+    _janela.dispose();
     super.dispose();
   }
 
@@ -327,8 +503,9 @@ class _AmTimelineState extends ConsumerState<AmTimeline> {
     } else if (n is ScrollEndNotification) {
       _rolagemDoDedo = false;
       // ENCAIXE DO CABECOTE: soltou perto de uma marca, cai nela — e o
-      // keyframe cravado em seguida cai exatamente na batida.
-      _encaixarNasMarcas();
+      // keyframe cravado em seguida cai exatamente na batida. Nao durante
+      // a pinca: ali o "fim" e o de cada reposicionamento do zoom.
+      if (!_pincando) _encaixarNasMarcas();
       // Parou: acomoda o conteudo no quadro em que o relogio caiu.
       _onClock();
       return false;
@@ -351,6 +528,106 @@ class _AmTimelineState extends ConsumerState<AmTimeline> {
       }
     }
     return false;
+  }
+
+  /// Tira do memo as linhas que ja nao existem (camada apagada, grupo
+  /// fechado, outro projeto): senao ele cresce com a sessao.
+  void _podarMemo(Iterable<String> vivos) {
+    if (_memoDasLinhas.isEmpty && _memoDasPilulas.isEmpty) return;
+    final conjunto = vivos.toSet();
+    _memoDasLinhas.removeWhere((id, _) => !conjunto.contains(id));
+    _memoDasPilulas.removeWhere((id, _) => !conjunto.contains(id));
+  }
+
+  /// A LINHA DE [trilha], REAPROVEITADA quando nada do que a desenha mudou.
+  ///
+  /// Arrastar um clipe muta o projeto a cada passo do dedo, e a linha do
+  /// tempo inteira reconstruia: todas as trilhas visiveis, todas as
+  /// barras, todos os losangos — embora UMA camada tivesse mudado. As
+  /// outras mantem a MESMA instancia (a lista nova preserva a identidade
+  /// de quem nao mexeu), entao devolver o MESMO widget faz o Flutter parar
+  /// ali: widget identico, subarvore intacta.
+  Widget _linhaMemorizada(
+    List<Layer> trilha, {
+    required double pps,
+    required double totalWidth,
+    required Set<String> selecionadas,
+  }) {
+    final id = trilha.first.id;
+    // SO A SELECAO DESTA LINHA. O conjunto inteiro muda a cada toque em
+    // qualquer camada; esta linha so desenha o que e dela.
+    final minhas = <String>{
+      for (final l in trilha)
+        if (selecionadas.contains(l.id)) l.id,
+    };
+    final compact = widget.singleLayerId != null;
+    final ativos = widget.activeTimesUs;
+    final antiga = _memoDasLinhas[id];
+    if (antiga != null &&
+        antiga.pps == pps &&
+        antiga.totalWidth == totalWidth &&
+        antiga.compact == compact &&
+        identical(antiga.playback, widget.playback) &&
+        setEquals(antiga.ativos, ativos) &&
+        setEquals(antiga.selecionadas, minhas) &&
+        _mesmasCamadas(antiga.camadas, trilha)) {
+      return antiga.widget;
+    }
+    final nova = _AmLayerRow(
+      key: ValueKey(id),
+      trilha: trilha,
+      pps: pps,
+      totalWidth: totalWidth,
+      selectedIds: minhas,
+      compact: compact,
+      playback: widget.playback,
+      janela: _janela,
+      onTapLayer: _aoTocarCamada,
+      activeTimesUs: ativos,
+      onForeignKeyframe: _aoTocarLosangoDeFora,
+      onKeyframeTap: _aoTocarLosango,
+      onEditStart: _comecarEdicaoDaBarra,
+      onEditEnd: _terminarEdicaoDaBarra,
+    );
+    _memoDasLinhas[id] = _LinhaMemo(
+      camadas: trilha,
+      pps: pps,
+      totalWidth: totalWidth,
+      compact: compact,
+      playback: widget.playback,
+      selecionadas: minhas,
+      ativos: ativos,
+      widget: nova,
+    );
+    return nova;
+  }
+
+  /// O mesmo para a coluna da esquerda: a pilula so depende da trilha.
+  Widget _pilulaMemorizada(List<Layer> trilha, {required bool isMatteSource}) {
+    final id = trilha.first.id;
+    final antiga = _memoDasPilulas[id];
+    if (antiga != null &&
+        antiga.isMatteSource == isMatteSource &&
+        identical(antiga.playback, widget.playback) &&
+        _mesmasCamadas(antiga.camadas, trilha)) {
+      return antiga.widget;
+    }
+    // CHAVE PROPRIA, e nao a da linha: as duas listas vivem na mesma
+    // arvore, e uma chave repetida faz `find.byKey(id)` achar dois
+    // widgets (a linha e a pilula).
+    final nova = _ControlesDaTrilha(
+      key: ValueKey('pilula-$id'),
+      trilha: trilha,
+      playback: widget.playback,
+      isMatteSource: isMatteSource,
+    );
+    _memoDasPilulas[id] = _PilulaMemo(
+      camadas: trilha,
+      playback: widget.playback,
+      isMatteSource: isMatteSource,
+      widget: nova,
+    );
+    return nova;
   }
 
   @override
@@ -392,6 +669,10 @@ class _AmTimelineState extends ConsumerState<AmTimeline> {
     }
     final totalWidth = (maxEndUs / 1e6 * _pps) + 200.0;
     final trilhas = empacotarTrilhas(layers);
+    final indiceDaLinha = <String, int>{
+      for (var i = 0; i < trilhas.length; i++) trilhas[i].first.id: i,
+    };
+    _podarMemo(indiceDaLinha.keys);
     final comMidia =
         widget.singleLayerId == null &&
         layers.any((l) => l is VideoLayer || l is AudioLayer);
@@ -400,9 +681,24 @@ class _AmTimelineState extends ConsumerState<AmTimeline> {
     final selecionadas = <String>{?selectedId, ...multi};
     final controller = ref.read(editorControllerProvider.notifier);
     final caminho = controller.caminhoDoGrupo;
-    final sessao = ref.watch(editorSessionProvider);
+    // SO O I E O O. A sessao guarda painel aberto, ferramenta, secao de
+    // texto — trocar qualquer um deles reconstruia a linha do tempo
+    // inteira, embora ela so leia as duas marcas. O record compara por
+    // valor, entao o `select` corta de verdade.
+    final pontas = ref.watch(
+      editorSessionProvider.select((s) => (s.inPoint, s.outPoint)),
+    );
     final selected = selectedId == null ? null : project.layerById(selectedId);
-    final keyCount = selected?.keyframeTimes.length ?? 0;
+    final keyCount = selected == null
+        ? 0
+        : _temposDosKeyframes(selected).length;
+    // O CACHE DA ONDA E DA SESSAO, NAO DO APP. Trocar de projeto deixava
+    // gravacoes de clipes que nao existem mais ocupando o teto de 32 —
+    // e as do projeto novo giravam por cima delas.
+    if (_projetoDoCache != project.id) {
+      _projetoDoCache = project.id;
+      ClipWaveformPainter.limparCache();
+    }
     final linhaDaSelecao = trilhas.indexWhere(
       (t) => t.any((l) => l.id == selectedId),
     );
@@ -462,9 +758,15 @@ class _AmTimelineState extends ConsumerState<AmTimeline> {
           child: LayoutBuilder(
             builder: (context, constraints) {
               final pad = constraints.maxWidth / 2;
+              // A JANELA DEPENDE DA LARGURA DA TELA e do zoom, e os dois
+              // se sabem aqui. Recalcular na montagem cobre a pinca (o
+              // `pps` mudou sem ninguem rolar) e a primeira abertura.
+              _larguraDaTela = constraints.maxWidth;
+              _atualizarJanela();
               return GestureDetector(
                 onScaleStart: (d) {
                   if (d.pointerCount >= 2) {
+                    _pincando = true;
                     HapticFeedback.selectionClick();
                   }
                   _ppsAtGestureStart = _pps;
@@ -502,214 +804,241 @@ class _AmTimelineState extends ConsumerState<AmTimeline> {
                     });
                   });
                 },
+                // O ULTIMO `jumpTo` DA PINCA chega depois do quadro em
+                // que o dedo saiu, e e ele que emite o aviso de fim de
+                // rolagem. Desligar a bandeira so no quadro seguinte
+                // impede que esse ultimo aviso caia no ima das marcas.
+                onScaleEnd: (_) {
+                  if (!_pincando) return;
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    _pincando = false;
+                  });
+                },
                 child: Stack(
                   children: [
                     // Conteudo rolavel: regua + linhas de camada.
-                    NotificationListener<ScrollNotification>(
-                      onNotification: _onScroll,
-                      child: SingleChildScrollView(
-                        controller: _scroll,
-                        scrollDirection: Axis.horizontal,
-                        // Rubber-band nas pontas em vez de parede seca
-                        // (AUREA §3.1-4: "parecer iOS").
-                        physics: const BouncingScrollPhysics(),
-                        child: Padding(
-                          padding: EdgeInsets.symmetric(horizontal: pad),
-                          child: SizedBox(
-                            width: totalWidth,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                SizedBox(
-                                  height: 20,
-                                  width: totalWidth,
-                                  // As marcas vivem NA REGUA: e onde a pessoa
-                                  // olha para achar o instante.
-                                  child: Stack(
-                                    clipBehavior: Clip.none,
-                                    children: [
-                                      Positioned.fill(
-                                        child: GestureDetector(
-                                          behavior: HitTestBehavior.opaque,
-                                          // TOQUE DUPLO cria a marca onde o
-                                          // dedo esta — nao no cabecote. Quem
-                                          // ouve a musica aponta o lugar; ter
-                                          // de levar o cabecote ate la antes
-                                          // e um passo a mais no meio do
-                                          // ritmo.
-                                          onDoubleTapDown: (d) =>
-                                              _xDoDuploToque =
-                                                  d.localPosition.dx,
-                                          // SEGURAR NA REGUA abre o menu de
-                                          // marcas e batidas: e na regua que
-                                          // elas moram, entao e nela que se
-                                          // pergunta por elas.
-                                          onLongPress: () {
-                                            HapticFeedback.mediumImpact();
-                                            menuDasMarcas(
-                                              context,
-                                              ref,
-                                              widget.playback,
-                                            );
-                                          },
-                                          onDoubleTap: () {
-                                            final t = Duration(
-                                              microseconds:
-                                                  (_xDoDuploToque / _pps * 1e6)
-                                                      .round(),
-                                            );
-                                            ref
+                    //
+                    // FRONTEIRA DE REPINTURA. Rolar move o conteudo daqui
+                    // de dentro; sem a fronteira, cada quadro de rolagem
+                    // tambem regravava o cabecote, o selo do tempo, o
+                    // gradiente e as pilulas da coluna esquerda, que nao
+                    // mudaram em nada.
+                    RepaintBoundary(
+                      child: NotificationListener<ScrollNotification>(
+                        onNotification: _onScroll,
+                        child: SingleChildScrollView(
+                          controller: _scroll,
+                          scrollDirection: Axis.horizontal,
+                          // Rubber-band nas pontas em vez de parede seca
+                          // (AUREA §3.1-4: "parecer iOS").
+                          physics: BouncingScrollPhysics(),
+                          child: Padding(
+                            padding: EdgeInsets.symmetric(horizontal: pad),
+                            child: SizedBox(
+                              width: totalWidth,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  SizedBox(
+                                    height: 20,
+                                    width: totalWidth,
+                                    // As marcas vivem NA REGUA: e onde a pessoa
+                                    // olha para achar o instante.
+                                    child: Stack(
+                                      clipBehavior: Clip.none,
+                                      children: [
+                                        Positioned.fill(
+                                          child: GestureDetector(
+                                            behavior: HitTestBehavior.opaque,
+                                            // TOQUE DUPLO cria a marca onde o
+                                            // dedo esta — nao no cabecote. Quem
+                                            // ouve a musica aponta o lugar; ter
+                                            // de levar o cabecote ate la antes
+                                            // e um passo a mais no meio do
+                                            // ritmo.
+                                            onDoubleTapDown: (d) =>
+                                                _xDoDuploToque =
+                                                    d.localPosition.dx,
+                                            // SEGURAR NA REGUA abre o menu de
+                                            // marcas e batidas: e na regua que
+                                            // elas moram, entao e nela que se
+                                            // pergunta por elas.
+                                            onLongPress: () {
+                                              HapticFeedback.mediumImpact();
+                                              menuDasMarcas(
+                                                context,
+                                                ref,
+                                                widget.playback,
+                                              );
+                                            },
+                                            onDoubleTap: () {
+                                              final t = Duration(
+                                                microseconds:
+                                                    (_xDoDuploToque /
+                                                            _pps *
+                                                            1e6)
+                                                        .round(),
+                                              );
+                                              ref
+                                                  .read(
+                                                    editorControllerProvider
+                                                        .notifier,
+                                                  )
+                                                  .toggleMarker(t);
+                                              HapticFeedback.selectionClick();
+                                            },
+                                            child: CustomPaint(
+                                              painter: _AmRulerPainter(
+                                                pps: _pps,
+                                                janela: _janela,
+                                              ),
+                                              // BATIDAS: risquinhos finos, e nao
+                                              // bandeiras. Sao centenas contra
+                                              // as poucas marcas postas a mao —
+                                              // desenhadas iguais, apagariam
+                                              // justamente as que alguem
+                                              // escolheu.
+                                              foregroundPainter: _BeatsPainter(
+                                                beats: project.beats,
+                                                pps: _pps,
+                                                janela: _janela,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                        for (final (rotulo, tempo) in [
+                                          ('I', pontas.$1),
+                                          ('O', pontas.$2),
+                                        ])
+                                          if (tempo != null)
+                                            Positioned(
+                                              key: ValueKey('marca-$rotulo'),
+                                              left: _timeToPx(tempo) - 1,
+                                              top: 0,
+                                              bottom: 0,
+                                              child: IgnorePointer(
+                                                child: Row(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
+                                                  children: [
+                                                    Container(
+                                                      width: 2,
+                                                      color: AmColors.action,
+                                                    ),
+                                                    AppText(
+                                                      rotulo,
+                                                      style: TextStyle(
+                                                        fontSize: 9,
+                                                        fontWeight:
+                                                            FontWeight.w800,
+                                                        color: AmColors.action,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                        // INTRODUCAO, FINAL E MINIATURA (menu ⋮):
+                                        // marcas do projeto, na cor do tempo.
+                                        for (final (chave, rotulo, tempo) in [
+                                          ('intro', 'intro', project.introFim),
+                                          (
+                                            'final',
+                                            'final',
+                                            project.finalInicio,
+                                          ),
+                                          ('miniatura', '▣', project.thumbTime),
+                                        ])
+                                          if (tempo != null)
+                                            Positioned(
+                                              key: ValueKey('regua-$chave'),
+                                              left: _timeToPx(tempo) - 1,
+                                              top: 0,
+                                              bottom: 0,
+                                              child: IgnorePointer(
+                                                child: Row(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
+                                                  children: [
+                                                    Container(
+                                                      width: 2,
+                                                      color: AmColors.accent,
+                                                    ),
+                                                    AppText(
+                                                      rotulo,
+                                                      style: TextStyle(
+                                                        fontSize: 9,
+                                                        fontWeight:
+                                                            FontWeight.w800,
+                                                        color: AmColors.accent,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                        for (final m in project.markers)
+                                          _MarcaNaRegua(
+                                            marca: m,
+                                            pps: _pps,
+                                            onMover: (dx) => ref
                                                 .read(
                                                   editorControllerProvider
                                                       .notifier,
                                                 )
-                                                .toggleMarker(t);
-                                            HapticFeedback.selectionClick();
-                                          },
-                                          child: CustomPaint(
-                                            painter: _AmRulerPainter(pps: _pps),
-                                            // BATIDAS: risquinhos finos, e nao
-                                            // bandeiras. Sao centenas contra
-                                            // as poucas marcas postas a mao —
-                                            // desenhadas iguais, apagariam
-                                            // justamente as que alguem
-                                            // escolheu.
-                                            foregroundPainter: _BeatsPainter(
-                                              beats: project.beats,
-                                              pps: _pps,
-                                            ),
+                                                .moveMarker(
+                                                  m.time,
+                                                  m.time +
+                                                      Duration(
+                                                        microseconds:
+                                                            (dx / _pps * 1e6)
+                                                                .round(),
+                                                      ),
+                                                ),
+                                            onMenu: () =>
+                                                _menuDaMarca(context, ref, m),
                                           ),
-                                        ),
-                                      ),
-                                      for (final (rotulo, tempo) in [
-                                        ('I', sessao.inPoint),
-                                        ('O', sessao.outPoint),
-                                      ])
-                                        if (tempo != null)
-                                          Positioned(
-                                            key: ValueKey('marca-$rotulo'),
-                                            left: _timeToPx(tempo) - 1,
-                                            top: 0,
-                                            bottom: 0,
-                                            child: IgnorePointer(
-                                              child: Row(
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.start,
-                                                children: [
-                                                  Container(
-                                                    width: 2,
-                                                    color: AmColors.action,
-                                                  ),
-                                                  AppText(
-                                                    rotulo,
-                                                    style: const TextStyle(
-                                                      fontSize: 9,
-                                                      fontWeight:
-                                                          FontWeight.w800,
-                                                      color: AmColors.action,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          ),
-                                      // INTRODUCAO, FINAL E MINIATURA (menu ⋮):
-                                      // marcas do projeto, na cor do tempo.
-                                      for (final (chave, rotulo, tempo) in [
-                                        ('intro', 'intro', project.introFim),
-                                        ('final', 'final', project.finalInicio),
-                                        ('miniatura', '▣', project.thumbTime),
-                                      ])
-                                        if (tempo != null)
-                                          Positioned(
-                                            key: ValueKey('regua-$chave'),
-                                            left: _timeToPx(tempo) - 1,
-                                            top: 0,
-                                            bottom: 0,
-                                            child: IgnorePointer(
-                                              child: Row(
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.start,
-                                                children: [
-                                                  Container(
-                                                    width: 2,
-                                                    color: AmColors.accent,
-                                                  ),
-                                                  AppText(
-                                                    rotulo,
-                                                    style: const TextStyle(
-                                                      fontSize: 9,
-                                                      fontWeight:
-                                                          FontWeight.w800,
-                                                      color: AmColors.accent,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          ),
-                                      for (final m in project.markers)
-                                        _MarcaNaRegua(
-                                          marca: m,
-                                          pps: _pps,
-                                          onMover: (dx) => ref
-                                              .read(
-                                                editorControllerProvider
-                                                    .notifier,
-                                              )
-                                              .moveMarker(
-                                                m.time,
-                                                m.time +
-                                                    Duration(
-                                                      microseconds:
-                                                          (dx / _pps * 1e6)
-                                                              .round(),
-                                                    ),
-                                              ),
-                                          onMenu: () =>
-                                              _menuDaMarca(context, ref, m),
-                                        ),
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(height: 18),
-                                Expanded(
-                                  // O FUNDO E UM ALVO. As barras sao opacas
-                                  // e ficam com o toque delas; o que sobra
-                                  // — o vazio abaixo das linhas — e o toque
-                                  // de voltar.
-                                  child: GestureDetector(
-                                    key: const ValueKey('timeline-fundo'),
-                                    behavior: HitTestBehavior.translucent,
-                                    onTap: widget.onTapBackground,
-                                    child: ListView.builder(
-                                      controller: _rowsScroll,
-                                      padding: EdgeInsets.zero,
-                                      itemExtent: alturaLinha,
-                                      itemCount: trilhas.length,
-                                      itemBuilder: (context, index) {
-                                        final trilha = trilhas[index];
-                                        return _AmLayerRow(
-                                          key: ValueKey(trilha.first.id),
-                                          trilha: trilha,
-                                          pps: _pps,
-                                          totalWidth: totalWidth,
-                                          selectedIds: selecionadas,
-                                          compact: widget.singleLayerId != null,
-                                          playback: widget.playback,
-                                          onTapLayer: widget.onTapLayer,
-                                          activeTimesUs: widget.activeTimesUs,
-                                          onForeignKeyframe:
-                                              widget.onForeignKeyframe,
-                                          onKeyframeTap: widget.onKeyframeTap,
-                                          onEditStart: () => _editingBar = true,
-                                          onEditEnd: _terminarEdicaoDaBarra,
-                                        );
-                                      },
+                                      ],
                                     ),
                                   ),
-                                ),
-                              ],
+                                  const SizedBox(height: 18),
+                                  Expanded(
+                                    // O FUNDO E UM ALVO. As barras sao opacas
+                                    // e ficam com o toque delas; o que sobra
+                                    // — o vazio abaixo das linhas — e o toque
+                                    // de voltar.
+                                    child: GestureDetector(
+                                      key: const ValueKey('timeline-fundo'),
+                                      behavior: HitTestBehavior.translucent,
+                                      onTap: widget.onTapBackground,
+                                      child: ListView.builder(
+                                        controller: _rowsScroll,
+                                        padding: EdgeInsets.zero,
+                                        itemExtent: alturaLinha,
+                                        itemCount: trilhas.length,
+                                        // REORDENAR SEM PERDER O GESTO. Sem
+                                        // isto o delegado nao acha a chave no
+                                        // indice novo: a linha arrastada era
+                                        // inflada do zero, o `State` da barra
+                                        // morria e com ele o reconhecedor do
+                                        // toque longo — a camada subia UM
+                                        // degrau e o arrasto acabava.
+                                        findChildIndexCallback: (chave) =>
+                                            chave is ValueKey<String>
+                                            ? indiceDaLinha[chave.value]
+                                            : null,
+                                        itemBuilder: (context, index) =>
+                                            _linhaMemorizada(
+                                              trilhas[index],
+                                              pps: _pps,
+                                              totalWidth: totalWidth,
+                                              selecionadas: selecionadas,
+                                            ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         ),
@@ -735,30 +1064,35 @@ class _AmTimelineState extends ConsumerState<AmTimeline> {
                             HapticFeedback.mediumImpact();
                             menuDasMarcas(context, ref, widget.playback);
                           },
-                          child: ValueListenableBuilder<Duration>(
-                            valueListenable: widget.playback.time,
-                            builder: (context, t, _) => Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                AppText(
-                                  formatTimecode(t, project.fps),
-                                  style: const TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w700,
-                                    color: Colors.white,
-                                    letterSpacing: 0.5,
-                                    fontFeatures: [
-                                      FontFeature.tabularFigures(),
-                                    ],
+                          // O UNICO WIDGET QUE O TIQUE RECONSTROI. Com a
+                          // fronteira, a regravacao por quadro para aqui
+                          // dentro em vez de subir ate a pilha inteira.
+                          child: RepaintBoundary(
+                            child: ValueListenableBuilder<Duration>(
+                              valueListenable: widget.playback.time,
+                              builder: (context, t, _) => Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  AppText(
+                                    formatTimecode(t, project.fps),
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w700,
+                                      color: Colors.white,
+                                      letterSpacing: 0.5,
+                                      fontFeatures: [
+                                        FontFeature.tabularFigures(),
+                                      ],
+                                    ),
                                   ),
-                                ),
-                                const SizedBox(height: 2),
-                                Container(
-                                  width: 58,
-                                  height: 1.5,
-                                  color: Colors.white,
-                                ),
-                              ],
+                                  const SizedBox(height: 2),
+                                  Container(
+                                    width: 58,
+                                    height: 1.5,
+                                    color: Colors.white,
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         ),
@@ -816,34 +1150,39 @@ class _AmTimelineState extends ConsumerState<AmTimeline> {
                       top: 38,
                       bottom: 0,
                       width: 66,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.centerLeft,
-                            end: Alignment.centerRight,
-                            colors: [
-                              AmColors.bg,
-                              AmColors.bg.withValues(alpha: 0.95),
-                              AmColors.bg.withValues(alpha: 0.0),
-                            ],
-                            stops: const [0.0, 0.78, 1.0],
+                      // O gradiente e as pilulas nao mudam quando a linha
+                      // rola atras do cabecote: fronteira propria.
+                      child: RepaintBoundary(
+                        child: Container(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.centerLeft,
+                              end: Alignment.centerRight,
+                              colors: [
+                                AmColors.bg,
+                                AmColors.bg.withValues(alpha: 0.95),
+                                AmColors.bg.withValues(alpha: 0.0),
+                              ],
+                              stops: const [0.0, 0.78, 1.0],
+                            ),
                           ),
-                        ),
-                        child: ListView.builder(
-                          controller: _pillsScroll,
-                          padding: EdgeInsets.zero,
-                          itemExtent: alturaLinha,
-                          itemCount: trilhas.length,
-                          itemBuilder: (context, index) {
-                            final trilha = trilhas[index];
-                            return _ControlesDaTrilha(
-                              trilha: trilha,
-                              playback: widget.playback,
-                              isMatteSource: trilha.any(
+                          child: ListView.builder(
+                            controller: _pillsScroll,
+                            padding: EdgeInsets.zero,
+                            itemExtent: alturaLinha,
+                            itemCount: trilhas.length,
+                            findChildIndexCallback: (chave) =>
+                                chave is ValueKey<String> &&
+                                    chave.value.startsWith('pilula-')
+                                ? indiceDaLinha[chave.value.substring(7)]
+                                : null,
+                            itemBuilder: (context, index) => _pilulaMemorizada(
+                              trilhas[index],
+                              isMatteSource: trilhas[index].any(
                                 (l) => matteSourceIds.contains(l.id),
                               ),
-                            );
-                          },
+                            ),
+                          ),
                         ),
                       ),
                     ),
@@ -864,6 +1203,7 @@ class _AmTimelineState extends ConsumerState<AmTimeline> {
 /// valem para todos os pedacos — sao o mesmo clipe para quem edita.
 class _ControlesDaTrilha extends ConsumerWidget {
   const _ControlesDaTrilha({
+    super.key,
     required this.trilha,
     required this.playback,
     required this.isMatteSource,
@@ -875,13 +1215,32 @@ class _ControlesDaTrilha extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final controller = ref.read(editorControllerProvider.notifier);
-    final project = ref.watch(editorControllerProvider);
     final layer = trilha.first;
-    final hidden = trilha.every((l) => project.metaOf(l.id).hidden);
-    final locked = trilha.every((l) => project.metaOf(l.id).locked);
-    // A ETIQUETA DE COR da camada pinta o quadradinho; sem etiqueta, o
-    // amarelo de sempre.
-    final etiqueta = project.metaOf(layer.id).label?.color;
+    // SO O QUE A PILULA DESENHA. Observar o projeto inteiro reconstruia
+    // TODAS as pilulas a cada passo de um arrasto — e o que elas mostram
+    // (olho, cadeado, etiqueta) nao muda durante um arrasto. O record
+    // compara por valor, entao o `select` corta de verdade.
+    final aparencia = ref.watch(
+      editorControllerProvider.select((p) {
+        var hidden = true;
+        var locked = true;
+        for (final l in trilha) {
+          final m = p.metaOf(l.id);
+          if (!m.hidden) hidden = false;
+          if (!m.locked) locked = false;
+        }
+        return (
+          hidden: hidden,
+          locked: locked,
+          // A ETIQUETA DE COR da camada pinta o quadradinho; sem
+          // etiqueta, o amarelo de sempre.
+          etiqueta: p.metaOf(layer.id).label?.color,
+        );
+      }),
+    );
+    final hidden = aparencia.hidden;
+    final locked = aparencia.locked;
+    final etiqueta = aparencia.etiqueta;
     final naMulti = ref.watch(
       multiSelectProvider.select((m) => trilha.any((l) => m.contains(l.id))),
     );
@@ -894,7 +1253,7 @@ class _ControlesDaTrilha extends ConsumerWidget {
         width: 58,
         margin: const EdgeInsets.only(left: 4),
         decoration: BoxDecoration(
-          color: const Color(0xFF1E222D),
+          color: AmColors.chip,
           borderRadius: BorderRadius.circular(14),
         ),
         child: Row(
@@ -1047,13 +1406,20 @@ class _Breadcrumb extends StatelessWidget {
 /// tempos; desenhados como bandeiras, viram uma parede. Risco fino de
 /// meia altura le-se como grade e nao disputa com a marca posta a mao.
 class _BeatsPainter extends CustomPainter {
-  const _BeatsPainter({required this.beats, required this.pps});
+  _BeatsPainter({required this.beats, required this.pps, this.janela})
+    : super(repaint: janela);
 
   final List<Duration> beats;
   final double pps;
 
+  /// O pedaco visivel, em pixels do conteudo (a regua comeca no zero do
+  /// conteudo, entao a janela vale direto). Nula = pinta tudo.
+  final ValueListenable<JanelaDaTimeline>? janela;
+
+  /// A COR VAI NO `paint()`, NAO AQUI. Um `static final` nasce na primeira
+  /// pintura e sobrevive ao remonte da arvore: com [AmColors] lendo o tema em
+  /// vigor, a grade ficaria na cor do PRIMEIRO tema aberto ate fechar o app.
   static final Paint _tinta = Paint()
-    ..color = AmColors.teal.withValues(alpha: 0.55)
     ..strokeWidth = 1
     ..style = PaintingStyle.stroke;
 
@@ -1061,7 +1427,6 @@ class _BeatsPainter extends CustomPainter {
   /// e um serrilhado uniforme e o olho nao acha o compasso — que e
   /// exatamente o que um editor de AMV esta procurando na regua.
   static final Paint _tintaForte = Paint()
-    ..color = AmColors.teal.withValues(alpha: 0.9)
     ..strokeWidth = 1.6
     ..style = PaintingStyle.stroke;
 
@@ -1072,12 +1437,31 @@ class _BeatsPainter extends CustomPainter {
 
   void _pintar(Canvas canvas, Size size) {
     if (beats.isEmpty) return;
+    final j = janela?.value ?? JanelaDaTimeline.tudo;
+    final x0 = math.max(-2.0, j.iniPx);
+    final x1 = math.min(size.width + 2, j.fimPx);
+    if (x1 < x0) return;
+    // BUSCA BINARIA DA PRIMEIRA BATIDA VISIVEL. A grade de um AMV tem
+    // milhares de tempos, e varrer todos por quadro so para descartar os
+    // de fora e o mesmo trabalho de desenhar todos.
+    var lo = 0;
+    var hi = beats.length;
+    while (lo < hi) {
+      final mid = (lo + hi) ~/ 2;
+      if (beats[mid].inMicroseconds / 1e6 * pps < x0) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
     // Uma grade densa tem milhares de riscos; num Path so, uma chamada.
     final caminho = Path();
     final fortes = Path();
-    for (var i = 0; i < beats.length; i++) {
+    for (var i = lo; i < beats.length; i++) {
       final x = beats[i].inMicroseconds / 1e6 * pps;
-      if (x < -2 || x > size.width + 2) continue;
+      if (x > x1) break;
+      // O INDICE CONTINUA ABSOLUTO: o tempo forte e 1 de cada 4 desde o
+      // comeco da musica, e nao desde a borda da tela.
       if (i % 4 == 0) {
         fortes
           ..moveTo(x, size.height * 0.3)
@@ -1088,13 +1472,18 @@ class _BeatsPainter extends CustomPainter {
           ..lineTo(x, size.height);
       }
     }
-    canvas.drawPath(caminho, _tinta);
-    canvas.drawPath(fortes, _tintaForte);
+    final cor = AmColors.teal;
+    canvas.drawPath(caminho, _tinta..color = cor.withValues(alpha: 0.55));
+    canvas.drawPath(fortes, _tintaForte..color = cor.withValues(alpha: 0.9));
   }
 
   @override
   bool shouldRepaint(_BeatsPainter old) =>
-      old.pps != pps || old.beats.length != beats.length;
+      old.pps != pps ||
+      old.janela != janela ||
+      // POR IDENTIDADE, e nao por tamanho. Mover uma batida troca a lista
+      // sem mudar a contagem, e a grade ficava desenhada no lugar antigo.
+      !identical(old.beats, beats);
 }
 
 /// Uma marca na regua: bandeirinha com rotulo, que se arrasta.
@@ -1163,6 +1552,38 @@ class _UmaMarcaPainter extends CustomPainter {
   final Color color;
   final String label;
 
+  /// OS ROTULOS JA MEDIDOS.
+  ///
+  /// Medir texto e a conta mais cara que cabe num `paint`, e as marcas
+  /// ficam dentro do conteudo rolavel: sem cache, todo rotulo do projeto
+  /// era medido de novo a cada quadro de rolagem e de play. O rotulo so
+  /// muda quando alguem o renomeia, e ai a chave muda com ele.
+  static final Map<(String, int), TextPainter> _rotulos = {};
+
+  /// Teto: um projeto com centenas de marcas nomeadas nao pode virar
+  /// centenas de paragrafos vivos. O mais antigo sai (o `Map` do Dart
+  /// guarda a ordem de insercao).
+  static const int _tetoDeRotulos = 64;
+
+  static TextPainter _rotulo(String label, Color color) {
+    final chave = (label, color.toARGB32());
+    final pronto = _rotulos[chave];
+    if (pronto != null) return pronto;
+    final tp = TextPainter(
+      text: TextSpan(
+        text: label,
+        style: TextStyle(fontSize: 9, color: color),
+      ),
+      textDirection: TextDirection.ltr,
+      maxLines: 1,
+    )..layout();
+    if (_rotulos.length >= _tetoDeRotulos) {
+      _rotulos.remove(_rotulos.keys.first)?.dispose();
+    }
+    _rotulos[chave] = tp;
+    return tp;
+  }
+
   @override
   void paint(Canvas canvas, Size size) {
     final cx = size.width / 2;
@@ -1174,15 +1595,7 @@ class _UmaMarcaPainter extends CustomPainter {
       ..close();
     canvas.drawPath(path, p);
     if (label.isEmpty) return;
-    final tp = TextPainter(
-      text: TextSpan(
-        text: label,
-        style: TextStyle(fontSize: 9, color: color),
-      ),
-      textDirection: TextDirection.ltr,
-      maxLines: 1,
-    )..layout();
-    tp.paint(canvas, Offset(cx + 7, 0));
+    _rotulo(label, color).paint(canvas, Offset(cx + 7, 0));
   }
 
   @override
@@ -1261,12 +1674,12 @@ Future<void> _menuDaMarca(
               ),
             ),
             ListTile(
-              leading: const Icon(
+              leading: Icon(
                 CupertinoIcons.delete,
                 color: AmColors.pink,
                 size: 20,
               ),
-              title: const AppText(
+              title: AppText(
                 'Apagar a marca',
                 style: TextStyle(color: AmColors.pink, fontSize: 15),
               ),
@@ -1286,9 +1699,12 @@ Future<void> _menuDaMarca(
 }
 
 class _AmRulerPainter extends CustomPainter {
-  const _AmRulerPainter({required this.pps});
+  _AmRulerPainter({required this.pps, this.janela}) : super(repaint: janela);
 
   final double pps;
+
+  /// O pedaco visivel, em pixels do conteudo. Nula = risca tudo.
+  final ValueListenable<JanelaDaTimeline>? janela;
 
   // Objetos de pintura reaproveitados: `paint` roda a cada quadro
   // enquanto a linha rola.
@@ -1315,23 +1731,36 @@ class _AmRulerPainter extends CustomPainter {
     if (step < 2) step = pps; // reduzido demais: so as marcas de segundo
     if (step <= 0) return;
 
+    // SO A JANELA. A regua cobre o projeto inteiro — uma hora a 400 px/s
+    // sao 1,44 milhao de pixels, ou 144 mil riscos gravados a cada quadro
+    // de rolagem para mostrar os quarenta que cabem na tela.
+    final j = janela?.value ?? JanelaDaTimeline.tudo;
+    final x0 = math.max(0.0, j.iniPx);
+    final x1 = math.min(size.width, j.fimPx);
+    if (x1 < x0) return;
+
     final minor = Path();
     final major = Path();
-    var i = 0;
-    for (var x = 0.0; x < size.width; x += step) {
+    // O INDICE MANDA NA POSICAO (`i * step`), e nao a soma acumulada: com
+    // `x += step` o erro do ponto flutuante empurrava o risco de segundo
+    // para longe do numero, quanto mais longe do zero pior.
+    final i0 = (x0 / step).floor();
+    for (var i = i0; ; i++) {
+      final x = i * step;
+      if (x > x1) break;
       final ehMajor = i % 10 == 0;
       final alvo = ehMajor ? major : minor;
       alvo
         ..moveTo(x, ehMajor ? 2 : 9)
         ..lineTo(x, size.height - 2);
-      i++;
     }
     canvas.drawPath(minor, _minor);
     canvas.drawPath(major, _major);
   }
 
   @override
-  bool shouldRepaint(_AmRulerPainter old) => old.pps != pps;
+  bool shouldRepaint(_AmRulerPainter old) =>
+      old.pps != pps || old.janela != janela;
 }
 
 /// UMA LINHA DA TIMELINE: uma trilha com um ou mais pedacos (Fase 2).
@@ -1354,6 +1783,7 @@ class _AmLayerRow extends ConsumerWidget {
     required this.playback,
     required this.onEditStart,
     required this.onEditEnd,
+    required this.janela,
     this.onTapLayer,
     this.activeTimesUs,
     this.onForeignKeyframe,
@@ -1372,6 +1802,10 @@ class _AmLayerRow extends ConsumerWidget {
   final void Function(Layer layer)? onTapLayer;
   final Set<int>? activeTimesUs;
   final void Function(Duration kfTime)? onForeignKeyframe;
+
+  /// O pedaco visivel da linha do tempo. Instancia ESTAVEL, entao a
+  /// memorizacao da linha continua valendo entre uma janela e outra.
+  final ValueListenable<JanelaDaTimeline> janela;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) => SizedBox(
@@ -1393,22 +1827,53 @@ class _AmLayerRow extends ConsumerWidget {
             },
           ),
         ),
-        for (final l in trilha)
-          _AmBar(
-            key: ValueKey('bar-${l.id}'),
-            layer: l,
-            pps: pps,
-            totalWidth: totalWidth,
-            selected: compact || selectedIds.contains(l.id),
-            compact: compact,
-            playback: playback,
-            onEditStart: onEditStart,
-            onEditEnd: onEditEnd,
-            onTapLayer: onTapLayer,
-            activeTimesUs: activeTimesUs,
-            onForeignKeyframe: onForeignKeyframe,
-            onKeyframeTap: onKeyframeTap,
+        // SO AS BARRAS QUE APARECEM.
+        //
+        // Um video decupado vira dezenas de pedacos NA MESMA LINHA, cada
+        // um com alcas, previa, onda e losangos — e todos nasciam, a dez
+        // telas do cabecote ou nao. O eixo do tempo e um
+        // `SingleChildScrollView`, que nao virtualiza nada sozinho.
+        //
+        // A SELECIONADA FICA SEMPRE: e a unica que pode estar em arrasto,
+        // e o `State` dela guarda o gesto — some-la no meio do movimento
+        // mataria o reconhecedor e o dedo perderia o clipe.
+        // O `Positioned.fill` da a esta pilha o tamanho da linha: uma
+        // pilha so de filhos posicionados encolhe para zero sem ele, e as
+        // barras (que sao `Positioned.fill`) sumiriam.
+        Positioned.fill(
+          child: ValueListenableBuilder<JanelaDaTimeline>(
+            valueListenable: janela,
+            builder: (context, j, _) => Stack(
+              clipBehavior: Clip.none,
+              fit: StackFit.expand,
+              children: [
+                for (final l in trilha)
+                  if (compact ||
+                      selectedIds.contains(l.id) ||
+                      j.cruza(
+                        l.startTime.inMicroseconds / 1e6 * pps,
+                        l.endTime.inMicroseconds / 1e6 * pps,
+                      ))
+                    _AmBar(
+                      key: ValueKey('bar-${l.id}'),
+                      layer: l,
+                      pps: pps,
+                      totalWidth: totalWidth,
+                      selected: compact || selectedIds.contains(l.id),
+                      compact: compact,
+                      playback: playback,
+                      janela: janela,
+                      onEditStart: onEditStart,
+                      onEditEnd: onEditEnd,
+                      onTapLayer: onTapLayer,
+                      activeTimesUs: activeTimesUs,
+                      onForeignKeyframe: onForeignKeyframe,
+                      onKeyframeTap: onKeyframeTap,
+                    ),
+              ],
+            ),
           ),
+        ),
       ],
     ),
   );
@@ -1426,6 +1891,7 @@ class _AmBar extends ConsumerStatefulWidget {
     required this.playback,
     required this.onEditStart,
     required this.onEditEnd,
+    required this.janela,
     this.onTapLayer,
     this.activeTimesUs,
     this.onForeignKeyframe,
@@ -1441,6 +1907,9 @@ class _AmBar extends ConsumerStatefulWidget {
   /// Modo pagina de ferramenta (faixa unica com setas de navegacao).
   final bool compact;
   final PlaybackController playback;
+
+  /// O pedaco visivel da linha do tempo, em pixels do conteudo.
+  final ValueListenable<JanelaDaTimeline> janela;
   final VoidCallback onEditStart;
   final VoidCallback onEditEnd;
   final void Function(Layer layer)? onTapLayer;
@@ -1487,14 +1956,24 @@ class _AmBarState extends ConsumerState<_AmBar> {
   void _reordenarPorArrasto(double dy) {
     _acumuladoVertical += dy;
     final c = ref.read(editorControllerProvider.notifier);
-    while (_acumuladoVertical > _Alturas.linhaDe(context) / 2) {
+    final altura = _Alturas.linhaDe(context);
+    // NAO COALESCE: reordenar e INCREMENTAL (um degrau por chamada), e
+    // descartar um passo perderia um degrau. O que ele ganha e o gesto
+    // unico de desfazer — antes cada degrau era estrutural e empilhava
+    // um passo proprio, entao desfazer um arrasto de tres linhas pedia
+    // tres toques.
+    while (_acumuladoVertical > altura / 2) {
+      _abrirGesto();
+      Interacao.marcar();
       c.reorderLayer(widget.layer.id, 1);
-      _acumuladoVertical -= _Alturas.linhaDe(context);
+      _acumuladoVertical -= altura;
       HapticFeedback.selectionClick();
     }
-    while (_acumuladoVertical < -_Alturas.linhaDe(context) / 2) {
+    while (_acumuladoVertical < -altura / 2) {
+      _abrirGesto();
+      Interacao.marcar();
       c.reorderLayer(widget.layer.id, -1);
-      _acumuladoVertical += _Alturas.linhaDe(context);
+      _acumuladoVertical += altura;
       HapticFeedback.selectionClick();
     }
   }
@@ -1521,18 +2000,87 @@ class _AmBarState extends ConsumerState<_AmBar> {
   /// chegar pelo dispose, onde o `ref` ja nao responde.
   StateController<DadosDaInfobar?>? _infobar;
 
+  /// O controlador, guardado no comeco do arrasto. O fim tambem chega
+  /// pelo `dispose` (a fileira saiu da arvore no meio do gesto), e ali o
+  /// `ref` ja nao responde.
+  EditorController? _controladorDoArrasto;
+
+  /// O passo de desfazer deste arrasto ja foi aberto.
+  bool _gestoAberto = false;
+
+  /// UM ARRASTO, UM DESFAZER.
+  ///
+  /// Mover, aparar e reordenar dependiam da janela de 450 ms do
+  /// `_mutate`: um dedo parado meio segundo no meio do arrasto partia o
+  /// gesto em dois passos de desfazer, e reordenar empilhava um passo POR
+  /// DEGRAU. Abre-se PREGUICOSAMENTE, na primeira mutacao de verdade —
+  /// como ja fazia o losango —, para que segurar e soltar sem mover nao
+  /// deixe um passo vazio na pilha.
+  void _abrirGesto() {
+    if (_gestoAberto) return;
+    _controladorDoArrasto ??= ref.read(editorControllerProvider.notifier);
+    _controladorDoArrasto!.beginGesture();
+    _gestoAberto = true;
+  }
+
   void _comecarArrasto() {
     _arrastandoBarra = true;
     _infobar = ref.read(infobarProvider.notifier);
+    _controladorDoArrasto = ref.read(editorControllerProvider.notifier);
     onEditStart();
   }
 
   void _terminarArrasto() {
     if (!_arrastandoBarra) return;
     _arrastandoBarra = false;
+    // O QUE FICOU PENDENTE SAI ANTES DE FECHAR: soltar o dedo nao pode
+    // perder o ultimo passo, que e justamente onde a barra parou.
+    _aplicarPendente();
+    if (_gestoAberto) {
+      _controladorDoArrasto?.endGesture();
+      _gestoAberto = false;
+    }
+    _controladorDoArrasto = null;
     _infobar?.state = null;
     _infobar = null;
+    // O gesto acabou: o palco volta a qualidade cheia sem esperar a folga.
+    Interacao.soltar();
     onEditEnd();
+  }
+
+  // ------------------------------------------------- uma mutacao por quadro
+
+  /// A mutacao que o ultimo evento do dedo pediu e ainda nao foi aplicada.
+  ///
+  /// O aparelho entrega toque a 120 ou 240 Hz numa tela de 60: sem isto,
+  /// dois ou quatro eventos por quadro pagavam cada um o ima (`_snap`), a
+  /// mutacao do projeto, a gravacao em disco adiada e o `_syncVideos` —
+  /// para desenhar UM quadro. Mover e aparar calculam o alvo ABSOLUTO a
+  /// partir da origem do gesto, entao descartar os intermediarios nao
+  /// perde nada: o ultimo ja contem todos.
+  ///
+  /// Reordenar NAO passa por aqui: ele e incremental (um degrau por vez).
+  VoidCallback? _pendente;
+  bool _quadroPedido = false;
+
+  void _pedirQuadro(VoidCallback mutacao) {
+    // O DEDO ESTA MEXENDO: o palco pode baixar a qualidade enquanto dura.
+    Interacao.marcar();
+    _pendente = mutacao;
+    if (_quadroPedido) return;
+    _quadroPedido = true;
+    SchedulerBinding.instance.scheduleFrameCallback((_) {
+      _quadroPedido = false;
+      _aplicarPendente();
+    });
+  }
+
+  void _aplicarPendente() {
+    final f = _pendente;
+    if (f == null) return;
+    _pendente = null;
+    if (!mounted) return;
+    f();
   }
 
   /// Onde o item arrastado esta e quanto andou desde que o dedo pegou.
@@ -1551,6 +2099,9 @@ class _AmBarState extends ConsumerState<_AmBar> {
 
   @override
   void dispose() {
+    // A barra morreu: o que estava pendente nao vai mais para o projeto.
+    // Mutar durante a desmontagem mexe na arvore que esta sendo desfeita.
+    _pendente = null;
     // A fileira pode sair da arvore no meio do arrasto (trocar de
     // painel, desfazer): o fim tem de sair mesmo assim.
     _terminarArrasto();
@@ -1642,7 +2193,7 @@ class _AmBarState extends ConsumerState<_AmBar> {
     double quadroExato(Duration t) => t.inMicroseconds * fps / 1e6;
     Duration? antes;
     Duration? depois;
-    for (final t in camada.keyframeTimes) {
+    for (final t in _temposDosKeyframes(camada)) {
       if (t < origem) {
         antes = t;
       } else if (t > origem) {
@@ -1709,6 +2260,7 @@ class _AmBarState extends ConsumerState<_AmBar> {
       a.controller.beginGesture();
       a.gestoAberto = true;
     }
+    Interacao.marcar();
     if (a.controller.moverKeyframe(layer.id, a.atual, para) != null) return;
     a.atual = para;
     playback.seek(global);
@@ -1726,6 +2278,7 @@ class _AmBarState extends ConsumerState<_AmBar> {
     if (a == null) return false;
     _arrastoDoLosango = null;
     if (a.gestoAberto) a.controller.endGesture();
+    Interacao.soltar();
     onEditEnd();
     return true;
   }
@@ -1832,6 +2385,11 @@ class _AmBarState extends ConsumerState<_AmBar> {
 
   @override
   Widget build(BuildContext context) {
+    // A MEDIDA DA MEMORIZACAO POR LINHA. A linha do tempo pode se
+    // reconstruir uma vez por passo do dedo (ela observa o projeto) e
+    // ainda assim so UMA linha descer ate as barras. Quem mostra isso e
+    // esta contagem, e nao a de `build.timeline`.
+    Perfil3D.contar('build.barra');
     final controller = ref.read(editorControllerProvider.notifier);
     final left = layer.startTime.inMicroseconds / 1e6 * pps;
     final width = (layer.duration.inMicroseconds / 1e6 * pps).clamp(40.0, 1e6);
@@ -1842,6 +2400,10 @@ class _AmBarState extends ConsumerState<_AmBar> {
     final locked = meta.locked;
     // Bloqueada: nem move, nem apara, nem reordena pelo arrasto.
     final podeMover = selected && !locked;
+    // A janela do quadro: a linha inteira e reconstruida quando ela muda
+    // (o `ValueListenableBuilder` de `_AmLayerRow`), entao ler o valor
+    // aqui e sempre ler o de agora.
+    final janela = widget.janela.value;
 
     return Positioned.fill(
       child: Stack(
@@ -1938,11 +2500,14 @@ class _AmBarState extends ConsumerState<_AmBar> {
                           ? _EixoDoArrasto.tempo
                           : _EixoDoArrasto.pilha;
                       if (_eixoDoArrasto == _EixoDoArrasto.tempo) {
-                        final desired =
-                            _dragStart0 + _pxToDur(d.offsetFromOrigin.dx);
-                        final novo = _snapMove(desired);
-                        controller.moveLayer(layer.id, novo);
-                        _informarTempo(novo, _dragStart0);
+                        final dx = d.offsetFromOrigin.dx;
+                        _pedirQuadro(() {
+                          final desired = _dragStart0 + _pxToDur(dx);
+                          final novo = _snapMove(desired);
+                          _abrirGesto();
+                          controller.moveLayer(layer.id, novo);
+                          _informarTempo(novo, _dragStart0);
+                        });
                       } else {
                         _reordenarPorArrasto(dy - _ultimoDyLongo);
                       }
@@ -1972,6 +2537,8 @@ class _AmBarState extends ConsumerState<_AmBar> {
                 child: _ClipPreview(
                   layer: layer,
                   playback: playback,
+                  janela: widget.janela,
+                  esquerdaPx: left,
                   // CLIPE CURTO: um pedaco de 266 ms tem 20 px de barra. O
                   // conteudo some por ordem de importancia em vez de
                   // estourar a linha (o projeto importado esta cheio deles).
@@ -2120,7 +2687,7 @@ class _AmBarState extends ConsumerState<_AmBar> {
                     color: AmColors.action,
                     borderRadius: BorderRadius.circular(6),
                   ),
-                  child: const AppText(
+                  child: AppText(
                     'Juntar',
                     style: TextStyle(
                       color: AmColors.onAction,
@@ -2132,25 +2699,29 @@ class _AmBarState extends ConsumerState<_AmBar> {
               ),
             ),
           // Cues de legenda como marcas dentro da barra (§6.5).
+          // So os da janela: uma legenda de dez minutos tem centenas de
+          // falas, e cada uma e um widget.
           if (layer is CaptionLayer)
             for (final cue in (layer as CaptionLayer).cues)
-              Positioned(
-                left: left + (cue.start.inMicroseconds / 1e6 * pps),
-                top: 6,
-                width: ((cue.end - cue.start).inMicroseconds / 1e6 * pps).clamp(
-                  3.0,
-                  1e6,
-                ),
-                height: _Alturas.barraDe(context) - 12,
-                child: IgnorePointer(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.35),
-                      borderRadius: BorderRadius.circular(3),
+              if (janela.cruza(
+                left + cue.start.inMicroseconds / 1e6 * pps,
+                left + cue.end.inMicroseconds / 1e6 * pps,
+              ))
+                Positioned(
+                  left: left + (cue.start.inMicroseconds / 1e6 * pps),
+                  top: 6,
+                  width: ((cue.end - cue.start).inMicroseconds / 1e6 * pps)
+                      .clamp(3.0, 1e6),
+                  height: _Alturas.barraDe(context) - 12,
+                  child: IgnorePointer(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.35),
+                        borderRadius: BorderRadius.circular(3),
+                      ),
                     ),
                   ),
                 ),
-              ),
           // Alcas de trim (com snap magnetico).
           if (podeMover && !compact) ...[
             _TrimHandle(
@@ -2162,12 +2733,18 @@ class _AmBarState extends ConsumerState<_AmBar> {
               },
               onEnd: _terminarArrasto,
               onDrag: (dx) {
+                // O ACUMULADO ANDA A CADA EVENTO, e so a MUTACAO espera o
+                // quadro: o alvo e absoluto (origem + acumulado), entao o
+                // ultimo evento do quadro ja carrega todos os anteriores.
                 _trimAccumPx += dx;
-                final desired = _trimStart0 + _pxToDur(_trimAccumPx);
-                final snapped = _snap(desired);
-                _hapticIfSnapped(desired, snapped);
-                controller.trimLayerStart(layer.id, snapped);
-                _informarTempo(snapped, _trimStart0);
+                _pedirQuadro(() {
+                  final desired = _trimStart0 + _pxToDur(_trimAccumPx);
+                  final snapped = _snap(desired);
+                  _hapticIfSnapped(desired, snapped);
+                  _abrirGesto();
+                  controller.trimLayerStart(layer.id, snapped);
+                  _informarTempo(snapped, _trimStart0);
+                });
               },
             ),
             _TrimHandle(
@@ -2180,19 +2757,29 @@ class _AmBarState extends ConsumerState<_AmBar> {
               onEnd: _terminarArrasto,
               onDrag: (dx) {
                 _trimAccumPx += dx;
-                final desired = _trimStart0 + _pxToDur(_trimAccumPx);
-                final snapped = _snap(desired);
-                _hapticIfSnapped(desired, snapped);
-                controller.trimLayerEnd(layer.id, snapped);
-                _informarTempo(snapped, _trimStart0);
+                _pedirQuadro(() {
+                  final desired = _trimStart0 + _pxToDur(_trimAccumPx);
+                  final snapped = _snap(desired);
+                  _hapticIfSnapped(desired, snapped);
+                  _abrirGesto();
+                  controller.trimLayerEnd(layer.id, snapped);
+                  _informarTempo(snapped, _trimStart0);
+                });
               },
             ),
           ],
           // Diamantes de keyframe sobre a barra: acesos = propriedade
           // ativa; translúcidos = de outra propriedade, ainda visíveis.
           // FAIXA DE KEYFRAMES COM DENSIDADE.
+          // So os da janela (com folga para o alvo do dedo, que e maior
+          // que o desenho): uma camada com cem marcas montava cem
+          // subarvores de losango, visiveis ou nao.
           for (final grupo in _gruposDosLosangos())
-            _losango(context, grupo, left),
+            if (janela.contem(
+              left + grupo.times.first.inMicroseconds / 1e6 * pps,
+              margem: 40,
+            ))
+              _losango(context, grupo, left),
           // O LOSANGO NA MAO vem por ultimo, por cima dos outros, e fora do
           // agrupamento: a um quadro da vizinha ele fica a menos de 4 px
           // dela, e sumiria dentro da pilula bem na hora de encaixar.
@@ -2211,18 +2798,20 @@ class _AmBarState extends ConsumerState<_AmBar> {
   }
 
   /// Os grupos de losangos a desenhar — sem o que esta na mao.
+  ///
+  /// SEM ARRASTO A CONTA E GUARDADA por instancia de camada e por zoom
+  /// ([_gruposDe]): montar os instantes (nove conjuntos, uma `Duration`
+  /// por marca) e agrupa-los por densidade acontecia a cada montagem de
+  /// cada barra, e a linha do tempo remonta a cada passo de arrasto.
+  /// Com o losango na mao a lista muda a cada passo, entao ali nao ha o
+  /// que guardar.
   List<_GrupoDeKeyframes> _gruposDosLosangos() {
     final arrasto = _arrastoDoLosango;
-    final tempos = layer.keyframeTimes;
-    return _agrupaKeyframes(
-      arrasto == null
-          ? tempos
-          : [
-              for (final t in tempos)
-                if (t != arrasto.atual) t,
-            ],
-      pps,
-    );
+    if (arrasto == null) return _gruposDe(layer, pps);
+    return _agrupaKeyframes([
+      for (final t in _temposDosKeyframes(layer))
+        if (t != arrasto.atual) t,
+    ], pps);
   }
 
   /// UM LOSANGO (ou a pilula de varios juntos demais) na faixa de baixo da
@@ -2674,11 +3263,18 @@ class _ClipPreview extends StatefulWidget {
   const _ClipPreview({
     required this.layer,
     required this.playback,
+    required this.janela,
+    required this.esquerdaPx,
     required this.child,
   });
 
   final Layer layer;
   final PlaybackController playback;
+
+  /// O pedaco visivel da linha do tempo e onde esta barra comeca nela: a
+  /// onda e a tira so montam o que cabe na tela.
+  final ValueListenable<JanelaDaTimeline> janela;
+  final double esquerdaPx;
   final Widget child;
 
   @override
@@ -2795,6 +3391,8 @@ class _ClipPreviewState extends State<_ClipPreview> {
                       start: inicio,
                       end: fim,
                       sourceDuration: (l as VideoLayer).sourceDuration ?? fim,
+                      janela: widget.janela,
+                      esquerdaPx: widget.esquerdaPx,
                     ),
                   ),
                 ),
@@ -2850,6 +3448,8 @@ class _ClipPreviewState extends State<_ClipPreview> {
                               : Colors.white,
                           gain: _service.ganhoDaOnda(path),
                           muted: mudo,
+                          janela: widget.janela,
+                          esquerdaPx: widget.esquerdaPx,
                         ),
                       ),
                     ),

@@ -358,7 +358,7 @@ class _TelaDePresetsState extends ConsumerState<TelaDePresets> {
                 padding: const EdgeInsets.fromLTRB(14, 0, 14, 6),
                 child: AppText(
                   _recado,
-                  style: const TextStyle(fontSize: 12, color: AmColors.accent),
+                  style: TextStyle(fontSize: 12, color: AmColors.accent),
                 ),
               ),
             Expanded(
@@ -429,7 +429,7 @@ class _TelaDePresetsState extends ConsumerState<TelaDePresets> {
   Widget _previaDoPreset(EffectPreset p) {
     final tipo = p.effects.firstOrNull?.type;
     if (tipo == null || effectSpecs[tipo] == null) {
-      return const ColoredBox(color: AmColors.panelHigh);
+      return ColoredBox(color: AmColors.panelHigh);
     }
     return LayoutBuilder(
       builder: (context, c) => PreviaDoEfeito(tipo: tipo, lado: c.maxWidth),

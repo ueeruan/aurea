@@ -154,7 +154,7 @@ class LinhaDoEstudio extends StatelessWidget {
                 onChanged: onTap == null ? null : (_) => onTap!(),
               )
             else if (ativo)
-              const Icon(
+              Icon(
                 CupertinoIcons.checkmark_alt,
                 size: 18,
                 color: AmColors.accent,

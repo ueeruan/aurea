@@ -17,6 +17,7 @@ import 'blob_track_service.dart';
 import 'camera_track_service.dart';
 import 'scene_cut_service.dart';
 import 'freehand_session.dart';
+import 'keyframe_clipboard.dart';
 import '../domain/blob_track.dart';
 import '../domain/caption.dart';
 import '../domain/caption_highlight.dart';
@@ -80,8 +81,16 @@ export '../domain/video_project.dart' show LayerProp, PropertyLink;
 /// Camada selecionada no editor (null = nada).
 final selectedLayerProvider = StateProvider<String?>((ref) => null);
 
-/// Atualiza automaticamente as trilhas animadas; pode ser desligado na UI.
-final autoKeyframeProvider = StateProvider<bool>((ref) => true);
+/// KEYFRAME AUTOMATICO: editar fora de uma marca crava a marca sozinho.
+///
+/// NASCE DESLIGADO. A regra do dono e que keyframe nao nasce sem intencao
+/// (`docs/keyframe-explicito.md`): sem isto ligado, a edicao fora de marca
+/// fica PENDENTE e quem crava e o losango. O padrao ja tinha sido tirado
+/// uma vez (f27267c) e voltou ligado por descuido (4cf6177) — e as marcas
+/// "apareciam sozinhas" de novo. Quem liga de proposito (menu "⋯" da
+/// transformacao) ve o selo "AUTO" no rail, que desliga num toque
+/// (`SeloAutoKeyframe`). Nao e persistido: toda sessao comeca desligada.
+final autoKeyframeProvider = StateProvider<bool>((ref) => false);
 
 /// A EDICAO PENDENTE: o valor que ja esta na tela e ainda nao esta gravado.
 ///
@@ -149,7 +158,10 @@ extension _ValorEditado on AnimatedDouble {
   AnimatedDouble editada(Duration t, double v) {
     if (aceitaEdicaoEm(t)) return edited(t, v);
     _recusaLocal = t;
-    return withKeyframe(t, v, easeAt(t));
+    // A marca que o losango vai cravar PARTE a curva do trecho em vez de
+    // nascer linear (`comMarcaInserida`): o projeto derivado e o que o
+    // losango grava, e uma marca reta ali achatava a segunda metade.
+    return comMarcaInserida(t, v);
   }
 }
 
@@ -157,7 +169,7 @@ extension _ValorEditadoOffset on AnimatedOffset {
   AnimatedOffset editada(Duration t, Offset v) {
     if (aceitaEdicaoEm(t)) return edited(t, v);
     _recusaLocal = t;
-    return withKeyframe(t, v, easeAt(t));
+    return comMarcaInserida(t, v);
   }
 }
 
@@ -1945,12 +1957,26 @@ class EditorController extends Notifier<VideoProject> {
             scaleY: layer.scaleY.withLoop(spec),
           ),
         );
+      // TODOS OS EIXOS DO GRUPO, como o losango e a curva fazem: o loop de
+      // Rotacao valia so para Z e o de Inclinacao so para X — uma camada 3D
+      // girando em Y com "Loop: repetir" parava no ultimo keyframe.
       case LayerProp.rotation:
-        _replace(layer.copyLayer(rotation: layer.rotation.withLoop(spec)));
+        _replace(
+          layer.copyLayer(
+            rotation: layer.rotation.withLoop(spec),
+            rotationX: layer.rotationX.withLoop(spec),
+            rotationY: layer.rotationY.withLoop(spec),
+          ),
+        );
       case LayerProp.opacity:
         _replace(layer.copyLayer(opacity: layer.opacity.withLoop(spec)));
       case LayerProp.skew:
-        _replace(layer.copyLayer(skewX: layer.skewX.withLoop(spec)));
+        _replace(
+          layer.copyLayer(
+            skewX: layer.skewX.withLoop(spec),
+            skewY: layer.skewY.withLoop(spec),
+          ),
+        );
       case LayerProp.pivot:
         _replace(layer.copyLayer(pivot: layer.pivot.withLoop(spec)));
       case LayerProp.parent:
@@ -3048,6 +3074,9 @@ class EditorController extends Notifier<VideoProject> {
     double rotYInicial = 0,
     Texto3D? texto3d,
     EstiloDoTexto3D? estiloTexto3d,
+    // O CREDITO NASCE COM O NO: autor, licenca e origem de um modelo baixado
+    // seguem o asset (exigencia das licencas CC), e nao a tela que o baixou.
+    ModelCredit3D credito = const ModelCredit3D(),
   }) {
     var rotX = rotXInicial;
     var rotY = rotYInicial;
@@ -3076,6 +3105,7 @@ class EditorController extends Notifier<VideoProject> {
       modelAsset: model,
       texto3d: texto3d,
       estiloTexto3d: estiloTexto3d,
+      credit: credito,
       modelSource: ModelSource3D(
         path: '',
         triangles: model.triangleCount,
@@ -3094,10 +3124,17 @@ class EditorController extends Notifier<VideoProject> {
     );
   }
 
-  String addModel3D(String sceneId, ModelAsset3D model) {
+  String addModel3D(
+    String sceneId,
+    ModelAsset3D model, {
+    ModelCredit3D? credito,
+  }) {
     final layer = _layer(sceneId);
     if (layer is! Scene3DLayer) return '';
-    final node = _nodeDoModelo(model);
+    final node = _nodeDoModelo(
+      model,
+      credito: credito ?? const ModelCredit3D(),
+    );
     _replace(
       layer.withScene(
         layer.scene.copyWith(nodes: [...layer.scene.nodes, node]),
@@ -3109,8 +3146,16 @@ class EditorController extends Notifier<VideoProject> {
   /// Importa um modelo como uma cena 3D pronta e centralizada. A cena e
   /// criada quando necessario; o ambiente metalico empacotado da ao PBR
   /// algo realista para refletir desde o primeiro quadro.
-  String addImportedModel3D(Duration at, ModelAsset3D model) {
-    final node = _nodeDoModelo(model, orientarParaCamera: true);
+  String addImportedModel3D(
+    Duration at,
+    ModelAsset3D model, {
+    ModelCredit3D? credito,
+  }) {
+    final node = _nodeDoModelo(
+      model,
+      orientarParaCamera: true,
+      credito: credito ?? const ModelCredit3D(),
+    );
     _push(
       Scene3DLayer(
         name: '3D · ${model.name}',
@@ -6275,6 +6320,272 @@ class EditorController extends Notifier<VideoProject> {
   void apagarKeyframeDeTransformacao(String id, Duration local) =>
       apagarKeyframe(id, local);
 
+  // ------------------------------------------- keyframes por propriedade
+  //
+  // [moverKeyframe] e [apagarKeyframe] falam do INSTANTE inteiro (o losango
+  // da linha do tempo). Os de baixo falam de MARCAS DE UMA PROPRIEDADE —
+  // `(camada, propriedade, tempo local)` — que e a unidade da selecao
+  // (`keyframesSelecionadosProvider`), do copiar/colar e do editor grafico.
+  // Todos sao comando explicito: nenhum cria marca que ninguem pediu.
+
+  /// COPIA as [marcas] para a [KeyframeClipboard]: valor, distancia no
+  /// tempo entre elas, curva e alcas. Devolve quantas marcas entraram (cada
+  /// eixo conta a sua); zero deixa a area de transferencia como estava.
+  ///
+  /// A area guarda marcas de UMA camada — colar e "aqui, nesta camada", e
+  /// marcas de camadas diferentes nao teriam um "aqui" so. Sem [layerId],
+  /// vale a camada da primeira marca; as das outras ficam de fora.
+  int copiarKeyframes(Iterable<MarcaSelecionada> marcas, {String? layerId}) {
+    final lista = marcas.toList();
+    if (lista.isEmpty) return 0;
+    final camada = _layer(layerId ?? lista.first.layerId);
+    if (camada == null) return 0;
+    final copiados = KeyframesCopiados.de(camada, lista);
+    if (copiados == null) return 0;
+    KeyframeClipboard.valor = copiados;
+    return copiados.quantidade;
+  }
+
+  /// COLA o que esta na [KeyframeClipboard] na camada [layerId], com a
+  /// primeira marca no cabecote ([globalTime]). Um passo de desfazer.
+  ///
+  /// Devolve quantas entraram e quantas ficaram de fora por cair antes do
+  /// comeco ou depois do fim da camada — quem chama avisa, em vez de a
+  /// animacao colada chegar pela metade calada. As coladas viram a selecao:
+  /// e o que a pessoa vai querer mexer em seguida.
+  ({int coladas, int foraDaCamada}) colarKeyframes(
+    String layerId,
+    Duration globalTime,
+  ) {
+    final copiados = KeyframeClipboard.valor;
+    final camada = _layer(layerId);
+    if (copiados == null || copiados.vazio || camada == null) {
+      return (coladas: 0, foraDaCamada: 0);
+    }
+    if (state.metaOf(layerId).locked) return (coladas: 0, foraDaCamada: 0);
+    final emLocal = camada.localTime(globalTime);
+    final r = copiados.colarEm(camada, emLocal);
+    if (r.coladas == 0) return (coladas: 0, foraDaCamada: r.foraDaCamada);
+    runAsOneUndo(() => _replace(r.camada));
+    final duracao = camada.duration;
+    ref.read(keyframesSelecionadosProvider.notifier).state = {
+      for (final prop in copiados.props)
+        for (final t in _temposCopiados(copiados, prop))
+          if (emLocal + t >= Duration.zero && emLocal + t <= duracao)
+            (layerId: layerId, prop: prop, tempo: emLocal + t),
+    };
+    return (coladas: r.coladas, foraDaCamada: r.foraDaCamada);
+  }
+
+  static Set<Duration> _temposCopiados(KeyframesCopiados c, LayerProp prop) => {
+    for (final marcas
+        in c.numeros[prop]?.values ?? const <List<Keyframe<double>>>[])
+      for (final k in marcas) k.time,
+    for (final marcas
+        in c.pontos[prop]?.values ?? const <List<Keyframe<Offset>>>[])
+      for (final k in marcas) k.time,
+  };
+
+  /// APAGA as [marcas] — so as trilhas da propriedade de cada uma, e nao o
+  /// instante inteiro como [apagarKeyframe]. Tudo num passo de desfazer.
+  /// Devolve quantas marcas (propriedade + instante) sairam; as que nao
+  /// existem mais e as de camada bloqueada nao contam. Saem da selecao.
+  int apagarKeyframes(Iterable<MarcaSelecionada> marcas) {
+    final lista = marcas.toList();
+    var apagadas = 0;
+    final novas = <String, Layer>{};
+    for (final m in lista) {
+      if (state.metaOf(m.layerId).locked) continue;
+      final camada = novas[m.layerId] ?? _layer(m.layerId);
+      if (camada == null || !temMarcaDaPropEm(camada, m.prop, m.tempo)) {
+        continue;
+      }
+      novas[m.layerId] = comTrilhasDaProp(
+        camada,
+        m.prop,
+        numero: (_, a) =>
+            a.hasKeyframeAt(m.tempo) ? a.withoutKeyframe(m.tempo) : a,
+        ponto: (_, a) =>
+            a.hasKeyframeAt(m.tempo) ? a.withoutKeyframe(m.tempo) : a,
+      );
+      apagadas++;
+    }
+    if (apagadas == 0) return 0;
+    runAsOneUndo(() {
+      _mutate(
+        state.copyWith(
+          layers: [for (final l in state.layers) novas[l.id] ?? l],
+        ),
+      );
+    });
+    podarKeyframesSelecionados();
+    return apagadas;
+  }
+
+  /// MOVE A MARCA DE UMA PROPRIEDADE, e so dela: as outras propriedades
+  /// que tenham marca no mesmo instante ficam onde estao (o
+  /// [moverKeyframe] leva o instante inteiro). Valor e curva vao junto.
+  /// E o que o editor grafico precisa para arrastar um ponto na horizontal.
+  ///
+  /// Devolve por que nao moveu, e nulo quando moveu (ou quando [deLocal] e
+  /// [paraLocal] sao o mesmo instante). Um passo de desfazer pela janela de
+  /// sempre; um arrasto abre um gesto ([beginGesture]).
+  MotivoDoKeyframeParado? moverKeyframeDaProp(
+    String id,
+    LayerProp prop,
+    Duration deLocal,
+    Duration paraLocal,
+  ) {
+    if (_layer(id) == null) return MotivoDoKeyframeParado.semCamada;
+    return _moverMarcas([
+      (layerId: id, prop: prop, de: deLocal, para: paraLocal),
+    ]);
+  }
+
+  /// MOVE VARIAS MARCAS pelo mesmo [delta] — a selecao inteira anda junto.
+  ///
+  /// TUDO OU NADA: se uma so nao pode ir (sairia da camada, cairia em cima
+  /// de uma marca que nao esta andando), nenhuma vai, e o motivo volta.
+  /// Mover so as que cabem desmontaria a relacao de tempo entre elas, que
+  /// e justamente o que selecionar varias promete manter.
+  MotivoDoKeyframeParado? moverKeyframes(
+    Iterable<MarcaSelecionada> marcas,
+    Duration delta,
+  ) => _moverMarcas([
+    for (final m in marcas)
+      (layerId: m.layerId, prop: m.prop, de: m.tempo, para: m.tempo + delta),
+  ]);
+
+  MotivoDoKeyframeParado? _moverMarcas(
+    List<({String layerId, LayerProp prop, Duration de, Duration para})>
+    pedidos,
+  ) {
+    bool perto(Duration a, Duration b) =>
+        (a - b).abs() < kToleranciaDoKeyframe;
+    final movimentos = [
+      for (final p in pedidos)
+        if (p.de != p.para) p,
+    ];
+    if (movimentos.isEmpty) {
+      // Nada a mover ainda responde "essa marca existe?".
+      for (final p in pedidos) {
+        final camada = _layer(p.layerId);
+        if (camada == null) return MotivoDoKeyframeParado.semCamada;
+        if (!temMarcaDaPropEm(camada, p.prop, p.de)) {
+          return MotivoDoKeyframeParado.semKeyframe;
+        }
+      }
+      return null;
+    }
+
+    final novas = <String, Layer>{};
+    final grupos = <(String, LayerProp)>{
+      for (final p in movimentos) (p.layerId, p.prop),
+    };
+    for (final (layerId, prop) in grupos) {
+      final original = _layer(layerId);
+      if (original == null) return MotivoDoKeyframeParado.semCamada;
+      // Camada bloqueada: o portao de sempre, calado (quem recusa avisa).
+      if (state.metaOf(layerId).locked) continue;
+      final doGrupo = [
+        for (final p in movimentos)
+          if (p.layerId == layerId && p.prop == prop) p,
+      ];
+      final trilhas = trilhasDaProp(original, prop);
+      final tempos = <Duration>{
+        for (final a in trilhas.numeros.values)
+          for (final k in a.keyframes) k.time,
+        for (final a in trilhas.pontos.values)
+          for (final k in a.keyframes) k.time,
+      };
+      for (final p in doGrupo) {
+        if (!tempos.any((t) => perto(t, p.de))) {
+          return MotivoDoKeyframeParado.semKeyframe;
+        }
+        if (p.para < Duration.zero || p.para > original.duration) {
+          return MotivoDoKeyframeParado.foraDaCamada;
+        }
+      }
+      // As que FICAM nao podem estar no destino de nenhuma que anda.
+      final paradas = [
+        for (final t in tempos)
+          if (!doGrupo.any((p) => perto(t, p.de))) t,
+      ];
+      for (final p in doGrupo) {
+        if (paradas.any((t) => perto(t, p.para))) {
+          return MotivoDoKeyframeParado.ocupado;
+        }
+      }
+      // A ORDEM EVITA QUE UMA ATROPELE A OUTRA: para a frente anda primeiro
+      // a ultima, para tras a primeira — o destino de cada uma ja esta
+      // vago quando ela chega.
+      doGrupo.sort(
+        (a, b) => a.para > a.de ? b.de.compareTo(a.de) : a.de.compareTo(b.de),
+      );
+      var camada = novas[layerId] ?? original;
+      for (final p in doGrupo) {
+        camada = comTrilhasDaProp(
+          camada,
+          prop,
+          numero: (_, a) => a.comKeyframeMovido(p.de, p.para),
+          ponto: (_, a) => a.comKeyframeMovido(p.de, p.para),
+        );
+      }
+      // A MARCA NAO RACHA: se algum eixo ficou para tras na origem (duas
+      // marcas do mesmo eixo dentro da tolerancia, de projeto antigo),
+      // nada muda — a mesma regra do losango em [moverKeyframe].
+      for (final p in doGrupo) {
+        if (perto(p.de, p.para)) continue;
+        if (doGrupo.any((o) => perto(o.para, p.de))) continue;
+        if (temMarcaDaPropEm(camada, prop, p.de)) {
+          return MotivoDoKeyframeParado.ocupado;
+        }
+      }
+      novas[layerId] = camada;
+    }
+    if (novas.isEmpty) return null;
+    _mutate(
+      state.copyWith(layers: [for (final l in state.layers) novas[l.id] ?? l]),
+    );
+    // A selecao acompanha a marca: ela e a mesma, so mudou de instante.
+    final selecao = ref.read(keyframesSelecionadosProvider);
+    if (selecao.isNotEmpty) {
+      ref.read(keyframesSelecionadosProvider.notifier).state = {
+        for (final m in selecao)
+          () {
+            for (final p in movimentos) {
+              if (novas.containsKey(p.layerId) &&
+                  p.layerId == m.layerId &&
+                  p.prop == m.prop &&
+                  perto(p.de, m.tempo)) {
+                return (layerId: m.layerId, prop: m.prop, tempo: p.para);
+              }
+            }
+            return m;
+          }(),
+      };
+    }
+    return null;
+  }
+
+  /// TIRA DA SELECAO as marcas que nao existem mais (apagadas, desfeitas,
+  /// camada removida). A selecao e estado de tela e nao entra no desfazer;
+  /// quem muda o projeto por fora chama isto para ela nao apontar para o
+  /// vazio.
+  void podarKeyframesSelecionados() {
+    final selecao = ref.read(keyframesSelecionadosProvider);
+    if (selecao.isEmpty) return;
+    final vivas = {
+      for (final m in selecao)
+        if (_layer(m.layerId) case final camada?
+            when temMarcaDaPropEm(camada, m.prop, m.tempo))
+          m,
+    };
+    if (vivas.length != selecao.length) {
+      ref.read(keyframesSelecionadosProvider.notifier).state = vivas;
+    }
+  }
+
   /// O LOSANGO CRAVA O QUE ESTA NA TELA.
   ///
   /// Se ha uma edicao pendente desta camada, neste instante, o toque no
@@ -6318,12 +6629,16 @@ class EditorController extends Notifier<VideoProject> {
     if (layer == null) return;
     final t = layer.localTime(globalTime);
 
+    // A MARCA NOVA NAO DEFORMA O TRECHO. Ela nascia linear, e o trecho de
+    // tras ficava com a curva inteira espremida na metade do tempo: cravar
+    // um keyframe no meio de um ease-in-out mudava o desenho da animacao.
+    // `comMarcaInserida` parte a curva do trecho em duas (de Casteljau).
     AnimatedDouble tog(AnimatedDouble track) => track.hasKeyframeAt(t)
         ? track.withoutKeyframe(t)
-        : track.withKeyframe(t, track.valueAt(t));
+        : track.comMarcaInserida(t);
     AnimatedOffset togO(AnimatedOffset track) => track.hasKeyframeAt(t)
         ? track.withoutKeyframe(t)
-        : track.withKeyframe(t, track.valueAt(t));
+        : track.comMarcaInserida(t);
 
     switch (prop) {
       case LayerProp.position:
@@ -6333,11 +6648,11 @@ class EditorController extends Notifier<VideoProject> {
           layer.copyLayer(
             position: remove
                 ? layer.position.withoutKeyframe(t)
-                : layer.position.withKeyframe(t, layer.position.valueAt(t)),
+                : layer.position.comMarcaInserida(t),
             positionZ: remove
                 ? layer.positionZ.withoutKeyframe(t)
                 : layer.is3D || layer.positionZ.isAnimated
-                ? layer.positionZ.withKeyframe(t, layer.positionZ.valueAt(t))
+                ? layer.positionZ.comMarcaInserida(t)
                 : layer.positionZ,
           ),
         );

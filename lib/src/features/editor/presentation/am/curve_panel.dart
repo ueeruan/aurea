@@ -152,7 +152,7 @@ class _CurvePanelState extends ConsumerState<CurvePanel> {
     final id = ref.watch(selectedLayerProvider);
     final layer = id == null ? null : project.layerById(id);
     if (layer == null || id == null) {
-      return const ColoredBox(color: AmColors.panel);
+      return ColoredBox(color: AmColors.panel);
     }
 
     final controller = ref.read(editorControllerProvider.notifier);
@@ -204,7 +204,7 @@ class _CurvePanelState extends ConsumerState<CurvePanel> {
                   const SizedBox(height: 12),
                   CupertinoButton(
                     onPressed: widget.onBack,
-                    child: const AppText(
+                    child: AppText(
                       'Voltar',
                       style: TextStyle(color: AmColors.accent),
                     ),
@@ -404,6 +404,18 @@ class _CurvePanelState extends ConsumerState<CurvePanel> {
                                 ),
                         ),
                       ),
+                      // A PRIMEIRA LINHA DE CURVAS, sempre a vista: o que
+                      // se usa em nove de dez trechos, sem passar pelas
+                      // abas do trilho.
+                      FaixaDeCurvasBasicas(
+                        ease: ease,
+                        onEscolher: (e) => controller.setSegmentEase(
+                          id,
+                          widget.prop,
+                          segment!.$1,
+                          e,
+                        ),
+                      ),
                       // Rodapé: "<  Efeito Ease de Cúbico-Bezier  >"
                       SizedBox(
                         height: 32,
@@ -471,48 +483,16 @@ class _CurvePanelState extends ConsumerState<CurvePanel> {
     );
   }
 
-  static const _presets = <({String nome, Easing ease})>[
-    (nome: 'Linear', ease: Easing.linear),
-    (nome: 'Ease in', ease: Easing.easeIn),
-    (nome: 'Ease out', ease: Easing.easeOut),
-    (nome: 'Ease in-out', ease: Easing.easeInOut),
-    (nome: 'Overshoot', ease: Easing.overshoot),
-    (nome: 'Quicar', ease: Easing.bounce),
-    (nome: 'Elástico', ease: Easing.elastic),
-    (nome: 'Degraus', ease: Easing(type: EasingType.steps)),
-    (nome: 'Cíclico', ease: Easing(type: EasingType.cyclic)),
-    (nome: 'Apple padrão', ease: Easing.appleStandard),
-    (nome: 'Apple entrada', ease: Easing.appleEntrance),
-    (nome: 'Apple saída', ease: Easing.appleExit),
-    (nome: 'Mola interface', ease: Easing.interfaceSpring),
-    (nome: 'Mola suave', ease: Easing.softSpring),
-  ];
-
   /// O NOME DO TRECHO no rodape: o preset quando e um, "(personalizada)"
-  /// quando as alcas ja sairam de qualquer um.
+  /// quando as alcas ja sairam de qualquer um. O catalogo e a FONTE UNICA
+  /// (`CatalogoDeCurvas`): o nome que aparece aqui e o mesmo chip que
+  /// acende no trilho e na faixa do sheet generico.
   static String _nomeDaCurva(Easing e) {
-    for (final familia in _familiasDaCurva) {
-      for (final (nome, preset) in familia.presets) {
-        if (_samePreset(e, preset)) return nome;
-      }
-    }
+    final preset = CatalogoDeCurvas.presetDe(e);
+    if (preset != null) return preset.nome;
     return e.type == EasingType.cubicBezier
         ? 'Bézier (personalizada)'
         : '${e.label} (personalizada)';
-  }
-
-  static bool _samePreset(Easing a, Easing b) {
-    if (a.type != b.type) return false;
-    if (a.type == EasingType.spring) {
-      return (a.response - b.response).abs() < 0.001 &&
-          (a.damping - b.damping).abs() < 0.001 &&
-          (a.initialVelocity - b.initialVelocity).abs() < 0.001;
-    }
-    if (a.type != EasingType.cubicBezier) return true;
-    return (a.x1 - b.x1).abs() < 0.01 &&
-        (a.y1 - b.y1).abs() < 0.01 &&
-        (a.x2 - b.x2).abs() < 0.01 &&
-        (a.y2 - b.y2).abs() < 0.01;
   }
 }
 
@@ -563,6 +543,11 @@ Future<void> showTrackCurveSheet(
 }) async {
   final myGen = paramSheetGeneration + 1;
   var aplicarEmTodos = false;
+  // O MESMO GRAFICO DE VELOCIDADE DO PAINEL DA TRANSFORMACAO. Sem ele,
+  // moldar a aceleracao de um parametro de efeito era adivinhar no
+  // grafico de valor — o que a curva "faz" so se ve na derivada.
+  var velocidade = false;
+  final ctrl = ref.read(editorControllerProvider.notifier);
   await showParamSheet(
     context,
     heightFactor: 0.5,
@@ -650,7 +635,7 @@ Future<void> showTrackCurveSheet(
                                           (times[1] - times[0]) ~/ 2,
                                     );
                                   },
-                                  child: const AppText('Ir ao primeiro trecho',
+                                  child: AppText('Ir ao primeiro trecho',
                                     style: TextStyle(
                                       color: AmColors.accent,
                                       fontSize: 14,
@@ -676,14 +661,37 @@ Future<void> showTrackCurveSheet(
                                 ),
                               ),
                               Expanded(
-                                child: _CurveGraph(
-                                  ease: ease,
-                                  overshootEnabled: true,
-                                  onBezierChanged: (e) {
-                                    onSetEase(seg!.$1, e);
-                                    setSheetState(() {});
-                                  },
-                                ),
+                                // O ARRASTO E UM PASSO DE DESFAZER SO. Aqui
+                                // o gesto nunca foi aberto: o agrupamento
+                                // dependia da janela de 450 ms do `_mutate`,
+                                // e um arrasto lento virava uma pilha de
+                                // passos que ninguem consegue desfazer.
+                                child: velocidade
+                                    ? _SpeedGraph(
+                                        key: const ValueKey(
+                                          'curva-sheet-velocidade',
+                                        ),
+                                        ease: ease,
+                                        onGestoInicio: ctrl.beginGesture,
+                                        onGestoFim: ctrl.endGesture,
+                                        onBezierChanged: (e) {
+                                          onSetEase(seg!.$1, e);
+                                          setSheetState(() {});
+                                        },
+                                      )
+                                    : _CurveGraph(
+                                        key: const ValueKey(
+                                          'curva-sheet-valor',
+                                        ),
+                                        ease: ease,
+                                        overshootEnabled: true,
+                                        onGestoInicio: ctrl.beginGesture,
+                                        onGestoFim: ctrl.endGesture,
+                                        onBezierChanged: (e) {
+                                          onSetEase(seg!.$1, e);
+                                          setSheetState(() {});
+                                        },
+                                      ),
                               ),
                               CupertinoButton(
                                 padding: const EdgeInsets.all(6),
@@ -696,6 +704,33 @@ Future<void> showTrackCurveSheet(
                               ),
                             ],
                           ),
+                        ),
+                        const SizedBox(height: 6),
+                        // A MESMA PRIMEIRA LINHA DO PAINEL DA TRANSFORMACAO
+                        // — com `Hold`, que aqui simplesmente nao existia:
+                        // congelar um parametro de efeito ate a proxima
+                        // marca era impossivel por esta porta.
+                        FaixaDeCurvasBasicas(
+                          ease: ease,
+                          onEscolher: (e) {
+                            if (aplicarEmTodos) {
+                              onSetEaseAll(e);
+                            } else {
+                              onSetEase(seg!.$1, e);
+                            }
+                            setSheetState(() {});
+                          },
+                          aoFinal: [
+                            _ChipDeCurva(
+                              key: const ValueKey('curva-sheet-velocidade-chip'),
+                              rotulo: velocidade ? 'Velocidade' : 'Valor',
+                              aceso: velocidade,
+                              aoTocar: () {
+                                velocidade = !velocidade;
+                                setSheetState(() {});
+                              },
+                            ),
+                          ],
                         ),
                         const SizedBox(height: 6),
                         SizedBox(
@@ -717,7 +752,8 @@ Future<void> showTrackCurveSheet(
                                   ),
                                 ),
                               ),
-                              for (final preset in _CurvePanelState._presets)
+                              for (final preset
+                                  in CatalogoDeCurvas.alemDosBasicos)
                                 SizedBox(
                                   width: 74,
                                   child: Padding(
@@ -725,8 +761,7 @@ Future<void> showTrackCurveSheet(
                                     child: _PresetTile(
                                       ease: preset.ease,
                                       label: preset.nome,
-                                      selected: _CurvePanelState._samePreset(
-                                        ease,
+                                      selected: ease.mesmoPresetQue(
                                         preset.ease,
                                       ),
                                       onTap: () {
@@ -748,7 +783,7 @@ Future<void> showTrackCurveSheet(
                                   EasingClipboard.valor = ease;
                                   setSheetState(() {});
                                 },
-                                child: const AppText('Copiar',
+                                child: AppText('Copiar',
                                   style: TextStyle(
                                     fontSize: 12,
                                     color: AmColors.accent,
@@ -768,7 +803,7 @@ Future<void> showTrackCurveSheet(
                                         );
                                         setSheetState(() {});
                                       },
-                                child: const AppText('Colar',
+                                child: AppText('Colar',
                                   style: TextStyle(
                                     fontSize: 12,
                                     color: AmColors.accent,
@@ -1029,6 +1064,7 @@ class _CurveGraphState extends State<_CurveGraph> {
 /// bezier, entao trocar de grafico nunca perde nada.
 class _SpeedGraph extends StatefulWidget {
   const _SpeedGraph({
+    super.key,
     required this.ease,
     required this.onBezierChanged,
     this.onGestoInicio,
@@ -1594,7 +1630,7 @@ class _AmCurvePresetCard extends StatelessWidget {
         width: 38,
         height: 38,
         decoration: BoxDecoration(
-          color: const Color(0xFF1E222D),
+          color: AmColors.chip,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
             color: selected ? AureaColors.accent : const Color(0xFF333B4F),
@@ -1609,65 +1645,97 @@ class _AmCurvePresetCard extends StatelessWidget {
   }
 }
 
-/// AS FAMILIAS DA CURVA (v1.1.1): cada uma com os seus presets.
-const _familiasDaCurva =
-    <({String nome, IconData icone, List<(String, Easing)> presets})>[
-      (
-        nome: 'Bézier',
-        icone: CupertinoIcons.scribble,
-        presets: [
-          ('Linear', Easing.linear),
-          ('Suave na entrada', Easing.easeIn),
-          ('Suave na saída', Easing.easeOut),
-          ('Suave nas duas pontas', Easing.easeInOut),
-        ],
-      ),
-      (
-        nome: 'Quique',
-        icone: CupertinoIcons.sportscourt,
-        presets: [
-          ('Quique na saída', Easing.bounce),
-          ('Quique na entrada', Easing.bounceIn),
-          ('Elástico na saída', Easing.elastic),
-          ('Elástico na entrada', Easing.elasticIn),
-        ],
-      ),
-      (
-        nome: 'Degraus',
-        icone: CupertinoIcons.chart_bar_alt_fill,
-        presets: [
-          ('Degraus', Easing.steps),
-          ('Degraus aleatórios', Easing.stepsRandom),
-          ('Degraus elásticos', Easing.elasticSteps),
-          ('Manter', Easing.hold),
-        ],
-      ),
-      (
-        nome: 'Outras',
-        icone: CupertinoIcons.waveform_path,
-        presets: [
-          ('Oscilar', Easing.oscillate),
-          ('Cíclica', Easing.cyclic),
-          ('Aleatória', Easing.random),
-          ('Repetir', Easing.repeat),
-          ('Dente de serra', Easing.sawtooth),
-          ('Mola', Easing.interfaceSpring),
-        ],
-      ),
-    ];
+/// O ICONE DE CADA FAMILIA, na ordem de [CatalogoDeCurvas.familias].
+///
+/// A LISTA das familias mora no dominio (fonte unica, lida tambem pelo
+/// sheet generico); so o desenho fica aqui — `IconData` e do Flutter e nao
+/// tem o que fazer perto do modelo.
+const _iconesDasFamilias = <IconData>[
+  CupertinoIcons.scribble,
+  CupertinoIcons.sportscourt,
+  CupertinoIcons.chart_bar_alt_fill,
+  CupertinoIcons.waveform_path,
+];
 
-int _familiaDe(Easing e) => switch (e.type) {
-  EasingType.cubicBezier => 0,
-  EasingType.bounce ||
-  EasingType.bounceIn ||
-  EasingType.elastic ||
-  EasingType.elasticIn => 1,
-  EasingType.steps ||
-  EasingType.stepsRandom ||
-  EasingType.elasticSteps ||
-  EasingType.hold => 2,
-  _ => 3,
-};
+/// UM CHIP DE CURVA: o nome, aceso quando e a curva do trecho.
+class _ChipDeCurva extends StatelessWidget {
+  const _ChipDeCurva({
+    super.key,
+    required this.rotulo,
+    required this.aceso,
+    required this.aoTocar,
+  });
+
+  final String rotulo;
+  final bool aceso;
+  final VoidCallback aoTocar;
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    behavior: HitTestBehavior.opaque,
+    onTap: aoTocar,
+    child: Container(
+      alignment: Alignment.center,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: aceso ? AmColors.accent : AmColors.bg,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: AppText(
+        rotulo,
+        maxLines: 1,
+        style: TextStyle(
+          fontSize: 11.5,
+          fontWeight: FontWeight.w700,
+          color: aceso ? AmColors.bg : AmColors.muted,
+        ),
+      ),
+    ),
+  );
+}
+
+/// A PRIMEIRA LINHA DE CURVAS — Linear, Ease in, Ease out, Ease in-out,
+/// Hold e Bézier — igual no painel da transformacao e no sheet generico
+/// de efeitos/forma/grade. Antes cada porta tinha a sua lista: o mesmo
+/// trecho oferecia curvas diferentes conforme por onde se entrava.
+class FaixaDeCurvasBasicas extends StatelessWidget {
+  const FaixaDeCurvasBasicas({
+    super.key,
+    required this.ease,
+    required this.onEscolher,
+    this.aoFinal = const [],
+  });
+
+  final Easing ease;
+  final ValueChanged<Easing> onEscolher;
+
+  /// Chips da propria tela depois dos basicos (o seletor Valor|Velocidade
+  /// do sheet, por exemplo).
+  final List<Widget> aoFinal;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    height: 30,
+    child: ListView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      children: [
+        for (final p in CatalogoDeCurvas.basicos)
+          Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: _ChipDeCurva(
+              key: ValueKey('curva-basico-${p.nome}'),
+              rotulo: p.nome,
+              aceso: CatalogoDeCurvas.aceso(p, ease),
+              aoTocar: () => onEscolher(CatalogoDeCurvas.aoEscolher(p, ease)),
+            ),
+          ),
+        for (final w in aoFinal)
+          Padding(padding: const EdgeInsets.only(right: 6), child: w),
+      ],
+    ),
+  );
+}
 
 class _FamiliasDaCurva extends StatefulWidget {
   const _FamiliasDaCurva({required this.ease, required this.onEscolher});
@@ -1680,11 +1748,12 @@ class _FamiliasDaCurva extends StatefulWidget {
 }
 
 class _FamiliasDaCurvaState extends State<_FamiliasDaCurva> {
-  late int _aba = _familiaDe(widget.ease);
+  late int _aba = CatalogoDeCurvas.familiaDe(widget.ease);
 
   @override
   Widget build(BuildContext context) {
-    final familia = _familiasDaCurva[_aba];
+    final familias = CatalogoDeCurvas.familias;
+    final familia = familias[_aba];
     return SizedBox(
       width: 132,
       child: Row(
@@ -1697,18 +1766,15 @@ class _FamiliasDaCurvaState extends State<_FamiliasDaCurva> {
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  for (final (nome, preset) in familia.presets)
+                  for (final p in familia.presets)
                     Tooltip(
-                      message: nome,
+                      message: p.nome,
                       child: KeyedSubtree(
-                        key: ValueKey('curva-preset-$nome'),
+                        key: ValueKey('curva-preset-${p.nome}'),
                         child: _AmCurvePresetCard(
-                          ease: preset,
-                          selected: _CurvePanelState._samePreset(
-                            widget.ease,
-                            preset,
-                          ),
-                          onTap: () => widget.onEscolher(preset),
+                          ease: p.ease,
+                          selected: widget.ease.mesmoPresetQue(p.ease),
+                          onTap: () => widget.onEscolher(p.ease),
                         ),
                       ),
                     ),
@@ -1723,9 +1789,9 @@ class _FamiliasDaCurvaState extends State<_FamiliasDaCurva> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                for (var i = 0; i < _familiasDaCurva.length; i++)
+                for (var i = 0; i < familias.length; i++)
                   Tooltip(
-                    message: _familiasDaCurva[i].nome,
+                    message: familias[i].nome,
                     child: GestureDetector(
                       key: ValueKey('curva-familia-$i'),
                       behavior: HitTestBehavior.opaque,
@@ -1734,7 +1800,7 @@ class _FamiliasDaCurvaState extends State<_FamiliasDaCurva> {
                         width: 34,
                         height: 40,
                         child: Icon(
-                          _familiasDaCurva[i].icone,
+                          _iconesDasFamilias[i],
                           size: 17,
                           color: i == _aba ? AmColors.accent : AmColors.muted,
                         ),

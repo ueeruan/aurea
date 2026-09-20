@@ -98,7 +98,7 @@ class _LinhaDeSomRecenteState extends State<LinhaDeSomRecente> {
                     value: _tocando ? _avanco : 0,
                     strokeWidth: 2.4,
                     backgroundColor: AmColors.chip,
-                    valueColor: const AlwaysStoppedAnimation<Color>(
+                    valueColor: AlwaysStoppedAnimation<Color>(
                       AmColors.accent,
                     ),
                   ),
@@ -137,7 +137,7 @@ class _LinhaDeSomRecenteState extends State<LinhaDeSomRecente> {
               color: AmColors.chip,
               borderRadius: BorderRadius.circular(10),
             ),
-            child: const Icon(
+            child: Icon(
               CupertinoIcons.plus,
               size: 16,
               color: AmColors.accent,

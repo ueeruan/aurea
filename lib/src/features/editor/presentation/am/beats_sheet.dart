@@ -239,7 +239,7 @@ Future<void> showBeatsSheet(
                           : (project.beats.isEmpty
                                 ? 'Detectar batidas'
                                 : 'Detectar de novo'),
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 13.5,
                         fontWeight: FontWeight.w700,
                         color: AmColors.accent,

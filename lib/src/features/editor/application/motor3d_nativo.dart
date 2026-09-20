@@ -16,6 +16,32 @@ import 'motor3d_modo.dart';
 import 'texture_cache.dart';
 import '../domain/orcamento_render.dart';
 
+/// A PLACA VISTA PELO TESTE.
+///
+/// O motor 3D nao e compilado para o PC, e sem ele nada daqui para baixo
+/// roda — nem o cache de imagens, nem a varredura das malhas. Foi assim que
+/// o laco do cache (cinco chaves na tela, quatro vagas) viveu sem teste: o
+/// defeito era de CONTABILIDADE, e a contabilidade so existia com a placa.
+///
+/// Esta porta troca SO as tres chamadas que tocam a placa (subir a malha,
+/// soltar a alca, desenhar). Tudo o que decide QUANDO chama-las — que e o
+/// que os testes prendem — continua sendo o codigo de producao.
+@visibleForTesting
+class PlacaDeTeste3D {
+  PlacaDeTeste3D({
+    required this.criarModelo,
+    required this.soltar,
+    required this.desenhar,
+  });
+
+  /// Devolve a alca do modelo criado (> 0), ou 0 quando a placa recusa.
+  final int Function(List<MalhaCrua3D> malhas) criarModelo;
+  final void Function(int alca) soltar;
+
+  /// Devolve os pixels RGBA do quadro (largura x altura da cena), ou nulo.
+  final Uint8List? Function(Cena3D cena) desenhar;
+}
+
 /// A CENA 3D DESENHADA PELO MOTOR NATIVO (DILIGENT).
 ///
 /// ============================ O QUE ESTA CLASSE E =====================
@@ -59,6 +85,15 @@ class Motor3DNativo {
 
   static final Motor3DNativo instance = Motor3DNativo._();
 
+  /// Ver [PlacaDeTeste3D]. Nula em producao, sempre.
+  @visibleForTesting
+  PlacaDeTeste3D? placaDeTeste;
+
+  /// QUANTOS DESENHOS A PLACA FEZ desde o ultimo [limpar]. E o numero que
+  /// diz se o palco parado esta mesmo parado: em repouso ele nao sobe.
+  @visibleForTesting
+  int desenhosFeitos = 0;
+
   final Ponte3D _ponte = Ponte3D();
   final Cena3D _cena = Cena3D();
   final Map<int, CamadaDeCena3D> _camadas = <int, CamadaDeCena3D>{};
@@ -93,29 +128,123 @@ class Motor3DNativo {
   final List<String> _ordemDasImagens = <String>[];
   static const _imagensGuardadas = 4;
 
+  /// A CHAVE QUE CADA VISTA ESTA MOSTRANDO AGORA (dono -> chave).
+  ///
+  /// ============================ O LACO QUE ISTO MATA =================
+  ///
+  /// O cache tinha quatro vagas em FILA. Com cinco chaves vivas na tela
+  /// (cinco camadas de cena, ou uma cena sob a casca de cebola) guardar a
+  /// quinta despejava a primeira; a revisao subia, todas as vistas
+  /// reconstruiam, a primeira nao achava a imagem, desenhava, guardava,
+  /// despejava a segunda... para sempre, com o palco PARADO. Medido na
+  /// bancada: 193 quadros em 6 s de repouso, CPU a 185%.
+  ///
+  /// A saida nao e um teto maior (seis chaves quebrariam de novo): e nunca
+  /// despejar o que alguem ESTA MOSTRANDO. Quem mostra diz qual chave
+  /// segura; o teto passa a valer so para o resto — as imagens de quadros
+  /// vizinhos que ficam para o vai-e-vem do cabecote.
+  final Map<Object, String> _chaveDoDono = <Object, String>{};
+
+  /// AS CHAVES JA DESENHADAS QUE AINDA ESTAO VIRANDO IMAGEM. Pedir de novo
+  /// uma destas nao desenha outra vez: a imagem ja vem. Sem este conjunto,
+  /// cinco fantasmas da MESMA cena pediam a mesma chave no mesmo quadro e
+  /// a placa desenhava cinco vezes o que ia virar UMA imagem.
+  final Set<String> _emVoo = <String>{};
+
+  /// AS MALHAS VIVAS DE CADA VISTA (familia -> chaves `m...`).
+  ///
+  /// A varredura do que morreu (`_soltarOMorto`) era por CHAMADA: cada
+  /// camada de cena soltava as malhas da outra, e a outra as recriava no
+  /// mesmo quadro — geometria subindo para a placa a cada rebuild, com a
+  /// imagem ja em cache. Agora cada vista declara as suas, e so sai o que
+  /// nao esta na UNIAO. A exportacao monta sem familia (a vazia) e continua
+  /// como era.
+  final Map<String, Set<String>> _vivasPorFamilia = <String, Set<String>>{};
+
   /// A ULTIMA IMAGEM PRONTA, de qualquer chave — o que aparece enquanto a
   /// chave pedida ainda nao voltou do decodificador.
   ui.Image? _ultima;
   bool _decodificando = false;
 
+  /// JA HA IMAGEM PARA ESTA CHAVE, pronta ou a caminho? Quem desenha usa
+  /// isto para NAO montar a cena quando o quadro ja existe: montar e
+  /// reescrever camadas, luzes e camera por FFI e varrer as malhas — tudo
+  /// por nada quando o motor nao vai desenhar.
+  bool temQuadro(String chave) =>
+      _imagens.containsKey(chave) || _emVoo.contains(chave);
+
+  /// A IMAGEM DO CACHE, OU NADA — sem desenhar. E o caminho dos fantasmas
+  /// da casca de cebola: um quadro vizinho ja visitado aparece; um que nunca
+  /// foi desenhado fica em branco, em vez de custar um desenho da placa por
+  /// fantasma por quadro.
+  ui.Image? quadroDoCache(String chave) {
+    if (!ligado) return null;
+    final pronta = _imagens[chave];
+    if (pronta != null) _renovar(chave);
+    return pronta;
+  }
+
+  /// A VISTA [dono] DEIXOU DE MOSTRAR: a chave dela volta a poder sair.
+  void esquecerDono(Object dono) {
+    if (_chaveDoDono.remove(dono) != null) _despejarOExcesso();
+  }
+
   void _guardarImagem(String chave, ui.Image imagem) {
-    final antiga = _imagens[chave];
-    if (antiga != null) {
-      _ordemDasImagens.remove(chave);
-      if (!identical(antiga, imagem)) antiga.dispose();
-    }
+    final antiga = _imagens.remove(chave);
+    final ultimaAntiga = _ultima;
+    _ordemDasImagens.remove(chave);
     _imagens[chave] = imagem;
     _ordemDasImagens.add(chave);
     _ultima = imagem;
-    while (_ordemDasImagens.length > _imagensGuardadas) {
-      final fora = _ordemDasImagens.removeAt(0);
-      final descartada = _imagens.remove(fora);
-      if (descartada != null &&
-          !identical(descartada, _ultima) &&
-          !_ultimaPorFamilia.values.any((i) => identical(i, descartada))) {
-        descartada.dispose();
+    if (antiga != null) _descartar(antiga);
+    // A "ultima" anterior pode ja ter saido do cache e so estar viva por
+    // ser a ultima: agora que deixou de ser, nao ha mais quem a solte.
+    if (ultimaAntiga != null) _descartar(ultimaAntiga);
+    _despejarOExcesso();
+  }
+
+  /// O TETO SO CONTA O QUE NINGUEM ESTA MOSTRANDO — com uma vaga de folga
+  /// alem das seguradas, para a chave que acabou de chegar nao sair no
+  /// mesmo passo em que entrou.
+  void _despejarOExcesso() {
+    final seguradas = _chaveDoDono.values.toSet();
+    final teto = math.max(_imagensGuardadas, seguradas.length + 1);
+    var i = 0;
+    while (_ordemDasImagens.length > teto && i < _ordemDasImagens.length) {
+      final candidata = _ordemDasImagens[i];
+      if (seguradas.contains(candidata)) {
+        i++;
+        continue;
       }
+      _ordemDasImagens.removeAt(i);
+      final descartada = _imagens.remove(candidata);
+      if (descartada != null) _descartar(descartada);
     }
+  }
+
+  /// Solta a imagem, a menos que alguem ainda a use: a "ultima" de uma
+  /// familia e o que o palco mostra enquanto a nova decodifica.
+  void _descartar(ui.Image imagem) {
+    if (identical(imagem, _ultima)) return;
+    if (_ultimaPorFamilia.values.any((i) => identical(i, imagem))) return;
+    if (_imagens.values.any((i) => identical(i, imagem))) return;
+    imagem.dispose();
+  }
+
+  /// A "ultima" de uma familia troca de mao. A antiga, se ja saiu do cache,
+  /// nao tinha mais quem a soltasse — e cada uma e do tamanho do alvo.
+  void _trocarUltimaDaFamilia(String familia, ui.Image nova) {
+    final antiga = _ultimaPorFamilia[familia];
+    if (identical(antiga, nova)) return;
+    _ultimaPorFamilia[familia] = nova;
+    if (antiga != null) _descartar(antiga);
+  }
+
+  /// O ACERTO RENOVA A VEZ DA CHAVE: sai primeiro a menos usada, e nao a
+  /// mais antiga — o quadro em que o dono esta parado nao envelhece.
+  void _renovar(String chave) {
+    if (_ordemDasImagens.isNotEmpty && _ordemDasImagens.last == chave) return;
+    if (_ordemDasImagens.remove(chave)) _ordemDasImagens.add(chave);
   }
 
   /// Sobe quando uma imagem nova fica pronta. Quem desenha escuta.
@@ -128,9 +257,10 @@ class Motor3DNativo {
   /// queda anterior nao mandou desistir. Um "nao" aqui NAO e um erro — e o
   /// caminho antigo continuando, que e o que mantem o editor de pe (§43).
   bool get ligado =>
-      !_desistiu &&
-      Motor3D.disponivel &&
-      (Motor3DPreferencia.instancia?.permiteGpu ?? true);
+      placaDeTeste != null ||
+      (!_desistiu &&
+          Motor3D.disponivel &&
+          (Motor3DPreferencia.instancia?.permiteGpu ?? true));
 
   /// POR QUE NAO, quando nao da — para a ficha e para a barra de estado.
   String get motivo {
@@ -250,6 +380,13 @@ class Motor3DNativo {
     try {
       final malhas = malhasCruas3DDe(fonte);
       if (malhas.isEmpty) return false;
+      final placa = placaDeTeste;
+      if (placa != null) {
+        final alca = placa.criarModelo(malhas);
+        if (alca <= 0) return false;
+        _alcaPorChave[chave] = alca;
+        return true;
+      }
       final resultado = Motor3D.criarModelo(malhas);
       if (!resultado.deuCerto) {
         debugPrint(
@@ -301,11 +438,38 @@ class Motor3DNativo {
       _alcaPorChave[chave] = resultado.alca;
       final aviso = leitura[3];
       if (aviso is String && aviso.isNotEmpty) _avisoDaChave[chave] = aviso;
+      // AS IMAGENS GUARDADAS FORAM DESENHADAS SEM ESTE MODELO. A chave da
+      // cena nao sabe se o arquivo ja carregou — ela so tem o caminho —
+      // e o rebuild que a revisao provoca ACERTAVA o cache com o quadro
+      // velho, sem o modelo, ate alguma outra coisa mudar. Esquecer tudo
+      // custa um desenho por vista, uma vez, quando o modelo chega.
+      _esquecerImagens();
       revision.value++;
     } catch (e) {
       debugPrint('Motor 3D nativo: falha ao ler "$caminho": $e');
     } finally {
       _pedindo.remove(chave);
+    }
+  }
+
+  /// SOLTA AS IMAGENS PRONTAS (nao as "ultimas", que o palco ainda mostra
+  /// ate a proxima chegar).
+  void _esquecerImagens() {
+    final antigas = _imagens.values.toList(growable: false);
+    _imagens.clear();
+    _ordemDasImagens.clear();
+    for (final imagem in antigas) {
+      _descartar(imagem);
+    }
+  }
+
+  /// SOLTA UMA ALCA DO ACERVO, pela placa de teste ou pela de verdade.
+  void _soltarAlca(int alca) {
+    final placa = placaDeTeste;
+    if (placa != null) {
+      placa.soltar(alca);
+    } else {
+      Motor3D.soltar(alca);
     }
   }
 
@@ -376,24 +540,36 @@ class Motor3DNativo {
   /// reaproveitar (§20).
   void limpar() {
     for (final alca in _alcaPorChave.values) {
-      Motor3D.soltar(alca);
+      _soltarAlca(alca);
     }
     _alcaPorChave.clear();
     _pedindo.clear();
     _avisoDaChave.clear();
+    _vivasPorFamilia.clear();
     _camadas.clear();
     _luzes.clear();
     _malhas.limpar();
     _estudios.clear();
-    for (final imagem in _imagens.values) {
-      imagem.dispose();
-    }
+    // AS "ULTIMAS" TAMBEM SAO IMAGENS: a de cada familia e a geral podem ja
+    // ter saido do cache e so estar vivas por serem a ultima. Juntar tudo
+    // num conjunto por identidade solta cada uma UMA vez.
+    final todas = <ui.Image>{
+      ..._imagens.values,
+      ..._ultimaPorFamilia.values,
+      ?_ultima,
+    };
     _imagens.clear();
     _ordemDasImagens.clear();
     _ultima = null;
     _ultimaPorFamilia.clear();
+    _chaveDoDono.clear();
+    _emVoo.clear();
     _pendentes.clear();
-    _ponte.esquecer();
+    for (final imagem in todas) {
+      imagem.dispose();
+    }
+    desenhosFeitos = 0;
+    if (placaDeTeste == null) _ponte.esquecer();
     revision.value++;
   }
 
@@ -405,6 +581,11 @@ class Motor3DNativo {
   /// timeline: quem aplica velocidade, deslocamento e ciclo e a timeline
   /// (§12), e o motor recebe o instante ja resolvido — pedir 40 s de um
   /// clipe de 3 s nao pode virar um quadro aleatorio.
+  ///
+  /// [familia] e a VISTA que esta montando (a camada de cena do palco):
+  /// as malhas avaliadas em Dart que este quadro usa ficam registradas em
+  /// nome dela, e so o que nenhuma vista usa e solto. Sem familia (a
+  /// exportacao) entra na familia vazia.
   Cena3D montar({
     required Scene3D cena,
     required RenderCamera? camera,
@@ -414,6 +595,7 @@ class Motor3DNativo {
     double aspectoDaComposicao = 1,
     int sombra = 0,
     int amostras = 1,
+    String? familia,
   }) {
     // O FIM DA CAMADA VEM DA PROPRIA CENA, carimbado por quem a montou
     // (`cenaComNulosDaComposicao`): e a ancora da saida do texto animado, e
@@ -513,11 +695,17 @@ class Motor3DNativo {
       _cena.luzes.add(l);
     }
 
-    _soltarOMorto(vivas);
+    _vivasPorFamilia[familia ?? ''] = vivas;
+    _soltarOMorto();
     return _cena;
   }
 
-  /// SOLTA O QUE ESTE QUADRO NAO USA. Uma malha avaliada em Dart (texto
+  /// A VISTA [familia] SAIU DA TELA: as malhas que so ela usava podem ir.
+  void esquecerFamilia(String familia) {
+    if (_vivasPorFamilia.remove(familia) != null) _soltarOMorto();
+  }
+
+  /// SOLTA O QUE NENHUMA VISTA USA. Uma malha avaliada em Dart (texto
   /// 3D, modelo animado pelos ossos do aplicativo) e NOVA a cada quadro:
   /// sem esta varredura o acervo guardaria uma copia por quadro ate
   /// estourar o orcamento de memoria da GPU (§20).
@@ -525,14 +713,17 @@ class Motor3DNativo {
   /// O QUE VEM DE ARQUIVO NAO SAI AQUI: ler e importar um GLB custa
   /// segundos, e uma camada escondida por um quadro nao pode pagar esse
   /// preco de novo. Esses ficam ate [limpar].
-  void _soltarOMorto(Set<String> vivas) {
+  void _soltarOMorto() {
+    final vivas = <String>{
+      for (final conjunto in _vivasPorFamilia.values) ...conjunto,
+    };
     final mortas = <String>[];
     for (final chave in _alcaPorChave.keys) {
       if (chave.startsWith('m') && !vivas.contains(chave)) mortas.add(chave);
     }
     for (final chave in mortas) {
       final alca = _alcaPorChave.remove(chave);
-      if (alca != null) Motor3D.soltar(alca);
+      if (alca != null) _soltarAlca(alca);
     }
   }
 
@@ -608,7 +799,7 @@ class Motor3DNativo {
   /// prende o tempo nas pontas de proposito (§12) — quem faz o clipe
   /// voltar ao comeco e esta conta, com o mesmo resultado para o preview e
   /// para a exportacao, porque nao depende de relogio nenhum (§34).
-  static double _instanteDaAnimacao(
+  double _instanteDaAnimacao(
     int alca,
     int clip,
     double duracaoDoAsset,
@@ -617,7 +808,9 @@ class Motor3DNativo {
   ) {
     var t = segundos * movimento.speed + movimento.offset;
     var duracao = duracaoDoAsset;
-    if (alca > 0) {
+    // A DURACAO NATIVA SO EXISTE NA PLACA DE VERDADE: a de teste nao tem
+    // clipe, e a pergunta por FFI derrubaria o teste no PC.
+    if (alca > 0 && placaDeTeste == null) {
       final nativa = Motor3D.duracaoDaAnimacao(alca, clip);
       if (nativa > 0) duracao = nativa;
     }
@@ -686,20 +879,46 @@ class Motor3DNativo {
   /// "ultima" para tudo, duas camadas 3D (um texto e um modelo) trocavam de
   /// imagem entre si: a que esperava recebia o ultimo quadro DA OUTRA.
   final Map<String, ui.Image> _ultimaPorFamilia = {};
+
+  /// OS QUADROS JA DESENHADOS ESPERANDO A VEZ DE DECODIFICAR, POR CHAVE.
+  ///
+  /// ============================ POR QUE POR CHAVE ======================
+  ///
+  /// Era um pedido por FAMILIA. Cinco vistas da mesma camada (o palco e os
+  /// quatro fantasmas da casca de cebola) compartilham a familia: a segunda
+  /// apagava o pedido da primeira, a terceira o da segunda, e tres dos
+  /// cinco quadros JA DESENHADOS eram jogados fora. No quadro seguinte as
+  /// tres vistas erravam o cache e mandavam desenhar de novo — tres
+  /// desenhos da placa por rodada, sempre. Medido no teste: quinze desenhos
+  /// para cinco chaves.
+  ///
+  /// Por chave, cada desenho vira exatamente uma imagem. O teto existe
+  /// porque cada pendente guarda uma copia dos pixels do quadro.
   final Map<String, (String, Uint8List, int, int)> _pendentes = {};
+  static const _pendentesGuardados = 8;
 
   ui.Image? _ultimaDe(String? familia) =>
       familia == null ? _ultima : _ultimaPorFamilia[familia];
 
-  ui.Image? quadro(String chave, {String? familia}) {
+  ///
+  /// [dono] e QUEM VAI MOSTRAR a imagem (a vista): enquanto ele nao
+  /// esquecer, a chave dele nao sai do cache — e o que impede o laco em
+  /// repouso descrito em [_chaveDoDono].
+  ui.Image? quadro(String chave, {String? familia, Object? dono}) {
     if (!ligado) return null;
+    if (dono != null) _chaveDoDono[dono] = chave;
     final pronta = _imagens[chave];
     if (pronta != null) {
-      if (familia != null) _ultimaPorFamilia[familia] = pronta;
+      _renovar(chave);
+      if (familia != null) _trocarUltimaDaFamilia(familia, pronta);
       return pronta;
     }
+    // JA DESENHADA, SO NAO DECODIFICOU AINDA: a imagem vem no proximo
+    // quadro; desenhar de novo seria pagar a placa duas vezes pelo mesmo.
+    if (_emVoo.contains(chave)) return _ultimaDe(familia);
     final pixels = _desenharAgora();
     if (pixels == null) return _ultimaDe(familia);
+    _emVoo.add(chave);
     unawaited(_decodificar(chave, pixels, familia: familia));
     return _ultimaDe(familia);
   }
@@ -717,6 +936,13 @@ class Motor3DNativo {
 
   Uint8List? _desenharAgora() {
     try {
+      final placa = placaDeTeste;
+      if (placa != null) {
+        desenhosFeitos++;
+        final pixels = placa.desenhar(_cena);
+        return pixels == null ? null : Uint8List.fromList(pixels);
+      }
+      desenhosFeitos++;
       if (!_ponte.desenhar(_cena)) return null;
       final pixels = _ponte.pixels();
       if (pixels == null) return null;
@@ -748,15 +974,30 @@ class Motor3DNativo {
   }) async {
     // O TAMANHO E O DO QUADRO DESENHADO, lido AGORA: outra camada pode montar
     // outro tamanho enquanto esta decodifica.
-    final largura = larguraDoQuadro ?? _ponte.largura;
-    final altura = alturaDoQuadro ?? _ponte.altura;
-    if (largura <= 0 || altura <= 0) return null;
-    if (pixels.length < largura * altura * 4) return _ultimaDe(familia);
+    final semPlaca = placaDeTeste != null;
+    final largura =
+        larguraDoQuadro ?? (semPlaca ? _cena.largura : _ponte.largura);
+    final altura = alturaDoQuadro ?? (semPlaca ? _cena.altura : _ponte.altura);
+    if (largura <= 0 || altura <= 0) {
+      _emVoo.remove(chave);
+      return null;
+    }
+    if (pixels.length < largura * altura * 4) {
+      _emVoo.remove(chave);
+      return _ultimaDe(familia);
+    }
     final dados = pixels;
     if (!esperar && _decodificando) {
-      // UM QUADRO POR VEZ, e UM PEDIDO PENDENTE POR CAMADA: com uma vaga so,
-      // a segunda camada 3D apagava o pedido da primeira.
-      _pendentes[familia ?? ''] = (chave, dados, largura, altura);
+      // UM QUADRO POR VEZ, e UMA VAGA POR CHAVE (ver [_pendentes]).
+      _pendentes[chave] = (familia ?? '', dados, largura, altura);
+      // O TETO: o pedido mais antigo cai, e a chave dele sai do "em voo" —
+      // senao ficaria presa como "a caminho" para sempre, e a vista que a
+      // espera nunca mais mandaria desenha-la.
+      while (_pendentes.length > _pendentesGuardados) {
+        final maisAntiga = _pendentes.keys.first;
+        _pendentes.remove(maisAntiga);
+        _emVoo.remove(maisAntiga);
+      }
       return _ultimaDe(familia);
     }
     _decodificando = true;
@@ -768,25 +1009,35 @@ class Motor3DNativo {
         return null;
       }
       _guardarImagem(chave, imagem);
-      if (familia != null) _ultimaPorFamilia[familia] = imagem;
+      if (familia != null) _trocarUltimaDaFamilia(familia, imagem);
+      // SAI DO "EM VOO" ANTES DE AVISAR: quem acorda com a revisao le o
+      // cache no build seguinte, e ali a chave ja tem de estar pronta e
+      // nao "a caminho".
+      _emVoo.remove(chave);
       revision.value++;
       return imagem;
     } finally {
+      _emVoo.remove(chave);
       _decodificando = false;
-      if (_pendentes.isNotEmpty) {
-        final fam = _pendentes.keys.first;
-        final p = _pendentes.remove(fam)!;
-        if (_imagens[p.$1] == null) {
-          unawaited(
-            _decodificar(
-              p.$1,
-              p.$2,
-              familia: fam.isEmpty ? null : fam,
-              larguraDoQuadro: p.$3,
-              alturaDoQuadro: p.$4,
-            ),
-          );
+      // A PROXIMA DA FILA. O que ja virou imagem enquanto esperava e
+      // descartado aqui (e sai do "em voo" junto), e nao deixado para tras.
+      while (_pendentes.isNotEmpty) {
+        final proxima = _pendentes.keys.first;
+        final p = _pendentes.remove(proxima)!;
+        if (_imagens.containsKey(proxima)) {
+          _emVoo.remove(proxima);
+          continue;
         }
+        unawaited(
+          _decodificar(
+            proxima,
+            p.$2,
+            familia: p.$1.isEmpty ? null : p.$1,
+            larguraDoQuadro: p.$3,
+            alturaDoQuadro: p.$4,
+          ),
+        );
+        break;
       }
     }
   }
@@ -1233,6 +1484,16 @@ String chaveDaCena({
       ..write(identityHashCode(no.mesh))
       ..write(':')
       ..write(identityHashCode(no.modelAsset))
+      ..write(':')
+      // OS MAPAS QUE JA DECODIFICARAM ENTRAM NA CHAVE. Um modelo
+      // texturizado nasce sem textura (a imagem decodifica fora do fio da
+      // interface); quando ela chega, o no e o mesmo objeto e a chave era
+      // a mesma — o cache devolvia o quadro cinza, sem mapa, ate alguma
+      // outra coisa mudar. A malha ja carregava esta prontidao na
+      // assinatura dela; faltava a chave do QUADRO carregar tambem.
+      ..write(no.modelAsset == null ? '' : prontidaoDosMapasDe(no.modelAsset!))
+      ..write(':')
+      ..write(_prontos(no.material))
       ..write(':')
       ..write(no.modelSource?.path ?? '')
       ..write(':')

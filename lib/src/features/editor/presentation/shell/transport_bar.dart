@@ -47,7 +47,6 @@ class EditorTransportBar extends ConsumerWidget {
     final fps = ref.watch(editorControllerProvider.select((p) => p.fps));
     final controller = ref.read(editorControllerProvider.notifier);
     final selected = ref.watch(selectedLayerProvider);
-    final project = ref.watch(editorControllerProvider);
     // OS KEYFRAMES DA CAMADA SELECIONADA, em tempo do projeto.
     //
     // "Quando voce poe um keyframe e clica aqui, tinha de ir para o
@@ -55,7 +54,14 @@ class EditorTransportBar extends ConsumerWidget {
     // e e o que o Alight faz: com uma camada animada, |◀ e ▶| andam de
     // marca em marca. Sem camada, ou sem marca do lado, vao ao comeco e
     // ao fim como antes.
-    final camada = selected == null ? null : project.layerById(selected);
+    // A CAMADA, NAO O PROJETO: esta barra fica montada o tempo todo, e
+    // observar o projeto inteiro a refazia a cada mutacao — inclusive a
+    // cada passo de um arrasto no palco.
+    final camada = selected == null
+        ? null
+        : ref.watch(
+            editorControllerProvider.select((p) => p.layerById(selected)),
+          );
     final marcas = camada == null
         ? const <Duration>[]
         : [for (final k in camada.keyframeTimes) camada.startTime + k];

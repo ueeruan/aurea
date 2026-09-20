@@ -78,8 +78,43 @@ Map<String, dynamic> _easing(Easing e) => {
   },
 };
 
+/// O tipo da curva pelo INDICE gravado, com guarda de faixa.
+///
+/// Um projeto salvo por uma versao mais nova pode trazer um tipo que esta
+/// versao nao conhece. `values[indice]` estourava `RangeError` e o projeto
+/// inteiro deixava de abrir por causa de UMA curva; fora da faixa, a curva
+/// cai na bezier com as alcas que vieram no arquivo (leitura tolerante).
+EasingType _asTipoDeEasing(dynamic v) {
+  final i = v is num ? v.toInt() : 0;
+  return i >= 0 && i < EasingType.values.length
+      ? EasingType.values[i]
+      : EasingType.cubicBezier;
+}
+
+/// O loop de uma trilha, o MESMO formato para numero e para ponto.
+Map<String, dynamic> _loop(LoopSpec l) => {
+  'm': l.mode.index,
+  'w': l.when.index,
+  'n': l.count,
+};
+
+LoopSpec _asLoop(dynamic v) {
+  if (v is! Map) return LoopSpec.none;
+  final m = (v['m'] as num?)?.toInt() ?? 0;
+  final w = (v['w'] as num?)?.toInt() ?? 0;
+  return LoopSpec(
+    mode: m >= 0 && m < LoopMode.values.length
+        ? LoopMode.values[m]
+        : LoopMode.none,
+    when: w >= 0 && w < LoopWhen.values.length
+        ? LoopWhen.values[w]
+        : LoopWhen.after,
+    count: (v['n'] as num?)?.toInt() ?? 0,
+  );
+}
+
 Easing _asEasing(Map<String, dynamic> m) => Easing(
-  type: EasingType.values[(m['t'] as num).toInt()],
+  type: _asTipoDeEasing(m['t']),
   x1: (m['x1'] as num).toDouble(),
   y1: (m['y1'] as num).toDouble(),
   x2: (m['x2'] as num).toDouble(),
@@ -102,8 +137,7 @@ Map<String, dynamic> _ad(AnimatedDouble a) => {
       for (final k in a.keyframes)
         {'t': _dur(k.time), 'v': k.value, 'e': _easing(k.ease)},
     ],
-  if (a.loop.active)
-    'loop': {'m': a.loop.mode.index, 'w': a.loop.when.index, 'n': a.loop.count},
+  if (a.loop.active) 'loop': _loop(a.loop),
 };
 
 /// Numero que VIROU animavel (constituicao, regra 6): projeto antigo
@@ -116,7 +150,6 @@ AnimatedDouble _asAdOuNumero(dynamic v, double padrao) {
 
 AnimatedDouble _asAd(dynamic v) {
   final m = v as Map<String, dynamic>;
-  final loopMap = m['loop'] as Map<String, dynamic>?;
   return AnimatedDouble(
     (m['b'] as num).toDouble(),
     [
@@ -127,13 +160,7 @@ AnimatedDouble _asAd(dynamic v) {
           ease: _asEasing(k['e'] as Map<String, dynamic>),
         ),
     ],
-    loopMap == null
-        ? LoopSpec.none
-        : LoopSpec(
-            mode: LoopMode.values[(loopMap['m'] as num).toInt()],
-            when: LoopWhen.values[(loopMap['w'] as num).toInt()],
-            count: (loopMap['n'] as num).toInt(),
-          ),
+    _asLoop(m['loop']),
     m['x'] as String?,
     AnimadorAutomatico.fromJson(m['an']),
   );
@@ -153,6 +180,9 @@ Map<String, dynamic> _ao(AnimatedOffset a) => {
           'e': _easing(k.ease),
         },
     ],
+  // O loop de Posicao e de Pivo NAO era gravado: "Loop: repetir" sumia ao
+  // salvar e reabrir. Aditivo — arquivo antigo, sem a chave, abre igual.
+  if (a.loop.active) 'loop': _loop(a.loop),
 };
 
 AnimatedOffset _asAo(dynamic v) {
@@ -167,7 +197,7 @@ AnimatedOffset _asAo(dynamic v) {
           ease: _asEasing(k['e'] as Map<String, dynamic>),
         ),
     ],
-    LoopSpec.none,
+    _asLoop(m['loop']),
     AnimadorAutomatico.fromJson(m['an']),
   );
 }
@@ -1811,15 +1841,24 @@ Map<String, dynamic> _credit(ModelCredit3D credit) => {
   if (credit.author != null) 'author': credit.author,
   if (credit.license != null) 'license': credit.license,
   if (credit.url != null) 'url': credit.url,
+  if (credit.title != null) 'title': credit.title,
+  if (credit.source != null) 'source': credit.source,
+  if (credit.authorUrl != null) 'authorUrl': credit.authorUrl,
 };
 
 ModelCredit3D _asCredit(Object? raw) {
   if (raw is! Map) return const ModelCredit3D();
-  final m = raw.cast<String, dynamic>();
+  // LEITURA TOLERANTE: o credito e enfeite perto da cena. Uma chave com o
+  // tipo errado (arquivo editado a mao, versao futura) vira "sem esse
+  // dado" — nunca um projeto que nao abre.
+  String? texto(Object? v) => v is String && v.isNotEmpty ? v : null;
   return ModelCredit3D(
-    author: m['author'] as String?,
-    license: m['license'] as String?,
-    url: m['url'] as String?,
+    author: texto(raw['author']),
+    license: texto(raw['license']),
+    url: texto(raw['url']),
+    title: texto(raw['title']),
+    source: texto(raw['source']),
+    authorUrl: texto(raw['authorUrl']),
   );
 }
 

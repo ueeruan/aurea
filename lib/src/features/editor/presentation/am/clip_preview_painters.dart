@@ -2,9 +2,12 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 
+import '../../application/perfil3d.dart';
 import '../../domain/peak_pyramid.dart';
+import 'janela_da_timeline.dart';
 
 /// FORMA DE ONDA na barra do clipe.
 ///
@@ -200,7 +203,9 @@ class FilmstripPainter extends CustomPainter {
     required this.start,
     required this.end,
     required this.sourceDuration,
-  });
+    this.janela,
+    this.esquerdaPx = 0,
+  }) : super(repaint: janela);
 
   final List<ui.Image> frames;
 
@@ -211,6 +216,18 @@ class FilmstripPainter extends CustomPainter {
   /// Duracao total do arquivo, que e o que as miniaturas cobrem.
   final Duration sourceDuration;
 
+  /// O PEDACO VISIVEL DA LINHA DO TEMPO e onde esta barra comeca nela.
+  /// Um video de dez minutos ampliado tem centenas de miniaturas na
+  /// barra; so as da janela sao gravadas. Sem janela, pinta tudo.
+  final ValueListenable<JanelaDaTimeline>? janela;
+  final double esquerdaPx;
+
+  // Reaproveitado: `paint` roda a cada troca de janela, e alocar aqui
+  // dentro e lixo por pintura.
+  static final Paint _tinta = Paint()
+    ..filterQuality = FilterQuality.low
+    ..isAntiAlias = false;
+
   @override
   void paint(Canvas canvas, Size size) {
     if (frames.isEmpty || size.width < 2 || size.height < 4) return;
@@ -220,17 +237,25 @@ class FilmstripPainter extends CustomPainter {
     final b = total <= 0 ? 1.0 : end.inMicroseconds / total;
     final span = (b - a).clamp(0.0001, 1.0);
 
-    final paint = Paint()
-      ..filterQuality = FilterQuality.low
-      ..isAntiAlias = false;
-
     // Largura de cada miniatura na barra, mantendo a proporcao.
     final first = frames.first;
     final tileW = size.height * first.width / first.height;
     if (tileW <= 0) return;
 
     final n = (size.width / tileW).ceil() + 1;
-    for (var i = 0; i < n; i++) {
+    // SO AS MINIATURAS DA JANELA. O indice continua absoluto (a conta de
+    // `x` parte de `i * tileW`), entao a tira nao "anda" quando a janela
+    // troca: a miniatura 40 e sempre a mesma, entre ou nao na gravacao.
+    var i0 = 0;
+    var i1 = n;
+    final j = janela?.value;
+    if (j != null) {
+      final de = j.iniPx - esquerdaPx;
+      final ate = j.fimPx - esquerdaPx;
+      if (de > 0) i0 = (de / tileW).floor().clamp(0, n);
+      if (ate < size.width) i1 = ((ate / tileW).ceil() + 1).clamp(0, n);
+    }
+    for (var i = i0; i < i1; i++) {
       final x = i * tileW;
       // Qual instante do ARQUIVO esta neste ponto da barra.
       final f = a + (x / size.width) * span;
@@ -240,7 +265,7 @@ class FilmstripPainter extends CustomPainter {
         img,
         Rect.fromLTWH(0, 0, img.width.toDouble(), img.height.toDouble()),
         Rect.fromLTWH(x, 0, tileW, size.height),
-        paint,
+        _tinta,
       );
     }
   }
@@ -250,7 +275,9 @@ class FilmstripPainter extends CustomPainter {
       old.frames != frames ||
       old.start != start ||
       old.end != end ||
-      old.sourceDuration != sourceDuration;
+      old.sourceDuration != sourceDuration ||
+      old.janela != janela ||
+      old.esquerdaPx != esquerdaPx;
 }
 
 /// A ONDA DO CLIPE, legivel para decupar.
@@ -284,7 +311,9 @@ class ClipWaveformPainter extends CustomPainter {
     this.contorno,
     this.gain = 1,
     this.muted = false,
-  });
+    this.janela,
+    this.esquerdaPx = 0,
+  }) : super(repaint: janela);
 
   /// O TETO DO CACHE. Cada clipe visivel ocupa uma entrada; 32 cobre uma
   /// linha do tempo cheia com folga e nao guarda a sessao inteira.
@@ -292,12 +321,50 @@ class ClipWaveformPainter extends CustomPainter {
 
   static final Map<Object, _OndaGravada> _cache = <Object, _OndaGravada>{};
 
+  /// O PEDACO VISIVEL DA LINHA DO TEMPO, e onde esta barra comeca nela
+  /// (pixels do conteudo).
+  ///
+  /// SEM ISTO A ONDA ERA DA LARGURA DO CLIPE: uma musica de tres minutos a
+  /// 400 px/s sao 72 mil colunas — tres `Float32List` e dois caminhos com
+  /// 144 mil pontos, refeitos a cada passo de zoom, e entregues INTEIROS ao
+  /// raster a cada quadro (o motor descarta por operacao, e a operacao e
+  /// um caminho so). Com a janela, o caminho tem teto: o que cabe na tela
+  /// mais a folga. Nula = a onda inteira, como sempre foi.
+  final ValueListenable<JanelaDaTimeline>? janela;
+  final double esquerdaPx;
+
+  /// O passo em que o recorte LOCAL anda. A janela ja chega quantizada,
+  /// mas em coordenadas do conteudo: arrastar o clipe mudaria o recorte
+  /// local a cada pixel e a gravacao seria refeita a cada passo do dedo.
+  /// Arredondado para fora neste passo, o recorte so muda quando a barra
+  /// atravessa um balde — e um clipe que cabe inteiro na janela nunca muda.
+  static const int _baldeLocal = 256;
+
+  /// As colunas `[c0, c1)` que entram na gravacao.
+  (int, int) _recorte(int colunas) {
+    final j = janela?.value;
+    if (j == null) return (0, colunas);
+    final de = j.iniPx - esquerdaPx;
+    final ate = j.fimPx - esquerdaPx;
+    final c0 = de <= 0
+        ? 0
+        : math.min(colunas, (de / _baldeLocal).floor() * _baldeLocal);
+    final c1 = ate >= colunas
+        ? colunas
+        : math.max(0, (ate / _baldeLocal).ceil() * _baldeLocal);
+    return (c0, math.min(colunas, c1));
+  }
+
   /// A CHAVE DA GRAVACAO: tudo o que muda o desenho. A piramide entra por
   /// IDENTIDADE (ela e imutavel depois de pronta); a fonte, pelos
   /// instantes das pontas — comparar os milhares de amostras do meio a
   /// cada quadro custaria mais caro do que redesenhar.
-  Object _assinatura(Size size) => Object.hash(
-    identityHashCode(pyramid),
+  ///
+  /// UM RECORD, e nao um `Object.hash`: o inteiro do hash era a propria
+  /// chave do mapa, e duas ondas diferentes com o mesmo hash devolveriam
+  /// a gravacao uma da outra. O record compara campo a campo.
+  Object _assinatura(Size size, int c0, int c1) => (
+    pyramid,
     size.width,
     size.height,
     color,
@@ -305,12 +372,11 @@ class ClipWaveformPainter extends CustomPainter {
     gain,
     muted,
     fonte.length,
-    fonte.isEmpty ? 0 : fonte.first,
-    fonte.length < 2 ? 0 : fonte.last,
-    _colunas(size),
+    fonte.isEmpty ? 0.0 : fonte.first,
+    fonte.length < 2 ? 0.0 : fonte.last,
+    c0,
+    c1,
   );
-
-  static int _colunas(Size size) => size.width.floor();
 
   /// ESVAZIA O CACHE. Chamado quando o projeto troca (outra linha do
   /// tempo, outro conjunto de clipes): manter gravacoes de uma sessao que
@@ -321,6 +387,7 @@ class ClipWaveformPainter extends CustomPainter {
     }
     _cache.clear();
     construcoes = 0;
+    colunasDaUltimaConstrucao = 0;
   }
 
   static int get entradasNoCache => _cache.length;
@@ -331,6 +398,11 @@ class ClipWaveformPainter extends CustomPainter {
   /// chamadas que a gravacao faz nao passam pela caneta de fora.
   @visibleForTesting
   static int construcoes = 0;
+
+  /// QUANTAS COLUNAS a ultima construcao percorreu: a prova de que a
+  /// janela recorta (um clipe de 20 mil px nao pode construir 20 mil).
+  @visibleForTesting
+  static int colunasDaUltimaConstrucao = 0;
 
   final PeakPyramid pyramid;
 
@@ -364,16 +436,27 @@ class ClipWaveformPainter extends CustomPainter {
     if (pyramid.isEmpty || fonte.length < 2 || size.width < 2 || size.height < 6) {
       return;
     }
+    final (c0, c1) = _recorte(size.width.floor());
+    // O clipe esta na arvore mas fora da janela (o selecionado fica
+    // sempre): nao ha coluna para desenhar, e nada entra no cache.
+    if (c1 <= c0) return;
     // O DESENHO PRONTO MANDA: enquanto nada na onda mudou, o que se faz
     // aqui e reexecutar a gravacao — e nao reconstruir milhares de pontos.
-    final chave = _assinatura(size);
-    final guardada = _cache[chave];
+    final chave = _assinatura(size, c0, c1);
+    final guardada = _cache.remove(chave);
     if (guardada != null) {
+      // Volta para o FIM da fila: quem foi usado agora e o ultimo a sair.
+      // Sem isto o teto expulsava por idade de NASCIMENTO, e o clipe que
+      // esta na tela ha mais tempo era justamente o primeiro a ser refeito.
+      _cache[chave] = guardada;
       canvas.drawPicture(guardada.picture);
       return;
     }
     final gravador = ui.PictureRecorder();
-    _desenhar(Canvas(gravador), size);
+    Perfil3D.fase(
+      'pintar.onda',
+      () => _desenhar(Canvas(gravador), size, c0, c1),
+    );
     final nova = _OndaGravada(gravador.endRecording(), chave);
     // Teto: a entrada mais antiga sai. O `Map` do Dart preserva a ordem de
     // insercao, entao a primeira chave e a mais velha.
@@ -385,14 +468,19 @@ class ClipWaveformPainter extends CustomPainter {
     canvas.drawPicture(nova.picture);
   }
 
-  void _desenhar(Canvas canvas, Size size) {
+  void _desenhar(Canvas canvas, Size size, int c0, int c1) {
     construcoes++;
     final colunas = size.width.floor();
+    final n = c1 - c0;
+    colunasDaUltimaConstrucao = n;
     final mid = size.height / 2;
     final half = size.height / 2 - 1;
-    final cima = Float32List(colunas), baixo = Float32List(colunas);
-    final corpo = Float32List(colunas);
-    for (var x = 0; x < colunas; x++) {
+    final cima = Float32List(n), baixo = Float32List(n);
+    final corpo = Float32List(n);
+    for (var k = 0; k < n; k++) {
+      // A coluna e ABSOLUTA na barra: o recorte muda quais colunas entram,
+      // nunca o que cada uma mostra.
+      final x = c0 + k;
       final t0 = _em(x / colunas), t1 = _em((x + 1) / colunas);
       final lo = math.min(t0, t1), hi = math.max(t0, t1);
       final nivel = pyramid.levelFor(math.max(hi - lo, 1e-6));
@@ -409,25 +497,25 @@ class ClipWaveformPainter extends CustomPainter {
         if (nivel.min[i] < mn) mn = nivel.min[i];
         if (nivel.rms[i] > rms) rms = nivel.rms[i];
       }
-      cima[x] = _altura(mx, half);
-      baixo[x] = _altura(mn, half);
-      corpo[x] = _altura(rms, half);
+      cima[k] = _altura(mx, half);
+      baixo[k] = _altura(mn, half);
+      corpo[k] = _altura(rms, half);
     }
     final alfa = muted ? 0.35 : 1.0;
     Path forma(Float32List up, Float32List down) {
-      final p = Path()..moveTo(0, mid - up[0]);
-      for (var x = 1; x < colunas; x++) {
-        p.lineTo(x + 0.5, mid - up[x]);
+      final p = Path()..moveTo(c0.toDouble(), mid - up[0]);
+      for (var k = 1; k < n; k++) {
+        p.lineTo(c0 + k + 0.5, mid - up[k]);
       }
-      for (var x = colunas - 1; x >= 0; x--) {
-        p.lineTo(x + 0.5, mid + down[x]);
+      for (var k = n - 1; k >= 0; k--) {
+        p.lineTo(c0 + k + 0.5, mid + down[k]);
       }
       return p..close();
     }
 
     canvas.drawLine(
-      Offset(0, mid),
-      Offset(size.width, mid),
+      Offset(c0.toDouble(), mid),
+      Offset(c1 >= colunas ? size.width : c1.toDouble(), mid),
       Paint()
         ..color = Colors.white.withValues(alpha: 0.10 * alfa)
         ..strokeWidth = 1,
@@ -456,8 +544,11 @@ class ClipWaveformPainter extends CustomPainter {
   bool shouldRepaint(ClipWaveformPainter old) =>
       old.pyramid != pyramid ||
       old.color != color ||
+      old.contorno != contorno ||
       old.gain != gain ||
       old.muted != muted ||
+      old.janela != janela ||
+      old.esquerdaPx != esquerdaPx ||
       old.fonte.length != fonte.length ||
       (fonte.isNotEmpty &&
           (old.fonte.first != fonte.first || old.fonte.last != fonte.last)) ||

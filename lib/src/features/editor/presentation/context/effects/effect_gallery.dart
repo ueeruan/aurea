@@ -17,8 +17,14 @@ import '../../../application/ui/pro_mode.dart';
 import '../../../domain/effect.dart';
 import '../../../domain/presets_de_edicao.dart';
 import '../../am/am_colors.dart';
+import '../../am/estudio_do_tempo.dart' show showEstudioDoTempo;
 import 'effect_detail_sheet.dart';
 import 'previa_do_efeito.dart';
+
+/// O que acha a entrada "Time Remap" na busca (ja sem acento e sem caixa).
+const _buscaDoTimeRemap =
+    'time remap remapear tempo velocidade curva rampa speed ramp '
+    'congelar reverso camera lenta slow motion';
 
 /// A GALERIA DE EFEITOS (Fase 4): previa animada de verdade por efeito,
 /// busca com sinonimos, categorias com contador e favoritos. Um toque no
@@ -37,6 +43,9 @@ Future<void> showEffectGallery(
   PlaybackController playback,
 ) async {
   final controller = ref.read(editorControllerProvider.notifier);
+  // O `ref` de QUEM ABRIU a galeria: o de dentro da folha morre com ela, e
+  // o Estudio do tempo abre depois de a folha fechar.
+  final refDeFora = ref;
   final search = TextEditingController();
   var query = '';
   String? category;
@@ -111,6 +120,22 @@ Future<void> showEffectGallery(
                   if (favs.contains(effectSpecs[t]!.id)) t,
               ];
             }
+
+            // So em video (a curva de tempo e da fonte do clipe). Com busca,
+            // vale a busca — os filtros de aba so contam com ela vazia,
+            // como no resto da galeria; sem busca, aparece em "Todos" e na
+            // aba Tempo.
+            final buscaDoTempo = normalizarBusca(query.trim());
+            final mostrarTimeRemap =
+                camadaDaGaleria is VideoLayer &&
+                (buscaDoTempo.isNotEmpty
+                    ? _buscaDoTimeRemap.contains(buscaDoTempo)
+                    : !presets &&
+                          !favoritos &&
+                          !recentes &&
+                          !edits &&
+                          !sugeridos &&
+                          (category == null || category == 'Time'));
 
             Widget chip(
               String texto,
@@ -274,6 +299,24 @@ Future<void> showEffectGallery(
                         ),
                       ),
                     const SizedBox(height: 8),
+                    // EFEITOS -> TEMPO -> TIME REMAP. O tipo continua fora
+                    // do catalogo (`efeitosInternos`): aplicar o efeito cru
+                    // so ligava a curva identidade e deixava a pessoa com
+                    // um numero de segundos para arrastar. Esta entrada
+                    // abre o MESMO Estudio do tempo da folha "Tempo" — uma
+                    // casa so para a curva, duas portas ate ela.
+                    if (mostrarTimeRemap)
+                      _EntradaDoTimeRemap(
+                        onTap: () {
+                          Navigator.of(sheetContext).pop();
+                          showEstudioDoTempo(
+                            context,
+                            refDeFora,
+                            layerId,
+                            playback,
+                          );
+                        },
+                      ),
                     if (presets && query.isEmpty)
                       Expanded(
                         child: ListView.builder(
@@ -322,7 +365,12 @@ Future<void> showEffectGallery(
                       )
                     else
                       Expanded(
-                        child: results.isEmpty
+                        // Com a busca em "time remap" a grade fica vazia e
+                        // a entrada acima e a resposta: "Nada encontrado"
+                        // embaixo dela seria mentira.
+                        child: results.isEmpty && mostrarTimeRemap
+                            ? const SizedBox.shrink()
+                            : results.isEmpty
                             ? Center(
                                 child: Padding(
                                   padding: const EdgeInsets.all(24),
@@ -636,7 +684,7 @@ class _PresetTile extends StatelessWidget {
                             ),
                             child: Text(
                               preset.marca,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 9,
                                 fontWeight: FontWeight.w700,
                                 color: AmColors.accent,
@@ -672,4 +720,65 @@ class _PresetTile extends StatelessWidget {
       ),
     );
   }
+}
+
+/// A entrada "Time Remap" da aba Tempo: uma linha acima da grade, e nao um
+/// tile dela — nao ha previa animada para mostrar, e ela ABRE um editor em
+/// vez de empilhar um efeito.
+class _EntradaDoTimeRemap extends StatelessWidget {
+  const _EntradaDoTimeRemap({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 10),
+    child: Tocavel(
+      key: const ValueKey('efeito-time_remap'),
+      haptico: true,
+      onTap: onTap,
+      child: Container(
+        height: 52,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          color: AmColors.chip,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Icon(CupertinoIcons.timer, size: 20, color: AmColors.action),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  AppText(
+                    'Time Remap',
+                    maxLines: 1,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: AmColors.text,
+                    ),
+                  ),
+                  AppText(
+                    'Tempo · curva, keyframes, congelar e reverso',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 11, color: AmColors.muted),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              CupertinoIcons.chevron_right,
+              size: 14,
+              color: AmColors.muted,
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 }

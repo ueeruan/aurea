@@ -1,6 +1,7 @@
 import 'dart:ui';
 
 import '../theme/aurea_colors.dart';
+import '../theme/aurea_paleta.dart';
 
 /// A PALETA DO EDITOR — o cromo do editor e do estudio.
 ///
@@ -32,33 +33,51 @@ import '../theme/aurea_colors.dart';
 /// no mesmo degrau. Os papeis de marca (acao, keyframe, selecao) agora saem
 /// de [AureaColors], e nao ha hexadecimal escrito aqui.
 ///
-/// OS CAMPOS SAO `static const` E NAO GETTERS, de proposito: `CromoEditor`
-/// escreve `static const Color acao = AmColors.action;`, e um getter
-/// quebraria a compilacao de todo o cromo.
+/// ==========================================================================
+/// OS CAMPOS VIRARAM GETTERS (20/09/2026) — E O QUE ISSO CUSTOU
+/// ==========================================================================
+///
+/// Eram `static const`. Cor `const` se resolve na compilacao, entao o editor
+/// nascia preso a UMA paleta: com seis temas em Ajustes, o app inteiro
+/// trocava de cor e o editor ficava no tom antigo.
+///
+/// Agora cada papel le [AureaPaleta.ativa] — mais precisamente a sub-paleta
+/// [AureaPaleta.editor], que no tema claro continua escura (palco de video se
+/// avalia sobre fundo escuro, e as alcas e rotulos do palco sao brancos
+/// fixos).
+///
+/// O CUSTO: toda expressao `const` que continha um destes campos deixou de
+/// ser constante e perdeu a palavra `const` (cerca de 170 sitios, apontados
+/// um a um pelo analisador). Por isso [text] e [muted] CONTINUAM `const`:
+/// sozinhos eles respondem por ~530 sitios, e os seis temas so variam o
+/// texto em nuances de branco — nao paga o preco. Quando o tema claro for
+/// ao editor, ai sim eles terao de virar getter tambem.
 abstract final class AmColors {
+  static AureaPaleta get _p => AureaPaleta.ativa.editor;
+
   /// O FUNDO ATRAS DA COMPOSICAO. Mais escuro que o cromo, para o quadro
   /// do projeto se destacar do que e ferramenta.
-  static const Color bg = AureaColors.stage;
+  static Color get bg => _p.stage;
 
   /// O CROMO: cabecalho, transporte, linha do tempo. Tudo que e ferramenta
   /// usa este tom, e por isso os tres blocos parecem uma peca so, que e o
   /// que eles sao.
-  static const Color topBar = AureaColors.chrome;
-  static const Color panel = AureaColors.chrome;
-  static const Color panelHigh = AureaColors.chromeHigh;
+  static Color get topBar => _p.background;
+  static Color get panel => _p.background;
+  static Color get panelHigh => _p.surface;
 
   /// A CAPSULA DO TEMPO e os chips em geral.
-  static const Color chip = AureaColors.chip;
+  static Color get chip => _p.chip;
 
   /// A PILULA DA CAMADA: o olho e a cor, flutuando sobre a trilha.
-  static const Color pilula = AureaColors.pill;
+  static Color get pilula => _p.panel;
 
   /// A CAIXA DE VALOR e os chips do painel de transformacao.
-  static const Color campo = AureaColors.field;
+  static Color get campo => _p.chip;
 
   /// Keyframe, curva e realce de contexto: o que esta LIGADO na tela.
-  static const Color accent = AureaColors.accent;
-  static const Color accentDim = AureaColors.accentDim;
+  static Color get accent => _p.accent;
+  static Color get accentDim => _p.accentDim;
 
   /// ACAO: Exportar, o "+", chips de acao.
   ///
@@ -67,29 +86,31 @@ abstract final class AmColors {
   /// esta ligado usa o claro, que e um TRACO fino sobre o fundo escuro e
   /// precisa de 7,8:1 contra ele. Um so azul nao serve aos dois: o que se ve
   /// sobre o preto e claro demais para levar texto em cima.
-  static const Color action = AureaColors.brand;
-  static const Color onAction = AureaColors.text;
-  static const Color actionDim = Color(0xFF16304A);
+  static Color get action => _p.primary;
+  static Color get onAction => _p.onPrimary;
+  static Color get actionDim => _p.primaryDim;
 
   /// Selecao e grupos: o fundo da camada escolhida e o chip de grupo.
-  static const Color selection = AureaColors.brandDeep;
+  static Color get selection => _p.selected;
 
   /// Selecao em TEXTO e em TRACO, onde [selection] seria escuro demais.
-  static const Color selectionText = AureaColors.selectionText;
+  static Color get selectionText => _p.selectedText;
 
   /// Barras de camada com contraste para texto e keyframes.
-  static const Color teal = AureaColors.brandLight;
-  static const Color tealBright = AureaColors.brandSoft;
+  static Color get teal => _p.accent;
+  static Color get tealBright => _p.keyframe;
 
   /// Excluir, erro, e a marca de alerta na regua.
-  static const Color pink = AureaColors.danger;
+  static Color get pink => _p.danger;
 
   /// O CABECOTE E BRANCO, como na referencia. Ele cruza trilhas de todas
   /// as cores: qualquer cor propria brigaria com alguma delas, e branco
   /// puro nao e usado em mais nada grande na tela.
-  static const Color cabecote = AureaColors.playhead;
+  static Color get cabecote => _p.playhead;
 
+  /// TEXTO — ainda `const`, ver o cabecalho da classe.
   static const Color text = AureaColors.text;
   static const Color muted = AureaColors.muted;
-  static const Color hairline = AureaColors.border;
+
+  static Color get hairline => _p.divider;
 }

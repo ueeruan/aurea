@@ -25,7 +25,7 @@ class PresetsDoTexto extends ConsumerWidget {
     final id = ref.watch(selectedLayerProvider);
     final layer = id == null ? null : project.layerById(id);
     if (layer is! TextLayer || id == null) {
-      return const ColoredBox(color: AmColors.panel);
+      return ColoredBox(color: AmColors.panel);
     }
 
     final atual = layer.animators;

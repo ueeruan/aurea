@@ -458,7 +458,7 @@ class _Passo extends StatelessWidget {
             child: FittedBox(
               child: AppText(
                 valor,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
                   color: AmColors.action,

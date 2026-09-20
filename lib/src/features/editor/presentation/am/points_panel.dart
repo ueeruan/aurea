@@ -327,7 +327,9 @@ class PointsPanelState extends ConsumerState<PointsPanel> {
 
   @override
   Widget build(BuildContext context) {
-    ref.watch(editorControllerProvider);
+    // A CAMADA EDITADA, nao o projeto: o `_caminho()` sai dela, e observar
+    // tudo refazia o painel a cada mutacao de qualquer outra camada.
+    ref.watch(editorControllerProvider.select((p) => p.layerById(widget.layerId)));
     final modo = ref.watch(pathEditModeProvider);
     final sel = ref.watch(pathEditSelectedProvider);
     final aba = ref.watch(abaDosPontosProvider);

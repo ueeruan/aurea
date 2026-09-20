@@ -42,21 +42,28 @@ import 'transport_bar.dart' show parseTimecodeInput;
 /// teal e keyframe, o violeta e selecao e grupo. Estrutura de editor de
 /// motion se aprende de qualquer referencia; paleta, icones e textos sao
 /// nossos.
+/// AS CORES SAO GETTERS porque [AmColors] passou a ler o tema em vigor
+/// ([AureaPaleta]). Eram `static const`, e const prende a cor na
+/// compilacao: o cromo ficaria no tema antigo enquanto o resto do app
+/// trocava.
 abstract final class CromoEditor {
-  static const Color fundo = AmColors.topBar;
-  static const Color palco = AmColors.bg;
-  static const Color trilho = AmColors.chip;
+  static Color get fundo => AmColors.topBar;
+  static Color get palco => AmColors.bg;
+  static Color get trilho => AmColors.chip;
 
   /// Acao e estado ligado (o lima da logo).
-  static const Color acao = AmColors.action;
-  static const Color sobreAcao = AmColors.onAction;
+  static Color get acao => AmColors.action;
+  static Color get sobreAcao => AmColors.onAction;
 
   /// Keyframe no cabecote (teal).
-  static const Color keyframe = AmColors.accent;
+  static Color get keyframe => AmColors.accent;
 
   /// Selecao e grupo (violeta da logo): a barra do lote e o chip de grupo.
-  static const Color selecao = AmColors.selection;
+  static Color get selecao => AmColors.selection;
   static const Color branco = AmColors.text;
+
+  /// Branco a 40%: rotulo apagado SOBRE O CROMO, que e escuro em todo tema
+  /// (no tema claro o editor usa a paleta escura — ver [AureaPaleta.editor]).
   static const Color apagado = Color(0x66FFFFFF);
 
   static const double navbar = 44;
@@ -151,7 +158,9 @@ class BarraDoProjeto extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final project = ref.watch(editorControllerProvider);
+    // SO O ID: esta barra fica montada o tempo todo e observar o projeto
+    // inteiro a refazia a cada mutacao, inclusive a cada passo de arrasto.
+    final projetoId = ref.watch(editorControllerProvider.select((p) => p.id));
     final controller = ref.read(editorControllerProvider.notifier);
     final dentroDeGrupo = controller.dentroDeGrupo;
     return Container(
@@ -182,7 +191,7 @@ class BarraDoProjeto extends ConsumerWidget {
           ),
           if (dentroDeGrupo) _TrilhaDeGrupos(controller: controller),
           const Expanded(child: _TituloEditavel()),
-          _ChipDoCronometro(projetoId: project.id),
+          _ChipDoCronometro(projetoId: projetoId),
           // O relogio mora na barra do projeto: tocar digita o tempo.
           ValueListenableBuilder<Duration>(
             valueListenable: playback.time,
@@ -259,13 +268,21 @@ class BarraDaCamada extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final project = ref.watch(editorControllerProvider);
-    final layer = project.layerById(layerId);
+    // A CAMADA E O VINCULO DE PAI, nao o projeto: a barra da camada fica
+    // montada enquanto ha selecao e nao pode refazer por mutacao alheia.
+    final layer = ref.watch(
+      editorControllerProvider.select((p) => p.layerById(layerId)),
+    );
     if (layer == null) {
       return Container(height: CromoEditor.navbar, color: CromoEditor.fundo);
     }
+    final comLinkDePai = ref.watch(
+      editorControllerProvider.select(
+        (p) => p.linkFor(layerId, LayerProp.parent) != null,
+      ),
+    );
     final temPai =
-        project.linkFor(layerId, LayerProp.parent) != null ||
+        comLinkDePai ||
         (layer is Scene3DLayer && layer.cameraParentLayerId != null);
     return Container(
       key: const ValueKey('barra-da-camada'),
@@ -975,14 +992,24 @@ class BarraDeReproducao extends ConsumerWidget {
       );
     }
     final controller = ref.read(editorControllerProvider.notifier);
-    final project = ref.watch(editorControllerProvider);
     final selected = ref.watch(selectedLayerProvider);
     final opcoes = ref.watch(opcoesDeVisualizacaoProvider);
-    final duration = project.duration;
-    final fps = project.fps <= 0 ? 30 : project.fps;
+    // TRES CAMPOS, NAO O PROJETO: a barra de reproducao esta sempre na
+    // tela e so precisa da duracao, da taxa e da camada selecionada.
+    final duration = ref.watch(
+      editorControllerProvider.select((p) => p.duration),
+    );
+    final fpsDoProjeto = ref.watch(
+      editorControllerProvider.select((p) => p.fps),
+    );
+    final fps = fpsDoProjeto <= 0 ? 30 : fpsDoProjeto;
     final quadro = Duration(microseconds: 1000000 ~/ fps);
 
-    final camada = selected == null ? null : project.layerById(selected);
+    final camada = selected == null
+        ? null
+        : ref.watch(
+            editorControllerProvider.select((p) => p.layerById(selected)),
+          );
     final marcas = camada == null
         ? const <Duration>[]
         : [for (final k in camada.keyframeTimes) camada.startTime + k];
@@ -1027,7 +1054,7 @@ class BarraDeReproducao extends ConsumerWidget {
               return Row(
                 children: [
                   _BotaoDoCromo(
-                    key: const ValueKey('editor-undo'),
+                    key: ValueKey('editor-undo'),
                     icone: CupertinoIcons.arrow_uturn_left,
                     dica: 'Desfazer',
                     largura: lado,
@@ -1085,7 +1112,7 @@ class BarraDeReproducao extends ConsumerWidget {
                               ),
                               // Repetindo, o play ganha a setinha do laco.
                               if (playback.loop.value)
-                                const Positioned(
+                                Positioned(
                                   right: 8,
                                   bottom: 8,
                                   child: IgnorePointer(
@@ -1189,7 +1216,7 @@ class _ConteudoDaInfobar extends StatelessWidget {
       return Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(
+          Icon(
             CupertinoIcons.rhombus,
             size: 14,
             color: CromoEditor.keyframe,
@@ -1316,8 +1343,16 @@ class ColunaDeVisualizacao extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final selected = ref.watch(selectedLayerProvider);
-    final project = ref.watch(editorControllerProvider);
-    final soloAtivo = selected != null && project.metaOf(selected).solo;
+    // DOIS RECORTES, NAO O PROJETO: esta coluna fica sobre o palco o tempo
+    // todo e so precisa do solo da camada e da pilha de camadas.
+    final soloAtivo =
+        selected != null &&
+        ref.watch(
+          editorControllerProvider.select((p) => p.metaOf(selected).solo),
+        );
+    final camadas = ref.watch(
+      editorControllerProvider.select((p) => p.layers),
+    );
     final zoom = ref.watch(zoomDoPalcoProvider);
     final opcoes = ref.watch(opcoesDeVisualizacaoProvider);
     final notifier = ref.read(opcoesDeVisualizacaoProvider.notifier);
@@ -1338,7 +1373,7 @@ class ColunaDeVisualizacao extends ConsumerWidget {
       return null;
     }
 
-    final camera = primeiraCamera(project.layers);
+    final camera = primeiraCamera(camadas);
 
     // A COLUNA CABE NO PALCO: num celular o palco tem pouco mais de 200
     // pontos de altura, e sete alvos de 44 passavam por cima da barra de
@@ -1381,7 +1416,7 @@ class ColunaDeVisualizacao extends ConsumerWidget {
       key: const ValueKey('coluna-de-visualizacao'),
       width: 40,
       padding: const EdgeInsets.symmetric(vertical: 4),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: CromoEditor.trilho,
         borderRadius: BorderRadius.only(
           topLeft: Radius.circular(12),
@@ -1940,7 +1975,7 @@ class _ChipDoCronometroState extends ConsumerState<_ChipDoCronometro> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(
+            Icon(
               CupertinoIcons.timer,
               size: 12,
               color: CromoEditor.acao,

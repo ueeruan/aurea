@@ -289,6 +289,22 @@ class _AboutTabState extends ConsumerState<AboutTab> {
                     applicationVersion: _appVersion,
                   ),
                 ),
+                Padding(
+                  padding: const EdgeInsets.only(left: 16),
+                  child: Divider(color: AppColors.hairline),
+                ),
+                // AS DIRETRIZES DO SKETCHFAB pedem que o app diga de onde
+                // vem o acervo 3D. A atribuicao de cada modelo fica no
+                // proprio no da cena; esta linha e a do app inteiro.
+                ListTile(
+                  key: const ValueKey('sobre-sketchfab'),
+                  leading: Icon(
+                    CupertinoIcons.cube_box,
+                    color: AppColors.lime,
+                    size: 21,
+                  ),
+                  title: const AppText('Modelos 3D fornecidos por Sketchfab'),
+                ),
               ],
             ),
           ),

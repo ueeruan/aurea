@@ -51,15 +51,28 @@ void main() {
       expect(still.valueAt(Duration.zero), 42);
     });
 
-    test('edited: com animacao vira keyframe, sem animacao muda a base', () {
-      final static = AnimatedDouble(1).edited(const Duration(seconds: 1), 5);
-      expect(static.isAnimated, false);
-      expect(static.base, 5);
+    // EDITAR UM VALOR NUNCA CRIA KEYFRAME (`docs/keyframe-explicito.md`).
+    // O teste fixava a regra ANTIGA — "animada + edicao = marca nova" —
+    // que e exatamente o defeito das marcas que apareciam sozinhas.
+    test('edited: sobre a marca atualiza; fora dela nao mexe', () {
+      final estatica = AnimatedDouble(1).edited(const Duration(seconds: 1), 5);
+      expect(estatica.isAnimated, false);
+      expect(estatica.base, 5);
 
-      final animated = AnimatedDouble(1)
-          .withKeyframe(Duration.zero, 1)
-          .edited(const Duration(seconds: 1), 5);
-      expect(animated.keyframes.length, 2);
+      final animada = AnimatedDouble(1).withKeyframe(Duration.zero, 1);
+
+      // FORA de qualquer marca: a trilha volta intacta, e quem chama
+      // trata a recusa (a edicao fica pendente ate o losango).
+      final fora = animada.edited(const Duration(seconds: 1), 5);
+      expect(fora.keyframes.length, 1);
+      expect(fora.valueAt(const Duration(seconds: 1)), 1);
+      expect(animada.aceitaEdicaoEm(const Duration(seconds: 1)), isFalse);
+
+      // SOBRE a marca: atualiza aquela marca, com a curva dela.
+      final sobre = animada.edited(Duration.zero, 5);
+      expect(sobre.keyframes.length, 1);
+      expect(sobre.keyframes.single.value, 5);
+      expect(animada.aceitaEdicaoEm(Duration.zero), isTrue);
     });
   });
 

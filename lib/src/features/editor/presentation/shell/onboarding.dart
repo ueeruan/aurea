@@ -116,7 +116,7 @@ class _OnboardingCoachState extends State<OnboardingCoach> {
                 padding: const EdgeInsets.symmetric(horizontal: 10),
                 minimumSize: const Size(0, 30),
                 onPressed: widget.onFechar,
-                child: const AppText('Entendi',
+                child: AppText('Entendi',
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
@@ -141,7 +141,7 @@ class DicaDoPalco extends StatelessWidget {
   const DicaDoPalco({super.key});
 
   @override
-  Widget build(BuildContext context) => const ColoredBox(
+  Widget build(BuildContext context) => ColoredBox(
     color: AmColors.panel,
     child: Center(
       child: Padding(

@@ -136,6 +136,10 @@ void main() {
     final e = c.read(editorControllerProvider.notifier);
     final id = c.read(editorControllerProvider).layers.first.id;
     e.toggleKeyframe(id, Duration.zero, LayerProp.opacity);
+    // O LOSANGO CRAVA, A EDICAO SO ATUALIZA: o auto-key nasce desligado
+    // (`docs/keyframe-explicito.md`), entao editar fora de uma marca fica
+    // pendente. Antes este trecho dependia do padrao ligado.
+    e.toggleKeyframe(id, const Duration(seconds: 2), LayerProp.opacity);
     e.editOpacity(id, const Duration(seconds: 2), .2);
     expect(
       c.read(editorControllerProvider).layerById(id)!.opacity.keyframes,

@@ -17,10 +17,19 @@ class GalleryAsset {
     this.id, {
     required this.video,
     this.duration = Duration.zero,
+    this.modificado,
   });
   final String id;
   final bool video;
   final Duration duration;
+
+  /// Quando o item mudou pela ultima vez, em segundos. Foto EDITADA na
+  /// galeria mantem o id — e isto que separa a versao nova da que o app ja
+  /// copiou.
+  final int? modificado;
+
+  /// O rastro do original nos Recentes: reconhece "esta eu ja copiei".
+  String get origem => 'galeria:$id@${modificado ?? 0}';
 }
 
 /// Metadata is paged. Full files are requested only after an explicit tap.
@@ -79,6 +88,7 @@ class GalleryService {
           asset.id,
           video: asset.type == AssetType.video,
           duration: Duration(seconds: asset.duration),
+          modificado: asset.modifiedDateSecond,
         ),
     ];
   }

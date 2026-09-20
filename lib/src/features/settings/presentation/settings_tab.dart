@@ -1,5 +1,6 @@
+import 'dart:async';
 import 'dart:io';
-import 'package:aurea/src/core/theme/aurea_colors.dart';
+import 'package:aurea/src/core/theme/aurea_paleta.dart';
 
 import '../../../core/l10n/app_language.dart';
 
@@ -7,6 +8,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../editor/application/desempenho/aurea_performance_manager.dart';
 import '../../editor/application/motor3d_modo.dart';
 import '../../editor/application/qualidade3d_controller.dart';
 import '../../editor/domain/orcamento_render.dart';
@@ -14,6 +16,7 @@ import 'travadas_screen.dart';
 import '../../editor/application/proxy_service.dart';
 import '../../editor/application/media_preview_service.dart';
 import '../../../core/ui/snack.dart';
+import '../../../core/ui/tocavel.dart';
 
 import 'package:path_provider/path_provider.dart';
 
@@ -155,16 +158,10 @@ class SettingsTab extends ConsumerWidget {
           const _GroupHeader('Aparencia'),
           _Group(
             children: [
-              _SegmentedRow<String>(
-                label: 'Tema',
-                values: const ['escuro', 'claro', 'sistema'],
-                selected: settings.themeMode,
-                labelOf: (m) => switch (m) {
-                  'claro' => 'Claro',
-                  'sistema' => 'Sistema',
-                  _ => 'Escuro',
-                },
-                onChanged: controller.setThemeMode,
+              _TemaRow(
+                modo: settings.themeMode,
+                onTema: controller.setTema,
+                onSistema: controller.seguirOSistema,
               ),
             ],
           ),
@@ -200,6 +197,9 @@ class SettingsTab extends ConsumerWidget {
               ),
             ],
           ),
+          const SizedBox(height: 26),
+          const _GroupHeader('Desempenho'),
+          const _Group(children: [_PerfilDeDesempenhoRow()]),
           const SizedBox(height: 26),
           const _GroupHeader('Cena 3D'),
           const _Group(
@@ -348,6 +348,219 @@ class _SegmentedRow<T extends Object> extends StatelessWidget {
   }
 }
 
+/// A ESCOLHA DO TEMA: uma fileira rolavel de amostras.
+///
+/// NAO E UM CONTROLE SEGMENTADO porque sao sete opcoes (seis temas e
+/// "Sistema"), e o segmentado do iOS espreme todas na largura da tela: com
+/// sete, o nome de nenhuma cabe. A amostra tambem diz mais que o nome —
+/// "Midnight" nao descreve uma cor para quem nunca viu.
+///
+/// A TROCA VALE NA HORA: o controlador grava, a raiz do app ([AureaApp])
+/// observa e remonta a arvore com a paleta nova. Esta fileira so existe
+/// aqui, numa rota raiz, porque o remonte derruba a pilha do Navigator.
+class _TemaRow extends StatelessWidget {
+  const _TemaRow({
+    required this.modo,
+    required this.onTema,
+    required this.onSistema,
+  });
+
+  /// O valor gravado ([AppSettings.themeMode]).
+  final String modo;
+  final ValueChanged<AureaTemaId> onTema;
+  final VoidCallback onSistema;
+
+  @override
+  Widget build(BuildContext context) {
+    final sistema = modo == AureaPaleta.modoSistema;
+    // Em 'sistema' nenhum tema fica marcado: a marca vai na amostra Sistema.
+    final escolhido = sistema
+        ? null
+        : AureaPaleta.resolver(modo, Brightness.dark);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+          child: AppText('Tema', style: Theme.of(context).textTheme.bodyLarge),
+        ),
+        SingleChildScrollView(
+          key: const ValueKey('tema-fileira'),
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (final p in AureaPaleta.todas)
+                _AmostraDeTema(
+                  key: ValueKey('tema-amostra-${p.id.name}'),
+                  nome: p.nome,
+                  fundo: p.background,
+                  aro: p.chip,
+                  miolo: p.accent,
+                  sobreMiolo: p.onAccent,
+                  marcado: escolhido == p.id,
+                  onTap: () => onTema(p.id),
+                ),
+              _AmostraDeTema(
+                key: const ValueKey('tema-amostra-sistema'),
+                nome: 'Sistema',
+                traduzNome: true,
+                fundo: AureaPaleta.aurea.background,
+                fundoB: AureaPaleta.light.background,
+                aro: AureaPaleta.aurea.chip,
+                miolo: AureaPaleta.aurea.accent,
+                sobreMiolo: AureaPaleta.aurea.onAccent,
+                marcado: sistema,
+                onTap: onSistema,
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
+          child: AppText(
+            'Troca na hora, sem reabrir o app. No Light, o editor continua '
+            'escuro.',
+            style: TextStyle(
+              fontSize: 12,
+              height: 1.35,
+              color: AppColors.muted,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Uma amostra: um disco com o FUNDO do tema, um aro com o tom de chip dele
+/// e um miolo com a cor de acao — as tres cores que dizem como o tema e.
+///
+/// SEM BORDA TRACADA: o aro e um disco maior por baixo, nao um contorno. E
+/// ele que separa a amostra Light (quase branca) do grupo branco, e a OLED
+/// (preta) do grupo escuro, sem desenhar caixa nenhuma.
+class _AmostraDeTema extends StatelessWidget {
+  const _AmostraDeTema({
+    super.key,
+    required this.nome,
+    required this.fundo,
+    required this.aro,
+    required this.miolo,
+    required this.sobreMiolo,
+    required this.marcado,
+    required this.onTap,
+    this.fundoB,
+    this.traduzNome = false,
+  });
+
+  final String nome;
+  final Color fundo;
+
+  /// A segunda metade do disco (so a amostra "Sistema": escuro | claro).
+  final Color? fundoB;
+  final Color aro;
+  final Color miolo;
+  final Color sobreMiolo;
+  final bool marcado;
+  final VoidCallback onTap;
+
+  /// Nome de tema e nome proprio e fica como esta; "Sistema" e palavra.
+  final bool traduzNome;
+
+  @override
+  Widget build(BuildContext context) {
+    final estilo = TextStyle(
+      fontSize: 11.5,
+      letterSpacing: -0.1,
+      fontWeight: marcado ? FontWeight.w700 : FontWeight.w500,
+      color: marcado ? AppColors.lime : AppColors.muted,
+    );
+    return Semantics(
+      button: true,
+      selected: marcado,
+      label: nome,
+      child: Tocavel(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          child: SizedBox(
+            width: 64,
+            child: Column(
+              children: [
+                // O aro: a cor de acao EM VIGOR quando marcado (e o sinal de
+                // "este"), o chip do proprio tema quando nao.
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: marcado ? AppColors.lime : aro,
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(3.5),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: fundoB == null ? fundo : null,
+                        gradient: fundoB == null
+                            ? null
+                            : LinearGradient(
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                // Corte seco na diagonal: metade escura,
+                                // metade clara.
+                                stops: const [0.5, 0.5],
+                                colors: [fundo, fundoB!],
+                              ),
+                      ),
+                      child: SizedBox(
+                        width: 45,
+                        height: 45,
+                        child: Center(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: miolo,
+                            ),
+                            child: SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: marcado
+                                  ? Icon(
+                                      CupertinoIcons.checkmark_alt,
+                                      size: 14,
+                                      color: sobreMiolo,
+                                    )
+                                  : null,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 7),
+                traduzNome
+                    ? AppText(
+                        nome,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: estilo,
+                      )
+                    : Text(
+                        nome,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: estilo,
+                      ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _SwitchRow extends StatelessWidget {
   const _SwitchRow({
     required this.title,
@@ -385,7 +598,7 @@ class _SwitchRow extends StatelessWidget {
           CupertinoSwitch(
             value: value,
             activeTrackColor: AppColors.lime,
-            thumbColor: value ? AureaColors.onAccent : null,
+            thumbColor: value ? AureaPaleta.ativa.onAccent : null,
             onChanged: onChanged,
           ),
         ],
@@ -572,6 +785,123 @@ class _Qualidade3DRowState extends State<_Qualidade3DRow> {
               'desce um degrau (sombra, MSAA, escala, textura, LOD) antes '
               'de o app travar; sobe de volta quando sobra folga. Agora: '
               '${qualidade3dRotulo(nivel)}.',
+              style: TextStyle(
+                fontSize: 12,
+                height: 1.35,
+                color: AppColors.muted,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// O PERFIL DE DESEMPENHO: quanto a PREVIA pode gastar.
+///
+/// NAO E UM CONTROLE SEGMENTADO porque sao cinco opcoes e a mais longa e
+/// "Maxima qualidade": espremidas na largura da tela, nenhuma se leria.
+/// Uma linha por perfil, com a explicacao embaixo e a marca do iOS a
+/// direita, e o mesmo padrao que a lista de ajustes ja usa.
+///
+/// A EXPORTACAO NAO ENTRA NESTA ESCOLHA, e a linha de baixo diz isso com
+/// todas as letras: o arquivo que sai sempre usa a qualidade completa.
+class _PerfilDeDesempenhoRow extends StatefulWidget {
+  const _PerfilDeDesempenhoRow();
+
+  @override
+  State<_PerfilDeDesempenhoRow> createState() => _PerfilDeDesempenhoRowState();
+}
+
+class _PerfilDeDesempenhoRowState extends State<_PerfilDeDesempenhoRow> {
+  final _gerente = AureaPerformanceManager.instancia;
+
+  @override
+  void initState() {
+    super.initState();
+    // Fora do editor o perfil pode nunca ter sido lido do disco.
+    unawaited(_gerente.carregar());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+          child: AppText('Perfil', style: Theme.of(context).textTheme.bodyLarge),
+        ),
+        ValueListenableBuilder<PerfilDeDesempenho>(
+          valueListenable: _gerente.perfil,
+          builder: (context, escolhido, _) => Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (final p in PerfilDeDesempenho.values)
+                Tocavel(
+                  key: ValueKey('desempenho-perfil-${p.name}'),
+                  onTap: () => _gerente.definirPerfil(p),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 9, 16, 9),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              AppText(
+                                perfilDeDesempenhoRotulo(p),
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: p == escolhido
+                                      ? FontWeight.w700
+                                      : FontWeight.w500,
+                                  color: p == escolhido
+                                      ? AppColors.lime
+                                      : AppColors.onDark,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              AppText(
+                                perfilDeDesempenhoExplicacao(p),
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  height: 1.35,
+                                  color: AppColors.muted,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        SizedBox(
+                          width: 18,
+                          child: p == escolhido
+                              ? Icon(
+                                  CupertinoIcons.checkmark_alt,
+                                  size: 16,
+                                  color: AppColors.lime,
+                                )
+                              : null,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 6, 16, 14),
+          child: ValueListenableBuilder<PoliticaDeDesempenho>(
+            valueListenable: _gerente.politica,
+            builder: (context, politica, _) => AppText(
+              'O perfil vale so para o que se ve enquanto se edita. O video '
+              'exportado sai sempre na qualidade completa.\nAgora: '
+              '${politica.motivo}, prévia '
+              '${(politica.escalaDaPrevia * 100).round()}%.',
               style: TextStyle(
                 fontSize: 12,
                 height: 1.35,

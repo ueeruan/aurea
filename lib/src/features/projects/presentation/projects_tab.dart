@@ -18,7 +18,10 @@ import '../../editor/domain/ajuste_da_midia.dart';
 import '../../editor/domain/template_pack.dart';
 import '../../editor/domain/video_project.dart';
 import '../../editor/presentation/editor_screen.dart';
-import '../../media/application/media_import_service.dart' show proporcaoDaFoto;
+import '../../media/application/media_import_service.dart'
+    show mediaImportServiceProvider, proporcaoDaFoto;
+import '../../media/application/midias_recentes.dart'
+    show midiasRecentesProvider, registrarMidiaImportada;
 import '../../tutoriais/presentation/tutorial_screen.dart';
 import '../application/dnyx_remix_assets.dart';
 import '../application/projects_controller.dart';
@@ -198,13 +201,17 @@ class _ProjectsTabState extends ConsumerState<ProjectsTab> {
   /// projeto novo com a mídia inserida no palco.
   Future<void> _importarMidia(BuildContext context) async {
     try {
-      final r = await FilePicker.platform.pickFiles(
-        type: FileType.media,
-        allowMultiple: false,
-      );
-      final caminho = r?.files.single.path;
-      if (caminho == null || !context.mounted) return;
-      final nome = r?.files.single.name ?? 'Mídia Importada';
+      // A MIDIA E COPIADA PARA O APP ANTES DE VIRAR CAMADA. O seletor
+      // devolve um arquivo em CACHE, e o caminho dele ia direto para a
+      // camada: o Android limpa o cache quando quer, e o projeto abria com
+      // a midia faltando. (No Android o seletor reabre na ultima pasta.)
+      final recentes = ref.read(midiasRecentesProvider.notifier);
+      final arquivo = await ref
+          .read(mediaImportServiceProvider)
+          .pickMediaFile();
+      if (arquivo == null || !context.mounted) return;
+      final caminho = arquivo.path;
+      final nome = arquivo.name;
       final controller = ref.read(editorControllerProvider.notifier);
       final ext = caminho.split('.').last.toLowerCase();
       final video = _extensoesDeVideo.contains(ext);
@@ -246,8 +253,16 @@ class _ProjectsTabState extends ConsumerState<ProjectsTab> {
       }
       Navigator.of(context)
           .push(MaterialPageRoute(builder: (_) => const EditorScreen()));
+      await registrarMidiaImportada(
+        recentes,
+        caminho: caminho,
+        nome: nome,
+        video: video,
+        duracao: sonda?.duracao ?? Duration.zero,
+      );
     } catch (_) {
-      _falha(context, 'Não consegui importar essa mídia.');
+      // A tela pode ter saido no meio da copia (o seletor sai e volta).
+      if (context.mounted) _falha(context, 'Não consegui importar essa mídia.');
     }
   }
 

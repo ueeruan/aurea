@@ -22,6 +22,7 @@ import '../widgets/rails_do_painel.dart';
 import 'audio_effects_panel.dart';
 import 'color_picker_sheet.dart';
 import 'curve_panel.dart';
+import 'estudio_do_tempo.dart';
 import 'presets_screen.dart';
 
 /// O PAINEL "EFEITOS", NA PLANTA DO ALIGHT MOTION (16/09, pedido do dono:
@@ -284,7 +285,7 @@ class _EffectsPanelState extends ConsumerState<EffectsPanel> {
     final id = ref.watch(selectedLayerProvider);
     final layer = id == null ? null : project.layerById(id);
     if (layer == null || id == null) {
-      return const ColoredBox(color: AmColors.panel);
+      return ColoredBox(color: AmColors.panel);
     }
     if (layer is AudioLayer) return AudioEffectsPanel(layerId: id);
     final realLayer =
@@ -340,7 +341,13 @@ class _EffectsPanelState extends ConsumerState<EffectsPanel> {
                     alvoFinal.id,
                     widget.playback.time.value,
                   ),
-            aoAbrirCurva: alvoFinal == null || !alvoFinal.hasAnimation
+            // O TIME REMAP TEM UM EDITOR SO. O cartao dele abria a folha de
+            // curva generica, e a folha Tempo abre o Estudio do tempo:
+            // dois editores para a mesma trilha divergem (so o estudio
+            // sabe congelar, reverter por trecho e mostrar a velocidade).
+            aoAbrirCurva: alvoFinal?.type == EffectType.timeRemap
+                ? () => showEstudioDoTempo(context, ref, id, widget.playback)
+                : alvoFinal == null || !alvoFinal.hasAnimation
                 ? null
                 : () => showTrackCurveSheet(
                     context,
@@ -399,7 +406,10 @@ class _EffectsPanelState extends ConsumerState<EffectsPanel> {
                         index: v,
                         effect: layer.effects[i],
                         extra: layer.effects[i].type == EffectType.timeRemap
-                            ? _OpcoesTimeRemap(layerId: id)
+                            ? _OpcoesTimeRemap(
+                                layerId: id,
+                                playback: widget.playback,
+                              )
                             : null,
                         local: layer.effects[i].type == EffectType.timeRemap
                             ? t - layer.startTime
@@ -564,7 +574,7 @@ class _Rodape extends ConsumerWidget {
               color: AmColors.chip,
               borderRadius: BorderRadius.circular(12),
             ),
-            child: const Row(
+            child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(CupertinoIcons.plus, size: 17, color: AmColors.action),
@@ -589,8 +599,9 @@ class _Rodape extends ConsumerWidget {
 /// The time curve remains in the layer model, with the same parameter rows
 /// and colors as the other effects. The graph editor edits this exact track.
 class _OpcoesTimeRemap extends ConsumerWidget {
-  const _OpcoesTimeRemap({required this.layerId});
+  const _OpcoesTimeRemap({required this.layerId, required this.playback});
   final String layerId;
+  final PlaybackController playback;
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final layer = ref.watch(editorControllerProvider).layerById(layerId);
@@ -598,6 +609,43 @@ class _OpcoesTimeRemap extends ConsumerWidget {
     final c = ref.read(editorControllerProvider.notifier);
     return Column(
       children: [
+        // A MESMA PORTA da folha Tempo: o numero cru do parametro "tempo"
+        // nao e jeito de editar uma curva de tempo.
+        Padding(
+          padding: const EdgeInsets.only(top: 4, bottom: 6),
+          child: Tocavel(
+            key: const ValueKey('efeito-time-remap-abrir'),
+            haptico: true,
+            onTap: () => showEstudioDoTempo(context, ref, layerId, playback),
+            child: Container(
+              height: 40,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: AmColors.action,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.show_chart_rounded,
+                    size: 17,
+                    color: AmColors.onAction,
+                  ),
+                  const SizedBox(width: 8),
+                  AppText(
+                    'Abrir o editor de curva',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: AmColors.onAction,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
         Material(
           color: Colors.transparent,
           child: SwitchListTile.adaptive(
@@ -625,7 +673,10 @@ class _OpcoesTimeRemap extends ConsumerWidget {
               style: const TextStyle(color: AmColors.text, fontSize: 12),
               items: [
                 for (final v in InterpolacaoDeQuadros.values)
-                  DropdownMenuItem(value: v, child: AppText(v.emPalavras)),
+                  DropdownMenuItem(
+                    value: v,
+                    child: AppText(rotuloDaInterpolacao(v)),
+                  ),
               ],
               onChanged: (v) {
                 if (v != null) c.setClipInterpolacao(layerId, v);

@@ -5,12 +5,40 @@ import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
 
+import '../domain/analise_do_modelo.dart';
 import '../domain/limites_de_importacao.dart';
 import '../domain/malha_importada.dart';
 import '../domain/model_asset3d.dart';
 import '../domain/model_import3d.dart';
 import '../domain/fbx_import3d.dart';
 import '../domain/obj_import3d.dart';
+import '../domain/texturas_importadas.dart';
+
+/// O QUE FAZER QUANDO O MODELO E PESADO.
+///
+///  * [perguntar]: a leitura PARA e lanca [ModeloPesadoException] com a
+///    ficha do modelo. Quem chamou mostra o aviso e chama de novo com uma
+///    das outras duas. Reler o arquivo so acontece no caso pesado, e evita
+///    atravessar uma malha gigante entre isolates so para esperar o dono;
+///  * [otimizar]: reduz a malha para perto de `alvoDeTriangulos` e as
+///    texturas para `ladoDaTextura`, no mesmo isolate da leitura;
+///  * [original]: entra como veio (o comportamento de sempre).
+enum PoliticaDePeso { perguntar, otimizar, original }
+
+/// O modelo foi lido, e pesado, e a politica era [PoliticaDePeso.perguntar].
+///
+/// E UMA [ModelImportException] de proposito: quem ainda nao conhece o
+/// aviso de modelo pesado mostra a mensagem em vez de cair no "nao consegui
+/// ler" generico.
+class ModeloPesadoException extends ModelImportException {
+  const ModeloPesadoException(this.analise)
+    : super(
+        'Este modelo é pesado para o aparelho. Importe com a otimização '
+        'automática ou escolha importar o original.',
+      );
+
+  final AnaliseDoModelo analise;
+}
 
 // Parsing and file access run off the UI isolate. Do not run the native
 // analyzer here: it blocks the UI and its recommendations are not consumed
@@ -18,6 +46,10 @@ import '../domain/obj_import3d.dart';
 Future<ModelAsset3D> readModel3DFiles(
   List<String> paths, {
   bool permitirModeloGrande = false,
+  PoliticaDePeso politica = PoliticaDePeso.original,
+  int alvoDeTriangulos = alvoDeTriangulosOtimizado,
+  int ladoDaTextura = ladoDaTexturaOtimizada,
+  LimitesDeModeloPesado limitesDePeso = limitesDeModeloPesado,
 }) => Isolate.run(() async {
   // UM .ZIP E UMA PASTA: o modelo e as texturas dele juntos. Sozinho, um OBJ
   // ou FBX costuma chegar sem textura — elas moram em arquivos ao lado, e o
@@ -38,7 +70,14 @@ Future<ModelAsset3D> readModel3DFiles(
     if (abertos.isEmpty) {
       modelFail('O .zip nao tem nenhum modelo (GLB, glTF, OBJ ou FBX).');
     }
-    return await _lerEOtimizar(abertos, permitirModeloGrande);
+    return await _lerEOtimizar(
+      abertos,
+      permitirModeloGrande,
+      politica: politica,
+      alvoDeTriangulos: alvoDeTriangulos,
+      ladoDaTextura: ladoDaTextura,
+      limitesDePeso: limitesDePeso,
+    );
   } finally {
     // O modelo lido ja carrega as texturas por dentro (data: URI): a pasta
     // temporaria pode ir embora.
@@ -94,20 +133,74 @@ List<String> _abrirZip(String caminho, Directory pasta) {
 
 Future<ModelAsset3D> _lerEOtimizar(
   List<String> paths,
-  bool permitirModeloGrande,
-) async {
+  bool permitirModeloGrande, {
+  required PoliticaDePeso politica,
+  required int alvoDeTriangulos,
+  required int ladoDaTextura,
+  required LimitesDeModeloPesado limitesDePeso,
+}) async {
   final asset = await _read(paths, conferirLimites: !permitirModeloGrande);
   // O MODELO LIDO ANTES DE CUSTAR MAIS: as contagens reais (o FBX so
   // se conhece depois de lido) e as texturas pelo cabecalho, antes do
   // LOD em C++ e antes de alguma delas ser decodificada inteira.
   if (!permitirModeloGrande) conferirModeloLido(asset.data);
+  var noDisco = 0;
+  if (politica == PoliticaDePeso.perguntar) {
+    for (final p in paths) {
+      try {
+        noDisco += File(p).lengthSync();
+      } catch (_) {}
+    }
+  }
+  return prepararModeloLido(
+    asset,
+    politica: politica,
+    alvoDeTriangulos: alvoDeTriangulos,
+    ladoDaTextura: ladoDaTextura,
+    limitesDePeso: limitesDePeso,
+    arquivoBytes: noDisco,
+  );
+}
+
+/// O POS-LEITURA, separado da leitura para o teste rodar sem arquivo e sem
+/// isolate: decide pelo peso, e so entao faz o trabalho caro em C++.
+///
+/// A PERGUNTA VEM ANTES DA SOLDA E DOS NIVEIS DE DETALHE: num modelo de um
+/// milhao de triangulos eles custam segundos, e seriam jogados fora se o
+/// dono escolhesse otimizar (a reducao roda no meio deles) ou cancelar.
+ModelAsset3D prepararModeloLido(
+  ModelAsset3D asset, {
+  PoliticaDePeso politica = PoliticaDePeso.original,
+  int alvoDeTriangulos = alvoDeTriangulosOtimizado,
+  int ladoDaTextura = ladoDaTexturaOtimizada,
+  LimitesDeModeloPesado limitesDePeso = limitesDeModeloPesado,
+  int arquivoBytes = 0,
+}) {
+  if (politica == PoliticaDePeso.perguntar) {
+    final analise = AnaliseDoModelo.doModelo(asset, arquivoBytes: arquivoBytes);
+    if (analise.pesado(limitesDePeso)) throw ModeloPesadoException(analise);
+  }
+  final otimizar = politica == PoliticaDePeso.otimizar;
   // Solda, cache de vertices, busca e niveis de detalhe em C++ — aqui,
   // no isolate da importacao, uma vez so (ver malha_importada.dart).
-  otimizarMalhasImportadas(asset.data);
-  return asset;
+  otimizarMalhasImportadas(
+    asset.data,
+    alvoDeTriangulos: otimizar ? alvoDeTriangulos : null,
+  );
+  if (otimizar) reduzirTexturasDoModelo(asset.data, lado: ladoDaTextura);
+  // UM EMBRULHO NOVO sobre os mesmos dados: `triangleCount` e
+  // `estimatedBytes` sao contas guardadas na primeira leitura, e a ficha de
+  // peso as leu ANTES da solda e da reducao. Devolver o embrulho antigo
+  // levaria ao orcamento de qualidade a memoria de um modelo que nao
+  // existe mais.
+  return ModelAsset3D(asset.data);
 }
 
 /// Malha e texturas do modelo ja lido, contra [limitesDeImportacao].
+///
+/// OS CINCO MAPAS ENTRAM NA SOMA. So a textura de cor era conferida, e um
+/// material com relevo, metal e oclusao em 8K passava inteiro pelo teto de
+/// pixels — que existe justamente para a memoria das imagens.
 void conferirModeloLido(Map<String, dynamic> data) {
   final c = contarModelo(data);
   conferirMalha(vertices: c.vertices, triangulos: c.triangulos);
@@ -116,19 +209,15 @@ void conferirModeloLido(Map<String, dynamic> data) {
   final materiais = data['materials'];
   for (final m in materiais is List ? materiais : const []) {
     if (m is! Map) continue;
-    final uri = m['image'];
-    if (uri is! String || !uri.startsWith('data:') || !vistas.add(uri)) {
-      continue;
+    for (final chave in mapasDoMaterial) {
+      final uri = m[chave];
+      if (uri is! String || !uri.startsWith('data:') || !vistas.add(uri)) {
+        continue;
+      }
+      final bytes = bytesDoDataUri(uri);
+      if (bytes == null) continue;
+      pixels += conferirImagem('${m['name'] ?? 'do material'}', bytes);
     }
-    final virgula = uri.indexOf(',');
-    if (virgula < 0) continue;
-    final Uint8List bytes;
-    try {
-      bytes = base64Decode(uri.substring(virgula + 1));
-    } on FormatException {
-      continue;
-    }
-    pixels += conferirImagem('${m['name'] ?? 'do material'}', bytes);
   }
   conferirPixelsDasImagens(pixels);
 }

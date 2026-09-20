@@ -103,7 +103,12 @@ Future<ProviderContainer> _montar(
 
 /// Quantas vezes a linha do tempo se reconstruiu, e quanto custou cada
 /// reconstrucao, enquanto [gesto] acontece.
-Future<({int vezes, double msCada, double msTotal})> _durante(
+///
+/// [barras] conta as BARRAS reconstruidas. E a medida que mostra o efeito
+/// da memorizacao por linha: a linha do tempo pode se reconstruir uma vez
+/// por passo do dedo (ela observa o projeto) e ainda assim so UMA linha
+/// descer ate as barras — as outras devolvem o mesmo widget.
+Future<({int vezes, double msCada, double msTotal, int barras})> _durante(
   WidgetTester tester,
   Future<void> Function() gesto,
 ) async {
@@ -111,11 +116,18 @@ Future<({int vezes, double msCada, double msTotal})> _durante(
   Perfil3D.ligado = true;
   await gesto();
   Perfil3D.ligado = false;
-  final f = Perfil3D.relatorio().fases['build.timeline'];
+  final relatorio = Perfil3D.relatorio();
+  final barras = relatorio.contas['build.barra'] ?? 0;
+  final f = relatorio.fases['build.timeline'];
   if (f == null || f.chamadas == 0) {
-    return (vezes: 0, msCada: 0.0, msTotal: 0.0);
+    return (vezes: 0, msCada: 0.0, msTotal: 0.0, barras: barras);
   }
-  return (vezes: f.chamadas, msCada: f.ms / f.chamadas, msTotal: f.ms);
+  return (
+    vezes: f.chamadas,
+    msCada: f.ms / f.chamadas,
+    msTotal: f.ms,
+    barras: barras,
+  );
 }
 
 void main() {
@@ -140,8 +152,8 @@ void main() {
       'Cada linha e um gesto de verdade. "vezes" e quantas reconstrucoes',
       'inteiras da timeline o gesto provocou.',
       '',
-      'camadas  gesto                    vezes   ms cada   ms total',
-      '--------------------------------------------------------------',
+      'camadas  gesto                    vezes   ms cada   ms total  barras',
+      '----------------------------------------------------------------------',
     ];
 
     // UM TAMANHO SO, e de proposito. A pergunta desta bancada e "um
@@ -202,7 +214,11 @@ void main() {
       await tester.pump(const Duration(milliseconds: 50));
       final arrasto = await _durante(tester, () async {
         final dedo = await tester.startGesture(alvoDoDedo);
-        await tester.pump(const Duration(milliseconds: 350));
+        // 600 ms, e nao 350: `kLongPressTimeout` e 500. Com 350 o toque
+        // longo ainda nao tinha disparado quando o dedo andou, o gesto
+        // ia para a rolagem horizontal que esta por baixo, e a bancada
+        // media uma ROLAGEM achando que media um arrasto de clipe.
+        await tester.pump(const Duration(milliseconds: 600));
         await dedo.moveBy(const Offset(28, 0));
         await tester.pump(const Duration(milliseconds: 16));
         for (var i = 0; i < 11; i++) {
@@ -242,7 +258,8 @@ void main() {
           '${n.toString().padLeft(5)}    ${nome.padRight(24)} '
           '${m.vezes.toString().padLeft(4)}  '
           '${m.msCada.toStringAsFixed(1).padLeft(7)}  '
-          '${m.msTotal.toStringAsFixed(0).padLeft(8)}',
+          '${m.msTotal.toStringAsFixed(0).padLeft(8)}  '
+          '${m.barras.toString().padLeft(6)}',
         );
       }
       await tester.pumpWidget(const SizedBox());

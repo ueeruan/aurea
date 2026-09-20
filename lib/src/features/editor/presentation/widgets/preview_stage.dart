@@ -25,8 +25,10 @@ import '../../domain/orcamento_render.dart';
 import '../../application/editor_controller.dart';
 import '../../application/freehand_session.dart' show onionSkinProvider;
 export '../../application/freehand_session.dart' show onionSkinProvider;
+import '../../application/interacao.dart';
 import '../../application/playback_controller.dart';
 import '../../application/ui/editor_session.dart';
+import 'rascunho_do_preview.dart';
 import '../am/am_colors.dart';
 import '../am/aviso_de_bloqueio.dart';
 import 'faixa_de_bloqueio.dart';
@@ -152,6 +154,11 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
   void initState() {
     super.initState();
     widget.playback.playing.addListener(_playbackChanged);
+    // O DEDO NO COMANDO troca a resolucao das fotos (ver o MediaQuery do
+    // palco), do mesmo jeito que o play: o palco precisa reconstruir
+    // quando o sinal liga e quando ele cai — e ao cair sai o quadro final
+    // em qualidade cheia.
+    Interacao.agora.addListener(_playbackChanged);
   }
 
   @override
@@ -170,6 +177,7 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
   @override
   void dispose() {
     widget.playback.playing.removeListener(_playbackChanged);
+    Interacao.agora.removeListener(_playbackChanged);
     super.dispose();
   }
 
@@ -698,10 +706,15 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
   bool _avisouBloqueio = false;
 
   /// A camada selecionada esta bloqueada? (falso quando nao ha selecao)
+  ///
+  /// So o BOOL entra na assinatura: observar o projeto inteiro aqui
+  /// reconstruia o palco todo a cada passo de slider em qualquer camada.
   bool _camadaSelecionadaBloqueada() {
     final id = ref.watch(selectedLayerProvider);
     if (id == null) return false;
-    return ref.watch(editorControllerProvider).metaOf(id).locked;
+    return ref.watch(
+      editorControllerProvider.select((p) => p.metaOf(id).locked),
+    );
   }
 
   void _onScaleUpdate(ScaleUpdateDetails d) {
@@ -969,7 +982,30 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
         setState(() => _panDoPalco = Offset.zero);
       }
     });
-    final project = ref.watch(projetoDoPalcoProvider);
+    // O DEDO ESTA MEXENDO EM ALGO: cada mutacao do projeto com o relogio
+    // parado (slider, arrasto, alca, tecla) marca a interacao. E daqui, e
+    // nao de `beginGesture`, porque so sete lugares chamam o gesto e a
+    // `ParameterRow` so tem `onChanged`. Tocando, o rascunho ja vale.
+    ref.listen<VideoProject>(projetoDoPalcoProvider, (antes, agora) {
+      if (!widget.playback.playing.value) Interacao.marcar();
+    });
+    // O PALCO NAO OBSERVA O PROJETO INTEIRO: so os campos que ele mesmo
+    // usa. O compositor (`CompositionView`) e quem precisa de tudo, e ele
+    // observa por conta propria. Sem isto, cada passo de slider
+    // reconstruia o palco, o LayoutBuilder e os enfeites por cima.
+    final palco = ref.watch(
+      projetoDoPalcoProvider.select(
+        (p) => (
+          largura: p.outputWidth,
+          altura: p.outputHeight,
+          fundo: p.backgroundColor,
+          guias: p.guides,
+          fps: p.fps,
+          id: p.id,
+          raster: _containsRasterMedia(p.layers),
+        ),
+      ),
+    );
     final opcoes = ref.watch(opcoesDeVisualizacaoProvider);
     // PIXELS REAIS ignora a resolucao reduzida: o que se ve e o que sai.
     final resolution = opcoes.pixels
@@ -979,10 +1015,15 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
     final selectedId = ref.watch(selectedLayerProvider);
     final onion = ref.watch(onionSkinProvider);
     final drawing = ref.watch(freehandRequestProvider);
-    final compW = project.outputWidth.toDouble();
-    final compH = project.outputHeight.toDouble();
-    final useDither =
-        DitherLayer.comoFiltro && !_containsRasterMedia(project.layers);
+    final compW = palco.largura.toDouble();
+    final compH = palco.altura.toDouble();
+    final useDither = DitherLayer.comoFiltro && !palco.raster;
+    final interagindo = Interacao.agora.value;
+    final fotos = fotosDoPreview(
+      escalaDoPalco: resolution.scale,
+      tocando: widget.playback.playing.value,
+      interagindo: interagindo,
+    );
 
     return Listener(
       onPointerDown: _dedoDesceu,
@@ -1086,20 +1127,36 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
                           child: FittedBox(
                             fit: BoxFit.contain,
                             alignment: Alignment.topLeft,
+                            // O TAMANHO FISICO DO PALCO PARA O 3D, sem a
+                            // metade da interacao: o alvo do motor nao pode
+                            // encolher e crescer a cada gesto (recria os
+                            // alvos), entao ele le a escala de repouso daqui
+                            // e nao a razao de pixels do MediaQuery abaixo.
+                            child: EscalaFisicaDoPalco(
+                              valor: previewRasterRatio(
+                                compWidth: compW,
+                                compHeight: compH,
+                                stageScale: scale * resolution.scale,
+                                devicePixelRatio:
+                                    MediaQuery.devicePixelRatioOf(context),
+                              ),
                             child: MediaQuery(
                               // FOTOS NA RESOLUCAO DA TELA. Tudo que fotografa a
                               // composicao (efeitos, mescla, dithering) le a razao
                               // de pixels daqui: com a do aparelho, cada foto saia
                               // em 1080x1920 x DPR — 75 MB por efeito por quadro no
                               // iPhone, e o iOS fechava o app na primeira animacao.
+                              //
+                              // COM O DEDO NO COMANDO, METADE: o teto cai a
+                              // 1080 e a escala a metade enquanto se arrasta
+                              // um slider ou uma camada; ao soltar, o palco
+                              // reconstroi e sai UM quadro em qualidade cheia.
                               data: MediaQuery.of(context).copyWith(
                                 devicePixelRatio: previewRasterRatio(
-                                  maxSidePx: widget.playback.playing.value
-                                      ? 1080
-                                      : 2160,
+                                  maxSidePx: fotos.tetoPx,
                                   compWidth: compW,
                                   compHeight: compH,
-                                  stageScale: scale * resolution.scale,
+                                  stageScale: scale * fotos.escalaDoPalco,
                                   devicePixelRatio:
                                       MediaQuery.devicePixelRatioOf(context),
                                 ),
@@ -1110,7 +1167,7 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
                                 // O FUNDO DA COMPOSICAO (⚙ Projeto): a cor
                                 // escolhida, atras de todas as camadas.
                                 child: ColoredBox(
-                                  color: project.backgroundColor,
+                                  color: palco.fundo,
                                   child: Stack(
                                     clipBehavior: Clip.none,
                                     children: [
@@ -1180,9 +1237,9 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
                                                     final passo = Duration(
                                                       microseconds:
                                                           1000000 ~/
-                                                          (project.fps < 1
+                                                          (palco.fps < 1
                                                               ? 30
-                                                              : project.fps),
+                                                              : palco.fps),
                                                     );
                                                     return Stack(
                                                       clipBehavior: Clip.none,
@@ -1224,7 +1281,7 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
                                             ),
                                             painter: _GuidesPainter(
                                               previewScale: scale,
-                                              guides: project.guides,
+                                              guides: palco.guias,
                                               compSize: Size(compW, compH),
                                               encaixeX:
                                                   _encaixeX ?? padGuides.x,
@@ -1264,36 +1321,45 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
                                       // garante que o dedo continua
                                       // chegando ao gesto do palco, que
                                       // e quem faz o teste de toque).
+                                      //
+                                      // NUM `Consumer` PROPRIO: o gizmo
+                                      // precisa do projeto (pais, camera),
+                                      // mas quem reconstroi por mutacao e so
+                                      // este ramo, e nao o palco inteiro.
                                       if (!drawing)
                                         ValueListenableBuilder<Duration>(
                                           valueListenable: widget.playback.time,
-                                          builder: (context, _, _) {
-                                            ref.watch(editorControllerProvider);
-                                            ref.watch(selectedLayerProvider);
-                                            final g = _gizmoDaSelecao();
-                                            if (g == null) {
-                                              return const SizedBox.shrink();
-                                            }
-                                            return Positioned.fill(
-                                              child: IgnorePointer(
-                                                child: CustomPaint(
-                                                  key: const ValueKey(
-                                                    'gizmo-3d',
-                                                  ),
-                                                  painter: Gizmo3DPainter(
-                                                    gizmo: g,
-                                                    escala: scale,
-                                                    comprimento: _kBracoDoGizmo,
-                                                    raio: _kRaioDoAnel,
-                                                    eixoAtivo: _eixoDoGizmo,
-                                                    anelAtivo: _anelDoGizmo,
-                                                    ativo:
-                                                        !_camadaSelecionadaBloqueada(),
+                                          builder: (context, _, _) => Consumer(
+                                            builder: (context, ref, _) {
+                                              ref.watch(editorControllerProvider);
+                                              ref.watch(selectedLayerProvider);
+                                              final bloqueada =
+                                                  _camadaSelecionadaBloqueada();
+                                              final g = _gizmoDaSelecao();
+                                              if (g == null) {
+                                                return const SizedBox.shrink();
+                                              }
+                                              return Positioned.fill(
+                                                child: IgnorePointer(
+                                                  child: CustomPaint(
+                                                    key: const ValueKey(
+                                                      'gizmo-3d',
+                                                    ),
+                                                    painter: Gizmo3DPainter(
+                                                      gizmo: g,
+                                                      escala: scale,
+                                                      comprimento:
+                                                          _kBracoDoGizmo,
+                                                      raio: _kRaioDoAnel,
+                                                      eixoAtivo: _eixoDoGizmo,
+                                                      anelAtivo: _anelDoGizmo,
+                                                      ativo: !bloqueada,
+                                                    ),
                                                   ),
                                                 ),
-                                              ),
-                                            );
-                                          },
+                                              );
+                                            },
+                                          ),
                                         ),
                                       // NOS DA MASCARA: quando alguem esta editando
                                       // o caminho, o dedo passa a mexer nos nos em
@@ -1309,7 +1375,7 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
                                       // pedido do menu estiver ligado.
                                       Positioned.fill(
                                         child: FreehandOverlay(
-                                          key: ValueKey(project.id),
+                                          key: ValueKey(palco.id),
                                           playback: widget.playback,
                                         ),
                                       ),
@@ -1317,6 +1383,7 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
                                   ), // fechado-bg
                                 ),
                               ),
+                            ),
                             ),
                           ),
                         ),
@@ -1368,45 +1435,53 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
                     EditorPanel.editShape)
               ValueListenableBuilder<Duration>(
                 valueListenable: widget.playback.time,
-                builder: (context, _, _) {
-                  ref.watch(editorControllerProvider);
-                  return Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      for (final a in _alcasDaFormaNoPalco())
-                        Positioned(
-                          left: a.ponto.dx - 9,
-                          top: a.ponto.dy - 9,
-                          child: IgnorePointer(
-                            child: Container(
-                              key: ValueKey('alca-forma-${a.chave}'),
-                              width: 18,
-                              height: 18,
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: AmColors.accent,
-                                  width: 3,
-                                ),
-                                boxShadow: const [
-                                  BoxShadow(
-                                    color: Colors.black54,
-                                    blurRadius: 4,
+                builder: (context, _, _) => Consumer(
+                  builder: (context, ref, _) {
+                    // So este ramo acompanha a mutacao, e nao o palco.
+                    ref.watch(editorControllerProvider);
+                    return Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        for (final a in _alcasDaFormaNoPalco())
+                          Positioned(
+                            left: a.ponto.dx - 9,
+                            top: a.ponto.dy - 9,
+                            child: IgnorePointer(
+                              child: Container(
+                                key: ValueKey('alca-forma-${a.chave}'),
+                                width: 18,
+                                height: 18,
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: AmColors.accent,
+                                    width: 3,
                                   ),
-                                ],
+                                  boxShadow: const [
+                                    BoxShadow(
+                                      color: Colors.black54,
+                                      blurRadius: 4,
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                    ],
-                  );
-                },
+                      ],
+                    );
+                  },
+                ),
               ),
-            // ALCAS DA SELECAO: marcadores sem desenho visivel
+            // ALCAS DA SELECAO: marcadores sem desenho visivel.
+            //
+            // Elas seguem a camada selecionada, entao ESTE ramo observa o
+            // projeto (o palco em volta nao).
             if (!drawing)
-              Builder(
-                builder: (context) {
+              Consumer(
+                builder: (context, ref, _) {
+                  ref.watch(editorControllerProvider);
+                  ref.watch(selectedLayerProvider);
                   final a = _alcasDaSelecao();
                   if (a == null) return const SizedBox.shrink();
                   Widget alca(Offset p, IconData icone, String chave) =>
@@ -1854,6 +1929,31 @@ class _CompositionGate {
 const Color _tintaPassado = Color(0x66FF6B6B);
 const Color _tintaFuturo = Color(0x666BFF8A);
 
+/// A ESCALA FISICA DO PALCO EM REPOUSO (pixels fisicos por pixel logico da
+/// composicao), para o alvo da cena 3D.
+///
+/// O MediaQuery do palco leva a razao das FOTOS, que cai a metade enquanto
+/// o dedo esta no comando. O 3D nao pode seguir esse vai-e-vem: trocar o
+/// tamanho do alvo recria os alvos do motor. Entao ele le daqui a escala
+/// de repouso — e, fora do palco (exportacao, miniaturas), cai na razao do
+/// MediaQuery mesmo.
+class EscalaFisicaDoPalco extends InheritedWidget {
+  const EscalaFisicaDoPalco({
+    super.key,
+    required this.valor,
+    required super.child,
+  });
+
+  final double valor;
+
+  static double? de(BuildContext context) => context
+      .dependOnInheritedWidgetOfExactType<EscalaFisicaDoPalco>()
+      ?.valor;
+
+  @override
+  bool updateShouldNotify(EscalaFisicaDoPalco old) => old.valor != valor;
+}
+
 /// Um quadro vizinho, esmaecido e tingido.
 class _Fantasma extends StatefulWidget {
   const _Fantasma({
@@ -1907,6 +2007,10 @@ class _FantasmaState extends State<_Fantasma> {
           time: _t,
           videos: widget.videos,
           selectedId: null,
+          // O FANTASMA NAO DESENHA 3D VIVO: ele mostra o quadro vizinho se
+          // o motor ja o tem, e nada se nao tem. Quatro fantasmas pedindo
+          // desenho da placa por quadro eram metade do laco em repouso.
+          apenasDoCache3D: true,
         ),
       ),
     );
@@ -1927,12 +2031,17 @@ class CompositionView extends ConsumerStatefulWidget {
     this.amostras3D,
     this.escalaDaCena3D = 1,
     this.vistaDoPalco = false,
+    this.apenasDoCache3D = false,
   });
 
   /// E O PALCO DO EDITOR: obedece as opcoes de visualizacao (sem efeitos,
   /// sem camera, selecionada a 50%). Exportacao, miniaturas e fantasmas
   /// desenham o projeto como ele e.
   final bool vistaDoPalco;
+
+  /// A CENA 3D SO DO CACHE DO MOTOR, sem desenhar: o fantasma da casca de
+  /// cebola mostra o quadro vizinho se ele ja existe e nada se nao existe.
+  final bool apenasDoCache3D;
 
   final ValueListenable<Duration> time;
   final VideoLayerManager videos;
@@ -1980,8 +2089,15 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
   /// volta inteira. Exportando, nunca — la a qualidade e o unico
   /// criterio. E a mesma regra do 3D em rascunho, e a mesma razao: um
   /// preview que engasga nao serve para animar nada.
-  bool get _rascunho =>
-      !widget.exporting && PlaybackController.tocandoAgora.value;
+  ///
+  /// E TAMBEM COM O DEDO NO COMANDO (`Interacao.agora`): arrastar um
+  /// slider com o relogio parado custava mais do que tocar, porque rodava
+  /// em qualidade cheia a cada passo. Exportando, nunca — ver `emRascunho`.
+  bool get _rascunho => emRascunho(
+    exporting: widget.exporting,
+    tocando: PlaybackController.tocandoAgora.value,
+    interagindo: Interacao.agora.value,
+  );
   final _gate = _CompositionGate();
 
   ValueListenable<Duration> get time => widget.time;
@@ -2097,9 +2213,15 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
     // O RASCUNHO PRECISA DE QUEM O ESCUTE. Sem este ouvinte, a
     // qualidade cheia so voltaria no proximo quadro — e ao pausar nao ha
     // proximo quadro, entao o preview ficaria parado no rascunho.
-    return ValueListenableBuilder<bool>(
-      valueListenable: PlaybackController.tocandoAgora,
-      builder: (context, _, _) => ValueListenableBuilder<Duration>(
+    //
+    // OS DOIS SINAIS DO RASCUNHO, o play e o dedo: ao soltar o dedo o sinal
+    // cai e este ouvinte e quem monta o quadro final em qualidade cheia.
+    return ListenableBuilder(
+      listenable: Listenable.merge([
+        PlaybackController.tocandoAgora,
+        Interacao.agora,
+      ]),
+      builder: (context, _) => ValueListenableBuilder<Duration>(
         valueListenable: time,
         builder: (context, t, _) {
           _tempoVivo = t;
@@ -3142,6 +3264,7 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
       sombra3D: sombraDaCena3D,
       amostras3D: amostrasDaCena3D,
       escalaDaCena3D: escalaDaCena3D,
+      apenasDoCache3D: widget.apenasDoCache3D,
       particlesFocal: isParticles && camAtiva != null
           ? camAtiva.zoom.valueAt(camAtiva.localTime(t)).clamp(60.0, 12000.0)
           : CameraLayer.lenteNeutra,
@@ -7249,6 +7372,7 @@ class _Cena3DView extends StatefulWidget {
     this.amostras,
     this.escalaDaExportacao = 1,
     this.quadroEsperado,
+    this.apenasDoCache = false,
   });
 
   final Scene3DLayer layer;
@@ -7258,6 +7382,9 @@ class _Cena3DView extends StatefulWidget {
   final double compWidth;
   final double compHeight;
   final bool exporting;
+
+  /// FANTASMA: so o que o motor ja tem, sem desenhar nem montar.
+  final bool apenasDoCache;
 
   /// Na exportacao, o desenho foi ESPERADO antes (§33) e estes numeros
   /// vem do mesmo lugar que a espera usou. Nulos = decide a receita.
@@ -7275,10 +7402,20 @@ class _Cena3DView extends StatefulWidget {
 }
 
 class _Cena3DViewState extends State<_Cena3DView> {
+  /// O ALVO DO ULTIMO QUADRO, para a histerese de `alvo3DDoPreview`.
+  ({int largura, int altura})? _alvoAnterior;
+
   @override
   void initState() {
     super.initState();
     Motor3DNativo.instance.revision.addListener(_acordar);
+    // OS MAPAS QUE CHEGAM DEPOIS mudam a chave do quadro (ver
+    // `chaveDaCena`); sem este ouvinte a vista so redesenharia quando
+    // outra coisa mudasse, e o modelo ficava cinza ate la.
+    TextureCache.instance.revision.addListener(_acordar);
+    // O DEDO SOLTO E O DEDO NO COMANDO mudam a qualidade (sombra) e a
+    // histerese do alvo — a vista precisa reconstruir nos dois momentos.
+    if (!widget.exporting) Interacao.agora.addListener(_acordar);
     ControladorDeQualidade3D.instancia.entrou();
     // A CENA SE APRESENTA ao controlador de qualidade: o orcamento e
     // decidido ANTES do primeiro quadro, e nao depois de a memoria ja
@@ -7300,11 +7437,23 @@ class _Cena3DViewState extends State<_Cena3DView> {
         widget.compHeight,
       );
     }
+    if (old.layer.id != widget.layer.id && !old.apenasDoCache) {
+      Motor3DNativo.instance.esquecerFamilia(old.layer.id);
+    }
   }
 
   @override
   void dispose() {
-    Motor3DNativo.instance.revision.removeListener(_acordar);
+    final motor = Motor3DNativo.instance;
+    motor.revision.removeListener(_acordar);
+    TextureCache.instance.revision.removeListener(_acordar);
+    if (!widget.exporting) Interacao.agora.removeListener(_acordar);
+    // A VISTA SAIU: a chave dela pode sair do cache e as malhas que so
+    // ela usava podem ir. O fantasma nunca registrou nada.
+    if (!widget.apenasDoCache) {
+      motor.esquecerDono(this);
+      if (!widget.exporting) motor.esquecerFamilia(widget.layer.id);
+    }
     ControladorDeQualidade3D.instancia.saiu();
     super.dispose();
   }
@@ -7321,22 +7470,40 @@ class _Cena3DViewState extends State<_Cena3DView> {
     final receita = ControladorDeQualidade3D.instancia.receita;
     final compLargura = widget.compWidth <= 0 ? 1.0 : widget.compWidth;
     final compAltura = widget.compHeight <= 0 ? 1.0 : widget.compHeight;
+    final interagindo = !widget.exporting && Interacao.agora.value;
     // O ALVO NAO E O TAMANHO DA CAIXA: a 3D e uma camada, entao ela
     // desenha na resolucao que o orcamento permite (nivel adaptativo do
-    // preview, §23) e a caixa amplia. Na exportacao a resolucao e a da
-    // composicao vezes a escala que coube na memoria.
+    // preview, §23), nunca acima do que o palco mostra de verdade (a razao
+    // de pixels do MediaQuery do palco ja e escala x DPR x resolucao da
+    // previa), e a caixa amplia. Na exportacao a resolucao e a da
+    // composicao vezes a escala que coube na memoria — e so ela.
     final alvo = widget.exporting
         ? (
             largura: (compLargura * widget.escalaDaExportacao).round(),
             altura: (compAltura * widget.escalaDaExportacao).round(),
           )
-        : alvoDoPreview(compLargura, compAltura, receita);
+        : alvo3DDoPreview(
+            compLargura: compLargura,
+            compAltura: compAltura,
+            receita: receita,
+            escalaFisica:
+                EscalaFisicaDoPalco.de(context) ??
+                MediaQuery.devicePixelRatioOf(context),
+            anterior: _alvoAnterior,
+            segurar: interagindo,
+          );
     if (alvo.largura <= 0 || alvo.altura <= 0) {
       return const SizedBox.shrink();
     }
+    if (!widget.exporting) _alvoAnterior = alvo;
     final maior = math.max(alvo.largura, alvo.altura);
-    final sombra = widget.sombra ?? nivelDeSombra3D(receita, maior);
-    final amostras = widget.amostras ?? (receita.msaa ? 4 : 1);
+    final qualidade = qualidade3DDoPreview(
+      sombra: widget.sombra ?? nivelDeSombra3D(receita, maior),
+      amostras: widget.amostras ?? (receita.msaa ? 4 : 1),
+      interagindo: interagindo,
+    );
+    final sombra = qualidade.sombra;
+    final amostras = qualidade.amostras;
 
     final estado = estado3DDoQuadro(
       project: widget.project,
@@ -7349,24 +7516,43 @@ class _Cena3DViewState extends State<_Cena3DView> {
       amostras: amostras,
     );
 
-    // MONTAR ANTES DE PEDIR: a chave descreve o estado, mas quem o entrega
-    // ao motor e esta chamada. Sem ela o desenho sairia do quadro anterior.
-    motor.montar(
-      cena: estado.cena,
-      camera: estado.camera,
-      local: widget.localTime,
-      largura: alvo.largura,
-      altura: alvo.altura,
-      aspectoDaComposicao: compLargura / compAltura,
-      sombra: sombra,
-      amostras: amostras,
-    );
+    // O FANTASMA SO OLHA O CACHE: nem monta, nem desenha, nem segura.
+    if (widget.apenasDoCache) {
+      return _quadro(motor.quadroDoCache(estado.chave));
+    }
+
+    // O CACHE ANTES DE MONTAR. Montar e reescrever camadas, luzes e camera
+    // por FFI e varrer as malhas; com a imagem deste estado ja pronta (ou
+    // a caminho) o motor nao vai desenhar, e montar seria trabalho por
+    // nada — era o custo dobrado por quadro em play, scrub e slider. A
+    // exportacao monta sempre: ela espera o desenho, e o quadro tem de
+    // sair do estado que acabou de ser entregue.
+    final precisaMontar = widget.exporting || !motor.temQuadro(estado.chave);
+    if (precisaMontar) {
+      // MONTAR ANTES DE PEDIR: a chave descreve o estado, mas quem o
+      // entrega ao motor e esta chamada. Sem ela o desenho sairia do
+      // quadro anterior.
+      motor.montar(
+        cena: estado.cena,
+        camera: estado.camera,
+        local: widget.localTime,
+        largura: alvo.largura,
+        altura: alvo.altura,
+        aspectoDaComposicao: compLargura / compAltura,
+        sombra: sombra,
+        amostras: amostras,
+        familia: widget.exporting ? null : widget.layer.id,
+      );
+    }
 
     final imagem = widget.exporting
         ? widget.quadroEsperado?.call(estado.chave)
-        : motor.quadro(estado.chave, familia: widget.layer.id);
-    if (imagem == null) return const SizedBox.shrink();
+        : motor.quadro(estado.chave, familia: widget.layer.id, dono: this);
+    return _quadro(imagem);
+  }
 
+  Widget _quadro(ui.Image? imagem) {
+    if (imagem == null) return const SizedBox.shrink();
     return SizedBox(
       width: widget.compWidth,
       height: widget.compHeight,
@@ -7391,6 +7577,7 @@ class _LayerContent extends StatelessWidget {
     this.sombra3D,
     this.amostras3D,
     this.escalaDaCena3D = 1,
+    this.apenasDoCache3D = false,
     required this.buildChildren,
     this.particlesRotX = 0,
     this.particlesRotY = 0,
@@ -7417,6 +7604,9 @@ class _LayerContent extends StatelessWidget {
   final int? sombra3D;
   final int? amostras3D;
   final double escalaDaCena3D;
+
+  /// Ver [CompositionView.apenasDoCache3D].
+  final bool apenasDoCache3D;
 
   /// Rotacao 3D do sistema de particulas (graus), ja com o delta do pai.
   /// A LENTE ATIVA, para a nuvem de particulas abrir o mesmo angulo
@@ -7748,6 +7938,7 @@ class _LayerContent extends StatelessWidget {
         amostras: amostras3D,
         escalaDaExportacao: escalaDaCena3D,
         quadroEsperado: quadroDaCena3D,
+        apenasDoCache: apenasDoCache3D,
       ),
       // Precomp: filhos compostos no tempo local do grupo.
       // PRECOMP: tempo proprio (com remapeamento), quadro proprio e a

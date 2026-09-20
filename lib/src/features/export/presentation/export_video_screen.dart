@@ -24,6 +24,7 @@ import '../../editor/domain/video_project.dart';
 import '../../editor/domain/shape.dart' show ShapeMediaFill;
 import '../../editor/domain/time_slice.dart';
 import '../../editor/domain/grupo_ops.dart';
+import '../../../core/theme/aurea_paleta.dart';
 import '../../../core/ui/am_colors.dart';
 import '../../editor/presentation/widgets/dither_layer.dart';
 import '../../editor/presentation/widgets/pixel_effect_engine.dart';
@@ -1085,7 +1086,7 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Row(
+            Row(
               children: [
                 Icon(
                   CupertinoIcons.exclamationmark_triangle,
@@ -1138,7 +1139,7 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Row(
+            Row(
               children: [
                 Icon(
                   CupertinoIcons.checkmark_seal_fill,
@@ -1197,7 +1198,7 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
                         ),
                       );
                     },
-                    child: const AppText(
+                    child: AppText(
                       'Copiar caminho',
                       style: TextStyle(fontSize: 13, color: AmColors.accent),
                     ),
@@ -1210,12 +1211,12 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
                     borderRadius: BorderRadius.circular(12),
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     onPressed: () => Navigator.of(context).maybePop(),
-                    child: const AppText(
+                    child: AppText(
                       'Concluir',
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
-                        color: Color(0xFF10151D),
+                        color: AureaPaleta.ativa.onAccent,
                       ),
                     ),
                   ),
@@ -1264,7 +1265,7 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
                 ),
               AppText(
                 '${(_progresso * 100).round()}%',
-                style: const TextStyle(fontSize: 13, color: AmColors.accent),
+                style: TextStyle(fontSize: 13, color: AmColors.accent),
               ),
             ],
           ),
@@ -1275,7 +1276,7 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
               value: _progresso,
               minHeight: 6,
               backgroundColor: AmColors.chip,
-              valueColor: const AlwaysStoppedAnimation<Color>(AmColors.accent),
+              valueColor: AlwaysStoppedAnimation<Color>(AmColors.accent),
             ),
           ),
           const SizedBox(height: 8),
@@ -1399,7 +1400,7 @@ class _BotaoGrande extends StatelessWidget {
         ),
         child: AppText(
           rotulo,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.w700,
             color: AmColors.onAction,

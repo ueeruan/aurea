@@ -7,7 +7,6 @@ import 'dart:ui' as ui;
 import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import 'package:flutter/foundation.dart' show ValueListenable;
-import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
@@ -122,10 +121,9 @@ class RelogioDasPrevias extends StatefulWidget {
   State<RelogioDasPrevias> createState() => _RelogioDasPreviasState();
 }
 
-class _RelogioDasPreviasState extends State<RelogioDasPrevias>
-    with SingleTickerProviderStateMixin {
+class _RelogioDasPreviasState extends State<RelogioDasPrevias> {
   final _quadro = ValueNotifier<int>(0);
-  Ticker? _ticker;
+  Timer? _relogio;
 
   @override
   void initState() {
@@ -133,18 +131,22 @@ class _RelogioDasPreviasState extends State<RelogioDasPrevias>
     PreviasDosEfeitos.instance.manifesto().then((_) {
       if (mounted) setState(() {});
     });
+    // UM TIMER NA TAXA DA PREVIA, E NAO UM TICKER. O Ticker agenda um
+    // quadro a CADA vsync (60-120 por segundo) mesmo quando o indice nao
+    // muda, e sem raster cache no Impeller cada quadro agendado e a
+    // composicao INTEIRA (o palco fica montado atras da galeria)
+    // rasterizada de novo. O Timer so acorda quando o quadro da tira troca.
     if (PreviasDosEfeitos.animar) {
-      _ticker = createTicker((passou) {
-        final q =
-            (passou.inMicroseconds * fpsDaPrevia ~/ 1000000) % quadrosDaPrevia;
-        if (q != _quadro.value) _quadro.value = q;
-      })..start();
+      _relogio = Timer.periodic(
+        Duration(microseconds: 1000000 ~/ fpsDaPrevia),
+        (_) => _quadro.value = (_quadro.value + 1) % quadrosDaPrevia,
+      );
     }
   }
 
   @override
   void dispose() {
-    _ticker?.dispose();
+    _relogio?.cancel();
     _quadro.dispose();
     super.dispose();
   }

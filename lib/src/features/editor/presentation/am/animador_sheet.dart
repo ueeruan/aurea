@@ -83,7 +83,7 @@ class _Animador extends ConsumerWidget {
                         controller.setPropAnimador(layerId, prop, null);
                         Navigator.of(context).pop();
                       },
-                      child: const Padding(
+                      child: Padding(
                         padding: EdgeInsets.symmetric(
                           horizontal: 10,
                           vertical: 6,

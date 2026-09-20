@@ -135,7 +135,7 @@ Future<void> showAppleCascadeSheet(
                     onPressed: selectionCount < 2
                         ? null
                         : () => apply(ready: true),
-                    child: const AppText('Escalonar selecao',
+                    child: AppText('Escalonar selecao',
                       style: TextStyle(
                         color: AmColors.bg,
                         fontWeight: FontWeight.w700,
@@ -166,7 +166,7 @@ Future<void> showAppleCascadeSheet(
                         child: AppText(
                           '${intervalMs.round()} ms',
                           textAlign: TextAlign.end,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 12,
                             color: AmColors.accent,
                           ),
@@ -269,7 +269,7 @@ Future<void> showAppleCascadeSheet(
                       depth == _CascadeDepth.avancado && onLinkProperty != null
                           ? 'Vincular com atraso incremental'
                           : 'Aplicar cascata',
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: AmColors.bg,
                         fontWeight: FontWeight.w700,
                       ),

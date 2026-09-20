@@ -245,7 +245,7 @@ Future<void> showLoopSheet(
                           ),
                           child: AppText(
                             label,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 12,
                               color: AmColors.accent,
                             ),
@@ -294,7 +294,7 @@ Future<void> showLoopSheet(
                             ),
                             child: AppText(
                               label,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 12,
                                 color: AmColors.accent,
                               ),
@@ -324,7 +324,7 @@ Future<void> showLoopSheet(
                         color: AmColors.chip,
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      child: const AppText('Inverter no tempo',
+                      child: AppText('Inverter no tempo',
                         style: TextStyle(fontSize: 12, color: AmColors.accent),
                       ),
                     ),

@@ -377,7 +377,10 @@ class _Ponta extends StatelessWidget {
             gradient: LinearGradient(
               begin: esquerda ? Alignment.centerLeft : Alignment.centerRight,
               end: esquerda ? Alignment.centerRight : Alignment.centerLeft,
-              colors: const [AmColors.panel, Color(0x00171C23)],
+              // A ponta some no PROPRIO fundo do painel: o segundo tom era
+              // um grafite fixo da era antiga (#171C23) e dedurava o
+              // degrade assim que o tema mudava.
+              colors: [AmColors.panel, AmColors.panel.withValues(alpha: 0)],
             ),
           ),
         ),
@@ -437,7 +440,7 @@ class _Aba extends StatelessWidget {
               Container(
                 width: 5,
                 height: 5,
-                decoration: const BoxDecoration(
+                decoration: BoxDecoration(
                   color: AmColors.accent,
                   shape: BoxShape.circle,
                 ),

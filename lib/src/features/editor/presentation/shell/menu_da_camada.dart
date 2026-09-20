@@ -721,7 +721,7 @@ Future<void> mostrarColarEstilo(
                           : () => Navigator.of(
                               folha,
                             ).pop(c.colarEstilo(destinoId, escolhidas)),
-                      child: const AppText(
+                      child: AppText(
                         'Colar',
                         style: TextStyle(
                           color: AmColors.onAction,

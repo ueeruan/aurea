@@ -120,7 +120,11 @@ void main() {
     rotationY: AnimatedDouble(ry),
     is3D: true,
   );
-  test('AutoKey starts enabled and rotation between keys writes all axes', () {
+  // O AUTO-KEY NASCE DESLIGADO (`docs/keyframe-explicito.md`). Este teste
+  // fixava o padrao ANTIGO (`isTrue`), que era o defeito das marcas que
+  // apareciam sozinhas; o que ele guarda de valioso — a rotacao gravando
+  // os tres eixos — continua, com o interruptor ligado a mao.
+  test('AutoKey nasce desligado; ligado, a rotacao escreve todos os eixos', () {
     final c = ProviderContainer();
     addTearDown(c.dispose);
     final e = c.read(editorControllerProvider.notifier);
@@ -133,7 +137,8 @@ void main() {
     e.openProject(
       VideoProject(name: 'test', createdAt: DateTime(2026), layers: [layer]),
     );
-    expect(c.read(autoKeyframeProvider), isTrue);
+    expect(c.read(autoKeyframeProvider), isFalse);
+    c.read(autoKeyframeProvider.notifier).state = true;
     e.editRotation('n', t, 450);
     final result = c.read(editorControllerProvider).layers.single;
     expect(result.rotation.valueAt(t), 450);

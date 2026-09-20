@@ -65,12 +65,14 @@ void main() {
   });
 
   test('o tema claro troca os papeis de AppColors e o escuro devolve', () {
+    // Os hexes sao os da identidade azul de 18/09 (AureaColors.lightBg e
+    // AureaColors.bg); o teste ainda cobrava os grafites de antes dela.
     final claro = AppTheme.light;
     expect(claro.brightness, Brightness.light);
-    expect(AppColors.background, const Color(0xFFF4F5F7));
+    expect(AppColors.background, const Color(0xFFF4F6F9));
     final escuro = AppTheme.dark;
     expect(escuro.brightness, Brightness.dark);
-    expect(AppColors.background, const Color(0xFF12151A));
+    expect(AppColors.background, const Color(0xFF0F141A));
     expect(const AppSettings().themeMode, 'escuro');
     expect(const AppSettings().copyWith(themeMode: 'claro').themeMode, 'claro');
   });

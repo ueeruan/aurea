@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:aurea/src/core/l10n/app_language.dart';
 import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import '../../../../core/ui/am_colors.dart';
@@ -81,18 +82,34 @@ class RailEsquerdo extends StatelessWidget {
           tamanho: 24,
           aoTocar: aoVoltar,
         ),
-        _BotaoCustomDoRail(
-          rotulo: alvo.temKeyframeAqui
-              ? 'Tirar o keyframe daqui'
-              : 'Marcar keyframe aqui',
-          aoTocar: alvo.aoAlternarKeyframe,
-          child: CustomPaint(
-            size: const Size(22, 22),
-            painter: _DiamondKeyframePainter(
-              hasKeyframe: alvo.temKeyframeAqui,
-              isAnimated: alvo.animado,
-              ativo: alvo.aoAlternarKeyframe != null,
-            ),
+        // O LOSANGO E, POR CIMA DELE, O SELO "AUTO" ENQUANTO O KEYFRAME
+        // AUTOMATICO ESTIVER LIGADO (ver [SeloAutoKeyframe]).
+        Expanded(
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: _CelulaDoRail(
+                  rotulo: alvo.temKeyframeAqui
+                      ? 'Tirar o keyframe daqui'
+                      : 'Marcar keyframe aqui',
+                  aoTocar: alvo.aoAlternarKeyframe,
+                  child: CustomPaint(
+                    size: const Size(22, 22),
+                    painter: _DiamondKeyframePainter(
+                      hasKeyframe: alvo.temKeyframeAqui,
+                      isAnimated: alvo.animado,
+                      ativo: alvo.aoAlternarKeyframe != null,
+                    ),
+                  ),
+                ),
+              ),
+              const Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: SeloAutoKeyframe(),
+              ),
+            ],
           ),
         ),
         _BotaoCustomDoRail(
@@ -167,7 +184,7 @@ class RailDireito extends StatelessWidget {
                     height: altura,
                     decoration: BoxDecoration(
                       color: i == vigente
-                          ? const Color(0xFF1E222D)
+                          ? AmColors.chip
                           : Colors.transparent,
                       borderRadius: BorderRadius.circular(8),
                       border: i == vigente
@@ -248,21 +265,101 @@ class _BotaoCustomDoRail extends StatelessWidget {
   final Widget child;
 
   @override
+  Widget build(BuildContext context) => Expanded(
+    child: _CelulaDoRail(rotulo: rotulo, aoTocar: aoTocar, child: child),
+  );
+}
+
+/// A celula tocavel do rail, SEM o `Expanded`: o losango precisa dela
+/// dentro de uma pilha, com o selo "AUTO" por cima.
+class _CelulaDoRail extends StatelessWidget {
+  const _CelulaDoRail({
+    required this.rotulo,
+    required this.aoTocar,
+    required this.child,
+  });
+
+  final String rotulo;
+  final VoidCallback? aoTocar;
+  final Widget child;
+
+  @override
   Widget build(BuildContext context) {
     final ativo = aoTocar != null;
-    return Expanded(
-      child: Semantics(
-        container: true,
-        excludeSemantics: true,
-        button: ativo,
-        enabled: ativo,
-        label: rotulo,
+    return Semantics(
+      container: true,
+      excludeSemantics: true,
+      button: ativo,
+      enabled: ativo,
+      label: rotulo,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: aoTocar,
+        child: SizedBox(
+          width: RailEsquerdo.largura,
+          child: Center(child: child),
+        ),
+      ),
+    );
+  }
+}
+
+/// O SELO "AUTO": o keyframe automatico ANUNCIADO, e desligavel num toque.
+///
+/// A regra do dono e que keyframe nao nasce sem intencao
+/// (`docs/keyframe-explicito.md`): o automatico nasce DESLIGADO. Quem o
+/// liga de proposito — pelo menu "⋯" da transformacao — passa a ver este
+/// selo colado ao losango em TODA ferramenta que tem rail, porque e ali que
+/// a marca que ele cria aparece. Antes o unico sinal era um item marcado
+/// dentro de um menu fechado, e as marcas "apareciam sozinhas".
+///
+/// Tocar no selo DESLIGA. Ligar continua sendo um gesto deliberado, no
+/// menu: o selo nunca liga nada.
+class SeloAutoKeyframe extends ConsumerWidget {
+  const SeloAutoKeyframe({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (!ref.watch(autoKeyframeProvider)) return const SizedBox.shrink();
+    const rotulo = 'Keyframe automático ligado. Toque para desligar';
+    return Semantics(
+      container: true,
+      excludeSemantics: true,
+      button: true,
+      label: translate(context, rotulo),
+      child: Tooltip(
+        message: translate(context, rotulo),
         child: GestureDetector(
+          key: const ValueKey('rail-auto-keyframe'),
           behavior: HitTestBehavior.opaque,
-          onTap: aoTocar,
+          onTap: () => ref.read(autoKeyframeProvider.notifier).state = false,
+          // A area de toque e a largura inteira do rail; a pilula e so o
+          // desenho. 18 px de altura: cabe embaixo do losango de 22 px na
+          // celula mais baixa que o rail chega a ter.
           child: SizedBox(
-            width: RailEsquerdo.largura,
-            child: Center(child: child),
+            height: 18,
+            child: Center(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: AmColors.accent,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                  child: AppText(
+                    'AUTO',
+                    maxLines: 1,
+                    style: TextStyle(
+                      fontSize: 8.5,
+                      height: 1,
+                      letterSpacing: .4,
+                      fontWeight: FontWeight.w800,
+                      color: AmColors.bg,
+                    ),
+                  ),
+                ),
+              ),
+            ),
           ),
         ),
       ),

@@ -351,6 +351,98 @@ class Easing {
     return dy / dx;
   }
 
+  /// PARTE A CURVA EM DUAS no progresso [f] (0..1) do trecho: a metade que
+  /// vai do comeco ate [f] e a que vai de [f] ate o fim.
+  ///
+  /// E o que o losango precisa para cravar uma marca NO MEIO de um trecho
+  /// sem deformar a animacao. A marca nova nascia linear e o trecho da
+  /// esquerda ficava com a curva INTEIRA espremida na metade do tempo: um
+  /// ease-in-out virava "ease-in-out ate o meio, reta dali em diante", e a
+  /// animacao mudava de desenho so por ter ganhado uma marca.
+  ///
+  /// Para a bezier a divisao e EXATA (de Casteljau): acha-se o parametro u
+  /// com x(u) = f, parte-se o poligono de controle ali, e cada metade e
+  /// renormalizada para o quadrado 0..1 — no tempo pelo pedaco de tempo que
+  /// lhe coube, no valor pelo pedaco de valor. `Manter` continua `Manter`
+  /// dos dois lados (o valor so salta na marca final). As outras familias
+  /// (quique, elastico, degraus, mola...) nao tem metade na propria
+  /// familia: a esquerda fica com a curva e a direita nasce reta, que e o
+  /// comportamento de sempre.
+  (Easing, Easing) dividirEm(double f) {
+    if (type == EasingType.hold) return (this, this);
+    if (type != EasingType.cubicBezier) return (this, Easing.linear);
+    if (isLinear || !f.isFinite || f <= 0 || f >= 1) return (this, this);
+    final ax = x1.clamp(0.0, 1.0), bx = x2.clamp(0.0, 1.0);
+    double px(double u) {
+      final v = 1 - u;
+      return 3 * v * v * u * ax + 3 * v * u * u * bx + u * u * u;
+    }
+
+    // x(u) e monotona (x1, x2 em 0..1): bissecao, como em [speedAt].
+    var lo = 0.0, hi = 1.0;
+    for (var i = 0; i < 40; i++) {
+      final mid = (lo + hi) / 2;
+      if (px(mid) < f) {
+        lo = mid;
+      } else {
+        hi = mid;
+      }
+    }
+    final u = (lo + hi) / 2;
+    double mix(double a, double b) => a + (b - a) * u;
+    // De Casteljau: P0=(0,0) P1=(x1,y1) P2=(x2,y2) P3=(1,1).
+    final aX = mix(0, ax), aY = mix(0, y1);
+    final bX = mix(ax, bx), bY = mix(y1, y2);
+    final cX = mix(bx, 1), cY = mix(y2, 1);
+    final dX = mix(aX, bX), dY = mix(aY, bY);
+    final eX = mix(bX, cX), eY = mix(bY, cY);
+    final mX = mix(dX, eX), mY = mix(dY, eY);
+    if (mX <= 1e-9 || mX >= 1 - 1e-9) return (this, this);
+
+    // Metade SEM VALOR para percorrer (a marca nova cai no mesmo valor de
+    // uma das pontas): o y da alca nao tem significado — o trecho e plano
+    // de qualquer jeito — e dividir por zero daria infinito. Fica reta.
+    Easing metade(double xa, double ya, double xb, double yb, double dy) {
+      if (dy.abs() < 1e-6) return Easing.linear;
+      final e = Easing(
+        x1: xa.clamp(0.0, 1.0),
+        y1: ya / dy,
+        x2: xb.clamp(0.0, 1.0),
+        y2: yb / dy,
+      );
+      final finita =
+          e.y1.isFinite && e.y2.isFinite && e.x1.isFinite && e.x2.isFinite;
+      return finita ? e : Easing.linear;
+    }
+
+    final esquerda = metade(aX / mX, aY, dX / mX, dY, mY);
+    final direita = metade(
+      (eX - mX) / (1 - mX),
+      eY - mY,
+      (cX - mX) / (1 - mX),
+      cY - mY,
+      1 - mY,
+    );
+    return (esquerda, direita);
+  }
+
+  /// E O MESMO PRESET? Bezier compara as alcas (com folga de arrasto), mola
+  /// compara os tres numeros, e as familias parametricas casam pelo tipo —
+  /// mexer nas alcas amarelas nao tira o trecho da familia.
+  bool mesmoPresetQue(Easing b) {
+    if (type != b.type) return false;
+    if (type == EasingType.spring) {
+      return (response - b.response).abs() < 0.001 &&
+          (damping - b.damping).abs() < 0.001 &&
+          (initialVelocity - b.initialVelocity).abs() < 0.001;
+    }
+    if (type != EasingType.cubicBezier) return true;
+    return (x1 - b.x1).abs() < 0.01 &&
+        (y1 - b.y1).abs() < 0.01 &&
+        (x2 - b.x2).abs() < 0.01 &&
+        (y2 - b.y2).abs() < 0.01;
+  }
+
   Easing copyWith({
     EasingType? type,
     double? x1,
@@ -396,6 +488,145 @@ class Easing {
     EasingType.repeat => 'Repetir',
     EasingType.sawtooth => 'Dente de serra',
   };
+}
+
+/// UM PRESET DE CURVA COM NOME — a peca da FONTE UNICA de presets.
+class PresetDeCurva {
+  const PresetDeCurva(this.nome, this.ease, {this.personalizada = false});
+
+  /// Em pt-BR, como o resto do app; quem desenha traduz.
+  final String nome;
+
+  /// A curva aplicada ao tocar. No preset [personalizada] e so o PONTO DE
+  /// PARTIDA das alcas (ver [CatalogoDeCurvas.aoEscolher]).
+  final Easing ease;
+
+  /// "Bezier personalizada": nao e uma curva fixa, e o modo das alcas.
+  final bool personalizada;
+}
+
+/// UMA FAMILIA DE PRESETS (as abas do painel da curva).
+class FamiliaDeCurvas {
+  const FamiliaDeCurvas(this.nome, this.presets);
+
+  final String nome;
+  final List<PresetDeCurva> presets;
+}
+
+/// A FONTE UNICA DOS PRESETS DE CURVA.
+///
+/// Havia TRES listas divergentes: a do painel da curva da transformacao
+/// (familias), a do editor generico de efeitos/forma/grade (catorze
+/// presets, SEM `Manter`) e uma terceira num widget morto. O mesmo trecho
+/// oferecia curvas diferentes conforme a porta por onde se entrava — e
+/// congelar um parametro de efeito (Hold) simplesmente nao existia.
+///
+/// Agora as duas telas leem daqui: a primeira linha ([basicos]) e a mesma
+/// em todo lugar, e as familias ([familias]) tambem.
+abstract final class CatalogoDeCurvas {
+  /// A PRIMEIRA LINHA, sempre visivel: o que se usa em nove de dez
+  /// trechos. Os nomes sao os do oficio (Ease in, Hold), de proposito.
+  static const basicos = <PresetDeCurva>[
+    PresetDeCurva('Linear', Easing.linear),
+    PresetDeCurva('Ease in', Easing.easeIn),
+    PresetDeCurva('Ease out', Easing.easeOut),
+    PresetDeCurva('Ease in-out', Easing.easeInOut),
+    PresetDeCurva('Hold', Easing.hold),
+    PresetDeCurva('Bézier', Easing.easeInOut, personalizada: true),
+  ];
+
+  static const familias = <FamiliaDeCurvas>[
+    FamiliaDeCurvas('Bézier', [
+      PresetDeCurva('Linear', Easing.linear),
+      PresetDeCurva('Suave na entrada', Easing.easeIn),
+      PresetDeCurva('Suave na saída', Easing.easeOut),
+      PresetDeCurva('Suave nas duas pontas', Easing.easeInOut),
+      PresetDeCurva('Overshoot', Easing.overshoot),
+      PresetDeCurva('Apple padrão', Easing.appleStandard),
+      PresetDeCurva('Apple saída', Easing.appleExit),
+    ]),
+    FamiliaDeCurvas('Quique', [
+      PresetDeCurva('Quique na saída', Easing.bounce),
+      PresetDeCurva('Quique na entrada', Easing.bounceIn),
+      PresetDeCurva('Elástico na saída', Easing.elastic),
+      PresetDeCurva('Elástico na entrada', Easing.elasticIn),
+    ]),
+    FamiliaDeCurvas('Degraus', [
+      PresetDeCurva('Degraus', Easing.steps),
+      PresetDeCurva('Degraus aleatórios', Easing.stepsRandom),
+      PresetDeCurva('Degraus elásticos', Easing.elasticSteps),
+      PresetDeCurva('Manter', Easing.hold),
+    ]),
+    FamiliaDeCurvas('Outras', [
+      PresetDeCurva('Oscilar', Easing.oscillate),
+      PresetDeCurva('Cíclica', Easing.cyclic),
+      PresetDeCurva('Aleatória', Easing.random),
+      PresetDeCurva('Repetir', Easing.repeat),
+      PresetDeCurva('Dente de serra', Easing.sawtooth),
+      PresetDeCurva('Mola', Easing.interfaceSpring),
+      PresetDeCurva('Mola suave', Easing.softSpring),
+    ]),
+  ];
+
+  /// As familias numa fila so, sem repetir o que ja esta em [basicos] —
+  /// e o que a faixa horizontal do editor generico mostra depois da
+  /// primeira linha.
+  static List<PresetDeCurva> get alemDosBasicos => [
+    for (final f in familias)
+      for (final p in f.presets)
+        if (!basicos.any(
+          (b) => !b.personalizada && b.ease.mesmoPresetQue(p.ease),
+        ))
+          p,
+  ];
+
+  /// Em que familia o trecho cai (a aba que nasce aberta).
+  static int familiaDe(Easing e) => switch (e.type) {
+    EasingType.cubicBezier => 0,
+    EasingType.bounce ||
+    EasingType.bounceIn ||
+    EasingType.elastic ||
+    EasingType.elasticIn => 1,
+    EasingType.steps ||
+    EasingType.stepsRandom ||
+    EasingType.elasticSteps ||
+    EasingType.hold => 2,
+    _ => 3,
+  };
+
+  /// O preset nomeado que [e] e — nulo quando as alcas ja sairam de todos.
+  /// As familias vem primeiro: o nome do rodape do painel e o delas.
+  static PresetDeCurva? presetDe(Easing e) {
+    for (final f in familias) {
+      for (final p in f.presets) {
+        if (e.mesmoPresetQue(p.ease)) return p;
+      }
+    }
+    for (final p in basicos) {
+      if (!p.personalizada && e.mesmoPresetQue(p.ease)) return p;
+    }
+    return null;
+  }
+
+  /// [e] e uma bezier que nao e nenhum preset? E quando o chip "Bezier"
+  /// da primeira linha fica aceso.
+  static bool ePersonalizada(Easing e) =>
+      e.type == EasingType.cubicBezier && presetDe(e) == null;
+
+  /// O chip [p] esta aceso para o trecho [atual]?
+  static bool aceso(PresetDeCurva p, Easing atual) =>
+      p.personalizada ? ePersonalizada(atual) : atual.mesmoPresetQue(p.ease);
+
+  /// A CURVA QUE O TOQUE NO PRESET [p] GRAVA, dado o trecho [atual].
+  ///
+  /// "Bezier" e o modo das alcas: se o trecho ja e uma bezier (preset ou
+  /// nao), fica como esta — tocar no chip nao pode jogar fora as alcas que
+  /// a pessoa acabou de ajustar. So um trecho de outra familia (quique,
+  /// Manter...) e que ganha o ponto de partida.
+  static Easing aoEscolher(PresetDeCurva p, Easing atual) =>
+      p.personalizada && atual.type == EasingType.cubicBezier
+      ? atual
+      : p.ease;
 }
 
 class Keyframe<T> {
@@ -464,6 +695,30 @@ List<Keyframe<T>> _removeAt<T>(List<Keyframe<T>> kfs, Duration t) {
     for (final k in kfs)
       if ((k.time - t).abs() >= _epsilon) k,
   ]);
+}
+
+/// AS DUAS CURVAS DE UMA MARCA NOVA EM [t]: (tempo da marca de tras, a
+/// metade esquerda que ela passa a ter) e a metade direita, que e a curva
+/// da marca nova. O primeiro e nulo quando [t] nao cai DENTRO de um trecho
+/// — ou cai em cima de uma marca, e ai quem chama substitui, nao insere
+/// (a curva devolvida e a da marca que ja esta la).
+((Duration, Easing)?, Easing) _curvasAoInserir<T>(
+  List<Keyframe<T>> kfs,
+  Duration t,
+) {
+  for (final k in kfs) {
+    if ((k.time - t).abs() < _epsilon) return (null, k.ease);
+  }
+  for (var i = 0; i < kfs.length - 1; i++) {
+    final a = kfs[i], b = kfs[i + 1];
+    if (t <= a.time || t >= b.time) continue;
+    final span = (b.time - a.time).inMicroseconds;
+    if (span <= 0) break;
+    final f = (t - a.time).inMicroseconds / span;
+    final (esquerda, direita) = a.ease.dividirEm(f);
+    return ((a.time, esquerda), direita);
+  }
+  return (null, Easing.linear);
 }
 
 /// MOVE UMA MARCA NO TEMPO, com o valor e a curva dela.
@@ -808,6 +1063,22 @@ class AnimatedDouble {
     animador,
   );
 
+  /// CRAVA UMA MARCA EM [t] SEM DEFORMAR A ANIMACAO (o losango).
+  ///
+  /// Dentro de um trecho, a curva dele e PARTIDA em duas
+  /// ([Easing.dividirEm]): a marca de tras fica com a metade esquerda e a
+  /// nova nasce com a direita. Fora de qualquer trecho (antes da primeira,
+  /// depois da ultima, trilha estatica) nao ha curva para partir e a marca
+  /// nasce reta, como sempre. Em cima de uma marca, troca o valor e mantem
+  /// a curva dela. [valor] e o que a marca guarda; por omissao, o valor
+  /// que a trilha ja tem ali.
+  AnimatedDouble comMarcaInserida(Duration t, [double? valor]) {
+    final v = valor ?? valueAt(t);
+    final (anterior, curva) = _curvasAoInserir(keyframes, t);
+    if (anterior == null) return withKeyframe(t, v, curva);
+    return withEase(anterior.$1, anterior.$2).withKeyframe(t, v, curva);
+  }
+
   AnimatedDouble withoutKeyframe(Duration t) {
     final rest = _removeAt(keyframes, t);
     // Removeu o ultimo keyframe: volta a ser estatico no valor atual.
@@ -1014,6 +1285,14 @@ class AnimatedOffset {
     loop,
     animador,
   );
+
+  /// A mesma regra de [AnimatedDouble.comMarcaInserida].
+  AnimatedOffset comMarcaInserida(Duration t, [Offset? valor]) {
+    final v = valor ?? valueAt(t);
+    final (anterior, curva) = _curvasAoInserir(keyframes, t);
+    if (anterior == null) return withKeyframe(t, v, curva);
+    return withEase(anterior.$1, anterior.$2).withKeyframe(t, v, curva);
+  }
 
   AnimatedOffset withoutKeyframe(Duration t) {
     final rest = _removeAt(keyframes, t);

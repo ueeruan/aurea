@@ -33,7 +33,42 @@ import '../../domain/keyframe.dart';
 import '../../domain/layer.dart';
 import '../../domain/remapear_tempo.dart';
 import 'am_colors.dart';
+import '../../../../core/ui/am_tick_ruler.dart' show AmArrastoDeValor;
 import '../../../../core/ui/tocavel.dart';
+
+/// O NOME DE CADA MODO DE INTERPOLACAO NA TELA, no vocabulario que o dono
+/// pediu (Nenhuma / Mistura / Fluxo optico / Fluxo optico (IA)). O enum
+/// nao muda — ele e gravado por `name` no projeto —, so o rotulo. Mora
+/// aqui porque as tres superficies do tempo (esta, a folha Tempo e o
+/// cartao do painel de efeitos) precisam dizer a mesma palavra.
+String rotuloDaInterpolacao(InterpolacaoDeQuadros modo) => switch (modo) {
+  InterpolacaoDeQuadros.nenhuma => 'Nenhuma',
+  InterpolacaoDeQuadros.mesclar => 'Mistura',
+  InterpolacaoDeQuadros.movimento => 'Fluxo óptico',
+  InterpolacaoDeQuadros.ia => 'Fluxo óptico (IA)',
+};
+
+/// A PREVIA JA MISTURA OS QUADROS VIZINHOS? Hoje nao: o palco mostra o
+/// quadro mais proximo, e mistura/fluxo optico so existem na exportacao.
+/// Quando a previa reduzida (dois quadros do cache + opacidade pela
+/// fracao) entrar no palco, esta constante vira `true` e o selo passa a
+/// dizer "prévia: mistura" — sem tocar em nenhuma das tres superficies.
+const bool kPreviaMisturaQuadros = false;
+
+/// O SELO DA PREVIA, dito na tela para ninguem procurar no palco um
+/// resultado que so sai no arquivo. Nulo = nada a avisar.
+String? seloDaInterpolacao(InterpolacaoDeQuadros modo) {
+  const previa = kPreviaMisturaQuadros
+      ? 'prévia: mistura'
+      : 'prévia: quadro mais próximo';
+  return switch (modo) {
+    InterpolacaoDeQuadros.nenhuma => null,
+    InterpolacaoDeQuadros.mesclar =>
+      kPreviaMisturaQuadros ? null : '$previa · exportação: mistura',
+    InterpolacaoDeQuadros.movimento ||
+    InterpolacaoDeQuadros.ia => '$previa · exportação: fluxo óptico',
+  };
+}
 
 /// A folha do estudio: modal sem arrasto proprio (o grafico fica com o
 /// gesto), barreira transparente e ~66% da tela — a previa continua a
@@ -636,6 +671,17 @@ class _EstudioDoTempoState extends ConsumerState<EstudioDoTempo> {
     setState(() => _enquadrado = false);
   }
 
+  /// Tira a curva e devolve a velocidade constante equivalente (a media
+  /// do clipe) — a duracao na timeline nao muda.
+  void _removerCurva() {
+    _c.ligarCurvaDeTempo(widget.layerId, false);
+    HapticFeedback.selectionClick();
+    setState(() {
+      _selecionado = null;
+      _enquadrado = false;
+    });
+  }
+
   // ---------------------------------------------------------- build
 
   @override
@@ -897,7 +943,9 @@ class _EstudioDoTempoState extends ConsumerState<EstudioDoTempo> {
                   influencia: (infSaida ?? s.influencia).clamp(0.01, 1.0),
                 ),
         ),
-        dentroDeGesto: false,
+        // Arrastando o campo, o gesto ja esta aberto (um desfazer so);
+        // digitando, cada valor e o proprio passo.
+        dentroDeGesto: _arrastandoCampo,
       );
     }
 
@@ -921,6 +969,8 @@ class _EstudioDoTempoState extends ConsumerState<EstudioDoTempo> {
               p.entrada == null ? null : p.entrada!.influencia * 100,
               '%',
               (v) => muda(infEntrada: v / 100),
+              min: 1,
+              max: 100,
             ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -930,7 +980,7 @@ class _EstudioDoTempoState extends ConsumerState<EstudioDoTempo> {
                   TipoDoPontoDeTempo.linear => 'Linear',
                   TipoDoPontoDeTempo.bezier => 'Bezier',
                 },
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w700,
                   color: AmColors.accent,
@@ -948,6 +998,8 @@ class _EstudioDoTempoState extends ConsumerState<EstudioDoTempo> {
               p.saida == null ? null : p.saida!.influencia * 100,
               '%',
               (v) => muda(infSaida: v / 100),
+              min: 1,
+              max: 100,
             ),
           ],
         ),
@@ -955,12 +1007,25 @@ class _EstudioDoTempoState extends ConsumerState<EstudioDoTempo> {
     );
   }
 
+  // O ARRASTO DE UM CAMPO DO INSPETOR E UM GESTO: abre no primeiro valor
+  // entregue (um toque que so abre o teclado nao gasta passo de desfazer)
+  // e fecha quando o dedo sai do vidro.
+  bool _arrastandoCampo = false;
+
+  void _soltarCampo() {
+    if (!_arrastandoCampo) return;
+    _arrastandoCampo = false;
+    _c.endGesture();
+  }
+
   Widget _campo(
     String rotulo,
     double? valor,
     String sufixo,
-    ValueChanged<double> aoDigitar,
-  ) => Padding(
+    ValueChanged<double> aoMudar, {
+    double min = double.negativeInfinity,
+    double max = double.infinity,
+  }) => Padding(
     padding: const EdgeInsets.symmetric(horizontal: 4),
     child: Opacity(
       opacity: valor == null ? .35 : 1,
@@ -968,7 +1033,20 @@ class _EstudioDoTempoState extends ConsumerState<EstudioDoTempo> {
         rotulo: rotulo,
         valor: valor ?? 0,
         sufixo: sufixo,
-        aoMudar: valor == null ? null : aoDigitar,
+        min: min,
+        max: max,
+        aoDigitar: valor == null ? null : aoMudar,
+        aoArrastar: valor == null
+            ? null
+            : (v) {
+                if (!_arrastandoCampo) {
+                  _arrastandoCampo = true;
+                  widget.playback?.pause();
+                  _c.beginGesture();
+                }
+                aoMudar(v);
+              },
+        aoSoltar: _soltarCampo,
       ),
     ),
   );
@@ -1024,6 +1102,14 @@ class _EstudioDoTempoState extends ConsumerState<EstudioDoTempo> {
                   botao('Congelar', 'estudio-tempo-congelar', _congelarAqui),
                   const SizedBox(width: 6),
                   botao('Reverso', 'estudio-tempo-reverso', _reverso),
+                  const SizedBox(width: 6),
+                  // VOLTAR A VELOCIDADE CONSTANTE: sem isto, quem testava
+                  // uma rampa so saia dela pelo desfazer.
+                  botao(
+                    'Remover curva',
+                    'estudio-tempo-remover',
+                    hasTimeRemap(l) ? _removerCurva : null,
+                  ),
                   const SizedBox(width: 6),
                   Tocavel(
                     key: const ValueKey('estudio-tempo-batidas'),
@@ -1089,7 +1175,7 @@ class _EstudioDoTempoState extends ConsumerState<EstudioDoTempo> {
                       children: [
                         for (final modo in InterpolacaoDeQuadros.values) ...[
                           botao(
-                            modo.emPalavras,
+                            rotuloDaInterpolacao(modo),
                             'estudio-tempo-interp-${modo.name}',
                             () {
                               _c.setClipInterpolacao(widget.layerId, modo);
@@ -1110,6 +1196,17 @@ class _EstudioDoTempoState extends ConsumerState<EstudioDoTempo> {
               ],
             ),
           ),
+          if (seloDaInterpolacao(l.interpolacao) case final selo?)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: AppText(
+                selo,
+                key: const ValueKey('estudio-tempo-selo-da-previa'),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 9.5, color: AmColors.muted),
+              ),
+            ),
         ],
       ),
     );
@@ -1118,90 +1215,119 @@ class _EstudioDoTempoState extends ConsumerState<EstudioDoTempo> {
 
 /// Campo compacto do inspetor: toque abre o teclado numerico do sistema
 /// num dialogo (o padrao das folhas), arrastar na horizontal ajusta fino.
+///
+/// O ARRASTO E O [AmArrastoDeValor], o mesmo das linhas de parametro: ele
+/// ACUMULA desde o toque (o valor so muda quando o dono reconstroi, e
+/// chegam dois ou tres eventos por quadro — somar cada delta em cima do
+/// valor do build perdia quase todo o movimento num arrasto rapido) e
+/// entrega uma vez por quadro. Mesmo sinal de antes: direita aumenta.
 class _CampoDoEstudio extends StatelessWidget {
   const _CampoDoEstudio({
     required this.rotulo,
     required this.valor,
     required this.sufixo,
-    required this.aoMudar,
+    required this.aoDigitar,
+    required this.aoArrastar,
+    required this.aoSoltar,
+    this.min = double.negativeInfinity,
+    this.max = double.infinity,
   });
 
   final String rotulo;
   final double valor;
   final String sufixo;
-  final ValueChanged<double>? aoMudar;
+  final double min;
+  final double max;
+  final ValueChanged<double>? aoDigitar;
+  final ValueChanged<double>? aoArrastar;
+  final VoidCallback aoSoltar;
+
+  Future<void> _digitar(BuildContext context) async {
+    final campo = TextEditingController(text: valor.toStringAsFixed(1));
+    final texto = await showCupertinoDialog<String>(
+      context: context,
+      builder: (dialogContext) => CupertinoAlertDialog(
+        title: AppText(rotulo),
+        content: Padding(
+          padding: const EdgeInsets.only(top: 10),
+          child: CupertinoTextField(
+            controller: campo,
+            autofocus: true,
+            keyboardType: const TextInputType.numberWithOptions(
+              decimal: true,
+              signed: true,
+            ),
+            onSubmitted: (v) => Navigator.of(dialogContext).pop(v),
+          ),
+        ),
+        actions: [
+          CupertinoDialogAction(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const AppText('Cancelar'),
+          ),
+          CupertinoDialogAction(
+            isDefaultAction: true,
+            onPressed: () => Navigator.of(dialogContext).pop(campo.text),
+            child: const AppText('Aplicar'),
+          ),
+        ],
+      ),
+    );
+    final novo = double.tryParse((texto ?? '').replaceAll(',', '.'));
+    if (novo != null && novo.isFinite) aoDigitar?.call(novo);
+  }
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onHorizontalDragUpdate: aoMudar == null
-          ? null
-          : (d) => aoMudar!(valor + d.delta.dx * 2),
-      onTap: aoMudar == null
-          ? null
-          : () async {
-              final campo = TextEditingController(
-                text: valor.toStringAsFixed(1),
-              );
-              final texto = await showCupertinoDialog<String>(
-                context: context,
-                builder: (dialogContext) => CupertinoAlertDialog(
-                  title: AppText(rotulo),
-                  content: Padding(
-                    padding: const EdgeInsets.only(top: 10),
-                    child: CupertinoTextField(
-                      controller: campo,
-                      autofocus: true,
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                        signed: true,
-                      ),
-                      onSubmitted: (v) => Navigator.of(dialogContext).pop(v),
-                    ),
-                  ),
-                  actions: [
-                    CupertinoDialogAction(
-                      onPressed: () => Navigator.of(dialogContext).pop(),
-                      child: const AppText('Cancelar'),
-                    ),
-                    CupertinoDialogAction(
-                      isDefaultAction: true,
-                      onPressed: () =>
-                          Navigator.of(dialogContext).pop(campo.text),
-                      child: const AppText('Aplicar'),
-                    ),
-                  ],
-                ),
-              );
-              final novo = double.tryParse((texto ?? '').replaceAll(',', '.'));
-              if (novo != null && novo.isFinite) aoMudar!(novo);
-            },
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            width: 64,
-            height: 24,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: const Color(0xFF1E222D),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text(
-              '${valor.toStringAsFixed(valor.abs() >= 100 ? 0 : 1)}$sufixo',
-              style: const TextStyle(
-                fontSize: 11,
-                color: AmColors.text,
-                fontFeatures: [FontFeature.tabularFigures()],
-              ),
+    final visual = Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Container(
+          width: 64,
+          height: 24,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: AmColors.chip,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            '${valor.toStringAsFixed(valor.abs() >= 100 ? 0 : 1)}$sufixo',
+            style: TextStyle(
+              fontSize: 11,
+              color: AmColors.text,
+              fontFeatures: [FontFeature.tabularFigures()],
             ),
           ),
-          const SizedBox(height: 2),
-          AppText(
-            rotulo,
-            style: const TextStyle(fontSize: 8.5, color: AmColors.muted),
-          ),
-        ],
+        ),
+        const SizedBox(height: 2),
+        AppText(
+          rotulo,
+          style: TextStyle(fontSize: 8.5, color: AmColors.muted),
+        ),
+      ],
+    );
+    final arrastar = aoArrastar;
+    if (arrastar == null) return visual;
+    // O dedo sai do vidro ANTES de o reconhecedor de arrasto entregar o
+    // ultimo valor pendente (o Listener e avisado primeiro, o roteador de
+    // gestos depois). Fechar o gesto numa microtarefa deixa esse ultimo
+    // valor entrar no MESMO passo de desfazer.
+    void soltar() => Future<void>.microtask(aoSoltar);
+    return Listener(
+      onPointerUp: (_) => soltar(),
+      onPointerCancel: (_) => soltar(),
+      child: AmArrastoDeValor(
+        value: valor,
+        min: min,
+        max: max,
+        // 2 unidades por pixel: a sensibilidade que o campo ja tinha.
+        unitsPerPixel: 2,
+        onChanged: arrastar,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => _digitar(context),
+          child: visual,
+        ),
       ),
     );
   }
@@ -1593,7 +1719,7 @@ class _PintorDaMiniTimeline extends CustomPainter {
     final faixa = Rect.fromLTRB(10, 9, size.width - 10, size.height - 9);
     canvas.drawRRect(
       RRect.fromRectAndRadius(faixa, const Radius.circular(6)),
-      Paint()..color = const Color(0xFF1E222D),
+      Paint()..color = AmColors.chip,
     );
     double x(Duration t) =>
         faixa.left +

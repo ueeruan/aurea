@@ -130,6 +130,24 @@ void main(List<String> args) async {
       flags: [
         if (input.config.code.targetOS == OS.windows) '/EHsc',
         if (ios) ...['-x', 'objective-c++', '-ObjC'],
+        // OS FRAMEWORKS VAO POR BANDEIRA. O `frameworks:` do `CBuilder` so e
+        // aplicado quando a linguagem e Objective-C; como o motor passou a
+        // compilar como C++ (com `-x objective-c++`), a lista de baixo era
+        // IGNORADA e o link falhava com 124 simbolos sem dono — `objc_msgSend`,
+        // `MTL*`, `kIOSurface*`, `CF*`: o runtime do Objective-C e os
+        // frameworks de que o MoltenVK depende.
+        if (ios) ...[
+          '-lobjc',
+          for (final f in const [
+            'Metal',
+            'QuartzCore',
+            'UIKit',
+            'CoreGraphics',
+            'CoreFoundation',
+            'IOSurface',
+            'Foundation',
+          ]) ...['-framework', f],
+        ],
       ],
     ).run(input: input, output: output);
 

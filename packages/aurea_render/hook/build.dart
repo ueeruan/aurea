@@ -97,7 +97,16 @@ void main(List<String> args) async {
       libraryDirectories: [if (ios) moltenVk],
       // No iOS, os dois arquivos de plataforma do Diligent sao Objective-C++
       // (.mm). As fontes .cpp continuam sendo inferidas como C++ pelo clang.
-      language: ios ? Language.objectiveC : Language.cpp,
+      // SEMPRE C++ PARA O `CBuilder`, E OBJECTIVE-C++ POR BANDEIRA NO iOS.
+      //
+      // `Language.objectiveC` faz o builder passar `-x objective-c`, e o
+      // clang RECUSA `-std=c++20` nesse modo ("invalid argument '-std=c++20'
+      // not allowed with 'Objective-C'") — foi o que derrubou os IPAs
+      // a01-r2 e a01-r3. O que os dois `.mm` do Diligent pedem e
+      // Objective-C++, que aceita o padrao do C++ e e um superconjunto dele:
+      // os `.cpp` compilam igual. O `-x` da bandeira vem depois do `-x c++`
+      // do builder, e o ultimo `-x` antes dos fontes e o que vale.
+      language: Language.cpp,
       frameworks: [
         if (ios) ...[
           'Metal',
@@ -114,7 +123,7 @@ void main(List<String> args) async {
       std: 'c++20',
       flags: [
         if (input.config.code.targetOS == OS.windows) '/EHsc',
-        if (ios) '-ObjC',
+        if (ios) ...['-x', 'objective-c++', '-ObjC'],
       ],
     ).run(input: input, output: output);
 

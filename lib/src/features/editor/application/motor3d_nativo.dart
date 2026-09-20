@@ -96,10 +96,7 @@ class Motor3DNativo {
   /// A ULTIMA IMAGEM PRONTA, de qualquer chave — o que aparece enquanto a
   /// chave pedida ainda nao voltou do decodificador.
   ui.Image? _ultima;
-  Uint8List? _rascunho;
   bool _decodificando = false;
-  String _chavePedida = '';
-  Uint8List? _pixelsPedidos;
 
   void _guardarImagem(String chave, ui.Image imagem) {
     final antiga = _imagens[chave];
@@ -113,7 +110,9 @@ class Motor3DNativo {
     while (_ordemDasImagens.length > _imagensGuardadas) {
       final fora = _ordemDasImagens.removeAt(0);
       final descartada = _imagens.remove(fora);
-      if (descartada != null && !identical(descartada, _ultima)) {
+      if (descartada != null &&
+          !identical(descartada, _ultima) &&
+          !_ultimaPorFamilia.values.any((i) => identical(i, descartada))) {
         descartada.dispose();
       }
     }
@@ -392,6 +391,8 @@ class Motor3DNativo {
     _imagens.clear();
     _ordemDasImagens.clear();
     _ultima = null;
+    _ultimaPorFamilia.clear();
+    _pendentes.clear();
     _ponte.esquecer();
     revision.value++;
   }
@@ -679,17 +680,28 @@ class Motor3DNativo {
   /// escuta [revision] e redesenha. Nulo quer dizer "nao ha 3D neste
   /// quadro" — e nao "preto": uma cena sem geometria nao entra na
   /// composicao de jeito nenhum.
-  ui.Image? quadro(String chave) {
+  /// A ULTIMA IMAGEM DE CADA CAMADA, e nao uma so para o motor inteiro.
+  ///
+  /// Enquanto o quadro novo decodifica, o palco mostra o anterior. Com UMA
+  /// "ultima" para tudo, duas camadas 3D (um texto e um modelo) trocavam de
+  /// imagem entre si: a que esperava recebia o ultimo quadro DA OUTRA.
+  final Map<String, ui.Image> _ultimaPorFamilia = {};
+  final Map<String, (String, Uint8List, int, int)> _pendentes = {};
+
+  ui.Image? _ultimaDe(String? familia) =>
+      familia == null ? _ultima : _ultimaPorFamilia[familia];
+
+  ui.Image? quadro(String chave, {String? familia}) {
     if (!ligado) return null;
     final pronta = _imagens[chave];
-    if (pronta != null) return pronta;
-    // A CHAVE E DO ESTADO, E NAO DA IMAGEM: quem chama monta a chave com
-    // tudo o que muda o desenho. Um pedido repetido nao redesenha.
+    if (pronta != null) {
+      if (familia != null) _ultimaPorFamilia[familia] = pronta;
+      return pronta;
+    }
     final pixels = _desenharAgora();
-    if (pixels == null) return _ultima;
-    unawaited(_decodificar(chave, pixels));
-    // O QUE JA ESTA NA TELA: a chave nova volta no proximo quadro.
-    return _ultima;
+    if (pixels == null) return _ultimaDe(familia);
+    unawaited(_decodificar(chave, pixels, familia: familia));
+    return _ultimaDe(familia);
   }
 
   /// DESENHA E ESPERA A IMAGEM. E o caminho da exportacao (§33): la um
@@ -708,12 +720,15 @@ class Motor3DNativo {
       if (!_ponte.desenhar(_cena)) return null;
       final pixels = _ponte.pixels();
       if (pixels == null) return null;
-      final rascunho = _rascunho ??= Uint8List(pixels.length);
-      if (rascunho.length != pixels.length) {
-        _rascunho = Uint8List(pixels.length);
-      }
-      _rascunho!.setAll(0, pixels);
-      return _rascunho;
+      // UMA COPIA POR QUADRO, e nao um rascunho reaproveitado.
+      //
+      // A decodificacao e ASSINCRONA: `decodeImageFromPixels` le o buffer
+      // depois que esta funcao ja voltou. Com um rascunho so, o quadro
+      // seguinte sobrescrevia os pixels antes de a imagem anterior nascer —
+      // e ela era guardada SOB A CHAVE DO QUADRO ANTIGO com o desenho do
+      // novo. Girando um objeto, o cache passava a devolver poses trocadas:
+      // o "corta do nada e muda o angulo" do relato.
+      return Uint8List.fromList(pixels);
     } catch (e) {
       desistir('$e');
       return null;
@@ -727,17 +742,22 @@ class Motor3DNativo {
     String chave,
     Uint8List pixels, {
     bool esperar = false,
+    String? familia,
+    int? larguraDoQuadro,
+    int? alturaDoQuadro,
   }) async {
-    final largura = _ponte.largura;
-    final altura = _ponte.altura;
+    // O TAMANHO E O DO QUADRO DESENHADO, lido AGORA: outra camada pode montar
+    // outro tamanho enquanto esta decodifica.
+    final largura = larguraDoQuadro ?? _ponte.largura;
+    final altura = alturaDoQuadro ?? _ponte.altura;
     if (largura <= 0 || altura <= 0) return null;
+    if (pixels.length < largura * altura * 4) return _ultimaDe(familia);
     final dados = pixels;
     if (!esperar && _decodificando) {
-      // UM QUADRO POR VEZ. Sem isto, um aparelho lento acumularia
-      // decodificacoes em fila e o atraso cresceria sem parar.
-      _chavePedida = chave;
-      _pixelsPedidos = dados;
-      return _ultima;
+      // UM QUADRO POR VEZ, e UM PEDIDO PENDENTE POR CAMADA: com uma vaga so,
+      // a segunda camada 3D apagava o pedido da primeira.
+      _pendentes[familia ?? ''] = (chave, dados, largura, altura);
+      return _ultimaDe(familia);
     }
     _decodificando = true;
     try {
@@ -748,16 +768,24 @@ class Motor3DNativo {
         return null;
       }
       _guardarImagem(chave, imagem);
+      if (familia != null) _ultimaPorFamilia[familia] = imagem;
       revision.value++;
       return imagem;
     } finally {
       _decodificando = false;
-      final proxima = _pixelsPedidos;
-      if (proxima != null) {
-        _pixelsPedidos = null;
-        final chavePendente = _chavePedida;
-        if (_imagens[chavePendente] == null) {
-          unawaited(_decodificar(chavePendente, proxima));
+      if (_pendentes.isNotEmpty) {
+        final fam = _pendentes.keys.first;
+        final p = _pendentes.remove(fam)!;
+        if (_imagens[p.$1] == null) {
+          unawaited(
+            _decodificar(
+              p.$1,
+              p.$2,
+              familia: fam.isEmpty ? null : fam,
+              larguraDoQuadro: p.$3,
+              alturaDoQuadro: p.$4,
+            ),
+          );
         }
       }
     }

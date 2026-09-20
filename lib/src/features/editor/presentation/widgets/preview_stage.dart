@@ -7364,7 +7364,7 @@ class _Cena3DViewState extends State<_Cena3DView> {
 
     final imagem = widget.exporting
         ? widget.quadroEsperado?.call(estado.chave)
-        : motor.quadro(estado.chave);
+        : motor.quadro(estado.chave, familia: widget.layer.id);
     if (imagem == null) return const SizedBox.shrink();
 
     return SizedBox(

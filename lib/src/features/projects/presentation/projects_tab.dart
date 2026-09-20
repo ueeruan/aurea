@@ -626,7 +626,7 @@ class _ProjectsTabState extends ConsumerState<ProjectsTab> {
                         Expanded(
                           child: _Atalho(
                             icon: CupertinoIcons.cube,
-                            rotulo: 'Cena 3D',
+                            rotulo: 'Importar projeto',
                             onTap: () => _importarCena(context),
                           ),
                         ),

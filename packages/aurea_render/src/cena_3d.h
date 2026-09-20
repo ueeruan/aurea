@@ -21,6 +21,7 @@
 #ifndef AUREA_RENDER_CENA_3D_H
 #define AUREA_RENDER_CENA_3D_H
 
+#include <cmath>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -28,6 +29,29 @@
 #include "base.h"
 #include "importador.h"
 #include "modelo.h"
+
+namespace aurea::render::tresd {
+
+/// A COR DO PAINEL VIRA LINEAR, AQUI E UMA VEZ POR DESENHO.
+///
+/// A textura de cor ja chega na GPU marcada como sRGB e o driver a converte
+/// ao amostrar (§6). A cor que o dono escolhe no painel — e a do ceu e a do
+/// chao — nao passa por textura nenhuma e precisa ser convertida em algum
+/// lugar: e o lugar e este, e nao o shader. Um `pow` por fragmento repetiria
+/// em milhoes de pixels uma conta que nao muda dentro do desenho.
+///
+/// A CURVA E A sRGB DE VERDADE, e nao um `pow(x, 2.2)`: as duas quase
+/// coincidem no meio e divergem nas pontas, e a diferenca apareceria como um
+/// material um pouco mais escuro do que o mesmo material com a cor vinda da
+/// textura. A volta (linear para sRGB) mora no `pbr.frag`, e as duas tem de
+/// continuar inversas uma da outra.
+[[nodiscard]] inline float canal_para_linear(std::uint8_t v) noexcept {
+  const float s = static_cast<float>(v) * (1.0F / 255.0F);
+  return s <= 0.04045F ? s * (1.0F / 12.92F)
+                       : std::pow((s + 0.055F) * (1.0F / 1.055F), 2.4F);
+}
+
+}  // namespace aurea::render::tresd
 #include "vetor.h"
 
 namespace aurea::render::tresd {
@@ -183,6 +207,22 @@ struct Cena3D {
   float ambiente_verde = 0.18F;
   float ambiente_azul = 0.20F;
 
+  /// O AMBIENTE COM DIRECAO, em linear: a cor que vem de cima e a que vem
+  /// de baixo. O ambiente plano nao faz metal — um metal nao tem difusa, e
+  /// refletindo uma cor unica ele vira uma cor chapada. Neutro (1,1,1 nas
+  /// duas) devolve exatamente o comportamento do ambiente plano.
+  float ceu_vermelho = 1.0F;
+  float ceu_verde = 1.0F;
+  float ceu_azul = 1.0F;
+  float chao_vermelho = 1.0F;
+  float chao_verde = 1.0F;
+  float chao_azul = 1.0F;
+
+  /// QUANTO DO AMBIENTE VOLTA NO REFLEXO ESPELHADO (0..1). Sem ele, o
+  /// metal so mostra o realce da luz direta e o resto da superficie fica
+  /// com a cor da reflexao ambiente chapada.
+  float reflexo_do_ambiente = 0.0F;
+
   QualidadeDaSombra sombra = QualidadeDaSombra::desligada;
   /// Amostras por eixo do antisserrilhado da 3D (§29). 1 = sem.
   std::uint32_t amostras = 1;
@@ -248,6 +288,10 @@ struct Quadro3D {
 
   std::vector<Luz> luzes;
   float ambiente[3] = {0.18F, 0.18F, 0.20F};
+  /// O ceu e o chao ja lineares, e a forca do reflexo do ambiente.
+  float ceu[3] = {1.0F, 1.0F, 1.0F};
+  float chao[3] = {1.0F, 1.0F, 1.0F};
+  float reflexo_do_ambiente = 0.0F;
   QualidadeDaSombra sombra = QualidadeDaSombra::desligada;
   std::uint32_t amostras = 1;
   std::uint32_t largura = 0;

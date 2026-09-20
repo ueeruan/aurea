@@ -160,9 +160,10 @@ external int _tamanhoInstancia();
 )
 external int _tamanhoDoLote(Pointer<_ParticulasC> p);
 
-@Native<
-  Uint32 Function(Pointer<_ParticulasC>, Double, Pointer<Float>, Uint32)
->(symbol: 'aurea_render_particulas_gerar', isLeaf: true)
+@Native<Uint32 Function(Pointer<_ParticulasC>, Double, Pointer<Float>, Uint32)>(
+  symbol: 'aurea_render_particulas_gerar',
+  isLeaf: true,
+)
 external int _gerar(
   Pointer<_ParticulasC> p,
   double tempoS,
@@ -433,6 +434,69 @@ class ParametrosDeParticulas {
     ..rotacaoXGraus = rotacaoXGraus
     ..rotacaoYGraus = rotacaoYGraus
     ..rotacaoZGraus = rotacaoZGraus;
+
+  /// Identidade completa da receita usada para montar o lote nativo.
+  /// Qualquer controle visivel precisa invalidar a simulacao; antes a UI
+  /// comparava apenas uma duzia de campos e gravidade, vento, turbulencia,
+  /// tamanho, opacidade e varios controles avancados pareciam quebrados.
+  int get assinatura => Object.hashAll([
+    emissor,
+    centroX,
+    centroY,
+    centroZ,
+    largura,
+    altura,
+    profundidade,
+    raio,
+    linhaX,
+    linhaY,
+    linhaZ,
+    taxaDeNascimento,
+    vidaS,
+    vidaVariacao,
+    maximo,
+    semente,
+    velocidade,
+    direcaoGraus,
+    aberturaGraus,
+    modoDeEmissao,
+    gravidade,
+    ventoX,
+    ventoY,
+    ventoZ,
+    arrasto,
+    turbulencia,
+    turbulenciaEscala,
+    turbulenciaVelocidade,
+    atracao,
+    atracaoX,
+    atracaoY,
+    atracaoZ,
+    tamanho,
+    tamanhoVariacao,
+    tamanhoNaVida,
+    opacidade,
+    opacidadeVariacao,
+    opacidadeNaVida,
+    corInicio,
+    corFim,
+    temCorFim,
+    forma,
+    giroGrausS,
+    brilho,
+    cintilar,
+    rastro,
+    faiscas,
+    faiscaVidaS,
+    faiscaHeranca,
+    faiscaVelocidade,
+    faiscaTamanho,
+    faiscaInicio,
+    focal,
+    rotacaoXGraus,
+    rotacaoYGraus,
+    rotacaoZGraus,
+  ]);
 }
 
 /// ==================== O LOTE ====================
@@ -533,7 +597,14 @@ class LoteDeParticulas {
     if (p == nullptr) return 0;
     try {
       p.asTypedList(alvo.length).setAll(0, alvo);
-      final tocados = _pintar(p, largura, altura, _memoria, _quantas, opacidade);
+      final tocados = _pintar(
+        p,
+        largura,
+        altura,
+        _memoria,
+        _quantas,
+        opacidade,
+      );
       alvo.setAll(0, p.asTypedList(alvo.length));
       return tocados;
     } finally {
@@ -686,62 +757,61 @@ abstract final class MotorDeParticulasRender {
     }
   }
 
-  static ParametrosDeParticulas _deC(_ParticulasC c) =>
-      ParametrosDeParticulas()
-        ..emissor = EmissorDeParticulas.values[c.emissor]
-        ..centroX = c.centroX
-        ..centroY = c.centroY
-        ..centroZ = c.centroZ
-        ..largura = c.largura
-        ..altura = c.altura
-        ..profundidade = c.profundidade
-        ..raio = c.raio
-        ..linhaX = c.linhaX
-        ..linhaY = c.linhaY
-        ..linhaZ = c.linhaZ
-        ..taxaDeNascimento = c.taxaDeNascimento
-        ..vidaS = c.vidaS
-        ..vidaVariacao = c.vidaVariacao
-        ..maximo = c.maximo
-        ..semente = c.semente
-        ..velocidade = c.velocidade
-        ..direcaoGraus = c.direcaoGraus
-        ..aberturaGraus = c.aberturaGraus
-        ..modoDeEmissao = ModoDeEmissao.values[c.modoDeEmissao]
-        ..gravidade = c.gravidade
-        ..ventoX = c.ventoX
-        ..ventoY = c.ventoY
-        ..ventoZ = c.ventoZ
-        ..arrasto = c.arrasto
-        ..turbulencia = c.turbulencia
-        ..turbulenciaEscala = c.turbulenciaEscala
-        ..turbulenciaVelocidade = c.turbulenciaVelocidade
-        ..atracao = c.atracao
-        ..atracaoX = c.atracaoX
-        ..atracaoY = c.atracaoY
-        ..atracaoZ = c.atracaoZ
-        ..tamanho = c.tamanho
-        ..tamanhoVariacao = c.tamanhoVariacao
-        ..tamanhoNaVida = TamanhoNaVida.values[c.tamanhoNaVida]
-        ..opacidade = c.opacidade
-        ..opacidadeVariacao = c.opacidadeVariacao
-        ..opacidadeNaVida = OpacidadeNaVida.values[c.opacidadeNaVida]
-        ..corInicio = c.corInicio
-        ..corFim = c.corFim
-        ..temCorFim = c.temCorFim != 0
-        ..forma = FormaDaParticula.values[c.forma]
-        ..giroGrausS = c.giroGrausS
-        ..brilho = c.brilho
-        ..cintilar = c.cintilar != 0
-        ..rastro = c.rastro
-        ..faiscas = c.faiscas
-        ..faiscaVidaS = c.faiscaVidaS
-        ..faiscaHeranca = c.faiscaHeranca
-        ..faiscaVelocidade = c.faiscaVelocidade
-        ..faiscaTamanho = c.faiscaTamanho
-        ..faiscaInicio = c.faiscaInicio
-        ..focal = c.focal
-        ..rotacaoXGraus = c.rotacaoXGraus
-        ..rotacaoYGraus = c.rotacaoYGraus
-        ..rotacaoZGraus = c.rotacaoZGraus;
+  static ParametrosDeParticulas _deC(_ParticulasC c) => ParametrosDeParticulas()
+    ..emissor = EmissorDeParticulas.values[c.emissor]
+    ..centroX = c.centroX
+    ..centroY = c.centroY
+    ..centroZ = c.centroZ
+    ..largura = c.largura
+    ..altura = c.altura
+    ..profundidade = c.profundidade
+    ..raio = c.raio
+    ..linhaX = c.linhaX
+    ..linhaY = c.linhaY
+    ..linhaZ = c.linhaZ
+    ..taxaDeNascimento = c.taxaDeNascimento
+    ..vidaS = c.vidaS
+    ..vidaVariacao = c.vidaVariacao
+    ..maximo = c.maximo
+    ..semente = c.semente
+    ..velocidade = c.velocidade
+    ..direcaoGraus = c.direcaoGraus
+    ..aberturaGraus = c.aberturaGraus
+    ..modoDeEmissao = ModoDeEmissao.values[c.modoDeEmissao]
+    ..gravidade = c.gravidade
+    ..ventoX = c.ventoX
+    ..ventoY = c.ventoY
+    ..ventoZ = c.ventoZ
+    ..arrasto = c.arrasto
+    ..turbulencia = c.turbulencia
+    ..turbulenciaEscala = c.turbulenciaEscala
+    ..turbulenciaVelocidade = c.turbulenciaVelocidade
+    ..atracao = c.atracao
+    ..atracaoX = c.atracaoX
+    ..atracaoY = c.atracaoY
+    ..atracaoZ = c.atracaoZ
+    ..tamanho = c.tamanho
+    ..tamanhoVariacao = c.tamanhoVariacao
+    ..tamanhoNaVida = TamanhoNaVida.values[c.tamanhoNaVida]
+    ..opacidade = c.opacidade
+    ..opacidadeVariacao = c.opacidadeVariacao
+    ..opacidadeNaVida = OpacidadeNaVida.values[c.opacidadeNaVida]
+    ..corInicio = c.corInicio
+    ..corFim = c.corFim
+    ..temCorFim = c.temCorFim != 0
+    ..forma = FormaDaParticula.values[c.forma]
+    ..giroGrausS = c.giroGrausS
+    ..brilho = c.brilho
+    ..cintilar = c.cintilar != 0
+    ..rastro = c.rastro
+    ..faiscas = c.faiscas
+    ..faiscaVidaS = c.faiscaVidaS
+    ..faiscaHeranca = c.faiscaHeranca
+    ..faiscaVelocidade = c.faiscaVelocidade
+    ..faiscaTamanho = c.faiscaTamanho
+    ..faiscaInicio = c.faiscaInicio
+    ..focal = c.focal
+    ..rotacaoXGraus = c.rotacaoXGraus
+    ..rotacaoYGraus = c.rotacaoYGraus
+    ..rotacaoZGraus = c.rotacaoZGraus;
 }

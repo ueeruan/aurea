@@ -13,18 +13,20 @@ import '../domain/obj_import3d.dart';
 // Parsing and file access run off the UI isolate. Do not run the native
 // analyzer here: it blocks the UI and its recommendations are not consumed
 // by the active renderer.
-Future<ModelAsset3D> readModel3DFiles(List<String> paths) =>
-    Isolate.run(() async {
-      final asset = await _read(paths);
-      // O MODELO LIDO ANTES DE CUSTAR MAIS: as contagens reais (o FBX so
-      // se conhece depois de lido) e as texturas pelo cabecalho, antes do
-      // LOD em C++ e antes de alguma delas ser decodificada inteira.
-      conferirModeloLido(asset.data);
-      // Solda, cache de vertices, busca e niveis de detalhe em C++ — aqui,
-      // no isolate da importacao, uma vez so (ver malha_importada.dart).
-      otimizarMalhasImportadas(asset.data);
-      return asset;
-    });
+Future<ModelAsset3D> readModel3DFiles(
+  List<String> paths, {
+  bool permitirModeloGrande = false,
+}) => Isolate.run(() async {
+  final asset = await _read(paths, conferirLimites: !permitirModeloGrande);
+  // O MODELO LIDO ANTES DE CUSTAR MAIS: as contagens reais (o FBX so
+  // se conhece depois de lido) e as texturas pelo cabecalho, antes do
+  // LOD em C++ e antes de alguma delas ser decodificada inteira.
+  if (!permitirModeloGrande) conferirModeloLido(asset.data);
+  // Solda, cache de vertices, busca e niveis de detalhe em C++ — aqui,
+  // no isolate da importacao, uma vez so (ver malha_importada.dart).
+  otimizarMalhasImportadas(asset.data);
+  return asset;
+});
 
 /// Malha e texturas do modelo ja lido, contra [limitesDeImportacao].
 void conferirModeloLido(Map<String, dynamic> data) {
@@ -52,7 +54,10 @@ void conferirModeloLido(Map<String, dynamic> data) {
   conferirPixelsDasImagens(pixels);
 }
 
-Future<ModelAsset3D> _read(List<String> paths) async {
+Future<ModelAsset3D> _read(
+  List<String> paths, {
+  bool conferirLimites = true,
+}) async {
   final models = paths
       .where(
         (p) =>
@@ -80,16 +85,18 @@ Future<ModelAsset3D> _read(List<String> paths) async {
       await raf.close();
     }
   }
-  conferirArquivoDoModelo(
-    nomeDoModelo,
-    await file.length(),
-    fbxDeTexto: fbxDeTexto,
-  );
+  if (conferirLimites) {
+    conferirArquivoDoModelo(
+      nomeDoModelo,
+      await file.length(),
+      fbxDeTexto: fbxDeTexto,
+    );
+  }
   final tamanhosDosRecursos = <String, int>{};
   Future<Uint8List> read(File f) async {
     if (f.path != file.path) {
       tamanhosDosRecursos[f.uri.pathSegments.last] = await f.length();
-      conferirRecursos(tamanhosDosRecursos);
+      if (conferirLimites) conferirRecursos(tamanhosDosRecursos);
     }
     return f.readAsBytes();
   }
@@ -158,12 +165,17 @@ Future<ModelAsset3D> _read(List<String> paths) async {
       bytes,
       name: file.uri.pathSegments.last,
       resources: resources,
-      maxTriangles: limitesDeImportacao.triangulos,
+      maxTriangles: conferirLimites ? limitesDeImportacao.triangulos : 1 << 30,
     );
   }
   if (lower.endsWith('.obj')) {
     final contagem = contarObj(bytes);
-    conferirMalha(vertices: contagem.vertices, triangulos: contagem.triangulos);
+    if (conferirLimites) {
+      conferirMalha(
+        vertices: contagem.vertices,
+        triangulos: contagem.triangulos,
+      );
+    }
     // Texto que nao e UTF-8 valido (nome de material em Latin-1, comum em
     // exportadores antigos) nao pode recusar a geometria inteira.
     final source = utf8.decode(bytes, allowMalformed: true);
@@ -215,10 +227,12 @@ Future<ModelAsset3D> _read(List<String> paths) async {
   }
   if (doc != null) {
     final declarado = contarGltf(doc);
-    conferirMalha(
-      vertices: declarado.vertices,
-      triangulos: declarado.triangulos,
-    );
+    if (conferirLimites) {
+      conferirMalha(
+        vertices: declarado.vertices,
+        triangulos: declarado.triangulos,
+      );
+    }
     for (final entry in [
       ...doc['buffers'] as List? ?? [],
       ...doc['images'] as List? ?? [],

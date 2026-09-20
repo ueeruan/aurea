@@ -103,13 +103,20 @@ class ParticulasPainter extends CustomPainter {
           Paint()..color = cor.withValues(alpha: cor.a * 0.9 * brilho),
         );
       }
-      final forma = FormaDaParticula.values[(l.floats[o + colunaForma] + 0.5)
-          .toInt()
-          .clamp(0, FormaDaParticula.values.length - 1)];
+      final forma =
+          FormaDaParticula.values[(l.floats[o + colunaForma] + 0.5)
+              .toInt()
+              .clamp(0, FormaDaParticula.values.length - 1)];
       switch (forma) {
         case FormaDaParticula.estrela:
-          _estrela(canvas, p, r, cor, l.floats[o + colunaVariacao],
-              l.floats[o + colunaAngulo]);
+          _estrela(
+            canvas,
+            p,
+            r,
+            cor,
+            l.floats[o + colunaVariacao],
+            l.floats[o + colunaAngulo],
+          );
         case FormaDaParticula.risco:
           _risco(canvas, l, o, p, r, cor, base);
         case FormaDaParticula.nuvem:
@@ -119,11 +126,7 @@ class ParticulasPainter extends CustomPainter {
           canvas.translate(p.dx, p.dy);
           canvas.rotate(l.floats[o + colunaAngulo] * math.pi / 180);
           canvas.drawRect(
-            Rect.fromCenter(
-              center: Offset.zero,
-              width: r * 2,
-              height: r * 2,
-            ),
+            Rect.fromCenter(center: Offset.zero, width: r * 2, height: r * 2),
             Paint()..color = cor,
           );
           canvas.restore();
@@ -181,8 +184,8 @@ class ParticulasPainter extends CustomPainter {
       final a = f[o + colunaA];
       final r = f[o + colunaTamanho];
       if (a <= 0.004 || r <= 0.2) continue;
-      final chave = ((r * 4).round().clamp(1, 16) << 8) |
-          (a * 15).round().clamp(1, 15);
+      final chave =
+          ((r * 4).round().clamp(1, 16) << 8) | (a * 15).round().clamp(1, 15);
       (baldes[chave] ??= <double>[])
         ..add(f[o + colunaX] + base.dx)
         ..add(f[o + colunaY] + base.dy);
@@ -234,12 +237,8 @@ class ParticulasPainter extends CustomPainter {
     canvas.drawCircle(
       Offset.zero,
       w * 0.95,
-      Paint()..color = Color.from(
-        alpha: cor.a * 0.85,
-        red: 1,
-        green: 1,
-        blue: 1,
-      ),
+      Paint()
+        ..color = Color.from(alpha: cor.a * 0.85, red: 1, green: 1, blue: 1),
     );
     canvas.restore();
   }
@@ -254,11 +253,8 @@ class ParticulasPainter extends CustomPainter {
     Color cor,
     Offset base,
   ) {
-    final cauda = Offset(
-          l.floats[o + colunaCaudaX],
-          l.floats[o + colunaCaudaY],
-        ) +
-        base;
+    final cauda =
+        Offset(l.floats[o + colunaCaudaX], l.floats[o + colunaCaudaY]) + base;
     final dir = p - cauda;
     final dist = dir.distance;
     final alvo = dist < 0.5
@@ -277,7 +273,11 @@ class ParticulasPainter extends CustomPainter {
 
   /// A NUVEM: tres discos concentricos bem transparentes.
   void _nuvem(Canvas canvas, Offset p, double r, Color cor) {
-    for (final (escala, alfa) in const [(2.6, 0.10), (1.8, 0.16), (1.1, 0.28)]) {
+    for (final (escala, alfa) in const [
+      (2.6, 0.10),
+      (1.8, 0.16),
+      (1.1, 0.28),
+    ]) {
       canvas.drawCircle(
         p,
         r * escala,
@@ -364,13 +364,9 @@ class _ParticulasDoPalcoState extends State<ParticulasDoPalco> {
   }
 
   String _chaveDaReceita(ParametrosDeParticulas p) {
-    // A ASSINATURA COBRE O QUE MUDA O TAMANHO DO LOTE OU O DESENHO. Sem
-    // ela, trocar de preset com o projeto aberto continuaria desenhando a
-    // nuvem antiga ate a camada sair da tela.
-    return '${p.focal}|${p.rotacaoXGraus}|${p.rotacaoYGraus}|${p.maximo}|'
-        '${p.emissor.index}|${p.forma.index}|${p.modoDeEmissao.index}|'
-        '${p.taxaDeNascimento}|${p.vidaS}|${p.rastro}|${p.faiscas}|'
-        '${p.semente}|${p.corInicio}|${p.corFim}|${p.temCorFim}';
+    // A assinatura pertence ao contrato do motor e cobre TODOS os campos,
+    // inclusive os controles avancados.
+    return p.assinatura.toString();
   }
 
   void _garantir(ParametrosDeParticulas p) {
@@ -397,11 +393,7 @@ class _ParticulasDoPalcoState extends State<ParticulasDoPalco> {
       // O AVISO E `const` NO FILHO, e nao no `SizedBox` inteiro: um
       // `const` com o widget dentro pediria a arvore inteira constante, e
       // o `Text` abaixo depende do tema.
-      return const SizedBox(
-        width: 420,
-        height: 420,
-        child: _AvisoDoMotor(),
-      );
+      return const SizedBox(width: 420, height: 420, child: _AvisoDoMotor());
     }
     lote.gerar(widget.tempo.inMicroseconds / 1e6);
     return CustomPaint(

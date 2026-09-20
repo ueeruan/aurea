@@ -314,13 +314,10 @@ class _EffectsPanelState extends ConsumerState<EffectsPanel> {
         valueListenable: widget.playback.time,
         builder: (context, t, _) {
           final local = layer.localTime(t);
-          // A curva interna de tempo (congelar, rampa pronta) nao vira
-          // cartao. Os indices da lista sao os dos visiveis; mover usa a
-          // distancia real na pilha.
-          final visiveis = [
-            for (var i = 0; i < layer.effects.length; i++)
-              if (!efeitosInternos.contains(layer.effects[i].type)) i,
-          ];
+          // Tipos internos nao entram na galeria, mas um efeito ja salvo
+          // continua editavel na pilha. Isso preserva projetos antigos de
+          // Time Remap sem oferecer o efeito novamente no catalogo.
+          final visiveis = [for (var i = 0; i < layer.effects.length; i++) i];
 
           // O ALVO DO RAIL: o efeito do parametro em edicao, ou o aberto.
           // Le o projeto DE VERDADE (e nao a edicao pendente): o losango
@@ -402,9 +399,11 @@ class _EffectsPanelState extends ConsumerState<EffectsPanel> {
                         index: v,
                         effect: layer.effects[i],
                         extra: layer.effects[i].type == EffectType.timeRemap
-                            ? _OpcoesTimeRemap(layerId: id) : null,
+                            ? _OpcoesTimeRemap(layerId: id)
+                            : null,
                         local: layer.effects[i].type == EffectType.timeRemap
-                            ? t - layer.startTime : local,
+                            ? t - layer.startTime
+                            : local,
                         expanded: _openEffectId == layer.effects[i].id,
                         selectedParam: _selectedParam,
                         onToggleExpanded: () =>
@@ -597,23 +596,45 @@ class _OpcoesTimeRemap extends ConsumerWidget {
     final layer = ref.watch(editorControllerProvider).layerById(layerId);
     if (layer is! VideoLayer) return const SizedBox.shrink();
     final c = ref.read(editorControllerProvider.notifier);
-    return Column(children: [
-      Material(color: Colors.transparent, child: SwitchListTile.adaptive(
-        dense: true, contentPadding: EdgeInsets.zero,
-        title: const AppText('Manter tom do áudio', style: TextStyle(fontSize: 12, color: AmColors.text)),
-        value: layer.audio.preservePitch,
-        onChanged: (v) => c.setClipPreservePitch(layerId, v),
-      )),
-      Row(children: [
-        const Expanded(child: AppText('Interpolação', style: TextStyle(fontSize: 12, color: AmColors.text))),
-        DropdownButton<InterpolacaoDeQuadros>(
-          value: layer.interpolacao, dropdownColor: AmColors.panelHigh,
-          style: const TextStyle(color: AmColors.text, fontSize: 12),
-          items: [for (final v in InterpolacaoDeQuadros.values) DropdownMenuItem(value: v, child: AppText(v.emPalavras))],
-          onChanged: (v) { if (v != null) c.setClipInterpolacao(layerId, v); },
+    return Column(
+      children: [
+        Material(
+          color: Colors.transparent,
+          child: SwitchListTile.adaptive(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            title: const AppText(
+              'Manter tom do áudio',
+              style: TextStyle(fontSize: 12, color: AmColors.text),
+            ),
+            value: layer.audio.preservePitch,
+            onChanged: (v) => c.setClipPreservePitch(layerId, v),
+          ),
         ),
-      ]),
-    ]);
+        Row(
+          children: [
+            const Expanded(
+              child: AppText(
+                'Interpolação',
+                style: TextStyle(fontSize: 12, color: AmColors.text),
+              ),
+            ),
+            DropdownButton<InterpolacaoDeQuadros>(
+              value: layer.interpolacao,
+              dropdownColor: AmColors.panelHigh,
+              style: const TextStyle(color: AmColors.text, fontSize: 12),
+              items: [
+                for (final v in InterpolacaoDeQuadros.values)
+                  DropdownMenuItem(value: v, child: AppText(v.emPalavras)),
+              ],
+              onChanged: (v) {
+                if (v != null) c.setClipInterpolacao(layerId, v);
+              },
+            ),
+          ],
+        ),
+      ],
+    );
   }
 }
 
@@ -879,7 +900,10 @@ class _CartaoDoEfeitoState extends State<_CartaoDoEfeito> {
               opacity: effect.enabled ? 1 : .45,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [..._linhas(), if (widget.extra != null) widget.extra!],
+                children: [
+                  ..._linhas(),
+                  if (widget.extra != null) widget.extra!,
+                ],
               ),
             ),
         ],

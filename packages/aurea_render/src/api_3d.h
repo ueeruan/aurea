@@ -136,6 +136,14 @@ typedef struct Aurea3DCena {
   float ambiente[3];
   Aurea3DCamera camera;
   uint32_t reserva;
+  /// O AMBIENTE COM DIRECAO: a cor de cima e a cor de baixo, em sRGB.
+  /// Neutro (branco em cima e embaixo) e o ambiente plano de antes.
+  float ceu[3];
+  /// Quanto do ambiente volta no reflexo espelhado (0..1). E o que faz um
+  /// metal parecer metal: sem ele, um metal so mostra o realce da luz.
+  float reflexo_do_ambiente;
+  float chao[3];
+  float chao_reserva;
 } Aurea3DCena;
 
 typedef struct Aurea3DOpcoes {

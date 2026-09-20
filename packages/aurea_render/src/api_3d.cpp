@@ -270,6 +270,21 @@ NumerosDoQuadro& numeros() {
   saida.ambiente_vermelho = entre(c->ambiente[0], 0.0F, 64.0F, 0.0F);
   saida.ambiente_verde = entre(c->ambiente[1], 0.0F, 64.0F, 0.0F);
   saida.ambiente_azul = entre(c->ambiente[2], 0.0F, 64.0F, 0.0F);
+  // O CEU E O CHAO CHEGAM EM sRGB e viram linear aqui, uma vez por quadro —
+  // a mesma curva que a cor do painel usa (`canal_para_linear`), para o
+  // mesmo material nao sair de dois tons conforme a cor venha do painel ou
+  // de uma textura.
+  const auto do_ceu = [](float v) {
+    return canal_para_linear(
+        static_cast<std::uint8_t>(entre(v, 0.0F, 1.0F, 1.0F) * 255.0F + 0.5F));
+  };
+  saida.ceu_vermelho = do_ceu(c->ceu[0]);
+  saida.ceu_verde = do_ceu(c->ceu[1]);
+  saida.ceu_azul = do_ceu(c->ceu[2]);
+  saida.chao_vermelho = do_ceu(c->chao[0]);
+  saida.chao_verde = do_ceu(c->chao[1]);
+  saida.chao_azul = do_ceu(c->chao[2]);
+  saida.reflexo_do_ambiente = entre(c->reflexo_do_ambiente, 0.0F, 1.0F, 0.0F);
   saida.sombra = (c->sombra >= 0 && c->sombra <= 3)
                      ? static_cast<QualidadeDaSombra>(c->sombra)
                      : QualidadeDaSombra::desligada;
@@ -709,11 +724,27 @@ AUREA_API std::int64_t aurea_render_3d_criar_modelo(
       // normal plana precisa dos tres vertices da face, e nao do vertice
       // sozinho. Um cubo sem normais fica certo; uma esfera sem normais
       // fica facetada, que e a resposta honesta para "nao me disseram".
-      if (crua.normais == nullptr) {
+      //
+      // NORMAL DE COMPRIMENTO ZERO CONTA COMO AUSENTE, e nao so o ponteiro
+      // nulo. Uma lista com zeros passa por "tem normal" e o `normalize` de
+      // um vetor nulo no shader nao da erro: da um modelo sem luz direta
+      // nenhuma, chapado, com a cara de "importou tudo preto". O zero nao e
+      // uma direcao valida — entao quem manda zero quer dizer "nao sei".
+      bool alguma_ausente = crua.normais == nullptr;
+      if (!alguma_ausente) {
+        for (std::uint32_t j = 0; j < nv && !alguma_ausente; ++j) {
+          const Vec3& n = malha.vertices[j].normal;
+          alguma_ausente = (n.x * n.x + n.y * n.y + n.z * n.z) < 1.0e-20F;
+        }
+      }
+      if (alguma_ausente) {
         for (std::uint32_t t = 0; t < ni; t += 3) {
-          const Vec3 a = malha.vertices[crua.indices[t + 0]].posicao;
-          const Vec3 b = malha.vertices[crua.indices[t + 1]].posicao;
-          const Vec3 c = malha.vertices[crua.indices[t + 2]].posicao;
+          const std::uint32_t i0 = crua.indices[t + 0];
+          const std::uint32_t i1 = crua.indices[t + 1];
+          const std::uint32_t i2 = crua.indices[t + 2];
+          const Vec3 a = malha.vertices[i0].posicao;
+          const Vec3 b = malha.vertices[i1].posicao;
+          const Vec3 c = malha.vertices[i2].posicao;
           const Vec3 u{b.x - a.x, b.y - a.y, b.z - a.z};
           const Vec3 v2{c.x - a.x, c.y - a.y, c.z - a.z};
           Vec3 n{u.y * v2.z - u.z * v2.y, u.z * v2.x - u.x * v2.z,
@@ -729,9 +760,16 @@ AUREA_API std::int64_t aurea_render_3d_criar_modelo(
           } else {
             n = Vec3{0.0F, 0.0F, 1.0F};
           }
-          malha.vertices[crua.indices[t + 0]].normal = n;
-          malha.vertices[crua.indices[t + 1]].normal = n;
-          malha.vertices[crua.indices[t + 2]].normal = n;
+          // A PLANA SO ENTRA ONDE NAO HA NORMAL. Num modelo com normal em
+          // parte dos vertices, sobrescrever os tres apagaria a normal suave
+          // que o arquivo trouxe.
+          for (std::uint32_t k = 0; k < 3; ++k) {
+            Vertice& v = malha.vertices[k == 0 ? i0 : (k == 1 ? i1 : i2)];
+            const float guardada = v.normal.x * v.normal.x +
+                                   v.normal.y * v.normal.y +
+                                   v.normal.z * v.normal.z;
+            if (guardada < 1.0e-20F) v.normal = n;
+          }
         }
       }
 
@@ -1122,7 +1160,9 @@ static_assert(sizeof(Aurea3DCamera) == 72, "Aurea3DCamera mudou de tamanho");
 static_assert(sizeof(Aurea3DMaterial) == 40, "Aurea3DMaterial mudou de tamanho");
 static_assert(sizeof(Aurea3DCamada) == 128, "Aurea3DCamada mudou de tamanho");
 static_assert(sizeof(Aurea3DLuz) == 60, "Aurea3DLuz mudou de tamanho");
-static_assert(sizeof(Aurea3DCena) == (sizeof(void*) == 8 ? 128 : 120),
+// 32 bytes a mais desde que a cena ganhou ceu, chao e a forca do reflexo do
+// ambiente — o ambiente plano nao faz metal (§ o ambiente com direcao).
+static_assert(sizeof(Aurea3DCena) == (sizeof(void*) == 8 ? 160 : 152),
               "Aurea3DCena mudou de tamanho");
 static_assert(sizeof(Aurea3DOpcoes) == 24, "Aurea3DOpcoes mudou de tamanho");
 static_assert(sizeof(Aurea3DRelato) == 56, "Aurea3DRelato mudou de tamanho");

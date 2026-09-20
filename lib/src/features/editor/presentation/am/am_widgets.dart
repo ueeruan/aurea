@@ -462,7 +462,11 @@ class _TickRulerPainter extends CustomPainter {
     // Ticks deslizam conforme o valor.
     final phase = (value / unitsPerPixel) % spacing;
     final pad = size.height * 0.18;
-    for (var x = -phase; x < size.width; x += spacing) {
+    // A regua acompanha o dedo: arrastar para a direita faz os riscos
+    // irem para a direita. A fita dos efeitos ja obedecia esta direcao;
+    // esta regua usava o sinal contrario e fazia os controles parecerem
+    // invertidos, embora o numero aumentasse corretamente.
+    for (var x = phase - spacing; x < size.width; x += spacing) {
       canvas.drawLine(Offset(x, pad), Offset(x, size.height - pad), tick);
     }
     final indicator = Paint()

@@ -1,6 +1,8 @@
 import 'luz_e_diversos.dart';
 import 'motion_tile.dart';
+
 import 'dart:ui';
+
 import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import 'package:flutter/foundation.dart' show debugPrint;
@@ -208,41 +210,122 @@ enum EffectType {
 /// Ela e a unica memoria do enum antigo e nao deve ser editada: so serve
 /// para ler arquivo velho. Tipo novo entra no enum, nunca aqui.
 const List<EffectType?> _ordemLegada = [
-  EffectType.gaussianBlur, EffectType.lightGlow, EffectType.tint, EffectType.glowVol,
+  EffectType.gaussianBlur,
+  EffectType.lightGlow,
+  EffectType.tint,
+  EffectType.glowVol,
   EffectType.tremor, EffectType.glitch, EffectType.rgbSplit, EffectType.echo,
-  EffectType.spatialEcho, EffectType.radialAberration, EffectType.levels, EffectType.vibrance,
-  EffectType.whiteBalance, EffectType.colorWheels, EffectType.unmult, EffectType.vignette,
-  EffectType.directionalBlur, EffectType.radialBlur, EffectType.lightRays, EffectType.mosaic,
-  EffectType.filmGrain, EffectType.fractalNoise, EffectType.digitalDamage, EffectType.zoomWarp,
+  EffectType.spatialEcho,
+  EffectType.radialAberration,
+  EffectType.levels,
+  EffectType.vibrance,
+  EffectType.whiteBalance,
+  EffectType.colorWheels,
+  EffectType.unmult,
+  EffectType.vignette,
+  EffectType.directionalBlur,
+  EffectType.radialBlur,
+  EffectType.lightRays,
+  EffectType.mosaic,
+  EffectType.filmGrain,
+  EffectType.fractalNoise,
+  EffectType.digitalDamage,
+  EffectType.zoomWarp,
   EffectType.posterize, EffectType.curves,
   // era o timeRemap: virou campo da camada, nao e mais efeito
   null,
   EffectType.pixelSort,
-  EffectType.blobTracker, EffectType.turbulentDisplace, EffectType.unsharpMask, EffectType.motionTile,
+  EffectType.blobTracker,
+  EffectType.turbulentDisplace,
+  EffectType.unsharpMask,
+  EffectType.motionTile,
   EffectType.bend, EffectType.ccScatterize, EffectType.ccSplit, EffectType.vhs,
-  EffectType.filmDamage, EffectType.glitchify, EffectType.forceMotionBlur, EffectType.flicker,
-  EffectType.gradient4, EffectType.liquidGlass, EffectType.corrections, EffectType.chromaKey,
-  EffectType.lumaKey, EffectType.colorKey, EffectType.findEdges, EffectType.oscillate,
-  EffectType.twirl, EffectType.fisheye, EffectType.kaleidoscope, EffectType.venetianBlinds,
-  EffectType.blockDissolve, EffectType.offset, EffectType.invert, EffectType.waveWarp,
-  EffectType.opticalFlow, EffectType.colorBalance, EffectType.selectiveColor, EffectType.channelMixer,
-  EffectType.photoFilter, EffectType.gradientMap, EffectType.brightnessContrast, EffectType.colorTune,
-  EffectType.flash, EffectType.strobe, EffectType.zoomPunch, EffectType.sliceGlitch,
-  EffectType.twitch, EffectType.timeSlice, EffectType.posterizeTime, EffectType.hueSaturation,
-  EffectType.sFlicker, EffectType.mathOps, EffectType.sSharpen, EffectType.looks,
+  EffectType.filmDamage,
+  EffectType.glitchify,
+  EffectType.forceMotionBlur,
+  EffectType.flicker,
+  EffectType.gradient4,
+  EffectType.liquidGlass,
+  EffectType.corrections,
+  EffectType.chromaKey,
+  EffectType.lumaKey,
+  EffectType.colorKey,
+  EffectType.findEdges,
+  EffectType.oscillate,
+  EffectType.twirl,
+  EffectType.fisheye,
+  EffectType.kaleidoscope,
+  EffectType.venetianBlinds,
+  EffectType.blockDissolve,
+  EffectType.offset,
+  EffectType.invert,
+  EffectType.waveWarp,
+  EffectType.opticalFlow,
+  EffectType.colorBalance,
+  EffectType.selectiveColor,
+  EffectType.channelMixer,
+  EffectType.photoFilter,
+  EffectType.gradientMap,
+  EffectType.brightnessContrast,
+  EffectType.colorTune,
+  EffectType.flash,
+  EffectType.strobe,
+  EffectType.zoomPunch,
+  EffectType.sliceGlitch,
+  EffectType.twitch,
+  EffectType.timeSlice,
+  EffectType.posterizeTime,
+  EffectType.hueSaturation,
+  EffectType.sFlicker,
+  EffectType.mathOps,
+  EffectType.sSharpen,
+  EffectType.looks,
   EffectType.lightSweep, EffectType.saber, EffectType.lensBlur, EffectType.bit8,
-  EffectType.smear, EffectType.bubbleBlur, EffectType.dissolver, EffectType.pena,
-  EffectType.aparecerSumir, EffectType.repetirEmLinha, EffectType.repetirEmGrade, EffectType.repetirEmCirculo,
-  EffectType.espalharCopias, EffectType.nuvens, EffectType.xadrez, EffectType.listras,
+  EffectType.smear,
+  EffectType.bubbleBlur,
+  EffectType.dissolver,
+  EffectType.pena,
+  EffectType.aparecerSumir,
+  EffectType.repetirEmLinha,
+  EffectType.repetirEmGrade,
+  EffectType.repetirEmCirculo,
+  EffectType.espalharCopias,
+  EffectType.nuvens,
+  EffectType.xadrez,
+  EffectType.listras,
   EffectType.pontos, EffectType.estrelas, EffectType.raios, EffectType.cortina,
-  EffectType.cortinaRadial, EffectType.apertarRecorte, EffectType.meioTom, EffectType.contorno,
-  EffectType.brilhoPorDentro, EffectType.bordasAsperas, EffectType.exposure, EffectType.threshold,
-  EffectType.thresholdRgb, EffectType.blockLoad, EffectType.scanLines, EffectType.halfTone,
-  EffectType.edgeColorize, EffectType.jpegDamage, EffectType.autoPaint, EffectType.tvDamage,
-  EffectType.vhsDamage, EffectType.ccLens, EffectType.opticsCompensation, EffectType.dissolveShake,
-  EffectType.crossGlitch, EffectType.chromaKeyPro, EffectType.sRays, EffectType.deepGlow,
-  EffectType.brilho, EffectType.sSpotLight, EffectType.sGlint, EffectType.sGlintRainbow,
-  EffectType.sGlowRings, EffectType.sEdgeRays, EffectType.sGlowAura, EffectType.sGlowDarks,
+  EffectType.cortinaRadial,
+  EffectType.apertarRecorte,
+  EffectType.meioTom,
+  EffectType.contorno,
+  EffectType.brilhoPorDentro,
+  EffectType.bordasAsperas,
+  EffectType.exposure,
+  EffectType.threshold,
+  EffectType.thresholdRgb,
+  EffectType.blockLoad,
+  EffectType.scanLines,
+  EffectType.halfTone,
+  EffectType.edgeColorize,
+  EffectType.jpegDamage,
+  EffectType.autoPaint,
+  EffectType.tvDamage,
+  EffectType.vhsDamage,
+  EffectType.ccLens,
+  EffectType.opticsCompensation,
+  EffectType.dissolveShake,
+  EffectType.crossGlitch,
+  EffectType.chromaKeyPro,
+  EffectType.sRays,
+  EffectType.deepGlow,
+  EffectType.brilho,
+  EffectType.sSpotLight,
+  EffectType.sGlint,
+  EffectType.sGlintRainbow,
+  EffectType.sGlowRings,
+  EffectType.sEdgeRays,
+  EffectType.sGlowAura,
+  EffectType.sGlowDarks,
 ];
 
 /// Posicao do Time Remap no enum antigo.
@@ -390,8 +473,7 @@ double migrateParamValue(
 /// o arquivo inteiro por causa de um efeito que nem desenha. O id derivado
 /// do nome do enum e o mesmo que o efeito tinha quando era oficial
 /// (camelCase -> snake_case), entao o arquivo sai igual e volta a ser lido.
-String effectIdOf(EffectType t) =>
-    effectSpecs[t]?.id ?? _idDerivado(t.name);
+String effectIdOf(EffectType t) => effectSpecs[t]?.id ?? _idDerivado(t.name);
 
 String _idDerivado(String nome) {
   final sb = StringBuffer();
@@ -623,10 +705,21 @@ const effectSpecs = <EffectType, EffectSpec>{
   ...efeitosPosterizeTime,
   ...efeitosRgbTimeWarp,
   EffectType.timeRemap: EffectSpec(
-    id: 'time_remap', name: 'Time Remap', category: 'Time',
+    id: 'time_remap',
+    name: 'Time Remap',
+    category: 'Time',
     synonyms: ['tempo', 'velocidade', 'remapear tempo'],
-    params: {'tempo': EffectParam('Time Remap', 0, 0, 86400,
-      unit: 's', decimals: 3, dragStep: 1 / 30)},
+    params: {
+      'tempo': EffectParam(
+        'Time Remap',
+        0,
+        0,
+        86400,
+        unit: 's',
+        decimals: 3,
+        dragStep: 1 / 30,
+      ),
+    },
   ),
 };
 
@@ -794,7 +887,7 @@ List<EffectType> effectsInCategory(String category) => [
 /// campo proprio de [VideoLayer]). O conjunto continua existindo porque
 /// e ele que diz "isto nao e escolhivel" — e porque a lista de exclusao
 /// precisa de um lugar unico.
-const efeitosInternos = <EffectType>{};
+const efeitosInternos = <EffectType>{EffectType.timeRemap};
 
 /// A ficha de [t], ou nulo quando o tipo nao tem mais ficha no catalogo.
 ///
@@ -838,14 +931,14 @@ class EffectInstance {
        _spec = effectSpecs[type],
        color = color ?? effectSpecs[type]?.defaultColor ?? _corNeutra,
        extraColors = List.unmodifiable(
-         extraColors ??
-             _coresPadraoDe(effectSpecs[type]),
+         extraColors ?? _coresPadraoDe(effectSpecs[type]),
        ),
        params = Map.unmodifiable(
          params ??
              {
-               for (final e in effectSpecs[type]?.params.entries ??
-                   const Iterable<MapEntry<String, EffectParam>>.empty())
+               for (final e
+                   in effectSpecs[type]?.params.entries ??
+                       const Iterable<MapEntry<String, EffectParam>>.empty())
                  e.key: AnimatedDouble(e.value.initial),
              },
        ) {
@@ -929,7 +1022,8 @@ class EffectInstance {
   EffectSpec get spec => _spec ?? _fichaInerte;
 
   AnimatedDouble track(String key) =>
-      params[key] ?? _padroes.putIfAbsent(
+      params[key] ??
+      _padroes.putIfAbsent(
         spec.params[key]?.initial ?? 0,
         () => AnimatedDouble(spec.params[key]?.initial ?? 0),
       );

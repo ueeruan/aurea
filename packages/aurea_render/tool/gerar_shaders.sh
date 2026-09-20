@@ -141,7 +141,8 @@ emitir() {  # emitir <nome-em-C> <comentario> <arquivo>
 //  eles TEM de bater. Conferidos contra esta saida:
 //
 //    binding 0  Quadro   mat4 vista, projecao, vista_projecao, luz_espaco;
-//                        vec4 olho @256, ambiente @272, ajustes @288
+//                        vec4 olho @256, ambiente @272, ajustes @288,
+//                        ceu @304, chao @320
 //    binding 1  Luzes    8 x { vec4 x4 }  passo 64
 //    binding 2  Desenho  mat4 mundo @0, normal @64; vec4 cor_base @128,
 //                        parametros @144, emissivo @160, bandeiras @176,

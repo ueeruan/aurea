@@ -2147,12 +2147,18 @@ class EditorController extends Notifier<VideoProject> {
   /// vertical.
   void addParticulasLayer(Duration at) {
     final n = state.layers.whereType<ParticulasLayer>().length + 1;
-    final receita =
-        MotorDeParticulasRender.preset(4) ??
-        ParametrosDeParticulas(maximo: 400, vidaS: 6);
+    ParametrosDeParticulas? preset;
+    try {
+      preset = MotorDeParticulasRender.preset(4);
+    } catch (_) {
+      // Uma biblioteca nativa ausente nunca pode impedir a camada de
+      // existir. O render pode degradar, mas a timeline e o projeto ficam
+      // validos e a pessoa nao perde o toque.
+    }
+    final receita = preset ?? ParametrosDeParticulas(maximo: 400, vidaS: 6);
     _push(
       ParticulasLayer(
-        name: 'Particulas $n',
+        name: 'Partículas 3D $n',
         startTime: at,
         duration: const Duration(seconds: 5),
         parametros: receita
@@ -2199,6 +2205,9 @@ class EditorController extends Notifier<VideoProject> {
         startTime: at,
         duration: const Duration(seconds: 5),
         kind: kind,
+        reflect: 0.65,
+        environment: EnvironmentKind.estudioMetal,
+        shininess: 0.65,
         is3D: true,
         position: AnimatedOffset(_center),
       ),
@@ -2632,56 +2641,61 @@ class EditorController extends Notifier<VideoProject> {
   }) async {
     final limpo = texto.trim();
     if (limpo.isEmpty) return null;
-    final Texto3D params = familia == null
+    var params = familia == null
         ? Texto3D(texto: limpo)
         : Texto3D(texto: limpo, familia: familia);
     ModelAsset3D modelo;
-    try {
-      final bytes = await FontService.instance.bytesDaFonte(params.familia);
-      if (bytes == null) return null;
-      final fonte = FonteTrueType.ler(bytes);
-      // UM NO POR LETRA: mesma geometria de sempre, mas com esqueleto —
-      // e o que deixa os presets de animacao do texto normal valerem
-      // letra a letra na malha extrudada.
-      modelo = modeloDoTexto3DPorLetra(
-        disporTexto3D(params, fonte),
-        params,
-        fonte.unidadesPorEm,
-        limpo,
-        estilo,
-      );
-    } catch (_) {
-      return null;
-    }
-    if (modelo.triangleCount == 0) return null;
-    String? no;
-    runAsOneUndo(() {
-      var cena = state.layers.whereType<Scene3DLayer>().firstOrNull;
-      if (cena == null) {
-        addScene3DLayer(at);
-        cena = state.layers.whereType<Scene3DLayer>().first;
-      }
-      final cenaId = cena.id;
-      no = addModel3D(cenaId, modelo);
-      final nuloDaCena = addSceneNull(cenaId);
-      setSceneNodeParent(cenaId, no!, nuloDaCena);
-      // O NULO DA LINHA DO TEMPO: mover, girar e animar essa camada leva o
-      // texto (o nulo da cena segue ela). Nasce no centro, entao nada pula.
-      addNullLayer(at);
-      final nuloDaComposicao = state.layers.first.id;
-      renameLayer(nuloDaComposicao, 'Nulo 3D · $limpo');
-      vincularNoANuloDaComposicao(cenaId, nuloDaCena, nuloDaComposicao);
-      // Metal precisa do que refletir: o estudio proprio, se a cena nao
-      // tem um panorama escolhido pela pessoa.
-      final atual = _layer(cenaId);
-      if (atual is Scene3DLayer && atual.scene.panorama.sourcePath == null) {
-        updateScene3D(
-          cenaId,
-          (s) => s.copyWith(environment: EnvironmentKind.estudioMetal),
+    Future<ModelAsset3D?> montar(Texto3D texto3D) async {
+      try {
+        final bytes = await FontService.instance.bytesDaFonte(texto3D.familia);
+        if (bytes == null) return null;
+        final fonte = FonteTrueType.ler(bytes);
+        // UM NO POR LETRA: mesma geometria de sempre, mas com esqueleto —
+        // e o que deixa os presets de animacao do texto normal valerem
+        // letra a letra na malha extrudada.
+        return modeloDoTexto3DPorLetra(
+          disporTexto3D(texto3D, fonte),
+          texto3D,
+          fonte.unidadesPorEm,
+          limpo,
+          estilo,
         );
+      } catch (_) {
+        return null;
       }
-    });
-    return no;
+    }
+
+    // Fonte importada ausente/corrompida nao pode tornar o botao inerte:
+    // refaz com a fonte empacotada, que viaja no mesmo AssetManifest.
+    var pronto = await montar(params);
+    if (pronto == null && params.familia != 'Aurea Motion Sans') {
+      params = params.copyWith(familia: 'Aurea Motion Sans');
+      pronto = await montar(params);
+    }
+    if (pronto == null) return null;
+    modelo = pronto;
+    if (modelo.triangleCount == 0) return null;
+    // UMA CAMADA SO NA TIMELINE. O texto continua sendo desenhado pelo
+    // motor 3D nativo, mas nao fica pendurado numa "Scene 3D" generica e
+    // num nulo auxiliar. Isso tambem impede uma cena antiga/importada de
+    // contaminar camera, escala ou orientacao do texto novo.
+    final node = _nodeDoModelo(modelo);
+    _push(
+      Scene3DLayer(
+        name: 'Texto 3D · $limpo',
+        startTime: at,
+        duration: const Duration(seconds: 5),
+        scene: Scene3D(
+          nodes: [node],
+          lights: Scene3D.tresPontos,
+          environment: EnvironmentKind.estudioMetal,
+          envReflect: 0.9,
+          showFloorGrid: false,
+        ),
+        position: AnimatedOffset(_center),
+      ),
+    );
+    return node.id;
   }
 
   /// O IPHONE 3D QUE DA PARA MODIFICAR: um aparelho paramétrico montado
@@ -2878,28 +2892,98 @@ class EditorController extends Notifier<VideoProject> {
     );
   }
 
-  String addModel3D(String sceneId, ModelAsset3D model) {
-    final layer = _layer(sceneId);
-    if (layer is! Scene3DLayer) return '';
-    final node = SceneNode(
+  SceneNode _nodeDoModelo(
+    ModelAsset3D model, {
+    bool orientarParaCamera = false,
+  }) {
+    var rotX = 0.0;
+    var rotY = 0.0;
+    if (orientarParaCamera) {
+      try {
+        final frame = model.evaluate(
+          Duration.zero,
+          const ModelMotion3D(clip: -1),
+          comAnimacaoDeTexto: false,
+        );
+        final lo = [double.infinity, double.infinity, double.infinity];
+        final hi = [-double.infinity, -double.infinity, -double.infinity];
+        for (final v in frame.mesh.verts) {
+          for (var eixo = 0; eixo < 3; eixo++) {
+            lo[eixo] = math.min(lo[eixo], v[eixo]);
+            hi[eixo] = math.max(hi[eixo], v[eixo]);
+          }
+        }
+        if (frame.mesh.verts.isNotEmpty) {
+          final tamanho = [for (var i = 0; i < 3; i++) hi[i] - lo[i]];
+          final ordem = [0, 1, 2]
+            ..sort((a, b) => tamanho[a].compareTo(tamanho[b]));
+          // So gira automaticamente quando ha UM eixo realmente fino.
+          // Objetos volumetricos preservam a orientacao autoral; placas,
+          // logos e aneis deixam de entrar vistos exatamente pela borda.
+          if (tamanho[ordem[0]] < tamanho[ordem[1]] * 0.18) {
+            if (ordem[0] == 0) rotY = 90;
+            if (ordem[0] == 1) rotX = 90;
+          }
+        }
+      } catch (_) {
+        // Modelo valido mas impossivel de medir: preserva a orientacao do
+        // arquivo; o renderizador continua podendo desenha-lo.
+      }
+    }
+    return SceneNode(
       name: model.name,
       size: 120,
+      rotX: AnimatedDouble(rotX),
+      rotY: AnimatedDouble(rotY),
       modelAsset: model,
       modelSource: ModelSource3D(
         path: '',
         triangles: model.triangleCount,
         meshes: model.primitives.length,
         animations: model.clips.length,
-        materials: (model.data['materials'] as List).length,
+        // A LEITURA E TOLERANTE: um modelo sem a chave dos materiais e um
+        // modelo sem material, e nao um modelo que nao entra. O `as List`
+        // cru estourava aqui — ANTES do no existir — e o dono via "nao
+        // consegui ler esse modelo" para um arquivo que estava bom.
+        materials: (model.data['materials'] as List? ?? const []).length,
         nodeNames: [for (final n in model.nodes) n['name'] as String],
         animationNames: model.clipNames,
         lodCount: 1,
         warning: model.warnings.isEmpty ? null : model.warnings.join(' '),
       ),
     );
+  }
+
+  String addModel3D(String sceneId, ModelAsset3D model) {
+    final layer = _layer(sceneId);
+    if (layer is! Scene3DLayer) return '';
+    final node = _nodeDoModelo(model);
     _replace(
       layer.withScene(
         layer.scene.copyWith(nodes: [...layer.scene.nodes, node]),
+      ),
+    );
+    return node.id;
+  }
+
+  /// Importa um modelo como uma cena 3D pronta e centralizada. A cena e
+  /// criada quando necessario; o ambiente metalico empacotado da ao PBR
+  /// algo realista para refletir desde o primeiro quadro.
+  String addImportedModel3D(Duration at, ModelAsset3D model) {
+    final node = _nodeDoModelo(model, orientarParaCamera: true);
+    _push(
+      Scene3DLayer(
+        name: '3D · ${model.name}',
+        startTime: at,
+        duration: const Duration(seconds: 5),
+        scene: Scene3D(
+          nodes: [node],
+          lights: Scene3D.tresPontos,
+          environment: EnvironmentKind.estudioMetal,
+          envReflect: 0.9,
+          showFloorGrid: false,
+        ),
+        position: AnimatedOffset(_center),
       ),
     );
     return node.id;
@@ -6292,7 +6376,9 @@ class EditorController extends Notifier<VideoProject> {
     final layer = _layer(layerId);
     if (layer == null) return;
     if (type == EffectType.timeRemap) {
-      if (layer is! VideoLayer || layer.effects.any((e) => e.type == type)) return;
+      if (layer is! VideoLayer || layer.effects.any((e) => e.type == type)) {
+        return;
+      }
       ligarCurvaDeTempo(layerId, true);
       return;
     }
@@ -6357,7 +6443,8 @@ class EditorController extends Notifier<VideoProject> {
     final idx = layer.effects.indexWhere((e) => e.id == effectId);
     if (idx < 0) return;
     final original = layer.effects[idx];
-    if (original.type == EffectType.opticalFlow || original.type == EffectType.timeRemap) {
+    if (original.type == EffectType.opticalFlow ||
+        original.type == EffectType.timeRemap) {
       return;
     }
     // Sem id: a instancia nova sorteia o proprio. Os keyframes vao junto
@@ -6421,8 +6508,12 @@ class EditorController extends Notifier<VideoProject> {
   ) {
     final layer = _layer(layerId);
     if (layer == null) return;
-    final remap = layer.effects.any((e) => e.id == effectId && e.type == EffectType.timeRemap);
-    final local = remap ? globalTime - layer.startTime : layer.localTime(globalTime);
+    final remap = layer.effects.any(
+      (e) => e.id == effectId && e.type == EffectType.timeRemap,
+    );
+    final local = remap
+        ? globalTime - layer.startTime
+        : layer.localTime(globalTime);
     _replace(
       layer.copyLayer(
         effects: [
@@ -6442,8 +6533,12 @@ class EditorController extends Notifier<VideoProject> {
     if (_cravarPendencia(layerId, globalTime)) return;
     final layer = _layer(layerId);
     if (layer == null) return;
-    final remap = layer.effects.any((e) => e.id == effectId && e.type == EffectType.timeRemap);
-    final local = remap ? globalTime - layer.startTime : layer.localTime(globalTime);
+    final remap = layer.effects.any(
+      (e) => e.id == effectId && e.type == EffectType.timeRemap,
+    );
+    final local = remap
+        ? globalTime - layer.startTime
+        : layer.localTime(globalTime);
     _replace(
       layer.copyLayer(
         effects: [
@@ -6518,8 +6613,12 @@ class EditorController extends Notifier<VideoProject> {
     if (_cravarPendencia(layerId, globalTime)) return;
     final layer = _layer(layerId);
     if (layer == null) return;
-    final remap = layer.effects.any((e) => e.id == effectId && e.type == EffectType.timeRemap);
-    final local = remap ? globalTime - layer.startTime : layer.localTime(globalTime);
+    final remap = layer.effects.any(
+      (e) => e.id == effectId && e.type == EffectType.timeRemap,
+    );
+    final local = remap
+        ? globalTime - layer.startTime
+        : layer.localTime(globalTime);
     _replace(
       layer.copyLayer(
         effects: [

@@ -72,6 +72,7 @@ void main(List<String> args) async {
           'src/api.cpp',
         ],
         if (tresD) ...const [
+          'src/assimp_stb.cpp',
           'src/importador.cpp',
           'src/cena_3d.cpp',
           'src/renderizador_3d.cpp',

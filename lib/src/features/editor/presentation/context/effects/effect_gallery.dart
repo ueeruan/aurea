@@ -85,7 +85,6 @@ Future<void> showEffectGallery(
                 is! VideoLayer) {
               results = results
                   .where((t) => t != EffectType.opticalFlow)
-                  .where((t) => t != EffectType.timeRemap || camadaDaGaleria is VideoLayer)
                   .toList();
             }
             if (edits && query.isEmpty && !favoritos) {
@@ -275,21 +274,6 @@ Future<void> showEffectGallery(
                         ),
                       ),
                     const SizedBox(height: 8),
-                    if (camadaDaGaleria is VideoLayer && !presets &&
-                        !favoritos && !recentes && !edits && !sugeridos &&
-                        (category == null || category == 'Time') &&
-                        (query.isEmpty || 'time remap remapear tempo velocidade'.contains(query.toLowerCase())))
-                        Material(color: Colors.transparent, child: ListTile(
-                          key: const ValueKey('efeito-time_remap'),
-                        dense: true,
-                        leading: const Icon(CupertinoIcons.timer, color: AmColors.action),
-                        title: const AppText('Time Remap', style: TextStyle(color: AmColors.text)),
-                        subtitle: const AppText('Tempo · Keyframes e curva', style: TextStyle(color: AmColors.muted)),
-                        onTap: () {
-                          controller.ligarCurvaDeTempo(layerId, true);
-                            Navigator.of(sheetContext).pop();
-                          },
-                        )),
                     if (presets && query.isEmpty)
                       Expanded(
                         child: ListView.builder(
@@ -514,7 +498,8 @@ class _EffectTile extends StatelessWidget {
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: AppTextMoldado(
-                          'custo {0}', [spec.cost],
+                          'custo {0}',
+                          [spec.cost],
                           style: const TextStyle(
                             fontSize: 9,
                             color: Colors.white,

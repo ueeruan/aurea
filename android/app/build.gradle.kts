@@ -23,6 +23,17 @@ if (temChaveDeRelease) {
     keystorePropertiesFile.inputStream().use { keystoreProperties.load(it) }
 }
 
+// `flutter build apk --split-per-abi` perdeu `flutter_assets` no conjunto
+// atual de Flutter + code assets: o APK instalava, mas ficava sem fontes de
+// icones, shaders e imagens. Para continuar entregando um APK pequeno por
+// arquitetura, cada ABI e compilada separadamente e este filtro remove as
+// bibliotecas das outras arquiteturas sem tocar nos assets do Flutter.
+val aureaAbi = providers.gradleProperty("aureaAbi").orNull
+val aureaAbisPermitidas = setOf("armeabi-v7a", "arm64-v8a")
+require(aureaAbi == null || aureaAbi in aureaAbisPermitidas) {
+    "aureaAbi invalida: $aureaAbi"
+}
+
 android {
     namespace = "com.aurea.aurea"
     compileSdk = flutter.compileSdkVersion
@@ -46,6 +57,12 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        if (aureaAbi != null) {
+            ndk {
+                abiFilters += aureaAbi
+            }
+        }
 
         externalNativeBuild {
             cmake {

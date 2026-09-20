@@ -400,6 +400,13 @@ void avaliar(const Cena3D& cena, const AcervoDeModelos& acervo,
   saida.ambiente[0] = cena.ambiente_vermelho;
   saida.ambiente[1] = cena.ambiente_verde;
   saida.ambiente[2] = cena.ambiente_azul;
+  saida.ceu[0] = cena.ceu_vermelho;
+  saida.ceu[1] = cena.ceu_verde;
+  saida.ceu[2] = cena.ceu_azul;
+  saida.chao[0] = cena.chao_vermelho;
+  saida.chao[1] = cena.chao_verde;
+  saida.chao[2] = cena.chao_azul;
+  saida.reflexo_do_ambiente = cena.reflexo_do_ambiente;
 
   montar_camera(cena.camera, cena.largura, cena.altura, saida.vista,
                 saida.projecao, saida.olho);
@@ -420,6 +427,16 @@ void avaliar(const Cena3D& cena, const AcervoDeModelos& acervo,
   misturar_float(impressao, cena.ambiente_vermelho);
   misturar_float(impressao, cena.ambiente_verde);
   misturar_float(impressao, cena.ambiente_azul);
+  // O CEU E O CHAO ENTRAM NA IMPRESSAO. E a impressao que diz ao compositor
+  // se o quadro pode ser reaproveitado: sem eles aqui, pintar a cena de
+  // dourado nao redesenharia nada.
+  misturar_float(impressao, cena.ceu_vermelho);
+  misturar_float(impressao, cena.ceu_verde);
+  misturar_float(impressao, cena.ceu_azul);
+  misturar_float(impressao, cena.chao_vermelho);
+  misturar_float(impressao, cena.chao_verde);
+  misturar_float(impressao, cena.chao_azul);
+  misturar_float(impressao, cena.reflexo_do_ambiente);
   misturar_camera(impressao, cena.camera);
   for (const Luz& l : cena.luzes) misturar_luz(impressao, l);
   // A QUANTIDADE DE CAMADAS ENTRA AQUI, e nao so o conteudo de cada uma:

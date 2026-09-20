@@ -22,7 +22,8 @@ void main() {
       'material': 40,
       'camada': 128,
       'luz': 60,
-      'cena': 128,
+      // 32 bytes a mais: o ceu, o chao e a forca do reflexo do ambiente.
+      'cena': 160,
       'relato': 56,
       'ficha': 80,
       'opcoes': 24,

@@ -42,16 +42,29 @@ jobs:
       - name: Build APK (Release)
         run: |
           set -o pipefail
-          # UM APK POR ARQUITETURA. O "fat" carrega as tres e sai com o
-          # triplo do tamanho; o aparelho do testador instala só a dele.
-          flutter build apk --release --split-per-abi -v 2>&1 | tee build-apk.log
+          # NAO USAR --split-per-abi AQUI. Com code assets ele gerou APKs
+          # sem `flutter_assets`: fontes, icones, shaders e previews sumiram.
+          # O filtro Gradle entrega uma ABI por vez e preserva os assets.
+          flutter build apk --release --target-platform android-arm64 \
+            --android-project-arg=aureaAbi=arm64-v8a -v \
+            2>&1 | tee build-apk-arm64.log
+          cp build/app/outputs/flutter-apk/app-release.apk \
+            build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+
+          flutter build apk --release --target-platform android-arm \
+            --android-project-arg=aureaAbi=armeabi-v7a -v \
+            2>&1 | tee build-apk-arm32.log
+          cp build/app/outputs/flutter-apk/app-release.apk \
+            build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
 
       - name: Guardar diagnostico da compilacao
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: apk-build-diagnostics
-          path: build-apk.log
+          path: |
+            build-apk-arm64.log
+            build-apk-arm32.log
           if-no-files-found: ignore
 
       - name: Upload APK

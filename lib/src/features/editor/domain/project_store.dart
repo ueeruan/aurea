@@ -1,5 +1,7 @@
 import 'acabamento3d.dart';
+
 import 'dart:convert';
+
 import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import 'package:aurea_render/aurea_render.dart';
@@ -378,7 +380,8 @@ AnimatedDouble _migrarTrilha(
 bool _eOTimeRemapAntigo(Map<String, dynamic> m) {
   // Named Time Remap is a normal effect again; retain id/order/enabled.
   // Arquivo antigo o bastante para nao ter `kind`: o indice 26 era ele.
-  if (m['kind'] == null && (m['type'] as num?)?.toInt() == indiceLegadoDoTimeRemap) {
+  if (m['kind'] == null &&
+      (m['type'] as num?)?.toInt() == indiceLegadoDoTimeRemap) {
     return true;
   }
   return false;
@@ -2120,10 +2123,11 @@ List<PropertyLink> _linksDoJson(Object? bruto, Set<String> idsVivos) {
         PropertyLink(
           id: m['id'] as String,
           targetLayerId: m['target'] as String,
-          targetProp: LayerProp.values[((m['prop'] as num).toInt()).clamp(
-            0,
-            LayerProp.values.length - 1,
-          )],
+          targetProp:
+              LayerProp.values[((m['prop'] as num).toInt()).clamp(
+                0,
+                LayerProp.values.length - 1,
+              )],
           sourceLayerId: m['source'] as String,
           scale: (m['scale'] as num).toDouble(),
           offsetX: (m['ox'] as num).toDouble(),
@@ -2133,9 +2137,7 @@ List<PropertyLink> _linksDoJson(Object? bruto, Set<String> idsVivos) {
           baseRotationX: (m['bRotX'] as num?)?.toDouble() ?? 0,
           baseRotationY: (m['bRotY'] as num?)?.toDouble() ?? 0,
           baseZ: (m['bZ'] as num?)?.toDouble() ?? 0,
-          delay: Duration(
-            microseconds: (m['delayUs'] as num?)?.toInt() ?? 0,
-          ),
+          delay: Duration(microseconds: (m['delayUs'] as num?)?.toInt() ?? 0),
         ),
       );
     } catch (_) {
@@ -2677,19 +2679,18 @@ Layer layerFromJson(Map<String, dynamic> m) {
         size: (m['size'] as num).toDouble(),
         color: _asCol(m['color']),
         edges: m['edges'] as bool? ?? true,
-        reflect: (m['reflect'] as num?)?.toDouble() ?? 0,
+        reflect: (m['reflect'] as num?)?.toDouble() ?? 0.65,
         environment:
-            EnvironmentKind.values[((m['env'] as num?)?.toInt() ?? 0).clamp(
-              0,
-              EnvironmentKind.values.length - 1,
-            )],
+            EnvironmentKind.values[((m['env'] as num?)?.toInt() ??
+                    EnvironmentKind.estudioMetal.index)
+                .clamp(0, EnvironmentKind.values.length - 1)],
         imagePath: m['img'] as String?,
         meshPath: m['mesh'] as String?,
         material: (m['mat'] as num?)?.toInt() ?? 0,
         gradient: m['grad'] is List && (m['grad'] as List).length >= 2
             ? [for (final c in m['grad'] as List) _asCol(c)]
             : const [Color(0xFF7A3FF2), Color(0xFF2F7BFF), Color(0xFFFF4FD8)],
-        shininess: (m['shine'] as num?)?.toDouble() ?? 0.5,
+        shininess: (m['shine'] as num?)?.toDouble() ?? 0.65,
         position: pos,
         scaleX: sx,
         scaleY: sy,

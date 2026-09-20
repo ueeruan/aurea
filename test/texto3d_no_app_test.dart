@@ -13,15 +13,25 @@ import 'package:aurea/src/features/editor/presentation/widgets/preview_stage.dar
     show cenaComNulosDaComposicao;
 import 'package:aurea/src/features/editor/domain/modelo_do_texto3d.dart';
 import 'package:aurea/src/features/editor/domain/texto3d.dart';
+import 'package:aurea/src/features/editor/application/editor_controller.dart';
+import 'package:aurea/src/features/editor/application/fonte_de_malha.dart';
+import 'package:aurea/src/features/editor/application/motor3d_nativo.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   test('o texto vira modelo com frente, chanfro e lateral em metal', () {
     final fonte = FonteTrueType.ler(
       File('assets/templates/dnyx/AureaMotionSans.ttf').readAsBytesSync(),
     );
     const t = Texto3D(texto: 'ELEMENT');
-    final malha = malhaDoTexto3D(disporTexto3D(t, fonte), t, fonte.unidadesPorEm);
+    final malha = malhaDoTexto3D(
+      disporTexto3D(t, fonte),
+      t,
+      fonte.unidadesPorEm,
+    );
     for (final estilo in EstiloDoTexto3D.values) {
       final m = modeloDoTexto3D(malha, 'ELEMENT', estilo);
       expect(m.primitives, hasLength(3), reason: estilo.name);
@@ -54,7 +64,11 @@ void main() {
       duration: const Duration(seconds: 4),
       position: AnimatedOffset(const Offset(1060, 490)),
     );
-    final no = SceneNode(name: 'texto', isNull: true, compParentLayerId: 'nulo');
+    final no = SceneNode(
+      name: 'texto',
+      isNull: true,
+      compParentLayerId: 'nulo',
+    );
     final cena = Scene3DLayer(
       id: 'cena',
       name: 'cena',
@@ -79,7 +93,47 @@ void main() {
     expect(resolvida.x.valueAt(Duration.zero), closeTo(100, 1e-9));
     expect(resolvida.y.valueAt(Duration.zero), closeTo(50, 1e-9));
     final volta = projectFromJson(projectToJson(projeto));
-    final lida = (volta.layers.whereType<Scene3DLayer>().single).scene.nodes.single;
+    final lida =
+        (volta.layers.whereType<Scene3DLayer>().single).scene.nodes.single;
     expect(lida.compParentLayerId, 'nulo');
   });
+
+  test(
+    'botao cria texto, camada na timeline e malha para o motor novo',
+    () async {
+      final container = ProviderContainer();
+      try {
+        final controller = container.read(editorControllerProvider.notifier);
+        controller.openProject(VideoProject.empty('texto 3d'));
+
+        final nodeId = await controller.addTexto3D(
+          Duration.zero,
+          'AUREA',
+          EstiloDoTexto3D.cromo,
+          familia: 'fonte que nao existe',
+        );
+
+        expect(nodeId, isNotNull, reason: 'deve cair na fonte interna');
+        final project = container.read(editorControllerProvider);
+        final scene = project.layers.whereType<Scene3DLayer>().single;
+        expect(scene.name, 'Texto 3D · AUREA');
+        expect(project.layers.whereType<NullLayer>(), isEmpty);
+        final node = scene.scene.nodeById(nodeId!)!;
+        expect(node.modelAsset, isNotNull);
+        final cache = CacheDeMalhas();
+        final source = cache.doNo(
+          node,
+          Duration.zero,
+          lodDaReceita: (_) => null,
+          assinaturaDoMaterial: assinaturaDoMaterial3D,
+        );
+        expect(source, isNotNull);
+        final nativeMeshes = malhasCruas3DDe(source!);
+        expect(nativeMeshes, isNotEmpty);
+        expect(nativeMeshes.every((m) => m.quantidadeDeIndices >= 3), isTrue);
+      } finally {
+        container.dispose();
+      }
+    },
+  );
 }

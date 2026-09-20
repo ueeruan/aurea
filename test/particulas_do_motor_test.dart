@@ -34,8 +34,7 @@ ParticulasLayer _camada({ParametrosDeParticulas? receita}) => ParticulasLayer(
   duration: const Duration(seconds: 5),
   parametros:
       receita ??
-      (MotorDeParticulasRender.preset(0) ??
-          ParametrosDeParticulas(maximo: 64)),
+      (MotorDeParticulasRender.preset(0) ?? ParametrosDeParticulas(maximo: 64)),
   position: AnimatedOffset(const Offset(960, 540)),
 );
 
@@ -56,6 +55,25 @@ void main() {
     );
   });
 
+  test('todo controle avancado invalida a receita nativa', () {
+    final base = ParametrosDeParticulas();
+    final campos = <ParametrosDeParticulas>[
+      base.clonar()..gravidade = 10,
+      base.clonar()..ventoX = 10,
+      base.clonar()..turbulencia = 10,
+      base.clonar()..atracao = 10,
+      base.clonar()..tamanho = 40,
+      base.clonar()..opacidade = .4,
+      base.clonar()..brilho = .8,
+      base.clonar()..giroGrausS = 90,
+      base.clonar()..tamanhoNaVida = TamanhoNaVida.cresce,
+      base.clonar()..opacidadeNaVida = OpacidadeNaVida.fixa,
+    ];
+    for (final alterada in campos) {
+      expect(alterada.assinatura, isNot(base.assinatura));
+    }
+  });
+
   group('a camada e um ENVELOPE, e nao um simulador', () {
     test('ela nao guarda nenhum estado de particula', () {
       // A LISTA DE CAMPOS E O CONTRATO. Se um dia aparecer aqui um
@@ -71,8 +89,16 @@ void main() {
     test('duas camadas com a mesma receita desenham igual', () {
       final a = _camada();
       final b = _camada(receita: a.parametros.clonar());
-      final la = LoteDeParticulas(a.parametros..centroX = 0..centroY = 0);
-      final lb = LoteDeParticulas(b.parametros..centroX = 0..centroY = 0);
+      final la = LoteDeParticulas(
+        a.parametros
+          ..centroX = 0
+          ..centroY = 0,
+      );
+      final lb = LoteDeParticulas(
+        b.parametros
+          ..centroX = 0
+          ..centroY = 0,
+      );
       la.gerar(1.7);
       lb.gerar(1.7);
       expect(la.quantas, greaterThan(0));
@@ -218,7 +244,11 @@ void main() {
         'emitH': 980,
         'size': 26,
       });
-      final lote = LoteDeParticulas(q..centroX = 0..centroY = 0)..gerar(1.0);
+      final lote = LoteDeParticulas(
+        q
+          ..centroX = 0
+          ..centroY = 0,
+      )..gerar(1.0);
       expect(lote.quantas, greaterThan(45));
       final alvo = Uint8List(256 * 256 * 4);
       expect(lote.pintar(alvo, 256, 256), greaterThan(0));
@@ -260,9 +290,7 @@ void main() {
     testWidgets('a camada de particulas desenha pelo motor', (tester) async {
       final c = await openEditor(tester);
       final camada = _camada();
-      c.read(editorControllerProvider.notifier).openProject(
-        _projeto([camada]),
-      );
+      c.read(editorControllerProvider.notifier).openProject(_projeto([camada]));
       await tester.pumpAndSettle();
 
       // O PINTOR DA NUVEM ESTA MONTADO, e o lote dele tem particulas —
@@ -274,8 +302,7 @@ void main() {
           .evaluate();
       expect(pintores, hasLength(1));
       final pintor =
-          (pintores.single.widget as CustomPaint).painter!
-              as ParticulasPainter;
+          (pintores.single.widget as CustomPaint).painter! as ParticulasPainter;
       expect(pintor.lote, isNotNull);
       expect(pintor.lote!.quantas, greaterThan(0));
     });
@@ -285,19 +312,19 @@ void main() {
       final camada = _camada(
         receita: ParametrosDeParticulas(maximo: 6000, vidaS: 4),
       );
-      c.read(editorControllerProvider.notifier).openProject(
-        _projeto([camada]),
-      );
+      c.read(editorControllerProvider.notifier).openProject(_projeto([camada]));
       await tester.pumpAndSettle();
 
       int quantas() {
-        final p = find
-            .byWidgetPredicate(
-              (w) => w is CustomPaint && w.painter is ParticulasPainter,
-            )
-            .evaluate()
-            .single
-            .widget as CustomPaint;
+        final p =
+            find
+                    .byWidgetPredicate(
+                      (w) => w is CustomPaint && w.painter is ParticulasPainter,
+                    )
+                    .evaluate()
+                    .single
+                    .widget
+                as CustomPaint;
         return (p.painter! as ParticulasPainter).lote!.capacidade;
       }
 
@@ -317,16 +344,17 @@ void main() {
       expect(reduzido, greaterThan(0));
     });
 
-    testWidgets('a camada de particulas nao desenha em cima do gizmo 3D',
-        (tester) async {
+    testWidgets('a camada de particulas nao desenha em cima do gizmo 3D', (
+      tester,
+    ) async {
       // A NUVEM NAO E UM ESPACO PROPRIO: ela nasce no centro da camada e
       // obedece ao mesmo transform de todo mundo. Ligar o 3D na camada
       // tem de ligar o gizmo como em qualquer outra.
       final c = await openEditor(tester);
       final camada = _camada();
-      c.read(editorControllerProvider.notifier).openProject(
-        _projeto([camada.copyLayer(is3D: true)]),
-      );
+      c
+          .read(editorControllerProvider.notifier)
+          .openProject(_projeto([camada.copyLayer(is3D: true)]));
       c.read(selectedLayerProvider.notifier).state = camada.id;
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('gizmo-3d')), findsOneWidget);

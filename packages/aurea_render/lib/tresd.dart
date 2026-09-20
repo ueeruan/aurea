@@ -356,6 +356,36 @@ final class _Cena3DC extends Struct {
 
   @Uint32()
   external int reserva;
+
+  // ------------------------------------------------- o ambiente com direcao
+  //
+  // O AMBIENTE PLANO NAO FAZ METAL. Um metal nao tem difusa: ele responde
+  // inteiro pelo que reflete, e refletindo uma cor unica ele vira uma cor
+  // chapada — o ouro sai como um bronze fosco. O ceu e o chao fazem o que a
+  // foto faz: o que aponta para cima pega o ceu, o que aponta para baixo
+  // pega o chao, e o olho le volume e brilho onde antes havia um adesivo.
+  //
+  // As cores vao em sRGB (0..1) e o motor as leva ao linear, que e o mesmo
+  // caminho da cor do painel.
+  @Float()
+  external double ceuR;
+  @Float()
+  external double ceuG;
+  @Float()
+  external double ceuB;
+
+  /// Quanto do ambiente a superficie devolve no reflexo espelhado.
+  @Float()
+  external double reflexoDoAmbiente;
+
+  @Float()
+  external double chaoR;
+  @Float()
+  external double chaoG;
+  @Float()
+  external double chaoB;
+  @Float()
+  external double chaoReserva;
 }
 
 /// A MALHA CRUA. CINCO PONTEIROS E OS CAMPOS DO MATERIAL.
@@ -1098,6 +1128,15 @@ class Cena3D {
   /// preto absoluto, e o modelo parece recortado em papel.
   double ambienteR = 0.18, ambienteG = 0.18, ambienteB = 0.20;
 
+  /// O AMBIENTE COM DIRECAO: a cor de cima e a cor de baixo, em sRGB.
+  /// Neutro — ceu e chao brancos — e o mesmo ambiente plano de antes.
+  double ceuR = 1.0, ceuG = 1.0, ceuB = 1.0;
+  double chaoR = 1.0, chaoG = 1.0, chaoB = 1.0;
+
+  /// Quanto do ambiente volta no reflexo espelhado. E o que separa um metal
+  /// de um plastico: em 1 o metal espelha o ambiente inteiro.
+  double reflexoDoAmbiente = 0.0;
+
   /// 0 desligada, 1 baixa, 2 media, 3 alta.
   int sombra = 0;
 
@@ -1764,6 +1803,14 @@ class Ponte3D {
     c.ambienteR = cena.ambienteR;
     c.ambienteG = cena.ambienteG;
     c.ambienteB = cena.ambienteB;
+    c.ceuR = cena.ceuR;
+    c.ceuG = cena.ceuG;
+    c.ceuB = cena.ceuB;
+    c.reflexoDoAmbiente = cena.reflexoDoAmbiente;
+    c.chaoR = cena.chaoR;
+    c.chaoG = cena.chaoG;
+    c.chaoB = cena.chaoB;
+    c.chaoReserva = 1.0;
     final cam = cena.camera;
     c.cameraPosicaoX = cam.posicaoX;
     c.cameraPosicaoY = cam.posicaoY;

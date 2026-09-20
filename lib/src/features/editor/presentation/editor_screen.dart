@@ -913,7 +913,11 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                       : (mostrandoDicas && ws > 0
                             ? (ContextSheet.handleHeight + 108) / ws
                             : (s.adding
-                                  ? 0.48
+                                  // O seletor e uma bandeja, nao um painel
+                                  // de edicao: tres fileiras compactas
+                                  // continuam rolaveis sem esconder metade
+                                  // da timeline e do preview.
+                                  ? 0.32
                                   : (s.panel != EditorPanel.none
                                         ? 0.46
                                         : EditorSession.alturaDaFolha))),

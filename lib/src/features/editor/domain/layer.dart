@@ -1,5 +1,7 @@
 import 'acabamento3d.dart';
+
 import 'dart:ui';
+
 import 'package:aurea/src/core/theme/aurea_colors.dart';
 
 import 'package:aurea_render/aurea_render.dart';
@@ -716,12 +718,26 @@ class VideoLayer extends Layer {
     super.matteSourceId,
   }) : super(effects: _withTimeRemap(effects ?? const [], timeRemap));
 
-  static List<EffectInstance> _withTimeRemap(List<EffectInstance> effects, AnimatedDouble? track) {
+  static List<EffectInstance> _withTimeRemap(
+    List<EffectInstance> effects,
+    AnimatedDouble? track,
+  ) {
     if (track == null) return effects;
     final index = effects.indexWhere((e) => e.type == EffectType.timeRemap);
-    if (index < 0) return [...effects, EffectInstance(type: EffectType.timeRemap, params: {'tempo': track})];
-    return [for (var i = 0; i < effects.length; i++)
-      i == index ? effects[i].copyWith(params: {...effects[i].params, 'tempo': track}) : effects[i]];
+    if (index < 0) {
+      return [
+        ...effects,
+        EffectInstance(type: EffectType.timeRemap, params: {'tempo': track}),
+      ];
+    }
+    return [
+      for (var i = 0; i < effects.length; i++)
+        i == index
+            ? effects[i].copyWith(
+                params: {...effects[i].params, 'tempo': track},
+              )
+            : effects[i],
+    ];
   }
 
   final String sourcePath;
@@ -893,7 +909,9 @@ class VideoLayer extends Layer {
       is3D: is3D ?? this.is3D,
       positionZ: positionZ ?? this.positionZ,
       effects: clearTimeRemap
-          ? (effects ?? this.effects).where((e) => e.type != EffectType.timeRemap).toList()
+          ? (effects ?? this.effects)
+                .where((e) => e.type != EffectType.timeRemap)
+                .toList()
           : effects ?? this.effects,
       masks: masks ?? this.masks,
       matteMode: matteMode ?? this.matteMode,
@@ -2771,7 +2789,9 @@ ParametrosDeParticulas parametrosDeParticulasDoProjeto(
   // no plano XY; no novo, 3 e uma LINHA e o anel foi para 4. Sem a marca
   // `pv`, `emitter: 3` viraria uma linha — o projeto abriria com as
   // particulas nascendo ao longo de um risco em vez de um circulo.
-  final emissor = novo ? bruto.clamp(0, 4) : const [0, 1, 2, 4][bruto.clamp(0, 3)];
+  final emissor = novo
+      ? bruto.clamp(0, 4)
+      : const [0, 1, 2, 4][bruto.clamp(0, 3)];
   final forma = i(m['shape'], (m['star'] as bool? ?? true) ? 1 : 0);
   final temFim = m['colorEnd'] != null;
   final largura = n(m['emitW'], 980);
@@ -2816,7 +2836,9 @@ ParametrosDeParticulas parametrosDeParticulasDoProjeto(
     opacidadeVariacao: n(m['opRnd'], 0),
     opacidadeNaVida: OpacidadeNaVida.values[i(m['opLife'], 0).clamp(0, 3)],
     corInicio: cor(m['color'], 0xFFFF3B52),
-    corFim: temFim ? cor(m['colorEnd'], 0xFFFF3B52) : cor(m['color'], 0xFFFF3B52),
+    corFim: temFim
+        ? cor(m['colorEnd'], 0xFFFF3B52)
+        : cor(m['color'], 0xFFFF3B52),
     temCorFim: temFim,
     forma: FormaDaParticula.values[forma.clamp(0, 5)],
     giroGrausS: n(m['spin'], 0),
@@ -2843,8 +2865,8 @@ class Element3DLayer extends Layer {
     this.size = 200,
     this.color = AureaColors.selectionText,
     this.edges = true,
-    this.reflect = 0,
-    this.environment = EnvironmentKind.estudio,
+    this.reflect = 0.65,
+    this.environment = EnvironmentKind.estudioMetal,
     this.imagePath,
     this.meshPath,
     this.material = 0,
@@ -2853,7 +2875,7 @@ class Element3DLayer extends Layer {
       Color(0xFF2F7BFF),
       Color(0xFFFF4FD8),
     ],
-    this.shininess = 0.5,
+    this.shininess = 0.65,
     this.acabamento = AcabamentoDoElemento3D.corLisa,
     super.position,
     super.scaleX,
@@ -3022,7 +3044,7 @@ class Element3DLayer extends Layer {
       material: material,
       gradient: gradient,
       shininess: shininess,
-    acabamento: acabamento,
+      acabamento: acabamento,
       position: position ?? this.position,
       scaleX: scaleX ?? this.scaleX,
       scaleY: scaleY ?? this.scaleY,

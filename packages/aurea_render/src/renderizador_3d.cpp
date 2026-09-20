@@ -157,13 +157,20 @@ struct BlocoQuadro {
   geo::Mat4 vista_projecao;
   geo::Mat4 luz_espaco;
   float olho[4];      // xyz olho, w sombra ligada
-  float ambiente[4];  // rgb ambiente
+  float ambiente[4];  // rgb ambiente (o piso, sem direcao)
   float ajustes[4];   // x luzes, y PCF, z lado do mapa, w inclinacao
+  // O CEU E O CHAO. `ceu.w` e o reflexo do ambiente: quanto do que esta em
+  // volta a superficie devolve na direcao espelhada. As cores ja vem
+  // lineares da cena.
+  float ceu[4];
+  float chao[4];
 };
-static_assert(sizeof(BlocoQuadro) == 304, "o bloco do quadro mudou de tamanho");
+static_assert(sizeof(BlocoQuadro) == 336, "o bloco do quadro mudou de tamanho");
 static_assert(offsetof(BlocoQuadro, olho) == 256, "olho fora de lugar");
 static_assert(offsetof(BlocoQuadro, ambiente) == 272, "ambiente fora de lugar");
 static_assert(offsetof(BlocoQuadro, ajustes) == 288, "ajustes fora de lugar");
+static_assert(offsetof(BlocoQuadro, ceu) == 304, "ceu fora de lugar");
+static_assert(offsetof(BlocoQuadro, chao) == 320, "chao fora de lugar");
 
 /// O BLOCO DE UM DESENHO. Um por chamada de desenho.
 struct BlocoDesenho {
@@ -198,22 +205,10 @@ struct BlocoLuzes {
 static_assert(sizeof(BlocoLuzes) == 512, "o bloco das luzes mudou");
 
 // ------------------------------------------------------------- utilidades
-
-/// A COR DO PAINEL VIRA LINEAR, AQUI E UMA VEZ POR DESENHO.
-///
-/// A textura de cor ja chega na GPU marcada como sRGB e o driver a converte
-/// ao amostrar (§6). A cor que o dono escolhe no painel nao passa por textura
-/// nenhuma e precisa ser convertida em algum lugar — e o lugar e este, e nao
-/// o shader: um `pow` por fragmento repetiria em milhoes de pixels uma conta
-/// que nao muda dentro do desenho.
-inline float canal_para_linear(std::uint8_t v) noexcept {
-  const float s = static_cast<float>(v) * (1.0F / 255.0F);
-  // A MESMA CURVA DA sRGB, e nao um `pow(x, 2.2)`: as duas quase coincidem
-  // no meio e divergem nas pontas, e a diferenca apareceria como um material
-  // um pouco mais escuro do que o mesmo material com a cor vindo da textura.
-  return s <= 0.04045F ? s * (1.0F / 12.92F)
-                       : std::pow((s + 0.055F) * (1.0F / 1.055F), 2.4F);
-}
+//
+// O `canal_para_linear` mora no `cena_3d.h`: a cena tambem precisa dele para
+// levar o ceu e o chao ao linear, e duas copias da mesma curva e o jeito mais
+// facil de elas divergirem sem ninguem notar.
 
 inline void cor_para_linear(const Cor& cor, float* saida) noexcept {
   saida[0] = canal_para_linear(cor.r);
@@ -1125,6 +1120,14 @@ bool Renderizador3D::Interno::preparar_blocos(const Quadro3D& quadro,
   bloco.ajustes[2] = static_cast<float>(sombra_lado);
   bloco.ajustes[3] =
       sombra_ligada ? inclinacao_da_sombra(sombra_lado) : 0.0F;
+  bloco.ceu[0] = quadro.ceu[0];
+  bloco.ceu[1] = quadro.ceu[1];
+  bloco.ceu[2] = quadro.ceu[2];
+  bloco.ceu[3] = quadro.reflexo_do_ambiente;
+  bloco.chao[0] = quadro.chao[0];
+  bloco.chao[1] = quadro.chao[1];
+  bloco.chao[2] = quadro.chao[2];
+  bloco.chao[3] = 1.0F;
 
   if (!bloco_quadro) {
     bloco_quadro = novo_buffer(dispositivo, "3d quadro",

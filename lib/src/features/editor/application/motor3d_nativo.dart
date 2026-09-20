@@ -365,6 +365,19 @@ class Motor3DNativo {
     _cena.ambienteR = cena.ambient.clamp(0.0, 1.0);
     _cena.ambienteG = cena.ambient.clamp(0.0, 1.0);
     _cena.ambienteB = cena.ambient.clamp(0.0, 1.0);
+    // O CEU E O CHAO DA CENA. Sao eles que dao direcao ao ambiente — sem
+    // direcao um metal nao tem o que refletir e sai como uma cor chapada.
+    // As cores vao em sRGB; o motor as leva ao linear com a mesma curva da
+    // cor do painel.
+    final ceu = cena.skyColor;
+    _cena.ceuR = ceu.r;
+    _cena.ceuG = ceu.g;
+    _cena.ceuB = ceu.b;
+    _cena.reflexoDoAmbiente = cena.envReflect.clamp(0.0, 1.0);
+    final chao = cena.groundColor;
+    _cena.chaoR = chao.r;
+    _cena.chaoG = chao.g;
+    _cena.chaoB = chao.b;
 
     final cam = _cena.camera;
     if (camera != null) {
@@ -782,16 +795,36 @@ List<MalhaCrua3D> malhasCruas3DDe(MalhaDoNo fonte) {
       }
     }
 
+    // SEM NORMAL, O PONTEIRO VAI NULO — e nao um buffer de zeros.
+    //
+    // A ABI diz "NULO faz o motor calcular a normal PLANA", e o motor so
+    // calcula quando o ponteiro e nulo: um buffer de zeros passa por "tem
+    // normal" e cada vertice fica com a normal (0,0,0). O `normalize` de um
+    // vetor nulo nao da erro nenhum — da um modelo chapado e escuro, com a
+    // luz direta valendo zero e so o ambiente aparecendo. Um OBJ sem `vn`,
+    // que e a maioria dos que saem de scanner e de conversor, chegava assim:
+    // o modelo inteiro virava uma silhueta cinza.
+    //
+    // Um modelo pode ter normal em PARTE dos vertices. Aí o nulo por vertice
+    // continua sendo do motor, mas o buffer so vale quando ha pelo menos uma
+    // normal de verdade — o que sobra de zero o importador nativo preenche
+    // com a plana da face.
     Float32List? normais;
     final normaisDaFonte = fonte.normais;
     if (normaisDaFonte != null && normaisDaFonte.length >= n) {
-      normais = Float32List(mapa.usados.length * 3);
-      for (var i = 0; i < mapa.usados.length; i++) {
-        final v = normaisDaFonte[mapa.usados[i]];
-        if (v != null) {
-          normais[i * 3] = v.x;
-          normais[i * 3 + 1] = v.y;
-          normais[i * 3 + 2] = v.z;
+      var alguma = false;
+      for (var i = 0; i < mapa.usados.length && !alguma; i++) {
+        alguma = normaisDaFonte[mapa.usados[i]] != null;
+      }
+      if (alguma) {
+        normais = Float32List(mapa.usados.length * 3);
+        for (var i = 0; i < mapa.usados.length; i++) {
+          final v = normaisDaFonte[mapa.usados[i]];
+          if (v != null) {
+            normais[i * 3] = v.x;
+            normais[i * 3 + 1] = v.y;
+            normais[i * 3 + 2] = v.z;
+          }
         }
       }
     }

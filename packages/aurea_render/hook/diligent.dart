@@ -125,6 +125,13 @@ class Fontes3D {
 
   static List<String> diligent({required bool android, required bool ios}) => [
     for (final p in _pastasDiligent) ..._cpp(p),
+    // `EngineFactoryBase` registra o callback global de diagnostico, cuja
+    // implementacao mora em `Primitives/src`, fora das quatro arvores de
+    // engine acima. O linker aceita deixar o simbolo pendente no `.so`,
+    // mas o Android recusa carregar a biblioteca inteira; com isso ate
+    // particulas (que nao usam Diligent) ficam indisponiveis.
+    if (File('$raiz/diligent/Primitives/src/DebugOutput.cpp').existsSync())
+      '$raiz/diligent/Primitives/src/DebugOutput.cpp',
     // O target de plataforma e uma dependencia real do backend (log,
     // arquivos e utilidades). No iOS ha dois .mm; o hook escolhe
     // Objective-C++ para que eles compilem junto com o restante.
@@ -162,6 +169,12 @@ class Fontes3D {
 
   static List<String> assimp() => [
     for (final p in _pastasAssimp) ..._cpp(p, recursivo: false),
+    // `Common/Assimp.cpp` instancia este adaptador da API C. Sem a
+    // implementacao, o Android aceita gerar o .so com o vtable pendente,
+    // mas o carregador recusa a biblioteca inteira em tempo de execucao —
+    // inclusive os simbolos de particulas que nao usam Assimp.
+    if (File('$raiz/assimp/code/CApi/CInterfaceIOWrapper.cpp').existsSync())
+      '$raiz/assimp/code/CApi/CInterfaceIOWrapper.cpp',
   ];
 
   /// OS CABECALHOS. Sem eles o Diligent nem sabe que a Vulkan existe.

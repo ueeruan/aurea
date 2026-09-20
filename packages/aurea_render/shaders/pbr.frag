@@ -53,8 +53,10 @@ layout(binding = 0) uniform Quadro {
   mat4 vista_projecao;
   mat4 luz_espaco;
   vec4 olho;        // xyz = olho, w = sombra ligada (0/1)
-  vec4 ambiente;    // rgb = ambiente linear
+  vec4 ambiente;    // rgb = ambiente linear, sem direcao
   vec4 ajustes;     // x = quantas luzes, y = PCF, z = tamanho do mapa, w = inclinacao
+  vec4 ceu;         // rgb = cor de cima (linear), w = reflexo do ambiente
+  vec4 chao;        // rgb = cor de baixo (linear)
 } u_quadro;
 
 layout(binding = 1) uniform Luzes {
@@ -127,6 +129,18 @@ float sombra_do_sol(vec4 posicao_luz) {
   // UMA PENUMBRA MINIMA. Sem ela a borda do mapa de sombra e uma escada de
   // um pixel, e o objeto parece recortado com tesoura.
   return mix(0.35, 1.0, duro);
+}
+
+/// A CURVA sRGB, E NAO UM `pow(x, 1/2.2)`.
+///
+/// E a inversa exata da que o `canal_para_linear` do renderizador usa para
+/// levar a cor do painel ao linear; trocar por uma aproximacao faria o mesmo
+/// material sair de dois tons diferentes conforme a cor viesse do painel ou
+/// de uma textura.
+vec3 linear_para_srgb(vec3 c) {
+  vec3 reta = c * 12.92;
+  vec3 curva = 1.055 * pow(max(c, vec3(0.0)), vec3(1.0 / 2.4)) - 0.055;
+  return mix(curva, reta, step(c, vec3(0.0031308)));
 }
 
 // -------------------------------------------------------------- o BRDF
@@ -268,20 +282,73 @@ void main() {
     direta += (kd * difusa / PI + brdf) * cor_da_luz * n_dot_l * atenuacao;
   }
 
-  // O AMBIENTE. Nao e uma imagem de ambiente — isso e um degrau posterior,
-  // e esta declarado como tal. O que existe resolve o necessario: o lado
-  // escuro nao fica preto, e um metal sem ambiente pareceria papelao.
+  // O AMBIENTE, COM DIRECAO. Nao e uma imagem de ambiente — isso e um degrau
+  // posterior, e esta declarado como tal. O que existe resolve as duas
+  // coisas que o ambiente plano nao resolvia:
+  //
+  //  a) UM METAL PRECISA DE DIRECAO PARA PARECER METAL. Um metal nao tem
+  //     difusa: ele responde inteiro pelo que reflete. Refletindo uma cor so,
+  //     o ouro sai como um bronze fosco e chapado, sem nenhuma leitura de
+  //     volume — foi exatamente o que o dono viu no texto dourado.
+  //  b) O LADO ESCURO PRECISA DE GRADIENTE. Com uma cor so, o que esta na
+  //     sombra fica do mesmo tom do que esta na luz, e a peca parece um
+  //     adesivo recortado.
+  //
+  // A CONTA E A MESMA DO PINTOR DE CPU (o `environmentColor` do
+  // `scene3d.dart`), e nao uma invencao deste shader: o mesmo material tem de
+  // sair parecido nos dois caminhos, senao o dono ve a cena mudar de tom
+  // quando ela cai na GPU.
   float oclusao = oclusao_de_ambiente();
-  vec3 difusa_ambiente = difusa * u_quadro.ambiente.rgb * oclusao;
-  vec3 especular_ambiente = f0 * u_quadro.ambiente.rgb * mix(1.0, oclusao, 0.5);
+
+  // O AMBIENTE DA CENA E A ESCALA, E O CEU/CHAO SO DAO A DIRECAO.
+  //
+  // O ceu e o chao entram DIVIDIDOS PELA MEDIA DOS DOIS, e nao crus. Sem
+  // isso a conta mudaria de patamar junto com a direcao: o ambiente da cena
+  // ja diz "quanta luz de todo lado existe aqui" (0,28 no estudio), e o
+  // hemisferio so pode dizer de ONDE ela vem. Dividido pela media, o valor
+  // medio do ambiente continua exatamente o de antes — a cena nao clareia
+  // nem escurece, ela ganha gradiente.
+  vec3 media = max((u_quadro.ceu.rgb + u_quadro.chao.rgb) * 0.5, vec3(1e-4));
+  vec3 escala = u_quadro.ambiente.rgb;
+
+  // Difusa: a face virada para cima pega o ceu, a virada para baixo pega o
+  // que o chao devolveu.
+  vec3 ambiente_do_lado =
+      mix(u_quadro.chao.rgb / media, u_quadro.ceu.rgb / media,
+          n.y * 0.5 + 0.5);
+  vec3 difusa_ambiente = difusa * ambiente_do_lado * escala * oclusao;
+
+  // Especular: o que a superficie devolve na direcao ESPELHADA da vista. E
+  // este termo que apara o metal: um metal nao tem difusa nenhuma, entao e
+  // este que desenha a peca inteira. A parte que aponta para o ceu devolve
+  // ceu, a que aponta para o chao devolve chao, e o olho le isso como
+  // reflexo.
+  vec3 espelhado = reflect(-v, n);
+  vec3 refletido =
+      mix(u_quadro.chao.rgb / media, u_quadro.ceu.rgb / media,
+          espelhado.y * 0.5 + 0.5);
+  // O REFLEXO TEM UMA FORCA PROPRIA, e ela vem da cena (`envReflect`). Em
+  // zero, o especular do ambiente volta a ser o piso plano — o de antes.
+  vec3 devolvido = mix(u_quadro.ambiente.rgb, refletido * escala,
+                       clamp(u_quadro.ceu.w, 0.0, 1.0));
+  vec3 especular_ambiente = f0 * devolvido * mix(1.0, oclusao, 0.5);
 
   vec3 emissivo = u_desenho.emissivo.rgb;
   if (u_desenho.bandeiras2.x > 0.5) emissivo *= texture(tex_emissiva, v_uv0).rgb;
+  // A FORCA EMISSIVA E DO BRILHO PROPRIO, e nao do material inteiro.
+  //
+  // ELA MULTIPLICA O EMISSIVO, e so ele. Multiplicando a cor toda, um material
+  // sem brilho proprio — que e o padrao, e o caso de todo material que o
+  // aplicativo monta a partir do painel — sai multiplicado por ZERO: a luz
+  // direta, o ambiente e o especular somem junto e a cena inteira vira preto,
+  // com a GPU sem acusar erro nenhum. O modelo importado escapava por acidente,
+  // porque a importacao deixa a forca em 1.
+  //
+  // PASSAR DE 1 E PERMITIDO E PROPOSITAL: e o estouro que o Bloom das camadas
+  // de efeito agarra em seguida (§35).
+  emissivo *= u_desenho.parametros.z;
 
   vec3 cor = direta + difusa_ambiente + especular_ambiente + emissivo;
-  // A FORCA EMISSIVA multiplica DEPOIS e pode passar de 1 de proposito: e o
-  // estouro que o Bloom das camadas de efeito agarra em seguida (§35).
-  cor *= u_desenho.parametros.z;
 
   // A SAIDA E PREMULTIPLICADA, e nao "cor e alfa lado a lado".
   //
@@ -300,7 +367,22 @@ void main() {
   // A SAIDA E RGBA8, e nao HDR: um valor acima de 1 seria cortado adiante
   // de qualquer forma, e cortar aqui deixa o comportamento previsivel em
   // vez de depender do driver.
+  //
+  // A COR SAI EM sRGB, e nao em linear.
+  //
+  // O alvo e RGBA8_UNORM e ninguem converte depois: o aplicativo le estes
+  // bytes e os entrega ao Flutter como sRGB. Escrever o valor linear num
+  // alvo que ninguem converte entrega a cena inteira escura — o ambiente de
+  // 0,28 saia como 37/255 em vez dos 106/255 que ele significa, e o modelo
+  // importado, que tem so ambiente quando a normal falta, aparecia como uma
+  // silhueta quase preta. A conta fecha: 0,28 x a cor base linear da
+  // exatamente (37, 42, 48).
+  //
+  // A CONVERSAO VEM ANTES DA PRE-MULTIPLICACAO, e nao depois: o Flutter
+  // mistura em sRGB, e um alfa aplicado sobre o linear daria uma borda de
+  // tom errado na silhueta.
+  vec3 saida = linear_para_srgb(clamp(cor, 0.0, 1.0));
   float alfa = clamp(base.a, 0.0, 1.0);
   if (modo < 2) alfa = 1.0;
-  frag_cor = vec4(clamp(cor, 0.0, 1.0) * alfa, alfa);
+  frag_cor = vec4(saida * alfa, alfa);
 }

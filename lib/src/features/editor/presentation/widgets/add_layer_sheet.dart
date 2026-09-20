@@ -17,6 +17,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../application/editor_controller.dart';
 import '../../application/font_service.dart';
+import '../../application/model_import_service.dart';
+import '../../application/texture_cache.dart';
 import '../../application/transcription_service.dart';
 import '../../application/transcricao_em_andamento.dart';
 import '../../../settings/application/settings_controller.dart';
@@ -24,6 +26,7 @@ import '../../domain/caption.dart';
 import '../../domain/element3d.dart';
 import '../../domain/layer.dart';
 import '../../domain/keyframe.dart';
+import '../../domain/model_import3d.dart';
 import '../../../../core/ui/snack.dart';
 import '../../domain/shape.dart';
 import '../../domain/svg_document.dart';
@@ -531,7 +534,8 @@ Future<void> showCaptionCreationSheet(
                     Padding(
                       padding: const EdgeInsets.only(top: 8),
                       child: AppTextMoldado(
-                        'Legendas prontas: {0} falas.', [estado.falas],
+                        'Legendas prontas: {0} falas.',
+                        [estado.falas],
                         style: const TextStyle(
                           fontSize: 12,
                           color: AmColors.accent,
@@ -680,6 +684,7 @@ class AddLayerPanel extends ConsumerStatefulWidget {
 
 class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
   bool _importingAudio = false;
+  bool _importing3D = false;
 
   Future<void> _importAudio({bool fromVideo = false}) async {
     if (_importingAudio) return;
@@ -742,15 +747,6 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
     _controller.addShapeLayer(widget.playhead, contents: build(), name: nome);
     for (final l in ref.read(editorControllerProvider).layers) {
       if (!antes.contains(l.id)) return l.id;
-    }
-    return null;
-  }
-
-  /// A cena 3D da composicao, se houver. Camera e Luz so fazem sentido
-  /// dentro de uma — fora dela seriam controles inertes.
-  Scene3DLayer? get _cena {
-    for (final l in ref.read(editorControllerProvider).layers) {
-      if (l is Scene3DLayer) return l;
     }
     return null;
   }
@@ -1265,6 +1261,11 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
     // A FONTE, quando ha escolha: as importadas em Ajustes valem para o
     // 3D tambem — o extrusor le o proprio arquivo TrueType da familia.
     String? familia;
+    // O indice das fontes importadas mora no disco e pode ainda nao ter
+    // sido lido nesta sessao. Sem aguardar aqui, Texto 3D oferecia apenas
+    // a fonte interna ou falhava ao tentar uma familia ainda nao registrada.
+    await FontService.instance.loadAll();
+    if (!raiz.mounted) return;
     final familias = FontService.instance.families;
     if (familias.length > 1) {
       familia = await showCupertinoModalPopup<String>(
@@ -1296,6 +1297,75 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
     );
     if (no == null && raiz.mounted) {
       AureaSnack.show(raiz, 'Não consegui criar o texto 3D com essa fonte.');
+    }
+  }
+
+  Future<void> _importarModelo3D() async {
+    if (_importing3D) return;
+    final continuar = await showCupertinoDialog<bool>(
+      context: context,
+      builder: (dialogContext) => CupertinoAlertDialog(
+        title: const AppText('Importar modelo 3D'),
+        content: const AppText(
+          'O Aurea aceita modelos de qualquer tamanho e não vai reduzir o '
+          'arquivo. Modelos muito grandes podem travar ou fechar o app em '
+          'celulares com pouca memória. Salve o projeto antes de continuar.',
+        ),
+        actions: [
+          CupertinoDialogAction(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const AppText('Cancelar'),
+          ),
+          CupertinoDialogAction(
+            isDefaultAction: true,
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const AppText('Escolher modelo'),
+          ),
+        ],
+      ),
+    );
+    if (continuar != true || !mounted) return;
+    setState(() => _importing3D = true);
+    final projectId = ref.read(editorControllerProvider).id;
+    try {
+      final selection = await FilePicker.platform.pickFiles(
+        allowMultiple: true,
+        type: FileType.any,
+        withData: false,
+      );
+      final paths =
+          selection?.files.map((f) => f.path).whereType<String>().toList() ??
+          const <String>[];
+      if (paths.isEmpty || !mounted) return;
+      final model = await readModel3DFiles(paths, permitirModeloGrande: true);
+      if (!mounted || ref.read(editorControllerProvider).id != projectId) {
+        return;
+      }
+      for (final material in model.data['materials'] as List) {
+        if (material is! Map || material['image'] is! String) continue;
+        if (!await TextureCache.instance.prepare(material['image'] as String)) {
+          modelFail('Uma textura não pôde ser aberta. Use PNG, JPEG ou WebP.');
+        }
+      }
+      if (!mounted || ref.read(editorControllerProvider).id != projectId) {
+        return;
+      }
+      final nodeId = _controller.addImportedModel3D(widget.playhead, model);
+      if (nodeId.isEmpty) {
+        throw const ModelImportException('Não foi possível criar a cena 3D.');
+      }
+      _fecha();
+    } on ModelImportException catch (error) {
+      if (mounted) AureaSnack.show(context, error.message);
+    } catch (_) {
+      if (mounted) {
+        AureaSnack.show(
+          context,
+          'Não consegui ler esse modelo. Tente GLB, glTF, OBJ ou FBX.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _importing3D = false);
     }
   }
 
@@ -1350,38 +1420,17 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
     }
 
     final cartoes = <Widget>[
-      // 1. Scene 3D com badge PROVAR
+      // 1. A cena vazia saiu da grade. Importar cria a cena automaticamente
+      // e entrega um resultado visivel, em vez de uma tela 3D sem conteudo.
       cardItem(
-        badge: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-          decoration: BoxDecoration(
-            color: AureaColors.accent,
-            borderRadius: BorderRadius.circular(4),
-          ),
-          child: const AppText(
-            'PROVAR',
-            style: TextStyle(
-              color: Colors.black,
-              fontSize: 8.5,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-        ),
-        iconWidget: const Icon(
-          CupertinoIcons.videocam,
+        key: const ValueKey('add-importar3d'),
+        iconWidget: Icon(
+          _importing3D ? CupertinoIcons.hourglass : CupertinoIcons.cube_box,
           size: 38,
-          color: Colors.white,
+          color: const Color(0xFF8BD5FF),
         ),
-        label: 'Scene 3D',
-        onTap: () {
-          _fecha();
-          final cena = _cena;
-          if (cena != null) {
-            _controller.addScene3DCamera(cena.id);
-          } else {
-            _controller.addScene3DLayer(widget.playhead);
-          }
-        },
+        label: _importing3D ? 'Importando 3D...' : 'Importar 3D',
+        onTap: _importarModelo3D,
       ),
       // 2. Grupo Vazio
       cardItem(
@@ -1447,8 +1496,23 @@ class _AddMenuAmState extends ConsumerState<AddLayerPanel> {
         ),
         label: translate(context, 'Partículas'),
         onTap: () {
-          _fecha();
-          _controller.addParticulasLayer(widget.playhead);
+          final before = {
+            for (final layer in ref.read(editorControllerProvider).layers)
+              layer.id,
+          };
+          ref
+              .read(editorControllerProvider.notifier)
+              .addParticulasLayer(widget.playhead);
+          final created = ref
+              .read(editorControllerProvider)
+              .layers
+              .whereType<ParticulasLayer>()
+              .any((layer) => !before.contains(layer.id));
+          if (created) {
+            _fecha();
+          } else {
+            AureaSnack.show(context, 'Não foi possível criar as partículas.');
+          }
         },
       ),
       // 6. Texto 3D estilo Element 3D: pede o texto e o metal e

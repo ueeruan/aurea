@@ -75,7 +75,6 @@ void main() {
     return (observer, container);
   }
 
-  void scene(EditorController c) => c.addScene3DLayer(Duration.zero);
   void camera(EditorController c) => c.addCameraLayer(Duration.zero);
   void text(EditorController c) => c.addTextLayer(Duration.zero);
   void grid(EditorController c) {
@@ -109,7 +108,6 @@ void main() {
     ('cor do elemento 3D', element, 'Cor e preenchimento'),
     ('borda e sombra', text, 'Borda e sombra'),
     ('volume', audio, 'Volume'),
-    ('fade', audio, 'Fade'),
     ('particulas', (c) => c.addParticulasLayer(Duration.zero), 'Partículas'),
     (
       'legendas',
@@ -179,9 +177,8 @@ void main() {
   //
   // A aba chama-se "Objeto / Elemento" (nao "Objeto") e a grade de clones
   // deixou de ser um tipo de camada proprio: quem carrega o modulo e o
-  // Nulo, e a grade se liga depois, na secao "Clonar" da doca. A cena 3D
-  // continua sendo um tipo.
-  for (final name in ['Nulo', 'Scene 3D']) {
+  // Nulo, e a grade se liga depois, na secao "Clonar" da doca.
+  for (final name in ['Nulo']) {
     testWidgets('adicionar $name mantem a composicao aberta', (tester) async {
       final (observer, container) = await openEditor(tester, (_) {});
       await tester.tap(find.text('adicionar'));
@@ -193,16 +190,44 @@ void main() {
       expect(observer.pagesPopped, 0);
       final layers = container.read(editorControllerProvider).layers;
       expect(layers, hasLength(1));
-      if (name == 'Nulo') {
-        expect(layers.single, isA<NullLayer>());
-        expect((layers.single as NullLayer).is3D, isTrue);
-      } else {
-        expect(layers.single, isA<Scene3DLayer>());
-      }
+      expect(layers.single, isA<NullLayer>());
+      expect((layers.single as NullLayer).is3D, isTrue);
       expect(find.text('editor aberto'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
   }
+
+  testWidgets('grade oferece Importar 3D e nao oferece cena vazia', (
+    tester,
+  ) async {
+    await openEditor(tester, (_) {});
+    await tester.tap(find.text('adicionar'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Objeto / Elemento'));
+    await tester.pumpAndSettle();
+    expect(find.text('Importar 3D'), findsOneWidget);
+    expect(find.text('Scene 3D'), findsNothing);
+  });
+
+  testWidgets('tocar em Particulas cria a camada antes de fechar a folha', (
+    tester,
+  ) async {
+    final (observer, container) = await openEditor(tester, (_) {});
+    await tester.tap(find.text('adicionar'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Objeto / Elemento'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('add-particulas')));
+    await tester.pumpAndSettle();
+    expect(observer.pagesPopped, 0);
+    final layers = container.read(editorControllerProvider).layers;
+    expect(layers, hasLength(1));
+    expect(layers.single, isA<ParticulasLayer>());
+    expect(layers.single.name, startsWith('Partículas 3D'));
+    expect(find.byType(AddLayerPanel), findsNothing);
+    expect(find.text('editor aberto'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 }
 
 class _NavigationObserver extends NavigatorObserver {

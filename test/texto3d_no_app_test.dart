@@ -117,8 +117,11 @@ void main() {
         final project = container.read(editorControllerProvider);
         final scene = project.layers.whereType<Scene3DLayer>().single;
         expect(scene.name, 'Texto 3D · AUREA');
+        expect(scene.is3D, isTrue);
         expect(project.layers.whereType<NullLayer>(), isEmpty);
         final node = scene.scene.nodeById(nodeId!)!;
+        expect(node.rotX.valueAt(Duration.zero), isNonZero);
+        expect(node.rotY.valueAt(Duration.zero), isNonZero);
         expect(node.modelAsset, isNotNull);
         final cache = CacheDeMalhas();
         final source = cache.doNo(

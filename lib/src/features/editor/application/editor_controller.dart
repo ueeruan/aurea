@@ -2633,34 +2633,39 @@ class EditorController extends Notifier<VideoProject> {
   /// O modelo entra normalizado pela propria caixa (a maior aresta vira 2,
   /// de -1 a 1), entao a meia-diagonal e no maximo a raiz de tres. E ela que
   /// diz de que distancia a camera precisa estar para o objeto inteiro caber.
-  double _raioDoModelo(ModelAsset3D modelo) {
+  ({List<double> lo, List<double> hi})? _limitesBrutosDoModelo(
+    ModelAsset3D modelo,
+  ) {
+    // IMPORTAR NAO PODE AVALIAR/COPIAR A MALHA INTEIRA so para enquadrar.
+    // Em modelos grandes isso duplicava centenas de MB no isolate da UI e
+    // fazia o Android matar ate o emulador. As posicoes ja decodificadas sao
+    // lidas diretamente, com amostragem limitada a ~100 mil por primitiva.
+    final lo = [double.infinity, double.infinity, double.infinity];
+    final hi = [-double.infinity, -double.infinity, -double.infinity];
+    var encontrou = false;
     try {
-      final frame = modelo.evaluate(
-        Duration.zero,
-        const ModelMotion3D(clip: -1),
-        comAnimacaoDeTexto: false,
-      );
-      final verts = frame.mesh.verts;
-      if (verts.isEmpty) return 0;
-      final lo = [1e30, 1e30, 1e30], hi = [-1e30, -1e30, -1e30];
-      for (final v in verts) {
-        for (var i = 0; i < 3; i++) {
-          final x = v.length > i ? v[i] : 0.0;
-          if (x < lo[i]) lo[i] = x;
-          if (x > hi[i]) hi[i] = x;
+      for (final primitiva in modelo.primitives) {
+        if (primitiva is! Map) continue;
+        final posicoes = primitiva['positions'];
+        if (posicoes is! List || posicoes.isEmpty) continue;
+        final passo = math.max(1, posicoes.length ~/ 100000);
+        for (var indice = 0; indice < posicoes.length; indice += passo) {
+          final vertice = posicoes[indice];
+          if (vertice is! List || vertice.length < 3) continue;
+          for (var eixo = 0; eixo < 3; eixo++) {
+            final valor = vertice[eixo];
+            if (valor is! num || !valor.isFinite) continue;
+            final x = valor.toDouble();
+            lo[eixo] = math.min(lo[eixo], x);
+            hi[eixo] = math.max(hi[eixo], x);
+          }
+          encontrou = true;
         }
       }
-      var soma = 0.0;
-      for (var i = 0; i < 3; i++) {
-        final meio = (hi[i] - lo[i]) / 2;
-        soma += meio * meio;
-      }
-      return math.sqrt(soma);
     } catch (_) {
-      // Modelo que nao se deixa medir nao impede a importacao: sem raio, a
-      // camera fica na padrao e o objeto aparece menor — e nao desaparece.
-      return 0;
+      return null;
     }
+    return encontrou ? (lo: lo, hi: hi) : null;
   }
 
   /// A CAMERA QUE ENQUADRA O OBJETO RECEM-IMPORTADO.
@@ -2733,7 +2738,9 @@ class EditorController extends Notifier<VideoProject> {
     // motor 3D nativo, mas nao fica pendurado numa "Scene 3D" generica e
     // num nulo auxiliar. Isso tambem impede uma cena antiga/importada de
     // contaminar camera, escala ou orientacao do texto novo.
-    final node = _nodeDoModelo(modelo);
+    // Uma leve perspectiva inicial deixa a extrusao imediatamente visivel;
+    // de frente, qualquer texto extrudado parece apenas texto 2D.
+    final node = _nodeDoModelo(modelo, rotXInicial: -8, rotYInicial: 15);
     _push(
       Scene3DLayer(
         name: 'Texto 3D · $limpo',
@@ -2749,8 +2756,11 @@ class EditorController extends Notifier<VideoProject> {
         // A CAMERA ENQUADRA O TEXTO. A padrao fica a 800 unidades e o texto
         // entraria ocupando um quinto do quadro — o metal, que so aparece no
         // reflexo, sumiria com ele.
-        camera: _cameraQueEnquadra(_raioDoModelo(modelo) * 120),
+        // Todo ModelAsset3D e normalizado com a maior aresta em 2. O raio
+        // frontal de 120 enquadra o texto sem copiar sua malha.
+        camera: _cameraQueEnquadra(120),
         position: AnimatedOffset(_center),
+        is3D: true,
       ),
     );
     return node.id;
@@ -2953,39 +2963,26 @@ class EditorController extends Notifier<VideoProject> {
   SceneNode _nodeDoModelo(
     ModelAsset3D model, {
     bool orientarParaCamera = false,
+    double rotXInicial = 0,
+    double rotYInicial = 0,
   }) {
-    var rotX = 0.0;
-    var rotY = 0.0;
+    var rotX = rotXInicial;
+    var rotY = rotYInicial;
     if (orientarParaCamera) {
-      try {
-        final frame = model.evaluate(
-          Duration.zero,
-          const ModelMotion3D(clip: -1),
-          comAnimacaoDeTexto: false,
-        );
-        final lo = [double.infinity, double.infinity, double.infinity];
-        final hi = [-double.infinity, -double.infinity, -double.infinity];
-        for (final v in frame.mesh.verts) {
-          for (var eixo = 0; eixo < 3; eixo++) {
-            lo[eixo] = math.min(lo[eixo], v[eixo]);
-            hi[eixo] = math.max(hi[eixo], v[eixo]);
-          }
+      final limites = _limitesBrutosDoModelo(model);
+      if (limites != null) {
+        final tamanho = [
+          for (var i = 0; i < 3; i++) limites.hi[i] - limites.lo[i],
+        ];
+        final ordem = [0, 1, 2]
+          ..sort((a, b) => tamanho[a].compareTo(tamanho[b]));
+        // So gira automaticamente quando ha UM eixo realmente fino.
+        // Objetos volumetricos preservam a orientacao autoral; placas,
+        // logos e aneis deixam de entrar vistos exatamente pela borda.
+        if (tamanho[ordem[0]] < tamanho[ordem[1]] * 0.18) {
+          if (ordem[0] == 0) rotY += 90;
+          if (ordem[0] == 1) rotX += 90;
         }
-        if (frame.mesh.verts.isNotEmpty) {
-          final tamanho = [for (var i = 0; i < 3; i++) hi[i] - lo[i]];
-          final ordem = [0, 1, 2]
-            ..sort((a, b) => tamanho[a].compareTo(tamanho[b]));
-          // So gira automaticamente quando ha UM eixo realmente fino.
-          // Objetos volumetricos preservam a orientacao autoral; placas,
-          // logos e aneis deixam de entrar vistos exatamente pela borda.
-          if (tamanho[ordem[0]] < tamanho[ordem[1]] * 0.18) {
-            if (ordem[0] == 0) rotY = 90;
-            if (ordem[0] == 1) rotX = 90;
-          }
-        }
-      } catch (_) {
-        // Modelo valido mas impossivel de medir: preserva a orientacao do
-        // arquivo; o renderizador continua podendo desenha-lo.
       }
     }
     return SceneNode(
@@ -3044,8 +3041,11 @@ class EditorController extends Notifier<VideoProject> {
           // `_cameraQueEnquadra`: sem isto, "importei" e "nao apareceu" eram
           // a mesma tela.
         ),
-        camera: _cameraQueEnquadra(_raioDoModelo(model) * 120),
+        // O motor normaliza a maior aresta para 2. Este raio enquadra o
+        // modelo sem criar uma segunda copia da malha importada.
+        camera: _cameraQueEnquadra(120),
         position: AnimatedOffset(_center),
+        is3D: true,
       ),
     );
     return node.id;

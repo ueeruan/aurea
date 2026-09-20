@@ -291,22 +291,15 @@ class _DialDeAnguloState extends State<DialDeAngulo> {
                 // OS DOIS CHIPS DE VOLTA, nas pontas do dial: um tira
                 // uma volta, o outro poe. Ficam FORA do anel para nao
                 // roubar o gesto de girar.
+                //
+                // MENOS A ESQUERDA, MAIS A DIREITA — a mesma regra de todo
+                // controle do app (direita aumenta). Eles nasceram
+                // trocados, com o "+" na esquerda, e eram o unico par
+                // menos|mais da tela lido de tras para a frente. As
+                // CHAVES nao mudaram: quem ancora nelas nao percebe.
                 if (chaves != null) ...[
                   Positioned(
                     left: 0,
-                    child: _ChipDeVolta(
-                      chave: chaves.mais,
-                      icone: CupertinoIcons.plus,
-                      dica: 'Mais uma volta',
-                      aoTocar: () {
-                        widget.aoComecar?.call();
-                        widget.aoMudar(widget.angulo + 360);
-                        widget.aoTerminar?.call();
-                      },
-                    ),
-                  ),
-                  Positioned(
-                    right: 0,
                     child: _ChipDeVolta(
                       chave: chaves.menos,
                       icone: CupertinoIcons.minus,
@@ -314,6 +307,19 @@ class _DialDeAnguloState extends State<DialDeAngulo> {
                       aoTocar: () {
                         widget.aoComecar?.call();
                         widget.aoMudar(widget.angulo - 360);
+                        widget.aoTerminar?.call();
+                      },
+                    ),
+                  ),
+                  Positioned(
+                    right: 0,
+                    child: _ChipDeVolta(
+                      chave: chaves.mais,
+                      icone: CupertinoIcons.plus,
+                      dica: 'Mais uma volta',
+                      aoTocar: () {
+                        widget.aoComecar?.call();
+                        widget.aoMudar(widget.angulo + 360);
                         widget.aoTerminar?.call();
                       },
                     ),

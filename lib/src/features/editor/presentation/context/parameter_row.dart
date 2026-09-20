@@ -32,8 +32,12 @@ class KeyframeState {
 ///
 ///   [◆] [nome] [—— regua ——] [valor tocavel]
 ///
-/// Arrastar a regua muda o valor; TOCAR O NUMERO abre o teclado para o
-/// valor exato (aceita "1080/3" e "50%"). Toque longo no nome reseta.
+/// Arrastar a linha muda o valor — para a DIREITA aumenta, para a
+/// ESQUERDA diminui, e com [min] e [max] finitos a regua mostra tambem o
+/// trilho de posicao, que enche para a direita (a conta, os riscos e o
+/// trilho moram em `core/ui/am_tick_ruler.dart`). TOCAR O NUMERO abre o
+/// teclado para o valor exato (aceita "1080/3" e "50%"). Toque longo no
+/// nome reseta.
 /// Toque longo no valor (Pro) abre a expressao, quando [onExpression]
 /// existe.
 class ParameterRow extends StatelessWidget {

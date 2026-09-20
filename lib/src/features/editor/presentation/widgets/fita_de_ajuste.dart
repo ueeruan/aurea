@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../../core/ui/am_colors.dart';
+import '../../../../core/ui/am_tick_ruler.dart';
 
 /// A FITA DE AJUSTE — o controle que substituiu o deslizante.
 ///
@@ -20,6 +21,12 @@ import '../../../../core/ui/am_colors.dart';
 /// AS LINHAS ROLAM COM O VALOR. Sem isso, arrastar num parametro que vai
 /// a milhares nao muda nada visivel na tela — o numero anda no campo,
 /// mas a superficie sob o dedo fica parada e o gesto parece morto.
+///
+/// DIREITA AUMENTA, ESQUERDA DIMINUI, e o desenho diz o mesmo: os riscos
+/// andam com o dedo e vem com um forte a cada cinco (riscos todos iguais
+/// parecem andar ao contrario num arrasto rapido — ver [riscosPorForte]).
+/// A conta dos riscos e a MESMA da regua do AM ([paraCadaRisco]): dois
+/// controles do mesmo painel nao podem discordar sobre para onde e "mais".
 class FitaDeAjuste extends StatefulWidget {
   const FitaDeAjuste({
     required this.valor,
@@ -30,6 +37,8 @@ class FitaDeAjuste extends StatefulWidget {
     this.aoTerminar,
     this.ativa = true,
     this.altura = 74,
+    this.min,
+    this.max,
     super.key,
   });
 
@@ -66,6 +75,17 @@ class FitaDeAjuste extends StatefulWidget {
   /// controle errado. Quem empilha duas fitas (inclinacao X e Y) passa
   /// um valor menor, porque as duas dividem a altura do miolo.
   final double altura;
+
+  /// A FAIXA DO PARAMETRO, quando ele TEM uma de verdade (opacidade de 0
+  /// a 100, canal de cor de 0 a 255). SO DESENHA: com as duas pontas
+  /// finitas a fita ganha o trilho de posicao na base, que enche para a
+  /// direita como um deslizante comum ([leituraDePosicao]). Prender o
+  /// valor na faixa continua sendo trabalho de quem recebe [aoMudar].
+  ///
+  /// Nulo — o caso de escala, inclinacao e de quase todo parametro — e a
+  /// fita de sempre: relativa, sem comeco nem fim, e sem trilho.
+  final double? min;
+  final double? max;
 
   /// O que o leitor de tela anuncia — e por onde os testes acham a
   /// fita, ja que ela nao tem texto nenhum.
@@ -143,7 +163,10 @@ class _FitaDeAjusteState extends State<FitaDeAjuste> {
         child: CustomPaint(
           size: Size.infinite,
           painter: _PintorDaFita(
-            fase: _faseDe(widget.valor, widget.porPixel),
+            valor: widget.valor,
+            porPixel: widget.porPixel,
+            min: widget.min ?? double.negativeInfinity,
+            max: widget.max ?? double.infinity,
             ativa: widget.ativa,
           ),
         ),
@@ -151,28 +174,6 @@ class _FitaDeAjusteState extends State<FitaDeAjuste> {
     ),
   );
 }
-
-/// QUANTO A FITA JA ROLOU DENTRO DE UM PASSO, em pixels.
-///
-/// `valor / porPixel` e o quanto de dedo aquele valor representa; o
-/// resto por [_passo] e o unico pedaco disso que muda o desenho, ja que
-/// as linhas sao todas iguais. Com [porPixel] zero ou valor invalido a
-/// conta nao tem resposta — a fita entao so nao rola, em vez de sumir.
-double _faseDe(double valor, double porPixel) {
-  final emPixels = valor / porPixel;
-  if (!emPixels.isFinite) return 0;
-  // O `%` do Dart devolve resultado nao negativo para divisor positivo,
-  // entao valor negativo tambem cai dentro do passo.
-  return emPixels % _passo;
-}
-
-/// O ESPACO ENTRE DUAS LINHAS DA FITA, medido na referencia: 9 px.
-///
-/// E o mesmo numero em toda parte porque a fita nao tem escala propria —
-/// ela mostra "quanto andou", e nao "onde no intervalo". Se cada
-/// parametro espacasse as linhas do seu jeito, o mesmo gesto pareceria
-/// mais rapido num campo do que no outro sem que nada tivesse mudado.
-const double _passo = 9;
 
 /// A FOLGA EM CIMA E EMBAIXO. As linhas nao encostam nas pontas da
 /// faixa: encostadas, a fita vira uma caixa com borda, e a reforma toda
@@ -198,38 +199,78 @@ const double _linhaCentral = 2;
 /// dentro de um `paint` so — no controle que existe justamente para
 /// ficar sob o dedo, e por isso o mais repintado do painel.
 class _PintorDaFita extends CustomPainter {
-  const _PintorDaFita({required this.fase, required this.ativa});
+  const _PintorDaFita({
+    required this.valor,
+    required this.porPixel,
+    required this.min,
+    required this.max,
+    required this.ativa,
+  });
 
-  final double fase;
+  final double valor;
+  final double porPixel;
+  final double min;
+  final double max;
   final bool ativa;
 
   @override
   void paint(Canvas canvas, Size size) {
     final topo = _folga;
-    final base = size.height - _folga;
+    var base = size.height - _folga;
     if (base <= topo || size.width <= 0) return;
 
-    final risco = Paint()..strokeWidth = 1;
+    // A LEITURA DE POSICAO, so quando o parametro tem faixa: o trilho na
+    // base enche PARA A DIREITA com o valor. Os riscos param antes dele.
+    final temLeitura = pintarLeituraDePosicao(
+      canvas,
+      size,
+      valor: valor,
+      min: min,
+      max: max,
+      ativa: ativa,
+    );
+    if (temLeitura && base > size.height - alturaDoTrilho - 2) {
+      base = size.height - alturaDoTrilho - 2;
+      if (base <= topo) return;
+    }
 
-    // A FITA SEGUE O DEDO: a fase entra somando, e nao subtraindo, para
-    // as linhas andarem para o mesmo lado que a mao — como papel
-    // deslizando por baixo do dedo. Ao contrario, o gesto briga.
-    //
-    // Comeca um passo antes de zero para a linha que esta entrando pela
-    // esquerda ja aparecer no lugar certo.
+    final risco = Paint();
+    // O RISCO FRACO E MAIS CURTO que o forte: altura e opacidade juntas,
+    // para o forte se ler mesmo na borda, onde o degrade apaga a cor.
+    final recuo = (base - topo) * .18;
+
+    // A FITA SEGUE O DEDO: o valor entra SOMANDO na posicao dos riscos
+    // ([paraCadaRisco]), para as linhas andarem para o mesmo lado que a
+    // mao — como papel deslizando por baixo do dedo. Ao contrario, o
+    // gesto briga.
     //
     // O DEGRADE DAS BORDAS SAI RISCO A RISCO, e nao de uma mascara.
     // Mascara aqui pediria `saveLayer`, que no Impeller custa um passe
     // de render inteiro por quadro — caro demais para um controle que
     // fica sendo arrastado o tempo todo.
-    for (var x = fase - _passo; x <= size.width; x += _passo) {
-      final forca = _opacidadeNaBorda(x, size.width);
-      if (forca <= 0) continue;
-      risco.color = AmColors.muted.withValues(alpha: .25 * forca);
-      canvas.drawLine(Offset(x, topo), Offset(x, base), risco);
-    }
-
     final centro = size.width / 2;
+    paraCadaRisco(
+      valor: valor,
+      porPixel: porPixel,
+      largura: size.width,
+      origem: centro,
+      desenhar: (x, forte) {
+        final forca = _opacidadeNaBorda(x, size.width);
+        if (forca <= 0) return;
+        risco
+          ..strokeWidth = forte ? 1.5 : 1
+          ..color = AmColors.muted.withValues(
+            alpha: (forte ? .6 : .25) * forca,
+          );
+        canvas.drawLine(
+          Offset(x, forte ? topo : topo + recuo),
+          Offset(x, forte ? base : base - recuo),
+          risco,
+        );
+      },
+    );
+
+    // A LINHA CENTRAL E O ULTIMO TRACO, por cima dos riscos.
     canvas.drawLine(
       Offset(centro, topo),
       Offset(centro, base),
@@ -249,6 +290,13 @@ class _PintorDaFita extends CustomPainter {
     return daBorda / _bordaSuave;
   }
 
+  // O VALOR INTEIRO, e nao so a fase dentro do passo: com o risco forte
+  // e o trilho, dois valores a 9 px um do outro ja nao desenham igual.
   @override
-  bool shouldRepaint(_PintorDaFita o) => o.fase != fase || o.ativa != ativa;
+  bool shouldRepaint(_PintorDaFita o) =>
+      o.valor != valor ||
+      o.porPixel != porPixel ||
+      o.min != min ||
+      o.max != max ||
+      o.ativa != ativa;
 }

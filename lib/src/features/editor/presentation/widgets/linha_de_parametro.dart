@@ -15,7 +15,8 @@ import 'fita_de_ajuste.dart';
 ///   - o CHIP diz o que e, e diz quando este e o parametro que o rail
 ///     esquerdo esta mirando;
 ///   - a FITA e onde o dedo mexe, e ela e relativa: funciona igual para
-///     um parametro de 0 a 1 e para um de 0 a 4000;
+///     um parametro de 0 a 1 e para um de 0 a 4000. DIREITA AUMENTA,
+///     esquerda diminui — como em todo controle de arrasto do app;
 ///   - o CAMPO diz o valor exato, e abre o teclado para quem quer
 ///     digitar em vez de arrastar.
 ///
@@ -38,6 +39,8 @@ class LinhaDeParametro extends StatelessWidget {
     this.aoComecar,
     this.aoTerminar,
     this.aoDigitar,
+    this.min,
+    this.max,
   });
 
   final String rotulo;
@@ -72,6 +75,13 @@ class LinhaDeParametro extends StatelessWidget {
   /// Nulo deixa o campo so de leitura, e sem sublinhado.
   final void Function(double)? aoDigitar;
 
+  /// A FAIXA DO PARAMETRO, quando a tabela tem uma. So desenha: com as
+  /// duas finitas a fita mostra o trilho de posicao, que enche para a
+  /// DIREITA ([FitaDeAjuste.min]). Prender o valor continua com quem
+  /// recebe [aoMudar].
+  final double? min;
+  final double? max;
+
   static const altura = 48.0;
 
   @override
@@ -91,6 +101,8 @@ class LinhaDeParametro extends StatelessWidget {
             rotulo: nome ?? rotulo,
             valor: valor,
             porPixel: porPixel,
+            min: min,
+            max: max,
             ativa: escolhida || aoEscolher == null,
             altura: altura - 8,
             aoComecar: () {

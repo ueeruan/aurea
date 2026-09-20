@@ -152,6 +152,29 @@ void main() {
     expect(vistos.every((v) => v.isFinite), isTrue);
   });
 
+  testWidgets('um passo inteiro de rolagem REPINTA a fita', (t) async {
+    // O pintor antigo so olhava a fase dentro do passo de 9 px — certo
+    // enquanto os riscos eram todos iguais. Com um forte a cada cinco,
+    // dois valores a 9 px um do outro desenham diferente; se o
+    // `shouldRepaint` voltar a comparar so a fase, a fita congela a cada
+    // passo cheio e o forte da saltos.
+    CustomPainter pintor() => t
+        .widget<CustomPaint>(
+          find.descendant(
+            of: find.byType(FitaDeAjuste),
+            matching: find.byType(CustomPaint),
+          ),
+        )
+        .painter!;
+    await t.pumpWidget(_monta(valor: 100, aoMudar: (_) {}));
+    final antes = pintor();
+    await t.pumpWidget(_monta(valor: 109, aoMudar: (_) {}));
+    expect(pintor().shouldRepaint(antes), isTrue);
+    final mesmo = pintor();
+    await t.pumpWidget(_monta(valor: 109, aoMudar: (_) {}));
+    expect(pintor().shouldRepaint(mesmo), isFalse);
+  });
+
   testWidgets('a fita tem rotulo de acessibilidade', (t) async {
     await t.pumpWidget(_monta(valor: 1, aoMudar: (_) {}));
     // "AJUSTAR ESCALA", e nao "Escala": o chip da linha de parametro ja

@@ -1,4 +1,4 @@
-package com.aurea.aurea.editor
+package com.aurea.aurea.state
 
 import android.view.Choreographer
 

@@ -18,7 +18,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.aurea.aurea.editor.RenderLoop
 import com.aurea.aurea.engine.AureaEngine
 import com.aurea.aurea.engine.CommandBatch
 import com.aurea.aurea.engine.EffectCatalogEntry
@@ -285,6 +284,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             engine.destroy()
         }
         lifecycleThread.shutdown()
+    }
+
+    override fun onCleared() {
+        saveIfDirty()
+        shutdown()
+        super.onCleared()
     }
 
     // =========================================================================

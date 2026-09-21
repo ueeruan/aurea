@@ -1,6 +1,7 @@
 #include "aurea/platform/DeviceCapabilities.hpp"
 #include "aurea/core/Log.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <thread>
@@ -25,7 +26,7 @@
     #define WIN32_LEAN_AND_MEAN
     #define NOGDI
     #include <windows.h>
-#elif defined(AUREA_PLATFORM_HOST)
+#elif defined(AUREA_PLATFORM_HOST) || defined(__ANDROID__)
     #include <unistd.h>
     #if defined(__linux__)
         #include <sys/sysinfo.h>
@@ -34,6 +35,35 @@
 
 namespace aurea {
 namespace {
+
+#if defined(__linux__)
+/// Lê um inteiro de um arquivo de /proc ou /sys; 0 se não existir.
+u64 read_u64_file(const char* path) noexcept {
+    FILE* f = std::fopen(path, "r");
+    if (!f) return 0;
+    unsigned long long v = 0;
+    if (std::fscanf(f, "%llu", &v) != 1) v = 0;
+    std::fclose(f);
+    return v;
+}
+
+/// `MemAvailable` de /proc/meminfo em bytes (0 se indisponível).
+u64 mem_available_bytes() noexcept {
+    FILE* f = std::fopen("/proc/meminfo", "r");
+    if (!f) return 0;
+    char line[160];
+    u64 kb = 0;
+    while (std::fgets(line, sizeof(line), f)) {
+        unsigned long long v = 0;
+        if (std::sscanf(line, "MemAvailable: %llu kB", &v) == 1) {
+            kb = v;
+            break;
+        }
+    }
+    std::fclose(f);
+    return kb * 1024ull;
+}
+#endif
 
 /// Slots de tag de codec no PlatformInfo.
 constexpr u32 kTagSlotAvc1 = 0;
@@ -154,9 +184,37 @@ void DeviceCapabilities::detect_cpu() noexcept {
         }
         cpu_.performanceCores = cpu_.totalCores;
     #endif
+#elif defined(__ANDROID__)
+    // Android é Linux: núcleos pelo sysconf, clusters pela frequência máxima
+    // de cada CPU (big.LITTLE: os "grandes" são os de frequência mais alta) e
+    // memória pelo /proc/meminfo.
+    const long n = sysconf(_SC_NPROCESSORS_CONF);
+    cpu_.totalCores = n > 0 ? static_cast<u32>(n) : 1u;
+    u64 freqs[64]{};
+    u64 top = 0;
+    const u32 count = std::min<u32>(cpu_.totalCores, 64);
+    for (u32 i = 0; i < count; ++i) {
+        char path[96];
+        std::snprintf(path, sizeof(path), "/sys/devices/system/cpu/cpu%u/cpufreq/cpuinfo_max_freq", i);
+        freqs[i] = read_u64_file(path);
+        top = std::max(top, freqs[i]);
+    }
+    if (top > 0) {
+        u32 big = 0;
+        for (u32 i = 0; i < count; ++i) if (freqs[i] * 10 >= top * 8) ++big;   // ≥ 80 % do topo
+        cpu_.performanceCores = std::max(1u, big);
+        cpu_.efficiencyCores = cpu_.totalCores > cpu_.performanceCores ? cpu_.totalCores - cpu_.performanceCores : 0;
+        cpu_.maxFrequencyKhz = static_cast<u32>(top);
+    } else {
+        cpu_.performanceCores = cpu_.totalCores;
+    }
+    const long pages = sysconf(_SC_PHYS_PAGES);
+    const long pageSize = sysconf(_SC_PAGE_SIZE);
+    if (pages > 0 && pageSize > 0) cpu_.totalMemoryBytes = static_cast<u64>(pages) * static_cast<u64>(pageSize);
+    cpu_.availableMemoryBytes = mem_available_bytes();
 #else
-    // Android / iOS: os números vêm de apply_platform_info. Se ninguém chamou,
-    // o padrão conservador é 1 núcleo e 2 GB — o pior caso plausível.
+    // iOS: os números vêm de apply_platform_info. Se ninguém chamou, o padrão
+    // conservador é 1 núcleo — o pior caso plausível.
     if (cpu_.totalCores == 0) cpu_.totalCores = 1;
     if (cpu_.performanceCores == 0) cpu_.performanceCores = cpu_.totalCores;
 #endif
@@ -192,6 +250,8 @@ void DeviceCapabilities::refresh_dynamic() noexcept {
     if (GlobalMemoryStatusEx(&ms)) {
         cpu_.availableMemoryBytes = ms.ullAvailPhys;
     }
+#elif defined(__ANDROID__)
+    if (const u64 avail = mem_available_bytes()) cpu_.availableMemoryBytes = avail;
 #endif
     // O estado térmico e a memória de aparelho vêm de set_thermal_state e de
     // apply_platform_info, chamados pela camada de plataforma. Aqui não se

@@ -4,11 +4,13 @@
 // animação, os comandos e a serialização precisam funcionar sem backend
 // gráfico, e é o que permite testá-los no CI.
 #include "TestFramework.hpp"
+#include "SyntheticVideo.hpp"
 
 #include "aurea/Engine.hpp"
 
 #include <cstdio>
 #include <string>
+#include <tuple>
 
 using namespace aurea;
 
@@ -718,4 +720,38 @@ AUREA_TEST(History, TrimStartKeepsContentWithOffset) {
     AUREA_CHECK_EQ(d.startFrame, 12);
     AUREA_CHECK_EQ(d.offsetFrames, 12);
     e.shutdown();
+}
+
+AUREA_TEST(Engine, PortraitVideoKeepsAspectInComposition) {
+    // Regressão: o teto de export era aplicado por eixo e um vídeo em pé
+    // (1080×1920) virava uma composição quadrada 1080×1080.
+    for (const auto& [w, h] : {std::pair<u32, u32>{1080, 1920}, std::pair<u32, u32>{2160, 3840},
+                               std::pair<u32, u32>{1920, 1080}, std::pair<u32, u32>{8000, 4500}}) {
+        test::SyntheticConfig cfg;
+        cfg.width = w;
+        cfg.height = h;
+        test::SyntheticFactory factory(cfg);
+        EngineConfig ec = headless_config();
+        ec.mediaFactory = &factory;
+        Engine e;
+        AUREA_CHECK(e.initialize(ec).ok());
+        AUREA_CHECK(e.new_project(1920, 1080, 30.0, nullptr).ok());
+        VideoImport vi;
+        vi.sourcePath = "sintetico";
+        AUREA_CHECK(e.import_video(vi).ok());
+        const Composition* c = e.project()->timeline().composition(e.project()->timeline().current());
+        const u32 capLong = std::max(e.caps().max_export_width(), e.caps().max_export_height());
+        const u32 capShort = std::min(e.caps().max_export_width(), e.caps().max_export_height());
+        // Proporção do vídeo mantida (até o arredondamento para par)...
+        AUREA_CHECK_NEAR(static_cast<f64>(c->width()) / c->height(), static_cast<f64>(w) / h, 0.01);
+        // ...e dentro do teto do aparelho nos dois lados.
+        AUREA_CHECK(std::max(c->width(), c->height()) <= capLong);
+        AUREA_CHECK(std::min(c->width(), c->height()) <= capShort);
+        // Vídeo que cabe no teto não é reduzido.
+        if (std::max(w, h) <= capLong && std::min(w, h) <= capShort) {
+            AUREA_CHECK_EQ(c->width(), w);
+            AUREA_CHECK_EQ(c->height(), h);
+        }
+        e.shutdown();
+    }
 }

@@ -440,8 +440,15 @@ Result<u64> Engine::import_video(const VideoImport& request) noexcept {
     // o aparelho exporta).
     const bool first = comp->layers().count() == 0;
     if (first) {
-        u32 w = std::min(dispW, caps_.max_export_width()) & ~1u;
-        u32 h = std::min(dispH, caps_.max_export_height()) & ~1u;
+        // O teto do aparelho é "lado maior × lado menor" (um 1920×1080 também
+        // exporta 1080×1920). Aplicado por eixo, um vídeo em pé viraria uma
+        // composição quadrada; aqui a escala é UMA só, e a proporção fica.
+        const u32 capLong = std::max(caps_.max_export_width(), caps_.max_export_height());
+        const u32 capShort = std::min(caps_.max_export_width(), caps_.max_export_height());
+        const u32 vLong = std::max(dispW, dispH), vShort = std::min(dispW, dispH);
+        const f64 k = std::min({1.0, static_cast<f64>(capLong) / vLong, static_cast<f64>(capShort) / vShort});
+        u32 w = static_cast<u32>(std::lround(dispW * k)) & ~1u;
+        u32 h = static_cast<u32>(std::lround(dispH * k)) & ~1u;
         if (w == 0) w = 2;
         if (h == 0) h = 2;
         comp->set_size(w, h);

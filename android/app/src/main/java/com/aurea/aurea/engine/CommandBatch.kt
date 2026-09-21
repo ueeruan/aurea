@@ -314,6 +314,21 @@ class CommandBatch(private val engine: AureaEngine) {
         b.putDouble(Off.COMP_FPS, fps)
     }
 
+    fun setCompositionDuration(comp: Long, frames: Int) = emit(CommandType.COMPOSITION_SET_DURATION) { b ->
+        b.putHandle(Off.LAYER, comp)
+        b.putLong(Off.COMP_DURATION, frames.toLong())
+    }
+
+    /** Fundo da composição em RGBA linear. */
+    fun setCompositionBackground(comp: Long, r: Float, g: Float, b: Float, a: Float) =
+        emit(CommandType.COMPOSITION_SET_BACKGROUND) { buf ->
+            buf.putHandle(Off.LAYER, comp)
+            buf.putFloat(Off.COMP_BACKGROUND, r)
+            buf.putFloat(Off.COMP_BACKGROUND + 4, g)
+            buf.putFloat(Off.COMP_BACKGROUND + 8, b)
+            buf.putFloat(Off.COMP_BACKGROUND + 12, a)
+        }
+
     fun setCurrentComposition(comp: Long) = emit(CommandType.PROJECT_SET_CURRENT_COMPOSITION) { b ->
         b.putHandle(Off.LAYER, comp)
     }
@@ -506,6 +521,10 @@ class CommandBatch(private val engine: AureaEngine) {
         const val COMP_WIDTH = PodLayout.CMD_OFF_PAYLOAD + 8
         const val COMP_HEIGHT = PodLayout.CMD_OFF_PAYLOAD + 12
         const val COMP_FPS = PodLayout.CMD_OFF_PAYLOAD + 8
+        /** CompDurationPayload { CompositionId; FrameIndex duration }. */
+        const val COMP_DURATION = PodLayout.CMD_OFF_PAYLOAD + 8
+        /** CompBackgroundPayload { CompositionId; f32 r, g, b, a }. */
+        const val COMP_BACKGROUND = PodLayout.CMD_OFF_PAYLOAD + 8
 
         const val PREVIEW_NUMERATOR = PodLayout.CMD_OFF_PAYLOAD
         const val PREVIEW_DENOMINATOR = PodLayout.CMD_OFF_PAYLOAD + 4

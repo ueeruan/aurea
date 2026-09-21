@@ -1074,6 +1074,26 @@ u32 Engine::query_thumbnail(u64 layerId, i32 timelineFrame, u32 height, u8* out,
     return bytes;
 }
 
+bool Engine::query_composition(u64& id, u32& width, u32& height, f64& fps, i64& durationFrames,
+                               f32 background[4]) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    if (!project_) return false;
+    const CompositionId cid = project_->timeline().current();
+    const Composition* c = project_->timeline().composition(cid);
+    if (!c) return false;
+    id = cid.pack();
+    width = c->width();
+    height = c->height();
+    fps = c->fps();
+    durationFrames = c->duration().value;
+    const Color bg = c->background();
+    background[0] = bg.r;
+    background[1] = bg.g;
+    background[2] = bg.b;
+    background[3] = bg.a;
+    return true;
+}
+
 bool Engine::query_layer_detail(u64 layerId, bridge::LayerDetailPOD& out) noexcept {
     out = bridge::LayerDetailPOD{};
     std::lock_guard<std::mutex> lock(modelMutex_);
@@ -1849,7 +1869,12 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             Composition* c = timeline.composition(cmd.comp_size.comp);
             if (!c) return Errc::NotFound;
             if (cmd.comp_size.width == 0 || cmd.comp_size.height == 0) return Errc::InvalidArgument;
-            if (cmd.comp_size.width > caps_.max_export_width() || cmd.comp_size.height > caps_.max_export_height()) {
+            // Teto como lado maior × lado menor: uma composição em pé com o
+            // mesmo número de pixels que a deitada também vale.
+            const u32 capLong = std::max(caps_.max_export_width(), caps_.max_export_height());
+            const u32 capShort = std::min(caps_.max_export_width(), caps_.max_export_height());
+            if (std::max(cmd.comp_size.width, cmd.comp_size.height) > capLong
+                || std::min(cmd.comp_size.width, cmd.comp_size.height) > capShort) {
                 return Errc::NotSupported;
             }
             c->set_size(cmd.comp_size.width, cmd.comp_size.height);

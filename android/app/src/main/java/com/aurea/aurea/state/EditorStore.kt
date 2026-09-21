@@ -72,6 +72,16 @@ data class ProjectState(
     val canRedo: Boolean = false,
 )
 
+/** Ajustes da composição atual (fonte: motor). Fundo em RGBA linear. */
+data class CompositionSettings(
+    val id: Long,
+    val width: Int,
+    val height: Int,
+    val fps: Double,
+    val durationFrames: Int,
+    val background: List<Float>,
+)
+
 data class PreviewState(
     val width: Int = 0,
     val height: Int = 0,
@@ -396,6 +406,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             engine.setSelection(selection.toLongArray())
         }
         keyframes = layers.associate { it.id to readKeyframes(it.id) }
+        refreshComposition()
         refreshDetail()
         refreshEffects()
     }
@@ -854,6 +865,50 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     fun toggleHud() {
         hudVisible = !hudVisible
+    }
+
+    // --- Composição (⚙ Projeto) ---------------------------------------------
+    /** Ajustes da composição atual, relidos do motor a cada mudança do modelo. */
+    var composition by mutableStateOf<CompositionSettings?>(null)
+        private set
+    private val compBuffer = DoubleArray(8)
+
+    private fun refreshComposition() {
+        val id = engine.queryComposition(compBuffer)
+        composition = if (id == 0L) null else CompositionSettings(
+            id = id,
+            width = compBuffer[0].toInt(),
+            height = compBuffer[1].toInt(),
+            fps = compBuffer[2],
+            durationFrames = compBuffer[3].toInt(),
+            background = listOf(compBuffer[4].toFloat(), compBuffer[5].toFloat(), compBuffer[6].toFloat(), compBuffer[7].toFloat()),
+        )
+    }
+
+    /** Tamanho da composição (px). O motor recusa acima do teto do aparelho. */
+    fun setCompositionSize(width: Int, height: Int) {
+        val c = composition ?: return
+        send { setCompositionSize(c.id, width and 1.inv(), height and 1.inv()) }
+        refreshNow()
+    }
+
+    fun setCompositionFps(fps: Double) {
+        val c = composition ?: return
+        send { setCompositionFps(c.id, fps) }
+        refreshNow()
+    }
+
+    fun setCompositionDuration(frames: Int) {
+        val c = composition ?: return
+        send { setCompositionDuration(c.id, max(1, frames)) }
+        refreshNow()
+    }
+
+    /** Fundo em RGBA LINEAR (o espaço de trabalho do motor). */
+    fun setCompositionBackground(r: Float, g: Float, b: Float, a: Float = 1f) {
+        val c = composition ?: return
+        send { setCompositionBackground(c.id, r, g, b, a) }
+        refreshNow()
     }
 
     // =========================================================================

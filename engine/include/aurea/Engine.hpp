@@ -273,6 +273,11 @@ public:
     u32 query_thumbnail(u64 layerId, i32 timelineFrame, u32 height, u8* out, u32 capacity,
                         u32* outWidth) noexcept;
 
+    /// Composição atual: id empacotado e ajustes (tamanho, fps, duração em
+    /// frames, fundo RGBA linear). false = sem projeto.
+    bool query_composition(u64& id, u32& width, u32& height, f64& fps, i64& durationFrames,
+                           f32 background[4]) noexcept;
+
     /// Detalhe de uma camada no playhead. false = camada não existe.
     bool query_layer_detail(u64 layerId, bridge::LayerDetailPOD& out) noexcept;
     u32 query_curve(u64 layerId, u32 property, i32 startFrame, i32 endFrame,

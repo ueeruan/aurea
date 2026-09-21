@@ -231,6 +231,9 @@ class AureaEngine private constructor() {
 
     fun queryLayerDetail(layer: Long, out: ByteBuffer): Boolean = nativeQueryLayerDetail(nativeHandle, layer, out)
 
+    /** Composição atual: devolve o id (0 = nenhuma); `out` = [w, h, fps, duração, r, g, b, a]. */
+    fun queryComposition(out: DoubleArray): Long = nativeQueryComposition(nativeHandle, out)
+
     /** RGBA8 da miniatura em `out`; 0 = ainda na fila (ver `thumbnailGeneration`). */
     fun queryThumbnail(layer: Long, frame: Int, height: Int, out: ByteBuffer, outWidth: IntArray): Int =
         nativeQueryThumbnail(nativeHandle, layer, frame, height, out, outWidth)
@@ -299,6 +302,7 @@ class AureaEngine private constructor() {
         handle: Long, layer: Long, effectId: Int, rows: ByteBuffer, capacity: Int, blob: ByteBuffer,
     ): Int
     private external fun nativeQueryLayerDetail(handle: Long, layer: Long, out: ByteBuffer): Boolean
+    private external fun nativeQueryComposition(handle: Long, out: DoubleArray): Long
     private external fun nativeQueryThumbnail(
         handle: Long, layer: Long, frame: Int, height: Int, out: ByteBuffer, outWidth: IntArray,
     ): Int

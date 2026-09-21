@@ -461,6 +461,22 @@ AUREA_JNI jint AUREA_FN(nativeQueryEffectParams)(JNIEnv* env, jclass, jlong hand
         static_cast<u32>(buffer_capacity(env, blob))));
 }
 
+/// Composição atual: devolve o id; `out` = [largura, altura, fps, duração, r, g, b, a].
+AUREA_JNI jlong AUREA_FN(nativeQueryComposition)(JNIEnv* env, jclass, jlong handle, jdoubleArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !out || env->GetArrayLength(out) < 8) return 0;
+    u64 id = 0;
+    u32 w = 0, h = 0;
+    f64 fps = 0.0;
+    i64 dur = 0;
+    f32 bg[4]{};
+    if (!c->engine.query_composition(id, w, h, fps, dur, bg)) return 0;
+    const jdouble v[8] = {static_cast<jdouble>(w), static_cast<jdouble>(h), fps, static_cast<jdouble>(dur),
+                          bg[0], bg[1], bg[2], bg[3]};
+    env->SetDoubleArrayRegion(out, 0, 8, v);
+    return static_cast<jlong>(id);
+}
+
 AUREA_JNI jboolean AUREA_FN(nativeQueryLayerDetail)(JNIEnv* env, jclass, jlong handle, jlong layer, jobject out) {
     NativeContext* c = ctx_of(handle);
     auto* pod = pod_buffer<bridge::LayerDetailPOD>(env, out, sizeof(bridge::LayerDetailPOD));

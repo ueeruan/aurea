@@ -39,6 +39,7 @@ class Gizmo3DPainter extends CustomPainter {
     this.aneis = true,
     this.alcaDeEscala = false,
     this.escalaEmUso = false,
+    this.pixelsPorUnidade = 1,
   });
 
   final GizmoNaTela gizmo;
@@ -68,7 +69,24 @@ class Gizmo3DPainter extends CustomPainter {
   final bool alcaDeEscala;
   final bool escalaEmUso;
 
+  /// QUANTOS PIXELS DE COMPOSICAO VALE UMA UNIDADE DA PROPRIEDADE.
+  ///
+  /// O anel nao e um circulo de raio em pixels: [anelDeGiro] monta a elipse
+  /// somando as DIRECOES dos outros dois eixos, que medem "pixels por
+  /// unidade". No gizmo da camada isso vale ~1 (um px de composicao por
+  /// unidade de posicao) e raio em px e raio em unidades sao a mesma coisa.
+  /// No gizmo de um no da CENA nao: com a camera padrao uma unidade da cena
+  /// vale varios pixels, e o mesmo numero desenharia um anel gigante, fora
+  /// do quadro. Quem sabe a conversao e quem monta o gizmo, e passa aqui —
+  /// o teste de toque usa a MESMA divisao, entao desenho e dedo nunca
+  /// discordam.
+  final double pixelsPorUnidade;
+
   double get _e => escala <= 0 ? 1 : escala;
+
+  /// O raio do anel em UNIDADES, a partir do raio em pixels de tela.
+  double get _raioEmUnidades =>
+      raio / _e / (pixelsPorUnidade.abs() < 1e-6 ? 1 : pixelsPorUnidade);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -84,7 +102,7 @@ class Gizmo3DPainter extends CustomPainter {
       // segundo braco, e pior, prometeria um gesto que o teste de toque
       // recusa. So aparece o anel que tem area.
       if (!anelVisivel(gizmo, e)) continue;
-      final pontos = anelDeGiro(gizmo, e, raio / _e);
+      final pontos = anelDeGiro(gizmo, e, _raioEmUnidades);
       final emUso = anelAtivo == e;
       final visivel = eixoVisivel(gizmo, e);
       final cor = corDoEixo(e);
@@ -253,7 +271,8 @@ class Gizmo3DPainter extends CustomPainter {
       old.eixos != eixos ||
       old.aneis != aneis ||
       old.alcaDeEscala != alcaDeEscala ||
-      old.escalaEmUso != escalaEmUso;
+      old.escalaEmUso != escalaEmUso ||
+      old.pixelsPorUnidade != pixelsPorUnidade;
 }
 
 /// ONDE FICA A ALCA DE ESCALA, em pixels de COMPOSICAO.

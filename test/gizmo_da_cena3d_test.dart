@@ -5,7 +5,7 @@
 // para a composicao pela MESMA matriz da moldura de selecao. Se o eixo
 // fosse adivinhado em vez de medido, o caso do pai girado 90 graus em Y
 // cairia aqui — e e justamente ele que quebrava a mao de quem arrasta.
-import 'dart:ui' as ui;
+
 
 import 'package:aurea/src/features/editor/application/editor_controller.dart';
 import 'package:aurea/src/features/editor/domain/element3d.dart';
@@ -146,34 +146,53 @@ void main() {
     expect(depois.scale.valueAt(_t0), antes.scale.valueAt(_t0));
   });
 
-  testWidgets('o pintor desenha NA ORIGEM, e nao em origem x escala', (
-    tester,
-  ) async {
+  test('o pintor desenha NA ORIGEM, e nao em origem x escala', () {
     // A ESCALA DUPLA ERA O "GIZMO FIXO NO CANTO": o pintor multiplicava
     // por `escala` dentro de um canvas que o `FittedBox` ja escala. Com
     // escala 0,5 e origem em (100,100), o gizmo saia desenhado em (50,50)
     // — longe do objeto, e o eixo que o dedo pegava ficava invisivel.
+    TestWidgetsFlutterBinding.ensureInitialized();
     const gizmo = GizmoNaTela(
       origem: Offset(100, 100),
       x: Offset(1, 0),
       y: Offset(0, -1),
-      z: Offset(0, 0),
+      z: Offset.zero,
       escala: 1,
     );
-    final gravador = ui.PictureRecorder();
+    final espiao = _CanvasEspiao();
     const Gizmo3DPainter(
       gizmo: gizmo,
       escala: 0.5,
       comprimento: 40,
       raio: 60,
-    ).paint(Canvas(gravador), const Size(200, 200));
-    final imagem = await gravador.endRecording().toImage(200, 200);
-    addTearDown(imagem.dispose);
-    final pixels = (await imagem.toByteData())!;
+    ).paint(espiao, const Size(200, 200));
 
-    int alfaEm(int x, int y) => pixels.getUint8((y * 200 + x) * 4 + 3);
-
-    expect(alfaEm(100, 100), greaterThan(0), reason: 'tinta sobre o objeto');
-    expect(alfaEm(50, 50), 0, reason: 'nada no canto de cima e a esquerda');
+    // O PONTO CENTRAL sai EXATAMENTE no pivo, e nao em (50,50).
+    expect(espiao.circulos.map((c) => c.$1), contains(const Offset(100, 100)));
+    expect(espiao.circulos.map((c) => c.$1), isNot(contains(const Offset(50, 50))));
+    // E o raio dele cresce com o zoom do palco: 4,5 px de TELA valem 9 px
+    // de composicao quando o palco esta a meio tamanho.
+    expect(espiao.circulos.first.$2, closeTo(9, 1e-9));
+    // Todo braco parte do pivo, e o de X acaba a 80 px (40 de tela / 0,5).
+    expect(espiao.linhas.every((l) => l.$1 == const Offset(100, 100)), isTrue);
+    expect(espiao.linhas.map((l) => l.$2), contains(const Offset(180, 100)));
   });
+}
+
+/// UM CANVAS QUE SO ANOTA. Rasterizar num teste pede o motor de verdade
+/// (`Picture.toImage` nunca completa sob o relogio falso do `flutter_test`);
+/// contar chamadas responde a mesma pergunta — ONDE o pintor pos a tinta.
+class _CanvasEspiao implements Canvas {
+  final List<(Offset, double)> circulos = [];
+  final List<(Offset, Offset)> linhas = [];
+
+  @override
+  void drawCircle(Offset c, double raio, Paint paint) =>
+      circulos.add((c, raio));
+
+  @override
+  void drawLine(Offset de, Offset para, Paint paint) => linhas.add((de, para));
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
 }

@@ -111,7 +111,12 @@ class _GizmoDaCenaOverlayState extends ConsumerState<GizmoDaCenaOverlay> {
   double get _escalaDoPalco => widget.escala <= 0 ? 1 : widget.escala;
 
   double get _braco => 86 / _escalaDoPalco;
-  double get _raio => 118 / _escalaDoPalco;
+
+  /// O RAIO DO ANEL EM UNIDADES DA CENA (ver [Gizmo3DPainter.pixelsPorUnidade]):
+  /// 118 px de tela viram px de composicao e depois unidades, para o anel
+  /// ter o mesmo tamanho no dedo em qualquer distancia de camera.
+  double _raioDoAnel(GizmoNaTela g) =>
+      118 / _escalaDoPalco / (g.escala.abs() < 1e-6 ? 1 : g.escala);
 
   @override
   Widget build(BuildContext context) {
@@ -182,6 +187,7 @@ class _GizmoDaCenaOverlayState extends ConsumerState<GizmoDaCenaOverlay> {
                       aneis: modo == ModoDoGizmo3D.girar,
                       alcaDeEscala: modo == ModoDoGizmo3D.escalar,
                       escalaEmUso: _escalando,
+                      pixelsPorUnidade: g.escala,
                     ),
                   ),
                 ),
@@ -310,7 +316,13 @@ class _GizmoDaCenaOverlayState extends ConsumerState<GizmoDaCenaOverlay> {
       ModoDoGizmo3D.mover =>
         eixoNoDedo(gizmo, p, _braco, tolerancia: folga) != null,
       ModoDoGizmo3D.girar =>
-        anelNoDedo(gizmo, p, _raio, tolerancia: 26 / _escalaDoPalco) != null,
+        anelNoDedo(
+          gizmo,
+          p,
+          _raioDoAnel(gizmo),
+          tolerancia: 26 / _escalaDoPalco,
+        ) !=
+            null,
       ModoDoGizmo3D.escalar =>
         (p - pontoDaAlcaDeEscala(gizmo, 86, _escalaDoPalco)).distance <= folga,
     };
@@ -365,6 +377,10 @@ class _GizmoDaCenaOverlayState extends ConsumerState<GizmoDaCenaOverlay> {
     _eixo = null;
     _anel = null;
     _escalando = false;
+    // O GIZMO CONGELADO DE UM GESTO ANTERIOR NAO PODE SOBRAR: ele e o que
+    // o pintor usa enquanto o dedo esta em cima, e um gizmo velho deixaria
+    // os eixos parados enquanto o objeto anda.
+    _gizmoInicial = null;
     final no = cena.nodeById(noId);
     if (no == null) return;
     final c = ref.read(editorControllerProvider.notifier);
@@ -380,7 +396,7 @@ class _GizmoDaCenaOverlayState extends ConsumerState<GizmoDaCenaOverlay> {
         final a = anelNoDedo(
           gizmo,
           dedo,
-          _raio,
+          _raioDoAnel(gizmo),
           tolerancia: 26 / _escalaDoPalco,
         );
         if (a == null) return;

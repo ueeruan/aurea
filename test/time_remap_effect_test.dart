@@ -8,8 +8,15 @@ import 'package:aurea/src/features/editor/domain/project_store.dart';
 import 'package:aurea/src/features/editor/domain/video_project.dart';
 
 void main() {
+  // 20/09, pedido do dono: o Time Remap VOLTOU ao catalogo como efeito
+  // comum, em EFEITOS -> TEMPO, ao lado de Time Warp (rgbTimeWarp) e
+  // Posterize Time. Ate 17/09 ele era interno de proposito (a UI dele
+  // fora apagada em 14/09) e este teste cobrava a ausencia; agora cobra a
+  // presenca. O que ele sempre protegeu continua aqui: a trilha de tempo
+  // da camada nasce e morre com a instancia do efeito, e atravessa o
+  // salvar/abrir.
   test(
-    'Time Remap stays persisted internally but is absent from the catalog',
+    'Time Remap is a normal catalog effect under Time and stays persisted',
     () {
       final c = ProviderContainer();
       addTearDown(c.dispose);
@@ -37,25 +44,37 @@ void main() {
       expect(effect.type, EffectType.timeRemap);
       expect(
         effectsInCategory('Time'),
-        containsAll([EffectType.posterizeTime, EffectType.rgbTimeWarp]),
+        containsAll([
+          EffectType.posterizeTime,
+          EffectType.rgbTimeWarp,
+          EffectType.timeRemap,
+        ]),
       );
-      expect(effectsInCategory('Time'), isNot(contains(EffectType.timeRemap)));
-      expect(efeitosDoCatalogo, isNot(contains(EffectType.timeRemap)));
-      expect(
-        searchEffects('time remap'),
-        isNot(contains(EffectType.timeRemap)),
-      );
-      controller.editEffectParam(
-        'v',
-        effect.id,
-        'tempo',
-        const Duration(milliseconds: 550),
-        2,
-      );
-      expect(
-        video().timeRemap!.hasKeyframeAt(const Duration(milliseconds: 550)),
-        isTrue,
-      );
+      expect(efeitosDoCatalogo, contains(EffectType.timeRemap));
+      expect(efeitosForaDoCatalogo, isNot(contains(EffectType.timeRemap)));
+      expect(specDe(EffectType.timeRemap)!.category, 'Time');
+      // Achavel pelo nome e pelo que a pessoa realmente digita.
+      expect(searchEffects('time remap'), contains(EffectType.timeRemap));
+      expect(searchEffects('congelar'), contains(EffectType.timeRemap));
+      // O losango dele e o do rail do painel: a barra da camada continua
+      // sem mostrar a trilha de tempo.
+      expect(efeitosInternos, contains(EffectType.timeRemap));
+      // A trilha de tempo nasce ANIMADA (curva identidade), entao ela cai
+      // na regra da casa: editar um valor fora de uma marca nao crava
+      // marca sozinho (docs/keyframe-explicito.md; `autoKeyframeProvider`
+      // nasce desligado). A edicao fica PENDENTE — o projeto de verdade
+      // nao muda.
+      const em550 = Duration(milliseconds: 550);
+      controller.editEffectParam('v', effect.id, 'tempo', em550, 2);
+      expect(video().timeRemap!.hasKeyframeAt(em550), isFalse);
+      // Com a marca automatica ligada de proposito, a edicao grava — e o
+      // que ela grava e a trilha de tempo DA CAMADA: o parametro `tempo`
+      // do efeito e a mesma coisa que `VideoLayer.timeRemap`.
+      c.read(autoKeyframeProvider.notifier).state = true;
+      controller.editEffectParam('v', effect.id, 'tempo', em550, 2);
+      expect(video().timeRemap!.hasKeyframeAt(em550), isTrue);
+      expect(video().timeRemap!.valueAt(em550), closeTo(2, 1e-6));
+      c.read(autoKeyframeProvider.notifier).state = false;
       controller.reorderEffect('v', effect.id, -1);
       expect(video().effects.first.id, effect.id);
       controller.toggleEffectEnabled('v', effect.id);

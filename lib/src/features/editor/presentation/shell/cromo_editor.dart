@@ -22,7 +22,7 @@ import '../am/align_sheet.dart';
 import '../am/am_colors.dart';
 import '../am/beats_sheet.dart';
 import '../am/cameras_sheet.dart';
-import '../am/export_sheet.dart';
+import '../../../export/presentation/export_video_screen.dart';
 import '../am/layer_look.dart';
 import '../am/layer_menu.dart' show showParentSheet;
 import 'layer_actions.dart';
@@ -243,7 +243,17 @@ class BarraDoProjeto extends ConsumerWidget {
               // palco da exportacao le o estado do editor. Sai de todos
               // antes — o projeto inteiro e o que se exporta.
               controller.exitAllGroups();
-              showExportSheet(context, ref);
+              // DIRETO PARA A TELA. Havia uma folha no caminho que so
+              // repetia, em outra aparencia, os mesmos controles da tela
+              // de exportacao. Quem exporta agora ve a predefinicao e o
+              // botao; Lottie, SVG, template e pacote vivem atras de
+              // "Outros formatos", la dentro.
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  fullscreenDialog: true,
+                  builder: (_) => const ExportVideoScreen(),
+                ),
+              );
             },
           ),
         ],

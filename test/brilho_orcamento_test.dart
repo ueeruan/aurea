@@ -392,9 +392,32 @@ void _naTela() {
     final fx = c.state.layerById('claro')!.effects.single;
     expect(fx.paramAt('raio', Duration.zero), 420);
 
-    // ANIMAR: keyframe no inicio e no fim.
+    // ANIMAR: keyframe no inicio, e o do fim cravado pelo LOSANGO.
+    //
+    // KEYFRAME NAO NASCE DE EDITAR VALOR (`docs/keyframe-explicito.md`).
+    // Num efeito que JA anima, mexer num numero FORA de uma marca nao
+    // grava nada: o valor fica como EDICAO PENDENTE — a previa ja mostra,
+    // a linha do tempo nao muda — e quem crava e o losango daquele
+    // instante. O interruptor "keyframe automatico" existe para quem
+    // quiser o atalho, e nasce desligado.
     c.toggleEffectKeyframe('claro', novo.id, Duration.zero);
     c.editEffectParam('claro', novo.id, 'raio', const Duration(seconds: 2), 80);
+    expect(
+      c.state.layerById('claro')!.effects.single.keyframeTimes,
+      everyElement(Duration.zero),
+      reason: 'editar fora da marca nao pode cravar keyframe sozinho',
+    );
+    expect(
+      container.read(edicaoPendenteProvider),
+      isNotNull,
+      reason: 'o valor novo fica pendente esperando o losango',
+    );
+    c.toggleEffectKeyframe('claro', novo.id, const Duration(seconds: 2));
+    expect(
+      container.read(edicaoPendenteProvider),
+      isNull,
+      reason: 'o losango gravou: nao sobra pendencia',
+    );
     final animado = c.state.layerById('claro')!.effects.single;
     expect(animado.hasAnimation, isTrue);
     expect(animado.paramAt('raio', Duration.zero), 420);

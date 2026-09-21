@@ -272,7 +272,13 @@ void main() {
       dir.deleteSync(recursive: true);
     });
     await tester.pumpAndSettle();
+    // "Exportar" abre a TELA de exportar video (20/09: a folha do meio,
+    // que repetia os controles da tela, deixou de existir). O que nao e
+    // video — Lottie, SVG, template, pacote — fica atras de "Outros
+    // formatos", la dentro.
     await tester.tap(find.byKey(const ValueKey('editor-export')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('export-outros-formatos')));
     await tester.pumpAndSettle();
     final button = find.text('Exportar SVG animado');
     await tester.ensureVisible(button);

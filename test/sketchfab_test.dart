@@ -532,6 +532,36 @@ void main() {
     ),
   );
 
+  /// VOLTAS AO RELOGIO REAL ATE [pronto] VALER.
+  ///
+  /// O download grava num arquivo de verdade, e o relogio falso do teste
+  /// nao adianta E/S: quem fecha e apaga o `.part` e o sistema, no tempo
+  /// dele. Medido nesta maquina, o caminho do cancelamento leva ~90 ms no
+  /// caso comum e ja foi visto em 770 ms quando o antivirus para para olhar
+  /// o arquivo recem-criado — sempre com o MESMO numero de passos, so com o
+  /// relogio mais lento.
+  ///
+  /// Por isso a espera nao pode ser um numero fixo de voltas: ele compra
+  /// tempo no escuro e falha em toda maquina mais lenta que a media. Aqui a
+  /// espera acaba assim que a condicao vale, e o teto existe so para o teste
+  /// morrer com recado se ela nunca valer.
+  Future<void> ateQue(
+    WidgetTester tester,
+    bool Function() pronto,
+    String oQue,
+  ) async {
+    final relogio = Stopwatch()..start();
+    while (!pronto()) {
+      if (relogio.elapsed > const Duration(seconds: 10)) {
+        fail('$oQue não aconteceu em 10 s');
+      }
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 5)),
+      );
+      await tester.pump();
+    }
+  }
+
   testWidgets('a tela lista o que a busca devolveu e diz de onde vem', (
     tester,
   ) async {
@@ -716,9 +746,8 @@ void main() {
     await tester.pumpAndSettle();
 
     torneira.add(List.filled(200, 3));
-    // O download e E/S de verdade: os bytes so andam fora do relogio
-    // falso do teste.
-    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    // O progresso e contado no mesmo instante em que o pedaco chega, entao
+    // aqui basta o relogio falso andar ate a tela se redesenhar.
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('sketchfab-etapas')), findsOneWidget);
@@ -730,17 +759,18 @@ void main() {
     // esta baixando nao pode ser interrompido no meio de uma escrita.
     torneira.add(List.filled(200, 3));
     unawaited(torneira.close());
-    // Fechar o arquivo e apagar o pedaco e E/S de verdade: sem estas
-    // voltas ao relogio real, o `finally` da importacao nunca corre.
-    for (var i = 0; i < 6; i++) {
-      await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 20)),
-      );
-      await tester.pump();
-    }
+    // Fechar o arquivo e apagar o pedaco e E/S de verdade: ate o sistema
+    // devolver o arquivo fechado, o `finally` da importacao nao corre.
+    await ateQue(
+      tester,
+      () => find.byKey(const ValueKey('sketchfab-etapas')).evaluate().isEmpty,
+      'o painel de etapas sumir depois do cancelamento',
+    );
 
     // O painel some e a tela volta ao acervo, sem camada nenhuma criada.
     expect(find.byKey(const ValueKey('sketchfab-etapas')), findsNothing);
     expect(find.byKey(const ValueKey('sketchfab-cartao-$_uid')), findsOneWidget);
+    // E nada sobrou no cache: nem o pacote pronto nem o pedaco.
+    expect(tmp.listSync(), isEmpty);
   });
 }

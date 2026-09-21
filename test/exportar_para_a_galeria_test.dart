@@ -301,7 +301,11 @@ void main() {
           .arguments as Map;
       expect(registro['mime'], 'video/mp4');
       expect(registro['album'], 'Aurea');
-      expect(find.text('Exportado com sucesso'), findsOneWidget);
+      // O titulo do fim encurtou para "Exportado" quando a tela foi
+      // simplificada (20/09): "com sucesso" nao acrescenta nada ao lado
+      // do selo verde, e o caminho do arquivo so aparece quando ha
+      // problema — com a URI na mao existem "Abrir" e "Compartilhar".
+      expect(find.text('Exportado'), findsOneWidget);
       expect(find.byKey(const ValueKey('export-abrir')), findsOneWidget);
       expect(find.byKey(const ValueKey('export-compartilhar')), findsOneWidget);
 
@@ -310,7 +314,7 @@ void main() {
       respostaDaGaleria = (_) => <String, Object?>{};
       await exportarCortePuro(tester);
 
-      expect(find.text('Exportado com sucesso'), findsNothing);
+      expect(find.text('Exportado'), findsNothing);
       expect(find.text('Exportado, mas nao entrou na galeria'), findsOneWidget);
       // A mensagem honesta do que houve, e o caminho para procurar.
       expect(find.byKey(const ValueKey('export-galeria')), findsOneWidget);
@@ -328,7 +332,7 @@ void main() {
       );
       await exportarCortePuro(tester);
 
-      expect(find.text('Exportado com sucesso'), findsNothing);
+      expect(find.text('Exportado'), findsNothing);
       expect(
         find.textContaining('recusou o registro na galeria'),
         findsOneWidget,

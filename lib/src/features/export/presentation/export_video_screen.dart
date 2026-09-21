@@ -5,6 +5,8 @@ import 'dart:math' as math;
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'dart:convert';
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
@@ -23,8 +25,13 @@ import '../../editor/domain/video_project.dart';
 import '../../editor/domain/shape.dart' show ShapeMediaFill;
 import '../../editor/domain/time_slice.dart';
 import '../../editor/domain/grupo_ops.dart';
+import '../../../core/storage/prefs.dart';
 import '../../../core/theme/aurea_paleta.dart';
 import '../../../core/ui/am_colors.dart';
+import '../../../core/ui/am_tick_ruler.dart';
+import '../../../core/ui/tocavel.dart';
+import '../../editor/presentation/am/export_sheet.dart';
+import '../../editor/presentation/widgets/campo_de_valor.dart';
 import '../../editor/presentation/widgets/dither_layer.dart';
 import '../../editor/presentation/widgets/pixel_effect_engine.dart';
 import '../../editor/domain/estilizar_lote2.dart';
@@ -43,18 +50,35 @@ import '../application/publicador_na_galeria.dart';
 import '../domain/export_settings.dart';
 import '../../settings/application/settings_controller.dart';
 
-/// EXPORTAR VIDEO.
+/// EXPORTAR VIDEO — A PORTA UNICA.
 ///
 /// A composicao e desenhada em Flutter, entao exportar e re-renderizar
 /// a MESMA arvore quadro a quadro e mandar para o FFmpeg. Nada de
 /// "gravar a tela": cada quadro sai na resolucao do projeto, mesmo que
 /// o aparelho mostre bem menor.
+///
+/// ==========================================================================
+/// HAVIA DUAS PORTAS PARA A MESMA DECISAO (20/09/2026)
+/// ==========================================================================
+///
+/// A folha do editor (`am/export_sheet.dart`) tinha Formato, Tamanho,
+/// Quadros, Codec, Qualidade e Taxa; esta tela tinha Formato, Tamanho,
+/// Quadros, Codec e Qualidade. Os mesmos cinco controles, duas vezes, com
+/// resumos que nem concordavam — a folha estimava o tamanho do arquivo
+/// com `project.duration` (que tem piso de cinco segundos) e a tela com
+/// `duracaoDoConteudo` (o que de fato sai).
+///
+/// Agora a decisao mora AQUI, e so aqui. A folha ficou com o que nao e
+/// video (Lottie, SVG, template, pacote, legendas).
+///
+/// E a tela pede UMA decisao: a predefinicao. Tudo o mais desceu para o
+/// cartao "Ajustes", recolhido — quem nao abrir nunca ve.
 class ExportVideoScreen extends ConsumerStatefulWidget {
   const ExportVideoScreen({super.key, this.settings = const ExportSettings()});
 
-  /// COM O QUE A TELA ABRE. Quem manda depois e o que a pessoa escolher
-  /// na fase de ajustes — antes nao havia fase nenhuma, e este valor,
-  /// que nenhum chamador passava, decidia a exportacao inteira.
+  /// COM O QUE A TELA ABRE. Quando ninguem passa nada, a tela lembra a
+  /// ultima exportacao (prefs) — e o mesmo `exportar.ajustes` que a folha
+  /// guardava.
   final ExportSettings settings;
 
   @override
@@ -88,6 +112,12 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
 
   /// O que a pessoa escolheu nesta tela.
   late ExportSettings _ajustes = widget.settings;
+
+  /// O CARTAO "AJUSTES" NASCE RECOLHIDO. E a razao de ser desta tela:
+  /// resolucao, quadros, codec, qualidade e taxa existem, continuam
+  /// inteiros, e nao aparecem para quem so quer o video.
+  bool _ajustesAbertos = false;
+
   double _progresso = 0;
   String _detalhe = '';
 
@@ -137,6 +167,16 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
   @override
   void initState() {
     super.initState();
+    // A ULTIMA EXPORTACAO E O PONTO DE PARTIDA desta. Quem passou
+    // ajustes explicitos manda; quem nao passou recebe o que ficou.
+    if (identical(widget.settings, const ExportSettings())) {
+      try {
+        final bruto = ref
+            .read(sharedPreferencesProvider)
+            .getString('exportar.ajustes');
+        if (bruto != null) _ajustes = ExportSettings.fromJson(jsonDecode(bruto));
+      } catch (_) {}
+    }
     // O shader precisa estar carregado antes do primeiro quadro. Ele
     // aquece agora, enquanto a pessoa escolhe os ajustes — quando ela
     // tocar em "Exportar" ja vai estar pronto.
@@ -181,6 +221,11 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
 
   void _passo(_Fase f, double p, String d) {
     if (!mounted) return;
+    // CANCELADO NAO VOLTA A RENDERIZAR. O laco so percebe o cancelamento
+    // no proximo `if (engine.cancelled)`; sem esta guarda, o passo que ja
+    // estava a caminho arrastaria a tela de volta para o progresso depois
+    // de ela ter voltado aos ajustes.
+    if (_engine?.cancelled ?? false) return;
     setState(() {
       _fase = f;
       _progresso = p.clamp(0.0, 1.0);
@@ -207,7 +252,41 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
 
   Future<void>? _aquecendo;
 
+  /// LARGA NO MEIO E VOLTA AOS AJUSTES.
+  ///
+  /// Nao havia como parar: o unico jeito de abandonar uma exportacao era
+  /// o X da barra, que tambem fechava a tela — quem so queria trocar a
+  /// resolucao perdia o caminho de volta.
+  Future<void> _cancelar() async {
+    final engine = _engine;
+    if (engine == null) return;
+    engine.cancel();
+    if (mounted) {
+      setState(() {
+        _fase = _Fase.ajustes;
+        _progresso = 0;
+        _detalhe = '';
+        _tempoRestante = null;
+      });
+    }
+    await _abandonar(engine);
+  }
+
   Future<void> _rodar() async {
+    // O MOTOR DA TENTATIVA ANTERIOR SAI DE CENA ANTES DO PRIMEIRO PASSO.
+    // Sem isto, depois de um "Cancelar" o primeiro `_passo` desta
+    // exportacao encontraria o motor cancelado na guarda e seria
+    // engolido — a tela ficaria parada nos ajustes por um instante.
+    _engine = null;
+    // O QUE SE ESCOLHEU AQUI VALE PARA A PROXIMA VEZ. Sem `await`: a
+    // exportacao nao espera o disco das preferencias para comecar.
+    try {
+      unawaited(
+        ref
+            .read(sharedPreferencesProvider)
+            .setString('exportar.ajustes', jsonEncode(_ajustes.toJson())),
+      );
+    } catch (_) {}
     await _aquecendo;
     if (!mounted) return;
     _comecoDoRender = DateTime.now();
@@ -917,37 +996,112 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
                   // widget empilhado acima dele nao entra no `toImage`. A
                   // composicao continua pintando por baixo (escondida com
                   // `Offstage` ela nao pintaria e a foto sairia vazia).
-                  if (_fase == _Fase.preparando ||
-                      _fase == _Fase.lendoVideos ||
-                      _fase == _Fase.desenhando ||
-                      _fase == _Fase.codificando)
+                  if (_renderizando)
                     Positioned.fill(
                       key: const ValueKey('export-capa-do-render'),
                       child: ColoredBox(
                         color: AmColors.bg,
-                        child: Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const CupertinoActivityIndicator(radius: 14),
-                              const SizedBox(height: 14),
-                              Text(
-                                '${(_progresso * 100).round()}%',
-                                style: const TextStyle(
-                                  fontSize: 28,
-                                  fontWeight: FontWeight.w700,
-                                  color: AmColors.text,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
+                        child: _telaDeProgresso(),
                       ),
                     ),
                 ],
               ),
             ),
-            _rodape(),
+            // O RODAPE NUNCA EMPURRA O PALCO PARA FORA. Com o cartao
+            // "Ajustes" aberto num aparelho baixo, a coluna passava da
+            // tela; aqui ele para em 62% e rola por dentro.
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * .62,
+              ),
+              child: _rodape(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  bool get _renderizando =>
+      _fase == _Fase.preparando ||
+      _fase == _Fase.lendoVideos ||
+      _fase == _Fase.desenhando ||
+      _fase == _Fase.codificando;
+
+  /// A TELA DE PROGRESSO: etapa, porcentagem e cancelar. Nada mais.
+  ///
+  /// Ela vive DENTRO da capa anti-piscada (o `Stack` acima), e nao no
+  /// rodape: e a capa que cobre a composicao meio montada enquanto a
+  /// exportacao salta de quadro em quadro. Juntar as duas coisas deixou
+  /// de haver duas barras de progresso na mesma tela.
+  Widget _telaDeProgresso() {
+    final rotulo = switch (_fase) {
+      _Fase.preparando => 'Preparando',
+      _Fase.lendoVideos => 'Lendo os videos',
+      _Fase.desenhando => 'Desenhando os quadros',
+      _Fase.codificando => 'Codificando',
+      _ => '',
+    };
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CupertinoActivityIndicator(radius: 14),
+            const SizedBox(height: 14),
+            AppText(
+              '${(_progresso * 100).round()}%',
+              key: const ValueKey('export-porcentagem'),
+              style: const TextStyle(
+                fontSize: 34,
+                fontWeight: FontWeight.w700,
+                color: AmColors.text,
+              ),
+            ),
+            const SizedBox(height: 6),
+            AppText(
+              rotulo,
+              key: const ValueKey('export-etapa'),
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: AmColors.text,
+              ),
+            ),
+            const SizedBox(height: 10),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 260),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: LinearProgressIndicator(
+                  value: _progresso,
+                  minHeight: 5,
+                  backgroundColor: AmColors.chip,
+                  valueColor: AlwaysStoppedAnimation<Color>(AmColors.accent),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            AppText(
+              _tempoRestante ?? _detalhe,
+              key: const ValueKey('export-restante'),
+              maxLines: 2,
+              textAlign: TextAlign.center,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 11, color: AmColors.muted),
+            ),
+            const SizedBox(height: 20),
+            _BotaoDeChip(
+              rotulo: 'Cancelar',
+              chave: const ValueKey('export-cancelar'),
+              aoTocar: _cancelar,
+            ),
+            const SizedBox(height: 10),
+            const AppText(
+              'Deixe o app aberto ate terminar.',
+              style: TextStyle(fontSize: 10, color: AmColors.muted),
+            ),
           ],
         ),
       ),
@@ -984,99 +1138,226 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
     ),
   );
 
-  /// A FICHA DOS AJUSTES, antes de comecar.
+  /// QUAL PREDEFINICAO ESTA ACESA — nula quando os ajustes sao proprios.
+  String? _predefinicaoAtual() {
+    for (final p in predefinicoesDeExportacao) {
+      if (_mesmosAjustes(p.ajustes, _ajustes)) return p.chave;
+    }
+    return null;
+  }
+
+  static bool _mesmosAjustes(ExportSettings a, ExportSettings b) =>
+      a.size == b.size &&
+      a.fps == b.fps &&
+      a.quality == b.quality &&
+      a.bitrateMbps == b.bitrateMbps &&
+      a.codec == b.codec &&
+      a.format == b.format;
+
+  /// O QUE VAI SAIR, numa linha: tamanho, quadros, peso e duracao.
+  ///
+  /// A DURACAO E A DO CONTEUDO. `VideoProject.duration` tem piso de cinco
+  /// segundos para a linha do tempo nascer utilizavel; usar esse piso
+  /// aqui faria a tela prometer um arquivo maior e mais longo do que o
+  /// que o motor grava.
+  String _resumo(int sw, int sh, int fps, Duration duracao) {
+    final tempo = _relogio(duracao);
+    if (_ajustes.format == ExportFormat.pngSequence) {
+      return '$sw x $sh · $fps fps · PNG com transparencia · $tempo';
+    }
+    final mb = _ajustes.estimatedMegabytes(sw, sh, fps, duracao);
+    final peso = mb < 1000
+        ? '~${mb.round()} MB'
+        : '~${(mb / 1024).toStringAsFixed(1)} GB';
+    return '$sw x $sh · $fps fps · $peso · $tempo';
+  }
+
+  static String _relogio(Duration d) {
+    final s = d.inSeconds;
+    return '${s ~/ 60}:${(s % 60).toString().padLeft(2, '0')}';
+  }
+
+  /// A TELA DE ANTES: uma decisao em cima, o resto guardado.
   Widget _ajustesDaExportacao(int w, int h, Duration duracao, int fpsProjeto) {
     final (sw, sh) = _ajustes.resolve(w, h);
     final fps = _ajustes.resolveFps(fpsProjeto);
-    final mb = _ajustes.estimatedMegabytes(sw, sh, fps, duracao);
-    final sequencia = _ajustes.format == ExportFormat.pngSequence;
+    final escolhida = _predefinicaoAtual();
 
     return Container(
       width: double.infinity,
       color: AmColors.panel,
       child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
+        padding: const EdgeInsets.fromLTRB(14, 10, 14, 16),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _Escolhas<ExportFormat>(
-              titulo: 'Formato',
-              itens: [
-                for (final f in ExportFormat.values) (exportFormatLabel(f), f),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final p in predefinicoesDeExportacao)
+                  _FichaDePredefinicao(
+                    chave: ValueKey('export-predefinicao-${p.chave}'),
+                    nome: p.nome,
+                    detalhe: p.detalhe,
+                    acesa: escolhida == p.chave,
+                    aoTocar: () => setState(() => _ajustes = p.ajustes),
+                  ),
+                // PERSONALIZADO NAO E UM AJUSTE: e o que a tela mostra
+                // quando os numeros deixaram de ser os de uma
+                // predefinicao. Tocar nele abre o cartao onde eles estao.
+                _FichaDePredefinicao(
+                  chave: const ValueKey('export-predefinicao-personalizado'),
+                  nome: 'Personalizado',
+                  detalhe: 'Abrir os ajustes',
+                  acesa: escolhida == null,
+                  aoTocar: () => setState(() => _ajustesAbertos = true),
+                ),
               ],
-              atual: _ajustes.format,
-              aoEscolher: (f) => setState(() {
-                _ajustes = _ajustes.copyWith(format: f);
-              }),
             ),
-            _Escolhas<ExportSize>(
-              titulo: 'Tamanho',
-              itens: [
-                for (final t in ExportSize.values) (exportSizeLabel(t), t),
-              ],
-              atual: _ajustes.size,
-              aoEscolher: (t) => setState(() {
-                _ajustes = _ajustes.copyWith(size: t);
-              }),
-            ),
-            _Escolhas<int?>(
-              titulo: 'Quadros por segundo',
-              itens: [
-                ('Do projeto ($fpsProjeto)', null),
-                ...const [('24', 24), ('30', 30), ('60', 60)],
-              ],
-              atual: _ajustes.fps,
-              aoEscolher: (f) => setState(() {
-                _ajustes = f == null
-                    ? _ajustes.copyWith(clearFps: true)
-                    : _ajustes.copyWith(fps: f);
-              }),
-            ),
-            // O CODEC E A QUALIDADE SO VALEM NO MP4. Sequencia PNG nao
-            // passa por codificador nenhum — mostrar os dois botoes ali
-            // seria oferecer escolha que o arquivo ignora.
-            if (!sequencia) ...[
-              _Escolhas<ExportCodec>(
-                titulo: 'Codec',
-                itens: [
-                  for (final c in ExportCodec.values) (exportCodecLabel(c), c),
-                ],
-                atual: _ajustes.codec,
-                aoEscolher: (c) => setState(() {
-                  _ajustes = _ajustes.copyWith(codec: c);
-                }),
-              ),
-              _Escolhas<String>(
-                titulo: 'Qualidade',
-                itens: const [
-                  ('Baixa', 'baixa'),
-                  ('Media', 'media'),
-                  ('Alta', 'alta'),
-                ],
-                atual: _ajustes.quality,
-                aoEscolher: (q) => setState(() {
-                  _ajustes = _ajustes.copyWith(quality: q);
-                }),
-              ),
-            ],
-            const SizedBox(height: 4),
+            const SizedBox(height: 12),
             AppText(
-              sequencia
-                  ? '$sw x $sh · $fps qps · guarda transparencia'
-                  : '$sw x $sh · $fps qps · cerca de '
-                        '${mb < 1000 ? '${mb.round()} MB' : '${(mb / 1024).toStringAsFixed(1)} GB'}',
+              _resumo(sw, sh, fps, duracao),
+              key: const ValueKey('export-resumo'),
               style: const TextStyle(
-                fontSize: 11,
-                height: 1.4,
+                fontSize: 12.5,
+                height: 1.35,
                 color: AmColors.muted,
               ),
             ),
+            _CabecaDeGrupo(
+              key: const ValueKey('export-cabeca-ajustes'),
+              rotulo: 'AJUSTES',
+              aberto: _ajustesAbertos,
+              aoTocar: () =>
+                  setState(() => _ajustesAbertos = !_ajustesAbertos),
+            ),
+            if (_ajustesAbertos)
+              Column(
+                key: const ValueKey('export-ajustes-corpo'),
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: _corpoDosAjustes(fpsProjeto),
+              ),
+            _CabecaDeGrupo(
+              key: const ValueKey('export-outros-formatos'),
+              rotulo: 'OUTROS FORMATOS',
+              aberto: false,
+              aoTocar: () => showOutrosFormatosSheet(context, ref),
+            ),
             const SizedBox(height: 12),
-            _BotaoGrande(rotulo: 'Exportar', aoTocar: _rodar),
+            _BotaoGrande(
+              rotulo: 'Exportar',
+              chave: const ValueKey('export-exportar'),
+              aoTocar: _rodar,
+            ),
           ],
         ),
       ),
     );
+  }
+
+  /// O QUE ESTAVA ESPALHADO PELA TELA, agora atras de um toque.
+  List<Widget> _corpoDosAjustes(int fpsProjeto) {
+    const quadros = [24, 25, 30, 50, 60];
+    final sequencia = _ajustes.format == ExportFormat.pngSequence;
+    final naMao = _ajustes.bitrateMbps != null;
+    return [
+      _LinhaDeEscolha(
+        key: const ValueKey('export-ajuste-formato'),
+        rotulo: 'Formato',
+        opcoes: [for (final f in ExportFormat.values) exportFormatLabel(f)],
+        valor: _ajustes.format.index,
+        aoMudar: (i) => setState(
+          () => _ajustes = _ajustes.copyWith(format: ExportFormat.values[i]),
+        ),
+      ),
+      _LinhaDeEscolha(
+        key: const ValueKey('export-ajuste-tamanho'),
+        rotulo: 'Tamanho',
+        opcoes: [for (final t in ExportSize.values) exportSizeLabel(t)],
+        valor: _ajustes.size.index,
+        aoMudar: (i) => setState(
+          () => _ajustes = _ajustes.copyWith(size: ExportSize.values[i]),
+        ),
+      ),
+      _LinhaDeEscolha(
+        key: const ValueKey('export-ajuste-quadros'),
+        rotulo: 'Quadros',
+        opcoes: ['Projeto ($fpsProjeto)', for (final f in quadros) '$f'],
+        valor: _ajustes.fps == null
+            ? 0
+            : (quadros.indexOf(_ajustes.fps!) + 1).clamp(0, quadros.length),
+        aoMudar: (i) => setState(
+          () => _ajustes = i == 0
+              ? _ajustes.copyWith(clearFps: true)
+              : _ajustes.copyWith(fps: quadros[i - 1]),
+        ),
+      ),
+      // O CODEC, A QUALIDADE E A TAXA SO VALEM NO MP4. Sequencia PNG nao
+      // passa por codificador nenhum — mostrar os botoes ali seria
+      // oferecer escolha que o arquivo ignora.
+      if (!sequencia) ...[
+        _LinhaDeEscolha(
+          key: const ValueKey('export-ajuste-codec'),
+          rotulo: 'Codec',
+          opcoes: [for (final c in ExportCodec.values) exportCodecLabel(c)],
+          valor: _ajustes.codec.index,
+          aoMudar: (i) => setState(
+            () => _ajustes = _ajustes.copyWith(codec: ExportCodec.values[i]),
+          ),
+        ),
+        _LinhaDeEscolha(
+          key: const ValueKey('export-ajuste-qualidade'),
+          rotulo: 'Qualidade',
+          opcoes: const ['Baixa', 'Media', 'Alta', 'Na mao'],
+          valor: naMao
+              ? 3
+              : const [
+                  'baixa',
+                  'media',
+                  'alta',
+                ].indexOf(_ajustes.quality).clamp(0, 2),
+          aoMudar: (i) => setState(
+            () => _ajustes = i == 3
+                ? _ajustes.copyWith(bitrateMbps: 12)
+                : _ajustes.copyWith(
+                    quality: const ['baixa', 'media', 'alta'][i],
+                    clearBitrate: true,
+                  ),
+          ),
+        ),
+        if (naMao)
+          SizedBox(
+            height: 44,
+            child: Row(
+              children: [
+                const _ChipDoRotulo('Taxa'),
+                Expanded(
+                  child: AmTickRuler(
+                    key: const ValueKey('export-ajuste-taxa'),
+                    value: _ajustes.bitrateMbps!.clamp(1, 120),
+                    min: 1,
+                    max: 120,
+                    unitsPerPixel: 119 / 420,
+                    height: 40,
+                    onChanged: (v) => setState(
+                      () => _ajustes = _ajustes.copyWith(bitrateMbps: v),
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 62,
+                  child: AppText(
+                    '${_ajustes.bitrateMbps!.toStringAsFixed(0)} Mb/s',
+                    textAlign: TextAlign.right,
+                    style: const TextStyle(fontSize: 11, color: AmColors.text),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    ];
   }
 
   Widget _rodape() {
@@ -1096,50 +1377,54 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
         width: double.infinity,
         padding: const EdgeInsets.fromLTRB(18, 14, 18, 20),
         color: AmColors.panel,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  CupertinoIcons.exclamationmark_triangle,
-                  size: 17,
-                  color: AmColors.pink,
-                ),
-                SizedBox(width: 8),
-                AppText(
-                  'Nao deu para exportar',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    CupertinoIcons.exclamationmark_triangle,
+                    size: 17,
                     color: AmColors.pink,
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            AppText(
-              _erro ?? '',
-              style: const TextStyle(
-                fontSize: 11,
-                height: 1.4,
-                color: AmColors.muted,
+                  const SizedBox(width: 8),
+                  AppText(
+                    'Nao deu para exportar',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: AmColors.pink,
+                    ),
+                  ),
+                ],
               ),
-            ),
-            const SizedBox(height: 12),
-            // TENTAR DE NOVO VOLTA AOS AJUSTES, e nao repete a mesma
-            // tentativa. Quase todo erro daqui — espaco, tamanho, codec
-            // que o aparelho recusou — se resolve mudando um ajuste, e
-            // repetir igual daria o mesmo erro.
-            _BotaoGrande(
-              rotulo: 'Mudar os ajustes e tentar de novo',
-              aoTocar: () => setState(() {
-                _erro = null;
-                _fase = _Fase.ajustes;
-                _progresso = 0;
-              }),
-            ),
-          ],
+              const SizedBox(height: 8),
+              AppText(
+                _erro ?? '',
+                style: const TextStyle(
+                  fontSize: 11,
+                  height: 1.4,
+                  color: AmColors.muted,
+                ),
+              ),
+              const SizedBox(height: 12),
+              // TENTAR DE NOVO VOLTA AOS AJUSTES, e nao repete a mesma
+              // tentativa. Quase todo erro daqui — espaco, tamanho, codec
+              // que o aparelho recusou — se resolve mudando um ajuste, e
+              // repetir igual daria o mesmo erro.
+              _BotaoGrande(
+                rotulo: 'Tentar de novo',
+                chave: const ValueKey('export-tentar-de-novo'),
+                aoTocar: () => setState(() {
+                  _erro = null;
+                  _fase = _Fase.ajustes;
+                  _progresso = 0;
+                  _ajustesAbertos = true;
+                }),
+              ),
+            ],
+          ),
         ),
       );
     }
@@ -1153,7 +1438,7 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
       final titulo = sequencia
           ? 'Sequencia pronta'
           : naGaleria
-          ? 'Exportado com sucesso'
+          ? 'Exportado'
           : 'Exportado, mas nao entrou na galeria';
       final corDoTitulo = sequencia || naGaleria
           ? AmColors.accent
@@ -1188,7 +1473,24 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
                 ),
               ],
             ),
-            if (!sequencia && pub != null) ...[
+            // O MOTIVO E O CAMINHO SO QUANDO ALGO DEU ERRADO. Com a URI
+            // na mao a pessoa tem "Abrir" e "Compartilhar": repetir
+            // "Movies/Aurea/aurea_p_180f.mp4" embaixo nao acrescenta
+            // nada e e a linha mais longa da tela.
+            // A SEQUENCIA NAO TEM URI NEM GALERIA: o caminho da pasta e
+            // a unica forma de achar as imagens.
+            if (sequencia) ...[
+              const SizedBox(height: 6),
+              AppText(
+                _detalhe,
+                style: const TextStyle(
+                  fontSize: 10,
+                  height: 1.4,
+                  color: AmColors.muted,
+                ),
+              ),
+            ],
+            if (!sequencia && pub != null && !naGaleria) ...[
               const SizedBox(height: 6),
               AppText(
                 pub.mensagem,
@@ -1199,16 +1501,16 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
                   color: AmColors.text,
                 ),
               ),
-            ],
-            const SizedBox(height: 6),
-            AppText(
-              pub?.ondeEsta ?? _saida?.path ?? '',
-              style: const TextStyle(
-                fontSize: 10,
-                height: 1.4,
-                color: AmColors.muted,
+              const SizedBox(height: 4),
+              AppText(
+                pub.ondeEsta ?? _saida?.path ?? '',
+                style: const TextStyle(
+                  fontSize: 10,
+                  height: 1.4,
+                  color: AmColors.muted,
+                ),
               ),
-            ),
+            ],
             const SizedBox(height: 12),
             Row(
               children: [
@@ -1218,7 +1520,7 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
                 // o que serve para procurar o arquivo.
                 if (pub?.podeAbrir ?? false) ...[
                   Expanded(
-                    child: _BotaoDoFim(
+                    child: _BotaoDeChip(
                       rotulo: 'Abrir',
                       chave: const ValueKey('export-abrir'),
                       aoTocar: () => GaleriaDoAparelho.abrir(pub!.uri!),
@@ -1226,7 +1528,7 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
                   ),
                   const SizedBox(width: 10),
                   Expanded(
-                    child: _BotaoDoFim(
+                    child: _BotaoDeChip(
                       rotulo: 'Compartilhar',
                       chave: const ValueKey('export-compartilhar'),
                       aoTocar: () => GaleriaDoAparelho.compartilhar(pub!.uri!),
@@ -1234,7 +1536,7 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
                   ),
                 ] else
                   Expanded(
-                    child: _BotaoDoFim(
+                    child: _BotaoDeChip(
                       rotulo: 'Copiar caminho',
                       chave: const ValueKey('export-copiar-caminho'),
                       aoTocar: () async {
@@ -1278,162 +1580,276 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
       );
     }
 
-    final rotulo = switch (_fase) {
-      _Fase.preparando => 'Preparando...',
-      _Fase.lendoVideos => 'Lendo os videos',
-      _Fase.desenhando => 'Desenhando os quadros',
-      _Fase.codificando => 'Codificando',
-      _ => '',
-    };
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(18, 16, 18, 20),
-      color: AmColors.panel,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              AppText(
-                rotulo,
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: AmColors.text,
-                ),
-              ),
-              const Spacer(),
-              if (_tempoRestante != null)
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: AppText(
-                    _tempoRestante!,
-                    key: const ValueKey('export-restante'),
-                    style: const TextStyle(fontSize: 11, color: AmColors.muted),
-                  ),
-                ),
-              AppText(
-                '${(_progresso * 100).round()}%',
-                style: TextStyle(fontSize: 13, color: AmColors.accent),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(6),
-            child: LinearProgressIndicator(
-              value: _progresso,
-              minHeight: 6,
-              backgroundColor: AmColors.chip,
-              valueColor: AlwaysStoppedAnimation<Color>(AmColors.accent),
-            ),
-          ),
-          const SizedBox(height: 8),
-          AppText(
-            _detalhe,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 11, color: AmColors.muted),
-          ),
-          const SizedBox(height: 4),
-          const AppText(
-            'Deixe o app aberto nesta tela ate terminar.',
-            style: TextStyle(fontSize: 10, color: AmColors.muted),
-          ),
-        ],
-      ),
-    );
+    // RENDERIZANDO: o rodape nao existe. Etapa, porcentagem, barra e
+    // "Cancelar" estao todos em `_telaDeProgresso`, dentro da capa que
+    // cobre a composicao — uma tela so, e nao duas barras de progresso.
+    return const SizedBox.shrink();
   }
 }
 
-/// UMA FILEIRA DE ESCOLHAS, com a vigente acesa.
+/// UMA PREDEFINICAO: o nome que a pessoa reconhece e os ajustes que ele
+/// significa.
 ///
-/// Sem `Slider` e sem menu suspenso: as listas daqui tem tres a seis
-/// itens e cabem todas na tela. Um menu esconderia atras de um toque a
-/// unica informacao que importa aqui — o que esta escolhido.
-class _Escolhas<T> extends StatelessWidget {
-  const _Escolhas({
-    required this.titulo,
-    required this.itens,
-    required this.atual,
-    required this.aoEscolher,
+/// A LISTA E CURTA DE PROPOSITO. A tela tinha cinco fileiras de escolhas
+/// (Formato, Tamanho, Quadros, Codec, Qualidade) e a folha do editor
+/// tinha as mesmas cinco mais a taxa — dezesseis pastilhas para dizer
+/// "quero postar isto no Reels". Aqui a pergunta e onde o video vai
+/// parar, e os numeros saem disso.
+class PredefinicaoDeExportacao {
+  const PredefinicaoDeExportacao(
+    this.chave,
+    this.nome,
+    this.detalhe,
+    this.ajustes,
+  );
+
+  /// O que vai na `ValueKey` — sem acento e sem espaco.
+  final String chave;
+  final String nome;
+  final String detalhe;
+  final ExportSettings ajustes;
+}
+
+/// NENHUMA PREDEFINICAO PROMETE "1080x1920", e o motivo importa.
+///
+/// `ExportSize` e uma ALTURA de saida, e a largura acompanha a proporcao
+/// do projeto: pedir "1080p" num projeto vertical de 1080x1920 da
+/// 608x1080 — menor, nao maior. Por isso a predefinicao de rede social e
+/// o TAMANHO DO PROJETO (que ja e 1080x1920 num projeto vertical), e quem
+/// diz os numeros de verdade e a linha de resumo, depois de resolvidos.
+const predefinicoesDeExportacao = <PredefinicaoDeExportacao>[
+  PredefinicaoDeExportacao(
+    'reels',
+    'Reels / TikTok',
+    'Tamanho do projeto · 30 fps',
+    ExportSettings(fps: 30, quality: 'alta'),
+  ),
+  PredefinicaoDeExportacao(
+    'youtube',
+    'YouTube 1080p',
+    'Altura 1080 · fps do projeto',
+    ExportSettings(size: ExportSize.p1080, quality: 'alta'),
+  ),
+  PredefinicaoDeExportacao(
+    'maxima',
+    'Maxima qualidade',
+    'Tamanho do projeto · alta',
+    ExportSettings(quality: 'alta'),
+  ),
+];
+
+/// A FICHA DE UMA PREDEFINICAO: acesa quando e a vigente.
+///
+/// Mesma pastilha das escolhas do painel de efeitos — `AmColors.campo`
+/// apagada, `AmColors.accentDim` acesa, raio de `CampoDeValor` — so que
+/// em duas linhas, porque aqui o nome sozinho nao diz o que vai sair.
+class _FichaDePredefinicao extends StatelessWidget {
+  const _FichaDePredefinicao({
+    required this.chave,
+    required this.nome,
+    required this.detalhe,
+    required this.acesa,
+    required this.aoTocar,
   });
 
-  final String titulo;
-  final List<(String, T)> itens;
-  final T atual;
-  final void Function(T) aoEscolher;
+  final Key chave;
+  final String nome;
+  final String detalhe;
+  final bool acesa;
+  final VoidCallback aoTocar;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    container: true,
+    excludeSemantics: true,
+    button: true,
+    selected: acesa,
+    label: '$nome $detalhe',
+    child: Tocavel(
+      key: chave,
+      onTap: aoTocar,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+        decoration: BoxDecoration(
+          color: acesa ? AmColors.accentDim : AmColors.campo,
+          borderRadius: BorderRadius.circular(CampoDeValor.raio),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            AppText(
+              nome,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: acesa ? AmColors.accent : AmColors.text,
+              ),
+            ),
+            const SizedBox(height: 2),
+            AppText(
+              detalhe,
+              style: const TextStyle(fontSize: 10.5, color: AmColors.muted),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+/// A CABECA DE UM CARTAO QUE ABRE E FECHA — a mesma do painel de efeitos
+/// (`am/effects_panel.dart`, `_CabecaDeGrupo`): triangulo pequeno, texto
+/// em caixa alta apagada e o tracinho a direita. Ela nao e um botao de
+/// acao; e uma divisoria.
+class _CabecaDeGrupo extends StatelessWidget {
+  const _CabecaDeGrupo({
+    super.key,
+    required this.rotulo,
+    required this.aberto,
+    required this.aoTocar,
+  });
+
+  final String rotulo;
+  final bool aberto;
+  final VoidCallback aoTocar;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    button: true,
+    expanded: aberto,
+    label: rotulo,
+    child: Tocavel(
+      onTap: aoTocar,
+      child: SizedBox(
+        height: 42,
+        child: Row(
+          children: [
+            Icon(
+              aberto
+                  ? CupertinoIcons.chevron_down
+                  : CupertinoIcons.chevron_right,
+              size: 13,
+              color: AmColors.muted,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: AppText(
+                rotulo,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: .6,
+                  color: AmColors.muted,
+                ),
+              ),
+            ),
+            Container(height: 1, width: 40, color: AmColors.hairline),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+/// O CHIP DA ESQUERDA das linhas do cartao — mesma largura e mesmo tipo
+/// do chip da `LinhaDeParametro`, para a coluna dos nomes nao pular.
+class _ChipDoRotulo extends StatelessWidget {
+  const _ChipDoRotulo(this.rotulo);
+
+  final String rotulo;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: 94,
+    height: 32,
+    alignment: Alignment.center,
+    padding: const EdgeInsets.symmetric(horizontal: 6),
+    child: AppText(
+      rotulo,
+      maxLines: 2,
+      textAlign: TextAlign.center,
+      overflow: TextOverflow.ellipsis,
+      style: const TextStyle(
+        fontSize: 12,
+        height: 1.1,
+        fontWeight: FontWeight.w600,
+        color: AmColors.muted,
+      ),
+    ),
+  );
+}
+
+/// [nome]  (A) (B) (C) — a linha de escolha do painel de efeitos.
+class _LinhaDeEscolha extends StatelessWidget {
+  const _LinhaDeEscolha({
+    super.key,
+    required this.rotulo,
+    required this.opcoes,
+    required this.valor,
+    required this.aoMudar,
+  });
+
+  final String rotulo;
+  final List<String> opcoes;
+  final int valor;
+  final ValueChanged<int> aoMudar;
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: 10),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    padding: const EdgeInsets.symmetric(vertical: 6),
+    child: Row(
       children: [
-        Padding(
-          padding: const EdgeInsets.only(bottom: 6),
-          child: AppText(
-            titulo,
-            style: const TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              color: AmColors.muted,
-            ),
-          ),
-        ),
-        Wrap(
-          spacing: 6,
-          runSpacing: 6,
-          children: [
-            for (final (nome, valor) in itens)
-              Semantics(
-                container: true,
-                excludeSemantics: true,
-                button: true,
-                selected: valor == atual,
-                label: '$titulo $nome',
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () => aoEscolher(valor),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 9,
-                    ),
-                    decoration: BoxDecoration(
-                      color: valor == atual ? AmColors.chip : null,
-                      borderRadius: BorderRadius.circular(8),
-                      border: valor == atual
-                          ? null
-                          : Border.all(color: AmColors.hairline),
-                    ),
-                    child: AppText(
-                      nome,
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: valor == atual ? AmColors.accent : AmColors.text,
+        _ChipDoRotulo(rotulo),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (var i = 0; i < opcoes.length; i++)
+                Semantics(
+                  container: true,
+                  excludeSemantics: true,
+                  button: true,
+                  selected: valor == i,
+                  label: '$rotulo ${opcoes[i]}',
+                  child: Tocavel(
+                    onTap: () => aoMudar(i),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 11,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: valor == i ? AmColors.accentDim : AmColors.campo,
+                        borderRadius: BorderRadius.circular(CampoDeValor.raio),
+                      ),
+                      child: AppText(
+                        opcoes[i],
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: valor == i ? AmColors.accent : AmColors.text,
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
       ],
     ),
   );
 }
 
-/// OS BOTOES DO FIM — o mesmo botao de sempre, so com outro rotulo.
-///
-/// Nao ha componente novo aqui: e o `CupertinoButton` com a pilula de
-/// `AmColors.chip` e o texto em `AmColors.accent` que a tela ja usava no
-/// "Copiar caminho". "Abrir" e "Compartilhar" entram no lugar dele, com
-/// a mesma forma, o mesmo raio e o mesmo corpo de texto.
-class _BotaoDoFim extends StatelessWidget {
-  const _BotaoDoFim({
+/// A PILULA DE CHIP — `AmColors.chip` com texto em `AmColors.accent`.
+/// E o botao secundario que a tela ja usava no "Copiar caminho"; "Abrir",
+/// "Compartilhar" e "Cancelar" usam a mesma forma.
+class _BotaoDeChip extends StatelessWidget {
+  const _BotaoDeChip({
     required this.rotulo,
     required this.aoTocar,
     required this.chave,
@@ -1448,7 +1864,7 @@ class _BotaoDoFim extends StatelessWidget {
     key: chave,
     color: AmColors.chip,
     borderRadius: BorderRadius.circular(12),
-    padding: const EdgeInsets.symmetric(vertical: 12),
+    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 22),
     onPressed: aoTocar,
     child: AppText(
       rotulo,
@@ -1460,10 +1876,15 @@ class _BotaoDoFim extends StatelessWidget {
 }
 
 class _BotaoGrande extends StatelessWidget {
-  const _BotaoGrande({required this.rotulo, required this.aoTocar});
+  const _BotaoGrande({
+    required this.rotulo,
+    required this.aoTocar,
+    this.chave,
+  });
 
   final String rotulo;
   final VoidCallback aoTocar;
+  final Key? chave;
 
   @override
   Widget build(BuildContext context) => Semantics(
@@ -1471,20 +1892,21 @@ class _BotaoGrande extends StatelessWidget {
     excludeSemantics: true,
     button: true,
     label: rotulo,
-    child: GestureDetector(
-      behavior: HitTestBehavior.opaque,
+    child: Tocavel(
+      key: chave,
+      haptico: true,
       onTap: aoTocar,
       child: Container(
-        height: 46,
+        height: 50,
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: AmColors.action,
-          borderRadius: BorderRadius.circular(11),
+          borderRadius: BorderRadius.circular(12),
         ),
         child: AppText(
           rotulo,
           style: TextStyle(
-            fontSize: 14,
+            fontSize: 15,
             fontWeight: FontWeight.w700,
             color: AmColors.onAction,
           ),

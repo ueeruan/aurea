@@ -81,6 +81,16 @@ void main() {
         layers: [layer],
       ));
       id = layer.id;
+      // O KEYFRAME AUTOMATICO NASCE DESLIGADO (`docs/keyframe-explicito.md`):
+      // editar um valor num instante sem marca nao grava nada — fica de
+      // pendencia esperando o losango. Estes testes falam da ANIMACAO em si
+      // (a curva do raio, a formiguinha, o Drawing Progress, o morph dos
+      // pontos), e nao da politica de quando a marca nasce — dessa cuidam
+      // `test/keyframe_explicito_test.dart` e `test/manual_auto_key_test.dart`.
+      // Por isso o interruptor e ligado DE PROPOSITO, como em
+      // `manual_auto_key_test.dart`: com ele ligado a edicao crava no instante
+      // editado, e so em trilha que JA esta animada (o ◈ de cada teste).
+      c.read(autoKeyframeProvider.notifier).state = true;
     });
 
     tearDown(() => c.dispose());

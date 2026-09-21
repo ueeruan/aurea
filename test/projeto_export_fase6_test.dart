@@ -77,27 +77,28 @@ void main() {
     expect(const AppSettings().copyWith(themeMode: 'claro').themeMode, 'claro');
   });
 
-  testWidgets('exportar em dois toques: Exportar, preset 1080p', (
+  // A FOLHA DO MEIO DEIXOU DE EXISTIR (20/09/2026).
+  //
+  // Este teste cobrava `export-preset-1080p/720p/4K` e
+  // `export-renderizar`: a folha de exportar do editor, que repetia em
+  // outra aparencia os MESMOS controles da tela de exportacao (formato,
+  // tamanho, quadros, codec, qualidade). Agora "Exportar" abre a tela
+  // direto, e e la que fica a unica decisao.
+  testWidgets('exportar em um toque: Exportar abre a tela, sem folha no meio', (
     tester,
   ) async {
     await openEditor(tester);
     await tester.tap(find.byKey(const ValueKey('editor-export'))); // 1
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('export-preset-1080p')), findsOneWidget);
-    expect(find.byKey(const ValueKey('export-preset-720p')), findsOneWidget);
-    expect(find.byKey(const ValueKey('export-preset-4K')), findsOneWidget);
+
     expect(
-      find.byKey(const ValueKey('export-renderizar')),
+      find.byKey(const ValueKey('export-predefinicao-reels')),
       findsOneWidget,
-      reason: 'ajustes finos sao Pro',
     );
-    await tester.tap(find.byKey(const ValueKey('export-preset-1080p'))); // 2
-    await tester.pumpAndSettle();
-    // A tela de exportacao abriu (o render de verdade nao roda em teste).
     expect(
-      find.byKey(const ValueKey('export-preset-1080p')),
-      findsNothing,
-      reason: 'a folha fechou',
+      find.byKey(const ValueKey('export-exportar')),
+      findsOneWidget,
+      reason: 'o segundo toque exporta',
     );
     expect(
       find.byKey(const ValueKey('editor-capture')),

@@ -21,6 +21,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   late Directory pasta;
+  late ProjectRepository repositorio;
   late ProviderContainer container;
   late ProjectsController c;
 
@@ -32,11 +33,10 @@ void main() {
     // simulacao do gesto e o proprio assunto.
     Interacao.ligada = true;
     pasta = Directory.systemTemp.createTempSync('aurea_projetos_');
+    repositorio = ProjectRepository(directory: pasta);
     container = ProviderContainer(
       overrides: [
-        projectRepositoryProvider.overrideWithValue(
-          ProjectRepository(directory: pasta),
-        ),
+        projectRepositoryProvider.overrideWithValue(repositorio),
       ],
     );
     c = container.read(projectsControllerProvider.notifier);
@@ -48,12 +48,19 @@ void main() {
   });
 
   tearDown(() async {
+    // `dispose` dispara, pelo `onDispose` do controlador, a gravacao do que
+    // ficou pendente — e cada gravacao atravessa um isolate (`compute`).
     container.dispose();
     Interacao.ligada = false;
     Interacao.zerar();
-    // A leitura inicial do disco e as gravacoes sao assincronas: apagar a
-    // pasta debaixo delas jogaria um erro no zone do teste que ja acabou.
-    await Future<void>.delayed(const Duration(milliseconds: 20));
+    // ESPERAR A FILA, NAO UM RELOGIO. Um `delayed` de 20 ms cobria a
+    // leitura inicial, mas nao a escrita: a PRIMEIRA abertura de isolate do
+    // processo custa muito mais que isso. A pasta temporaria sumia debaixo
+    // da escrita e o PathNotFoundException caia no zone de um teste que ja
+    // tinha terminado ("This test failed after it had already completed").
+    try {
+      await repositorio.flush();
+    } catch (_) {}
     try {
       pasta.deleteSync(recursive: true);
     } catch (_) {}

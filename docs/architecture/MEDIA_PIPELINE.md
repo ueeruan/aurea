@@ -1,159 +1,92 @@
 # Pipeline de mídia
 
-## Estado: interface pronta, implementação ausente
+Estado: **implementado para vídeo e imagem** (Fases 2 e 3). Áudio e export
+ainda não existem.
 
-O motor **define** o pipeline e **recusa** o que não pode fazer. Nada aqui está
-implementado ainda; o que existe são os contratos que garantem que a
-implementação não vai reintroduzir o caminho proibido.
-
-## O caminho proibido
+## Visão
 
 ```
-decode → bitmap → Swift/Kotlin → UI → GPU
+Importar ─► VideoSourceFactory::probe ─► Asset + Layer (motor)
+Preview  ─► MediaManager (uma fonte por layer) ─► VideoSource (thread de decode)
+                                                  └─ VideoDecoderBackend (MediaCodec no Android)
+                                                  └─ DecodedFrameCache
+Renderer ─► frame_for(instante) ─► textura (zero-copy ou planos)
+Timeline ─► ThumbnailService (decoder próprio, baixa prioridade)
 ```
 
-Cada seta dessa cadeia é uma cópia de um frame que pode ter 33 MB. A 60 fps,
-essa cópia sozinha consome a banda que o compositor precisa.
+## Android: `engine/platform/android/MediaCodecSource.cpp`
 
-## O caminho do Aurea
+- **Origem**: `fd:<n>[:off:len]`, `content://…` (o motor chama
+  `AureaEngine.openContentFd` pelo JNI e recebe um descritor novo — é o que
+  permite reabrir o vídeo de um projeto salvo) ou caminho comum.
+- **Sondagem**: `AMediaExtractor`: tamanho, rotação (`rotation-degrees`), fps
+  (chave ou mediana dos intervalos das primeiras amostras), duração, perfil →
+  profundidade de bits, cor (`color-standard/range/transfer`).
+- **Decoder**: `AMediaCodec` (hardware primeiro; se o hardware recusa ou esgota,
+  o decoder de software do sistema), prioridade tempo real, saída para um
+  `AImageReader` de 12 imagens:
+  - zero-copy: `AIMAGE_FORMAT_PRIVATE` + `GPU_SAMPLED_IMAGE` → `AHardwareBuffer`;
+  - planos: `YUV_420_888` → NV12/NV21/I420 (layout exótico é compactado para NV12).
+  O frame segura o `AImage` e o dono do leitor por referência: o leitor só morre
+  quando o último frame em voo na GPU é solto.
+- **Cor**: a do bitstream (formato de saída do codec) vence a do container. Sem
+  metadado, BT.601 abaixo de 720 linhas e BT.709 acima — nunca "tudo BT.709
+  limitado". A rotação do container é aplicada no shader (a chave é zerada no
+  `configure` para o codec não marcar o buffer).
+- **Segundo plano**: `suspend` devolve o codec ao sistema; `resume` recria.
 
-```
-Android:
-  FFmpeg / MediaExtractor   →  demux e parsing de container
-          ↓
-  MediaCodec                →  decode de hardware
-          ↓
-  Surface / AHardwareBuffer →  buffer compartilhado
-          ↓                    (o motor importa como textura)
-  Vulkan                    →  amostra direto
-          ↓
-  FrameGraph                →  composição
+## Motor: `VideoSource` (`src/media/VideoSource.cpp`)
 
-iOS:
-  AVAssetReader / demux     →  demux
-          ↓
-  VideoToolbox              →  decode de hardware
-          ↓
-  CVPixelBuffer             →  buffer compartilhado
-          ↓
-  CVMetalTexture            →  importa como textura
-          ↓
-  FrameGraph                →  composição
-```
+Uma thread por fonte, com UM pedido pendente (`DecodeRequest`: instante, modo,
+direção, velocidade):
 
-**Sem cópia de CPU em nenhum ponto do caminho de frame.**
+- **Coalescência**: pedido novo substitui o anterior ainda não atendido; se o
+  alvo novo está à frente e ao alcance de um GOP, a thread segue andando em vez
+  de fazer seek (`forwardRetargets`).
+- **Scrub**: frames intermediários são decodificados e descartados sem render;
+  arrastando para a frente, deixa dois frames prontos adiante.
+- **Playback**: mantém de 3 a 4 frames à frente do playhead (prefetch).
+- **Still**: o frame exato.
 
-## Papel do FFmpeg
+`DecodedFrameCache`: orçamento por quantidade e bytes; despejo temporal (frames
+atrás da direção do movimento custam 3×). O cache segura no máximo
+`imagens do leitor − 5` (sobram os frames em voo na GPU e uma folga para o codec
+não travar). `FrameRef` é contagem de referência intrusiva; o renderer solta o
+frame depois que a GPU termina (`defer_until_gpu_done`).
 
-Demux, mux, container, parsing, formatos, importação, fallback de codec, áudio,
-compatibilidade. **Não** é o compositor principal — o compositor é o Aurea
-Renderer.
+`MediaManager`: uma fonte por layer (duplicar uma layer abre outra fonte),
+coleta das ociosas, `suspend_all/resume_all`, estatísticas agregadas (seeks,
+coalescidos, descartados, decode médio, último seek, decoder e se é hardware).
 
-Sem codecs GPL. O que o FFmpeg faz aqui é ler containers e formatos; quem
-decodifica é o hardware, e quem codifica é o hardware.
+## Reprodução (`src/playback/Playback.cpp`)
 
-## Detecção de capacidades
+`PlaybackClock` com `MasterClock` trocável (o relógio de áudio entra aqui quando
+existir), `PlaybackController` (play, pause, toggle, seek, scrub begin/move/end,
+passo, loop, velocidade) e `FrameScheduler` (frames perdidos). O modo do
+controller decide o modo do decode.
 
-`DeviceCapabilities` é preenchida pela plataforma (Android: `MediaCodecList`;
-iOS: `VTIsHardwareDecodeSupported` + sondagem). O motor então se adapta:
+## Miniaturas (`src/media/ThumbnailService.cpp`)
 
-| Pergunta | Uso |
-| --- | --- |
-| H.264 / HEVC / AV1 / VP9? | escolhe o caminho; sem codec, avisa que a reprodução será lenta |
-| 8 ou 10 bits? | formato de textura interna |
-| HDR? | pipeline de cor |
-| resolução máxima? | teto de preview e de export |
-| FPS máximo? | orçamento de decode |
-| instâncias simultâneas? | paralelismo de decode REAL |
-| aceleração de hardware? | decide entre zero-copy e cópia |
+Thread própria em prioridade de fundo, decoder próprio sempre em modo CPU,
+quadro-chave mais próximo (baldes de 250 ms), conversão YUV→RGBA8 reduzida com a
+matriz/faixa e a rotação do vídeo, cache LRU de 900 miniaturas, fila com o pedido
+mais recente primeiro. A UI pede por `query_thumbnail` e redesenha quando
+`thumbnailGeneration` muda no status.
 
-Nunca se pergunta "é um celular?" para assumir o pior. Pergunta-se "quantos
-decoders HEVC 4K este aparelho tem?" e decide-se por isso.
+## Imagens
 
-## `ExternalImageHandle`
+A plataforma decodifica (JPEG/PNG/HEIC) em RGBA8 com alfa reto e entrega ao
+motor com a origem (`import_image(…, sourcePath)`). O projeto salva a origem; ao
+reabrir, o motor pede os pixels de volta pelo `EngineConfig::imageLoader`
+(JNI → `AureaEngine.decodeImage`).
 
-O ponto de entrada do zero-copy:
+## Importação de vídeo
 
-```cpp
-struct ExternalImageHandle {
-    void* nativeHandle;    // AHardwareBuffer* / CVPixelBufferRef
-    u32   width, height;
-    PixelFormat format;    // NV12, P010, RGBA8...
-    i32   presentationTime;
-    u32   timescale;
-};
-```
+`Engine::import_video`: sonda fora do lock, cria asset e layer no topo; o
+primeiro clipe faz a composição adotar tamanho (teto do aparelho aplicado com UMA
+escala, preservando a proporção), fps e duração; a layer é ancorada no centro e
+encaixada.
 
-O motor só repassa; quem cria e destrói é a camada de mídia da plataforma. O
-backend importa como textura e **cuida da sincronização**: o decoder sinaliza um
-fence, o backend o espera antes de amostrar. Devolver a textura antes do fence é
-o bug clássico de frame rasgado — por isso a interface só expõe
-`import_external_image`, que já faz isso.
+## Fora do escopo atual
 
-## Proxy
-
-Um 4K HEVC não decodifica em tempo real em aparelho médio para *scrubbing*, ainda
-que decodifique para playback. O proxy resolve:
-
-```
-Original:  4K HEVC
-Proxy:     720p ou 540p, H.264, gerado em segundo plano
-```
-
-- o preview usa o proxy;
-- **a exportação SEMPRE usa o original**;
-- a troca é transparente: o usuário não escolhe, e não precisa saber.
-
-## Metadados na importação
-
-Abrir o container de um 4K HEVC custa dezenas de ms. Fazer isso ao arrastar uma
-camada travaria o arrasto. Então os metadados são lidos UMA vez, na importação, e
-guardados no `.aurea`:
-
-- codec, perfil, nível, profundidade, subsampling;
-- primárias e transferência de cor;
-- resolução, taxa, contagem de frames;
-- VFR? e a lista de tamanhos de amostra (sem ela, buscar um frame no meio de um
-  VFR é chute).
-
-## Áudio
-
-O áudio é o **master clock** durante o playback. A camada de áudio precisa
-produzir uma posição consultável; o renderer pergunta "que instante é agora?" e
-desenha o frame correspondente.
-
-Se o áudio não estiver pronto, o motor cai no relógio do sistema por um frame e
-**registra isso na telemetria**. Nunca finge que o áudio está sincronizado.
-
-Waveform: pré-computada num arquivo plano de picos por bucket. Desenhar a
-waveform lendo o áudio inteiro a cada repaint seria absurdo.
-
-## Export
-
-```
-fonte → decode HW → Aurea GPU Renderer → encode HW → mux
-```
-
-`PreviewScheduler` e `ExportScheduler` são **separados** — o export não compete
-com o preview e não herda a degradação dele. Mas ambos compartilham timeline,
-compositor, efeitos, shaders, pipeline de cor, 3D, máscaras e avaliação de
-animação.
-
-É essa partilha que faz o resultado final ser o mesmo que o usuário viu.
-
-### Estado atual
-
-`start_export` devolve `NotImplemented` e **não cria arquivo nenhum**. Um arquivo
-vazio que o usuário acha que é o trabalho dele é pior do que um erro claro. Um
-teste verifica que nenhum arquivo é criado.
-
-## Ordem de implementação
-
-1. camada de mídia Android: demux + `MediaCodec` → `AHardwareBuffer` →
-   `import_external_image`;
-2. passes de decode e de composição no FrameGraph;
-3. proxy automático;
-4. áudio e master clock;
-5. codificador de hardware + muxer (export).
-
-Os passos 1 e 2 dependem do backend Vulkan.
+Decodificação de áudio (waveforms, relógio de áudio), export, proxies.

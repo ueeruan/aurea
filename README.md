@@ -33,8 +33,9 @@ Aureabeta/
 │   │   ├── bridge/            CONTRATO DE MEMÓRIA (BridgePods.hpp)
 │   │   └── shaders/           fonte única dos shaders
 │   ├── src/                   implementação
-│   ├── tests/                 171 testes, rodam sem GPU
-│   └── platform/              ponte JNI (Android) e ObjC++ (iOS, futuro)
+│   ├── tests/                 243 testes (os de GPU usam o Vulkan do host)
+│   ├── gpu/vulkan/            backend Vulkan (Android e host de testes)
+│   └── platform/              ponte JNI + MediaCodec (Android) e ObjC++ (iOS, futuro)
 │
 ├── android/                   UI nativa
 │   └── app/src/main/
@@ -93,18 +94,18 @@ funcionar" e "não instalar".
 
 ## Estado da implementação
 
-O que **funciona hoje**: timeline, animação por keyframe, comandos, undo/redo,
-projeto e serialização `.aurea`, autosave com journal e recuperação pós-crash,
-orçamento de memória, pool de tarefas, agendamento adaptativo, o compilador de
-efeitos e o grafo de frame (estrutura), tudo coberto por 171 testes.
+O que **funciona hoje**: backend Vulkan (preview em superfície nativa, cache
+de pipeline, frames em voo, timestamps de GPU), FrameGraph e EffectGraph com
+fusão de passes, 12 efeitos novos (inclusive o Motion Tile portado), decode de
+vídeo por MediaCodec (zero-copy por AHardwareBuffer ou planos pela CPU) com a
+cor do próprio arquivo, scrub coalescido, playback no ritmo do conteúdo, preview
+adaptativo, miniaturas da timeline, imagens que voltam ao reabrir o projeto,
+desfazer/refazer por snapshot, timeline, keyframes, projeto `.aurea` com autosave
+e recuperação, painel de desempenho — coberto por 243 testes no host.
 
-O que **não existe**: backend gráfico (Vulkan/Metal), decode de hardware,
-renderização de efeitos, texto, vetor, máscara renderizada, 3D, partículas,
-áudio e export.
-
-O motor **recusa** o que não faz, em vez de fingir: `start_export` devolve
-`NotImplemented` e não cria arquivo nenhum; comandos de 3D devolvem
-`NotImplemented`; `GPUBackend::create_default()` devolve `nullptr`.
+O que **não existe ainda**: Metal (iOS), áudio, export, texto, vetor, máscara
+renderizada, 3D e partículas. A UI mostra esses pontos de entrada e avisa "em
+breve" em vez de fingir; o motor recusa (`NotImplemented`) o que não faz.
 
 Ver [`docs/architecture/ENGINE.md`](docs/architecture/ENGINE.md) para a lista
 completa e a ordem de implementação.

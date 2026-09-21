@@ -1,153 +1,63 @@
-# Performance
+# Desempenho
 
-## O princípio
+Estado: **métricas implementadas**; números medidos listados abaixo com a
+origem. Aparelho real ainda não medido (nenhum conectado até agora).
 
-```
-CPU organiza.  GPU processa.  Hardware decodifica.  Hardware codifica.
-UI apenas controla.
-```
+## Orçamentos
 
-As três coisas proibidas:
+- Preview a 60 Hz: 16,67 ms por frame; a 30 Hz: 33,33 ms. O
+  `AdaptiveResolutionController` (modo AUTO) usa o custo medido do frame para
+  descer/subir a escala do preview (1/2, 1/4, 1/8) sem mudar coordenadas.
+- O preview redesenha na taxa do CONTEÚDO (ver RENDERER.md, "ritmo"), não na do
+  painel; a UI (Compose) roda na taxa do painel, independente do preview.
+- Miniaturas em prioridade de fundo; preview sempre na frente; export (futuro)
+  separado.
 
-- `GPU → CPU → GPU` — ler o frame de volta entre passes;
-- `decode → bitmap → Swift/Kotlin → UI → GPU`;
-- qualquer processamento pesado na thread da UI.
+## O que é medido (`bridge::PerfPOD`, painel DEV)
 
-## Onde o tempo vai, e como cada item é atacado
+Preview FPS e FPS da UI; CPU do frame (prepare + gravação); GPU do frame e por
+estágio via timestamp queries (conversão de cor, efeitos, blur, glow,
+composição, saída); decode médio; aquisição e present do swapchain; último seek;
+frames perdidos (total e janela recente); escala do preview e resolução; frames e
+bytes no cache de decode; RAM (DeviceCapabilities — no Android por
+`/proc/meminfo`) e memória de GPU; passes executados/cortados; texturas físicas,
+aliasadas e criadas no frame; pipelines totais e compilados "ao vivo" (depois do
+estado estável); zero-copy ligado; decoder e se é hardware; seeks e pedidos
+coalescidos; frames aproximados (scrub); camadas renderizadas; estado térmico.
 
-| Custo | Atacado por |
-| --- | --- |
-| Alocação por frame | arena de bump; buffers reusados; nenhuma alocação no caminho de frame |
-| Travessias de bridge | um lote de comandos por frame; status POD (3 chamadas no total) |
-| Compilação de pipeline | cache por chave estrutural + pré-aquecimento |
-| Banda de memória dos efeitos | fusão de efeitos (N passes virando 1) |
-| Pico de memória dos intermediários | aliasing no FrameGraph |
-| Decode repetido | cache de frames com chave de conteúdo + prefetch |
-| Resolução | preview adaptativo com orçamento medido por display |
-| Recompilação do grafo | revisão estrutural — só recompila quando a topologia muda |
+O painel DEV do editor mostra esses campos por cima do preview (leitura a cada
+250 ms, só com o painel aberto).
 
-## Orçamento de frame
+## Garantias com teste
 
-```
-60 Hz  → 16,67 ms
-90 Hz  → 11,11 ms
-120 Hz →  8,33 ms
-```
+- Playback estável não cria textura (TransientTexturePool) — `test_gpu.cpp`.
+- Nenhum pipeline compilado durante o playback depois do pré-aquecimento (15
+  pipelines na inicialização; compilação tardia gera aviso no log).
+- Scrub de 12 posições em rajada faz no máximo 3 seeks (coalescência) —
+  `test_gpu.cpp`/`test_media.cpp`.
 
-Divisão do orçamento: decode 15%, apresentação 10%, reserva 20%, render 55%.
+## Números medidos
 
-A reserva não é folga: um frame que usa 100% do orçamento já está perdido,
-porque a variação normal o empurra para fora. O limiar de conforto é 80%.
+Emulador Android (API 34, x86_64, GPU do host — RTX 3050 — via gfxstream;
+caminho de planos pela CPU porque o gfxstream não amostra YUV externo), vídeo
+H.264 1280×720 30 fps, antes do ritmo por conteúdo:
 
-## Threads
+| Métrica | Valor |
+|---|---|
+| Preview (apresentação) | 60 fps, 0 frames perdidos |
+| CPU do frame | 9,6 ms (CPU x86 emulada) |
+| GPU do frame | 0,4 ms |
+| Decode médio | 2,2 ms/frame |
+| Aquisição / present | 4,5 ms / 0,8 ms |
+| Com desfoque gaussiano | 8 passes, blur 0,1 ms de GPU |
+| Com desfoque + Motion Tile | 9 passes, 2 texturas aliasadas |
+| Seek | 1,4 – 4,3 ms |
+| Cor (barras do testsrc2 vs ffmpeg) | erro máximo 3/255 |
 
-| Thread | O quê | Nunca faz |
-| --- | --- | --- |
-| UI | gestos, painéis, escrita de comandos | processar frame, esperar o motor |
-| Render | fila, animação, grafo, submissão | esperar a GPU terminar o frame anterior |
-| Workers | decode, proxy, miniatura, waveform, geometria | bloquear esperando outro worker |
-| Áudio | mixer — o master clock | esperar o vídeo |
+Host (Windows, RTX 3050): 243 testes do motor, 0 falhas, incluindo o backend
+Vulkan real e os golden frames.
 
-### Dimensionamento do pool
+## Pendente
 
-`recommended_worker_count()` usa núcleos de **performance**, não o total, e
-deixa dois de folga (um para a thread de render, um para o sistema).
-
-Um pool que ocupa os 8 núcleos de um big.LITTLE deixa a thread de render sem
-CPU — o scheduler do sistema a tira no meio do frame, e o ganho dos núcleos
-extras some. O teto também é limitado por memória disponível: mais workers é
-menos memória para cache, e menos cache é mais decode repetido.
-
-`decode_parallelism()` é limitado pelo número de **instâncias de decoder de
-hardware**. Pedir 8 decodes a um aparelho com 2 instâncias faz 6 esperarem —
-mais lento do que pedir 2.
-
-### `wait()` que não bloqueia
-
-Se quem espera é um worker, ele **trabalha** em vez de bloquear. Bloquear um
-worker esperando outro é como um pool de N threads vira pool de 1 — ou trava de
-vez quando todos esperam.
-
-## Memória
-
-Orçamento por categoria, derivado da RAM medida do aparelho, não de uma
-constante escolhida no escuro:
-
-| Categoria | Fatia | Ordem de descarte |
-| --- | --- | --- |
-| Thumbnails | 6% | 1ª |
-| Proxies | 10% | 7ª |
-| DecodedFrames | 24% | 3ª |
-| RenderedFrames | 16% | 2ª |
-| GpuTextures | 20% | 5ª |
-| GpuGeometry | 10% | 4ª |
-| Audio | 4% | 6ª |
-| Assets | 8% | — |
-| Persistent | 2% | **nunca** |
-
-A ordem de descarte é por custo de refazer: uma miniatura custa um decode
-pequeno; um frame decodificado custa um decode grande; geometria custa um
-re-upload.
-
-`Persistent` (o projeto aberto) **nunca** é recusado nem descartado. Se ele não
-couber, o problema é o teto — e falhar aqui perderia trabalho do usuário.
-
-Antes de recusar uma reserva, o gerenciador **pede** aos caches da categoria que
-liberem. Recusar sem tentar seria deixar memória ocupada por cache enquanto o
-trabalho real falha.
-
-## Cache
-
-Sete níveis: `DecodedFrameCache`, `RenderedFrameCache`, `ThumbnailCache`,
-`AudioCache`, `AssetCache`, `ShaderCache`, `DiskCache`.
-
-A chave do cache de frames combina **tudo** que influencia o frame: fonte, tempo,
-transform avaliado, propriedades de efeito, máscaras, dependências. Se nada
-mudou, não se renderiza de novo — é o que faz arrastar um slider parado não
-custar nada, e o que faz o scrubbing para trás ser rápido.
-
-## Prefetch
-
-| Situação | Janela |
-| --- | --- |
-| Parado | simétrica curta (o usuário pode ir para qualquer lado) |
-| Playback / scrub para frente | 1 atrás, `n+2` à frente |
-| Scrub para trás | `n+2` atrás, 1 à frente |
-
-Pré-decodificar para trás durante um arrasto para a frente é trabalho jogado
-fora — o usuário nunca vai ver aqueles frames.
-
-## Térmico
-
-Monitorado por `ThermalState`, informado pela plataforma (`PowerManager` no
-Android, `ProcessInfo` no iOS).
-
-| Estado | Ação |
-| --- | --- |
-| Nominal / Fair | nada |
-| Serious | para de subir a resolução |
-| Critical / Emergency | desce mesmo com o frame dentro do orçamento |
-
-Descer no nível crítico acontece **antes** de o frame estourar: o aparelho VAI
-estrangular, e esperar o estrangulamento produzir engasgo.
-
-A ordem de degradação nunca mata o playback: reduz preview, mantém a UI fluida,
-e só o export nunca degrada.
-
-## Telemetria
-
-Painel de debug com: FPS, tempo de frame, tempo de GPU, tempo de CPU, decode,
-frames perdidos, RAM, memória de GPU, taxa de acerto de cache, passes, draw
-calls, triângulos, efeitos ativos, camadas ativas.
-
-Sem timestamp query disponível, o painel mostra **"não medido"** em vez de zero —
-um número inventado seria pior do que a ausência do número.
-
-## O que falta medir
-
-O motor roda hoje headless: sem backend gráfico, sem decode, sem composição. Os
-números de frame time e de banda acima são **orçamentos de projeto**, derivados
-de medição de aparelho para este tipo de pipeline — não medições do Aurea.
-
-A primeira tarefa depois do backend Vulkan é instrumentar e substituir estes
-números pelos reais.
+Medir em aparelho Android real (zero-copy, 1080p/4K, temperatura, memória) e
+refazer a tabela com o ritmo por conteúdo ativo.

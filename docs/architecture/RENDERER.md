@@ -1,121 +1,138 @@
 # Renderer
 
+Estado: **implementado** (Fase 2). Este documento descreve só o que existe no
+código; o que ainda não existe está na seção "Fora do escopo atual".
+
 ## A regra
 
-Nada acima de `GPUBackend` menciona Vulkan ou Metal. O compositor, o grafo de
-efeitos, o motor 3D e o export falam em `TextureHandle`, `PipelineHandle` e
-`CommandList`.
-
-Consequência: o MESMO código de composição roda no preview Android (Vulkan) e no
-preview iOS (Metal). Preview e export serem visualmente idênticos deixa de
-depender de disciplina e passa a ser consequência de arquitetura — só existe uma
-implementação.
+Nada acima de `GPUBackend` (`engine/include/aurea/render/GPUBackend.hpp`)
+conhece Vulkan ou Metal. Renderer, FrameGraph e EffectGraph falam em
+`TextureHandle`, `PipelineHandle`, `SamplerHandle` e `CommandList`. O backend
+Vulkan (`engine/gpu/vulkan/`) é uma biblioteca separada (`aurea_vulkan`); o
+núcleo (`aurea_core`) compila sem ele — os testes de timeline, animação e
+serialização rodam sem GPU.
 
 ```
-        ┌────────────────────────────┐
-        │      Compositor            │
-        │  FrameGraph · EffectGraph  │   ← não conhece API gráfica
-        └─────────────┬──────────────┘
-                      │  GPUBackend (interface pura)
-          ┌───────────┴───────────┐
-          │                       │
-     VulkanBackend           MetalBackend
-      SPIR-V                  MSL (de SPIR-V)
+ Engine ── prepare (lock do modelo) ──► FrameSnapshot
+        └─ render (sem lock) ──► Renderer ─► EffectGraph ─► FrameGraph ─► GPUBackend
+                                                                          └─ vk::Backend
 ```
 
-## Zero-copy
+A plataforma cria o backend e o entrega ao motor (`EngineConfig::backend`); o
+motor assume a posse. No Android isso acontece em `aurea_jni.cpp`; nos testes do
+host, o mesmo `vk::Backend` roda na GPU da máquina (RTX 3050).
 
-O ponto crítico do pipeline. Um frame decodificado pelo hardware chega como
-`AHardwareBuffer` (Android) ou `CVPixelBuffer` (iOS). A ponte o importa como
-textura amostrável **sem cópia de CPU**.
+## Backend Vulkan
 
-```
-Android:
-  MediaCodec → Surface / AHardwareBuffer → Vulkan → FrameGraph → Display
+| Peça | Arquivo | O que faz |
+|---|---|---|
+| Loader | `VulkanLoader.*` | Carrega `libvulkan.so`/`vulkan-1.dll` em runtime (`VK_NO_PROTOTYPES`); tabelas de funções por X-macro. |
+| Dispositivo | `VulkanDevice.cpp` | Exige Vulkan 1.1. Extensões: swapchain, superfície Android, `VK_ANDROID_external_memory_android_hardware_buffer`, `queue_family_foreign`, conversão YCbCr. Camada de validação só em debug e só se instalada. Preenche `GPUCapabilities` (um struct, sem checagens espalhadas). |
+| Memória | `VulkanCommon.cpp` (`MemoryAllocator`) | Blocos de 64 MB (device) e 16 MB (host), sub-alocação first-fit com coalescência e alinhamento a `bufferImageGranularity`; alocação dedicada acima de meio bloco. |
+| Anéis por frame | `HostRing` | Uniforms (256 KB, UBO dinâmico) e staging (4 MB) por frame em voo — nada é alocado durante o playback. |
+| Frames em voo | `FrameContext` ×3 | Fence, semáforo de aquisição, pools de descritor por frame, query pool de timestamps, fila de destruição adiada. `BackendConfig::framesInFlight` limitado a 1..3. |
+| Swapchain | `VulkanSwapchain.cpp` | FIFO, pré-rotação (a imagem sai girada no shader, o compositor do sistema não gasta um passe), ≥3 imagens, recriação por `OUT_OF_DATE`/`SUBOPTIMAL`/resize. No Android a extensão vem do `surfaceChanged` (o `currentExtent` fica um passo atrás quando o layout muda e a imagem sairia esticada). |
+| Recursos | `VulkanResources.cpp` | Texturas, buffers, samplers, shaders, pipelines; destruição adiada até a GPU terminar (`defer_until_gpu_done`); caches de render pass, framebuffer e pipeline layout (um por sampler imutável). |
+| Comandos | `VulkanCommands.cpp` | `CommandList` (barreiras explícitas vindas do FrameGraph, render pass, bind, push constants, draw/dispatch, timers, labels), begin/end de frame, submit esperando em `COLOR_ATTACHMENT_OUTPUT`, present. |
 
-iOS:
-  VideoToolbox → CVPixelBuffer → CVMetalTexture → Metal → FrameGraph → Display
-```
+Layout universal de descritores (set 0): bindings 0–3 `sampler2D`, 4 UBO
+dinâmico, 5–6 imagens de storage, 7 SSBO; push constants de 128 bytes. Render
+passes com layout inicial = final `COLOR_ATTACHMENT_OPTIMAL` e dependências
+externas; as transições são as barreiras planejadas pelo FrameGraph.
 
-A sincronização é responsabilidade do backend: o decoder sinaliza um fence, o
-backend o espera antes de amostrar. Devolver a textura antes do fence é o bug
-clássico de frame rasgado — por isso a interface só expõe
-`import_external_image`, que já cuida disso.
+Cache de pipeline: `VkPipelineCache` persistido em
+`<cacheDir>/aurea_pipeline_cache.bin` (gravação atômica por rename) no
+`suspend` e no `shutdown`. O `ShaderLibrary` pré-aquece os pipelines na
+inicialização e conta compilações depois de `mark_steady_state` (chamado após o
+primeiro frame): compilar pipeline durante o playback vira aviso no log.
 
-## Fonte única de shader
+Perda de dispositivo: `is_device_lost` → `Engine::recover_device_locked`
+recria backend e renderer e reabre as fontes de mídia.
 
-O shader é escrito **uma vez**, em GLSL, em `engine/include/aurea/shaders/`.
-Android recebe SPIR-V. iOS recebe MSL gerado de SPIR-V no build (SPIRV-Cross),
-não escrito à mão.
+## Zero-copy de vídeo (Android)
 
-Convenções:
+`MediaCodec → AImageReader (PRIVATE, GPU_SAMPLED_IMAGE) → AImage →
+AHardwareBuffer → VkImage`. A importação (`import_external_image`):
 
-- espaço de cor **linear**. A conversão de sRGB acontece na importação; a de
-  saída, no passe final. Um shader de efeito nunca converte sozinho;
-- sem ramificação dependente de dado quando a mesma conta sai por aritmética.
-  Em GPU mobile um `if` divergente custa mais que uma multiplicação por zero.
+- usa o **formato externo** do buffer (`VkExternalFormatANDROID`) e uma
+  `VkSamplerYcbcrConversion` por (formato, matriz, faixa);
+- a matriz e a faixa são **as do arquivo** (`ExternalImageDesc::matrix/fullRange`
+  vindos de `VideoColorInfo`), nunca a sugestão do gralloc — muitos aparelhos, e
+  o emulador, sugerem BT.601 cheio para qualquer vídeo;
+- o componente de mapeamento e os offsets de croma são os sugeridos pelo driver;
+- a amostra sai em RGB não linear; o shader `video/yuv_external.frag` só aplica
+  curva de transferência, primárias e tone map;
+- buffers que já são RGB (formato comum ou externo com sugestão `RGB_IDENTITY`)
+  usam sampler sem conversão;
+- a VkImage é cacheada por `AHardwareBuffer*` (o ImageReader recicla um
+  conjunto fixo): em regime, importar custa zero; aquisição da fila FOREIGN com
+  layout `UNDEFINED` e devolução no fim do frame.
 
-## Cache de pipeline
+Quirk conhecido: o emulador (gfxstream) anuncia as extensões mas amostra o
+buffer YUV externo como bytes crus. Lá (`ro.boot.qemu`/`ranchu`) o motor usa os
+planos pela CPU. **O caminho zero-copy ainda não foi validado em aparelho real.**
 
-Compilar um pipeline custa de 5 a 200 ms. Três defesas:
+Fallback (sem importação de AHB ou no emulador): planos NV12/NV21/I420/P010 do
+`AImageReader YUV_420_888` sobem por textura (uma por plano, persistentes por
+layer) e o shader `video/yuv_planar.frag` faz a conversão com a mesma
+matemática (`common/color.glsl`).
 
-1. **cache por chave estrutural** — `(shader, blend, formats, samples)`. Duas
-   camadas com o mesmo blend compartilham o pipeline;
-2. **pré-aquecimento** ao abrir o projeto e antes de exportar. Nenhum pipeline
-   novo durante o playback nem no meio da exportação;
-3. **invalidação sem perda** — perder o dispositivo apaga os handles do driver
-   mas mantém as chaves. O cache do motor continua válido.
+## Renderer (`src/render/Renderer.cpp`)
 
-Se um pipeline não está em cache e não compila, o passe é **pulado** e o fato
-aparece na telemetria. Nunca se desenha com pipeline inválido, e nunca se finge
-que o efeito rodou.
+**prepare** (sob o lock do modelo, sem GPU): percorre a ordem da composição,
+avalia transform e opacidade pelas trilhas (sem mexer no modelo; inclui a
+cadeia de pais), pede os frames de vídeo ao `MediaManager` (modo Still, Scrub ou
+Playback), sobe imagens, planeja os efeitos (`EffectGraph::plan`) e monta o
+`FrameSnapshot`.
 
-## Orçamento de frame
+**render** (sem lock): `begin_frame` → uploads → por layer, a fonte (vídeo
+zero-copy/planar, imagem por `rgba_to_linear`, sólido por clear, 1×1 quando não
+tem efeito) → `EffectGraph::build` → UM passe de composição com blend de
+hardware (Normal e Add) e push constants → passe de saída para o swapchain
+(letterbox, pré-rotação, dither) → `compile`/`execute` do FrameGraph →
+`end_frame`. Frames de vídeo usados são soltos com `defer_until_gpu_done`.
 
-O orçamento vem da cadência REAL do display:
+Espaço de trabalho: linear BT.709, pré-multiplicado, RGBA16F. SDR entra e sai
+pela curva sRGB (os códigos fazem ida e volta sem mudar). HDR: PQ/HLG com branco
+de referência de 203 nits e tone map de Reinhard na luminância.
 
-| Display | Orçamento |
-| --- | --- |
-| 60 Hz | 16,67 ms |
-| 90 Hz | 11,11 ms |
-| 120 Hz | 8,33 ms |
+## Preview adaptativo e ritmo
 
-Divisão: decode 15%, apresentação 10%, reserva 20%, render 55%. A reserva existe
-porque um frame que usa 100% do orçamento já está perdido — a variação normal o
-empurra para fora.
+- Escala do preview FULL, 1/2, 1/4, 1/8 ou AUTO sem mudar coordenadas lógicas.
+  AUTO: `AdaptiveResolutionController` pelas métricas reais do frame (orçamento
+  16,67 ms ou 33,33 ms). Por layer, a densidade de texel é a potência de dois
+  acima da escala na tela × fator do preview.
+- O preview tem a **sua** thread de render (`Engine::render_thread_main`),
+  acordada por comando, frame novo do decoder ou mudança de superfície. Com
+  `render_frame(onlyIfChanged)` ela só redesenha quando o frame do playhead
+  muda, chega comando/superfície nova ou chega um frame de vídeo que faltava —
+  um vídeo de 30 fps redesenha 30 vezes por segundo, não na taxa do painel.
+  Entre frames ela dorme até o próximo frame devido.
 
-## Preview adaptativo
+## Outras saídas
 
-Ordem de degradação, sempre nesta ordem:
+- `render_offscreen(target, w, h)`: o instante atual numa textura, esperando os
+  frames EXATOS de vídeo (base do export e dos testes visuais).
+- `capture_frame_rgba(maxDim, …)`: o frame em RGBA8 sRGB (miniatura do projeto
+  na Home).
 
-```
-1. sobra tempo?              não faz nada
-2. passou do orçamento?      reduz a resolução um degrau (1 → 1/2 → 1/4 → 1/8)
-3. ainda passa?              reduz efeitos caros para a versão de preview
-4. aqueceu?                  reduz mais cedo, antes de o aparelho travar
-```
+## Shaders
 
-Anti-oscilação: descer exige 3 frames seguidos acima do orçamento; subir exige
-90 frames confortavelmente abaixo. Todo degrau trava por 30 (descer) ou 60
-(subir) frames. Sem isso a resolução pisca, o que é pior do que ficar baixo.
+`engine/shaders/{common,video,composite,effects}/`, compilados para SPIR-V no
+build pelo `glslc` do NDK (`cmake/AureaShaders.cmake`), embutidos no binário
+(`ShaderId` gerado + blobs). Dependência nos `.glsl` incluídos: mudar um include
+recompila quem o usa.
 
-A escolha manual do usuário **nunca** é sobreposta pelo automático. Ele mandou;
-ele vê o resultado — e a UI avisa se ficar lento, em vez de desobedecer.
+## Testes
 
-**O export nunca degrada.** Preview e export compartilham timeline, compositor,
-shaders, pipeline de cor, 3D, máscaras e avaliação de animação. O que muda é só
-o quanto o preview degrada.
+`engine/tests/test_gpu.cpp` roda o backend Vulkan real: testes analíticos
+(exposição, saturação, pilha fundida, níveis, curvas, tinta, energia/simetria do
+blur, glow, nitidez, NV12 BT.709 limitado e BT.601 cheio, ida e volta SDR),
+golden frames (transform, gaussian blur, glow, exposure, motion tile —
+`engine/tests/golden/`, regerar com `AUREA_UPDATE_GOLDENS=1`), playback estável
+sem criar textura, captura RGBA e o motor ponta a ponta com vídeo sintético.
 
-## Estado atual
+## Fora do escopo atual
 
-Nenhum backend existe. `GPUBackend::create_default()` devolve `nullptr`, e o
-`Engine` trata isso: registra um aviso, desativa o preview e segue de pé. Não é
-um stub fingindo funcionar — é a resposta correta para "que backend usar?".
-
-O que falta, em ordem:
-
-1. `VulkanBackend` — device, swapchain, import de `AHardwareBuffer`,
-   compilador de SPIR-V em runtime para as variantes;
-2. passes de composição no FrameGraph;
-3. `MetalBackend` — device, `CAMetalLayer`, import de `CVPixelBuffer`,
-   carregamento do MSL traduzido no build.
+Metal (iOS), export de vídeo (reusará `render_offscreen`), modos de mesclagem
+além de Normal/Add, 3D, texto e formas vetoriais.

@@ -134,12 +134,7 @@ class _CatalogoDeEfeitosState extends ConsumerState<CatalogoDeEfeitos> {
       case _Efeito(:final tipo):
         umPasso(
           ref,
-          () => c.addEffect(
-            id,
-            tipo,
-            // O MESMO efeito que a previa mostra: o preset da tira.
-            pronto: PreviasDosEfeitos.instance.prontoDaPrevia(tipo),
-          ),
+          () => c.addEffect(id, tipo, pronto: prontoAoAplicar(tipo)),
         );
         ref.read(effectRecentsProvider.notifier).registrar(tipo);
         Navigator.of(context).maybePop();
@@ -464,4 +459,29 @@ class _CatalogoDeEfeitosState extends ConsumerState<CatalogoDeEfeitos> {
       ),
     );
   }
+}
+
+/// O QUE O TOQUE NO CATALOGO APLICA NA CAMADA.
+///
+/// Em regra, o mesmo preset que a miniatura mostrou: quem toca na previa
+/// espera ver aquele efeito, e muitos efeitos com os valores iniciais nao
+/// mudam nada visivel.
+///
+/// O MOTION TILE E A EXCECAO, e foi relato de testador: "a imagem comprime,
+/// diminui de tamanho, parece voltar". A miniatura dele mostra o preset
+/// Tijolos (mosaico 50% x 25%), e aplicar esse preset ENCOLHIA a camada na
+/// hora — o passe estava certo, o que chegava era uma demonstracao. O
+/// Motion Tile nao pode mexer no tamanho da imagem: ele nasce com o
+/// mosaico em 100% (a copia do centro igual a camada) e a SAIDA em 300%,
+/// para as copias aparecerem ao redor sem tocar na original.
+EffectPronto? prontoAoAplicar(EffectType tipo) {
+  if (tipo == EffectType.motionTile) {
+    return const EffectPronto('Ao redor', {
+      'tile_width': 100,
+      'tile_height': 100,
+      'output_width': 300,
+      'output_height': 300,
+    });
+  }
+  return PreviasDosEfeitos.instance.prontoDaPrevia(tipo);
 }

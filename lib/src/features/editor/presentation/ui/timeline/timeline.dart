@@ -1,89 +1,88 @@
-import 'package:flutter/foundation.dart' show ValueListenable, listEquals;
+import 'package:flutter/gestures.dart';
+import 'package:flutter/physics.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../../core/ds/ds.dart';
 import '../../../../../core/l10n/app_language.dart';
 import '../../../application/editor_controller.dart';
+import '../../../application/keyframe_clipboard.dart';
 import '../../../application/perfil3d.dart';
 import '../../../application/playback_controller.dart';
-import '../../am/layer_look.dart' show layerTypeColor;
+import '../shell/contrato.dart';
+import 'cabecote.dart';
+import 'estado_da_timeline.dart';
+import 'guias.dart';
+import 'linha_da_camada.dart';
+import 'linha_da_propriedade.dart';
+import 'linhas.dart';
+import 'regua.dart';
+import 'reordenar.dart';
+
+export 'estado_da_timeline.dart' show EstadoDaTimeline, SondaDaTimeline;
+export 'linhas.dart' show camadasExpandidasProvider;
 
 // ===========================================================================
-// A TIMELINE — ESQUELETO DA FUNDACAO
+// A TIMELINE DO EDITOR
 // ===========================================================================
 //
-// O minimo que a casca precisa para ser usavel: regua, uma linha de 28 por
-// camada com o clipe, o cabecote FIXO no centro (rolar = scrub), toque no
-// clipe seleciona e toque no vazio solta. A frente da timeline reescreve
-// esta pasta inteira (trim, mover, reordenar, pinca, ima, keyframes
-// arrastaveis, virtualizacao); o contrato com a casca e so o construtor de
-// [TimelineDoEditor].
+//   regua 42 · linhas de 28 (cabecalho 70 fixo + clipe 23) · cabecote FIXO
+//   no centro (1,5; toque 100 x 38) · rolar = scrub (o tempo corre sob ele)
 //
-// DESEMPENHO, ja nesta versao: o cabecote NAO reconstroi widget nenhum. As
-// linhas e a regua repintam pelo `repaint:` do relogio; o widget so se
-// refaz quando muda a ESTRUTURA (camadas, inicio, duracao, nome) — um
-// passo de slider nao chega aqui.
+// MAPA DOS GESTOS — quem ganha a arena, e por que nao ha briga.
+//
+// A arena do Flutter da o ponteiro a quem ACEITA primeiro; num empate de
+// evento, ao mais FUNDO (quem recebe o movimento antes). A timeline usa isso
+// de proposito, em tres camadas:
+//
+//  1. RAIZ (esta tela): UM reconhecedor de escala faz tudo o que e "no
+//     vazio" — 1 dedo na horizontal = scrub (com inercia), 1 dedo na
+//     vertical = rolar as camadas (com inercia), 2 dedos = pinca de zoom
+//     ANCORADA no instante sob os dedos. O eixo se decide UMA vez, pelo
+//     caminho que o dedo fez ate vencer a arena, e nao muda no meio do
+//     gesto. O folga de arrasto dele e a mesma de um arrasto comum (e nao
+//     a dobrada da escala), senao o clipe escolhido e a raiz empatariam
+//     com vantagem errada. Um toque que nao vira nada solta a selecao.
+//
+//  2. ZONAS CALCULADAS de cada linha (`AreaDeToqueCalculada`): o corpo do
+//     clipe, as alcas de trim (30 FORA do clipe) e os losangos. Elas so
+//     "existem" para o toque onde o pintor desenhou alguma coisa, com a
+//     vista de agora; fora disso o dedo cai direto na raiz. Dentro:
+//       - toque no clipe ............. escolhe a camada
+//       - toque longo no clipe ....... menu da camada
+//       - arrastar o clipe ESCOLHIDO . move no tempo (ima + guia + toque).
+//         Clipe NAO escolhido nao arrasta: o arrasto e da raiz (scrub).
+//       - arrastar a alca ............ apara a ponta (ima)
+//       - toque no losango ........... escolhe a marca e leva o cabecote
+//       - arrastar o losango ......... move a marca (ima no cabecote)
+//       - toque longo no losango ..... editor de curva
+//     Sao mais fundas que a raiz: num arrasto horizontal elas aceitam no
+//     MESMO evento que a raiz e ganham por ordem. Um arrasto VERTICAL sobre
+//     o clipe nao interessa a elas (so tem arrasto horizontal) e vai para a
+//     raiz: rola as camadas.
+//
+//  3. CABECALHO (70, por cima da ponta esquerda de cada linha): toque
+//     escolhe (na ja escolhida e animada, abre as propriedades); toque no
+//     olho (44) mostra/oculta; toque LONGO + arrastar reordena, e a alca de
+//     35 da linha escolhida reordena direto no arrasto vertical. O toque
+//     longo vence a raiz porque ela so aceita com movimento; mexer antes
+//     dos 500 ms e rolar.
+//
+// Toda edicao de um gesto e UM passo de desfazer (`SessaoDeGesto`), e cada
+// passo marca a interacao (o palco desenha em rascunho enquanto o dedo
+// anda).
+//
+// DESEMPENHO: a raiz observa so a ESTRUTURA (a lista de linhas, por
+// valor). Cada linha observa so a propria camada. O relogio nao reconstroi
+// nada: a vista (`EstadoDaTimeline`) e um notificador que os pintores
+// escutam. A lista e virtual (so as linhas da tela, com folga pequena) e
+// cada pintor so desenha a janela visivel.
 
-/// Uma faixa da timeline, so com o que o desenho usa (compara por valor).
-@immutable
-class _Faixa {
-  const _Faixa({
-    required this.id,
-    required this.nome,
-    required this.inicioUs,
-    required this.duracaoUs,
-    required this.cor,
-    required this.oculta,
-  });
-
-  final String id;
-  final String nome;
-  final int inicioUs;
-  final int duracaoUs;
-  final Color cor;
-  final bool oculta;
-
-  @override
-  bool operator ==(Object o) =>
-      o is _Faixa &&
-      o.id == id &&
-      o.nome == nome &&
-      o.inicioUs == inicioUs &&
-      o.duracaoUs == duracaoUs &&
-      o.cor == cor &&
-      o.oculta == oculta;
-
-  @override
-  int get hashCode => Object.hash(id, nome, inicioUs, duracaoUs, cor, oculta);
-}
-
-@immutable
-class _Faixas {
-  const _Faixas(this.lista);
-
-  final List<_Faixa> lista;
-
-  @override
-  bool operator ==(Object o) => o is _Faixas && listEquals(o.lista, lista);
-
-  @override
-  int get hashCode => Object.hashAll(lista);
-}
-
-/// OS INSTANTES COM MARCA da camada selecionada (tempo da composicao, µs).
-@immutable
-class _Marcas {
-  const _Marcas(this.us);
-
-  final List<int> us;
-
-  @override
-  bool operator ==(Object o) => o is _Marcas && listEquals(o.us, us);
-
-  @override
-  int get hashCode => Object.hashAll(us);
-}
+/// O modo do gesto da raiz em curso.
+enum _Modo { nenhum, scrub, rolagem, pinca }
 
 class TimelineDoEditor extends ConsumerStatefulWidget {
   const TimelineDoEditor({
@@ -106,360 +105,418 @@ class TimelineDoEditor extends ConsumerStatefulWidget {
   final ValueChanged<String>? aoTocarNaCamada;
 
   @override
-  ConsumerState<TimelineDoEditor> createState() => _TimelineDoEditorState();
+  ConsumerState<TimelineDoEditor> createState() => TimelineDoEditorState();
 }
 
-class _TimelineDoEditorState extends ConsumerState<TimelineDoEditor> {
-  static const double _pps = AureaDims.dpPorSegundo;
+class TimelineDoEditorState extends ConsumerState<TimelineDoEditor>
+    with TickerProviderStateMixin {
+  late final EstadoDaTimeline estado = EstadoDaTimeline(
+    playback: widget.playback,
+    vsync: this,
+  );
 
-  Duration _tempoNoToque = Duration.zero;
-  double _arrastado = 0;
+  final ScrollController _rolagem = ScrollController();
+  final GlobalKey _chaveDaLista = GlobalKey();
+  late final ControleDeReordenar _reordenar;
 
-  void _comecarScrub(DragStartDetails _) {
-    widget.playback.pause();
-    _tempoNoToque = widget.playback.time.value;
-    _arrastado = 0;
+  /// As linhas de agora (a estrutura da ultima montagem).
+  List<LinhaDaTimeline> _linhas = const [];
+
+  /// AS LINHAS MEMORIZADAS, pela chave: a lista devolve o MESMO widget, e
+  /// o Flutter nem desce na linha — quem a reconstroi sao os `select` dela.
+  final Map<String, Widget> _memo = {};
+  final Map<String, int> _indiceDaChave = {};
+
+  // ------------------------------------------------------ gesto da raiz
+  _Modo _modo = _Modo.nenhum;
+  int _dedos = 0;
+  Offset? _pontoDoToque;
+  bool _ignorarResto = false;
+  double _vista0 = 0;
+  double _x0 = 0;
+  double _y0 = 0;
+  double _rolagem0 = 0;
+  double _pps0 = 0;
+  double? _escala0;
+  double _focoUs = 0;
+
+  // ---------------------------------------------------- inercia do scrub
+  late final Ticker _inercia = createTicker(_tiqueDaInercia);
+  FrictionSimulation? _simulacao;
+  double _vistaDaInercia = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _reordenar = ControleDeReordenar(
+      estado: estado,
+      lista: _rolagem,
+      chaveDaLista: _chaveDaLista,
+      linhas: () => _linhas,
+      controlador: () => ref.read(editorControllerProvider.notifier),
+    );
+    estado.reordenar = _reordenar;
   }
 
-  void _scrub(DragUpdateDetails d, Duration total) {
-    _arrastado += d.delta.dx;
-    // O CABECOTE E FIXO: arrastar o conteudo para a DIREITA traz o passado
-    // para baixo dele — o tempo volta.
-    final us =
-        _tempoNoToque.inMicroseconds - (_arrastado / _pps * 1e6).round();
-    final limite = total.inMicroseconds;
-    widget.playback.seek(Duration(microseconds: us.clamp(0, limite)));
-    widget.aoScrub?.call();
+  @override
+  void dispose() {
+    _reordenar.cancelar();
+    _pararInercia();
+    _inercia.dispose();
+    if (_modo == _Modo.scrub || _modo == _Modo.pinca) estado.soltarVista();
+    _rolagem.dispose();
+    estado.dispose();
+    super.dispose();
   }
 
-  void _tocarNaLinha(_Faixa f, Offset local, double largura) {
-    final t = widget.playback.time.value.inMicroseconds;
-    final centro = largura / 2;
-    final x0 = centro + (f.inicioUs - t) / 1e6 * _pps;
-    final x1 = x0 + f.duracaoUs / 1e6 * _pps;
-    if (local.dx >= x0 && local.dx <= x1) {
-      widget.playback.pause();
-      ref.read(multiSelectProvider.notifier).state = const {};
-      ref.read(selectedLayerProvider.notifier).state = f.id;
-      widget.aoTocarNaCamada?.call(f.id);
-    } else {
-      widget.aoTocarNoVazio?.call();
+  // =============================================================== gestos
+
+  void _aoPousar(PointerDownEvent e) {
+    _pararInercia();
+    // Parar a inercia da lista tambem: o dedo que pousa segura tudo.
+    if (_rolagem.hasClients && _rolagem.position.isScrollingNotifier.value) {
+      _rolagem.jumpTo(_rolagem.offset);
     }
+    if (_dedos == 0) {
+      _pontoDoToque = e.localPosition;
+      _ignorarResto = false;
+    }
+    _dedos++;
+  }
+
+  void _aoLevantar(PointerEvent _) {
+    if (_dedos > 0) _dedos--;
+  }
+
+  void _inicio(ScaleStartDetails d) {
+    _pararInercia();
+    if (_ignorarResto) return;
+    if (d.pointerCount >= 2) {
+      _comecarPinca(d.localFocalPoint);
+      return;
+    }
+    // O EIXO SAI DO CAMINHO que o dedo fez ate vencer a arena.
+    final desde = _pontoDoToque ?? d.localFocalPoint;
+    final v = d.localFocalPoint - desde;
+    if (v.dx.abs() >= v.dy.abs()) {
+      _modo = _Modo.scrub;
+      widget.playback.pause();
+      estado.segurarVista();
+      _vista0 = estado.vistaUs.value;
+      _x0 = d.localFocalPoint.dx;
+    } else {
+      _modo = _Modo.rolagem;
+      _y0 = d.localFocalPoint.dy;
+      _rolagem0 = _rolagem.hasClients ? _rolagem.offset : 0;
+    }
+  }
+
+  void _comecarPinca(Offset foco) {
+    _modo = _Modo.pinca;
+    widget.playback.pause();
+    estado.segurarVista();
+    _pps0 = estado.pps.value;
+    _escala0 = null;
+    // O INSTANTE SOB OS DEDOS: e ele que fica sob os dedos ate o fim.
+    _focoUs = estado.tempoDoX(foco.dx);
+    HapticFeedback.selectionClick();
+  }
+
+  void _passo(ScaleUpdateDetails d) {
+    switch (_modo) {
+      case _Modo.scrub:
+        // O CABECOTE E FIXO: arrastar o conteudo para a DIREITA traz o
+        // passado para baixo dele — o tempo volta.
+        estado.irPara(_vista0 - estado.usPorPx(d.localFocalPoint.dx - _x0));
+      case _Modo.rolagem:
+        if (!_rolagem.hasClients) return;
+        final p = _rolagem.position;
+        final alvo = (_rolagem0 - (d.localFocalPoint.dy - _y0)).clamp(
+          p.minScrollExtent,
+          p.maxScrollExtent,
+        );
+        if (alvo != p.pixels) _rolagem.jumpTo(alvo);
+      case _Modo.pinca:
+        if (d.pointerCount < 2) return;
+        final base = _escala0 ??= d.scale;
+        estado.zoom(_pps0 * d.scale / base);
+        estado.irPara(
+          _focoUs -
+              (d.localFocalPoint.dx - estado.centro) / estado.pps.value * 1e6,
+        );
+      case _Modo.nenhum:
+        break;
+    }
+  }
+
+  void _fim(ScaleEndDetails d) {
+    final modo = _modo;
+    _modo = _Modo.nenhum;
+    switch (modo) {
+      case _Modo.scrub:
+        final vx = d.velocity.pixelsPerSecond.dx;
+        if (d.pointerCount == 0 && vx.abs() > kMinFlingVelocity) {
+          // A INERCIA continua o mesmo gesto: a vista segue presa.
+          _comecarInercia(vx);
+        } else {
+          estado.soltarVista();
+        }
+      case _Modo.rolagem:
+        final vy = d.velocity.pixelsPerSecond.dy;
+        final p = _rolagem.hasClients ? _rolagem.position : null;
+        if (p is ScrollPositionWithSingleContext &&
+            vy.abs() > kMinFlingVelocity) {
+          p.goBallistic(-vy);
+        }
+      case _Modo.pinca:
+        estado.soltarVista();
+        // Os dedos que sobraram nao viram scrub de repente.
+        if (d.pointerCount > 0) _ignorarResto = true;
+      case _Modo.nenhum:
+        break;
+    }
+  }
+
+  void _comecarInercia(double vx) {
+    _vistaDaInercia = estado.vistaUs.value;
+    // O atrito do rolar do iOS: desliza e assenta, sem mola.
+    _simulacao = FrictionSimulation(0.135, 0, vx);
+    _inercia.start();
+  }
+
+  void _tiqueDaInercia(Duration t) {
+    final s = _simulacao;
+    if (s == null) return;
+    final seg = t.inMicroseconds / 1e6;
+    final antes = estado.vistaUs.value;
+    estado.irPara(_vistaDaInercia - estado.usPorPx(s.x(seg)));
+    final parou = estado.vistaUs.value == antes && seg > 0;
+    if (s.isDone(seg) || parou) _pararInercia();
+  }
+
+  void _pararInercia() {
+    if (_simulacao == null) return;
+    _simulacao = null;
+    if (_inercia.isActive) _inercia.stop();
+    estado.soltarVista();
+  }
+
+  void _tocarNoVazio(TapUpDetails _) {
+    if (ref.read(keyframesSelecionadosProvider).isNotEmpty) {
+      ref.read(keyframesSelecionadosProvider.notifier).state = const {};
+    }
+    widget.aoTocarNoVazio?.call();
+  }
+
+  /// A RODA DO MOUSE (desktop, emulador): vertical rola as camadas,
+  /// horizontal (ou com shift) anda no tempo.
+  void _roda(PointerSignalEvent e) {
+    if (e is! PointerScrollEvent) return;
+    GestureBinding.instance.pointerSignalResolver.register(e, (ev) {
+      final s = ev as PointerScrollEvent;
+      final horizontal =
+          s.scrollDelta.dx.abs() > s.scrollDelta.dy.abs() ||
+          HardwareKeyboard.instance.isShiftPressed;
+      if (horizontal) {
+        final dx = s.scrollDelta.dx != 0 ? s.scrollDelta.dx : s.scrollDelta.dy;
+        widget.playback.pause();
+        estado.irPara(estado.vistaUs.value + estado.usPorPx(dx));
+      } else if (_rolagem.hasClients) {
+        final p = _rolagem.position;
+        _rolagem.jumpTo(
+          (p.pixels + s.scrollDelta.dy).clamp(
+            p.minScrollExtent,
+            p.maxScrollExtent,
+          ),
+        );
+      }
+    });
+  }
+
+  // =========================================================== as linhas
+
+  Widget _linha(LinhaDaTimeline l) => _memo[l.chave] ??= l.ehCamada
+      ? LinhaDaCamada(key: ValueKey(l.chave), layerId: l.layerId)
+      : LinhaDaPropriedade(
+          key: ValueKey(l.chave),
+          layerId: l.layerId,
+          chave: l.trilha!,
+        );
+
+  void _trocarLinhas(List<LinhaDaTimeline> linhas) {
+    if (identical(linhas, _linhas)) return;
+    _linhas = linhas;
+    _indiceDaChave
+      ..clear()
+      ..addAll({for (var i = 0; i < linhas.length; i++) linhas[i].chave: i});
+    // Quem saiu da lista sai do memo (senao ele cresce com a sessao).
+    _memo.removeWhere((k, _) => !_indiceDaChave.containsKey(k));
+  }
+
+  /// A CAMADA ESCOLHIDA APARECE: escolher pelo palco (ou desfazer) nao
+  /// pode deixar a linha dela escondida fora da lista. Com um painel
+  /// aberto ([noTopo]) ela sobe para a primeira linha: o painel (200) cobre
+  /// a parte de baixo da timeline, e o que sobra a vista e o topo.
+  void _revelar(String? id, {bool noTopo = false}) {
+    if (id == null) return;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_rolagem.hasClients) return;
+      final i = _indiceDaChave['linha-$id'];
+      if (i == null) return;
+      final p = _rolagem.position;
+      final topo = i * AureaDims.linhaDeCamada;
+      final base = topo + AureaDims.linhaDeCamada;
+      final alvo = noTopo || topo < p.pixels
+          ? topo
+          : base > p.pixels + p.viewportDimension
+          ? base - p.viewportDimension
+          : p.pixels;
+      if (alvo != p.pixels) {
+        _rolagem.jumpTo(alvo.clamp(p.minScrollExtent, p.maxScrollExtent));
+      }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
+    SondaDaTimeline.buildsDaTimeline++;
+    // A regua das reconstrucoes da casca (`Perfil3D`): um passo de slider
+    // nao pode aparecer aqui.
     Perfil3D.contar('build.timeline');
-    final faixas = ref.watch(
-      editorControllerProvider.select(
-        (p) => _Faixas([
-          for (final l in p.layers)
-            _Faixa(
-              id: l.id,
-              nome: l.name,
-              inicioUs: l.startTime.inMicroseconds,
-              duracaoUs: l.duration.inMicroseconds,
-              cor: layerTypeColor(l),
-              oculta: p.metaOf(l.id).hidden,
-            ),
-        ]),
-      ),
+    estado
+      ..aoScrub = widget.aoScrub
+      ..aoTocarNaCamada = widget.aoTocarNaCamada;
+    final abertas = ref.watch(camadasExpandidasProvider);
+    final estrutura = ref.watch(
+      projetoVisivelProvider.select((p) => EstruturaDaTimeline.de(p, abertas)),
     );
-    final total = ref.watch(editorControllerProvider.select((p) => p.duration));
-    final fps = ref.watch(editorControllerProvider.select((p) => p.fps));
-    final selecionada = ref.watch(selectedLayerProvider);
-    final marcas = selecionada == null
-        ? const _Marcas([])
-        : ref.watch(
-            editorControllerProvider.select((p) {
-              final l = p.layerById(selecionada);
-              if (l == null) return const _Marcas([]);
-              return _Marcas([
-                for (final k in l.keyframeTimes)
-                  (l.startTime + k).inMicroseconds,
-              ]);
-            }),
-          );
+    _trocarLinhas(estrutura.linhas);
 
-    // A FONTE DO APP nos pintores: `TextPainter` nao herda o tema, e sem
-    // isto a regua e os nomes dos clipes sairiam na fonte crua do sistema.
-    final base = DefaultTextStyle.of(context).style;
+    ref.listen<String?>(
+      selectedLayerProvider,
+      (_, id) => _revelar(id, noTopo: ref.read(painelAbertoProvider) != null),
+    );
+    ref.listen<PainelId?>(painelAbertoProvider, (antes, aberto) {
+      // O PAINEL FECHOU: nenhuma propriedade em foco, tudo aceso de novo.
+      if (aberto == null && ref.read(propriedadeAtivaProvider) != null) {
+        ref.read(propriedadeAtivaProvider.notifier).state = null;
+      }
+      // O PAINEL ABRIU: a camada dele sobe para a linha que fica a vista.
+      if (aberto != null && antes == null) {
+        _revelar(ref.read(selectedLayerProvider), noTopo: true);
+      }
+    });
 
-    return ColoredBox(
-      key: const ValueKey('timeline-nova'),
-      color: AureaCores.cromo,
-      child: LayoutBuilder(
-        builder: (context, c) {
-          final largura = c.maxWidth;
-          return GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: widget.aoTocarNoVazio,
-            onHorizontalDragStart: _comecarScrub,
-            onHorizontalDragUpdate: (d) => _scrub(d, total),
-            child: Stack(
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    SizedBox(
-                      key: const ValueKey('timeline-regua'),
-                      height: AureaDims.regua,
-                      child: RepaintBoundary(
-                        child: CustomPaint(
-                          painter: _PintorDaRegua(
-                            tempo: widget.playback.time,
-                            fps: fps <= 0 ? 30 : fps,
-                            risco: AureaCores.textoSecundario,
-                            estilo: base.copyWith(
-                              fontSize: 10,
-                              color: AureaCores.textoSecundario,
-                              decoration: TextDecoration.none,
-                            ),
-                          ),
-                        ),
+    final linhas = _linhas;
+    return EscopoDaTimeline(
+      estado: estado,
+      child: ColoredBox(
+        key: const ValueKey('timeline-nova'),
+        color: AureaCores.cromo,
+        child: LayoutBuilder(
+          builder: (context, c) {
+            estado.largura = c.maxWidth;
+            final ajustes = MediaQuery.maybeGestureSettingsOf(context);
+            // A FOLGA DO PAN DA RAIZ = a folga de um arrasto comum (a da
+            // escala e o dobro): o scrub comeca junto com o arrasto do
+            // clipe, e o mais fundo (o clipe) ganha o empate.
+            final folga = ajustes?.touchSlop ?? kTouchSlop;
+            return Listener(
+              onPointerDown: _aoPousar,
+              onPointerUp: _aoLevantar,
+              onPointerCancel: _aoLevantar,
+              onPointerSignal: _roda,
+              child: RawGestureDetector(
+                behavior: HitTestBehavior.opaque,
+                gestures: {
+                  ScaleGestureRecognizer:
+                      GestureRecognizerFactoryWithHandlers<
+                        ScaleGestureRecognizer
+                      >(
+                        () => ScaleGestureRecognizer(debugOwner: this),
+                        (r) => r
+                          ..gestureSettings = DeviceGestureSettings(
+                            touchSlop: folga / 2,
+                          )
+                          ..onStart = _inicio
+                          ..onUpdate = _passo
+                          ..onEnd = _fim,
                       ),
-                    ),
-                    Expanded(
-                      child: faixas.lista.isEmpty
-                          ? Center(
-                              child: AppText(
-                                'Toque em + para adicionar a primeira camada',
-                                style: AureaEstilos.propriedade,
-                              ),
-                            )
-                          : ListView.builder(
-                              key: const ValueKey('timeline-linhas'),
-                              padding: const EdgeInsets.only(
-                                bottom: AureaDims.botaoAdicionar,
-                              ),
-                              itemExtent: AureaDims.linhaDeCamada,
-                              itemCount: faixas.lista.length,
-                              itemBuilder: (context, i) {
-                                final f = faixas.lista[i];
-                                final escolhida = f.id == selecionada;
-                                return GestureDetector(
-                                  key: ValueKey('linha-${f.id}'),
-                                  behavior: HitTestBehavior.opaque,
-                                  onTapUp: (d) =>
-                                      _tocarNaLinha(f, d.localPosition, largura),
-                                  child: RepaintBoundary(
-                                    child: CustomPaint(
-                                      painter: _PintorDaLinha(
-                                        faixa: f,
-                                        tempo: widget.playback.time,
-                                        escolhida: escolhida,
-                                        marcasUs: escolhida
-                                            ? marcas.us
-                                            : const [],
-                                        selecao: AureaCores.texto,
-                                        keyframe: AureaCores.keyframe,
-                                        rotulo: base.copyWith(
-                                          fontSize: AureaDims.rotuloDoClipe,
-                                          color: AureaCores.texto,
-                                          decoration: TextDecoration.none,
-                                        ),
-                                      ),
-                                    ),
+                  TapGestureRecognizer:
+                      GestureRecognizerFactoryWithHandlers<
+                        TapGestureRecognizer
+                      >(
+                        () => TapGestureRecognizer(debugOwner: this),
+                        (r) => r.onTapUp = _tocarNoVazio,
+                      ),
+                },
+                child: Stack(
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        ReguaDaTimeline(estado: estado),
+                        Expanded(
+                          child: linhas.isEmpty
+                              ? Center(
+                                  child: AppText(
+                                    'Toque em + para adicionar a primeira camada',
+                                    style: AureaEstilos.propriedade,
                                   ),
-                                );
-                              },
-                            ),
+                                )
+                              : ListView.builder(
+                                  key: _chaveDaLista,
+                                  controller: _rolagem,
+                                  // QUEM ROLA E A RAIZ (o mesmo gesto que
+                                  // decide entre scrub e rolagem); a lista
+                                  // so obedece e da a inercia.
+                                  physics: const NeverScrollableScrollPhysics(
+                                    parent: ClampingScrollPhysics(),
+                                  ),
+                                  // O "+" (73) cobre a ponta de baixo: a
+                                  // ultima linha pode subir acima dele.
+                                  padding: const EdgeInsets.only(
+                                    bottom: AureaDims.botaoAdicionar,
+                                  ),
+                                  itemExtent: AureaDims.linhaDeCamada,
+                                  // FOLGA PEQUENA: duas linhas alem da tela.
+                                  scrollCacheExtent:
+                                      const ScrollCacheExtent.pixels(
+                                        AureaDims.linhaDeCamada * 2,
+                                      ),
+                                  itemCount: linhas.length,
+                                  // A linha arrastada (e a reordenada) mantem
+                                  // o `State` — e o reconhecedor do dedo.
+                                  findChildIndexCallback: (chave) =>
+                                      chave is ValueKey<String>
+                                      ? _indiceDaChave[chave.value]
+                                      : null,
+                                  itemBuilder: (context, i) =>
+                                      _linha(linhas[i]),
+                                ),
+                        ),
+                      ],
+                    ),
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      top: AureaDims.regua,
+                      bottom: 0,
+                      child: CamadaDeGuias(estado: estado, lista: _rolagem),
+                    ),
+                    Positioned.fill(
+                      child: CabecoteDaTimeline(
+                        estado: estado,
+                        playback: widget.playback,
+                      ),
                     ),
                   ],
                 ),
-                // O CABECOTE: linha de 1,5 FIXA no centro, por cima de tudo
-                // e sem pegar toque (quem rola e o conteudo).
-                Positioned(
-                  left: largura / 2 - AureaDims.cabecote / 2,
-                  top: AureaDims.regua * .45,
-                  bottom: 0,
-                  width: AureaDims.cabecote,
-                  child: IgnorePointer(
-                    child: ColoredBox(
-                      key: const ValueKey('timeline-cabecote'),
-                      color: AureaCores.cabecote,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-
-/// A REGUA: riscos de segundo (18), meio segundo (12) e quadro (5, so
-/// quando cabem com 4 de vao), com o tempo de cada segundo.
-class _PintorDaRegua extends CustomPainter {
-  _PintorDaRegua({
-    required this.tempo,
-    required this.fps,
-    required this.risco,
-    required this.estilo,
-  }) : super(repaint: tempo);
-
-  final ValueListenable<Duration> tempo;
-  final int fps;
-  final Color risco;
-  final TextStyle estilo;
-
-  final Map<int, TextPainter> _rotulos = {};
-
-  TextPainter _rotulo(int segundo) => _rotulos.putIfAbsent(segundo, () {
-    final m = segundo ~/ 60;
-    final s = segundo % 60;
-    return TextPainter(
-      text: TextSpan(
-        text: '$m:${s.toString().padLeft(2, '0')}',
-        style: estilo,
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    const pps = AureaDims.dpPorSegundo;
-    final t = tempo.value.inMicroseconds / 1e6;
-    final centro = size.width / 2;
-    final base = size.height;
-    final pincel = Paint()
-      ..color = risco
-      ..strokeWidth = AureaDims.larguraDoRisco;
-    final primeiro = (t - centro / pps).floor() - 1;
-    final ultimo = (t + centro / pps).ceil() + 1;
-    final passoDoQuadro = pps / fps;
-    final comQuadros = passoDoQuadro >= AureaDims.vaoMinimoDoRisco;
-    for (var s = primeiro < 0 ? 0 : primeiro; s <= ultimo; s++) {
-      final x = centro + (s - t) * pps;
-      canvas.drawLine(
-        Offset(x, base - AureaDims.riscoDeSegundo),
-        Offset(x, base),
-        pincel,
-      );
-      _rotulo(s).paint(canvas, Offset(x + 3, base - AureaDims.riscoDeSegundo - 2 - 12));
-      final meio = x + pps / 2;
-      canvas.drawLine(
-        Offset(meio, base - AureaDims.riscoDeMeioSegundo),
-        Offset(meio, base),
-        pincel,
-      );
-      if (comQuadros) {
-        for (var q = 1; q < fps; q++) {
-          final xq = x + q * passoDoQuadro;
-          if ((xq - meio).abs() < 1) continue;
-          canvas.drawLine(
-            Offset(xq, base - AureaDims.riscoDeQuadro),
-            Offset(xq, base),
-            pincel,
-          );
-        }
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(_PintorDaRegua old) =>
-      old.fps != fps || old.risco != risco || old.estilo != estilo;
-}
-
-/// UMA LINHA: o clipe (23 de altura, recuo 2,5, raio 1,5), o nome dentro
-/// dele e, na escolhida, o contorno e os losangos.
-class _PintorDaLinha extends CustomPainter {
-  _PintorDaLinha({
-    required this.faixa,
-    required this.tempo,
-    required this.escolhida,
-    required this.marcasUs,
-    required this.selecao,
-    required this.keyframe,
-    required this.rotulo,
-  }) : super(repaint: tempo);
-
-  final _Faixa faixa;
-  final ValueListenable<Duration> tempo;
-  final bool escolhida;
-  final List<int> marcasUs;
-  final Color selecao;
-  final Color keyframe;
-  final TextStyle rotulo;
-
-  TextPainter? _nome;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    const pps = AureaDims.dpPorSegundo;
-    final t = tempo.value.inMicroseconds;
-    final centro = size.width / 2;
-    final x0 = centro + (faixa.inicioUs - t) / 1e6 * pps;
-    final x1 = x0 + faixa.duracaoUs / 1e6 * pps;
-    if (x1 < 0 || x0 > size.width) return;
-    final caixa = Rect.fromLTRB(
-      x0,
-      AureaDims.recuoDoClipe,
-      x1,
-      size.height - AureaDims.recuoDoClipe,
-    );
-    final rr = RRect.fromRectAndRadius(
-      caixa,
-      const Radius.circular(AureaDims.raioDoClipe),
-    );
-    canvas.drawRRect(
-      rr,
-      Paint()
-        ..color = faixa.cor.withValues(
-          alpha: faixa.oculta ? .35 : (escolhida ? 1 : .8),
+              ),
+            );
+          },
         ),
+      ),
     );
-    // O NOME acompanha o comeco visivel do clipe: com o inicio fora da
-    // tela, ele gruda na borda esquerda em vez de sumir junto.
-    final nome = _nome ??= TextPainter(
-      text: TextSpan(text: faixa.nome, style: rotulo),
-      maxLines: 1,
-      ellipsis: '…',
-      textDirection: TextDirection.ltr,
-    )..layout();
-    final xNome =
-        (x0 < 0 ? 0.0 : x0) + AureaDims.recuoDoRotuloDoClipe / 2;
-    if (x1 - xNome > 12) {
-      canvas.save();
-      canvas.clipRect(caixa);
-      nome.paint(canvas, Offset(xNome, (size.height - nome.height) / 2));
-      canvas.restore();
-    }
-    if (escolhida) {
-      canvas.drawRRect(
-        rr.deflate(AureaDims.tracoDeSelecao / 2),
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = AureaDims.tracoDeSelecao
-          ..color = selecao,
-      );
-      final losango = Paint()..color = keyframe;
-      const r = AureaDims.raioDoKeyframe;
-      final y = size.height - AureaDims.recuoDoClipe - r - 1;
-      for (final us in marcasUs) {
-        final x = centro + (us - t) / 1e6 * pps;
-        if (x < -r || x > size.width + r) continue;
-        final p = Path()
-          ..moveTo(x, y - r)
-          ..lineTo(x + r, y)
-          ..lineTo(x, y + r)
-          ..lineTo(x - r, y)
-          ..close();
-        canvas.drawPath(p, losango);
-      }
-    }
   }
-
-  @override
-  bool shouldRepaint(_PintorDaLinha old) =>
-      old.faixa != faixa ||
-      old.escolhida != escolhida ||
-      !listEquals(old.marcasUs, marcasUs) ||
-      old.selecao != selecao ||
-      old.keyframe != keyframe ||
-      old.rotulo != rotulo;
 }

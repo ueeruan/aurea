@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../application/playback_controller.dart';
 import '../../../application/video_layer_manager.dart';
 import '../../../domain/layer.dart';
+import '../../../domain/video_project.dart' show LayerProp;
 import '../paineis/registro.dart';
 
 // ===========================================================================
@@ -419,3 +420,54 @@ class EscopoDoEditor extends InheritedWidget {
   bool updateShouldNotify(EscopoDoEditor old) =>
       old.playback != playback || old.videos != videos;
 }
+
+// ---- acrescentado pela timeline: a propriedade ativa.
+
+/// A PROPRIEDADE EM EDICAO — a sub-aba ativa do painel aberto.
+///
+/// E ela que decide quais keyframes a timeline mostra ACESOS: os da
+/// propriedade ativa em destaque, os de outras propriedades apagados (o
+/// "losango apagado = voce esta na sub-aba errada" do app de referencia).
+/// Quem troca de sub-aba escreve aqui; nulo = nenhuma em foco (tudo aceso).
+@immutable
+class PropriedadeAtiva {
+  /// Uma propriedade da transformacao (Posicao, Escala, Rotacao...).
+  const PropriedadeAtiva.transformacao(LayerProp this.prop)
+    : efeitoId = null,
+      mascaraId = null;
+
+  /// Um efeito da pilha (o keyframe do efeito vale para todos os
+  /// parametros dele).
+  const PropriedadeAtiva.efeito(String this.efeitoId)
+    : prop = null,
+      mascaraId = null;
+
+  /// Uma mascara da camada.
+  const PropriedadeAtiva.mascara(String this.mascaraId)
+    : prop = null,
+      efeitoId = null;
+
+  final LayerProp? prop;
+  final String? efeitoId;
+  final String? mascaraId;
+
+  @override
+  bool operator ==(Object other) =>
+      other is PropriedadeAtiva &&
+      other.prop == prop &&
+      other.efeitoId == efeitoId &&
+      other.mascaraId == mascaraId;
+
+  @override
+  int get hashCode => Object.hash(prop, efeitoId, mascaraId);
+
+  @override
+  String toString() =>
+      'PropriedadeAtiva(${prop?.name ?? efeitoId ?? mascaraId})';
+}
+
+/// A propriedade ativa (nula = nenhuma). A timeline a solta quando o
+/// painel fecha.
+final propriedadeAtivaProvider = StateProvider<PropriedadeAtiva?>(
+  (ref) => null,
+);

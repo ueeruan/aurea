@@ -1,0 +1,16 @@
+# Normaliza fim de linha. O projeto é desenvolvido no Windows e compilado para
+# Android e iOS; sem isto, um arquivo salvo com CRLF produz um diff de todas as
+# linhas quando outra pessoa o abre.
+* text=auto eol=lf
+
+# Binários: sem conversão nenhuma. A identidade da marca (ícones, splash) e os
+# artefatos de build não podem ser tocados.
+*.png binary
+*.jpg binary
+*.ttf binary
+*.otf binary
+*.jar binary
+*.keystore binary
+*.jks binary
+*.apk binary
+*.aab binary

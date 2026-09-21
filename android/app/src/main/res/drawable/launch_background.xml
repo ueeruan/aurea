@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A TELA DE ABERTURA.
+
+     Ela era BRANCA (`@android:color/white`) enquanto o app inteiro e escuro,
+     entao abrir o Aurea dava um flash branco na cara antes do primeiro
+     quadro. Agora ela usa o fundo da marca e mostra a logo no meio: e a
+     mesma identidade do icone, e nao um retangulo generico.
+
+     A logo vem de `@drawable/splash_logo`, gerada por `tool_icones.py` nas
+     cinco densidades. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/aurea_background" />
+    <item>
+        <bitmap
+            android:gravity="center"
+            android:src="@drawable/splash_logo" />
+    </item>
+</layer-list>

@@ -1,0 +1,35 @@
+# ---- Build ----
+/build
+/android/.gradle
+/android/.kotlin
+/android/app/.cxx
+/engine/build
+*.class
+*.o
+*.so
+*.a
+
+# ---- Android: assinatura e caminhos locais ----
+# A keystore e o key.properties NUNCA vão para o repositório. Ver
+# _identity/signing/IDENTIDADE.md para onde a chave aponta e por quê.
+key.properties
+*.jks
+*.keystore
+/android/local.properties
+
+# ---- iOS ----
+ios/Pods/
+ios/build/
+ios/DerivedData/
+*.xcuserstate
+xcuserdata/
+
+# ---- IDE ----
+.idea/
+*.iml
+.vscode/
+.cache/
+
+# ---- Sistema ----
+.DS_Store
+Thumbs.db

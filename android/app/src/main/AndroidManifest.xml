@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Manifest do Aurea.
+
+  O applicationId, o label e o ícone são os MESMOS do Aurea oficial — é o que
+  faz o APK novo substituir a instalação existente em vez de virar um segundo
+  app. Ver _identity/signing/IDENTIDADE.md.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Leitura de mídia. A partir do Android 13 o acesso é por tipo; nas
+         versões anteriores vale READ_EXTERNAL_STORAGE. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED"/>
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32"/>
+
+    <!-- Gravação: câmera e microfone para captura direta no editor. -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+
+    <!-- Salvar na galeria em Android 9 e anteriores. Do 10 em diante o
+         MediaStore não pede permissão nenhuma. -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28"/>
+
+    <!-- Atualização dentro do app: o aparelho baixa o APK e abre o instalador.
+         Sem esta permissão o Android recusa a instalação. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+
+    <!-- O motor precisa de Vulkan. Sem `required`, o app instala em aparelhos
+         sem Vulkan 1.1 e o preview nunca sobe — melhor recusar na loja do que
+         instalar e não funcionar. -->
+    <uses-feature
+        android:name="android.hardware.vulkan.version"
+        android:version="0x401000"
+        android:required="true"/>
+
+    <application
+        android:label="Aurea"
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:largeHeap="true"
+        android:hardwareAccelerated="true"
+        android:supportsRtl="true"
+        android:theme="@style/AureaTheme">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:taskAffinity="com.aurea.aurea"
+            android:screenOrientation="fullUser"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|density|uiMode|smallestScreenSize"
+            android:theme="@style/AureaTheme">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+
+            <!-- Abrir um .aurea de fora do app (gerenciador de arquivos,
+                 compartilhamento). O motor precisa saber que estes arquivos
+                 são dele. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="content"/>
+                <data android:mimeType="application/x-aurea-project"/>
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

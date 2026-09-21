@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Regras de extração de dados (Android 12+).
+
+  NADA do app é incluído em backup. Dois motivos:
+
+  1. O cache do motor guarda frames decodificados e proxies — são gigabytes de
+     dado derivado, que podem ser refeitos a partir da mídia original. Copiar
+     isso para a nuvem do usuário é desperdício e ainda quebra a cota do Drive.
+
+  2. O projeto (.aurea) referencia mídia na sandbox do app. Restaurar o projeto
+     sem a mídia produziria layers órfãs: o usuário abriria o arquivo e veria
+     buracos onde os vídeos estavam. Melhor não restaurar nada e deixar claro
+     que o projeto vive no aparelho.
+
+  O usuário que quiser levar o trabalho usa Exportar ou Salvar como.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </device-transfer>
+</data-extraction-rules>

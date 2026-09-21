@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Tema do app.
+
+      O fundo é `@color/aurea_background` (#0F141A), a cor da marca. É a mesma
+      que pinta o ícone adaptativo e a tela de abertura: se fossem tons
+      diferentes, abrir o Aurea piscaria entre o ícone e o app.
+
+      Sem ActionBar: a UI é toda Compose, e uma barra do sistema em cima de um
+      editor já apertado é área desperdiçada.
+    -->
+    <style name="AureaTheme" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/aurea_background</item>
+        <item name="android:colorBackground">@color/aurea_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <!-- O editor desenha atrás das barras do sistema; sem isto, a área
+             segura não é calculada e a timeline fica sob a barra de gestos. -->
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+    </style>
+
+    <!-- Tema da janela enquanto o processo sobe: mostra a logo sobre o fundo da
+         marca, em vez de um retângulo preto ou branco. -->
+    <style name="AureaLaunchTheme" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@drawable/launch_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>

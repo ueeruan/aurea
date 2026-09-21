@@ -1,0 +1,10 @@
+# Caminhos locais e material de build. Nunca versionados.
+local.properties
+key.properties
+/build
+.gradle
+.kotlin
+.cxx
+*.jks
+*.keystore
+captures/

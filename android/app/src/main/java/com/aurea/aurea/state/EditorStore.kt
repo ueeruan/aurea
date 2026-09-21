@@ -883,11 +883,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         busyMessage = "Importando imagem…"
         viewModelScope.launch {
             val id = withContext(Dispatchers.IO) {
-                val bmp = decodeBitmap(uri) ?: return@withContext -1L
+                val bmp = AureaEngine.decodeBitmapRgba(getApplication(), uri) ?: return@withContext -1L
                 val buf = directBuffer(bmp.width * bmp.height * 4)
                 bmp.copyPixelsToBuffer(buf)
                 buf.rewind()
-                val r = engine.importImage(buf, bmp.width, bmp.height, name)
+                // A URI vai junto: ao reabrir o projeto o motor pede a imagem de novo.
+                val r = engine.importImage(buf, bmp.width, bmp.height, name, uri.toString())
                 bmp.recycle()
                 r
             }
@@ -899,22 +900,6 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             refreshNow()
             select(id)
         }
-    }
-
-    private fun decodeBitmap(uri: Uri): Bitmap? = try {
-        val cr = getApplication<Application>().contentResolver
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        cr.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
-        var sample = 1
-        while (max(bounds.outWidth, bounds.outHeight) / sample > 4096) sample *= 2
-        val opts = BitmapFactory.Options().apply {
-            inSampleSize = sample
-            inPreferredConfig = Bitmap.Config.ARGB_8888
-            inPremultiplied = false
-        }
-        cr.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
-    } catch (_: Exception) {
-        null
     }
 
     private fun takePermission(uri: Uri) {

@@ -130,6 +130,11 @@ struct EngineTelemetry {
     bool throttling = false;
 };
 
+/// Decodifica a imagem de um asset (caminho ou URI da plataforma) em RGBA8
+/// sRGB com alfa reto. É a plataforma que sabe abrir `content://` e decodificar
+/// JPEG/PNG/HEIC; o motor só guarda a origem no projeto e pede de volta ao abrir.
+using ImageLoaderFn = bool (*)(const char* sourcePath, ImagePixels& out, void* ctx);
+
 struct EngineConfig {
     /// Backend gráfico, criado pela plataforma (Vulkan no Android e no host de
     /// testes, Metal no iOS). O motor assume a posse. Nulo = sem GPU (a
@@ -139,6 +144,9 @@ struct EngineConfig {
 
     /// Decoders de mídia da plataforma. NÃO é assumida a posse.
     VideoSourceFactory* mediaFactory = nullptr;
+    /// Decodificador de imagem da plataforma (reabrir projeto com imagens).
+    ImageLoaderFn imageLoader = nullptr;
+    void* imageLoaderContext = nullptr;
 
     f32   displayRefreshRate = 60.0f;
     std::string cacheDirectory;
@@ -215,8 +223,10 @@ public:
     /// fps e duração do vídeo. Devolve o id da layer.
     [[nodiscard]] Result<u64> import_video(const VideoImport& request) noexcept;
     /// Imagem já decodificada pela plataforma (RGBA8 sRGB, alfa reto).
+    /// `sourcePath` (URI/caminho) fica no projeto: ao reabrir, o motor pede a
+    /// imagem de novo ao `imageLoader`. Sem origem, a imagem só vive na sessão.
     [[nodiscard]] Result<u64> import_image(const u8* rgba, u32 width, u32 height,
-                                           const char* name) noexcept;
+                                           const char* name, const char* sourcePath = nullptr) noexcept;
 
     // =========================================================================
     // A fronteira

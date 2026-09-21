@@ -63,6 +63,45 @@ class AureaEngine private constructor() {
             -1
         }
 
+        /**
+         * Chamado pelo motor ao reabrir um projeto com imagens: decodifica a
+         * origem (URI `content://` ou caminho) em RGBA8 com alfa reto. Resposta:
+         * 8 bytes (largura, altura em u32 little-endian) + pixels; null se falhar.
+         */
+        @JvmStatic
+        fun decodeImage(source: String): ByteArray? {
+            val ctx = appContext ?: return null
+            val bmp = decodeBitmapRgba(ctx, Uri.parse(source)) ?: return null
+            val w = bmp.width
+            val h = bmp.height
+            val out = ByteArray(8 + w * h * 4)
+            val header = java.nio.ByteBuffer.wrap(out, 0, 8).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            header.putInt(w).putInt(h)
+            bmp.copyPixelsToBuffer(java.nio.ByteBuffer.wrap(out, 8, w * h * 4))
+            bmp.recycle()
+            return out
+        }
+
+        /**
+         * Decodifica uma imagem em ARGB_8888 NÃO pré-multiplicado (o motor quer
+         * alfa reto), reduzida por potência de dois até o lado maior caber em 4096.
+         */
+        fun decodeBitmapRgba(ctx: Context, uri: Uri): android.graphics.Bitmap? = try {
+            val cr = ctx.contentResolver
+            val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            cr.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, bounds) }
+            var sample = 1
+            while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 4096) sample *= 2
+            val opts = android.graphics.BitmapFactory.Options().apply {
+                inSampleSize = sample
+                inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
+                inPremultiplied = false
+            }
+            cr.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, opts) }
+        } catch (_: Throwable) {
+            null
+        }
+
         @JvmStatic external fun nativeCreate(): Long
         @JvmStatic external fun nativeDestroy(handle: Long)
     }
@@ -212,8 +251,8 @@ class AureaEngine private constructor() {
         nativeImportVideo(nativeHandle, source, displayName)
 
     /** RGBA8 sRGB (alfa reto) num buffer direto de `width * height * 4` bytes. */
-    fun importImage(rgba: ByteBuffer, width: Int, height: Int, name: String): Long =
-        nativeImportImage(nativeHandle, rgba, width, height, name)
+    fun importImage(rgba: ByteBuffer, width: Int, height: Int, name: String, source: String): Long =
+        nativeImportImage(nativeHandle, rgba, width, height, name, source)
 
     fun newProject(width: Int, height: Int, fps: Float, title: String): Boolean =
         nativeNewProject(nativeHandle, width, height, fps, title)
@@ -267,7 +306,9 @@ class AureaEngine private constructor() {
     private external fun nativeSetSelection(handle: Long, layers: LongArray)
     private external fun nativeClearSelection(handle: Long)
     private external fun nativeImportVideo(handle: Long, source: String, name: String): Long
-    private external fun nativeImportImage(handle: Long, rgba: ByteBuffer, width: Int, height: Int, name: String): Long
+    private external fun nativeImportImage(
+        handle: Long, rgba: ByteBuffer, width: Int, height: Int, name: String, source: String,
+    ): Long
     private external fun nativeNewProject(handle: Long, width: Int, height: Int, fps: Float, title: String): Boolean
     private external fun nativeLoadProject(handle: Long, path: String): Int
     private external fun nativeSaveProject(handle: Long, path: String): Int

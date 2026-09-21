@@ -42,6 +42,7 @@ namespace {
 JavaVM* g_vm = nullptr;
 jclass g_engineClass = nullptr;          // referência global: FindClass numa thread
 jmethodID g_openContentFd = nullptr;     // nativa usaria o class loader do sistema
+jmethodID g_decodeImage = nullptr;       // AureaEngine.decodeImage(String): ByteArray?
 
 void android_log_sink(LogLevel level, const char* message, void*) {
     int prio = ANDROID_LOG_INFO;
@@ -80,6 +81,47 @@ int open_content_fd(const char* uri, void*) {
     // A thread nativa precisa se soltar antes de terminar, ou a ART aborta.
     if (attached) g_vm->DetachCurrentThread();
     return fd;
+}
+
+/// Pede à plataforma os pixels de uma imagem do projeto (reabrir projeto).
+/// Resposta: 8 bytes (largura, altura em u32 little-endian) + RGBA8 reto.
+bool load_image(const char* source, ImagePixels& out, void*) {
+    if (!g_vm || !g_engineClass || !g_decodeImage) return false;
+    JNIEnv* env = nullptr;
+    bool attached = false;
+    if (g_vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
+        if (g_vm->AttachCurrentThread(&env, nullptr) != JNI_OK) return false;
+        attached = true;
+    }
+    bool ok = false;
+    if (jstring js = env->NewStringUTF(source)) {
+        auto arr = static_cast<jbyteArray>(env->CallStaticObjectMethod(g_engineClass, g_decodeImage, js));
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            arr = nullptr;
+        }
+        if (arr) {
+            const jsize n = env->GetArrayLength(arr);
+            if (n > 8) {
+                u8 header[8];
+                env->GetByteArrayRegion(arr, 0, 8, reinterpret_cast<jbyte*>(header));
+                const u32 w = header[0] | (header[1] << 8) | (header[2] << 16) | (static_cast<u32>(header[3]) << 24);
+                const u32 h = header[4] | (header[5] << 8) | (header[6] << 16) | (static_cast<u32>(header[7]) << 24);
+                const usize bytes = static_cast<usize>(w) * h * 4;
+                if (w && h && static_cast<usize>(n) == bytes + 8) {
+                    out.width = w;
+                    out.height = h;
+                    out.rgba.resize(bytes);
+                    env->GetByteArrayRegion(arr, 8, static_cast<jsize>(bytes), reinterpret_cast<jbyte*>(out.rgba.data()));
+                    ok = true;
+                }
+            }
+            env->DeleteLocalRef(arr);
+        }
+        env->DeleteLocalRef(js);
+    }
+    if (attached) g_vm->DetachCurrentThread();
+    return ok;
 }
 
 // -----------------------------------------------------------------------------
@@ -167,6 +209,11 @@ AUREA_JNI jint JNI_OnLoad(JavaVM* vm, void*) {
             env->ExceptionClear();
             g_openContentFd = nullptr;
         }
+        g_decodeImage = env->GetStaticMethodID(g_engineClass, "decodeImage", "(Ljava/lang/String;)[B");
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            g_decodeImage = nullptr;
+        }
     }
     return JNI_VERSION_1_6;
 }
@@ -213,6 +260,7 @@ AUREA_JNI jboolean AUREA_FN(nativeInitialize)(JNIEnv* env, jclass, jlong handle,
     config.documentsDirectory = to_string(env, documentsDir);
     config.displayRefreshRate = refreshRate > 0.0f ? refreshRate : 60.0f;
     config.mediaFactory = &c->media;
+    config.imageLoader = &load_image;
     config.enableTelemetry = true;
 
     if (const Status s = c->engine.initialize(config); !s.ok()) {
@@ -495,14 +543,16 @@ AUREA_JNI jlong AUREA_FN(nativeImportVideo)(JNIEnv* env, jclass, jlong handle, j
 }
 
 AUREA_JNI jlong AUREA_FN(nativeImportImage)(JNIEnv* env, jclass, jlong handle, jobject rgba, jint width,
-                                            jint height, jstring name) {
+                                            jint height, jstring name, jstring source) {
     NativeContext* c = ctx_of(handle);
     if (!c || width <= 0 || height <= 0) return -static_cast<jlong>(Errc::InvalidArgument);
     const jlong bytes = static_cast<jlong>(width) * height * 4;
     const auto* pixels = pod_buffer<const u8>(env, rgba, bytes);
     if (!pixels) return -static_cast<jlong>(Errc::InvalidArgument);
     const std::string n = to_string(env, name);
-    const Result<u64> r = c->engine.import_image(pixels, static_cast<u32>(width), static_cast<u32>(height), n.c_str());
+    const std::string src = to_string(env, source);
+    const Result<u64> r = c->engine.import_image(pixels, static_cast<u32>(width), static_cast<u32>(height), n.c_str(),
+                                                 src.empty() ? nullptr : src.c_str());
     if (!r.ok()) return -static_cast<jlong>(r.status().code());
     return static_cast<jlong>(*r);
 }

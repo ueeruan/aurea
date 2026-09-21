@@ -9,6 +9,7 @@
 #include "aurea/Engine.hpp"
 
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <tuple>
 
@@ -754,4 +755,44 @@ AUREA_TEST(Engine, PortraitVideoKeepsAspectInComposition) {
         }
         e.shutdown();
     }
+}
+
+AUREA_TEST(Engine, ImagesComeBackWhenTheProjectIsReopened) {
+    // A imagem importada guarda a origem; ao reabrir, o motor pede os pixels à
+    // plataforma (imageLoader). Antes, a imagem só existia na sessão.
+    static u32 loads = 0;
+    loads = 0;
+    EngineConfig ec = headless_config();
+    ec.imageLoader = [](const char* src, ImagePixels& out, void*) {
+        if (std::string(src) != "content://teste/imagem") return false;
+        ++loads;
+        out.width = 4;
+        out.height = 2;
+        out.rgba.assign(4 * 2 * 4, 200);
+        return true;
+    };
+    Engine e;
+    AUREA_CHECK(e.initialize(ec).ok());
+    AUREA_CHECK(e.new_project(640, 360, 30.0, nullptr).ok());
+    std::vector<u8> px(4 * 2 * 4, 200);
+    const auto id = e.import_image(px.data(), 4, 2, "foto", "content://teste/imagem");
+    AUREA_CHECK(id.ok());
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_teste_imagem.aurea";
+    AUREA_CHECK(e.save_project(path.c_str()).ok());
+    AUREA_CHECK(e.load_project(path.c_str()).ok());
+    AUREA_CHECK_EQ(loads, 1u);
+    // A camada volta e a miniatura (feita dos pixels recarregados) existe.
+    const Composition* c = e.project()->timeline().composition(e.project()->timeline().current());
+    LayerId lid{};
+    c->layers().for_each([&](LayerId l, const Layer&) { lid = l; });
+    std::vector<u8> thumb(64 * 64 * 4);
+    u32 w = 0;
+    AUREA_CHECK(e.query_thumbnail(lid.pack(), 0, 8, thumb.data(), static_cast<u32>(thumb.size()), &w) > 0);
+    AUREA_CHECK_EQ(w, 16u);
+    bridge::LayerDetailPOD d;
+    AUREA_CHECK(e.query_layer_detail(lid.pack(), d));
+    AUREA_CHECK_EQ(d.sourceWidth, 4u);
+    AUREA_CHECK_EQ(d.sourceHeight, 2u);
+    e.shutdown();
+    std::remove(path.c_str());
 }

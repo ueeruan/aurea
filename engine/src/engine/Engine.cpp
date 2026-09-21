@@ -292,7 +292,7 @@ Status Engine::new_project(u32 width, u32 height, f64 fps, const char* title) no
     project_ = std::make_unique<Project>(std::move(*result));
     images_.clear();
     history_.clear();
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+        modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     selection_.clear();
     if (Composition* c = current_composition()) {
         adapt().configure(c->width(), c->height(), static_cast<f32>(c->fps()));
@@ -328,13 +328,36 @@ Status Engine::load_project(const char* path) noexcept {
         project_ = std::make_unique<Project>(std::move(loaded));
         images_.clear();
         history_.clear();
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+        modelRevision_.fetch_add(1, std::memory_order_acq_rel);
         selection_.clear();
         if (Composition* c = current_composition()) {
             adapt().configure(c->width(), c->height(), static_cast<f32>(c->fps()));
             playback_ = PlaybackController{};
             playback_.configure(c->fps(), c->duration());
         }
+    }
+    // Imagens: o projeto guarda a origem; os pixels voltam pela plataforma. Fora
+    // do lock do modelo (decodificar um JPEG grande custa dezenas de ms).
+    if (config_.imageLoader) {
+        std::vector<std::pair<u64, std::string>> pending;
+        {
+            std::lock_guard<std::mutex> lock(modelMutex_);
+            project_->for_each_asset([&](AssetId id, const Asset& a) {
+                if (a.kind == AssetKind::Image && !a.sourcePath.empty()) pending.emplace_back(id.pack(), a.sourcePath);
+            });
+        }
+        u32 missing = 0;
+        for (const auto& [key, src] : pending) {
+            ImagePixels px;
+            if (!config_.imageLoader(src.c_str(), px, config_.imageLoaderContext) || px.width == 0 || px.height == 0
+                || px.rgba.size() != static_cast<usize>(px.width) * px.height * 4) {
+                ++missing;
+                continue;
+            }
+            std::lock_guard<std::mutex> lock(modelMutex_);
+            images_[key] = std::move(px);
+        }
+        if (missing) AUREA_LOG_WARN("%u imagem(ns) do projeto nao puderam ser abertas", missing);
     }
     request_render();
     if (!report.clean()) return Status{Errc::CorruptData, "projeto aberto parcialmente"};
@@ -480,7 +503,8 @@ Result<u64> Engine::import_video(const VideoImport& request) noexcept {
     return lid.pack();
 }
 
-Result<u64> Engine::import_image(const u8* rgba, u32 width, u32 height, const char* name) noexcept {
+Result<u64> Engine::import_image(const u8* rgba, u32 width, u32 height, const char* name,
+                                 const char* sourcePath) noexcept {
     if (!rgba || width == 0 || height == 0) return Status{Errc::InvalidArgument, "imagem vazia"};
     std::lock_guard<std::mutex> lock(modelMutex_);
     if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
@@ -492,6 +516,10 @@ Result<u64> Engine::import_image(const u8* rgba, u32 width, u32 height, const ch
     Asset asset;
     asset.kind = AssetKind::Image;
     asset.name = name ? name : "Imagem";
+    asset.sourcePath = sourcePath ? sourcePath : "";
+    asset.originalFilename = asset.name;
+    asset.video.width = width;    // tamanho da mídia: detalhe da camada, hit-test do palco
+    asset.video.height = height;
     const AssetId assetId = project_->add_asset(std::move(asset));
 
     ImagePixels px;

@@ -163,6 +163,36 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** Camada principal da seleção. */
     val primary: Long? get() = selection.firstOrNull()
 
+    /**
+     * Keyframe escolhido (losango tocado na timeline). Estado de APRESENTAÇÃO
+     * compartilhado entre a timeline e o editor de curva — o keyframe em si
+     * continua no motor; aqui só fica QUAL está escolhido.
+     */
+    var selectedKeyframe by mutableStateOf<Pair<Long, KeyframeRow>?>(null)
+        private set
+
+    /** Aviso curto e não bloqueante (ex.: "Em breve no Aurea novo"). A UI some com ele em ~2 s. */
+    var toast by mutableStateOf<String?>(null)
+        private set
+    private var toastSerial = 0
+
+    fun showToast(message: String) {
+        toast = message
+        val serial = ++toastSerial
+        main.postDelayed({ if (serial == toastSerial) toast = null }, 2200)
+    }
+
+    /** Para os recursos que o motor novo ainda não tem: diz, não finge. */
+    fun comingSoon(feature: String) = showToast("$feature: em breve no Aurea novo")
+
+    fun selectKeyframe(layer: Long, key: KeyframeRow) {
+        selectedKeyframe = layer to key
+    }
+
+    fun clearSelectedKeyframe() {
+        selectedKeyframe = null
+    }
+
     // =========================================================================
     // Buffers (diretos, reutilizados)
     // =========================================================================
@@ -573,6 +603,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     private fun detailOf(layer: Long): LayerDetail? =
         if (engine.queryLayerDetail(layer, detailBuffer)) LayerDetail.read(detailBuffer) else null
+
+    /**
+     * Detalhe de QUALQUER camada no playhead (transform avaliado, tamanho da
+     * mídia). Para o hit-test do palco e afins; leitura síncrona e barata.
+     */
+    fun queryDetail(layer: Long): LayerDetail? = detailOf(layer)
 
     /**
      * Reordena na vertical. `displayIndex` é a posição na timeline (0 = topo,

@@ -72,7 +72,7 @@ struct LayerRow {
     u32 nameLength    = 0;    // +48
     u32 blendMode     = 0;    // +52
     u32 parentIndex   = 0;    // +56  kInvalidIndex = sem pai
-    u32 reserved      = 0;    // +60  alinha em 64 e deixa espaço para o próximo campo
+    i32 offsetFrames  = 0;    // +60  deslocamento do conteúdo (in-point); keyframe na timeline = t + start - offset
 };
 
 inline constexpr u32 kLayerRowFlagVisible  = 1u << 0;

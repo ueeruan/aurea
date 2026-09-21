@@ -54,6 +54,7 @@ internal object PodLayout {
     const val LAYER_OFF_NAME_LENGTH = 48  // u32
     const val LAYER_OFF_BLEND_MODE = 52   // u32
     const val LAYER_OFF_PARENT_INDEX = 56 // u32
+    const val LAYER_OFF_OFFSET = 60       // i32 deslocamento do conteúdo
 
     /** Bits de `LayerRow::flags`, na ordem definida em BridgePods.hpp. */
     const val FLAG_VISIBLE = 1 shl 0
@@ -181,6 +182,8 @@ class LayerRow internal constructor(
     val keyframeCount: Int,
     val blendMode: Int,
     val parentIndex: Int,
+    /** Deslocamento do conteúdo: keyframe local `t` fica na timeline em `t + startFrame - offsetFrames`. */
+    val offsetFrames: Int,
     private val nameOffset: Int,
     private val nameLength: Int,
     private val nameBlob: ByteBuffer,
@@ -224,6 +227,7 @@ class LayerRow internal constructor(
                 keyframeCount = buffer.getInt(b + PodLayout.LAYER_OFF_KEYFRAME_COUNT),
                 blendMode = buffer.getInt(b + PodLayout.LAYER_OFF_BLEND_MODE),
                 parentIndex = buffer.getInt(b + PodLayout.LAYER_OFF_PARENT_INDEX),
+                offsetFrames = buffer.getInt(b + PodLayout.LAYER_OFF_OFFSET),
                 nameOffset = buffer.getInt(b + PodLayout.LAYER_OFF_NAME_OFFSET),
                 nameLength = buffer.getInt(b + PodLayout.LAYER_OFF_NAME_LENGTH),
                 nameBlob = nameBlob,

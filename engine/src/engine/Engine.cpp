@@ -953,6 +953,7 @@ u32 Engine::query_layers(bridge::LayerRow* out, u32 capacity, char* outNameBlob,
         row.zIndex = i;
         row.startFrame = static_cast<i32>(l->start.value);
         row.endFrame = static_cast<i32>(l->end.value);
+        row.offsetFrames = static_cast<i32>(l->offset.value);
         row.opacity = l->transform.opacity;
         row.effectCount = static_cast<u32>(l->effects.size());
         row.maskCount = static_cast<u32>(l->masks.size());
@@ -969,7 +970,6 @@ u32 Engine::query_layers(bridge::LayerRow* out, u32 capacity, char* outNameBlob,
         if (l->threeD)  flags |= bridge::kLayerRowFlagThreeD;
         row.flags = flags;
         row.parentIndex = kInvalidIndex;
-        row.reserved = 0;
         if (outNameBlob && nameCursor + l->name.size() < nameBlobCapacity) {
             std::memcpy(outNameBlob + nameCursor, l->name.data(), l->name.size());
             row.nameOffset = nameCursor;

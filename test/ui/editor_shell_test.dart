@@ -374,9 +374,12 @@ void main() {
       final c = await abrirEditor(tester);
       await tester.tap(find.byKey(const ValueKey('editor-adicionar')));
       await tester.pumpAndSettle();
+      // As categorias da folha nova (test/ui/toolbar cobre o resto).
+      expect(find.byKey(const ValueKey('adicionar-aba-midia')), findsOneWidget);
+      expect(find.byKey(const ValueKey('adicionar-aba-3d')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('adicionar-aba-texto')));
+      await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('adicionar-texto')), findsOneWidget);
-      expect(find.byKey(const ValueKey('adicionar-midia')), findsOneWidget);
-      expect(find.byKey(const ValueKey('adicionar-3d')), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('adicionar-texto')));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('adicionar-texto')), findsNothing);

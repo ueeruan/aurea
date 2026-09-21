@@ -20,19 +20,18 @@ import '../../../application/ui/editor_session.dart';
 import '../../../application/video_layer_manager.dart';
 import '../../../domain/layer.dart';
 import '../../am/am_widgets.dart' show paramSheetHostKey, previewStageKey;
-import '../../am/align_sheet.dart' show showAlignSheet;
 import '../../am/layer_menu.dart' show showReasonToast;
 import '../../am/texto3d_sheet.dart' show showTexto3DSheet;
 import '../../shell/cromo_editor.dart' show menuDaTimeline;
-import '../../shell/layer_actions.dart'
-    show abrirCascata, agruparSelecao, excluirCamadas, vincularSelecao;
-import '../../shell/menu_da_camada.dart' show menuDaCamada;
 import '../../shell/project_settings_sheet.dart' show showProjectSettingsSheet;
 import '../../widgets/preview_stage.dart';
 import '../paineis/pontos.dart' show fecharEditarPontos;
 import '../timeline/timeline.dart';
 import '../toolbar/adicionar.dart';
 import '../toolbar/barra_contextual.dart';
+import '../toolbar/barra_do_lote.dart';
+import '../toolbar/barra_do_projeto.dart';
+import '../toolbar/menu_da_camada.dart';
 import 'barra_de_transporte.dart';
 import 'barra_do_topo.dart';
 import 'contrato.dart';
@@ -99,7 +98,7 @@ class _EditorShellState extends ConsumerState<EditorShell> {
   void _acionar(String acao, String layerId) {
     switch (acao) {
       case AcaoDaFerramenta.mais:
-        menuDaCamada(context, ref, layerId, _pb);
+        mostrarMenuDaCamada(context, ref, layerId, playback: _pb);
       case AcaoDaFerramenta.dividir:
         _pb.pause();
         HapticFeedback.lightImpact();
@@ -109,34 +108,18 @@ class _EditorShellState extends ConsumerState<EditorShell> {
     }
   }
 
-  /// As acoes da selecao multipla (a barra do lote do editor antigo).
-  void _acionarLote(String acao) {
-    final alvos = <String>{
-      ...ref.read(multiSelectProvider),
-      ?ref.read(selectedLayerProvider),
-    };
-    if (alvos.isEmpty) return;
-    final t = _pb.time.value;
-    _pb.pause();
-    switch (acao) {
-      case AcaoDoLote.agrupar:
-        if (alvos.length < 2) {
-          showReasonToast(context, 'Um grupo precisa de duas ou mais camadas');
-          return;
-        }
-        agruparSelecao(ref, alvos);
-      case AcaoDoLote.alinhar:
-        showAlignSheet(context, ref, alvos.toList(), t);
-      case AcaoDoLote.cascata:
-        abrirCascata(context, ref, alvos, t);
-      case AcaoDoLote.vincular:
-        vincularSelecao(context, ref, alvos, t);
-      case AcaoDoLote.apagar:
-        excluirCamadas(context, ref, alvos);
-      case AcaoDoLote.soltar:
-        ref.read(multiSelectProvider.notifier).state = const {};
-    }
-  }
+  /// As acoes da selecao multipla (a barra do lote).
+  void _acionarLote(String acao) =>
+      acionarLote(context, ref, acao, playback: _pb);
+
+  /// As acoes do projeto (a barra sem camada escolhida).
+  void _acionarProjeto(String acao) => acionarProjeto(
+    context,
+    ref,
+    acao,
+    playback: _pb,
+    abrirPainel: _abrirPainel,
+  );
 
   /// TEXTO -> TEXTO 3D, e a folha do Texto 3D abre na camada nova. Veio da
   /// ficha "Ativar 3D" da doca antiga.
@@ -279,8 +262,9 @@ class _EditorShellState extends ConsumerState<EditorShell> {
       _fecharPainel();
       return;
     }
-    if (ref.read(multiSelectProvider).isNotEmpty) {
-      ref.read(multiSelectProvider.notifier).state = const {};
+    if (ref.read(multiSelectProvider).isNotEmpty ||
+        ref.read(modoSelecionarProvider)) {
+      sairDoModoSelecionar(ref);
       return;
     }
     if (ref.read(selectedLayerProvider) != null) {
@@ -321,7 +305,11 @@ class _EditorShellState extends ConsumerState<EditorShell> {
     // de slider nao pode aparecer aqui.
     Perfil3D.contar('build.casca');
     final selecionada = ref.watch(selectedLayerProvider);
-    final lote = ref.watch(multiSelectProvider).isNotEmpty;
+    // O LOTE: varias marcadas, ou o modo Selecionar ligado (mesmo com uma
+    // so — a barra do lote diz quantas e espera a proxima).
+    final lote =
+        ref.watch(multiSelectProvider).isNotEmpty ||
+        ref.watch(modoSelecionarProvider);
     final painel = ref.watch(painelAbertoProvider);
     final telaCheia = ref.watch(
       editorSessionProvider.select((s) => s.previewExpanded),
@@ -402,6 +390,7 @@ class _EditorShellState extends ConsumerState<EditorShell> {
                           selecionada: selecionada,
                           lote: lote,
                           aoAcionarLote: _acionarLote,
+                          aoAcionarProjeto: _acionarProjeto,
                           painel: painel,
                           altura: alturaDaTimeline,
                           aoTocarFerramenta: _tocarFerramenta,
@@ -471,6 +460,7 @@ class _AreaDaTimeline extends StatelessWidget {
     required this.selecionada,
     required this.lote,
     required this.aoAcionarLote,
+    required this.aoAcionarProjeto,
     required this.painel,
     required this.altura,
     required this.aoTocarFerramenta,
@@ -486,6 +476,9 @@ class _AreaDaTimeline extends StatelessWidget {
   /// Ha selecao multipla: a barra da base vira a do lote.
   final bool lote;
   final void Function(String idDaAcao) aoAcionarLote;
+
+  /// Nada escolhido: a barra da base e a do projeto.
+  final void Function(String idDaAcao) aoAcionarProjeto;
   final PainelId? painel;
   final double altura;
   final ValueChanged<Ferramenta> aoTocarFerramenta;
@@ -511,17 +504,16 @@ class _AreaDaTimeline extends StatelessWidget {
                 ),
               ),
               if (lote)
-                BarraContextual(
-                  ferramentas: ferramentasDoLote(aoAcionar: aoAcionarLote),
-                  aoTocar: (f) => f.acao?.call(),
-                )
+                BarraDoLote(aoAcionar: aoAcionarLote)
               else if (id != null)
                 _BarraDaCamada(
                   layerId: id,
                   painel: aberto,
                   aoTocar: aoTocarFerramenta,
                   aoAcionar: aoAcionar,
-                ),
+                )
+              else
+                BarraDoProjeto(aoAcionar: aoAcionarProjeto),
             ],
           ),
         ),

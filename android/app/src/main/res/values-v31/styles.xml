@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- A SPLASH do Android 12+ (print 17_splash): fundo #0F141A e a logo 3D
+         no centro, sem círculo de fundo. O sistema escala o ícone para 288 dp;
+         a `splash_logo` (160 dp, glifo 54 × 47) sai com ~97 × 85 dp, a medida
+         do print. É o mesmo arranjo do app antigo (flutter_native_splash). -->
+    <style name="AureaTheme" parent="Base.AureaTheme">
+        <item name="android:windowSplashScreenBackground">@color/aurea_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_logo</item>
+    </style>
+</resources>

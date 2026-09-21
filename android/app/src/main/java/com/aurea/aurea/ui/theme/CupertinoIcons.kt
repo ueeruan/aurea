@@ -195,4 +195,10 @@ object CupertinoGlyph {
     const val Xmark = ''
     const val XmarkCircle = ''
     const val XmarkCircleFill = ''
+
+    // Home (Comunidade e Perfil da A.01)
+    const val At = ''
+    const val CloudFill = ''
+    const val LockShield = ''
+    const val PlusApp = ''
 }

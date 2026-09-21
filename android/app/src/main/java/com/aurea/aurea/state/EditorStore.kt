@@ -1044,6 +1044,26 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         project = project.copy(title = title.trim())
     }
 
+    /**
+     * Renomeia um projeto da Home SEM abri-lo: o título mora só no sidecar
+     * `.meta.json` (o arquivo `.aurea` e a miniatura não mudam de nome), então
+     * basta reescrever o campo e reler a lista. Sem sidecar, nasce um só com o título.
+     */
+    fun renameProjectFile(path: String, title: String) {
+        val clean = title.trim()
+        if (clean.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val metaFile = File(path + META_SUFFIX)
+            val j = try {
+                if (metaFile.exists()) JSONObject(metaFile.readText()) else JSONObject()
+            } catch (_: Exception) {
+                JSONObject()
+            }
+            metaFile.writeText(j.put("title", clean).toString())
+            withContext(Dispatchers.Main) { refreshProjects() }
+        }
+    }
+
     fun deleteProjects(paths: Collection<String>) {
         viewModelScope.launch(Dispatchers.IO) {
             paths.forEach { p ->

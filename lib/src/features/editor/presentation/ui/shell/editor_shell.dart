@@ -578,6 +578,11 @@ class _BarraDaCamada extends ConsumerWidget {
     if (tipo == null) return const SizedBox.shrink();
     final camada = ref.read(editorControllerProvider).layerById(layerId);
     return BarraContextual(
+      // UMA BARRA POR CAMADA: sem a chave, trocar a selecao direto de uma
+      // camada para outra reaproveitava a rolagem da barra anterior — a do
+      // video rolada ate "Dividir" abria a do texto no fim, com Texto,
+      // Fonte e Estilo fora da tela (visto no teste do fluxo completo).
+      key: ValueKey('barra-da-camada-$layerId'),
       ferramentas: ferramentasDa(camada, aoAcionar: aoAcionar),
       ativo: painel,
       aoTocar: aoTocar,

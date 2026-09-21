@@ -6879,6 +6879,43 @@ class EditorController extends Notifier<VideoProject> {
     ]);
   }
 
+  /// MOVE A MARCA DE UM EFEITO, e so dele: a linha do efeito na timeline
+  /// expandida. O keyframe do efeito e universal — todos os parametros com
+  /// marca em [deLocal] andam juntos (`EffectInstance.comKeyframeMovido`)
+  /// —, e as outras propriedades da camada ficam onde estao ([moverKeyframe]
+  /// leva o instante inteiro, [moverKeyframeDaProp] so fala de
+  /// `LayerProp`). Nulo quando moveu; camada bloqueada fica calada.
+  MotivoDoKeyframeParado? moverKeyframeDoEfeito(
+    String id,
+    String effectId,
+    Duration deLocal,
+    Duration paraLocal,
+  ) {
+    final layer = _layer(id);
+    if (layer == null) return MotivoDoKeyframeParado.semCamada;
+    if (state.metaOf(id).locked) return null;
+    final i = layer.effects.indexWhere((e) => e.id == effectId);
+    if (i < 0) return MotivoDoKeyframeParado.semKeyframe;
+    final efeito = layer.effects[i];
+    bool perto(Duration a, Duration b) =>
+        (a - b).abs() < kToleranciaDoKeyframe;
+    final tempos = efeito.keyframeTimes.toSet();
+    if (!tempos.any((t) => perto(t, deLocal))) {
+      return MotivoDoKeyframeParado.semKeyframe;
+    }
+    if (deLocal == paraLocal) return null;
+    if (paraLocal < Duration.zero || paraLocal > layer.duration) {
+      return MotivoDoKeyframeParado.foraDaCamada;
+    }
+    if (tempos.any((t) => !perto(t, deLocal) && perto(t, paraLocal))) {
+      return MotivoDoKeyframeParado.ocupado;
+    }
+    final efeitos = [...layer.effects];
+    efeitos[i] = efeito.comKeyframeMovido(deLocal, paraLocal);
+    _replace(layer.copyLayer(effects: efeitos));
+    return null;
+  }
+
   /// MOVE VARIAS MARCAS pelo mesmo [delta] — a selecao inteira anda junto.
   ///
   /// TUDO OU NADA: se uma so nao pode ir (sairia da camada, cairia em cima
@@ -8122,7 +8159,6 @@ class EditorController extends Notifier<VideoProject> {
     final layer = _layer(id);
     if (layer is! CaptionLayer) return;
     _replace(layer.copyLayer(highlight: fn(layer.highlight)));
-    _push(layer);
   }
 
   int addCaptionLayer(List<Cue> cues) {

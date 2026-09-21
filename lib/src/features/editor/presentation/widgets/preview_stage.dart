@@ -29,7 +29,6 @@ import '../../application/freehand_session.dart' show onionSkinProvider;
 export '../../application/freehand_session.dart' show onionSkinProvider;
 import '../../application/interacao.dart';
 import '../../application/playback_controller.dart';
-import '../../application/ui/editor_session.dart';
 import 'rascunho_do_preview.dart';
 import '../am/am_colors.dart';
 import '../am/aviso_de_bloqueio.dart';
@@ -64,7 +63,6 @@ import '../../domain/layer_meta.dart';
 import '../../domain/mask.dart';
 import '../../domain/scene3d.dart';
 import '../../domain/shape.dart';
-import '../../domain/selection_geometry.dart';
 import '../../domain/video_project.dart';
 import 'animated_text.dart';
 import 'blend_mask.dart';
@@ -107,6 +105,9 @@ import 'null_gizmo_painter.dart';
 import 'particulas_painter.dart';
 import 'gizmo3d_painter.dart';
 import 'texto_no_atlas.dart';
+import '../ui/palco/alcas_do_palco.dart';
+import '../ui/palco/edicao_no_palco.dart';
+import '../ui/palco/gestos_do_palco.dart';
 
 import 'package:aurea/src/core/l10n/app_language.dart';
 
@@ -154,11 +155,9 @@ bool _temRecorte(List<Layer> layers) => layers.any(
 );
 
 /// Palco: composicao renderizada em coordenadas logicas, escalada para
-/// caber. Gestos editam a camada selecionada.
-/// A alca que o dedo pegou: canto de baixo e a direita redimensiona,
-/// canto de cima e a direita gira.
-enum _Alca { escala, giro }
-
+/// caber. Os GESTOS moram em `ui/palco/` (mapa e prioridades em
+/// `gestos_do_palco.dart`): aqui fica o desenho, a geometria que ele mede
+/// e o gizmo da camada 3D.
 class PreviewStage extends ConsumerStatefulWidget {
   const PreviewStage({super.key, required this.playback, required this.videos});
 
@@ -169,7 +168,12 @@ class PreviewStage extends ConsumerStatefulWidget {
   ConsumerState<PreviewStage> createState() => _PreviewStageState();
 }
 
-class _PreviewStageState extends ConsumerState<PreviewStage> {
+class _PreviewStageState extends ConsumerState<PreviewStage>
+    implements PalcoVivo {
+  /// Quem executa o gesto e quem decide o dono dele (ver `ui/palco/`).
+  late final EdicaoNoPalco _edicao = EdicaoNoPalco(ref, this);
+  late final ArbitroDoPalco _arbitro = ArbitroDoPalco(_edicao);
+
   @override
   void initState() {
     super.initState();
@@ -198,11 +202,11 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
   void dispose() {
     widget.playback.playing.removeListener(_playbackChanged);
     Interacao.agora.removeListener(_playbackChanged);
+    _arbitro.descartar();
+    _edicao.dispose();
     super.dispose();
   }
 
-  double _startScale = 1;
-  double _startRotation = 0;
   double _stageScale = 1;
 
   /// Canto de cima e da esquerda do quadro da composicao dentro do
@@ -211,15 +215,6 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
 
   /// O tamanho da area do palco, para prender as alcas dentro dela.
   Size _tamanhoDoPalco = Size.zero;
-
-  /// A alca que o dedo pegou neste gesto (null = arrastar a camada).
-  _Alca? _alca;
-  Offset _dragStartPos = Offset.zero;
-
-  /// O pivo no inicio do gesto: e em torno dele (posicao + pivo) que as
-  /// alcas giram e escalam. No grupo ele fica no centro dos filhos.
-  Offset _dragStartPivot = Offset.zero;
-  Offset _dragAccum = Offset.zero;
 
   // ---- GIZMO 3D: o eixo (ou o anel) que o dedo pegou neste gesto ----
   //
@@ -244,50 +239,68 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
   Offset _naComposicao(Offset local) =>
       (local - _stageOrigin) / (_stageScale <= 0 ? 1 : _stageScale);
 
-  /// A camada mais de cima cujo quadro contem o ponto (null = nenhuma).
-  ///
-  /// E o que faltava para o app parecer um editor: o testador toca no
-  /// objeto na tela e ele fica selecionado, sem precisar descobrir que
-  /// a barrinha da timeline e que seleciona.
-  String? _camadaNoPonto(Offset comp) {
-    final project = ref.read(editorControllerProvider);
-    final controller = ref.read(editorControllerProvider.notifier);
-    final t = widget.playback.time.value;
-    final ordered = depthSortPaintOrder(
-      project.layers.reversed.toList(),
-      t,
-      project: project,
-    ).reversed;
-    for (final l in [
-      ...ordered.where((l) => l is! NullLayer),
-      ...ordered.whereType<NullLayer>(),
-    ]) {
-      // Nulos ficam por ultimo: o gizmo pode ser escolhido sem bloquear midia.
-      if (l is AudioLayer || l is AdjustmentLayer) continue;
-      if (!l.activeAt(t)) continue;
-      if (project.isHidden(l.id)) continue;
-      if (project.metaOf(l.id).locked) continue;
-      // A caixa do grupo envolve os filhos (e nao a composicao inteira):
-      // tocar no vazio ao lado do conteudo nao pega o grupo.
-      final caixa = controller.layerBoxRect(l, t, scaled: false);
-      if (caixa.isEmpty) continue;
-      final matrix = selectionTransform(project, l, t);
-      final inverse = Matrix4.tryInvert(matrix);
-      if (inverse == null) continue;
-      final p = MatrixUtils.transformPoint(inverse, comp);
-      // Uma folga de 12 px: alvo pequeno tambem tem de dar para pegar.
-      if (caixa.contains(p)) return l.id;
-      final nearest = Offset(
-        p.dx.clamp(caixa.left, caixa.right),
-        p.dy.clamp(caixa.top, caixa.bottom),
-      );
-      if ((MatrixUtils.transformPoint(matrix, nearest) - comp).distance *
-              _stageScale <=
-          12) {
-        return l.id;
-      }
-    }
-    return null;
+  // ================= O PALCO PARA A EDICAO (ui/palco/) =================
+  //
+  // A edicao le a geometria que o LayoutBuilder mediu e pede a vista, a
+  // linha de apoio e o gizmo da camada por aqui. Nada disto desenha.
+
+  @override
+  PlaybackController get playback => widget.playback;
+
+  @override
+  Offset get origem => _stageOrigin;
+
+  @override
+  double get escala => _stageScale;
+
+  @override
+  Size get tamanho => _tamanhoDoPalco;
+
+  @override
+  double get zoom => ref.read(zoomDoPalcoProvider);
+
+  @override
+  void definirVista({required double zoom, required Offset pan}) {
+    if (!mounted) return;
+    final z = ref.read(zoomDoPalcoProvider.notifier);
+    if (z.state != zoom) z.state = zoom;
+    final novo = zoom == 1.0 ? Offset.zero : pan;
+    if (novo != _panDoPalco) setState(() => _panDoPalco = novo);
+  }
+
+  @override
+  void mostrarEncaixe(double? x, double? y) {
+    if (!mounted || (x == _encaixeX && y == _encaixeY)) return;
+    setState(() {
+      _encaixeX = x;
+      _encaixeY = y;
+    });
+  }
+
+  @override
+  void avisarBloqueio(String camadaId) {
+    if (!mounted) return;
+    avisarCamadaBloqueada(context, ref, fraseDeBloqueio('mover'), camadaId);
+  }
+
+  @override
+  bool gizmoDaCamadaEm(Offset noPalco) => _gizmoNoPonto(noPalco) != null;
+
+  @override
+  bool pegarGizmoDaCamada(Offset noPalco) => _pegarDoGizmo(noPalco);
+
+  @override
+  void arrastarGizmoDaCamada(Offset passo, Offset noPalco) =>
+      _arrastarNoGizmo(passo, noPalco);
+
+  @override
+  void soltarGizmoDaCamada() {
+    if (_eixoDoGizmo == null && _anelDoGizmo == null) return;
+    _eixoDoGizmo = null;
+    _anelDoGizmo = null;
+    _gizmoInicial = null;
+    ref.read(editorControllerProvider.notifier).endGesture();
+    if (mounted) setState(() {});
   }
 
   /// O COMPRIMENTO DO BRACO E O RAIO DO ANEL, EM PIXELS DE TELA.
@@ -322,23 +335,36 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
     return gizmoDaCamada(project, l, t);
   }
 
+  /// O QUE DO GIZMO ESTA SOB O DEDO (so leitura; nulo = nada). E o que a
+  /// edicao pergunta quando o dedo desce, antes de decidir o dono.
+  ({GizmoNaTela g, EixoDoGizmo? anel, EixoDoGizmo? eixo})? _gizmoNoPonto(
+    Offset noPalco,
+  ) {
+    final g = _gizmoDaSelecao();
+    if (g == null) return null;
+    final dedo = _naComposicao(noPalco);
+    final braco = _kBracoDoGizmo / _stageScale;
+    final raio = _kRaioDoAnel / _stageScale;
+    final folga = 22 / _stageScale;
+    // O ANEL PRIMEIRO: ele passa por fora do braco, e quem mira a
+    // circunferencia nao quer o eixo.
+    final anel = anelNoDedo(g, dedo, raio, tolerancia: 26 / _stageScale);
+    final eixo = eixoNoDedo(g, dedo, braco, tolerancia: folga);
+    if (anel == null && eixo == null) return null;
+    return (g: g, anel: anel, eixo: eixo);
+  }
+
   /// O DEDO CAIU NUM EIXO DO GIZMO? Devolve o eixo e ja guarda o estado do
   /// gesto (o gizmo congelado e os valores de partida).
   bool _pegarDoGizmo(Offset noPalco) {
     _eixoDoGizmo = null;
     _anelDoGizmo = null;
-    final g = _gizmoDaSelecao();
-    if (g == null) return false;
+    final pego = _gizmoNoPonto(noPalco);
+    if (pego == null) return false;
+    final g = pego.g;
+    final anel = pego.anel;
+    final eixo = pego.eixo;
     final dedo = _naComposicao(noPalco);
-    final braco = _kBracoDoGizmo / _stageScale;
-    final raio = _kRaioDoAnel / _stageScale;
-    final folga = 22 / _stageScale;
-
-    // O ANEL PRIMEIRO: ele passa por fora do braco, e quem mira a
-    // circunferencia nao quer o eixo.
-    final anel = anelNoDedo(g, dedo, raio, tolerancia: 26 / _stageScale);
-    final eixo = eixoNoDedo(g, dedo, braco, tolerancia: folga);
-    if (anel == null && eixo == null) return false;
 
     final id = ref.read(selectedLayerProvider)!;
     final layer = ref.read(editorControllerProvider).layerById(id)!;
@@ -369,7 +395,8 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
   }
 
   /// O ARRASTO DENTRO DO GIZMO. Devolve `true` quando consumiu o gesto.
-  bool _arrastarNoGizmo(ScaleUpdateDetails d) {
+  /// [passo] e o quanto o dedo andou; [noPalco], onde ele esta.
+  bool _arrastarNoGizmo(Offset passo, Offset noPalco) {
     final eixo = _eixoDoGizmo;
     final anel = _anelDoGizmo;
     final g = _gizmoInicial;
@@ -382,7 +409,7 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
       // O DELTA E ACUMULADO DESDE O INICIO, e nao somado evento a evento:
       // a posicao vem sempre de `inicial + total`, e um evento perdido
       // nao deixa erro permanente no objeto.
-      _deltaAcumuladoDoEixo += d.focalPointDelta;
+      _deltaAcumuladoDoEixo += passo;
       final v = valorArrastado(
         eixo: eixo,
         gizmo: g,
@@ -411,7 +438,7 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
     // atras da camada girava ao contrario.
     final alvo = anel!;
     final centro = g.origem;
-    final atual = _naComposicao(d.localFocalPoint);
+    final atual = _naComposicao(noPalco);
     _giroAcumulado +=
         giroEntre(centro, _dedoAnterior, atual) * sinalDoGiro(g, alvo);
     // O DEDO ANTERIOR GUARDA O PONTO EM COORDENADAS DA COMPOSICAO, igual
@@ -434,79 +461,6 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
       ('Giro ${nomeDoEixo(alvo)}', '${valor.toStringAsFixed(1)}°'),
     ]);
     return true;
-  }
-
-  /// Onde ficam as alcas da selecao, em coordenadas do PALCO.
-  ({Offset escala, Offset giro, Rect quadro})? _alcasDaSelecao() {
-    final id = ref.read(selectedLayerProvider);
-    if (id == null) return null;
-    final project = ref.read(editorControllerProvider);
-    final l = project.layerById(id);
-    if (l == null || l is AudioLayer) return null;
-    // BLOQUEADA NAO TEM ALCA: a alca promete um gesto que o cadeado
-    // recusa, e alca que nao obedece e pior do que alca nenhuma.
-    if (project.metaOf(id).locked) return null;
-    final t = widget.playback.time.value;
-    if (!l.activeAt(t)) return null;
-    final matrix = selectionTransform(project, l, t);
-    // Camada que passou da camera nao aparece: sem alcas soltas no canto.
-    if (matrix.storage.every((v) => v == 0)) return null;
-    final caixa = ref
-        .read(editorControllerProvider.notifier)
-        .layerBoxRect(l, t, scaled: false);
-    if (caixa.isEmpty) return null;
-    final centro =
-        _stageOrigin +
-        MatrixUtils.transformPoint(matrix, caixa.center) * _stageScale;
-
-    // AS DUAS ALCAS NUNCA ENCOSTAM UMA NA OUTRA.
-    //
-    // Elas ficam nos cantos de cima e de baixo da selecao. Num objeto
-    // pequeno — ou num palco baixo, que e o caso desde que a altura do
-    // preview passou a sair da proporcao da composicao — esses dois
-    // cantos caem a poucos pixels de distancia. Como quem procura a alca
-    // testa a de ESCALA primeiro, ela ganhava as duas, e girar deixava
-    // de existir: era o "a rotacao nao gira" do relato, agora por outro
-    // caminho. Um afastamento minimo em pixels DE TELA resolve, e nao
-    // mexe em objeto grande, onde os cantos ja estao longe.
-    const afastamentoMinimo = 30.0;
-
-    // AS ALCAS FICAM DENTRO DO PALCO, sempre.
-    //
-    // Um objeto maior que o quadro empurra o canto para fora da area
-    // visivel, e ali a alca nao existe para o dedo. Presas na borda, com
-    // margem para o circulo caber, continuam onde se espera.
-    final palco = Offset.zero & _tamanhoDoPalco;
-    Offset presa(Offset p) => palco.isEmpty
-        ? p
-        : Offset(
-            p.dx.clamp(palco.left + 22, palco.right - 22),
-            p.dy.clamp(palco.top + 22, palco.bottom - 22),
-          );
-
-    Offset noPalco(Offset canto) {
-      var delta =
-          (MatrixUtils.transformPoint(matrix, canto) * _stageScale +
-              _stageOrigin) -
-          centro;
-      if (delta.distance < afastamentoMinimo && delta.distance > 1e-6) {
-        delta *= afastamentoMinimo / delta.distance;
-      }
-      return presa(centro + delta);
-    }
-
-    var escala = noPalco(caixa.bottomRight);
-    var giro = noPalco(caixa.topRight);
-    if ((escala - giro).distance < 60) {
-      final middle = (escala + giro) / 2;
-      escala = presa(middle + const Offset(0, 30));
-      giro = presa(middle - const Offset(0, 30));
-    }
-    return (
-      escala: escala,
-      giro: giro,
-      quadro: MatrixUtils.transformRect(matrix, caixa),
-    );
   }
 
   /// ONDE O ENCAIXE PEGOU, em coordenadas da composicao. Nulo = solto.
@@ -532,203 +486,6 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
   /// o zoom volta ao ajustado.
   Offset _panDoPalco = Offset.zero;
 
-  /// O zoom do palco quando a pinca comecou (dois dedos no vazio).
-  double _zoomNoInicioDaPinca = 1.0;
-
-  /// TOQUE DUPLO COM DOIS DEDOS: os dedos no palco, onde desceram, se
-  /// andaram, e quando foi o ultimo toque de dois dedos.
-  final Map<int, Offset> _dedosNoPalco = {};
-  Duration? _desceramOsDois;
-  bool _osDoisAndaram = false;
-  Duration? _ultimoToqueDeDois;
-
-  void _dedoDesceu(PointerDownEvent e) {
-    _dedosNoPalco[e.pointer] = e.position;
-    if (_dedosNoPalco.length == 2) {
-      _desceramOsDois = e.timeStamp;
-      _osDoisAndaram = false;
-    } else if (_dedosNoPalco.length > 2) {
-      _desceramOsDois = null;
-    }
-  }
-
-  void _dedoAndou(PointerMoveEvent e) {
-    final origem = _dedosNoPalco[e.pointer];
-    if (origem != null && (e.position - origem).distance > 12) {
-      _osDoisAndaram = true;
-    }
-  }
-
-  void _dedoSubiu(PointerEvent e) {
-    final eramDois = _dedosNoPalco.length == 2;
-    _dedosNoPalco.remove(e.pointer);
-    final desceram = _desceramOsDois;
-    if (!eramDois || desceram == null) return;
-    _desceramOsDois = null;
-    if (_osDoisAndaram ||
-        e.timeStamp - desceram > const Duration(milliseconds: 300)) {
-      return;
-    }
-    final anterior = _ultimoToqueDeDois;
-    if (anterior != null &&
-        e.timeStamp - anterior <= const Duration(milliseconds: 450)) {
-      _ultimoToqueDeDois = null;
-      final zoom = ref.read(zoomDoPalcoProvider.notifier);
-      zoom.state = zoom.state == 1.0 ? 2.0 : 1.0;
-    } else {
-      _ultimoToqueDeDois = e.timeStamp;
-    }
-  }
-
-  /// O NUMERO QUE O DEDO ESTA MUDANDO, na barra de informacoes.
-  void _informar(String id) {
-    final camada = ref.read(editorControllerProvider).layerById(id);
-    if (camada == null) return;
-    final local = camada.localTime(widget.playback.time.value);
-    final pos = camada.position.valueAt(local);
-    final escala = camada.scaleX.valueAt(local);
-    final giro = camada.rotation.valueAt(local);
-    ref.read(infobarProvider.notifier).state = DadosDaInfobar.pares([
-      ('X', pos.dx.toStringAsFixed(0)),
-      ('Y', pos.dy.toStringAsFixed(0)),
-      ('Escala', '${(escala * 100).toStringAsFixed(0)}%'),
-      ('Rotação', '${giro.toStringAsFixed(1)}°'),
-    ]);
-  }
-
-  void _limparInfobar() {
-    if (ref.read(infobarProvider) != null) {
-      ref.read(infobarProvider.notifier).state = null;
-    }
-  }
-
-  void _limparEncaixe() {
-    if (_encaixeX == null && _encaixeY == null) return;
-    setState(() {
-      _encaixeX = null;
-      _encaixeY = null;
-    });
-  }
-
-  /// A ALCA DE PARAMETRO DA FORMA sob o dedo (nulo = nenhuma).
-  String? _alcaDaForma;
-
-  /// O centro do desenho no comeco do arrasto da alca: a caixa da forma e
-  /// centrada no desenho, e o desenho muda enquanto se arrasta.
-  Offset _centroDoDesenho = Offset.zero;
-
-  /// AS ALCAS DA FORMA VIVA, em coordenadas do PALCO: so com o Editar
-  /// forma aberto, na forma selecionada.
-  List<({String chave, Offset ponto})> _alcasDaFormaNoPalco() {
-    if (ref.read(editorSessionProvider).panel != EditorPanel.editShape) {
-      return const [];
-    }
-    final id = ref.read(selectedLayerProvider);
-    if (id == null) return const [];
-    final project = ref.read(editorControllerProvider);
-    final l = project.layerById(id);
-    if (l is! ShapeLayer) return const [];
-    final t = widget.playback.time.value;
-    if (!l.activeAt(t)) return const [];
-    // Bloqueada nao tem alca de forma pela mesma razao das de selecao.
-    if (project.metaOf(id).locked) return const [];
-    final forma = l.contents.whereType<ShapeParametric>().firstOrNull;
-    if (forma == null) return const [];
-    final local = l.localTime(t);
-    final matriz = selectionTransform(project, l, t);
-    if (matriz.storage.every((v) => v == 0)) return const [];
-    final centro = shapeBounds(evaluateShape(l.contents, local)).center;
-    return [
-      for (final a in alcasDaForma(forma, local))
-        (
-          chave: a.chave,
-          ponto:
-              _stageOrigin +
-              MatrixUtils.transformPoint(matriz, a.ponto - centro) *
-                  _stageScale,
-        ),
-    ];
-  }
-
-  void _onScaleStart(ScaleStartDetails d) {
-    _zoomNoInicioDaPinca = ref.read(zoomDoPalcoProvider);
-    // O dedo pegou uma alca da forma? Ela vem antes das de escala e giro:
-    // e o que se esta editando.
-    _alcaDaForma = null;
-    if (d.pointerCount < 2) {
-      for (final a in _alcasDaFormaNoPalco()) {
-        if ((d.localFocalPoint - a.ponto).distance <= 24) {
-          _alcaDaForma = a.chave;
-          final id = ref.read(selectedLayerProvider)!;
-          final l =
-              ref.read(editorControllerProvider).layerById(id)! as ShapeLayer;
-          _centroDoDesenho = shapeBounds(
-            evaluateShape(l.contents, l.localTime(widget.playback.time.value)),
-          ).center;
-          ref.read(editorControllerProvider.notifier).beginGesture();
-          return;
-        }
-      }
-    }
-    // O GIZMO 3D VEM PRIMEIRO. Ele vive no centro da camada e as alcas 2D
-    // nos cantos da caixa; num objeto pequeno os dois se encostam, e quem
-    // mira o eixo do Z nao quer redimensionar a camada.
-    if (d.pointerCount < 2 && _pegarDoGizmo(d.localFocalPoint)) return;
-    // O dedo pegou uma alca? (raio generoso: 28 px)
-    _alca = null;
-    final alcas = _alcasDaSelecao();
-    if (alcas != null && d.pointerCount < 2) {
-      if ((d.localFocalPoint - alcas.escala).distance <= 28) {
-        _alca = _Alca.escala;
-      } else if ((d.localFocalPoint - alcas.giro).distance <= 28) {
-        _alca = _Alca.giro;
-      }
-    }
-    // Tocou fora de qualquer alca: seleciona o que estiver embaixo do
-    // dedo (e nada, se for o vazio).
-    if (_alca == null && d.pointerCount < 2) {
-      final alvo = _camadaNoPonto(_naComposicao(d.localFocalPoint));
-      // MODO SELECIONAR: tocar na camada marca e desmarca; o palco nao
-      // arrasta nada enquanto se escolhe.
-      if (ref.read(modoSelecionarProvider)) {
-        _selecionandoNoPalco = true;
-        if (alvo != null) {
-          final r = alternarNaSelecao(
-            ref.read(multiSelectProvider),
-            ref.read(selectedLayerProvider),
-            alvo,
-          );
-          ref.read(multiSelectProvider.notifier).state = r.multi;
-          ref.read(selectedLayerProvider.notifier).state = r.principal;
-        }
-        return;
-      }
-      _selecionandoNoPalco = false;
-      final atual = ref.read(selectedLayerProvider);
-      if (alvo != atual) {
-        ref.read(multiSelectProvider.notifier).state = const {};
-        ref.read(selectedLayerProvider.notifier).state = alvo;
-      }
-    }
-    final id = ref.read(selectedLayerProvider);
-    if (id == null) return;
-    final layer = ref.read(editorControllerProvider).layerById(id);
-    if (layer == null) return;
-    final t = layer.localTime(widget.playback.time.value);
-    _startScale = layer.scaleX.valueAt(t);
-    _startRotation = layer.rotation.valueAt(t);
-    _dragStartPos = layer.position.valueAt(t);
-    _dragStartPivot = layer.pivot.valueAt(t);
-    _dragAccum = Offset.zero;
-  }
-
-  /// O toque atual comecou no modo Selecionar: nao move camada nenhuma.
-  bool _selecionandoNoPalco = false;
-
-  /// Ja avisou do cadeado neste gesto (um aviso por arrasto, nao por
-  /// quadro: `onScaleUpdate` chega dezenas de vezes por segundo).
-  bool _avisouBloqueio = false;
-
   /// A camada selecionada esta bloqueada? (falso quando nao ha selecao)
   ///
   /// So o BOOL entra na assinatura: observar o projeto inteiro aqui
@@ -739,263 +496,6 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
     return ref.watch(
       editorControllerProvider.select((p) => p.metaOf(id).locked),
     );
-  }
-
-  void _onScaleUpdate(ScaleUpdateDetails d) {
-    if (_selecionandoNoPalco) return;
-    // O GIZMO TEM PRIORIDADE SOBRE O ARRASTO LIVRE: quem pegou o eixo
-    // quer andar NAQUELE eixo, e nao em qualquer direcao.
-    if (_arrastarNoGizmo(d)) return;
-    final chaveDaAlca = _alcaDaForma;
-    if (chaveDaAlca != null) {
-      _arrastarAlcaDaForma(chaveDaAlca, d.localFocalPoint);
-      return;
-    }
-    final id = ref.read(selectedLayerProvider);
-    // COM ZOOM E NADA SELECIONADO, o arrasto passeia pelo palco.
-    if (id == null) {
-      final zoom = ref.read(zoomDoPalcoProvider);
-      // DOIS DEDOS NO VAZIO: a pinca aproxima e o par de dedos passeia,
-      // como numa foto. Perto de 100% o palco gruda no ajustado.
-      if (d.pointerCount >= 2) {
-        var novo = (_zoomNoInicioDaPinca * d.scale).clamp(0.25, 4.0);
-        if ((novo - 1.0).abs() < 0.04) novo = 1.0;
-        if (novo != zoom) {
-          ref.read(zoomDoPalcoProvider.notifier).state = novo;
-        }
-        if (novo != 1.0) {
-          setState(() => _panDoPalco += d.focalPointDelta);
-        }
-        return;
-      }
-      if (zoom != 1.0 && d.pointerCount == 1) {
-        setState(() => _panDoPalco += d.focalPointDelta);
-      }
-      return;
-    }
-    final controller = ref.read(editorControllerProvider.notifier);
-    final project = ref.read(editorControllerProvider);
-    // O TOQUE PEGOU UMA CAMADA BLOQUEADA. O controlador recusaria a
-    // mutacao em silencio e o dedo ficaria arrastando o nada — o palco
-    // diz o que houve, uma vez por gesto.
-    if (project.metaOf(id).locked) {
-      if (!_avisouBloqueio) {
-        _avisouBloqueio = true;
-        avisarCamadaBloqueada(context, ref, fraseDeBloqueio('mover'), id);
-      }
-      return;
-    }
-    _avisouBloqueio = false;
-    final t = widget.playback.time.value;
-
-    if (d.pointerCount >= 2) {
-      controller.editScaleUniform(
-        id,
-        t,
-        (_startScale * d.scale).clamp(0.05, 8.0),
-      );
-      controller.editRotation(
-        id,
-        t,
-        _startRotation + d.rotation * 180 / math.pi,
-      );
-      _informar(id);
-      return;
-    }
-
-    // ALCAS: um dedo so, mas nao arrasta a camada — redimensiona ou gira.
-    if (_alca != null) {
-      final centro =
-          _stageOrigin + (_dragStartPos + _dragStartPivot) * _stageScale;
-      final v = d.localFocalPoint - centro;
-      if (_alca == _Alca.giro) {
-        final ang = math.atan2(v.dy, v.dx) * 180 / math.pi;
-        // O canto de cima e a direita comeca a 45 graus do centro.
-        controller.editRotation(id, t, ang + 45);
-        _informar(id);
-      } else {
-        final camada = project.layerById(id);
-        if (camada != null) {
-          // A CAIXA SEM ESCALA, senao a conta briga consigo mesma.
-          //
-          // A escala nova e "distancia do dedo ao centro dividida pela
-          // meia diagonal da caixa". Com a caixa JA ESCALADA, a meia
-          // diagonal cresce junto com a escala que acabou de ser
-          // aplicada: o proximo evento divide por um numero maior e
-          // devolve uma escala menor, que encolhe a caixa, que devolve
-          // uma escala maior... O objeto tremia entre dois tamanhos e
-          // nunca acompanhava o dedo — era o "da ghost no zoom e nao da
-          // zoom de verdade" do beta. Contra a caixa base, a escala e
-          // funcao so de onde o dedo esta.
-          final caixa = controller.layerBoxSize(camada, t, scaled: false);
-          final meia = math.max(
-            1.0,
-            Offset(caixa.width / 2, caixa.height / 2).distance,
-          );
-          controller.editScaleUniform(
-            id,
-            t,
-            (v.distance / _stageScale / meia).clamp(0.05, 8.0),
-          );
-          _informar(id);
-        }
-      }
-      return;
-    }
-    final deltaLogical = d.focalPointDelta / _stageScale;
-    if (deltaLogical == Offset.zero) return;
-    _dragAccum += deltaLogical;
-
-    // ALINHAMENTO: enquanto o dedo anda so num eixo, o outro fica quieto
-    // — o arrasto nao "sai torto" ao comecar.
-    //
-    // O CRITERIO E ABSOLUTO, e nao uma proporcao. Antes bastava um eixo
-    // ser 2,5 vezes maior que o outro: depois de arrastar duzentos
-    // pixels para o lado, era preciso descer OITENTA para o objeto voltar
-    // a subir e descer. No meio do gesto isso e indistinguivel de um
-    // travamento, e foi parte do que o beta chamou de "para de mexer".
-    // Com um limite em pixels, o eixo se solta assim que a pessoa move
-    // de verdade para o outro lado, nao importa o quanto ja tenha
-    // andado.
-    const folgaDoEixo = 12.0;
-    var target = _dragStartPos + _dragAccum;
-    final adx = _dragAccum.dx.abs();
-    final ady = _dragAccum.dy.abs();
-    if (adx > 24 && ady < folgaDoEixo) {
-      target = Offset(target.dx, _dragStartPos.dy);
-    } else if (ady > 24 && adx < folgaDoEixo) {
-      target = Offset(_dragStartPos.dx, target.dy);
-    }
-
-    // ENCAIXE (PR-X2): centro e bordas da composicao, centros e bordas
-    // das OUTRAS camadas, e as guias. O primeiro alvo dentro da
-    // tolerancia vence, por eixo.
-    // DEZ PIXELS DE TELA, e nao dezesseis. A tolerancia e uma zona morta:
-    // dentro dela o objeto fica parado enquanto o dedo anda. Dezesseis
-    // para cada lado davam trinta e dois pixels de "nao acontece nada" —
-    // um terco de polegada em que o app parece quebrado. Dez ainda pega
-    // o alinhamento e some antes de virar queixa.
-    final snap = 10 / _stageScale;
-
-    // QUEM PASSA CORRENDO NAO ESTA MIRANDO.
-    //
-    // Esta e a metade que faltava do relato "passa o dedo por cima e
-    // para de mexer". Quem arrasta depressa de um lado ao outro nao quer
-    // alinhar nada — quer chegar do outro lado — e o encaixe agarrando
-    // no meio do caminho e puro estorvo. Quem quer alinhar chega devagar.
-    //
-    // O limite e a propria tolerancia: se o dedo atravessa a zona
-    // inteira num unico evento, ele estava passando, e nao mirando.
-    // Assim a regra se ajusta sozinha a qualquer zoom do palco, sem mais
-    // um numero magico para manter.
-    if (deltaLogical.distance > snap) {
-      controller.editPosition(id, t, target);
-      _limparEncaixe();
-      _informar(id);
-      return;
-    }
-    final self = ref.read(editorControllerProvider.notifier);
-    final size = self.layerBoxSize(
-      ref.read(editorControllerProvider).layerById(id)!,
-      t,
-    );
-    final half = Offset(size.width / 2, size.height / 2);
-
-    final xs = <double>[
-      project.outputWidth / 2,
-      half.dx,
-      project.outputWidth - half.dx,
-      ...project.guides.vertical,
-      ...project.guides.vertical.map((g) => g + half.dx),
-      ...project.guides.vertical.map((g) => g - half.dx),
-    ];
-    final ys = <double>[
-      project.outputHeight / 2,
-      half.dy,
-      project.outputHeight - half.dy,
-      ...project.guides.horizontal,
-      ...project.guides.horizontal.map((g) => g + half.dy),
-      ...project.guides.horizontal.map((g) => g - half.dy),
-    ];
-    for (final other in project.layers) {
-      if (other.id == id || !other.activeAt(t)) continue;
-      final oc = other.position.valueAt(other.localTime(t));
-      final os = self.layerBoxSize(other, t);
-      final oh = Offset(os.width / 2, os.height / 2);
-      xs
-        ..add(oc.dx)
-        ..add(oc.dx - oh.dx + half.dx)
-        ..add(oc.dx + oh.dx - half.dx)
-        ..add(oc.dx - oh.dx - half.dx)
-        ..add(oc.dx + oh.dx + half.dx);
-      ys
-        ..add(oc.dy)
-        ..add(oc.dy - oh.dy + half.dy)
-        ..add(oc.dy + oh.dy - half.dy)
-        ..add(oc.dy - oh.dy - half.dy)
-        ..add(oc.dy + oh.dy + half.dy);
-    }
-    double? pegouX;
-    double? pegouY;
-    for (final x in xs) {
-      if ((target.dx - x).abs() < snap) {
-        target = Offset(x, target.dy);
-        pegouX = x;
-        break;
-      }
-    }
-    for (final y in ys) {
-      if ((target.dy - y).abs() < snap) {
-        target = Offset(target.dx, y);
-        pegouY = y;
-        break;
-      }
-    }
-    // A LINHA APARECE COM O ENCAIXE E SOME COM ELE. Nada de cruz
-    // permanente: o que ela mostra e "seu objeto esta alinhado com
-    // isto", e essa frase so faz sentido no instante em que e verdade.
-    if (pegouX != _encaixeX || pegouY != _encaixeY) {
-      setState(() {
-        _encaixeX = pegouX;
-        _encaixeY = pegouY;
-      });
-    }
-
-    controller.editPosition(id, t, target);
-    _informar(id);
-  }
-
-  /// O dedo numa alca da forma: do palco ao espaco do desenho (pela
-  /// inversa da selecao) e dai aos numeros da forma.
-  void _arrastarAlcaDaForma(String chave, Offset noPalco) {
-    final id = ref.read(selectedLayerProvider);
-    if (id == null) return;
-    final project = ref.read(editorControllerProvider);
-    final l = project.layerById(id);
-    if (l is! ShapeLayer) return;
-    final forma = l.contents.whereType<ShapeParametric>().firstOrNull;
-    if (forma == null) return;
-    final t = widget.playback.time.value;
-    final inversa = Matrix4.tryInvert(selectionTransform(project, l, t));
-    if (inversa == null) return;
-    final naCaixa = MatrixUtils.transformPoint(inversa, _naComposicao(noPalco));
-    final valores = valoresDaAlcaDaForma(
-      forma,
-      chave,
-      naCaixa + _centroDoDesenho,
-      l.localTime(t),
-    );
-    final controller = ref.read(editorControllerProvider.notifier);
-    for (final e in valores.entries) {
-      controller.editShapeParam(id, e.key, t, e.value);
-    }
-    ref.read(infobarProvider.notifier).state = DadosDaInfobar.pares([
-      for (final e in valores.entries)
-        (
-          fichaDoParametroDaForma(e.key, forma.kind).rotulo,
-          e.value.toStringAsFixed(0),
-        ),
-    ]);
   }
 
   @override
@@ -1080,41 +580,21 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
       tetoPx: math.min(cru.tetoPx, tetoDasFotosDaPolitica.toDouble()),
     );
 
-    return Listener(
-      onPointerDown: _dedoDesceu,
-      onPointerMove: _dedoAndou,
-      onPointerUp: _dedoSubiu,
-      onPointerCancel: _dedoSubiu,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onScaleStart: drawing ? null : _onScaleStart,
-        onScaleUpdate: drawing ? null : _onScaleUpdate,
-        // SOLTOU O DEDO, SOME A LINHA. Ela e um sinal do gesto em
-        // andamento; deixada na tela depois vira decoracao que confunde.
-        //
-        // SO `onScaleEnd`. Um `onTapUp` aqui parecia inofensivo e nao era:
-        // ele poe um reconhecedor de toque na mesma arena, e o toque
-        // simples passava a ser dele em vez de chegar ao `onScaleStart` —
-        // que e quem seleciona a camada embaixo do dedo. O palco parou de
-        // selecionar por causa de uma limpeza que ja acontecia sozinha.
-        onScaleEnd: drawing
-            ? null
-            : (_) {
-                if (_alcaDaForma != null) {
-                  _alcaDaForma = null;
-                  ref.read(editorControllerProvider.notifier).endGesture();
-                }
-                if (_eixoDoGizmo != null || _anelDoGizmo != null) {
-                  _eixoDoGizmo = null;
-                  _anelDoGizmo = null;
-                  _gizmoInicial = null;
-                  ref.read(editorControllerProvider.notifier).endGesture();
-                  setState(() {});
-                }
-                _limparEncaixe();
-                _limparInfobar();
-              },
-        child: Stack(
+    // O GESTO DO PALCO E UM RECONHECEDOR SO (ver ui/palco/gestos_do_palco):
+    // toque, arrasto, alcas e as duas pincas passam por um arbitro que da
+    // UM dono a cada gesto. Desenhando, o desenho livre e o dono de tudo.
+    return RawGestureDetector(
+      behavior: HitTestBehavior.opaque,
+      gestures: drawing
+          ? const <Type, GestureRecognizerFactory>{}
+          : <Type, GestureRecognizerFactory>{
+              ReconhecedorDoPalco:
+                  GestureRecognizerFactoryWithHandlers<ReconhecedorDoPalco>(
+                    () => ReconhecedorDoPalco(debugOwner: this),
+                    (r) => r.arbitro = _arbitro,
+                  ),
+            },
+      child: Stack(
           fit: StackFit.expand,
           children: [
             // A FOLGA EM VOLTA DA COMPOSICAO usa a cor do painel, e
@@ -1451,6 +931,21 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
                           ),
                         ),
                       ),
+                      // A MOLDURA E AS ALCAS DA SELECAO, em pixels de TELA
+                      // (traco 2, alca 5/6, pegador de giro 35) — medidas
+                      // com a geometria que este LayoutBuilder acabou de
+                      // calcular, entao nunca ficam um quadro atras do
+                      // zoom. So desenho: o dedo e do reconhecedor do palco.
+                      if (!drawing)
+                        Positioned.fill(
+                          child: CamadaDaSelecao(
+                            tempo: widget.playback.time,
+                            origem: _stageOrigin,
+                            escala: scale,
+                            palco: _tamanhoDoPalco,
+                            alcaAtiva: _edicao.alcaAtiva,
+                          ),
+                        ),
                     ],
                   );
                 },
@@ -1491,89 +986,6 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
                   ),
                 ),
               ),
-            // AS ALCAS DA FORMA VIVA: pontos brancos com borda na cor do
-            // keyframe, onde cada numero da forma se puxa com o dedo.
-            if (!drawing &&
-                ref.watch(editorSessionProvider.select((s) => s.panel)) ==
-                    EditorPanel.editShape)
-              ValueListenableBuilder<Duration>(
-                valueListenable: widget.playback.time,
-                builder: (context, _, _) => Consumer(
-                  builder: (context, ref, _) {
-                    // So este ramo acompanha a mutacao, e nao o palco.
-                    ref.watch(editorControllerProvider);
-                    return Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        for (final a in _alcasDaFormaNoPalco())
-                          Positioned(
-                            left: a.ponto.dx - 9,
-                            top: a.ponto.dy - 9,
-                            child: IgnorePointer(
-                              child: Container(
-                                key: ValueKey('alca-forma-${a.chave}'),
-                                width: 18,
-                                height: 18,
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: AmColors.accent,
-                                    width: 3,
-                                  ),
-                                  boxShadow: const [
-                                    BoxShadow(
-                                      color: Colors.black54,
-                                      blurRadius: 4,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                      ],
-                    );
-                  },
-                ),
-              ),
-            // ALCAS DA SELECAO: marcadores sem desenho visivel.
-            //
-            // Elas seguem a camada selecionada, entao ESTE ramo observa o
-            // projeto (o palco em volta nao).
-            if (!drawing)
-              Consumer(
-                builder: (context, ref, _) {
-                  ref.watch(editorControllerProvider);
-                  ref.watch(selectedLayerProvider);
-                  final a = _alcasDaSelecao();
-                  if (a == null) return const SizedBox.shrink();
-                  Widget alca(Offset p, IconData icone, String chave) =>
-                      Positioned(
-                        left: p.dx,
-                        top: p.dy,
-                        child: SizedBox(
-                          key: ValueKey(chave),
-                          width: 0,
-                          height: 0,
-                        ),
-                      );
-                  return Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      alca(
-                        a.escala,
-                        CupertinoIcons.arrow_up_left_arrow_down_right,
-                        'alca-escala',
-                      ),
-                      alca(
-                        a.giro,
-                        CupertinoIcons.arrow_2_circlepath,
-                        'alca-giro',
-                      ),
-                    ],
-                  );
-                },
-              ),
             // A FAIXA DO CADEADO, no lugar das alcas que sumiram.
             //
             // Sem ela, selecionar uma camada bloqueada no palco daria a
@@ -1606,7 +1018,6 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
               ),
           ],
         ),
-      ),
     );
   }
 }
@@ -3458,22 +2869,18 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
       }
     }
 
-    // Selecao desenhada DEPOIS dos efeitos: blur/glow nao pegam a borda.
-    // Copias de eco (opacityMul < 1) nao ganham borda de selecao.
+    // A MOLDURA DE SELECAO SAIU DAQUI (21/09): ela e desenhada por cima do
+    // quadro, em pixels de TELA, pela camada das alcas
+    // (`ui/palco/alcas_do_palco.dart`). Aqui dentro ela tinha 4 px DA
+    // COMPOSICAO — 0,8 px num celular — e engordava com a escala da camada.
     //
-    // A MOLDURA NAO MUDA A FORMA DA ARVORE. Ela era um Stack que so existia
-    // com a camada selecionada: selecionar trocava o pai do conteudo, e o
-    // Flutter destruia e recriava tudo embaixo — numa Cena 3D, o motor
-    // inteiro (geometria e texturas subindo de novo, alvos novos, a
-    // memoria antiga esperando o coletor). Agora e sempre o mesmo
-    // DecoratedBox, com ou sem borda.
+    // O DecoratedBox FICA, vazio: a forma da arvore nao pode depender da
+    // selecao. Trocar o pai do conteudo ao selecionar fazia o Flutter
+    // destruir e recriar tudo embaixo — numa Cena 3D, o motor inteiro.
     final contentSemSelecao = content;
-    final selecionada = layer.id == selectedId && opacityMul == 1;
     content = DecoratedBox(
       position: DecorationPosition.foreground,
-      decoration: selecionada
-          ? BoxDecoration(border: Border.all(color: Colors.white, width: 4))
-          : const BoxDecoration(),
+      decoration: const BoxDecoration(),
       child: content,
     );
 
@@ -3566,32 +2973,6 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
           ),
           child: contentSemSelecao,
         );
-        if (selecionada) {
-          // A borda de selecao fica so na frente, sem virar caixa 3D.
-          composed = Stack(
-            clipBehavior: Clip.none,
-            children: [
-              composed,
-              Positioned.fill(
-                child: IgnorePointer(
-                  child: Transform(
-                    transform: pm,
-                    alignment: Alignment.center,
-                    child: Transform(
-                      transform: m,
-                      alignment: Alignment.center,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          border: Border.all(color: Colors.white, width: 4),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          );
-        }
       } else {
         composed = Transform(
           transform: pm,

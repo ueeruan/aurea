@@ -23,6 +23,15 @@ uniform float uFilter;
 // lugar do espelho, sem erro nenhum na tela. (Mesma armadilha ja registrada
 // para os shaders de filtro.)
 uniform float uClamp;
+// uMeioTexel TAMBEM ENTRA NO FIM, pelo mesmo motivo que uClamp.
+//
+// E meio texel DA FOTO DA CAMADA, e nao meio pixel da camada. A conta
+// antiga era `0.5*uOutput/uSize`, que e meio pixel de camada: com a foto
+// tirada em 3x (um celular comum), ela achatava um pixel e meio em cada
+// emenda de ladrilho — inclusive na borda da COPIA CENTRAL, que e a que
+// tem de sair identica a imagem original. Zero significa "nao trava", que
+// e o certo quando a textura ja chega no tamanho da camada.
+uniform vec2 uMeioTexel;
 uniform sampler2D uImage;
 
 out vec4 fragColor;
@@ -50,9 +59,10 @@ void main() {
     if(uMirror>0.5) f=mix(f,1.0-f,mod(cell,2.0));
   }
 
-  // The input is now the source itself, never a padded transparent FBO.
-  // Half-texel clamping prevents filtering a tile edge into transparency.
-  vec2 halfPixel=0.5*uOutput/uSize;
+  // A ENTRADA E A PROPRIA FONTE, nunca um alvo transparente com margem.
+  // A trava de meio texel impede que a interpolacao lamber a borda do
+  // ladrilho vizinho — e ela e do tamanho do TEXEL, nao do pixel de camada.
+  vec2 halfPixel=min(uMeioTexel,vec2(0.5));
   vec2 sampleUv=clamp(f,halfPixel,1.0-halfPixel);
   #if defined(IMPELLER_TARGET_OPENGLES) && !defined(IMPELLER_OPENGLES_UNFLIPPED_DEPRECATED)
   if(uFilter>0.5) sampleUv.y=1.0-sampleUv.y;

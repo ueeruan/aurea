@@ -1165,6 +1165,35 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         return name
     }
 
+    /**
+     * "Limpar cache". Onde fica cada cache do app (e nada fora daqui):
+     *  - `cacheDir/motor/` — cache de pipeline do Vulkan (regenerável; o motor
+     *    regrava no próximo segundo plano);
+     *  - `filesDir/projetos/.miniaturas/` — miniaturas dos projetos da Home
+     *    (só as ÓRFÃS, de projetos apagados, saem);
+     *  - miniaturas da timeline e frames decodificados vivem só na memória.
+     * Devolve os bytes liberados.
+     */
+    fun clearCache(): Long {
+        val dirs = directories()
+        var freed = 0L
+        dirs.cache.listFiles()?.forEach { f ->
+            freed += f.walkBottomUp().filter { it.isFile }.sumOf { it.length() }
+            f.deleteRecursively()
+        }
+        val alive = dirs.projects.listFiles { f -> f.extension == "aurea" }
+            ?.map { it.nameWithoutExtension }?.toSet() ?: emptySet()
+        dirs.thumbs.listFiles()?.forEach { t ->
+            if (t.nameWithoutExtension !in alive) {
+                freed += t.length()
+                t.delete()
+            }
+        }
+        thumbnails.clear()
+        showToast("Cache limpo: ${"%.1f".format(freed / (1024.0 * 1024.0))} MB")
+        return freed
+    }
+
     fun dismissError() {
         errorMessage = null
     }

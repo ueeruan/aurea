@@ -1,62 +1,48 @@
-import 'dart:io';
-import 'dart:ui' show ImageFilter;
+import 'dart:math' as math;
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/cupertino.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart'
+    show MaterialLocalizations, MaterialPageRoute, TimeOfDay;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path_provider/path_provider.dart';
 
+import '../../../core/ds/ds.dart';
 import '../../../core/l10n/app_language.dart';
-import '../../../core/theme/app_theme.dart';
 import '../../../core/ui/tocavel.dart';
 import '../../../core/widgets/aurea_logo.dart';
 import '../../about/presentation/report_sheet.dart';
-import '../../community/application/conta_da_comunidade.dart';
-import '../../editor/application/editor_controller.dart';
-import '../../editor/domain/ajuste_da_midia.dart';
-import '../../editor/domain/template_pack.dart';
 import '../../editor/domain/video_project.dart';
-import '../../editor/presentation/editor_screen.dart';
-import '../../media/application/media_import_service.dart'
-    show mediaImportServiceProvider, proporcaoDaFoto;
-import '../../media/application/midias_recentes.dart'
-    show midiasRecentesProvider, registrarMidiaImportada;
 import '../../tutoriais/presentation/tutorial_screen.dart';
-import '../application/dnyx_remix_assets.dart';
+import '../application/project_repository.dart';
 import '../application/projects_controller.dart';
 import '../application/projects_view.dart';
-import '../application/reference_rebuild_assets.dart';
 import '../application/thumbnail_service.dart';
-import '../application/vhf_motion_assets.dart';
-import '../domain/cena_xml_import.dart';
-import '../domain/notes_motion_template.dart';
-import '../domain/pacote_aurea.dart';
-import '../domain/pacote_zip_import.dart';
-import '../domain/pindown_motion_template.dart';
-import '../domain/project_presets.dart';
+import 'acoes_da_inicio.dart';
 import 'home_shell.dart';
 import 'new_project_sheet.dart';
 import 'whats_new.dart';
 
-/// A INICIO, do jeito de um app de video: o titulo, UM botao de criar,
-/// os projetos recentes numa lista com a miniatura DE VERDADE e um menu
-/// que se ve, os modelos com um quadro renderizado.
+export 'acoes_da_inicio.dart' show apagarTodosOsProjetos;
+
+/// A INICIO: a marca, UM botao de criar e os projetos recentes.
 ///
-/// Reescrita otimizada (mesmo visual, mesmo contrato de chaves):
-/// - [ProjectsTab] virou [ConsumerStatefulWidget]: o
-///   `ThumbnailService.init()` roda UMA vez no [initState], nao a cada
-///   build; antes ele era chamado dentro do `build`.
-/// - cada cartao escuta o [ThumbnailService.revision] sozinho
-///   ([_ThumbProjeto]): uma miniatura nova repinta UM cartao, nao a
-///   grade inteira (antes um ValueListenableBuilder envolvia o SliverGrid).
-/// - o avatar do cabecalho ([_AvatarDaConta]) checa o arquivo uma vez
-///   por caminho, nao com `File.existsSync()` a cada build.
-/// - a lista de modelos e `const` + `ListView.builder` com `cacheExtent`:
-///   nada de 13 `Image.asset` montados de uma vez fora da tela.
-/// - um unico caminho de abertura ([_abrirNoEditor]) em vez de
-///   add+open+navigate repetidos em 8 lugares.
-/// - [RepaintBoundary] nos cartoes e barras com blur; estilos `static const`.
+/// O que o dono pediu, na ordem: AUREA · + Novo projeto · Projetos
+/// recentes · cartoes. Cada cartao diz o que importa para achar um
+/// trabalho — miniatura, nome, quadro, duracao e quando foi mexido — e
+/// tem o seu ⋯ com abrir, renomear, duplicar, compartilhar e excluir.
+///
+/// O resto que a Inicio ja fazia (importar midia, template, projeto,
+/// modelos prontos, tutoriais, apagar todos) continua a um toque, no menu
+/// do topo: existe, mas nao disputa a tela com os projetos.
+///
+/// RAPIDA DE PROPOSITO:
+/// - a lista e preguicosa (SliverGrid com builder): so os cartoes na tela
+///   existem, e so as miniaturas deles sao lidas do disco;
+/// - a miniatura e decodificada no tamanho do cartao, e o provedor dela
+///   fica guardado por projeto ([_Miniaturas]): voltar a Inicio nao
+///   decodifica de novo, e uma miniatura nova troca so a sua;
+/// - com o editor por cima, a Inicio para de ouvir a lista: cada edicao
+///   publica o projeto, e ela refazia os cartoes escondida a cada toque.
+///   Ao voltar ela le a lista uma vez, ja em dia.
 class ProjectsTab extends ConsumerStatefulWidget {
   const ProjectsTab({super.key});
 
@@ -65,6 +51,12 @@ class ProjectsTab extends ConsumerStatefulWidget {
 }
 
 class _ProjectsTabState extends ConsumerState<ProjectsTab> {
+  /// A ultima lista vista com a Inicio na frente (ver o cabecalho).
+  List<VideoProject> _vistos = const [];
+
+  bool _procurando = false;
+  final _busca = TextEditingController();
+
   @override
   void initState() {
     super.initState();
@@ -72,2137 +64,1239 @@ class _ProjectsTabState extends ConsumerState<ProjectsTab> {
     ThumbnailService.instance.init();
   }
 
-  // -- Abertura ---------------------------------------------------------
-
-  void _abrirNoEditor(
-    BuildContext context,
-    VideoProject project, {
-    bool add = true,
-  }) {
-    if (add) ref.read(projectsControllerProvider.notifier).add(project);
-    ref.read(editorControllerProvider.notifier).openProject(project);
-    if (!context.mounted) return;
-    Navigator.of(context)
-        .push(MaterialPageRoute(builder: (_) => const EditorScreen()));
+  @override
+  void dispose() {
+    _busca.dispose();
+    super.dispose();
   }
 
-  Future<void> _createProject(
-    BuildContext context,
-    int total, {
-    String? nomeSugerido,
-  }) async {
-    final project = await showNewProjectSheet(
+  // -- acoes ---------------------------------------------------------------
+
+  Future<void> _criar() async {
+    final total = ref.read(projectsControllerProvider).length;
+    final projeto = await showNewProjectSheet(
       context,
-      nomeSugerido: nomeSugerido ?? 'Projeto ${total + 1}',
+      nomeSugerido: 'Projeto ${total + 1}',
     );
-    if (project == null || !context.mounted) return;
-    _abrirNoEditor(context, project);
+    if (projeto == null || !mounted) return;
+    entrarNoEditor(context, ref, projeto, novo: true);
   }
 
-  /// MODELO PRONTO: um projeto montado por codigo, com id novo a cada
-  /// abertura — o mesmo cuidado do template em arquivo.
-  void _abrirModelo(BuildContext context, VideoProject modelo) {
-    _abrirNoEditor(context, modelo.comIdNovo());
-  }
-
-  void _falha(BuildContext context, String texto) {
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: AppText(texto)));
-  }
-
-  Future<void> _openVhfMotion(BuildContext context) async {
-    try {
-      final model = await prepareVhfMotion();
-      if (!context.mounted) return;
-      _abrirModelo(context, model);
-    } catch (_) {
-      _falha(context, 'Nao consegui preparar o motion VHF. Tente novamente.');
-    }
-  }
-
-  /// Prepara a trilha empacotada antes de abrir a nova recriacao.
-  Future<void> _openDnyxRemix(BuildContext context) async {
-    try {
-      final model = await prepareDnyxRemix();
-      if (!context.mounted) return;
-      _abrirModelo(context, model);
-    } catch (_) {
-      _falha(context, 'Nao consegui preparar o motion. Tente abrir novamente.');
-    }
-  }
-
-  /// Prepara a trilha empacotada antes de abrir a nova recriacao.
-  Future<void> _openReferenceRebuild(BuildContext context) async {
-    try {
-      final model = await prepareReferenceRebuild();
-      if (!context.mounted) return;
-      _abrirModelo(context, model);
-    } catch (_) {
-      _falha(
-        context,
-        'Nao consegui preparar a trilha. Tente abrir o modelo novamente.',
-      );
-    }
-  }
-
-  void _openModeloId(BuildContext context, String id) {
-    switch (id) {
-      case 'vhf':
-        _openVhfMotion(context);
-      case 'dnyx':
-        _openDnyxRemix(context);
-      case 'reference':
-        _openReferenceRebuild(context);
-      case 'notes':
-        _abrirModelo(context, buildNotesMotionTemplate());
-      case 'pindown':
-        _abrirModelo(context, buildPindownMotionTemplate());
-    }
-  }
-
-  /// ABRIR TEMPLATE: o arquivo vira um projeto NOVO, com id novo.
-  ///
-  /// Sem id novo, abrir o mesmo template duas vezes sobrescreveria o
-  /// trabalho da primeira vez — e a pessoa perderia o que fez sem
-  /// entender por que.
-  Future<void> _openTemplate(BuildContext context) async {
-    final r = await FilePicker.platform.pickFiles(
-      type: Platform.isIOS ? FileType.any : FileType.custom,
-      allowedExtensions: Platform.isIOS ? null : const ['json', 'aurea'],
-    );
-    final caminho = r?.files.single.path;
-    if (caminho == null || !context.mounted) return;
-    final ext = caminho.split('.').last.toLowerCase();
-    if (ext != 'aurea' && ext != 'json') {
-      _falha(context, 'Escolha um arquivo .aurea');
-      return;
-    }
-
-    TemplatePack? pack;
-    try {
-      pack = TemplatePack.decode(await File(caminho).readAsString());
-    } catch (_) {
-      pack = null;
-    }
-    if (!context.mounted) return;
-    if (pack == null) {
-      _falha(context, 'Nao consegui ler esse template');
-      return;
-    }
-    final packNaoNulo = pack;
-    _abrirNoEditor(
-      context,
-      packNaoNulo.project.copyWith(name: packNaoNulo.name).comIdNovo(),
-    );
-  }
-
-  /// IMPORTAR MÍDIA: escolhe foto ou vídeo da galeria e já inicia um
-  /// projeto novo com a mídia inserida no palco.
-  Future<void> _importarMidia(BuildContext context) async {
-    try {
-      // A MIDIA E COPIADA PARA O APP ANTES DE VIRAR CAMADA. O seletor
-      // devolve um arquivo em CACHE, e o caminho dele ia direto para a
-      // camada: o Android limpa o cache quando quer, e o projeto abria com
-      // a midia faltando. (No Android o seletor reabre na ultima pasta.)
-      final recentes = ref.read(midiasRecentesProvider.notifier);
-      final arquivo = await ref
-          .read(mediaImportServiceProvider)
-          .pickMediaFile();
-      if (arquivo == null || !context.mounted) return;
-      final caminho = arquivo.path;
-      final nome = arquivo.name;
-      final controller = ref.read(editorControllerProvider.notifier);
-      final ext = caminho.split('.').last.toLowerCase();
-      final video = _extensoesDeVideo.contains(ext);
-      // O PROJETO TEM A PROPORCAO DA MIDIA: a previa abre cheia, sem faixa.
-      // Era 9:16 sempre, e o video deitado ficava pequeno no meio da tela.
-      final sonda = video ? await controller.sondarVideo(caminho) : null;
-      final proporcao = video
-          ? sonda!.proporcao
-          : await proporcaoDaFoto(caminho);
-      if (!context.mounted) return;
-      final projeto = VideoProject(
-        id: 'projeto-${DateTime.now().millisecondsSinceEpoch}',
-        name: nome.replaceAll(RegExp(r'\.[^.]+$'), ''),
-        createdAt: DateTime.now(),
-        fps: 30,
-        aspectRatio: proporcaoDoProjeto(proporcao),
-      );
-      ref.read(projectsControllerProvider.notifier).add(projeto);
-      controller.openProject(projeto);
-      if (video) {
-        final duracao = sonda!.duracao > Duration.zero
-            ? sonda.duracao
-            : const Duration(seconds: 5);
-        controller.addVideoLayer(
-          Duration.zero,
-          caminho,
-          nome,
-          duracao,
-          fonte: sonda.duracao > Duration.zero ? sonda.duracao : null,
-          proporcao: proporcao,
-        );
-      } else {
-        controller.addImageLayer(
-          Duration.zero,
-          caminho,
-          nome,
-          proporcao: proporcao,
-        );
-      }
-      Navigator.of(context)
-          .push(MaterialPageRoute(builder: (_) => const EditorScreen()));
-      await registrarMidiaImportada(
-        recentes,
-        caminho: caminho,
-        nome: nome,
-        video: video,
-        duracao: sonda?.duracao ?? Duration.zero,
-      );
-    } catch (_) {
-      // A tela pode ter saido no meio da copia (o seletor sai e volta).
-      if (context.mounted) _falha(context, 'Não consegui importar essa mídia.');
-    }
-  }
-
-  static const _extensoesDeVideo = {
-    'mp4',
-    'mov',
-    'm4v',
-    'avi',
-    'mkv',
-    'webm',
-    '3gp',
-  };
-
-  /// CENA EM XML: le o que reasonhece, mostra o balanco (camadas,
-  /// keyframes, o que ficou de fora) e abre como projeto novo.
-  Future<void> _importarCena(BuildContext context) async {
-    final r = await FilePicker.platform.pickFiles(type: FileType.any);
-    final caminho = r?.files.single.path;
-    if (caminho == null || !context.mounted) return;
-    final nomeArquivo = caminho.split(RegExp(r'[\\/]')).last;
-    final nomeLimpo = nomeArquivo.replaceAll(
-      RegExp(r'\.(xml|zip|amproj|aurea)$', caseSensitive: false),
-      '',
-    );
-    CenaXmlResult resultado;
-    try {
-      // PACOTE (.amproj, zip com XML) ou PACOTE .aurea: as midias vem
-      // junto e entram de verdade. XML solto continua como sempre.
-      final minusculo = nomeArquivo.toLowerCase();
-      if (minusculo.endsWith('.aurea')) {
-        final projeto = PacoteAurea.abrir(
-          await File(caminho).readAsBytes(),
-          await _pastaDasMidiasImportadas(),
-        );
-        if (!context.mounted) return;
-        _abrirNoEditor(context, projeto);
-        return;
-      }
-      if (minusculo.endsWith('.zip') || minusculo.endsWith('.amproj')) {
-        resultado = CenaEmZip.abrir(
-          await File(caminho).readAsBytes(),
-          await _pastaDasMidiasImportadas(),
-          nome: nomeLimpo,
-        );
-      } else {
-        final texto = await File(caminho).readAsString();
-        resultado = importarCenaXml(texto, nome: nomeLimpo);
-      }
-    } on FormatException catch (e) {
-      if (!context.mounted) return;
-      await _aviso(context, 'Nao deu para importar', e.message);
-      return;
-    } on CenaXmlException catch (e) {
-      if (!context.mounted) return;
-      await _aviso(context, 'Nao deu para importar', e.message);
-      return;
-    } catch (e) {
-      if (!context.mounted) return;
-      await _aviso(context, 'Nao deu para importar', 'Arquivo ilegivel: $e');
-      return;
-    }
-    if (!context.mounted) return;
-    final abrir = await showCupertinoDialog<bool>(
-      context: context,
-      builder: (c) => CupertinoAlertDialog(
-        title: const AppText('Cena importada'),
-        content: Padding(
-          padding: const EdgeInsets.only(top: 8),
-          child: AppText(
-            _resumoDaImportacao(resultado),
-            textAlign: TextAlign.left,
-          ),
+  Future<void> _menuDoProjeto(BuildContext ancora, VideoProject p) async {
+    final acao = await mostrarAureaMenu<String>(
+      ancora,
+      itens: const [
+        AureaMenuItem(
+          valor: 'abrir',
+          rotulo: 'Abrir',
+          icone: CupertinoIcons.play,
+          chave: 'abrir',
         ),
-        actions: [
-          CupertinoDialogAction(
-            onPressed: () => Navigator.of(c).pop(false),
-            child: const AppText('Cancelar'),
-          ),
-          CupertinoDialogAction(
-            isDefaultAction: true,
-            onPressed: () => Navigator.of(c).pop(true),
-            child: const AppText('Abrir'),
-          ),
-        ],
-      ),
-    );
-    if (abrir != true || !context.mounted) return;
-    _abrirNoEditor(context, resultado.project);
-  }
-
-  /// Onde as midias que chegam em pacote moram no aparelho.
-  static Future<Directory> _pastaDasMidiasImportadas() async {
-    final docs = await getApplicationDocumentsDirectory();
-    return Directory(
-      '${docs.path}/midias_importadas/${DateTime.now().millisecondsSinceEpoch}',
-    );
-  }
-
-  static String _resumoDaImportacao(CenaXmlResult r) {
-    final b = StringBuffer()
-      ..write('${r.layersImported} camadas e ')
-      ..write('${r.keyframesImported} keyframes reconhecidos.');
-    if (r.ignored.isNotEmpty) {
-      b.write('\n\nFicou de fora:');
-      for (final item in r.ignored.take(6)) {
-        b.write('\n- $item');
-      }
-      if (r.ignored.length > 6) {
-        b.write('\n- e mais ${r.ignored.length - 6}');
-      }
-    }
-    return b.toString();
-  }
-
-  Future<void> _aviso(BuildContext context, String titulo, String texto) =>
-      showCupertinoDialog<void>(
-        context: context,
-        builder: (c) => CupertinoAlertDialog(
-          title: AppText(titulo),
-          content: Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: AppText(texto),
-          ),
-          actions: [
-            CupertinoDialogAction(
-              isDefaultAction: true,
-              onPressed: () => Navigator.of(c).pop(),
-              child: const AppText('OK'),
-            ),
-          ],
+        AureaMenuItem(
+          valor: 'renomear',
+          rotulo: 'Renomear',
+          icone: CupertinoIcons.pencil,
+          chave: 'renomear',
         ),
-      );
-
-  void _openProject(BuildContext context, VideoProject project) {
-    ref.read(editorControllerProvider.notifier).openProject(project);
-    Navigator.of(context)
-        .push(MaterialPageRoute(builder: (_) => const EditorScreen()));
-  }
-
-  // -- Mutacoes ----------------------------------------------------------
-
-  Future<void> _confirmarExclusao(
-    BuildContext context,
-    VideoProject project,
-  ) async {
-    final apaga = await showCupertinoModalPopup<bool>(
-      context: context,
-      builder: (c) => CupertinoActionSheet(
-        title: Text(project.name),
-        actions: [
-          CupertinoActionSheetAction(
-            isDestructiveAction: true,
-            onPressed: () => Navigator.of(c).pop(true),
-            child: const AppText('Excluir projeto'),
-          ),
-          CupertinoActionSheetAction(
-            isDestructiveAction: true,
-            onPressed: () {
-              Navigator.of(c).pop(false);
-              apagarTodosOsProjetos(context, ref);
-            },
-            child: const AppText('Apagar todos os projetos'),
-          ),
-        ],
-        cancelButton: CupertinoActionSheetAction(
-          onPressed: () => Navigator.of(c).pop(false),
-          child: const AppText('Cancelar'),
+        AureaMenuItem(
+          valor: 'duplicar',
+          rotulo: 'Duplicar',
+          icone: CupertinoIcons.plus_square_on_square,
+          chave: 'duplicar',
         ),
-      ),
-    );
-    if (apaga != true) return;
-    ref.read(projectsControllerProvider.notifier).remove(project.id);
-    ThumbnailService.instance.delete(project.id);
-  }
-
-  /// DUPLICAR: o mesmo projeto com id novo, na frente da lista.
-  /// MARCAR/DESMARCAR um projeto (e sair do modo ao desmarcar o ultimo).
-  void _marcar(String id) {
-    final atual = {...ref.read(selecaoDeProjetosProvider)};
-    if (!atual.add(id)) atual.remove(id);
-    ref.read(selecaoDeProjetosProvider.notifier).state = atual;
-  }
-
-  /// EXCLUIR OS ESCOLHIDOS, com uma pergunta so para o lote inteiro.
-  Future<void> _excluirEscolhidos(BuildContext context, Set<String> ids) async {
-    final apaga = await showCupertinoModalPopup<bool>(
-      context: context,
-      builder: (c) => CupertinoActionSheet(
-        title: AppText('Excluir ${ids.length} projetos?'),
-        message: const AppText('Nao da para desfazer.'),
-        actions: [
-          CupertinoActionSheetAction(
-            key: const ValueKey('projetos-excluir-lote'),
-            isDestructiveAction: true,
-            onPressed: () => Navigator.of(c).pop(true),
-            child: const AppText('Excluir'),
-          ),
-        ],
-        cancelButton: CupertinoActionSheetAction(
-          onPressed: () => Navigator.of(c).pop(false),
-          child: const AppText('Cancelar'),
+        AureaMenuItem(
+          valor: 'compartilhar',
+          rotulo: 'Compartilhar',
+          icone: CupertinoIcons.square_arrow_up,
+          chave: 'compartilhar',
         ),
-      ),
-    );
-    if (apaga != true) return;
-    final controlador = ref.read(projectsControllerProvider.notifier);
-    for (final id in ids) {
-      controlador.remove(id);
-    }
-    ref.read(selecaoDeProjetosProvider.notifier).state = const {};
-  }
-
-  void _duplicar(VideoProject project) {
-    final copia = project.copyWith(name: '${project.name} (cópia)').comIdNovo();
-    ref.read(projectsControllerProvider.notifier).add(copia);
-  }
-
-  Future<void> _renomear(BuildContext context, VideoProject project) async {
-    final nome = await showCupertinoDialog<String>(
-      context: context,
-      builder: (_) => _DialogoDeNome(inicial: project.name),
-    );
-    final limpo = nome?.trim();
-    if (limpo == null || limpo.isEmpty || limpo == project.name) return;
-    ref
-        .read(projectsControllerProvider.notifier)
-        .upsert(project.copyWith(name: limpo));
-  }
-
-  /// O MENU DO PROJETO, no botao de reticencias e no toque longo. Antes
-  /// so existia "segurar para excluir", que ninguem descobre sozinho.
-  Future<void> _menuDoProjeto(
-    BuildContext context,
-    VideoProject project,
-  ) async {
-    final acao = await showCupertinoModalPopup<String>(
-      context: context,
-      builder: (c) => CupertinoActionSheet(
-        title: Text(project.name),
-        message: AppText(fichaDoProjeto(project)),
-        actions: [
-          for (final (rotulo, chave) in const [
-            ('Abrir', 'abrir'),
-            ('Duplicar', 'duplicar'),
-            ('Renomear', 'renomear'),
-          ])
-            CupertinoActionSheetAction(
-              key: ValueKey('projeto-$chave'),
-              onPressed: () => Navigator.of(c).pop(chave),
-              child: AppText(rotulo),
-            ),
-          CupertinoActionSheetAction(
-            key: const ValueKey('projeto-excluir'),
-            isDestructiveAction: true,
-            onPressed: () => Navigator.of(c).pop('excluir'),
-            child: const AppText('Excluir projeto'),
-          ),
-          CupertinoActionSheetAction(
-            key: const ValueKey('projeto-apagar-todos'),
-            isDestructiveAction: true,
-            // A FOLHA E DE `String`: devolver `false` aqui estourava erro de
-            // tipo dentro do toque, ANTES de o apagar ser chamado — o botao
-            // parecia morto. A acao volta pelo nome, como as outras.
-            onPressed: () => Navigator.of(c).pop('apagar-todos'),
-            child: const AppText('Apagar todos os projetos'),
-          ),
-        ],
-        cancelButton: CupertinoActionSheetAction(
-          onPressed: () => Navigator.of(c).pop(),
-          child: const AppText('Cancelar'),
+        AureaMenuItem(
+          valor: 'excluir',
+          rotulo: 'Excluir',
+          icone: CupertinoIcons.trash,
+          destrutivo: true,
+          chave: 'excluir',
         ),
-      ),
+      ],
     );
-    if (acao == null || !context.mounted) return;
+    if (acao == null || !mounted) return;
     switch (acao) {
       case 'abrir':
-        _openProject(context, project);
-      case 'duplicar':
-        _duplicar(project);
+        entrarNoEditor(context, ref, p);
       case 'renomear':
-        await _renomear(context, project);
+        await renomearProjeto(context, ref, p);
+      case 'duplicar':
+        duplicarProjeto(ref, p);
+      case 'compartilhar':
+        await compartilharProjeto(context, ref, p);
       case 'excluir':
-        await _confirmarExclusao(context, project);
+        await excluirProjeto(context, ref, p);
+    }
+  }
+
+  Future<void> _menuDaInicio(BuildContext ancora) async {
+    final temProjeto = ref.read(projectsControllerProvider).isNotEmpty;
+    final acao = await mostrarAureaMenu<String>(
+      ancora,
+      itens: [
+        const AureaMenuItem(
+          valor: 'midia',
+          rotulo: 'Importar mídia',
+          icone: CupertinoIcons.photo_on_rectangle,
+          chave: 'importar-midia',
+        ),
+        const AureaMenuItem(
+          valor: 'template',
+          rotulo: 'Abrir template',
+          icone: CupertinoIcons.doc_on_doc,
+          chave: 'abrir-template',
+        ),
+        const AureaMenuItem(
+          valor: 'projeto',
+          rotulo: 'Importar projeto',
+          icone: CupertinoIcons.tray_arrow_down,
+          chave: 'importar-projeto',
+        ),
+        const AureaMenuItem(
+          valor: 'modelos',
+          rotulo: 'Modelos',
+          icone: CupertinoIcons.square_stack_3d_up,
+          chave: 'modelos',
+        ),
+        const AureaMenuItem(
+          valor: 'aprender',
+          rotulo: 'Aprender',
+          icone: CupertinoIcons.play_rectangle,
+          chave: 'aprender',
+        ),
+        const AureaMenuItem(
+          valor: 'ajustes',
+          rotulo: 'Ajustes',
+          icone: CupertinoIcons.gear,
+          chave: 'ajustes',
+        ),
+        // A aba Sobre nao tem lugar na barra: a porta dela e esta.
+        const AureaMenuItem(
+          valor: 'sobre',
+          rotulo: 'Sobre',
+          icone: CupertinoIcons.info_circle,
+          chave: 'sobre',
+        ),
+        AureaMenuItem(
+          valor: 'apagar-todos',
+          rotulo: 'Apagar todos os projetos',
+          icone: CupertinoIcons.trash,
+          destrutivo: true,
+          habilitado: temProjeto,
+          chave: 'apagar-todos',
+        ),
+      ],
+    );
+    if (acao == null || !mounted) return;
+    switch (acao) {
+      case 'midia':
+        await importarMidia(context, ref);
+      case 'template':
+        await abrirTemplate(context, ref);
+      case 'projeto':
+        await importarProjeto(context, ref);
+      case 'modelos':
+        await _folhaDeModelos();
+      case 'aprender':
+        await _folhaDeAprender();
+      case 'ajustes':
+        ref.read(homeTabProvider.notifier).state = 2;
+      case 'sobre':
+        ref.read(homeTabProvider.notifier).state = 4;
       case 'apagar-todos':
         await apagarTodosOsProjetos(context, ref);
     }
   }
 
-  // -- Build -------------------------------------------------------------
+  Future<void> _folhaDeModelos() async {
+    final id = await mostrarAureaFolha<String>(
+      context,
+      titulo: 'Modelos',
+      construtor: (folha) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final m in modelosProntos)
+            _LinhaDeModelo(
+              key: ValueKey('modelo-${m.id}'),
+              imagem: m.imagem,
+              titulo: m.titulo,
+              detalhe: m.detalhe,
+              aoTocar: () => Navigator.of(folha).pop(m.id),
+            ),
+          const SizedBox(height: AureaDims.e10),
+        ],
+      ),
+    );
+    if (id == null || !mounted) return;
+    await abrirModelo(context, ref, id);
+  }
 
-  @override
-  Widget build(BuildContext context) {
-    final todos = ref.watch(projectsControllerProvider);
-    ref.listen(novoProjetoSolicitadoProvider, (_, _) {
-      _createProject(context, ref.read(projectsControllerProvider).length);
-    });
-    final mostrarTodos = ref.watch(_mostrarTodosProvider);
-    final ordem = ref.watch(ordemDosProjetosProvider);
-    final busca = ref.watch(buscaDeProjetosProvider);
-    final selecao = ref.watch(selecaoDeProjetosProvider);
-    final selecionando = selecao.isNotEmpty;
-    final projects = projetosArrumados(todos, ordem, busca);
-    // O HEROI "Continuar editando": o projeto mais recente vira um cartao
-    // largo em cima; a grade mostra o resto, sem repetir. Procurando,
-    // ordenando por outra coisa ou escolhendo varios, nao ha heroi: a
-    // lista inteira e o assunto.
-    final emBuscaOuOrdem =
-        busca.trim().isNotEmpty || ordem != OrdemDosProjetos.recentes;
-    final heroi = projects.isEmpty || selecionando || emBuscaOuOrdem
-        ? null
-        : projects.first;
-    // Com busca, ordem ou selecao, a lista nao esconde nada atras do
-    // "mostrar todos".
-    final abertos = mostrarTodos || selecionando || emBuscaOuOrdem;
-    final heroiId = heroi?.id;
-    final visiveis = [
-      for (final p in abertos ? projects : projects.take(_recentesNaInicio))
-        if (p.id != heroiId) p,
+  Future<void> _folhaDeAprender() async {
+    const itens = [
+      (
+        id: 'cena3d',
+        chave: 'inicio-tutorial-cena3d',
+        icone: CupertinoIcons.play_rectangle,
+        texto: 'Tutorial em vídeo: sua primeira cena 3D',
+      ),
+      (
+        id: 'cena-completa',
+        chave: 'inicio-tutorial-cena-completa',
+        icone: CupertinoIcons.cube_box,
+        texto: 'Tutorial em vídeo: cena 3D com modelos e câmeras',
+      ),
+      (
+        id: 'texto-bounce',
+        chave: 'inicio-tutorial-texto-bounce',
+        icone: CupertinoIcons.textformat,
+        texto: 'Tutorial em vídeo: texto que quica, do seu jeito',
+      ),
+      (
+        id: 'novidades',
+        chave: 'inicio-novidades',
+        icone: CupertinoIcons.sparkles,
+        texto: 'O que ha de novo nesta versao',
+      ),
+      (
+        id: 'relatar',
+        chave: 'inicio-relatar',
+        icone: CupertinoIcons.exclamationmark_bubble,
+        texto: 'Versao beta: achou um problema? Conte pra gente',
+      ),
     ];
-    final largura = MediaQuery.sizeOf(context).width;
-    final colunas = largura >= 700 ? 3 : (largura >= 520 ? 2 : 1);
-
-    return SafeArea(
-      bottom: false,
-      child: Stack(
+    final id = await mostrarAureaFolha<String>(
+      context,
+      titulo: 'Aprender',
+      construtor: (folha) => Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          // A BARRA DAS ACOES EM LOTE fica por cima da lista, e so
-          // existe enquanto ha projeto escolhido.
-          _BarraAoRolar(
-            onTemplate: () => _openTemplate(context),
-            onPerfil: () => ref.read(homeTabProvider.notifier).state = 3,
-            child: CustomScrollView(
-              slivers: [
-                SliverToBoxAdapter(
-                  child: _Cabecalho(onTemplate: () => _openTemplate(context)),
-                ),
-                // UM BOTAO DE CRIAR, na largura inteira.
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 6, 20, 0),
-                    child: SizedBox(
-                      height: 54,
-                      width: double.infinity,
-                      child: FilledButton.icon(
-                        key: const ValueKey('novo-projeto'),
-                        style: FilledButton.styleFrom(
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                        ),
-                        icon: const Icon(CupertinoIcons.plus, size: 20),
-                        label: const AppText('Novo projeto'),
-                        onPressed: () =>
-                            _createProject(context, projects.length),
-                      ),
-                    ),
-                  ),
-                ),
-                // ATALHOS: icone num circulo e o nome embaixo. Sem caixa, sem borda.
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 18, 12, 0),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: _Atalho(
-                            icon: CupertinoIcons.photo_on_rectangle,
-                            rotulo: translate(context, 'Mídia'),
-                            onTap: () => _importarMidia(context),
-                          ),
-                        ),
-                        Expanded(
-                          child: _Atalho(
-                            icon: CupertinoIcons.doc_on_doc,
-                            rotulo: 'Template',
-                            onTap: () => _openTemplate(context),
-                          ),
-                        ),
-                        Expanded(
-                          child: _Atalho(
-                            icon: CupertinoIcons.cube,
-                            rotulo: 'Importar projeto',
-                            onTap: () => _importarCena(context),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                if (heroi != null)
-                  SliverToBoxAdapter(
-                    child: _CartaoContinuar(
-                      key: ValueKey('projeto-${heroi.id}'),
-                      project: heroi,
-                      onOpen: () => _openProject(context, heroi),
-                      onMenu: () => _menuDoProjeto(context, heroi),
-                    ),
-                  ),
-                if (todos.length == 1)
-                  const SliverToBoxAdapter(child: SizedBox(height: 12)),
-                if (todos.length > 1)
-                  SliverToBoxAdapter(
-                    child: _BarraDaLista(
-                      total: projects.length,
-                      ordem: ordem,
-                      busca: busca,
-                      selecao: selecao,
-                      projetos: projects,
-                    ),
-                  ),
-                if (projects.isEmpty)
-                  const SliverToBoxAdapter(child: _SemProjetos())
-                else
-                  SliverPadding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    sliver: SliverGrid(
-                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: colunas,
-                        mainAxisSpacing: 10,
-                        crossAxisSpacing: 12,
-                        mainAxisExtent: 104,
-                      ),
-                      delegate: SliverChildBuilderDelegate(
-                        (context, i) {
-                          final project = visiveis[i];
-                          final marcado = selecao.contains(project.id);
-                          return _CartaoProjeto(
-                            compacto: true,
-                            key: ValueKey('projeto-${project.id}'),
-                            project: project,
-                            marcado: marcado,
-                            escolhendo: selecionando,
-                            onOpen: () => selecionando
-                                ? _marcar(project.id)
-                                : _openProject(context, project),
-                            onMenu: () => selecionando
-                                ? _marcar(project.id)
-                                : _menuDoProjeto(context, project),
-                            onMarcar: () => _marcar(project.id),
-                          );
-                        },
-                        childCount: visiveis.length,
-                        // Nao mantem estado fora da tela; a borda repinta sozinha.
-                        addAutomaticKeepAlives: false,
-                        addRepaintBoundaries: true,
-                      ),
-                    ),
-                  ),
-                if (!abertos && projects.length > _recentesNaInicio)
-                  SliverToBoxAdapter(
-                    child: _Linha(
-                      key: const ValueKey('projetos-todos'),
-                      icon: mostrarTodos
-                          ? CupertinoIcons.chevron_up
-                          : CupertinoIcons.square_grid_2x2,
-                      texto: mostrarTodos
-                          ? 'Mostrar menos'
-                          : 'Mostrar todos os ${projects.length} projetos',
-                      onTap: () =>
-                          ref.read(_mostrarTodosProvider.notifier).state =
-                              !mostrarTodos,
-                    ),
-                  ),
-                // MODELOS: motions inteiros montados camada por camada.
-                const SliverToBoxAdapter(child: _TituloSecao('Modelos')),
-                SliverToBoxAdapter(
-                  child: SizedBox(
-                    height: 196,
-                    child: ListView.builder(
-                      scrollDirection: Axis.horizontal,
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      addRepaintBoundaries: true,
-                      itemCount: _modelos.length,
-                      itemBuilder: (context, i) {
-                        final m = _modelos[i];
-                        return _CartaoModelo(
-                          imagem: m.imagem,
-                          titulo: m.titulo,
-                          detalhe: m.detalhe,
-                          onTap: () => _openModeloId(context, m.id),
-                        );
-                      },
-                    ),
-                  ),
-                ),
-                const SliverToBoxAdapter(child: _TituloSecao('Comunidade')),
-                SliverToBoxAdapter(
-                  child: _LinhaGrande(
-                    icon: CupertinoIcons.person_2_fill,
-                    titulo: 'Veja o que a galera está criando',
-                    subtitulo: 'Poste o seu projeto, responda e reposte',
-                    // A ABA DA COMUNIDADE E A 1. O atalho antigo mandava para a
-                    // 2 — que e Ajustes.
-                    onTap: () => ref.read(homeTabProvider.notifier).state = 1,
-                  ),
-                ),
-                const SliverToBoxAdapter(child: _TituloSecao('Aprender')),
-                SliverToBoxAdapter(
-                  child: Column(
-                    children: [
-                      _Linha(
-                        key: const ValueKey('inicio-tutorial-cena3d'),
-                        icon: CupertinoIcons.play_rectangle,
-                        texto: 'Tutorial em vídeo: sua primeira cena 3D',
-                        onTap: () => Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => const TutorialScreen(id: 'cena3d'),
-                          ),
-                        ),
-                      ),
-                      _Linha(
-                        key: const ValueKey('inicio-tutorial-cena-completa'),
-                        icon: CupertinoIcons.cube_box,
-                        texto:
-                            'Tutorial em vídeo: cena 3D com modelos e câmeras',
-                        onTap: () => Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) =>
-                                const TutorialScreen(id: 'cena-completa'),
-                          ),
-                        ),
-                      ),
-                      _Linha(
-                        key: const ValueKey('inicio-tutorial-texto-bounce'),
-                        icon: CupertinoIcons.textformat,
-                        texto:
-                            'Tutorial em vídeo: texto que quica, do seu jeito',
-                        onTap: () => Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) =>
-                                const TutorialScreen(id: 'texto-bounce'),
-                          ),
-                        ),
-                      ),
-                      _Linha(
-                        icon: CupertinoIcons.sparkles,
-                        texto: 'O que ha de novo nesta versao',
-                        onTap: () => showWhatsNewSheet(context),
-                      ),
-                      _Linha(
-                        icon: CupertinoIcons.exclamationmark_bubble,
-                        texto:
-                            'Versao beta: achou um problema? Conte pra gente',
-                        onTap: () => showReportSheet(context),
-                      ),
-                      _Linha(
-                        icon: CupertinoIcons.info_circle,
-                        texto: 'Sobre o Aurea',
-                        onTap: () =>
-                            ref.read(homeTabProvider.notifier).state = 4,
-                      ),
-                    ],
-                  ),
-                ),
-                const SliverToBoxAdapter(child: SizedBox(height: 120)),
-              ],
+          for (final i in itens)
+            _LinhaDaFolha(
+              key: ValueKey(i.chave),
+              icone: i.icone,
+              texto: i.texto,
+              aoTocar: () => Navigator.of(folha).pop(i.id),
             ),
-          ),
-          if (selecionando)
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: _AcoesEmLote(
-                quantos: selecao.length,
-                onDuplicar: () {
-                  for (final p in todos) {
-                    if (selecao.contains(p.id)) _duplicar(p);
-                  }
-                  ref.read(selecaoDeProjetosProvider.notifier).state = const {};
-                },
-                onExcluir: () => _excluirEscolhidos(context, selecao),
-              ),
-            ),
+          const SizedBox(height: AureaDims.e10),
         ],
       ),
     );
-  }
-}
-
-/// Os modelos prontos: so dados const — a abertura resolve por id.
-const _modelos = [
-  (
-    id: 'vhf',
-    imagem: 'assets/templates/vhf/thumbnail.jpg',
-    titulo: 'VHF · Neon Orbit',
-    detalhe: '12 cenas · vetores e gradientes animados',
-  ),
-  (
-    id: 'dnyx',
-    imagem: 'assets/templates/dnyx/thumbnail.jpg',
-    titulo: 'Aurea App · RMK Dnyx',
-    detalhe: 'Texto, fotos, cursores e audio editaveis',
-  ),
-  (
-    id: 'reference',
-    imagem: 'assets/templates/reference-rebuild.jpg',
-    titulo: 'Nova recriacao · Codex',
-    detalhe: '5 cenas · 280 quadros · camadas editaveis',
-  ),
-  (
-    id: 'notes',
-    imagem: 'assets/templates/notes.jpg',
-    titulo: 'Notes',
-    detalhe: 'Icone, botao, listas, whip e glow',
-  ),
-  (
-    id: 'pindown',
-    imagem: 'assets/templates/notes.jpg',
-    titulo: 'Pindown',
-    detalhe: 'Casa, faisca medida e coroas 3D',
-  ),
-];
-
-/// A BARRA QUE APARECE AO ROLAR (o compacto do titulo grande do iOS):
-/// o cabecalho rola embora com a pagina; passando dele, uma barra fina
-/// com blur surge presa em cima, com o nome e os mesmos dois botoes.
-class _BarraAoRolar extends StatefulWidget {
-  const _BarraAoRolar({
-    required this.child,
-    required this.onTemplate,
-    required this.onPerfil,
-  });
-
-  final Widget child;
-  final VoidCallback onTemplate;
-  final VoidCallback onPerfil;
-
-  @override
-  State<_BarraAoRolar> createState() => _BarraAoRolarState();
-}
-
-class _BarraAoRolarState extends State<_BarraAoRolar> {
-  bool _visivel = false;
-
-  bool _aoRolar(ScrollNotification n) {
-    if (n.metrics.axis != Axis.vertical) return false;
-    final mostrar = n.metrics.pixels > 64;
-    if (mostrar != _visivel) setState(() => _visivel = mostrar);
-    return false;
-  }
-
-  @override
-  Widget build(BuildContext context) => Stack(
-    children: [
-      NotificationListener<ScrollNotification>(
-        onNotification: _aoRolar,
-        child: widget.child,
-      ),
-      Positioned(
-        left: 0,
-        right: 0,
-        top: 0,
-        // AnimatedSwitcher, e nao opacidade: a barra escondida NAO PODE
-        // continuar na arvore — tooltip e leitor de tela a achariam.
-        child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 180),
-          switchInCurve: Curves.easeOut,
-          switchOutCurve: Curves.easeIn,
-          child: !_visivel
-              ? const SizedBox.shrink()
-              : RepaintBoundary(
-                  child: ClipRect(
-                    child: BackdropFilter(
-                      filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-                      child: Container(
-                        height: 52,
-                        padding: const EdgeInsets.fromLTRB(20, 0, 12, 0),
-                        color: AppColors.background.withValues(alpha: .62),
-                        child: Row(
-                          children: [
-                            const AureaLogo(size: 22),
-                            const SizedBox(width: 8),
-                            Text(
-                              'Aurea',
-                              style: TextStyle(
-                                fontSize: 17,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: -0.4,
-                                color: AppColors.onDark,
-                              ),
-                            ),
-                            const Spacer(),
-                            _BotaoRedondo(
-                              icon: CupertinoIcons.doc_on_doc,
-                              tooltip: 'Template',
-                              onTap: widget.onTemplate,
-                            ),
-                            const SizedBox(width: 2),
-                            _BotaoRedondo(
-                              icon: CupertinoIcons.person_crop_circle,
-                              tooltip: 'Perfil',
-                              onTap: widget.onPerfil,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-        ),
-      ),
-    ],
-  );
-}
-
-/// Miniatura de UM projeto: escuta o [ThumbnailService.revision] sozinha.
-///
-/// Antes, um unico ValueListenableBuilder envolvia o SliverGrid inteiro:
-/// qualquer miniatura nova reconstruia TODOS os cartoes. Agora cada
-/// cartao repinta so o seu [Image].
-class _ThumbProjeto extends StatelessWidget {
-  const _ThumbProjeto({
-    required this.projectId,
-    required this.hero,
-    required this.placeholder,
-  });
-
-  final String projectId;
-  final bool hero;
-  final Widget placeholder;
-
-  @override
-  Widget build(BuildContext context) {
-    return ValueListenableBuilder<int>(
-      valueListenable: ThumbnailService.instance.revision,
-      builder: (_, rev, _) {
-        final t = ThumbnailService.instance.fileFor(projectId);
-        if (t == null) return placeholder;
-        return Image.file(
-          t,
-          // A revisao entra na chave: sem isso o ImageCache seguraria a
-          // miniatura antiga (mesmo caminho = mesmo FileImage).
-          key: ValueKey('$projectId/$rev'),
-          fit: BoxFit.cover,
-          width: double.infinity,
-          height: double.infinity,
-          gaplessPlayback: true,
-          // Miniaturas sao PNGs grandes de captura: decodifica ja no
-          // tamanho de exibicao em vez de textura cheia.
-          cacheWidth: hero ? 1280 : 640,
-          filterQuality: FilterQuality.low,
-          errorBuilder: (_, _, _) => placeholder,
+    if (id == null || !mounted) return;
+    switch (id) {
+      case 'novidades':
+        await showWhatsNewSheet(context);
+      case 'relatar':
+        await showReportSheet(context);
+      default:
+        await Navigator.of(context).push(
+          MaterialPageRoute<void>(builder: (_) => TutorialScreen(id: id)),
         );
-      },
-    );
-  }
-}
-
-/// O CARTAO "CONTINUAR EDITANDO": o projeto mais recente em toda a
-/// largura, com a miniatura de verdade, o nome por cima e o botao que
-/// diz o verbo. Toque abre; toque longo (ou as reticencias) abre o menu
-/// do projeto — as mesmas chaves do cartao da grade.
-class _CartaoContinuar extends StatelessWidget {
-  const _CartaoContinuar({
-    super.key,
-    required this.project,
-    required this.onOpen,
-    required this.onMenu,
-  });
-
-  final VideoProject project;
-  final VoidCallback onOpen;
-  final VoidCallback onMenu;
-
-  static const _scrim = BoxDecoration(
-    gradient: LinearGradient(
-      begin: Alignment.topCenter,
-      end: Alignment.bottomCenter,
-      stops: [0.45, 1],
-      colors: [Colors.transparent, Color(0xB3000000)],
-    ),
-  );
-
-  @override
-  Widget build(BuildContext context) {
-    final placeholderDecor = BoxDecoration(
-      gradient: LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [AppColors.surfaceHigh, AppColors.surface],
-      ),
-    );
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
-      child: RepaintBoundary(
-        child: Tocavel(
-          onTap: onOpen,
-          onLongPress: onMenu,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(20),
-            child: AspectRatio(
-              aspectRatio: 16 / 9,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  _ThumbProjeto(
-                    projectId: project.id,
-                    hero: true,
-                    placeholder: DecoratedBox(
-                      decoration: placeholderDecor,
-                      child: Center(
-                        child: Icon(
-                          CupertinoIcons.film,
-                          size: 34,
-                          color: AppColors.muted,
-                        ),
-                      ),
-                    ),
-                  ),
-                  // O SCRIM: o nome le em cima de qualquer miniatura.
-                  const DecoratedBox(decoration: _scrim),
-                  Positioned(
-                    left: 16,
-                    right: 16,
-                    bottom: 14,
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              AppText(
-                                'Continuar editando',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 0.4,
-                                  color: AppColors.lime,
-                                ),
-                              ),
-                              const SizedBox(height: 3),
-                              Text(
-                                project.name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: -0.2,
-                                  color: Colors.white,
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              AppText(
-                                fichaDoProjeto(project),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.white70,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 9,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppColors.lime,
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: const Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                CupertinoIcons.play_fill,
-                                size: 13,
-                                color: Color(0xFF10130C),
-                              ),
-                              SizedBox(width: 6),
-                              AppText(
-                                'Continuar',
-                                style: TextStyle(
-                                  fontSize: 12.5,
-                                  fontWeight: FontWeight.w700,
-                                  color: Color(0xFF10130C),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  // O MENU DO PROJETO, com a mesma chave da grade: apagar,
-                  // duplicar e renomear nunca dependem de gesto escondido.
-                  Positioned(
-                    top: 2,
-                    right: 2,
-                    child: Tocavel(
-                      key: ValueKey('projeto-menu-${project.id}'),
-                      onTap: onMenu,
-                      child: const SizedBox(
-                        width: 40,
-                        height: 40,
-                        child: Icon(
-                          CupertinoIcons.ellipsis,
-                          size: 18,
-                          color: Colors.white70,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Quantos projetos a Inicio mostra antes do "mostrar todos".
-const _recentesNaInicio = 6;
-
-final _mostrarTodosProvider = StateProvider<bool>((_) => false);
-
-/// A ficha tecnica de um projeto: "16:9 · 1080p · 30 fps".
-String fichaDoProjeto(VideoProject project) {
-  final aspect = ProjectPresets.aspects
-      .firstWhere(
-        (a) => (a.ratio - project.aspectRatio).abs() < 0.01,
-        orElse: () => ProjectPresets.aspects.first,
-      )
-      .label;
-  return '$aspect · ${ProjectPresets.resolutionLabel(project.resolutionHeight)} · ${project.fps} fps';
-}
-
-/// O dialogo de renomear: dono do proprio controlador de texto, para
-/// ele so ser descartado quando o dialogo sai da arvore.
-class _DialogoDeNome extends StatefulWidget {
-  const _DialogoDeNome({required this.inicial});
-
-  final String inicial;
-
-  @override
-  State<_DialogoDeNome> createState() => _DialogoDeNomeState();
-}
-
-class _DialogoDeNomeState extends State<_DialogoDeNome> {
-  late final TextEditingController _campo = TextEditingController(
-    text: widget.inicial,
-  );
-
-  @override
-  void dispose() {
-    _campo.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return CupertinoAlertDialog(
-      title: const AppText('Renomear'),
-      content: Padding(
-        padding: const EdgeInsets.only(top: 12),
-        child: CupertinoTextField(
-          key: const ValueKey('renomear-campo'),
-          controller: _campo,
-          autofocus: true,
-          textCapitalization: TextCapitalization.sentences,
-          onSubmitted: (v) => Navigator.of(context).pop(v),
-        ),
-      ),
-      actions: [
-        CupertinoDialogAction(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const AppText('Cancelar'),
-        ),
-        CupertinoDialogAction(
-          key: const ValueKey('renomear-salvar'),
-          isDefaultAction: true,
-          onPressed: () => Navigator.of(context).pop(_campo.text),
-          child: const AppText('Salvar'),
-        ),
-      ],
-    );
-  }
-}
-
-/// Cartao de modelo pronto: um quadro renderizado do proprio motion.
-/// O CABECALHO: a marca em titulo grande, a saudacao com o apelido e dois
-/// botoes redondos (abrir template, perfil). Sem degradê no texto — ele
-/// cortava o "A" do nome e deixava o titulo apagado.
-class _Cabecalho extends ConsumerWidget {
-  const _Cabecalho({required this.onTemplate});
-
-  final VoidCallback onTemplate;
-
-  static String _saudacao() {
-    final hora = DateTime.now().hour;
-    if (hora >= 5 && hora < 12) return 'Bom dia';
-    if (hora >= 12 && hora < 18) return 'Boa tarde';
-    return 'Boa noite';
-  }
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final conta = ref.watch(contaDaComunidadeProvider);
-    final apelido = conta?.apelido;
-    final saudacao = translate(context, _saudacao());
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 12, 18),
-      child: Row(
-        children: [
-          const AureaLogo(size: 32),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Aurea',
-                  style: TextStyle(
-                    fontSize: 25,
-                    height: 1.05,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.8,
-                    color: AppColors.onDark,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                // O apelido e da pessoa: nunca passa pelo dicionario.
-                Text(
-                  apelido == null ? saudacao : '$saudacao, $apelido',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 13.5, color: AppColors.muted),
-                ),
-              ],
-            ),
-          ),
-          _BotaoRedondo(
-            icon: CupertinoIcons.doc_on_doc,
-            tooltip: translate(context, 'Abrir template'),
-            onTap: onTemplate,
-          ),
-          const SizedBox(width: 6),
-          _AvatarDaConta(
-            caminho: conta?.avatar,
-            inicial: conta?.inicial ?? '?',
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Avatar do cabecalho: resolve `File.existsSync` UMA vez por caminho
-/// (no init/didUpdate), nao a cada rebuild do header.
-class _AvatarDaConta extends ConsumerWidget {
-  const _AvatarDaConta({required this.caminho, required this.inicial});
-
-  final String? caminho;
-  final String inicial;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final remote = caminho?.startsWith('https://') == true;
-    final existe = caminho != null && (remote || _existe(caminho!));
-    return Tocavel(
-      key: const ValueKey('inicio-perfil'),
-      onTap: () => ref.read(homeTabProvider.notifier).state = 3,
-      child: SizedBox(
-        width: 44,
-        height: 44,
-        child: Center(
-          child: existe
-              ? CircleAvatar(
-                  radius: 17,
-                  backgroundImage: remote
-                      ? NetworkImage(caminho!)
-                      : FileImage(File(caminho!)) as ImageProvider,
-                )
-              : CircleAvatar(
-                  radius: 17,
-                  backgroundColor: AppColors.violet,
-                  child: Text(
-                    inicial,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-        ),
-      ),
-    );
-  }
-
-  // Cache simples por caminho: evita stat repetido no mesmo frame.
-  static final _cache = <String, bool>{};
-  static bool _existe(String caminho) {
-    final hit = _cache[caminho];
-    if (hit != null) return hit;
-    final v = File(caminho).existsSync();
-    if (_cache.length > 64) _cache.clear();
-    _cache[caminho] = v;
-    return v;
-  }
-}
-
-class _BotaoRedondo extends StatelessWidget {
-  const _BotaoRedondo({
-    required this.icon,
-    required this.tooltip,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String tooltip;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) => Tooltip(
-    message: tooltip,
-    child: Tocavel(
-      onTap: onTap,
-      child: SizedBox(
-        width: 44,
-        height: 44,
-        child: Center(
-          child: Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              color: AppColors.surfaceHigh,
-              shape: BoxShape.circle,
-            ),
-            child: Icon(icon, size: 17, color: AppColors.onDark),
-          ),
-        ),
-      ),
-    ),
-  );
-}
-
-class _Atalho extends StatelessWidget {
-  const _Atalho({
-    required this.icon,
-    required this.rotulo,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String rotulo;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) => Tocavel(
-    onTap: onTap,
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 56,
-          height: 56,
-          decoration: BoxDecoration(
-            color: AppColors.surfaceHigh,
-            shape: BoxShape.circle,
-          ),
-          child: Icon(icon, size: 23, color: AppColors.lime),
-        ),
-        const SizedBox(height: 7),
-        AppText(
-          rotulo,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-        ),
-      ],
-    ),
-  );
-}
-
-class _TituloSecao extends StatelessWidget {
-  const _TituloSecao(this.titulo);
-
-  final String titulo;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(20, 28, 20, 12),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: [
-        Expanded(
-          child: AppText(
-            titulo,
-            style: const TextStyle(
-              fontSize: 21,
-              fontWeight: FontWeight.w700,
-              letterSpacing: -0.4,
-            ),
-          ),
-        ),
-      ],
-    ),
-  );
-}
-
-class _SemProjetos extends StatelessWidget {
-  const _SemProjetos();
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
-    child: Row(
-      children: [
-        Icon(CupertinoIcons.film, size: 22, color: AppColors.muted),
-        const SizedBox(width: 12),
-        Expanded(
-          child: AppText(
-            'Seus projetos aparecem aqui, com a miniatura do que voce fez.',
-            style: TextStyle(color: AppColors.muted, fontSize: 13.5),
-          ),
-        ),
-      ],
-    ),
-  );
-}
-
-/// UM PROJETO NA GRADE: a miniatura de verdade (ou a moldura do formato,
-/// antes da primeira), o nome como foi digitado e o menu que se ve.
-class _CartaoProjeto extends StatelessWidget {
-  const _CartaoProjeto({
-    super.key,
-    required this.project,
-    required this.onOpen,
-    required this.onMenu,
-    this.marcado = false,
-    this.escolhendo = false,
-    this.onMarcar,
-    this.compacto = false,
-  });
-
-  final VideoProject project;
-  final VoidCallback onOpen;
-  final VoidCallback onMenu;
-
-  /// ESCOLHENDO VARIOS: o cartao mostra a marca e o toque passa a
-  /// marcar, em vez de abrir.
-  final bool marcado;
-  final bool escolhendo;
-  final VoidCallback? onMarcar;
-  final bool compacto;
-
-  @override
-  Widget build(BuildContext context) {
-    final ratio = project.aspectRatio <= 0 ? 16 / 9 : project.aspectRatio;
-    if (compacto) {
-      return RepaintBoundary(
-        child: Material(
-          color: marcado
-              ? AppColors.lime.withValues(alpha: .12)
-              : AppColors.surface,
-          borderRadius: BorderRadius.circular(14),
-          child: InkWell(
-            onTap: onOpen,
-            onLongPress: escolhendo ? onMarcar : onMenu,
-            borderRadius: BorderRadius.circular(14),
-            child: Padding(
-              padding: const EdgeInsets.all(10),
-              child: Row(
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(9),
-                    child: SizedBox(
-                      width: 76,
-                      height: 84,
-                      child: _ThumbProjeto(
-                        projectId: project.id,
-                        hero: false,
-                        placeholder: ColoredBox(
-                          color: AppColors.surfaceHigh,
-                          child: Icon(
-                            CupertinoIcons.film,
-                            color: AppColors.muted,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          project.name,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        AppText(
-                          fichaDoProjeto(project),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: AppColors.muted,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (escolhendo)
-                    Icon(
-                      key: ValueKey('projeto-marca-${project.id}'),
-                      marcado
-                          ? CupertinoIcons.checkmark_circle_fill
-                          : CupertinoIcons.circle,
-                      size: 19,
-                      color: AppColors.lime,
-                    ),
-                  IconButton(
-                    key: ValueKey('projeto-menu-${project.id}'),
-                    onPressed: escolhendo ? onMarcar : onMenu,
-                    tooltip: 'Opções do projeto',
-                    icon: const Icon(Icons.more_vert, size: 20),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-    return RepaintBoundary(
-      child: Tocavel(
-        onTap: onOpen,
-        onLongPress: escolhendo ? onMarcar : onMenu,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(14),
-                child: _ThumbProjeto(
-                  projectId: project.id,
-                  hero: false,
-                  placeholder: DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [AppColors.surfaceHigh, AppColors.surface],
-                      ),
-                    ),
-                    child: Center(
-                      // A moldura do formato do projeto (9:16, 16:9, 1:1).
-                      child: FractionallySizedBox(
-                        heightFactor: ratio >= 1 ? null : 0.62,
-                        widthFactor: ratio >= 1 ? 0.52 : null,
-                        child: AspectRatio(
-                          aspectRatio: ratio,
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              color: AppColors.background.withValues(
-                                alpha: .55,
-                              ),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Icon(
-                              CupertinoIcons.film,
-                              size: 18,
-                              color: AppColors.muted,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                if (escolhendo)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 6),
-                    child: Icon(
-                      key: ValueKey('projeto-marca-${project.id}'),
-                      marcado
-                          ? CupertinoIcons.checkmark_circle_fill
-                          : CupertinoIcons.circle,
-                      size: 18,
-                      color: marcado ? AppColors.lime : AppColors.muted,
-                    ),
-                  ),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        project.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: -0.1,
-                        ),
-                      ),
-                      const SizedBox(height: 1),
-                      AppText(
-                        fichaDoProjeto(project),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 11, color: AppColors.muted),
-                      ),
-                    ],
-                  ),
-                ),
-                // O MENU TEM 40 PX de alvo: e por onde se apaga, duplica e
-                // renomeia — nada disso pode depender de um gesto escondido.
-                // Escolhendo varios, o mesmo alvo marca e desmarca.
-                Tocavel(
-                  key: ValueKey('projeto-menu-${project.id}'),
-                  onTap: escolhendo ? onMarcar : onMenu,
-                  child: SizedBox(
-                    width: 40,
-                    height: 40,
-                    child: Icon(
-                      CupertinoIcons.ellipsis,
-                      size: 18,
-                      color: AppColors.muted,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// UM MODELO: o quadro renderizado grande, com o nome por cima.
-class _CartaoModelo extends StatelessWidget {
-  const _CartaoModelo({
-    required this.imagem,
-    required this.titulo,
-    required this.detalhe,
-    required this.onTap,
-  });
-
-  final String imagem;
-  final String titulo;
-  final String detalhe;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(right: 12),
-      child: RepaintBoundary(
-        child: Tocavel(
-          onTap: onTap,
-          child: SizedBox(
-            width: 232,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(16),
-                  child: SizedBox(
-                    width: 232,
-                    height: 146,
-                    child: Image.asset(
-                      imagem,
-                      fit: BoxFit.cover,
-                      cacheWidth: 464,
-                      filterQuality: FilterQuality.low,
-                      errorBuilder: (_, _, _) => ColoredBox(
-                        color: AppColors.surfaceHigh,
-                        child: Center(
-                          child: Icon(
-                            CupertinoIcons.film,
-                            color: AppColors.muted,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                AppText(
-                  titulo,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: -0.1,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                AppText(
-                  detalhe,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 11.5, color: AppColors.muted),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Linha simples com icone e seta: sem caixa, sem borda.
-class _Linha extends StatelessWidget {
-  const _Linha({
-    super.key,
-    required this.icon,
-    required this.texto,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String texto;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Tocavel(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 13, 20, 13),
-        child: Row(
-          children: [
-            Icon(icon, size: 19, color: AppColors.lime),
-            const SizedBox(width: 14),
-            Expanded(
-              child: AppText(texto, style: const TextStyle(fontSize: 14.5)),
-            ),
-            Icon(
-              CupertinoIcons.chevron_right,
-              size: 15,
-              color: AppColors.muted,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Linha maior, com o icone num circulo e duas linhas de texto.
-class _LinhaGrande extends StatelessWidget {
-  const _LinhaGrande({
-    required this.icon,
-    required this.titulo,
-    required this.subtitulo,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String titulo;
-  final String subtitulo;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) => Tocavel(
-    key: const ValueKey('inicio-comunidade'),
-    onTap: onTap,
-    child: Padding(
-      padding: const EdgeInsets.fromLTRB(20, 2, 20, 2),
-      child: Row(
-        children: [
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              color: AppColors.lime.withValues(alpha: .14),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(icon, size: 22, color: AppColors.lime),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                AppText(
-                  titulo,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                AppText(subtitulo, style: const TextStyle(fontSize: 12.5)),
-              ],
-            ),
-          ),
-          Icon(CupertinoIcons.chevron_right, size: 15, color: AppColors.muted),
-        ],
-      ),
-    ),
-  );
-}
-
-/// Confirma e apaga TODOS os projetos e miniaturas.
-Future<void> apagarTodosOsProjetos(BuildContext context, WidgetRef ref) async {
-  final total = ref.read(projectsControllerProvider).length;
-  if (total == 0) return;
-  final ok = await showCupertinoDialog<bool>(
-    context: context,
-    builder: (c) => CupertinoAlertDialog(
-      title: const AppText('Apagar todos os projetos?'),
-      content: Text(
-        '$total projeto(s) serao apagados. Isso nao pode ser desfeito.',
-      ),
-      actions: [
-        CupertinoDialogAction(
-          onPressed: () => Navigator.of(c).pop(false),
-          child: const AppText('Cancelar'),
-        ),
-        CupertinoDialogAction(
-          isDestructiveAction: true,
-          onPressed: () => Navigator.of(c).pop(true),
-          child: const AppText('Apagar todos'),
-        ),
-      ],
-    ),
-  );
-  if (ok != true) return;
-  final ids = [for (final p in ref.read(projectsControllerProvider)) p.id];
-  ref.read(projectsControllerProvider.notifier).removeAll();
-  for (final id in ids) {
-    ThumbnailService.instance.delete(id);
-  }
-}
-
-/// A BARRA DA LISTA: quantos sao, como estao ordenados, a busca e o
-/// modo de escolher varios.
-class _BarraDaLista extends ConsumerStatefulWidget {
-  const _BarraDaLista({
-    required this.total,
-    required this.ordem,
-    required this.busca,
-    required this.selecao,
-    required this.projetos,
-  });
-
-  final int total;
-  final OrdemDosProjetos ordem;
-  final String busca;
-  final Set<String> selecao;
-  final List<VideoProject> projetos;
-
-  @override
-  ConsumerState<_BarraDaLista> createState() => _BarraDaListaState();
-}
-
-class _BarraDaListaState extends ConsumerState<_BarraDaLista> {
-  final _campo = TextEditingController();
-  var _procurando = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _campo.text = widget.busca;
-    _procurando = widget.busca.isNotEmpty;
-  }
-
-  @override
-  void didUpdateWidget(covariant _BarraDaLista old) {
-    super.didUpdateWidget(old);
-    // Limpeza externa (lote excluido): fecha a busca sem reconstruir nada.
-    if (widget.busca.isEmpty && _campo.text.isNotEmpty && !_procurando) {
-      _campo.clear();
     }
   }
 
-  @override
-  void dispose() {
-    _campo.dispose();
-    super.dispose();
-  }
-
-  Future<void> _escolherOrdem() async {
-    final escolha = await showCupertinoModalPopup<OrdemDosProjetos>(
-      context: context,
-      builder: (c) => CupertinoActionSheet(
-        title: const AppText('Ordenar os projetos'),
-        actions: [
-          for (final o in OrdemDosProjetos.values)
-            CupertinoActionSheetAction(
-              key: ValueKey('projetos-ordem-${o.name}'),
-              onPressed: () => Navigator.of(c).pop(o),
-              child: AppText(rotuloDaOrdem(o)),
-            ),
-        ],
-        cancelButton: CupertinoActionSheetAction(
-          onPressed: () => Navigator.of(c).pop(),
-          child: const AppText('Cancelar'),
-        ),
-      ),
+  Future<void> _escolherOrdem(BuildContext ancora) async {
+    final atual = ref.read(ordemDosProjetosProvider);
+    final escolha = await mostrarAureaMenu<OrdemDosProjetos>(
+      ancora,
+      itens: [
+        for (final o in OrdemDosProjetos.values)
+          AureaMenuItem(
+            valor: o,
+            rotulo: rotuloDaOrdem(o),
+            marcado: o == atual,
+            chave: 'projetos-ordem-${o.name}',
+          ),
+      ],
     );
     if (escolha != null) {
       ref.read(ordemDosProjetosProvider.notifier).escolher(escolha);
     }
   }
 
+  void _marcar(String id) {
+    final atual = {...ref.read(selecaoDeProjetosProvider)};
+    if (!atual.add(id)) atual.remove(id);
+    ref.read(selecaoDeProjetosProvider.notifier).state = atual;
+  }
+
+  void _fecharBusca() {
+    _busca.clear();
+    ref.read(buscaDeProjetosProvider.notifier).state = '';
+    setState(() => _procurando = false);
+  }
+
+  // -- build -----------------------------------------------------------------
+
   @override
   Widget build(BuildContext context) {
-    final selecionando = widget.selecao.isNotEmpty;
-    if (selecionando) {
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(20, 18, 12, 6),
-        child: Row(
+    // O "+" da barra de abas pede um projeto novo daqui.
+    ref.listen(novoProjetoSolicitadoProvider, (_, _) => _criar());
+
+    // COM O EDITOR POR CIMA, NAO OUVE A LISTA (ver o cabecalho da classe).
+    // Voltar a ser a rota da frente reconstroi esta tela (dependencia do
+    // ModalRoute), e ai ela le a lista de novo.
+    if (ModalRoute.isCurrentOf(context) ?? true) {
+      _vistos = ref.watch(projectsControllerProvider);
+    }
+    final todos = _vistos;
+    final ordem = ref.watch(ordemDosProjetosProvider);
+    final busca = ref.watch(buscaDeProjetosProvider);
+    final selecao = ref.watch(selecaoDeProjetosProvider);
+    final escolhendo = selecao.isNotEmpty;
+    final projetos = projetosArrumados(todos, ordem, busca);
+    final repositorio = ref.read(projectRepositoryProvider);
+
+    return ColoredBox(
+      color: AureaCores.cromo,
+      child: SafeArea(
+        bottom: false,
+        child: Column(
           children: [
+            _Topo(aoMenu: _menuDaInicio),
             Expanded(
-              child: AppTextMoldado(
-                '{0} escolhidos',
-                [widget.selecao.length],
-                style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                ),
+              child: Stack(
+                children: [
+                  CustomScrollView(
+                    slivers: [
+                      SliverToBoxAdapter(
+                        child: _BotaoNovoProjeto(aoTocar: _criar),
+                      ),
+                      if (todos.isNotEmpty)
+                        SliverToBoxAdapter(
+                          child: escolhendo
+                              ? _CabecalhoDaSelecao(
+                                  quantos: selecao.length,
+                                  aoMarcarTodos: () =>
+                                      ref
+                                          .read(
+                                            selecaoDeProjetosProvider.notifier,
+                                          )
+                                          .state = {
+                                        for (final p in projetos) p.id,
+                                      },
+                                  aoSair: () =>
+                                      ref
+                                              .read(
+                                                selecaoDeProjetosProvider
+                                                    .notifier,
+                                              )
+                                              .state =
+                                          const {},
+                                )
+                              : _CabecalhoDaLista(
+                                  procurando: _procurando,
+                                  busca: _busca,
+                                  aoProcurar: () =>
+                                      setState(() => _procurando = true),
+                                  aoDigitar: (v) =>
+                                      ref
+                                              .read(
+                                                buscaDeProjetosProvider
+                                                    .notifier,
+                                              )
+                                              .state =
+                                          v,
+                                  aoFecharBusca: _fecharBusca,
+                                  aoOrdenar: _escolherOrdem,
+                                ),
+                        ),
+                      if (projetos.isEmpty)
+                        SliverToBoxAdapter(
+                          child: _Vazio(procurando: busca.trim().isNotEmpty),
+                        )
+                      else
+                        SliverPadding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: _margem,
+                          ),
+                          sliver: SliverGrid(
+                            // UMA COLUNA NO CELULAR; duas ou mais so em tela
+                            // larga (tablet, celular deitado).
+                            gridDelegate:
+                                const SliverGridDelegateWithMaxCrossAxisExtent(
+                                  maxCrossAxisExtent: 560,
+                                  mainAxisExtent: _alturaDoCartao,
+                                  mainAxisSpacing: AureaDims.e8,
+                                  crossAxisSpacing: AureaDims.e10,
+                                ),
+                            delegate: SliverChildBuilderDelegate(
+                              (context, i) {
+                                final p = projetos[i];
+                                return _CartaoDoProjeto(
+                                  key: ValueKey('projeto-${p.id}'),
+                                  projeto: p,
+                                  editadoEm: _Edicoes.de(p, repositorio),
+                                  escolhendo: escolhendo,
+                                  marcado: selecao.contains(p.id),
+                                  aoAbrir: () => escolhendo
+                                      ? _marcar(p.id)
+                                      : entrarNoEditor(context, ref, p),
+                                  aoSegurar: () => _marcar(p.id),
+                                  aoMenu: (ancora) => _menuDoProjeto(ancora, p),
+                                );
+                              },
+                              childCount: projetos.length,
+                              // Fora da tela nao guarda estado nenhum.
+                              addAutomaticKeepAlives: false,
+                            ),
+                          ),
+                        ),
+                      SliverToBoxAdapter(
+                        child: SizedBox(
+                          height: escolhendo
+                              ? _alturaDoLote + AureaDims.e20
+                              : AureaDims.e20,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (escolhendo)
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: _AcoesEmLote(
+                        quantos: selecao.length,
+                        aoDuplicar: () {
+                          for (final p in todos) {
+                            if (selecao.contains(p.id)) duplicarProjeto(ref, p);
+                          }
+                          ref.read(selecaoDeProjetosProvider.notifier).state =
+                              const {};
+                        },
+                        aoExcluir: () async {
+                          final foi = await excluirEscolhidos(
+                            context,
+                            ref,
+                            selecao,
+                          );
+                          if (foi) {
+                            ref
+                                    .read(selecaoDeProjetosProvider.notifier)
+                                    .state =
+                                const {};
+                          }
+                        },
+                      ),
+                    ),
+                ],
               ),
-            ),
-            _BotaoDaBarra(
-              chave: 'projetos-marcar-todos',
-              icone: CupertinoIcons.checkmark_circle,
-              onTap: () => ref.read(selecaoDeProjetosProvider.notifier).state =
-                  {for (final p in widget.projetos) p.id},
-            ),
-            _BotaoDaBarra(
-              chave: 'projetos-selecao-sair',
-              icone: CupertinoIcons.xmark,
-              onTap: () =>
-                  ref.read(selecaoDeProjetosProvider.notifier).state = const {},
             ),
           ],
         ),
-      );
-    }
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 18, 12, 6),
-      child: Row(
-        children: [
-          if (!_procurando) ...[
-            Expanded(
-              child: AppText(
-                '${widget.total} ${translate(context, 'projetos')}',
-                style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-            _BotaoDaBarra(
-              chave: 'projetos-buscar',
-              icone: CupertinoIcons.search,
-              onTap: () => setState(() => _procurando = true),
-            ),
-          ] else
-            Expanded(
-              child: SizedBox(
-                height: 34,
-                child: CupertinoTextField(
-                  key: const ValueKey('projetos-busca-campo'),
-                  controller: _campo,
-                  autofocus: true,
-                  placeholder: 'Procurar pelo nome',
-                  suffix: Tocavel(
-                    key: const ValueKey('projetos-busca-limpar'),
-                    onTap: () {
-                      _campo.clear();
-                      ref.read(buscaDeProjetosProvider.notifier).state = '';
-                      setState(() => _procurando = false);
-                    },
-                    child: const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 8),
-                      child: Icon(CupertinoIcons.xmark_circle_fill, size: 16),
-                    ),
-                  ),
-                  onChanged: (v) =>
-                      ref.read(buscaDeProjetosProvider.notifier).state = v,
-                ),
-              ),
-            ),
-          _BotaoDaBarra(
-            chave: 'projetos-ordenar',
-            icone: CupertinoIcons.arrow_up_arrow_down,
-            onTap: _escolherOrdem,
-          ),
-          _BotaoDaBarra(
-            chave: 'projetos-selecionar',
-            icone: CupertinoIcons.checkmark_circle,
-            onTap: () {
-              final primeiro = widget.projetos.firstOrNull;
-              if (primeiro == null) return;
-              ref.read(selecaoDeProjetosProvider.notifier).state = {
-                primeiro.id,
-              };
-            },
-          ),
-        ],
       ),
     );
   }
 }
 
-class _BotaoDaBarra extends StatelessWidget {
-  const _BotaoDaBarra({
-    required this.chave,
-    required this.icone,
-    required this.onTap,
-  });
+const double _margem = 16;
 
-  final String chave;
-  final IconData icone;
-  final VoidCallback onTap;
+/// A altura do cartao do projeto: a linha da lista da referencia (80),
+/// com a miniatura de 64.
+const double _alturaDoCartao = 80;
+const double _ladoDaMiniatura = 64;
+const double _alturaDoLote = 52;
+
+/// A duracao como o relogio do editor mostra: 0:05, 12:40, 1:02:03.
+String duracaoDoProjeto(Duration d) {
+  final s = d.inSeconds;
+  final h = s ~/ 3600;
+  final m = (s % 3600) ~/ 60;
+  final ss = (s % 60).toString().padLeft(2, '0');
+  return h > 0 ? '$h:${m.toString().padLeft(2, '0')}:$ss' : '$m:$ss';
+}
+
+/// A ficha do cartao: o quadro de saida e a duracao — "1080 × 1920 · 0:05".
+String fichaDoProjeto(VideoProject p) =>
+    '${p.outputWidth} × ${p.outputHeight} · ${duracaoDoProjeto(p.duration)}';
+
+/// QUANDO FOI MEXIDO, no formato do idioma da tela: hoje e a hora, este
+/// ano e o dia, antes disso a data curta. Sem palavra nenhuma — o relogio
+/// ao lado diz o que o numero e.
+String quandoFoiEditado(BuildContext context, DateTime t, DateTime agora) {
+  final loc = MaterialLocalizations.of(context);
+  if (t.year == agora.year && t.month == agora.month && t.day == agora.day) {
+    return loc.formatTimeOfDay(TimeOfDay.fromDateTime(t));
+  }
+  if (t.year == agora.year) return loc.formatShortMonthDay(t);
+  return loc.formatShortDate(t);
+}
+
+/// A ULTIMA EDICAO de cada projeto, sem `stat` a cada quadro.
+///
+/// O modelo nao guarda a data da ultima edicao; o arquivo do projeto sim
+/// (ele e regravado a cada edicao — [ProjectRepository.editadoEm]). A
+/// data fica presa a INSTANCIA do projeto (o projeto e imutavel: editar
+/// cria outro), entao cada cartao consulta o disco uma vez. Uma instancia
+/// nova de um id ja visto e uma edicao feita agora, nesta sessao — o
+/// arquivo pode nem ter sido gravado ainda (a gravacao espera 900 ms).
+abstract final class _Edicoes {
+  static final _instancia = <String, VideoProject>{};
+  static final _quando = Expando<DateTime>('editado-em');
+
+  static DateTime de(VideoProject p, ProjectRepository repositorio) {
+    final ja = _quando[p];
+    if (ja != null) return ja;
+    final anterior = _instancia[p.id];
+    final q = anterior != null && !identical(anterior, p)
+        ? DateTime.now()
+        : (repositorio.editadoEm(p.id) ?? DateTime.now());
+    _instancia[p.id] = p;
+    _quando[p] = q;
+    return q;
+  }
+}
+
+/// O PROVEDOR DE CADA MINIATURA, guardado por projeto.
+///
+/// A miniatura so muda quando o editor fecha (captura) — e o
+/// [ThumbnailService.revision] sobe. Sem guardar, cada revisao (de
+/// QUALQUER projeto) faria cada cartao visivel olhar o disco de novo.
+/// Guardando, o cartao olha a data do arquivo uma vez por revisao e so
+/// descarta a imagem decodificada quando o arquivo mudou de verdade — o
+/// `evict` e necessario porque a imagem decodificada no tamanho do cartao
+/// ([ResizeImage]) tem chave propria no cache, e a captura so descarta a
+/// do arquivo cheio.
+abstract final class _Miniaturas {
+  static final _porId =
+      <
+        String,
+        ({int revisao, int largura, DateTime? quando, ImageProvider? imagem})
+      >{};
+
+  static ImageProvider? de(String id, int revisao, int largura) {
+    final c = _porId[id];
+    if (c != null && c.revisao == revisao && c.largura == largura) {
+      return c.imagem;
+    }
+    final arquivo = ThumbnailService.instance.fileFor(id);
+    DateTime? quando;
+    if (arquivo != null) {
+      try {
+        quando = arquivo.lastModifiedSync();
+      } catch (_) {}
+    }
+    if (c?.imagem != null && (arquivo == null || c!.quando != quando)) {
+      c!.imagem!.evict();
+    }
+    final imagem = arquivo == null
+        ? null
+        : ResizeImage(FileImage(arquivo), width: largura);
+    _porId[id] = (
+      revisao: revisao,
+      largura: largura,
+      quando: quando,
+      imagem: imagem,
+    );
+    return imagem;
+  }
+}
+
+// ---------------------------------------------------------------- pecas
+
+/// O TOPO: a marca e o menu. Altura da barra de cima da referencia (57).
+class _Topo extends StatelessWidget {
+  const _Topo({required this.aoMenu});
+
+  final void Function(BuildContext ancora) aoMenu;
 
   @override
-  Widget build(BuildContext context) => Tocavel(
-    key: ValueKey(chave),
-    onTap: onTap,
-    child: Padding(
-      padding: const EdgeInsets.all(8),
-      child: Icon(icone, size: 19, color: AppColors.muted),
+  Widget build(BuildContext context) => SizedBox(
+    height: 57,
+    child: Row(
+      children: [
+        const SizedBox(width: _margem),
+        const AureaLogo(size: 30),
+        const SizedBox(width: AureaDims.e10),
+        // A marca: nome proprio, nao passa pelo dicionario.
+        Text(
+          'AUREA',
+          style: TextStyle(
+            fontSize: 19,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 3,
+            color: AureaCores.texto,
+          ),
+        ),
+        const Spacer(),
+        Builder(
+          builder: (ancora) => Tocavel(
+            key: const ValueKey('home-menu'),
+            onTap: () => aoMenu(ancora),
+            child: SizedBox(
+              width: AureaDims.toqueConfortavel,
+              height: AureaDims.toqueConfortavel,
+              child: Icon(
+                CupertinoIcons.line_horizontal_3,
+                size: AureaDims.iconeLg,
+                color: AureaCores.texto,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: AureaDims.e6),
+      ],
     ),
   );
 }
 
-/// AS ACOES DO LOTE: duplicar e excluir o que estiver marcado.
-class _AcoesEmLote extends StatelessWidget {
-  const _AcoesEmLote({
+/// O BOTAO DE CRIAR, na largura inteira: a primeira coisa depois da marca.
+class _BotaoNovoProjeto extends StatelessWidget {
+  const _BotaoNovoProjeto({required this.aoTocar});
+
+  final VoidCallback aoTocar;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(_margem, AureaDims.e4, _margem, 0),
+    child: Tocavel(
+      key: const ValueKey('novo-projeto'),
+      haptico: true,
+      onTap: aoTocar,
+      child: Container(
+        height: 52,
+        decoration: BoxDecoration(
+          color: AureaCores.acao,
+          borderRadius: BorderRadius.circular(AureaDims.raioPilula),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              CupertinoIcons.plus,
+              size: AureaDims.iconeMd,
+              color: AureaCores.sobreAcao,
+            ),
+            const SizedBox(width: AureaDims.e8),
+            Flexible(
+              child: AppText(
+                'Novo projeto',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: AureaCores.sobreAcao,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+/// "Projetos recentes", a busca e a ordem.
+class _CabecalhoDaLista extends StatelessWidget {
+  const _CabecalhoDaLista({
+    required this.procurando,
+    required this.busca,
+    required this.aoProcurar,
+    required this.aoDigitar,
+    required this.aoFecharBusca,
+    required this.aoOrdenar,
+  });
+
+  final bool procurando;
+  final TextEditingController busca;
+  final VoidCallback aoProcurar;
+  final ValueChanged<String> aoDigitar;
+  final VoidCallback aoFecharBusca;
+  final void Function(BuildContext ancora) aoOrdenar;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(
+      _margem,
+      AureaDims.e20,
+      AureaDims.e6,
+      AureaDims.e6,
+    ),
+    child: SizedBox(
+      height: AureaDims.toqueConfortavel,
+      child: Row(
+        children: [
+          if (procurando)
+            Expanded(
+              child: CupertinoTextField(
+                key: const ValueKey('projetos-busca-campo'),
+                controller: busca,
+                autofocus: true,
+                placeholder: translate(context, 'Procurar pelo nome'),
+                style: AureaEstilos.corpo.copyWith(fontSize: 14),
+                placeholderStyle: AureaEstilos.corpo.copyWith(
+                  fontSize: 14,
+                  color: AureaCores.textoSecundario,
+                ),
+                cursorColor: AureaCores.destaque,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AureaDims.e10,
+                  vertical: AureaDims.e8,
+                ),
+                decoration: BoxDecoration(
+                  color: AureaCores.campo,
+                  borderRadius: BorderRadius.circular(AureaDims.raioPilula),
+                ),
+                onChanged: aoDigitar,
+              ),
+            )
+          else
+            Expanded(
+              child: AppText(
+                'Projetos recentes',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AureaEstilos.titulo.copyWith(fontSize: 16),
+              ),
+            ),
+          _BotaoDeIcone(
+            chave: procurando ? 'projetos-busca-limpar' : 'projetos-buscar',
+            icone: procurando ? CupertinoIcons.xmark : CupertinoIcons.search,
+            aoTocar: (_) => procurando ? aoFecharBusca() : aoProcurar(),
+          ),
+          _BotaoDeIcone(
+            chave: 'projetos-ordenar',
+            icone: CupertinoIcons.arrow_up_arrow_down,
+            aoTocar: aoOrdenar,
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+/// Escolhendo varios: quantos, marcar todos e sair.
+class _CabecalhoDaSelecao extends StatelessWidget {
+  const _CabecalhoDaSelecao({
     required this.quantos,
-    required this.onDuplicar,
-    required this.onExcluir,
+    required this.aoMarcarTodos,
+    required this.aoSair,
   });
 
   final int quantos;
-  final VoidCallback onDuplicar;
-  final VoidCallback onExcluir;
+  final VoidCallback aoMarcarTodos;
+  final VoidCallback aoSair;
 
   @override
-  Widget build(BuildContext context) => RepaintBoundary(
-    child: ClipRect(
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-        child: Container(
-          decoration: BoxDecoration(
-            color: AppColors.surface.withValues(alpha: .88),
-            border: Border(
-              top: BorderSide(color: AppColors.outline, width: .5),
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(
+      _margem,
+      AureaDims.e20,
+      AureaDims.e6,
+      AureaDims.e6,
+    ),
+    child: SizedBox(
+      height: AureaDims.toqueConfortavel,
+      child: Row(
+        children: [
+          Expanded(
+            child: AppTextMoldado(
+              '{0} escolhidos',
+              [quantos],
+              maxLines: 1,
+              style: AureaEstilos.titulo.copyWith(fontSize: 16),
             ),
           ),
-          child: SafeArea(
-            top: false,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: AppTextMoldado('{0} escolhidos', [
-                      quantos,
-                    ], style: TextStyle(fontSize: 13, color: AppColors.muted)),
+          _BotaoDeIcone(
+            chave: 'projetos-marcar-todos',
+            icone: CupertinoIcons.checkmark_circle,
+            aoTocar: (_) => aoMarcarTodos(),
+          ),
+          _BotaoDeIcone(
+            chave: 'projetos-selecao-sair',
+            icone: CupertinoIcons.xmark,
+            aoTocar: (_) => aoSair(),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _BotaoDeIcone extends StatelessWidget {
+  const _BotaoDeIcone({
+    required this.chave,
+    required this.icone,
+    required this.aoTocar,
+  });
+
+  final String chave;
+  final IconData icone;
+  final void Function(BuildContext ancora) aoTocar;
+
+  @override
+  Widget build(BuildContext context) => Tocavel(
+    key: ValueKey(chave),
+    onTap: () => aoTocar(context),
+    child: SizedBox(
+      width: AureaDims.toqueConfortavel,
+      height: AureaDims.toqueConfortavel,
+      child: Icon(
+        icone,
+        size: AureaDims.iconeMd,
+        color: AureaCores.textoSecundario,
+      ),
+    ),
+  );
+}
+
+class _Vazio extends StatelessWidget {
+  const _Vazio({required this.procurando});
+
+  final bool procurando;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(
+      _margem,
+      AureaDims.e20,
+      _margem,
+      0,
+    ),
+    child: Row(
+      children: [
+        Icon(
+          procurando ? CupertinoIcons.search : CupertinoIcons.film,
+          size: AureaDims.iconeLg,
+          color: AureaCores.textoSecundario,
+        ),
+        const SizedBox(width: AureaDims.e10),
+        Expanded(
+          child: procurando
+              ? AppText(
+                  'Nenhum projeto com esse nome.',
+                  style: AureaEstilos.corpo.copyWith(
+                    color: AureaCores.textoSecundario,
                   ),
-                  Tocavel(
-                    key: const ValueKey('projetos-lote-duplicar'),
-                    onTap: onDuplicar,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 8,
+                )
+              : AppText(
+                  'Seus projetos aparecem aqui, com a miniatura do que voce fez.',
+                  style: AureaEstilos.corpo.copyWith(
+                    color: AureaCores.textoSecundario,
+                  ),
+                ),
+        ),
+      ],
+    ),
+  );
+}
+
+/// UM PROJETO: miniatura, nome como foi digitado, quadro e duracao, a
+/// ultima edicao e o ⋯. Toque abre; toque longo comeca a escolher varios
+/// (duplicar/excluir em lote), como na referencia.
+class _CartaoDoProjeto extends StatelessWidget {
+  const _CartaoDoProjeto({
+    super.key,
+    required this.projeto,
+    required this.editadoEm,
+    required this.escolhendo,
+    required this.marcado,
+    required this.aoAbrir,
+    required this.aoSegurar,
+    required this.aoMenu,
+  });
+
+  final VideoProject projeto;
+  final DateTime editadoEm;
+  final bool escolhendo;
+  final bool marcado;
+  final VoidCallback aoAbrir;
+  final VoidCallback aoSegurar;
+  final void Function(BuildContext ancora) aoMenu;
+
+  @override
+  Widget build(BuildContext context) {
+    final secundario = AureaEstilos.corpo.copyWith(
+      fontSize: 12,
+      color: AureaCores.textoSecundario,
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
+    return RepaintBoundary(
+      child: Tocavel(
+        onTap: aoAbrir,
+        onLongPress: aoSegurar,
+        encolhe: .985,
+        child: Container(
+          padding: const EdgeInsets.all(AureaDims.e8),
+          decoration: BoxDecoration(
+            color: marcado ? AureaCores.destaqueApagado : AureaCores.painel,
+            borderRadius: BorderRadius.circular(AureaDims.raioXl),
+          ),
+          child: Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(AureaDims.raioLg),
+                child: SizedBox.square(
+                  dimension: _ladoDaMiniatura,
+                  child: _Miniatura(projeto: projeto),
+                ),
+              ),
+              const SizedBox(width: AureaDims.e10 + 2),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // O nome e da pessoa: Text, nunca o dicionario.
+                    Text(
+                      projeto.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AureaEstilos.corpo.copyWith(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
                       ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            CupertinoIcons.plus_square_on_square,
-                            size: 18,
-                            color: AppColors.onDark,
+                    ),
+                    const SizedBox(height: AureaDims.e4),
+                    Text(
+                      fichaDoProjeto(projeto),
+                      key: ValueKey('projeto-ficha-${projeto.id}'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: secundario,
+                    ),
+                    const SizedBox(height: AureaDims.e2),
+                    Row(
+                      children: [
+                        Icon(
+                          CupertinoIcons.clock,
+                          size: 12,
+                          color: AureaCores.textoSecundario,
+                        ),
+                        const SizedBox(width: AureaDims.e4),
+                        Flexible(
+                          child: Text(
+                            quandoFoiEditado(
+                              context,
+                              editadoEm,
+                              DateTime.now(),
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: secundario,
                           ),
-                          const SizedBox(width: 6),
-                          const AppText(
-                            'Duplicar',
-                            style: TextStyle(fontSize: 13),
-                          ),
-                        ],
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              if (escolhendo)
+                SizedBox(
+                  width: AureaDims.toqueConfortavel,
+                  child: Icon(
+                    key: ValueKey('projeto-marca-${projeto.id}'),
+                    marcado
+                        ? CupertinoIcons.checkmark_circle_fill
+                        : CupertinoIcons.circle,
+                    size: AureaDims.iconeMd,
+                    color: marcado
+                        ? AureaCores.destaque
+                        : AureaCores.textoSecundario,
+                  ),
+                )
+              else
+                // O MENU TEM ALVO DE 44 e fica a vista: abrir, renomear,
+                // duplicar, compartilhar e excluir nunca dependem de um
+                // gesto escondido.
+                Builder(
+                  builder: (ancora) => Tocavel(
+                    key: ValueKey('projeto-menu-${projeto.id}'),
+                    onTap: () => aoMenu(ancora),
+                    child: SizedBox(
+                      width: AureaDims.toqueConfortavel,
+                      height: _ladoDaMiniatura,
+                      child: Icon(
+                        CupertinoIcons.ellipsis,
+                        size: AureaDims.iconeMd,
+                        color: AureaCores.textoSecundario,
                       ),
                     ),
                   ),
-                  Tocavel(
-                    key: const ValueKey('projetos-lote-excluir'),
-                    onTap: onExcluir,
-                    child: const Padding(
-                      padding: EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 8,
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            CupertinoIcons.delete,
-                            size: 18,
-                            color: Color(0xFFFF6B6B),
-                          ),
-                          SizedBox(width: 6),
-                          AppText(
-                            'Excluir',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: Color(0xFFFF6B6B),
-                            ),
-                          ),
-                        ],
-                      ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A MINIATURA de um projeto: escuta a revisao das miniaturas sozinha
+/// (uma captura nova repinta o seu cartao, nao a lista) e decodifica no
+/// tamanho do cartao. Sem miniatura, a moldura do formato do projeto.
+class _Miniatura extends StatelessWidget {
+  const _Miniatura({required this.projeto});
+
+  final VideoProject projeto;
+
+  @override
+  Widget build(BuildContext context) {
+    final r = projeto.aspectRatio > 0 ? projeto.aspectRatio : 16 / 9;
+    // BoxFit.cover num quadrado: o lado curto da imagem enche o quadrado,
+    // entao a imagem deitada precisa de largura proporcional.
+    final largura =
+        (_ladoDaMiniatura *
+                MediaQuery.devicePixelRatioOf(context) *
+                math.max(1.0, r))
+            .ceil()
+            .clamp(32, 640);
+    final vazio = _MolduraVazia(ratio: r);
+    return ColoredBox(
+      color: AureaCores.campo,
+      child: ValueListenableBuilder<int>(
+        valueListenable: ThumbnailService.instance.revision,
+        builder: (_, revisao, _) {
+          final imagem = _Miniaturas.de(projeto.id, revisao, largura);
+          if (imagem == null) return vazio;
+          return Image(
+            image: imagem,
+            fit: BoxFit.cover,
+            width: _ladoDaMiniatura,
+            height: _ladoDaMiniatura,
+            gaplessPlayback: true,
+            filterQuality: FilterQuality.low,
+            excludeFromSemantics: true,
+            errorBuilder: (_, _, _) => vazio,
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// Antes da primeira miniatura: o formato do projeto desenhado no tom.
+class _MolduraVazia extends StatelessWidget {
+  const _MolduraVazia({required this.ratio});
+
+  final double ratio;
+
+  @override
+  Widget build(BuildContext context) {
+    const lado = _ladoDaMiniatura * .5;
+    final r = ratio.clamp(.2, 5.0);
+    return Center(
+      child: Container(
+        width: r >= 1 ? lado : lado * r,
+        height: r >= 1 ? lado / r : lado,
+        decoration: BoxDecoration(
+          color: AureaCores.campoAlto,
+          borderRadius: BorderRadius.circular(AureaDims.raioSm),
+        ),
+      ),
+    );
+  }
+}
+
+/// AS ACOES DO LOTE, presas embaixo enquanto ha projeto escolhido. Tom de
+/// painel sobre o cromo — sem blur, sem borda.
+class _AcoesEmLote extends StatelessWidget {
+  const _AcoesEmLote({
+    required this.quantos,
+    required this.aoDuplicar,
+    required this.aoExcluir,
+  });
+
+  final int quantos;
+  final VoidCallback aoDuplicar;
+  final VoidCallback aoExcluir;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    height: _alturaDoLote,
+    color: AureaCores.painel,
+    padding: const EdgeInsets.symmetric(horizontal: AureaDims.e6),
+    child: Row(
+      children: [
+        const SizedBox(width: AureaDims.e10),
+        Expanded(
+          child: AppTextMoldado(
+            '{0} escolhidos',
+            [quantos],
+            maxLines: 1,
+            style: AureaEstilos.corpo.copyWith(
+              color: AureaCores.textoSecundario,
+            ),
+          ),
+        ),
+        _AcaoDoLote(
+          chave: 'projetos-lote-duplicar',
+          icone: CupertinoIcons.plus_square_on_square,
+          rotulo: 'Duplicar',
+          cor: AureaCores.texto,
+          aoTocar: aoDuplicar,
+        ),
+        _AcaoDoLote(
+          chave: 'projetos-lote-excluir',
+          icone: CupertinoIcons.trash,
+          rotulo: 'Excluir',
+          cor: AureaCores.perigo,
+          aoTocar: aoExcluir,
+        ),
+      ],
+    ),
+  );
+}
+
+class _AcaoDoLote extends StatelessWidget {
+  const _AcaoDoLote({
+    required this.chave,
+    required this.icone,
+    required this.rotulo,
+    required this.cor,
+    required this.aoTocar,
+  });
+
+  final String chave;
+  final IconData icone;
+  final String rotulo;
+  final Color cor;
+  final VoidCallback aoTocar;
+
+  @override
+  Widget build(BuildContext context) => Tocavel(
+    key: ValueKey(chave),
+    onTap: aoTocar,
+    child: Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AureaDims.e10,
+        vertical: AureaDims.e10,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icone, size: AureaDims.iconeMd, color: cor),
+          const SizedBox(width: AureaDims.e6),
+          AppText(rotulo, style: AureaEstilos.corpo.copyWith(color: cor)),
+        ],
+      ),
+    ),
+  );
+}
+
+/// Uma linha de folha: icone, texto e a seta. Alvo de 44.
+class _LinhaDaFolha extends StatelessWidget {
+  const _LinhaDaFolha({
+    super.key,
+    required this.icone,
+    required this.texto,
+    required this.aoTocar,
+  });
+
+  final IconData icone;
+  final String texto;
+  final VoidCallback aoTocar;
+
+  @override
+  Widget build(BuildContext context) => Tocavel(
+    onTap: aoTocar,
+    child: Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AureaDims.margemDoPainel,
+        vertical: AureaDims.e10 + 2,
+      ),
+      child: Row(
+        children: [
+          Icon(icone, size: AureaDims.iconeMd, color: AureaCores.destaque),
+          const SizedBox(width: AureaDims.e15),
+          Expanded(
+            child: AppText(
+              texto,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: AureaEstilos.corpo.copyWith(fontSize: 14),
+            ),
+          ),
+          Icon(
+            CupertinoIcons.chevron_right,
+            size: AureaDims.iconeSm,
+            color: AureaCores.textoSecundario,
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+/// Um modelo pronto: o quadro renderizado dele, o nome e o que tem.
+class _LinhaDeModelo extends StatelessWidget {
+  const _LinhaDeModelo({
+    super.key,
+    required this.imagem,
+    required this.titulo,
+    required this.detalhe,
+    required this.aoTocar,
+  });
+
+  final String imagem;
+  final String titulo;
+  final String detalhe;
+  final VoidCallback aoTocar;
+
+  @override
+  Widget build(BuildContext context) {
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    return Tocavel(
+      onTap: aoTocar,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AureaDims.margemDoPainel,
+          vertical: AureaDims.e6,
+        ),
+        child: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(AureaDims.raioLg),
+              child: Container(
+                width: 80,
+                height: 45,
+                color: AureaCores.campo,
+                child: Image.asset(
+                  imagem,
+                  fit: BoxFit.cover,
+                  cacheWidth: (80 * dpr).ceil(),
+                  filterQuality: FilterQuality.low,
+                  excludeFromSemantics: true,
+                  errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                ),
+              ),
+            ),
+            const SizedBox(width: AureaDims.e10 + 2),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  AppText(
+                    titulo,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AureaEstilos.corpo.copyWith(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: AureaDims.e2),
+                  AppText(
+                    detalhe,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AureaEstilos.corpo.copyWith(
+                      fontSize: 12,
+                      color: AureaCores.textoSecundario,
                     ),
                   ),
                 ],
               ),
             ),
-          ),
+          ],
         ),
       ),
-    ),
-  );
+    );
+  }
 }

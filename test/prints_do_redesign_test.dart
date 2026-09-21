@@ -1,6 +1,6 @@
-// PRINTS DO REDESIGN (sem emulador): a Home nova (heroi "Continuar
-// editando" com miniatura de verdade + a barra compacta com blur ao
-// rolar) e as fichas na lingua nova (ParameterRow). Com AUREA_PRINT_DIR
+// PRINTS DO REDESIGN (sem emulador): a Home nova (cartoes com a
+// miniatura de verdade, o topo fixo e chapado) e as fichas na lingua
+// nova (ParameterRow). Com AUREA_PRINT_DIR
 // apontado, sai um PNG por tela; sem, os testes so provam que nada
 // estoura.
 import 'dart:io';
@@ -128,22 +128,26 @@ Future<ProviderContainer> _home(WidgetTester tester, GlobalKey chave) async {
 void main() {
   setUpAll(carregarFontesReais);
 
-  testWidgets('Home nova: heroi com miniatura, sem estouro', (tester) async {
+  testWidgets('Home nova: cartoes com miniatura, sem estouro', (tester) async {
     final chave = GlobalKey();
     await _home(tester, chave);
     expect(tester.takeException(), isNull);
-    expect(find.text('Continuar editando'), findsOneWidget);
+    expect(find.text('Novo projeto'), findsOneWidget);
     expect(find.text('Clipe da campanha'), findsOneWidget);
     await gravarPrint(tester, chave, 'redesign-inicio');
     await tester.pump(const Duration(seconds: 1));
   });
 
-  testWidgets('Home rolada: a barra compacta com blur assume', (tester) async {
+  testWidgets('Home rolada: o topo fica, a lista rola, sem blur', (
+    tester,
+  ) async {
     final chave = GlobalKey();
     await _home(tester, chave);
     await tester.drag(find.byType(CustomScrollView), const Offset(0, -520));
     await tester.pump(const Duration(milliseconds: 250));
-    expect(find.byType(BackdropFilter), findsWidgets);
+    expect(tester.takeException(), isNull);
+    expect(find.text('AUREA'), findsOneWidget);
+    expect(find.byType(BackdropFilter), findsNothing);
     await gravarPrint(tester, chave, 'redesign-inicio-rolada');
     await tester.pump(const Duration(seconds: 1));
   });

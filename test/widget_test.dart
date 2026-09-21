@@ -4,6 +4,7 @@ import 'package:aurea/src/features/projects/presentation/boas_vindas.dart';
 import 'dart:convert';
 
 import 'package:aurea/src/features/community/application/conta_da_comunidade.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -37,10 +38,14 @@ void main() {
       ),
     );
 
-    expect(find.text('Aurea'), findsOneWidget);
+    expect(find.text('AUREA'), findsOneWidget);
     expect(find.text('Novo projeto'), findsOneWidget);
     expect(find.text('Ajustes'), findsOneWidget);
     expect(find.text('Perfil'), findsOneWidget);
+    // A aba Sobre nao esta na barra: a porta dela e o menu da Inicio.
+    await tester.tap(find.byKey(const ValueKey('home-menu')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('Sobre'), findsOneWidget);
   });
 }

@@ -86,6 +86,26 @@ class ProjectRepository {
     await Future.wait(_writes.values.toList());
   }
 
+  /// QUANDO O PROJETO FOI GRAVADO PELA ULTIMA VEZ — a "ultima edicao" que
+  /// a Inicio mostra no cartao.
+  ///
+  /// O modelo nao guarda essa data (so `createdAt`), e o arquivo e gravado
+  /// a cada edicao: a data dele E a ultima edicao. Mora aqui porque so o
+  /// repositorio sabe onde o arquivo fica. Um `stat` sincrono, barato;
+  /// nulo enquanto a pasta nao e conhecida (antes do primeiro [loadAll])
+  /// ou o arquivo ainda nao existe.
+  DateTime? editadoEm(String id) {
+    final dir = _cached;
+    if (dir == null) return null;
+    try {
+      final stat = File('${dir.path}/${_safeId(id)}.json').statSync();
+      if (stat.type == FileSystemEntityType.notFound) return null;
+      return stat.modified;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// A pasta dos PESOS: um arquivo por modelo importado, ao lado dos
   /// projetos. Um modelo nao muda depois de importado, entao ele e
   /// escrito uma vez e nunca mais — e o salvamento automatico volta a

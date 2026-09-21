@@ -1,14 +1,14 @@
 import 'dart:async';
-import 'dart:ui';
 
 import 'package:flutter/cupertino.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' show Scaffold;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/l10n/app_language.dart';
 import '../../../core/storage/prefs.dart';
-import '../../../core/theme/app_theme.dart';
+import '../../../core/ds/ds.dart';
+import '../../../core/ui/tocavel.dart';
 import '../../about/presentation/about_tab.dart';
 import '../../community/presentation/community_tab.dart';
 import '../../settings/presentation/settings_tab.dart';
@@ -22,14 +22,11 @@ import 'release_notice.dart';
 final homeTabProvider = StateProvider<int>((ref) => 0);
 final novoProjetoSolicitadoProvider = StateProvider<int>((ref) => 0);
 
-/// Casca principal: abas com tab bar translucida estilo iOS
-/// (blur + hairline, conteudo rolando por baixo).
+/// Casca principal: as abas e o "+" de criar no meio da barra.
 ///
-/// Otimizacoes vs. versao anterior:
 /// - filhos do [IndexedStack] com [PageStorageKey]: o scroll de cada aba
 ///   sobrevive a troca sem reconstruir a lista do zero;
-/// - o blur da tab bar vive dentro de um [RepaintBoundary]: o backdrop
-///   so repinta quando a barreira muda, nao a cada frame do conteudo;
+/// - a barra e chapada (tom, sem blur): nada de passe de GPU por quadro;
 /// - [_TabItem] e const e nao aloca estilo por build (estilos estaticos).
 class HomeShell extends ConsumerStatefulWidget {
   const HomeShell({super.key});
@@ -125,7 +122,6 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   Widget build(BuildContext context) {
     final index = ref.watch(homeTabProvider);
     return Scaffold(
-      extendBody: true,
       body: Column(
         children: [
           // O AVISO AO VIVO fica ACIMA das abas: e a unica coisa que o
@@ -142,58 +138,63 @@ class _HomeShellState extends ConsumerState<HomeShell> {
           ),
         ],
       ),
-      bottomNavigationBar: RepaintBoundary(
-        child: ClipRect(
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-            child: Container(
-              decoration: BoxDecoration(
-                color: AppColors.background.withValues(alpha: 0.72),
-                border: Border(
-                  top: BorderSide(color: AppColors.hairline, width: 0.5),
-                ),
-              ),
-              child: SafeArea(
-                top: false,
-                child: SizedBox(
-                  height: 54,
-                  child: Row(
-                    children: [
-                      for (final i in const [0, 1, -1, 3, 2])
-                        Expanded(
-                          child: i == -1
-                              ? Center(
-                                  child: SizedBox(
-                                    width: 46,
-                                    height: 46,
-                                    child: IconButton.filled(
-                                      key: const ValueKey('home-criar'),
-                                      tooltip: 'Criar projeto',
-                                      onPressed: () {
-                                        _select(0);
-                                        ref
-                                            .read(
-                                              novoProjetoSolicitadoProvider
-                                                  .notifier,
-                                            )
-                                            .state++;
-                                      },
-                                      icon: const Icon(Icons.add, size: 29),
+      // A BARRA DE ABAS E CHAPADA: tom de palco (o mais fundo) abaixo do
+      // cromo das abas, sem blur e sem linha. O blur custava um passe de
+      // GPU inteiro a cada quadro de rolagem, so para um vidro que a
+      // separacao por tom ja resolve.
+      bottomNavigationBar: ColoredBox(
+        color: AureaCores.palco,
+        child: SafeArea(
+          top: false,
+          child: SizedBox(
+            height: 54,
+            child: Row(
+              children: [
+                for (final i in const [0, 1, -1, 3, 2])
+                  Expanded(
+                    child: i == -1
+                        ? Center(
+                            child: Semantics(
+                              button: true,
+                              label: translate(context, 'Criar projeto'),
+                              child: Tocavel(
+                                key: const ValueKey('home-criar'),
+                                haptico: true,
+                                onTap: () {
+                                  _select(0);
+                                  ref
+                                      .read(
+                                        novoProjetoSolicitadoProvider.notifier,
+                                      )
+                                      .state++;
+                                },
+                                child: Container(
+                                  width: 52,
+                                  height: 34,
+                                  decoration: BoxDecoration(
+                                    color: AureaCores.acao,
+                                    borderRadius: BorderRadius.circular(
+                                      AureaDims.raioPilula,
                                     ),
                                   ),
-                                )
-                              : _TabItem(
-                                  icon: _tabs[i].icon,
-                                  activeIcon: _tabs[i].active,
-                                  label: _tabs[i].label,
-                                  selected: i == index,
-                                  onTap: () => _select(i),
+                                  child: Icon(
+                                    CupertinoIcons.plus,
+                                    size: AureaDims.iconeLg,
+                                    color: AureaCores.sobreAcao,
+                                  ),
                                 ),
-                        ),
-                    ],
+                              ),
+                            ),
+                          )
+                        : _TabItem(
+                            icon: _tabs[i].icon,
+                            activeIcon: _tabs[i].active,
+                            label: _tabs[i].label,
+                            selected: i == index,
+                            onTap: () => _select(i),
+                          ),
                   ),
-                ),
-              ),
+              ],
             ),
           ),
         ),
@@ -231,7 +232,7 @@ class _TabItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = selected ? AppColors.lime : AppColors.muted;
+    final color = selected ? AureaCores.destaque : AureaCores.textoSecundario;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,

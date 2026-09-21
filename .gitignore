@@ -1,13 +1,64 @@
-# ---- Build ----
-/build
-/android/.gradle
-/android/.kotlin
-/android/app/.cxx
+# =============================================================================
+#  O que NUNCA entra no repositório.
+#
+#  O Aurea antigo chegou a ~50 GB de pasta com builds, caches do Flutter,
+#  APKs e exports de teste misturados ao código. Tudo aqui é regenerável ou
+#  pessoal; se um artefato precisar mesmo de versão, ele entra com exceção
+#  explícita (`!caminho`) e um comentário dizendo por quê.
+# =============================================================================
+
+# ---- Build (qualquer nível) ----
+build/
+out/
+dist/
+.gradle/
+.kotlin/
+.cxx/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
 /engine/build
+generated/
+intermediates/
+obj/
 *.class
 *.o
+*.obj
 *.so
 *.a
+*.lib
+*.pdb
+*.dll
+*.exe
+
+# ---- Pacotes gerados ----
+*.apk
+*.aab
+*.ipa
+*.apks
+*.dSYM/
+
+# ---- Caches, temporários e saídas de teste ----
+cache/
+.cache/
+tmp/
+temp/
+logs/
+*.log
+proxies/
+thumbnails/
+render-cache/
+test-output/
+test_output/
+*.tmp
+*.bak
+
+# ---- Mídia de teste gerada (use referências, não cópias) ----
+*.mp4
+*.mov
+*.mkv
+*.webm
+!engine/tests/golden/**
 
 # ---- Android: assinatura e caminhos locais ----
 # A keystore e o key.properties NUNCA vão para o repositório. Ver
@@ -20,16 +71,18 @@ key.properties
 # ---- iOS ----
 ios/Pods/
 ios/build/
-ios/DerivedData/
+DerivedData/
 *.xcuserstate
 xcuserdata/
 
-# ---- IDE ----
+# ---- Ferramentas locais ----
+.claude/worktrees/
+.claude/settings.local.json
 .idea/
 *.iml
 .vscode/
-.cache/
 
 # ---- Sistema ----
 .DS_Store
 Thumbs.db
+desktop.ini

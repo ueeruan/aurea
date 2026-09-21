@@ -11,11 +11,16 @@ import '../../../help/presentation/quick_guide_screen.dart';
 import '../../application/editor_controller.dart';
 import '../../application/effect_preset_store.dart';
 import '../../application/playback_controller.dart';
+import '../../application/interacao.dart';
 import '../../application/ui/pro_mode.dart';
+import '../../domain/animador_de_texto.dart';
 import '../../domain/effect.dart';
 import '../../domain/effect_preset.dart';
+import '../../domain/keyframe.dart';
 import '../../domain/layer.dart';
+import '../../domain/text_animator.dart';
 import '../context/effects/effect_gallery.dart';
+import '../context/parameter_row.dart';
 import '../widgets/campo_de_valor.dart';
 import '../widgets/linha_de_parametro.dart';
 import '../widgets/rails_do_painel.dart';
@@ -132,6 +137,13 @@ class _EffectsPanelState extends ConsumerState<EffectsPanel> {
   /// RESETAR os parametros no instante atual, num desfazer so. O tempo e
   /// lido NO TOQUE: o painel nao pausa a reproducao.
   void _resetarEfeito(String layerId, EffectInstance effect) {
+    // RESETAR O TIME REMAP E VOLTAR A IDENTIDADE, nao zerar o parametro:
+    // o `initial` de `tempo` e 0 segundo, e crava-lo no instante atual
+    // deixaria o clipe inteiro parado no primeiro quadro.
+    if (effect.type == EffectType.timeRemap) {
+      _controller.resetarCurvaDeTempo(layerId);
+      return;
+    }
     final agora = widget.playback.time.value;
     _controller.beginGesture();
     try {
@@ -198,6 +210,10 @@ class _EffectsPanelState extends ConsumerState<EffectsPanel> {
             ),
           );
         }
+        // O TIME REMAP TEM UMA TRILHA SO, a do motor. Duplicar,
+        // empilhar como preset ou assar nao significam nada nela — o
+        // clipe tem UM mapeamento de tempo, nao dois.
+        final remap = effect.type == EffectType.timeRemap;
         return CupertinoActionSheet(
           title: AppText(effect.spec.name),
           actions: [
@@ -205,13 +221,16 @@ class _EffectsPanelState extends ConsumerState<EffectsPanel> {
               'ligar',
               effect.enabled ? 'Desativar efeito' : 'Ativar efeito',
             ),
-            item('duplicar', 'Duplicar'),
+            if (!remap) item('duplicar', 'Duplicar'),
             if (posicao > 0) item('subir', 'Mover para cima'),
             if (posicao < total - 1) item('descer', 'Mover para baixo'),
             item('resetar', 'Resetar'),
-            item('salvar', 'Salvar como preset'),
-            item('presets', 'Meus presets'),
-            if (pro && effect.spec.procedural)
+            // O ESTUDIO DO TEMPO continua aqui dentro, para quem quer
+            // desenhar a curva com o dedo. A porta OFICIAL e o cartao.
+            if (remap) item('estudio', 'Abrir o Estúdio do tempo'),
+            if (!remap) item('salvar', 'Salvar como preset'),
+            if (!remap) item('presets', 'Meus presets'),
+            if (pro && !remap && effect.spec.procedural)
               item('assar', 'Assar em keyframes'),
             item('ajuda', 'Como usar este efeito'),
           ],
@@ -243,6 +262,8 @@ class _EffectsPanelState extends ConsumerState<EffectsPanel> {
         );
       case 'resetar':
         _resetarEfeito(layer.id, effect);
+      case 'estudio':
+        await showEstudioDoTempo(context, ref, layer.id, widget.playback);
       case 'salvar':
         await _salvarComoPreset(context, layer.id, effect);
       case 'presets':
@@ -341,13 +362,12 @@ class _EffectsPanelState extends ConsumerState<EffectsPanel> {
                     alvoFinal.id,
                     widget.playback.time.value,
                   ),
-            // O TIME REMAP TEM UM EDITOR SO. O cartao dele abria a folha de
-            // curva generica, e a folha Tempo abre o Estudio do tempo:
-            // dois editores para a mesma trilha divergem (so o estudio
-            // sabe congelar, reverter por trecho e mostrar a velocidade).
-            aoAbrirCurva: alvoFinal?.type == EffectType.timeRemap
-                ? () => showEstudioDoTempo(context, ref, id, widget.playback)
-                : alvoFinal == null || !alvoFinal.hasAnimation
+            // UM EDITOR DE CURVA SO NO APLICATIVO INTEIRO (20/09, pedido
+            // do dono). O Time Remap abria aqui um estudio proprio; agora
+            // a trilha `tempo` vai para o MESMO grafico de qualquer
+            // propriedade — que ja tem a aba de velocidade. O estudio
+            // continua a um toque, no menu ••• do cartao.
+            aoAbrirCurva: alvoFinal == null || !alvoFinal.hasAnimation
                 ? null
                 : () => showTrackCurveSheet(
                     context,
@@ -405,9 +425,21 @@ class _EffectsPanelState extends ConsumerState<EffectsPanel> {
                         key: ValueKey(layer.effects[i].id),
                         index: v,
                         effect: layer.effects[i],
+                        // O CARTAO DO TIME REMAP: Speed antes do Time (a
+                        // ordem que o dono pediu) e Frame, Reverse,
+                        // Freeze e Interpolacao depois — todos nas linhas
+                        // dos outros cartoes.
+                        extraAntes:
+                            layer.effects[i].type == EffectType.timeRemap
+                            ? _LinhaDaVelocidadeDoTempo(
+                                layerId: id,
+                                playback: widget.playback,
+                              )
+                            : null,
                         extra: layer.effects[i].type == EffectType.timeRemap
                             ? _OpcoesTimeRemap(
                                 layerId: id,
+                                effectId: layer.effects[i].id,
                                 playback: widget.playback,
                               )
                             : null,
@@ -484,6 +516,20 @@ class _Rodape extends ConsumerWidget {
     final controller = ref.read(editorControllerProvider.notifier);
     return Column(
       children: [
+        // O ANIMADOR DE TEXTO E UM EFEITO DA PILHA. Ele nao mora em
+        // `layer.effects` (o motor dele e por unidade de texto, nao um
+        // passe de pixel), mas para quem usa e a mesma coisa: um cartao
+        // que abre, com os mesmos parametros e o mesmo losango.
+        if (layer is TextLayer)
+          for (final a in layer.animators)
+            if (ehAnimadorDeTexto(a))
+              _CartaoDoAnimador(
+                key: ValueKey('animador-${a.id}'),
+                layerId: layerId,
+                animator: a,
+                local: local,
+                playback: playback,
+              ),
         if (layer is AdjustmentLayer)
           Container(
             key: const ValueKey('adjustment-opacity-effects'),
@@ -596,95 +642,138 @@ class _Rodape extends ConsumerWidget {
   }
 }
 
-/// The time curve remains in the layer model, with the same parameter rows
-/// and colors as the other effects. The graph editor edits this exact track.
+/// AS LINHAS DO TIME REMAP QUE VEM DEPOIS DO "Time": Frame, Reverse,
+/// Freeze e Interpolacao.
+///
+/// Nenhuma delas e um parametro GUARDADO. `tempo` e a unica trilha do
+/// efeito (e a trilha do motor): Frame e ela lida em quadros, Reverse e
+/// Freeze mexem no mapeamento dela, e a interpolacao e um campo da
+/// camada que a exportacao le. Guardar copias dos mesmos fatos daria
+/// duas verdades sobre o mesmo instante.
+///
+/// As linhas sao as MESMAS dos outros cartoes: [LinhaDeParametro],
+/// [_LinhaDeInterruptor] e [_LinhaDeEscolha].
 class _OpcoesTimeRemap extends ConsumerWidget {
-  const _OpcoesTimeRemap({required this.layerId, required this.playback});
+  const _OpcoesTimeRemap({
+    required this.layerId,
+    required this.effectId,
+    required this.playback,
+  });
+
   final String layerId;
+  final String effectId;
   final PlaybackController playback;
+
+  /// O QUE A PESSOA LE NO CARTAO, no vocabulario do After Effects. Os
+  /// quatro modos da camada continuam os mesmos: o quarto e o fluxo
+  /// optico com IA, que ja existia e nao se perde aqui.
+  static const _rotulosDaInterpolacao = <String>[
+    'Frame Sampling',
+    'Frame Blending',
+    'Optical Flow',
+    'Optical Flow IA',
+  ];
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final layer = ref.watch(editorControllerProvider).layerById(layerId);
     if (layer is! VideoLayer) return const SizedBox.shrink();
     final c = ref.read(editorControllerProvider.notifier);
+    final agora = playback.time.value;
+    final congelado = c.timeRemapCongeladoEm(layerId, agora);
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // A MESMA PORTA da folha Tempo: o numero cru do parametro "tempo"
-        // nao e jeito de editar uma curva de tempo.
-        Padding(
-          padding: const EdgeInsets.only(top: 4, bottom: 6),
-          child: Tocavel(
-            key: const ValueKey('efeito-time-remap-abrir'),
-            haptico: true,
-            onTap: () => showEstudioDoTempo(context, ref, layerId, playback),
-            child: Container(
-              height: 40,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: AmColors.action,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.show_chart_rounded,
-                    size: 17,
-                    color: AmColors.onAction,
-                  ),
-                  const SizedBox(width: 8),
-                  AppText(
-                    'Abrir o editor de curva',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: AmColors.onAction,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+        // FRAME: a mesma trilha `tempo`, em quadros. Quem conta quadro
+        // nao quer dividir por 30 de cabeca.
+        LinhaDeParametro(
+          key: const ValueKey('time-remap-frame'),
+          rotulo: 'Frame',
+          nome: 'Quadro da fonte',
+          valor: c.timeRemapFrameAt(layerId, agora),
+          porPixel: 0.5,
+          casas: 0,
+          aoComecar: c.beginGesture,
+          aoTerminar: c.endGesture,
+          aoMudar: (v) {
+            Interacao.marcar();
+            c.setTimeRemapFrame(layerId, playback.time.value, v);
+          },
+          aoDigitar: (v) =>
+              c.setTimeRemapFrame(layerId, playback.time.value, v),
+        ),
+        _LinhaDeInterruptor(
+          key: const ValueKey('time-remap-reverse'),
+          rotulo: 'Reverse',
+          valor: layer.reverse,
+          aoMudar: (v) => c.setClipReverse(layerId, v),
+        ),
+        _LinhaDeInterruptor(
+          key: const ValueKey('time-remap-freeze'),
+          rotulo: 'Freeze',
+          valor: congelado,
+          aoMudar: (v) =>
+              c.setTimeRemapFreeze(layerId, playback.time.value, v),
+        ),
+        _LinhaDeEscolha(
+          key: const ValueKey('time-remap-interpolacao'),
+          rotulo: 'Interpolação',
+          opcoes: _rotulosDaInterpolacao,
+          valor: layer.interpolacao.index.clamp(
+            0,
+            _rotulosDaInterpolacao.length - 1,
+          ),
+          aoMudar: (i) => c.setClipInterpolacao(
+            layerId,
+            InterpolacaoDeQuadros.values[i],
           ),
         ),
-        Material(
-          color: Colors.transparent,
-          child: SwitchListTile.adaptive(
-            dense: true,
-            contentPadding: EdgeInsets.zero,
-            title: const AppText(
-              'Manter tom do áudio',
-              style: TextStyle(fontSize: 12, color: AmColors.text),
-            ),
-            value: layer.audio.preservePitch,
-            onChanged: (v) => c.setClipPreservePitch(layerId, v),
-          ),
-        ),
-        Row(
-          children: [
-            const Expanded(
-              child: AppText(
-                'Interpolação',
-                style: TextStyle(fontSize: 12, color: AmColors.text),
-              ),
-            ),
-            DropdownButton<InterpolacaoDeQuadros>(
-              value: layer.interpolacao,
-              dropdownColor: AmColors.panelHigh,
-              style: const TextStyle(color: AmColors.text, fontSize: 12),
-              items: [
-                for (final v in InterpolacaoDeQuadros.values)
-                  DropdownMenuItem(
-                    value: v,
-                    child: AppText(rotuloDaInterpolacao(v)),
-                  ),
-              ],
-              onChanged: (v) {
-                if (v != null) c.setClipInterpolacao(layerId, v);
-              },
-            ),
-          ],
+        _LinhaDeInterruptor(
+          key: const ValueKey('time-remap-tom'),
+          rotulo: 'Manter tom',
+          valor: layer.audio.preservePitch,
+          aoMudar: (v) => c.setClipPreservePitch(layerId, v),
         ),
       ],
+    );
+  }
+}
+
+/// A LINHA "Speed" DO TIME REMAP, antes do "Time".
+///
+/// O numero e a DERIVADA da trilha no cabecote (1 = normal), e nao um
+/// parametro a parte: a velocidade de um remapeamento E a inclinacao da
+/// curva. Arrastar aqui reinclina o trecho seguinte e leva o resto da
+/// curva junto, entao o desenho de depois nao se desmancha.
+class _LinhaDaVelocidadeDoTempo extends ConsumerWidget {
+  const _LinhaDaVelocidadeDoTempo({
+    required this.layerId,
+    required this.playback,
+  });
+
+  final String layerId;
+  final PlaybackController playback;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final layer = ref.watch(editorControllerProvider).layerById(layerId);
+    if (layer is! VideoLayer) return const SizedBox.shrink();
+    final c = ref.read(editorControllerProvider.notifier);
+    return LinhaDeParametro(
+      key: const ValueKey('time-remap-speed'),
+      rotulo: 'Speed',
+      nome: 'Velocidade no cabeçote',
+      valor: c.timeRemapSpeedAt(layerId, playback.time.value),
+      porPixel: 0.01,
+      casas: 2,
+      sufixo: 'x',
+      aoComecar: c.beginGesture,
+      aoTerminar: c.endGesture,
+      aoMudar: (v) {
+        Interacao.marcar();
+        c.setTimeRemapSpeed(layerId, playback.time.value, v);
+      },
+      aoDigitar: (v) => c.setTimeRemapSpeed(layerId, playback.time.value, v),
     );
   }
 }
@@ -707,10 +796,17 @@ class _CartaoDoEfeito extends StatefulWidget {
     required this.onColor,
     required this.onExtraColor,
     this.extra,
+    this.extraAntes,
   });
 
-  /// Posicao entre os visiveis: e o que o arrasto entrega ao reordenar.
+  /// Linhas que a ficha do efeito nao descreve. [extraAntes] entra ANTES
+  /// dos parametros da ficha, [extra] depois — e o que deixa o Time Remap
+  /// abrir em "Speed, Time, Frame" sem inventar um parametro guardado
+  /// para a velocidade.
   final Widget? extra;
+  final Widget? extraAntes;
+
+  /// Posicao entre os visiveis: e o que o arrasto entrega ao reordenar.
   final int index;
   final EffectInstance effect;
   final Duration local;
@@ -952,6 +1048,7 @@ class _CartaoDoEfeitoState extends State<_CartaoDoEfeito> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  if (widget.extraAntes != null) widget.extraAntes!,
                   ..._linhas(),
                   if (widget.extra != null) widget.extra!,
                 ],
@@ -1268,4 +1365,387 @@ class _LinhaDeCor extends StatelessWidget {
       ],
     ),
   );
+}
+
+/// O CARTAO DO ANIMADOR DE TEXTO.
+///
+/// ==========================================================================
+/// POR QUE ELE E UM CARTAO E NAO UM PAINEL
+/// ==========================================================================
+///
+/// O animador tinha painel proprio, com posicoes (entrada/enfase/saida),
+/// grade de miniaturas, modo avancado e seletores montados na mao — um
+/// editor de desktop dentro do celular.
+///
+/// Aqui ele e um efeito como os outros: o MESMO cartao de [_CartaoDoEfeito]
+/// (fundo, raio, cabecalho de 48, triangulo, ••• e 🗑), as MESMAS cabecas de
+/// grupo ([_CabecaDeGrupo]), as MESMAS linhas de escolha ([_LinhaDeEscolha])
+/// e as linhas de parametro da Aurea ([ParameterRow]). Nenhum componente
+/// visual novo.
+///
+/// O LOSANGO E O DA CASA: toda linha animavel — Start, End, Offset, os dois
+/// pesos da curva e as sete propriedades — usa [KeyframeState]. Nao ha
+/// logica de keyframe propria aqui; o losango chama o controlador, que
+/// mexe na mesma `AnimatedDouble` que o resto do app anima.
+class _CartaoDoAnimador extends ConsumerStatefulWidget {
+  const _CartaoDoAnimador({
+    super.key,
+    required this.layerId,
+    required this.animator,
+    required this.local,
+    required this.playback,
+  });
+
+  final String layerId;
+  final TextAnimator animator;
+
+  /// O tempo LOCAL da camada: e nele que os keyframes do animador moram.
+  final Duration local;
+  final PlaybackController playback;
+
+  @override
+  ConsumerState<_CartaoDoAnimador> createState() => _CartaoDoAnimadorState();
+}
+
+class _CartaoDoAnimadorState extends ConsumerState<_CartaoDoAnimador> {
+  /// Recem-aplicado abre sozinho — foi a pessoa que acabou de pedir.
+  bool _aberto = true;
+
+  /// Os grupos abertos. Faixa primeiro: Offset e o numero que faz a
+  /// animacao andar, e e o que se procura antes de tudo.
+  final _grupos = <String>{'Faixa'};
+
+  EditorController get _c => ref.read(editorControllerProvider.notifier);
+  TextAnimator get _a => widget.animator;
+  Duration get _agora => widget.playback.time.value;
+
+  void _alternarGrupo(String rotulo) => setState(() {
+    if (!_grupos.remove(rotulo)) _grupos.add(rotulo);
+  });
+
+  Future<void> _menu() async {
+    final acao = await showCupertinoModalPopup<String>(
+      context: context,
+      builder: (c) {
+        CupertinoActionSheetAction item(
+          String id,
+          String rotulo, {
+          bool destrutivo = false,
+        }) => CupertinoActionSheetAction(
+          key: ValueKey('animador-menu-$id'),
+          isDestructiveAction: destrutivo,
+          onPressed: () => Navigator.of(c).pop(id),
+          child: AppText(rotulo),
+        );
+        return CupertinoActionSheet(
+          title: const AppText(nomeDoAnimadorDeTexto),
+          actions: [
+            item('ligar', _a.enabled ? 'Desativar efeito' : 'Ativar efeito'),
+            item('resetar', 'Resetar'),
+            item('remover', 'Remover efeito', destrutivo: true),
+          ],
+          cancelButton: CupertinoActionSheetAction(
+            onPressed: () => Navigator.of(c).pop(),
+            child: const AppText('Cancelar'),
+          ),
+        );
+      },
+    );
+    switch (acao) {
+      case 'ligar':
+        _c.toggleTextAnimator(widget.layerId, _a.id);
+      case 'resetar':
+        _c.aplicarPresetNoAnimador(
+          widget.layerId,
+          _a.id,
+          presetsDoAnimador.firstWhere((p) => p.id == presetPadraoDoAnimador),
+        );
+      case 'remover':
+        _c.removeTextAnimator(widget.layerId, _a.id);
+    }
+  }
+
+  // ---------------------------------------------------------- as linhas
+
+  /// Uma linha do SELETOR (Start, End, Offset, Ease High, Ease Low).
+  ///
+  /// O motor guarda fracao (0..1) e a tela fala porcentagem, entao a
+  /// conversao acontece nas duas pontas — e so aqui.
+  Widget _linhaDaFaixa(
+    RangeSelector faixa,
+    String chave,
+    String rotulo,
+    AnimatedDouble trilha, {
+    required double min,
+    required double max,
+    bool porcento = true,
+  }) {
+    final valor = porcento
+        ? fracaoParaPorcento(trilha.valueAt(widget.local))
+        : trilha.valueAt(widget.local);
+    return ParameterRow(
+      key: ValueKey('animador-${_a.id}-$chave'),
+      label: rotulo,
+      value: valor,
+      min: min,
+      max: max,
+      unitsPerPixel: (max - min) / 420,
+      decimals: 0,
+      unit: '%',
+      keyframe: KeyframeState(
+        animated: trilha.isAnimated,
+        here: trilha.hasKeyframeAt(widget.local),
+        onToggle: () => _c.toggleSelectorParamKeyframe(
+          widget.layerId,
+          _a.id,
+          faixa.id,
+          chave,
+          _agora,
+        ),
+      ),
+      onChanged: (v) {
+        Interacao.marcar();
+        _c.editSelectorParam(
+          widget.layerId,
+          _a.id,
+          faixa.id,
+          chave,
+          _agora,
+          porcento ? porcentoParaFracao(v.clamp(min, max)) : v.clamp(min, max),
+        );
+      },
+    );
+  }
+
+  /// Uma PROPRIEDADE ANIMAVEL (Posicao, Escala, Rotacao, Opacidade,
+  /// Espacamento, Desfoque). Aparece sempre, mesmo antes de existir: o
+  /// valor mostrado e o neutro, e a primeira mexida a cria.
+  Widget _linhaDaPropriedade(TextAnimProp tipo) {
+    final trilha = propriedadeDoAnimador(_a, tipo)?.value;
+    final (min, max) = faixaDaPropriedade(tipo);
+    final valor = trilha?.valueAt(widget.local) ?? neutroDaPropriedade(tipo);
+    return ParameterRow(
+      key: ValueKey('animador-${_a.id}-prop-${tipo.name}'),
+      label: textAnimPropLabel(tipo),
+      value: valor,
+      min: min,
+      max: max,
+      unitsPerPixel: (max - min) / 420,
+      decimals: 0,
+      unit: unidadeDaPropriedade(tipo),
+      keyframe: KeyframeState(
+        animated: trilha?.isAnimated ?? false,
+        here: trilha?.hasKeyframeAt(widget.local) ?? false,
+        onToggle: () =>
+            _c.toggleAnimadorPropKeyframe(widget.layerId, _a.id, tipo, _agora),
+      ),
+      onReset: () => _c.editAnimadorProp(
+        widget.layerId,
+        _a.id,
+        tipo,
+        _agora,
+        neutroDaPropriedade(tipo),
+      ),
+      onChanged: (v) {
+        Interacao.marcar();
+        _c.editAnimadorProp(
+          widget.layerId,
+          _a.id,
+          tipo,
+          _agora,
+          v.clamp(min, max),
+        );
+      },
+    );
+  }
+
+  List<Widget> _corpo(RangeSelector faixa) {
+    final linhas = <Widget>[];
+
+    // PRESETS: dez receitas do mesmo motor. A escolha e a mesma linha de
+    // escolha dos parametros de efeito — nao ha grade nova.
+    linhas.add(
+      _LinhaDeEscolha(
+        key: ValueKey('animador-${_a.id}-preset'),
+        rotulo: 'Preset',
+        opcoes: [for (final p in presetsDoAnimador) p.nome],
+        valor: presetsDoAnimador.indexWhere((p) => p.nome == _a.name),
+        aoMudar: (i) => _c.aplicarPresetNoAnimador(
+          widget.layerId,
+          _a.id,
+          presetsDoAnimador[i],
+        ),
+      ),
+    );
+
+    void grupo(String rotulo, List<Widget> Function() filhos) {
+      final aberto = _grupos.contains(rotulo);
+      linhas.add(
+        _CabecaDeGrupo(
+          key: ValueKey('animador-grupo-${_a.id}-$rotulo'),
+          rotulo: rotulo,
+          aberto: aberto,
+          aoTocar: () => _alternarGrupo(rotulo),
+        ),
+      );
+      if (aberto) linhas.addAll(filhos());
+    }
+
+    grupo('Faixa', () {
+      return [
+        _linhaDaFaixa(faixa, 'start', 'Start', faixa.start, min: 0, max: 100),
+        _linhaDaFaixa(faixa, 'end', 'End', faixa.end, min: 0, max: 100),
+        // O OFFSET E O QUE FAZ A ANIMACAO ANDAR: de -100 a 100 a janela
+        // atravessa a frase inteira, unidade por unidade.
+        _linhaDaFaixa(
+          faixa,
+          'offset',
+          'Offset',
+          faixa.offset,
+          min: -100,
+          max: 100,
+        ),
+        _LinhaDeEscolha(
+          key: ValueKey('animador-${_a.id}-unidade'),
+          rotulo: 'Unidade',
+          opcoes: [for (final u in unidadesDoAnimador) rotuloDaUnidade(u)],
+          valor: unidadesDoAnimador.indexOf(faixa.basedOn),
+          aoMudar: (i) => _c.setAnimadorUnidade(
+            widget.layerId,
+            _a.id,
+            unidadesDoAnimador[i],
+          ),
+        ),
+        _LinhaDeEscolha(
+          key: ValueKey('animador-${_a.id}-forma'),
+          rotulo: 'Forma',
+          opcoes: [for (final s in formasDoAnimador) rotuloDaForma(s)],
+          valor: formasDoAnimador.indexOf(faixa.shape),
+          aoMudar: (i) => _c.setRangeSelectorShape(
+            widget.layerId,
+            _a.id,
+            faixa.id,
+            formasDoAnimador[i],
+          ),
+        ),
+      ];
+    });
+
+    grupo('Easing', () {
+      return [
+        _linhaDaFaixa(
+          faixa,
+          'easeHigh',
+          'Ease High',
+          faixa.easeHigh,
+          min: -100,
+          max: 100,
+          porcento: false,
+        ),
+        _linhaDaFaixa(
+          faixa,
+          'easeLow',
+          'Ease Low',
+          faixa.easeLow,
+          min: -100,
+          max: 100,
+          porcento: false,
+        ),
+      ];
+    });
+
+    grupo('Propriedades', () {
+      return [for (final p in propriedadesDoAnimador) _linhaDaPropriedade(p)];
+    });
+
+    return linhas;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final faixa = faixaDoAnimador(_a);
+    if (faixa == null) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.fromLTRB(10, 2, 6, 8),
+      decoration: BoxDecoration(
+        color: AmColors.panelHigh,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SizedBox(
+            height: 48,
+            child: Row(
+              children: [
+                Expanded(
+                  child: Tocavel(
+                    key: ValueKey('animador-cabecalho-${_a.id}'),
+                    encolhe: 1,
+                    onTap: () => setState(() => _aberto = !_aberto),
+                    child: Row(
+                      children: [
+                        Icon(
+                          _aberto
+                              ? CupertinoIcons.arrowtriangle_down_fill
+                              : CupertinoIcons.arrowtriangle_right_fill,
+                          size: 13,
+                          color: AmColors.text,
+                        ),
+                        const SizedBox(width: 12),
+                        Flexible(
+                          child: Opacity(
+                            opacity: _a.enabled ? 1 : .45,
+                            child: const AppText(
+                              nomeDoAnimadorDeTexto,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.w600,
+                                color: AmColors.text,
+                              ),
+                            ),
+                          ),
+                        ),
+                        if (!_a.enabled) ...[
+                          const SizedBox(width: 8),
+                          const Icon(
+                            CupertinoIcons.eye_slash,
+                            size: 16,
+                            color: AmColors.muted,
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+                _BotaoDoCabecalho(
+                  key: ValueKey('animador-menu-${_a.id}'),
+                  rotulo: 'Mais opcoes do efeito',
+                  icone: CupertinoIcons.ellipsis,
+                  aoTocar: _menu,
+                ),
+                _BotaoDoCabecalho(
+                  key: ValueKey('animador-remover-${_a.id}'),
+                  rotulo: 'Remover efeito',
+                  icone: CupertinoIcons.trash,
+                  aoTocar: () => _c.removeTextAnimator(widget.layerId, _a.id),
+                ),
+              ],
+            ),
+          ),
+          if (_aberto)
+            Opacity(
+              opacity: _a.enabled ? 1 : .45,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: _corpo(faixa),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 }

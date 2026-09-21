@@ -134,9 +134,12 @@ Future<_Quadro> _desenharShader({
       ..setFloat(9, fase)
       ..setFloat(10, 0) // uHorizontal
       ..setFloat(11, 0) // uFilter (host sem Impeller: orientacao ja certa)
-      // uClamp E O ULTIMO, e nao pode sair do lugar: `setFloat` endereca
-      // por ordem de declaracao.
       ..setFloat(12, estica)
+      // uMeioTexel E O ULTIMO, e nao pode sair do lugar: `setFloat`
+      // endereca por ordem de declaracao. Aqui a textura e a propria fonte
+      // no tamanho dela, entao meio texel e meio pixel de camada.
+      ..setFloat(13, .5 / fonte.width)
+      ..setFloat(14, .5 / fonte.height)
       ..setImageSampler(0, fonte);
     final gravador = ui.PictureRecorder();
     ui.Canvas(gravador).drawRect(

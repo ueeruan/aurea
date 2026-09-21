@@ -39,6 +39,7 @@ class Gizmo3DPainter extends CustomPainter {
     this.aneis = true,
     this.alcaDeEscala = false,
     this.escalaEmUso = false,
+    this.pontaQuadrada = false,
     this.pixelsPorUnidade = 1,
   });
 
@@ -68,6 +69,15 @@ class Gizmo3DPainter extends CustomPainter {
   final bool aneis;
   final bool alcaDeEscala;
   final bool escalaEmUso;
+
+  /// A PONTA DO BRACO E UM CUBO, E NAO UMA SETA.
+  ///
+  /// A seta promete DIRECAO ("ando para la"); o cubo promete TAMANHO
+  /// ("estico deste lado"). E a convencao de toda ferramenta 3D, e aqui
+  /// ela nao e enfeite: no modo Escalar os mesmos tres bracos respondem a
+  /// outra coisa, e a ponta e o unico lugar em que isso se ve antes de o
+  /// dedo descobrir arrastando.
+  final bool pontaQuadrada;
 
   /// QUANTOS PIXELS DE COMPOSICAO VALE UMA UNIDADE DA PROPRIEDADE.
   ///
@@ -163,22 +173,43 @@ class Gizmo3DPainter extends CustomPainter {
 
       // O CONE DA PONTA: diz o SENTIDO do eixo. Sem ele, um eixo so de
       // traco nao distingue +X de -X — e a pessoa arrasta para o lado
-      // errado.
+      // errado. No modo Escalar a ponta vira CUBO (ver [pontaQuadrada]).
       if (visivel && ativo) {
         final u = _direcaoNaTela(e);
-        final n = Offset(-u.dy, u.dx);
-        final c = 9 / _e;
-        final l = 5.5 / _e;
-        canvas.drawPath(
-          Path()
-            ..moveTo(ponta.dx + u.dx * c, ponta.dy + u.dy * c)
-            ..lineTo(ponta.dx + n.dx * l, ponta.dy + n.dy * l)
-            ..lineTo(ponta.dx - n.dx * l, ponta.dy - n.dy * l)
-            ..close(),
-          Paint()
-            ..color = cor.withValues(alpha: alfa)
-            ..isAntiAlias = true,
-        );
+        final tinta = Paint()
+          ..color = cor.withValues(alpha: alfa)
+          ..isAntiAlias = true;
+        if (pontaQuadrada) {
+          final lado = (emUso ? 13.0 : 11.0) / _e;
+          canvas.drawRect(
+            Rect.fromCenter(
+              center: ponta + u * (lado / 2),
+              width: lado,
+              height: lado,
+            ).inflate(1.5 / _e),
+            Paint()..color = Colors.black.withValues(alpha: alfa * 0.6),
+          );
+          canvas.drawRect(
+            Rect.fromCenter(
+              center: ponta + u * (lado / 2),
+              width: lado,
+              height: lado,
+            ),
+            tinta,
+          );
+        } else {
+          final n = Offset(-u.dy, u.dx);
+          final c = 9 / _e;
+          final l = 5.5 / _e;
+          canvas.drawPath(
+            Path()
+              ..moveTo(ponta.dx + u.dx * c, ponta.dy + u.dy * c)
+              ..lineTo(ponta.dx + n.dx * l, ponta.dy + n.dy * l)
+              ..lineTo(ponta.dx - n.dx * l, ponta.dy - n.dy * l)
+              ..close(),
+            tinta,
+          );
+        }
       }
 
       if (visivel) {
@@ -186,19 +217,27 @@ class Gizmo3DPainter extends CustomPainter {
       }
     }
 
-    // A ALCA DE ESCALA: um quadrado branco na diagonal, no mesmo raio do
-    // braco. Quadrado, e nao circulo, porque circulo ja e o ponto central
-    // — dois circulos no mesmo gizmo seriam a mesma promessa duas vezes.
+    // A ALCA DA ESCALA UNIFORME: um quadrado BRANCO na diagonal, fora dos
+    // bracos (que ficam nos eixos) e fora do ponto central, para o dedo
+    // nao disputar com nenhum dos dois. Branco porque ela nao e de eixo
+    // nenhum — e a unica alca do gizmo que mexe nos tres de uma vez.
+    //
+    // MAIOR QUE AS PONTAS DE EIXO (14 px de tela contra 11): no modo
+    // Escalar os quatro alvos convivem, e o que faz mais coisa tem de ser
+    // o mais facil de acertar.
     if (alcaDeEscala) {
       final p = pontoDaAlcaDeEscala(gizmo, comprimento, escala);
-      final lado = (escalaEmUso ? 13.0 : 10.0) / _e;
+      final lado = (escalaEmUso ? 18.0 : 14.0) / _e;
       final caixa = Rect.fromCenter(center: p, width: lado, height: lado);
-      canvas.drawRect(
-        caixa.inflate(1.5 / _e),
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          caixa.inflate(2 / _e),
+          Radius.circular(3 / _e),
+        ),
         Paint()..color = Colors.black.withValues(alpha: ativo ? 0.6 : 0.25),
       );
-      canvas.drawRect(
-        caixa,
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(caixa, Radius.circular(2.5 / _e)),
         Paint()
           ..color = Colors.white.withValues(alpha: ativo ? 0.95 : 0.3),
       );
@@ -272,6 +311,7 @@ class Gizmo3DPainter extends CustomPainter {
       old.aneis != aneis ||
       old.alcaDeEscala != alcaDeEscala ||
       old.escalaEmUso != escalaEmUso ||
+      old.pontaQuadrada != pontaQuadrada ||
       old.pixelsPorUnidade != pixelsPorUnidade;
 }
 

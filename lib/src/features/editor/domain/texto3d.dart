@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:characters/characters.dart';
 
 import 'fonte_truetype.dart';
+import 'keyframe.dart';
 
 /// TEXTO 3D, O DO ELEMENT 3D: letra extrudada, com chanfro e tres
 /// materiais (frente, chanfro e lateral).
@@ -19,6 +20,208 @@ import 'fonte_truetype.dart';
 
 /// Como a borda da letra e cortada.
 enum TipoDeChanfro { nenhum, angular, redondo }
+
+// ------------------------------------------- ajuste por caractere
+
+/// AS NOVE MEDIDAS DE UM AJUSTE POR CARACTERE.
+///
+/// Sao as mesmas de uma transformacao de camada, mais as duas que so
+/// existem em texto: o espacamento (que abre a faixa letra a letra) e o
+/// offset (que desliza a faixa inteira pela linha do texto).
+enum MedidaDoCaractere { x, y, z, girX, girY, girZ, escala, espacamento, offset }
+
+/// O VALOR DE REPOUSO de cada medida: escala nasce em 1, o resto em zero.
+double padraoDaMedida(MedidaDoCaractere m) =>
+    m == MedidaDoCaractere.escala ? 1 : 0;
+
+String rotuloDaMedida(MedidaDoCaractere m) => switch (m) {
+  MedidaDoCaractere.x => 'Posição X',
+  MedidaDoCaractere.y => 'Posição Y',
+  MedidaDoCaractere.z => 'Posição Z',
+  MedidaDoCaractere.girX => 'Rotação X',
+  MedidaDoCaractere.girY => 'Rotação Y',
+  MedidaDoCaractere.girZ => 'Rotação Z',
+  MedidaDoCaractere.escala => 'Escala',
+  MedidaDoCaractere.espacamento => 'Espaçamento',
+  MedidaDoCaractere.offset => 'Offset',
+};
+
+/// MOVER LETRAS SOLTAS DENTRO DE UM TEXTO 3D.
+///
+/// ======================= POR QUE UMA FAIXA, E NAO UMA LETRA ============
+///
+/// O giro por letra ([Texto3D.rotLetraX] e irmaos) vale para TODAS as
+/// letras de uma vez — e o "Per-character 3D" do After Effects. Faltava o
+/// contrario: empurrar SO o "C" de "ABCDE" no eixo Z, ou mexer so em
+/// "BCD". Guardar um ajuste por letra inchava o projeto e quebrava quando
+/// o dono trocava a palavra; guardar uma FAIXA ([inicio]..[fim]) diz o que
+/// a pessoa quis ("estas tres letras") e sobrevive a edicao do texto.
+///
+/// [inicio] e [fim] sao indices de UNIDADE DE TEXTO (grapheme) no texto
+/// limpo — a mesma contagem de [LetraDoTexto3D.unidade] e do motor de
+/// animadores. [fim] negativo quer dizer "ate a ultima letra", que e como
+/// "Todas as letras" se escreve.
+///
+/// CADA MEDIDA E UMA TRILHA ([AnimatedDouble]): o losango do painel crava
+/// keyframe nela como em qualquer outra propriedade do aplicativo. Medida
+/// ausente do mapa = o valor de repouso, e nao um zero gravado.
+///
+/// A GEOMETRIA NAO MUDA: isto e pose, como o giro por letra. Por isso fica
+/// fora de [Texto3D.soGeometria] e mexer aqui nao refaz extrusao nem
+/// chanfro — o motor ja recebe uma matriz por letra.
+class AjusteDeCaracteres {
+  AjusteDeCaracteres({
+    this.inicio = 0,
+    this.fim = -1,
+    Map<MedidaDoCaractere, AnimatedDouble>? trilhas,
+  }) : trilhas = Map.unmodifiable(
+         trilhas ?? const <MedidaDoCaractere, AnimatedDouble>{},
+       );
+
+  final int inicio;
+
+  /// Ultima letra da faixa, INCLUSIVE. Negativo = ate o fim do texto.
+  final int fim;
+
+  final Map<MedidaDoCaractere, AnimatedDouble> trilhas;
+
+  bool get todas => inicio <= 0 && fim < 0;
+
+  /// Esta unidade de texto esta na faixa?
+  bool pega(int unidade) =>
+      unidade >= inicio && (fim < 0 || unidade <= fim);
+
+  /// A trilha da medida (uma trilha parada no valor de repouso, quando a
+  /// pessoa ainda nao mexeu nela).
+  AnimatedDouble trilha(MedidaDoCaractere m) =>
+      trilhas[m] ?? AnimatedDouble(padraoDaMedida(m));
+
+  double valorEm(MedidaDoCaractere m, Duration t) =>
+      trilhas[m]?.valueAt(t) ?? padraoDaMedida(m);
+
+  /// Nada gravado aqui muda uma letra de lugar: o ajuste pode ser jogado
+  /// fora sem o dono perder nada.
+  bool get inerte => trilhas.entries.every(
+    (e) => !e.value.isAnimated && e.value.base == padraoDaMedida(e.key),
+  );
+
+  AjusteDeCaracteres com(MedidaDoCaractere m, AnimatedDouble t) =>
+      AjusteDeCaracteres(
+        inicio: inicio,
+        fim: fim,
+        trilhas: {...trilhas, m: t},
+      );
+
+  AjusteDeCaracteres comFaixa(int inicio, int fim) =>
+      AjusteDeCaracteres(inicio: inicio, fim: fim, trilhas: trilhas);
+
+  /// A trilha viaja como NUMERO quando esta parada (o caso comum) e como
+  /// `{b: base, k: [[microssegundos, valor], ...]}` quando tem keyframes.
+  static Object _trilhaParaJson(AnimatedDouble a) => a.isAnimated
+      ? {
+          'b': a.base,
+          'k': [
+            for (final k in a.keyframes) [k.time.inMicroseconds, k.value],
+          ],
+        }
+      : a.base;
+
+  static AnimatedDouble? _trilhaDeJson(Object? v) {
+    if (v is num) {
+      return v.isFinite ? AnimatedDouble(v.toDouble()) : null;
+    }
+    if (v is! Map) return null;
+    final base = v['b'];
+    final marcas = <Keyframe<double>>[];
+    for (final k in (v['k'] as List? ?? const [])) {
+      if (k is! List || k.length < 2) continue;
+      final t = k[0], val = k[1];
+      if (t is! num || val is! num || !val.isFinite) continue;
+      marcas.add(
+        Keyframe(
+          time: Duration(microseconds: t.toInt()),
+          value: val.toDouble(),
+        ),
+      );
+    }
+    marcas.sort((a, b) => a.time.compareTo(b.time));
+    return AnimatedDouble(
+      base is num && base.isFinite ? base.toDouble() : 0,
+      marcas,
+    );
+  }
+
+  Map<String, Object> toJson() => {
+    'i': inicio,
+    'f': fim,
+    for (final e in trilhas.entries) e.key.name: _trilhaParaJson(e.value),
+  };
+
+  /// LEITURA TOLERANTE: faixa sem numero cai em "todas as letras", medida
+  /// desconhecida e ignorada e trilha ilegivel some — um arquivo antigo (ou
+  /// editado a mao) continua abrindo.
+  static AjusteDeCaracteres? fromJson(Map<dynamic, dynamic> m) {
+    final i = m['i'];
+    final f = m['f'];
+    final trilhas = <MedidaDoCaractere, AnimatedDouble>{};
+    for (final medida in MedidaDoCaractere.values) {
+      final t = _trilhaDeJson(m[medida.name]);
+      if (t != null) trilhas[medida] = t;
+    }
+    if (trilhas.isEmpty) return null;
+    return AjusteDeCaracteres(
+      inicio: i is num && i.isFinite ? i.toInt().clamp(0, 1 << 20) : 0,
+      fim: f is num && f.isFinite ? f.toInt().clamp(-1, 1 << 20) : -1,
+      trilhas: trilhas,
+    );
+  }
+
+  /// IGUALDADE POR VALOR, e nao por objeto.
+  ///
+  /// [AnimatedDouble] compara por identidade: sem isto, dois ajustes com
+  /// os mesmos numeros se diriam diferentes, e [Texto3D] (que e comparado
+  /// para decidir se a malha e refeita) nunca voltaria a ser igual a si
+  /// mesmo depois de uma reconstrucao.
+  static bool _mesmaTrilha(AnimatedDouble a, AnimatedDouble b) {
+    if (identical(a, b)) return true;
+    if (a.base != b.base || a.keyframes.length != b.keyframes.length) {
+      return false;
+    }
+    for (var i = 0; i < a.keyframes.length; i++) {
+      if (a.keyframes[i].time != b.keyframes[i].time ||
+          a.keyframes[i].value != b.keyframes[i].value) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    if (other is! AjusteDeCaracteres) return false;
+    if (other.inicio != inicio ||
+        other.fim != fim ||
+        other.trilhas.length != trilhas.length) {
+      return false;
+    }
+    for (final e in trilhas.entries) {
+      final o = other.trilhas[e.key];
+      if (o == null || !_mesmaTrilha(e.value, o)) return false;
+    }
+    return true;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    inicio,
+    fim,
+    Object.hashAllUnordered([
+      for (final e in trilhas.entries)
+        Object.hash(e.key, e.value.base, e.value.keyframes.length),
+    ]),
+  );
+}
 
 /// Quanto a curva da letra e respeitada. Mais qualidade, mais triangulo.
 enum QualidadeDoTexto3D { baixa, media, alta }
@@ -49,6 +252,7 @@ class Texto3D {
     this.rotLetraX = 0,
     this.rotLetraY = 0,
     this.rotLetraZ = 0,
+    this.ajustes = const [],
     this.cor,
     this.metalico,
     this.rugosidade,
@@ -80,6 +284,23 @@ class Texto3D {
 
   bool get temRotacaoPorLetra =>
       rotLetraX != 0 || rotLetraY != 0 || rotLetraZ != 0;
+
+  /// OS AJUSTES POR FAIXA DE CARACTERES (ver [AjusteDeCaracteres]).
+  ///
+  /// O giro acima vale para todas as letras; estes valem para as letras
+  /// que a pessoa escolheu — o "so o C de ABCDE". Sao pose, nao malha:
+  /// ficam fora de [soGeometria].
+  final List<AjusteDeCaracteres> ajustes;
+
+  bool get temAjusteDeCaracteres => ajustes.any((a) => !a.inerte);
+
+  /// O ajuste GRAVADO para esta faixa exata, quando existe.
+  AjusteDeCaracteres? ajusteDaFaixa(int inicio, int fim) {
+    for (final a in ajustes) {
+      if (a.inicio == inicio && a.fim == fim) return a;
+    }
+    return null;
+  }
 
   /// O ACABAMENTO POR CIMA DO METAL ESCOLHIDO.
   ///
@@ -148,6 +369,7 @@ class Texto3D {
     double? rotLetraX,
     double? rotLetraY,
     double? rotLetraZ,
+    List<AjusteDeCaracteres>? ajustes,
     int? cor,
     double? metalico,
     double? rugosidade,
@@ -169,6 +391,7 @@ class Texto3D {
     rotLetraX: rotLetraX ?? this.rotLetraX,
     rotLetraY: rotLetraY ?? this.rotLetraY,
     rotLetraZ: rotLetraZ ?? this.rotLetraZ,
+    ajustes: ajustes ?? this.ajustes,
     cor: semAcabamentoProprio ? null : (cor ?? this.cor),
     metalico: semAcabamentoProprio ? null : (metalico ?? this.metalico),
     rugosidade: semAcabamentoProprio ? null : (rugosidade ?? this.rugosidade),
@@ -192,6 +415,7 @@ class Texto3D {
           other.rotLetraX == rotLetraX &&
           other.rotLetraY == rotLetraY &&
           other.rotLetraZ == rotLetraZ &&
+          _mesmosAjustes(other.ajustes, ajustes) &&
           other.cor == cor &&
           other.metalico == metalico &&
           other.rugosidade == rugosidade &&
@@ -212,11 +436,24 @@ class Texto3D {
     rotLetraX,
     rotLetraY,
     rotLetraZ,
+    Object.hashAll(ajustes),
     cor,
     metalico,
     rugosidade,
     emissivo,
   );
+
+  static bool _mesmosAjustes(
+    List<AjusteDeCaracteres> a,
+    List<AjusteDeCaracteres> b,
+  ) {
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
 
   Map<String, Object> toJson() => {
     't': texto,
@@ -229,6 +466,7 @@ class Texto3D {
     'sp': espacamento,
     'q': qualidade.name,
     'sep': separarLetras,
+    if (ajustes.isNotEmpty) 'aj': [for (final a in ajustes) a.toJson()],
     // O ACABAMENTO SO ENTRA QUANDO EXISTE: chave ausente e "o que o metal
     // trouxe", e um projeto antigo abre igual ao que era.
     'cor': ?cor,
@@ -266,6 +504,7 @@ class Texto3D {
       espacamento: numero('sp', 0, -1, 4),
       qualidade: escolha(m['q'], QualidadeDoTexto3D.values, p.qualidade),
       separarLetras: m['sep'] == true,
+      ajustes: ajustesDeJson(m['aj']),
       cor: m['cor'] is num ? (m['cor'] as num).toInt() : null,
       metalico: m['mt'] is num && (m['mt'] as num).isFinite
           ? (m['mt'] as num).toDouble().clamp(0.0, 1.0)
@@ -276,6 +515,16 @@ class Texto3D {
       emissivo: numero('em', 0, 0, 4),
     );
   }
+}
+
+/// A LISTA DE AJUSTES DE UM JSON, tolerante: o que nao e mapa some, o
+/// ajuste ilegivel some, e um arquivo sem a chave abre com lista vazia.
+List<AjusteDeCaracteres> ajustesDeJson(Object? v) {
+  if (v is! List) return const [];
+  return [
+    for (final a in v)
+      if (a is Map) ?AjusteDeCaracteres.fromJson(a),
+  ];
 }
 
 // ------------------------------------------------------------ layout

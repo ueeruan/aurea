@@ -10,7 +10,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:gal/gal.dart';
 
 import '../../editor/application/editor_controller.dart';
 import '../../editor/application/motor3d_nativo.dart';
@@ -40,6 +39,7 @@ import '../application/aprimoramento_export.dart';
 import '../application/export_engine.dart';
 import '../application/interpolacao_rife.dart';
 import '../application/platform_encoder.dart';
+import '../application/publicador_na_galeria.dart';
 import '../domain/export_settings.dart';
 import '../../settings/application/settings_controller.dart';
 
@@ -98,12 +98,16 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
   String? _erro;
   File? _saida;
 
-  /// O QUE ACONTECEU COM A GALERIA. Ate agora o video terminava dentro
-  /// da pasta do app e a tela oferecia "copiar caminho" — num celular
-  /// isso nao leva a lugar nenhum, e os testadores exportaram tres
-  /// videos sem achar nenhum. Agora ele vai para a galeria e esta linha
-  /// diz se foi, ou por que nao foi.
-  String? _galeria;
+  /// O QUE ACONTECEU COM A GALERIA.
+  ///
+  /// Ate agora o video terminava dentro da pasta PRIVADA do app e a tela
+  /// oferecia "copiar caminho" — num celular isso nao leva a lugar
+  /// nenhum, e os testadores exportaram tres videos sem achar nenhum.
+  /// Pior: a tela ja dizia "Video pronto" sem saber se o registro na
+  /// galeria existia, porque a copia antiga nao devolvia resposta
+  /// nenhuma. Agora a publicacao TEM resultado, e e ele quem decide o
+  /// que a tela diz.
+  PublicacaoNaGaleria? _publicacao;
 
   /// Quadros das camadas de video: pasta por camada + imagem do quadro
   /// atual, ja decodificada.
@@ -252,13 +256,11 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
       _passo(_Fase.preparando, 0.1, 'Verificando se da para copiar...');
       final atalho = podeCopiar ? await engine.tryPureCut() : null;
       if (atalho != null) {
-        if (!mounted) return;
-        setState(() {
-          _fase = _Fase.pronto;
-          _progresso = 1;
-          _saida = atalho;
-          _detalhe = 'Corte puro: copiado sem recodificar.';
-        });
+        // O CORTE PURO TAMBEM VAI PARA A GALERIA. Ele saia por aqui sem
+        // passar pela publicacao — e como e o caminho mais comum de
+        // todos (cortar um clipe e exportar), era a causa mais frequente
+        // do "exportei e nao achei o video".
+        await _terminar(engine, atalho, 'Corte puro: copiado sem recodificar.');
         return;
       }
 
@@ -397,15 +399,7 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
         _passo(_Fase.codificando, .7, 'Juntando o audio...');
         final file = await engine.juntarAudio(mudo!);
         await engine.cleanup();
-        final naGaleria = await _salvarNaGaleria(file);
-        if (!mounted) return;
-        setState(() {
-          _fase = _Fase.pronto;
-          _progresso = 1;
-          _saida = file;
-          _detalhe = _comAvisos(engine, file.path);
-          _galeria = naGaleria;
-        });
+        await _terminar(engine, file, file.path);
         return;
       }
 
@@ -439,15 +433,7 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
         ),
       );
       await engine.cleanup();
-      final naGaleria = await _salvarNaGaleria(file);
-      if (!mounted) return;
-      setState(() {
-        _fase = _Fase.pronto;
-        _progresso = 1;
-        _saida = file;
-        _detalhe = _comAvisos(engine, file.path);
-        _galeria = naGaleria;
-      });
+      await _terminar(engine, file, file.path);
     } on ExportException catch (e) {
       await _abandonar(engine);
       if (!mounted) return;
@@ -782,28 +768,53 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
     return data?.buffer.asUint8List();
   }
 
+  /// TERMINA A EXPORTACAO — e so entao diz que terminou.
+  ///
+  /// A ORDEM AQUI E A CORRECAO. Antes a tela virava "Video pronto"
+  /// assim que o motor devolvia um `File`, sem perguntar se aquele
+  /// arquivo tinha conteudo e sem saber se a galeria o aceitou (a copia
+  /// antiga nao devolvia resposta nenhuma). Agora:
+  ///
+  ///   1. o arquivo existe e tem tamanho — senao e ERRO de exportacao,
+  ///      porque nao ha video nenhum para mostrar;
+  ///   2. a galeria registra e devolve a URI — senao a tela continua
+  ///      pronta, mas diz a verdade: nao entrou na galeria, por isto, e
+  ///      o arquivo esta aqui.
+  Future<void> _terminar(
+    ExportEngine engine,
+    File file,
+    String detalhe,
+  ) async {
+    // UM ARQUIVO VAZIO NAO E UMA EXPORTACAO CONCLUIDA. Sobe como erro
+    // de exportacao e cai no `catch` de quem chamou, com a mesma tela de
+    // erro dos outros problemas.
+    final problema = GaleriaDoAparelho.conferir(file);
+    if (problema != null) throw ExportException(problema);
+
+    final publicacao = await _publicar(file);
+    if (!mounted) return;
+    setState(() {
+      _fase = _Fase.pronto;
+      _progresso = 1;
+      _saida = file;
+      _detalhe = _comAvisos(engine, detalhe);
+      _publicacao = publicacao;
+    });
+  }
+
   /// LEVA O VIDEO PARA A GALERIA.
   ///
-  /// Devolve a frase que a tela mostra — nunca lanca. Uma exportacao que
-  /// terminou nao pode virar erro porque a permissao da galeria foi
-  /// negada: o arquivo existe, e o caminho continua na tela.
-  Future<String?> _salvarNaGaleria(File file) async {
-    if (!ref.read(settingsControllerProvider).saveToGallery) return null;
-    if (!(Platform.isAndroid || Platform.isIOS)) {
-      return 'Galeria so no celular — o arquivo esta na pasta abaixo';
+  /// Nunca lanca: uma exportacao que terminou nao vira erro porque a
+  /// permissao da galeria foi negada. O arquivo existe, e o caminho
+  /// continua na tela.
+  Future<PublicacaoNaGaleria> _publicar(File file) async {
+    if (!ref.read(settingsControllerProvider).saveToGallery) {
+      return PublicacaoNaGaleria.falhou(
+        'Salvar na galeria esta desligado em Ajustes',
+        ondeEsta: file.path,
+      );
     }
-    try {
-      if (!await Gal.hasAccess(toAlbum: true) &&
-          !await Gal.requestAccess(toAlbum: true)) {
-        return 'Sem permissao para a galeria. O arquivo esta na pasta abaixo';
-      }
-      await Gal.putVideo(file.path, album: 'Aurea');
-      return 'Salvo na galeria, no album Aurea';
-    } on GalException catch (e) {
-      return 'Nao deu para salvar na galeria: ${e.type.message}';
-    } catch (_) {
-      return 'Nao deu para salvar na galeria. O arquivo esta na pasta abaixo';
-    }
+    return GaleriaDoAparelho.publicarVideo(file);
   }
 
   @override
@@ -1074,7 +1085,9 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
       return _ajustesDaExportacao(
         p.outputWidth,
         p.outputHeight,
-        p.duration,
+        // O QUE VAI SAIR, e nao o piso da linha do tempo: a ficha tem de
+        // dizer a mesma duracao que o arquivo vai ter.
+        p.duracaoDoConteudo,
         p.fps,
       );
     }
@@ -1132,6 +1145,19 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
     }
 
     if (_fase == _Fase.pronto) {
+      // A SEQUENCIA PNG NAO E UM VIDEO: nao vai para a galeria, e dizer
+      // que "nao entrou" seria inventar um problema.
+      final sequencia = _ajustes.format == ExportFormat.pngSequence;
+      final pub = _publicacao;
+      final naGaleria = pub?.ok ?? false;
+      final titulo = sequencia
+          ? 'Sequencia pronta'
+          : naGaleria
+          ? 'Exportado com sucesso'
+          : 'Exportado, mas nao entrou na galeria';
+      final corDoTitulo = sequencia || naGaleria
+          ? AmColors.accent
+          : AmColors.pink;
       return Container(
         width: double.infinity,
         padding: const EdgeInsets.fromLTRB(18, 14, 18, 20),
@@ -1142,25 +1168,31 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
             Row(
               children: [
                 Icon(
-                  CupertinoIcons.checkmark_seal_fill,
+                  sequencia || naGaleria
+                      ? CupertinoIcons.checkmark_seal_fill
+                      : CupertinoIcons.exclamationmark_triangle,
                   size: 17,
-                  color: AmColors.accent,
+                  color: corDoTitulo,
                 ),
-                SizedBox(width: 8),
-                AppText(
-                  'Video pronto',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: AmColors.accent,
+                const SizedBox(width: 8),
+                Expanded(
+                  child: AppText(
+                    titulo,
+                    key: const ValueKey('export-titulo-do-fim'),
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: corDoTitulo,
+                    ),
                   ),
                 ),
               ],
             ),
-            if (_galeria != null) ...[
+            if (!sequencia && pub != null) ...[
               const SizedBox(height: 6),
               AppText(
-                _galeria!,
+                pub.mensagem,
+                key: const ValueKey('export-galeria'),
                 style: const TextStyle(
                   fontSize: 12,
                   height: 1.35,
@@ -1170,7 +1202,7 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
             ],
             const SizedBox(height: 6),
             AppText(
-              _saida?.path ?? '',
+              pub?.ondeEsta ?? _saida?.path ?? '',
               style: const TextStyle(
                 fontSize: 10,
                 height: 1.4,
@@ -1180,30 +1212,48 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
             const SizedBox(height: 12),
             Row(
               children: [
-                Expanded(
-                  child: CupertinoButton(
-                    color: AmColors.chip,
-                    borderRadius: BorderRadius.circular(12),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    onPressed: () async {
-                      final messenger = ScaffoldMessenger.maybeOf(context);
-                      await Clipboard.setData(
-                        ClipboardData(text: _saida?.path ?? ''),
-                      );
-                      messenger?.showSnackBar(
-                        const SnackBar(
-                          content: AppText('Caminho copiado'),
-                          duration: Duration(seconds: 2),
-                          behavior: SnackBarBehavior.floating,
-                        ),
-                      );
-                    },
-                    child: AppText(
-                      'Copiar caminho',
-                      style: TextStyle(fontSize: 13, color: AmColors.accent),
+                // ABRIR E COMPARTILHAR SO COM O REGISTRO NA MAO: sem a
+                // URI nao ha o que abrir, e um botao que nao faz nada e
+                // pior que botao nenhum. Sem ela sobra o caminho, que e
+                // o que serve para procurar o arquivo.
+                if (pub?.podeAbrir ?? false) ...[
+                  Expanded(
+                    child: _BotaoDoFim(
+                      rotulo: 'Abrir',
+                      chave: const ValueKey('export-abrir'),
+                      aoTocar: () => GaleriaDoAparelho.abrir(pub!.uri!),
                     ),
                   ),
-                ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _BotaoDoFim(
+                      rotulo: 'Compartilhar',
+                      chave: const ValueKey('export-compartilhar'),
+                      aoTocar: () => GaleriaDoAparelho.compartilhar(pub!.uri!),
+                    ),
+                  ),
+                ] else
+                  Expanded(
+                    child: _BotaoDoFim(
+                      rotulo: 'Copiar caminho',
+                      chave: const ValueKey('export-copiar-caminho'),
+                      aoTocar: () async {
+                        final messenger = ScaffoldMessenger.maybeOf(context);
+                        await Clipboard.setData(
+                          ClipboardData(
+                            text: pub?.ondeEsta ?? _saida?.path ?? '',
+                          ),
+                        );
+                        messenger?.showSnackBar(
+                          const SnackBar(
+                            content: AppText('Caminho copiado'),
+                            duration: Duration(seconds: 2),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                      },
+                    ),
+                  ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: CupertinoButton(
@@ -1372,6 +1422,39 @@ class _Escolhas<T> extends StatelessWidget {
           ],
         ),
       ],
+    ),
+  );
+}
+
+/// OS BOTOES DO FIM — o mesmo botao de sempre, so com outro rotulo.
+///
+/// Nao ha componente novo aqui: e o `CupertinoButton` com a pilula de
+/// `AmColors.chip` e o texto em `AmColors.accent` que a tela ja usava no
+/// "Copiar caminho". "Abrir" e "Compartilhar" entram no lugar dele, com
+/// a mesma forma, o mesmo raio e o mesmo corpo de texto.
+class _BotaoDoFim extends StatelessWidget {
+  const _BotaoDoFim({
+    required this.rotulo,
+    required this.aoTocar,
+    required this.chave,
+  });
+
+  final String rotulo;
+  final Future<void> Function() aoTocar;
+  final Key chave;
+
+  @override
+  Widget build(BuildContext context) => CupertinoButton(
+    key: chave,
+    color: AmColors.chip,
+    borderRadius: BorderRadius.circular(12),
+    padding: const EdgeInsets.symmetric(vertical: 12),
+    onPressed: aoTocar,
+    child: AppText(
+      rotulo,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(fontSize: 13, color: AmColors.accent),
     ),
   );
 }

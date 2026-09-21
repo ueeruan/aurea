@@ -11,24 +11,31 @@ import '../../am/am_colors.dart';
 import '../../am/color_picker_sheet.dart';
 import '../../am/font_sheet.dart';
 import '../../am/panel_chrome.dart';
-import '../../am/text_animators_panel.dart';
 import '../parameter_row.dart';
 import 'barra_de_estilo_do_texto.dart';
 import 'presets_do_texto.dart';
 import '../../../application/ui/pro_mode.dart';
 import '../../../domain/layer_meta.dart';
 
-/// E3 · EDITAR TEXTO — UM PAINEL, TRES AREAS.
+/// E3 · EDITAR TEXTO — UM PAINEL, DUAS AREAS.
 ///
-/// Editar o texto e animar o texto eram dois lugares: o painel de texto
-/// (conteudo, fonte, cor) e o animador, que se abria por um botao que
-/// FECHAVA este painel. Quem queria conferir como ficou a animacao saia
-/// do texto, animava as cegas e voltava para corrigir uma virgula — e a
-/// cada volta recomecava de uma lista.
+/// ==========================================================================
+/// A ABA "ANIMACAO" SAIU (20/09, pedido do dono)
+/// ==========================================================================
 ///
-/// Sao as tres coisas que se fazem com um texto, entao sao tres abas do
-/// mesmo painel: o texto fica ali enquanto se anima, e trocar de ideia e
-/// um toque lateral em vez de uma ida e volta.
+/// Ela abria o Animador Manual: posicoes (entrada/enfase/saida), grade de
+/// trinta e seis miniaturas, seis controles proprios e uma secao
+/// "Avancado" com seletores montados a mao. Era uma segunda ferramenta
+/// dentro da ficha de texto — e o veredito do dono foi "praticamente
+/// impossivel de usar".
+///
+/// ANIMAR TEXTO AGORA E APLICAR UM EFEITO: Selecionar Texto → Efeitos →
+/// Texto → Animador de Texto. Ele entra na MESMA pilha de Glow e Blur,
+/// como cartao que abre, com as mesmas linhas de parametro e o mesmo
+/// losango de keyframe. Nao ha porta propria, nem previa propria.
+///
+/// Ficam as duas coisas que so a ficha de texto sabe fazer: escrever o
+/// texto e aplicar uma receita pronta.
 class TextPanel extends ConsumerWidget {
   const TextPanel({super.key, required this.playback});
 
@@ -40,15 +47,6 @@ class TextPanel extends ConsumerWidget {
       label: 'Editar texto',
       chave: ValueKey('texto-aba-editar'),
     ),
-    // A CHAVE ANTIGA VEM JUNTO. O gravador do tutorial procura
-    // 'texto-animar' para chegar na animacao; o botao saiu do corpo, mas
-    // o caminho ate ele continua sendo um toque — entao a chave segue o
-    // caminho ate a aba.
-    ParamTab(
-      id: 'animation',
-      label: 'Animação',
-      chave: ValueKey('texto-animar'),
-    ),
     ParamTab(
       id: 'presets',
       label: 'Presets',
@@ -58,7 +56,13 @@ class TextPanel extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final secao = ref.watch(editorSessionProvider).textSection;
+    final guardada = ref.watch(editorSessionProvider).textSection;
+    // PROJETO (OU SESSAO) QUE PAROU NA ABA ANTIGA volta para a edicao:
+    // o valor continua no enum por compatibilidade, mas nao tem mais
+    // tela por tras dele.
+    final secao = guardada == TextSection.animation
+        ? TextSection.edit
+        : guardada;
     final id = ref.watch(selectedLayerProvider);
     if (id == null) return ColoredBox(color: AmColors.panel);
 
@@ -76,15 +80,11 @@ class TextPanel extends ConsumerWidget {
           ),
           Expanded(
             child: switch (secao) {
-              TextSection.edit => _EdicaoDeTexto(
+              TextSection.presets => const PresetsDoTexto(),
+              _ => _EdicaoDeTexto(
                 key: ValueKey('texto-edicao-$id'),
                 playback: playback,
               ),
-              TextSection.animation => TextAnimatorsPanel(
-                playback: playback,
-                embutido: true,
-              ),
-              TextSection.presets => const PresetsDoTexto(),
             },
           ),
         ],

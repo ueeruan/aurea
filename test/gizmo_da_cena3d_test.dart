@@ -13,9 +13,12 @@ import 'package:aurea/src/features/editor/domain/gizmo3d.dart';
 import 'package:aurea/src/features/editor/domain/gizmo_da_cena3d.dart';
 import 'package:aurea/src/features/editor/domain/keyframe.dart';
 import 'package:aurea/src/features/editor/domain/layer.dart';
+import 'package:aurea/src/features/editor/domain/project_store.dart';
 import 'package:aurea/src/features/editor/domain/scene3d.dart';
 import 'package:aurea/src/features/editor/domain/video_project.dart';
 import 'package:aurea/src/features/editor/presentation/widgets/gizmo3d_painter.dart';
+import 'package:aurea/src/features/editor/presentation/widgets/gizmo_da_cena_overlay.dart'
+    show noAtivoDaCena;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -144,6 +147,136 @@ void main() {
     expect(depois.rotY.valueAt(_t0), antes.rotY.valueAt(_t0));
     expect(depois.rotZ.valueAt(_t0), antes.rotZ.valueAt(_t0));
     expect(depois.scale.valueAt(_t0), antes.scale.valueAt(_t0));
+  });
+
+  test('trocar de objeto MOVE o gizmo (e o padrao e o primeiro)', () {
+    final a = SceneNode(name: 'A');
+    final b = SceneNode(name: 'B', x: AnimatedDouble(300));
+    final camada = _camada([a, b]);
+    final projeto = _projeto(camada);
+
+    final ga = gizmoDoNo(projeto, camada, a.id, _t0, _palco)!;
+    final gb = gizmoDoNo(projeto, camada, b.id, _t0, _palco)!;
+    expect(ga.origem.dx, closeTo(_cw / 2, 0.5));
+    expect(gb.origem.dx, greaterThan(ga.origem.dx + 20));
+
+    // Quem escolhe o objeto e o provedor da selecao; sem escolha vale o
+    // primeiro da cena, e uma escolha que nao existe mais nao trava o
+    // gizmo num fantasma.
+    expect(noAtivoDaCena(camada.scene, null), a.id);
+    expect(noAtivoDaCena(camada.scene, b.id), b.id);
+    expect(noAtivoDaCena(camada.scene, 'nao-existe'), a.id);
+  });
+
+  test('cena sem objeto visivel: nao ha gizmo', () {
+    final escondido = SceneNode(name: 'Cubo', visible: false);
+    final nulo = SceneNode(name: 'Nulo', isNull: true);
+    final camada = _camada([escondido, nulo]);
+
+    expect(objetosDaCena(camada.scene), isEmpty);
+    expect(noAtivoDaCena(camada.scene, null), isNull);
+    expect(noAtivoDaCena(camada.scene, escondido.id), isNull);
+  });
+
+  test('escala por eixo: arrastar o braco X muda SO o scaleX', () {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    final e = container.read(editorControllerProvider.notifier);
+    e.addScene3DLayer(_t0);
+    final id = container.read(editorControllerProvider).layers.single.id;
+    e.addSceneNode(id, Element3DKind.cube);
+    SceneNode no() =>
+        (container.read(editorControllerProvider).layerById(id)!
+                as Scene3DLayer)
+            .scene
+            .nodes
+            .single;
+    final antes = no();
+
+    e.editSceneNodeProp(id, antes.id, PropDoNo.escalaX, _t0, 2.5);
+
+    final depois = no();
+    expect(depois.scaleX.valueAt(_t0), 2.5);
+    expect(depois.scaleY.valueAt(_t0), 1);
+    expect(depois.scaleZ.valueAt(_t0), 1);
+    expect(depois.scale.valueAt(_t0), antes.scale.valueAt(_t0));
+    expect(depois.x.valueAt(_t0), antes.x.valueAt(_t0));
+    expect(depois.y.valueAt(_t0), antes.y.valueAt(_t0));
+  });
+
+  test('escala por eixo estica SO aquele eixo no desenho', () {
+    // A prova que importa nao e o campo existir, e a GEOMETRIA mudar: um
+    // cubo com scaleX=2 tem de ficar duas vezes mais largo e continuar
+    // com a mesma altura.
+    const cam = RenderCamera(position: Vec3(0, 0, 900));
+    const viewport = Size(1000, 1000);
+
+    (double largura, double altura) caixa(Scene3D cena) {
+      final quadro = renderScene(cena, cam, viewport, _t0);
+      var minX = double.infinity, maxX = -double.infinity;
+      var minY = double.infinity, maxY = -double.infinity;
+      for (final tri in [...quadro.opaque, ...quadro.transparent]) {
+        for (final p in [tri.a, tri.b, tri.c]) {
+          if (p.dx < minX) minX = p.dx;
+          if (p.dx > maxX) maxX = p.dx;
+          if (p.dy < minY) minY = p.dy;
+          if (p.dy > maxY) maxY = p.dy;
+        }
+      }
+      return (maxX - minX, maxY - minY);
+    }
+
+    final normal = caixa(Scene3D(nodes: [SceneNode(name: 'Cubo')]));
+    final esticado = caixa(
+      Scene3D(
+        nodes: [SceneNode(name: 'Cubo', scaleX: AnimatedDouble(2))],
+      ),
+    );
+
+    expect(normal.$1, greaterThan(0));
+    expect(esticado.$1 / normal.$1, closeTo(2, 0.02));
+    expect(esticado.$2, closeTo(normal.$2, 0.5), reason: 'a altura nao muda');
+  });
+
+  test('escala por eixo vai e volta do arquivo, e so entra quando ha', () {
+    // O NO PARADO NAO ENGORDA O ARQUIVO: tres trilhas a mais por no, em
+    // cenas com centenas deles, so para dizer "1".
+    final parado = SceneNode(name: 'Cubo');
+    final jsonParado =
+        (projectToJson(_projeto(_camada([parado])))['layers'] as List).single
+            as Map<String, dynamic>;
+    final noParado =
+        ((jsonParado['scene'] as Map)['nodes'] as List).single as Map;
+    expect(noParado.containsKey('sx'), isFalse);
+    expect(noParado.containsKey('sy'), isFalse);
+    expect(noParado.containsKey('sz'), isFalse);
+
+    // E um projeto ANTIGO (sem os campos) volta com os tres em 1 — a
+    // leitura tolerante do QA 1.0.
+    final voltaParado = projectFromJson(
+      projectToJson(_projeto(_camada([parado]))),
+    );
+    final noVolta =
+        (voltaParado.layers.single as Scene3DLayer).scene.nodes.single;
+    expect(noVolta.scaleX.valueAt(_t0), 1);
+    expect(noVolta.scaleY.valueAt(_t0), 1);
+    expect(noVolta.scaleZ.valueAt(_t0), 1);
+
+    // Mexido, vai e volta com keyframe e tudo.
+    final esticado = SceneNode(
+      name: 'Cubo',
+      scaleX: AnimatedDouble(2.5),
+      scaleY: AnimatedDouble(1, [
+        Keyframe<double>(time: const Duration(seconds: 1), value: 3),
+      ]),
+    );
+    final volta = projectFromJson(
+      projectToJson(_projeto(_camada([esticado]))),
+    );
+    final no = (volta.layers.single as Scene3DLayer).scene.nodes.single;
+    expect(no.scaleX.valueAt(_t0), 2.5);
+    expect(no.scaleY.valueAt(const Duration(seconds: 1)), 3);
+    expect(no.scaleZ.valueAt(_t0), 1);
   });
 
   test('o pintor desenha NA ORIGEM, e nao em origem x escala', () {

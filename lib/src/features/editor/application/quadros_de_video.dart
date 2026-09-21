@@ -8,13 +8,30 @@ import 'package:ffmpeg_kit_flutter_new_full/return_code.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'desempenho/aurea_performance_manager.dart';
+
 /// Bounded temporal preview cache: one-second blocks, one extraction and
 /// at most two image decodes. No whole-clip extraction during playback.
 class QuadrosDeVideo {
   QuadrosDeVideo._();
   static final instance = QuadrosDeVideo._();
   static const fps = 30;
+
+  /// A ALTURA DE SEMPRE do quadro guardado (o que a politica completa
+  /// devolve com o aparelho frio).
   static const altura = 360;
+
+  /// QUANTO A PREVIA DECODIFICA AGORA — o consumidor da politica.
+  ///
+  /// Era a constante [altura] e ponto: com o aparelho quente, a escada
+  /// descia degraus e este leitor seguia extraindo e decodificando 360p
+  /// a 30 quadros por segundo, que e um dos trabalhos mais caros do
+  /// editor. Agora ele obedece [DecodificacaoDaPrevia].
+  ///
+  /// ISTO E SO A PREVIA. A exportacao nao passa por este cache: ela
+  /// decodifica o arquivo original (ver export_video_screen).
+  static int get alturaAgora =>
+      AureaPerformanceManager.instancia.politica.value.decodificacao.alturaPx;
   static const _tetoDeImagens = 64;
   static const _tetoDeBlocos = 8;
   final ValueNotifier<int> revision = ValueNotifier(0);
@@ -50,7 +67,10 @@ class QuadrosDeVideo {
     // Round-trip Duration values such as 33,333 us must keep frame 1.
     final frame = ((us + .5) * fps / 1000000).floor();
     final segundo = frame ~/ fps;
-    final chave = '$arquivo@$segundo';
+    // A ALTURA ENTRA NA CHAVE: trocar a politica no meio da edicao nao
+    // pode devolver um bloco extraido na altura antiga como se fosse o
+    // novo. Os blocos velhos saem sozinhos pelo LRU de [_tetoDeBlocos].
+    final chave = _chave(arquivo, segundo);
     final bloco = _blocos.remove(chave);
     if (bloco == null) {
       _pedir(arquivo, segundo);
@@ -78,12 +98,13 @@ class QuadrosDeVideo {
   void _adiantar(String arquivo, int atual) {
     // Request the next second before crossing its boundary, while the
     // current block remains visible. Decode only a small look-ahead window.
-    if (atual % fps >= fps ~/ 2 && !_blocos.containsKey('$arquivo@${atual ~/ fps + 1}')) {
+    if (atual % fps >= fps ~/ 2 &&
+        !_blocos.containsKey(_chave(arquivo, atual ~/ fps + 1))) {
       _pedir(arquivo, atual ~/ fps + 1);
     }
     for (var i = 1; i <= 6 && _decodificando.length < 2; i++) {
       final frame = atual + i;
-      final bloco = _blocos['$arquivo@${frame ~/ fps}'];
+      final bloco = _blocos[_chave(arquivo, frame ~/ fps)];
       if (bloco == null) continue;
       final indice = (frame % fps).clamp(0, bloco.contagem - 1);
       final key = '${bloco.pasta.path}/$indice';
@@ -100,8 +121,11 @@ class QuadrosDeVideo {
   /// requested timestamps in quadro(), never by the entire range.
   void preparar(String arquivo, Duration inicio, Duration fim) {}
 
+  static String _chave(String arquivo, int segundo) =>
+      '$arquivo@$segundo#${alturaAgora}p';
+
   void _pedir(String arquivo, int segundo) {
-    final chave = '$arquivo@$segundo';
+    final chave = _chave(arquivo, segundo);
     if (_extracaoAtual == chave) return;
     final falhou = _falhas[chave];
     if (falhou != null && DateTime.now().difference(falhou).inSeconds < 10) {
@@ -121,6 +145,7 @@ class QuadrosDeVideo {
     _extracaoAtual = chave;
     final geracao = _geracao;
     final (arquivo, segundo) = _pedidos.remove(chave)!;
+    final altura = alturaAgora;
     try {
       final tmp = await getTemporaryDirectory();
       final raiz = await Directory('${tmp.path}/quadros_temporais')
@@ -144,7 +169,10 @@ class QuadrosDeVideo {
         '-filter_threads',
         '1',
         '-vf',
-        "fps=$fps,scale=w='min(360,iw)':h='min(360,ih)':force_original_aspect_ratio=decrease",
+        // A ALTURA VEM DA POLITICA (ver [alturaAgora]): com o aparelho
+        // quente extrair 360p a 30 fps e trabalho que ninguem ve.
+        "fps=$fps,scale=w='min($altura,iw)':h='min($altura,ih)':"
+            'force_original_aspect_ratio=decrease',
         '-threads',
         '1',
         '-q:v',

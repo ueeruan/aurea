@@ -27,6 +27,11 @@ const _desenhaEmOutroLugar = <EffectType>{
   EffectType.posterizeTime,
   // O conteudo da camada, e nao um pixel: empilha tres quadros do video.
   EffectType.rgbTimeWarp,
+  // QUAL QUADRO, e nao como pintar o quadro. A trilha do Time Remap e a
+  // funcao tempo->fonte do clipe: quem a "desenha" e o decodificador,
+  // por `videoSourceTimeAt` (ver cut_ops.dart e o nucleo aurea_timecore).
+  // Ele voltou ao catalogo em 20/09, a pedido do dono.
+  EffectType.timeRemap,
   // Nitidez: uma passada propria (`PassadaDeNitidez`), com o numero de
   // amostras escolhido pela qualidade da previa.
   EffectType.unsharpMask,

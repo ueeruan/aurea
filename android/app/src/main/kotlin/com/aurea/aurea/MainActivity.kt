@@ -1,9 +1,16 @@
 package com.aurea.aurea
 
+import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMuxer
+import android.media.MediaScannerConnection
+import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterShellArgs
 import android.util.Log
@@ -211,6 +218,40 @@ class MainActivity : FlutterActivity() {
 
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
+            "aurea/galeria"
+        ).setMethodCallHandler { call, result ->
+            try {
+                when (call.method) {
+                    "disponivel" -> result.success(true)
+                    "publicarVideo" -> publicarVideo(
+                        call.argument<String>("caminho"),
+                        call.argument<String>("nome"),
+                        call.argument<String>("mime") ?: "video/mp4",
+                        call.argument<String>("album") ?: "Aurea",
+                        result
+                    )
+                    "abrir" -> result.success(
+                        abrirNaGaleria(
+                            call.argument<String>("uri"),
+                            call.argument<String>("mime") ?: "video/mp4"
+                        )
+                    )
+                    "compartilhar" -> result.success(
+                        compartilharDaGaleria(
+                            call.argument<String>("uri"),
+                            call.argument<String>("mime") ?: "video/mp4"
+                        )
+                    )
+                    else -> result.notImplemented()
+                }
+            } catch (e: Exception) {
+                galeriaPendente = null
+                result.error("galeria", e.message ?: "$e", null)
+            }
+        }
+
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
             "aurea/encoder"
         ).setMethodCallHandler { call, result ->
             // Codificar bloqueia; a thread da interface nao pode parar.
@@ -254,6 +295,15 @@ class MainActivity : FlutterActivity() {
             } catch (_: Exception) {
             }
         }
+        // Nem uma publicacao presa no pedido de permissao.
+        galeriaPendente?.let {
+            galeriaPendente = null
+            galeriaArgumentos = null
+            try {
+                it.error("galeria", "a tela fechou durante o pedido de permissao", null)
+            } catch (_: Exception) {
+            }
+        }
         super.onDestroy()
     }
 
@@ -278,6 +328,9 @@ class MainActivity : FlutterActivity() {
     private companion object {
         /** Codigo do pedido: longe dos que os plugins de seletor usam. */
         const val PEDIDO_DO_SELETOR = 0xA17E
+
+        /** Permissao de escrita para publicar na galeria ate a API 28. */
+        const val PEDIDO_DA_GALERIA = 0xA17F
     }
 
     private fun abrirSeletor(
@@ -424,6 +477,296 @@ class MainActivity : FlutterActivity() {
             "nome" to limpo,
             "uri" to uri.toString()
         )
+    }
+
+    // =============================================================== galeria
+
+    /**
+     * PUBLICAR O VIDEO EXPORTADO NA GALERIA DO APARELHO.
+     *
+     * O relato era "exporto e o video nao aparece na galeria", e a causa
+     * nao estava no codificador: o arquivo nascia em
+     * `/data/user/0/<pacote>/app_flutter/exports`, a pasta PRIVADA do
+     * app. Nenhum indexador entra la — nem o Google Fotos, nem a Galeria
+     * do fabricante, nem o seletor de midia de outro aplicativo.
+     *
+     * Ha DOIS mundos, e os dois estao aqui:
+     *
+     *   API 29+ (Android 10, armazenamento com escopo)
+     *       Quem cria o arquivo publico e o `MediaStore`. O app nunca
+     *       toca no caminho: insere uma linha com `RELATIVE_PATH`
+     *       (Movies/Aurea), `DISPLAY_NAME` e `MIME_TYPE`, escreve pelo
+     *       `ContentResolver` e so entao baixa o `IS_PENDING`. O
+     *       PENDENTE e o detalhe que decide tudo: sem ele, o indexador
+     *       pode ler o arquivo no meio da copia e registrar um video
+     *       truncado — que aparece na galeria quebrado, ou nao aparece.
+     *
+     *   API 24..28 (o caminho antigo)
+     *       Escrever direto em `Movies/Aurea` com
+     *       WRITE_EXTERNAL_STORAGE, que ali ainda e uma permissao de
+     *       execucao e precisa ser PEDIDA, e depois avisar o indexador
+     *       pelo `MediaScannerConnection` — que e quem devolve a URI de
+     *       conteudo. Sem o scan o arquivo existe no cartao e continua
+     *       invisivel, que e o mesmo sintoma por outro motivo.
+     *
+     * Nos dois casos a resposta ao Dart e a MESMA: `uri`, `bytes` e
+     * `caminho`. A tela so diz "Exportado com sucesso" com a URI na mao.
+     */
+    private var galeriaPendente: MethodChannel.Result? = null
+    private var galeriaArgumentos: Array<String>? = null
+
+    private fun publicarVideo(
+        caminho: String?,
+        nome: String?,
+        mime: String,
+        album: String,
+        result: MethodChannel.Result
+    ) {
+        if (caminho.isNullOrBlank()) {
+            result.error("galeria", "caminho vazio", null)
+            return
+        }
+        val origem = File(caminho)
+        if (!origem.exists()) {
+            result.error("galeria", "o arquivo exportado nao esta em $caminho", null)
+            return
+        }
+        if (origem.length() <= 0L) {
+            result.error("galeria", "o arquivo exportado esta vazio", null)
+            return
+        }
+        val limpo = (nome ?: origem.name)
+            .substringAfterLast('/')
+            .replace(Regex("[\\\\/:*?\"<>|]"), "_")
+            .ifBlank { "aurea.mp4" }
+
+        // O CAMINHO ANTIGO PRECISA DA PERMISSAO ANTES DE ESCREVER. Pedir
+        // e assincrono: o pedido fica guardado e `onRequestPermissionsResult`
+        // retoma daqui de cima.
+        if (Build.VERSION.SDK_INT in 23..28 && !temPermissaoDeEscrita()) {
+            if (galeriaPendente != null) {
+                result.error("galeria", "ja existe um pedido de permissao aberto", null)
+                return
+            }
+            galeriaPendente = result
+            galeriaArgumentos = arrayOf(caminho, limpo, mime, album)
+            // Pelo `ActivityCompat`: `Activity.requestPermissions` so
+            // existe da API 23 em diante, e o app ainda instala abaixo
+            // disso.
+            androidx.core.app.ActivityCompat.requestPermissions(
+                this,
+                arrayOf(android.Manifest.permission.WRITE_EXTERNAL_STORAGE),
+                PEDIDO_DA_GALERIA
+            )
+            return
+        }
+
+        publicarEmSegundoPlano(origem, limpo, mime, album, result)
+    }
+
+    /** Copiar centenas de MB bloqueia; nunca na thread da interface. */
+    private fun publicarEmSegundoPlano(
+        origem: File,
+        nome: String,
+        mime: String,
+        album: String,
+        result: MethodChannel.Result
+    ) {
+        thread {
+            try {
+                val mapa = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    publicarPeloMediaStore(origem, nome, mime, album)
+                } else {
+                    publicarNoCaminhoAntigo(origem, nome, mime, album)
+                }
+                runOnUiThread { result.success(mapa) }
+            } catch (e: Exception) {
+                runOnUiThread { result.error("galeria", e.message ?: "$e", null) }
+            }
+        }
+    }
+
+    private fun temPermissaoDeEscrita(): Boolean =
+        androidx.core.content.ContextCompat.checkSelfPermission(
+            this, android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        if (requestCode != PEDIDO_DA_GALERIA) {
+            // Os plugins recebem os pedidos deles por aqui.
+            super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+            return
+        }
+        val result = galeriaPendente ?: return
+        val args = galeriaArgumentos
+        galeriaPendente = null
+        galeriaArgumentos = null
+        val liberou = grantResults.isNotEmpty() &&
+            grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (!liberou || args == null) {
+            result.error("galeria", "sem permissao para escrever na galeria", null)
+            return
+        }
+        publicarEmSegundoPlano(File(args[0]), args[1], args[2], args[3], result)
+    }
+
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.Q)
+    private fun publicarPeloMediaStore(
+        origem: File,
+        nome: String,
+        mime: String,
+        album: String
+    ): Map<String, Any?> {
+        val relativo = "${Environment.DIRECTORY_MOVIES}/$album"
+        val agora = System.currentTimeMillis()
+        val valores = ContentValues().apply {
+            put(MediaStore.Video.Media.DISPLAY_NAME, nome)
+            put(MediaStore.Video.Media.MIME_TYPE, mime)
+            put(MediaStore.Video.Media.RELATIVE_PATH, relativo)
+            put(MediaStore.Video.Media.DATE_ADDED, agora / 1000)
+            put(MediaStore.Video.Media.DATE_MODIFIED, agora / 1000)
+            put(MediaStore.Video.Media.DATE_TAKEN, agora)
+            // PENDENTE ATE O FIM DA COPIA: enquanto valer 1, o arquivo
+            // nao aparece para mais ninguem — nem meio escrito.
+            put(MediaStore.Video.Media.IS_PENDING, 1)
+        }
+        val colecao = MediaStore.Video.Media.getContentUri(
+            MediaStore.VOLUME_EXTERNAL_PRIMARY
+        )
+        val uri = contentResolver.insert(colecao, valores)
+            ?: throw java.io.IOException("o sistema recusou o registro na galeria")
+
+        try {
+            contentResolver.openOutputStream(uri, "w").use { saida ->
+                if (saida == null) {
+                    throw java.io.IOException("a galeria nao abriu o arquivo para escrita")
+                }
+                origem.inputStream().use { entrada -> entrada.copyTo(saida, 1 shl 16) }
+                saida.flush()
+            }
+            val gravados = tamanhoDe(uri)
+            if (gravados <= 0L) {
+                throw java.io.IOException("o registro na galeria ficou com 0 bytes")
+            }
+            val fim = ContentValues().apply {
+                put(MediaStore.Video.Media.IS_PENDING, 0)
+            }
+            contentResolver.update(uri, fim, null, null)
+            return mapOf(
+                "uri" to uri.toString(),
+                "bytes" to gravados,
+                "nome" to nome,
+                "caminho" to "$relativo/$nome"
+            )
+        } catch (e: Exception) {
+            // UM PENDENTE ABANDONADO FICA PARA SEMPRE. Apagar a linha e
+            // parte de falhar direito.
+            try {
+                contentResolver.delete(uri, null, null)
+            } catch (_: Exception) {
+            }
+            throw e
+        }
+    }
+
+    private fun tamanhoDe(uri: Uri): Long = try {
+        contentResolver.openFileDescriptor(uri, "r")?.use { it.statSize } ?: 0L
+    } catch (_: Exception) {
+        0L
+    }
+
+    /**
+     * ANDROID 9 E ANTERIORES: arquivo publico + scan.
+     *
+     * Aqui `Movies/Aurea` e uma pasta de verdade e o app escreve nela
+     * com WRITE_EXTERNAL_STORAGE. Quem transforma o arquivo em item da
+     * galeria e o indexador; ele devolve a URI de conteudo pelo
+     * callback, e e essa URI que "Abrir" e "Compartilhar" usam.
+     */
+    @Suppress("DEPRECATION")
+    private fun publicarNoCaminhoAntigo(
+        origem: File,
+        nome: String,
+        mime: String,
+        album: String
+    ): Map<String, Any?> {
+        val pasta = File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES),
+            album
+        )
+        if (!pasta.exists() && !pasta.mkdirs()) {
+            throw java.io.IOException("nao deu para criar a pasta ${pasta.absolutePath}")
+        }
+        var alvo = File(pasta, nome)
+        // Nao sobrescrever o que a pessoa ja exportou antes.
+        if (alvo.exists()) {
+            val base = nome.substringBeforeLast('.', nome)
+            val ext = nome.substringAfterLast('.', "mp4")
+            alvo = File(pasta, "${base}_${System.currentTimeMillis()}.$ext")
+        }
+        origem.inputStream().use { entrada ->
+            alvo.outputStream().use { saida -> entrada.copyTo(saida, 1 shl 16) }
+        }
+        if (alvo.length() <= 0L) {
+            alvo.delete()
+            throw java.io.IOException("a copia para a galeria ficou com 0 bytes")
+        }
+
+        val trava = java.util.concurrent.CountDownLatch(1)
+        var uri: Uri? = null
+        MediaScannerConnection.scanFile(
+            this, arrayOf(alvo.absolutePath), arrayOf(mime)
+        ) { _, devolvida ->
+            uri = devolvida
+            trava.countDown()
+        }
+        trava.await(15, java.util.concurrent.TimeUnit.SECONDS)
+        val achada = uri
+            ?: throw java.io.IOException(
+                "o indexador nao registrou ${alvo.absolutePath}"
+            )
+        return mapOf(
+            "uri" to achada.toString(),
+            "bytes" to alvo.length(),
+            "nome" to alvo.name,
+            "caminho" to alvo.absolutePath
+        )
+    }
+
+    private fun abrirNaGaleria(uri: String?, mime: String): Boolean {
+        if (uri.isNullOrBlank()) return false
+        return try {
+            startActivity(
+                Intent(Intent.ACTION_VIEW)
+                    .setDataAndType(Uri.parse(uri), mime)
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun compartilharDaGaleria(uri: String?, mime: String): Boolean {
+        if (uri.isNullOrBlank()) return false
+        return try {
+            val envio = Intent(Intent.ACTION_SEND)
+                .setType(mime)
+                .putExtra(Intent.EXTRA_STREAM, Uri.parse(uri))
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            startActivity(
+                Intent.createChooser(envio, null)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+            true
+        } catch (_: Exception) {
+            false
+        }
     }
 
     // =========================================================== atualizacao

@@ -17,14 +17,15 @@ import '../../../application/ui/pro_mode.dart';
 import '../../../domain/effect.dart';
 import '../../../domain/presets_de_edicao.dart';
 import '../../am/am_colors.dart';
-import '../../am/estudio_do_tempo.dart' show showEstudioDoTempo;
+import '../../../domain/animador_de_texto.dart';
 import 'effect_detail_sheet.dart';
 import 'previa_do_efeito.dart';
 
-/// O que acha a entrada "Time Remap" na busca (ja sem acento e sem caixa).
-const _buscaDoTimeRemap =
-    'time remap remapear tempo velocidade curva rampa speed ramp '
-    'congelar reverso camera lenta slow motion';
+/// O que acha a entrada "Animador de Texto" na busca (sem acento e sem
+/// caixa, como o resto da busca da galeria).
+const _buscaDoAnimadorDeTexto =
+    'animador de texto animacao letra por letra palavra typewriter '
+    'maquina de escrever offset seletor range text animator';
 
 /// A GALERIA DE EFEITOS (Fase 4): previa animada de verdade por efeito,
 /// busca com sinonimos, categorias com contador e favoritos. Um toque no
@@ -43,9 +44,6 @@ Future<void> showEffectGallery(
   PlaybackController playback,
 ) async {
   final controller = ref.read(editorControllerProvider.notifier);
-  // O `ref` de QUEM ABRIU a galeria: o de dentro da folha morre com ela, e
-  // o Estudio do tempo abre depois de a folha fechar.
-  final refDeFora = ref;
   final search = TextEditingController();
   var query = '';
   String? category;
@@ -90,10 +88,18 @@ Future<void> showEffectGallery(
                 : (category == null
                       ? efeitosDoCatalogo
                       : effectsInCategory(category!));
+            // SO EM VIDEO: o fluxo optico e a curva de tempo trabalham na
+            // FONTE do clipe. Um texto ou uma forma nao tem fonte para
+            // remapear, e um tile que nao aplica nada e pior que tile
+            // nenhum.
             if (ref.read(editorControllerProvider).layerById(layerId)
                 is! VideoLayer) {
               results = results
-                  .where((t) => t != EffectType.opticalFlow)
+                  .where(
+                    (t) =>
+                        t != EffectType.opticalFlow &&
+                        t != EffectType.timeRemap,
+                  )
                   .toList();
             }
             if (edits && query.isEmpty && !favoritos) {
@@ -121,21 +127,26 @@ Future<void> showEffectGallery(
               ];
             }
 
-            // So em video (a curva de tempo e da fonte do clipe). Com busca,
-            // vale a busca — os filtros de aba so contam com ela vazia,
-            // como no resto da galeria; sem busca, aparece em "Todos" e na
-            // aba Tempo.
-            final buscaDoTempo = normalizarBusca(query.trim());
-            final mostrarTimeRemap =
-                camadaDaGaleria is VideoLayer &&
-                (buscaDoTempo.isNotEmpty
-                    ? _buscaDoTimeRemap.contains(buscaDoTempo)
+            // EFEITOS → TEXTO → ANIMADOR DE TEXTO. So em camada de texto:
+            // ele anima UNIDADE por UNIDADE (letra, palavra, linha), e
+            // uma camada sem texto nao tem unidade nenhuma.
+            //
+            // A entrada fica fora da grade porque o motor dele nao e um
+            // passe de pixel e nao ha previa de catalogo para mostrar —
+            // mas o que ela aplica e um cartao igual ao dos outros, na
+            // mesma pilha.
+            final buscaDoTexto = normalizarBusca(query.trim());
+            final ehTexto = camadaDaGaleria is TextLayer;
+            final mostrarAnimadorDeTexto =
+                ehTexto &&
+                (buscaDoTexto.isNotEmpty
+                    ? _buscaDoAnimadorDeTexto.contains(buscaDoTexto)
                     : !presets &&
                           !favoritos &&
                           !recentes &&
                           !edits &&
                           !sugeridos &&
-                          (category == null || category == 'Time'));
+                          (category == null || category == 'Text'));
 
             Widget chip(
               String texto,
@@ -279,6 +290,27 @@ Future<void> showEffectGallery(
                                   }),
                                   key: const ValueKey('galeria-favoritos'),
                                 ),
+                              // A CATEGORIA TEXTO so existe em camada de
+                              // texto, e hoje tem um morador so. Ela nao
+                              // sai de `effectCategories` porque o
+                              // Animador de Texto nao e um tipo do
+                              // catalogo de efeitos de pixel.
+                              if (ehTexto)
+                                chip(
+                                  '${translate(sheetContext, 'Texto')} 1',
+                                  category == 'Text',
+                                  () => setSheetState(() {
+                                    category = category == 'Text'
+                                        ? null
+                                        : 'Text';
+                                    favoritos = false;
+                                    edits = false;
+                                    presets = false;
+                                    sugeridos = false;
+                                    recentes = false;
+                                  }),
+                                  key: const ValueKey('galeria-cat-Text'),
+                                ),
                               for (final c in effectCategories)
                                 if (effectsInCategory(c).isNotEmpty)
                                   chip(
@@ -299,22 +331,17 @@ Future<void> showEffectGallery(
                         ),
                       ),
                     const SizedBox(height: 8),
-                    // EFEITOS -> TEMPO -> TIME REMAP. O tipo continua fora
-                    // do catalogo (`efeitosInternos`): aplicar o efeito cru
-                    // so ligava a curva identidade e deixava a pessoa com
-                    // um numero de segundos para arrastar. Esta entrada
-                    // abre o MESMO Estudio do tempo da folha "Tempo" — uma
-                    // casa so para a curva, duas portas ate ela.
-                    if (mostrarTimeRemap)
-                      _EntradaDoTimeRemap(
+                    // EFEITOS -> TEMPO -> TIME REMAP. Desde 20/09 ele e um
+                    // TILE COMO OS OUTROS, na categoria Tempo, ao lado de
+                    // RGB Time Warp e Posterize Time. A faixa especial que
+                    // morava aqui e abria um estudio proprio saiu a pedido
+                    // do dono: "nao quero tela especial, nem secao
+                    // escondida, nem editor separado".
+                    if (mostrarAnimadorDeTexto)
+                      _EntradaDoAnimadorDeTexto(
                         onTap: () {
+                          controller.addTextAnimator(layerId);
                           Navigator.of(sheetContext).pop();
-                          showEstudioDoTempo(
-                            context,
-                            refDeFora,
-                            layerId,
-                            playback,
-                          );
                         },
                       ),
                     if (presets && query.isEmpty)
@@ -365,10 +392,11 @@ Future<void> showEffectGallery(
                       )
                     else
                       Expanded(
-                        // Com a busca em "time remap" a grade fica vazia e
-                        // a entrada acima e a resposta: "Nada encontrado"
-                        // embaixo dela seria mentira.
-                        child: results.isEmpty && mostrarTimeRemap
+                        // Com a busca em "animador de texto" (ou na aba
+                        // Texto) a grade fica vazia e a entrada acima e a
+                        // resposta: "Nada encontrado" embaixo dela seria
+                        // mentira.
+                        child: results.isEmpty && mostrarAnimadorDeTexto
                             ? const SizedBox.shrink()
                             : results.isEmpty
                             ? Center(
@@ -722,11 +750,14 @@ class _PresetTile extends StatelessWidget {
   }
 }
 
-/// A entrada "Time Remap" da aba Tempo: uma linha acima da grade, e nao um
-/// tile dela — nao ha previa animada para mostrar, e ela ABRE um editor em
-/// vez de empilhar um efeito.
-class _EntradaDoTimeRemap extends StatelessWidget {
-  const _EntradaDoTimeRemap({required this.onTap});
+/// A ENTRADA "ANIMADOR DE TEXTO" da aba Texto: uma linha acima da grade.
+///
+/// Fora da grade porque nao ha previa de catalogo para mostrar — o que
+/// ele anima e o texto DESTA camada, letra a letra, e nao um quadrado de
+/// demonstracao. O que ela aplica, porem, e um efeito como os outros: um
+/// cartao na mesma pilha, com os mesmos parametros e o mesmo losango.
+class _EntradaDoAnimadorDeTexto extends StatelessWidget {
+  const _EntradaDoAnimadorDeTexto({required this.onTap});
 
   final VoidCallback onTap;
 
@@ -734,7 +765,7 @@ class _EntradaDoTimeRemap extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(bottom: 10),
     child: Tocavel(
-      key: const ValueKey('efeito-time_remap'),
+      key: const ValueKey('efeito-animador_de_texto'),
       haptico: true,
       onTap: onTap,
       child: Container(
@@ -746,15 +777,15 @@ class _EntradaDoTimeRemap extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Icon(CupertinoIcons.timer, size: 20, color: AmColors.action),
+            Icon(CupertinoIcons.textformat, size: 20, color: AmColors.action),
             const SizedBox(width: 10),
             Expanded(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  AppText(
-                    'Time Remap',
+                  const AppText(
+                    nomeDoAnimadorDeTexto,
                     maxLines: 1,
                     style: TextStyle(
                       fontSize: 14,
@@ -762,8 +793,8 @@ class _EntradaDoTimeRemap extends StatelessWidget {
                       color: AmColors.text,
                     ),
                   ),
-                  AppText(
-                    'Tempo · curva, keyframes, congelar e reverso',
+                  const AppText(
+                    'Texto · letra a letra, palavra ou linha',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(fontSize: 11, color: AmColors.muted),
@@ -772,9 +803,9 @@ class _EntradaDoTimeRemap extends StatelessWidget {
               ),
             ),
             Icon(
-              CupertinoIcons.chevron_right,
-              size: 14,
-              color: AmColors.muted,
+              CupertinoIcons.plus_circle_fill,
+              size: 20,
+              color: AmColors.accent,
             ),
           ],
         ),
@@ -782,3 +813,4 @@ class _EntradaDoTimeRemap extends StatelessWidget {
     ),
   );
 }
+

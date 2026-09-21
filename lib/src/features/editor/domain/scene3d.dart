@@ -488,6 +488,9 @@ class SceneNode {
     AnimatedDouble? rotY,
     AnimatedDouble? rotZ,
     AnimatedDouble? scale,
+    AnimatedDouble? scaleX,
+    AnimatedDouble? scaleY,
+    AnimatedDouble? scaleZ,
     this.size = 100,
     this.visible = true,
     this.instances = const [],
@@ -518,7 +521,10 @@ class SceneNode {
        rotX = rotX ?? AnimatedDouble(0),
        rotY = rotY ?? AnimatedDouble(0),
        rotZ = rotZ ?? AnimatedDouble(0),
-       scale = scale ?? AnimatedDouble(1);
+       scale = scale ?? AnimatedDouble(1),
+       scaleX = scaleX ?? AnimatedDouble(1),
+       scaleY = scaleY ?? AnimatedDouble(1),
+       scaleZ = scaleZ ?? AnimatedDouble(1);
 
   /// Uma copia com id novo — o mesmo objeto, ao lado do original.
   SceneNode duplicado({String? nome}) => SceneNode(
@@ -532,6 +538,9 @@ class SceneNode {
     rotY: rotY,
     rotZ: rotZ,
     scale: scale,
+    scaleX: scaleX,
+    scaleY: scaleY,
+    scaleZ: scaleZ,
     size: size,
     visible: visible,
     instances: instances,
@@ -567,6 +576,24 @@ class SceneNode {
   final AnimatedDouble rotY;
   final AnimatedDouble rotZ;
   final AnimatedDouble scale;
+
+  /// ESCALA POR EIXO — e SO DESTE NO.
+  ///
+  /// [scale] e a escala UNIFORME, e e ela que desce pela cadeia de pais
+  /// ([NodeTransform] carrega um fator so, e a posicao do filho e
+  /// multiplicada por ele). Esticar um objeto num eixo nao e a mesma
+  /// coisa: se descesse pelo pai, um nulo achatado em Y arrastaria os
+  /// filhos para um espaco cisalhado que nem a ponte do motor nem o
+  /// pintor de CPU sabem representar (os dois so tem "escala X, Y, Z" da
+  /// PROPRIA camada).
+  ///
+  /// Por isso estes tres multiplicam apenas os vertices do proprio no —
+  /// a caixa dele muda, a cadeia continua igual. Nascem em 1, entao um
+  /// projeto antigo (e um no que ninguem esticou) desenha exatamente o
+  /// que desenhava antes.
+  final AnimatedDouble scaleX;
+  final AnimatedDouble scaleY;
+  final AnimatedDouble scaleZ;
   final double size;
   final bool visible;
 
@@ -635,6 +662,9 @@ class SceneNode {
     AnimatedDouble? rotY,
     AnimatedDouble? rotZ,
     AnimatedDouble? scale,
+    AnimatedDouble? scaleX,
+    AnimatedDouble? scaleY,
+    AnimatedDouble? scaleZ,
     double? size,
     bool? visible,
     List<Vec3>? instances,
@@ -673,6 +703,9 @@ class SceneNode {
     rotY: rotY ?? this.rotY,
     rotZ: rotZ ?? this.rotZ,
     scale: scale ?? this.scale,
+    scaleX: scaleX ?? this.scaleX,
+    scaleY: scaleY ?? this.scaleY,
+    scaleZ: scaleZ ?? this.scaleZ,
     size: size ?? this.size,
     visible: visible ?? this.visible,
     instances: instances ?? this.instances,
@@ -713,6 +746,9 @@ class SceneNode {
     rotY: rotY,
     rotZ: rotZ,
     scale: scale,
+    scaleX: scaleX,
+    scaleY: scaleY,
+    scaleZ: scaleZ,
     size: size,
     visible: visible,
     instances: instances,
@@ -1574,6 +1610,13 @@ SceneFrame renderScene(
 
     final xf = resolveNodeTransform(scene, node, t);
     final s = node.size * xf.scale;
+    // A ESCALA POR EIXO MULTIPLICA SO ESTE NO (ver [SceneNode.scaleX]): ela
+    // entra nos vertices, e nao no transform que desce para os filhos. As
+    // normais sao recalculadas por face (Newell) a partir dos vertices de
+    // MUNDO logo abaixo, entao a luz continua certa num objeto achatado.
+    final sx = s * node.scaleX.valueAt(t);
+    final sy = s * node.scaleY.valueAt(t);
+    final sz = s * node.scaleZ.valueAt(t);
     final rx = xf.rotX * math.pi / 180;
     final ry = xf.rotY * math.pi / 180;
     final rz = xf.rotZ * math.pi / 180;
@@ -1600,7 +1643,11 @@ SceneFrame renderScene(
       // objeto inteiro com um teste so.
       final toCam = origin - cam.position;
       final zCam = toCam.dot(basis.forward);
-      final radius = s.abs() * boundRadius;
+      // O RAIO DO DESCARTE FICA COM O MAIOR DOS TRES EIXOS: um objeto
+      // esticado em Y tem de continuar entrando no quadro pela borda de
+      // cima, e o raio pequeno demais e um objeto que some sem motivo.
+      final radius =
+          math.max(sx.abs(), math.max(sy.abs(), sz.abs())) * boundRadius;
       if (zCam + radius < cam.near || zCam - radius > cam.far) {
         culled++;
         continue;
@@ -1626,7 +1673,7 @@ SceneFrame renderScene(
       final wz = Float64List(n);
       for (var i = 0; i < n; i++) {
         final v = mesh.verts[i];
-        final r = _rotate(Vec3(v[0] * s, v[1] * s, v[2] * s), rx, ry, rz);
+        final r = _rotate(Vec3(v[0] * sx, v[1] * sy, v[2] * sz), rx, ry, rz);
         final world = origin + r;
         wx[i] = world.x;
         wy[i] = world.y;

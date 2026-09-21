@@ -10,6 +10,7 @@ import '../../projects/application/projects_controller.dart';
 import '../../projects/application/thumbnail_service.dart';
 import '../application/desempenho/aurea_performance_manager.dart';
 import '../application/editor_controller.dart';
+import '../application/perfil3d.dart';
 import '../application/freehand_session.dart';
 import '../application/playback_controller.dart';
 import '../application/preview_stats.dart';
@@ -297,6 +298,45 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
 
   Set<int> _timesForProp(Layer layer, LayerProp prop) =>
       keyframeTimesForProp(layer, prop);
+
+  /// OS DIAMANTES ACESOS da propriedade que o painel aberto edita.
+  ///
+  /// O `select` do Riverpod compara com `==`, e `Set` NAO tem igualdade
+  /// por valor em Dart: devolver o conjunto cru faria a timeline se
+  /// refazer a cada passo de slider mesmo sem nenhum keyframe novo — que
+  /// e exatamente o custo que esta frente veio cortar. [_Diamantes]
+  /// guarda os instantes ORDENADOS e compara por valor, entao o `watch`
+  /// so acorda quando um keyframe nasce, morre ou muda de lugar.
+  _Diamantes? _diamantesAcesos(WidgetRef r, EditorSession s, String? id) {
+    if (id == null) return null;
+    final forma = switch (s.panel) {
+      EditorPanel.editPoints => r.watch(pathEditTargetProvider)?.forma ?? true,
+      _ => true,
+    };
+    return r.watch(
+      editorControllerProvider.select((p) {
+        final layer = p.layerById(id);
+        if (layer == null) return null;
+        final us = switch (s.panel) {
+          EditorPanel.none || EditorPanel.add => null,
+          EditorPanel.transform => _timesForProp(layer, propOfTool(s.tool)),
+          EditorPanel.curve => _timesForProp(layer, s.curveProp),
+          EditorPanel.blending => {
+            ...layer.opacityTimesUs,
+            ...layer.maskTimesUs,
+          },
+          EditorPanel.effects => layer.effectTimesUs,
+          EditorPanel.colorFill => const <int>{},
+          EditorPanel.editText => null,
+          EditorPanel.editShape => layer.moduleTimesUs,
+          EditorPanel.editPoints => forma
+              ? layer.moduleTimesUs
+              : layer.maskTimesUs,
+        };
+        return us == null ? null : _Diamantes(us);
+      }),
+    );
+  }
 
   /// De qual propriedade e o keyframe que esta em [t], e como se chama.
   (LayerProp, String)? _donoDoKeyframe(Layer layer, Duration t) {
@@ -648,6 +688,10 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
 
   @override
   Widget build(BuildContext context) {
+    // A REGUA DAS RECONSTRUCOES. Desligada custa um `if` (ver Perfil3D);
+    // ligada, e o numero que prova se um passo de slider refaz o editor
+    // inteiro. Ver test/preview2_reconstrucoes_test.dart.
+    Perfil3D.contar('build.editor');
     final selectedId = ref.watch(selectedLayerProvider);
     final multi = ref.watch(multiSelectProvider);
     final s = ref.watch(editorSessionProvider);
@@ -701,15 +745,29 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
       editorControllerProvider.select((p) => p.fps),
     );
 
-    // A CAMADA, NAO O PROJETO. Observar o projeto inteiro aqui remarcava a
-    // RAIZ do editor (palco, timeline, barras e o painel aberto) a cada
-    // mutacao — inclusive a cada passo de um arrasto. A camada e imutavel:
-    // o select so dispara quando ELA muda de identidade.
-    final layer = selectedId == null
+    // A FICHA DA CAMADA, E NAO A CAMADA.
+    //
+    // Observar a CAMADA aqui ainda era largo demais: a camada tambem e
+    // imutavel, entao mexer em QUALQUER numero dela (que e o que um
+    // slider faz, passo a passo) trocava a identidade e remarcava a RAIZ
+    // do editor — palco, timeline, barras e a folha aberta. Medido em
+    // test/preview2_reconstrucoes_test.dart: 12 passos de slider na
+    // camada selecionada davam 12 reconstrucoes de tudo.
+    //
+    // A raiz so precisa de tres coisas da camada: se existe, o id e o
+    // nome (para a trilha). Sao valores, e o `select` compara por valor:
+    // arrastar opacidade nao muda nenhum dos tres. Quem precisa da camada
+    // VIVA — as ferramentas da camada e os diamantes da timeline — le num
+    // `Consumer` proprio, abaixo.
+    final ficha = selectedId == null
         ? null
         : ref.watch(
-            editorControllerProvider.select((p) => p.layerById(selectedId)),
+            editorControllerProvider.select((p) {
+              final l = p.layerById(selectedId);
+              return l == null ? null : (id: l.id, nome: l.name);
+            }),
           );
+    final temCamada = ficha != null;
     final targets = <String>{...multi, ?selectedId};
     final semCamadas = ref.watch(
       editorControllerProvider.select((p) => p.layers.isEmpty),
@@ -763,27 +821,6 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
         s.panel == EditorPanel.curve ||
         s.animandoTexto;
 
-    // Diamantes da propriedade ativa acendem; os demais ficam apagados.
-    final Set<int>? activeTimesUs = layer == null
-        ? null
-        : switch (s.panel) {
-            EditorPanel.none || EditorPanel.add => null,
-            EditorPanel.transform => _timesForProp(layer, propOfTool(s.tool)),
-            EditorPanel.curve => _timesForProp(layer, s.curveProp),
-            EditorPanel.blending => {
-              ...layer.opacityTimesUs,
-              ...layer.maskTimesUs,
-            },
-            EditorPanel.effects => layer.effectTimesUs,
-            EditorPanel.colorFill => const <int>{},
-            EditorPanel.editText => null,
-            EditorPanel.editShape => layer.moduleTimesUs,
-            EditorPanel.editPoints =>
-              (ref.watch(pathEditTargetProvider)?.forma ?? true)
-                  ? layer.moduleTimesUs
-                  : layer.maskTimesUs,
-          };
-
     final temContexto =
         s.panel != EditorPanel.none ||
         ref.watch(freehandRequestProvider) ||
@@ -808,9 +845,9 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
       final nomeDoProjeto = ref.watch(
         editorControllerProvider.select((p) => p.name),
       );
-      trilha = layer == null
+      trilha = ficha == null
           ? nomeDoProjeto
-          : '$nomeDoProjeto › ${layer.name}';
+          : '$nomeDoProjeto › ${ficha.nome}';
     } else if (s.adding) {
       conteudo = AddLayerPanel(
         key: const ValueKey('adicionar-camada'),
@@ -821,11 +858,15 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
       );
     } else if (targets.length >= 2) {
       conteudo = MultiSelectionPanel(targets: targets, playback: _playback);
-    } else if (layer != null) {
-      conteudo = LayerToolsDock(
-        layer: layer,
+    } else if (ficha != null) {
+      // AS FERRAMENTAS DA CAMADA leem a camada VIVA num `Consumer`
+      // proprio: elas precisam dela inteira (tipo, grupo, travas), e a
+      // raiz nao. Sem esta casca, dar `layer` daqui de cima obrigava a
+      // raiz a observar a camada — e um slider voltava a refazer tudo.
+      conteudo = _FerramentasDaCamada(
+        layerId: ficha.id,
         playback: _playback,
-        onAction: (action) => _openLayerAction(layer, action),
+        onAction: _openLayerAction,
       );
     } else {
       conteudo = null;
@@ -858,7 +899,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
         !mostrandoDicas &&
         panel == null &&
         !s.adding &&
-        layer == null &&
+        !temCamada &&
         targets.length < 2;
 
     return AureaTheme(
@@ -886,9 +927,18 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                 // onde a composicao comeca. Deduzindo a altura da
                 // proporcao, o quadro preenche a area inteira e o que
                 // sobra vai para a timeline, que estava vazia.
-                final proporcao = ref
-                    .watch(editorControllerProvider)
-                    .aspectRatio;
+                // O ULTIMO WATCH LARGO DA RAIZ, e o mais caro que havia.
+                //
+                // Ele lia `aspectRatio` do projeto INTEIRO: como o projeto
+                // e imutavel, cada mutacao trocava a identidade e este
+                // `watch` remarcava a RAIZ do editor — palco, timeline,
+                // barras e a folha aberta — a cada passo de dedo. Medido
+                // em test/preview2_reconstrucoes_test.dart: 12 passos de
+                // slider davam 12 reconstrucoes de tudo. Com o `select`,
+                // so uma mudanca de PROPORCAO refaz esta arvore.
+                final proporcao = ref.watch(
+                  editorControllerProvider.select((p) => p.aspectRatio),
+                );
                 // O PALCO TEM TAMANHO PROPRIO; a composicao encaixa
                 // DENTRO dele.
                 //
@@ -963,12 +1013,12 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                   sheetVisible: conteudo != null,
                   timelineFloor: s.animandoTexto
                       ? EditorSession.pisoDaTimelineAoAnimar
-                      : layer != null || s.panel != EditorPanel.none
+                      : temCamada || s.panel != EditorPanel.none
                       ? 90
                       : 120,
                   sheetMayCoverTimeline: s.adding,
                   focusedLayer:
-                      layer != null && s.panel != EditorPanel.none && !s.adding,
+                      temCamada && s.panel != EditorPanel.none && !s.adding,
                 );
                 // AS PECAS, montadas uma vez; o arranjo depende da largura
                 // (Fase 7: acima de 700 pt, timeline e painel lado a lado —
@@ -1023,9 +1073,9 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                 // A BARRA DE CIMA SEGUE A SELECAO: lote, camada ou projeto.
                 final barraDoTopo = multi.isNotEmpty
                     ? BarraDoLote(playback: _playback) as Widget
-                    : (layer != null
+                    : (ficha != null
                           ? BarraDaCamada(
-                              layerId: layer.id,
+                              layerId: ficha.id,
                               onBack: _back,
                               playback: _playback,
                             )
@@ -1034,33 +1084,42 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                               playback: _playback,
                               onMenu: () => _abrirMenuDaTimeline(context, ref),
                             ));
+                // OS DIAMANTES ACESOS SAO DA TIMELINE, e so dela: eles
+                // saem dos keyframes da camada selecionada, entao quem os
+                // calcula tem de observar a camada. Feito na raiz, isso
+                // arrastava o palco e as barras junto a cada passo de
+                // slider; aqui so a timeline acompanha.
                 Widget timeline(double alturaTimeline) => RepaintBoundary(
-                  child: AmTimeline(
-                    playback: _playback,
-                    height: alturaTimeline,
-                    singleLayerId:
-                        targets.length < 2 &&
-                            s.panel != EditorPanel.none &&
-                            !s.adding
-                        ? selectedId
-                        : null,
-                    playheadColor: pinkPlayhead ? AmColors.pink : Colors.white,
-                    onTapLayer: (l) {
-                      if (panel != null) {
-                        _back();
-                        return;
-                      }
-                      _onTapLayer(l);
-                    },
-                    onTapBackground: panel != null ? _back : null,
-                    onScrub: _videos.scrub,
-                    onExpand: _session.toggleTimelineExpanded,
-                    expanded: s.timelineExpanded,
-                    activeTimesUs: activeTimesUs,
-                    onForeignKeyframe: panel == null
-                        ? null
-                        : _onForeignKeyframe,
-                    onKeyframeTap: _onKeyframeTap,
+                  child: Consumer(
+                    builder: (context, ref, _) => AmTimeline(
+                      playback: _playback,
+                      height: alturaTimeline,
+                      singleLayerId:
+                          targets.length < 2 &&
+                              s.panel != EditorPanel.none &&
+                              !s.adding
+                          ? selectedId
+                          : null,
+                      playheadColor: pinkPlayhead
+                          ? AmColors.pink
+                          : Colors.white,
+                      onTapLayer: (l) {
+                        if (panel != null) {
+                          _back();
+                          return;
+                        }
+                        _onTapLayer(l);
+                      },
+                      onTapBackground: panel != null ? _back : null,
+                      onScrub: _videos.scrub,
+                      onExpand: _session.toggleTimelineExpanded,
+                      expanded: s.timelineExpanded,
+                      activeTimesUs: _diamantesAcesos(ref, s, selectedId)?.us,
+                      onForeignKeyframe: panel == null
+                          ? null
+                          : _onForeignKeyframe,
+                      onKeyframeTap: _onKeyframeTap,
+                    ),
                   ),
                 );
                 Widget folha(double alturaFolha) => ContextSheet(
@@ -1229,6 +1288,61 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
           ),
         ),
       ),
+    );
+  }
+}
+
+/// OS INSTANTES ACESOS, COMO VALOR. Ver [_EditorScreenState._diamantesAcesos].
+@immutable
+class _Diamantes {
+  _Diamantes(Set<int> instantes)
+    : us = instantes,
+      _ordenados = instantes.toList()..sort();
+
+  final Set<int> us;
+  final List<int> _ordenados;
+
+  @override
+  bool operator ==(Object other) =>
+      other is _Diamantes && _iguais(other._ordenados, _ordenados);
+
+  @override
+  int get hashCode => Object.hashAll(_ordenados);
+
+  static bool _iguais(List<int> a, List<int> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+}
+
+/// AS FERRAMENTAS DA CAMADA, com a camada viva lida aqui dentro.
+///
+/// A raiz do editor so sabe o id: assim um slider (que troca a identidade
+/// da camada a cada passo) refaz esta casca, e nao a tela inteira.
+class _FerramentasDaCamada extends ConsumerWidget {
+  const _FerramentasDaCamada({
+    required this.layerId,
+    required this.playback,
+    required this.onAction,
+  });
+
+  final String layerId;
+  final PlaybackController playback;
+  final void Function(Layer layer, LayerMenuAction action) onAction;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final layer = ref.watch(
+      editorControllerProvider.select((p) => p.layerById(layerId)),
+    );
+    if (layer == null) return const SizedBox.shrink();
+    return LayerToolsDock(
+      layer: layer,
+      playback: playback,
+      onAction: (action) => onAction(layer, action),
     );
   }
 }
@@ -1427,22 +1541,34 @@ class _Diag3D extends StatelessWidget {
 class _RascunhoBadge extends ConsumerWidget {
   const _RascunhoBadge();
 
+  /// A VARREDURA LEMBRADA PELA PILHA.
+  ///
+  /// Este `select` roda a cada mutacao do projeto — inclusive a cada
+  /// passo de um slider — e percorre todas as camadas e todos os efeitos
+  /// de cada uma. A resposta so pode mudar quando a pilha muda de
+  /// identidade (a lista e imutavel), entao um par lembrado basta.
+  static List<Layer>? _pilhaDoAviso;
+  static bool _respostaDoAviso = false;
+
+  static bool _simplificaAlgo(List<Layer> camadas) {
+    if (identical(camadas, _pilhaDoAviso)) return _respostaDoAviso;
+    _pilhaDoAviso = camadas;
+    return _respostaDoAviso = camadas.any(
+      (l) =>
+          l is Scene3DLayer ||
+          l.effects.any(
+            (e) =>
+                e.enabled &&
+                ((receitasSapphire[e.type]?.usaOrcamentoDeAmostras ?? false) ||
+                    e.type == EffectType.unsharpMask),
+          ),
+    );
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final simplifica = ref.watch(
-      editorControllerProvider.select(
-        (p) => p.layers.any(
-          (l) =>
-              l is Scene3DLayer ||
-              l.effects.any(
-                (e) =>
-                    e.enabled &&
-                    ((receitasSapphire[e.type]?.usaOrcamentoDeAmostras ??
-                            false) ||
-                        e.type == EffectType.unsharpMask),
-              ),
-        ),
-      ),
+      editorControllerProvider.select((p) => _simplificaAlgo(p.layers)),
     );
     if (!simplifica) return const SizedBox.shrink();
     return ValueListenableBuilder<bool>(

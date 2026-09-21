@@ -40,15 +40,19 @@ void _lembrarCompensacao(WidgetRef ref, CompensacaoDaVelocidade c) {
   } catch (_) {}
 }
 
-/// A FOLHA "TEMPO" da camada: a porta do Time Remap no topo, e abaixo a
-/// velocidade constante com o modo de compensacao, as rampas prontas, o
-/// reverso, o blur temporal e a interpolacao de quadros.
+/// A FOLHA "TEMPO E VELOCIDADE" da camada: velocidade constante com o
+/// modo de compensacao, as rampas prontas, o reverso, o blur temporal e a
+/// interpolacao de quadros.
 ///
-/// O Time Remap (curva, keyframes de tempo, congelar, reverso por trecho)
-/// mora no Estudio do tempo; esta folha e o caminho ate ele. A porta ja
-/// foi apagada duas vezes (da folha em `aba36bb`, da galeria em `7e7c294`)
-/// e o recurso ficou sem chamador nenhum — `time_remap_porta_test.dart`
-/// existe para isso nao se repetir em silencio.
+/// AQUI NAO HA MAIS PORTA PARA O TIME REMAP (20/09, pedido do dono). A
+/// faixa "Time Remap" que abria um estudio proprio no topo desta folha
+/// saiu: o Time Remap e um EFEITO, em Efeitos -> Tempo, ao lado de RGB
+/// Time Warp e Posterize Time. Esta folha ficou com o que ela sempre foi
+/// — a velocidade CONSTANTE do clipe.
+///
+/// O que ela nao perdeu: a interpolacao de quadros continua aqui porque
+/// uma camera lenta de velocidade constante (0,25x, sem curva nenhuma)
+/// tambem precisa escolher como os quadros do meio nascem.
 Future<void> showSpeedSheet(
   BuildContext context,
   WidgetRef ref,
@@ -124,23 +128,6 @@ Future<void> showSpeedSheet(
                   '${speed.toStringAsFixed(2)}x · ${formatTime(layer.duration)}',
                   style: TextStyle(fontSize: 12, color: AmColors.accent),
                 ),
-                if (video != null) ...[
-                  const SizedBox(height: 10),
-                  // NO TOPO, e nao no fim da folha: quem entra em "Tempo"
-                  // atras do Time Remap nao pode ter de rolar para acha-lo.
-                  _PortaDoTimeRemap(
-                    video: video,
-                    onTap: () async {
-                      await showEstudioDoTempo(
-                        sheetContext,
-                        ref,
-                        layerId,
-                        playback,
-                      );
-                      if (sheetContext.mounted) setSheetState(() {});
-                    },
-                  ),
-                ],
                 const SizedBox(height: 10),
                 _LinhaDeCompensacao(
                   modo: modo,
@@ -318,81 +305,6 @@ Future<void> showSpeedSheet(
       },
     ),
   );
-}
-
-/// A PORTA DO ESTUDIO DO TEMPO: uma faixa cheia, com o nome do recurso e o
-/// estado da curva — quem ja remapeou o clipe ve isso antes de abrir.
-class _PortaDoTimeRemap extends StatelessWidget {
-  const _PortaDoTimeRemap({required this.video, required this.onTap});
-
-  final VideoLayer video;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final trilha = timeRemapTrackOf(video);
-    final estiloDoEstado = TextStyle(fontSize: 11, color: AmColors.onAction);
-    return Tocavel(
-      key: const ValueKey('abrir-estudio-do-tempo'),
-      haptico: true,
-      onTap: onTap,
-      child: Container(
-        height: 48,
-        padding: const EdgeInsets.symmetric(horizontal: 14),
-        decoration: BoxDecoration(
-          color: AmColors.action,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Row(
-          children: [
-            Icon(
-              Icons.show_chart_rounded,
-              size: 18,
-              color: AmColors.onAction,
-            ),
-            const SizedBox(width: 8),
-            AppText(
-              'Time Remap',
-              maxLines: 1,
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w700,
-                color: AmColors.onAction,
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Align(
-                alignment: Alignment.centerRight,
-                child: trilha == null
-                    ? AppText(
-                        'Curva, keyframes, congelar, reverso',
-                        key: const ValueKey('time-remap-estado'),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: estiloDoEstado,
-                      )
-                    : AppTextMoldado(
-                        'Curva ativa · {0} keyframes',
-                        [trilha.keyframes.length],
-                        key: const ValueKey('time-remap-estado'),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: estiloDoEstado,
-                      ),
-              ),
-            ),
-            const SizedBox(width: 4),
-            Icon(
-              CupertinoIcons.chevron_right,
-              size: 14,
-              color: AmColors.onAction,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 }
 
 /// OS QUATRO MODOS lado a lado, cada um com o desenho do que acontece com

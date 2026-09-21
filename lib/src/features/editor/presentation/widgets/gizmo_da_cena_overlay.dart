@@ -102,6 +102,11 @@ class _GizmoDaCenaOverlayState extends ConsumerState<GizmoDaCenaOverlay> {
   EixoDoGizmo? _anel;
   bool _escalando = false;
 
+  /// O BRACO PEGO ESTA ESTICANDO, E NAO ANDANDO. No modo Escalar os
+  /// mesmos tres bracos existem, com a ponta em cubo: sem esta marca o
+  /// arrasto cairia no ramo de mover e o objeto sairia do lugar.
+  bool _escalaPorEixo = false;
+
   double _valorInicial = 0;
   double _giroAcumulado = 0;
   Offset _deltaAcumulado = Offset.zero;
@@ -111,6 +116,27 @@ class _GizmoDaCenaOverlayState extends ConsumerState<GizmoDaCenaOverlay> {
   double get _escalaDoPalco => widget.escala <= 0 ? 1 : widget.escala;
 
   double get _braco => 86 / _escalaDoPalco;
+
+  /// A FOLGA DO DEDO, em pixels de COMPOSICAO. 26 px de TELA e a metade
+  /// do alvo minimo do app (`AureaTokens.minTap`): a alca e uma linha, e
+  /// o que se mira e a faixa em volta dela.
+  double get _folga => 26 / _escalaDoPalco;
+
+  /// O ultimo cabecote ainda nao publicado. Um so agendamento por rajada:
+  /// durante a reproducao o valor muda a cada quadro, e agendar uma
+  /// chamada por quadro seria trabalho de graca.
+  Duration? _cabecotePendente;
+
+  void _publicarCabecote(Duration t) {
+    final primeiro = _cabecotePendente == null;
+    _cabecotePendente = t;
+    if (!primeiro) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final v = _cabecotePendente;
+      _cabecotePendente = null;
+      if (v != null && cabecoteDoPalco.value != v) cabecoteDoPalco.value = v;
+    });
+  }
 
   /// O RAIO DO ANEL EM UNIDADES DA CENA (ver [Gizmo3DPainter.pixelsPorUnidade]):
   /// 118 px de tela viram px de composicao e depois unidades, para o anel
@@ -124,7 +150,13 @@ class _GizmoDaCenaOverlayState extends ConsumerState<GizmoDaCenaOverlay> {
       child: ValueListenableBuilder<Duration>(
         valueListenable: widget.tempo,
         builder: (context, tempo, _) {
-          if (cabecoteDoPalco.value != tempo) cabecoteDoPalco.value = tempo;
+          // O CABECOTE VIAJA DEPOIS DO QUADRO, e nao dentro dele.
+          //
+          // A ficha 3D ESCUTA [cabecoteDoPalco] para o losango seguir o
+          // transporte. Publicar aqui dentro marcaria a ficha suja no meio
+          // da construcao da arvore — o "setState() called during build",
+          // que derruba o editor inteiro em vez de so atrasar um numero.
+          if (cabecoteDoPalco.value != tempo) _publicarCabecote(tempo);
           final projeto = ref.watch(editorControllerProvider);
           final id = ref.watch(selectedLayerProvider);
           final camada = id == null ? null : projeto.layerById(id);
@@ -183,9 +215,14 @@ class _GizmoDaCenaOverlayState extends ConsumerState<GizmoDaCenaOverlay> {
                       eixoAtivo: _eixo,
                       anelAtivo: _anel,
                       ativo: !bloqueada,
-                      eixos: modo == ModoDoGizmo3D.mover,
+                      // OS BRACOS APARECEM EM MOVER E EM ESCALAR: no
+                      // segundo eles sao as alcas de escala POR EIXO (a
+                      // ponta vira cubo). No modo Girar sairiam de graca
+                      // por cima dos aneis e roubariam o dedo.
+                      eixos: modo != ModoDoGizmo3D.girar,
                       aneis: modo == ModoDoGizmo3D.girar,
                       alcaDeEscala: modo == ModoDoGizmo3D.escalar,
+                      pontaQuadrada: modo == ModoDoGizmo3D.escalar,
                       escalaEmUso: _escalando,
                       pixelsPorUnidade: g.escala,
                     ),
@@ -249,49 +286,69 @@ class _GizmoDaCenaOverlayState extends ConsumerState<GizmoDaCenaOverlay> {
 
   /// AS FICHAS Mover | Girar | Escalar, no pe do palco.
   ///
-  /// Desenhadas em pixels de composicao e desescaladas: sem isso elas
+  /// Sao as MESMAS pilulas do painel de Efeitos — fundo [AmColors.chip],
+  /// escolhida em [AmColors.accentDim] com o texto em [AmColors.accent].
+  /// Nao ha componente novo aqui, so o grupo dentro de uma capsula, que e
+  /// o que separa a ferramenta do video atras dela.
+  ///
+  /// Desenhadas em pixels de composicao e DESESCALADAS: sem isso elas
   /// encolheriam com o zoom do palco ate nao caberem no dedo, que e
-  /// justamente o defeito que este gizmo veio corrigir.
+  /// justamente o defeito que este gizmo veio corrigir. Cada ficha tem 44
+  /// px de altura — o alvo minimo do app.
   Widget _fichasDeModo(ModoDoGizmo3D modo) => Align(
     alignment: Alignment.bottomCenter,
     child: Transform.scale(
       scale: 1 / _escalaDoPalco,
       alignment: Alignment.bottomCenter,
       child: Padding(
-        padding: const EdgeInsets.only(bottom: 10),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final m in ModoDoGizmo3D.values)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 3),
-                child: GestureDetector(
-                  key: ValueKey('gizmo-modo-${m.name}'),
-                  onTap: () =>
-                      ref.read(modoDoGizmo3DProvider.notifier).state = m,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 7,
-                    ),
-                    decoration: BoxDecoration(
-                      color: m == modo
-                          ? AmColors.accent
-                          : AmColors.chip.withValues(alpha: 0.9),
-                      borderRadius: BorderRadius.circular(9),
-                    ),
-                    child: AppText(
-                      rotuloDoModoDoGizmo(m),
-                      style: TextStyle(
-                        color: m == modo ? Colors.white : AmColors.text,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Container(
+          padding: const EdgeInsets.all(4),
+          decoration: BoxDecoration(
+            color: AmColors.panel.withValues(alpha: 0.86),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final m in ModoDoGizmo3D.values)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 2),
+                  child: Semantics(
+                    button: true,
+                    selected: m == modo,
+                    label: rotuloDoModoDoGizmo(m),
+                    child: GestureDetector(
+                      key: ValueKey('gizmo-modo-${m.name}'),
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () =>
+                          ref.read(modoDoGizmo3DProvider.notifier).state = m,
+                      child: Container(
+                        height: 44,
+                        alignment: Alignment.center,
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        decoration: BoxDecoration(
+                          color: m == modo
+                              ? AmColors.accentDim
+                              : AmColors.chip,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: AppText(
+                          rotuloDoModoDoGizmo(m),
+                          style: TextStyle(
+                            color: m == modo
+                                ? AmColors.accent
+                                : AmColors.text,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
       ),
     ),
@@ -311,20 +368,18 @@ class _GizmoDaCenaOverlayState extends ConsumerState<GizmoDaCenaOverlay> {
     RenderCamera camera,
     int quantosObjetos,
   ) {
-    final folga = 22 / _escalaDoPalco;
+    final folga = _folga;
     final pegou = switch (modo) {
       ModoDoGizmo3D.mover =>
         eixoNoDedo(gizmo, p, _braco, tolerancia: folga) != null,
       ModoDoGizmo3D.girar =>
-        anelNoDedo(
-          gizmo,
-          p,
-          _raioDoAnel(gizmo),
-          tolerancia: 26 / _escalaDoPalco,
-        ) !=
-            null,
+        anelNoDedo(gizmo, p, _raioDoAnel(gizmo), tolerancia: folga) != null,
+      // ESCALAR TEM QUATRO ALVOS: a alca branca da uniforme e os tres
+      // bracos de eixo.
       ModoDoGizmo3D.escalar =>
-        (p - pontoDaAlcaDeEscala(gizmo, 86, _escalaDoPalco)).distance <= folga,
+        (p - pontoDaAlcaDeEscala(gizmo, 86, _escalaDoPalco)).distance <=
+                folga ||
+            eixoNoDedo(gizmo, p, _braco, tolerancia: folga) != null,
     };
     if (pegou) return true;
     if (quantosObjetos < 2) return false;
@@ -377,6 +432,7 @@ class _GizmoDaCenaOverlayState extends ConsumerState<GizmoDaCenaOverlay> {
     _eixo = null;
     _anel = null;
     _escalando = false;
+    _escalaPorEixo = false;
     // O GIZMO CONGELADO DE UM GESTO ANTERIOR NAO PODE SOBRAR: ele e o que
     // o pintor usa enquanto o dedo esta em cima, e um gizmo velho deixaria
     // os eixos parados enquanto o objeto anda.
@@ -384,7 +440,7 @@ class _GizmoDaCenaOverlayState extends ConsumerState<GizmoDaCenaOverlay> {
     final no = cena.nodeById(noId);
     if (no == null) return;
     final c = ref.read(editorControllerProvider.notifier);
-    final folga = 22 / _escalaDoPalco;
+    final folga = _folga;
 
     switch (modo) {
       case ModoDoGizmo3D.mover:
@@ -397,23 +453,39 @@ class _GizmoDaCenaOverlayState extends ConsumerState<GizmoDaCenaOverlay> {
           gizmo,
           dedo,
           _raioDoAnel(gizmo),
-          tolerancia: 26 / _escalaDoPalco,
+          tolerancia: folga,
         );
         if (a == null) return;
         _anel = a;
         _valorInicial = c.sceneNodeValueAt(no, _propDeGirar(a), local);
       case ModoDoGizmo3D.escalar:
         final alca = pontoDaAlcaDeEscala(gizmo, 86, _escalaDoPalco);
-        if ((dedo - alca).distance > folga) return;
-        _escalando = true;
-        _valorInicial = c.sceneNodeValueAt(no, PropDoNo.escala, local);
-        // A DISTANCIA DE PARTIDA NUNCA E ZERO: a razao dedo/inicio e o
-        // fator de escala, e dividir por zero mandaria o objeto para o
-        // infinito no primeiro pixel.
-        _distanciaInicial = (dedo - gizmo.origem).distance.clamp(
-          1.0,
-          double.infinity,
-        );
+        if ((dedo - alca).distance <= folga) {
+          _escalando = true;
+          _valorInicial = c.sceneNodeValueAt(no, PropDoNo.escala, local);
+          // A DISTANCIA DE PARTIDA NUNCA E ZERO: a razao dedo/inicio e o
+          // fator de escala, e dividir por zero mandaria o objeto para o
+          // infinito no primeiro pixel.
+          _distanciaInicial = (dedo - gizmo.origem).distance.clamp(
+            1.0,
+            double.infinity,
+          );
+        } else {
+          // ESCALA POR EIXO: o braco X estica so o X do objeto. O fator e
+          // a razao entre onde o dedo esta AO LONGO DO EIXO e onde ele
+          // comecou — a mesma mao de toda ferramenta 3D, e a unica que
+          // nao inverte quando a camera passa para o outro lado.
+          final e = eixoNoDedo(gizmo, dedo, _braco, tolerancia: folga);
+          if (e == null) return;
+          _eixo = e;
+          _escalaPorEixo = true;
+          _valorInicial = c.sceneNodeValueAt(no, _propDeEscalar(e), local);
+          _distanciaInicial = _aoLongoDoEixo(
+            gizmo,
+            e,
+            dedo,
+          ).abs().clamp(12 / _escalaDoPalco, double.infinity);
+        }
     }
 
     _gizmoInicial = gizmo;
@@ -437,6 +509,18 @@ class _GizmoDaCenaOverlayState extends ConsumerState<GizmoDaCenaOverlay> {
     Interacao.marcar();
 
     final eixo = _eixo;
+    if (eixo != null && _escalaPorEixo) {
+      final agora = _aoLongoDoEixo(g, eixo, d.localPosition);
+      final fator = agora / _distanciaInicial;
+      c.editSceneNodeProp(
+        camadaId,
+        noId,
+        _propDeEscalar(eixo),
+        tempo,
+        (_valorInicial * fator).clamp(0.01, 100.0),
+      );
+      return;
+    }
     if (eixo != null) {
       // O DELTA E ACUMULADO DESDE O INICIO: o valor vem sempre de
       // `inicial + total`, e um evento perdido nao deixa erro permanente.
@@ -486,6 +570,7 @@ class _GizmoDaCenaOverlayState extends ConsumerState<GizmoDaCenaOverlay> {
     _eixo = null;
     _anel = null;
     _escalando = false;
+    _escalaPorEixo = false;
     _gizmoInicial = null;
     ref.read(editorControllerProvider.notifier).endGesture();
     Interacao.soltar();
@@ -503,6 +588,22 @@ class _GizmoDaCenaOverlayState extends ConsumerState<GizmoDaCenaOverlay> {
     EixoDoGizmo.y => PropDoNo.giroY,
     EixoDoGizmo.z => PropDoNo.giroZ,
   };
+
+  PropDoNo _propDeEscalar(EixoDoGizmo e) => switch (e) {
+    EixoDoGizmo.x => PropDoNo.escalaX,
+    EixoDoGizmo.y => PropDoNo.escalaY,
+    EixoDoGizmo.z => PropDoNo.escalaZ,
+  };
+
+  /// ONDE O DEDO ESTA AO LONGO DO EIXO, em pixels de composicao a partir
+  /// do pivo. So a componente NO eixo conta: mover de lado nao estica.
+  static double _aoLongoDoEixo(GizmoNaTela g, EixoDoGizmo e, Offset dedo) {
+    final d = g.direcao(e);
+    final modulo = d.distance;
+    if (modulo < 1e-6) return 0;
+    final rel = dedo - g.origem;
+    return (rel.dx * d.dx + rel.dy * d.dy) / modulo;
+  }
 }
 
 /// A AREA QUE SO EXISTE ONDE HA ALCA.

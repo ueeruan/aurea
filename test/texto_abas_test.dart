@@ -1,24 +1,31 @@
-
 import 'package:aurea/src/features/editor/application/editor_controller.dart';
 import 'package:aurea/src/features/editor/application/ui/editor_session.dart';
+import 'package:aurea/src/features/editor/domain/animador_de_texto.dart';
 import 'package:aurea/src/features/editor/domain/layer.dart';
-import 'package:aurea/src/features/editor/domain/text_anim.dart';
 import 'package:aurea/src/features/editor/domain/text_animator.dart';
+import 'package:aurea/src/features/editor/presentation/am/text_animators_panel.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'editor_hierarchy_test.dart' show openEditor;
 
-/// AS TRES ABAS DA EDICAO DE TEXTO — EDITAR TEXTO / ANIMACAO / PRESETS.
+/// AS ABAS DA EDICAO DE TEXTO — EDITAR TEXTO / PRESETS.
 ///
-/// O animador manual tinha painel proprio, aberto de fora, e os presets
-/// nao tinham tela nenhuma. Agora os dois moram dentro do painel de
-/// texto, e o antigo caminho nao existe mais.
+/// A TERCEIRA ABA ("Animação") SAIU em 20/09, a pedido do dono. Ela abria
+/// o Animador Manual: posicoes entrada/enfase/saida, grade de trinta e
+/// seis miniaturas, seis controles proprios e uma secao "Avancado" com
+/// seletores montados a mao. O veredito foi "praticamente impossivel de
+/// usar" e "parece plugin externo".
 ///
-/// AS PREVIAS ANIMAM EM LOOP (`AnimationController.repeat`), entao a
-/// partir do momento em que a aba de animacao monta `pumpAndSettle`
-/// NUNCA assenta. Tudo depois disso usa [assentar].
+/// Animar texto agora e APLICAR UM EFEITO — Selecionar Texto → Efeitos →
+/// Texto → Animador de Texto —, coberto por `animador_de_texto_test.dart`.
+/// Aqui fica o que sobrou da ficha: escrever o texto e aplicar uma receita
+/// pronta.
+///
+/// AS PREVIAS DOS PRESETS ANIMAM EM LOOP, entao a partir do momento em que
+/// a aba monta `pumpAndSettle` NUNCA assenta. Tudo depois disso usa
+/// [assentar].
 void main() {
   /// Quadros fixos, sem esperar a arvore ficar parada — ela nao fica.
   Future<void> assentar(WidgetTester tester, [int quadros = 8]) async {
@@ -40,81 +47,37 @@ void main() {
   TextLayer texto(ProviderContainer c, String id) =>
       c.read(editorControllerProvider).layerById(id)! as TextLayer;
 
-  testWidgets('o painel de texto abre nas tres abas, e nao ha mais botao de '
-      'animar dentro da edicao', (tester) async {
+  testWidgets('o painel de texto abre nas duas abas, e a porta do animador '
+      'manual nao existe mais', (tester) async {
     final (c, _) = await abrirTexto(tester);
 
     expect(c.read(editorSessionProvider).textSection, TextSection.edit);
-    // A aba de conteudo mostra a edicao; as outras duas existem ao lado.
     expect(find.byKey(const ValueKey('texto-conteudo')), findsOneWidget);
     expect(find.byKey(const ValueKey('texto-aba-editar')), findsOneWidget);
-    expect(find.byKey(const ValueKey('texto-animar')), findsOneWidget);
     expect(find.byKey(const ValueKey('texto-aba-presets')), findsOneWidget);
 
-    // O BOTAO ANTIGO SAIU: nao existe mais "Animar texto" dentro da
-    // edicao, e nao existe mais o painel proprio do animador.
+    // A ABA GIGANTE SAIU, e com ela o painel proprio: nao ha aba
+    // "Animação", nem sub-abas de posicao, nem "Animar texto".
+    expect(find.byKey(const ValueKey('texto-animar')), findsNothing);
+    expect(find.text('Animação'), findsNothing);
+    expect(find.text('Entrada'), findsNothing);
+    expect(find.text('Enfase'), findsNothing);
+    expect(find.text('Saida'), findsNothing);
     expect(find.text('Animar texto'), findsNothing);
-    expect(
-      EditorPanel.values.map((e) => e.name),
-      isNot(contains('animators')),
-    );
+    expect(find.text('Avancado (animadores do AE)'), findsNothing);
+    expect(EditorPanel.values.map((e) => e.name), isNot(contains('animators')));
   });
 
-  testWidgets('a aba de animacao abre o animador manual, em area maior, e '
-      'ele continua mexendo no texto', (tester) async {
-    final (c, id) = await abrirTexto(tester);
-    final alturaDaEdicao = tester.getSize(
-      find.byKey(const ValueKey('context-sheet')),
-    ).height;
+  testWidgets('a sessao que parou na aba antiga volta para a edicao, sem '
+      'tela em branco', (tester) async {
+    final (c, _) = await abrirTexto(tester);
+    c
+        .read(editorSessionProvider.notifier)
+        .setTextSection(TextSection.animation);
+    await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const ValueKey('texto-animar')));
-    await assentar(tester);
-
-    expect(c.read(editorSessionProvider).textSection, TextSection.animation);
-    // A edicao deu lugar ao animador: o campo de conteudo sai de cena.
-    expect(find.byKey(const ValueKey('texto-conteudo')), findsNothing);
-    // As sub-abas do animador (as posicoes da animacao) estao ali.
-    expect(find.text('Entrada'), findsOneWidget);
-    expect(find.text('Enfase'), findsOneWidget);
-    expect(find.text('Saida'), findsOneWidget);
-
-    // A FERRAMENTA PEDE MAIS ESPACO QUE A FICHA.
-    final alturaDaAnimacao = tester.getSize(
-      find.byKey(const ValueKey('context-sheet')),
-    ).height;
-    expect(
-      alturaDaAnimacao,
-      greaterThan(alturaDaEdicao),
-      reason:
-          'a aba de animacao nao pode ficar espremida no painel antigo '
-          '($alturaDaEdicao x $alturaDaAnimacao em 430x932)',
-    );
-
-    // Escolher uma animacao do catalogo muda a camada — a mesma logica
-    // de antes, agora por dentro do painel de texto.
-    final alvo = find.text('Quicar por letra');
-    for (var i = 0; i < 10 && alvo.evaluate().isEmpty; i++) {
-      await tester.drag(
-        find.byType(CustomScrollView).last,
-        const Offset(0, -180),
-        warnIfMissed: false,
-      );
-      await assentar(tester, 4);
-    }
-    expect(alvo, findsOneWidget, reason: 'o catalogo de entrada esta na tela');
-    // A TILE PODE ESTAR CONSTRUIDA E FORA DA JANELA (a grade e preguicosa):
-    // tocar sem trazer para dentro da area visivel cai no vazio.
-    await tester.ensureVisible(alvo);
-    await assentar(tester, 4);
-    await tester.tap(alvo);
-    await assentar(tester);
-
-    final entrada = texto(
-      c,
-      id,
-    ).anims.firstWhere((a) => a.slot == TextAnimSlot.entrada);
-    expect(entrada.specId, 'bounceLetter');
-    expect(entrada.ease, TextAnimEase.mola);
+    expect(find.byKey(const ValueKey('texto-conteudo')), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('a aba de presets aplica a pilha de animadores de verdade, e '
@@ -126,31 +89,46 @@ void main() {
     expect(c.read(editorSessionProvider).textSection, TextSection.presets);
     expect(texto(c, id).animators, isEmpty);
 
-    await tester.tap(find.text('Fade por letra'));
+    await tester.tap(find.text('Letra por letra'));
     await assentar(tester);
 
     final pilha = texto(c, id).animators;
-    expect(pilha.map((a) => a.name), ['Fade por letra']);
-    // KEYFRAMES DE VERDADE: o preset varre o seletor de 0 a 1 no tempo.
-    final seletor = pilha.first.selectors.first as RangeSelector;
-    expect(seletor.start.isAnimated, isTrue);
+    expect(pilha.map((a) => a.name), ['Letra por letra']);
+    // KEYFRAMES DE VERDADE: o preset varre o OFFSET no tempo, que e o
+    // que faz a janela do seletor atravessar a frase.
+    final seletor = faixaDoAnimador(pilha.first)!;
+    expect(seletor.offset.isAnimated, isTrue);
+    // E e um animador de faixa — o mesmo que o cartao de efeito edita.
+    expect(pilha.first.selectors.single, isA<RangeSelector>());
+    expect(ehAnimadorDeTexto(pilha.first), isTrue);
 
     await tester.tap(find.text('Nenhuma'));
     await assentar(tester);
     expect(texto(c, id).animators, isEmpty);
   });
 
-  testWidgets('ir e voltar entre as tres abas nao perde o texto nem o que '
-      'foi animado', (tester) async {
+  testWidgets('ir e voltar entre as abas nao perde o texto nem o que foi '
+      'animado', (tester) async {
     final (c, id) = await abrirTexto(tester);
     c.read(editorControllerProvider.notifier).editTextLayer(id, text: 'AUREA');
     await tester.pumpAndSettle();
 
     await tester.tap(find.byKey(const ValueKey('texto-aba-presets')));
     await assentar(tester);
-    await tester.tap(find.text('Subir por letra'));
-    await assentar(tester);
-    await tester.tap(find.byKey(const ValueKey('texto-animar')));
+    // A GRADE E PREGUICOSA: o cartao de fora da janela nem existe.
+    final alvo = find.text('Fade Up');
+    for (var i = 0; i < 10 && alvo.evaluate().isEmpty; i++) {
+      await tester.drag(
+        find.byType(CustomScrollView).last,
+        const Offset(0, -180),
+        warnIfMissed: false,
+      );
+      await assentar(tester, 4);
+    }
+    expect(alvo, findsOneWidget);
+    await tester.ensureVisible(alvo);
+    await assentar(tester, 4);
+    await tester.tap(alvo);
     await assentar(tester);
     await tester.tap(find.byKey(const ValueKey('texto-aba-editar')));
     await tester.pumpAndSettle();
@@ -158,6 +136,16 @@ void main() {
     expect(c.read(editorSessionProvider).textSection, TextSection.edit);
     expect(find.byKey(const ValueKey('texto-conteudo')), findsOneWidget);
     expect(texto(c, id).text, 'AUREA');
-    expect(texto(c, id).animators.map((a) => a.name), ['Subir por letra']);
+    expect(texto(c, id).animators.map((a) => a.name), ['Fade Up']);
+  });
+
+  testWidgets('a previa dos presets continua desenhando, sem painel em '
+      'volta', (tester) async {
+    final (c, _) = await abrirTexto(tester);
+    await tester.tap(find.byKey(const ValueKey('texto-aba-presets')));
+    await assentar(tester);
+    // O unico pedaco do arquivo antigo que ficou e o desenho.
+    expect(find.byType(PreviaDeAnimador), findsWidgets);
+    expect(tester.takeException(), isNull);
   });
 }

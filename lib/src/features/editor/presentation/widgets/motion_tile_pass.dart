@@ -137,14 +137,13 @@ class _TileRender extends RenderProxyBox {
       return;
     }
     final bounds = Offset.zero & input.size;
-    // Only the source is rasterized. Scaling down adds tiles without
-    // increasing source texture dimensions or multiplying CPU bitmaps.
-    final ratio = math
-        .min(
-          pixelRatio,
-          math.sqrt(2e6 / (input.size.width * input.size.height)),
-        )
-        .clamp(.05, 3.0);
+    // SO A FONTE E RASTERIZADA. Repetir e barato: a foto da camada tem o
+    // tamanho DA CAMADA, e nao o da regiao ladrilhada — crescer a saida
+    // acrescenta ladrilhos, e nao pixels de textura.
+    final ratio = ratioDaCapturaMotionTile(
+      camada: input.size,
+      pixelRatio: pixelRatio,
+    );
     final layer = OffsetLayer();
     final capture = PaintingContext(layer, bounds);
     capture.paintChild(input, Offset.zero);
@@ -152,30 +151,176 @@ class _TileRender extends RenderProxyBox {
     capture.stopRecordingIfNeeded();
     final image = layer.toImageSync(bounds, pixelRatio: ratio);
     layer.dispose();
-    fx
-      ..setFloat(0, size.width)
-      ..setFloat(1, size.height)
-      ..setFloat(2, size.width / input.size.width)
-      ..setFloat(3, size.height / input.size.height)
-      ..setFloat(4, (_p('tile_width') / 100).clamp(.01, 3))
-      ..setFloat(5, (_p('tile_height') / 100).clamp(.01, 3))
-      ..setFloat(6, _p('tile_center'))
-      ..setFloat(7, _p('tile_center_y'))
-      ..setFloat(8, _p('mirror_edges'))
-      ..setFloat(9, _p('phase') / 360)
-      ..setFloat(10, _p('horizontal_phase_shift'))
-      ..setFloat(11, 0)
-      ..setFloat(12, _p('clamp_edges'))
-      ..setImageSampler(0, image);
     context.canvas.save();
     context.canvas.translate(offset.dx, offset.dy);
-    context.canvas.drawRect(Offset.zero & size, Paint()..shader = fx);
+    pintarMotionTile(
+      canvas: context.canvas,
+      shader: fx,
+      textura: image,
+      fonte: input.size,
+      saida: size,
+      parametros: ParametrosDoMotionTile.de(config.effect, config.time),
+    );
     context.canvas.restore();
     image.dispose();
   }
 
   @override
   void applyPaintTransform(RenderBox child, Matrix4 transform) {}
+}
+
+/// ==========================================================================
+/// O QUE O LADRILHO FAZ — SEM ARVORE DE WIDGETS E SEM RENDER OBJECT.
+/// ==========================================================================
+///
+/// O RELATO DO DONO: "aplico Motion Tile numa imagem 1:1 e a imagem
+/// comprime, parece voltar, diminui de tamanho e perde qualidade".
+///
+/// As duas metades desse relato moram aqui, e cada uma virou uma funcao
+/// que um teste consegue chamar direto:
+///
+///   [ParametrosDoMotionTile] + [pintarMotionTile] — A GEOMETRIA. O
+///   ladrilho do meio tem de sair do tamanho EXATO da camada, no lugar
+///   exato dela, e as copias nascem para FORA. Nada de escala.
+///
+///   [ratioDaCapturaMotionTile] — A RESOLUCAO. A foto da camada nao pode
+///   ter menos pixel do que a camada: menos pixel e perda PERMANENTE, que
+///   sai no arquivo exportado e nao se recupera.
+///
+/// POR QUE FUNCOES SOLTAS: `_TileRender.paint` tira uma foto da camada com
+/// `Layer.toImageSync`, e isso precisa do rasterizador de verdade — num
+/// teste de widget ele nunca devolve. Com o desenho separado da foto, o
+/// teste entrega a textura pronta e mede o pixel que sai. Ver
+/// `test/motion_tile_escala_test.dart`.
+
+/// OS NUMEROS DO LADRILHO, ja nas unidades do shader.
+///
+/// O que a pessoa ve em porcentagem e grau chega aqui em fator e volta:
+/// converter num lugar so evita que o passe e o teste divirjam por 360.
+class ParametrosDoMotionTile {
+  const ParametrosDoMotionTile({
+    this.ladrilhoX = 1,
+    this.ladrilhoY = 1,
+    this.centroX = .5,
+    this.centroY = .5,
+    this.espelhar = false,
+    this.esticar = false,
+    this.faseHorizontal = false,
+    this.fase = 0,
+  });
+
+  /// A LEITURA DA FICHA no instante pedido.
+  factory ParametrosDoMotionTile.de(EffectInstance efeito, Duration instante) {
+    double p(String chave) => efeito.paramAt(chave, instante);
+    return ParametrosDoMotionTile(
+      ladrilhoX: (p('tile_width') / 100).clamp(.01, 3),
+      ladrilhoY: (p('tile_height') / 100).clamp(.01, 3),
+      centroX: p('tile_center'),
+      centroY: p('tile_center_y'),
+      espelhar: p('mirror_edges') >= .5,
+      esticar: p('clamp_edges') >= .5,
+      faseHorizontal: p('horizontal_phase_shift') >= .5,
+      fase: p('phase') / 360,
+    );
+  }
+
+  /// O tamanho de cada ladrilho, em fracao da camada. 1 = a camada inteira.
+  final double ladrilhoX, ladrilhoY;
+
+  /// ONDE FICA O CENTRO DO LADRILHO DO MEIO, em fracao da camada. Mover
+  /// isto DESLIZA a grade; nao escala, nao encolhe, nao corta.
+  final double centroX, centroY;
+
+  final bool espelhar, esticar, faseHorizontal;
+
+  /// A fase em VOLTAS (o grau da ficha dividido por 360).
+  final double fase;
+}
+
+/// O ORCAMENTO DE TEXELS da foto da camada, em texels.
+///
+/// Ele e um TETO, e nunca um piso: serve para uma camada gigante nao virar
+/// uma textura gigante. Ver [ratioDaCapturaMotionTile].
+const double orcamentoDeTexelsDoMotionTile = 2e6;
+
+/// A RESOLUCAO DA FOTO DA CAMADA, em pixels de textura por pixel de camada.
+///
+/// ==========================================================================
+/// NUNCA ABAIXO DE 1 — E ESTE E O DEFEITO QUE ESTA FUNCAO FECHA.
+/// ==========================================================================
+///
+/// A conta antiga era `min(pixelRatio, sqrt(2e6 / area))`. Numa camada
+/// grande a raiz cai abaixo de 1 e a foto sai com MENOS pixel do que a
+/// camada: uma camada de 1080x1920 virava uma textura de 1060x1885, e um
+/// quadro 4K (3840x2160) virava METADE — 1886x1061 esticados de volta ao
+/// tamanho cheio.
+///
+/// Isso e perda PERMANENTE. Nao e a previa cedendo ao dedo: e a textura
+/// que o efeito desenha, e ela sai igual no arquivo exportado. Era este o
+/// "perde qualidade" do relato.
+///
+/// AGORA O TETO NUNCA DESCE ABAIXO DE 1. Numa camada dentro do orcamento,
+/// ainda se pode gastar mais que 1 (ate o `pixelRatio` do aparelho) porque
+/// ali a foto e barata e a borda do ladrilho agradece. Numa camada acima
+/// do orcamento, para-se em 1 — a camada inteira, nem um pixel a menos.
+double ratioDaCapturaMotionTile({
+  required Size camada,
+  required double pixelRatio,
+}) {
+  final area = camada.width * camada.height;
+  if (!area.isFinite || area <= 0) return 1;
+  final pedido = pixelRatio.isFinite && pixelRatio > 0 ? pixelRatio : 1.0;
+  final folga = math.sqrt(orcamentoDeTexelsDoMotionTile / area);
+  final teto = math.min(math.max(1.0, folga), 3.0);
+  return pedido.clamp(1.0, teto).toDouble();
+}
+
+/// DESENHA A REPETICAO NA REGIAO [saida], com a camada ja fotografada.
+///
+/// [fonte] e o tamanho LOGICO da camada — o ladrilho do meio sai
+/// exatamente desse tamanho, centrado em [saida]. [textura] e a foto dela,
+/// que pode ter mais pixel que [fonte] (ver [ratioDaCapturaMotionTile]) sem
+/// que isso mude UM PIXEL da geometria: o shader amostra em coordenada
+/// normalizada.
+///
+/// A ORDEM DOS `setFloat` E A DA DECLARACAO NO SHADER, e nao a do byte do
+/// std140 (ver a nota em `shaders/motion_tile.frag`). Uniforme novo entra
+/// no FIM, nunca no meio.
+void pintarMotionTile({
+  required ui.Canvas canvas,
+  required ui.FragmentShader shader,
+  required ui.Image textura,
+  required Size fonte,
+  required Size saida,
+  required ParametrosDoMotionTile parametros,
+}) {
+  if (fonte.isEmpty || saida.isEmpty) return;
+  final p = parametros;
+  shader
+    ..setFloat(0, saida.width)
+    ..setFloat(1, saida.height)
+    ..setFloat(2, saida.width / fonte.width)
+    ..setFloat(3, saida.height / fonte.height)
+    ..setFloat(4, p.ladrilhoX)
+    ..setFloat(5, p.ladrilhoY)
+    ..setFloat(6, p.centroX)
+    ..setFloat(7, p.centroY)
+    ..setFloat(8, p.espelhar ? 1 : 0)
+    ..setFloat(9, p.fase)
+    ..setFloat(10, p.faseHorizontal ? 1 : 0)
+    ..setFloat(11, 0)
+    ..setFloat(12, p.esticar ? 1 : 0)
+    // MEIO TEXEL DA TEXTURA DE VERDADE, e nao meio pixel da camada.
+    //
+    // O shader trava a amostra a meio texel da borda do ladrilho para a
+    // interpolacao nao lamber o ladrilho vizinho. A conta antiga usava
+    // meio pixel DA CAMADA; com a foto em 3x (um celular comum), isso
+    // achatava UM PIXEL E MEIO em cada emenda — e tambem na borda da
+    // copia central, que e justamente a que tem de sair intacta.
+    ..setFloat(13, .5 / math.max(1, textura.width))
+    ..setFloat(14, .5 / math.max(1, textura.height))
+    ..setImageSampler(0, textura);
+  canvas.drawRect(Offset.zero & saida, Paint()..shader = shader);
 }
 
 /// O FATOR PELA LARGURA (ou altura) QUE FAZ A REPETICAO COBRIR A COMPOSICAO.

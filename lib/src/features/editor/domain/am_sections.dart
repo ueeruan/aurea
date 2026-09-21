@@ -24,9 +24,14 @@ enum AmSecao {
   volume,
   fade,
 
-  /// Video: velocidade, reverso, interpolacao de quadros e a porta do
-  /// Time Remap (o Estudio do tempo). Fica logo depois do som porque a
-  /// ordem do enum E a ordem da grade — e tempo anda junto com o audio.
+  /// Video: velocidade CONSTANTE, rampas prontas, reverso, blur temporal
+  /// e interpolacao de quadros. Fica logo depois do som porque a ordem do
+  /// enum E a ordem da grade — e tempo anda junto com o audio.
+  ///
+  /// NAO E MAIS A PORTA DO TIME REMAP (20/09, pedido do dono): o Time
+  /// Remap virou efeito, em Efeitos -> Tempo. Esta secao ficou com a
+  /// velocidade constante, que e outra coisa e continua precisando de
+  /// casa propria.
   tempo,
   editarForma,
 
@@ -119,10 +124,9 @@ Set<AmSecao> secoesDe(Layer layer) {
     // Video com som ganha as duas do audio — e a razao de a grade do
     // video bater exatamente em sete, e nao em oito.
     if (layer is VideoLayer) AmSecao.volume,
-    // TEMPO NA GRADE, e nao atras do "⋮": o Time Remap tinha ficado sem
-    // porta nenhuma (a da folha Velocidade e a da galeria foram apagadas
-    // em commits seguidos) e o dono nao achava mais o recurso. Com esta,
-    // a grade do video bate em sete — o teto exato.
+    // TEMPO NA GRADE, e nao atras do "⋮": mudar a velocidade de um clipe
+    // e das primeiras coisas que se faz com ele, e estava escondido num
+    // menu. Com esta, a grade do video bate em sete — o teto exato.
     if (layer is VideoLayer) AmSecao.tempo,
     // A PORTA DA CENA 3D RASTREADA: rastrear a camera do clipe e povoar
     // o espaco com objetos, texto e nulos.

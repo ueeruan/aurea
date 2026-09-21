@@ -19,7 +19,9 @@ import 'package:video_player/video_player.dart';
 
 import '../../application/texture_cache.dart';
 import '../../application/blob_track_service.dart';
+import '../../application/desempenho/aurea_performance_manager.dart';
 import '../../application/motor3d_nativo.dart';
+import '../../application/perfil3d.dart';
 import '../../application/qualidade3d_controller.dart';
 import '../../domain/orcamento_render.dart';
 import '../../application/editor_controller.dart';
@@ -117,6 +119,22 @@ bool _containsRasterMedia(List<Layer> layers) => layers.any(
       layer is VideoLayer ||
       (layer is GroupLayer && _containsRasterMedia(layer.children)),
 );
+
+/// A MESMA RESPOSTA, LEMBRADA PELA PILHA.
+///
+/// O `select` do palco roda a CADA mutacao do projeto — inclusive a cada
+/// passo de um slider —, e esta varredura desce em todos os grupos. A
+/// resposta so pode mudar quando a pilha de camadas muda de identidade
+/// (a lista e imutavel), entao um par lembrado basta: mexer num numero
+/// nao paga mais a varredura.
+List<Layer>? _pilhaDoRaster;
+bool _respostaDoRaster = false;
+
+bool _temMidiaRaster(List<Layer> layers) {
+  if (identical(layers, _pilhaDoRaster)) return _respostaDoRaster;
+  _pilhaDoRaster = layers;
+  return _respostaDoRaster = _containsRasterMedia(layers);
+}
 
 /// UMA CAMADA QUE RECORTA (Excluir / Interseccao) SO CORTA QUEM ESTA
 /// NA MESMA PILHA — nunca o fundo da composicao.
@@ -982,6 +1000,9 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
 
   @override
   Widget build(BuildContext context) {
+    // A REGUA DAS RECONSTRUCOES DO PALCO (ver Perfil3D; desligada custa um
+    // `if`). Ver test/preview2_reconstrucoes_test.dart.
+    Perfil3D.contar('build.palco');
     // ZOOM DE VOLTA AO AJUSTADO: o passeio zera junto.
     ref.listen<double>(zoomDoPalcoProvider, (antes, agora) {
       if (agora == 1.0 && _panDoPalco != Offset.zero) {
@@ -1008,7 +1029,7 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
           guias: p.guides,
           fps: p.fps,
           id: p.id,
-          raster: _containsRasterMedia(p.layers),
+          raster: _temMidiaRaster(p.layers),
         ),
       ),
     );
@@ -1017,6 +1038,30 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
     final resolution = opcoes.pixels
         ? PreviewResolution.full
         : ref.watch(previewResolutionProvider);
+    // ================= A POLITICA DE DESEMPENHO, LIGADA =================
+    //
+    // O gerente publicava a politica e NINGUEM a lia: o aparelho
+    // esquentava, a escada descia degraus e a previa continuava no
+    // maximo. Aqui entram os dois numeros que sao do palco.
+    //
+    // E UM TETO, NUNCA UM PISO. Quem ja escolheu 1/4 no seletor continua
+    // com 1/4: `math.min`. E com o perfil Automatico e o aparelho frio a
+    // politica vale 1.0 e 4096 — ou seja, o app de antes, pixel por
+    // pixel. "Pixels reais" tambem fica de fora: quem pediu para ver o
+    // pixel tem de ver o pixel.
+    //
+    // ESTE E O PALCO, E O PALCO NUNCA EXPORTA. A exportacao monta o
+    // `CompositionView` direto (ver export_video_screen) e nao passa por
+    // aqui; a prova esta em test/politica_ligada_test.dart.
+    final tetoDaPolitica = ref.watch(
+      politicaDeDesempenhoProvider.select((p) => p.escalaDaPrevia),
+    );
+    final tetoDasFotosDaPolitica = ref.watch(
+      politicaDeDesempenhoProvider.select((p) => p.tetoDasFotosPx),
+    );
+    final escalaDaPrevia = opcoes.pixels
+        ? resolution.scale
+        : math.min(resolution.scale, tetoDaPolitica);
     final padGuides = ref.watch(transformGuidesProvider);
     final selectedId = ref.watch(selectedLayerProvider);
     final onion = ref.watch(onionSkinProvider);
@@ -1025,10 +1070,14 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
     final compH = palco.altura.toDouble();
     final useDither = DitherLayer.comoFiltro && !palco.raster;
     final interagindo = Interacao.agora.value;
-    final fotos = fotosDoPreview(
-      escalaDoPalco: resolution.scale,
+    final cru = fotosDoPreview(
+      escalaDoPalco: escalaDaPrevia,
       tocando: widget.playback.playing.value,
       interagindo: interagindo,
+    );
+    final fotos = (
+      escalaDoPalco: cru.escalaDoPalco,
+      tetoPx: math.min(cru.tetoPx, tetoDasFotosDaPolitica.toDouble()),
     );
 
     return Listener(
@@ -1142,7 +1191,7 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
                               valor: previewRasterRatio(
                                 compWidth: compW,
                                 compHeight: compH,
-                                stageScale: scale * resolution.scale,
+                                stageScale: scale * escalaDaPrevia,
                                 devicePixelRatio:
                                     MediaQuery.devicePixelRatioOf(context),
                               ),
@@ -2112,6 +2161,18 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
     tocando: PlaybackController.tocandoAgora.value,
     interagindo: Interacao.agora.value,
   );
+
+  /// QUANTOS NIVEIS DA PIRAMIDE DO BRILHO a politica concede agora.
+  ///
+  /// Era uma constante (5) e a politica que o gerente publicava nunca
+  /// chegava aqui: o aparelho esquentava, a escada descia degraus e o
+  /// bloom continuava com a piramide inteira. E um TETO — o rascunho e o
+  /// parametro do efeito continuam podendo pedir menos.
+  ///
+  /// EXPORTANDO, SEMPRE O COMPLETO: o `ref.watch` esta na perna FALSA do
+  /// ternario em [build], entao a exportacao nem chega a assinar o
+  /// provider. Provado em test/politica_ligada_test.dart.
+  int _tetoDoBrilho = PoliticaDeDesempenho.exportacao.niveisDoBrilho;
   final _gate = _CompositionGate();
 
   ValueListenable<Duration> get time => widget.time;
@@ -2216,6 +2277,14 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
 
   @override
   Widget build(BuildContext context) {
+    Perfil3D.contar('build.composicao');
+    // A EXPORTACAO NAO LE A POLITICA: o `watch` so acontece na perna
+    // falsa deste ternario.
+    _tetoDoBrilho = widget.exporting
+        ? PoliticaDeDesempenho.exportacao.niveisDoBrilho
+        : ref.watch(
+            politicaDeDesempenhoProvider.select((p) => p.niveisDoBrilho),
+          );
     final project = widget.vistaDoPalco
         ? ref.watch(projetoDoPalcoProvider)
         : ref.watch(projetoVisivelProvider);
@@ -4281,7 +4350,7 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
             final niveis = effect
                 .paramAt('piramide', local)
                 .round()
-                .clamp(1, _rascunho ? 2 : 5);
+                .clamp(1, math.min(_tetoDoBrilho, _rascunho ? 2 : 5));
             final multR = effect.paramAt('mult_r', local).clamp(0.0, 2.0);
             final multG = effect.paramAt('mult_g', local).clamp(0.0, 2.0);
             final multB = effect.paramAt('mult_b', local).clamp(0.0, 2.0);
@@ -4728,9 +4797,15 @@ class _CompositionViewState extends ConsumerState<CompositionView> {
                 .paramAt('quality', local)
                 .round()
                 .clamp(0, 2);
-            final niveis = _rascunho
-                ? math.min(2, bloomLevels(quality))
-                : bloomLevels(quality);
+            final niveis = math.max(
+              1,
+              math.min(
+                _tetoDoBrilho,
+                _rascunho
+                    ? math.min(2, bloomLevels(quality))
+                    : bloomLevels(quality),
+              ),
+            );
             final pesos = bloomWeights(niveis);
             final sigmas = bloomSigmas(raioPx, niveis);
 

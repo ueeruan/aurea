@@ -100,9 +100,14 @@ class ExportEngine {
   int get height =>
       settings.resolve(project.outputWidth, project.outputHeight).$2;
 
+  /// ATE ONDE A EXPORTACAO VAI: o fim da ultima camada, e nao o piso de
+  /// cinco segundos que a linha do tempo usa para nascer utilizavel. Um
+  /// projeto de dois segundos gera dois segundos de video, sem cauda preta.
+  Duration get duracaoDaSaida => project.duracaoDoConteudo;
+
   /// Quantos quadros a composicao inteira tem.
   int get frameCount {
-    final us = project.duration.inMicroseconds;
+    final us = duracaoDaSaida.inMicroseconds;
     if (us <= 0) return 0;
     return (us * fps / 1000000).round().clamp(1, 60 * 60 * 60);
   }
@@ -142,7 +147,7 @@ class ExportEngine {
     // O remux nao desenha a composicao: o clipe precisa cobrir exatamente
     // todo o relogio. Sem isto, um clipe deslocado perderia o preto inicial
     // (ou o preenchimento final imposto pela duracao minima do projeto).
-    if (l.startTime != Duration.zero || l.endTime != project.duration) {
+    if (l.startTime != Duration.zero || l.endTime != duracaoDaSaida) {
       return null;
     }
 
@@ -983,7 +988,7 @@ class ExportEngine {
     );
   }
 
-  double get _total => project.duration.inMicroseconds / 1000000.0;
+  double get _total => duracaoDaSaida.inMicroseconds / 1000000.0;
 
   /// So entra limitador quando a soma pode passar do teto: mais de uma
   /// trilha, ou alguma com ganho acima de 0 dB.

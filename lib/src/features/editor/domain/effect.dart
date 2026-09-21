@@ -704,14 +704,34 @@ const effectSpecs = <EffectType, EffectSpec>{
   ...efeitosPretoEBranco,
   ...efeitosPosterizeTime,
   ...efeitosRgbTimeWarp,
+  // TIME REMAP VOLTOU A SER EFEITO (20/09, pedido do dono): "nao quero
+  // tela especial, nem secao escondida, nem editor separado". Ele mora em
+  // EFEITOS -> TEMPO, ao lado de RGB Time Warp e Posterize Time, e o
+  // cartao dele e um cartao como os outros.
+  //
+  // UM PARAMETRO SO, de proposito: `tempo` E a trilha do motor (ver
+  // [VideoLayer.timeRemap]). Speed e Frame sao LEITURAS dessa mesma
+  // trilha — a derivada e o quadro — e por isso nao viram parametro
+  // guardado: dois numeros para o mesmo fato divergem no primeiro
+  // congelamento.
   EffectType.timeRemap: EffectSpec(
     id: 'time_remap',
     name: 'Time Remap',
     category: 'Time',
-    synonyms: ['tempo', 'velocidade', 'remapear tempo'],
+    synonyms: [
+      'tempo',
+      'velocidade',
+      'remapear tempo',
+      'speed ramp',
+      'rampa',
+      'congelar',
+      'reverso',
+      'camera lenta',
+      'slow motion',
+    ],
     params: {
       'tempo': EffectParam(
-        'Time Remap',
+        'Time',
         0,
         0,
         86400,
@@ -818,7 +838,7 @@ List<EffectType> searchEffects(String query) {
   bool contem(String texto) => normalizarBusca(texto).contains(q);
   return [
     for (final e in effectSpecs.entries)
-      if (!efeitosInternos.contains(e.key) &&
+      if (!efeitosForaDoCatalogo.contains(e.key) &&
           (contem(e.value.name) ||
               contem(e.value.id) ||
               contem(e.value.category) ||
@@ -874,19 +894,30 @@ const _semAcento = <String, String>{
 
 List<EffectType> effectsInCategory(String category) => [
   for (final e in effectSpecs.entries)
-    if (e.value.category == category && !efeitosInternos.contains(e.key)) e.key,
+    if (e.value.category == category &&
+        !efeitosForaDoCatalogo.contains(e.key))
+      e.key,
 ];
 
-/// TIME REMAP SAIU DO APP (14/09, pedido do dono). A trilha continua sendo
-/// o jeito INTERNO de congelar quadro, fazer rampa pronta e cortar clipe em
-/// reverso, entao o tipo e a spec ficam; o que some e a porta: galeria,
-/// Tipos que existem no enum por COMPATIBILIDADE DE INDICE, mas nao sao
-/// efeitos de verdade: nao aparecem na galeria, na busca nem no guia.
+/// O QUE NAO SE ESCOLHE NA GALERIA, na busca nem no guia.
 ///
-/// Ficou vazio quando o Time Remap saiu de vez (a trilha de tempo virou
-/// campo proprio de [VideoLayer]). O conjunto continua existindo porque
-/// e ele que diz "isto nao e escolhivel" — e porque a lista de exclusao
-/// precisa de um lugar unico.
+/// Vazio desde 20/09: o Time Remap voltou a ser efeito de verdade, em
+/// EFEITOS -> TEMPO, ao lado de RGB Time Warp e Posterize Time. O
+/// conjunto continua existindo porque a lista de exclusao precisa de um
+/// lugar unico — e porque um tipo novo pode nascer interno amanha.
+const efeitosForaDoCatalogo = <EffectType>{};
+
+/// A TRILHA DE TEMPO NAO GANHA LOSANGO NA BARRA DA CAMADA.
+///
+/// Ela e a unica trilha do app cujo VALOR e um instante da fonte, e nao
+/// um valor de tela. Congelar um quadro, aplicar uma rampa pronta ou
+/// cortar um clipe em reverso escreve dezenas de pontos nela; mostra-los
+/// na barra encheria a camada de losangos que ninguem pos ali, e
+/// arrastar um deles moveria QUADRO, nao valor.
+///
+/// O losango do Time Remap existe — e o do rail do painel de efeitos, o
+/// mesmo de qualquer efeito (ver [EffectInstance.withKeyframeToggled]).
+/// O que este conjunto tira e so o atalho da barra.
 const efeitosInternos = <EffectType>{EffectType.timeRemap};
 
 /// A ficha de [t], ou nulo quando o tipo nao tem mais ficha no catalogo.
@@ -899,7 +930,7 @@ EffectSpec? specDe(EffectType t) => effectSpecs[t];
 /// O que a pessoa pode escolher na galeria.
 List<EffectType> get efeitosDoCatalogo => [
   for (final t in effectSpecs.keys)
-    if (!efeitosInternos.contains(t)) t,
+    if (!efeitosForaDoCatalogo.contains(t)) t,
 ];
 
 /// Instancia de efeito numa camada. TODO parametro numerico e animavel

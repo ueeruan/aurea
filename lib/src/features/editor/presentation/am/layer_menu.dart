@@ -530,6 +530,10 @@ _Tile? _tileDaSecao(
           sceneId: cena.id,
           nodeId: noId,
           playhead: playback.time.value,
+          // O CABECOTE VIVO: o losango dos ajustes por caractere crava no
+          // instante em que o dedo toca, e nao no que existia quando a
+          // folha abriu.
+          playback: playback,
         );
       }),
       badge: 'NEW',
@@ -570,6 +574,7 @@ _Tile? _tileDaSecao(
             sceneId: layer.id,
             nodeId: no.id,
             playhead: playback.time.value,
+            playback: playback,
           ),
         );
       },

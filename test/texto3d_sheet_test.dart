@@ -13,12 +13,15 @@
 //     por toque), e a folha nasce com `Material` — sem ele os textos saiam
 //     com o sublinhado amarelo do "texto sem estilo".
 import 'package:aurea/src/features/editor/application/editor_controller.dart';
+import 'package:aurea/src/features/editor/domain/element3d.dart';
 import 'package:aurea/src/features/editor/domain/layer.dart';
 import 'package:aurea/src/features/editor/domain/modelo_do_texto3d.dart';
 import 'package:aurea/src/features/editor/domain/scene3d.dart';
+import 'package:aurea/src/features/editor/domain/texto3d.dart';
 import 'package:aurea/src/features/editor/domain/video_project.dart';
 import 'package:aurea/src/features/editor/presentation/am/texto3d_sheet.dart';
 import 'package:aurea/src/features/editor/presentation/context/parameter_row.dart';
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -92,7 +95,189 @@ void main() {
         reason: 'o metal ${e.name} tem de estar na folha',
       );
     }
+  });
+
+  // OS CARTOES SAO OS DO PAINEL DE EFEITOS: abrem e fecham, e recolhido
+  // nem constroi o corpo. Extrusao e Material nascem abertos (e o que se
+  // mexe em toda letra); o resto fica a UM toque — nao escondido.
+  testWidgets('os cartoes abrem e fecham como os do painel de efeitos', (
+    tester,
+  ) async {
+    await abrir(tester);
+    for (final nome in const [
+      'extrusao',
+      'material',
+      'caracteres',
+      'cena',
+      'fonte-e-ajuste-fino',
+    ]) {
+      expect(
+        find.byKey(ValueKey('texto3d-cartao-$nome')),
+        findsOneWidget,
+        reason: 'o cartao $nome tem de estar na folha',
+      );
+    }
+    // O CABECALHO E A ALCA: o corpo do cartao aberto esta cheio de reguas,
+    // entao o toque nao pode ser no centro — e nos 48 px de cima.
+    Future<void> alternar(String nome) async {
+      final cartao = find.byKey(ValueKey('texto3d-cartao-$nome'));
+      await tester.ensureVisible(cartao);
+      await tester.pumpAndSettle();
+      final caixa = tester.getRect(cartao);
+      await tester.tapAt(Offset(caixa.center.dx, caixa.top + 24));
+      await tester.pumpAndSettle();
+    }
+
+    // Fechado: o botao de importar fonte nem existe na arvore.
+    expect(find.byKey(const ValueKey('texto3d-importar-fonte')), findsNothing);
+    await alternar('fonte-e-ajuste-fino');
     expect(find.byKey(const ValueKey('texto3d-importar-fonte')), findsOneWidget);
+
+    // E fechar o Material tira as fichas de metal da arvore.
+    await alternar('material');
+    expect(find.byKey(const ValueKey('texto3d-estilo-cromo')), findsNothing);
+  });
+
+  // O CARTAO "CARACTERES": mover letras soltas, com o MESMO losango de
+  // keyframe de qualquer outra propriedade — e nao uma logica propria.
+  testWidgets('Caracteres tem as nove medidas com o losango da casa', (
+    tester,
+  ) async {
+    await abrir(tester);
+    final cartao = find.byKey(const ValueKey('texto3d-cartao-caracteres'));
+    await tester.ensureVisible(cartao);
+    await tester.tap(cartao, warnIfMissed: false);
+    await tester.pumpAndSettle();
+
+    for (final m in MedidaDoCaractere.values) {
+      final linha = find.byKey(ValueKey('texto3d-ajuste-${m.name}'));
+      expect(linha, findsOneWidget, reason: 'falta a medida ${m.name}');
+      expect(
+        tester.widget<ParameterRow>(linha).keyframe,
+        isNotNull,
+        reason: 'toda medida animavel tem o losango',
+      );
+    }
+    for (final chave in const [
+      'texto3d-selecao-todas',
+      'texto3d-selecao-uma',
+      'texto3d-selecao-intervalo',
+    ]) {
+      expect(find.byKey(ValueKey(chave)), findsOneWidget);
+    }
+  });
+
+  testWidgets('escolher UMA letra e empurra-la move so ela', (tester) async {
+    await abrir(tester);
+    final cartao = find.byKey(const ValueKey('texto3d-cartao-caracteres'));
+    await tester.ensureVisible(cartao);
+    await tester.tap(cartao, warnIfMissed: false);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('texto3d-selecao-uma')));
+    await tester.pumpAndSettle();
+    // "AUREA": a terceira letra e o "R" (indice 2).
+    final letra = find.byKey(const ValueKey('texto3d-letra-2'));
+    await tester.ensureVisible(letra);
+    await tester.tap(letra);
+    await tester.pumpAndSettle();
+
+    final linha = find.byKey(const ValueKey('texto3d-ajuste-z'));
+    await tester.ensureVisible(linha);
+    await tester.pumpAndSettle();
+    final caixa = tester.getRect(linha);
+    final gesto = await tester.startGesture(
+      Offset(caixa.left + caixa.width * 0.28, caixa.center.dy),
+    );
+    for (var i = 0; i < 6; i++) {
+      await gesto.moveBy(const Offset(15, 0));
+      await tester.pump();
+    }
+    await gesto.up();
+    await tester.pumpAndSettle();
+
+    final ajustes = no().texto3d!.ajustes;
+    expect(ajustes.length, 1, reason: 'um ajuste, o da letra escolhida');
+    expect(ajustes.single.inicio, 2);
+    expect(ajustes.single.fim, 2);
+    expect(
+      ajustes.single.valorEm(MedidaDoCaractere.z, Duration.zero),
+      greaterThan(0),
+      reason: 'arrastar para a direita empurra a letra',
+    );
+    // A malha NAO foi refeita: mover uma letra e pose, nao geometria.
+    expect(no().modelAsset!.temAnimacaoDeTexto, isTrue);
+  });
+
+  // A CENA E O ESTUDIO DA LETRA: reflexo, iluminacao e ambiente vao para a
+  // cena (nao para o material) e aparecem no palco na hora, sem refazer
+  // um triangulo.
+  testWidgets('Cena muda reflexo, iluminacao e ambiente direto na cena', (
+    tester,
+  ) async {
+    await abrir(tester);
+    final cartao = find.byKey(const ValueKey('texto3d-cartao-cena'));
+    await tester.ensureVisible(cartao);
+    final caixa = tester.getRect(cartao);
+    await tester.tapAt(Offset(caixa.center.dx, caixa.top + 24));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('texto3d-controle-Reflexo')), findsOneWidget);
+    expect(find.byKey(const ValueKey('texto3d-controle-Ambiente')), findsOneWidget);
+
+    final malhaAntes = no().modelAsset;
+    final ficha = find.byKey(const ValueKey('texto3d-iluminacao-neon'));
+    await tester.ensureVisible(ficha);
+    await tester.tap(ficha);
+    await tester.pumpAndSettle();
+    expect(cena().scene.environment, EnvironmentKind.neon);
+    expect(
+      no().modelAsset,
+      same(malhaAntes),
+      reason: 'trocar o estudio nao refaz a letra',
+    );
+  });
+
+  // O LOSANGO E O DA CASA: crava no instante do cabecote e tira de novo.
+  // Nao ha logica de keyframe propria da folha — a trilha e uma
+  // `AnimatedDouble`, como qualquer outra propriedade do aplicativo.
+  testWidgets('o losango crava e tira o keyframe do ajuste', (tester) async {
+    await abrir(tester);
+    final cartao = find.byKey(const ValueKey('texto3d-cartao-caracteres'));
+    await tester.ensureVisible(cartao);
+    final caixa = tester.getRect(cartao);
+    await tester.tapAt(Offset(caixa.center.dx, caixa.top + 24));
+    await tester.pumpAndSettle();
+
+    final linha = find.byKey(const ValueKey('texto3d-ajuste-z'));
+    await tester.ensureVisible(linha);
+    await tester.pumpAndSettle();
+    final losango = find.descendant(
+      of: linha,
+      matching: find.byIcon(CupertinoIcons.rhombus),
+    );
+    expect(losango, findsOneWidget, reason: 'o losango vazio da linha');
+    await tester.tap(losango);
+    await tester.pumpAndSettle();
+
+    final ajustes = no().texto3d!.ajustes;
+    expect(ajustes.length, 1);
+    final trilha = ajustes.single.trilha(MedidaDoCaractere.z);
+    expect(trilha.isAnimated, isTrue);
+    // NO INSTANTE DO CABECOTE, e em tempo LOCAL da camada: a folha abriu
+    // com o cabecote em 1 s e a camada comeca em zero.
+    expect(trilha.keyframes.single.time, const Duration(seconds: 1));
+
+    // Tocar de novo no losango CHEIO tira a marca — e sem marca nenhuma o
+    // ajuste volta a nao existir no projeto.
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const ValueKey('texto3d-ajuste-z')),
+        matching: find.byIcon(CupertinoIcons.rhombus_fill),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(no().texto3d!.ajustes, isEmpty);
   });
 
   testWidgets('sem previa interna, na metade de baixo, com Material', (tester) async {

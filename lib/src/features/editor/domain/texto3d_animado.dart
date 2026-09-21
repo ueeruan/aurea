@@ -158,9 +158,72 @@ ModelAsset3D modeloDoTexto3DPorLetra(
       'u': unidades,
       'c': centros,
       'tam': t.tamanho,
-      if (t.temRotacaoPorLetra) 'rot': [t.rotLetraX, t.rotLetraY, t.rotLetraZ],
+      ...blocoDaPoseDoTexto3D(
+        t.rotLetraX,
+        t.rotLetraY,
+        t.rotLetraZ,
+        t.ajustes,
+      ),
       'anims': <Map<String, dynamic>>[],
       'fim': 0,
+    },
+  });
+}
+
+/// O PEDACO "POSE" DO BLOCO DE TEXTO: o giro por letra e os ajustes por
+/// faixa de caracteres.
+///
+/// O QUARTO NUMERO DE `rot` E UMA BANDEIRA, e nao um angulo.
+/// `ModelAsset3D.temAnimacaoDeTexto` decide se vale a pena pedir as
+/// matrizes por letra olhando so para `rot` (algum numero diferente de
+/// zero) e para `anims` (lista nao vazia). Um texto que tem SO ajuste por
+/// caractere nao tem nem um nem outro, e a pose ficaria gravada sem nunca
+/// ser aplicada — a letra escolhida nao sairia do lugar. O quarto numero e
+/// a quantidade de ajustes: liga a bandeira sem inventar um giro, e quem
+/// le a pose continua lendo apenas os tres primeiros.
+Map<String, Object> blocoDaPoseDoTexto3D(
+  double rotX,
+  double rotY,
+  double rotZ,
+  List<AjusteDeCaracteres> ajustes,
+) {
+  final vivos = [
+    for (final a in ajustes)
+      if (!a.inerte) a,
+  ];
+  final temRot = rotX != 0 || rotY != 0 || rotZ != 0;
+  return {
+    if (temRot || vivos.isNotEmpty)
+      'rot': [rotX, rotY, rotZ, vivos.length.toDouble()],
+    if (vivos.isNotEmpty) 'ajustes': [for (final a in vivos) a.toJson()],
+  };
+}
+
+/// UM MODELO NOVO com as mesmas malhas e estes ajustes por caractere.
+///
+/// Mexer numa letra NAO refaz geometria: o unico lugar que muda e o bloco
+/// `texto` do modelo, e por isso o controle acompanha o dedo em vez de
+/// esperar o extrusor ler a fonte e remontar cada glifo.
+ModelAsset3D texto3DComAjustes(
+  ModelAsset3D asset,
+  List<AjusteDeCaracteres> ajustes,
+) {
+  final texto = asset.data['texto'];
+  if (texto is! Map) return asset;
+  final base = texto.cast<String, dynamic>();
+  final rot = base['rot'] as List?;
+  double angulo(int i) =>
+      rot != null && rot.length > i && rot[i] is num
+      ? (rot[i] as num).toDouble()
+      : 0.0;
+  final limpo = {...base}
+    ..remove('rot')
+    ..remove('ajustes');
+  return ModelAsset3D({
+    ...asset.data,
+    'texto': {
+      ...limpo,
+      ...blocoDaPoseDoTexto3D(angulo(0), angulo(1), angulo(2), ajustes),
     },
   });
 }
@@ -206,6 +269,12 @@ class _EstadoDaUnidade {
   double dx = 0, dy = 0, dz = 0, rotacao = 0, tracking = 0;
   double inclinacao = 0, rotX = 0, rotY = 0;
   double escalaP = 100, opacidadeP = 100, escalaXP = 100, escalaYP = 100;
+
+  /// O AJUSTE POR CARACTERE, ja em UNIDADES DA CENA (+X direita, +Y cima,
+  /// +Z para quem olha). Os campos acima vem do motor 2D e passam pela
+  /// conversao de eixo; estes nao — o painel fala a lingua da cena, que e
+  /// a que o dono ve quando empurra uma letra no Z.
+  double ex = 0, ey = 0, ez = 0;
 
   void aplicar(AnimatorProperty p, Duration t, double c) {
     switch (p.type) {
@@ -265,7 +334,11 @@ List<vm.Matrix4?>? matrizesDoTextoAnimado(
   final rotY = rot != null && rot.length > 1 ? (rot[1] as num).toDouble() : 0.0;
   final rotZ = rot != null && rot.length > 2 ? (rot[2] as num).toDouble() : 0.0;
   final temRot = rotX != 0 || rotY != 0 || rotZ != 0;
-  if (brutas.isEmpty && !temRot) return null;
+  // OS AJUSTES POR FAIXA DE CARACTERES valem sozinhos, como o giro: sao
+  // pose de repouso das letras escolhidas, e os animadores somam por cima.
+  final ajustes = ajustesDeJson(texto['ajustes']);
+  final temAjuste = ajustes.isNotEmpty;
+  if (brutas.isEmpty && !temRot && !temAjuste) return null;
   final s = texto['t'];
   final u = texto['u'] as List?;
   final c = texto['c'] as List?;
@@ -276,7 +349,7 @@ List<vm.Matrix4?>? matrizesDoTextoAnimado(
     for (final a in brutas)
       if (a is Map) ?textAnimDeJson(a),
   ];
-  if (anims.isEmpty && !temRot) return null;
+  if (anims.isEmpty && !temRot && !temAjuste) return null;
 
   final units = _unitsGuardadas[data] ??= TextUnits.of(s);
   final fim =
@@ -306,7 +379,11 @@ List<vm.Matrix4?>? matrizesDoTextoAnimado(
   ];
   // SEM ANIMADOR ATIVO AINDA PODE HAVER O GIRO POR LETRA, que e pose de
   // repouso: sair aqui o jogava fora, e o controle ficava morto.
-  if (animators.isEmpty && !temRot) return null;
+  if (animators.isEmpty && !temRot && !temAjuste) return null;
+
+  // Distancias dos presets sao pixels sobre o texto 2D padrao (120px de
+  // corpo); aqui viram unidades da cena na proporcao do tamanho do em.
+  final tam = ((texto['tam'] as num?) ?? 100).toDouble();
 
   // A pilha de cada unidade, com o espacamento acumulado como no 2D:
   // a unidade i desloca pela soma do tracking das anteriores.
@@ -330,13 +407,33 @@ List<vm.Matrix4?>? matrizesDoTextoAnimado(
         e.aplicar(p, t, cobertura);
       }
     }
+    // O AJUSTE DA FAIXA, POR CIMA DE TUDO. Cada faixa que pega esta letra
+    // soma a sua parte: mover "BCD" e mover o C tambem, e o resultado e a
+    // soma — como duas camadas de ajuste, nao uma vencendo a outra.
+    for (final aj in ajustes) {
+      if (!aj.pega(ci)) continue;
+      e.ex += aj.valorEm(MedidaDoCaractere.x, t);
+      e.ey += aj.valorEm(MedidaDoCaractere.y, t);
+      e.ez += aj.valorEm(MedidaDoCaractere.z, t);
+      e.rotX += aj.valorEm(MedidaDoCaractere.girX, t);
+      e.rotY += aj.valorEm(MedidaDoCaractere.girY, t);
+      e.rotacao += aj.valorEm(MedidaDoCaractere.girZ, t);
+      e.escalaP *= aj.valorEm(MedidaDoCaractere.escala, t);
+      // ESPACAMENTO abre a faixa letra a letra (acumula dentro dela, e so
+      // dentro dela: as letras de fora nao andam junto); OFFSET desliza a
+      // faixa inteira pela linha do texto. As duas medem em FRACAO DO
+      // CORPO, entao valem o mesmo em qualquer tamanho de texto.
+      final passo = (ci - (aj.inicio < 0 ? 0 : aj.inicio)).toDouble();
+      e.ex +=
+          (aj.valorEm(MedidaDoCaractere.espacamento, t) * passo +
+              aj.valorEm(MedidaDoCaractere.offset, t)) *
+          tam;
+    }
     acumulado += e.tracking;
     estados[ci] = e;
   }
 
-  // Distancias dos presets sao pixels sobre o texto 2D padrao (120px de
-  // corpo); aqui viram unidades da cena na proporcao do tamanho do em.
-  final fator = (((texto['tam'] as num?) ?? 100).toDouble()) / 120.0;
+  final fator = tam / 120.0;
   const d2r = math.pi / 180;
   final out = List<vm.Matrix4?>.filled(nodes.length, null);
   for (var i = 0; i < u.length && i + 1 < nodes.length; i++) {
@@ -365,9 +462,9 @@ List<vm.Matrix4?>? matrizesDoTextoAnimado(
 
     final m = vm.Matrix4.identity()
       ..setTranslationRaw(
-        px + cx + (e.dx + desvioDoTracking[ci]) * fator,
-        py + cy - e.dy * fator,
-        -e.dz * fator,
+        px + cx + (e.dx + desvioDoTracking[ci]) * fator + e.ex,
+        py + cy - e.dy * fator + e.ey,
+        -e.dz * fator + e.ez,
       );
     if (e.rotacao != 0) m.rotateZ(-e.rotacao * d2r);
     if (e.rotX != 0) m.rotateX(-e.rotX * d2r);

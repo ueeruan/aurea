@@ -265,11 +265,14 @@ void main() {
     },
   );
 
-  // A REGRA MUDOU DE PROPOSITO (20/09): a folha voltou a ter A PORTA do
-  // Time Remap, porque sem ela o recurso tinha ficado sem chamador nenhum
-  // no aplicativo inteiro. O que continua proibido e DUPLICAR o editor —
-  // uma porta so, e ela abre o Estudio do tempo.
-  testWidgets('a folha tem UMA porta do Time Remap, e nao um segundo editor', (
+  // A REGRA MUDOU DE NOVO, E E A ULTIMA PALAVRA DO DONO (20/09): o Time
+  // Remap e um EFEITO, em Efeitos -> Tempo, ao lado de RGB Time Warp e
+  // Posterize Time. Nenhuma porta especial: nem faixa no topo desta
+  // folha, nem entrada avulsa na galeria. Esta folha voltou a ser o que
+  // sempre foi — a velocidade CONSTANTE do clipe.
+  //
+  // A porta do efeito tem casa propria em `time_remap_porta_test.dart`.
+  testWidgets('a folha de velocidade nao abre mais o Time Remap', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(430, 932);
@@ -305,17 +308,17 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       find.byKey(const ValueKey('abrir-estudio-do-tempo')),
-      findsOneWidget,
+      findsNothing,
+      reason: 'a porta oficial do Time Remap e o efeito',
     );
-    expect(find.text('Time Remap'), findsOneWidget);
+    expect(find.text('Time Remap'), findsNothing);
     // Nada de um segundo editor de curva dentro da propria folha.
     expect(find.text('Editor de curva'), findsNothing);
+    // O que a folha continua sendo: a velocidade constante do clipe.
     expect(find.byKey(const ValueKey('velocidade-regua')), findsOneWidget);
-    // Sem curva ainda: a faixa convida em vez de contar keyframes.
     final clipe =
         c.read(editorControllerProvider).layerById('v')! as VideoLayer;
     expect(hasTimeRemap(clipe), isFalse);
-    expect(find.text('Curva, keyframes, congelar, reverso'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

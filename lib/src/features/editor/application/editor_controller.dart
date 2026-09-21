@@ -11,6 +11,7 @@ import 'package:video_player/video_player.dart';
 import '../../media/application/media_import_service.dart';
 import '../../../core/storage/prefs.dart';
 import '../../media/application/sons_recentes.dart';
+import '../domain/animador_de_texto.dart';
 import '../domain/animadores.dart';
 import '../domain/blend_extra.dart';
 import 'blob_track_service.dart';
@@ -193,10 +194,14 @@ extension _ValorEditadoPath on AnimatedPath {
 
 /// AS PROPRIEDADES ANIMAVEIS DE UM OBJETO DA CENA 3D.
 ///
-/// Sete trilhas por objeto. O nome tipado existe para que exista
+/// Dez trilhas por objeto. O nome tipado existe para que exista
 /// LOSANGO: um diamante precisa saber de que trilha ele fala, e
 /// `updateSceneNode` com uma funcao crua nao sabe de nada.
-enum PropDoNo { x, y, z, giroX, giroY, giroZ, escala }
+///
+/// [escala] e a UNIFORME (a que desce pela cadeia de pais); [escalaX],
+/// [escalaY] e [escalaZ] esticam so o proprio objeto — ver
+/// `SceneNode.scaleX`.
+enum PropDoNo { x, y, z, giroX, giroY, giroZ, escala, escalaX, escalaY, escalaZ }
 
 String propDoNoLabel(PropDoNo p) => switch (p) {
   PropDoNo.x => 'Posicao X',
@@ -206,6 +211,9 @@ String propDoNoLabel(PropDoNo p) => switch (p) {
   PropDoNo.giroY => 'Giro Y',
   PropDoNo.giroZ => 'Giro Z',
   PropDoNo.escala => 'Escala',
+  PropDoNo.escalaX => 'Escala X',
+  PropDoNo.escalaY => 'Escala Y',
+  PropDoNo.escalaZ => 'Escala Z',
 };
 
 /// A UNICA TRILHA ANIMAVEL DE UMA LUZ.
@@ -2911,6 +2919,69 @@ class EditorController extends Notifier<VideoProject> {
     return node.id;
   }
 
+  /// MOVER LETRAS SOLTAS DE UM TEXTO 3D (ver [AjusteDeCaracteres]).
+  ///
+  /// NAO PASSA PELO EXTRUSOR. Mudar a profundidade ou a fonte refaz a malha
+  /// de cada glifo — ler a fonte do disco, planificar contorno, triangular —
+  /// e por isso [editarTexto3D] e `Future`. Empurrar o "C" no eixo Z nao
+  /// muda um triangulo: e a matriz da letra. Aqui so o bloco `texto` do
+  /// modelo e reescrito, na hora, e o controle acompanha o dedo.
+  void ajustarCaracteresDoTexto3D(
+    String sceneId,
+    String nodeId,
+    List<AjusteDeCaracteres> ajustes,
+  ) {
+    final camada = _layer(sceneId);
+    if (camada is! Scene3DLayer) return;
+    final no = camada.scene.nodeById(nodeId);
+    final params = no?.texto3d;
+    if (no == null || params == null) return;
+    // O AJUSTE INERTE NAO FICA GRAVADO: zerar tudo de uma faixa tem de
+    // devolver o projeto ao que era, e nao deixar um bloco de zeros que
+    // viaja no arquivo e liga o caminho da matriz por letra a toa.
+    final vivos = [
+      for (final a in ajustes)
+        if (!a.inerte) a,
+    ];
+    final malha = no.modelAsset;
+    _replace(
+      camada.withScene(
+        camada.scene.copyWith(
+          nodes: [
+            for (final n in camada.scene.nodes)
+              n.id == nodeId
+                  ? n.copyWith(
+                      texto3d: params.copyWith(ajustes: vivos),
+                      modelAsset: malha == null
+                          ? null
+                          : texto3DComAjustes(malha, vivos),
+                    )
+                  : n,
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// A LUZ AMBIENTE DA CENA DO TEXTO 3D (0..1): o quanto a letra recebe
+  /// sem vir de luz nenhuma. Companheira do reflexo — uma diz quanto o
+  /// metal devolve do estudio, a outra quanto ele recebe do ar.
+  void ajustarAmbienteDoTexto3D(String sceneId, double valor) {
+    final camada = _layer(sceneId);
+    if (camada is! Scene3DLayer) return;
+    _replace(
+      camada.withScene(camada.scene.copyWith(ambient: valor.clamp(0.0, 1.0))),
+    );
+  }
+
+  /// O ESTUDIO REFLETIDO pelo texto 3D. Metal nao tem cor propria: trocar
+  /// o ambiente e, na pratica, trocar o que a letra mostra.
+  void trocarIluminacaoDoTexto3D(String sceneId, EnvironmentKind ambiente) {
+    final camada = _layer(sceneId);
+    if (camada is! Scene3DLayer) return;
+    _replace(camada.withScene(camada.scene.copyWith(environment: ambiente)));
+  }
+
   /// REFLEXO DO AMBIENTE PARA O TEXTO 3D (0..1).
   ///
   /// Metal so parece metal com o que refletir: a rugosidade e a conta do
@@ -3364,6 +3435,9 @@ class EditorController extends Notifier<VideoProject> {
     PropDoNo.giroY => n.rotY,
     PropDoNo.giroZ => n.rotZ,
     PropDoNo.escala => n.scale,
+    PropDoNo.escalaX => n.scaleX,
+    PropDoNo.escalaY => n.scaleY,
+    PropDoNo.escalaZ => n.scaleZ,
   };
 
   SceneNode _comTrilhaDoNo(SceneNode n, PropDoNo p, AnimatedDouble t) =>
@@ -3375,6 +3449,9 @@ class EditorController extends Notifier<VideoProject> {
         PropDoNo.giroY => n.copyWith(rotY: t),
         PropDoNo.giroZ => n.copyWith(rotZ: t),
         PropDoNo.escala => n.copyWith(scale: t),
+        PropDoNo.escalaX => n.copyWith(scaleX: t),
+        PropDoNo.escalaY => n.copyWith(scaleY: t),
+        PropDoNo.escalaZ => n.copyWith(scaleZ: t),
       };
 
   /// O valor de [p] no cabecote — o que a ficha mostra.
@@ -3683,6 +3760,13 @@ class EditorController extends Notifier<VideoProject> {
 
   void setSceneNodeLod(String layerId, String nodeId, MeshLod3D lod) =>
       updateSceneNode(layerId, nodeId, (n) => n.copyWith(lod: lod));
+
+  /// A ANIMACAO QUE VEIO DENTRO DO ARQUIVO: clipe, velocidade, comeco e
+  /// repeticao. Ate hoje o unico caminho era [updateSceneNode] com uma
+  /// funcao crua — e a ficha do objeto nao tinha onde ligar os controles.
+  void setSceneNodeMotion(String layerId, String nodeId, ModelMotion3D m) =>
+      updateSceneNode(layerId, nodeId, (n) => n.copyWith(modelMotion: m));
+
 
   /// O MATERIAL INTEIRO de um objeto — os 18 campos numa tacada.
   void setSceneNodeMaterial(String layerId, String nodeId, Material3D m) =>
@@ -4085,7 +4169,15 @@ class EditorController extends Notifier<VideoProject> {
     final node = layer.scene.nodes.where((n) => n.id == nodeId).firstOrNull;
     if (node == null) return;
     final transform = resolveNodeTransform(layer.scene, node, Duration.zero);
-    final r = node.size * transform.scale.abs() * 1.8;
+    // O MAIOR DOS TRES EIXOS manda no enquadramento: um objeto esticado em
+    // Y tem de caber inteiro, e o raio pela escala uniforme cortaria as
+    // pontas dele fora do quadro.
+    final porEixo = [
+      node.scaleX.valueAt(Duration.zero).abs(),
+      node.scaleY.valueAt(Duration.zero).abs(),
+      node.scaleZ.valueAt(Duration.zero).abs(),
+    ].reduce(math.max);
+    final r = node.size * transform.scale.abs() * porEixo * 1.8;
     _replace(
       layer.withCamera(
         frameBounds(
@@ -5254,6 +5346,212 @@ class EditorController extends Notifier<VideoProject> {
     final layer = _layer(id);
     if (layer is! VideoLayer) return;
     _replace(layer.copyLayer(interpolacao: modo));
+  }
+
+  // ------------------------------------------- cartao do Time Remap
+  //
+  // O CARTAO DO EFEITO le e escreve A MESMA TRILHA do motor (`tempo`).
+  // Speed e Frame nao sao parametros guardados: sao leituras da trilha —
+  // a derivada e o quadro. Guardar os tres significaria tres verdades
+  // sobre o mesmo instante, e a primeira rampa ja as separaria.
+
+  /// O instante LOCAL do cabecote dentro do clipe, preso a barra.
+  Duration _localDoRemap(VideoLayer l, Duration global) => Duration(
+    microseconds: (global - l.startTime).inMicroseconds.clamp(
+      0,
+      l.duration.inMicroseconds,
+    ),
+  );
+
+  AnimatedDouble _curvaDoRemap(VideoLayer l) =>
+      timeRemapTrackOf(l) ??
+      curvaIdentidade(l.duration, _spanConstante(l));
+
+  /// O trecho de fonte que o clipe tocaria SEM curva nenhuma.
+  ///
+  /// [videoSourceSpan] nao serve para isto: com uma curva no ar ele
+  /// devolve o alcance DA CURVA. Congelar o quadro encolhe esse alcance
+  /// para zero, e reconstruir a identidade a partir dele deixava o clipe
+  /// inteiro dentro do primeiro segundo.
+  double _spanConstante(VideoLayer l) =>
+      l.duration.inMicroseconds * l.speed / 1000000.0;
+
+  /// ATE ONDE A TRILHA PODE IR: o que existe de fonte depois do ponto de
+  /// entrada. Projeto antigo sem `sourceDuration` nao tem teto conhecido
+  /// — e melhor deixar passar do que prender a curva no alcance atual.
+  double _tetoDoRemap(VideoLayer l) {
+    final fonte = l.sourceDuration;
+    if (fonte == null) return double.infinity;
+    final us = fonte.inMicroseconds - l.sourceOffset.inMicroseconds;
+    return us <= 0 ? double.infinity : us / 1000000.0;
+  }
+
+  /// A VELOCIDADE NO CABECOTE: ds/dt da curva (1 = normal). Sem curva,
+  /// a velocidade constante do clipe.
+  double timeRemapSpeedAt(String id, Duration global) {
+    final layer = _layer(id);
+    if (layer is! VideoLayer) return 1;
+    final track = timeRemapTrackOf(layer);
+    if (track == null) return clipSpeedOf(id);
+    return velocidadeDaCurva(track, _localDoRemap(layer, global));
+  }
+
+  /// O QUADRO DA FONTE no cabecote, na taxa do projeto.
+  double timeRemapFrameAt(String id, Duration global) {
+    final layer = _layer(id);
+    if (layer is! VideoLayer) return 0;
+    return valorDaCurva(_curvaDoRemap(layer), _localDoRemap(layer, global)) *
+        state.fps;
+  }
+
+  /// MUDA A VELOCIDADE NO CABECOTE sem mexer no que ja passou.
+  ///
+  /// Crava a marca do instante (o passado fica intacto), estica ou encolhe
+  /// o trecho seguinte ate a velocidade pedida e ARRASTA o resto da curva
+  /// junto — o desenho de depois continua o mesmo, so mais adiante ou
+  /// mais atras na fonte. E o que o dedo espera de um "Speed" no meio de
+  /// um clipe.
+  void setTimeRemapSpeed(String id, Duration global, double speed) {
+    final layer = _layer(id);
+    if (layer is! VideoLayer) return;
+    final teto = _tetoDoRemap(layer);
+    final local = _localDoRemap(layer, global);
+    if (local >= layer.duration) return;
+    runAsOneUndo(() {
+      if (layer.reverse) assarReversoNaCurva(id);
+      final atual = _layer(id);
+      if (atual is! VideoLayer) return;
+      var track = _curvaDoRemap(atual);
+      final v0 = valorDaCurva(track, local);
+      if (!track.hasKeyframeAt(local)) {
+        track = track.withKeyframe(local, v0, track.easeAt(local));
+      }
+      // O PROXIMO PONTO manda no trecho; sem nenhum, o fim da barra.
+      Duration? proximo;
+      for (final k in track.keyframes) {
+        if (k.time > local) {
+          proximo = k.time;
+          break;
+        }
+      }
+      proximo ??= atual.duration;
+      if (proximo <= local) return;
+      final segundos = (proximo - local).inMicroseconds / 1000000.0;
+      final alvo = (v0 + speed * segundos).clamp(0.0, teto);
+      final anterior = valorDaCurva(track, proximo);
+      final delta = alvo - anterior;
+      var nova = AnimatedDouble(track.base, [
+        for (final k in track.keyframes)
+          if (k.time <= local)
+            k
+          else
+            k.copyWith(value: (k.value + delta).clamp(0.0, teto)),
+      ], track.loop, track.expression);
+      if (!nova.hasKeyframeAt(proximo)) {
+        nova = nova.withKeyframe(proximo, alvo, track.easeAt(proximo));
+      }
+      definirTrilhaDeTempo(id, nova);
+    });
+  }
+
+  /// MUDA O QUADRO no cabecote: escreve na trilha `tempo` do efeito, pelo
+  /// mesmo caminho do parametro "Time" (auto-keyframe do sistema geral).
+  void setTimeRemapFrame(String id, Duration global, double frame) {
+    final layer = _layer(id);
+    if (layer is! VideoLayer) return;
+    final double fps = state.fps <= 0 ? 30 : state.fps.toDouble();
+    final teto = _tetoDoRemap(layer);
+    final efeito = layer.effects.firstWhere(
+      (e) => e.type == EffectType.timeRemap,
+      orElse: () => EffectInstance(type: EffectType.timeRemap),
+    );
+    if (!layer.effects.any((e) => e.id == efeito.id)) return;
+    editEffectParam(
+      id,
+      efeito.id,
+      'tempo',
+      global,
+      (frame / fps).clamp(0.0, teto),
+    );
+  }
+
+  /// O QUADRO ESTA PARADO AQUI? Verdadeiro quando a curva nao anda no
+  /// cabecote — e o que "Freeze" liga e desliga.
+  bool timeRemapCongeladoEm(String id, Duration global) {
+    final layer = _layer(id);
+    if (layer is! VideoLayer) return false;
+    final track = timeRemapTrackOf(layer);
+    if (track == null) return false;
+    final local = _localDoRemap(layer, global);
+    if (local >= layer.duration) return false;
+    final v0 = valorDaCurva(track, local);
+    final adiante = local + const Duration(milliseconds: 40);
+    final v1 = valorDaCurva(
+      track,
+      adiante > layer.duration ? layer.duration : adiante,
+    );
+    return (v1 - v0).abs() < 1e-4;
+  }
+
+  /// CONGELA (ou solta) o quadro do cabecote ATE O FIM DA BARRA.
+  ///
+  /// Ligado: a curva fica reta no valor de agora — o clipe segura o
+  /// quadro. Desligado: volta a andar dali em diante, na velocidade que
+  /// tinha antes do congelamento (ou 1x, quando ela tambem era zero).
+  ///
+  /// O congelamento COM duracao propria (que estica a barra e ripla o
+  /// resto) continua sendo [freezeFrame]; este e o interruptor do cartao.
+  void setTimeRemapFreeze(String id, Duration global, bool congelar) {
+    final layer = _layer(id);
+    if (layer is! VideoLayer) return;
+    final teto = _tetoDoRemap(layer);
+    final local = _localDoRemap(layer, global);
+    if (local >= layer.duration) return;
+    runAsOneUndo(() {
+      if (layer.reverse) assarReversoNaCurva(id);
+      final atual = _layer(id);
+      if (atual is! VideoLayer) return;
+      final track = _curvaDoRemap(atual);
+      final v0 = valorDaCurva(track, local);
+      final double alvo;
+      if (congelar) {
+        alvo = v0;
+      } else {
+        // A velocidade de ANTES do congelamento: um instante atras, e
+        // nunca zero — soltar o quadro tem de voltar a andar.
+        final atras = local - const Duration(milliseconds: 40);
+        var taxa = velocidadeDaCurva(
+          track,
+          atras < Duration.zero ? Duration.zero : atras,
+        );
+        if (taxa.abs() < 1e-3) taxa = 1;
+        final segundos =
+            (atual.duration - local).inMicroseconds / 1000000.0;
+        alvo = (v0 + taxa * segundos).clamp(0.0, teto);
+      }
+      var nova = AnimatedDouble(track.base, [
+        for (final k in track.keyframes)
+          if (k.time <= local) k,
+      ], track.loop, track.expression);
+      if (!nova.hasKeyframeAt(local)) {
+        nova = nova.withKeyframe(local, v0, track.easeAt(local));
+      }
+      nova = nova.withKeyframe(atual.duration, alvo, Easing.linear);
+      definirTrilhaDeTempo(id, nova);
+    });
+  }
+
+  /// RESETAR O TIME REMAP: volta a identidade (nenhum quadro fora do
+  /// lugar), sem tirar o efeito da pilha. Zerar o parametro `tempo` como
+  /// se faz nos outros efeitos deixaria o clipe inteiro no quadro zero.
+  void resetarCurvaDeTempo(String id) {
+    final layer = _layer(id);
+    if (layer is! VideoLayer) return;
+    final span = _spanConstante(layer);
+    runAsOneUndo(() {
+      if (layer.reverse) setClipReverse(id, false);
+      definirTrilhaDeTempo(id, curvaIdentidade(layer.duration, span));
+    });
   }
 
   /// Liga/desliga o APRIMORAMENTO POR IA do clipe e/ou muda a forca
@@ -8037,15 +8335,170 @@ class EditorController extends Notifier<VideoProject> {
     );
   }
 
-  void addTextAnimator(String id) {
+  /// APLICAR O EFEITO "Animador de Texto".
+  ///
+  /// Ele nasce PRONTO, no preset padrao: um seletor de faixa com o offset
+  /// varrendo a frase e a opacidade partindo de zero. Um animador vazio
+  /// (o que esta porta criava antes) obrigava a pessoa a montar seletor e
+  /// propriedade na mao antes de ver qualquer coisa se mexer — que era
+  /// exatamente a queixa.
+  ///
+  /// Devolve o id do animador criado (a pilha pode ter mais de um).
+  String? addTextAnimator(String id, {ReceitaDoAnimador? receita}) {
+    final layer = _layer(id);
+    if (layer is! TextLayer) return null;
+    final novo = animadorDaReceita(receita ?? receitaPadraoDoAnimador);
+    _updateTextLayer(
+      id,
+      (l) => l.copyLayer(animators: [...l.animators, novo]),
+    );
+    return novo.id;
+  }
+
+  /// Troca a receita de UM animador sem trocar a identidade dele: o
+  /// cartao continua aberto, a ordem na pilha nao muda, e o desfazer e
+  /// um passo so.
+  void aplicarPresetNoAnimador(
+    String id,
+    String animatorId,
+    PresetDoAnimador preset,
+  ) {
     _updateTextLayer(id, (l) {
-      final n = l.animators.length + 1;
       return l.copyLayer(
         animators: [
-          ...l.animators,
-          TextAnimator(name: 'Animador $n'),
+          for (final a in l.animators)
+            a.id == animatorId ? preset.construir(id: animatorId) : a,
         ],
       );
+    });
+  }
+
+  /// A UNIDADE do animador: caractere, palavra ou linha.
+  ///
+  /// Vai em TODOS os seletores do animador — uma faixa em palavras com um
+  /// segundo seletor em caracteres cobriria unidades diferentes e o
+  /// resultado seria ilegivel.
+  void setAnimadorUnidade(String id, String animatorId, SelectorBasedOn base) {
+    _updateAnimator(id, animatorId, (a) {
+      return a.copyWith(
+        selectors: [
+          for (final s in a.selectors)
+            switch (s) {
+              RangeSelector r => r.copyWith(basedOn: base),
+              WigglySelector w => w.copyWith(basedOn: base),
+              ExpressionSelector e => e.copyWith(basedOn: base),
+              StaggerSelector g => g.copyWith(basedOn: base),
+            },
+        ],
+      );
+    });
+  }
+
+  /// Escreve o valor de uma propriedade do animador PELO TIPO, criando-a
+  /// se ainda nao existe.
+  ///
+  /// O cartao mostra as sete propriedades sempre, no neutro quando nao
+  /// existem — e a primeira mexida que as cria. Sem isto seria preciso
+  /// "adicionar propriedade" antes de mexer, que e a ceremonia que o
+  /// animador antigo cobrava.
+  void editAnimadorProp(
+    String id,
+    String animatorId,
+    TextAnimProp tipo,
+    Duration globalTime,
+    double value,
+  ) {
+    final layer = _layer(id);
+    if (layer == null) return;
+    final local = layer.localTime(globalTime);
+    _updateAnimator(id, animatorId, (a) {
+      final atual = propriedadeDoAnimador(a, tipo);
+      if (atual == null) {
+        return a.copyWith(
+          properties: [
+            ...a.properties,
+            AnimatorProperty(type: tipo, value: AnimatedDouble(value)),
+          ],
+        );
+      }
+      return a.copyWith(
+        properties: [
+          for (final p in a.properties)
+            p.type == tipo ? p.copyWith(value: p.value.editada(local, value)) : p,
+        ],
+      );
+    });
+  }
+
+  /// O losango de uma propriedade do animador, pelo tipo.
+  void toggleAnimadorPropKeyframe(
+    String id,
+    String animatorId,
+    TextAnimProp tipo,
+    Duration globalTime,
+  ) {
+    if (_cravarPendencia(id, globalTime)) return;
+    final layer = _layer(id);
+    if (layer == null) return;
+    final local = layer.localTime(globalTime);
+    _updateAnimator(id, animatorId, (a) {
+      final atual = propriedadeDoAnimador(a, tipo);
+      // Marcar o que nao existe CRIA a propriedade ja com a marca: o
+      // losango nunca fica aceso sobre o nada.
+      if (atual == null) {
+        return a.copyWith(
+          properties: [
+            ...a.properties,
+            AnimatorProperty(
+              type: tipo,
+              value: AnimatedDouble(
+                neutroDaPropriedade(tipo),
+              ).withKeyframe(local, neutroDaPropriedade(tipo)),
+            ),
+          ],
+        );
+      }
+      return a.copyWith(
+        properties: [
+          for (final p in a.properties)
+            p.type == tipo
+                ? p.copyWith(
+                    value: p.value.hasKeyframeAt(local)
+                        ? p.value.withoutKeyframe(local)
+                        : p.value.withKeyframe(local, p.value.valueAt(local)),
+                  )
+                : p,
+        ],
+      );
+    });
+  }
+
+  /// O losango de um parametro do seletor (start, end, offset, ease).
+  void toggleSelectorParamKeyframe(
+    String id,
+    String animatorId,
+    String selectorId,
+    String param,
+    Duration globalTime,
+  ) {
+    if (_cravarPendencia(id, globalTime)) return;
+    final layer = _layer(id);
+    if (layer == null) return;
+    final local = layer.localTime(globalTime);
+    AnimatedDouble virar(AnimatedDouble v) => v.hasKeyframeAt(local)
+        ? v.withoutKeyframe(local)
+        : v.withKeyframe(local, v.valueAt(local));
+    _updateSelector(id, animatorId, selectorId, (s) {
+      if (s is! RangeSelector) return s;
+      return switch (param) {
+        'start' => s.copyWith(start: virar(s.start)),
+        'end' => s.copyWith(end: virar(s.end)),
+        'offset' => s.copyWith(offset: virar(s.offset)),
+        'easeHigh' => s.copyWith(easeHigh: virar(s.easeHigh)),
+        'easeLow' => s.copyWith(easeLow: virar(s.easeLow)),
+        'amount' => s.copyWith(amount: virar(s.amount)),
+        _ => s,
+      };
     });
   }
 
@@ -8210,6 +8663,13 @@ class EditorController extends Notifier<VideoProject> {
           'end' => s.copyWith(end: s.end.editada(local, value)),
           'offset' => s.copyWith(offset: s.offset.editada(local, value)),
           'amount' => s.copyWith(amount: s.amount.editada(local, value)),
+          // OS DOIS PESOS DA CURVA do seletor: entram aqui porque sao
+          // trilhas como as outras — o cartao poe keyframe neles.
+          'easeHigh' => s.copyWith(easeHigh: s.easeHigh.editada(local, value)),
+          'easeLow' => s.copyWith(easeLow: s.easeLow.editada(local, value)),
+          'smooth' => s.copyWith(
+            smoothness: s.smoothness.editada(local, value),
+          ),
           _ => s,
         };
       }

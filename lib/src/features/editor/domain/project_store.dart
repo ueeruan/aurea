@@ -140,6 +140,18 @@ Map<String, dynamic> _ad(AnimatedDouble a) => {
   if (a.loop.active) 'loop': _loop(a.loop),
 };
 
+/// A ESCALA POR EIXO DE UM NO DA CENA VALE A PENA GRAVAR?
+///
+/// Tres trilhas a mais por no, em cenas com centenas de nos, so para
+/// dizer "1" trezentas vezes. Grava-se apenas o que alguem mexeu: valor
+/// diferente de 1, keyframe, expressao, animador ou loop.
+bool _escalaDeEixoMexida(AnimatedDouble a) =>
+    (a.base - 1).abs() > 1e-9 ||
+    a.keyframes.isNotEmpty ||
+    a.hasExpression ||
+    a.animador != null ||
+    a.loop.active;
+
 /// Numero que VIROU animavel (constituicao, regra 6): projeto antigo
 /// gravou um numero solto; o novo grava a trilha inteira. Os dois abrem.
 AnimatedDouble _asAdOuNumero(dynamic v, double padrao) {
@@ -1699,6 +1711,11 @@ Map<String, dynamic> _texto3d(Texto3D t) => {
   'qualidade': t.qualidade.name,
   'separarLetras': t.separarLetras,
   if (t.temRotacaoPorLetra) 'rotLetra': [t.rotLetraX, t.rotLetraY, t.rotLetraZ],
+  // OS AJUSTES POR FAIXA DE CARACTERES (mover so o "C" de "ABCDE"). A
+  // chave so entra quando ha ajuste: projeto antigo continua byte a byte
+  // como era, e `ajustesDeJson` devolve lista vazia quando ela falta.
+  if (t.ajustes.isNotEmpty)
+    'ajustesDeCaracteres': [for (final a in t.ajustes) a.toJson()],
 };
 
 Texto3D? _asTexto3D(Object? json) {
@@ -1727,6 +1744,7 @@ Texto3D? _asTexto3D(Object? json) {
     rotLetraX: _rotLetra(json['rotLetra'], 0),
     rotLetraY: _rotLetra(json['rotLetra'], 1),
     rotLetraZ: _rotLetra(json['rotLetra'], 2),
+    ajustes: ajustesDeJson(json['ajustesDeCaracteres']),
   );
 }
 
@@ -1895,6 +1913,13 @@ Map<String, dynamic> _scene(Scene3D s) => {
         'ry': _ad(n.rotY),
         'rz': _ad(n.rotZ),
         's': _ad(n.scale),
+        // ESCALA POR EIXO: so entra no arquivo quando ALGUEM MEXEU. O
+        // caso comum (1, 1, 1 sem keyframe) continua gravando o mesmo
+        // JSON de antes — e um projeto salvo por uma versao anterior
+        // volta com os tres em 1, que e exatamente o que ele desenhava.
+        if (_escalaDeEixoMexida(n.scaleX)) 'sx': _ad(n.scaleX),
+        if (_escalaDeEixoMexida(n.scaleY)) 'sy': _ad(n.scaleY),
+        if (_escalaDeEixoMexida(n.scaleZ)) 'sz': _ad(n.scaleZ),
         'size': n.size,
         'vis': n.visible,
         if (n.instances.isNotEmpty)
@@ -1998,6 +2023,11 @@ SceneNode _asSceneNode(Map<String, dynamic> n) {
     rotY: _asAd(n['ry']),
     rotZ: _asAd(n['rz']),
     scale: _asAd(n['s']),
+    // LEITURA TOLERANTE (regra do QA 1.0): ausente vale 1, numero solto
+    // tambem abre, e uma trilha ilegivel nao derruba o no inteiro.
+    scaleX: _asAdOuNumero(n['sx'], 1),
+    scaleY: _asAdOuNumero(n['sy'], 1),
+    scaleZ: _asAdOuNumero(n['sz'], 1),
     size: (n['size'] as num).toDouble(),
     visible: n['vis'] as bool? ?? true,
     instances: [

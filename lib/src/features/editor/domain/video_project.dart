@@ -290,12 +290,25 @@ class VideoProject {
   late final Duration duration = _duration();
 
   Duration _duration() {
-    var end = Duration.zero;
-    for (final l in layers) {
-      if (l.endTime > end) end = l.endTime;
-    }
-    return end < const Duration(seconds: 5) ? const Duration(seconds: 5) : end;
+    final fim = duracaoDoConteudo;
+    return fim < const Duration(seconds: 5) ? const Duration(seconds: 5) : fim;
   }
+
+  /// ATE ONDE VAI O QUE EXISTE, sem piso nenhum: o fim da camada que termina
+  /// por ultimo, e zero num projeto vazio.
+  ///
+  /// [duration] tem piso de cinco segundos para a linha do tempo nascer com
+  /// largura utilizavel e para caber um clipe arrastado. Isso e bom para
+  /// EDITAR e pessimo para EXPORTAR: um projeto de dois segundos virava um
+  /// video de cinco, com tres de preto no fim — foi o relato. Quem grava
+  /// video usa ESTA aqui; quem desenha a linha do tempo usa a outra.
+  late final Duration duracaoDoConteudo = () {
+    var fim = Duration.zero;
+    for (final l in layers) {
+      if (l.endTime > fim) fim = l.endTime;
+    }
+    return fim;
+  }();
 
   Duration get frameDuration => Duration(microseconds: 1000000 ~/ fps);
 

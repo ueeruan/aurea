@@ -38,11 +38,22 @@ const efeitosMotionTile = <EffectType, EffectSpec>{
         kind: ParamKind.point,
         relative: true,
       ),
+      // O MOSAICO SOBE ATE 300%, E NAO PARA EM 100%.
+      //
+      // O RELATO: "a imagem comprime, diminui de tamanho". O teto de 100%
+      // era a causa direta — com ele, o unico caminho que a pessoa tinha
+      // nesse controle era ENCOLHER a imagem, e nao havia como voltar
+      // para cima. No After Effects o mesmo controle passa de 100% e o
+      // ladrilho fica MAIOR que a camada.
+      //
+      // 300% E O QUE O SHADER JA FAZIA: `ParametrosDoMotionTile` trava o
+      // fator em `.clamp(.01, 3)`. A ficha so estava escondendo dois
+      // tercos do que o efeito ja sabia desenhar.
       'tile_width': EffectParam(
         'Largura do mosaico',
         100,
         1,
-        100,
+        300,
         unit: '%',
         decimals: 1,
       ),
@@ -50,7 +61,7 @@ const efeitosMotionTile = <EffectType, EffectSpec>{
         'Altura do mosaico',
         100,
         1,
-        100,
+        300,
         unit: '%',
         decimals: 1,
       ),

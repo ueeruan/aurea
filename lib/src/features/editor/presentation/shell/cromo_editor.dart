@@ -11,6 +11,7 @@ import '../../../../core/ui/tocavel.dart';
 import '../../application/cronometro_de_edicao.dart';
 import '../../application/editor_controller.dart';
 import '../../application/operacoes_do_lote.dart';
+import '../../application/perfil3d.dart';
 import '../../application/playback_controller.dart';
 import '../../application/ui/editor_session.dart';
 import '../../application/ui/opcoes_de_visualizacao.dart';
@@ -861,6 +862,47 @@ class _BarraDoLoteState extends ConsumerState<BarraDoLote> {
 /// aparar o comeco, dividir, aparar o fim. Com o cabecote de fora:
 /// estender ate ele, mover ate ele. E sempre: alinhar os comecos,
 /// distribuir uma depois da outra, alinhar os fins.
+/// OS PARES (INICIO, FIM) DAS CAMADAS DO LOTE, como valor comparavel.
+///
+/// E a mesma resposta de `cabecoteDentroDoLote` (que e
+/// `camadas.any((l) => l.activeAt(t))`, e `activeAt` e so
+/// `t >= startTime && t < endTime`), so que sem obrigar quem pergunta a
+/// observar o projeto inteiro.
+@immutable
+class _JanelasDoLote {
+  const _JanelasDoLote(this.us);
+
+  factory _JanelasDoLote.de(List<Layer> camadas) => _JanelasDoLote([
+    for (final l in camadas) ...[
+      l.startTime.inMicroseconds,
+      l.endTime.inMicroseconds,
+    ],
+  ]);
+
+  /// Inicio e fim de cada camada, alternados.
+  final List<int> us;
+
+  bool contem(Duration t) {
+    final agora = t.inMicroseconds;
+    for (var i = 0; i + 1 < us.length; i += 2) {
+      if (agora >= us[i] && agora < us[i + 1]) return true;
+    }
+    return false;
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (other is! _JanelasDoLote || other.us.length != us.length) return false;
+    for (var i = 0; i < us.length; i++) {
+      if (other.us[i] != us[i]) return false;
+    }
+    return true;
+  }
+
+  @override
+  int get hashCode => Object.hashAll(us);
+}
+
 class BarraDoLoteNoTempo extends ConsumerWidget {
   const BarraDoLoteNoTempo({super.key, required this.playback});
 
@@ -868,8 +910,20 @@ class BarraDoLoteNoTempo extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    Perfil3D.contar('build.barra-lote');
     final multi = ref.watch(multiSelectProvider);
-    final projeto = ref.watch(editorControllerProvider);
+    // AS JANELAS DO LOTE, E NAO O PROJETO INTEIRO.
+    //
+    // Esta barra so precisa saber se o cabecote passa por dentro de
+    // alguma camada escolhida — ou seja, dos pares (inicio, fim). Lendo
+    // o projeto inteiro ela se refazia a cada mutacao, inclusive a cada
+    // passo de um slider que nao mexe em tempo nenhum. [_JanelasDoLote]
+    // compara por VALOR: arrastar opacidade nao acorda mais esta barra.
+    final janelas = ref.watch(
+      editorControllerProvider.select(
+        (p) => _JanelasDoLote.de(camadasDoLote(p, multi)),
+      ),
+    );
     final controller = ref.read(editorControllerProvider.notifier);
     Duration t() => playback.time.value;
     VideoProject atual() => ref.read(editorControllerProvider);
@@ -877,7 +931,7 @@ class BarraDoLoteNoTempo extends ConsumerWidget {
     return ValueListenableBuilder<Duration>(
       valueListenable: playback.time,
       builder: (context, agora, _) {
-        final dentro = cabecoteDentroDoLote(projeto, multi, agora);
+        final dentro = janelas.contem(agora);
         return Container(
           key: const ValueKey('barra-do-lote-no-tempo'),
           height: 46,
@@ -1614,6 +1668,32 @@ Future<void> menuDaTimeline(
   );
 }
 
+/// OS IDS DAS CAMADAS, como valor comparavel: o `select` compara com
+/// `==`, e uma `List` nova a cada leitura acordaria o menu por nada.
+@immutable
+class _IdsDasCamadas {
+  const _IdsDasCamadas(this.ids);
+
+  factory _IdsDasCamadas.de(VideoProject p) =>
+      _IdsDasCamadas([for (final l in p.layers) l.id]);
+
+  final List<String> ids;
+
+  @override
+  bool operator ==(Object other) {
+    if (other is! _IdsDasCamadas || other.ids.length != ids.length) {
+      return false;
+    }
+    for (var i = 0; i < ids.length; i++) {
+      if (other.ids[i] != ids[i]) return false;
+    }
+    return true;
+  }
+
+  @override
+  int get hashCode => Object.hashAll(ids);
+}
+
 class _MenuDaTimeline extends ConsumerWidget {
   const _MenuDaTimeline({
     required this.playback,
@@ -1634,7 +1714,26 @@ class _MenuDaTimeline extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final projeto = ref.watch(editorControllerProvider);
+    // SO OS CAMPOS QUE O MENU MOSTRA.
+    //
+    // Este menu e uma folha modal por cima do editor: observando o
+    // projeto inteiro ele se refazia junto com qualquer mutacao — e
+    // enquanto ele esta aberto o que muda o projeto sao as proprias
+    // acoes dele. Sao seis campos, e um deles (a lista de ids) e o unico
+    // que precisa passear pelas camadas. O `select` compara por valor,
+    // entao a lista de ids vai como `_IdsDasCamadas`.
+    final projeto = ref.watch(
+      editorControllerProvider.select(
+        (p) => (
+          id: p.id,
+          thumbTime: p.thumbTime,
+          introFim: p.introFim,
+          finalInicio: p.finalInicio,
+          marcadores: p.markers.length,
+          ids: _IdsDasCamadas.de(p),
+        ),
+      ),
+    );
     final controller = ref.read(editorControllerProvider.notifier);
     final opcoes = ref.watch(opcoesDeVisualizacaoProvider);
     final cronometro = ref.watch(cronometroDeEdicaoProvider(projeto.id));
@@ -1681,7 +1780,7 @@ class _MenuDaTimeline extends ConsumerWidget {
     );
 
     final estado = cronometro.estado;
-    final todas = [for (final l in projeto.layers) l.id];
+    final todas = projeto.ids.ids;
 
     return SafeArea(
       child: ConstrainedBox(
@@ -1850,9 +1949,9 @@ class _MenuDaTimeline extends ConsumerWidget {
               'timeline-menu-marcas',
               CupertinoIcons.bookmark_solid,
               'Marcas na timeline',
-              detalhe: projeto.markers.isEmpty
+              detalhe: projeto.marcadores == 0
                   ? null
-                  : '${projeto.markers.length}',
+                  : '${projeto.marcadores}',
               onTap: () => fecharE(
                 () => menuDasMarcas(contextoDoEditor, ref, playback),
               ),

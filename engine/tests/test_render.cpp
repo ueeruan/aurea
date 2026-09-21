@@ -983,3 +983,37 @@ AUREA_TEST(Compositor, TransformEffectAtTheEndAddsNoPass) {
     AUREA_CHECK(f.renderer.render(snap, rs, nullptr, stats, timings).ok());
     AUREA_CHECK_EQ(f.renderer.graph_stats().passesExecuted, baseline);
 }
+
+// -----------------------------------------------------------------------------
+// Motion Tile — cenários dos testes do Aurea antigo que faltavam no porte
+// (motion_tile_test.dart / motion_tile_escala_test.dart).
+// -----------------------------------------------------------------------------
+AUREA_TEST(MotionTile, TileXAndYCanDiffer) {
+    motion_tile::Params p;
+    p.tileX = 0.5f;
+    p.tileY = 0.25f;
+    for (u32 i = 0; i < 20; ++i) {
+        const f32 v = 0.01f + 0.02f * static_cast<f32>(i);
+        const Vec2 a = motion_tile::reference_lookup(p, Vec2{v, v});
+        const Vec2 bx = motion_tile::reference_lookup(p, Vec2{v + 0.5f, v});
+        const Vec2 by = motion_tile::reference_lookup(p, Vec2{v, v + 0.25f});
+        AUREA_CHECK_NEAR(a.x, bx.x, 1e-5);   // período 1/2 em X
+        AUREA_CHECK_NEAR(a.y, by.y, 1e-5);   // período 1/4 em Y
+    }
+}
+
+AUREA_TEST(MotionTile, WideFrameAsksMoreOnWidthThanHeight) {
+    motion_tile::Params p;
+    // Layer 1000×1000 a 50 % no centro de um quadro 2000×1000.
+    const Vec2 f = motion_tile::coverage_factors(p, tile_placement(2000, 1000, 1000, 1000, 1000, 500, 0.5f));
+    AUREA_CHECK_NEAR(f.x, 4.0f, 1e-2);
+    AUREA_CHECK_NEAR(f.y, 2.0f, 1e-2);
+}
+
+AUREA_TEST(MotionTile, ScaleAndRotationAddUp) {
+    motion_tile::Params p;
+    // Metade do tamanho (×2) e 45° num quadrado (×√2): as duas coisas se somam.
+    const Vec2 f = motion_tile::coverage_factors(p, tile_placement(1000, 1000, 1000, 1000, 500, 500, 0.5f, 45.0f));
+    AUREA_CHECK_NEAR(f.x, 2.0f * std::sqrt(2.0f), 2e-3);
+    AUREA_CHECK_NEAR(f.y, 2.0f * std::sqrt(2.0f), 2e-3);
+}

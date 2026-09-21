@@ -922,3 +922,111 @@ AUREA_TEST(Gpu, CaptureFrameGivesSrgbThumbnail) {
     AUREA_CHECK_EQ(px(16, 9, 3), 255);
     e.shutdown();
 }
+
+// -----------------------------------------------------------------------------
+// Motion Tile na GPU — cenários dos testes do Aurea antigo que faltavam.
+// -----------------------------------------------------------------------------
+namespace {
+/// Maior diferença na caixa de uma layer 64×36 centrada em (128,72).
+f32 central_copy_error(const FloatImage& a, const FloatImage& b) {
+    f32 worst = 0.0f;
+    for (u32 y = 56; y < 88; ++y) {
+        for (u32 x = 98; x < 158; ++x) {
+            for (int c = 0; c < 3; ++c) worst = std::fmax(worst, std::fabs(a.at(x, y)[c] - b.at(x, y)[c]));
+        }
+    }
+    return worst;
+}
+}
+
+AUREA_TEST(Gpu, MotionTileOutputSizeNeverShrinksTheCentralCopy) {
+    // "Largura/altura da saída em 200% não encolhem a cópia".
+    AUREA_REQUIRE_GPU();
+    Scene s(256, 144);
+    const LayerId id = s.image(reference_image(128, 72), 128, 72, 0.5f);
+    const FloatImage plain = s.render();
+    EffectInstance& mt = s.add_effect(id, effect_keys::kMotionTile);
+    mt.params[motion_tile::kOutputWidth].constant.v[0] = 200.0f;
+    mt.params[motion_tile::kOutputHeight].constant.v[0] = 200.0f;
+    AUREA_CHECK(central_copy_error(plain, s.render()) < 0.01f);
+}
+
+AUREA_TEST(Gpu, MotionTileCenterSlidesTheGridWithoutResizing) {
+    // "Centro X desliza a grade, sem mexer no tamanho": com o centro deslocado
+    // meio ladrilho, a imagem é a mesma deslocada — o período não muda.
+    AUREA_REQUIRE_GPU();
+    Scene s(256, 144);
+    const LayerId id = s.image(reference_image(256, 144), 128, 72);
+    EffectInstance& mt = s.add_effect(id, effect_keys::kMotionTile);
+    mt.params[motion_tile::kTileWidth].constant.v[0] = 50.0f;
+    mt.params[motion_tile::kTileHeight].constant.v[0] = 50.0f;
+    const FloatImage base = s.render();
+    mt.params[motion_tile::kCenter].constant.v[0] = 0.75f;   // +1/4 da layer = meio ladrilho
+    const FloatImage slid = s.render();
+    f32 worstShift = 0.0f, worstPeriod = 0.0f;
+    for (u32 y = 10; y < 60; y += 3) {
+        for (u32 x = 10; x < 118; x += 3) {
+            for (int c = 0; c < 3; ++c) {
+                worstShift = std::fmax(worstShift, std::fabs(slid.at(x + 64, y)[c] - base.at(x, y)[c]));
+                worstPeriod = std::fmax(worstPeriod, std::fabs(slid.at(x, y)[c] - slid.at(x + 128, y)[c]));
+            }
+        }
+    }
+    AUREA_CHECK(worstShift < 0.02f);
+    AUREA_CHECK(worstPeriod < 0.01f);
+}
+
+AUREA_TEST(Gpu, MotionTileAt200PercentDrawsADoubleTile) {
+    // "Mosaico em 200% desenha um ladrilho do DOBRO": a imagem da layer ocupa o
+    // dobro — o centro dela fica no mesmo lugar e a borda vai para o dobro.
+    AUREA_REQUIRE_GPU();
+    Scene s(256, 144);
+    const LayerId id = s.image(reference_image(64, 36), 128, 72);
+    EffectInstance& mt = s.add_effect(id, effect_keys::kMotionTile);
+    mt.params[motion_tile::kTileWidth].constant.v[0] = 200.0f;
+    mt.params[motion_tile::kTileHeight].constant.v[0] = 200.0f;
+    mt.params[motion_tile::kOutputWidth].constant.v[0] = 400.0f;
+    mt.params[motion_tile::kOutputHeight].constant.v[0] = 400.0f;
+    const FloatImage img = s.render();
+    // Na referência, o vermelho vai de 0 a 1 na largura da imagem. Num ladrilho
+    // de 128 px (o dobro de 64) centrado em x = 128, o pixel x = 164 é a fonte
+    // em u ≈ 0,78 (vermelho sRGB ≈ 199 → linear ≈ 0,57). Com o ladrilho de
+    // 64 px ele cairia no começo do vizinho (u ≈ 0,06 → quase preto). O x = 160
+    // foi evitado de propósito: é uma linha escura da grade da referência.
+    const f32 r = img.at(164, 60)[0];
+    AUREA_CHECK(r > 0.40f && r < 0.75f);
+}
+
+AUREA_TEST(Gpu, MotionTileLeavesNoHoleInAnyCombination) {
+    // "Nada de borda nem de buraco em nenhuma combinação": a layer encolhida
+    // e girada com qualquer ladrilho/espelho cobre o quadro inteiro.
+    AUREA_REQUIRE_GPU();
+    const f32 tiles[] = {10.0f, 37.0f, 100.0f};
+    const f32 scales[] = {0.2f, 0.5f};
+    const f32 rotations[] = {0.0f, 30.0f, 90.0f};
+    u32 holes = 0, cases = 0;
+    for (f32 tile : tiles) {
+        for (f32 scale : scales) {
+            for (f32 rot : rotations) {
+                for (int mirror = 0; mirror < 2; ++mirror) {
+                    Scene s(160, 90);
+                    const LayerId id = s.image(uniform_image(64, 36, 220, 220, 220), 80, 45, scale);
+                    s.comp->layer(id)->transform.rotation.z = rot;
+                    EffectInstance& mt = s.add_effect(id, effect_keys::kMotionTile);
+                    mt.params[motion_tile::kTileWidth].constant.v[0] = tile;
+                    mt.params[motion_tile::kTileHeight].constant.v[0] = tile;
+                    mt.params[motion_tile::kMirror].constant.v[0] = static_cast<f32>(mirror);
+                    const FloatImage img = s.render();
+                    ++cases;
+                    for (u32 y = 0; y < 90; y += 2) {
+                        for (u32 x = 0; x < 160; x += 2) {
+                            if (img.at(x, y)[3] < 0.99f) { ++holes; break; }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    AUREA_CHECK_EQ(cases, 36u);
+    AUREA_CHECK_EQ(holes, 0u);
+}

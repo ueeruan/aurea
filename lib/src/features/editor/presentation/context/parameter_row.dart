@@ -604,8 +604,19 @@ Future<double?> showNumberInput(
 }
 
 /// O numero sem zeros sobrando: 12.50 -> "12.5", 3.00 -> "3".
-String formatarValorDigitado(double v, int decimals) =>
-    v.toStringAsFixed(decimals.clamp(0, 6)).replaceAll(RegExp(r'\.?0+$'), '');
+///
+/// SO APARA DEPOIS DA VIRGULA. A regra antiga (`\.?0+$` no texto inteiro)
+/// tambem comia os zeros da parte INTEIRA quando nao havia casa decimal:
+/// com `decimals` 0, 100 virava "1" e 120 virava "12" — o teclado abria
+/// com o numero errado e a caixa de valor mostrava outro.
+String formatarValorDigitado(double v, int decimals) {
+  final texto = v.toStringAsFixed(decimals.clamp(0, 6));
+  if (!texto.contains('.')) return texto == '-0' ? '0' : texto;
+  final aparado = texto
+      .replaceAll(RegExp(r'0+$'), '')
+      .replaceAll(RegExp(r'\.$'), '');
+  return aparado == '-0' ? '0' : aparado;
+}
 
 class TecladoNumerico extends StatefulWidget {
   const TecladoNumerico({

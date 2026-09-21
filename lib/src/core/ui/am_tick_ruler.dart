@@ -272,6 +272,8 @@ class AmArrastoDeValor extends StatefulWidget {
     this.unitsPerPixel = 0.5,
     this.min = double.negativeInfinity,
     this.max = double.infinity,
+    this.onStart,
+    this.onEnd,
   });
 
   final double value;
@@ -280,6 +282,13 @@ class AmArrastoDeValor extends StatefulWidget {
   final double unitsPerPixel;
   final double min;
   final double max;
+
+  /// O COMECO E O FIM DO GESTO, para quem precisa fazer do arrasto inteiro
+  /// UM passo de desfazer (`beginGesture`/`endGesture` do controlador).
+  /// Opcionais: sem eles o arrasto e exatamente o de sempre. [onEnd] chega
+  /// DEPOIS do ultimo valor entregue, tambem no cancelamento.
+  final VoidCallback? onStart;
+  final VoidCallback? onEnd;
 
   @override
   State<AmArrastoDeValor> createState() => _AmArrastoDeValorState();
@@ -316,6 +325,7 @@ class _AmArrastoDeValorState extends State<AmArrastoDeValor> {
       onHorizontalDragStart: (_) {
         _inicio = widget.value;
         _acumulado = 0;
+        widget.onStart?.call();
       },
       onHorizontalDragUpdate: (d) {
         _acumulado += d.delta.dx;
@@ -336,8 +346,14 @@ class _AmArrastoDeValorState extends State<AmArrastoDeValor> {
           if (mounted) _descarregar();
         });
       },
-      onHorizontalDragEnd: (_) => _descarregar(),
-      onHorizontalDragCancel: _descarregar,
+      onHorizontalDragEnd: (_) {
+        _descarregar();
+        widget.onEnd?.call();
+      },
+      onHorizontalDragCancel: () {
+        _descarregar();
+        widget.onEnd?.call();
+      },
       child: widget.child,
     );
   }

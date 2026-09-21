@@ -113,4 +113,27 @@ abstract final class AmColors {
   static const Color muted = AureaColors.muted;
 
   static Color get hairline => _p.divider;
+
+  // ------------------------------------------------ papeis da UI nova (ds)
+  //
+  // O design system (`core/ds/`) separa as superficies SO POR TOM, sem
+  // borda — e para isso precisa de um degrau acima do [chip] e do texto
+  // secundario da paleta em vigor. Os dois saem da paleta (nenhum hex
+  // novo) e nao mudam nenhum papel que ja existia.
+
+  /// O DEGRAU MAIS ALTO: campo apertado, item de menu sob o dedo. E o
+  /// [chip] puxado 8% para o texto — claro o bastante para se separar do
+  /// campo sem virar um cinza que brigue com o conteudo.
+  static Color get campoAlto =>
+      Color.lerp(_p.chip, _p.textPrimary, .08) ?? _p.chip;
+
+  /// Texto secundario DO TEMA (rotulo de propriedade, dica). [muted]
+  /// continua `const` pelos ~530 sitios antigos; a UI nova le este.
+  static Color get textoSecundario => _p.textSecondary;
+
+  /// Texto principal do tema, pelo mesmo motivo de [textoSecundario].
+  static Color get textoPrincipal => _p.textPrimary;
+
+  /// O losango de keyframe: a cor propria da paleta.
+  static Color get keyframe => _p.keyframe;
 }

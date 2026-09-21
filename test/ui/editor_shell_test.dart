@@ -163,11 +163,11 @@ void main() {
       expect(find.byKey(const ValueKey('ferramenta-fonte')), findsOneWidget);
       expect(find.byKey(const ValueKey('ferramenta-forma')), findsNothing);
 
-      // Toque no vazio da timeline solta a selecao e a barra some.
-      await tester.tapAt(
-        tester.getCenter(find.byKey(ValueKey('linha-${texto.id}'))) -
-            const Offset(150, 0),
-      );
+      // Toque no vazio da timeline solta a selecao e a barra some. O
+      // vazio fica A DIREITA do fim do clipe: a esquerda agora mora o
+      // cabecalho de 70 dp da camada (olho, miniatura), que seleciona.
+      final linha = tester.getRect(find.byKey(ValueKey('linha-${texto.id}')));
+      await tester.tapAt(Offset(linha.right - 6, linha.center.dy));
       await tester.pumpAndSettle();
       expect(c.read(selectedLayerProvider), isNull);
       expect(find.byKey(const ValueKey('barra-contextual')), findsNothing);

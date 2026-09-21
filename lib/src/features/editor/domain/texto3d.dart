@@ -5,6 +5,8 @@ import 'package:characters/characters.dart';
 
 import 'fonte_truetype.dart';
 import 'keyframe.dart';
+// So a codificacao da curva: a mesma das outras trilhas do arquivo.
+import 'project_store.dart' show easingFromJson, easingToJson;
 
 /// TEXTO 3D, O DO ELEMENT 3D: letra extrudada, com chanfro e tres
 /// materiais (frente, chanfro e lateral).
@@ -117,14 +119,38 @@ class AjusteDeCaracteres {
 
   /// A trilha viaja como NUMERO quando esta parada (o caso comum) e como
   /// `{b: base, k: [[microssegundos, valor], ...]}` quando tem keyframes.
+  ///
+  /// A CURVA DO TRECHO e um TERCEIRO item OPCIONAL da marca —
+  /// `[microssegundos, valor, curva]`, na codificacao de [easingToJson],
+  /// a mesma das outras trilhas do projeto. So entra quando a curva nao e
+  /// a linear: um ajuste sem curva editada sai byte a byte como antes, e
+  /// um arquivo antigo (marca de dois itens) le linear, como sempre leu.
+  /// Sem isto a curva editada num caractere voltava a linear ao reabrir —
+  /// e tambem no render, que le a pose deste mesmo JSON no modelo.
   static Object _trilhaParaJson(AnimatedDouble a) => a.isAnimated
       ? {
           'b': a.base,
           'k': [
-            for (final k in a.keyframes) [k.time.inMicroseconds, k.value],
+            for (final k in a.keyframes)
+              [
+                k.time.inMicroseconds,
+                k.value,
+                if (!k.ease.isLinear) easingToJson(k.ease),
+              ],
           ],
         }
       : a.base;
+
+  /// A curva gravada na marca, tolerante: ausente, estranha ou incompleta
+  /// = linear (o que um arquivo antigo sempre quis dizer).
+  static Easing _curvaDeJson(Object? v) {
+    if (v is! Map) return Easing.linear;
+    try {
+      return easingFromJson(v.cast<String, dynamic>());
+    } on TypeError {
+      return Easing.linear;
+    }
+  }
 
   static AnimatedDouble? _trilhaDeJson(Object? v) {
     if (v is num) {
@@ -141,6 +167,7 @@ class AjusteDeCaracteres {
         Keyframe(
           time: Duration(microseconds: t.toInt()),
           value: val.toDouble(),
+          ease: k.length > 2 ? _curvaDeJson(k[2]) : Easing.linear,
         ),
       );
     }
@@ -189,11 +216,31 @@ class AjusteDeCaracteres {
     }
     for (var i = 0; i < a.keyframes.length; i++) {
       if (a.keyframes[i].time != b.keyframes[i].time ||
-          a.keyframes[i].value != b.keyframes[i].value) {
+          a.keyframes[i].value != b.keyframes[i].value ||
+          !_mesmaCurva(a.keyframes[i].ease, b.keyframes[i].ease)) {
         return false;
       }
     }
     return true;
+  }
+
+  /// A curva tambem e valor: trocar SO a curva de um caractere e uma
+  /// mudanca, e um ajuste com a curva perdida nao e igual ao original.
+  /// Os numeros da mola so contam na mola (o arquivo so os grava nela).
+  static bool _mesmaCurva(Easing a, Easing b) {
+    if (identical(a, b) || (a.isLinear && b.isLinear)) return true;
+    return a.type == b.type &&
+        a.x1 == b.x1 &&
+        a.y1 == b.y1 &&
+        a.x2 == b.x2 &&
+        a.y2 == b.y2 &&
+        a.count == b.count &&
+        a.smooth == b.smooth &&
+        a.intensity == b.intensity &&
+        (a.type != EasingType.spring ||
+            (a.response == b.response &&
+                a.damping == b.damping &&
+                a.initialVelocity == b.initialVelocity));
   }
 
   @override

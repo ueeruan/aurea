@@ -127,6 +127,16 @@ Easing _asEasing(Map<String, dynamic> m) => Easing(
   initialVelocity: (m['initialVelocity'] as num?)?.toDouble() ?? 0,
 );
 
+/// A CURVA NO FORMATO DO ARQUIVO, para quem grava trilha fora daqui: os
+/// ajustes por caractere do Texto 3D (`AjusteDeCaracteres`) guardam o
+/// keyframe no bloco deles, e a curva tem de sair com a MESMA codificacao
+/// das outras trilhas — um formato de curva so no projeto inteiro.
+Map<String, dynamic> easingToJson(Easing e) => _easing(e);
+
+/// A leitura estrita de [easingToJson] (campo faltando lanca); quem precisa
+/// de tolerancia pega o erro e cai na linear.
+Easing easingFromJson(Map<String, dynamic> m) => _asEasing(m);
+
 Map<String, dynamic> _ad(AnimatedDouble a) => {
   'b': a.base,
   // A expressao e texto: vai como veio. Ausente = sem expressao.

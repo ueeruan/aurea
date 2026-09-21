@@ -349,8 +349,22 @@ EffectType? effectTypeFromId(String id) {
   for (final e in effectSpecs.entries) {
     if (e.value.id == id) return e.key;
   }
-  return _aliasesDeId[id];
+  return _aliasesDeId[id] ?? _tiposForaDoCatalogoPorId[id];
 }
+
+/// OS EFEITOS QUE SAIRAM DO CATALOGO, PELO ID QUE ELES GRAVAM.
+///
+/// [effectIdOf] grava um efeito removido pelo id derivado do nome do enum,
+/// mas a leitura so procurava nas fichas e nos aliases. Nao achando, quem
+/// le caia no INDICE antigo — que hoje aponta para OUTRO efeito. Um projeto
+/// do beta abria certo e, na primeira gravacao da versao nova, 64 dos 89
+/// efeitos removidos voltavam trocados (seis deles passando a desenhar:
+/// o Bend virava Motion Tile, o Time Slice virava Twitch). So entram aqui
+/// os tipos SEM ficha, para um id derivado nunca sombrear um id oficial.
+final Map<String, EffectType> _tiposForaDoCatalogoPorId = {
+  for (final t in EffectType.values)
+    if (effectSpecs[t] == null) _idDerivado(t.name): t,
+};
 
 /// NOMES ANTIGOS que ainda aparecem em arquivo. Renomear nao pode
 /// quebrar o que ja existe.

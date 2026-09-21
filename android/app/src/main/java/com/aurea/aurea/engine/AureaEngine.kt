@@ -1,117 +1,129 @@
 package com.aurea.aurea.engine
 
+import android.content.Context
+import android.net.Uri
+import android.view.Surface
 import java.nio.ByteBuffer
 
 /**
  * A fronteira com o motor C++.
  *
  * REGRA DESTA CLASSE: ela é a ÚNICA porta para o motor. Nenhum outro arquivo
- * Kotlin declara `external fun`. Se a UI pudesse chamar o motor direto, cada
- * tela inventaria a sua própria forma de conversar com ele — e o custo de
- * travessia da bridge deixaria de ser controlado num lugar só.
+ * Kotlin declara `external fun`.
  *
- * As três chamadas de um frame são:
+ * O PREVIEW NÃO PASSA POR AQUI. O motor tem a sua própria thread de render,
+ * pacificada pelo vsync do swapchain Vulkan, que desenha direto no `Surface`
+ * do `SurfaceView`. A UI só:
  *
- *   1. [submitCommands] — a UI escreve comandos POD num buffer e envia o lote.
- *      Uma travessia, não uma por propriedade mexida.
- *   2. [renderFrame]    — o motor drena a fila, avalia a animação, compõe na
- *      GPU e apresenta no `Surface`. NENHUM bitmap atravessa a fronteira.
- *   3. [readStatus]     — o estado condensado volta como struct POD.
+ *   1. envia comandos POD em lote ([submitCommands]);
+ *   2. lê o estado condensado ([readStatus]) e, no painel DEV, as métricas
+ *      ([readPerf]);
+ *   3. consulta listas (camadas, efeitos, parâmetros) em buffers diretos.
  *
- * O buffer de comandos é DIRETO (fora do heap gerenciado) e tem o tamanho
- * exato de um `Command` do C++ (128 bytes). A UI escreve nele, o motor lê. Sem
- * cópia intermediária e sem serializar campo por campo.
+ * Recomposição do Compose nunca bloqueia o preview, e um preview pesado nunca
+ * trava a interface.
  */
 class AureaEngine private constructor() {
 
     companion object {
-        /**
-         * Tamanho de um `Command` no C++, em bytes.
-         *
-         * É contrato de ABI: `static_assert(sizeof(Command) == 128)` do lado
-         * C++ quebra a compilação se este número deixar de valer. Manter os
-         * dois em sincronia é obrigatório — um desalinhamento aqui produz
-         * comandos com campos trocados, que é pior do que um crash porque
-         * corrompe o projeto em silêncio.
-         */
+        /** Tamanho de um `Command` no C++ (`static_assert` do lado nativo). */
         const val COMMAND_SIZE_BYTES = 128
 
         /** Capacidade do lote. 4096 comandos = 512 KB, o pior caso de um gesto. */
         const val MAX_COMMANDS_PER_FRAME = 4096
 
-        /** Tamanho máximo do blob de strings por lote (nomes, conteúdo de texto). */
+        /** Blob de strings por lote (nomes, conteúdo de texto). */
         const val STRING_BLOB_BYTES = 64 * 1024
 
         @Volatile
-        private var libraryLoaded = false
+        private var appContext: Context? = null
 
         init {
-            // A .so do motor é carregada uma vez no processo. O NDK a chama de
-            // `libaurea.so`; o nome tem que bater com o `add_library` do CMake.
             System.loadLibrary("aurea")
-            libraryLoaded = true
+        }
+
+        fun create(context: Context): AureaEngine {
+            appContext = context.applicationContext
+            return AureaEngine()
         }
 
         /**
-         * Cria o motor. Não faz nada além de instanciar — a inicialização
-         * pesada (detecção de capacidades, sondagem de codecs, criação do
-         * backend gráfico) acontece em [initialize] e roda FORA da thread da
-         * UI, porque leva dezenas de milissegundos.
+         * Chamado pelo motor (threads nativas) para abrir uma URI `content://`
+         * de vídeo. Devolve um descritor que passa a ser do motor, ou -1.
+         *
+         * É o que permite reabrir o vídeo de um projeto salvo: o asset guarda a
+         * URI, e cada decoder pede um descritor novo quando precisa.
          */
-        fun create(): AureaEngine = AureaEngine()
-
         @JvmStatic
-        external fun nativeCreate(): Long
+        fun openContentFd(uri: String): Int = try {
+            appContext?.contentResolver
+                ?.openFileDescriptor(Uri.parse(uri), "r")
+                ?.detachFd() ?: -1
+        } catch (_: Throwable) {
+            -1
+        }
 
-        @JvmStatic
-        external fun nativeDestroy(handle: Long)
+        @JvmStatic external fun nativeCreate(): Long
+        @JvmStatic external fun nativeDestroy(handle: Long)
     }
 
-    /** Ponteiro para o `Engine` do C++. 0 = destruído. */
+    /** Ponteiro para o contexto nativo. 0 = destruído. */
     private var nativeHandle: Long = nativeCreate()
 
-    /** Buffer de comandos, direto e reutilizado entre frames. */
-    private val commandBuffer: ByteBuffer =
-        ByteBuffer.allocateDirect(MAX_COMMANDS_PER_FRAME * COMMAND_SIZE_BYTES)
-            .also { it.order(java.nio.ByteOrder.nativeOrder()) }
-
-    /** Blob de strings do lote atual. */
-    private val stringBuffer: ByteBuffer =
-        ByteBuffer.allocateDirect(STRING_BLOB_BYTES)
-            .also { it.order(java.nio.ByteOrder.nativeOrder()) }
+    private val commandBuffer: ByteBuffer = directBuffer(MAX_COMMANDS_PER_FRAME * COMMAND_SIZE_BYTES)
+    private val stringBuffer: ByteBuffer = directBuffer(STRING_BLOB_BYTES)
 
     private var stringWriteOffset = 0
     private var commandCount = 0
 
+    // =========================================================================
+    // Ciclo de vida
+    // =========================================================================
+
     /**
-     * Inicializa o motor e conecta a superfície de apresentação.
-     *
-     * @param surface Janela nativa (`Surface`) onde o motor vai desenhar. O
-     *   frame composto chega DIRETO nela — a UI nunca vê pixels.
+     * Sobe GPU, renderer e a thread de render. NÃO precisa de superfície: ela
+     * chega depois, por [attachSurface]. Pesado (dezenas a centenas de ms na
+     * primeira vez, antes do cache de pipeline existir) — fora da thread da UI.
      */
-    fun initialize(
-        surface: android.view.Surface,
-        widthPx: Int,
-        heightPx: Int,
-        refreshRate: Float,
-        cacheDir: String,
-        documentsDir: String,
-    ): Boolean = nativeInitialize(
-        nativeHandle, surface, widthPx, heightPx, refreshRate, cacheDir, documentsDir,
-    )
+    fun initialize(refreshRate: Float, cacheDir: String, documentsDir: String, debug: Boolean): Boolean =
+        nativeInitialize(nativeHandle, refreshRate, cacheDir, documentsDir, debug)
 
     fun shutdown() = nativeShutdown(nativeHandle)
 
-    /** Recomeça o lote. Chamado no início de cada frame da UI. */
+    fun destroy() {
+        if (nativeHandle != 0L) {
+            nativeDestroy(nativeHandle)
+            nativeHandle = 0L
+        }
+    }
+
+    /** App em segundo plano: pausa, devolve os decoders, grava o cache de pipeline. */
+    fun suspend() = nativeSuspend(nativeHandle)
+
+    fun resume() = nativeResume(nativeHandle)
+
+    // =========================================================================
+    // Superfície
+    // =========================================================================
+
+    fun attachSurface(surface: Surface, widthPx: Int, heightPx: Int): Boolean =
+        nativeAttachSurface(nativeHandle, surface, widthPx, heightPx)
+
+    /** Só volta quando a GPU largou a janela (o Android a destrói logo depois). */
+    fun detachSurface() = nativeDetachSurface(nativeHandle)
+
+    fun resizeSurface(widthPx: Int, heightPx: Int) = nativeResizeSurface(nativeHandle, widthPx, heightPx)
+
+    // =========================================================================
+    // Comandos
+    // =========================================================================
+
     fun beginCommandBatch() {
         commandCount = 0
         stringWriteOffset = 0
     }
 
-    /**
-     * Escreve uma string no blob do lote e devolve o offset, ou -1 se não
-     * couber. Usado para nomes de camada e conteúdo de texto.
-     */
+    /** Escreve uma string no blob do lote e devolve o offset, ou -1 se não couber. */
     fun writeString(text: String): Int {
         val bytes = text.toByteArray(Charsets.UTF_8)
         if (stringWriteOffset + bytes.size > STRING_BLOB_BYTES) return -1
@@ -122,159 +134,130 @@ class AureaEngine private constructor() {
         return offset
     }
 
-    /**
-     * Reserva um slot de comando e devolve o buffer posicionado no início dele.
-     *
-     * Quem chama escreve os campos na ORDEM EXATA do `struct Command` do C++ e
-     * fecha com [endCommand]. Escrever na ordem errada não gera erro de
-     * compilação — gera um comando com campos trocados. É por isso que a
-     * escrita fica concentrada no [CommandBatch] em vez de espalhada.
-     *
-     * Devolve `null` quando o lote encheu; a UI reenvia o resto no próximo frame.
-     */
+    /** Slot do próximo comando, ou `null` com o lote cheio. Só o [CommandBatch] escreve nele. */
     internal fun reserveCommandSlot(): ByteBuffer? {
         if (commandCount >= MAX_COMMANDS_PER_FRAME) return null
-        val slot = commandBuffer
-        slot.position(commandCount * COMMAND_SIZE_BYTES)
-        slot.limit((commandCount + 1) * COMMAND_SIZE_BYTES)
-        return slot
+        commandBuffer.limit(commandBuffer.capacity())
+        commandBuffer.position(commandCount * COMMAND_SIZE_BYTES)
+        return commandBuffer.slice().order(java.nio.ByteOrder.nativeOrder())
     }
 
     internal fun endCommand() {
         commandCount++
     }
 
-    /** Quantos comandos foram escritos neste lote. */
     fun pendingCommandCount(): Int = commandCount
 
-    /**
-     * Envia o lote. Devolve quantos comandos foram aceitos — menos que
-     * [pendingCommandCount] significa fila cheia, e a UI reenvia o resto.
-     *
-     * NÃO bloqueia: a fila do motor é livre de trava e nunca faz a UI esperar.
-     */
+    /** Envia o lote (fila sem trava: nunca bloqueia) e acorda o render. */
     fun submitCommands(): Int {
         if (commandCount == 0) return 0
         val accepted = nativeSubmitCommands(
-            nativeHandle,
-            commandBuffer,
-            commandCount,
-            if (stringWriteOffset > 0) stringBuffer else null,
-            stringWriteOffset,
+            nativeHandle, commandBuffer, commandCount,
+            if (stringWriteOffset > 0) stringBuffer else null, stringWriteOffset,
         )
-        // Os comandos recusados foram perdidos: reenviá-los exigiria a UI
-        // manter o buffer do frame anterior. Na prática a fila tem folga de
-        // milhares de comandos e o recusado só acontece se a UI emitir sem
-        // parar — e nesse caso a UI tem um bug maior.
         commandCount = 0
         stringWriteOffset = 0
         return accepted
     }
 
-    /**
-     * Desenha um frame.
-     *
-     * @param audioTimeNs posição do mixer de áudio, em nanossegundos. Durante o
-     *   playback é o master clock; parado, o playhead da timeline manda.
-     */
-    fun renderFrame(audioTimeNs: Long): Boolean = nativeRenderFrame(nativeHandle, audioTimeNs)
+    // =========================================================================
+    // Estado
+    // =========================================================================
 
-    /** Estado condensado para a UI. `out` é um buffer direto de STATUS_BYTES. */
     fun readStatus(out: ByteBuffer): Boolean = nativeReadStatus(nativeHandle, out)
+    fun readTelemetry(out: ByteBuffer): Boolean = nativeReadTelemetry(nativeHandle, out)
+    fun readPerf(out: ByteBuffer): Boolean = nativeReadPerf(nativeHandle, out)
 
-    /**
-     * Projeta as layers da composição atual num buffer direto.
-     *
-     * `outBuffer` precisa comportar `capacity * LAYER_ROW_BYTES`. O motor
-     * escreve os structs POD nele e o Kotlin lê por offset com [LayerRow.read] —
-     * uma travessia, zero alocação.
-     */
+    // =========================================================================
+    // Consultas
+    // =========================================================================
+
     fun queryLayers(outBuffer: ByteBuffer, capacity: Int, nameBlob: ByteBuffer): Int =
         nativeQueryLayers(nativeHandle, outBuffer, capacity, nameBlob, nameBlob.capacity())
 
-    /**
-     * Keyframes de uma layer, para desenhar a barra de keyframes.
-     * `outBuffer` precisa comportar `capacity * KEYFRAME_ROW_BYTES`.
-     */
-    fun queryKeyframes(layerHandle: Long, outBuffer: ByteBuffer, capacity: Int): Int =
-        nativeQueryKeyframes(nativeHandle, layerHandle, outBuffer, capacity)
+    fun queryKeyframes(layer: Long, outBuffer: ByteBuffer, capacity: Int): Int =
+        nativeQueryKeyframes(nativeHandle, layer, outBuffer, capacity)
 
-    /** Curva amostrada de uma propriedade, para o editor de gráfico. */
-    fun queryCurve(layerHandle: Long, property: Int, from: Int, to: Int, out: FloatArray): Int =
-        nativeQueryCurve(nativeHandle, layerHandle, property, from, to, out, out.size)
+    fun queryCurve(layer: Long, property: Int, from: Int, to: Int, out: FloatArray): Int =
+        nativeQueryCurve(nativeHandle, layer, property, from, to, out, out.size)
 
-    fun setSelection(layerHandles: LongArray) = nativeSetSelection(nativeHandle, layerHandles)
+    fun queryEffectCatalog(rows: ByteBuffer, capacity: Int, blob: ByteBuffer): Int =
+        nativeQueryEffectCatalog(nativeHandle, rows, capacity, blob)
 
+    fun queryLayerEffects(layer: Long, rows: ByteBuffer, capacity: Int, blob: ByteBuffer): Int =
+        nativeQueryLayerEffects(nativeHandle, layer, rows, capacity, blob)
+
+    fun queryEffectParams(layer: Long, effectId: Int, rows: ByteBuffer, capacity: Int, blob: ByteBuffer): Int =
+        nativeQueryEffectParams(nativeHandle, layer, effectId, rows, capacity, blob)
+
+    fun setSelection(layers: LongArray) = nativeSetSelection(nativeHandle, layers)
     fun clearSelection() = nativeClearSelection(nativeHandle)
 
-    /** Redimensiona a superfície. Rotação e tela dividida passam por aqui. */
-    fun resizeSurface(widthPx: Int, heightPx: Int) =
-        nativeResizeSurface(nativeHandle, widthPx, heightPx)
+    // =========================================================================
+    // Importação e projeto
+    // =========================================================================
 
-    /** O app foi para segundo plano. Libera GPU e cache; o projeto fica em pé. */
-    fun suspend() = nativeSuspend(nativeHandle)
+    /** Id da layer criada (≥ 0), ou `-código` do erro. */
+    fun importVideo(source: String, displayName: String): Long =
+        nativeImportVideo(nativeHandle, source, displayName)
 
-    fun resume(surface: android.view.Surface, widthPx: Int, heightPx: Int) =
-        nativeResume(nativeHandle, surface, widthPx, heightPx)
+    /** RGBA8 sRGB (alfa reto) num buffer direto de `width * height * 4` bytes. */
+    fun importImage(rgba: ByteBuffer, width: Int, height: Int, name: String): Long =
+        nativeImportImage(nativeHandle, rgba, width, height, name)
 
     fun newProject(width: Int, height: Int, fps: Float, title: String): Boolean =
         nativeNewProject(nativeHandle, width, height, fps, title)
 
     fun loadProject(path: String): Int = nativeLoadProject(nativeHandle, path)
-
-    /** Descarta o journal da sessão anterior. Ação destrutiva. */
-    fun discardRecovery(): Int = nativeDiscardRecovery(nativeHandle)
-
-    /** Reaplica o journal da sessão anterior sobre o projeto aberto. */
-    fun recoverSession(): Int = nativeRecoverSession(nativeHandle)
     fun saveProject(path: String): Int = nativeSaveProject(nativeHandle, path)
+    fun discardRecovery(): Int = nativeDiscardRecovery(nativeHandle)
+    fun recoverSession(): Int = nativeRecoverSession(nativeHandle)
 
     fun startExport(outputPath: String): Int = nativeStartExport(nativeHandle, outputPath)
     fun cancelExport(): Int = nativeCancelExport(nativeHandle)
     fun exportProgress(out: ByteBuffer): Boolean = nativeExportProgress(nativeHandle, out)
 
-    fun readTelemetry(out: ByteBuffer): Boolean = nativeReadTelemetry(nativeHandle, out)
-
-    /** Endereço do `Engine` para o teste de integração. Só para debug. */
-    internal fun rawHandle(): Long = nativeHandle
-
     // -------------------------------------------------------------------------
-    // Declarações nativas. A implementação está em jni_bridge.cpp.
+    // Declarações nativas (engine/platform/android/aurea_jni.cpp)
     // -------------------------------------------------------------------------
     private external fun nativeInitialize(
-        handle: Long, surface: android.view.Surface,
-        width: Int, height: Int, refreshRate: Float,
-        cacheDir: String, documentsDir: String,
+        handle: Long, refreshRate: Float, cacheDir: String, documentsDir: String, debug: Boolean,
     ): Boolean
     private external fun nativeShutdown(handle: Long)
+    private external fun nativeSuspend(handle: Long)
+    private external fun nativeResume(handle: Long)
+    private external fun nativeAttachSurface(handle: Long, surface: Surface, width: Int, height: Int): Boolean
+    private external fun nativeDetachSurface(handle: Long)
+    private external fun nativeResizeSurface(handle: Long, width: Int, height: Int)
     private external fun nativeSubmitCommands(
-        handle: Long, commands: ByteBuffer, count: Int,
-        stringBlob: ByteBuffer?, stringBlobSize: Int,
+        handle: Long, commands: ByteBuffer, count: Int, stringBlob: ByteBuffer?, stringBlobSize: Int,
     ): Int
-    private external fun nativeRenderFrame(handle: Long, audioTimeNs: Long): Boolean
     private external fun nativeReadStatus(handle: Long, out: ByteBuffer): Boolean
     private external fun nativeReadTelemetry(handle: Long, out: ByteBuffer): Boolean
+    private external fun nativeReadPerf(handle: Long, out: ByteBuffer): Boolean
     private external fun nativeQueryLayers(
-        handle: Long, outBuffer: ByteBuffer, capacity: Int,
-        nameBlob: ByteBuffer, nameBlobCapacity: Int,
+        handle: Long, rows: ByteBuffer, capacity: Int, blob: ByteBuffer, blobCapacity: Int,
     ): Int
-    private external fun nativeQueryKeyframes(
-        handle: Long, layerHandle: Long, outBuffer: ByteBuffer, capacity: Int,
-    ): Int
+    private external fun nativeQueryKeyframes(handle: Long, layer: Long, rows: ByteBuffer, capacity: Int): Int
     private external fun nativeQueryCurve(
-        handle: Long, layerHandle: Long, property: Int, from: Int, to: Int,
-        out: FloatArray, count: Int,
+        handle: Long, layer: Long, property: Int, from: Int, to: Int, out: FloatArray, count: Int,
     ): Int
-    private external fun nativeSetSelection(handle: Long, layerHandles: LongArray)
+    private external fun nativeQueryEffectCatalog(handle: Long, rows: ByteBuffer, capacity: Int, blob: ByteBuffer): Int
+    private external fun nativeQueryLayerEffects(
+        handle: Long, layer: Long, rows: ByteBuffer, capacity: Int, blob: ByteBuffer,
+    ): Int
+    private external fun nativeQueryEffectParams(
+        handle: Long, layer: Long, effectId: Int, rows: ByteBuffer, capacity: Int, blob: ByteBuffer,
+    ): Int
+    private external fun nativeSetSelection(handle: Long, layers: LongArray)
     private external fun nativeClearSelection(handle: Long)
-    private external fun nativeResizeSurface(handle: Long, width: Int, height: Int)
-    private external fun nativeSuspend(handle: Long)
-    private external fun nativeResume(handle: Long, surface: android.view.Surface, width: Int, height: Int)
+    private external fun nativeImportVideo(handle: Long, source: String, name: String): Long
+    private external fun nativeImportImage(handle: Long, rgba: ByteBuffer, width: Int, height: Int, name: String): Long
     private external fun nativeNewProject(handle: Long, width: Int, height: Int, fps: Float, title: String): Boolean
     private external fun nativeLoadProject(handle: Long, path: String): Int
+    private external fun nativeSaveProject(handle: Long, path: String): Int
     private external fun nativeDiscardRecovery(handle: Long): Int
     private external fun nativeRecoverSession(handle: Long): Int
-    private external fun nativeSaveProject(handle: Long, path: String): Int
     private external fun nativeStartExport(handle: Long, outputPath: String): Int
     private external fun nativeCancelExport(handle: Long): Int
     private external fun nativeExportProgress(handle: Long, out: ByteBuffer): Boolean

@@ -1,48 +1,49 @@
 // =============================================================================
-//  Aurea / android / jni_bridge.cpp
+//  Aurea / platform / android / aurea_jni.cpp
 //
 //  A ponte entre Kotlin e o motor C++.
 //
-//  PRINCÍPIO: este arquivo é BURRO de propósito. Ele não decide nada, não
-//  guarda estado além do necessário, e não faz política. Traduz tipos e chama o
-//  motor. Toda regra vive no C++ compartilhado, onde o iOS também a executa —
-//  duas implementações da mesma regra divergem na primeira correção que só uma
-//  recebe.
+//  Este arquivo é BURRO de propósito: traduz tipos e chama o motor. Toda regra
+//  vive no C++ compartilhado, onde o iOS também a executa.
 //
-//  O QUE ATRAVESSA, EM ORDEM DE VOLUME:
+//  O que atravessa:
+//   - comandos (UI → motor): um bloco contíguo de structs POD por lote;
+//   - status/perf (motor → UI): structs POD escritos em buffers diretos;
+//   - consultas (layers, efeitos, parâmetros): linhas POD + blob de texto.
 //
-//   1. Comandos (UI → motor). Um bloco contíguo por frame, não uma chamada por
-//      propriedade. `submit_commands` copia o buffer direto e devolve.
-//
-//   2. Status (motor → UI). Um struct POD de 256 bytes, escrito num buffer
-//      direto que a UI já tem. Sem alocação, sem objeto do lado Java.
-//
-//   3. Consultas (listas de camadas, keyframes, curvas). Escrevem em buffers
-//      diretos pelos mesmos motivos: uma data class por camada custaria 200
-//      alocações por frame.
-//
-//  NENHUM BITMAP ATRAVESSA. O frame composto vai do compositor direto para o
-//  `ANativeWindow`, e a UI nunca o vê. É essa ausência que mantém o pipeline
-//  como zero-copy de ponta a ponta.
+//  NENHUM BITMAP ATRAVESSA. O preview vai do renderer direto para o
+//  ANativeWindow do SurfaceView, pela thread de render do próprio motor.
 // =============================================================================
-
 #include <jni.h>
 #include <android/log.h>
 #include <android/native_window_jni.h>
+#include <sys/system_properties.h>
+
+#include "MediaCodecSource.hpp"
+#include "VulkanBackend.hpp"
 
 #include "aurea/Engine.hpp"
-#include "aurea/core/Log.hpp"
 #include "aurea/bridge/BridgePods.hpp"
+#include "aurea/core/Log.hpp"
+#include "aurea/core/Version.hpp"
 
 #include <cstring>
+#include <mutex>
+#include <new>
 #include <string>
 
 using namespace aurea;
 
 namespace {
 
-/// Sink de log do motor para o logcat. Instalado uma vez, na primeira chamada.
-void android_log_sink(LogLevel level, const char* message, void* /*user*/) {
+// -----------------------------------------------------------------------------
+// JVM
+// -----------------------------------------------------------------------------
+JavaVM* g_vm = nullptr;
+jclass g_engineClass = nullptr;          // referência global: FindClass numa thread
+jmethodID g_openContentFd = nullptr;     // nativa usaria o class loader do sistema
+
+void android_log_sink(LogLevel level, const char* message, void*) {
     int prio = ANDROID_LOG_INFO;
     switch (level) {
         case LogLevel::Trace: prio = ANDROID_LOG_VERBOSE; break;
@@ -55,49 +56,72 @@ void android_log_sink(LogLevel level, const char* message, void* /*user*/) {
     __android_log_write(prio, "AureaEngine", message);
 }
 
-void ensure_log_sink() {
-    static bool installed = false;
-    if (!installed) {
-        set_log_sink(&android_log_sink, nullptr);
-        installed = true;
+/// Abre uma URI content:// pelo ContentResolver (lado Kotlin) e devolve um
+/// descritor que passa a ser nosso. Chamado das threads do motor (sondagem,
+/// abertura de decoder), que podem não estar presas à JVM.
+int open_content_fd(const char* uri, void*) {
+    if (!g_vm || !g_engineClass || !g_openContentFd) return -1;
+    JNIEnv* env = nullptr;
+    bool attached = false;
+    if (g_vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
+        if (g_vm->AttachCurrentThread(&env, nullptr) != JNI_OK) return -1;
+        attached = true;
     }
+    int fd = -1;
+    jstring juri = env->NewStringUTF(uri);
+    if (juri) {
+        fd = env->CallStaticIntMethod(g_engineClass, g_openContentFd, juri);
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            fd = -1;
+        }
+        env->DeleteLocalRef(juri);
+    }
+    // A thread nativa precisa se soltar antes de terminar, ou a ART aborta.
+    if (attached) g_vm->DetachCurrentThread();
+    return fd;
 }
 
-/// A janela nativa adquirida em `initialize`.
-///
-/// POR QUE UM ESTÁTICO AQUI É CORRETO: existe UM motor por processo (a UI cria
-/// uma instância e o ciclo de vida dela é o do app). E `ANativeWindow_fromSurface`
-/// INCREMENTA uma referência que PRECISA ser devolvida com `ANativeWindow_release`
-/// — esquecer a devolução vaza a superfície, e o SurfaceFlinger fica com um
-/// buffer preso. Guardar o ponteiro aqui é o que permite liberá-lo no shutdown,
-/// que é onde o ciclo fecha.
-///
-/// Se o motor deixar de ser único por processo, isto vira um mapa por handle —
-/// e a asserção abaixo avisa antes disso acontecer.
-ANativeWindow* g_nativeWindow = nullptr;
-Engine*        g_owner = nullptr;
+// -----------------------------------------------------------------------------
+// Contexto nativo: um por motor
+// -----------------------------------------------------------------------------
+struct NativeContext {
+    Engine engine;
+    android::MediaCodecFactory media;
+    std::mutex surfaceMutex;
+    ANativeWindow* window = nullptr;   ///< referência adquirida; devolvida no detach
+    bool initialized = false;
+};
 
-/// Resolve o `Engine*` de um handle. Devolve nullptr em handle inválido em vez
-/// de desreferenciar — um bug na UI não pode derrubar o processo no C++.
-[[nodiscard]] Engine* from_handle(jlong handle) noexcept {
-    if (handle == 0) return nullptr;
-    return reinterpret_cast<Engine*>(static_cast<intptr_t>(handle));
+[[nodiscard]] NativeContext* ctx_of(jlong handle) noexcept {
+    return handle ? reinterpret_cast<NativeContext*>(static_cast<intptr_t>(handle)) : nullptr;
 }
 
-/// Ponteiro para o início de um `ByteBuffer` direto, ou nullptr.
 [[nodiscard]] void* buffer_ptr(JNIEnv* env, jobject buffer) noexcept {
-    if (!buffer) return nullptr;
-    return env->GetDirectBufferAddress(buffer);
+    return buffer ? env->GetDirectBufferAddress(buffer) : nullptr;
 }
 
-/// Tamanho em bytes de um `ByteBuffer` direto.
 [[nodiscard]] jlong buffer_capacity(JNIEnv* env, jobject buffer) noexcept {
-    if (!buffer) return 0;
-    return env->GetDirectBufferCapacity(buffer);
+    return buffer ? env->GetDirectBufferCapacity(buffer) : 0;
 }
 
-/// Copia uma `jstring` para um `std::string` UTF-8.
-[[nodiscard]] std::string to_string(JNIEnv* env, jstring s) noexcept {
+/// Buffer direto com pelo menos `bytes`, ou nullptr.
+template <typename T>
+[[nodiscard]] T* pod_buffer(JNIEnv* env, jobject buffer, jlong bytes) noexcept {
+    void* p = buffer_ptr(env, buffer);
+    if (!p || buffer_capacity(env, buffer) < bytes) return nullptr;
+    return static_cast<T*>(p);
+}
+
+/// Linhas que cabem no buffer, limitadas ao pedido.
+template <typename Row>
+[[nodiscard]] u32 row_capacity(JNIEnv* env, jobject buffer, jint requested) noexcept {
+    if (requested <= 0) return 0;
+    const jlong fit = buffer_capacity(env, buffer) / static_cast<jlong>(sizeof(Row));
+    return static_cast<u32>(std::min<jlong>(fit, requested));
+}
+
+[[nodiscard]] std::string to_string(JNIEnv* env, jstring s) {
     if (!s) return {};
     const char* chars = env->GetStringUTFChars(s, nullptr);
     if (!chars) return {};
@@ -106,437 +130,400 @@ Engine*        g_owner = nullptr;
     return result;
 }
 
-/// Traz uma referência curta para o ambiente JNI. O parâmetro precisa se
-/// chamar `env_` na assinatura (o JNI casa por nome), então o corpo usa `env`.
-///
-/// O `(void)env` existe porque várias funções deste arquivo não usam o
-/// ambiente — e sem ele o compilador avisaria de variável não usada, o que
-/// treinaria quem lê a ignorar avisos.
-#define AUREA_JNI_ENTER() JNIEnv* env = env_; (void)env
+/// Emulador do Android Studio (goldfish/ranchu com gfxstream).
+[[nodiscard]] bool running_on_emulator() noexcept {
+    char value[PROP_VALUE_MAX]{};
+    if (__system_property_get("ro.boot.qemu", value) > 0 && value[0] == '1') return true;
+    if (__system_property_get("ro.kernel.qemu", value) > 0 && value[0] == '1') return true;
+    if (__system_property_get("ro.hardware", value) > 0
+        && (std::strcmp(value, "ranchu") == 0 || std::strcmp(value, "goldfish") == 0)) {
+        return true;
+    }
+    return false;
+}
 
-/// Resolve o motor e sai cedo quando o handle é inválido. Um handle morto
-/// vindo da UI é bug dela, e não pode derrubar o processo no lado nativo.
-///
-/// Duas variantes porque uma função que devolve `void` não aceita
-/// `return {}` — o compilador recusa, e a recusa é o lembrete de que a versão
-/// vazia existe.
-#define AUREA_JNI_RESOLVE(handle)          \
-    Engine* engine = from_handle(handle);  \
-    if (!engine) return {}
-
-#define AUREA_JNI_GUARD(handle) AUREA_JNI_RESOLVE(handle)
-#define AUREA_JNI_GUARD_VOID(handle) \
-    Engine* engine = from_handle(handle); \
-    if (!engine) return
+void release_window_locked(NativeContext& c) noexcept {
+    if (c.window) {
+        ANativeWindow_release(c.window);
+        c.window = nullptr;
+    }
+}
 
 } // namespace
 
-#define AUREA_JNI_EXPORT extern "C" JNIEXPORT
+#define AUREA_JNI extern "C" JNIEXPORT
+#define AUREA_FN(name) JNICALL Java_com_aurea_aurea_engine_AureaEngine_##name
+
+AUREA_JNI jint JNI_OnLoad(JavaVM* vm, void*) {
+    g_vm = vm;
+    JNIEnv* env = nullptr;
+    if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) return JNI_ERR;
+    set_log_sink(&android_log_sink, nullptr);
+    if (jclass local = env->FindClass("com/aurea/aurea/engine/AureaEngine")) {
+        g_engineClass = static_cast<jclass>(env->NewGlobalRef(local));
+        env->DeleteLocalRef(local);
+        g_openContentFd = env->GetStaticMethodID(g_engineClass, "openContentFd", "(Ljava/lang/String;)I");
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            g_openContentFd = nullptr;
+        }
+    }
+    return JNI_VERSION_1_6;
+}
 
 // =============================================================================
 // Ciclo de vida
 // =============================================================================
-AUREA_JNI_EXPORT jlong JNICALL
-Java_com_aurea_aurea_engine_AureaEngine_nativeCreate(JNIEnv* env_, jclass) {
-    AUREA_JNI_ENTER();
-    (void)env;
-    ensure_log_sink();
-
-    // `new` numa fronteira C++ compilada sem exceções: se o operador falhar,
-    // devolve nullptr em vez de lançar. E o motor NUNCA lança para o Kotlin —
-    // uma exceção atravessando o JNI é comportamento indefinido.
-    Engine* engine = new (std::nothrow) Engine();
-    if (!engine) {
+AUREA_JNI jlong AUREA_FN(nativeCreate)(JNIEnv*, jclass) {
+    auto* c = new (std::nothrow) NativeContext();
+    if (!c) {
         AUREA_LOG_FATAL("nao foi possivel alocar o motor");
         return 0;
     }
+    c->media.set_fd_opener(&open_content_fd, nullptr);
     AUREA_LOG_INFO("motor criado (v%s)", AUREA_VERSION_LABEL);
-    return static_cast<jlong>(reinterpret_cast<intptr_t>(engine));
+    return static_cast<jlong>(reinterpret_cast<intptr_t>(c));
 }
 
-AUREA_JNI_EXPORT void JNICALL
-Java_com_aurea_aurea_engine_AureaEngine_nativeDestroy(JNIEnv* env_, jclass, jlong handle) {
-    AUREA_JNI_ENTER();
-    (void)env;
-    Engine* engine = from_handle(handle);
-    if (!engine) return;
-
-    // Fecha o ciclo da janela nativa: `initialize` a adquiriu, aqui ela volta.
-    if (g_owner == engine || g_owner == nullptr) {
-        if (g_nativeWindow) {
-            ANativeWindow_release(g_nativeWindow);
-            g_nativeWindow = nullptr;
-        }
-        g_owner = nullptr;
+AUREA_JNI void AUREA_FN(nativeDestroy)(JNIEnv*, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return;
+    c->engine.shutdown();
+    {
+        std::lock_guard<std::mutex> lock(c->surfaceMutex);
+        release_window_locked(*c);
     }
-
-    delete engine;
+    delete c;
     AUREA_LOG_INFO("motor destruido");
 }
 
-AUREA_JNI_EXPORT jboolean JNICALL
-Java_com_aurea_aurea_engine_AureaEngine_nativeInitialize(
-    JNIEnv* env_, jclass, jlong handle, jobject surface,
-    jint width, jint height, jfloat refreshRate, jstring cacheDir, jstring documentsDir) {
-    AUREA_JNI_ENTER();
-    AUREA_JNI_GUARD(handle);
-
-    if (!surface) {
-        AUREA_LOG_ERROR("initialize sem Surface");
-        return JNI_FALSE;
-    }
-
-    // A janela nativa é a superfície de apresentação do motor. `Acquire`
-    // incrementa a referência; `Release` no shutdown. Guardar o ANativeWindow
-    // sem adquirir produziria um ponteiro morto quando o Surface for destruído
-    // (rotação, app em background) — e o sintoma seria um crash dentro do
-    // Vulkan, longe da causa.
-    ANativeWindow* window = ANativeWindow_fromSurface(env, surface);
-    if (!window) {
-        AUREA_LOG_ERROR("nao foi possivel obter o ANativeWindow");
-        return JNI_FALSE;
-    }
-    if (g_owner && g_owner != engine) {
-        // Dois motores no mesmo processo: o estático que guarda a janela
-        // deixaria de ser correto. Recusar é melhor do que vazar a superfície
-        // do primeiro em silêncio.
-        AUREA_LOG_ERROR("segundo motor no mesmo processo: janela nativa nao suportada");
-        ANativeWindow_release(window);
-        return JNI_FALSE;
-    }
-    g_nativeWindow = window;
-    g_owner = engine;
+/// Inicializa o motor SEM superfície: instância e dispositivo Vulkan, renderer,
+/// pipelines e a thread de render. A superfície chega depois, pelo SurfaceView.
+AUREA_JNI jboolean AUREA_FN(nativeInitialize)(JNIEnv* env, jclass, jlong handle, jfloat refreshRate,
+                                              jstring cacheDir, jstring documentsDir, jboolean debug) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return JNI_FALSE;
+    if (c->initialized) return JNI_TRUE;
 
     EngineConfig config;
-    config.nativeWindow = window;
-    config.surfaceWidth = static_cast<u32>(width);
-    config.surfaceHeight = static_cast<u32>(height);
-    config.displayRefreshRate = refreshRate > 0.0f ? refreshRate : 60.0f;
-    config.createGpuBackend = true;
+    config.backend = new (std::nothrow) vk::Backend();
+    config.backendConfig.enableValidation = debug == JNI_TRUE;
+    config.backendConfig.enableGpuTimers = true;
     config.cacheDirectory = to_string(env, cacheDir);
     config.documentsDirectory = to_string(env, documentsDir);
-    // Telemetria ligada em debug: os contadores custam pouco e são a única
-    // forma de responder "por que o preview está lento" sem adivinhar.
-#if !defined(NDEBUG)
+    config.displayRefreshRate = refreshRate > 0.0f ? refreshRate : 60.0f;
+    config.mediaFactory = &c->media;
     config.enableTelemetry = true;
-#endif
 
-    const Status s = engine->initialize(config);
-    if (!s.ok()) {
+    if (const Status s = c->engine.initialize(config); !s.ok()) {
         AUREA_LOG_ERROR("falha ao inicializar: %s", s.message().data());
+        return JNI_FALSE;
+    }
+    GPUBackend* gpu = c->engine.gpu();
+    if (!gpu) {
+        AUREA_LOG_ERROR("sem GPU utilizavel: o preview nao tem como desenhar");
+        c->engine.shutdown();
+        return JNI_FALSE;
+    }
+    // Zero-copy só onde a GPU importa o AHardwareBuffer do decoder; senão os
+    // planos vêm pela CPU. Decidido uma vez, a partir das capacidades reais.
+    //
+    // QUIRK: o emulador (gfxstream) anuncia VK_ANDROID_external_memory_android_
+    // hardware_buffer e a conversão YCbCr, mas amostra o buffer YUV externo como
+    // bytes crus (plano Y em cima, UV embaixo). Lá o caminho é o de planos.
+    const bool emulator = running_on_emulator();
+    const bool zeroCopy = gpu->capabilities().zero_copy_video() && !emulator;
+    c->media.set_zero_copy(zeroCopy);
+    AUREA_LOG_INFO("video: %s%s", zeroCopy ? "zero-copy (AHardwareBuffer)" : "planos pela CPU",
+                   emulator ? " (emulador: YCbCr externo nao confiavel)" : "");
+    c->engine.start_render_thread();
+    c->initialized = true;
+    return JNI_TRUE;
+}
+
+AUREA_JNI void AUREA_FN(nativeShutdown)(JNIEnv*, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return;
+    c->engine.shutdown();
+    c->initialized = false;
+    std::lock_guard<std::mutex> lock(c->surfaceMutex);
+    release_window_locked(*c);
+}
+
+AUREA_JNI void AUREA_FN(nativeSuspend)(JNIEnv*, jclass, jlong handle) {
+    if (NativeContext* c = ctx_of(handle)) (void)c->engine.suspend();
+}
+
+AUREA_JNI void AUREA_FN(nativeResume)(JNIEnv*, jclass, jlong handle) {
+    if (NativeContext* c = ctx_of(handle)) (void)c->engine.resume();
+}
+
+// =============================================================================
+// Superfície
+// =============================================================================
+AUREA_JNI jboolean AUREA_FN(nativeAttachSurface)(JNIEnv* env, jclass, jlong handle, jobject surface,
+                                                 jint width, jint height) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !surface) return JNI_FALSE;
+    // `fromSurface` adquire uma referência: guardada até o detach. Sem ela o
+    // Vulkan desenharia numa janela que o sistema já destruiu.
+    ANativeWindow* window = ANativeWindow_fromSurface(env, surface);
+    if (!window) return JNI_FALSE;
+    std::lock_guard<std::mutex> lock(c->surfaceMutex);
+    const Status s = c->engine.attach_surface(window, static_cast<u32>(width), static_cast<u32>(height));
+    if (!s.ok()) {
+        AUREA_LOG_ERROR("superficie recusada: %s", s.message().data());
         ANativeWindow_release(window);
         return JNI_FALSE;
     }
+    release_window_locked(*c);
+    c->window = window;
     return JNI_TRUE;
 }
 
-AUREA_JNI_EXPORT void JNICALL
-Java_com_aurea_aurea_engine_AureaEngine_nativeShutdown(JNIEnv* env_, jclass, jlong handle) {
-    AUREA_JNI_ENTER();
-    (void)env;
-    Engine* engine = from_handle(handle);
-    if (!engine) return;
-    engine->shutdown();
+/// Volta só depois que a GPU largou a janela: o Android a destrói em seguida.
+AUREA_JNI void AUREA_FN(nativeDetachSurface)(JNIEnv*, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return;
+    std::lock_guard<std::mutex> lock(c->surfaceMutex);
+    c->engine.detach_surface();
+    release_window_locked(*c);
+}
+
+AUREA_JNI void AUREA_FN(nativeResizeSurface)(JNIEnv*, jclass, jlong handle, jint width, jint height) {
+    if (NativeContext* c = ctx_of(handle)) {
+        (void)c->engine.resize_surface(static_cast<u32>(width), static_cast<u32>(height));
+    }
 }
 
 // =============================================================================
-// A fronteira por frame
+// Comandos e estado
 // =============================================================================
-AUREA_JNI_EXPORT jint JNICALL
-Java_com_aurea_aurea_engine_AureaEngine_nativeSubmitCommands(
-    JNIEnv* env_, jclass, jlong handle, jobject commandBuffer, jint count,
-    jobject stringBlob, jint stringBlobSize) {
-    AUREA_JNI_ENTER();
-    if (!from_handle(handle)) return 0;
-    Engine* engine = from_handle(handle);
-
-    auto* commands = static_cast<const Command*>(buffer_ptr(env, commandBuffer));
-    if (!commands || count <= 0) return 0;
-
-    // Confere o tamanho do buffer antes de confiar no `count`. Se a UI passar um
-    // número maior do que o buffer comporta, o motor leria além do fim — e uma
-    // leitura fora do buffer é um bug que só aparece sob carga.
-    const jlong capacity = buffer_capacity(env, commandBuffer);
-    if (capacity < static_cast<jlong>(count) * static_cast<jlong>(sizeof(Command))) {
-        AUREA_LOG_ERROR("lote de comandos maior que o buffer (%d comandos, %lld bytes)",
-                        static_cast<int>(count), static_cast<long long>(capacity));
+AUREA_JNI jint AUREA_FN(nativeSubmitCommands)(JNIEnv* env, jclass, jlong handle, jobject commandBuffer,
+                                              jint count, jobject stringBlob, jint stringBlobSize) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || count <= 0) return 0;
+    const jlong need = static_cast<jlong>(count) * static_cast<jlong>(sizeof(Command));
+    auto* commands = pod_buffer<const Command>(env, commandBuffer, need);
+    if (!commands) {
+        AUREA_LOG_ERROR("lote de comandos maior que o buffer (%d)", static_cast<int>(count));
         return 0;
     }
-
     const auto* blob = static_cast<const char*>(buffer_ptr(env, stringBlob));
-    return static_cast<jint>(
-        engine->submit_commands(commands, static_cast<u32>(count), blob,
-                                static_cast<u32>(stringBlobSize)));
+    u32 blobSize = 0;
+    if (blob && stringBlobSize > 0) {
+        blobSize = static_cast<u32>(std::min<jlong>(stringBlobSize, buffer_capacity(env, stringBlob)));
+    }
+    const u32 accepted = c->engine.submit_commands(commands, static_cast<u32>(count), blob, blobSize);
+    c->engine.request_render();
+    return static_cast<jint>(accepted);
 }
 
-AUREA_JNI_EXPORT jboolean JNICALL
-Java_com_aurea_aurea_engine_AureaEngine_nativeRenderFrame(JNIEnv* env_, jclass,
-                                                          jlong handle, jlong audioTimeNs) {
-    AUREA_JNI_ENTER();
-    AUREA_JNI_GUARD(handle);
-
-    const Status s = engine->render_frame(TickNs{static_cast<i64>(audioTimeNs)});
-    // O erro é registrado, mas NÃO derruba o app. Um frame que não saiu é um
-    // problema a ser mostrado na telemetria; matar o editor no meio de um
-    // projeto de duas horas seria muito pior.
-    if (!s.ok()) {
-        AUREA_LOG_WARN("frame nao renderizou: %s", s.message().data());
-        return JNI_FALSE;
-    }
+AUREA_JNI jboolean AUREA_FN(nativeReadStatus)(JNIEnv* env, jclass, jlong handle, jobject out) {
+    NativeContext* c = ctx_of(handle);
+    auto* pod = pod_buffer<bridge::EngineStatusPOD>(env, out, sizeof(bridge::EngineStatusPOD));
+    if (!c || !pod) return JNI_FALSE;
+    c->engine.fill_status(*pod);
     return JNI_TRUE;
 }
 
-AUREA_JNI_EXPORT jboolean JNICALL
-Java_com_aurea_aurea_engine_AureaEngine_nativeReadStatus(JNIEnv* env_, jclass,
-                                                         jlong handle, jobject out) {
-    AUREA_JNI_ENTER();
-    AUREA_JNI_GUARD(handle);
-
-    auto* pod = static_cast<bridge::EngineStatusPOD*>(buffer_ptr(env, out));
-    if (!pod) return JNI_FALSE;
-    // O buffer direto pode ser maior que o struct; escrever só no tamanho exato
-    // evita tocar em memória que não é nossa.
-    if (buffer_capacity(env, out) < static_cast<jlong>(sizeof(bridge::EngineStatusPOD))) {
-        return JNI_FALSE;
-    }
-    engine->fill_status(*pod);
+AUREA_JNI jboolean AUREA_FN(nativeReadTelemetry)(JNIEnv* env, jclass, jlong handle, jobject out) {
+    NativeContext* c = ctx_of(handle);
+    auto* pod = pod_buffer<bridge::TelemetryPOD>(env, out, sizeof(bridge::TelemetryPOD));
+    if (!c || !pod) return JNI_FALSE;
+    c->engine.fill_telemetry(*pod);
     return JNI_TRUE;
 }
 
-AUREA_JNI_EXPORT jboolean JNICALL
-Java_com_aurea_aurea_engine_AureaEngine_nativeReadTelemetry(JNIEnv* env_, jclass,
-                                                            jlong handle, jobject out) {
-    AUREA_JNI_ENTER();
-    AUREA_JNI_GUARD(handle);
-
-    auto* pod = static_cast<bridge::TelemetryPOD*>(buffer_ptr(env, out));
-    if (!pod) return JNI_FALSE;
-    if (buffer_capacity(env, out) < static_cast<jlong>(sizeof(bridge::TelemetryPOD))) {
-        return JNI_FALSE;
-    }
-    engine->fill_telemetry(*pod);
+AUREA_JNI jboolean AUREA_FN(nativeReadPerf)(JNIEnv* env, jclass, jlong handle, jobject out) {
+    NativeContext* c = ctx_of(handle);
+    auto* pod = pod_buffer<bridge::PerfPOD>(env, out, sizeof(bridge::PerfPOD));
+    if (!c || !pod) return JNI_FALSE;
+    c->engine.fill_perf(*pod);
     return JNI_TRUE;
 }
 
 // =============================================================================
 // Consultas
 // =============================================================================
-AUREA_JNI_EXPORT jint JNICALL
-Java_com_aurea_aurea_engine_AureaEngine_nativeQueryLayers(
-    JNIEnv* env_, jclass, jlong handle, jobject array, jint capacity,
-    jobject nameBlob, jint nameBlobCapacity) {
-    AUREA_JNI_ENTER();
-    AUREA_JNI_GUARD(handle);
-
-    auto* rows = static_cast<bridge::LayerRow*>(buffer_ptr(env, array));
-    auto* blob = static_cast<char*>(buffer_ptr(env, nameBlob));
-    if (!rows || capacity <= 0) return 0;
-
-    return static_cast<jint>(engine->query_layers(
-        rows, static_cast<u32>(capacity), blob,
-        static_cast<u32>(nameBlobCapacity > 0 ? nameBlobCapacity : 0)));
+AUREA_JNI jint AUREA_FN(nativeQueryLayers)(JNIEnv* env, jclass, jlong handle, jobject rows, jint capacity,
+                                           jobject blob, jint blobCapacity) {
+    NativeContext* c = ctx_of(handle);
+    auto* out = static_cast<bridge::LayerRow*>(buffer_ptr(env, rows));
+    if (!c || !out) return 0;
+    const u32 cap = row_capacity<bridge::LayerRow>(env, rows, capacity);
+    const u32 blobCap = static_cast<u32>(std::min<jlong>(std::max(0, blobCapacity), buffer_capacity(env, blob)));
+    return static_cast<jint>(c->engine.query_layers(out, cap, static_cast<char*>(buffer_ptr(env, blob)), blobCap));
 }
 
-AUREA_JNI_EXPORT jint JNICALL
-Java_com_aurea_aurea_engine_AureaEngine_nativeQueryKeyframes(
-    JNIEnv* env_, jclass, jlong handle, jlong layerHandle, jobject array, jint capacity) {
-    AUREA_JNI_ENTER();
-    AUREA_JNI_GUARD(handle);
-
-    auto* rows = static_cast<bridge::KeyframeRow*>(buffer_ptr(env, array));
-    if (!rows || capacity <= 0) return 0;
-
-    return static_cast<jint>(engine->query_keyframes(
-        static_cast<u64>(layerHandle), rows, static_cast<u32>(capacity)));
+AUREA_JNI jint AUREA_FN(nativeQueryKeyframes)(JNIEnv* env, jclass, jlong handle, jlong layer, jobject rows,
+                                              jint capacity) {
+    NativeContext* c = ctx_of(handle);
+    auto* out = static_cast<bridge::KeyframeRow*>(buffer_ptr(env, rows));
+    if (!c || !out) return 0;
+    return static_cast<jint>(c->engine.query_keyframes(static_cast<u64>(layer), out,
+                                                       row_capacity<bridge::KeyframeRow>(env, rows, capacity)));
 }
 
-AUREA_JNI_EXPORT jint JNICALL
-Java_com_aurea_aurea_engine_AureaEngine_nativeQueryCurve(
-    JNIEnv* env_, jclass, jlong handle, jlong layerHandle, jint property,
-    jint from, jint to, jfloatArray out, jint count) {
-    AUREA_JNI_ENTER();
-    AUREA_JNI_GUARD(handle);
-    if (!out || count <= 0) return 0;
-
-    // Aqui o buffer não é direto (é um FloatArray do Kotlin). Copia uma vez:
-    // a curva é amostrada sob demanda, quando o editor de gráfico está aberto —
-    // não no caminho de frame.
+AUREA_JNI jint AUREA_FN(nativeQueryCurve)(JNIEnv* env, jclass, jlong handle, jlong layer, jint property,
+                                          jint from, jint to, jfloatArray out, jint count) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !out || count <= 0) return 0;
+    const jsize len = env->GetArrayLength(out);
     jfloat* values = env->GetFloatArrayElements(out, nullptr);
     if (!values) return 0;
-
-    const u32 written = engine->query_curve(
-        static_cast<u64>(layerHandle), static_cast<u32>(property), from, to,
-        reinterpret_cast<f32*>(values), static_cast<u32>(count));
-
+    const u32 written = c->engine.query_curve(static_cast<u64>(layer), static_cast<u32>(property), from, to,
+                                              reinterpret_cast<f32*>(values),
+                                              static_cast<u32>(std::min<jint>(count, len)));
     env->ReleaseFloatArrayElements(out, values, 0);
     return static_cast<jint>(written);
 }
 
-AUREA_JNI_EXPORT void JNICALL
-Java_com_aurea_aurea_engine_AureaEngine_nativeSetSelection(
-    JNIEnv* env_, jclass, jlong handle, jlongArray handles) {
-    AUREA_JNI_ENTER();
-    AUREA_JNI_GUARD_VOID(handle);
-    if (!handles) {
-        engine->clear_selection();
-        return;
-    }
+AUREA_JNI jint AUREA_FN(nativeQueryEffectCatalog)(JNIEnv* env, jclass, jlong handle, jobject rows, jint capacity,
+                                                  jobject blob) {
+    NativeContext* c = ctx_of(handle);
+    auto* out = static_cast<bridge::EffectCatalogRow*>(buffer_ptr(env, rows));
+    auto* text = static_cast<char*>(buffer_ptr(env, blob));
+    if (!c || !out || !text) return 0;
+    return static_cast<jint>(c->engine.query_effect_catalog(
+        out, row_capacity<bridge::EffectCatalogRow>(env, rows, capacity), text,
+        static_cast<u32>(buffer_capacity(env, blob))));
+}
 
-    const jsize count = env->GetArrayLength(handles);
+AUREA_JNI jint AUREA_FN(nativeQueryLayerEffects)(JNIEnv* env, jclass, jlong handle, jlong layer, jobject rows,
+                                                 jint capacity, jobject blob) {
+    NativeContext* c = ctx_of(handle);
+    auto* out = static_cast<bridge::LayerEffectRow*>(buffer_ptr(env, rows));
+    auto* text = static_cast<char*>(buffer_ptr(env, blob));
+    if (!c || !out || !text) return 0;
+    return static_cast<jint>(c->engine.query_layer_effects(
+        static_cast<u64>(layer), out, row_capacity<bridge::LayerEffectRow>(env, rows, capacity), text,
+        static_cast<u32>(buffer_capacity(env, blob))));
+}
+
+AUREA_JNI jint AUREA_FN(nativeQueryEffectParams)(JNIEnv* env, jclass, jlong handle, jlong layer, jint effectId,
+                                                 jobject rows, jint capacity, jobject blob) {
+    NativeContext* c = ctx_of(handle);
+    auto* out = static_cast<bridge::EffectParamRow*>(buffer_ptr(env, rows));
+    auto* text = static_cast<char*>(buffer_ptr(env, blob));
+    if (!c || !out || !text) return 0;
+    return static_cast<jint>(c->engine.query_effect_params(
+        static_cast<u64>(layer), static_cast<u32>(effectId), out,
+        row_capacity<bridge::EffectParamRow>(env, rows, capacity), text,
+        static_cast<u32>(buffer_capacity(env, blob))));
+}
+
+AUREA_JNI void AUREA_FN(nativeSetSelection)(JNIEnv* env, jclass, jlong handle, jlongArray ids) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return;
+    const jsize count = ids ? env->GetArrayLength(ids) : 0;
     if (count == 0) {
-        engine->clear_selection();
+        c->engine.clear_selection();
         return;
     }
-
-    jlong* raw = env->GetLongArrayElements(handles, nullptr);
+    jlong* raw = env->GetLongArrayElements(ids, nullptr);
     if (!raw) return;
-
-    // `u64` e `jlong` são ambos 64 bits e com sinal/unsigned compatível na
-    // prática, mas o cast explícito documenta a intenção em vez de depender
-    // disso silenciosamente.
-    engine->set_selection(reinterpret_cast<const u64*>(raw), static_cast<u32>(count));
-    env->ReleaseLongArrayElements(handles, raw, JNI_ABORT);
+    static_assert(sizeof(jlong) == sizeof(u64));
+    c->engine.set_selection(reinterpret_cast<const u64*>(raw), static_cast<u32>(count));
+    env->ReleaseLongArrayElements(ids, raw, JNI_ABORT);
+    c->engine.request_render();
 }
 
-AUREA_JNI_EXPORT void JNICALL
-Java_com_aurea_aurea_engine_AureaEngine_nativeClearSelection(JNIEnv* env_, jclass, jlong handle) {
-    AUREA_JNI_ENTER();
-    (void)env;
-    if (Engine* engine = from_handle(handle)) engine->clear_selection();
+AUREA_JNI void AUREA_FN(nativeClearSelection)(JNIEnv*, jclass, jlong handle) {
+    if (NativeContext* c = ctx_of(handle)) c->engine.clear_selection();
 }
 
 // =============================================================================
-// Superfície
+// Importação
 // =============================================================================
-AUREA_JNI_EXPORT void JNICALL
-Java_com_aurea_aurea_engine_AureaEngine_nativeResizeSurface(
-    JNIEnv* env_, jclass, jlong handle, jint width, jint height) {
-    AUREA_JNI_ENTER();
-    (void)env;
-    if (Engine* engine = from_handle(handle)) {
-        (void)engine->resize_surface(static_cast<u32>(width), static_cast<u32>(height));
+/// Devolve o id da layer criada (≥ 0) ou `-Errc` em caso de falha.
+AUREA_JNI jlong AUREA_FN(nativeImportVideo)(JNIEnv* env, jclass, jlong handle, jstring source, jstring name) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return -static_cast<jlong>(Errc::InvalidState);
+    VideoImport request;
+    request.sourcePath = to_string(env, source);
+    request.displayName = to_string(env, name);
+    const Result<u64> r = c->engine.import_video(request);
+    if (!r.ok()) {
+        AUREA_LOG_ERROR("importacao de video falhou: %s", r.status().message().data());
+        return -static_cast<jlong>(r.status().code());
     }
+    return static_cast<jlong>(*r);
 }
 
-AUREA_JNI_EXPORT void JNICALL
-Java_com_aurea_aurea_engine_AureaEngine_nativeSuspend(JNIEnv* env_, jclass, jlong handle) {
-    AUREA_JNI_ENTER();
-    (void)env;
-    if (Engine* engine = from_handle(handle)) {
-        (void)engine->suspend();
-    }
-}
-
-AUREA_JNI_EXPORT void JNICALL
-Java_com_aurea_aurea_engine_AureaEngine_nativeResume(
-    JNIEnv* env_, jclass, jlong handle, jobject surface, jint width, jint height) {
-    AUREA_JNI_ENTER();
-    (void)env;
-    Engine* engine = from_handle(handle);
-    if (!engine || !surface) return;
-
-    ANativeWindow* window = ANativeWindow_fromSurface(env, surface);
-    if (!window) return;
-
-    // A janela antiga precisa ser devolvida ANTES de trocar: suspender liberou a
-    // GPU mas não a referência, e guardar as duas vazaria uma superfície por
-    // ciclo de background. O SurfaceFlinger segura os buffers e a memória
-    // gráfica do app cresce a cada ida ao background.
-    if (g_nativeWindow && g_nativeWindow != window) {
-        ANativeWindow_release(g_nativeWindow);
-    }
-    g_nativeWindow = window;
-    g_owner = engine;
-
-    EngineConfig config;
-    config.nativeWindow = window;
-    config.surfaceWidth = static_cast<u32>(width);
-    config.surfaceHeight = static_cast<u32>(height);
-    (void)engine->resume(config);
+AUREA_JNI jlong AUREA_FN(nativeImportImage)(JNIEnv* env, jclass, jlong handle, jobject rgba, jint width,
+                                            jint height, jstring name) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || width <= 0 || height <= 0) return -static_cast<jlong>(Errc::InvalidArgument);
+    const jlong bytes = static_cast<jlong>(width) * height * 4;
+    const auto* pixels = pod_buffer<const u8>(env, rgba, bytes);
+    if (!pixels) return -static_cast<jlong>(Errc::InvalidArgument);
+    const std::string n = to_string(env, name);
+    const Result<u64> r = c->engine.import_image(pixels, static_cast<u32>(width), static_cast<u32>(height), n.c_str());
+    if (!r.ok()) return -static_cast<jlong>(r.status().code());
+    return static_cast<jlong>(*r);
 }
 
 // =============================================================================
 // Projeto
 // =============================================================================
-AUREA_JNI_EXPORT jboolean JNICALL
-Java_com_aurea_aurea_engine_AureaEngine_nativeNewProject(
-    JNIEnv* env_, jclass, jlong handle, jint width, jint height, jfloat fps, jstring title) {
-    AUREA_JNI_ENTER();
-    AUREA_JNI_GUARD(handle);
-
+AUREA_JNI jboolean AUREA_FN(nativeNewProject)(JNIEnv* env, jclass, jlong handle, jint width, jint height,
+                                              jfloat fps, jstring title) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return JNI_FALSE;
     const std::string t = to_string(env, title);
-    return engine->new_project(static_cast<u32>(width), static_cast<u32>(height),
-                               static_cast<f64>(fps), t.c_str()).ok() ? JNI_TRUE : JNI_FALSE;
+    return c->engine.new_project(static_cast<u32>(width), static_cast<u32>(height), static_cast<f64>(fps),
+                                 t.c_str()).ok() ? JNI_TRUE : JNI_FALSE;
 }
 
-AUREA_JNI_EXPORT jint JNICALL
-Java_com_aurea_aurea_engine_AureaEngine_nativeLoadProject(JNIEnv* env_, jclass,
-                                                          jlong handle, jstring path) {
-    AUREA_JNI_ENTER();
-    AUREA_JNI_GUARD(handle);
+AUREA_JNI jint AUREA_FN(nativeLoadProject)(JNIEnv* env, jclass, jlong handle, jstring path) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return static_cast<jint>(Errc::InvalidState);
     const std::string p = to_string(env, path);
-    return static_cast<jint>(engine->load_project(p.c_str()).raw());
+    return static_cast<jint>(c->engine.load_project(p.c_str()).raw());
 }
 
-AUREA_JNI_EXPORT jint JNICALL
-Java_com_aurea_aurea_engine_AureaEngine_nativeSaveProject(JNIEnv* env_, jclass,
-                                                          jlong handle, jstring path) {
-    AUREA_JNI_ENTER();
-    AUREA_JNI_GUARD(handle);
+AUREA_JNI jint AUREA_FN(nativeSaveProject)(JNIEnv* env, jclass, jlong handle, jstring path) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return static_cast<jint>(Errc::InvalidState);
     const std::string p = to_string(env, path);
-    return static_cast<jint>(engine->save_project(p.c_str()).raw());
+    return static_cast<jint>(c->engine.save_project(p.c_str()).raw());
 }
 
-AUREA_JNI_EXPORT jint JNICALL
-Java_com_aurea_aurea_engine_AureaEngine_nativeDiscardRecovery(JNIEnv* env_, jclass, jlong handle) {
-    AUREA_JNI_ENTER();
-    Engine* engine = from_handle(handle);
-    if (!engine) return static_cast<jint>(Errc::InvalidState);
-    engine->discard_recovery();
+AUREA_JNI jint AUREA_FN(nativeDiscardRecovery)(JNIEnv*, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return static_cast<jint>(Errc::InvalidState);
+    c->engine.discard_recovery();
     return static_cast<jint>(Errc::Ok);
 }
 
-AUREA_JNI_EXPORT jint JNICALL
-Java_com_aurea_aurea_engine_AureaEngine_nativeRecoverSession(JNIEnv* env_, jclass, jlong handle) {
-    AUREA_JNI_ENTER();
-    Engine* engine = from_handle(handle);
-    if (!engine) return static_cast<jint>(Errc::InvalidState);
-    return static_cast<jint>(engine->recover_session().raw());
+AUREA_JNI jint AUREA_FN(nativeRecoverSession)(JNIEnv*, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return static_cast<jint>(Errc::InvalidState);
+    return static_cast<jint>(c->engine.recover_session().raw());
 }
 
 // =============================================================================
-// Export
+// Export (próxima fase: reusa o mesmo renderer)
 // =============================================================================
-AUREA_JNI_EXPORT jint JNICALL
-Java_com_aurea_aurea_engine_AureaEngine_nativeStartExport(JNIEnv* env_, jclass,
-                                                          jlong handle, jstring outputPath) {
-    AUREA_JNI_ENTER();
-    AUREA_JNI_GUARD(handle);
+AUREA_JNI jint AUREA_FN(nativeStartExport)(JNIEnv* env, jclass, jlong handle, jstring outputPath) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return static_cast<jint>(Errc::InvalidState);
     const std::string p = to_string(env, outputPath);
-    const ExportSettings settings;   // os ajustes vigentes vêm do projeto
-    return static_cast<jint>(engine->start_export(settings, p.c_str()).raw());
+    const ExportSettings settings;
+    return static_cast<jint>(c->engine.start_export(settings, p.c_str()).raw());
 }
 
-AUREA_JNI_EXPORT jint JNICALL
-Java_com_aurea_aurea_engine_AureaEngine_nativeCancelExport(JNIEnv* env_, jclass, jlong handle) {
-    AUREA_JNI_ENTER();
-    (void)env;
-    Engine* engine = from_handle(handle);
-    if (!engine) return static_cast<jint>(Errc::InvalidState);
-    return static_cast<jint>(engine->cancel_export().raw());
+AUREA_JNI jint AUREA_FN(nativeCancelExport)(JNIEnv*, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return static_cast<jint>(Errc::InvalidState);
+    return static_cast<jint>(c->engine.cancel_export().raw());
 }
 
-AUREA_JNI_EXPORT jboolean JNICALL
-Java_com_aurea_aurea_engine_AureaEngine_nativeExportProgress(JNIEnv* env_, jclass,
-                                                             jlong handle, jobject out) {
-    AUREA_JNI_ENTER();
-    AUREA_JNI_GUARD(handle);
-
-    auto* pod = static_cast<bridge::ExportProgressPOD*>(buffer_ptr(env, out));
-    if (!pod) return JNI_FALSE;
-    if (buffer_capacity(env, out) < static_cast<jlong>(sizeof(bridge::ExportProgressPOD))) {
-        return JNI_FALSE;
-    }
-    engine->fill_export_progress(*pod);
+AUREA_JNI jboolean AUREA_FN(nativeExportProgress)(JNIEnv* env, jclass, jlong handle, jobject out) {
+    NativeContext* c = ctx_of(handle);
+    auto* pod = pod_buffer<bridge::ExportProgressPOD>(env, out, sizeof(bridge::ExportProgressPOD));
+    if (!c || !pod) return JNI_FALSE;
+    c->engine.fill_export_progress(*pod);
     return JNI_TRUE;
 }

@@ -369,6 +369,74 @@ class CommandBatch(private val engine: AureaEngine) {
     fun undo() = emit(CommandType.UNDO) { }
     fun redo() = emit(CommandType.REDO) { }
 
+    // =========================================================================
+    // Efeitos
+    //
+    // `effectId` é o id LOCAL da layer (estável ao reordenar), o mesmo que
+    // `LayerEffectRow.effectId` devolve. Vai no campo `index` do EffectId.
+    // =========================================================================
+
+    /** Adiciona no fim da pilha (ou em `index`). `typeId` vem do catálogo. */
+    fun addEffect(layer: Long, typeId: Int, index: Int = -1) = emit(CommandType.EFFECT_ADD) { b ->
+        b.putHandle(Off.LAYER, layer)
+        b.putInt(Off.EFFECT_TYPE, typeId)
+        b.putInt(Off.EFFECT_ADD_INDEX, index)   // -1 = 0xFFFFFFFF = no fim
+    }
+
+    fun removeEffect(layer: Long, effectId: Int) = emit(CommandType.EFFECT_REMOVE) { b ->
+        b.putHandle(Off.LAYER, layer)
+        b.putInt(Off.EFFECT_ID, effectId)
+    }
+
+    fun setEffectEnabled(layer: Long, effectId: Int, enabled: Boolean) = emit(CommandType.EFFECT_SET_ENABLED) { b ->
+        b.putHandle(Off.LAYER, layer)
+        b.putInt(Off.EFFECT_ID, effectId)
+        b.put(Off.EFFECT_PARAM_INDEX, if (enabled) 1 else 0)
+    }
+
+    fun setEffectParam(layer: Long, effectId: Int, param: Int, value: Float) = emit(CommandType.EFFECT_SET_PARAM) { b ->
+        b.putHandle(Off.LAYER, layer)
+        b.putInt(Off.EFFECT_ID, effectId)
+        b.putInt(Off.EFFECT_PARAM_INDEX, param)
+        b.putFloat(Off.EFFECT_VALUE, value)
+    }
+
+    /** Parâmetro de até 4 componentes: cor RGBA, ponto 2D/3D. */
+    fun setEffectVector(layer: Long, effectId: Int, param: Int, v0: Float, v1: Float, v2: Float, v3: Float) =
+        emit(CommandType.EFFECT_SET_COLOR_PARAM) { b ->
+            b.putHandle(Off.LAYER, layer)
+            b.putInt(Off.EFFECT_ID, effectId)
+            b.putInt(Off.EFFECT_PARAM_INDEX, param)
+            b.putFloat(Off.EFFECT_VALUE, v0)
+            b.putFloat(Off.EFFECT_VALUE + 4, v1)
+            b.putFloat(Off.EFFECT_VALUE + 8, v2)
+            b.putFloat(Off.EFFECT_VALUE + 12, v3)
+        }
+
+    // =========================================================================
+    // Reprodução: scrub e passo
+    // =========================================================================
+
+    fun togglePlayback() = emit(CommandType.PLAYBACK_TOGGLE) { }
+
+    /** O dedo encostou na régua: o decode entra em modo scrub (coalescido). */
+    fun scrubBegin() = emit(CommandType.PLAYBACK_SCRUB_BEGIN) { }
+
+    fun scrub(timeNs: Long) = emit(CommandType.PLAYBACK_SCRUB) { b ->
+        b.putLong(Off.ABSOLUTE, timeNs)
+    }
+
+    /** Soltou: o frame exato do ponto final é decodificado. */
+    fun scrubEnd() = emit(CommandType.PLAYBACK_SCRUB_END) { }
+
+    fun step(frames: Int) = emit(CommandType.PLAYBACK_STEP) { b ->
+        b.putInt(Off.ABSOLUTE, frames)
+    }
+
+    fun setSpeed(speed: Float) = emit(CommandType.PLAYBACK_SET_SPEED) { b ->
+        b.putFloat(Off.ABSOLUTE, speed)
+    }
+
     /**
      * Offsets dentro do `Command`.
      *
@@ -429,6 +497,15 @@ class CommandBatch(private val engine: AureaEngine) {
         const val PREVIEW_NUMERATOR = PodLayout.CMD_OFF_PAYLOAD
         const val PREVIEW_DENOMINATOR = PodLayout.CMD_OFF_PAYLOAD + 4
         const val PREVIEW_AUTOMATIC = PodLayout.CMD_OFF_PAYLOAD + 8
+
+        /** EffectAddPayload { LayerId; u32 effectType; u32 index }. */
+        const val EFFECT_TYPE = PodLayout.CMD_OFF_PAYLOAD + 8
+        const val EFFECT_ADD_INDEX = PodLayout.CMD_OFF_PAYLOAD + 12
+
+        /** Effect*Payload { LayerId; EffectId{index, generation}; u32 param; f32 valor[...] }. */
+        const val EFFECT_ID = PodLayout.CMD_OFF_PAYLOAD + 8
+        const val EFFECT_PARAM_INDEX = PodLayout.CMD_OFF_PAYLOAD + 16
+        const val EFFECT_VALUE = PodLayout.CMD_OFF_PAYLOAD + 20
     }
 }
 
@@ -524,4 +601,9 @@ object CommandType {
     const val UNDO_END_GROUP = 81
     const val EXPORT_REQUEST = 82
     const val EXPORT_CANCEL = 83
+    const val PLAYBACK_TOGGLE = 84
+    const val PLAYBACK_SCRUB_BEGIN = 85
+    const val PLAYBACK_SCRUB = 86
+    const val PLAYBACK_SCRUB_END = 87
+    const val PLAYBACK_STEP = 88
 }

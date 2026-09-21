@@ -7,8 +7,10 @@
 //  DUAS ENTRADAS, UMA MATEMÁTICA:
 //
 //   AUREA_EXTERNAL  a imagem do MediaCodec importada sem cópia (AHardwareBuffer).
-//                   O sampler imutável faz SÓ a reconstrução do croma; ele
-//                   entrega os códigos crus em (R=Cr, G=Y, B=Cb).
+//                   O sampler imutável reconstrói o croma e aplica a matriz e
+//                   a faixa DO ARQUIVO (sampling.w = 1): a amostra já é RGB
+//                   não linear. Com sampling.w = 0 (conversão RGB_IDENTITY) os
+//                   códigos chegam crus em (R=Cr, G=Y, B=Cb).
 //   (sem define)    planos enviados pela CPU — o caminho de fallback quando o
 //                   aparelho não importa AHardwareBuffer, e o caminho dos
 //                   testes no host. NV12, NV21, I420 e P010.
@@ -35,13 +37,16 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     vec4 crop;       // xy=deslocamento  zw=escala da região visível no quadro codificado
     vec4 rot;        // matriz 2x2 de orientação (xy = coluna 0, zw = coluna 1)
     vec4 sampling;   // x=layout planar (0 NV12, 1 NV21, 2 I420)  y=escala de código (P010)  z=taps de redução (0/1)
+                     // w=imagem externa já em RGB (0/1): pula a matriz YCbCr
     vec4 texel;      // xy=tamanho do texel de luma em uv  zw=tamanho do pixel de saída em uv da fonte
 } p;
 
 vec3 fetch_ycc(vec2 uv) {
 #ifdef AUREA_EXTERNAL
     vec4 s = texture(u_tex0, uv);
-    return vec3(s.g, s.b, s.r);
+    // Com conversão RGB_IDENTITY os códigos chegam em (R=Cr, G=Y, B=Cb). Um
+    // buffer já em RGB (sampling.w) volta como está.
+    return p.sampling.w > 0.5 ? s.rgb : vec3(s.g, s.b, s.r);
 #else
     float y = texture(u_tex0, uv).r;
     vec2 c;
@@ -81,7 +86,7 @@ void main() {
         ycc = fetch_ycc(uv);
     }
 
-    vec3 rgb = ycbcr_to_rgb(ycc, p.coeffs.x, p.coeffs.y, p.coeffs.z > 0.5, p.coeffs.w);
+    vec3 rgb = p.sampling.w > 0.5 ? ycc : ycbcr_to_rgb(ycc, p.coeffs.x, p.coeffs.y, p.coeffs.z > 0.5, p.coeffs.w);
     vec3 lin = decode_transfer(clamp(rgb, 0.0, 1.0), int(p.transfer.x + 0.5));
     lin = primaries_to_bt709(lin, int(p.transfer.y + 0.5));
     if (p.transfer.z > 0.5) lin = tonemap_to_sdr(lin, p.transfer.w);

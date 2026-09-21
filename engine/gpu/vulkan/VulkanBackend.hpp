@@ -169,6 +169,8 @@ struct Texture {
     bool          ownsImage = true;          ///< false: imagem do swapchain
     // Imagem externa (AHardwareBuffer do decoder)
     bool          external = false;
+    bool          externalRgb = false;   ///< amostra sai em RGB
+    u64           colorKey = 0;          ///< matriz/faixa da conversão da view
     bool          acquiredThisFrame = false;
     VkDeviceMemory importedMemory = VK_NULL_HANDLE;
     u64           ycbcrSampler = 0;

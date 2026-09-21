@@ -79,7 +79,10 @@ internal object PodLayout {
     const val STATUS_BYTES = 256
     const val ST_OFF_STATE = 0            // i32
     const val ST_OFF_LAST_ERROR = 4       // i32
-    const val ST_OFF_ERROR_DETAIL = 8     // char[120]
+    const val ST_OFF_ERROR_DETAIL = 8     // char[104]
+    const val ST_OFF_COMP_FPS = 112       // f32
+    const val ST_OFF_COMP_WIDTH = 116     // u32
+    const val ST_OFF_COMP_HEIGHT = 120    // u32
     const val ST_OFF_CURRENT_FPS = 128    // f32
     const val ST_OFF_AVERAGE_FRAME_MS = 132
     const val ST_OFF_GPU_MS = 136
@@ -275,6 +278,9 @@ class EngineStatus {
     var playhead: Long = 0
     var duration: Long = 0
     var playing: Boolean = false
+    var compFps: Float = 0f
+    var compWidth: Int = 0
+    var compHeight: Int = 0
     var layerCount: Int = 0
     var selectedCount: Int = 0
     var canUndo: Boolean = false
@@ -307,6 +313,9 @@ class EngineStatus {
         playhead = buffer.getLong(PodLayout.ST_OFF_PLAYHEAD)
         duration = buffer.getLong(PodLayout.ST_OFF_DURATION)
         playing = buffer.getInt(PodLayout.ST_OFF_PLAYING) != 0
+        compFps = buffer.getFloat(PodLayout.ST_OFF_COMP_FPS)
+        compWidth = buffer.getInt(PodLayout.ST_OFF_COMP_WIDTH)
+        compHeight = buffer.getInt(PodLayout.ST_OFF_COMP_HEIGHT)
         layerCount = buffer.getInt(PodLayout.ST_OFF_LAYER_COUNT)
         selectedCount = buffer.getInt(PodLayout.ST_OFF_SELECTED_COUNT)
         canUndo = buffer.getInt(PodLayout.ST_OFF_CAN_UNDO) != 0
@@ -407,10 +416,248 @@ class ExportProgress {
         val dup = buffer.duplicate()
         dup.position(PodLayout.EPD_OFF_MESSAGE)
         dup.get(bytes, 0, 95)
-        message = String(bytes, Charsets.UTF_8).takeWhile { it != ' ' }
+        message = String(bytes, Charsets.UTF_8).takeWhile { it.code != 0 }
     }
 }
 
 /** Cria um buffer direto, com a ordem de bytes nativa do aparelho. */
 internal fun directBuffer(bytes: Int): ByteBuffer =
     ByteBuffer.allocateDirect(bytes).also { it.order(ByteOrder.nativeOrder()) }
+
+// =============================================================================
+// Efeitos
+// =============================================================================
+
+/** Lê `length` bytes UTF-8 do blob de texto das consultas. */
+internal fun ByteBuffer.utf8(offset: Int, length: Int): String {
+    if (length <= 0 || offset < 0 || offset + length > capacity()) return ""
+    val bytes = ByteArray(length)
+    val dup = duplicate()
+    dup.position(offset)
+    dup.get(bytes, 0, length)
+    return String(bytes, Charsets.UTF_8)
+}
+
+/** Espelho de `bridge::EffectCatalogRow` (32 bytes). */
+data class EffectCatalogEntry(
+    val typeId: Int,
+    val effectClass: Int,
+    val paramCount: Int,
+    val name: String,
+    val category: String,
+) {
+    companion object {
+        const val ROW_BYTES = 32
+
+        internal fun read(rows: ByteBuffer, index: Int, blob: ByteBuffer): EffectCatalogEntry {
+            val b = index * ROW_BYTES
+            return EffectCatalogEntry(
+                typeId = rows.getInt(b),
+                effectClass = rows.getInt(b + 4),
+                paramCount = rows.getInt(b + 8),
+                name = blob.utf8(rows.getInt(b + 12), rows.getInt(b + 16)),
+                category = blob.utf8(rows.getInt(b + 20), rows.getInt(b + 24)),
+            )
+        }
+    }
+}
+
+/** Espelho de `bridge::LayerEffectRow` (32 bytes). */
+data class LayerEffect(
+    val effectId: Int,
+    val typeId: Int,
+    val enabled: Boolean,
+    val paramCount: Int,
+    val name: String,
+    val known: Boolean,
+) {
+    companion object {
+        const val ROW_BYTES = 32
+
+        internal fun read(rows: ByteBuffer, index: Int, blob: ByteBuffer): LayerEffect {
+            val b = index * ROW_BYTES
+            return LayerEffect(
+                effectId = rows.getInt(b),
+                typeId = rows.getInt(b + 4),
+                enabled = rows.getInt(b + 8) != 0,
+                paramCount = rows.getInt(b + 12),
+                name = blob.utf8(rows.getInt(b + 16), rows.getInt(b + 20)),
+                known = rows.getInt(b + 24) != 0,
+            )
+        }
+    }
+}
+
+/** `aurea::ParamType` e `aurea::ParamFlags`. */
+object ParamType {
+    const val FLOAT = 0
+    const val INT = 1
+    const val BOOL = 2
+    const val COLOR = 3
+    const val POINT2D = 4
+    const val POINT3D = 5
+    const val ANGLE = 6
+    const val ENUM = 7
+    const val CURVE = 8
+    const val GRADIENT = 9
+    const val LAYER_REFERENCE = 10
+    const val TEXTURE_REFERENCE = 11
+
+    const val FLAG_ANIMATABLE = 1 shl 0
+    const val FLAG_PIXELS = 1 shl 1
+    const val FLAG_PERCENT = 1 shl 2
+    const val FLAG_RELATIVE = 1 shl 3
+    const val FLAG_HIDDEN = 1 shl 4
+}
+
+/** Espelho de `bridge::EffectParamRow` (96 bytes). `value` é o valor no playhead. */
+class EffectParam(
+    val index: Int,
+    val type: Int,
+    val flags: Int,
+    val min: Float,
+    val max: Float,
+    val value: FloatArray,
+    val defaultValue: FloatArray,
+    val label: String,
+    val unit: String,
+    val enumLabels: List<String>,
+    val animated: Boolean,
+) {
+    val hidden: Boolean get() = (flags and ParamType.FLAG_HIDDEN) != 0
+
+    override fun equals(other: Any?): Boolean =
+        other is EffectParam && index == other.index && type == other.type &&
+            value.contentEquals(other.value) && label == other.label && animated == other.animated
+
+    override fun hashCode(): Int = 31 * (31 * index + type) + value.contentHashCode()
+
+    companion object {
+        const val ROW_BYTES = 96
+
+        internal fun read(rows: ByteBuffer, i: Int, blob: ByteBuffer): EffectParam {
+            val b = i * ROW_BYTES
+            val enumText = blob.utf8(rows.getInt(b + 72), rows.getInt(b + 76))
+            return EffectParam(
+                index = rows.getInt(b),
+                type = rows.getInt(b + 4),
+                flags = rows.getInt(b + 8),
+                min = rows.getFloat(b + 16),
+                max = rows.getFloat(b + 20),
+                value = FloatArray(4) { rows.getFloat(b + 24 + it * 4) },
+                defaultValue = FloatArray(4) { rows.getFloat(b + 40 + it * 4) },
+                label = blob.utf8(rows.getInt(b + 56), rows.getInt(b + 60)),
+                unit = blob.utf8(rows.getInt(b + 64), rows.getInt(b + 68)),
+                enumLabels = if (enumText.isEmpty()) emptyList() else enumText.split('|'),
+                animated = rows.getInt(b + 80) != 0,
+            )
+        }
+    }
+}
+
+// =============================================================================
+// Métricas do painel DEV — espelho de `bridge::PerfPOD` (256 bytes)
+// =============================================================================
+data class PerfStats(
+    val previewFps: Float = 0f,
+    val cpuFrameMs: Float = 0f,
+    val gpuFrameMs: Float = 0f,
+    val decodeMs: Float = 0f,
+    val colorConvMs: Float = 0f,
+    val effectsMs: Float = 0f,
+    val blurMs: Float = 0f,
+    val glowMs: Float = 0f,
+    val compositeMs: Float = 0f,
+    val outputMs: Float = 0f,
+    val presentMs: Float = 0f,
+    val acquireMs: Float = 0f,
+    val lastSeekMs: Float = 0f,
+    val frameBudgetMs: Float = 0f,
+    val droppedFrames: Int = 0,
+    val droppedRecent: Int = 0,
+    val renderScaleNum: Int = 1,
+    val renderScaleDen: Int = 1,
+    val renderAuto: Boolean = true,
+    val previewWidth: Int = 0,
+    val previewHeight: Int = 0,
+    val decodedCacheFrames: Int = 0,
+    val decodedCacheBytes: Long = 0,
+    val ramBytes: Long = 0,
+    val gpuMemoryBytes: Long = 0,
+    val transientBytes: Long = 0,
+    val passesExecuted: Int = 0,
+    val passesCulled: Int = 0,
+    val texturesCreated: Int = 0,
+    val transientTextures: Int = 0,
+    val physicalTextures: Int = 0,
+    val aliasedTextures: Int = 0,
+    val pipelineCompilesLive: Int = 0,
+    val pipelinesTotal: Int = 0,
+    val zeroCopy: Boolean = false,
+    val hardwareDecoder: Boolean = false,
+    val gpuTimers: Boolean = false,
+    val seeks: Int = 0,
+    val coalesced: Int = 0,
+    val staleFrames: Int = 0,
+    val layersRendered: Int = 0,
+    val thermal: Int = 0,
+    val decoder: String = "",
+    val gpuName: String = "",
+) {
+    companion object {
+        const val BYTES = 256
+
+        private fun ByteBuffer.cString(offset: Int, max: Int): String {
+            var n = 0
+            while (n < max && get(offset + n) != 0.toByte()) n++
+            return utf8(offset, n)
+        }
+
+        internal fun read(b: ByteBuffer) = PerfStats(
+            previewFps = b.getFloat(0),
+            cpuFrameMs = b.getFloat(4),
+            gpuFrameMs = b.getFloat(8),
+            decodeMs = b.getFloat(12),
+            colorConvMs = b.getFloat(16),
+            effectsMs = b.getFloat(20),
+            blurMs = b.getFloat(24),
+            glowMs = b.getFloat(28),
+            compositeMs = b.getFloat(32),
+            outputMs = b.getFloat(36),
+            presentMs = b.getFloat(40),
+            acquireMs = b.getFloat(44),
+            lastSeekMs = b.getFloat(48),
+            frameBudgetMs = b.getFloat(52),
+            droppedFrames = b.getInt(56),
+            droppedRecent = b.getInt(60),
+            renderScaleNum = b.getInt(64),
+            renderScaleDen = b.getInt(68),
+            renderAuto = b.getInt(72) != 0,
+            previewWidth = b.getInt(76),
+            previewHeight = b.getInt(80),
+            decodedCacheFrames = b.getInt(84),
+            decodedCacheBytes = b.getLong(88),
+            ramBytes = b.getLong(96),
+            gpuMemoryBytes = b.getLong(104),
+            transientBytes = b.getLong(112),
+            passesExecuted = b.getInt(120),
+            passesCulled = b.getInt(124),
+            texturesCreated = b.getInt(128),
+            transientTextures = b.getInt(132),
+            physicalTextures = b.getInt(136),
+            aliasedTextures = b.getInt(140),
+            pipelineCompilesLive = b.getInt(144),
+            pipelinesTotal = b.getInt(148),
+            zeroCopy = b.getInt(152) != 0,
+            hardwareDecoder = b.getInt(156) != 0,
+            gpuTimers = b.getInt(160) != 0,
+            seeks = b.getInt(164),
+            coalesced = b.getInt(168),
+            staleFrames = b.getInt(172),
+            layersRendered = b.getInt(176),
+            thermal = b.getInt(180),
+            decoder = b.cString(184, 48),
+            gpuName = b.cString(232, 24),
+        )
+    }
+}

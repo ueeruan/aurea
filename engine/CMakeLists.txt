@@ -205,7 +205,9 @@ if(AUREA_HAS_VULKAN)
     elseif(NOT WIN32)
         target_link_libraries(aurea_vulkan PUBLIC ${CMAKE_DL_LIBS})
     endif()
-    target_compile_options(aurea_vulkan PRIVATE ${AUREA_WARNINGS})
+    target_compile_options(aurea_vulkan PRIVATE ${AUREA_WARNINGS}
+        # `VkX info{VK_STRUCTURE_TYPE_X}` zera o resto de propósito (idioma do Vulkan).
+        $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wno-missing-field-initializers>)
 endif()
 
 # -----------------------------------------------------------------------------

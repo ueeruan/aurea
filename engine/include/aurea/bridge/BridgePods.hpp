@@ -126,7 +126,11 @@ static_assert(offsetof(KeyframeRow, interpolation) == 16);
 struct EngineStatusPOD {
     i32 state            = 0;     // +0
     i32 lastError        = 0;     // +4
-    char errorDetail[120]{};      // +8
+    char errorDetail[104]{};      // +8
+    f32 compFps          = 0.0f;  // +112 composição atual (a UI converte frame ↔ tempo)
+    u32 compWidth        = 0;     // +116
+    u32 compHeight       = 0;     // +120
+    u32 reservedStatus   = 0;     // +124
     f32 currentFps       = 0.0f;  // +128
     f32 averageFrameMs   = 0.0f;  // +132
     f32 gpuMs            = 0.0f;  // +136
@@ -164,6 +168,7 @@ struct EngineStatusPOD {
 
 static_assert(sizeof(EngineStatusPOD) == 256, "EngineStatusPOD e contrato de ABI");
 static_assert(offsetof(EngineStatusPOD, state) == 0);
+static_assert(offsetof(EngineStatusPOD, compFps) == 112);
 static_assert(offsetof(EngineStatusPOD, currentFps) == 128);
 static_assert(offsetof(EngineStatusPOD, previewWidth) == 156);
 static_assert(offsetof(EngineStatusPOD, playing) == 192);

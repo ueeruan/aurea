@@ -28,6 +28,7 @@
 // =============================================================================
 #pragma once
 
+#include "aurea/media/VideoTypes.hpp"
 #include "aurea/core/Types.hpp"
 #include "aurea/core/Result.hpp"
 #include "aurea/core/Math.hpp"
@@ -270,6 +271,11 @@ struct ExternalImageDesc {
     u32 width = 0;
     u32 height = 0;
     PixelFormat format = PixelFormat::Opaque;
+    /// Matriz e faixa DO ARQUIVO. A conversão YCbCr do sampler usa estes
+    /// valores, nunca a sugestão do gralloc (que muitos aparelhos, e o
+    /// emulador, preenchem errado).
+    YCbCrMatrix matrix = YCbCrMatrix::BT709;
+    bool fullRange = false;
 };
 
 /// Resultado de uma importação. `sampler` é o sampler de conversão YCbCr que
@@ -279,6 +285,10 @@ struct ExternalTexture {
     TextureHandle texture{};
     SamplerHandle sampler{};
     u64 formatKey = 0;
+    /// A amostra já sai em RGB não linear (o sampler converteu com a matriz do
+    /// arquivo, ou o buffer já era RGB): o shader só decodifica curva e
+    /// primárias.
+    bool rgb = false;
 };
 
 // -----------------------------------------------------------------------------

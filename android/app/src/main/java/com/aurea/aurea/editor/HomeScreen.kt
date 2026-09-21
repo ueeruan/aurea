@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -70,6 +71,7 @@ fun HomeScreen(viewModel: EditorViewModel) {
         modifier = Modifier
             .fillMaxSize()
             .background(AureaColors.Background)
+            .systemBarsPadding()
             .padding(horizontal = 20.dp),
     ) {
         Spacer(Modifier.height(48.dp))
@@ -264,7 +266,7 @@ private fun RecoveryBanner(onRecover: () -> Unit, onDiscard: () -> Unit) {
 
 private fun formatDate(ms: Long): String {
     if (ms <= 0) return "—"
-    val fmt = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale("pt", "BR"))
+    val fmt = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.forLanguageTag("pt-BR"))
     return fmt.format(Date(ms))
 }
 

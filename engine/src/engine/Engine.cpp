@@ -81,7 +81,11 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
 
     gpu_.reset(config.backend);
     if (gpu_) {
-        if (const Status s = gpu_->initialize(config.backendConfig); !s.ok()) {
+        // O backend guarda o caminho do cache de pipeline: por padrão, o mesmo
+        // diretório de cache do motor (que vive em config_, não no chamador).
+        BackendConfig bc = config_.backendConfig;
+        if (!bc.cacheDirectory || !*bc.cacheDirectory) bc.cacheDirectory = config_.cacheDirectory.c_str();
+        if (const Status s = gpu_->initialize(bc); !s.ok()) {
             AUREA_LOG_ERROR("backend grafico nao inicializou: %s", s.message().data());
             gpu_.reset();
         } else if (const Status r = renderer_.initialize(*gpu_, effectRegistry_); !r.ok()) {
@@ -750,6 +754,9 @@ EngineStatus Engine::read_status() noexcept {
         if (const Composition* c = project_->timeline().composition(project_->timeline().current())) {
             st.duration = c->duration();
             st.layerCount = c->layers().count();
+            st.compFps = c->fps();
+            st.compWidth = c->width();
+            st.compHeight = c->height();
         }
     }
     st.canUndo = undo_.can_undo();
@@ -1765,6 +1772,9 @@ void Engine::fill_status(bridge::EngineStatusPOD& out) noexcept {
     out.playhead = st.playhead.value;
     out.duration = st.duration.value;
     out.playing = st.playing ? 1u : 0u;
+    out.compFps = static_cast<f32>(st.compFps);
+    out.compWidth = st.compWidth;
+    out.compHeight = st.compHeight;
     out.layerCount = st.layerCount;
     out.selectedCount = st.selectedCount;
     out.canUndo = st.canUndo ? 1u : 0u;

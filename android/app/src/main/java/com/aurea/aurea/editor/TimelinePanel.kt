@@ -4,6 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -69,6 +70,9 @@ import kotlin.math.roundToInt
 fun TimelinePanel(
     state: EditorUiState,
     onScrub: (Int) -> Unit,
+    onScrubStart: (Int) -> Unit = {},
+    onScrubMove: (Int) -> Unit = {},
+    onScrubEnd: () -> Unit = {},
     onSelectLayer: (Long, Boolean) -> Unit,
     onToggleVisibility: (Long, Boolean) -> Unit,
     onTrimLayer: (Long, Int, Int) -> Unit,
@@ -119,6 +123,9 @@ fun TimelinePanel(
                 scrollState = horizontalScroll,
                 rulerHeight = rulerHeight,
                 onScrub = onScrub,
+                onScrubStart = onScrubStart,
+                onScrubMove = onScrubMove,
+                onScrubEnd = onScrubEnd,
             )
         }
 
@@ -196,6 +203,9 @@ private fun TimeRuler(
     scrollState: androidx.compose.foundation.ScrollState,
     rulerHeight: androidx.compose.ui.unit.Dp,
     onScrub: (Int) -> Unit,
+    onScrubStart: (Int) -> Unit,
+    onScrubMove: (Int) -> Unit,
+    onScrubEnd: () -> Unit,
 ) {
     val minSpacingPx = 56f
     val frameStep = remember(pixelsPerFrame, fps) {
@@ -210,10 +220,25 @@ private fun TimeRuler(
             .horizontalScroll(scrollState)
             .pointerInput(totalFrames, pixelsPerFrame) {
                 detectTapGestures { offset ->
-                    // Toque na régua = posicionar o playhead. É o gesto de
-                    // scrubbing mais direto, e não precisa de arrasto.
+                    // Toque na régua = posicionar o playhead.
                     onScrub((offset.x / pixelsPerFrame).roundToInt().coerceIn(0, totalFrames))
                 }
+            }
+            .pointerInput(totalFrames, pixelsPerFrame) {
+                // Arrastar na régua = scrub. O detector consome o arrasto antes
+                // do scroll horizontal; o decoder coalesce os pedidos e o
+                // soltar decodifica o frame exato.
+                detectHorizontalDragGestures(
+                    onDragStart = { offset ->
+                        onScrubStart((offset.x / pixelsPerFrame).roundToInt().coerceIn(0, totalFrames))
+                    },
+                    onDragEnd = { onScrubEnd() },
+                    onDragCancel = { onScrubEnd() },
+                    onHorizontalDrag = { change, _ ->
+                        change.consume()
+                        onScrubMove((change.position.x / pixelsPerFrame).roundToInt().coerceIn(0, totalFrames))
+                    },
+                )
             },
     ) {
         Canvas(

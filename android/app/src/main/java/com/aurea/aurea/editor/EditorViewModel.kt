@@ -1,6 +1,14 @@
 package com.aurea.aurea.editor
 
 import android.app.Application
+import android.content.Intent
+import android.content.pm.ApplicationInfo
+import android.hardware.display.DisplayManager
+import android.net.Uri
+import android.os.Handler
+import android.os.Looper
+import android.provider.OpenableColumns
+import android.view.Display
 import android.view.Surface
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -9,26 +17,25 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.aurea.aurea.engine.AureaEngine
 import com.aurea.aurea.engine.CommandBatch
+import com.aurea.aurea.engine.EffectCatalogEntry
+import com.aurea.aurea.engine.EffectParam
 import com.aurea.aurea.engine.EngineStatus
+import com.aurea.aurea.engine.LayerEffect
 import com.aurea.aurea.engine.LayerRow
+import com.aurea.aurea.engine.PerfStats
 import com.aurea.aurea.engine.PodLayout
 import com.aurea.aurea.engine.directBuffer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.concurrent.Executors
 
 /**
- * Destino da tela.
- *
- * É estado, não uma pilha de navegação: o Aurea edita UM projeto por vez, e
- * "voltar" fecha o projeto. Uma pilha permitiria dois editores abertos, e dois
- * motores não cabem no mesmo processo (ver o comentário da janela nativa no
- * bridge JNI).
+ * Destino da tela. É estado, não pilha: o Aurea edita UM projeto por vez.
  */
 enum class Screen { Home, Editor }
 
-/** Uma entrada da lista de projetos da Home. */
 data class RecentProject(
     val path: String,
     val title: String,
@@ -37,11 +44,7 @@ data class RecentProject(
 )
 
 /**
- * Estado imutável que a UI desenha.
- *
- * Isto NÃO é o motor. É a cópia do que a tela precisa mostrar, atualizada a
- * cada frame. Manter a UI lendo só este objeto é o que impede uma tela Compose
- * de tocar no motor direto — e é o que torna a tela testável sem aparelho.
+ * O que a UI desenha. NÃO é o motor: é a cópia do que a tela precisa mostrar.
  */
 data class EditorUiState(
     val screen: Screen = Screen.Home,
@@ -50,7 +53,9 @@ data class EditorUiState(
     val playheadFrame: Int = 0,
     val totalFrames: Int = 0,
     val playing: Boolean = false,
-    val fps: Float = 60f,
+    val fps: Float = 30f,
+    val compWidth: Int = 0,
+    val compHeight: Int = 0,
     val layers: List<LayerRow> = emptyList(),
     val selectedIds: Set<Long> = emptySet(),
     val previewWidth: Int = 0,
@@ -63,10 +68,18 @@ data class EditorUiState(
     val recoveryAvailable: Boolean = false,
     val errorMessage: String? = null,
     val engineReady: Boolean = false,
-    /** Painel inferior aberto: propriedades, efeitos, curvas. */
-    val inspectorTab: InspectorTab = InspectorTab.Properties,
+    val importing: Boolean = false,
+    val inspectorTab: InspectorTab = InspectorTab.Effects,
     /** Zoom horizontal da timeline, em pixels por frame. */
     val timelineZoom: Float = 4f,
+    /** Catálogo de efeitos (tipos disponíveis). */
+    val effectCatalog: List<EffectCatalogEntry> = emptyList(),
+    /** Efeitos da layer selecionada, na ordem da pilha. */
+    val layerEffects: List<LayerEffect> = emptyList(),
+    /** Efeito aberto no painel e os seus parâmetros. */
+    val openEffectId: Int = -1,
+    val effectParams: List<EffectParam> = emptyList(),
+    val hudVisible: Boolean = false,
 )
 
 enum class InspectorTab { Properties, Effects, Keyframes }
@@ -74,124 +87,89 @@ enum class InspectorTab { Properties, Effects, Keyframes }
 /**
  * O dono do motor do lado da UI.
  *
- * Três responsabilidades, nesta ordem de importância:
+ *  1. CICLO DE VIDA. O motor sobe UMA vez, sem superfície (GPU, renderer e a
+ *     thread de render própria). A superfície do SurfaceView entra e sai
+ *     independente disso — rotação, background e split-screen só trocam a
+ *     janela, nunca recriam o motor.
  *
- *   1. CICLO DE VIDA. Criar, inicializar, suspender e destruir o motor nos
- *      momentos certos do ciclo do app. Errar aqui vaza GPU ou trava o app em
- *      background.
+ *  2. ESTADO. Um laço no vsync da UI lê o status condensado (uma travessia) e
+ *     publica o que mudou. O PREVIEW não depende deste laço: ele roda na
+ *     thread de render do motor.
  *
- *   2. LAÇO DE FRAME. Um `Choreographer` chama `renderFrame` a cada vsync. Não
- *      é um `while(true)` numa corrotina: o Choreographer entrega o timestamp
- *      do display e sincroniza com a taxa real, que pode ser 90 ou 120 Hz.
- *
- *   3. TRADUÇÃO DE GESTO EM COMANDO. Um arrasto na timeline vira `setTransform`
- *      ou `setTimeRange`, dentro de um grupo de desfazer — um gesto, um passo.
- *
- * O que ela NÃO faz: desenhar vídeo. O frame composto vai do motor direto para
- * o `Surface` do `SurfaceView`.
+ *  3. GESTOS → COMANDOS, em lotes.
  */
 class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
-    private val engine = AureaEngine.create()
+    private val engine = AureaEngine.create(app)
     private val batch = CommandBatch(engine)
+    private val main = Handler(Looper.getMainLooper())
 
     var ui by mutableStateOf(EditorUiState())
         private set
 
-    /** Linhas de camada, lidas do motor para um buffer direto. */
+    /** Métricas do painel DEV. Estado separado: atualizar o HUD não recompõe o editor. */
+    var perf by mutableStateOf(PerfStats())
+        private set
+
+    /** Frames por segundo do laço da UI (Choreographer), medidos junto com o HUD. */
+    var uiFps by mutableStateOf(0f)
+        private set
+    private var uiFrames = 0
+
     private val layerBuffer = directBuffer(MAX_LAYERS * PodLayout.LAYER_ROW_BYTES)
     private val nameBlob = directBuffer(NAME_BLOB_BYTES)
     private val statusBuffer = directBuffer(PodLayout.STATUS_BYTES)
+    private val perfBuffer = directBuffer(PerfStats.BYTES)
+    private val rowBuffer = directBuffer(64 * EffectParam.ROW_BYTES)
+    private val textBlob = directBuffer(16 * 1024)
     private val status = EngineStatus()
 
-    private var surface: Surface? = null
-    private var initialized = false
-    private var renderLoop: RenderLoop? = null
+    // --- Ciclo de vida -------------------------------------------------------
+    /** Serializa inicialização, superfície e suspensão. */
+    private val lifecycleLock = Any()
+    private val lifecycleThread = Executors.newSingleThreadExecutor { r -> Thread(r, "aurea-ciclo") }
+    @Volatile private var ready = false
+    private var destroyed = false
+    private var pendingSurface: Triple<Surface, Int, Int>? = null
+    private var statusLoop: RenderLoop? = null
+    private var lastPerfNs = 0L
+    private var lastLayerSignature = 0L
 
-    /** Projeto aberto na memória. Vazio = Home. */
+    /** Scrub em andamento: o playhead da UI segue o dedo, não o status. */
+    private var scrubbing = false
+
     private var projectPath: String? = null
 
-    // =========================================================================
-    // Ciclo de vida
-    // =========================================================================
-
-    /**
-     * Chamado quando o `SurfaceView` entrega a superfície.
-     *
-     * A inicialização do motor é PESADA — detecção de codecs, sondagem de GPU,
-     * criação do dispositivo — e leva dezenas de milissegundos. Ela roda em
-     * `Dispatchers.Default`, nunca na thread principal: na principal, o
-     * resultado seria um congelamento visível ao abrir o app.
-     */
-    fun attachSurface(newSurface: Surface, width: Int, height: Int, refreshRate: Float) {
-        surface = newSurface
-        if (initialized) {
-            engine.resizeSurface(width, height)
-            return
-        }
-
-        viewModelScope.launch {
-            val ok = withContext(Dispatchers.Default) {
-                val dirs = cacheDirectories()
-                engine.initialize(
-                    newSurface, width, height, refreshRate,
-                    dirs.first, dirs.second,
-                )
+    init {
+        lifecycleThread.execute {
+            synchronized(lifecycleLock) {
+                if (destroyed) return@synchronized
+                val dirs = directories()
+                val debug = (app.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+                val ok = engine.initialize(displayRefreshRate(), dirs.first, dirs.second, debug)
+                ready = ok
+                if (ok) {
+                    pendingSurface?.let { (s, w, h) -> engine.attachSurface(s, w, h) }
+                }
+                pendingSurface = null
+                main.post {
+                    ui = if (ok) {
+                        ui.copy(engineReady = true, effectCatalog = readCatalog())
+                    } else {
+                        ui.copy(errorMessage = "Não foi possível iniciar o motor gráfico (Vulkan) neste aparelho.")
+                    }
+                    if (ok) startStatusLoop()
+                }
             }
-            if (!ok) {
-                ui = ui.copy(errorMessage = "Não foi possível iniciar o motor gráfico neste aparelho.")
-                return@launch
-            }
-            initialized = true
-            ui = ui.copy(engineReady = true)
-            startRenderLoop()
         }
     }
 
-    fun detachSurface() {
-        renderLoop?.stop()
-        renderLoop = null
+    private fun displayRefreshRate(): Float {
+        val dm = getApplication<Application>().getSystemService(DisplayManager::class.java)
+        return dm?.getDisplay(Display.DEFAULT_DISPLAY)?.refreshRate ?: 60f
     }
 
-    /**
-     * A superfície mudou de tamanho: rotação, split-screen, janela redimensionada.
-     *
-     * Rotear isto para o motor é o que evita o preview esticar. O Vulkan precisa
-     * recriar o swapchain, e sem o aviso ele continuaria desenhando no tamanho
-     * antigo — a imagem apareceria esticada ou cortada.
-     */
-    fun resizeSurface(width: Int, height: Int) {
-        if (!initialized) return
-        viewModelScope.launch(Dispatchers.Default) {
-            engine.resizeSurface(width, height)
-        }
-    }
-
-    fun onEnterForeground() {
-        if (initialized && renderLoop == null) startRenderLoop()
-    }
-
-    fun onEnterBackground() {
-        renderLoop?.stop()
-        renderLoop = null
-        if (initialized) {
-            // O sistema pode matar o processo a qualquer momento. Suspender
-            // libera GPU e cache descartável ANTES disso — e o projeto continua
-            // em memória, então voltar não perde trabalho.
-            viewModelScope.launch(Dispatchers.Default) { engine.suspend() }
-        }
-    }
-
-    fun shutdown() {
-        renderLoop?.stop()
-        renderLoop = null
-        if (initialized) {
-            initialized = false
-            engine.shutdown()
-        }
-    }
-
-    private fun cacheDirectories(): Pair<String, String> {
+    private fun directories(): Pair<String, String> {
         val app = getApplication<Application>()
         val cache = File(app.cacheDir, "motor").apply { mkdirs() }
         val docs = File(app.filesDir, "projetos").apply { mkdirs() }
@@ -199,62 +177,112 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // =========================================================================
-    // Laço de frame
+    // Superfície (chamadas da thread principal, pelo SurfaceHolder)
     // =========================================================================
 
-    /**
-     * O laço de frame.
-     *
-     * Usa `Choreographer` em vez de uma corrotina com `delay`: o Choreographer
-     * entrega o instante do vsync e sincroniza com a taxa REAL do display —
-     * a 120 Hz o `delay(16)` perderia metade dos frames ou os desalinharia.
-     *
-     * O trabalho por frame é: enviar os comandos pendentes, desenhar, ler o
-     * status. Três travessias de bridge, independente de quantas camadas o
-     * usuário está mexendo.
-     */
-    private fun startRenderLoop() {
-        if (renderLoop != null) return
-        renderLoop = RenderLoop { frameTimeNanos ->
-            if (!initialized) return@RenderLoop
+    fun attachSurface(surface: Surface, width: Int, height: Int) {
+        synchronized(lifecycleLock) {
+            if (!ready) {
+                pendingSurface = Triple(surface, width, height)
+                return
+            }
+            if (!engine.attachSurface(surface, width, height)) {
+                ui = ui.copy(errorMessage = "O preview não conseguiu usar a superfície de vídeo.")
+            }
+        }
+    }
 
-            engine.submitCommands()
-            engine.renderFrame(frameTimeNanos)
+    fun resizeSurface(width: Int, height: Int) {
+        synchronized(lifecycleLock) {
+            val pending = pendingSurface
+            if (!ready && pending != null) {
+                pendingSurface = Triple(pending.first, width, height)
+                return
+            }
+            if (ready) engine.resizeSurface(width, height)
+        }
+    }
+
+    /** Bloqueia até a GPU largar a janela — o Android a destrói em seguida. */
+    fun detachSurface() {
+        synchronized(lifecycleLock) {
+            pendingSurface = null
+            if (ready) engine.detachSurface()
+        }
+    }
+
+    fun onEnterForeground() {
+        lifecycleThread.execute { synchronized(lifecycleLock) { if (ready) engine.resume() } }
+        if (ready) startStatusLoop()
+    }
+
+    fun onEnterBackground() {
+        stopStatusLoop()
+        // Suspender pausa, devolve os decoders de hardware ao sistema e grava o
+        // cache de pipeline antes que o sistema possa matar o processo.
+        lifecycleThread.execute { synchronized(lifecycleLock) { if (ready) engine.suspend() } }
+    }
+
+    fun shutdown() {
+        stopStatusLoop()
+        synchronized(lifecycleLock) {
+            destroyed = true
+            ready = false
+            engine.shutdown()
+            engine.destroy()
+        }
+        lifecycleThread.shutdown()
+    }
+
+    // =========================================================================
+    // Estado
+    // =========================================================================
+
+    private fun startStatusLoop() {
+        if (statusLoop != null) return
+        statusLoop = RenderLoop { frameTimeNanos ->
+            if (!ready) return@RenderLoop
             engine.readStatus(statusBuffer)
             status.readFrom(statusBuffer)
-
             publishStatus()
+            uiFrames++
+            if (ui.hudVisible && frameTimeNanos - lastPerfNs > 250_000_000L) {
+                if (lastPerfNs != 0L) uiFps = uiFrames * 1e9f / (frameTimeNanos - lastPerfNs)
+                uiFrames = 0
+                lastPerfNs = frameTimeNanos
+                engine.readPerf(perfBuffer)
+                perf = PerfStats.read(perfBuffer)
+            }
         }.also { it.start() }
     }
 
-    /**
-     * Publica o status do motor no estado da UI.
-     *
-     * A lista de camadas só é relida quando ela MUDA (contagem ou seleção
-     * diferentes) ou quando o playhead pode ter alterado a ordem de desenho.
-     * Reler 200 linhas a 60 Hz seria 12 mil leituras por segundo para desenhar
-     * a mesma lista — e é o tipo de desperdício que faz a UI engasgar sem
-     * motivo visível.
-     */
+    private fun stopStatusLoop() {
+        statusLoop?.stop()
+        statusLoop = null
+    }
+
     private fun publishStatus() {
-        // A lista só é relida quando a contagem muda. Reler 200 linhas a 60 Hz
-        // seriam 12 mil leituras por segundo para desenhar a mesma lista.
-        val layersChanged = status.layerCount != ui.layers.size &&
-            status.layerCount > 0 && ui.screen == Screen.Editor
-        val newLayers = if (layersChanged) readLayers() else ui.layers
-
-        val scaleLabel = if (status.previewAuto) {
-            "AUTO"
-        } else if (status.previewDenominator <= 1) {
-            "FULL"
+        // A lista de camadas só é relida quando algo dela muda (contagem,
+        // seleção, duração): reler 200 linhas por vsync seria desperdício.
+        val signature = status.layerCount.toLong() * 31 + status.duration * 7 + status.assetCount
+        val newLayers = if (ui.screen == Screen.Editor && signature != lastLayerSignature) {
+            lastLayerSignature = signature
+            readLayers()
         } else {
-            "1/${status.previewDenominator}"
+            ui.layers
         }
-
-        ui = ui.copy(
-            playheadFrame = status.playhead.toInt(),
+        val scaleLabel = when {
+            status.previewAuto -> "AUTO"
+            status.previewDenominator <= 1 -> "FULL"
+            else -> "1/${status.previewDenominator}"
+        }
+        val next = ui.copy(
+            playheadFrame = if (scrubbing) ui.playheadFrame else status.playhead.toInt(),
             totalFrames = status.duration.toInt(),
             playing = status.playing,
+            fps = if (status.compFps > 0f) status.compFps else ui.fps,
+            compWidth = status.compWidth,
+            compHeight = status.compHeight,
             layers = newLayers,
             previewWidth = status.previewWidth,
             previewHeight = status.previewHeight,
@@ -265,129 +293,85 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
             dirty = status.dirty,
             recoveryAvailable = status.recoveryAvailable,
         )
+        if (next != ui) ui = next
     }
 
-    /**
-     * Lê a lista de camadas do motor para o buffer direto e a converte em
-     * objetos para o Compose.
-     *
-     * A conversão em `List<LayerRow>` aloca, e alocar por frame é justamente o
-     * que o buffer direto evita. Ela só acontece quando a CONTAGEM muda ou
-     * quando um gesto acabou de alterar a lista — não a cada vsync.
-     */
     private fun readLayers(): List<LayerRow> {
         val count = engine.queryLayers(layerBuffer, MAX_LAYERS, nameBlob)
         if (count <= 0) return emptyList()
         return List(count) { i -> LayerRow.read(layerBuffer, i, nameBlob) }
     }
 
+    private fun refreshLayers() {
+        lastLayerSignature = -1
+        ui = ui.copy(layers = readLayers())
+        refreshEffects()
+    }
+
     // =========================================================================
-    // Comandos vindos da UI
+    // Comandos
     // =========================================================================
 
-    fun createLayer(kind: Int, name: String) {
+    private inline fun send(block: CommandBatch.() -> Unit) {
         engine.beginCommandBatch()
-        batch.createLayer(kind, name, 0)
+        batch.block()
         engine.submitCommands()
+    }
+
+    fun createLayer(kind: Int, name: String) {
+        send { createLayer(kind, name, 0) }
         refreshLayers()
     }
 
     fun deleteLayer(layerId: Long) {
-        engine.beginCommandBatch()
-        batch.deleteLayer(layerId)
-        engine.submitCommands()
+        send { deleteLayer(layerId) }
+        ui = ui.copy(selectedIds = ui.selectedIds - layerId)
         refreshLayers()
     }
 
     fun duplicateLayer(layerId: Long) {
-        engine.beginCommandBatch()
-        batch.duplicateLayer(layerId)
-        engine.submitCommands()
+        send { duplicateLayer(layerId) }
         refreshLayers()
     }
 
     fun toggleLayerVisibility(layerId: Long, visible: Boolean) {
-        engine.beginCommandBatch()
-        batch.setLayerVisible(layerId, visible)
-        engine.submitCommands()
+        send { setLayerVisible(layerId, visible) }
+        refreshLayers()
     }
 
-    fun renameLayer(layerId: Long, name: String) {
-        engine.beginCommandBatch()
-        batch.setLayerName(layerId, name)
-        engine.submitCommands()
-    }
+    fun renameLayer(layerId: Long, name: String) = send { setLayerName(layerId, name) }
 
-    /**
-     * Um arrasto na timeline, em uma frase: abre o grupo de desfazer, emite o
-     * comando, fecha no fim do gesto.
-     *
-     * O grupo é o que faz o gesto inteiro desfazer de uma vez. Sem ele, desfazer
-     * um arrasto de dois segundos exigiria dezenas de toques em "desfazer" — e o
-     * usuário leria isso como "o desfazer está quebrado".
-     */
-    fun beginGesture(label: String) {
-        engine.beginCommandBatch()
-        batch.beginUndoGroup(label)
-        engine.submitCommands()
-    }
-
-    fun endGesture() {
-        engine.beginCommandBatch()
-        batch.endUndoGroup()
-        engine.submitCommands()
-    }
+    fun beginGesture(label: String) = send { beginUndoGroup(label) }
+    fun endGesture() = send { endUndoGroup() }
 
     fun moveLayerInTime(layerId: Long, startFrame: Int, endFrame: Int) {
-        engine.beginCommandBatch()
-        batch.setLayerTimeRange(layerId, startFrame, endFrame)
-        engine.submitCommands()
-    }
-
-    fun transformLayer(
-        layerId: Long,
-        x: Float, y: Float, opacity: Float,
-        scaleX: Float, scaleY: Float, rotationZ: Float,
-    ) {
-        engine.beginCommandBatch()
-        batch.setTransform(
-            layerId,
-            x, y, 0f,
-            scaleX, scaleY, 1f,
-            0f, 0f, rotationZ,
-            0f, 0f, 0f,
-            opacity,
-        )
-        engine.submitCommands()
+        send { setLayerTimeRange(layerId, startFrame, endFrame) }
+        refreshLayers()
     }
 
     fun splitLayerAtPlayhead(layerId: Long) {
-        engine.beginCommandBatch()
-        batch.splitLayer(layerId, ui.playheadFrame)
-        engine.submitCommands()
+        send { splitLayer(layerId, ui.playheadFrame) }
         refreshLayers()
     }
 
     fun reorderLayer(layerId: Long, newIndex: Int) {
-        engine.beginCommandBatch()
-        batch.reorderLayer(layerId, newIndex)
-        engine.submitCommands()
+        send { reorderLayer(layerId, newIndex) }
         refreshLayers()
     }
 
     fun select(layerId: Long, additive: Boolean) {
         val next = if (additive) {
-            if (ui.selectedIds.contains(layerId)) ui.selectedIds - layerId
-            else ui.selectedIds + layerId
+            if (ui.selectedIds.contains(layerId)) ui.selectedIds - layerId else ui.selectedIds + layerId
         } else {
             setOf(layerId)
         }
-        ui = ui.copy(selectedIds = next)
+        ui = ui.copy(selectedIds = next, openEffectId = -1, effectParams = emptyList())
         engine.setSelection(next.toLongArray())
+        refreshEffects()
     }
 
     fun clearSelection() {
-        ui = ui.copy(selectedIds = emptySet())
+        ui = ui.copy(selectedIds = emptySet(), layerEffects = emptyList(), openEffectId = -1, effectParams = emptyList())
         engine.clearSelection()
     }
 
@@ -395,39 +379,55 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     // Reprodução
     // =========================================================================
 
-    fun togglePlayback() {
-        engine.beginCommandBatch()
-        if (ui.playing) batch.pause() else batch.play()
-        engine.submitCommands()
+    private fun frameToNs(frame: Int): Long {
+        val fps = if (ui.fps > 0f) ui.fps.toDouble() else 30.0
+        return (frame / fps * 1_000_000_000.0).toLong()
     }
 
+    fun togglePlayback() = send { togglePlayback() }
+
     fun seekTo(frame: Int) {
-        val clamped = frame.coerceIn(0, ui.totalFrames)
-        val fps = ui.fps.toDouble()
-        val timeNs = (clamped / fps * 1_000_000_000.0).toLong()
-        engine.beginCommandBatch()
-        batch.seek(timeNs)
-        engine.submitCommands()
+        val clamped = frame.coerceIn(0, maxOf(0, ui.totalFrames - 1))
+        send { seek(frameToNs(clamped)) }
         ui = ui.copy(playheadFrame = clamped)
     }
 
-    fun setPreviewScale(label: String, numerator: Int, denominator: Int) {
-        engine.beginCommandBatch()
-        batch.setPreviewScale(label == "AUTO", numerator, denominator)
-        engine.submitCommands()
+    /** Scrub: início, movimento (coalescido no decoder) e fim (frame exato). */
+    fun scrubStart(frame: Int) {
+        scrubbing = true
+        val clamped = frame.coerceIn(0, maxOf(0, ui.totalFrames - 1))
+        send {
+            scrubBegin()
+            scrub(frameToNs(clamped))
+        }
+        ui = ui.copy(playheadFrame = clamped)
     }
 
+    fun scrubTo(frame: Int) {
+        val clamped = frame.coerceIn(0, maxOf(0, ui.totalFrames - 1))
+        if (clamped == ui.playheadFrame) return
+        send { scrub(frameToNs(clamped)) }
+        ui = ui.copy(playheadFrame = clamped)
+    }
+
+    fun scrubEnd() {
+        send { scrubEnd() }
+        scrubbing = false
+        refreshEffectParams()
+    }
+
+    fun stepFrames(frames: Int) = send { step(frames) }
+
+    fun setPreviewScale(label: String, numerator: Int, denominator: Int) =
+        send { setPreviewScale(label == "AUTO", numerator, denominator) }
+
     fun undo() {
-        engine.beginCommandBatch()
-        batch.undo()
-        engine.submitCommands()
+        send { undo() }
         refreshLayers()
     }
 
     fun redo() {
-        engine.beginCommandBatch()
-        batch.redo()
-        engine.submitCommands()
+        send { redo() }
         refreshLayers()
     }
 
@@ -439,30 +439,143 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         ui = ui.copy(inspectorTab = tab)
     }
 
+    fun toggleHud() {
+        ui = ui.copy(hudVisible = !ui.hudVisible)
+    }
+
+    // =========================================================================
+    // Efeitos
+    // =========================================================================
+
+    private fun readCatalog(): List<EffectCatalogEntry> {
+        val n = engine.queryEffectCatalog(rowBuffer, 64, textBlob)
+        return List(maxOf(0, n)) { EffectCatalogEntry.read(rowBuffer, it, textBlob) }
+    }
+
+    private fun selectedLayer(): Long? = ui.selectedIds.firstOrNull()
+
+    private fun refreshEffects() {
+        val layer = selectedLayer()
+        if (layer == null || !ready) {
+            ui = ui.copy(layerEffects = emptyList(), openEffectId = -1, effectParams = emptyList())
+            return
+        }
+        val n = engine.queryLayerEffects(layer, rowBuffer, 64, textBlob)
+        val effects = List(maxOf(0, n)) { LayerEffect.read(rowBuffer, it, textBlob) }
+        val open = if (effects.any { it.effectId == ui.openEffectId }) ui.openEffectId else -1
+        ui = ui.copy(layerEffects = effects, openEffectId = open)
+        refreshEffectParams()
+    }
+
+    private fun refreshEffectParams() {
+        val layer = selectedLayer()
+        val effect = ui.openEffectId
+        if (layer == null || effect < 0) {
+            if (ui.effectParams.isNotEmpty()) ui = ui.copy(effectParams = emptyList())
+            return
+        }
+        val n = engine.queryEffectParams(layer, effect, rowBuffer, 64, textBlob)
+        ui = ui.copy(effectParams = List(maxOf(0, n)) { EffectParam.read(rowBuffer, it, textBlob) })
+    }
+
+    fun addEffect(typeId: Int) {
+        val layer = selectedLayer() ?: return
+        send { addEffect(layer, typeId) }
+        refreshLayers()
+        ui.layerEffects.lastOrNull()?.let { openEffect(it.effectId) }
+    }
+
+    fun removeEffect(effectId: Int) {
+        val layer = selectedLayer() ?: return
+        send { removeEffect(layer, effectId) }
+        if (ui.openEffectId == effectId) ui = ui.copy(openEffectId = -1)
+        refreshLayers()
+    }
+
+    fun setEffectEnabled(effectId: Int, enabled: Boolean) {
+        val layer = selectedLayer() ?: return
+        send { setEffectEnabled(layer, effectId, enabled) }
+        refreshEffects()
+    }
+
+    fun openEffect(effectId: Int) {
+        ui = ui.copy(openEffectId = if (ui.openEffectId == effectId) -1 else effectId)
+        refreshEffectParams()
+    }
+
+    fun setEffectParam(param: Int, value: Float) {
+        val layer = selectedLayer() ?: return
+        val effect = ui.openEffectId.takeIf { it >= 0 } ?: return
+        send { setEffectParam(layer, effect, param, value) }
+        refreshEffectParams()
+    }
+
+    fun setEffectVector(param: Int, v: FloatArray) {
+        val layer = selectedLayer() ?: return
+        val effect = ui.openEffectId.takeIf { it >= 0 } ?: return
+        send { setEffectVector(layer, effect, param, v[0], v[1], v[2], v[3]) }
+        refreshEffectParams()
+    }
+
+    // =========================================================================
+    // Importação
+    // =========================================================================
+
+    /**
+     * Importa um vídeo escolhido no seletor do sistema. O motor recebe a URI
+     * `content://` e abre descritores por ela sempre que precisa (decoder novo,
+     * volta do segundo plano, projeto reaberto).
+     */
+    fun importVideo(uri: Uri) {
+        val app = getApplication<Application>()
+        try {
+            app.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } catch (_: Exception) {
+            // Nem todo provedor concede permissão persistente; a da sessão basta.
+        }
+        val name = displayName(uri) ?: "Vídeo"
+        ui = ui.copy(importing = true)
+        viewModelScope.launch {
+            val id = withContext(Dispatchers.IO) { engine.importVideo(uri.toString(), name) }
+            ui = ui.copy(importing = false)
+            if (id < 0) {
+                ui = ui.copy(errorMessage = "Não foi possível importar o vídeo (erro ${-id}).")
+                return@launch
+            }
+            refreshLayers()
+            select(id, false)
+        }
+    }
+
+    private fun displayName(uri: Uri): String? = try {
+        getApplication<Application>().contentResolver
+            .query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+    } catch (_: Exception) {
+        null
+    }
+
     // =========================================================================
     // Projetos
     // =========================================================================
 
-    /** Relê a lista depois de uma operação que a mudou. */
-    private fun refreshLayers() {
-        ui = ui.copy(layers = readLayers())
-    }
-
     fun newProject(width: Int, height: Int, fps: Float, title: String) {
         viewModelScope.launch {
-            val ok = withContext(Dispatchers.Default) {
-                engine.newProject(width, height, fps, title)
-            }
+            val ok = withContext(Dispatchers.Default) { engine.newProject(width, height, fps, title) }
             if (!ok) {
                 ui = ui.copy(errorMessage = "Não foi possível criar o projeto.")
                 return@launch
             }
+            projectPath = null
             ui = ui.copy(
                 screen = Screen.Editor,
                 projectTitle = title,
                 fps = fps,
                 playheadFrame = 0,
-                totalFrames = (fps * 10f).toInt(),
+                selectedIds = emptySet(),
+                layerEffects = emptyList(),
+                openEffectId = -1,
+                effectParams = emptyList(),
             )
             refreshLayers()
         }
@@ -476,32 +589,41 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
             projectPath = path
-            ui = ui.copy(
-                screen = Screen.Editor,
-                projectTitle = File(path).nameWithoutExtension,
-            )
+            ui = ui.copy(screen = Screen.Editor, projectTitle = File(path).nameWithoutExtension, selectedIds = emptySet())
             refreshLayers()
         }
     }
 
+    fun saveProject() {
+        val path = projectPath ?: File(directories().second, "${ui.projectTitle.ifBlank { "Projeto" }}.aurea").absolutePath
+        viewModelScope.launch {
+            val code = withContext(Dispatchers.IO) { engine.saveProject(path) }
+            if (code != 0) {
+                ui = ui.copy(errorMessage = "Falha ao salvar (código $code).")
+            } else {
+                projectPath = path
+            }
+        }
+    }
+
     fun closeProject() {
+        saveIfDirty()
         clearSelection()
         ui = ui.copy(screen = Screen.Home, layers = emptyList())
         projectPath = null
         refreshRecentProjects()
     }
 
-    /**
-     * Descarta a recuperação da sessão anterior.
-     *
-     * É uma ação destrutiva — o journal é apagado —, então ela só acontece
-     * quando o usuário pede explicitamente. Oferecer "Descartar" ao lado de
-     * "Recuperar" sem confirmação some com o trabalho de quem toca errado.
-     */
+    private fun saveIfDirty() {
+        if (!ui.dirty || ui.layers.isEmpty()) return
+        val path = projectPath ?: File(directories().second, "${ui.projectTitle.ifBlank { "Projeto" }}.aurea").absolutePath
+        engine.saveProject(path)
+    }
+
     fun discardRecovery() {
         viewModelScope.launch(Dispatchers.Default) {
             engine.discardRecovery()
-            ui = ui.copy(recoveryAvailable = false)
+            withContext(Dispatchers.Main) { ui = ui.copy(recoveryAvailable = false) }
         }
     }
 
@@ -515,16 +637,9 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
             val list = dir.listFiles { f -> f.extension == "aurea" }
                 ?.sortedByDescending { it.lastModified() }
                 ?.take(20)
-                ?.map {
-                    RecentProject(
-                        path = it.absolutePath,
-                        title = it.nameWithoutExtension,
-                        modifiedMs = it.lastModified(),
-                        sizeBytes = it.length(),
-                    )
-                }
+                ?.map { RecentProject(it.absolutePath, it.nameWithoutExtension, it.lastModified(), it.length()) }
                 ?: emptyList()
-            ui = ui.copy(recentProjects = list)
+            withContext(Dispatchers.Main) { ui = ui.copy(recentProjects = list) }
         }
     }
 

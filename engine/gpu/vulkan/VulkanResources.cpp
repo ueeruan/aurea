@@ -39,15 +39,6 @@ VkSamplerAddressMode to_vk(SamplerDesc::Wrap w) noexcept {
     return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
 }
 
-VkShaderStageFlagBits to_vk(ShaderStage s) noexcept {
-    switch (s) {
-        case ShaderStage::Vertex:   return VK_SHADER_STAGE_VERTEX_BIT;
-        case ShaderStage::Fragment: return VK_SHADER_STAGE_FRAGMENT_BIT;
-        case ShaderStage::Compute:  return VK_SHADER_STAGE_COMPUTE_BIT;
-    }
-    return VK_SHADER_STAGE_FRAGMENT_BIT;
-}
-
 VkPrimitiveTopology to_vk(Topology t) noexcept {
     switch (t) {
         case Topology::TriangleList:  return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
@@ -736,10 +727,19 @@ Result<ExternalTexture> Backend::import_external_image(const ExternalImageDesc& 
     auto* ahb = static_cast<AHardwareBuffer*>(img.nativeHandle);
     if (!ahb) return Status{Errc::InvalidArgument, "buffer nulo"};
 
+    const u64 colorKey = static_cast<u64>(img.matrix) | (img.fullRange ? 4ull : 0ull);
+
     // O ImageReader recicla um conjunto fixo de buffers: a importação é feita
     // uma vez por buffer e reaproveitada. Em regime, importar custa zero.
     if (auto it = importedByBuffer_.find(ahb); it != importedByBuffer_.end()) {
-        if (Texture* t = textures_.get(it->second)) {
+        Texture* cached = textures_.get(it->second);
+        if (cached && cached->colorKey != colorKey) {
+            // A cor do vídeo mudou (formato de saída novo): a view carrega a
+            // conversão antiga e precisa ser refeita.
+            destroy_texture(TextureHandle{it->second});
+            cached = nullptr;
+        }
+        if (Texture* t = cached) {
             t->lastUsedFrame = frameNumber_;
             t->state = ResourceState::Undefined;   // conteúdo novo do decoder: nova aquisição
             t->layout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -748,9 +748,10 @@ Result<ExternalTexture> Backend::import_external_image(const ExternalImageDesc& 
             out.texture = TextureHandle{it->second};
             out.sampler = SamplerHandle{t->ycbcrSampler};
             out.formatKey = s ? reinterpret_cast<u64>(s->conversion) : 0;
+            out.rgb = t->externalRgb;
             return out;
         }
-        importedByBuffer_.erase(it);
+        importedByBuffer_.erase(ahb);
     }
 
     VkAndroidHardwareBufferFormatPropertiesANDROID fmt{VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_FORMAT_PROPERTIES_ANDROID};
@@ -761,24 +762,62 @@ Result<ExternalTexture> Backend::import_external_image(const ExternalImageDesc& 
         return s;
     }
     const bool externalFormat = fmt.format == VK_FORMAT_UNDEFINED;
-    const u64 formatKey = externalFormat ? fmt.externalFormat : (static_cast<u64>(fmt.format) | (1ull << 63));
+    const u64 formatKey = (externalFormat ? fmt.externalFormat : (static_cast<u64>(fmt.format) | (1ull << 63)))
+                        ^ (colorKey * 0x9E3779B97F4A7C15ull);
+    // YCbCr de verdade: um formato multi-plano conhecido, ou um formato externo
+    // para o qual o driver sugere um modelo YCbCr. Um formato RGB comum (ou um
+    // externo com sugestão RGB_IDENTITY) já traz a cor convertida.
+    const bool ycbcrFormat = fmt.format >= VK_FORMAT_G8B8G8R8_422_UNORM
+                          && fmt.format <= VK_FORMAT_G16_B16_R16_3PLANE_444_UNORM;
+    const bool rgbContent = externalFormat
+        ? fmt.suggestedYcbcrModel == VK_SAMPLER_YCBCR_MODEL_CONVERSION_RGB_IDENTITY
+        : !ycbcrFormat;
+    const bool needsConversion = externalFormat || ycbcrFormat;
 
-    // Conversão YCbCr por formato — IDENTIDADE de modelo: o driver só
-    // reconstrói o croma, e a matriz/faixa/curva são do shader do Aurea, com os
-    // metadados do próprio vídeo. Assim a cor é a mesma em todo aparelho, e a
-    // mesma do caminho sem zero-copy.
+    // Conversão YCbCr por (formato, matriz, faixa). A matriz e a faixa são as
+    // DO ARQUIVO, não a sugestão do driver: o gralloc de muitos aparelhos (e o
+    // do emulador) sugere BT.601 cheio para qualquer vídeo. O modelo
+    // RGB_IDENTITY com a conta no shader seria mais puro, mas há drivers que o
+    // ignoram e convertem assim mesmo — a cor sairia convertida duas vezes.
+    // Curva de transferência, primárias e tone map continuam no shader.
     u64 samplerId = 0;
     if (auto it = ycbcrByFormat_.find(formatKey); it != ycbcrByFormat_.end()) {
         samplerId = it->second;
+    } else if (!needsConversion) {
+        // RGB comum: sampler linear sem conversão (conversão YCbCr só é válida
+        // para formatos YCbCr ou externos).
+        AUREA_LOG_INFO("ahb: formato RGB %d (sem conversao YCbCr)", static_cast<int>(fmt.format));
+        SamplerObject so;
+        so.shared = true;
+        VkSamplerCreateInfo si{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+        si.magFilter = si.minFilter = VK_FILTER_LINEAR;
+        si.addressModeU = si.addressModeV = si.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        si.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+        si.maxLod = 0.0f;
+        if (const Status s = check(vkCreateSampler(device_, &si, nullptr, &so.sampler), "vkCreateSampler(ahb rgb)"); !s.ok()) {
+            return s;
+        }
+        samplerId = samplers_.add(std::move(so));
+        ycbcrByFormat_[formatKey] = samplerId;
     } else {
+        AUREA_LOG_INFO("ahb: formato %d externo %llu modelo sugerido %d faixa %d features 0x%x%s",
+                       static_cast<int>(fmt.format), static_cast<unsigned long long>(fmt.externalFormat),
+                       static_cast<int>(fmt.suggestedYcbcrModel), static_cast<int>(fmt.suggestedYcbcrRange),
+                       static_cast<unsigned>(fmt.formatFeatures), rgbContent ? " (conteudo RGB)" : "");
         VkExternalFormatANDROID ext{VK_STRUCTURE_TYPE_EXTERNAL_FORMAT_ANDROID};
         ext.externalFormat = externalFormat ? fmt.externalFormat : 0;
         const bool linear = (fmt.formatFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_YCBCR_CONVERSION_LINEAR_FILTER_BIT) != 0;
         VkSamplerYcbcrConversionCreateInfo ci{VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_CREATE_INFO};
         ci.pNext = externalFormat ? &ext : nullptr;
         ci.format = fmt.format;
-        ci.ycbcrModel = VK_SAMPLER_YCBCR_MODEL_CONVERSION_RGB_IDENTITY;
-        ci.ycbcrRange = VK_SAMPLER_YCBCR_RANGE_ITU_FULL;
+        switch (img.matrix) {
+            case YCbCrMatrix::BT601:  ci.ycbcrModel = VK_SAMPLER_YCBCR_MODEL_CONVERSION_YCBCR_601; break;
+            case YCbCrMatrix::BT2020: ci.ycbcrModel = VK_SAMPLER_YCBCR_MODEL_CONVERSION_YCBCR_2020; break;
+            default:                  ci.ycbcrModel = VK_SAMPLER_YCBCR_MODEL_CONVERSION_YCBCR_709; break;
+        }
+        // Buffer que já é RGB (externo com sugestão RGB_IDENTITY): sem matriz.
+        if (rgbContent) ci.ycbcrModel = VK_SAMPLER_YCBCR_MODEL_CONVERSION_RGB_IDENTITY;
+        ci.ycbcrRange = img.fullRange || rgbContent ? VK_SAMPLER_YCBCR_RANGE_ITU_FULL : VK_SAMPLER_YCBCR_RANGE_ITU_NARROW;
         ci.components = fmt.samplerYcbcrConversionComponents;
         ci.xChromaOffset = fmt.suggestedXChromaOffset;
         ci.yChromaOffset = fmt.suggestedYChromaOffset;
@@ -819,6 +858,8 @@ Result<ExternalTexture> Backend::import_external_image(const ExternalImageDesc& 
     t.desc.sampled = true;
     t.ycbcrSampler = samplerId;
     t.nativeBuffer = ahb;
+    t.externalRgb = true;
+    t.colorKey = colorKey;
 
     VkExternalFormatANDROID extFmt{VK_STRUCTURE_TYPE_EXTERNAL_FORMAT_ANDROID};
     extFmt.externalFormat = externalFormat ? fmt.externalFormat : 0;
@@ -862,7 +903,7 @@ Result<ExternalTexture> Backend::import_external_image(const ExternalImageDesc& 
     VkSamplerYcbcrConversionInfo convInfo{VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_INFO};
     convInfo.conversion = conv->conversion;
     VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
-    vi.pNext = &convInfo;
+    vi.pNext = conv->conversion ? &convInfo : nullptr;
     vi.image = t.image;
     vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
     vi.format = fmt.format;
@@ -882,7 +923,8 @@ Result<ExternalTexture> Backend::import_external_image(const ExternalImageDesc& 
     ExternalTexture out;
     out.texture = TextureHandle{id};
     out.sampler = SamplerHandle{samplerId};
-    out.formatKey = reinterpret_cast<u64>(conv->conversion);
+    out.formatKey = conv->conversion ? reinterpret_cast<u64>(conv->conversion) : formatKey;
+    out.rgb = true;
     return out;
 #else
     (void)img;

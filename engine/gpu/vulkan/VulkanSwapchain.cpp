@@ -104,6 +104,19 @@ Status Backend::create_swapchain(u32 width, u32 height) noexcept {
     // pré-rotação, o conteúdo é girado no shader e o compositor do sistema não
     // precisa gastar um passe girando a imagem.
     VkExtent2D extent = caps.currentExtent;
+#if defined(VK_USE_PLATFORM_ANDROID_KHR)
+    // O tamanho do surfaceChanged é a verdade. O currentExtent do Android pode
+    // ficar um passo atrás quando o layout muda (painel abrindo): o swapchain
+    // sairia com o tamanho antigo e o compositor ESTICARIA a imagem para a
+    // view nova. O swapchain do Android aceita qualquer extensão.
+    if (width > 0 && height > 0) {
+        const bool sideways = (caps.currentTransform & (VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR
+                                                        | VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR)) != 0;
+        extent = sideways ? VkExtent2D{height, width} : VkExtent2D{width, height};
+        extent.width = std::clamp(extent.width, caps.minImageExtent.width, std::max(caps.minImageExtent.width, caps.maxImageExtent.width));
+        extent.height = std::clamp(extent.height, caps.minImageExtent.height, std::max(caps.minImageExtent.height, caps.maxImageExtent.height));
+    }
+#endif
     if (extent.width == 0xFFFFFFFFu) {
         extent.width = std::clamp(width, caps.minImageExtent.width, caps.maxImageExtent.width);
         extent.height = std::clamp(height, caps.minImageExtent.height, caps.maxImageExtent.height);

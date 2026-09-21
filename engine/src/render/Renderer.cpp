@@ -433,9 +433,11 @@ bool Renderer::build_video_source(const RenderLayer& layer, u32 layerIndex, u32 
         ext.width = f->width;
         ext.height = f->height;
         ext.format = f->format;
+        ext.matrix = f->color.matrix;
+        ext.fullRange = f->color.fullRange;
         auto imported = backend_->import_external_image(ext);
         if (imported.ok()) {
-            u.sampling = Vec4{0.0f, 1.0f, taps ? 1.0f : 0.0f, 0.0f};
+            u.sampling = Vec4{0.0f, 1.0f, taps ? 1.0f : 0.0f, imported->rgb ? 1.0f : 0.0f};
             PipelineKey key = PipelineKey::fullscreen(ShaderId::video_yuv_external_frag, kWorkFormat);
             key.immutableSampler = imported->sampler.id;
             auto pipe = shaders_.pipeline(key);

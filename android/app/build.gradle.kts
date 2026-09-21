@@ -33,9 +33,9 @@ if (temChaveDeRelease) {
 // nome que não bate com o que a loja espera; aqui o filtro é explícito e o APK
 // sai inteiro, com os assets certos.
 val aureaAbi = providers.gradleProperty("aureaAbi").orNull
-val aureasAbisPermitidas = setOf("armeabi-v7a", "arm64-v8a")
+val aureasAbisPermitidas = setOf("armeabi-v7a", "arm64-v8a", "x86_64")
 require(aureaAbi == null || aureaAbi in aureasAbisPermitidas) {
-    "aureaAbi invalida: $aureaAbi (esperado: armeabi-v7a ou arm64-v8a)"
+    "aureaAbi invalida: $aureaAbi (esperado: armeabi-v7a, arm64-v8a ou x86_64 — este só para o emulador)"
 }
 
 android {

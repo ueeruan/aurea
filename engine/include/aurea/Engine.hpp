@@ -78,6 +78,9 @@ struct EngineStatus {
     FrameIndex playhead{0};
     FrameIndex duration{0};
     bool playing = false;
+    f64  compFps = 0.0;
+    u32  compWidth = 0;
+    u32  compHeight = 0;
 
     u32  layerCount = 0;
     u32  selectedCount = 0;

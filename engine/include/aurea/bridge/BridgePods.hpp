@@ -103,12 +103,47 @@ static_assert(offsetof(LayerRow, parentIndex) == 56);
 // -----------------------------------------------------------------------------
 struct KeyframeRow {
     u32 property      = 0;    // +0
-    u32 effectIndex   = 0;    // +4   kInvalidIndex quando não é de efeito
-    i32 time          = 0;    // +8
+    u32 effectIndex   = 0;    // +4   id do efeito; kInvalidIndex quando não é de efeito
+    i32 time          = 0;    // +8   tempo LOCAL da layer (timeline = time + start - offset)
     f32 value         = 0.0f; // +12
     u32 interpolation = 0;    // +16
-    u32 reserved      = 0;    // +20
+    u32 paramIndex    = 0;    // +20  parâmetro de efeito: param*4 + componente
 };
+
+/// Detalhe de UMA camada para o inspetor: transform avaliado no playhead (a
+/// animação já aplicada), o que está animado e o que tem keyframe exatamente
+/// no playhead (estado do botão de losango). A UI não guarda cópia disso:
+/// relê a cada mudança.
+struct LayerDetailPOD {
+    u64 id                = 0;    // +0
+    u32 kind              = 0;    // +8
+    u32 flags             = 0;    // +12  kLayerRowFlag*
+    i32 startFrame        = 0;    // +16
+    i32 endFrame          = 0;    // +20
+    i32 offsetFrames      = 0;    // +24  deslocamento do conteúdo (in-point)
+    u32 blendMode         = 0;    // +28
+    f32 position[3]{};            // +32
+    f32 scale[3]{};               // +44
+    f32 rotation[3]{};            // +56  graus
+    f32 anchor[3]{};              // +68
+    f32 opacity           = 1.0f; // +80
+    f32 skew[2]{};                // +84
+    u32 animatedMask      = 0;    // +92  bit n = TrackProperty n (0..14) tem keyframes
+    u32 keyAtPlayheadMask = 0;    // +96  bit n = keyframe exatamente no playhead
+    u32 sourceWidth       = 0;    // +100
+    u32 sourceHeight      = 0;    // +104
+    f32 sourceFps         = 0.0f; // +108
+    i32 sourceFrames      = 0;    // +112 duração da mídia em frames da composição (0 = sem limite)
+    u32 effectCount       = 0;    // +116
+    u32 maskCount         = 0;    // +120
+    i32 localPlayhead     = 0;    // +124 playhead no tempo local da layer
+    u64 parentId          = 0;    // +128 0 = sem pai
+    u32 reserved[14]{};           // +136
+};
+static_assert(sizeof(LayerDetailPOD) == 192, "LayerDetailPOD e contrato de ABI");
+static_assert(offsetof(LayerDetailPOD, position) == 32);
+static_assert(offsetof(LayerDetailPOD, animatedMask) == 92);
+static_assert(offsetof(LayerDetailPOD, parentId) == 128);
 
 static_assert(sizeof(KeyframeRow) == 24, "KeyframeRow e contrato de ABI com a UI");
 static_assert(offsetof(KeyframeRow, property) == 0);
@@ -126,11 +161,13 @@ static_assert(offsetof(KeyframeRow, interpolation) == 16);
 struct EngineStatusPOD {
     i32 state            = 0;     // +0
     i32 lastError        = 0;     // +4
-    char errorDetail[104]{};      // +8
+    char errorDetail[96]{};       // +8
+    u32 modelRevision    = 0;     // +104 muda a cada alteração do modelo (a UI relê listas)
+    u32 reservedRev      = 0;     // +108
     f32 compFps          = 0.0f;  // +112 composição atual (a UI converte frame ↔ tempo)
     u32 compWidth        = 0;     // +116
     u32 compHeight       = 0;     // +120
-    u32 reservedStatus   = 0;     // +124
+    u32 thumbnailGeneration = 0;  // +124 muda quando uma miniatura nova fica pronta
     f32 currentFps       = 0.0f;  // +128
     f32 averageFrameMs   = 0.0f;  // +132
     f32 gpuMs            = 0.0f;  // +136

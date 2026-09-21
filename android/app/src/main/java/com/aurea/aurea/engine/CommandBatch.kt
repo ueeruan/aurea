@@ -114,17 +114,22 @@ class CommandBatch(private val engine: AureaEngine) {
      * Trim: move a borda de entrada e/ou saída. É o gesto de arrastar a ponta da
      * barra na timeline.
      */
-    fun setLayerTimeRange(layer: Long, startFrame: Int, endFrame: Int) =
+    fun setLayerTimeRange(layer: Long, startFrame: Int, endFrame: Int, offsetFrames: Int? = null) =
         emit(CommandType.LAYER_SET_TIME_RANGE) { b ->
             b.putHandle(Off.LAYER, layer)
-            b.putInt(Off.RANGE_START, startFrame)
-            b.putInt(Off.RANGE_END, endFrame)
+            b.putLong(Off.RANGE_START, startFrame.toLong())
+            b.putLong(Off.RANGE_END, endFrame.toLong())
+            // Trim do INÍCIO: o conteúdo fica parado e só a borda anda.
+            if (offsetFrames != null) {
+                b.putLong(Off.RANGE_OFFSET, offsetFrames.toLong())
+                b.putInt(Off.RANGE_SET_OFFSET, 1)
+            }
         }
 
     /** Divide a camada no playhead. */
     fun splitLayer(layer: Long, atFrame: Int) = emit(CommandType.LAYER_SPLIT) { b ->
         b.putHandle(Off.LAYER, layer)
-        b.putInt(Off.SPLIT_AT, atFrame)
+        b.putLong(Off.SPLIT_AT, atFrame.toLong())
     }
 
     // =========================================================================
@@ -207,25 +212,25 @@ class CommandBatch(private val engine: AureaEngine) {
     fun insertKeyframe(
         layer: Long, property: Int, effectIndex: Int, effectParam: Int,
         timeFrame: Int, value: Float,
-    ) = emit(CommandType.KEYFRAME_INSERT) { b -> writeTrackRef(b, layer, property, effectIndex, effectParam); b.putInt(Off.KEYFRAME_TIME, timeFrame); b.putFloat(Off.KEYFRAME_VALUE, value) }
+    ) = emit(CommandType.KEYFRAME_INSERT) { b -> writeTrackRef(b, layer, property, effectIndex, effectParam); b.putLong(Off.KEYFRAME_TIME, timeFrame.toLong()); b.putFloat(Off.KEYFRAME_VALUE, value) }
 
     fun deleteKeyframe(
         layer: Long, property: Int, effectIndex: Int, effectParam: Int, timeFrame: Int,
-    ) = emit(CommandType.KEYFRAME_DELETE) { b -> writeTrackRef(b, layer, property, effectIndex, effectParam); b.putInt(Off.KEYFRAME_TIME, timeFrame) }
+    ) = emit(CommandType.KEYFRAME_DELETE) { b -> writeTrackRef(b, layer, property, effectIndex, effectParam); b.putLong(Off.KEYFRAME_TIME, timeFrame.toLong()) }
 
     fun moveKeyframe(
         layer: Long, property: Int, effectIndex: Int, effectParam: Int,
         fromFrame: Int, toFrame: Int,
     ) = emit(CommandType.KEYFRAME_MOVE) { b ->
         writeTrackRef(b, layer, property, effectIndex, effectParam)
-        b.putInt(Off.KEYFRAME_TIME, fromFrame)
-        b.putInt(Off.KEYFRAME_TIME + 8, toFrame)
+        b.putLong(Off.KEYFRAME_TIME, fromFrame.toLong())
+        b.putLong(Off.KEYFRAME_TIME + 8, toFrame.toLong())
     }
 
     fun setKeyframeValue(
         layer: Long, property: Int, effectIndex: Int, effectParam: Int,
         timeFrame: Int, value: Float,
-    ) = emit(CommandType.KEYFRAME_SET_VALUE) { b -> writeTrackRef(b, layer, property, effectIndex, effectParam); b.putInt(Off.KEYFRAME_TIME, timeFrame); b.putFloat(Off.KEYFRAME_VALUE, value) }
+    ) = emit(CommandType.KEYFRAME_SET_VALUE) { b -> writeTrackRef(b, layer, property, effectIndex, effectParam); b.putLong(Off.KEYFRAME_TIME, timeFrame.toLong()); b.putFloat(Off.KEYFRAME_VALUE, value) }
 
     /**
      * Muda a interpolação do keyframe. `interp` é o valor de `Interpolation` do
@@ -238,7 +243,7 @@ class CommandBatch(private val engine: AureaEngine) {
         bx1: Float, by1: Float, bx2: Float, by2: Float,
     ) = emit(CommandType.KEYFRAME_SET_INTERPOLATION) { b ->
         writeTrackRef(b, layer, property, effectIndex, effectParam)
-        b.putInt(Off.KEYFRAME_TIME, timeFrame)
+        b.putLong(Off.KEYFRAME_TIME, timeFrame.toLong())
         b.put(Off.KEYFRAME_TIME + 8, interp.toByte())
         // Os control points vêm logo depois do enum, alinhados em 4.
         b.putFloat(Off.KEYFRAME_TIME + 12, bx1)
@@ -388,6 +393,12 @@ class CommandBatch(private val engine: AureaEngine) {
         b.putInt(Off.EFFECT_ID, effectId)
     }
 
+    fun reorderEffect(layer: Long, effectId: Int, newIndex: Int) = emit(CommandType.EFFECT_REORDER) { b ->
+        b.putHandle(Off.LAYER, layer)
+        b.putInt(Off.EFFECT_ID, effectId)
+        b.putInt(Off.EFFECT_PARAM_INDEX, newIndex)   // EffectReorderPayload.newIndex (+32)
+    }
+
     fun setEffectEnabled(layer: Long, effectId: Int, enabled: Boolean) = emit(CommandType.EFFECT_SET_ENABLED) { b ->
         b.putHandle(Off.LAYER, layer)
         b.putInt(Off.EFFECT_ID, effectId)
@@ -457,6 +468,8 @@ class CommandBatch(private val engine: AureaEngine) {
         const val LAYER_CREATE_KIND = PodLayout.CMD_OFF_PAYLOAD + 8
         const val RANGE_START = PodLayout.CMD_OFF_PAYLOAD + 8
         const val RANGE_END = PodLayout.CMD_OFF_PAYLOAD + 16
+        const val RANGE_OFFSET = PodLayout.CMD_OFF_PAYLOAD + 24
+        const val RANGE_SET_OFFSET = PodLayout.CMD_OFF_PAYLOAD + 32
         const val SPLIT_AT = PodLayout.CMD_OFF_PAYLOAD + 8
 
         const val POSITION_X = PodLayout.CMD_OFF_PAYLOAD + 8

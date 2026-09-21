@@ -72,6 +72,7 @@ internal object PodLayout {
     const val KF_OFF_TIME = 8             // i32
     const val KF_OFF_VALUE = 12           // f32
     const val KF_OFF_INTERPOLATION = 16   // u32
+    const val KF_OFF_PARAM_INDEX = 20     // u32 (param*4 + componente, efeito)
 
     // =========================================================================
     // EngineStatusPOD — 256 bytes, quatro linhas de cache.
@@ -79,10 +80,12 @@ internal object PodLayout {
     const val STATUS_BYTES = 256
     const val ST_OFF_STATE = 0            // i32
     const val ST_OFF_LAST_ERROR = 4       // i32
-    const val ST_OFF_ERROR_DETAIL = 8     // char[104]
+    const val ST_OFF_ERROR_DETAIL = 8     // char[96]
+    const val ST_OFF_MODEL_REVISION = 104 // u32
     const val ST_OFF_COMP_FPS = 112       // f32
     const val ST_OFF_COMP_WIDTH = 116     // u32
     const val ST_OFF_COMP_HEIGHT = 120    // u32
+    const val ST_OFF_THUMB_GENERATION = 124 // u32
     const val ST_OFF_CURRENT_FPS = 128    // f32
     const val ST_OFF_AVERAGE_FRAME_MS = 132
     const val ST_OFF_GPU_MS = 136
@@ -230,12 +233,17 @@ class LayerRow internal constructor(
 }
 
 /** Um keyframe, para a barra de keyframes da timeline. */
-class KeyframeRow internal constructor(
+/**
+ * Um keyframe. `time` é o tempo LOCAL da camada: na timeline fica em
+ * `time + start - offset` (ver [LayerDetail]).
+ */
+data class KeyframeRow(
     val property: Int,
     val effectIndex: Int,
     val time: Int,
     val value: Float,
     val interpolation: Int,
+    val paramIndex: Int,
 ) {
     companion object {
         internal fun read(buffer: ByteBuffer, index: Int): KeyframeRow {
@@ -246,6 +254,7 @@ class KeyframeRow internal constructor(
                 time = buffer.getInt(b + PodLayout.KF_OFF_TIME),
                 value = buffer.getFloat(b + PodLayout.KF_OFF_VALUE),
                 interpolation = buffer.getInt(b + PodLayout.KF_OFF_INTERPOLATION),
+                paramIndex = buffer.getInt(b + PodLayout.KF_OFF_PARAM_INDEX),
             )
         }
     }
@@ -281,6 +290,8 @@ class EngineStatus {
     var compFps: Float = 0f
     var compWidth: Int = 0
     var compHeight: Int = 0
+    var modelRevision: Int = 0
+    var thumbnailGeneration: Int = 0
     var layerCount: Int = 0
     var selectedCount: Int = 0
     var canUndo: Boolean = false
@@ -316,6 +327,8 @@ class EngineStatus {
         compFps = buffer.getFloat(PodLayout.ST_OFF_COMP_FPS)
         compWidth = buffer.getInt(PodLayout.ST_OFF_COMP_WIDTH)
         compHeight = buffer.getInt(PodLayout.ST_OFF_COMP_HEIGHT)
+        modelRevision = buffer.getInt(PodLayout.ST_OFF_MODEL_REVISION)
+        thumbnailGeneration = buffer.getInt(PodLayout.ST_OFF_THUMB_GENERATION)
         layerCount = buffer.getInt(PodLayout.ST_OFF_LAYER_COUNT)
         selectedCount = buffer.getInt(PodLayout.ST_OFF_SELECTED_COUNT)
         canUndo = buffer.getInt(PodLayout.ST_OFF_CAN_UNDO) != 0
@@ -503,6 +516,15 @@ object ParamType {
     const val LAYER_REFERENCE = 10
     const val TEXTURE_REFERENCE = 11
 
+    /** Componentes numéricos animáveis (espelho de `aurea::component_count`). */
+    fun componentCount(type: Int): Int = when (type) {
+        FLOAT, INT, BOOL, ANGLE, ENUM -> 1
+        POINT2D -> 2
+        POINT3D -> 3
+        COLOR -> 4
+        else -> 0
+    }
+
     const val FLAG_ANIMATABLE = 1 shl 0
     const val FLAG_PIXELS = 1 shl 1
     const val FLAG_PERCENT = 1 shl 2
@@ -659,5 +681,106 @@ data class PerfStats(
             decoder = b.cString(184, 48),
             gpuName = b.cString(232, 24),
         )
+    }
+}
+
+// =============================================================================
+// Detalhe da camada — espelho de `bridge::LayerDetailPOD` (192 bytes)
+// =============================================================================
+
+/** Propriedades de transform (`aurea::TrackProperty`), na ordem dos bits de `animatedMask`. */
+object TrackProperty {
+    const val POSITION_X = 0
+    const val POSITION_Y = 1
+    const val POSITION_Z = 2
+    const val SCALE_X = 3
+    const val SCALE_Y = 4
+    const val SCALE_Z = 5
+    const val ROTATION_X = 6
+    const val ROTATION_Y = 7
+    const val ROTATION_Z = 8
+    const val ANCHOR_X = 9
+    const val ANCHOR_Y = 10
+    const val ANCHOR_Z = 11
+    const val OPACITY = 12
+    const val SKEW_X = 13
+    const val SKEW_Y = 14
+    const val TIME_REMAP = 30
+    const val EFFECT_PARAM = 31
+}
+
+/**
+ * Transform avaliado no playhead (animação aplicada), o que está animado e o
+ * que tem keyframe exatamente no playhead. A UI NÃO guarda cópia: relê quando
+ * `modelRevision` ou o playhead mudam.
+ */
+data class LayerDetail(
+    val id: Long,
+    val kind: Int,
+    val flags: Int,
+    val startFrame: Int,
+    val endFrame: Int,
+    val offsetFrames: Int,
+    val blendMode: Int,
+    val position: List<Float>,
+    val scale: List<Float>,
+    val rotation: List<Float>,
+    val anchor: List<Float>,
+    val opacity: Float,
+    val skew: List<Float>,
+    val animatedMask: Int,
+    val keyAtPlayheadMask: Int,
+    val sourceWidth: Int,
+    val sourceHeight: Int,
+    val sourceFps: Float,
+    val sourceFrames: Int,
+    val effectCount: Int,
+    val maskCount: Int,
+    val localPlayhead: Int,
+    val parentId: Long,
+) {
+    fun isAnimated(property: Int) = (animatedMask and (1 shl property)) != 0
+    fun hasKeyAtPlayhead(property: Int) = (keyAtPlayheadMask and (1 shl property)) != 0
+
+    /** Tempo local (dos keyframes) → frame da timeline. */
+    fun timelineFrame(localFrame: Int) = localFrame + startFrame - offsetFrames
+
+    /** Frame da timeline → tempo local. */
+    fun localFrame(timelineFrame: Int) = timelineFrame - startFrame + offsetFrames
+
+    val visible: Boolean get() = (flags and PodLayout.FLAG_VISIBLE) != 0
+    val locked: Boolean get() = (flags and PodLayout.FLAG_LOCKED) != 0
+
+    companion object {
+        const val BYTES = 192
+
+        internal fun read(b: ByteBuffer): LayerDetail {
+            fun v3(o: Int) = listOf(b.getFloat(o), b.getFloat(o + 4), b.getFloat(o + 8))
+            return LayerDetail(
+                id = b.getLong(0),
+                kind = b.getInt(8),
+                flags = b.getInt(12),
+                startFrame = b.getInt(16),
+                endFrame = b.getInt(20),
+                offsetFrames = b.getInt(24),
+                blendMode = b.getInt(28),
+                position = v3(32),
+                scale = v3(44),
+                rotation = v3(56),
+                anchor = v3(68),
+                opacity = b.getFloat(80),
+                skew = listOf(b.getFloat(84), b.getFloat(88)),
+                animatedMask = b.getInt(92),
+                keyAtPlayheadMask = b.getInt(96),
+                sourceWidth = b.getInt(100),
+                sourceHeight = b.getInt(104),
+                sourceFps = b.getFloat(108),
+                sourceFrames = b.getInt(112),
+                effectCount = b.getInt(116),
+                maskCount = b.getInt(120),
+                localPlayhead = b.getInt(124),
+                parentId = b.getLong(128),
+            )
+        }
     }
 }

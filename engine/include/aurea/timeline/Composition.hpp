@@ -18,6 +18,7 @@
 #include "aurea/timeline/Layer.hpp"
 #include "aurea/core/Handle.hpp"
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -184,6 +185,12 @@ public:
 
     /// Checagem de ciclo antes de permitir aninhar `candidate`.
     [[nodiscard]] bool can_nest(const Composition& candidate) const noexcept;
+
+    /// Cópia profunda para o histórico (ids preservados).
+    [[nodiscard]] std::unique_ptr<Composition> clone() const;
+    /// Volta ao estado de `snapshot`. As revisões AVANÇAM (nunca voltam): os
+    /// caches que dependem delas precisam ver a mudança.
+    void restore_from(const Composition& snapshot);
 
 private:
     CompositionId id_{};

@@ -6,7 +6,6 @@
 #include "aurea/memory/Arena.hpp"
 #include "aurea/memory/MemoryManager.hpp"
 #include "aurea/command/CommandQueue.hpp"
-#include "aurea/command/UndoStack.hpp"
 #include "aurea/jobs/JobSystem.hpp"
 #include "aurea/render/RenderScheduler.hpp"
 
@@ -277,91 +276,6 @@ AUREA_TEST(Command, SizeIsContract) {
     // quebra a suposição em silêncio.
     AUREA_CHECK_EQ(sizeof(Command), static_cast<usize>(128));
     AUREA_CHECK(std::is_trivially_copyable_v<Command>);
-}
-
-// -----------------------------------------------------------------------------
-// UndoStack
-// -----------------------------------------------------------------------------
-AUREA_TEST(Undo, RecordAndPop) {
-    UndoStack undo;
-    Command inv;
-    inv.type = CommandType::LayerDelete;
-    (void)undo.record(inv, nullptr, 0, "criar", 5, 0);
-
-    AUREA_CHECK(undo.can_undo());
-    AUREA_CHECK(!undo.can_redo());
-
-    Command out;
-    const void* payload = nullptr;
-    u32 size = 0;
-    AUREA_CHECK(undo.pop_undo(out, payload, size));
-    AUREA_CHECK_EQ(static_cast<int>(out.type), static_cast<int>(CommandType::LayerDelete));
-}
-
-AUREA_TEST(Undo, MergeCollapsesRepeatedDrag) {
-    // Um arrasto gera dezenas de comandos de posição. Sem fusão, desfazer um
-    // gesto exigiria apertar desfazer 60 vezes — o que o usuário leria como
-    // "o desfazer está quebrado".
-    UndoStack undo;
-    for (int i = 0; i < 50; ++i) {
-        Command inv;
-        inv.type = CommandType::LayerSetPosition;
-        inv.position.layer = LayerId{1, 1};
-        inv.position.x = static_cast<f32>(i);
-        (void)undo.record(inv, nullptr, 0, "mover", 5, 0xABCD);
-    }
-    AUREA_CHECK_EQ(undo.depth(), static_cast<u32>(1));
-
-    Command out;
-    const void* payload = nullptr;
-    u32 size = 0;
-    AUREA_CHECK(undo.pop_undo(out, payload, size));
-    // O inverso guardado é o PRIMEIRO valor (a posição de origem), não o último:
-    // desfazer o arrasto devolve a camada para onde ela estava.
-    AUREA_CHECK_NEAR(out.position.x, 0.0f, 1e-6);
-}
-
-AUREA_TEST(Undo, DifferentMergeKeysDoNotMerge) {
-    UndoStack undo;
-    for (int i = 0; i < 5; ++i) {
-        Command inv;
-        inv.type = CommandType::LayerSetPosition;
-        (void)undo.record(inv, nullptr, 0, "mover", 5,
-                          static_cast<u64>(i + 1));
-    }
-    AUREA_CHECK_EQ(undo.depth(), static_cast<u32>(5));
-}
-
-AUREA_TEST(Undo, PayloadIsStoredAndRetrieved) {
-    UndoStack undo;
-    const char payload[] = "conteudo grande de uma camada apagada";
-    Command inv;
-    inv.type = CommandType::LayerCreate;
-    (void)undo.record(inv, payload, sizeof(payload), "apagar", 6, 0);
-
-    Command out;
-    const void* readBack = nullptr;
-    u32 size = 0;
-    AUREA_CHECK(undo.pop_undo(out, readBack, size));
-    AUREA_CHECK_EQ(size, static_cast<u32>(sizeof(payload)));
-    AUREA_CHECK(readBack != nullptr);
-    AUREA_CHECK_EQ(std::strncmp(static_cast<const char*>(readBack), payload, sizeof(payload)), 0);
-}
-
-AUREA_TEST(Undo, GroupCollapsesCommands) {
-    UndoStack undo;
-    undo.begin_group("gesto", 5);
-    AUREA_CHECK(undo.in_group());
-    for (int i = 0; i < 20; ++i) {
-        Command inv;
-        inv.type = CommandType::LayerReorder;
-        (void)undo.record(inv, nullptr, 0, "reordenar", 9, 0);
-    }
-    undo.end_group();
-    AUREA_CHECK(!undo.in_group());
-    // Todos os 20 entram no mesmo grupo; desfazer precisa devolver o grupo
-    // inteiro como um passo.
-    AUREA_CHECK(undo.depth() >= 1);
 }
 
 // -----------------------------------------------------------------------------

@@ -177,7 +177,10 @@ struct TrackRef {
 struct LayerCreatePayload { LayerId layer; LayerKind kind; };
 struct LayerRefPayload { LayerId layer; };
 struct LayerReorderPayload { LayerId layer; u32 newIndex; };
-struct LayerRangePayload { LayerId layer; FrameIndex start; FrameIndex end; };
+/// Trim/mover no tempo. Com `setOffset`, o deslocamento do conteúdo também
+/// muda: é o trim do INÍCIO, em que o conteúdo fica parado no tempo e só a
+/// borda anda (sem ele, cortar o começo de um vídeo o empurraria).
+struct LayerRangePayload { LayerId layer; FrameIndex start; FrameIndex end; FrameIndex offset; u32 setOffset; };
 struct LayerSplitPayload { LayerId layer; FrameIndex at; LayerId outSecond; };
 struct LayerParentPayload { LayerId layer; LayerId parent; };
 struct LayerBlendPayload { LayerId layer; BlendMode mode; };
@@ -379,6 +382,8 @@ namespace cmd_layout {
     // Payloads maiores.
     inline constexpr usize kRangeStart        = 24;
     inline constexpr usize kRangeEnd          = 32;
+    inline constexpr usize kRangeOffset       = 40;
+    inline constexpr usize kRangeSetOffset    = 48;
     inline constexpr usize kSplitAt           = 24;
     inline constexpr usize kPositionX         = 24;
     inline constexpr usize kPositionY         = 28;
@@ -433,6 +438,8 @@ static_assert(offsetof(Command, layer_create.kind) == cmd_layout::kLayerPayload2
 static_assert(offsetof(Command, layer_reorder.newIndex) == cmd_layout::kLayerPayload2);
 static_assert(offsetof(Command, layer_range.start) == cmd_layout::kRangeStart);
 static_assert(offsetof(Command, layer_range.end) == cmd_layout::kRangeEnd);
+static_assert(offsetof(Command, layer_range.offset) == cmd_layout::kRangeOffset);
+static_assert(offsetof(Command, layer_range.setOffset) == cmd_layout::kRangeSetOffset);
 static_assert(offsetof(Command, layer_split.at) == cmd_layout::kSplitAt);
 static_assert(offsetof(Command, layer_blend.mode) == cmd_layout::kLayerPayload2);
 static_assert(offsetof(Command, layer_visible.visible) == cmd_layout::kLayerPayload2);

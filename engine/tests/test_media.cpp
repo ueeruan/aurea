@@ -7,6 +7,7 @@
 
 #include "aurea/core/Time.hpp"
 #include "aurea/media/DecodedFrameCache.hpp"
+#include "aurea/media/ThumbnailService.hpp"
 #include "aurea/media/VideoSource.hpp"
 #include "aurea/playback/Playback.hpp"
 
@@ -343,4 +344,76 @@ AUREA_TEST(FrameScheduler, CountsSkippedCompositionFrames) {
     AUREA_CHECK_EQ(fs.dropped_total(), static_cast<u32>(2));
     fs.presented(FrameIndex{100}, false);   // seek parado não é perda
     AUREA_CHECK_EQ(fs.dropped_total(), static_cast<u32>(2));
+}
+
+// -----------------------------------------------------------------------------
+// Miniaturas da timeline
+// -----------------------------------------------------------------------------
+AUREA_TEST(Thumbnail, ConvertsWithTheVideoMatrixAndKeepsAspect) {
+    SyntheticConfig cfg;
+    cfg.width = 64;
+    cfg.height = 36;
+    SyntheticDecoder dec(cfg);
+    AUREA_CHECK(dec.seek_to_keyframe(0).ok());
+    FrameRef f;
+    i64 pts = 0;
+    bool eos = false;
+    AUREA_CHECK(dec.next_frame(-1, f, pts, eos).ok());
+    AUREA_CHECK(static_cast<bool>(f));
+
+    ThumbnailService::Image img;
+    AUREA_CHECK(frame_to_thumbnail(*f.get(), 18, img));
+    AUREA_CHECK_EQ(img.height, 18u);
+    AUREA_CHECK_EQ(img.width, 32u);   // 16:9
+    auto px = [&](u32 x, u32 y, u32 c) { return static_cast<int>(img.rgba[(static_cast<usize>(y) * img.width + x) * 4 + c]); };
+    // Quadrantes: vermelho, verde, azul, branco (BT.709 limitado).
+    AUREA_CHECK(px(4, 4, 0) > 240 && px(4, 4, 1) < 16 && px(4, 4, 2) < 16);
+    AUREA_CHECK(px(28, 4, 1) > 240 && px(28, 4, 0) < 16 && px(28, 4, 2) < 16);
+    AUREA_CHECK(px(4, 14, 2) > 240 && px(4, 14, 0) < 16 && px(4, 14, 1) < 16);
+    AUREA_CHECK(px(28, 14, 0) > 240 && px(28, 14, 1) > 240 && px(28, 14, 2) > 240);
+}
+
+AUREA_TEST(Thumbnail, RotatedVideoIsUpright) {
+    SyntheticConfig cfg;
+    cfg.width = 64;
+    cfg.height = 36;
+    cfg.rotation = 90;
+    SyntheticDecoder dec(cfg);
+    AUREA_CHECK(dec.seek_to_keyframe(0).ok());
+    FrameRef f;
+    i64 pts = 0;
+    bool eos = false;
+    AUREA_CHECK(dec.next_frame(-1, f, pts, eos).ok());
+    f->rotation = 90;
+    ThumbnailService::Image img;
+    AUREA_CHECK(frame_to_thumbnail(*f.get(), 32, img));
+    AUREA_CHECK_EQ(img.width, 18u);   // retrato
+    // Girado 90° no sentido horário: o canto superior DIREITO da exibição é o
+    // superior ESQUERDO do quadro codificado (vermelho).
+    const usize tr = (static_cast<usize>(2) * img.width + (img.width - 3)) * 4;
+    AUREA_CHECK(img.rgba[tr] > 240 && img.rgba[tr + 1] < 16);
+}
+
+AUREA_TEST(Thumbnail, ServiceDecodesAsyncAndCaches) {
+    SyntheticConfig cfg;
+    SyntheticFactory factory(cfg);
+    ThumbnailService svc;
+    svc.set_factory(&factory);
+    svc.start();
+    Asset a;
+    a.kind = AssetKind::Video;
+    ThumbnailService::Image img;
+    const u32 gen0 = svc.generation();
+    AUREA_CHECK(!svc.video(7, a, 1'000'000, 24, img));   // primeiro pedido: fila
+    const u64 t0 = monotonic_ns();
+    while (svc.generation() == gen0 && monotonic_ns() - t0 < 2'000'000'000ull) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    AUREA_CHECK(svc.video(7, a, 1'000'000, 24, img));
+    AUREA_CHECK_EQ(img.height, 24u);
+    AUREA_CHECK(img.width > 0);
+    // Mesmo balde de 250 ms: vem do cache, sem abrir decoder novo.
+    AUREA_CHECK(svc.video(7, a, 1'100'000, 24, img));
+    AUREA_CHECK_EQ(factory.opened, 1u);
+    svc.stop();
 }

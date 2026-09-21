@@ -554,3 +554,168 @@ AUREA_TEST(Engine, MaskOperationsOnMissingMaskAreRefused) {
     AUREA_CHECK(!e.apply_command(maskOp).ok());
     e.shutdown();
 }
+
+// -----------------------------------------------------------------------------
+// Histórico (desfazer/refazer por snapshot da composição)
+// -----------------------------------------------------------------------------
+namespace {
+
+LayerId first_layer(Engine& e) {
+    const Composition* c = e.project()->timeline().composition(e.project()->timeline().current());
+    LayerId id{};
+    c->layers().for_each([&](LayerId lid, const Layer&) { if (!id.valid()) id = lid; });
+    return id;
+}
+
+const Layer* layer_of(Engine& e, LayerId id) {
+    return e.project()->timeline().composition(e.project()->timeline().current())->layer(id);
+}
+
+Command position_cmd(LayerId id, f32 x, f32 y) {
+    Command c;
+    c.type = CommandType::LayerSetPosition;
+    c.position.layer = id;
+    c.position.x = x;
+    c.position.y = y;
+    return c;
+}
+
+} // namespace
+
+AUREA_TEST(History, UndoAndRedoRestoreTheExactValue) {
+    Engine e;
+    AUREA_CHECK(e.initialize(headless_config()).ok());
+    AUREA_CHECK(e.new_project(1280, 720, 30.0, nullptr).ok());
+    Command create;
+    create.type = CommandType::LayerCreate;
+    create.layer_create.kind = LayerKind::Shape;
+    AUREA_CHECK(e.apply_command(create).ok());
+    const LayerId id = first_layer(e);
+    AUREA_CHECK(id.valid());
+
+    AUREA_CHECK(e.apply_command(position_cmd(id, 100, 200)).ok());
+    AUREA_CHECK(e.apply_command(position_cmd(id, 300, 400)).ok());
+    AUREA_CHECK(e.read_status().canUndo);
+
+    Command undo;
+    undo.type = CommandType::Undo;
+    AUREA_CHECK(e.apply_command(undo).ok());
+    AUREA_CHECK_NEAR(layer_of(e, id)->transform.position.x, 100.0f, 1e-6f);
+    AUREA_CHECK(e.read_status().canRedo);
+
+    Command redo;
+    redo.type = CommandType::Redo;
+    AUREA_CHECK(e.apply_command(redo).ok());
+    AUREA_CHECK_NEAR(layer_of(e, id)->transform.position.x, 300.0f, 1e-6f);
+
+    // Desfaz tudo, inclusive a criação: a layer some; refazer a devolve com o MESMO id.
+    AUREA_CHECK(e.apply_command(undo).ok());
+    AUREA_CHECK(e.apply_command(undo).ok());
+    AUREA_CHECK(e.apply_command(undo).ok());
+    AUREA_CHECK(layer_of(e, id) == nullptr);
+    AUREA_CHECK(!e.read_status().canUndo);
+    AUREA_CHECK(e.apply_command(redo).ok());
+    AUREA_CHECK(layer_of(e, id) != nullptr);
+    e.shutdown();
+}
+
+AUREA_TEST(History, AGestureGroupUndoesAtOnce) {
+    Engine e;
+    AUREA_CHECK(e.initialize(headless_config()).ok());
+    AUREA_CHECK(e.new_project(1280, 720, 30.0, nullptr).ok());
+    Command create;
+    create.type = CommandType::LayerCreate;
+    create.layer_create.kind = LayerKind::Shape;
+    AUREA_CHECK(e.apply_command(create).ok());
+    const LayerId id = first_layer(e);
+    AUREA_CHECK(e.apply_command(position_cmd(id, 10, 10)).ok());
+    const u32 depthBefore = e.read_status().undoDepth;
+
+    Command begin;
+    begin.type = CommandType::UndoBeginGroup;
+    AUREA_CHECK(e.apply_command(begin, "arrastar").ok());
+    for (int i = 1; i <= 60; ++i) AUREA_CHECK(e.apply_command(position_cmd(id, 10.0f + i, 10.0f)).ok());
+    Command end;
+    end.type = CommandType::UndoEndGroup;
+    AUREA_CHECK(e.apply_command(end).ok());
+    AUREA_CHECK_EQ(e.read_status().undoDepth, depthBefore + 1);
+
+    Command undo;
+    undo.type = CommandType::Undo;
+    AUREA_CHECK(e.apply_command(undo).ok());
+    AUREA_CHECK_NEAR(layer_of(e, id)->transform.position.x, 10.0f, 1e-6f);
+    e.shutdown();
+}
+
+AUREA_TEST(History, SplitAndEffectAreUndoable) {
+    Engine e;
+    AUREA_CHECK(e.initialize(headless_config()).ok());
+    AUREA_CHECK(e.new_project(1280, 720, 30.0, nullptr).ok());
+    Command create;
+    create.type = CommandType::LayerCreate;
+    create.layer_create.kind = LayerKind::Shape;
+    AUREA_CHECK(e.apply_command(create).ok());
+    const LayerId id = first_layer(e);
+    Command range;
+    range.type = CommandType::LayerSetTimeRange;
+    range.layer_range.layer = id;
+    range.layer_range.start = FrameIndex{0};
+    range.layer_range.end = FrameIndex{90};
+    AUREA_CHECK(e.apply_command(range).ok());
+
+    Command split;
+    split.type = CommandType::LayerSplit;
+    split.layer_split.layer = id;
+    split.layer_split.at = FrameIndex{30};
+    AUREA_CHECK(e.apply_command(split).ok());
+    const Composition* c = e.project()->timeline().composition(e.project()->timeline().current());
+    AUREA_CHECK_EQ(c->layers().count(), 2u);
+    AUREA_CHECK_EQ(layer_of(e, id)->end.value, static_cast<i64>(30));
+
+    Command fx;
+    fx.type = CommandType::EffectAdd;
+    fx.effect_add.layer = id;
+    fx.effect_add.effectType = effect_type_id(effect_keys::kGaussianBlur);
+    fx.effect_add.index = kInvalidIndex;
+    AUREA_CHECK(e.apply_command(fx).ok());
+    AUREA_CHECK_EQ(layer_of(e, id)->effects.size(), static_cast<usize>(1));
+
+    Command undo;
+    undo.type = CommandType::Undo;
+    AUREA_CHECK(e.apply_command(undo).ok());
+    AUREA_CHECK_EQ(layer_of(e, id)->effects.size(), static_cast<usize>(0));
+    AUREA_CHECK(e.apply_command(undo).ok());
+    c = e.project()->timeline().composition(e.project()->timeline().current());
+    AUREA_CHECK_EQ(c->layers().count(), 1u);
+    AUREA_CHECK_EQ(layer_of(e, id)->end.value, static_cast<i64>(90));
+    e.shutdown();
+}
+
+AUREA_TEST(History, TrimStartKeepsContentWithOffset) {
+    Engine e;
+    AUREA_CHECK(e.initialize(headless_config()).ok());
+    AUREA_CHECK(e.new_project(1280, 720, 30.0, nullptr).ok());
+    Command create;
+    create.type = CommandType::LayerCreate;
+    create.layer_create.kind = LayerKind::Shape;
+    AUREA_CHECK(e.apply_command(create).ok());
+    const LayerId id = first_layer(e);
+    Command trim;
+    trim.type = CommandType::LayerSetTimeRange;
+    trim.layer_range.layer = id;
+    trim.layer_range.start = FrameIndex{12};
+    trim.layer_range.end = FrameIndex{60};
+    trim.layer_range.offset = FrameIndex{12};
+    trim.layer_range.setOffset = 1;
+    AUREA_CHECK(e.apply_command(trim).ok());
+    const Layer* l = layer_of(e, id);
+    AUREA_CHECK_EQ(l->offset.value, static_cast<i64>(12));
+    // O conteúdo não andou: o frame local no instante 20 continua 20.
+    AUREA_CHECK_EQ(l->local_time(FrameIndex{20}).value, static_cast<i64>(20));
+
+    bridge::LayerDetailPOD d;
+    AUREA_CHECK(e.query_layer_detail(id.pack(), d));
+    AUREA_CHECK_EQ(d.startFrame, 12);
+    AUREA_CHECK_EQ(d.offsetFrames, 12);
+    e.shutdown();
+}

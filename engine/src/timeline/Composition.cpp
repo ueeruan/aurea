@@ -1,4 +1,6 @@
 #include "aurea/timeline/Composition.hpp"
+
+#include <algorithm>
 #include "aurea/core/Log.hpp"
 
 #if !defined(NDEBUG)
@@ -174,6 +176,54 @@ bool Composition::can_nest(const Composition& candidate) const noexcept {
     if (candidate.nestingDepth_ >= kMaxNestingDepth) return false;
     if (nestingDepth_ + candidate.nestingDepth_ + 1 > kMaxNestingDepth) return false;
     return true;
+}
+
+std::unique_ptr<Composition> Composition::clone() const {
+    auto c = std::make_unique<Composition>(name_);
+    c->id_ = id_;
+    c->width_ = width_;
+    c->height_ = height_;
+    c->fps_ = fps_;
+    c->duration_ = duration_;
+    c->background_ = background_;
+    c->transparent_ = transparent_;
+    c->layers_.copy_from(layers_);
+    c->order_ = order_;
+    c->activeCamera_ = activeCamera_;
+    c->shadows_ = shadows_;
+    c->environment_ = environment_;
+    c->postProcess_ = postProcess_;
+    c->motionBlur_ = motionBlur_;
+    c->scene_ = scene_;
+    c->revision_ = revision_;
+    c->formatRevision_ = formatRevision_;
+    c->nestingDepth_ = nestingDepth_;
+    return c;
+}
+
+void Composition::restore_from(const Composition& snapshot) {
+    const bool formatChanged = snapshot.width_ != width_ || snapshot.height_ != height_ || snapshot.fps_ != fps_;
+    const u64 revision = std::max(revision_, snapshot.revision_) + 1;
+    const u64 formatRevision = std::max(formatRevision_, snapshot.formatRevision_) + (formatChanged ? 1 : 0);
+    name_ = snapshot.name_;
+    width_ = snapshot.width_;
+    height_ = snapshot.height_;
+    fps_ = snapshot.fps_;
+    duration_ = snapshot.duration_;
+    background_ = snapshot.background_;
+    transparent_ = snapshot.transparent_;
+    layers_.copy_from(snapshot.layers_);
+    order_ = snapshot.order_;
+    activeCamera_ = snapshot.activeCamera_;
+    shadows_ = snapshot.shadows_;
+    environment_ = snapshot.environment_;
+    postProcess_ = snapshot.postProcess_;
+    motionBlur_ = snapshot.motionBlur_;
+    scene_ = snapshot.scene_;
+    nestingDepth_ = snapshot.nestingDepth_;
+    revision_ = revision;
+    formatRevision_ = formatRevision;
+    rebuild_draw_order();
 }
 
 } // namespace aurea

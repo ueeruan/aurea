@@ -890,3 +890,35 @@ AUREA_TEST(Gpu, EngineImportsSeeksAndScrubsARealVideoPipeline) {
 }
 
 #endif // AUREA_TEST_VULKAN
+
+AUREA_TEST(Gpu, CaptureFrameGivesSrgbThumbnail) {
+    Gpu& g = gpu();
+    if (!g.ok) return;
+    SyntheticConfig cfg;
+    cfg.width = 64;
+    cfg.height = 36;
+    SyntheticFactory factory(cfg);
+    Engine e;
+    EngineConfig ec;
+    ec.backend = new vk::Backend();
+    ec.backendConfig.enableValidation = false;
+    ec.mediaFactory = &factory;
+    ec.disableAutosave = true;
+    ec.workerCount = 2;
+    AUREA_CHECK(e.initialize(ec).ok());
+    AUREA_CHECK(e.new_project(64, 36, 30.0, nullptr).ok());
+    VideoImport vi;
+    vi.sourcePath = "sintetico";
+    vi.displayName = "quadrantes";
+    AUREA_CHECK(e.import_video(vi).ok());
+    std::vector<u8> rgba;
+    u32 w = 0, h = 0;
+    AUREA_CHECK(e.capture_frame_rgba(32, rgba, w, h).ok());
+    AUREA_CHECK_EQ(w, 32u);
+    AUREA_CHECK_EQ(h, 18u);
+    auto px = [&](u32 x, u32 y, u32 c) { return static_cast<int>(rgba[(static_cast<usize>(y) * w + x) * 4 + c]); };
+    AUREA_CHECK(px(4, 4, 0) > 235 && px(4, 4, 1) < 20 && px(4, 4, 2) < 20);     // vermelho
+    AUREA_CHECK(px(28, 14, 0) > 235 && px(28, 14, 1) > 235 && px(28, 14, 2) > 235);   // branco
+    AUREA_CHECK_EQ(px(16, 9, 3), 255);
+    e.shutdown();
+}

@@ -743,13 +743,14 @@ bool MediaCodecFactory::probe(const char* sourcePath, MediaProbe& out) {
 }
 
 std::unique_ptr<VideoDecoderBackend> MediaCodecFactory::open_video(const Asset& asset, MediaPriority priority) {
-    (void)priority;
+    // Miniatura: planos na CPU sempre (a conversão para RGBA pequeno é na CPU).
     SourceFd fd;
     if (!open_source(asset.sourcePath.c_str(), opener_, openerCtx_, fd)) {
         AUREA_LOG_ERROR("midia do asset '%s' inacessivel", asset.name.c_str());
         return nullptr;
     }
-    auto decoder = std::make_unique<MediaCodecDecoder>(std::move(fd), zeroCopy_.load());
+    const bool zeroCopy = priority != MediaPriority::Thumbnail && zeroCopy_.load();
+    auto decoder = std::make_unique<MediaCodecDecoder>(std::move(fd), zeroCopy);
     if (const Status s = decoder->open(); !s.ok()) {
         AUREA_LOG_ERROR("decoder nao abriu: %s", s.message().data());
         return nullptr;

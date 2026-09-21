@@ -156,6 +156,16 @@ public:
         count_    = 0;
     }
 
+    /// Cópia profunda EXPLÍCITA (histórico de desfazer). A cópia implícita é
+    /// proibida de propósito: copiar uma tabela de layers sem querer custaria
+    /// caro e passaria despercebido. Gerações e lista livre vêm juntas, então
+    /// os handles antigos continuam válidos na cópia.
+    void copy_from(const SlotTable& other) {
+        slots_ = other.slots_;
+        freeHead_ = other.freeHead_;
+        count_ = other.count_;
+    }
+
 private:
     struct Slot {
         T   object{};

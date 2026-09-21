@@ -55,7 +55,7 @@ set(AUREA_CORE_SOURCES
     src/core/Thread.cpp
     src/memory/MemoryManager.cpp
     src/jobs/JobSystem.cpp
-    src/command/UndoStack.cpp
+    src/command/History.cpp
     src/platform/DeviceCapabilities.cpp
     src/animation/Curve.cpp
     src/animation/Track.cpp
@@ -78,6 +78,7 @@ set(AUREA_CORE_SOURCES
     src/media/DecodedFrameCache.cpp
     src/media/VideoSource.cpp
     src/media/MediaManager.cpp
+    src/media/ThumbnailService.cpp
     src/playback/Playback.cpp
     src/engine/Engine.cpp
     ${AUREA_SHADER_SOURCES}

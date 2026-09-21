@@ -26,13 +26,14 @@
 
 #include "aurea/bridge/BridgePods.hpp"
 #include "aurea/command/CommandQueue.hpp"
-#include "aurea/command/UndoStack.hpp"
+#include "aurea/command/History.hpp"
 #include "aurea/core/Result.hpp"
 #include "aurea/core/Time.hpp"
 #include "aurea/core/Types.hpp"
 #include "aurea/effects/EffectRegistry.hpp"
 #include "aurea/jobs/JobSystem.hpp"
 #include "aurea/media/MediaManager.hpp"
+#include "aurea/media/ThumbnailService.hpp"
 #include "aurea/memory/MemoryManager.hpp"
 #include "aurea/platform/DeviceCapabilities.hpp"
 #include "aurea/playback/Playback.hpp"
@@ -84,6 +85,8 @@ struct EngineStatus {
 
     u32  layerCount = 0;
     u32  selectedCount = 0;
+    u32  thumbnailGeneration = 0;
+    u32  modelRevision = 0;
 
     bool canUndo = false;
     bool canRedo = false;
@@ -224,11 +227,20 @@ public:
 
     /// Um frame completo: drena, avança o playback, prepara, renderiza e
     /// apresenta. Chamado pela thread de render (ou pelos testes).
-    [[nodiscard]] Status render_frame() noexcept;
+    ///
+    /// `onlyIfChanged` (thread de render): não redesenha quando nada mudou —
+    /// mesmo frame do playhead, sem comando novo, sem frame de vídeo que
+    /// faltava. Um vídeo de 30 fps num painel de 120 Hz redesenha 30 vezes
+    /// por segundo, não 120.
+    [[nodiscard]] Status render_frame(bool onlyIfChanged = false) noexcept;
 
     /// Renderiza o instante atual numa textura (export, testes visuais), em
     /// resolução cheia, sem superfície. Espera a GPU terminar.
     [[nodiscard]] Status render_offscreen(TextureHandle target, u32 width, u32 height) noexcept;
+
+    /// O frame do playhead em RGBA8 sRGB (alfa reto), com o lado maior em
+    /// `maxDim`. Miniatura do projeto na Home. Síncrono (espera a GPU).
+    [[nodiscard]] Status capture_frame_rgba(u32 maxDim, std::vector<u8>& out, u32& width, u32& height) noexcept;
 
     [[nodiscard]] EngineStatus read_status() noexcept;
     [[nodiscard]] EngineTelemetry read_telemetry() noexcept;
@@ -244,6 +256,15 @@ public:
     u32 query_layers(bridge::LayerRow* out, u32 capacity,
                      char* outNameBlob, u32 nameBlobCapacity) noexcept;
     u32 query_keyframes(u64 layerId, bridge::KeyframeRow* out, u32 capacity) noexcept;
+    /// Miniatura da layer no instante `timelineFrame` (RGBA8 sRGB, `height`
+    /// linhas). Devolve os bytes escritos, ou 0 se ainda não está pronta (o
+    /// pedido fica na fila; `thumbnailGeneration` no status avisa quando
+    /// chegar). `outWidth` recebe a largura.
+    u32 query_thumbnail(u64 layerId, i32 timelineFrame, u32 height, u8* out, u32 capacity,
+                        u32* outWidth) noexcept;
+
+    /// Detalhe de uma camada no playhead. false = camada não existe.
+    bool query_layer_detail(u64 layerId, bridge::LayerDetailPOD& out) noexcept;
     u32 query_curve(u64 layerId, u32 property, i32 startFrame, i32 endFrame,
                     f32* outValues, u32 sampleCount) noexcept;
 
@@ -290,7 +311,7 @@ public:
     [[nodiscard]] const DeviceCapabilities& caps() const noexcept { return caps_; }
     [[nodiscard]] JobSystem& jobs() noexcept { return jobs_; }
     [[nodiscard]] MemoryManager& memory() noexcept { return memory_; }
-    [[nodiscard]] UndoStack& undo() noexcept { return undo_; }
+    [[nodiscard]] History& history() noexcept { return history_; }
     [[nodiscard]] EffectRegistry& effects() noexcept { return effectRegistry_; }
     [[nodiscard]] GPUBackend* gpu() noexcept { return gpu_.get(); }
     [[nodiscard]] Renderer& renderer() noexcept { return renderer_; }
@@ -309,6 +330,12 @@ public:
 private:
     [[nodiscard]] Status apply_command_internal(const Command& cmd, const char* stringData,
                                                 bool recordUndo) noexcept;
+    /// Snapshot "antes" no histórico, se o comando altera a composição.
+    void record_history_locked(CommandType type) noexcept;
+    [[nodiscard]] static bool mutates_model(CommandType type) noexcept;
+    /// Depois de desfazer/refazer: seleção sem layers mortas, fontes de mídia
+    /// órfãs fechadas, playback no tamanho novo.
+    void after_history_restore_locked() noexcept;
     void drain_commands_locked() noexcept;
     [[nodiscard]] Composition* current_composition() noexcept;
     [[nodiscard]] Status recover_device_locked() noexcept;
@@ -329,13 +356,14 @@ private:
     DeviceCapabilities caps_{};
     JobSystem          jobs_{};
     MemoryManager      memory_{};
-    UndoStack          undo_{};
+    History            history_{};
     EffectRegistry     effectRegistry_{};
     AdaptiveResolutionController* adaptive_ = nullptr;
 
     std::unique_ptr<GPUBackend> gpu_;
     Renderer           renderer_;
     MediaManager       media_;
+    ThumbnailService   thumbs_;
     PlaybackController playback_;
     FrameScheduler     frameScheduler_;
     FrameSnapshot      snapshot_;
@@ -345,6 +373,7 @@ private:
     std::unordered_map<u64, ImagePixels> images_;   ///< por AssetId empacotado
 
     std::vector<u64> selection_;
+    std::atomic<u32> modelRevision_{1};   ///< a UI relê listas quando muda
 
     // --- Sincronização --------------------------------------------------------
     /// Protege projeto, timeline, playback, seleção e imagens.
@@ -358,6 +387,14 @@ private:
     std::mutex wakeMutex_;
     std::condition_variable wakeCv_;
     bool wakeFlag_ = false;
+    // Ritmo do preview pelo conteúdo (render_frame(onlyIfChanged)).
+    std::atomic<bool> forceRender_{true};     ///< a UI mudou algo / superfície nova
+    std::atomic<u64>  mediaReadyGen_{0};      ///< frames novos do decoder
+    i64  lastRenderedFrame_ = -1;
+    u64  lastMediaGen_ = 0;
+    bool lastIncomplete_ = true;              ///< último frame tinha vídeo faltando/aproximado
+    bool lastSkipped_ = false;
+    u64  nextFrameDueNs_ = 0;                 ///< quando o playhead muda de frame (tocando)
     std::atomic<bool> renderRunning_{false};
     std::atomic<bool> playingHint_{false};
     std::atomic<bool> surfaceAttached_{false};

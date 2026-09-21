@@ -190,6 +190,16 @@ class AureaEngine private constructor() {
     fun queryEffectParams(layer: Long, effectId: Int, rows: ByteBuffer, capacity: Int, blob: ByteBuffer): Int =
         nativeQueryEffectParams(nativeHandle, layer, effectId, rows, capacity, blob)
 
+    fun queryLayerDetail(layer: Long, out: ByteBuffer): Boolean = nativeQueryLayerDetail(nativeHandle, layer, out)
+
+    /** RGBA8 da miniatura em `out`; 0 = ainda na fila (ver `thumbnailGeneration`). */
+    fun queryThumbnail(layer: Long, frame: Int, height: Int, out: ByteBuffer, outWidth: IntArray): Int =
+        nativeQueryThumbnail(nativeHandle, layer, frame, height, out, outWidth)
+
+    /** Frame do playhead em RGBA8 sRGB (lado maior = `maxDim`); `outSize` recebe largura/altura. */
+    fun captureFrame(maxDim: Int, out: ByteBuffer, outSize: IntArray): Int =
+        nativeCaptureFrame(nativeHandle, maxDim, out, outSize)
+
     fun setSelection(layers: LongArray) = nativeSetSelection(nativeHandle, layers)
     fun clearSelection() = nativeClearSelection(nativeHandle)
 
@@ -249,6 +259,11 @@ class AureaEngine private constructor() {
     private external fun nativeQueryEffectParams(
         handle: Long, layer: Long, effectId: Int, rows: ByteBuffer, capacity: Int, blob: ByteBuffer,
     ): Int
+    private external fun nativeQueryLayerDetail(handle: Long, layer: Long, out: ByteBuffer): Boolean
+    private external fun nativeQueryThumbnail(
+        handle: Long, layer: Long, frame: Int, height: Int, out: ByteBuffer, outWidth: IntArray,
+    ): Int
+    private external fun nativeCaptureFrame(handle: Long, maxDim: Int, out: ByteBuffer, outSize: IntArray): Int
     private external fun nativeSetSelection(handle: Long, layers: LongArray)
     private external fun nativeClearSelection(handle: Long)
     private external fun nativeImportVideo(handle: Long, source: String, name: String): Long

@@ -33,13 +33,14 @@ void main() {
       expect(find.byKey(ValueKey('fundo-$i')), findsOneWidget);
     }
     expect(find.byKey(const ValueKey('criar-projeto')), findsOneWidget);
-    // O nome sugerido e a ficha viva do padrao dos Ajustes (16:9, 1080, 30).
+    // O nome sugerido e a ficha viva do padrao dos Ajustes nunca mexidos
+    // (9:16 — app de celular —, 1080, 30).
     expect(find.text('Projeto 1'), findsOneWidget);
-    expect(find.text('1920 × 1080 · 30 fps'), findsOneWidget);
-    // A ficha muda com o toque.
-    await tester.tap(find.byKey(const ValueKey('formato-9:16')));
-    await tester.pump();
     expect(find.text('1080 × 1920 · 30 fps'), findsOneWidget);
+    // A ficha muda com o toque.
+    await tester.tap(find.byKey(const ValueKey('formato-16:9')));
+    await tester.pump();
+    expect(find.text('1920 × 1080 · 30 fps'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

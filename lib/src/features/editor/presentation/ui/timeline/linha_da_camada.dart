@@ -53,7 +53,8 @@ enum _Arrasto { mover, trimInicio, trimFim }
 ///   * arrastar o losango .... move a marca (ima no cabecote)
 ///   * toque longo no losango  editor de curva
 ///   * cabecalho: toque escolhe (na escolhida, abre as propriedades);
-///     toque longo + arrastar, ou a alca de 35, reordena
+///     toque longo + arrastar reordena; na escolhida, a miniatura vira o
+///     ≡ e o arrasto vertical do cabecalho reordena direto
 class LinhaDaCamada extends ConsumerStatefulWidget {
   const LinhaDaCamada({super.key, required this.layerId});
 
@@ -686,6 +687,7 @@ class _LinhaDaCamadaState extends ConsumerState<LinhaDaCamada>
       aoComecarReordenar: _comecarReordenar,
       aoMoverReordenar: _moverReordenar,
       aoTerminarReordenar: _terminarReordenar,
+      reordenavel: escolhida && !travada && !lote,
     );
 
     return SizedBox(
@@ -753,6 +755,13 @@ class _LinhaDaCamadaState extends ConsumerState<LinhaDaCamada>
                   key: ValueKey('alcas-$_id'),
                   behavior: HitTestBehavior.opaque,
                   dragStartBehavior: DragStartBehavior.down,
+                  // Com a ponta colada na borda a zona entra no clipe: o
+                  // toque ali continua sendo um toque no clipe.
+                  onTapUp: (d) {
+                    if (GeometriaDaLinha.noCorpo(e, camada, d.localPosition)) {
+                      _tocarNoClipe();
+                    }
+                  },
                   onHorizontalDragStart: _comecarTrim,
                   onHorizontalDragUpdate: _seguirArrasto,
                   onHorizontalDragEnd: (_) => _terminarArrasto(),
@@ -782,20 +791,6 @@ class _LinhaDaCamadaState extends ConsumerState<LinhaDaCamada>
                   onHorizontalDragCancel: _terminarLosango,
                   child: const SizedBox.expand(),
                 ),
-              ),
-            ),
-          if (escolhida && !travada)
-            Positioned(
-              key: const ValueKey('alca-reordenar'),
-              right: 0,
-              top: 0,
-              bottom: 0,
-              width: AureaDims.alcaDeReordenar,
-              child: AlcaDeReordenar(
-                layerId: _id,
-                aoComecar: _comecarReordenar,
-                aoMover: _moverReordenar,
-                aoTerminar: _terminarReordenar,
               ),
             ),
           Positioned(

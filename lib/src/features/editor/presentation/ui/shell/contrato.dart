@@ -176,10 +176,12 @@ List<Ferramenta> ferramentasDa(Layer? camada, {AoAcionarFerramenta? aoAcionar}) 
     CupertinoIcons.circle_lefthalf_fill,
     'Máscara',
   );
+  // ROTULO CURTO E INTEIRO: "Borda e sombra" saia "Borda e som…" nos 64
+  // do botao. O painel continua sendo o de borda E sombra.
   final borda = painel(
     PainelId.bordaSombra,
     CupertinoIcons.square_on_square,
-    'Borda e sombra',
+    'Borda',
   );
   final propriedades = painel(
     PainelId.propriedades,

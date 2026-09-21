@@ -203,8 +203,13 @@ void main() {
       );
       await tester.tapAt(pontoNoTempo(tester, b, frente, 0.5));
       await tester.pumpAndSettle();
+      // A ALCA MORA NO CABECALHO (a miniatura vira o ≡), fora da area dos
+      // clipes — la ela cobria a alca de trim do fim.
       final alca = find.byKey(ValueKey('alca-reordenar-$frente'));
-      expect(tester.getSize(alca).width, AureaDims.alcaDeReordenar);
+      expect(
+        tester.getRect(alca).right,
+        lessThanOrEqualTo(AureaDims.cabecalhoDaCamada),
+      );
       // Duas linhas para baixo: a da frente vai para o fundo da pilha.
       final g = await tester.startGesture(tester.getCenter(alca));
       await g.moveBy(const Offset(0, 20));

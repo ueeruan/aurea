@@ -164,10 +164,17 @@ void main() {
       expect(find.byKey(const ValueKey('ferramenta-forma')), findsNothing);
 
       // Toque no vazio da timeline solta a selecao e a barra some. O
-      // vazio fica A DIREITA do fim do clipe: a esquerda agora mora o
-      // cabecalho de 70 dp da camada (olho, miniatura), que seleciona.
+      // vazio fica ENTRE o cabecalho de 70 dp (que seleciona) e a alca do
+      // comeco do clipe. A ponta direita da linha e o proprio clipe (ele
+      // passa da borda): la morava a alca de reordenar, que engolia o
+      // toque — hoje ela mora no cabecalho.
       final linha = tester.getRect(find.byKey(ValueKey('linha-${texto.id}')));
-      await tester.tapAt(Offset(linha.right - 6, linha.center.dy));
+      final vista = tester
+          .state<TimelineDoEditorState>(find.byType(TimelineDoEditor))
+          .estado;
+      final x0 = vista.xDoTempo(texto.startTime.inMicroseconds);
+      expect(x0 - 30, greaterThan(70 + 20), reason: 'sem vazio a esquerda');
+      await tester.tapAt(Offset(linha.left + (70 + x0 - 30) / 2, linha.center.dy));
       await tester.pumpAndSettle();
       expect(c.read(selectedLayerProvider), isNull);
       expect(find.byKey(const ValueKey('barra-contextual')), findsNothing);

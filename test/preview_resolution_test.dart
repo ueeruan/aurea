@@ -11,7 +11,7 @@ void main() {
     expect(PreviewResolution.values.map((v) => v.scale), [
       1.0, .75, .5, .33, .25, .125,
     ]);
-    expect(PreviewResolution.values.first.label, 'Full');
+    expect(PreviewResolution.values.first.label, '100%');
   });
 
   test('a escala so desce', () {

@@ -66,10 +66,12 @@ export 'linhas.dart' show camadasExpandidasProvider;
 //
 //  3. CABECALHO (70, por cima da ponta esquerda de cada linha): toque
 //     escolhe (na ja escolhida e animada, abre as propriedades); toque no
-//     olho (44) mostra/oculta; toque LONGO + arrastar reordena, e a alca de
-//     35 da linha escolhida reordena direto no arrasto vertical. O toque
-//     longo vence a raiz porque ela so aceita com movimento; mexer antes
-//     dos 500 ms e rolar.
+//     olho (44) mostra/oculta; toque LONGO + arrastar reordena, e na linha
+//     escolhida (a miniatura vira o ≡) o arrasto vertical do cabecalho
+//     reordena direto. O toque longo vence a raiz porque ela so aceita com
+//     movimento; mexer antes dos 500 ms e rolar. NADA de reordenar mora na
+//     area dos clipes: a alca que morava na ponta direita cobria a alca de
+//     trim do fim do clipe.
 //
 // Toda edicao de um gesto e UM passo de desfazer (`SessaoDeGesto`), e cada
 // passo marca a interacao (o palco desenha em rascunho enquanto o dedo
@@ -458,11 +460,30 @@ class TimelineDoEditorState extends ConsumerState<TimelineDoEditor>
                         ReguaDaTimeline(estado: estado),
                         Expanded(
                           child: linhas.isEmpty
-                              ? Center(
-                                  child: AppText(
-                                    'Toque em + para adicionar a primeira camada',
-                                    style: AureaEstilos.propriedade,
-                                  ),
+                              // A DICA NAO CRUZA O CABECOTE: ele e fixo no
+                              // centro e cortava a frase ao meio. Ela mora
+                              // na metade da direita, acima do "+".
+                              ? Row(
+                                  children: [
+                                    const Spacer(),
+                                    Expanded(
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: AureaDims.e15,
+                                        ),
+                                        child: Center(
+                                          child: AppText(
+                                            'Toque em + para adicionar a primeira camada',
+                                            key: const ValueKey(
+                                              'timeline-dica-vazia',
+                                            ),
+                                            textAlign: TextAlign.center,
+                                            style: AureaEstilos.propriedade,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 )
                               : ListView.builder(
                                   key: _chaveDaLista,

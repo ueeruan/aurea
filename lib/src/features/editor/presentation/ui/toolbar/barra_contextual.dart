@@ -15,7 +15,8 @@ import '../shell/contrato.dart';
 /// ferramentas: espremidas a esquerda elas deixariam meia barra vazia e
 /// o polegar teria de ir buscar). QUANDO NAO CABE, cada um fica com 64 e
 /// a fileira rola de lado — cortar uma ferramenta seria esconder uma
-/// funcao. So o "Soltar" do lote nao rola: fica preso no fim.
+/// funcao. NUNCA ESPREME abaixo de 64: a 50 o rotulo virava "Transfor…".
+/// So o "Soltar" do lote nao rola: fica preso no fim.
 ///
 /// Chaves: [chave] (padrao `barra-contextual`) e `ferramenta-<id>`.
 class BarraContextual extends StatelessWidget {
@@ -51,10 +52,10 @@ class BarraContextual extends StatelessWidget {
   /// o lugar de uma ferramenta num aparelho de 360.
   static const _presas = {AcaoDoLote.soltar};
 
-  /// ATE ONDE UM BOTAO ENCOLHE para a fileira caber sem rolar: 48 ainda
-  /// leva o rotulo de 10 inteiro ("Vincular") e passa do toque minimo. E o
-  /// que deixa a barra do lote inteira num aparelho de 360.
-  static const _larguraMinima = 48.0;
+  /// ATE ONDE UM BOTAO ENCOLHE para a fileira caber sem rolar: os 64 do
+  /// botao. Encolher mais cortava o rotulo ("Transfor…", "Borda e som…")
+  /// — rolar e melhor que adivinhar.
+  static const _larguraMinima = AureaDims.botaoDeFerramenta;
 
   @override
   Widget build(BuildContext context) {

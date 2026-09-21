@@ -9,7 +9,7 @@ import '../../editor/domain/modo_de_transcricao.dart';
 /// Preferencias do app, persistidas em SharedPreferences.
 class AppSettings {
   const AppSettings({
-    this.defaultAspectKey = '16:9',
+    this.defaultAspectKey = padraoDaProporcao,
     this.defaultFps = 30,
     this.defaultResolution = 1080,
     this.defaultLayerSeconds = 3,
@@ -38,6 +38,11 @@ class AppSettings {
       AureaPaleta.resolver(themeMode, sistema);
 
   bool get temaSegueOSistema => themeMode == AureaPaleta.modoSistema;
+
+  /// A PROPORCAO DE QUEM NUNCA MEXEU NOS AJUSTES: 9:16, o video de
+  /// celular. Quem escolheu outra nos Ajustes continua com a sua (ela esta
+  /// gravada; so a falta de escolha cai aqui).
+  static const padraoDaProporcao = '9:16';
 
   /// Valores padrao usados ao criar um projeto novo.
   final String defaultAspectKey;
@@ -89,7 +94,8 @@ class SettingsController extends Notifier<AppSettings> {
   AppSettings build() {
     final prefs = ref.read(sharedPreferencesProvider);
     return AppSettings(
-      defaultAspectKey: prefs.getString(_kAspect) ?? '16:9',
+      defaultAspectKey:
+          prefs.getString(_kAspect) ?? AppSettings.padraoDaProporcao,
       defaultFps: prefs.getInt(_kFps) ?? 30,
       defaultResolution: prefs.getInt(_kResolution) ?? 1080,
       defaultLayerSeconds: (prefs.getInt(_kLayerSeconds) ?? 3).clamp(1, 30),

@@ -10,6 +10,7 @@ import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../../../../../core/ds/ds.dart';
 import '../../../../../core/storage/prefs.dart';
 import '../../../../media/application/gallery_service.dart';
 import '../../../../media/application/media_import_service.dart';
@@ -214,6 +215,7 @@ class _GalleryPanelState extends ConsumerState<GalleryPanel>
     Duration duration, {
     bool persisted = false,
     GalleryAsset? asset,
+    bool Function(XFile arquivo)? videoDe,
   }) async {
     if (_importing) return;
     setState(() {
@@ -242,12 +244,14 @@ class _GalleryPanelState extends ConsumerState<GalleryPanel>
                   .persist(file, image: !video);
         if (!mounted) return;
       }
-      await widget.onImport(saved, video, duration);
+      // O SELETOR DE ARQUIVOS so diz o que veio depois da escolha.
+      final ehVideo = videoDe?.call(saved) ?? video;
+      await widget.onImport(saved, ehVideo, duration);
       await registrarMidiaImportada(
         recentes,
         caminho: saved.path,
         nome: saved.name,
-        video: video,
+        video: ehVideo,
         duracao: duration,
         origem: asset?.origem,
         miniaturaPronta: asset == null ? null : () => servico.thumbnail(asset),
@@ -393,6 +397,36 @@ class _GalleryPanelState extends ConsumerState<GalleryPanel>
       if (mounted) setState(() => _importing = false);
     }
   }
+
+  /// PERMITIR ACESSO: pede de novo; se o sistema ja nao pergunta (negado
+  /// de vez), abre os ajustes do app. No acesso limitado, abre a escolha
+  /// de mais fotos. A volta ao app recarrega a galeria sozinha.
+  Future<void> _permitirAcesso() async {
+    if (_access == GalleryAccess.limited) return _selectMore();
+    try {
+      final acesso = await _service.requestAccess();
+      if (acesso == GalleryAccess.denied) await _service.settings();
+    } catch (_) {}
+    if (mounted) await _refresh();
+  }
+
+  /// ESCOLHER ARQUIVOS: foto ou video pelo seletor do sistema, sem acesso
+  /// a galeria — ja copiado para dentro do app.
+  Future<void> _escolherArquivos() => _import(
+    ref.read(mediaImportServiceProvider).pickMediaFile,
+    false,
+    Duration.zero,
+    persisted: true,
+    videoDe: (f) => pareceVideo(f.name) || pareceVideo(f.path),
+  );
+
+  /// SEM GRADE PARA MOSTRAR: negado, indisponivel (desktop) ou limitado
+  /// sem nada liberado.
+  bool get _semAcesso =>
+      !_loading &&
+      (_access == GalleryAccess.denied ||
+          _access == GalleryAccess.unavailable ||
+          (_access == GalleryAccess.limited && _assets.isEmpty && !_paging));
 
   Future<void> _selectMore() async {
     try {
@@ -676,6 +710,8 @@ class _GalleryPanelState extends ConsumerState<GalleryPanel>
             Expanded(
               child: vendoRecentes
                   ? _gradeDeRecentes(listaDeRecentes)
+                  : _semAcesso
+                  ? _blocoDeAcesso()
                   : _grade(),
             ),
           ],
@@ -770,6 +806,67 @@ class _GalleryPanelState extends ConsumerState<GalleryPanel>
       ),
     ),
   );
+
+  /// O PRIMEIRO USO SEM ACESSO: no lugar da grade, as duas saidas com
+  /// nome — e nao so os dois icones sem rotulo do canto.
+  Widget _blocoDeAcesso() {
+    final podePedir = _access != GalleryAccess.unavailable;
+    final texto = switch (_access) {
+      GalleryAccess.limited =>
+        'Nenhuma mídia liberada. Libere mais fotos ou escolha os arquivos.',
+      GalleryAccess.unavailable =>
+        'A galeria não abre aqui. Escolha os arquivos.',
+      _ => 'Sem acesso às fotos. Permita o acesso ou escolha os arquivos.',
+    };
+    return Center(
+      key: const ValueKey('galeria-sem-acesso'),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(vertical: AureaDims.e10),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            AppText(
+              texto,
+              textAlign: TextAlign.center,
+              maxLines: 3,
+              style: AureaEstilos.propriedade,
+            ),
+            const SizedBox(height: AureaDims.e10),
+            Row(
+              children: [
+                if (podePedir) ...[
+                  Expanded(
+                    child: AureaToolbarButton(
+                      key: const ValueKey('galeria-permitir-acesso'),
+                      icone: CupertinoIcons.lock_open,
+                      rotulo: _access == GalleryAccess.limited
+                          ? 'Liberar fotos'
+                          : 'Permitir acesso',
+                      bloco: true,
+                      largura: double.infinity,
+                      aoTocar: _importing ? null : _permitirAcesso,
+                    ),
+                  ),
+                  const SizedBox(width: AureaDims.vaoDoPainel),
+                ],
+                Expanded(
+                  child: AureaToolbarButton(
+                    key: const ValueKey('galeria-escolher-arquivos'),
+                    icone: CupertinoIcons.folder,
+                    rotulo: 'Escolher arquivos',
+                    bloco: true,
+                    largura: double.infinity,
+                    aoTocar: _importing ? null : _escolherArquivos,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   Widget _empty() => Center(
     child: SingleChildScrollView(

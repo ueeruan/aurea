@@ -45,11 +45,12 @@ Future<(ProviderContainer, Registro)> montarInicio(
   WidgetTester tester, {
   List<VideoProject> projetos = const [],
   Size tela = const Size(390, 844),
+  Map<String, Object> prefsIniciais = const {},
 }) async {
   tester.view.physicalSize = tela;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
-  SharedPreferences.setMockInitialValues({});
+  SharedPreferences.setMockInitialValues(prefsIniciais);
   final prefs = await SharedPreferences.getInstance();
   final registro = Registro();
   final c = ProviderContainer(

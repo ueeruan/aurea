@@ -410,8 +410,14 @@ class PintorDaLinha extends CustomPainter {
     }
 
     if (comAlcas) {
-      _pintarAlca(canvas, x0, caixa.center.dy, LadoDaAlca.inicio);
-      _pintarAlca(canvas, x1, caixa.center.dy, LadoDaAlca.fim);
+      // Ponta escondida (atras do cabecalho, alem da borda) nao tem alca:
+      // a mesma regra da zona de toque.
+      if (x0 >= AureaDims.cabecalhoDaCamada) {
+        _pintarAlca(canvas, x0, caixa.center.dy, LadoDaAlca.inicio, size);
+      }
+      if (x1 <= size.width) {
+        _pintarAlca(canvas, x1, caixa.center.dy, LadoDaAlca.fim, size);
+      }
     }
 
     final l = losangos;
@@ -472,12 +478,21 @@ class PintorDaLinha extends CustomPainter {
     canvas.restore();
   }
 
-  /// A ALCA DE TRIM, desenhada FORA do clipe (17 x 15), colada na ponta.
-  void _pintarAlca(Canvas canvas, double x, double cy, LadoDaAlca lado) {
-    final d = AureaDims.desenhoDaAlcaDeTrim;
-    final r = lado == LadoDaAlca.inicio
-        ? Rect.fromLTWH(x - d.width, cy - d.height / 2, d.width, d.height)
-        : Rect.fromLTWH(x, cy - d.height / 2, d.width, d.height);
+  /// A ALCA DE TRIM, desenhada FORA do clipe (17 x 15), colada na ponta —
+  /// ou dentro dele, com a ponta colada na borda (`GeometriaDaLinha`).
+  void _pintarAlca(
+    Canvas canvas,
+    double x,
+    double cy,
+    LadoDaAlca lado,
+    Size size,
+  ) {
+    final r = GeometriaDaLinha.desenhoDaAlca(
+      x,
+      cy,
+      lado,
+      largura: size.width,
+    );
     canvas.drawRRect(
       RRect.fromRectAndRadius(r, const Radius.circular(AureaDims.raioSm)),
       Paint()..color = cores.alca,

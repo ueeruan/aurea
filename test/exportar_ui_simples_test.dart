@@ -23,8 +23,9 @@ import 'package:flutter_test/flutter_test.dart';
 ///
 /// Projeto de proposito vertical: 1080x1920 a 24 fps com dois segundos de
 /// conteudo. Vertical porque e onde o piso de cinco segundos e a conta de
-/// "1080p" mais enganam (num projeto de 1080x1920, "1080p" e uma ALTURA
-/// de 1080, ou seja 608x1080 — menor, e nao igual).
+/// "1080p" mais enganam. Desde 21/09 "Np" nesta tela e o LADO MENOR = N
+/// (1080p num 1080x1920 e 1080x1920; antes era uma ALTURA e dava
+/// 608x1080 — menor que o projeto).
 VideoProject _projeto() => VideoProject(
   name: 'p',
   createdAt: DateTime(2026, 9, 20),
@@ -74,13 +75,13 @@ void main() {
     // que importa aqui e o resumo: o tamanho e o fps do projeto.
     expect(_resumo(tester), startsWith('1080 x 1920 · 24 fps'));
 
-    // YOUTUBE 1080p: "1080p" e uma ALTURA. Num projeto vertical isso
-    // DIMINUI o quadro (608x1080), e a linha tem de dizer isso.
+    // YOUTUBE 1080p: "1080p" e o LADO MENOR. Num projeto vertical de
+    // 1080x1920 o quadro fica igual — e nao encolhe para 608x1080.
     await tester.tap(
       find.byKey(const ValueKey('export-predefinicao-youtube')),
     );
     await tester.pump();
-    expect(_resumo(tester), startsWith('608 x 1080 · 24 fps'));
+    expect(_resumo(tester), startsWith('1080 x 1920 · 24 fps'));
 
     // REELS / TIKTOK: tamanho do projeto e 30 quadros — os dois mudam
     // com um toque so.

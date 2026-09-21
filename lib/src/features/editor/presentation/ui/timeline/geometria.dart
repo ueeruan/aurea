@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui';
 
 import '../../../../../core/ds/ds.dart';
@@ -36,12 +37,66 @@ abstract final class GeometriaDaLinha {
 
   /// O dedo caiu numa ALCA DE TRIM? Cada uma tem [AureaDims.alcaDeTrim] de
   /// toque FORA do clipe — dentro dele, o toque e do clipe (mover).
+  ///
+  /// A PONTA COLADA NA BORDA NAO PERDE A ALCA: com o fim do clipe a menos
+  /// de 30 da borda direita (ou o comeco a menos de 30 do cabecalho de 70,
+  /// que fica por cima), a zona entra no clipe ate completar os 30 a
+  /// vista — sem passar do meio dele, que continua sendo do mover. Era o
+  /// caso de logo depois de importar: o fim do video a ~10 da borda e o
+  /// arrasto virava scrub.
   static LadoDaAlca? naAlca(EstadoDaTimeline e, Layer l, Offset p) {
+    final z = zonasDasAlcas(e, l);
+    final i = z.inicio;
+    if (i != null && p.dx >= i.$1 && p.dx < i.$2) return LadoDaAlca.inicio;
+    final f = z.fim;
+    if (f != null && p.dx > f.$1 && p.dx <= f.$2) return LadoDaAlca.fim;
+    return null;
+  }
+
+  /// As faixas de toque das duas alcas ([de, ate]), com a vista de agora.
+  /// Nula = a ponta esta escondida (atras do cabecalho ou alem da borda):
+  /// o que nao se ve nao se apara — rola-se o tempo antes.
+  static ({(double, double)? inicio, (double, double)? fim}) zonasDasAlcas(
+    EstadoDaTimeline e,
+    Layer l,
+  ) {
     final c = clipe(e, l);
     const t = AureaDims.alcaDeTrim;
-    if (p.dx >= c.x0 - t && p.dx < c.x0) return LadoDaAlca.inicio;
-    if (p.dx > c.x1 && p.dx <= c.x1 + t) return LadoDaAlca.fim;
-    return null;
+    const esquerda = AureaDims.cabecalhoDaCamada;
+    final direita = e.largura > 0 ? e.largura : double.infinity;
+    final meio = (c.x0 + c.x1) / 2;
+    (double, double)? inicio;
+    if (c.x0 >= esquerda) {
+      inicio = c.x0 - t >= esquerda
+          ? (c.x0 - t, c.x0)
+          : (esquerda, math.max(c.x0, math.min(esquerda + t, meio)));
+    }
+    (double, double)? fim;
+    if (c.x1 <= direita) {
+      fim = c.x1 + t <= direita
+          ? (c.x1, c.x1 + t)
+          : (math.min(c.x1, math.max(direita - t, meio)), direita);
+    }
+    return (inicio: inicio, fim: fim);
+  }
+
+  /// O DESENHO DA ALCA (17 x 15), colado na ponta e FORA do clipe; quando
+  /// fora nao cabe a vista (a ponta colada na borda ou no cabecalho), ele
+  /// entra no clipe — a alca que se toca e a alca que se ve.
+  static Rect desenhoDaAlca(
+    double x,
+    double cy,
+    LadoDaAlca lado, {
+    required double largura,
+  }) {
+    final d = AureaDims.desenhoDaAlcaDeTrim;
+    final top = cy - d.height / 2;
+    if (lado == LadoDaAlca.inicio) {
+      final dentro = x - d.width < AureaDims.cabecalhoDaCamada;
+      return Rect.fromLTWH(dentro ? x : x - d.width, top, d.width, d.height);
+    }
+    final dentro = x + d.width > largura;
+    return Rect.fromLTWH(dentro ? x - d.width : x, top, d.width, d.height);
   }
 
   /// O centro vertical dos losangos na linha da camada: na faixa de baixo

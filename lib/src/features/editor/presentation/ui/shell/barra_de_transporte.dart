@@ -1,4 +1,5 @@
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../../core/ds/ds.dart';
@@ -9,16 +10,23 @@ import '../../../application/playback_controller.dart';
 import '../../../application/ui/opcoes_de_visualizacao.dart';
 import '../palco/zoom_do_palco.dart';
 
-/// A BARRA DE TRANSPORTE (46): desfazer e refazer a esquerda; quadro
-/// anterior, play e proximo quadro no CENTRO; o tempo (atual / total) e o
-/// modo de previa a direita. Enquanto o palco arrasta algo, a barra vira a
-/// infobar (os numeros do que o dedo esta mudando).
+/// A BARRA DE TRANSPORTE (46): desfazer e refazer a esquerda — e, com uma
+/// camada escolhida, a TESOURA; quadro anterior, play e proximo quadro no
+/// CENTRO; o tempo (atual / total) e o modo de previa a direita. Enquanto
+/// o palco arrasta algo, a barra vira a infobar (os numeros do que o dedo
+/// esta mudando).
+///
+/// DIVIDIR MORA AQUI, SEMPRE A VISTA: cortar e a operacao central da
+/// edicao, e na barra da camada ela era a nona ferramenta do video (dois
+/// arrastos para achar). No app de referencia as edicoes rapidas ficam na
+/// barra de transporte. Apagada quando o cabecote nao esta dentro da
+/// camada (ou a sobra de um lado teria menos de 100 ms).
 ///
 /// O relogio chega por `ValueListenableBuilder`: o cabecote andando nao
 /// reconstroi a barra inteira, so o texto do tempo e o icone do play.
 ///
-/// Chaves: `transporte-desfazer`, `-refazer`, `-anterior`, `-play`,
-/// `-proximo`, `-tempo`, `-modo`.
+/// Chaves: `transporte-desfazer`, `-refazer`, `-dividir`, `-anterior`,
+/// `-play`, `-proximo`, `-tempo`, `-modo`.
 class BarraDeTransporte extends ConsumerWidget {
   const BarraDeTransporte({
     super.key,
@@ -111,6 +119,24 @@ class BarraDeTransporte extends ConsumerWidget {
       editorControllerProvider.select((_) => (c.canUndo, c.canRedo)),
     );
     final total = ref.watch(editorControllerProvider.select((p) => p.duration));
+    // A TESOURA: so com UMA camada escolhida (no lote nao ha "a" camada).
+    final escolhida = ref.watch(selectedLayerProvider);
+    final lote =
+        ref.watch(multiSelectProvider.select((m) => m.isNotEmpty)) ||
+        ref.watch(modoSelecionarProvider);
+    final alvo = escolhida == null || lote ? null : escolhida;
+    // O que decide se da para cortar: as pontas e o cadeado (nao o resto
+    // da camada — um passo de slider nao refaz a barra).
+    final pontas = alvo == null
+        ? null
+        : ref.watch(
+            editorControllerProvider.select((p) {
+              final l = p.layerById(alvo);
+              return l == null
+                  ? null
+                  : (l.startTime, l.endTime, p.metaOf(alvo).locked);
+            }),
+          );
 
     Widget botao(
       String chave,
@@ -157,13 +183,17 @@ class BarraDeTransporte extends ConsumerWidget {
       // de invadir o play numa tela de 360.
       child: Row(
         children: [
+          // A 360 cada lado tem 120: desfazer, refazer e a tesoura (3 x 40)
+          // cabem exatos — a folga de 2 da ponta sai quando a tesoura entra,
+          // e abaixo de 360 o grupo encolhe em vez de estourar.
           Expanded(
-            child: Align(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
               alignment: Alignment.centerLeft,
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const SizedBox(width: AureaDims.e2),
+                  if (alvo == null) const SizedBox(width: AureaDims.e2),
                   botao(
                     'desfazer',
                     CupertinoIcons.arrow_uturn_left,
@@ -176,6 +206,18 @@ class BarraDeTransporte extends ConsumerWidget {
                     'Refazer',
                     podeRefazer ? c.redo : null,
                   ),
+                  if (alvo != null && pontas != null)
+                    ValueListenableBuilder<Duration>(
+                      valueListenable: playback.time,
+                      builder: (context, t, _) => botao(
+                        'dividir',
+                        CupertinoIcons.scissors,
+                        'Dividir',
+                        podeDividirEm(pontas.$1, pontas.$2, t) && !pontas.$3
+                            ? () => dividirNoCabecote(ref, playback, alvo)
+                            : null,
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -383,4 +425,25 @@ Duration? parseTimecodeInput(String texto, int fps) {
     return null;
   }
   return null;
+}
+
+/// DA PARA CORTAR em [t] uma camada de [inicio] a [fim]? A mesma regra do
+/// `splitLayer`: o cabecote dentro dela e 100 ms de sobra de cada lado.
+bool podeDividirEm(Duration inicio, Duration fim, Duration t) {
+  const sobra = Duration(milliseconds: 100);
+  return t - inicio >= sobra && fim - t >= sobra;
+}
+
+/// CORTA a camada [layerId] no cabecote — a tesoura do transporte e o
+/// "Dividir" da barra da camada sao a mesma acao.
+void dividirNoCabecote(
+  WidgetRef ref,
+  PlaybackController playback,
+  String layerId,
+) {
+  playback.pause();
+  HapticFeedback.lightImpact();
+  ref
+      .read(editorControllerProvider.notifier)
+      .splitLayer(layerId, playback.time.value);
 }

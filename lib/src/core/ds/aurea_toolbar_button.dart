@@ -54,9 +54,12 @@ class AureaToolbarButton extends StatelessWidget {
           color: cor,
         ),
         const SizedBox(height: AureaDims.e4),
+        // NA BARRA, NO MAXIMO DUAS LINHAS: 24 + 4 + 2 x 12 cabem nos 57. A
+        // barra nao espreme um botao abaixo de 64, entao rotulo de uma
+        // palavra cabe numa linha so. No bloco (icone 32) cabe uma.
         AppText(
           rotulo,
-          maxLines: 1,
+          maxLines: bloco ? 1 : 2,
           overflow: TextOverflow.ellipsis,
           textAlign: TextAlign.center,
           style: AureaEstilos.rotulo.copyWith(

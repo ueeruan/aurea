@@ -97,9 +97,7 @@ class _EditorShellState extends ConsumerState<EditorShell> {
       case AcaoDaFerramenta.mais:
         mostrarMenuDaCamada(context, ref, layerId, playback: _pb);
       case AcaoDaFerramenta.dividir:
-        _pb.pause();
-        HapticFeedback.lightImpact();
-        _c.splitLayer(layerId, _pb.time.value);
+        dividirNoCabecote(ref, _pb, layerId);
       case AcaoDaFerramenta.ativar3d:
         _ativarTexto3D(layerId);
     }

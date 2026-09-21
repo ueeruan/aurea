@@ -16,6 +16,7 @@ import '../../../application/editor_controller.dart';
 import '../../../application/font_service.dart';
 import '../../../application/freehand_session.dart';
 import '../../../application/playback_controller.dart';
+import '../../../domain/element3d.dart';
 import '../../../domain/keyframe.dart';
 import '../../../domain/layer.dart';
 import '../../../domain/model_import3d.dart';
@@ -232,6 +233,36 @@ Future<void> importarSvg(EditorParaAdicionar e) async {
 }
 
 // --------------------------------------------------------------------- 3D
+
+/// O GIRO COM QUE O SOLIDO 3D NASCE (graus): de frente e chapado ele
+/// parecia um quadrado 2D. Visto um pouco de cima (X -20) e de lado
+/// (Y -30), tres faces aparecem, cada uma com o seu tom da luz fixa do
+/// pintor (de cima e da esquerda): tampo claro, frente media, lado escuro.
+/// Com Y +30 a face maior, a da frente, caia na sombra.
+const giroInicialDoSolido3D = (x: -20.0, y: -30.0);
+
+/// SOLIDO 3D: nasce no cabecote ja mostrando o volume. Criar e girar sao
+/// UM passo de desfazer — desfazer uma vez tira o solido inteiro, e nao so
+/// o giro.
+void criarSolido3D(EditorParaAdicionar e) {
+  final c = e.controlador;
+  final agora = e.agora;
+  c.runAsOneUndo(() {
+    final antes = {
+      for (final l in e.ref.read(editorControllerProvider).layers) l.id,
+    };
+    c.addElement3DLayer(agora, Element3DKind.cube);
+    final novo = e.ref
+        .read(editorControllerProvider)
+        .layers
+        .whereType<Element3DLayer>()
+        .where((l) => !antes.contains(l.id))
+        .firstOrNull;
+    if (novo == null) return;
+    c.editRotationX(novo.id, agora, giroInicialDoSolido3D.x);
+    c.editRotationY(novo.id, agora, giroInicialDoSolido3D.y);
+  });
+}
 
 /// UM MODELO DO APARELHO: o seletor e depois a porta unica da importacao
 /// 3D ([concluirImportacao3D]) — a ficha de modelo pesado com a opcao de

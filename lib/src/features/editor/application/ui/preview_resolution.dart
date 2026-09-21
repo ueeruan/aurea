@@ -10,8 +10,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 ///
 /// O EXPORT NAO LE ISTO. Ele sempre desenha no tamanho final: a previa
 /// pode ser reduzida, o tempo e as animacoes nao.
+///
+/// O SELO SOBRE A PREVIA E UM NUMERO, em toda faixa: "Full" era o unico em
+/// ingles no meio da tela em portugues, e 100% diz a mesma coisa que 75%
+/// e 50% dizem, sem traducao.
 enum PreviewResolution {
-  full('Full', 1),
+  full('100%', 1),
   p75('75%', .75),
   half('50%', .5),
   p33('33%', .33),

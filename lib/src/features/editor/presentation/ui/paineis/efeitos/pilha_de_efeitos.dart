@@ -20,7 +20,10 @@ import 'time_remap.dart';
 
 /// A PILHA DE EFEITOS de uma camada, na ordem em que o motor aplica.
 ///
-/// Um [AureaEffectCard] por efeito: seta abre e recolhe, olho liga e
+/// Um [AureaEffectCard] por efeito, em ACORDEAO: um cartao aberto por
+/// vez — o recem-aplicado, ou o ultimo cujo cabecalho foi tocado; os
+/// outros recolhem ao cabecalho de 37. Com todos abertos, o terceiro
+/// efeito ficava a sete arrastos do topo. Seta abre e recolhe, olho liga e
 /// desliga sem apagar, a alca ≡ reordena ARRASTANDO (sem toque longo:
 /// a alca e so para isso) e o ⋯ guarda duplicar, resetar, copiar, colar
 /// e apagar. Aberto, uma [AureaPropertyRow] por parametro, cada uma com o
@@ -58,9 +61,10 @@ class PilhaDeEfeitos extends ConsumerStatefulWidget {
 
 class _PilhaDeEfeitosState extends ConsumerState<PilhaDeEfeitos>
     with PropriedadeAtivaDoPainel {
-  /// Os cartoes abertos, por id (sobrevive a reordenar e a trocar de
-  /// posicao). Animador de texto entra como `animador-<id>`.
-  final Set<String> _abertos = {};
+  /// O CARTAO ABERTO, por id (sobrevive a reordenar e a trocar de
+  /// posicao); nulo = todos recolhidos. UM SO: abrir um fecha o outro.
+  /// Animador de texto entra como `animador-<id>`.
+  String? _aberto;
 
   /// O que ja estava na pilha no ultimo build: o que aparecer de novo
   /// (acabou de ser aplicado) abre sozinho — foi a pessoa que pediu.
@@ -69,9 +73,9 @@ class _PilhaDeEfeitosState extends ConsumerState<PilhaDeEfeitos>
   void _abrir(String chave, bool aberto, {String? efeitoId}) {
     setState(() {
       if (aberto) {
-        _abertos.add(chave);
-      } else {
-        _abertos.remove(chave);
+        _aberto = chave;
+      } else if (_aberto == chave) {
+        _aberto = null;
       }
     });
     // O CARTAO ABERTO E A PROPRIEDADE ATIVA: a timeline acende as marcas
@@ -100,15 +104,18 @@ class _PilhaDeEfeitosState extends ConsumerState<PilhaDeEfeitos>
           ]
         : const <Never>[];
 
-    // O RECEM-APLICADO ABRE SOZINHO.
-    final ids = {
+    // O RECEM-APLICADO ABRE SOZINHO — e os outros recolhem.
+    final ids = [
       for (final e in efeitos) e.id,
       for (final a in animadores) 'animador-${a.id}',
-    };
+    ];
     final conhecidos = _conhecidos;
     if (conhecidos != null) {
-      final novos = ids.difference(conhecidos);
-      _abertos.addAll(novos);
+      final novos = [
+        for (final id in ids)
+          if (!conhecidos.contains(id)) id,
+      ];
+      if (novos.isNotEmpty) _aberto = novos.last;
       final efeitoNovo = [
         for (final e in efeitos)
           if (novos.contains(e.id)) e.id,
@@ -117,8 +124,8 @@ class _PilhaDeEfeitosState extends ConsumerState<PilhaDeEfeitos>
         ativarPropriedade(PropriedadeAtiva.efeito(efeitoNovo.last));
       }
     }
-    _abertos.retainAll(ids);
-    _conhecidos = ids;
+    if (_aberto != null && !ids.contains(_aberto)) _aberto = null;
+    _conhecidos = ids.toSet();
 
     final playback = EscopoDoEditor.of(context).playback;
     return NoCabecote(
@@ -136,7 +143,7 @@ class _PilhaDeEfeitosState extends ConsumerState<PilhaDeEfeitos>
             camada: gravada,
             t: t,
             playback: playback,
-            aberto: _abertos.contains(e.id),
+            aberto: _aberto == e.id,
             aoMudarAberto: (v) => _abrir(e.id, v, efeitoId: e.id),
             indiceNaLista: filtro == null ? i : null,
           );
@@ -156,7 +163,7 @@ class _PilhaDeEfeitosState extends ConsumerState<PilhaDeEfeitos>
               camada: gravada,
               t: t,
               playback: playback,
-              aberto: _abertos.contains('animador-${a.id}'),
+              aberto: _aberto == 'animador-${a.id}',
               aoMudarAberto: (v) => _abrir('animador-${a.id}', v),
             ),
           ...widget.rodape,

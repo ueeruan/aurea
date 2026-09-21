@@ -9,7 +9,6 @@ import '../../../../media/application/midias_recentes.dart';
 import '../../../../media/application/sons_recentes.dart';
 import '../../../application/editor_controller.dart';
 import '../../../application/playback_controller.dart';
-import '../../../domain/element3d.dart';
 import '../../../domain/shape_library.dart';
 import '../../../../../core/ui/snack.dart';
 import 'acoes_da_camada.dart' show agruparSelecao;
@@ -169,6 +168,13 @@ class _FolhaDeAdicionarState extends State<FolhaDeAdicionar> {
             duration: AureaMotion.rapido,
             switchInCurve: AureaMotion.entrada,
             switchOutCurve: AureaMotion.saida,
+            // A ABA OCUPA A AREA TODA E COMECA NO TOPO: o padrao do
+            // AnimatedSwitcher centraliza, e a grade de blocos (que mede so
+            // o que tem) ficava solta la embaixo com um vao vazio em cima.
+            layoutBuilder: (atual, anteriores) => Stack(
+              fit: StackFit.expand,
+              children: [...anteriores, ?atual],
+            ),
             child: KeyedSubtree(
               key: ValueKey('adicionar-conteudo-${_categoria.id}'),
               child: switch (_categoria) {
@@ -559,9 +565,7 @@ class _FolhaDeAdicionarState extends State<FolhaDeAdicionar> {
       CupertinoIcons.cube_fill,
       'Sólido 3D',
       () {
-        _criaEFecha(
-          () => _e.controlador.addElement3DLayer(_e.agora, Element3DKind.cube),
-        );
+        _criaEFecha(() => criarSolido3D(_e));
       },
     ),
   ]);

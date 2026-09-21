@@ -12,6 +12,12 @@ import '../../../../../core/l10n/app_language.dart';
 /// Toque: seleciona (na ja escolhida, abre ou fecha as linhas das
 /// propriedades animadas). Toque longo: pega a camada para REORDENAR — o
 /// arrasto vertical leva a camada a outro degrau da pilha.
+///
+/// A ALCA DE REORDENAR MORA AQUI ([reordenavel]: a camada escolhida e
+/// destravada). A miniatura vira o ≡ e o cabecalho inteiro reordena no
+/// arrasto vertical, sem esperar o toque longo. Ela ja morou na ponta
+/// direita da linha e cobria a alca de trim do fim do clipe — o arrasto
+/// de aparar virava scrub logo depois de importar.
 class CabecalhoDaCamada extends StatelessWidget {
   const CabecalhoDaCamada({
     super.key,
@@ -28,6 +34,7 @@ class CabecalhoDaCamada extends StatelessWidget {
     required this.aoMoverReordenar,
     required this.aoTerminarReordenar,
     this.miniatura,
+    this.reordenavel = false,
   });
 
   final String layerId;
@@ -48,6 +55,10 @@ class CabecalhoDaCamada extends StatelessWidget {
   /// [cancelou] = o sistema tirou o dedo (nao aplica).
   final void Function({required bool cancelou}) aoTerminarReordenar;
 
+  /// A alca de reordenar: o ≡ no lugar da miniatura e o arrasto vertical
+  /// do cabecalho reordena direto.
+  final bool reordenavel;
+
   @override
   Widget build(BuildContext context) {
     final corDoIcone = oculta ? AureaCores.textoSecundario : AureaCores.texto;
@@ -63,6 +74,18 @@ class CabecalhoDaCamada extends StatelessWidget {
         onLongPressStart: (d) => aoComecarReordenar(d.globalPosition),
         onLongPressMoveUpdate: (d) => aoMoverReordenar(d.globalPosition),
         onLongPressEnd: (_) => aoTerminarReordenar(cancelou: false),
+        onVerticalDragStart: reordenavel
+            ? (d) => aoComecarReordenar(d.globalPosition)
+            : null,
+        onVerticalDragUpdate: reordenavel
+            ? (d) => aoMoverReordenar(d.globalPosition)
+            : null,
+        onVerticalDragEnd: reordenavel
+            ? (_) => aoTerminarReordenar(cancelou: false)
+            : null,
+        onVerticalDragCancel: reordenavel
+            ? () => aoTerminarReordenar(cancelou: true)
+            : null,
         child: ColoredBox(
           color: AureaCores.cromo,
           child: Padding(
@@ -99,7 +122,14 @@ class CabecalhoDaCamada extends StatelessWidget {
                       // toque do olho (44) comeca em 26, e tocar na
                       // miniatura para escolher nao pode esconder a camada.
                       padding: const EdgeInsets.fromLTRB(2, 3, 14, 3),
-                      child: miniatura != null
+                      child: reordenavel
+                          ? Icon(
+                              CupertinoIcons.line_horizontal_3,
+                              key: ValueKey('alca-reordenar-$layerId'),
+                              size: AureaDims.iconeSm,
+                              color: AureaCores.texto,
+                            )
+                          : miniatura != null
                           ? ClipRRect(
                               borderRadius: BorderRadius.circular(
                                 AureaDims.raioXs,
@@ -176,50 +206,4 @@ class CabecalhoDaCamada extends StatelessWidget {
       ),
     );
   }
-}
-
-/// A ALCA DE REORDENAR (35), na ponta direita da linha escolhida: o arrasto
-/// vertical dela reordena direto, sem esperar o toque longo.
-class AlcaDeReordenar extends StatelessWidget {
-  const AlcaDeReordenar({
-    super.key,
-    required this.layerId,
-    required this.aoComecar,
-    required this.aoMover,
-    required this.aoTerminar,
-  });
-
-  final String layerId;
-  final ValueChanged<Offset> aoComecar;
-  final ValueChanged<Offset> aoMover;
-  final void Function({required bool cancelou}) aoTerminar;
-
-  @override
-  Widget build(BuildContext context) => GestureDetector(
-    key: ValueKey('alca-reordenar-$layerId'),
-    behavior: HitTestBehavior.opaque,
-    onVerticalDragStart: (d) => aoComecar(d.globalPosition),
-    onVerticalDragUpdate: (d) => aoMover(d.globalPosition),
-    onVerticalDragEnd: (_) => aoTerminar(cancelou: false),
-    onVerticalDragCancel: () => aoTerminar(cancelou: true),
-    child: Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: AureaCores.elevado,
-          borderRadius: const BorderRadius.horizontal(
-            left: Radius.circular(AureaDims.raioPilula),
-          ),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.only(left: 6),
-          child: Icon(
-            CupertinoIcons.line_horizontal_3,
-            size: 14,
-            color: AureaCores.textoSecundario,
-          ),
-        ),
-      ),
-    ),
-  );
 }

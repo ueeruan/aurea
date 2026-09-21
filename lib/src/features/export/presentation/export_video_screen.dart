@@ -300,7 +300,9 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
     // o abaixamento que a pessoa acabou de ouvir, nao com um recalculado.
     final engine = ExportEngine(
       project,
-      _ajustes,
+      // "480p" E O LADO MENOR: o motor le o tamanho por `resolve`, e e a
+      // leitura desta tela que vai para ele (ver `AjustesPeloLadoMenor`).
+      AjustesPeloLadoMenor(_ajustes),
       buildProjectDuckEnvelopes(
         project.layers,
         MediaPreviewService.instance.peaksOf,
@@ -1186,18 +1188,27 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
 
   /// A TELA DE ANTES: uma decisao em cima, o resto guardado.
   Widget _ajustesDaExportacao(int w, int h, Duration duracao, int fpsProjeto) {
-    final (sw, sh) = _ajustes.resolve(w, h);
+    final (sw, sh) = tamanhoDeSaida(_ajustes, w, h);
     final fps = _ajustes.resolveFps(fpsProjeto);
     final escolhida = _predefinicaoAtual();
 
+    // O BOTAO EXPORTAR FICA PRESO NO RODAPE: so as escolhas rolam. Com
+    // "Ajustes" aberto ele ia para baixo da dobra, e a pessoa terminava de
+    // ajustar sem ver como sair dali.
     return Container(
       width: double.infinity,
       color: AmColors.panel,
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(14, 10, 14, 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Flexible(
+            child: SingleChildScrollView(
+              key: const ValueKey('export-rolagem-dos-ajustes'),
+              padding: const EdgeInsets.fromLTRB(14, 10, 14, 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
             Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -1250,14 +1261,19 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
               aberto: false,
               aoTocar: () => showOutrosFormatosSheet(context, ref),
             ),
-            const SizedBox(height: 12),
-            _BotaoGrande(
+                ],
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 8, 14, 16),
+            child: _BotaoGrande(
               rotulo: 'Exportar',
               chave: const ValueKey('export-exportar'),
               aoTocar: _rodar,
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -1616,13 +1632,50 @@ class PredefinicaoDeExportacao {
   final ExportSettings ajustes;
 }
 
-/// NENHUMA PREDEFINICAO PROMETE "1080x1920", e o motivo importa.
-///
-/// `ExportSize` e uma ALTURA de saida, e a largura acompanha a proporcao
-/// do projeto: pedir "1080p" num projeto vertical de 1080x1920 da
-/// 608x1080 — menor, nao maior. Por isso a predefinicao de rede social e
-/// o TAMANHO DO PROJETO (que ja e 1080x1920 num projeto vertical), e quem
-/// diz os numeros de verdade e a linha de resumo, depois de resolvidos.
+/// "Np" NESTA TELA E O LADO MENOR = N, como em todo app de video de
+/// celular: 480p num projeto 9:16 e 480 x 854, e nao 270 x 480. O
+/// `ExportSize` guardado continua sendo o mesmo numero (o disco e o
+/// motor nao mudam); muda a LEITURA dele, que esta tela entrega ao motor
+/// por [AjustesPeloLadoMenor]. Num projeto deitado, o lado menor e a
+/// altura — o resultado e o de sempre.
+(int, int) tamanhoDeSaida(ExportSettings ajustes, int w, int h) {
+  final alvo = exportSizeHeight(ajustes.size);
+  if (alvo == null || w <= 0 || h <= 0) return ajustes.resolve(w, h);
+  final escala = alvo / math.min(w, h);
+  int par(num v) {
+    final x = math.max(2, v.round());
+    return x.isOdd ? x + 1 : x;
+  }
+
+  return (par(w * escala), par(h * escala));
+}
+
+/// OS AJUSTES COMO O MOTOR OS VE: iguais aos escolhidos, com o tamanho
+/// lido pelo lado menor ([tamanhoDeSaida]). O motor so pergunta
+/// `resolve`, entao ele nao precisa saber da regra.
+class AjustesPeloLadoMenor extends ExportSettings {
+  AjustesPeloLadoMenor(ExportSettings a)
+    : super(
+        size: a.size,
+        fps: a.fps,
+        quality: a.quality,
+        bitrateMbps: a.bitrateMbps,
+        codec: a.codec,
+        format: a.format,
+      );
+
+  @override
+  (int, int) resolve(int w, int h) {
+    final alvo = exportSizeHeight(size);
+    if (alvo == null || w <= 0 || h <= 0) return super.resolve(w, h);
+    return tamanhoDeSaida(this, w, h);
+  }
+}
+
+/// NENHUMA PREDEFINICAO PROMETE "1080x1920", e o motivo importa: quem diz
+/// os numeros de verdade e a linha de resumo, depois de resolvidos. A de
+/// rede social e o TAMANHO DO PROJETO (que ja e 1080x1920 num projeto
+/// vertical).
 const predefinicoesDeExportacao = <PredefinicaoDeExportacao>[
   PredefinicaoDeExportacao(
     'reels',
@@ -1633,7 +1686,7 @@ const predefinicoesDeExportacao = <PredefinicaoDeExportacao>[
   PredefinicaoDeExportacao(
     'youtube',
     'YouTube 1080p',
-    'Altura 1080 · fps do projeto',
+    '1080p · fps do projeto',
     ExportSettings(size: ExportSize.p1080, quality: 'alta'),
   ),
   PredefinicaoDeExportacao(

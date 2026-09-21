@@ -3,10 +3,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../../core/ds/ds.dart';
 import '../../../application/editor_controller.dart';
+import '../../../domain/ajuste_da_midia.dart';
 import '../../../domain/keyframe.dart';
 import '../../../domain/layer.dart';
 import '../shell/contrato.dart';
 import 'comum.dart';
+import 'comum_de_objetos.dart' show FileiraDePilulas;
+import 'menu_do_campo.dart';
 import 'pecas_centrais.dart';
 
 /// TRANSFORMAR — o "Move & Transform" da referencia: uma sub-aba por
@@ -55,6 +58,9 @@ class PainelTransformar extends ConsumerStatefulWidget {
   @override
   ConsumerState<PainelTransformar> createState() => _PainelTransformarState();
 }
+
+/// A unidade de cada aba (para o "Animar sozinho").
+const _unidades = ['px', '%', '°', '%', '°', 'px'];
 
 class _PainelTransformarState extends ConsumerState<PainelTransformar>
     with PropriedadeAtivaDoPainel {
@@ -112,6 +118,23 @@ class _PainelTransformarState extends ConsumerState<PainelTransformar>
           ativo: visivel.is3D,
           aoTocar: () => umPasso(ref, () => c.toggle3D(id)),
         ),
+        // O MENU DO CAMPO da aba (expressao, animar sozinho, expor): o
+        // mesmo do toque longo no valor — e a porta da Posicao e do Pivo,
+        // que sao pontos e nao tem uma caixa so para segurar.
+        Builder(
+          builder: (botao) => AcaoDoCabecalho(
+            key: const ValueKey('transformar-campo'),
+            icone: CupertinoIcons.ellipsis_circle,
+            aoTocar: () => menuDoCampo(
+              botao,
+              ref,
+              id,
+              PainelTransformar.propriedades[_aba],
+              nome: PainelTransformar.abas[_aba],
+              unidade: _unidades[_aba],
+            ),
+          ),
+        ),
       ],
       corpo: NoCabecote(
         construir: (context, t) {
@@ -141,6 +164,15 @@ class _PainelTransformarState extends ConsumerState<PainelTransformar>
             rotulo: rotulo,
             valor: valor,
             aoMudar: aCadaPasso(mudar),
+            // TOQUE LONGO NO VALOR: expressao, animar sozinho, expor.
+            aoSegurarValor: () => menuDoCampo(
+              context,
+              ref,
+              id,
+              prop,
+              nome: PainelTransformar.abas[_aba],
+              unidade: unidade,
+            ),
             min: min,
             max: max,
             sensibilidade: sensibilidade,
@@ -202,6 +234,31 @@ class _PainelTransformarState extends ConsumerState<PainelTransformar>
                   ),
               ],
               LayerProp.scale => [
+                // PREENCHER OU AJUSTAR a foto ou o video na composicao: um
+                // toque volta a midia a 100% no centro cobrindo a
+                // composicao ou cabendo inteira nela.
+                if (visivel case VideoLayer(:final ajuste) ||
+                    ImageLayer(:final ajuste))
+                  AureaPropertyRow.personalizada(
+                    rotulo: 'Encaixe',
+                    chave: 'midia-encaixe',
+                    filho: FileiraDePilulas<AjusteDaMidia>(
+                      chave: 'midia',
+                      chaveDe: (a) => a == AjusteDaMidia.cobrir
+                          ? 'preencher'
+                          : 'ajustar',
+                      opcoes: const [
+                        AjusteDaMidia.cobrir,
+                        AjusteDaMidia.conter,
+                      ],
+                      atual: ajuste,
+                      rotuloDe: (a) => a == AjusteDaMidia.cobrir
+                          ? 'Preencher'
+                          : 'Ajustar',
+                      aoEscolher: (a) =>
+                          umPasso(ref, () => c.setAjusteDaMidia(id, a)),
+                    ),
+                  ),
                 numero(
                   'Escala',
                   visivel.scaleX.valueAt(local) * 100,

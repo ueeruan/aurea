@@ -3,8 +3,11 @@ import 'package:flutter/material.dart' show ReorderableListView;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../../../core/ds/ds.dart';
+import '../../../../../../core/l10n/app_language.dart';
+import '../../../../../../core/ui/snack.dart';
 import '../../../../application/editor_controller.dart';
 import '../../../../application/playback_controller.dart';
+import '../../../../application/ui/pro_mode.dart';
 import '../../../../domain/animador_de_texto.dart';
 import '../../../../domain/effect.dart';
 import '../../../../domain/layer.dart';
@@ -243,6 +246,17 @@ class _CartaoDoEfeito extends ConsumerWidget {
   Future<void> _menu(BuildContext botao, WidgetRef ref) async {
     final c = ref.read(editorControllerProvider.notifier);
     final conhecido = efeito.conhecido;
+    // O KEYFRAME DO EFEITO INTEIRO: uma marca em todos os parametros no
+    // cabecote (o losango do trilho do editor antigo). Le a verdade
+    // GRAVADA — a edicao pendente nao cria marca.
+    final temMarcaAqui = registrado.hasKeyframeAt(_local);
+    // ASSAR so vale para o movimento procedural (Tremor e cia.), no Pro —
+    // a mesma regra do menu antigo.
+    final podeAssar =
+        conhecido &&
+        !_remap &&
+        efeito.spec.procedural &&
+        ref.read(proModeProvider);
     final escolha = await mostrarAureaMenu<String>(
       botao,
       titulo: conhecido ? efeito.spec.name : null,
@@ -277,6 +291,24 @@ class _CartaoDoEfeito extends ConsumerWidget {
             icone: CupertinoIcons.doc_on_clipboard,
             chave: 'efeito-colar',
           ),
+        if (conhecido && !_remap)
+          AureaMenuItem(
+            valor: 'keyframe',
+            rotulo: temMarcaAqui
+                ? 'Tirar o keyframe de todos os parâmetros'
+                : 'Keyframe em todos os parâmetros',
+            icone: temMarcaAqui
+                ? CupertinoIcons.suit_diamond
+                : CupertinoIcons.suit_diamond_fill,
+            chave: 'efeito-keyframe',
+          ),
+        if (podeAssar)
+          const AureaMenuItem(
+            valor: 'assar',
+            rotulo: 'Assar em keyframes',
+            icone: CupertinoIcons.flame,
+            chave: 'efeito-assar',
+          ),
         if (_remap)
           const AureaMenuItem(
             valor: 'curva',
@@ -303,6 +335,31 @@ class _CartaoDoEfeito extends ConsumerWidget {
         c.copyEffects(layerId);
       case 'colar':
         umPasso(ref, () => c.pasteEffects(layerId));
+      case 'keyframe':
+        // O instante e lido NO TOQUE, nunca o do build.
+        umPasso(
+          ref,
+          () => c.toggleEffectKeyframe(
+            layerId,
+            efeito.id,
+            playback.time.value,
+          ),
+        );
+      case 'assar':
+        umPasso(
+          ref,
+          () => c.bakeEffectToKeyframes(
+            layerId,
+            efeito.id,
+            ref.read(editorControllerProvider).fps,
+          ),
+        );
+        AureaSnack.show(
+          botao,
+          translate(botao, 'Movimento assado em keyframes'),
+          actionLabel: translate(botao, 'Desfazer'),
+          onAction: c.undo,
+        );
       case 'curva':
         _abrirCurva(botao, ref, 'tempo');
       case 'apagar':
@@ -545,6 +602,7 @@ class _CartaoDoEfeito extends ConsumerWidget {
           layerId: layerId,
           video: camadaDeVideo,
           t: t,
+          playback: playback,
           abrirCurva: () => _abrirCurva(context, ref, 'tempo'),
         ),
     ];

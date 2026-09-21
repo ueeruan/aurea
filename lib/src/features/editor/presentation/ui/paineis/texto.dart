@@ -6,7 +6,9 @@ import '../../../../../core/l10n/app_language.dart';
 import '../../../../../core/ui/tocavel.dart';
 import '../../../application/editor_controller.dart';
 import '../../../application/font_service.dart';
+import '../../../application/ui/pro_mode.dart';
 import '../../../domain/layer.dart';
+import '../../../domain/layer_meta.dart' show DataBinding;
 import '../shell/contrato.dart';
 import 'comum.dart';
 import 'comum_de_objetos.dart';
@@ -124,6 +126,18 @@ class _PainelTextoState extends ConsumerState<PainelTexto> {
       );
     }
     final familia = camada.fontFamily;
+    // DADOS (Pro): o texto segue uma coluna do CSV do projeto. So aparece
+    // com uma tabela carregada (Ajustes do projeto › Dados).
+    final pro = ref.watch(proModeProvider);
+    final dados = ref.watch(projetoVisivelProvider.select((p) => p.data));
+    final vinculo = ref.watch(
+      projetoVisivelProvider.select(
+        (p) => p.bindings
+            .where((b) => b.layerId == id && b.property == 'text')
+            .firstOrNull
+            ?.column,
+      ),
+    );
     return AureaPanel(
       titulo: _titulo,
       chave: chave,
@@ -258,6 +272,30 @@ class _PainelTextoState extends ConsumerState<PainelTexto> {
                     ),
                   ),
                 ),
+                if (pro && dados != null && dados.columns.isNotEmpty)
+                  AureaPropertyRow.personalizada(
+                    rotulo: 'Dados',
+                    chave: 'texto-dados',
+                    filho: AureaDropdown<String>(
+                      valor: vinculo ?? '',
+                      opcoes: ['', ...dados.columns],
+                      // As colunas sao conteudo do CSV: nao se traduzem.
+                      traduzir: false,
+                      rotuloDe: (col) => col.isEmpty
+                          ? translate(context, 'Sem vínculo')
+                          : col,
+                      titulo: moldar(context, 'Coluna de {0}', [dados.name]),
+                      aoMudar: (col) => c.runAsOneUndo(() {
+                        c.removeDataBinding(id);
+                        if (col.isNotEmpty) {
+                          c.addDataBinding(
+                            DataBinding(layerId: id, column: col),
+                          );
+                          c.applyDataBindings();
+                        }
+                      }),
+                    ),
+                  ),
               ],
             ),
           ),

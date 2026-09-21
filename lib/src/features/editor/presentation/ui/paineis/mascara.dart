@@ -113,6 +113,11 @@ class _PainelMascaraState extends ConsumerState<PainelMascara>
 
     final c = ref.read(editorControllerProvider.notifier);
     final id = widget.layerId;
+    // A FONTE DO RECORTE e a camada logo acima: observa so o nome dela
+    // (reordenar ou renomear a de cima muda o aviso).
+    final fonteAcima = ref.watch(
+      editorControllerProvider.select((_) => c.matteSourceAbove(id)?.name),
+    );
     return AureaPanel(
       titulo: _titulo,
       chave: 'painel-${PainelId.mascara.name}',
@@ -193,6 +198,22 @@ class _PainelMascaraState extends ConsumerState<PainelMascara>
                   },
                 ),
               ),
+              // DE QUEM E O RECORTE: a fonte e a camada logo acima, e ela
+              // some da composicao (o "Pronto · Recortar" do editor antigo
+              // dizia isto antes de a pessoa escolher).
+              if (visivel.matteMode != MatteMode.recorte)
+                AureaAvisoDoPainel(
+                  key: const ValueKey('recorte-fonte'),
+                  texto: switch (fonteAcima) {
+                    null => 'Coloque uma camada acima desta para recortar '
+                        'por ela.',
+                    final nome => moldar(
+                      context,
+                      'Fonte acima: {0}. Ela fica oculta.',
+                      [nome],
+                    ),
+                  },
+                ),
               AureaSection(
                 titulo: 'Máscaras',
                 chave: 'mascaras',
@@ -260,6 +281,36 @@ class _PainelMascaraState extends ConsumerState<PainelMascara>
                   ),
                 ],
               ),
+              // REVELAR: um toque cria uma mascara comum com dois keyframes
+              // reais (o "Pronto · Revelar" do editor antigo) — depois ela
+              // se edita como qualquer outra, no cartao acima.
+              AureaSection(
+                titulo: 'Revelar',
+                chave: 'mascara-revelar',
+                recolhivel: false,
+                filhos: [
+                  FileiraDeAcoes(
+                    acoes: [
+                      for (final preset in MaskRevealPreset.values)
+                        AureaChip(
+                          key: ValueKey('mascara-revelar-${preset.name}'),
+                          rotulo: preset == MaskRevealPreset.iris
+                              ? 'Íris'
+                              : preset.label,
+                          icone: CupertinoIcons.wand_stars,
+                          aoTocar: () => umPasso(
+                            ref,
+                            () => c.applyMaskReveal(
+                              id,
+                              preset,
+                              escopo.playback.time.value,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
             ],
           );
         },
@@ -316,6 +367,33 @@ class _CartaoDaMascara extends ConsumerWidget {
           rotulo: 'Editar pontos',
           icone: CupertinoIcons.pencil_outline,
         ),
+        // MONTAR: trocar o caminho no cabecote (com a regra do keyframe:
+        // caminho animado ganha marca, parado so muda).
+        const AureaMenuItem(
+          valor: 'retangulo',
+          rotulo: 'Trocar por retângulo',
+          icone: CupertinoIcons.square,
+          chave: 'mascara-retangulo',
+        ),
+        const AureaMenuItem(
+          valor: 'elipse',
+          rotulo: 'Trocar por elipse',
+          icone: CupertinoIcons.circle,
+          chave: 'mascara-elipse',
+        ),
+        if (camada is ShapeLayer)
+          const AureaMenuItem(
+            valor: 'da-forma',
+            rotulo: 'Usar a forma da camada',
+            icone: CupertinoIcons.square_on_circle,
+            chave: 'mascara-da-forma',
+          ),
+        const AureaMenuItem(
+          valor: 'desenhar',
+          rotulo: 'Desenhar à mão',
+          icone: CupertinoIcons.scribble,
+          chave: 'mascara-desenhar',
+        ),
         const AureaMenuItem(
           valor: 'apagar',
           rotulo: 'Apagar',
@@ -338,6 +416,45 @@ class _CartaoDaMascara extends ConsumerWidget {
           EscopoDoEditor.of(botao).playback,
           mascara.id,
         );
+      case 'retangulo' || 'elipse':
+        final agora = EscopoDoEditor.of(botao).playback.time.value;
+        final caixa = c.maskBox(layerId, agora);
+        umPasso(
+          ref,
+          () => c.replaceMaskPath(
+            layerId,
+            mascara.id,
+            escolha == 'retangulo'
+                ? BezierPath.rect(caixa.width, caixa.height)
+                : BezierPath.ellipse(caixa.width, caixa.height),
+            agora,
+          ),
+        );
+      case 'da-forma':
+        final agora = EscopoDoEditor.of(botao).playback.time.value;
+        var ok = false;
+        umPasso(
+          ref,
+          () => ok = c.setMaskFromOwnShape(layerId, mascara.id, agora),
+        );
+        if (!ok && botao.mounted) {
+          showReasonToast(
+            botao,
+            translate(botao, 'Esta camada não tem forma para copiar'),
+          );
+        }
+      case 'desenhar':
+        final playback = EscopoDoEditor.of(botao).playback;
+        umPasso(
+          ref,
+          () => c.replaceMaskPath(
+            layerId,
+            mascara.id,
+            BezierPath(vertices: const [], closed: false),
+            playback.time.value,
+          ),
+        );
+        abrirEditarPontosDaMascara(botao, ref, playback, mascara.id);
       case 'apagar':
         umPasso(ref, () => c.removeMask(layerId, mascara.id));
     }

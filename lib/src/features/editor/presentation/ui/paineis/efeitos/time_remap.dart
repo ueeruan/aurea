@@ -4,7 +4,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../../../core/ds/ds.dart';
 import '../../../../application/editor_controller.dart';
 import '../../../../application/playback_controller.dart';
+import '../../../../domain/cut_ops.dart'
+    show hasTimeRemap, timeRemapTrackOf, videoSourceSpan;
 import '../../../../domain/layer.dart';
+import '../../../../domain/remapear_tempo.dart'
+    show curvaIdentidade, reversoAPartirDe;
 import '../tempo.dart' show rotuloDaInterpolacao;
 import '../pecas_centrais.dart';
 
@@ -55,6 +59,7 @@ abstract final class LinhasDoTimeRemap {
     required VideoLayer video,
     required Duration t,
     required VoidCallback abrirCurva,
+    PlaybackController? playback,
   }) {
     final c = ref.read(editorControllerProvider.notifier);
     return [
@@ -118,6 +123,74 @@ abstract final class LinhasDoTimeRemap {
           aoTocar: abrirCurva,
         ),
       ),
+      // AS ACOES DO ESTUDIO DO TEMPO (a tela propria saiu a pedido do dono;
+      // as acoes dela nao podiam sair junto): espelhar a curva, reverso a
+      // partir do cabecote e voltar a velocidade constante.
+      FileiraDeAcoes(
+        acoes: [
+          AureaChip(
+            key: const ValueKey('time-remap-inverter'),
+            rotulo: 'Inverter a curva',
+            icone: CupertinoIcons.arrow_left_right,
+            aoTocar: () => inverterACurva(ref, layerId),
+          ),
+          AureaChip(
+            key: const ValueKey('time-remap-reverso-daqui'),
+            rotulo: 'Reverso a partir daqui',
+            icone: CupertinoIcons.arrow_uturn_left,
+            aoTocar: () =>
+                reversoAPartirDoCabecote(ref, layerId, playback?.time.value ?? t),
+          ),
+          if (hasTimeRemap(video))
+            AureaChip(
+              key: const ValueKey('time-remap-constante'),
+              rotulo: 'Velocidade constante',
+              icone: CupertinoIcons.minus,
+              // Tira a curva e fica a velocidade media do clipe: a duracao
+              // na timeline nao muda.
+              aoTocar: () =>
+                  umPasso(ref, () => c.ligarCurvaDeTempo(layerId, false)),
+            ),
+        ],
+      ),
     ];
+  }
+
+  /// O CLIPE PASSA A CORRER AO CONTRARIO pela curva. Com o interruptor
+  /// Reverse ligado, primeiro grava na curva o que a previa ja toca (e
+  /// desliga o interruptor); depois espelha. Um passo de desfazer.
+  static void inverterACurva(WidgetRef ref, String layerId) {
+    final c = ref.read(editorControllerProvider.notifier);
+    final l = ref.read(editorControllerProvider).layerById(layerId);
+    if (l is! VideoLayer) return;
+    c.runAsOneUndo(() {
+      if (l.reverse) c.assarReversoNaCurva(layerId);
+      c.assarReversoNaCurva(layerId);
+    });
+  }
+
+  /// REVERSO A PARTIR DO CABECOTE: o que ja passou fica; dali em diante a
+  /// curva espelha em torno do quadro atual. Um passo de desfazer.
+  static void reversoAPartirDoCabecote(
+    WidgetRef ref,
+    String layerId,
+    Duration global,
+  ) {
+    final c = ref.read(editorControllerProvider.notifier);
+    final inicial = ref.read(editorControllerProvider).layerById(layerId);
+    if (inicial is! VideoLayer) return;
+    c.runAsOneUndo(() {
+      if (inicial.reverse) c.assarReversoNaCurva(layerId);
+      final l = ref.read(editorControllerProvider).layerById(layerId);
+      if (l is! VideoLayer) return;
+      final span = videoSourceSpan(l).inMicroseconds / 1e6;
+      final trilha =
+          timeRemapTrackOf(l) ?? curvaIdentidade(l.duration, span);
+      // A trilha do Time Remap vive no tempo CRU do clipe.
+      var local = global - l.startTime;
+      if (local < Duration.zero) local = Duration.zero;
+      if (local > l.duration) local = l.duration;
+      c.definirTrilhaDeTempo(layerId, reversoAPartirDe(trilha, local, span));
+    });
   }
 }

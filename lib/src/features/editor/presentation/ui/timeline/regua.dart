@@ -8,6 +8,7 @@ import '../../../../../core/ds/ds.dart';
 import '../../../application/editor_controller.dart';
 import '../../../domain/video_project.dart' show Marker;
 import 'estado_da_timeline.dart';
+import 'marcas_da_regua.dart';
 
 /// A REGUA (42): riscos de segundo (18), meio segundo (12) e quadro (5, so
 /// quando cabem com [AureaDims.vaoMinimoDoRisco] de vao), o tempo nos
@@ -60,8 +61,15 @@ class ReguaDaTimeline extends ConsumerWidget {
               ),
             ),
           ),
+          // AS MARCAS aceitam o dedo: segurar abre o menu da marca,
+          // arrastar leva a marca. Fora delas, o toque segue para o scrub.
+          if (dados.marcas.isNotEmpty)
+            Positioned.fill(
+              child: ToqueDasMarcas(estado: estado, marcas: dados.marcas),
+            ),
           // DENTRO DE UM GRUPO: o caminho de volta mora na ponta da regua,
-          // acima dos cabecalhos. Tocar sai um nivel.
+          // acima dos cabecalhos. Tocar sai um nivel; segurar abre as
+          // migalhas (voltar direto a qualquer nivel de fora).
           if (caminho.isNotEmpty)
             Positioned(
               left: AureaDims.e4,
@@ -72,6 +80,16 @@ class ReguaDaTimeline extends ConsumerWidget {
                 key: const ValueKey('timeline-sair-do-grupo'),
                 behavior: HitTestBehavior.opaque,
                 onTap: controlador.exitGroup,
+                onLongPressStart: (d) => menuDasMigalhas(
+                  context,
+                  ref,
+                  ancora: Rect.fromLTWH(
+                    d.globalPosition.dx,
+                    d.globalPosition.dy,
+                    0,
+                    0,
+                  ),
+                ),
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: AureaDims.e4),
                   decoration: BoxDecoration(

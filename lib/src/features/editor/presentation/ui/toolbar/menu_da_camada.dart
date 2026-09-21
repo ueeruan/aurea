@@ -1,3 +1,5 @@
+import 'dart:async' show unawaited;
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -5,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../../core/ds/ds.dart';
 import '../../../../../core/l10n/app_language.dart';
 import '../../../../../core/ui/snack.dart';
+import '../../../application/camera_track_service.dart';
 import '../../../application/editor_controller.dart';
 import '../../../application/keyframe_clipboard.dart';
 import '../../../application/playback_controller.dart';
@@ -50,6 +53,7 @@ import 'escolher_pai.dart';
 abstract final class AcaoDaCamada {
   static const duplicar = 'duplicar';
   static const dividir = 'dividir';
+  static const juntar = 'juntar';
   static const apagar = 'apagar';
   static const renomear = 'renomear';
   static const ocultar = 'ocultar';
@@ -112,6 +116,8 @@ abstract final class AcaoDaCamada {
   static const grupoRecorte = 'grupo-recorte';
   static const excluirEFechar = 'excluir-e-fechar';
   static const fecharBuracos = 'fechar-buracos';
+  static const selecionarAcima = 'selecionar-acima';
+  static const selecionarAbaixo = 'selecionar-abaixo';
 }
 
 AureaMenuItem<String> _item(
@@ -140,6 +146,7 @@ List<AureaMenuItem<String>> itensDoMenuDaCamada(
   required bool temCamadaCopiada,
   required bool temKeyframesCopiados,
   required bool podeColarEstilo,
+  bool podeJuntar = false,
 }) {
   final id = camada.id;
   final meta = projeto.metaOf(id);
@@ -160,6 +167,15 @@ List<AureaMenuItem<String>> itensDoMenuDaCamada(
       CupertinoIcons.scissors,
       habilitado: camada.activeAt(t),
     ),
+    // JUNTAR: dois pedacos do mesmo arquivo, encostados e em sequencia na
+    // fonte, voltam a ser um clipe. So aparece quando ha com quem juntar
+    // (era o selo "Juntar" na juncao da barra do editor antigo).
+    if (podeJuntar)
+      _item(
+        AcaoDaCamada.juntar,
+        'Juntar ao pedaço vizinho',
+        CupertinoIcons.link,
+      ),
     _item(
       AcaoDaCamada.apagar,
       'Apagar',
@@ -480,6 +496,24 @@ List<AureaMenuItem<String>> itensDeMaisAcoes(
       'Fechar buracos da timeline',
       CupertinoIcons.arrow_left_right,
     ),
+    // AS SETAS DE CAMADA VIZINHA do editor antigo (barra compacta com o
+    // painel aberto): escolher a de cima ou a de baixo sem procurar na
+    // timeline.
+    _item(
+      AcaoDaCamada.selecionarAcima,
+      'Selecionar a camada de cima',
+      CupertinoIcons.chevron_up,
+      habilitado: projeto.layers.indexWhere((l) => l.id == id) > 0,
+    ),
+    _item(
+      AcaoDaCamada.selecionarAbaixo,
+      'Selecionar a camada de baixo',
+      CupertinoIcons.chevron_down,
+      habilitado: () {
+        final i = projeto.layers.indexWhere((l) => l.id == id);
+        return i >= 0 && i < projeto.layers.length - 1;
+      }(),
+    ),
   ];
 }
 
@@ -527,6 +561,7 @@ Future<void> mostrarMenuDaCamada(
       temCamadaCopiada: c.temCamadaCopiada,
       temKeyframesCopiados: KeyframeClipboard.temAlgo,
       podeColarEstilo: c.categoriasColaveis(layerId).isNotEmpty,
+      podeJuntar: c.hasJoinableNeighbour(layerId),
     ),
   );
   if (acao == null || !context.mounted) return;
@@ -563,7 +598,24 @@ Future<void> executarAcaoDaCamada(
   switch (acao) {
     case AcaoDaCamada.duplicar:
       HapticFeedback.lightImpact();
-      umPasso(() => c.duplicarCamada(id));
+      String? copia;
+      umPasso(() => copia = c.duplicarCamada(id));
+      // O RASTREIO DE CAMERA acompanha a copia (e um ativo do trecho,
+      // guardado fora do projeto): o `duplicateLayer` antigo clonava, e sem
+      // isto a copia de um video rastreado perdia a camera.
+      final nova = copia;
+      if (camada is VideoLayer && nova != null) {
+        unawaited(CameraTrackService.instance.clonar(id, nova));
+      }
+    case AcaoDaCamada.juntar:
+      HapticFeedback.lightImpact();
+      var juntou = false;
+      umPasso(() => juntou = c.joinWithNeighbour(id));
+      if (!juntou) {
+        aviso('Não há pedaço vizinho para juntar');
+      } else {
+        aviso('Pedaços juntados');
+      }
     case AcaoDaCamada.dividir:
       if (!camada.activeAt(t)) {
         showReasonToast(context, 'Leve o cabeçote para dentro da camada');
@@ -798,6 +850,12 @@ Future<void> executarAcaoDaCamada(
         return;
       }
       umPasso(c.closeTimelineGaps);
+    case AcaoDaCamada.selecionarAcima:
+      ref.read(multiSelectProvider.notifier).state = const {};
+      c.selectNeighbor(-1);
+    case AcaoDaCamada.selecionarAbaixo:
+      ref.read(multiSelectProvider.notifier).state = const {};
+      c.selectNeighbor(1);
   }
 }
 

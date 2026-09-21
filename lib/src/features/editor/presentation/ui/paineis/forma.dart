@@ -12,6 +12,7 @@ import '../../../domain/shape.dart';
 import '../shell/contrato.dart';
 import 'comum.dart';
 import 'comum_de_objetos.dart';
+import 'operadores_da_forma.dart';
 import 'pontos.dart';
 
 /// O nome de cada tipo de forma parametrica (rotulo de UI).
@@ -41,7 +42,12 @@ const _emGraus = {'shapeRotation', 'startAngle', 'sweep'};
 ///    com losango;
 ///  * Cor: o preenchimento (nenhum, cor, degrade);
 ///  * Traco: cor, espessura, opacidade e tracejado, com losango;
-///  * Desenhar: o progresso do traco (inicio, fim, deslocamento).
+///  * Desenhar: o progresso do traco (inicio, fim, deslocamento);
+///  * Operadores: Trim Paths, Repeater, Morph, operadores de caminho,
+///    Combinar e geometria composta (`operadores_da_forma.dart`).
+///
+/// O toque longo no losango de uma linha animada abre o editor de curva
+/// do trecho (a curva da primitiva e a de cada trilha do traco e do trim).
 ///
 /// O lapis do cabecalho abre o editor de pontos. Com este painel aberto o
 /// palco mostra as alcas da forma viva (a casca espelha o painel na
@@ -57,7 +63,7 @@ class PainelForma extends ConsumerStatefulWidget {
 
 class _PainelFormaState extends ConsumerState<PainelForma> {
   static const _titulo = 'Forma';
-  static const _abas = ['Forma', 'Cor', 'Traço', 'Desenhar'];
+  static const _abas = ['Forma', 'Cor', 'Traço', 'Desenhar', 'Operadores'];
 
   int _aba = 0;
 
@@ -116,7 +122,16 @@ class _PainelFormaState extends ConsumerState<PainelForma> {
             0 => _forma(visivel, gravada, t, escopo.playback),
             1 => _cor(visivel),
             2 => _traco(visivel, gravada, t, escopo.playback),
-            _ => _desenhar(visivel, gravada, t, escopo.playback),
+            3 => _desenhar(visivel, gravada, t, escopo.playback),
+            _ => linhasDosOperadores(
+              context,
+              ref,
+              layerId: _id,
+              visivel: visivel,
+              gravada: gravada,
+              t: t,
+              playback: escopo.playback,
+            ),
           },
         ),
       ),
@@ -234,10 +249,45 @@ class _PainelFormaState extends ConsumerState<PainelForma> {
         t: t,
         playback: playback,
         aoAlternar: () => _c.toggleShapeParamKeyframe(_id, chave, t),
+        aoCurva: () => abrirCurvaDaForma(
+          context,
+          ref,
+          playback,
+          layerId: _id,
+          rotulo: ficha.rotulo,
+          trilhaDe: (l) {
+            if (l is! ShapeLayer) return null;
+            final p = l.contents.whereType<ShapeParametric>().firstOrNull;
+            return p == null ? null : shapeParamTrackOf(p, chave);
+          },
+          gravar: (c, id, inicio, e) =>
+              c.setShapeParamSegmentEase(id, chave, inicio, e),
+          gravarEmTodos: (c, id, e) =>
+              c.applyEaseToAllShapeParamSegments(id, chave, e),
+        ),
       ),
       aoMudar: (v) => _c.editShapeParam(_id, chave, t, v),
     );
   }
+
+  /// A CURVA de uma trilha de item (traco, trim) da forma.
+  void _curvaDoItem(
+    PlaybackController playback,
+    String itemId,
+    String chave,
+    String rotulo,
+  ) => abrirCurvaDaForma(
+    context,
+    ref,
+    playback,
+    layerId: _id,
+    rotulo: rotulo,
+    trilhaDe: (l) => trilhaDoItemDaForma(l, itemId, chave),
+    gravar: (c, id, inicio, e) =>
+        c.setShapeItemTrackSegmentEase(id, itemId, chave, inicio, e),
+    gravarEmTodos: (c, id, e) =>
+        c.applyEaseToAllShapeItemTrackSegments(id, itemId, chave, e),
+  );
 
   // ---------------------------------------------------------------- cor
 
@@ -391,6 +441,7 @@ class _PainelFormaState extends ConsumerState<PainelForma> {
         playback: playback,
         aoAlternar: () =>
             _c.toggleShapeItemTrackKeyframe(_id, traco.id, chave, t),
+        aoCurva: () => _curvaDoItem(playback, traco.id, chave, rotulo),
       ),
       aoMudar: (v) =>
           _c.editShapeItemTrack(_id, traco.id, chave, t, v / escala),
@@ -441,6 +492,16 @@ class _PainelFormaState extends ConsumerState<PainelForma> {
         min: 0,
         max: 300,
       ),
+      // O TRACEJADO QUE ANDA: o deslocamento do tracejado (a "formiga"
+      // do contorno) tinha trilho e curva no editor antigo.
+      linha(
+        'Deslocar tracejado',
+        'dashOffset',
+        traco.dashOffset,
+        tracoGravado.dashOffset,
+        min: -2000,
+        max: 2000,
+      ),
     ];
   }
 
@@ -490,6 +551,7 @@ class _PainelFormaState extends ConsumerState<PainelForma> {
         playback: playback,
         aoAlternar: () =>
             _c.toggleShapeItemTrackKeyframe(_id, trim.id, chave, t),
+        aoCurva: () => _curvaDoItem(playback, trim.id, chave, rotulo),
       ),
       aoMudar: (v) => _c.editShapeItemTrack(_id, trim.id, chave, t, v / 100),
     );

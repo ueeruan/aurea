@@ -10,6 +10,7 @@ import '../../../domain/layer.dart';
 import '../shell/contrato.dart';
 import 'comum.dart';
 import 'comum_de_objetos.dart';
+import 'operadores_da_forma.dart' show abrirCurvaDaForma;
 
 /// CLONAR — a grade de clones do nulo: o nulo posiciona as camadas
 /// escolhidas numa grade (retangular, radial ou esferica), e o morph anima
@@ -192,10 +193,28 @@ class _PainelClonarState extends ConsumerState<PainelClonar> {
         t: t,
         playback: playback,
         aoAlternar: () => _c.toggleGridParamKeyframe(_id, chave, t),
+        aoCurva: () => _curvaDaGrade(playback, chave, rotulo),
       ),
       aoMudar: (v) => _c.editGridParam(_id, chave, t, v / escala),
     );
   }
+
+  /// A CURVA de uma trilha da grade (inclui 'transition', o morph) — o
+  /// editor de curva geral, gravando pelo controlador da grade.
+  void _curvaDaGrade(PlaybackController playback, String chave, String rotulo) =>
+      abrirCurvaDaForma(
+        context,
+        ref,
+        playback,
+        layerId: _id,
+        rotulo: rotulo,
+        trilhaDe: (l) => l is NullLayer && l.grid != null
+            ? gridTrackOf(l.grid!, chave)
+            : null,
+        gravar: (c, id, inicio, e) =>
+            c.setGridSegmentEase(id, chave, inicio, e),
+        gravarEmTodos: (c, id, e) => c.applyEaseToAllGridSegments(id, chave, e),
+      );
 
   List<Widget> _grade(
     NullLayer visivel,
@@ -247,6 +266,7 @@ class _PainelClonarState extends ConsumerState<PainelClonar> {
           t: t,
           playback: playback,
           aoAlternar: () => _c.toggleGridTransitionKeyframe(_id, t),
+          aoCurva: () => _curvaDaGrade(playback, 'transition', 'Morph'),
         ),
         aoMudar: (v) => _c.editGridTransition(_id, t, v),
       ),

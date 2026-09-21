@@ -80,13 +80,16 @@ AureaPropertyRow linhaNumerica(
 
 /// O losango de uma TRILHA qualquer ([AnimatedDouble]) da camada
 /// [gravada]: as marcas vem da trilha GRAVADA (o losango nao mente sobre
-/// edicao pendente) e o toque chama [aoAlternar].
+/// edicao pendente) e o toque chama [aoAlternar]. Com [aoCurva], o toque
+/// longo no losango abre o editor de curva do trecho (so com duas marcas
+/// ou mais — com uma nao ha trecho).
 Losango losangoDaTrilha({
   required AnimatedDouble? trilha,
   required Layer gravada,
   required Duration t,
   required PlaybackController playback,
   required VoidCallback aoAlternar,
+  VoidCallback? aoCurva,
 }) => losangoDasMarcas(
   marcasUs: [
     for (final k in trilha?.keyframes ?? const []) k.time.inMicroseconds,
@@ -95,6 +98,7 @@ Losango losangoDaTrilha({
   t: t,
   playback: playback,
   aoAlternar: aoAlternar,
+  aoCurva: aoCurva,
 );
 
 // ------------------------------------------------ acabamento (LayerStyles)

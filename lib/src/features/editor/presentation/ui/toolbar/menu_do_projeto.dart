@@ -17,6 +17,7 @@ import '../../../domain/layer.dart';
 import '../../../domain/video_project.dart';
 import '../paineis/batidas.dart' show showBeatsSheet;
 import '../timeline/ima.dart' show alternarIma, magneticProvider;
+import '../timeline/marcas_da_regua.dart' show menuDaMarca;
 
 // ===========================================================================
 // O MENU DO PROJETO E O MENU DAS MARCAS
@@ -208,6 +209,23 @@ Future<void> menuDasMarcas(
               fechar();
             },
           ),
+          // A MARCA DEBAIXO DO CABECOTE: a bandeirinha no cabecote fica sob
+          // o toque dele na regua, entao renomear e pintar essa marca mora
+          // aqui tambem (o toque longo na marca faz o mesmo nas outras).
+          if (project.markerNear(
+                playback.time.value,
+                const Duration(milliseconds: 120),
+              )
+              case final aqui?)
+            ItemDoMenuEmFolha(
+              chave: 'marcas-editar-aqui',
+              icone: CupertinoIcons.pencil,
+              rotulo: 'Renomear, pintar ou apagar a marca daqui',
+              onTap: () {
+                fechar();
+                menuDaMarca(context, ref, aqui);
+              },
+            ),
           ItemDoMenuEmFolha(
             chave: 'marcas-proxima',
             icone: CupertinoIcons.chevron_right_2,

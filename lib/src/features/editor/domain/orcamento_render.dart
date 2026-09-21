@@ -557,6 +557,12 @@ double escalaDoPreview(
 /// A ESCALA DO ALVO DA CENA 3D NO PREVIEW — e ela NAO sabe se o video
 /// esta tocando.
 ///
+/// SEM CHAMADOR EM PRODUCAO. Quem decide o alvo 3D do preview hoje e
+/// `alvo3DDoPreview` (presentation/widgets/rascunho_do_preview.dart): ele
+/// junta a receita com o tamanho FISICO do palco, arredonda a multiplos de
+/// 64 px e so troca com histerese. Esta continua aqui porque tem teste
+/// proprio; nao a use como segunda conta do mesmo alvo.
+///
 /// O teto era 720 px tocando e 1080 parado. So que o flutter_scene joga
 /// fora todas as texturas de trabalho quando o tamanho do alvo muda (cor,
 /// profundidade, MSAA, bloom) e cria outras enquanto as antigas ainda

@@ -17,6 +17,7 @@ import 'package:aurea/src/features/editor/application/sketchfab_service.dart';
 import 'package:aurea/src/features/editor/presentation/sketchfab/sketchfab_screen.dart';
 import 'package:aurea/src/features/editor/presentation/widgets/importacao_3d.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -586,6 +587,52 @@ void main() {
     expect(find.byKey(const ValueKey('sketchfab-detalhe')), findsOneWidget);
     expect(find.text('Conectar conta'), findsWidgets);
     expect(find.text('Baixar e importar'), findsNothing);
+  });
+
+  testWidgets('o detalhe mostra a atribuicao e copia a linha TASL', (
+    tester,
+  ) async {
+    // O que foi parar na area de transferencia; o canal de plataforma nao
+    // existe no teste, entao ele e atendido aqui.
+    Object? copiado;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (chamada) async {
+        if (chamada.method == 'Clipboard.setData') {
+          copiado = (chamada.arguments as Map)['text'];
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+
+    final http = _Http(
+      (_) => _Resposta.texto(200, _buscaJson(miniaturas: false)),
+    );
+    await tester.pumpWidget(app(SketchfabService(http: http)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('sketchfab-cartao-$_uid')));
+    await tester.pumpAndSettle();
+
+    final linha = tester
+        .widget<Text>(find.byKey(const ValueKey('sketchfab-creditos')))
+        .data!;
+    expect(linha, contains('Castelo medieval'));
+    expect(linha, contains('Túlio Modelador'));
+    expect(linha, contains('CC Attribution'));
+    expect(linha, contains('Sketchfab'));
+
+    await tester.tap(find.byKey(const ValueKey('sketchfab-copiar-creditos')));
+    await tester.pumpAndSettle();
+    expect(copiado, linha);
+    // O aviso de "copiado" tem timer proprio: deixa-lo fechar.
+    await tester.pump(const Duration(seconds: 5));
   });
 
   testWidgets('com token o botao baixa, e o dialogo do token grava no cofre', (

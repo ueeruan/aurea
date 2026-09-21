@@ -36,6 +36,11 @@ enum AmSecao {
   /// Texto: conteudo, fonte, animadores e texto em caminho.
   editarTexto,
 
+  /// Texto (e so ele): virar TEXTO 3D, levando conteudo, fonte, cor e
+  /// transformacao. Fica colada em "Editar texto" porque e a continuacao
+  /// dela — o dono escreve, posiciona e so entao decide extrudar.
+  ativar3d,
+
   /// Legenda: o texto de cada fala e o estilo.
   editarLegendas,
   particulas,
@@ -43,7 +48,12 @@ enum AmSecao {
   /// Cena 3D e Elemento 3D: objetos, materiais, luzes, cameras e cortes.
   cena3d,
 
-  /// Texto 3D: a letra, a fonte, o metal, a espessura e o chanfro.
+  /// Texto 3D: a letra, a fonte, o metal, a profundidade e o chanfro.
+  ///
+  /// So aparece para a camada de CENA 3D que tem um no de texto 3D dentro.
+  /// Video, imagem, modelo importado e texto comum nao a veem: um painel
+  /// que abre para editar uma letra que nao existe e pior que painel
+  /// nenhum.
   texto3d,
 
   /// Video: a porta da Cena 3D rastreada (motor 2.0) e os rastreios 2D.
@@ -122,6 +132,10 @@ Set<AmSecao> secoesDe(Layer layer) {
     // escondido — e por isso pareciam nao existir. Cada um e a secao do
     // seu tipo, e nenhum tipo passa de sete.
     if (layer is TextLayer) AmSecao.editarTexto,
+    // ATIVAR 3D SO NO TEXTO. Nao e um botao generico de "3D": ele extruda
+    // LETRA, e para isso precisa do conteudo e da fonte que so a camada de
+    // texto tem.
+    if (layer is TextLayer) AmSecao.ativar3d,
     if (layer is CaptionLayer) AmSecao.editarLegendas,
     if (layer is ParticulasLayer) AmSecao.particulas,
     if (layer is Element3DLayer || layer is Scene3DLayer) AmSecao.cena3d,

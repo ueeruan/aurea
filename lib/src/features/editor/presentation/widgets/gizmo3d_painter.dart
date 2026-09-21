@@ -7,12 +7,20 @@ import 'texto_no_atlas.dart';
 
 /// O DESENHO DO GIZMO 3D — os tres eixos e os tres aneis, na viewport.
 ///
-/// ONDE ELE DESENHA: nas coordenadas da COMPOSICAO multiplicadas por
-/// [escala]. A caixa do gizmo na tela nao muda com o zoom do palco do
-/// mesmo jeito que o resto? Muda: [comprimento] e [raio] chegam ja
-/// divididos pela escala do palco (ver `kComprimentoDoGizmo`), entao o
-/// braco tem sempre os mesmos pixels de dedo — um gizmo que encolhesse
-/// junto com o zoom sumiria justamente quando se aproxima para mirar.
+/// ONDE ELE DESENHA: em pixels da COMPOSICAO, porque e esse o canvas em
+/// que ele e montado — o `FittedBox` do palco aplica a escala depois, como
+/// ja acontece com as guias e com a grade. Multiplicar aqui por [escala]
+/// (o que este pintor fazia) punha o gizmo em `origem * escala²`: com um
+/// palco de 360 px para uma composicao de 1080, um objeto no centro
+/// aparecia encolhido no canto de cima e a esquerda, e andava um terco do
+/// que o objeto andava. O TOQUE sempre esteve certo (ele converte o dedo
+/// para a composicao), entao o eixo que se pegava era invisivel e o que
+/// se via nao respondia. E o "gizmo fixo no canto" relatado pelo dono.
+///
+/// O QUE FICA CONSTANTE NA TELA: o braco, o raio do anel, a espessura e o
+/// rotulo. Eles chegam em pixels de TELA e sao divididos pela escala do
+/// palco — um gizmo que encolhesse junto com o zoom sumiria justamente
+/// quando a pessoa se aproxima para mirar.
 ///
 /// A COR E A INFORMACAO: X vermelho, Y verde, Z azul — as canonicas. O
 /// rotulo na ponta existe para quem nao tem a convencao na memoria, e o
@@ -27,6 +35,10 @@ class Gizmo3DPainter extends CustomPainter {
     this.eixoAtivo,
     this.anelAtivo,
     this.ativo = true,
+    this.eixos = true,
+    this.aneis = true,
+    this.alcaDeEscala = false,
+    this.escalaEmUso = false,
   });
 
   final GizmoNaTela gizmo;
@@ -34,7 +46,7 @@ class Gizmo3DPainter extends CustomPainter {
   /// O fator composicao -> tela do palco.
   final double escala;
 
-  /// O comprimento do braco e o raio do anel, JA em pixels de tela.
+  /// O comprimento do braco e o raio do anel, em pixels de TELA.
   final double comprimento;
   final double raio;
 
@@ -47,23 +59,32 @@ class Gizmo3DPainter extends CustomPainter {
   /// promete um gesto que o cadeado recusa.
   final bool ativo;
 
-  Offset _naTela(Offset comp) => comp * escala;
+  /// QUAL FERRAMENTA ESTA NA MAO. Num celular os tres bracos, os tres
+  /// aneis e a alca de escala juntos nao cabem no dedo: as fichas do palco
+  /// escolhem um conjunto por vez, e o que nao esta em uso nem aparece —
+  /// desenhar o que nao responde e prometer um gesto que nao existe.
+  final bool eixos;
+  final bool aneis;
+  final bool alcaDeEscala;
+  final bool escalaEmUso;
+
+  double get _e => escala <= 0 ? 1 : escala;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final origem = _naTela(gizmo.origem);
-    final braco = comprimento;
+    final origem = gizmo.origem;
+    final braco = comprimento / _e;
 
     // OS ANEIS PRIMEIRO, os bracos por cima: o braco e o que se pega com
     // mais frequencia, e desenha-lo por ultimo evita que a elipse passe
     // na frente da ponta que o dedo esta mirando.
-    for (final e in EixoDoGizmo.values) {
+    for (final e in aneis ? EixoDoGizmo.values : const <EixoDoGizmo>[]) {
       // ANEL DE PERFIL NAO SE DESENHA. Uma circunferencia vista de lado e
       // um traco — desenha-la por cima do braco do eixo pareceria um
       // segundo braco, e pior, prometeria um gesto que o teste de toque
       // recusa. So aparece o anel que tem area.
       if (!anelVisivel(gizmo, e)) continue;
-      final pontos = anelDeGiro(gizmo, e, raio / escala);
+      final pontos = anelDeGiro(gizmo, e, raio / _e);
       final emUso = anelAtivo == e;
       final visivel = eixoVisivel(gizmo, e);
       final cor = corDoEixo(e);
@@ -72,11 +93,9 @@ class Gizmo3DPainter extends CustomPainter {
           : visivel
           ? (emUso ? 0.95 : 0.5)
           : 0.18;
-      final caminho = Path()
-        ..moveTo(_naTela(pontos.first).dx, _naTela(pontos.first).dy);
+      final caminho = Path()..moveTo(pontos.first.dx, pontos.first.dy);
       for (final p in pontos.skip(1)) {
-        final q = _naTela(p);
-        caminho.lineTo(q.dx, q.dy);
+        caminho.lineTo(p.dx, p.dy);
       }
       // O HALO ESCURO POR BAIXO: a elipse fina de uma cor clara sobre um
       // video claro desaparecia. Duas passadas resolvem sem opacificar a
@@ -86,7 +105,7 @@ class Gizmo3DPainter extends CustomPainter {
         Paint()
           ..style = PaintingStyle.stroke
           ..color = Colors.black.withValues(alpha: alfa * 0.55)
-          ..strokeWidth = emUso ? 6 : 4
+          ..strokeWidth = (emUso ? 6 : 4) / _e
           ..isAntiAlias = true,
       );
       canvas.drawPath(
@@ -94,12 +113,12 @@ class Gizmo3DPainter extends CustomPainter {
         Paint()
           ..style = PaintingStyle.stroke
           ..color = cor.withValues(alpha: alfa)
-          ..strokeWidth = emUso ? 3.4 : 1.8
+          ..strokeWidth = (emUso ? 3.4 : 1.8) / _e
           ..isAntiAlias = true,
       );
     }
 
-    for (final e in EixoDoGizmo.values) {
+    for (final e in eixos ? EixoDoGizmo.values : const <EixoDoGizmo>[]) {
       final emUso = eixoAtivo == e;
       final visivel = eixoVisivel(gizmo, e);
       final cor = corDoEixo(e);
@@ -117,11 +136,11 @@ class Gizmo3DPainter extends CustomPainter {
       // HALO: a linha passa por cima de qualquer conteudo.
       traco
         ..color = Colors.black.withValues(alpha: alfa * 0.6)
-        ..strokeWidth = emUso ? 11 : 8;
+        ..strokeWidth = (emUso ? 11 : 8) / _e;
       canvas.drawLine(origem, ponta, traco);
       traco
         ..color = cor.withValues(alpha: alfa)
-        ..strokeWidth = emUso ? 5.5 : 3.6;
+        ..strokeWidth = (emUso ? 5.5 : 3.6) / _e;
       canvas.drawLine(origem, ponta, traco);
 
       // O CONE DA PONTA: diz o SENTIDO do eixo. Sem ele, um eixo so de
@@ -130,11 +149,13 @@ class Gizmo3DPainter extends CustomPainter {
       if (visivel && ativo) {
         final u = _direcaoNaTela(e);
         final n = Offset(-u.dy, u.dx);
+        final c = 9 / _e;
+        final l = 5.5 / _e;
         canvas.drawPath(
           Path()
-            ..moveTo(ponta.dx + u.dx * 9, ponta.dy + u.dy * 9)
-            ..lineTo(ponta.dx + n.dx * 5.5, ponta.dy + n.dy * 5.5)
-            ..lineTo(ponta.dx - n.dx * 5.5, ponta.dy - n.dy * 5.5)
+            ..moveTo(ponta.dx + u.dx * c, ponta.dy + u.dy * c)
+            ..lineTo(ponta.dx + n.dx * l, ponta.dy + n.dy * l)
+            ..lineTo(ponta.dx - n.dx * l, ponta.dy - n.dy * l)
             ..close(),
           Paint()
             ..color = cor.withValues(alpha: alfa)
@@ -143,8 +164,26 @@ class Gizmo3DPainter extends CustomPainter {
       }
 
       if (visivel) {
-        _rotulo(canvas, ponta + _direcaoNaTela(e) * 12, cor, alfa, e);
+        _rotulo(canvas, ponta + _direcaoNaTela(e) * (12 / _e), cor, alfa, e);
       }
+    }
+
+    // A ALCA DE ESCALA: um quadrado branco na diagonal, no mesmo raio do
+    // braco. Quadrado, e nao circulo, porque circulo ja e o ponto central
+    // — dois circulos no mesmo gizmo seriam a mesma promessa duas vezes.
+    if (alcaDeEscala) {
+      final p = pontoDaAlcaDeEscala(gizmo, comprimento, escala);
+      final lado = (escalaEmUso ? 13.0 : 10.0) / _e;
+      final caixa = Rect.fromCenter(center: p, width: lado, height: lado);
+      canvas.drawRect(
+        caixa.inflate(1.5 / _e),
+        Paint()..color = Colors.black.withValues(alpha: ativo ? 0.6 : 0.25),
+      );
+      canvas.drawRect(
+        caixa,
+        Paint()
+          ..color = Colors.white.withValues(alpha: ativo ? 0.95 : 0.3),
+      );
     }
 
     // O PONTO CENTRAL: o que se ve quando o eixo inteiro aponta para o
@@ -152,14 +191,13 @@ class Gizmo3DPainter extends CustomPainter {
     // ter gizmo nenhum — e o Z existe, so nao tem comprimento.
     canvas.drawCircle(
       origem,
-      4.5,
+      4.5 / _e,
       Paint()..color = Colors.white.withValues(alpha: ativo ? 0.85 : 0.3),
     );
     canvas.drawCircle(
       origem,
-      2.4,
-      Paint()
-        ..color = Colors.black.withValues(alpha: ativo ? 0.75 : 0.3),
+      2.4 / _e,
+      Paint()..color = Colors.black.withValues(alpha: ativo ? 0.75 : 0.3),
     );
   }
 
@@ -182,7 +220,7 @@ class Gizmo3DPainter extends CustomPainter {
     // [TextoNoAtlas], que e a regra do projeto para texto no palco — o
     // atlas de glifos do Impeller corrompe quando um glifo e pedido muito
     // maior do que o corpo de desenho.
-    final corpo = 13 / (escala <= 0 ? 1 : escala);
+    final corpo = 13 / _e;
     final t = TextoNoAtlas(
       texto: nomeDoEixo(e),
       estilo: TextStyle(
@@ -211,7 +249,26 @@ class Gizmo3DPainter extends CustomPainter {
       old.raio != raio ||
       old.eixoAtivo != eixoAtivo ||
       old.anelAtivo != anelAtivo ||
-      old.ativo != ativo;
+      old.ativo != ativo ||
+      old.eixos != eixos ||
+      old.aneis != aneis ||
+      old.alcaDeEscala != alcaDeEscala ||
+      old.escalaEmUso != escalaEmUso;
+}
+
+/// ONDE FICA A ALCA DE ESCALA, em pixels de COMPOSICAO.
+///
+/// Na diagonal de cima e a direita, a [comprimento] pixels de TELA da
+/// origem: fora dos bracos (que ficam nos eixos) e fora do ponto central,
+/// para o dedo nao disputar com nenhum dos dois.
+Offset pontoDaAlcaDeEscala(
+  GizmoNaTela gizmo,
+  double comprimento,
+  double escala,
+) {
+  final e = escala <= 0 ? 1.0 : escala;
+  const diagonal = Offset(0.7071, -0.7071);
+  return gizmo.origem + diagonal * (comprimento / e);
 }
 
 /// O HALO QUE O DEDO VE AO PEGAR UM EIXO: o braco em uso ganha um circulo

@@ -41,11 +41,16 @@ void main() {
     addTearDown(container.dispose);
     final controller = container.read(editorControllerProvider.notifier);
     controller.openProject(VideoProject.empty('texto 3d'));
-    noId = (await controller.addTexto3D(
-      Duration.zero,
-      'AUREA',
-      EstiloDoTexto3D.ouro,
-      familia: 'fonte que nao existe',
+    // EM `runAsync` PORQUE MONTAR A LETRA LE ARQUIVO DE VERDADE (a fonte).
+    // Dentro do `testWidgets` o relogio e falso e um Future de I/O real
+    // nunca completa: sem isto o teste fica pendurado ate o timeout.
+    noId = (await tester.runAsync<String?>(
+      () => controller.addTexto3D(
+        Duration.zero,
+        'AUREA',
+        EstiloDoTexto3D.ouro,
+        familia: 'fonte que nao existe',
+      ),
     ))!;
     cenaId = cena().id;
 
@@ -167,20 +172,30 @@ void main() {
     );
   });
 
-  testWidgets('a espessura anda no rotulo durante o arrasto', (tester) async {
+  testWidgets('a profundidade anda no rotulo durante o arrasto', (tester) async {
     await abrir(tester);
     final inicio = no().texto3d!.espessura;
-    final controle = find.byKey(const ValueKey('texto3d-controle-Espessura'));
+    // PROFUNDIDADE e o nome do controle da extrusao desde que a folha foi
+    // posta na ordem de prioridade do dono ("Espessura" era a medida
+    // interna, e ninguem procurava por ela).
+    final controle = find.byKey(const ValueKey('texto3d-controle-Profundidade'));
     await tester.ensureVisible(controle);
     await tester.pumpAndSettle();
     final linha = tester.widget<ParameterRow>(controle);
     expect(linha.value, inicio);
 
-    // A LINHA INTEIRA E A REGUA: arrastar na horizontal puxa o valor.
-    final meio = tester.getCenter(controle);
-    final gesto = await tester.startGesture(meio);
-    await gesto.moveBy(const Offset(90, 0));
-    await tester.pump();
+    // A LINHA INTEIRA E A REGUA: arrastar na horizontal puxa o valor. O
+    // dedo desce no rotulo (a esquerda), longe do chip do numero, que tem
+    // o toque para digitar — e anda em passos, como um dedo de verdade:
+    // um salto unico nao resolve a arena contra a rolagem da folha.
+    final caixa = tester.getRect(controle);
+    final gesto = await tester.startGesture(
+      Offset(caixa.left + caixa.width * 0.25, caixa.center.dy),
+    );
+    for (var i = 0; i < 6; i++) {
+      await gesto.moveBy(const Offset(15, 0));
+      await tester.pump();
+    }
     // AINDA COM O DEDO NA TELA: o numero ja tem de ter mudado. Era aqui que
     // o controle parecia morto — nada mudava ate soltar.
     expect(
@@ -189,7 +204,15 @@ void main() {
       reason: 'o rotulo ficou parado com o dedo na tela',
     );
     await gesto.up();
-    await tester.pumpAndSettle();
+    // A ESPERA DE 140 ms E UM `Timer`, e Timer nao agenda quadro: um
+    // `pumpAndSettle` sozinho volta antes de ele disparar. O tempo tem de
+    // ser avancado de proposito, e a letra e refeita lendo a fonte do
+    // disco — que so anda em `runAsync`.
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 400)),
+    );
+    await tester.pump();
     expect(
       no().texto3d!.espessura,
       isNot(inicio),

@@ -194,14 +194,22 @@ class _TelaDoSketchfabState extends ConsumerState<TelaDoSketchfab> {
   // -------------------------------------------------------------- importar
 
   Future<void> _abrirDetalhe(ModeloDoSketchfab m) async {
-    final baixar = await showCupertinoModalPopup<bool>(
+    final acao = await showCupertinoModalPopup<String>(
       context: context,
       builder: (_) => _FolhaDoModelo(modelo: m, temToken: _token != null),
     );
-    if (!mounted || baixar != true) return;
+    if (!mounted || acao == null) return;
+    if (acao == 'creditos') {
+      await Clipboard.setData(ClipboardData(text: m.credito.porExtenso));
+      if (mounted) AureaSnack.show(context, 'Créditos copiados.');
+      return;
+    }
+    if (acao != 'baixar') return;
     if (_token == null) {
       await _conectarConta();
-      return;
+      // CONECTOU AGORA: segue para o download sem obrigar o dono a achar o
+      // mesmo cartao de novo — ele ja disse o que queria.
+      if (!mounted || _token == null) return;
     }
     await _baixarEImportar(m);
   }
@@ -599,6 +607,24 @@ class _FolhaDoModelo extends StatelessWidget {
             ], style: linha),
           if (modelo.animacoes > 0)
             AppTextMoldado('Animações: {0}', [modelo.animacoes], style: linha),
+          const SizedBox(height: 6),
+          // A ATRIBUICAO, DO JEITO QUE VAI FICAR PRESA AO MODELO. As
+          // licencas Creative Commons pedem titulo, autor, origem e licenca
+          // onde quer que a obra apareca — mostrar a linha aqui e o que
+          // deixa o dono ver, ANTES de baixar, o que ele vai ter de creditar.
+          const AppText(
+            'Créditos',
+            style: TextStyle(
+              color: AmColors.text,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          Text(
+            modelo.credito.porExtenso,
+            key: const ValueKey('sketchfab-creditos'),
+            style: linha,
+          ),
           if (ficha.pesado())
             AppText(
               'Modelo pesado: o app vai oferecer reduzir na importação.',
@@ -610,8 +636,13 @@ class _FolhaDoModelo extends StatelessWidget {
         CupertinoActionSheetAction(
           key: const ValueKey('sketchfab-baixar'),
           isDefaultAction: true,
-          onPressed: () => Navigator.of(context).pop(true),
+          onPressed: () => Navigator.of(context).pop('baixar'),
           child: AppText(temToken ? 'Baixar e importar' : 'Conectar conta'),
+        ),
+        CupertinoActionSheetAction(
+          key: const ValueKey('sketchfab-copiar-creditos'),
+          onPressed: () => Navigator.of(context).pop('creditos'),
+          child: const AppText('Copiar créditos'),
         ),
         if (modelo.viewerUrl != null)
           CupertinoActionSheetAction(
@@ -626,7 +657,7 @@ class _FolhaDoModelo extends StatelessWidget {
       ],
       cancelButton: CupertinoActionSheetAction(
         key: const ValueKey('sketchfab-detalhe-fechar'),
-        onPressed: () => Navigator.of(context).pop(false),
+        onPressed: () => Navigator.of(context).pop(),
         child: const AppText('Cancelar'),
       ),
     );

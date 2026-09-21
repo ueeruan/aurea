@@ -139,7 +139,22 @@ class _Texto3DSheetState extends ConsumerState<_Texto3DSheet> {
 
   Future<void> _trocarEstilo(EstiloDoTexto3D estilo) async {
     setState(() => _estilo = estilo);
-    await _aplicar(_atual);
+    // A PREDEFINICAO MANDA. Ouro que continuasse com a rugosidade e a cor
+    // que o dono tinha ajustado a mao no cromo nao seria ouro — e o relato
+    // seria "escolhi o metal e nao mudou".
+    await _aplicar(_atual.copyWith(semAcabamentoProprio: true));
+  }
+
+  /// REFLEXO: vai direto para a cena, SEM espera.
+  ///
+  /// Os outros controles esperam 140 ms porque refazem a geometria; este
+  /// nao mexe em um triangulo, entao esperar so faria o controle parecer
+  /// morto com o dedo na tela.
+  void _mudarReflexo(double v) {
+    ref
+        .read(editorControllerProvider.notifier)
+        .ajustarReflexoDoTexto3D(widget.sceneId, v);
+    if (mounted) setState(() {});
   }
 
   @override
@@ -278,6 +293,25 @@ class _Texto3DSheetState extends ConsumerState<_Texto3DSheet> {
     }
   }
 
+  /// O VALOR QUE O DONO VE quando ele ainda nao mexeu: o do metal
+  /// escolhido. Sem isto, "Metal" e "Rugosidade" abririam em zero e a
+  /// primeira coisa que a folha mostraria do ouro seria plastico.
+  double get _metalBase =>
+      _atual.metalico ??
+      (materiaisDoTexto3D(_estilo).first['metallic'] as num).toDouble();
+
+  double get _rugosidadeBase =>
+      _atual.rugosidade ??
+      (materiaisDoTexto3D(_estilo).first['roughness'] as num).toDouble();
+
+  /// O REFLEXO MORA NA CENA (ela e quem tem o que refletir), entao ele e
+  /// lido da camada a cada reconstrucao — nao ha copia local para
+  /// desencontrar do palco.
+  double get _reflexoAtual {
+    final camada = ref.read(editorControllerProvider).layerById(widget.sceneId);
+    return camada is Scene3DLayer ? camada.scene.envReflect : 0.9;
+  }
+
   List<Widget> _linhas() {
     return [
       if (_aviso != null)
@@ -289,43 +323,15 @@ class _Texto3DSheetState extends ConsumerState<_Texto3DSheet> {
             style: const TextStyle(fontSize: 12.5, color: Color(0xFFFFB454)),
           ),
         ),
-      Padding(
-        padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
-        child: Align(
-          alignment: Alignment.centerLeft,
-          child: CupertinoButton(
-            key: const ValueKey('texto3d-importar-fonte'),
-            padding: EdgeInsets.zero,
-            minimumSize: const Size(0, 32),
-            onPressed: _importandoFonte ? null : _importarFonte,
-            child: AppText(
-              _importandoFonte ? 'Importando fonte...' : 'Importar fonte (.ttf / .otf)',
-              style: const TextStyle(fontSize: 13),
-            ),
-          ),
-        ),
-      ),
-      if (_familias.length > 1)
-        _fileiraDeOpcoes<String>(
-          'Fonte',
-          _familias,
-          (f) => f,
-          _atual.familia,
-          (f) => _aplicar(_atual.copyWith(familia: f)),
-          chave: (f) => ValueKey('texto3d-fonte-$f'),
-        ),
-      _secao('Material'),
-      _fileiraDeOpcoes<EstiloDoTexto3D>(
-        'Metal',
-        EstiloDoTexto3D.values,
-        nomeDoEstiloDoTexto3D,
-        _estilo,
-        _trocarEstilo,
-        chave: (e) => ValueKey('texto3d-estilo-${e.name}'),
-      ),
+      // A ORDEM E A DA PRIORIDADE DO DONO: primeiro o que faz a letra ter
+      // volume (profundidade e chanfro), depois o que faz ela ter
+      // superficie (material), depois o giro e a fonte. Espacamento e
+      // qualidade vem por ultimo porque sao ajuste fino.
       _secao('Forma'),
+      // PROFUNDIDADE e o nome do que isto faz — "espessura" e a medida
+      // interna da extrusao, e ninguem procura por ela.
       _controle(
-        'Espessura',
+        'Profundidade',
         _atual.espessura,
         4,
         120,
@@ -352,14 +358,55 @@ class _Texto3DSheetState extends ConsumerState<_Texto3DSheet> {
           aoArrastar: (v) =>
               setState(() => _params = _atual.copyWith(larguraDoChanfro: v)),
         ),
+      _secao('Material'),
+      // AS FICHAS DE PREDEFINICAO. Escolher um metal LIMPA o acabamento a
+      // mao: ouro que continuasse com a rugosidade do cromo anterior seria
+      // "escolhi ouro e nao ficou ouro".
+      _fileiraDeOpcoes<EstiloDoTexto3D>(
+        'Predefinição',
+        EstiloDoTexto3D.values,
+        nomeDoEstiloDoTexto3D,
+        _estilo,
+        _trocarEstilo,
+        chave: (e) => ValueKey('texto3d-estilo-${e.name}'),
+      ),
       _controle(
-        'Espaçamento',
-        _atual.espacamento,
-        -0.2,
-        0.6,
-        (v) => _aplicar(_atual.copyWith(espacamento: v)),
+        'Metal',
+        _metalBase,
+        0,
+        1,
+        (v) => _aplicar(_atual.copyWith(metalico: v)),
         aoArrastar: (v) =>
-            setState(() => _params = _atual.copyWith(espacamento: v)),
+            setState(() => _params = _atual.copyWith(metalico: v)),
+      ),
+      _controle(
+        'Rugosidade',
+        _rugosidadeBase,
+        0,
+        1,
+        (v) => _aplicar(_atual.copyWith(rugosidade: v)),
+        aoArrastar: (v) =>
+            setState(() => _params = _atual.copyWith(rugosidade: v)),
+      ),
+      _controle(
+        'Brilho próprio',
+        _atual.emissivo,
+        0,
+        2,
+        (v) => _aplicar(_atual.copyWith(emissivo: v)),
+        aoArrastar: (v) =>
+            setState(() => _params = _atual.copyWith(emissivo: v)),
+      ),
+      // REFLEXO/AMBIENTE: quanto do estudio ao redor a letra devolve. Vai
+      // para a cena, nao para o material, e por isso nao passa pelo
+      // `_aplicar` (que refaz a malha) — aqui nao ha malha a refazer.
+      _controle(
+        'Reflexo',
+        _reflexoAtual,
+        0,
+        1,
+        _mudarReflexo,
+        aoArrastar: _mudarReflexo,
       ),
       // GIRO POR LETRA, como o "Per-character 3D" do After Effects: cada
       // letra gira em torno do proprio centro. O giro do texto INTEIRO e o
@@ -395,7 +442,44 @@ class _Texto3DSheetState extends ConsumerState<_Texto3DSheet> {
         aoArrastar: (v) =>
             setState(() => _params = _atual.copyWith(rotLetraZ: v)),
       ),
-      _secao('Qualidade'),
+      _secao('Fonte'),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(2, 0, 2, 6),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: CupertinoButton(
+            key: const ValueKey('texto3d-importar-fonte'),
+            padding: EdgeInsets.zero,
+            minimumSize: const Size(0, 32),
+            onPressed: _importandoFonte ? null : _importarFonte,
+            child: AppText(
+              _importandoFonte
+                  ? 'Importando fonte...'
+                  : 'Importar fonte (.ttf / .otf)',
+              style: const TextStyle(fontSize: 13),
+            ),
+          ),
+        ),
+      ),
+      if (_familias.length > 1)
+        _fileiraDeOpcoes<String>(
+          'Fonte',
+          _familias,
+          (f) => f,
+          _atual.familia,
+          (f) => _aplicar(_atual.copyWith(familia: f)),
+          chave: (f) => ValueKey('texto3d-fonte-$f'),
+        ),
+      _secao('Ajuste fino'),
+      _controle(
+        'Espaçamento',
+        _atual.espacamento,
+        -0.2,
+        0.6,
+        (v) => _aplicar(_atual.copyWith(espacamento: v)),
+        aoArrastar: (v) =>
+            setState(() => _params = _atual.copyWith(espacamento: v)),
+      ),
       _fileiraDeOpcoes<QualidadeDoTexto3D>(
         'Qualidade',
         QualidadeDoTexto3D.values,

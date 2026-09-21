@@ -55,6 +55,8 @@ import '../../domain/text_animator.dart' show valueNoise01;
 import '../../domain/caption_highlight.dart';
 import '../../domain/grid_rig.dart';
 import '../../domain/gizmo3d.dart';
+import '../../domain/gizmo_da_cena3d.dart';
+import 'gizmo_da_cena_overlay.dart';
 import '../../domain/layer.dart';
 import '../../domain/layer_meta.dart';
 import '../../domain/mask.dart';
@@ -293,6 +295,10 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
     if (l == null || !l.is3D || l is AudioLayer || l is AdjustmentLayer) {
       return null;
     }
+    // CENA COM OBJETO SELECIONADO TEM O GIZMO DO OBJETO, e so ele
+    // (`GizmoDaCenaOverlay`): dois gizmos no mesmo ponto sao duas
+    // promessas sobrepostas, e o dedo nunca saberia qual pegou.
+    if (l is Scene3DLayer && objetosDaCena(l.scene).isNotEmpty) return null;
     final t = widget.playback.time.value;
     if (!l.activeAt(t)) return null;
     return gizmoDaCamada(project, l, t);
@@ -1360,6 +1366,14 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
                                               );
                                             },
                                           ),
+                                        ),
+                                      // O GIZMO DO OBJETO DA CENA 3D, sobre o
+                                      // pivo dele: eixos, aneis e alca de
+                                      // escala. Ver `gizmo_da_cena_overlay.dart`.
+                                      if (!drawing)
+                                        GizmoDaCenaOverlay(
+                                          tempo: widget.playback.time,
+                                          escala: scale,
                                         ),
                                       // NOS DA MASCARA: quando alguem esta editando
                                       // o caminho, o dedo passa a mexer nos nos em

@@ -49,6 +49,10 @@ class Texto3D {
     this.rotLetraX = 0,
     this.rotLetraY = 0,
     this.rotLetraZ = 0,
+    this.cor,
+    this.metalico,
+    this.rugosidade,
+    this.emissivo = 0,
   });
 
   final String texto;
@@ -76,6 +80,31 @@ class Texto3D {
 
   bool get temRotacaoPorLetra =>
       rotLetraX != 0 || rotLetraY != 0 || rotLetraZ != 0;
+
+  /// O ACABAMENTO POR CIMA DO METAL ESCOLHIDO.
+  ///
+  /// O metal ([EstiloDoTexto3D]) e uma PREDEFINICAO: ele chega com cor,
+  /// metalico e rugosidade prontos. Estes quatro campos sao o ajuste fino
+  /// em cima dela — o que o dono pediu para ter na folha (Metal,
+  /// Rugosidade, Brilho proprio) sem ter de escolher outro metal.
+  ///
+  /// NULO QUER DIZER "O QUE O METAL TROUXE", e nao zero: um `metalico` que
+  /// nascesse em 0 transformaria todo texto de ouro em plastico amarelo na
+  /// primeira vez que a folha abrisse.
+  ///
+  /// [cor] e ARGB e vale para a frente da letra (o chanfro clareia e a
+  /// lateral escurece, como nas predefinicoes). E por ela que o "Ativar 3D"
+  /// de um texto comum leva a cor que o dono ja tinha escolhido.
+  ///
+  /// NENHUM DELES MUDA A MALHA: sao material. Por isso ficam fora do
+  /// [soGeometria] e mexer aqui nao refaz extrusao nem chanfro.
+  final int? cor;
+  final double? metalico;
+  final double? rugosidade;
+  final double emissivo;
+
+  bool get temAcabamentoProprio =>
+      cor != null || metalico != null || rugosidade != null || emissivo != 0;
 
   /// Quantos aneis o perfil do chanfro tem. Angular e um corte so;
   /// redondo precisa de tres ou quatro para a luz correr sem degrau.
@@ -119,6 +148,13 @@ class Texto3D {
     double? rotLetraX,
     double? rotLetraY,
     double? rotLetraZ,
+    int? cor,
+    double? metalico,
+    double? rugosidade,
+    double? emissivo,
+    // VOLTAR AO METAL PRECISA DE UMA PORTA PROPRIA: com campo nulavel,
+    // `copyWith(cor: null)` e indistinguivel de "nao mexi na cor".
+    bool semAcabamentoProprio = false,
   }) => Texto3D(
     texto: texto ?? this.texto,
     familia: familia ?? this.familia,
@@ -133,6 +169,10 @@ class Texto3D {
     rotLetraX: rotLetraX ?? this.rotLetraX,
     rotLetraY: rotLetraY ?? this.rotLetraY,
     rotLetraZ: rotLetraZ ?? this.rotLetraZ,
+    cor: semAcabamentoProprio ? null : (cor ?? this.cor),
+    metalico: semAcabamentoProprio ? null : (metalico ?? this.metalico),
+    rugosidade: semAcabamentoProprio ? null : (rugosidade ?? this.rugosidade),
+    emissivo: semAcabamentoProprio ? 0 : (emissivo ?? this.emissivo),
   );
 
   @override
@@ -151,7 +191,11 @@ class Texto3D {
           other.separarLetras == separarLetras &&
           other.rotLetraX == rotLetraX &&
           other.rotLetraY == rotLetraY &&
-          other.rotLetraZ == rotLetraZ;
+          other.rotLetraZ == rotLetraZ &&
+          other.cor == cor &&
+          other.metalico == metalico &&
+          other.rugosidade == rugosidade &&
+          other.emissivo == emissivo;
 
   @override
   int get hashCode => Object.hash(
@@ -168,6 +212,10 @@ class Texto3D {
     rotLetraX,
     rotLetraY,
     rotLetraZ,
+    cor,
+    metalico,
+    rugosidade,
+    emissivo,
   );
 
   Map<String, Object> toJson() => {
@@ -181,6 +229,12 @@ class Texto3D {
     'sp': espacamento,
     'q': qualidade.name,
     'sep': separarLetras,
+    // O ACABAMENTO SO ENTRA QUANDO EXISTE: chave ausente e "o que o metal
+    // trouxe", e um projeto antigo abre igual ao que era.
+    'cor': ?cor,
+    'mt': ?metalico,
+    'rg': ?rugosidade,
+    if (emissivo != 0) 'em': emissivo,
   };
 
   /// Leitura TOLERANTE: campo ausente ou estranho volta ao padrao, e um
@@ -212,6 +266,14 @@ class Texto3D {
       espacamento: numero('sp', 0, -1, 4),
       qualidade: escolha(m['q'], QualidadeDoTexto3D.values, p.qualidade),
       separarLetras: m['sep'] == true,
+      cor: m['cor'] is num ? (m['cor'] as num).toInt() : null,
+      metalico: m['mt'] is num && (m['mt'] as num).isFinite
+          ? (m['mt'] as num).toDouble().clamp(0.0, 1.0)
+          : null,
+      rugosidade: m['rg'] is num && (m['rg'] as num).isFinite
+          ? (m['rg'] as num).toDouble().clamp(0.0, 1.0)
+          : null,
+      emissivo: numero('em', 0, 0, 4),
     );
   }
 }

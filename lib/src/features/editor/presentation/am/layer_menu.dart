@@ -495,6 +495,45 @@ _Tile? _tileDaSecao(
       onTap: () => fecharCom(LayerMenuAction.editText),
       badge: null,
     ),
+    // ATIVAR 3D: o texto comum vira texto 3D e a folha do Texto 3D abre ja
+    // na camada nova. Sem esta porta, extrudar um texto que ja existia
+    // significava apagar e refazer.
+    AmSecao.ativar3d => (
+      icone: CupertinoIcons.cube,
+      rotulo: 'Ativar 3D',
+      onTap: () => abrirDepois(() async {
+        if (layer is! TextLayer) return;
+        final controlador = ref.read(editorControllerProvider.notifier);
+        final noId = await controlador.ativarTexto3D(layer.id);
+        if (!context.mounted) return;
+        if (noId == null) {
+          // NADA INERTE EM SILENCIO: a fonte recusada diz por que.
+          showReasonToast(
+            context,
+            controlador.ultimoMotivoDoTexto3D ??
+                'Nao foi possivel transformar este texto em 3D.',
+          );
+          return;
+        }
+        // A CAMADA NOVA E OUTRA: o id do texto 3D e o da cena que o
+        // controlador acabou de por no lugar da camada de texto.
+        final cena = ref
+            .read(editorControllerProvider)
+            .layers
+            .whereType<Scene3DLayer>()
+            .where((c) => c.scene.nodeById(noId) != null)
+            .firstOrNull;
+        if (cena == null) return;
+        await showTexto3DSheet(
+          context,
+          ref,
+          sceneId: cena.id,
+          nodeId: noId,
+          playhead: playback.time.value,
+        );
+      }),
+      badge: 'NEW',
+    ),
     AmSecao.editarLegendas => (
       icone: CupertinoIcons.captions_bubble,
       rotulo: 'Editar legendas',
@@ -514,10 +553,16 @@ _Tile? _tileDaSecao(
       icone: CupertinoIcons.textformat,
       rotulo: 'Texto 3D',
       onTap: () {
+        // A FICHA SO EXISTE PARA A CENA QUE TEM UM NO DE TEXTO 3D
+        // (`secoesDe`), e a checagem aqui e o segundo cadeado: abrir a
+        // folha sem no daria uma folha editando um texto inventado.
         final no = layer is Scene3DLayer
             ? layer.scene.nodes.where((n) => n.texto3d != null).firstOrNull
             : null;
-        if (no == null) return;
+        if (no == null) {
+          showReasonToast(context, 'Esta camada nao tem texto 3D para editar.');
+          return;
+        }
         abrirDepois(
           () => showTexto3DSheet(
             context,

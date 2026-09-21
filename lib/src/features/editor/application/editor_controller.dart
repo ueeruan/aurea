@@ -2737,12 +2737,15 @@ class EditorController extends Notifier<VideoProject> {
       // UM NO POR LETRA: mesma geometria de sempre, mas com esqueleto —
       // e o que deixa os presets de animacao do texto normal valerem
       // letra a letra na malha extrudada.
-      return modeloDoTexto3DPorLetra(
-        disporTexto3D(texto3D, fonte),
+      return _comOAcabamento(
+        modeloDoTexto3DPorLetra(
+          disporTexto3D(texto3D, fonte),
+          texto3D,
+          fonte.unidadesPorEm,
+          texto3D.texto,
+          estilo,
+        ),
         texto3D,
-        fonte.unidadesPorEm,
-        texto3D.texto,
-        estilo,
       );
     } on FonteNaoSuportada catch (e) {
       // O MOTIVO FICA GUARDADO. Antes a recusa virava nulo, o chamador caia
@@ -2759,6 +2762,41 @@ class EditorController extends Notifier<VideoProject> {
           'A fonte "${texto3D.familia}" nao pode ser lida pelo Texto 3D.';
       return null;
     }
+  }
+
+  /// O AJUSTE FINO DO MATERIAL POR CIMA DO METAL ESCOLHIDO.
+  ///
+  /// O metal chega da predefinicao com cor, metalico e rugosidade prontos
+  /// (`materiaisDoTexto3D`); Metal, Rugosidade, Brilho proprio e a cor do
+  /// texto sao ajustes DO DONO em cima dela. Sao trocados aqui, no unico
+  /// lugar por onde a malha do texto passa, porque e material — nao muda um
+  /// triangulo, e refazer a geometria por causa de um brilho seria caro a
+  /// toa.
+  ///
+  /// A ORDEM DOS MATERIAIS E A DE `ParteDoTexto3D`: frente, chanfro,
+  /// lateral. A cor do dono vale para a frente; o chanfro clareia e a
+  /// lateral escurece, que e o que separa letra de metal de letra chapada.
+  ModelAsset3D _comOAcabamento(ModelAsset3D modelo, Texto3D t) {
+    if (!t.temAcabamentoProprio) return modelo;
+    final originais = (modelo.data['materials'] as List? ?? const []);
+    final cor = t.cor;
+    final novos = <Map<String, dynamic>>[];
+    for (var i = 0; i < originais.length; i++) {
+      final m = Map<String, dynamic>.from(originais[i] as Map);
+      if (cor != null) {
+        // Frente (0) na cor pedida, chanfro (1) 18% mais claro, lateral
+        // (2) 25% mais escura.
+        final fator = i == 1 ? 1.18 : (i == 2 ? 0.75 : 1.0);
+        double canal(int deslocamento) =>
+            (((cor >> deslocamento) & 0xFF) / 255 * fator).clamp(0.0, 1.0);
+        m['color'] = [canal(16), canal(8), canal(0), 1.0];
+      }
+      if (t.metalico != null) m['metallic'] = t.metalico;
+      if (t.rugosidade != null) m['roughness'] = t.rugosidade;
+      if (t.emissivo != 0) m['emissive'] = t.emissivo;
+      novos.add(m);
+    }
+    return ModelAsset3D({...modelo.data, 'materials': novos});
   }
 
   /// MUDA UM TEXTO 3D JA CRIADO: o texto, a fonte, a espessura, o chanfro,
@@ -2870,6 +2908,107 @@ class EditorController extends Notifier<VideoProject> {
         is3D: true,
       ),
     );
+    return node.id;
+  }
+
+  /// REFLEXO DO AMBIENTE PARA O TEXTO 3D (0..1).
+  ///
+  /// Metal so parece metal com o que refletir: a rugosidade e a conta do
+  /// material, mas quem decide se ha mundo para devolver e a CENA. Por isso
+  /// o controle "Reflexo" da folha do texto mexe aqui, e nao no material —
+  /// sem esta linha, baixar a rugosidade num ambiente desligado so deixava
+  /// a letra mais lisa e igualmente sem brilho.
+  void ajustarReflexoDoTexto3D(String sceneId, double valor) {
+    final camada = _layer(sceneId);
+    if (camada is! Scene3DLayer) return;
+    _replace(
+      camada.withScene(
+        camada.scene.copyWith(envReflect: valor.clamp(0.0, 1.0)),
+      ),
+    );
+  }
+
+  /// ATIVAR 3D NUM TEXTO COMUM: a camada de texto VIRA um texto 3D, no
+  /// lugar dela na pilha.
+  ///
+  /// Era o caminho que faltava. "Texto 3D" so existia como camada NOVA, e
+  /// quem ja tinha escrito, posicionado e colorido um texto tinha de jogar
+  /// tudo fora e recomecar — que e exatamente o que a folha de edicao veio
+  /// resolver do outro lado.
+  ///
+  /// O QUE MIGRA: o conteudo, a fonte importada, a cor, e a transformacao
+  /// da camada (posicao, escala, giro, opacidade, 3D) com o inicio e a
+  /// duracao. O metal nasce CROMO porque ele e neutro: com a cor do dono
+  /// por cima, um texto branco vira cromo branco e um texto vermelho vira
+  /// metal vermelho — escolher ouro tingiria de amarelo a cor escolhida.
+  ///
+  /// O QUE NAO MIGRA (e nao tem para onde ir): os animadores e as animacoes
+  /// do texto 2D, o alinhamento, o texto em caminho e o tamanho da fonte —
+  /// o texto 3D tem o proprio tamanho em unidades da cena, e e a camera
+  /// dele que enquadra. Efeitos, mascaras e matte tambem ficam para tras.
+  ///
+  /// Devolve o id do no criado, ou nulo se nao deu (camada errada, texto
+  /// vazio ou fonte que o extrusor nao abre).
+  Future<String?> ativarTexto3D(String textLayerId) async {
+    final texto = _layer(textLayerId);
+    if (texto is! TextLayer) return null;
+    final limpo = texto.text.trim();
+    if (limpo.isEmpty) return null;
+    const estilo = EstiloDoTexto3D.cromo;
+    ultimoMotivoDoTexto3D = null;
+    var params = Texto3D(texto: limpo, cor: texto.color.toARGB32());
+    if (texto.fontFamily != null) {
+      params = params.copyWith(familia: texto.fontFamily);
+    }
+    var pronto = await _modeloDoTexto3D(params, estilo);
+    // A FONTE QUE O EXTRUSOR NAO ABRE NAO CANCELA A CONVERSAO: aqui nao ha
+    // "como estava" para preservar — o texto vira 3D na fonte do
+    // aplicativo, e o motivo fica guardado para a folha contar.
+    if (pronto == null && params.familia != 'Aurea Motion Sans') {
+      params = params.copyWith(familia: 'Aurea Motion Sans');
+      pronto = await _modeloDoTexto3D(params, estilo);
+    }
+    if (pronto == null) return null;
+    final modelo = pronto;
+    if (modelo.triangleCount == 0) return null;
+    final node = _nodeDoModelo(
+      modelo,
+      rotXInicial: -8,
+      rotYInicial: 15,
+      texto3d: params,
+      estiloTexto3d: estilo,
+    );
+    final nova = Scene3DLayer(
+      name: 'Texto 3D · $limpo',
+      startTime: texto.startTime,
+      duration: texto.duration,
+      scene: Scene3D(
+        nodes: [node],
+        lights: Scene3D.tresPontos,
+        environment: EnvironmentKind.estudioMetal,
+        envReflect: 0.9,
+        showFloorGrid: false,
+      ),
+      camera: _cameraQueEnquadra(120),
+      position: texto.position,
+      scaleX: texto.scaleX,
+      scaleY: texto.scaleY,
+      rotation: texto.rotation,
+      opacity: texto.opacity,
+      is3D: true,
+    );
+    runAsOneUndo(() {
+      // NO LUGAR DA VELHA, e nao no topo da pilha: o texto que estava atras
+      // do logo continua atras do logo depois de virar 3D.
+      _mutate(
+        state.copyWith(
+          layers: [
+            for (final l in state.layers) l.id == textLayerId ? nova : l,
+          ],
+        ),
+      );
+      ref.read(selectedLayerProvider.notifier).state = nova.id;
+    });
     return node.id;
   }
 

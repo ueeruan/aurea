@@ -1,5 +1,6 @@
 import 'package:aurea/src/features/editor/application/desempenho/aurea_performance_manager.dart';
 import 'package:aurea/src/features/editor/application/interacao.dart';
+import 'package:aurea/src/features/editor/application/playback_controller.dart';
 import 'package:aurea/src/features/editor/application/qualidade3d_controller.dart';
 import 'package:aurea/src/features/editor/domain/orcamento_render.dart';
 import 'package:flutter/widgets.dart';
@@ -30,6 +31,7 @@ void main() {
     }
     q3d.zerar();
     Interacao.zerar();
+    PlaybackController.tocandoAgora.value = false;
   });
 
   group('perfil', () {
@@ -140,10 +142,27 @@ void main() {
 
     test('doze quadros lentos descem um degrau no Automatico', () {
       g.editorAbriu();
-      for (var i = 0; i < 12; i++) {
+      // PRECISA HAVER MOTIVO PARA O QUADRO EXISTIR. Com o editor parado
+      // a escada nao mede nada: quadro em repouso ou e defeito de
+      // terceiro ou e o quadro que a propria politica encomendou, e
+      // reagir a ele fecha o laco (ver test/brilho_sem_laco_test.dart).
+      PlaybackController.tocandoAgora.value = true;
+      // Os oito primeiros sao a acomodacao do proprio "comecou a tocar",
+      // que ja mexeu na politica.
+      for (var i = 0; i < 20; i++) {
         g.amostraDeQuadro(60);
       }
       expect(g.politica.value.escalaDaPrevia, .75);
+      PlaybackController.tocandoAgora.value = false;
+    });
+
+    test('com o editor PARADO, medir quadro nao mexe na politica', () {
+      g.editorAbriu();
+      final antes = g.politica.value;
+      for (var i = 0; i < 400; i++) {
+        g.amostraDeQuadro(60);
+      }
+      expect(g.politica.value, antes);
     });
 
     test('o teto do perfil chega ao controlador 3D e volta ao sair', () async {

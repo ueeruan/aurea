@@ -265,11 +265,63 @@ void main() {
     });
 
     test('nao passa de dois degraus', () {
-      final e = EscadaPorTempoDeQuadro();
+      // A CARENCIA ENTRE DEGRAUS (2 s) e o que impede a escada de virar
+      // oscilador, entao o relogio tem de andar entre um degrau e outro.
+      var agora = DateTime(2026, 9, 20, 12);
+      final e = EscadaPorTempoDeQuadro(agora: () => agora);
       for (var i = 0; i < 200; i++) {
+        agora = agora.add(const Duration(milliseconds: 80));
         e.amostra(80);
       }
       expect(e.degraus, 2);
+    });
+
+    test('dois degraus nao cabem na mesma carencia', () {
+      var agora = DateTime(2026, 9, 20, 12);
+      final e = EscadaPorTempoDeQuadro(agora: () => agora);
+      for (var i = 0; i < 12; i++) {
+        e.amostra(80);
+      }
+      expect(e.degraus, 1);
+      // Mais doze lentos no MESMO instante: o segundo degrau nao sai.
+      for (var i = 0; i < 12; i++) {
+        e.amostra(80);
+      }
+      expect(e.degraus, 1, reason: 'a carencia de 2 s nao passou');
+      agora = agora.add(const Duration(seconds: 3));
+      for (var i = 0; i < 12; i++) {
+        e.amostra(80);
+      }
+      expect(e.degraus, 2);
+    });
+
+    test('os quadros logo depois de acomodar nao votam', () {
+      final e = EscadaPorTempoDeQuadro();
+      e.acomodar();
+      expect(e.acomodando, isTrue);
+      for (var i = 0; i < EscadaPorTempoDeQuadro.quadrosDeAcomodacao; i++) {
+        e.amostra(80);
+      }
+      expect(e.acomodando, isFalse);
+      // Onze lentos depois da acomodacao ainda nao bastam: a contagem
+      // recomecou do zero, e os quadros descartados nao entraram nela.
+      for (var i = 0; i < 11; i++) {
+        e.amostra(80);
+      }
+      expect(e.degraus, 0);
+      expect(e.amostra(80), isTrue);
+    });
+
+    test('sem motivo para o quadro existir, a contagem morre', () {
+      final e = EscadaPorTempoDeQuadro();
+      for (var i = 0; i < 11; i++) {
+        e.amostra(80);
+      }
+      e.pausar();
+      for (var i = 0; i < 11; i++) {
+        e.amostra(80);
+      }
+      expect(e.degraus, 0, reason: 'as duas rajadas nao podem somar');
     });
 
     test('so sobe depois da espera, e com folga sustentada', () {

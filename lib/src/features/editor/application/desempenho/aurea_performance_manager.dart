@@ -215,19 +215,49 @@ class AureaPerformanceManager with WidgetsBindingObserver {
     }
   }
 
+  /// HA MOTIVO EXTERNO PARA ESTE QUADRO EXISTIR?
+  ///
+  /// ===================== O LACO QUE ISTO FECHA ========================
+  ///
+  /// A politica decide o que a previa desenha; desenhar produz um quadro;
+  /// o quadro vinha medido para ca e podia mexer na politica de novo. Com
+  /// brilho na cena esse circuito se sustentava sozinho: a bancada mediu
+  /// 360 quadros em 6 s de tela PARADA, 80% de uma CPU, com ui_p50 de
+  /// 0,8 ms (ninguem reconstruia nada) e raster de 15 ms (repintava tudo).
+  ///
+  /// O corte e na raiz: com o editor parado nao ha o que medir. Quadro em
+  /// repouso ou e defeito de outra pessoa — e a escada nao pode reagir a
+  /// ele — ou e o quadro que a propria politica encomendou, e reagir a
+  /// ele e realimentar o laco. So o dedo e o relogio dao motivo para um
+  /// quadro existir; so eles ligam a medicao.
+  bool get _haMotivoParaQuadro =>
+      PlaybackController.tocandoAgora.value || Interacao.agora.value;
+
   void _quadros(List<FrameTiming> timings) {
-    var mudou = false;
     for (final t in timings) {
-      if (_escada.amostra(t.totalSpan.inMicroseconds / 1000.0)) mudou = true;
+      _medirQuadro(t.totalSpan.inMicroseconds / 1000.0);
     }
-    if (mudou) _recalcular();
   }
 
-  /// Um quadro que levou [ms] (para os testes e para a bancada).
-  @visibleForTesting
-  void amostraDeQuadro(double ms) {
+  void _medirQuadro(double ms) {
+    if (!_haMotivoParaQuadro) {
+      // Nem guarda para depois: uma rajada de quadros de repouso somada a
+      // proxima rajada de verdade decidiria um degrau que ninguem pediu.
+      _escada.pausar();
+      return;
+    }
     if (_escada.amostra(ms)) _recalcular();
   }
+
+  /// Um quadro que levou [ms] (para os testes e para a bancada). Passa
+  /// pela MESMA porta do quadro de verdade, inclusive o portao de
+  /// repouso — senao o teste provaria um caminho que o app nao tem.
+  @visibleForTesting
+  void amostraDeQuadro(double ms) => _medirQuadro(ms);
+
+  /// Esquece o que foi medido ate agora (testes e troca de perfil).
+  @visibleForTesting
+  void zerarMedicaoDoQuadro() => _escada.zerar();
 
   // ------------------------------------------------------ interacao
 
@@ -290,7 +320,15 @@ class AureaPerformanceManager with WidgetsBindingObserver {
         // A receita pode ter mudado com o teto novo.
         p = politicaPara(perfil.value, sinais);
       }
+      // A POLITICA SO AVISA QUANDO MUDA DE VALOR (o ValueNotifier compara
+      // com o `==` da politica, que e por valor). Uma instancia nova e
+      // igual nao acorda ninguem — e por isso um `recalcular` a toa nao
+      // custa um quadro.
+      final antes = politica.value;
       politica.value = p;
+      // MUDOU DE VERDADE: os proximos quadros sao efeito desta politica.
+      // Deixa-los votar no proximo degrau e fechar o laco de novo.
+      if (p != antes) _escada.acomodar();
     } finally {
       _recalculando = false;
     }

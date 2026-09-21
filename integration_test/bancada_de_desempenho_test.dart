@@ -232,9 +232,10 @@ void main() {
     }
 
     try {
-      c.addEffect(primeira, EffectType.values.firstWhere(
-        (t) => t.name.toLowerCase().contains('glow'),
-      ));
+      // O BRILHO DE VERDADE, e nao o primeiro nome com "glow": o
+      // `lightGlow` saiu do catalogo em 16/09 e nasce inerte, entao o
+      // cenario media uma cena sem efeito nenhum.
+      c.addEffect(primeira, EffectType.brilho);
     } catch (e) {
       // ignore: avoid_print
       print('BANCADA sem brilho: $e');

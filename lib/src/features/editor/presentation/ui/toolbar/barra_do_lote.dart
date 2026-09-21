@@ -7,9 +7,8 @@ import '../../../../../core/l10n/app_language.dart';
 import '../../../../../core/ui/snack.dart';
 import '../../../application/editor_controller.dart';
 import '../../../application/playback_controller.dart';
-import '../../am/align_sheet.dart' show showAlignSheet;
-import '../../am/layer_menu.dart' show showReasonToast;
-import '../../shell/layer_actions.dart' show abrirCascata, excluirCamadas;
+import 'alinhar.dart' show abrirCascata, showAlignSheet;
+import 'acoes_da_camada.dart' show excluirCamadas;
 import '../shell/contrato.dart';
 import 'barra_contextual.dart';
 import 'escolher_pai.dart';
@@ -114,10 +113,7 @@ class BarraDoLote extends ConsumerWidget {
               style: AureaEstilos.titulo.copyWith(color: AureaCores.destaque),
             ),
             const SizedBox(height: AureaDims.e2),
-            AppText(
-              n == 1 ? 'camada' : 'camadas',
-              style: AureaEstilos.rotulo,
-            ),
+            AppText(n == 1 ? 'camada' : 'camadas', style: AureaEstilos.rotulo),
           ],
         ),
       ),

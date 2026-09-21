@@ -24,8 +24,8 @@ import '../../../domain/shape.dart';
 import '../../../domain/shape_library.dart';
 import '../../../domain/svg_document.dart';
 import '../../sketchfab/sketchfab_screen.dart' show abrirTelaDoSketchfab;
-import '../../widgets/gallery_panel.dart' show MidiaDoLote;
-import '../../widgets/importacao_3d.dart' show concluirImportacao3D;
+import 'galeria.dart' show MidiaDoLote;
+import 'importacao_3d.dart' show concluirImportacao3D;
 import '../paineis/pontos.dart' show abrirEditarPontosDaForma;
 import '../shell/contrato.dart';
 

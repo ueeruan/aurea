@@ -5,7 +5,7 @@ import 'package:aurea/src/features/editor/domain/layer.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'editor_hierarchy_test.dart' show openEditor;
+import 'apoio/abrir_editor.dart' show openEditor;
 
 /// RASTREAR, do lado de quem usa.
 ///

@@ -10,7 +10,6 @@ import '../../../application/font_service.dart';
 import '../../../domain/caption.dart';
 import '../../../domain/caption_highlight.dart';
 import '../../../domain/layer.dart';
-import '../../am/color_picker_sheet.dart' show showColorPicker;
 import '../shell/contrato.dart';
 import 'comum.dart';
 import 'comum_de_objetos.dart';

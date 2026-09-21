@@ -9,8 +9,8 @@ import '../../../domain/effect.dart';
 import '../../../domain/layer.dart';
 import '../../../domain/layer_meta.dart';
 import '../../../domain/shape.dart';
-import '../../am/gradient_fill_sheet.dart' show showGradientFillSheet;
-import '../../am/layer_menu.dart' show showElement3DSheet;
+import 'degrade.dart' show showGradientFillSheet;
+import 'elemento3d.dart' show showElement3DSheet;
 import '../shell/contrato.dart';
 import 'comum.dart';
 import 'efeitos.dart';
@@ -331,7 +331,9 @@ class _PreenchimentoDaForma extends ConsumerWidget {
                 acoes: [
                   AureaChip(
                     key: const ValueKey('cor-midia-escolher'),
-                    rotulo: midia == null ? 'Escolher uma foto' : 'Trocar a foto',
+                    rotulo: midia == null
+                        ? 'Escolher uma foto'
+                        : 'Trocar a foto',
                     icone: CupertinoIcons.photo,
                     aoTocar: escolherFoto,
                   ),

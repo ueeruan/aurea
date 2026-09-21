@@ -8,11 +8,11 @@ import 'package:aurea/src/features/editor/domain/keyframe.dart';
 import 'package:aurea/src/features/editor/domain/layer.dart';
 import 'package:aurea/src/features/editor/domain/project_store.dart';
 import 'package:aurea/src/features/editor/domain/video_project.dart';
-import 'package:aurea/src/features/editor/presentation/am/audio_sheet.dart';
+import 'package:aurea/src/features/editor/presentation/ui/paineis/audio.dart'
+    show volumeComKeyframeAlternado, volumeEditado;
 import 'package:aurea/src/features/export/application/export_engine.dart';
 import 'package:aurea/src/features/export/domain/export_settings.dart';
 import 'package:aurea/src/features/projects/application/projects_controller.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -123,87 +123,5 @@ void main() {
     expect(a.volumeAnimado!.isAnimated, isFalse);
     a = volumeEditado(a, _s, 1);
     expect(a.volumeAnimado, isNull);
-  });
-
-  testWidgets('a folha do som: losango, valor e colar som', (tester) async {
-    tester.view.physicalSize = const Size(400, 1000);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
-    final c = ProviderContainer(
-      overrides: [projectsControllerProvider.overrideWith(_Projetos.new)],
-    );
-    addTearDown(c.dispose);
-    c.read(editorControllerProvider.notifier).openProject(
-      VideoProject(
-        name: 'p',
-        createdAt: DateTime(2026, 9, 15),
-        layers: [
-          _musica(),
-          AudioLayer(
-            id: 'v',
-            name: 'voz',
-            startTime: Duration.zero,
-            duration: const Duration(seconds: 10),
-            sourcePath: '/tmp/v.wav',
-          ),
-        ],
-      ),
-    );
-    AudioSpec som(String id) =>
-        (c.read(editorControllerProvider).layerById(id)! as AudioLayer).audio;
-    somCopiado = null;
-    await tester.pumpWidget(
-      UncontrolledProviderScope(
-        container: c,
-        child: MaterialApp(
-          home: Scaffold(
-            body: Consumer(
-              builder: (context, ref, _) => Column(
-                children: [
-                  TextButton(
-                    onPressed: () => showAudioSheet(context, ref, 'm'),
-                    child: const Text('musica'),
-                  ),
-                  TextButton(
-                    onPressed: () => showAudioSheet(context, ref, 'v'),
-                    child: const Text('voz'),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-    await tester.tap(find.text('musica'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('som-volume-valor')));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byKey(const ValueKey('valor-campo')), '50');
-    await tester.tap(find.text('OK'));
-    await tester.pumpAndSettle();
-    expect(som('m').volumeEm(Duration.zero), .5);
-
-    await tester.tap(find.byKey(const ValueKey('kf-volume')));
-    await tester.pumpAndSettle();
-    expect(som('m').volumeAnimado!.hasKeyframeAt(Duration.zero), isTrue);
-
-    final copiar = find.byKey(const ValueKey('som-copiar'));
-    await tester.ensureVisible(copiar);
-    await tester.tap(copiar);
-    await tester.pumpAndSettle();
-    expect(somCopiado?.volumeAnimado, isNotNull);
-
-    Navigator.of(tester.element(copiar)).pop();
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('voz'));
-    await tester.pumpAndSettle();
-    final colar = find.byKey(const ValueKey('som-colar'));
-    await tester.ensureVisible(colar);
-    await tester.tap(colar);
-    await tester.pumpAndSettle();
-    expect(som('v').volumeAnimado!.hasKeyframeAt(Duration.zero), isTrue);
-    expect(tester.takeException(), isNull);
-    await tester.pump(const Duration(seconds: 5));
   });
 }

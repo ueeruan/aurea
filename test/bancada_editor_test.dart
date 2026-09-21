@@ -21,12 +21,12 @@ import 'package:flutter/material.dart';
 import 'package:aurea/src/features/editor/application/perfil3d.dart';
 import 'package:aurea/src/features/editor/application/playback_controller.dart';
 import 'package:aurea/src/features/editor/application/video_layer_manager.dart';
-import 'package:aurea/src/features/editor/presentation/am/am_timeline.dart';
+import 'package:aurea/src/features/editor/presentation/ui/timeline/timeline.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'editor_hierarchy_test.dart' show openEditor;
+import 'apoio/abrir_editor.dart' show openEditor;
 
 /// Um projeto do tamanho de um trabalho de verdade: texto animado,
 /// formas, uma camada com efeitos e uma pilha que a composicao tem de
@@ -227,7 +227,7 @@ class _CascaDaTimelineState extends State<_CascaDaTimeline>
   @override
   Widget build(BuildContext context) => SizedBox(
     height: 300,
-    child: AmTimeline(playback: _playback, height: 300),
+    child: TimelineDoEditor(playback: _playback),
   );
 }
 

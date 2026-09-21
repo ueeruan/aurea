@@ -7,7 +7,7 @@ import '../../../../../core/ui/tocavel.dart';
 import '../../../application/editor_controller.dart';
 import '../../../application/playback_controller.dart';
 import '../../../application/ui/opcoes_de_visualizacao.dart';
-import '../../shell/cromo_editor.dart' show zoomDoPalcoProvider;
+import '../palco/zoom_do_palco.dart';
 
 /// A BARRA DE TRANSPORTE (46): desfazer e refazer a esquerda; quadro
 /// anterior, play e proximo quadro no CENTRO; o tempo (atual / total) e o
@@ -216,16 +216,21 @@ class BarraDeTransporte extends ConsumerWidget {
                   child: FittedBox(
                     fit: BoxFit.scaleDown,
                     alignment: Alignment.centerRight,
-                    child: ValueListenableBuilder<Duration>(
-                      valueListenable: playback.time,
-                      builder: (context, t, _) => Text(
-                        '${tempoDaInfobar(t)} / ${tempoDaInfobar(total)}',
-                        key: const ValueKey('transporte-tempo'),
-                        maxLines: 1,
-                        style: AureaEstilos.valor.copyWith(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w500,
-                          color: AureaCores.textoSecundario,
+                    // TOCAR O TEMPO digita para onde ir ("12.5", "1:02.5",
+                    // "00:01:02:15") — a porta do relogio da barra antiga.
+                    child: Tocavel(
+                      onTap: () => irParaOTempo(context, ref, playback),
+                      child: ValueListenableBuilder<Duration>(
+                        valueListenable: playback.time,
+                        builder: (context, t, _) => Text(
+                          '${tempoDaInfobar(t)} / ${tempoDaInfobar(total)}',
+                          key: const ValueKey('transporte-tempo'),
+                          maxLines: 1,
+                          style: AureaEstilos.valor.copyWith(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                            color: AureaCores.textoSecundario,
+                          ),
                         ),
                       ),
                     ),
@@ -272,10 +277,7 @@ class _Infobar extends StatelessWidget {
           const SizedBox(width: AureaDims.e6),
           Text(tempoDaInfobar(tempo), style: valor),
           const SizedBox(width: AureaDims.e20),
-          Text(
-            '${d.isNegative ? '' : '+'}${tempoDaInfobar(d)}',
-            style: valor,
-          ),
+          Text('${d.isNegative ? '' : '+'}${tempoDaInfobar(d)}', style: valor),
         ],
       );
     }
@@ -287,16 +289,98 @@ class _Infobar extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 AppText(rotulo, maxLines: 1, style: AureaEstilos.rotulo),
-                Text(
-                  v,
-                  maxLines: 1,
-                  overflow: TextOverflow.fade,
-                  style: valor,
-                ),
+                Text(v, maxLines: 1, overflow: TextOverflow.fade, style: valor),
               ],
             ),
           ),
       ],
     );
   }
+}
+
+/// IR PARA O TEMPO: o relogio da barra aceita "12.5", "1:02.5",
+/// "00:01:02:15". O cabecote vai ao instante digitado, preso ao projeto.
+Future<void> irParaOTempo(
+  BuildContext context,
+  WidgetRef ref,
+  PlaybackController playback,
+) async {
+  playback.pause();
+  final project = ref.read(editorControllerProvider);
+  final total = project.duration;
+  final fps = project.fps;
+  final ctrl = TextEditingController(
+    text: (playback.time.value.inMilliseconds / 1000).toStringAsFixed(2),
+  );
+  final r = await showCupertinoDialog<String>(
+    context: context,
+    barrierDismissible: true,
+    builder: (ctx) => CupertinoAlertDialog(
+      title: const AppText('Ir para o tempo'),
+      content: Padding(
+        padding: const EdgeInsets.only(top: AureaDims.e10),
+        child: CupertinoTextField(
+          key: const ValueKey('transport-timecode-campo'),
+          controller: ctrl,
+          autofocus: true,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          placeholder: translate(ctx, 'segundos, ou mm:ss.ms'),
+          onSubmitted: (v) => Navigator.pop(ctx, v),
+        ),
+      ),
+      actions: [
+        CupertinoDialogAction(
+          onPressed: () => Navigator.pop(ctx),
+          child: const AppText('Cancelar'),
+        ),
+        CupertinoDialogAction(
+          isDefaultAction: true,
+          onPressed: () => Navigator.pop(ctx, ctrl.text),
+          child: const AppText('Ir'),
+        ),
+      ],
+    ),
+  );
+  ctrl.dispose();
+  final t = parseTimecodeInput(r ?? '', fps);
+  if (t == null) return;
+  playback.seek(t < Duration.zero ? Duration.zero : (t > total ? total : t));
+}
+
+/// Le "12.5", "1:02.5", "00:01:02:15" (o ultimo campo em quadros quando
+/// ha tres separadores). Nulo quando o texto nao e um tempo.
+Duration? parseTimecodeInput(String texto, int fps) {
+  final s = texto.trim().replaceAll(',', '.');
+  if (s.isEmpty) return null;
+  final partes = s.split(':');
+  try {
+    if (partes.length == 1) {
+      return Duration(microseconds: (double.parse(partes[0]) * 1e6).round());
+    }
+    if (partes.length == 2) {
+      final m = int.parse(partes[0]);
+      final seg = double.parse(partes[1]);
+      return Duration(microseconds: ((m * 60 + seg) * 1e6).round());
+    }
+    if (partes.length == 3) {
+      final h = int.parse(partes[0]);
+      final m = int.parse(partes[1]);
+      final seg = double.parse(partes[2]);
+      return Duration(microseconds: ((h * 3600 + m * 60 + seg) * 1e6).round());
+    }
+    if (partes.length == 4) {
+      final h = int.parse(partes[0]);
+      final m = int.parse(partes[1]);
+      final seg = int.parse(partes[2]);
+      final q = int.parse(partes[3]);
+      return Duration(
+        microseconds:
+            ((h * 3600 + m * 60 + seg) * 1e6).round() +
+            (q * 1e6 / (fps <= 0 ? 30 : fps)).round(),
+      );
+    }
+  } catch (_) {
+    return null;
+  }
+  return null;
 }

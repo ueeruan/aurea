@@ -93,6 +93,19 @@ class _PainelTransformarState extends ConsumerState<PainelTransformar>
       aoTrocarAba: _trocarAba,
       aoFechar: escopo.fecharPainel,
       acoes: [
+        // AUTO KEYFRAME: nasce desligado (toda sessao) e, ligado, fica
+        // ACESO aqui — anunciado na tela, e um toque desliga. Era o selo
+        // "AUTO" do trilho antigo; sem esta porta o modo nao teria como
+        // ser ligado nem visto na UI nova.
+        AcaoDoCabecalho(
+          key: const ValueKey('transformar-auto-keyframe'),
+          icone: CupertinoIcons.wand_stars,
+          ativo: ref.watch(autoKeyframeProvider),
+          aoTocar: () {
+            final n = ref.read(autoKeyframeProvider.notifier);
+            n.state = !n.state;
+          },
+        ),
         AcaoDoCabecalho(
           key: const ValueKey('transformar-3d'),
           icone: CupertinoIcons.cube,
@@ -110,6 +123,7 @@ class _PainelTransformarState extends ConsumerState<PainelTransformar>
             prop: prop,
             t: t,
             playback: escopo.playback,
+            contexto: context,
           );
           void resetar() => umPasso(ref, () => c.resetProp(id, prop));
 
@@ -202,15 +216,13 @@ class _PainelTransformarState extends ConsumerState<PainelTransformar>
                 numero(
                   'Largura',
                   visivel.scaleX.valueAt(local) * 100,
-                  (v) =>
-                      c.editScaleX(id, escopo.playback.time.value, v / 100),
+                  (v) => c.editScaleX(id, escopo.playback.time.value, v / 100),
                   unidade: '%',
                 ),
                 numero(
                   'Altura',
                   visivel.scaleY.valueAt(local) * 100,
-                  (v) =>
-                      c.editScaleY(id, escopo.playback.time.value, v / 100),
+                  (v) => c.editScaleY(id, escopo.playback.time.value, v / 100),
                   unidade: '%',
                 ),
               ],
@@ -252,8 +264,7 @@ class _PainelTransformarState extends ConsumerState<PainelTransformar>
                 numero(
                   'Opacidade',
                   visivel.opacity.valueAt(local) * 100,
-                  (v) =>
-                      c.editOpacity(id, escopo.playback.time.value, v / 100),
+                  (v) => c.editOpacity(id, escopo.playback.time.value, v / 100),
                   min: 0,
                   max: 100,
                   unidade: '%',

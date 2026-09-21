@@ -14,7 +14,7 @@ import '../../../../core/ui/tocavel.dart';
 import '../../application/sketchfab_service.dart';
 import '../../domain/analise_do_modelo.dart';
 import '../../domain/model_import3d.dart';
-import '../widgets/importacao_3d.dart';
+import '../ui/toolbar/importacao_3d.dart';
 
 /// ABRE O ACERVO DO SKETCHFAB e devolve o id do no criado, ou `null` se o
 /// dono saiu sem importar nada.

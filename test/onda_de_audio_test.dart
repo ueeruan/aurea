@@ -19,7 +19,7 @@ import 'package:aurea/src/features/editor/domain/onda_no_clipe.dart';
 import 'package:aurea/src/features/editor/domain/peak_pyramid.dart';
 import 'package:aurea/src/features/editor/domain/streaming_waveform.dart';
 import 'package:aurea/src/features/editor/domain/waveform_cache.dart';
-import 'package:aurea/src/features/editor/presentation/am/clip_preview_painters.dart';
+import 'package:aurea/src/features/editor/presentation/ui/timeline/pintores_do_clipe.dart';
 import 'package:flutter/material.dart' hide Easing;
 import 'package:flutter_test/flutter_test.dart';
 

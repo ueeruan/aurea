@@ -65,3 +65,10 @@ class AureaSnack {
     ScaffoldMessenger.maybeOf(context)?.clearSnackBars();
   }
 }
+
+/// O AVISO CURTO DO POR QUE: "leve o cabecote para dentro da camada", "a
+/// camada esta travada". Um segundo e meio — e explicacao de um gesto que
+/// nao aconteceu, nao noticia.
+void showReasonToast(BuildContext context, String msg) {
+  AureaSnack.show(context, msg, duration: const Duration(milliseconds: 1500));
+}

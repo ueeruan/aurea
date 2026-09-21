@@ -8,7 +8,7 @@ import 'package:aurea/src/features/editor/application/playback_controller.dart';
 import 'package:aurea/src/features/editor/domain/layer.dart';
 import 'package:aurea/src/features/editor/domain/keyframe.dart';
 import 'package:aurea/src/features/editor/domain/video_project.dart';
-import 'package:aurea/src/features/editor/presentation/am/curve_panel.dart';
+import 'package:aurea/src/features/editor/presentation/ui/curva/curva.dart';
 
 /// Um TickerProvider avulso para o relogio do teste.
 class _Vsync extends TickerProvider {
@@ -17,8 +17,8 @@ class _Vsync extends TickerProvider {
 }
 
 void main() {
-  testWidgets('o painel de curva nunca move o cabecote', (tester) async {
-    // POR QUE ESTE TESTE EXISTE: o painel puxava o cabecote de volta para
+  testWidgets('o editor de curva nunca move o cabecote', (tester) async {
+    // POR QUE ESTE TESTE EXISTE: o painel antigo puxava o cabecote de volta para
     // dentro do trecho de keyframes sempre que ele saia — e fazia isso
     // DENTRO do build. Com a reproducao andando virava um cabo de guerra:
     // o relogio avancava, o painel puxava, o relogio avancava de novo. O
@@ -56,11 +56,13 @@ void main() {
         child: MaterialApp(
           home: Scaffold(
             body: SizedBox(
-              height: 300,
-              child: CurvePanel(
+              height: 316,
+              child: EditorDeCurva(
+                layerId: camada.id,
+                trilha: TrilhaDaCurva.transformacao(LayerProp.position),
+                tempoInicial: const Duration(milliseconds: 500),
                 playback: playback,
-                prop: LayerProp.position,
-                onBack: () {},
+                aoFechar: () {},
               ),
             ),
           ),

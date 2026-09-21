@@ -6,7 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../../core/ds/ds.dart';
 import '../../../application/editor_controller.dart';
 import '../../../application/playback_controller.dart';
-import '../../shell/layer_actions.dart' show menuDasMarcas;
+import '../toolbar/menu_do_projeto.dart' show menuDasMarcas;
 import 'estado_da_timeline.dart';
 import 'regua.dart' show textoDoTempo;
 

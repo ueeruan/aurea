@@ -29,7 +29,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:aurea/src/features/editor/domain/peak_pyramid.dart';
-import 'package:aurea/src/features/editor/presentation/am/clip_preview_painters.dart';
+import 'package:aurea/src/features/editor/presentation/ui/timeline/pintores_do_clipe.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 

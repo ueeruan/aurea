@@ -237,18 +237,14 @@ void main() {
     });
 
     test('ligado, e anunciado na tela e sai com um toque', () {
-      // O selo mora no rail de TODA ferramenta que tem losango — e ali
-      // que a marca criada sozinha aparece.
-      final rail = File(
-        'lib/src/features/editor/presentation/widgets/rails_do_painel.dart',
+      // O anuncio mora no cabecalho do painel Transformar (a UI nova): o
+      // botao fica ACESO enquanto o modo esta ligado e um toque o desliga.
+      final painel = File(
+        'lib/src/features/editor/presentation/ui/paineis/transformar.dart',
       ).readAsStringSync();
-      expect(rail, contains('class SeloAutoKeyframe'));
-      expect(rail, contains('ref.watch(autoKeyframeProvider)'));
-      expect(
-        rail,
-        contains('ref.read(autoKeyframeProvider.notifier).state = false'),
-        reason: 'o selo desliga num toque; ligar continua sendo pelo menu',
-      );
+      expect(painel, contains("ValueKey('transformar-auto-keyframe')"));
+      expect(painel, contains('ativo: ref.watch(autoKeyframeProvider)'));
+      expect(painel, contains('n.state = !n.state'));
     });
   });
 }

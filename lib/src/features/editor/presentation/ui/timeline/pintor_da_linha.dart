@@ -6,8 +6,8 @@ import 'package:flutter/foundation.dart';
 
 import '../../../../../core/ds/ds.dart';
 import '../../../domain/peak_pyramid.dart';
-import '../../am/clip_preview_painters.dart';
-import '../../am/janela_da_timeline.dart';
+import 'pintores_do_clipe.dart';
+import 'janela_da_timeline.dart';
 import 'estado_da_timeline.dart';
 import 'geometria.dart';
 

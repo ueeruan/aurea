@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../../core/ds/ds.dart';
 import '../../../../../core/l10n/app_language.dart';
+import '../../../../../core/theme/aurea_colors.dart';
 import '../../../../../core/ui/snack.dart';
 import '../../../application/editor_controller.dart';
 import '../../../application/estilo_preset_store.dart';
@@ -11,9 +12,7 @@ import '../../../domain/keyframe.dart';
 import '../../../domain/layer.dart';
 import '../../../domain/layer_meta.dart';
 import '../../../domain/shape.dart';
-import '../../am/borda_e_sombra_sheet.dart'
-    show maximoDeBordas, nomesDasTerminacoes, novaBorda, sombrasProntas;
-import '../../am/presets_screen.dart' show AbaDosPresets, abrirTelaDePresets;
+import 'presets.dart' show AbaDosPresets, abrirTelaDePresets;
 import '../shell/contrato.dart';
 import 'comum.dart';
 import 'pecas_centrais.dart';
@@ -418,7 +417,8 @@ class PainelBordaSombra extends ConsumerWidget {
             ...sombra(
               'sombra',
               sombraExterna!,
-              (f) => mudarEstilos((s) => s.copyWith(dropShadow: f(s.dropShadow!))),
+              (f) =>
+                  mudarEstilos((s) => s.copyWith(dropShadow: f(s.dropShadow!))),
             ),
           ],
         ],
@@ -452,8 +452,9 @@ class PainelBordaSombra extends ConsumerWidget {
             ...sombra(
               'sombra-interna',
               sombraInterna!,
-              (f) =>
-                  mudarEstilos((s) => s.copyWith(innerShadow: f(s.innerShadow!))),
+              (f) => mudarEstilos(
+                (s) => s.copyWith(innerShadow: f(s.innerShadow!)),
+              ),
             ),
         ],
       ),
@@ -482,7 +483,8 @@ class PainelBordaSombra extends ConsumerWidget {
               'brilho-cor',
               brilho!.color,
               (nova) => mudarEstilos(
-                (s) => s.copyWith(outerGlow: s.outerGlow!.copyWith(color: nova)),
+                (s) =>
+                    s.copyWith(outerGlow: s.outerGlow!.copyWith(color: nova)),
               ),
             ),
             numero(
@@ -667,7 +669,12 @@ class _CartaoDaBorda extends StatelessWidget {
         if (escolha != null) aoMenu(escolha);
       },
       filhos: [
-        cor('Cor', '$k-cor', borda.color, (c) => aoMudar(borda.copyWith(color: c))),
+        cor(
+          'Cor',
+          '$k-cor',
+          borda.color,
+          (c) => aoMudar(borda.copyWith(color: c)),
+        ),
         AureaPropertyRow.personalizada(
           rotulo: 'Posição',
           chave: '$k-posicao',
@@ -705,3 +712,76 @@ class _CartaoDaBorda extends StatelessWidget {
     );
   }
 }
+
+// ------------------------------------------------------------------------
+// AS CONTAS DA BORDA E DA SOMBRA (vieram da folha antiga de borda e sombra).
+
+/// No maximo quatro bordas: cada uma e um passe inteiro na GPU.
+const maximoDeBordas = 4;
+
+/// Os nomes das pontas do traco.
+const nomesDasTerminacoes = <TerminacaoDoTraco, String>{
+  TerminacaoDoTraco.nenhuma: 'Nenhuma',
+  TerminacaoDoTraco.seta: 'Seta',
+  TerminacaoDoTraco.setaCheia: 'Seta cheia',
+  TerminacaoDoTraco.setaVazada: 'Seta vazada',
+  TerminacaoDoTraco.circuloCheio: 'Círculo cheio',
+  TerminacaoDoTraco.circuloVazado: 'Círculo vazado',
+  TerminacaoDoTraco.losango: 'Losango',
+  TerminacaoDoTraco.losangoCheio: 'Losango cheio',
+  TerminacaoDoTraco.quadrado: 'Quadrado',
+  TerminacaoDoTraco.quadradoCheio: 'Quadrado cheio',
+  TerminacaoDoTraco.gotaCheia: 'Gota cheia',
+  TerminacaoDoTraco.gotaVazada: 'Gota vazada',
+  TerminacaoDoTraco.linhaT: 'Linha em T',
+};
+
+/// A BORDA NOVA aparece por fora das que ja existem: cada borda se mede
+/// da beira da camada e as de baixo ficam por tras, entao a nova nasce
+/// mais larga que a ultima.
+StrokeStyle novaBorda(List<StrokeStyle> bordas, Duration local) {
+  if (bordas.isEmpty) {
+    return StrokeStyle(
+      color: const Color(0xFFFFFFFF),
+      width: AnimatedDouble(6),
+    );
+  }
+  final ultima = bordas.last;
+  const cores = [Color(0xFFFFFFFF), AureaColors.bg];
+  return StrokeStyle(
+    color: cores[bordas.length % 2],
+    width: AnimatedDouble(
+      (ultima.width.valueAt(local) + 6).clamp(1.0, 100.0).toDouble(),
+    ),
+    posicao: ultima.posicao,
+  );
+}
+
+/// SOMBRAS PRONTAS: um toque liga uma sombra ja ajustada.
+final sombrasProntas = <String, ShadowStyle Function()>{
+  'Suave': () => ShadowStyle(
+    opacity: AnimatedDouble(.35),
+    angleDeg: AnimatedDouble(270),
+    distance: AnimatedDouble(18),
+    size: AnimatedDouble(48),
+  ),
+  'Dura': () => ShadowStyle(
+    opacity: AnimatedDouble(.6),
+    angleDeg: AnimatedDouble(315),
+    distance: AnimatedDouble(10),
+    size: AnimatedDouble(0),
+  ),
+  'Longa': () => ShadowStyle(
+    opacity: AnimatedDouble(.45),
+    angleDeg: AnimatedDouble(300),
+    distance: AnimatedDouble(60),
+    size: AnimatedDouble(24),
+  ),
+  'Contato': () => ShadowStyle(
+    opacity: AnimatedDouble(.55),
+    angleDeg: AnimatedDouble(270),
+    distance: AnimatedDouble(4),
+    size: AnimatedDouble(8),
+    spread: AnimatedDouble(2),
+  ),
+};

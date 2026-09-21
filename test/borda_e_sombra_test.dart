@@ -1,7 +1,8 @@
 // BORDA E SOMBRA (v1.1.1): o traco da forma ganha pontas nos contornos
 // abertos; qualquer camada empilha ate quatro bordas (fora, dentro ou
 // centro) e tem sombra, sombra interna e brilho numa folha so.
-import 'dart:ui' show Color, Offset, Size;
+import 'dart:ui'
+    show Color, Offset;
 
 import 'package:aurea/src/features/editor/application/editor_controller.dart';
 import 'package:aurea/src/features/editor/domain/keyframe.dart';
@@ -11,14 +12,13 @@ import 'package:aurea/src/features/editor/domain/mask.dart';
 import 'package:aurea/src/features/editor/domain/project_store.dart';
 import 'package:aurea/src/features/editor/domain/shape.dart';
 import 'package:aurea/src/features/editor/domain/video_project.dart';
-import 'package:aurea/src/features/editor/presentation/am/borda_e_sombra_sheet.dart';
-import 'package:aurea/src/features/editor/presentation/editor_screen.dart';
+import 'package:aurea/src/features/editor/presentation/ui/paineis/borda_sombra.dart'
+    show nomesDasTerminacoes, novaBorda;
 import 'package:aurea/src/features/projects/application/projects_controller.dart';
 import 'package:flutter/material.dart' hide Color, Offset, Size;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'apoio/print_da_ui.dart';
 
 class _Projetos extends ProjectsController {
   @override
@@ -45,25 +45,7 @@ ShapeStroke _traco(TerminacaoDoTraco inicio, TerminacaoDoTraco fim) =>
     );
 
 /// Rola a folha ate [alvo] existir (a lista e preguicosa) e o mostra.
-Future<void> _ver(WidgetTester tester, Finder alvo) async {
-  if (alvo.evaluate().isEmpty) {
-    await tester.scrollUntilVisible(
-      alvo,
-      160,
-      scrollable: find
-          .descendant(
-            of: find.byKey(const ValueKey('borda-e-sombra')),
-            matching: find.byType(Scrollable),
-          )
-          .first,
-    );
-  }
-  await tester.ensureVisible(alvo);
-  await tester.pumpAndSettle();
-}
-
 void main() {
-  setUpAll(carregarFontesReais);
 
   test('a lista grava a primeira borda no contorno e as outras nas extras', () {
     final a = StrokeStyle(color: const Color(0xFFFFFFFF));
@@ -188,234 +170,4 @@ void main() {
     }
   });
 
-  testWidgets(
-    'o menu da camada abre a folha; traco, ponta e bordas mudam o projeto',
-    (tester) async {
-      tester.view.physicalSize = const Size(390, 844);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.reset);
-      final c = _container();
-      c
-          .read(editorControllerProvider.notifier)
-          .addShapeLayer(Duration.zero, name: 'F');
-      final id = _forma(c).id;
-      await tester.pumpWidget(
-        UncontrolledProviderScope(
-          container: c,
-          child: const MaterialApp(home: EditorScreen()),
-        ),
-      );
-      await tester.pumpAndSettle();
-      c.read(selectedLayerProvider.notifier).state = id;
-      await tester.pumpAndSettle();
-
-      final tile = find.text('Borda e sombra');
-      await tester.ensureVisible(tile);
-      await tester.pumpAndSettle();
-      await tester.tap(tile);
-      await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('borda-e-sombra')), findsOneWidget);
-
-      ShapeStroke? traco() =>
-          _forma(c).contents.whereType<ShapeStroke>().firstOrNull;
-      LayerStyles estilos() =>
-          c.read(editorControllerProvider).metaOf(id).styles;
-
-      if (traco() == null) {
-        await tester.tap(find.byKey(const ValueKey('borda-traco-ligado')));
-        await tester.pumpAndSettle();
-      }
-      expect(traco(), isNotNull);
-
-      await tester.tap(find.byKey(const ValueKey('borda-traco-juncao-Redonda')));
-      await tester.pumpAndSettle();
-      expect(traco()!.join, StrokeJoin.round);
-
-      await tester.tap(find.byKey(const ValueKey('borda-terminacao-fim')));
-      await tester.pumpAndSettle();
-      final seta = find.byKey(const ValueKey('borda-terminacao-fim-setaCheia'));
-      await tester.ensureVisible(seta);
-      await tester.tap(seta);
-      await tester.pumpAndSettle();
-      expect(traco()!.fim, TerminacaoDoTraco.setaCheia);
-
-      final adicionar = find.byKey(const ValueKey('borda-adicionar'));
-      await tester.ensureVisible(adicionar);
-      await tester.pumpAndSettle();
-      await tester.tap(adicionar);
-      await tester.pumpAndSettle();
-      await tester.ensureVisible(adicionar);
-      await tester.pumpAndSettle();
-      await tester.tap(adicionar);
-      await tester.pumpAndSettle();
-      expect(estilos().bordas, hasLength(2));
-      expect(estilos().bordas.last.width.base, 12);
-
-      final dentro = find.byKey(const ValueKey('borda-posicao-1-Dentro'));
-      await _ver(tester, dentro);
-      await tester.tap(dentro);
-      await tester.pumpAndSettle();
-      expect(estilos().bordas.last.posicao, PosicaoDaBorda.dentro);
-
-      final subir = find.byKey(const ValueKey('borda-subir-1'));
-      await _ver(tester, subir);
-      await tester.tap(subir);
-      await tester.pumpAndSettle();
-      expect(estilos().bordas.first.posicao, PosicaoDaBorda.dentro);
-
-      final excluir = find.byKey(const ValueKey('borda-excluir-0'));
-      await _ver(tester, excluir);
-      await tester.tap(excluir);
-      await tester.pumpAndSettle();
-      expect(estilos().bordas, hasLength(1));
-      expect(estilos().bordas.single.posicao, PosicaoDaBorda.fora);
-
-      final sombra = find.byKey(const ValueKey('sombra-ligada'));
-      await _ver(tester, sombra);
-      await tester.tap(sombra);
-      await tester.pumpAndSettle();
-      expect(estilos().dropShadow?.enabled, isTrue);
-      final dura = find.byKey(const ValueKey('sombra-pronta-Dura'));
-      await _ver(tester, dura);
-      await tester.tap(dura);
-      await tester.pumpAndSettle();
-      expect(estilos().dropShadow!.size.base, 0);
-
-      final interna = find.byKey(const ValueKey('sombra-interna-ligada'));
-      await _ver(tester, interna);
-      await tester.tap(interna);
-      await tester.pumpAndSettle();
-      expect(estilos().innerShadow?.enabled, isTrue);
-
-      final brilho = find.byKey(const ValueKey('brilho-ligado'));
-      await _ver(tester, brilho);
-      await tester.tap(brilho);
-      await tester.pumpAndSettle();
-      expect(estilos().outerGlow?.enabled, isTrue);
-
-      expect(tester.takeException(), isNull);
-      await tester.pump(const Duration(seconds: 1));
-    },
-  );
-
-  testWidgets('texto: a folha nao mostra traco, so bordas e sombras', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(390, 844);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
-    final c = _container();
-    c.read(editorControllerProvider.notifier).addTextLayer(Duration.zero);
-    final id = c.read(editorControllerProvider).layers.first.id;
-    await tester.pumpWidget(
-      UncontrolledProviderScope(
-        container: c,
-        child: MaterialApp(
-          home: Scaffold(
-            body: BordaESombra(layerId: id, tempo: Duration.zero),
-          ),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('borda-traco-ligado')), findsNothing);
-    await tester.tap(find.byKey(const ValueKey('borda-adicionar')));
-    await tester.pumpAndSettle();
-    expect(
-      c.read(editorControllerProvider).metaOf(id).styles.stroke?.width.base,
-      6,
-    );
-    for (var i = 0; i < 3; i++) {
-      final adicionar = find.byKey(const ValueKey('borda-adicionar'));
-      await tester.ensureVisible(adicionar);
-      await tester.pumpAndSettle();
-      await tester.tap(adicionar);
-      await tester.pumpAndSettle();
-    }
-    expect(c.read(editorControllerProvider).metaOf(id).styles.bordas, hasLength(4));
-    expect(
-      find.byKey(const ValueKey('borda-adicionar')),
-      findsNothing,
-      reason: 'quatro e o teto',
-    );
-    expect(tester.takeException(), isNull);
-    await tester.pump(const Duration(seconds: 1));
-  });
-  testWidgets('print: tres bordas, sombra longa e uma seta no palco', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(390, 844);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
-    final c = _container();
-    final e = c.read(editorControllerProvider.notifier);
-    e.addShapeLayer(Duration.zero, name: 'Caixa');
-    final caixa = _forma(c).id;
-    e.updateLayerStyles(
-      caixa,
-      (s) => comBordas(s, [
-        StrokeStyle(
-          color: const Color(0xFFFFFFFF),
-          width: AnimatedDouble(12),
-          posicao: PosicaoDaBorda.dentro,
-        ),
-        StrokeStyle(color: const Color(0xFFFF3B52), width: AnimatedDouble(16)),
-        StrokeStyle(color: const Color(0xFFFFB020), width: AnimatedDouble(32)),
-      ]).copyWith(dropShadow: sombrasProntas['Longa']!()),
-    );
-    e.addShapeLayer(
-      Duration.zero,
-      name: 'Seta',
-      contents: [
-        ShapeBezier(
-          path: AnimatedPath(
-            BezierPath(
-              closed: false,
-              vertices: const [
-                PathVertex(p: Offset(-320, 380)),
-                PathVertex(p: Offset(300, 520)),
-              ],
-            ),
-          ),
-        ),
-        ShapeStroke(
-          color: const Color(0xFF35C4E7),
-          width: AnimatedDouble(14),
-          inicio: TerminacaoDoTraco.circuloCheio,
-          fim: TerminacaoDoTraco.setaCheia,
-        ),
-      ],
-    );
-    final chave = GlobalKey();
-    await tester.pumpWidget(
-      UncontrolledProviderScope(
-        container: c,
-        child: RepaintBoundary(
-          key: chave,
-          child: MaterialApp(
-            theme: ThemeData(
-              platform: TargetPlatform.iOS,
-              fontFamily: 'Aurea Motion Sans',
-              brightness: Brightness.dark,
-            ),
-            home: const EditorScreen(),
-          ),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(tester.takeException(), isNull);
-    await gravarPrint(tester, chave, 'borda-e-sombra-palco');
-
-    c.read(selectedLayerProvider.notifier).state = caixa;
-    await tester.pumpAndSettle();
-    final tile = find.text('Borda e sombra');
-    await tester.ensureVisible(tile);
-    await tester.pumpAndSettle();
-    await tester.tap(tile);
-    await tester.pumpAndSettle();
-    expect(tester.takeException(), isNull);
-    await gravarPrint(tester, chave, 'borda-e-sombra-folha');
-    await tester.pump(const Duration(seconds: 1));
-  });
 }

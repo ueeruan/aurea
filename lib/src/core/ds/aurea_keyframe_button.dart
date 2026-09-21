@@ -1,13 +1,28 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
 
-import '../../features/editor/presentation/context/parameter_row.dart'
-    show KeyframeState;
 import '../ui/tocavel.dart';
 import 'tokens.dart';
 
-export '../../features/editor/presentation/context/parameter_row.dart'
-    show KeyframeState;
+/// O ESTADO DE KEYFRAME de uma linha de parametro: o losango.
+class KeyframeState {
+  const KeyframeState({
+    required this.animated,
+    required this.here,
+    required this.onToggle,
+    this.onCurve,
+  });
+
+  /// A propriedade tem keyframes / tem keyframe neste instante.
+  final bool animated;
+  final bool here;
+
+  /// Toque no losango: poe ou tira o keyframe no cabecote.
+  final VoidCallback onToggle;
+
+  /// Toque longo no losango: abre a curva (quando ha keyframes).
+  final VoidCallback? onCurve;
+}
 
 /// A TOLERANCIA DE "NESTA MARCA": 8 ms, a mesma do painel antigo e da
 /// barra de reproducao. Um quadro a 120 fps tem 8,3 ms — menos que isso e

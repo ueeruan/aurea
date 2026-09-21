@@ -24,12 +24,6 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:aurea/src/core/ui/am_tick_ruler.dart';
-import 'package:aurea/src/features/editor/presentation/am/am_widgets.dart'
-    as am;
-import 'package:aurea/src/features/editor/presentation/context/parameter_row.dart';
-import 'package:aurea/src/features/editor/presentation/widgets/dial_de_angulo.dart';
-import 'package:aurea/src/features/editor/presentation/widgets/fita_de_ajuste.dart';
-import 'package:aurea/src/features/editor/presentation/widgets/linha_de_parametro.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -113,52 +107,18 @@ typedef _Caso = ({
   Widget Function(double valor, ValueChanged<double> aoMudar) monta,
 });
 
-/// TODO CONTROLE DE ARRASTO RETO DO APP. Os demais (audio, Texto 3D,
-/// transporte das folhas, as vinte e tantas reguas soltas) sao um destes
-/// por dentro: e a origem que se testa, e nao cada chamada.
+/// A ORIGEM DE TODO CONTROLE DE ARRASTO RETO DO APP. Os demais (a linha
+/// de propriedade e o deslizante do design system, a exportacao) sao a
+/// regua ou o arrasto dela por dentro: e a origem que se testa, e nao cada
+/// chamada. O deslizante do DS tem o teste dele em
+/// test/ds/ds_componentes_test.dart.
 final _casos = <_Caso>[
   (
-    nome: 'AmTickRuler (pela porta de am_widgets)',
-    tipo: am.AmTickRuler,
+    nome: 'AmTickRuler',
+    tipo: AmTickRuler,
     porPixel: .5,
     monta: (v, set) =>
-        am.AmTickRuler(value: v, unitsPerPixel: .5, onChanged: set),
-  ),
-  (
-    nome: 'ParameterRow',
-    tipo: ParameterRow,
-    porPixel: .5,
-    monta: (v, set) =>
-        ParameterRow(label: 'Espessura', value: v, unitsPerPixel: .5, onChanged: set),
-  ),
-  (
-    // O `_Slider` da ficha de audio e uma ParameterRow com faixa e com a
-    // sensibilidade tirada dela — montado aqui com a mesma receita.
-    nome: 'ParameterRow com faixa (o _Slider do audio)',
-    tipo: ParameterRow,
-    porPixel: 200 / 420,
-    monta: (v, set) => ParameterRow(
-      label: 'Volume',
-      value: v.clamp(0, 200),
-      min: 0,
-      max: 200,
-      unitsPerPixel: 200 / 420,
-      onChanged: (n) => set(n.clamp(0, 200)),
-    ),
-  ),
-  (
-    nome: 'FitaDeAjuste',
-    tipo: FitaDeAjuste,
-    porPixel: .5,
-    monta: (v, set) =>
-        FitaDeAjuste(rotulo: 'Escala', valor: v, porPixel: .5, aoMudar: set),
-  ),
-  (
-    nome: 'LinhaDeParametro',
-    tipo: LinhaDeParametro,
-    porPixel: .5,
-    monta: (v, set) =>
-        LinhaDeParametro(rotulo: 'Brilho', valor: v, porPixel: .5, aoMudar: set),
+        AmTickRuler(value: v, unitsPerPixel: .5, onChanged: set),
   ),
 ];
 
@@ -414,39 +374,6 @@ void main() {
       );
     });
 
-    testWidgets('a fita com faixa pinta o mesmo trilho; sem faixa, nenhum', (
-      t,
-    ) async {
-      await t.pumpWidget(
-        _palco(
-          FitaDeAjuste(
-            rotulo: 'Opacidade',
-            valor: 75,
-            porPixel: .35,
-            min: 0,
-            max: 100,
-            aoMudar: (_) {},
-          ),
-        ),
-      );
-      final com = _pintado(t, find.byType(FitaDeAjuste));
-      expect(com.retangulos, hasLength(2));
-      expect(com.retangulos[1].left, 0);
-      expect(com.retangulos[1].right, closeTo(com.size.width * .75, .001));
-
-      await t.pumpWidget(
-        _palco(
-          FitaDeAjuste(
-            rotulo: 'Escala',
-            valor: 75,
-            porPixel: .35,
-            aoMudar: (_) {},
-          ),
-        ),
-      );
-      expect(_pintado(t, find.byType(FitaDeAjuste)).retangulos, isEmpty);
-    });
-
     testWidgets('a regua repinta quando so a sensibilidade ou a faixa muda', (
       t,
     ) async {
@@ -481,82 +408,6 @@ void main() {
         ),
       );
       expect(pintor().shouldRepaint(semFaixa), isTrue);
-    });
-  });
-
-  group('o dial', () {
-    Future<List<double>> girar(WidgetTester t, List<double> graus) async {
-      final vistos = <double>[];
-      await t.pumpWidget(
-        Directionality(
-          textDirection: TextDirection.ltr,
-          child: Center(
-            child: SizedBox(
-              width: 200,
-              height: 200,
-              child: DialDeAngulo(angulo: 0, aoMudar: vistos.add),
-            ),
-          ),
-        ),
-      );
-      final centro = t.getCenter(find.byType(DialDeAngulo));
-      Offset em(double a) =>
-          centro +
-          Offset(math.cos(a * math.pi / 180), math.sin(a * math.pi / 180)) * 80;
-      final g = await t.startGesture(em(graus.first));
-      for (final a in graus.skip(1)) {
-        await g.moveTo(em(a));
-      }
-      await g.up();
-      await t.pump();
-      return vistos;
-    }
-
-    testWidgets('horario aumenta, anti-horario diminui', (t) async {
-      final horario = await girar(t, [0, 15, 30, 45, 60]);
-      expect(horario.last, closeTo(60, 1));
-      final anti = await girar(t, [0, -15, -30, -45, -60]);
-      expect(anti.last, closeTo(-60, 1));
-    });
-
-    testWidgets('no alto do dial, dedo para a direita aumenta', (t) async {
-      // 12 horas = -90 graus. Andar para a direita ali e andar no sentido
-      // horario: e o mesmo "direita = mais" dos controles retos.
-      final vistos = await girar(t, [-90, -80, -70, -60]);
-      expect(vistos.last, greaterThan(0));
-      expect(vistos.last, closeTo(30, 1));
-    });
-
-    testWidgets('chips de volta: MENOS a esquerda, MAIS a direita', (t) async {
-      final vistos = <double>[];
-      await t.pumpWidget(
-        Directionality(
-          textDirection: TextDirection.ltr,
-          child: Center(
-            child: SizedBox(
-              width: 240,
-              height: 200,
-              child: DialDeAngulo(
-                angulo: 10,
-                aoMudar: vistos.add,
-                passosDeVolta: (mais: 'volta-mais', menos: 'volta-menos'),
-              ),
-            ),
-          ),
-        ),
-      );
-      final mais = find.byKey(const ValueKey('volta-mais'));
-      final menos = find.byKey(const ValueKey('volta-menos'));
-      expect(
-        t.getCenter(menos).dx,
-        lessThan(t.getCenter(mais).dx),
-        reason: 'menos|mais se le da esquerda para a direita',
-      );
-      // E cada chave continua fazendo o que o nome diz.
-      await t.tap(mais);
-      expect(vistos.last, closeTo(370, 1e-9));
-      await t.tap(menos);
-      expect(vistos.last, closeTo(-350, 1e-9));
     });
   });
 
@@ -641,13 +492,24 @@ void main() {
       expect(achados, isEmpty, reason: achados.join('\n'));
     });
 
-    test('a regua tem UMA origem: am_widgets so reexporta', () {
-      final porta = File(
-        'lib/src/features/editor/presentation/am/am_widgets.dart',
-      ).readAsStringSync();
-      expect(porta.contains('class AmTickRuler'), isFalse);
-      expect(porta.contains('class AmArrastoDeValor'), isFalse);
-      expect(porta.contains("core/ui/am_tick_ruler.dart'"), isTrue);
+    test('a regua tem UMA origem: core/ui/am_tick_ruler.dart', () {
+      // Nenhuma copia da regua ou do arrasto na UI nova nem no design
+      // system: eles importam a origem.
+      final copias = <String>[];
+      for (final pasta in [
+        'lib/src/features/editor/presentation/ui',
+        'lib/src/core/ds',
+      ]) {
+        for (final f in Directory(pasta).listSync(recursive: true)) {
+          if (f is! File || !f.path.endsWith('.dart')) continue;
+          final fonte = f.readAsStringSync();
+          if (fonte.contains('class AmTickRuler') ||
+              fonte.contains('class AmArrastoDeValor')) {
+            copias.add(f.path);
+          }
+        }
+      }
+      expect(copias, isEmpty, reason: copias.join('\n'));
       final origem = File('lib/src/core/ui/am_tick_ruler.dart')
           .readAsStringSync();
       expect(origem.contains('_inicio + _acumulado * widget.unitsPerPixel'),

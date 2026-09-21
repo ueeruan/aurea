@@ -16,7 +16,6 @@ import '../../../domain/text_anim.dart';
 import '../../../domain/texto3d.dart';
 import '../../../domain/texto3d_animado.dart';
 import '../../../domain/video_project.dart';
-import '../../am/color_picker_sheet.dart' show showColorPicker;
 import '../../widgets/gizmo_da_cena_overlay.dart'
     show noDaCenaSelecionadoProvider;
 import 'comum.dart';

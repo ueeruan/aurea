@@ -10,7 +10,6 @@ import '../../../application/keyframe_clipboard.dart';
 import '../../../application/playback_controller.dart';
 import '../../../domain/keyframe.dart';
 import '../../../domain/layer.dart';
-import '../../am/curve_panel.dart' show EasingClipboard;
 import '../shell/contrato.dart' show EscopoDoEditor;
 import 'grafico_da_curva.dart';
 import 'navegacao_de_keyframes.dart';
@@ -163,8 +162,10 @@ class EditorDeCurvaState extends ConsumerState<EditorDeCurva> {
     if (camada != null) {
       final marcas = widget.trilha.marcasDe(_c, camada);
       _inicio =
-          trechoEm(marcas, widget.trilha.localEm(camada, widget.tempoInicial))
-              ?.inicio ??
+          trechoEm(
+            marcas,
+            widget.trilha.localEm(camada, widget.tempoInicial),
+          )?.inicio ??
           trechoEm(
             marcas,
             widget.trilha.localEm(camada, widget.playback.time.value),
@@ -430,7 +431,8 @@ class EditorDeCurvaState extends ConsumerState<EditorDeCurva> {
         if (!ancora.mounted) return;
         await _abrirMaisCurvas(ancora, curva);
       case 'loop-none':
-        if (prop != null) _c.setPropertyLoop(widget.layerId, prop, LoopSpec.none);
+        if (prop != null)
+          _c.setPropertyLoop(widget.layerId, prop, LoopSpec.none);
       case 'loop-cycle':
         if (prop != null) {
           _c.setPropertyLoop(
@@ -463,7 +465,8 @@ class EditorDeCurvaState extends ConsumerState<EditorDeCurva> {
             valor: k,
             rotulo: presets[k].nome,
             marcado: curva.mesmoPresetQue(presets[k].ease),
-            chave: 'curva-mais-${AureaPropertyRow.slugDoRotulo(presets[k].nome)}',
+            chave:
+                'curva-mais-${AureaPropertyRow.slugDoRotulo(presets[k].nome)}',
           ),
       ],
     );
@@ -563,9 +566,7 @@ class EditorDeCurvaState extends ConsumerState<EditorDeCurva> {
           _faixaDePresets(curva),
           Expanded(
             child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: AureaDims.e6,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: AureaDims.e6),
               child: curva == null || trecho == null
                   ? _aviso(marcas.length)
                   : ClipRRect(
@@ -815,4 +816,16 @@ class EditorDeCurvaState extends ConsumerState<EditorDeCurva> {
       _ => translate(context, e.label),
     };
   }
+}
+
+// ------------------------------------------------------------------------
+// A AREA DE TRANSFERENCIA DA CURVA (veio do painel de curva antigo).
+
+/// AREA DE TRANSFERENCIA DE CURVA: copiar o easing de um trecho e colar
+/// em outro — de outro parametro, de outra camada, de outro efeito.
+/// Uma so, global, em memoria: e assim que se usa (copia, vai la, cola).
+class EasingClipboard {
+  EasingClipboard._();
+
+  static Easing? valor;
 }

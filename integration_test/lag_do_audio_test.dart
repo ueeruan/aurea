@@ -28,17 +28,15 @@ import 'package:aurea/src/features/editor/application/editor_controller.dart';
 import 'package:aurea/src/features/editor/application/preview_stats.dart';
 import 'package:aurea/src/features/editor/application/video_layer_manager.dart';
 import 'package:aurea/src/features/editor/presentation/editor_screen.dart';
-import 'package:aurea/src/features/projects/application/projects_controller.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:path_provider/path_provider.dart';
 
-import '../test/editor_hierarchy_test.dart' show openEditor;
+import '../test/apoio/abrir_editor.dart' show openEditor;
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();

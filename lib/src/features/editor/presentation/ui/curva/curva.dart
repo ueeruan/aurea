@@ -3,8 +3,14 @@
 library;
 
 export 'editor_de_curva.dart'
-    show EditorDeCurva, abrirEditorDeCurva, chaveDoPreset, presetsDoEditorDeCurva;
-export 'grafico_da_curva.dart' show GraficoDaCurva, ModoDoGrafico;
+    show
+        EasingClipboard,
+        EditorDeCurva,
+        abrirEditorDeCurva,
+        chaveDoPreset,
+        presetsDoEditorDeCurva;
+export 'grafico_da_curva.dart'
+    show AlcasParametricas, GraficoDaCurva, ModoDoGrafico;
 export 'navegacao_de_keyframes.dart'
     show irParaMarcaDaTrilha, irParaMarcaVizinha, marcaVizinha, setasDaTrilha;
 export 'trilha_da_curva.dart'

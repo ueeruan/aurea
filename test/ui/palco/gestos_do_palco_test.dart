@@ -16,8 +16,7 @@ import 'package:aurea/src/features/editor/domain/gizmo_da_cena3d.dart';
 import 'package:aurea/src/features/editor/domain/layer.dart';
 import 'package:aurea/src/features/editor/domain/scene3d.dart';
 import 'package:aurea/src/features/editor/domain/video_project.dart';
-import 'package:aurea/src/features/editor/presentation/shell/cromo_editor.dart'
-    show zoomDoPalcoProvider;
+import 'package:aurea/src/features/editor/presentation/ui/palco/zoom_do_palco.dart';
 import 'package:aurea/src/features/editor/presentation/ui/palco/alcas_do_palco.dart';
 import 'package:aurea/src/features/editor/presentation/widgets/gizmo_da_cena_overlay.dart'
     show noAtivoDaCena;

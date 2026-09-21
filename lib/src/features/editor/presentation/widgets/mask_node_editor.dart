@@ -10,7 +10,7 @@ import '../../domain/layer.dart';
 import '../../domain/mask.dart';
 import '../../domain/shape.dart';
 import '../../domain/path_edit.dart';
-import '../am/am_colors.dart';
+import '../../../../core/ui/am_colors.dart';
 
 /// Que mascara esta sendo editada no a no. Nulo = ninguem, e a camada
 /// volta a se mover com o dedo normalmente.

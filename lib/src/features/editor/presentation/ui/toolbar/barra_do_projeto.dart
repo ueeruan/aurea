@@ -7,11 +7,11 @@ import '../../../../help/presentation/quick_guide_screen.dart';
 import '../../../application/editor_controller.dart';
 import '../../../application/playback_controller.dart';
 import '../../../domain/layer.dart';
-import '../../am/beats_sheet.dart' show showBeatsSheet;
-import '../../am/layer_menu.dart' show showReasonToast;
-import '../../shell/layer_actions.dart' show menuDasMarcas;
-import '../../shell/project_settings_sheet.dart' show showProjectSettingsSheet;
-import '../../widgets/add_layer_sheet.dart' show showCaptionCreationSheet;
+import '../paineis/batidas.dart' show showBeatsSheet;
+import '../../../../../core/ui/snack.dart';
+import 'menu_do_projeto.dart' show menuDasMarcas;
+import '../shell/ajustes_do_projeto.dart' show showProjectSettingsSheet;
+import 'legendar.dart' show showCaptionCreationSheet;
 import '../shell/contrato.dart';
 import 'adicionar.dart';
 import 'barra_contextual.dart';
@@ -103,9 +103,7 @@ class BarraDoProjeto extends ConsumerWidget {
       aoTocar: (f) => f.acao?.call(),
       // O "+" (73, a 6 da borda) flutua sobre o canto direito da barra.
       recuoFinal:
-          AureaDims.botaoAdicionar +
-          AureaDims.margemDoAdicionar +
-          AureaDims.e6,
+          AureaDims.botaoAdicionar + AureaDims.margemDoAdicionar + AureaDims.e6,
     );
   }
 }

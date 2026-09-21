@@ -15,15 +15,12 @@ import '../../../domain/cut_ops.dart';
 import '../../../domain/effect.dart';
 import '../../../domain/layer.dart';
 import '../../../domain/velocidade.dart';
-import '../../am/estudio_do_tempo.dart'
-    show rotuloDaInterpolacao, seloDaInterpolacao;
-import '../../am/speed_sheet.dart' show compensacaoLembrada;
 import '../shell/contrato.dart';
 import 'comum.dart';
 import 'pecas_centrais.dart';
 
-/// A mesma chave de `am/speed_sheet.dart`: o modo de compensacao que a
-/// pessoa escolheu da ultima vez vale nas duas superficies.
+/// O modo de compensacao que a pessoa escolheu da ultima vez (prefs):
+/// vale em toda abertura do painel.
 const _chaveDaCompensacao = 'velocidade.compensacao';
 
 /// OS EFEITOS DE TEMPO que o painel Tempo oferece de atalho. Sao efeitos
@@ -96,7 +93,10 @@ class _PainelTempoState extends ConsumerState<PainelTempo> {
       if (!ok) {
         AureaSnack.show(
           context,
-          translate(context, 'Leve o cabeçote para dentro de um clipe de vídeo'),
+          translate(
+            context,
+            'Leve o cabeçote para dentro de um clipe de vídeo',
+          ),
         );
       }
     }
@@ -342,11 +342,64 @@ class _SecaoDaVelocidadeState extends ConsumerState<SecaoDaVelocidade> {
             chave: 'velocidade-tom',
             filho: AureaToggle(
               valor: som.preservePitch,
-              aoMudar: (v) =>
-                  umPasso(ref, () => c.setClipPreservePitch(id, v)),
+              aoMudar: (v) => umPasso(ref, () => c.setClipPreservePitch(id, v)),
             ),
           ),
       ],
     );
   }
 }
+
+// ------------------------------------------------------------------------
+// OS NOMES DA INTERPOLACAO DE QUADROS (vieram do estudio do tempo antigo).
+
+/// O NOME DE CADA MODO DE INTERPOLACAO NA TELA, no vocabulario que o dono
+/// pediu (Nenhuma / Mistura / Fluxo optico / Fluxo optico (IA)). O enum
+/// nao muda — ele e gravado por `name` no projeto —, so o rotulo. Mora
+/// aqui porque as tres superficies do tempo (esta, a folha Tempo e o
+/// cartao do painel de efeitos) precisam dizer a mesma palavra.
+String rotuloDaInterpolacao(InterpolacaoDeQuadros modo) => switch (modo) {
+  InterpolacaoDeQuadros.nenhuma => 'Nenhuma',
+  InterpolacaoDeQuadros.mesclar => 'Mistura',
+  InterpolacaoDeQuadros.movimento => 'Fluxo óptico',
+  InterpolacaoDeQuadros.ia => 'Fluxo óptico (IA)',
+};
+
+/// O SELO DA PREVIA, dito na tela para ninguem procurar no palco um
+/// resultado que so sai no arquivo. Nulo = nada a avisar.
+String? seloDaInterpolacao(InterpolacaoDeQuadros modo) {
+  const previa = kPreviaMisturaQuadros
+      ? 'prévia: mistura'
+      : 'prévia: quadro mais próximo';
+  return switch (modo) {
+    InterpolacaoDeQuadros.nenhuma => null,
+    InterpolacaoDeQuadros.mesclar =>
+      kPreviaMisturaQuadros ? null : '$previa · exportação: mistura',
+    InterpolacaoDeQuadros.movimento ||
+    InterpolacaoDeQuadros.ia => '$previa · exportação: fluxo óptico',
+  };
+}
+
+// ------------------------------------------------------------------------
+// A COMPENSACAO LEMBRADA (veio da folha de velocidade antiga).
+
+/// O modo de compensacao da ultima vez (Estender fim na primeira).
+CompensacaoDaVelocidade compensacaoLembrada(WidgetRef ref) {
+  try {
+    final i = ref.read(sharedPreferencesProvider).getInt(_chaveDaCompensacao);
+    if (i != null && i >= 0 && i < CompensacaoDaVelocidade.values.length) {
+      return CompensacaoDaVelocidade.values[i];
+    }
+  } catch (_) {}
+  return CompensacaoDaVelocidade.estenderFim;
+}
+
+// ------------------------------------------------------------------------
+// A PREVIA DA INTERPOLACAO.
+
+/// A PREVIA JA MISTURA OS QUADROS VIZINHOS? Hoje nao: o palco mostra o
+/// quadro mais proximo, e mistura/fluxo optico so existem na exportacao.
+/// Quando a previa reduzida (dois quadros do cache + opacidade pela
+/// fracao) entrar no palco, esta constante vira `true` e o selo passa a
+/// dizer "prévia: mistura" — sem tocar em nenhuma das tres superficies.
+const bool kPreviaMisturaQuadros = false;

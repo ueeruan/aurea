@@ -15,20 +15,18 @@ import '../../../domain/layer_meta.dart';
 import '../../../domain/layout_ops.dart';
 import '../../../domain/mask.dart';
 import '../../../domain/video_project.dart';
-import '../../am/align_sheet.dart' show showAlignSheet;
-import '../../am/beat_pulse_sheet.dart' show showBeatPulseSheet;
-import '../../am/beats_sheet.dart' show showBeatsSheet;
-import '../../am/cameras_sheet.dart' show showCamerasSheet;
-import '../../am/decupar_sheet.dart' show showDecuparSheet;
-import '../../am/freeze_sheet.dart' show showFreezeSheet;
-import '../../am/layer_menu.dart' show showExtrudeSheet, showReasonToast;
-import '../../am/oficio_sheets.dart' show showLoopSheet, showOrganizeSheet;
-import '../../am/precomp_sheet.dart' show showPrecompSheet;
-import '../../am/text_path_sheet.dart' show showTextPathSheet;
-import '../../shell/layer_actions.dart' show excluirCamadas, renomearCamada;
-import '../../shell/menu_da_camada.dart'
+import 'alinhar.dart' show showAlignSheet;
+import '../paineis/batidas.dart' show showBeatPulseSheet, showBeatsSheet;
+import '../paineis/cameras.dart' show showCamerasSheet;
+import 'decupar.dart' show showDecuparSheet;
+import 'congelar.dart' show showFreezeSheet;
+import '../paineis/extrude.dart' show showExtrudeSheet;
+import 'oficio.dart' show showLoopSheet, showOrganizeSheet;
+import 'texto_no_caminho.dart' show showTextPathSheet;
+import 'acoes_da_camada.dart' show excluirCamadas, renomearCamada;
+import 'acoes_de_midia.dart'
     show extrairAudioComAviso, mostrarColarEstilo, mostrarInfoDaMidia;
-import '../../widgets/add_layer_sheet.dart' show showCaptionCreationSheet;
+import 'legendar.dart' show showCaptionCreationSheet;
 import '../shell/contrato.dart';
 import 'barra_do_lote.dart';
 import 'escolher_pai.dart';
@@ -185,17 +183,8 @@ List<AureaMenuItem<String>> itensDoMenuDaCamada(
       meta.locked ? 'Destravar' : 'Travar',
       meta.locked ? CupertinoIcons.lock_open : CupertinoIcons.lock,
     ),
-    _item(
-      AcaoDaCamada.solo,
-      'Solo',
-      CupertinoIcons.scope,
-      marcado: meta.solo,
-    ),
-    _item(
-      AcaoDaCamada.selecionar,
-      'Selecionar várias',
-      iconeDeSelecionar,
-    ),
+    _item(AcaoDaCamada.solo, 'Solo', CupertinoIcons.scope, marcado: meta.solo),
+    _item(AcaoDaCamada.selecionar, 'Selecionar várias', iconeDeSelecionar),
     _item(
       AcaoDaCamada.subir,
       'Mover para cima',
@@ -302,50 +291,105 @@ List<AureaMenuItem<String>> itensDeMaisAcoes(
         CupertinoIcons.rectangle_split_3x1,
         habilitado: !camada.reverse && !hasTimeRemap(camada),
       ),
-    _item(AcaoDaCamada.apararInicio, 'Aparar o início no cabeçote',
-        CupertinoIcons.arrow_right_to_line, habilitado: dentro),
-    _item(AcaoDaCamada.apararFim, 'Aparar o fim no cabeçote',
-        CupertinoIcons.arrow_left_to_line, habilitado: dentro),
-    _item(AcaoDaCamada.moverInicio, 'Mover o início para o cabeçote',
-        CupertinoIcons.arrow_right_to_line_alt),
-    _item(AcaoDaCamada.moverFim, 'Mover o fim para o cabeçote',
-        CupertinoIcons.arrow_left_to_line_alt),
+    _item(
+      AcaoDaCamada.apararInicio,
+      'Aparar o início no cabeçote',
+      CupertinoIcons.arrow_right_to_line,
+      habilitado: dentro,
+    ),
+    _item(
+      AcaoDaCamada.apararFim,
+      'Aparar o fim no cabeçote',
+      CupertinoIcons.arrow_left_to_line,
+      habilitado: dentro,
+    ),
+    _item(
+      AcaoDaCamada.moverInicio,
+      'Mover o início para o cabeçote',
+      CupertinoIcons.arrow_right_to_line_alt,
+    ),
+    _item(
+      AcaoDaCamada.moverFim,
+      'Mover o fim para o cabeçote',
+      CupertinoIcons.arrow_left_to_line_alt,
+    ),
     if (video)
-      _item(AcaoDaCamada.congelar, 'Congelar quadro', CupertinoIcons.snow,
-          habilitado: dentro),
-    _item(AcaoDaCamada.copiarEfeitos, 'Copiar efeitos', CupertinoIcons.sparkles,
-        habilitado: camada.effects.isNotEmpty),
-    _item(AcaoDaCamada.colarEfeitos, 'Colar efeitos',
-        CupertinoIcons.wand_stars, habilitado: temEfeitosCopiados),
+      _item(
+        AcaoDaCamada.congelar,
+        'Congelar quadro',
+        CupertinoIcons.snow,
+        habilitado: dentro,
+      ),
+    _item(
+      AcaoDaCamada.copiarEfeitos,
+      'Copiar efeitos',
+      CupertinoIcons.sparkles,
+      habilitado: camada.effects.isNotEmpty,
+    ),
+    _item(
+      AcaoDaCamada.colarEfeitos,
+      'Colar efeitos',
+      CupertinoIcons.wand_stars,
+      habilitado: temEfeitosCopiados,
+    ),
     if (temSom) ...[
-      _item(AcaoDaCamada.mudo, 'Mudo', CupertinoIcons.speaker_slash,
-          marcado: mudo),
-      _item(AcaoDaCamada.batidas, 'Detectar batidas',
-          CupertinoIcons.metronome),
-      _item(AcaoDaCamada.inserir, 'Inserir cópia no cabeçote',
-          CupertinoIcons.arrow_right_to_line),
-      _item(AcaoDaCamada.sobrescrever, 'Sobrescrever no cabeçote',
-          CupertinoIcons.rectangle_on_rectangle),
+      _item(
+        AcaoDaCamada.mudo,
+        'Mudo',
+        CupertinoIcons.speaker_slash,
+        marcado: mudo,
+      ),
+      _item(AcaoDaCamada.batidas, 'Detectar batidas', CupertinoIcons.metronome),
+      _item(
+        AcaoDaCamada.inserir,
+        'Inserir cópia no cabeçote',
+        CupertinoIcons.arrow_right_to_line,
+      ),
+      _item(
+        AcaoDaCamada.sobrescrever,
+        'Sobrescrever no cabeçote',
+        CupertinoIcons.rectangle_on_rectangle,
+      ),
     ],
-    _item(AcaoDaCamada.levantar, 'Levantar trecho (Entrada–Saída)',
-        CupertinoIcons.arrow_up_to_line),
-    _item(AcaoDaCamada.extrair, 'Extrair trecho (Entrada–Saída)',
-        CupertinoIcons.scissors_alt),
+    _item(
+      AcaoDaCamada.levantar,
+      'Levantar trecho (Entrada–Saída)',
+      CupertinoIcons.arrow_up_to_line,
+    ),
+    _item(
+      AcaoDaCamada.extrair,
+      'Extrair trecho (Entrada–Saída)',
+      CupertinoIcons.scissors_alt,
+    ),
     if (video) ...[
       _item(AcaoDaCamada.legendar, 'Legendar', CupertinoIcons.captions_bubble),
       _item(AcaoDaCamada.reenquadrar, 'Reenquadrar', CupertinoIcons.crop),
-      _item(AcaoDaCamada.estabilizar, 'Estabilizar',
-          CupertinoIcons.camera_viewfinder),
+      _item(
+        AcaoDaCamada.estabilizar,
+        'Estabilizar',
+        CupertinoIcons.camera_viewfinder,
+      ),
     ],
     if (camada is Scene3DLayer)
       _item(AcaoDaCamada.cameras, 'Câmeras', CupertinoIcons.videocam),
     if (camada is TextLayer)
-      _item(AcaoDaCamada.caminho, 'Texto no caminho',
-          CupertinoIcons.arrow_turn_up_right),
-    _item(AcaoDaCamada.camada3d, 'Camada 3D', CupertinoIcons.cube,
-        marcado: camada.is3D),
-    _item(AcaoDaCamada.motionBlur, 'Motion blur', CupertinoIcons.wind,
-        marcado: projeto.metaOf(id).motionBlur),
+      _item(
+        AcaoDaCamada.caminho,
+        'Texto no caminho',
+        CupertinoIcons.arrow_turn_up_right,
+      ),
+    _item(
+      AcaoDaCamada.camada3d,
+      'Camada 3D',
+      CupertinoIcons.cube,
+      marcado: camada.is3D,
+    ),
+    _item(
+      AcaoDaCamada.motionBlur,
+      'Motion blur',
+      CupertinoIcons.wind,
+      marcado: projeto.metaOf(id).motionBlur,
+    ),
     if (extrudavel)
       _item(AcaoDaCamada.extrude, 'Extrude 3D', CupertinoIcons.cube_box),
     if (visual)
@@ -353,47 +397,89 @@ List<AureaMenuItem<String>> itensDeMaisAcoes(
     _item(AcaoDaCamada.loop, 'Loop de keyframes', CupertinoIcons.repeat),
     _item(AcaoDaCamada.organizar, 'Organizar', CupertinoIcons.folder),
     if (midia) ...[
-      _item(AcaoDaCamada.infoDaMidia, 'Informações da mídia',
-          CupertinoIcons.info_circle),
+      _item(
+        AcaoDaCamada.infoDaMidia,
+        'Informações da mídia',
+        CupertinoIcons.info_circle,
+      ),
       if (video)
-        _item(AcaoDaCamada.extrairAudio, 'Extrair o áudio',
-            CupertinoIcons.music_note_2),
+        _item(
+          AcaoDaCamada.extrairAudio,
+          'Extrair o áudio',
+          CupertinoIcons.music_note_2,
+        ),
     ],
     if (visual) ...[
       if (!recortada)
-        _item(AcaoDaCamada.recortar, 'Recortar pela camada de baixo',
-            CupertinoIcons.arrow_turn_left_down,
-            habilitado: temBaseDeRecorte)
+        _item(
+          AcaoDaCamada.recortar,
+          'Recortar pela camada de baixo',
+          CupertinoIcons.arrow_turn_left_down,
+          habilitado: temBaseDeRecorte,
+        )
       else
-        _item(AcaoDaCamada.soltarRecorte, 'Soltar o recorte',
-            CupertinoIcons.arrow_turn_up_right),
-      _item(AcaoDaCamada.caber, 'Caber na composição',
-          CupertinoIcons.rectangle_arrow_up_right_arrow_down_left),
-      _item(AcaoDaCamada.preencher, 'Preencher a composição',
-          CupertinoIcons.fullscreen),
-      _item(AcaoDaCamada.esticar, 'Esticar até as bordas',
-          CupertinoIcons.arrow_up_left_arrow_down_right),
-      _item(AcaoDaCamada.espelharH, 'Espelhar na horizontal',
-          CupertinoIcons.arrow_left_right_square),
-      _item(AcaoDaCamada.espelharV, 'Espelhar na vertical',
-          CupertinoIcons.arrow_up_down_square),
+        _item(
+          AcaoDaCamada.soltarRecorte,
+          'Soltar o recorte',
+          CupertinoIcons.arrow_turn_up_right,
+        ),
+      _item(
+        AcaoDaCamada.caber,
+        'Caber na composição',
+        CupertinoIcons.rectangle_arrow_up_right_arrow_down_left,
+      ),
+      _item(
+        AcaoDaCamada.preencher,
+        'Preencher a composição',
+        CupertinoIcons.fullscreen,
+      ),
+      _item(
+        AcaoDaCamada.esticar,
+        'Esticar até as bordas',
+        CupertinoIcons.arrow_up_left_arrow_down_right,
+      ),
+      _item(
+        AcaoDaCamada.espelharH,
+        'Espelhar na horizontal',
+        CupertinoIcons.arrow_left_right_square,
+      ),
+      _item(
+        AcaoDaCamada.espelharV,
+        'Espelhar na vertical',
+        CupertinoIcons.arrow_up_down_square,
+      ),
     ],
     if (grupo != null) ...[
-      _item(AcaoDaCamada.grupoMascara, 'Grupo de máscara',
-          CupertinoIcons.square_stack_3d_down_right_fill,
-          habilitado: grupo.children.length >= 2,
-          marcado: grupo.children.isNotEmpty &&
-              grupo.children.first.blendMode == BlendMode.dstIn),
-      _item(AcaoDaCamada.grupoRecorte, 'Grupo de recorte',
-          CupertinoIcons.square_stack_3d_down_right,
-          habilitado: grupo.children.length >= 2,
-          marcado: grupo.children.isNotEmpty &&
-              grupo.children.first.blendMode == BlendMode.dstOut),
+      _item(
+        AcaoDaCamada.grupoMascara,
+        'Grupo de máscara',
+        CupertinoIcons.square_stack_3d_down_right_fill,
+        habilitado: grupo.children.length >= 2,
+        marcado:
+            grupo.children.isNotEmpty &&
+            grupo.children.first.blendMode == BlendMode.dstIn,
+      ),
+      _item(
+        AcaoDaCamada.grupoRecorte,
+        'Grupo de recorte',
+        CupertinoIcons.square_stack_3d_down_right,
+        habilitado: grupo.children.length >= 2,
+        marcado:
+            grupo.children.isNotEmpty &&
+            grupo.children.first.blendMode == BlendMode.dstOut,
+      ),
     ],
-    _item(AcaoDaCamada.excluirEFechar, 'Apagar e fechar o buraco',
-        CupertinoIcons.delete_left, destrutivo: true),
-    _item(AcaoDaCamada.fecharBuracos, 'Fechar buracos da timeline',
-        CupertinoIcons.arrow_left_right),
+    _item(
+      AcaoDaCamada.excluirEFechar,
+      'Apagar e fechar o buraco',
+      CupertinoIcons.delete_left,
+      destrutivo: true,
+    ),
+    _item(
+      AcaoDaCamada.fecharBuracos,
+      'Fechar buracos da timeline',
+      CupertinoIcons.arrow_left_right,
+    ),
   ];
 }
 
@@ -550,10 +636,11 @@ Future<void> executarAcaoDaCamada(
         AureaSnack.show(context, avisos.join('\n'));
       }
     case AcaoDaCamada.tempoDoGrupo:
-      // A mesma folha do botao "Tempo do grupo" do painel Grupo.
-      if (playback != null) {
-        await showPrecompSheet(context, ref, id, playback);
-      }
+      // O TEMPO DO GRUPO (duracao interna, igualar a barra, remapear,
+      // colapsar, recortar) mora no painel Grupo: o menu abre o painel.
+      context.getInheritedWidgetOfExactType<EscopoDoEditor>()?.abrirPainel(
+        PainelId.grupo,
+      );
     case AcaoDaCamada.vincular:
       final pai = await escolherPai(context, ref, {id}, ancora: onde);
       if (pai == null) return;
@@ -608,7 +695,11 @@ Future<void> executarAcaoDaCamada(
     case AcaoDaCamada.colarEfeitos:
       var n = 0;
       umPasso(() => n = c.pasteEffects(id));
-      aviso(n == 0 ? 'Copie os efeitos de outra camada primeiro' : 'Efeitos colados');
+      aviso(
+        n == 0
+            ? 'Copie os efeitos de outra camada primeiro'
+            : 'Efeitos colados',
+      );
     case AcaoDaCamada.mudo:
       final mudo = c.audioSpecOf(id)?.muted ?? false;
       umPasso(() => c.updateAudioSpec(id, (s) => s.copyWith(muted: !mudo)));
@@ -635,9 +726,7 @@ Future<void> executarAcaoDaCamada(
       aviso('Achando o assunto...');
       final n = await c.autoReframeLayer(id);
       if (!context.mounted) return;
-      aviso(
-        (n ?? 0) == 0 ? 'Não achei um assunto claro' : 'Reenquadrado',
-      );
+      aviso((n ?? 0) == 0 ? 'Não achei um assunto claro' : 'Reenquadrado');
     case AcaoDaCamada.estabilizar:
       aviso('Lendo o vídeo para estabilizar...');
       final n = await c.stabilizeLayer(id);
@@ -672,23 +761,20 @@ Future<void> executarAcaoDaCamada(
         await mostrarInfoDaMidia(context, caminho, camada.name);
       }
     case AcaoDaCamada.extrairAudio:
-      if (camada is VideoLayer) await extrairAudioComAviso(context, ref, camada);
+      if (camada is VideoLayer)
+        await extrairAudioComAviso(context, ref, camada);
     case AcaoDaCamada.recortar:
       umPasso(() => c.recortarPelaDeBaixo(id));
     case AcaoDaCamada.soltarRecorte:
       umPasso(() => c.setMatte(id, MatteMode.none, null));
     case AcaoDaCamada.caber:
-      umPasso(
-        () => c.encaixarNaComposicao(id, EncaixeNaComposicao.caber, t),
-      );
+      umPasso(() => c.encaixarNaComposicao(id, EncaixeNaComposicao.caber, t));
     case AcaoDaCamada.preencher:
       umPasso(
         () => c.encaixarNaComposicao(id, EncaixeNaComposicao.preencher, t),
       );
     case AcaoDaCamada.esticar:
-      umPasso(
-        () => c.encaixarNaComposicao(id, EncaixeNaComposicao.esticar, t),
-      );
+      umPasso(() => c.encaixarNaComposicao(id, EncaixeNaComposicao.esticar, t));
     case AcaoDaCamada.espelharH:
       umPasso(() => c.espelharCamada(id, horizontal: true));
     case AcaoDaCamada.espelharV:
@@ -742,8 +828,7 @@ Future<void> _escolherEtiqueta(
           rotulo: LayerLabel.palette[i].name,
           icone: CupertinoIcons.circle_fill,
           marcado:
-              atual?.color.toARGB32() ==
-              LayerLabel.palette[i].color.toARGB32(),
+              atual?.color.toARGB32() == LayerLabel.palette[i].color.toARGB32(),
           chave: 'etiqueta-$i',
         ),
     ],
@@ -751,6 +836,9 @@ Future<void> _escolherEtiqueta(
   if (escolha == null) return;
   final c = ref.read(editorControllerProvider.notifier);
   c.runAsOneUndo(
-    () => c.setLayerLabel(id, escolha == sem ? null : LayerLabel.palette[escolha]),
+    () => c.setLayerLabel(
+      id,
+      escolha == sem ? null : LayerLabel.palette[escolha],
+    ),
   );
 }

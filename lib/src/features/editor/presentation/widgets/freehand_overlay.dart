@@ -6,15 +6,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../../../core/l10n/app_language.dart';
 import '../../../../core/storage/prefs.dart';
 import '../../application/editor_controller.dart';
 import '../../application/freehand_session.dart';
 import '../../application/playback_controller.dart';
 import '../../domain/desenho_livre.dart';
-import '../am/am_colors.dart';
-import '../am/color_picker_sheet.dart';
-import '../context/parameter_row.dart';
+import '../../../../core/ui/am_colors.dart';
+import '../../../../core/ds/ds.dart';
 export '../../application/freehand_session.dart' show freehandRequestProvider;
 
 /// O tamanho da grade do balde: o contorno da regiao sai com esta
@@ -288,89 +286,80 @@ class BarraDoDesenho extends ConsumerWidget {
     ),
   };
 
+  /// OS AJUSTES DO TRACO numa folha do design system: as mesmas tres
+  /// linhas de propriedade de todo painel (arrastar a linha muda, tocar o
+  /// numero abre o teclado). A preferencia e lembrada a cada passo.
   Future<void> _ajustes(BuildContext context, WidgetRef ref) async {
     playback.pause();
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: AmColors.panel,
-      barrierColor: Colors.black26,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
-      ),
-      builder: (folha) => Consumer(
+    await mostrarAureaFolha<void>(
+      context,
+      titulo: 'Ajustes do desenho',
+      modal: false,
+      construtor: (folha) => Consumer(
         builder: (folha, ref, _) {
           final pincel =
               ref.watch(ferramentaDoDesenhoProvider) ==
               FerramentaDeDesenho.pincel;
-          return SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const AppText(
-                    'Ajustes do desenho',
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      color: AmColors.text,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  ParameterRow(
-                    label: 'Espessura',
-                    value: ref.watch(espessuraDoDesenhoProvider),
-                    min: 1,
-                    max: 200,
-                    unitsPerPixel: .5,
-                    decimals: 0,
-                    unit: 'px',
-                    valueKey: const ValueKey('desenho-espessura'),
-                    onChanged: (v) {
-                      ref.read(espessuraDoDesenhoProvider.notifier).state = v;
-                      _lembrar(ref, (p) => p.setDouble(_chaveDaEspessura, v));
-                    },
-                  ),
-                  if (pincel)
-                    ParameterRow(
-                      label: 'Dureza',
-                      value: ref.watch(durezaDoDesenhoProvider) * 100,
-                      min: 0,
-                      max: 100,
-                      unitsPerPixel: .35,
-                      decimals: 0,
-                      unit: '%',
-                      valueKey: const ValueKey('desenho-dureza'),
-                      onChanged: (v) {
-                        ref.read(durezaDoDesenhoProvider.notifier).state =
-                            v / 100;
-                        _lembrar(
-                          ref,
-                          (p) => p.setDouble(_chaveDaDureza, v / 100),
-                        );
-                      },
-                    ),
-                  ParameterRow(
-                    label: 'Opacidade',
-                    value: ref.watch(opacidadeDoDesenhoProvider) * 100,
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AureaDims.margemDoPainel,
+              0,
+              AureaDims.margemDoPainel,
+              AureaDims.topoDoPainel,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                AureaPropertyRow(
+                  key: const ValueKey('desenho-espessura'),
+                  rotulo: 'Espessura',
+                  valor: ref.watch(espessuraDoDesenhoProvider),
+                  min: 1,
+                  max: 200,
+                  casas: 0,
+                  unidade: 'px',
+                  aoMudar: (v) {
+                    ref.read(espessuraDoDesenhoProvider.notifier).state = v;
+                    _lembrar(ref, (p) => p.setDouble(_chaveDaEspessura, v));
+                  },
+                ),
+                if (pincel)
+                  AureaPropertyRow(
+                    key: const ValueKey('desenho-dureza'),
+                    rotulo: 'Dureza',
+                    valor: ref.watch(durezaDoDesenhoProvider) * 100,
                     min: 0,
                     max: 100,
-                    unitsPerPixel: .35,
-                    decimals: 0,
-                    unit: '%',
-                    valueKey: const ValueKey('desenho-opacidade'),
-                    onChanged: (v) {
-                      ref.read(opacidadeDoDesenhoProvider.notifier).state =
+                    casas: 0,
+                    unidade: '%',
+                    aoMudar: (v) {
+                      ref.read(durezaDoDesenhoProvider.notifier).state =
                           v / 100;
                       _lembrar(
                         ref,
-                        (p) => p.setDouble(_chaveDaOpacidade, v / 100),
+                        (p) => p.setDouble(_chaveDaDureza, v / 100),
                       );
                     },
                   ),
-                ],
-              ),
+                AureaPropertyRow(
+                  key: const ValueKey('desenho-opacidade'),
+                  rotulo: 'Opacidade',
+                  valor: ref.watch(opacidadeDoDesenhoProvider) * 100,
+                  min: 0,
+                  max: 100,
+                  casas: 0,
+                  unidade: '%',
+                  aoMudar: (v) {
+                    ref.read(opacidadeDoDesenhoProvider.notifier).state =
+                        v / 100;
+                    _lembrar(
+                      ref,
+                      (p) => p.setDouble(_chaveDaOpacidade, v / 100),
+                    );
+                  },
+                ),
+              ],
             ),
           );
         },

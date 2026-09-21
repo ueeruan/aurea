@@ -4,12 +4,13 @@
 import 'dart:ui' show Color, Rect, Size;
 
 import 'package:aurea/src/features/editor/application/editor_controller.dart';
-import 'package:aurea/src/features/editor/application/ui/editor_session.dart';
 import 'package:aurea/src/features/editor/domain/layer.dart';
 import 'package:aurea/src/features/editor/domain/project_store.dart';
 import 'package:aurea/src/features/editor/domain/shape.dart';
 import 'package:aurea/src/features/editor/domain/video_project.dart';
+import 'package:aurea/src/core/ds/ds.dart';
 import 'package:aurea/src/features/editor/presentation/editor_screen.dart';
+import 'package:aurea/src/features/editor/presentation/ui/shell/contrato.dart';
 import 'package:aurea/src/features/projects/application/projects_controller.dart';
 import 'package:flutter/material.dart' hide Color, Rect, Size;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -122,15 +123,22 @@ void main() {
     );
   });
 
-  testWidgets('painel da forma: abas trocam o tipo; degrade vira varredura', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(390, 844);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
-    final c = _container();
-    c.read(editorControllerProvider.notifier).addShapeLayer(Duration.zero, name: 'F');
-    final id = _forma(c).id;
+  // O PAINEL COR da casca nova: o tipo de preenchimento e uma ESCOLHA
+  // (AureaDropdown na linha "Preenchimento"); o menu dela numera os itens
+  // na ordem das opcoes (`menu-<indice>`).
+  Future<void> escolher(WidgetTester tester, int indice) async {
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const ValueKey('prop-cor-preenchimento')),
+        matching: find.byWidgetPredicate((w) => w is AureaDropdown),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(ValueKey('menu-$indice')).last);
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> abrirCor(WidgetTester tester, ProviderContainer c, String id) async {
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: c,
@@ -139,16 +147,23 @@ void main() {
     );
     await tester.pumpAndSettle();
     c.read(selectedLayerProvider.notifier).state = id;
-    c.read(editorSessionProvider.notifier).openPanel(EditorPanel.colorFill);
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('cor-aba-degrade')));
+    c.read(painelAbertoProvider.notifier).state = PainelId.cor;
     await tester.pumpAndSettle();
+  }
+
+  testWidgets('painel da forma: a escolha troca o tipo', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final c = _container();
+    c.read(editorControllerProvider.notifier).addShapeLayer(Duration.zero, name: 'F');
+    final id = _forma(c).id;
+    await abrirCor(tester, c, id);
+    // Opcoes: nenhum, cor, degrade, midia.
+    await escolher(tester, 2);
     expect(tipoDePreenchimentoDe(_forma(c).contents), TipoDePreenchimento.degrade);
-    await tester.tap(find.text('Varredura'));
-    await tester.pumpAndSettle();
-    expect(_forma(c).contents.whereType<ShapeGradientFill>().single.varredura, isTrue);
-    await tester.tap(find.byKey(const ValueKey('cor-aba-nenhum')));
-    await tester.pumpAndSettle();
+    await escolher(tester, 0);
     expect(tipoDePreenchimentoDe(_forma(c).contents), TipoDePreenchimento.nenhum);
     expect(tester.takeException(), isNull);
     await tester.pump(const Duration(seconds: 1));
@@ -161,29 +176,18 @@ void main() {
     final c = _container();
     c.read(editorControllerProvider.notifier).addTextLayer(Duration.zero);
     final id = c.read(editorControllerProvider).layers.first.id;
-    await tester.pumpWidget(
-      UncontrolledProviderScope(
-        container: c,
-        child: const MaterialApp(home: EditorScreen()),
-      ),
-    );
-    await tester.pumpAndSettle();
-    c.read(selectedLayerProvider.notifier).state = id;
-    c.read(editorSessionProvider.notifier).openPanel(EditorPanel.colorFill);
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('cor-aba-cor')));
-    await tester.pumpAndSettle();
+    await abrirCor(tester, c, id);
+    // Opcoes: a propria cor do texto, cor por cima, degrade.
+    await escolher(tester, 1);
     expect(
       c.read(editorControllerProvider).metaOf(id).styles.colorOverlay?.enabled,
       isTrue,
     );
-    await tester.tap(find.byKey(const ValueKey('cor-aba-degrade')));
-    await tester.pumpAndSettle();
+    await escolher(tester, 2);
     final estilos = c.read(editorControllerProvider).metaOf(id).styles;
     expect(estilos.gradientOverlay?.enabled, isTrue);
     expect(estilos.colorOverlay, isNull);
-    await tester.tap(find.byKey(const ValueKey('cor-aba-intrinseca')));
-    await tester.pumpAndSettle();
+    await escolher(tester, 0);
     expect(c.read(editorControllerProvider).metaOf(id).styles.isEmpty, isTrue);
     expect(tester.takeException(), isNull);
     await tester.pump(const Duration(seconds: 1));

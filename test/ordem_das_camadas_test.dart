@@ -1,9 +1,7 @@
 import 'package:aurea/src/features/editor/application/editor_controller.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'editor_hierarchy_test.dart' show openEditor;
 
 /// "NAO SEI COMO MUDAR A ORDEM DE UMA CAMADA" — o controlador sabia
 /// reordenar; nao havia botao. Agora ha dois na barra de acoes (e no
@@ -12,15 +10,6 @@ import 'editor_hierarchy_test.dart' show openEditor;
 /// Indice 0 e o TOPO da pilha (o palco pinta `layers.reversed`): "para
 /// frente" e delta negativo.
 void main() {
-  setUpAll(() async {
-    for (final family in ['Aurea Motion Sans', 'Roboto']) {
-      await (FontLoader(family)..addFont(
-            rootBundle.load('assets/templates/dnyx/AureaMotionSans.ttf'),
-          ))
-          .load();
-    }
-  });
-
   group('reorderLayers no controlador', () {
     late ProviderContainer container;
     late EditorController c;
@@ -72,26 +61,4 @@ void main() {
     });
   });
 
-  testWidgets('a barra de acoes traz para frente e envia para tras', (tester) async {
-    final c = await openEditor(tester);
-    final camadas = c.read(editorControllerProvider).layers;
-    expect(camadas.length, greaterThanOrEqualTo(2));
-    final deBaixo = camadas[1].id;
-    c.read(selectedLayerProvider.notifier).state = deBaixo;
-    await tester.pumpAndSettle();
-
-    final frente = find.byTooltip('Subir camada');
-    final tras = find.byTooltip('Descer camada');
-    expect(frente, findsOneWidget, reason: 'o botao de trazer para frente');
-    expect(tras, findsOneWidget, reason: 'o botao de enviar para tras');
-
-    await tester.tap(frente);
-    await tester.pumpAndSettle();
-    expect(c.read(editorControllerProvider).layers.first.id, deBaixo,
-        reason: 'trazer para frente poe no topo da pilha');
-
-    await tester.tap(tras);
-    await tester.pumpAndSettle();
-    expect(c.read(editorControllerProvider).layers[1].id, deBaixo);
-  });
 }

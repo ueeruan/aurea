@@ -12,19 +12,16 @@
 //      atravessa a frase, e da para MEDIR isso por caractere.
 import 'package:aurea/src/features/editor/application/editor_controller.dart';
 import 'package:aurea/src/features/editor/application/effect_preset_store.dart';
-import 'package:aurea/src/features/editor/application/playback_controller.dart';
-import 'package:aurea/src/features/editor/application/ui/editor_session.dart';
 import 'package:aurea/src/features/editor/domain/animador_de_texto.dart';
 import 'package:aurea/src/features/editor/domain/layer.dart';
 import 'package:aurea/src/features/editor/domain/text_animator.dart';
-import 'package:aurea/src/features/editor/presentation/am/effects_panel.dart';
-import 'package:aurea/src/features/editor/presentation/context/effects/effect_gallery.dart';
-import 'package:aurea/src/features/editor/presentation/context/effects/effect_thumbnail.dart';
+import 'package:aurea/src/features/editor/presentation/ui/paineis/efeitos.dart';
+import 'package:aurea/src/features/editor/presentation/ui/paineis/efeitos/miniatura_do_efeito.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'editor_hierarchy_test.dart' show openEditor;
+import 'ui/paineis/apoio_paineis.dart';
 
 /// A cobertura de cada unidade do texto, na base do seletor.
 List<double> _coberturaPorUnidade(
@@ -37,7 +34,7 @@ List<double> _coberturaPorUnidade(
 }
 
 /// O animador de uma receita com o offset PARADO no valor pedido (em %).
-TextAnimator _comOffset(double porcento, {SelectorShape? forma, int? unused}) {
+TextAnimator _comOffset(double porcento, {SelectorShape? forma}) {
   return animadorDaReceita(
     ReceitaDoAnimador(
       forma: forma ?? SelectorShape.triangle,
@@ -371,154 +368,65 @@ void main() {
     });
   });
 
-  group('a porta', () {
-    testWidgets('Efeitos → Texto → Animador de Texto aplica o efeito', (
-      tester,
-    ) async {
-      tester.view.physicalSize = const Size(390, 844);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.reset);
-
-      final c = ProviderContainer();
-      addTearDown(c.dispose);
-      final e = c.read(editorControllerProvider.notifier);
-      e.addTextLayer(Duration.zero);
-      final id = c.read(editorControllerProvider).layers.first.id;
-      final playback = PlaybackController(
-        vsync: tester,
-        durationOf: () => const Duration(seconds: 5),
-      );
-      addTearDown(playback.dispose);
-
-      await tester.pumpWidget(
-        UncontrolledProviderScope(
-          container: c,
-          child: MaterialApp(
-            home: Consumer(
-              builder: (context, ref, _) => Scaffold(
-                body: Center(
-                  child: TextButton(
-                    key: const ValueKey('abrir'),
-                    onPressed: () =>
-                        showEffectGallery(context, ref, id, playback),
-                    child: const Text('abrir'),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-
-      await tester.tap(find.byKey(const ValueKey('abrir')));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 500));
-
-      // A CATEGORIA TEXTO existe em camada de texto, e a entrada esta la.
-      expect(find.byKey(const ValueKey('galeria-cat-Text')), findsOneWidget);
-      expect(
-        find.byKey(const ValueKey('efeito-animador_de_texto')),
-        findsOneWidget,
-      );
-
-      await tester.tap(find.byKey(const ValueKey('efeito-animador_de_texto')));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 500));
-
-      final camada =
-          c.read(editorControllerProvider).layerById(id)! as TextLayer;
-      expect(camada.animators, hasLength(1));
-      expect(camada.animators.single.name, nomeDoAnimadorDeTexto);
-      await tester.pump(const Duration(seconds: 1));
-    });
-  });
-
+  // A PORTA (Efeitos -> Texto -> Animador de Texto) mora em
+  // test/ui/paineis/efeitos_catalogo_test.dart.
   group('o cartao', () {
     testWidgets('mora na pilha de efeitos, com os parametros e o losango', (
       tester,
     ) async {
-      final c = await openEditor(tester);
-      final e = c.read(editorControllerProvider.notifier);
-      e.addTextLayer(Duration.zero);
-      final id = c.read(selectedLayerProvider)!;
-      e.editTextLayer(id, text: 'AUREA');
-      final animatorId = e.addTextAnimator(id)!;
-      c.read(editorSessionProvider.notifier).openPanel(EditorPanel.effects);
+      final (b, id) = await montarPainel(
+        tester,
+        preparar: (c) {
+          c.addTextLayer(Duration.zero);
+          final id = c.projetoCompleto.layers.single.id;
+          c.editTextLayer(id, text: 'AUREA');
+          return id;
+        },
+        painel: (id) => PainelEfeitos(layerId: id),
+        tamanho: const Size(430, 932),
+        altura: 900,
+      );
+      // Aplicado com o painel ja montado: o recem-aplicado abre sozinho.
+      final animatorId = b.c.addTextAnimator(id)!;
       await tester.pumpAndSettle();
+      final k = 'animador-$animatorId';
 
-      final cartao = find.byKey(ValueKey('animador-$animatorId'));
-      await tester.scrollUntilVisible(
-        cartao,
-        80,
-        scrollable: find
-            .descendant(
-              of: find.byType(EffectsPanel),
-              matching: find.byType(Scrollable),
-            )
-            .first,
-      );
-      await tester.pumpAndSettle();
+      // O CABECALHO E O DOS OUTROS EFEITOS: nome e menu •••.
+      expect(find.byKey(ValueKey('$k-cabecalho')), findsOneWidget);
+      expect(find.byKey(ValueKey('$k-menu')), findsOneWidget);
 
-      // O CABECALHO E O DOS OUTROS EFEITOS: nome, ••• e lixeira.
-      expect(
-        find.byKey(ValueKey('animador-cabecalho-$animatorId')),
-        findsOneWidget,
-      );
-      expect(find.byKey(ValueKey('animador-menu-$animatorId')), findsOneWidget);
-      expect(
-        find.byKey(ValueKey('animador-remover-$animatorId')),
-        findsOneWidget,
-      );
-
-      // O grupo Faixa nasce aberto, com as linhas pedidas.
-      for (final chave in ['start', 'end', 'offset']) {
+      // A faixa nasce aberta, com as linhas pedidas.
+      for (final chave in ['start', 'end', 'offset', 'unidade', 'forma']) {
         expect(
-          find.byKey(ValueKey('animador-$animatorId-$chave')),
+          find.byKey(ValueKey('prop-$k-$chave')),
           findsOneWidget,
           reason: 'a linha $chave tem de estar na ficha',
         );
       }
-      expect(
-        find.byKey(ValueKey('animador-$animatorId-unidade')),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(ValueKey('animador-$animatorId-forma')),
-        findsOneWidget,
-      );
 
-      // O LOSANGO E O DA CASA: a chave vem de `ParameterFrame`, a mesma
-      // que toda linha de parametro do app usa.
-      final losango = find.descendant(
-        of: find.byKey(ValueKey('animador-$animatorId-start')),
-        matching: find.byKey(const ValueKey('kf-start')),
-      );
+      // O LOSANGO E O DA CASA: a chave `kf-` vem da mesma linha de
+      // propriedade que o app inteiro usa.
+      final losango = find.byKey(ValueKey('kf-$k-start'));
       expect(losango, findsOneWidget);
 
       TextAnimator animador() =>
-          (c.read(editorControllerProvider).layerById(id)! as TextLayer)
-              .animators
-              .single;
+          (b.camada(id) as TextLayer).animators.single;
       expect(faixaDoAnimador(animador())!.start.isAnimated, isFalse);
-      // A lista e preguicosa e alta: trazer a linha para a janela antes
-      // de tocar, senao o toque cai no vazio.
       await tester.ensureVisible(losango);
       await tester.pumpAndSettle();
       await tester.tap(losango);
       await tester.pumpAndSettle();
       expect(faixaDoAnimador(animador())!.start.isAnimated, isTrue);
 
-      // A lixeira tira o efeito da pilha, como qualquer outro.
-      final lixeira = find.byKey(ValueKey('animador-remover-$animatorId'));
-      await tester.ensureVisible(lixeira);
+      // Apagar (no •••) tira o efeito da pilha, como qualquer outro.
+      await tester.ensureVisible(find.byKey(ValueKey('$k-menu')));
       await tester.pumpAndSettle();
-      await tester.tap(lixeira);
+      await tester.tap(find.byKey(ValueKey('$k-menu')));
       await tester.pumpAndSettle();
-      expect(
-        (c.read(editorControllerProvider).layerById(id)! as TextLayer)
-            .animators,
-        isEmpty,
-      );
+      await tester.tap(find.byKey(const ValueKey('menu-animador-apagar')));
+      await tester.pumpAndSettle();
+      expect((b.camada(id) as TextLayer).animators, isEmpty);
+      expect(tester.takeException(), isNull);
     });
   });
 }

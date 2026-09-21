@@ -1,9 +1,7 @@
 import 'dart:io';
 
 import 'package:aurea/src/core/storage/prefs.dart';
-import 'package:aurea/src/features/editor/presentation/widgets/add_layer_sheet.dart';
 import 'package:aurea/src/features/media/application/sons_recentes.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -99,35 +97,4 @@ void main() {
     expect(c.read(sonsRecentesProvider), isEmpty);
   });
 
-  testWidgets('a aba de som com recentes cabe na folha sem estourar', (
-    tester,
-  ) async {
-    // REGRESSAO (16/09): a lista de recentes usa Expanded, e a aba de
-    // som vivia dentro do SingleChildScrollView da folha — altura sem
-    // fim + Expanded = folha quebrada no aparelho. A aba de som agora
-    // tem altura propria, como a de midia.
-    final c = await _com();
-    addTearDown(c.dispose);
-    final beat = _arquivo('beat.mp3');
-    c.read(sonsRecentesProvider.notifier).registrar(beat, 'Beat da intro');
-    await tester.pumpWidget(
-      UncontrolledProviderScope(
-        container: c,
-        child: MaterialApp(
-          theme: ThemeData(brightness: Brightness.dark),
-          home: Scaffold(
-            body: SizedBox(
-              height: 270,
-              child: AddLayerPanel(onClose: () {}, playhead: Duration.zero),
-            ),
-          ),
-        ),
-      ),
-    );
-    await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('add-tab-audio')));
-    await tester.pump();
-    expect(tester.takeException(), isNull);
-    expect(find.byKey(ValueKey('som-recente-$beat')), findsOneWidget);
-  });
 }

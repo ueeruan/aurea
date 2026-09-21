@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'editor_hierarchy_test.dart' show openEditor;
+import 'apoio/abrir_editor.dart' show openEditor;
 
 /// O RELATO: "os testadores nao estao conseguindo editar".
 ///
@@ -41,8 +41,8 @@ void main() {
       c.read(editorControllerProvider).layers.first.id,
       reason: 'a de cima ganha',
     );
-    // E as ferramentas da camada apareceram sozinhas.
-    expect(find.text('Movimentação e transformação'), findsOneWidget);
+    // E a barra da camada (as ferramentas) apareceu sozinha.
+    expect(find.byKey(const ValueKey('ferramenta-transformar')), findsOneWidget);
 
     // Canto do palco: nao ha camada ali.
     final palco = tester.getRect(find.byType(PreviewStage));

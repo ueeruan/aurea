@@ -6,7 +6,7 @@ import 'package:aurea/src/features/editor/presentation/widgets/preview_stage.dar
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'editor_hierarchy_test.dart' show openEditor;
+import 'apoio/abrir_editor.dart' show openEditor;
 
 void main() {
   for (final z in [0.0, 600.0, -400.0]) {

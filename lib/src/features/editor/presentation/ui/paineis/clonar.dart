@@ -7,7 +7,6 @@ import '../../../application/playback_controller.dart';
 import '../../../domain/grid_rig.dart';
 import '../../../domain/keyframe.dart';
 import '../../../domain/layer.dart';
-import '../../am/layer_look.dart' show layerTypeIcon;
 import '../shell/contrato.dart';
 import 'comum.dart';
 import 'comum_de_objetos.dart';

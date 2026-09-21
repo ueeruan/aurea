@@ -1,32 +1,9 @@
 import 'dart:io';
 
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:image/image.dart' as img;
 import 'package:aurea/src/features/enhance/domain/color_look.dart';
 import 'package:aurea/src/features/enhance/application/enhance_worker.dart';
-import 'package:aurea/src/features/enhance/presentation/enhance_screen.dart';
-
-class _Picker extends FilePicker {
-  @override
-  Future<FilePickerResult?> pickFiles({
-    String? dialogTitle,
-    String? initialDirectory,
-    FileType type = FileType.any,
-    List<String>? allowedExtensions,
-    Function(FilePickerStatus)? onFileLoading,
-    bool allowCompression = true,
-    int compressionQuality = 30,
-    bool allowMultiple = false,
-    bool withData = false,
-    bool withReadStream = false,
-    bool lockParentWindow = false,
-    bool readSequential = false,
-  }) async => FilePickerResult([
-    PlatformFile(name: 'sample.png', size: 1, path: 'sample.png'),
-  ]);
-}
 
 void main() {
   test('color recipes support neutral strength, mono, limits and alpha', () {
@@ -61,25 +38,5 @@ void main() {
     expect(param.contains(' output'), isTrue);
     expect(File('assets/ai/realesr-animevideov3/x4.bin').lengthSync(), 1247368);
     expect(File('assets/ai/compressed_esrgan.tflite').existsSync(), isFalse);
-  });
-  testWidgets('standalone enhancement controls fit a small phone', (
-    tester,
-  ) async {
-    FilePicker.platform = _Picker();
-    tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(320, 568);
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    await tester.pumpWidget(
-      MaterialApp(theme: ThemeData.dark(), home: const EnhanceScreen()),
-    );
-    await tester.tap(find.text('Escolher foto ou vídeo'));
-    await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(find.text('CCs • Correção de cor'), 200);
-    expect(find.text('CCs • Correção de cor'), findsOneWidget);
-    await tester.scrollUntilVisible(find.text('Gerar resultado'), 200);
-    expect(find.text('Comparar antes e depois'), findsOneWidget);
-    expect(tester.takeException(), isNull);
-    await tester.pumpWidget(const SizedBox());
   });
 }

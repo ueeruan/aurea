@@ -13,7 +13,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'editor_hierarchy_test.dart' show openEditor;
+import 'apoio/abrir_editor.dart' show openEditor;
 
 const _captureKey = ValueKey('freehand-preview-capture');
 

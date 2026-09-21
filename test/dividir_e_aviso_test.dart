@@ -7,7 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'editor_hierarchy_test.dart' show openEditor;
+import 'apoio/abrir_editor.dart' show openEditor;
 
 /// Dois pedidos do beta que se provam do mesmo jeito: uma coisa que tem
 /// de estar SEMPRE na tela.
@@ -26,15 +26,13 @@ void main() {
     }
   });
 
-  testWidgets('a tesoura esta na linha de acoes e divide no cabecote', (
+  testWidgets('a tesoura esta na barra da camada e divide no cabecote', (
     tester,
   ) async {
-    // 16/09: a tesoura mora na LINHA DE ACOES do painel da camada,
-    // junto de velocidade e aparar — que e onde a planta a poe. A
-    // barra flutuante que a hospedava antes tapava a linha do tempo
-    // e foi embora.
+    // A tesoura mora na BARRA CONTEXTUAL da camada (a casca nova): so
+    // existe com uma camada escolhida.
     final c = await openEditor(tester);
-    final tesoura = find.byKey(const ValueKey('camada-dividir'));
+    final tesoura = find.byKey(const ValueKey('ferramenta-dividir'));
     final antes = c.read(editorControllerProvider).layers.length;
     expect(
       tesoura,

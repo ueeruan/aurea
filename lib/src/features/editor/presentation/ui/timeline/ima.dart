@@ -1,4 +1,7 @@
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../../../../core/storage/prefs.dart';
 
 import '../../../domain/video_project.dart';
 import 'keyframes_da_timeline.dart';
@@ -122,4 +125,35 @@ class HapticoDoIma {
 int naGradeDeQuadros(double us, int fps) {
   final f = fps < 1 ? 30 : fps;
   return instanteDoQuadroUs((us * f / 1e6).round(), f);
+}
+
+// ------------------------------------------------------------------------
+// O IMA LIGADO/DESLIGADO (preferencia; veio da timeline antiga): decide se apagar fecha o buraco.
+
+/// TIMELINE MAGNETICA — ligada por padrao.
+///
+/// Ligada: excluir fecha o buraco e o que vinha depois encosta. Sem
+/// isso, apagar um pedaco deixa um vazio que a pessoa arruma na mao — e
+/// era a reclamacao "corta, apaga e fica um buraco".
+///
+/// Desligada: cada clipe tem posicao livre, e excluir deixa o buraco.
+/// E o que se quer quando outra trilha precisa continuar no mesmo lugar.
+final magneticProvider = StateProvider<bool>((ref) {
+  try {
+    return ref.read(sharedPreferencesProvider).getBool(kTimelineImaPref) ??
+        true;
+  } catch (_) {
+    return true;
+  }
+});
+
+const kTimelineImaPref = 'timeline.ima';
+
+/// Liga/desliga o ima pela regua, e lembra.
+void alternarIma(WidgetRef ref) {
+  final v = !ref.read(magneticProvider);
+  ref.read(magneticProvider.notifier).state = v;
+  try {
+    ref.read(sharedPreferencesProvider).setBool(kTimelineImaPref, v);
+  } catch (_) {}
 }

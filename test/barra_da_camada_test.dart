@@ -13,7 +13,9 @@ import 'package:aurea/src/features/editor/domain/layer_meta.dart';
 import 'package:aurea/src/features/editor/domain/layout_ops.dart';
 import 'package:aurea/src/features/editor/domain/mask.dart';
 import 'package:aurea/src/features/editor/domain/video_project.dart';
+import 'package:aurea/src/core/ds/ds.dart';
 import 'package:aurea/src/features/editor/presentation/editor_screen.dart';
+import 'package:aurea/src/features/editor/presentation/ui/toolbar/barra_contextual.dart';
 import 'package:aurea/src/features/projects/application/projects_controller.dart';
 import 'package:flutter/material.dart' hide Offset;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -55,59 +57,84 @@ void main() {
   testWidgets('com camada escolhida a barra e dela; voltar devolve a do projeto', (
     tester,
   ) async {
+    // A CASCA NOVA: com uma camada escolhida, a barra de baixo e a das
+    // FERRAMENTAS dela (a contextual); o Voltar do topo solta a camada e a
+    // barra do projeto volta.
     final c = await _editor(tester);
     final id = c.read(editorControllerProvider).layers.first.id;
+    expect(find.byKey(const ValueKey('barra-do-projeto')), findsOneWidget);
     c.read(selectedLayerProvider.notifier).state = id;
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('barra-da-camada')), findsOneWidget);
-    for (final k in ['camada-nome', 'camada-duplicar', 'camada-lixeira', 'camada-menu']) {
-      expect(find.byKey(ValueKey(k)), findsOneWidget, reason: k);
-    }
-    expect(find.byKey(const ValueKey('editor-project-name')), findsNothing);
-    expect(
-      find.byKey(const ValueKey('camada-parentesco')),
-      findsNothing,
-      reason: 'sem pai, o elo nao ocupa lugar na barra',
-    );
+    expect(find.byKey(const ValueKey('barra-contextual')), findsOneWidget);
+    expect(find.byKey(const ValueKey('ferramenta-transformar')), findsOneWidget);
+    expect(find.byKey(const ValueKey('barra-do-projeto')), findsNothing);
 
-    // Renomear ali mesmo.
-    await tester.tap(find.byKey(const ValueKey('camada-nome')));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byKey(const ValueKey('camada-nome-campo')), 'Logo');
-    await tester.testTextInput.receiveAction(TextInputAction.done);
-    await tester.pumpAndSettle();
-    expect(c.read(editorControllerProvider).layerById(id)!.name, 'Logo');
-
-    await tester.tap(find.byKey(const ValueKey('editor-back')));
+    await tester.tap(find.byKey(const ValueKey('topo-voltar')));
     await tester.pumpAndSettle();
     expect(c.read(selectedLayerProvider), isNull);
-    expect(find.byKey(const ValueKey('editor-project-name')), findsOneWidget);
+    expect(find.byKey(const ValueKey('barra-do-projeto')), findsOneWidget);
     await tester.pump(const Duration(seconds: 1));
   });
 
-  testWidgets('o ⋯ da camada: etiqueta e espelho pelo menu real', (
+  testWidgets('o menu da camada: etiqueta e espelho pelo menu real', (
     tester,
   ) async {
     final c = await _editor(tester);
     final id = c.read(editorControllerProvider).layers.first.id;
     c.read(selectedLayerProvider.notifier).state = id;
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('camada-menu')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('camada-menu-folha')), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('camada-etiqueta-6')));
+
+    // O MENU E UMA LISTA QUE ROLA; "Mais" e o ultimo da barra, que tambem
+    // rola de lado quando nao cabe.
+    Future<void> rolarAte(Finder alvo, Finder dono) async {
+      await tester.scrollUntilVisible(
+        alvo,
+        120,
+        scrollable: find
+            .descendant(of: dono, matching: find.byType(Scrollable))
+            .first,
+      );
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> abrirMenu() async {
+      await rolarAte(
+        find.byKey(const ValueKey('ferramenta-mais')),
+        find.byType(BarraContextual),
+      );
+      await tester.tap(find.byKey(const ValueKey('ferramenta-mais')));
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> tocarNoMenu(String chave) async {
+      await rolarAte(find.byKey(ValueKey(chave)), find.byType(AureaMenu<String>).last);
+      await tester.tap(find.byKey(ValueKey(chave)));
+      await tester.pumpAndSettle();
+    }
+
+    await abrirMenu();
+    await tocarNoMenu('menu-camada-etiqueta');
+    // O menu da etiqueta e outro AureaMenu (de int).
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('menu-etiqueta-6')),
+      120,
+      scrollable: find
+          .descendant(
+            of: find.byType(AureaMenu<int>),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    await tester.tap(find.byKey(const ValueKey('menu-etiqueta-6')));
     await tester.pumpAndSettle();
     expect(
       c.read(editorControllerProvider).metaOf(id).label?.color,
       LayerLabel.palette[6].color,
     );
-    // A lista ja construiu o item (fora da tela): rolar ate ele de verdade.
-    await tester.ensureVisible(
-      find.byKey(const ValueKey('camada-menu-espelhar-h')),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('camada-menu-espelhar-h')));
-    await tester.pumpAndSettle();
+
+    await abrirMenu();
+    await tocarNoMenu('menu-camada-mais-acoes');
+    await tocarNoMenu('menu-camada-espelhar-h');
     final l = c.read(editorControllerProvider).layerById(id)!;
     expect(l.scaleX.valueAt(Duration.zero), lessThan(0));
     expect(tester.takeException(), isNull);

@@ -5,7 +5,7 @@ import 'package:aurea/src/features/editor/presentation/widgets/preview_stage.dar
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'editor_hierarchy_test.dart' show openEditor;
+import 'apoio/abrir_editor.dart' show openEditor;
 
 /// A LINHA VERMELHA DE APOIO, provada pelo que ela desenha.
 ///

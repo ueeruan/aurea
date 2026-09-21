@@ -1,33 +1,18 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:ui' as ui;
 
 import 'package:aurea/src/core/storage/prefs.dart';
-import 'package:aurea/src/features/editor/application/editor_controller.dart';
-import 'package:aurea/src/features/editor/domain/video_project.dart';
-import 'package:aurea/src/features/editor/presentation/editor_screen.dart';
-import 'package:aurea/src/features/editor/presentation/widgets/add_layer_sheet.dart';
-import 'package:aurea/src/features/editor/presentation/widgets/gallery_panel.dart';
-import 'package:aurea/src/features/editor/presentation/widgets/preview_stage.dart';
+import 'package:aurea/src/features/editor/presentation/ui/toolbar/galeria.dart';
 import 'package:aurea/src/features/media/application/gallery_service.dart';
 import 'package:aurea/src/features/media/application/media_import_service.dart';
 import 'package:aurea/src/features/media/application/midias_recentes.dart';
-import 'package:aurea/src/features/projects/application/projects_controller.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
-class _Projects extends ProjectsController {
-  @override
-  List<VideoProject> build() => [];
-  @override
-  void upsert(VideoProject project) => state = [project];
-}
 
 class _Gallery extends GalleryService {
   GalleryAccess access = GalleryAccess.full;
@@ -104,123 +89,6 @@ void main() {
       'MaterialIcons',
     )..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'))).load();
   });
-  for (final size in [const Size(360, 640), const Size(430, 844)]) {
-    testWidgets('embedded add and media panels preserve preview at $size', (
-      tester,
-    ) async {
-      tester.view.physicalSize = size;
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      final gallery = _Gallery();
-      final container = ProviderContainer(
-        overrides: [
-          projectsControllerProvider.overrideWith(_Projects.new),
-          galleryServiceProvider.overrideWith((ref) => gallery),
-          mediaImportServiceProvider.overrideWithValue(_Importer()),
-        ],
-      );
-      addTearDown(container.dispose);
-      container
-          .read(editorControllerProvider.notifier)
-          .openProject(VideoProject.empty('Projeto de teste'));
-      final boundary = GlobalKey();
-      Future<void> capture(String name) async {
-        if (!const bool.fromEnvironment('AUREA_CAPTURE_UI') ||
-            size.width != 430) {
-          return;
-        }
-        await tester.pump();
-        await tester.runAsync(() async {
-          final image =
-              await (boundary.currentContext!.findRenderObject()!
-                      as RenderRepaintBoundary)
-                  .toImage(pixelRatio: 2);
-          final bytes = (await image.toByteData(
-            format: ui.ImageByteFormat.png,
-          ))!.buffer.asUint8List();
-          await File('output/am-ui-reference/$name.png').writeAsBytes(bytes);
-          image.dispose();
-        });
-      }
-
-      await tester.pumpWidget(
-        UncontrolledProviderScope(
-          container: container,
-          child: RepaintBoundary(
-            key: boundary,
-            child: const MaterialApp(
-              debugShowCheckedModeBanner: false,
-              home: EditorScreen(),
-            ),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      final preview = tester.getRect(find.byType(PreviewStage));
-      final barriers = find.byType(ModalBarrier).evaluate().length;
-      await tester.tap(find.byTooltip('Adicionar camada'));
-      await tester.pumpAndSettle();
-      expect(find.byType(AddLayerPanel), findsOneWidget);
-      expect(find.byType(ModalBarrier).evaluate().length, barriers);
-      expect(tester.getRect(find.byType(PreviewStage)), preview);
-      await capture('aurea-shapes');
-      await tester.tap(find.text('Mídia'));
-      await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('gallery-grid')), findsOneWidget);
-      expect(
-        gallery.thumbnails,
-        lessThan(30),
-        reason: 'Only visible thumbnails are decoded',
-      );
-      expect(tester.getRect(find.byType(PreviewStage)), preview);
-      await tester.tap(find.byTooltip('Selecionar álbum'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Fotos').last);
-      await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('photos-0-0')), findsOneWidget);
-      // Widget-test clocks do not wait for native image decoders. Explicitly
-      // await the displayed providers so this verifies pixels, not just tiles.
-      await tester.runAsync(() async {
-        for (final element
-            in find
-                .descendant(
-                  of: find.byType(GalleryPanel),
-                  matching: find.byType(Image),
-                )
-                .evaluate()) {
-          await precacheImage((element.widget as Image).image, element);
-        }
-      });
-      await tester.pumpAndSettle();
-      expect(
-        tester
-            .widgetList<RawImage>(
-              find.descendant(
-                of: find.byType(GalleryPanel),
-                matching: find.byType(RawImage),
-              ),
-            )
-            .where((image) => image.image != null),
-        isNotEmpty,
-      );
-      await capture('aurea-gallery');
-      await tester.tap(find.byTooltip('Fechar adicionar'));
-      await tester.pumpAndSettle();
-      expect(find.byType(AddLayerPanel), findsNothing);
-      expect(tester.getRect(find.byType(PreviewStage)), preview);
-      await tester.tap(find.byKey(const ValueKey('editor-fab')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Circulo'));
-      await tester.pumpAndSettle();
-      expect(container.read(editorControllerProvider).layers.length, 1);
-      expect(find.byType(AddLayerPanel), findsNothing);
-      expect(tester.getRect(find.byType(PreviewStage)), preview);
-      await capture('aurea-layer-tools');
-      expect(tester.takeException(), isNull);
-    });
-  }
-
   testWidgets('limited gallery, failed import and cancellation remain usable', (
     tester,
   ) async {

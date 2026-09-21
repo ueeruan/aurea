@@ -1,4 +1,3 @@
-import 'package:flutter/material.dart' hide Easing;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -10,7 +9,6 @@ import 'package:aurea/src/features/editor/domain/project_store.dart';
 import 'package:aurea/src/features/editor/domain/shape.dart';
 import 'package:aurea/src/features/editor/domain/shape_library.dart';
 import 'package:aurea/src/features/editor/domain/video_project.dart';
-import 'package:aurea/src/features/editor/presentation/widgets/add_layer_sheet.dart';
 
 /// NIVEL 1 DO RESET (shapes no modelo AM): biblioteca, numeros
 /// animaveis, traco com tracejado animavel, Drawing Progress, pontos
@@ -225,78 +223,4 @@ void main() {
     });
   });
 
-  group('menu de adicionar (modelo AM)', () {
-    testWidgets('abas, trilho e a grade de formas',
-        (tester) async {
-      final c = ProviderContainer();
-      addTearDown(c.dispose);
-      c.read(editorControllerProvider.notifier).openProject(VideoProject(
-        name: 'p',
-        createdAt: DateTime(2026, 1, 1),
-        layers: const [],
-      ));
-      tester.view.physicalSize = const Size(1080, 2400);
-      tester.view.devicePixelRatio = 3;
-      addTearDown(tester.view.reset);
-
-      await tester.pumpWidget(UncontrolledProviderScope(
-        container: c,
-        child: MaterialApp(
-          home: Scaffold(
-            body: Consumer(
-              builder: (context, ref, _) => TextButton(
-                onPressed: () => showAddLayerSheet(context, ref, Duration.zero),
-                child: const Text('abrir'),
-              ),
-            ),
-          ),
-        ),
-      ));
-      await tester.tap(find.text('abrir'));
-      await tester.pumpAndSettle();
-
-      for (final aba in ['Forma', 'Midia', 'Audio', 'Objeto', 'Mais']) {
-        expect(find.text(aba), findsOneWidget, reason: aba);
-      }
-      expect(find.text('Desenho à\nmão livre'), findsOneWidget);
-      expect(find.text('Desenho\nvetorial'), findsOneWidget);
-      expect(find.text('Texto'), findsOneWidget);
-      // Primeira pagina: quinze tiles, cinco por fileira.
-      expect(find.byTooltip('Circulo'), findsOneWidget);
-      expect(find.byTooltip('Quadrado arredondado'), findsOneWidget);
-
-      // REGRA 4: a folha nao pode cobrir a linha do tempo. Antes tinha
-      // altura fixa de 40% da tela com o minimo de 300 px e sobrava meia
-      // tela vazia na aba de Objeto.
-      final tela = tester.view.physicalSize.height / tester.view.devicePixelRatio;
-      for (final aba in ['Forma', 'Midia', 'Audio', 'Objeto']) {
-        // A fileira de abas rola: com o estudio inteiro ligado sao cinco,
-        // e a ultima nasce fora da tela.
-        await tester.ensureVisible(find.text(aba));
-        await tester.pumpAndSettle();
-        await tester.tap(find.text(aba));
-        await tester.pumpAndSettle();
-        final altura = tester.getSize(find.byType(BottomSheet)).height;
-        // A aba Objeto tem DUAS zonas por desenho (objetos conceituais e
-        // solidos) e a faixa de descricao; as outras nao. Por isso o teto
-        // dela e maior — e ainda assim tem teto.
-        final teto = aba == 'Objeto' ? 0.50 : 0.40;
-        expect(altura, lessThan(tela * teto),
-            reason: 'a aba $aba cobre demais: $altura de $tela');
-      }
-
-      await tester.ensureVisible(find.text('Forma'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Forma'));
-      await tester.pumpAndSettle();
-
-      // Tocar um tile cria a camada de forma e fecha.
-      await tester.tap(find.byTooltip('Quadrado arredondado'));
-      await tester.pumpAndSettle();
-      final layers = c.read(editorControllerProvider).layers;
-      expect(layers.length, 1);
-      expect(layers.single, isA<ShapeLayer>());
-      expect(layers.single.name, startsWith('Quadrado arredondado'));
-    });
-  });
 }

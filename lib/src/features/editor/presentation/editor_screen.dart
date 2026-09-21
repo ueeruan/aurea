@@ -12,11 +12,8 @@ import '../application/ui/editor_session.dart';
 import '../application/video_layer_manager.dart';
 import '../domain/grupo_ops.dart';
 import '../domain/layer.dart';
-import 'am/am_widgets.dart' show RecentSheets, closeActiveParamSheet;
-import 'am/points_panel.dart' show editPointsRequestProvider;
-import 'shell/cromo_editor.dart' show zoomDoPalcoProvider;
-import 'ui/paineis/pontos.dart'
-    show abrirEditarPontosDaForma, fecharEditarPontos;
+import 'ui/palco/zoom_do_palco.dart';
+import 'ui/paineis/pontos.dart' show fecharEditarPontos;
 import 'ui/shell/contrato.dart' show painelAbertoProvider;
 import 'ui/shell/editor_shell.dart';
 
@@ -56,7 +53,6 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
   @override
   void initState() {
     super.initState();
-    RecentSheets.instance.clear();
     WidgetsBinding.instance.addObserver(this);
     // O EDITOR ABRIU: o gerente de desempenho liga as sondas (temperatura,
     // memoria, tempo de quadro) e passa a publicar a politica da previa.
@@ -121,7 +117,6 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
     if (_telaCheiaAtiva) _modoDeSistema(false);
     WidgetsBinding.instance.removeObserver(this);
     AureaPerformanceManager.instancia.editorFechou();
-    RecentSheets.instance.clear();
     // Sem ref no dispose: o controlador foi guardado na montagem.
     _controladorDoNivel?.aoMudarDeNivel = null;
     _playback.time.removeListener(_syncVideos);
@@ -180,10 +175,8 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
 
     ref.listen<String?>(selectedLayerProvider, (previous, next) {
       if (previous == next) return;
-      // Um painel/atalho capturado para A nao pode editar A depois de
+      // Um painel capturado para A nao pode editar A depois de
       // selecionar B.
-      RecentSheets.instance.clear();
-      closeActiveParamSheet(context);
       fecharEditarPontos(ref);
       if (ref.read(painelAbertoProvider) != null) {
         ref.read(painelAbertoProvider.notifier).state = null;
@@ -191,10 +184,6 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
     });
 
     ref.listen(editorControllerProvider, (previous, updated) {
-      if (previous?.id != updated.id) {
-        RecentSheets.instance.clear();
-        closeActiveParamSheet(context);
-      }
       // Mutacao com o dedo ARRASTANDO na tela e passo de gesto: o gerente
       // liga [Interacao.agora], e a lista de projetos (e a Inicio atras da
       // rota) para de ser refeita a cada evento de ponteiro.
@@ -205,14 +194,6 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
           .read(projectsControllerProvider.notifier)
           .upsert(ref.read(editorControllerProvider.notifier).projetoCompleto);
       _syncVideos();
-    });
-
-    // Desenho vetorial pelo menu de adicionar: abre o Editar pontos na
-    // camada recem-criada.
-    ref.listen<String?>(editPointsRequestProvider, (_, id) {
-      if (id == null) return;
-      ref.read(editPointsRequestProvider.notifier).state = null;
-      abrirEditarPontosDaForma(context, ref, _playback, id);
     });
 
     // O relogio compoe na taxa da COMPOSICAO, nao na da tela.

@@ -1,18 +1,12 @@
 // PRINTS DO REDESIGN (sem emulador): a Home nova (cartoes com a
-// miniatura de verdade, o topo fixo e chapado) e as fichas na lingua
-// nova (ParameterRow). Com AUREA_PRINT_DIR
+// miniatura de verdade, o topo fixo e chapado). Com AUREA_PRINT_DIR
 // apontado, sai um PNG por tela; sem, os testes so provam que nada
 // estoura.
 import 'dart:io';
 
 import 'package:aurea/src/core/storage/prefs.dart';
 import 'package:aurea/src/core/theme/app_theme.dart';
-import 'package:aurea/src/features/editor/application/editor_controller.dart';
-import 'package:aurea/src/features/editor/domain/keyframe.dart';
-import 'package:aurea/src/features/editor/domain/layer.dart';
 import 'package:aurea/src/features/editor/domain/video_project.dart';
-import 'package:aurea/src/features/editor/presentation/am/audio_sheet.dart';
-import 'package:aurea/src/features/editor/presentation/am/layer_menu.dart';
 import 'package:aurea/src/features/projects/application/projects_controller.dart';
 import 'package:aurea/src/features/projects/application/thumbnail_service.dart';
 import 'package:aurea/src/features/projects/presentation/projects_tab.dart';
@@ -149,100 +143,6 @@ void main() {
     expect(find.text('AUREA'), findsOneWidget);
     expect(find.byType(BackdropFilter), findsNothing);
     await gravarPrint(tester, chave, 'redesign-inicio-rolada');
-    await tester.pump(const Duration(seconds: 1));
-  });
-
-  Future<(ProviderContainer, GlobalKey)> editorLite(
-    WidgetTester tester,
-    List<Layer> layers,
-    void Function(BuildContext, WidgetRef) abrir,
-  ) async {
-    tester.view.physicalSize = const Size(390, 844);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
-    SharedPreferences.setMockInitialValues({});
-    final prefs = await SharedPreferences.getInstance();
-    final c = ProviderContainer(
-      overrides: [sharedPreferencesProvider.overrideWithValue(prefs)],
-    );
-    addTearDown(c.dispose);
-    c
-        .read(editorControllerProvider.notifier)
-        .openProject(
-          VideoProject(name: 'p', createdAt: DateTime(2026), layers: layers),
-        );
-    final chave = GlobalKey();
-    await tester.pumpWidget(
-      UncontrolledProviderScope(
-        container: c,
-        child: MaterialApp(
-          theme: AppTheme.dark,
-          // O RepaintBoundary abraca o Navigator: e o que poe a FOLHA
-          // (bottom sheet) dentro do print.
-          builder: (context, child) =>
-              RepaintBoundary(key: chave, child: child!),
-          home: Scaffold(
-            backgroundColor: AppColors.background,
-            body: Consumer(
-              builder: (context, ref, _) => Center(
-                child: FilledButton(
-                  key: const ValueKey('abrir-ficha'),
-                  onPressed: () => abrir(context, ref),
-                  child: const Text('abrir'),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-    await tester.tap(find.byKey(const ValueKey('abrir-ficha')));
-    await tester.pump(const Duration(milliseconds: 400));
-    await tester.pump(const Duration(milliseconds: 400));
-    return (c, chave);
-  }
-
-  testWidgets('Ficha de Som na lingua nova', (tester) async {
-    final som = AudioLayer(
-      name: 'Trilha',
-      startTime: Duration.zero,
-      duration: const Duration(seconds: 12),
-      sourcePath: 'trilha.m4a',
-      opacity: AnimatedDouble(1),
-    );
-    final voz = AudioLayer(
-      name: 'Locução',
-      startTime: Duration.zero,
-      duration: const Duration(seconds: 12),
-      sourcePath: 'voz.m4a',
-    );
-    final (_, chave) = await editorLite(
-      tester,
-      [som, voz],
-      (context, ref) => showAudioSheet(context, ref, som.id),
-    );
-    expect(tester.takeException(), isNull);
-    expect(find.text('Ganho'), findsOneWidget);
-    await gravarPrint(tester, chave, 'redesign-ficha-som');
-    await tester.pump(const Duration(seconds: 1));
-  });
-
-  testWidgets('Ficha de Particulas na lingua nova', (tester) async {
-    final p = ParticulasLayer(
-      name: 'Faíscas',
-      startTime: Duration.zero,
-      duration: const Duration(seconds: 8),
-    );
-    final (_, chave) = await editorLite(
-      tester,
-      [p],
-      (context, ref) => showParticulasSheet(context, ref, p.id),
-    );
-    expect(tester.takeException(), isNull);
-    expect(find.text('Quantidade'), findsOneWidget);
-    // A RECEITA DO MOTOR aparece: sao os presets que o painel abre.
-    expect(find.text('RECEITA'), findsOneWidget);
-    await gravarPrint(tester, chave, 'redesign-ficha-particulas');
     await tester.pump(const Duration(seconds: 1));
   });
 }

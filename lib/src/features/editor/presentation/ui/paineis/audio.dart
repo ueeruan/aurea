@@ -11,10 +11,9 @@ import '../../../application/editor_controller.dart';
 import '../../../application/media_preview_service.dart';
 import '../../../domain/audio_effect.dart';
 import '../../../domain/audio_ops.dart';
+import '../../../domain/keyframe.dart';
 import '../../../domain/layer.dart';
-import '../../am/audio_sheet.dart'
-    show somCopiado, volumeComKeyframeAlternado, volumeEditado;
-import '../../am/beats_sheet.dart' show showBeatsSheet;
+import 'batidas.dart' show showBeatsSheet;
 import '../shell/contrato.dart';
 import 'comum.dart';
 import 'pecas_centrais.dart';
@@ -59,9 +58,7 @@ class PainelAudio extends ConsumerWidget {
         titulo: _titulo,
         chave: chave,
         aoFechar: escopo.fecharPainel,
-        filhos: const [
-          AureaAvisoDoPainel(texto: 'Esta camada não tem som.'),
-        ],
+        filhos: const [AureaAvisoDoPainel(texto: 'Esta camada não tem som.')],
       );
     }
     final caminho = switch (camada) {
@@ -76,9 +73,7 @@ class PainelAudio extends ConsumerWidget {
         titulo: _titulo,
         chave: chave,
         aoFechar: escopo.fecharPainel,
-        filhos: const [
-          AureaAvisoDoPainel(texto: 'Esta camada não tem áudio.'),
-        ],
+        filhos: const [AureaAvisoDoPainel(texto: 'Esta camada não tem áudio.')],
       );
     }
     return AureaPanel(
@@ -154,7 +149,9 @@ class PainelAudio extends ConsumerWidget {
       casas: casas,
       unidade: unidade,
       aoMudar: aCadaPasso((v) => mudar(v.clamp(min, max).toDouble())),
-      aoResetar: padrao == null ? null : () => umPasso(ref, () => mudar(padrao)),
+      aoResetar: padrao == null
+          ? null
+          : () => umPasso(ref, () => mudar(padrao)),
       aoComecarGesto: c.beginGesture,
       aoTerminarGesto: c.endGesture,
     );
@@ -174,11 +171,14 @@ class PainelAudio extends ConsumerWidget {
         aoProximo: kf.proximo,
         aoComecarGesto: c.beginGesture,
         aoTerminarGesto: c.endGesture,
-        aoResetar: () =>
-            umPasso(ref, () => editar((a) => a.copyWith(clearVolumeAnimado: true))),
+        aoResetar: () => umPasso(
+          ref,
+          () => editar((a) => a.copyWith(clearVolumeAnimado: true)),
+        ),
         aoMudar: aCadaPasso(
           (v) => editar(
-            (a) => volumeEditado(a, localDe(escopo.playback.time.value), v / 100),
+            (a) =>
+                volumeEditado(a, localDe(escopo.playback.time.value), v / 100),
           ),
         ),
       ),
@@ -192,7 +192,8 @@ class PainelAudio extends ConsumerWidget {
         rotulo: 'Mudo',
         filho: AureaToggle(
           valor: som.muted,
-          aoMudar: (v) => umPasso(ref, () => editar((a) => a.copyWith(muted: v))),
+          aoMudar: (v) =>
+              umPasso(ref, () => editar((a) => a.copyWith(muted: v))),
         ),
       ),
       numero(
@@ -283,9 +284,8 @@ class PainelAudio extends ConsumerWidget {
             0,
             100,
             (v) => editar(
-              (a) => a.copyWith(
-                processing: a.processing.copyWith(voice: v / 100),
-              ),
+              (a) =>
+                  a.copyWith(processing: a.processing.copyWith(voice: v / 100)),
             ),
             unidade: '%',
             padrao: 0,
@@ -345,7 +345,10 @@ class PainelAudio extends ConsumerWidget {
               AureaSnack.show(
                 context,
                 g == null
-                    ? translate(context, 'A forma de onda ainda está sendo lida')
+                    ? translate(
+                        context,
+                        'A forma de onda ainda está sendo lida',
+                      )
                     : '${translate(context, 'Ganho ajustado para')} '
                           '${gainToDb(g).toStringAsFixed(1)} dB',
               );
@@ -364,7 +367,10 @@ class PainelAudio extends ConsumerWidget {
                     context,
                     'A forma de onda ainda está sendo lida',
                   ),
-                  <= 1 => translate(context, 'Não achei pausa longa o bastante'),
+                  <= 1 => translate(
+                    context,
+                    'Não achei pausa longa o bastante',
+                  ),
                   _ => '$n ${translate(context, 'pedaços, sem as pausas')}',
                 },
                 actionLabel: n != null && n > 1
@@ -675,4 +681,37 @@ class SecaoDeEfeitosDeAudio extends ConsumerWidget {
       filhos: filhos,
     );
   }
+}
+
+// ------------------------------------------------------------------------
+// O VOLUME ANIMADO E O SOM COPIADO (vieram da folha de som antiga).
+
+/// O SOM COPIADO por "Copiar som", para colar noutra camada com audio.
+AudioSpec? somCopiado;
+
+/// O VOLUME COM KEYFRAMES no instante [local]: parado muda o numero; com
+/// keyframes, so a marca que estiver ali (quem crava e o losango).
+AudioSpec volumeEditado(AudioSpec a, Duration local, double multiplicador) {
+  final trilha = a.volumeAnimado ?? AnimatedDouble(1);
+  final nova = trilha.edited(local, multiplicador.clamp(0.0, 4.0).toDouble());
+  if (!nova.isAnimated && (nova.base - 1).abs() < 1e-9 && !nova.hasExpression) {
+    return a.copyWith(clearVolumeAnimado: true);
+  }
+  return a.copyWith(volumeAnimado: nova);
+}
+
+/// O LOSANGO DO VOLUME: poe a marca com o valor de agora, ou tira a que
+/// estiver ali.
+AudioSpec volumeComKeyframeAlternado(AudioSpec a, Duration local) {
+  final trilha = a.volumeAnimado ?? AnimatedDouble(1);
+  if (trilha.hasKeyframeAt(local)) {
+    final sem = trilha.withoutKeyframe(local);
+    if (!sem.isAnimated && (sem.base - 1).abs() < 1e-9 && !sem.hasExpression) {
+      return a.copyWith(clearVolumeAnimado: true);
+    }
+    return a.copyWith(volumeAnimado: sem);
+  }
+  return a.copyWith(
+    volumeAnimado: trilha.withKeyframe(local, trilha.valueAt(local)),
+  );
 }

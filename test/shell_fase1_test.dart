@@ -1,28 +1,27 @@
-import 'package:aurea/src/features/editor/application/editor_controller.dart';
-import 'package:aurea/src/features/editor/presentation/am/am_timeline.dart';
 import 'package:aurea/src/features/editor/application/ui/editor_layout.dart';
 import 'package:aurea/src/features/editor/application/ui/editor_session.dart';
 import 'package:aurea/src/features/editor/application/ui/pro_mode.dart';
-import 'package:aurea/src/features/editor/domain/layer.dart';
-import 'package:aurea/src/features/editor/presentation/shell/transport_bar.dart';
-import 'package:aurea/src/features/editor/presentation/am/transform_panel.dart';
+import 'package:aurea/src/features/editor/domain/video_project.dart';
+import 'package:aurea/src/features/editor/presentation/ui/shell/barra_de_transporte.dart';
+import 'package:aurea/src/features/editor/presentation/widgets/preview_stage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'editor_hierarchy_test.dart' show openEditor;
+import 'apoio/abrir_editor.dart' show openEditor;
 
 /// FASE 1 DO REDESIGN — A CASCA (docs/UI_REDESIGN_PLAN.md, secao 3.1).
 ///
 /// - As cinco zonas resolvidas de uma vez: o preview so muda pela alca;
 ///   abrir categoria ou adicionar nunca move o preview; a timeline nunca
 ///   fica abaixo do minimo (salvo ao adicionar, que e um seletor).
-/// - A barra de cima tem UM estado: Voltar, nome, desfazer/refazer, ⚙,
-///   Simples/Pro e Exportar — sempre, com ou sem selecao, com ou sem
-///   painel aberto.
-/// - O transporte tem o timecode tocavel e o ◆ unico.
-/// - Sem selecao, o painel contextual e a barra de ADICIONAR (E1).
+/// - A sessao do editor abre e fecha paineis sem mexer em altura.
+/// - O tempo do transporte e tocavel e aceita o tempo digitado.
+/// - O editor e sempre Pro.
+///
+/// As zonas da casca NOVA, o "+", a barra da camada e a do lote estao em
+/// test/ui/editor_shell_test.dart e test/ui/toolbar/toolbar_test.dart.
 void main() {
   setUpAll(() async {
     for (final family in ['Aurea Motion Sans', 'Roboto']) {
@@ -215,80 +214,13 @@ void main() {
     });
   });
 
-  testWidgets('o cabecalho acompanha a camada e mantem voltar e ajustes', (
+  testWidgets('o tempo do transporte permite digitar o tempo exato', (
     tester,
   ) async {
-    final c = await openEditor(tester);
-    // SEM SELECAO a barra e do projeto (nome, ajustes); COM SELECAO a
-    // barra da camada toma o lugar (v1.1.1, mapa do dono): voltar, nome da
-    // camada e o ⋯ dela. Desfazer e refazer moram na reproducao, sempre.
-    void barra(String momento) {
-      for (final k in [
-        'editor-back',
-        'editor-project-name',
-        'editor-undo',
-        'editor-redo',
-        'editor-settings',
-      ]) {
-        expect(find.byKey(ValueKey(k)), findsOneWidget, reason: '$k $momento');
-      }
-    }
-
-    void barraDaCamada(String momento) {
-      for (final k in [
-        'editor-back',
-        'camada-nome',
-        'camada-menu',
-        'editor-undo',
-        'editor-redo',
-      ]) {
-        expect(find.byKey(ValueKey(k)), findsOneWidget, reason: '$k $momento');
-      }
-      expect(
-        find.byKey(const ValueKey('editor-project-name')),
-        findsNothing,
-        reason: 'a barra do projeto sai com a selecao ($momento)',
-      );
-    }
-
-    barra('sem selecao');
-    // A barra de adicionar so aparece pelo "+": sem selecao o painel fica
-    // fechado e a timeline fica com o espaco.
-    expect(find.byKey(const ValueKey('add-tab-midia')), findsNothing);
-    expect(find.byKey(const ValueKey('editor-fab')), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('editor-fab')));
-    await tester.pumpAndSettle();
-    expect(
-      find.byKey(const ValueKey('add-tab-midia')),
-      findsOneWidget,
-      reason: 'E1 pelo +',
-    );
-    await tester.tap(find.byKey(const ValueKey('editor-back')));
-    await tester.pumpAndSettle();
-
-    final id = c.read(editorControllerProvider).layers.first.id;
-    c.read(selectedLayerProvider.notifier).state = id;
-    await tester.pumpAndSettle();
-    barraDaCamada('com selecao');
-    expect(
-      find.text('Movimentação e transformação'),
-      findsOneWidget,
-      reason: 'E2 com selecao (dock AM)',
-    );
-
-    await tester.tap(find.text('Movimentação e transformação'));
-    await tester.pumpAndSettle();
-    barraDaCamada('com painel aberto');
-    expect(find.byType(TransformPanel), findsOneWidget);
-  });
-
-  testWidgets('o relógio da navbar permite digitar o tempo exato', (
-    tester,
-  ) async {
-    // NA LINGUA DO AM (v1.1.1): o relogio mora na navbar; tocar nele
-    // abre o "ir para o tempo". Segurar ▶| agora vai ao fim.
+    // NA CASCA NOVA o relogio mora na ponta direita do transporte (atual /
+    // total); tocar nele abre o "ir para o tempo".
     await openEditor(tester);
-    await tester.tap(find.byKey(const ValueKey('navbar-tempo')));
+    await tester.tap(find.byKey(const ValueKey('transporte-tempo')));
     await tester.pumpAndSettle();
     final campo = find.byKey(const ValueKey('transport-timecode-campo'));
     expect(campo, findsOneWidget);
@@ -296,40 +228,10 @@ void main() {
     await tester.tap(find.text('Ir'));
     await tester.pumpAndSettle();
     expect(
-      tester.widget<AmTimeline>(find.byType(AmTimeline)).playback.time.value,
+      tester.widget<PreviewStage>(find.byType(PreviewStage)).playback.time.value,
       const Duration(milliseconds: 1500),
     );
   });
-
-  testWidgets(
-    'o ◆ da ferramenta crava e tira o keyframe da propriedade ativa',
-    (tester) async {
-      final c = await openEditor(tester);
-      final id = c.read(editorControllerProvider).layers.first.id;
-      c.read(selectedLayerProvider.notifier).state = id;
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Movimentação e transformação'));
-      await tester.pumpAndSettle();
-
-      Layer camada() => c.read(editorControllerProvider).layerById(id)!;
-      expect(camada().keyframeTimes, isEmpty);
-
-      final losango = find.bySemanticsLabel('Marcar keyframe aqui');
-      expect(losango, findsOneWidget);
-      await tester.tap(losango);
-      await tester.pumpAndSettle();
-      expect(camada().keyframeTimes, isNotEmpty, reason: 'um keyframe em 0 s');
-      expect(find.bySemanticsLabel('Tirar o keyframe daqui'), findsOneWidget);
-
-      await tester.tap(find.bySemanticsLabel('Tirar o keyframe daqui'));
-      await tester.pumpAndSettle();
-      expect(camada().keyframeTimes, isEmpty, reason: 'o mesmo toque tira');
-      expect(
-        find.bySemanticsLabel('Marcar keyframe aqui'),
-        findsOneWidget,
-      );
-    },
-  );
 
   testWidgets('editor sempre Pro sem seletor de modo nos ajustes', (
     tester,
@@ -338,84 +240,11 @@ void main() {
     expect(c.read(proModeProvider), isTrue);
     c.read(proModeProvider.notifier).set(false);
     expect(c.read(proModeProvider), isTrue);
-    // Os ajustes do projeto moram na barra do PROJETO (sem selecao).
-    await tester.tap(find.byKey(const ValueKey('editor-settings')));
+    // Os ajustes do projeto: a engrenagem da barra do topo.
+    await tester.tap(find.byKey(const ValueKey('topo-projeto')));
     await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('projeto-nome')), findsOneWidget);
     expect(find.byKey(const ValueKey('editor-pro')), findsNothing);
     expect(c.read(proModeProvider), isTrue);
-    Navigator.of(tester.element(find.byKey(const ValueKey('projeto-fundo')))).pop();
-    await tester.pumpAndSettle();
-    c.read(selectedLayerProvider.notifier).state = c
-        .read(editorControllerProvider)
-        .layers
-        .first
-        .id;
-    await tester.pumpAndSettle();
-    expect(find.text('Movimentação e transformação'), findsOneWidget);
-    expect(find.byKey(const ValueKey('editor-pro')), findsNothing);
-  });
-
-  testWidgets(
-    'o + abre a barra; Texto cria em um toque; Midia abre o seletor',
-    (tester) async {
-      final c = await openEditor(tester);
-      final antes = c.read(editorControllerProvider).layers.length;
-
-      await tester.tap(find.byKey(const ValueKey('editor-fab')));
-      await tester.pumpAndSettle();
-      expect(
-        c.read(editorSessionProvider).adding,
-        isTrue,
-        reason: 'o + e o unico lugar de adicionar',
-      );
-      await tester.tap(find.text('Texto'));
-      await tester.pumpAndSettle();
-      final camadas = c.read(editorControllerProvider).layers;
-      expect(camadas.length, antes + 1);
-      expect(
-        camadas.any((l) => l is TextLayer),
-        isTrue,
-        reason: 'um toque, um texto',
-      );
-
-      c.read(selectedLayerProvider.notifier).state = null;
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('editor-fab')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('add-tab-midia')));
-      await tester.pumpAndSettle();
-      expect(find.byTooltip('Fechar adicionar'), findsOneWidget);
-      // Closing the selector returns directly to the timeline.
-      await tester.tap(find.byTooltip('Fechar adicionar'));
-      await tester.pumpAndSettle();
-      expect(c.read(editorSessionProvider).adding, isFalse);
-      expect(find.byKey(const ValueKey('add-tab-midia')), findsNothing);
-      expect(
-        find.byKey(const ValueKey('editor-fab')).hitTestable(),
-        findsOneWidget,
-      );
-    },
-  );
-
-  testWidgets('selecao multipla mostra a barra do conjunto', (tester) async {
-    final c = await openEditor(tester);
-    final ids = c
-        .read(editorControllerProvider)
-        .layers
-        .map((l) => l.id)
-        .toList();
-    c.read(selectedLayerProvider.notifier).state = ids[0];
-    c.read(multiSelectProvider.notifier).state = {ids[0], ids[1]};
-    await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('selecao-contagem')), findsOneWidget);
-    expect(find.byKey(const ValueKey('selecao-agrupar')), findsOneWidget);
-    expect(
-      find.byKey(const ValueKey('camada-mais')),
-      findsNothing,
-      reason: 'E2 e de uma camada so',
-    );
-    await tester.tap(find.byKey(const ValueKey('selecao-limpar')));
-    await tester.pumpAndSettle();
-    expect(c.read(multiSelectProvider), isEmpty);
   });
 }

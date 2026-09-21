@@ -2,18 +2,13 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:aurea/src/features/editor/application/editor_controller.dart';
-import 'package:aurea/src/features/editor/application/ui/editor_session.dart';
 import 'package:aurea/src/features/editor/application/ui/preview_resolution.dart';
 import 'package:aurea/src/features/editor/domain/layer.dart';
 import 'package:aurea/src/features/editor/domain/cut_ops.dart';
-import 'package:aurea/src/features/editor/presentation/context/context_sheet.dart';
 import 'package:aurea/src/features/editor/presentation/widgets/preview_stage.dart';
-import 'package:aurea/src/features/editor/presentation/widgets/campo_de_valor.dart';
-import 'package:aurea/src/features/editor/domain/shape.dart';
-import 'package:aurea/src/features/editor/domain/keyframe.dart';
 import 'package:aurea/src/features/media/application/gallery_service.dart';
 
-import 'editor_hierarchy_test.dart' show openEditor;
+import 'apoio/abrir_editor.dart' show openEditor;
 
 void main() {
   test('image Z enables depth and undo restores 2D', () {
@@ -74,10 +69,6 @@ void main() {
           .first
           .id;
       await tester.pumpAndSettle();
-      expect(
-        tester.getSize(find.byType(ContextSheet)).height,
-        greaterThanOrEqualTo(215),
-      );
       expect(tester.getRect(find.byType(PreviewStage)), before);
       for (final key in [
         'timeline-ima',
@@ -89,7 +80,7 @@ void main() {
       }
       await tester.tap(find.byKey(const ValueKey('preview-resolution')));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('1/8'));
+      await tester.tap(find.text(PreviewResolution.eighth.label).last);
       await tester.pumpAndSettle();
       expect(c.read(previewResolutionProvider), PreviewResolution.eighth);
       expect(
@@ -103,76 +94,4 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
-  testWidgets('corner value opens keypad and updates only that corner', (
-    tester,
-  ) async {
-    final c = await openEditor(tester, size: const Size(375, 667));
-    final e = c.read(editorControllerProvider.notifier);
-    e.addShapeLayer(
-      Duration.zero,
-      name: 'Rounded',
-      contents: [
-        ShapeParametric(roundness: AnimatedDouble(25)),
-        ShapeFill(),
-      ],
-    );
-    final id = c.read(selectedLayerProvider)!;
-    await tester.pumpAndSettle();
-    c.read(editorSessionProvider.notifier).openPanel(EditorPanel.editShape);
-    c.read(editorSessionProvider.notifier).setShapeTool(ShapeTool.corners);
-    await tester.pumpAndSettle();
-    final field = find.byWidgetPredicate(
-      (w) => w is CampoDeValor && w.rotulo == 'Superior dir.',
-    );
-    expect(field, findsOneWidget);
-    await tester.tap(field);
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byType(CupertinoTextField), '40');
-    await tester.tap(find.text('OK'));
-    await tester.pumpAndSettle();
-    final l = c.read(editorControllerProvider).layerById(id)! as ShapeLayer;
-    final shape = l.contents.whereType<ShapeParametric>().single;
-    expect(
-      shapeParamTrackOf(shape, 'cornerTopRight')!.valueAt(Duration.zero),
-      40,
-    );
-    expect(
-      shapeParamTrackOf(shape, 'cornerTopLeft')!.valueAt(Duration.zero),
-      25,
-    );
-    expect(tester.takeException(), isNull);
-  });
-  testWidgets(
-    'transform pad keeps straight movement and clears its red guide on release',
-    (tester) async {
-      final c = await openEditor(tester);
-      final id = c.read(editorControllerProvider).layers.first.id;
-      c.read(selectedLayerProvider.notifier).state = id;
-      await tester.pumpAndSettle();
-      c.read(editorSessionProvider.notifier).openTransform();
-      await tester.pumpAndSettle();
-      final before = c
-          .read(editorControllerProvider)
-          .layerById(id)!
-          .position
-          .valueAt(Duration.zero);
-      final pad = find.byKey(const ValueKey('position-drag-pad'));
-      final gesture = await tester.startGesture(tester.getCenter(pad));
-      await gesture.moveBy(const Offset(30, 1));
-      await tester.pump();
-      await gesture.moveBy(const Offset(40, 1));
-      await tester.pump();
-      final after = c
-          .read(editorControllerProvider)
-          .layerById(id)!
-          .position
-          .valueAt(Duration.zero);
-      expect(after.dx, greaterThan(before.dx));
-      expect(after.dy, before.dy);
-      expect(c.read(transformGuidesProvider).y, before.dy);
-      await gesture.up();
-      await tester.pumpAndSettle();
-      expect(c.read(transformGuidesProvider), (x: null, y: null));
-    },
-  );
 }

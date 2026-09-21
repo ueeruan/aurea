@@ -2,7 +2,6 @@
 // a trilha de grupos leva a qualquer nivel, o selo do tempo marca o
 // instante e o cabecalho da linha mostra etiqueta, visto e recorte.
 import 'package:aurea/src/features/editor/application/editor_controller.dart';
-import 'package:aurea/src/features/editor/domain/layer_meta.dart';
 import 'package:aurea/src/features/editor/domain/video_project.dart';
 import 'package:aurea/src/features/editor/presentation/editor_screen.dart';
 import 'package:aurea/src/features/projects/application/projects_controller.dart';
@@ -39,27 +38,26 @@ Future<ProviderContainer> _editor(WidgetTester tester) async {
 }
 
 void main() {
-  testWidgets('o titulo vira campo, renomeia e o renomear se desfaz', (
+  testWidgets('o nome no topo renomeia, e o renomear se desfaz', (
     tester,
   ) async {
+    // O NOME DO PROJETO mora no centro da barra do topo: o toque abre o
+    // pedido de nome (o mesmo dialogo das camadas).
     final c = await _editor(tester);
-    await tester.tap(find.byKey(const ValueKey('editor-project-name')));
+    await tester.tap(find.byKey(const ValueKey('topo-nome')));
     await tester.pumpAndSettle();
-    final campo = find.byKey(const ValueKey('editor-project-name-campo'));
+    final campo = find.byKey(const ValueKey('estudio-nome'));
     expect(campo, findsOneWidget);
     await tester.enterText(campo, 'Abertura do canal');
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
     expect(c.read(editorControllerProvider).name, 'Abertura do canal');
-    expect(find.byKey(const ValueKey('editor-project-name-campo')), findsNothing);
+    expect(find.byKey(const ValueKey('estudio-nome')), findsNothing);
 
-    // Vazio nao vale: volta o que estava.
-    await tester.tap(find.byKey(const ValueKey('editor-project-name')));
+    // Vazio nao vale: fica o que estava.
+    await tester.tap(find.byKey(const ValueKey('topo-nome')));
     await tester.pumpAndSettle();
-    await tester.enterText(
-      find.byKey(const ValueKey('editor-project-name-campo')),
-      '   ',
-    );
+    await tester.enterText(find.byKey(const ValueKey('estudio-nome')), '   ');
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
     expect(c.read(editorControllerProvider).name, 'Abertura do canal');
@@ -70,7 +68,7 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
   });
 
-  testWidgets('trilha de grupos: migalhas levam de volta a qualquer nivel', (
+  testWidgets('dentro de grupos, a ponta da regua sai um nivel por toque', (
     tester,
   ) async {
     final c = await _editor(tester);
@@ -79,53 +77,33 @@ void main() {
     final grupo = c.read(editorControllerProvider).layers.single.id;
     e.enterGroup(grupo);
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('navbar-trilha-de-grupos')), findsOneWidget);
-    expect(find.byKey(const ValueKey('navbar-sair-grupo')), findsOneWidget);
+    final sair = find.byKey(const ValueKey('timeline-sair-do-grupo'));
+    expect(sair, findsOneWidget);
     expect(e.nomeDoProjetoRaiz, 'Meu vídeo');
 
-    // Um grupo dentro do grupo: agora ha migalha do projeto E do grupo.
+    // Um grupo dentro do grupo.
     e.groupLayers([c.read(editorControllerProvider).layers.first.id]);
     final interno = c.read(editorControllerProvider).layers.first.id;
     e.enterGroup(interno);
     await tester.pumpAndSettle();
     expect(e.profundidadeDoGrupo, 2);
-    expect(find.byKey(const ValueKey('navbar-migalha-0')), findsOneWidget);
-    // A trilha rola por dentro (o teto dela encolheu quando o ⋮ do menu
-    // chegou a barra): traz a migalha para a vista antes de tocar, como
-    // o dedo faria.
-    await tester.ensureVisible(find.byKey(const ValueKey('navbar-migalha-0')));
+
+    await tester.tap(sair);
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('navbar-migalha-0')));
+    expect(e.profundidadeDoGrupo, 1);
+    await tester.tap(sair);
     await tester.pumpAndSettle();
     expect(e.profundidadeDoGrupo, 0);
-    expect(find.byKey(const ValueKey('navbar-trilha-de-grupos')), findsNothing);
+    expect(sair, findsNothing);
     expect(tester.takeException(), isNull);
     await tester.pump(const Duration(seconds: 1));
   });
 
-  testWidgets('selo do tempo marca o cabecote; cabecalho mostra etiqueta e visto', (
-    tester,
-  ) async {
+  testWidgets('tocar no cabecote marca o instante', (tester) async {
     final c = await _editor(tester);
-    await tester.tap(find.byKey(const ValueKey('timeline-selo-do-tempo')));
+    await tester.tap(find.byKey(const ValueKey('timeline-toque-do-cabecote')));
     await tester.pumpAndSettle();
     expect(c.read(editorControllerProvider).markers, hasLength(1));
-
-    final ids = [for (final l in c.read(editorControllerProvider).layers) l.id];
-    c.read(editorControllerProvider.notifier).setLayerLabel(
-      ids.first,
-      LayerLabel.palette.first,
-    );
-    c.read(multiSelectProvider.notifier).state = ids.toSet();
-    await tester.pumpAndSettle();
-    final quadrado = tester.widget<Container>(
-      find.byKey(ValueKey('etiqueta-${ids.first}')),
-    );
-    expect(
-      (quadrado.decoration! as BoxDecoration).color,
-      LayerLabel.palette.first.color,
-    );
-    expect(find.byKey(ValueKey('visto-${ids.first}')), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pump(const Duration(seconds: 1));
   });

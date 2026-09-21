@@ -127,7 +127,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const ValueKey('editor-menu')));
+    await tester.tap(find.byKey(const ValueKey('topo-menu')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('timeline-menu')), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('timeline-menu-selecionar-todas')));
@@ -136,7 +136,7 @@ void main() {
 
     c.read(multiSelectProvider.notifier).state = const {};
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('editor-menu')));
+    await tester.tap(find.byKey(const ValueKey('topo-menu')));
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
       find.byKey(const ValueKey('timeline-menu-modo-semEfeitos')),

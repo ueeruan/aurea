@@ -19,11 +19,8 @@ import '../../../application/preview_stats.dart';
 import '../../../application/ui/editor_session.dart';
 import '../../../application/video_layer_manager.dart';
 import '../../../domain/layer.dart';
-import '../../am/am_widgets.dart' show paramSheetHostKey, previewStageKey;
-import '../../am/layer_menu.dart' show showReasonToast;
-import '../../am/texto3d_sheet.dart' show showTexto3DSheet;
-import '../../shell/cromo_editor.dart' show menuDaTimeline;
-import '../../shell/project_settings_sheet.dart' show showProjectSettingsSheet;
+import '../toolbar/menu_do_projeto.dart' show mostrarMenuDoProjeto;
+import 'ajustes_do_projeto.dart' show showProjectSettingsSheet;
 import '../../widgets/preview_stage.dart';
 import '../paineis/pontos.dart' show fecharEditarPontos;
 import '../timeline/timeline.dart';
@@ -121,8 +118,9 @@ class _EditorShellState extends ConsumerState<EditorShell> {
     abrirPainel: _abrirPainel,
   );
 
-  /// TEXTO -> TEXTO 3D, e a folha do Texto 3D abre na camada nova. Veio da
-  /// ficha "Ativar 3D" da doca antiga.
+  /// TEXTO -> TEXTO 3D: o texto vira uma cena com a palavra em volume, a
+  /// cena passa a ser a escolhida e o PAINEL Texto 3D abre nela (a mesma
+  /// porta da barra da camada — nao ha folha propria do Texto 3D).
   Future<void> _ativarTexto3D(String layerId) async {
     _pb.pause();
     final noId = await _c.ativarTexto3D(layerId);
@@ -143,14 +141,7 @@ class _EditorShellState extends ConsumerState<EditorShell> {
         .firstOrNull;
     if (cena == null) return;
     ref.read(selectedLayerProvider.notifier).state = cena.id;
-    await showTexto3DSheet(
-      context,
-      ref,
-      sceneId: cena.id,
-      nodeId: noId,
-      playhead: _pb.time.value,
-      playback: _pb,
-    );
+    _abrirPainel(PainelId.texto3d);
   }
 
   /// O PAINEL NA SESSAO: o palco desenha as alcas da forma viva e o
@@ -179,7 +170,11 @@ class _EditorShellState extends ConsumerState<EditorShell> {
 
   Future<void> _renomear() async {
     final atual = ref.read(editorControllerProvider).name;
-    final novo = await pedirNome(context, titulo: 'Nome do projeto', atual: atual);
+    final novo = await pedirNome(
+      context,
+      titulo: 'Nome do projeto',
+      atual: atual,
+    );
     if (novo == null || novo.trim().isEmpty) return;
     _c.renameProject(novo.trim());
   }
@@ -198,7 +193,7 @@ class _EditorShellState extends ConsumerState<EditorShell> {
   }
 
   void _menuDoProjeto() {
-    menuDaTimeline(
+    mostrarMenuDoProjeto(
       context,
       ref,
       _pb,
@@ -336,11 +331,6 @@ class _EditorShellState extends ConsumerState<EditorShell> {
           if (!didPop) _voltar();
         },
         child: Scaffold(
-          // A CHAVE DO HOSPEDEIRO DAS FOLHAS ANTIGAS: as folhas de
-          // parametro que os paineis ainda abrem (`showParamSheet`)
-          // procuram este Scaffold para ficar persistentes, e o editor as
-          // fecha por ela ao trocar de camada.
-          key: paramSheetHostKey,
           resizeToAvoidBottomInset: ModalRoute.of(context)?.isCurrent ?? true,
           backgroundColor: AureaCores.cromo,
           body: SafeArea(
@@ -374,7 +364,9 @@ class _EditorShellState extends ConsumerState<EditorShell> {
                         },
                         aoExportar: _exportar,
                       ),
-                    Expanded(child: _Previa(playback: _pb, videos: widget.videos)),
+                    Expanded(
+                      child: _Previa(playback: _pb, videos: widget.videos),
+                    ),
                     BarraDeTransporte(
                       playback: _pb,
                       telaCheia: telaCheia,

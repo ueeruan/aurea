@@ -6,9 +6,6 @@ import 'package:aurea/src/features/editor/domain/layer.dart';
 import 'package:aurea/src/features/editor/domain/gear.dart';
 import 'package:aurea/src/features/editor/domain/project_store.dart';
 import 'package:aurea/src/features/editor/domain/video_project.dart';
-import 'package:aurea/src/features/editor/presentation/am/animador_sheet.dart';
-import 'package:aurea/src/features/editor/presentation/context/parameter_row.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -235,86 +232,5 @@ void main() {
       ),
       isFalse,
     );
-  });
-
-  testWidgets('o toque longo no nome oferece animar sozinho', (tester) async {
-    var pedidos = 0;
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: Center(
-            child: ParameterRow(
-              label: 'Opacidade',
-              value: 80,
-              min: 0,
-              max: 100,
-              onChanged: (_) {},
-              onReset: () {},
-              onAnimador: () => pedidos++,
-            ),
-          ),
-        ),
-      ),
-    );
-    await tester.longPress(find.text('Opacidade'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('animador-propriedade')));
-    await tester.pumpAndSettle();
-    expect(pedidos, 1);
-  });
-
-  testWidgets('a folha põe, ajusta e tira o animador', (tester) async {
-    final c = ProviderContainer();
-    addTearDown(c.dispose);
-    final e = c.read(editorControllerProvider.notifier);
-    e.addShapeLayer(Duration.zero);
-    final id = c.read(editorControllerProvider).layers.single.id;
-    Layer camada() => c.read(editorControllerProvider).layerById(id)!;
-
-    await tester.pumpWidget(
-      UncontrolledProviderScope(
-        container: c,
-        child: MaterialApp(
-          home: Consumer(
-            builder: (context, ref, _) => Scaffold(
-              body: Center(
-                child: TextButton(
-                  onPressed: () => showAnimadorSheet(
-                    context,
-                    ref,
-                    id,
-                    LayerProp.position,
-                    nome: 'a posição',
-                    unidade: 'px',
-                  ),
-                  child: const Text('abrir'),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-    await tester.tap(find.text('abrir'));
-    await tester.pumpAndSettle();
-    // Sem animador ainda: nada para tirar.
-    expect(find.byKey(const ValueKey('animador-tirar')), findsNothing);
-    await tester.tap(find.byKey(const ValueKey('animador-tipo-triangulo')));
-    await tester.pumpAndSettle();
-    final posto = e.propAnimador(camada(), LayerProp.position)!;
-    expect(posto.tipo, TipoDoAnimador.triangulo);
-    // Um ponto tem as duas forças.
-    expect(find.byKey(const ValueKey('animador-forca-y')), findsOneWidget);
-    expect(find.byKey(const ValueKey('animador-tirar')), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('animador-modo-multiplicar')));
-    await tester.pumpAndSettle();
-    expect(
-      e.propAnimador(camada(), LayerProp.position)!.modo,
-      ModoDoAnimador.multiplicar,
-    );
-    await tester.tap(find.byKey(const ValueKey('animador-tirar')));
-    await tester.pumpAndSettle();
-    expect(e.propAnimador(camada(), LayerProp.position), isNull);
-    expect(tester.takeException(), isNull);
   });
 }

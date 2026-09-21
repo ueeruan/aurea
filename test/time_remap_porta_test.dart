@@ -9,16 +9,13 @@
 //
 //   * a PORTA — o efeito esta no catalogo, na categoria Tempo, ao lado do
 //     RGB Time Warp e do Posterize Time; aplicar cria a trilha do motor;
-//     e a faixa especial da folha de velocidade e a entrada avulsa da
-//     galeria nao existem mais;
 //   * o CARTAO — Speed, Time, Frame, Reverse, Freeze e Interpolacao nas
 //     mesmas linhas dos outros efeitos, com o mesmo losango e o MESMO
 //     editor de curva de qualquer propriedade.
 //
-// O Estudio do tempo continua vivo, a um toque no menu ••• do cartao: e
-// onde se desenha a curva com o dedo. O que ele deixou de ser e a porta.
+// A aplicacao pelo catalogo e o "fora de video" moram em
+// test/ui/paineis/efeitos_catalogo_test.dart.
 import 'package:aurea/src/features/editor/application/editor_controller.dart';
-import 'package:aurea/src/features/editor/application/playback_controller.dart';
 import 'package:aurea/src/features/editor/domain/am_sections.dart';
 import 'package:aurea/src/features/editor/domain/cut_ops.dart';
 import 'package:aurea/src/features/editor/domain/effect.dart';
@@ -26,16 +23,15 @@ import 'package:aurea/src/features/editor/domain/keyframe.dart';
 import 'package:aurea/src/features/editor/domain/layer.dart';
 import 'package:aurea/src/features/editor/domain/project_store.dart';
 import 'package:aurea/src/features/editor/domain/video_project.dart';
-import 'package:aurea/src/features/editor/presentation/am/am_widgets.dart';
-import 'package:aurea/src/features/editor/presentation/am/effects_panel.dart';
-import 'package:aurea/src/features/editor/presentation/am/estudio_do_tempo.dart';
-import 'package:aurea/src/features/editor/presentation/am/layer_menu.dart';
-import 'package:aurea/src/features/editor/presentation/am/speed_sheet.dart';
-import 'package:aurea/src/features/editor/presentation/context/effects/effect_gallery.dart';
+import 'package:aurea/src/features/editor/presentation/ui/curva/curva.dart';
+import 'package:aurea/src/features/editor/presentation/ui/paineis/efeitos.dart';
+import 'package:aurea/src/features/editor/presentation/ui/paineis/tempo.dart';
 import 'package:aurea/src/features/projects/application/projects_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'ui/paineis/apoio_paineis.dart';
 
 class _Projetos extends ProjectsController {
   @override
@@ -72,57 +68,26 @@ ProviderContainer _projeto(Layer clipe) {
 VideoLayer _video(ProviderContainer c) =>
     c.read(editorControllerProvider).layerById('v')! as VideoLayer;
 
-EffectInstance _cartao(ProviderContainer c) =>
-    _video(c).effects.firstWhere((e) => e.type == EffectType.timeRemap);
+EffectInstance _efeito(VideoProject p) => (p.layerById('v')! as VideoLayer)
+    .effects
+    .firstWhere((e) => e.type == EffectType.timeRemap);
 
-/// Um host com Scaffold (a folha de parametro procura um) e um botao que
-/// abre o que o teste quiser.
-Widget _host(
-  ProviderContainer c,
-  void Function(BuildContext, WidgetRef) aoTocar,
-) => UncontrolledProviderScope(
-  container: c,
-  child: MaterialApp(
-    home: Scaffold(
-      key: paramSheetHostKey,
-      body: Consumer(
-        builder: (context, ref, _) => TextButton(
-          onPressed: () => aoTocar(context, ref),
-          child: const Text('abrir'),
-        ),
-      ),
-    ),
-  ),
-);
-
-/// O painel de efeitos montado sozinho, com o clipe ja selecionado.
-Future<PlaybackController> _painelDeEfeitos(
-  WidgetTester tester,
-  ProviderContainer c,
-) async {
-  tester.view.physicalSize = const Size(430, 932);
-  tester.view.devicePixelRatio = 1;
-  addTearDown(tester.view.reset);
-  late final PlaybackController pb;
-  pb = PlaybackController(
-    vsync: tester,
-    durationOf: () => const Duration(seconds: 10),
+/// O painel de efeitos montado sozinho (a bancada da UI nova), com o
+/// Time Remap aplicado DEPOIS de montar: o recem-aplicado abre sozinho.
+Future<BancadaDoPainel> _painelDeEfeitos(WidgetTester tester) async {
+  final (b, id) = await montarPainel(
+    tester,
+    preparar: (c) {
+      abrirProjetoCom(c, [_clipe()]);
+      return 'v';
+    },
+    painel: (id) => PainelEfeitos(layerId: id),
+    tamanho: const Size(430, 932),
+    altura: 900,
   );
-  addTearDown(pb.dispose);
-  c.read(selectedLayerProvider.notifier).state = 'v';
-  await tester.pumpWidget(
-    UncontrolledProviderScope(
-      container: c,
-      child: MaterialApp(
-        home: Scaffold(
-          key: paramSheetHostKey,
-          body: EffectsPanel(playback: pb, onBack: () {}),
-        ),
-      ),
-    ),
-  );
+  b.c.addEffect(id, EffectType.timeRemap);
   await tester.pumpAndSettle();
-  return pb;
+  return b;
 }
 
 void main() {
@@ -184,107 +149,38 @@ void main() {
         1,
       );
     });
-
-    testWidgets('a galeria aplica pelo tile, como qualquer efeito', (
-      tester,
-    ) async {
-      tester.view.physicalSize = const Size(430, 932);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.reset);
-      final c = _projeto(_clipe());
-      late final PlaybackController pb;
-      pb = PlaybackController(
-        vsync: tester,
-        durationOf: () => const Duration(seconds: 10),
-      );
-      addTearDown(pb.dispose);
-      await tester.pumpWidget(
-        _host(c, (context, ref) => showEffectGallery(context, ref, 'v', pb)),
-      );
-      await tester.tap(find.text('abrir'));
-      await tester.pumpAndSettle();
-
-      // Filtra pela busca: a grade e preguicosa e o tile pode nascer fora
-      // da vista.
-      await tester.enterText(
-        find.byKey(const ValueKey('galeria-busca')),
-        'time remap',
-      );
-      await tester.pumpAndSettle();
-
-      final tile = find.byKey(const ValueKey('efeito-time_remap'));
-      expect(tile, findsOneWidget, reason: 'o Time Remap sumiu da galeria');
-      await tester.tap(tile);
-      await tester.pumpAndSettle();
-
-      expect(_video(c).timeRemap, isNotNull);
-      expect(tester.takeException(), isNull);
-    });
-
-    testWidgets('num texto o Time Remap nem aparece', (tester) async {
-      tester.view.physicalSize = const Size(430, 932);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.reset);
-      final c = _projeto(
-        TextLayer(
-          id: 'v',
-          name: 't',
-          startTime: Duration.zero,
-          duration: const Duration(seconds: 2),
-          text: 'oi',
-        ),
-      );
-      late final PlaybackController pb;
-      pb = PlaybackController(
-        vsync: tester,
-        durationOf: () => const Duration(seconds: 10),
-      );
-      addTearDown(pb.dispose);
-      await tester.pumpWidget(
-        _host(c, (context, ref) => showEffectGallery(context, ref, 'v', pb)),
-      );
-      await tester.tap(find.text('abrir'));
-      await tester.pumpAndSettle();
-      await tester.enterText(
-        find.byKey(const ValueKey('galeria-busca')),
-        'time remap',
-      );
-      await tester.pumpAndSettle();
-
-      expect(find.byKey(const ValueKey('efeito-time_remap')), findsNothing);
-      expect(tester.takeException(), isNull);
-    });
   });
 
   group('o cartao no painel de efeitos', () {
     testWidgets('abre com Speed, Time, Frame, Reverse, Freeze e Interpolação', (
       tester,
     ) async {
-      final c = _projeto(_clipe());
-      c.read(editorControllerProvider.notifier).addEffect(
-        'v',
-        EffectType.timeRemap,
-      );
-      await _painelDeEfeitos(tester, c);
-
-      final efeito = _cartao(c);
-      expect(find.byKey(const ValueKey('time-remap-speed')), findsOneWidget);
+      final b = await _painelDeEfeitos(tester);
+      final efeito = _efeito(b.projeto);
       expect(
-        find.byKey(ValueKey('efeito-param-${efeito.id}/tempo')),
+        find.byKey(const ValueKey('prop-time-remap-speed')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(ValueKey('prop-${efeito.id}-tempo')),
         findsOneWidget,
         reason: 'a linha "Time" e o parametro da ficha, como nos outros',
       );
-      expect(find.byKey(const ValueKey('time-remap-frame')), findsOneWidget);
-      expect(find.byKey(const ValueKey('time-remap-reverse')), findsOneWidget);
-      expect(find.byKey(const ValueKey('time-remap-freeze')), findsOneWidget);
       expect(
-        find.byKey(const ValueKey('time-remap-interpolacao')),
+        find.byKey(const ValueKey('prop-time-remap-frame')),
         findsOneWidget,
       );
-      // O botao gordo que abria um editor proprio saiu do cartao.
       expect(
-        find.byKey(const ValueKey('efeito-time-remap-abrir')),
-        findsNothing,
+        find.byKey(const ValueKey('prop-time-remap-reverse')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('prop-time-remap-freeze')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('prop-time-remap-interpolacao')),
+        findsOneWidget,
       );
       expect(tester.takeException(), isNull);
     });
@@ -292,52 +188,45 @@ void main() {
     testWidgets('a escolha de interpolacao muda a camada e persiste', (
       tester,
     ) async {
-      final c = _projeto(_clipe());
-      c.read(editorControllerProvider.notifier).addEffect(
-        'v',
-        EffectType.timeRemap,
-      );
-      await _painelDeEfeitos(tester, c);
+      final b = await _painelDeEfeitos(tester);
+      VideoLayer video() => b.projeto.layerById('v')! as VideoLayer;
 
-      expect(_video(c).interpolacao, InterpolacaoDeQuadros.nenhuma);
-      await tester.tap(find.text('Frame Blending'));
+      expect(video().interpolacao, InterpolacaoDeQuadros.nenhuma);
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const ValueKey('prop-time-remap-interpolacao')),
+          matching: find.text(
+            rotuloDaInterpolacao(InterpolacaoDeQuadros.nenhuma),
+          ),
+        ),
+      );
       await tester.pumpAndSettle();
-      expect(_video(c).interpolacao, InterpolacaoDeQuadros.mesclar);
+      await tester.tap(
+        find.text(rotuloDaInterpolacao(InterpolacaoDeQuadros.mesclar)).last,
+      );
+      await tester.pumpAndSettle();
+      expect(video().interpolacao, InterpolacaoDeQuadros.mesclar);
 
       // ... e sobrevive ao arquivo.
-      final volta = projectFromJson(
-        projectToJson(c.read(editorControllerProvider)),
-      );
+      final volta = projectFromJson(projectToJson(b.projeto));
       final lida = volta.layerById('v')! as VideoLayer;
       expect(lida.interpolacao, InterpolacaoDeQuadros.mesclar);
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('o botao de curva abre o GRAFICO GERAL, nao um segundo', (
+    testWidgets('o botao de curva abre o editor de curva GERAL', (
       tester,
     ) async {
-      final c = _projeto(_clipe());
-      final controller = c.read(editorControllerProvider.notifier);
-      controller.addEffect('v', EffectType.timeRemap);
+      final b = await _painelDeEfeitos(tester);
       // A identidade ja nasce com duas marcas: a trilha esta animada.
-      expect(_cartao(c).hasAnimation, isTrue);
-      await _painelDeEfeitos(tester, c);
+      expect(_efeito(b.projeto).hasAnimation, isTrue);
 
-      await tester.tap(find.byTooltip('Editar curva da propriedade'));
+      await tester.tap(find.byKey(const ValueKey('time-remap-abrir-curva')));
       await tester.pumpAndSettle();
 
-      // `curva-sheet-valor` e o grafico generico — o mesmo que abre
-      // para opacidade, escala ou qualquer parametro de efeito.
-      expect(
-        find.byKey(const ValueKey('curva-sheet-valor')),
-        findsOneWidget,
-        reason: 'tem de ser o mesmo grafico de qualquer propriedade',
-      );
-      expect(
-        find.byKey(const ValueKey('estudio-tempo-grafico')),
-        findsNothing,
-        reason: 'proibido um segundo editor de curva',
-      );
+      // O mesmo editor que abre para opacidade, escala ou qualquer
+      // parametro de efeito — proibido um segundo editor de curva.
+      expect(find.byType(EditorDeCurva), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
   });
@@ -430,30 +319,7 @@ void main() {
     });
   });
 
-  group('as portas velhas sairam do caminho', () {
-    testWidgets('a folha de velocidade nao tem mais a faixa Time Remap', (
-      tester,
-    ) async {
-      tester.view.physicalSize = const Size(430, 932);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.reset);
-      final c = _projeto(_clipe());
-      await tester.pumpWidget(
-        _host(c, (context, ref) => showSpeedSheet(context, ref, 'v')),
-      );
-      await tester.tap(find.text('abrir'));
-      await tester.pumpAndSettle();
-
-      expect(
-        find.byKey(const ValueKey('abrir-estudio-do-tempo')),
-        findsNothing,
-        reason: 'a porta oficial do Time Remap e o efeito',
-      );
-      // O que a folha continua sendo: a velocidade CONSTANTE do clipe.
-      expect(find.byKey(const ValueKey('velocidade-regua')), findsOneWidget);
-      expect(tester.takeException(), isNull);
-    });
-
+  group('a grade de secoes', () {
     test('a secao Tempo da grade ficou, e agora e so a velocidade', () {
       final secoes = secoesDe(_clipe());
       expect(secoes, contains(AmSecao.tempo));
@@ -464,77 +330,9 @@ void main() {
       ];
       expect(indices, [...indices]..sort());
     });
-
-    testWidgets('a ficha "Tempo" da grade abre a folha de velocidade', (
-      tester,
-    ) async {
-      tester.view.physicalSize = const Size(430, 932);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.reset);
-      final c = _projeto(_clipe());
-      late final PlaybackController pb;
-      pb = PlaybackController(
-        vsync: tester,
-        durationOf: () => const Duration(seconds: 10),
-      );
-      addTearDown(pb.dispose);
-      await tester.pumpWidget(
-        UncontrolledProviderScope(
-          container: c,
-          child: MaterialApp(
-            home: Scaffold(
-              key: paramSheetHostKey,
-              body: Consumer(
-                builder: (context, ref, _) => LayerToolsDock(
-                  layer: ref.watch(editorControllerProvider).layers.first,
-                  playback: pb,
-                  onAction: (_) {},
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      final ficha = find.text('Tempo');
-      expect(ficha, findsOneWidget, reason: 'a grade perdeu a ficha Tempo');
-      await tester.tap(ficha);
-      await tester.pumpAndSettle();
-
-      expect(find.byKey(const ValueKey('velocidade-regua')), findsOneWidget);
-      expect(tester.takeException(), isNull);
-    });
   });
 
   group('interpolacao de quadros', () {
-    testWidgets('o chip da folha muda o campo da camada SEM curva de tempo', (
-      tester,
-    ) async {
-      tester.view.physicalSize = const Size(430, 932);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.reset);
-      final c = _projeto(_clipe());
-      expect(_video(c).interpolacao, InterpolacaoDeQuadros.nenhuma);
-      await tester.pumpWidget(
-        _host(c, (context, ref) => showSpeedSheet(context, ref, 'v')),
-      );
-      await tester.tap(find.text('abrir'));
-      await tester.pumpAndSettle();
-
-      final chip = find.byKey(const ValueKey('interpolacao-mesclar'));
-      await tester.scrollUntilVisible(chip, 120);
-      await tester.pumpAndSettle();
-      await tester.tap(chip);
-      await tester.pumpAndSettle();
-
-      // A camera lenta de velocidade CONSTANTE tambem escolhe como os
-      // quadros do meio nascem — era isto que so existia dentro da curva.
-      expect(_video(c).interpolacao, InterpolacaoDeQuadros.mesclar);
-      expect(_video(c).timeRemap, isNull);
-      expect(tester.takeException(), isNull);
-    });
-
     test('o rotulo de cada modo e o vocabulario da tela', () {
       expect(
         [for (final m in InterpolacaoDeQuadros.values) rotuloDaInterpolacao(m)],

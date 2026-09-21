@@ -11,11 +11,11 @@ import '../../../application/editor_controller.dart';
 import '../../../application/playback_controller.dart';
 import '../../../domain/element3d.dart';
 import '../../../domain/shape_library.dart';
-import '../../am/layer_menu.dart' show showReasonToast;
-import '../../shell/layer_actions.dart' show agruparSelecao;
-import '../../widgets/add_layer_sheet.dart' show showCaptionCreationSheet;
-import '../../widgets/gallery_panel.dart';
-import '../../widgets/linha_de_som_recente.dart';
+import '../../../../../core/ui/snack.dart';
+import 'acoes_da_camada.dart' show agruparSelecao;
+import 'legendar.dart' show showCaptionCreationSheet;
+import 'galeria.dart';
+import 'linha_de_som_recente.dart';
 import '../shell/contrato.dart';
 import 'adicionar_acoes.dart';
 
@@ -327,7 +327,9 @@ class _FolhaDeAdicionarState extends State<FolhaDeAdicionar> {
             return _MiniaturaDeRecente(
               key: ValueKey('adicionar-recente-$i'),
               midia: m,
-              aoTocar: _ocupado ? null : () => _espera(() => usarMidiaRecente(_e, m)),
+              aoTocar: _ocupado
+                  ? null
+                  : () => _espera(() => usarMidiaRecente(_e, m)),
             );
           },
         );
@@ -375,7 +377,9 @@ class _FolhaDeAdicionarState extends State<FolhaDeAdicionar> {
                         largura: double.infinity,
                         aoTocar: _ocupado
                             ? null
-                            : () => _espera(() => importarAudio(_e, doVideo: true)),
+                            : () => _espera(
+                                () => importarAudio(_e, doVideo: true),
+                              ),
                       ),
                     ),
                   ],
@@ -408,31 +412,61 @@ class _FolhaDeAdicionarState extends State<FolhaDeAdicionar> {
   // ----------------------------------------------------------------- texto
 
   Widget _texto() => _blocos([
-    ('texto', CupertinoIcons.textformat, 'Texto', () {
-      _criaEFecha(() => _e.controlador.addTextLayer(_e.agora));
-    }),
-    ('legenda', CupertinoIcons.captions_bubble, 'Legenda', () {
-      // Transcricao automatica (nuvem ou aparelho) ou SRT colado.
-      _fechaE(() => showCaptionCreationSheet(_e.context, _e.ref));
-    }),
-    ('texto3d', CupertinoIcons.textformat_alt, 'Texto 3D', () {
-      _fechaE(() => criarTexto3D(_e));
-    }),
+    (
+      'texto',
+      CupertinoIcons.textformat,
+      'Texto',
+      () {
+        _criaEFecha(() => _e.controlador.addTextLayer(_e.agora));
+      },
+    ),
+    (
+      'legenda',
+      CupertinoIcons.captions_bubble,
+      'Legenda',
+      () {
+        // Transcricao automatica (nuvem ou aparelho) ou SRT colado.
+        _fechaE(() => showCaptionCreationSheet(_e.context, _e.ref));
+      },
+    ),
+    (
+      'texto3d',
+      CupertinoIcons.textformat_alt,
+      'Texto 3D',
+      () {
+        _fechaE(() => criarTexto3D(_e));
+      },
+    ),
   ]);
 
   // ---------------------------------------------------------------- formas
 
   Widget _formas() {
     final ferramentas = <(String, IconData, String, VoidCallback)>[
-      ('desenho-livre', CupertinoIcons.scribble, 'Desenho livre', () {
-        _criaEFecha(() => comecarDesenhoLivre(_e));
-      }),
-      ('desenho-vetorial', CupertinoIcons.pencil_outline, 'Vetorial', () {
-        _fechaE(() async => comecarDesenhoVetorial(_e));
-      }),
-      ('svg', CupertinoIcons.doc_text, 'SVG', () {
-        _fechaE(() => importarSvg(_e));
-      }),
+      (
+        'desenho-livre',
+        CupertinoIcons.scribble,
+        'Desenho livre',
+        () {
+          _criaEFecha(() => comecarDesenhoLivre(_e));
+        },
+      ),
+      (
+        'desenho-vetorial',
+        CupertinoIcons.pencil_outline,
+        'Vetorial',
+        () {
+          _fechaE(() async => comecarDesenhoVetorial(_e));
+        },
+      ),
+      (
+        'svg',
+        CupertinoIcons.doc_text,
+        'SVG',
+        () {
+          _fechaE(() => importarSvg(_e));
+        },
+      ),
     ];
     return CustomScrollView(
       slivers: [
@@ -496,45 +530,95 @@ class _FolhaDeAdicionarState extends State<FolhaDeAdicionar> {
   Widget _tresD() => _blocos([
     // DO APARELHO: GLB, glTF, OBJ, FBX; o que e pesado de verdade pergunta
     // com a ficha dele e a opcao de otimizar (importacao_3d.dart).
-    ('3d-aparelho', CupertinoIcons.device_phone_portrait, 'Do aparelho', () {
-      _fechaE(() => importarModelo3DDoAparelho(_e));
-    }),
-    ('3d-sketchfab', CupertinoIcons.cloud_download, 'Sketchfab', () {
-      _fechaE(() => abrirSketchfab(_e));
-    }),
-    ('3d-texto3d', CupertinoIcons.textformat_alt, 'Texto 3D', () {
-      _fechaE(() => criarTexto3D(_e));
-    }),
-    ('3d-solido', CupertinoIcons.cube_fill, 'Sólido 3D', () {
-      _criaEFecha(
-        () => _e.controlador.addElement3DLayer(_e.agora, Element3DKind.cube),
-      );
-    }),
+    (
+      '3d-aparelho',
+      CupertinoIcons.device_phone_portrait,
+      'Do aparelho',
+      () {
+        _fechaE(() => importarModelo3DDoAparelho(_e));
+      },
+    ),
+    (
+      '3d-sketchfab',
+      CupertinoIcons.cloud_download,
+      'Sketchfab',
+      () {
+        _fechaE(() => abrirSketchfab(_e));
+      },
+    ),
+    (
+      '3d-texto3d',
+      CupertinoIcons.textformat_alt,
+      'Texto 3D',
+      () {
+        _fechaE(() => criarTexto3D(_e));
+      },
+    ),
+    (
+      '3d-solido',
+      CupertinoIcons.cube_fill,
+      'Sólido 3D',
+      () {
+        _criaEFecha(
+          () => _e.controlador.addElement3DLayer(_e.agora, Element3DKind.cube),
+        );
+      },
+    ),
   ]);
 
   // --------------------------------------------------------------- objetos
 
   Widget _objetos() => _blocos([
-    ('nulo', CupertinoIcons.smallcircle_circle, 'Nulo', () {
-      _criaEFecha(() => _e.controlador.addNullLayer(_e.agora));
-    }),
-    ('camera', CupertinoIcons.videocam, 'Câmera', () {
-      _criaEFecha(() => _e.controlador.addCameraLayer(_e.agora));
-    }),
-    ('ajuste', CupertinoIcons.slider_horizontal_3, 'Ajuste', () {
-      // Um efeito sobre tudo abaixo: a camada ja nasce com Efeitos aberto.
-      _criaEFecha(() => _e.controlador.addAdjustmentLayer(_e.agora));
-      _e.abrirPainel(PainelId.efeitos);
-    }),
-    ('particulas', CupertinoIcons.sparkles, 'Partículas', () {
-      _criaEFecha(() => _e.controlador.addParticulasLayer(_e.agora));
-    }),
-    ('grupo', CupertinoIcons.folder, 'Grupo vazio', () {
-      _criaEFecha(() => _e.controlador.addEmptyGroup(_e.agora));
-    }),
-    ('agrupar', CupertinoIcons.folder_badge_plus, 'Agrupar camadas', () {
-      _fechaE(() => agruparPorEscolha(_e.context, _e.ref));
-    }),
+    (
+      'nulo',
+      CupertinoIcons.smallcircle_circle,
+      'Nulo',
+      () {
+        _criaEFecha(() => _e.controlador.addNullLayer(_e.agora));
+      },
+    ),
+    (
+      'camera',
+      CupertinoIcons.videocam,
+      'Câmera',
+      () {
+        _criaEFecha(() => _e.controlador.addCameraLayer(_e.agora));
+      },
+    ),
+    (
+      'ajuste',
+      CupertinoIcons.slider_horizontal_3,
+      'Ajuste',
+      () {
+        // Um efeito sobre tudo abaixo: a camada ja nasce com Efeitos aberto.
+        _criaEFecha(() => _e.controlador.addAdjustmentLayer(_e.agora));
+        _e.abrirPainel(PainelId.efeitos);
+      },
+    ),
+    (
+      'particulas',
+      CupertinoIcons.sparkles,
+      'Partículas',
+      () {
+        _criaEFecha(() => _e.controlador.addParticulasLayer(_e.agora));
+      },
+    ),
+    (
+      'grupo',
+      CupertinoIcons.folder,
+      'Grupo vazio',
+      () {
+        _criaEFecha(() => _e.controlador.addEmptyGroup(_e.agora));
+      },
+    ),
+    (
+      'agrupar',
+      CupertinoIcons.folder_badge_plus,
+      'Agrupar camadas',
+      () {
+        _fechaE(() => agruparPorEscolha(_e.context, _e.ref));
+      },
+    ),
   ]);
 }
 
@@ -585,7 +669,11 @@ class _MiniaturaDeRecente extends StatelessWidget {
 
 /// UMA FORMA DA BIBLIOTECA desenhada do tamanho do ladrilho.
 class _LadrilhoDeForma extends StatelessWidget {
-  const _LadrilhoDeForma({super.key, required this.forma, required this.aoTocar});
+  const _LadrilhoDeForma({
+    super.key,
+    required this.forma,
+    required this.aoTocar,
+  });
 
   final ShapeLibraryEntry forma;
   final VoidCallback aoTocar;

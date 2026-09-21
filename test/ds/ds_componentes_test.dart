@@ -1,7 +1,5 @@
 import 'package:aurea/src/core/ds/ds.dart';
 import 'package:aurea/src/core/theme/aurea_paleta.dart';
-import 'package:aurea/src/features/editor/presentation/context/parameter_row.dart'
-    show TecladoNumerico;
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_test/flutter_test.dart';
 

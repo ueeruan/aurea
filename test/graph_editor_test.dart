@@ -1,8 +1,8 @@
 import 'package:aurea/src/features/editor/application/editor_controller.dart';
-import 'package:aurea/src/features/editor/application/ui/pro_mode.dart';
 import 'package:aurea/src/features/editor/application/playback_controller.dart';
 import 'package:aurea/src/features/editor/domain/keyframe.dart';
-import 'package:aurea/src/features/editor/presentation/am/curve_panel.dart';
+import 'package:aurea/src/features/editor/presentation/ui/curva/curva.dart';
+import 'package:aurea/src/features/editor/presentation/ui/curva/grafico_da_curva.dart';
 import 'package:flutter/material.dart' hide Easing;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -179,8 +179,6 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
 
       final container = comAnimacao();
-      // O editor de curva (alcas) e Pro desde a Fase 5.
-      container.read(proModeProvider.notifier).set(true);
       final c = container.read(editorControllerProvider.notifier);
       final id = container.read(editorControllerProvider).layers.first.id;
       // Uma curva com as duas alcas bem separadas.
@@ -196,32 +194,42 @@ void main() {
           container: container,
           child: MaterialApp(
             home: _Host(
-              builder: (p) => CurvePanel(
-                playback: p,
-                prop: LayerProp.position,
-                onBack: () {},
+              builder: (p) => Column(
+                children: [
+                  const Expanded(child: SizedBox.expand()),
+                  SizedBox(
+                    height: 316,
+                    child: EditorDeCurva(
+                      layerId: id,
+                      trilha: TrilhaDaCurva.transformacao(LayerProp.position),
+                      tempoInicial: const Duration(milliseconds: 500),
+                      playback: p,
+                      aoFechar: () {},
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
         ),
       );
-      await tester.pumpAndSettle();
+      await tester.pump();
 
-      // O painel abre no grafico de VALOR (_velocidade = false): se
-      // esta area sumir, o teste tem de falhar, e nao passar calado.
-      final area = find.byKey(const ValueKey('curve-edit-area'));
-      expect(area, findsOneWidget,
-          reason: 'a area de edicao da curva nao esta na tela');
-      final caixa = tester.getRect(area);
+      // O editor abre no grafico de VALOR: se o grafico sumir, o teste tem
+      // de falhar, e nao passar calado.
+      final grafico = find.byKey(const ValueKey('curva-grafico'));
+      expect(grafico, findsOneWidget,
+          reason: 'o grafico da curva nao esta na tela');
+      final caixa = tester.getRect(grafico);
+      final inicio = caixa.topLeft +
+          tester.state<GraficoDaCurvaState>(grafico).centroDaAlca(0)!;
       final x2Antes = easeDe(container).x2;
       final y2Antes = easeDe(container).y2;
 
-      // Comeca perto da alca 1 (esquerda) e ATRAVESSA o grafico inteiro
-      // ate o lado da alca 2. No comportamento antigo, o gesto largava
-      // a alca 1 no meio do caminho e passava a mexer na 2.
-      final gesto = await tester.startGesture(
-        Offset(caixa.left + caixa.width * .15, caixa.center.dy),
-      );
+      // Comeca na alca 1 (esquerda) e ATRAVESSA o grafico inteiro ate o
+      // lado da alca 2. No comportamento antigo, o gesto largava a alca 1
+      // no meio do caminho e passava a mexer na 2.
+      final gesto = await tester.startGesture(inicio);
       await tester.pump(const Duration(milliseconds: 30));
       // SEM RECONSTRUIR ENTRE OS PASSOS, de proposito.
       //
@@ -234,12 +242,15 @@ void main() {
       // o que a primeira versao deste teste fez.
       for (var i = 1; i <= 12; i++) {
         await gesto.moveTo(
-          Offset(caixa.left + caixa.width * (.15 + .06 * i), caixa.center.dy),
+          Offset(inicio.dx + caixa.width * .06 * i, inicio.dy),
         );
       }
       await tester.pump();
       await gesto.up();
-      await tester.pumpAndSettle();
+      await tester.pump();
+      // O grafico tem toque DUPLO (ajustar): o reconhecedor segura um
+      // relogio curto depois do dedo sair. Deixa ele vencer.
+      await tester.pump(const Duration(milliseconds: 400));
 
       final depois = easeDe(container);
       expect(depois.x1, greaterThan(.15),

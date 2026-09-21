@@ -7,8 +7,6 @@ import '../../../../../core/ui/tocavel.dart';
 import '../../../application/editor_controller.dart';
 import '../../../application/font_service.dart';
 import '../../../domain/layer.dart';
-import '../../am/color_picker_sheet.dart' show showColorPicker;
-import '../../am/texto3d_sheet.dart' show showTexto3DSheet;
 import '../shell/contrato.dart';
 import 'comum.dart';
 import 'comum_de_objetos.dart';
@@ -293,14 +291,9 @@ class _PainelTextoState extends ConsumerState<PainelTexto> {
           LinhaDePorta(
             rotulo: 'Editar a palavra do Texto 3D',
             icone: CupertinoIcons.textformat,
-            aoTocar: () => showTexto3DSheet(
-              context,
-              ref,
-              sceneId: camada.id,
-              nodeId: no.id,
-              playhead: escopo.playback.time.value,
-              playback: escopo.playback,
-            ),
+            // O painel Texto 3D e o editor da palavra (fonte, volume,
+            // metal, letras): trocar de painel, nao abrir folha.
+            aoTocar: () => escopo.abrirPainel(PainelId.texto3d),
           ),
       ],
     );

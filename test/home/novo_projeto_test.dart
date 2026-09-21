@@ -2,7 +2,7 @@
 // CRIAR — que poe o projeto na lista e abre o editor direto. Dois toques
 // da Inicio ate o editor.
 import 'package:aurea/src/features/editor/domain/video_project.dart';
-import 'package:aurea/src/features/editor/presentation/context/parameter_row.dart'
+import 'package:aurea/src/core/ds/aurea_teclado_numerico.dart'
     show TecladoNumerico;
 import 'package:aurea/src/features/projects/application/projects_controller.dart';
 import 'package:aurea/src/features/projects/presentation/new_project_sheet.dart';

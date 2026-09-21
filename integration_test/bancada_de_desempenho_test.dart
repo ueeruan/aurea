@@ -259,13 +259,13 @@ void main() {
         Future<void>.delayed(const Duration(seconds: 6));
 
     Future<void> tocar() async {
-      await tester.tap(find.byKey(const ValueKey('transport-play')).first);
+      await tester.tap(find.byKey(const ValueKey('transporte-play')).first);
       await Future<void>.delayed(const Duration(seconds: 6));
-      await tester.tap(find.byKey(const ValueKey('transport-play')).first);
+      await tester.tap(find.byKey(const ValueKey('transporte-play')).first);
     }
 
     Future<void> rolarTimeline() async {
-      final alvo = find.byKey(const ValueKey('timeline-fundo'));
+      final alvo = find.byKey(const ValueKey('timeline-nova'));
       for (var i = 0; i < 3; i++) {
         await tester.timedDrag(
           alvo,

@@ -18,7 +18,6 @@ import '../../../domain/cut_ops.dart' show videoSourceSpan;
 import '../../../domain/keyframe.dart' show kToleranciaDoKeyframe;
 import '../../../domain/layer.dart';
 import '../../../domain/onda_no_clipe.dart';
-import '../../am/layer_look.dart';
 import '../curva/curva.dart';
 import '../shell/contrato.dart' show PropriedadeAtiva, propriedadeAtivaProvider;
 import '../toolbar/menu_da_camada.dart' show mostrarMenuDaCamada;
@@ -299,6 +298,8 @@ class _LinhaDaCamadaState extends ConsumerState<LinhaDaCamada>
     _e.autoRolagem.parar();
     _e.soltarVista();
     updateKeepAlive();
+    // Refaz a linha: os tratadores que so ficaram pelo gesto saem agora.
+    if (mounted) setState(() {});
   }
 
   // ================================================================ losango
@@ -444,6 +445,7 @@ class _LinhaDaCamadaState extends ConsumerState<LinhaDaCamada>
     _e.autoRolagem.parar();
     _e.soltarVista();
     updateKeepAlive();
+    if (mounted) setState(() {});
   }
 
   /// A SELECAO ACOMPANHA A MARCA: e a mesma marca, so mudou de instante.
@@ -625,6 +627,15 @@ class _LinhaDaCamadaState extends ConsumerState<LinhaDaCamada>
     final travada = meta.travada;
     final podeEditar = escolhida && !travada;
     final comAlcas = podeEditar && !lote;
+    // UM GESTO EM CURSO SEGURA OS SEUS TRATADORES: se a selecao cai (ou o
+    // painel troca) no meio do arrasto, tirar o tratador faria o
+    // reconhecedor morrer sem `onEnd`/`onCancel` — e a vista ficava presa
+    // em "arrastando", com a timeline parada longe do relogio (o keyframe
+    // nascia no tempo certo e APARECIA longe do cabecote).
+    final movendo = _arrasto == _Arrasto.mover;
+    final aparando =
+        _arrasto == _Arrasto.trimInicio || _arrasto == _Arrasto.trimFim;
+    final moveClipe = podeEditar || movendo;
     final temAnimacao = trilhasAnimadas(real).isNotEmpty;
     _pedirMidia(camada);
 
@@ -720,20 +731,20 @@ class _LinhaDaCamadaState extends ConsumerState<LinhaDaCamada>
                 // duplo atrasa o toque simples.
                 onDoubleTap: camada is GroupLayer ? _entrarNoGrupo : null,
                 onLongPressStart: _menu,
-                onHorizontalDragStart: podeEditar
+                onHorizontalDragStart: moveClipe
                     ? (d) => _comecarArrasto(_Arrasto.mover, d)
                     : null,
-                onHorizontalDragUpdate: podeEditar ? _seguirArrasto : null,
-                onHorizontalDragEnd: podeEditar
+                onHorizontalDragUpdate: moveClipe ? _seguirArrasto : null,
+                onHorizontalDragEnd: moveClipe
                     ? (_) => _terminarArrasto()
                     : null,
-                onHorizontalDragCancel: podeEditar ? _terminarArrasto : null,
+                onHorizontalDragCancel: moveClipe ? _terminarArrasto : null,
                 child: const SizedBox.expand(),
               ),
             ),
           ),
           // AS ALCAS DE TRIM: 30 de toque FORA de cada ponta.
-          if (comAlcas)
+          if (comAlcas || aparando)
             Positioned.fill(
               key: const ValueKey('alcas'),
               child: AreaDeToqueCalculada(
@@ -752,7 +763,7 @@ class _LinhaDaCamadaState extends ConsumerState<LinhaDaCamada>
             ),
           // OS LOSANGOS: na metade de baixo da linha (a de cima e do clipe,
           // senao um clipe cheio de marcas nao se deixaria arrastar).
-          if (losangos != null && tempos.isNotEmpty)
+          if ((losangos != null && tempos.isNotEmpty) || _losango != null)
             Positioned.fill(
               key: const ValueKey('losangos'),
               child: AreaDeToqueCalculada(

@@ -2,12 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:aurea/src/features/editor/application/editor_controller.dart';
-import 'package:aurea/src/features/editor/application/ui/editor_session.dart';
+import 'package:aurea/src/features/editor/presentation/ui/shell/contrato.dart';
 import 'package:aurea/src/features/editor/presentation/widgets/composition_frame.dart';
 import 'package:aurea/src/features/editor/presentation/widgets/preview_stage.dart';
-import 'package:aurea/src/features/editor/presentation/widgets/motion_keyframe_track.dart';
 
-import 'editor_hierarchy_test.dart' show openEditor;
+import 'apoio/abrir_editor.dart' show openEditor;
 
 void main() {
   setUpAll(() async {
@@ -70,43 +69,23 @@ void main() {
           .id;
       await tester.pumpAndSettle();
       expect(tester.getRect(find.byType(PreviewStage)), before);
-      for (final panel in [
-        EditorPanel.transform,
-        EditorPanel.effects,
-        EditorPanel.blending,
-        EditorPanel.colorFill,
+      // O PAINEL SOBE POR CIMA DA TIMELINE, nunca por cima da previa.
+      for (final painel in [
+        PainelId.transformar,
+        PainelId.efeitos,
+        PainelId.mascara,
+        PainelId.cor,
       ]) {
-        c.read(editorSessionProvider.notifier).openPanel(panel);
+        c.read(painelAbertoProvider.notifier).state = painel;
         await tester.pumpAndSettle();
+        expect(
+          find.byKey(ValueKey('painel-${painel.name}')),
+          findsOneWidget,
+          reason: '$size / $painel abriu',
+        );
         expect(tester.getRect(find.byType(PreviewStage)), before);
-        expect(tester.takeException(), isNull, reason: '$size / $panel');
+        expect(tester.takeException(), isNull, reason: '$size / $painel');
       }
     });
   }
-  testWidgets('motion diamonds seek and scrub exact times', (tester) async {
-    Duration? chosen;
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: Center(
-            child: SizedBox(
-              width: 324,
-              child: MotionKeyframeTrack(
-                keysUs: const [0, 1000000, 4000000],
-                duration: const Duration(seconds: 5),
-                time: Duration.zero,
-                label: 'Camera',
-                onSeek: (t) => chosen = t,
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-    final track = tester.getRect(find.byType(MotionKeyframeTrack));
-    await tester.tapAt(track.topLeft + const Offset(12 + 60 + 6, 18));
-    expect(chosen, const Duration(seconds: 1));
-    await tester.tapAt(track.topLeft + const Offset(12 + 240, 18));
-    expect(chosen, const Duration(seconds: 4));
-  });
 }

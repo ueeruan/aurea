@@ -5,7 +5,7 @@ import 'package:flutter/widgets.dart';
 
 import '../../../../../core/ds/ds.dart';
 import '../../../application/playback_controller.dart';
-import '../../am/janela_da_timeline.dart';
+import 'janela_da_timeline.dart';
 import 'reordenar.dart';
 
 // ===========================================================================

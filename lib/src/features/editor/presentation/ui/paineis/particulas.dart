@@ -5,7 +5,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../../core/ds/ds.dart';
 import '../../../application/editor_controller.dart';
 import '../../../domain/layer.dart';
-import '../../am/color_picker_sheet.dart' show showColorPicker;
 import '../shell/contrato.dart';
 import 'comum.dart';
 import 'comum_de_objetos.dart';

@@ -4,7 +4,7 @@ import 'dart:typed_data';
 
 import 'package:aurea/src/features/editor/application/editor_controller.dart';
 import 'package:aurea/src/features/editor/domain/layer.dart';
-import 'package:aurea/src/features/editor/presentation/widgets/gallery_panel.dart';
+import 'package:aurea/src/features/editor/presentation/ui/toolbar/galeria.dart';
 import 'package:aurea/src/features/media/application/gallery_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';

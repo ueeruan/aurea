@@ -10,23 +10,20 @@
 // errada continua sem desenhar nada, e nenhum teste de fisica repara nisso.
 import 'dart:convert';
 import 'dart:typed_data';
-import 'dart:ui' as ui;
 
 import 'package:aurea/src/features/editor/application/editor_controller.dart';
-import 'package:aurea/src/features/editor/application/playback_controller.dart';
 import 'package:aurea/src/features/editor/application/ui/preview_resolution.dart';
 import 'package:aurea/src/features/editor/domain/keyframe.dart';
 import 'package:aurea/src/features/editor/domain/layer.dart';
 import 'package:aurea/src/features/editor/domain/project_store.dart'
-    show layerToJson, projectFromJson, projectToJson;
+    show projectFromJson, projectToJson;
 import 'package:aurea/src/features/editor/domain/video_project.dart';
 import 'package:aurea/src/features/editor/presentation/widgets/particulas_painter.dart';
 import 'package:aurea_render/aurea_render.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'editor_hierarchy_test.dart' show openEditor;
+import 'apoio/abrir_editor.dart' show openEditor;
 
 ParticulasLayer _camada({ParametrosDeParticulas? receita}) => ParticulasLayer(
   name: 'Nuvem',

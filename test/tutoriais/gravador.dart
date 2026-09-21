@@ -11,8 +11,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:aurea/src/core/ui/am_tick_ruler.dart';
 import 'package:aurea/src/features/editor/domain/video_project.dart';
-import 'package:aurea/src/features/editor/presentation/am/am_widgets.dart';
 import 'package:aurea/src/features/projects/application/project_repository.dart';
 import 'package:aurea/src/features/projects/application/projects_controller.dart';
 import 'package:flutter/material.dart';
@@ -255,41 +255,7 @@ class Gravador {
     await descarregar();
   }
 
-  /// A regua do tempo do Estudio, com o dedo andando junto do valor.
-  Future<void> tempoDoEstudio(double de, double ate, {int passos = 8}) async {
-    final regua = find.byKey(const ValueKey('scene-motion-time'));
-    final r = tester.getRect(regua);
-    final widget = tester.widget<AmTickRuler>(regua);
-    for (var i = 1; i <= passos; i++) {
-      final v = de + (ate - de) * i / passos;
-      widget.onChanged(v);
-      dedo = Offset(r.left + r.width * (i / passos), r.center.dy);
-      await tester.pump(const Duration(milliseconds: 40));
-      await quadro(dur: .09);
-    }
-    dedo = null;
-    await tester.pump();
-    await quadro(dur: .3);
-  }
-
-  /// Digita um numero num dos campos X/Y/Z da ferramenta ativa.
-  ///
-  /// O NUMERO, e nao o arrasto: no arrasto quem decide e onde o dedo
-  /// encosta — fora do objeto, o palco orbita a camera. O campo e o
-  /// caminho que sempre funciona, e e o que se ensina.
-  Future<void> valorDoEixo(int eixo, String valor) async {
-    await tocar(find.byKey(ValueKey('scene-transform-$eixo')));
-    await assentar(quadros: 5);
-    await tester.enterText(find.byKey(const ValueKey('valor-campo')), valor);
-    await assentar(quadros: 3);
-    tester.view.resetViewInsets();
-    await assentar(quadros: 3);
-    await tocar(find.text('OK'));
-    await assentar(quadros: 5);
-  }
-
-  /// Fecha a folha que estiver por cima (as folhas do Estudio nao tem
-  /// botao de fechar em todas as alturas).
+  /// Fecha a folha que estiver por cima.
   Future<void> fecharFolha() async {
     tester.state<NavigatorState>(find.byType(Navigator).last).pop();
     await assentar(quadros: 5);

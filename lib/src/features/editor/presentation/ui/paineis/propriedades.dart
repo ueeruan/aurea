@@ -5,8 +5,8 @@ import '../../../../../core/ds/ds.dart';
 import '../../../../../core/l10n/app_language.dart';
 import '../../../application/editor_controller.dart';
 import '../../../domain/layer_meta.dart';
-import '../../am/layer_menu.dart' show showParentSheet;
-import '../../am/oficio_sheets.dart' show showLoopSheet, showOrganizeSheet;
+import '../toolbar/escolher_pai.dart';
+import '../toolbar/oficio.dart' show showLoopSheet, showOrganizeSheet;
 import '../shell/contrato.dart';
 import 'comum.dart';
 import 'mascara.dart' show gravarModoDeMistura, modoDeMisturaDe, modosDeMistura;
@@ -21,8 +21,7 @@ class PainelPropriedades extends ConsumerStatefulWidget {
   final String layerId;
 
   @override
-  ConsumerState<PainelPropriedades> createState() =>
-      _PainelPropriedadesState();
+  ConsumerState<PainelPropriedades> createState() => _PainelPropriedadesState();
 }
 
 class _PainelPropriedadesState extends ConsumerState<PainelPropriedades> {
@@ -106,7 +105,9 @@ class _PainelPropriedadesState extends ConsumerState<PainelPropriedades> {
       return const PainelSemCamada(titulo: _titulo);
     }
     // SO A FICHA desta camada: o painel nao acorda por mutacao alheia.
-    final meta = ref.watch(editorControllerProvider.select((p) => p.metaOf(id)));
+    final meta = ref.watch(
+      editorControllerProvider.select((p) => p.metaOf(id)),
+    );
     final temPai = ref.watch(
       editorControllerProvider.select(
         (p) => p.linkFor(id, LayerProp.parent) != null,
@@ -136,6 +137,7 @@ class _PainelPropriedadesState extends ConsumerState<PainelPropriedades> {
             prop: LayerProp.opacity,
             t: t,
             playback: escopo.playback,
+            contexto: context,
           );
           return ListView(
             padding: respiroDoPainel,
@@ -182,8 +184,7 @@ class _PainelPropriedadesState extends ConsumerState<PainelPropriedades> {
                 rotulo: 'Opacidade',
                 valor: camada.opacity.valueAt(camada.localTime(t)) * 100,
                 aoMudar: aCadaPasso(
-                  (v) =>
-                      c.editOpacity(id, escopo.playback.time.value, v / 100),
+                  (v) => c.editOpacity(id, escopo.playback.time.value, v / 100),
                 ),
                 min: 0,
                 max: 100,
@@ -208,12 +209,16 @@ class _PainelPropriedadesState extends ConsumerState<PainelPropriedades> {
                 icone: temPai
                     ? CupertinoIcons.link_circle_fill
                     : CupertinoIcons.link,
-                aoTocar: () {
+                aoTocar: () async {
                   escopo.playback.pause();
-                  showParentSheet(
-                    context,
+                  // O MESMO escolher-pai do menu da camada e da barra do
+                  // lote: um menu so, uma regra so (ciclos apagados).
+                  final pai = await escolherPai(context, ref, {id});
+                  if (pai == null) return;
+                  vincularAoPai(
                     ref,
-                    camada,
+                    {id},
+                    pai.paiId,
                     escopo.playback.time.value,
                   );
                 },

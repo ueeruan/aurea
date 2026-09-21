@@ -9,7 +9,6 @@ import '../../../application/editor_controller.dart';
 import '../../../application/interacao.dart';
 import '../../../application/playback_controller.dart';
 import '../../../domain/keyframe.dart';
-import '../../am/color_picker_sheet.dart' show showColorPicker;
 import '../shell/contrato.dart';
 
 // AS PECAS DOS PAINEIS CENTRAIS (Transformar, Efeitos, Cor, Tempo,

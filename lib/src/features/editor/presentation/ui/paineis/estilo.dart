@@ -11,7 +11,6 @@ import '../../../domain/layer_meta.dart';
 import '../../../domain/shape.dart';
 import '../../../domain/text_animator.dart';
 import '../../../domain/video_project.dart';
-import '../../am/color_picker_sheet.dart' show showColorPicker;
 import '../shell/contrato.dart';
 import 'comum.dart';
 import 'comum_de_objetos.dart';
@@ -793,6 +792,7 @@ class _CaixaDoTexto extends ConsumerWidget {
             prop: LayerProp.opacity,
             t: t,
             playback: playback,
+            contexto: context,
           ),
           aoMudar: (v) => c.editOpacity(caixaId, t, v / 100),
         ),

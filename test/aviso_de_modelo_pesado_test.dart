@@ -12,7 +12,7 @@
 //     quando nao ha (nada de "2048 px → 2048 px");
 //   * a licenca sem derivados vira um lembrete, e nao um bloqueio.
 import 'package:aurea/src/features/editor/domain/analise_do_modelo.dart';
-import 'package:aurea/src/features/editor/presentation/widgets/importacao_3d.dart';
+import 'package:aurea/src/features/editor/presentation/ui/toolbar/importacao_3d.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_test/flutter_test.dart';
 

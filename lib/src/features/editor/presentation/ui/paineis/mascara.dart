@@ -5,10 +5,10 @@ import '../../../../../core/ds/ds.dart';
 import '../../../../../core/l10n/app_language.dart';
 import '../../../../../core/ui/snack.dart';
 import '../../../application/editor_controller.dart';
+import '../../../domain/blend_extra.dart';
 import '../../../domain/keyframe.dart';
 import '../../../domain/layer.dart';
 import '../../../domain/mask.dart';
-import '../../am/layer_menu.dart' show ModoDeMescla, categoriasDeMescla;
 import '../shell/contrato.dart';
 import 'comum.dart';
 import 'pecas_centrais.dart';
@@ -125,6 +125,7 @@ class _PainelMascaraState extends ConsumerState<PainelMascara>
             prop: LayerProp.opacity,
             t: t,
             playback: escopo.playback,
+            contexto: context,
           );
           return ListView(
             padding: respiroDoPainel,
@@ -133,8 +134,7 @@ class _PainelMascaraState extends ConsumerState<PainelMascara>
                 rotulo: 'Opacidade',
                 valor: visivel.opacity.valueAt(visivel.localTime(t)) * 100,
                 aoMudar: aCadaPasso(
-                  (v) =>
-                      c.editOpacity(id, escopo.playback.time.value, v / 100),
+                  (v) => c.editOpacity(id, escopo.playback.time.value, v / 100),
                 ),
                 min: 0,
                 max: 100,
@@ -203,7 +203,8 @@ class _PainelMascaraState extends ConsumerState<PainelMascara>
                       key: ValueKey('cartao-mascara-${m.id}'),
                       layerId: id,
                       mascara: m,
-                      gravada: gravada.masks
+                      gravada:
+                          gravada.masks
                               .where((g) => g.id == m.id)
                               .firstOrNull ??
                           m,
@@ -403,10 +404,9 @@ class _CartaoDaMascara extends ConsumerWidget {
       );
     }
 
-    final kfDoCaminho = losango(
-      [for (final k in gravada.path.keyframes) k.time.inMicroseconds],
-      () => c.toggleMaskPathKeyframe(layerId, m.id, playback.time.value),
-    );
+    final kfDoCaminho = losango([
+      for (final k in gravada.path.keyframes) k.time.inMicroseconds,
+    ], () => c.toggleMaskPathKeyframe(layerId, m.id, playback.time.value));
     final ligada = m.mode != MaskMode.none;
     return AureaEffectCard(
       chave: 'mascara-${m.id}',
@@ -450,10 +450,8 @@ class _CartaoDaMascara extends ConsumerWidget {
                 chave: 'mascara-${m.id}-inverter',
                 filho: AureaToggle(
                   valor: m.inverted,
-                  aoMudar: (_) => umPasso(
-                    ref,
-                    () => c.toggleMaskInverted(layerId, m.id),
-                  ),
+                  aoMudar: (_) =>
+                      umPasso(ref, () => c.toggleMaskInverted(layerId, m.id)),
                 ),
               ),
               AureaPropertyRow.personalizada(
@@ -466,12 +464,8 @@ class _CartaoDaMascara extends ConsumerWidget {
                   key: ValueKey('mascara-${m.id}-pontos'),
                   rotulo: 'Editar pontos',
                   icone: CupertinoIcons.pencil_outline,
-                  aoTocar: () => abrirEditarPontosDaMascara(
-                    context,
-                    ref,
-                    playback,
-                    m.id,
-                  ),
+                  aoTocar: () =>
+                      abrirEditarPontosDaMascara(context, ref, playback, m.id),
                 ),
               ),
               if (!m.path.valueAt(local).closed)
@@ -530,3 +524,89 @@ class _CartaoDaMascara extends ConsumerWidget {
     );
   }
 }
+
+// ------------------------------------------------------------------------
+// O CATALOGO DA MESCLAGEM (veio da doca antiga): sete categorias, todos os modos que o motor faz.
+
+/// UM MODO DE MESCLA: nativo do Flutter ou proprio da Aurea.
+class ModoDeMescla {
+  const ModoDeMescla(this.rotulo, {this.nativo, this.aurea});
+
+  final String rotulo;
+  final BlendMode? nativo;
+  final AureaBlend? aurea;
+}
+
+/// AS SETE CATEGORIAS DA MESCLAGEM (v1.1.1), com todos os modos que o
+/// motor sabe fazer — os nativos e os da Aurea lado a lado.
+const categoriasDeMescla = <({String nome, List<ModoDeMescla> modos})>[
+  (
+    nome: 'Normal',
+    modos: [
+      ModoDeMescla('Normal', nativo: BlendMode.srcOver),
+      ModoDeMescla('Dissolver', aurea: AureaBlend.dissolve),
+    ],
+  ),
+  (
+    nome: 'Escurecer',
+    modos: [
+      ModoDeMescla('Escurecer', nativo: BlendMode.darken),
+      ModoDeMescla('Multiplicar', nativo: BlendMode.multiply),
+      ModoDeMescla('Queimar cor', nativo: BlendMode.colorBurn),
+      ModoDeMescla('Queimar linear', aurea: AureaBlend.linearBurn),
+      ModoDeMescla('Cor mais escura', aurea: AureaBlend.darkerColor),
+    ],
+  ),
+  (
+    nome: 'Clarear',
+    modos: [
+      ModoDeMescla('Clarear', nativo: BlendMode.lighten),
+      ModoDeMescla('Tela', nativo: BlendMode.screen),
+      ModoDeMescla('Subexpor cor', nativo: BlendMode.colorDodge),
+      ModoDeMescla('Adicionar', nativo: BlendMode.plus),
+      ModoDeMescla('Cor mais clara', aurea: AureaBlend.lighterColor),
+    ],
+  ),
+  (
+    nome: 'Contraste',
+    modos: [
+      ModoDeMescla('Sobrepor', nativo: BlendMode.overlay),
+      ModoDeMescla('Luz suave', nativo: BlendMode.softLight),
+      ModoDeMescla('Luz forte', nativo: BlendMode.hardLight),
+      ModoDeMescla('Luz viva', aurea: AureaBlend.vividLight),
+      ModoDeMescla('Luz linear', aurea: AureaBlend.linearLight),
+      ModoDeMescla('Luz pontual', aurea: AureaBlend.pinLight),
+      ModoDeMescla('Mistura dura', aurea: AureaBlend.hardMix),
+    ],
+  ),
+  (
+    nome: 'Diferença',
+    modos: [
+      ModoDeMescla('Diferença', nativo: BlendMode.difference),
+      ModoDeMescla('Exclusão', nativo: BlendMode.exclusion),
+      ModoDeMescla('Subtrair', aurea: AureaBlend.subtract),
+      ModoDeMescla('Dividir', aurea: AureaBlend.divide),
+    ],
+  ),
+  (
+    nome: 'Cor',
+    modos: [
+      ModoDeMescla('Matiz', nativo: BlendMode.hue),
+      ModoDeMescla('Saturação', nativo: BlendMode.saturation),
+      ModoDeMescla('Cor', nativo: BlendMode.color),
+      ModoDeMescla('Luminosidade', nativo: BlendMode.luminosity),
+    ],
+  ),
+  (
+    // ESTE ROTULO FICA EM PORTUGUES AQUI, e o motivo esta escrito: ele
+    // mora numa TABELA de dados no topo do arquivo, onde nao ha
+    // `context`. Traduzir exige o caminho de dado (a chave viaja e a
+    // traducao acontece na hora de desenhar), que e o mesmo trabalho que
+    // falta nos nomes de preset e nos rotulos do catalogo de efeitos.
+    nome: 'Máscara',
+    modos: [
+      ModoDeMescla('Máscara', nativo: BlendMode.dstIn),
+      ModoDeMescla('Recortar', nativo: BlendMode.dstOut),
+    ],
+  ),
+];

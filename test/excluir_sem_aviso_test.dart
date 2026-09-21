@@ -8,9 +8,9 @@ import 'package:aurea/src/features/editor/domain/keyframe.dart';
 import 'package:aurea/src/features/editor/domain/layer.dart';
 import 'package:aurea/src/features/editor/domain/shape.dart';
 import 'package:aurea/src/features/editor/domain/video_project.dart';
-import 'package:aurea/src/features/editor/presentation/am/am_timeline.dart'
+import 'package:aurea/src/features/editor/presentation/ui/timeline/ima.dart'
     show magneticProvider;
-import 'package:aurea/src/features/editor/presentation/shell/layer_actions.dart';
+import 'package:aurea/src/features/editor/presentation/ui/toolbar/acoes_da_camada.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';

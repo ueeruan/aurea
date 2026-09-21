@@ -15,7 +15,7 @@ import 'dart:io';
 
 import 'package:aurea/src/features/editor/application/sketchfab_service.dart';
 import 'package:aurea/src/features/editor/presentation/sketchfab/sketchfab_screen.dart';
-import 'package:aurea/src/features/editor/presentation/widgets/importacao_3d.dart';
+import 'package:aurea/src/features/editor/presentation/ui/toolbar/importacao_3d.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';

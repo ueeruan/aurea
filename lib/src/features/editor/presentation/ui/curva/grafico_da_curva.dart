@@ -7,7 +7,6 @@ import 'package:flutter/widgets.dart';
 import '../../../../../core/ds/tokens.dart';
 import '../../../application/interacao.dart';
 import '../../../domain/keyframe.dart';
-import '../../am/curve_panel.dart' show AlcasParametricas;
 
 // ===========================================================================
 // O GRAFICO DO EDITOR DE CURVA
@@ -106,8 +105,11 @@ class VistaDoGrafico {
     } else {
       hi = 1.5;
       for (var i = 0; i <= n; i++) {
-        ver(e.speedAt(i / n).clamp(-velocidadeMaximaDaCurva,
-            velocidadeMaximaDaCurva));
+        ver(
+          e
+              .speedAt(i / n)
+              .clamp(-velocidadeMaximaDaCurva, velocidadeMaximaDaCurva),
+        );
       }
     }
     final folga = (hi - lo) * 0.08;
@@ -158,9 +160,8 @@ List<(double, double)> alcasDaCurva(Easing e, ModoDoGrafico modo) {
   return AlcasParametricas.de(e);
 }
 
-double _velocidadeNoGrafico(double v) => v.isNaN
-    ? 1
-    : v.clamp(0.0, velocidadeMaximaDaCurva).toDouble();
+double _velocidadeNoGrafico(double v) =>
+    v.isNaN ? 1 : v.clamp(0.0, velocidadeMaximaDaCurva).toDouble();
 
 /// A velocidade com que o trecho SAI do primeiro keyframe.
 double velocidadeDeSaida(Easing e) => _velocidadeNoGrafico(e.speedAt(0));
@@ -595,9 +596,7 @@ class PintorDaCurva extends CustomPainter {
     this.valorDoFim,
     this.tempoDoInicio,
     this.tempoDoFim,
-  }) : super(
-         repaint: Listenable.merge([previa, ?percorrido]),
-       );
+  }) : super(repaint: Listenable.merge([previa, ?percorrido]));
 
   final Easing curva;
   final ModoDoGrafico modo;
@@ -610,7 +609,9 @@ class PintorDaCurva extends CustomPainter {
   final String? valorDoInicio, valorDoFim, tempoDoInicio, tempoDoFim;
 
   double _y(double t) {
-    final v = modo == ModoDoGrafico.valor ? curva.transform(t) : curva.speedAt(t);
+    final v = modo == ModoDoGrafico.valor
+        ? curva.transform(t)
+        : curva.speedAt(t);
     if (!v.isFinite) return v.isNegative ? -1e3 : 1e3;
     return v.clamp(-1e3, 1e3).toDouble();
   }
@@ -643,14 +644,22 @@ class PintorDaCurva extends CustomPainter {
       final x = k * passoX;
       final notavel = (x - 0).abs() < 1e-9 || (x - 1).abs() < 1e-9;
       final sx = p(x, 0).dx;
-      canvas.drawLine(Offset(sx, 0), Offset(sx, size.height), notavel ? forte : fina);
+      canvas.drawLine(
+        Offset(sx, 0),
+        Offset(sx, size.height),
+        notavel ? forte : fina,
+      );
     }
     final passoY = _passo(vista.altura / area.height);
     for (var k = (vista.y0 / passoY).ceil(); k * passoY <= vista.y1; k++) {
       final y = k * passoY;
       final notavel = (y - 0).abs() < 1e-9 || (y - 1).abs() < 1e-9;
       final sy = p(0, y).dy;
-      canvas.drawLine(Offset(0, sy), Offset(size.width, sy), notavel ? forte : fina);
+      canvas.drawLine(
+        Offset(0, sy),
+        Offset(size.width, sy),
+        notavel ? forte : fina,
+      );
     }
 
     // --- guias do ima: a linha em que a alca grudou.
@@ -711,8 +720,16 @@ class PintorDaCurva extends CustomPainter {
         canvas.drawLine(p(1, 1), p(alcas[1].$1, alcas[1].$2), tangente);
       } else {
         // A velocidade de cada ponta vale da borda ate a influencia.
-        canvas.drawLine(p(0, alcas[0].$2), p(alcas[0].$1, alcas[0].$2), tangente);
-        canvas.drawLine(p(alcas[1].$1, alcas[1].$2), p(1, alcas[1].$2), tangente);
+        canvas.drawLine(
+          p(0, alcas[0].$2),
+          p(alcas[0].$1, alcas[0].$2),
+          tangente,
+        );
+        canvas.drawLine(
+          p(alcas[1].$1, alcas[1].$2),
+          p(1, alcas[1].$2),
+          tangente,
+        );
       }
     }
     if (modo == ModoDoGrafico.valor) {
@@ -792,11 +809,7 @@ class PintorDaCurva extends CustomPainter {
       rotulo('1×', Offset(area.left + 4, p(0, 1).dy - 14));
     }
     rotulo(tempoDoInicio, Offset(area.left + 2, size.height - 13));
-    rotulo(
-      tempoDoFim,
-      Offset(area.right - 2, size.height - 13),
-      direita: true,
-    );
+    rotulo(tempoDoFim, Offset(area.right - 2, size.height - 13), direita: true);
     canvas.restore();
   }
 
@@ -823,4 +836,64 @@ class PintorDaCurva extends CustomPainter {
       old.valorDoFim != valorDoFim ||
       old.tempoDoInicio != tempoDoInicio ||
       old.tempoDoFim != tempoDoFim;
+}
+
+// ------------------------------------------------------------------------
+// AS ALCAS DAS FAMILIAS PARAMETRICAS (vieram do painel de curva antigo).
+
+/// ONDE FICAM AS ALCAS AMARELAS de cada familia parametrica, e o que
+/// cada uma escreve.
+///
+/// A alca A anda na HORIZONTAL e conta as repeticoes: quanto mais para
+/// a esquerda, mais oscilacoes cabem no trecho. A alca B anda na
+/// VERTICAL e regula a forca — quanto o elastico passa do ponto, quanto
+/// o quique perde de altura, quanto o ciclo e suave. As duas ficam
+/// sempre EM CIMA do que controlam, para o dedo entender sem legenda.
+abstract final class AlcasParametricas {
+  static const int maximo = 12;
+
+  /// Onde a alca A se apoia na curva: no primeiro pico (elastico), no
+  /// primeiro toque no chao (quicar) ou no fim do primeiro ciclo.
+  static double _fatorDeA(EasingType t) => switch (t) {
+    EasingType.elastic => 0.75,
+    EasingType.bounce => 0.5,
+    _ => 1.0,
+  };
+
+  static List<(double, double)> de(Easing e) {
+    final n = (e.count < 1 ? 1 : e.count).clamp(1, maximo);
+    final xA = (_fatorDeA(e.type) / n).clamp(0.04, 0.96);
+    switch (e.type) {
+      case EasingType.elastic:
+        return [(xA, e.transform(xA)), (0.5, 1 + 0.45 * e.intensity)];
+      case EasingType.bounce:
+        return [(xA, e.transform(xA)), (0.5, 1 - 0.6 * e.intensity)];
+      case EasingType.cyclic:
+        return [(xA, e.transform(xA)), (0.5, e.smooth.clamp(0.0, 1.0))];
+      case EasingType.steps:
+      case EasingType.elasticSteps:
+        return [(xA, e.transform(xA))];
+      default:
+        return const [];
+    }
+  }
+
+  /// A alca A moveu para [x]: recalcula as repeticoes.
+  static Easing comAlcaA(Easing e, double x) {
+    final xx = x.clamp(0.04, 0.96);
+    final n = (_fatorDeA(e.type) / xx).round().clamp(1, maximo);
+    return e.copyWith(count: n);
+  }
+
+  /// A alca B moveu para [y]: recalcula a forca.
+  static Easing comAlcaB(Easing e, double y) => switch (e.type) {
+    EasingType.elastic => e.copyWith(
+      intensity: ((y - 1) / 0.45).clamp(0.05, 1.0),
+    ),
+    EasingType.bounce => e.copyWith(
+      intensity: ((1 - y) / 0.6).clamp(0.05, 1.0),
+    ),
+    EasingType.cyclic => e.copyWith(smooth: y.clamp(0.0, 1.0)),
+    _ => e,
+  };
 }

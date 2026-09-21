@@ -13,7 +13,7 @@ import '../../../../application/ui/effect_recents.dart';
 import '../../../../domain/animador_de_texto.dart';
 import '../../../../domain/effect.dart';
 import '../../../../domain/layer.dart';
-import '../../../context/effects/previa_do_efeito.dart';
+import 'previa_do_efeito.dart';
 import '../../shell/contrato.dart';
 import '../pecas_centrais.dart';
 

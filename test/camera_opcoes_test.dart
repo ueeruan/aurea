@@ -2,17 +2,18 @@
 // ligado a lente (com o desenho do cone), desfoque de foco pela distancia
 // ao olho da camera e neblina — no palco, na selecao e no arquivo.
 import 'package:aurea/src/features/editor/application/editor_controller.dart';
-import 'package:aurea/src/features/editor/application/playback_controller.dart';
 import 'package:aurea/src/features/editor/domain/keyframe.dart';
 import 'package:aurea/src/features/editor/domain/layer.dart';
 import 'package:aurea/src/features/editor/domain/project_store.dart';
 import 'package:aurea/src/features/editor/domain/video_project.dart';
-import 'package:aurea/src/features/editor/presentation/am/camera_sheet.dart';
 import 'package:aurea/src/features/editor/presentation/editor_screen.dart';
+import 'package:aurea/src/features/editor/presentation/ui/paineis/camera.dart';
 import 'package:aurea/src/features/projects/application/projects_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'ui/paineis_3d/banco.dart';
 
 class _Projetos extends ProjectsController {
   @override
@@ -160,40 +161,16 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
   });
 
-  testWidgets('a folha: ortografica, angulo que muda a lente, foco e neblina', (
+  testWidgets('o painel: ortografica, angulo que muda a lente, foco e neblina', (
     tester,
   ) async {
-    tester.view.physicalSize = const Size(400, 1000);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
-    final c = _container();
-    c.read(editorControllerProvider.notifier).addCameraLayer(Duration.zero);
+    final c = containerNovo();
+    controladorDe(c).addCameraLayer(Duration.zero);
     final id = _camera(c).id;
-    final playback = PlaybackController(
-      vsync: tester,
-      durationOf: () => const Duration(seconds: 5),
-    );
-    addTearDown(playback.dispose);
-    await tester.pumpWidget(
-      UncontrolledProviderScope(
-        container: c,
-        child: MaterialApp(
-          home: Scaffold(
-            body: Consumer(
-              builder: (context, ref, _) => TextButton(
-                onPressed: () => showCameraSheet(context, ref, id, playback),
-                child: const Text('camera'),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-    await tester.tap(find.text('camera'));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('camera-cone')), findsOneWidget);
+    await montar(tester, c, (_) => PainelCamera(layerId: id));
 
-    await tester.tap(find.byKey(const ValueKey('camera-angulo')));
+    // Lente: o angulo digitado no teclado do app vira a lente.
+    await tester.tap(find.byKey(const ValueKey('valor-camera-angulo')));
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const ValueKey('valor-campo')), '90');
     await tester.tap(find.text('OK'));
@@ -204,17 +181,19 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('camera-ortografica')));
     await tester.pumpAndSettle();
     expect(_camera(c).opcoes.ortografica, isTrue);
-    expect(find.byKey(const ValueKey('camera-angulo')), findsNothing);
+    expect(find.byKey(const ValueKey('prop-camera-angulo')), findsNothing);
 
-    await tester.tap(find.byKey(const ValueKey('camera-foco')));
+    await tocarNaAba(tester, 'camera', 1);
+    await tester.tap(find.byKey(const ValueKey('interruptor-camera-foco')));
     await tester.pumpAndSettle();
     expect(_camera(c).opcoes.focoLigado, isTrue);
-    expect(find.byKey(const ValueKey('camera-foco-distancia')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('prop-camera-foco-distancia')),
+      findsOneWidget,
+    );
 
-    final neblina = find.byKey(const ValueKey('camera-neblina'));
-    await tester.ensureVisible(neblina);
-    await tester.pumpAndSettle();
-    await tester.tap(neblina);
+    await tocarNaAba(tester, 'camera', 2);
+    await tester.tap(find.byKey(const ValueKey('interruptor-camera-neblina')));
     await tester.pumpAndSettle();
     expect(_camera(c).opcoes.neblinaLigada, isTrue);
     expect(tester.takeException(), isNull);

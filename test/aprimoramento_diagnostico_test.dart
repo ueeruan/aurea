@@ -54,15 +54,12 @@ void main() {
     final tela = File('lib/src/features/export/presentation/export_video_screen.dart').readAsStringSync();
     expect(tela.contains('AprimoradorIa.doAparelho()'), isTrue);
     // 15/09: o dono pediu a aba "Aprimorar com IA" FORA da UI por
-    // enquanto. O motor e a folha ficam (testados em
-    // aprimoramento_sheet_test); o menu da camada nao pode mais abrir a
-    // folha — e este teste agora PRENDE a remocao, para ela nao voltar
-    // por acidente antes da hora.
-    final menu = File('lib/src/features/editor/presentation/am/layer_menu.dart').readAsStringSync();
-    expect(menu.contains('showAprimoramentoSheet('), isFalse,
+    // enquanto. 21/09: a folha antiga foi apagada com a UI antiga; o motor
+    // fica. Este teste PRENDE a remocao da porta no menu da camada novo.
+    final menu = File(
+      'lib/src/features/editor/presentation/ui/toolbar/menu_da_camada.dart',
+    ).readAsStringSync();
+    expect(menu.contains('Aprimor'), isFalse,
         reason: 'a porta da camada saiu a pedido (15/09)');
-    final folha = File('lib/src/features/editor/presentation/am/aprimoramento_sheet.dart').readAsStringSync();
-    expect(folha.contains('showAprimoramentoSheet('), isTrue,
-        reason: 'a folha continua pronta para quando a porta voltar');
   });
 }

@@ -1,23 +1,21 @@
-import 'editor_audit_helpers.dart';
+import 'package:aurea/src/core/ds/ds.dart';
 import 'package:aurea/src/features/editor/application/editor_controller.dart';
 import 'package:aurea/src/features/editor/application/ui/editor_session.dart';
 import 'package:aurea/src/features/editor/application/ui/pro_mode.dart';
-import 'package:aurea/src/features/editor/domain/layer.dart';
-import 'package:aurea/src/features/editor/domain/layer_meta.dart';
+import 'package:aurea/src/features/editor/presentation/ui/toolbar/barra_contextual.dart';
 import 'package:aurea/src/features/editor/presentation/widgets/preview_stage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'editor_hierarchy_test.dart' show openEditor;
+import 'apoio/abrir_editor.dart' show openEditor;
 
 /// FASE 7 (QA) E FASE 8 (OFICIO) DO REDESIGN.
 ///
-/// Fase 7: os fluxos da secao 10 em toques; alvos de 44 pt nas barras;
-/// tablet/paisagem com timeline e painel lado a lado acima de 700 pt.
-/// Fase 8: edicao de 3 pontos (Entrada/Saida na regua + Inserir,
-/// Sobrescrever, Levantar, Extrair), voz/EQ e dados CSV (Pro).
+/// Fase 7: os fluxos da secao 10 em toques e os alvos de toque das barras
+/// (na casca nova). Fase 8: edicao de 3 pontos (Entrada/Saida no menu das
+/// marcas + Levantar, Extrair) e voz/EQ.
 void main() {
   setUpAll(() async {
     for (final family in ['Aurea Motion Sans', 'Roboto']) {
@@ -28,110 +26,78 @@ void main() {
     }
   });
 
-  testWidgets('tablet/paisagem: acima de 700 pt o painel fica ao lado do preview', (tester) async {
-    final c = await openEditor(tester, size: const Size(1024, 768));
-    expect(find.byKey(const ValueKey('editor-largo')), findsOneWidget);
-    // Na primeira abertura o lugar da dica e das QUATRO DICAS de estreia:
-    // elas moram na folha, e nao mais por cima do palco (la cobriam a
-    // alca de girar). Depois de "Entendi", a linha de dica assume.
-    expect(find.byKey(const ValueKey('editor-dica')), findsNothing, reason: 'preview remains unobstructed');
-
-    final id = c.read(editorControllerProvider).layers.first.id;
-    c.read(selectedLayerProvider.notifier).state = id;
-    await tester.pumpAndSettle();
-    final preview = tester.getRect(find.byType(PreviewStage));
-    final folha = tester.getRect(find.byKey(const ValueKey('context-sheet')));
-    expect(folha.left, greaterThanOrEqualTo(preview.right - 1), reason: 'painel a direita');
-    expect(folha.width, closeTo(380, 1));
-    expect(folha.height, greaterThan(500), reason: 'painel de altura inteira');
-    expect(find.text('Movimentação e transformação'), findsOneWidget);
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('alvos de toque: barras de cima e de transporte com 44 pt', (tester) async {
+  testWidgets('alvos de toque: botoes das barras com o toque minimo do DS', (tester) async {
+    // A CASCA NOVA segue as medidas do plano (secao 2): barra do topo de 42
+    // com botao de 40 x 42, transporte de 46 — o toque minimo e 40
+    // ([AureaDims.toqueMinimo]); 44 so onde cabe sem estourar a densidade.
     final c = await openEditor(tester);
 
     Future<void> medir(List<String> chaves, String quando) async {
       for (final k in chaves) {
-        expect(
-          find.byKey(ValueKey(k)),
-          findsOneWidget,
-          reason: '$k na tela ($quando)',
-        );
+        expect(find.byKey(ValueKey(k)), findsOneWidget, reason: '$k na tela ($quando)');
         final r = tester.getSize(find.byKey(ValueKey(k)));
-        expect(
-          r.height,
-          greaterThanOrEqualTo(44),
-          reason: '$k altura ${r.height} ($quando)',
-        );
-        expect(
-          r.width,
-          greaterThanOrEqualTo(40),
-          reason: '$k largura ${r.width} ($quando)',
-        );
+        expect(r.height, greaterThanOrEqualTo(AureaDims.toqueMinimo),
+            reason: '$k altura ${r.height} ($quando)');
+        expect(r.width, greaterThanOrEqualTo(AureaDims.toqueMinimo),
+            reason: '$k largura ${r.width} ($quando)');
       }
     }
 
-    // SEM SELECAO: a barra de cima e a DO PROJETO — voltar, desfazer,
-    // refazer, projeto e exportar.
     await medir(const [
-      'editor-back',
-      'editor-undo',
-      'editor-redo',
-      'editor-settings',
-      'editor-export',
-      'transport-start',
-      'transport-play',
-      'transport-end',
-      'transport-expand',
-      'editor-fab',
+      'topo-voltar',
+      'topo-menu',
+      'topo-projeto',
+      'topo-exportar',
+      'transporte-desfazer',
+      'transporte-refazer',
+      'transporte-anterior',
+      'transporte-play',
+      'transporte-proximo',
+      'editor-adicionar',
     ], 'sem selecao');
 
-    // COM SELECAO: a barra da camada TOMA O LUGAR da do projeto (o
-    // comentario esta escrito na propria `BarraDaCamada`). Projeto e
-    // exportar saem de cena — procurar os dois aqui acusaria o aplicativo
-    // por uma troca que ele faz de proposito.
+    // COM SELECAO a barra de baixo vira a da camada (as ferramentas).
     c.read(selectedLayerProvider.notifier).state =
         c.read(editorControllerProvider).layers.first.id;
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('editor-settings')), findsNothing);
     await medir(const [
-      'editor-back',
-      'camada-duplicar',
-      'transport-start',
-      'transport-play',
-      'transport-end',
-      'transport-expand',
+      'topo-voltar',
+      'ferramenta-transformar',
+      'ferramenta-dividir',
+      'transporte-play',
     ], 'com selecao');
   });
 
-  testWidgets('fluxos da secao 10: dividir em 1 toque, categoria em 2, keyframe em 1', (tester) async {
+  testWidgets('fluxos da secao 10: dividir em 1 toque, categoria em 1, keyframe em 1', (tester) async {
     final c = await openEditor(tester);
     final e = c.read(editorControllerProvider.notifier);
     final id = c.read(editorControllerProvider).layers.first.id;
     e.trimLayerEnd(id, const Duration(seconds: 4));
+    e.moveLayer(id, Duration.zero);
     c.read(selectedLayerProvider.notifier).state = id; // selecionar
     await tester.pumpAndSettle();
-    // Dividir no cabecote: 1 toque (acao rapida).
-    e.moveLayer(id, Duration.zero);
     final playback = tester.widget<PreviewStage>(find.byType(PreviewStage)).playback;
-    playback.seek(const Duration(seconds: 2));
+    playback.seek(const Duration(seconds: 1));
     await tester.pumpAndSettle();
+
+    // Keyframe: o painel Transformar abre num toque e o losango crava.
+    await tester.tap(find.byKey(const ValueKey('ferramenta-transformar')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('kf-posicao')));
+    await tester.pumpAndSettle();
+    expect(c.read(editorControllerProvider).layerById(id)!.keyframeTimes, isNotEmpty);
+    // Fecha o painel pelo Voltar: a barra da camada volta a aparecer.
+    await tester.tap(find.byKey(const ValueKey('topo-voltar')));
+    await tester.pumpAndSettle();
+
+    // Categoria: Efeitos esta na barra da camada, a um toque.
+    expect(find.byKey(const ValueKey('ferramenta-efeitos')), findsOneWidget);
+
+    // Dividir no cabecote: 1 toque (a tesoura da barra).
     final antes = c.read(editorControllerProvider).layers.length;
-    await openLayerActions(tester);
-    await tester.ensureVisible(find.byKey(const ValueKey('mais-dividir')));
-    await tester.tap(find.byKey(const ValueKey('mais-dividir')));
+    await tester.tap(find.byKey(const ValueKey('ferramenta-dividir')));
     await tester.pumpAndSettle();
     expect(c.read(editorControllerProvider).layers.length, antes + 1);
-    // Descobrir uma categoria: selecionar + olhar o grid (ja visivel).
-    expect(find.text('Efeitos'), findsOneWidget);
-    // Keyframe: 1 toque no ◆ da transporte.
-    final sel = c.read(selectedLayerProvider)!;
-    await tester.tap(find.text('Movimentação e transformação'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.bySemanticsLabel('Marcar keyframe aqui'));
-    await tester.pumpAndSettle();
-    expect(c.read(editorControllerProvider).layerById(sel)!.keyframeTimes, isNotEmpty);
   });
 
   group('edicao de 3 pontos', () {
@@ -150,7 +116,7 @@ void main() {
       expect(c.read(editorSessionProvider).inPoint, isNull);
     });
 
-    testWidgets('Pro: I e O na regua, e Extrair tira o trecho da camada', (tester) async {
+    testWidgets('Pro: I e O no menu das marcas, e Extrair tira o trecho da camada', (tester) async {
       final c = await openEditor(tester);
       final e = c.read(editorControllerProvider.notifier);
       c.read(proModeProvider.notifier).set(true);
@@ -160,38 +126,62 @@ void main() {
       c.read(selectedLayerProvider.notifier).state = id;
       await tester.pumpAndSettle();
 
-
       final playback = tester.widget<PreviewStage>(find.byType(PreviewStage)).playback;
-      playback.seek(const Duration(seconds: 1));
-      await tester.pumpAndSettle();
-      // AS MARCAS MORAM NO MENU DAS MARCAS. Elas ficaram um tempo na
-      // regua, e o dono mandou tirar da regua tudo o que a atravanca —
-      // ha teste guardando isso. Entrada e Saida sao assunto de marca,
-      // e o menu de marcas e onde o assunto mora.
-      await tester.tap(find.byKey(const ValueKey('timeline-selo-do-tempo')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('timeline-entrada')));
-      await tester.pumpAndSettle();
-      playback.seek(const Duration(seconds: 2));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('timeline-selo-do-tempo')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('timeline-saida')));
-      await tester.pumpAndSettle();
-      expect(c.read(editorSessionProvider).inOut, isNotNull);
-      expect(find.byKey(const ValueKey('marca-I')), findsOneWidget);
-      expect(find.byKey(const ValueKey('marca-O')), findsOneWidget);
+      // AS MARCAS MORAM NO MENU DAS MARCAS: toque longo no cabecote.
+      Future<void> marcar(Duration t, String chave) async {
+        playback.seek(t);
+        await tester.pumpAndSettle();
+        await tester.longPress(find.byKey(const ValueKey('timeline-toque-do-cabecote')));
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(find.byKey(ValueKey(chave)));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(ValueKey(chave)));
+        await tester.pumpAndSettle();
+      }
 
-      await openLayerActions(tester);
-      expect(find.byKey(const ValueKey('mais-levantar')), findsOneWidget);
-      await tester.ensureVisible(find.byKey(const ValueKey('mais-extrair')));
-      await tester.tap(find.byKey(const ValueKey('mais-extrair')));
+      await marcar(const Duration(seconds: 1), 'timeline-entrada');
+      await marcar(const Duration(seconds: 2), 'timeline-saida');
+      expect(c.read(editorSessionProvider).inOut, isNotNull);
+
+      // Extrair mora em "Mais acoes..." do menu da camada. O "Mais" e o
+      // ultimo da barra da camada, que rola de lado quando nao cabe.
+      await tester.scrollUntilVisible(
+        find.byKey(const ValueKey('ferramenta-mais')),
+        120,
+        scrollable: find
+            .descendant(
+              of: find.byType(BarraContextual),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
       await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('ferramenta-mais')));
+      await tester.pumpAndSettle();
+      // O MENU E UMA LISTA DE 450 que rola: os ultimos itens so existem
+      // depois de rolados.
+      Future<void> tocarNoMenu(String chave) async {
+        await tester.scrollUntilVisible(
+          find.byKey(ValueKey(chave)),
+          120,
+          scrollable: find
+              .descendant(
+                of: find.byType(AureaMenu<String>),
+                matching: find.byType(Scrollable),
+              )
+              .first,
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(ValueKey(chave)));
+        await tester.pumpAndSettle();
+      }
+
+      await tocarNoMenu('menu-camada-mais-acoes');
+      await tocarNoMenu('menu-camada-extrair');
       final total = c.read(editorControllerProvider).layers
           .where((l) => l.name.startsWith('Título'))
           .fold(Duration.zero, (d, l) => d + l.duration);
       expect(total, const Duration(seconds: 3), reason: 'um segundo saiu e o resto encostou');
-      // O aviso "Desfazer" tem um temporizador: deixa ele terminar.
       await tester.pump(const Duration(seconds: 8));
     });
   });
@@ -208,33 +198,5 @@ void main() {
     expect(spec.processing.voice, .3);
     expect(spec.processing.highDb, 4);
     expect(spec.processing.isNeutral, isFalse);
-  });
-
-  testWidgets('dados: CSV carregado e o texto vinculado a uma coluna (Pro)', (tester) async {
-    final c = await openEditor(tester);
-    final e = c.read(editorControllerProvider.notifier);
-    c.read(proModeProvider.notifier).set(true);
-    e.setDataSource(parseCsv('nome,preco\nAurea,42\n', name: 'tabela.csv'));
-    e.addTextLayer(Duration.zero, text: 'x');
-    final texto = c.read(editorControllerProvider).layers.whereType<TextLayer>().single;
-    c.read(selectedLayerProvider.notifier).state = texto.id;
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Editar texto'));
-    await tester.pumpAndSettle();
-    // A LINHA DE DADOS E A ULTIMA DA LISTA, e a lista e preguicosa: ela
-    // so existe depois de rolada ate o fim. `ensureVisible` exige o
-    // elemento na arvore, e antes de rolar ele nao esta.
-    await tester.dragUntilVisible(
-      find.byKey(const ValueKey('texto-dados')),
-      find.byType(ListView).last,
-      const Offset(0, -60),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('texto-dados')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('texto-dados-nome')));
-    await tester.pumpAndSettle();
-    expect((c.read(editorControllerProvider).layerById(texto.id)! as TextLayer).text, 'Aurea');
-    expect(c.read(editorControllerProvider).bindings.single.column, 'nome');
   });
 }

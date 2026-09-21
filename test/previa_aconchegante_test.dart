@@ -13,6 +13,7 @@ import 'package:aurea/src/features/editor/domain/video_project.dart';
 import 'package:aurea/src/features/editor/presentation/editor_screen.dart';
 import 'package:aurea/src/features/editor/presentation/widgets/preview_stage.dart';
 import 'package:aurea/src/features/projects/application/projects_controller.dart';
+import 'package:aurea/src/core/ds/tokens.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -71,14 +72,16 @@ void main() {
       ('1:1', quadrada),
       ('2.39:1', cinema),
     ]) {
+      // A CASCA NOVA (plano da UI nova, secao 2): topo 42, transporte 46,
+      // timeline 280 e a previa com o RESTO — ~51% num 360 x 800, ~56%
+      // num 390 x 844.
       expect(
         f,
         greaterThan(0.35),
-        reason: '$nome: palco com ${(f * 100).round()}% da tela; '
-            'a planta pede perto de 44%',
+        reason: '$nome: palco com ${(f * 100).round()}% da tela',
       );
-      // E ele nao come a tela: a linha do tempo continua viva.
-      expect(f, lessThan(0.55), reason: nome);
+      // E ele nao come a tela: a timeline continua com os 280 dela.
+      expect(f, lessThan(0.60), reason: nome);
     }
     // O MESMO palco, nao um por formato.
     expect(larga, closeTo(vertical, 0.001));
@@ -86,14 +89,20 @@ void main() {
     expect(cinema, closeTo(vertical, 0.001));
   });
 
-  testWidgets('num celular pequeno o palco cede ao painel', (tester) async {
-    // Numa tela curta o painel tem prioridade: com 16 px a mais no
-    // palco, o trilho do painel de transformacao perdia um botao. O
-    // palco continua bem maior do que era (era a altura da composicao,
-    // 211 px num 16:9), mas nao a ponto de comer controle.
+  testWidgets('num celular pequeno a timeline guarda os 280 e o palco fica com o resto', (tester) async {
+    // A TIMELINE TEM 280, mas nunca deixa a previa com menos de 160: num
+    // 375 x 667 cabem os dois, e o palco e exatamente o que sobra.
     addTearDown(tester.view.reset);
-    final f = await fracaoDoPalco(tester, 16 / 9, 375, 667);
-    expect(f, greaterThan(0.28), reason: '${(f * 100).round()}% da tela');
-    expect(f, lessThan(0.40), reason: '${(f * 100).round()}% da tela');
+    const h = 667.0;
+    final f = await fracaoDoPalco(tester, 16 / 9, 375, h);
+    final palco = f * h;
+    expect(palco, greaterThanOrEqualTo(160), reason: '${palco.round()} px');
+    expect(
+      palco,
+      closeTo(
+        h - AureaDims.barraDoTopo - AureaDims.transporte - AureaDims.timeline,
+        1,
+      ),
+    );
   });
 }

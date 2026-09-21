@@ -8,7 +8,7 @@ import '../../../../application/playback_controller.dart';
 import '../../../../domain/animador_de_texto.dart';
 import '../../../../domain/effect.dart';
 import '../../../../domain/layer.dart';
-import '../../../am/curve_panel.dart' show showTrackCurveSheet;
+import '../../curva/curva.dart' show TrilhaDaCurva, abrirEditorDeCurva;
 import '../../shell/contrato.dart';
 import '../comum.dart';
 import '../pecas_centrais.dart';
@@ -74,9 +74,7 @@ class _PilhaDeEfeitosState extends ConsumerState<PilhaDeEfeitos>
     // O CARTAO ABERTO E A PROPRIEDADE ATIVA: a timeline acende as marcas
     // dele. Fechar devolve a camada inteira.
     ativarPropriedade(
-      aberto && efeitoId != null
-          ? PropriedadeAtiva.efeito(efeitoId)
-          : null,
+      aberto && efeitoId != null ? PropriedadeAtiva.efeito(efeitoId) : null,
     );
   }
 
@@ -240,8 +238,7 @@ class _CartaoDoEfeito extends ConsumerWidget {
   /// O TEMPO DO EFEITO: o Time Remap vive no tempo cru do clipe (a trilha
   /// dele E o tempo), todo o resto no tempo local da camada — que o
   /// Posterize Time pode quantizar.
-  Duration get _local =>
-      _remap ? t - camada.startTime : camada.localTime(t);
+  Duration get _local => _remap ? t - camada.startTime : camada.localTime(t);
 
   Future<void> _menu(BuildContext botao, WidgetRef ref) async {
     final c = ref.read(editorControllerProvider.notifier);
@@ -333,29 +330,26 @@ class _CartaoDoEfeito extends ConsumerWidget {
     });
   }
 
-  /// O EDITOR DE CURVA GERAL para a trilha [chave] deste efeito — o mesmo
-  /// de qualquer propriedade, com a aba de velocidade. O Time Remap abre
-  /// nele tambem (`rawTime`: o eixo e o tempo da fonte).
+  /// O EDITOR DE CURVA NOVO para a trilha [chave] deste efeito — o mesmo
+  /// de qualquer propriedade (valor e velocidade, presets, alcas). O Time
+  /// Remap abre na trilha propria dele (`TrilhaDaCurva.timeRemap`: o eixo e
+  /// o tempo da fonte, no relogio cru do clipe); os demais pela trilha do
+  /// efeito, que grava o trecho em todo parametro com marca ali.
   void _abrirCurva(BuildContext context, WidgetRef ref, String chave) {
-    final c = ref.read(editorControllerProvider.notifier);
     playback.pause();
-    showTrackCurveSheet(
+    abrirEditorDeCurva(
       context,
       ref,
-      playback,
-      label: efeito.spec.params[chave]?.label ?? efeito.spec.name,
       layerId: layerId,
-      rawTime: _remap,
-      trackOf: (l) {
-        for (final e in l.effects) {
-          if (e.id == efeito.id) return e.params[chave];
-        }
-        return null;
-      },
-      onSetEase: (seg, e) =>
-          c.setEffectSegmentEase(layerId, efeito.id, seg, e),
-      onSetEaseAll: (e) =>
-          c.applyEaseToAllEffectSegments(layerId, efeito.id, e),
+      trilha: _remap
+          ? TrilhaDaCurva.timeRemap()
+          : TrilhaDaCurva.efeito(
+              efeito.id,
+              parametro: chave,
+              rotulo: efeito.spec.params[chave]?.label ?? efeito.spec.name,
+            ),
+      tempo: playback.time.value,
+      playback: playback,
     );
   }
 
@@ -541,8 +535,7 @@ class _CartaoDoEfeito extends ConsumerWidget {
             context,
             ref,
             inicial: efeito.extraColor(i),
-            aplicar: (cor) =>
-                c.setEffectExtraColor(layerId, efeito.id, i, cor),
+            aplicar: (cor) => c.setEffectExtraColor(layerId, efeito.id, i, cor),
           ),
         ),
       if (_remap && camadaDeVideo != null)
@@ -568,4 +561,3 @@ class _CartaoDoEfeito extends ConsumerWidget {
     return 1;
   }
 }
-

@@ -2,37 +2,8 @@ import 'package:aurea/src/features/editor/domain/effect.dart';
 import 'package:aurea/src/features/help/presentation/quick_guide_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:aurea/src/features/editor/application/editor_controller.dart';
-import 'package:aurea/src/features/editor/presentation/editor_screen.dart';
-import 'package:aurea/src/features/editor/presentation/am/effects_panel.dart';
-
-import 'editor_hierarchy_test.dart' show openEditor;
 
 void main() {
-  testWidgets(
-    'effects help opens and returns to the same layer on a small phone',
-    (tester) async {
-      final container = await openEditor(tester, size: const Size(375, 667));
-      final layer = container.read(editorControllerProvider).layers.first;
-      container
-          .read(editorControllerProvider.notifier)
-          .addEffect(layer.id, EffectType.posterize);
-      container.read(selectedLayerProvider.notifier).state = layer.id;
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Efeitos'));
-      await tester.pumpAndSettle();
-      expect(find.byType(EffectsPanel), findsOneWidget);
-      await tester.tap(find.byTooltip('Como usar os efeitos'));
-      await tester.pumpAndSettle();
-      expect(find.byType(QuickGuideScreen), findsOneWidget);
-      await tester.binding.handlePopRoute();
-      await tester.pumpAndSettle();
-      expect(find.byType(EditorScreen), findsOneWidget);
-      expect(find.byType(EffectsPanel), findsOneWidget);
-      expect(container.read(selectedLayerProvider), layer.id);
-      expect(tester.takeException(), isNull);
-    },
-  );
   test('todo efeito do catalogo tem instrucao concreta', () {
     // O QUE SE COBRA E O CATALOGO, e nao o enum.
     //

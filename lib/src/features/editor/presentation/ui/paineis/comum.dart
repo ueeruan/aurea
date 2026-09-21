@@ -7,6 +7,7 @@ import '../../../../../core/ui/tocavel.dart';
 import '../../../application/editor_controller.dart';
 import '../../../application/playback_controller.dart';
 import '../../../domain/layer.dart';
+import '../curva/curva.dart' show TrilhaDaCurva, abrirEditorDeCurva;
 import '../shell/contrato.dart';
 
 // AS PECAS QUE TODO PAINEL USA. Quem reescreve um painel continua usando
@@ -39,6 +40,7 @@ losangoDasMarcas({
   required Duration t,
   required PlaybackController playback,
   required VoidCallback aoAlternar,
+  VoidCallback? aoCurva,
 }) {
   final marcas = marcasUs.toList(growable: false);
   final agora = camada.localTime(t).inMicroseconds;
@@ -50,6 +52,8 @@ losangoDasMarcas({
       animated: marcas.isNotEmpty,
       here: temMarcaEm(marcas, agora),
       onToggle: aoAlternar,
+      // A CURVA SO EXISTE ENTRE DUAS MARCAS: com uma so nao ha trecho.
+      onCurve: marcas.length < 2 ? null : aoCurva,
     ),
     anterior: ant == null ? null : () => irParaMarca(playback, camada, ant),
     proximo: prox == null ? null : () => irParaMarca(playback, camada, prox),
@@ -57,6 +61,10 @@ losangoDasMarcas({
 }
 
 /// O losango de uma propriedade de TRANSFORMACAO ([LayerProp]).
+///
+/// Com [contexto], o toque longo no losango abre o EDITOR DE CURVA do
+/// trecho do cabecote (`TrilhaDaCurva.transformacao`) — o mesmo que o
+/// toque longo no losango da timeline abre.
 ({KeyframeState estado, VoidCallback? anterior, VoidCallback? proximo})
 losangoDaPropriedade(
   WidgetRef ref, {
@@ -64,6 +72,7 @@ losangoDaPropriedade(
   required LayerProp prop,
   required Duration t,
   required PlaybackController playback,
+  BuildContext? contexto,
 }) {
   final controller = ref.read(editorControllerProvider.notifier);
   return losangoDasMarcas(
@@ -75,6 +84,19 @@ losangoDaPropriedade(
     t: t,
     playback: playback,
     aoAlternar: () => controller.toggleKeyframe(gravada.id, t, prop),
+    aoCurva: contexto == null
+        ? null
+        : () {
+            playback.pause();
+            abrirEditorDeCurva(
+              contexto,
+              ref,
+              layerId: gravada.id,
+              trilha: TrilhaDaCurva.transformacao(prop),
+              tempo: playback.time.value,
+              playback: playback,
+            );
+          },
   );
 }
 
@@ -153,9 +175,7 @@ class PainelSemCamada extends StatelessWidget {
   Widget build(BuildContext context) => AureaPanel(
     titulo: titulo,
     aoFechar: EscopoDoEditor.of(context).fecharPainel,
-    filhos: const [
-      AureaAvisoDoPainel(texto: 'Esta camada não existe mais.'),
-    ],
+    filhos: const [AureaAvisoDoPainel(texto: 'Esta camada não existe mais.')],
   );
 }
 

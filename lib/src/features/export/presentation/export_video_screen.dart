@@ -30,8 +30,8 @@ import '../../../core/theme/aurea_paleta.dart';
 import '../../../core/ui/am_colors.dart';
 import '../../../core/ui/am_tick_ruler.dart';
 import '../../../core/ui/tocavel.dart';
-import '../../editor/presentation/am/export_sheet.dart';
-import '../../editor/presentation/widgets/campo_de_valor.dart';
+import 'outros_formatos.dart';
+import 'campo_de_valor.dart';
 import '../../editor/presentation/widgets/dither_layer.dart';
 import '../../editor/presentation/widgets/pixel_effect_engine.dart';
 import '../../editor/domain/estilizar_lote2.dart';
@@ -174,7 +174,8 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
         final bruto = ref
             .read(sharedPreferencesProvider)
             .getString('exportar.ajustes');
-        if (bruto != null) _ajustes = ExportSettings.fromJson(jsonDecode(bruto));
+        if (bruto != null)
+          _ajustes = ExportSettings.fromJson(jsonDecode(bruto));
       } catch (_) {}
     }
     // O shader precisa estar carregado antes do primeiro quadro. Ele
@@ -198,8 +199,7 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
       // `await` deste Future ja acontece antes do laco (e o que o
       // comentario acima promete); faltava a lista certa.
       MotorSapphire.warmUp(assetsDosShadersSapphire),
-    ])
-        .catchError((Object _) => const <void>[]);
+    ]).catchError((Object _) => const <void>[]);
   }
 
   @override
@@ -664,7 +664,10 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
       largura,
       altura,
     );
-    final r = ControladorDeQualidade3D.instancia.paraExportacao(largura, altura);
+    final r = ControladorDeQualidade3D.instancia.paraExportacao(
+      largura,
+      altura,
+    );
     final receita = ReceitaDeQualidade.de(r.nivel);
     final maior = math.max(largura, altura).round();
     _sombra3D = nivelDeSombra3D(receita, maior);
@@ -791,10 +794,18 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
 
   /// O indice do PNG que a camada [l] mostra no instante [t] da
   /// composicao (null se a camada nao tem quadros extraidos).
-  int? _indiceDoQuadro(VideoLayer l, Duration t, List<Layer> layers, {bool sampled = false}) {
+  int? _indiceDoQuadro(
+    VideoLayer l,
+    Duration t,
+    List<Layer> layers, {
+    bool sampled = false,
+  }) {
     final count = _contagem[l.id] ?? 0;
     if (_pastas[l.id] == null || count == 0) return null;
-    final source = videoAbsoluteSourceTimeAt(l, sampled ? t - l.startTime : l.localTime(t));
+    final source = videoAbsoluteSourceTimeAt(
+      l,
+      sampled ? t - l.startTime : l.localTime(t),
+    );
     final extractedFrom = _inicioDosQuadros[l.id] ?? l.sourceOffset;
     // A MESMA TAXA DA EXTRACAO: com interpolacao ligada ha mais quadros
     // no disco do que a composicao tem, e o indice segue a taxa em que
@@ -859,11 +870,7 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
   ///   2. a galeria registra e devolve a URI — senao a tela continua
   ///      pronta, mas diz a verdade: nao entrou na galeria, por isto, e
   ///      o arquivo esta aqui.
-  Future<void> _terminar(
-    ExportEngine engine,
-    File file,
-    String detalhe,
-  ) async {
+  Future<void> _terminar(ExportEngine engine, File file, String detalhe) async {
     // UM ARQUIVO VAZIO NAO E UMA EXPORTACAO CONCLUIDA. Sobe como erro
     // de exportacao e cai no `catch` de quem chamou, com a mesma tela de
     // erro dos outros problemas.
@@ -912,69 +919,71 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
               child: Stack(
                 children: [
                   Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: FittedBox(
-                    fit: BoxFit.contain,
-                    // O boundary tem o tamanho REAL da composicao; o
-                    // FittedBox so encolhe o que aparece na tela.
-                    child: RepaintBoundary(
-                      key: _boundary,
-                      child: MediaQuery(
-                        // AS FOTOS DA EXPORTACAO TINHAM O TAMANHO DE TELA
-                        // CHEIA.
-                        //
-                        // Todo ponto que fotografa uma camada para aplicar
-                        // efeito — BlendMask, MaskedBox, CustomBlendBox e o
-                        // proprio SnapshotWidget do Flutter — le a razao de
-                        // pixels daqui, do MediaQuery. O palco troca essa
-                        // razao por uma conta que cabe na tela e tem teto
-                        // (previewRasterRatio), e por isso nunca sofreu. A
-                        // exportacao NAO trocava: herdava o DPR do aparelho.
-                        //
-                        // A conta, em 1080x1920: com DPR 3 cada foto saia
-                        // 3240x5760 = 18,7 megapixels = 75 MB — o MESMO
-                        // numero que o comentario de preview_raster.dart
-                        // descreve como causa do fechamento no iPhone, e que
-                        // a correcao do palco resolveu so de um lado. Com
-                        // margem de mascara (ate 720 px), a foto unica
-                        // chegava a 305 MB.
-                        //
-                        // Aqui nao ha tela: o que importa e a resolucao de
-                        // SAIDA. A razao 1 da exatamente um pixel de
-                        // dispositivo por pixel logico da composicao, que e
-                        // o que vai para o arquivo. O teto de 12 megapixels
-                        // continua valendo por dentro, para o caso de
-                        // projeto 4K com margem grande.
-                        data: MediaQuery.of(context).copyWith(
-                          devicePixelRatio: previewRasterRatio(
-                            maxSidePx: math.max(w, h),
-                            compWidth: w,
-                            compHeight: h,
-                            stageScale: 1,
-                            devicePixelRatio: 1,
-                          ),
-                        ),
-                        child: SizedBox(
-                          width: w,
-                          height: h,
-                          child: ClipRect(
-                            key: const ValueKey('export-composition-clip'),
-                            child: ColoredBox(
-                              color: project.backgroundColor,
-                              child: DitherLayer(
-                                time: _time.value,
-                                child: CompositionView(
-                                  time: _time,
-                                  videos: _videos,
-                                  selectedId: null,
-                                  exportFrames: _quadroAtual,
-                                  exporting: true,
-                                  quadroDeVideoEm: _quadroDeOutroTempo,
-                                  quadroDeCena3D: _quadroDaCena3D,
-                                  sombra3D: _sombra3D,
-                                  amostras3D: _amostras3D,
-                                  escalaDaCena3D: _escala3D,
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: FittedBox(
+                        fit: BoxFit.contain,
+                        // O boundary tem o tamanho REAL da composicao; o
+                        // FittedBox so encolhe o que aparece na tela.
+                        child: RepaintBoundary(
+                          key: _boundary,
+                          child: MediaQuery(
+                            // AS FOTOS DA EXPORTACAO TINHAM O TAMANHO DE TELA
+                            // CHEIA.
+                            //
+                            // Todo ponto que fotografa uma camada para aplicar
+                            // efeito — BlendMask, MaskedBox, CustomBlendBox e o
+                            // proprio SnapshotWidget do Flutter — le a razao de
+                            // pixels daqui, do MediaQuery. O palco troca essa
+                            // razao por uma conta que cabe na tela e tem teto
+                            // (previewRasterRatio), e por isso nunca sofreu. A
+                            // exportacao NAO trocava: herdava o DPR do aparelho.
+                            //
+                            // A conta, em 1080x1920: com DPR 3 cada foto saia
+                            // 3240x5760 = 18,7 megapixels = 75 MB — o MESMO
+                            // numero que o comentario de preview_raster.dart
+                            // descreve como causa do fechamento no iPhone, e que
+                            // a correcao do palco resolveu so de um lado. Com
+                            // margem de mascara (ate 720 px), a foto unica
+                            // chegava a 305 MB.
+                            //
+                            // Aqui nao ha tela: o que importa e a resolucao de
+                            // SAIDA. A razao 1 da exatamente um pixel de
+                            // dispositivo por pixel logico da composicao, que e
+                            // o que vai para o arquivo. O teto de 12 megapixels
+                            // continua valendo por dentro, para o caso de
+                            // projeto 4K com margem grande.
+                            data: MediaQuery.of(context).copyWith(
+                              devicePixelRatio: previewRasterRatio(
+                                maxSidePx: math.max(w, h),
+                                compWidth: w,
+                                compHeight: h,
+                                stageScale: 1,
+                                devicePixelRatio: 1,
+                              ),
+                            ),
+                            child: SizedBox(
+                              width: w,
+                              height: h,
+                              child: ClipRect(
+                                key: const ValueKey('export-composition-clip'),
+                                child: ColoredBox(
+                                  color: project.backgroundColor,
+                                  child: DitherLayer(
+                                    time: _time.value,
+                                    child: CompositionView(
+                                      time: _time,
+                                      videos: _videos,
+                                      selectedId: null,
+                                      exportFrames: _quadroAtual,
+                                      exporting: true,
+                                      quadroDeVideoEm: _quadroDeOutroTempo,
+                                      quadroDeCena3D: _quadroDaCena3D,
+                                      sombra3D: _sombra3D,
+                                      amostras3D: _amostras3D,
+                                      escalaDaCena3D: _escala3D,
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
@@ -983,8 +992,6 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
                       ),
                     ),
                   ),
-                ),
-              ),
                   // A TELA PISCAVA DURANTE O RENDER, e nao era defeito do
                   // arquivo: era a MESA DE TRABALHO aparecendo. A exportacao
                   // salta quadro a quadro, troca o quadro de cada video e
@@ -1229,8 +1236,7 @@ class _ExportVideoScreenState extends ConsumerState<ExportVideoScreen> {
               key: const ValueKey('export-cabeca-ajustes'),
               rotulo: 'AJUSTES',
               aberto: _ajustesAbertos,
-              aoTocar: () =>
-                  setState(() => _ajustesAbertos = !_ajustesAbertos),
+              aoTocar: () => setState(() => _ajustesAbertos = !_ajustesAbertos),
             ),
             if (_ajustesAbertos)
               Column(
@@ -1876,11 +1882,7 @@ class _BotaoDeChip extends StatelessWidget {
 }
 
 class _BotaoGrande extends StatelessWidget {
-  const _BotaoGrande({
-    required this.rotulo,
-    required this.aoTocar,
-    this.chave,
-  });
+  const _BotaoGrande({required this.rotulo, required this.aoTocar, this.chave});
 
   final String rotulo;
   final VoidCallback aoTocar;

@@ -1,9 +1,8 @@
 import 'package:flutter/widgets.dart';
 
-import '../../features/editor/presentation/context/parameter_row.dart'
-    show formatarValorDigitado, showNumberInput;
 import '../ui/am_tick_ruler.dart';
 import '../ui/tocavel.dart';
+import 'aurea_teclado_numerico.dart';
 import 'tokens.dart';
 
 /// O NUMERO EXATO: a caixa de 56 com o valor. O toque abre o teclado do

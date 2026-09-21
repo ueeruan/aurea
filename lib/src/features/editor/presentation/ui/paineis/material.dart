@@ -5,7 +5,7 @@ import '../../../../../core/ds/ds.dart';
 import '../../../application/editor_controller.dart';
 import '../../../domain/layer.dart';
 import '../../../domain/scene3d.dart';
-import '../../am/layer_menu.dart' show showElement3DSheet;
+import 'elemento3d.dart' show showElement3DSheet;
 import '../../widgets/gizmo_da_cena_overlay.dart'
     show noDaCenaSelecionadoProvider;
 import '../shell/contrato.dart';

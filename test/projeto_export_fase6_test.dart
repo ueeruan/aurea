@@ -10,7 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'editor_hierarchy_test.dart' show openEditor;
+import 'apoio/abrir_editor.dart' show openEditor;
 
 /// FASE 6 DO REDESIGN — EXPORTAR, ⚙ PROJETO, ONBOARDING, TEMA (3.6).
 ///
@@ -88,7 +88,7 @@ void main() {
     tester,
   ) async {
     await openEditor(tester);
-    await tester.tap(find.byKey(const ValueKey('editor-export'))); // 1
+    await tester.tap(find.byKey(const ValueKey('topo-exportar'))); // 1
     await tester.pumpAndSettle();
 
     expect(
@@ -111,7 +111,7 @@ void main() {
     '⚙ Projeto: composicao editavel no Simples; guias, motion blur e paleta no Pro',
     (tester) async {
       final c = await openEditor(tester);
-      await tester.tap(find.byKey(const ValueKey('editor-settings')));
+      await tester.tap(find.byKey(const ValueKey('topo-projeto')));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('projeto-fundo')), findsOneWidget);
       expect(
@@ -133,7 +133,7 @@ void main() {
       // Reabre a folha para ver as secoes Pro.
       await tester.tapAt(const Offset(10, 10));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('editor-settings')));
+      await tester.tap(find.byKey(const ValueKey('topo-projeto')));
       await tester.pumpAndSettle();
       expect(
         find.byKey(const ValueKey('projeto-areas-seguras')),
@@ -166,7 +166,7 @@ void main() {
   );
 
   testWidgets(
-    'as dicas de primeiro uso aparecem uma vez e o estado vazio tem a chamada',
+    'sem dicas de primeiro uso; projeto vazio chama pelo "+" e a ajuda mora no ⚙',
     (tester) async {
       final c = await openEditor(tester);
       expect(
@@ -175,18 +175,18 @@ void main() {
         reason: 'help no longer covers editing',
       );
 
-      // Estado vazio: sem camadas, a chamada "+ Adicione uma midia".
+      // Sem camadas, a casca nova nao tem um cartao de "estado vazio": o
+      // "+" (73) continua na base, e e ele a chamada.
       final e = c.read(editorControllerProvider.notifier);
       for (final l in c.read(editorControllerProvider).layers.toList()) {
         e.removeLayer(l.id);
       }
       c.read(selectedLayerProvider.notifier).state = null;
       await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('estado-vazio')), findsOneWidget);
-      expect(find.byKey(const ValueKey('estado-vazio-cta')), findsOneWidget);
+      expect(find.byKey(const ValueKey('editor-adicionar')), findsOneWidget);
       // A barra de adicionar (com o chip de ajuda) so vem pelo "+".
       expect(find.byKey(const ValueKey('projeto-ajuda')), findsNothing);
-      await tester.tap(find.byKey(const ValueKey('editor-settings')));
+      await tester.tap(find.byKey(const ValueKey('topo-projeto')));
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
         find.byKey(const ValueKey('projeto-ajuda')),

@@ -6,7 +6,7 @@ import 'package:aurea/src/features/editor/domain/effect_preset.dart';
 import 'package:aurea/src/features/editor/domain/estilo_preset.dart';
 import 'package:aurea/src/features/editor/domain/keyframe.dart';
 import 'package:aurea/src/features/editor/domain/layer_meta.dart';
-import 'package:aurea/src/features/editor/presentation/am/presets_screen.dart';
+import 'package:aurea/src/features/editor/presentation/ui/paineis/presets.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';

@@ -1,21 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:aurea/src/core/ui/am_tick_ruler.dart' as origem;
-import 'package:aurea/src/features/editor/presentation/am/am_widgets.dart';
+import 'package:aurea/src/core/ui/am_tick_ruler.dart';
 
 /// A superficie de arrasto: o valor tem de seguir o DEDO, nao a
 /// cadencia de reconstrucao de quem esta por cima.
 void main() {
-  test('a regua do core e a de am_widgets sao A MESMA classe', () {
-    // Ja houve duas: a viva em `am_widgets.dart` e uma copia morta em
-    // `core/ui/am_tick_ruler.dart`, com o sinal antigo (direita DIMINUIA).
-    // Nome identico, sentido oposto. Agora a do core e a unica, e
-    // `am_widgets.dart` so a reexporta.
-    expect(AmTickRuler, same(origem.AmTickRuler));
-    expect(AmArrastoDeValor, same(origem.AmArrastoDeValor));
-  });
-
   testWidgets('varios eventos no mesmo quadro somam, nao se perdem',
       (tester) async {
     var valor = 0.0;

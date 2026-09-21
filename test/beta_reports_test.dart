@@ -7,16 +7,15 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:aurea/src/features/editor/application/editor_controller.dart';
 import 'package:aurea/src/features/editor/application/font_service.dart';
-import 'package:aurea/src/features/editor/application/ui/editor_session.dart';
 import 'package:aurea/src/features/editor/application/ui/pro_mode.dart';
 import 'package:aurea/src/features/editor/domain/keyframe.dart';
 import 'package:aurea/src/features/editor/domain/layer.dart';
 import 'package:aurea/src/features/editor/domain/lottie_export.dart';
 import 'package:aurea/src/features/editor/domain/svg_document.dart';
 import 'package:aurea/src/features/editor/domain/shape.dart';
-import 'package:aurea/src/features/editor/presentation/am/am_timeline.dart';
+import 'package:aurea/src/features/editor/presentation/ui/shell/contrato.dart';
 
-import 'editor_hierarchy_test.dart' show openEditor;
+import 'apoio/abrir_editor.dart' show openEditor;
 
 class _FontsPicker extends FilePicker {
   _FontsPicker(this.paths);
@@ -83,46 +82,6 @@ void main() {
     }
   });
   testWidgets(
-    'layer reorder and time moves remain usable in tools and compact timeline',
-    (tester) async {
-      final c = await openEditor(tester);
-      final e = c.read(editorControllerProvider.notifier);
-      final id = c.read(editorControllerProvider).layers.last.id;
-      c.read(selectedLayerProvider.notifier).state = id;
-      await tester.pumpAndSettle();
-      expect(
-        tester.widget<AmTimeline>(find.byType(AmTimeline)).singleLayerId,
-        isNull,
-      );
-      await tester.tap(find.byKey(const ValueKey('camada-subir')));
-      await tester.pumpAndSettle();
-      expect(c.read(editorControllerProvider).layers.first.id, id);
-      final clock = tester.widget<AmTimeline>(find.byType(AmTimeline)).playback;
-      clock.seek(const Duration(seconds: 1));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('camada-inicio-aqui')));
-      await tester.pumpAndSettle();
-      expect(
-        c.read(editorControllerProvider).layerById(id)!.startTime,
-        const Duration(seconds: 1),
-      );
-      c.read(editorSessionProvider.notifier).openPanel(EditorPanel.transform);
-      await tester.pumpAndSettle();
-      final before = c.read(editorControllerProvider).layerById(id)!.startTime;
-      final label = find
-          .text(c.read(editorControllerProvider).layerById(id)!.name)
-          .last;
-      await tester.drag(label, const Offset(75, 0));
-      await tester.pumpAndSettle();
-      expect(
-        c.read(editorControllerProvider).layerById(id)!.startTime,
-        greaterThan(before),
-      );
-      expect(tester.takeException(), isNull);
-      e.undo();
-    },
-  );
-  testWidgets(
     'text keyboard closes and a batch of fonts previews the authored text',
     (tester) async {
       final c = await openEditor(tester);
@@ -130,16 +89,18 @@ void main() {
       e.addTextLayer(Duration.zero);
       await tester.pumpAndSettle();
       final id = c.read(selectedLayerProvider)!;
-      c.read(editorSessionProvider.notifier).openPanel(EditorPanel.editText);
+      c.read(painelAbertoProvider.notifier).state = PainelId.texto;
       await tester.pumpAndSettle();
-      final field = find.byKey(const ValueKey('texto-conteudo'));
+      final field = find.byKey(const ValueKey('texto-campo'));
       await tester.enterText(field, 'Minha prévia');
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('texto-fechar-teclado')));
       await tester.pumpAndSettle();
       expect(
         tester
-            .widget<EditableText>(find.byType(EditableText).first)
+            .widget<EditableText>(
+              find.descendant(of: field, matching: find.byType(EditableText)),
+            )
             .focusNode
             .hasFocus,
         isFalse,
@@ -170,11 +131,25 @@ void main() {
       paths.add('${dir.path}/broken.txt');
       final picker = _FontsPicker(paths);
       FilePicker.platform = picker;
-      await tester.tap(find.byKey(const ValueKey('texto-fonte')));
+      // A linha "Fonte" do painel Texto abre o painel Fonte.
+      // A lista do painel e preguicosa: a linha so existe depois de rolada.
+      final fonte = find.byKey(const ValueKey('texto-fonte'));
+      await tester.scrollUntilVisible(
+        fonte,
+        60,
+        scrollable: find
+            .descendant(
+              of: find.byKey(ValueKey('painel-aberto-texto-$id')),
+              matching: find.byType(Scrollable),
+            )
+            .last,
+      );
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.byKey(const ValueKey('fontes-importar')));
+      await tester.tap(fonte);
+      await tester.pumpAndSettle();
+      expect(c.read(painelAbertoProvider), PainelId.fonte);
       await tester.runAsync(() async {
-        await tester.tap(find.byKey(const ValueKey('fontes-importar')));
+        await tester.tap(find.byKey(const ValueKey('fonte-importar')));
         final deadline = DateTime.now().add(const Duration(seconds: 5));
         // Registration finishes before the picker applies the first font.
         // Wait for both asynchronous steps, including the layer update.
@@ -272,11 +247,10 @@ void main() {
       dir.deleteSync(recursive: true);
     });
     await tester.pumpAndSettle();
-    // "Exportar" abre a TELA de exportar video (20/09: a folha do meio,
-    // que repetia os controles da tela, deixou de existir). O que nao e
-    // video — Lottie, SVG, template, pacote — fica atras de "Outros
+    // "Exportar" (barra do topo) abre a TELA de exportar video. O que nao
+    // e video — Lottie, SVG, template, pacote — fica atras de "Outros
     // formatos", la dentro.
-    await tester.tap(find.byKey(const ValueKey('editor-export')));
+    await tester.tap(find.byKey(const ValueKey('topo-exportar')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('export-outros-formatos')));
     await tester.pumpAndSettle();
@@ -302,27 +276,6 @@ void main() {
     await tester.tap(button);
     await tester.pumpAndSettle();
     expect(find.text('Exportação cancelada'), findsOneWidget);
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('empty project footer fits a small phone and opens add tools', (
-    tester,
-  ) async {
-    final c = await openEditor(tester, size: const Size(320, 568));
-    c
-        .read(editorControllerProvider.notifier)
-        .removeLayers(
-          c.read(editorControllerProvider).layers.map((l) => l.id).toList(),
-        );
-    await tester.pumpAndSettle();
-    final cta = find.byKey(const ValueKey('estado-vazio-cta'));
-    final message = find.byKey(const ValueKey('estado-vazio'));
-    expect(tester.getRect(cta).bottom, lessThanOrEqualTo(568));
-    expect(tester.getRect(message).bottom, lessThanOrEqualTo(568));
-    expect(cta.hitTestable(), findsOneWidget);
-    await tester.tap(cta);
-    await tester.pumpAndSettle();
-    expect(c.read(editorSessionProvider).adding, isTrue);
     expect(tester.takeException(), isNull);
   });
 

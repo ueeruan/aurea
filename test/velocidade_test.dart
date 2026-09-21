@@ -1,16 +1,11 @@
 // VELOCIDADE (v1.1.1): quatro modos para onde vai a diferenca de duracao
-// (estender inicio/fim, cortar inicio/fim), regua com imas e metade
-// esquerda para camera lenta, valor digitado; camada sem midia explica
-// em vez de mostrar controle que nao faz nada.
+// (estender inicio/fim, cortar inicio/fim) e a regua com imas. O painel
+// da UI nova tem o teste dele em test/ui/paineis/tempo_test.dart.
 import 'package:aurea/src/features/editor/application/editor_controller.dart';
-import 'package:aurea/src/features/editor/domain/cut_ops.dart';
-import 'package:aurea/src/features/editor/domain/keyframe.dart';
 import 'package:aurea/src/features/editor/domain/layer.dart';
 import 'package:aurea/src/features/editor/domain/velocidade.dart';
 import 'package:aurea/src/features/editor/domain/video_project.dart';
-import 'package:aurea/src/features/editor/presentation/am/speed_sheet.dart';
 import 'package:aurea/src/features/projects/application/projects_controller.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -129,18 +124,12 @@ void main() {
     });
   });
 
-  test('a regua gruda nos imas, anda de 0,05 e divide a faixa no 1x', () {
+  test('a regua gruda nos imas e anda de 0,05', () {
     expect(velocidadeDaRegua(.52), .5);
     expect(velocidadeDaRegua(1.04), 1);
     expect(velocidadeDaRegua(2.95), 3);
     expect(velocidadeDaRegua(1.37), 1.35);
     expect(velocidadeDaRegua(9), velocidadeMaximaDaRegua);
-    expect(posicaoDaVelocidade(1), .5);
-    expect(posicaoDaVelocidade(velocidadeMinima), 0);
-    expect(posicaoDaVelocidade(4), 1);
-    for (final v in [.1, .3, .75, 1.0, 1.8, 3.2, 4.0]) {
-      expect(velocidadeDaPosicao(posicaoDaVelocidade(v)), closeTo(v, 1e-9));
-    }
   });
 
   test('o controlador aplica o modo no clipe de audio', () {
@@ -167,158 +156,5 @@ void main() {
     expect(a.duration, _seg(2));
     expect(a.endTime, _seg(14));
     expect(a.sourceOffset, _seg(4), reason: 'saida em 6 s, 2 s de fonte a 1x');
-  });
-
-  testWidgets(
-    'a folha: modos, regua e numero mudam o clipe; sem midia explica',
-    (tester) async {
-      tester.view.physicalSize = const Size(400, 900);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.reset);
-      final c = _container(
-        AudioLayer(
-          id: 'a',
-          name: 'musica',
-          startTime: _seg(10),
-          duration: _seg(4),
-          sourcePath: '/a.m4a',
-          sourceDuration: _seg(20),
-        ),
-      );
-      c.read(editorControllerProvider.notifier).addTextLayer(Duration.zero);
-      final texto = c
-          .read(editorControllerProvider)
-          .layers
-          .firstWhere((l) => l is TextLayer)
-          .id;
-      await tester.pumpWidget(
-        UncontrolledProviderScope(
-          container: c,
-          child: MaterialApp(
-            home: Scaffold(
-              body: Consumer(
-                builder: (context, ref, _) => Column(
-                  children: [
-                    TextButton(
-                      onPressed: () => showSpeedSheet(context, ref, 'a'),
-                      child: const Text('abrir'),
-                    ),
-                    TextButton(
-                      onPressed: () => showSpeedSheet(context, ref, texto),
-                      child: const Text('texto'),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-      await tester.tap(find.text('abrir'));
-      await tester.pumpAndSettle();
-      for (final m in CompensacaoDaVelocidade.values) {
-        expect(
-          find.byKey(ValueKey('velocidade-modo-${m.name}')),
-          findsOneWidget,
-        );
-      }
-      AudioLayer audio() =>
-          c.read(editorControllerProvider).layerById('a')! as AudioLayer;
-
-      await tester.tap(
-        find.byKey(const ValueKey('velocidade-modo-estenderInicio')),
-      );
-      await tester.pumpAndSettle();
-      // Tocar na regua a tres quartos da largura: 2,5x.
-      final regua = tester.getRect(
-        find.byKey(const ValueKey('velocidade-regua')),
-      );
-      await tester.tapAt(
-        Offset(regua.left + regua.width * .75, regua.center.dy),
-      );
-      await tester.pumpAndSettle();
-      expect(audio().speed, 2.5);
-      expect(audio().endTime, _seg(14), reason: 'estender inicio segura o fim');
-
-      await tester.tap(find.byKey(const ValueKey('velocidade-valor')));
-      await tester.pumpAndSettle();
-      await tester.enterText(find.byKey(const ValueKey('valor-campo')), '0,5');
-      await tester.tap(find.text('OK'));
-      await tester.pumpAndSettle();
-      expect(audio().speed, .5);
-      expect(audio().endTime, _seg(14));
-      expect(find.text('0.50x'), findsWidgets);
-
-      Navigator.of(
-        tester.element(find.byKey(const ValueKey('velocidade-regua'))),
-      ).pop();
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('texto'));
-      await tester.pumpAndSettle();
-      expect(
-        find.byKey(const ValueKey('velocidade-sem-midia')),
-        findsOneWidget,
-      );
-      expect(find.byKey(const ValueKey('velocidade-regua')), findsNothing);
-      expect(tester.takeException(), isNull);
-      await tester.pump(const Duration(seconds: 1));
-    },
-  );
-
-  // A REGRA MUDOU DE NOVO, E E A ULTIMA PALAVRA DO DONO (20/09): o Time
-  // Remap e um EFEITO, em Efeitos -> Tempo, ao lado de RGB Time Warp e
-  // Posterize Time. Nenhuma porta especial: nem faixa no topo desta
-  // folha, nem entrada avulsa na galeria. Esta folha voltou a ser o que
-  // sempre foi — a velocidade CONSTANTE do clipe.
-  //
-  // A porta do efeito tem casa propria em `time_remap_porta_test.dart`.
-  testWidgets('a folha de velocidade nao abre mais o Time Remap', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(430, 932);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
-    final c = _container(
-      VideoLayer(
-        id: 'v',
-        name: 'video',
-        startTime: Duration.zero,
-        duration: const Duration(seconds: 4),
-        sourcePath: '/video.mp4',
-        sourceDuration: const Duration(seconds: 8),
-        position: AnimatedOffset(Offset.zero),
-      ),
-    );
-    await tester.pumpWidget(
-      UncontrolledProviderScope(
-        container: c,
-        child: MaterialApp(
-          home: Scaffold(
-            body: Consumer(
-              builder: (context, ref, _) => TextButton(
-                onPressed: () => showSpeedSheet(context, ref, 'v'),
-                child: const Text('abrir tempo'),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-    await tester.tap(find.text('abrir tempo'));
-    await tester.pumpAndSettle();
-    expect(
-      find.byKey(const ValueKey('abrir-estudio-do-tempo')),
-      findsNothing,
-      reason: 'a porta oficial do Time Remap e o efeito',
-    );
-    expect(find.text('Time Remap'), findsNothing);
-    // Nada de um segundo editor de curva dentro da propria folha.
-    expect(find.text('Editor de curva'), findsNothing);
-    // O que a folha continua sendo: a velocidade constante do clipe.
-    expect(find.byKey(const ValueKey('velocidade-regua')), findsOneWidget);
-    final clipe =
-        c.read(editorControllerProvider).layerById('v')! as VideoLayer;
-    expect(hasTimeRemap(clipe), isFalse);
-    expect(tester.takeException(), isNull);
   });
 }

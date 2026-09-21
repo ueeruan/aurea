@@ -5,7 +5,7 @@ import '../../../../../../core/ds/ds.dart';
 import '../../../../application/editor_controller.dart';
 import '../../../../application/playback_controller.dart';
 import '../../../../domain/layer.dart';
-import '../../../am/estudio_do_tempo.dart' show rotuloDaInterpolacao;
+import '../tempo.dart' show rotuloDaInterpolacao;
 import '../pecas_centrais.dart';
 
 /// AS LINHAS DO TIME REMAP que a ficha do efeito nao descreve.
@@ -96,8 +96,7 @@ abstract final class LinhasDoTimeRemap {
           // nomes.
           rotuloDe: rotuloDaInterpolacao,
           titulo: 'Interpolação',
-          aoMudar: (i) =>
-              umPasso(ref, () => c.setClipInterpolacao(layerId, i)),
+          aoMudar: (i) => umPasso(ref, () => c.setClipInterpolacao(layerId, i)),
         ),
       ),
       AureaPropertyRow.personalizada(

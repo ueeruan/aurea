@@ -5,14 +5,37 @@
 // um (montagem + rasterizacao), quanto de CPU o processo gastou e a memoria.
 //
 // O CENARIO QUE MAIS IMPORTA E O REPOUSO: com nada mudando na tela, o numero
-// certo de quadros e ZERO. Quadro produzido em repouso e bateria e calor
+// certo de PEDIDOS e ZERO. Quadro pedido em repouso e bateria e calor
 // jogados fora — e o que os testadores sentem como "o celular esquenta".
+//
+// ================== CONTAR QUADROS EM REPOUSO MEDE O INSTRUMENTO =========
+//
+// `quadros=` NAO serve para julgar repouso, e isto ja custou uma cacada
+// inteira. O binding de teste AO VIVO reagenda um quadro por conta propria
+// toda vez que desenha um quadro que nao veio de um `pump`:
+// `LiveTestWidgetsFlutterBinding.handleDrawFrame` termina em
+// `platformDispatcher.scheduleFrame()` quando `_expectingFrame` e falso, e
+// com `framePolicy = fullyLive` esse quadro e sempre desenhado. Basta UM
+// quadro do app fora de um pump — o quadro final em qualidade cheia que sai
+// 260 ms depois de um gesto, por exemplo — para a bancada ficar em 60 fps
+// ATE O FIM DO TESTE, com ui_p50 ~1 ms (nada reconstroi) e raster cheio.
+// Medido com `Text('a')` na tela, sem app nenhum: 0 quadros em 1,5 s depois
+// de um pump, e 168 quadros na MESMA janela depois de um unico
+// `scheduleFrame()` — com UM pedido do app no total
+// (test/bancada_ao_vivo_test.dart prende esses numeros).
+//
+// Por isso o numero honesto e `pedidos=`: o app pede quadro por
+// `SchedulerBinding.scheduleFrame()`, que levanta `hasScheduledFrame`; o
+// reagendamento do binding vai direto ao `platformDispatcher` e NAO levanta.
+// Contar a borda de subida desse sinal conta o que o app quis, e nao o que o
+// instrumento produziu sozinho.
 //
 // Rodar (a partir do drive A:):
 //   flutter drive --driver=test_driver/integration_test.dart \
 //     --target=integration_test/bancada_de_desempenho_test.dart \
 //     --profile -d emulator-5554
 // ou, em depuracao: flutter test integration_test/bancada_de_desempenho_test.dart
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui';
 
@@ -49,11 +72,52 @@ int _tiquesDeCpu() {
   }
 }
 
+/// QUANTAS VEZES O APP PEDIU UM QUADRO — o numero que julga o repouso.
+///
+/// O pedido do app passa por `SchedulerBinding.scheduleFrame()` e levanta
+/// `hasScheduledFrame`; o reagendamento do proprio binding de teste ao vivo
+/// vai direto ao `platformDispatcher` e nao levanta nada (ver o cabecalho).
+/// Contar a BORDA DE SUBIDA desse sinal separa um do outro.
+///
+/// Duas sondas, porque um pedido nasce em dois lugares: dentro do quadro
+/// (alguem se marcou sujo enquanto pintava — a assinatura do laco, o quadro
+/// que encomenda o proximo) e fora dele (um Timer, uma resposta de disco).
+abstract final class _PedidosDeQuadro {
+  static int contados = 0;
+  static bool _aberto = false;
+  static Timer? _relogio;
+
+  static void observar() {
+    if (_relogio != null) return;
+    SchedulerBinding.instance.addPersistentFrameCallback((_) => _olhar());
+    // 4 ms: um pedido fica de pe ate o proximo vsync (16 ms), entao quatro
+    // olhadas por quadro nao deixam passar — e 250 despertares por segundo
+    // nao mexem na conta de CPU.
+    _relogio = Timer.periodic(const Duration(milliseconds: 4), (_) => _olhar());
+  }
+
+  static void _olhar() {
+    final agora = SchedulerBinding.instance.hasScheduledFrame;
+    if (agora && !_aberto) contados++;
+    _aberto = agora;
+  }
+}
+
 class _Medida {
-  _Medida(this.nome, this.segundos, this.quadros, this.cpu, this.rssMb);
+  _Medida(
+    this.nome,
+    this.segundos,
+    this.quadros,
+    this.pedidos,
+    this.cpu,
+    this.rssMb,
+  );
   final String nome;
   final double segundos;
   final List<FrameTiming> quadros;
+
+  /// Quadros que O APP pediu na janela. Em repouso tem de ser ZERO.
+  final int pedidos;
   final double cpu;
   final double rssMb;
 
@@ -74,7 +138,8 @@ class _Medida {
     ];
     final fps = quadros.length / segundos;
     String f(double x) => x.toStringAsFixed(1);
-    return 'BANCADA[$nome] quadros=${quadros.length} em ${f(segundos)}s '
+    return 'BANCADA[$nome] pedidos=$pedidos quadros=${quadros.length} '
+        'em ${f(segundos)}s '
         'fps=${f(fps)} total_p50=${f(_pct(total, .5))}ms '
         'total_p90=${f(_pct(total, .9))}ms total_p99=${f(_pct(total, .99))}ms '
         'ui_p50=${f(_pct(ui, .5))}ms ui_p90=${f(_pct(ui, .9))}ms '
@@ -88,6 +153,7 @@ void main() {
   binding.framePolicy = LiveTestWidgetsFlutterBindingFramePolicy.fullyLive;
 
   testWidgets('bancada de desempenho do editor', (tester) async {
+    _PedidosDeQuadro.observar();
     final recolhidos = <FrameTiming>[];
     void aoMedir(List<FrameTiming> lote) => recolhidos.addAll(lote);
     SchedulerBinding.instance.addTimingsCallback(aoMedir);
@@ -101,11 +167,13 @@ void main() {
     Future<void> medir(String nome, Future<void> Function() acao) async {
       await Future<void>.delayed(const Duration(milliseconds: 1300));
       recolhidos.clear();
+      final pedidos0 = _PedidosDeQuadro.contados;
       final cpu0 = _tiquesDeCpu();
       final relogio = Stopwatch()..start();
       await acao();
       relogio.stop();
       final cpu1 = _tiquesDeCpu();
+      final pedidos1 = _PedidosDeQuadro.contados;
       await Future<void>.delayed(const Duration(milliseconds: 1300));
       final seg = relogio.elapsedMicroseconds / 1e6;
       var dentro = <FrameTiming>[];
@@ -124,6 +192,7 @@ void main() {
         nome,
         seg,
         dentro,
+        pedidos1 - pedidos0,
         (cpu1 - cpu0) / 100.0 / seg * 100.0,
         ProcessInfo.currentRss / (1024 * 1024),
       );
@@ -231,6 +300,18 @@ void main() {
       }
     }
 
+    // ISOLAR O CULPADO EM TRES PASSOS. Mexer num valor SEM efeito e medir
+    // o repouso logo depois: se sujar aqui, a culpa e do rastro do gesto.
+    // Depois por o brilho e medir o repouso SEM ter tocado em nada: se
+    // sujar so aqui, a culpa e do efeito. So entao repetir o gesto.
+    //
+    // OLHAR `pedidos=`, NUNCA `quadros=`: depois de um gesto sai um quadro
+    // fora do pump (o quadro final em qualidade cheia, 260 ms depois do
+    // ultimo passo) e o binding ao vivo passa a reagendar sozinho ate o fim
+    // do teste — `quadros=` fica em 60 fps com o app parado. Ver o cabecalho.
+    await tentar('2d-mexer-valor-sem-efeito', mexerNoValor);
+    await tentar('2d-repouso-apos-mexer', repouso);
+
     try {
       // O BRILHO DE VERDADE, e nao o primeiro nome com "glow": o
       // `lightGlow` saiu do catalogo em 16/09 e nasce inerte, entao o
@@ -241,6 +322,7 @@ void main() {
       print('BANCADA sem brilho: $e');
     }
     await tester.pump(const Duration(milliseconds: 600));
+    await tentar('2d-brilho-recem-posto-repouso', repouso);
     await tentar('2d-mexer-valor-com-brilho', mexerNoValor);
     await tentar('2d-com-brilho-repouso', repouso);
 

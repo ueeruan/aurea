@@ -146,6 +146,15 @@ enum class CommandType : u16 {
     // --- Export -------------------------------------------------------------
     ExportRequest,
     ExportCancel,
+
+    // --- Reprodução (fase de preview real) ------------------------------------
+    // No FIM do enum: os números anteriores já estão na UI e em journals de
+    // recuperação. Nada é reordenado.
+    PlaybackToggle,
+    PlaybackScrubBegin,    ///< o dedo encostou na régua
+    PlaybackScrub,         ///< o dedo moveu (SeekPayload): coalescido no decode
+    PlaybackScrubEnd,
+    PlaybackStep,          ///< avança/recua N frames (StepPayload)
 };
 
 /// Alvo de um comando que mexe em uma propriedade animável.
@@ -222,6 +231,7 @@ struct PreviewScalePayload { u32 scaleNumerator; u32 scaleDenominator; bool auto
 struct SeekPayload { TickNs time; };
 struct LoopPayload { bool loop; };
 struct SpeedPayload { f32 speed; };
+struct StepPayload { i32 frames; };
 struct ExportRequestPayload { u32 codec; u32 width; u32 height; f64 fps; u32 bitrate; u32 audioBitrate; };
 
 /// Comando. União de campos por tipo — `union` porque não há construtor nem
@@ -306,6 +316,7 @@ struct Command {
         SeekPayload seek;
         LoopPayload loop;
         SpeedPayload speed;
+        StepPayload step;
         ExportRequestPayload export_request;
 
         /// Leitura crua do payload. Usado para zerar o comando inteiro.

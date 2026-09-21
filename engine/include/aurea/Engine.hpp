@@ -3,71 +3,65 @@
 //
 //  A fachada. É o ÚNICO cabeçalho que a bridge JNI e a ObjC++ incluem.
 //
-//  Contrato da fronteira, em três regras:
+//  Contrato da fronteira:
 //
 //   1. NADA de ponteiro do motor cruza para a UI. Só handles (u64) e POD.
-//      A UI guarda números; quem resolve é o motor.
+//   2. A UI NÃO processa frame e NÃO dita o ritmo do preview. O preview tem a
+//      SUA thread de render, pacificada pelo vsync do swapchain; a UI só manda
+//      comandos e lê estado. Recomposição do Compose não toca no preview, e um
+//      preview pesado não trava a interface.
+//   3. Um frame da UI são poucas travessias: `submit_commands` (lock-free),
+//      `fill_status` e, no painel DEV, `fill_perf`.
 //
-//   2. A UI NÃO processa frame. Ela chama `render_frame` e o resultado vai
-//      direto para a superfície nativa. Nenhum bitmap atravessa a fronteira.
+//  Threads:
 //
-//   3. A UI esconde o motor: as TRÊS chamadas de uma sessão de edição são
-//      `submit_commands`, `render_frame` e `read_telemetry`. Um frame normal
-//      são 3 chamadas nativas, não 300.
-//
-//  Fluxo por frame:
-//
-//      UI (Compose/SwiftUI)
-//        │  escreve comandos POD na fila
-//        ├─ submit_commands()  ─────────────► CommandQueue
-//        │
-//        │                                     Engine aplica
-//        │                                     Engine avalia animação
-//        │                                     FrameGraph compila
-//        ├─ render_frame()     ─────────────► GPU compõe → superfície
-//        │
-//        └─ read_telemetry()   ◄───────────── FrameStats + AdaptiveState
-//
-//  Nada bloqueia a UI: `submit_commands` é lock-free, `render_frame` devolve
-//  o estado do frame que a GPU ainda está desenhando, e `read_telemetry` é uma
-//  leitura de struct POD.
+//      UI ─ submit_commands ──► fila lock-free ─┐
+//      UI ─ fill_status/query_* ─(lock do modelo, curto)
+//                                                ▼
+//      render ─ [lock do modelo] drena, avança o playback, prepara o snapshot
+//             ─ [sem lock] FrameGraph → GPU → swapchain
+//      decode (uma por fonte) ─ MediaCodec → cache de frames → acorda o render
 // =============================================================================
 #pragma once
 
-#include "aurea/core/Types.hpp"
-#include "aurea/core/Result.hpp"
-#include "aurea/core/Time.hpp"
-#include "aurea/memory/MemoryManager.hpp"
-#include "aurea/jobs/JobSystem.hpp"
+#include "aurea/bridge/BridgePods.hpp"
 #include "aurea/command/CommandQueue.hpp"
 #include "aurea/command/UndoStack.hpp"
+#include "aurea/core/Result.hpp"
+#include "aurea/core/Time.hpp"
+#include "aurea/core/Types.hpp"
+#include "aurea/effects/EffectRegistry.hpp"
+#include "aurea/jobs/JobSystem.hpp"
+#include "aurea/media/MediaManager.hpp"
+#include "aurea/memory/MemoryManager.hpp"
 #include "aurea/platform/DeviceCapabilities.hpp"
+#include "aurea/playback/Playback.hpp"
 #include "aurea/project/Project.hpp"
 #include "aurea/render/GPUBackend.hpp"
-#include "aurea/render/FrameGraph.hpp"
-#include "aurea/render/EffectGraph.hpp"
-#include "aurea/render/ShaderLibrary.hpp"
 #include "aurea/render/RenderScheduler.hpp"
-#include "aurea/bridge/BridgePods.hpp"
+#include "aurea/render/Renderer.hpp"
 
+#include <atomic>
+#include <condition_variable>
 #include <memory>
+#include <mutex>
+#include <thread>
+#include <unordered_map>
 #include <vector>
-#include <functional>
 
 namespace aurea {
 
-/// Estado do motor, exposto à UI sem ponteiro.
 enum class EngineState : u8 {
     Uninitialized = 0,
     Ready,
     Rendering,
     Exporting,
-    Suspended,     ///< app em background
+    Suspended,     ///< app em segundo plano
     ShuttingDown,
     Failed,
 };
 
-/// O que a UI recebe depois de um frame. POD — atravessa a bridge por valor.
+/// O que a UI recebe depois de um frame.
 struct EngineStatus {
     EngineState state = EngineState::Uninitialized;
     Errc lastError = Errc::Ok;
@@ -109,83 +103,55 @@ struct EngineStatus {
     f32  memoryPressure = 0.0f;
 };
 
-/// Telemetria completa — só o painel de debug lê isto.
 struct EngineTelemetry {
     FrameStats frame{};
-
     u32  workerCount = 0;
     u64  jobsCompleted = 0;
     u32  queueDepth[static_cast<u8>(JobPriority::Count)]{};
-
     u32  shaderCount = 0;
     u32  pipelineCount = 0;
     f32  pipelineHitRate = 0.0f;
     u32  shaderFailures = 0;
-
     u32  physicalResources = 0;
     u32  logicalResources = 0;
-
     u32  frameCacheEntries = 0;
     f32  frameCacheHitRate = 0.0f;
-
     u32  adaptiveScaleChanges = 0;
     u32  effectsInPreviewMode = 0;
-
     u64  undoBlobBytes = 0;
     u64  commandsDropped = 0;
-
     ThermalState::Level thermal = ThermalState::Level::Unknown;
     bool throttling = false;
 };
 
-/// Opções de inicialização. A plataforma preenche o que sabe; o motor descobre
-/// o resto por conta própria.
 struct EngineConfig {
-    /// Janela nativa de apresentação (ANativeWindow* / CAMetalLayer*).
-    void* nativeWindow = nullptr;
-    u32   surfaceWidth = 0;
-    u32   surfaceHeight = 0;
-    f32   displayRefreshRate = 60.0f;
-    bool  displaySupportsHdr = false;
+    /// Backend gráfico, criado pela plataforma (Vulkan no Android e no host de
+    /// testes, Metal no iOS). O motor assume a posse. Nulo = sem GPU (a
+    /// timeline, a animação e a serialização funcionam sem preview).
+    GPUBackend* backend = nullptr;
+    BackendConfig backendConfig{};
 
-    /// Diretório onde ficam cache, proxy e temporários. A plataforma informa o
-    /// caminho da sandbox — o motor nunca adivinha.
+    /// Decoders de mídia da plataforma. NÃO é assumida a posse.
+    VideoSourceFactory* mediaFactory = nullptr;
+
+    f32   displayRefreshRate = 60.0f;
     std::string cacheDirectory;
     std::string documentsDirectory;
-
-    /// Workers. 0 = automático por DeviceCapabilities.
     u32   workerCount = 0;
-
-    /// Se true, o motor cria o backend gráfico. Em testes headless, false —
-    /// a timeline, a animação e a serialização funcionam sem GPU.
-    bool  createGpuBackend = true;
-
-    /// Orçamento de memória em bytes. 0 = automático.
     u64   memoryBudgetBytes = 0;
-
-    /// Habilita o painel de telemetria (timestamps na GPU, contadores). Custa
-    /// um pouco; fica desligado em release.
-    bool  enableTelemetry = false;
-
-    /// Desliga o autosave e a recuperação. Usado pelos testes (que não podem
-    /// escrever no diretório de trabalho do usuário) e pelo modo headless.
+    bool  enableTelemetry = true;
     bool  disableAutosave = false;
-
-    /// Cadências do autosave, em milissegundos. O journal é barato e roda
-    /// seguido; o ponto de recuperação completo custa mais e roda espaçado.
     u32   autosaveJournalIntervalMs  = 3000;
     u32   autosaveRecoveryIntervalMs = 60000;
-
-    /// Escala de qualidade inicial do preview. AUTO deixa o controlador
-    /// adaptativo decidir desde o primeiro frame.
     PreviewScale initialPreviewScale = PreviewScale::Auto;
 };
 
-/// O motor.
-///
-/// Uma instância por processo. Não é singleton global escondido: quem cria é
-/// quem destrói, e o ciclo de vida é explícito. (A UI tem UMA instância, mas
-/// isso é decisão dela, não do motor — os testes criam várias.)
+/// Pedido de importação de vídeo.
+struct VideoImport {
+    std::string sourcePath;    ///< caminho, ou "fd:<n>" no Android
+    std::string displayName;
+};
+
 class Engine {
 public:
     Engine();
@@ -197,133 +163,100 @@ public:
     // =========================================================================
     // Ciclo de vida
     // =========================================================================
-
-    /// Sobe o motor: detecta capacidades, cria backend, sobe o pool, prepara
-    /// caches. Pode levar dezenas de ms — chame fora da thread da UI.
     [[nodiscard]] Status initialize(const EngineConfig& config) noexcept;
-
-    /// Encerra tudo. Espera o trabalho em curso terminar; chamadas pendentes
-    /// devolvem `ShuttingDown`.
     void shutdown() noexcept;
-
     [[nodiscard]] EngineState state() const noexcept;
 
-    // --- Suspensão (app em background) ---------------------------------------
-    //
-    //  O sistema pode tirar a GPU e o surface da gente a qualquer momento. Em
-    //  vez de tentar desenhar num surface morto e ser morto pelo sistema,
-    //  `suspend` libera GPU e caches descartáveis, e `resume` recria.
-    //  O PROJETO permanece em memória — suspender não perde trabalho.
-
+    /// App em segundo plano: pausa, devolve os decoders de hardware ao sistema,
+    /// grava o cache de pipeline. O PROJETO fica intacto.
     [[nodiscard]] Status suspend() noexcept;
-    [[nodiscard]] Status resume(const EngineConfig& config) noexcept;
+    [[nodiscard]] Status resume() noexcept;
 
-    /// A superfície mudou de tamanho (rotação, split-screen, redimensionar).
+    // --- Superfície (Android: SurfaceView → ANativeWindow) -------------------
+    /// Chamadas da thread da UI. `detach_surface` só volta depois que a GPU
+    /// parou de usar a janela — o Android destrói a superfície logo depois.
+    [[nodiscard]] Status attach_surface(void* nativeWindow, u32 width, u32 height) noexcept;
+    void detach_surface() noexcept;
     [[nodiscard]] Status resize_surface(u32 width, u32 height) noexcept;
+
+    // --- Thread de render -----------------------------------------------------
+    /// Sobe a thread de render própria do preview. Ela dorme quando não há o
+    /// que desenhar (pausado, sem mudança) e acorda com comando, frame novo de
+    /// vídeo ou mudança de superfície.
+    void start_render_thread() noexcept;
+    void stop_render_thread() noexcept;
+    /// Acorda a thread de render (há algo novo para mostrar).
+    void request_render() noexcept;
 
     // =========================================================================
     // Projeto
     // =========================================================================
-
-    /// Projeto novo, com uma composição pronta.
     [[nodiscard]] Status new_project(u32 width = 1920, u32 height = 1080,
-                                     f64 fps = 60.0,
-                                     const char* title = nullptr) noexcept;
-
+                                     f64 fps = 30.0, const char* title = nullptr) noexcept;
     [[nodiscard]] Status load_project(const char* path) noexcept;
     [[nodiscard]] Status save_project(const char* path) noexcept;
-
-    /// Salva no caminho atual. Se o projeto nunca foi salvo, devolve
-    /// `InvalidState` — a UI precisa então pedir um destino.
     [[nodiscard]] Status save_project() noexcept;
-
-    /// Estado do autosave + recuperação. A UI chama isto ao abrir para saber
-    /// se deve oferecer "recuperar sessão anterior".
     [[nodiscard]] const AutosaveState& autosave_state() const noexcept;
-
     [[nodiscard]] Status recover_session() noexcept;
     void discard_recovery() noexcept;
 
     [[nodiscard]] Project* project() noexcept { return project_.get(); }
     [[nodiscard]] const Project* project() const noexcept { return project_.get(); }
 
-    // =========================================================================
-    // A fronteira — três chamadas por frame
-    // =========================================================================
+    // --- Importação -----------------------------------------------------------
+    /// Sonda o arquivo (fora do lock), cria o asset e uma layer de vídeo no
+    /// TOPO da composição. Sendo o primeiro clipe, a composição adota tamanho,
+    /// fps e duração do vídeo. Devolve o id da layer.
+    [[nodiscard]] Result<u64> import_video(const VideoImport& request) noexcept;
+    /// Imagem já decodificada pela plataforma (RGBA8 sRGB, alfa reto).
+    [[nodiscard]] Result<u64> import_image(const u8* rgba, u32 width, u32 height,
+                                           const char* name) noexcept;
 
-    /// Escreve um lote de comandos. Lock-free: a UI nunca espera o motor.
-    ///
-    /// Devolve a quantidade aceita. Menos que `count` significa fila cheia —
-    /// a UI deve reenviar o resto no próximo frame. Nunca bloqueia, nunca
-    /// perde comando silenciosamente.
+    // =========================================================================
+    // A fronteira
+    // =========================================================================
     [[nodiscard]] u32 submit_commands(const Command* commands, u32 count,
                                       const char* stringBlob = nullptr,
                                       u32 stringBlobSize = 0) noexcept;
 
-    /// Desenha um frame.
-    ///
-    /// Faz, nesta ordem: drena a fila de comandos, atualiza o relógio, avalia
-    /// a animação das layers ativas, compila o FrameGraph, executa na GPU e
-    /// apresenta. NÃO bloqueia esperando a GPU terminar o frame anterior —
-    /// quem espera é `present`, dois frames depois.
-    ///
-    /// `audioTime` é a posição do mixer. Durante playback é o master clock; se
-    /// o áudio não estiver pronto, o motor cai no relógio do sistema por um
-    /// frame e registra isso na telemetria.
-    [[nodiscard]] Status render_frame(TickNs audioTime) noexcept;
+    /// Um frame completo: drena, avança o playback, prepara, renderiza e
+    /// apresenta. Chamado pela thread de render (ou pelos testes).
+    [[nodiscard]] Status render_frame() noexcept;
 
-    /// Estado condensado para a UI. POD, sem alocação.
+    /// Renderiza o instante atual numa textura (export, testes visuais), em
+    /// resolução cheia, sem superfície. Espera a GPU terminar.
+    [[nodiscard]] Status render_offscreen(TextureHandle target, u32 width, u32 height) noexcept;
+
     [[nodiscard]] EngineStatus read_status() noexcept;
-
-    /// Telemetria completa. Só o painel de debug chama.
     [[nodiscard]] EngineTelemetry read_telemetry() noexcept;
-
-    // --- Versões para a fronteira nativa -------------------------------------
-    //
-    //  Escrevem direto no struct da bridge, que é o que a UI lê por offset.
-    //  Separadas das versões internas de propósito: os tipos da bridge são
-    //  congelados por static_assert, e mudar um campo interno aqui NÃO pode
-    //  quebrar a UI. O preço é uma cópia campo a campo por frame — dezenas de
-    //  instruções, irrelevante diante do trabalho de composição.
 
     void fill_status(bridge::EngineStatusPOD& out) noexcept;
     void fill_telemetry(bridge::TelemetryPOD& out) noexcept;
+    void fill_perf(bridge::PerfPOD& out) noexcept;
     void fill_export_progress(bridge::ExportProgressPOD& out) const noexcept;
 
     // =========================================================================
-    // Consultas à timeline (somente leitura, para desenhar a UI)
+    // Consultas (somente leitura, para a UI)
     // =========================================================================
-    //
-    //  A UI pede os dados que precisa desenhar numa única chamada, num buffer
-    //  que ela mesma fornece. Não há uma chamada por layer — seriam 200
-    //  travessias de bridge por frame só para desenhar a lista.
-
-    /// Preenche `out` com as layers da composição atual. Devolve quantas.
-    /// `outNameBlob` recebe os nomes concatenados.
-    ///
-    /// Os dois tipos são os da fronteira (bridge/BridgePods.hpp), não structs
-    /// internas: a UI lê estes offsets, e eles são congelados por static_assert.
     u32 query_layers(bridge::LayerRow* out, u32 capacity,
                      char* outNameBlob, u32 nameBlobCapacity) noexcept;
-
-    /// Keyframes de uma layer, para a timeline desenhar a barra de keyframes
-    /// sem uma chamada por propriedade.
     u32 query_keyframes(u64 layerId, bridge::KeyframeRow* out, u32 capacity) noexcept;
-
-    /// Caminho da curva de uma propriedade, amostrado em N pontos — é o que o
-    /// graph editor desenha. Amostrar no motor garante que o gráfico mostra
-    /// exatamente o que a avaliação produz, sem reimplementar a curva na UI.
     u32 query_curve(u64 layerId, u32 property, i32 startFrame, i32 endFrame,
                     f32* outValues, u32 sampleCount) noexcept;
+
+    /// Tipos de efeito disponíveis.
+    u32 query_effect_catalog(bridge::EffectCatalogRow* out, u32 capacity,
+                             char* blob, u32 blobCapacity) noexcept;
+    /// Efeitos aplicados numa layer, na ordem.
+    u32 query_layer_effects(u64 layerId, bridge::LayerEffectRow* out, u32 capacity,
+                            char* blob, u32 blobCapacity) noexcept;
+    /// Parâmetros de um efeito aplicado, com o valor no playhead.
+    u32 query_effect_params(u64 layerId, u32 effectId, bridge::EffectParamRow* out, u32 capacity,
+                            char* blob, u32 blobCapacity) noexcept;
 
     // =========================================================================
     // Seleção
     // =========================================================================
-    //
-    //  A seleção mora no motor porque undo/redo, comandos em lote e o painel
-    //  de propriedades precisam dela de forma consistente. Se morasse na UI, o
-    //  motor não saberia o que "aplicar a todas as selecionadas" significa.
-
     void set_selection(const u64* layerIds, u32 count) noexcept;
     void clear_selection() noexcept;
     [[nodiscard]] u32 selection_count() const noexcept;
@@ -331,14 +264,9 @@ public:
     [[nodiscard]] bool is_selected(u64 layerId) const noexcept;
 
     // =========================================================================
-    // Export
+    // Export (próxima fase: reusa o MESMO renderer via render_offscreen)
     // =========================================================================
-
-    /// Inicia uma exportação. Devolve imediatamente — o export roda no pool.
-    /// O progresso vem por `export_progress`.
-    [[nodiscard]] Status start_export(const ExportSettings& settings,
-                                      const char* outputPath) noexcept;
-
+    [[nodiscard]] Status start_export(const ExportSettings& settings, const char* outputPath) noexcept;
     [[nodiscard]] Status cancel_export() noexcept;
 
     struct ExportProgress {
@@ -356,48 +284,42 @@ public:
     // =========================================================================
     // Acesso de baixo nível (testes e painel de debug)
     // =========================================================================
-
     [[nodiscard]] const DeviceCapabilities& caps() const noexcept { return caps_; }
     [[nodiscard]] JobSystem& jobs() noexcept { return jobs_; }
     [[nodiscard]] MemoryManager& memory() noexcept { return memory_; }
     [[nodiscard]] UndoStack& undo() noexcept { return undo_; }
     [[nodiscard]] EffectRegistry& effects() noexcept { return effectRegistry_; }
-    [[nodiscard]] GPUBackend* gpu() noexcept { return gpu_; }
+    [[nodiscard]] GPUBackend* gpu() noexcept { return gpu_.get(); }
+    [[nodiscard]] Renderer& renderer() noexcept { return renderer_; }
+    [[nodiscard]] MediaManager& media() noexcept { return media_; }
+    [[nodiscard]] PlaybackController& playback() noexcept { return playback_; }
     [[nodiscard]] CommandQueue& commands() noexcept { return *commandQueue_; }
 
-    /// Executa um comando direto, sem passar pela fila. Só para testes e para
-    /// o caminho de recuperação de projeto. A UI SEMPRE usa `submit_commands`.
-    [[nodiscard]] Status apply_command(const Command& cmd,
-                                       const char* stringData = nullptr) noexcept;
+    /// Executa um comando direto, sem fila. Testes e recuperação de projeto.
+    [[nodiscard]] Status apply_command(const Command& cmd, const char* stringData = nullptr) noexcept;
 
-    /// Recalcula a escala adaptativa com um frame simulado. Só para testes —
-    /// em produção o controlador é alimentado pelo renderer.
     void debug_feed_frame_stats(const FrameStats& stats) noexcept;
 
-    /// Caminho de cache. Usado pelas camadas de mídia da plataforma.
     [[nodiscard]] const std::string& cache_directory() const noexcept { return config_.cacheDirectory; }
     [[nodiscard]] const std::string& documents_directory() const noexcept { return config_.documentsDirectory; }
 
 private:
-    friend class CommandApplier;
-
-    [[nodiscard]] Status apply_command_internal(const Command& cmd,
-                                                const char* stringData,
+    [[nodiscard]] Status apply_command_internal(const Command& cmd, const char* stringData,
                                                 bool recordUndo) noexcept;
-    [[nodiscard]] Status drena_comandos() noexcept;
-    void update_clock(TickNs audioTime) noexcept;
-    void evaluate_animation(FrameIndex time) noexcept;
-    void rebuild_engine_status() noexcept;
+    void drain_commands_locked() noexcept;
     [[nodiscard]] Composition* current_composition() noexcept;
-    [[nodiscard]] Status ensure_export_worker() noexcept;
+    [[nodiscard]] Status recover_device_locked() noexcept;
+    void render_thread_main() noexcept;
+    void update_perf(const FrameStats& stats, const RenderTimings& timings,
+                     const FrameSnapshot& snap, u64 frameStartNs) noexcept;
+    [[nodiscard]] RenderSettings current_render_settings() noexcept;
+    static const ImagePixels* image_lookup(void* self, AssetId id);
+    static void on_frame_ready(void* self);
 
-    /// Controlador adaptativo. Devolve uma referência sempre válida: ele é
-    /// criado no construtor porque as consultas de resolução são feitas antes
-    /// de `initialize` (a UI desenha o preview vazio usando a escala).
     [[nodiscard]] AdaptiveResolutionController& adapt() noexcept { return *adaptive_; }
 
     EngineConfig       config_{};
-    EngineState        state_ = EngineState::Uninitialized;
+    std::atomic<EngineState> state_{EngineState::Uninitialized};
     Errc               lastError_ = Errc::Ok;
     char               lastErrorDetail_[128]{};
 
@@ -406,34 +328,48 @@ private:
     MemoryManager      memory_{};
     UndoStack          undo_{};
     EffectRegistry     effectRegistry_{};
-    ShaderLibrary      shaders_{};
-    FrameGraph         frameGraph_;
-    FrameCache         frameCache_{};
-    FramePrefetcher    prefetcher_{};
     AdaptiveResolutionController* adaptive_ = nullptr;
 
-    GPUBackend*        gpu_ = nullptr;
+    std::unique_ptr<GPUBackend> gpu_;
+    Renderer           renderer_;
+    MediaManager       media_;
+    PlaybackController playback_;
+    FrameScheduler     frameScheduler_;
+    FrameSnapshot      snapshot_;
+
     std::unique_ptr<CommandQueue> commandQueue_;
     std::unique_ptr<Project>      project_;
+    std::unordered_map<u64, ImagePixels> images_;   ///< por AssetId empacotado
 
-    /// Layers ativas do frame atual. Reusado entre frames — o vetor mantém a
-    /// capacidade e nunca realoca durante o playback.
-    std::vector<LayerId> activeLayers_;
-
-    /// Seleção. Vetor ordenado por id para `is_selected` ser busca binária.
     std::vector<u64> selection_;
 
-    FrameStats      lastFrame_{};
-    EngineStatus    cachedStatus_{};
-    EngineTelemetry cachedTelemetry_{};
+    // --- Sincronização --------------------------------------------------------
+    /// Protege projeto, timeline, playback, seleção e imagens.
+    mutable std::mutex modelMutex_;
+    /// Protege backend e renderer (GPU). Nunca adquirido com o do modelo já
+    /// preso por outra thread que espere o de render — a ordem é sempre
+    /// modelo → render, ou render sozinho.
+    std::mutex renderMutex_;
 
-    u64 lastSubmitNs_ = 0;
+    std::thread renderThread_;
+    std::mutex wakeMutex_;
+    std::condition_variable wakeCv_;
+    bool wakeFlag_ = false;
+    std::atomic<bool> renderRunning_{false};
+    std::atomic<bool> playingHint_{false};
+    std::atomic<bool> surfaceAttached_{false};
+
+    SurfaceDesc surface_{};
+
+    // --- Métricas ---------------------------------------------------------------
+    mutable std::mutex perfMutex_;
+    bridge::PerfPOD perf_{};
+    FrameStats lastFrame_{};
     u64 frameCounter_ = 0;
-    u32 droppedFrames_ = 0;
+    u64 fpsWindowStartNs_ = 0;
+    u32 fpsWindowFrames_ = 0;
+    f32 measuredFps_ = 0.0f;
 
-    u64 exportRevision_ = 0;
-
-    // Implementação do export fica em TranslationUnits separadas.
     struct ExportContext;
     std::unique_ptr<ExportContext> exportCtx_;
 };

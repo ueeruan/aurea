@@ -1,727 +1,985 @@
-// Testes do grafo de um frame, do compilador de efeitos e do pipeline de cor.
-//
-// O FrameGraph é testado com um backend FALSO: ele não desenha nada, só conta
-// o que foi criado e destruído. É o suficiente para verificar as propriedades
-// que importam — ordem de execução, poda de passes e reaproveitamento de
-// memória — sem precisar de GPU, e por isso os testes rodam no CI.
+// =============================================================================
+//  Testes do renderer SEM GPU: FrameGraph, EffectGraph, Motion Tile (geometria
+//  portada do Aurea antigo), ShaderLibrary e o compositor contra um backend
+//  que só grava comandos. Os testes com a GPU de verdade estão em test_gpu.cpp.
+// =============================================================================
 #include "TestFramework.hpp"
+#include "MockBackend.hpp"
 
+#include "aurea/effects/EffectGraph.hpp"
+#include "aurea/effects/MotionTile.hpp"
+#include "aurea/project/Project.hpp"
 #include "aurea/render/FrameGraph.hpp"
-#include "aurea/render/EffectGraph.hpp"
+#include "aurea/render/Renderer.hpp"
 #include "aurea/render/ShaderLibrary.hpp"
-#include "aurea/core/Log.hpp"
 
-#include <map>
+#include <cmath>
+#include <vector>
 
 using namespace aurea;
+using aurea::test::MockBackend;
 
-// -----------------------------------------------------------------------------
-// Backend falso
-// -----------------------------------------------------------------------------
 namespace {
 
-class FakeCommandList : public CommandList {
-public:
-    u32 beginCount = 0;
-    u32 endCount = 0;
-    u32 dispatches = 0;
-    u32 draws = 0;
-
-    Status begin() noexcept override { ++beginCount; return OkStatus; }
-    Status end() noexcept override { ++endCount; return OkStatus; }
-    void bind_pipeline(PipelineHandle) noexcept override {}
-    void bind_texture(u32, u32, TextureHandle, SamplerHandle) noexcept override {}
-    void bind_uniform(u32, u32, const void*, u32) noexcept override {}
-    void bind_storage_buffer(u32, u32, BufferHandle) noexcept override {}
-    void set_viewport(f32, f32, f32, f32) noexcept override {}
-    void set_scissor(i32, i32, u32, u32) noexcept override {}
-    void begin_render_pass(RenderPassHandle, TextureHandle, TextureHandle,
-                           TextureHandle, const f32[4]) noexcept override {}
-    void end_render_pass() noexcept override {}
-    void draw(const DrawCall&) noexcept override { ++draws; }
-    void dispatch(u32, u32, u32) noexcept override { ++dispatches; }
-    void memory_barrier() noexcept override {}
-    void copy_buffer_to_texture(BufferHandle, TextureHandle) noexcept override {}
-    void copy_texture_to_buffer(TextureHandle, BufferHandle) noexcept override {}
-    void write_timestamp(QueryPoolHandle, u32) noexcept override {}
-};
-
-class FakeBackend : public GPUBackend {
-public:
-    u64 nextId = 1;
-    u32 texturesCreated = 0;
-    u32 texturesDestroyed = 0;
-    u32 buffersCreated = 0;
-    u32 pipelinesCreated = 0;
-    std::map<u64, u64> textureBytes;
-
-    const char* name() const noexcept override { return "fake"; }
-    Status initialize() noexcept override { return OkStatus; }
-    void shutdown() noexcept override {}
-    Status recreate_surface(const SurfaceDesc&) noexcept override { return OkStatus; }
-    Status resize_surface(u32, u32) noexcept override { return OkStatus; }
-    Status begin_frame(TextureHandle& out) noexcept override {
-        out = TextureHandle{nextId++};
-        return OkStatus;
-    }
-    Status end_frame(CommandList&) noexcept override { return OkStatus; }
-
-    Result<TextureHandle> create_texture(const TextureDesc& d) noexcept override {
-        ++texturesCreated;
-        const u64 id = nextId++;
-        textureBytes[id] = d.estimated_bytes();
-        return TextureHandle{id};
-    }
-    Result<BufferHandle> create_buffer(usize, u32) noexcept override {
-        ++buffersCreated;
-        return BufferHandle{nextId++};
-    }
-    Result<SamplerHandle> create_sampler(const SamplerDesc&) noexcept override {
-        return SamplerHandle{nextId++};
-    }
-    Result<ShaderHandle> create_shader(const ShaderDesc&) noexcept override {
-        return ShaderHandle{nextId++};
-    }
-    Result<PipelineHandle> create_pipeline(const PipelineDesc&) noexcept override {
-        ++pipelinesCreated;
-        return PipelineHandle{nextId++};
-    }
-    Result<RenderPassHandle> create_render_pass(const TextureDesc*, u32,
-                                                const TextureDesc*) noexcept override {
-        return RenderPassHandle{nextId++};
-    }
-    Result<QueryPoolHandle> create_query_pool(u32) noexcept override {
-        return QueryPoolHandle{nextId++};
-    }
-    void destroy_texture(TextureHandle) noexcept override { ++texturesDestroyed; }
-    void destroy_buffer(BufferHandle) noexcept override {}
-    void destroy_sampler(SamplerHandle) noexcept override {}
-    void destroy_shader(ShaderHandle) noexcept override {}
-    void destroy_pipeline(PipelineHandle) noexcept override {}
-    void destroy_render_pass(RenderPassHandle) noexcept override {}
-    void destroy_query_pool(QueryPoolHandle) noexcept override {}
-
-    Status upload_texture(TextureHandle, const void*, u32, u32) noexcept override { return OkStatus; }
-    Status upload_buffer(BufferHandle, const void*, usize, usize) noexcept override { return OkStatus; }
-    Status map_buffer(BufferHandle, void*& out) noexcept override { out = nullptr; return OkStatus; }
-    void unmap_buffer(BufferHandle) noexcept override {}
-    Result<TextureHandle> import_external_image(const ExternalImageHandle&) noexcept override {
-        return TextureHandle{nextId++};
-    }
-    void release_external_image(TextureHandle) noexcept override {}
-    Status read_texture(TextureHandle, void*, u32) noexcept override { return OkStatus; }
-    void wait_idle() noexcept override {}
-    bool read_timestamps(QueryPoolHandle, u32, u32, f32*) noexcept override { return false; }
-    bool is_device_lost() const noexcept override { return false; }
-    u32 current_frame_index() const noexcept override { return 0; }
-    u64 allocated_bytes() const noexcept override { return 0; }
-};
-
-// Funções de passe para os testes. Contam execuções num vetor compartilhado.
-std::vector<const char*>* g_execLog = nullptr;
-void record_pass_a(FrameGraph&, void*, CommandList&) { if (g_execLog) g_execLog->push_back("a"); }
-void record_pass_b(FrameGraph&, void*, CommandList&) { if (g_execLog) g_execLog->push_back("b"); }
-void record_pass_c(FrameGraph&, void*, CommandList&) { if (g_execLog) g_execLog->push_back("c"); }
-
-TextureDesc tex_desc(u32 w, u32 h) {
+TextureDesc rt(u32 w = 64, u32 h = 64) {
     TextureDesc d;
     d.width = w;
     d.height = h;
     d.format = SurfaceFormat::RGBA16F;
-    d.sampled = true;
     d.renderTarget = true;
+    d.sampled = true;
     return d;
 }
 
+struct GraphFixture {
+    MockBackend backend;
+    TransientTexturePool pool;
+    FrameGraph graph;
+
+    Status run() {
+        FrameBegin fb;
+        (void)backend.begin_frame(fb);
+        pool.begin_frame(backend, fb.frameNumber);
+        const Status s = graph.compile(pool);
+        if (s.ok()) graph.execute(*fb.commands, false);
+        graph.release(pool);
+        pool.end_frame();
+        (void)backend.end_frame();
+        return s;
+    }
+};
+
+u32 first_event(const MockBackend& b, MockBackend::Event::Kind k, u64 tex) {
+    for (u32 i = 0; i < b.events.size(); ++i) {
+        if (b.events[i].kind == k && b.events[i].texture == tex) return i;
+    }
+    return kInvalidIndex;
+}
+
 } // namespace
 
-// -----------------------------------------------------------------------------
+// =============================================================================
 // FrameGraph
-// -----------------------------------------------------------------------------
-AUREA_TEST(FrameGraph, EmptyGraphReportsNothing) {
-    FakeBackend backend;
-    FrameGraph g;
-    AUREA_CHECK(g.pass_count() == 0);
-    AUREA_CHECK(g.resource_count() == 0);
-    AUREA_CHECK(g.compile(backend).ok());
+// =============================================================================
+AUREA_TEST(FrameGraph, OrderFollowsDependenciesNotDeclaration) {
+    GraphFixture f;
+    const FGTexture x = f.graph.create_texture("x", rt());
+    const FGTexture y = f.graph.create_texture("y", rt());
+    // B é declarado ANTES de A, mas lê o que A escreve.
+    const u32 b = f.graph.add_raster_pass("B", PassStage::Effects, y, LoadOp::Clear, {}, [](PassContext&) {});
+    f.graph.read(b, x);
+    const u32 a = f.graph.add_raster_pass("A", PassStage::Effects, x, LoadOp::Clear, {}, [](PassContext&) {});
+    f.graph.set_output(y, ResourceState::ShaderRead);
+    AUREA_CHECK(f.run().ok());
+    AUREA_CHECK_EQ(f.graph.order().size(), static_cast<usize>(2));
+    AUREA_CHECK_EQ(f.graph.order()[0], a);
+    AUREA_CHECK_EQ(f.graph.order()[1], b);
 }
 
-AUREA_TEST(FrameGraph, CullsPassesThatFeedNothing) {
-    FakeBackend backend;
-    FrameGraph g;
-    const u32 res = g.create_texture("x", tex_desc(64, 64));
-    const u32 a = g.add_pass("a", PassStage::Effects, record_pass_a, nullptr);
-    g.pass_writes(a, res);
-    // Nenhuma saída declarada: o passe não contribui para nada e é podado.
-    // Sem isso, cada camada invisível ainda pagaria decode e efeitos.
-    AUREA_CHECK(g.compile(backend).ok());
-    AUREA_CHECK_EQ(g.culled_count(), static_cast<u32>(1));
+AUREA_TEST(FrameGraph, PassWithoutReaderIsCulled) {
+    GraphFixture f;
+    const FGTexture out = f.graph.create_texture("saida", rt());
+    const FGTexture orphan = f.graph.create_texture("orfa", rt());
+    (void)f.graph.add_raster_pass("util", PassStage::Composite, out, LoadOp::Clear, {}, [](PassContext&) {});
+    (void)f.graph.add_raster_pass("ninguem-le", PassStage::Effects, orphan, LoadOp::Clear, {}, [](PassContext&) {});
+    f.graph.set_output(out, ResourceState::ShaderRead);
+    AUREA_CHECK(f.run().ok());
+    AUREA_CHECK_EQ(f.graph.stats().passesCulled, static_cast<u32>(1));
+    AUREA_CHECK_EQ(f.graph.stats().passesExecuted, static_cast<u32>(1));
+    // Recurso de passe podado não aloca textura.
+    AUREA_CHECK_EQ(f.graph.stats().transientTextures, static_cast<u32>(1));
 }
 
-AUREA_TEST(FrameGraph, KeepsPassesReachingOutput) {
-    FakeBackend backend;
-    FrameGraph g;
-    const u32 res = g.create_texture("saida", tex_desc(64, 64));
-    const u32 a = g.add_pass("a", PassStage::Effects, record_pass_a, nullptr);
-    g.pass_writes(a, res);
-    g.set_output(res);
-
-    AUREA_CHECK(g.compile(backend).ok());
-    AUREA_CHECK_EQ(g.culled_count(), static_cast<u32>(0));
-    AUREA_CHECK_EQ(g.execution_order().size(), static_cast<usize>(1));
+AUREA_TEST(FrameGraph, TextureMemoryIsReusedWhenLifetimesDoNotOverlap) {
+    // A textura A morre no passe 2; a mesma memória vira a textura C no 3.
+    GraphFixture g;
+    const FGTexture a = g.graph.create_texture("t1", rt());
+    const FGTexture b = g.graph.create_texture("t2", rt());
+    const FGTexture c = g.graph.create_texture("t3", rt());
+    (void)g.graph.add_raster_pass("p1", PassStage::Effects, a, LoadOp::Clear, {}, [](PassContext&) {});
+    const u32 q2 = g.graph.add_raster_pass("p2", PassStage::Effects, b, LoadOp::DontCare, {}, [](PassContext&) {});
+    g.graph.read(q2, a);
+    const u32 q3 = g.graph.add_raster_pass("p3", PassStage::Effects, c, LoadOp::DontCare, {}, [](PassContext&) {});
+    g.graph.read(q3, b);
+    g.graph.set_output(c, ResourceState::ShaderRead);
+    FrameBegin fb;
+    (void)g.backend.begin_frame(fb);
+    g.pool.begin_frame(g.backend, 1);
+    AUREA_CHECK(g.graph.compile(g.pool).ok());
+    AUREA_CHECK_EQ(g.graph.stats().transientTextures, static_cast<u32>(3));
+    AUREA_CHECK_EQ(g.graph.stats().physicalTextures, static_cast<u32>(2));
+    AUREA_CHECK_EQ(g.graph.stats().aliasedTextures, static_cast<u32>(1));
+    AUREA_CHECK_EQ(g.graph.physical_slot(a), g.graph.physical_slot(c));
+    AUREA_CHECK(g.graph.physical_slot(a) != g.graph.physical_slot(b));
+    g.graph.release(g.pool);
 }
 
-AUREA_TEST(FrameGraph, DependencyOrderOverridesDeclarationOrder) {
-    // O grafo ordena por dependência, não por declaração. Declarar B antes de A
-    // e ainda assim executar A primeiro é o teste que prova isso.
-    FakeBackend backend;
-    FrameGraph g;
-    const u32 mid = g.create_texture("intermediario", tex_desc(64, 64));
-    const u32 out = g.create_texture("saida", tex_desc(64, 64));
-
-    const u32 b = g.add_pass("b", PassStage::Composite, record_pass_b, nullptr);
-    g.pass_reads(b, mid);
-    g.pass_writes(b, out);
-
-    const u32 a = g.add_pass("a", PassStage::Effects, record_pass_a, nullptr);
-    g.pass_writes(a, mid);
-
-    g.set_output(out);
-    AUREA_CHECK(g.compile(backend).ok());
-
-    const std::vector<u32>& order = g.execution_order();
-    AUREA_CHECK_EQ(order.size(), static_cast<usize>(2));
-    AUREA_CHECK_EQ(order[0], a);
-    AUREA_CHECK_EQ(order[1], b);
+AUREA_TEST(FrameGraph, OverlappingLifetimesNeverShareMemory) {
+    GraphFixture g;
+    const FGTexture a = g.graph.create_texture("a", rt());
+    const FGTexture b = g.graph.create_texture("b", rt());
+    const FGTexture c = g.graph.create_texture("c", rt());
+    (void)g.graph.add_raster_pass("p1", PassStage::Effects, a, LoadOp::Clear, {}, [](PassContext&) {});
+    const u32 p2 = g.graph.add_raster_pass("p2", PassStage::Effects, b, LoadOp::DontCare, {}, [](PassContext&) {});
+    g.graph.read(p2, a);
+    const u32 p3 = g.graph.add_raster_pass("p3", PassStage::Effects, c, LoadOp::DontCare, {}, [](PassContext&) {});
+    g.graph.read(p3, b);
+    g.graph.read(p3, a);   // `a` ainda vivo quando `c` nasce
+    g.graph.set_output(c, ResourceState::ShaderRead);
+    FrameBegin fb;
+    (void)g.backend.begin_frame(fb);
+    g.pool.begin_frame(g.backend, 1);
+    AUREA_CHECK(g.graph.compile(g.pool).ok());
+    AUREA_CHECK_EQ(g.graph.stats().physicalTextures, static_cast<u32>(3));
+    AUREA_CHECK(g.graph.physical_slot(a) != g.graph.physical_slot(c));
+    g.graph.release(g.pool);
 }
 
-AUREA_TEST(FrameGraph, ExecuteRunsInResolvedOrder) {
-    FakeBackend backend;
-    FakeCommandList cmds;
-    FrameGraph g;
-
-    const u32 mid = g.create_texture("m", tex_desc(4, 4));
-    const u32 out = g.create_texture("o", tex_desc(4, 4));
-    const u32 a = g.add_pass("a", PassStage::Effects, record_pass_a, nullptr);
-    g.pass_writes(a, mid);
-    const u32 b = g.add_pass("b", PassStage::Composite, record_pass_b, nullptr);
-    g.pass_reads(b, mid);
-    g.pass_writes(b, out);
-    g.set_output(out);
-
-    AUREA_CHECK(g.compile(backend).ok());
-
-    std::vector<const char*> log;
-    g_execLog = &log;
-    g.execute(cmds);
-    g_execLog = nullptr;
-
-    AUREA_CHECK_EQ(log.size(), static_cast<usize>(2));
-    AUREA_CHECK_EQ(std::strcmp(log[0], "a"), 0);
-    AUREA_CHECK_EQ(std::strcmp(log[1], "b"), 0);
+AUREA_TEST(FrameGraph, DifferentShapesNeverAlias) {
+    GraphFixture g;
+    const FGTexture a = g.graph.create_texture("a", rt(64, 64));
+    const FGTexture b = g.graph.create_texture("b", rt(32, 32));
+    const FGTexture c = g.graph.create_texture("c", rt(32, 64));
+    (void)g.graph.add_raster_pass("p1", PassStage::Effects, a, LoadOp::Clear, {}, [](PassContext&) {});
+    const u32 p2 = g.graph.add_raster_pass("p2", PassStage::Effects, b, LoadOp::DontCare, {}, [](PassContext&) {});
+    g.graph.read(p2, a);
+    const u32 p3 = g.graph.add_raster_pass("p3", PassStage::Effects, c, LoadOp::DontCare, {}, [](PassContext&) {});
+    g.graph.read(p3, b);
+    g.graph.set_output(c, ResourceState::ShaderRead);
+    FrameBegin fb;
+    (void)g.backend.begin_frame(fb);
+    g.pool.begin_frame(g.backend, 1);
+    AUREA_CHECK(g.graph.compile(g.pool).ok());
+    AUREA_CHECK_EQ(g.graph.stats().aliasedTextures, static_cast<u32>(0));
+    g.graph.release(g.pool);
 }
 
-AUREA_TEST(FrameGraph, AliasesResourcesWithDisjointLifetimes) {
-    // Dois intermediários que nunca coexistem dividem uma textura física. Numa
-    // cadeia de 8 efeitos sobre 4K isso é a diferença entre ~600 MB e ~150 MB
-    // de pico — entre rodar e ser morto pelo sistema.
-    FakeBackend backend;
-    FrameGraph g;
+AUREA_TEST(FrameGraph, BarriersComeBeforeEveryUse) {
+    GraphFixture f;
+    const FGTexture t1 = f.graph.create_texture("t1", rt());
+    const FGTexture t2 = f.graph.create_texture("t2", rt());
+    (void)f.graph.add_raster_pass("p1", PassStage::Effects, t1, LoadOp::Clear, {}, [](PassContext&) {});
+    const u32 p2 = f.graph.add_raster_pass("p2", PassStage::Effects, t2, LoadOp::Clear, {}, [](PassContext&) {});
+    f.graph.read(p2, t1);
+    f.graph.set_output(t2, ResourceState::ShaderRead);
+    AUREA_CHECK(f.run().ok());
 
-    const u32 r1 = g.create_texture("etapa1", tex_desc(128, 128));
-    const u32 r2 = g.create_texture("etapa2", tex_desc(128, 128));
-    const u32 out = g.create_texture("saida", tex_desc(128, 128));
-
-    const u32 a = g.add_pass("a", PassStage::Effects, record_pass_a, nullptr);
-    g.pass_writes(a, r1);
-    const u32 b = g.add_pass("b", PassStage::Effects, record_pass_b, nullptr);
-    g.pass_reads(b, r1);
-    g.pass_writes(b, r2);
-    const u32 c = g.add_pass("c", PassStage::Composite, record_pass_c, nullptr);
-    g.pass_reads(c, r2);
-    g.pass_writes(c, out);
-    g.set_output(out);
-
-    AUREA_CHECK(g.compile(backend).ok());
-    // Quatro recursos lógicos (r1, r2, out, e o alvo físico compartilhado), mas
-    // menos texturas físicas — a prova de que o aliasing aconteceu.
-    AUREA_CHECK(g.physical_resource_count() <= g.resource_count());
+    const auto& ev = f.backend.events;
+    const u64 id1 = f.backend.textures.size() >= 1 ? 1 : 0;
+    // t1: vira anexo (descartando) antes do render pass dele...
+    const u32 barrierAttach = first_event(f.backend, MockBackend::Event::Barrier, id1);
+    const u32 pass1 = first_event(f.backend, MockBackend::Event::BeginPass, id1);
+    AUREA_CHECK(barrierAttach < pass1);
+    AUREA_CHECK(ev[barrierAttach].state == ResourceState::ColorAttachment);
+    AUREA_CHECK(ev[barrierAttach].discard);
+    // ...e vira leitura de shader antes do passe que o lê.
+    bool readBarrier = false;
+    for (u32 i = pass1; i < ev.size(); ++i) {
+        if (ev[i].kind == MockBackend::Event::Barrier && ev[i].texture == id1
+            && ev[i].state == ResourceState::ShaderRead) {
+            readBarrier = true;
+            // Nenhum render pass aberto no momento da barreira.
+            u32 open = 0;
+            for (u32 k = 0; k < i; ++k) {
+                if (ev[k].kind == MockBackend::Event::BeginPass) ++open;
+                if (ev[k].kind == MockBackend::Event::EndPass) --open;
+            }
+            AUREA_CHECK_EQ(open, static_cast<u32>(0));
+            break;
+        }
+    }
+    AUREA_CHECK(readBarrier);
 }
 
-AUREA_TEST(FrameGraph, PersistentResourcesAreNeverAliased) {
-    // Um recurso de histórico precisa sobreviver ao frame. Se fosse aliado, o
-    // efeito temporal leria o próprio resultado do frame anterior misturado com
-    // o de outro passe.
-    FakeBackend backend;
-    FrameGraph g;
-    const u32 hist = g.create_persistent_texture("historico", tex_desc(64, 64));
-    const u32 out = g.create_texture("saida", tex_desc(64, 64));
-
-    const u32 a = g.add_pass("a", PassStage::Effects, record_pass_a, nullptr);
-    g.pass_reads_writes(a, hist);
-    const u32 b = g.add_pass("b", PassStage::Composite, record_pass_b, nullptr);
-    g.pass_reads(b, hist);
-    g.pass_writes(b, out);
-    g.set_output(out);
-    AUREA_CHECK(g.compile(backend).ok());
-
-    AUREA_CHECK(g.texture(hist).valid());
-    AUREA_CHECK(g.texture(out).valid());
-    AUREA_CHECK(g.texture(hist) != g.texture(out));
+AUREA_TEST(FrameGraph, OutputEndsInTheRequestedState) {
+    GraphFixture f;
+    TextureDesc bb;
+    bb.width = 100;
+    bb.height = 50;
+    bb.format = SurfaceFormat::RGBA8;
+    const FGTexture swap = f.graph.import_texture("swapchain", TextureHandle{777}, bb);
+    (void)f.graph.add_raster_pass("saida", PassStage::Output, swap, LoadOp::Clear, {}, [](PassContext&) {});
+    f.graph.set_output(swap, ResourceState::Present);
+    AUREA_CHECK(f.run().ok());
+    const auto& last = f.backend.events.back();
+    AUREA_CHECK(last.kind == MockBackend::Event::Barrier);
+    AUREA_CHECK_EQ(last.texture, static_cast<u64>(777));
+    AUREA_CHECK(last.state == ResourceState::Present);
 }
 
-AUREA_TEST(FrameGraph, RecompileIsSkippedWhenRevisionUnchanged) {
-    // Durante o playback a topologia é a mesma em quase todo frame. Recompilar
-    // seria trabalho puro — o que muda são os PARÂMETROS, não os passes.
-    FakeBackend backend;
-    FrameGraph g;
-    const u32 out = g.create_texture("saida", tex_desc(32, 32));
-    const u32 a = g.add_pass("a", PassStage::Composite, record_pass_a, nullptr);
-    g.pass_writes(a, out);
-    g.set_output(out);
-
-    AUREA_CHECK(g.compile(backend).ok());
-    const u64 rev = g.revision();
-    AUREA_CHECK(g.compile(backend).ok());
-    AUREA_CHECK_EQ(g.revision(), rev);
+AUREA_TEST(FrameGraph, CycleIsRejected) {
+    GraphFixture f;
+    const FGTexture x = f.graph.create_texture("x", rt());
+    const FGTexture y = f.graph.create_texture("y", rt());
+    const u32 a = f.graph.add_raster_pass("A", PassStage::Effects, x, LoadOp::Clear, {}, [](PassContext&) {});
+    f.graph.read(a, y);
+    const u32 b = f.graph.add_raster_pass("B", PassStage::Effects, y, LoadOp::Clear, {}, [](PassContext&) {});
+    f.graph.read(b, x);
+    f.graph.set_output(x, ResourceState::ShaderRead);
+    AUREA_CHECK(!f.run().ok());
 }
 
-AUREA_TEST(FrameGraph, ResetKeepsPhysicalResources) {
-    // Realocar 4K a 60 Hz seria o gargalo dominante do editor: os recursos
-    // físicos sobrevivem ao reset do frame.
-    FakeBackend backend;
-    FrameGraph g;
-    const u32 out = g.create_texture("saida", tex_desc(64, 64));
-    const u32 a = g.add_pass("a", PassStage::Composite, record_pass_a, nullptr);
-    g.pass_writes(a, out);
-    g.set_output(out);
-    AUREA_CHECK(g.compile(backend).ok());
-    const TextureHandle first = g.texture(out);
-
-    g.reset();
-    const u32 out2 = g.create_texture("saida", tex_desc(64, 64));
-    const u32 a2 = g.add_pass("a", PassStage::Composite, record_pass_a, nullptr);
-    g.pass_writes(a2, out2);
-    g.set_output(out2);
-    AUREA_CHECK(g.compile(backend).ok());
-
-    AUREA_CHECK(g.texture(out2) == first);
-    AUREA_CHECK_EQ(backend.texturesCreated, static_cast<u32>(1));
+AUREA_TEST(FrameGraph, ReadingBeforeWritingIsRejected) {
+    GraphFixture f;
+    const FGTexture never = f.graph.create_texture("nunca-escrita", rt());
+    const FGTexture out = f.graph.create_texture("saida", rt());
+    const u32 p = f.graph.add_raster_pass("le", PassStage::Effects, out, LoadOp::Clear, {}, [](PassContext&) {});
+    f.graph.read(p, never);
+    f.graph.set_output(out, ResourceState::ShaderRead);
+    AUREA_CHECK(!f.run().ok());
 }
 
-AUREA_TEST(FrameGraph, ImportedResourcesAreNotAllocated) {
-    FakeBackend backend;
-    FrameGraph g;
-    const u32 ext = g.import_texture("backbuffer", TextureHandle{777});
-    const u32 a = g.add_pass("a", PassStage::Composite, record_pass_a, nullptr);
-    g.pass_writes(a, ext);
-    g.set_output(ext);
-
-    AUREA_CHECK(g.compile(backend).ok());
-    AUREA_CHECK_EQ(backend.texturesCreated, static_cast<u32>(0));
-    AUREA_CHECK_EQ(g.texture(ext).id, static_cast<u64>(777));
+AUREA_TEST(FrameGraph, LoadOpLoadKeepsThePreviousWriterAlive) {
+    GraphFixture f;
+    const FGTexture t = f.graph.create_texture("acumula", rt());
+    const u32 a = f.graph.add_raster_pass("limpa", PassStage::Composite, t, LoadOp::Clear, {}, [](PassContext&) {});
+    const u32 b = f.graph.add_raster_pass("soma", PassStage::Composite, t, LoadOp::Load, {}, [](PassContext&) {});
+    f.graph.set_output(t, ResourceState::ShaderRead);
+    AUREA_CHECK(f.run().ok());
+    AUREA_CHECK_EQ(f.graph.stats().passesExecuted, static_cast<u32>(2));
+    AUREA_CHECK_EQ(f.graph.order()[0], a);
+    AUREA_CHECK_EQ(f.graph.order()[1], b);
 }
 
-AUREA_TEST(FrameGraph, FindByNameWorks) {
-    FrameGraph g;
-    (void)g.create_texture("alvo-nomeado", tex_desc(8, 8));
-    (void)g.add_pass("passe-nomeado", PassStage::Effects, record_pass_a, nullptr);
-    AUREA_CHECK(g.find_resource("alvo-nomeado") != kInvalidIndex);
-    AUREA_CHECK(g.find_resource("nao-existe") == kInvalidIndex);
-    AUREA_CHECK(g.find_pass("passe-nomeado") != kInvalidIndex);
+AUREA_TEST(FrameGraph, SteadyStateCreatesNoTextures) {
+    // Playback: o mesmo grafo frame após frame NÃO cria nem destrói textura.
+    MockBackend backend;
+    TransientTexturePool pool;
+    FrameGraph graph;
+    u32 createdAfterWarmup = 0;
+    for (u32 frame = 1; frame <= 10; ++frame) {
+        graph.reset();
+        const FGTexture a = graph.create_texture("a", rt(128, 72));
+        const FGTexture b = graph.create_texture("b", rt(64, 36));
+        const FGTexture c = graph.create_texture("c", rt(128, 72));
+        (void)graph.add_raster_pass("p1", PassStage::Effects, a, LoadOp::Clear, {}, [](PassContext&) {});
+        const u32 p2 = graph.add_raster_pass("p2", PassStage::Effects, b, LoadOp::DontCare, {}, [](PassContext&) {});
+        graph.read(p2, a);
+        const u32 p3 = graph.add_raster_pass("p3", PassStage::Effects, c, LoadOp::DontCare, {}, [](PassContext&) {});
+        graph.read(p3, b);
+        graph.set_output(c, ResourceState::ShaderRead);
+        FrameBegin fb;
+        (void)backend.begin_frame(fb);
+        pool.begin_frame(backend, frame);
+        AUREA_CHECK(graph.compile(pool).ok());
+        graph.execute(*fb.commands, false);
+        graph.release(pool);
+        pool.end_frame();
+        (void)backend.end_frame();
+        if (frame == 1) createdAfterWarmup = backend.texturesCreated;
+        if (frame > 1) AUREA_CHECK_EQ(pool.stats().createdThisFrame, static_cast<u32>(0));
+    }
+    AUREA_CHECK_EQ(backend.texturesCreated, createdAfterWarmup);
+    AUREA_CHECK_EQ(backend.texturesDestroyed, static_cast<u32>(0));
 }
 
-AUREA_TEST(FrameGraph, ReleaseGpuResourcesClearsHandles) {
-    FakeBackend backend;
-    FrameGraph g;
-    const u32 out = g.create_texture("saida", tex_desc(64, 64));
-    const u32 a = g.add_pass("a", PassStage::Composite, record_pass_a, nullptr);
-    g.pass_writes(a, out);
-    g.set_output(out);
-    AUREA_CHECK(g.compile(backend).ok());
-
-    // Dispositivo perdido: os handles do driver antigo morreram.
-    g.release_gpu_resources(backend);
-    AUREA_CHECK(!g.texture(out).valid());
-    AUREA_CHECK_EQ(g.physical_resource_count(), static_cast<u32>(0));
+AUREA_TEST(FrameGraph, PoolDestroysTexturesLeftIdle) {
+    MockBackend backend;
+    TransientTexturePool pool(5);
+    pool.begin_frame(backend, 1);
+    const TextureHandle t = pool.acquire(rt());
+    pool.release(t);
+    pool.end_frame();
+    for (u64 f = 2; f < 10; ++f) {
+        pool.begin_frame(backend, f);
+        pool.end_frame();
+    }
+    AUREA_CHECK_EQ(backend.texturesDestroyed, static_cast<u32>(1));
+    AUREA_CHECK_EQ(pool.stats().alive, static_cast<u32>(0));
 }
 
-// -----------------------------------------------------------------------------
-// EffectRegistry + EffectCompiler
-// -----------------------------------------------------------------------------
+// =============================================================================
+// EffectGraph — planejamento
+// =============================================================================
 namespace {
 
-const EffectParamDesc kBlurParams[] = {
-    {"Raio", EffectParamType::Float, 0.0f, 200.0f, 0.0f, 0, nullptr},
-    {"Intensidade", EffectParamType::Float, 0.0f, 2.0f, 1.0f, 0, nullptr},
+struct FakeResources final : EffectResources {
+    TextureHandle curve_lut(const CurveData&) noexcept override { return TextureHandle{4242}; }
 };
-const EffectDesc kBlurDesc{"Desfoque", "Desfoque", 2, kBlurParams, 3, true, 8, 16};
 
-const EffectParamDesc kColorParams[] = {
-    {"Exposicao", EffectParamType::Float, -4.0f, 4.0f, 0.0f, 0, nullptr},
-    {"Contraste", EffectParamType::Float, 0.0f, 4.0f, 1.0f, 0, nullptr},
-    {"Saturacao", EffectParamType::Float, 0.0f, 4.0f, 1.0f, 0, nullptr},
-};
-const EffectDesc kColorDesc{"Correcao de cor", "Cor", 3, kColorParams, 1, true, 0, 0};
-
-const EffectParamDesc kEchoParams[] = {
-    {"Ecos", EffectParamType::Float, 0.0f, 16.0f, 0.0f, 0, nullptr},
-};
-const EffectDesc kEchoDesc{"Eco", "Temporal", 1, kEchoParams, 4, false, 4, 16};
-
-const EffectParamDesc kDisplaceParams[] = {
-    {"Forca", EffectParamType::Float, 0.0f, 1.0f, 0.0f, 0, nullptr},
-};
-const EffectDesc kDisplaceDesc{"Deslocamento", "Distorcao", 1, kDisplaceParams, 2, false, 0, 0};
-
-void build_registry(EffectRegistry& reg) {
-    (void)reg.register_effect(&kBlurDesc, EffectClass::Neighborhood, 0);
-    (void)reg.register_effect(&kColorDesc, EffectClass::PerPixel, 1);
-    (void)reg.register_effect(&kEchoDesc, EffectClass::Temporal, 2);
-    (void)reg.register_effect(&kDisplaceDesc, EffectClass::Domain, 3);
-}
-
-Effect make_effect(u16 type, f32 param0) {
-    Effect e;
-    e.type = type;
-    e.enabled = true;
-    e.floats[0] = param0;
-    e.floats[1] = 1.0f;
-    e.floats[2] = 1.0f;
+EffectInstance make_effect(const EffectRegistry& reg, const char* key, u32 id) {
+    EffectInstance e;
+    e.id = id;
+    e.type = effect_type_id(key);
+    initialize_instance(e, *reg.params(e.type));
     return e;
 }
 
+LayerPlacement placement(u32 w = 1920, u32 h = 1080) {
+    LayerPlacement p;
+    p.compWidth = w;
+    p.compHeight = h;
+    p.layerWidth = w;
+    p.layerHeight = h;
+    return p;
+}
+
 } // namespace
 
-AUREA_TEST(EffectRegistry, RegisterAndLookup) {
+AUREA_TEST(EffectGraph, ConsecutivePerPixelEffectsFuseIntoOnePass) {
     EffectRegistry reg;
-    build_registry(reg);
-    AUREA_CHECK_EQ(reg.count(), static_cast<u32>(4));
-    AUREA_CHECK(reg.description(0) != nullptr);
-    AUREA_CHECK_EQ(reg.classification(2), EffectClass::Temporal);
-    AUREA_CHECK(reg.find("Eco") == 2u);
-    AUREA_CHECK(reg.find("nao existe") == kInvalidIndex);
-}
+    register_builtin_effects(reg);
+    Layer l;
+    l.effects.push_back(make_effect(reg, effect_keys::kExposure, 0));
+    l.effects.back().params[0].constant.v[0] = 1.0f;
+    l.effects.push_back(make_effect(reg, effect_keys::kBrightnessContrast, 1));
+    l.effects.back().params[1].constant.v[0] = 30.0f;
+    l.effects.push_back(make_effect(reg, effect_keys::kSaturation, 2));
+    l.effects.back().params[0].constant.v[0] = 20.0f;
+    l.effects.push_back(make_effect(reg, effect_keys::kTint, 3));
 
-AUREA_TEST(EffectRegistry, DuplicateRegistrationIsRefused) {
-    EffectRegistry reg;
-    AUREA_CHECK(reg.register_effect(&kBlurDesc, EffectClass::Neighborhood, 0).ok());
-    AUREA_CHECK(!reg.register_effect(&kColorDesc, EffectClass::PerPixel, 0).ok());
-}
-
-AUREA_TEST(EffectCompiler, EmptyChainProducesNoPasses) {
-    EffectRegistry reg;
-    build_registry(reg);
-    std::vector<Effect> effects;
-    TrackSet tracks;
     EffectPlan plan;
-    AUREA_CHECK(EffectCompiler::compile(effects, tracks, FrameIndex{0}, reg,
-                                        1920, 1080, true, plan).ok());
-    AUREA_CHECK_EQ(plan.pass_count(), static_cast<u32>(0));
+    EffectGraph::plan(l, reg, FrameIndex{0}, 1.0f, placement(), nullptr, plan);
+    AUREA_CHECK_EQ(plan.stages.size(), static_cast<usize>(1));
+    AUREA_CHECK(plan.stages[0].kind == EffectStage::Kind::FusedColor);
+    AUREA_CHECK_EQ(plan.stages[0].count, static_cast<u32>(4));
+    AUREA_CHECK_EQ(plan.fusedEffects, static_cast<u32>(4));
 }
 
-AUREA_TEST(EffectCompiler, ConsecutivePerPixelFuseIntoOnePass) {
-    // O caso que motiva todo o sistema: exposição + contraste + saturação são
-    // uma leitura e uma escrita, não três. Três passes sobre 4K RGBA16F seriam
-    // ~200 MB de tráfego de memória por frame só nesse trecho.
+AUREA_TEST(EffectGraph, NeutralEffectsCostNothing) {
     EffectRegistry reg;
-    build_registry(reg);
-
-    std::vector<Effect> effects;
-    effects.push_back(make_effect(1, 0.5f));
-    effects.push_back(make_effect(1, 1.2f));
-    effects.push_back(make_effect(1, 1.1f));
-
-    TrackSet tracks;
+    register_builtin_effects(reg);
+    Layer l;
+    l.effects.push_back(make_effect(reg, effect_keys::kGaussianBlur, 0));   // raio 0
+    l.effects.push_back(make_effect(reg, effect_keys::kLevels, 1));         // padrões
+    l.effects.push_back(make_effect(reg, effect_keys::kExposure, 2));       // 0 stops
     EffectPlan plan;
-    AUREA_CHECK(EffectCompiler::compile(effects, tracks, FrameIndex{0}, reg,
-                                        1920, 1080, true, plan).ok());
-
-    AUREA_CHECK_EQ(plan.pass_count(), static_cast<u32>(1));
-    AUREA_CHECK_EQ(plan.stages[0].effectIndices.size(), static_cast<usize>(3));
-    AUREA_CHECK_EQ(plan.stages[0].sampleCount, static_cast<u32>(1));
+    EffectGraph::plan(l, reg, FrameIndex{0}, 1.0f, placement(), nullptr, plan);
+    AUREA_CHECK(plan.empty());
+    AUREA_CHECK_EQ(plan.droppedIdentity, static_cast<u32>(3));
 }
 
-AUREA_TEST(EffectCompiler, NeighborhoodProducesTwoPassesWhenSeparable) {
-    // Um gaussiano separável é H + V: 2*N taps em vez de N².
+AUREA_TEST(EffectGraph, NeighborhoodBreaksTheFusionRun) {
     EffectRegistry reg;
-    build_registry(reg);
-
-    std::vector<Effect> effects;
-    effects.push_back(make_effect(0, 12.0f));
-
-    TrackSet tracks;
+    register_builtin_effects(reg);
+    Layer l;
+    l.effects.push_back(make_effect(reg, effect_keys::kExposure, 0));
+    l.effects.back().params[0].constant.v[0] = 0.5f;
+    l.effects.push_back(make_effect(reg, effect_keys::kGaussianBlur, 1));
+    l.effects.back().params[0].constant.v[0] = 12.0f;
+    l.effects.push_back(make_effect(reg, effect_keys::kSaturation, 2));
+    l.effects.back().params[0].constant.v[0] = -50.0f;
     EffectPlan plan;
-    AUREA_CHECK(EffectCompiler::compile(effects, tracks, FrameIndex{0}, reg,
-                                        1920, 1080, true, plan).ok());
-
-    AUREA_CHECK_EQ(plan.pass_count(), static_cast<u32>(2));
-    AUREA_CHECK(plan.stages[0].name.find("-h") != std::string::npos);
-    AUREA_CHECK(plan.stages[1].name.find("-v") != std::string::npos);
+    EffectGraph::plan(l, reg, FrameIndex{0}, 1.0f, placement(), nullptr, plan);
+    AUREA_CHECK_EQ(plan.stages.size(), static_cast<usize>(3));
+    AUREA_CHECK(plan.stages[0].kind == EffectStage::Kind::FusedColor);
+    AUREA_CHECK(plan.stages[1].kind == EffectStage::Kind::Single);
+    AUREA_CHECK(plan.stages[2].kind == EffectStage::Kind::FusedColor);
+    // O passe de cor ANTES do blur precisa deixar a margem que o blur lê.
+    AUREA_CHECK_NEAR(plan.stages[0].margin, 12.0f, 1e-4);
+    AUREA_CHECK_NEAR(plan.stages[2].margin, 0.0f, 1e-4);
 }
 
-AUREA_TEST(EffectCompiler, TemporalEffectAlwaysGetsItsOwnPass) {
+AUREA_TEST(EffectGraph, FusedPassHasAnOperationLimit) {
     EffectRegistry reg;
-    build_registry(reg);
-
-    std::vector<Effect> effects;
-    effects.push_back(make_effect(2, 4.0f));   // eco
-    effects.push_back(make_effect(1, 0.5f));   // correcao
-
-    TrackSet tracks;
+    register_builtin_effects(reg);
+    Layer l;
+    for (u32 i = 0; i < 14; ++i) {
+        l.effects.push_back(make_effect(reg, effect_keys::kExposure, i));
+        l.effects.back().params[0].constant.v[0] = 0.1f;
+    }
     EffectPlan plan;
-    AUREA_CHECK(EffectCompiler::compile(effects, tracks, FrameIndex{0}, reg,
-                                        1920, 1080, true, plan).ok());
-
-    // O temporal NÃO funde com o per-pixel seguinte: ele precisa do frame
-    // anterior e de um recurso persistente, e misturá-los produziria imagem
-    // diferente do que o usuário vê no painel.
-    AUREA_CHECK_EQ(plan.pass_count(), static_cast<u32>(2));
-    AUREA_CHECK_EQ(plan.stages[0].cls, EffectClass::Temporal);
-    AUREA_CHECK(plan.stages[0].requiresHistory);
-    AUREA_CHECK_EQ(plan.stages[1].cls, EffectClass::PerPixel);
+    EffectGraph::plan(l, reg, FrameIndex{0}, 1.0f, placement(), nullptr, plan);
+    AUREA_CHECK_EQ(plan.stages.size(), static_cast<usize>(2));
+    AUREA_CHECK_EQ(plan.stages[0].count, kMaxFusedColorOps);
+    AUREA_CHECK_EQ(plan.stages[1].count, static_cast<u32>(2));
+    AUREA_CHECK(!plan.blockers.empty());
 }
 
-AUREA_TEST(EffectCompiler, DomainEffectBreaksTheFusionRun) {
+AUREA_TEST(EffectGraph, OneCurveLutPerFusedPass) {
     EffectRegistry reg;
-    build_registry(reg);
-
-    std::vector<Effect> effects;
-    effects.push_back(make_effect(1, 0.5f));   // per-pixel
-    effects.push_back(make_effect(3, 0.5f));   // deslocamento (dominio)
-    effects.push_back(make_effect(1, 0.5f));   // per-pixel
-
-    TrackSet tracks;
+    register_builtin_effects(reg);
+    FakeResources res;
+    Layer l;
+    for (u32 i = 0; i < 2; ++i) {
+        l.effects.push_back(make_effect(reg, effect_keys::kCurves, i));
+        l.effects.back().curves[0].channel[0] = {{0, 0}, {0.5f, 0.6f}, {1, 1}};
+    }
     EffectPlan plan;
-    AUREA_CHECK(EffectCompiler::compile(effects, tracks, FrameIndex{0}, reg,
-                                        1920, 1080, true, plan).ok());
-
-    // Três etapas: o deslocamento muda o domínio da imagem, então o que vem
-    // depois não pode ser fundido com o que vem antes.
-    AUREA_CHECK_EQ(plan.pass_count(), static_cast<u32>(3));
+    EffectGraph::plan(l, reg, FrameIndex{0}, 1.0f, placement(), &res, plan);
+    AUREA_CHECK_EQ(plan.stages.size(), static_cast<usize>(2));
+    AUREA_CHECK_EQ(plan.colorOps[0].lut.id, static_cast<u64>(4242));
 }
 
-AUREA_TEST(EffectCompiler, NeutralEffectIsDropped) {
+AUREA_TEST(EffectGraph, TransformAtTheEndIsFoldedIntoTheComposite) {
+    // Transform no fim da pilha não cria textura: vira matriz da composição.
     EffectRegistry reg;
-    build_registry(reg);
-
-    std::vector<Effect> effects;
-    effects.push_back(make_effect(0, 0.0f));   // desfoque com raio 0: nao muda nada
-
-    TrackSet tracks;
+    register_builtin_effects(reg);
+    Layer l;
+    l.effects.push_back(make_effect(reg, effect_keys::kExposure, 0));
+    l.effects.back().params[0].constant.v[0] = 1.0f;
+    l.effects.push_back(make_effect(reg, effect_keys::kTransform, 1));
+    l.effects.back().params[1].constant = ParamValue::vec2(0.75f, 0.5f);   // posição deslocada
     EffectPlan plan;
-    AUREA_CHECK(EffectCompiler::compile(effects, tracks, FrameIndex{0}, reg,
-                                        1920, 1080, true, plan).ok());
-
-    AUREA_CHECK_EQ(plan.pass_count(), static_cast<u32>(0));
-    AUREA_CHECK_EQ(plan.droppedEffects.size(), static_cast<usize>(1));
+    EffectGraph::plan(l, reg, FrameIndex{0}, 1.0f, placement(100, 100), nullptr, plan);
+    AUREA_CHECK(plan.hasFold);
+    AUREA_CHECK_EQ(plan.stages.size(), static_cast<usize>(1));   // só a exposição
+    AUREA_CHECK_NEAR(plan.foldMatrix.col[3].x, 25.0f, 1e-4);     // (0.75-0.5)*100
 }
 
-AUREA_TEST(EffectCompiler, DisabledEffectIsDropped) {
+AUREA_TEST(EffectGraph, TransformInTheMiddleNeedsItsOwnPass) {
     EffectRegistry reg;
-    build_registry(reg);
-
-    std::vector<Effect> effects;
-    Effect e = make_effect(1, 0.5f);
-    e.enabled = false;
-    effects.push_back(e);
-
-    TrackSet tracks;
+    register_builtin_effects(reg);
+    Layer l;
+    l.effects.push_back(make_effect(reg, effect_keys::kTransform, 0));
+    l.effects.back().params[3].constant.v[0] = 30.0f;   // rotação
+    l.effects.push_back(make_effect(reg, effect_keys::kGaussianBlur, 1));
+    l.effects.back().params[0].constant.v[0] = 5.0f;
     EffectPlan plan;
-    AUREA_CHECK(EffectCompiler::compile(effects, tracks, FrameIndex{0}, reg,
-                                        1920, 1080, true, plan).ok());
-    AUREA_CHECK_EQ(plan.pass_count(), static_cast<u32>(0));
+    EffectGraph::plan(l, reg, FrameIndex{0}, 1.0f, placement(), nullptr, plan);
+    AUREA_CHECK(!plan.hasFold);
+    AUREA_CHECK_EQ(plan.stages.size(), static_cast<usize>(2));
 }
 
-AUREA_TEST(EffectCompiler, UnknownEffectIsReportedNotSilentlySkipped) {
-    // Um projeto vindo de uma versão que tinha um efeito que esta não tem. O
-    // compilador precisa DIZER isso — aplicar um passe vazio faria o usuário
-    // ver o frame sem o efeito e não saber por quê.
+AUREA_TEST(EffectGraph, KeyframesAreEvaluatedAtTheLayerTime) {
     EffectRegistry reg;
-    build_registry(reg);
-
-    std::vector<Effect> effects;
-    effects.push_back(make_effect(99, 1.0f));
-
-    TrackSet tracks;
+    register_builtin_effects(reg);
+    Layer l;
+    l.effects.push_back(make_effect(reg, effect_keys::kExposure, 7));
+    Track& t = l.tracks.get_or_create(TrackProperty::EffectParam, 7, param_track_key(0, 0));
+    (void)t.set(FrameIndex{0}, 0.0f);
+    (void)t.set(FrameIndex{10}, 2.0f);
     EffectPlan plan;
-    AUREA_CHECK(EffectCompiler::compile(effects, tracks, FrameIndex{0}, reg,
-                                        1920, 1080, true, plan).ok());
-    AUREA_CHECK_EQ(plan.pass_count(), static_cast<u32>(0));
-    AUREA_CHECK(!plan.fusionBlockers.empty());
+    EffectGraph::plan(l, reg, FrameIndex{5}, 1.0f, placement(), nullptr, plan);
+    AUREA_CHECK_EQ(plan.evals.size(), static_cast<usize>(1));
+    AUREA_CHECK_NEAR(plan.colorOps[0].p[1], 1.0f, 1e-5);
+    // No frame 0 o valor é 0 → neutro → sai da cadeia.
+    EffectGraph::plan(l, reg, FrameIndex{0}, 1.0f, placement(), nullptr, plan);
+    AUREA_CHECK(plan.empty());
 }
 
-AUREA_TEST(EffectCompiler, PreviewUsesFewerSamplesThanExport) {
-    // O preview degrada; o export NÃO. É o que permite editar 4K num aparelho
-    // médio sem que o resultado final perca qualidade.
+AUREA_TEST(EffectGraph, KeyframeKeyIsTheEffectIdNotItsPosition) {
+    // Reordenar efeitos não pode fazer a animação de um passar para outro.
     EffectRegistry reg;
-    build_registry(reg);
-
-    std::vector<Effect> effects;
-    effects.push_back(make_effect(0, 30.0f));   // desfoque grande
-
-    TrackSet tracks;
-    EffectPlan preview;
-    EffectPlan final;
-    AUREA_CHECK(EffectCompiler::compile(effects, tracks, FrameIndex{0}, reg,
-                                        1920, 1080, true, preview).ok());
-    AUREA_CHECK(EffectCompiler::compile(effects, tracks, FrameIndex{0}, reg,
-                                        1920, 1080, false, final).ok());
-
-    AUREA_CHECK(preview.total_cost() <= final.total_cost());
-    AUREA_CHECK(final.stages[0].sampleCount >= preview.stages[0].sampleCount);
-}
-
-AUREA_TEST(EffectCompiler, LargeBlurRunsAtReducedResolutionInPreview) {
-    EffectRegistry reg;
-    build_registry(reg);
-
-    std::vector<Effect> effects;
-    effects.push_back(make_effect(0, 100.0f));
-
-    TrackSet tracks;
+    register_builtin_effects(reg);
+    Layer l;
+    l.effects.push_back(make_effect(reg, effect_keys::kSaturation, 3));
+    l.effects.push_back(make_effect(reg, effect_keys::kExposure, 9));
+    Track& t = l.tracks.get_or_create(TrackProperty::EffectParam, 9, param_track_key(0, 0));
+    (void)t.set(FrameIndex{0}, 1.5f);
+    std::swap(l.effects[0], l.effects[1]);   // a exposição vai para o índice 0
     EffectPlan plan;
-    AUREA_CHECK(EffectCompiler::compile(effects, tracks, FrameIndex{0}, reg,
-                                        3840, 2160, true, plan).ok());
-    // Blur de raio 100 em resolução cheia não cabe no orçamento de nenhum
-    // celular. Em meia resolução é visualmente idêntico e 4x mais barato.
-    AUREA_CHECK_NEAR(plan.stages[0].resolutionScale, 0.5f, 1e-6);
+    EffectGraph::plan(l, reg, FrameIndex{0}, 1.0f, placement(), nullptr, plan);
+    AUREA_CHECK_EQ(plan.evals.size(), static_cast<usize>(1));
+    AUREA_CHECK(plan.colorOps[0].code == ColorOpCode::Exposure);
+    AUREA_CHECK_NEAR(plan.colorOps[0].p[1], 1.5f, 1e-5);
 }
 
-AUREA_TEST(EffectCompiler, AnimatedRadiusChangesThePlan) {
+AUREA_TEST(EffectGraph, ExpressionFallsBackToConstantAndSaysSo) {
     EffectRegistry reg;
-    build_registry(reg);
-
-    std::vector<Effect> effects;
-    effects.push_back(make_effect(0, 12.0f));
-
+    register_builtin_effects(reg);
+    EffectInstance e = make_effect(reg, effect_keys::kExposure, 0);
+    e.params[0].constant.v[0] = 0.25f;
+    e.params[0].source = ParamSource::Expression;
+    e.params[0].expression = 1;
     TrackSet tracks;
-    Track& radius = tracks.get_or_create(TrackProperty::EffectParam, 0, 0);
-    radius.set(FrameIndex{0}, 0.0f);
-    radius.set(FrameIndex{100}, 40.0f);
-
-    EffectPlan atStart;
-    EffectPlan atMid;
-    EffectCompiler::compile(effects, tracks, FrameIndex{0}, reg, 1920, 1080, true, atStart);
-    EffectCompiler::compile(effects, tracks, FrameIndex{50}, reg, 1920, 1080, true, atMid);
-
-    // No frame 0 o raio é 0: efeito neutro, nenhum passe. No meio, o raio é 20 e
-    // o efeito existe. O compilador lê o valor ANIMADO, não o estático.
-    AUREA_CHECK_EQ(atStart.pass_count(), static_cast<u32>(0));
-    AUREA_CHECK(atMid.pass_count() > 0);
+    bool fallback = false;
+    const ParamValue v = evaluate_param(tracks, e, 0, reg.params(e.type)->at(0), FrameIndex{0}, &fallback);
+    AUREA_CHECK(fallback);
+    AUREA_CHECK_NEAR(v.v[0], 0.25f, 1e-6);
 }
 
-AUREA_TEST(EffectCompiler, ZeroSampleStageIsRefused) {
-    // Guarda contra um registro mal formado: uma etapa sem amostra é um passe
-    // que não lê nada e desenharia preto. Melhor falhar na compilação.
+AUREA_TEST(EffectGraph, UnknownAndDisabledEffectsAreDropped) {
     EffectRegistry reg;
-    const EffectParamDesc p[] = {
-        {"Raio", EffectParamType::Float, 0.0f, 100.0f, 1.0f, 0, nullptr},
-    };
-    // Efeito de vizinhança sem declarar amostras: o compilador cai no padrão de
-    // 9 taps em vez de gerar zero.
-    const EffectDesc noSamples{"Sem amostras", "Teste", 1, p, 1, false, 0, 0};
-    (void)reg.register_effect(&noSamples, EffectClass::Neighborhood, 0);
-
-    std::vector<Effect> effects;
-    effects.push_back(make_effect(0, 5.0f));
-
-    TrackSet tracks;
+    register_builtin_effects(reg);
+    Layer l;
+    EffectInstance unknown;
+    unknown.id = 0;
+    unknown.type = effect_type_id("aurea.inexistente");
+    l.effects.push_back(unknown);
+    l.effects.push_back(make_effect(reg, effect_keys::kExposure, 1));
+    l.effects.back().params[0].constant.v[0] = 1.0f;
+    l.effects.back().enabled = false;
     EffectPlan plan;
-    AUREA_CHECK(EffectCompiler::compile(effects, tracks, FrameIndex{0}, reg,
-                                        1920, 1080, true, plan).ok());
-    for (const auto& s : plan.stages) {
-        AUREA_CHECK(s.sampleCount > 0);
+    EffectGraph::plan(l, reg, FrameIndex{0}, 1.0f, placement(), nullptr, plan);
+    AUREA_CHECK(plan.empty());
+    AUREA_CHECK_EQ(plan.droppedUnknown, static_cast<u32>(1));
+    AUREA_CHECK(!plan.blockers.empty());
+}
+
+AUREA_TEST(EffectGraph, RegistryRefusesDuplicateKeys) {
+    EffectRegistry reg;
+    register_builtin_effects(reg);
+    const u32 before = reg.count();
+    register_builtin_effects(reg);
+    AUREA_CHECK_EQ(reg.count(), before);
+    AUREA_CHECK_EQ(before, static_cast<u32>(12));
+}
+
+AUREA_TEST(EffectGraph, CurveIsMonotoneBetweenPoints) {
+    // Spline monotônica: entre dois pontos crescentes, nunca passa deles.
+    CurveData c = CurveData::identity();
+    c.channel[0] = {{0.0f, 0.0f}, {0.3f, 0.1f}, {0.6f, 0.9f}, {1.0f, 1.0f}};
+    f32 prev = -1.0f;
+    for (u32 i = 0; i <= 100; ++i) {
+        const f32 x = static_cast<f32>(i) / 100.0f;
+        const f32 y = c.evaluate(0, x);
+        AUREA_CHECK(y >= prev - 1e-6f);
+        AUREA_CHECK(y >= -1e-6f && y <= 1.0f + 1e-6f);
+        prev = y;
+    }
+    AUREA_CHECK_NEAR(c.evaluate(0, 0.3f), 0.1f, 1e-5);
+    AUREA_CHECK_NEAR(c.evaluate(0, 0.6f), 0.9f, 1e-5);
+}
+
+// =============================================================================
+// Motion Tile — geometria (casos portados de test/motion_tile_test.dart)
+// =============================================================================
+namespace {
+
+LayerPlacement tile_placement(f32 compW, f32 compH, f32 layerW, f32 layerH, f32 posX, f32 posY,
+                              f32 scale, f32 rotDeg = 0.0f) {
+    LayerPlacement p;
+    p.compWidth = static_cast<u32>(compW);
+    p.compHeight = static_cast<u32>(compH);
+    p.layerWidth = static_cast<u32>(layerW);
+    p.layerHeight = static_cast<u32>(layerH);
+    p.compFromLayer = Mat4::translation(Vec3{posX, posY, 0})
+                    * Mat4::from_quat(Quat::from_axis_angle(Vec3{0, 0, 1}, rotDeg * kDeg2Rad))
+                    * Mat4::scale(Vec3{scale, scale, 1})
+                    * Mat4::translation(Vec3{-layerW * 0.5f, -layerH * 0.5f, 0});
+    return p;
+}
+
+} // namespace
+
+AUREA_TEST(MotionTile, At100PercentTheRegionIsTheLayer) {
+    motion_tile::Params p;
+    const Vec2 f = motion_tile::coverage_factors(p, tile_placement(1920, 1080, 1920, 1080, 960, 540, 1.0f));
+    AUREA_CHECK_NEAR(f.x, 1.0f, 1e-4);
+    AUREA_CHECK_NEAR(f.y, 1.0f, 1e-4);
+}
+
+AUREA_TEST(MotionTile, At50PercentTheRegionDoubles) {
+    // O RELATO: camada em 50% deixava moldura vazia. A região tem de dobrar.
+    motion_tile::Params p;
+    const Vec2 f = motion_tile::coverage_factors(p, tile_placement(1920, 1080, 1920, 1080, 960, 540, 0.5f));
+    AUREA_CHECK_NEAR(f.x, 2.0f, 1e-3);
+    AUREA_CHECK_NEAR(f.y, 2.0f, 1e-3);
+    const Vec2 q = motion_tile::coverage_factors(p, tile_placement(1920, 1080, 1920, 1080, 960, 540, 0.25f));
+    AUREA_CHECK_NEAR(q.x, 4.0f, 1e-3);
+}
+
+AUREA_TEST(MotionTile, EnlargedLayerDoesNotShrinkTheRegion) {
+    motion_tile::Params p;
+    const Vec2 f = motion_tile::coverage_factors(p, tile_placement(1920, 1080, 1920, 1080, 960, 540, 2.0f));
+    AUREA_CHECK_NEAR(f.x, 1.0f, 1e-4);
+    AUREA_CHECK_NEAR(f.y, 1.0f, 1e-4);
+}
+
+AUREA_TEST(MotionTile, RequestedOutputWinsWhenLarger) {
+    motion_tile::Params p;
+    p.outputX = 3.0f;
+    p.outputY = 1.5f;
+    const Vec2 f = motion_tile::coverage_factors(p, tile_placement(1920, 1080, 1920, 1080, 960, 540, 1.0f));
+    AUREA_CHECK_NEAR(f.x, 3.0f, 1e-4);
+    AUREA_CHECK_NEAR(f.y, 1.5f, 1e-4);
+}
+
+AUREA_TEST(MotionTile, DisplacedLayerAsksForMoreOnTheFarSide) {
+    motion_tile::Params p;
+    // Camada em x = 25% do quadro: o lado direito está a 75% de distância.
+    const Vec2 f = motion_tile::coverage_factors(p, tile_placement(1000, 1000, 1000, 1000, 250, 500, 1.0f));
+    AUREA_CHECK_NEAR(f.x, 1.5f, 1e-3);
+    AUREA_CHECK_NEAR(f.y, 1.0f, 1e-3);
+}
+
+AUREA_TEST(MotionTile, TileSizeDoesNotChangeTheCoverage) {
+    motion_tile::Params p;
+    p.tileX = p.tileY = 0.25f;
+    const Vec2 f = motion_tile::coverage_factors(p, tile_placement(1920, 1080, 1920, 1080, 960, 540, 0.5f));
+    AUREA_CHECK_NEAR(f.x, 2.0f, 1e-3);
+}
+
+AUREA_TEST(MotionTile, ZeroScaleNeverBecomesInfinity) {
+    motion_tile::Params p;
+    const Vec2 f = motion_tile::coverage_factors(p, tile_placement(1920, 1080, 1920, 1080, 960, 540, 0.0f));
+    AUREA_CHECK(std::isfinite(f.x) && std::isfinite(f.y));
+    AUREA_CHECK_NEAR(f.x, 1.0f, 1e-4);
+}
+
+AUREA_TEST(MotionTile, CoverageHasACeiling) {
+    motion_tile::Params p;
+    const Vec2 f = motion_tile::coverage_factors(p, tile_placement(1920, 1080, 1920, 1080, 960, 540, 0.001f));
+    AUREA_CHECK_NEAR(f.x, motion_tile::kMaxCoverage, 1e-3);
+}
+
+AUREA_TEST(MotionTile, FortyFiveDegreesOnASquareIsExactlySqrt2) {
+    motion_tile::Params p;
+    const Vec2 f = motion_tile::coverage_factors(p, tile_placement(1000, 1000, 1000, 1000, 500, 500, 1.0f, 45.0f));
+    AUREA_CHECK_NEAR(f.x, std::sqrt(2.0f), 1e-3);
+    AUREA_CHECK_NEAR(f.y, std::sqrt(2.0f), 1e-3);
+    const Vec2 g = motion_tile::coverage_factors(p, tile_placement(1000, 1000, 1000, 1000, 500, 500, 1.0f, 90.0f));
+    AUREA_CHECK_NEAR(g.x, 1.0f, 1e-3);
+    const Vec2 h = motion_tile::coverage_factors(p, tile_placement(1000, 1000, 1000, 1000, 500, 500, 1.0f, 180.0f));
+    AUREA_CHECK_NEAR(h.x, 1.0f, 1e-3);
+}
+
+AUREA_TEST(MotionTile, AnchorOffCenterStillCoversFromTheLayerCenter) {
+    // Generalização do porte: com âncora fora do centro, a conta inverte a
+    // matriz inteira — e a região continua centrada no CENTRO da layer.
+    motion_tile::Params p;
+    LayerPlacement pl;
+    pl.compWidth = pl.compHeight = 1000;
+    pl.layerWidth = pl.layerHeight = 1000;
+    // Âncora no canto (0,0), posição no centro do quadro: o centro da layer
+    // fica em (1000,1000) — só o quadrante superior esquerdo aparece.
+    pl.compFromLayer = Mat4::translation(Vec3{500, 500, 0});
+    const Vec2 f = motion_tile::coverage_factors(p, pl);
+    // Canto (0,0) do quadro está a (-500,-500)-(500,500)... = 1000 do centro.
+    AUREA_CHECK_NEAR(f.x, 2.0f, 1e-3);
+    const Rect r = motion_tile::tiled_region(p, pl);
+    AUREA_CHECK_NEAR(r.x + r.w * 0.5f, 500.0f, 1e-3);
+    AUREA_CHECK_NEAR(r.y + r.h * 0.5f, 500.0f, 1e-3);
+}
+
+AUREA_TEST(MotionTile, CentralCopyStaysTheLayerAndCornersAreCovered) {
+    // A região contém a caixa da layer (a cópia central não muda de lugar nem
+    // de tamanho) e os QUATRO CANTOS do quadro caem dentro dela depois do
+    // transform — conferido pela ida (matriz direta + produto vetorial), não
+    // pela volta que a própria função usa.
+    motion_tile::Params p;
+    u32 checked = 0;
+    for (f32 rot : {0.0f, 17.0f, 45.0f, 90.0f, 133.0f, -60.0f}) {
+        for (f32 scale : {0.2f, 0.5f, 0.9f, 1.0f, 1.7f}) {
+            for (f32 px : {0.0f, 300.0f, 960.0f, 1920.0f}) {
+                const LayerPlacement pl = tile_placement(1920, 1080, 800, 600, px, 540.0f, scale, rot);
+                const Rect r = motion_tile::tiled_region(p, pl);
+                AUREA_CHECK(r.x <= 1e-3f && r.y <= 1e-3f);
+                AUREA_CHECK(r.x + r.w >= 800.0f - 1e-3f && r.y + r.h >= 600.0f - 1e-3f);
+                AUREA_CHECK_NEAR(r.x + r.w * 0.5f, 400.0f, 1e-2);
+                if (r.w >= 800.0f * motion_tile::kMaxCoverage - 1.0f || r.h >= 600.0f * motion_tile::kMaxCoverage - 1.0f) {
+                    continue;   // no teto de cobertura a garantia não vale (por projeto)
+                }
+                // O canto mais distante fica EXATAMENTE na borda da região (é
+                // ele que define o fator): meio pixel de folga absorve o erro
+                // de ponto flutuante do teste, não da conta.
+                const Rect rr{r.x - 0.5f, r.y - 0.5f, r.w + 1.0f, r.h + 1.0f};
+                const Mat4& m = pl.compFromLayer;
+                auto fwd = [&](f32 x, f32 y) {
+                    return Vec2{m.col[0].x * x + m.col[1].x * y + m.col[3].x,
+                                m.col[0].y * x + m.col[1].y * y + m.col[3].y};
+                };
+                const Vec2 q[4] = {fwd(rr.x, rr.y), fwd(rr.x + rr.w, rr.y), fwd(rr.x + rr.w, rr.y + rr.h),
+                                   fwd(rr.x, rr.y + rr.h)};
+                for (Vec2 c : {Vec2{0, 0}, Vec2{1920, 0}, Vec2{0, 1080}, Vec2{1920, 1080}}) {
+                    bool pos = false, neg = false;
+                    for (int i = 0; i < 4; ++i) {
+                        const Vec2 a = q[i], b = q[(i + 1) % 4];
+                        const f32 cross = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+                        if (cross > 1e-2f) pos = true;
+                        if (cross < -1e-2f) neg = true;
+                    }
+                    AUREA_CHECK(!(pos && neg));
+                    ++checked;
+                }
+            }
+        }
+    }
+    AUREA_CHECK(checked > 100);
+}
+
+AUREA_TEST(MotionTile, NeverNaNOrInfinity) {
+    motion_tile::Params p;
+    u32 n = 0;
+    for (f32 s : {0.0f, 1e-6f, 0.3f, 1.0f, 5.0f, -1.0f}) {
+        for (f32 rot : {0.0f, 30.0f, 89.999f, 270.0f}) {
+            for (f32 x : {-5000.0f, 0.0f, 960.0f, 1e6f}) {
+                for (f32 ox : {0.01f, 1.0f, 6.0f}) {
+                    p.outputX = ox;
+                    const Vec2 f = motion_tile::coverage_factors(p, tile_placement(1920, 1080, 640, 360, x, 540, s, rot));
+                    AUREA_CHECK(std::isfinite(f.x) && std::isfinite(f.y));
+                    AUREA_CHECK(f.x >= 0.01f && f.x <= motion_tile::kMaxCoverage);
+                    ++n;
+                }
+            }
+        }
+    }
+    AUREA_CHECK_EQ(n, static_cast<u32>(288));
+}
+
+AUREA_TEST(MotionTile, GridRepeatsAtTheTilePeriod) {
+    motion_tile::Params p;
+    p.tileX = p.tileY = 0.5f;
+    for (u32 i = 0; i < 50; ++i) {
+        const f32 x = 0.005f + 0.01f * static_cast<f32>(i);
+        const Vec2 a = motion_tile::reference_lookup(p, Vec2{x, 0.2f});
+        const Vec2 b = motion_tile::reference_lookup(p, Vec2{x + 0.5f, 0.2f});
+        AUREA_CHECK_NEAR(a.x, b.x, 1e-5);
     }
 }
 
-// -----------------------------------------------------------------------------
+AUREA_TEST(MotionTile, IdentityParamsShowTheSourceUntouched) {
+    motion_tile::Params p;
+    AUREA_CHECK(p.identity_params());
+    for (u32 i = 1; i < 20; ++i) {
+        const f32 v = static_cast<f32>(i) / 20.0f;
+        const Vec2 f = motion_tile::reference_lookup(p, Vec2{v, 1.0f - v});
+        AUREA_CHECK_NEAR(f.x, v, 1e-5);
+        AUREA_CHECK_NEAR(f.y, 1.0f - v, 1e-5);
+    }
+}
+
+AUREA_TEST(MotionTile, MirrorFlipsTheNeighbor) {
+    motion_tile::Params p;
+    p.tileX = p.tileY = 0.5f;
+    p.mirror = true;
+    const Vec2 a = motion_tile::reference_lookup(p, Vec2{0.3f, 0.3f});
+    const Vec2 b = motion_tile::reference_lookup(p, Vec2{0.8f, 0.3f});
+    AUREA_CHECK_NEAR(b.x, 1.0f - a.x, 1e-5);
+}
+
+AUREA_TEST(MotionTile, PhaseShiftsAlternateColumns) {
+    motion_tile::Params p;
+    p.tileX = p.tileY = 0.5f;
+    p.phaseTurns = 0.5f;   // 180°
+    const Vec2 even = motion_tile::reference_lookup(p, Vec2{0.3f, 0.3f});
+    const Vec2 odd = motion_tile::reference_lookup(p, Vec2{0.8f, 0.3f});
+    AUREA_CHECK_NEAR(std::fabs(odd.y - even.y), 0.5f, 1e-5);
+    AUREA_CHECK_NEAR(odd.x, even.x, 1e-5);
+}
+
+AUREA_TEST(MotionTile, ClampStretchesTheEdgeAndBeatsMirror) {
+    motion_tile::Params p;
+    p.tileX = p.tileY = 0.5f;
+    p.clamp = true;
+    p.mirror = true;
+    const Vec2 f = motion_tile::reference_lookup(p, Vec2{0.95f, 0.05f});
+    AUREA_CHECK_NEAR(f.x, 1.0f, 1e-5);
+    AUREA_CHECK_NEAR(f.y, 0.0f, 1e-5);
+}
+
+AUREA_TEST(MotionTile, IdentityOnlyWhenTheLayerAlreadyCoversTheFrame) {
+    EffectRegistry reg;
+    register_builtin_effects(reg);
+    Layer l;
+    l.effects.push_back(make_effect(reg, effect_keys::kMotionTile, 0));
+    EffectPlan plan;
+    EffectGraph::plan(l, reg, FrameIndex{0}, 1.0f,
+                      tile_placement(1920, 1080, 1920, 1080, 960, 540, 1.0f), nullptr, plan);
+    AUREA_CHECK(plan.empty());
+    // A MESMA configuração com a layer em 50% já não é identidade.
+    EffectGraph::plan(l, reg, FrameIndex{0}, 1.0f,
+                      tile_placement(1920, 1080, 1920, 1080, 960, 540, 0.5f), nullptr, plan);
+    AUREA_CHECK_EQ(plan.stages.size(), static_cast<usize>(1));
+}
+
+// =============================================================================
 // ShaderLibrary
-// -----------------------------------------------------------------------------
-AUREA_TEST(ShaderLibrary, CompositePipelineIsCached) {
-    FakeBackend backend;
+// =============================================================================
+AUREA_TEST(ShaderLibrary, CreatesEveryEmbeddedShader) {
+    MockBackend b;
     ShaderLibrary lib;
-    AUREA_CHECK(lib.initialize(backend).ok());
-
-    auto a = lib.composite_pipeline(BlendMode::Normal, SurfaceFormat::RGBA16F, 1);
-    AUREA_CHECK(a.ok());
-    const u32 created = backend.pipelinesCreated;
-
-    auto b = lib.composite_pipeline(BlendMode::Normal, SurfaceFormat::RGBA16F, 1);
-    AUREA_CHECK(b.ok());
-    // Mesma chave estrutural = mesmo pipeline. Sem isso, duas camadas com o
-    // mesmo blend mode compilariam pipelines separados.
-    AUREA_CHECK_EQ(backend.pipelinesCreated, created);
-    AUREA_CHECK(*a == *b);
+    AUREA_CHECK(lib.initialize(b).ok());
+    AUREA_CHECK_EQ(b.shadersCreated, kShaderCount);
+    AUREA_CHECK(kShaderCount >= 16);
+    for (u32 i = 0; i < kShaderCount; ++i) {
+        const ShaderBlob& blob = shader_blob(static_cast<ShaderId>(i));
+        AUREA_CHECK(blob.bytes > 20 && blob.bytes % 4 == 0);
+        AUREA_CHECK_EQ(blob.words[0], 0x07230203u);   // número mágico do SPIR-V
+    }
 }
 
-AUREA_TEST(ShaderLibrary, DifferentBlendModesGetDifferentPipelines) {
-    FakeBackend backend;
+AUREA_TEST(ShaderLibrary, SameKeySamePipelineCompiledOnce) {
+    MockBackend b;
     ShaderLibrary lib;
-    AUREA_CHECK(lib.initialize(backend).ok());
-
-    auto a = lib.composite_pipeline(BlendMode::Normal, SurfaceFormat::RGBA16F, 1);
-    auto b = lib.composite_pipeline(BlendMode::Add, SurfaceFormat::RGBA16F, 1);
-    AUREA_CHECK(a.ok());
-    AUREA_CHECK(b.ok());
-    AUREA_CHECK(*a != *b);
+    AUREA_CHECK(lib.initialize(b).ok());
+    const PipelineKey k = PipelineKey::fullscreen(ShaderId::effects_color_stack_frag, SurfaceFormat::RGBA16F);
+    auto p1 = lib.pipeline(k);
+    auto p2 = lib.pipeline(k);
+    AUREA_CHECK(p1.ok() && p2.ok());
+    AUREA_CHECK(*p1 == *p2);
+    AUREA_CHECK_EQ(b.pipelinesCreated, static_cast<u32>(1));
+    PipelineKey add = PipelineKey::graphics(ShaderId::composite_layer_vert, ShaderId::composite_layer_frag,
+                                            SurfaceFormat::RGBA16F, true, BlendMode::Add);
+    PipelineKey normal = add;
+    normal.blend = BlendMode::Normal;
+    AUREA_CHECK(!(*lib.pipeline(add) == *lib.pipeline(normal)));
 }
 
-AUREA_TEST(ShaderLibrary, DifferentFormatsGetDifferentPipelines) {
-    FakeBackend backend;
+AUREA_TEST(ShaderLibrary, CompilesDuringPlaybackAreCounted) {
+    MockBackend b;
     ShaderLibrary lib;
-    AUREA_CHECK(lib.initialize(backend).ok());
-
-    auto a = lib.composite_pipeline(BlendMode::Normal, SurfaceFormat::RGBA16F, 1);
-    auto b = lib.composite_pipeline(BlendMode::Normal, SurfaceFormat::RGBA8, 1);
-    AUREA_CHECK(a.ok());
-    AUREA_CHECK(b.ok());
-    AUREA_CHECK(*a != *b);
+    AUREA_CHECK(lib.initialize(b).ok());
+    const PipelineKey k = PipelineKey::fullscreen(ShaderId::effects_sharpen_frag, SurfaceFormat::RGBA16F);
+    AUREA_CHECK_EQ(lib.prewarm(&k, 1), static_cast<u32>(1));
+    lib.mark_steady_state();
+    (void)lib.pipeline(k);   // já em cache: não conta
+    AUREA_CHECK_EQ(lib.compiles_since_mark(), static_cast<u32>(0));
+    (void)lib.pipeline(PipelineKey::fullscreen(ShaderId::effects_glow_combine_frag, SurfaceFormat::RGBA16F));
+    AUREA_CHECK_EQ(lib.compiles_since_mark(), static_cast<u32>(1));
 }
 
-AUREA_TEST(ShaderLibrary, PrewarmCompilesAllBlendModes) {
-    FakeBackend backend;
+AUREA_TEST(ShaderLibrary, FailureIsReportedNotHidden) {
+    MockBackend b;
+    b.failPipelines = true;
     ShaderLibrary lib;
-    AUREA_CHECK(lib.initialize(backend).ok());
+    AUREA_CHECK(lib.initialize(b).ok());
+    auto p = lib.pipeline(PipelineKey::fullscreen(ShaderId::effects_sharpen_frag, SurfaceFormat::RGBA16F));
+    AUREA_CHECK(!p.ok());
+    AUREA_CHECK_EQ(lib.compile_failures(), static_cast<u32>(1));
+    AUREA_CHECK(!lib.last_error().empty());
+}
 
-    const BlendMode modes[] = {
-        BlendMode::Normal, BlendMode::Add, BlendMode::Multiply,
-        BlendMode::Screen, BlendMode::Overlay, BlendMode::SoftLight,
+// =============================================================================
+// Compositor (Renderer contra o backend falso)
+// =============================================================================
+namespace {
+
+struct RenderFixture {
+    MockBackend backend;
+    EffectRegistry effects;
+    Renderer renderer;
+    Project project;
+    Composition* comp = nullptr;
+
+    RenderFixture() {
+        register_builtin_effects(effects);
+        (void)renderer.initialize(backend, effects);
+        auto p = Project::create_new(1920, 1080, 30.0, "teste");
+        project = std::move(*p);
+        comp = project.timeline().composition(project.timeline().root());
+    }
+
+    LayerId solid(const char* name, Vec4 color, f32 x = 960, f32 y = 540) {
+        const LayerId id = comp->add_layer(LayerKind::Shape, name);
+        Layer* l = comp->layer(id);
+        l->shape.bounds = Rect{0, 0, 400, 300};
+        l->shape.fillColor = color;
+        l->transform.anchor = Vec3{200, 150, 0};
+        l->transform.position = Vec3{x, y, 0};
+        return id;
+    }
+
+    void prepare(FrameSnapshot& snap, FrameIndex t = FrameIndex{0}, u64 frame = 1) {
+        RenderSettings rs;
+        renderer.prepare(*comp, project, t, nullptr, nullptr, nullptr, rs, frame, 0, DecodeMode::Still, 1.0f, snap);
+    }
+};
+
+} // namespace
+
+AUREA_TEST(Compositor, CompositionOrderIsTheCoreOrder) {
+    // duplicate_layer já teve bug de ordem. A ordem de desenho TEM que ser a
+    // do Core: fundo → frente, com a cópia logo acima do original.
+    RenderFixture f;
+    const LayerId a = f.solid("A", Vec4{1, 0, 0, 1});
+    const LayerId b = f.solid("B", Vec4{0, 1, 0, 1});
+    const LayerId c = f.solid("C", Vec4{0, 0, 1, 1});
+    const LayerId b2 = f.comp->duplicate_layer(b, FrameIndex{0});
+    FrameSnapshot snap;
+    f.prepare(snap);
+    AUREA_CHECK_EQ(snap.layers.size(), static_cast<usize>(4));
+    AUREA_CHECK(snap.layers[0].id == a);
+    AUREA_CHECK(snap.layers[1].id == b);
+    AUREA_CHECK(snap.layers[2].id == b2);
+    AUREA_CHECK(snap.layers[3].id == c);
+    for (u32 i = 0; i < f.comp->order().size(); ++i) AUREA_CHECK(snap.layers[i].id == f.comp->order().at(i));
+    // Reordenar no Core reordena a composição, sem lista paralela.
+    AUREA_CHECK(f.comp->reorder_layer(c, 0));
+    f.prepare(snap);
+    AUREA_CHECK(snap.layers[0].id == c);
+}
+
+AUREA_TEST(Compositor, InvisibleAndOutOfRangeLayersCostNothing) {
+    RenderFixture f;
+    const LayerId a = f.solid("visivel", Vec4{1, 1, 1, 1});
+    const LayerId hidden = f.solid("oculta", Vec4{1, 1, 1, 1});
+    const LayerId transparent = f.solid("opacidade-zero", Vec4{1, 1, 1, 1});
+    const LayerId later = f.solid("depois", Vec4{1, 1, 1, 1});
+    f.comp->layer(hidden)->visible = false;
+    f.comp->layer(transparent)->transform.opacity = 0.0f;
+    f.comp->layer(later)->start = FrameIndex{100};
+    FrameSnapshot snap;
+    f.prepare(snap);
+    AUREA_CHECK_EQ(snap.layers.size(), static_cast<usize>(1));
+    AUREA_CHECK(snap.layers[0].id == a);
+}
+
+AUREA_TEST(Compositor, LayerTransformBecomesTheCompositeMatrix) {
+    RenderFixture f;
+    const LayerId id = f.solid("t", Vec4{1, 1, 1, 1});
+    Layer* l = f.comp->layer(id);
+    l->transform.scale = Vec3{2, 2, 1};
+    l->transform.rotation = Vec3{0, 0, 90};
+    FrameSnapshot snap;
+    f.prepare(snap);
+    const Mat4& m = snap.layers[0].compFromLayer;
+    auto apply = [&](f32 x, f32 y) {
+        return Vec2{m.col[0].x * x + m.col[1].x * y + m.col[3].x, m.col[0].y * x + m.col[1].y * y + m.col[3].y};
     };
-    const u32 compiled = lib.prewarm_blend_modes(modes, 6, SurfaceFormat::RGBA16F, 1);
-    AUREA_CHECK_EQ(compiled, static_cast<u32>(6));
-
-    // Pré-aquecer de novo não recompila nada: os 6 já estão em cache.
-    AUREA_CHECK_EQ(lib.prewarm_blend_modes(modes, 6, SurfaceFormat::RGBA16F, 1),
-                   static_cast<u32>(0));
+    const Vec2 anchor = apply(200, 150);
+    AUREA_CHECK_NEAR(anchor.x, 960.0f, 1e-3);
+    AUREA_CHECK_NEAR(anchor.y, 540.0f, 1e-3);
+    // 50 px à direita da âncora, escala 2, girado 90° → 100 px para baixo.
+    const Vec2 p = apply(250, 150);
+    AUREA_CHECK_NEAR(p.x, 960.0f, 1e-3);
+    AUREA_CHECK_NEAR(p.y, 640.0f, 1e-3);
 }
 
-AUREA_TEST(ShaderLibrary, InvalidateKeepsKeysAndRecompiles) {
-    FakeBackend backend;
-    ShaderLibrary lib;
-    AUREA_CHECK(lib.initialize(backend).ok());
-
-    auto first = lib.composite_pipeline(BlendMode::Normal, SurfaceFormat::RGBA16F, 1);
-    AUREA_CHECK(first.ok());
-    const u32 afterFirst = backend.pipelinesCreated;
-
-    // Dispositivo perdido: os handles do driver morreram, mas a chave
-    // estrutural do cache continua válida.
-    lib.invalidate_device_shaders();
-    auto second = lib.composite_pipeline(BlendMode::Normal, SurfaceFormat::RGBA16F, 1);
-    AUREA_CHECK(second.ok());
-    AUREA_CHECK(backend.pipelinesCreated > afterFirst);
-    AUREA_CHECK_EQ(lib.pipeline_count(), static_cast<u32>(1));
+AUREA_TEST(Compositor, KeyframedTransformIsEvaluatedWithoutTouchingTheModel) {
+    RenderFixture f;
+    const LayerId id = f.solid("anim", Vec4{1, 1, 1, 1});
+    Layer* l = f.comp->layer(id);
+    Track& t = l->tracks.get_or_create(TrackProperty::PositionX);
+    (void)t.set(FrameIndex{0}, 0.0f);
+    (void)t.set(FrameIndex{100}, 1000.0f);
+    FrameSnapshot snap;
+    f.prepare(snap, FrameIndex{50});
+    AUREA_CHECK_NEAR(snap.layers[0].compFromLayer.col[3].x, 500.0f - 200.0f, 1e-2);
+    // O valor estático não foi sobrescrito pela animação.
+    AUREA_CHECK_NEAR(l->transform.position.x, 960.0f, 1e-4);
 }
 
-AUREA_TEST(ShaderLibrary, ComputePipelineHasNoColorAttachments) {
-    FakeBackend backend;
-    ShaderLibrary lib;
-    AUREA_CHECK(lib.initialize(backend).ok());
+AUREA_TEST(Compositor, TwoLayersBlurAndGlowCreateNoTexturesInSteadyState) {
+    RenderFixture f;
+    const LayerId a = f.solid("fundo", Vec4{0.2f, 0.3f, 0.8f, 1}, 960, 540);
+    const LayerId b = f.solid("frente", Vec4{1, 0.8f, 0.2f, 1}, 1100, 600);
+    Layer* la = f.comp->layer(a);
+    la->transform.scale = Vec3{4, 4, 1};
+    EffectInstance blur = make_effect(f.effects, effect_keys::kGaussianBlur, 0);
+    blur.params[0].constant.v[0] = 40.0f;
+    la->effects.push_back(blur);
+    Layer* lb = f.comp->layer(b);
+    EffectInstance glow = make_effect(f.effects, effect_keys::kGlow, 0);
+    lb->effects.push_back(glow);
 
-    ShaderKey key;
-    key.source = "#version 450\nvoid main(){}";
-    key.stage = ShaderStage::Compute;
-    auto p = lib.compute_pipeline(key);
-    AUREA_CHECK(p.ok());
+    FrameSnapshot snap;
+    RenderSettings rs;
+    rs.previewDenominator = 2;
+    u32 createdAfterWarmup = 0;
+    for (u64 frame = 1; frame <= 8; ++frame) {
+        f.renderer.prepare(*f.comp, f.project, FrameIndex{0}, nullptr, nullptr, nullptr, rs, frame, 0,
+                           DecodeMode::Still, 1.0f, snap);
+        FrameStats stats;
+        RenderTimings timings;
+        AUREA_CHECK(f.renderer.render(snap, rs, nullptr, stats, timings).ok());
+        if (frame == 2) createdAfterWarmup = f.backend.texturesCreated;
+        if (frame > 2) AUREA_CHECK_EQ(f.renderer.pool_stats().createdThisFrame, static_cast<u32>(0));
+        AUREA_CHECK_EQ(stats.layersRendered, static_cast<u32>(2));
+    }
+    AUREA_CHECK_EQ(f.backend.texturesCreated, createdAfterWarmup);
+    AUREA_CHECK(f.renderer.graph_stats().passesExecuted > 6);
+    // Preview em 1/2: a composição é 960x540, as coordenadas continuam 1920x1080.
+    AUREA_CHECK_EQ(snap.compWidth, static_cast<u32>(1920));
+}
+
+AUREA_TEST(Compositor, TransformEffectAtTheEndAddsNoPass) {
+    RenderFixture f;
+    const LayerId id = f.solid("t", Vec4{1, 1, 1, 1});
+    FrameSnapshot snap;
+    RenderSettings rs;
+    FrameStats stats;
+    RenderTimings timings;
+    f.prepare(snap);
+    AUREA_CHECK(f.renderer.render(snap, rs, nullptr, stats, timings).ok());
+    const u32 baseline = f.renderer.graph_stats().passesExecuted;
+
+    EffectInstance tr = make_effect(f.effects, effect_keys::kTransform, 0);
+    tr.params[3].constant.v[0] = 25.0f;
+    f.comp->layer(id)->effects.push_back(tr);
+    f.prepare(snap, FrameIndex{0}, 2);
+    AUREA_CHECK(snap.plans[0].hasFold);
+    AUREA_CHECK(f.renderer.render(snap, rs, nullptr, stats, timings).ok());
+    AUREA_CHECK_EQ(f.renderer.graph_stats().passesExecuted, baseline);
 }

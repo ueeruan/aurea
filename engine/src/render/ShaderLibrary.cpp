@@ -1,296 +1,224 @@
 #include "aurea/render/ShaderLibrary.hpp"
 #include "aurea/core/Log.hpp"
-#include "aurea/shaders/Composite.h"
 
-#include <cstring>
+#include <cstdio>
+#include <filesystem>
+#include <system_error>
 
 namespace aurea {
 
-bool operator==(const PipelineKey& a, const PipelineKey& b) noexcept {
-    if (a.isCompute != b.isCompute) return false;
-    if (a.isCompute) return a.compute == b.compute;
-    if (!(a.vertex == b.vertex)) return false;
-    if (!(a.fragment == b.fragment)) return false;
-    if (a.blend != b.blend) return false;
-    if (a.depthTest != b.depthTest || a.depthWrite != b.depthWrite) return false;
-    if (a.cullBackFace != b.cullBackFace) return false;
-    if (a.colorAttachmentCount != b.colorAttachmentCount) return false;
-    if (a.depthFormat != b.depthFormat) return false;
-    if (a.sampleCount != b.sampleCount) return false;
-    for (u32 i = 0; i < 4; ++i) {
-        if (a.colorFormats[i] != b.colorFormats[i]) return false;
-    }
-    return true;
+usize PipelineKeyHash::operator()(const PipelineKey& k) const noexcept {
+    // FNV-1a em 64 bits sobre os campos, reduzido no fim. Misturar em `usize`
+    // direto truncaria em armeabi-v7a (32 bits) e faria chaves colidirem.
+    u64 h = 1469598103934665603ull;
+    auto mix = [&h](u64 v) { h ^= v; h *= 1099511628211ull; };
+    mix(static_cast<u64>(k.vertex));
+    mix(static_cast<u64>(k.fragment));
+    mix(static_cast<u64>(k.compute));
+    mix(static_cast<u64>(k.blendEnabled));
+    mix(static_cast<u64>(k.blend));
+    mix(static_cast<u64>(k.format));
+    mix(static_cast<u64>(k.topology));
+    mix(k.immutableSampler);
+    return static_cast<usize>(h ^ (h >> 32));
 }
 
-usize PipelineKeyHash::operator()(const PipelineKey& k) const noexcept {
-    if (k.isCompute) {
-        return ShaderKeyHash{}(k.compute) ^ 0x5DEECE66Dull;
+namespace {
+
+SamplerDesc common_sampler_desc(CommonSampler s) noexcept {
+    SamplerDesc d;
+    switch (s) {
+        case CommonSampler::LinearClamp: break;
+        case CommonSampler::LinearBorder:
+            d.wrapU = d.wrapV = SamplerDesc::Wrap::ClampToBorder;
+            break;
+        case CommonSampler::NearestClamp:
+            d.minFilter = d.magFilter = SamplerDesc::Filter::Nearest;
+            break;
+        case CommonSampler::LinearRepeat:
+            d.wrapU = d.wrapV = SamplerDesc::Wrap::Repeat;
+            break;
+        case CommonSampler::LinearMirror:
+            d.wrapU = d.wrapV = SamplerDesc::Wrap::MirroredRepeat;
+            break;
+        case CommonSampler::Count: break;
     }
-    usize h = ShaderKeyHash{}(k.vertex);
-    h ^= ShaderKeyHash{}(k.fragment) * 0x9E3779B97F4A7C15ull;
-    h ^= static_cast<usize>(k.blend) * 0xC2B2AE3D27D4EB4Full;
-    h ^= static_cast<usize>(k.depthTest) << 3;
-    h ^= static_cast<usize>(k.depthWrite) << 4;
-    h ^= static_cast<usize>(k.cullBackFace) << 5;
-    h ^= static_cast<usize>(k.colorAttachmentCount) << 6;
-    h ^= static_cast<usize>(k.depthFormat) << 9;
-    h ^= static_cast<usize>(k.sampleCount) << 13;
-    for (u32 i = 0; i < 4; ++i) {
-        h ^= static_cast<usize>(k.colorFormats[i]) << (16 + i * 4);
-    }
-    return h;
+    return d;
 }
+
+} // namespace
 
 Status ShaderLibrary::initialize(GPUBackend& backend) noexcept {
     backend_ = &backend;
-    shaders_.reserve(64);
-    pipelines_.reserve(128);
-    shaderIndex_.reserve(64);
-    pipelineIndex_.reserve(128);
+    overrides_.assign(kShaderCount, {});
+    overrideStamp_.assign(kShaderCount, 0);
+
+    for (u32 i = 0; i < kShaderCount; ++i) {
+        const ShaderBlob& blob = shader_blob(static_cast<ShaderId>(i));
+        ShaderDesc desc;
+        desc.stage = kShaderStages[i];
+        desc.spirv = blob.words;
+        desc.spirvBytes = blob.bytes;
+        desc.debugName = kShaderNames[i];
+        auto created = backend.create_shader(desc);
+        if (!created.ok()) {
+            lastError_ = std::string("shader nao criado: ") + kShaderNames[i];
+            AUREA_LOG_ERROR("%s", lastError_.c_str());
+            ++failures_;
+            return created.status();
+        }
+        shaders_[i] = *created;
+    }
+
+    for (u32 i = 0; i < static_cast<u32>(CommonSampler::Count); ++i) {
+        auto created = backend.create_sampler(common_sampler_desc(static_cast<CommonSampler>(i)));
+        if (!created.ok()) return created.status();
+        samplers_[i] = *created;
+    }
     return OkStatus;
 }
 
 void ShaderLibrary::shutdown() noexcept {
-    shaders_.clear();
+    if (!backend_) return;
+    for (auto& [key, handle] : pipelines_) backend_->destroy_pipeline(handle);
+    for (ShaderHandle& s : shaders_) {
+        if (s.valid()) backend_->destroy_shader(s);
+        s = ShaderHandle{};
+    }
+    for (SamplerHandle& s : samplers_) {
+        if (s.valid()) backend_->destroy_sampler(s);
+        s = SamplerHandle{};
+    }
+    forget_device();
+}
+
+void ShaderLibrary::forget_device() noexcept {
     pipelines_.clear();
-    shaderIndex_.clear();
-    pipelineIndex_.clear();
+    for (ShaderHandle& s : shaders_) s = ShaderHandle{};
+    for (SamplerHandle& s : samplers_) s = SamplerHandle{};
     backend_ = nullptr;
 }
 
-Result<ShaderHandle> ShaderLibrary::get_shader(const ShaderKey& key) noexcept {
-    if (!backend_) {
-        return Status{Errc::InvalidState, "biblioteca de shaders nao inicializada"};
-    }
-    if (!key.source) {
-        return Status{Errc::InvalidArgument, "shader sem fonte"};
-    }
-
-    auto it = shaderIndex_.find(key);
-    if (it != shaderIndex_.end()) {
-        ShaderEntry& entry = shaders_[it->second];
-        if (entry.valid) {
-            ++hits_;
-            return entry.handle;
-        }
-    }
-
-    ++misses_;
-    ShaderDesc desc;
-    desc.stage = key.stage;
-    desc.source = key.source;
-    desc.entryPoint = "main";
-    desc.debugName = key.source;
-
-    auto res = backend_->create_shader(desc);
-    if (!res.ok()) {
-        ++compileFailures_;
-        lastError_ = "falha ao compilar shader (variante ";
-        lastError_ += std::to_string(key.variantFlags);
-        lastError_ += ")";
-        AUREA_LOG_ERROR("%s", lastError_.c_str());
-        return res.status();
-    }
-
-    if (it != shaderIndex_.end()) {
-        shaders_[it->second].handle = *res;
-        shaders_[it->second].valid = true;
-        return *res;
-    }
-
-    ShaderEntry entry;
-    entry.key = key;
-    entry.handle = *res;
-    entry.valid = true;
-    shaders_.push_back(entry);
-    shaderIndex_.emplace(key, static_cast<u32>(shaders_.size()) - 1);
-    return entry.handle;
+ShaderHandle ShaderLibrary::shader(ShaderId id) const noexcept {
+    const u32 i = static_cast<u32>(id);
+    return i < kShaderCount ? shaders_[i] : ShaderHandle{};
 }
 
-void ShaderLibrary::invalidate_device_shaders() noexcept {
-    // O dispositivo foi recriado: os handles do driver morreram. As ENTRADAS do
-    // cache continuam — a chave estrutural não mudou, então na próxima
-    // requisição o shader é recompilado e o handle do cache é atualizado.
-    for (auto& entry : shaders_) {
-        entry.handle = ShaderHandle{};
-        entry.valid = false;
-    }
-    for (auto& entry : pipelines_) {
-        entry.handle = PipelineHandle{};
-        entry.valid = false;
-    }
+SamplerHandle ShaderLibrary::sampler(CommonSampler s) const noexcept {
+    const u32 i = static_cast<u32>(s);
+    return i < static_cast<u32>(CommonSampler::Count) ? samplers_[i] : SamplerHandle{};
 }
 
-Result<PipelineHandle> ShaderLibrary::get_pipeline(const PipelineKey& key) noexcept {
-    if (!backend_) {
-        return Status{Errc::InvalidState, "biblioteca de shaders nao inicializada"};
-    }
-
-    auto it = pipelineIndex_.find(key);
-    if (it != pipelineIndex_.end()) {
-        PipelineEntry& entry = pipelines_[it->second];
-        if (entry.valid) {
-            ++hits_;
-            return entry.handle;
-        }
-    }
-
-    ++misses_;
+Result<PipelineHandle> ShaderLibrary::pipeline(const PipelineKey& key) noexcept {
+    if (!backend_) return Status{Errc::InvalidState, "biblioteca de shaders sem backend"};
+    if (const auto it = pipelines_.find(key); it != pipelines_.end()) return it->second;
 
     PipelineDesc desc;
-
-    if (key.isCompute) {
-        auto cs = get_shader(key.compute);
-        if (!cs.ok()) return cs.status();
-
-        desc.isCompute = true;
-        desc.computeShader = *cs;
-
-        auto res = backend_->create_pipeline(desc);
-        if (!res.ok()) {
-            ++compileFailures_;
-            lastError_ = "falha ao compilar pipeline de compute";
-            AUREA_LOG_ERROR("%s", lastError_.c_str());
-            return res.status();
-        }
-
-        if (it != pipelineIndex_.end()) {
-            pipelines_[it->second].handle = *res;
-            pipelines_[it->second].valid = true;
-            return *res;
-        }
-        PipelineEntry entry;
-        entry.key = key;
-        entry.handle = *res;
-        entry.valid = true;
-        pipelines_.push_back(entry);
-        pipelineIndex_.emplace(key, static_cast<u32>(pipelines_.size()) - 1);
-        return entry.handle;
+    desc.isCompute = key.is_compute();
+    if (desc.isCompute) {
+        desc.computeShader = shader(key.compute);
+        desc.debugName = kShaderNames[static_cast<u32>(key.compute)];
+    } else {
+        desc.vertexShader = shader(key.vertex);
+        desc.fragmentShader = shader(key.fragment);
+        desc.debugName = key.fragment != ShaderId::Count
+                       ? kShaderNames[static_cast<u32>(key.fragment)] : "pipeline";
     }
-
-    // Os shaders do pipeline precisam existir antes dele.
-    auto vs = get_shader(key.vertex);
-    if (!vs.ok()) return vs.status();
-    auto fs = get_shader(key.fragment);
-    if (!fs.ok()) return fs.status();
-
-    desc.vertexShader = *vs;
-    desc.fragmentShader = *fs;
+    desc.blendEnabled = key.blendEnabled;
     desc.blend = key.blend;
-    desc.depthTest = key.depthTest;
-    desc.depthWrite = key.depthWrite;
-    desc.cullBackFace = key.cullBackFace;
-    desc.colorAttachmentCount = key.colorAttachmentCount;
-    for (u32 i = 0; i < 4; ++i) desc.colorFormats[i] = key.colorFormats[i];
-    desc.depthFormat = key.depthFormat;
-    desc.sampleCount = key.sampleCount;
+    desc.colorFormat = key.format;
+    desc.topology = key.topology;
+    desc.immutableSampler0 = SamplerHandle{key.immutableSampler};
 
-    auto res = backend_->create_pipeline(desc);
-    if (!res.ok()) {
-        ++compileFailures_;
-        lastError_ = "falha ao compilar pipeline (blend ";
-        lastError_ += std::to_string(static_cast<int>(key.blend));
-        lastError_ += ")";
+    auto created = backend_->create_pipeline(desc);
+    if (!created.ok()) {
+        ++failures_;
+        lastError_ = std::string("pipeline nao compilou: ") + (desc.debugName ? desc.debugName : "?");
         AUREA_LOG_ERROR("%s", lastError_.c_str());
-        return res.status();
+        return created.status();
     }
-
-    if (it != pipelineIndex_.end()) {
-        pipelines_[it->second].handle = *res;
-        pipelines_[it->second].valid = true;
-        return *res;
+    if (steady_) {
+        ++compilesSinceMark_;
+        AUREA_LOG_WARN("pipeline '%s' criado durante o playback", desc.debugName ? desc.debugName : "?");
     }
-
-    PipelineEntry entry;
-    entry.key = key;
-    entry.handle = *res;
-    entry.valid = true;
-    pipelines_.push_back(entry);
-    pipelineIndex_.emplace(key, static_cast<u32>(pipelines_.size()) - 1);
-    return entry.handle;
+    pipelines_.emplace(key, *created);
+    return *created;
 }
 
-Result<PipelineHandle> ShaderLibrary::composite_pipeline(BlendMode blend,
-                                                         SurfaceFormat targetFormat,
-                                                         u32 sampleCount) noexcept {
-    PipelineKey key;
-    // A fonte do shader de composição é fixa: um quad texturizado com o blend
-    // selecionado. Preview e export usam exatamente esta — é por isso que eles
-    // não podem divergir visualmente.
-    key.vertex.source   = kCompositeVertexSource;
-    key.vertex.stage    = ShaderStage::Vertex;
-    key.fragment.source = kCompositeFragmentSource;
-    key.fragment.stage  = ShaderStage::Fragment;
-    key.blend = blend;
-    key.depthTest = false;
-    key.depthWrite = false;
-    key.cullBackFace = false;
-    key.colorAttachmentCount = 1;
-    key.colorFormats[0] = targetFormat;
-    key.sampleCount = sampleCount;
-    return get_pipeline(key);
-}
-
-Result<PipelineHandle> ShaderLibrary::compute_pipeline(const ShaderKey& shader) noexcept {
-    PipelineKey key;
-    key.isCompute = true;
-    key.compute = shader;
-    // Sem estágios gráficos, sem anexos de cor, sem blend: um pipeline de
-    // compute é declarado como compute e o backend monta o estado certo.
-    key.colorAttachmentCount = 0;
-    return get_pipeline(key);
-}
-
-u32 ShaderLibrary::prewarm_blend_modes(const BlendMode* modes, u32 count,
-                                       SurfaceFormat targetFormat,
-                                       u32 sampleCount) noexcept {
-    if (!modes) return 0;
-    u32 compiled = 0;
+u32 ShaderLibrary::prewarm(const PipelineKey* keys, u32 count) noexcept {
+    u32 created = 0;
+    const bool wasSteady = steady_;
+    steady_ = false;   // pré-aquecer não é "durante o playback"
     for (u32 i = 0; i < count; ++i) {
-        PipelineKey key;
-        key.vertex.source   = kCompositeVertexSource;
-        key.vertex.stage    = ShaderStage::Vertex;
-        key.fragment.source = kCompositeFragmentSource;
-        key.fragment.stage  = ShaderStage::Fragment;
-        key.blend = modes[i];
-        key.colorFormats[0] = targetFormat;
-        key.sampleCount = sampleCount;
-
-        const bool alreadyCached = pipelineIndex_.find(key) != pipelineIndex_.end();
-        auto res = get_pipeline(key);
-        if (res.ok() && !alreadyCached) ++compiled;
+        const usize before = pipelines_.size();
+        (void)pipeline(keys[i]);
+        if (pipelines_.size() > before) ++created;
     }
-    // Compilar 12 blends antes do primeiro frame custa ~100 ms uma vez; deixar
-    // para a primeira vez que cada um aparece custa 12 engasgos durante o
-    // playback. O primeiro é claramente melhor.
-    AUREA_LOG_INFO("ShaderLibrary: pre-aquecidos %u pipelines de blend", compiled);
-    return compiled;
+    steady_ = wasSteady;
+    return created;
 }
 
-u32 ShaderLibrary::prewarm_effects(const u32* effectTypeIds, u32 count,
-                                   SurfaceFormat targetFormat) noexcept {
-    if (!effectTypeIds || count == 0) return 0;
-    // Cada efeito tem um ou dois pipelines (um por classe de fusão). Pré-aquecer
-    // aqui garante que o EXPORT nunca compile nada no meio — um compile de 200 ms
-    // no meio da exportação seria 200 ms de vídeo com o frame errado, ou uma
-    // pausa de uma eternidade.
-    u32 compiled = 0;
-    for (u32 i = 0; i < count; ++i) {
-        PipelineKey key;
-        key.vertex.source   = kCompositeVertexSource;
-        key.vertex.stage    = ShaderStage::Vertex;
-        key.fragment.source = kCompositeFragmentSource;
-        key.fragment.stage  = ShaderStage::Fragment;
-        key.fragment.variantFlags = effectTypeIds[i];
-        key.blend = BlendMode::Normal;
-        key.colorFormats[0] = targetFormat;
+u32 ShaderLibrary::reload_changed(const char* spvDirectory) noexcept {
+    if (!backend_ || !spvDirectory || !*spvDirectory) return 0;
+    namespace fs = std::filesystem;
+    u32 reloaded = 0;
 
-        const bool alreadyCached = pipelineIndex_.find(key) != pipelineIndex_.end();
-        auto res = get_pipeline(key);
-        if (res.ok() && !alreadyCached) ++compiled;
+    for (u32 i = 0; i < kShaderCount; ++i) {
+        std::error_code ec;
+        const fs::path path = fs::path(spvDirectory) / (std::string(kShaderNames[i]) + ".spv");
+        const auto stamp = fs::last_write_time(path, ec);
+        if (ec) continue;
+        const i64 ticks = static_cast<i64>(stamp.time_since_epoch().count());
+        if (overrideStamp_[i] == 0) { overrideStamp_[i] = ticks; continue; }   // primeira visita
+        if (ticks == overrideStamp_[i]) continue;
+
+        std::FILE* f = std::fopen(path.string().c_str(), "rb");
+        if (!f) continue;
+        std::vector<u32> words;
+        std::fseek(f, 0, SEEK_END);
+        const long size = std::ftell(f);
+        std::fseek(f, 0, SEEK_SET);
+        if (size > 0 && size % 4 == 0) {
+            words.resize(static_cast<usize>(size) / 4);
+            if (std::fread(words.data(), 1, static_cast<usize>(size), f) != static_cast<usize>(size)) {
+                words.clear();
+            }
+        }
+        std::fclose(f);
+        if (words.empty()) continue;
+
+        ShaderDesc desc;
+        desc.stage = kShaderStages[i];
+        desc.spirv = words.data();
+        desc.spirvBytes = words.size() * 4;
+        desc.debugName = kShaderNames[i];
+        auto created = backend_->create_shader(desc);
+        if (!created.ok()) {
+            AUREA_LOG_WARN("recarga: '%s' nao compilou, mantendo a versao anterior", kShaderNames[i]);
+            overrideStamp_[i] = ticks;
+            continue;
+        }
+        backend_->destroy_shader(shaders_[i]);
+        shaders_[i] = *created;
+        overrides_[i] = std::move(words);
+        overrideStamp_[i] = ticks;
+
+        // Todo pipeline que usava o shader antigo é descartado; o próximo
+        // frame o recria com o novo.
+        const ShaderId id = static_cast<ShaderId>(i);
+        for (auto it = pipelines_.begin(); it != pipelines_.end();) {
+            const PipelineKey& k = it->first;
+            if (k.vertex == id || k.fragment == id || k.compute == id) {
+                backend_->destroy_pipeline(it->second);
+                it = pipelines_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        ++reloaded;
+        AUREA_LOG_INFO("shader recarregado: %s", kShaderNames[i]);
     }
-    return compiled;
+    return reloaded;
 }
 
 } // namespace aurea

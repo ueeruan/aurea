@@ -1,0 +1,840 @@
+#include "aurea/render/Renderer.hpp"
+#include "aurea/core/Log.hpp"
+#include "aurea/core/Time.hpp"
+#include "aurea/project/Project.hpp"
+
+#include <algorithm>
+#include <cmath>
+#include <cstring>
+
+namespace aurea {
+namespace {
+
+constexpr SurfaceFormat kWorkFormat = SurfaceFormat::RGBA16F;
+
+f32 srgb_to_linear(f32 c) noexcept {
+    return c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
+}
+
+/// float → half (IEEE 754 binary16), arredondando para o mais próximo.
+u16 to_half(f32 f) noexcept {
+    u32 x;
+    std::memcpy(&x, &f, 4);
+    const u32 sign = (x >> 16) & 0x8000u;
+    i32 exp = static_cast<i32>((x >> 23) & 0xFF) - 127 + 15;
+    u32 mant = x & 0x7FFFFFu;
+    if (exp <= 0) {
+        if (exp < -10) return static_cast<u16>(sign);
+        mant = (mant | 0x800000u) >> (1 - exp);
+        return static_cast<u16>(sign | ((mant + 0x1000u) >> 13));
+    }
+    if (exp >= 31) return static_cast<u16>(sign | 0x7C00u);
+    const u32 h = sign | (static_cast<u32>(exp) << 10) | (mant >> 13);
+    return static_cast<u16>(h + ((mant >> 12) & 1u));
+}
+
+/// Maior fator de escala de uma matriz 2D (comprimento da maior coluna).
+f32 max_scale(const Mat4& m) noexcept {
+    const f32 sx = std::sqrt(m.col[0].x * m.col[0].x + m.col[0].y * m.col[0].y);
+    const f32 sy = std::sqrt(m.col[1].x * m.col[1].x + m.col[1].y * m.col[1].y);
+    return std::max(sx, sy);
+}
+
+/// Densidade de trabalho da layer: texels por pixel da layer, arredondada
+/// PARA CIMA à potência de 2 (1, 1/2, 1/4...). Duas razões para o degrau:
+/// qualidade nunca abaixo do que a tela mostra, e poucas resoluções distintas
+/// — uma layer com zoom animado não cria textura nova a cada frame.
+f32 texel_scale_for(f32 onScreenScale) noexcept {
+    if (!(onScreenScale > 0.0f)) return 1.0f;
+    f32 k = 1.0f;
+    while (k * 0.5f >= onScreenScale && k > 1.0f / 32.0f) k *= 0.5f;
+    return k;
+}
+
+Mat4 layer_matrix(const Layer& l, FrameIndex local) noexcept {
+    const TrackSet& t = l.tracks;
+    auto s = [&](TrackProperty p, f32 fallback) noexcept {
+        const Track* tr = t.find(p);
+        return (tr && !tr->keys.empty()) ? tr->sample(local) : fallback;
+    };
+    const Vec3 pos{s(TrackProperty::PositionX, l.transform.position.x),
+                   s(TrackProperty::PositionY, l.transform.position.y), 0.0f};
+    const Vec3 scale{s(TrackProperty::ScaleX, l.transform.scale.x),
+                     s(TrackProperty::ScaleY, l.transform.scale.y), 1.0f};
+    const f32 rot = s(TrackProperty::RotationZ, l.transform.rotation.z) * kDeg2Rad;
+    const Vec3 anchor{s(TrackProperty::AnchorX, l.transform.anchor.x),
+                      s(TrackProperty::AnchorY, l.transform.anchor.y), 0.0f};
+    return Mat4::translation(pos) * Mat4::from_quat(Quat::from_axis_angle(Vec3{0, 0, 1}, rot))
+         * Mat4::scale(scale) * Mat4::translation(-anchor);
+}
+
+f32 layer_opacity(const Layer& l, FrameIndex local) noexcept {
+    const Track* tr = l.tracks.find(TrackProperty::Opacity);
+    const f32 v = (tr && !tr->keys.empty()) ? tr->sample(local) : l.transform.opacity;
+    return std::clamp(v, 0.0f, 1.0f);
+}
+
+/// Matriz clip ← composição: pixels da composição (y para baixo) → NDC do
+/// Vulkan (y para baixo também, então só escala e desloca).
+Mat4 clip_from_comp(f32 w, f32 h) noexcept {
+    Mat4 m;
+    m.col[0] = Vec4{2.0f / w, 0, 0, 0};
+    m.col[1] = Vec4{0, 2.0f / h, 0, 0};
+    m.col[3] = Vec4{-1.0f, -1.0f, 0, 1};
+    return m;
+}
+
+struct LayerPush {
+    Mat4 clipFromLayer;
+    Vec4 region;
+    Vec4 uvRect;
+    Vec4 params;
+};
+static_assert(sizeof(LayerPush) <= binding::kPushConstantBytes, "push constants do layer.vert");
+
+struct YuvUniforms {
+    Vec4 coeffs;
+    Vec4 transfer;
+    Vec4 crop;
+    Vec4 rot;
+    Vec4 sampling;
+    Vec4 texel;
+};
+
+} // namespace
+
+// =============================================================================
+// Ciclo de vida
+// =============================================================================
+Renderer::Renderer() {
+    draws_.reserve(64);
+    framesInFlight_.reserve(16);
+    timingScratch_.resize(128);
+}
+
+Renderer::~Renderer() { shutdown(); }
+
+Status Renderer::initialize(GPUBackend& backend, const EffectRegistry& effects) noexcept {
+    backend_ = &backend;
+    effects_ = &effects;
+    if (const Status s = shaders_.initialize(backend); !s.ok()) {
+        backend_ = nullptr;
+        return s;
+    }
+
+    // PRÉ-AQUECIMENTO: todo pipeline embutido é compilado aqui, antes do
+    // primeiro frame. Com o cache de pipeline persistido pelo backend, da
+    // segunda abertura em diante isto é quase instantâneo.
+    std::vector<PipelineKey> keys;
+    effects.collect_pipelines(keys, kWorkFormat);
+    keys.push_back(PipelineKey::fullscreen(ShaderId::video_yuv_planar_frag, kWorkFormat));
+    keys.push_back(PipelineKey::fullscreen(ShaderId::video_rgba_to_linear_frag, kWorkFormat));
+    keys.push_back(PipelineKey::fullscreen(ShaderId::common_copy_frag, kWorkFormat));
+    keys.push_back(PipelineKey::graphics(ShaderId::composite_layer_vert, ShaderId::composite_layer_frag,
+                                         kWorkFormat, true, BlendMode::Normal));
+    keys.push_back(PipelineKey::graphics(ShaderId::composite_layer_vert, ShaderId::composite_layer_frag,
+                                         kWorkFormat, true, BlendMode::Add));
+    for (SurfaceFormat f : {SurfaceFormat::RGBA8, SurfaceFormat::BGRA8}) {
+        keys.push_back(PipelineKey::graphics(ShaderId::composite_layer_vert, ShaderId::composite_output_frag, f));
+    }
+    prewarmed_ = shaders_.prewarm(keys.data(), static_cast<u32>(keys.size()));
+    AUREA_LOG_INFO("renderer: %u pipelines pre-aquecidos", prewarmed_);
+    return OkStatus;
+}
+
+void Renderer::shutdown() noexcept {
+    if (!backend_) return;
+    backend_->wait_idle();
+    framesInFlight_.clear();
+    release_project_resources();
+    pool_.clear();
+    shaders_.shutdown();
+    backend_ = nullptr;
+}
+
+void Renderer::forget_device() noexcept {
+    framesInFlight_.clear();
+    planar_.clear();
+    images_.clear();
+    luts_.clear();
+    uploads_.clear();
+    pool_.forget();
+    shaders_.forget_device();
+    backend_ = nullptr;
+}
+
+void Renderer::release_project_resources() noexcept {
+    if (!backend_) return;
+    for (auto& [k, p] : planar_) {
+        for (TextureHandle& t : p.plane) if (t.valid()) backend_->destroy_texture(t);
+    }
+    for (auto& [k, i] : images_) backend_->destroy_texture(i.texture);
+    for (auto& [k, l] : luts_) backend_->destroy_texture(l.texture);
+    planar_.clear();
+    images_.clear();
+    luts_.clear();
+    uploads_.clear();
+}
+
+// =============================================================================
+// EffectResources
+// =============================================================================
+TextureHandle Renderer::curve_lut(const CurveData& curve) noexcept {
+    if (!backend_) return TextureHandle{};
+    const u64 key = curve.hash();
+    if (auto it = luts_.find(key); it != luts_.end()) {
+        it->second.lastFrame = frameNumber_;
+        return it->second.texture;
+    }
+    TextureDesc d;
+    d.width = 256;
+    d.height = 1;
+    d.format = SurfaceFormat::RGBA16F;
+    d.sampled = true;
+    d.transferDst = true;
+    d.debugName = "lut-curvas";
+    auto tex = backend_->create_texture(d);
+    if (!tex.ok()) return TextureHandle{};
+
+    // Canal = mestra ∘ canal (a mestra age sobre R, G e B, depois cada canal).
+    PendingUpload up;
+    up.texture = *tex;
+    up.bytesPerRow = 256 * 8;
+    up.data.resize(256 * 8);
+    u16* px = reinterpret_cast<u16*>(up.data.data());
+    for (u32 i = 0; i < 256; ++i) {
+        const f32 x = static_cast<f32>(i) / 255.0f;
+        const f32 m = std::clamp(curve.evaluate(0, x), 0.0f, 1.0f);
+        px[i * 4 + 0] = to_half(std::clamp(curve.evaluate(1, m), 0.0f, 1.0f));
+        px[i * 4 + 1] = to_half(std::clamp(curve.evaluate(2, m), 0.0f, 1.0f));
+        px[i * 4 + 2] = to_half(std::clamp(curve.evaluate(3, m), 0.0f, 1.0f));
+        px[i * 4 + 3] = to_half(1.0f);
+    }
+    uploads_.push_back(std::move(up));
+    luts_[key] = LutTexture{*tex, frameNumber_};
+    return *tex;
+}
+
+// =============================================================================
+// Fase 1 — prepare (sob o lock do modelo)
+// =============================================================================
+void Renderer::prepare(const Composition& comp, const Project& project, FrameIndex time,
+                       MediaManager* media, const ImagePixels* (*imageLookup)(void*, AssetId),
+                       void* imageCtx, const RenderSettings& settings, u64 frameNumber,
+                       i32 playDirection, DecodeMode decodeMode, f32 speed, FrameSnapshot& out) {
+    frameNumber_ = frameNumber;
+    out.layers.clear();
+    out.compWidth = comp.width();
+    out.compHeight = comp.height();
+    const Color bg = comp.background();
+    out.background = Vec4{srgb_to_linear(bg.r), srgb_to_linear(bg.g), srgb_to_linear(bg.b),
+                          comp.transparent_background() ? 0.0f : 1.0f};
+    out.time = time;
+    out.videoLayers = 0;
+    out.staleVideoFrames = 0;
+    out.missingVideoFrames = 0;
+
+    const f32 previewFactor = static_cast<f32>(settings.previewNumerator)
+                            / static_cast<f32>(std::max(1u, settings.previewDenominator));
+    const f64 fps = comp.fps() > 0.0 ? comp.fps() : 30.0;
+
+    // A ORDEM DO CORE É A ORDEM DE COMPOSIÇÃO: `order()` do fundo para a
+    // frente. Nenhuma lista paralela, nenhum reordenamento por tipo.
+    const OrderedIds<LayerId>& order = comp.order();
+    const u32 n = order.size();
+    u32 used = 0;
+    for (u32 i = 0; i < n; ++i) {
+        const LayerId id = order.at(i);
+        const Layer* l = comp.layer(id);
+        if (!l || !l->visible || !l->contains_time(time)) continue;
+        const FrameIndex local = l->local_time(time);
+
+        RenderLayer rl;
+        rl.id = id;
+        rl.blend = l->blendMode;
+        rl.opacity = layer_opacity(*l, local);
+        if (rl.opacity <= 0.0f) continue;   // invisível: nenhum passe, nenhum decode
+
+        switch (l->kind) {
+            case LayerKind::Video: {
+                const Asset* asset = project.asset(l->source);
+                if (!asset || !asset->has_video()) continue;
+                rl.source.kind = LayerSource::Kind::Video;
+                rl.source.width = asset->video.width;
+                rl.source.height = asset->video.height;
+                ++out.videoLayers;
+                break;
+            }
+            case LayerKind::Image: {
+                const ImagePixels* px = imageLookup ? imageLookup(imageCtx, l->source) : nullptr;
+                if (!px || !px->width || !px->height) continue;
+                rl.source.kind = LayerSource::Kind::Image;
+                rl.source.image = l->source;
+                rl.source.pixels = px;
+                rl.source.width = px->width;
+                rl.source.height = px->height;
+                break;
+            }
+            case LayerKind::Shape: {
+                if (l->shape.shapeType != 0 || !l->shape.filled) continue;   // só retângulo sólido nesta fase
+                rl.source.kind = LayerSource::Kind::Solid;
+                const Vec4 c = l->shape.fillColor;
+                rl.source.solid = Vec4{srgb_to_linear(c.x) * c.w, srgb_to_linear(c.y) * c.w,
+                                       srgb_to_linear(c.z) * c.w, c.w};
+                rl.source.width = static_cast<u32>(std::max(1.0f, l->shape.bounds.w));
+                rl.source.height = static_cast<u32>(std::max(1.0f, l->shape.bounds.h));
+                break;
+            }
+            default:
+                continue;   // texto, 3D, partículas: fora desta fase
+        }
+
+        // Transform da layer, com a cadeia de pais (cada pai no próprio tempo).
+        Mat4 m = layer_matrix(*l, local);
+        LayerId parent = l->parent;
+        for (u32 depth = 0; parent.valid() && depth < 16; ++depth) {
+            const Layer* p = comp.layer(parent);
+            if (!p) break;
+            m = layer_matrix(*p, p->local_time(time)) * m;
+            parent = p->parent;
+        }
+        rl.compFromLayer = m;
+        rl.texelScale = texel_scale_for(max_scale(m) * previewFactor);
+
+        // Vídeo: pede o frame e pega o melhor disponível AGORA (nunca espera).
+        if (rl.source.kind == LayerSource::Kind::Video && media) {
+            const Asset* asset = project.asset(l->source);
+            VideoSource* src = media->source_for(id, l->source, *asset, frameNumber);
+            if (src) {
+                i64 mediaUs = static_cast<i64>(std::llround(static_cast<f64>(local.value) * 1e6 / fps));
+                const i64 dur = src->info().durationUs;
+                if (dur > 0) mediaUs = std::clamp<i64>(mediaUs, 0, dur - src->frame_duration_us() / 2);
+                DecodeRequest req;
+                req.targetUs = mediaUs;
+                req.mode = decodeMode;
+                req.direction = playDirection;
+                req.speed = speed;
+                src->request(req);
+                bool exact = false;
+                rl.source.frame = src->frame_for(mediaUs, &exact);
+                rl.source.frameExact = exact;
+                if (!rl.source.frame) ++out.missingVideoFrames;
+                else if (!exact) ++out.staleVideoFrames;
+            }
+            if (!rl.source.frame) {
+                // Ainda nada decodificado (primeiro frame a caminho): a layer
+                // fica de fora deste frame; o callback da fonte acorda o render.
+                continue;
+            }
+        }
+
+        // Imagem nova: sobe uma vez (a cópia dos pixels só acontece aqui).
+        if (rl.source.kind == LayerSource::Kind::Image && backend_) {
+            const u64 key = l->source.pack();
+            auto it = images_.find(key);
+            // Mesmo id com outro tamanho = outro conteúdo (projeto trocado
+            // sem liberar, asset reimportado): a textura velha não serve.
+            if (it != images_.end()
+                && (it->second.width != rl.source.width || it->second.height != rl.source.height)) {
+                backend_->destroy_texture(it->second.texture);
+                images_.erase(it);
+                it = images_.end();
+            }
+            if (it == images_.end()) {
+                TextureDesc d;
+                d.width = rl.source.width;
+                d.height = rl.source.height;
+                d.format = SurfaceFormat::RGBA8;
+                d.sampled = true;
+                d.transferDst = true;
+                d.debugName = "imagem";
+                auto tex = backend_->create_texture(d);
+                if (tex.ok()) {
+                    PendingUpload up;
+                    up.texture = *tex;
+                    up.bytesPerRow = rl.source.width * 4;
+                    up.data = rl.source.pixels->rgba;
+                    uploads_.push_back(std::move(up));
+                    images_[key] = ImageTexture{*tex, rl.source.width, rl.source.height, frameNumber};
+                }
+            } else {
+                it->second.lastFrame = frameNumber;
+            }
+            rl.source.pixels = nullptr;   // não vale fora do lock
+        }
+
+        if (out.plans.size() <= used) out.plans.emplace_back();
+        LayerPlacement placement;
+        placement.compFromLayer = m;
+        placement.compWidth = out.compWidth;
+        placement.compHeight = out.compHeight;
+        placement.layerWidth = rl.source.width;
+        placement.layerHeight = rl.source.height;
+        EffectGraph::plan(*l, *effects_, local, rl.texelScale, placement, this, out.plans[used]);
+
+        out.layers.push_back(std::move(rl));
+        ++used;
+    }
+    for (u32 k = used; k < out.plans.size(); ++k) out.plans[k].clear();
+}
+
+// =============================================================================
+// Fase 2 — render (sem lock)
+// =============================================================================
+void Renderer::flush_uploads() noexcept {
+    for (PendingUpload& up : uploads_) {
+        if (const Status s = backend_->upload_texture(up.texture, up.data.data(), up.bytesPerRow); !s.ok()) {
+            AUREA_LOG_WARN("upload de textura falhou: %s", s.message().data());
+        }
+    }
+    uploads_.clear();
+}
+
+bool Renderer::build_video_source(const RenderLayer& layer, u32 layerIndex, u32 w, u32 h,
+                                  FGTexture target, u64 frameNumber) noexcept {
+    DecodedFrame* f = layer.source.frame.get();
+    if (!f) return false;
+    (void)layerIndex;
+
+    YuvUniforms u{};
+    f32 kr = 0.2126f, kb = 0.0722f;
+    f->color.coefficients(kr, kb);
+    u.coeffs = Vec4{kr, kb, f->color.fullRange ? 1.0f : 0.0f, static_cast<f32>(f->color.bitDepth)};
+    const bool hdr = f->color.hdr();
+    // HDR no preview SDR: tone map com pico de 1000 nits (o padrão de
+    // masterização dos celulares) sobre o branco de referência de 203 nits.
+    u.transfer = Vec4{static_cast<f32>(static_cast<u8>(f->color.transfer)),
+                      static_cast<f32>(static_cast<u8>(f->color.primaries)),
+                      hdr ? 1.0f : 0.0f, 1000.0f / 203.0f};
+    const f32 cw = static_cast<f32>(std::max(1u, f->width));
+    const f32 ch = static_cast<f32>(std::max(1u, f->height));
+    const f32 vw = static_cast<f32>(f->visibleWidth ? f->visibleWidth : f->width);
+    const f32 vh = static_cast<f32>(f->visibleHeight ? f->visibleHeight : f->height);
+    u.crop = Vec4{static_cast<f32>(f->cropLeft) / cw, static_cast<f32>(f->cropTop) / ch, vw / cw, vh / ch};
+    switch (f->rotation) {
+        case 90:  u.rot = Vec4{0.0f, -1.0f, 1.0f, 0.0f}; break;
+        case 180: u.rot = Vec4{-1.0f, 0.0f, 0.0f, -1.0f}; break;
+        case 270: u.rot = Vec4{0.0f, 1.0f, -1.0f, 0.0f}; break;
+        default:  u.rot = Vec4{1.0f, 0.0f, 0.0f, 1.0f}; break;
+    }
+    const f32 dispW = (f->rotation == 90 || f->rotation == 270) ? vh : vw;
+    const bool taps = dispW / static_cast<f32>(std::max(1u, w)) >= 2.0f;
+    // Tamanho de um pixel de SAÍDA em uv da fonte (já sem a rotação, que só
+    // troca os eixos: a caixa de redução é quadrada o bastante para isso).
+    u.texel = Vec4{1.0f / cw, 1.0f / ch, (vw / cw) / static_cast<f32>(std::max(1u, (f->rotation % 180) ? h : w)),
+                   (vh / ch) / static_cast<f32>(std::max(1u, (f->rotation % 180) ? w : h))};
+
+    if (f->hardwareBuffer) {
+        // ZERO-COPY: o AHardwareBuffer do decoder vira textura sem passar pela
+        // CPU. O backend cacheia a importação por buffer (o ImageReader
+        // recicla um conjunto fixo), então importar custa ~0 em regime.
+        ExternalImageDesc ext;
+        ext.nativeHandle = f->hardwareBuffer;
+        ext.width = f->width;
+        ext.height = f->height;
+        ext.format = f->format;
+        auto imported = backend_->import_external_image(ext);
+        if (imported.ok()) {
+            u.sampling = Vec4{0.0f, 1.0f, taps ? 1.0f : 0.0f, 0.0f};
+            PipelineKey key = PipelineKey::fullscreen(ShaderId::video_yuv_external_frag, kWorkFormat);
+            key.immutableSampler = imported->sampler.id;
+            auto pipe = shaders_.pipeline(key);
+            if (!pipe.ok()) return false;
+
+            TextureDesc d;
+            d.width = f->width;
+            d.height = f->height;
+            d.format = SurfaceFormat::RGBA8;
+            const FGTexture extTex = graph_.import_texture("frame-do-decoder", imported->texture, d);
+            void* ubo = arena_.alloc(sizeof(u), 16);
+            std::memcpy(ubo, &u, sizeof(u));
+            struct Cap { PipelineHandle p; FGTexture t; u64 sampler; void* ubo; } cap{*pipe, extTex, imported->sampler.id, ubo};
+            const u32 pass = graph_.add_raster_pass("cor-do-video", PassStage::Decode, target, LoadOp::DontCare,
+                                                    Vec4{0, 0, 0, 0}, [cap](PassContext& pc) {
+                pc.cmds.bind_pipeline(cap.p);
+                pc.cmds.bind_texture(0, pc.texture(cap.t), SamplerHandle{cap.sampler});
+                pc.cmds.set_uniforms(cap.ubo, sizeof(YuvUniforms));
+                pc.cmds.draw(3);
+            });
+            graph_.read(pass, extTex);
+            lastZeroCopy_ = true;
+            return true;
+        }
+        AUREA_LOG_WARN("importacao zero-copy falhou; sem planos de CPU para cair no fallback");
+        return false;
+    }
+
+    // FALLBACK: planos na CPU (aparelho sem importação de AHardwareBuffer, ou
+    // host de testes). Uma textura por plano, persistente por layer, sobe a
+    // cada frame novo.
+    if (f->planeCount < 2 || !f->planes[0]) return false;
+    const bool tenBit = f->format == PixelFormat::P010;
+    const bool threePlane = f->format == PixelFormat::YUV420P;
+    const u64 key = layer.id.pack();
+    PlanarTextures& pt = planar_[key];
+    if (pt.width != f->width || pt.height != f->height || pt.format != f->format) {
+        for (TextureHandle& t : pt.plane) {
+            if (t.valid()) backend_->destroy_texture(t);
+            t = TextureHandle{};
+        }
+        pt.width = f->width;
+        pt.height = f->height;
+        pt.format = f->format;
+        const u32 planes = threePlane ? 3u : 2u;
+        for (u32 p = 0; p < planes; ++p) {
+            TextureDesc d;
+            d.width = p == 0 ? f->width : (f->width + 1) / 2;
+            d.height = p == 0 ? f->height : (f->height + 1) / 2;
+            d.format = p == 0 || threePlane ? (tenBit ? SurfaceFormat::R16 : SurfaceFormat::R8)
+                                            : (tenBit ? SurfaceFormat::RG16 : SurfaceFormat::RG8);
+            d.sampled = true;
+            d.transferDst = true;
+            d.debugName = "plano-de-video";
+            auto tex = backend_->create_texture(d);
+            if (!tex.ok()) return false;
+            pt.plane[p] = *tex;
+        }
+    }
+    pt.lastFrame = frameNumber;
+    const u32 planes = threePlane ? 3u : 2u;
+    for (u32 p = 0; p < planes; ++p) {
+        if (!f->planes[p]) return false;
+        if (!backend_->upload_texture(pt.plane[p], f->planes[p], f->strides[p]).ok()) return false;
+    }
+
+    const f32 layoutKind = f->format == PixelFormat::NV21 ? 1.0f : (threePlane ? 2.0f : 0.0f);
+    // P010 amostrado como unorm16: código de 10 bits = amostra * 65535 / (64 * 1023).
+    const f32 codeScale = tenBit ? 65535.0f / (64.0f * 1023.0f) : 1.0f;
+    u.sampling = Vec4{layoutKind, codeScale, taps ? 1.0f : 0.0f, 0.0f};
+
+    EffectBuildContext ctx(graph_, shaders_, arena_, *this, kWorkFormat, 4096);
+    const SamplerHandle lin = shaders_.sampler(CommonSampler::LinearClamp);
+    (void)lin;
+    return ctx.fullscreen_pass("cor-do-video", PassStage::Decode, target, ShaderId::video_yuv_planar_frag,
+                               {PassTexture{{}, pt.plane[0], CommonSampler::LinearClamp},
+                                PassTexture{{}, pt.plane[1], CommonSampler::LinearClamp},
+                                PassTexture{{}, threePlane ? pt.plane[2] : pt.plane[1], CommonSampler::LinearClamp}},
+                               &u, sizeof(u)) != kInvalidIndex;
+}
+
+bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEffects, LayerImage& out,
+                            std::vector<FrameRef>& framesUsed, u64 frameNumber) noexcept {
+    const u32 maxTex = std::min<u32>(backend_->capabilities().maxTexture2D, 8192);
+    const f32 k = layer.texelScale;
+    u32 w = std::max(1u, static_cast<u32>(std::ceil(static_cast<f32>(layer.source.width) * k)));
+    u32 h = std::max(1u, static_cast<u32>(std::ceil(static_cast<f32>(layer.source.height) * k)));
+    if (w > maxTex || h > maxTex) {
+        const f32 r = static_cast<f32>(maxTex) / static_cast<f32>(std::max(w, h));
+        w = std::max(1u, static_cast<u32>(static_cast<f32>(w) * r));
+        h = std::max(1u, static_cast<u32>(static_cast<f32>(h) * r));
+    }
+    TextureDesc d;
+    d.width = w;
+    d.height = h;
+    d.format = kWorkFormat;
+    d.sampled = true;
+    d.renderTarget = true;
+
+    out.region = Rect{0.0f, 0.0f, static_cast<f32>(layer.source.width), static_cast<f32>(layer.source.height)};
+    out.width = w;
+    out.height = h;
+
+    switch (layer.source.kind) {
+        case LayerSource::Kind::Video: {
+            out.texture = graph_.create_texture("layer-video", d);
+            if (!build_video_source(layer, layerIndex, w, h, out.texture, frameNumber)) return false;
+            framesUsed.push_back(layer.source.frame);
+            return true;
+        }
+        case LayerSource::Kind::Image: {
+            auto it = images_.find(layer.source.image.pack());
+            if (it == images_.end()) return false;
+            out.texture = graph_.create_texture("layer-imagem", d);
+            EffectBuildContext ctx(graph_, shaders_, arena_, *this, kWorkFormat, maxTex);
+            const Vec4 flags{0.0f, 0.0f, 0.0f, 0.0f};
+            return ctx.fullscreen_pass("imagem", PassStage::Decode, out.texture, ShaderId::video_rgba_to_linear_frag,
+                                       {PassTexture{{}, it->second.texture, CommonSampler::LinearClamp}},
+                                       &flags, sizeof(flags)) != kInvalidIndex;
+        }
+        case LayerSource::Kind::Solid: {
+            // Sólido: um clear, sem shader. Sem efeitos, 1x1 basta — a
+            // composição estica. Com efeitos (blur, glow), a textura precisa da
+            // densidade da layer: um blur sobre 1 texel não tem vizinhança.
+            if (!hasEffects) {
+                d.width = d.height = 1;
+                out.width = out.height = 1;
+            }
+            out.texture = graph_.create_texture("layer-solida", d);
+            graph_.add_raster_pass("solido", PassStage::Decode, out.texture, LoadOp::Clear, layer.source.solid,
+                                   [](PassContext&) {});
+            return true;
+        }
+        case LayerSource::Kind::None: break;
+    }
+    return false;
+}
+
+Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
+                        const OffscreenTarget* offscreen, FrameStats& stats,
+                        RenderTimings& timings) noexcept {
+    if (!backend_) return Status{Errc::InvalidState, "renderer sem backend"};
+    const u64 t0 = monotonic_ns();
+
+    FrameBegin fb;
+    if (const Status s = backend_->begin_frame(fb); !s.ok()) {
+        // Sem imagem de swapchain neste vsync (superfície em recriação): os
+        // frames de vídeo deste snapshot só são soltos — não houve GPU.
+        for (RenderLayer& l : snap.layers) l.source.frame.reset();
+        return s;
+    }
+    const u64 tBegin = monotonic_ns();
+    timings.acquireWaitMs = static_cast<f32>(static_cast<f64>(tBegin - t0) * 1e-6);
+
+    flush_uploads();
+    pool_.begin_frame(*backend_, fb.frameNumber);
+    graph_.reset();
+    arena_.reset();
+    draws_.clear();
+    lastZeroCopy_ = false;
+    framesInFlight_.clear();
+
+    // --- Alvo da composição: resolução de PREVIEW, coordenadas de COMPOSIÇÃO.
+    u32 cw = 0, ch = 0;
+    if (offscreen && offscreen->texture.valid()) {
+        cw = offscreen->width;
+        ch = offscreen->height;
+    } else {
+        const u32 num = std::max(1u, settings.previewNumerator);
+        const u32 den = std::max(1u, settings.previewDenominator);
+        cw = std::max(1u, snap.compWidth * num / den);
+        ch = std::max(1u, snap.compHeight * num / den);
+        const u32 maxTex = backend_->capabilities().maxTexture2D;
+        if (cw > maxTex || ch > maxTex) {
+            const f32 r = static_cast<f32>(maxTex) / static_cast<f32>(std::max(cw, ch));
+            cw = std::max(1u, static_cast<u32>(static_cast<f32>(cw) * r));
+            ch = std::max(1u, static_cast<u32>(static_cast<f32>(ch) * r));
+        }
+    }
+    TextureDesc compDesc;
+    compDesc.width = cw;
+    compDesc.height = ch;
+    compDesc.format = kWorkFormat;
+    compDesc.sampled = true;
+    compDesc.renderTarget = true;
+    compDesc.transferSrc = true;
+    const FGTexture comp = (offscreen && offscreen->texture.valid())
+                         ? graph_.import_texture("composicao", offscreen->texture, compDesc)
+                         : graph_.create_texture("composicao", compDesc);
+
+    // --- Layers: fonte → efeitos → desenho na composição.
+    EffectBuildContext ctx(graph_, shaders_, arena_, *this, kWorkFormat,
+                           std::min<u32>(backend_->capabilities().maxTexture2D, 8192));
+    for (u32 i = 0; i < snap.layers.size(); ++i) {
+        const RenderLayer& layer = snap.layers[i];
+        LayerImage src;
+        const bool hasEffects = i < snap.plans.size() && !snap.plans[i].empty();
+        if (!build_source(layer, i, hasEffects, src, framesInFlight_, fb.frameNumber)) continue;
+        LayerImage fin = src;
+        if (i < snap.plans.size() && !snap.plans[i].empty()) {
+            (void)EffectGraph::build(snap.plans[i], ctx, src, fin);
+        }
+        CompositeDraw draw;
+        draw.texture = fin.texture;
+        draw.region = fin.region;
+        draw.compFromLayer = layer.compFromLayer;
+        draw.opacity = layer.opacity;
+        draw.blend = layer.blend;
+        draw.sampler = shaders_.sampler(layer.source.kind == LayerSource::Kind::Solid && fin.width == 1
+                                        ? CommonSampler::LinearClamp : CommonSampler::LinearBorder).id;
+        if (i < snap.plans.size() && snap.plans[i].hasFold) {
+            draw.compFromLayer = draw.compFromLayer * snap.plans[i].foldMatrix;
+            draw.opacity *= snap.plans[i].foldOpacity;
+        }
+        draws_.push_back(draw);
+    }
+
+    // --- Composição: um passe, todas as layers, blend de hardware.
+    {
+        auto pNormal = shaders_.pipeline(PipelineKey::graphics(
+            ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat, true, BlendMode::Normal));
+        auto pAdd = shaders_.pipeline(PipelineKey::graphics(
+            ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat, true, BlendMode::Add));
+        const u32 count = static_cast<u32>(draws_.size());
+        CompositeDraw* arr = count ? arena_.alloc_array<CompositeDraw>(count) : nullptr;
+        for (u32 i = 0; i < count; ++i) arr[i] = draws_[i];
+        struct Cap {
+            CompositeDraw* draws; u32 count; PipelineHandle normal; PipelineHandle add;
+            f32 compW; f32 compH;
+        } cap{arr, count, pNormal.ok() ? *pNormal : PipelineHandle{}, pAdd.ok() ? *pAdd : PipelineHandle{},
+              static_cast<f32>(snap.compWidth), static_cast<f32>(snap.compHeight)};
+        const u32 pass = graph_.add_raster_pass("composicao", PassStage::Composite, comp, LoadOp::Clear,
+                                                snap.background, [cap](PassContext& pc) {
+            const Mat4 clip = clip_from_comp(cap.compW, cap.compH);
+            PipelineHandle bound{};
+            for (u32 i = 0; i < cap.count; ++i) {
+                const CompositeDraw& d = cap.draws[i];
+                // Blend: Normal e Add são de hardware. Os demais modos ainda
+                // não têm passe com leitura do destino — caem no Normal (e o
+                // painel mostra), em vez de uma aproximação silenciosa.
+                const PipelineHandle p = d.blend == BlendMode::Add && cap.add.valid() ? cap.add : cap.normal;
+                if (!p.valid()) continue;
+                if (!(p == bound)) { pc.cmds.bind_pipeline(p); bound = p; }
+                LayerPush push;
+                push.clipFromLayer = clip * d.compFromLayer;
+                push.region = Vec4{d.region.x, d.region.y, d.region.w, d.region.h};
+                push.uvRect = Vec4{0.0f, 0.0f, 1.0f, 1.0f};
+                push.params = Vec4{d.opacity, 0.0f, 0.0f, 0.0f};
+                pc.cmds.bind_texture(0, pc.texture(d.texture), SamplerHandle{d.sampler});
+                pc.cmds.push_constants(&push, sizeof(push));
+                pc.cmds.draw(6);
+            }
+        });
+        for (const CompositeDraw& d : draws_) graph_.read(pass, d.texture);
+    }
+
+    // --- Saída.
+    if (!offscreen && fb.backbuffer.valid()) {
+        TextureDesc bbDesc;
+        bbDesc.width = fb.backbufferWidth;
+        bbDesc.height = fb.backbufferHeight;
+        bbDesc.format = fb.backbufferFormat;
+        const FGTexture bb = graph_.import_texture("swapchain", fb.backbuffer, bbDesc);
+        auto pOut = shaders_.pipeline(PipelineKey::graphics(ShaderId::composite_layer_vert,
+                                                            ShaderId::composite_output_frag, fb.backbufferFormat));
+        // A composição encaixada (letterbox) no espaço LÓGICO do display, e a
+        // pré-rotação aplicada no clip: o compositor do sistema não precisa
+        // girar a imagem (o que custaria um passe a mais por frame, dele).
+        const bool swap = fb.rotation == SurfaceRotation::Rotate90 || fb.rotation == SurfaceRotation::Rotate270;
+        const f32 dispW = static_cast<f32>(swap ? fb.backbufferHeight : fb.backbufferWidth);
+        const f32 dispH = static_cast<f32>(swap ? fb.backbufferWidth : fb.backbufferHeight);
+        const f32 compW = static_cast<f32>(snap.compWidth), compH = static_cast<f32>(snap.compHeight);
+        const f32 fit = std::min(dispW / compW, dispH / compH) * std::max(0.01f, settings.viewportZoom);
+        const f32 ox = (dispW - compW * fit) * 0.5f + settings.viewportPan.x;
+        const f32 oy = (dispH - compH * fit) * 0.5f + settings.viewportPan.y;
+        Mat4 dispFromComp = Mat4::translation(Vec3{ox, oy, 0}) * Mat4::scale(Vec3{fit, fit, 1});
+        Mat4 clip = clip_from_comp(dispW, dispH) * dispFromComp;
+        f32 angle = 0.0f;
+        switch (fb.rotation) {
+            case SurfaceRotation::Rotate90:  angle = 90.0f; break;
+            case SurfaceRotation::Rotate180: angle = 180.0f; break;
+            case SurfaceRotation::Rotate270: angle = 270.0f; break;
+            default: break;
+        }
+        if (angle != 0.0f) clip = Mat4::from_quat(Quat::from_axis_angle(Vec3{0, 0, 1}, angle * kDeg2Rad)) * clip;
+
+        const Vec4 bg = settings.editorBackground;
+        void* ubo = arena_.alloc(16, 16);
+        std::memcpy(ubo, &bg, 16);
+        struct Cap { PipelineHandle p; FGTexture comp; u64 sampler; Mat4 clip; f32 w, h; f32 dither; void* ubo; }
+            cap{pOut.ok() ? *pOut : PipelineHandle{}, comp, shaders_.sampler(CommonSampler::LinearClamp).id,
+                clip, compW, compH, settings.dither ? 1.0f : 0.0f, ubo};
+        const Vec4 clear{0, 0, 0, 1};
+        const u32 pass = graph_.add_raster_pass("saida", PassStage::Output, bb, LoadOp::Clear, clear,
+                                                [cap](PassContext& pc) {
+            if (!cap.p.valid()) return;
+            pc.cmds.bind_pipeline(cap.p);
+            LayerPush push;
+            push.clipFromLayer = cap.clip;
+            push.region = Vec4{0.0f, 0.0f, cap.w, cap.h};
+            push.uvRect = Vec4{0.0f, 0.0f, 1.0f, 1.0f};
+            push.params = Vec4{cap.dither, 0, 0, 0};
+            pc.cmds.bind_texture(0, pc.texture(cap.comp), SamplerHandle{cap.sampler});
+            pc.cmds.set_uniforms(cap.ubo, 16);
+            pc.cmds.push_constants(&push, sizeof(push));
+            pc.cmds.draw(6);
+        });
+        graph_.read(pass, comp);
+        graph_.set_output(bb, ResourceState::Present);
+    } else {
+        graph_.set_output(comp, ResourceState::ShaderRead);
+    }
+
+    Status result = graph_.compile(pool_);
+    if (result.ok()) {
+        graph_.execute(*fb.commands, settings.gpuTimers);
+    } else {
+        AUREA_LOG_ERROR("FrameGraph nao compilou: %s", result.message().data());
+    }
+    graph_.release(pool_);
+    pool_.end_frame();
+
+    const u64 tRecorded = monotonic_ns();
+    const Status endStatus = backend_->end_frame();
+    const u64 tEnd = monotonic_ns();
+
+    // Os frames de vídeo lidos neste frame voltam ao decoder SÓ quando a GPU
+    // terminar — nem antes (frame rasgado), nem depois (decoder sem buffer).
+    for (FrameRef& fr : framesInFlight_) {
+        DecodedFrame* raw = fr.detach();
+        if (raw) backend_->defer_until_gpu_done([](void* p) { static_cast<DecodedFrame*>(p)->release(); }, raw);
+    }
+    framesInFlight_.clear();
+    for (RenderLayer& l : snap.layers) l.source.frame.reset();
+
+    collect_resources(fb.frameNumber);
+
+    timings.cpuRecordMs = static_cast<f32>(static_cast<f64>(tRecorded - tBegin) * 1e-6);
+    timings.presentMs = static_cast<f32>(static_cast<f64>(tEnd - tRecorded) * 1e-6);
+    read_timings(timings);
+
+    stats.passesExecuted = graph_.stats().passesExecuted;
+    stats.passesCulled = graph_.stats().passesCulled;
+    stats.drawCalls = static_cast<u32>(draws_.size()) + graph_.stats().passesExecuted;
+    stats.layersRendered = static_cast<u32>(draws_.size());
+    stats.previewWidth = cw;
+    stats.previewHeight = ch;
+    stats.gpuMs = timings.gpuMeasured ? timings.gpuTotalMs : 0.0f;
+    stats.gpuMemoryBytes = backend_->memory_stats().usedBytes;
+    ++framesRendered_;
+
+    if (!result.ok()) return result;
+    return endStatus;
+}
+
+void Renderer::collect_resources(u64 frameNumber) noexcept {
+    // Recursos persistentes de layers que sumiram. Checado a cada 2 s — não
+    // há pressa, e varrer mapas a cada frame é custo sem ganho.
+    if (frameNumber % 120 != 0) return;
+    for (auto it = planar_.begin(); it != planar_.end();) {
+        if (frameNumber > it->second.lastFrame + 240) {
+            for (TextureHandle& t : it->second.plane) if (t.valid()) backend_->destroy_texture(t);
+            it = planar_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    for (auto it = luts_.begin(); it != luts_.end();) {
+        if (frameNumber > it->second.lastFrame + 240) {
+            backend_->destroy_texture(it->second.texture);
+            it = luts_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+void Renderer::read_timings(RenderTimings& t) noexcept {
+    f32 total = 0.0f;
+    const u32 n = backend_->read_gpu_timings(timingScratch_.data(),
+                                             static_cast<u32>(timingScratch_.size()), &total);
+    t.gpuMeasured = n > 0;
+    if (!t.gpuMeasured) return;
+    t.gpuTotalMs = total;
+    t.gpuColorConvMs = t.gpuEffectsMs = t.gpuBlurMs = t.gpuGlowMs = t.gpuCompositeMs = t.gpuOutputMs = 0.0f;
+    for (u32 i = 0; i < n; ++i) {
+        const GpuTiming& g = timingScratch_[i];
+        if (!g.label) continue;
+        const char* s = g.label;
+        auto starts = [s](const char* p) { return std::strncmp(s, p, std::strlen(p)) == 0; };
+        if (starts("cor-do-video") || starts("imagem") || starts("solido")) t.gpuColorConvMs += g.ms;
+        else if (starts("composicao")) t.gpuCompositeMs += g.ms;
+        else if (starts("saida")) t.gpuOutputMs += g.ms;
+        else {
+            t.gpuEffectsMs += g.ms;
+            if (starts("blur")) t.gpuBlurMs += g.ms;
+            if (starts("glow")) t.gpuGlowMs += g.ms;
+        }
+    }
+}
+
+} // namespace aurea

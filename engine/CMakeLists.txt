@@ -1,14 +1,17 @@
 # =============================================================================
 #  AUREA ENGINE — núcleo C++23 compartilhado entre Android e iOS.
 #
-#  Regra central de performance:
 #     CPU organiza. GPU processa. Hardware decodifica. Hardware codifica.
 #     UI apenas controla.
 #
-#  Este projeto não conhece Compose, SwiftUI, Vulkan nem Metal diretamente:
-#  são alvos que entram por baixo de interfaces puras (IGPUBackend,
-#  IMediaDecoder, IPlatformSurface). Quem compila para Android liga
-#  AUREA_PLATFORM_ANDROID; para iOS, AUREA_PLATFORM_IOS.
+#  Alvos:
+#    aurea_core    tudo que independe de API gráfica e de SO: timeline,
+#                  playback, FrameGraph, EffectGraph, efeitos, renderer (sobre
+#                  GPUBackend), SPIR-V embutido. Roda nos testes do host.
+#    aurea_vulkan  o backend Vulkan. O MESMO código no Android e no host de
+#                  testes (sem superfície), para os testes visuais usarem os
+#                  shaders reais.
+#    aurea         a .so do Android: JNI + MediaCodec + render thread.
 # =============================================================================
 cmake_minimum_required(VERSION 3.22)
 
@@ -17,9 +20,6 @@ project(AureaEngine
         DESCRIPTION "Aurea Editor — motor de composicao e render"
         LANGUAGES CXX)
 
-# -----------------------------------------------------------------------------
-# Padrão da linguagem
-# -----------------------------------------------------------------------------
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -28,9 +28,6 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "" FORCE)
 endif()
 
-# -----------------------------------------------------------------------------
-# Plataforma
-# -----------------------------------------------------------------------------
 if(ANDROID)
     set(AUREA_PLATFORM_ANDROID ON)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "iOS")
@@ -40,18 +37,22 @@ else()
 endif()
 
 option(AUREA_BUILD_TESTS      "Compila os testes do motor"      ON)
-option(AUREA_BUILD_SHADERS    "Compila os shaders SPIR-V/MSL"   OFF)
 option(AUREA_ENABLE_SANITIZE  "ASan/UBSan no host"              OFF)
 
+include(cmake/AureaShaders.cmake)
+
 # -----------------------------------------------------------------------------
-# Alvo: aurea_core
-#
-# Tudo que é independente de GPU e de sistema operacional. É a única parte
-# que a UI enxerga. Não faz I/O de vídeo, não fala com o display.
+# Shaders: GLSL → SPIR-V → .cpp embutido (ver cmake/AureaShaders.cmake).
+# -----------------------------------------------------------------------------
+aurea_compile_shaders(AUREA_SHADER_SOURCES AUREA_GENERATED_INCLUDE)
+
+# -----------------------------------------------------------------------------
+# aurea_core
 # -----------------------------------------------------------------------------
 set(AUREA_CORE_SOURCES
     src/core/Log.cpp
     src/core/Time.cpp
+    src/core/Thread.cpp
     src/memory/MemoryManager.cpp
     src/jobs/JobSystem.cpp
     src/command/UndoStack.cpp
@@ -62,12 +63,24 @@ set(AUREA_CORE_SOURCES
     src/timeline/Timeline.cpp
     src/project/Project.cpp
     src/project/Serialization.cpp
-    src/render/GPUBackend.cpp
+    src/render/GPUCapabilities.cpp
     src/render/FrameGraph.cpp
-    src/render/EffectGraph.cpp
     src/render/ShaderLibrary.cpp
     src/render/RenderScheduler.cpp
+    src/render/Renderer.cpp
+    src/effects/Parameter.cpp
+    src/effects/EffectGraph.cpp
+    src/effects/builtin/ColorEffects.cpp
+    src/effects/builtin/BlurEffects.cpp
+    src/effects/builtin/GlowEffect.cpp
+    src/effects/builtin/TransformEffect.cpp
+    src/effects/builtin/MotionTileEffect.cpp
+    src/media/DecodedFrameCache.cpp
+    src/media/VideoSource.cpp
+    src/media/MediaManager.cpp
+    src/playback/Playback.cpp
     src/engine/Engine.cpp
+    ${AUREA_SHADER_SOURCES}
 )
 
 add_library(aurea_core STATIC ${AUREA_CORE_SOURCES})
@@ -75,6 +88,7 @@ add_library(aurea_core STATIC ${AUREA_CORE_SOURCES})
 target_include_directories(aurea_core
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${AUREA_GENERATED_INCLUDE}
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
@@ -85,11 +99,6 @@ target_compile_definitions(aurea_core
         AUREA_VERSION_MINOR=${PROJECT_VERSION_MINOR}
         AUREA_VERSION_PATCH=${PROJECT_VERSION_PATCH}
     PRIVATE
-        # O motor usa fopen/fwrite direto em vez de <fstream>: o comportamento
-        # de exceção do iostream não combina com um motor compilado sem
-        # exceções, e formatar via stream custa mais do que o necessário para
-        # dados binários. O aviso de "função insegura" do MSVC não se aplica —
-        # todos os caminhos vêm de strings que o próprio motor montou.
         $<$<CXX_COMPILER_ID:MSVC>:_CRT_SECURE_NO_WARNINGS>
 )
 
@@ -101,20 +110,16 @@ else()
     target_compile_definitions(aurea_core PUBLIC AUREA_PLATFORM_HOST=1)
 endif()
 
-# O motor é usado por JNI e por ObjC++: RTTI ligado ajuda o bridge a validar
-# tipos; exceções DESLIGADAS porque nenhuma fronteira do motor pode lançar.
-target_compile_options(aurea_core PRIVATE
-    # /utf-8: o código-fonte é UTF-8 e tem acentos e setas nos comentários. Sem
-    # esta flag o MSVC lê com a página de código do sistema, e uma sequência de
-    # vários bytes no meio de um comentário consome caracteres da linha
-    # seguinte — o erro que aparece é "identificador não declarado" num lugar
-    # que não tem nada a ver com o problema.
+# Exceções DESLIGADAS: nenhuma fronteira do motor pode lançar. /utf-8: o fonte
+# tem acentos nos comentários, e sem a flag o MSVC lê com a página de código do
+# sistema e o erro aparece longe da causa.
+set(AUREA_WARNINGS
     $<$<CXX_COMPILER_ID:MSVC>:/W4 /permissive- /EHsc- /Zc:__cplusplus /utf-8>
     $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -Wpedantic -fno-exceptions>
 )
-
+target_compile_options(aurea_core PRIVATE ${AUREA_WARNINGS})
 target_compile_options(aurea_core PRIVATE
-    $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:GNU,Clang,AppleClang>>:-O3 -ffast-math>
+    $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:GNU,Clang,AppleClang>>:-O3>
     $<$<AND:$<CONFIG:RelWithDebInfo>,$<CXX_COMPILER_ID:GNU,Clang,AppleClang>>:-O2 -g>
     $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:MSVC>>:/O2>
 )
@@ -124,58 +129,104 @@ if(AUREA_ENABLE_SANITIZE AND NOT ANDROID AND NOT AUREA_PLATFORM_IOS)
     target_link_options(aurea_core PRIVATE -fsanitize=address,undefined)
 endif()
 
-# `pthread` e uma biblioteca separada no Linux e no host do macOS. No Android
-# ela NAO existe como biblioteca: o suporte a threads vive na libc, e pedir
-# `-lpthread` faz o linker falhar com "unable to find library". O iOS tambem
-# nao tem libpthread separada.
+# `pthread` separado só no Linux/macOS de host. No Android e no iOS as threads
+# vivem na libc, e pedir -lpthread quebra o link.
 if(NOT MSVC AND NOT ANDROID AND NOT AUREA_PLATFORM_IOS)
     find_package(Threads REQUIRED)
     target_link_libraries(aurea_core PUBLIC Threads::Threads)
 endif()
 
 # -----------------------------------------------------------------------------
-# Nota sobre shaders:
+# aurea_vulkan — backend Vulkan (Android e host de testes).
 #
-#  A fonte dos shaders é única e mora em `include/aurea/shaders/`. Ela é
-#  compilada para SPIR-V no build; o iOS recebe MSL gerado de SPIR-V por
-#  SPIRV-Cross, não uma versão escrita à mão. É por isso que preview e export
-#  são visualmente idênticos mesmo com backends diferentes: só existe uma
-#  implementação.
-#
-#  A etapa de compilação offline (glslang + spirv-cross) entra junto com o
-#  backend gráfico — a opção AUREA_BUILD_SHADERS existe e fica desligada
-#  enquanto não houver shader de efeito para compilar.
+# No Android os cabeçalhos vêm do sysroot do NDK. No host: VULKAN_SDK, ou os
+# cabeçalhos do NDK declarado em android/local.properties (os mesmos que o
+# aparelho usa). A biblioteca é carregada em runtime (VulkanLoader), então o
+# host não precisa de SDK instalado — só do driver da GPU.
 # -----------------------------------------------------------------------------
+set(AUREA_HAS_VULKAN OFF)
+set(AUREA_VULKAN_INCLUDE "")
+if(AUREA_PLATFORM_ANDROID)
+    set(AUREA_HAS_VULKAN ON)
+elseif(AUREA_PLATFORM_HOST)
+    if(AUREA_VULKAN_HEADERS AND EXISTS "${AUREA_VULKAN_HEADERS}/vulkan/vulkan.h")
+        set(AUREA_VULKAN_INCLUDE "${AUREA_VULKAN_HEADERS}")
+    elseif(DEFINED ENV{VULKAN_SDK} AND EXISTS "$ENV{VULKAN_SDK}/Include/vulkan/vulkan.h")
+        set(AUREA_VULKAN_INCLUDE "$ENV{VULKAN_SDK}/Include")
+    elseif(AUREA_GLSLC)
+        # glslc do NDK: <ndk>/shader-tools/<host>/glslc → sysroot ao lado.
+        get_filename_component(_ndk_root "${AUREA_GLSLC}" DIRECTORY)
+        get_filename_component(_ndk_root "${_ndk_root}" DIRECTORY)
+        get_filename_component(_ndk_root "${_ndk_root}" DIRECTORY)
+        file(GLOB _sysroots "${_ndk_root}/toolchains/llvm/prebuilt/*/sysroot/usr/include")
+        foreach(_s IN LISTS _sysroots)
+            if(EXISTS "${_s}/vulkan/vulkan.h")
+                # Só as pastas do Vulkan, copiadas para o build: incluir o
+                # sysroot inteiro traria a libc do Android (bionic) por cima da
+                # libc do host, e nada mais compilaria.
+                set(_iso "${CMAKE_CURRENT_BINARY_DIR}/generated/vulkan-headers")
+                file(COPY "${_s}/vulkan" DESTINATION "${_iso}")
+                if(EXISTS "${_s}/vk_video")
+                    file(COPY "${_s}/vk_video" DESTINATION "${_iso}")
+                endif()
+                set(AUREA_VULKAN_INCLUDE "${_iso}")
+                break()
+            endif()
+        endforeach()
+    endif()
+    if(AUREA_VULKAN_INCLUDE)
+        set(AUREA_HAS_VULKAN ON)
+        message(STATUS "Aurea: backend Vulkan no host (cabecalhos em ${AUREA_VULKAN_INCLUDE})")
+    else()
+        message(STATUS "Aurea: sem cabecalhos Vulkan no host — testes de GPU desligados")
+    endif()
+endif()
+
+if(AUREA_HAS_VULKAN)
+    add_library(aurea_vulkan STATIC
+        gpu/vulkan/VulkanLoader.cpp
+        gpu/vulkan/VulkanCommon.cpp
+        gpu/vulkan/VulkanDevice.cpp
+        gpu/vulkan/VulkanSwapchain.cpp
+        gpu/vulkan/VulkanResources.cpp
+        gpu/vulkan/VulkanCommands.cpp
+    )
+    target_include_directories(aurea_vulkan PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/gpu/vulkan)
+    if(AUREA_VULKAN_INCLUDE)
+        # SYSTEM: os avisos dos cabeçalhos do Khronos não são nossos.
+        target_include_directories(aurea_vulkan SYSTEM PUBLIC "${AUREA_VULKAN_INCLUDE}")
+    endif()
+    target_link_libraries(aurea_vulkan PUBLIC aurea_core)
+    target_compile_definitions(aurea_vulkan PUBLIC VK_NO_PROTOTYPES=1
+        $<$<CXX_COMPILER_ID:MSVC>:_CRT_SECURE_NO_WARNINGS>)
+    if(AUREA_PLATFORM_ANDROID)
+        target_compile_definitions(aurea_vulkan PUBLIC VK_USE_PLATFORM_ANDROID_KHR=1)
+        target_link_libraries(aurea_vulkan PUBLIC android dl)
+    elseif(NOT WIN32)
+        target_link_libraries(aurea_vulkan PUBLIC ${CMAKE_DL_LIBS})
+    endif()
+    target_compile_options(aurea_vulkan PRIVATE ${AUREA_WARNINGS})
+endif()
 
 # -----------------------------------------------------------------------------
-# Alvo: aurea — a biblioteca compartilhada que a UI nativa carrega.
-#
-# Existe só no Android e no iOS. No host, quem consome o motor é o executável de
-# teste, que linka `aurea_core` direto — sem .so no meio, para o depurador
-# enxergar os símbolos.
-#
-# A ponte NÃO entra em `aurea_core`: o núcleo precisa compilar sem <jni.h> e sem
-# cabeçalhos de sistema da Apple, senão deixa de rodar nos testes.
+# aurea — a .so que o Android carrega. A ponte não entra no núcleo: o núcleo
+# compila sem <jni.h>, senão deixa de rodar nos testes.
 # -----------------------------------------------------------------------------
 if(AUREA_PLATFORM_ANDROID)
     add_library(aurea SHARED
         platform/android/aurea_jni.cpp
+        platform/android/MediaCodecSource.cpp
     )
-    target_link_libraries(aurea PRIVATE aurea_core android log)
-    target_compile_options(aurea PRIVATE
-        $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -fno-exceptions -fno-rtti>
-    )
-    # O motor é um só, carregado uma vez no processo. O nome do arquivo tem que
-    # bater com o `System.loadLibrary("aurea")` do Kotlin.
-    set_target_properties(aurea PROPERTIES
-        OUTPUT_NAME "aurea"
-        PREFIX "lib"
-        ANDROID_STL "c++_shared"
-    )
+    target_include_directories(aurea PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/platform/android)
+    # `mediandk` é o MediaCodec/MediaExtractor/ImageReader: sem ele não há
+    # decode de hardware. `android` dá ANativeWindow e AHardwareBuffer.
+    target_link_libraries(aurea PRIVATE aurea_core aurea_vulkan android log mediandk)
+    target_compile_options(aurea PRIVATE $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -fno-exceptions>)
+    set_target_properties(aurea PROPERTIES OUTPUT_NAME "aurea" PREFIX "lib")
 endif()
 
 # -----------------------------------------------------------------------------
-# Testes
+# Testes (host)
 # -----------------------------------------------------------------------------
 if(AUREA_BUILD_TESTS AND NOT ANDROID AND NOT AUREA_PLATFORM_IOS)
     enable_testing()

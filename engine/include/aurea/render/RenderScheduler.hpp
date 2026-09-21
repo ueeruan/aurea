@@ -29,7 +29,7 @@
 #pragma once
 
 #include "aurea/platform/DeviceCapabilities.hpp"
-#include "aurea/render/EffectGraph.hpp"
+#include "aurea/render/GPUBackend.hpp"
 #include "aurea/core/Time.hpp"
 
 #include <vector>
@@ -129,108 +129,9 @@ struct FrameStats {
     bool valid() const noexcept { return frameIndex != 0; }
 };
 
-/// Cache de frames com hash de conteúdo.
-///
-/// A chave é o hash de TUDO que influencia o frame: fontes, tempo, transform
-/// avaliado, propriedades de efeito, máscaras, dependências. Se nada mudou,
-/// NÃO se renderiza de novo — o resultado anterior é reusado. É isso que faz
-/// arrastar um slider que não mudou nada ser instantâneo, e é o que faz o
-/// scrubbing para trás ser rápido.
-class FrameCache {
-public:
-    struct Key {
-        u64 hash = 0;
-        u32 width = 0;
-        u32 height = 0;
-        u32 scaleDenominator = 1;
-        bool previewQuality = true;
-
-        friend bool operator==(const Key&, const Key&) noexcept = default;
-    };
-
-    struct Entry {
-        Key           key{};
-        TextureHandle texture{};
-        u64           lastUsedFrame = 0;
-        u32           byteSize = 0;
-    };
-
-    void set_capacity(u32 entries) noexcept { capacity_ = entries; }
-    [[nodiscard]] u32 capacity() const noexcept { return capacity_; }
-
-    [[nodiscard]] const Entry* find(const Key& key) noexcept;
-    void insert(const Key& key, TextureHandle texture, u32 bytes, u64 frameNumber) noexcept;
-    void touch(const Key& key, u64 frameNumber) noexcept;
-    void clear() noexcept;
-
-    /// Descarta os menos usados recentemente até caber `targetBytes`.
-    u32 evict_to_fit(usize targetBytes) noexcept;
-
-    [[nodiscard]] u32 count() const noexcept { return static_cast<u32>(entries_.size()); }
-    [[nodiscard]] usize bytes() const noexcept { return bytes_; }
-
-    /// Estatísticas para o painel: uma taxa baixa durante scrubbing significa
-    /// que a chave tem campo demais e o cache nunca acerta.
-    [[nodiscard]] f32 hit_rate() const noexcept {
-        const u64 t = hits_ + misses_;
-        return t ? static_cast<f32>(static_cast<f64>(hits_) / static_cast<f64>(t)) : 0.0f;
-    }
-
-private:
-    std::vector<Entry> entries_;
-    u32   capacity_ = 48;
-    usize bytes_ = 0;
-    u64   hits_ = 0;
-    u64   misses_ = 0;
-};
-
-/// Pedido de frame a decodificar. O prefetcher enfileira; o decode worker
-/// atende. `priority` é recalculado a cada mudança da direção do scrub.
-struct PrefetchRequest {
-    u32  assetSlot = 0;       ///< índice da fonte no cache de decoders
-    FrameIndex frame{0};
-    enum class Priority : u8 { Urgent = 0, High, Normal, Low } priority = Priority::Normal;
-    /// Marcado quando o usuário já passou deste frame — cancelar é mais barato
-    /// que decodificar para ninguém.
-    bool stale = false;
-};
-
-/// Decide o que pré-decodificar durante playback e scrubbing.
-///
-/// Durante playback: a janela é simétrica (t-2..t+2), porque o usuário pode
-/// pausar e voltar.
-///
-/// Durante scrubbing: a janela é ASSIMÉTRICA e segue a direção. Arrastando para
-/// a frente, os frames t+1, t+2, t+3 ganham prioridade sobre t-1 — pré-decodificar
-/// para trás seria trabalho jogado fora.
-class FramePrefetcher {
-public:
-    /// Janela de prefetch. Ajustada pelo tempo de decode medido: num aparelho
-    /// rápido a janela é maior (mais acerto de cache); num lento, menor (menos
-    /// trabalho desperdiçado).
-    void set_window(u32 behind, u32 ahead) noexcept { behind_ = behind; ahead_ = ahead; }
-
-    /// Informa a direção do scrub. `direction` +1 = avançando, -1 = voltando,
-    /// 0 = sem scrub ativo.
-    void set_direction(i32 direction) noexcept { direction_ = direction; }
-
-    /// Gera os pedidos para o frame atual. Escreve em `out` sem alocar quando
-    /// já houver capacidade.
-    void plan(u32 assetSlot, FrameIndex current, FrameIndex first, FrameIndex last,
-              std::vector<PrefetchRequest>& out) const;
-
-    /// Marca como obsoletos os pedidos que a direção atual já ultrapassou.
-    void invalidate_behind(std::vector<PrefetchRequest>& requests,
-                           FrameIndex current) const;
-
-    [[nodiscard]] u32 window_behind() const noexcept { return behind_; }
-    [[nodiscard]] u32 window_ahead() const noexcept { return ahead_; }
-
-private:
-    u32 behind_ = 1;
-    u32 ahead_  = 2;
-    i32 direction_ = 0;
-};
+// O cache de frames decodificados e o prefetch vivem em media/ (VideoSource,
+// DecodedFrameCache): é lá que a decisão de o que decodificar tem os dados
+// para ser tomada — o pts real, o keyframe, o estado do decoder.
 
 /// Recalcula a escala do preview conforme o orçamento medido.
 class AdaptiveResolutionController {

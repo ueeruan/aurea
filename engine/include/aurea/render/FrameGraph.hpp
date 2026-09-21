@@ -1,46 +1,45 @@
 // =============================================================================
 //  Aurea / render / FrameGraph.hpp
 //
-//  O grafo de um frame.
+//  AureaFrameGraph — o plano de GPU de um frame.
 //
-//  A ideia central: o compositor NÃO executa passes na ordem em que foram
-//  declarados. Ele declara o que cada passe lê e escreve, e o grafo resolve:
+//  Quem monta o frame (compositor, efeitos) DECLARA: "este passe lê A e B e
+//  escreve C". O grafo então decide, sozinho:
 //
-//     - ordem de execução (por dependência, não por declaração);
-//     - quem pode rodar em paralelo (passe de áudio não disputa GPU);
-//     - quais recursos precisam existir e por quanto tempo;
-//     - onde reinserir barreiras de sincronização;
-//     - quais passes podem ser ELIMINADOS (ninguém lê o resultado → não roda).
+//    - a ORDEM (por dependência, com a ordem de declaração como desempate);
+//    - o que PODAR (passe cujo resultado ninguém lê não roda);
+//    - o TEMPO DE VIDA de cada textura (primeiro e último uso);
+//    - o REAPROVEITAMENTO: duas texturas transitórias cujas vidas não se
+//      cruzam usam a MESMA textura física. A textura A morre no passe 2 e a
+//      mesma memória vira a textura B no passe 4. Numa cadeia de efeitos em
+//      4K isso é a diferença entre caber e ser morto pelo sistema;
+//    - as BARREIRAS: cada passe declara como usa cada recurso, e o grafo emite
+//      a transição de estado antes dele. Nenhum passe gerencia layout;
+//    - os RENDER PASSES: o passe de raster só desenha; begin/end, load op e
+//      clear são do grafo.
 //
-//  O ganho concreto num editor: uma layer com opacidade 0, ou fora da tela, ou
-//  coberta por outra opaca, tem seu subgrafo inteiro podado antes de custar
-//  qualquer coisa. Sem isso, cada layer invisível ainda paga decode + efeitos.
-//
-//  Sobre memória: recursos do grafo são ALIADOS por tempo de vida. Dois
-//  intermediários com vidas que não se sobrepõem dividem a mesma textura. Numa
-//  cadeia de 8 efeitos sobre 4K, isso derruba o pico de ~600 MB para ~150 MB —
-//  e é a diferença entre rodar e ser morto pelo sistema.
+//  Custo por frame: o grafo é remontado do zero a cada frame (é barato: dezenas
+//  de passes), mas NÃO aloca em regime — os vetores mantêm a capacidade, os
+//  callbacks são `InplaceFunction` e as texturas físicas vêm de um pool que
+//  sobrevive entre frames. Em playback estacionário, texturas criadas por frame
+//  = 0 (há teste para isso).
 // =============================================================================
 #pragma once
 
-#include "aurea/render/GPUBackend.hpp"
-#include "aurea/core/Types.hpp"
+#include "aurea/core/InplaceFunction.hpp"
 #include "aurea/core/Result.hpp"
+#include "aurea/core/Types.hpp"
+#include "aurea/render/GPUBackend.hpp"
 
-#include <vector>
 #include <string>
+#include <vector>
 
 namespace aurea {
 
-/// Etapas nomeadas do pipeline de composição. A ordem aqui é INFORMATIVA — quem
-/// manda é a dependência declarada — mas serve para o painel de telemetria
-/// agrupar o tempo gasto por etapa.
-///
-///   Decode → TimeRemap → Transform → Mask → Effects → 3D → Particles
-///          → Text → Composite → ColorOutput → Display
+/// Etapas do pipeline de composição — agrupam o tempo no painel DEV.
 enum class PassStage : u8 {
-    Decode = 0,
-    TimeRemap,
+    Upload = 0,
+    Decode,        ///< conversão de cor do frame do decoder
     Transform,
     Mask,
     Effects,
@@ -49,15 +48,14 @@ enum class PassStage : u8 {
     Text,
     Composite,
     PostProcess,
-    ColorOutput,
-    Present,
+    Output,        ///< codificação para o display / encoder
     _Count,
 };
 
 [[nodiscard]] constexpr const char* to_string(PassStage s) noexcept {
     switch (s) {
-        case PassStage::Decode:      return "decode";
-        case PassStage::TimeRemap:   return "time-remap";
+        case PassStage::Upload:      return "upload";
+        case PassStage::Decode:      return "cor-do-video";
         case PassStage::Transform:   return "transform";
         case PassStage::Mask:        return "mascara";
         case PassStage::Effects:     return "efeitos";
@@ -66,229 +64,257 @@ enum class PassStage : u8 {
         case PassStage::Text:        return "texto";
         case PassStage::Composite:   return "composicao";
         case PassStage::PostProcess: return "pos-processo";
-        case PassStage::ColorOutput: return "saida-de-cor";
-        case PassStage::Present:     return "apresentacao";
+        case PassStage::Output:      return "saida";
         case PassStage::_Count:      break;
     }
     return "?";
 }
 
-/// Recurso do grafo. Uma textura (ou buffer) com tempo de vida declarado.
-struct FrameResource {
-    /// Nome do recurso: "cor-da-layer-3", "mascara-1", "profundidade-3d".
-    /// Existe só para o painel de debug — o grafo casa por handles.
-    std::string  name;
+enum class PassKind : u8 { Raster = 0, Compute, Transfer };
 
-    // Quem escreve primeiro e quem lê por último. O par define o tempo de vida
-    // e é o que permite o aliasing.
-    u32 firstPass = kInvalidIndex;
-    u32 lastPass  = kInvalidIndex;
-
-    TextureDesc  desc{};
-    TextureHandle physical{};   ///< textura real, possivelmente compartilhada
-    BufferHandle  buffer{};     ///< quando o recurso é buffer, não textura
-    bool          isBuffer = false;
-
-    /// Recurso externo: veio de fora do grafo (backbuffer, frame decodificado).
-    /// Nunca é aliado nem criado pelo grafo.
-    bool          external = false;
-    /// Recurso de histórico (frame anterior): precisa sobreviver ao frame.
-    /// É o que permite efeito temporal, eco, motion blur acumulativo.
-    bool          persistent = false;
-
-    /// Caminho de importação zero-copy, quando é frame de decoder.
-    ExternalImageHandle externalImage{};
-
-    [[nodiscard]] bool alive_at(u32 passIndex) const noexcept {
-        return passIndex >= firstPass && passIndex <= lastPass;
-    }
+/// Referência a um recurso lógico do grafo deste frame.
+struct FGTexture {
+    u32 index = kInvalidIndex;
+    [[nodiscard]] bool valid() const noexcept { return index != kInvalidIndex; }
+    friend constexpr bool operator==(FGTexture, FGTexture) noexcept = default;
 };
 
-/// Acesso declarado por um passe.
-struct ResourceAccess {
-    enum class Type : u8 { Read = 0, Write, ReadWrite };
-    u32  resourceIndex = kInvalidIndex;
-    Type type = Type::Read;
-};
-
-/// Um nó do grafo. `execute` é o que o renderer chama.
 class FrameGraph;
-using PassExecuteFn = void (*)(FrameGraph& graph, void* userData, CommandList& cmds);
 
-struct FramePass {
-    std::string   name;
-    PassStage     stage = PassStage::Composite;
-
-    std::vector<u32> reads;
-    std::vector<u32> writes;
-
-    PassExecuteFn execute = nullptr;
-    void*         userData = nullptr;
-
-    /// Culling declarado. Se o passe não contribui para nenhuma saída, o grafo
-    /// o remove — e a decisão fica onde ela pertence, no passe, não espalhada
-    /// pelo chamador.
-    bool culled = false;
-
-    /// Otimização: este passe não depende de nada do frame e pode rodar uma vez
-    /// e ser reaproveitado (ex.: geração de mipmap de um asset estático).
-    bool cacheable = false;
-
-    /// Para a telemetria: custo estimado em "unidades de trabalho de fragmento".
-    /// É uma estimativa derivada da resolução e do número de amostras — nunca
-    /// um número inventado de tempo.
-    u64 estimatedCost = 0;
-
-    /// Medição real, quando timestamp queries estão disponíveis. Zero significa
-    /// "não medido", não "instantâneo".
-    f32 measuredMs = 0.0f;
+/// O que um passe recebe ao executar.
+struct PassContext {
+    CommandList& cmds;
+    const FrameGraph& graph;
+    [[nodiscard]] TextureHandle texture(FGTexture t) const noexcept;
+    [[nodiscard]] const TextureDesc& desc(FGTexture t) const noexcept;
 };
 
-/// Objetivo final do grafo. O grafo só mantém os passes que contribuem para
-/// algum destes recursos.
-struct FrameGraphOutput {
-    u32 resourceIndex = kInvalidIndex;
+using PassFn = InplaceFunction<void(PassContext&), 256>;
+
+// -----------------------------------------------------------------------------
+// Pool de texturas transitórias. Sobrevive entre frames.
+//
+// É daqui que o grafo tira as texturas físicas. Uma textura devolvida no fim do
+// frame N pode ser pega no frame N+1 sem espera: numa única fila de GPU, a
+// barreira do primeiro uso no frame novo já ordena depois das leituras do
+// frame velho. O que NÃO pode acontecer é destruir a textura com a GPU ainda
+// lendo — e a destruição passa pelo backend, que adia até o fence.
+// -----------------------------------------------------------------------------
+class TransientTexturePool {
+public:
+    /// Uma textura parada por mais que isto é destruída. 120 frames = 2 s a
+    /// 60 Hz: sobrevive a uma pausa curta, mas não acumula as resoluções de
+    /// cada modo de preview que o usuário já testou.
+    explicit TransientTexturePool(u32 idleFramesBeforeDestroy = 120) noexcept
+        : idleFrames_(idleFramesBeforeDestroy) {}
+
+    void begin_frame(GPUBackend& backend, u64 frameNumber) noexcept;
+    [[nodiscard]] TextureHandle acquire(const TextureDesc& desc) noexcept;
+    void release(TextureHandle texture) noexcept;
+    void end_frame() noexcept;
+
+    /// Destrói tudo. Fechar projeto, perder o dispositivo, encerrar.
+    void clear() noexcept;
+    /// Esquece tudo SEM destruir: o dispositivo morreu e levou as texturas.
+    void forget() noexcept;
+
+    struct Stats {
+        u32 alive = 0;
+        u32 inUse = 0;
+        u64 bytes = 0;
+        u32 createdThisFrame = 0;
+        u32 destroyedThisFrame = 0;
+        u64 createdTotal = 0;
+    };
+    [[nodiscard]] const Stats& stats() const noexcept { return stats_; }
+
+private:
+    struct Entry {
+        TextureDesc   desc{};
+        TextureHandle texture{};
+        u64           lastUsedFrame = 0;
+        bool          inUse = false;
+    };
+    GPUBackend* backend_ = nullptr;
+    std::vector<Entry> entries_;
+    u64 frame_ = 0;
+    u32 idleFrames_ = 120;
+    Stats stats_{};
 };
 
+// -----------------------------------------------------------------------------
+// O grafo
+// -----------------------------------------------------------------------------
 class FrameGraph {
 public:
-    /// Capacidade inicial. Reservada na construção para que montar o grafo de
-    /// um frame não aloque — 60 vezes por segundo, isso importa.
-    static constexpr u32 kMaxPasses    = 512;
-    static constexpr u32 kMaxResources = 512;
-
-    explicit FrameGraph(usize arenaBytes = 0);
-
-    FrameGraph(const FrameGraph&)            = delete;
+    FrameGraph();
+    FrameGraph(const FrameGraph&) = delete;
     FrameGraph& operator=(const FrameGraph&) = delete;
 
-    // --- Montagem (fase de declaração) ---------------------------------------
+    // --- Declaração -----------------------------------------------------------
 
-    /// Zera o grafo para o próximo frame. Não libera texturas já alocadas: o
-    /// pool de recursos sobrevive entre frames, porque realocar 4K a 60 Hz
-    /// seria o gargalo dominante.
+    /// Zera a declaração do frame. Mantém a capacidade dos vetores.
     void reset() noexcept;
 
-    /// Declara um recurso. Devolve o índice para referência nos passes.
-    [[nodiscard]] u32 create_texture(std::string name, const TextureDesc& desc) noexcept;
-    [[nodiscard]] u32 create_buffer(std::string name, usize bytes, u32 usage) noexcept;
+    /// Textura transitória: existe só neste frame, o grafo escolhe a física.
+    [[nodiscard]] FGTexture create_texture(const char* name, const TextureDesc& desc) noexcept;
 
-    /// Declara um recurso que vem de fora (backbuffer, imagem de decoder).
-    [[nodiscard]] u32 import_texture(std::string name, TextureHandle external) noexcept;
-    [[nodiscard]] u32 import_external_image(std::string name, const ExternalImageHandle& img,
-                                            const TextureDesc& desc) noexcept;
+    /// Textura que vem de fora (backbuffer, frame importado do decoder, alvo
+    /// do export). Nunca é reaproveitada nem criada pelo grafo.
+    [[nodiscard]] FGTexture import_texture(const char* name, TextureHandle texture,
+                                           const TextureDesc& desc) noexcept;
 
-    /// Declara um recurso persistente entre frames (histórico para efeito
-    /// temporal). É a exceção ao "tudo é reciclado por frame".
-    [[nodiscard]] u32 create_persistent_texture(std::string name, const TextureDesc& desc) noexcept;
+    /// Passe de raster: desenha em `colorTarget`. O grafo abre e fecha o
+    /// render pass com o `load` pedido.
+    u32 add_raster_pass(const char* name, PassStage stage, FGTexture colorTarget,
+                        LoadOp load, Vec4 clear, PassFn fn) noexcept;
+    u32 add_compute_pass(const char* name, PassStage stage, PassFn fn) noexcept;
+    u32 add_transfer_pass(const char* name, PassStage stage, PassFn fn) noexcept;
 
-    /// Adiciona um passe. Devolve o índice.
-    [[nodiscard]] u32 add_pass(std::string name, PassStage stage,
-                               PassExecuteFn fn, void* userData) noexcept;
+    /// Leitura em shader (amostragem).
+    void read(u32 pass, FGTexture texture) noexcept;
+    /// Escrita de compute em image2D.
+    void write_storage(u32 pass, FGTexture texture) noexcept;
+    void copy_source(u32 pass, FGTexture texture) noexcept;
+    void copy_destination(u32 pass, FGTexture texture) noexcept;
 
-    void pass_reads(u32 passIndex, u32 resourceIndex) noexcept;
-    void pass_writes(u32 passIndex, u32 resourceIndex) noexcept;
-    void pass_reads_writes(u32 passIndex, u32 resourceIndex) noexcept;
+    /// Passe com efeito fora do grafo (leitura de volta, marcação). Nunca é
+    /// podado.
+    void mark_side_effect(u32 pass) noexcept;
 
-    /// Declara a saída final. Sem isto, todo passe é podado.
-    void set_output(u32 resourceIndex) noexcept;
+    /// Saída do frame e o estado em que ela deve terminar (`Present` para o
+    /// swapchain, `ShaderRead` para uma textura de cache, `TransferSrc` para
+    /// leitura de volta). Sem saída, todo passe é podado.
+    void set_output(FGTexture texture, ResourceState finalState) noexcept;
 
     // --- Compilação -----------------------------------------------------------
 
-    /// Resolve dependências, ordena topologicamente, poda o que não contribui,
-    /// aloca recursos com aliasing e insere as barreiras.
-    ///
-    /// É chamada uma vez por frame, depois da montagem e antes da execução.
-    /// Não é chamada durante playback se `revision` não mudou — o plano do
-    /// frame anterior é reaproveitado, que é o caso comum.
-    [[nodiscard]] Status compile(GPUBackend& backend) noexcept;
-
-    /// Revisão da estrutura. Muda quando passes ou recursos são adicionados,
-    /// removidos ou religados. `compile` só refaz o trabalho quando muda.
-    [[nodiscard]] u64 revision() const noexcept { return revision_; }
+    /// Ordena, poda, calcula vidas, escolhe texturas físicas e planeja as
+    /// barreiras. Falha em ciclo e em leitura de textura nunca escrita.
+    [[nodiscard]] Status compile(TransientTexturePool& pool) noexcept;
 
     // --- Execução -------------------------------------------------------------
 
-    /// Executa os passes na ordem compilada, gravando os comandos.
-    /// Requer `compile()` bem-sucedido e recursos resolvidos.
-    void execute(CommandList& cmds) noexcept;
+    /// Grava os passes na ordem compilada. Com `timers`, cada passe vira uma
+    /// medição de GPU com o nome dele.
+    void execute(CommandList& cmds, bool timers) noexcept;
 
-    // --- Consultas e depuração ------------------------------------------------
+    /// Devolve as físicas ao pool. Chamado depois de `execute`.
+    void release(TransientTexturePool& pool) noexcept;
 
-    [[nodiscard]] u32 pass_count() const noexcept { return passCount_; }
-    [[nodiscard]] const FramePass& pass(u32 i) const noexcept { return passes_[i]; }
-    [[nodiscard]] u32 resource_count() const noexcept { return resourceCount_; }
-    [[nodiscard]] const FrameResource& resource(u32 i) const noexcept { return resources_[i]; }
+    // --- Consultas ------------------------------------------------------------
 
-    /// Ordem de execução resolvida. O painel de telemetria mostra isto.
-    [[nodiscard]] const std::vector<u32>& execution_order() const noexcept { return order_; }
+    [[nodiscard]] TextureHandle physical(FGTexture t) const noexcept;
+    [[nodiscard]] const TextureDesc& desc(FGTexture t) const noexcept;
 
-    /// Quantos passes foram podados nesta compilação. Se o número for alto, o
-    /// grafo está fazendo o trabalho dele.
-    [[nodiscard]] u32 culled_count() const noexcept { return culledCount_; }
-    [[nodiscard]] u32 merged_count() const noexcept { return mergedCount_; }
+    struct Stats {
+        u32 passesDeclared = 0;
+        u32 passesExecuted = 0;
+        u32 passesCulled = 0;
+        u32 transientTextures = 0;   ///< lógicas
+        u32 physicalTextures = 0;    ///< distintas usadas neste frame
+        u32 aliasedTextures = 0;     ///< lógicas que reusaram física do mesmo frame
+        u32 barriers = 0;
+        u64 transientBytes = 0;      ///< soma das físicas distintas
+    };
+    [[nodiscard]] const Stats& stats() const noexcept { return stats_; }
 
-    /// Quantos recursos físicos foram alocados versus quantos recursos lógicos
-    /// foram declarados. A diferença é o ganho do aliasing.
-    [[nodiscard]] u32 physical_resource_count() const noexcept { return physicalCount_; }
+    /// Ordem de execução (índices de passe), sem os podados.
+    [[nodiscard]] const std::vector<u32>& order() const noexcept { return order_; }
+    [[nodiscard]] u32 pass_count() const noexcept { return static_cast<u32>(passes_.size()); }
+    [[nodiscard]] const char* pass_name(u32 p) const noexcept { return passes_[p].name; }
+    [[nodiscard]] PassStage pass_stage(u32 p) const noexcept { return passes_[p].stage; }
+    [[nodiscard]] bool pass_culled(u32 p) const noexcept { return passes_[p].culled; }
+    [[nodiscard]] u32 resource_count() const noexcept { return static_cast<u32>(resources_.size()); }
 
-    /// Textura resolvida de um recurso lógico.
-    [[nodiscard]] TextureHandle texture(u32 resourceIndex) const noexcept;
+    /// Índice da física usada por uma textura lógica (para testes de
+    /// aliasing). kInvalidIndex se importada ou podada.
+    [[nodiscard]] u32 physical_slot(FGTexture t) const noexcept;
 
-    [[nodiscard]] u32 find_resource(const char* name) const noexcept;
-    [[nodiscard]] u32 find_pass(const char* name) const noexcept;
+    /// Barreira planejada — exposta para teste.
+    struct PlannedBarrier {
+        u32 resource = kInvalidIndex;
+        ResourceState state = ResourceState::Undefined;
+        bool discard = false;
+    };
+    /// Barreiras emitidas antes do passe `p` (vazio se podado).
+    void barriers_before(u32 p, std::vector<PlannedBarrier>& out) const;
 
-    /// Grafo em texto, para o painel de debug. Só é gerado quando pedido —
-    /// montar isso a cada frame custaria mais que o próprio render.
+    /// Texto do plano, para o painel DEV. Aloca — só sob demanda.
     [[nodiscard]] std::string dump() const;
 
-    /// Libera todas as texturas físicas. Chamado ao fechar projeto ou quando o
-    /// dispositivo é perdido (as texturas do driver antigo morreram).
-    void release_gpu_resources(GPUBackend& backend) noexcept;
-
 private:
-    /// Recurso físico: a textura/buffer real do driver. Vários recursos
-    /// lógicos podem apontar para o mesmo físico (aliasing), desde que seus
-    /// tempos de vida não se sobreponham.
-    struct PhysicalResource {
-        TextureDesc  desc{};
-        TextureHandle texture{};
-        BufferHandle  buffer{};
-        bool          isBuffer = false;
+    enum class Access : u8 { Read = 0, ColorWrite, StorageWrite, CopySrc, CopyDst };
 
-        /// Fim do último passe que usou este físico na alocação atual. É o que
-        /// decide se ele está livre para o próximo recurso lógico.
-        u32           busyUntilPass = kInvalidIndex;
-
-        /// Nome do recurso lógico que motivou a criação. Serve só para a
-        /// mensagem de erro apontar onde o grafo falhou.
-        std::string   ownerName;
+    struct AccessRecord {
+        u32 pass = 0;
+        u32 resource = 0;
+        Access access = Access::Read;
     };
 
-    void topo_sort() noexcept;
-    void cull_unreachable() noexcept;
-    void alias_resources() noexcept;
-    void insert_barriers() noexcept;
+    struct Resource {
+        const char*   name = "";
+        TextureDesc   desc{};
+        TextureHandle physical{};
+        bool          imported = false;
+        bool          isOutput = false;
+        bool          alive = false;
+        ResourceState finalState = ResourceState::ShaderRead;
+        u32           firstUse = kInvalidIndex;   ///< posição em order_
+        u32           lastUse  = kInvalidIndex;
+        u32           slot = kInvalidIndex;       ///< índice em slots_
+    };
 
-    std::vector<FramePass>     passes_;
-    std::vector<FrameResource> resources_;
-    std::vector<PhysicalResource> physical_;
+    struct Pass {
+        const char* name = "";
+        PassStage   stage = PassStage::Composite;
+        PassKind    kind = PassKind::Raster;
+        FGTexture   colorTarget{};
+        LoadOp      load = LoadOp::Clear;
+        f32         clear[4] = {0, 0, 0, 0};
+        PassFn      fn;
+        bool        sideEffect = false;
+        bool        culled = false;
+        u32         accessBegin = 0;   ///< faixa em sortedAccess_
+        u32         accessCount = 0;
+        u32         barrierBegin = 0;  ///< faixa em barriers_
+        u32         barrierCount = 0;
+    };
+
+    /// Uma textura física deste frame. Várias lógicas podem apontar para ela.
+    struct Slot {
+        TextureHandle texture{};
+        TextureDesc   desc{};
+        bool          free = false;   ///< disponível para reuso neste frame
+    };
+
+    void add_access(u32 pass, FGTexture t, Access a) noexcept;
+    [[nodiscard]] bool sort_passes() noexcept;
+    void cull() noexcept;
+    [[nodiscard]] Status assign_physical(TransientTexturePool& pool) noexcept;
+    void plan_barriers() noexcept;
+
+    std::vector<Pass>          passes_;
+    std::vector<Resource>      resources_;
+    std::vector<AccessRecord>  accesses_;
+    std::vector<AccessRecord>  sortedAccess_;
     std::vector<u32>           order_;
     std::vector<u32>           outputs_;
-    std::vector<u8>            marks_;      ///< visitado / na recursão, para detectar ciclo
+    std::vector<Slot>          slots_;
+    std::vector<PlannedBarrier> barriers_;
+    std::vector<PlannedBarrier> finalBarriers_;
 
-    /// Mapa recurso lógico → índice em `physical_`. -1 = sem recurso físico
-    /// (externo, ou podado).
-    std::vector<i32>           resourceToPhysical_;
+    // Temporários da compilação, mantidos para não alocar por frame.
+    std::vector<u32> indegree_;
+    std::vector<u32> edges_;       ///< pares (pred, succ) achatados
+    std::vector<u32> edgeBegin_;   ///< CSR: início dos sucessores de cada passe
+    std::vector<u32> succ_;
+    std::vector<u32> fill_;
+    std::vector<u32> queue_;
+    std::vector<ResourceState> tracked_;
 
-    u32  passCount_ = 0;
-    u32  resourceCount_ = 0;
-    u32  physicalCount_ = 0;
-    u32  culledCount_ = 0;
-    u32  mergedCount_ = 0;
-    u64  revision_ = 1;
-    u64  compiledRevision_ = 0;
-    bool compiled_ = false;
+    Stats stats_{};
+    bool  compiled_ = false;
 };
 
 } // namespace aurea

@@ -191,15 +191,22 @@ AUREA_TEST(Serialization, EffectsAndMasksSurviveRoundTrip) {
     Composition* c = original.timeline().composition(original.timeline().root());
     const LayerId id = c->add_layer(LayerKind::Video, "Com efeitos");
 
-    Effect e;
+    // Efeito no formato novo: tipo = id estável, slots genéricos, curva. O
+    // tipo é um que esta versão NÃO registra — o projeto tem de guardar tudo
+    // mesmo assim (abrir numa versão sem o efeito não pode apagar o ajuste).
+    EffectInstance e;
     e.id = c->layer(id)->alloc_effect_id();
-    e.type = 7;
+    e.type = effect_type_id("aurea.teste.desconhecido");
     e.enabled = false;
     e.expanded = true;
-    e.floats[0] = 12.5f;
-    e.floats[3] = -2.0f;
-    e.colors[0] = Vec4{0.1f, 0.2f, 0.3f, 0.4f};
-    e.paramCount = 5;
+    e.params.resize(3);
+    e.params[0].constant = ParamValue::scalar(12.5f);
+    e.params[1].constant = ParamValue::color(0.1f, 0.2f, 0.3f, 0.4f);
+    e.params[2].source = ParamSource::Expression;
+    e.params[2].expression = 3;
+    CurveData curve = CurveData::identity();
+    curve.channel[0].insert(curve.channel[0].begin() + 1, CurveData::Point{0.5f, 0.7f});
+    e.curves.push_back(curve);
     c->layer(id)->effects.push_back(e);
 
     Mask m;
@@ -224,10 +231,17 @@ AUREA_TEST(Serialization, EffectsAndMasksSurviveRoundTrip) {
     const Layer* ll = lc->layer(lc->order().at(0));
 
     AUREA_CHECK_EQ(ll->effects.size(), static_cast<usize>(1));
-    AUREA_CHECK_EQ(ll->effects[0].type, static_cast<u16>(7));
-    AUREA_CHECK(!ll->effects[0].enabled);
-    AUREA_CHECK_NEAR(ll->effects[0].floats[0], 12.5f, 1e-5);
-    AUREA_CHECK_NEAR(ll->effects[0].colors[0].w, 0.4f, 1e-5);
+    const EffectInstance& le = ll->effects[0];
+    AUREA_CHECK_EQ(le.type, effect_type_id("aurea.teste.desconhecido"));
+    AUREA_CHECK(!le.enabled);
+    AUREA_CHECK_EQ(le.params.size(), static_cast<usize>(3));
+    AUREA_CHECK_NEAR(le.params[0].constant.v[0], 12.5f, 1e-5);
+    AUREA_CHECK_NEAR(le.params[1].constant.v[3], 0.4f, 1e-5);
+    AUREA_CHECK(le.params[2].source == ParamSource::Expression);
+    AUREA_CHECK_EQ(le.params[2].expression, static_cast<u32>(3));
+    AUREA_CHECK_EQ(le.curves.size(), static_cast<usize>(1));
+    AUREA_CHECK_EQ(le.curves[0].channel[0].size(), static_cast<usize>(3));
+    AUREA_CHECK_NEAR(le.curves[0].channel[0][1].y, 0.7f, 1e-6);
 
     AUREA_CHECK_EQ(ll->masks.size(), static_cast<usize>(1));
     AUREA_CHECK_EQ(ll->masks[0].name, std::string("Recorte"));

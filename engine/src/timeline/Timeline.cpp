@@ -31,7 +31,7 @@ bool Timeline::remove_composition(CompositionId id) noexcept {
 
     // Layers de outras composições que referenciam esta viram órfãs. Não as
     // removemos implicitamente: o chamador decide, e a UI avisa o usuário.
-    compositions_.destroy(id);
+    (void)compositions_.destroy(id);   // existência conferida acima
     if (current_ == id) current_ = root_;
     return true;
 }

@@ -230,6 +230,118 @@ static_assert(offsetof(TelemetryPOD, workerCount) == 24);
 static_assert(offsetof(TelemetryPOD, gpuMemoryBytes) == 88);
 
 // -----------------------------------------------------------------------------
+// PerfPOD — o painel DEV de performance.
+//
+// Tudo que o painel mostra sai daqui, medido: GPU por timestamp query (0 =
+// "não medido", nunca "instantâneo"), decode pela thread de decode, frames
+// perdidos pelo FrameScheduler. Nada é estimado para parecer bonito.
+// -----------------------------------------------------------------------------
+struct PerfPOD {
+    f32 previewFps          = 0.0f;  // +0   frames apresentados por segundo
+    f32 cpuFrameMs          = 0.0f;  // +4   preparo + gravação
+    f32 gpuFrameMs          = 0.0f;  // +8
+    f32 decodeMs            = 0.0f;  // +12  por frame, thread de decode
+    f32 colorConvMs         = 0.0f;  // +16  GPU: YUV → linear
+    f32 effectsMs           = 0.0f;  // +20  GPU: todos os efeitos
+    f32 blurMs              = 0.0f;  // +24
+    f32 glowMs              = 0.0f;  // +28
+    f32 compositeMs         = 0.0f;  // +32
+    f32 outputMs            = 0.0f;  // +36  GPU: passe de saída
+    f32 presentMs           = 0.0f;  // +40  CPU: submissão + apresentação
+    f32 acquireMs           = 0.0f;  // +44  espera por imagem/fence
+    f32 lastSeekMs          = 0.0f;  // +48  do pedido ao frame pronto
+    f32 frameBudgetMs       = 0.0f;  // +52
+    u32 droppedFrames       = 0;     // +56  total da sessão
+    u32 droppedRecent       = 0;     // +60  último segundo
+    u32 renderScaleNum      = 1;     // +64
+    u32 renderScaleDen      = 1;     // +68
+    u32 renderAuto          = 1;     // +72
+    u32 previewWidth        = 0;     // +76
+    u32 previewHeight       = 0;     // +80
+    u32 decodedCacheFrames  = 0;     // +84
+    u64 decodedCacheBytes   = 0;     // +88
+    u64 ramBytes            = 0;     // +96
+    u64 gpuMemoryBytes      = 0;     // +104
+    u64 transientBytes      = 0;     // +112
+    u32 passesExecuted      = 0;     // +120
+    u32 passesCulled        = 0;     // +124
+    u32 texturesCreated     = 0;     // +128  neste frame (o certo em regime é 0)
+    u32 transientTextures   = 0;     // +132
+    u32 physicalTextures    = 0;     // +136
+    u32 aliasedTextures     = 0;     // +140
+    u32 pipelineCompilesLive = 0;    // +144  criados durante o playback (o certo é 0)
+    u32 pipelinesTotal      = 0;     // +148
+    u32 zeroCopy            = 0;     // +152
+    u32 hardwareDecoder     = 0;     // +156
+    u32 gpuTimers           = 0;     // +160
+    u32 seeks               = 0;     // +164
+    u32 coalesced           = 0;     // +168
+    u32 staleFrames         = 0;     // +172
+    u32 layersRendered      = 0;     // +176
+    u32 thermal             = 0;     // +180
+    char decoder[48]{};              // +184
+    char gpuName[24]{};              // +232
+};
+static_assert(sizeof(PerfPOD) == 256, "PerfPOD e contrato de ABI");
+static_assert(offsetof(PerfPOD, droppedFrames) == 56);
+static_assert(offsetof(PerfPOD, decodedCacheBytes) == 88);
+static_assert(offsetof(PerfPOD, passesExecuted) == 120);
+static_assert(offsetof(PerfPOD, decoder) == 184);
+static_assert(offsetof(PerfPOD, gpuName) == 232);
+
+// -----------------------------------------------------------------------------
+// Catálogo de efeitos (menu "adicionar efeito"). Nomes no blob de strings.
+// -----------------------------------------------------------------------------
+struct EffectCatalogRow {
+    u32 typeId          = 0;   // +0   id estável (hash da chave)
+    u32 effectClass     = 0;   // +4
+    u32 paramCount      = 0;   // +8
+    u32 nameOffset      = 0;   // +12
+    u32 nameLength      = 0;   // +16
+    u32 categoryOffset  = 0;   // +20
+    u32 categoryLength  = 0;   // +24
+    u32 reserved        = 0;   // +28
+};
+static_assert(sizeof(EffectCatalogRow) == 32, "EffectCatalogRow e contrato de ABI");
+
+/// Um efeito aplicado numa layer, na ordem de aplicação.
+struct LayerEffectRow {
+    u32 effectId        = 0;   // +0   id local à layer (chave dos keyframes)
+    u32 typeId          = 0;   // +4
+    u32 enabled         = 0;   // +8
+    u32 paramCount      = 0;   // +12
+    u32 nameOffset      = 0;   // +16
+    u32 nameLength      = 0;   // +20
+    u32 known           = 0;   // +24  0 = tipo que esta versão não conhece
+    u32 reserved        = 0;   // +28
+};
+static_assert(sizeof(LayerEffectRow) == 32, "LayerEffectRow e contrato de ABI");
+
+/// Um parâmetro de um efeito aplicado: declaração + valor atual.
+struct EffectParamRow {
+    u32 index           = 0;    // +0
+    u32 type            = 0;    // +4   ParamType
+    u32 flags           = 0;    // +8
+    u32 enumCount       = 0;    // +12
+    f32 minValue        = 0.0f; // +16
+    f32 maxValue        = 0.0f; // +20
+    f32 value[4]{};             // +24  valor no instante do playhead
+    f32 defaultValue[4]{};      // +40
+    u32 labelOffset     = 0;    // +56
+    u32 labelLength     = 0;    // +60
+    u32 unitOffset      = 0;    // +64
+    u32 unitLength      = 0;    // +68
+    u32 enumOffset      = 0;    // +72  rótulos separados por '|'
+    u32 enumLength      = 0;    // +76
+    u32 animated        = 0;    // +80  tem keyframe
+    u32 reserved[3]{};          // +84
+};
+static_assert(sizeof(EffectParamRow) == 96, "EffectParamRow e contrato de ABI");
+static_assert(offsetof(EffectParamRow, value) == 24);
+static_assert(offsetof(EffectParamRow, labelOffset) == 56);
+static_assert(offsetof(EffectParamRow, animated) == 80);
+
+// -----------------------------------------------------------------------------
 // Trava final: tudo que atravessa a fronteira precisa ser copiável byte a byte.
 // Um tipo com destrutor ou ponteiro aqui seria um desastre silencioso — o JNI
 // copiaria o ponteiro e não o conteúdo.
@@ -239,6 +351,10 @@ static_assert(std::is_trivially_copyable_v<KeyframeRow>);
 static_assert(std::is_trivially_copyable_v<EngineStatusPOD>);
 static_assert(std::is_trivially_copyable_v<ExportProgressPOD>);
 static_assert(std::is_trivially_copyable_v<TelemetryPOD>);
+static_assert(std::is_trivially_copyable_v<PerfPOD>);
+static_assert(std::is_trivially_copyable_v<EffectCatalogRow>);
+static_assert(std::is_trivially_copyable_v<LayerEffectRow>);
+static_assert(std::is_trivially_copyable_v<EffectParamRow>);
 
 // O motor guarda estes tamanhos para reservar os buffers diretos do lado Kotlin.
 inline constexpr usize kCommandSizeBytes     = command_layout::kSize;

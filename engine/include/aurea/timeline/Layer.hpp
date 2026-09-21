@@ -23,6 +23,7 @@
 #include "aurea/core/Handle.hpp"
 #include "aurea/core/Math.hpp"
 #include "aurea/animation/Curve.hpp"
+#include "aurea/effects/Parameter.hpp"
 
 #include <string>
 #include <vector>
@@ -56,70 +57,8 @@ struct Transform {
     }
 };
 
-/// Tipo de parâmetro de um efeito. Declarado como dado para a UI construir o
-/// inspector sem conhecer cada efeito individualmente.
-enum class EffectParamType : u8 {
-    Float = 0, Int, Bool, Color, Vec2, Vec3, Angle, Percent, Enum, Curve, Asset,
-};
-
-struct EffectParamDesc {
-    const char*    name = "";
-    EffectParamType type = EffectParamType::Float;
-    f32            minValue = 0.0f;
-    f32            maxValue = 1.0f;
-    f32            defaultValue = 0.0f;
-    u32            enumCount = 0;      ///< itens quando type == Enum
-    const char* const* enumNames = nullptr;
-};
-
-/// Descrição de um efeito. Registrada uma vez, estática, compartilhada por
-/// todas as instâncias. É o que permite a UI montar o painel de propriedades e
-/// o export compilar a mesma cadeia de passes.
-struct EffectDesc {
-    const char* name = "";
-    const char* category = "";
-    u32         paramCount = 0;
-    const EffectParamDesc* params = nullptr;
-
-    /// Peso relativo de custo, 1 = barato. O preview adaptativo usa isto para
-    /// decidir o que degradar primeiro quando o frame não fecha.
-    u32 costWeight = 1;
-
-    /// O efeito pode ser fundido num único passe com o efeito anterior?
-    /// (ex.: exposição + contraste + saturação → 1 shader)
-    bool fusable = true;
-
-    /// Descrição do preview: alguns efeitos têm versão de preview mais barata
-    /// com qualidade reduzida. `previewSamples` é o teto no preview; o export
-    /// sempre usa `exportSamples`.
-    u32 previewSamples = 0;
-    u32 exportSamples  = 0;
-};
-
-/// Instância de um efeito numa layer.
-struct Effect {
-    /// Id local à layer, estável enquanto o efeito existir. É o que a UI
-    /// guarda para falar de "este efeito" (a posição no vetor muda com
-    /// reordenar). Não é um Handle de geração porque não cruza a fronteira
-    /// sozinho — sempre vem acompanhado do LayerId.
-    u32   id = kInvalidIndex;
-    u16   type = 0;                ///< índice em EffectRegistry
-    bool  enabled = true;
-    bool  expanded = true;         ///< estado do painel na UI (persistido)
-
-    /// Parâmetros. Nomeados por índice na EffectDesc, não por ponteiro.
-    f32   floats[16]{};
-    Vec4  colors[2]{};
-    Vec2  vec2s[2]{};
-    u32   ints[4]{};
-
-    /// Parâmetros animáveis vivem no TrackSet da layer, com
-    /// (effectIndex, effectParamIndex) como chave.
-    u32   paramCount = 0;
-
-    /// Máscaras que recortam este efeito. Vazio = aplica a layer inteira.
-    MaskId mask{};
-};
+// Efeitos: a instância (`EffectInstance`) e os parâmetros genéricos vivem em
+// effects/Parameter.hpp. A layer só guarda a lista, na ordem de aplicação.
 
 /// Máscara. Os pontos são animáveis: o path vive aqui, a animação nos tracks.
 struct MaskPoint {
@@ -275,7 +214,7 @@ struct Layer {
     Transform transform;
     TrackSet  tracks;
 
-    std::vector<Effect> effects;
+    std::vector<EffectInstance> effects;
     std::vector<Mask>   masks;
 
     // --- Específico de tipo --------------------------------------------------
@@ -322,7 +261,7 @@ struct Layer {
         for (auto& m : masks) if (m.id == id.index) return &m;
         return nullptr;
     }
-    [[nodiscard]] Effect* find_effect(EffectId id) noexcept {
+    [[nodiscard]] EffectInstance* find_effect(EffectId id) noexcept {
         for (auto& e : effects) if (e.id == id.index) return &e;
         return nullptr;
     }

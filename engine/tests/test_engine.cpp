@@ -16,7 +16,8 @@ namespace {
 
 EngineConfig headless_config() {
     EngineConfig cfg;
-    cfg.createGpuBackend = false;
+    // Sem backend: config.backend nulo. Timeline, comandos e serialização
+    // funcionam sem GPU.
     cfg.workerCount = 2;
     cfg.memoryBudgetBytes = 64ull * 1024 * 1024;
     cfg.disableAutosave = true;
@@ -83,7 +84,7 @@ AUREA_TEST(Engine, CommandsThroughTheQueueReachTheModel) {
     const Command batch[1] = {create};
     AUREA_CHECK_EQ(e.submit_commands(batch, 1), static_cast<u32>(1));
 
-    AUREA_CHECK(e.render_frame(TickNs{0}).ok());
+    AUREA_CHECK(e.render_frame().ok());
 
     const Project* p = e.project();
     const Composition* c = p->timeline().composition(p->timeline().current());
@@ -360,71 +361,8 @@ AUREA_TEST(Engine, CompositionSizeBeyondDeviceIsRefused) {
     e.shutdown();
 }
 
-AUREA_TEST(Engine, AnimationIsEvaluatedOnSeek) {
-    // COM O EDITOR PARADO, quem manda é o playhead da timeline: o instante
-    // passado em `render_frame` é o do clock de áudio, e ele só é consultado
-    // quando o áudio é a fonte (isto é, durante o playback). É essa regra que
-    // evita o áudio puxar o playhead de volta enquanto o dedo arrasta.
-    Engine e;
-    AUREA_CHECK(e.initialize(headless_config()).ok());
-    AUREA_CHECK(e.new_project(1280, 720, 30.0, nullptr).ok());
-
-    Command create;
-    create.type = CommandType::LayerCreate;
-    create.layer_create.kind = LayerKind::Video;
-    (void)e.apply_command(create);
-
-    Composition* c = e.project()->timeline().composition(
-        e.project()->timeline().current());
-    const LayerId id = c->order().at(0);
-    c->layer(id)->start = FrameIndex{0};
-    c->layer(id)->end = FrameIndex{300};
-
-    Track& posX = c->layer(id)->tracks.get_or_create(TrackProperty::PositionX);
-    posX.set(FrameIndex{0}, 0.0f);
-    posX.set(FrameIndex{100}, 500.0f);
-
-    Command seek;
-    seek.type = CommandType::PlaybackSeek;
-    seek.seek.time = TickNs{0};
-    (void)e.apply_command(seek);
-    AUREA_CHECK(e.render_frame(TickNs{0}).ok());
-    AUREA_CHECK_NEAR(c->layer(id)->transform.position.x, 0.0f, 0.01f);
-
-    // 50 frames a 30 fps = 1,667 s.
-    seek.seek.time = tick_at(FrameIndex{50}, 30.0);
-    AUREA_CHECK(e.apply_command(seek).ok());
-    AUREA_CHECK(e.render_frame(TickNs{0}).ok());
-    AUREA_CHECK_NEAR(c->layer(id)->transform.position.x, 250.0f, 0.01f);
-    e.shutdown();
-}
-
-AUREA_TEST(Engine, AudioClockDrivesPlayheadDuringPlayback) {
-    // DURANTE O PLAYBACK quem manda é o áudio. O renderer pergunta "que
-    // instante é agora?" e desenha o frame correspondente — se o vídeo travar,
-    // o áudio continua e o vídeo pula, em vez de o áudio esperar e produzir
-    // estalo.
-    Engine e;
-    AUREA_CHECK(e.initialize(headless_config()).ok());
-    AUREA_CHECK(e.new_project(1280, 720, 30.0, nullptr).ok());
-
-    Command play;
-    play.type = CommandType::PlaybackPlay;
-    AUREA_CHECK(e.apply_command(play).ok());
-
-    const TickNs oneSecond = tick_at(FrameIndex{30}, 30.0);
-    AUREA_CHECK(e.render_frame(oneSecond).ok());
-
-    // 1 segundo a 30 fps = frame 30, mesmo sem nenhum seek: o instante veio do
-    // mixer de áudio.
-    AUREA_CHECK_EQ(e.project()->timeline().playhead().value, static_cast<i64>(30));
-    e.shutdown();
-}
-
-AUREA_TEST(Engine, PinnedClockIgnoresAudioTime) {
-    // O inverso do teste acima: parado, o instante do áudio NÃO move o
-    // playhead. Sem isto, um arrasto na timeline seria puxado de volta pelo
-    // áudio e o usuário não conseguiria posicionar o playhead.
+AUREA_TEST(Engine, SeekMovesThePlayheadAndRenderKeepsIt) {
+    // Parado, o playhead é o que o usuário pediu: renderizar não o move.
     Engine e;
     AUREA_CHECK(e.initialize(headless_config()).ok());
     AUREA_CHECK(e.new_project(1280, 720, 30.0, nullptr).ok());
@@ -433,11 +371,30 @@ AUREA_TEST(Engine, PinnedClockIgnoresAudioTime) {
     seek.type = CommandType::PlaybackSeek;
     seek.seek.time = tick_at(FrameIndex{10}, 30.0);
     AUREA_CHECK(e.apply_command(seek).ok());
-
-    const TickNs farAway = tick_at(FrameIndex{500}, 30.0);
-    AUREA_CHECK(e.render_frame(farAway).ok());
-
+    AUREA_CHECK(e.render_frame().ok());
+    AUREA_CHECK(e.render_frame().ok());
     AUREA_CHECK_EQ(e.project()->timeline().playhead().value, static_cast<i64>(10));
+    AUREA_CHECK_EQ(e.read_status().playhead.value, static_cast<i64>(10));
+    e.shutdown();
+}
+
+AUREA_TEST(Engine, PlayAdvancesThePlayheadFromTheClock) {
+    Engine e;
+    AUREA_CHECK(e.initialize(headless_config()).ok());
+    AUREA_CHECK(e.new_project(1280, 720, 30.0, nullptr).ok());
+    Command play;
+    play.type = CommandType::PlaybackPlay;
+    AUREA_CHECK(e.apply_command(play).ok());
+    AUREA_CHECK(e.read_status().playing);
+    // O relógio anda em tempo real: 120 ms depois, pelo menos 2 frames.
+    const u64 t0 = monotonic_ns();
+    while (monotonic_ns() - t0 < 120'000'000ull) {}
+    AUREA_CHECK(e.render_frame().ok());
+    AUREA_CHECK(e.project()->timeline().playhead().value >= 2);
+    Command pause;
+    pause.type = CommandType::PlaybackPause;
+    AUREA_CHECK(e.apply_command(pause).ok());
+    AUREA_CHECK(!e.read_status().playing);
     e.shutdown();
 }
 
@@ -457,7 +414,7 @@ AUREA_TEST(Engine, AnimationSkipsLayersOutsideTheirRange) {
     c->layer(id)->start = FrameIndex{1000};
     c->layer(id)->end = FrameIndex{2000};
 
-    AUREA_CHECK(e.render_frame(TickNs{0}).ok());
+    AUREA_CHECK(e.render_frame().ok());
 
     bridge::LayerRow rows[4];
     // A camada existe na timeline, mas o motor não a avaliou — ela está fora
@@ -475,7 +432,7 @@ AUREA_TEST(Engine, StatusReflectsProjectState) {
     create.type = CommandType::LayerCreate;
     create.layer_create.kind = LayerKind::Video;
     (void)e.apply_command(create);
-    (void)e.render_frame(TickNs{0});
+    (void)e.render_frame();
 
     const EngineStatus st = e.read_status();
     AUREA_CHECK_EQ(st.layerCount, static_cast<u32>(1));
@@ -533,8 +490,7 @@ AUREA_TEST(Engine, SuspendAndResumeKeepProject) {
     AUREA_CHECK(e.suspend().ok());
     AUREA_CHECK_EQ(e.state(), EngineState::Suspended);
 
-    EngineConfig cfg = headless_config();
-    AUREA_CHECK(e.resume(cfg).ok());
+    AUREA_CHECK(e.resume().ok());
 
     // Suspender NÃO perde trabalho: o app pode ser morto em background a
     // qualquer momento, e o projeto tem que estar lá quando ele voltar.
@@ -549,7 +505,7 @@ AUREA_TEST(Engine, SuspendAndResumeKeepProject) {
 AUREA_TEST(Engine, RenderWithoutProjectFails) {
     Engine e;
     AUREA_CHECK(e.initialize(headless_config()).ok());
-    AUREA_CHECK(!e.render_frame(TickNs{0}).ok());
+    AUREA_CHECK(!e.render_frame().ok());
     e.shutdown();
 }
 

@@ -210,29 +210,73 @@ void read_track(ByteReader& r, Track& t) {
     }
 }
 
-void write_effect(ByteWriter& w, const Effect& e) {
+// Efeito no formato da API nova: o tipo é o id estável (hash da chave), e cada
+// parâmetro é um slot genérico (4 componentes + referência + origem). Um tipo
+// desconhecido é lido e guardado inteiro — o projeto abre, o efeito não
+// desenha, e nada do que a pessoa configurou se perde ao salvar de novo.
+void write_effect(ByteWriter& w, const EffectInstance& e) {
     w.u32v(e.id);
-    w.u16v(e.type);
+    w.u32v(e.type);
     w.boolv(e.enabled);
     w.boolv(e.expanded);
-    for (f32 f : e.floats) w.f32v(f);
-    for (const Vec4& c : e.colors) w.vec4(c);
-    for (const Vec2& v : e.vec2s) w.vec2(v);
-    for (u32 i : e.ints) w.u32v(i);
-    w.u32v(e.paramCount);
+    w.u32v(static_cast<u32>(e.params.size()));
+    for (const ParamSlot& s : e.params) {
+        for (f32 f : s.constant.v) w.f32v(f);
+        w.u64v(s.constant.ref);
+        w.u32v(s.expression);
+        w.u8v(static_cast<u8>(s.source));
+    }
+    w.u32v(static_cast<u32>(e.curves.size()));
+    for (const CurveData& c : e.curves) {
+        for (const auto& ch : c.channel) {
+            w.u32v(static_cast<u32>(ch.size()));
+            for (const CurveData::Point& p : ch) { w.f32v(p.x); w.f32v(p.y); }
+        }
+    }
+    w.u32v(static_cast<u32>(e.gradients.size()));
+    for (const GradientData& g : e.gradients) {
+        w.u32v(static_cast<u32>(g.stops.size()));
+        for (const GradientStop& s : g.stops) { w.f32v(s.position); w.vec4(s.color); }
+    }
     w.u64v(e.mask.pack());
 }
 
-void read_effect(ByteReader& r, Effect& e) {
+void read_effect(ByteReader& r, EffectInstance& e) {
     e.id = r.u32v();
-    e.type = r.u16v();
+    e.type = r.u32v();
     e.enabled = r.boolv();
     e.expanded = r.boolv();
-    for (f32& f : e.floats) f = r.f32v();
-    for (Vec4& c : e.colors) c = r.vec4();
-    for (Vec2& v : e.vec2s) v = r.vec2();
-    for (u32& i : e.ints) i = r.u32v();
-    e.paramCount = r.u32v();
+    const u32 paramCount = r.u32v();
+    if (paramCount > 256) { r.skip_to_end(); return; }
+    e.params.resize(paramCount);
+    for (ParamSlot& s : e.params) {
+        for (f32& f : s.constant.v) f = r.f32v();
+        s.constant.ref = r.u64v();
+        s.expression = r.u32v();
+        const u8 src = r.u8v();
+        s.source = src <= static_cast<u8>(ParamSource::Expression) ? static_cast<ParamSource>(src)
+                                                                   : ParamSource::Constant;
+    }
+    const u32 curveCount = r.u32v();
+    if (curveCount > 64) { r.skip_to_end(); return; }
+    e.curves.resize(curveCount);
+    for (CurveData& c : e.curves) {
+        for (auto& ch : c.channel) {
+            const u32 n = r.u32v();
+            if (n > 4096) { r.skip_to_end(); return; }
+            ch.resize(n);
+            for (CurveData::Point& p : ch) { p.x = r.f32v(); p.y = r.f32v(); }
+        }
+    }
+    const u32 gradientCount = r.u32v();
+    if (gradientCount > 64) { r.skip_to_end(); return; }
+    e.gradients.resize(gradientCount);
+    for (GradientData& g : e.gradients) {
+        const u32 n = r.u32v();
+        if (n > 4096) { r.skip_to_end(); return; }
+        g.stops.resize(n);
+        for (GradientStop& s : g.stops) { s.position = r.f32v(); s.color = r.vec4(); }
+    }
     e.mask = MaskId::unpack(r.u64v());
 }
 
@@ -320,7 +364,7 @@ void write_layer(ByteWriter& w, const Layer& l) {
 
     // Efeitos
     w.u32v(static_cast<u32>(l.effects.size()));
-    for (const Effect& e : l.effects) write_effect(w, e);
+    for (const EffectInstance& e : l.effects) write_effect(w, e);
 
     // Máscaras
     w.u32v(static_cast<u32>(l.masks.size()));
@@ -452,7 +496,7 @@ void read_layer(ByteReader& r, Layer& l) {
     l.effects.clear();
     l.effects.reserve(effectCount);
     for (u32 i = 0; i < effectCount && r.good(); ++i) {
-        Effect e;
+        EffectInstance e;
         read_effect(r, e);
         l.effects.push_back(e);
     }

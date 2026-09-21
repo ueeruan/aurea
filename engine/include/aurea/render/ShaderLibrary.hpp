@@ -1,196 +1,144 @@
 // =============================================================================
 //  Aurea / render / ShaderLibrary.hpp
 //
-//  Fonte única de shader, cache de pipeline.
+//  ShaderCache + PipelineCache + SamplerCache do motor.
 //
-//  O problema real que isto resolve: compilar um pipeline Vulkan/Metal custa
-//  de 5 a 200 ms. Se isso acontece na primeira vez que um efeito aparece
-//  durante o playback, o usuário vê um congelamento de um terço de segundo no
-//  meio da reprodução — e pior, ele acontece várias vezes, uma por combinação
-//  de estado de blend/format.
+//  O problema que isto resolve: criar um pipeline custa de 5 a 200 ms. Se isso
+//  acontece na primeira vez que um efeito aparece DURANTE o playback, o vídeo
+//  congela por um terço de segundo. Três defesas:
 //
-//  Três camadas de defesa:
+//   1. SPIR-V PRONTO. Os shaders chegam compilados do build (ShaderIds.hpp) e
+//      os módulos são criados uma vez, na inicialização.
 //
-//   1. FONTE ÚNICA. O shader é escrito uma vez. Android recebe SPIR-V, iOS
-//      recebe MSL gerado de SPIR-V no build (SPIRV-Cross), não escrito à mão.
-//      Preview e export usam o mesmo shader — impossível divergirem.
+//   2. CHAVE ESTRUTURAL. O pipeline é identificado por (shaders, blend, formato,
+//      sampler imutável) — duas layers com o mesmo efeito dividem o pipeline.
 //
-//   2. CACHE POR CHAVE ESTRUTURAL. A chave do pipeline é (shader, blend,
-//      formats, samples), não um ponteiro. Duas layers com o mesmo blend mode
-//      compartilham o pipeline.
+//   3. PRÉ-AQUECIMENTO. Todo efeito embutido declara os pipelines que usa, e o
+//      renderer compila todos antes do primeiro frame. O cache de pipeline do
+//      driver é persistido em disco pelo backend, então a partir da segunda
+//      execução isso é quase instantâneo.
 //
-//   3. PRÉ-AQUECIMENTO. Ao abrir um projeto, o motor varre os efeitos usados e
-//      compila os pipelines de que vai precisar ANTES do primeiro frame —
-//      enquanto a UI ainda mostra o carregamento. Também é o que o export faz
-//      antes de começar: nenhum pipeline novo durante a exportação.
-//
-//  Se um pipeline não está no cache e não pode ser compilado, o passe é
-//  PULADO e o frame sai sem ele — com um aviso na telemetria. Nunca se desenha
-//  com um pipeline inválido, e nunca se finge que o efeito rodou.
+//  `compiles_since_mark()` conta pipelines criados depois que o playback
+//  começou. O número certo é ZERO, e há teste e telemetria para isso.
 // =============================================================================
 #pragma once
 
-#include "aurea/render/GPUBackend.hpp"
 #include "aurea/core/Result.hpp"
+#include "aurea/render/GPUBackend.hpp"
+#include "aurea/shaders/ShaderIds.hpp"
 
-#include <vector>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace aurea {
 
-/// Identidade estrutural de um shader. Duas instâncias com a mesma descrição
-/// são o mesmo shader.
-struct ShaderKey {
-    const char* source = nullptr;
-    ShaderStage stage = ShaderStage::Fragment;
-    /// Variantes por #define. Ex.: ENABLE_MASK, BLEND_ADD, HAS_LUT.
-    u32 variantFlags = 0;
-
-    friend bool operator==(const ShaderKey& a, const ShaderKey& b) noexcept {
-        return a.source == b.source && a.stage == b.stage
-            && a.variantFlags == b.variantFlags;
-    }
-};
-
-struct ShaderKeyHash {
-    [[nodiscard]] usize operator()(const ShaderKey& k) const noexcept {
-        // Mistura simples: ponteiro + estágio + flags. Sem colisão prática
-        // porque o número de shaders é pequeno (centenas).
-        usize h = reinterpret_cast<usize>(k.source);
-        h ^= static_cast<usize>(k.stage) * 0x9E3779B97F4A7C15ull;
-        h ^= static_cast<usize>(k.variantFlags) * 0xC2B2AE3D27D4EB4Full;
-        return h;
-    }
-};
-
-/// Identidade estrutural de um pipeline. Todos os campos que mudam o estado
-/// compilado entram aqui — e SÓ eles. Um campo que não muda o pipeline na
-/// chave produz recompilação inútil; um que muda e não está na chave produz
-/// artefato silencioso.
 struct PipelineKey {
-    /// Distingue compute de gráfico. Sem este campo, um pipeline de compute com
-    /// vertex/fragment nulos colidiria com um gráfico de shaders nulos — e os
-    /// dois se confundiriam no cache.
-    bool isCompute = false;
+    ShaderId vertex   = ShaderId::Count;
+    ShaderId fragment = ShaderId::Count;
+    ShaderId compute  = ShaderId::Count;
+    bool          blendEnabled = false;
+    BlendMode     blend = BlendMode::Normal;
+    SurfaceFormat format = SurfaceFormat::RGBA16F;
+    Topology      topology = Topology::TriangleList;
+    /// Sampler imutável (conversão YCbCr de um formato externo). 0 = nenhum.
+    u64           immutableSampler = 0;
 
-    ShaderKey vertex{};
-    ShaderKey fragment{};
-    ShaderKey compute{};
-    BlendMode blend = BlendMode::Normal;
-    bool depthTest = false;
-    bool depthWrite = false;
-    bool cullBackFace = false;
-    u32  colorAttachmentCount = 1;
-    SurfaceFormat colorFormats[4] = {};
-    SurfaceFormat depthFormat = SurfaceFormat::Depth24;
-    u32  sampleCount = 1;
+    [[nodiscard]] bool is_compute() const noexcept { return compute != ShaderId::Count; }
 
-    friend bool operator==(const PipelineKey& a, const PipelineKey& b) noexcept;
+    [[nodiscard]] static PipelineKey graphics(ShaderId vs, ShaderId fs, SurfaceFormat fmt,
+                                              bool blendEnabled = false,
+                                              BlendMode mode = BlendMode::Normal) noexcept {
+        PipelineKey k;
+        k.vertex = vs;
+        k.fragment = fs;
+        k.format = fmt;
+        k.blendEnabled = blendEnabled;
+        k.blend = mode;
+        return k;
+    }
+    /// Passe de tela cheia (fullscreen.vert + fragment) — o caso de todo efeito.
+    [[nodiscard]] static PipelineKey fullscreen(ShaderId fs, SurfaceFormat fmt) noexcept {
+        return graphics(ShaderId::common_fullscreen_vert, fs, fmt);
+    }
+    [[nodiscard]] static PipelineKey compute_shader(ShaderId cs) noexcept {
+        PipelineKey k;
+        k.compute = cs;
+        return k;
+    }
+
+    friend bool operator==(const PipelineKey&, const PipelineKey&) noexcept = default;
 };
 
 struct PipelineKeyHash {
     [[nodiscard]] usize operator()(const PipelineKey& k) const noexcept;
 };
 
-/// Descreve um parâmetro que a UI pode mexer sem recompilar o shader.
-/// Só entra aqui o que vira uniform buffer. O que vira #define precisa de uma
-/// variante nova — e é por isso que a lista de variantes é pequena e fixa.
-struct ShaderUniform {
-    const char* name = "";
-    u32 offset = 0;
-    u32 size = 0;
-    u32 arrayCount = 1;
+/// Samplers que todo passe usa. Criados uma vez.
+enum class CommonSampler : u8 {
+    LinearClamp = 0,   ///< o padrão: bilinear, borda repetida
+    LinearBorder,      ///< bilinear, fora da imagem = transparente
+    NearestClamp,
+    LinearRepeat,
+    LinearMirror,
+    Count,
 };
 
 class ShaderLibrary {
 public:
-    static constexpr u32 kMaxShaders = 512;
-    static constexpr u32 kMaxPipelines = 1024;
-
     ShaderLibrary() = default;
+    ShaderLibrary(const ShaderLibrary&) = delete;
+    ShaderLibrary& operator=(const ShaderLibrary&) = delete;
 
+    /// Cria os módulos de shader e os samplers comuns.
     [[nodiscard]] Status initialize(GPUBackend& backend) noexcept;
+    /// Destrói tudo (encerramento normal).
     void shutdown() noexcept;
+    /// O dispositivo morreu e levou os objetos: esquece os handles sem
+    /// destruí-los. `initialize` recria.
+    void forget_device() noexcept;
 
-    // --- Shaders --------------------------------------------------------------
+    [[nodiscard]] bool ready() const noexcept { return backend_ != nullptr; }
 
-    /// Compila (ou devolve do cache) um shader. `variantFlags` seleciona a
-    /// variante; a fonte pode usar `#if AUREA_VARIANT_*` para compilá-la.
-    [[nodiscard]] Result<ShaderHandle> get_shader(const ShaderKey& key) noexcept;
+    [[nodiscard]] ShaderHandle shader(ShaderId id) const noexcept;
+    [[nodiscard]] SamplerHandle sampler(CommonSampler s) const noexcept;
 
-    /// Devia o cache de shaders do backend. O handle fica estável — é por isso
-    /// que o cache é indexado por chave e não por handle do driver: perder o
-    /// dispositivo não invalida o que o motor guardou.
-    void invalidate_device_shaders() noexcept;
+    /// Devolve (ou cria) o pipeline. Falha é registrada e o chamador pula o
+    /// passe — nunca se desenha com pipeline inválido.
+    [[nodiscard]] Result<PipelineHandle> pipeline(const PipelineKey& key) noexcept;
 
-    // --- Pipelines ------------------------------------------------------------
+    /// Compila antecipadamente. Devolve quantos foram criados agora.
+    u32 prewarm(const PipelineKey* keys, u32 count) noexcept;
 
-    /// Compila (ou devolve do cache) um pipeline.
-    [[nodiscard]] Result<PipelineHandle> get_pipeline(const PipelineKey& key) noexcept;
+    /// A partir daqui, toda criação de pipeline conta como "durante o
+    /// playback" — o painel DEV mostra, e o número certo é zero.
+    void mark_steady_state() noexcept { compilesSinceMark_ = 0; steady_ = true; }
+    [[nodiscard]] u32 compiles_since_mark() const noexcept { return compilesSinceMark_; }
 
-    /// Pipeline de composição pronto para o caso mais comum: quad, blend do
-    /// modo pedido, alvo RGBA16F. A maioria do frame passa por aqui.
-    [[nodiscard]] Result<PipelineHandle> composite_pipeline(BlendMode blend,
-                                                            SurfaceFormat targetFormat,
-                                                            u32 sampleCount) noexcept;
-
-    /// Pipeline de compute para uma shader de partícula, culling ou redução.
-    [[nodiscard]] Result<PipelineHandle> compute_pipeline(const ShaderKey& shader) noexcept;
-
-    // --- Pré-aquecimento ------------------------------------------------------
-
-    /// Compila antecipadamente os pipelines que este conjunto de blends e
-    /// formatos vai precisar. Chamado ao abrir o projeto e antes do export.
-    /// Devolve quantos foram compilados (o resto já estava em cache).
-    u32 prewarm_blend_modes(const BlendMode* modes, u32 count,
-                            SurfaceFormat targetFormat, u32 sampleCount) noexcept;
-
-    /// Compila os pipelines dos efeitos de um projeto inteiro. É o que garante
-    /// que o export nunca compile nada no meio.
-    u32 prewarm_effects(const u32* effectTypeIds, u32 count,
-                        SurfaceFormat targetFormat) noexcept;
-
-    // --- Estatísticas ---------------------------------------------------------
-
-    [[nodiscard]] u32 shader_count() const noexcept { return static_cast<u32>(shaders_.size()); }
     [[nodiscard]] u32 pipeline_count() const noexcept { return static_cast<u32>(pipelines_.size()); }
-    [[nodiscard]] u32 compile_failures() const noexcept { return compileFailures_; }
-
-    /// Cache hit rate do frame atual, para a telemetria. Uma taxa baixa em
-    /// regime estacionário significa que a chave tem campo demais.
-    [[nodiscard]] f32 hit_rate() const noexcept {
-        const u64 total = hits_ + misses_;
-        return total ? static_cast<f32>(static_cast<f64>(hits_) / static_cast<f64>(total)) : 0.0f;
-    }
-    void reset_frame_stats() noexcept { hits_ = 0; misses_ = 0; }
-
-    /// Erro da última compilação que falhou. A UI mostra isto — um efeito que
-    /// não compila precisa aparecer como "não disponível", não como silêncio.
+    [[nodiscard]] u32 compile_failures() const noexcept { return failures_; }
     [[nodiscard]] const std::string& last_error() const noexcept { return lastError_; }
 
+    // --- Recarga de shader (desenvolvimento, desktop) -------------------------
+    //
+    // Com `AUREA_SHADER_DIR` apontando para a pasta de .spv do build, o motor
+    // recarrega o shader alterado e descarta os pipelines que o usavam. Não é
+    // usado no Android de produção: lá os shaders são os embutidos.
+    u32 reload_changed(const char* spvDirectory) noexcept;
+
 private:
-    struct ShaderEntry {
-        ShaderKey    key{};
-        ShaderHandle handle{};
-        bool         valid = false;
-    };
-    struct PipelineEntry {
-        PipelineKey    key{};
-        PipelineHandle handle{};
-        bool           valid = false;
-    };
-
     GPUBackend* backend_ = nullptr;
+    ShaderHandle shaders_[kShaderCount]{};
+    SamplerHandle samplers_[static_cast<u32>(CommonSampler::Count)]{};
+    std::unordered_map<PipelineKey, PipelineHandle, PipelineKeyHash> pipelines_;
 
-    std::vector<ShaderEntry>   shaders_;
-    std::vector<PipelineEntry> pipelines_;
-    std::unordered_map<ShaderKey, u32, ShaderKeyHash>   shaderIndex_;
-    std::unordered_map<PipelineKey, u32, PipelineKeyHash> pipelineIndex_;
+    /// SPIR-V recarregado do disco (substitui o embutido enquanto viver).
+    std::vector<std::vector<u32>> overrides_;
+    std::vector<i64> overrideStamp_;
 
-    u32 compileFailures_ = 0;
-    u64 hits_ = 0;
-    u64 misses_ = 0;
+    u32 failures_ = 0;
+    u32 compilesSinceMark_ = 0;
+    bool steady_ = false;
     std::string lastError_;
 };
 

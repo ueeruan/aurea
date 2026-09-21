@@ -202,14 +202,29 @@ enum class ColorSpace : u16 {
     SRGB, Rec709, DisplayP3, Rec2020, HDR10, HLG,
 };
 
+/// Layout de memória de um frame de vídeo decodificado. Os valores novos
+/// entram SEMPRE no fim: o número pode ter sido gravado em cache de proxy.
 enum class PixelFormat : u16 {
     Unknown = 0,
     RGBA8, RGBA16F,
-    NV12, P010,   // saída típica de decoder de hardware
+    NV12,     ///< Y + CbCr intercalado, 8 bits (o caso comum de H.264)
+    P010,     ///< Y + CbCr intercalado, 10 bits em 16 (HEVC Main10, HDR)
+    NV21,     ///< Y + CrCb intercalado (câmeras antigas)
+    YUV420P,  ///< três planos separados, 8 bits (I420)
+    /// Formato opaco do fabricante: só a GPU sabe ler, via conversão YCbCr.
+    /// É o que o MediaCodec entrega no caminho zero-copy.
+    Opaque,
 };
 
+/// Formato de textura da GPU. Os valores novos entram no fim, pelo mesmo
+/// motivo do PixelFormat.
 enum class SurfaceFormat : u16 {
     R8 = 0, RG8, RGBA8, R16F, RGBA16F, R32F, Depth24, Depth32F,
+    R16,      ///< unorm 16 — plano Y de P010 enviado pela CPU
+    RG16,     ///< unorm 16 — plano CbCr de P010
+    BGRA8,
+    RG16F,
+    RGBA32F,
 };
 
 enum class ScalingMode : u16 {

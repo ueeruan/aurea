@@ -2,498 +2,588 @@
 #include "aurea/core/Log.hpp"
 
 #include <algorithm>
-#include <sstream>
+#include <cstdio>
 
 namespace aurea {
 
-FrameGraph::FrameGraph(usize /*arenaBytes*/) {
+// =============================================================================
+// PassContext
+// =============================================================================
+TextureHandle PassContext::texture(FGTexture t) const noexcept { return graph.physical(t); }
+const TextureDesc& PassContext::desc(FGTexture t) const noexcept { return graph.desc(t); }
+
+// =============================================================================
+// TransientTexturePool
+// =============================================================================
+void TransientTexturePool::begin_frame(GPUBackend& backend, u64 frameNumber) noexcept {
+    backend_ = &backend;
+    frame_ = frameNumber;
+    stats_.createdThisFrame = 0;
+    stats_.destroyedThisFrame = 0;
+}
+
+TextureHandle TransientTexturePool::acquire(const TextureDesc& desc) noexcept {
+    for (Entry& e : entries_) {
+        if (e.inUse || !e.desc.compatible(desc)) continue;
+        e.inUse = true;
+        e.lastUsedFrame = frame_;
+        ++stats_.inUse;
+        return e.texture;
+    }
+    if (!backend_) return TextureHandle{};
+
+    auto created = backend_->create_texture(desc);
+    if (!created.ok()) {
+        AUREA_LOG_ERROR("pool: falha ao criar textura %ux%u (%s)", desc.width, desc.height,
+                        desc.debugName ? desc.debugName : "?");
+        return TextureHandle{};
+    }
+    Entry e;
+    e.desc = desc;
+    e.desc.debugName = nullptr;   // o nome é do primeiro dono, não da textura
+    e.texture = *created;
+    e.lastUsedFrame = frame_;
+    e.inUse = true;
+    entries_.push_back(e);
+    ++stats_.alive;
+    ++stats_.inUse;
+    ++stats_.createdThisFrame;
+    ++stats_.createdTotal;
+    stats_.bytes += desc.estimated_bytes();
+    return e.texture;
+}
+
+void TransientTexturePool::release(TextureHandle texture) noexcept {
+    for (Entry& e : entries_) {
+        if (e.texture == texture && e.inUse) {
+            e.inUse = false;
+            e.lastUsedFrame = frame_;
+            if (stats_.inUse) --stats_.inUse;
+            return;
+        }
+    }
+}
+
+void TransientTexturePool::end_frame() noexcept {
+    if (!backend_) return;
+    for (usize i = 0; i < entries_.size();) {
+        Entry& e = entries_[i];
+        if (!e.inUse && frame_ > e.lastUsedFrame + idleFrames_) {
+            backend_->destroy_texture(e.texture);
+            stats_.bytes -= std::min(stats_.bytes, e.desc.estimated_bytes());
+            if (stats_.alive) --stats_.alive;
+            ++stats_.destroyedThisFrame;
+            entries_[i] = entries_.back();
+            entries_.pop_back();
+            continue;
+        }
+        ++i;
+    }
+}
+
+void TransientTexturePool::clear() noexcept {
+    if (backend_) {
+        for (Entry& e : entries_) backend_->destroy_texture(e.texture);
+    }
+    forget();
+}
+
+void TransientTexturePool::forget() noexcept {
+    entries_.clear();
+    stats_.alive = 0;
+    stats_.inUse = 0;
+    stats_.bytes = 0;
+}
+
+// =============================================================================
+// FrameGraph — declaração
+// =============================================================================
+FrameGraph::FrameGraph() {
     passes_.reserve(64);
     resources_.reserve(64);
-    physical_.reserve(32);
+    accesses_.reserve(256);
+    sortedAccess_.reserve(256);
     order_.reserve(64);
-    marks_.reserve(64);
+    slots_.reserve(32);
+    barriers_.reserve(256);
 }
 
 void FrameGraph::reset() noexcept {
     passes_.clear();
     resources_.clear();
+    accesses_.clear();
+    sortedAccess_.clear();
     order_.clear();
     outputs_.clear();
-    marks_.clear();
-    passCount_ = 0;
-    resourceCount_ = 0;
-    culledCount_ = 0;
-    mergedCount_ = 0;
+    slots_.clear();
+    barriers_.clear();
+    finalBarriers_.clear();
+    stats_ = Stats{};
     compiled_ = false;
-
-    // `physical_` NÃO é limpo: as texturas do frame anterior são reaproveitadas.
-    // Realocar 4K a 60 Hz seria o gargalo dominante do editor.
-    for (auto& p : physical_) p.busyUntilPass = kInvalidIndex;
-    resourceToPhysical_.clear();
-    ++revision_;
 }
 
-u32 FrameGraph::create_texture(std::string name, const TextureDesc& desc) noexcept {
-    if (resourceCount_ >= kMaxResources) {
-        AUREA_LOG_ERROR("FrameGraph: limite de %u recursos", kMaxResources);
-        return kInvalidIndex;
+FGTexture FrameGraph::create_texture(const char* name, const TextureDesc& desc) noexcept {
+    if (desc.width == 0 || desc.height == 0) {
+        AUREA_LOG_ERROR("FrameGraph: textura '%s' com dimensao zero", name ? name : "?");
+        return FGTexture{};
     }
-    FrameResource r;
-    r.name = std::move(name);
+    Resource r;
+    r.name = name ? name : "";
     r.desc = desc;
-    r.firstPass = kInvalidIndex;
-    r.lastPass = 0;
-    resources_.push_back(std::move(r));
-    ++revision_;
-    return resourceCount_++;
+    r.desc.debugName = name;
+    resources_.push_back(r);
+    return FGTexture{static_cast<u32>(resources_.size() - 1)};
 }
 
-u32 FrameGraph::create_buffer(std::string name, usize bytes, u32 usage) noexcept {
-    if (resourceCount_ >= kMaxResources) return kInvalidIndex;
-    FrameResource r;
-    r.name = std::move(name);
-    r.isBuffer = true;
-    r.desc.width = static_cast<u32>(bytes);
-    r.desc.usageHint = usage;
-    r.firstPass = kInvalidIndex;
-    r.lastPass = 0;
-    resources_.push_back(std::move(r));
-    ++revision_;
-    return resourceCount_++;
-}
-
-u32 FrameGraph::import_texture(std::string name, TextureHandle external) noexcept {
-    if (resourceCount_ >= kMaxResources) return kInvalidIndex;
-    FrameResource r;
-    r.name = std::move(name);
-    r.external = true;
-    r.physical = external;
-    r.firstPass = kInvalidIndex;
-    r.lastPass = 0;
-    resources_.push_back(std::move(r));
-    ++revision_;
-    return resourceCount_++;
-}
-
-u32 FrameGraph::import_external_image(std::string name, const ExternalImageHandle& img,
-                                      const TextureDesc& desc) noexcept {
-    if (resourceCount_ >= kMaxResources) return kInvalidIndex;
-    FrameResource r;
-    r.name = std::move(name);
-    r.external = true;
-    r.externalImage = img;
+FGTexture FrameGraph::import_texture(const char* name, TextureHandle texture,
+                                     const TextureDesc& desc) noexcept {
+    if (!texture.valid()) return FGTexture{};
+    Resource r;
+    r.name = name ? name : "";
     r.desc = desc;
-    r.desc.width = img.width;
-    r.desc.height = img.height;
-    r.desc.externalImport = true;
-    r.firstPass = kInvalidIndex;
-    r.lastPass = 0;
-    resources_.push_back(std::move(r));
-    ++revision_;
-    return resourceCount_++;
+    r.physical = texture;
+    r.imported = true;
+    resources_.push_back(r);
+    return FGTexture{static_cast<u32>(resources_.size() - 1)};
 }
 
-u32 FrameGraph::create_persistent_texture(std::string name, const TextureDesc& desc) noexcept {
-    const u32 idx = create_texture(std::move(name), desc);
-    if (idx != kInvalidIndex) resources_[idx].persistent = true;
-    return idx;
-}
-
-u32 FrameGraph::add_pass(std::string name, PassStage stage,
-                         PassExecuteFn fn, void* userData) noexcept {
-    if (passCount_ >= kMaxPasses) {
-        AUREA_LOG_ERROR("FrameGraph: limite de %u passes", kMaxPasses);
-        return kInvalidIndex;
-    }
-    FramePass p;
-    p.name = std::move(name);
+u32 FrameGraph::add_raster_pass(const char* name, PassStage stage, FGTexture colorTarget,
+                                LoadOp load, Vec4 clear, PassFn fn) noexcept {
+    Pass p;
+    p.name = name ? name : "";
     p.stage = stage;
-    p.execute = fn;
-    p.userData = userData;
+    p.kind = PassKind::Raster;
+    p.colorTarget = colorTarget;
+    p.load = load;
+    p.clear[0] = clear.x; p.clear[1] = clear.y; p.clear[2] = clear.z; p.clear[3] = clear.w;
+    p.fn = std::move(fn);
     passes_.push_back(std::move(p));
-    ++revision_;
-    return passCount_++;
+    const u32 index = static_cast<u32>(passes_.size() - 1);
+    if (colorTarget.valid()) {
+        // Carregar o conteúdo anterior é uma LEITURA: quem escreveu antes
+        // precisa rodar antes, e não pode ser podado.
+        if (load == LoadOp::Load) add_access(index, colorTarget, Access::Read);
+        add_access(index, colorTarget, Access::ColorWrite);
+    }
+    return index;
 }
 
-void FrameGraph::pass_reads(u32 passIndex, u32 resourceIndex) noexcept {
-    if (passIndex >= passCount_ || resourceIndex >= resourceCount_) return;
-    passes_[passIndex].reads.push_back(resourceIndex);
-    FrameResource& r = resources_[resourceIndex];
-    if (r.firstPass == kInvalidIndex || passIndex < r.firstPass) r.firstPass = passIndex;
-    if (passIndex > r.lastPass) r.lastPass = passIndex;
-    ++revision_;
+u32 FrameGraph::add_compute_pass(const char* name, PassStage stage, PassFn fn) noexcept {
+    Pass p;
+    p.name = name ? name : "";
+    p.stage = stage;
+    p.kind = PassKind::Compute;
+    p.fn = std::move(fn);
+    passes_.push_back(std::move(p));
+    return static_cast<u32>(passes_.size() - 1);
 }
 
-void FrameGraph::pass_writes(u32 passIndex, u32 resourceIndex) noexcept {
-    if (passIndex >= passCount_ || resourceIndex >= resourceCount_) return;
-    passes_[passIndex].writes.push_back(resourceIndex);
-    FrameResource& r = resources_[resourceIndex];
-    if (r.firstPass == kInvalidIndex || passIndex < r.firstPass) r.firstPass = passIndex;
-    if (passIndex > r.lastPass) r.lastPass = passIndex;
-    ++revision_;
+u32 FrameGraph::add_transfer_pass(const char* name, PassStage stage, PassFn fn) noexcept {
+    Pass p;
+    p.name = name ? name : "";
+    p.stage = stage;
+    p.kind = PassKind::Transfer;
+    p.fn = std::move(fn);
+    passes_.push_back(std::move(p));
+    return static_cast<u32>(passes_.size() - 1);
 }
 
-void FrameGraph::pass_reads_writes(u32 passIndex, u32 resourceIndex) noexcept {
-    pass_reads(passIndex, resourceIndex);
-    pass_writes(passIndex, resourceIndex);
+void FrameGraph::add_access(u32 pass, FGTexture t, Access a) noexcept {
+    if (pass >= passes_.size() || !t.valid() || t.index >= resources_.size()) return;
+    accesses_.push_back(AccessRecord{pass, t.index, a});
 }
 
-void FrameGraph::set_output(u32 resourceIndex) noexcept {
-    if (resourceIndex >= resourceCount_) return;
-    outputs_.push_back(resourceIndex);
-    ++revision_;
+void FrameGraph::read(u32 pass, FGTexture t) noexcept { add_access(pass, t, Access::Read); }
+void FrameGraph::write_storage(u32 pass, FGTexture t) noexcept { add_access(pass, t, Access::StorageWrite); }
+void FrameGraph::copy_source(u32 pass, FGTexture t) noexcept { add_access(pass, t, Access::CopySrc); }
+void FrameGraph::copy_destination(u32 pass, FGTexture t) noexcept { add_access(pass, t, Access::CopyDst); }
+
+void FrameGraph::mark_side_effect(u32 pass) noexcept {
+    if (pass < passes_.size()) passes_[pass].sideEffect = true;
 }
 
-// -----------------------------------------------------------------------------
+void FrameGraph::set_output(FGTexture t, ResourceState finalState) noexcept {
+    if (!t.valid() || t.index >= resources_.size()) return;
+    resources_[t.index].isOutput = true;
+    resources_[t.index].finalState = finalState;
+    outputs_.push_back(t.index);
+}
+
+// =============================================================================
 // Compilação
-// -----------------------------------------------------------------------------
-Status FrameGraph::compile(GPUBackend& backend) noexcept {
-    // Reaproveita o plano anterior quando a estrutura não mudou. Durante
-    // playback, 99% dos frames têm exatamente a mesma topologia — recompilar
-    // seria trabalho puro. O que muda entre frames são os PARÂMETROS dos
-    // passes, não os passes.
-    if (compiled_ && compiledRevision_ == revision_) {
-        return OkStatus;
+// =============================================================================
+namespace {
+[[nodiscard]] constexpr bool is_write(u8 a) noexcept { return a != 0 && a != 3; }   // Read=0, CopySrc=3
+}
+
+Status FrameGraph::compile(TransientTexturePool& pool) noexcept {
+    stats_ = Stats{};
+    stats_.passesDeclared = static_cast<u32>(passes_.size());
+
+    // Acessos agrupados por passe (ordenação estável: a ordem de declaração
+    // dentro do passe é preservada).
+    sortedAccess_ = accesses_;
+    std::stable_sort(sortedAccess_.begin(), sortedAccess_.end(),
+                     [](const AccessRecord& a, const AccessRecord& b) { return a.pass < b.pass; });
+    for (Pass& p : passes_) { p.accessBegin = 0; p.accessCount = 0; p.culled = false; }
+    for (u32 i = 0; i < sortedAccess_.size(); ++i) {
+        Pass& p = passes_[sortedAccess_[i].pass];
+        if (p.accessCount == 0) p.accessBegin = i;
+        ++p.accessCount;
     }
 
-    topo_sort();
-    if (order_.size() != passCount_) {
-        AUREA_LOG_ERROR("FrameGraph: ciclo detectado entre passes "
-                        "(ordenados %llu de %u)",
-                        static_cast<unsigned long long>(order_.size()), passCount_);
-        return Errc::InvalidState;
+    if (!sort_passes()) {
+        AUREA_LOG_ERROR("FrameGraph: ciclo entre passes");
+        return Status{Errc::InvalidState, "ciclo no FrameGraph"};
     }
+    cull();
 
-    cull_unreachable();
-    alias_resources();
-
-    // Depois do aliasing, só os slots físicos SEM dono anterior precisam de
-    // alocação real. Um slot reaproveitado já tem textura do frame passado.
-    for (PhysicalResource& phys : physical_) {
-        if (phys.texture.valid() || phys.buffer.valid()) continue;
-        if (phys.isBuffer) {
-            auto res = backend.create_buffer(phys.desc.width, phys.desc.usageHint);
-            if (!res.ok()) {
-                AUREA_LOG_ERROR("FrameGraph: falha ao criar buffer '%s'",
-                                phys.ownerName.c_str());
-                return res.code();
-            }
-            phys.buffer = *res;
-        } else {
-            auto res = backend.create_texture(phys.desc);
-            if (!res.ok()) {
-                AUREA_LOG_ERROR("FrameGraph: falha ao criar textura '%s' (%ux%u)",
-                                phys.ownerName.c_str(), phys.desc.width, phys.desc.height);
-                return res.code();
-            }
-            phys.texture = *res;
+    // Vidas: posição do primeiro e do último uso na ordem de execução.
+    for (Resource& r : resources_) {
+        r.firstUse = kInvalidIndex;
+        r.lastUse = kInvalidIndex;
+        r.slot = kInvalidIndex;
+        if (!r.imported) r.physical = TextureHandle{};
+    }
+    for (u32 pos = 0; pos < order_.size(); ++pos) {
+        const Pass& p = passes_[order_[pos]];
+        for (u32 k = 0; k < p.accessCount; ++k) {
+            Resource& r = resources_[sortedAccess_[p.accessBegin + k].resource];
+            if (r.firstUse == kInvalidIndex) r.firstUse = pos;
+            r.lastUse = pos;
         }
     }
 
-    // Fixa em cada recurso lógico o handle físico resolvido.
-    for (u32 i = 0; i < resourceCount_; ++i) {
-        FrameResource& r = resources_[i];
-        if (r.external) continue;
-        const i32 slot = resourceToPhysical_[i];
-        if (slot < 0) continue;
-        r.physical = physical_[static_cast<usize>(slot)].texture;
-        r.buffer   = physical_[static_cast<usize>(slot)].buffer;
+    // O primeiro uso de uma textura transitória TEM que ser escrita. Ler antes
+    // de escrever é lixo de memória na tela — e em alguns drivers, lixo de
+    // OUTRO app.
+    for (u32 i = 0; i < resources_.size(); ++i) {
+        const Resource& r = resources_[i];
+        if (r.imported || r.firstUse == kInvalidIndex) continue;
+        const Pass& p = passes_[order_[r.firstUse]];
+        bool written = false;
+        for (u32 k = 0; k < p.accessCount; ++k) {
+            const AccessRecord& a = sortedAccess_[p.accessBegin + k];
+            if (a.resource != i) continue;
+            if (a.access == Access::Read || a.access == Access::CopySrc) {
+                written = false;
+                break;
+            }
+            written = true;
+        }
+        if (!written) {
+            AUREA_LOG_ERROR("FrameGraph: '%s' lida no passe '%s' antes de ser escrita",
+                            r.name, p.name);
+            return Status{Errc::InvalidState, "textura lida antes de escrita"};
+        }
     }
 
-    insert_barriers();
+    if (const Status s = assign_physical(pool); !s.ok()) return s;
+    plan_barriers();
+
+    stats_.passesExecuted = static_cast<u32>(order_.size());
+    stats_.passesCulled = stats_.passesDeclared - stats_.passesExecuted;
+    stats_.physicalTextures = static_cast<u32>(slots_.size());
+    for (const Slot& s : slots_) stats_.transientBytes += s.desc.estimated_bytes();
+    stats_.barriers = static_cast<u32>(barriers_.size() + finalBarriers_.size());
 
     compiled_ = true;
-    compiledRevision_ = revision_;
     return OkStatus;
 }
 
-void FrameGraph::topo_sort() noexcept {
+bool FrameGraph::sort_passes() noexcept {
+    const u32 n = static_cast<u32>(passes_.size());
     order_.clear();
-    marks_.assign(passCount_, 0);
+    if (n == 0) return true;
 
-    // Ordenação por dependência: um passe só entra depois de todos os passes
-    // que escrevem os recursos que ele lê. Implementado com DFS iterativo para
-    // não estourar a pilha num grafo profundo.
+    // Arestas pred → succ, em pares achatados (pred, succ).
     //
-    // Um passe que ESCREVE um recurso também depende de quem o escreveu antes
-    // (antirraw), senão dois passes escrevendo o mesmo alvo rodariam trocados.
-    std::vector<u32> stack;
-    stack.reserve(passCount_);
-
-    for (u32 start = 0; start < passCount_; ++start) {
-        if (marks_[start] == 2) continue;
-        stack.clear();
-        stack.push_back(start);
-
-        while (!stack.empty()) {
-            const u32 p = stack.back();
-            if (marks_[p] == 2) { stack.pop_back(); continue; }
-
-            if (marks_[p] == 0) {
-                marks_[p] = 1;   // na recursão
-                bool pushed = false;
-                for (u32 dep : passes_[p].reads) {
-                    for (u32 other = 0; other < passCount_; ++other) {
-                        if (other == p || marks_[other] == 2) continue;
-                        const FramePass& op = passes_[other];
-                        const bool writes = std::find(op.writes.begin(), op.writes.end(), dep)
-                                            != op.writes.end();
-                        if (!writes) continue;
-                        if (marks_[other] == 1) {
-                            // Ciclo: `other` já está na pilha. Não é recuperável
-                            // — o grafo está errado, e o chamador precisa saber.
-                            return;
-                        }
-                        stack.push_back(other);
-                        pushed = true;
-                    }
-                }
-                if (pushed) continue;
+    // Cada ESCRITA cria uma versão nova do recurso (como SSA). Uma leitura lê a
+    // versão do último escritor declarado ANTES dela — ou, se não houver
+    // nenhum antes, a do primeiro declarado depois (o produtor foi declarado
+    // mais tarde, e é isso que "ordem por dependência" permite). Uma escrita
+    // que não é a primeira depende do escritor anterior (escrita sobre
+    // escrita) e de quem leu a versão anterior (leitura antes de escrita).
+    edges_.clear();
+    const u32 accessCount = static_cast<u32>(sortedAccess_.size());
+    auto producer_of = [&](u32 resource, u32 readerPass) -> u32 {
+        u32 before = kInvalidIndex, after = kInvalidIndex;
+        for (u32 j = 0; j < accessCount; ++j) {
+            const AccessRecord& w = sortedAccess_[j];
+            if (w.resource != resource || w.pass == readerPass || !is_write(static_cast<u8>(w.access))) continue;
+            if (w.pass < readerPass) before = (before == kInvalidIndex || w.pass > before) ? w.pass : before;
+            else after = (after == kInvalidIndex || w.pass < after) ? w.pass : after;
+        }
+        return before != kInvalidIndex ? before : after;
+    };
+    for (u32 i = 0; i < accessCount; ++i) {
+        const AccessRecord& a = sortedAccess_[i];
+        if (!is_write(static_cast<u8>(a.access))) {
+            const u32 p = producer_of(a.resource, a.pass);
+            if (p != kInvalidIndex) { edges_.push_back(p); edges_.push_back(a.pass); }
+            continue;
+        }
+        // Escritor anterior (declarado antes) desta mesma textura.
+        u32 prev = kInvalidIndex;
+        for (u32 j = 0; j < accessCount; ++j) {
+            const AccessRecord& w = sortedAccess_[j];
+            if (w.resource == a.resource && w.pass < a.pass && is_write(static_cast<u8>(w.access))) {
+                prev = (prev == kInvalidIndex || w.pass > prev) ? w.pass : prev;
             }
-
-            if (marks_[p] == 1) {
-                marks_[p] = 2;
-                order_.push_back(p);
-            }
-            stack.pop_back();
+        }
+        if (prev == kInvalidIndex) continue;
+        edges_.push_back(prev);
+        edges_.push_back(a.pass);
+        for (u32 j = 0; j < accessCount; ++j) {
+            const AccessRecord& r = sortedAccess_[j];
+            if (r.resource != a.resource || r.pass == a.pass || is_write(static_cast<u8>(r.access))) continue;
+            if (producer_of(r.resource, r.pass) == prev) { edges_.push_back(r.pass); edges_.push_back(a.pass); }
         }
     }
+
+    // CSR a partir dos pares.
+    edgeBegin_.assign(n + 1, 0);
+    indegree_.assign(n, 0);
+    for (usize e = 0; e + 1 < edges_.size(); e += 2) ++edgeBegin_[edges_[e] + 1];
+    for (u32 i = 0; i < n; ++i) edgeBegin_[i + 1] += edgeBegin_[i];
+    succ_.assign(edgeBegin_.back(), 0);
+    fill_.assign(edgeBegin_.begin(), edgeBegin_.end() - 1);
+    for (usize e = 0; e + 1 < edges_.size(); e += 2) {
+        succ_[fill_[edges_[e]]++] = edges_[e + 1];
+        ++indegree_[edges_[e + 1]];
+    }
+
+    // Kahn com desempate pelo menor índice de declaração: a ordem é
+    // determinística, e igual à de declaração quando ela já respeita as
+    // dependências (o caso normal). Arestas duplicadas são inofensivas: cada
+    // uma soma e subtrai um do grau de entrada.
+    queue_.clear();
+    for (u32 i = 0; i < n; ++i) if (indegree_[i] == 0) queue_.push_back(i);
+
+    while (!queue_.empty()) {
+        usize best = 0;
+        for (usize q = 1; q < queue_.size(); ++q) if (queue_[q] < queue_[best]) best = q;
+        const u32 p = queue_[best];
+        queue_[best] = queue_.back();
+        queue_.pop_back();
+        order_.push_back(p);
+        for (u32 e = edgeBegin_[p]; e < edgeBegin_[p + 1]; ++e) {
+            const u32 s = succ_[e];
+            if (--indegree_[s] == 0) queue_.push_back(s);
+        }
+    }
+    return order_.size() == n;
 }
 
-void FrameGraph::cull_unreachable() noexcept {
-    // Um passe sobrevive se algum recurso que ele escreve é lido por um passe
-    // já vivo, ou é uma saída. A propagação é de trás para frente: começa nas
-    // saídas e sobe pelas dependências.
-    std::vector<u8> alive(resourceCount_, 0);
-    std::vector<u8> passAlive(passCount_, 0);
+void FrameGraph::cull() noexcept {
+    for (Resource& r : resources_) r.alive = false;
+    for (u32 out : outputs_) resources_[out].alive = true;
+
+    for (usize idx = order_.size(); idx-- > 0;) {
+        Pass& p = passes_[order_[idx]];
+        bool needed = p.sideEffect;
+        for (u32 k = 0; k < p.accessCount && !needed; ++k) {
+            const AccessRecord& a = sortedAccess_[p.accessBegin + k];
+            if (is_write(static_cast<u8>(a.access)) && resources_[a.resource].alive) needed = true;
+        }
+        p.culled = !needed;
+        if (!needed) continue;
+        for (u32 k = 0; k < p.accessCount; ++k) {
+            const AccessRecord& a = sortedAccess_[p.accessBegin + k];
+            if (!is_write(static_cast<u8>(a.access))) resources_[a.resource].alive = true;
+        }
+    }
+    order_.erase(std::remove_if(order_.begin(), order_.end(),
+                                [this](u32 p) { return passes_[p].culled; }),
+                 order_.end());
+}
+
+Status FrameGraph::assign_physical(TransientTexturePool& pool) noexcept {
+    slots_.clear();
+    const u32 steps = static_cast<u32>(order_.size());
+
+    for (u32 pos = 0; pos < steps; ++pos) {
+        // Nasce aqui: pega uma física livre compatível deste frame, senão o pool.
+        for (u32 i = 0; i < resources_.size(); ++i) {
+            Resource& r = resources_[i];
+            if (r.imported || r.firstUse != pos) continue;
+            ++stats_.transientTextures;
+
+            u32 chosen = kInvalidIndex;
+            for (u32 s = 0; s < slots_.size(); ++s) {
+                if (slots_[s].free && slots_[s].desc.compatible(r.desc)) { chosen = s; break; }
+            }
+            if (chosen != kInvalidIndex) {
+                ++stats_.aliasedTextures;
+                slots_[chosen].free = false;
+            } else {
+                const TextureHandle t = pool.acquire(r.desc);
+                if (!t.valid()) {
+                    return Status{Errc::OutOfDeviceMemory, "textura transitoria indisponivel"};
+                }
+                Slot slot;
+                slot.texture = t;
+                slot.desc = r.desc;
+                slots_.push_back(slot);
+                chosen = static_cast<u32>(slots_.size() - 1);
+            }
+            r.slot = chosen;
+            r.physical = slots_[chosen].texture;
+        }
+        // Morre aqui: a física volta a ficar livre para quem nascer depois.
+        // Saídas nunca morrem dentro do frame.
+        for (Resource& r : resources_) {
+            if (r.imported || r.isOutput || r.lastUse != pos || r.slot == kInvalidIndex) continue;
+            slots_[r.slot].free = true;
+        }
+    }
+    return OkStatus;
+}
+
+void FrameGraph::plan_barriers() noexcept {
+    barriers_.clear();
+    finalBarriers_.clear();
+    tracked_.assign(resources_.size(), ResourceState::Undefined);
+
+    for (u32 pos = 0; pos < order_.size(); ++pos) {
+        Pass& p = passes_[order_[pos]];
+        p.barrierBegin = static_cast<u32>(barriers_.size());
+        p.barrierCount = 0;
+
+        for (u32 k = 0; k < p.accessCount; ++k) {
+            const AccessRecord& a = sortedAccess_[p.accessBegin + k];
+            const Resource& r = resources_[a.resource];
+            ResourceState want = ResourceState::ShaderRead;
+            bool discard = false;
+            switch (a.access) {
+                case Access::Read:
+                    // Leitura do alvo do próprio passe (LoadOp::Load) é a carga do
+                    // render pass, não amostragem: o estado certo é o de anexo.
+                    if (p.kind == PassKind::Raster && p.colorTarget.index == a.resource) continue;
+                    want = ResourceState::ShaderRead;
+                    break;
+                case Access::ColorWrite:
+                    want = ResourceState::ColorAttachment;
+                    discard = p.load != LoadOp::Load;
+                    break;
+                case Access::StorageWrite:
+                    want = ResourceState::StorageWrite;
+                    discard = !r.imported && r.firstUse == pos;
+                    break;
+                case Access::CopySrc:
+                    want = ResourceState::TransferSrc;
+                    break;
+                case Access::CopyDst:
+                    want = ResourceState::TransferDst;
+                    discard = !r.imported && r.firstUse == pos;
+                    break;
+            }
+            if (tracked_[a.resource] == want && !discard) continue;
+            barriers_.push_back(PlannedBarrier{a.resource, want, discard});
+            tracked_[a.resource] = want;
+            ++p.barrierCount;
+        }
+    }
 
     for (u32 out : outputs_) {
-        if (out < resourceCount_) alive[out] = 1;
-    }
-
-    // Repete até estabilizar. O número de iterações é limitado pela
-    // profundidade do grafo — na prática 2 ou 3 num compositor de editor.
-    bool changed = true;
-    while (changed) {
-        changed = false;
-        for (u32 p = 0; p < passCount_; ++p) {
-            if (passAlive[p]) continue;
-            const FramePass& pass = passes_[p];
-
-            // O passe é necessário se escreve algo vivo.
-            bool needed = false;
-            for (u32 w : pass.writes) {
-                if (alive[w]) { needed = true; break; }
-            }
-            if (!needed) continue;
-
-            passAlive[p] = 1;
-            changed = true;
-
-            // Tudo que ele lê passa a estar vivo.
-            for (u32 r : pass.reads) {
-                if (!alive[r]) { alive[r] = 1; changed = true; }
-            }
-        }
-    }
-
-    culledCount_ = 0;
-    for (u32 p = 0; p < passCount_; ++p) {
-        passes_[p].culled = (passAlive[p] == 0);
-        if (passes_[p].culled) ++culledCount_;
-    }
-
-    // Remove os passes podados da ordem de execução.
-    order_.erase(std::remove_if(order_.begin(), order_.end(),
-                                [&](u32 p) { return passes_[p].culled; }),
-                 order_.end());
-
-    // Recursos que ninguém usa não são alocados.
-    for (u32 i = 0; i < resourceCount_; ++i) {
-        if (!alive[i] && !resources_[i].persistent) {
-            resources_[i].firstPass = kInvalidIndex;
-            resources_[i].lastPass = 0;
-        }
+        const Resource& r = resources_[out];
+        if (r.firstUse == kInvalidIndex) continue;
+        if (tracked_[out] == r.finalState) continue;
+        finalBarriers_.push_back(PlannedBarrier{out, r.finalState, false});
+        tracked_[out] = r.finalState;
     }
 }
 
-void FrameGraph::alias_resources() noexcept {
-    // Aliasing de memória: dois recursos com tempos de vida que NÃO se
-    // sobrepõem dividem a mesma textura física, desde que a descrição seja
-    // compatível.
-    //
-    // Numa cadeia de 8 efeitos sobre 4K, isso é a diferença entre ~600 MB de
-    // pico e ~150 MB — e é literalmente a diferença entre rodar e ser morto
-    // pelo sistema num aparelho de 6 GB.
-    //
-    // A ordem importa: os slots físicos sobrevivem entre frames (realocar 4K a
-    // 60 Hz seria o gargalo dominante), então o casamento é estável — o mesmo
-    // recurso lógico tende a cair no mesmo físico frame após frame, o que
-    // evita recriação desnecessária.
-    resourceToPhysical_.assign(resourceCount_, -1);
-    physicalCount_ = 0;
+// =============================================================================
+// Execução
+// =============================================================================
+void FrameGraph::execute(CommandList& cmds, bool timers) noexcept {
+    if (!compiled_) return;
+    PassContext ctx{cmds, *this};
 
-    // Nenhum slot está ocupado no início do frame.
-    for (auto& p : physical_) p.busyUntilPass = kInvalidIndex;
+    for (u32 pos = 0; pos < order_.size(); ++pos) {
+        Pass& p = passes_[order_[pos]];
 
-    auto same_shape = [](const TextureDesc& a, const TextureDesc& b) noexcept {
-        return a.width == b.width && a.height == b.height
-            && a.format == b.format && a.sampleCount == b.sampleCount
-            && a.layers == b.layers && a.mipLevels == b.mipLevels;
-    };
-
-    // Percorre em ordem de primeiro uso: assim um recurso é casado com um
-    // físico cujo uso terminou, e não com um que ainda vai rodar.
-    std::vector<u32> byFirstUse;
-    byFirstUse.reserve(resourceCount_);
-    for (u32 i = 0; i < resourceCount_; ++i) {
-        const FrameResource& r = resources_[i];
-        if (r.external) continue;
-        if (r.firstPass == kInvalidIndex) continue;   // podado, ninguém usa
-        byFirstUse.push_back(i);
-    }
-    std::sort(byFirstUse.begin(), byFirstUse.end(),
-              [this](u32 a, u32 b) { return resources_[a].firstPass < resources_[b].firstPass; });
-
-    for (u32 i : byFirstUse) {
-        const FrameResource& r = resources_[i];
-
-        i32 chosen = -1;
-        if (!r.persistent) {
-            // Recurso de histórico NUNCA é aliado: ele precisa sobreviver ao
-            // frame para o efeito temporal poder ler o frame anterior. É a
-            // exceção explícita ao esquema, e por isso ela é declarada.
-            for (usize s = 0; s < physical_.size(); ++s) {
-                PhysicalResource& phys = physical_[s];
-                if (phys.isBuffer != r.isBuffer) continue;
-                if (!same_shape(phys.desc, r.desc)) continue;
-                // Livre se o último uso terminou ANTES deste recurso começar.
-                if (phys.busyUntilPass != kInvalidIndex
-                    && phys.busyUntilPass >= r.firstPass) {
-                    continue;
-                }
-                chosen = static_cast<i32>(s);
-                break;
-            }
+        for (u32 b = 0; b < p.barrierCount; ++b) {
+            const PlannedBarrier& pb = barriers_[p.barrierBegin + b];
+            cmds.barrier(resources_[pb.resource].physical, pb.state, pb.discard);
         }
 
-        if (chosen < 0) {
-            PhysicalResource phys;
-            phys.desc = r.desc;
-            phys.isBuffer = r.isBuffer;
-            phys.ownerName = r.name;
-            physical_.push_back(std::move(phys));
-            chosen = static_cast<i32>(physical_.size()) - 1;
+        cmds.begin_label(p.name);
+        if (timers) cmds.begin_timer(p.name);
+
+        if (p.kind == PassKind::Raster && p.colorTarget.valid()) {
+            RenderPassBegin rp;
+            rp.color = resources_[p.colorTarget.index].physical;
+            rp.load = p.load;
+            for (int c = 0; c < 4; ++c) rp.clear[c] = p.clear[c];
+            cmds.begin_render_pass(rp);
+            if (p.fn) p.fn(ctx);
+            cmds.end_render_pass();
+        } else if (p.fn) {
+            p.fn(ctx);
         }
 
-        PhysicalResource& phys = physical_[static_cast<usize>(chosen)];
-        phys.busyUntilPass = r.lastPass;
-        if (phys.ownerName.empty()) phys.ownerName = r.name;
-        resourceToPhysical_[i] = chosen;
-        ++physicalCount_;
+        if (timers) cmds.end_timer();
+        cmds.end_label();
     }
 
-    // Descarta os físicos que sobraram de frames anteriores com formato que
-    // não é mais usado. Sem isso, mudar o modo de preview acumularia texturas
-    // de todas as resoluções já usadas.
-    // (A destruição efetiva acontece em `release_gpu_resources`, que tem o
-    // backend em mãos. Aqui só se marca pelo tamanho.)
-    if (physical_.size() > 64) {
-        for (auto it = physical_.begin(); it != physical_.end();) {
-            if (it->busyUntilPass == kInvalidIndex) {
-                it = physical_.erase(it);
-            } else {
-                ++it;
-            }
-        }
-        // Os índices mudaram com o erase: invalida o mapa e refaz a ligação
-        // numa segunda passada simples.
-        resourceToPhysical_.assign(resourceCount_, -1);
-        for (u32 i : byFirstUse) {
-            const FrameResource& r = resources_[i];
-            for (usize s = 0; s < physical_.size(); ++s) {
-                if (physical_[s].ownerName == r.name
-                    && physical_[s].isBuffer == r.isBuffer) {
-                    resourceToPhysical_[i] = static_cast<i32>(s);
-                    break;
-                }
-            }
-        }
+    for (const PlannedBarrier& pb : finalBarriers_) {
+        cmds.barrier(resources_[pb.resource].physical, pb.state, false);
     }
 }
 
-void FrameGraph::insert_barriers() noexcept {
-    // O backend infere a barreira a partir da transição de layout em
-    // `begin_render_pass`. Nada a fazer aqui além de garantir a ordem — que o
-    // `reset()` do frame seguinte não deixe um recurso lido como escrito.
-    //
-    // Este método existe como ponto de extensão explícito: quando o backend
-    // ganhar barreiras explícitas de buffer (para compute com dependência de
-    // leitura), é aqui que elas entram, sem tocar no resto do grafo.
-}
-
-void FrameGraph::execute(CommandList& cmds) noexcept {
-    for (u32 p : order_) {
-        FramePass& pass = passes_[p];
-        if (pass.culled || !pass.execute) continue;
-        pass.execute(*this, pass.userData, cmds);
+void FrameGraph::release(TransientTexturePool& pool) noexcept {
+    for (const Slot& s : slots_) pool.release(s.texture);
+    slots_.clear();
+    for (Resource& r : resources_) {
+        if (!r.imported) r.physical = TextureHandle{};
     }
+    compiled_ = false;
 }
 
-TextureHandle FrameGraph::texture(u32 resourceIndex) const noexcept {
-    if (resourceIndex >= resourceCount_) return TextureHandle{};
-    return resources_[resourceIndex].physical;
+// =============================================================================
+// Consultas
+// =============================================================================
+TextureHandle FrameGraph::physical(FGTexture t) const noexcept {
+    if (!t.valid() || t.index >= resources_.size()) return TextureHandle{};
+    return resources_[t.index].physical;
 }
 
-u32 FrameGraph::find_resource(const char* name) const noexcept {
-    if (!name) return kInvalidIndex;
-    for (u32 i = 0; i < resourceCount_; ++i) {
-        if (resources_[i].name == name) return i;
-    }
-    return kInvalidIndex;
+const TextureDesc& FrameGraph::desc(FGTexture t) const noexcept {
+    static const TextureDesc kEmpty{};
+    if (!t.valid() || t.index >= resources_.size()) return kEmpty;
+    return resources_[t.index].desc;
 }
 
-u32 FrameGraph::find_pass(const char* name) const noexcept {
-    if (!name) return kInvalidIndex;
-    for (u32 i = 0; i < passCount_; ++i) {
-        if (passes_[i].name == name) return i;
-    }
-    return kInvalidIndex;
+u32 FrameGraph::physical_slot(FGTexture t) const noexcept {
+    if (!t.valid() || t.index >= resources_.size()) return kInvalidIndex;
+    return resources_[t.index].slot;
+}
+
+void FrameGraph::barriers_before(u32 p, std::vector<PlannedBarrier>& out) const {
+    out.clear();
+    if (p >= passes_.size() || passes_[p].culled) return;
+    const Pass& pass = passes_[p];
+    for (u32 b = 0; b < pass.barrierCount; ++b) out.push_back(barriers_[pass.barrierBegin + b]);
 }
 
 std::string FrameGraph::dump() const {
-    std::ostringstream os;
-    os << "FrameGraph: " << passCount_ << " passes (" << culledCount_ << " podados), "
-       << resourceCount_ << " recursos logicos, " << physicalCount_ << " fisicos\n";
-    os << "ordem de execucao:\n";
-    for (u32 p : order_) {
-        const FramePass& pass = passes_[p];
-        os << "  [" << to_string(pass.stage) << "] " << pass.name;
-        if (pass.measuredMs > 0.0f) os << " " << pass.measuredMs << " ms";
-        os << "\n";
+    std::string s;
+    char line[256];
+    std::snprintf(line, sizeof(line),
+                  "FrameGraph: %u passes (%u podados), %u transitorias em %u fisicas "
+                  "(%u reaproveitadas), %u barreiras, %.1f MB\n",
+                  stats_.passesDeclared, stats_.passesCulled, stats_.transientTextures,
+                  stats_.physicalTextures, stats_.aliasedTextures, stats_.barriers,
+                  static_cast<f64>(stats_.transientBytes) / (1024.0 * 1024.0));
+    s += line;
+    for (u32 pos = 0; pos < order_.size(); ++pos) {
+        const Pass& p = passes_[order_[pos]];
+        std::snprintf(line, sizeof(line), "  %2u [%s] %s\n", pos, to_string(p.stage), p.name);
+        s += line;
     }
-    return os.str();
-}
-
-void FrameGraph::release_gpu_resources(GPUBackend& backend) noexcept {
-    // Dispositivo perdido: todas as texturas do driver antigo morreram. Os
-    // handles do MOTOR continuam válidos (o cache de shader inclusive), mas os
-    // recursos físicos precisam ser recriados.
-    for (auto& r : resources_) {
-        r.physical = TextureHandle{};
-        r.buffer = BufferHandle{};
-    }
-    for (auto& p : physical_) {
-        p.texture = TextureHandle{};
-        p.buffer = BufferHandle{};
-        p.busyUntilPass = kInvalidIndex;
-    }
-    physical_.clear();
-    resourceToPhysical_.clear();
-    physicalCount_ = 0;
-    compiled_ = false;
-    compiledRevision_ = 0;
-    (void)backend;
+    return s;
 }
 
 } // namespace aurea

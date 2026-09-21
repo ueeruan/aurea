@@ -96,7 +96,7 @@ AUREA_TEST(Composition, DuplicateIsDeepCopy) {
     const LayerId orig = c.add_layer(LayerKind::Video, "A");
     c.layer(orig)->tracks.get_or_create(TrackProperty::Opacity)
         .set(FrameIndex{0}, 0.5f);
-    c.layer(orig)->effects.push_back(Effect{});
+    c.layer(orig)->effects.push_back(EffectInstance{});
 
     const LayerId copy = c.duplicate_layer(orig, FrameIndex{0});
     c.layer(copy)->tracks.get_or_create(TrackProperty::Opacity)
@@ -278,9 +278,9 @@ AUREA_TEST(Layer, LocalAndTimelineTimeRoundTrip) {
 
 AUREA_TEST(Layer, EffectIdLookupIsByLocalId) {
     Layer l;
-    Effect a;
+    EffectInstance a;
     a.id = l.alloc_effect_id();
-    Effect b;
+    EffectInstance b;
     b.id = l.alloc_effect_id();
     l.effects.push_back(a);
     l.effects.push_back(b);

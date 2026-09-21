@@ -1,10 +1,9 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'package:aurea/src/core/l10n/app_language.dart';
-
+import '../../../../core/ds/ds.dart';
 import '../../application/editor_controller.dart';
 import '../../application/interacao.dart';
 import '../../domain/gizmo3d.dart';
@@ -12,7 +11,7 @@ import '../../domain/gizmo_da_cena3d.dart';
 import '../../domain/layer.dart';
 import '../../domain/scene3d.dart';
 import '../../domain/video_project.dart';
-import '../am/am_colors.dart';
+import '../ui/paineis/rastrear.dart' show PontosDoRastreioNoPalco;
 import 'gizmo3d_painter.dart';
 import 'preview_stage.dart' show cameraDaCena, cenaComNulosDaComposicao;
 
@@ -47,6 +46,12 @@ String rotuloDoModoDoGizmo(ModoDoGizmo3D m) => switch (m) {
   ModoDoGizmo3D.mover => 'Mover',
   ModoDoGizmo3D.girar => 'Girar',
   ModoDoGizmo3D.escalar => 'Escalar',
+};
+
+IconData iconeDoModoDoGizmo(ModoDoGizmo3D m) => switch (m) {
+  ModoDoGizmo3D.mover => CupertinoIcons.move,
+  ModoDoGizmo3D.girar => CupertinoIcons.arrow_2_circlepath,
+  ModoDoGizmo3D.escalar => CupertinoIcons.arrow_up_left_arrow_down_right,
 };
 
 final modoDoGizmo3DProvider = StateProvider<ModoDoGizmo3D>(
@@ -146,205 +151,192 @@ class _GizmoDaCenaOverlayState extends ConsumerState<GizmoDaCenaOverlay> {
 
   @override
   Widget build(BuildContext context) {
+    // AS SOBREPOSICOES 3D DO PALCO moram juntas, no mesmo lugar do Stack da
+    // composicao: o gizmo do objeto e os pontos do rastreio (que so
+    // aparecem com o painel Rastrear aberto num video analisado). Os dois
+    // desenham em pixels de composicao e so pegam o dedo em cima do que
+    // desenharam.
     return Positioned.fill(
-      child: ValueListenableBuilder<Duration>(
-        valueListenable: widget.tempo,
-        builder: (context, tempo, _) {
-          // O CABECOTE VIAJA DEPOIS DO QUADRO, e nao dentro dele.
-          //
-          // A ficha 3D ESCUTA [cabecoteDoPalco] para o losango seguir o
-          // transporte. Publicar aqui dentro marcaria a ficha suja no meio
-          // da construcao da arvore — o "setState() called during build",
-          // que derruba o editor inteiro em vez de so atrasar um numero.
-          if (cabecoteDoPalco.value != tempo) _publicarCabecote(tempo);
-          final projeto = ref.watch(editorControllerProvider);
-          final id = ref.watch(selectedLayerProvider);
-          final camada = id == null ? null : projeto.layerById(id);
-          if (camada is! Scene3DLayer || !camada.activeAt(tempo)) {
-            return const SizedBox.shrink();
-          }
-          if (projeto.isHidden(camada.id)) return const SizedBox.shrink();
-          final bloqueada = projeto.metaOf(camada.id).locked;
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Positioned.fill(child: _gizmo(context)),
+          PontosDoRastreioNoPalco(tempo: widget.tempo, escala: widget.escala),
+        ],
+      ),
+    );
+  }
 
-          final local = camada.localTime(tempo);
-          final cena = cenaComNulosDaComposicao(projeto, camada, local, tempo);
-          final camera = orbitarCamera(
-            cameraDaCena(projeto, camada, local, tempo) ??
-                camada.cameraAt(local),
-            -camada.rotationX.valueAt(local),
-            -camada.rotationY.valueAt(local),
-          );
-          final palco = Size(
-            projeto.outputWidth.toDouble(),
-            projeto.outputHeight.toDouble(),
-          );
-          final objetos = objetosDaCena(cena);
-          if (objetos.isEmpty) return const SizedBox.shrink();
-          final noId = noAtivoDaCena(
-            cena,
-            ref.watch(noDaCenaSelecionadoProvider),
-          );
-          if (noId == null) return const SizedBox.shrink();
+  Widget _gizmo(BuildContext context) {
+    return ValueListenableBuilder<Duration>(
+      valueListenable: widget.tempo,
+      builder: (context, tempo, _) {
+        // O CABECOTE VIAJA DEPOIS DO QUADRO, e nao dentro dele.
+        //
+        // A ficha 3D ESCUTA [cabecoteDoPalco] para o losango seguir o
+        // transporte. Publicar aqui dentro marcaria a ficha suja no meio
+        // da construcao da arvore — o "setState() called during build",
+        // que derruba o editor inteiro em vez de so atrasar um numero.
+        if (cabecoteDoPalco.value != tempo) _publicarCabecote(tempo);
+        final projeto = ref.watch(editorControllerProvider);
+        final id = ref.watch(selectedLayerProvider);
+        final camada = id == null ? null : projeto.layerById(id);
+        if (camada is! Scene3DLayer || !camada.activeAt(tempo)) {
+          return const SizedBox.shrink();
+        }
+        if (projeto.isHidden(camada.id)) return const SizedBox.shrink();
+        final bloqueada = projeto.metaOf(camada.id).locked;
 
-          final gizmo = gizmoDoNo(
-            projeto,
-            camada,
-            noId,
-            tempo,
-            palco,
-            cena: cena,
-            camera: camera,
-          );
-          if (gizmo == null) return const SizedBox.shrink();
+        final local = camada.localTime(tempo);
+        final cena = cenaComNulosDaComposicao(projeto, camada, local, tempo);
+        final camera = orbitarCamera(
+          cameraDaCena(projeto, camada, local, tempo) ?? camada.cameraAt(local),
+          -camada.rotationX.valueAt(local),
+          -camada.rotationY.valueAt(local),
+        );
+        final palco = Size(
+          projeto.outputWidth.toDouble(),
+          projeto.outputHeight.toDouble(),
+        );
+        final objetos = objetosDaCena(cena);
+        if (objetos.isEmpty) return const SizedBox.shrink();
+        final noId = noAtivoDaCena(
+          cena,
+          ref.watch(noDaCenaSelecionadoProvider),
+        );
+        if (noId == null) return const SizedBox.shrink();
 
-          final modo = ref.watch(modoDoGizmo3DProvider);
-          final g = _gizmoInicial ?? gizmo;
+        final gizmo = gizmoDoNo(
+          projeto,
+          camada,
+          noId,
+          tempo,
+          palco,
+          cena: cena,
+          camera: camera,
+        );
+        if (gizmo == null) return const SizedBox.shrink();
 
-          return Stack(
-            clipBehavior: Clip.none,
-            children: [
-              Positioned.fill(
-                child: IgnorePointer(
-                  child: CustomPaint(
-                    key: const ValueKey('gizmo-da-cena'),
-                    painter: Gizmo3DPainter(
-                      gizmo: g,
-                      escala: _escalaDoPalco,
-                      comprimento: 86,
-                      raio: 118,
-                      eixoAtivo: _eixo,
-                      anelAtivo: _anel,
-                      ativo: !bloqueada,
-                      // OS BRACOS APARECEM EM MOVER E EM ESCALAR: no
-                      // segundo eles sao as alcas de escala POR EIXO (a
-                      // ponta vira cubo). No modo Girar sairiam de graca
-                      // por cima dos aneis e roubariam o dedo.
-                      eixos: modo != ModoDoGizmo3D.girar,
-                      aneis: modo == ModoDoGizmo3D.girar,
-                      alcaDeEscala: modo == ModoDoGizmo3D.escalar,
-                      pontaQuadrada: modo == ModoDoGizmo3D.escalar,
-                      escalaEmUso: _escalando,
-                      pixelsPorUnidade: g.escala,
-                    ),
+        final modo = ref.watch(modoDoGizmo3DProvider);
+        final g = _gizmoInicial ?? gizmo;
+
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Positioned.fill(
+              child: IgnorePointer(
+                child: CustomPaint(
+                  key: const ValueKey('gizmo-da-cena'),
+                  painter: Gizmo3DPainter(
+                    gizmo: g,
+                    escala: _escalaDoPalco,
+                    comprimento: 86,
+                    raio: 118,
+                    eixoAtivo: _eixo,
+                    anelAtivo: _anel,
+                    ativo: !bloqueada,
+                    // OS BRACOS APARECEM EM MOVER E EM ESCALAR: no
+                    // segundo eles sao as alcas de escala POR EIXO (a
+                    // ponta vira cubo). No modo Girar sairiam de graca
+                    // por cima dos aneis e roubariam o dedo.
+                    eixos: modo != ModoDoGizmo3D.girar,
+                    aneis: modo == ModoDoGizmo3D.girar,
+                    alcaDeEscala: modo == ModoDoGizmo3D.escalar,
+                    pontaQuadrada: modo == ModoDoGizmo3D.escalar,
+                    escalaEmUso: _escalando,
+                    pixelsPorUnidade: g.escala,
                   ),
                 ),
               ),
-              if (!bloqueada)
-                Positioned.fill(
-                  child: _AreaDoGizmo(
-                    pega: (p) => _pega(
-                      p,
-                      gizmo,
-                      modo,
+            ),
+            if (!bloqueada)
+              Positioned.fill(
+                child: _AreaDoGizmo(
+                  pega: (p) => _pega(
+                    p,
+                    gizmo,
+                    modo,
+                    projeto,
+                    camada,
+                    tempo,
+                    palco,
+                    cena,
+                    camera,
+                    objetos.length,
+                  ),
+                  child: GestureDetector(
+                    key: const ValueKey('gizmo-da-cena-gesto'),
+                    behavior: HitTestBehavior.opaque,
+                    onTapUp: (d) => _escolherNo(
+                      d.localPosition,
                       projeto,
                       camada,
                       tempo,
                       palco,
                       cena,
                       camera,
-                      objetos.length,
                     ),
-                    child: GestureDetector(
-                      key: const ValueKey('gizmo-da-cena-gesto'),
-                      behavior: HitTestBehavior.opaque,
-                      onTapUp: (d) => _escolherNo(
-                        d.localPosition,
-                        projeto,
-                        camada,
-                        tempo,
-                        palco,
-                        cena,
-                        camera,
-                      ),
-                      onPanStart: (d) => _comecar(
-                        d.localPosition,
-                        gizmo,
-                        modo,
-                        camada,
-                        noId,
-                        local,
-                        cena,
-                      ),
-                      onPanUpdate: (d) => _andar(
-                        d,
-                        camada.id,
-                        noId,
-                        tempo,
-                      ),
-                      onPanEnd: (_) => _soltar(),
-                      onPanCancel: _soltar,
+                    onPanStart: (d) => _comecar(
+                      d.localPosition,
+                      gizmo,
+                      modo,
+                      camada,
+                      noId,
+                      local,
+                      cena,
                     ),
+                    onPanUpdate: (d) => _andar(d, camada.id, noId, tempo),
+                    onPanEnd: (_) => _soltar(),
+                    onPanCancel: _soltar,
                   ),
                 ),
-              _fichasDeModo(modo),
-            ],
-          );
-        },
-      ),
+              ),
+            _fichasDeModo(modo),
+          ],
+        );
+      },
     );
   }
 
   /// AS FICHAS Mover | Girar | Escalar, no pe do palco.
   ///
-  /// Sao as MESMAS pilulas do painel de Efeitos — fundo [AmColors.chip],
-  /// escolhida em [AmColors.accentDim] com o texto em [AmColors.accent].
-  /// Nao ha componente novo aqui, so o grupo dentro de uma capsula, que e
-  /// o que separa a ferramenta do video atras dela.
+  /// Sao os BOTOES DE BARRA do design system (`AureaToolbarButton`: icone
+  /// 24 e rotulo, aceso no destaque quando escolhido — o mesmo sinal de
+  /// estado da barra contextual), numa capsula no tom do painel, que e o
+  /// que separa a ferramenta do video atras dela.
   ///
   /// Desenhadas em pixels de composicao e DESESCALADAS: sem isso elas
   /// encolheriam com o zoom do palco ate nao caberem no dedo, que e
-  /// justamente o defeito que este gizmo veio corrigir. Cada ficha tem 44
-  /// px de altura — o alvo minimo do app.
+  /// justamente o defeito que este gizmo veio corrigir. Cada botao tem
+  /// 64 x 57 — acima do alvo minimo do app.
   Widget _fichasDeModo(ModoDoGizmo3D modo) => Align(
     alignment: Alignment.bottomCenter,
     child: Transform.scale(
       scale: 1 / _escalaDoPalco,
       alignment: Alignment.bottomCenter,
       child: Padding(
-        padding: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.only(bottom: AureaDims.e10),
         child: Container(
-          padding: const EdgeInsets.all(4),
+          key: const ValueKey('gizmo-modos'),
+          padding: const EdgeInsets.symmetric(horizontal: AureaDims.e4),
           decoration: BoxDecoration(
-            color: AmColors.panel.withValues(alpha: 0.86),
-            borderRadius: BorderRadius.circular(16),
+            color: AureaCores.painel.withValues(alpha: 0.9),
+            borderRadius: BorderRadius.circular(AureaDims.raioXl),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               for (final m in ModoDoGizmo3D.values)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 2),
-                  child: Semantics(
-                    button: true,
-                    selected: m == modo,
-                    label: rotuloDoModoDoGizmo(m),
-                    child: GestureDetector(
-                      key: ValueKey('gizmo-modo-${m.name}'),
-                      behavior: HitTestBehavior.opaque,
-                      onTap: () =>
-                          ref.read(modoDoGizmo3DProvider.notifier).state = m,
-                      child: Container(
-                        height: 44,
-                        alignment: Alignment.center,
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        decoration: BoxDecoration(
-                          color: m == modo
-                              ? AmColors.accentDim
-                              : AmColors.chip,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: AppText(
-                          rotuloDoModoDoGizmo(m),
-                          style: TextStyle(
-                            color: m == modo
-                                ? AmColors.accent
-                                : AmColors.text,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ),
+                Semantics(
+                  button: true,
+                  selected: m == modo,
+                  child: AureaToolbarButton(
+                    key: ValueKey('gizmo-modo-${m.name}'),
+                    icone: iconeDoModoDoGizmo(m),
+                    rotulo: rotuloDoModoDoGizmo(m),
+                    ativo: m == modo,
+                    aoTocar: () =>
+                        ref.read(modoDoGizmo3DProvider.notifier).state = m,
                   ),
                 ),
             ],

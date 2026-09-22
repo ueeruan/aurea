@@ -171,7 +171,8 @@ public:
     /// Passe 3D: cor (opcional — inválida = só profundidade, sombra) e
     /// profundidade. `storeDepth` quando outro passe lê a profundidade depois.
     u32 add_raster_pass_depth(const char* name, PassStage stage, FGTexture colorTarget, LoadOp load, Vec4 clear,
-                              FGTexture depthTarget, LoadOp depthLoad, bool storeDepth, PassFn fn) noexcept;
+                              FGTexture depthTarget, LoadOp depthLoad, bool storeDepth, f32 clearDepth,
+                              PassFn fn) noexcept;
     u32 add_compute_pass(const char* name, PassStage stage, PassFn fn) noexcept;
     u32 add_transfer_pass(const char* name, PassStage stage, PassFn fn) noexcept;
 
@@ -278,6 +279,7 @@ private:
         FGTexture   depthTarget{};
         LoadOp      depthLoad = LoadOp::Clear;
         bool        storeDepth = false;
+        f32         clearDepth = 1.0f;
         f32         clear[4] = {0, 0, 0, 0};
         PassFn      fn;
         bool        sideEffect = false;

@@ -321,6 +321,10 @@ Result<SamplerHandle> Backend::create_sampler(const SamplerDesc& desc) noexcept 
     info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     info.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
     info.maxLod = VK_LOD_CLAMP_NONE;
+    if (desc.maxAnisotropy > 1.0f && caps_.maxSamplerAnisotropy > 1.0f) {
+        info.anisotropyEnable = VK_TRUE;
+        info.maxAnisotropy = std::min(desc.maxAnisotropy, caps_.maxSamplerAnisotropy);
+    }
     SamplerObject s;
     if (const Status st = check(vkCreateSampler(device_, &info, nullptr, &s.sampler), "vkCreateSampler"); !st.ok()) return st;
     return SamplerHandle{samplers_.add(std::move(s))};

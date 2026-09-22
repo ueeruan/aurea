@@ -25,6 +25,7 @@
 #pragma once
 
 #include "aurea/export/ExportSink.hpp"
+#include "aurea/scene3d/Importer.hpp"
 
 #include "aurea/bridge/BridgePods.hpp"
 #include "aurea/command/CommandQueue.hpp"
@@ -167,6 +168,15 @@ struct EngineConfig {
     PreviewScale initialPreviewScale = PreviewScale::Auto;
 };
 
+/// Pedido de importação de modelo 3D (glTF/GLB). `path` é um arquivo no
+/// sandbox do app (a plataforma copia para lá o que vem de `content://`):
+/// dentro de `documentsDirectory`, o projeto guarda o caminho RELATIVO — o
+/// mesmo .aurea abre no Android e no iOS.
+struct ModelImport {
+    std::string path;
+    std::string displayName;
+};
+
 /// Pedido de importação de vídeo.
 struct VideoImport {
     std::string sourcePath;    ///< caminho, ou "fd:<n>" no Android
@@ -234,6 +244,15 @@ public:
     /// imagem de novo ao `imageLoader`. Sem origem, a imagem só vive na sessão.
     [[nodiscard]] Result<u64> import_image(const u8* rgba, u32 width, u32 height,
                                            const char* name, const char* sourcePath = nullptr) noexcept;
+    /// Importa um modelo 3D e cria a layer no topo, enquadrada. O parse roda
+    /// na thread de quem chama (a plataforma chama fora da UI); o modelo só
+    /// trava no fim, para criar asset e layer. Falha = erro específico
+    /// (`detail` preenchido), nunca "importado" com a tela preta.
+    [[nodiscard]] Result<u64> import_model(const ModelImport& request, scene3d::ImportProgress* progress = nullptr,
+                                           std::string* detail = nullptr) noexcept;
+    /// Asset 3D carregado (nulo = ausente/ilegível). Compartilhado: a layer
+    /// apagada não invalida quem ainda desenha.
+    [[nodiscard]] std::shared_ptr<const scene3d::SceneAsset> model_asset(u64 assetId) const noexcept;
 
     // =========================================================================
     // A fronteira
@@ -400,6 +419,12 @@ private:
     std::unique_ptr<CommandQueue> commandQueue_;
     std::unique_ptr<Project>      project_;
     std::unordered_map<u64, ImagePixels> images_;   ///< por AssetId empacotado
+    /// Modelos 3D carregados, por AssetId. Um por asset, qualquer número de
+    /// layers (ModelInstance) apontando para ele.
+    std::unordered_map<u64, std::shared_ptr<const scene3d::SceneAsset>> models_;
+    static std::shared_ptr<const scene3d::SceneAsset> model_lookup(void* self, AssetId id);
+    [[nodiscard]] std::string resolve_asset_path(const std::string& stored) const;
+    [[nodiscard]] std::string store_asset_path(const std::string& absolute) const;
 
     std::vector<u64> selection_;
     std::atomic<u32> modelRevision_{1};   ///< a UI relê listas quando muda

@@ -33,6 +33,26 @@
 
 namespace aurea {
 
+/// Layouts de vértice dos pipelines 3D. Poucos e fixos: cada malha cabe num
+/// deles, e o número de variantes de pipeline fica previsível.
+///
+///   fluxo 0  posição   float3                         (12 B)
+///   fluxo 1  shading   normal f3, tangente f4, uv0 f2, uv1 f2, cor u8×4 (48 B)
+///   fluxo 2  skin      juntas u16×4, pesos unorm16×4  (16 B)
+enum class MeshLayout : u8 {
+    None = 0,        ///< o shader gera os vértices (quads 2D)
+    PositionOnly,    ///< profundidade/sombra: só o fluxo 0
+    Static,          ///< fluxos 0 + 1
+    Skinned,         ///< fluxos 0 + 1 + 2
+    SkinnedPosition, ///< sombra de malha com skin: fluxos 0 + 2
+};
+
+[[nodiscard]] VertexLayout vertex_layout_for(MeshLayout layout) noexcept;
+
+inline constexpr u32 kMeshPositionStride = 12;
+inline constexpr u32 kMeshShadingStride = 48;
+inline constexpr u32 kMeshSkinStride = 16;
+
 struct PipelineKey {
     ShaderId vertex   = ShaderId::Count;
     ShaderId fragment = ShaderId::Count;
@@ -43,6 +63,19 @@ struct PipelineKey {
     Topology      topology = Topology::TriangleList;
     /// Sampler imutável (conversão YCbCr de um formato externo). 0 = nenhum.
     u64           immutableSampler = 0;
+
+    // --- 3D ------------------------------------------------------------------
+    MeshLayout    mesh = MeshLayout::None;
+    bool          hasDepth = false;
+    bool          depthOnly = false;
+    bool          depthTest = false;
+    bool          depthWrite = false;
+    CompareOp     depthCompare = CompareOp::GreaterOrEqual;   ///< Z reverso
+    SurfaceFormat depthFormat = SurfaceFormat::Depth32F;
+    CullMode      cull = CullMode::None;
+    bool          frontFaceCCW = true;
+    f32           depthBiasConstant = 0.0f;
+    f32           depthBiasSlope = 0.0f;
 
     [[nodiscard]] bool is_compute() const noexcept { return compute != ShaderId::Count; }
 

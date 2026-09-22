@@ -889,6 +889,153 @@ AUREA_TEST(Gpu, EngineImportsSeeksAndScrubsARealVideoPipeline) {
     e.shutdown();
 }
 
+
+// -----------------------------------------------------------------------------
+// 3D no renderer do Aurea (5A): import → layer → frame.
+// -----------------------------------------------------------------------------
+namespace {
+
+std::string gltf_data(const char* rel) { return std::string(AUREA_TEST_DATA_DIR) + "/gltf/" + rel; }
+
+bool file_exists(const std::string& p) {
+    std::FILE* f = std::fopen(p.c_str(), "rb");
+    if (f) std::fclose(f);
+    return f != nullptr;
+}
+
+/// Um triângulo glTF de um lado só, virado para +Z (para quem olha do lado
+/// +Z, que é onde o observador do glTF fica) ou para −Z. Buffer em base64
+/// dentro do JSON — o teste não depende de arquivo externo.
+std::string write_triangle_gltf(bool facingViewer, f32 r, f32 g, f32 b) {
+    const f32 pos[9] = {-0.5f, -0.5f, 0.0f, 0.5f, -0.5f, 0.0f, 0.0f, 0.5f, 0.0f};
+    const u16 idx[3] = {0, static_cast<u16>(facingViewer ? 1 : 2), static_cast<u16>(facingViewer ? 2 : 1)};
+    std::vector<u8> bin(36 + 6 + 2);
+    std::memcpy(bin.data(), pos, 36);
+    std::memcpy(bin.data() + 36, idx, 6);
+    static const char* b64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string enc;
+    for (usize i = 0; i < bin.size(); i += 3) {
+        const u32 v = (static_cast<u32>(bin[i]) << 16) | (i + 1 < bin.size() ? static_cast<u32>(bin[i + 1]) << 8 : 0u)
+                    | (i + 2 < bin.size() ? bin[i + 2] : 0u);
+        enc += b64[(v >> 18) & 63];
+        enc += b64[(v >> 12) & 63];
+        enc += i + 1 < bin.size() ? b64[(v >> 6) & 63] : '=';
+        enc += i + 2 < bin.size() ? b64[v & 63] : '=';
+    }
+    char json[2048];
+    std::snprintf(json, sizeof(json),
+        R"({"asset":{"version":"2.0"},"scene":0,"scenes":[{"nodes":[0]}],"nodes":[{"mesh":0}],)"
+        R"("meshes":[{"primitives":[{"attributes":{"POSITION":0},"indices":1,"material":0}]}],)"
+        R"("materials":[{"pbrMetallicRoughness":{"baseColorFactor":[%f,%f,%f,1],"metallicFactor":0,"roughnessFactor":1},"extensions":{"KHR_materials_unlit":{}}}],)"
+        R"("extensionsUsed":["KHR_materials_unlit"],)"
+        R"("buffers":[{"byteLength":%u,"uri":"data:application/octet-stream;base64,%s"}],)"
+        R"("bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":36},{"buffer":0,"byteOffset":36,"byteLength":6}],)"
+        R"("accessors":[{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[-0.5,-0.5,0],"max":[0.5,0.5,0]},)"
+        R"({"bufferView":1,"componentType":5123,"count":3,"type":"SCALAR"}]})",
+        r, g, b, static_cast<unsigned>(bin.size()), enc.c_str());
+    const std::string path = std::string("aurea_teste_triangulo_") + (facingViewer ? "frente" : "costas") + ".gltf";
+    std::FILE* f = std::fopen(path.c_str(), "wb");
+    std::fwrite(json, 1, std::strlen(json), f);
+    std::fclose(f);
+    return path;
+}
+
+struct Scene3DRig {
+    Engine e;
+    explicit Scene3DRig(u32 w = 256, u32 h = 144) {
+        EngineConfig ec;
+        ec.backend = new vk::Backend();
+        ec.backendConfig.enableValidation = false;
+        ec.disableAutosave = true;
+        ec.workerCount = 2;
+        AUREA_CHECK(e.initialize(ec).ok());
+        AUREA_CHECK(e.new_project(w, h, 30.0, nullptr).ok());
+    }
+    ~Scene3DRig() { e.shutdown(); }
+    Image8 capture(u32 maxDim) {
+        Image8 img;
+        std::vector<u8> rgba;
+        u32 w = 0, h = 0;
+        AUREA_CHECK(e.capture_frame_rgba(maxDim, rgba, w, h).ok());
+        img.width = w;
+        img.height = h;
+        img.rgba = std::move(rgba);
+        return img;
+    }
+};
+
+/// Fração de pixels que diferem do fundo (preto da composição).
+f32 coverage(const Image8& img) {
+    u32 n = 0;
+    for (u32 y = 0; y < img.height; ++y) {
+        for (u32 x = 0; x < img.width; ++x) {
+            const u8* p = img.at(x, y);
+            if (p[0] > 8 || p[1] > 8 || p[2] > 8) ++n;
+        }
+    }
+    return static_cast<f32>(n) / static_cast<f32>(std::max(1u, img.width * img.height));
+}
+
+} // namespace
+
+AUREA_TEST(Gpu, Scene3DFrontFaceIsVisibleAndBackFaceIsCulled) {
+    AUREA_REQUIRE_GPU();
+    {
+        Scene3DRig rig;
+        ModelImport mi;
+        mi.path = write_triangle_gltf(true, 1.0f, 0.0f, 0.0f);
+        AUREA_CHECK(rig.e.import_model(mi).ok());
+        const Image8 img = rig.capture(256);
+        // Unlit vermelho puro: o centro da composição é o triângulo.
+        const u8* c = img.at(img.width / 2, img.height / 2);
+        AUREA_CHECK(c[0] > 240 && c[1] < 10 && c[2] < 10);
+        AUREA_CHECK(coverage(img) > 0.05f);
+        // Ponta do triângulo PARA CIMA (glTF +Y = cima na tela): a linha de
+        // cima do quadro no centro tem menos cobertura que a de baixo.
+        u32 top = 0, bottom = 0;
+        for (u32 x = 0; x < img.width; ++x) {
+            top += img.at(x, img.height * 3 / 10)[0] > 128;
+            bottom += img.at(x, img.height * 7 / 10)[0] > 128;
+        }
+        AUREA_CHECK(top < bottom);
+    }
+    {
+        Scene3DRig rig;
+        ModelImport mi;
+        mi.path = write_triangle_gltf(false, 0.0f, 1.0f, 0.0f);
+        AUREA_CHECK(rig.e.import_model(mi).ok());
+        // Face de trás, material de um lado só: nada desenhado.
+        AUREA_CHECK_NEAR(coverage(rig.capture(256)), 0.0f, 1e-6f);
+    }
+}
+
+AUREA_TEST(Gpu, Scene3DModelsAppearFramedWithPbr) {
+    AUREA_REQUIRE_GPU();
+    const char* models[] = {"Box.glb", "DamagedHelmet.glb", "MetalRoughSpheres.glb", "BoxTextured/BoxTextured.gltf",
+                            "AlphaBlendModeTest.glb", "Fox.glb"};
+    for (const char* m : models) {
+        const std::string path = gltf_data(m);
+        if (!file_exists(path)) {
+            std::printf("\n    (modelo de amostra ausente: %s)", m);
+            continue;
+        }
+        Scene3DRig rig(512, 288);
+        ModelImport mi;
+        mi.path = path;
+        std::string detail;
+        const Result<u64> r = rig.e.import_model(mi, nullptr, &detail);
+        AUREA_CHECK_MSG(r.ok(), m);
+        if (!r.ok()) continue;
+        const Image8 img = rig.capture(512);
+        const f32 cov = coverage(img);
+        // Enquadrado: aparece (nem sumido, nem estourando o quadro inteiro).
+        AUREA_CHECK_MSG(cov > 0.03f && cov < 0.95f, m);
+        std::string out = std::string("scene3d_") + m;
+        for (char& ch : out) if (ch == '/' || ch == '.') ch = '_';
+        (void)write_png(out + ".png", img);
+    }
+}
+
 #endif // AUREA_TEST_VULKAN
 
 AUREA_TEST(Gpu, CaptureFrameGivesSrgbThumbnail) {

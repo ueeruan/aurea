@@ -2,6 +2,7 @@
 #include "aurea/core/Log.hpp"
 
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <system_error>
 
@@ -20,7 +21,36 @@ usize PipelineKeyHash::operator()(const PipelineKey& k) const noexcept {
     mix(static_cast<u64>(k.format));
     mix(static_cast<u64>(k.topology));
     mix(k.immutableSampler);
+    mix(static_cast<u64>(k.mesh) | (static_cast<u64>(k.hasDepth) << 8) | (static_cast<u64>(k.depthOnly) << 9)
+        | (static_cast<u64>(k.depthTest) << 10) | (static_cast<u64>(k.depthWrite) << 11)
+        | (static_cast<u64>(k.depthCompare) << 12) | (static_cast<u64>(k.depthFormat) << 16)
+        | (static_cast<u64>(k.cull) << 32) | (static_cast<u64>(k.frontFaceCCW) << 36));
+    u32 bc = 0, bs = 0;
+    std::memcpy(&bc, &k.depthBiasConstant, 4);
+    std::memcpy(&bs, &k.depthBiasSlope, 4);
+    mix((static_cast<u64>(bc) << 32) | bs);
     return static_cast<usize>(h ^ (h >> 32));
+}
+
+VertexLayout vertex_layout_for(MeshLayout layout) noexcept {
+    VertexLayout v;
+    if (layout == MeshLayout::None) return v;
+    v.set_binding(0, kMeshPositionStride);
+    v.add(0, 0, VertexFormat::Float3, 0);
+    if (layout == MeshLayout::Static || layout == MeshLayout::Skinned) {
+        v.set_binding(1, kMeshShadingStride);
+        v.add(1, 1, VertexFormat::Float3, 0);        // normal
+        v.add(2, 1, VertexFormat::Float4, 12);       // tangente (w = sinal)
+        v.add(3, 1, VertexFormat::Float2, 28);       // uv0
+        v.add(4, 1, VertexFormat::Float2, 36);       // uv1
+        v.add(5, 1, VertexFormat::UByte4Norm, 44);   // cor
+    }
+    if (layout == MeshLayout::Skinned || layout == MeshLayout::SkinnedPosition) {
+        v.set_binding(2, kMeshSkinStride);
+        v.add(6, 2, VertexFormat::UShort4, 0);       // juntas
+        v.add(7, 2, VertexFormat::UShort4Norm, 8);   // pesos
+    }
+    return v;
 }
 
 namespace {
@@ -129,6 +159,17 @@ Result<PipelineHandle> ShaderLibrary::pipeline(const PipelineKey& key) noexcept 
     desc.colorFormat = key.format;
     desc.topology = key.topology;
     desc.immutableSampler0 = SamplerHandle{key.immutableSampler};
+    desc.vertexLayout = vertex_layout_for(key.mesh);
+    desc.hasDepth = key.hasDepth;
+    desc.depthOnly = key.depthOnly;
+    desc.depth.test = key.depthTest;
+    desc.depth.write = key.depthWrite;
+    desc.depth.compare = key.depthCompare;
+    desc.depth.biasConstant = key.depthBiasConstant;
+    desc.depth.biasSlope = key.depthBiasSlope;
+    desc.depthFormat = key.depthFormat;
+    desc.cull = key.cull;
+    desc.frontFaceCCW = key.frontFaceCCW;
 
     auto created = backend_->create_pipeline(desc);
     if (!created.ok()) {

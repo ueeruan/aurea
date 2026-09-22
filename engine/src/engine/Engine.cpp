@@ -99,6 +99,7 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
     if (effectRegistry_.count() == 0) register_builtin_effects(effectRegistry_);
 
     gpu_.reset(config.backend);
+    renderer_.set_model_lookup(&Engine::model_lookup, this);
     if (gpu_) {
         // O backend guarda o caminho do cache de pipeline: por padrão, o mesmo
         // diretório de cache do motor (que vive em config_, não no chamador).
@@ -160,6 +161,7 @@ void Engine::shutdown() noexcept {
         std::lock_guard<std::mutex> lock(modelMutex_);
         project_.reset();
         images_.clear();
+        models_.clear();
     }
     state_ = EngineState::Uninitialized;
 }
@@ -314,6 +316,7 @@ Status Engine::new_project(u32 width, u32 height, f64 fps, const char* title) no
     std::lock_guard<std::mutex> lock(modelMutex_);
     project_ = std::make_unique<Project>(std::move(*result));
     images_.clear();
+    models_.clear();
     history_.clear();
         modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     selection_.clear();
@@ -350,6 +353,7 @@ Status Engine::load_project(const char* path) noexcept {
         std::lock_guard<std::mutex> lock(modelMutex_);
         project_ = std::make_unique<Project>(std::move(loaded));
         images_.clear();
+        models_.clear();
         history_.clear();
         modelRevision_.fetch_add(1, std::memory_order_acq_rel);
         selection_.clear();
@@ -381,6 +385,31 @@ Status Engine::load_project(const char* path) noexcept {
             images_[key] = std::move(px);
         }
         if (missing) AUREA_LOG_WARN("%u imagem(ns) do projeto nao puderam ser abertas", missing);
+    }
+    // Modelos 3D: reabertos do caminho guardado (relativo ao sandbox). Ausente
+    // = o projeto abre mesmo assim; a layer fica sem desenhar e a UI mostra
+    // "modelo 3D ausente" para religar.
+    {
+        std::vector<std::pair<u64, std::string>> pending;
+        {
+            std::lock_guard<std::mutex> lock(modelMutex_);
+            project_->for_each_asset([&](AssetId id, const Asset& a) {
+                if (a.kind == AssetKind::Model3D && !a.sourcePath.empty()) pending.emplace_back(id.pack(), a.sourcePath);
+            });
+        }
+        u32 missing = 0;
+        for (const auto& [key, src] : pending) {
+            scene3d::ImportOptions o;
+            scene3d::ImportResult r = scene3d::import_gltf_file(resolve_asset_path(src), o);
+            if (!r.ok()) {
+                ++missing;
+                AUREA_LOG_WARN("modelo 3D do projeto nao abriu: %s (%s)", src.c_str(), r.detail.c_str());
+                continue;
+            }
+            std::lock_guard<std::mutex> lock(modelMutex_);
+            models_[key] = std::shared_ptr<const scene3d::SceneAsset>(std::move(r.asset));
+        }
+        if (missing) AUREA_LOG_WARN("%u modelo(s) 3D ausente(s) no projeto", missing);
     }
     request_render();
     if (!report.clean()) return Status{Errc::CorruptData, "projeto aberto parcialmente"};
@@ -565,6 +594,114 @@ Result<u64> Engine::import_image(const u8* rgba, u32 width, u32 height, const ch
     return lid.pack();
 }
 
+// -----------------------------------------------------------------------------
+// Modelos 3D
+// -----------------------------------------------------------------------------
+std::string Engine::store_asset_path(const std::string& absolute) const {
+    const std::string& docs = config_.documentsDirectory;
+    if (!docs.empty() && absolute.size() > docs.size() && absolute.compare(0, docs.size(), docs) == 0) {
+        usize start = docs.size();
+        while (start < absolute.size() && (absolute[start] == '/' || absolute[start] == '\\')) ++start;
+        return "docs:" + absolute.substr(start);
+    }
+    return absolute;
+}
+
+std::string Engine::resolve_asset_path(const std::string& stored) const {
+    if (stored.rfind("docs:", 0) == 0) {
+        std::string base = config_.documentsDirectory;
+        if (!base.empty() && base.back() != '/' && base.back() != '\\') base += '/';
+        return base + stored.substr(5);
+    }
+    return stored;
+}
+
+Result<u64> Engine::import_model(const ModelImport& request, scene3d::ImportProgress* progress,
+                                 std::string* detail) noexcept {
+    if (request.path.empty()) return Status{Errc::InvalidArgument, "caminho vazio"};
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
+    }
+    // Parse, validação e otimização FORA do lock: o preview continua rodando.
+    scene3d::ImportOptions options;
+    options.maxTextureSize = std::min<u32>(4096, caps_.max_export_width() > 0 ? 4096u : 2048u);
+    scene3d::ImportResult r = scene3d::import_gltf_file(request.path, options, progress);
+    if (!r.ok()) {
+        if (detail) *detail = r.detail;
+        const Errc code = r.error == scene3d::ImportError::Cancelled ? Errc::Cancelled
+                        : r.error == scene3d::ImportError::FileNotFound ? Errc::NotFound
+                        : r.error == scene3d::ImportError::OutOfMemory ? Errc::OutOfMemory
+                        : r.error == scene3d::ImportError::UnsupportedCompression
+                          || r.error == scene3d::ImportError::UnsupportedFeature ? Errc::UnsupportedFeature
+                        : Errc::CorruptData;
+        return Status{code, scene3d::to_string(r.error)};
+    }
+    std::shared_ptr<const scene3d::SceneAsset> scene(std::move(r.asset));
+    if (detail) {
+        detail->clear();
+        for (const std::string& w : scene->warnings) *detail += w + "\n";
+    }
+    if (progress) progress->phase.store(scene3d::ImportPhase::Complete, std::memory_order_relaxed);
+
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    if (!project_) return Status{Errc::InvalidState, "projeto fechado durante o import"};
+    Composition* comp = current_composition();
+    if (!comp) return Status{Errc::InvalidState, "projeto sem composicao"};
+    history_.before_mutation(*comp, project_->timeline().current(), "importar modelo 3D");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+
+    Asset asset;
+    asset.kind = AssetKind::Model3D;
+    asset.name = request.displayName.empty() ? scene->sourceName : request.displayName;
+    asset.sourcePath = store_asset_path(request.path);
+    asset.originalFilename = scene->sourceName;
+    asset.model.meshCount = scene->stats.meshes;
+    asset.model.materialCount = scene->stats.materials;
+    asset.model.animationCount = scene->stats.animations;
+    asset.model.triangleCount = scene->stats.triangles;
+    asset.model.lodCount = 1;
+    asset.model.hasSkeleton = scene->stats.skins > 0;
+    asset.model.hasMorphTargets = scene->stats.morphTargets > 0;
+    for (const scene3d::Animation& a : scene->animations) asset.model.animationNames.push_back(a.name);
+    const AssetId assetId = project_->add_asset(std::move(asset));
+    models_[assetId.pack()] = scene;
+
+    const LayerId lid = comp->add_layer(LayerKind::Model3D, request.displayName.empty() ? scene->sourceName
+                                                                                       : request.displayName);
+    Layer* l = comp->layer(lid);
+    if (!l) return Status{Errc::OutOfMemory, "camada nao criada"};
+    l->threeD = true;
+    l->model.scene = assetId;
+    // Enquadramento: a silhueta vista de frente (largura/altura; a
+    // profundidade pesa menos) ocupa ~55% do lado menor da composição,
+    // centrada. A escala da layer fica em 100% para o usuário.
+    const Vec3 ext = scene->bounds.extent();
+    const f32 maxExt = std::max({ext.x, ext.y, ext.z * 0.6f, 1e-6f});
+    l->model.unitScale = 0.55f * static_cast<f32>(std::min(comp->width(), comp->height())) / maxExt;
+    l->model.pivot = scene->bounds.center();
+    l->transform.position = Vec3{static_cast<f32>(comp->width()) * 0.5f, static_cast<f32>(comp->height()) * 0.5f, 0.0f};
+    l->transform.scale = Vec3{1.0f, 1.0f, 1.0f};
+    project_->mark_dirty();
+    request_render();
+    AUREA_LOG_INFO("modelo 3D importado: %s (%u triangulos, escala %.3f px/m)", scene->sourceName.c_str(),
+                   scene->stats.triangles, l->model.unitScale);
+    return lid.pack();
+}
+
+std::shared_ptr<const scene3d::SceneAsset> Engine::model_asset(u64 assetId) const noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    const auto it = models_.find(assetId);
+    return it == models_.end() ? nullptr : it->second;
+}
+
+std::shared_ptr<const scene3d::SceneAsset> Engine::model_lookup(void* self, AssetId id) {
+    // Chamado pelo renderer DENTRO do prepare (modelo já travado).
+    Engine* e = static_cast<Engine*>(self);
+    const auto it = e->models_.find(id.pack());
+    return it == e->models_.end() ? nullptr : it->second;
+}
+
 const ImagePixels* Engine::image_lookup(void* self, AssetId id) {
     Engine* e = static_cast<Engine*>(self);
     const auto it = e->images_.find(id.pack());
@@ -630,6 +767,7 @@ Status Engine::recover_device_locked() noexcept {
     renderer_.forget_device();
     gpu_->shutdown();
     if (const Status s = gpu_->initialize(config_.backendConfig); !s.ok()) return s;
+    renderer_.set_model_lookup(&Engine::model_lookup, this);
     if (const Status s = renderer_.initialize(*gpu_, effectRegistry_); !s.ok()) return s;
     if (surface_.nativeWindow) {
         const Status s = gpu_->attach_surface(surface_);

@@ -425,6 +425,10 @@ void write_layer(ByteWriter& w, const Layer& l) {
     w.boolv(l.model.castShadows);
     w.boolv(l.model.receiveShadows);
     w.i32v(l.model.forcedLod);
+    w.f32v(l.model.unitScale);
+    w.f32v(l.model.pivot.x);
+    w.f32v(l.model.pivot.y);
+    w.f32v(l.model.pivot.z);
 
     w.u32v(l.particles.emitterType);
     w.f32v(l.particles.rate);
@@ -449,6 +453,12 @@ void write_layer(ByteWriter& w, const Layer& l) {
     w.u32v(l.nextEffectId);
     w.u32v(l.nextMaskId);
 }
+
+/// Versão da seção Timeline. v2: layer de modelo 3D guarda escala de unidade
+/// e pivô (o enquadramento do import). v1 continua sendo lida (campos novos
+/// com o padrão).
+constexpr u32 kTimelineSectionVersion = 2;
+thread_local u32 g_readingTimelineVersion = kTimelineSectionVersion;
 
 void read_layer(ByteReader& r, Layer& l) {
     l.kind = static_cast<LayerKind>(r.u8v());
@@ -569,6 +579,12 @@ void read_layer(ByteReader& r, Layer& l) {
     l.model.castShadows = r.boolv();
     l.model.receiveShadows = r.boolv();
     l.model.forcedLod = r.i32v();
+    if (g_readingTimelineVersion >= 2) {
+        l.model.unitScale = r.f32v();
+        l.model.pivot.x = r.f32v();
+        l.model.pivot.y = r.f32v();
+        l.model.pivot.z = r.f32v();
+    }
 
     l.particles.emitterType = r.u32v();
     l.particles.rate = r.f32v();
@@ -1133,7 +1149,7 @@ Status ProjectSerializer::save(const Project& project, const std::string& path,
 
     std::vector<PendingSection> sections;
     sections.push_back(PendingSection{SectionKind::Project, 1, build_project_section(project)});
-    sections.push_back(PendingSection{SectionKind::Timeline, 1, build_timeline_section(project)});
+    sections.push_back(PendingSection{SectionKind::Timeline, kTimelineSectionVersion, build_timeline_section(project)});
     sections.push_back(PendingSection{SectionKind::Assets, 1, build_assets_section(project)});
 
     // As seções Animations, Effects, Scene3D, Particles, Fonts e Thumbnails
@@ -1284,7 +1300,10 @@ Status ProjectSerializer::load(Project& out, const std::string& path,
         const u8* effective = data;
         usize effectiveSize = sh.size;
 
-        if (sh.version != 1) {
+        // Versões lidas nativamente (sem migração): 1 de toda seção; 1 e 2 da
+        // Timeline.
+        const bool native = sh.version == 1 || (sh.kind == SectionKind::Timeline && sh.version <= kTimelineSectionVersion);
+        if (!native) {
             bool handled = false;
             for (u32 m = 0; m < g_migrationCount; ++m) {
                 if (g_migrations[m].kind == sh.kind && g_migrations[m].fromVersion == sh.version) {
@@ -1320,7 +1339,9 @@ Status ProjectSerializer::load(Project& out, const std::string& path,
                 apply_project_section(effective, effectiveSize, out);
                 break;
             case SectionKind::Timeline:
+                g_readingTimelineVersion = sh.version;
                 apply_timeline_section(effective, effectiveSize, out);
+                g_readingTimelineVersion = kTimelineSectionVersion;
                 break;
             case SectionKind::Assets:
                 apply_assets_section(effective, effectiveSize, out);

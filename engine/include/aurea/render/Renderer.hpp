@@ -27,6 +27,7 @@
 #include "aurea/render/FrameGraph.hpp"
 #include "aurea/render/RenderScheduler.hpp"
 #include "aurea/render/ShaderLibrary.hpp"
+#include "aurea/scene3d/SceneRenderer.hpp"
 #include "aurea/timeline/Composition.hpp"
 
 #include <unordered_map>
@@ -45,7 +46,7 @@ struct ImagePixels {
 
 /// Origem da imagem de uma layer neste frame.
 struct LayerSource {
-    enum class Kind : u8 { None = 0, Video, Image, Solid };
+    enum class Kind : u8 { None = 0, Video, Image, Solid, Scene3D };
     Kind kind = Kind::None;
     u32  width = 0;          ///< tamanho natural da layer (px)
     u32  height = 0;
@@ -60,6 +61,9 @@ struct LayerSource {
 
     // Cor sólida (shape retangular), linear
     Vec4     solid{};
+
+    // Grupo 3D: índice em FrameSnapshot::scenes
+    u32      sceneGroup = 0;
 };
 
 struct RenderLayer {
@@ -78,6 +82,9 @@ struct FrameSnapshot {
     FrameIndex time{0};
     std::vector<RenderLayer> layers;   ///< do fundo para a frente
     std::vector<EffectPlan>  plans;    ///< um por layer (mesmo índice)
+    /// Grupos 3D do frame (layers 3D consecutivas da pilha). O RenderLayer do
+    /// grupo aponta para cá.
+    std::vector<scene3d::SceneFrame> scenes;
     u32  videoLayers = 0;
     u32  staleVideoFrames = 0;         ///< mostrando frame aproximado (scrub)
     u32  missingVideoFrames = 0;       ///< nenhum frame ainda (primeiro decode)
@@ -156,6 +163,12 @@ public:
     /// Descarta texturas de imagem e LUTs (projeto fechado).
     void release_project_resources() noexcept;
 
+    /// De onde vêm os modelos 3D (o motor guarda os SceneAsset).
+    using ModelLookup = std::shared_ptr<const scene3d::SceneAsset> (*)(void* ctx, AssetId id);
+    void set_model_lookup(ModelLookup fn, void* ctx) noexcept { modelLookup_ = fn; modelCtx_ = ctx; }
+    [[nodiscard]] const scene3d::SceneStats& scene_stats() const noexcept { return scene3d_.stats(); }
+    [[nodiscard]] u64 scene_resident_bytes() const noexcept { return scene3d_.resident_bytes(); }
+
     // --- EffectResources -----------------------------------------------------
     [[nodiscard]] TextureHandle curve_lut(const CurveData& curve) noexcept override;
 
@@ -206,6 +219,7 @@ private:
         u32 bytesPerRow = 0;
     };
 
+    void fill_scene_context(const Composition& comp, FrameIndex time, FrameSnapshot& out) const noexcept;
     [[nodiscard]] bool build_source(const RenderLayer& layer, u32 layerIndex, bool hasEffects,
                                     LayerImage& out, std::vector<FrameRef>& framesUsed,
                                     u64 frameNumber) noexcept;
@@ -218,6 +232,9 @@ private:
     GPUBackend* backend_ = nullptr;
     const EffectRegistry* effects_ = nullptr;
     ShaderLibrary shaders_;
+    scene3d::SceneRenderer scene3d_;
+    ModelLookup modelLookup_ = nullptr;
+    void* modelCtx_ = nullptr;
     FrameGraph graph_;
     TransientTexturePool pool_;
     Arena arena_{64 * 1024};
@@ -230,6 +247,8 @@ private:
     std::vector<PendingUpload> uploads_;
     std::vector<GpuTiming> timingScratch_;
 
+    const std::vector<scene3d::SceneFrame>* currentScenes_ = nullptr;
+    u32 compTargetW_ = 0, compTargetH_ = 0;
     u32 prewarmed_ = 0;
     u32 framesRendered_ = 0;
     u64 frameNumber_ = 0;

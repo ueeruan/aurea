@@ -170,12 +170,13 @@ u32 FrameGraph::add_raster_pass(const char* name, PassStage stage, FGTexture col
 
 u32 FrameGraph::add_raster_pass_depth(const char* name, PassStage stage, FGTexture colorTarget, LoadOp load,
                                       Vec4 clear, FGTexture depthTarget, LoadOp depthLoad, bool storeDepth,
-                                      PassFn fn) noexcept {
+                                      f32 clearDepth, PassFn fn) noexcept {
     const u32 index = add_raster_pass(name, stage, colorTarget, load, clear, std::move(fn));
     Pass& p = passes_[index];
     p.depthTarget = depthTarget;
     p.depthLoad = depthLoad;
     p.storeDepth = storeDepth;
+    p.clearDepth = clearDepth;
     if (depthTarget.valid()) {
         if (depthLoad == LoadOp::Load) add_access(index, depthTarget, Access::Read);
         add_access(index, depthTarget, Access::DepthWrite);
@@ -540,6 +541,7 @@ void FrameGraph::execute(CommandList& cmds, bool timers) noexcept {
                 rp.depth = resources_[p.depthTarget.index].physical;
                 rp.depthLoad = p.depthLoad;
                 rp.storeDepth = p.storeDepth;
+                rp.clearDepth = p.clearDepth;
             }
             for (int c = 0; c < 4; ++c) rp.clear[c] = p.clear[c];
             cmds.begin_render_pass(rp);

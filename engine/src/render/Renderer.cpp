@@ -51,6 +51,37 @@ f32 texel_scale_for(f32 onScreenScale) noexcept {
     return k;
 }
 
+/// Transform 3D completo da layer (posição/rotação/escala/âncora em XYZ).
+Mat4 layer_matrix_3d(const Layer& l, FrameIndex local) noexcept {
+    const TrackSet& t = l.tracks;
+    auto s = [&](TrackProperty p, f32 fallback) noexcept {
+        const Track* tr = t.find(p);
+        return (tr && !tr->keys.empty()) ? tr->sample(local) : fallback;
+    };
+    const Vec3 pos{s(TrackProperty::PositionX, l.transform.position.x), s(TrackProperty::PositionY, l.transform.position.y),
+                   s(TrackProperty::PositionZ, l.transform.position.z)};
+    const Vec3 scale{s(TrackProperty::ScaleX, l.transform.scale.x), s(TrackProperty::ScaleY, l.transform.scale.y),
+                     s(TrackProperty::ScaleZ, l.transform.scale.z)};
+    const Vec3 rot{s(TrackProperty::RotationX, l.transform.rotation.x) * kDeg2Rad,
+                   s(TrackProperty::RotationY, l.transform.rotation.y) * kDeg2Rad,
+                   s(TrackProperty::RotationZ, l.transform.rotation.z) * kDeg2Rad};
+    const Vec3 anchor{s(TrackProperty::AnchorX, l.transform.anchor.x), s(TrackProperty::AnchorY, l.transform.anchor.y),
+                      s(TrackProperty::AnchorZ, l.transform.anchor.z)};
+    return Mat4::translation(pos) * Mat4::from_quat(Quat::from_euler_zyx(rot.x, rot.y, rot.z)) * Mat4::scale(scale)
+         * Mat4::translation(-anchor);
+}
+
+/// Cena do modelo (glTF: metros, Y para cima, +Z para o observador) → espaço
+/// da layer (pixels, Y para baixo, Z para dentro): giro de 180° em X (troca Y
+/// e Z sem espelhar — a face da frente continua da frente), escala de
+/// metros para pixels e o pivô no centro da caixa do modelo.
+Mat4 layer_from_model(const Model3DData& m) noexcept {
+    Mat4 flip;
+    flip.col[1] = Vec4{0, -1, 0, 0};
+    flip.col[2] = Vec4{0, 0, -1, 0};
+    return flip * Mat4::scale(Vec3{m.unitScale, m.unitScale, m.unitScale}) * Mat4::translation(-m.pivot);
+}
+
 Mat4 layer_matrix(const Layer& l, FrameIndex local) noexcept {
     const TrackSet& t = l.tracks;
     auto s = [&](TrackProperty p, f32 fallback) noexcept {
@@ -125,8 +156,12 @@ Status Renderer::initialize(GPUBackend& backend, const EffectRegistry& effects) 
     // PRÉ-AQUECIMENTO: todo pipeline embutido é compilado aqui, antes do
     // primeiro frame. Com o cache de pipeline persistido pelo backend, da
     // segunda abertura em diante isto é quase instantâneo.
+    if (const Status s = scene3d_.initialize(backend, shaders_); !s.ok()) {
+        AUREA_LOG_ERROR("renderer: 3D indisponivel: %s", s.message().data());
+    }
     std::vector<PipelineKey> keys;
     effects.collect_pipelines(keys, kWorkFormat);
+    scene3d_.collect_pipelines(keys);
     keys.push_back(PipelineKey::fullscreen(ShaderId::video_yuv_planar_frag, kWorkFormat));
     keys.push_back(PipelineKey::fullscreen(ShaderId::video_rgba_to_linear_frag, kWorkFormat));
     keys.push_back(PipelineKey::fullscreen(ShaderId::common_copy_frag, kWorkFormat));
@@ -150,6 +185,7 @@ void Renderer::shutdown() noexcept {
     backend_->wait_idle();
     framesInFlight_.clear();
     release_project_resources();
+    scene3d_.shutdown();
     pool_.clear();
     shaders_.shutdown();
     backend_ = nullptr;
@@ -161,6 +197,7 @@ void Renderer::forget_device() noexcept {
     images_.clear();
     luts_.clear();
     uploads_.clear();
+    scene3d_.forget_device();
     pool_.forget();
     shaders_.forget_device();
     backend_ = nullptr;
@@ -177,6 +214,7 @@ void Renderer::release_project_resources() noexcept {
     images_.clear();
     luts_.clear();
     uploads_.clear();
+    scene3d_.release_all();
 }
 
 // =============================================================================
@@ -246,6 +284,11 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
     const OrderedIds<LayerId>& order = comp.order();
     const u32 n = order.size();
     u32 used = 0;
+    out.scenes.clear();
+    // Layers 3D CONSECUTIVAS na pilha formam um grupo (uma cena, uma
+    // profundidade compartilhada: elas se ocluem). Qualquer layer 2D entre
+    // elas fecha o grupo — a ordem da pilha continua sendo a lei.
+    bool groupOpen = false;
     for (u32 i = 0; i < n; ++i) {
         const LayerId id = order.at(i);
         const Layer* l = comp.layer(id);
@@ -288,8 +331,55 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 rl.source.height = static_cast<u32>(std::max(1.0f, l->shape.bounds.h));
                 break;
             }
+            case LayerKind::Model3D: {
+                std::shared_ptr<const scene3d::SceneAsset> asset =
+                    modelLookup_ ? modelLookup_(modelCtx_, l->model.scene) : nullptr;
+                if (!asset) continue;   // asset ausente: a layer não desenha (a UI mostra "modelo ausente")
+                scene3d::SceneInstance inst;
+                Mat4 m3 = layer_matrix_3d(*l, local);
+                LayerId parent3 = l->parent;
+                for (u32 depth = 0; parent3.valid() && depth < 16; ++depth) {
+                    const Layer* p = comp.layer(parent3);
+                    if (!p) break;
+                    m3 = (p->threeD || p->kind == LayerKind::Model3D ? layer_matrix_3d(*p, p->local_time(time))
+                                                                       : layer_matrix(*p, p->local_time(time))) * m3;
+                    parent3 = p->parent;
+                }
+                inst.world = m3 * layer_from_model(l->model);
+                inst.nodeWorld = asset->rest_world_matrices();
+                inst.castShadows = l->model.castShadows;
+                inst.assetKey = l->model.scene.pack();
+                inst.asset = std::move(asset);
+                if (groupOpen && !out.scenes.empty()) {
+                    out.scenes.back().instances.push_back(std::move(inst));
+                    continue;   // entra no grupo aberto; nenhuma layer nova na pilha
+                }
+                out.scenes.emplace_back();
+                out.scenes.back().instances.push_back(std::move(inst));
+                rl.source.kind = LayerSource::Kind::Scene3D;
+                rl.source.sceneGroup = static_cast<u32>(out.scenes.size() - 1);
+                rl.source.width = out.compWidth;
+                rl.source.height = out.compHeight;
+                rl.compFromLayer = Mat4::identity();
+                rl.texelScale = previewFactor;
+                groupOpen = true;
+                break;
+            }
+            case LayerKind::Camera:
+            case LayerKind::Light:
+                continue;   // não desenham; entram na cena depois do laço
             default:
-                continue;   // texto, 3D, partículas: fora desta fase
+                continue;   // texto, partículas: fora desta fase
+        }
+        if (rl.source.kind != LayerSource::Kind::Scene3D) groupOpen = false;
+        if (rl.source.kind == LayerSource::Kind::Scene3D) {
+            // O grupo não tem efeitos de layer nesta fase (entram sobre o
+            // resultado do grupo quando o 3D ganhar efeitos compatíveis).
+            if (out.plans.size() <= used) out.plans.emplace_back();
+            out.plans[used].clear();
+            out.layers.push_back(std::move(rl));
+            ++used;
+            continue;
         }
 
         // Transform da layer, com a cadeia de pais (cada pai no próprio tempo).
@@ -388,6 +478,66 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         ++used;
     }
     for (u32 k = used; k < out.plans.size(); ++k) out.plans[k].clear();
+    if (!out.scenes.empty()) fill_scene_context(comp, time, out);
+}
+
+void Renderer::fill_scene_context(const Composition& comp, FrameIndex time, FrameSnapshot& out) const noexcept {
+    // Câmera: a layer de câmera ATIVA visível no instante; sem ela, a câmera
+    // padrão (plano Z=0 em escala 1:1 com a composição).
+    scene3d::SceneCamera cam = scene3d::default_camera(out.compWidth, out.compHeight);
+    std::vector<scene3d::SceneLight> lights;
+    const OrderedIds<LayerId>& order = comp.order();
+    for (u32 i = 0; i < order.size(); ++i) {
+        const Layer* l = comp.layer(order.at(i));
+        if (!l || !l->visible || !l->contains_time(time)) continue;
+        const FrameIndex local = l->local_time(time);
+        if (l->kind == LayerKind::Camera && l->camera.active) {
+            const Mat4 w = layer_matrix_3d(*l, local);
+            // Vista = inversa da pose rígida (a escala da layer não entra).
+            const Vec3 x = Vec3{w.col[0].x, w.col[0].y, w.col[0].z}.normalized();
+            const Vec3 y = Vec3{w.col[1].x, w.col[1].y, w.col[1].z}.normalized();
+            const Vec3 z = Vec3{w.col[2].x, w.col[2].y, w.col[2].z}.normalized();
+            const Vec3 t{w.col[3].x, w.col[3].y, w.col[3].z};
+            Mat4 v;
+            v.col[0] = Vec4{x.x, y.x, z.x, 0};
+            v.col[1] = Vec4{x.y, y.y, z.y, 0};
+            v.col[2] = Vec4{x.z, y.z, z.z, 0};
+            v.col[3] = Vec4{-x.dot(t), -y.dot(t), -z.dot(t), 1};
+            cam.view = v;
+            cam.position = t;
+            const Track* fov = l->tracks.find(TrackProperty::Fov);
+            const f32 deg = fov && !fov->keys.empty() ? fov->sample(local) : l->camera.fov;
+            cam.fovY = std::clamp(deg, 1.0f, 170.0f) * kDeg2Rad;
+            cam.nearZ = std::max(0.1f, l->camera.nearPlane);
+        } else if (l->kind == LayerKind::Light && l->light.kind != LightKind::Ambient) {
+            scene3d::SceneLight s;
+            const Mat4 w = layer_matrix_3d(*l, local);
+            s.kind = l->light.kind == LightKind::Point ? scene3d::LightKindGpu::Point
+                   : l->light.kind == LightKind::Spot ? scene3d::LightKindGpu::Spot : scene3d::LightKindGpu::Directional;
+            s.position = Vec3{w.col[3].x, w.col[3].y, w.col[3].z};
+            s.direction = Vec3{w.col[2].x, w.col[2].y, w.col[2].z}.normalized();   // a luz aponta para +Z da layer
+            s.color = l->light.color.xyz();
+            s.intensity = l->light.intensity;
+            s.range = l->light.range;
+            s.outerCone = l->light.coneAngle * 0.5f * kDeg2Rad;
+            s.innerCone = s.outerCone * (1.0f - std::clamp(l->light.penumbra, 0.0f, 1.0f));
+            lights.push_back(s);
+        }
+    }
+    if (lights.empty()) {
+        // Sem luz no projeto: uma luz-chave suave do alto à esquerda, na
+        // frente. IMPORTOU → APARECE, sem montar iluminação.
+        scene3d::SceneLight key;
+        key.kind = scene3d::LightKindGpu::Directional;
+        key.direction = Vec3{0.45f, 1.0f, 0.75f}.normalized();
+        key.color = Vec3{1.0f, 0.97f, 0.92f};
+        key.intensity = 2.2f;
+        lights.push_back(key);
+    }
+    for (scene3d::SceneFrame& f : out.scenes) {
+        f.camera = cam;
+        f.lights = lights;
+    }
 }
 
 // =============================================================================
@@ -533,6 +683,21 @@ bool Renderer::build_video_source(const RenderLayer& layer, u32 layerIndex, u32 
 
 bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEffects, LayerImage& out,
                             std::vector<FrameRef>& framesUsed, u64 frameNumber) noexcept {
+    if (layer.source.kind == LayerSource::Kind::Scene3D) {
+        // O grupo 3D renderiza no tamanho do alvo da composição (resolução de
+        // preview incluída) e cobre a composição inteira.
+        if (!currentScenes_ || layer.source.sceneGroup >= currentScenes_->size()) return false;
+        FGTexture tex{};
+        if (!scene3d_.build(graph_, arena_, (*currentScenes_)[layer.source.sceneGroup], compTargetW_, compTargetH_,
+                            frameNumber, tex)) {
+            return false;
+        }
+        out.texture = tex;
+        out.region = Rect{0.0f, 0.0f, static_cast<f32>(layer.source.width), static_cast<f32>(layer.source.height)};
+        out.width = compTargetW_;
+        out.height = compTargetH_;
+        return true;
+    }
     const u32 maxTex = std::min<u32>(backend_->capabilities().maxTexture2D, 8192);
     const f32 k = layer.texelScale;
     u32 w = std::max(1u, static_cast<u32>(std::ceil(static_cast<f32>(layer.source.width) * k)));
@@ -639,6 +804,9 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     const FGTexture comp = (offscreen && offscreen->texture.valid())
                          ? graph_.import_texture("composicao", offscreen->texture, compDesc)
                          : graph_.create_texture("composicao", compDesc);
+    currentScenes_ = &snap.scenes;
+    compTargetW_ = cw;
+    compTargetH_ = ch;
 
     // --- Layers: fonte → efeitos → desenho na composição.
     EffectBuildContext ctx(graph_, shaders_, arena_, *this, kWorkFormat,
@@ -834,6 +1002,7 @@ void Renderer::collect_resources(u64 frameNumber) noexcept {
     // Recursos persistentes de layers que sumiram. Checado a cada 2 s — não
     // há pressa, e varrer mapas a cada frame é custo sem ganho.
     if (frameNumber % 120 != 0) return;
+    scene3d_.collect(frameNumber);
     for (auto it = planar_.begin(); it != planar_.end();) {
         if (frameNumber > it->second.lastFrame + 240) {
             for (TextureHandle& t : it->second.plane) if (t.valid()) backend_->destroy_texture(t);

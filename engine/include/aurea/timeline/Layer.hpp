@@ -156,6 +156,11 @@ struct LightData {
 
 struct Model3DData {
     AssetId scene{};
+    /// Metros do modelo → pixels da composição, e o centro da caixa do modelo
+    /// (pivô). Definidos no import para o modelo APARECER enquadrado; a escala
+    /// da layer continua 100% para o usuário.
+    f32     unitScale = 1.0f;
+    Vec3    pivot{0.0f, 0.0f, 0.0f};
     i32     animationClip = -1;
     f32     timeScale = 1.0f;
     bool    castShadows = true;

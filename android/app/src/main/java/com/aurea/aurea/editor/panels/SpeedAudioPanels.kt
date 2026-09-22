@@ -23,7 +23,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -47,10 +46,7 @@ import kotlin.math.max
 import kotlin.math.pow
 import kotlin.math.roundToInt
 
-// Velocidade: o motor ainda não tem tempo de clipe (fase 6) — a casca da A.01
-// fica pronta e TODO toque diz "em breve". Som: ligado ao mixer do motor.
-
-/** Duração da camada em "m:ss" (a única coisa real que o painel de velocidade tem). */
+/** Duração da camada em "m:ss". */
 private fun clock(frames: Int, fps: Float): String {
     val s = if (fps > 0f) (frames / fps).roundToInt() else 0
     return "${s / 60}:${(s % 60).toString().padStart(2, '0')}"
@@ -61,8 +57,7 @@ private fun clock(frames: Int, fps: Float): String {
  * com a barra, a régua entre a tartaruga e a lebre (escala logarítmica: meio
  * risco para 0,5x vale o mesmo que para 2x), os atalhos e os interruptores.
  * Velocidade e Reverso são do motor (vídeo, miniatura e som seguem a mesma
- * conta de tempo); o som acompanha a velocidade com o tom (manter o tom é
- * time stretch — ainda não existe, e o interruptor diz isso).
+ * conta de tempo); o som acompanha a velocidade junto com o tom.
  */
 @Composable
 internal fun SpeedPanel(env: PanelEnv) {
@@ -92,30 +87,12 @@ internal fun SpeedPanel(env: PanelEnv) {
         }
         Text("${speedLabel(speed)} · ${clock(frames, store.project.fps)}", style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Accent)))
         Spacer(Modifier.height(10.dp))
-        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(AureaColors.Chip).padding(3.dp)) {
-            listOf(
-                Triple(CupertinoGlyph.ArrowLeftToLine, "Estender início", false),
-                Triple(CupertinoGlyph.Scissors, "Cortar início", true),
-                Triple(CupertinoGlyph.Scissors, "Cortar fim", false),
-                Triple(CupertinoGlyph.ArrowRightToLine, "Estender fim", false),
-            ).forEachIndexed { i, (glyph, label, flip) ->
-                val on = i == 3 // o que o motor faz: o início fica, o fim acompanha
-                Column(
-                    Modifier
-                        .weight(1f)
-                        .height(52.dp)
-                        .clip(RoundedCornerShape(9.dp))
-                        .background(if (on) AureaColors.AccentDim else androidx.compose.ui.graphics.Color.Transparent)
-                        .tocavel(onClick = { if (!on) store.comingSoon(label) }),
-                    verticalArrangement = Arrangement.Center,
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    CupertinoIcon(glyph, 17.dp, if (on) AureaColors.Accent else AureaColors.Text, Modifier.graphicsLayer { scaleX = if (flip) -1f else 1f })
-                    Spacer(Modifier.height(4.dp))
-                    Text(label, maxLines = 1, style = AureaType.Base.merge(TextStyle(fontSize = 10.5.sp, color = if (on) AureaColors.Accent else AureaColors.Muted)))
-                }
-            }
-        }
+        // O que a mudança de velocidade faz com a barra: o início fica onde está
+        // e o fim acompanha (é o que o motor faz — nada de escolha falsa aqui).
+        Text(
+            "O início da camada fica no lugar; o fim acompanha a nova velocidade.",
+            style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = AureaColors.Muted)),
+        )
         Spacer(Modifier.height(12.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             CupertinoIcon(CupertinoGlyph.Tortoise, 20.dp, AureaColors.Muted)
@@ -160,10 +137,10 @@ internal fun SpeedPanel(env: PanelEnv) {
         }
         Spacer(Modifier.height(14.dp))
         val remap by remember(store) { derivedStateOf { store.detail?.timeRemap ?: false } }
-        Text("Rampa de velocidade", style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.W700, color = AureaColors.Muted)))
+        Text("Acelerar e desacelerar no tempo", style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.W700, color = AureaColors.Muted)))
         Spacer(Modifier.height(6.dp))
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf(-1 to "Sem rampa", 1 to "Suave", 2 to "Herói", 3 to "Acelerar", 4 to "Desacelerar").forEach { (preset, label) ->
+            listOf(-1 to "Sem rampa", 1 to "Suave", 2 to "Lento no meio", 3 to "Acelerar", 4 to "Desacelerar").forEach { (preset, label) ->
                 val on = (preset == -1 && !remap)
                 Box(
                     Modifier
@@ -181,21 +158,20 @@ internal fun SpeedPanel(env: PanelEnv) {
             TimeRemapGraph(store)
             Spacer(Modifier.height(6.dp))
             Text(
-                "Curva de tempo ligada: o som e o vídeo seguem a mesma rampa, do mesmo trecho da mídia.",
+                "Com a rampa ligada, som e vídeo seguem a mesma mudança de velocidade.",
                 style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = AureaColors.Muted)),
             )
         }
         Spacer(Modifier.height(8.dp))
-        ShellToggle("Manter tom do áudio (em breve)") { store.comingSoon("Manter o tom") }
         if (kind == LayerType.Video.kind) {
             Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Reverso", modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+                Text("Passar de trás para frente", modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
                 AureaToggle(checked = reversed, onCheckedChange = { store.setLayerReversed(it) })
             }
             Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Câmera lenta", modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+                Text("Quadros na câmera lenta", modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(0 to "Repetir", 1 to "Mistura", 2 to "Movimento").forEach { (m, label) ->
+                    listOf(0 to "Repetir quadro", 1 to "Misturar", 2 to "Movimento suave").forEach { (m, label) ->
                         val on = frameBlend == m
                         Box(
                             Modifier.clip(RoundedCornerShape(8.dp)).background(if (on) AureaColors.AccentDim else AureaColors.Chip)
@@ -206,7 +182,6 @@ internal fun SpeedPanel(env: PanelEnv) {
                     }
                 }
             }
-            ShellToggle("Blur proporcional à velocidade (em breve)") { store.comingSoon("Blur proporcional") }
         }
     }
 }
@@ -219,20 +194,12 @@ private fun snapSpeed(s: Float): Float {
     return (s * 100f).roundToInt() / 100f
 }
 
-private fun speedLabel(s: Float): String = "%.2fx".format(s).replace('.', ',')
-
-@Composable
-private fun ShellToggle(label: String, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
-        AureaToggle(checked = false, onCheckedChange = { onClick() })
-    }
-}
+private fun speedLabel(s: Float): String = "${com.aurea.aurea.ui.ds.numeroPtBr(s, 2)}x"
 
 /**
  * SOM [A] (`audio_sheet.dart`): "Som" com o nível em dB, Mudo, Solo, Volume
  * (animável, com ◇), Ganho, Balanço e fades de igual potência — tudo ligado ao
- * mixer do motor (o mesmo que exporta). "Abaixar pela voz" ainda não existe.
+ * mixer do motor (o mesmo que exporta).
  */
 @Composable
 internal fun AudioPanel(env: PanelEnv) {
@@ -275,25 +242,25 @@ internal fun AudioPanel(env: PanelEnv) {
             unitsPerDp = 0.5f, min = 0f, max = 200f, gesture = "volume", store = store,
         ) { store.setAudioVolume(it / 100f) }
         AudioRuler(
-            label = "Ganho", value = { dbValue(store.detail?.audioGain ?: 1f) }, text = db(detail.audioGain),
-            unitsPerDp = 0.1f, min = -24f, max = 12f, gesture = "ganho", store = store,
+            label = "Reforço", value = { dbValue(store.detail?.audioGain ?: 1f) }, text = db(detail.audioGain),
+            unitsPerDp = 0.1f, min = -24f, max = 12f, gesture = "reforço", store = store,
         ) { store.setAudioGain(if (it <= -24f) 0f else 10f.pow(it / 20f)) }
         AudioRuler(
-            label = "Balanço", value = { (store.detail?.audioPan ?: 0f) * 100f }, text = pan(detail.audioPan),
+            label = "Esquerda e direita", value = { (store.detail?.audioPan ?: 0f) * 100f }, text = pan(detail.audioPan),
             unitsPerDp = 0.5f, min = -100f, max = 100f, gesture = "balanço", store = store,
         ) { store.setAudioPan(it / 100f) }
         val maxFade = max(0f, (detail.endFrame - detail.startFrame) / fps / 2f)
         AudioRuler(
-            label = "Fade de entrada", value = { (store.detail?.audioFadeIn ?: 0) / fps }, text = secs(detail.audioFadeIn / fps),
-            unitsPerDp = 0.02f, min = 0f, max = maxFade, gesture = "fade de entrada", store = store,
+            label = "Entrada suave", value = { (store.detail?.audioFadeIn ?: 0) / fps }, text = secs(detail.audioFadeIn / fps),
+            unitsPerDp = 0.02f, min = 0f, max = maxFade, gesture = "entrada suave", store = store,
         ) { store.setAudioFade(true, (it * fps).roundToInt()) }
         AudioRuler(
-            label = "Fade de saída", value = { (store.detail?.audioFadeOut ?: 0) / fps }, text = secs(detail.audioFadeOut / fps),
-            unitsPerDp = 0.02f, min = 0f, max = maxFade, gesture = "fade de saída", store = store,
+            label = "Saída suave", value = { (store.detail?.audioFadeOut ?: 0) / fps }, text = secs(detail.audioFadeOut / fps),
+            unitsPerDp = 0.02f, min = 0f, max = maxFade, gesture = "saída suave", store = store,
         ) { store.setAudioFade(false, (it * fps).roundToInt()) }
         Spacer(Modifier.height(6.dp))
         Text(
-            "O fade é de igual potência: fade reto de volume soa como um buraco no meio.",
+            "O volume sobe e desce de forma natural, sem buraco no meio do som.",
             style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, lineHeight = 14.85.sp, color = AureaColors.Muted)),
         )
         if (detail.kind == LayerType.Video.kind) {
@@ -308,13 +275,6 @@ internal fun AudioPanel(env: PanelEnv) {
                 Text("Extrair o áudio para uma camada", style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
             }
         }
-        Spacer(Modifier.height(14.dp))
-        Text("Abaixar pela voz", style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700, color = AureaColors.Muted)))
-        Spacer(Modifier.height(4.dp))
-        Text(
-            "A trilha desce quando a voz entra e volta quando ela para. Ainda não disponível.",
-            style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, lineHeight = 14.85.sp, color = AureaColors.Muted)),
-        )
     }
 }
 

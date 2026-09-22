@@ -117,6 +117,10 @@ struct AutosaveState {
     bool dirty = false;              ///< há alteração não gravada
     bool recoveryAvailable = false;  ///< há journal/recovery de sessão anterior
     u32  recoveryCommandCount = 0;
+    /// Sobe a cada `mark_dirty`. A gravação fora do lock só limpa o "sujo" se
+    /// ninguém mexeu entre a cópia e o fim da escrita (`mark_clean_if`) — sem
+    /// isso, uma edição feita durante o fsync ficaria marcada como salva.
+    u64  editGeneration = 0;
 };
 
 class Project {
@@ -210,8 +214,17 @@ public:
     // --- Estado ---------------------------------------------------------------
 
     [[nodiscard]] bool dirty() const noexcept { return autosave_.dirty; }
-    void mark_dirty() noexcept { autosave_.dirty = true; ++autosave_.commandsSinceRecovery; }
+    void mark_dirty() noexcept {
+        autosave_.dirty = true;
+        ++autosave_.commandsSinceRecovery;
+        ++autosave_.editGeneration;
+    }
     void mark_clean() noexcept { autosave_.dirty = false; }
+    [[nodiscard]] u64 edit_generation() const noexcept { return autosave_.editGeneration; }
+    /// Limpa só se nada mudou desde `generation` (ver AutosaveState).
+    void mark_clean_if(u64 generation) noexcept {
+        if (autosave_.editGeneration == generation) autosave_.dirty = false;
+    }
 
     [[nodiscard]] u64 revision() const noexcept { return revision_; }
     void touch() noexcept { ++revision_; }

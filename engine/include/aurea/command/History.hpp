@@ -30,8 +30,23 @@ class Timeline;
 
 class History {
 public:
-    /// Ações guardadas. Mais antigas saem primeiro.
-    static constexpr u32 kMaxEntries = 200;
+    /// Ações guardadas (§125: 1000). Mais antigas saem primeiro — pela
+    /// contagem ou pelo orçamento de bytes, o que vier antes.
+    static constexpr u32 kMaxEntries = 1000;
+    /// Orçamento padrão dos snapshots (§126). Uma composição de 500 camadas
+    /// com milhares de keyframes pesa MBs por snapshot; 1000 deles sem teto
+    /// seriam GBs — o OOM killer do Android antes do undo.
+    static constexpr u64 kDefaultBudgetBytes = 64ull * 1024 * 1024;
+
+    /// Orçamento de memória dos snapshots. A última ação sempre fica
+    /// desfazível, mesmo sozinha acima do teto.
+    void set_budget_bytes(u64 bytes) noexcept;
+    [[nodiscard]] u64 budget_bytes() const noexcept { return budgetBytes_; }
+    /// Bytes estimados guardados agora (antes + depois de todas as entradas).
+    [[nodiscard]] u64 bytes() const noexcept { return bytes_; }
+    /// Estimativa do tamanho em memória de uma composição (o que um snapshot
+    /// custa). Percorre as camadas; não aloca.
+    [[nodiscard]] static u64 estimate_bytes(const Composition& comp) noexcept;
 
     void clear() noexcept;
 
@@ -60,9 +75,17 @@ private:
         CompositionId comp{};
         std::unique_ptr<Composition> before;
         std::unique_ptr<Composition> after;   ///< preenchido no primeiro desfazer
+        u64 beforeBytes = 0;
+        u64 afterBytes = 0;
     };
 
+    /// Tira as entradas mais antigas até caber no orçamento (fica ≥ 1).
+    void enforce_budget() noexcept;
+    void erase_range(usize first, usize last) noexcept;
+
     std::vector<Entry> entries_;
+    u64 budgetBytes_ = kDefaultBudgetBytes;
+    u64 bytes_ = 0;
     usize cursor_ = 0;                ///< [0, cursor) aplicadas; [cursor, fim) refazíveis
     u32 groupDepth_ = 0;
     bool groupCaptured_ = false;

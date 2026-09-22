@@ -254,9 +254,44 @@ public:
     // =========================================================================
     [[nodiscard]] Status new_project(u32 width = 1920, u32 height = 1080,
                                      f64 fps = 30.0, const char* title = nullptr) noexcept;
+    /// Abre o projeto. Principal ilegível (truncado, CRC, lixo) → tenta o
+    /// `.tmp` (gravação interrompida antes do rename) e o `.bak` (versão
+    /// anterior) e guarda o principal ruim em `.corrompido`; nada válido →
+    /// ProjectCorrupted, e o projeto aberto antes continua aberto. Versão
+    /// futura → UnsupportedVersion, sem tentar cópias (abrir uma mais velha e
+    /// salvar por cima perderia o trabalho). O que foi preciso fazer fica em
+    /// `last_load_notice()`.
     [[nodiscard]] Status load_project(const char* path) noexcept;
+    /// Grava: copia o modelo sob o lock (encode) e faz a E/S com fsync FORA
+    /// dele. Uma gravação por vez; o "sujo" só é limpo se nada mudou durante
+    /// a escrita. Disco cheio → StorageFull, com o arquivo anterior intacto.
     [[nodiscard]] Status save_project(const char* path) noexcept;
     [[nodiscard]] Status save_project() noexcept;
+
+    /// Bits do que a última abertura precisou fazer (0 = abriu limpo). A UI
+    /// avisa em vez de esconder (§55, §120, §124).
+    enum LoadNotice : u32 {
+        kLoadRecoveredCopy = 1u << 0,   ///< principal ilegível: abriu o .tmp ou o .bak
+        kLoadPartial       = 1u << 1,   ///< abriu com seções faltando (a timeline veio)
+        kLoadOlderFormat   = 1u << 2,   ///< formato antigo: cópia guardada antes de regravar
+        kLoadMissingMedia  = 1u << 3,   ///< imagem/fonte/modelo 3D ausente: fica o espaço, religar
+    };
+    [[nodiscard]] u32 last_load_notice() const noexcept { return lastLoadNotice_.load(std::memory_order_relaxed); }
+    /// Assets que a última abertura não conseguiu ler (imagens + modelos + fontes).
+    [[nodiscard]] u32 last_load_missing_assets() const noexcept { return lastLoadMissing_.load(std::memory_order_relaxed); }
+
+    /// Medidas das gravações (diagnóstico §2/§57): o tempo com o lock do modelo
+    /// preso é o que a UI pode sentir; o da escrita não trava ninguém.
+    struct SaveStats {
+        u64  lastLockNs = 0;     ///< encode sob o lock do modelo
+        u64  lastWriteNs = 0;    ///< escrita + fsync + rename, sem lock
+        u64  maxLockNs = 0;
+        u64  lastBytes = 0;
+        u32  saves = 0;
+        u32  failures = 0;
+        Errc lastError = Errc::Ok;
+    };
+    [[nodiscard]] SaveStats save_stats() const noexcept;
     [[nodiscard]] const AutosaveState& autosave_state() const noexcept;
     [[nodiscard]] Status recover_session() noexcept;
     void discard_recovery() noexcept;
@@ -937,6 +972,20 @@ private:
     std::atomic<EngineState> state_{EngineState::Uninitialized};
     Errc               lastError_ = Errc::Ok;
     char               lastErrorDetail_[128]{};
+    /// Guarda o último erro (código padronizado + texto sem dado do usuário) e
+    /// loga com o nome §115.
+    void set_last_error(Status s, const char* context) noexcept;
+
+    // --- Gravação / abertura (Fase 8G) ---------------------------------------
+    std::mutex         saveMutex_;              ///< uma gravação por vez
+    mutable std::mutex saveStatsMutex_;
+    SaveStats          saveStats_{};
+    /// O arquivo principal do projeto aberto estava ruim (abriu da cópia ou
+    /// parcial): a próxima gravação NÃO o gira para `.bak` — senão o lixo
+    /// tomaria o lugar do último estado válido. Sob modelMutex_.
+    bool               mainFileSuspect_ = false;
+    std::atomic<u32>   lastLoadNotice_{0};
+    std::atomic<u32>   lastLoadMissing_{0};
 
     DeviceCapabilities caps_{};
     JobSystem          jobs_{};

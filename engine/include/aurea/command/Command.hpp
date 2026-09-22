@@ -26,6 +26,7 @@
 #include "aurea/bridge/BridgePods.hpp"
 
 #include <cstddef>
+#include <cstring>
 #include <type_traits>
 
 namespace aurea {
@@ -254,6 +255,13 @@ struct ExportRequestPayload { u32 codec; u32 width; u32 height; f64 fps; u32 bit
 /// Comando. União de campos por tipo — `union` porque não há construtor nem
 /// destrutor a rodar, e o bloco inteiro é memcpy-ável pela bridge.
 struct Command {
+    /// Tudo zerado, payload inteiro incluído. O `raw = 0` da união só zera 8
+    /// dos 64 bytes: um comando montado em C++ campo a campo (motor, testes,
+    /// recuperação) levava o resto do payload com lixo da pilha — um `z` de
+    /// posição que ninguém escreveu virava NaN no transform (achado pelo fuzz
+    /// da Fase 8, §134). Continua trivialmente copiável (memcpy pela bridge).
+    Command() noexcept { std::memset(static_cast<void*>(this), 0, sizeof(*this)); }
+
     CommandType type = CommandType::Nop;
 
     /// Payload de string: deslocamento no blob do bloco, não ponteiro.

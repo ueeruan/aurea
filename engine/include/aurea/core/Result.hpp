@@ -58,7 +58,23 @@ enum class Errc : i32 {
     Cancelled,
     Timeout,
     ShuttingDown,
+
+    // Fase 8 (estabilidade, §115). No FIM: o número cru atravessa a bridge e o
+    // Kotlin (EditorStore.humanError) casa por número — nada é reordenado.
+    StorageFull,          ///< TEMP_STORAGE_FULL: sem espaço (ENOSPC) ao gravar projeto/cache/temporário
+    AssetCorrupted,       ///< ASSET_CORRUPTED: mídia, fonte ou modelo 3D ilegível
+    ProjectCorrupted,     ///< PROJECT_CORRUPTED: nenhuma cópia válida do projeto (principal, .tmp, .bak)
+    EncoderUnavailable,   ///< ENCODER_UNAVAILABLE: o aparelho não tem encoder para o pedido
 };
+
+// Contrato com a UI (EditorStore.kt): os números abaixo são lidos lá.
+static_assert(static_cast<i32>(Errc::CorruptData) == 11);
+static_assert(static_cast<i32>(Errc::UnsupportedVersion) == 12);
+static_assert(static_cast<i32>(Errc::UnsupportedFormat) == 17);
+static_assert(static_cast<i32>(Errc::OutOfDeviceMemory) == 20);
+static_assert(static_cast<i32>(Errc::ShuttingDown) == 27);
+static_assert(static_cast<i32>(Errc::StorageFull) == 28);
+static_assert(static_cast<i32>(Errc::EncoderUnavailable) == 31);
 
 [[nodiscard]] constexpr std::string_view to_string(Errc e) noexcept {
     switch (e) {
@@ -90,8 +106,34 @@ enum class Errc : i32 {
         case Errc::Cancelled:             return "cancelado";
         case Errc::Timeout:               return "tempo esgotado";
         case Errc::ShuttingDown:          return "encerrando";
+        case Errc::StorageFull:           return "armazenamento cheio";
+        case Errc::AssetCorrupted:        return "arquivo de midia corrompido";
+        case Errc::ProjectCorrupted:      return "projeto corrompido";
+        case Errc::EncoderUnavailable:    return "encoder indisponivel";
     }
     return "erro desconhecido";
+}
+
+/// Nome padronizado (§115) para log e diagnóstico. Os seis da especificação
+/// saem com o nome fixo, alguns vizinhos úteis também; o resto é "ERRC_OTHER"
+/// (o número cru vai junto no log). Nunca leva texto do usuário (caminho, título).
+[[nodiscard]] constexpr std::string_view error_code_name(Errc e) noexcept {
+    switch (e) {
+        case Errc::Ok:                 return "OK";
+        case Errc::OutOfDeviceMemory:  return "GPU_OUT_OF_MEMORY";
+        case Errc::DecodeFailed:       return "DECODER_FAILED";
+        case Errc::EncoderUnavailable: return "ENCODER_UNAVAILABLE";
+        case Errc::AssetCorrupted:     return "ASSET_CORRUPTED";
+        case Errc::ProjectCorrupted:   return "PROJECT_CORRUPTED";
+        case Errc::StorageFull:        return "TEMP_STORAGE_FULL";
+        case Errc::OutOfMemory:        return "OUT_OF_MEMORY";
+        case Errc::IoError:            return "IO_ERROR";
+        case Errc::UnsupportedVersion: return "UNSUPPORTED_VERSION";
+        case Errc::UnsupportedFormat:  return "UNSUPPORTED_FORMAT";
+        case Errc::MediaSourceMissing: return "MEDIA_MISSING";
+        case Errc::DeviceLost:         return "GPU_DEVICE_LOST";
+        default:                       return "ERRC_OTHER";
+    }
 }
 
 [[nodiscard]] constexpr bool ok(Errc e) noexcept { return e == Errc::Ok; }

@@ -139,8 +139,11 @@ public:
 
     /// Resolve o offset de string de um comando. Vale só durante a drenagem
     /// do lote em que o comando foi escrito.
+    /// Fora da arena → nullptr. (Antes: `offset + length` em u32 dava a volta
+    /// com valores grandes e passava no teste, e o caso inválido devolvia ""
+    /// — de onde o chamador copiava `length` bytes: leitura fora do buffer.)
     [[nodiscard]] const char* string_at(u32 offset, u32 length) const noexcept {
-        if (offset + length >= kStringBlobSize) return "";
+        if (offset >= kStringBlobSize || length >= kStringBlobSize - offset) return nullptr;
         return stringBlob_ + offset;
     }
 

@@ -39,6 +39,17 @@ endif()
 option(AUREA_BUILD_TESTS      "Compila os testes do motor"      ON)
 option(AUREA_ENABLE_SANITIZE  "ASan/UBSan no host"              OFF)
 
+# ASan no host Windows (§136): o MSVC tem AddressSanitizer (não tem UBSan).
+# Vale para TODOS os alvos (núcleo, Vulkan, terceiros e testes) — um alvo sem
+# instrumentação no meio esconde a escrita fora do buffer que ele fizer.
+# Build separado: engine/build/asan. Para rodar, a DLL do ASan
+# (clang_rt.asan_dynamic-x86_64.dll, pasta bin do MSVC) precisa estar no PATH.
+if(AUREA_ENABLE_SANITIZE AND MSVC)
+    # /bigobj: com a instrumentação o harfbuzz.cc passa do limite de seções do .obj.
+    add_compile_options(/fsanitize=address /Zi /bigobj)
+    add_link_options(/INCREMENTAL:NO /DEBUG)
+endif()
+
 include(cmake/AureaShaders.cmake)
 
 # -----------------------------------------------------------------------------
@@ -63,6 +74,7 @@ set(AUREA_CORE_SOURCES
     src/timeline/Timeline.cpp
     src/project/Project.cpp
     src/project/Serialization.cpp
+    src/project/FileIO.cpp
     src/project/Presets.cpp
     src/render/GPUCapabilities.cpp
     src/render/FrameGraph.cpp
@@ -189,7 +201,7 @@ target_compile_options(aurea_core PRIVATE
     $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:MSVC>>:/O2>
 )
 
-if(AUREA_ENABLE_SANITIZE AND NOT ANDROID AND NOT AUREA_PLATFORM_IOS)
+if(AUREA_ENABLE_SANITIZE AND NOT MSVC AND NOT ANDROID AND NOT AUREA_PLATFORM_IOS)
     target_compile_options(aurea_core PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
     target_link_options(aurea_core PRIVATE -fsanitize=address,undefined)
 endif()

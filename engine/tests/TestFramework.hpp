@@ -54,6 +54,8 @@ public:
     [[nodiscard]] u32 checks() const noexcept { return checks_; }
 
 private:
+    // A Fase 8 soma suítes em paralelo; acima do teto o `add` conta o
+    // descarte e o run_all falha (nada some em silêncio).
     static constexpr u32 kMax = 4096;
     TestCase tests_[kMax]{};
     u32 count_ = 0;

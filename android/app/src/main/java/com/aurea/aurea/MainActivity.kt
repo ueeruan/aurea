@@ -40,4 +40,20 @@ class MainActivity : ComponentActivity() {
         store.onEnterBackground()
         super.onStop()
     }
+
+    /**
+     * Pressão de memória do sistema (Fase 8B §13): o nível vai para o motor,
+     * que solta cache na ordem do spec. Nunca o projeto.
+     */
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        store.onTrimMemory(level)
+    }
+
+    @Deprecated("Android < 14 ainda chama; equivale a TRIM_MEMORY_COMPLETE")
+    override fun onLowMemory() {
+        @Suppress("DEPRECATION")
+        super.onLowMemory()
+        store.onTrimMemory(EditorStore.TRIM_COMPLETE)
+    }
 }

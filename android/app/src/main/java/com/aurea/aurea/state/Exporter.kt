@@ -117,6 +117,10 @@ class Exporter internal constructor(
                         message = "Não deu para exportar: ${progress.message.ifBlank { "erro ${progress.result}" }}.",
                     )
                 }
+                // Temporário com dono (Fase 8B §52): falhou ou cancelou, o
+                // arquivo parcial sai agora — não espera o próximo export.
+                // Sucesso: `publish` já apagou depois de copiar para a galeria.
+                if (progress.result != 0) withContext(Dispatchers.IO) { file.delete() }
                 break
             }
         }

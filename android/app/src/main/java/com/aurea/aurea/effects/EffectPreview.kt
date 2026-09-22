@@ -55,6 +55,9 @@ class EffectPreviewStore(
     /** Quantas prévias já estão em memória (o painel de desempenho mostra). */
     fun residentCount(): Int = memory.size()
 
+    /** Pressão de memória (Fase 8B): solta as prévias em memória; refeitas sob demanda. */
+    fun trimMemory() = memory.evictAll()
+
     fun clear() {
         memory.evictAll()
         dir.listFiles()?.forEach { it.delete() }

@@ -986,6 +986,90 @@ AUREA_JNI jboolean AUREA_FN(nativeClearTextSpans)(JNIEnv*, jclass, jlong handle,
                ? JNI_TRUE : JNI_FALSE;
 }
 
+AUREA_JNI jstring AUREA_FN(nativeLayerMediaPath)(JNIEnv* env, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return nullptr;
+    const std::string p = c->engine.layer_media_path(static_cast<u64>(layer));
+    return p.empty() ? nullptr : env->NewStringUTF(p.c_str());
+}
+
+/// Legendas: palavras (texto + [início, fim] em segundos da mídia) e opções.
+/// ints = modo, palavras, caracteres, linhas, estilo, destaque, maiúsculas,
+/// quebrar nas pausas, tirar vícios; floats = pausa, y, tamanho, cor (rgb).
+AUREA_JNI jint AUREA_FN(nativeCreateCaptions)(JNIEnv* env, jclass, jlong handle, jlong layer, jobjectArray texts, jdoubleArray times,
+                                             jintArray ints, jfloatArray floats) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !texts || !times || !ints || !floats) return -1;
+    const jsize n = env->GetArrayLength(texts);
+    if (env->GetArrayLength(times) < n * 2 || env->GetArrayLength(ints) < 9 || env->GetArrayLength(floats) < 6) return -1;
+    std::vector<f64> t(static_cast<usize>(n) * 2);
+    env->GetDoubleArrayRegion(times, 0, n * 2, t.data());
+    std::vector<text::CaptionWord> words(static_cast<usize>(n));
+    for (jsize i = 0; i < n; ++i) {
+        auto js = static_cast<jstring>(env->GetObjectArrayElement(texts, i));
+        const char* s = js ? env->GetStringUTFChars(js, nullptr) : nullptr;
+        words[static_cast<usize>(i)] = text::CaptionWord{s ? s : "", t[static_cast<usize>(i) * 2], t[static_cast<usize>(i) * 2 + 1]};
+        if (s) env->ReleaseStringUTFChars(js, s);
+        if (js) env->DeleteLocalRef(js);
+    }
+    jint iv[9];
+    jfloat fv[6];
+    env->GetIntArrayRegion(ints, 0, 9, iv);
+    env->GetFloatArrayRegion(floats, 0, 6, fv);
+    text::CaptionOptions o;
+    o.mode = static_cast<u32>(std::max(0, iv[0]));
+    o.maxWords = static_cast<u32>(std::max(1, iv[1]));
+    o.maxChars = static_cast<u32>(std::max(4, iv[2]));
+    o.maxLines = static_cast<u32>(std::max(1, iv[3]));
+    o.style = static_cast<u32>(std::max(0, iv[4]));
+    o.highlight = iv[5] != 0;
+    o.uppercase = iv[6] != 0;
+    o.breakOnPause = iv[7] != 0;
+    o.pauseSec = fv[0];
+    o.posY = fv[1];
+    o.sizeFrac = fv[2];
+    o.highlightColor = Vec4{fv[3], fv[4], fv[5], 1.0f};
+    if (iv[8] != 0) words = text::remove_filler_words(words);
+    auto r = c->engine.create_captions(static_cast<u64>(layer), words, o);
+    return r.ok() ? static_cast<jint>(*r) : -static_cast<jint>(r.status().code());
+}
+
+AUREA_JNI jint AUREA_FN(nativeRemoveCaptions)(JNIEnv*, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    return c ? static_cast<jint>(c->engine.remove_captions(static_cast<u64>(layer))) : 0;
+}
+
+AUREA_JNI jint AUREA_FN(nativeCaptionCount)(JNIEnv*, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    return c ? static_cast<jint>(c->engine.caption_count(static_cast<u64>(layer))) : 0;
+}
+
+/// SRT → "início\tfim\tpalavra" por linha.
+AUREA_JNI jstring AUREA_FN(nativeParseSrt)(JNIEnv* env, jclass, jstring srt) {
+    if (!srt) return nullptr;
+    const char* s = env->GetStringUTFChars(srt, nullptr);
+    const std::vector<text::CaptionWord> w = text::parse_srt(s ? s : "");
+    if (s) env->ReleaseStringUTFChars(srt, s);
+    std::string out;
+    char buf[64];
+    for (const text::CaptionWord& x : w) {
+        std::snprintf(buf, sizeof buf, "%.3f\t%.3f\t", x.start, x.end);
+        out += buf;
+        out += x.text;
+        out += '\n';
+    }
+    return env->NewStringUTF(out.c_str());
+}
+
+/// Vícios de linguagem: o mesmo critério do motor, para a transcrição marcar.
+AUREA_JNI jboolean AUREA_FN(nativeIsFillerWord)(JNIEnv* env, jclass, jstring word) {
+    if (!word) return JNI_FALSE;
+    const char* s = env->GetStringUTFChars(word, nullptr);
+    const bool f = s && text::is_filler_word(s);
+    if (s) env->ReleaseStringUTFChars(word, s);
+    return f ? JNI_TRUE : JNI_FALSE;
+}
+
 AUREA_JNI jfloatArray AUREA_FN(nativeQueryTextAnimators)(JNIEnv* env, jclass, jlong handle, jlong layer) {
     NativeContext* c = ctx_of(handle);
     if (!c) return nullptr;

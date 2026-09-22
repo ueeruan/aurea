@@ -24,6 +24,7 @@
 // =============================================================================
 #pragma once
 
+#include "aurea/text/Captions.hpp"
 #include "aurea/export/ExportSink.hpp"
 #include "aurea/scene3d/Importer.hpp"
 #include "aurea/scene3d/Text3D.hpp"
@@ -305,6 +306,18 @@ public:
     bool toggle_text_anim_key(u64 layerId, u32 index, u32 param) noexcept;
     /// Preset nativo (substitui os animadores), a partir do início da camada.
     bool apply_text_preset(u64 layerId, u32 preset) noexcept;
+
+    /// Arquivo de mídia da camada de vídeo/áudio (caminho ou content://), para
+    /// o provedor de transcrição ler o áudio. Vazio = não tem mídia.
+    [[nodiscard]] std::string layer_media_path(u64 layerId) noexcept;
+    /// Legendas da fala da camada `sourceLayer` (palavras em segundos da
+    /// mídia): camadas de texto no tempo da fala, num passo de desfazer.
+    /// Substitui as legendas anteriores dessa camada. Devolve quantas criou.
+    [[nodiscard]] Result<u32> create_captions(u64 sourceLayer, const std::vector<text::CaptionWord>& words,
+                                              const text::CaptionOptions& options) noexcept;
+    /// Tira as legendas geradas da camada. Devolve quantas tirou.
+    u32 remove_captions(u64 sourceLayer) noexcept;
+    [[nodiscard]] u32 caption_count(u64 sourceLayer) noexcept;
     /// "família\tpeso\titálico\tcaminho real" da camada de texto (vazio = não é texto).
     [[nodiscard]] std::string text_font(u64 layerId) noexcept;
 
@@ -728,6 +741,7 @@ private:
     std::unordered_map<u64, std::shared_ptr<const scene3d::SceneAsset>> models_;
     static std::shared_ptr<const scene3d::SceneAsset> model_lookup(void* self, AssetId id);
     [[nodiscard]] std::string resolve_asset_path(const std::string& stored) const;
+    [[nodiscard]] u32 caption_count_locked(const Composition& comp, u64 sourceLayer) const noexcept;
     [[nodiscard]] std::string store_asset_path(const std::string& absolute) const;
 
     std::vector<u64> selection_;

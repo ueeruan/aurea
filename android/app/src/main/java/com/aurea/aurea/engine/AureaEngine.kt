@@ -348,6 +348,13 @@ class AureaEngine private constructor() {
         nativeSetTextSpan(nativeHandle, layer, start, end, hasColor, r, g, b, weight, scale)
     fun clearTextSpans(layer: Long, start: Int, end: Int): Boolean = nativeClearTextSpans(nativeHandle, layer, start, end)
     fun queryTextAnimators(layer: Long): FloatArray? = nativeQueryTextAnimators(nativeHandle, layer)
+    fun layerMediaPath(layer: Long): String? = nativeLayerMediaPath(nativeHandle, layer)
+    fun createCaptions(layer: Long, texts: Array<String>, times: DoubleArray, ints: IntArray, floats: FloatArray): Int =
+        nativeCreateCaptions(nativeHandle, layer, texts, times, ints, floats)
+    fun removeCaptions(layer: Long): Int = nativeRemoveCaptions(nativeHandle, layer)
+    fun captionCount(layer: Long): Int = nativeCaptionCount(nativeHandle, layer)
+    fun parseSrt(srt: String): String? = nativeParseSrt(srt)
+    fun isFillerWord(word: String): Boolean = nativeIsFillerWord(word)
     fun addTextAnimator(layer: Long, props: Int): Int = nativeAddTextAnimator(nativeHandle, layer, props)
     fun removeTextAnimator(layer: Long, index: Int): Boolean = nativeRemoveTextAnimator(nativeHandle, layer, index)
     fun setTextAnimator(layer: Long, index: Int, v: FloatArray): Boolean = nativeSetTextAnimator(nativeHandle, layer, index, v)
@@ -490,6 +497,12 @@ class AureaEngine private constructor() {
     private external fun nativeSetTextSpan(handle: Long, layer: Long, start: Int, end: Int, hasColor: Boolean, r: Float, g: Float, b: Float, weight: Int, scale: Float): Boolean
     private external fun nativeClearTextSpans(handle: Long, layer: Long, start: Int, end: Int): Boolean
     private external fun nativeQueryTextAnimators(handle: Long, layer: Long): FloatArray?
+    private external fun nativeLayerMediaPath(handle: Long, layer: Long): String?
+    private external fun nativeCreateCaptions(handle: Long, layer: Long, texts: Array<String>, times: DoubleArray, ints: IntArray, floats: FloatArray): Int
+    private external fun nativeRemoveCaptions(handle: Long, layer: Long): Int
+    private external fun nativeCaptionCount(handle: Long, layer: Long): Int
+    private external fun nativeParseSrt(srt: String): String?
+    private external fun nativeIsFillerWord(word: String): Boolean
     private external fun nativeAddTextAnimator(handle: Long, layer: Long, props: Int): Int
     private external fun nativeRemoveTextAnimator(handle: Long, layer: Long, index: Int): Boolean
     private external fun nativeSetTextAnimator(handle: Long, layer: Long, index: Int, v: FloatArray): Boolean

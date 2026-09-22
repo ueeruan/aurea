@@ -120,6 +120,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     private val engine = AureaEngine.create(app)
 
+    /** Legendas automáticas (transcrição + camadas); ver `CaptionsState`. */
+    val captions = com.aurea.aurea.captions.CaptionsState(app, engine, viewModelScope) { refreshNow() }
+
     /** Export (tela Exportar). O motor renderiza; aqui só acompanha e publica. */
     val exporter = Exporter(app, engine, viewModelScope)
     private val batch = CommandBatch(engine)

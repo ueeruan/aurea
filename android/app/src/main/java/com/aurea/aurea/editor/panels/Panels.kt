@@ -45,6 +45,7 @@ enum class EditorPanel {
     Echo,          // eco e rgb no tempo
     Tracking,      // rastreio de ponto / estabilização
     Element3D,     // ambiente 3D (HDRI)
+    Captions,      // legendas automáticas da fala
 }
 
 /**
@@ -107,6 +108,7 @@ fun PanelContent(
         EditorPanel.Echo -> "Eco e rastro"
         EditorPanel.Tracking -> "Rastreio"
         EditorPanel.Element3D -> "Elemento 3D"
+        EditorPanel.Captions -> "Legendas"
     }
 
     Column(modifier.fillMaxSize().background(AureaColors.EditorPanel)) {
@@ -129,6 +131,7 @@ fun PanelContent(
                     EditorPanel.Echo -> EchoPanel(env)
                     EditorPanel.Tracking -> TrackingPanel(env)
                     EditorPanel.Element3D -> Element3DPanel(env)
+                    EditorPanel.Captions -> CaptionsPanel(env)
                 }
             }
         }

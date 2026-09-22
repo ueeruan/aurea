@@ -3173,6 +3173,120 @@ bool Engine::apply_text_preset(u64 layerId, u32 preset) noexcept {
     return ok;
 }
 
+std::string Engine::layer_media_path(u64 layerId) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || (l->kind != LayerKind::Video && l->kind != LayerKind::Audio)) return {};
+    const Asset* a = project_->asset(l->source);
+    return a ? resolve_asset_path(a->sourcePath) : std::string{};
+}
+
+namespace {
+/// Tira as legendas de `src` (índices de trás para a frente).
+u32 drop_captions(Composition& comp, u64 src) {
+    std::vector<LayerId> ids;
+    for (u32 i = 0; i < comp.order().size(); ++i) {
+        const LayerId id = comp.order().at(i);
+        const Layer* l = comp.layer(id);
+        if (l && l->kind == LayerKind::Text && l->text.captionSource == src) ids.push_back(id);
+    }
+    for (const LayerId id : ids) comp.remove_layer(id);
+    return static_cast<u32>(ids.size());
+}
+} // namespace
+
+Result<u32> Engine::create_captions(u64 sourceLayer, const std::vector<text::CaptionWord>& words,
+                                    const text::CaptionOptions& opt) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp) return Status{Errc::InvalidState, "nenhum projeto aberto"};
+    const Layer* src = comp->layer(LayerId::unpack(sourceLayer));
+    if (!src || (src->kind != LayerKind::Video && src->kind != LayerKind::Audio)) return Status{Errc::NotFound, "camada sem fala"};
+    if (!text::default_font()) return Status{Errc::NotSupported, "nenhuma fonte disponivel neste aparelho"};
+    const std::vector<text::CaptionGroup> groups = text::group_captions(words, opt);
+    if (groups.empty()) return Status{Errc::InvalidArgument, "nenhuma palavra"};
+    history_.before_mutation(*comp, project_->timeline().current(), "gerar legendas");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    const f64 fps = comp->fps();
+    // Segundo da mídia → quadro da timeline: a MESMA conta de tempo da fonte
+    // (velocidade, reverso e remapeamento inclusos), procurada quadro a quadro.
+    const i64 s0 = src->start.value, s1 = std::max(src->start.value + 1, src->end.value);
+    std::vector<f64> srcSec(static_cast<usize>(s1 - s0));
+    for (i64 f = s0; f < s1; ++f) srcSec[static_cast<usize>(f - s0)] = src->source_frame(FrameIndex{f}) / fps;
+    const f64 half = 0.5 / fps;
+    auto frame_of = [&](f64 sec) -> i64 {
+        for (usize i = 0; i < srcSec.size(); ++i) if (srcSec[i] + half >= sec) return s0 + static_cast<i64>(i);
+        return -1;   // depois do fim da camada
+    };
+    const u64 key = sourceLayer;
+    drop_captions(*comp, key);
+    const u32 shortSide = std::min(comp->width(), comp->height());
+    const f32 posY = std::clamp(opt.posY, 0.1f, 0.9f);
+    u32 made = 0;
+    for (usize g = 0; g < groups.size(); ++g) {
+        const text::CaptionGroup& cg = groups[g];
+        const i64 a = frame_of(cg.start);
+        if (a < 0) break;
+        // Até a próxima legenda (sem buraco pequeno) ou o fim da fala + 8 quadros.
+        i64 b = frame_of(cg.end);
+        if (b < 0) b = s1;
+        b = std::max(b + std::min<i64>(8, static_cast<i64>(std::lround(fps * 0.25))), a + 1);
+        if (g + 1 < groups.size()) {
+            const i64 n = frame_of(groups[g + 1].start);
+            if (n >= 0 && (n < b || n - b < static_cast<i64>(std::lround(fps * 0.3)))) b = std::max(n, a + 1);
+        }
+        b = std::min(b, s1);
+        if (b <= a) continue;
+        const LayerId lid = comp->add_layer(LayerKind::Text, "Legenda " + std::to_string(made + 1));
+        Layer* l = comp->layer(lid);
+        if (!l) break;
+        l->text.content = cg.text;
+        l->text.captionSource = key;
+        l->start = FrameIndex{a};
+        l->end = FrameIndex{b};
+        std::vector<i64> wf;
+        for (u32 w = 0; w < cg.count; ++w) {
+            const i64 f = frame_of(words[cg.first + w].start);
+            wf.push_back(f < 0 ? b - a : f - a);
+        }
+        text::apply_caption_style(opt, shortSide, l->text, l->tracks, wf, b - a);
+        l->transform.position = Vec3{static_cast<f32>(comp->width()) * 0.5f, static_cast<f32>(comp->height()) * posY, 0.0f};
+        recenter_text(*l);
+        ++made;
+    }
+    project_->mark_dirty();
+    request_render();
+    return made;
+}
+
+u32 Engine::remove_captions(u64 sourceLayer) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp || caption_count_locked(*comp, sourceLayer) == 0) return 0;
+    history_.before_mutation(*comp, project_->timeline().current(), "remover legendas");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    const u32 n = drop_captions(*comp, sourceLayer);
+    project_->mark_dirty();
+    request_render();
+    return n;
+}
+
+u32 Engine::caption_count_locked(const Composition& comp, u64 sourceLayer) const noexcept {
+    u32 n = 0;
+    for (u32 i = 0; i < comp.order().size(); ++i) {
+        const Layer* l = comp.layer(comp.order().at(i));
+        n += l && l->kind == LayerKind::Text && l->text.captionSource == sourceLayer;
+    }
+    return n;
+}
+
+u32 Engine::caption_count(u64 sourceLayer) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    return comp ? caption_count_locked(*comp, sourceLayer) : 0;
+}
+
 std::string Engine::text_font(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;

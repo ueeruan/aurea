@@ -11,6 +11,10 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -20,7 +24,6 @@ import com.aurea.aurea.ui.theme.AureaType
 
 private val LayerSeconds = listOf(2, 3, 5)
 private val Themes = listOf("Escuro", "Claro", "Sistema")
-private val Transcription = listOf("Automático", "Nuvem", "No aparelho")
 private val Engine3D = listOf("Automatico", "Sempre GPU", "Sempre CPU")
 private val Quality3D = listOf("Automatica", "Maxima", "Equilibrada", "Leve")
 
@@ -47,6 +50,8 @@ private fun shortResolution(r: Int) = when (r) {
 @Composable
 internal fun SettingsTab(store: EditorStore, vm: HomeViewModel, listState: LazyListState, bottomBar: Dp) {
     val soon: (String) -> Unit = { store.comingSoon(it) }
+    var keyDialog by remember { mutableStateOf(false) }
+    if (keyDialog) GroqKeyDialog(store, onDismiss = { keyDialog = false })
     LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize(),
@@ -87,8 +92,11 @@ internal fun SettingsTab(store: EditorStore, vm: HomeViewModel, listState: LazyL
             Spacer(Modifier.height(26.dp))
             GroupHeader("Legendas")
             Group {
-                SegmentedRow("Transcrição automática", Transcription, Transcription[0], { it }) { soon("Legendas") }
-                GroupNote("Com internet, na nuvem; sem, no aparelho.")
+                TapRow(
+                    "Chave da Groq",
+                    if (store.captions.hasGroqKey) "Configurada — toque para trocar ou remover" else "Não configurada — toque para colocar",
+                ) { keyDialog = true }
+                GroupNote("A chave fica só neste aparelho, criptografada. O áudio só é enviado à Groq quando você toca em Gerar legendas; sem chave, dá para usar um arquivo SRT.")
             }
         }
         item(key = "exportacao") {
@@ -119,4 +127,38 @@ internal fun SettingsTab(store: EditorStore, vm: HomeViewModel, listState: LazyL
             }
         }
     }
+}
+
+/** Colar/trocar/remover a chave da Groq (guardada cifrada, nunca mostrada de volta). */
+@Composable
+private fun GroqKeyDialog(store: EditorStore, onDismiss: () -> Unit) {
+    var key by remember { mutableStateOf("") }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Chave da Groq") },
+        text = {
+            androidx.compose.foundation.layout.Column {
+                Text("Crie a chave em console.groq.com e cole aqui. Ela fica só neste aparelho.", style = HomeType.Note)
+                Spacer(Modifier.height(12.dp))
+                androidx.compose.material3.OutlinedTextField(
+                    value = key,
+                    onValueChange = { key = it },
+                    singleLine = true,
+                    placeholder = { Text("gsk_…") },
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                )
+            }
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(enabled = key.isNotBlank(), onClick = { store.captions.setGroqKey(key); onDismiss() }) { Text("Salvar") }
+        },
+        dismissButton = {
+            androidx.compose.foundation.layout.Row {
+                if (store.captions.hasGroqKey) {
+                    androidx.compose.material3.TextButton(onClick = { store.captions.clearGroqKey(); onDismiss() }) { Text("Remover") }
+                }
+                androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Cancelar") }
+            }
+        },
+    )
 }

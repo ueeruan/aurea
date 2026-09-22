@@ -9,6 +9,9 @@
 #include "aurea/Engine.hpp"
 #include "aurea/audio/Audio.hpp"
 #include "aurea/core/Time.hpp"
+#include "aurea/project/Project.hpp"
+#include "aurea/text/TextAnimator.hpp"
+#include "aurea/timeline/Composition.hpp"
 
 #include <chrono>
 #include <cmath>
@@ -450,5 +453,109 @@ AUREA_TEST(Audio, WaveformPeaksAreComputedOnceAndServedAtAnyZoom) {
     }
     AUREA_CHECK_EQ(e.query_waveform(*id, 30.0, 1.0, 60, w.data()), 60u);
     AUREA_CHECK(std::abs(static_cast<int>(w[10]) - 180) <= 3);
+    e.shutdown();
+}
+
+AUREA_TEST(Audio, CaptionsGroupBreakAndParse) {
+    using text::CaptionWord;
+    std::vector<CaptionWord> w = {
+        {" Olá", 0.0, 0.3}, {"pessoal,", 0.3, 0.7}, {"hum", 0.8, 1.0}, {"hoje", 1.0, 1.3}, {"vamos", 1.3, 1.6},
+        {"editar.", 1.6, 2.0}, {"Depois", 3.5, 3.8}, {"da", 3.8, 3.9}, {"pausa", 3.9, 4.3},
+    };
+    const auto clean = text::remove_filler_words(w);
+    AUREA_CHECK_EQ(clean.size(), 8u);
+    text::CaptionOptions o;
+    o.maxWords = 3;
+    auto g = text::group_captions(clean, o);
+    // "Olá pessoal, hoje" | "vamos editar." (fim de frase) | pausa de 1,5 s | "Depois da pausa"
+    AUREA_CHECK_EQ(g.size(), 3u);
+    AUREA_CHECK_EQ(g[0].text, std::string("Olá pessoal, hoje"));   // cabe em 18 caracteres
+    o.maxChars = 12;
+    AUREA_CHECK_EQ(text::group_captions(clean, o)[0].text, std::string("Olá pessoal,\nhoje"));
+    o.maxChars = 18;
+    AUREA_CHECK_EQ(g[1].text, std::string("vamos editar."));
+    AUREA_CHECK(std::fabs(g[2].start - 3.5) < 1e-9 && g[2].count == 3);
+    o.uppercase = true;
+    o.mode = 1;
+    g = text::group_captions(clean, o);
+    AUREA_CHECK_EQ(g.size(), 8u);
+    AUREA_CHECK_EQ(g[0].text, std::string("OLÁ"));
+    const auto srt = text::parse_srt("1\r\n00:00:01,000 --> 00:00:03,000\r\n<i>Bom dia</i> gente\r\n\r\n2\r\n00:00:04,500 --> 00:00:05,000\r\nFim\r\n");
+    AUREA_CHECK_EQ(srt.size(), 4u);
+    AUREA_CHECK(std::fabs(srt[0].start - 1.0) < 1e-9 && std::fabs(srt[2].end - 3.0) < 1e-9);
+    AUREA_CHECK_EQ(srt[0].text, std::string("Bom"));
+    AUREA_CHECK(std::fabs(srt[3].start - 4.5) < 1e-9);
+}
+
+AUREA_TEST(Audio, CaptionsBecomeTimedTextLayersWithHighlightUndoAndReopen) {
+    SyntheticConfig cfg = audio_cfg(48000);
+    cfg.audioSeconds = 6.0;
+    SyntheticFactory f(cfg);
+    EngineConfig ec = headless();
+    ec.mediaFactory = &f;
+    Engine e;
+    AUREA_CHECK(e.initialize(ec).ok());
+    AUREA_CHECK(e.new_project(1080, 1920, 30.0, nullptr).ok());
+    VideoImport vi;
+    vi.sourcePath = "s";
+    vi.displayName = "s";
+    auto vid = e.import_video(vi);
+    AUREA_CHECK(vid.ok());
+    AUREA_CHECK_EQ(e.layer_media_path(*vid), std::string("s"));
+    // A camada começa no quadro 30 e pula o primeiro 0,5 s da mídia.
+    Composition* comp = e.project()->timeline().composition(e.project()->timeline().current());
+    Layer* v = comp->layer(LayerId::unpack(*vid));
+    v->start = FrameIndex{30};
+    v->end = FrameIndex{30 + 150};
+    v->offset = FrameIndex{15};
+    std::vector<text::CaptionWord> words = {{"um", 1.0, 1.4}, {"dois", 1.5, 1.9}, {"três", 2.0, 2.4}, {"quatro", 2.5, 3.0}};
+    text::CaptionOptions o;
+    o.maxWords = 2;
+    o.style = 2;
+    auto made = e.create_captions(*vid, words, o);
+    AUREA_CHECK(made.ok() && *made == 2);
+    AUREA_CHECK_EQ(e.caption_count(*vid), 2u);
+    comp = e.project()->timeline().composition(e.project()->timeline().current());
+    const Layer* c0 = nullptr;
+    for (u32 i = 0; i < comp->order().size(); ++i) {
+        const Layer* l = comp->layer(comp->order().at(i));
+        if (l && l->kind == LayerKind::Text && l->text.content == "um dois") c0 = l;
+    }
+    AUREA_CHECK(c0 != nullptr);
+    if (c0) {
+        // 1,0 s da mídia = quadro 30 da mídia = timeline 30 + (30 − 15) = 45.
+        std::printf("    legenda 1: quadros %lld..%lld, y %.0f, tamanho %.0f\n", static_cast<long long>(c0->start.value),
+                    static_cast<long long>(c0->end.value), c0->transform.position.y, c0->text.size);
+        AUREA_CHECK_EQ(c0->start.value, 45);
+        AUREA_CHECK_EQ(c0->end.value, 75);   // até a próxima legenda (2,0 s = timeline 75)
+        AUREA_CHECK(std::fabs(c0->transform.position.y - static_cast<f32>(comp->height()) * 0.78f) < 1);
+        AUREA_CHECK_EQ(c0->text.fontWeight, 900);
+        AUREA_CHECK_EQ(c0->text.animators.size(), 1u);
+        // Destaque: "um" no começo, "dois" a partir de 1,5 s (quadro local 15 − 0 = 15).
+        std::vector<text::GlyphUnits> units(7);
+        for (u32 i = 0; i < 7; ++i) { units[i].charIndex = i; units[i].wordIndex = i < 3 ? 0 : 1; }
+        std::vector<text::GlyphAnim> a0, a1;
+        const f64 l0 = static_cast<f64>(c0->local_time(FrameIndex{46}).value), l1 = static_cast<f64>(c0->local_time(FrameIndex{61}).value);
+        text::evaluate_text_animators(c0->text, c0->tracks, l0, 30.0, units, 7, 2, 1, a0);
+        text::evaluate_text_animators(c0->text, c0->tracks, l1 - 1, 30.0, units, 7, 2, 1, a1);
+        AUREA_CHECK(a0[0].fill.w > 0.99f && a0[5].fill.w < 0.01f);
+        AUREA_CHECK(a1[0].fill.w < 0.01f && a1[5].fill.w > 0.99f);
+    }
+    // Gerar de novo substitui; desfazer volta; tirar remove.
+    o.maxWords = 1;
+    AUREA_CHECK(*e.create_captions(*vid, words, o) == 4);
+    AUREA_CHECK_EQ(e.caption_count(*vid), 4u);
+    Command u;
+    u.type = CommandType::Undo;
+    AUREA_CHECK(e.apply_command(u).ok());
+    AUREA_CHECK_EQ(e.caption_count(*vid), 2u);
+    // Salvar e reabrir: continuam ligadas à camada de origem.
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_teste_legendas.aurea";
+    AUREA_CHECK(e.save_project(path.c_str()).ok());
+    AUREA_CHECK(e.load_project(path.c_str()).ok());
+    AUREA_CHECK_EQ(e.caption_count(*vid), 2u);
+    AUREA_CHECK_EQ(e.remove_captions(*vid), 2u);
+    AUREA_CHECK_EQ(e.caption_count(*vid), 0u);
+    std::remove(path.c_str());
     e.shutdown();
 }

@@ -174,6 +174,10 @@ struct TextData {
     /// Text Animator: pilha de animadores (os valores animados moram na
     /// TrackSet da camada como TrackProperty::TextAnimParam).
     std::vector<TextAnimator> animators;
+
+    /// Legenda gerada da fala de outra camada (id empacotado; 0 = texto comum).
+    /// Gerar de novo substitui as legendas daquela camada.
+    u64         captionSource = 0;
 };
 
 struct ShapeData {

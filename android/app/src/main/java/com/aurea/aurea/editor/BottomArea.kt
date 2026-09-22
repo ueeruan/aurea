@@ -96,6 +96,7 @@ private enum class DockSection(val glyph: Char, val label: String, val badge: St
     Transitions(CupertinoGlyph.ArrowRightToLine, "Entrada e saída"),
     Echo(CupertinoGlyph.SquareStack3dDownRight, "Eco e rastro"),
     Effects(CupertinoGlyph.Sparkles, "Efeitos"),
+    Captions(CupertinoGlyph.Textformat, "Legendas"),
 }
 
 /**
@@ -104,7 +105,7 @@ private enum class DockSection(val glyph: Char, val label: String, val badge: St
  * cor.
  */
 private fun sectionsFor(type: LayerType): List<DockSection> = when (type) {
-    LayerType.Audio -> listOf(DockSection.Volume, DockSection.Effects)
+    LayerType.Audio -> listOf(DockSection.Volume, DockSection.Captions, DockSection.Effects)
     LayerType.Null -> listOf(DockSection.Move, DockSection.Clone)
     LayerType.Camera -> listOf(DockSection.Move, DockSection.Camera)
     else -> buildList {
@@ -114,6 +115,7 @@ private fun sectionsFor(type: LayerType): List<DockSection> = when (type) {
         add(DockSection.Blend)
         if (type == LayerType.Video) add(DockSection.Volume)
         if (type == LayerType.Video) add(DockSection.Track)
+        if (type == LayerType.Video) add(DockSection.Captions)
         if (type == LayerType.Shape) add(DockSection.EditShape)
         if (type == LayerType.Text) add(DockSection.EditText)
         if (type == LayerType.Particles) add(DockSection.Particles)
@@ -227,6 +229,7 @@ private fun onSection(store: EditorStore, ui: EditorUi, s: DockSection) {
         DockSection.Track -> openPanel(store, ui, EditorPanel.Tracking)
         DockSection.Element3D -> openPanel(store, ui, EditorPanel.Element3D)
         DockSection.Echo -> openPanel(store, ui, EditorPanel.Echo)
+        DockSection.Captions -> openPanel(store, ui, EditorPanel.Captions)
         DockSection.ColorFill, DockSection.EditShape, DockSection.EditText -> when (store.detail?.kind) {
             com.aurea.aurea.ui.theme.LayerType.Shape.kind -> openPanel(store, ui, EditorPanel.Shape)
             com.aurea.aurea.ui.theme.LayerType.Text.kind -> openPanel(store, ui, EditorPanel.Text)

@@ -539,6 +539,32 @@ AUREA_TEST(Stability, ConcurrentSavesAndEditsNeverCorruptTheFile) {
     remove_family(path);
 }
 
+AUREA_TEST(Stability, CorruptJournalHeaderDoesNotAllocateWhatItDeclares) {
+    // Bug real (P1): o leitor do journal alocava pelo cabeçalho — um bloco
+    // corrompido declarando 4 GB de strings (ou 1M comandos) virava um vector
+    // desse tamanho: OOM/abort na recuperação, justamente depois de uma queda.
+    const std::string path = test_path("journal_ruim");
+    std::remove(path.c_str());
+    Command c;
+    c.type = CommandType::LayerSetOpacity;
+    AUREA_CHECK(ProjectSerializer::append_journal(path, &c, 1, nullptr, 0).ok());
+    std::vector<u8> j = read_file(path);
+    AUREA_CHECK(j.size() == 24 + sizeof(Command));
+    for (const std::pair<u32, u32>& bad : {std::pair<u32, u32>{0u, 0xFFFFFFF0u}, std::pair<u32, u32>{1u << 20, 0u},
+                                           std::pair<u32, u32>{0xFFFFFFFFu, 0xFFFFFFFFu}}) {
+        std::vector<u8> f = j;
+        std::vector<u8> tail(j.begin(), j.begin() + 24);
+        wr<u32>(tail, 8, bad.first);
+        wr<u32>(tail, 12, bad.second);
+        f.insert(f.end(), tail.begin(), tail.end());   // bloco bom + bloco com cabeçalho absurdo
+        AUREA_CHECK(write_raw(path, f));
+        std::vector<Command> out;
+        AUREA_CHECK(ProjectSerializer::read_journal(path, out).ok());
+        AUREA_CHECK_EQ(out.size(), static_cast<usize>(1));   // o bloco bom anterior fica
+    }
+    std::remove(path.c_str());
+}
+
 AUREA_TEST(Stability, EditDuringWriteStaysDirty) {
     // mark_clean_if: uma edição que acontece entre a cópia (encode) e o fim da
     // escrita não pode ser dada como salva.

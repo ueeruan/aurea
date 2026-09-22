@@ -161,15 +161,20 @@ fun humanError(code: Int): String = when (code) {
 }
 
 /** Grava texto atomicamente: temporário → sync → rename (o sidecar nunca fica pela metade). */
-private fun writeTextAtomic(target: File, text: String) {
+internal fun writeTextAtomic(target: File, text: String) {
     val tmp = File(target.path + ".tmp")
-    FileOutputStream(tmp).use { out ->
-        out.write(text.toByteArray(Charsets.UTF_8))
-        out.fd.sync()
-    }
-    if (!tmp.renameTo(target)) {
+    try {
+        FileOutputStream(tmp).use { out ->
+            out.write(text.toByteArray(Charsets.UTF_8))
+            out.fd.sync()
+        }
+        // Files.move atômico (API 26+): substitui o existente numa operação só.
+        java.nio.file.Files.move(
+            tmp.toPath(), target.toPath(),
+            java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+        )
+    } finally {
         tmp.delete()
-        throw java.io.IOException("rename falhou: ${target.name}")
     }
 }
 /** Floats do cabeçalho de cada máscara em Engine::query_masks (kMaskHeaderFloats). */
@@ -3272,7 +3277,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val tmp = File(target.path + ".tmp")
         try {
             FileOutputStream(tmp).use { bmp.compress(Bitmap.CompressFormat.JPEG, 85, it) }
-            if (!tmp.renameTo(target)) throw java.io.IOException("rename da miniatura falhou")
+            java.nio.file.Files.move(
+                tmp.toPath(), target.toPath(),
+                java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+            )
         } finally {
             tmp.delete()
             bmp.recycle()

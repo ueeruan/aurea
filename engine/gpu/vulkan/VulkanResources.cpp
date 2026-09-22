@@ -271,6 +271,11 @@ Status Backend::write_buffer(BufferHandle dst, usize offset, const void* data, u
         return OkStatus;
     }
     // Buffer só de GPU: staging + cópia, síncrono (não é caminho de frame).
+    // O VkBuffer de destino é copiado ANTES de criar o staging: `create_buffer`
+    // pode realocar o pool e `b` ficaria pendurado (use-after-free achado pelo
+    // ASan da Fase 8 no upload de modelo 3D, Gpu.Scene3D*).
+    const VkBuffer dstBuffer = b->buffer;
+    b = nullptr;
     BufferDesc sd;
     sd.bytes = bytes;
     sd.usage = BufferUsage::TransferSrc;
@@ -280,7 +285,7 @@ Status Backend::write_buffer(BufferHandle dst, usize offset, const void* data, u
     Buffer* s = buffers_.get(staging->id);
     std::memcpy(s->alloc.mapped, data, bytes);
     struct Ctx { VkBuffer src; VkBuffer dst; VkDeviceSize offset; VkDeviceSize size; }
-        ctx{s->buffer, b->buffer, offset, bytes};
+        ctx{s->buffer, dstBuffer, offset, bytes};
     const Status st = submit_immediate([](Backend&, VkCommandBuffer cmd, void* p) {
         const Ctx* c = static_cast<const Ctx*>(p);
         VkBufferCopy region{0, c->offset, c->size};

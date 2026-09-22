@@ -9,6 +9,10 @@
 //  (inversa transposta, 3×3 em colunas vec4; normalCol0.w = início das juntas
 //  da skin no SSBO do frame). Com skin, as juntas já estão no
 //  espaço da cena do modelo; `model` leva da cena ao mundo (a layer).
+//
+//  Estática instanciada (8E): normalCol0.w = 1 + início das instâncias no
+//  SSBO do quadro; cada instância ocupa duas mat4 — a do mundo e a de normais
+//  (colunas 0..2). Sem instância (w = 0) vale o push, como antes.
 // =============================================================================
 #include "../common/scene.glsl"
 
@@ -32,6 +36,10 @@ layout(location = 7) in vec4 a_weights;
 layout(set = 0, binding = AUREA_DATA, std430) readonly buffer Joints {
     mat4 joints[];
 } j;
+#else
+layout(set = 0, binding = AUREA_DATA, std430) readonly buffer Instances {
+    mat4 m[];
+} inst;
 #endif
 
 layout(location = 0) out vec3 v_world;
@@ -55,11 +63,19 @@ void main() {
     n = s3 * n;
     t = s3 * t;
 #endif
-    vec4 world = pc.model * local;
+    mat4 model = pc.model;
     mat3 nm = mat3(pc.normalCol0.xyz, pc.normalCol1.xyz, pc.normalCol2.xyz);
+#ifndef SKINNED
+    if (pc.normalCol0.w > 0.5) {
+        uint k = (uint(pc.normalCol0.w + 0.5) - 1u) + 2u * uint(gl_InstanceIndex);
+        model = inst.m[k];
+        nm = mat3(inst.m[k + 1u]);
+    }
+#endif
+    vec4 world = model * local;
     v_world = world.xyz;
     v_normal = nm * n;
-    v_tangent = vec4(mat3(pc.model) * t, a_tangent.w);
+    v_tangent = vec4(mat3(model) * t, a_tangent.w);
     v_uv0 = a_uv0;
     v_uv1 = a_uv1;
     v_color = a_color;

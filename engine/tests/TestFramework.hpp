@@ -52,7 +52,7 @@ public:
     [[nodiscard]] u32 checks() const noexcept { return checks_; }
 
 private:
-    static constexpr u32 kMax = 512;
+    static constexpr u32 kMax = 1024;   // acima disto o registro descartaria testes EM SILÊNCIO
     TestCase tests_[kMax]{};
     u32 count_ = 0;
     u32 failures_ = 0;

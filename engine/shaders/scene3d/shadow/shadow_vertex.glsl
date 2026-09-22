@@ -3,6 +3,8 @@
 //
 //  Vértice do mapa de sombra: só posição (e skin, na variante SKINNED). A
 //  matriz do push já é luz ← local; `extra.x` = início das juntas no SSBO.
+//  Estática instanciada (8E): `extra.y` = 1 + início das matrizes luz ← local
+//  das instâncias no SSBO do quadro (uma mat4 por instância).
 // =============================================================================
 #include "../../common/bindings.glsl"
 
@@ -18,6 +20,10 @@ layout(location = 7) in vec4 a_weights;
 layout(set = 0, binding = AUREA_DATA, std430) readonly buffer Joints {
     mat4 joints[];
 } j;
+#else
+layout(set = 0, binding = AUREA_DATA, std430) readonly buffer Instances {
+    mat4 m[];
+} inst;
 #endif
 
 void main() {
@@ -27,6 +33,13 @@ void main() {
     mat4 skin = a_weights.x * j.joints[base + a_joints.x] + a_weights.y * j.joints[base + a_joints.y]
               + a_weights.z * j.joints[base + a_joints.z] + a_weights.w * j.joints[base + a_joints.w];
     p = skin * p;
-#endif
     gl_Position = pc.lightFromLocal * p;
+#else
+    if (pc.extra.y > 0.5) {
+        uint base = uint(pc.extra.y + 0.5) - 1u;
+        gl_Position = inst.m[base + uint(gl_InstanceIndex)] * p;
+    } else {
+        gl_Position = pc.lightFromLocal * p;
+    }
+#endif
 }

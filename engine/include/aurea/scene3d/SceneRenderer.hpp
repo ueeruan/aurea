@@ -21,6 +21,7 @@
 #include "aurea/scene3d/Environment.hpp"
 #include "aurea/scene3d/SceneAsset.hpp"
 
+#include <algorithm>
 #include <future>
 #include <memory>
 #include <unordered_map>
@@ -144,11 +145,16 @@ struct SceneFrame {
     std::vector<u32> planeLayers;
 };
 
+/// Contas do QUADRO inteiro (todas as cenas e subquadros de desfoque): o
+/// build zera ao ver um `frameNumber` novo e soma dentro do mesmo quadro.
 struct SceneStats {
-    u32 drawCalls = 0;
+    u32 drawCalls = 0;           ///< draw_indexed da cor (depois do instancing)
+    u32 shadowDrawCalls = 0;     ///< draw_indexed do mapa de sombra
+    u32 instancedDraws = 0;      ///< desenhos que juntaram ≥ 2 instâncias
     u32 triangles = 0;
-    u32 visiblePrimitives = 0;
-    u32 culledPrimitives = 0;
+    u32 visiblePrimitives = 0;   ///< primitivas × instâncias que passaram no frustum
+    u32 culledPrimitives = 0;    ///< fora do frustum (não desenhadas)
+    u32 shadowMapSize = 0;       ///< lado do mapa de sombra usado (0 = sem sombra)
     u64 geometryBytes = 0;
     u64 textureBytes = 0;
 };
@@ -164,6 +170,7 @@ struct SceneStats {
 [[nodiscard]] SceneCamera default_camera(u32 compWidth, u32 compHeight) noexcept;
 
 class SceneRenderer {
+    static constexpr u32 kJointRingDecl = 8;
 public:
     [[nodiscard]] Status initialize(GPUBackend& gpu, ShaderLibrary& shaders) noexcept;
     void shutdown() noexcept;
@@ -195,6 +202,15 @@ public:
     [[nodiscard]] u64 environment_key() const noexcept { return envKey_; }
 
     [[nodiscard]] const SceneStats& stats() const noexcept { return stats_; }
+    /// Qualidade do preview (HeavyQuality): mapa de sombra (512..2048), filtro
+    /// (2 = PCF 6×6, 1 = 2×2 bilinear, 0 = uma amostra) e viés do LOD. O
+    /// export chama com (2048, 2, 1).
+    void set_quality(u32 shadowMapSize, u32 shadowFilter, f32 lodBias, bool lodHysteresis = true) noexcept {
+        lodHysteresis_ = lodHysteresis;
+        shadowSize_ = std::clamp(shadowMapSize, 256u, 4096u);
+        shadowFilter_ = std::min(shadowFilter, 2u);
+        lodBias_ = std::clamp(lodBias, 0.1f, 1.0f);
+    }
     [[nodiscard]] u64 resident_bytes() const noexcept;
 
 private:
@@ -207,13 +223,27 @@ private:
     [[nodiscard]] PipelineKey key_for(AlphaMode mode, bool doubleSided, bool skinned) const noexcept;
     [[nodiscard]] PipelineKey shadow_key(bool skinned) const noexcept;
     u32 shadowSize_ = 2048;
+    u32 shadowFilter_ = 2;
+    f32 lodBias_ = 1.0f;
+    bool lodHysteresis_ = true;
+    u64 statsFrame_ = ~0ull;
+    /// Nível de LOD da última escolha por (camada, nó, primitiva): a troca só
+    /// acontece fora de uma faixa de ±15% em volta do limiar (sem "piscar"
+    /// quando o tamanho na tela oscila em cima dele).
+    struct LodState { u8 level = 0; u64 lastFrame = 0; };
+    std::unordered_map<u64, LodState> lodState_;
+    /// Instâncias por quadro (instancing): mat4 do mundo + matriz de normais
+    /// (PBR) e luz ← local (sombra), no anel dos buffers de junta.
+    BufferHandle instBuf_[kJointRingDecl]{};
+    usize instCap_[kJointRingDecl]{};
+    u32 instSlot_ = 0;
 
     GPUBackend* gpu_ = nullptr;
     ShaderLibrary* shaders_ = nullptr;
     std::unordered_map<u64, Entry> models_;
     // Matrizes de junta: um buffer mapeado por chamada de build, num anel
     // (a GPU ainda pode estar lendo os de frames anteriores).
-    static constexpr u32 kJointRing = 8;
+    static constexpr u32 kJointRing = kJointRingDecl;
     BufferHandle jointBuf_[kJointRing]{};
     usize jointCap_[kJointRing]{};
     u32 jointSlot_ = 0;

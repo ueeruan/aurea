@@ -25,6 +25,7 @@
 #include "aurea/media/MediaManager.hpp"
 #include "aurea/memory/Arena.hpp"
 #include "aurea/render/FrameGraph.hpp"
+#include "aurea/render/HeavyQuality.hpp"
 #include "aurea/render/RenderScheduler.hpp"
 #include "aurea/render/ShaderLibrary.hpp"
 #include "aurea/scene3d/SceneRenderer.hpp"
@@ -226,7 +227,15 @@ struct RenderSettings {
     /// 1 = completo; ≤ 0,25 também troca o movimento de pixels pela mistura.
     /// O export sempre usa 1.
     f32  heavyScale = 1.0f;
+    /// Sistemas pesados (8E) botão a botão. Com `heavyExplicit` falso sai de
+    /// `HeavyQuality::from_scale(heavyScale, previewDenominator)`; o export
+    /// (finalQuality) ignora os dois e usa `HeavyQuality::full()`.
+    HeavyQuality heavy{};
+    bool heavyExplicit = false;
 };
+
+/// A qualidade dos sistemas pesados que vale para estes ajustes (export = cheia).
+[[nodiscard]] HeavyQuality resolve_heavy(const RenderSettings& s) noexcept;
 
 /// Alvo fora da tela (export, testes visuais): a composição é escrita nesta
 /// textura (RGBA16F, tamanho da composição × escala).
@@ -313,6 +322,12 @@ public:
     void set_hdri_lookup(HdriLookup fn, void* ctx) noexcept { hdriLookup_ = fn; hdriCtx_ = ctx; }
     [[nodiscard]] const scene3d::SceneStats& scene_stats() const noexcept { return scene3d_.stats(); }
     [[nodiscard]] u64 scene_resident_bytes() const noexcept { return scene3d_.resident_bytes(); }
+    /// Contadores dos sistemas pesados (texto, vetor, máscara, flow, partículas, 3D).
+    [[nodiscard]] const HeavyStats& heavy_stats() const noexcept { return heavyStats_; }
+    void reset_heavy_stats() noexcept { heavyStats_ = HeavyStats{}; }
+    /// A qualidade dos sistemas pesados do último quadro renderizado.
+    [[nodiscard]] const HeavyQuality& heavy_quality() const noexcept { return heavyQ_; }
+    [[nodiscard]] f32 effect_quality() const noexcept override { return heavyQ_.effects; }
 
     // --- EffectResources -----------------------------------------------------
     [[nodiscard]] TextureHandle curve_lut(const CurveData& curve) noexcept override;
@@ -461,6 +476,13 @@ private:
     std::unordered_map<u64, FlowCache> flowCache_;
     u32 flowHits_ = 0, flowMisses_ = 0;
     f32 heavyScale_ = 1.0f;
+    HeavyQuality heavyQ_{};
+    HeavyStats heavyStats_{};
+    u32 glyphRasterSeen_ = 0, glyphResetSeen_ = 0;   ///< leitura anterior de text::glyph_atlas_stats
+    BufferHandle particleQuad_{};                      ///< 6 índices u16 do quad (partículas indexadas)
+    /// Orçamento do cache do optical flow (texturas residentes, todas as camadas).
+    static constexpr u64 kFlowCacheBudget = 48ull << 20;
+    void trim_flow_cache(u64 keepLayer) noexcept;
     /// Planos de cada grupo 3D do snapshot sendo composto (camadas 2D na cena).
     std::vector<std::vector<scene3d::ScenePlane>> groupPlanes_;
     bool flowCacheEnabled_ = true;   ///< do quadro sendo renderizado (RenderSettings::heavyScale)

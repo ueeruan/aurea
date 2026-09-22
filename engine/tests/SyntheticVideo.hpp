@@ -47,11 +47,23 @@ struct SyntheticConfig {
     u32 audioChannels = 2;
     f64 audioFreq = 440.0;
     f64 audioSeconds = 10.0;
+    /// > 0: soma um bumbo (60 Hz decaindo) a cada batida, a partir de
+    /// `audioBeatStart` s — para testar a detecção de batidas.
+    f64 audioBpm = 0.0;
+    f64 audioBeatStart = 0.0;
 };
 
 /// Valor exato da senoide sintética no instante `t` (s), canal `c`.
 inline f32 synthetic_audio_value(const SyntheticConfig& cfg, u32 c, f64 t) {
-    return static_cast<f32>(0.5 * std::sin(2.0 * 3.14159265358979323846 * cfg.audioFreq * (c + 1) * t));
+    constexpr f64 kPi = 3.14159265358979323846;
+    if (cfg.audioBpm > 0.0) {
+        const f64 period = 60.0 / cfg.audioBpm;
+        const f64 since = t - cfg.audioBeatStart;
+        const f64 tt = since >= 0.0 ? std::fmod(since, period) : 1e9;
+        const f64 kick = tt < 0.2 ? 0.8 * std::exp(-tt * 18.0) * std::sin(2.0 * kPi * 60.0 * tt) : 0.0;
+        return static_cast<f32>(0.1 * std::sin(2.0 * kPi * cfg.audioFreq * (c + 1) * t) + kick);
+    }
+    return static_cast<f32>(0.5 * std::sin(2.0 * kPi * cfg.audioFreq * (c + 1) * t));
 }
 
 /// "Decoder" de áudio: entrega quadros de 1024 amostras (como AAC), com pts

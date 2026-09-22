@@ -174,6 +174,7 @@ internal class TimelinePainter(
             }
         }
         drawRuler(w, view, ppf, cx, fps, st.pps)
+        drawMarkers(store.markers, w, view, ppf, cx)
         drawTimecode(cx, store.playhead, fps)
         val color = if (compact) AureaColors.Danger else AureaColors.Playhead
         drawRect(color, Offset(cx - m.playhead / 2f, 0f), Size(m.playhead, h))
@@ -604,6 +605,28 @@ internal class TimelinePainter(
         drawPath(minorPath, AureaTimeline.TickMinor, style = minorStroke)
         drawPath(majorPath, AureaTimeline.TickMajor, style = majorStroke)
     }
+
+    /** Marcas na régua: triângulo no alto + fio até a base dos riscos; batidas em laranja, menores. */
+    private fun DrawScope.drawMarkers(mk: com.aurea.aurea.state.EditorStore.Markers, w: Float, view: Double, ppf: Float, cx: Float) {
+        if (mk.size == 0) return
+        val half = m.tickBottom * 0.28f
+        for (i in 0 until mk.size) {
+            val x = TimeAxis.xOf(mk.frames[i].toDouble(), view, ppf, cx)
+            if (x < -half || x > w + half) continue
+            val beat = mk.kinds[i] == 1
+            val c = mk.colors[i]
+            val color = Color(red = (c and 0xFF) / 255f, green = ((c shr 8) and 0xFF) / 255f, blue = ((c shr 16) and 0xFF) / 255f)
+            val s = if (beat) half * 0.7f else half
+            markerPath.reset()
+            markerPath.moveTo(x - s, 0f)
+            markerPath.lineTo(x + s, 0f)
+            markerPath.lineTo(x, s * 1.4f)
+            markerPath.close()
+            drawPath(markerPath, color)
+            drawLine(color, Offset(x, s * 1.4f), Offset(x, m.tickBottom), strokeWidth = if (beat) 1f else 1.5f * m.density)
+        }
+    }
+    private val markerPath = androidx.compose.ui.graphics.Path()
 
     private fun DrawScope.drawRulerLabel(seconds: Int, x: Float, cx: Float) {
         var layout = labels.get(seconds)

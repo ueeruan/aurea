@@ -461,7 +461,7 @@ void write_layer(ByteWriter& w, const Layer& l) {
 /// e pivô (o enquadramento do import). v1 continua sendo lida (campos novos
 /// com o padrão).
 /// v3: velocidade e reverso da layer.
-constexpr u32 kTimelineSectionVersion = 3;
+constexpr u32 kTimelineSectionVersion = 4;
 thread_local u32 g_readingTimelineVersion = kTimelineSectionVersion;
 
 void read_layer(ByteReader& r, Layer& l) {
@@ -844,6 +844,15 @@ std::vector<u8> build_timeline_section(const Project& p) {
         w.boolv(mb.vectorBlur);
 
         w.u64v(c.scene().pack());
+
+        // v4: marcas.
+        w.u32v(static_cast<u32>(c.markers().size()));
+        for (const Marker& m : c.markers()) {
+            w.i64v(m.frame.value);
+            w.u32v(m.color);
+            w.u32v(m.kind);
+            w.str(m.label);
+        }
     });
 
     return std::vector<u8>(w.bytes().begin(), w.bytes().end());
@@ -952,6 +961,12 @@ void apply_timeline_section(const u8* data, usize size, Project& p) {
         const u32 layerCount = r.u32v();
         if (layerCount > kMaxLayerCount) { r.skip_to_end(); return; }
 
+        // Ids do arquivo → ids desta sessão. Os slots nascem na ordem VERTICAL,
+        // não na de criação: sem remapear, pai e câmera ativa apontariam para
+        // outra camada (ou nenhuma) ao reabrir.
+        std::vector<std::pair<u64, LayerId>> idMap;
+        idMap.reserve(layerCount);
+        const u64 activeCamPack = c->active_camera().pack();
         for (u32 li = 0; li < layerCount && r.good(); ++li) {
             const u64 layerPack = r.u64v();
             Layer layer;
@@ -964,8 +979,18 @@ void apply_timeline_section(const u8* data, usize size, Project& p) {
                 *dst = std::move(layer);
                 dst->name = keepName;
             }
-            (void)layerPack;
+            idMap.emplace_back(layerPack, lid);
         }
+        auto remap = [&idMap](LayerId old) {
+            if (!old.valid()) return LayerId{};
+            for (const auto& [pack, now] : idMap) if (pack == old.pack()) return now;
+            return LayerId{};
+        };
+        for (const auto& [pack, now] : idMap) {
+            (void)pack;
+            if (Layer* dst = c->layer(now)) dst->parent = remap(dst->parent);
+        }
+        c->set_active_camera(remap(LayerId::unpack(activeCamPack)));
 
         if (ShadowSettings* sh = &c->shadows(); true) {
             sh->enabled = r.boolv();
@@ -1002,6 +1027,18 @@ void apply_timeline_section(const u8* data, usize size, Project& p) {
         mb.vectorBlur = r.boolv();
 
         c->set_scene(Scene3DId::unpack(r.u64v()));
+        if (g_readingTimelineVersion >= 4) {
+            const u32 mc = r.u32v();
+            if (mc > 100000u) { r.skip_to_end(); return; }
+            for (u32 mi = 0; mi < mc && r.good(); ++mi) {
+                Marker m;
+                m.frame = FrameIndex{r.i64v()};
+                m.color = r.u32v();
+                m.kind = r.u32v();
+                m.label = r.str();
+                c->put_marker(std::move(m));
+            }
+        }
         c->rebuild_draw_order();
     }
 

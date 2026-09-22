@@ -177,3 +177,105 @@ AUREA_TEST(ClipTime, SpeedAndReverseSurviveSaveAndReopen) {
     r2.comp()->layers().for_each([&](LayerId, const Layer& x) { l = &x; });
     AUREA_CHECK(l && std::fabs(l->speed - 0.25f) < 1e-6f && l->reversed && l->end.value == 1200);
 }
+
+
+// =============================================================================
+//  Marcas e batidas
+// =============================================================================
+AUREA_TEST(ClipTime, DetectBeatsPlacesMarkersOnTheTimelineGrid) {
+    SyntheticConfig cfg = cfg_with_audio();
+    cfg.audioBpm = 120.0;
+    cfg.audioBeatStart = 0.5;
+    TimeRig r(cfg);
+    f64 bpm = 0.0;
+    auto n = r.e.detect_beats(r.layer.pack(), &bpm);
+    AUREA_CHECK(n.ok());
+    std::vector<i64> m(3 * 64);
+    const u32 total = r.e.query_markers(m.data(), 64);
+    // 120 BPM a 30 fps = uma batida a cada 15 quadros, a 1ª no quadro 15.
+    u32 off = 0;
+    for (u32 i = 0; i < total && i < 64; ++i) {
+        const i64 f = m[i * 3];
+        const i64 near = 15 + ((f - 15 + 7) / 15) * 15;
+        if (std::llabs(f - near) > 1) ++off;
+        AUREA_CHECK_EQ(m[i * 3 + 2], static_cast<i64>(kMarkerBeat));
+    }
+    std::printf("    %.2f BPM, %u marcas, %u fora da grade\n", bpm, total, off);
+    AUREA_CHECK(std::fabs(bpm - 120.0) < 1.0);
+    AUREA_CHECK(total >= 18 && total <= 20);
+    AUREA_CHECK_EQ(off, 0u);
+    // Clipe 2x: as mesmas batidas caem na METADE do tempo da timeline.
+    r.speed(2.0f);
+    n = r.e.detect_beats(r.layer.pack(), &bpm);
+    AUREA_CHECK(n.ok());
+    const u32 total2 = r.e.query_markers(m.data(), 64);
+    // Marcas de batida antigas fora do novo trecho (frames >= 150) continuam
+    // (são da composição); as de dentro foram trocadas.
+    u32 inside = 0, onGrid = 0;
+    for (u32 i = 0; i < total2 && i < 64; ++i) {
+        const i64 f = m[i * 3];
+        if (f >= 150) continue;
+        ++inside;
+        const i64 rel = f - 7;   // 0,5 s de fonte a 2x = 7,5 quadros
+        if (std::llabs(rel - ((rel + 3) / 7.5 > 0 ? static_cast<i64>(std::llround(rel / 7.5) * 7.5) : 0)) <= 1) ++onGrid;
+    }
+    std::printf("    a 2x: %u marcas no trecho, %u na grade de 7,5 quadros\n", inside, onGrid);
+    AUREA_CHECK(inside >= 18 && inside <= 20);
+    AUREA_CHECK(onGrid + 1 >= inside);
+}
+
+AUREA_TEST(ClipTime, DetectBeatsOn44kAudioLayer) {
+    // Como no aparelho: camada de ÁUDIO (import_audio) de fonte a 44,1 kHz.
+    SyntheticConfig cfg = cfg_with_audio();
+    cfg.audioRate = 44100;
+    cfg.audioBpm = 60.0;
+    cfg.audioBeatStart = 0.25;
+    cfg.audioSeconds = 6.0;
+    SyntheticFactory factory(cfg);
+    Engine e;
+    EngineConfig ec;
+    ec.workerCount = 2;
+    ec.disableAutosave = true;
+    ec.mediaFactory = &factory;
+    AUREA_CHECK(e.initialize(ec).ok());
+    AUREA_CHECK(e.new_project(64, 36, 30.0, nullptr).ok());
+    VideoImport vi;
+    vi.sourcePath = "som.wav";
+    vi.displayName = "som";
+    auto id = e.import_audio(vi);
+    AUREA_CHECK(id.ok());
+    f64 bpm = 0.0;
+    auto n = id.ok() ? e.detect_beats(*id, &bpm) : Result<u32>{Status{Errc::InvalidState, ""}};
+    std::printf("    44,1 kHz: %s, %u batidas, %.2f BPM\n", n.ok() ? "ok" : "erro", n.ok() ? *n : 0u, bpm);
+    AUREA_CHECK(n.ok() && *n >= 5);
+    e.shutdown();
+}
+
+AUREA_TEST(ClipTime, MarkersToggleUndoSaveAndRetime) {
+    TimeRig r(cfg_with_audio());
+    AUREA_CHECK(r.e.toggle_marker(30));
+    AUREA_CHECK(r.e.toggle_marker(90));
+    std::vector<i64> m(3 * 8);
+    AUREA_CHECK_EQ(r.e.query_markers(m.data(), 8), 2u);
+    AUREA_CHECK(!r.e.toggle_marker(90));    // tocar de novo tira
+    AUREA_CHECK_EQ(r.e.query_markers(m.data(), 8), 1u);
+    Command u;
+    u.type = CommandType::Undo;
+    AUREA_CHECK(r.e.apply_command(u).ok());   // volta a de 90
+    AUREA_CHECK_EQ(r.e.query_markers(m.data(), 8), 2u);
+    AUREA_CHECK(r.e.move_marker(90, 120));
+    AUREA_CHECK_EQ(r.e.query_markers(m.data(), 8), 2u);
+    AUREA_CHECK_EQ(m[3], 120);
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_teste_marcas.aurea";
+    AUREA_CHECK(r.e.save_project(path.c_str()).ok());
+    AUREA_CHECK(r.e.load_project(path.c_str()).ok());
+    AUREA_CHECK_EQ(r.e.query_markers(m.data(), 8), 2u);
+    AUREA_CHECK_EQ(m[0], 30);
+    AUREA_CHECK_EQ(m[3], 120);
+    // 30 → 60 fps: a marca fica no mesmo segundo.
+    r.comp()->retime(60.0);
+    AUREA_CHECK_EQ(r.e.query_markers(m.data(), 8), 2u);
+    AUREA_CHECK_EQ(m[0], 60);
+    AUREA_CHECK_EQ(m[3], 240);
+    std::remove(path.c_str());
+}

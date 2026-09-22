@@ -210,6 +210,13 @@ std::shared_ptr<const AudioBlock> AudioBlockCache::decode_block(u64 key, i64 blo
         resample_to_mix(r.buf.data(), r.frames(), srcPos - static_cast<f64>(r.bufStart), step, out->pcm.data(),
                         kBlockFrames);
     }
+    // Decoder de aparelho com defeito (NaN/inf) não chega ao alto-falante nem
+    // ao export: vira silêncio e fica registrado.
+    u32 bad = 0;
+    for (f32& v : out->pcm) {
+        if (!std::isfinite(v)) { v = 0.0f; ++bad; }
+    }
+    if (bad) AUREA_LOG_WARN("audio: %u amostras nao finitas zeradas no bloco %lld", bad, static_cast<long long>(block));
     const f64 ms = static_cast<f64>(monotonic_ns() - t0) / 1e6;
     std::lock_guard<std::mutex> lock(mutex_);
     ++stats_.decoded;

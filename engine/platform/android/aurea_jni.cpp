@@ -641,6 +641,37 @@ AUREA_JNI jstring AUREA_FN(nativeQueryText)(JNIEnv* env, jclass, jlong handle, j
     return env->NewStringUTF(t.content.c_str());
 }
 
+AUREA_JNI jboolean AUREA_FN(nativeToggleMarker)(JNIEnv*, jclass, jlong handle, jlong frame) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.toggle_marker(frame) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeMoveMarker)(JNIEnv*, jclass, jlong handle, jlong from, jlong to) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.move_marker(from, to) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jint AUREA_FN(nativeQueryMarkers)(JNIEnv* env, jclass, jlong handle, jlongArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !out) return 0;
+    const jsize len = env->GetArrayLength(out);
+    std::vector<i64> tmp(static_cast<usize>(len));
+    const u32 total = c->engine.query_markers(tmp.data(), static_cast<u32>(len / 3));
+    const jsize copy = std::min<jsize>(len, static_cast<jsize>(std::min<u32>(total, static_cast<u32>(len / 3)) * 3));
+    if (copy > 0) env->SetLongArrayRegion(out, 0, copy, reinterpret_cast<const jlong*>(tmp.data()));
+    return static_cast<jint>(total);
+}
+
+AUREA_JNI jlong AUREA_FN(nativeDetectBeats)(JNIEnv* env, jclass, jlong handle, jlong layerId, jdoubleArray bpmOut) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return -static_cast<jlong>(Errc::InvalidState);
+    f64 bpm = 0.0;
+    const Result<u32> r = c->engine.detect_beats(static_cast<u64>(layerId), &bpm);
+    if (bpmOut && env->GetArrayLength(bpmOut) > 0) env->SetDoubleArrayRegion(bpmOut, 0, 1, &bpm);
+    if (!r.ok()) return -static_cast<jlong>(r.status().code());
+    return static_cast<jlong>(*r);
+}
+
 AUREA_JNI jlong AUREA_FN(nativeAddNull)(JNIEnv*, jclass, jlong handle, jboolean threeD) {
     NativeContext* c = ctx_of(handle);
     if (!c) return -static_cast<jlong>(Errc::InvalidState);

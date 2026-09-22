@@ -788,6 +788,9 @@ internal class TimelineController(
             buf[n++] = v
         }
         add(0)
+        // Marcas e batidas da régua: o ímã principal da edição no ritmo.
+        val mk = store.markers
+        for (i in 0 until mk.size) add(mk.frames[i])
         // No compacto as outras camadas não aparecem: grudar nelas pareceria aleatório.
         if (!state.compact) {
             val list = rows.value

@@ -1,4 +1,5 @@
 #include "aurea/Engine.hpp"
+#include "aurea/audio/Beats.hpp"
 
 #include "aurea/text/Text.hpp"
 #include "aurea/core/Log.hpp"
@@ -831,6 +832,129 @@ Result<u64> Engine::add_null(bool threeD) noexcept {
     project_->mark_dirty();
     request_render();
     return lid.pack();
+}
+
+bool Engine::toggle_marker(i64 frame) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp) return false;
+    const i64 f = std::clamp<i64>(frame, 0, std::max<i64>(0, comp->duration().value - 1));
+    const bool had = std::any_of(comp->markers().begin(), comp->markers().end(),
+                                 [f](const Marker& m) { return m.frame.value == f; });
+    history_.before_mutation(*comp, project_->timeline().current(), had ? "remover marca" : "adicionar marca");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    if (had) comp->remove_marker_at(FrameIndex{f});
+    else comp->put_marker(Marker{FrameIndex{f}, 0xFFF7C34Fu, kMarkerManual, {}});
+    project_->mark_dirty();
+    return !had;
+}
+
+bool Engine::move_marker(i64 from, i64 to) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp) return false;
+    auto it = std::find_if(comp->markers().begin(), comp->markers().end(),
+                           [from](const Marker& m) { return m.frame.value == from; });
+    if (it == comp->markers().end()) return false;
+    Marker m = *it;
+    history_.before_mutation(*comp, project_->timeline().current(), "mover marca");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    comp->remove_marker_at(FrameIndex{from});
+    m.frame = FrameIndex{std::clamp<i64>(to, 0, std::max<i64>(0, comp->duration().value - 1))};
+    comp->put_marker(std::move(m));
+    project_->mark_dirty();
+    return true;
+}
+
+u32 Engine::query_markers(i64* out, u32 capacity) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp) return 0;
+    const auto& ms = comp->markers();
+    for (u32 i = 0; i < ms.size() && i < capacity && out; ++i) {
+        out[i * 3] = ms[i].frame.value;
+        out[i * 3 + 1] = static_cast<i64>(ms[i].color);
+        out[i * 3 + 2] = static_cast<i64>(ms[i].kind);
+    }
+    return static_cast<u32>(ms.size());
+}
+
+Result<u32> Engine::detect_beats(u64 layerId, f64* bpmOut) noexcept {
+    // 1. O que decodificar (sob o lock, rápido).
+    u64 key = 0;
+    audio::AudioAssetRef ref;
+    f64 fps = 30.0, rate = 1.0, atStart = 0.0;
+    bool reversed = false;
+    i64 start = 0, end = 0;
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        Composition* comp = project_ ? current_composition() : nullptr;
+        if (!comp) return Status{Errc::InvalidState, "nenhum projeto aberto"};
+        const Layer* l = comp->layer(LayerId::unpack(layerId));
+        if (!l || (l->kind != LayerKind::Video && l->kind != LayerKind::Audio)) return Status{Errc::InvalidArgument, "camada sem som"};
+        const Asset* a = project_->asset(l->source);
+        if (!a || !a->has_audio()) return Status{Errc::InvalidArgument, "camada sem som"};
+        if (l->speed <= 0.0f) return Status{Errc::InvalidArgument, "quadro congelado"};
+        key = l->source.pack();
+        fps = comp->fps() > 0.0 ? comp->fps() : 30.0;
+        rate = l->speed;
+        reversed = l->reversed;
+        atStart = l->source_frame(l->start);
+        start = l->start.value;
+        end = l->end.value;
+        const i64 len = a->audio.sampleCount.value > 0 && a->audio.sampleRate > 0
+                      ? a->audio.sampleCount.value * static_cast<i64>(audio::kMixRate) / a->audio.sampleRate
+                      : audio::frame_to_sample(a->duration.value, a->timebaseFps > 0.0 ? a->timebaseFps : fps);
+        ref = audio::AudioAssetRef{resolve_asset_path(a->sourcePath), len};
+    }
+    VideoSourceFactory* factory = config_.mediaFactory;
+    if (!factory) return Status{Errc::InvalidState, "sem decodificador"};
+    // 2. Só o trecho da fonte que a camada usa, em mono.
+    const f64 srcA = atStart, srcB = atStart + (reversed ? -1.0 : 1.0) * static_cast<f64>(end - start) * rate;
+    const i64 s0 = std::max<i64>(0, static_cast<i64>(std::floor(std::min(srcA, srcB) * audio::kMixRate / fps)));
+    const i64 s1 = std::min<i64>(ref.durationSamples, static_cast<i64>(std::ceil(std::max(srcA, srcB) * audio::kMixRate / fps)));
+    if (s1 - s0 < static_cast<i64>(audio::kMixRate) * 3) return Status{Errc::InvalidArgument, "trecho curto demais"};
+    audio::AudioBlockCache blocks(factory, 2ull << 20, false);
+    blocks.register_asset(key, ref);
+    std::vector<f32> mono(static_cast<usize>(s1 - s0), 0.0f);
+    for (i64 b = s0 / audio::kBlockFrames; b * audio::kBlockFrames < s1; ++b) {
+        auto blk = blocks.fetch(key, b);
+        if (!blk) {
+            if (b == s0 / audio::kBlockFrames) return Status{Errc::IoError, "audio ilegivel"};
+            break;
+        }
+        const i64 base = b * audio::kBlockFrames;
+        for (i64 i = std::max(base, s0); i < std::min(base + static_cast<i64>(audio::kBlockFrames), s1); ++i) {
+            const usize k = static_cast<usize>(i - base) * 2;
+            mono[static_cast<usize>(i - s0)] = 0.5f * (blk->pcm[k] + blk->pcm[k + 1]);
+        }
+    }
+    const u64 t0 = monotonic_ns();
+    const audio::BeatResult br = audio::detect_beats(mono.data(), mono.size());
+    if (bpmOut) *bpmOut = br.bpm;
+    AUREA_LOG_INFO("batidas: %zu a %.1f BPM em %.1f s de audio (%.0f ms)", br.beats.size(), br.bpm,
+                   static_cast<f64>(mono.size()) / audio::kMixRate, static_cast<f64>(monotonic_ns() - t0) / 1e6);
+    // 3. Segundos da fonte → frames da timeline (mesma conta do vídeo/mixer).
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp) return Status{Errc::InvalidState, "projeto fechado"};
+    history_.before_mutation(*comp, project_->timeline().current(), "detectar batidas");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    comp->remove_markers(kMarkerBeat, FrameIndex{start}, FrameIndex{end});
+    u32 placed = 0;
+    for (f64 sec : br.beats) {
+        const f64 srcFrame = (static_cast<f64>(s0) / audio::kMixRate + sec) * fps;
+        const f64 elapsed = reversed ? (atStart - srcFrame) / rate : (srcFrame - atStart) / rate;
+        const i64 f = start + static_cast<i64>(std::llround(elapsed));
+        if (f < start || f >= end) continue;
+        const bool taken = std::any_of(comp->markers().begin(), comp->markers().end(),
+                                       [f](const Marker& m) { return m.frame.value == f; });
+        if (taken) continue;   // a marca da pessoa manda
+        comp->put_marker(Marker{FrameIndex{f}, 0xFF4DB7FFu, kMarkerBeat, {}});
+        ++placed;
+    }
+    project_->mark_dirty();
+    return placed;
 }
 
 Result<u64> Engine::add_shape(u32 preset) noexcept {

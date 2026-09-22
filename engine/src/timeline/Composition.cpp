@@ -216,7 +216,37 @@ void Composition::retime(f64 fps) noexcept {
         retime_track(l.timeRemap, k, true);
         for (u32 i = 0; i < l.tracks.size(); ++i) retime_track(l.tracks.at(i), k, false);
     });
+    // Marcas ficam no mesmo SEGUNDO; duas que caírem no mesmo frame viram uma.
+    std::vector<Marker> kept = std::move(markers_);
+    markers_.clear();
+    for (Marker& m : kept) { m.frame = scale(m.frame); put_marker(std::move(m)); }
     touch();
+}
+
+u32 Composition::put_marker(Marker m) {
+    auto it = std::lower_bound(markers_.begin(), markers_.end(), m.frame,
+                               [](const Marker& a, FrameIndex f) { return a.frame.value < f.value; });
+    if (it != markers_.end() && it->frame.value == m.frame.value) {
+        *it = std::move(m);
+    } else {
+        it = markers_.insert(it, std::move(m));
+    }
+    return static_cast<u32>(it - markers_.begin());
+}
+
+bool Composition::remove_marker_at(FrameIndex f) noexcept {
+    auto it = std::find_if(markers_.begin(), markers_.end(), [f](const Marker& m) { return m.frame.value == f.value; });
+    if (it == markers_.end()) return false;
+    markers_.erase(it);
+    return true;
+}
+
+u32 Composition::remove_markers(u32 kind, FrameIndex from, FrameIndex to) noexcept {
+    const usize before = markers_.size();
+    markers_.erase(std::remove_if(markers_.begin(), markers_.end(), [&](const Marker& m) {
+        return m.kind == kind && m.frame.value >= from.value && m.frame.value < to.value;
+    }), markers_.end());
+    return static_cast<u32>(before - markers_.size());
 }
 
 std::unique_ptr<Composition> Composition::clone() const {
@@ -236,6 +266,7 @@ std::unique_ptr<Composition> Composition::clone() const {
     c->postProcess_ = postProcess_;
     c->motionBlur_ = motionBlur_;
     c->scene_ = scene_;
+    c->markers_ = markers_;
     c->revision_ = revision_;
     c->formatRevision_ = formatRevision_;
     c->nestingDepth_ = nestingDepth_;
@@ -261,6 +292,7 @@ void Composition::restore_from(const Composition& snapshot) {
     postProcess_ = snapshot.postProcess_;
     motionBlur_ = snapshot.motionBlur_;
     scene_ = snapshot.scene_;
+    markers_ = snapshot.markers_;
     nestingDepth_ = snapshot.nestingDepth_;
     revision_ = revision;
     formatRevision_ = formatRevision;

@@ -530,8 +530,8 @@ private fun MoreTab(store: EditorStore) {
         MoreItem(CupertinoGlyph.CaptionsBubble, "Legendas") { store.comingSoon("Legendas") }
         MoreItem(CupertinoGlyph.WandStars, "Camada de ajuste") { store.comingSoon("Camada de ajuste") }
         MoreItem(CupertinoGlyph.Folder, "Agrupar camadas") { store.comingSoon("Agrupar camadas") }
-        MoreItem(CupertinoGlyph.Bookmark, "Marcas") { store.comingSoon("Marcas") }
-        MoreItem(ShellGlyph.Metronome, "Detectar batidas") { store.comingSoon("Detectar batidas") }
+        MoreItem(CupertinoGlyph.Bookmark, "Marca no cabeçote") { store.toggleMarker() }
+        MoreItem(ShellGlyph.Metronome, "Detectar batidas") { store.detectBeats() }
         MoreItem(CupertinoGlyph.QuestionCircle, "Como editar") { store.comingSoon("Guia rápido") }
     }
 }

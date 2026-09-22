@@ -356,6 +356,42 @@ AUREA_TEST(Engine, ParentingKeepsChildInPlace) {
     e.shutdown();
 }
 
+AUREA_TEST(Engine, ParentSurvivesSaveAndReopenAfterReorder) {
+    Engine e;
+    AUREA_CHECK(e.initialize(headless_config()).ok());
+    AUREA_CHECK(e.new_project(1280, 720, 30.0, nullptr).ok());
+    auto a = e.add_null(false);   // slot 0
+    auto b = e.add_null(false);   // slot 1
+    auto c = e.add_null(false);   // slot 2
+    AUREA_CHECK(a.ok() && b.ok() && c.ok());
+    Composition* comp = e.project()->timeline().composition(e.project()->timeline().current());
+    comp->layer(LayerId::unpack(*a))->name = "filho";
+    comp->layer(LayerId::unpack(*c))->name = "pai";
+    // Ordem vertical diferente da de criação: o pai vai para o fundo.
+    Command ro;
+    ro.type = CommandType::LayerReorder;
+    ro.layer_reorder.layer = LayerId::unpack(*c);
+    ro.layer_reorder.newIndex = 0;
+    AUREA_CHECK(e.apply_command(ro).ok());
+    Command pc;
+    pc.type = CommandType::LayerSetParent;
+    pc.layer_parent.layer = LayerId::unpack(*a);
+    pc.layer_parent.parent = LayerId::unpack(*c);
+    AUREA_CHECK(e.apply_command(pc).ok());
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_teste_pai.aurea";
+    AUREA_CHECK(e.save_project(path.c_str()).ok());
+    AUREA_CHECK(e.load_project(path.c_str()).ok());
+    comp = e.project()->timeline().composition(e.project()->timeline().current());
+    const Layer* child = nullptr;
+    comp->layers().for_each([&](LayerId, const Layer& l) { if (l.name == "filho") child = &l; });
+    AUREA_CHECK(child != nullptr);
+    const Layer* par = child ? comp->layer(child->parent) : nullptr;
+    AUREA_CHECK(par != nullptr);
+    AUREA_CHECK(par && par->name == "pai");
+    e.shutdown();
+    std::remove(path.c_str());
+}
+
 AUREA_TEST(Engine, SelectionIsSortedAndDeduplicated) {
     Engine e;
     AUREA_CHECK(e.initialize(headless_config()).ok());

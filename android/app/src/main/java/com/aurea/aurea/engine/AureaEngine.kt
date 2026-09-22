@@ -271,6 +271,14 @@ class AureaEngine private constructor() {
     /** Nova forma (ladrilho `preset` da aba Forma) no centro. Id ≥ 0 ou −Errc. */
     fun addShape(preset: Int): Long = nativeAddShape(nativeHandle, preset)
 
+    /** Liga/desliga a marca no frame. true = ficou marcada. */
+    fun toggleMarker(frame: Long): Boolean = nativeToggleMarker(nativeHandle, frame)
+    fun moveMarker(from: Long, to: Long): Boolean = nativeMoveMarker(nativeHandle, from, to)
+    /** Marcas: frame, cor, tipo (3 longs cada). Devolve o total. */
+    fun queryMarkers(out: LongArray): Int = nativeQueryMarkers(nativeHandle, out)
+    /** Síncrono (decodifica o som): fora da thread de UI. Nº de batidas ou −Errc. */
+    fun detectBeats(layer: Long, bpm: DoubleArray): Long = nativeDetectBeats(nativeHandle, layer, bpm)
+
     /** Nulo 2D ou 3D no centro. Id ≥ 0 ou −Errc. */
     fun addNull(threeD: Boolean): Long = nativeAddNull(nativeHandle, threeD)
 
@@ -360,6 +368,10 @@ class AureaEngine private constructor() {
     private external fun nativeExtractAudio(handle: Long, layer: Long): Long
     private external fun nativeAddShape(handle: Long, preset: Int): Long
     private external fun nativeAddNull(handle: Long, threeD: Boolean): Long
+    private external fun nativeToggleMarker(handle: Long, frame: Long): Boolean
+    private external fun nativeMoveMarker(handle: Long, from: Long, to: Long): Boolean
+    private external fun nativeQueryMarkers(handle: Long, out: LongArray): Int
+    private external fun nativeDetectBeats(handle: Long, layer: Long, bpm: DoubleArray): Long
     private external fun nativeAddText(handle: Long, content: String): Long
     private external fun nativeQueryText(handle: Long, layer: Long, out: FloatArray): String?
     private external fun nativeFreezeFrame(handle: Long, layer: Long, frame: Int, holdFrames: Int): Long

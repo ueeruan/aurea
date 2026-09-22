@@ -440,6 +440,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** Relê tudo o que depende do modelo. Barato: dezenas de linhas POD. */
     private fun refreshModel() {
         layers = readLayers()
+        refreshMarkers()
         selectCreatedAfter?.let { before ->
             val created = layers.map { it.id }.filter { it !in before }
             if (created.isNotEmpty()) {
@@ -1144,6 +1145,70 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val id = primary ?: return
         send { setTextStrokeColor(id, r, g, b, a) }
         refreshDetail()
+    }
+
+    // --- Marcas e batidas ----------------------------------------------------------
+    /** Marcas da composição, em ordem de frame. */
+    class Markers(val frames: IntArray, val kinds: IntArray, val colors: IntArray) {
+        val size: Int get() = frames.size
+    }
+    var markers by mutableStateOf(Markers(IntArray(0), IntArray(0), IntArray(0)))
+        private set
+    private var markerBuf = LongArray(3 * 256)
+
+    private fun refreshMarkers() {
+        var total = engine.queryMarkers(markerBuf)
+        if (total * 3 > markerBuf.size) {
+            markerBuf = LongArray(total * 3)
+            total = engine.queryMarkers(markerBuf)
+        }
+        val n = minOf(total, markerBuf.size / 3)
+        val f = IntArray(n) { markerBuf[it * 3].toInt() }
+        val k = IntArray(n) { markerBuf[it * 3 + 2].toInt() }
+        val c = IntArray(n) { markerBuf[it * 3 + 1].toInt() }
+        val cur = markers
+        if (f.contentEquals(cur.frames) && k.contentEquals(cur.kinds) && c.contentEquals(cur.colors)) return
+        markers = Markers(f, k, c)
+    }
+
+    /** "Marcas": marca (ou desmarca) o frame do cabeçote. */
+    fun toggleMarker() {
+        val on = engine.toggleMarker(playhead.toLong())
+        refreshNow()
+        showToast(if (on) "Marca adicionada" else "Marca removida")
+    }
+
+    var detectingBeats by mutableStateOf(false)
+        private set
+    private val beatHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    /**
+     * "Detectar batidas" no som da camada escolhida. Decodifica o áudio fora da
+     * UI (thread do ciclo de vida: o motor não fecha no meio).
+     */
+    fun detectBeats() {
+        val id = primary
+        val row = layers.firstOrNull { it.id == id }
+        if (id == null || row == null || (row.kind != com.aurea.aurea.ui.theme.LayerType.Audio.kind && row.kind != com.aurea.aurea.ui.theme.LayerType.Video.kind)) {
+            showToast("Escolha uma camada de áudio ou vídeo com som")
+            return
+        }
+        if (detectingBeats) return
+        detectingBeats = true
+        showToast("Detectando batidas…")
+        lifecycleThread.execute {
+            val bpm = DoubleArray(1)
+            val n = synchronized(lifecycleLock) { if (ready) engine.detectBeats(id, bpm) else -1L }
+            beatHandler.post {
+                detectingBeats = false
+                refreshNow()
+                when {
+                    n > 0 -> showToast("$n batidas · ${bpm[0].roundToInt()} BPM")
+                    n == 0L -> showToast("Nenhuma batida clara neste som")
+                    else -> showToast("Não foi possível analisar o som (erro ${-n})")
+                }
+            }
+        }
     }
 
     // --- Nulo e parentesco --------------------------------------------------------

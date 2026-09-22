@@ -759,10 +759,14 @@ public:
             return Status{Errc::UnsupportedFormat, "sem decoder para este audio"};
         }
         // Pede float (menos conversão, sem perda); o decoder pode ignorar e
-        // mandar 16 bits — o formato de saída diz o que veio.
-        AMediaFormat_setInt32(fmt, kKeyPcmEncoding, kPcmFloat);
+        // mandar 16 bits — o formato de saída diz o que veio. EXCETO em
+        // audio/raw (WAV): ali "pcm-encoding" descreve a ENTRADA e o decoder
+        // só repassa os bytes — pedir float rotulava 16 bits como float
+        // (lixo, inf) na saída. Fica o encoding que o extrator leu do arquivo.
+        const bool raw = mime_ == "audio/raw";
+        if (!raw) AMediaFormat_setInt32(fmt, kKeyPcmEncoding, kPcmFloat);
         media_status_t ms = AMediaCodec_configure(codec_, fmt, nullptr, nullptr, 0);
-        if (ms != AMEDIA_OK) {
+        if (ms != AMEDIA_OK && !raw) {
             AMediaFormat_setInt32(fmt, kKeyPcmEncoding, kPcm16);
             ms = AMediaCodec_configure(codec_, fmt, nullptr, nullptr, 0);
         }

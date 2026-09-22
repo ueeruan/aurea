@@ -269,6 +269,18 @@ public:
     /// Nulo (não desenha; serve de pai/controle). `threeD` = nulo 3D (vive na
     /// cena: posição/rotação/escala em X, Y e Z).
     [[nodiscard]] Result<u64> add_null(bool threeD) noexcept;
+
+    // --- Marcas e batidas -------------------------------------------------------
+    /// Liga/desliga a marca da pessoa no frame (toggle). true = ficou marcada.
+    bool toggle_marker(i64 frame) noexcept;
+    bool move_marker(i64 from, i64 to) noexcept;
+    /// Marcas da composição atual: frame, cor e tipo intercalados em `out`
+    /// (3 por marca). Devolve o total (pode passar de `capacity`).
+    u32 query_markers(i64* out, u32 capacity) noexcept;
+    /// Detecta as batidas do som da camada e troca as marcas de batida dentro
+    /// do trecho dela. Síncrono (decodifica o áudio): chamar fora da thread de
+    /// UI. Devolve o número de batidas; `bpm` recebe o tempo.
+    [[nodiscard]] Result<u32> detect_beats(u64 layerId, f64* bpm = nullptr) noexcept;
     /// Dados de texto da camada (para a UI editar). false = não é texto.
     bool query_text(u64 layerId, TextData& out) noexcept;
     /// Imagem já decodificada pela plataforma (RGBA8 sRGB, alfa reto).

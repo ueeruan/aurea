@@ -68,6 +68,17 @@ struct MotionBlurSettings {
     bool vectorBlur = false;  ///< blur baseado em vetores de movimento
 };
 
+/// Marca na régua da composição. `kind` 0 = marca da pessoa, 1 = batida
+/// detectada (substituída em bloco quando a detecção roda de novo).
+struct Marker {
+    FrameIndex  frame{0};
+    u32         color = 0xFFF7C34Fu;   ///< RGBA8 sRGB (r no byte baixo)
+    u32         kind = 0;
+    std::string label;
+};
+inline constexpr u32 kMarkerManual = 0;
+inline constexpr u32 kMarkerBeat = 1;
+
 class Composition {
 public:
     using LayerTable = SlotTable<Layer, LayerTag>;
@@ -170,6 +181,15 @@ public:
     [[nodiscard]] MotionBlurSettings& motion_blur() noexcept { return motionBlur_; }
     [[nodiscard]] const MotionBlurSettings& motion_blur() const noexcept { return motionBlur_; }
 
+    // --- Marcas ----------------------------------------------------------------
+    /// Sempre em ordem de frame; no máximo uma marca por frame.
+    [[nodiscard]] const std::vector<Marker>& markers() const noexcept { return markers_; }
+    /// Insere (ou troca a do mesmo frame). Devolve o índice.
+    u32 put_marker(Marker m);
+    bool remove_marker_at(FrameIndex f) noexcept;
+    /// Remove todas as marcas do tipo dentro de [from, to).
+    u32 remove_markers(u32 kind, FrameIndex from, FrameIndex to) noexcept;
+
     [[nodiscard]] Scene3DId scene() const noexcept { return scene_; }
     void set_scene(Scene3DId s) noexcept { scene_ = s; }
 
@@ -222,6 +242,7 @@ private:
     PostProcessSettings postProcess_{};
     MotionBlurSettings  motionBlur_{};
     Scene3DId           scene_{};
+    std::vector<Marker> markers_;
 
     u64 revision_       = 1;
     u64 formatRevision_ = 1;

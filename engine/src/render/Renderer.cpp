@@ -1,4 +1,6 @@
 #include "aurea/render/Renderer.hpp"
+
+#include "aurea/scene3d/Animation.hpp"
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Time.hpp"
 #include "aurea/project/Project.hpp"
@@ -350,7 +352,22 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     parent3 = p->parent;
                 }
                 inst.world = m3 * layer_from_model(l->model);
-                inst.nodeWorld = asset->rest_world_matrices();
+                {
+                    // Animação no relógio da TIMELINE (tempo local da layer ×
+                    // velocidade do clipe): seek, scrub e export dão a mesma pose.
+                    scene3d::Pose pose;
+                    const i32 clip = l->model.animationClip;
+                    f32 t = 0.0f;
+                    if (clip >= 0 && clip < static_cast<i32>(asset->animations.size())) {
+                        const f64 fps = comp.fps() > 0.0 ? comp.fps() : 30.0;
+                        t = scene3d::clip_time(asset->animations[static_cast<usize>(clip)],
+                                               static_cast<f64>(local.value) / fps * l->model.timeScale);
+                    }
+                    scene3d::evaluate_pose(*asset, clip, t, pose);
+                    inst.nodeWorld = std::move(pose.nodeWorld);
+                    inst.jointMatrices = std::move(pose.jointMatrices);
+                    inst.skinJointOffset = std::move(pose.skinJointOffset);
+                }
                 inst.castShadows = l->model.castShadows;
                 inst.assetKey = l->model.scene.pack();
                 inst.asset = std::move(asset);

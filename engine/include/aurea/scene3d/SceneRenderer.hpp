@@ -174,6 +174,12 @@ private:
     GPUBackend* gpu_ = nullptr;
     ShaderLibrary* shaders_ = nullptr;
     std::unordered_map<u64, Entry> models_;
+    // Matrizes de junta: um buffer mapeado por chamada de build, num anel
+    // (a GPU ainda pode estar lendo os de frames anteriores).
+    static constexpr u32 kJointRing = 8;
+    BufferHandle jointBuf_[kJointRing]{};
+    usize jointCap_[kJointRing]{};
+    u32 jointSlot_ = 0;
     TextureHandle white_{}, flatNormal_{}, black_{}, envCube_{}, brdfLut_{};
     TextureHandle irradiance_{}, prefiltered_{}, iblLut_{};
     u32 prefilteredMips_ = 1;

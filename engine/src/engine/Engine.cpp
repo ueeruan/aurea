@@ -809,6 +809,9 @@ Result<u64> Engine::import_model(const ModelImport& request, scene3d::ImportProg
     const Vec3 ext = scene->bounds.extent();
     const f32 maxExt = std::max({ext.x, ext.y, ext.z * 0.6f, 1e-6f});
     l->model.unitScale = 0.55f * static_cast<f32>(std::min(comp->width(), comp->height())) / maxExt;
+    // Com animação no arquivo, a primeira toca (no relógio da timeline) — é o
+    // que se espera ao importar um personagem.
+    l->model.animationClip = scene->animations.empty() ? -1 : 0;
     l->model.pivot = scene->bounds.center();
     l->transform.position = Vec3{static_cast<f32>(comp->width()) * 0.5f, static_cast<f32>(comp->height()) * 0.5f, 0.0f};
     l->transform.scale = Vec3{1.0f, 1.0f, 1.0f};

@@ -1037,6 +1037,40 @@ AUREA_TEST(Gpu, Scene3DModelsAppearFramedWithPbr) {
 }
 
 
+AUREA_TEST(Gpu, Scene3DSkinnedModelAnimatesOnTheTimelineClock) {
+    AUREA_REQUIRE_GPU();
+    const std::string path = gltf_data("Fox.glb");
+    if (!file_exists(path)) return;
+    Scene3DRig rig(384, 216);
+    ModelImport mi;
+    mi.path = path;
+    AUREA_CHECK(rig.e.import_model(mi).ok());
+    auto seek = [&](i64 frame) {
+        Command c;
+        c.type = CommandType::PlaybackSeek;
+        c.seek.time = TickNs{frame * 1'000'000'000LL / 30};
+        AUREA_CHECK(rig.e.apply_command(c).ok());
+    };
+    seek(0);
+    const Image8 a = rig.capture(384);
+    seek(12);
+    const Image8 b = rig.capture(384);
+    seek(0);
+    const Image8 a2 = rig.capture(384);
+    AUREA_CHECK(coverage(a) > 0.02f && coverage(b) > 0.02f);
+    // A pose mudou entre 0 e 0,4 s (a raposa anda), e voltar ao 0 dá o mesmo quadro.
+    u64 diff = 0, back = 0;
+    for (usize i = 0; i < a.rgba.size() && i < b.rgba.size(); ++i) {
+        diff += static_cast<u64>(std::abs(a.rgba[i] - b.rgba[i]) > 24);
+        back = std::max<u64>(back, static_cast<u64>(std::abs(a.rgba[i] - a2.rgba[i])));
+    }
+    std::printf("    pixels que mudaram entre 0 e 0,4 s: %llu\n", static_cast<unsigned long long>(diff));
+    AUREA_CHECK(diff > 500);
+    AUREA_CHECK(back <= 2);
+    (void)write_png("scene3d_fox_t0.png", a);
+    (void)write_png("scene3d_fox_t12.png", b);
+}
+
 AUREA_TEST(Gpu, Scene3DSurvivesSaveAndReopenIdentically) {
     AUREA_REQUIRE_GPU();
     const std::string path = gltf_data("DamagedHelmet.glb");

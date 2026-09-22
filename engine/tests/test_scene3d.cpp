@@ -228,6 +228,7 @@ AUREA_TEST(Scene3D, TextureCapDownscalesAndWarns) {
     AUREA_CHECK(!r.asset->warnings.empty());
 }
 
+#include "aurea/scene3d/Animation.hpp"
 #include "aurea/scene3d/Environment.hpp"
 #include <chrono>
 
@@ -251,4 +252,45 @@ AUREA_TEST(Scene3D, EnvironmentBuildIsFastAndSane) {
         AUREA_CHECK(a >= 0.0f && b >= 0.0f && a + b <= 1.05f);
     }
     for (f32 v : {0.0f, 0.5f, 1.0f, 65504.0f, 1e-3f}) AUREA_CHECK_NEAR(half_to_float(float_to_half(v)), v, std::fmax(1e-3f, v * 1e-3f));
+}
+
+
+AUREA_TEST(Scene3D, SkinnedAnimationPoseFollowsTheClipTime) {
+    if (!have("Fox.glb")) return;
+    ImportResult r = load("Fox.glb");
+    AUREA_CHECK(r.ok());
+    if (!r.ok()) return;
+    const SceneAsset& a = *r.asset;
+    AUREA_CHECK(!a.animations.empty() && !a.skins.empty());
+    const Animation& clip = a.animations[0];
+    AUREA_CHECK(clip.duration > 0.1f);
+    // Laço: o tempo da layer volta ao começo do clipe (e negativos também).
+    AUREA_CHECK_NEAR(clip_time(clip, clip.duration + 0.25), 0.25f, 1e-4f);
+    AUREA_CHECK_NEAR(clip_time(clip, -0.25), clip.duration - 0.25f, 1e-4f);
+
+    Pose rest, p0, p1, p1b;
+    evaluate_pose(a, -1, 0.0f, rest);
+    evaluate_pose(a, 0, 0.0f, p0);
+    evaluate_pose(a, 0, clip.duration * 0.5f, p1);
+    evaluate_pose(a, 0, clip.duration * 0.5f, p1b);
+    AUREA_CHECK_EQ(p1.jointMatrices.size(), a.skins[0].joints.size());
+    AUREA_CHECK_EQ(p1.nodeWorld.size(), a.nodes.size());
+    // Pose de repouso: junta × inversa de bind ≈ identidade (a malha fica onde foi modelada).
+    f32 restErr = 0.0f;
+    for (const Mat4& m : rest.jointMatrices) {
+        for (int c = 0; c < 4; ++c) for (int k = 0; k < 4; ++k) {
+            restErr = std::max(restErr, std::fabs((&m.col[c].x)[k] - (c == k ? 1.0f : 0.0f)));
+        }
+    }
+    AUREA_CHECK_MSG(restErr < 1e-3f, "pose de repouso deveria ser identidade");
+    // A pose muda com o tempo, e o mesmo instante dá os mesmos bits (seek = export).
+    f32 moved = 0.0f;
+    for (usize j = 0; j < p0.jointMatrices.size(); ++j) {
+        for (int c = 0; c < 4; ++c) for (int k = 0; k < 4; ++k) {
+            moved = std::max(moved, std::fabs((&p0.jointMatrices[j].col[c].x)[k] - (&p1.jointMatrices[j].col[c].x)[k]));
+            AUREA_CHECK(std::isfinite((&p1.jointMatrices[j].col[c].x)[k]));
+            AUREA_CHECK_EQ((&p1.jointMatrices[j].col[c].x)[k], (&p1b.jointMatrices[j].col[c].x)[k]);
+        }
+    }
+    AUREA_CHECK(moved > 0.05f);
 }

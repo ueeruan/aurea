@@ -6,7 +6,8 @@
 //  livre de #defines.
 //
 //  Push constants: matriz de mundo da instância e a matriz de normais
-//  (inversa transposta, 3×3 em colunas vec4). Com skin, as juntas já estão no
+//  (inversa transposta, 3×3 em colunas vec4; normalCol0.w = início das juntas
+//  da skin no SSBO do frame). Com skin, as juntas já estão no
 //  espaço da cena do modelo; `model` leva da cena ao mundo (a layer).
 // =============================================================================
 #include "../common/scene.glsl"
@@ -45,8 +46,10 @@ void main() {
     vec3 n = a_normal;
     vec3 t = a_tangent.xyz;
 #ifdef SKINNED
-    mat4 skin = a_weights.x * j.joints[a_joints.x] + a_weights.y * j.joints[a_joints.y]
-              + a_weights.z * j.joints[a_joints.z] + a_weights.w * j.joints[a_joints.w];
+    // Deslocamento da skin desta instância no SSBO do frame (normalCol0.w).
+    uint base = uint(pc.normalCol0.w + 0.5);
+    mat4 skin = a_weights.x * j.joints[base + a_joints.x] + a_weights.y * j.joints[base + a_joints.y]
+              + a_weights.z * j.joints[base + a_joints.z] + a_weights.w * j.joints[base + a_joints.w];
     local = skin * local;
     mat3 s3 = mat3(skin);
     n = s3 * n;

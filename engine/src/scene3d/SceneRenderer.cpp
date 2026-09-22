@@ -425,6 +425,11 @@ void SceneRenderer::finish_environment() noexcept {
 void SceneRenderer::shutdown() noexcept {
     if (pendingEnv_.valid()) pendingEnv_.wait();
     if (!gpu_) return;
+    for (u32 i = 0; i < kJointRing; ++i) {
+        if (jointBuf_[i].valid()) gpu_->destroy_buffer(jointBuf_[i]);
+        jointBuf_[i] = BufferHandle{};
+        jointCap_[i] = 0;
+    }
     release_all();
     release_environment();
     for (TextureHandle* t : {&white_, &flatNormal_, &black_, &envCube_, &brdfLut_}) {
@@ -438,6 +443,10 @@ void SceneRenderer::shutdown() noexcept {
 
 void SceneRenderer::forget_device() noexcept {
     models_.clear();
+    for (u32 i = 0; i < kJointRing; ++i) {
+        jointBuf_[i] = BufferHandle{};
+        jointCap_[i] = 0;
+    }
     irradiance_ = prefiltered_ = iblLut_ = TextureHandle{};
     white_ = flatNormal_ = black_ = envCube_ = brdfLut_ = TextureHandle{};
     cubeSampler_ = SamplerHandle{};
@@ -508,7 +517,10 @@ PipelineKey SceneRenderer::key_for(AlphaMode mode, bool doubleSided, bool skinne
 
 void SceneRenderer::collect_pipelines(std::vector<PipelineKey>& out) const {
     for (AlphaMode mode : {AlphaMode::Opaque, AlphaMode::Mask, AlphaMode::Blend}) {
-        for (bool twoSided : {false, true}) out.push_back(key_for(mode, twoSided, false));
+        for (bool twoSided : {false, true}) {
+            out.push_back(key_for(mode, twoSided, false));
+            out.push_back(key_for(mode, twoSided, true));
+        }
     }
 }
 
@@ -576,6 +588,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         PipelineHandle pipeline;
         f32 viewDepth;
         u32 sortKey;
+        bool skinned;
     };
     std::vector<Draw> opaque, blended;
     std::unordered_map<const GpuMaterial*, const SceneBlock*> blocks;
@@ -609,7 +622,45 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         return b;
     };
 
-    for (const SceneInstance& inst : frame.instances) {
+    // Juntas de todas as instâncias num SSBO só; cada desenho com skin recebe
+    // o deslocamento da sua skin no push constant (normalCol[0].w).
+    std::vector<u32> instJointBase(frame.instances.size(), 0);
+    BufferHandle joints{};
+    {
+        usize total = 0;
+        for (usize i = 0; i < frame.instances.size(); ++i) {
+            instJointBase[i] = static_cast<u32>(total);
+            total += frame.instances[i].jointMatrices.size();
+        }
+        if (total > 0) {
+            const u32 slot = jointSlot_++ % kJointRing;
+            const usize bytes = total * sizeof(Mat4);
+            if (jointCap_[slot] < bytes) {
+                if (jointBuf_[slot].valid()) gpu_->destroy_buffer(jointBuf_[slot]);
+                BufferDesc bd;
+                bd.bytes = std::max<usize>(bytes * 2, 64 * sizeof(Mat4));
+                bd.usage = BufferUsage::Storage;
+                bd.access = MemoryAccess::Upload;
+                bd.debugName = "3d-juntas";
+                auto b = gpu_->create_buffer(bd);
+                jointBuf_[slot] = b.ok() ? *b : BufferHandle{};
+                jointCap_[slot] = b.ok() ? bd.bytes : 0;
+            }
+            void* ptr = nullptr;
+            if (jointBuf_[slot].valid() && gpu_->map_buffer(jointBuf_[slot], ptr).ok() && ptr) {
+                auto* dst = static_cast<Mat4*>(ptr);
+                for (usize i = 0; i < frame.instances.size(); ++i) {
+                    const auto& jm = frame.instances[i].jointMatrices;
+                    std::copy(jm.begin(), jm.end(), dst + instJointBase[i]);
+                }
+                gpu_->unmap_buffer(jointBuf_[slot]);
+                joints = jointBuf_[slot];
+            }
+        }
+    }
+
+    for (usize instIndex = 0; instIndex < frame.instances.size(); ++instIndex) {
+        const SceneInstance& inst = frame.instances[instIndex];
         if (!inst.asset) continue;
         const GpuModel* gm = model(inst.assetKey, *inst.asset);
         if (auto it = models_.find(inst.assetKey); it != models_.end()) it->second.lastFrame = frameNumber;
@@ -618,19 +669,26 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         for (usize n = 0; n < nodes.size(); ++n) {
             const i32 mi = nodes[n].mesh;
             if (mi < 0 || mi >= static_cast<i32>(gm->meshes.size())) continue;
-            const Mat4 world = inst.world * (n < inst.nodeWorld.size() ? inst.nodeWorld[n] : Mat4::identity());
+            // Malha com skin: a pose vem das juntas (já no espaço da cena do
+            // modelo); o nó da malha não entra (regra do glTF).
+            const i32 skinIndex = nodes[n].skin;
+            const bool skinnedNode = joints.valid() && skinIndex >= 0
+                                   && skinIndex < static_cast<i32>(inst.skinJointOffset.size())
+                                   && gm->skin.valid();
+            const Mat4 world = skinnedNode ? inst.world
+                                           : inst.world * (n < inst.nodeWorld.size() ? inst.nodeWorld[n] : Mat4::identity());
             const Mat4 clipFromLocal = viewProj * world;
             const Mat4 viewFromLocal = frame.camera.view * world;
             for (const GpuPrimitive& p : gm->meshes[mi]) {
-                if (outside_frustum(clipFromLocal, p.bounds, frame.camera.nearZ)) {
+                // Com skin a caixa de repouso não vale para a pose: sem recorte.
+                if (!(skinnedNode && p.skinned) && outside_frustum(clipFromLocal, p.bounds, frame.camera.nearZ)) {
                     ++stats_.culledPrimitives;
                     continue;
                 }
                 const GpuMaterial* mat = p.material >= 0 && p.material < static_cast<i32>(gm->materials.size())
                                        ? &gm->materials[p.material] : &gm->defaultMaterial;
-                // Skin na GPU entra no 5D (matrizes de junta por frame); até
-                // lá, a malha com skin desenha na pose de bind.
-                const PipelineKey key = key_for(mat->factors.alphaMode, mat->factors.doubleSided, false);
+                const bool skinDraw = skinnedNode && p.skinned;
+                const PipelineKey key = key_for(mat->factors.alphaMode, mat->factors.doubleSided, skinDraw);
                 auto pipe = shaders_->pipeline(key);
                 if (!pipe.ok()) continue;
                 const SceneBlock* blk = block_for(mat);
@@ -642,6 +700,11 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 d.block = blk;
                 d.push.model = world;
                 normal_matrix(world, d.push.normalCol);
+                d.skinned = skinDraw;
+                if (skinDraw) {
+                    d.push.normalCol[0].w = static_cast<f32>(instJointBase[instIndex]
+                                                             + inst.skinJointOffset[static_cast<usize>(skinIndex)]);
+                }
                 d.pipeline = *pipe;
                 d.viewDepth = viewFromLocal.transform_point(p.bounds.center()).z;
                 d.sortKey = static_cast<u32>(pipe->id & 0xFFFF) << 16 | static_cast<u32>(reinterpret_cast<uintptr_t>(mat) >> 4 & 0xFFFF);
@@ -672,9 +735,10 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         SamplerHandle cubeSampler;
         u64 linearSampler;
         u64 clampSampler;
+        BufferHandle joints;
     } cap{list, total, white_, flatNormal_, ibl ? irradiance_ : envCube_, ibl ? prefiltered_ : envCube_,
           ibl ? iblLut_ : brdfLut_, cubeSampler_, shaders_->sampler(CommonSampler::LinearRepeat).id,
-          shaders_->sampler(CommonSampler::LinearClamp).id};
+          shaders_->sampler(CommonSampler::LinearClamp).id, joints};
 
     // Z reverso: limpa a profundidade com 0 (o infinito).
     graph.add_raster_pass_depth("3d-pbr", PassStage::Scene3D, color, LoadOp::Clear, Vec4{0, 0, 0, 0}, depth,
@@ -702,9 +766,11 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 c.bind_texture(7, cap.brdf, SamplerHandle{cap.clampSampler});
                 boundMat = d.material;
             }
-            if (d.model != boundModel) {
+            if (d.skinned) c.bind_storage_buffer(cap.joints);
+            if (d.model != boundModel || d.skinned) {
                 c.bind_vertex_buffer(0, d.model->positions, 0);
                 c.bind_vertex_buffer(1, d.model->shading, 0);
+                if (d.model->skin.valid()) c.bind_vertex_buffer(2, d.model->skin, 0);
                 c.bind_index_buffer(d.model->indices, 0, d.model->indexType);
                 boundModel = d.model;
             }

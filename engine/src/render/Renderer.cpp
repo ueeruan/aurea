@@ -355,6 +355,19 @@ Mat4 layer_world_matrix(const Composition& comp, const Layer& l, FrameIndex time
     return m;
 }
 
+// Sistemas pesados (8E): o export é sempre cheio; o preview segue o bloco
+// explícito ou a escada da escala única.
+HeavyQuality resolve_heavy(const RenderSettings& s) noexcept {
+    if (s.finalQuality) {
+        HeavyQuality q = HeavyQuality::full();
+        q.exportFrame = true;
+        return q;
+    }
+    if (s.heavyExplicit) return s.heavy;
+    const u32 den = std::max(1u, s.previewDenominator) / std::max(1u, s.previewNumerator);
+    return HeavyQuality::from_scale(s.heavyScale, den);
+}
+
 // =============================================================================
 // Ciclo de vida
 // =============================================================================
@@ -459,6 +472,8 @@ void Renderer::shutdown() noexcept {
     release_project_resources();
     if (glyphAtlas_.valid()) backend_->destroy_texture(glyphAtlas_);
     glyphAtlas_ = TextureHandle{};
+    if (particleQuad_.valid()) backend_->destroy_buffer(particleQuad_);
+    particleQuad_ = BufferHandle{};
     if (previewSrcTex_.valid()) backend_->destroy_texture(previewSrcTex_);
     previewSrcTex_ = TextureHandle{};
     previewSrcDirty_ = !previewSrc_.empty();
@@ -482,6 +497,7 @@ void Renderer::shutdown() noexcept {
 
 void Renderer::forget_device() noexcept {
     glyphAtlas_ = TextureHandle{};
+    particleQuad_ = BufferHandle{};
     glyphAtlasGen_ = 0;
     for (u32 i = 0; i < kGlyphRing; ++i) {
         glyphBuf_[i] = BufferHandle{}; glyphCap_[i] = 0;
@@ -493,6 +509,7 @@ void Renderer::forget_device() noexcept {
     framesInFlight_.clear();
     planar_.clear();
     flowCache_.clear();
+    heavyStats_.flowCacheBytes = 0;
     images_.clear();
     luts_.clear();
     uploads_.clear();
@@ -514,6 +531,7 @@ void Renderer::release_project_resources() noexcept {
     for (auto& [k, l] : luts_) backend_->destroy_texture(l.texture);
     for (auto& [k, f] : flowCache_) for (TextureHandle& t : f.tex) if (t.valid()) backend_->destroy_texture(t);
     flowCache_.clear();
+    heavyStats_.flowCacheBytes = 0;
     for (auto& [k, m] : maskCache_) for (TextureHandle& t : m.tex) if (t.valid()) backend_->destroy_texture(t);
     maskCache_.clear();
     planar_.clear();
@@ -808,6 +826,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     const u64 key = vector::content_hash(ev, lf) ^ (static_cast<u64>(dens * 64.0f) * 0x9E3779B97F4A7C15ull);
                     VectorCacheEntry& ce = vectorCache_[rid.pack()];
                     if (ce.key != key || ce.lastFrame == 0) {
+                        ++heavyStats_.vectorTessellations;
                         vector::VectorMesh mesh;
                         vector::build_mesh(ev, lf, dens, mesh);
                         ce.verts = std::move(mesh.verts);
@@ -815,6 +834,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         ce.min = mesh.min;
                         ce.max = mesh.max;
                         ce.key = key;
+                    } else {
+                        ++heavyStats_.vectorCacheHits;
                     }
                     ce.lastFrame = frameNumber + 1;
                     if (ce.verts.empty()) continue;
@@ -1097,8 +1118,9 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 const f32 tsec = static_cast<f32>(static_cast<f64>(local.value) / fps);
                 const f32 rate = std::clamp(pd.rate, 0.1f, 1000000.0f);   // o shader analítico aceita milhões
                 const f32 life = std::clamp(pd.lifetime, 0.05f, 60.0f);
-                const u32 cap = settings.finalQuality ? std::max<u32>(1u, pd.maxParticles)
-                                                      : std::max<u32>(1u, static_cast<u32>(static_cast<f32>(pd.maxParticles) * std::clamp(settings.heavyScale, 0.05f, 1.0f)));
+                // Preview: a fração do bloco de qualidade (8E); export = todas.
+                const u32 cap = std::max<u32>(1u, static_cast<u32>(static_cast<f64>(pd.maxParticles)
+                                                                    * std::clamp(resolve_heavy(settings).particles, 0.05f, 1.0f)));
                 const u32 slots = std::min<u32>(cap,
                                                 static_cast<u32>(std::ceil(rate * life * 1.25f)) + 1u);
                 auto lin = [](Vec4 c) { return Vec4{srgb_to_linear(c.x), srgb_to_linear(c.y), srgb_to_linear(c.z), c.w}; };
@@ -1948,7 +1970,7 @@ bool Renderer::build_video_source(const RenderLayer& layer, u32 layerIndex, u32 
 FGTexture Renderer::video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture b, u32 w, u32 h, u32& baseW, u32& baseH,
                                u64 frameNumber) noexcept {
     // Base da pirâmide com o lado maior ≤ 384 (o flow não precisa de 4K).
-    const f32 base = std::max(96.0f, 384.0f * std::clamp(heavyScale_, 0.25f, 1.0f));
+    const f32 base = std::max(96.0f, 384.0f * std::clamp(heavyQ_.flow, 0.25f, 1.0f));
     const f32 s = std::min(1.0f, base / static_cast<f32>(std::max(w, h)));
     u32 lw = std::max(8u, static_cast<u32>(std::lround(static_cast<f32>(w) * s)));
     u32 lh = std::max(8u, static_cast<u32>(std::lround(static_cast<f32>(h) * s)));
@@ -1964,7 +1986,11 @@ FGTexture Renderer::video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture
     FlowCache& fc = flowCache_[layerKey];
     fc.lastFrame = frameNumber;
     if (fc.width != lw || fc.height != lh) {
-        for (TextureHandle& t : fc.tex) if (t.valid()) backend_->destroy_texture(t);
+        for (TextureHandle& t : fc.tex) {
+            if (!t.valid()) continue;
+            backend_->destroy_texture(t);
+            heavyStats_.flowCacheBytes -= std::min<u64>(heavyStats_.flowCacheBytes, static_cast<u64>(fc.width) * fc.height * 8);
+        }
         fc = FlowCache{};
         fc.width = lw;
         fc.height = lh;
@@ -1973,16 +1999,22 @@ FGTexture Renderer::video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture
     for (u32 i = 0; i < 2 && flowCacheEnabled_; ++i) {
         if (fc.tex[i].valid() && fc.key[i] == pairKey) {
             ++flowHits_;
+            ++heavyStats_.flowCacheHits;
             return graph_.import_texture("flow-cache", fc.tex[i], fd);
         }
     }
     ++flowMisses_;
+    ++heavyStats_.flowComputed;
     const u32 slot = fc.next;
     fc.next ^= 1u;
     if (!fc.tex[slot].valid()) {
+        // Orçamento do cache (todas as camadas): antes de criar, solta as
+        // camadas paradas há mais tempo.
+        trim_flow_cache(layerKey, static_cast<u64>(lw) * lh * 8);
         auto t = backend_->create_texture(fd);
         if (!t.ok()) return FGTexture{};
         fc.tex[slot] = *t;
+        heavyStats_.flowCacheBytes += static_cast<u64>(lw) * lh * 8;   // RGBA16F
     }
     fc.key[slot] = pairKey;
     EffectBuildContext ctx(graph_, shaders_, arena_, *this, kWorkFormat, 4096);
@@ -2020,6 +2052,28 @@ FGTexture Renderer::video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture
     return flow;
 }
 
+void Renderer::trim_flow_cache(u64 keepLayer, u64 incomingBytes) noexcept {
+    // LRU por camada: o flow de uma camada é um par de texturas pequenas
+    // (≤ 384 px), mas 30 camadas com flow num projeto longo somam. Acima do
+    // orçamento, sai a camada usada há mais tempo (nunca a que pede agora).
+    while (heavyStats_.flowCacheBytes + incomingBytes > flowCacheBudget_) {
+        auto victim = flowCache_.end();
+        for (auto it = flowCache_.begin(); it != flowCache_.end(); ++it) {
+            if (it->first == keepLayer) continue;
+            if (victim == flowCache_.end() || it->second.lastFrame < victim->second.lastFrame) victim = it;
+        }
+        if (victim == flowCache_.end()) break;
+        for (TextureHandle& t : victim->second.tex) {
+            if (!t.valid()) continue;
+            backend_->destroy_texture(t);   // o backend adia a destruição até a GPU soltar
+            heavyStats_.flowCacheBytes -= std::min<u64>(heavyStats_.flowCacheBytes,
+                                                        static_cast<u64>(victim->second.width) * victim->second.height * 8);
+        }
+        flowCache_.erase(victim);
+        ++heavyStats_.flowCacheEvictions;
+    }
+}
+
 bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEffects, LayerImage& out,
                             std::vector<FrameRef>& framesUsed, u64 frameNumber) noexcept {
     if (layer.source.kind == LayerSource::Kind::Nested) {
@@ -2040,6 +2094,22 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
         FGTexture tex{};
         const std::vector<scene3d::ScenePlane>* planes =
             layer.source.sceneGroup < groupPlanes_.size() && !groupPlanes_[layer.source.sceneGroup].empty() ? &groupPlanes_[layer.source.sceneGroup] : nullptr;
+        // Sombra e LOD do bloco de qualidade (export = cheio); as contas do
+        // quadro (todas as cenas e subquadros) vão para os contadores 8E.
+        scene3d_.set_quality(heavyQ_.shadowMapSize, heavyQ_.shadowFilter, heavyQ_.lodBias, !heavyQ_.exportFrame);
+        struct SceneStatsSink {
+            Renderer* r;
+            ~SceneStatsSink() {
+                const scene3d::SceneStats& st = r->scene3d_.stats();
+                r->heavyStats_.lastSceneDrawCalls = st.drawCalls;
+                r->heavyStats_.lastSceneShadowDrawCalls = st.shadowDrawCalls;
+                r->heavyStats_.lastSceneInstancedDraws = st.instancedDraws;
+                r->heavyStats_.lastSceneVisible = st.visiblePrimitives;
+                r->heavyStats_.lastSceneCulled = st.culledPrimitives;
+                r->heavyStats_.lastSceneTriangles = st.triangles;
+                r->heavyStats_.lastShadowMapSize = st.shadowMapSize;
+            }
+        } sink{this};
         if (group.blurFrames.empty()) {
             if (!scene3d_.build(graph_, arena_, group, compTargetW_, compTargetH_, frameNumber, tex, planes)) return false;
         } else {
@@ -2196,7 +2266,9 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                 if (layer.source.vectorBlur > 0.0f) {
                     // Borrão ao longo do vetor de cada pixel, obturador centrado no quadro.
                     const FGTexture blurred = graph_.create_texture("layer-video-desfoque-vetorial", d);
-                    const Vec4 vp{layer.source.vectorBlur, 1.0f / static_cast<f32>(baseW), 1.0f / static_cast<f32>(baseH), 16.0f};
+                    // Amostras: 16 no export; o preview segue o bloco de qualidade (8E).
+                    const Vec4 vp{layer.source.vectorBlur, 1.0f / static_cast<f32>(baseW), 1.0f / static_cast<f32>(baseH),
+                                  static_cast<f32>(std::clamp<u32>(heavyQ_.flowBlurSamples, 4u, 16u))};
                     ctx.fullscreen_pass("desfoque-vetorial", PassStage::Decode, blurred, ShaderId::video_flow_vblur_frag,
                                         {PassTexture{out.texture}, PassTexture{flow}}, &vp, sizeof(vp));
                     out.texture = blurred;
@@ -2378,17 +2450,35 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                 ShaderId::particles_particles_vert, ShaderId::particles_particles_frag, kWorkFormat, true,
                 layer.source.particleAdditive ? BlendMode::Add : BlendMode::Normal));
             if (!pipe.ok()) return false;
+            if (!particleQuad_.valid()) {
+                BufferDesc bd;
+                bd.bytes = 6 * sizeof(u16);
+                bd.usage = BufferUsage::Index | BufferUsage::TransferDst;
+                bd.access = MemoryAccess::GpuOnly;
+                bd.debugName = "particulas-quad";
+                auto b = backend_->create_buffer(bd);
+                if (!b.ok()) return false;
+                const u16 idx[6] = {0, 1, 2, 1, 3, 2};
+                if (!backend_->write_buffer(*b, 0, idx, sizeof(idx)).ok()) {
+                    backend_->destroy_buffer(*b);
+                    return false;
+                }
+                particleQuad_ = *b;
+            }
             struct Cap {
-                PipelineHandle p; Mat4 clip; Vec4 block[7]; u32 slots;
+                PipelineHandle p; Mat4 clip; Vec4 block[7]; u32 slots; BufferHandle quad;
             } cap{*pipe, clip_from_comp(static_cast<f32>(layer.source.width), static_cast<f32>(layer.source.height)), {},
-                  layer.source.particleSlots};
+                  layer.source.particleSlots, particleQuad_};
             for (int i = 0; i < 7; ++i) cap.block[i] = layer.source.particleBlock[i];
+            heavyStats_.lastParticleSlots += layer.source.particleSlots;
+            ++heavyStats_.lastParticleLayers;
             graph_.add_raster_pass("particulas", PassStage::Decode, out.texture, LoadOp::Clear, Vec4{0, 0, 0, 0},
                                    [cap](PassContext& pc) {
                 pc.cmds.bind_pipeline(cap.p);
                 pc.cmds.set_uniforms(cap.block, sizeof(cap.block));
                 pc.cmds.push_constants(&cap.clip, sizeof(cap.clip));
-                pc.cmds.draw(6, cap.slots);
+                pc.cmds.bind_index_buffer(cap.quad, 0, IndexType::U16);
+                pc.cmds.draw_indexed(6, cap.slots, 0, 0, 0);
             });
             return true;
         }
@@ -2468,6 +2558,7 @@ void Renderer::apply_masks(const RenderLayer& layer, LayerImage& img, u64 frameN
     for (u32 i = 0; i < 2; ++i) {
         if (mc.tex[i].valid() && mc.key[i] == key) {
             ++maskHits_;
+            ++heavyStats_.maskCacheHits;
             cov = graph_.import_texture("cobertura-da-mascara", mc.tex[i], md);
             break;
         }
@@ -2486,6 +2577,7 @@ void Renderer::apply_masks(const RenderLayer& layer, LayerImage& img, u64 frameN
         }
         mc.key[slot] = key;
         ++maskMisses_;
+        ++heavyStats_.maskRasterizations;
         cov = graph_.import_texture("cobertura-da-mascara", mc.tex[slot], md);
         struct { Vec4 region; Vec4 info; } u{Vec4{img.region.x, img.region.y, img.region.w, img.region.h},
                                              Vec4{static_cast<f32>(currentSnap_->maskBase + layer.maskFirst),
@@ -2911,6 +3003,11 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     const u64 t0 = monotonic_ns();
     heavyScale_ = settings.finalQuality ? 1.0f : settings.heavyScale;
     quality_ = effective_quality(settings);
+    heavyQ_ = resolve_heavy(settings);
+    heavyStats_.lastParticleSlots = heavyStats_.lastParticleLayers = 0;
+    heavyStats_.lastSceneDrawCalls = heavyStats_.lastSceneShadowDrawCalls = heavyStats_.lastSceneInstancedDraws = 0;
+    heavyStats_.lastSceneVisible = heavyStats_.lastSceneCulled = heavyStats_.lastSceneTriangles = 0;
+    heavyStats_.lastShadowMapSize = 0;
 
     FrameBegin fb;
     // Alvo offscreen (export, captura): frame SEM swapchain. Com begin_frame o
@@ -2950,7 +3047,15 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
             uploads_.push_back(std::move(up));
             glyphAtlasGen_ = gen;
             text::glyph_atlas_clean();
+            ++heavyStats_.glyphAtlasUploads;
+            heavyStats_.glyphAtlasUploadBytes += static_cast<u64>(text::kGlyphAtlasSize) * text::kGlyphAtlasSize;
         }
+        u32 rasterized = 0, resets = 0;
+        text::glyph_atlas_stats(rasterized, resets);
+        heavyStats_.glyphsRasterized += rasterized - glyphRasterSeen_;
+        heavyStats_.glyphAtlasResets += resets - glyphResetSeen_;
+        glyphRasterSeen_ = rasterized;
+        glyphResetSeen_ = resets;
     }
     flush_uploads();
     pool_.begin_frame(*backend_, fb.frameNumber);
@@ -3181,6 +3286,7 @@ Status Renderer::render_effect_preview(const EffectRegistry& effects, EffectType
     // roda uma vez. O que o aparelho mostra tem de ser o que o efeito faz.
     heavyScale_ = 1.0f;
     quality_ = PreviewQuality{};
+    heavyQ_ = HeavyQuality::full();
 
     pool_.begin_frame(*backend_, fb.frameNumber);
     graph_.reset();
@@ -3474,7 +3580,11 @@ void Renderer::collect_resources(u64 frameNumber) noexcept {
     }
     for (auto it = flowCache_.begin(); it != flowCache_.end();) {
         if (frameNumber > it->second.lastFrame + 240) {
-            for (TextureHandle& t : it->second.tex) if (t.valid()) backend_->destroy_texture(t);
+            for (TextureHandle& t : it->second.tex) {
+                if (!t.valid()) continue;
+                backend_->destroy_texture(t);
+                heavyStats_.flowCacheBytes -= std::min<u64>(heavyStats_.flowCacheBytes, static_cast<u64>(it->second.width) * it->second.height * 8);
+            }
             it = flowCache_.erase(it);
         } else {
             ++it;

@@ -43,11 +43,20 @@ float shadow_factor(vec3 world, float NdotL) {
     vec3 p = sc.xyz / sc.w;
     if (p.x <= 0.0 || p.x >= 1.0 || p.y <= 0.0 || p.y >= 1.0 || p.z >= 1.0) return 1.0;
     float texel = u.shadowParams.y;
+    // Filtro do preview (8E): x = 1 PCF 6×6 (export), 2 = 2×2 bilinear, 3 = uma amostra.
     // Viés maior em superfície rasante (onde a acne aparece primeiro).
     float bias = u.shadowParams.z * (1.0 + 3.0 * (1.0 - clamp(NdotL, 0.0, 1.0)));
     vec2 base = p.xy / texel - 0.5;
     vec2 f = fract(base);
     vec2 origin = (floor(base) + 0.5) * texel;
+    if (u.shadowParams.x > 2.5) return (p.z - bias) <= texture(t_shadow, p.xy).r ? 1.0 : 0.0;
+    if (u.shadowParams.x > 1.5) {
+        float s00 = (p.z - bias) <= texture(t_shadow, origin).r ? 1.0 : 0.0;
+        float s10 = (p.z - bias) <= texture(t_shadow, origin + vec2(texel, 0.0)).r ? 1.0 : 0.0;
+        float s01 = (p.z - bias) <= texture(t_shadow, origin + vec2(0.0, texel)).r ? 1.0 : 0.0;
+        float s11 = (p.z - bias) <= texture(t_shadow, origin + vec2(texel)).r ? 1.0 : 0.0;
+        return mix(mix(s00, s10, f.x), mix(s01, s11, f.x), f.y);
+    }
     float lit = 0.0;
     for (int y = -2; y <= 3; ++y) {
         for (int x = -2; x <= 3; ++x) {

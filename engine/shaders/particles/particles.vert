@@ -29,9 +29,10 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
 layout(location = 0) out vec2 v_local;
 layout(location = 1) out vec4 v_color;
 
-const vec2 kCorners[6] = vec2[6](
-    vec2(0.0, 0.0), vec2(1.0, 0.0), vec2(0.0, 1.0),
-    vec2(1.0, 0.0), vec2(1.0, 1.0), vec2(0.0, 1.0));
+// Quatro cantos + índices (0,1,2 / 1,3,2): com o desenho INDEXADO a GPU
+// reaproveita os vértices repetidos da instância — 4 execuções deste shader
+// por partícula em vez de 6 (8E: o vértice é o custo das partículas).
+const vec2 kCorners[4] = vec2[4](vec2(0.0, 0.0), vec2(1.0, 0.0), vec2(0.0, 1.0), vec2(1.0, 1.0));
 
 uint pcg(uint v) {
     uint state = v * 747796405u + 2891336453u;

@@ -935,6 +935,7 @@ struct Hasher {
 u64 content_hash(const std::vector<VectorGroup>& groups, f64 frame) noexcept {
     Hasher H;
     bool morph = false;
+    f64 kmin = 1e300, kmax = -1e300;
     H.u(groups.size());
     for (const VectorGroup& g : groups) {
         H.u(g.visible); H.u(g.merge);
@@ -946,7 +947,13 @@ u64 content_hash(const std::vector<VectorGroup>& groups, f64 frame) noexcept {
             H.path(p.path);
             H.u(p.keys.size());
             for (const PathKey& k : p.keys) { H.u(static_cast<u64>(k.frame)); H.u(k.ease); H.path(k.path); }
-            morph = morph || p.keys.size() > 1;
+            if (p.keys.size() > 1) {
+                morph = true;
+                for (const PathKey& k : p.keys) {
+                    kmin = std::min(kmin, static_cast<f64>(k.frame));
+                    kmax = std::max(kmax, static_cast<f64>(k.frame));
+                }
+            }
         }
         H.u(g.fill.enabled); H.u(g.fill.rule); H.paint(g.fill.paint);
         const VectorStroke& s = g.stroke;
@@ -960,7 +967,12 @@ u64 content_hash(const std::vector<VectorGroup>& groups, f64 frame) noexcept {
         H.f(r.startOpacity); H.f(r.endOpacity); H.u(r.above);
         H.v2(g.position); H.v2(g.anchor); H.v2(g.scale); H.f(g.rotation); H.f(g.opacity);
     }
-    if (morph) H.bytes(&frame, sizeof(frame));
+    // Só o trecho ENTRE o primeiro e o último key muda a forma: fora dele o
+    // caminho é o do key da ponta — o mesmo hash, sem retriangular (8E).
+    if (morph) {
+        const f64 f = std::clamp(frame, kmin, kmax);
+        H.bytes(&f, sizeof(f));
+    }
     return H.h;
 }
 

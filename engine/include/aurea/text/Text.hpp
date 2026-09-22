@@ -39,6 +39,8 @@ public:
 
     struct Impl;
     [[nodiscard]] const Impl& impl() const noexcept { return *impl_; }
+    /// Bytes do arquivo em RAM (a fonte fica inteira na memória enquanto viva).
+    [[nodiscard]] usize memory_bytes() const noexcept;
 
 private:
     Font() = default;
@@ -128,6 +130,11 @@ bool layout_quads(const Font& font, const TextData& t, f32 pad, TextLayout& out)
 /// mudou desde a última leitura (o renderer sobe a textura).
 const u8* glyph_atlas(u64& generation, bool& dirty);
 void glyph_atlas_clean() noexcept;
+/// SDFs gerados e atlas refeitos (acumulados no processo) — 8E: em regime de
+/// playback nenhum dos dois cresce.
+void glyph_atlas_stats(u32& rasterized, u32& resets) noexcept;
+/// Fontes de reserva carregadas (sob demanda, uma a uma) e os bytes delas.
+void fallback_font_stats(u32& loaded, u64& bytes) noexcept;
 
 /// Chave de cache: muda quando qualquer coisa que altera os pixels muda.
 [[nodiscard]] u64 raster_key(const TextData& t, f32 scale) noexcept;

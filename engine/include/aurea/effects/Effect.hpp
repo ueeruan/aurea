@@ -116,6 +116,9 @@ public:
     virtual ~EffectResources() = default;
     /// LUT 256x1 da curva, criada/atualizada só quando a curva muda.
     [[nodiscard]] virtual TextureHandle curve_lut(const CurveData& curve) noexcept = 0;
+    /// Fração das amostras que os efeitos caros usam neste quadro (0,25..1).
+    /// Preview adaptativo/calor < 1; export e prévia do catálogo = 1 sempre.
+    [[nodiscard]] virtual f32 effect_quality() const noexcept { return 1.0f; }
 };
 
 /// Valores resolvidos de UMA instância num instante.

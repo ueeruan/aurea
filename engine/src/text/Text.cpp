@@ -59,6 +59,8 @@ struct Font::Impl {
 
 Font::~Font() = default;
 
+usize Font::memory_bytes() const noexcept { return impl_ ? impl_->data.size() : 0; }
+
 std::shared_ptr<const Font> Font::load(const std::string& path) {
     std::FILE* f = std::fopen(path.c_str(), "rb");
     if (!f) return nullptr;
@@ -120,25 +122,65 @@ std::vector<u32> decode_utf8(const std::string& s) {
 
 // --- Fontes de reserva (fallback) ----------------------------------------------
 // Caractere que a fonte escolhida não tem (árabe no Roboto, CJK, hebraico…)
-// vai para a primeira fonte do aparelho que tem — carregadas sob demanda.
+// vai para a primeira fonte do aparelho que tem. Carregadas UMA A UMA, só
+// quando um caractere precisa (8E): antes, o primeiro caractere ausente
+// carregava as 12 candidatas de uma vez — o CJK sozinho tem ~20 MB. A busca
+// começa pelas fontes da escrita do caractere; as outras só se ela não tiver.
+constexpr const char* kFallbackPaths[] = {
+    "/system/fonts/NotoNaskhArabic-Regular.ttf", "/system/fonts/NotoSansArabic-Regular.ttf",   // 0, 1 árabe
+    "/system/fonts/NotoSansHebrew-Regular.ttf",                                                  // 2 hebraico
+    "/system/fonts/NotoSansDevanagari-Regular.ttf",                                              // 3 devanágari
+    "/system/fonts/NotoSansThai-Regular.ttf",                                                    // 4 tailandês
+    "/system/fonts/NotoSansCJK-Regular.ttc", "/system/fonts/DroidSansFallback.ttf",              // 5, 6 CJK
+    "C:/Windows/Fonts/segoeui.ttf", "C:/Windows/Fonts/arial.ttf",                                // 7, 8 geral
+    "C:/Windows/Fonts/msyh.ttc",                                                                 // 9 CJK (Windows)
+    "C:/Windows/Fonts/seguisym.ttf", "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",     // 10, 11 símbolos
+};
+constexpr usize kFallbackCount = sizeof(kFallbackPaths) / sizeof(kFallbackPaths[0]);
 std::mutex g_fallbackMutex;
-std::vector<std::shared_ptr<const Font>> g_fallbacks;
-bool g_fallbacksTried = false;
+std::shared_ptr<const Font> g_fallbacks[kFallbackCount];
+bool g_fallbackTried[kFallbackCount] = {};
+u32 g_fallbackLoads = 0;
+u64 g_fallbackBytes = 0;
 
-const std::vector<std::shared_ptr<const Font>>& fallbacks() {
+/// Ordem de busca pela escrita do caractere (índices de kFallbackPaths).
+void fallback_order(u32 cp, u8 (&order)[kFallbackCount], usize& n) {
+    static constexpr u8 kArabic[] = {0, 1}, kHebrew[] = {2}, kDeva[] = {3}, kThai[] = {4}, kCjk[] = {5, 9, 6},
+                        kGeneral[] = {7, 8, 10, 11, 6};
+    const u8* first = kGeneral;
+    usize nf = sizeof(kGeneral);
+    if ((cp >= 0x0600 && cp <= 0x06FF) || (cp >= 0x0750 && cp <= 0x077F) || (cp >= 0x08A0 && cp <= 0x08FF)
+        || (cp >= 0xFB50 && cp <= 0xFDFF) || (cp >= 0xFE70 && cp <= 0xFEFF)) { first = kArabic; nf = sizeof(kArabic); }
+    else if ((cp >= 0x0590 && cp <= 0x05FF) || (cp >= 0xFB1D && cp <= 0xFB4F)) { first = kHebrew; nf = sizeof(kHebrew); }
+    else if (cp >= 0x0900 && cp <= 0x097F) { first = kDeva; nf = sizeof(kDeva); }
+    else if (cp >= 0x0E00 && cp <= 0x0E7F) { first = kThai; nf = sizeof(kThai); }
+    else if ((cp >= 0x2E80 && cp <= 0x9FFF) || (cp >= 0xAC00 && cp <= 0xD7AF) || (cp >= 0xF900 && cp <= 0xFAFF)
+             || (cp >= 0xFF00 && cp <= 0xFFEF) || (cp >= 0x20000 && cp <= 0x2FFFF)) { first = kCjk; nf = sizeof(kCjk); }
+    bool used[kFallbackCount] = {};
+    n = 0;
+    for (usize i = 0; i < nf; ++i) { order[n++] = first[i]; used[first[i]] = true; }
+    for (u8 i = 0; i < kFallbackCount; ++i) if (!used[i]) order[n++] = i;
+}
+
+/// A primeira fonte de reserva que tem o caractere (nula se nenhuma).
+const Font::Impl* fallback_for(u32 cp) {
+    u8 order[kFallbackCount];
+    usize n = 0;
+    fallback_order(cp, order, n);
     std::lock_guard<std::mutex> lock(g_fallbackMutex);
-    if (!g_fallbacksTried) {
-        g_fallbacksTried = true;
-        for (const char* c : {"/system/fonts/NotoNaskhArabic-Regular.ttf", "/system/fonts/NotoSansArabic-Regular.ttf",
-                              "/system/fonts/NotoSansHebrew-Regular.ttf", "/system/fonts/NotoSansDevanagari-Regular.ttf",
-                              "/system/fonts/NotoSansThai-Regular.ttf", "/system/fonts/NotoSansCJK-Regular.ttc",
-                              "/system/fonts/DroidSansFallback.ttf", "C:/Windows/Fonts/segoeui.ttf", "C:/Windows/Fonts/arial.ttf",
-                              "C:/Windows/Fonts/msyh.ttc", "C:/Windows/Fonts/seguisym.ttf",
-                              "/System/Library/Fonts/Supplemental/Arial Unicode.ttf"}) {
-            if (auto f = Font::load(c)) g_fallbacks.push_back(std::move(f));
+    for (usize k = 0; k < n; ++k) {
+        const u8 i = order[k];
+        if (!g_fallbackTried[i]) {
+            g_fallbackTried[i] = true;
+            g_fallbacks[i] = Font::load(kFallbackPaths[i]);
+            if (g_fallbacks[i]) {
+                ++g_fallbackLoads;
+                g_fallbackBytes += g_fallbacks[i]->memory_bytes();
+            }
         }
+        if (g_fallbacks[i] && stbtt_FindGlyphIndex(&g_fallbacks[i]->impl().info, static_cast<int>(cp)) != 0) return &g_fallbacks[i]->impl();
     }
-    return g_fallbacks;
+    return nullptr;
 }
 
 bool is_mark(u32 cp) {   // combinantes, seletores de variação, ZWJ/ZWNJ: seguem o anterior
@@ -292,9 +334,7 @@ void place_once(const Font::Impl& f, const TextData& t, f32 pxScale, f32 factor,
         const u32 cp = all[i];
         if (cp == ' ' || cp == '\n' || stbtt_FindGlyphIndex(&attr[i].font->info, static_cast<int>(cp)) != 0) continue;
         if (stbtt_FindGlyphIndex(&f.info, static_cast<int>(cp)) != 0) { attr[i].font = &f; continue; }
-        for (const auto& fb : fallbacks()) {
-            if (stbtt_FindGlyphIndex(&fb->impl().info, static_cast<int>(cp)) != 0) { attr[i].font = &fb->impl(); break; }
-        }
+        if (const Font::Impl* fb = fallback_for(cp)) attr[i].font = fb;
     }
     std::vector<Line> lines;
     hb_buffer_t* buf = hb_buffer_create();
@@ -528,6 +568,8 @@ struct Atlas {
     u32 shelfX = 1, shelfY = 1, shelfH = 0;
     u64 generation = 1;
     bool dirty = true;
+    u32 rasterized = 0;   ///< SDFs gerados (8E: em regime, 0 por quadro)
+    u32 resets = 0;       ///< atlas cheio → refeito
 };
 Atlas& atlas() {
     static Atlas a;
@@ -558,6 +600,7 @@ bool atlas_glyph(Atlas& A, const Font::Impl& f, int glyph, AtlasEntry& out) {
         A.dirty = true;
     }
     if (sdf) stbtt_FreeSDF(sdf, nullptr);
+    ++A.rasterized;
     A.entries[key] = e;
     out = e;
     return true;
@@ -570,6 +613,19 @@ const u8* glyph_atlas(u64& generation, bool& dirty) {
     generation = A.generation;
     dirty = A.dirty;
     return A.px.data();
+}
+
+void glyph_atlas_stats(u32& rasterized, u32& resets) noexcept {
+    Atlas& A = atlas();
+    std::lock_guard<std::mutex> lock(A.mutex);
+    rasterized = A.rasterized;
+    resets = A.resets;
+}
+
+void fallback_font_stats(u32& loaded, u64& bytes) noexcept {
+    std::lock_guard<std::mutex> lock(g_fallbackMutex);
+    loaded = g_fallbackLoads;
+    bytes = g_fallbackBytes;
 }
 
 void glyph_atlas_clean() noexcept {
@@ -639,6 +695,7 @@ bool layout_quads(const Font& font, const TextData& t, f32 pad, TextLayout& out)
         A.shelfX = A.shelfY = 1;
         A.shelfH = 0;
         ++A.generation;
+        ++A.resets;
         A.dirty = true;
     }
     return !out.quads.empty();

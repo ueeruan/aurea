@@ -480,8 +480,9 @@ void SceneRenderer::shutdown() noexcept {
     for (u32 i = 0; i < kJointRing; ++i) {
         if (jointBuf_[i].valid()) gpu_->destroy_buffer(jointBuf_[i]);
         if (morphBuf_[i].valid()) gpu_->destroy_buffer(morphBuf_[i]);
-        jointBuf_[i] = morphBuf_[i] = BufferHandle{};
-        jointCap_[i] = morphCap_[i] = 0;
+        if (instBuf_[i].valid()) gpu_->destroy_buffer(instBuf_[i]);
+        jointBuf_[i] = morphBuf_[i] = instBuf_[i] = BufferHandle{};
+        jointCap_[i] = morphCap_[i] = instCap_[i] = 0;
     }
     release_all();
     release_environment();
@@ -497,8 +498,8 @@ void SceneRenderer::shutdown() noexcept {
 void SceneRenderer::forget_device() noexcept {
     models_.clear();
     for (u32 i = 0; i < kJointRing; ++i) {
-        jointBuf_[i] = morphBuf_[i] = BufferHandle{};
-        jointCap_[i] = morphCap_[i] = 0;
+        jointBuf_[i] = morphBuf_[i] = instBuf_[i] = BufferHandle{};
+        jointCap_[i] = morphCap_[i] = instCap_[i] = 0;
     }
     irradiance_ = prefiltered_ = iblLut_ = TextureHandle{};
     white_ = flatNormal_ = black_ = envCube_ = brdfLut_ = TextureHandle{};
@@ -611,7 +612,16 @@ void SceneRenderer::collect_pipelines(std::vector<PipelineKey>& out) const {
 
 bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& frame, u32 width, u32 height,
                           u64 frameNumber, FGTexture& outColor, const std::vector<ScenePlane>* planes) noexcept {
-    stats_ = SceneStats{};
+    if (frameNumber != statsFrame_) {
+        stats_ = SceneStats{};
+        statsFrame_ = frameNumber;
+        // Estado de LOD de primitivas que sumiram há 10 s sai (sem crescer à toa).
+        if (lodState_.size() > 4096 || frameNumber % 600 == 0) {
+            for (auto it = lodState_.begin(); it != lodState_.end();) {
+                if (it->second.lastFrame + 600 < frameNumber) it = lodState_.erase(it); else ++it;
+            }
+        }
+    }
     if (!gpu_ || !shaders_ || width == 0 || height == 0) return false;
     // Ambiente (IBL): o estúdio neutro ou o HDRI do projeto, gerado fora da
     // thread de render; pronto → vale no próximo quadro.
@@ -668,10 +678,11 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         bool morph;
         usize morphPos, morphShade;
         u32 firstIndex, indexCount;   ///< o nível de detalhe escolhido
+        u32 instanceCount;            ///< > 1 = instanciado (instBase no SSBO)
     };
     // Nível de detalhe pelo tamanho na tela: diâmetro projetado da caixa.
     const f32 pxPerUnit = static_cast<f32>(height) * 0.5f / std::tan(frame.camera.fovY * 0.5f);
-    auto pick_lod = [&](const GpuPrimitive& p, const Mat4& world, const Mat4& viewFromLocal, u32& first, u32& count) {
+    auto pick_lod = [&](const GpuPrimitive& p, const Mat4& world, const Mat4& viewFromLocal, u64 stateKey, u32& first, u32& count) {
         first = p.firstIndex;
         count = p.indexCount;
         if (p.lodLevels <= 1 || !p.bounds.valid()) return;
@@ -681,8 +692,25 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         const f32 sy = Vec3{world.col[1].x, world.col[1].y, world.col[1].z}.length();
         const f32 sz = Vec3{world.col[2].x, world.col[2].y, world.col[2].z}.length();
         const f32 diameter = p.bounds.extent().length() * std::max(sx, std::max(sy, sz));
-        const f32 px = diameter / depth * pxPerUnit;
-        u32 level = px < 60.0f ? 2u : (px < 160.0f ? 1u : 0u);
+        // Viés do preview (HeavyQuality::lodBias < 1 troca antes para a malha
+        // simplificada); o export usa 1.
+        const f32 px = diameter / depth * pxPerUnit * lodBias_;
+        auto level_at = [](f32 v, f32 k) { return v < 60.0f * k ? 2u : (v < 160.0f * k ? 1u : 0u); };
+        u32 level = level_at(px, 1.0f);
+        if (lodHysteresis_) {
+            // Histerese: engrossa só abaixo de 85% do limiar, refina só acima
+            // de 115% — um tamanho oscilando em cima do limiar não troca a
+            // malha a cada quadro (o "popping" que pisca).
+            auto it = lodState_.find(stateKey);
+            if (it != lodState_.end()) {
+                const u32 prev = it->second.level;
+                const u32 coarser = level_at(px, 0.85f), finer = level_at(px, 1.15f);
+                level = coarser > prev ? coarser : (finer < prev ? finer : prev);
+            }
+            LodState& st = lodState_[stateKey];
+            st.level = static_cast<u8>(level);
+            st.lastFrame = frameNumber;
+        }
         level = std::min(level, p.lodLevels - 1);
         first = p.lodFirst[level];
         count = p.lodCount[level];
@@ -765,6 +793,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         MeshPush push;   // model = luz ← local; normalCol[0].x = início das juntas
         PipelineHandle pipeline;
         bool skinned;
+        u32 instanceCount;
     };
     std::vector<ShadowDraw> shadowDraws;
     Mat4 shadowMatrix = Mat4::identity();
@@ -844,6 +873,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                                                                         + inst.skinJointOffset[static_cast<usize>(skinIndex)]) : 0.0f;
                         sd.pipeline = *pipe;
                         sd.skinned = sk;
+                        sd.instanceCount = 1;
                         shadowDraws.push_back(sd);
                     }
                 }
@@ -852,7 +882,9 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     }
     const bool shadowsOn = !shadowDraws.empty();
     header.shadowMatrix = shadowMatrix;
-    header.shadowParams = Vec4{shadowsOn ? 1.0f : 0.0f, 1.0f / static_cast<f32>(shadowSize_), 0.0015f,
+    // x: 0 = sem sombra; 1 = PCF 6×6 (export), 2 = 2×2 bilinear, 3 = uma amostra (preview, 8E).
+    const f32 filterCode = shadowFilter_ >= 2 ? 1.0f : (shadowFilter_ == 1 ? 2.0f : 3.0f);
+    header.shadowParams = Vec4{shadowsOn ? filterCode : 0.0f, 1.0f / static_cast<f32>(shadowSize_), 0.0015f,
                                static_cast<f32>(shadowLight)};
     FGTexture shadowTex{};
     if (shadowsOn) {
@@ -862,33 +894,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         sd.sampled = true;
         sd.renderTarget = true;
         shadowTex = graph.create_texture("3d-sombra", sd);
-        const u32 n = static_cast<u32>(shadowDraws.size());
-        ShadowDraw* sl = arena.alloc_array<ShadowDraw>(n);
-        if (!sl) return false;
-        std::copy(shadowDraws.begin(), shadowDraws.end(), sl);
-        struct SCap {
-            ShadowDraw* draws;
-            u32 count;
-            BufferHandle joints;
-        } scap{sl, n, joints};
-        graph.add_raster_pass_depth("3d-sombra", PassStage::Scene3D, FGTexture{}, LoadOp::DontCare, Vec4{}, shadowTex,
-                                    LoadOp::Clear, true, 1.0f, [scap](PassContext& pc) {
-            CommandList& c = pc.cmds;
-            PipelineHandle bound{};
-            for (u32 i = 0; i < scap.count; ++i) {
-                const ShadowDraw& d = scap.draws[i];
-                if (!(d.pipeline == bound)) {
-                    c.bind_pipeline(d.pipeline);
-                    bound = d.pipeline;
-                }
-                if (d.skinned) c.bind_storage_buffer(scap.joints);
-                c.bind_vertex_buffer(0, d.model->positions, 0);
-                if (d.skinned) c.bind_vertex_buffer(2, d.model->skin, 0);
-                c.bind_index_buffer(d.model->indices, 0, d.model->indexType);
-                c.push_constants(&d.push, sizeof(MeshPush));
-                c.draw_indexed(d.prim->indexCount, 1, d.prim->firstIndex, d.prim->vertexOffset, 0);
-            }
-        });
+        stats_.shadowMapSize = std::max(stats_.shadowMapSize, shadowSize_);
     }
 
     // --- Morph (blend shapes): deformação na CPU, um bloco por primitiva -------
@@ -1041,8 +1047,13 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                                                              + inst.skinJointOffset[static_cast<usize>(skinIndex)]);
                 }
                 d.pipeline = *pipe;
+                d.instanceCount = 1;
                 if (skinDraw || d.morph) { d.firstIndex = p.firstIndex; d.indexCount = p.indexCount; }
-                else pick_lod(p, world, viewFromLocal, d.firstIndex, d.indexCount);
+                else {
+                    const u64 lodKey = (inst.layerKey * 0x9E3779B97F4A7C15ull) ^ (static_cast<u64>(n) << 20) ^ static_cast<u64>(primIndex)
+                                     ^ (static_cast<u64>(instIndex) << 44);
+                    pick_lod(p, world, viewFromLocal, lodKey, d.firstIndex, d.indexCount);
+                }
                 d.viewDepth = viewFromLocal.transform_point(p.bounds.center()).z;
                 d.sortKey = static_cast<u32>(pipe->id & 0xFFFF) << 16 | static_cast<u32>(reinterpret_cast<uintptr_t>(mat) >> 4 & 0xFFFF);
                 (mat->factors.alphaMode == AlphaMode::Blend ? blended : opaque).push_back(d);
@@ -1050,13 +1061,140 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 stats_.triangles += d.indexCount / 3;
             }
         }
-        stats_.geometryBytes += gm->geometryBytes;
-        stats_.textureBytes += gm->textureBytes;
     }
     // Opacos agrupados por pipeline/material (menos trocas de estado); os
     // transparentes do mais longe para o mais perto (ordem correta do blend).
     std::sort(opaque.begin(), opaque.end(), [](const Draw& a, const Draw& b) { return a.sortKey < b.sortKey; });
     std::sort(blended.begin(), blended.end(), [](const Draw& a, const Draw& b) { return a.viewDepth > b.viewDepth; });
+
+    // --- Instancing (8E) ------------------------------------------------------
+    // Objetos iguais (mesma malha, primitiva, LOD, material e pipeline; sem
+    // skin nem morph) viram UM desenho com N instâncias. As matrizes vão num
+    // SSBO do quadro: duas mat4 por instância na cor (mundo + normais), uma na
+    // sombra (luz ← local). Transparentes ficam fora: a ordem do blend é por
+    // profundidade, desenho a desenho. O recorte por frustum já aconteceu —
+    // instância fora da tela nem entra no grupo.
+    std::vector<Mat4> instData;
+    {
+        auto mix = [](u64 h, u64 v) { return (h ^ v) * 0x100000001B3ull; };
+        std::unordered_map<u64, u32> groupOf;
+        std::vector<std::vector<u32>> members;
+        std::vector<Draw> merged;
+        merged.reserve(opaque.size());
+        for (u32 i = 0; i < opaque.size(); ++i) {
+            const Draw& d = opaque[i];
+            if (d.skinned || d.morph || !instancing_) { merged.push_back(d); members.emplace_back(); continue; }
+            u64 h = 0xCBF29CE484222325ull;
+            h = mix(h, reinterpret_cast<uintptr_t>(d.model));
+            h = mix(h, reinterpret_cast<uintptr_t>(d.prim));
+            h = mix(h, reinterpret_cast<uintptr_t>(d.material));
+            h = mix(h, d.pipeline.id);
+            h = mix(h, (static_cast<u64>(d.firstIndex) << 32) | d.indexCount);
+            auto [it, fresh] = groupOf.try_emplace(h, static_cast<u32>(merged.size()));
+            if (fresh) { merged.push_back(d); members.emplace_back(1, i); }
+            else members[it->second].push_back(i);
+        }
+        for (u32 g = 0; g < merged.size(); ++g) {
+            if (members[g].size() < 2) continue;
+            const u32 base = static_cast<u32>(instData.size());
+            for (u32 idx : members[g]) {
+                const Draw& m = opaque[idx];
+                instData.push_back(m.push.model);
+                Mat4 nm;
+                nm.col[0] = Vec4{m.push.normalCol[0].x, m.push.normalCol[0].y, m.push.normalCol[0].z, 0};
+                nm.col[1] = Vec4{m.push.normalCol[1].x, m.push.normalCol[1].y, m.push.normalCol[1].z, 0};
+                nm.col[2] = Vec4{m.push.normalCol[2].x, m.push.normalCol[2].y, m.push.normalCol[2].z, 0};
+                nm.col[3] = Vec4{0, 0, 0, 0};
+                instData.push_back(nm);
+            }
+            merged[g].instanceCount = static_cast<u32>(members[g].size());
+            merged[g].push.normalCol[0].w = static_cast<f32>(base + 1u);
+            ++stats_.instancedDraws;
+        }
+        opaque.swap(merged);
+
+        // Sombra: o mesmo, por (malha, primitiva, pipeline).
+        std::unordered_map<u64, u32> sgroupOf;
+        std::vector<std::vector<u32>> smembers;
+        std::vector<ShadowDraw> smerged;
+        for (u32 i = 0; i < shadowDraws.size(); ++i) {
+            const ShadowDraw& d = shadowDraws[i];
+            if (d.skinned || !instancing_) { smerged.push_back(d); smembers.emplace_back(); continue; }
+            u64 h = 0xCBF29CE484222325ull;
+            h = mix(h, reinterpret_cast<uintptr_t>(d.model));
+            h = mix(h, reinterpret_cast<uintptr_t>(d.prim));
+            h = mix(h, d.pipeline.id);
+            auto [it, fresh] = sgroupOf.try_emplace(h, static_cast<u32>(smerged.size()));
+            if (fresh) { smerged.push_back(d); smembers.emplace_back(1, i); }
+            else smembers[it->second].push_back(i);
+        }
+        for (u32 g = 0; g < smerged.size(); ++g) {
+            if (smembers[g].size() < 2) continue;
+            const u32 base = static_cast<u32>(instData.size());
+            for (u32 idx : smembers[g]) instData.push_back(shadowDraws[idx].push.model);
+            smerged[g].instanceCount = static_cast<u32>(smembers[g].size());
+            smerged[g].push.normalCol[0].y = static_cast<f32>(base + 1u);
+        }
+        shadowDraws.swap(smerged);
+    }
+    BufferHandle instBuf{};
+    if (!instData.empty()) {
+        const u32 slot = instSlot_++ % kJointRing;
+        const usize bytes = instData.size() * sizeof(Mat4);
+        if (instCap_[slot] < bytes) {
+            if (instBuf_[slot].valid()) gpu_->destroy_buffer(instBuf_[slot]);
+            BufferDesc bd;
+            bd.bytes = std::max<usize>(bytes * 2, 64 * sizeof(Mat4));
+            bd.usage = BufferUsage::Storage;
+            bd.access = MemoryAccess::Upload;
+            bd.debugName = "3d-instancias";
+            auto b = gpu_->create_buffer(bd);
+            instBuf_[slot] = b.ok() ? *b : BufferHandle{};
+            instCap_[slot] = b.ok() ? bd.bytes : 0;
+        }
+        void* ptr = nullptr;
+        if (instBuf_[slot].valid() && gpu_->map_buffer(instBuf_[slot], ptr).ok() && ptr) {
+            std::copy(instData.begin(), instData.end(), static_cast<Mat4*>(ptr));
+            gpu_->unmap_buffer(instBuf_[slot]);
+            instBuf = instBuf_[slot];
+        }
+        // Sem o buffer (memória de GPU): o grupo não desenha — melhor faltar
+        // um quadro do que desenhar todas as instâncias no lugar da primeira.
+        if (!instBuf.valid()) return false;
+    }
+
+    if (shadowsOn) {
+        const u32 n = static_cast<u32>(shadowDraws.size());
+        ShadowDraw* sl = arena.alloc_array<ShadowDraw>(n);
+        if (!sl) return false;
+        std::copy(shadowDraws.begin(), shadowDraws.end(), sl);
+        stats_.shadowDrawCalls += n;
+        struct SCap {
+            ShadowDraw* draws;
+            u32 count;
+            BufferHandle joints;
+            BufferHandle inst;
+        } scap{sl, n, joints, instBuf};
+        graph.add_raster_pass_depth("3d-sombra", PassStage::Scene3D, FGTexture{}, LoadOp::DontCare, Vec4{}, shadowTex,
+                                    LoadOp::Clear, true, 1.0f, [scap](PassContext& pc) {
+            CommandList& c = pc.cmds;
+            PipelineHandle bound{};
+            for (u32 i = 0; i < scap.count; ++i) {
+                const ShadowDraw& d = scap.draws[i];
+                if (!(d.pipeline == bound)) {
+                    c.bind_pipeline(d.pipeline);
+                    bound = d.pipeline;
+                }
+                if (d.skinned) c.bind_storage_buffer(scap.joints);
+                else if (d.instanceCount > 1) c.bind_storage_buffer(scap.inst);
+                c.bind_vertex_buffer(0, d.model->positions, 0);
+                if (d.skinned) c.bind_vertex_buffer(2, d.model->skin, 0);
+                c.bind_index_buffer(d.model->indices, 0, d.model->indexType);
+                c.push_constants(&d.push, sizeof(MeshPush));
+                c.draw_indexed(d.prim->indexCount, std::max(1u, d.instanceCount), d.prim->firstIndex, d.prim->vertexOffset, 0);
+            }
+        });
+    }
 
     const u32 total = static_cast<u32>(opaque.size() + blended.size());
     Draw* list = total ? arena.alloc_array<Draw>(total) : nullptr;
@@ -1079,7 +1217,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     const u32 opaqueCount = static_cast<u32>(opaque.size());
     for (usize i = 0; i < opaque.size(); ++i) list[i] = opaque[i];
     for (usize i = 0; i < blended.size(); ++i) list[opaque.size() + i] = blended[i];
-    stats_.drawCalls = total;
+    stats_.drawCalls += total;
 
     struct Cap {
         Draw* draws;
@@ -1092,6 +1230,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         FGTexture shadow;
         u64 nearestSampler;
         BufferHandle morph;
+        BufferHandle inst;
         ScenePlane* planes;
         u32 planeCount;
         u32 opaqueCount;
@@ -1099,7 +1238,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     } cap{list, total, white_, flatNormal_, ibl ? irradiance_ : envCube_, ibl ? prefiltered_ : envCube_,
           ibl ? iblLut_ : brdfLut_, cubeSampler_, shaders_->sampler(CommonSampler::LinearRepeat).id,
           shaders_->sampler(CommonSampler::LinearClamp).id, joints, shadowTex,
-          shaders_->sampler(CommonSampler::NearestClamp).id, morphBuf, planeList, planeCount, opaqueCount, planePipe};
+          shaders_->sampler(CommonSampler::NearestClamp).id, morphBuf, instBuf, planeList, planeCount, opaqueCount, planePipe};
 
     // Z reverso: limpa a profundidade com 0 (o infinito).
     const u32 pbrPass = graph.add_raster_pass_depth("3d-pbr", PassStage::Scene3D, color, LoadOp::Clear, Vec4{0, 0, 0, 0}, depth,
@@ -1166,14 +1305,23 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 c.bind_index_buffer(d.model->indices, 0, d.model->indexType);
                 boundModel = d.model;
             }
+            if (d.instanceCount > 1) c.bind_storage_buffer(cap.inst);
             c.set_uniforms(d.block, sizeof(SceneBlock));
             c.push_constants(&d.push, sizeof(MeshPush));
-            c.draw_indexed(d.indexCount, 1, d.firstIndex, d.prim->vertexOffset, 0);
+            c.draw_indexed(d.indexCount, std::max(1u, d.instanceCount), d.firstIndex, d.prim->vertexOffset, 0);
         }
         if (cap.opaqueCount >= cap.count) drawPlanes();
     });
     if (shadowTex.valid()) graph.read(pbrPass, shadowTex);
     for (u32 k = 0; k < planeCount; ++k) graph.read(pbrPass, planeList[k].texture);
+    // Memória residente: por modelo (instâncias do mesmo asset dividem malha,
+    // texturas e materiais — um GpuModel por asset).
+    stats_.geometryBytes = stats_.textureBytes = 0;
+    for (const auto& [k, e] : models_) {
+        if (!e.model) continue;
+        stats_.geometryBytes += e.model->geometryBytes;
+        stats_.textureBytes += e.model->textureBytes;
+    }
     outColor = color;
     return true;
 }

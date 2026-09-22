@@ -73,16 +73,23 @@ public:
         return true;
     }
 
-    /// O halo de um raio: separa o que passa do limiar e borra.
-    static Status halo(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input,
-                       const Rect& region, f32 radius, const char* label, LayerImage& out) {
+    /// Redução da imagem clara para um halo de raio `radius` (px da layer):
+    /// o bastante para o gaussiano caber no orçamento (48 px, a regra de antes)
+    /// e, com o raio ≥ 12 TEXELS da resolução de trabalho, pelo menos 1/2 — um
+    /// borrão de σ ≥ 4 texels não tem detalhe que a meia resolução perca (o
+    /// diff do export está no relatório 8E: só as curvas de nível do "estouro"
+    /// andam alguns px; média 0,08/255).
+    static u32 bright_reduction(f32 radius, f32 texelScale) noexcept {
+        return std::max(reduction_for(std::max(radius, 1.0f), 48.0f), radius * texelScale >= 12.0f ? 2u : 1u);
+    }
+
+    /// A imagem clara (limiar com joelho), já reduzida por `r`.
+    static Status bright(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, const Rect& region, u32 r,
+                         const char* label, LayerImage& out) {
         const f32 k = input.texel_scale_x();
-        // O brilho vive numa densidade menor: é um borrão largo, não precisa
-        // da resolução cheia, e isso derruba o custo do gaussiano.
-        const u32 r = reduction_for(std::max(radius, 1.0f), 48.0f);
         u32 bw = 0, bh = 0;
         ctx.region_size(region, k / static_cast<f32>(r), bw, bh);
-        const FGTexture bright = ctx.texture(label, bw, bh);
+        const FGTexture tex = ctx.texture(label, bw, bh);
         const f32 t = e.f(kThreshold) / 100.0f;
         const f32 knee = std::max(1e-4f, t * 0.5f);
         struct {
@@ -93,19 +100,25 @@ public:
         ub.uvMap = EffectBuildContext::uv_map(region, input.region);
         ub.texel = Vec4{1.0f / static_cast<f32>(input.width), 1.0f / static_cast<f32>(input.height), 0, 0};
         ub.knee = Vec4{t, knee, 1.0f / (4.0f * knee), 0.0f};
-        if (ctx.fullscreen_pass(label, PassStage::Effects, bright, ShaderId::effects_bright_pass_frag,
+        if (ctx.fullscreen_pass(label, PassStage::Effects, tex, ShaderId::effects_bright_pass_frag,
                                 {PassTexture{input.texture, {}, CommonSampler::LinearBorder}},
                                 &ub, sizeof(ub)) == kInvalidIndex) {
             return Errc::PipelineCompileFailed;
         }
+        out = LayerImage{tex, region, bw, bh};
+        return OkStatus;
+    }
 
-        LayerImage brightImage{bright, region, bw, bh};
+    /// Um halo a partir da imagem clara: o gaussiano segue a PIRÂMIDE a partir
+    /// dela (build_gaussian reduz por 2 enquanto σ passar de 8 texels).
+    static Status blur_halo(EffectBuildContext& ctx, const LayerImage& brightImage, const Rect& region, f32 radius,
+                            LayerImage& out) {
         out = brightImage;
         if (radius <= 0.5f) return OkStatus;
         BlurRequest req;
         // O sigma é medido em pixels da LAYER: o gaussiano o converte pela
-        // densidade da imagem que recebe (que já está reduzida por `r`). Aqui
-        // NÃO se multiplica por `r` — seria desfocar r² vezes.
+        // densidade da imagem que recebe (já reduzida). Aqui NÃO se multiplica
+        // pela redução — seria desfocar r² vezes.
         req.sigmaX = req.sigmaY = radius / 3.0f;
         req.repeatEdges = false;
         req.outRegion = region;
@@ -120,13 +133,25 @@ public:
         const Rect region = spread_region(input.region, std::max(coreR, haloR), std::max(coreR, haloR),
                                           e.placement, margin);
 
+        // Núcleo e halo (8E): o núcleo largo (≥ 8 texels) vive em 1/2 — antes
+        // era borrado em resolução cheia (≈ 70% do custo do efeito). Quando os
+        // dois caem na MESMA redução, a imagem clara é uma só (o limiar não
+        // depende do raio); com reduções diferentes, cada um tem a sua, como
+        // antes — o halo sai idêntico.
+        const bool wantCore = e.f(kCoreIntensity) > 1e-4f, wantHalo = e.f(kHaloIntensity) > 1e-4f;
         LayerImage core{input.texture, input.region, input.width, input.height};
         LayerImage haloImage{input.texture, input.region, input.width, input.height};
-        if (e.f(kCoreIntensity) > 1e-4f) {
-            if (const Status s = halo(ctx, e, input, region, coreR, "brilho-nucleo", core); !s.ok()) return s;
+        const f32 k = input.texel_scale_x();
+        const u32 rCore = bright_reduction(coreR, k), rHalo = bright_reduction(haloR, k);
+        LayerImage coreBright, haloBright;
+        if (wantCore) {
+            if (const Status s = bright(ctx, e, input, region, rCore, "brilho-nucleo", coreBright); !s.ok()) return s;
+            if (const Status s = blur_halo(ctx, coreBright, region, coreR, core); !s.ok()) return s;
         }
-        if (e.f(kHaloIntensity) > 1e-4f) {
-            if (const Status s = halo(ctx, e, input, region, haloR, "brilho-halo", haloImage); !s.ok()) return s;
+        if (wantHalo) {
+            if (wantCore && rHalo == rCore) haloBright = coreBright;
+            else if (const Status s = bright(ctx, e, input, region, rHalo, "brilho-halo", haloBright); !s.ok()) return s;
+            if (const Status s = blur_halo(ctx, haloBright, region, haloR, haloImage); !s.ok()) return s;
         }
 
         u32 w = 0, h = 0;
@@ -193,7 +218,9 @@ public:
         // passar as coordenadas relativas.
         const Vec2 c = e.p2(kCenter);
         u.p0 = Vec4{e.f(kIntensity), e.f(kLength) / 100.0f, e.f(kThreshold) / 100.0f, e.f(kDecay) / 100.0f};
-        u.p1 = Vec4{c.x, c.y, std::round(e.f(kSamples)), e.f(kKnee) / 100.0f};
+        // Amostras ao longo do raio: o preview adaptativo reduz (mín. 8); export = as do usuário.
+        const f32 samples = std::max(std::min(8.0f, e.f(kSamples)), std::round(e.f(kSamples) * ctx.resources().effect_quality()));
+        u.p1 = Vec4{c.x, c.y, samples, e.f(kKnee) / 100.0f};
         u.p2 = Vec4{e.b(kKeepSource) ? 1.0f : 0.0f, e.f(kColorShift), 0.0f, 0.0f};
         u.color = e.color(kColor);
         return single_pass(ctx, ShaderId::effects_rays_frag, input, u, "raios", out);
@@ -295,7 +322,9 @@ public:
         // O raio é medido em TEXELS da textura reduzida: por isso a divisão.
         u.p0 = Vec4{radius * texelScaleX / static_cast<f32>(k), e.f(kHighlightBoost) / 100.0f,
                     static_cast<f32>(e.e(kIrisSides)), e.f(kIrisSharpness) / 100.0f};
-        const f32 quality = std::clamp(e.f(kQuality), 1.0f, 6.0f);
+        // Preview adaptativo (8E): a qualidade (anéis do disco) cai junto com
+        // `effect_quality`; o export e a prévia do catálogo usam 1 (intocados).
+        const f32 quality = std::clamp(e.f(kQuality) * ctx.resources().effect_quality(), 1.0f, 6.0f);
         u.p1 = Vec4{e.f(kIrisRotation), std::round(6.0f + quality * 3.0f), std::round(quality),
                     e.f(kMix) / 100.0f};
         u.p3 = Vec4{e.b(kOnlyBlur) ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f};

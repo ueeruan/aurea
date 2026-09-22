@@ -47,6 +47,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.aurea.aurea.ui.ds.AureaModalSheet
 import com.aurea.aurea.ui.theme.AureaColors
+import com.aurea.aurea.ui.theme.AureaDims
 import com.aurea.aurea.ui.theme.AureaType
 
 /** O que a folha devolve ao criar. */
@@ -92,7 +93,7 @@ internal fun NewProjectSheet(
         onCreate(NewProjectSpec(frame.width, frame.height, fps, title))
     }
 
-    AureaModalSheet(onDismiss = onDismiss, topRadius = HomeDims.SheetTopRadius) {
+    AureaModalSheet(onDismiss = onDismiss, topRadius = AureaDims.RadiusXl) {
         Column(
             Modifier
                 .fillMaxWidth()
@@ -102,7 +103,7 @@ internal fun NewProjectSheet(
             Row(verticalAlignment = Alignment.Bottom) {
                 Text("Novo projeto", style = AureaType.TitleLarge, modifier = Modifier.weight(1f))
                 // A ficha, viva: muda com cada escolha.
-                Text("${frame.width} × ${frame.height} · $fps fps", style = HomeType.SheetSpec)
+                Text("${frame.width} × ${frame.height} · $fps fps", style = AureaType.SheetSpec)
             }
             Spacer(Modifier.height(16.dp))
             AspectPreviewFrame(
@@ -124,7 +125,7 @@ internal fun NewProjectSheet(
                 Spacer(Modifier.height(12.dp))
                 Row(verticalAlignment = Alignment.Bottom) {
                     DimensionField("Largura", freeWidth, Modifier.weight(1f)) { freeWidth = it }
-                    Text("×", style = HomeType.Times, modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp))
+                    Text("×", style = AureaType.Times, modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp))
                     DimensionField("Altura", freeHeight, Modifier.weight(1f)) { freeHeight = it }
                 }
             }
@@ -135,8 +136,8 @@ internal fun NewProjectSheet(
                 value = name,
                 onValueChange = { name = it },
                 placeholder = suggestedName.ifEmpty { "Nome do projeto" },
-                textStyle = HomeType.NameField,
-                placeholderStyle = HomeType.NamePlaceholder,
+                textStyle = AureaType.NameField,
+                placeholderStyle = AureaType.NamePlaceholder,
                 keyboard = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
                 onDone = { create() },
                 modifier = Modifier
@@ -171,7 +172,7 @@ internal fun NewProjectSheet(
                     .pressHighlight { create() },
                 contentAlignment = Alignment.Center,
             ) {
-                Text("Criar projeto", style = HomeType.CreateButton)
+                Text("Criar projeto", style = AureaType.Button)
             }
         }
     }
@@ -197,8 +198,8 @@ private fun AspectPreviewFrame(ratio: Float, label: String, hint: String) {
         ) {
             ScaleDownToFit(Modifier.fillMaxSize()) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(label, style = HomeType.FrameLabel)
-                    Text(hint, style = HomeType.FrameHint)
+                    Text(label, style = AureaType.FrameLabel)
+                    Text(hint, style = AureaType.FrameHint)
                 }
             }
         }
@@ -238,8 +239,8 @@ private fun AspectOptionItem(option: AspectOption, selected: Boolean, modifier: 
             )
         }
         Spacer(Modifier.height(7.dp))
-        Text(option.label, style = HomeType.FormatLabel, color = if (selected) AureaColors.Accent else AureaColors.Text)
-        Text(option.hint, style = HomeType.FormatHint, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+        Text(option.label, style = AureaType.FormatLabel, color = if (selected) AureaColors.Accent else AureaColors.Text)
+        Text(option.hint, style = AureaType.FormatHint, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
     }
 }
 
@@ -247,13 +248,13 @@ private fun AspectOptionItem(option: AspectOption, selected: Boolean, modifier: 
 @Composable
 private fun DimensionField(label: String, value: String, modifier: Modifier, onChange: (String) -> Unit) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(label, style = HomeType.DimLabel)
+        Text(label, style = AureaType.DimLabel)
         SheetTextField(
             value = value,
             onValueChange = { v -> onChange(v.filter { it.isDigit() }.take(5)) },
             placeholder = "",
-            textStyle = HomeType.DimField,
-            placeholderStyle = HomeType.DimField,
+            textStyle = AureaType.DimField,
+            placeholderStyle = AureaType.DimField,
             keyboard = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
             onDone = null,
             modifier = Modifier

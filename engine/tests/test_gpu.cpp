@@ -3877,3 +3877,72 @@ AUREA_TEST(Gpu, ShapeSizeAndRadiusAnimateWithKeyframes) {
     std::remove(path.c_str());
     (void)l;
 }
+
+// =============================================================================
+// Prévia de efeito (Fase 7.3 §13–§15)
+//
+// A cartela de demonstração roda o efeito REAL. O que se testa aqui não é a
+// arte da cartela: é que a prévia sai com o tamanho pedido, com alfa cheio, e
+// que ela MUDA quando o efeito faz algo — uma prévia que devolvesse a cartela
+// intacta para todo efeito seria uma prévia que mente.
+// =============================================================================
+AUREA_TEST(Gpu, EffectPreviewRendersThePlateAtTheRequestedSize) {
+    AUREA_REQUIRE_GPU();
+    Gpu& g = gpu();
+    std::vector<u8> rgba;
+    AUREA_CHECK(g.renderer.render_effect_preview(g.effects, effect_type_id(effect_keys::kExposure), 160, 100, rgba).ok());
+    AUREA_CHECK_EQ(rgba.size(), static_cast<usize>(160) * 100 * 4);
+    usize opaque = 0;
+    for (usize i = 3; i < rgba.size(); i += 4) if (rgba[i] == 255) ++opaque;
+    AUREA_CHECK_EQ(opaque, static_cast<usize>(160) * 100);   // a cartela é opaca
+    // A cartela tem conteúdo: se saísse preta, nenhuma prévia diria nada.
+    usize bright = 0;
+    for (usize i = 0; i < rgba.size(); i += 4) if (rgba[i] > 40) ++bright;
+    AUREA_CHECK(bright > 100);
+}
+
+AUREA_TEST(Gpu, EffectPreviewShowsWhatTheEffectDoes) {
+    AUREA_REQUIRE_GPU();
+    Gpu& g = gpu();
+    std::vector<u8> mild;
+    std::vector<u8> sharp;
+    AUREA_CHECK(g.renderer.render_effect_preview(g.effects, effect_type_id(effect_keys::kGaussianBlur), 160, 100, mild).ok());
+    AUREA_CHECK(g.renderer.render_effect_preview(g.effects, effect_type_id(effect_keys::kGaussianBlur), 160, 100, sharp).ok());
+    // Determinística: a cartela é gerada no shader, sem estado escondido.
+    AUREA_CHECK(mild == sharp);
+
+    std::vector<u8> crisp;
+    AUREA_CHECK(g.renderer.render_effect_preview(g.effects, effect_type_id(effect_keys::kSharpen), 160, 100, crisp).ok());
+    // As prévias usam os VALORES DE DEMONSTRAÇÃO, não o padrão neutro: se
+    // saíssem iguais, a prévia não estaria mostrando nada (§13).
+    AUREA_CHECK(mild != crisp);
+
+    // Energia de borda: soma do salto de luma entre pixels vizinhos. Desfocar
+    // TEM de baixar isto, e não afiar. É a medida de "o efeito apareceu".
+    const u32 w = 160;
+    auto edge_energy = [w](const std::vector<u8>& px) {
+        f64 e = 0.0;
+        const u32 h = static_cast<u32>(px.size() / 4) / w;
+        for (u32 y = 0; y < h; ++y) {
+            for (u32 x = 1; x < w; ++x) {
+                const usize a = (static_cast<usize>(y) * w + x) * 4;
+                e += std::fabs(static_cast<f64>(px[a]) - static_cast<f64>(px[a - 4]));
+            }
+        }
+        return e;
+    };
+    AUREA_CHECK(edge_energy(mild) < edge_energy(crisp));
+}
+
+AUREA_TEST(Gpu, EffectPreviewRefusesWhatOneFrameCannotShow) {
+    AUREA_REQUIRE_GPU();
+    Gpu& g = gpu();
+    std::vector<u8> rgba;
+    // Eco precisa de uma SEQUÊNCIA: um quadro solto não o representa, e a UI
+    // prefere a cartela genérica a uma imagem que mentiria.
+    const Status s = g.renderer.render_effect_preview(g.effects, effect_type_id(effect_keys::kEchoTrail), 96, 60, rgba);
+    AUREA_CHECK(!s.ok());
+    std::vector<u8> none;
+    AUREA_CHECK(!g.renderer.render_effect_preview(g.effects, 0u, 96, 60, none).ok());
+    AUREA_CHECK(!g.renderer.render_effect_preview(g.effects, effect_type_id(effect_keys::kGaussianBlur), 0, 60, none).ok());
+}

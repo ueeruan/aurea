@@ -31,6 +31,10 @@ public:
         p.add_float("offset", "Deslocamento", 0.0f, -0.5f, 0.5f);
         p.add_float("gamma", "Correção de gama", 1.0f, 0.1f, 10.0f);
     }
+    bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
+        v[kExposure] = ParamValue::scalar(1.0f);      // um ponto de luz já se vê
+        return true;
+    }
     bool is_identity(const EffectEval& e) const noexcept override {
         return near(e.f(kExposure), 0.0f) && near(e.f(kOffset), 0.0f) && near(e.f(kGamma), 1.0f);
     }
@@ -58,6 +62,11 @@ public:
     void declare_parameters(ParameterRegistry& p) const override {
         p.add_float("brightness", "Brilho", 0.0f, -150.0f, 150.0f);
         p.add_float("contrast", "Contraste", 0.0f, -100.0f, 100.0f);
+    }
+    bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
+        v[kBrightness] = ParamValue::scalar(25.0f);
+        v[kContrast] = ParamValue::scalar(40.0f);
+        return true;
     }
     bool is_identity(const EffectEval& e) const noexcept override {
         return near(e.f(kBrightness), 0.0f) && near(e.f(kContrast), 0.0f);
@@ -90,6 +99,10 @@ public:
     void declare_parameters(ParameterRegistry& p) const override {
         p.add_float("saturation", "Saturação", 0.0f, -100.0f, 100.0f);
     }
+    bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
+        v[kSaturation] = ParamValue::scalar(80.0f);
+        return true;
+    }
     bool is_identity(const EffectEval& e) const noexcept override {
         return near(e.f(kSaturation), 0.0f);
     }
@@ -115,6 +128,12 @@ public:
         p.add_color("map_black", "Mapear preto para", Vec4{0, 0, 0, 1});
         p.add_color("map_white", "Mapear branco para", Vec4{1, 1, 1, 1});
         p.add_float("amount", "Intensidade", 100.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+    }
+    bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
+        // Sombras no azul profundo, luzes no âmbar: o duotone clássico.
+        v[0] = ParamValue::color(0.02f, 0.10f, 0.30f, 1.0f);
+        v[1] = ParamValue::color(1.00f, 0.72f, 0.32f, 1.0f);
+        return true;
     }
     bool is_identity(const EffectEval& e) const noexcept override {
         return near(e.f(kAmount), 0.0f);
@@ -153,6 +172,13 @@ public:
                         offset ? -1.0f : -4.0f, offset ? 1.0f : 4.0f);
         }
     }
+    bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
+        // Roda os canais: vermelho vem do verde, verde do azul, azul do
+        // vermelho. Uma matriz identidade não mostraria nada.
+        const f32 m[12] = {0, 1, 0, 0,  0, 0, 1, 0,  1, 0, 0, 0};
+        for (u32 i = 0; i < 12; ++i) v[i] = ParamValue::scalar(m[i]);
+        return true;
+    }
     bool is_identity(const EffectEval& e) const noexcept override {
         for (u32 i = 0; i < 12; ++i) {
             const f32 want = (i == 0 || i == 5 || i == 10) ? 1.0f : 0.0f;
@@ -189,6 +215,12 @@ public:
         p.add_float("output_black", "Preto de saída", 0.0f, 0.0f, 255.0f);
         p.add_float("output_white", "Branco de saída", 255.0f, 0.0f, 255.0f);
     }
+    bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
+        v[0] = ParamValue::scalar(32.0f);    // preto de entrada
+        v[1] = ParamValue::scalar(214.0f);   // branco de entrada
+        v[2] = ParamValue::scalar(1.4f);     // gama
+        return true;
+    }
     bool is_identity(const EffectEval& e) const noexcept override {
         return near(e.f(kInBlack), 0.0f) && near(e.f(kInWhite), 255.0f) && near(e.f(kGamma), 1.0f)
             && near(e.f(kOutBlack), 0.0f) && near(e.f(kOutWhite), 255.0f);
@@ -218,6 +250,14 @@ public:
     }
     void declare_parameters(ParameterRegistry& p) const override {
         p.add_curve("curve", "Curva");
+    }
+    bool demo_values(EffectInstance& inst, std::vector<ParamValue>& v) const noexcept override {
+        // Uma S suave na mestra: escurece as sombras, clareia as luzes e
+        // deixa o cinza médio no lugar. É a curva que todo mundo reconhece.
+        if (inst.curves.empty()) return false;
+        inst.curves[0].channel[0] = {{0.00f, 0.00f}, {0.25f, 0.16f}, {0.50f, 0.50f}, {0.75f, 0.84f}, {1.00f, 1.00f}};
+        v[kCurve].ref = 0;
+        return true;
     }
     bool is_identity(const EffectEval& e) const noexcept override {
         const CurveData* c = e.curve(kCurve);

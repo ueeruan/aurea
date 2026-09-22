@@ -231,6 +231,10 @@ class AureaEngine private constructor() {
     fun queryEffectParams(layer: Long, effectId: Int, rows: ByteBuffer, capacity: Int, blob: ByteBuffer): Int =
         nativeQueryEffectParams(nativeHandle, layer, effectId, rows, capacity, blob)
 
+    /** Declaração dos parâmetros de um TIPO de efeito (a ficha do catálogo). */
+    fun queryEffectSpecs(typeId: Int, rows: ByteBuffer, capacity: Int, blob: ByteBuffer): Int =
+        nativeQueryEffectSpecs(nativeHandle, typeId, rows, capacity, blob)
+
     fun queryLayerDetail(layer: Long, out: ByteBuffer): Boolean = nativeQueryLayerDetail(nativeHandle, layer, out)
 
     /** Composição atual: devolve o id (0 = nenhuma); `out` = [w, h, fps, duração, r, g, b, a]. */
@@ -243,6 +247,15 @@ class AureaEngine private constructor() {
     /** Frame do playhead em RGBA8 sRGB (lado maior = `maxDim`); `outSize` recebe largura/altura. */
     fun captureFrame(maxDim: Int, out: ByteBuffer, outSize: IntArray): Int =
         nativeCaptureFrame(nativeHandle, maxDim, out, outSize)
+
+    /**
+     * A prévia de um efeito: o efeito de verdade rodando sobre a cartela de
+     * demonstração do motor, em RGBA8 (pré-multiplicado não: alfa reto).
+     * `outSize` recebe largura/altura de verdade. Falso = não deu para
+     * pré-visualizar (efeito temporal, sem GPU, tipo desconhecido).
+     */
+    fun renderEffectPreview(typeId: Int, width: Int, height: Int, out: ByteBuffer, outSize: IntArray): Boolean =
+        nativeRenderEffectPreview(nativeHandle, typeId, width, height, out, outSize)
 
     fun setSelection(layers: LongArray) = nativeSetSelection(nativeHandle, layers)
     fun clearSelection() = nativeClearSelection(nativeHandle)
@@ -525,6 +538,9 @@ class AureaEngine private constructor() {
         handle: Long, layer: Long, property: Int, from: Int, to: Int, out: FloatArray, count: Int,
     ): Int
     private external fun nativeQueryEffectCatalog(handle: Long, rows: ByteBuffer, capacity: Int, blob: ByteBuffer): Int
+    private external fun nativeQueryEffectSpecs(
+        handle: Long, typeId: Int, rows: ByteBuffer, capacity: Int, blob: ByteBuffer,
+    ): Int
     private external fun nativeQueryLayerEffects(
         handle: Long, layer: Long, rows: ByteBuffer, capacity: Int, blob: ByteBuffer,
     ): Int
@@ -537,6 +553,9 @@ class AureaEngine private constructor() {
         handle: Long, layer: Long, frame: Int, height: Int, out: ByteBuffer, outWidth: IntArray,
     ): Int
     private external fun nativeCaptureFrame(handle: Long, maxDim: Int, out: ByteBuffer, outSize: IntArray): Int
+    private external fun nativeRenderEffectPreview(
+        handle: Long, typeId: Int, width: Int, height: Int, out: ByteBuffer, outSize: IntArray,
+    ): Boolean
     private external fun nativeSetSelection(handle: Long, layers: LongArray)
     private external fun nativeClearSelection(handle: Long)
     private external fun nativeImportVideo(handle: Long, source: String, name: String): Long

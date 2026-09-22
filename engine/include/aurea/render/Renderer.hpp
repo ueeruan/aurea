@@ -273,6 +273,18 @@ public:
     /// Descarta texturas de imagem e LUTs (projeto fechado).
     void release_project_resources() noexcept;
 
+    /// A PRÉVIA DE UM EFEITO (Fase 7.3 §13–§15): o efeito de verdade, com os
+    /// valores PADRÃO da declaração, rodando sobre a cartela de demonstração
+    /// (`effects/preview_plate.frag`). Um frame, fora da tela, sem projeto e
+    /// sem composição — a prévia de um efeito não depende do que está aberto.
+    ///
+    /// Sai RGBA8 sRGB de alfa reto, do tamanho pedido. Devolve `NotImplemented`
+    /// para efeito que não faz sentido num quadro solto (temporal, global) e
+    /// `PipelineCompileFailed` quando o efeito não conseguiu montar os passes —
+    /// nos dois casos a UI mostra a cartela genérica.
+    [[nodiscard]] Status render_effect_preview(const EffectRegistry& effects, EffectTypeId type,
+                                               u32 width, u32 height, std::vector<u8>& outRgba) noexcept;
+
     /// De onde vêm os modelos 3D (o motor guarda os SceneAsset).
     using ModelLookup = std::shared_ptr<const scene3d::SceneAsset> (*)(void* ctx, AssetId id);
     /// O último quadro deixou alguma camada de fora por recurso pendente? (lê e zera)

@@ -17,6 +17,38 @@ void register_motion_tile_effect(EffectRegistry& r);
 void register_keying_effects(EffectRegistry& r);
 void register_expression_controls(EffectRegistry& r);
 void register_echo_effect(EffectRegistry& r);
+void register_distort_effects(EffectRegistry& r);
+void register_stylize_effects(EffectRegistry& r);
+void register_light_effects(EffectRegistry& r);
+void register_glitch_effects(EffectRegistry& r);
+void register_temporal_effects(EffectRegistry& r);
+
+/// O bloco de uniforms dos efeitos novos, num layout só.
+///
+/// Um efeito novo não inventa layout: ele preenche este bloco e o shader lê
+/// `p0..p3`, `color` e `texel` nos mesmos lugares. Uniformizar isto é o que
+/// permite revisar dez efeitos de uma vez sem reler dez blocos diferentes — e
+/// é o que impede o erro clássico de desalinhamento em std140.
+struct EffectUniforms {
+    Vec4 uvMap{};    ///< uv de entrada = uv da saída * xy + zw
+    Vec4 texel{};    ///< x = 1/largura, y = 1/altura, z/w = texels por pixel da layer
+    Vec4 p0{};
+    Vec4 p1{};
+    Vec4 p2{};
+    Vec4 p3{};
+    Vec4 color{};    ///< tinta/cor do efeito, linear
+};
+static_assert(sizeof(EffectUniforms) == 112, "layout std140 dos uniforms de efeito");
+
+/// Um passe de tela cheia que NÃO muda a região: lê a entrada, escreve a saída
+/// do mesmo tamanho e densidade. É o corpo de quase todo efeito — o que sobra
+/// para o efeito é a conta e o preenchimento dos uniforms.
+[[nodiscard]] Status single_pass(EffectBuildContext& ctx, ShaderId frag, const LayerImage& input,
+                                 const EffectUniforms& u, const char* name, LayerImage& out);
+
+/// Uniforms já com o mapa de uv e a escala de texel preenchidos para um passe
+/// que mantém a região (o caso de [single_pass]).
+[[nodiscard]] EffectUniforms base_uniforms(const LayerImage& input) noexcept;
 
 /// Pedido de gaussiano, em pixels de LAYER. O construtor converte para texels
 /// pela densidade da entrada e reduz a imagem enquanto o sigma passar de 8

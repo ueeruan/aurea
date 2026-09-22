@@ -39,6 +39,11 @@ public:
         p.add_angle("rotation", "Rotação", 0.0f);
         p.add_float("opacity", "Opacidade", 100.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
     }
+    bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
+        v[kScale] = ParamValue::vec2(78.0f, 78.0f);
+        v[kRotation] = ParamValue::scalar(9.0f);       // a borda transparente se vê
+        return true;
+    }
     void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
         out.push_back(PipelineKey::fullscreen(ShaderId::effects_affine_resample_frag, work));
     }

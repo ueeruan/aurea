@@ -141,6 +141,12 @@ public:
         p.add_angle("phase", "Fase", 0.0f);
         p.add_bool("horizontal_phase_shift", "Deslocamento de fase horizontal", false);
     }
+    bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
+        v[1] = ParamValue::scalar(55.0f);      // ladrilho de 55 %: a grade aparece
+        v[2] = ParamValue::scalar(55.0f);
+        v[5] = ParamValue::boolean(true);      // espelhado
+        return true;
+    }
     void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
         out.push_back(PipelineKey::fullscreen(ShaderId::effects_motion_tile_frag, work));
     }

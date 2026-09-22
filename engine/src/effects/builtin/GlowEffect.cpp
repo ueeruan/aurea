@@ -37,6 +37,12 @@ public:
         p.add_float("intensity", "Intensidade", 1.0f, 0.0f, 10.0f);
         p.add_color("color", "Cor", Vec4{1, 1, 1, 1});
     }
+    bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
+        v[kThreshold] = ParamValue::scalar(48.0f);    // só o clarão entra
+        v[kRadius] = ParamValue::scalar(70.0f);
+        v[kIntensity] = ParamValue::scalar(2.4f);
+        return true;
+    }
     void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
         out.push_back(PipelineKey::fullscreen(ShaderId::effects_bright_pass_frag, work));
         out.push_back(PipelineKey::fullscreen(ShaderId::effects_glow_combine_frag, work));

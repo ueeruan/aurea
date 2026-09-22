@@ -221,6 +221,20 @@ public:
         return false;
     }
 
+    /// VALORES DE DEMONSTRAÇÃO — os que a PRÉVIA do catálogo usa (Fase 7.3
+    /// §13). O vetor chega preenchido com os padrões da declaração; o efeito
+    /// sobrescreve o que precisar para que a prévia MOSTRE o que ele faz.
+    ///
+    /// Isto existe porque o padrão de fábrica de quase todo efeito é neutro
+    /// (desfoque 0, nitidez 0, brilho 0): a prévia de um efeito desligado não
+    /// diz nada a ninguém. A instância vem junto porque curvas e degradês
+    /// vivem nela, não no valor. Devolver `false` mantém os padrões.
+    [[nodiscard]] virtual bool demo_values(EffectInstance& instance,
+                                           std::vector<ParamValue>& values) const noexcept {
+        (void)instance; (void)values;
+        return false;
+    }
+
     /// Só efeitos por pixel: a operação que entra no passe de cor fundido.
     [[nodiscard]] virtual bool color_op(const EffectEval& eval, ColorOp& out) const noexcept {
         (void)eval; (void)out;

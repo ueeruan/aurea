@@ -16,8 +16,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.aurea.aurea.effects.EffectPreviewStore
+import com.aurea.aurea.effects.EffectPrefs
 import com.aurea.aurea.engine.AureaEngine
 import com.aurea.aurea.engine.CommandBatch
 import com.aurea.aurea.engine.EffectCatalogEntry
@@ -178,6 +182,40 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     var catalog by mutableStateOf<List<EffectCatalogEntry>>(emptyList())
         private set
+
+    /**
+     * Favoritos e recentes do catálogo de efeitos: preferência do APARELHO, não
+     * do projeto. Vive aqui porque o navegador de efeitos aparece nos dois
+     * lugares (a aba Efeitos da Home e o editor) e os dois leem o mesmo.
+     */
+    val effectPrefs = EffectPrefs(getApplication())
+    /**
+     * As prévias dos efeitos (§13–§15). Nulo até o motor subir — o navegador
+     * desenha a cartela genérica enquanto isso, em vez de esperar.
+     */
+    var effectPreviews by mutableStateOf<EffectPreviewStore?>(null)
+        private set
+
+    /**
+     * A prévia de UM efeito: o efeito de verdade rodando sobre a cartela de
+     * demonstração do motor, em RGBA8. Devolve nulo quando não dá para
+     * pré-visualizar — e aí o cartão mostra a cartela genérica.
+     *
+     * Cada chamada traz o SEU buffer: a geração roda em `Dispatchers.Default` e
+     * vários cartões podem pedir prévia ao mesmo tempo. Um buffer compartilhado
+     * aqui seria uma corrida silenciosa — a prévia de um efeito apareceria no
+     * cartão de outro.
+     */
+    private fun renderEffectPreview(typeId: Int, width: Int, height: Int): ImageBitmap? {
+        val pixels = directBuffer(width * height * 4)
+        val dims = IntArray(2)
+        if (!engine.renderEffectPreview(typeId, width, height, pixels, dims)) return null
+        if (dims[0] <= 0 || dims[1] <= 0) return null
+        pixels.rewind()
+        val bmp = Bitmap.createBitmap(dims[0], dims[1], Bitmap.Config.ARGB_8888)
+        bmp.copyPixelsFromBuffer(pixels)
+        return bmp.asImageBitmap()
+    }
     /** Efeitos da camada principal, na ordem da pilha. */
     var effects by mutableStateOf<List<LayerEffect>>(emptyList())
         private set
@@ -274,6 +312,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                         startThermalWatch()
                         engineReady = true
                         catalog = readCatalog()
+                        effectPreviews = EffectPreviewStore(dirs.cache, ::renderEffectPreview)
                         startStatusLoop()
                     } else {
                         errorMessage = "Não foi possível iniciar o motor gráfico (Vulkan) neste aparelho."
@@ -831,6 +870,23 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     private fun readCatalog(): List<EffectCatalogEntry> {
         val n = engine.queryEffectCatalog(rowBuffer, 64, textBlob)
         return List(max(0, n)) { EffectCatalogEntry.read(rowBuffer, it, textBlob) }
+    }
+
+    // Buffers próprios da ficha do catálogo: `effectSpecs` é chamado do
+    // navegador, que pode estar compondo enquanto o laço de frame usa o
+    // `rowBuffer`. Compartilhar os dois seria uma corrida silenciosa.
+    private val specRows = directBuffer(64 * EffectParam.ROW_BYTES)
+    private val specBlob = directBuffer(16 * 1024)
+    private val specCache = HashMap<Int, List<EffectParam>>()
+
+    /**
+     * A DECLARAÇÃO dos parâmetros de um tipo de efeito, sem precisar de uma
+     * camada aberta: é o que o navegador mostra na ficha (§68). Fica em cache
+     * porque a declaração de um tipo nunca muda enquanto o motor está de pé.
+     */
+    fun effectSpecs(typeId: Int): List<EffectParam> = specCache.getOrPut(typeId) {
+        val n = engine.queryEffectSpecs(typeId, specRows, 64, specBlob)
+        List(max(0, n)) { EffectParam.read(specRows, it, specBlob) }
     }
 
     private fun refreshEffects() {

@@ -1066,3 +1066,69 @@ AUREA_TEST(Engine, SearchLayersFoldsCaseAndAccents) {
     AUREA_CHECK(e.search_layers("xyz").empty());
     e.shutdown();
 }
+
+// =============================================================================
+// Ficha do catálogo de efeitos (Fase 7.3 §20, §68)
+//
+// `query_effect_specs` é o que o navegador mostra antes de existir camada: a
+// DECLARAÇÃO dos parâmetros de um tipo. Sem camada não há valor corrente, e o
+// contrato é que `value` saia com o padrão — quem lê a ficha não pode ver lixo
+// de memória nem um valor que o efeito nunca teria.
+// =============================================================================
+AUREA_TEST(Engine, EffectSpecsDescribeEveryParameterOfAType) {
+    Engine e;
+    AUREA_CHECK(e.initialize(headless_config()).ok());
+
+    const EffectTypeId gaussian = effect_type_id(effect_keys::kGaussianBlur);
+    std::vector<bridge::EffectParamRow> rows(16);
+    std::vector<char> blob(8 * 1024);
+    const u32 n = e.query_effect_specs(gaussian, rows.data(), static_cast<u32>(rows.size()), blob.data(),
+                                        static_cast<u32>(blob.size()));
+    AUREA_CHECK(n > 0);
+
+    // O efeito declara os parâmetros na mesma ordem; o índice é o contrato com
+    // o projeto (é ele que vai no keyframe).
+    for (u32 i = 0; i < n; ++i) {
+        AUREA_CHECK_EQ(rows[i].index, i);
+        AUREA_CHECK(rows[i].labelLength > 0);                 // sem rótulo a UI fica muda
+        AUREA_CHECK(rows[i].minValue <= rows[i].maxValue);
+        for (int c = 0; c < 4; ++c) {
+            AUREA_CHECK_EQ(rows[i].value[c], rows[i].defaultValue[c]);
+        }
+        // Sem instância não há keyframe: a ficha nunca mente dizendo "animado".
+        AUREA_CHECK_EQ(rows[i].animated, 0u);
+    }
+
+    // Tipo que não existe: nenhuma linha, sem escrever nada.
+    AUREA_CHECK_EQ(e.query_effect_specs(0u, rows.data(), static_cast<u32>(rows.size()), blob.data(),
+                                        static_cast<u32>(blob.size())), 0u);
+    // Capacidade menor que o número de parâmetros: corta em vez de estourar.
+    AUREA_CHECK_EQ(e.query_effect_specs(gaussian, rows.data(), 1u, blob.data(),
+                                        static_cast<u32>(blob.size())), 1u);
+    e.shutdown();
+}
+
+AUREA_TEST(Engine, EffectSpecsCoverTheWholeCatalog) {
+    Engine e;
+    AUREA_CHECK(e.initialize(headless_config()).ok());
+
+    std::vector<bridge::EffectCatalogRow> catalog(64);
+    std::vector<char> blob(16 * 1024);
+    const u32 count = e.query_effect_catalog(catalog.data(), static_cast<u32>(catalog.size()), blob.data(),
+                                             static_cast<u32>(blob.size()));
+    AUREA_CHECK(count > 0);
+
+    std::vector<bridge::EffectParamRow> rows(64);
+    std::vector<char> specBlob(32 * 1024);
+    u32 withParams = 0;
+    for (u32 i = 0; i < count; ++i) {
+        const u32 n = e.query_effect_specs(catalog[i].typeId, rows.data(), static_cast<u32>(rows.size()),
+                                           specBlob.data(), static_cast<u32>(specBlob.size()));
+        // O catálogo diz quantos parâmetros o efeito tem; a ficha tem de bater.
+        AUREA_CHECK_EQ(n, catalog[i].paramCount);
+        if (n > 0 && n <= rows.size()) ++withParams;
+    }
+    // Todo efeito do motor tem ficha — nenhum entra no catálogo mudo.
+    AUREA_CHECK_EQ(withParams, count);
+    e.shutdown();
+}

@@ -4339,6 +4339,28 @@ Status Engine::render_offscreen(TextureHandle target, u32 width, u32 height, boo
     return s;
 }
 
+Status Engine::render_effect_preview(u32 typeId, u32 width, u32 height, std::vector<u8>& out, u32& outWidth,
+                                     u32& outHeight) noexcept {
+    if (!gpu_ || !renderer_.ready()) return Status{Errc::InvalidState, "sem GPU"};
+    if (width == 0 || height == 0) return Status{Errc::InvalidArgument, "previa sem tamanho"};
+    const u32 maxTex = gpu_->capabilities().maxTexture2D;
+    // A cartela é pequena, mas o aparelho manda: nunca pedir textura maior do
+    // que ele cria. Passando do teto, encolhe pela proporção (nunca estica).
+    u32 w = width, h = height;
+    if (w > maxTex || h > maxTex) {
+        const f32 k = static_cast<f32>(maxTex) / static_cast<f32>(std::max(w, h));
+        w = std::max<u32>(1, static_cast<u32>(static_cast<f32>(w) * k));
+        h = std::max<u32>(1, static_cast<u32>(static_cast<f32>(h) * k));
+    }
+    std::lock_guard<std::mutex> rl(renderMutex_);
+    const Status s = renderer_.render_effect_preview(effectRegistry_, typeId, w, h, out);
+    if (s.ok()) {
+        outWidth = w;
+        outHeight = h;
+    }
+    return s;
+}
+
 Status Engine::capture_frame_rgba(u32 maxDim, std::vector<u8>& out, u32& width, u32& height) noexcept {
     if (!gpu_ || maxDim == 0) return Status{Errc::InvalidState, "sem GPU"};
     u32 cw = 0, ch = 0;
@@ -5070,6 +5092,43 @@ u32 Engine::query_effect_params(u64 layerId, u32 effectId, bridge::EffectParamRo
         for (u32 c = 0; c < comps; ++c) {
             const Track* t = l->tracks.find(TrackProperty::EffectParam, inst->id, param_track_key(i, c));
             if (t && !t->keys.empty()) row.animated = 1;
+        }
+        out[written++] = row;
+    }
+    return written;
+}
+
+u32 Engine::query_effect_specs(u32 typeId, bridge::EffectParamRow* out, u32 capacity, char* blob,
+                               u32 blobCapacity) noexcept {
+    if (!out) return 0;
+    const ParameterRegistry* params = effectRegistry_.params(typeId);
+    if (!params) return 0;
+    u32 cursor = 0, written = 0;
+    for (u32 i = 0; i < params->count() && written < capacity; ++i) {
+        const ParamSpec& spec = params->at(i);
+        bridge::EffectParamRow row;
+        row.index = i;
+        row.type = static_cast<u32>(spec.type);
+        row.flags = spec.flags;
+        row.enumCount = spec.enumCount;
+        row.minValue = spec.minValue;
+        row.maxValue = spec.maxValue;
+        // Sem instância não há valor corrente: o padrão da declaração responde
+        // pelos dois, e nada aparece animado.
+        for (int c = 0; c < 4; ++c) {
+            row.value[c] = spec.defaultValue.v[c];
+            row.defaultValue[c] = spec.defaultValue.v[c];
+        }
+        (void)put_string(blob, blobCapacity, cursor, spec.label, row.labelOffset, row.labelLength);
+        (void)put_string(blob, blobCapacity, cursor, spec.unit, row.unitOffset, row.unitLength);
+        if (spec.enumCount && spec.enumLabels) {
+            row.enumOffset = cursor;
+            for (u32 k = 0; k < spec.enumCount; ++k) {
+                u32 o = 0, n = 0;
+                if (k) (void)put_string(blob, blobCapacity, cursor, "|", o, n);
+                (void)put_string(blob, blobCapacity, cursor, spec.enumLabels[k], o, n);
+            }
+            row.enumLength = cursor - row.enumOffset;
         }
         out[written++] = row;
     }

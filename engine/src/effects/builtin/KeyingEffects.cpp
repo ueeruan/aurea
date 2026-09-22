@@ -42,6 +42,12 @@ public:
         p.add_float("threshold", "Limiar", 20.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
         p.add_float("softness", "Suavidade", 10.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
     }
+    bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
+        v[0] = ParamValue::scalar(0.0f);      // tirar os escuros
+        v[1] = ParamValue::scalar(34.0f);     // limiar
+        v[2] = ParamValue::scalar(14.0f);     // suavidade
+        return true;
+    }
     bool color_op(const EffectEval& e, ColorOp& op) const noexcept override {
         op.code = ColorOpCode::LumaKey;
         op.p[1] = std::clamp(e.f(kThreshold), 0.0f, 100.0f) / 100.0f;

@@ -37,46 +37,47 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaDims
+import com.aurea.aurea.ui.theme.AureaElevation
+import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.CupertinoGlyph
 import com.aurea.aurea.ui.theme.CupertinoIcon
 
-/** Uma aba da barra: rótulo, ícone inativo e ativo (`home_shell.dart@762dbfe`). */
+/** Uma aba da barra: rótulo, ícone inativo e ativo. */
 private class HomeTab(val label: String, val icon: Char, val active: Char)
 
+/**
+ * As quatro abas da Home 7.3. Comunidade e Perfil saíram (§2): a barra ficou
+ * enxuta e cada aba tem uma função só.
+ */
 private val Tabs = listOf(
-    HomeTab("Inicio", CupertinoGlyph.House, CupertinoGlyph.HouseFill),
-    HomeTab("Comunidade", CupertinoGlyph.Person2, CupertinoGlyph.Person2Fill),
+    HomeTab("Início", CupertinoGlyph.House, CupertinoGlyph.HouseFill),
+    HomeTab("Projetos", CupertinoGlyph.RectangleStack, CupertinoGlyph.RectangleStack),
+    HomeTab("Efeitos", CupertinoGlyph.WandStars, CupertinoGlyph.WandStars),
     HomeTab("Ajustes", CupertinoGlyph.SliderHorizontal3, CupertinoGlyph.SliderHorizontal3),
-    HomeTab("Perfil", CupertinoGlyph.Person, CupertinoGlyph.PersonFill),
-    HomeTab("Sobre", CupertinoGlyph.InfoCircle, CupertinoGlyph.InfoCircleFill),
 )
 
 /**
- * A Home da Beta A.01 (versão 762dbfe dos prints aprovados): a casca com a
- * barra de 5 abas translúcida e o conteúdo rolando por baixo dela.
+ * A Home: a casca com a barra de 4 abas translúcida e o conteúdo rolando por
+ * baixo dela.
  *
  * - Só a aba atual fica composta; a rolagem de cada uma mora no
- *   [HomeViewModel] e volta igual ao trocar de aba ou voltar do editor
- *   (o IndexedStack + PageStorageKey da A.01).
- * - O recuo da status bar entra UMA vez, aqui (a A.01 somava dois com a
- *   faixa de aviso aberta, §8.1). A status bar leva o véu #0B0F13 dos prints.
- * - A faixa de aviso do topo ("+100 usuários…") NÃO entra: o texto vinha do
- *   servidor de avisos (`AvisosService`), não era conteúdo do app.
+ *   [HomeViewModel] e volta igual ao trocar de aba ou voltar do editor.
+ * - O recuo da status bar entra UMA vez, aqui. A status bar leva o véu
+ *   #0B0F13 do desenho aprovado.
  */
 @Composable
 fun HomeScreen(store: EditorStore) {
     val vm: HomeViewModel = viewModel()
     // Uma chamada por aba (nada de laço): cada estado tem o seu lugar fixo na composição.
-    val home = rememberTabListState(vm, 0)
-    val community = rememberTabListState(vm, 1)
-    val settings = rememberTabListState(vm, 2)
-    val profile = rememberTabListState(vm, 3)
-    val about = rememberTabListState(vm, 4)
+    val home = rememberTabListState(vm, HomeViewModel.HOME_TAB)
+    val projects = rememberTabListState(vm, HomeViewModel.PROJECTS_TAB)
+    val effects = rememberTabListState(vm, HomeViewModel.EFFECTS_TAB)
+    val settings = rememberTabListState(vm, HomeViewModel.SETTINGS_TAB)
     val shellBackdrop = rememberBackdrop()
     val view = LocalView.current
     val navBottom = with(LocalDensity.current) { WindowInsets.navigationBars.getBottom(this).toDp() }
     // Altura total da barra de abas: hairline + 54 + a barra de gestos.
-    val bottomBar = AureaDims.Hairline + HomeDims.TabBarHeight + navBottom
+    val bottomBar = AureaDims.Hairline + AureaDims.TabBarHeight + navBottom
 
     val selectTab: (Int) -> Unit = { i ->
         if (i != vm.tab) {
@@ -91,15 +92,14 @@ fun HomeScreen(store: EditorStore) {
             .background(AureaColors.Background)
             .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
     ) {
-        Box(Modifier.fillMaxWidth().windowInsetsTopHeight(WindowInsets.statusBars).background(HomeColors.StatusBarVeil))
+        Box(Modifier.fillMaxWidth().windowInsetsTopHeight(WindowInsets.statusBars).background(AureaColors.SystemBarVeil))
         Box(Modifier.fillMaxWidth().weight(1f)) {
             Box(Modifier.fillMaxSize().backdropSource(shellBackdrop)) {
                 when (vm.tab) {
-                    0 -> ProjectsTab(store, vm, home, bottomBar, selectTab)
-                    1 -> CommunityTab(store, community, bottomBar)
-                    2 -> SettingsTab(store, vm, settings, bottomBar)
-                    3 -> ProfileTab(store, profile, bottomBar)
-                    else -> AboutTab(store, vm, about, bottomBar)
+                    HomeViewModel.HOME_TAB -> StartTab(store, vm, home, bottomBar, selectTab)
+                    HomeViewModel.PROJECTS_TAB -> ProjectsTab(store, vm, projects, bottomBar)
+                    HomeViewModel.EFFECTS_TAB -> EffectsTab(store, vm, effects, bottomBar)
+                    else -> SettingsTab(store, vm, settings, bottomBar)
                 }
             }
             HomeTabBar(vm.tab, selectTab, shellBackdrop, Modifier.align(Alignment.BottomCenter))
@@ -119,7 +119,7 @@ private fun rememberTabListState(vm: HomeViewModel, tab: Int): LazyListState {
 
 /**
  * A barra de abas: vidro #0F141A @ 0,72 com blur σ 24, hairline no topo,
- * 54 de altura; embaixo, a barra de gestos preta dos prints.
+ * 54 de altura; embaixo, a barra de gestos preta.
  */
 @Composable
 private fun HomeTabBar(selected: Int, onSelect: (Int) -> Unit, backdrop: Backdrop, modifier: Modifier) {
@@ -128,16 +128,16 @@ private fun HomeTabBar(selected: Int, onSelect: (Int) -> Unit, backdrop: Backdro
             Modifier
                 .fillMaxWidth()
                 .blockTouches()
-                .glass(backdrop, HomeDims.TabBarBlur, AureaColors.Background.copy(alpha = 0.72f), AureaColors.Background.copy(alpha = 0.97f)),
+                .glass(backdrop, AureaElevation.TabBarBlur, AureaElevation.tabBarTint(), AureaElevation.tabBarFallback()),
         ) {
             Box(Modifier.fillMaxWidth().height(AureaDims.Hairline).background(AureaColors.Hairline))
-            Row(Modifier.fillMaxWidth().height(HomeDims.TabBarHeight)) {
+            Row(Modifier.fillMaxWidth().height(AureaDims.TabBarHeight)) {
                 Tabs.forEachIndexed { i, tab ->
                     TabItem(tab, i == selected, Modifier.weight(1f)) { onSelect(i) }
                 }
             }
         }
-        Spacer(Modifier.fillMaxWidth().windowInsetsBottomHeight(WindowInsets.navigationBars).background(HomeColors.NavigationBar))
+        Spacer(Modifier.fillMaxWidth().windowInsetsBottomHeight(WindowInsets.navigationBars).background(AureaColors.NavigationBar))
     }
 }
 
@@ -152,8 +152,8 @@ private fun TabItem(tab: HomeTab, selected: Boolean, modifier: Modifier, onClick
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        CupertinoIcon(if (selected) tab.active else tab.icon, 24.dp, color)
+        CupertinoIcon(if (selected) tab.active else tab.icon, AureaDims.IconLg, color)
         Spacer(Modifier.height(3.dp))
-        Text(tab.label, style = HomeType.TabLabel, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(tab.label, style = AureaType.TabLabel, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }

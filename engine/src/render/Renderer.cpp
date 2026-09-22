@@ -2810,6 +2810,233 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     return endStatus;
 }
 
+Status Renderer::render_effect_preview(const EffectRegistry& effects, EffectTypeId type,
+                                       u32 width, u32 height, std::vector<u8>& outRgba) noexcept {
+    if (!backend_) return Status{Errc::InvalidState, "renderer sem backend"};
+    if (width == 0 || height == 0) return Status{Errc::InvalidArgument, "previa sem tamanho"};
+    const Effect* effect = effects.find(type);
+    if (!effect) return Status{Errc::NotFound, "efeito desconhecido"};
+    const ParameterRegistry* params = effects.params(type);
+    if (!params) return Status{Errc::NotFound, "efeito sem parametros"};
+    // Um quadro solto não diz nada sobre efeito que precisa de uma SEQUÊNCIA
+    // (eco, remapeamento de tempo) nem de um histograma do quadro inteiro.
+    // Não é falha: é um efeito que a cartela não representa, e a UI mostra a
+    // cartela genérica em vez de uma imagem que mentiria.
+    if (effect->effect_class() == EffectClass::Temporal || effect->effect_class() == EffectClass::Global) {
+        return Status{Errc::NotImplemented, "efeito sem previa de um quadro"};
+    }
+
+    FrameBegin fb;
+    if (const Status s = backend_->begin_frame(fb); !s.ok()) return s;
+
+    // Preview de efeito NUNCA é rebaixado pelo calor: a cartela é 320×200 e
+    // roda uma vez. O que o aparelho mostra tem de ser o que o efeito faz.
+    heavyScale_ = 1.0f;
+
+    pool_.begin_frame(*backend_, fb.frameNumber);
+    graph_.reset();
+    arena_.reset();
+    draws_.clear();
+    currentScenes_ = nullptr;
+    currentSnap_ = nullptr;
+    compTargetW_ = width;
+    compTargetH_ = height;
+
+    const u32 maxTex = std::min<u32>(backend_->capabilities().maxTexture2D, 8192);
+
+    // --- A entrada: a cartela de demonstração, no formato de trabalho.
+    TextureDesc inDesc;
+    inDesc.width = width;
+    inDesc.height = height;
+    inDesc.format = kWorkFormat;
+    inDesc.sampled = true;
+    inDesc.renderTarget = true;
+    const FGTexture plate = graph_.create_texture("cartela", inDesc);
+
+    EffectBuildContext ctx(graph_, shaders_, arena_, *this, kWorkFormat, maxTex);
+    {
+        const Vec4 size{static_cast<f32>(width), static_cast<f32>(height), 0.0f, 0.0f};
+        if (ctx.fullscreen_pass("cartela", PassStage::Effects, plate, ShaderId::effects_preview_plate_frag,
+                                {}, &size, sizeof(size)) == kInvalidIndex) {
+            graph_.release(pool_);
+            pool_.end_frame();
+            (void)backend_->end_frame();
+            return Status{Errc::PipelineCompileFailed, "cartela nao compilou"};
+        }
+    }
+
+    // --- A instância: valores PADRÃO da declaração, um efeito, sem keyframes.
+    EffectInstance instance;
+    initialize_instance(instance, *params);
+    std::vector<ParamValue> values(params->count());
+    for (u32 i = 0; i < params->count(); ++i) values[i] = instance.params[i].constant;
+    // A prévia mostra o efeito LIGADO: com os padrões de fábrica (quase sempre
+    // neutros) a cartela sairia intacta e a prévia não diria nada.
+    (void)effect->demo_values(instance, values);
+
+    // A camada cobre o quadro inteiro, sem transformação: é o caso mais simples
+    // e o que faz todo efeito de domínio (Motion Tile) se comportar.
+    LayerPlacement placement;
+    placement.compFromLayer = Mat4::identity();
+    placement.compWidth = width;
+    placement.compHeight = height;
+    placement.layerWidth = width;
+    placement.layerHeight = height;
+
+    EffectEval eval;
+    eval.effect = effect;
+    eval.instance = &instance;
+    eval.resources = this;
+    eval.values = values.data();
+    eval.valueOffset = 0;
+    eval.count = static_cast<u32>(values.size());
+    eval.effectIndex = 0;
+    eval.localTime = FrameIndex{0};
+    eval.texelScale = 1.0f;
+    eval.placement = &placement;
+
+    const LayerImage input{plate, Rect{0.0f, 0.0f, static_cast<f32>(width), static_cast<f32>(height)}, width, height};
+    LayerImage result;
+    Status built = OkStatus;
+
+    // Um efeito POR PIXEL não monta passe nenhum: ele devolve uma operação de
+    // cor, e o grafo funde as operações vizinhas num passe só. Aqui não há
+    // vizinhas — a operação roda sozinha no MESMO `color_stack.frag`, com a
+    // mesma estrutura de uniforms. Sem isto, metade do catálogo (exposição,
+    // saturação, níveis, curvas) não teria prévia.
+    ColorOp single{};
+    if (effect->color_op(eval, single)) {
+        struct ColorStackUniforms {
+            f32 header[4];
+            f32 ops[kMaxFusedColorOps * 16];
+        };
+        static_assert(sizeof(ColorStackUniforms) == 16 + kMaxFusedColorOps * 64,
+                      "layout std140 do color_stack.frag");
+        ColorStackUniforms u{};
+        u.header[0] = 1.0f;
+        std::memcpy(u.ops, single.p, sizeof(single.p));
+        u.ops[0] = static_cast<f32>(static_cast<u32>(single.code));
+        TextureDesc fxDesc;
+        fxDesc.width = width;
+        fxDesc.height = height;
+        fxDesc.format = kWorkFormat;
+        fxDesc.sampled = true;
+        fxDesc.renderTarget = true;
+        result.texture = graph_.create_texture("efeito", fxDesc);
+        result.region = input.region;
+        result.width = width;
+        result.height = height;
+        if (ctx.fullscreen_pass("efeito", PassStage::Effects, result.texture, ShaderId::effects_color_stack_frag,
+                                {PassTexture{input.texture, {}, CommonSampler::NearestClamp},
+                                 PassTexture{{}, single.lut, CommonSampler::LinearClamp}},
+                                &u, sizeof(u)) == kInvalidIndex) {
+            built = Status{Errc::PipelineCompileFailed, "color stack nao compilou"};
+            result = LayerImage{};
+        }
+    } else {
+        built = effect->build(ctx, eval, input, 0.0f, result);
+    }
+    if (!built.ok() || !result.valid()) {
+        graph_.release(pool_);
+        pool_.end_frame();
+        (void)backend_->end_frame();
+        return built.ok() ? Status{Errc::NotImplemented, "efeito sem saida"} : built;
+    }
+
+    // --- O que sai na tela: a JANELA DO QUADRO lida da região de saída. Um
+    // efeito de domínio devolve uma região maior (ou em outro lugar); sem este
+    // passe a prévia mostraria o canto da textura em vez da imagem.
+    //
+    // A textura de saída é NOSSA, não do grafo: ela precisa sobreviver ao fim
+    // do frame para ser lida de volta (o grafo devolveria a física ao pool).
+    TextureDesc outDesc = inDesc;
+    outDesc.sampled = true;
+    outDesc.renderTarget = true;
+    outDesc.transferSrc = true;
+    outDesc.debugName = "previa-de-efeito";
+    auto made = backend_->create_texture(outDesc);
+    if (!made.ok()) {
+        graph_.release(pool_);
+        pool_.end_frame();
+        (void)backend_->end_frame();
+        return made.status();
+    }
+    const TextureHandle shownHandle = *made;
+    const FGTexture shown = graph_.import_texture("previa", shownHandle, outDesc);
+    {
+        const Vec4 uvMap = EffectBuildContext::uv_map(Rect{0.0f, 0.0f, static_cast<f32>(width), static_cast<f32>(height)},
+                                                      result.region);
+        if (ctx.fullscreen_pass("previa", PassStage::Output, shown, ShaderId::common_copy_frag,
+                                {PassTexture{result.texture, {}, CommonSampler::LinearClamp}},
+                                &uvMap, sizeof(uvMap)) == kInvalidIndex) {
+            graph_.release(pool_);
+            pool_.end_frame();
+            (void)backend_->end_frame();
+            backend_->destroy_texture(shownHandle);
+            return Status{Errc::PipelineCompileFailed, "copia da previa nao compilou"};
+        }
+    }
+    graph_.set_output(shown, ResourceState::TransferSrc);
+
+    const Status compiled = graph_.compile(pool_);
+    if (compiled.ok()) {
+        graph_.execute(*fb.commands, false);
+    } else {
+        AUREA_LOG_ERROR("previa de efeito nao compilou: %s", compiled.message().data());
+    }
+    graph_.release(pool_);
+    pool_.end_frame();
+    const Status ended = backend_->end_frame();
+    if (!compiled.ok() || !ended.ok()) {
+        backend_->destroy_texture(shownHandle);
+        return compiled.ok() ? ended : compiled;
+    }
+
+    // --- Leitura de volta: RGBA16F pré-multiplicado → RGBA8 sRGB de alfa reto.
+    std::vector<u16> half(static_cast<usize>(width) * height * 4);
+    const Status read = backend_->read_texture(shownHandle, half.data(), width * 8);
+    backend_->destroy_texture(shownHandle);
+    if (!read.ok()) return read;
+
+    auto h2f = [](u16 h) noexcept {
+        const u32 sign = static_cast<u32>(h & 0x8000u) << 16;
+        const u32 exp = (h >> 10) & 0x1Fu;
+        const u32 mant = h & 0x3FFu;
+        u32 bits;
+        if (exp == 0) {
+            if (mant == 0) {
+                bits = sign;
+            } else {
+                u32 e = 113, m = mant;
+                while (!(m & 0x400u)) { m <<= 1; --e; }
+                bits = sign | (e << 23) | ((m & 0x3FFu) << 13);
+            }
+        } else if (exp == 31) {
+            bits = sign | 0x7F800000u | (mant << 13);
+        } else {
+            bits = sign | ((exp + 112u) << 23) | (mant << 13);
+        }
+        f32 f;
+        std::memcpy(&f, &bits, 4);
+        return f;
+    };
+    auto encode = [](f32 v) noexcept {
+        const f32 c = std::clamp(v, 0.0f, 1.0f);
+        const f32 e = c <= 0.0031308f ? c * 12.92f : 1.055f * std::pow(c, 1.0f / 2.4f) - 0.055f;
+        return static_cast<u8>(std::lround(std::clamp(e, 0.0f, 1.0f) * 255.0f));
+    };
+    outRgba.resize(static_cast<usize>(width) * height * 4);
+    for (usize i = 0; i < static_cast<usize>(width) * height; ++i) {
+        const f32 a = h2f(half[i * 4 + 3]);
+        const f32 inv = a > 1e-5f ? 1.0f / a : 0.0f;   // o trabalho é pré-multiplicado
+        outRgba[i * 4 + 0] = encode(h2f(half[i * 4 + 0]) * inv);
+        outRgba[i * 4 + 1] = encode(h2f(half[i * 4 + 1]) * inv);
+        outRgba[i * 4 + 2] = encode(h2f(half[i * 4 + 2]) * inv);
+        outRgba[i * 4 + 3] = static_cast<u8>(std::lround(std::clamp(a, 0.0f, 1.0f) * 255.0f));
+    }
+    return OkStatus;
+}
+
 void Renderer::collect_resources(u64 frameNumber) noexcept {
     // Recursos persistentes de layers que sumiram. Checado a cada 2 s — não
     // há pressa, e varrer mapas a cada frame é custo sem ganho.

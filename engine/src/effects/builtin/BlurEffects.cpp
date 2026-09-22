@@ -179,6 +179,10 @@ public:
         p.add_enum("dimensions", "Dimensões", kDims, 3, kBoth);
         p.add_bool("repeat_edges", "Repetir pixels da borda", false);
     }
+    bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
+        v[kBlurriness] = ParamValue::scalar(18.0f);   // o xadrez da cartela some
+        return true;
+    }
     void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
         out.push_back(PipelineKey::fullscreen(ShaderId::effects_gaussian_blur_frag, work));
         out.push_back(PipelineKey::fullscreen(ShaderId::effects_downsample_frag, work));
@@ -219,6 +223,10 @@ public:
     }
     void declare_parameters(ParameterRegistry& p) const override {
         p.add_float("amount", "Intensidade", 0.0f, 0.0f, 500.0f, kParamAnimatable | kParamPercent, "%");
+    }
+    bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
+        v[kAmount] = ParamValue::scalar(160.0f);      // as arestas da cartela realçam
+        return true;
     }
     void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
         out.push_back(PipelineKey::fullscreen(ShaderId::effects_sharpen_frag, work));

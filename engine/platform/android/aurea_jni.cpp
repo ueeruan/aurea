@@ -474,6 +474,17 @@ AUREA_JNI jint AUREA_FN(nativeQueryEffectParams)(JNIEnv* env, jclass, jlong hand
         static_cast<u32>(buffer_capacity(env, blob))));
 }
 
+AUREA_JNI jint AUREA_FN(nativeQueryEffectSpecs)(JNIEnv* env, jclass, jlong handle, jint typeId,
+                                                jobject rows, jint capacity, jobject blob) {
+    NativeContext* c = ctx_of(handle);
+    auto* out = static_cast<bridge::EffectParamRow*>(buffer_ptr(env, rows));
+    auto* text = static_cast<char*>(buffer_ptr(env, blob));
+    if (!c || !out || !text) return 0;
+    return static_cast<jint>(c->engine.query_effect_specs(
+        static_cast<u32>(typeId), out, row_capacity<bridge::EffectParamRow>(env, rows, capacity), text,
+        static_cast<u32>(buffer_capacity(env, blob))));
+}
+
 /// Composição atual: devolve o id; `out` = [largura, altura, fps, duração, r, g, b, a].
 AUREA_JNI jlong AUREA_FN(nativeQueryComposition)(JNIEnv* env, jclass, jlong handle, jdoubleArray out) {
     NativeContext* c = ctx_of(handle);
@@ -537,6 +548,28 @@ AUREA_JNI jint AUREA_FN(nativeCaptureFrame)(JNIEnv* env, jclass, jlong handle, j
         env->SetIntArrayRegion(outSize, 0, 2, wh);
     }
     return static_cast<jint>(rgba.size());
+}
+
+/// A prévia de um efeito em RGBA8 sRGB; `outSize` recebe largura/altura.
+AUREA_JNI jboolean AUREA_FN(nativeRenderEffectPreview)(JNIEnv* env, jclass, jlong handle, jint typeId,
+                                                       jint width, jint height, jobject out,
+                                                       jintArray outSize) {
+    NativeContext* c = ctx_of(handle);
+    auto* dst = static_cast<u8*>(buffer_ptr(env, out));
+    if (!c || !dst || width <= 0 || height <= 0) return JNI_FALSE;
+    std::vector<u8> rgba;
+    u32 w = 0, h = 0;
+    if (!c->engine.render_effect_preview(static_cast<u32>(typeId), static_cast<u32>(width),
+                                         static_cast<u32>(height), rgba, w, h).ok()) {
+        return JNI_FALSE;
+    }
+    if (rgba.empty() || static_cast<jlong>(rgba.size()) > buffer_capacity(env, out)) return JNI_FALSE;
+    std::memcpy(dst, rgba.data(), rgba.size());
+    if (outSize && env->GetArrayLength(outSize) >= 2) {
+        const jint wh[2] = {static_cast<jint>(w), static_cast<jint>(h)};
+        env->SetIntArrayRegion(outSize, 0, 2, wh);
+    }
+    return JNI_TRUE;
 }
 
 AUREA_JNI void AUREA_FN(nativeSetSelection)(JNIEnv* env, jclass, jlong handle, jlongArray ids) {

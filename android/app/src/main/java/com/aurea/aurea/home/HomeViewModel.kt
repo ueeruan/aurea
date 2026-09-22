@@ -37,7 +37,7 @@ import kotlin.math.max
  * Estado de APRESENTAÇÃO da Home — o que o motor não conhece e que precisa
  * sobreviver à ida ao editor (a Home sai da composição enquanto se edita):
  * aba atual, rolagem de cada aba, busca, ordem, seleção, padrões da folha
- * "Novo projeto" e o cache de miniaturas.
+ * "Novo projeto", favoritos de efeito e o cache de miniaturas.
  *
  * Nada de projeto mora aqui: a lista, abrir, criar, duplicar, apagar e
  * renomear passam pelo [EditorStore].
@@ -47,7 +47,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     private val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     // --- Abas ------------------------------------------------------------------
-    var tab by mutableIntStateOf(0)
+    var tab by mutableIntStateOf(HOME_TAB)
         private set
 
     fun selectTab(i: Int) {
@@ -76,7 +76,6 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     var query by mutableStateOf("")
     var searching by mutableStateOf(false)
-    var showAll by mutableStateOf(false)
 
     /** Projetos marcados (caminhos). Não vazio = modo de seleção. */
     var selection by mutableStateOf<Set<String>>(emptySet())
@@ -137,6 +136,21 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         devTools = !devTools
         prefs.edit { putBoolean(KEY_DEV, devTools) }
         return devTools
+    }
+
+    // --- Efeitos ------------------------------------------------------------------
+    /** Termo de busca do navegador de efeitos, lembrado entre aberturas. */
+    var effectQuery by mutableStateOf("")
+
+    /** Rolagem da grade de efeitos (a grade não é uma `LazyListState`). */
+    internal var effectScrollIndex by mutableIntStateOf(0)
+        private set
+    internal var effectScrollOffset by mutableIntStateOf(0)
+        private set
+
+    internal fun saveEffectScroll(index: Int, offset: Int) {
+        effectScrollIndex = index
+        effectScrollOffset = offset
     }
 
     // --- Miniaturas ------------------------------------------------------------------
@@ -227,7 +241,13 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     companion object {
-        const val TAB_COUNT = 5
+        /** Início · Projetos · Efeitos · Ajustes. */
+        const val TAB_COUNT = 4
+        const val HOME_TAB = 0
+        const val PROJECTS_TAB = 1
+        const val EFFECTS_TAB = 2
+        const val SETTINGS_TAB = 3
+
         private const val PREFS = "aurea.home"
         private const val KEY_SORT = "projetos.ordem"
         private const val KEY_ASPECT = "settings.defaultAspect"
@@ -244,6 +264,11 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
  *
  * A chave leva o `modifiedMs` do projeto: salvar reescreve a miniatura no
  * MESMO caminho, e sem o carimbo o cache mostraria a imagem velha.
+ *
+ * A chave leva TAMBÉM a largura pedida (Fase 7.3 §74): o hero decodifica em
+ * 1280 px e a grade em 512 px, e cada um tem a sua entrada. Antes os dois
+ * dividiam uma imagem de 1280 px só — numa grade de 40 projetos isso eram
+ * 40 bitmaps de 1280 px na RAM sem nenhum motivo.
  */
 internal class HomeThumbnails(private val resources: Resources) {
     private val cache = object : LruCache<String, ImageBitmap>(MAX_BYTES) {
@@ -287,29 +312,39 @@ internal class HomeThumbnails(private val resources: Resources) {
     }
 }
 
+/** Largura de decodificação das miniaturas de projeto, por onde ela aparece. */
+internal const val HERO_DECODE_PX = 1080
+internal const val CARD_DECODE_PX = 512
+/** Largura de decodificação das imagens dos modelos (o `cacheWidth` da A.01). */
+internal const val MODEL_DECODE_PX = 464
+
 /**
- * Miniatura de um projeto; null enquanto decodifica ou se não há arquivo.
+ * Miniatura de um projeto no tamanho em que ela vai aparecer.
  *
- * Hero e grade dividem a MESMA imagem (decodificada para a largura do hero,
- * 1280 px, o `cacheWidth` da A.01): as miniaturas do motor têm no máximo
- * 512 px, então não há o que reduzir — e o projeto que sai do hero para a
- * grade (ao ordenar) não decodifica de novo.
+ * O hero e a grade NÃO dividem mais a mesma imagem: o hero lê em
+ * [HERO_DECODE_PX] e a grade em [CARD_DECODE_PX], com entradas separadas no
+ * cache. O projeto que sai do hero para a grade decodifica de novo — mais
+ * barato que carregar 1080 px por cartão de grade.
  */
 @Composable
-internal fun rememberProjectThumbnail(thumbs: HomeThumbnails, entry: ProjectEntry): ImageBitmap? {
+internal fun rememberProjectThumbnail(
+    thumbs: HomeThumbnails,
+    entry: ProjectEntry,
+    widthPx: Int = CARD_DECODE_PX,
+): ImageBitmap? {
     val path = entry.thumbnailPath
-    val key = remember(path, entry.modifiedMs) { path?.let { "$it|${entry.modifiedMs}" } }
+    val key = remember(path, entry.modifiedMs, widthPx) {
+        path?.let { "$it|${entry.modifiedMs}|$widthPx" }
+    }
     val state = produceState(key?.let { thumbs.peek(it) }, key) {
         if (key == null || path == null) {
             value = null
             return@produceState
         }
-        value = thumbs.peek(key) ?: thumbs.load(key) { thumbs.decodeFile(path, PROJECT_DECODE_PX) }
+        value = thumbs.peek(key) ?: thumbs.load(key) { thumbs.decodeFile(path, widthPx) }
     }
     return state.value
 }
-
-private const val PROJECT_DECODE_PX = 1280
 
 /** Imagem de um modelo (drawable empacotado). */
 @Composable

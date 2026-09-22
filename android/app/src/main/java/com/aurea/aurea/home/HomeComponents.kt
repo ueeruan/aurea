@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material.icons.Icons
@@ -35,6 +34,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -46,6 +46,9 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.aurea.aurea.ui.theme.AureaColors
+import com.aurea.aurea.ui.theme.AureaDims
+import com.aurea.aurea.ui.theme.AureaMotion
+import com.aurea.aurea.ui.theme.AureaShape
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.CupertinoGlyph
 import com.aurea.aurea.ui.theme.CupertinoIcon
@@ -54,18 +57,24 @@ import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.roundToInt
 
-/** `_BotaoRedondo`: alvo 44 com círculo 36 #1B2530 e ícone 17. */
+// =============================================================================
+//  O KIT DA HOME (Fase 7.3 §8). Tudo aqui lê os tokens do design system —
+//  nenhum número ou cor solta. O que era "HomeColors/HomeType/HomeDims" da
+//  A.01 virou `AureaColors`/`AureaType`/`AureaDims`.
+// =============================================================================
+
+/** `_BotaoRedondo`: alvo 44 com círculo 36 e ícone 17. */
 @Composable
 internal fun RoundIconButton(glyph: Char, description: String, onClick: () -> Unit) {
     Box(
         Modifier
-            .size(HomeDims.RoundTarget)
+            .size(AureaDims.RoundTarget)
             .semantics { contentDescription = description }
             .tocavel(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Box(
-            Modifier.size(HomeDims.RoundCircle).clip(CircleShape).background(AureaColors.SurfaceHigh),
+            Modifier.size(AureaDims.RoundCircle).clip(AureaShape.Circle).background(AureaColors.SurfaceHigh),
             contentAlignment = Alignment.Center,
         ) {
             CupertinoIcon(glyph, 17.dp, AureaColors.Text)
@@ -74,35 +83,24 @@ internal fun RoundIconButton(glyph: Char, description: String, onClick: () -> Un
 }
 
 /**
- * `_AvatarDaConta` sem conta: círculo 34 #A9D3EC com "?". A inicial era
- * branca (contraste 1,6:1, spec §8.9) — aqui sai em `OnAccent`.
+ * Cabeçalho de seção: título 21 w700 com uma ação opcional à direita
+ * ("Ver todos"). Sem ação, é só o título.
  */
 @Composable
-internal fun AccountAvatar(onClick: () -> Unit) {
-    Box(
-        Modifier
-            .size(HomeDims.RoundTarget)
-            .semantics { contentDescription = "Perfil" }
-            .tocavel(onClick = onClick),
-        contentAlignment = Alignment.Center,
+internal fun SectionHeader(text: String, actionLabel: String? = null, onAction: (() -> Unit)? = null) {
+    Row(
+        Modifier.fillMaxWidth().padding(start = AureaDims.Gutter, top = 26.dp, end = AureaDims.Gutter, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            Modifier.size(34.dp).clip(CircleShape).background(AureaColors.Keyframe),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text("?", style = HomeType.AvatarInitial)
+        Text(text, style = AureaType.ScreenTitle, modifier = Modifier.weight(1f))
+        if (actionLabel != null && onAction != null) {
+            Text(
+                actionLabel,
+                style = AureaType.of(13.5f, androidx.compose.ui.text.font.FontWeight.W600, color = AureaColors.Accent),
+                modifier = Modifier.tocavel(onClick = onAction).padding(4.dp),
+            )
         }
     }
-}
-
-/** `_TituloSecao`: 21 w700, padding (20, 28, 20, 12). */
-@Composable
-internal fun SectionTitle(text: String) {
-    Text(
-        text,
-        style = HomeType.SectionTitle,
-        modifier = Modifier.fillMaxWidth().padding(start = 20.dp, top = 28.dp, end = 20.dp, bottom = 12.dp),
-    )
 }
 
 /** `_Linha`: ícone 19 · texto 14,5 · chevron 15 (altura 45,6). */
@@ -112,24 +110,24 @@ internal fun HomeLinkRow(glyph: Char, text: String, onClick: () -> Unit) {
         Modifier
             .fillMaxWidth()
             .tocavel(onClick = onClick)
-            .padding(horizontal = 20.dp, vertical = 13.dp),
+            .padding(horizontal = AureaDims.Gutter, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         CupertinoIcon(glyph, 19.dp, AureaColors.Accent)
         Spacer(Modifier.width(14.dp))
-        Text(text, style = HomeType.LinkRow, modifier = Modifier.weight(1f))
+        Text(text, style = AureaType.LinkRow, modifier = Modifier.weight(1f))
         CupertinoIcon(CupertinoGlyph.ChevronRight, 15.dp, AureaColors.Muted)
     }
 }
 
-/** Rótulo de seção em caixa-alta (12 w500 +0,6 muted). */
+/** Rótulo em caixa-alta. */
 @Composable
 internal fun CapsLabel(text: String, modifier: Modifier = Modifier) {
-    Text(text.uppercase(), style = HomeType.SectionLabel, modifier = modifier)
+    Text(text.uppercase(), style = AureaType.Caps, modifier = modifier)
 }
 
 /**
- * Realce do FilledButton do tema antigo: não encolhe, só acende 5 % enquanto
+ * Realce de um botão cheio: não encolhe, só acende branco 5 % enquanto
  * pressionado (o ripple era desligado; sobrava o `highlightColor`).
  */
 @Composable
@@ -140,7 +138,7 @@ internal fun Modifier.pressHighlight(onClick: () -> Unit): Modifier {
         .clickable(interactionSource = interaction, indication = null, role = Role.Button, onClick = onClick)
         .drawWithContent {
             drawContent()
-            if (pressed) drawRect(HomeColors.ButtonHighlight)
+            if (pressed) drawRect(AureaColors.PressHighlight)
         }
 }
 
@@ -167,7 +165,7 @@ internal fun <T> AureaSegmented(
         modifier
             .fillMaxWidth()
             .heightIn(min = 28.dp)
-            .clip(RoundedCornerShape(9.dp))
+            .clip(AureaShape.Chip)
             .background(background)
             .padding(horizontal = 3.dp, vertical = 2.dp)
             .drawBehind {
@@ -178,7 +176,7 @@ internal fun <T> AureaSegmented(
                     val alpha = min(abs(i - pos), abs(i - 1 - pos)).coerceIn(0f, 1f)
                     if (alpha > 0f) {
                         drawRect(
-                            HomeColors.SegmentSeparator.copy(alpha = HomeColors.SegmentSeparator.alpha * alpha),
+                            AureaColors.SegmentSeparator.copy(alpha = AureaColors.SegmentSeparator.alpha * alpha),
                             topLeft = Offset(w * i - 0.5f, inset),
                             size = Size(1f, size.height - inset * 2),
                         )
@@ -205,7 +203,7 @@ internal fun <T> AureaSegmented(
                 // estreito) quebra em duas linhas em vez de virar reticências.
                 Text(
                     label(v),
-                    style = HomeType.Segment,
+                    style = AureaType.Segment,
                     color = if (chosen) AureaColors.Accent else AureaColors.Text,
                     textAlign = TextAlign.Center,
                     maxLines = 2,
@@ -216,21 +214,20 @@ internal fun <T> AureaSegmented(
     }
 }
 
-/** `CupertinoSwitch` dos Ajustes: trilho 51×31 (#6FAED9 ligado), polegar 27 (onAccent ligado). */
+/** `CupertinoSwitch`: trilho 59×39 (#6FAED9 ligado), polegar 27. */
 @Composable
 internal fun AureaSwitch(checked: Boolean, onChange: (Boolean) -> Unit) {
-    val t by animateFloatAsState(if (checked) 1f else 0f, tween(200), label = "interruptor")
+    val t by animateFloatAsState(if (checked) 1f else 0f, tween(AureaMotion.NORMAL), label = "interruptor")
     Box(
         Modifier
-            .size(width = 59.dp, height = 39.dp)
+            .size(AureaDims.SwitchWidth, AureaDims.SwitchHeight)
             .clickable(interactionSource = null, indication = null, role = Role.Switch) { onChange(!checked) }
             .padding(horizontal = 4.dp, vertical = 4.dp)
             .drawBehind {
-                val track = if (checked) AureaColors.Accent else HomeColors.SwitchOffTrack
-                drawRoundRect(track, cornerRadius = CornerRadius(size.height / 2))
+                drawRoundRect(if (checked) AureaColors.Accent else AureaColors.SwitchOffTrack, cornerRadius = CornerRadius(size.height / 2))
                 val r = size.height / 2 - 2.dp.toPx()
                 val cx = size.height / 2 + (size.width - size.height) * t
-                drawCircle(if (checked) AureaColors.OnAccent else HomeColors.White, radius = r, center = Offset(cx, size.height / 2))
+                drawCircle(if (checked) AureaColors.OnAccent else AureaColors.OnImage, radius = r, center = Offset(cx, size.height / 2))
             },
     )
 }
@@ -255,48 +252,54 @@ internal fun ScaleDownToFit(modifier: Modifier = Modifier, content: @Composable 
     }
 }
 
+/**
+ * O vidro é opaco ao toque, como o Container colorido do Flutter: um toque
+ * na área vazia da barra não pode abrir o cartão escondido embaixo dela.
+ */
+internal fun Modifier.blockTouches(): Modifier = pointerInput(Unit) {}
+
 // =============================================================================
-// Listas agrupadas (Ajustes, Sobre)
+// Listas agrupadas (Ajustes)
 // =============================================================================
 
-/** `_GroupHeader`: caixa-alta, recuo 16, 8 embaixo. */
+/** Cabeçalho de grupo em caixa-alta, recuo 16. */
 @Composable
 internal fun GroupHeader(text: String) {
-    CapsLabel(text, Modifier.padding(start = 16.dp, bottom = 8.dp))
+    CapsLabel(text, Modifier.padding(start = AureaDims.S4, bottom = AureaDims.S2))
 }
 
-/** `_Group`: caixa #151C24 raio 16. */
+/** A caixa de um grupo de linhas. */
 @Composable
 internal fun Group(content: @Composable () -> Unit) {
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(HomeDims.GroupRadius))
+            .clip(AureaShape.Lg)
             .background(AureaColors.Surface),
     ) { content() }
 }
 
-/** `_GroupDivider`: hairline 0,5 recuada 16 à esquerda. */
+/** Hairline 0,5 recuada 16 à esquerda. */
 @Composable
 internal fun GroupDivider() {
-    Box(Modifier.padding(start = 16.dp).fillMaxWidth().height(0.5.dp).background(AureaColors.Hairline))
+    Box(Modifier.padding(start = AureaDims.S4).fillMaxWidth().height(AureaDims.Hairline).background(AureaColors.Hairline))
 }
 
-/** `_SegmentedRow`: rótulo bodyLarge + segmentado (fundo #0F141A, polegar #1B2530). */
+/** Rótulo + segmentado. */
 @Composable
 internal fun <T> SegmentedRow(label: String, values: List<T>, selected: T, labelOf: (T) -> String, onChange: (T) -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(16.dp, 14.dp)) {
+    Column(Modifier.fillMaxWidth().padding(AureaDims.S4, 14.dp)) {
         Text(label, style = AureaType.BodyLarge)
         Spacer(Modifier.height(10.dp))
-        AureaSegmented(values, selected, labelOf, onChange, AureaColors.Background, AureaColors.SurfaceHigh, 6.dp)
+        AureaSegmented(values, selected, labelOf, onChange, AureaColors.SegmentTrack, AureaColors.SegmentThumb, 6.dp)
     }
 }
 
-/** `_SwitchRow`: título + subtítulo e o interruptor. */
+/** Título + subtítulo e o interruptor. */
 @Composable
 internal fun SwitchRow(title: String, subtitle: String?, checked: Boolean, onChange: (Boolean) -> Unit) {
     Row(
-        Modifier.fillMaxWidth().padding(start = 16.dp, top = 10.dp, end = 12.dp, bottom = 10.dp),
+        Modifier.fillMaxWidth().padding(start = AureaDims.S4, top = 10.dp, end = AureaDims.S3, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
@@ -310,14 +313,14 @@ internal fun SwitchRow(title: String, subtitle: String?, checked: Boolean, onCha
     }
 }
 
-/** `_TapRow`: título + subtítulo e chevron 16. */
+/** Título + subtítulo e chevron 16. */
 @Composable
 internal fun TapRow(title: String, subtitle: String?, onClick: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
             .pressHighlight(onClick)
-            .padding(16.dp, 12.dp),
+            .padding(AureaDims.S4, AureaDims.S3),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
@@ -327,42 +330,39 @@ internal fun TapRow(title: String, subtitle: String?, onClick: () -> Unit) {
                 Text(subtitle, style = AureaType.BodySmall)
             }
         }
-        CupertinoIcon(CupertinoGlyph.ChevronRight, 16.dp, AureaColors.Muted)
+        CupertinoIcon(CupertinoGlyph.ChevronRight, AureaDims.IconSm, AureaColors.Muted)
     }
 }
 
-/** Nota 12,5 muted embaixo de uma linha de grupo. */
+/** Nota muted embaixo de uma linha de grupo. */
 @Composable
 internal fun GroupNote(text: String) {
-    Text(text, style = HomeType.Note, modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 14.dp))
+    Text(text, style = AureaType.Note, modifier = Modifier.fillMaxWidth().padding(start = AureaDims.S4, end = AureaDims.S4, bottom = 14.dp))
 }
 
-/**
- * O `ListTile` do Material 3 como a A.01 usava em Ajustes/Sobre: ícone à
- * esquerda, título bodyLarge, subtítulo e, se tocável, a seta.
- */
+/** Linha de lista com ícone à esquerda, título, subtítulo e o que vier à direita. */
 @Composable
 internal fun TileRow(
     leading: @Composable () -> Unit,
     title: String,
     subtitle: String? = null,
-    subtitleStyle: TextStyle = HomeType.TileSubtitle,
+    subtitleStyle: TextStyle = AureaType.BodySmall,
     trailing: (@Composable () -> Unit)? = null,
     onClick: (() -> Unit)? = null,
 ) {
     val base = Modifier.fillMaxWidth().heightIn(min = if (subtitle == null) 56.dp else 72.dp)
     Row(
-        (if (onClick != null) base.pressHighlight(onClick) else base).padding(start = 16.dp, end = 24.dp, top = 8.dp, bottom = 8.dp),
+        (if (onClick != null) base.pressHighlight(onClick) else base).padding(start = AureaDims.S4, end = AureaDims.S5, top = AureaDims.S2, bottom = AureaDims.S2),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.width(24.dp), contentAlignment = Alignment.CenterStart) { leading() }
-        Spacer(Modifier.width(16.dp))
+        Box(Modifier.width(AureaDims.IconLg), contentAlignment = Alignment.CenterStart) { leading() }
+        Spacer(Modifier.width(AureaDims.S4))
         Column(Modifier.weight(1f)) {
             Text(title, style = AureaType.BodyLarge)
             if (subtitle != null) Text(subtitle, style = subtitleStyle)
         }
         if (trailing != null) {
-            Spacer(Modifier.width(16.dp))
+            Spacer(Modifier.width(AureaDims.S4))
             trailing()
         }
     }
@@ -371,11 +371,44 @@ internal fun TileRow(
 /** A seta Cupertino 16 das linhas tocáveis de grupo. */
 @Composable
 internal fun TileChevron() {
-    CupertinoIcon(CupertinoGlyph.ChevronRight, 16.dp, AureaColors.Muted)
+    CupertinoIcon(CupertinoGlyph.ChevronRight, AureaDims.IconSm, AureaColors.Muted)
 }
 
 /** Seta do Material (`Icons.chevron_right`) da linha de Idioma. */
 @Composable
 internal fun MaterialChevron() {
     Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = AureaColors.Muted)
+}
+
+/** Um botão cheio de largura inteira (criar projeto, ação principal). */
+@Composable
+internal fun FillButton(label: String, glyph: Char? = null, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(AureaDims.ButtonHeight)
+            .clip(AureaShape.Lg)
+            .background(AureaColors.Accent)
+            .pressHighlight(onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (glyph != null) {
+                CupertinoIcon(glyph, AureaDims.IconMd, AureaColors.OnAccent)
+                Spacer(Modifier.width(AureaDims.S2))
+            }
+            Text(label, style = AureaType.Button)
+        }
+    }
+}
+
+/** Círculo com um ícone dentro — o atalho redondo. */
+@Composable
+internal fun GlyphCircle(glyph: Char, size: Dp = 56.dp, tint: Color = AureaColors.Accent) {
+    Box(
+        Modifier.size(size).clip(CircleShape).background(AureaColors.SurfaceHigh),
+        contentAlignment = Alignment.Center,
+    ) {
+        CupertinoIcon(glyph, size * 0.41f, tint)
+    }
 }

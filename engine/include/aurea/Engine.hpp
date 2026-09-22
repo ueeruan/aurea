@@ -711,6 +711,13 @@ public:
     /// `maxDim`. Miniatura do projeto na Home. Síncrono (espera a GPU).
     [[nodiscard]] Status capture_frame_rgba(u32 maxDim, std::vector<u8>& out, u32& width, u32& height) noexcept;
 
+    /// A PRÉVIA DE UM EFEITO (Fase 7.3): o efeito, com os valores padrão, sobre
+    /// a cartela de demonstração. RGBA8 sRGB de alfa reto. Não depende de
+    /// projeto nem de composição aberta — o navegador de efeitos existe antes
+    /// de qualquer camada. `NotImplemented` = efeito sem prévia de um quadro.
+    [[nodiscard]] Status render_effect_preview(u32 typeId, u32 width, u32 height, std::vector<u8>& out,
+                                               u32& outWidth, u32& outHeight) noexcept;
+
     [[nodiscard]] EngineStatus read_status() noexcept;
     [[nodiscard]] EngineTelemetry read_telemetry() noexcept;
 
@@ -763,6 +770,12 @@ public:
     /// Parâmetros de um efeito aplicado, com o valor no playhead.
     u32 query_effect_params(u64 layerId, u32 effectId, bridge::EffectParamRow* out, u32 capacity,
                             char* blob, u32 blobCapacity) noexcept;
+
+    /// Declaração dos parâmetros de um TIPO de efeito, sem precisar de layer:
+    /// a ficha do catálogo (nome, tipo, faixa, unidade). `value` sai com o
+    /// padrão da declaração e `animated` sai 0 — não há instância por trás.
+    u32 query_effect_specs(u32 typeId, bridge::EffectParamRow* out, u32 capacity,
+                           char* blob, u32 blobCapacity) noexcept;
 
     // =========================================================================
     // Seleção

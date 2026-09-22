@@ -1554,6 +1554,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshNow()
     }
 
+    /** Desfoque pelo movimento do próprio vídeo (optical flow). */
+    fun setVectorBlur(layer: Long, on: Boolean) {
+        engine.setVectorBlur(layer, if (on) 1f else 0f)
+        refreshNow()
+        showToast(if (on) "Desfoque do movimento do vídeo ligado" else "Desfoque do movimento do vídeo desligado")
+    }
+
     fun setCompositionMotionBlur(on: Boolean) {
         engine.setCompositionMotionBlur(on)
         refreshNow()

@@ -324,6 +324,11 @@ public:
     /// Vídeo em câmera lenta/velocidade quebrada: 0 repete o quadro, 1 mistura
     /// os dois quadros vizinhos da fonte, 2 movimento de pixels (optical flow).
     bool set_frame_blend(u64 layerId, u32 mode) noexcept;
+    /// Desfoque pelo movimento do vídeo (optical flow): 0 desliga; 1 = o
+    /// obturador da composição (até 2).
+    bool set_vector_blur(u64 layerId, f32 amount) noexcept;
+    /// Acertos/erros do cache do optical flow do renderer.
+    void flow_cache_stats(u32& hits, u32& misses) const noexcept { renderer_.flow_cache_stats(hits, misses); }
     /// Obturador da composição em graus (0–720; 180 = padrão de cinema).
     bool set_shutter_angle(f32 degrees) noexcept;
     /// Chave geral da composição (as camadas com desfoque só borram com ela).

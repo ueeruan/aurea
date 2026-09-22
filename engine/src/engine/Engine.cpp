@@ -1671,6 +1671,19 @@ bool Engine::set_frame_blend(u64 layerId, u32 mode) noexcept {
     return true;
 }
 
+bool Engine::set_vector_blur(u64 layerId, f32 amount) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->kind != LayerKind::Video) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), amount > 0.0f ? "desfoque do movimento do video" : "sem desfoque do video");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    l->vectorBlur = std::clamp(amount, 0.0f, 2.0f);
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
 bool Engine::set_composition_motion_blur(bool on) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
@@ -3616,7 +3629,7 @@ bool Engine::fill_layer_detail_locked(u64 layerId, bridge::LayerDetailPOD& out) 
     out.audioFadeOut = static_cast<i32>(l->fadeOut.value);
     out.speed = l->speed;
     out.timeFlags = (l->reversed ? 1u : 0u) | (l->motionBlur ? 2u : 0u) | (l->timeRemapEnabled ? 4u : 0u)
-                  | (l->frameBlend == 1 ? 8u : 0u) | (l->frameBlend == 2 ? 16u : 0u);
+                  | (l->frameBlend == 1 ? 8u : 0u) | (l->frameBlend == 2 ? 16u : 0u) | (l->vectorBlur > 0.0f ? 32u : 0u);
     // Transições: tipo entrada (4 bits) | saída (4) | quadros entrada (12) | saída (12).
     out.reserved0 = (l->transitionIn & 0xFu) | ((l->transitionOut & 0xFu) << 4)
                   | ((std::min<u32>(l->transitionInFrames, 4095u)) << 8) | ((std::min<u32>(l->transitionOutFrames, 4095u)) << 20);

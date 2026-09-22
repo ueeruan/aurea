@@ -334,6 +334,7 @@ class AureaEngine private constructor() {
     // Desfoque de movimento.
     fun setMotionBlur(layer: Long, on: Boolean): Boolean = nativeSetMotionBlur(nativeHandle, layer, on)
     fun setFrameBlend(layer: Long, mode: Int): Boolean = nativeSetFrameBlend(nativeHandle, layer, mode)
+    fun setVectorBlur(layer: Long, amount: Float): Boolean = nativeSetVectorBlur(nativeHandle, layer, amount)
     fun queryTimeRemap(layer: Long, out: FloatArray): Int = nativeQueryTimeRemap(nativeHandle, layer, out)
 
     // Rastreio de câmera 3D.
@@ -458,6 +459,7 @@ class AureaEngine private constructor() {
     private external fun nativeToggleMarker(handle: Long, frame: Long): Boolean
     private external fun nativeSetEditMode(handle: Long, on: Boolean)
     private external fun nativeSetMotionBlur(handle: Long, layer: Long, on: Boolean): Boolean
+    private external fun nativeSetVectorBlur(handle: Long, layer: Long, amount: Float): Boolean
     private external fun nativeSetFrameBlend(handle: Long, layer: Long, mode: Int): Boolean
     private external fun nativeStartCameraTrack(handle: Long, layer: Long, mode: Int): Boolean
     private external fun nativeCancelCameraTrack(handle: Long)

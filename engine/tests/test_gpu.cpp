@@ -2696,3 +2696,70 @@ AUREA_TEST(Gpu, TimeRemapGraphEditsPointsAndTheVideoFollows) {
     e.gpu()->destroy_texture(target);
     e.shutdown();
 }
+
+AUREA_TEST(Gpu, VectorBlurSmearsFootageMotionAndFlowIsCached) {
+    AUREA_REQUIRE_GPU();
+    SyntheticConfig cfg;
+    cfg.width = 96;
+    cfg.height = 54;
+    cfg.frameCount = 300;
+    cfg.pattern = SyntheticPattern::FastSquare;
+    SyntheticFactory factory(cfg);
+    Engine e;
+    EngineConfig ec;
+    ec.backend = new vk::Backend();
+    ec.backendConfig.framesInFlight = 2;
+    ec.mediaFactory = &factory;
+    ec.workerCount = 2;
+    ec.disableAutosave = true;
+    AUREA_CHECK(e.initialize(ec).ok());
+    AUREA_CHECK(e.new_project(96, 54, 30.0, "vetor").ok());
+    VideoImport imp;
+    imp.sourcePath = "sintetico";
+    imp.displayName = "clipe";
+    auto layer = e.import_video(imp);
+    AUREA_CHECK(layer.ok());
+    if (!layer.ok()) { e.shutdown(); return; }
+    TextureDesc d;
+    d.width = 96;
+    d.height = 54;
+    d.format = SurfaceFormat::RGBA16F;
+    d.renderTarget = true;
+    d.transferSrc = true;
+    const TextureHandle target = *e.gpu()->create_texture(d);
+    std::vector<u16> half(96 * 54 * 4);
+    // Linha e coluna do meio: meio-tons na horizontal (o quadrado corre em x)
+    // e na vertical (não corre em y).
+    auto measure = [&](i64 frame, u32& halfX, u32& halfY) {
+        Command seek;
+        seek.type = CommandType::PlaybackSeek;
+        seek.seek.time = tick_at(FrameIndex{frame}, 30.0);
+        AUREA_CHECK(e.submit_commands(&seek, 1) == 1);
+        AUREA_CHECK(e.render_offscreen(target, 96, 54).ok());
+        AUREA_CHECK(e.gpu()->read_texture(target, half.data(), 96 * 8).ok());
+        auto code = [&](u32 x, u32 y) { return srgb_encode(half_to_float(half[(y * 96 + x) * 4])) * 219.0f + 16.0f; };
+        halfX = halfY = 0;
+        const u32 cx = static_cast<u32>(fast_square_x(frame));
+        // Borda de fora do quadrado (fundo ~100..130 contra xadrez 20/235): meio-tom = nem fundo nem xadrez.
+        for (u32 x = 0; x < 96; ++x) { const f32 v = code(x, 17 + 3); if (v > 45.0f && v < 90.0f) ++halfX; }
+        for (u32 y = 0; y < 54; ++y) { const f32 v = code(cx - 8, y); if (v > 45.0f && v < 90.0f) ++halfY; }
+    };
+    u32 sx = 0, sy = 0, bx = 0, by = 0;
+    measure(50, sx, sy);
+    AUREA_CHECK(e.set_vector_blur(*layer, 1.0f));
+    u32 h0 = 0, m0 = 0;
+    e.flow_cache_stats(h0, m0);
+    measure(50, bx, by);
+    u32 bx2 = 0, by2 = 0;
+    measure(50, bx2, by2);                      // o mesmo quadro de novo: fluxo do cache
+    u32 h1 = 0, m1 = 0;
+    e.flow_cache_stats(h1, m1);
+    std::printf("    desfoque vetorial: meio-tons em x %u -> %u (y %u -> %u); repetido x %u; cache do fluxo +%u acertos, +%u calculos\n", sx, bx, sy, by,
+                bx2, h1 - h0, m1 - m0);
+    AUREA_CHECK(bx >= sx + 4);                  // 8 px/quadro × 180° = rastro de ~4 px em cada borda vertical
+    AUREA_CHECK(by <= sy + 2);                  // nada na vertical
+    AUREA_CHECK(bx2 == bx);
+    AUREA_CHECK(h1 > h0);
+    e.gpu()->destroy_texture(target);
+    e.shutdown();
+}

@@ -74,6 +74,8 @@ struct LayerSource {
     FrameRef frameB;
     f32      blendT = 0.0f;
     u8       blendMode = 0;   ///< 1 mistura, 2 optical flow
+    /// Desfoque vetorial: fração do quadro que o obturador cobre (0 = não).
+    f32      vectorBlur = 0.0f;
 
     // Imagem
     AssetId  image{};
@@ -304,6 +306,24 @@ private:
     std::vector<CompositeDraw> draws_;
     std::vector<FrameRef> framesInFlight_;
     std::unordered_map<u64, PlanarTextures> planar_;   ///< por LayerId empacotado
+    /// Cache do optical flow por camada: duas texturas alternadas (a que um
+    /// quadro em voo lê nunca é a que o próximo escreve), cada uma com o par
+    /// de quadros da fonte que a gerou.
+    struct FlowCache {
+        TextureHandle tex[2]{};
+        u64 key[2]{0, 0};
+        u32 width = 0, height = 0;
+        u32 next = 0;
+        u64 lastFrame = 0;
+    };
+    std::unordered_map<u64, FlowCache> flowCache_;
+    u32 flowHits_ = 0, flowMisses_ = 0;
+    [[nodiscard]] FGTexture video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture b, u32 w, u32 h, u32& baseW, u32& baseH,
+                                       u64 frameNumber) noexcept;
+public:
+    /// Acertos/erros do cache do optical flow (testes e HUD).
+    void flow_cache_stats(u32& hits, u32& misses) const noexcept { hits = flowHits_; misses = flowMisses_; }
+private:
     std::unordered_map<u64, ImageTexture> images_;     ///< por AssetId empacotado
     std::unordered_map<u64, LutTexture> luts_;         ///< por hash da curva
     std::vector<PendingUpload> uploads_;

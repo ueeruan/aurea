@@ -152,6 +152,15 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
             checked = store.detail?.motionBlur == true,
             detail = "Borra na direção do movimento (obturador nas configurações do projeto)",
         )
+        if (type == LayerType.Video) {
+            MenuItemRow(
+                CupertinoGlyph.Speedometer,
+                "Desfoque do movimento do vídeo",
+                act { store.setVectorBlur(id, !(store.detail?.vectorBlur ?: false)) },
+                checked = store.detail?.vectorBlur == true,
+                detail = "Borra o que se mexe dentro do vídeo (pelos vetores de movimento)",
+            )
+        }
 
         MenuSection("Tempo")
         MenuItemRow(CupertinoGlyph.ArrowRightToLine, "Aparar o início no cabeçote", if (inside) timeAct { store.trimStart(id, t) } else null)

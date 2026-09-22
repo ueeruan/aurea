@@ -225,6 +225,10 @@ struct Layer {
     /// da fonte pelo tempo entre eles, 2 = movimento de pixels (optical flow:
     /// o quadro intermediário é deformado pelo fluxo entre os dois).
     u8    frameBlend = 0;
+    /// Desfoque pelo movimento do PRÓPRIO vídeo (vetores do optical flow, à
+    /// la RSMB): 0 desligado; 1 = o obturador da composição. Borra o que se
+    /// mexe dentro do quadro, não o transform da camada.
+    f32   vectorBlur = 0.0f;
     /// Transições de entrada/saída (avaliadas no render, não viram keyframes):
     /// 0 nenhuma, 1 dissolver, 2 deslizar para cima, 3 deslizar da esquerda,
     /// 4 zoom, 5 girar. Duração em quadros.

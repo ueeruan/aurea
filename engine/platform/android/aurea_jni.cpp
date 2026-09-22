@@ -909,6 +909,11 @@ AUREA_JNI jboolean AUREA_FN(nativeSetMotionBlur)(JNIEnv*, jclass, jlong handle, 
     return c && c->engine.set_motion_blur(static_cast<u64>(layer), on == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
 }
 
+AUREA_JNI jboolean AUREA_FN(nativeSetVectorBlur)(JNIEnv*, jclass, jlong handle, jlong layer, jfloat amount) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.set_vector_blur(static_cast<u64>(layer), amount) ? JNI_TRUE : JNI_FALSE;
+}
+
 AUREA_JNI jboolean AUREA_FN(nativeStartCameraTrack)(JNIEnv*, jclass, jlong handle, jlong layer, jint mode) {
     NativeContext* c = ctx_of(handle);
     return c && c->engine.start_camera_track(static_cast<u64>(layer), static_cast<u32>(mode)) ? JNI_TRUE : JNI_FALSE;

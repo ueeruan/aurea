@@ -402,6 +402,7 @@ void Renderer::shutdown() noexcept {
 void Renderer::forget_device() noexcept {
     framesInFlight_.clear();
     planar_.clear();
+    flowCache_.clear();
     images_.clear();
     luts_.clear();
     uploads_.clear();
@@ -418,6 +419,8 @@ void Renderer::release_project_resources() noexcept {
     }
     for (auto& [k, i] : images_) backend_->destroy_texture(i.texture);
     for (auto& [k, l] : luts_) backend_->destroy_texture(l.texture);
+    for (auto& [k, f] : flowCache_) for (TextureHandle& t : f.tex) if (t.valid()) backend_->destroy_texture(t);
+    flowCache_.clear();
     planar_.clear();
     images_.clear();
     luts_.clear();
@@ -830,15 +833,18 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 // Mistura de quadros: posição FRACIONÁRIA na grade da fonte.
                 i64 nextUs = -1;
                 f32 blendT = 0.0f;
-                if (l->frameBlend >= 1) {
+                const bool wantVector = l->vectorBlur > 0.0f && comp.motion_blur().shutterAngle > 0.0f;
+                if (l->frameBlend >= 1 || wantVector) {
                     if (const f64 srcFps = src->info().fps; srcFps > 0.0) {
                         const f64 pos = l->source_frame(time) / fps * srcFps;
                         const f64 idx = std::floor(pos + 1e-3);
                         const f64 frac = pos - idx;
                         const i64 us = static_cast<i64>(std::llround((idx + 1.0) * 1e6 / srcFps));
-                        if (frac > 0.01 && frac < 0.99 && (src->info().durationUs <= 0 || us < src->info().durationUs)) {
+                        const bool inside = src->info().durationUs <= 0 || us < src->info().durationUs;
+                        const bool between = l->frameBlend >= 1 && frac > 0.01 && frac < 0.99;
+                        if (inside && (between || wantVector)) {
                             nextUs = us;
-                            blendT = static_cast<f32>(frac);
+                            blendT = between ? static_cast<f32>(frac) : 0.0f;
                         }
                     }
                 }
@@ -873,6 +879,11 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         rl.source.frameB = std::move(b);
                         rl.source.blendT = blendT;
                         rl.source.blendMode = l->frameBlend;
+                        // Desfoque vetorial: o fluxo cobre um quadro da FONTE;
+                        // o obturador da composição dá a fração (× velocidade).
+                        rl.source.vectorBlur = wantVector
+                            ? std::clamp(l->vectorBlur, 0.0f, 2.0f) * comp.motion_blur().shutterAngle / 360.0f * std::max(0.0f, std::fabs(l->speed))
+                            : 0.0f;
                     } else {
                         exact = false;   // falta um dos dois: o export espera; o preview mostra o que tem
                     }
@@ -1191,6 +1202,80 @@ bool Renderer::build_video_source(const RenderLayer& layer, u32 layerIndex, u32 
                                &u, sizeof(u)) != kInvalidIndex;
 }
 
+FGTexture Renderer::video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture b, u32 w, u32 h, u32& baseW, u32& baseH,
+                               u64 frameNumber) noexcept {
+    // Base da pirâmide com o lado maior ≤ 384 (o flow não precisa de 4K).
+    const f32 s = std::min(1.0f, 384.0f / static_cast<f32>(std::max(w, h)));
+    u32 lw = std::max(8u, static_cast<u32>(std::lround(static_cast<f32>(w) * s)));
+    u32 lh = std::max(8u, static_cast<u32>(std::lround(static_cast<f32>(h) * s)));
+    baseW = lw;
+    baseH = lh;
+    TextureDesc fd;
+    fd.width = lw;
+    fd.height = lh;
+    fd.format = kWorkFormat;
+    fd.sampled = true;
+    fd.renderTarget = true;
+    fd.debugName = "flow-cache";
+    FlowCache& fc = flowCache_[layerKey];
+    fc.lastFrame = frameNumber;
+    if (fc.width != lw || fc.height != lh) {
+        for (TextureHandle& t : fc.tex) if (t.valid()) backend_->destroy_texture(t);
+        fc = FlowCache{};
+        fc.width = lw;
+        fc.height = lh;
+        fc.lastFrame = frameNumber;
+    }
+    for (u32 i = 0; i < 2; ++i) {
+        if (fc.tex[i].valid() && fc.key[i] == pairKey) {
+            ++flowHits_;
+            return graph_.import_texture("flow-cache", fc.tex[i], fd);
+        }
+    }
+    ++flowMisses_;
+    const u32 slot = fc.next;
+    fc.next ^= 1u;
+    if (!fc.tex[slot].valid()) {
+        auto t = backend_->create_texture(fd);
+        if (!t.ok()) return FGTexture{};
+        fc.tex[slot] = *t;
+    }
+    fc.key[slot] = pairKey;
+    EffectBuildContext ctx(graph_, shaders_, arena_, *this, kWorkFormat, 4096);
+    FGTexture levels[6];
+    u32 sizes[6][2];
+    levels[0] = ctx.texture("flow-nivel", lw, lh);
+    sizes[0][0] = lw;
+    sizes[0][1] = lh;
+    const Vec4 lumaParams{1.0f / static_cast<f32>(lw), 1.0f / static_cast<f32>(lh), 0, 0};
+    ctx.fullscreen_pass("flow-luma", PassStage::Decode, levels[0], ShaderId::video_flow_luma_frag,
+                        {PassTexture{a}, PassTexture{b}}, &lumaParams, sizeof(lumaParams));
+    u32 n = 1;
+    while (n < 6 && std::min(lw, lh) >= 12) {
+        const u32 nw = (lw + 1) / 2, nh = (lh + 1) / 2;
+        struct { Vec4 uvMap; Vec4 texel; } dp{Vec4{1, 1, 0, 0}, Vec4{1.0f / static_cast<f32>(lw), 1.0f / static_cast<f32>(lh), 0, 0}};
+        levels[n] = ctx.texture("flow-nivel", nw, nh);
+        ctx.fullscreen_pass("flow-reduz", PassStage::Decode, levels[n], ShaderId::effects_downsample_frag,
+                            {PassTexture{levels[n - 1]}}, &dp, sizeof(dp));
+        sizes[n][0] = lw = nw;
+        sizes[n][1] = lh = nh;
+        ++n;
+    }
+    FGTexture flow{};
+    bool haveFlow = false;
+    for (u32 i = n; i-- > 0;) {
+        const f32 fw = static_cast<f32>(sizes[i][0]), fh = static_cast<f32>(sizes[i][1]);
+        struct { Vec4 texel; Vec4 flags; } lp{Vec4{1.0f / fw, 1.0f / fh, fw, fh}, Vec4{haveFlow ? 1.0f : 0.0f, 6.0f, 0, 0}};
+        // O nível base vai direto para a textura do cache.
+        const FGTexture f = i == 0 ? graph_.import_texture("flow-cache", fc.tex[slot], fd) : ctx.texture("flow", sizes[i][0], sizes[i][1]);
+        ctx.fullscreen_pass("flow-lk", PassStage::Decode, f, ShaderId::video_flow_lk_frag,
+                            {PassTexture{levels[i]}, PassTexture{haveFlow ? flow : levels[i]}}, &lp, sizeof(lp));
+        flow = f;
+        haveFlow = true;
+    }
+    return flow;
+}
+
 bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEffects, LayerImage& out,
                             std::vector<FrameRef>& framesUsed, u64 frameNumber) noexcept {
     if (layer.source.kind == LayerSource::Kind::Nested) {
@@ -1282,84 +1367,64 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
             out.texture = graph_.create_texture("layer-video", d);
             if (!build_video_source(layer, layerIndex, w, h, out.texture, frameNumber)) return false;
             framesUsed.push_back(layer.source.frame);
-            // Mistura de quadros: o seguinte por cima, com o peso do tempo
-            // entre os dois (vídeo opaco: A·(1−t) + B·t).
-            if (layer.source.frameB && layer.source.blendT > 0.0f) {
+            // Quadro seguinte da fonte: mistura, movimento de pixels e/ou
+            // desfoque vetorial (os dois últimos pelo optical flow, em cache).
+            if (layer.source.frameB) {
                 const FGTexture b = graph_.create_texture("layer-video-seguinte", d);
-                auto pNormal = shaders_.pipeline(PipelineKey::graphics(
-                    ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat, true, BlendMode::Normal));
-                const bool haveB = build_video_source(layer, layerIndex, w, h, b, frameNumber, layer.source.frameB.get());
-                if (haveB) framesUsed.push_back(layer.source.frameB);
-                if (haveB && layer.source.blendMode == 2) {
-                    // Movimento de pixels: pirâmide de luminância (base com o
-                    // lado maior ≤ 384), Lucas-Kanade do nível mais grosso ao
-                    // mais fino e deformação dos dois quadros até t.
-                    EffectBuildContext ctx(graph_, shaders_, arena_, *this, kWorkFormat, maxTex);
-                    const f32 s = std::min(1.0f, 384.0f / static_cast<f32>(std::max(w, h)));
-                    u32 lw = std::max(8u, static_cast<u32>(std::lround(static_cast<f32>(w) * s)));
-                    u32 lh = std::max(8u, static_cast<u32>(std::lround(static_cast<f32>(h) * s)));
-                    const u32 baseW = lw, baseH = lh;
-                    FGTexture levels[6];
-                    u32 sizes[6][2];
-                    u32 n = 0;
-                    levels[0] = ctx.texture("flow-nivel", lw, lh);
-                    sizes[0][0] = lw;
-                    sizes[0][1] = lh;
-                    const Vec4 lumaParams{1.0f / static_cast<f32>(lw), 1.0f / static_cast<f32>(lh), 0, 0};
-                    ctx.fullscreen_pass("flow-luma", PassStage::Decode, levels[0], ShaderId::video_flow_luma_frag,
-                                        {PassTexture{out.texture}, PassTexture{b}}, &lumaParams, sizeof(lumaParams));
-                    n = 1;
-                    while (n < 6 && std::min(lw, lh) >= 12) {
-                        const u32 nw = (lw + 1) / 2, nh = (lh + 1) / 2;
-                        struct { Vec4 uvMap; Vec4 texel; } dp{Vec4{1, 1, 0, 0}, Vec4{1.0f / static_cast<f32>(lw), 1.0f / static_cast<f32>(lh), 0, 0}};
-                        levels[n] = ctx.texture("flow-nivel", nw, nh);
-                        ctx.fullscreen_pass("flow-reduz", PassStage::Decode, levels[n], ShaderId::effects_downsample_frag,
-                                            {PassTexture{levels[n - 1]}}, &dp, sizeof(dp));
-                        sizes[n][0] = lw = nw;
-                        sizes[n][1] = lh = nh;
-                        ++n;
-                    }
-                    FGTexture flow{};
-                    bool haveFlow = false;
-                    for (u32 i = n; i-- > 0;) {
-                        const f32 fw = static_cast<f32>(sizes[i][0]), fh = static_cast<f32>(sizes[i][1]);
-                        struct { Vec4 texel; Vec4 flags; } lp{Vec4{1.0f / fw, 1.0f / fh, fw, fh}, Vec4{haveFlow ? 1.0f : 0.0f, 6.0f, 0, 0}};
-                        const FGTexture f = ctx.texture("flow", sizes[i][0], sizes[i][1]);
-                        ctx.fullscreen_pass("flow-lk", PassStage::Decode, f, ShaderId::video_flow_lk_frag,
-                                            {PassTexture{levels[i]}, PassTexture{haveFlow ? flow : levels[i]}}, &lp, sizeof(lp));
-                        flow = f;
-                        haveFlow = true;
-                    }
+                if (!build_video_source(layer, layerIndex, w, h, b, frameNumber, layer.source.frameB.get())) return true;
+                framesUsed.push_back(layer.source.frameB);
+                EffectBuildContext ctx(graph_, shaders_, arena_, *this, kWorkFormat, maxTex);
+                const bool needFlow = (layer.source.blendMode == 2 && layer.source.blendT > 0.0f) || layer.source.vectorBlur > 0.0f;
+                FGTexture flow{};
+                u32 baseW = 0, baseH = 0;
+                if (needFlow) {
+                    const u64 pair = (static_cast<u64>(layer.source.frame->ptsUs) * 1000003ull) ^ static_cast<u64>(layer.source.frameB->ptsUs)
+                                   ^ (static_cast<u64>(w) << 40) ^ (static_cast<u64>(h) << 52);
+                    flow = video_flow(layer.id.pack(), pair, out.texture, b, w, h, baseW, baseH, frameNumber);
+                }
+                if (layer.source.blendT > 0.0f && layer.source.blendMode == 2) {
                     const FGTexture moved = graph_.create_texture("layer-video-movimento", d);
                     const Vec4 wp{layer.source.blendT, 1.0f / static_cast<f32>(baseW), 1.0f / static_cast<f32>(baseH), 0};
                     ctx.fullscreen_pass("flow-deforma", PassStage::Decode, moved, ShaderId::video_flow_warp_frag,
                                         {PassTexture{out.texture}, PassTexture{b}, PassTexture{flow}}, &wp, sizeof(wp));
                     out.texture = moved;
-                } else if (pNormal.ok() && haveB) {
-                    // Alvo novo que LÊ os dois (o grafo ordena e não descarta A).
-                    const FGTexture mix = graph_.create_texture("layer-video-mistura", d);
-                    struct Cap { PipelineHandle p; FGTexture a; FGTexture b; u64 sampler; f32 w; f32 h; f32 t; }
-                        cap{*pNormal, out.texture, b, shaders_.sampler(CommonSampler::LinearClamp).id, static_cast<f32>(w),
-                            static_cast<f32>(h), layer.source.blendT};
-                    const u32 pass = graph_.add_raster_pass("mistura-de-quadros", PassStage::Decode, mix, LoadOp::Clear,
-                                                            Vec4{0, 0, 0, 0}, [cap](PassContext& pc) {
-                        pc.cmds.bind_pipeline(cap.p);
-                        LayerPush push;
-                        push.clipFromLayer = clip_from_comp(cap.w, cap.h);
-                        push.region = Vec4{0.0f, 0.0f, cap.w, cap.h};
-                        push.uvRect = Vec4{0.0f, 0.0f, 1.0f, 1.0f};
-                        pc.cmds.bind_texture(0, pc.texture(cap.a), SamplerHandle{cap.sampler});
-                        push.params = Vec4{1.0f, 0, 0, 0};
-                        pc.cmds.push_constants(&push, sizeof(push));
-                        pc.cmds.draw(6);
-                        pc.cmds.bind_texture(0, pc.texture(cap.b), SamplerHandle{cap.sampler});
-                        push.params = Vec4{cap.t, 0, 0, 0};
-                        pc.cmds.push_constants(&push, sizeof(push));
-                        pc.cmds.draw(6);
-                    });
-                    graph_.read(pass, out.texture);
-                    graph_.read(pass, b);
-                    out.texture = mix;
+                } else if (layer.source.blendT > 0.0f && layer.source.blendMode == 1) {
+                    // Mistura: alvo novo que LÊ os dois (vídeo opaco: A·(1−t) + B·t).
+                    auto pNormal = shaders_.pipeline(PipelineKey::graphics(
+                        ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat, true, BlendMode::Normal));
+                    if (pNormal.ok()) {
+                        const FGTexture mix = graph_.create_texture("layer-video-mistura", d);
+                        struct Cap { PipelineHandle p; FGTexture a; FGTexture b; u64 sampler; f32 w; f32 h; f32 t; }
+                            cap{*pNormal, out.texture, b, shaders_.sampler(CommonSampler::LinearClamp).id, static_cast<f32>(w),
+                                static_cast<f32>(h), layer.source.blendT};
+                        const u32 pass = graph_.add_raster_pass("mistura-de-quadros", PassStage::Decode, mix, LoadOp::Clear,
+                                                                Vec4{0, 0, 0, 0}, [cap](PassContext& pc) {
+                            pc.cmds.bind_pipeline(cap.p);
+                            LayerPush push;
+                            push.clipFromLayer = clip_from_comp(cap.w, cap.h);
+                            push.region = Vec4{0.0f, 0.0f, cap.w, cap.h};
+                            push.uvRect = Vec4{0.0f, 0.0f, 1.0f, 1.0f};
+                            pc.cmds.bind_texture(0, pc.texture(cap.a), SamplerHandle{cap.sampler});
+                            push.params = Vec4{1.0f, 0, 0, 0};
+                            pc.cmds.push_constants(&push, sizeof(push));
+                            pc.cmds.draw(6);
+                            pc.cmds.bind_texture(0, pc.texture(cap.b), SamplerHandle{cap.sampler});
+                            push.params = Vec4{cap.t, 0, 0, 0};
+                            pc.cmds.push_constants(&push, sizeof(push));
+                            pc.cmds.draw(6);
+                        });
+                        graph_.read(pass, out.texture);
+                        graph_.read(pass, b);
+                        out.texture = mix;
+                    }
+                }
+                if (layer.source.vectorBlur > 0.0f) {
+                    // Borrão ao longo do vetor de cada pixel, obturador centrado no quadro.
+                    const FGTexture blurred = graph_.create_texture("layer-video-desfoque-vetorial", d);
+                    const Vec4 vp{layer.source.vectorBlur, 1.0f / static_cast<f32>(baseW), 1.0f / static_cast<f32>(baseH), 16.0f};
+                    ctx.fullscreen_pass("desfoque-vetorial", PassStage::Decode, blurred, ShaderId::video_flow_vblur_frag,
+                                        {PassTexture{out.texture}, PassTexture{flow}}, &vp, sizeof(vp));
+                    out.texture = blurred;
                 }
             }
             return true;
@@ -1771,6 +1836,14 @@ void Renderer::collect_resources(u64 frameNumber) noexcept {
         if (frameNumber > it->second.lastFrame + 240) {
             for (TextureHandle& t : it->second.plane) if (t.valid()) backend_->destroy_texture(t);
             it = planar_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    for (auto it = flowCache_.begin(); it != flowCache_.end();) {
+        if (frameNumber > it->second.lastFrame + 240) {
+            for (TextureHandle& t : it->second.tex) if (t.valid()) backend_->destroy_texture(t);
+            it = flowCache_.erase(it);
         } else {
             ++it;
         }

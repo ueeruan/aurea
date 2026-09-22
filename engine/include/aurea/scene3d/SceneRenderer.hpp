@@ -95,6 +95,8 @@ struct SceneInstance {
     std::vector<u32>  skinJointOffset; ///< início de cada skin em jointMatrices
     std::vector<std::vector<f32>> morphWeights;   ///< por nó (vazio = pesos da malha)
     bool castShadows = true;
+    u64  layerKey = 0;                 ///< camada de origem (sub-quadros do desfoque)
+    bool motionBlur = false;           ///< a camada pede desfoque de movimento
 };
 
 struct SceneCamera {
@@ -122,6 +124,10 @@ struct SceneFrame {
     SceneEnvironment environment;
     std::vector<SceneLight> lights;
     std::vector<SceneInstance> instances;
+    /// Desfoque de movimento: a cena em K instantes do obturador (câmera,
+    /// modelos e pose da animação). Vazio = sem desfoque; o render acumula a
+    /// média dos K quadros.
+    std::vector<SceneFrame> blurFrames;
 };
 
 struct SceneStats {

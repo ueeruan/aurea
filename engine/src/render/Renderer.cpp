@@ -54,30 +54,6 @@ f32 texel_scale_for(f32 onScreenScale) noexcept {
     return k;
 }
 
-/// Transform 3D completo da layer (posição/rotação/escala/âncora em XYZ).
-Mat4 layer_matrix_3d(const Layer& l, FrameIndex local) noexcept {
-    const TrackSet& t = l.tracks;
-    auto s = [&](TrackProperty p, f32 fallback) noexcept {
-        const Track* tr = t.find(p);
-        return (tr && !tr->keys.empty()) ? tr->sample(local) : fallback;
-    };
-    const Vec3 pos{s(TrackProperty::PositionX, l.transform.position.x), s(TrackProperty::PositionY, l.transform.position.y),
-                   s(TrackProperty::PositionZ, l.transform.position.z)};
-    Vec3 scale{s(TrackProperty::ScaleX, l.transform.scale.x), s(TrackProperty::ScaleY, l.transform.scale.y),
-               s(TrackProperty::ScaleZ, l.transform.scale.z)};
-    // Modelo 3D: a profundidade acompanha a largura (Z multiplica X). Os
-    // controles de escala da UI mexem só em X/Y; sem isto, escalar um modelo
-    // o achataria em profundidade (sombreamento e perfil mudam).
-    if (l.kind == LayerKind::Model3D) scale.z *= scale.x;
-    const Vec3 rot{s(TrackProperty::RotationX, l.transform.rotation.x) * kDeg2Rad,
-                   s(TrackProperty::RotationY, l.transform.rotation.y) * kDeg2Rad,
-                   s(TrackProperty::RotationZ, l.transform.rotation.z) * kDeg2Rad};
-    const Vec3 anchor{s(TrackProperty::AnchorX, l.transform.anchor.x), s(TrackProperty::AnchorY, l.transform.anchor.y),
-                      s(TrackProperty::AnchorZ, l.transform.anchor.z)};
-    return Mat4::translation(pos) * Mat4::from_quat(Quat::from_euler_zyx(rot.x, rot.y, rot.z)) * Mat4::scale(scale)
-         * Mat4::translation(-anchor);
-}
-
 /// Cena do modelo (glTF: metros, Y para cima, +Z para o observador) → espaço
 /// da layer (pixels, Y para baixo, Z para dentro): giro de 180° em X (troca Y
 /// e Z sem espelhar — a face da frente continua da frente), escala de
@@ -133,6 +109,35 @@ Mat4 layer_matrix_frac(const Layer& l, f64 local) noexcept {
                       s(TrackProperty::AnchorY, l.transform.anchor.y), 0.0f};
     return Mat4::translation(pos) * Mat4::from_quat(Quat::from_axis_angle(Vec3{0, 0, 1}, rot))
          * Mat4::scale(scale) * Mat4::translation(-anchor);
+}
+
+/// Transform 3D completo da layer (posição/rotação/escala/âncora em XYZ),
+/// num tempo local fracionário (inteiro = o próprio quadro).
+Mat4 layer_matrix_3d_frac(const Layer& l, f64 local) noexcept {
+    const TrackSet& t = l.tracks;
+    auto s = [&](TrackProperty p, f32 fallback) noexcept {
+        const Track* tr = t.find(p);
+        return (tr && !tr->keys.empty()) ? sample_frac(*tr, local) : fallback;
+    };
+    const Vec3 pos{s(TrackProperty::PositionX, l.transform.position.x), s(TrackProperty::PositionY, l.transform.position.y),
+                   s(TrackProperty::PositionZ, l.transform.position.z)};
+    Vec3 scale{s(TrackProperty::ScaleX, l.transform.scale.x), s(TrackProperty::ScaleY, l.transform.scale.y),
+               s(TrackProperty::ScaleZ, l.transform.scale.z)};
+    // Modelo 3D: a profundidade acompanha a largura (Z multiplica X). Os
+    // controles de escala da UI mexem só em X/Y; sem isto, escalar um modelo
+    // o achataria em profundidade (sombreamento e perfil mudam).
+    if (l.kind == LayerKind::Model3D) scale.z *= scale.x;
+    const Vec3 rot{s(TrackProperty::RotationX, l.transform.rotation.x) * kDeg2Rad,
+                   s(TrackProperty::RotationY, l.transform.rotation.y) * kDeg2Rad,
+                   s(TrackProperty::RotationZ, l.transform.rotation.z) * kDeg2Rad};
+    const Vec3 anchor{s(TrackProperty::AnchorX, l.transform.anchor.x), s(TrackProperty::AnchorY, l.transform.anchor.y),
+                      s(TrackProperty::AnchorZ, l.transform.anchor.z)};
+    return Mat4::translation(pos) * Mat4::from_quat(Quat::from_euler_zyx(rot.x, rot.y, rot.z)) * Mat4::scale(scale)
+         * Mat4::translation(-anchor);
+}
+
+Mat4 layer_matrix_3d(const Layer& l, FrameIndex local) noexcept {
+    return layer_matrix_3d_frac(l, static_cast<f64>(local.value));
 }
 
 f32 layer_opacity(const Layer& l, FrameIndex local) noexcept {
@@ -215,30 +220,60 @@ Mat4 world_2d_frac(const Composition& comp, const Layer& l, f64 time) noexcept {
     return m;
 }
 
-/// Mundo 3D da camada com a cadeia de pais (cada pai no próprio tempo).
-Mat4 world_3d(const Composition& comp, const Layer& l, FrameIndex time) noexcept {
-    Mat4 m = layer_matrix_3d(l, l.local_time(time));
+/// Mundo 3D da camada com a cadeia de pais (cada pai no próprio tempo), num
+/// instante fracionário da timeline (sub-quadro do obturador).
+Mat4 world_3d_frac(const Composition& comp, const Layer& l, f64 time) noexcept {
+    auto localOf = [time](const Layer& x) {
+        return time - static_cast<f64>(x.start.value) + static_cast<f64>(x.offset.value);
+    };
+    Mat4 m = layer_matrix_3d_frac(l, localOf(l));
     LayerId parent = l.parent;
     for (u32 depth = 0; parent.valid() && depth < 16; ++depth) {
         const Layer* p = comp.layer(parent);
         if (!p) break;
-        m = layer_matrix_3d(*p, p->local_time(time)) * m;
+        m = layer_matrix_3d_frac(*p, localOf(*p)) * m;
         parent = p->parent;
     }
     return m;
 }
 
+/// Mundo 3D da camada com a cadeia de pais (cada pai no próprio tempo).
+Mat4 world_3d(const Composition& comp, const Layer& l, FrameIndex time) noexcept {
+    return world_3d_frac(comp, l, static_cast<f64>(time.value));
+}
+
+/// Modelo 3D no instante (fracionário): mundo com a cadeia de pais e pose da
+/// animação no relógio da TIMELINE (tempo local × velocidade do clipe).
+void place_model(const Composition& comp, const Layer& l, const scene3d::SceneAsset& asset, f64 time,
+                 scene3d::SceneInstance& inst) {
+    inst.world = world_3d_frac(comp, l, time) * layer_from_model(l.model);
+    scene3d::Pose pose;
+    const i32 clip = l.model.animationClip;
+    f32 t = 0.0f;
+    if (clip >= 0 && clip < static_cast<i32>(asset.animations.size())) {
+        const f64 fps = comp.fps() > 0.0 ? comp.fps() : 30.0;
+        const f64 local = time - static_cast<f64>(l.start.value) + static_cast<f64>(l.offset.value);
+        t = scene3d::clip_time(asset.animations[static_cast<usize>(clip)], local / fps * l.model.timeScale);
+    }
+    scene3d::evaluate_pose(asset, clip, t, pose);
+    inst.nodeWorld = std::move(pose.nodeWorld);
+    inst.jointMatrices = std::move(pose.jointMatrices);
+    inst.skinJointOffset = std::move(pose.skinJointOffset);
+    inst.morphWeights = std::move(pose.morphWeights);
+}
+
 /// Câmera da composição no instante: a camada de câmera ATIVA visível; sem
 /// ela, a padrão (plano Z=0 em escala 1:1 com a composição).
-scene3d::SceneCamera camera_for(const Composition& comp, FrameIndex time, u32 w, u32 h) noexcept {
+scene3d::SceneCamera camera_for_frac(const Composition& comp, f64 timeF, u32 w, u32 h) noexcept {
+    const FrameIndex time{static_cast<i64>(std::floor(timeF))};
     scene3d::SceneCamera cam = scene3d::default_camera(w, h);
     const OrderedIds<LayerId>& order = comp.order();
     for (u32 i = 0; i < order.size(); ++i) {
         const Layer* l = comp.layer(order.at(i));
         if (!l || !l->visible || !l->contains_time(time)) continue;
         if (l->kind != LayerKind::Camera || !l->camera.active) continue;
-        const FrameIndex local = l->local_time(time);
-        const Mat4 wm = world_3d(comp, *l, time);
+        const f64 local = timeF - static_cast<f64>(l->start.value) + static_cast<f64>(l->offset.value);
+        const Mat4 wm = world_3d_frac(comp, *l, timeF);
         const Vec3 x = Vec3{wm.col[0].x, wm.col[0].y, wm.col[0].z}.normalized();
         const Vec3 y = Vec3{wm.col[1].x, wm.col[1].y, wm.col[1].z}.normalized();
         const Vec3 z = Vec3{wm.col[2].x, wm.col[2].y, wm.col[2].z}.normalized();
@@ -251,12 +286,23 @@ scene3d::SceneCamera camera_for(const Composition& comp, FrameIndex time, u32 w,
         cam.view = v;
         cam.position = t;
         const Track* fov = l->tracks.find(TrackProperty::Fov);
-        const f32 deg = fov && !fov->keys.empty() ? fov->sample(local) : l->camera.fov;
+        const f32 deg = fov && !fov->keys.empty() ? sample_frac(*fov, local) : l->camera.fov;
         cam.fovY = std::clamp(deg, 1.0f, 170.0f) * kDeg2Rad;
         cam.nearZ = std::max(0.1f, l->camera.nearPlane);
         break;
     }
     return cam;
+}
+
+scene3d::SceneCamera camera_for(const Composition& comp, FrameIndex time, u32 w, u32 h) noexcept {
+    return camera_for_frac(comp, static_cast<f64>(time.value), w, h);
+}
+
+/// Composição (px) ← mundo, com a câmera no instante fracionário.
+Mat4 comp_view_projection_frac(const Composition& comp, f64 time, u32 w, u32 h) noexcept {
+    const scene3d::SceneCamera cam = camera_for_frac(comp, time, w, h);
+    return comp_from_clip(static_cast<f32>(w), static_cast<f32>(h))
+         * scene3d::reverse_z_perspective(cam.fovY, static_cast<f32>(w) / static_cast<f32>(std::max(1u, h)), cam.nearZ) * cam.view;
 }
 
 } // namespace
@@ -524,34 +570,11 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     modelLookup_ ? modelLookup_(modelCtx_, l->model.scene) : nullptr;
                 if (!asset) continue;   // asset ausente: a layer não desenha (a UI mostra "modelo ausente")
                 scene3d::SceneInstance inst;
-                Mat4 m3 = layer_matrix_3d(*l, local);
-                LayerId parent3 = l->parent;
-                for (u32 depth = 0; parent3.valid() && depth < 16; ++depth) {
-                    const Layer* p = comp.layer(parent3);
-                    if (!p) break;
-                    // Matriz 3D para qualquer pai (num pai 2D comum ela é a
-                    // mesma da 2D): o mesmo mundo que world_3d e o parentesco usam.
-                    m3 = layer_matrix_3d(*p, p->local_time(time)) * m3;
-                    parent3 = p->parent;
-                }
-                inst.world = m3 * layer_from_model(l->model);
-                {
-                    // Animação no relógio da TIMELINE (tempo local da layer ×
-                    // velocidade do clipe): seek, scrub e export dão a mesma pose.
-                    scene3d::Pose pose;
-                    const i32 clip = l->model.animationClip;
-                    f32 t = 0.0f;
-                    if (clip >= 0 && clip < static_cast<i32>(asset->animations.size())) {
-                        const f64 fps = comp.fps() > 0.0 ? comp.fps() : 30.0;
-                        t = scene3d::clip_time(asset->animations[static_cast<usize>(clip)],
-                                               static_cast<f64>(local.value) / fps * l->model.timeScale);
-                    }
-                    scene3d::evaluate_pose(*asset, clip, t, pose);
-                    inst.nodeWorld = std::move(pose.nodeWorld);
-                    inst.jointMatrices = std::move(pose.jointMatrices);
-                    inst.skinJointOffset = std::move(pose.skinJointOffset);
-                    inst.morphWeights = std::move(pose.morphWeights);
-                }
+                // Matriz 3D para qualquer pai (num pai 2D comum ela é a mesma
+                // da 2D): o mesmo mundo que world_3d e o parentesco usam.
+                place_model(comp, *l, *asset, static_cast<f64>(time.value), inst);
+                inst.layerKey = rid.pack();
+                inst.motionBlur = l->motionBlur;
                 inst.castShadows = l->model.castShadows;
                 inst.assetKey = l->model.scene.pack();
                 inst.asset = std::move(asset);
@@ -711,7 +734,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
 
         // Desfoque de movimento (transform 2D, com pais): K amostras no
         // obturador centrado no quadro. Camada parada no intervalo = nada.
-        if (l->motionBlur && comp.motion_blur().enabled && !wants_3d(comp, *l, time)) {
+        if (l->motionBlur && comp.motion_blur().enabled) {
+            const bool in3d = wants_3d(comp, *l, time);
             const MotionBlurSettings& mb = comp.motion_blur();
             const u32 k = std::clamp<u32>(settings.finalQuality ? mb.samples : mb.previewSamples, 2u, 64u);
             const f64 open = std::clamp(static_cast<f64>(mb.shutterAngle), 0.0, 720.0) / 360.0;
@@ -720,7 +744,9 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 bool moves = false;
                 for (u32 i = 0; i < k; ++i) {
                     const f64 u = (static_cast<f64>(i) + 0.5) / static_cast<f64>(k) - 0.5;
-                    rl.blurMatrices[i] = world_2d_frac(comp, *l, static_cast<f64>(time.value) + u * open);
+                    const f64 ts = static_cast<f64>(time.value) + u * open;
+                    rl.blurMatrices[i] = in3d ? comp_view_projection_frac(comp, ts, out.compWidth, out.compHeight) * world_3d_frac(comp, *l, ts)
+                                              : world_2d_frac(comp, *l, ts);
                     for (int c = 0; c < 4 && !moves; ++c) {
                         const Vec4 d = rl.blurMatrices[i].col[c] - rl.blurMatrices[0].col[c];
                         if (std::fabs(d.x) + std::fabs(d.y) + std::fabs(d.z) + std::fabs(d.w) > 1e-4f) moves = true;
@@ -881,6 +907,52 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
     }
     for (u32 k = used; k < out.plans.size(); ++k) out.plans[k].clear();
     if (!out.scenes.empty()) fill_scene_context(comp, time, out);
+    // Desfoque de movimento 3D: cada grupo com modelo que pede desfoque vira
+    // K cenas no obturador (câmera, mundo e pose no sub-quadro).
+    if (!out.scenes.empty() && comp.motion_blur().enabled && comp.motion_blur().shutterAngle > 0.0f) {
+        const MotionBlurSettings& mb = comp.motion_blur();
+        const u32 k = std::clamp<u32>(settings.finalQuality ? mb.samples : mb.previewSamples, 2u, 64u);
+        const f64 open = std::clamp(static_cast<f64>(mb.shutterAngle), 0.0, 720.0) / 360.0;
+        auto differs = [](const Mat4& a, const Mat4& b) {
+            for (int c = 0; c < 4; ++c) {
+                const Vec4 d = a.col[c] - b.col[c];
+                if (std::fabs(d.x) + std::fabs(d.y) + std::fabs(d.z) + std::fabs(d.w) > 1e-4f) return true;
+            }
+            return false;
+        };
+        for (scene3d::SceneFrame& f : out.scenes) {
+            f.blurFrames.clear();
+            bool any = false;
+            for (const scene3d::SceneInstance& in : f.instances) any |= in.motionBlur;
+            if (!any) continue;
+            bool moves = false;
+            f.blurFrames.resize(k);
+            for (u32 s = 0; s < k; ++s) {
+                const f64 ts = static_cast<f64>(time.value) + ((static_cast<f64>(s) + 0.5) / static_cast<f64>(k) - 0.5) * open;
+                scene3d::SceneFrame& sf = f.blurFrames[s];
+                sf.camera = camera_for_frac(comp, ts, out.compWidth, out.compHeight);
+                sf.lights = f.lights;
+                sf.environment = f.environment;
+                sf.instances = f.instances;
+                for (scene3d::SceneInstance& in : sf.instances) {
+                    if (!in.motionBlur) continue;
+                    const Layer* l = comp.layer(LayerId::unpack(in.layerKey));
+                    if (l && in.asset) place_model(comp, *l, *in.asset, ts, in);
+                }
+                if (s > 0 && !moves) {
+                    const scene3d::SceneFrame& s0 = f.blurFrames[0];
+                    moves = differs(sf.camera.view, s0.camera.view);
+                    for (usize i = 0; i < sf.instances.size() && !moves; ++i) {
+                        moves = differs(sf.instances[i].world, s0.instances[i].world);
+                        const auto& a = sf.instances[i].nodeWorld;
+                        const auto& b = s0.instances[i].nodeWorld;
+                        for (usize n = 0; n < a.size() && n < b.size() && !moves; ++n) moves = differs(a[n], b[n]);
+                    }
+                }
+            }
+            if (!moves) f.blurFrames.clear();   // nada se mexe no obturador: uma cena só
+        }
+    }
 }
 
 void Renderer::fill_scene_context(const Composition& comp, FrameIndex time, FrameSnapshot& out) const noexcept {
@@ -1099,10 +1171,49 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
         // O grupo 3D renderiza no tamanho do alvo da composição (resolução de
         // preview incluída) e cobre a composição inteira.
         if (!currentScenes_ || layer.source.sceneGroup >= currentScenes_->size()) return false;
+        const scene3d::SceneFrame& group = (*currentScenes_)[layer.source.sceneGroup];
         FGTexture tex{};
-        if (!scene3d_.build(graph_, arena_, (*currentScenes_)[layer.source.sceneGroup], compTargetW_, compTargetH_,
-                            frameNumber, tex)) {
-            return false;
+        if (group.blurFrames.empty()) {
+            if (!scene3d_.build(graph_, arena_, group, compTargetW_, compTargetH_, frameNumber, tex)) return false;
+        } else {
+            // Desfoque: K cenas no obturador, média aditiva (peso 1/K, cor
+            // pré-multiplicada) num alvo do tamanho da composição.
+            const u32 k = static_cast<u32>(group.blurFrames.size());
+            FGTexture* frames = arena_.alloc_array<FGTexture>(k);
+            u32 built = 0;
+            for (u32 s = 0; s < k; ++s) {
+                if (scene3d_.build(graph_, arena_, group.blurFrames[s], compTargetW_, compTargetH_, frameNumber, frames[built])) ++built;
+            }
+            auto pAdd = shaders_.pipeline(PipelineKey::graphics(
+                ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat, true, BlendMode::Add));
+            if (built == 0 || !pAdd.ok()) return false;
+            TextureDesc ad;
+            ad.width = compTargetW_;
+            ad.height = compTargetH_;
+            ad.format = kWorkFormat;
+            ad.sampled = true;
+            ad.renderTarget = true;
+            tex = graph_.create_texture("3d-desfoque", ad);
+            struct Cap {
+                FGTexture* frames; u32 n; PipelineHandle p; u64 sampler; f32 w; f32 h;
+            } cap{frames, built, *pAdd, shaders_.sampler(CommonSampler::LinearClamp).id,
+                  static_cast<f32>(layer.source.width), static_cast<f32>(layer.source.height)};
+            const u32 pass = graph_.add_raster_pass("3d-desfoque", PassStage::Composite, tex, LoadOp::Clear, Vec4{0, 0, 0, 0},
+                                                    [cap](PassContext& pc) {
+                const Mat4 clip = clip_from_comp(cap.w, cap.h);
+                pc.cmds.bind_pipeline(cap.p);
+                for (u32 s = 0; s < cap.n; ++s) {
+                    pc.cmds.bind_texture(0, pc.texture(cap.frames[s]), SamplerHandle{cap.sampler});
+                    LayerPush push;
+                    push.clipFromLayer = clip;
+                    push.region = Vec4{0.0f, 0.0f, cap.w, cap.h};
+                    push.uvRect = Vec4{0.0f, 0.0f, 1.0f, 1.0f};
+                    push.params = Vec4{1.0f / static_cast<f32>(cap.n), 0, 0, 0};
+                    pc.cmds.push_constants(&push, sizeof(push));
+                    pc.cmds.draw(6);
+                }
+            });
+            for (u32 s = 0; s < built; ++s) graph_.read(pass, frames[s]);
         }
         out.texture = tex;
         out.region = Rect{0.0f, 0.0f, static_cast<f32>(layer.source.width), static_cast<f32>(layer.source.height)};

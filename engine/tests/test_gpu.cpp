@@ -2440,3 +2440,51 @@ AUREA_TEST(Gpu, UngroupPrecompKeepsTheScreenAndRefusesWhatWouldChange) {
     AUREA_CHECK(back);
     AUREA_CHECK(!n3.ok() && !why.empty());
 }
+
+AUREA_TEST(Gpu, MotionBlurWorksOn3DLayersAndModels) {
+    AUREA_REQUIRE_GPU();
+    auto run = [&](bool model, u32& sharpW, u32& blurW, u32& stillDiff) {
+        Scene3DRig rig(400, 200);
+        Result<u64> id = Status{Errc::NotFound};
+        if (model) {
+            const std::string path = gltf_data("Box.glb");
+            if (!file_exists(path)) return false;
+            ModelImport mi;
+            mi.path = path;
+            id = rig.e.import_model(mi);
+        } else {
+            id = rig.e.add_shape(10);
+        }
+        AUREA_CHECK(id.ok());
+        if (!id.ok()) return false;
+        Composition* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+        Layer* l = comp->layer(LayerId::unpack(*id));
+        if (model) l->model.unitScale *= 0.35f;              // caixa pequena: o rastro cabe no quadro
+        else l->transform.rotation = Vec3{0, 30, 0};         // forma inclinada: vive no espaço 3D
+        Track& px = l->tracks.get_or_create(TrackProperty::PositionX);
+        px.set(l->local_time(FrameIndex{0}), 100.0f);
+        px.set(l->local_time(FrameIndex{10}), 300.0f);
+        seek_frame(rig.e, 5);
+        sharpW = lit_box(rig.capture(400)).w();
+        AUREA_CHECK(rig.e.set_motion_blur(*id, true));
+        blurW = lit_box(rig.capture(400)).w();
+        px.clear();                                           // parado: o desfoque não muda nada
+        const Image8 still = rig.capture(400);
+        AUREA_CHECK(rig.e.set_motion_blur(*id, false));
+        stillDiff = max_diff(still, rig.capture(400));
+        return true;
+    };
+    u32 s2 = 0, b2 = 0, d2 = 0, s3 = 0, b3 = 0, d3 = 0;
+    const bool shape = run(false, s2, b2, d2);
+    const bool box = run(true, s3, b3, d3);
+    std::printf("    forma em 3D: largura %u -> %u (parada dif %u); modelo 3D: largura %u -> %u (parado dif %u)\n", s2, b2, d2, s3, b3, d3);
+    // 180° a 20 px/quadro = rastro de ~10 px.
+    if (shape) {
+        AUREA_CHECK(b2 >= s2 + 6 && b2 <= s2 + 14);
+        AUREA_CHECK(d2 <= 1);
+    }
+    if (box) {
+        AUREA_CHECK(b3 >= s3 + 6 && b3 <= s3 + 14);
+        AUREA_CHECK(d3 <= 1);
+    }
+}

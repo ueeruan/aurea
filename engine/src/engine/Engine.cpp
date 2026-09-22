@@ -64,6 +64,11 @@ struct Engine::ExportContext {
     }
 };
 
+/// Maior lado de textura de modelo 3D no celular: 2048 (uma 4K com mips são
+/// ~90 MB de GPU; um personagem com cinco delas estoura a memória de um
+/// aparelho médio). O MESMO teto no import e ao reabrir — o quadro não muda.
+constexpr u32 kModelTextureCap = 2048;
+
 Engine::Engine() {
     commandQueue_ = std::make_unique<CommandQueue>();
     adaptive_ = new AdaptiveResolutionController(caps_);
@@ -416,6 +421,7 @@ Status Engine::load_project(const char* path) noexcept {
         u32 missing = 0;
         for (const auto& [key, src] : pending) {
             scene3d::ImportOptions o;
+            o.maxTextureSize = kModelTextureCap;
             scene3d::ImportResult r = scene3d::import_scene_file(resolve_asset_path(src), o);
             if (!r.ok()) {
                 ++missing;
@@ -755,6 +761,7 @@ Result<u64> Engine::import_model(const ModelImport& request, scene3d::ImportProg
     }
     // Parse, validação e otimização FORA do lock: o preview continua rodando.
     scene3d::ImportOptions options;
+    options.maxTextureSize = kModelTextureCap;
     options.maxTextureSize = std::min<u32>(4096, caps_.max_export_width() > 0 ? 4096u : 2048u);
     scene3d::ImportResult r = scene3d::import_scene_file(request.path, options, progress);
     if (!r.ok()) {

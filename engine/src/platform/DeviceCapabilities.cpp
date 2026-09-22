@@ -65,20 +65,17 @@ u64 mem_available_bytes() noexcept {
 }
 #endif
 
-/// Slots de tag de codec no PlatformInfo.
+/// Slots de tag de codec no PlatformInfo. O mapeamento tag→slot é o MESMO do
+/// `PlatformInfo::tag_slot_of` — uma tabela só, senão o dia em que um codec
+/// novo entrar aqui e não lá, o decoder some sem erro nenhum.
 constexpr u32 kTagSlotAvc1 = 0;
 constexpr u32 kTagSlotHvc1 = 1;
 constexpr u32 kTagSlotAv01 = 2;
 constexpr u32 kTagSlotVp09 = 3;
 
 u32 tag_slot_for(u32 codecTag) noexcept {
-    switch (codecTag) {
-        case 0x61766331u: return kTagSlotAvc1;   // 'avc1'
-        case 0x68766331u: return kTagSlotHvc1;   // 'hvc1'
-        case 0x61763031u: return kTagSlotAv01;   // 'av01'
-        case 0x76703039u: return kTagSlotVp09;   // 'vp09'
-        default: return kInvalidIndex;
-    }
+    const u32 slot = PlatformInfo::tag_slot_of(codecTag);
+    return slot < 8 ? slot : kInvalidIndex;
 }
 
 const CodecCapability kUnsupported{};
@@ -107,6 +104,21 @@ void DeviceCapabilities::apply_platform_info(const PlatformInfo& info) noexcept 
     gpu_.totalSystemMemoryBytes = cpu_.totalMemoryBytes;
 
     apply_platform_codecs();
+}
+
+bool DeviceCapabilities::apply_gpu(const GpuCapabilities& gpu) noexcept {
+    if (gpu.deviceName.empty()) return false;   // nada medido: não inventa
+
+    const bool changed = gpu.deviceName != gpu_.deviceName
+                      || gpu.maxTextureSize != gpu_.maxTextureSize
+                      || gpu.totalVideoMemoryBytes != gpu_.totalVideoMemoryBytes;
+    gpu_ = gpu;
+    // A RAM do sistema é medida pela plataforma, não pela GPU: o backend não
+    // tem como saber quanta RAM o aparelho tem, e sobrescrever com zero
+    // derrubaria o orçamento para o piso.
+    gpu_.totalSystemMemoryBytes = cpu_.totalMemoryBytes;
+    compute_budget();
+    return changed;
 }
 
 void DeviceCapabilities::apply_platform_codecs() noexcept {
@@ -156,6 +168,15 @@ const CodecCapability& DeviceCapabilities::best_decoder_for(u32 codecTag) const 
 }
 
 void DeviceCapabilities::detect_cpu() noexcept {
+    // O que a plataforma mediu ganha da heurística daqui.
+    //
+    // A daqui olha /proc e /sys DE FORA: conta núcleos e adivinha os grandes
+    // pela frequência máxima. A da plataforma sabe o que o sistema operacional
+    // sabe — no Android, o `ActivityManager` conhece o limite real de memória
+    // do processo, que o /proc não mostra. Sem esta guarda, `apply_platform_info`
+    // seria sobrescrito por `detect()` e o doc dele viraria mentira.
+    const CpuCapabilities measured = cpu_;
+
 #if defined(AUREA_PLATFORM_HOST)
     unsigned hw = std::thread::hardware_concurrency();
     if (hw == 0) hw = 1;
@@ -218,6 +239,15 @@ void DeviceCapabilities::detect_cpu() noexcept {
     if (cpu_.totalCores == 0) cpu_.totalCores = 1;
     if (cpu_.performanceCores == 0) cpu_.performanceCores = cpu_.totalCores;
 #endif
+
+    // Devolve o que veio medido. `acima` fica o que a heurística só conseguiu
+    // estimar; o campo que a plataforma mediu não é reescrito.
+    if (measured.totalCores)         cpu_.totalCores = measured.totalCores;
+    if (measured.performanceCores)   cpu_.performanceCores = measured.performanceCores;
+    if (measured.efficiencyCores)    cpu_.efficiencyCores = measured.efficiencyCores;
+    if (measured.maxFrequencyKhz)    cpu_.maxFrequencyKhz = measured.maxFrequencyKhz;
+    if (measured.totalMemoryBytes)   cpu_.totalMemoryBytes = measured.totalMemoryBytes;
+    if (measured.availableMemoryBytes) cpu_.availableMemoryBytes = measured.availableMemoryBytes;
 }
 
 void DeviceCapabilities::detect_gpu_host() noexcept {

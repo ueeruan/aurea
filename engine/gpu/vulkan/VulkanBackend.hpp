@@ -347,6 +347,7 @@ public:
 
     [[nodiscard]] Status begin_frame(FrameBegin& out) noexcept override;
     [[nodiscard]] Status end_frame() noexcept override;
+    [[nodiscard]] Status begin_offscreen_frame(FrameBegin& out) noexcept override;
 
     [[nodiscard]] Result<TextureHandle>  create_texture(const TextureDesc& desc) noexcept override;
     [[nodiscard]] Result<BufferHandle>   create_buffer(const BufferDesc& desc) noexcept override;
@@ -431,6 +432,9 @@ private:
     [[nodiscard]] FrameContext* deferral_target() noexcept;
     void load_pipeline_cache() noexcept;
     [[nodiscard]] bool note_device_lost(VkResult r) noexcept;
+    /// Corpo comum de `begin_frame` e `begin_offscreen_frame`; `withSurface`
+    /// decide se o swapchain é adquirido.
+    [[nodiscard]] Status begin_frame_impl(FrameBegin& out, bool withSurface) noexcept;
 
     BackendConfig config_{};
     GPUCapabilities caps_{};

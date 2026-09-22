@@ -56,10 +56,9 @@ internal fun normalizeSearch(s: String): String =
  * prévia visual, ficha e parâmetros, e num aparelho de 6" uma folha parcial
  * deixava duas colunas de cartão — o espaço não cabia o que o navegador faz.
  *
- * A grade, a busca, as fichas e a ficha de detalhe são as MESMAS da aba
- * Efeitos da Home (`EffectsCatalogGrid` / `EffectDetailSheet`). Aqui o toque
- * no cartão abre a FICHA, e é a ficha que aplica — assim dá para ler o que o
- * efeito faz antes de sujar a pilha. Favoritos e recentes são do aparelho.
+ * A grade, a busca e as fichas são `EffectsCatalogGrid` / `EffectDetailSheet`.
+ * O toque no cartão abre a FICHA, e é a ficha que aplica — assim dá para ler o
+ * que o efeito faz antes de sujar a pilha. Favoritos e recentes são do aparelho.
  */
 @Composable
 internal fun EffectsBrowser(store: EditorStore, onDismiss: () -> Unit) {
@@ -98,7 +97,7 @@ internal fun EffectsBrowser(store: EditorStore, onDismiss: () -> Unit) {
                     modifier = Modifier.weight(1f),
                 )
                 Text(
-                    "${catalog.size} no motor",
+                    "${catalog.size} efeitos",
                     style = AureaType.CardSpec,
                     modifier = Modifier.padding(end = AureaDims.S3),
                 )

@@ -4088,3 +4088,98 @@ AUREA_TEST(Gpu, TimeWarpRgbReadsEachChannelFromItsOwnInstant) {
     AUREA_CHECK_MSG(gErr < 0.02f, "o verde devia ficar no quadro 20");
     AUREA_CHECK_MSG(bErr < 0.02f, "o azul devia ficar no quadro 20");
 }
+
+// =============================================================================
+// O catálogo INTEIRO: todo efeito monta, compila e desenha
+//
+// O catálogo não pode listar efeito que fecha o app. Este teste percorre o
+// registro inteiro pelo MESMO caminho do botão "aplicar": pré-aquece os
+// pipelines (como o renderer faz ao abrir o projeto), adiciona o efeito numa
+// camada de verdade e desenha um quadro com a validação Vulkan ligada.
+//
+// Shader que não compila, uniform do tamanho errado, textura faltando ou um
+// índice fora do lugar aparecem AQUI — com o nome do efeito — em vez de na mão
+// de quem está editando. Os valores são os de demonstração (§13), porque o
+// padrão de fábrica é neutro em quase tudo e um efeito neutro sai da cadeia
+// sem passar pelo shader: o teste não provaria nada.
+// =============================================================================
+AUREA_TEST(Gpu, EveryRegisteredEffectBuildsAndRenders) {
+    AUREA_REQUIRE_GPU();
+
+    const u32 total = gpu().effects.count();
+    AUREA_CHECK_MSG(total > 0, "o registro de efeitos está vazio");
+
+    // Pré-aquecimento: é o que o Renderer faz na inicialização com os pipelines
+    // de TODOS os efeitos. Se um shader do catálogo não compilar, o erro sai
+    // daqui — antes de qualquer projeto abrir.
+    {
+        std::vector<PipelineKey> keys;
+        gpu().effects.collect_pipelines(keys, SurfaceFormat::RGBA16F);
+        AUREA_CHECK_MSG(!keys.empty(), "nenhum pipeline de efeito para pré-aquecer");
+        for (const PipelineKey& k : keys) {
+            AUREA_CHECK_MSG(gpu().renderer.shaders().pipeline(k).ok(),
+                            "pipeline do catálogo não compilou");
+        }
+    }
+
+    std::vector<std::string> broken;
+    for (u32 i = 0; i < total; ++i) {
+        const Effect& fx = gpu().effects.at(i);
+        const char* key = fx.info().key;
+        const ParameterRegistry& params = gpu().effects.params_at(i);
+
+        Scene s(96, 96);
+        // Imagem com degradê, disco claro e linhas finas: dá borda afiada para
+        // o que depende de vizinhança e área clara para o que depende de luz.
+        const LayerId id = s.image(reference_image(96, 96), 48, 48);
+        Layer* l = s.comp->layer(id);
+
+        EffectInstance e;
+        e.id = l->alloc_effect_id();
+        e.type = fx.type_id();
+        initialize_instance(e, params);
+        {
+            std::vector<ParamValue> values(params.count());
+            for (u32 p = 0; p < params.count(); ++p) values[p] = e.params[p].constant;
+            if (fx.demo_values(e, values)) {
+                for (u32 p = 0; p < params.count(); ++p) e.params[p].constant = values[p];
+            }
+        }
+        l->effects.push_back(std::move(e));
+
+        // O caminho do EDITOR: os MESMOS parâmetros, mas varridos de ponta a
+        // ponta. O botão "aplicar" usa os padrões de fábrica e o usuário empurra
+        // cada controle até o fim — um raio gigante, uma escala enorme. É aí que
+        // mora a alocação de textura no limite do aparelho e a divisão por zero
+        // que a prévia (sempre com os valores de demonstração) nunca vê.
+        for (u32 p = 0; p < params.count(); ++p) {
+            const ParamSpec& spec = params.at(p);
+            if (spec.type != ParamType::Float && spec.type != ParamType::Int) continue;
+            for (f32 v : {spec.minValue, spec.maxValue}) {
+                Layer* ll = s.comp->layer(id);
+                ll->effects[0].params[p].constant = ParamValue::scalar(v);
+                const FloatImage im = s.render();
+                for (const f32 x : im.px) {
+                    if (!std::isfinite(x)) {
+                        broken.emplace_back(std::string(key) + ": parametro " + std::to_string(p) +
+                                            " em " + std::to_string(v) + " deu pixel nao-finito");
+                        break;
+                    }
+                }
+            }
+        }
+
+        const FloatImage img = s.render();
+        for (const f32 v : img.px) {
+            if (!std::isfinite(v)) { broken.emplace_back(std::string(key) + ": pixel nao-finito"); break; }
+        }
+        if (!img.px.empty()) {
+            f32 sum = 0.0f;
+            for (const f32 v : img.px) sum += std::fabs(v);
+            if (sum <= 0.0f) broken.emplace_back(std::string(key) + ": quadro preto");
+        }
+    }
+
+    for (const std::string& b : broken) std::printf("\n    efeito quebrado: %s", b.c_str());
+    AUREA_CHECK_MSG(broken.empty(), "efeito do catálogo nao desenha");
+}

@@ -250,13 +250,90 @@ AUREA_JNI void AUREA_FN(nativeDestroy)(JNIEnv*, jclass, jlong handle) {
     AUREA_LOG_INFO("motor destruido");
 }
 
+/// Lê a sondagem do aparelho que o Kotlin mandou.
+///
+/// `probe` são os fatos medidos: [memória total, memória disponível]. Os
+/// núcleos NÃO vêm por aqui de propósito: quem os mede é o próprio motor, lendo
+/// `/sys/devices/system/cpu/*/cpufreq` — a mesma leitura, uma implementação só,
+/// e o iOS usa a mesma. O que só o Android sabe é o limite de memória do
+/// processo, e é isso que atravessa.
+void read_probe(const jlong* probe, jsize len, PlatformInfo& info) noexcept {
+    if (!probe || len < 2) return;
+    info.totalMemoryBytes     = static_cast<u64>(probe[0]);
+    info.availableMemoryBytes = static_cast<u64>(probe[1]);
+}
+
+/// Lê a tabela de codecs do MediaCodecList.
+///
+/// Sete `int` por linha: tag, é_encoder, hardware, largura, altura, bits,
+/// instâncias simultâneas. Uma linha com tag 0 é o fim. O tag é o que liga a
+/// linha ao decoder certo — quem manda não precisa saber a ordem da tabela.
+void read_codecs(const jint* rows, jsize len, PlatformInfo& info) noexcept {
+    if (!rows) return;
+    const jsize entry = 7;
+    for (jsize at = 0; at + entry <= len; at += entry) {
+        const u32 tag = static_cast<u32>(rows[at]);
+        if (tag == 0) break;
+        const bool encoder = rows[at + 1] != 0;
+
+        CodecCapability cap;
+        cap.supported = true;
+        cap.hardwareAccelerated = rows[at + 2] != 0;
+        cap.maxWidth  = static_cast<u32>(rows[at + 3] > 0 ? rows[at + 3] : 0);
+        cap.maxHeight = static_cast<u32>(rows[at + 4] > 0 ? rows[at + 4] : 0);
+        cap.maxBitDepth = static_cast<u8>(rows[at + 5] > 0 ? rows[at + 5] : 8);
+        cap.concurrentInstances = static_cast<u32>(rows[at + 6] > 0 ? rows[at + 6] : 0);
+
+        if (encoder) {
+            if (info.encoderCount >= 8) continue;
+            cap.name = "MediaCodec (encoder de hardware)";
+            info.encoders[info.encoderCount] = cap;
+            info.set_encoder_tag(tag, info.encoderCount);
+            ++info.encoderCount;
+        } else {
+            if (info.decoderCount >= 16) continue;
+            cap.name = cap.hardwareAccelerated ? "MediaCodec (hardware)" : "MediaCodec (software)";
+            info.decoders[info.decoderCount] = cap;
+            info.set_decoder_tag(tag, info.decoderCount);
+            ++info.decoderCount;
+        }
+    }
+}
+
 /// Inicializa o motor SEM superfície: instância e dispositivo Vulkan, renderer,
 /// pipelines e a thread de render. A superfície chega depois, pelo SurfaceView.
+///
+/// `probe` e `codecs` são a medição que a UI fez do aparelho (uma vez só, e
+/// guardada — ver `DeviceProfile` no Kotlin). Sem eles o motor decide no
+/// conservador, o que num aparelho de verdade significa codec de hardware
+/// ignorado e orçamento de memória menor que o possível.
 AUREA_JNI jboolean AUREA_FN(nativeInitialize)(JNIEnv* env, jclass, jlong handle, jfloat refreshRate,
-                                              jstring cacheDir, jstring documentsDir, jboolean debug) {
+                                              jstring cacheDir, jstring documentsDir, jboolean debug,
+                                              jlongArray probe, jintArray codecs) {
     NativeContext* c = ctx_of(handle);
     if (!c) return JNI_FALSE;
     if (c->initialized) return JNI_TRUE;
+
+    PlatformInfo info;
+    bool hasInfo = false;
+    if (probe) {
+        const jsize n = env->GetArrayLength(probe);
+        jlong* p = env->GetLongArrayElements(probe, nullptr);
+        if (p) {
+            read_probe(p, n, info);
+            env->ReleaseLongArrayElements(probe, p, JNI_ABORT);
+            hasInfo = true;
+        }
+    }
+    if (codecs) {
+        const jsize n = env->GetArrayLength(codecs);
+        jint* rows = env->GetIntArrayElements(codecs, nullptr);
+        if (rows) {
+            read_codecs(rows, n, info);
+            env->ReleaseIntArrayElements(codecs, rows, JNI_ABORT);
+            hasInfo = true;
+        }
+    }
 
     EngineConfig config;
     config.backend = new (std::nothrow) vk::Backend();
@@ -265,6 +342,8 @@ AUREA_JNI jboolean AUREA_FN(nativeInitialize)(JNIEnv* env, jclass, jlong handle,
     config.cacheDirectory = to_string(env, cacheDir);
     config.documentsDirectory = to_string(env, documentsDir);
     config.displayRefreshRate = refreshRate > 0.0f ? refreshRate : 60.0f;
+    config.platformInfo = info;
+    config.hasPlatformInfo = hasInfo;
     config.mediaFactory = &c->media;
     config.exportSinkFactory = &android::make_mediacodec_export_sink;
     config.audioOutput = &c->audioOut;
@@ -1075,6 +1154,53 @@ AUREA_JNI void AUREA_FN(nativeSetThermal)(JNIEnv*, jclass, jlong handle, jint st
     // Android: 0 NONE, 1 LIGHT, 2 MODERATE, 3 SEVERE, 4 CRITICAL, 5 EMERGENCY, 6 SHUTDOWN.
     const u32 level = status <= 0 ? 0u : status == 1 ? 1u : status == 2 ? 1u : status == 3 ? 2u : status == 4 ? 3u : 4u;
     c->engine.set_thermal(level, status >= 2);
+}
+
+/// O que o motor decidiu para ESTE aparelho, em números.
+///
+/// A UI mostra o que foi decidido — não um "otimizado!" sem lastro. Cada slot
+/// é uma decisão que o motor tomou a partir da sondagem:
+///   0 núcleos · 1 núcleos grandes · 2 núcleos pequenos · 3 RAM total (MB)
+///   4 RAM disponível (MB) · 5 orçamento do motor (MB) · 6 maior textura
+///   7 largura máxima de preview · 8 altura máxima de preview
+///   9 largura máxima de export · 10 altura máxima de export
+///   11 decodes paralelos · 12 workers do pool · 13 escala inicial (0..3)
+AUREA_JNI jboolean AUREA_FN(nativeDeviceReport)(JNIEnv* env, jclass, jlong handle, jlongArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !out) return JNI_FALSE;
+    if (env->GetArrayLength(out) < 14) return JNI_FALSE;
+    const DeviceCapabilities& caps = c->engine.caps();
+
+    const jlong mb = 1024 * 1024;
+    jlong report[14];
+    report[0]  = static_cast<jlong>(caps.cpu().totalCores);
+    report[1]  = static_cast<jlong>(caps.cpu().performanceCores);
+    report[2]  = static_cast<jlong>(caps.cpu().efficiencyCores);
+    report[3]  = static_cast<jlong>(caps.cpu().totalMemoryBytes / mb);
+    report[4]  = static_cast<jlong>(caps.cpu().availableMemoryBytes / mb);
+    report[5]  = static_cast<jlong>(caps.memory_budget_bytes() / mb);
+    report[6]  = static_cast<jlong>(caps.max_texture_dimension());
+    report[7]  = static_cast<jlong>(caps.max_preview_width());
+    report[8]  = static_cast<jlong>(caps.max_preview_height());
+    report[9]  = static_cast<jlong>(caps.max_export_width());
+    report[10] = static_cast<jlong>(caps.max_export_height());
+    report[11] = static_cast<jlong>(caps.decode_parallelism());
+    report[12] = static_cast<jlong>(caps.recommended_worker_count());
+    report[13] = static_cast<jlong>(caps.recommended_initial_scale(1920, 1080));
+    env->SetLongArrayRegion(out, 0, 14, report);
+    return JNI_TRUE;
+}
+
+/// Nome da GPU, versão do driver e o resumo de uma linha — para a tela de
+/// Ajustes mostrar o aparelho, não um rótulo genérico.
+AUREA_JNI jstring AUREA_FN(nativeDeviceSummary)(JNIEnv* env, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return env->NewStringUTF("");
+    const DeviceCapabilities& caps = c->engine.caps();
+    std::string s = caps.gpu().deviceName;
+    if (!caps.gpu().driverVersion.empty()) s += " · " + caps.gpu().driverVersion;
+    if (s.empty()) s = "GPU não identificada";
+    return env->NewStringUTF(s.c_str());
 }
 
 namespace {

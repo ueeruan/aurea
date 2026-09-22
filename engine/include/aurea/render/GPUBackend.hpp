@@ -541,6 +541,19 @@ public:
     /// Submete e, se houver backbuffer, apresenta.
     [[nodiscard]] virtual Status end_frame() noexcept = 0;
 
+    /// Frame OFFSCREEN: NÃO adquire nem apresenta nada na tela.
+    ///
+    /// É o frame de quem roda fora da thread de render — prévia de efeito e
+    /// export. Abrir um frame com superfície ali significa disputar o
+    /// swapchain e, no `end_frame`, APRESENTAR um quadro que não é o da tela;
+    /// e a superfície pode estar sendo refeita pelo ciclo de vida no mesmo
+    /// instante (rotação, app indo para segundo plano), sem relação alguma com
+    /// o lock do renderizador. Num driver de verdade isso derruba o processo.
+    ///
+    /// O `FrameBegin` sai com `backbuffer` inválido, e o `end_frame` seguinte
+    /// só submete — nunca apresenta.
+    [[nodiscard]] virtual Status begin_offscreen_frame(FrameBegin& out) noexcept = 0;
+
     // --- Recursos -------------------------------------------------------------
     [[nodiscard]] virtual Result<TextureHandle>  create_texture(const TextureDesc&) noexcept = 0;
     [[nodiscard]] virtual Result<BufferHandle>   create_buffer(const BufferDesc&) noexcept = 0;

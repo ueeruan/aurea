@@ -33,6 +33,16 @@ public:
     u32 pipelinesCreated = 0;
     u32 shadersCreated = 0;
     u32 framesSubmitted = 0;
+    u32 offscreenFrames = 0;
+    /// Quantas vezes o swapchain foi adquirido e quantas o quadro foi para a
+    /// tela. Só contam com superfície anexada — é o que a prévia de efeito NÃO
+    /// pode fazer, porque roda fora da thread de render.
+    u32 acquires = 0;
+    u32 presents = 0;
+    u32 surfaceWidth = 1920;
+    u32 surfaceHeight = 1080;
+    bool frameHadBackbuffer = false;
+    bool surfaceAttached = false;
     bool frameOpen = false;
     bool failPipelines = false;
     GPUCapabilities caps;
@@ -48,21 +58,45 @@ public:
     const GPUCapabilities& capabilities() const noexcept override { return caps; }
     Status initialize(const BackendConfig&) noexcept override { return OkStatus; }
     void shutdown() noexcept override {}
-    Status attach_surface(const SurfaceDesc&) noexcept override { return OkStatus; }
-    void detach_surface() noexcept override {}
-    Status resize_surface(u32, u32) noexcept override { return OkStatus; }
-    bool has_surface() const noexcept override { return false; }
+    Status attach_surface(const SurfaceDesc&) noexcept override {
+        surfaceAttached = true;
+        return OkStatus;
+    }
+    void detach_surface() noexcept override { surfaceAttached = false; }
+    Status resize_surface(u32 w, u32 h) noexcept override {
+        surfaceWidth = w;
+        surfaceHeight = h;
+        return OkStatus;
+    }
+    bool has_surface() const noexcept override { return surfaceAttached; }
 
     Status begin_frame(FrameBegin& out) noexcept override {
         out = FrameBegin{};
         out.commands = this;
         out.frameNumber = ++frame_;
         frameOpen = true;
+        if (surfaceAttached) {
+            ++acquires;
+            out.backbuffer = TextureHandle{++ids_};
+            out.backbufferWidth = surfaceWidth;
+            out.backbufferHeight = surfaceHeight;
+            frameHadBackbuffer = true;
+        }
+        return OkStatus;
+    }
+    Status begin_offscreen_frame(FrameBegin& out) noexcept override {
+        out = FrameBegin{};
+        out.commands = this;
+        out.frameNumber = ++frame_;
+        frameOpen = true;
+        ++offscreenFrames;
         return OkStatus;
     }
     Status end_frame() noexcept override {
         frameOpen = false;
         ++framesSubmitted;
+        if (frameHadBackbuffer) ++presents;
+        frameHadBackbuffer = false;
         for (auto& d : deferred_) d.fn(d.ctx);
         deferred_.clear();
         return OkStatus;

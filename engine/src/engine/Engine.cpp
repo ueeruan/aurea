@@ -105,6 +105,41 @@ struct Engine::ExportContext {
 /// aparelho médio). O MESMO teto no import e ao reabrir — o quadro não muda.
 constexpr u32 kModelTextureCap = 2048;
 
+/// Tradução das capacidades do BACKEND para o vocabulário de plataforma.
+///
+/// São duas structs de propósito: `render::GPUCapabilities` é o que o Vulkan
+/// respondeu; `platform::GpuCapabilities` é o que o resto do motor consulta.
+/// Preenche-se só o que as duas têm — campo sem correspondência fica no padrão,
+/// porque inventar limite é pior que ficar no conservador.
+GpuCapabilities device_gpu_from(const GPUCapabilities& g) noexcept {
+    GpuCapabilities p;
+    p.deviceName    = g.deviceName;
+    p.driverVersion = g.driverInfo;
+    p.vendorId      = g.vendorId;
+    p.deviceId      = g.deviceId;
+    // Vulkan e Metal obrigam a existir estágio de compute; OpenGL ES não.
+    p.vulkan        = g.apiName == "Vulkan";
+    p.metal         = g.apiName == "Metal";
+    p.openGLES      = g.apiName == "OpenGL ES";
+    p.apiVersionMajor = g.apiMajor;
+    p.apiVersionMinor = g.apiMinor;
+
+    p.maxTextureSize            = g.maxTexture2D;
+    p.maxComputeWorkgroupSize   = g.maxComputeWorkGroupInvocations;
+    p.supportsCompute           = p.vulkan || p.metal;
+
+    p.supportsFloat16           = g.fp16Arithmetic;
+    p.supportsFloat16Storage    = g.fp16Storage;
+    p.supportsDepthTexture      = g.depth32fSampled;
+    p.supportsAnisotropicFiltering = g.maxSamplerAnisotropy > 1.0f;
+    p.supportsAstcCompression   = g.textureCompressionASTC;
+    p.supportsEtc2Compression   = g.textureCompressionETC2;
+    p.supportsTimestampQueries  = g.timestampQueries;
+
+    p.totalVideoMemoryBytes     = g.deviceLocalBytes;
+    return p;
+}
+
 Engine::Engine() {
     commandQueue_ = std::make_unique<CommandQueue>();
     adaptive_ = new AdaptiveResolutionController(caps_);
@@ -131,6 +166,10 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
         return Status{Errc::InvalidState, "motor ja inicializado"};
     }
     config_ = config;
+    // A medição da plataforma entra ANTES da detecção: o que ela traz é medido
+    // no aparelho, e o que a detecção genérica não alcança (codec de hardware,
+    // núcleos grandes) fica com o conservador.
+    if (config_.hasPlatformInfo) caps_.apply_platform_info(config_.platformInfo);
     caps_.detect();
 
     const u32 workers = config.workerCount ? config.workerCount : caps_.recommended_worker_count();
@@ -140,16 +179,7 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
         return s;
     }
 
-    const u64 budget = config.memoryBudgetBytes ? config.memoryBudgetBytes : caps_.memory_budget_bytes();
-    memory_.set_budget(MemoryClass::Thumbnails,     budget * 6 / 100);
-    memory_.set_budget(MemoryClass::Proxies,        budget * 10 / 100);
-    memory_.set_budget(MemoryClass::DecodedFrames,  budget * 24 / 100);
-    memory_.set_budget(MemoryClass::RenderedFrames, budget * 16 / 100);
-    memory_.set_budget(MemoryClass::GpuTextures,    budget * 20 / 100);
-    memory_.set_budget(MemoryClass::GpuGeometry,    budget * 10 / 100);
-    memory_.set_budget(MemoryClass::Audio,          budget * 4 / 100);
-    memory_.set_budget(MemoryClass::Assets,         budget * 8 / 100);
-    memory_.set_budget(MemoryClass::Persistent,     budget * 2 / 100);
+    apply_memory_budgets();
 
     if (effectRegistry_.count() == 0) register_builtin_effects(effectRegistry_);
 
@@ -172,6 +202,14 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
             AUREA_LOG_INFO("GPU: %s", gpu_->capabilities().summary().c_str());
         }
     }
+    // A GPU de verdade só passa a existir agora: o backend acabou de subir e é
+    // o único que sabe os limites reais. É aqui que "gpu=desconhecida
+    // max_textura=2048" vira o aparelho que está na mão — e, como o orçamento
+    // de memória sai daí, ele é refeito com os números medidos.
+    if (gpu_ && caps_.apply_gpu(device_gpu_from(gpu_->capabilities()))) {
+        apply_memory_budgets();
+        AUREA_LOG_INFO("dispositivo (GPU medida): %s", caps_.summary().c_str());
+    }
 
     text::set_default_font_path(config.defaultFontPath);
     // Fonte importada guardada como "docs:…": o gerenciador resolve pelo motor.
@@ -192,6 +230,30 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
     state_ = EngineState::Ready;
     AUREA_LOG_INFO("Aurea Engine pronta: %s", caps_.summary().c_str());
     return OkStatus;
+}
+
+u32 Engine::model_texture_cap() const noexcept {
+    // O teto do celular manda, e o do aparelho é o piso: uma GPU que só aceita
+    // 4096 num 2D não pode receber 2048 com mips em cada eixo. Os dois sítios
+    // (importar agora e reabrir depois) passam AQUI — era essa a regra do
+    // `kModelTextureCap`, e ela estava quebrada: o import usava 4096 fixo e a
+    // reabertura usava 2048, então o mesmo .aurea abria diferente de como foi
+    // importado.
+    const u32 gpu = caps_.max_texture_dimension();
+    return gpu ? std::min(kModelTextureCap, gpu) : kModelTextureCap;
+}
+
+void Engine::apply_memory_budgets() noexcept {
+    const u64 budget = config_.memoryBudgetBytes ? config_.memoryBudgetBytes : caps_.memory_budget_bytes();
+    memory_.set_budget(MemoryClass::Thumbnails,     budget * 6 / 100);
+    memory_.set_budget(MemoryClass::Proxies,        budget * 10 / 100);
+    memory_.set_budget(MemoryClass::DecodedFrames,  budget * 24 / 100);
+    memory_.set_budget(MemoryClass::RenderedFrames, budget * 16 / 100);
+    memory_.set_budget(MemoryClass::GpuTextures,    budget * 20 / 100);
+    memory_.set_budget(MemoryClass::GpuGeometry,    budget * 10 / 100);
+    memory_.set_budget(MemoryClass::Audio,          budget * 4 / 100);
+    memory_.set_budget(MemoryClass::Assets,         budget * 8 / 100);
+    memory_.set_budget(MemoryClass::Persistent,     budget * 2 / 100);
 }
 
 void Engine::shutdown() noexcept {
@@ -521,7 +583,7 @@ Status Engine::load_project(const char* path) noexcept {
         u32 missing = 0;
         for (const auto& [key, src] : pending) {
             scene3d::ImportOptions o;
-            o.maxTextureSize = kModelTextureCap;
+            o.maxTextureSize = model_texture_cap();
             // Texto 3D: a origem é a receita; a malha é gerada de novo.
             scene3d::Text3DSpec spec;
             const auto font = scene3d::decode_text3d(src, spec) ? text::default_font() : nullptr;
@@ -3315,8 +3377,7 @@ Result<u64> Engine::import_model(const ModelImport& request, scene3d::ImportProg
     }
     // Parse, validação e otimização FORA do lock: o preview continua rodando.
     scene3d::ImportOptions options;
-    options.maxTextureSize = kModelTextureCap;
-    options.maxTextureSize = std::min<u32>(4096, caps_.max_export_width() > 0 ? 4096u : 2048u);
+    options.maxTextureSize = model_texture_cap();
     scene3d::ImportResult r = scene3d::import_scene_file(request.path, options, progress);
     if (!r.ok()) {
         if (detail) *detail = r.detail;

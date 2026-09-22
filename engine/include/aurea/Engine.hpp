@@ -167,6 +167,16 @@ struct EngineConfig {
     audio::AudioOutput* audioOutput = nullptr;
 
     f32   displayRefreshRate = 60.0f;
+
+    /// O que a camada de plataforma mediu do aparelho: núcleos grandes e
+    /// pequenos, memória e a tabela de codecs do MediaCodecList.
+    ///
+    /// A plataforma mede UMA vez (a enumeração de codecs custa dezenas de ms) e
+    /// guarda; depois passa aqui toda vez. Com `hasPlatformInfo` falso o motor
+    /// detecta o que conseguir sozinho e fica no conservador no resto — nunca
+    /// num valor otimista inventado.
+    PlatformInfo platformInfo{};
+    bool hasPlatformInfo = false;
     /// Fonte padrão do texto (arquivo TTF/OTF); vazio = procurar a do sistema.
     std::string defaultFontPath;
     std::string cacheDirectory;
@@ -834,6 +844,12 @@ public:
 private:
     [[nodiscard]] Status apply_command_internal(const Command& cmd, const char* stringData,
                                                 bool recordUndo) noexcept;
+    /// Divide o orçamento de memória pelas categorias. Chamado na subida e de
+    /// novo quando a GPU real chega e muda o orçamento.
+    void apply_memory_budgets() noexcept;
+    /// Maior lado de textura aceito ao importar modelo 3D — e o MESMO ao
+    /// reabrir, senão o quadro muda entre importar e reabrir o projeto.
+    [[nodiscard]] u32 model_texture_cap() const noexcept;
     /// Snapshot "antes" no histórico, se o comando altera a composição.
     void record_history_locked(CommandType type) noexcept;
     [[nodiscard]] static bool mutates_model(CommandType type) noexcept;

@@ -7,11 +7,13 @@
 #include "aurea/memory/MemoryManager.hpp"
 #include "aurea/command/CommandQueue.hpp"
 #include "aurea/jobs/JobSystem.hpp"
+#include "aurea/platform/DeviceCapabilities.hpp"
 #include "aurea/render/RenderScheduler.hpp"
 
 #include <atomic>
 #include <memory>
 #include <chrono>
+#include <string>
 #include <thread>
 
 using namespace aurea;
@@ -425,6 +427,84 @@ AUREA_TEST(Scheduler, RenderSizeIsEven) {
     ctrl.set_user_scale(PreviewScale::Half);
     AUREA_CHECK_EQ(ctrl.render_width() % 2, static_cast<u32>(0));
     AUREA_CHECK_EQ(ctrl.render_height() % 2, static_cast<u32>(0));
+}
+
+// -----------------------------------------------------------------------------
+// DeviceCapabilities: a sondagem da plataforma e a GPU medida pelo backend
+// -----------------------------------------------------------------------------
+AUREA_TEST(DeviceCaps, PlatformInfoWinsOverGenericDetection) {
+    DeviceCapabilities caps;
+    PlatformInfo info;
+    info.totalCores = 8;
+    info.performanceCores = 4;
+    info.efficiencyCores = 4;
+    info.totalMemoryBytes = 6ull * 1024 * 1024 * 1024;
+    info.availableMemoryBytes = 2ull * 1024 * 1024 * 1024;
+    info.gpu.deviceName = "Adreno (TM) 740";
+    info.gpu.maxTextureSize = 16384;
+    info.gpu.vulkan = true;
+    // Um HEVC 4K de hardware, com duas instâncias simultâneas.
+    info.decoders[0] = CodecCapability{true, true, 3840, 2160, 60, 0, 10, true, 2, false, false, "c2.qti.hevc.decoder"};
+    info.decoderCount = 1;
+    info.set_decoder_tag(0x68766331u, 0);   // 'hvc1'
+
+    caps.apply_platform_info(info);
+    caps.detect();
+
+    AUREA_CHECK_EQ(caps.cpu().totalCores, static_cast<u32>(8));
+    AUREA_CHECK_EQ(caps.cpu().performanceCores, static_cast<u32>(4));
+    AUREA_CHECK_EQ(caps.max_texture_dimension(), static_cast<u32>(16384));
+    AUREA_CHECK(caps.decoder_hevc().supported);
+    AUREA_CHECK(caps.decoder_hevc().hardwareAccelerated);
+    // Duas instâncias de decode de hardware mandam no paralelismo, não o pool.
+    AUREA_CHECK_EQ(caps.decode_parallelism(), static_cast<u32>(2));
+    AUREA_CHECK(caps.detected());
+}
+
+AUREA_TEST(DeviceCaps, EmptyPlatformInfoIsIgnored) {
+    // A regra da casa: sem medição, o conservador — nunca um valor otimista
+    // inventado. Um `PlatformInfo` vazio não pode zerar a detecção do sistema.
+    DeviceCapabilities caps;
+    caps.detect();
+    const u32 cores = caps.cpu().totalCores;
+    const u64 budget = caps.memory_budget_bytes();
+
+    caps.apply_platform_info(PlatformInfo{});
+    caps.detect();
+
+    AUREA_CHECK_EQ(caps.cpu().totalCores, cores);
+    AUREA_CHECK_EQ(caps.memory_budget_bytes(), budget);
+}
+
+AUREA_TEST(DeviceCaps, ApplyGpuReplacesTheConservativeDefault) {
+    // O cenário real do Android antes desta correção: a detecção genérica não
+    // alcança a GPU e o motor decide com max_textura 2048 e GPU desconhecida.
+    DeviceCapabilities caps;
+    caps.detect();
+    AUREA_CHECK_EQ(caps.max_texture_dimension(), static_cast<u32>(2048));
+
+    GpuCapabilities gpu;
+    gpu.deviceName = "Adreno (TM) 740";
+    gpu.vulkan = true;
+    gpu.maxTextureSize = 16384;
+    gpu.totalVideoMemoryBytes = 2ull * 1024 * 1024 * 1024;
+
+    AUREA_CHECK(caps.apply_gpu(gpu));
+    AUREA_CHECK_EQ(caps.max_texture_dimension(), static_cast<u32>(16384));
+    AUREA_CHECK_EQ(caps.gpu().deviceName, std::string("Adreno (TM) 740"));
+    // A RAM do sistema é da plataforma: aplicar a GPU não pode zerá-la.
+    AUREA_CHECK(caps.gpu().totalSystemMemoryBytes > 0 ||
+                caps.cpu().totalMemoryBytes == 0);
+
+    // Repetir com a MESMA GPU não é mudança.
+    AUREA_CHECK(!caps.apply_gpu(gpu));
+}
+
+AUREA_TEST(DeviceCaps, ApplyGpuWithoutMeasurementChangesNothing) {
+    DeviceCapabilities caps;
+    caps.detect();
+    AUREA_CHECK(!caps.apply_gpu(GpuCapabilities{}));
+    AUREA_CHECK_EQ(caps.max_texture_dimension(), static_cast<u32>(2048));
 }
 
 // O cache de frames decodificados e o prefetch estão em test_media.cpp.

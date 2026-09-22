@@ -46,18 +46,20 @@ import com.aurea.aurea.ui.theme.CupertinoIcon
 private class HomeTab(val label: String, val icon: Char, val active: Char)
 
 /**
- * As quatro abas da Home 7.3. Comunidade e Perfil saíram (§2): a barra ficou
- * enxuta e cada aba tem uma função só.
+ * As três abas da Home. Comunidade e Perfil saíram (§2); a aba Efeitos saiu
+ * depois — ela mostrava o catálogo sem NADA para aplicar, um espelho só de
+ * leitura do navegador que já existe dentro do editor, onde o toque aplica.
+ * Fora do editor não há camada selecionada, então não há o que fazer com o
+ * efeito: o navegador vive onde ele serve para alguma coisa.
  */
 private val Tabs = listOf(
     HomeTab("Início", CupertinoGlyph.House, CupertinoGlyph.HouseFill),
     HomeTab("Projetos", CupertinoGlyph.RectangleStack, CupertinoGlyph.RectangleStack),
-    HomeTab("Efeitos", CupertinoGlyph.WandStars, CupertinoGlyph.WandStars),
     HomeTab("Ajustes", CupertinoGlyph.SliderHorizontal3, CupertinoGlyph.SliderHorizontal3),
 )
 
 /**
- * A Home: a casca com a barra de 4 abas translúcida e o conteúdo rolando por
+ * A Home: a casca com a barra de 3 abas translúcida e o conteúdo rolando por
  * baixo dela.
  *
  * - Só a aba atual fica composta; a rolagem de cada uma mora no
@@ -71,7 +73,6 @@ fun HomeScreen(store: EditorStore) {
     // Uma chamada por aba (nada de laço): cada estado tem o seu lugar fixo na composição.
     val home = rememberTabListState(vm, HomeViewModel.HOME_TAB)
     val projects = rememberTabListState(vm, HomeViewModel.PROJECTS_TAB)
-    val effects = rememberTabListState(vm, HomeViewModel.EFFECTS_TAB)
     val settings = rememberTabListState(vm, HomeViewModel.SETTINGS_TAB)
     val shellBackdrop = rememberBackdrop()
     val view = LocalView.current
@@ -98,7 +99,6 @@ fun HomeScreen(store: EditorStore) {
                 when (vm.tab) {
                     HomeViewModel.HOME_TAB -> StartTab(store, vm, home, bottomBar, selectTab)
                     HomeViewModel.PROJECTS_TAB -> ProjectsTab(store, vm, projects, bottomBar)
-                    HomeViewModel.EFFECTS_TAB -> EffectsTab(store, vm, effects, bottomBar)
                     else -> SettingsTab(store, vm, settings, bottomBar)
                 }
             }

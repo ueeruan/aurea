@@ -69,6 +69,12 @@ internal fun Modifier.backdropSource(backdrop: Backdrop): Modifier {
 /**
  * Fundo de vidro: o que está atrás, borrado com o `sigma` do Flutter, e a
  * tinta por cima. [fallback] é a cor sólida sem blur (API < 31).
+ *
+ * O [fallback] também é desenhado ANTES do borrão no caminho com blur: se o
+ * `RenderEffect` não render nada (SwiftShader, driver sem o efeito), a camada
+ * borrada fica vazia e sobraria só a tinta de 72% — o texto de trás passaria
+ * legível por baixo da barra. Com o piso, ou o borrão cobre o piso inteiro,
+ * ou a barra fica sólida. Nunca "meio transparente sem blur".
  */
 @Composable
 internal fun Modifier.glass(backdrop: Backdrop, sigma: Dp, tint: Color, fallback: Color): Modifier {
@@ -85,6 +91,7 @@ internal fun Modifier.glass(backdrop: Backdrop, sigma: Dp, tint: Color, fallback
                 clip = true
             }
             onDrawBehind {
+                drawRect(fallback)
                 val offset = self.value - backdrop.origin
                 blurred.record(size.toIntSize()) {
                     translate(-offset.x, -offset.y) { drawLayer(backdrop.layer) }

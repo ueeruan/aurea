@@ -2966,7 +2966,10 @@ Status Renderer::render_effect_preview(const EffectRegistry& effects, EffectType
     }
 
     FrameBegin fb;
-    if (const Status s = backend_->begin_frame(fb); !s.ok()) return s;
+    // Offscreen: a cartela é renderizada e lida de volta, não vai para a tela.
+    // Abrir um frame com superfície aqui apresentaria o quadro da PRÉVIA no
+    // lugar do quadro da tela — e a prévia roda fora da thread de render.
+    if (const Status s = backend_->begin_offscreen_frame(fb); !s.ok()) return s;
 
     // Preview de efeito NUNCA é rebaixado pelo calor: a cartela é 320×200 e
     // roda uma vez. O que o aparelho mostra tem de ser o que o efeito faz.

@@ -185,8 +185,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /**
      * Favoritos e recentes do catálogo de efeitos: preferência do APARELHO, não
-     * do projeto. Vive aqui porque o navegador de efeitos aparece nos dois
-     * lugares (a aba Efeitos da Home e o editor) e os dois leem o mesmo.
+     * do projeto. Vive aqui porque sobrevive à saída do editor — quem favorita
+     * um efeito o encontra marcado na próxima vez que abrir o navegador.
      */
     val effectPrefs = EffectPrefs(getApplication())
     /**
@@ -303,12 +303,21 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 if (destroyed) return@synchronized
                 val dirs = directories()
                 val debug = (app.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
-                val ok = engine.initialize(displayRefreshRate(), dirs.cache.absolutePath, dirs.projects.absolutePath, debug)
+                // Sondagem do aparelho: medida UMA vez (primeira abertura ou SO
+                // novo) e guardada; o motor decide orçamento, workers, teto de
+                // textura/preview/export a partir dela e da GPU real.
+                val probe = runCatching { com.aurea.aurea.engine.DeviceProfile.probe(app) }.getOrNull()
+                val ok = engine.initialize(
+                    displayRefreshRate(), dirs.cache.absolutePath, dirs.projects.absolutePath, debug,
+                    probe?.memory, probe?.codecs,
+                )
                 ready = ok
                 if (ok) pendingSurface?.let { (s, w, h) -> engine.attachSurface(s, w, h) }
                 pendingSurface = null
                 main.post {
                     if (ok) {
+                        deviceReport = engine.deviceReport()
+                        deviceName = engine.deviceSummary()
                         startThermalWatch()
                         engineReady = true
                         catalog = readCatalog()
@@ -321,6 +330,18 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             }
         }
         refreshProjects()
+    }
+
+    /** O que o motor decidiu para ESTE aparelho (mostrado nos Ajustes). */
+    var deviceReport by mutableStateOf<com.aurea.aurea.engine.DeviceReport?>(null)
+        private set
+    var deviceName by mutableStateOf("")
+        private set
+
+    /** Esquece a sondagem guardada: a próxima abertura mede o aparelho de novo. */
+    fun remeasureDevice() {
+        com.aurea.aurea.engine.DeviceProfile.forget(getApplication())
+        showToast("O aparelho será medido de novo na próxima vez que o Aurea abrir")
     }
 
     private data class Dirs(val cache: File, val projects: File, val thumbs: File)
@@ -2675,8 +2696,16 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     /** "Marcas": marca (ou desmarca) o frame do cabeçote. */
-    fun toggleMarker() {
-        val on = engine.toggleMarker(playhead.toLong())
+    fun toggleMarker() = toggleMarkerAt(playhead)
+
+    /**
+     * Marca (ou desmarca) um frame qualquer. O toque na régua cai aqui com o
+     * frame do DEDO, não com o do cabeçote: a marca nasce onde se tocou, mesmo
+     * que a prévia ainda esteja alcançando aquele quadro.
+     */
+    fun toggleMarkerAt(frame: Int) {
+        val f = clampFrame(frame)
+        val on = engine.toggleMarker(f.toLong())
         refreshNow()
         showToast(if (on) "Marca adicionada" else "Marca removida")
     }

@@ -134,6 +134,29 @@ internal fun SettingsTab(store: EditorStore, vm: HomeViewModel, listState: LazyL
             }
             GroupNote("A cena 3D usa a GPU do aparelho. O motor não tem caminho de CPU — por isso não há \"Sempre CPU\".")
         }
+        item(key = "aparelho") {
+            Spacer(Modifier.height(AureaDims.S5))
+            GroupHeader("Este aparelho")
+            val rep = store.deviceReport
+            Group {
+                TileRow(
+                    leading = { CupertinoIcon(CupertinoGlyph.Bolt, 21.dp, AureaColors.Accent) },
+                    title = store.deviceName.ifEmpty { "Medindo o aparelho…" },
+                    subtitle = rep?.summary() ?: "O motor ainda está subindo",
+                )
+                if (rep != null) {
+                    GroupDivider()
+                    TileRow(
+                        leading = { CupertinoIcon(CupertinoGlyph.Film, 21.dp, AureaColors.Muted) },
+                        title = "Prévia até ${rep.maxPreviewHeight}p · exporta até ${rep.maxExportHeight}p",
+                        subtitle = "Textura máx. ${rep.maxTexture} px · ${rep.workers} tarefas em paralelo",
+                    )
+                }
+                GroupDivider()
+                TapRow("Medir o aparelho de novo", "Refaz a otimização automática na próxima abertura") { store.remeasureDevice() }
+            }
+            GroupNote("Na primeira vez que abre, o Aurea mede este celular (memória, GPU e codecs de vídeo) e ajusta sozinho a qualidade da prévia, o uso de memória e o limite de exportação. Fica guardado; só mede de novo se o sistema for atualizado.")
+        }
         item(key = "geral") {
             Spacer(Modifier.height(AureaDims.S5))
             GroupHeader("Geral")

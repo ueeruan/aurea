@@ -866,6 +866,32 @@ struct RenderFixture {
 
 } // namespace
 
+// =============================================================================
+// A prévia de efeito NÃO encosta no swapchain (Fase 7.3 §13)
+//
+// A prévia abre um quadro, desenha a cartela fora da tela e lê de volta. Ela
+// roda em thread de trabalho, ao lado do quadro da tela. Se abrisse um quadro
+// COM superfície, disputaria o swapchain com o editor e, no fim, apresentaria
+// o quadro da cartela no lugar do quadro da composição. É o caminho que
+// derruba o app no aparelho quando o ciclo de vida refaz o swapchain no mesmo
+// instante (rotação, app indo para segundo plano).
+//
+// O teste prende o contrato: com superfície anexada, a prévia abre um quadro
+// offscreen, não adquire nada e não apresenta nada.
+// =============================================================================
+AUREA_TEST(EffectPreview, NeverTouchesTheSwapchain) {
+    RenderFixture f;
+    AUREA_CHECK(f.backend.attach_surface(SurfaceDesc{}).ok());
+    AUREA_CHECK(f.backend.has_surface());
+
+    std::vector<u8> rgba;
+    (void)f.renderer.render_effect_preview(f.effects, effect_type_id(effect_keys::kGaussianBlur), 96, 60, rgba);
+
+    AUREA_CHECK_EQ(f.backend.offscreenFrames, static_cast<u32>(1));
+    AUREA_CHECK_EQ(f.backend.acquires, static_cast<u32>(0));
+    AUREA_CHECK_EQ(f.backend.presents, static_cast<u32>(0));
+}
+
 AUREA_TEST(Compositor, CompositionOrderIsTheCoreOrder) {
     // duplicate_layer já teve bug de ordem. A ordem de desenho TEM que ser a
     // do Core: fundo → frente, com a cópia logo acima do original.

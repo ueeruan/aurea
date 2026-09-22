@@ -528,6 +528,14 @@ u32 Backend::read_gpu_timings(GpuTiming* out, u32 capacity, f32* totalMs) noexce
 }
 
 Status Backend::begin_frame(FrameBegin& out) noexcept {
+    return begin_frame_impl(out, true);
+}
+
+Status Backend::begin_offscreen_frame(FrameBegin& out) noexcept {
+    return begin_frame_impl(out, false);
+}
+
+Status Backend::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
     out = FrameBegin{};
     if (!initialized_) return Status{Errc::InvalidState, "backend nao inicializado"};
     if (deviceLost_) return Status{Errc::DeviceLost, "dispositivo perdido"};
@@ -577,6 +585,9 @@ Status Backend::begin_frame(FrameBegin& out) noexcept {
     out.frameNumber = frameNumber_;
 
     imageAcquired_ = false;
+    // Frame offscreen (prévia de efeito, export): nada de swapchain. A imagem
+    // da tela não é nossa, e apresentar daqui seria apresentar o quadro errado.
+    if (!withSurface) return OkStatus;
     if (swapchain_ || swapchainDirty_) {
         if (swapchainDirty_ && surface_) {
             if (const Status s = recreate_swapchain(); !s.ok()) {

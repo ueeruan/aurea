@@ -98,7 +98,7 @@ fun EffectCatalogTile(
             }
             if (cost > 1) {
                 Text(
-                    "custo $cost",
+                    costLabel(cost),
                     style = AureaType.of(9f, FontWeight.W500, color = Color.White),
                     modifier = Modifier
                         .align(Alignment.BottomStart)
@@ -209,9 +209,10 @@ fun EffectFilterChip(label: String, on: Boolean, onClick: () -> Unit) {
 /**
  * O NAVEGADOR: busca, fichas de filtro e a grade de cartões.
  *
- * [onPick] nulo = modo CATÁLOGO (a aba Efeitos da Home): tocar abre a ficha.
- * [onPick] preenchido = modo APLICAR (dentro do editor): tocar aplica na
- * seleção e fecha.
+ * [onClick] recebe o cartão tocado. Quem chama decide o que fazer com ele:
+ * o navegador do editor abre a FICHA, e é a ficha que aplica na seleção — o
+ * mesmo caminho em todo lugar, porque fora do editor não há seleção para
+ * aplicar.
  */
 @Composable
 fun EffectsCatalogGrid(
@@ -342,7 +343,7 @@ fun EffectDetailSheet(
                     Column(Modifier.weight(1f)) {
                         Text(name, style = AureaType.of(22f, FontWeight.W700, -0.4f))
                         Spacer(Modifier.height(2.dp))
-                        Text("${entry.category} · custo $cost", style = AureaType.CardSpec)
+                        Text(if (cost > 1) "${entry.category} · ${costLabel(cost).lowercase()} para o celular" else entry.category, style = AureaType.CardSpec)
                     }
                     Box(
                         Modifier
@@ -407,17 +408,31 @@ fun EffectDetailSheet(
     }
 }
 
-/** "número · 0 a 100 · %", "escolha · 4 opções", "cor" — a faixa em uma linha. */
+/** Peso do efeito no celular, em palavra (o número relativo fica interno). */
+private fun costLabel(cost: Int): String = when {
+    cost >= 3 -> "Pesado"
+    cost == 2 -> "Médio"
+    else -> "Leve"
+}
+
+/**
+ * O que o controle faz, em linguagem de edição: "Empurrar, Puxar, Torcer…",
+ * "0 a 100 %", "Cor", "Liga/desliga", "Um ponto na tela".
+ */
 private fun paramSummary(p: com.aurea.aurea.engine.EffectParam): String {
-    val kind = paramTypeLabel(p.type)
-    val range = if (p.min.isFinite() && p.max.isFinite() && p.max > p.min) {
-        " · ${trimNumber(p.min)} a ${trimNumber(p.max)}"
-    } else {
-        ""
+    if (p.enumLabels.isNotEmpty()) {
+        val shown = p.enumLabels.take(3).joinToString(", ")
+        return if (p.enumLabels.size > 3) "$shown…" else shown
     }
-    val unit = if (p.unit.isNotEmpty()) " ${p.unit}" else ""
-    val options = if (p.enumLabels.isNotEmpty()) " · ${p.enumLabels.size} opções" else ""
-    return "$kind$range$options$unit"
+    return when (p.type) {
+        com.aurea.aurea.engine.ParamType.COLOR -> "Cor"
+        com.aurea.aurea.engine.ParamType.BOOL -> "Liga/desliga"
+        com.aurea.aurea.engine.ParamType.POINT2D -> "Um ponto na tela"
+        else -> {
+            val unit = if (p.unit.isNotEmpty()) " ${p.unit}" else ""
+            if (p.min.isFinite() && p.max.isFinite() && p.max > p.min) "${trimNumber(p.min)} a ${trimNumber(p.max)}$unit" else unit.trim()
+        }
+    }
 }
 
 private fun trimNumber(v: Float): String =

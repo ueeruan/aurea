@@ -124,8 +124,30 @@ class AureaEngine private constructor() {
      * chega depois, por [attachSurface]. Pesado (dezenas a centenas de ms na
      * primeira vez, antes do cache de pipeline existir) — fora da thread da UI.
      */
-    fun initialize(refreshRate: Float, cacheDir: String, documentsDir: String, debug: Boolean): Boolean =
-        nativeInitialize(nativeHandle, refreshRate, cacheDir, documentsDir, debug)
+    fun initialize(
+        refreshRate: Float,
+        cacheDir: String,
+        documentsDir: String,
+        debug: Boolean,
+        probe: LongArray? = null,
+        codecs: IntArray? = null,
+    ): Boolean = nativeInitialize(nativeHandle, refreshRate, cacheDir, documentsDir, debug, probe, codecs)
+
+    /**
+     * O que o motor decidiu para ESTE aparelho, já em números.
+     *
+     * É o que a tela de Ajustes mostra e o que a folha "Novo projeto" usa para
+     * não oferecer uma resolução que o aparelho não exporta. Nulo = motor fora
+     * do ar.
+     */
+    fun deviceReport(): DeviceReport? {
+        val out = LongArray(DeviceReport.SLOTS)
+        if (!nativeDeviceReport(nativeHandle, out)) return null
+        return DeviceReport(out)
+    }
+
+    /** "Adreno (TM) 740 · driver 0x…" — o aparelho, não um rótulo genérico. */
+    fun deviceSummary(): String = nativeDeviceSummary(nativeHandle) ?: ""
 
     fun shutdown() = nativeShutdown(nativeHandle)
 
@@ -516,7 +538,10 @@ class AureaEngine private constructor() {
     // -------------------------------------------------------------------------
     private external fun nativeInitialize(
         handle: Long, refreshRate: Float, cacheDir: String, documentsDir: String, debug: Boolean,
+        probe: LongArray?, codecs: IntArray?,
     ): Boolean
+    private external fun nativeDeviceReport(handle: Long, out: LongArray): Boolean
+    private external fun nativeDeviceSummary(handle: Long): String?
     private external fun nativeShutdown(handle: Long)
     private external fun nativeSuspend(handle: Long)
     private external fun nativeResume(handle: Long)

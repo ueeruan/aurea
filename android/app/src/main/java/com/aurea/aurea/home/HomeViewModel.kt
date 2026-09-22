@@ -138,21 +138,6 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         return devTools
     }
 
-    // --- Efeitos ------------------------------------------------------------------
-    /** Termo de busca do navegador de efeitos, lembrado entre aberturas. */
-    var effectQuery by mutableStateOf("")
-
-    /** Rolagem da grade de efeitos (a grade não é uma `LazyListState`). */
-    internal var effectScrollIndex by mutableIntStateOf(0)
-        private set
-    internal var effectScrollOffset by mutableIntStateOf(0)
-        private set
-
-    internal fun saveEffectScroll(index: Int, offset: Int) {
-        effectScrollIndex = index
-        effectScrollOffset = offset
-    }
-
     // --- Miniaturas ------------------------------------------------------------------
     internal val thumbnails = HomeThumbnails(app.resources)
 
@@ -241,12 +226,11 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     companion object {
-        /** Início · Projetos · Efeitos · Ajustes. */
-        const val TAB_COUNT = 4
+        /** Início · Projetos · Ajustes. */
+        const val TAB_COUNT = 3
         const val HOME_TAB = 0
         const val PROJECTS_TAB = 1
-        const val EFFECTS_TAB = 2
-        const val SETTINGS_TAB = 3
+        const val SETTINGS_TAB = 2
 
         private const val PREFS = "aurea.home"
         private const val KEY_SORT = "projetos.ordem"

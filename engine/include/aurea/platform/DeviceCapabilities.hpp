@@ -155,10 +155,29 @@ struct PlatformInfo {
     u32 decoderIndexForTag[8]{};
     u32 encoderIndexForTag[8]{};
 
-    void set_decoder_tag(u32 slot, u32 codecTag, u32 index) noexcept {
-        if (slot < 8) {
-            (void)codecTag;
-            decoderIndexForTag[slot] = index;
+    /// Liga um tag ('avc1', 'hvc1', 'av01', 'vp09') ao índice em `decoders`.
+    ///
+    /// O slot sai DO TAG, não do chamador: quem preenche a tabela pensa em
+    /// "achei um HEVC", não em "slot 1". Antes o slot vinha por parâmetro e o
+    /// tag era descartado — trocar a ordem de dois codecs ligava o decoder
+    /// errado em silêncio.
+    void set_decoder_tag(u32 codecTag, u32 index) noexcept {
+        if (const u32 slot = tag_slot_of(codecTag); slot < 8) decoderIndexForTag[slot] = index;
+    }
+
+    /// O mesmo para encoder.
+    void set_encoder_tag(u32 codecTag, u32 index) noexcept {
+        if (const u32 slot = tag_slot_of(codecTag); slot < 8) encoderIndexForTag[slot] = index;
+    }
+
+    /// Slot de um tag de codec; 8 = desconhecido.
+    [[nodiscard]] static u32 tag_slot_of(u32 codecTag) noexcept {
+        switch (codecTag) {
+            case 0x61766331u: return 0;   // 'avc1'
+            case 0x68766331u: return 1;   // 'hvc1'
+            case 0x61763031u: return 2;   // 'av01'
+            case 0x76703039u: return 3;   // 'vp09'
+            default: return 8;
         }
     }
 };
@@ -180,6 +199,18 @@ public:
     /// Aplica o que a camada de plataforma mediu. Chamar ANTES de `detect()`
     /// ou a informação será sobrescrita pela detecção genérica.
     void apply_platform_info(const PlatformInfo& info) noexcept;
+
+    /// Aplica a GPU REAL, medida pelo backend depois que ele sobe.
+    ///
+    /// Por que isto existe separado de `apply_platform_info`: a GPU é a única
+    /// coisa que a camada de plataforma não consegue medir de fora — é preciso
+    /// ter criado o dispositivo Vulkan/Metal para perguntar os limites. Então
+    /// ela chega DEPOIS de `detect()`, e sozinha, sem tocar em codec nenhum.
+    ///
+    /// Sem esta chamada o motor decide com o padrão conservador (max_textura
+    /// 2048, GPU desconhecida) em qualquer aparelho — inclusive num que suporta
+    /// 16384. Recomputa o orçamento. Devolve true se algo mudou.
+    bool apply_gpu(const GpuCapabilities& gpu) noexcept;
 
     /// Sondagem só do que é barato. Usada em segundo plano para atualizar
     /// memória disponível e estado térmico sem parar o editor.

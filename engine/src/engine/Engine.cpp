@@ -4369,12 +4369,17 @@ Status Engine::render_offscreen(TextureHandle target, u32 width, u32 height, boo
 
     RenderSettings rs;
     rs.dither = false;
-    rs.gpuTimers = false;
+    rs.gpuTimers = offscreenTimers_;
     if (asPreview) rs.heavyScale = preview_heavy_scale();
+    OffscreenMeasure m;
+    const u64 tStart = monotonic_ns();
+    u64 tPrep0 = tStart, tPrep1 = tStart;
     // Espera os frames EXATOS de vídeo (export e teste não aceitam o frame
     // aproximado que o scrub mostra). Limite de 4 s para arquivo quebrado não
     // travar para sempre.
     for (int attempt = 0; attempt < 800; ++attempt) {
+        tPrep0 = monotonic_ns();
+        ++m.mediaAttempts;
         {
             std::lock_guard<std::mutex> lock(modelMutex_);
             if (!project_) return Errc::InvalidState;
@@ -4387,17 +4392,55 @@ Status Engine::render_offscreen(TextureHandle target, u32 width, u32 height, boo
             renderer_.prepare(*comp, *project_, t, &media_, &Engine::image_lookup, this, rs, ++frameCounter_,
                               0, DecodeMode::Still, 1.0f, snapshot_);
         }
+        tPrep1 = monotonic_ns();
         if (snapshot_.missingVideoFrames == 0 && snapshot_.staleVideoFrames == 0) break;
         for (RenderLayer& l : snapshot_.layers) l.source.frame.reset();
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    auto ms = [](u64 a, u64 b) { return static_cast<f32>(static_cast<f64>(b - a) * 1e-6); };
+    m.prepareMs = ms(tPrep0, tPrep1);
+    m.mediaWaitMs = ms(tStart, tPrep0);
+    for (const EffectPlan& p : snapshot_.plans) m.activeEffects += static_cast<u32>(p.evals.size());
+    for (const RenderLayer& l : snapshot_.layers) {
+        if (l.source.kind == LayerSource::Kind::Particles) m.particles += l.source.particleSlots;
     }
 
     OffscreenTarget off{target, width, height};
     FrameStats stats;
     RenderTimings timings;
     const Status s = renderer_.render(snapshot_, rs, &off, stats, timings);
+    const u64 tW0 = monotonic_ns();
     gpu_->wait_idle();
+    m.gpuWaitMs = ms(tW0, monotonic_ns());
+    m.recordMs = timings.cpuRecordMs;
+    m.submitMs = timings.presentMs;
+    m.passesExecuted = stats.passesExecuted;
+    m.passesCulled = stats.passesCulled;
+    m.drawCalls = stats.drawCalls;
+    m.layersRendered = stats.layersRendered;
+    if (!snapshot_.scenes.empty()) {   // sem cena o SceneStats é o do último quadro 3D
+        const scene3d::SceneStats& ss = renderer_.scene_stats();
+        m.draws3D = ss.drawCalls;
+        m.triangles3D = ss.triangles;
+        m.culled3D = ss.culledPrimitives;
+    }
+    m.transientBytes = renderer_.graph_stats().transientBytes;
+    m.gpuUsedBytes = gpu_->memory_stats().usedBytes;
+    if (offscreenTimers_ && s.ok()) {
+        // Depois do wait_idle o backend já leu os timestamps DESTE quadro.
+        f32 total = 0.0f;
+        m.gpuPasses = gpu_->read_gpu_timings(offscreenPasses_, 64, &total);
+        m.gpuMeasured = m.gpuPasses > 0;
+        m.gpuMs = m.gpuMeasured ? total : 0.0f;
+    }
+    offscreenMeasure_ = m;
     return s;
+}
+
+u32 Engine::last_offscreen_gpu_passes(GpuTiming* out, u32 capacity) const noexcept {
+    const u32 n = std::min(capacity, offscreenMeasure_.gpuPasses);
+    for (u32 i = 0; i < n; ++i) out[i] = offscreenPasses_[i];
+    return n;
 }
 
 bool Engine::set_effect_preview_source(const u8* rgba, u32 width, u32 height) noexcept {
@@ -4503,12 +4546,21 @@ void Engine::update_perf(const FrameStats& stats, const RenderTimings& t, const 
                          u64 frameStartNs) noexcept {
     ++fpsWindowFrames_;
     if (fpsWindowStartNs_ == 0) fpsWindowStartNs_ = frameStartNs;
+    // Ritmo: só quadros seguidos TOCANDO contam (parado, o intervalo é o
+    // tempo entre toques da pessoa, não ritmo de quadro).
+    if (playingHint_.load(std::memory_order_relaxed) && lastPresentNs_ != 0) {
+        pacingMs_[pacingHead_] = static_cast<f32>(static_cast<f64>(frameStartNs - lastPresentNs_) * 1e-6);
+        pacingHead_ = (pacingHead_ + 1) % kPacingRing;
+        if (pacingCount_ < kPacingRing) ++pacingCount_;
+    }
+    lastPresentNs_ = playingHint_.load(std::memory_order_relaxed) ? frameStartNs : 0;
     const u64 elapsed = frameStartNs - fpsWindowStartNs_;
     if (elapsed >= 1'000'000'000ull) {
         measuredFps_ = static_cast<f32>(static_cast<f64>(fpsWindowFrames_) * 1e9 / static_cast<f64>(elapsed));
         fpsWindowFrames_ = 0;
         fpsWindowStartNs_ = frameStartNs;
         frameScheduler_.roll_window();
+        roll_pacing();
     }
 
     const MediaManager::Stats ms = media_.stats();
@@ -4561,6 +4613,45 @@ void Engine::update_perf(const FrameStats& stats, const RenderTimings& t, const 
     std::snprintf(p.decoder, sizeof(p.decoder), "%s", ms.decoderName);
     if (gpu_) std::snprintf(p.gpuName, sizeof(p.gpuName), "%s", gpu_->capabilities().deviceName.c_str());
 
+    // Fase 8A: contadores que já existem, copiados (nada alocado, nada
+    // estimado — o que o motor não mede fica 0 e a HUD não mostra).
+    p.pacingP50Ms = pacingP50_;
+    p.pacingP95Ms = pacingP95_;
+    p.pacingP99Ms = pacingP99_;
+    p.pacingStdMs = pacingStd_;
+    p.pacingSamples = pacingSamples_;
+    p.cpuPrepareMs = t.cpuPrepareMs;
+    p.cpuRecordMs = t.cpuRecordMs;
+    p.drawCalls = stats.drawCalls;
+    if (!snap.scenes.empty()) {   // sem cena, o SceneStats é o do último quadro 3D
+        const scene3d::SceneStats& ss = renderer_.scene_stats();
+        p.draws3D = ss.drawCalls;
+        p.triangles3D = ss.triangles;
+        p.culled3D = ss.culledPrimitives;
+    }
+    for (const EffectPlan& plan : snap.plans) p.activeEffects += static_cast<u32>(plan.evals.size());
+    for (const RenderLayer& l : snap.layers) {
+        if (l.source.kind == LayerSource::Kind::Particles) p.particles += l.source.particleSlots;
+    }
+    renderer_.flow_cache_stats(p.flowCacheHits, p.flowCacheMisses);
+    renderer_.mask_cache_stats(p.maskCacheHits, p.maskCacheMisses);
+    const audio::AudioEngine::Stats as = audio_.stats();
+    p.audioOutputOpen = as.outputOpen ? 1u : 0u;
+    if (as.outputOpen) {
+        p.audioQueuedMs = as.queuedMs;
+        p.audioUnderruns = static_cast<u32>(as.underruns);
+        p.audioMissingBlocks = static_cast<u32>(as.missingBlocks);
+        if (config_.audioOutput) p.audioOutputMs = config_.audioOutput->latency_frames() * 1000u / audio::kMixRate;
+    }
+    p.heavyScale = preview_heavy_scale();
+    p.memoryBudgetMB = static_cast<u32>(memory_.total_budget() >> 20);
+    p.scene3dBytes = renderer_.scene_resident_bytes();
+    if (gpu_) {
+        const GpuMemoryStats gm = gpu_->memory_stats();
+        p.gpuReservedBytes = gm.reservedBytes;
+        p.gpuAllocations = gm.allocationCount;
+    }
+
     // A partir do primeiro frame mostrado, pipeline novo é "durante o
     // playback" — o número certo no painel é zero.
     if (renderer_.frames_rendered() == 1) renderer_.shaders().mark_steady_state();
@@ -4569,6 +4660,36 @@ void Engine::update_perf(const FrameStats& stats, const RenderTimings& t, const 
     perf_ = p;
     lastFrame_ = stats;
     lastFrame_.gpuMs = p.gpuFrameMs;
+}
+
+void Engine::roll_pacing() noexcept {
+    // Uma vez por segundo, na thread de render: cópia na pilha (128 floats) e
+    // nth_element — nada alocado. Menos de 8 amostras = não tocou o bastante.
+    pacingSamples_ = pacingCount_;
+    if (pacingCount_ < 8) {
+        pacingP50_ = pacingP95_ = pacingP99_ = pacingStd_ = 0.0f;
+        pacingCount_ = pacingHead_ = 0;
+        return;
+    }
+    f32 v[kPacingRing];
+    const u32 n = pacingCount_;
+    f64 sum = 0.0, sum2 = 0.0;
+    for (u32 i = 0; i < n; ++i) {
+        v[i] = pacingMs_[i];
+        sum += v[i];
+        sum2 += static_cast<f64>(v[i]) * v[i];
+    }
+    auto pct = [&](f64 q) {
+        const u32 k = std::min<u32>(n - 1, static_cast<u32>(q * static_cast<f64>(n - 1) + 0.5));
+        std::nth_element(v, v + k, v + n);
+        return v[k];
+    };
+    pacingP50_ = pct(0.50);
+    pacingP95_ = pct(0.95);
+    pacingP99_ = pct(0.99);
+    const f64 mean = sum / n;
+    pacingStd_ = static_cast<f32>(std::sqrt(std::max(0.0, sum2 / n - mean * mean)));
+    pacingCount_ = pacingHead_ = 0;   // janela nova: o número é do último segundo
 }
 
 void Engine::fill_perf(bridge::PerfPOD& out) noexcept {

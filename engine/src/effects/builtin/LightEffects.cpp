@@ -319,7 +319,9 @@ public:
                  kChroma, kOffset, kGain, kTint };
 
     const EffectInfo& info() const noexcept override {
-        static const EffectInfo i{effect_keys::kColorama, "Colorama", "Cor", EffectClass::PerPixel};
+        // Por pixel, mas com passe próprio (arco-íris mapeado), sem ColorOp:
+        // como PerPixel o EffectGraph o tirava do plano e ele não desenhava.
+        static const EffectInfo i{effect_keys::kColorama, "Colorama", "Cor", EffectClass::Neighborhood};
         return i;
     }
     void declare_parameters(ParameterRegistry& p) const override {

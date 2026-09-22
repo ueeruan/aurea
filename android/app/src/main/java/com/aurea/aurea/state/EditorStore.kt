@@ -229,6 +229,26 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         private set
     var hudVisible by mutableStateOf(false)
         private set
+    /** Memória do processo e do sistema, lida pela HUD (só com ela aberta). */
+    var appMemory by mutableStateOf(AppMemory())
+        private set
+
+    /**
+     * RAM vista pelo app (Fase 8A, HUD). Tudo leitura barata: heap nativo e
+     * Java do processo, e o MemoryInfo do sistema (uma chamada ao
+     * ActivityManager por segundo). PSS/RSS não entram: getProcessMemoryInfo é
+     * limitado pelo sistema e Debug.getPss custa milissegundos.
+     */
+    data class AppMemory(
+        val nativeHeapBytes: Long = 0,
+        val javaHeapBytes: Long = 0,
+        val systemAvailBytes: Long = 0,
+        val systemTotalBytes: Long = 0,
+        val lowMemory: Boolean = false,
+        /** Quadros da UI (Choreographer) com intervalo > 1,5 vsync na janela. */
+        val uiSlowFrames: Int = 0,
+        val uiWorstFrameMs: Float = 0f,
+    )
 
     /** Muda quando o motor terminou uma miniatura nova (a timeline redesenha). */
     var thumbnailGeneration by mutableIntStateOf(0)
@@ -295,6 +315,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     private var lastThumbGen = -1
     private var lastPerfNs = 0L
     private var uiFrames = 0
+    private var lastUiFrameNs = 0L
+    private var uiSlowFrames = 0
+    private var uiWorstFrameNs = 0L
+    private var lastSystemMemNs = 0L
+    private var systemMem: android.app.ActivityManager.MemoryInfo? = null
+    private val vsyncNs: Long by lazy { (1e9f / displayRefreshRate().coerceAtLeast(30f)).toLong() }
     private var scrubbing = false
 
     init {
@@ -472,14 +498,51 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             status.readFrom(statusBuffer)
             publish()
             uiFrames++
+            if (hudVisible) {
+                // Quadro lento da UI: o Choreographer chamou mais de 1,5 vsync
+                // depois do anterior (a thread principal ficou presa).
+                if (lastUiFrameNs != 0L) {
+                    val dt = frameTimeNanos - lastUiFrameNs
+                    if (dt * 2 > vsyncNs * 3) uiSlowFrames++
+                    if (dt > uiWorstFrameNs) uiWorstFrameNs = dt
+                }
+                lastUiFrameNs = frameTimeNanos
+            } else {
+                lastUiFrameNs = 0L
+            }
             if (hudVisible && frameTimeNanos - lastPerfNs > 250_000_000L) {
                 if (lastPerfNs != 0L) uiFps = uiFrames * 1e9f / (frameTimeNanos - lastPerfNs)
                 uiFrames = 0
                 lastPerfNs = frameTimeNanos
                 engine.readPerf(perfBuffer)
                 perf = PerfStats.read(perfBuffer)
+                readAppMemory(frameTimeNanos)
             }
         }.also { it.start() }
+    }
+
+    /** HUD: memória do app a 4 Hz; a do sistema e os quadros lentos por janela de 1 s. */
+    private fun readAppMemory(nowNs: Long) {
+        val rt = Runtime.getRuntime()
+        if (nowNs - lastSystemMemNs >= 1_000_000_000L) {
+            val am = getApplication<Application>().getSystemService(android.content.Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+            val mi = systemMem ?: android.app.ActivityManager.MemoryInfo().also { systemMem = it }
+            am?.getMemoryInfo(mi)
+            appMemory = appMemory.copy(
+                systemAvailBytes = mi.availMem,
+                systemTotalBytes = mi.totalMem,
+                lowMemory = mi.lowMemory,
+                uiSlowFrames = uiSlowFrames,
+                uiWorstFrameMs = uiWorstFrameNs / 1e6f,
+            )
+            uiSlowFrames = 0
+            uiWorstFrameNs = 0L
+            lastSystemMemNs = nowNs
+        }
+        appMemory = appMemory.copy(
+            nativeHeapBytes = android.os.Debug.getNativeHeapAllocatedSize(),
+            javaHeapBytes = rt.totalMemory() - rt.freeMemory(),
+        )
     }
 
     private fun stopStatusLoop() {

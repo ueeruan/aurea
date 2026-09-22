@@ -49,6 +49,7 @@ enum class EditorPanel {
     Presets,       // navegador de presets (efeitos, texto, animação, legenda, curva)
     Mask,          // máscaras (roto) e track matte
     Vector,        // camada vetorial: caminhos, tinta, contorno, aparar, repetidor
+    ShapeEdit,     // Frente D (7.2): editar forma — tamanho, raio, pontas; alças no palco
 }
 
 /**
@@ -115,6 +116,7 @@ fun PanelContent(
         EditorPanel.Presets -> "Presets"
         EditorPanel.Mask -> "Máscara e recorte"
         EditorPanel.Vector -> "Vetor"
+        EditorPanel.ShapeEdit -> "Editar forma"
     }
 
     Column(modifier.fillMaxSize().background(AureaColors.EditorPanel)) {
@@ -141,6 +143,7 @@ fun PanelContent(
                     EditorPanel.Presets -> PresetsPanel(env)
                     EditorPanel.Mask -> MaskPanel(env)
                     EditorPanel.Vector -> VectorPanel(env)
+                    EditorPanel.ShapeEdit -> ShapeEditPanel(env)
                 }
             }
         }

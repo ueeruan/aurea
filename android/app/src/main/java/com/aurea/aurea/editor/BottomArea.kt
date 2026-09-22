@@ -236,7 +236,7 @@ internal fun LayerToolsDock(store: EditorStore, ui: EditorUi, layerId: Long) {
             ) {
                 rows.forEach { row ->
                     Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        row.forEach { s -> DockTile(s, tileHeight) { openPanel(store, ui, s.panel) } }
+                        row.forEach { s -> DockTile(s, tileHeight) { openPanel(store, ui, panelFor(store, s)) } }
                         // A coluna vazia guarda o lugar: sem ela a última ficha
                         // de uma fileira incompleta esticava.
                         repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
@@ -258,6 +258,20 @@ private inline fun timeEdit(store: EditorStore, l: DockLayer, action: () -> Unit
             action()
         }
     }
+}
+
+/**
+ * O painel da ficha depende da camada: "Editar forma" abre o editor da
+ * silhueta (ou o Vetor, na camada vetorial) e "Cor e preenchimento" muda
+ * entre forma, vetor e texto.
+ */
+private fun panelFor(store: EditorStore, s: DockSection): EditorPanel = when (s) {
+    DockSection.EditShape -> if (store.isVectorLayer) EditorPanel.Vector else EditorPanel.ShapeEdit
+    DockSection.ColorFill -> when (store.detail?.kind) {
+        com.aurea.aurea.ui.theme.LayerType.Text.kind -> EditorPanel.Text
+        else -> if (store.isVectorLayer) EditorPanel.Vector else EditorPanel.Shape
+    }
+    else -> s.panel
 }
 
 @Composable

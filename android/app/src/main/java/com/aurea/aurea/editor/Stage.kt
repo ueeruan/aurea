@@ -112,7 +112,13 @@ private fun VectorToolBanner(store: EditorStore, modifier: Modifier) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            if (tool == 2) "Mão livre: desenhe com o dedo" else "Pontos: toque para criar, arraste para curvar",
+            if (tool == 2) "Mão livre: desenhe com o dedo"
+            else when (PointTool.effective(VectorStageState.pointTool, store.vectorPathAt?.path?.v?.size ?: 0)) {
+                PointTool.ADD -> "Adicionar: toque na linha ou no vazio; arraste para curvar"
+                PointTool.REMOVE -> "Remover: toque no ponto para apagar"
+                PointTool.CORNER -> "Canto/Suave: toque no ponto para alternar"
+                else -> "Selecionar: arraste pontos e alças"
+            },
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, fontWeight = FontWeight.W600)),
@@ -352,6 +358,11 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
     // Principal: escuro 55 % em 3,5 e destaque em 2 (travada: secundário).
     outline(m, m.corners, m.outlineUnder, m.outlineOver, if (d.locked) AureaColors.Muted else AureaColors.Accent)
     if (selection.size != 1 || d.locked || masking) return   // no modo de máscara o toque é do caminho
+    // Editar forma: alças de tamanho e raio da silhueta no lugar de escala/giro.
+    if (shapeEditMode(store, ui)) {
+        drawShapeEditHandles(store, m)
+        return
+    }
     placeHandles(m)
     m.handlesValid = true
     val grabbed = ui.grabbedHandle
@@ -559,6 +570,15 @@ private suspend fun PointerInputScope.stageGestures(
             return@awaitEachGesture
         }
 
+        // Editar forma: as alças da silhueta (tamanho/raio) têm a vez.
+        if (m.valid && shapeEditMode(store, ui)) {
+            val sh = pickShapeHandle(downX, downY, 26.dp.toPx())
+            if (sh >= 0) {
+                shapeEditGesture(store, m, sh, down)
+                return@awaitEachGesture
+            }
+        }
+
         // Gizmo 3D: tocar numa ponta de seta arrasta no eixo do mundo.
         val gz = store.gizmo
         if (gz != null && store.selection.size == 1 && m.valid) {
@@ -648,7 +668,7 @@ private suspend fun PointerInputScope.stageGestures(
         val ms = store.masks
         val editMask = store.maskEdit
         if (maskMode(store, ui) && ms != null && editMask != null && m.valid && ms.layer == store.primary) {
-            maskGesture(store, m, ms, editMask, down, slop, 22.dp.toPx(), haptic)
+            maskGesture(store, m, ms, editMask, down, slop, 28.dp.toPx(), haptic)
             return@awaitEachGesture
         }
 
@@ -1257,7 +1277,7 @@ private fun DrawScope.drawMasks(m: StageMapper, ms: EditorStore.MaskState, edit:
         drawPath(path, if (on) MaskEditColor else MaskOtherColor, style = if (on) m.outlineOver else m.batchOver)
         if (!on) continue
         // Pontos: quadrados (o 1º maior enquanto desenha: tocar nele fecha).
-        val half = 4.dp.toPx()
+        val half = 5.5.dp.toPx()
         for (i in 0 until n) {
             val c = Offset(sx(p[i * 6], p[i * 6 + 1]), sy(p[i * 6], p[i * 6 + 1]))
             val h = if (drawing && i == 0 && n >= 3) half * 1.6f else half
@@ -1275,8 +1295,8 @@ private fun DrawScope.drawMasks(m: StageMapper, ms: EditorStore.MaskState, edit:
                 val t = Offset(sx(tx, ty), sy(tx, ty))
                 drawLine(ShellColors.OutlineUnder, c, t, 3f * density)
                 drawLine(MaskEditColor, c, t, 1.5f * density)
-                drawCircle(ShellColors.OutlineUnder, 5.5.dp.toPx(), t)
-                drawCircle(MaskEditColor, 4.dp.toPx(), t)
+                drawCircle(ShellColors.OutlineUnder, 7.5.dp.toPx(), t)
+                drawCircle(MaskEditColor, 6.dp.toPx(), t)
             }
         }
     }

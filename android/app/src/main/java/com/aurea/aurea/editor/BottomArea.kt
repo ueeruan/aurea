@@ -238,7 +238,9 @@ private fun onSection(store: EditorStore, ui: EditorUi, s: DockSection) {
         DockSection.Captions -> openPanel(store, ui, EditorPanel.Captions)
         DockSection.Presets -> openPanel(store, ui, EditorPanel.Presets)
         DockSection.Mask -> openPanel(store, ui, EditorPanel.Mask)
-        DockSection.ColorFill, DockSection.EditShape, DockSection.EditText -> when (store.detail?.kind) {
+        // Editar forma (Frente D): a silhueta tem painel próprio; a vetorial edita no Vetor.
+        DockSection.EditShape -> openPanel(store, ui, if (store.isVectorLayer) EditorPanel.Vector else EditorPanel.ShapeEdit)
+        DockSection.ColorFill, DockSection.EditText -> when (store.detail?.kind) {
             com.aurea.aurea.ui.theme.LayerType.Shape.kind -> openPanel(store, ui, if (store.isVectorLayer) EditorPanel.Vector else EditorPanel.Shape)
             com.aurea.aurea.ui.theme.LayerType.Text.kind -> openPanel(store, ui, EditorPanel.Text)
             else -> store.comingSoon(s.label)

@@ -1,6 +1,7 @@
 package com.aurea.aurea.editor
 
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
@@ -40,6 +41,23 @@ import kotlin.math.hypot
 internal object VectorStageState {
     /** Traço da mão livre em curso (px da composição, x,y intercalados). */
     var stroke by mutableStateOf(FloatArray(0))
+
+    /**
+     * Ferramenta de pontos (Frente D): o que o toque faz no modo de pontos.
+     * Arrastar ponto ou alça funciona em todas; o que muda é o TOQUE.
+     */
+    var pointTool by mutableIntStateOf(PointTool.SELECT)
+}
+
+/** As ferramentas da barra do Vetor (ícone + nome no painel). */
+internal object PointTool {
+    const val SELECT = 0    // escolher e arrastar pontos/alças; toque no vazio solta
+    const val ADD = 1       // toque na linha insere; no vazio (caminho aberto) acrescenta no fim
+    const val REMOVE = 2    // toque num ponto o apaga
+    const val CORNER = 3    // toque num ponto alterna canto ↔ suave
+
+    /** Caminho com menos de 2 pontos só tem o que acrescentar: a ferramenta vira Adicionar. */
+    fun effective(tool: Int, vertices: Int): Int = if (vertices < 2) ADD else tool
 }
 
 private val PathLine = Color(0xFF5AA8FF)
@@ -85,12 +103,12 @@ internal fun DrawScope.drawVectorOverlay(store: EditorStore, m: StageMapper) {
         for (k in 0..1) {
             val h = Offset(pts[sel * 6 + 2 + k * 2], pts[sel * 6 + 3 + k * 2])
             if (hypot(h.x - c.x, h.y - c.y) < 1f) continue
-            drawLine(HandleLine, c, h, 1.2.dp.toPx())
-            drawCircle(ShellColors.OutlineUnder, 6.dp.toPx(), h)
-            drawCircle(Color.White, 4.5.dp.toPx(), h)
+            drawLine(HandleLine, c, h, 1.4.dp.toPx())
+            drawCircle(ShellColors.OutlineUnder, 7.5.dp.toPx(), h)
+            drawCircle(Color.White, 6.dp.toPx(), h)
         }
     }
-    val r = 5.dp.toPx()
+    val r = 6.dp.toPx()
     for (i in v.indices) {
         val c = Offset(pts[i * 6], pts[i * 6 + 1])
         val chosen = i == sel
@@ -120,9 +138,12 @@ internal suspend fun AwaitPointerEventScope.vectorGesture(store: EditorStore, m:
         waitUp(down)
         return
     }
-    val reach = 22.dp.toPx()
+    val reach = 28.dp.toPx()
     val q = FloatArray(2)
     val v = at.path.v
+    // Caminho vazio (desenho novo): fica em Adicionar até a pessoa trocar.
+    if (v.size < 2) VectorStageState.pointTool = PointTool.ADD
+    val tool = PointTool.effective(VectorStageState.pointTool, v.size)
     fun screenOf(x: Float, y: Float): Offset {
         at.toComp(x, y, q)
         return Offset(m.sx(q[0]), m.sy(q[1]))
@@ -154,6 +175,23 @@ internal suspend fun AwaitPointerEventScope.vectorGesture(store: EditorStore, m:
     fun groupOf(pos: Offset): Boolean = at.fromComp(m.cx(pos.x), m.cy(pos.y), g)
     val slop = 4.dp.toPx()
 
+    // Remover / Canto-suave: o toque num ponto age nele (sem arrasto).
+    if (handle < 0 && hit >= 0 && (tool == PointTool.REMOVE || tool == PointTool.CORNER)) {
+        waitUp(down)
+        store.vectorPoint = hit
+        if (tool == PointTool.REMOVE) VectorPathOps.deletePoint(store) else VectorPathOps.toggleSmooth(store)
+        return
+    }
+    // Adicionar: toque sobre a linha insere um ponto ali (a curva não muda).
+    if (handle < 0 && hit < 0 && tool == PointTool.ADD && v.size >= 2) {
+        val ins = VectorPathOps.insertAt(at, m, dp, reach)
+        if (ins != null) {
+            store.setVectorPathShape(ins.first, continuing = false)
+            store.vectorPoint = ins.second
+            waitUp(down)
+            return
+        }
+    }
     when {
         handle >= 0 -> {
             val p = work.v[sel]
@@ -195,7 +233,7 @@ internal suspend fun AwaitPointerEventScope.vectorGesture(store: EditorStore, m:
                 sent = true
             }
             if (!moved) {
-                if (hit == 0 && !work.closed && work.v.size >= 3 && store.vectorPoint == work.v.size - 1) {
+                if (tool == PointTool.ADD && hit == 0 && !work.closed && work.v.size >= 3 && store.vectorPoint == work.v.size - 1) {
                     work.closed = true
                     store.setVectorPathShape(work, continuing = false)
                 }
@@ -204,7 +242,8 @@ internal suspend fun AwaitPointerEventScope.vectorGesture(store: EditorStore, m:
                 store.vectorPoint = hit
             }
         }
-        work.closed -> {
+        work.closed || tool != PointTool.ADD -> {
+            // Toque no vazio: solta o ponto escolhido.
             store.vectorPoint = -1
             waitUp(down)
         }
@@ -267,6 +306,62 @@ private suspend fun AwaitPointerEventScope.waitUp(down: PointerInputChange) = dr
 
 /** Operações do painel sobre o caminho escolhido (fora do palco). */
 internal object VectorPathOps {
+    /**
+     * Ponto novo sobre a linha perto de [pos] (px do palco): divide o trecho
+     * pela conta de De Casteljau, então a curva continua IGUAL. Devolve o
+     * caminho novo e o índice do ponto, ou nulo se o toque não caiu na linha.
+     */
+    fun insertAt(at: VPathAt, m: StageMapper, pos: Offset, reach: Float): Pair<VBezier, Int>? {
+        val v = at.path.v
+        val n = v.size
+        if (n < 2) return null
+        val segs = if (at.path.closed) n else n - 1
+        val q = FloatArray(2)
+        var bestD = reach
+        var bestSeg = -1
+        var bestT = 0f
+        val steps = 48
+        for (i in 0 until segs) {
+            val a = v[i]
+            val b = v[(i + 1) % n]
+            for (k in 1 until steps) {
+                val t = k / steps.toFloat()
+                val x = cubic(a.x, a.x + a.outX, b.x + b.inX, b.x, t)
+                val y = cubic(a.y, a.y + a.outY, b.y + b.inY, b.y, t)
+                at.toComp(x, y, q)
+                val d = hypot(m.sx(q[0]) - pos.x, m.sy(q[1]) - pos.y)
+                if (d < bestD) { bestD = d; bestSeg = i; bestT = t }
+            }
+        }
+        if (bestSeg < 0) return null
+        val w = at.path.copyDeep()
+        val i = bestSeg
+        val j = (i + 1) % n
+        val a = w.v[i]
+        val b = w.v[j]
+        val t = bestT
+        fun lerp(p: Float, r: Float) = p + (r - p) * t
+        val p1x = a.x + a.outX; val p1y = a.y + a.outY
+        val p2x = b.x + b.inX; val p2y = b.y + b.inY
+        val ax = lerp(a.x, p1x); val ay = lerp(a.y, p1y)
+        val bx = lerp(p1x, p2x); val by = lerp(p1y, p2y)
+        val cx = lerp(p2x, b.x); val cy = lerp(p2y, b.y)
+        val dx = lerp(ax, bx); val dy = lerp(ay, by)
+        val ex = lerp(bx, cx); val ey = lerp(by, cy)
+        val fx = lerp(dx, ex); val fy = lerp(dy, ey)
+        a.outX = ax - a.x; a.outY = ay - a.y
+        b.inX = cx - b.x; b.inY = cy - b.y
+        val nv = VVertex(fx, fy, dx - fx, dy - fy, ex - fx, ey - fy)
+        val idx = if (j == 0) n else i + 1
+        w.v.add(idx, nv)
+        return w to idx
+    }
+
+    private fun cubic(p0: Float, p1: Float, p2: Float, p3: Float, t: Float): Float {
+        val u = 1f - t
+        return u * u * u * p0 + 3f * u * u * t * p1 + 3f * u * t * t * p2 + t * t * t * p3
+    }
+
     fun deletePoint(store: EditorStore) {
         val at: VPathAt = store.vectorPathAt ?: return
         val i = store.vectorPoint

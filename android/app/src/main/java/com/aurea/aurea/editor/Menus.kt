@@ -152,7 +152,7 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
             MenuItemRow(CupertinoGlyph.Speedometer, "Velocidade e remapear o tempo", act { openPanel(store, ui, EditorPanel.Speed) })
         }
         if (type == LayerType.Video) {
-            MenuItemRow(ShellGlyph.Snow, "Congelar quadro", if (inside) soon("Congelar quadro") else null)
+            MenuItemRow(ShellGlyph.Snow, "Congelar quadro", if (inside) act { store.freezeFrame(id) } else null)
         }
 
         MenuSection("Mais")

@@ -56,17 +56,20 @@ private fun clock(frames: Int, fps: Float): String {
 }
 
 /**
- * TEMPO E VELOCIDADE [A] (`showSpeedSheet`): "1,00x · duração", o que acontece com
- * a barra (Estender início · Cortar início · Cortar fim · Estender fim), a régua
- * entre a tartaruga e a lebre, os atalhos 0,5x / 1x / 2x e os interruptores.
- * O motor toca a 1x — é o único valor verdadeiro, e é o que aparece.
+ * TEMPO E VELOCIDADE [A] (`showSpeedSheet`): "1,00x · duração", o que acontece
+ * com a barra, a régua entre a tartaruga e a lebre (escala logarítmica: meio
+ * risco para 0,5x vale o mesmo que para 2x), os atalhos e os interruptores.
+ * Velocidade e Reverso são do motor (vídeo, miniatura e som seguem a mesma
+ * conta de tempo); o som acompanha a velocidade com o tom (manter o tom é
+ * time stretch — ainda não existe, e o interruptor diz isso).
  */
 @Composable
 internal fun SpeedPanel(env: PanelEnv) {
     val store = env.store
     val kind by remember(store) { derivedStateOf { store.detail?.kind ?: 0 } }
     val frames by remember(store) { derivedStateOf { store.detail?.let { it.endFrame - it.startFrame } ?: 0 } }
-    val soon = { store.comingSoon("Velocidade") }
+    val speed by remember(store) { derivedStateOf { store.detail?.speed ?: 1f } }
+    val reversed by remember(store) { derivedStateOf { store.detail?.reversed ?: false } }
     val media = kind == LayerType.Video.kind || kind == LayerType.Audio.kind
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 18.dp, top = 14.dp, end = 18.dp, bottom = 24.dp)) {
         if (!media) {
@@ -76,7 +79,16 @@ internal fun SpeedPanel(env: PanelEnv) {
             )
             return@Column
         }
-        Text("1,00x · ${clock(frames, store.project.fps)}", style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Accent)))
+        if (speed == 0f) {
+            Text("Quadro congelado · ${clock(frames, store.project.fps)}", style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Accent)))
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Este trecho é um quadro parado. Apare as bordas na timeline para mudar quanto tempo ele fica na tela.",
+                style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, lineHeight = 18.2.sp, color = AureaColors.Muted)),
+            )
+            return@Column
+        }
+        Text("${speedLabel(speed)} · ${clock(frames, store.project.fps)}", style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Accent)))
         Spacer(Modifier.height(10.dp))
         Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(AureaColors.Chip).padding(3.dp)) {
             listOf(
@@ -85,14 +97,14 @@ internal fun SpeedPanel(env: PanelEnv) {
                 Triple(CupertinoGlyph.Scissors, "Cortar fim", false),
                 Triple(CupertinoGlyph.ArrowRightToLine, "Estender fim", false),
             ).forEachIndexed { i, (glyph, label, flip) ->
-                val on = i == 3 // padrão da A.01: estender o fim
+                val on = i == 3 // o que o motor faz: o início fica, o fim acompanha
                 Column(
                     Modifier
                         .weight(1f)
                         .height(52.dp)
                         .clip(RoundedCornerShape(9.dp))
                         .background(if (on) AureaColors.AccentDim else androidx.compose.ui.graphics.Color.Transparent)
-                        .tocavel(onClick = soon),
+                        .tocavel(onClick = { if (!on) store.comingSoon(label) }),
                     verticalArrangement = Arrangement.Center,
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
@@ -106,22 +118,38 @@ internal fun SpeedPanel(env: PanelEnv) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             CupertinoIcon(CupertinoGlyph.Tortoise, 20.dp, AureaColors.Muted)
             Spacer(Modifier.width(6.dp))
-            Box(Modifier.weight(1f).height(40.dp).tocavel(shrink = 1f, onClick = soon)) {
-                TickRuler(value = { 1f }, unitsPerDp = 0.01f, active = true, modifier = Modifier.fillMaxSize())
+            // Régua em log2 × 100: arrastar a mesma distância dobra ou divide.
+            Box(Modifier.weight(1f).height(40.dp)) {
+                TickRuler(
+                    value = { log2Speed(store.detail?.speed ?: 1f) },
+                    unitsPerDp = 1f,
+                    active = true,
+                    modifier = Modifier.fillMaxSize().valueDrag(
+                        enabled = true,
+                        start = { log2Speed(store.detail?.speed ?: 1f) },
+                        unitsPerDp = { 1f },
+                        min = -332f,
+                        max = 332f,
+                        onStart = { store.beginGesture("velocidade") },
+                        onValue = { v -> store.setLayerSpeed(snapSpeed(2f.pow(v / 100f))) },
+                        onEnd = { store.endGesture() },
+                    ),
+                )
             }
             Spacer(Modifier.width(6.dp))
             CupertinoIcon(CupertinoGlyph.Hare, 20.dp, AureaColors.Muted)
             Spacer(Modifier.width(8.dp))
-            ValueBox("1,00x", width = 64.dp, onTap = soon)
+            ValueBox(speedLabel(speed), width = 64.dp, onTap = null)
         }
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf("0,5x" to false, "1x" to true, "2x" to false).forEach { (label, on) ->
+            listOf(0.25f to "0,25x", 0.5f to "0,5x", 1f to "1x", 2f to "2x", 4f to "4x").forEach { (value, label) ->
+                val on = kotlin.math.abs(speed - value) < 0.005f
                 Box(
                     Modifier
                         .clip(RoundedCornerShape(8.dp))
                         .background(if (on) AureaColors.AccentDim else AureaColors.Chip)
-                        .tocavel(onClick = soon)
+                        .tocavel(onClick = { store.setLayerSpeed(value) })
                         .padding(horizontal = 12.dp, vertical = 6.dp),
                 ) {
                     Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = if (on) AureaColors.Accent else AureaColors.Text)))
@@ -129,13 +157,26 @@ internal fun SpeedPanel(env: PanelEnv) {
             }
         }
         Spacer(Modifier.height(8.dp))
-        ShellToggle("Manter tom do áudio", soon)
+        ShellToggle("Manter tom do áudio (em breve)") { store.comingSoon("Manter o tom") }
         if (kind == LayerType.Video.kind) {
-            ShellToggle("Reverso", soon)
-            ShellToggle("Blur proporcional à velocidade", soon)
+            Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Reverso", modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+                AureaToggle(checked = reversed, onCheckedChange = { store.setLayerReversed(it) })
+            }
+            ShellToggle("Blur proporcional à velocidade (em breve)") { store.comingSoon("Blur proporcional") }
         }
     }
 }
+
+private fun log2Speed(s: Float): Float = (kotlin.math.ln(s.coerceIn(0.05f, 16f)) / kotlin.math.ln(2f)) * 100f
+
+/** Encosta nos valores redondos (0,25 · 0,5 · 1 · 2 · 4) quando passa perto. */
+private fun snapSpeed(s: Float): Float {
+    for (v in floatArrayOf(0.25f, 0.5f, 1f, 2f, 4f)) if (kotlin.math.abs(s - v) / v < 0.03f) return v
+    return (s * 100f).roundToInt() / 100f
+}
+
+private fun speedLabel(s: Float): String = "%.2fx".format(s).replace('.', ',')
 
 @Composable
 private fun ShellToggle(label: String, onClick: () -> Unit) {

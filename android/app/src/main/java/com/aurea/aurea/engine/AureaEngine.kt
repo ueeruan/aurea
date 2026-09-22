@@ -140,6 +140,8 @@ class AureaEngine private constructor() {
     fun suspend() = nativeSuspend(nativeHandle)
 
     fun resume() = nativeResume(nativeHandle)
+    /** Redesenha o preview mesmo sem mudança (a janela voltou a aparecer). */
+    fun invalidate() = nativeInvalidate(nativeHandle)
 
     // =========================================================================
     // Superfície
@@ -260,6 +262,9 @@ class AureaEngine private constructor() {
     /** O som do vídeo vira camada própria; o vídeo fica mudo. Id ≥ 0 ou −Errc. */
     fun extractAudio(layer: Long): Long = nativeExtractAudio(nativeHandle, layer)
 
+    /** Congela o quadro do clipe no `frame` por `holdFrames`; o resto anda. Id ≥ 0 ou −Errc. */
+    fun freezeFrame(layer: Long, frame: Int, holdFrames: Int): Long = nativeFreezeFrame(nativeHandle, layer, frame, holdFrames)
+
     /** Waveform: `count` baldes (u8, compansão raiz) a partir de `startFrame`. 0 = sem som. */
     fun queryWaveform(layer: Long, startFrame: Double, framesPerBucket: Double, count: Int, out: ByteBuffer): Int =
         nativeQueryWaveform(nativeHandle, layer, startFrame, framesPerBucket, count, out)
@@ -306,6 +311,7 @@ class AureaEngine private constructor() {
     private external fun nativeShutdown(handle: Long)
     private external fun nativeSuspend(handle: Long)
     private external fun nativeResume(handle: Long)
+    private external fun nativeInvalidate(handle: Long)
     private external fun nativeAttachSurface(handle: Long, surface: Surface, width: Int, height: Int): Boolean
     private external fun nativeDetachSurface(handle: Long)
     private external fun nativeResizeSurface(handle: Long, width: Int, height: Int)
@@ -340,6 +346,7 @@ class AureaEngine private constructor() {
     private external fun nativeImportVideo(handle: Long, source: String, name: String): Long
     private external fun nativeImportAudio(handle: Long, source: String, name: String): Long
     private external fun nativeExtractAudio(handle: Long, layer: Long): Long
+    private external fun nativeFreezeFrame(handle: Long, layer: Long, frame: Int, holdFrames: Int): Long
     private external fun nativeQueryWaveform(
         handle: Long, layer: Long, startFrame: Double, framesPerBucket: Double, count: Int, out: ByteBuffer,
     ): Int

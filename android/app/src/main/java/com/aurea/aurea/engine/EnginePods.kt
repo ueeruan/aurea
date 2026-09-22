@@ -749,7 +749,11 @@ data class LayerDetail(
     val audioFadeIn: Int = 0,
     val audioFadeOut: Int = 0,
     val audioFlags: Int = 0,
+    val speed: Float = 1f,
+    val timeFlags: Int = 0,
 ) {
+    val reversed: Boolean get() = (timeFlags and 1) != 0
+
     val audioMuted: Boolean get() = (audioFlags and 1) != 0
     val audioSolo: Boolean get() = (audioFlags and 2) != 0
     /** A camada tem som de verdade (vídeo com trilha, ou camada de áudio). */
@@ -803,6 +807,8 @@ data class LayerDetail(
                 audioFadeIn = b.getInt(148),
                 audioFadeOut = b.getInt(152),
                 audioFlags = b.getInt(156),
+                speed = b.getFloat(160),
+                timeFlags = b.getInt(164),
             )
         }
     }

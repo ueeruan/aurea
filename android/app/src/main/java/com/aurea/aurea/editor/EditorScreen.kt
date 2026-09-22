@@ -191,6 +191,24 @@ fun EditorScreen(store: EditorStore) {
     }
     ImmersiveMode(ui.fullscreen)
     BackHandler { shellBack(store, ui) }
+    // Voltou do seletor do sistema (mídia, arquivo): o quadro apresentado com
+    // a janela escondida pode ter sido descartado — reapresenta ao voltar e
+    // de novo quando a animação de volta termina.
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                store.invalidatePreview()
+                handler.postDelayed({ store.invalidatePreview() }, 350)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            handler.removeCallbacksAndMessages(null)
+        }
+    }
 
     val content = when {
         ui.adding -> SheetContent.Adding

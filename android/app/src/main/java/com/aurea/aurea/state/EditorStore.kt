@@ -1062,6 +1062,38 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun queryWaveform(layer: Long, startFrame: Double, framesPerBucket: Double, count: Int, out: java.nio.ByteBuffer): Int =
         if (engineReady) engine.queryWaveform(layer, startFrame, framesPerBucket, count, out) else 0
 
+    /** A janela do editor voltou a aparecer: o preview é reapresentado. */
+    fun invalidatePreview() {
+        if (engineReady) engine.invalidate()
+    }
+
+    // --- Tempo do clipe --------------------------------------------------------
+    fun setLayerSpeed(speed: Float) {
+        val id = primary ?: return
+        send { setLayerSpeed(id, speed.coerceIn(0.05f, 16f)) }
+        refreshNow()
+    }
+
+    fun setLayerReversed(reversed: Boolean) {
+        val id = primary ?: return
+        send { setLayerReversed(id, reversed) }
+        refreshNow()
+    }
+
+    /** Congela o quadro do cabeçote por 3 s (o resto do clipe anda). */
+    fun freezeFrame(layer: Long? = primary) {
+        val id = layer ?: return
+        val fps = project.fps.takeIf { it > 0f } ?: 30f
+        val created = engine.freezeFrame(id, playhead, (fps * 3f).toInt())
+        if (created < 0) {
+            errorMessage = "Posicione o cabeçote sobre o vídeo para congelar o quadro."
+            return
+        }
+        refreshNow()
+        select(created)
+        showToast("Quadro congelado por 3 s")
+    }
+
     // --- Som da camada principal ---------------------------------------------
     fun setAudioMuted(muted: Boolean) {
         val id = primary ?: return

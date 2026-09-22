@@ -421,7 +421,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             const Asset* asset = project.asset(l->source);
             VideoSource* src = media->source_for(id, l->source, *asset, frameNumber);
             if (src) {
-                i64 mediaUs = static_cast<i64>(std::llround(static_cast<f64>(local.value) * 1e6 / fps));
+                i64 mediaUs = static_cast<i64>(std::llround(l->source_frame(time) * 1e6 / fps));
                 // Na grade de quadros da FONTE: o quadro que está na tela no
                 // instante t (piso), não o "mais próximo". Composição a 60 sobre
                 // vídeo a 30 cai a cada dois quadros exatamente entre dois
@@ -436,8 +436,9 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 DecodeRequest req;
                 req.targetUs = mediaUs;
                 req.mode = decodeMode;
-                req.direction = playDirection;
-                req.speed = speed;
+                // Clipe reverso ou congelado: o decoder não tem embalo para a frente.
+                req.direction = l->speed == 0.0f ? 0 : (l->reversed ? -playDirection : playDirection);
+                req.speed = speed * std::max(0.0f, l->speed);
                 src->request(req);
                 bool exact = false;
                 rl.source.frame = src->frame_for(mediaUs, &exact);

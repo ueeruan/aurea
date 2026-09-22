@@ -1162,6 +1162,20 @@ AUREA_TEST(Gpu, Scene3DExtraModelsImportAndRender) {
     }
 }
 
+AUREA_TEST(Gpu, ImportedImageIsVisibleOnTheVeryFirstFrame) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(128, 72);
+    std::vector<u8> px(64 * 64 * 4);
+    for (usize i = 0; i < px.size(); i += 4) { px[i] = 255; px[i + 1] = 0; px[i + 2] = 0; px[i + 3] = 255; }
+    auto id = rig.e.import_image(px.data(), 64, 64, "vermelho");
+    AUREA_CHECK(id.ok());
+    // O primeiro quadro depois do import já mostra a imagem (nada de preto
+    // até o próximo redesenho).
+    const Image8 img = rig.capture(128);
+    const u8* c = img.at(img.width / 2, img.height / 2);
+    AUREA_CHECK_MSG(c[0] > 200 && c[1] < 40 && c[2] < 40, "imagem nova saiu preta no primeiro quadro");
+}
+
 AUREA_TEST(Gpu, Scene3DSurvivesSaveAndReopenIdentically) {
     AUREA_REQUIRE_GPU();
     const std::string path = gltf_data("DamagedHelmet.glb");

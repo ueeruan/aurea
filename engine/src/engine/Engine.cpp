@@ -217,8 +217,13 @@ Status Engine::resume() noexcept {
     if (state_ != EngineState::Suspended) return Status{Errc::InvalidState, "motor nao esta suspenso"};
     media_.resume_all();
     state_ = EngineState::Ready;
-    request_render();
+    invalidate();
     return OkStatus;
+}
+
+void Engine::invalidate() noexcept {
+    forceRender_.store(true, std::memory_order_release);
+    request_render();
 }
 
 Status Engine::attach_surface(void* nativeWindow, u32 width, u32 height) noexcept {
@@ -230,7 +235,12 @@ Status Engine::attach_surface(void* nativeWindow, u32 width, u32 height) noexcep
     surface_.vsync = true;
     const Status s = gpu_->attach_surface(surface_);
     surfaceAttached_ = s.ok();
-    if (s.ok()) request_render();
+    // Superfície nova (voltou do seletor de mídia, girou a tela) começa vazia:
+    // redesenha mesmo que o modelo não tenha mudado.
+    if (s.ok()) {
+        forceRender_.store(true, std::memory_order_release);
+        request_render();
+    }
     return s;
 }
 
@@ -247,6 +257,7 @@ Status Engine::resize_surface(u32 width, u32 height) noexcept {
     surface_.height = height;
     if (!gpu_ || !surfaceAttached_) return OkStatus;
     const Status s = gpu_->resize_surface(width, height);
+    forceRender_.store(true, std::memory_order_release);
     request_render();
     return s;
 }
@@ -660,6 +671,61 @@ Result<u64> Engine::extract_audio(u64 videoLayerId) noexcept {
     return lid.pack();
 }
 
+Result<u64> Engine::freeze_frame(u64 layerId, i64 frame, i64 holdFrames) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
+    Composition* comp = current_composition();
+    if (!comp) return Status{Errc::InvalidState, "projeto sem composicao"};
+    const LayerId id = LayerId::unpack(layerId);
+    Layer* l = comp->layer(id);
+    if (!l || l->kind != LayerKind::Video) return Status{Errc::NotFound, "camada de video nao encontrada"};
+    if (frame < l->start.value || frame >= l->end.value) return Status{Errc::OutOfRange, "o cabecote nao esta sobre o clipe"};
+    holdFrames = std::max<i64>(1, holdFrames);
+    history_.before_mutation(*comp, project_->timeline().current(), "congelar quadro");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+
+    // Quadro exato da fonte no cabeçote (antes de mexer em qualquer coisa).
+    const i64 srcFrame = static_cast<i64>(std::floor(l->source_frame(FrameIndex{frame}) + 1e-6));
+    // Copiados antes da divisão: criar camada pode realocar a tabela (e `l`).
+    const AssetId srcAsset = l->source;
+    const std::string srcName = l->name;
+    // 1) O resto do clipe (depois do cabeçote) anda `holdFrames` para frente.
+    if (frame > l->start.value) {
+        Command split;
+        split.type = CommandType::LayerSplit;
+        split.layer_split.layer = id;
+        split.layer_split.at = FrameIndex{frame};
+        if (const Status s = apply_command_internal(split, nullptr, false); !s.ok()) return s;
+    }
+    // A metade de depois é a camada criada pela divisão (ou a própria, se o
+    // cabeçote estava no primeiro quadro).
+    LayerId after = id;
+    comp->layers().for_each([&](LayerId lid, const Layer& o) {
+        if (lid != id && o.source == srcAsset && o.start.value == frame && o.kind == LayerKind::Video) after = lid;
+    });
+    if (Layer* a = comp->layer(after)) {
+        a->start = FrameIndex{a->start.value + holdFrames};
+        a->end = FrameIndex{a->end.value + holdFrames};
+    }
+    // 2) O quadro parado, no lugar.
+    const LayerId hold = comp->duplicate_layer(id, FrameIndex{frame});
+    Layer* h = comp->layer(hold);
+    if (!h) return Status{Errc::OutOfMemory, "camada nao criada"};
+    h->name = (srcName.empty() ? std::string("Video") : srcName) + " (congelado)";
+    h->start = FrameIndex{frame};
+    h->end = FrameIndex{frame + holdFrames};
+    h->offset = FrameIndex{srcFrame};
+    h->speed = 0.0f;
+    h->reversed = false;
+    i64 maxEnd = comp->duration().value;
+    comp->layers().for_each([&](LayerId, const Layer& o) { maxEnd = std::max(maxEnd, o.end.value); });
+    if (maxEnd > comp->duration().value) comp->set_duration(FrameIndex{maxEnd});
+    playback_.configure(comp->fps(), comp->duration());
+    project_->mark_dirty();
+    request_render();
+    return hold.pack();
+}
+
 Result<u64> Engine::import_image(const u8* rgba, u32 width, u32 height, const char* name,
                                  const char* sourcePath) noexcept {
     if (!rgba || width == 0 || height == 0) return Status{Errc::InvalidArgument, "imagem vazia"};
@@ -955,7 +1021,11 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         // redesenhar: mesmo frame do playhead, nenhum comando/superfície nova,
         // e nenhum frame de vídeo que estava faltando chegou.
         const u64 mediaGen = mediaReadyGen_.load(std::memory_order_acquire);
-        const bool force = forceRender_.exchange(false, std::memory_order_acq_rel);
+        // Toda mudança do modelo redesenha — inclusive as que não vêm pela fila
+        // de comandos (importar imagem/vídeo/modelo, extrair áudio, congelar).
+        const u32 rev = modelRevision_.load(std::memory_order_acquire);
+        const bool force = forceRender_.exchange(false, std::memory_order_acq_rel) || rev != lastRenderedRevision_;
+        lastRenderedRevision_ = rev;
         if (onlyIfChanged && !force && t.value == lastRenderedFrame_
             && !(lastIncomplete_ && mediaGen != lastMediaGen_)) {
             lastSkipped_ = true;
@@ -980,7 +1050,12 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
     }
     const u64 tPrepared = monotonic_ns();
 
-    if (!surfaceAttached_) return OkStatus;
+    // Sem superfície o quadro não é apresentado: a mudança continua pendente
+    // para o primeiro quadro com superfície (senão a tela nova fica vazia).
+    if (!surfaceAttached_) {
+        forceRender_.store(true, std::memory_order_release);
+        return OkStatus;
+    }
 
     FrameStats stats;
     RenderTimings timings;
@@ -1354,6 +1429,7 @@ u32 Engine::query_waveform(u64 layerId, f64 startFrame, f64 framesPerBucket, u32
     if (!out || count == 0 || !waveforms_ || !(framesPerBucket > 0.0)) return 0;
     u64 key = 0;
     f64 srcStart = 0.0, perBucket = 0.0;
+    bool reversedWave = false;
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
         Composition* comp = current_composition();
@@ -1364,15 +1440,26 @@ u32 Engine::query_waveform(u64 layerId, f64 startFrame, f64 framesPerBucket, u32
         if (!a || !a->has_audio()) return 0;
         key = l->source.pack();
         const f64 fps = comp->fps() > 0.0 ? comp->fps() : 30.0;
-        // Frame da timeline → amostra da fonte (o conteúdo começa em start − offset).
-        srcStart = (startFrame - static_cast<f64>(l->start.value) + static_cast<f64>(l->offset.value)) * audio::kMixRate / fps;
-        perBucket = framesPerBucket * audio::kMixRate / fps;
+        if (l->speed <= 0.0f) return 0;   // quadro congelado: sem som
+        // Frame da timeline → amostra da fonte pela MESMA conta do vídeo e do
+        // mixer (velocidade e reverso incluídos).
+        const f64 rate = static_cast<f64>(l->speed);
+        const f64 atStart = l->source_frame(l->start);
+        const f64 dir = l->reversed ? -1.0 : 1.0;
+        srcStart = (atStart + dir * (startFrame - static_cast<f64>(l->start.value)) * rate) * audio::kMixRate / fps;
+        perBucket = framesPerBucket * rate * audio::kMixRate / fps;
+        reversedWave = l->reversed;
         i64 len = a->audio.sampleCount.value > 0 && a->audio.sampleRate > 0
                 ? a->audio.sampleCount.value * static_cast<i64>(audio::kMixRate) / a->audio.sampleRate
                 : audio::frame_to_sample(a->duration.value, a->timebaseFps > 0.0 ? a->timebaseFps : fps);
         waveforms_->request(key, audio::AudioAssetRef{resolve_asset_path(a->sourcePath), len});
     }
-    return waveforms_->query(key, srcStart, perBucket, count, out) ? count : 0;
+    if (!reversedWave) return waveforms_->query(key, srcStart, perBucket, count, out) ? count : 0;
+    // Reverso: a fonte anda para trás — pede o trecho em ordem e inverte.
+    const f64 lo = srcStart - perBucket * count;
+    if (!waveforms_->query(key, lo, perBucket, count, out)) return 0;
+    std::reverse(out, out + count);
+    return count;
 }
 
 u32 Engine::query_thumbnail(u64 layerId, i32 timelineFrame, u32 height, u8* out, u32 capacity,
@@ -1393,9 +1480,9 @@ u32 Engine::query_thumbnail(u64 layerId, i32 timelineFrame, u32 height, u8* out,
             if (it == images_.end()) return 0;
             if (!thumbs_.image(key, it->second.rgba.data(), it->second.width, it->second.height, height, img)) return 0;
         } else if (a->kind == AssetKind::Video) {
-            const i64 local = l->local_time(FrameIndex{timelineFrame}).value;
             const f64 fps = comp->fps() > 0.0 ? comp->fps() : 30.0;
-            const i64 us = static_cast<i64>(std::llround(static_cast<f64>(std::max<i64>(0, local)) * 1e6 / fps));
+            const f64 src = std::max(0.0, l->source_frame(FrameIndex{timelineFrame}));
+            const i64 us = static_cast<i64>(std::llround(src * 1e6 / fps));
             if (!thumbs_.video(key, *a, us, height, img)) return 0;
         } else {
             return 0;
@@ -1484,6 +1571,8 @@ bool Engine::query_layer_detail(u64 layerId, bridge::LayerDetailPOD& out) noexce
     out.audioPan = l->pan;
     out.audioFadeIn = static_cast<i32>(l->fadeIn.value);
     out.audioFadeOut = static_cast<i32>(l->fadeOut.value);
+    out.speed = l->speed;
+    out.timeFlags = l->reversed ? 1u : 0u;
     {
         const Asset* aa = project_->asset(l->source);
         const Track* vt = l->tracks.find(TrackProperty::AudioVolume);
@@ -1988,7 +2077,8 @@ bool Engine::mutates_model(CommandType type) noexcept {
     return (t >= static_cast<u16>(CommandType::LayerCreate) && t <= static_cast<u16>(CommandType::TextSetStrokeColor))
         || type == CommandType::CompositionSetSize || type == CommandType::CompositionSetFps
         || type == CommandType::CompositionSetDuration || type == CommandType::CompositionSetBackground
-        || type == CommandType::AudioSetVolume || type == CommandType::AudioSetPan;
+        || type == CommandType::AudioSetVolume || type == CommandType::AudioSetPan
+        || type == CommandType::LayerSetSpeed || type == CommandType::LayerSetReversed;
 }
 
 void Engine::record_history_locked(CommandType type) noexcept {
@@ -2101,7 +2191,17 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             if (Layer* s = comp->layer(second)) {
                 s->start = at;
                 s->end = originalEnd;
-                s->offset = FrameIndex{originalOffset.value + (at.value - l->start.value)};
+                // Ponto de entrada de cada metade pela velocidade; no reverso a
+                // primeira metade é a que começa mais tarde na fonte.
+                const f64 sp = l->speed;
+                if (l->reversed) {
+                    s->offset = originalOffset;
+                    l->offset = FrameIndex{originalOffset.value
+                                           + static_cast<i64>(std::llround(static_cast<f64>(originalEnd.value - at.value) * sp))};
+                } else {
+                    s->offset = FrameIndex{originalOffset.value
+                                           + static_cast<i64>(std::llround(static_cast<f64>(at.value - l->start.value) * sp))};
+                }
             }
             return OkStatus;
         }
@@ -2420,6 +2520,26 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             Layer* l = need_layer(cmd.audio_gain.layer);
             if (!l) return Errc::NotFound;
             l->gain = clampf(cmd.audio_gain.gain, 0.0f, 4.0f);
+            return OkStatus;
+        }
+        case CommandType::LayerSetSpeed: {
+            Layer* l = need_layer(cmd.audio_gain.layer);
+            if (!l || !comp) return Errc::NotFound;
+            const f32 s = clampf(cmd.audio_gain.gain, 0.05f, 16.0f);
+            // O TRECHO da fonte fica o mesmo; a duração na timeline acompanha
+            // (2× mais rápido = metade do tempo), como em todo editor.
+            const f64 span = static_cast<f64>(l->end.value - l->start.value) * (l->speed > 0.0f ? l->speed : 1.0f);
+            const i64 frames = std::max<i64>(1, static_cast<i64>(std::llround(span / s)));
+            l->speed = s;
+            l->end = FrameIndex{l->start.value + frames};
+            if (l->end.value > comp->duration().value) comp->set_duration(l->end);
+            playback_.configure(comp->fps(), comp->duration());
+            return OkStatus;
+        }
+        case CommandType::LayerSetReversed: {
+            Layer* l = need_layer(cmd.audio_flag.layer);
+            if (!l) return Errc::NotFound;
+            l->reversed = cmd.audio_flag.flag;
             return OkStatus;
         }
         case CommandType::AudioSetVolume: {

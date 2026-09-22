@@ -202,6 +202,12 @@ struct Layer {
     Track timeRemap;
     bool  timeRemapEnabled = false;
 
+    /// Velocidade do conteúdo (quadros da fonte por quadro da timeline).
+    /// 0 = quadro congelado. `reversed` toca do ponto de saída para o de
+    /// entrada. `offset` continua sendo o ponto de entrada na fonte.
+    f32   speed = 1.0f;
+    bool  reversed = false;
+
     // --- Hierarquia e composição --------------------------------------------
     LayerId  parent{};
     u32      zOrder = 0;       ///< posição vertical; maior = na frente
@@ -253,6 +259,17 @@ struct Layer {
     }
     [[nodiscard]] FrameIndex duration() const noexcept { return FrameIndex{end.value - start.value}; }
     [[nodiscard]] bool animated() const noexcept { return tracks.has_animation() || timeRemapEnabled; }
+
+    /// Instante da FONTE (em quadros da composição, fracionário) que toca no
+    /// frame `timelineTime` da timeline: ponto de entrada + tempo decorrido ×
+    /// velocidade (de trás para a frente se `reversed`; parado se velocidade
+    /// 0). É a ÚNICA função de tempo da fonte — vídeo, miniatura e áudio usam
+    /// esta mesma conta.
+    [[nodiscard]] f64 source_frame(FrameIndex timelineTime) const noexcept {
+        const f64 elapsed = reversed ? static_cast<f64>(end.value - 1 - timelineTime.value)
+                                     : static_cast<f64>(timelineTime.value - start.value);
+        return static_cast<f64>(offset.value) + elapsed * static_cast<f64>(speed);
+    }
 
     /// Tempo dentro da layer (0 = primeiro frame dela).
     [[nodiscard]] FrameIndex local_time(FrameIndex timelineTime) const noexcept {

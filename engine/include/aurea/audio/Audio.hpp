@@ -213,6 +213,11 @@ struct AudioClip {
     i64 start = 0;          ///< amostra da timeline raiz onde o clipe começa (inclusive)
     i64 end = 0;            ///< exclusive
     i64 sourceAt0 = 0;      ///< amostra da FONTE que toca em `start`
+    /// Velocidade (amostras da fonte por amostra da timeline; negativa =
+    /// reverso). ≠ 1: leitura fracionária (varispeed — o tom acompanha a
+    /// velocidade; preservar o tom é time stretch, fase seguinte).
+    f64 rate = 1.0;
+    f64 sourceStartF = 0.0; ///< amostra (fracionária) da fonte em `start` quando rate ≠ 1
     i64 sourceLength = 0;   ///< fim da mídia (além disso é silêncio)
     f32 gain = 1.0f;        ///< ganho do clipe (linear) × ganhos das pré-comps
     f32 pan = 0.0f;         ///< balanço −1..1

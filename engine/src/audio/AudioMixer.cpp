@@ -47,9 +47,9 @@ struct Flatten {
         });
         comp.layers().for_each([&](LayerId, const Layer& l) {
             if (l.muted || (anySolo && !l.solo)) return;
-            // Time remap ainda não chega ao áudio (fase 6: time stretch). Um
-            // som fora de sincronia é pior que silêncio.
-            if (l.timeRemapEnabled) return;
+            // Remapeamento por curva ainda não chega ao áudio; quadro
+            // congelado não tem som. Um som fora de sincronia é pior que silêncio.
+            if (l.timeRemapEnabled || l.speed <= 0.0f) return;
             const i64 ls = frame_to_sample(l.start.value, fps);
             const i64 le = frame_to_sample(l.end.value, fps);
             if (le <= ls) return;
@@ -77,6 +77,12 @@ struct Flatten {
             // Amostra da fonte em `ls` (início da layer) = offset do conteúdo.
             const i64 srcAtLs = frame_to_sample(l.offset.value, fps);
             c.sourceAt0 = srcAtLs + (c.start - shift - ls);
+            if (l.speed != 1.0f || l.reversed) {
+                c.rate = static_cast<f64>(l.speed) * (l.reversed ? -1.0 : 1.0);
+                // A mesma função de tempo do vídeo (Layer::source_frame), em amostras.
+                const f64 srcFrameAtLs = l.source_frame(l.start);
+                c.sourceStartF = srcFrameAtLs * kMixRate / fps + static_cast<f64>(c.start - shift - ls) * c.rate;
+            }
             c.sourceLength = asset_length(a);
             c.gain = gain * l.gain;
             c.pan = std::clamp(l.pan, -1.0f, 1.0f);
@@ -163,6 +169,46 @@ void mix(const AudioMixSnapshot& snap, i64 start, u32 frames, BlockSource& block
         // Balanço (a fonte já é estéreo): o lado oposto desce, o próprio fica.
         const f32 balL = c.pan > 0.0f ? 1.0f - c.pan : 1.0f;
         const f32 balR = c.pan < 0.0f ? 1.0f + c.pan : 1.0f;
+        if (c.rate != 1.0) {
+            // Leitura fracionária entre amostras vizinhas (que podem estar em
+            // blocos diferentes).
+            i64 bA = -1, bB = -1;
+            const AudioBlock* blkA = nullptr;
+            const AudioBlock* blkB = nullptr;
+            auto sample_at = [&](i64 idx, f32& l, f32& r) -> bool {
+                if (idx < 0 || idx >= c.sourceLength) return false;
+                const i64 b = idx / kBlockFrames;
+                const AudioBlock* blk = nullptr;
+                if (b == bA) blk = blkA;
+                else if (b == bB) blk = blkB;
+                else {
+                    blk = blocks.block(c.asset, b);
+                    if (!blk) ++missing;
+                    bB = bA; blkB = blkA;
+                    bA = b; blkA = blk;
+                }
+                if (!blk) return false;
+                const usize off = static_cast<usize>(idx - b * kBlockFrames) * 2;
+                if (off + 1 >= blk->pcm.size()) return false;
+                l = blk->pcm[off];
+                r = blk->pcm[off + 1];
+                return true;
+            };
+            for (i64 t = s0; t < s1; ++t) {
+                const f64 pos = c.sourceStartF + static_cast<f64>(t - c.start) * c.rate;
+                if (pos < 0.0 || pos >= static_cast<f64>(c.sourceLength)) continue;
+                const i64 i0 = static_cast<i64>(pos);
+                const f32 fr = static_cast<f32>(pos - static_cast<f64>(i0));
+                f32 l0 = 0, r0 = 0, l1 = 0, r1 = 0;
+                if (!sample_at(i0, l0, r0)) continue;
+                if (!sample_at(i0 + 1, l1, r1)) { l1 = l0; r1 = r0; }
+                const f32 g = envelope(c, t);
+                f32* o = out + static_cast<usize>(t - start) * 2;
+                o[0] += (l0 + (l1 - l0) * fr) * g * balL;
+                o[1] += (r0 + (r1 - r0) * fr) * g * balR;
+            }
+            continue;
+        }
         i64 curBlock = -1;
         const AudioBlock* blk = nullptr;
         for (i64 t = s0; t < s1; ++t) {
@@ -200,8 +246,16 @@ void blocks_needed(const AudioMixSnapshot& snap, i64 start, i64 frames, std::vec
         const i64 s0 = std::max(start, c.start);
         const i64 s1 = std::min(stop, c.end);
         if (s0 >= s1) continue;
-        const i64 a = std::max<i64>(0, c.sourceAt0 + (s0 - c.start));
-        const i64 z = std::min(c.sourceLength, c.sourceAt0 + (s1 - c.start));
+        i64 a = 0, z = 0;
+        if (c.rate != 1.0) {
+            const f64 pa = c.sourceStartF + static_cast<f64>(s0 - c.start) * c.rate;
+            const f64 pz = c.sourceStartF + static_cast<f64>(s1 - c.start) * c.rate;
+            a = std::max<i64>(0, static_cast<i64>(std::floor(std::min(pa, pz))));
+            z = std::min(c.sourceLength, static_cast<i64>(std::ceil(std::max(pa, pz))) + 1);
+        } else {
+            a = std::max<i64>(0, c.sourceAt0 + (s0 - c.start));
+            z = std::min(c.sourceLength, c.sourceAt0 + (s1 - c.start));
+        }
         if (z <= a) continue;
         for (i64 b = a / kBlockFrames; b <= (z - 1) / kBlockFrames; ++b) out.emplace_back(c.asset, b);
     }

@@ -159,6 +159,10 @@ enum class CommandType : u16 {
     // --- Áudio (fase 4) ---------------------------------------------------------
     AudioSetVolume,        ///< volume parado (AudioGainPayload, linear); animado = keyframes de AudioVolume
     AudioSetPan,           ///< balanço −1..1 (AudioGainPayload)
+
+    // --- Tempo do clipe (fase 6) -----------------------------------------------
+    LayerSetSpeed,         ///< velocidade (AudioGainPayload: layer + f32); a duração acompanha
+    LayerSetReversed,      ///< reverso (AudioFlagPayload)
 };
 
 /// Alvo de um comando que mexe em uma propriedade animável.

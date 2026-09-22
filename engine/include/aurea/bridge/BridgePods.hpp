@@ -145,7 +145,9 @@ struct LayerDetailPOD {
     i32 audioFadeIn       = 0;    // +148 frames
     i32 audioFadeOut      = 0;    // +152 frames
     u32 audioFlags        = 0;    // +156 kAudioFlag*
-    u32 reserved[8]{};            // +160
+    f32 speed             = 1.0f; // +160 velocidade do conteúdo (0 = congelado)
+    u32 timeFlags         = 0;    // +164 bit0 = reverso
+    u32 reserved[6]{};            // +168
 };
 inline constexpr u32 kAudioFlagMuted = 1u << 0;
 inline constexpr u32 kAudioFlagSolo = 1u << 1;

@@ -308,6 +308,10 @@ AUREA_JNI void AUREA_FN(nativeSuspend)(JNIEnv*, jclass, jlong handle) {
     if (NativeContext* c = ctx_of(handle)) (void)c->engine.suspend();
 }
 
+AUREA_JNI void AUREA_FN(nativeInvalidate)(JNIEnv*, jclass, jlong handle) {
+    if (NativeContext* c = ctx_of(handle)) c->engine.invalidate();
+}
+
 AUREA_JNI void AUREA_FN(nativeResume)(JNIEnv*, jclass, jlong handle) {
     if (NativeContext* c = ctx_of(handle)) (void)c->engine.resume();
 }
@@ -593,6 +597,14 @@ AUREA_JNI jint AUREA_FN(nativeQueryWaveform)(JNIEnv* env, jclass, jlong handle, 
     if (!dst) return 0;
     return static_cast<jint>(c->engine.query_waveform(static_cast<u64>(layerId), startFrame, framesPerBucket,
                                                       static_cast<u32>(count), dst));
+}
+
+AUREA_JNI jlong AUREA_FN(nativeFreezeFrame)(JNIEnv*, jclass, jlong handle, jlong layerId, jint frame, jint holdFrames) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return -static_cast<jlong>(Errc::InvalidState);
+    const Result<u64> r = c->engine.freeze_frame(static_cast<u64>(layerId), frame, holdFrames);
+    if (!r.ok()) return -static_cast<jlong>(r.status().code());
+    return static_cast<jlong>(*r);
 }
 
 AUREA_JNI jlong AUREA_FN(nativeExtractAudio)(JNIEnv*, jclass, jlong handle, jlong layerId) {

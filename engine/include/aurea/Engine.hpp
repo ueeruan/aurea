@@ -223,6 +223,10 @@ public:
     void stop_render_thread() noexcept;
     /// Acorda a thread de render (há algo novo para mostrar).
     void request_render() noexcept;
+    /// Redesenha e reapresenta mesmo sem mudança no modelo: a janela voltou a
+    /// aparecer (seletor do sistema fechou) e o último quadro apresentado com
+    /// ela escondida pode ter sido descartado pelo compositor.
+    void invalidate() noexcept;
 
     // =========================================================================
     // Projeto
@@ -251,6 +255,10 @@ public:
     /// "Extrair o áudio": o som de um vídeo vira uma camada própria (mesmo
     /// tempo, mesmo corte) e o vídeo fica mudo. Uma ação de desfazer.
     [[nodiscard]] Result<u64> extract_audio(u64 videoLayerId) noexcept;
+    /// "Congelar quadro": divide o clipe no `frame`, insere ali `holdFrames`
+    /// do quadro parado e empurra o resto do clipe para depois. Uma ação de
+    /// desfazer. Devolve o id do clipe congelado.
+    [[nodiscard]] Result<u64> freeze_frame(u64 layerId, i64 frame, i64 holdFrames) noexcept;
     /// Imagem já decodificada pela plataforma (RGBA8 sRGB, alfa reto).
     /// `sourcePath` (URI/caminho) fica no projeto: ao reabrir, o motor pede a
     /// imagem de novo ao `imageLoader`. Sem origem, a imagem só vive na sessão.
@@ -473,6 +481,7 @@ private:
     std::atomic<bool> forceRender_{true};     ///< a UI mudou algo / superfície nova
     std::atomic<u64>  mediaReadyGen_{0};      ///< frames novos do decoder
     i64  lastRenderedFrame_ = -1;
+    u32  lastRenderedRevision_ = 0;           ///< modelRevision_ do último frame desenhado
     u64  lastMediaGen_ = 0;
     bool lastIncomplete_ = true;              ///< último frame tinha vídeo faltando/aproximado
     bool lastSkipped_ = false;

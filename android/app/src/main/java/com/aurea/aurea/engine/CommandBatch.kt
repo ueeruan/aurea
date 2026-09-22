@@ -400,6 +400,17 @@ class CommandBatch(private val engine: AureaEngine) {
         b.putFloat(Off.GAIN_VALUE, pan)
     }
 
+    /** Velocidade do conteúdo (a duração do clipe acompanha). */
+    fun setLayerSpeed(layer: Long, speed: Float) = emit(CommandType.LAYER_SET_SPEED) { b ->
+        b.putHandle(Off.LAYER, layer)
+        b.putFloat(Off.GAIN_VALUE, speed)
+    }
+
+    fun setLayerReversed(layer: Long, reversed: Boolean) = emit(CommandType.LAYER_SET_REVERSED) { b ->
+        b.putHandle(Off.LAYER, layer)
+        b.put(Off.SECOND_U32, if (reversed) 1 else 0)
+    }
+
     // =========================================================================
     // Histórico
     // =========================================================================
@@ -667,4 +678,6 @@ object CommandType {
     const val PLAYBACK_STEP = 88
     const val AUDIO_SET_VOLUME = 89
     const val AUDIO_SET_PAN = 90
+    const val LAYER_SET_SPEED = 91
+    const val LAYER_SET_REVERSED = 92
 }

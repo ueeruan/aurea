@@ -33,7 +33,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <mutex>
+#include <unordered_map>
 
 namespace aurea::text {
 
@@ -373,6 +375,162 @@ bool outline(const Font& font, const TextData& t, std::vector<std::vector<Vec2>>
     contours.erase(std::remove_if(contours.begin(), contours.end(), [](const std::vector<Vec2>& c) { return c.size() < 3; }),
                    contours.end());
     return !contours.empty();
+}
+
+// =============================================================================
+// Atlas de glifos SDF
+// =============================================================================
+namespace {
+struct AtlasEntry { u16 x = 0, y = 0, w = 0, h = 0; i16 xoff = 0, yoff = 0; };
+struct Atlas {
+    std::mutex mutex;
+    std::vector<u8> px = std::vector<u8>(static_cast<usize>(kGlyphAtlasSize) * kGlyphAtlasSize, 0);
+    std::unordered_map<u64, AtlasEntry> entries;
+    u32 shelfX = 1, shelfY = 1, shelfH = 0;
+    u64 generation = 1;
+    bool dirty = true;
+};
+Atlas& atlas() {
+    static Atlas a;
+    return a;
+}
+
+/// Entrada do glifo (rasteriza e empacota na 1ª vez). Falso = atlas cheio.
+bool atlas_glyph(Atlas& A, const Font::Impl& f, int glyph, AtlasEntry& out) {
+    const u64 key = (reinterpret_cast<u64>(&f) << 20) ^ static_cast<u64>(glyph);
+    if (auto it = A.entries.find(key); it != A.entries.end()) { out = it->second; return true; }
+    const f32 fs = stbtt_ScaleForPixelHeight(&f.info, kGlyphBasePx);
+    int w = 0, h = 0, xo = 0, yo = 0;
+    u8* sdf = stbtt_GetGlyphSDF(&f.info, fs, glyph, static_cast<int>(kGlyphSpread), 128, kGlyphDistScale, &w, &h, &xo, &yo);
+    AtlasEntry e;
+    if (sdf && w > 0 && h > 0) {
+        if (A.shelfX + static_cast<u32>(w) + 1 > kGlyphAtlasSize) { A.shelfX = 1; A.shelfY += A.shelfH + 1; A.shelfH = 0; }
+        if (A.shelfY + static_cast<u32>(h) + 1 > kGlyphAtlasSize) { stbtt_FreeSDF(sdf, nullptr); return false; }
+        e.x = static_cast<u16>(A.shelfX);
+        e.y = static_cast<u16>(A.shelfY);
+        e.w = static_cast<u16>(w);
+        e.h = static_cast<u16>(h);
+        e.xoff = static_cast<i16>(xo);
+        e.yoff = static_cast<i16>(yo);
+        for (int yy = 0; yy < h; ++yy)
+            std::memcpy(&A.px[static_cast<usize>(e.y + yy) * kGlyphAtlasSize + e.x], sdf + yy * w, static_cast<usize>(w));
+        A.shelfX += static_cast<u32>(w) + 1;
+        A.shelfH = std::max(A.shelfH, static_cast<u32>(h));
+        A.dirty = true;
+    }
+    if (sdf) stbtt_FreeSDF(sdf, nullptr);
+    A.entries[key] = e;
+    out = e;
+    return true;
+}
+} // namespace
+
+const u8* glyph_atlas(u64& generation, bool& dirty) {
+    Atlas& A = atlas();
+    std::lock_guard<std::mutex> lock(A.mutex);
+    generation = A.generation;
+    dirty = A.dirty;
+    return A.px.data();
+}
+
+void glyph_atlas_clean() noexcept {
+    Atlas& A = atlas();
+    std::lock_guard<std::mutex> lock(A.mutex);
+    A.dirty = false;
+}
+
+bool layout_quads(const Font& font, const TextData& t, f32 pad, TextLayout& out) {
+    const Font::Impl& f = font.impl();
+    const f32 size = std::max(1.0f, t.size);
+    const f32 fs0 = stbtt_ScaleForPixelHeight(&f.info, size);
+    const f32 tracking = t.tracking * size / 1000.0f;
+    const std::vector<Line> lines = layout(f, t, size, tracking);
+    f32 maxW = 0.0f;
+    for (const Line& l : lines) maxW = std::max(maxW, l.width);
+    const f32 lineAdvance = size * std::max(0.1f, t.lineHeight);
+    const f32 ascent = static_cast<f32>(f.ascent) * fs0, descent = static_cast<f32>(-f.descent) * fs0;
+    out = TextLayout{};
+    out.pad = pad;
+    out.lines = static_cast<u32>(lines.size());
+    out.width = std::max(1.0f, std::ceil(maxW) + 2.0f * pad);
+    out.height = std::max(1.0f, std::ceil(ascent + descent + lineAdvance * static_cast<f32>(lines.size() - 1)) + 2.0f * pad);
+    // Índices lógicos: caractere no texto inteiro e palavra (separada por espaço).
+    std::vector<u32> lineCharBase(lines.size(), 0);
+    std::vector<std::vector<u32>> wordOfChar(lines.size());
+    {
+        const std::vector<u32> cps = decode_utf8(t.content);
+        u32 li = 0, charInLine = 0, word = 0, total = 0;
+        bool inWord = false;
+        for (u32 cp : cps) {
+            if (cp == '\r') continue;
+            if (cp == '\n') {
+                ++li;
+                if (li < lines.size()) lineCharBase[li] = total + 1;
+                charInLine = 0;
+                if (inWord) { ++word; inWord = false; }
+                ++total;
+                continue;
+            }
+            const bool space = cp == ' ' || cp == '\t' || cp == 0x00A0;
+            if (!space && !inWord) inWord = true;
+            if (space && inWord) { ++word; inWord = false; }
+            if (li < wordOfChar.size()) wordOfChar[li].push_back(word);
+            ++charInLine;
+            ++total;
+        }
+        out.chars = total;
+        out.words = word + (inWord ? 1u : 0u);
+    }
+    Atlas& A = atlas();
+    std::lock_guard<std::mutex> lock(A.mutex);
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        out.quads.clear();
+        bool full = false;
+        for (usize li = 0; li < lines.size() && !full; ++li) {
+            const Line& l = lines[li];
+            f32 x0 = pad;
+            if (t.alignment == 1) x0 += (maxW - l.width) * 0.5f;
+            else if (t.alignment == 2) x0 += maxW - l.width;
+            const f32 baseline = pad + ascent + lineAdvance * static_cast<f32>(li);
+            for (usize gi = 0; gi < l.glyphs.size(); ++gi) {
+                const Glyph& g = l.glyphs[gi];
+                AtlasEntry e;
+                if (!atlas_glyph(A, *g.font, g.id, e)) { full = true; break; }
+                if (e.w == 0) continue;   // espaço
+                // Base (64 px) → tamanho pedido desta fonte.
+                const f32 k = g.fs / stbtt_ScaleForPixelHeight(&g.font->info, kGlyphBasePx);
+                GlyphQuad q;
+                q.penX = x0 + g.x;
+                q.baseline = baseline + g.y;
+                q.x0 = q.penX + static_cast<f32>(e.xoff) * k;
+                q.y0 = q.baseline + static_cast<f32>(e.yoff) * k;
+                q.x1 = q.x0 + static_cast<f32>(e.w) * k;
+                q.y1 = q.y0 + static_cast<f32>(e.h) * k;
+                const f32 inv = 1.0f / static_cast<f32>(kGlyphAtlasSize);
+                q.u0 = static_cast<f32>(e.x) * inv;
+                q.v0 = static_cast<f32>(e.y) * inv;
+                q.u1 = static_cast<f32>(e.x + e.w) * inv;
+                q.v1 = static_cast<f32>(e.y + e.h) * inv;
+                q.k = k;
+                const f32 nextX = gi + 1 < l.glyphs.size() ? l.glyphs[gi + 1].x : l.width;
+                q.advance = std::max(0.0f, nextX - g.x);
+                const u32 cl = g.cluster;
+                q.lineIndex = static_cast<u32>(li);
+                q.charIndex = lineCharBase[li] + cl;
+                q.wordIndex = cl < wordOfChar[li].size() ? wordOfChar[li][cl] : 0;
+                out.quads.push_back(q);
+            }
+        }
+        if (!full) break;
+        // Atlas cheio: recomeça (os quadros seguintes remontam o que usarem).
+        std::fill(A.px.begin(), A.px.end(), 0);
+        A.entries.clear();
+        A.shelfX = A.shelfY = 1;
+        A.shelfH = 0;
+        ++A.generation;
+        A.dirty = true;
+    }
+    return !out.quads.empty();
 }
 
 u32 shaped_glyphs(const Font& font, const TextData& t, std::vector<ShapedGlyph>& out) {

@@ -395,6 +395,13 @@ void Renderer::shutdown() noexcept {
     backend_->wait_idle();
     framesInFlight_.clear();
     release_project_resources();
+    if (glyphAtlas_.valid()) backend_->destroy_texture(glyphAtlas_);
+    glyphAtlas_ = TextureHandle{};
+    for (u32 i = 0; i < kGlyphRing; ++i) {
+        if (glyphBuf_[i].valid()) backend_->destroy_buffer(glyphBuf_[i]);
+        glyphBuf_[i] = BufferHandle{};
+        glyphCap_[i] = 0;
+    }
     scene3d_.shutdown();
     pool_.clear();
     shaders_.shutdown();
@@ -402,6 +409,9 @@ void Renderer::shutdown() noexcept {
 }
 
 void Renderer::forget_device() noexcept {
+    glyphAtlas_ = TextureHandle{};
+    glyphAtlasGen_ = 0;
+    for (u32 i = 0; i < kGlyphRing; ++i) { glyphBuf_[i] = BufferHandle{}; glyphCap_[i] = 0; }
     framesInFlight_.clear();
     planar_.clear();
     flowCache_.clear();
@@ -479,6 +489,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
     frameNumber_ = frameNumber;
     out.layers.clear();
     out.nested.clear();
+    out.glyphs.clear();
     out.target = FGTexture{};
     out.compWidth = comp.width();
     out.compHeight = comp.height();
@@ -606,11 +617,29 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 // pixels vêm depois, na escala da tela (abaixo).
                 const auto font = text::FontManager::instance().font_for(l->text);
                 if (!font || l->text.content.empty() || (l->text.color.w <= 0.0f && l->text.strokeWidth <= 0.0f)) continue;
-                const text::TextExtent ext = text::measure(*font, l->text);
-                const f32 pad = l->text.strokeWidth > 0.0f ? l->text.strokeWidth + 2.0f : 2.0f;
-                rl.source.kind = LayerSource::Kind::Image;
-                rl.source.width = static_cast<u32>(std::ceil(ext.width + 2.0f * pad));
-                rl.source.height = static_cast<u32>(std::ceil(ext.height + 2.0f * pad));
+                // O contorno cabe na distância do atlas (16 px da base × escala).
+                const f32 strokeMax = text::kGlyphSpread * std::max(1.0f, l->text.size) / text::kGlyphBasePx - 1.0f;
+                const f32 stroke = std::clamp(l->text.strokeWidth, 0.0f, std::max(0.0f, strokeMax));
+                const f32 pad = stroke > 0.0f ? stroke + 2.0f : 2.0f;
+                text::TextLayout L;
+                if (!text::layout_quads(*font, l->text, pad, L)) continue;
+                rl.source.kind = LayerSource::Kind::Text;
+                rl.source.width = static_cast<u32>(std::ceil(L.width));
+                rl.source.height = static_cast<u32>(std::ceil(L.height));
+                rl.source.glyphFirst = static_cast<u32>(out.glyphs.size());
+                auto lin = [](Vec4 c) { return Vec4{srgb_to_linear(c.x), srgb_to_linear(c.y), srgb_to_linear(c.z), c.w}; };
+                const Vec4 fill = lin(l->text.color), strokeCol = lin(l->text.strokeColor);
+                for (const text::GlyphQuad& q : L.quads) {
+                    GlyphInstance g;
+                    g.rect = Vec4{q.x0, q.y0, q.x1, q.y1};
+                    g.uv = Vec4{q.u0, q.v0, q.u1, q.v1};
+                    g.fill = fill;
+                    g.stroke = strokeCol;
+                    g.misc = Vec4{0, 0, q.k, stroke};
+                    g.pivot = Vec4{q.penX + q.advance * 0.5f, q.baseline, 0, 0};
+                    out.glyphs.push_back(g);
+                }
+                rl.source.glyphCount = static_cast<u32>(out.glyphs.size()) - rl.source.glyphFirst;
                 break;
             }
             case LayerKind::ParticleSystem: {
@@ -759,6 +788,14 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             }
         }
         rl.texelScale = texel_scale_for(std::min(onScreen, 4.0f) * previewFactor);
+        // Vetor (texto na GPU, forma SDF): não há "pixel da fonte" — ampliado,
+        // a camada é desenhada mais densa (até 4×) e continua nítida.
+        if (rl.source.kind == LayerSource::Kind::Text || rl.source.kind == LayerSource::Kind::Shape) {
+            f32 k = 1.0f;
+            const f32 want = std::min(onScreen, 4.0f) * previewFactor;
+            while (k < want && k < 4.0f) k *= 2.0f;
+            rl.texelScale = std::max(rl.texelScale, k);
+        }
 
         // Desfoque de movimento (transform 2D, com pais): K amostras no
         // obturador centrado no quadro. Camada parada no intervalo = nada.
@@ -807,48 +844,6 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     rl.temporal.push_back({world_2d_frac(comp, *l, t0 - static_cast<f64>(i) * d), w, Vec3{0, 0, 0}});
                 }
             }
-        }
-
-        // Texto: rasteriza na escala em que aparece (potência de 2, para não
-        // refazer a cada zoom) e só quando algo que muda os pixels mudou.
-        if (l->kind == LayerKind::Text && backend_) {
-            const auto font = text::FontManager::instance().font_for(l->text);
-            f32 want = std::max(0.5f, max_scale(m) * previewFactor);
-            f32 scale = 0.5f;
-            while (scale < want && scale < 4.0f) scale *= 2.0f;
-            const u64 key = (static_cast<u64>(rid.generation) << 32) | (0x80000000u | rid.index);   // fora do espaço de assets
-            const u64 rkey = text::raster_key(l->text, scale);
-            auto it = textKeys_.find(key);
-            if (font && (it == textKeys_.end() || it->second != rkey || images_.find(key) == images_.end())) {
-                text::TextRaster raster;
-                if (text::rasterize(*font, l->text, scale, raster)) {
-                    if (auto old = images_.find(key); old != images_.end()) {
-                        backend_->destroy_texture(old->second.texture);
-                        images_.erase(old);
-                    }
-                    TextureDesc d;
-                    d.width = raster.width;
-                    d.height = raster.height;
-                    d.format = SurfaceFormat::RGBA8;
-                    d.sampled = true;
-                    d.transferDst = true;
-                    d.debugName = "texto";
-                    auto tex = backend_->create_texture(d);
-                    if (tex.ok()) {
-                        PendingUpload up;
-                        up.texture = *tex;
-                        up.bytesPerRow = raster.width * 4;
-                        up.data = std::move(raster.rgba);
-                        uploads_.push_back(std::move(up));
-                        images_[key] = ImageTexture{*tex, raster.width, raster.height, frameNumber};
-                        textKeys_[key] = rkey;
-                    }
-                }
-            }
-            if (auto img = images_.find(key); img != images_.end()) img->second.lastFrame = frameNumber;
-            else continue;
-            rl.source.image = AssetId::unpack(key);
-            rl.source.pixels = nullptr;
         }
 
         // Vídeo: pede o frame e pega o melhor disponível AGORA (nunca espera).
@@ -1119,6 +1114,42 @@ void Renderer::fill_scene_context(const Composition& comp, FrameIndex time, Fram
 // =============================================================================
 // Fase 2 — render (sem lock)
 // =============================================================================
+void Renderer::upload_glyphs(FrameSnapshot& snap) noexcept {
+    // Todos os snapshots (pré-composições incluídas) num buffer só do quadro.
+    usize total = 0;
+    std::vector<FrameSnapshot*> all;
+    std::vector<FrameSnapshot*> stack{&snap};
+    while (!stack.empty()) {
+        FrameSnapshot* s = stack.back();
+        stack.pop_back();
+        s->glyphBase = static_cast<u32>(total);
+        total += s->glyphs.size();
+        all.push_back(s);
+        for (auto& c : s->nested) if (c) stack.push_back(c.get());
+    }
+    glyphFrameBuf_ = BufferHandle{};
+    if (total == 0) return;
+    const u32 slot = glyphSlot_++ % kGlyphRing;
+    const usize bytes = total * sizeof(GlyphInstance);
+    if (glyphCap_[slot] < bytes) {
+        if (glyphBuf_[slot].valid()) backend_->destroy_buffer(glyphBuf_[slot]);
+        BufferDesc bd;
+        bd.bytes = std::max<usize>(bytes * 2, 1024 * sizeof(GlyphInstance));
+        bd.usage = BufferUsage::Storage;
+        bd.access = MemoryAccess::Upload;
+        bd.debugName = "glifos";
+        auto b = backend_->create_buffer(bd);
+        glyphBuf_[slot] = b.ok() ? *b : BufferHandle{};
+        glyphCap_[slot] = b.ok() ? bd.bytes : 0;
+    }
+    void* ptr = nullptr;
+    if (!glyphBuf_[slot].valid() || !backend_->map_buffer(glyphBuf_[slot], ptr).ok() || !ptr) return;
+    auto* dst = static_cast<GlyphInstance*>(ptr);
+    for (FrameSnapshot* s : all) std::copy(s->glyphs.begin(), s->glyphs.end(), dst + s->glyphBase);
+    backend_->unmap_buffer(glyphBuf_[slot]);
+    glyphFrameBuf_ = glyphBuf_[slot];
+}
+
 void Renderer::flush_uploads() noexcept {
     for (PendingUpload& up : uploads_) {
         if (const Status s = backend_->upload_texture(up.texture, up.data.data(), up.bytesPerRow); !s.ok()) {
@@ -1493,6 +1524,27 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
             }
             return true;
         }
+        case LayerSource::Kind::Text: {
+            // Glifos instanciados no atlas SDF, na densidade da layer na tela.
+            if (!glyphFrameBuf_.valid() || !glyphAtlas_.valid() || layer.source.glyphCount == 0 || !currentSnap_) return false;
+            auto pipe = shaders_.pipeline(PipelineKey::graphics(ShaderId::text_glyph_vert, ShaderId::text_glyph_frag, kWorkFormat, true,
+                                                                BlendMode::Normal));
+            if (!pipe.ok()) return false;
+            out.texture = graph_.create_texture("layer-texto", d);
+            struct Cap { PipelineHandle p; TextureHandle atlas; u64 sampler; BufferHandle buf; Mat4 clip; f32 first; u32 count; }
+                cap{*pipe, glyphAtlas_, shaders_.sampler(CommonSampler::LinearClamp).id, glyphFrameBuf_,
+                    clip_from_comp(static_cast<f32>(layer.source.width), static_cast<f32>(layer.source.height)),
+                    static_cast<f32>(currentSnap_->glyphBase + layer.source.glyphFirst), layer.source.glyphCount};
+            graph_.add_raster_pass("texto", PassStage::Decode, out.texture, LoadOp::Clear, Vec4{0, 0, 0, 0}, [cap](PassContext& pc) {
+                pc.cmds.bind_pipeline(cap.p);
+                pc.cmds.bind_texture(0, cap.atlas, SamplerHandle{cap.sampler});
+                pc.cmds.bind_storage_buffer(cap.buf);
+                struct { Mat4 m; Vec4 params; } push{cap.clip, Vec4{cap.first, 0, 0, 0}};
+                pc.cmds.push_constants(&push, sizeof(push));
+                pc.cmds.draw(6, cap.count);
+            });
+            return true;
+        }
         case LayerSource::Kind::Image: {
             auto it = images_.find(layer.source.image.pack());
             if (it == images_.end()) return false;
@@ -1747,6 +1799,32 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     const u64 tBegin = monotonic_ns();
     timings.acquireWaitMs = static_cast<f32>(static_cast<f64>(tBegin - t0) * 1e-6);
 
+    // Atlas de glifos: sobe quando ganhou glifo novo (ou foi refeito).
+    {
+        u64 gen = 0;
+        bool dirty = false;
+        const u8* px = text::glyph_atlas(gen, dirty);
+        if (!glyphAtlas_.valid()) {
+            TextureDesc d;
+            d.width = d.height = text::kGlyphAtlasSize;
+            d.format = SurfaceFormat::R8;
+            d.sampled = true;
+            d.transferDst = true;
+            d.debugName = "atlas-de-glifos";
+            auto t = backend_->create_texture(d);
+            if (t.ok()) glyphAtlas_ = *t;
+            dirty = true;
+        }
+        if (glyphAtlas_.valid() && (dirty || gen != glyphAtlasGen_)) {
+            PendingUpload up;
+            up.texture = glyphAtlas_;
+            up.bytesPerRow = text::kGlyphAtlasSize;
+            up.data.assign(px, px + static_cast<usize>(text::kGlyphAtlasSize) * text::kGlyphAtlasSize);
+            uploads_.push_back(std::move(up));
+            glyphAtlasGen_ = gen;
+            text::glyph_atlas_clean();
+        }
+    }
     flush_uploads();
     pool_.begin_frame(*backend_, fb.frameNumber);
     graph_.reset();
@@ -1787,6 +1865,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     compTargetW_ = cw;
     compTargetH_ = ch;
 
+    upload_glyphs(snap);
     compose_layers(snap, comp, compDesc, fb.frameNumber, draws_, 0);
     // A raiz de novo (as pré-composições trocaram o estado em curso).
     currentScenes_ = &snap.scenes;

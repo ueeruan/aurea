@@ -61,8 +61,20 @@ struct Layer;
 /// Mundo 3D da camada com a cadeia de pais (o mesmo dos modelos/luzes).
 [[nodiscard]] Mat4 layer_world_3d(const Composition& comp, const Layer& l, FrameIndex time) noexcept;
 
+/// Um glifo na GPU (std430, espelho de shaders/text/glyph.vert).
+struct GlyphInstance {
+    Vec4 rect;     ///< x0 y0 x1 y1, px da layer
+    Vec4 uv;
+    Vec4 fill;     ///< linear, alfa
+    Vec4 stroke;   ///< linear, alfa
+    Vec4 xf{1, 0, 0, 1};   ///< 2×2 em volta do pivô
+    Vec4 misc;     ///< tx, ty, k, largura do contorno (px da layer)
+    Vec4 pivot;    ///< px, py, desfoque (px), _
+};
+static_assert(sizeof(GlyphInstance) == 112, "layout std430 do glifo");
+
 struct LayerSource {
-    enum class Kind : u8 { None = 0, Video, Image, Solid, Scene3D, Shape, Nested, Particles };
+    enum class Kind : u8 { None = 0, Video, Image, Solid, Scene3D, Shape, Nested, Particles, Text };
     Kind kind = Kind::None;
     u32  width = 0;          ///< tamanho natural da layer (px)
     u32  height = 0;
@@ -89,6 +101,10 @@ struct LayerSource {
 
     // Pré-composição: índice em FrameSnapshot::nested
     u32      nestedIndex = 0;
+
+    // Texto (GPU): glifos em FrameSnapshot::glyphs.
+    u32      glyphFirst = 0;
+    u32      glyphCount = 0;
 
     // Partículas: o bloco de parâmetros do shader (7 vec4), nº de slots, blend.
     Vec4     particleBlock[7]{};
@@ -140,6 +156,9 @@ struct FrameSnapshot {
     /// no tempo da fonte da camada). `target` = onde ela foi composta.
     std::vector<std::unique_ptr<FrameSnapshot>> nested;
     FGTexture target{};
+    /// Glifos das camadas de texto deste quadro (a camada guarda o trecho).
+    std::vector<GlyphInstance> glyphs;
+    u32 glyphBase = 0;   ///< onde este snapshot começa no buffer do quadro (render)
 };
 
 struct RenderSettings {
@@ -314,6 +333,15 @@ private:
     std::vector<CompositeDraw> draws_;
     std::vector<FrameRef> framesInFlight_;
     std::unordered_map<u64, PlanarTextures> planar_;   ///< por LayerId empacotado
+    // Texto na GPU: atlas de glifos (R8) e o buffer de glifos do quadro (anel).
+    TextureHandle glyphAtlas_{};
+    u64 glyphAtlasGen_ = 0;
+    static constexpr u32 kGlyphRing = 4;
+    BufferHandle glyphBuf_[kGlyphRing]{};
+    usize glyphCap_[kGlyphRing]{};
+    u32 glyphSlot_ = 0;
+    BufferHandle glyphFrameBuf_{};
+    void upload_glyphs(FrameSnapshot& snap) noexcept;
     /// Cache do optical flow por camada: duas texturas alternadas (a que um
     /// quadro em voo lê nunca é a que o próximo escreve), cada uma com o par
     /// de quadros da fonte que a gerou.

@@ -3018,3 +3018,34 @@ AUREA_TEST(Gpu, ZoomingANullZoomsItsModelUniformly) {
     std::printf("    zoom pelo nulo vs escala do modelo: diferenca media %.3f, maxima %u\n", mean, max_diff(viaNull, direct));
     AUREA_CHECK(mean < 0.5);
 }
+
+AUREA_TEST(Gpu, GpuTextIsSharpScalesAndStrokes) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(640, 360);
+    auto t = rig.e.add_text("Aurea Glifo");
+    AUREA_CHECK(t.ok());
+    if (!t.ok()) return;
+    Composition* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+    Layer* l = comp->layer(LayerId::unpack(*t));
+    l->text.size = 80;
+    l->text.color = Vec4{1, 1, 1, 1};
+    const Image8 plain = rig.capture(640);
+    l->text.strokeWidth = 4;
+    l->text.strokeColor = Vec4{1, 0, 0, 1};
+    const Image8 stroked = rig.capture(640);
+    l->text.strokeWidth = 0;
+    l->transform.scale = Vec3{3, 3, 1};           // ampliado: o SDF continua nítido (sem rasterizar de novo)
+    const Image8 big = rig.capture(640);
+    auto count = [](const Image8& img, auto pred) { u32 n = 0; for (usize i = 0; i + 3 < img.rgba.size(); i += 4) n += pred(&img.rgba[i]) ? 1u : 0u; return n; };
+    const u32 white = count(plain, [](const u8* p) { return p[0] > 200 && p[1] > 200 && p[2] > 200; });
+    const u32 red = count(stroked, [](const u8* p) { return p[0] > 200 && p[1] < 60 && p[2] < 60; });
+    // Borda ampliada: pixels de transição (nem fundo nem branco) por pixel de borda — nítido = poucos.
+    const u32 edgeBig = count(big, [](const u8* p) { return p[0] > 30 && p[0] < 225; });
+    const u32 fullBig = count(big, [](const u8* p) { return p[0] >= 225; });
+    std::printf("    texto GPU: %u px brancos; contorno %u px vermelhos; ampliado 3x: %u cheios, %u de transicao (%.2f)\n", white, red, fullBig,
+                edgeBig, static_cast<f64>(edgeBig) / std::max(1u, fullBig));
+    AUREA_CHECK(white > 3000);
+    AUREA_CHECK(red > 1500);
+    AUREA_CHECK(fullBig > white * 4);
+    AUREA_CHECK(edgeBig * 5 < fullBig);
+}

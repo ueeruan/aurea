@@ -89,6 +89,44 @@ struct ShapedGlyph {
 /// Glifos do texto em ordem visual (kerning, ligaduras, árabe contextual, RTL).
 u32 shaped_glyphs(const Font& font, const TextData& t, std::vector<ShapedGlyph>& out);
 
+// -----------------------------------------------------------------------------
+// Texto na GPU: atlas de glifos SDF (cada glifo rasterizado UMA vez, a 64 px,
+// com 16 px de distância em volta) e o texto como quads — nada de rasterizar o
+// bloco de novo a cada quadro, e cada glifo pode ter o seu transform/cor
+// (Text Animator).
+// -----------------------------------------------------------------------------
+inline constexpr u32 kGlyphAtlasSize = 2048;
+inline constexpr f32 kGlyphBasePx = 64.0f;
+inline constexpr f32 kGlyphSpread = 16.0f;       ///< px da base, em volta do glifo
+inline constexpr f32 kGlyphDistScale = 8.0f;     ///< valor (0..255) por px da base
+
+struct GlyphQuad {
+    f32 x0 = 0, y0 = 0, x1 = 0, y1 = 0;   ///< px da layer (margem incluída)
+    f32 u0 = 0, v0 = 0, u1 = 0, v1 = 0;   ///< no atlas
+    f32 k = 1;                            ///< px da layer por px da base (distância do SDF)
+    f32 penX = 0, baseline = 0;           ///< origem do glifo (pivô dos transforms por letra)
+    f32 advance = 0;                      ///< largura do glifo na linha (px da layer)
+    u32 charIndex = 0;                    ///< caractere de origem, em ordem lógica no texto inteiro
+    u32 wordIndex = 0;
+    u32 lineIndex = 0;
+};
+
+struct TextLayout {
+    std::vector<GlyphQuad> quads;         ///< em ordem visual
+    f32 width = 0, height = 0;            ///< caixa da layer com a margem
+    f32 pad = 0;
+    u32 chars = 0, words = 0, lines = 0;
+};
+
+/// Monta os quads do texto (shaping + atlas). `pad` = margem em px da layer
+/// (contorno). Falso se não há glifo visível.
+bool layout_quads(const Font& font, const TextData& t, f32 pad, TextLayout& out);
+
+/// Atlas (R8, kGlyphAtlasSize²): pixels, geração (muda quando é refeito) e se
+/// mudou desde a última leitura (o renderer sobe a textura).
+const u8* glyph_atlas(u64& generation, bool& dirty);
+void glyph_atlas_clean() noexcept;
+
 /// Chave de cache: muda quando qualquer coisa que altera os pixels muda.
 [[nodiscard]] u64 raster_key(const TextData& t, f32 scale) noexcept;
 

@@ -18,7 +18,7 @@ cmake_minimum_required(VERSION 3.22)
 project(AureaEngine
         VERSION 2.0.0
         DESCRIPTION "Aurea Editor — motor de composicao e render"
-        LANGUAGES CXX)
+        LANGUAGES C CXX)   # C: ufbx.c
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -98,8 +98,9 @@ set(AUREA_CORE_SOURCES
 # o /W4 do motor não vale para código que não é nosso.
 # -----------------------------------------------------------------------------
 file(GLOB AUREA_MESHOPT_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/meshoptimizer/src/*.cpp)
-add_library(aurea_thirdparty STATIC ${AUREA_MESHOPT_SOURCES})
+add_library(aurea_thirdparty STATIC ${AUREA_MESHOPT_SOURCES} ${CMAKE_CURRENT_SOURCE_DIR}/third_party/ufbx/ufbx.c)
 target_include_directories(aurea_thirdparty PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/ufbx
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/meshoptimizer/src
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/cgltf
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb)

@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cctype>
 #include <cstring>
 #include <unordered_map>
 
@@ -38,6 +39,7 @@
 #include "stb_image.h"
 
 #include "meshoptimizer.h"
+#include "ufbx.h"
 #if defined(_MSC_VER)
     #pragma warning(pop)
 #elif defined(__clang__)
@@ -633,6 +635,67 @@ ImportError from_cgltf(cgltf_result r) noexcept {
     }
 }
 
+/// Etapa comum a todo formato (glTF, FBX, OBJ): otimização das malhas,
+/// caixa da cena, validação final e estatísticas.
+ImportResult finalize_asset(std::unique_ptr<SceneAsset> asset, const ImportOptions& options, ImportProgress* progress,
+                            u32 imagesUsed) {
+    // --- Otimização ------------------------------------------------------------
+    SceneAsset& A = *asset;
+    usize primTotal = 0;
+    for (const Mesh& m : A.meshes) primTotal += m.primitives.size();
+    const u64 tOpt = monotonic_ns();
+    set_phase(progress, ImportPhase::Optimization);
+    if (options.optimize) {
+        usize done = 0;
+        for (Mesh& mesh : A.meshes) {
+            for (Primitive& p : mesh.primitives) {
+                if (cancelled(progress)) return fail_result(ImportError::Cancelled, "cancelado");
+                const bool blend = p.material >= 0 && p.material < static_cast<i32>(A.materials.size())
+                                && A.materials[p.material].alphaMode == AlphaMode::Blend;
+                if (!blend) optimize_primitive(p);
+                set_fraction(progress, static_cast<f32>(++done) / static_cast<f32>(std::max<usize>(1, primTotal)));
+            }
+        }
+    }
+    A.stats.optimizeMs = ms_since(tOpt);
+
+    // --- Validação final e estatísticas -----------------------------------------
+    const std::vector<Mat4> world = A.rest_world_matrices();
+    for (usize i = 0; i < A.nodes.size(); ++i) {
+        const i32 m = A.nodes[i].mesh;
+        if (m >= 0 && m < static_cast<i32>(A.meshes.size())) A.bounds.add(A.meshes[m].bounds.transformed(world[i]));
+    }
+    for (const Mesh& mesh : A.meshes) {
+        for (const Primitive& p : mesh.primitives) {
+            A.stats.vertices += p.vertex_count();
+            A.stats.triangles += p.triangle_count();
+            A.stats.morphTargets += static_cast<u32>(p.morphTargets.size());
+            A.stats.geometryBytes += p.positions.size() * sizeof(Vec3) * 2 + p.indices.size() * sizeof(u32);
+            ++A.stats.primitives;
+            if (p.generatedNormals) {
+                const std::string w = "malha '" + mesh.name + "' sem normais: normais planas geradas";
+                if (std::find(A.warnings.begin(), A.warnings.end(), w) == A.warnings.end()) A.warnings.push_back(w);
+            }
+        }
+    }
+    if (A.stats.triangles == 0 || !A.bounds.valid()) {
+        return fail_result(ImportError::NoGeometry, "nenhuma malha visivel na cena");
+    }
+    A.stats.nodes = static_cast<u32>(A.nodes.size());
+    A.stats.meshes = static_cast<u32>(A.meshes.size());
+    A.stats.materials = static_cast<u32>(A.materials.size());
+    A.stats.images = imagesUsed;
+    A.stats.animations = static_cast<u32>(A.animations.size());
+    A.stats.skins = static_cast<u32>(A.skins.size());
+
+    ImportResult res;
+    res.asset = std::move(asset);
+    AUREA_LOG_INFO("import 3D: %u malhas, %u triangulos, %u materiais, %u imagens, %u animacoes (%.0f+%.0f+%.0f+%.0f ms)",
+                   A.stats.meshes, A.stats.triangles, A.stats.materials, A.stats.images, A.stats.animations,
+                   A.stats.parseMs, A.stats.geometryMs, A.stats.imagesMs, A.stats.optimizeMs);
+    return res;
+}
+
 } // namespace
 
 std::vector<Mat4> SceneAsset::rest_world_matrices() const {
@@ -915,58 +978,8 @@ ImportResult import_gltf_memory(const u8* bytes, usize size, const std::string& 
         A.animations.push_back(std::move(o));
     }
 
-    // --- Otimização ------------------------------------------------------------
-    const u64 tOpt = monotonic_ns();
-    set_phase(progress, ImportPhase::Optimization);
-    if (options.optimize) {
-        usize done = 0;
-        for (Mesh& mesh : A.meshes) {
-            for (Primitive& p : mesh.primitives) {
-                if (cancelled(progress)) return fail_result(ImportError::Cancelled, "cancelado");
-                const bool blend = p.material >= 0 && p.material < static_cast<i32>(A.materials.size())
-                                && A.materials[p.material].alphaMode == AlphaMode::Blend;
-                if (!blend) optimize_primitive(p);
-                set_fraction(progress, static_cast<f32>(++done) / static_cast<f32>(std::max<usize>(1, primTotal)));
-            }
-        }
-    }
-    A.stats.optimizeMs = ms_since(tOpt);
-
-    // --- Validação final e estatísticas -----------------------------------------
-    const std::vector<Mat4> world = A.rest_world_matrices();
-    for (usize i = 0; i < A.nodes.size(); ++i) {
-        const i32 m = A.nodes[i].mesh;
-        if (m >= 0 && m < static_cast<i32>(A.meshes.size())) A.bounds.add(A.meshes[m].bounds.transformed(world[i]));
-    }
-    for (const Mesh& mesh : A.meshes) {
-        for (const Primitive& p : mesh.primitives) {
-            A.stats.vertices += p.vertex_count();
-            A.stats.triangles += p.triangle_count();
-            A.stats.morphTargets += static_cast<u32>(p.morphTargets.size());
-            A.stats.geometryBytes += p.positions.size() * sizeof(Vec3) * 2 + p.indices.size() * sizeof(u32);
-            ++A.stats.primitives;
-            if (p.generatedNormals) {
-                const std::string w = "malha '" + mesh.name + "' sem normais: normais planas geradas";
-                if (std::find(A.warnings.begin(), A.warnings.end(), w) == A.warnings.end()) A.warnings.push_back(w);
-            }
-        }
-    }
-    if (A.stats.triangles == 0 || !A.bounds.valid()) {
-        return fail_result(ImportError::NoGeometry, "nenhuma malha visivel na cena");
-    }
-    A.stats.nodes = static_cast<u32>(A.nodes.size());
-    A.stats.meshes = static_cast<u32>(A.meshes.size());
-    A.stats.materials = static_cast<u32>(A.materials.size());
-    A.stats.images = static_cast<u32>(std::count(used.begin(), used.end(), 1));
-    A.stats.animations = static_cast<u32>(A.animations.size());
-    A.stats.skins = static_cast<u32>(A.skins.size());
-
-    ImportResult res;
-    res.asset = std::move(asset);
-    AUREA_LOG_INFO("import 3D: %u malhas, %u triangulos, %u materiais, %u imagens, %u animacoes (%.0f+%.0f+%.0f+%.0f ms)",
-                   A.stats.meshes, A.stats.triangles, A.stats.materials, A.stats.images, A.stats.animations,
-                   A.stats.parseMs, A.stats.geometryMs, A.stats.imagesMs, A.stats.optimizeMs);
-    return res;
+    return finalize_asset(std::move(asset), options, progress,
+                          static_cast<u32>(std::count(used.begin(), used.end(), 1)));
 }
 
 ImportResult import_gltf_file(const std::string& path, const ImportOptions& options, ImportProgress* progress) {
@@ -979,5 +992,7 @@ ImportResult import_gltf_file(const std::string& path, const ImportOptions& opti
     }
     return r;
 }
+
+#include "UfbxImport.inl"
 
 } // namespace aurea::scene3d

@@ -64,6 +64,14 @@ struct ImportResult {
     [[nodiscard]] bool ok() const noexcept { return error == ImportError::None && asset != nullptr; }
 };
 
+/// FBX (binário/ASCII, com skin e animações assadas) ou OBJ (+ .mtl), via ufbx.
+[[nodiscard]] ImportResult import_ufbx_file(const std::string& path, const ImportOptions& options,
+                                            ImportProgress* progress = nullptr);
+
+/// Pela extensão: .fbx/.obj → ufbx; o resto → glTF.
+[[nodiscard]] ImportResult import_scene_file(const std::string& path, const ImportOptions& options,
+                                             ImportProgress* progress = nullptr);
+
 /// Importa um .glb ou .gltf do disco.
 [[nodiscard]] ImportResult import_gltf_file(const std::string& path, const ImportOptions& options,
                                             ImportProgress* progress = nullptr);

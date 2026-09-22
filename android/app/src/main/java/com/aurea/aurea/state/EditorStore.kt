@@ -1122,7 +1122,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * Modelo 3D (glTF/GLB) do seletor de arquivos. O arquivo é COPIADO para o
+     * Modelo 3D (glTF/GLB, FBX ou OBJ) do seletor de arquivos. O arquivo é COPIADO para o
      * sandbox do app (`files/modelos/<hash>.glb`): a permissão de uma URI
      * `content://` pode sumir, e o projeto guarda só o caminho relativo — o
      * mesmo .aurea abre no Android e no iOS. Dois imports do mesmo arquivo
@@ -1134,8 +1134,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun importModel(uri: Uri) {
         val name = displayName(uri) ?: "Modelo 3D"
         val ext = name.substringAfterLast('.', "").lowercase()
-        if (ext != "glb" && ext != "gltf") {
-            errorMessage = "Esse arquivo não é um modelo glTF/GLB (.glb ou .gltf)."
+        if (ext !in setOf("glb", "gltf", "fbx", "obj")) {
+            errorMessage = "Esse arquivo não é um modelo 3D suportado (.glb, .gltf, .fbx ou .obj)."
             return
         }
         busyMessage = "Importando modelo 3D…"

@@ -416,7 +416,7 @@ Status Engine::load_project(const char* path) noexcept {
         u32 missing = 0;
         for (const auto& [key, src] : pending) {
             scene3d::ImportOptions o;
-            scene3d::ImportResult r = scene3d::import_gltf_file(resolve_asset_path(src), o);
+            scene3d::ImportResult r = scene3d::import_scene_file(resolve_asset_path(src), o);
             if (!r.ok()) {
                 ++missing;
                 AUREA_LOG_WARN("modelo 3D do projeto nao abriu: %s (%s)", src.c_str(), r.detail.c_str());
@@ -756,7 +756,7 @@ Result<u64> Engine::import_model(const ModelImport& request, scene3d::ImportProg
     // Parse, validação e otimização FORA do lock: o preview continua rodando.
     scene3d::ImportOptions options;
     options.maxTextureSize = std::min<u32>(4096, caps_.max_export_width() > 0 ? 4096u : 2048u);
-    scene3d::ImportResult r = scene3d::import_gltf_file(request.path, options, progress);
+    scene3d::ImportResult r = scene3d::import_scene_file(request.path, options, progress);
     if (!r.ok()) {
         if (detail) *detail = r.detail;
         const Errc code = r.error == scene3d::ImportError::Cancelled ? Errc::Cancelled

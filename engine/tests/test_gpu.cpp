@@ -1132,6 +1132,36 @@ AUREA_TEST(Gpu, Scene3DKeyLightCastsShadows) {
     (void)write_png("scene3d_sombra_off.png", noShadow);
 }
 
+/// Modelos reais do usuário (fora do git): AUREA_EXTRA_MODELS=<pasta>. Sem a
+/// variável, o teste não faz nada.
+AUREA_TEST(Gpu, Scene3DExtraModelsImportAndRender) {
+    AUREA_REQUIRE_GPU();
+    const char* dir = std::getenv("AUREA_EXTRA_MODELS");
+    if (!dir || !*dir) return;
+    const char* names[] = {"final astronaut motion.fbx", "FINAL_MODEL_23.fbx", "Minecraft2.fbx", "Torch.obj",
+                           "anel_teste.obj", "cc8b74aeda164d6a8f58b0d5e5e40349.fbx.fbx", "Mineways2Skfb.obj"};
+    for (const char* n : names) {
+        const std::string path = std::string(dir) + "/" + n;
+        if (!file_exists(path)) continue;
+        Scene3DRig rig(384, 216);
+        ModelImport mi;
+        mi.path = path;
+        std::string detail;
+        const u64 t0 = monotonic_ns();
+        const Result<u64> r = rig.e.import_model(mi, nullptr, &detail);
+        const f64 ms = static_cast<f64>(monotonic_ns() - t0) / 1e6;
+        std::printf("    %s: %s (%.0f ms) %s\n", n, r.ok() ? "ok" : "FALHOU", ms, detail.c_str());
+        AUREA_CHECK_MSG(r.ok(), n);
+        if (!r.ok()) continue;
+        const Image8 img = rig.capture(384);
+        std::printf("      cobertura %.3f\n", coverage(img));
+        AUREA_CHECK_MSG(coverage(img) > 0.005f, n);
+        std::string out = std::string("extra_") + n + ".png";
+        for (char& ch : out) if (ch == ' ') ch = '_';
+        (void)write_png(out, img);
+    }
+}
+
 AUREA_TEST(Gpu, Scene3DSurvivesSaveAndReopenIdentically) {
     AUREA_REQUIRE_GPU();
     const std::string path = gltf_data("DamagedHelmet.glb");

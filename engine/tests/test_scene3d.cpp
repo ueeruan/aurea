@@ -294,3 +294,44 @@ AUREA_TEST(Scene3D, SkinnedAnimationPoseFollowsTheClipTime) {
     }
     AUREA_CHECK(moved > 0.05f);
 }
+
+AUREA_TEST(Scene3D, ObjAndFbxImportThroughUfbx) {
+    // OBJ escrito na hora: um quadrado (duas faces) com material .mtl vermelho.
+    const std::string dir = std::string(AUREA_TEST_DATA_DIR) + "/../";
+    const std::string obj = "aurea_teste_quad.obj", mtl = "aurea_teste_quad.mtl";
+    {
+        std::FILE* f = std::fopen(mtl.c_str(), "wb");
+        std::fputs("newmtl vermelho\nKd 1.0 0.0 0.0\n", f);
+        std::fclose(f);
+        f = std::fopen(obj.c_str(), "wb");
+        std::fputs("mtllib aurea_teste_quad.mtl\nv 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nvn 0 0 1\n"
+                   "usemtl vermelho\nf 1//1 2//1 3//1 4//1\n", f);
+        std::fclose(f);
+    }
+    ImportOptions o;
+    ImportResult r = import_scene_file(obj, o);
+    AUREA_CHECK_MSG(r.ok(), r.detail.c_str());
+    if (r.ok()) {
+        const SceneAsset& a = *r.asset;
+        AUREA_CHECK_EQ(a.stats.triangles, 2u);
+        AUREA_CHECK_EQ(a.stats.vertices, 4u);   // os cantos iguais foram soldados
+        AUREA_CHECK(!a.materials.empty());
+        if (!a.materials.empty()) {
+            AUREA_CHECK_NEAR(a.materials[0].baseColor.x, 1.0f, 1e-3f);
+            AUREA_CHECK_NEAR(a.materials[0].baseColor.y, 0.0f, 1e-3f);
+        }
+        AUREA_CHECK_NEAR(a.bounds.extent().x, 1.0f, 1e-3f);
+    }
+    // Arquivo que não existe: erro específico, nunca "importado".
+    ImportResult bad = import_scene_file("nao_existe.fbx", o);
+    AUREA_CHECK(!bad.ok() && bad.error == ImportError::FileNotFound);
+    // Lixo com extensão .fbx: formato inválido.
+    {
+        std::FILE* f = std::fopen("aurea_lixo.fbx", "wb");
+        std::fputs("isto nao e um fbx", f);
+        std::fclose(f);
+    }
+    ImportResult junk = import_scene_file("aurea_lixo.fbx", o);
+    AUREA_CHECK(!junk.ok() && junk.error == ImportError::InvalidFormat);
+    (void)dir;
+}

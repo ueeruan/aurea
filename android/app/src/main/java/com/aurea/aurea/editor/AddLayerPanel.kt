@@ -407,7 +407,7 @@ private fun ObjectsTab(store: EditorStore, close: () -> Unit) {
                         if (card == null) Spacer(Modifier.weight(1f))
                         else ObjectCardTile(card, cardH) {
                             when (card) {
-                                ObjectCard.Scene3D -> picker.launch(arrayOf("model/gltf-binary", "model/gltf+json", "application/octet-stream", "*/*"))
+                                ObjectCard.Scene3D -> picker.launch(arrayOf("model/gltf-binary", "model/gltf+json", "model/obj", "application/octet-stream", "*/*"))
                                 else -> store.comingSoon(card.label)
                             }
                         }

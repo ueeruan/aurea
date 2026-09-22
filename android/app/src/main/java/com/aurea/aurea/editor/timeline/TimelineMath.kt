@@ -245,6 +245,48 @@ internal object Keyframes {
         if (i < 0) i = -i - 1
         return i
     }
+
+    /**
+     * Lista de desenho dos losangos de UMA linha: só os instantes na tela
+     * (busca binária na borda esquerda, para na direita) e vizinhos a menos de
+     * `mergeGap` px viram um grupo (a pílula). Escreve pares [primeiro, último]
+     * em `out` e devolve quantos grupos; `out` precisa de 2 × (instantes na
+     * tela) — o pintor passa um buffer que cresce e é reusado.
+     */
+    fun visibleGroups(
+        instants: IntArray, view: Double, pxPerFrame: Float, centerX: Float,
+        width: Float, margin: Float, mergeGap: Float, out: IntArray,
+    ): Int {
+        if (instants.isEmpty()) return 0
+        var i = firstAtOrAfter(instants, TimeAxis.frameAt(-margin, view, pxPerFrame, centerX))
+        var n = 0
+        while (i < instants.size) {
+            val kx = TimeAxis.xOf(instants[i].toDouble(), view, pxPerFrame, centerX)
+            if (kx > width + margin) break
+            var j = i
+            var lastX = kx
+            while (j + 1 < instants.size && lastX <= width + margin) {
+                val nx = TimeAxis.xOf(instants[j + 1].toDouble(), view, pxPerFrame, centerX)
+                if (nx - lastX >= mergeGap) break
+                // Denso (zoom aberto, milhares de marcas): tudo antes de lastX + mergeGap
+                // entra no grupo de uma vez (busca binária) em vez de marca a marca —
+                // a cada dois passos o grupo anda ≥ mergeGap px: O(largura/mergeGap · log n).
+                val k = firstAtOrAfter(instants, TimeAxis.frameAt(lastX + mergeGap, view, pxPerFrame, centerX))
+                j = max(j + 1, minOf(k, instants.size) - 1)
+                lastX = TimeAxis.xOf(instants[j].toDouble(), view, pxPerFrame, centerX)
+            }
+            if (2 * n + 1 >= out.size) return n
+            out[2 * n] = i
+            out[2 * n + 1] = j
+            n++
+            i = j + 1
+        }
+        return n
+    }
+
+    /** Algum instante do grupo `[a, b]` é `frame`? (busca binária no grupo) */
+    fun groupHas(instants: IntArray, a: Int, b: Int, frame: Int): Boolean =
+        frame != Snap.NONE && java.util.Arrays.binarySearch(instants, a, b + 1, frame) >= 0
 }
 
 /**

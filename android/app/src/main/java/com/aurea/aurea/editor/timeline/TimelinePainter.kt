@@ -78,6 +78,8 @@ internal class TimelinePainter(
     private val multiStroke = Stroke(m.multiStroke)
     private val diamondStroke = Stroke(m.diamondStroke)
     private val tc = IntArray(4)
+    /** Grupos de losangos visíveis de uma linha ([primeiro, último] por grupo), reusado. */
+    private var groupBuf = IntArray(256)
     private var steps: RulerSteps? = null
     private var stepsPps = Float.NaN
     private var stepsFps = Float.NaN
@@ -457,30 +459,25 @@ internal class TimelinePainter(
         val inst = r.instants
         if (inst.isEmpty()) return
         val cy = top + if (compact) m.diamondCyCompact else m.diamondCyNormal
-        var i = Keyframes.firstAtOrAfter(inst, TimeAxis.frameAt(-m.keyTouchHalf, view, ppf, cx))
+        // Lista de desenho pronta (Keyframes.visibleGroups): só o que está na tela;
+        // o buffer cabe o máximo de grupos da largura (grupos distam ≥ keyMergeGap).
+        val need = 2 * ((w + 2f * m.keyTouchHalf) / m.keyMergeGap).toInt() + 8
+        if (groupBuf.size < need) groupBuf = IntArray(need)
+        val groups = Keyframes.visibleGroups(inst, view, ppf, cx, w, m.keyTouchHalf, m.keyMergeGap, groupBuf)
         var dragX = Float.NaN
-        while (i < inst.size) {
+        for (g in 0 until groups) {
+            val i = groupBuf[2 * g]
+            val j = groupBuf[2 * g + 1]
             val kx = TimeAxis.xOf(inst[i].toDouble(), view, ppf, cx)
-            if (kx > w + m.keyTouchHalf) break
-            var j = i
-            var lastX = kx
-            var on = inst[i] == selFrame
-            while (j + 1 < inst.size) {
-                val nx = TimeAxis.xOf(inst[j + 1].toDouble(), view, ppf, cx)
-                if (nx - lastX >= m.keyMergeGap) break
-                j++
-                lastX = nx
-                if (inst[j] == selFrame) on = true
-            }
+            val on = Keyframes.groupHas(inst, i, j, selFrame)
             val fill = if (on) AureaTimeline.KeyframeOn else KEY_OFF
             if (j == i) {
                 val dragging = inst[i] == dragFrame
                 if (dragging) dragX = kx
                 drawDiamond(kx, cy, fill, on, if (dragging) m.keyDragScale else 1f)
             } else {
-                drawKeyPill(kx, lastX, cy, fill)
+                drawKeyPill(kx, TimeAxis.xOf(inst[j].toDouble(), view, ppf, cx), cy, fill)
             }
-            i = j + 1
         }
         if (!dragX.isNaN()) drawBalloon(dragX, cy, dragFrame, fps)
     }

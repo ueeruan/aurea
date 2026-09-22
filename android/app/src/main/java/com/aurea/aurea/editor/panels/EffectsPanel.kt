@@ -3,6 +3,7 @@ package com.aurea.aurea.editor.panels
 import com.aurea.aurea.engine.TrackKey
 import com.aurea.aurea.engine.ExpressionLook
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,39 +18,52 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ChevronLeft
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import com.aurea.aurea.engine.EffectParam
 import com.aurea.aurea.engine.LayerEffect
 import com.aurea.aurea.engine.ParamType
 import com.aurea.aurea.engine.TrackProperty
+import com.aurea.aurea.state.EditorStore
+import com.aurea.aurea.ui.ds.AdvancedToggle
 import com.aurea.aurea.ui.ds.AureaActionSheet
 import com.aurea.aurea.ui.ds.AureaToggle
 import com.aurea.aurea.ui.ds.ChoiceChips
 import com.aurea.aurea.ui.ds.ColorWell
-import com.aurea.aurea.ui.ds.EffectCard
+import com.aurea.aurea.ui.ds.EffectStackCard
 import com.aurea.aurea.ui.ds.KeyframeLook
 import com.aurea.aurea.ui.ds.KeypadRequest
 import com.aurea.aurea.ui.ds.PropertyCustomRow
 import com.aurea.aurea.ui.ds.PropertyRow
 import com.aurea.aurea.ui.ds.SheetAction
-import com.aurea.aurea.ui.ds.casasAutomaticas
 import com.aurea.aurea.ui.ds.comUnidade
 import com.aurea.aurea.ui.ds.numeroPtBr
 import com.aurea.aurea.ui.ds.displayToEngine
@@ -89,19 +103,10 @@ internal data class ParamSlot(
     val animatable get() = (flags and ParamType.FLAG_ANIMATABLE) != 0 && ParamType.componentCount(type) > 0
     val components get() = ParamType.componentCount(type)
 
-    /** Casas [A]: inteiro 0, ângulo 1, senão pela faixa (`_casasAutomaticas`). */
-    val decimals: Int
-        get() = when (type) {
-            ParamType.INT -> 0
-            ParamType.ANGLE -> 1
-            else -> casasAutomaticas(min, max)
-        }
-
     /**
-     * Sensibilidade [A]: `(max − min) / 500` por dp (atravessar a régua ≈ a faixa
-     * inteira em poucos arrastos). O motor não publica o `dragStep` da A.01, então:
-     * ângulo = 0,5 °/dp (o `dragStep` da Fase do Motion Tile) e faixas enormes são
-     * presas em 2 unidades/dp; sem faixa, 0,5/dp.
+     * Sensibilidade [A], na unidade do MOTOR: `(max − min) / 500` por dp
+     * (atravessar a régua ≈ a faixa inteira em poucos arrastos). Ângulo = 0,5 °/dp;
+     * faixas enormes presas em 2 unidades/dp; sem faixa, 0,5/dp.
      */
     val unitsPerDp: Float
         get() {
@@ -125,15 +130,63 @@ private fun axisLabel(label: String, component: Int): String {
     return "${if (cut != null) label.substring(0, cut) else label} $axis"
 }
 
+/** O tipo (`typeId`) do efeito [effectId] da camada principal (0 = sumiu). */
+private fun EditorStore.typeOf(effectId: Int): Int = effects.firstOrNull { it.effectId == effectId }?.typeId ?: 0
+
+/** Rótulo humano da linha (com eixo quando é ponto). */
+private fun rowLabel(d: ParamDisplay, s: ParamSlot, component: Int): String =
+    if (s.type == ParamType.POINT2D || s.type == ParamType.POINT3D) axisLabel(d.label, component) else d.label
+
+/** Um toque longo no rótulo pede o menu do parâmetro. */
+@Immutable
+private data class ParamMenuTarget(val effectId: Int, val param: Int, val label: String)
+
 /**
- * O PAINEL "EFEITOS" [A] (t2): trilho esquerdo 46 (‹ · ◇ · curva) + pilha de
- * cartões (lista com padding 2/8/12/16) + "Adicionar efeito".
+ * O ARRASTE da pilha (≡): a ordem VISUAL enquanto o dedo arrasta e o quanto o
+ * cartão erguido andou desde o último lugar. Ao soltar, UM `reorderEffect` (um
+ * passo de desfazer); a ordem local some porque o store já traz a nova.
+ */
+@Stable
+private class ReorderState {
+    var dragging by mutableStateOf<Int?>(null)
+    var offset by mutableFloatStateOf(0f)
+    var order by mutableStateOf<List<Int>?>(null)
+
+    /** Troca com o vizinho quando o centro do cartão erguido passa do centro dele. */
+    fun swapIfNeeded(list: LazyListState) {
+        val id = dragging ?: return
+        val ord = order ?: return
+        val visible = list.layoutInfo.visibleItemsInfo
+        val me = visible.firstOrNull { it.key == id } ?: return
+        val i = ord.indexOf(id)
+        if (i < 0) return
+        val center = me.offset + offset + me.size / 2f
+        if (offset > 0f && i < ord.lastIndex) {
+            val next = visible.firstOrNull { it.key == ord[i + 1] } ?: return
+            if (center > next.offset + next.size / 2f) {
+                order = ord.toMutableList().also { it[i] = ord[i + 1]; it[i + 1] = id }
+                offset -= next.size
+            }
+        } else if (offset < 0f && i > 0) {
+            val prev = visible.firstOrNull { it.key == ord[i - 1] } ?: return
+            if (center < prev.offset + prev.size / 2f) {
+                order = ord.toMutableList().also { it[i] = ord[i - 1]; it[i - 1] = id }
+                offset += prev.size
+            }
+        }
+    }
+}
+
+/**
+ * O PAINEL "EFEITOS" (ref16/ref17, Fase 7.2).
  *
- * - Acordeão: UM cartão aberto; ao entrar, o primeiro; efeito recém-adicionado
- *   abre sozinho.
- * - A linha ESCOLHIDA (chip aceso) é o alvo do trilho: o ◇ crava/tira a marca
- *   daquele parâmetro no cabeçote (keyframe por linha) e a curva abre o trecho
- *   dele. Abrir um cartão escolhe a primeira linha, para o ◇ nunca ficar sem alvo.
+ * - LISTA (nenhum aberto): trilho estreito `‹` em cima e `⋯` embaixo; cada efeito
+ *   um cartão `▶ Nome · 👁 · ≡` (≡ arrasta para reordenar) e "+ Adicionar efeito".
+ * - EFEITO ABERTO: cartão `▼ Nome · ⋯ · 🗑`; os PRINCIPAIS primeiro e
+ *   "Avançado ▾" com o resto; trilho `‹ · ◇ · curva · =` mirando a linha escolhida.
+ * - Acordeão: UM cartão aberto; efeito recém-adicionado abre sozinho; entrar pelo
+ *   losango de um parâmetro de efeito na timeline abre aquele efeito naquela linha.
+ * - Toque longo no rótulo: Redefinir (e Expressão). Tocar no valor: teclado.
  */
 @Composable
 internal fun EffectsPanel(env: PanelEnv) {
@@ -143,10 +196,30 @@ internal fun EffectsPanel(env: PanelEnv) {
     // `detail` muda a cada quadro da reprodução; o painel só quer o TIPO.
     val kind by remember(store) { derivedStateOf { store.detail?.kind ?: 0 } }
 
-    var openId by remember(layerId) { mutableStateOf(effects.firstOrNull()?.effectId) }
+    // Veio de um losango de efeito da timeline (ou volta da curva dele)? Abre ali.
+    val entry = remember(layerId) {
+        store.selectedKeyframe?.takeIf { it.first == layerId && it.second.property == TrackProperty.EFFECT_PARAM }?.second
+            ?.takeIf { k -> effects.any { it.effectId == k.effectIndex } }
+    }
+    var openId by remember(layerId) { mutableStateOf(entry?.effectIndex) }
     var known by remember(layerId) { mutableStateOf(effects.map { it.effectId }.toSet()) }
-    var selected by remember(layerId) { mutableStateOf<ParamKey?>(null) }
+    var selected by remember(layerId) {
+        mutableStateOf(entry?.let { ParamKey(it.effectIndex, it.paramIndex / 4, it.paramIndex % 4) })
+    }
+    var advancedOpen by remember(layerId) {
+        mutableStateOf(
+            entry?.let { k ->
+                val type = store.typeOf(k.effectIndex)
+                val visible = store.effectParams[k.effectIndex].orEmpty().map { ParamSlot.of(it) }.filter { !it.hidden }
+                if (splitPrincipal(type, visible).second.any { it.index == k.paramIndex / 4 }) setOf(k.effectIndex) else emptySet()
+            } ?: emptySet(),
+        )
+    }
     var menuFor by remember { mutableStateOf<LayerEffect?>(null) }
+    var paramMenu by remember { mutableStateOf<ParamMenuTarget?>(null) }
+    var railMenu by remember { mutableStateOf(false) }
+    val reorder = remember(layerId) { ReorderState() }
+    val listState = rememberLazyListState()
 
     // Efeito novo abre sozinho; o aberto que sumiu fecha. Fora da composição
     // (bug B-09: estado mutado durante o build).
@@ -157,7 +230,7 @@ internal fun EffectsPanel(env: PanelEnv) {
         else if (openId != null && openId !in ids) openId = null
         known = ids
     }
-    // O cartão aberto escolhe a sua primeira linha (se a escolhida não é dele).
+    // O cartão aberto escolhe a sua primeira linha PRINCIPAL (se a escolhida não é dele).
     LaunchedEffect(openId, effects) {
         val id = openId
         if (id == null) {
@@ -165,7 +238,8 @@ internal fun EffectsPanel(env: PanelEnv) {
             return@LaunchedEffect
         }
         if (selected?.effectId == id) return@LaunchedEffect
-        val first = store.effectParams[id]?.firstOrNull { !it.hidden && ParamType.componentCount(it.type) > 0 }
+        val visible = store.effectParams[id].orEmpty().map { ParamSlot.of(it) }.filter { !it.hidden }
+        val first = splitPrincipal(store.typeOf(id), visible).first.firstOrNull { it.components > 0 }
         selected = first?.let { ParamKey(id, it.index, 0) }
     }
 
@@ -185,59 +259,106 @@ internal fun EffectsPanel(env: PanelEnv) {
         derivedStateOf { selected?.let { k -> store.primaryKeys().effectTrack(k.effectId, k.param, k.component).size >= 2 } ?: false }
     }
 
+    val byId = effects.associateBy { it.effectId }
+    val order = (reorder.order ?: effects.map { it.effectId }).mapNotNull { byId[it] }
+
     Row(Modifier.fillMaxSize()) {
-        LeftRail(
-            onBack = env.onClose,
-            keyframeLook = railLook,
-            onKeyframe = if (railAnimatable) {
-                {
-                    // Lido NO TOQUE: o parâmetro e o cabeçote de agora.
-                    selected?.let { k -> store.paramOf(k.effectId, k.param)?.let { store.toggleEffectKeyframe(k.effectId, it) } }
-                }
-            } else {
-                null
-            },
-            curveAnimated = railLook != KeyframeLook.None,
-            onCurve = if (curveTrackReady) {
-                {
-                    val k = selected
-                    val layer = store.primary
-                    val t = store.detail?.localPlayhead
-                    if (k != null && layer != null && t != null) {
-                        store.primaryKeys().effectTrack(k.effectId, k.param, k.component).segmentStart(t)?.let { key ->
-                            store.selectKeyframe(layer, key)
-                            env.onOpenPanel(EditorPanel.Curve)
+        if (openId == null) {
+            ListRail(onBack = env.onClose, onMore = { railMenu = true })
+        } else {
+            LeftRail(
+                // Com um efeito aberto, o ‹ volta para a LISTA (ref17 → ref16).
+                onBack = { openId = null },
+                keyframeLook = railLook,
+                onKeyframe = if (railAnimatable) {
+                    {
+                        // Lido NO TOQUE: o parâmetro e o cabeçote de agora.
+                        selected?.let { k -> store.paramOf(k.effectId, k.param)?.let { store.toggleEffectKeyframe(k.effectId, it) } }
+                    }
+                } else {
+                    null
+                },
+                curveAnimated = railLook != KeyframeLook.None,
+                onCurve = if (curveTrackReady) {
+                    {
+                        val k = selected
+                        val layer = store.primary
+                        val t = store.detail?.localPlayhead
+                        if (k != null && layer != null && t != null) {
+                            store.primaryKeys().effectTrack(k.effectId, k.param, k.component).segmentStart(t)?.let { key ->
+                                store.selectKeyframe(layer, key)
+                                env.onOpenPanel(EditorPanel.Curve)
+                            }
                         }
                     }
-                }
-            } else {
-                null
-            },
-            expression = railExpr,
-            onExpression = if (railAnimatable) {
-                { selected?.let { k -> store.paramOf(k.effectId, k.param)?.let { openParamExpression(store, k.effectId, ParamSlot.of(it)) } } }
-            } else {
-                null
-            },
-        )
+                } else {
+                    null
+                },
+                expression = railExpr,
+                onExpression = if (railAnimatable) {
+                    { selected?.let { k -> store.paramOf(k.effectId, k.param)?.let { openParamExpression(store, k.effectId, ParamSlot.of(it)) } } }
+                } else {
+                    null
+                },
+            )
+        }
         LazyColumn(
             Modifier.weight(1f).fillMaxHeight(),
+            state = listState,
             contentPadding = PaddingValues(start = 2.dp, top = 8.dp, end = 12.dp, bottom = 16.dp),
         ) {
-            items(effects, key = { it.effectId }) { e ->
+            items(order, key = { it.effectId }) { e ->
+                val dragged = reorder.dragging == e.effectId
                 EffectCardItem(
                     env = env,
                     effect = e,
                     expanded = openId == e.effectId,
                     selected = selected?.takeIf { it.effectId == e.effectId },
+                    advanced = e.effectId in advancedOpen,
+                    lifted = dragged,
                     onToggle = { openId = if (openId == e.effectId) null else e.effectId },
+                    onToggleAdvanced = {
+                        advancedOpen = if (e.effectId in advancedOpen) advancedOpen - e.effectId else advancedOpen + e.effectId
+                    },
                     onSelect = { selected = it },
+                    onParamMenu = { paramMenu = it },
                     onMenu = { menuFor = e },
                     onRemove = { store.removeEffect(e.effectId) },
+                    dragHandle = Modifier.reorderHandle(e.effectId, reorder, listState, store),
+                    modifier = if (dragged) {
+                        Modifier.zIndex(1f).graphicsLayer { translationY = reorder.offset }
+                    } else {
+                        Modifier.animateItem()
+                    },
                 )
             }
             item(key = "rodape") { EffectsFooter(env, kind) }
         }
+    }
+
+    if (railMenu) {
+        val anyOn = effects.any { it.enabled }
+        AureaActionSheet(
+            title = "Efeitos da camada",
+            actions = buildList {
+                add(SheetAction("Adicionar efeito") { env.onOpenEffectsBrowser() })
+                if (effects.isNotEmpty()) add(SheetAction("Copiar efeitos") { store.copyEffects() })
+                if (store.clipboard and 4 != 0) add(SheetAction("Colar efeitos") { store.pasteEffects() })
+                if (effects.isNotEmpty()) {
+                    add(
+                        SheetAction(if (anyOn) "Desligar todos" else "Ligar todos") {
+                            store.beginGesture(if (anyOn) "desligar efeitos" else "ligar efeitos")
+                            try {
+                                effects.forEach { if (it.enabled == anyOn) store.setEffectEnabled(it.effectId, !anyOn) }
+                            } finally {
+                                store.endGesture()
+                            }
+                        },
+                    )
+                }
+            },
+            onDismiss = { railMenu = false },
+        )
     }
 
     menuFor?.let { e ->
@@ -247,34 +368,136 @@ internal fun EffectsPanel(env: PanelEnv) {
             listOf(SheetAction("Remover efeito", destructive = true) { store.removeEffect(e.effectId) })
         } else {
             buildList {
-                add(SheetAction(if (e.enabled) "Desativar efeito" else "Ativar efeito") { store.setEffectEnabled(e.effectId, !e.enabled) })
-                add(SheetAction("Duplicar") { store.comingSoon("Duplicar efeito") })
+                add(SheetAction(if (e.enabled) "Desligar efeito" else "Ligar efeito") { store.setEffectEnabled(e.effectId, !e.enabled) })
+                add(SheetAction("Redefinir efeito") { resetEffect(env, e.effectId) })
                 if (index > 0) add(SheetAction("Mover para cima") { store.reorderEffect(e.effectId, index - 1) })
                 if (index in 0 until effects.lastIndex) add(SheetAction("Mover para baixo") { store.reorderEffect(e.effectId, index + 1) })
-                add(SheetAction("Resetar") { resetEffect(env, e.effectId) })
-                add(SheetAction("Salvar como preset") { store.comingSoon("Presets de efeito") })
-                add(SheetAction("Meus presets") { store.comingSoon("Presets de efeito") })
-                add(SheetAction("Como usar este efeito") { store.comingSoon("Guia dos efeitos") })
+                add(SheetAction("Remover efeito", destructive = true) { store.removeEffect(e.effectId) })
             }
         }
         AureaActionSheet(
-            title = if (e.known) e.name else "Efeito removido",
+            title = if (e.known) effectDisplayName(e.typeId, e.name) else "Efeito removido",
             message = if (e.known) null else "Este efeito saiu do Aurea e não desenha mais nada. Ele ficou guardado aqui para você decidir — o resto da camada está intacto.",
             actions = actions,
             cancelLabel = if (e.known) "Cancelar" else "Manter",
             onDismiss = { menuFor = null },
         )
     }
+
+    paramMenu?.let { t ->
+        val p = store.paramOf(t.effectId, t.param)
+        val slot = p?.let { ParamSlot.of(it) }
+        val d = slot?.let { paramDisplay(store.typeOf(t.effectId), it) }
+        AureaActionSheet(
+            title = t.label,
+            message = if (p != null && d != null) "Padrão: ${defaultText(p, slot, d)}" else null,
+            actions = buildList {
+                add(SheetAction("Redefinir", enabled = p != null) { resetParam(store, t.effectId, t.param) })
+                if (slot?.animatable == true) add(SheetAction("Expressão…") { openParamExpression(store, t.effectId, slot) })
+            },
+            onDismiss = { paramMenu = null },
+        )
+    }
+}
+
+/** O valor padrão como a linha mostraria ("100%", "0°", "Ligado", a opção). */
+private fun defaultText(p: EffectParam, s: ParamSlot, d: ParamDisplay): String {
+    val v = p.defaultValue
+    return when (s.type) {
+        ParamType.BOOL -> if (v[0] >= 0.5f) "ligado" else "desligado"
+        ParamType.ENUM -> s.enumLabels.getOrNull(v[0].roundToInt()) ?: "${v[0].roundToInt() + 1}"
+        ParamType.COLOR -> rgbaColor(engineToDisplay(v)).let { "RGB ${(it.red * 255).roundToInt()} ${(it.green * 255).roundToInt()} ${(it.blue * 255).roundToInt()}" }
+        ParamType.POINT2D, ParamType.POINT3D -> (0 until s.components).joinToString(" × ") {
+            comUnidade(numeroPtBr(d.toDisplay(v[it]), d.decimals), d.suffix)
+        }
+        else -> comUnidade(numeroPtBr(d.toDisplay(v[0]), d.decimals), d.suffix)
+    }
+}
+
+/** REDEFINIR UM parâmetro: o padrão no cabeçote, num passo de desfazer. */
+private fun resetParam(store: EditorStore, effectId: Int, index: Int) {
+    val p = store.paramOf(effectId, index) ?: return
+    if (ParamType.componentCount(p.type) == 0) return
+    store.beginGesture("redefinir ${p.label}")
+    try {
+        store.writeParamVector(effectId, p, p.defaultValue)
+    } finally {
+        store.endGesture()
+    }
 }
 
 /**
- * RESETAR: todos os parâmetros ao padrão NO CABEÇOTE, num passo de desfazer só
- * (parâmetro animado ganha a marca com o padrão, como qualquer edição).
+ * A alça ≡: arrasto vertical imediato (a alça é só dela, não briga com a rolagem
+ * da lista — o filho consome primeiro). Soltar grava a ordem com UM comando.
+ */
+private fun Modifier.reorderHandle(id: Int, state: ReorderState, list: LazyListState, store: EditorStore): Modifier =
+    this.then(
+        Modifier.pointerInput(id) {
+            fun finish() {
+                val ord = state.order
+                val from = store.effects.indexOfFirst { it.effectId == id }
+                val to = ord?.indexOf(id) ?: -1
+                state.dragging = null
+                state.offset = 0f
+                if (to >= 0 && from >= 0 && to != from) store.reorderEffect(id, to)
+                state.order = null
+            }
+            detectDragGestures(
+                onDragStart = {
+                    state.order = store.effects.map { it.effectId }
+                    state.dragging = id
+                    state.offset = 0f
+                },
+                onDrag = { change, amount ->
+                    change.consume()
+                    state.offset += amount.y
+                    state.swapIfNeeded(list)
+                },
+                onDragEnd = { finish() },
+                onDragCancel = { finish() },
+            )
+        },
+    )
+
+/**
+ * O TRILHO DA LISTA (ref16): estreito, `‹` em cima (volta às ferramentas da
+ * camada) e `⋯` embaixo (copiar/colar/ligar todos).
+ */
+@Composable
+private fun ListRail(onBack: () -> Unit, onMore: () -> Unit) {
+    Column(Modifier.width(46.dp).fillMaxHeight()) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+                .semantics { contentDescription = "Voltar às ferramentas" }
+                .tocavel(shrink = 1f, onClick = onBack),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Rounded.ChevronLeft, contentDescription = null, tint = AureaColors.Text, modifier = Modifier.size(24.dp))
+        }
+        Spacer(Modifier.weight(1f))
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+                .semantics { contentDescription = "Mais opções dos efeitos" }
+                .tocavel(shrink = 1f, onClick = onMore),
+            contentAlignment = Alignment.Center,
+        ) {
+            CupertinoIcon(CupertinoGlyph.Ellipsis, 24.dp, AureaColors.Text)
+        }
+    }
+}
+
+/**
+ * REDEFINIR O EFEITO: todos os parâmetros ao padrão NO CABEÇOTE, num passo de
+ * desfazer só (parâmetro animado ganha a marca com o padrão, como qualquer edição).
  */
 private fun resetEffect(env: PanelEnv, effectId: Int) {
     val store = env.store
     val params = store.effectParams[effectId] ?: return
-    store.beginGesture("resetar efeito")
+    store.beginGesture("redefinir efeito")
     try {
         params.filter { !it.hidden && ParamType.componentCount(it.type) > 0 }.forEach { p ->
             store.writeParamVector(effectId, p, p.defaultValue)
@@ -291,19 +514,29 @@ private fun EffectCardItem(
     effect: LayerEffect,
     expanded: Boolean,
     selected: ParamKey?,
+    advanced: Boolean,
+    lifted: Boolean,
     onToggle: () -> Unit,
+    onToggleAdvanced: () -> Unit,
     onSelect: (ParamKey) -> Unit,
+    onParamMenu: (ParamMenuTarget) -> Unit,
     onMenu: () -> Unit,
     onRemove: () -> Unit,
+    dragHandle: Modifier,
+    modifier: Modifier = Modifier,
 ) {
     val store = env.store
-    EffectCard(
-        name = effect.name,
+    EffectStackCard(
+        name = effectDisplayName(effect.typeId, effect.name),
         enabled = effect.enabled,
         expanded = expanded,
         onToggleExpanded = onToggle,
+        onToggleEnabled = { store.setEffectEnabled(effect.effectId, !effect.enabled) },
         onMenu = onMenu,
         onRemove = onRemove,
+        dragHandle = dragHandle,
+        lifted = lifted,
+        modifier = modifier,
     ) {
         val id = effect.effectId
         val slots by remember(store, id) {
@@ -311,35 +544,50 @@ private fun EffectCardItem(
         }
         if (!effect.known) {
             PanelNotice("Este efeito saiu do catálogo. Ele não desenha mais; apague pelo ⋯.")
-            return@EffectCard
+            return@EffectStackCard
         }
         val visible = slots.filter { !it.hidden }
         if (visible.isEmpty()) {
             PanelNotice("Este efeito não tem ajustes.")
-            return@EffectCard
+            return@EffectStackCard
         }
-        visible.forEach { s ->
-            when (s.type) {
-                ParamType.FLOAT, ParamType.INT, ParamType.ANGLE ->
-                    EffectNumberRow(env, id, s, 0, s.label, selected == ParamKey(id, s.index, 0), onSelect)
-                ParamType.POINT2D, ParamType.POINT3D -> repeat(s.components) { c ->
-                    EffectNumberRow(env, id, s, c, axisLabel(s.label, c), selected == ParamKey(id, s.index, c), onSelect)
-                }
-                ParamType.BOOL -> EffectToggleRow(env, id, s, selected?.param == s.index, onSelect)
-                ParamType.ENUM -> EffectChoiceRow(env, id, s, selected?.param == s.index, onSelect)
-                ParamType.COLOR -> EffectColorRow(env, id, s, selected?.param == s.index, onSelect)
-                else -> PropertyCustomRow(
-                    label = s.label,
-                    selected = false,
-                    onSelect = { store.comingSoon(s.label) },
-                ) {
-                    Text(
-                        "Em breve",
-                        modifier = Modifier.tocavel(shrink = 1f) { store.comingSoon(s.label) },
-                        style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)),
-                    )
-                }
-            }
+        val (main, rest) = remember(visible, effect.typeId) { splitPrincipal(effect.typeId, visible) }
+        main.forEach { s -> ParamRows(env, id, effect.typeId, s, selected, onSelect, onParamMenu) }
+        if (rest.isNotEmpty()) {
+            AdvancedToggle(open = advanced, count = rest.size, onToggle = onToggleAdvanced)
+            if (advanced) rest.forEach { s -> ParamRows(env, id, effect.typeId, s, selected, onSelect, onParamMenu) }
+        }
+    }
+}
+
+/** As linhas de UM parâmetro (ponto = uma linha por eixo). */
+@Composable
+private fun ParamRows(
+    env: PanelEnv,
+    id: Int,
+    typeId: Int,
+    s: ParamSlot,
+    selected: ParamKey?,
+    onSelect: (ParamKey) -> Unit,
+    onParamMenu: (ParamMenuTarget) -> Unit,
+) {
+    val d = remember(typeId, s) { paramDisplay(typeId, s) }
+    val menu = { onParamMenu(ParamMenuTarget(id, s.index, d.label)) }
+    when (s.type) {
+        ParamType.FLOAT, ParamType.INT, ParamType.ANGLE ->
+            EffectNumberRow(env, id, s, d, 0, d.label, selected == ParamKey(id, s.index, 0), onSelect, menu)
+        ParamType.POINT2D, ParamType.POINT3D -> repeat(s.components) { c ->
+            EffectNumberRow(env, id, s, d, c, rowLabel(d, s, c), selected == ParamKey(id, s.index, c), onSelect, menu)
+        }
+        ParamType.BOOL -> EffectToggleRow(env, id, s, d.label, selected?.param == s.index, onSelect, menu)
+        ParamType.ENUM -> EffectChoiceRow(env, id, s, d.label, selected?.param == s.index, onSelect, menu)
+        ParamType.COLOR -> EffectColorRow(env, id, s, d.label, selected?.param == s.index, onSelect, menu)
+        // Curva/degradê/referência: o motor tem, o app ainda não edita — sem botão falso.
+        else -> PropertyCustomRow(label = d.label, selected = false, onSelect = {}) {
+            Text(
+                "Ainda não editável no app",
+                style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)),
+            )
         }
     }
 }
@@ -358,10 +606,11 @@ private fun rememberParamValue(env: PanelEnv, effectId: Int, index: Int, compone
 internal fun paramKeys(effectId: Int, s: ParamSlot): List<TrackKey> =
     List(ParamType.componentCount(s.type).coerceAtLeast(1)) { c -> TrackKey(TrackProperty.EFFECT_PARAM, effectId, s.index * 4 + c) }
 
-/** Editor de expressão do parâmetro inteiro (ponto/cor: a expressão é vetorial). */
-internal fun openParamExpression(store: com.aurea.aurea.state.EditorStore, effectId: Int, s: ParamSlot) {
+/** Editor de expressão do parâmetro inteiro (ponto/cor: a expressão é vetorial), na unidade humana. */
+internal fun openParamExpression(store: EditorStore, effectId: Int, s: ParamSlot) {
     if (!s.animatable) return
-    store.openExpression(s.label, paramKeys(effectId, s), 1f, s.unit)
+    val d = paramDisplay(store.typeOf(effectId), s)
+    store.openExpression(d.label, paramKeys(effectId, s), d.scale, d.suffix)
 }
 
 @Composable
@@ -378,62 +627,83 @@ private fun rememberLook(env: PanelEnv, effectId: Int, index: Int, component: In
     return look
 }
 
-/** Número / ângulo / eixo de ponto: a linha [A] com régua e caixa. */
+/**
+ * Número / ângulo / eixo de ponto: rótulo + régua + caixa, NA UNIDADE HUMANA
+ * (a régua, a caixa e o teclado falam `motor × scale`; a escrita desfaz a escala).
+ */
 @Composable
 private fun EffectNumberRow(
     env: PanelEnv,
     effectId: Int,
     s: ParamSlot,
+    d: ParamDisplay,
     component: Int,
     label: String,
     selected: Boolean,
     onSelect: (ParamKey) -> Unit,
+    onMenu: () -> Unit,
 ) {
     val store = env.store
     val value = rememberParamValue(env, effectId, s.index, component)
     val look = rememberLook(env, effectId, s.index, component)
     val lo = if (s.min.isFinite()) s.min else Float.NEGATIVE_INFINITY
     val hi = if (s.max.isFinite()) s.max else Float.POSITIVE_INFINITY
-    fun write(v: Float) {
+    val shownLo = if (lo.isFinite()) d.toDisplay(lo) else lo
+    val shownHi = if (hi.isFinite()) d.toDisplay(hi) else hi
+    fun write(display: Float) {
         val p = store.paramOf(effectId, s.index) ?: return
-        val clamped = v.coerceIn(lo, hi)
+        val clamped = d.toEngine(display).coerceIn(lo, hi)
         store.setEffectParam(effectId, p, if (s.type == ParamType.INT) clamped.roundToInt().toFloat() else clamped, component)
     }
+    val shown = d.toDisplay(value)
     PropertyRow(
         label = label,
-        value = value,
-        unitsPerDp = s.unitsPerDp,
-        min = lo,
-        max = hi,
-        format = { comUnidade(numeroPtBr(it, s.decimals), s.unit) },
+        value = shown,
+        unitsPerDp = s.unitsPerDp * d.scale,
+        min = min(shownLo, shownHi),
+        max = max(shownLo, shownHi),
+        format = { comUnidade(numeroPtBr(it, d.decimals), d.suffix) },
         selected = selected,
         keyframe = look,
         expression = rememberExpr(env, effectId, s),
-        onExpression = if (s.animatable) ({ openParamExpression(store, effectId, s) }) else null,
+        // O toque longo no rótulo abre o menu da linha (Redefinir · Expressão).
+        onExpression = onMenu,
         onSelect = { onSelect(ParamKey(effectId, s.index, component)) },
         onGestureStart = { store.beginGesture("ajustar $label") },
         onValue = ::write,
         onGestureEnd = { store.endGesture() },
         onTapValue = {
-            env.openKeypad(KeypadRequest(label, value, s.unit, lo, hi, s.decimals) { write(it) })
+            onSelect(ParamKey(effectId, s.index, component))
+            env.openKeypad(KeypadRequest(label, shown, d.suffix, min(shownLo, shownHi), max(shownLo, shownHi), d.decimals) { write(it) })
         },
     )
 }
 
 /** Liga/desliga: valor ≥ 0,5 = ligado; escreve 1/0 num passo. */
 @Composable
-private fun EffectToggleRow(env: PanelEnv, effectId: Int, s: ParamSlot, selected: Boolean, onSelect: (ParamKey) -> Unit) {
+private fun EffectToggleRow(
+    env: PanelEnv,
+    effectId: Int,
+    s: ParamSlot,
+    label: String,
+    selected: Boolean,
+    onSelect: (ParamKey) -> Unit,
+    onMenu: () -> Unit,
+) {
     val store = env.store
     val value = rememberParamValue(env, effectId, s.index, 0)
     val look = rememberLook(env, effectId, s.index, null)
     PropertyCustomRow(
-        s.label, selected, onSelect = { onSelect(ParamKey(effectId, s.index, 0)) }, keyframe = look,
-        expression = rememberExpr(env, effectId, s), onExpression = if (s.animatable) ({ openParamExpression(store, effectId, s) }) else null,
+        label, selected, onSelect = { onSelect(ParamKey(effectId, s.index, 0)) }, keyframe = look,
+        expression = rememberExpr(env, effectId, s), onExpression = onMenu,
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             AureaToggle(
                 checked = value >= 0.5f,
-                onCheckedChange = { on -> store.paramOf(effectId, s.index)?.let { store.setEffectParam(effectId, it, if (on) 1f else 0f) } },
+                onCheckedChange = { on ->
+                    onSelect(ParamKey(effectId, s.index, 0))
+                    store.paramOf(effectId, s.index)?.let { store.setEffectParam(effectId, it, if (on) 1f else 0f) }
+                },
             )
             Spacer(Modifier.width(4.dp))
         }
@@ -442,14 +712,22 @@ private fun EffectToggleRow(env: PanelEnv, effectId: Int, s: ParamSlot, selected
 
 /** Escolha: chips à vista (a linha cresce se quebrar). Índice arredondado e preso. */
 @Composable
-private fun EffectChoiceRow(env: PanelEnv, effectId: Int, s: ParamSlot, selected: Boolean, onSelect: (ParamKey) -> Unit) {
+private fun EffectChoiceRow(
+    env: PanelEnv,
+    effectId: Int,
+    s: ParamSlot,
+    label: String,
+    selected: Boolean,
+    onSelect: (ParamKey) -> Unit,
+    onMenu: () -> Unit,
+) {
     val store = env.store
     val value = rememberParamValue(env, effectId, s.index, 0)
     val look = rememberLook(env, effectId, s.index, null)
     val options = s.enumLabels.ifEmpty { List((s.max - s.min).roundToInt().coerceAtLeast(0) + 1) { "${it + 1}" } }
     PropertyCustomRow(
-        s.label, selected, onSelect = { onSelect(ParamKey(effectId, s.index, 0)) }, keyframe = look,
-        expression = rememberExpr(env, effectId, s), onExpression = if (s.animatable) ({ openParamExpression(store, effectId, s) }) else null,
+        label, selected, onSelect = { onSelect(ParamKey(effectId, s.index, 0)) }, keyframe = look,
+        expression = rememberExpr(env, effectId, s), onExpression = onMenu,
     ) {
         ChoiceChips(
             options = options,
@@ -461,7 +739,15 @@ private fun EffectChoiceRow(env: PanelEnv, effectId: Int, s: ParamSlot, selected
 
 /** Cor: "R G B" + amostra → seletor; a folha inteira = UM passo de desfazer. */
 @Composable
-private fun EffectColorRow(env: PanelEnv, effectId: Int, s: ParamSlot, selected: Boolean, onSelect: (ParamKey) -> Unit) {
+private fun EffectColorRow(
+    env: PanelEnv,
+    effectId: Int,
+    s: ParamSlot,
+    label: String,
+    selected: Boolean,
+    onSelect: (ParamKey) -> Unit,
+    onMenu: () -> Unit,
+) {
     val store = env.store
     // Derivado como `Color` (igualdade por valor): um FloatArray novo a cada
     // leitura faria a linha recompor a cada quadro da reprodução.
@@ -470,18 +756,13 @@ private fun EffectColorRow(env: PanelEnv, effectId: Int, s: ParamSlot, selected:
     }
     val look = rememberLook(env, effectId, s.index, null)
     PropertyCustomRow(
-        s.label, selected, onSelect = { onSelect(ParamKey(effectId, s.index, 0)) }, keyframe = look,
-        expression = rememberExpr(env, effectId, s), onExpression = if (s.animatable) ({ openParamExpression(store, effectId, s) }) else null,
+        label, selected, onSelect = { onSelect(ParamKey(effectId, s.index, 0)) }, keyframe = look,
+        expression = rememberExpr(env, effectId, s), onExpression = onMenu,
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "${(color.red * 255).roundToInt()} ${(color.green * 255).roundToInt()} ${(color.blue * 255).roundToInt()}",
-                style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontFeatureSettings = "tnum")),
-            )
-            Spacer(Modifier.width(10.dp))
             ColorWell(color) {
                 onSelect(ParamKey(effectId, s.index, 0))
-                store.beginGesture("cor ${s.label}")
+                store.beginGesture("cor $label")
                 env.openColor(
                     ColorRequest(
                         initial = floatArrayOf(color.red, color.green, color.blue, color.alpha),
@@ -498,41 +779,26 @@ private fun EffectColorRow(env: PanelEnv, effectId: Int, s: ParamSlot, selected:
 }
 
 /**
- * O RODAPÉ [A] (`_Rodape`): intensidade da camada de ajuste (é a opacidade),
- * "Efeitos de áudio" em vídeo, e o botão largo "+ Adicionar efeito".
+ * O RODAPÉ: intensidade da camada de ajuste (é a opacidade) e o botão largo
+ * "+ Adicionar efeito" (ref16: texto sublinhado num cartão escuro).
  */
 @Composable
 private fun EffectsFooter(env: PanelEnv, kind: Int) {
-    val store = env.store
     Column(Modifier.fillMaxWidth()) {
         if (kind == LayerType.Adjustment.kind) AdjustmentIntensity(env)
-        if (kind == LayerType.Video.kind) {
-            Row(
-                Modifier
-                    .padding(vertical = 4.dp)
-                    .tocavel { store.comingSoon("Efeitos de áudio") }
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                CupertinoIcon(CupertinoGlyph.MusicNote, 18.dp, AureaColors.Accent)
-                Spacer(Modifier.width(8.dp))
-                Text("Efeitos de áudio", style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W500, color = AureaColors.Accent)))
-            }
-        }
-        Spacer(Modifier.height(8.dp))
         Row(
             Modifier
                 .fillMaxWidth()
+                .height(52.dp)
                 .clip(RoundedCornerShape(12.dp))
-                .background(AureaColors.Chip)
-                .tocavel(haptic = true, onClick = env.onOpenEffectsBrowser)
-                .padding(vertical = 13.dp),
+                .background(AureaColors.Surface)
+                .tocavel(haptic = true, onClick = env.onOpenEffectsBrowser),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            CupertinoIcon(CupertinoGlyph.Plus, 17.dp, AureaColors.Action)
+            CupertinoIcon(CupertinoGlyph.Plus, 17.dp, AureaColors.Accent)
             Spacer(Modifier.width(8.dp))
-            Text("Adicionar efeito", style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W600, color = AureaColors.Action)))
+            Text("Adicionar efeito", style = AureaType.Base.merge(TextStyle(fontSize = 16.sp, fontWeight = FontWeight.W600, color = AureaColors.Accent)))
         }
     }
 }
@@ -554,7 +820,7 @@ private fun AdjustmentIntensity(env: PanelEnv) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Intensidade da camada de ajuste", modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
             Box(
-                Modifier.size(36.dp).tocavel { store.toggleTransformKeyframe(intArrayOf(TrackProperty.OPACITY)) },
+                Modifier.size(44.dp).tocavel { store.toggleTransformKeyframe(intArrayOf(TrackProperty.OPACITY)) },
                 contentAlignment = Alignment.Center,
             ) {
                 CupertinoIcon(

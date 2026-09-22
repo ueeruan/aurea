@@ -21,6 +21,11 @@ namespace {
 
 constexpr SurfaceFormat kWorkFormat = SurfaceFormat::RGBA16F;
 
+/// As máscaras de canal do RGB no tempo: uma amostra contribui exatamente um
+/// canal, e as três somadas refazem a cor inteira (o alfa entra dividido por
+/// três no shader de composição).
+constexpr Vec3 kChannelMasks[3] = {Vec3{1, 0, 0}, Vec3{0, 1, 0}, Vec3{0, 0, 1}};
+
 f32 srgb_to_linear(f32 c) noexcept {
     return c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
 }
@@ -595,7 +600,30 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         // Guia: referência de trabalho no editor, nunca no arquivo final.
         if (l->guide && settings.finalQuality) continue;
         if (anySolo && !l->solo && !isMatte) continue;
-        const FrameIndex local = l->local_time(time);
+        // POSTERIZAR TEMPO (Fase 7.3 §26): o tempo da camada é travado numa
+        // taxa menor ANTES de tudo. Trava o TEMPO DA TIMELINE, não o "tempo
+        // local": quem decide o quadro do vídeo é `source_frame(timelineTime)`,
+        // então travar o tempo local deixaria o vídeo andando normalmente — e
+        // o efeito não seria um efeito, seria um nome no painel.
+        FrameIndex layerTime = time;
+        if (effects_) {
+            const EffectTypeId posterize = effects_->find_key(effect_keys::kPosterizeTime);
+            const ParameterRegistry* pp = posterize ? effects_->params(posterize) : nullptr;
+            if (pp && pp->count() >= 2) {
+                for (const EffectInstance& inst : l->effects) {
+                    if (!inst.enabled || inst.type != posterize) continue;
+                    const f32 fps = evaluate_param(l->tracks, inst, 0, pp->at(0), l->local_time(time)).v[0];
+                    const bool hold = evaluate_param(l->tracks, inst, 1, pp->at(1), l->local_time(time)).as_bool();
+                    const f64 step = comp.fps() / std::max(fps, 0.01f);
+                    if (step > 1.0) {
+                        const f64 v = static_cast<f64>(time.value) / step;
+                        layerTime = FrameIndex{static_cast<i64>((hold ? std::floor(v) : std::round(v)) * step)};
+                    }
+                    break;   // um Posterizar por camada: o primeiro ligado manda
+                }
+            }
+        }
+        const FrameIndex local = l->local_time(layerTime);
 
         const LayerId rid = render_id(id);
         RenderLayer rl;
@@ -1027,7 +1055,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 const Composition* child = project.timeline().composition(l->nested.composition);
                 if (!child || child == &comp || prepareDepth_ >= 8) continue;
                 const f64 childFps = child->fps() > 0.0 ? child->fps() : fps;
-                const i64 cf = static_cast<i64>(std::floor(l->source_frame(time) * childFps / fps + 1e-6));
+                const i64 cf = static_cast<i64>(std::floor(l->source_frame(layerTime) * childFps / fps + 1e-6));
                 if (cf < 0 || cf >= child->duration().value) continue;
                 auto snapChild = std::make_unique<FrameSnapshot>();
                 const u32 savedSalt = nestSalt_;
@@ -1226,19 +1254,51 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             }
         }
 
+        // RGB NO TEMPO (Fase 7.3 §25): cada canal de cor vem de um INSTANTE
+        // diferente da camada. Aqui só se leem os parâmetros; as fontes extras
+        // são buscadas no bloco de vídeo, que é quem fala com o decoder.
+        //
+        // Com o Eco ligado junto, o RGB no tempo MANDA: os dois somam imagem
+        // inteira por caminhos diferentes e o resultado estouraria. Trocar é
+        // mais honesto que somar e mentir sobre a intensidade.
+        bool rgbOn = false;
+        f32 rgbOffsets[3] = {0.0f, 0.0f, 0.0f};
+        f32 rgbUnit = 1.0f;
+        f32 rgbAmount = 0.0f;
+        if (effects_ && !wants_3d(comp, *l, time)) {
+            const EffectTypeId rgbType = effects_->find_key(effect_keys::kTimeWarpRgb);
+            const ParameterRegistry* rp = rgbType ? effects_->params(rgbType) : nullptr;
+            for (const EffectInstance& inst : l->effects) {
+                if (!inst.enabled || inst.type != rgbType || !rp || rp->count() < 6) continue;
+                rgbOffsets[0] = evaluate_param(l->tracks, inst, 0, rp->at(0), local).v[0];
+                rgbOffsets[1] = evaluate_param(l->tracks, inst, 1, rp->at(1), local).v[0];
+                rgbOffsets[2] = evaluate_param(l->tracks, inst, 2, rp->at(2), local).v[0];
+                const bool seconds = evaluate_param(l->tracks, inst, 3, rp->at(3), local).as_enum() == 1;
+                rgbAmount = std::clamp(evaluate_param(l->tracks, inst, 4, rp->at(4), local).v[0] / 100.0f, 0.0f, 1.0f);
+                rgbUnit = seconds ? static_cast<f32>(comp.fps()) : 1.0f;
+                rgbOn = rgbAmount >= 0.01f;
+                break;   // um RGB no tempo por camada
+            }
+        }
+        if (rgbOn) {
+            // O deslocamento por canal já está aplicado nas fontes extras; a
+            // camada não precisa de amostras de matriz.
+            rl.temporal.clear();
+        }
+
         // Vídeo: pede o frame e pega o melhor disponível AGORA (nunca espera).
         if (rl.source.kind == LayerSource::Kind::Video && media) {
             const Asset* asset = project.asset(l->source);
             VideoSource* src = media->source_for(rid, l->source, *asset, frameNumber);
             if (src) {
-                i64 mediaUs = static_cast<i64>(std::llround(l->source_frame(time) * 1e6 / fps));
+                i64 mediaUs = static_cast<i64>(std::llround(l->source_frame(layerTime) * 1e6 / fps));
                 // Mistura de quadros: posição FRACIONÁRIA na grade da fonte.
                 i64 nextUs = -1;
                 f32 blendT = 0.0f;
                 const bool wantVector = l->vectorBlur > 0.0f && comp.motion_blur().shutterAngle > 0.0f;
                 if (l->frameBlend >= 1 || wantVector) {
                     if (const f64 srcFps = src->info().fps; srcFps > 0.0) {
-                        const f64 pos = l->source_frame(time) / fps * srcFps;
+                        const f64 pos = l->source_frame(layerTime) / fps * srcFps;
                         const f64 idx = std::floor(pos + 1e-3);
                         const f64 frac = pos - idx;
                         const i64 us = static_cast<i64>(std::llround((idx + 1.0) * 1e6 / srcFps));
@@ -1293,6 +1353,43 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     }
                 }
                 rl.source.frameExact = exact;
+
+                // RGB NO TEMPO: as fontes extras da MESMA camada, uma por
+                // canal. Aqui, e não no acúmulo do desfoque de movimento,
+                // porque só aqui o decoder é consultado — e o cache de quadros
+                // faz as três leituras custarem o mesmo que uma quando os
+                // instantes são próximos, que é sempre o caso.
+                if (rgbOn) {
+                    const i64 dur2 = src->info().durationUs;
+                    i64 chanUs[3] = {0, 0, 0};
+                    for (u32 c = 0; c < 3; ++c) {
+                        const f64 shifted = static_cast<f64>(time.value)
+                                          + static_cast<f64>(rgbOffsets[c] * rgbUnit * rgbAmount);
+                        f64 us = l->source_frame(FrameIndex{static_cast<i64>(std::llround(shifted))}) * 1e6 / fps;
+                        if (const f64 srcFps = src->info().fps; srcFps > 0.0) {
+                            us = std::llround(std::floor(us * srcFps / 1e6 + 1e-3) * 1e6 / srcFps);
+                        }
+                        if (dur2 > 0) us = std::clamp<f64>(us, 0.0, static_cast<f64>(dur2 - src->frame_duration_us() / 2));
+                        chanUs[c] = static_cast<i64>(std::llround(us));
+                        // O PEDIDO vem antes da leitura: sem ele o decoder não
+                        // está trabalhando nesses instantes e `frame_for`
+                        // devolveria vazio para sempre.
+                        DecodeRequest creq = req;
+                        creq.targetUs = chanUs[c];
+                        src->request(creq);
+                    }
+                    for (u32 c = 0; c < 3; ++c) {
+                        bool ex = false;
+                        rl.source.channel[c].frame = src->frame_for(chanUs[c], &ex);
+                        rl.source.channel[c].mask = kChannelMasks[c];
+                        // O quadro APROXIMADO serve para o preview (melhor um
+                        // canal fora do lugar do que um buraco), mas o export
+                        // ESPERA: um RGB no tempo que mostrasse o quadro atual
+                        // no vermelho não seria o efeito, seria um bug.
+                        if (!rl.source.channel[c].frame || !ex) ++out.missingVideoFrames;
+                    }
+                    rl.source.channelCount = 3;
+                }
                 if (!rl.source.frame) ++out.missingVideoFrames;
                 else if (!exact) ++out.staleVideoFrames;
             }
@@ -1670,8 +1767,21 @@ bool Renderer::build_video_source(const RenderLayer& layer, u32 layerIndex, u32 
     const bool tenBit = f->format == PixelFormat::P010;
     const bool threePlane = f->format == PixelFormat::YUV420P;
     // O quadro seguinte da mistura sobe em texturas próprias (senão o upload
-    // dele sobrescreveria o do atual antes do passe de cor).
-    const u64 key = layer.id.pack() ^ (f == layer.source.frameB.get() ? 0x8000000000000000ull : 0ull);
+    // dele sobrescreveria o do atual antes do passe de cor) — e o mesmo vale
+    // para as fontes do RGB no tempo, que são três quadros da MESMA camada no
+    // mesmo frame. Sem o sal por fonte, as três dividiriam uma textura só e o
+    // passe de junção leria três vezes o último quadro que subiu: o efeito
+    // pareceria funcionar (dois canais "certos" por coincidência) e estaria
+    // errado no único canal que ele existe para mudar.
+    u64 salt = 0;
+    if (f == layer.source.frameB.get()) {
+        salt = 0x8000000000000000ull;
+    } else if (f != layer.source.frame.get()) {
+        for (u32 c = 0; c < layer.source.channelCount; ++c) {
+            if (f == layer.source.channel[c].frame.get()) { salt = 0x00C0FFEE00ull + c; break; }
+        }
+    }
+    const u64 key = layer.id.pack() ^ salt;
     PlanarTextures& pt = planar_[key];
     if (pt.width != f->width || pt.height != f->height || pt.format != f->format) {
         for (TextureHandle& t : pt.plane) {
@@ -1886,6 +1996,35 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
             out.texture = graph_.create_texture("layer-video", d);
             if (!build_video_source(layer, layerIndex, w, h, out.texture, frameNumber)) return false;
             framesUsed.push_back(layer.source.frame);
+
+            // RGB NO TEMPO (Fase 7.3 §25): a textura da camada vira a JUNÇÃO
+            // de três fontes, uma por canal de cor. Um passe de tela cheia
+            // (rgb_merge.frag) lê o mesmo uv nas três — elas cobrem exatamente
+            // a mesma área, então não há matriz nenhuma para acertar.
+            if (layer.source.channelCount > 0) {
+                bool built = true;
+                FGTexture chan[LayerSource::kMaxChannelFrames]{};
+                for (u32 c = 0; c < layer.source.channelCount && built; ++c) {
+                    if (!layer.source.channel[c].frame) { built = false; break; }
+                    chan[c] = graph_.create_texture("rgb-no-tempo-canal", d);
+                    built = build_video_source(layer, layerIndex, w, h, chan[c], frameNumber,
+                                               layer.source.channel[c].frame.get());
+                    framesUsed.push_back(layer.source.channel[c].frame);
+                }
+                if (built && layer.source.channelCount == 3) {
+                    const FGTexture merged = graph_.create_texture("rgb-no-tempo", d);
+                    EffectBuildContext rctx(graph_, shaders_, arena_, *this, kWorkFormat, maxTex);
+                    const u32 pass = rctx.fullscreen_pass(
+                        "rgb-no-tempo", PassStage::Decode, merged, ShaderId::effects_rgb_merge_frag,
+                        {PassTexture{chan[0], {}, CommonSampler::LinearClamp},
+                         PassTexture{chan[1], {}, CommonSampler::LinearClamp},
+                         PassTexture{chan[2], {}, CommonSampler::LinearClamp}},
+                        nullptr, 0);
+                    if (pass != kInvalidIndex) out.texture = merged;
+                }
+                // Sem os três quadros (decoder atrasado), a camada sai da fonte
+                // principal: melhor mostrar o quadro atual do que um buraco.
+            }
             // Quadro seguinte da fonte: mistura, movimento de pixels e/ou
             // desfoque vetorial (os dois últimos pelo optical flow, em cache).
             if (layer.source.frameB) {
@@ -2851,6 +2990,11 @@ Status Renderer::render_effect_preview(const EffectRegistry& effects, EffectType
     inDesc.format = kWorkFormat;
     inDesc.sampled = true;
     inDesc.renderTarget = true;
+    auto plateDesc = [&]() noexcept {
+        TextureDesc d = inDesc;
+        d.debugName = "previa-do-efeito";
+        return d;
+    };
     const FGTexture plate = graph_.create_texture("cartela", inDesc);
 
     EffectBuildContext ctx(graph_, shaders_, arena_, *this, kWorkFormat, maxTex);
@@ -2899,13 +3043,37 @@ Status Renderer::render_effect_preview(const EffectRegistry& effects, EffectType
     LayerImage result;
     Status built = OkStatus;
 
+    // EFEITO NEUTRO: a prévia é a própria cartela. Isto não é um atalho — é a
+    // resposta certa para os controles de expressão (que existem no painel e
+    // não desenham nada) e para qualquer efeito nos valores de demonstração
+    // que não mudam a imagem. Sem esta linha, eles apareceriam como "sem
+    // prévia", que para um efeito que não muda nada é simplesmente falso.
+    if (effect->is_identity(eval)) {
+        const FGTexture same = graph_.create_texture("previa", plateDesc());
+        const Vec4 copyMap{1.0f, 1.0f, 0.0f, 0.0f};
+        if (ctx.fullscreen_pass("previa", PassStage::Output, same, ShaderId::common_copy_frag,
+                                {PassTexture{input.texture, {}, CommonSampler::LinearClamp}},
+                                &copyMap, sizeof(copyMap)) == kInvalidIndex) {
+            graph_.release(pool_);
+            pool_.end_frame();
+            (void)backend_->end_frame();
+            return Status{Errc::PipelineCompileFailed, "copia da cartela nao compilou"};
+        }
+        result.texture = same;
+        result.region = input.region;
+        result.width = width;
+        result.height = height;
+    }
+
     // Um efeito POR PIXEL não monta passe nenhum: ele devolve uma operação de
     // cor, e o grafo funde as operações vizinhas num passe só. Aqui não há
     // vizinhas — a operação roda sozinha no MESMO `color_stack.frag`, com a
     // mesma estrutura de uniforms. Sem isto, metade do catálogo (exposição,
     // saturação, níveis, curvas) não teria prévia.
     ColorOp single{};
-    if (effect->color_op(eval, single)) {
+    if (result.valid()) {
+        // já resolvido acima: efeito neutro
+    } else if (effect->color_op(eval, single)) {
         struct ColorStackUniforms {
             f32 header[4];
             f32 ops[kMaxFusedColorOps * 16];

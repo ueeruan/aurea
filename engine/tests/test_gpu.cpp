@@ -3946,3 +3946,145 @@ AUREA_TEST(Gpu, EffectPreviewRefusesWhatOneFrameCannotShow) {
     AUREA_CHECK(!g.renderer.render_effect_preview(g.effects, 0u, 96, 60, none).ok());
     AUREA_CHECK(!g.renderer.render_effect_preview(g.effects, effect_type_id(effect_keys::kGaussianBlur), 0, 60, none).ok());
 }
+
+// =============================================================================
+// A PRÉVIA DE TODO O CATÁLOGO (Fase 7.3 §13)
+//
+// Um efeito novo sem prévia é um cartão cinza no navegador — e, pior, é um
+// efeito cujo shader provavelmente não compila. Este teste percorre o catálogo
+// INTEIRO e exige que cada efeito ou desenhe a cartela, ou seja de uma classe
+// que um quadro solto não representa (temporal/global) e que a classe esteja
+// declarada como tal.
+//
+// É o teste que pega o erro mais fácil de cometer ao acrescentar um efeito:
+// registrar sem que o passe monte, ou montar um uniforme com o layout errado.
+// =============================================================================
+AUREA_TEST(Gpu, EveryCatalogEffectEitherRendersAPreviewOrSaysWhyNot) {
+    AUREA_REQUIRE_GPU();
+    Gpu& g = gpu();
+    std::vector<u8> rgba;
+    u32 rendered = 0, refused = 0;
+    for (u32 i = 0; i < g.effects.count(); ++i) {
+        const Effect& e = g.effects.at(i);
+        rgba.clear();
+        const Status s = g.renderer.render_effect_preview(g.effects, e.type_id(), 96, 60, rgba);
+        const bool structural = e.effect_class() == EffectClass::Temporal
+                             || e.effect_class() == EffectClass::Global;
+        if (s.ok()) {
+            if (rgba.size() != static_cast<usize>(96) * 60 * 4) {
+                std::printf("\n    '%s' devolveu %zu bytes", e.info().name, rgba.size());
+            }
+            AUREA_CHECK(rgba.size() == static_cast<usize>(96) * 60 * 4);
+            ++rendered;
+        } else {
+            if (!structural) {
+                std::printf("\n    '%s' nao desenhou a previa: %s", e.info().name, s.message().data());
+            }
+            AUREA_CHECK_MSG(structural, "efeito sem previa e sem motivo estrutural");
+            ++refused;
+        }
+    }
+    std::printf("(previas: %u desenhadas, %u recusadas por classe) ", rendered, refused);
+    // Um catálogo em que quase nada desenha não é um catálogo.
+    AUREA_CHECK(rendered > g.effects.count() * 3 / 4);
+}
+
+// =============================================================================
+// Efeitos temporais (Fase 7.3 §25, §26, §61)
+//
+// Os dois são DECLARATIVOS: quem age é o renderer, lendo os parâmetros no
+// instante. Estes testes provam que eles agem de verdade e não são dois nomes
+// bonitos numa lista (§21) — e provam contra uma cena que MUDA com o tempo,
+// que é o único jeito de um efeito temporal mostrar alguma coisa.
+// =============================================================================
+namespace {
+
+FloatImage first_diff_frame(Scene& s, const FloatImage& base, FrameIndex from, FrameIndex to) {
+    // Devolve o primeiro quadro a partir de `from` que difere de `base`.
+    for (i64 i = from.value; i <= to.value; ++i) {
+        const FloatImage img = s.render(FrameIndex{i});
+        f32 d = 0.0f;
+        for (usize k = 0; k < img.px.size(); ++k) d = std::max(d, std::fabs(img.px[k] - base.px[k]));
+        if (d > 0.01f) return img;
+    }
+    return base;
+}
+
+} // namespace
+
+AUREA_TEST(Gpu, PosterizeTimeHoldsTheFrameAndThenLetsItGo) {
+    AUREA_REQUIRE_GPU();
+    Scene s(128, 72, 30.0);
+    SyntheticConfig cfg;
+    cfg.width = 64;
+    cfg.height = 36;
+    cfg.pattern = SyntheticPattern::MovingSquare;
+    cfg.frameCount = 120;
+    const LayerId id = s.video(cfg, 64, 36, 0.5f);
+
+    // Sem o efeito, o quadro anda a cada quadro.
+    const FloatImage plain0 = s.render(FrameIndex{0});
+    const FloatImage plain2 = s.render(FrameIndex{2});
+    f32 moved = 0.0f;
+    for (usize k = 0; k < plain0.px.size(); ++k) moved = std::max(moved, std::fabs(plain0.px[k] - plain2.px[k]));
+    AUREA_CHECK(moved > 0.01f);
+
+    // A 10 quadros por segundo, a composição de 30 mostra o mesmo quadro em
+    // 0, 1 e 2 — e um quadro novo em 3.
+    EffectInstance& e = s.add_effect(id, effect_keys::kPosterizeTime);
+    e.params[0].constant = ParamValue::scalar(10.0f);
+    e.params[1].constant = ParamValue::boolean(true);
+
+    const FloatImage held0 = s.render(FrameIndex{0});
+    const FloatImage held2 = s.render(FrameIndex{2});
+    f32 heldDiff = 0.0f;
+    for (usize k = 0; k < held0.px.size(); ++k) heldDiff = std::max(heldDiff, std::fabs(held0.px[k] - held2.px[k]));
+    AUREA_CHECK_MSG(heldDiff < 0.01f, "o quadro devia estar SEGURADO de 0 a 2");
+
+    const FloatImage held3 = s.render(FrameIndex{3});
+    f32 nextDiff = 0.0f;
+    for (usize k = 0; k < held0.px.size(); ++k) nextDiff = std::max(nextDiff, std::fabs(held0.px[k] - held3.px[k]));
+    AUREA_CHECK_MSG(nextDiff > 0.01f, "o quadro devia DESTRAVAR no 3");
+}
+
+AUREA_TEST(Gpu, TimeWarpRgbReadsEachChannelFromItsOwnInstant) {
+    AUREA_REQUIRE_GPU();
+    Scene s(128, 72, 30.0);
+    SyntheticConfig cfg;
+    cfg.width = 64;
+    cfg.height = 36;
+    cfg.pattern = SyntheticPattern::MovingSquare;
+    cfg.frameCount = 120;
+    const LayerId id = s.video(cfg, 64, 36, 0.5f);
+
+    // Referência: o que o quadro 10 mostra, sem efeito nenhum.
+    const FloatImage ref10 = s.render(FrameIndex{10});
+    const FloatImage ref20 = s.render(FrameIndex{20});
+
+    // Vermelho 10 quadros ATRÁS, verde e azul no instante.
+    EffectInstance& e = s.add_effect(id, effect_keys::kTimeWarpRgb);
+    e.params[0].constant = ParamValue::scalar(-10.0f);
+    e.params[1].constant = ParamValue::scalar(0.0f);
+    e.params[2].constant = ParamValue::scalar(0.0f);
+    e.params[3].constant = ParamValue::scalar(0.0f);   // quadros = 0
+    e.params[4].constant = ParamValue::scalar(100.0f);
+    e.params[5].constant = ParamValue::boolean(false);
+
+    const FloatImage warped = s.render(FrameIndex{20});
+
+    // O vermelho do quadro 20 com o efeito tem de ser o vermelho do QUADRO 10,
+    // e o verde e o azul continuam os do quadro 20.
+    f32 rErr = 0.0f, gErr = 0.0f, bErr = 0.0f;
+    for (u32 y = 0; y < warped.height; ++y) {
+        for (u32 x = 0; x < warped.width; ++x) {
+            const usize k = (static_cast<usize>(y) * warped.width + x) * 4;
+            rErr = std::max(rErr, std::fabs(warped.px[k + 0] - ref10.px[k + 0]));
+            gErr = std::max(gErr, std::fabs(warped.px[k + 1] - ref20.px[k + 1]));
+            bErr = std::max(bErr, std::fabs(warped.px[k + 2] - ref20.px[k + 2]));
+        }
+    }
+    // Cada canal no seu instante, no MESMO pixel: é a definição do efeito.
+    AUREA_CHECK_MSG(rErr < 0.02f, "o vermelho devia vir do quadro 10");
+    AUREA_CHECK_MSG(gErr < 0.02f, "o verde devia ficar no quadro 20");
+    AUREA_CHECK_MSG(bErr < 0.02f, "o azul devia ficar no quadro 20");
+}

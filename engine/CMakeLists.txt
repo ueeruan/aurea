@@ -81,6 +81,11 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/ExpressionControls.cpp
     src/effects/builtin/EchoEffect.cpp
     src/effects/builtin/EffectsSupport.cpp
+    src/effects/builtin/DistortEffects.cpp
+    src/effects/builtin/StylizeEffects.cpp
+    src/effects/builtin/LightEffects.cpp
+    src/effects/builtin/GlitchEffects.cpp
+    src/effects/builtin/TemporalEffects.cpp
     src/expr/Expression.cpp
     src/media/DecodedFrameCache.cpp
     src/media/VideoSource.cpp

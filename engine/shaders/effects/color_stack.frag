@@ -31,6 +31,7 @@
 #define OP_CURVES        7
 #define OP_LUMA_KEY      8
 #define OP_CHROMA_KEY    9
+#define OP_INVERT       10
 
 #define MAX_OPS 12
 
@@ -128,6 +129,13 @@ void main() {
             float keep = hi - lo > 1e-5 ? smoothstep(lo, hi, y) : step(a.y, y);
             if (a.w > 0.5) keep = 1.0 - keep;
             alpha *= keep;
+        } else if (op == OP_INVERT) {
+            // a.y = 1 inverte as três cores; a.z = 1 inverte o alfa.
+            // A cor é invertida no valor CODIFICADO (é o "negativo" que se
+            // espera de um filme), não em linear.
+            vec3 enc = linear_to_srgb(c);
+            c = srgb_to_linear(a.y > 0.5 ? vec3(1.0) - enc : enc);
+            if (a.z > 0.5) alpha = 1.0 - alpha;
         } else if (op == OP_CHROMA_KEY) {
             // a.yzw cor-chave codificada, b.x tolerância, b.y suavidade, b.z derramamento.
             vec3 enc = linear_to_srgb(c);

@@ -201,6 +201,446 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             ),
         ),
     )
+    // --- Fase 7.3: o pacote novo ---------------------------------------------
+    // Os parâmetros principais vêm primeiro (o resto vai para "Avançado"), e o
+    // sufixo/casas são os que fazem o número fazer sentido na tela.
+    put("aurea.color.invert", EffectHuman(keywords = "inverter negativo inverter cor"))
+    put(
+        "aurea.stylize.scanlines",
+        EffectHuman(
+            keywords = "scanline varredura crt tv tubo linha",
+            principal = listOf(0, 1, 3, 4),
+            params = mapOf(
+                0 to ParamHuman(label = "Altura da linha", suffix = "px", decimals = 1),
+                3 to ParamHuman(label = "Suavidade", decimals = 0),
+                4 to ParamHuman(label = "Contraste", decimals = 0),
+                6 to ParamHuman(label = "Canal"),
+                8 to ParamHuman(label = "Rolagem", suffix = "px", decimals = 0),
+            ),
+        ),
+    )
+    put(
+        "aurea.stylize.grain",
+        EffectHuman(
+            keywords = "grain grao filme ruido textura analogico",
+            principal = listOf(0, 1, 2, 4, 7),
+            params = mapOf(
+                0 to ParamHuman(label = "Intensidade", decimals = 0),
+                1 to ParamHuman(label = "Tamanho do grão", suffix = "px", decimals = 1),
+                2 to ParamHuman(label = "Grão de cor", decimals = 0),
+                3 to ParamHuman(label = "Rugosidade", suffix = "x", decimals = 2),
+                4 to ParamHuman(label = "Sombras", decimals = 0),
+                5 to ParamHuman(label = "Luzes", decimals = 0),
+                7 to ParamHuman(label = "Animado"),
+                8 to ParamHuman(label = "Monocromático"),
+            ),
+        ),
+    )
+    put(
+        "aurea.stylize.halftone",
+        EffectHuman(
+            keywords = "halftone meio tom reticula pontos impressao jornal pontilhado",
+            principal = listOf(0, 1, 2, 5, 7),
+            params = mapOf(
+                0 to ParamHuman(label = "Tamanho do ponto", suffix = "px", decimals = 0),
+                1 to ParamHuman(label = "Contraste", decimals = 0),
+                2 to ParamHuman(label = "Ângulo", suffix = "°", decimals = 0),
+                3 to ParamHuman(label = "Suavidade", decimals = 0),
+                4 to ParamHuman(label = "Rotação por canal", suffix = "°", decimals = 0),
+                5 to ParamHuman(label = "Padrão"),
+                6 to ParamHuman(label = "Grades separadas"),
+                7 to ParamHuman(label = "Fundo claro", decimals = 0),
+                8 to ParamHuman(label = "Ganho do ponto", decimals = 0),
+            ),
+        ),
+    )
+    put(
+        "aurea.stylize.minimax",
+        EffectHuman(
+            keywords = "minimax dilatar erodir morfologia matte afinar engrossar",
+            principal = listOf(1, 0, 4, 3),
+            params = mapOf(
+                0 to ParamHuman(label = "Raio", suffix = "px", decimals = 0),
+                1 to ParamHuman(label = "Operação"),
+                2 to ParamHuman(label = "Forma"),
+                3 to ParamHuman(label = "Intensidade", decimals = 0),
+                4 to ParamHuman(label = "Comparar por"),
+            ),
+        ),
+    )
+    put(
+        "aurea.blur.unsharp",
+        EffectHuman(
+            keywords = "unsharp mascara de nitidez sharpen afiar detalhe",
+            principal = listOf(0, 1, 2),
+            params = mapOf(
+                0 to ParamHuman(label = "Intensidade", decimals = 0),
+                1 to ParamHuman(label = "Raio", suffix = "px", decimals = 1),
+                2 to ParamHuman(label = "Limiar", decimals = 0),
+                4 to ParamHuman(label = "Mistura", decimals = 0),
+            ),
+        ),
+    )
+    put(
+        "aurea.blur.lens",
+        EffectHuman(
+            keywords = "lens blur desfoque de lente bokeh iris",
+            principal = listOf(0, 1, 2, 4),
+            params = mapOf(
+                0 to ParamHuman(label = "Raio", suffix = "px", decimals = 0),
+                1 to ParamHuman(label = "Ganho das luzes", decimals = 0),
+                2 to ParamHuman(label = "Lados da íris", decimals = 0),
+                3 to ParamHuman(label = "Rotação da íris", suffix = "°", decimals = 0),
+                4 to ParamHuman(label = "Qualidade", decimals = 0),
+                7 to ParamHuman(label = "Mistura", decimals = 0),
+            ),
+        ),
+    )
+    put(
+        "aurea.distort.shake",
+        EffectHuman(
+            keywords = "shake tremor camera balancar vibrar tremer",
+            principal = listOf(0, 1, 2, 4, 5),
+            params = mapOf(
+                0 to ParamHuman(label = "Amplitude X", suffix = "px", decimals = 0),
+                1 to ParamHuman(label = "Amplitude Y", suffix = "px", decimals = 0),
+                2 to ParamHuman(label = "Frequência", suffix = "x", decimals = 2),
+                4 to ParamHuman(label = "Eixos separados"),
+                5 to ParamHuman(label = "Rotação", suffix = "°", decimals = 0),
+                6 to ParamHuman(label = "Suavização", decimals = 0),
+                7 to ParamHuman(label = "Mistura", decimals = 0),
+            ),
+        ),
+    )
+    put(
+        "aurea.distort.turbulence",
+        EffectHuman(
+            keywords = "turbulencia displacement deslocamento ruido organico fumaca",
+            principal = listOf(0, 1, 2, 4),
+            params = mapOf(
+                0 to ParamHuman(label = "Intensidade", suffix = "px", decimals = 0),
+                1 to ParamHuman(label = "Tamanho do ruído", suffix = "px", decimals = 0),
+                2 to ParamHuman(label = "Complexidade", suffix = "oitavas", decimals = 0),
+                3 to ParamHuman(label = "Evolução", suffix = "px/q", decimals = 1),
+                4 to ParamHuman(label = "Deslocamento X", suffix = "px", decimals = 0),
+                5 to ParamHuman(label = "Deslocamento Y", suffix = "px", decimals = 0),
+                8 to ParamHuman(label = "Bordas"),
+                10 to ParamHuman(label = "Girar o deslocamento", suffix = "°", decimals = 0),
+            ),
+        ),
+    )
+    put(
+        "aurea.distort.wave_warp",
+        EffectHuman(
+            keywords = "wave warp onda ondular senoide agua",
+            principal = listOf(0, 1, 2, 4),
+            params = mapOf(
+                0 to ParamHuman(label = "Altura da onda", suffix = "px", decimals = 0),
+                1 to ParamHuman(label = "Largura de onda", suffix = "px", decimals = 0),
+                2 to ParamHuman(label = "Velocidade", suffix = "px/q", decimals = 0),
+                3 to ParamHuman(label = "Fase", suffix = "°", decimals = 0),
+                4 to ParamHuman(label = "Direção"),
+                5 to ParamHuman(label = "Onda quadrada"),
+                6 to ParamHuman(label = "Bordas"),
+                7 to ParamHuman(label = "Travar nas bordas"),
+            ),
+        ),
+    )
+    put(
+        "aurea.distort.warp",
+        EffectHuman(
+            keywords = "warp lente distorcer empurrar puxar torcer esfera canto bulge pinch twist",
+            principal = listOf(0, 1, 2, 3),
+            params = mapOf(
+                0 to ParamHuman(label = "Modo"),
+                1 to ParamHuman(label = "Intensidade", suffix = "px", decimals = 0),
+                2 to ParamHuman(label = "Raio", suffix = "px", decimals = 0),
+                3 to ParamHuman(label = "Centro"),
+                4 to ParamHuman(label = "Bordas"),
+                5 to ParamHuman(label = "Mistura", decimals = 0),
+                6 to ParamHuman(label = "Luz da esfera", decimals = 0),
+            ),
+        ),
+    )
+    put(
+        "aurea.distort.ripple_dissolve",
+        EffectHuman(
+            keywords = "ripple dissolve ondulacao dissolver transicao circular agua",
+            principal = listOf(0, 1, 2, 3),
+            params = mapOf(
+                0 to ParamHuman(label = "Progresso", decimals = 0),
+                1 to ParamHuman(label = "Ondulação", suffix = "px", decimals = 0),
+                2 to ParamHuman(label = "Comprimento da onda", suffix = "px", decimals = 0),
+                3 to ParamHuman(label = "Suavidade da borda", decimals = 0),
+                4 to ParamHuman(label = "Centro"),
+                5 to ParamHuman(label = "Velocidade da onda", suffix = "x", decimals = 2),
+                7 to ParamHuman(label = "Distorcer a imagem junto"),
+                8 to ParamHuman(label = "De fora para dentro"),
+            ),
+        ),
+    )
+    put(
+        "aurea.light.deep_glow",
+        EffectHuman(
+            keywords = "deep glow brilho profundo halo neon luz bloom",
+            principal = listOf(0, 1, 2, 3, 4),
+            params = mapOf(
+                0 to ParamHuman(label = "Limite", decimals = 0),
+                1 to ParamHuman(label = "Raio do núcleo", suffix = "px", decimals = 0),
+                2 to ParamHuman(label = "Raio do halo", suffix = "px", decimals = 0),
+                3 to ParamHuman(label = "Força do núcleo", suffix = "x", decimals = 2),
+                4 to ParamHuman(label = "Força do halo", suffix = "x", decimals = 2),
+                5 to ParamHuman(label = "Cor do brilho"),
+                6 to ParamHuman(label = "Preservar as sombras"),
+                7 to ParamHuman(label = "Halo em tela"),
+                10 to ParamHuman(label = "Só o brilho"),
+                11 to ParamHuman(label = "Estouro", decimals = 0),
+            ),
+        ),
+    )
+    put(
+        "aurea.light.rays",
+        EffectHuman(
+            keywords = "rays raios de luz god rays sol volumetrico spread",
+            principal = listOf(0, 1, 2, 3, 4),
+            params = mapOf(
+                0 to ParamHuman(label = "Intensidade", suffix = "x", decimals = 2),
+                1 to ParamHuman(label = "Comprimento", decimals = 0),
+                2 to ParamHuman(label = "Limite", decimals = 0),
+                3 to ParamHuman(label = "Decaimento", decimals = 0),
+                4 to ParamHuman(label = "Ponto de luz"),
+                5 to ParamHuman(label = "Amostras", decimals = 0),
+                7 to ParamHuman(label = "Guardar a cor da fonte"),
+                8 to ParamHuman(label = "Girar a cor", suffix = "°", decimals = 0),
+            ),
+        ),
+    )
+    put(
+        "aurea.light.sweep",
+        EffectHuman(
+            keywords = "light sweep faixa de luz brilho varredura reflexo",
+            principal = listOf(0, 1, 2, 4, 5),
+            params = mapOf(
+                0 to ParamHuman(label = "Posição", decimals = 0),
+                1 to ParamHuman(label = "Largura", decimals = 0),
+                2 to ParamHuman(label = "Intensidade", suffix = "x", decimals = 2),
+                3 to ParamHuman(label = "Suavidade da borda", decimals = 0),
+                4 to ParamHuman(label = "Ângulo", suffix = "°", decimals = 0),
+                5 to ParamHuman(label = "Relevo", decimals = 0),
+                6 to ParamHuman(label = "Multiplicar"),
+                7 to ParamHuman(label = "Só onde a imagem é clara"),
+            ),
+        ),
+    )
+    put(
+        "aurea.color.colorama",
+        EffectHuman(
+            keywords = "colorama remapeamento de cor arco-iris psicodelico mapa de cor",
+            principal = listOf(0, 1, 2, 4, 5),
+            params = mapOf(
+                0 to ParamHuman(label = "Fase", suffix = "voltas", decimals = 2),
+                1 to ParamHuman(label = "Ciclos", suffix = "x", decimals = 2),
+                2 to ParamHuman(label = "Saturação", decimals = 0),
+                3 to ParamHuman(label = "Brilho", decimals = 0),
+                4 to ParamHuman(label = "Entrada"),
+                5 to ParamHuman(label = "Mistura", decimals = 0),
+                6 to ParamHuman(label = "Inverter o arco-íris"),
+                7 to ParamHuman(label = "Peso do croma", decimals = 0),
+                9 to ParamHuman(label = "Ganho", suffix = "x", decimals = 2),
+            ),
+        ),
+    )
+    put(
+        "aurea.stylize.pixel_sort",
+        EffectHuman(
+            keywords = "pixel sort ordenar pixels derreter listras glitch sort",
+            principal = listOf(0, 1, 2, 4),
+            params = mapOf(
+                0 to ParamHuman(label = "Limiar baixo", decimals = 0),
+                1 to ParamHuman(label = "Limiar alto", decimals = 0),
+                2 to ParamHuman(label = "Comprimento", decimals = 0),
+                3 to ParamHuman(label = "Aleatoriedade", decimals = 0),
+                4 to ParamHuman(label = "Direção"),
+                5 to ParamHuman(label = "Sentido inverso"),
+                6 to ParamHuman(label = "Ordenar por"),
+                8 to ParamHuman(label = "Por faixa de tom"),
+                9 to ParamHuman(label = "Passo", suffix = "px", decimals = 0),
+            ),
+        ),
+    )
+    put(
+        "aurea.stylize.film_damage",
+        EffectHuman(
+            keywords = "film damage dano de filme poeira riscos arranhao projetor pelicula",
+            principal = listOf(0, 1, 2, 3, 4),
+            params = mapOf(
+                0 to ParamHuman(label = "Poeira", decimals = 0),
+                1 to ParamHuman(label = "Riscos", decimals = 0),
+                2 to ParamHuman(label = "Piscar", decimals = 0),
+                3 to ParamHuman(label = "Balanço de porta", suffix = "px", decimals = 1),
+                4 to ParamHuman(label = "Queimado", decimals = 0),
+                5 to ParamHuman(label = "Emenda"),
+                7 to ParamHuman(label = "Mistura", decimals = 0),
+                8 to ParamHuman(label = "Tamanho da poeira", suffix = "px", decimals = 1),
+                9 to ParamHuman(label = "Comprimento do risco", decimals = 0),
+                11 to ParamHuman(label = "Calor do queimado", decimals = 0),
+            ),
+        ),
+    )
+    put(
+        "aurea.stylize.jpeg_damage",
+        EffectHuman(
+            keywords = "jpeg damage dano compressao artefato bloco qualidade",
+            principal = listOf(0, 1, 2, 3),
+            params = mapOf(
+                0 to ParamHuman(label = "Qualidade", decimals = 0),
+                1 to ParamHuman(label = "Blocos", decimals = 0),
+                2 to ParamHuman(label = "Anelamento", decimals = 0),
+                3 to ParamHuman(label = "Dano de cor", decimals = 0),
+                4 to ParamHuman(label = "Tamanho do bloco", suffix = "px", decimals = 0),
+                5 to ParamHuman(label = "Suavizar o bloco", decimals = 0),
+                7 to ParamHuman(label = "Mistura", decimals = 0),
+                8 to ParamHuman(label = "Blocos corrompidos", decimals = 0),
+            ),
+        ),
+    )
+    put(
+        "aurea.stylize.holomatrix",
+        EffectHuman(
+            keywords = "holo matrix holograma projecao grade tecnologica scanner",
+            principal = listOf(0, 1, 3, 4, 6),
+            params = mapOf(
+                0 to ParamHuman(label = "Mistura da cor", decimals = 0),
+                1 to ParamHuman(label = "Grade", decimals = 0),
+                2 to ParamHuman(label = "Células da grade", decimals = 0),
+                3 to ParamHuman(label = "Brilho das bordas", decimals = 0),
+                4 to ParamHuman(label = "Posição da varredura", decimals = 0),
+                5 to ParamHuman(label = "Largura da varredura", decimals = 0),
+                6 to ParamHuman(label = "Interferência", decimals = 0),
+                7 to ParamHuman(label = "Velocidade da varredura", suffix = "x", decimals = 2),
+                9 to ParamHuman(label = "Fundo aceso", decimals = 0),
+                11 to ParamHuman(label = "Mistura", decimals = 0),
+            ),
+        ),
+    )
+    put(
+        "aurea.glitch.glitchify",
+        EffectHuman(
+            keywords = "glitchify glitch defeito digital rasgo bloco corrupcao",
+            principal = listOf(0, 1, 2, 3, 4),
+            params = mapOf(
+                0 to ParamHuman(label = "Altura da faixa", suffix = "px", decimals = 0),
+                1 to ParamHuman(label = "Deslocamento", suffix = "px", decimals = 0),
+                2 to ParamHuman(label = "Picos", decimals = 0),
+                3 to ParamHuman(label = "Separação RGB", suffix = "px", decimals = 0),
+                4 to ParamHuman(label = "Frequência", suffix = "quadros", decimals = 1),
+                6 to ParamHuman(label = "Travar o quadro"),
+                7 to ParamHuman(label = "Mistura", decimals = 0),
+                8 to ParamHuman(label = "Blocos verticais"),
+                9 to ParamHuman(label = "Corrupção de cor", decimals = 0),
+            ),
+        ),
+    )
+    put(
+        "aurea.glitch.vhs",
+        EffectHuman(
+            keywords = "vhs fita cassette videocassete tracking dropouts analogico videotape",
+            principal = listOf(0, 1, 2, 3, 4, 5, 6),
+            params = mapOf(
+                0 to ParamHuman(label = "Borrado da luma", suffix = "px", decimals = 1),
+                1 to ParamHuman(label = "Alargar a cor", suffix = "px", decimals = 1),
+                2 to ParamHuman(label = "Instabilidade", suffix = "px", decimals = 0),
+                3 to ParamHuman(label = "Perdas de fita", decimals = 0),
+                4 to ParamHuman(label = "Varredura de cabeçote", decimals = 0),
+                5 to ParamHuman(label = "Ruído", decimals = 0),
+                6 to ParamHuman(label = "Degradação de cor", decimals = 0),
+                7 to ParamHuman(label = "Sangramento", decimals = 0),
+                10 to ParamHuman(label = "Velocidade da instabilidade", suffix = "x", decimals = 2),
+                11 to ParamHuman(label = "Altura da perda", suffix = "px", decimals = 1),
+                12 to ParamHuman(label = "Mistura", decimals = 0),
+            ),
+        ),
+    )
+    put(
+        "aurea.glitch.uni_vhs",
+        EffectHuman(
+            keywords = "vhs fita estilizado anos 80 retro neon chroma warp",
+            principal = listOf(0, 1, 2, 3, 6),
+            params = mapOf(
+                0 to ParamHuman(label = "Separação RGB", suffix = "px", decimals = 0),
+                1 to ParamHuman(label = "Ondulação", suffix = "px", decimals = 0),
+                2 to ParamHuman(label = "Brilho sujo", decimals = 0),
+                3 to ParamHuman(label = "Vinheta", decimals = 0),
+                4 to ParamHuman(label = "Varredura", decimals = 0),
+                5 to ParamHuman(label = "Ruído", decimals = 0),
+                6 to ParamHuman(label = "Saturação", decimals = 0),
+                7 to ParamHuman(label = "Mistura", decimals = 0),
+                9 to ParamHuman(label = "Frequência da ondulação", suffix = "x", decimals = 1),
+            ),
+        ),
+    )
+    put(
+        "aurea.glitch.signal",
+        EffectHuman(
+            keywords = "signal sinal interferencia transmissao banda sincronia chiado",
+            principal = listOf(0, 1, 2, 3, 4),
+            params = mapOf(
+                0 to ParamHuman(label = "Bandas perdidas", decimals = 0),
+                1 to ParamHuman(label = "Deslocamento", suffix = "px", decimals = 0),
+                2 to ParamHuman(label = "Deriva", suffix = "px/q", decimals = 2),
+                3 to ParamHuman(label = "Altura da banda", suffix = "px", decimals = 0),
+                4 to ParamHuman(label = "Ruído de sinal", decimals = 0),
+                6 to ParamHuman(label = "Frequência", suffix = "quadros", decimals = 1),
+                7 to ParamHuman(label = "Mistura", decimals = 0),
+                8 to ParamHuman(label = "Perder a sincronia"),
+                9 to ParamHuman(label = "Separação de cor", suffix = "px", decimals = 0),
+            ),
+        ),
+    )
+    put(
+        "aurea.glitch.cross",
+        EffectHuman(
+            keywords = "cross glitch cruz transicao varredura rasgo",
+            principal = listOf(0, 1, 2, 4),
+            params = mapOf(
+                0 to ParamHuman(label = "Progresso", decimals = 0),
+                1 to ParamHuman(label = "Largura da faixa", decimals = 0),
+                2 to ParamHuman(label = "Deslocamento", suffix = "px", decimals = 0),
+                3 to ParamHuman(label = "Ruído de fundo", decimals = 0),
+                4 to ParamHuman(label = "Separação RGB", suffix = "px", decimals = 0),
+                6 to ParamHuman(label = "Frequência", suffix = "quadros", decimals = 1),
+                7 to ParamHuman(label = "Mistura", decimals = 0),
+                8 to ParamHuman(label = "Faixa vertical"),
+                9 to ParamHuman(label = "Faixa horizontal"),
+            ),
+        ),
+    )
+    put(
+        "aurea.time.posterize",
+        EffectHuman(
+            keywords = "posterize time posterizar tempo taxa quadros stop motion animacao",
+            principal = listOf(0, 1),
+            params = mapOf(
+                0 to ParamHuman(label = "Quadros por segundo", suffix = "fps", decimals = 1),
+                1 to ParamHuman(label = "Segurar o quadro"),
+            ),
+        ),
+    )
+    put(
+        "aurea.time.warp_rgb",
+        EffectHuman(
+            keywords = "rgb no tempo time warp separar canais atrasar cor chromatic",
+            principal = listOf(0, 1, 2, 3, 4),
+            params = mapOf(
+                0 to ParamHuman(label = "Vermelho", suffix = "quadros", decimals = 1),
+                1 to ParamHuman(label = "Verde", suffix = "quadros", decimals = 1),
+                2 to ParamHuman(label = "Azul", suffix = "quadros", decimals = 1),
+                3 to ParamHuman(label = "Unidade"),
+                4 to ParamHuman(label = "Intensidade", decimals = 0),
+                5 to ParamHuman(label = "Prender nas pontas"),
+            ),
+        ),
+    )
     put("aurea.control.slider", EffectHuman(keywords = "expressao slider controle", params = mapOf(0 to ParamHuman(decimals = 1))))
     put("aurea.control.angle", EffectHuman(keywords = "expressao angulo controle"))
     put("aurea.control.checkbox", EffectHuman(keywords = "expressao caixa controle"))

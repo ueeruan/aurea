@@ -503,7 +503,14 @@ AUREA_TEST(EffectGraph, RegistryRefusesDuplicateKeys) {
     const u32 before = reg.count();
     register_builtin_effects(reg);
     AUREA_CHECK_EQ(reg.count(), before);
-    AUREA_CHECK_EQ(before, static_cast<u32>(20));   // 12 efeitos + chaves de luma e croma (7E) + 5 controles de expressão (7G)
+    // 12 efeitos + chaves de luma e croma (7E) + 5 controles de expressão (7G)
+    // + os 27 do pacote da Fase 7.3:
+    //   estilizar 6 (inverter, varredura, grão, meio-tom, minimax, máscara de nitidez)
+    //   distorcer 5 (tremor, turbulência, onda, lente, ondulação que dissolve)
+    //   luz e cor 5 (brilho profundo, raios, faixa de luz, desfoque de lente, colorama)
+    //   glitch e dano 9 (glitchify, VHS, VHS fita, sinal, cruz, holomatrix, filme, JPEG, ordenar pixels)
+    //   tempo 2 (posterizar tempo, RGB no tempo)
+    AUREA_CHECK_EQ(before, static_cast<u32>(47));
 }
 
 AUREA_TEST(EffectGraph, CurveIsMonotoneBetweenPoints) {

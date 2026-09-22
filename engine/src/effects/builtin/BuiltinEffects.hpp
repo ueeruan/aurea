@@ -50,6 +50,14 @@ static_assert(sizeof(EffectUniforms) == 112, "layout std140 dos uniforms de efei
 /// que mantém a região (o caso de [single_pass]).
 [[nodiscard]] EffectUniforms base_uniforms(const LayerImage& input) noexcept;
 
+/// Um passe de REAMOSTRAGEM AFIM: a saída lê a entrada pela inversa de `m`,
+/// com a região da caixa transformada. É o corpo do Transformar e do Shake —
+/// os dois são "mover a imagem no plano", só que um pelo usuário e o outro
+/// por um sorteio determinístico.
+[[nodiscard]] Status affine_pass(EffectBuildContext& ctx, const LayerImage& input, const Mat4& m,
+                                 const LayerPlacement* placement, f32 opacity, const char* name,
+                                 f32 margin, LayerImage& out);
+
 /// Pedido de gaussiano, em pixels de LAYER. O construtor converte para texels
 /// pela densidade da entrada e reduz a imagem enquanto o sigma passar de 8
 /// texels — o custo por pixel fica limitado, qualquer que seja o raio.

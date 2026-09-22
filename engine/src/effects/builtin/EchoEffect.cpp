@@ -16,7 +16,7 @@ namespace {
 class EchoEffect final : public Effect {
 public:
     const EffectInfo& info() const noexcept override {
-        static const EffectInfo kInfo{effect_keys::kEchoTrail, "Eco e rastro", "Tempo", EffectClass::PerPixel};
+        static const EffectInfo kInfo{effect_keys::kEchoTrail, "Eco e rastro", "Tempo", EffectClass::Temporal};
         return kInfo;
     }
 

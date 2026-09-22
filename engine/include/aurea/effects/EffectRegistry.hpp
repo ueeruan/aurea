@@ -59,6 +59,42 @@ namespace effect_keys {
     inline constexpr const char* kLumaKey            = "aurea.key.luma";
     inline constexpr const char* kChromaKey          = "aurea.key.chroma";
     inline constexpr const char* kEchoTrail          = "aurea.time.echo";
+
+    // --- Fase 7.3 (§22): o pacote de efeitos novos ---
+    // Cor
+    inline constexpr const char* kInvert             = "aurea.color.invert";
+    inline constexpr const char* kColorama           = "aurea.color.colorama";
+    // Desfoque e nitidez
+    inline constexpr const char* kUnsharp            = "aurea.blur.unsharp";
+    inline constexpr const char* kLensBlur           = "aurea.blur.lens";
+    // Luz
+    inline constexpr const char* kDeepGlow           = "aurea.light.deep_glow";
+    inline constexpr const char* kRays               = "aurea.light.rays";
+    inline constexpr const char* kLightSweep         = "aurea.light.sweep";
+    // Distorção
+    inline constexpr const char* kShake              = "aurea.distort.shake";
+    inline constexpr const char* kTurbulence         = "aurea.distort.turbulence";
+    inline constexpr const char* kWaveWarp           = "aurea.distort.wave_warp";
+    inline constexpr const char* kWarp               = "aurea.distort.warp";
+    inline constexpr const char* kRippleDissolve     = "aurea.distort.ripple_dissolve";
+    // Estilizar
+    inline constexpr const char* kScanlines          = "aurea.stylize.scanlines";
+    inline constexpr const char* kGrain              = "aurea.stylize.grain";
+    inline constexpr const char* kHalftone           = "aurea.stylize.halftone";
+    inline constexpr const char* kMinimax            = "aurea.stylize.minimax";
+    inline constexpr const char* kPixelSort          = "aurea.stylize.pixel_sort";
+    inline constexpr const char* kFilmDamage         = "aurea.stylize.film_damage";
+    inline constexpr const char* kJpegDamage         = "aurea.stylize.jpeg_damage";
+    inline constexpr const char* kHoloMatrix         = "aurea.stylize.holomatrix";
+    // Glitch
+    inline constexpr const char* kGlitchify          = "aurea.glitch.glitchify";
+    inline constexpr const char* kVhs                = "aurea.glitch.vhs";
+    inline constexpr const char* kUniVhs             = "aurea.glitch.uni_vhs";
+    inline constexpr const char* kSignal             = "aurea.glitch.signal";
+    inline constexpr const char* kCrossGlitch        = "aurea.glitch.cross";
+    // Tempo (integrados ao Temporal Engine, não desenham na cadeia de pixels)
+    inline constexpr const char* kPosterizeTime      = "aurea.time.posterize";
+    inline constexpr const char* kTimeWarpRgb        = "aurea.time.warp_rgb";
     // Controles de expressão (não desenham; ver ExpressionControls.cpp).
     inline constexpr const char* kSliderControl      = "aurea.control.slider";
     inline constexpr const char* kAngleControl       = "aurea.control.angle";

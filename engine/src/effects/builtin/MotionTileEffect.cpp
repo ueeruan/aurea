@@ -217,7 +217,8 @@ void register_motion_tile_effect(EffectRegistry& r) { (void)r.add(std::make_uniq
 } // namespace builtin
 
 void register_builtin_effects(EffectRegistry& registry) {
-    // Ordem do menu "adicionar efeito".
+    // Ordem do menu "adicionar efeito". O bloco novo (Fase 7.3) entra depois
+    // dos que já existiam para não mudar a ordem que o dono já conhece.
     builtin::register_transform_effect(registry);
     builtin::register_color_effects(registry);
     builtin::register_blur_effects(registry);
@@ -226,6 +227,11 @@ void register_builtin_effects(EffectRegistry& registry) {
     builtin::register_keying_effects(registry);
     builtin::register_expression_controls(registry);
     builtin::register_echo_effect(registry);
+    builtin::register_distort_effects(registry);
+    builtin::register_stylize_effects(registry);
+    builtin::register_light_effects(registry);
+    builtin::register_glitch_effects(registry);
+    builtin::register_temporal_effects(registry);
 }
 
 } // namespace aurea

@@ -14,6 +14,10 @@
 #ifndef AUREA_EFFECTS_COMMON_GLSL
 #define AUREA_EFFECTS_COMMON_GLSL
 
+// As conversões de cor do motor (linear_to_srgb, premultiply, luminance709)
+// vivem lá desde sempre: os efeitos usam AS MESMAS, não uma cópia.
+#include "../common/color.glsl"
+
 const float AUREA_TAU = 6.28318530718;
 
 // --- Ruído -------------------------------------------------------------------

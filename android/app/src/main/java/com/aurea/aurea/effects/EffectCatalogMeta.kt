@@ -98,6 +98,51 @@ private val Table: Map<Int, EffectMeta> = buildMap {
     put("aurea.time.echo", EffectMeta("Deixa rastro: cópias da própria imagem atrasadas no tempo, com desvanecimento.", AllTargets))
     put("aurea.time.posterize", EffectMeta("Trava a taxa de quadros: a imagem passa a andar em passos, como animação desenhada.", AllTargets))
     put("aurea.time.warp_rgb", EffectMeta("Cada canal de cor vem de um instante diferente — o deslocamento RGB no tempo.", AllTargets))
+    // --- Fase 7.3: o pacote novo ---------------------------------------------
+    put("aurea.color.invert", EffectMeta("O negativo: cada cor vira o seu contrário, como um filme revelado errado.", AllTargets))
+    put("aurea.color.colorama", EffectMeta("Remapeia a cor: a luz de cada pixel vira uma posição num arco-íris que gira.", AllTargets))
+    put("aurea.blur.unsharp", EffectMeta("Máscara de nitidez de verdade: original + ganho × (original − borrado), com limiar para não amplificar o grão.", AllTargets))
+    put("aurea.blur.lens", EffectMeta(
+        "Desfoque de lente: um disco de amostras com o formato da íris, e as luzes pesam mais — é o bokeh, não um borrão.",
+        AllTargets,
+    ))
+    put("aurea.light.deep_glow", EffectMeta("Brilho em dois halos, um apertado e um largo, com cor própria: o núcleo estoura e o ambiente preenche.", AllTargets))
+    put("aurea.light.rays", EffectMeta("Raios de luz que saem de um ponto: a clareira das partes claras se espalha em linha reta.", AllTargets))
+    put("aurea.light.sweep", EffectMeta("Uma lâmina de luz atravessa a imagem. Com relevo, ela acende só onde a superfície está virada para ela.", AllTargets))
+    put(
+        "aurea.distort.shake",
+        EffectMeta(
+            "Tremor determinístico: a camada treme igual toda vez que você reabre o projeto, com frequência e eixos separados.",
+            listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Ajuste),
+        ),
+    )
+    put("aurea.distort.turbulence", EffectMeta("Um campo de ruído empurra cada pixel. O campo evolui com o tempo — fumaça, calor, água.", AllTargets))
+    put("aurea.distort.wave_warp", EffectMeta("Uma onda atravessa a imagem, horizontal, vertical ou na diagonal, e pode ser travada nas bordas.", AllTargets))
+    put("aurea.distort.warp", EffectMeta("Lente: empurrar, puxar, torcer, esfera e canto, com raio e ponto próprios.", AllTargets))
+    put("aurea.distort.ripple_dissolve", EffectMeta("A imagem some em círculos que crescem do centro com a borda ondulando. Anime o progresso para virar transição.", AllTargets))
+    put("aurea.stylize.scanlines", EffectMeta("Varredura de tela: a linha escurece o que está atrás dela, com altura, suavidade e canal próprios.", AllTargets))
+    put("aurea.stylize.grain", EffectMeta("Grão de filme: cristal do tamanho que você quiser, luma e croma separados, mais forte nas sombras.", AllTargets))
+    put("aurea.stylize.halftone", EffectMeta("Meio-tom: a imagem vira pontos, com a grade girada por canal para as três retículas não brigarem.", AllTargets))
+    put("aurea.stylize.minimax", EffectMeta("Dilata ou erode o que estiver claro: engrossa ou afina um recorte e limpa um pixel de borda.", AllTargets))
+    put("aurea.stylize.pixel_sort", EffectMeta("Ordena os pixels de cada linha pela luz: a imagem derrete em riscos.", AllTargets))
+    put("aurea.stylize.film_damage", EffectMeta("Filme danificado: poeira, riscos, piscar, balanço de porta, queimado e emenda — cada um com o seu controle.", AllTargets))
+    put("aurea.stylize.jpeg_damage", EffectMeta("Dano de JPEG: os blocos, o anelamento das bordas e a cor em meia resolução. Qualidade escala os três.", AllTargets))
+    put("aurea.stylize.holomatrix", EffectMeta("Holograma: a imagem vira projeção, com grade técnica, varredura e interferência.", AllTargets))
+    put("aurea.glitch.glitchify", EffectMeta("Glitch digital: a imagem se parte em blocos que deslizam, os canais se separam e blocos inteiros saem do lugar.", AllTargets))
+    put("aurea.glitch.vhs", EffectMeta("VHS de verdade: borrão, croma alargada, instabilidade de tracking, perdas de fita, varredura e degradação de cor.", AllTargets))
+    put("aurea.glitch.uni_vhs", EffectMeta("O VHS estilizado: separação RGB grande, ondulação, brilho sujo e vinheta — o vocabulário da fita a serviço do visual.", AllTargets))
+    put("aurea.glitch.signal", EffectMeta("Sinal de transmissão: bandas que se perdem, sincronia que escorrega e deriva constante.", AllTargets))
+    put("aurea.glitch.cross", EffectMeta("Duas faixas, uma vertical e uma horizontal, varrem a imagem lendo do lugar errado. Anime o progresso para virar transição.", AllTargets))
+    put("aurea.time.posterize", EffectMeta(
+        "Trava a taxa de quadros: a imagem passa a andar em passos, como animação desenhada.",
+        listOf(EffectTarget.Video, EffectTarget.PreComposicao, EffectTarget.Imagem, EffectTarget.Ajuste),
+        "stop motion quadros taxa travada",
+    ))
+    put("aurea.time.warp_rgb", EffectMeta(
+        "Cada canal de cor vem de um instante diferente: o vermelho do quadro de trás, o azul do da frente.",
+        listOf(EffectTarget.Video, EffectTarget.PreComposicao, EffectTarget.Imagem),
+        "rgb no tempo canais separados atraso de cor",
+    ))
     put("aurea.control.slider", EffectMeta("Um valor de 0 a 100 que você liga na expressão de outro parâmetro.", AllTargets))
     put("aurea.control.angle", EffectMeta("Um ângulo que você liga na expressão de outro parâmetro.", AllTargets))
     put("aurea.control.checkbox", EffectMeta("Um liga/desliga que você liga na expressão de outro parâmetro.", AllTargets))

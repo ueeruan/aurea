@@ -78,6 +78,22 @@ struct LayerSource {
     /// mesmo índice) leem a composição acumulada abaixo dela.
     enum class Kind : u8 { None = 0, Video, Image, Solid, Scene3D, Shape, Nested, Particles, Text, Adjustment, Vector };
     Kind kind = Kind::None;
+
+    /// RGB NO TEMPO (Fase 7.3 §25): a MESMA camada, em até três instantes, um
+    /// por canal de cor. Vazio (`channelCount == 0`) = o caminho normal, uma
+    /// fonte só.
+    ///
+    /// Mora aqui, e não no acúmulo de amostras do desfoque de movimento,
+    /// porque só o `prepare` fala com o decoder — e é o decoder que decide se
+    /// o quadro daquele instante existe. O desfoque varia a MATRIZ, o RGB no
+    /// tempo varia a FONTE; são coisas diferentes.
+    struct ChannelFrame {
+        FrameRef frame;
+        Vec3     mask{0, 0, 0};
+    };
+    static constexpr u32 kMaxChannelFrames = 3;
+    ChannelFrame channel[kMaxChannelFrames];
+    u32 channelCount = 0;
     u32  width = 0;          ///< tamanho natural da layer (px)
     u32  height = 0;
 

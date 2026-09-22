@@ -109,7 +109,8 @@ AUREA_TEST(Startup, ColdAndWarmEngineInitializeAreMeasured) {
     constexpr int kRounds = 5;
     // [rodada][0 = total, 1 = gpu, 2 = renderer, 3 = resto, 4 = 1o quadro]
     f64 cold[5][kRounds] = {}, warm[5][kRounds] = {};
-    u32 prewarmed = 0;
+    u32 prewarmed = 0, oldExtraCount = 0;
+    f64 oldExtra[kRounds] = {};
     u64 cacheBytes = 0;
     auto keep = [](f64 (&dst)[5][kRounds], int r, const Opened& o, const Engine::StartupTimings& t) {
         dst[0][r] = o.initMs;
@@ -126,6 +127,14 @@ AUREA_TEST(Startup, ColdAndWarmEngineInitializeAreMeasured) {
             AUREA_CHECK(o.ok);
             keep(cold, r, o, e.startup_timings());
             prewarmed = o.prewarmed;
+            // O que a abertura ANTIGA ainda compilava a mais (todos os efeitos),
+            // medido no mesmo processo e no mesmo estado de cache, para o
+            // antes/depois não depender do ruído entre execuções.
+            std::vector<PipelineKey> rest;
+            e.effects().collect_pipelines(rest, SurfaceFormat::RGBA16F);
+            const auto t2 = std::chrono::steady_clock::now();
+            oldExtraCount = e.renderer().shaders().prewarm(rest.data(), static_cast<u32>(rest.size()));
+            oldExtra[r] = std::chrono::duration<f64, std::milli>(std::chrono::steady_clock::now() - t2).count();
             e.shutdown();
         }
         cacheBytes = fs::file_size(cache_file(dir), ec);
@@ -146,8 +155,10 @@ AUREA_TEST(Startup, ColdAndWarmEngineInitializeAreMeasured) {
     std::printf("      fria:   gpu %.1f  renderer %.1f  resto %.1f ms\n", cold[1][kRounds / 2], cold[2][kRounds / 2], cold[3][kRounds / 2]);
     std::printf("      quente: gpu %.1f  renderer %.1f  resto %.1f ms\n", warm[1][kRounds / 2], warm[2][kRounds / 2], warm[3][kRounds / 2]);
     std::printf("      %u pipelines antes do 1o quadro; cache %llu KB\n", prewarmed, static_cast<unsigned long long>(cacheBytes / 1024));
-    std::printf("      1o quadro (projeto novo + forma + texto): fria %.1f ms, quente %.1f ms\n    ",
+    std::printf("      1o quadro (projeto novo + forma + texto): fria %.1f ms, quente %.1f ms\n",
                 cold[4][kRounds / 2], warm[4][kRounds / 2]);
+    std::printf("      a abertura antiga compilava mais %u pipelines de efeito: %.1f ms (fria, mediana) + os do 3D\n    ",
+                oldExtraCount, med(oldExtra));
     fs::remove_all(fs::path(dir), ec);
     // A abertura só pré-aquece o que todo projeto usa (composição, vídeo,
     // forma, vetor, texto, máscara, cor, saída); efeito e 3D ficam de fora.
@@ -284,15 +295,56 @@ AUREA_TEST(Startup, ProjectPipelinesWarmWhenUsedNotAtOpen) {
 
     const u32 before3d = lib.pipeline_count();
     AUREA_CHECK(e.add_null(true).ok());
+    const auto t3d = std::chrono::steady_clock::now();
     AUREA_CHECK(e.capture_frame_rgba(128, rgba, w, h).ok());
+    const f64 ms3d = std::chrono::duration<f64, std::milli>(std::chrono::steady_clock::now() - t3d).count();
     const u32 after3d = lib.pipeline_count();
     AUREA_CHECK(after3d >= before3d + 10);   // opaco/máscara/mistura × faces + sombra + plano
 
     lib.mark_steady_state();
     for (int i = 0; i < 5; ++i) AUREA_CHECK(e.capture_frame_rgba(128, rgba, w, h).ok());
     AUREA_CHECK_EQ(lib.compiles_since_mark(), 0u);
-    std::printf("\n    abertura %u pipelines; +%u do projeto (desfoque + 3D) no 1o quadro parado\n    ",
-                e.renderer().pipelines_prewarmed(), e.renderer().pipelines_warmed_for_project());
+    std::printf("\n    abertura %u pipelines; +%u do projeto (desfoque + 3D) no 1o quadro parado;"
+                " 1o quadro com 3D (compila %u) %.1f ms\n    ",
+                e.renderer().pipelines_prewarmed(), e.renderer().pipelines_warmed_for_project(), after3d - before3d, ms3d);
+    e.shutdown();
+    std::error_code ec;
+    fs::remove_all(fs::path(dir), ec);
+}
+
+AUREA_TEST(Startup, EffectBrowserPreviewCostIsMeasured) {
+    // O que saiu da abertura (pipelines de efeito) é pago quando o navegador
+    // de efeitos pede as prévias (320 × 200, o tamanho do cartão). No app a
+    // fila é de uma prévia por vez e o resultado vai para o disco: da segunda
+    // abertura do navegador em diante isto não roda mais.
+    if (!gpu_available()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    const std::string dir = startup_dir("previas");
+    Engine e;
+    AUREA_CHECK(open_engine(dir, e).ok);
+    const u32 pipelinesBefore = e.renderer().shaders().pipeline_count();
+    std::vector<u8> rgba;
+    u32 w = 0, h = 0, made = 0;
+    f64 firstTotal = 0.0, firstMax = 0.0, againTotal = 0.0;
+    const char* slowest = "";
+    for (int pass = 0; pass < 2; ++pass) {
+        for (u32 i = 0; i < e.effects().count(); ++i) {
+            const EffectTypeId type = effect_type_id(e.effects().at(i).info().key);
+            const auto t0 = std::chrono::steady_clock::now();
+            const bool ok = e.render_effect_preview(type, 320, 200, rgba, w, h).ok();
+            const f64 ms = std::chrono::duration<f64, std::milli>(std::chrono::steady_clock::now() - t0).count();
+            if (pass == 0) {
+                made += ok ? 1u : 0u;
+                firstTotal += ms;
+                if (ms > firstMax) { firstMax = ms; slowest = e.effects().at(i).info().name; }
+            } else {
+                againTotal += ms;
+            }
+        }
+    }
+    const u32 compiled = e.renderer().shaders().pipeline_count() - pipelinesBefore;
+    std::printf("\n    navegador: %u prévias de %u efeitos; 1a vez %.1f ms (máx %.1f ms: %s) compilando %u pipelines;"
+                " de novo %.1f ms\n    ", made, e.effects().count(), firstTotal, firstMax, slowest, compiled, againTotal);
+    AUREA_CHECK(made > 0);
     e.shutdown();
     std::error_code ec;
     fs::remove_all(fs::path(dir), ec);

@@ -271,6 +271,9 @@ class AureaEngine private constructor() {
     /** Nova forma (ladrilho `preset` da aba Forma) no centro. Id ≥ 0 ou −Errc. */
     fun addShape(preset: Int): Long = nativeAddShape(nativeHandle, preset)
 
+    /** Nulo 2D ou 3D no centro. Id ≥ 0 ou −Errc. */
+    fun addNull(threeD: Boolean): Long = nativeAddNull(nativeHandle, threeD)
+
     /** Congela o quadro do clipe no `frame` por `holdFrames`; o resto anda. Id ≥ 0 ou −Errc. */
     fun freezeFrame(layer: Long, frame: Int, holdFrames: Int): Long = nativeFreezeFrame(nativeHandle, layer, frame, holdFrames)
 
@@ -356,6 +359,7 @@ class AureaEngine private constructor() {
     private external fun nativeImportAudio(handle: Long, source: String, name: String): Long
     private external fun nativeExtractAudio(handle: Long, layer: Long): Long
     private external fun nativeAddShape(handle: Long, preset: Int): Long
+    private external fun nativeAddNull(handle: Long, threeD: Boolean): Long
     private external fun nativeAddText(handle: Long, content: String): Long
     private external fun nativeQueryText(handle: Long, layer: Long, out: FloatArray): String?
     private external fun nativeFreezeFrame(handle: Long, layer: Long, frame: Int, holdFrames: Int): Long

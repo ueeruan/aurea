@@ -139,7 +139,106 @@ struct YuvUniforms {
     Vec4 texel;
 };
 
+/// Composição ← clip (inversa de clip_from_comp).
+Mat4 comp_from_clip(f32 w, f32 h) noexcept {
+    Mat4 m;
+    m.col[0] = Vec4{w * 0.5f, 0, 0, 0};
+    m.col[1] = Vec4{0, h * 0.5f, 0, 0};
+    m.col[3] = Vec4{w * 0.5f, h * 0.5f, 0, 1};
+    return m;
+}
+
+/// A camada (ou algum pai) vive no espaço 3D? Marcada como 3D, ou com rotação
+/// em X/Y ou profundidade no instante — aí a perspectiva é a da câmera da
+/// cena, não um "achatado" 2D (rotação X/Y num 2D não mudava nada na tela).
+bool wants_3d(const Composition& comp, const Layer& l, FrameIndex time) noexcept {
+    const Layer* p = &l;
+    for (u32 depth = 0; p && depth < 17; ++depth) {
+        if (p->threeD) return true;
+        const FrameIndex local = p->local_time(time);
+        auto s = [&](TrackProperty prop, f32 fallback) noexcept {
+            const Track* tr = p->tracks.find(prop);
+            return (tr && !tr->keys.empty()) ? tr->sample(local) : fallback;
+        };
+        if (s(TrackProperty::RotationX, p->transform.rotation.x) != 0.0f
+            || s(TrackProperty::RotationY, p->transform.rotation.y) != 0.0f
+            || s(TrackProperty::PositionZ, p->transform.position.z) != 0.0f) {
+            return true;
+        }
+        p = p->parent.valid() ? comp.layer(p->parent) : nullptr;
+    }
+    return false;
+}
+
+/// Mundo 3D da camada com a cadeia de pais (cada pai no próprio tempo).
+Mat4 world_3d(const Composition& comp, const Layer& l, FrameIndex time) noexcept {
+    Mat4 m = layer_matrix_3d(l, l.local_time(time));
+    LayerId parent = l.parent;
+    for (u32 depth = 0; parent.valid() && depth < 16; ++depth) {
+        const Layer* p = comp.layer(parent);
+        if (!p) break;
+        m = layer_matrix_3d(*p, p->local_time(time)) * m;
+        parent = p->parent;
+    }
+    return m;
+}
+
+/// Câmera da composição no instante: a camada de câmera ATIVA visível; sem
+/// ela, a padrão (plano Z=0 em escala 1:1 com a composição).
+scene3d::SceneCamera camera_for(const Composition& comp, FrameIndex time, u32 w, u32 h) noexcept {
+    scene3d::SceneCamera cam = scene3d::default_camera(w, h);
+    const OrderedIds<LayerId>& order = comp.order();
+    for (u32 i = 0; i < order.size(); ++i) {
+        const Layer* l = comp.layer(order.at(i));
+        if (!l || !l->visible || !l->contains_time(time)) continue;
+        if (l->kind != LayerKind::Camera || !l->camera.active) continue;
+        const FrameIndex local = l->local_time(time);
+        const Mat4 wm = world_3d(comp, *l, time);
+        const Vec3 x = Vec3{wm.col[0].x, wm.col[0].y, wm.col[0].z}.normalized();
+        const Vec3 y = Vec3{wm.col[1].x, wm.col[1].y, wm.col[1].z}.normalized();
+        const Vec3 z = Vec3{wm.col[2].x, wm.col[2].y, wm.col[2].z}.normalized();
+        const Vec3 t{wm.col[3].x, wm.col[3].y, wm.col[3].z};
+        Mat4 v;
+        v.col[0] = Vec4{x.x, y.x, z.x, 0};
+        v.col[1] = Vec4{x.y, y.y, z.y, 0};
+        v.col[2] = Vec4{x.z, y.z, z.z, 0};
+        v.col[3] = Vec4{-x.dot(t), -y.dot(t), -z.dot(t), 1};
+        cam.view = v;
+        cam.position = t;
+        const Track* fov = l->tracks.find(TrackProperty::Fov);
+        const f32 deg = fov && !fov->keys.empty() ? fov->sample(local) : l->camera.fov;
+        cam.fovY = std::clamp(deg, 1.0f, 170.0f) * kDeg2Rad;
+        cam.nearZ = std::max(0.1f, l->camera.nearPlane);
+        break;
+    }
+    return cam;
+}
+
 } // namespace
+
+Mat4 layer_comp_matrix(const Composition& comp, const Layer& l, FrameIndex time, bool* perspective) noexcept {
+    const bool is3d = wants_3d(comp, l, time);
+    if (perspective) *perspective = is3d;
+    if (!is3d) return layer_world_matrix(comp, l, time);
+    const u32 w = std::max(1u, comp.width()), h = std::max(1u, comp.height());
+    const scene3d::SceneCamera cam = camera_for(comp, time, w, h);
+    return comp_from_clip(static_cast<f32>(w), static_cast<f32>(h))
+         * scene3d::reverse_z_perspective(cam.fovY, static_cast<f32>(w) / static_cast<f32>(h), cam.nearZ) * cam.view
+         * world_3d(comp, l, time);
+}
+
+Mat4 layer_world_matrix(const Composition& comp, const Layer& l, FrameIndex time) noexcept {
+    if (wants_3d(comp, l, time)) return world_3d(comp, l, time);
+    Mat4 m = layer_matrix(l, l.local_time(time));
+    LayerId parent = l.parent;
+    for (u32 depth = 0; parent.valid() && depth < 16; ++depth) {
+        const Layer* p = comp.layer(parent);
+        if (!p) break;
+        m = layer_matrix(*p, p->local_time(time)) * m;
+        parent = p->parent;
+    }
+    return m;
+}
 
 // =============================================================================
 // Ciclo de vida
@@ -285,6 +384,12 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
 
     const f32 previewFactor = static_cast<f32>(settings.previewNumerator)
                             / static_cast<f32>(std::max(1u, settings.previewDenominator));
+    // Câmera da cena para camadas 2D que vivem no espaço 3D.
+    const scene3d::SceneCamera cam3d = camera_for(comp, time, out.compWidth, out.compHeight);
+    const Mat4 viewProj3d = scene3d::reverse_z_perspective(
+                                cam3d.fovY, static_cast<f32>(out.compWidth) / static_cast<f32>(std::max(1u, out.compHeight)),
+                                cam3d.nearZ) * cam3d.view;
+    const Mat4 compFromClip = comp_from_clip(static_cast<f32>(out.compWidth), static_cast<f32>(out.compHeight));
     const f64 fps = comp.fps() > 0.0 ? comp.fps() : 30.0;
 
     // A ORDEM DO CORE É A ORDEM DE COMPOSIÇÃO: `order()` do fundo para a
@@ -441,6 +546,11 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             m = layer_matrix(*p, p->local_time(time)) * m;
             parent = p->parent;
         }
+        if (wants_3d(comp, *l, time)) {
+            // Rotação X/Y, profundidade, nulo 3D na cadeia: a MESMA câmera dos
+            // modelos 3D (padrão = plano Z=0 1:1 com a composição).
+            m = compFromClip * viewProj3d * world_3d(comp, *l, time);
+        }
         rl.compFromLayer = m;
         rl.texelScale = texel_scale_for(max_scale(m) * previewFactor);
 
@@ -575,36 +685,21 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
 }
 
 void Renderer::fill_scene_context(const Composition& comp, FrameIndex time, FrameSnapshot& out) const noexcept {
-    // Câmera: a layer de câmera ATIVA visível no instante; sem ela, a câmera
-    // padrão (plano Z=0 em escala 1:1 com a composição).
-    scene3d::SceneCamera cam = scene3d::default_camera(out.compWidth, out.compHeight);
+    // Câmera: a camada de câmera ATIVA visível no instante (com pais, inclusive
+    // nulo 3D — rig de órbita); sem ela, a padrão.
+    const scene3d::SceneCamera cam = camera_for(comp, time, out.compWidth, out.compHeight);
     std::vector<scene3d::SceneLight> lights;
     const OrderedIds<LayerId>& order = comp.order();
     for (u32 i = 0; i < order.size(); ++i) {
         const Layer* l = comp.layer(order.at(i));
         if (!l || !l->visible || !l->contains_time(time)) continue;
         const FrameIndex local = l->local_time(time);
-        if (l->kind == LayerKind::Camera && l->camera.active) {
-            const Mat4 w = layer_matrix_3d(*l, local);
-            // Vista = inversa da pose rígida (a escala da layer não entra).
-            const Vec3 x = Vec3{w.col[0].x, w.col[0].y, w.col[0].z}.normalized();
-            const Vec3 y = Vec3{w.col[1].x, w.col[1].y, w.col[1].z}.normalized();
-            const Vec3 z = Vec3{w.col[2].x, w.col[2].y, w.col[2].z}.normalized();
-            const Vec3 t{w.col[3].x, w.col[3].y, w.col[3].z};
-            Mat4 v;
-            v.col[0] = Vec4{x.x, y.x, z.x, 0};
-            v.col[1] = Vec4{x.y, y.y, z.y, 0};
-            v.col[2] = Vec4{x.z, y.z, z.z, 0};
-            v.col[3] = Vec4{-x.dot(t), -y.dot(t), -z.dot(t), 1};
-            cam.view = v;
-            cam.position = t;
-            const Track* fov = l->tracks.find(TrackProperty::Fov);
-            const f32 deg = fov && !fov->keys.empty() ? fov->sample(local) : l->camera.fov;
-            cam.fovY = std::clamp(deg, 1.0f, 170.0f) * kDeg2Rad;
-            cam.nearZ = std::max(0.1f, l->camera.nearPlane);
+        if (l->kind == LayerKind::Camera) {
+            continue;   // câmera resolvida em camera_for
         } else if (l->kind == LayerKind::Light && l->light.kind != LightKind::Ambient) {
             scene3d::SceneLight s;
-            const Mat4 w = layer_matrix_3d(*l, local);
+            const Mat4 w = world_3d(comp, *l, time);   // luz filha de nulo 3D acompanha
+            (void)local;
             s.kind = l->light.kind == LightKind::Point ? scene3d::LightKindGpu::Point
                    : l->light.kind == LightKind::Spot ? scene3d::LightKindGpu::Spot : scene3d::LightKindGpu::Directional;
             s.position = Vec3{w.col[3].x, w.col[3].y, w.col[3].z};

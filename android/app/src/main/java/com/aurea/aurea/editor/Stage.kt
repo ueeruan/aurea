@@ -641,6 +641,9 @@ private class StageEdit(
         ui.manipulating = true
     }
 
+    private val pt = FloatArray(2)
+    private var moveDetail: LayerDetail? = null
+
     private fun keepTransform(d: LayerDetail) {
         sx0 = d.scale[0]
         sy0 = d.scale[1]
@@ -657,8 +660,11 @@ private class StageEdit(
     }
 
     fun startMove(d: LayerDetail, x: Float, y: Float) {
-        pos0x = d.position[0]
-        pos0y = d.position[1]
+        // Tudo em px da composição (mundo); só no fim volta ao espaço do pai.
+        moveDetail = d
+        d.parentToComp(d.position[0], d.position[1], pt)
+        pos0x = pt[0]
+        pos0y = pt[1]
         downX = x
         downY = y
         downCx = m.cx(x)
@@ -679,8 +685,9 @@ private class StageEdit(
 
     fun startHandle(d: LayerDetail, handle: Int, x: Float, y: Float) {
         keepTransform(d)
-        pivotX = m.sx(d.position[0])
-        pivotY = m.sy(d.position[1])
+        d.parentToComp(d.position[0], d.position[1], pt)
+        pivotX = m.sx(pt[0])
+        pivotY = m.sy(pt[1])
         dist0 = max(minPivot, hypot(x - pivotX, y - pivotY))
         lastAngle = atan2(y - pivotY, x - pivotX)
         accAngle = 0f
@@ -759,6 +766,12 @@ private class StageEdit(
         ui.snapX = snapX
         ui.snapY = snapY
         begin("mover")
+        val d = moveDetail
+        if (d != null) {
+            d.compToParent(nx, ny, pt)
+            nx = pt[0]
+            ny = pt[1]
+        }
         store.setTransform2(TrackProperty.POSITION_X, nx, TrackProperty.POSITION_Y, ny)
     }
 

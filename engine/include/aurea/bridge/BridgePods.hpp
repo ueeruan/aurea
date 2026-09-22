@@ -153,12 +153,25 @@ struct LayerDetailPOD {
     f32 shapeStrokeWidth  = 0.0f; // +180
     f32 shapeCorner       = 0.0f; // +184
     f32 shapeInner        = 0.0f; // +188
+    /// Cantos TL, TR, BR, BL da caixa da camada em px da composição, com a
+    /// cadeia de pais e a perspectiva da câmera — o MESMO cálculo do renderer.
+    f32 corners[8]        = {};   // +192
+    /// Pai → composição, afim 2D (a b c d tx ty: x' = a·x + c·y + tx,
+    /// y' = b·x + d·y + ty). Identidade sem pai. Arrastar no palco converte o
+    /// delta da tela pelo inverso disto.
+    f32 parentAffine[6]   = {1, 0, 0, 1, 0, 0}; // +224
+    u32 geomFlags         = 0;    // +248 bit0 cantos válidos, bit1 perspectiva
+    u32 reserved0         = 0;    // +252
 };
+inline constexpr u32 kGeomCornersValid = 1u << 0;
+inline constexpr u32 kGeomPerspective = 1u << 1;
 inline constexpr u32 kAudioFlagMuted = 1u << 0;
 inline constexpr u32 kAudioFlagSolo = 1u << 1;
 inline constexpr u32 kAudioFlagHasAudio = 1u << 2;
 inline constexpr u32 kAudioFlagVolumeAnimated = 1u << 3;
-static_assert(sizeof(LayerDetailPOD) == 192, "LayerDetailPOD e contrato de ABI");
+static_assert(sizeof(LayerDetailPOD) == 256, "LayerDetailPOD e contrato de ABI");
+static_assert(offsetof(LayerDetailPOD, corners) == 192);
+static_assert(offsetof(LayerDetailPOD, geomFlags) == 248);
 static_assert(offsetof(LayerDetailPOD, position) == 32);
 static_assert(offsetof(LayerDetailPOD, animatedMask) == 92);
 static_assert(offsetof(LayerDetailPOD, parentId) == 128);

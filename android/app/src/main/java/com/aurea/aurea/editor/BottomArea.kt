@@ -174,7 +174,7 @@ internal fun LayerToolsDock(store: EditorStore, ui: EditorUi, layerId: Long) {
                     "Vincular (Parentear)",
                     20,
                     tint = if (hasParent) AureaColors.Accent else AureaColors.Text,
-                ) { store.comingSoon("Vincular") }
+                ) { openPanel(store, ui, EditorPanel.Parent) }
             }
             Column(
                 Modifier
@@ -328,7 +328,7 @@ internal fun MultiSelectionPanel(store: EditorStore) {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             BatchAction(ShellGlyph.FolderBadgePlus, "Agrupar") { store.comingSoon("Agrupar") }
-            BatchAction(CupertinoGlyph.Link, "Vincular") { store.comingSoon("Vincular") }
+            BatchAction(CupertinoGlyph.Link, "Vincular") { store.parentSelectionToLast() }
             BatchAction(CupertinoGlyph.ChartBarAltFill, "Cascata") { store.comingSoon("Cascata") }
             BatchAction(ShellGlyph.SquareGrid3x2, "Alinhar") { store.comingSoon("Alinhar") }
             BatchAction(CupertinoGlyph.Scissors, "Dividir") {

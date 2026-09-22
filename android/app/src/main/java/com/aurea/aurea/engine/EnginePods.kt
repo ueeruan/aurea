@@ -689,7 +689,7 @@ data class PerfStats(
 }
 
 // =============================================================================
-// Detalhe da camada — espelho de `bridge::LayerDetailPOD` (192 bytes)
+// Detalhe da camada — espelho de `bridge::LayerDetailPOD` (256 bytes)
 // =============================================================================
 
 /** Propriedades de transform (`aurea::TrackProperty`), na ordem dos bits de `animatedMask`. */
@@ -757,7 +757,33 @@ data class LayerDetail(
     val shapeStrokeWidth: Float = 0f,
     val shapeCorner: Float = 0f,
     val shapeInner: Float = 0f,
+    /** Cantos TL,TR,BR,BL em px da composição (mundo, com pais e câmera), do motor. */
+    val worldCorners: FloatArray = FloatArray(8),
+    /** Pai → composição (a b c d tx ty). Identidade sem pai. */
+    val parentAffine: FloatArray = floatArrayOf(1f, 0f, 0f, 1f, 0f, 0f),
+    val geomFlags: Int = 0,
 ) {
+    val hasWorldCorners: Boolean get() = (geomFlags and 1) != 0
+    val perspective: Boolean get() = (geomFlags and 2) != 0
+
+    /** Ponto no espaço do pai → composição. */
+    fun parentToComp(x: Float, y: Float, out: FloatArray) {
+        val a = parentAffine
+        out[0] = a[0] * x + a[2] * y + a[4]
+        out[1] = a[1] * x + a[3] * y + a[5]
+    }
+
+    /** Composição → espaço do pai (o que a posição local usa). */
+    fun compToParent(x: Float, y: Float, out: FloatArray) {
+        val a = parentAffine
+        val det = a[0] * a[3] - a[2] * a[1]
+        if (kotlin.math.abs(det) < 1e-9f) { out[0] = x; out[1] = y; return }
+        val dx = x - a[4]
+        val dy = y - a[5]
+        out[0] = (a[3] * dx - a[2] * dy) / det
+        out[1] = (-a[1] * dx + a[0] * dy) / det
+    }
+
     val reversed: Boolean get() = (timeFlags and 1) != 0
 
     val audioMuted: Boolean get() = (audioFlags and 1) != 0
@@ -779,7 +805,7 @@ data class LayerDetail(
     val locked: Boolean get() = (flags and PodLayout.FLAG_LOCKED) != 0
 
     companion object {
-        const val BYTES = 192
+        const val BYTES = 256
 
         internal fun read(b: ByteBuffer): LayerDetail {
             fun v3(o: Int) = listOf(b.getFloat(o), b.getFloat(o + 4), b.getFloat(o + 8))
@@ -821,6 +847,9 @@ data class LayerDetail(
                 shapeStrokeWidth = b.getFloat(180),
                 shapeCorner = b.getFloat(184),
                 shapeInner = b.getFloat(188),
+                worldCorners = FloatArray(8) { b.getFloat(192 + it * 4) },
+                parentAffine = FloatArray(6) { b.getFloat(224 + it * 4) },
+                geomFlags = b.getInt(248),
             )
         }
     }

@@ -1279,6 +1279,79 @@ AUREA_TEST(Gpu, TextRendersCrispWithStrokeAndStaysCentered) {
     (void)write_png("texto_contorno.png", b);
 }
 
+namespace {
+/// Caixa dos pixels acesos (>8) de uma captura.
+struct Box8 { u32 x0 = ~0u, y0 = ~0u, x1 = 0, y1 = 0; u32 w() const { return x1 >= x0 ? x1 - x0 + 1 : 0; } u32 h() const { return y1 >= y0 ? y1 - y0 + 1 : 0; } };
+Box8 lit_box(const Image8& img) {
+    Box8 b;
+    for (u32 y = 0; y < img.height; ++y) for (u32 x = 0; x < img.width; ++x) {
+        const u8* p = img.at(x, y);
+        if (p[0] > 8 || p[1] > 8 || p[2] > 8) { b.x0 = std::min(b.x0, x); b.y0 = std::min(b.y0, y); b.x1 = std::max(b.x1, x); b.y1 = std::max(b.y1, y); }
+    }
+    return b;
+}
+} // namespace
+
+AUREA_TEST(Gpu, TwoDLayerRotationXYIsRealPerspective) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(400, 400);
+    auto id = rig.e.add_shape(10);   // quadrado
+    AUREA_CHECK(id.ok());
+    const Image8 flat = rig.capture(400);
+    const Box8 b0 = lit_box(flat);
+    auto rot = [&](f32 rx, f32 ry, f32 rz) {
+        Command c;
+        c.type = CommandType::LayerSetRotation;
+        c.rotation.layer = LayerId::unpack(*id);
+        c.rotation.rx = rx; c.rotation.ry = ry; c.rotation.rz = rz;
+        AUREA_CHECK(rig.e.apply_command(c).ok());
+    };
+    rot(60, 0, 0);
+    const Box8 bx = lit_box(rig.capture(400));
+    rot(0, 60, 0);
+    const Box8 by = lit_box(rig.capture(400));
+    rot(0, 0, 0);
+    const Image8 back = rig.capture(400);
+    std::printf("    quadrado %ux%u; X60 %ux%u; Y60 %ux%u\n", b0.w(), b0.h(), bx.w(), bx.h(), by.w(), by.h());
+    // X 60°: a altura cai para ~cos 60 = metade (perspectiva: ±15%); a largura quase igual.
+    AUREA_CHECK(bx.h() < b0.h() * 0.65f && bx.h() > b0.h() * 0.35f);
+    AUREA_CHECK(bx.w() > b0.w() * 0.8f);
+    // Y 60°: a largura cai para ~metade.
+    AUREA_CHECK(by.w() < b0.w() * 0.65f && by.w() > b0.w() * 0.35f);
+    AUREA_CHECK(by.h() > b0.h() * 0.8f);
+    // Voltar a zero: o mesmo quadro do 2D (caminho 2D de novo).
+    u32 worst = 0;
+    for (usize i = 0; i < flat.rgba.size() && i < back.rgba.size(); ++i) worst = std::max<u32>(worst, static_cast<u32>(std::abs(flat.rgba[i] - back.rgba[i])));
+    AUREA_CHECK(worst <= 2);
+}
+
+AUREA_TEST(Gpu, ChildOfMovedNullRendersWhole) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(640, 360);
+    auto tid = rig.e.add_text("Texto Aurea");
+    AUREA_CHECK(tid.ok());
+    const Box8 b0 = lit_box(rig.capture(640));
+    auto nid = rig.e.add_null(false);
+    AUREA_CHECK(nid.ok());
+    Command pc;
+    pc.type = CommandType::LayerSetParent;
+    pc.layer_parent.layer = LayerId::unpack(*tid);
+    pc.layer_parent.parent = LayerId::unpack(*nid);
+    AUREA_CHECK(rig.e.apply_command(pc).ok());
+    const Box8 b1 = lit_box(rig.capture(640));
+    Command mv;
+    mv.type = CommandType::LayerSetPosition;
+    mv.position.layer = LayerId::unpack(*nid);
+    mv.position.x = 320; mv.position.y = 80; mv.position.z = 0;
+    AUREA_CHECK(rig.e.apply_command(mv).ok());
+    const Box8 b2 = lit_box(rig.capture(640));
+    std::printf("    texto %ux%u @%u,%u; com pai %ux%u @%u,%u; pai movido %ux%u @%u,%u\n",
+                b0.w(), b0.h(), b0.x0, b0.y0, b1.w(), b1.h(), b1.x0, b1.y0, b2.w(), b2.h(), b2.x0, b2.y0);
+    AUREA_CHECK(b1.x0 == b0.x0 && b1.y0 == b0.y0 && b1.w() == b0.w() && b1.h() == b0.h());
+    AUREA_CHECK(b2.w() == b0.w() && b2.h() == b0.h());
+    AUREA_CHECK(b2.y0 + 100 == b0.y0);
+}
+
 AUREA_TEST(Gpu, Scene3DSurvivesSaveAndReopenIdentically) {
     AUREA_REQUIRE_GPU();
     const std::string path = gltf_data("DamagedHelmet.glb");

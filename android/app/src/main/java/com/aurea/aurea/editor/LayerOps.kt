@@ -44,6 +44,11 @@ internal object LayerGeometry {
 
     /** Cantos TL, TR, BR, BL (x,y intercalados) em px da composição. */
     fun corners(d: LayerDetail, out: FloatArray): Boolean {
+        if (d.hasWorldCorners) {
+            // O motor já resolveu pais e câmera (mesmo cálculo do renderer).
+            d.worldCorners.copyInto(out, 0, 0, 8)
+            return true
+        }
         if (!hasSize(d)) return false
         val w = width(d)
         val h = height(d)
@@ -89,6 +94,7 @@ internal object LayerGeometry {
      * de folga? Desfaz o transform (escala negativa — espelho — também vale).
      */
     fun contains(d: LayerDetail, x: Float, y: Float, slack: Float): Boolean {
+        if (d.hasWorldCorners) return quadContains(d.worldCorners, x, y, slack)
         if (!hasSize(d)) return false
         val sx = d.scale[0]
         val sy = d.scale[1]
@@ -105,6 +111,25 @@ internal object LayerGeometry {
         val tx = slack / abs(sx)
         val ty = slack / abs(sy)
         return lx >= -tx && lx <= width(d) + tx && ly >= -ty && ly <= height(d) + ty
+    }
+
+    /** Ponto dentro do quadrilátero convexo (ou a menos de `slack` da borda). */
+    private fun quadContains(q: FloatArray, x: Float, y: Float, slack: Float): Boolean {
+        var pos = 0
+        var neg = 0
+        var near = false
+        for (i in 0 until 4) {
+            val ax = q[i * 2]; val ay = q[i * 2 + 1]
+            val bx = q[((i + 1) % 4) * 2]; val by = q[((i + 1) % 4) * 2 + 1]
+            val ex = bx - ax; val ey = by - ay
+            val cr = ex * (y - ay) - ey * (x - ax)
+            if (cr > 0f) pos++ else if (cr < 0f) neg++
+            val len2 = ex * ex + ey * ey
+            val t = if (len2 > 0f) (((x - ax) * ex + (y - ay) * ey) / len2).coerceIn(0f, 1f) else 0f
+            val px = ax + ex * t - x; val py = ay + ey * t - y
+            if (px * px + py * py <= slack * slack) near = true
+        }
+        return near || pos == 0 || neg == 0
     }
 
     /** A camada está no tempo do cabeçote? */

@@ -779,6 +779,60 @@ Result<u64> Engine::add_text(const char* content) noexcept {
     return lid.pack();
 }
 
+namespace {
+
+/// Inversa geral 4×4 (cofatores). Matrizes de camada são afins e inversíveis
+/// (escala 0 devolve identidade — nada a compensar).
+Mat4 inverse4(const Mat4& a) noexcept {
+    const f32* m = &a.col[0].x;
+    f32 inv[16];
+    inv[0] = m[5]*m[10]*m[15] - m[5]*m[11]*m[14] - m[9]*m[6]*m[15] + m[9]*m[7]*m[14] + m[13]*m[6]*m[11] - m[13]*m[7]*m[10];
+    inv[4] = -m[4]*m[10]*m[15] + m[4]*m[11]*m[14] + m[8]*m[6]*m[15] - m[8]*m[7]*m[14] - m[12]*m[6]*m[11] + m[12]*m[7]*m[10];
+    inv[8] = m[4]*m[9]*m[15] - m[4]*m[11]*m[13] - m[8]*m[5]*m[15] + m[8]*m[7]*m[13] + m[12]*m[5]*m[11] - m[12]*m[7]*m[9];
+    inv[12] = -m[4]*m[9]*m[14] + m[4]*m[10]*m[13] + m[8]*m[5]*m[14] - m[8]*m[6]*m[13] - m[12]*m[5]*m[10] + m[12]*m[6]*m[9];
+    inv[1] = -m[1]*m[10]*m[15] + m[1]*m[11]*m[14] + m[9]*m[2]*m[15] - m[9]*m[3]*m[14] - m[13]*m[2]*m[11] + m[13]*m[3]*m[10];
+    inv[5] = m[0]*m[10]*m[15] - m[0]*m[11]*m[14] - m[8]*m[2]*m[15] + m[8]*m[3]*m[14] + m[12]*m[2]*m[11] - m[12]*m[3]*m[10];
+    inv[9] = -m[0]*m[9]*m[15] + m[0]*m[11]*m[13] + m[8]*m[1]*m[15] - m[8]*m[3]*m[13] - m[12]*m[1]*m[11] + m[12]*m[3]*m[9];
+    inv[13] = m[0]*m[9]*m[14] - m[0]*m[10]*m[13] - m[8]*m[1]*m[14] + m[8]*m[2]*m[13] + m[12]*m[1]*m[10] - m[12]*m[2]*m[9];
+    inv[2] = m[1]*m[6]*m[15] - m[1]*m[7]*m[14] - m[5]*m[2]*m[15] + m[5]*m[3]*m[14] + m[13]*m[2]*m[7] - m[13]*m[3]*m[6];
+    inv[6] = -m[0]*m[6]*m[15] + m[0]*m[7]*m[14] + m[4]*m[2]*m[15] - m[4]*m[3]*m[14] - m[12]*m[2]*m[7] + m[12]*m[3]*m[6];
+    inv[10] = m[0]*m[5]*m[15] - m[0]*m[7]*m[13] - m[4]*m[1]*m[15] + m[4]*m[3]*m[13] + m[12]*m[1]*m[7] - m[12]*m[3]*m[5];
+    inv[14] = -m[0]*m[5]*m[14] + m[0]*m[6]*m[13] + m[4]*m[1]*m[14] - m[4]*m[2]*m[13] - m[12]*m[1]*m[6] + m[12]*m[2]*m[5];
+    inv[3] = -m[1]*m[6]*m[11] + m[1]*m[7]*m[10] + m[5]*m[2]*m[11] - m[5]*m[3]*m[10] - m[9]*m[2]*m[7] + m[9]*m[3]*m[6];
+    inv[7] = m[0]*m[6]*m[11] - m[0]*m[7]*m[10] - m[4]*m[2]*m[11] + m[4]*m[3]*m[10] + m[8]*m[2]*m[7] - m[8]*m[3]*m[6];
+    inv[11] = -m[0]*m[5]*m[11] + m[0]*m[7]*m[9] + m[4]*m[1]*m[11] - m[4]*m[3]*m[9] - m[8]*m[1]*m[7] + m[8]*m[3]*m[5];
+    inv[15] = m[0]*m[5]*m[10] - m[0]*m[6]*m[9] - m[4]*m[1]*m[10] + m[4]*m[2]*m[9] + m[8]*m[1]*m[6] - m[8]*m[2]*m[5];
+    const f32 det = m[0] * inv[0] + m[1] * inv[4] + m[2] * inv[8] + m[3] * inv[12];
+    if (std::fabs(det) < 1e-12f) return Mat4::identity();
+    Mat4 r;
+    f32* o = &r.col[0].x;
+    for (int i = 0; i < 16; ++i) o[i] = inv[i] / det;
+    return r;
+}
+
+} // namespace
+
+Result<u64> Engine::add_null(bool threeD) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
+    Composition* comp = current_composition();
+    if (!comp) return Status{Errc::InvalidState, "projeto sem composicao"};
+    history_.before_mutation(*comp, project_->timeline().current(), threeD ? "adicionar nulo 3D" : "adicionar nulo");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    const LayerId lid = comp->add_layer(LayerKind::Null, threeD ? "Nulo 3D" : "Nulo");
+    Layer* l = comp->layer(lid);
+    if (!l) return Status{Errc::OutOfMemory, "camada nao criada"};
+    l->threeD = threeD;
+    const i64 t = std::clamp<i64>(playback_.current().value, 0, std::max<i64>(0, comp->duration().value - 1));
+    l->start = FrameIndex{t};
+    l->end = FrameIndex{std::max<i64>(t + 1, comp->duration().value)};
+    l->transform.anchor = Vec3{50.0f, 50.0f, 0.0f};   // caixa virtual de 100 px (alças no palco)
+    l->transform.position = Vec3{static_cast<f32>(comp->width()) * 0.5f, static_cast<f32>(comp->height()) * 0.5f, 0.0f};
+    project_->mark_dirty();
+    request_render();
+    return lid.pack();
+}
+
 Result<u64> Engine::add_shape(u32 preset) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
@@ -1656,6 +1710,38 @@ void Engine::composition_size_cap(u32& longSide, u32& shortSide) const noexcept 
 bool Engine::query_layer_detail(u64 layerId, bridge::LayerDetailPOD& out) noexcept {
     out = bridge::LayerDetailPOD{};
     std::lock_guard<std::mutex> lock(modelMutex_);
+    if (!fill_layer_detail_locked(layerId, out)) return false;
+    // Geometria no palco: cantos e pai, pelo MESMO cálculo do renderer.
+    const Composition* comp = current_composition();
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l) return true;
+    const FrameIndex now = playback_.current();
+    if (const Layer* p = l->parent.valid() ? comp->layer(l->parent) : nullptr) {
+        const Mat4 pm = layer_world_matrix(*comp, *p, now);
+        out.parentAffine[0] = pm.col[0].x; out.parentAffine[1] = pm.col[0].y;
+        out.parentAffine[2] = pm.col[1].x; out.parentAffine[3] = pm.col[1].y;
+        out.parentAffine[4] = pm.col[3].x; out.parentAffine[5] = pm.col[3].y;
+    }
+    const bool boxed = out.sourceWidth > 0 && out.sourceHeight > 0 && l->kind != LayerKind::Model3D
+                    && l->kind != LayerKind::Camera && l->kind != LayerKind::Light;
+    if (boxed) {
+        bool persp = false;
+        const Mat4 m = layer_comp_matrix(*comp, *l, now, &persp);
+        const f32 w = static_cast<f32>(out.sourceWidth), h = static_cast<f32>(out.sourceHeight);
+        const f32 xs[4] = {0, w, w, 0}, ys[4] = {0, 0, h, h};
+        bool ok = true;
+        for (int i = 0; i < 4; ++i) {
+            const Vec4 v = m * Vec4{xs[i], ys[i], 0, 1};
+            if (!(v.w > 1e-6f)) { ok = false; break; }   // canto atrás da câmera
+            out.corners[i * 2] = v.x / v.w;
+            out.corners[i * 2 + 1] = v.y / v.w;
+        }
+        if (ok) out.geomFlags = bridge::kGeomCornersValid | (persp ? bridge::kGeomPerspective : 0u);
+    }
+    return true;
+}
+
+bool Engine::fill_layer_detail_locked(u64 layerId, bridge::LayerDetailPOD& out) noexcept {
     Composition* comp = current_composition();
     if (!comp || !project_) return false;
     const Layer* l = comp->layer(LayerId::unpack(layerId));
@@ -1713,6 +1799,11 @@ bool Engine::query_layer_detail(u64 layerId, bridge::LayerDetailPOD& out) noexce
                        | ((aa && aa->has_audio() && (l->kind == LayerKind::Video || l->kind == LayerKind::Audio))
                               ? bridge::kAudioFlagHasAudio : 0u)
                        | ((vt && vt->animated()) ? bridge::kAudioFlagVolumeAnimated : 0u);
+    }
+    if (l->kind == LayerKind::Null) {
+        out.sourceWidth = 100;
+        out.sourceHeight = 100;
+        return true;
     }
     if (l->kind == LayerKind::Text) {
         if (const auto font = text::default_font()) {
@@ -2395,7 +2486,51 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                     cursor = p->parent;
                 }
             }
+            // Compensação: o filho fica onde está na tela ao ganhar (ou perder)
+            // um pai — o transform local vira "pai⁻¹ × mundo". Só com posição,
+            // rotação e escala sem keyframes (animadas, o local é a animação).
+            const FrameIndex now = playback_.current();
+            auto animated = [&](TrackProperty p) { const Track* tr = l->tracks.find(p); return tr && tr->animated(); };
+            const bool canCompensate = comp && !animated(TrackProperty::PositionX) && !animated(TrackProperty::PositionY)
+                                    && !animated(TrackProperty::PositionZ) && !animated(TrackProperty::RotationX)
+                                    && !animated(TrackProperty::RotationY) && !animated(TrackProperty::RotationZ)
+                                    && !animated(TrackProperty::ScaleX) && !animated(TrackProperty::ScaleY)
+                                    && l->kind != LayerKind::Model3D;
+            const Mat4 world = canCompensate ? layer_world_matrix(*comp, *l, now) : Mat4::identity();
             l->parent = parent;
+            if (canCompensate) {
+                const Layer* p = parent.valid() ? comp->layer(parent) : nullptr;
+                const Mat4 pw = p ? layer_world_matrix(*comp, *p, now) : Mat4::identity();
+                const Vec3 anc = l->transform.anchor;
+                const Mat4 m = inverse4(pw) * world * Mat4::translation(anc);
+                const Vec3 c0{m.col[0].x, m.col[0].y, m.col[0].z};
+                const Vec3 c1{m.col[1].x, m.col[1].y, m.col[1].z};
+                const Vec3 c2{m.col[2].x, m.col[2].y, m.col[2].z};
+                const f32 sx = c0.length(), sy = c1.length(), sz = std::max(1e-6f, c2.length());
+                if (sx > 1e-6f && sy > 1e-6f) {
+                    const f32 r20 = c0.z / sx, r21 = c1.z / sy, r22 = c2.z / sz, r10 = c0.y / sx, r00 = c0.x / sx;
+                    const f32 ry = std::asin(std::clamp(-r20, -1.0f, 1.0f));
+                    const f32 rx = std::atan2(r21, r22);
+                    const f32 rz = std::atan2(r10, r00);
+                    Vec3 rotDeg{rx / kDeg2Rad, ry / kDeg2Rad, rz / kDeg2Rad};
+                    // Camada 2D fica 2D: sem inclinar em X/Y por arredondamento.
+                    if (std::fabs(rotDeg.x) < 1e-3f) rotDeg.x = 0.0f;
+                    if (std::fabs(rotDeg.y) < 1e-3f) rotDeg.y = 0.0f;
+                    const Vec3 pos{m.col[3].x, m.col[3].y, std::fabs(m.col[3].z) < 1e-3f ? 0.0f : m.col[3].z};
+                    l->transform.position = pos;
+                    l->transform.rotation = rotDeg;
+                    l->transform.scale = Vec3{sx, sy, l->threeD ? sz : l->transform.scale.z};
+                    // Valores parados em trilhas sem keyframe acompanham.
+                    auto set = [&](TrackProperty prop, f32 v) {
+                        if (Track* tr = l->tracks.find(prop); tr && tr->keys.size() <= 1) {
+                            if (tr->keys.size() == 1) tr->keys[0].value = v; else tr->staticValue = v;
+                        }
+                    };
+                    set(TrackProperty::PositionX, pos.x); set(TrackProperty::PositionY, pos.y); set(TrackProperty::PositionZ, pos.z);
+                    set(TrackProperty::RotationX, rotDeg.x); set(TrackProperty::RotationY, rotDeg.y); set(TrackProperty::RotationZ, rotDeg.z);
+                    set(TrackProperty::ScaleX, sx); set(TrackProperty::ScaleY, sy);
+                }
+            }
             return OkStatus;
         }
 

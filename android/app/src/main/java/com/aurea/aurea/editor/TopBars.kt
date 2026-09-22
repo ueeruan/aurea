@@ -111,7 +111,7 @@ internal fun LayerTopBar(store: EditorStore, ui: EditorUi, layerId: Long) {
             ChromeButton(
                 CupertinoGlyph.LinkCircleFill,
                 "Segue outra camada",
-                onClick = { store.comingSoon("Parentesco") },
+                onClick = { openPanel(store, ui, com.aurea.aurea.editor.panels.EditorPanel.Parent) },
                 size = 20.dp,
                 tint = AureaColors.Accent,
             )

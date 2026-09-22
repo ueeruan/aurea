@@ -45,6 +45,15 @@ struct ImagePixels {
 };
 
 /// Origem da imagem de uma layer neste frame.
+class Composition;
+struct Layer;
+/// Matriz composição ← camada no instante, com a cadeia de pais (3D quando a
+/// camada ou um pai vive no espaço 3D). O MESMO cálculo do renderer.
+[[nodiscard]] Mat4 layer_world_matrix(const Composition& comp, const Layer& l, FrameIndex time) noexcept;
+/// Composição ← camada como o renderer desenha: igual a `layer_world_matrix`
+/// no 2D; no espaço 3D, já com a câmera e a perspectiva (dividir por w).
+[[nodiscard]] Mat4 layer_comp_matrix(const Composition& comp, const Layer& l, FrameIndex time, bool* perspective = nullptr) noexcept;
+
 struct LayerSource {
     enum class Kind : u8 { None = 0, Video, Image, Solid, Scene3D, Shape };
     Kind kind = Kind::None;

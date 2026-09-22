@@ -1146,6 +1146,63 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshDetail()
     }
 
+    // --- Nulo e parentesco --------------------------------------------------------
+    fun addNull(threeD: Boolean) {
+        val id = engine.addNull(threeD)
+        if (id < 0) {
+            errorMessage = "Não foi possível criar o nulo (erro ${-id})."
+            return
+        }
+        refreshNow()
+        select(id)
+    }
+
+    /**
+     * Liga (ou solta, `parent` = 0) o pai da camada. O motor compensa: a camada
+     * fica onde está na tela e passa a seguir o pai dali em diante.
+     */
+    fun setParent(layer: Long, parent: Long) {
+        send { setLayerParent(layer, parent) }
+        refreshNow()
+    }
+
+    /**
+     * Vincular em lote: a ÚLTIMA camada escolhida vira o pai das outras (como
+     * arrastar o pick whip de várias camadas para uma). Um passo de desfazer.
+     */
+    fun parentSelectionToLast() {
+        val ids = selection.toList()
+        if (ids.size < 2) return
+        val parent = ids.last()
+        val children = ids.dropLast(1).filter { c -> parentCandidates(c).any { it.id == parent } }
+        if (children.isEmpty()) {
+            showToast("Essas camadas já formam uma cadeia — nada a vincular")
+            return
+        }
+        beginGesture("vincular camadas")
+        children.forEach { c -> send { setLayerParent(c, parent) } }
+        endGesture()
+        refreshNow()
+        showToast("${children.size} camada(s) seguindo a última escolhida")
+    }
+
+    /** Pais possíveis: toda camada que não é ela nem descendente dela. */
+    fun parentCandidates(layer: Long): List<LayerRow> {
+        val rows = layers
+        val self = rows.indexOfFirst { it.id == layer }
+        if (self < 0) return emptyList()
+        return rows.filterIndexed { i, _ ->
+            var cur = i
+            var steps = 0
+            while (cur >= 0 && cur < rows.size && steps < 64) {
+                if (cur == self) return@filterIndexed false
+                cur = rows[cur].parentIndex
+                steps++
+            }
+            true
+        }
+    }
+
     // --- Forma ------------------------------------------------------------------
     /** Ladrilho `preset` da aba Forma: nova camada no centro, já escolhida. */
     fun addShape(preset: Int) {

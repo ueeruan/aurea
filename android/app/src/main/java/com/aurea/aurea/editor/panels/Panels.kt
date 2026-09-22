@@ -38,6 +38,7 @@ enum class EditorPanel {
     Audio,         // volume
     Shape,         // cor e preenchimento / editar forma
     Text,          // editar texto
+    Parent,        // seguir outra camada (parentesco)
 }
 
 /**
@@ -93,6 +94,7 @@ fun PanelContent(
         EditorPanel.Audio -> "Som"
         EditorPanel.Shape -> "Cor e preenchimento"
         EditorPanel.Text -> "Texto"
+        EditorPanel.Parent -> "Seguir outra camada"
     }
 
     Column(modifier.fillMaxSize().background(AureaColors.EditorPanel)) {
@@ -108,6 +110,7 @@ fun PanelContent(
                     EditorPanel.Audio -> AudioPanel(env)
                     EditorPanel.Shape -> ShapePanel(env)
                     EditorPanel.Text -> TextPanel(env)
+                    EditorPanel.Parent -> ParentPanel(env)
                 }
             }
         }

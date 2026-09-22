@@ -266,6 +266,9 @@ public:
     [[nodiscard]] Result<u64> add_shape(u32 preset) noexcept;
     /// Nova camada de texto ("Texto", centralizada), do cabeçote até o fim.
     [[nodiscard]] Result<u64> add_text(const char* content = nullptr) noexcept;
+    /// Nulo (não desenha; serve de pai/controle). `threeD` = nulo 3D (vive na
+    /// cena: posição/rotação/escala em X, Y e Z).
+    [[nodiscard]] Result<u64> add_null(bool threeD) noexcept;
     /// Dados de texto da camada (para a UI editar). false = não é texto.
     bool query_text(u64 layerId, TextData& out) noexcept;
     /// Imagem já decodificada pela plataforma (RGBA8 sRGB, alfa reto).
@@ -338,6 +341,9 @@ public:
 
     /// Detalhe de uma camada no playhead. false = camada não existe.
     bool query_layer_detail(u64 layerId, bridge::LayerDetailPOD& out) noexcept;
+private:
+    bool fill_layer_detail_locked(u64 layerId, bridge::LayerDetailPOD& out) noexcept;
+public:
     u32 query_curve(u64 layerId, u32 property, i32 startFrame, i32 endFrame,
                     f32* outValues, u32 sampleCount) noexcept;
     /// Waveform da camada: `count` baldes a partir do frame `startFrame` da

@@ -156,7 +156,7 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
         }
 
         MenuSection("Mais")
-        MenuItemRow(CupertinoGlyph.Link, "Seguir outra camada (parentesco)", soon("Parentesco"))
+        MenuItemRow(CupertinoGlyph.Link, "Seguir outra camada (parentesco)", act { openPanel(store, ui, EditorPanel.Parent) })
         MenuItemRow(CupertinoGlyph.SquareGrid2x2, "Todas as ações…", soon("Todas as ações"))
         MenuItemRow(CupertinoGlyph.Trash, "Excluir camada", act { LayerOps.delete(store, listOf(id)) }, danger = true)
     }

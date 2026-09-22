@@ -381,7 +381,7 @@ private fun AddOption(glyph: Char, label: String, onClick: () -> Unit) {
 // =============================================================================
 
 private enum class ObjectCard(val label: String) {
-    Scene3D("Cena 3D"), EmptyGroup("Grupo Vazio"), Null("Nulo"), Camera3D("Câmera 3D"),
+    Scene3D("Cena 3D"), EmptyGroup("Grupo Vazio"), Null("Nulo"), Null3D("Nulo 3D"), Camera3D("Câmera 3D"),
     Element("Elemento / Projeto"), Particles("Partículas"), Text3D("Texto 3D"), Phone3D("iPhone 3D"),
 }
 
@@ -413,6 +413,8 @@ private fun ObjectsTab(store: EditorStore, close: () -> Unit) {
                         else ObjectCardTile(card, cardH) {
                             when (card) {
                                 ObjectCard.Scene3D -> picker.launch(arrayOf("model/gltf-binary", "model/gltf+json", "model/obj", "application/octet-stream", "*/*"))
+                                ObjectCard.Null -> { store.addNull(false); close() }
+                                ObjectCard.Null3D -> { store.addNull(true); close() }
                                 else -> store.comingSoon(card.label)
                             }
                         }
@@ -489,6 +491,18 @@ private fun DrawScope.drawObjectIcon(card: ObjectCard) {
             val r = Rect(center.x - 16 * k, center.y - 16 * k, center.x + 16 * k, center.y + 16 * k)
             drawRoundRect(Color.White, r.topLeft, r.size, androidx.compose.ui.geometry.CornerRadius(5 * k), style = stroke)
             drawLine(Color.White, Offset(r.left + 3 * k, r.bottom - 3 * k), Offset(r.right - 3 * k, r.top + 3 * k), 2f * k)
+        }
+        ObjectCard.Null3D -> {
+            // Cubo em arame: o nulo que vive no espaço 3D.
+            val s = 11 * k
+            val d = 6 * k
+            val f = Rect(center.x - s - d / 2, center.y - s + d / 2, center.x + s - d / 2, center.y + s + d / 2)
+            val b = Rect(f.left + d, f.top - d, f.right + d, f.bottom - d)
+            drawRect(Color.White, b.topLeft, b.size, style = Stroke(1.2f * k))
+            drawRect(Color.White, f.topLeft, f.size, style = stroke)
+            for ((p, q) in listOf(f.topLeft to b.topLeft, f.topRight to b.topRight, f.bottomLeft to b.bottomLeft, f.bottomRight to b.bottomRight)) {
+                drawLine(Color.White, p, q, 1.4f * k)
+            }
         }
         else -> {
             val tri = Path().apply {

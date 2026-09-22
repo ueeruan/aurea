@@ -7,6 +7,7 @@
 #include "SyntheticVideo.hpp"
 
 #include "aurea/Engine.hpp"
+#include "aurea/render/Renderer.hpp"
 
 #include <cstdio>
 #include <cstdlib>
@@ -287,6 +288,71 @@ AUREA_TEST(Engine, ParentingCycleIsRefused) {
     cycle.layer_parent.layer = b;
     cycle.layer_parent.parent = a;
     AUREA_CHECK(!e.apply_command(cycle).ok());
+    e.shutdown();
+}
+
+AUREA_TEST(Engine, ParentingKeepsChildInPlace) {
+    Engine e;
+    AUREA_CHECK(e.initialize(headless_config()).ok());
+    AUREA_CHECK(e.new_project(1280, 720, 30.0, nullptr).ok());
+    auto pid = e.add_null(false);
+    auto cid = e.add_null(false);
+    AUREA_CHECK(pid.ok() && cid.ok());
+    Composition* c = e.project()->timeline().composition(e.project()->timeline().current());
+    Layer* par = c->layer(LayerId::unpack(*pid));
+    Layer* ch = c->layer(LayerId::unpack(*cid));
+    AUREA_CHECK(par && ch && par->kind == LayerKind::Null);
+    par->transform.position = Vec3{300, 200, 0};
+    par->transform.rotation = Vec3{0, 0, 30};
+    par->transform.scale = Vec3{2, 2, 1};
+    ch->transform.position = Vec3{900, 500, 0};
+    ch->transform.rotation = Vec3{0, 0, -10};
+    const FrameIndex t0{0};
+    auto corner = [&](const Mat4& m, f32 x, f32 y) { return m * Vec4{x, y, 0, 1}; };
+    const Mat4 before = layer_world_matrix(*c, *ch, t0);
+    bridge::LayerDetailPOD d0, d1;
+    AUREA_CHECK(e.query_layer_detail(*cid, d0));
+    AUREA_CHECK((d0.geomFlags & bridge::kGeomCornersValid) != 0);
+    Command pc;
+    pc.type = CommandType::LayerSetParent;
+    pc.layer_parent.layer = LayerId::unpack(*cid);
+    pc.layer_parent.parent = LayerId::unpack(*pid);
+    AUREA_CHECK(e.apply_command(pc).ok());
+    const Mat4 after = layer_world_matrix(*c, *ch, t0);
+    f32 worst = 0;
+    for (f32 x : {0.0f, 100.0f}) for (f32 y : {0.0f, 100.0f}) {
+        const Vec4 a = corner(before, x, y), b = corner(after, x, y);
+        worst = std::max({worst, std::fabs(a.x - b.x), std::fabs(a.y - b.y)});
+    }
+    std::printf("    filho: escala local %.3f rot %.2f; desvio %.4f px\n", ch->transform.scale.x, ch->transform.rotation.z, worst);
+    AUREA_CHECK(worst < 0.05f);
+    AUREA_CHECK(std::fabs(ch->transform.scale.x - 0.5f) < 1e-3f);
+    AUREA_CHECK(std::fabs(ch->transform.rotation.z + 40.0f) < 1e-2f);
+    AUREA_CHECK(ch->transform.rotation.x == 0.0f && ch->transform.rotation.y == 0.0f);
+    // O palco recebe os mesmos cantos (mundo) e o afim do pai.
+    AUREA_CHECK(e.query_layer_detail(*cid, d1));
+    f32 cw = 0;
+    for (int i = 0; i < 8; ++i) cw = std::max(cw, std::fabs(d0.corners[i] - d1.corners[i]));
+    AUREA_CHECK(cw < 0.05f);
+    AUREA_CHECK(std::fabs(d1.parentAffine[0] - 2.0f * std::cos(30.0f * 3.14159265f / 180.0f)) < 1e-3f);
+    AUREA_CHECK(std::fabs(d1.parentAffine[4] - (300.0f - 2.0f * (50.0f * std::cos(0.5235988f) - 50.0f * std::sin(0.5235988f)))) < 0.05f);
+    // Mover o pai arrasta o filho.
+    par->transform.position.x += 50;
+    const Vec4 moved = corner(layer_world_matrix(*c, *ch, t0), 0, 0);
+    AUREA_CHECK(std::fabs(moved.x - corner(after, 0, 0).x - 50.0f) < 0.05f);
+    par->transform.position.x -= 50;
+    // Soltar o pai: volta ao mesmo lugar, transform original.
+    pc.layer_parent.parent = LayerId{};
+    AUREA_CHECK(e.apply_command(pc).ok());
+    const Mat4 freed = layer_world_matrix(*c, *ch, t0);
+    f32 worst2 = 0;
+    for (f32 x : {0.0f, 100.0f}) for (f32 y : {0.0f, 100.0f}) {
+        const Vec4 a = corner(before, x, y), b = corner(freed, x, y);
+        worst2 = std::max({worst2, std::fabs(a.x - b.x), std::fabs(a.y - b.y)});
+    }
+    AUREA_CHECK(worst2 < 0.05f);
+    AUREA_CHECK(std::fabs(ch->transform.position.x - 900.0f) < 0.05f);
+    AUREA_CHECK(std::fabs(ch->transform.scale.x - 1.0f) < 1e-3f);
     e.shutdown();
 }
 

@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Español. -->
+<resources>
+
+    <string name="common_ok">Entendido</string>
+    <string name="common_cancel">Cancelar</string>
+    <string name="common_save">Guardar</string>
+    <string name="common_delete">Eliminar</string>
+    <string name="common_remove">Quitar</string>
+    <string name="common_rename">Renombrar</string>
+    <string name="common_duplicate">Duplicar</string>
+    <string name="common_open">Abrir</string>
+    <string name="common_back">Volver</string>
+    <string name="common_close">Cerrar</string>
+    <string name="common_apply">Aplicar</string>
+    <string name="common_undo">Deshacer</string>
+    <string name="common_redo">Rehacer</string>
+    <string name="common_yes">Sí</string>
+    <string name="common_no">No</string>
+    <string name="common_search">Buscar</string>
+    <string name="common_none">Ninguno</string>
+    <string name="common_all">Todos</string>
+    <string name="common_default">Predeterminado</string>
+    <string name="common_automatic">Automático</string>
+    <string name="common_off">Apagado</string>
+    <string name="common_on">Encendido</string>
+    <string name="common_irreversible">Esto no se puede deshacer.</string>
+
+    <string name="home_tab_start">Inicio</string>
+    <string name="home_tab_projects">Proyectos</string>
+    <string name="home_tab_settings">Ajustes</string>
+    <string name="home_title_start">Inicio</string>
+    <string name="home_title_projects">Proyectos</string>
+    <string name="home_title_settings">Ajustes</string>
+    <string name="home_search_projects">Buscar proyectos</string>
+    <string name="home_new_project">Nuevo proyecto</string>
+    <string name="home_no_projects">Todavía no hay proyectos</string>
+    <string name="home_no_projects_hint">Toca Nuevo proyecto para empezar.</string>
+    <string name="home_no_results">No se encontraron proyectos</string>
+    <string name="home_sort_recent">Recientes</string>
+    <string name="home_sort_name">Nombre</string>
+    <string name="home_sort_created">Creación</string>
+    <string name="home_sort_size">Tamaño</string>
+    <string name="home_sort_title">Ordenar los proyectos</string>
+    <string name="home_project_count">%1$d proyecto</string>
+    <string name="home_project_count_plural">%1$d proyectos</string>
+    <string name="home_selected_count">%1$d seleccionados</string>
+    <string name="home_select_all">Seleccionar todo</string>
+    <string name="home_clear_selection">Quitar selección</string>
+
+    <string name="settings_group_defaults">Valores de nuevos proyectos</string>
+    <string name="settings_aspect">Proporción</string>
+    <string name="settings_resolution">Resolución</string>
+    <string name="settings_fps">Fotogramas por segundo</string>
+    <string name="settings_defaults_note">Es lo que la hoja "Nuevo proyecto" ya trae elegido.</string>
+    <string name="settings_group_language">Idioma</string>
+    <string name="settings_language">Idioma de la app</string>
+    <string name="settings_language_system">Predeterminado del sistema</string>
+    <string name="settings_language_note">Cambia el texto de la app. Los nombres de proyectos, medios y efectos se quedan igual.</string>
+    <string name="settings_group_captions">Subtítulos</string>
+    <string name="settings_groq_key">Clave de Groq</string>
+    <string name="settings_groq_set">Configurada — toca para cambiar o quitar</string>
+    <string name="settings_groq_unset">Sin configurar — toca para añadir</string>
+    <string name="settings_groq_note">La clave se queda solo en este dispositivo, cifrada. El audio solo va a Groq cuando tocas Generar subtítulos; sin clave puedes usar un archivo SRT.</string>
+    <string name="settings_group_device">Rendimiento</string>
+    <string name="settings_device_auto">Optimización automática</string>
+    <string name="settings_device_auto_note">En la primera apertura la app mide el dispositivo y elige la escala del visor, el número de hilos y el tope de exportación. Queda configurado para las próximas veces.</string>
+    <string name="settings_device_analyse">Analizar el dispositivo otra vez</string>
+    <string name="settings_device_analysed">Dispositivo analizado</string>
+    <string name="settings_group_general">General</string>
+    <string name="settings_clear_cache">Limpiar caché</string>
+    <string name="settings_clear_cache_note">Borra vistas previas, miniaturas y fotogramas temporales</string>
+    <string name="settings_clear_recents">Limpiar efectos recientes</string>
+    <string name="settings_clear_recents_note">La lista de "Recientes" del navegador de efectos</string>
+    <string name="settings_recents_cleared">Efectos recientes borrados</string>
+    <string name="settings_group_about">Acerca de</string>
+    <string name="settings_technology">Tecnología</string>
+    <string name="settings_technology_value">Jetpack Compose + motor C++ / Vulkan</string>
+    <string name="settings_creator">Creador</string>
+    <string name="settings_beta_title">Versión beta de pruebas · %1$s</string>
+    <string name="settings_beta_body">Puede tener errores, bloquearse o perder cambios sin guardar. ¿Encontraste un problema? Toca aquí siete veces para abrir las herramientas de desarrollo.</string>
+    <string name="settings_dev_tools">Herramientas de desarrollo</string>
+    <string name="settings_dev_on">Herramientas de desarrollo activadas</string>
+    <string name="settings_dev_off">Herramientas de desarrollo desactivadas</string>
+    <string name="settings_made_by">Hecho por Ruanzitwo</string>
+
+    <string name="project_delete">Eliminar proyecto</string>
+    <string name="project_delete_all">Borrar todos los proyectos</string>
+    <string name="project_delete_all_title">¿Borrar todos los proyectos?</string>
+    <string name="project_delete_all_message">Se borrarán %1$d proyecto(s). Esto no se puede deshacer.</string>
+    <string name="project_delete_all_confirm">Borrar todos</string>
+    <string name="project_delete_many_title">¿Eliminar %1$d proyectos?</string>
+    <string name="project_new">Proyecto %1$d</string>
+    <string name="project_untitled">Sin título</string>
+
+    <string name="unit_fps">%1$d fps</string>
+    <string name="unit_seconds">%1$s s</string>
+    <string name="unit_megabyte">%1$d MB</string>
+    <string name="unit_gigabyte">%1$s GB</string>
+
+</resources>

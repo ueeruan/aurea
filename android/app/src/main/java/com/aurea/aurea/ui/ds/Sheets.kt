@@ -98,9 +98,10 @@ fun AureaActionSheet(
     title: String? = null,
     message: String? = null,
     actions: List<SheetAction>,
-    cancelLabel: String = "Cancelar",
+    cancelLabel: String? = null,   // nulo = o do catálogo, no idioma do app
     onDismiss: () -> Unit,
 ) {
+    val cancel = cancelLabel ?: androidx.compose.ui.res.stringResource(com.aurea.aurea.R.string.common_cancel)
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.BottomCenter) {
             Column(
@@ -167,25 +168,33 @@ fun AureaActionSheet(
                         .tocavel(shrink = 1f, onClick = onDismiss),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(cancelLabel, style = AureaType.Base.merge(TextStyle(fontSize = 17.sp, fontWeight = FontWeight.W600, color = AureaColors.Accent)))
+                    Text(cancel, style = AureaType.Base.merge(TextStyle(fontSize = 17.sp, fontWeight = FontWeight.W600, color = AureaColors.Accent)))
                 }
             }
         }
     }
 }
 
-/** Diálogo de confirmação no estilo Cupertino (270 dp, raio 14). */
+/**
+ * Diálogo de confirmação no estilo Cupertino (270 dp, raio 14).
+ *
+ * [cancelLabel] nulo = o rótulo do catálogo, no idioma do app. Esconder o botão
+ * de cancelar é [showCancel] = false, não um rótulo nulo: com sete idiomas, um
+ * `null` que significa duas coisas vira bug de tradução.
+ */
 @Composable
 fun AureaAlert(
     title: String,
     message: String? = null,
     confirmLabel: String = "OK",
-    cancelLabel: String? = "Cancelar",
+    cancelLabel: String? = null,
+    showCancel: Boolean = true,
     destructive: Boolean = false,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
     extra: (@Composable () -> Unit)? = null,
 ) {
+    val cancel = cancelLabel ?: androidx.compose.ui.res.stringResource(com.aurea.aurea.R.string.common_cancel)
     Dialog(onDismissRequest = onDismiss) {
         Column(
             Modifier
@@ -206,8 +215,8 @@ fun AureaAlert(
             }
             HorizontalDivider(thickness = 0.3.dp, color = Color(0xD57D7D7D))
             Row(Modifier.fillMaxWidth().heightIn(min = 45.dp)) {
-                if (cancelLabel != null) {
-                    DialogButton(cancelLabel, Modifier.weight(1f), bold = false, color = AureaColors.Accent, onClick = onDismiss)
+                if (showCancel) {
+                    DialogButton(cancel, Modifier.weight(1f), bold = false, color = AureaColors.Accent, onClick = onDismiss)
                     Box(Modifier.width(0.3.dp).height(45.dp).background(Color(0xD57D7D7D)))
                 }
                 DialogButton(

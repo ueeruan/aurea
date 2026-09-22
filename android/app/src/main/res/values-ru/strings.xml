@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Русский. -->
+<resources>
+
+    <string name="common_ok">Понятно</string>
+    <string name="common_cancel">Отмена</string>
+    <string name="common_save">Сохранить</string>
+    <string name="common_delete">Удалить</string>
+    <string name="common_remove">Убрать</string>
+    <string name="common_rename">Переименовать</string>
+    <string name="common_duplicate">Дублировать</string>
+    <string name="common_open">Открыть</string>
+    <string name="common_back">Назад</string>
+    <string name="common_close">Закрыть</string>
+    <string name="common_apply">Применить</string>
+    <string name="common_undo">Отменить</string>
+    <string name="common_redo">Вернуть</string>
+    <string name="common_yes">Да</string>
+    <string name="common_no">Нет</string>
+    <string name="common_search">Поиск</string>
+    <string name="common_none">Нет</string>
+    <string name="common_all">Все</string>
+    <string name="common_default">По умолчанию</string>
+    <string name="common_automatic">Автоматически</string>
+    <string name="common_off">Выкл.</string>
+    <string name="common_on">Вкл.</string>
+    <string name="common_irreversible">Это нельзя отменить.</string>
+
+    <string name="home_tab_start">Главная</string>
+    <string name="home_tab_projects">Проекты</string>
+    <string name="home_tab_settings">Настройки</string>
+    <string name="home_title_start">Главная</string>
+    <string name="home_title_projects">Проекты</string>
+    <string name="home_title_settings">Настройки</string>
+    <string name="home_search_projects">Поиск проектов</string>
+    <string name="home_new_project">Новый проект</string>
+    <string name="home_no_projects">Проектов пока нет</string>
+    <string name="home_no_projects_hint">Нажмите «Новый проект», чтобы начать.</string>
+    <string name="home_no_results">Проекты не найдены</string>
+    <string name="home_sort_recent">Недавние</string>
+    <string name="home_sort_name">Имя</string>
+    <string name="home_sort_created">Дата создания</string>
+    <string name="home_sort_size">Размер</string>
+    <string name="home_sort_title">Сортировка проектов</string>
+    <string name="home_project_count">%1$d проект</string>
+    <string name="home_project_count_plural">%1$d проектов</string>
+    <string name="home_selected_count">Выбрано: %1$d</string>
+    <string name="home_select_all">Выбрать все</string>
+    <string name="home_clear_selection">Снять выделение</string>
+
+    <string name="settings_group_defaults">Параметры новых проектов</string>
+    <string name="settings_aspect">Соотношение сторон</string>
+    <string name="settings_resolution">Разрешение</string>
+    <string name="settings_fps">Кадров в секунду</string>
+    <string name="settings_defaults_note">Это то, что уже выбрано в окне «Новый проект».</string>
+    <string name="settings_group_language">Язык</string>
+    <string name="settings_language">Язык приложения</string>
+    <string name="settings_language_system">Как в системе</string>
+    <string name="settings_language_note">Меняет текст приложения. Имена проектов, файлов и эффектов остаются прежними.</string>
+    <string name="settings_group_captions">Субтитры</string>
+    <string name="settings_groq_key">Ключ Groq</string>
+    <string name="settings_groq_set">Задан — нажмите, чтобы заменить или убрать</string>
+    <string name="settings_groq_unset">Не задан — нажмите, чтобы добавить</string>
+    <string name="settings_groq_note">Ключ хранится только на этом устройстве, в зашифрованном виде. Звук уходит в Groq только когда вы нажимаете «Создать субтитры»; без ключа можно загрузить файл SRT.</string>
+    <string name="settings_group_device">Производительность</string>
+    <string name="settings_device_auto">Автоматическая оптимизация</string>
+    <string name="settings_device_auto_note">При первом запуске приложение измеряет устройство и выбирает масштаб просмотра, число потоков и предел экспорта. Дальше настройки сохраняются.</string>
+    <string name="settings_device_analyse">Проверить устройство заново</string>
+    <string name="settings_device_analysed">Устройство проверено</string>
+    <string name="settings_group_general">Общие</string>
+    <string name="settings_clear_cache">Очистить кэш</string>
+    <string name="settings_clear_cache_note">Удаляет превью, миниатюры и временные кадры</string>
+    <string name="settings_clear_recents">Очистить недавние эффекты</string>
+    <string name="settings_clear_recents_note">Список «Недавние» в браузере эффектов</string>
+    <string name="settings_recents_cleared">Недавние эффекты очищены</string>
+    <string name="settings_group_about">О программе</string>
+    <string name="settings_technology">Технология</string>
+    <string name="settings_technology_value">Jetpack Compose + движок на C++ / Vulkan</string>
+    <string name="settings_creator">Автор</string>
+    <string name="settings_beta_title">Бета-версия для тестов · %1$s</string>
+    <string name="settings_beta_body">Возможны ошибки, зависания и потеря несохранённых изменений. Нашли проблему? Нажмите здесь семь раз, чтобы открыть инструменты разработчика.</string>
+    <string name="settings_dev_tools">Инструменты разработчика</string>
+    <string name="settings_dev_on">Инструменты разработчика включены</string>
+    <string name="settings_dev_off">Инструменты разработчика выключены</string>
+    <string name="settings_made_by">Сделано Ruanzitwo</string>
+
+    <string name="project_delete">Удалить проект</string>
+    <string name="project_delete_all">Удалить все проекты</string>
+    <string name="project_delete_all_title">Удалить все проекты?</string>
+    <string name="project_delete_all_message">Будет удалено проектов: %1$d. Это нельзя отменить.</string>
+    <string name="project_delete_all_confirm">Удалить все</string>
+    <string name="project_delete_many_title">Удалить проекты (%1$d)?</string>
+    <string name="project_new">Проект %1$d</string>
+    <string name="project_untitled">Без названия</string>
+
+    <string name="unit_fps">%1$d кадр/с</string>
+    <string name="unit_seconds">%1$s с</string>
+    <string name="unit_megabyte">%1$d МБ</string>
+    <string name="unit_gigabyte">%1$s ГБ</string>
+
+</resources>

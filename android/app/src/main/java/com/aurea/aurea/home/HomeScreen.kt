@@ -30,10 +30,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.aurea.aurea.R
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaDims
@@ -42,8 +44,8 @@ import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.CupertinoGlyph
 import com.aurea.aurea.ui.theme.CupertinoIcon
 
-/** Uma aba da barra: rótulo, ícone inativo e ativo. */
-private class HomeTab(val label: String, val icon: Char, val active: Char)
+/** Uma aba da barra: rótulo (do catálogo), ícone inativo e ativo. */
+private class HomeTab(val label: Int, val icon: Char, val active: Char)
 
 /**
  * As três abas da Home. Comunidade e Perfil saíram (§2); a aba Efeitos saiu
@@ -53,9 +55,9 @@ private class HomeTab(val label: String, val icon: Char, val active: Char)
  * efeito: o navegador vive onde ele serve para alguma coisa.
  */
 private val Tabs = listOf(
-    HomeTab("Início", CupertinoGlyph.House, CupertinoGlyph.HouseFill),
-    HomeTab("Projetos", CupertinoGlyph.RectangleStack, CupertinoGlyph.RectangleStack),
-    HomeTab("Ajustes", CupertinoGlyph.SliderHorizontal3, CupertinoGlyph.SliderHorizontal3),
+    HomeTab(R.string.home_tab_start, CupertinoGlyph.House, CupertinoGlyph.HouseFill),
+    HomeTab(R.string.home_tab_projects, CupertinoGlyph.RectangleStack, CupertinoGlyph.RectangleStack),
+    HomeTab(R.string.home_tab_settings, CupertinoGlyph.SliderHorizontal3, CupertinoGlyph.SliderHorizontal3),
 )
 
 /**
@@ -154,6 +156,6 @@ private fun TabItem(tab: HomeTab, selected: Boolean, modifier: Modifier, onClick
     ) {
         CupertinoIcon(if (selected) tab.active else tab.icon, AureaDims.IconLg, color)
         Spacer(Modifier.height(3.dp))
-        Text(tab.label, style = AureaType.TabLabel, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(stringResource(tab.label), style = AureaType.TabLabel, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }

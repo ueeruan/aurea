@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  العربية — RTL.
+
+  O texto daqui corre da direita para a esquerda automaticamente pelo locale.
+  O que NÃO pode espelhar (timeline, régua, playhead, curva, canvas, eixos X/Y/Z)
+  é forçado a LTR pelo código, não por este arquivo.
+
+  Os números ficam em algarismos latinos (%1$d) de propósito: a régua, o
+  timecode e as coordenadas do Aurea são latinos em todos os idiomas, e um
+  timecode árabe-índico sairia diferente do que o usuário vê no painel.
+-->
+<resources>
+
+    <string name="common_ok">فهمت</string>
+    <string name="common_cancel">إلغاء</string>
+    <string name="common_save">حفظ</string>
+    <string name="common_delete">حذف</string>
+    <string name="common_remove">إزالة</string>
+    <string name="common_rename">إعادة تسمية</string>
+    <string name="common_duplicate">تكرار</string>
+    <string name="common_open">فتح</string>
+    <string name="common_back">رجوع</string>
+    <string name="common_close">إغلاق</string>
+    <string name="common_apply">تطبيق</string>
+    <string name="common_undo">تراجع</string>
+    <string name="common_redo">إعادة</string>
+    <string name="common_yes">نعم</string>
+    <string name="common_no">لا</string>
+    <string name="common_search">بحث</string>
+    <string name="common_none">لا شيء</string>
+    <string name="common_all">الكل</string>
+    <string name="common_default">افتراضي</string>
+    <string name="common_automatic">تلقائي</string>
+    <string name="common_off">متوقف</string>
+    <string name="common_on">مشغّل</string>
+    <string name="common_irreversible">لا يمكن التراجع عن هذا.</string>
+
+    <string name="home_tab_start">الرئيسية</string>
+    <string name="home_tab_projects">المشاريع</string>
+    <string name="home_tab_settings">الإعدادات</string>
+    <string name="home_title_start">الرئيسية</string>
+    <string name="home_title_projects">المشاريع</string>
+    <string name="home_title_settings">الإعدادات</string>
+    <string name="home_search_projects">بحث في المشاريع</string>
+    <string name="home_new_project">مشروع جديد</string>
+    <string name="home_no_projects">لا توجد مشاريع بعد</string>
+    <string name="home_no_projects_hint">اضغط على «مشروع جديد» للبدء.</string>
+    <string name="home_no_results">لم يُعثر على مشاريع</string>
+    <string name="home_sort_recent">الأحدث</string>
+    <string name="home_sort_name">الاسم</string>
+    <string name="home_sort_created">تاريخ الإنشاء</string>
+    <string name="home_sort_size">الحجم</string>
+    <string name="home_sort_title">ترتيب المشاريع</string>
+    <string name="home_project_count">%1$d مشروع</string>
+    <string name="home_project_count_plural">%1$d مشاريع</string>
+    <string name="home_selected_count">%1$d محدّد</string>
+    <string name="home_select_all">تحديد الكل</string>
+    <string name="home_clear_selection">إلغاء التحديد</string>
+
+    <string name="settings_group_defaults">إعدادات المشاريع الجديدة</string>
+    <string name="settings_aspect">نسبة الأبعاد</string>
+    <string name="settings_resolution">الدقة</string>
+    <string name="settings_fps">إطار في الثانية</string>
+    <string name="settings_defaults_note">هذه هي القيم المختارة مسبقًا في نافذة «مشروع جديد».</string>
+    <string name="settings_group_language">اللغة</string>
+    <string name="settings_language">لغة التطبيق</string>
+    <string name="settings_language_system">لغة النظام</string>
+    <string name="settings_language_note">تغيّر نص التطبيق. أسماء المشاريع والوسائط والمؤثرات تبقى كما هي.</string>
+    <string name="settings_group_captions">الترجمات</string>
+    <string name="settings_groq_key">مفتاح Groq</string>
+    <string name="settings_groq_set">مضبوط — اضغط للاستبدال أو الإزالة</string>
+    <string name="settings_groq_unset">غير مضبوط — اضغط للإضافة</string>
+    <string name="settings_groq_note">يبقى المفتاح على هذا الجهاز فقط، مشفَّرًا. لا يُرسل الصوت إلى Groq إلا عند الضغط على «إنشاء الترجمات»؛ وبدون مفتاح يمكن استخدام ملف SRT.</string>
+    <string name="settings_group_device">الأداء</string>
+    <string name="settings_device_auto">التحسين التلقائي</string>
+    <string name="settings_device_auto_note">عند أول تشغيل يقيس التطبيق الجهاز ويختار مقياس المعاينة وعدد العمّال وحدّ التصدير. تبقى الإعدادات محفوظة بعد ذلك.</string>
+    <string name="settings_device_analyse">تحليل الجهاز مرة أخرى</string>
+    <string name="settings_device_analysed">تم تحليل الجهاز</string>
+    <string name="settings_group_general">عام</string>
+    <string name="settings_clear_cache">مسح الذاكرة المؤقتة</string>
+    <string name="settings_clear_cache_note">يحذف المعاينات والصور المصغّرة والإطارات المؤقتة</string>
+    <string name="settings_clear_recents">مسح المؤثرات الأخيرة</string>
+    <string name="settings_clear_recents_note">قائمة «الأخيرة» في مستعرض المؤثرات</string>
+    <string name="settings_recents_cleared">تم مسح المؤثرات الأخيرة</string>
+    <string name="settings_group_about">حول</string>
+    <string name="settings_technology">التقنية</string>
+    <string name="settings_technology_value">Jetpack Compose + محرك C++ / Vulkan</string>
+    <string name="settings_creator">المطوّر</string>
+    <string name="settings_beta_title">نسخة تجريبية للاختبار · %1$s</string>
+    <string name="settings_beta_body">قد تحدث أخطاء أو توقّف أو فقدان لتغييرات غير محفوظة. وجدت مشكلة؟ اضغط هنا سبع مرات لفتح أدوات المطوّر.</string>
+    <string name="settings_dev_tools">أدوات المطوّر</string>
+    <string name="settings_dev_on">أدوات المطوّر مفعّلة</string>
+    <string name="settings_dev_off">أدوات المطوّر متوقفة</string>
+    <string name="settings_made_by">من صنع Ruanzitwo</string>
+
+    <string name="project_delete">حذف المشروع</string>
+    <string name="project_delete_all">حذف كل المشاريع</string>
+    <string name="project_delete_all_title">حذف كل المشاريع؟</string>
+    <string name="project_delete_all_message">سيُحذف %1$d مشروع. لا يمكن التراجع عن هذا.</string>
+    <string name="project_delete_all_confirm">حذف الكل</string>
+    <string name="project_delete_many_title">حذف %1$d مشاريع؟</string>
+    <string name="project_new">مشروع %1$d</string>
+    <string name="project_untitled">بلا عنوان</string>
+
+    <string name="unit_fps">%1$d إطار/ث</string>
+    <string name="unit_seconds">%1$s ث</string>
+    <string name="unit_megabyte">%1$d م.ب</string>
+    <string name="unit_gigabyte">%1$s ج.ب</string>
+
+</resources>

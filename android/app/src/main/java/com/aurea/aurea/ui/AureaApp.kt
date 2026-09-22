@@ -16,7 +16,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.aurea.aurea.R
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.editor.EditorScreen
 import com.aurea.aurea.home.HomeScreen
@@ -67,8 +69,8 @@ fun AureaApp(store: EditorStore) {
                 AureaAlert(
                     title = "Aurea",
                     message = msg,
-                    confirmLabel = "Entendi",
-                    cancelLabel = null,
+                    confirmLabel = stringResource(R.string.common_ok),
+                    showCancel = false,
                     onConfirm = {},
                     onDismiss = { store.dismissError() },
                 )

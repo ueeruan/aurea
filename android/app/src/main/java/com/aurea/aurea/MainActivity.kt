@@ -1,5 +1,6 @@
 package com.aurea.aurea
 
+import android.content.Context
 import android.graphics.Color
 import android.os.Bundle
 import android.view.WindowManager
@@ -10,6 +11,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.AureaApp
+import com.aurea.aurea.ui.i18n.AppLanguage
 
 /**
  * A única Activity. O [EditorStore] é um ViewModel de verdade: sobrevive a
@@ -19,6 +21,18 @@ import com.aurea.aurea.ui.AureaApp
 class MainActivity : ComponentActivity() {
 
     private val store: EditorStore by viewModels()
+
+    /**
+     * O idioma escolhido entra AQUI — antes de qualquer recurso ser lido.
+     *
+     * É o gancho mais cedo que existe: a partir daqui `stringResource`,
+     * `getString` e a direção de layout do app inteiro resolvem no idioma
+     * certo. Trocar o idioma nos Ajustes recria a Activity, e a nova passa por
+     * aqui de novo.
+     */
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(AppLanguage.wrap(newBase))
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

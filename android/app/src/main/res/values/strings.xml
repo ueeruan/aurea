@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Catálogo de texto do Aurea (Fase 8.1).
+
+  `values/` é o PORTUGUÊS: é o idioma em que o app foi escrito, então é ele que
+  serve de padrão e de fallback. Os outros seis idiomas moram em `values-<código>`
+  e trazem SÓ o que traduz — o que faltar cai para cá, nunca para um espaço vazio.
+
+  REGRA: nenhuma string de interface fora deste arquivo. Nome técnico em
+  `snake_case` com o dono na frente (`home_tab_projects`), porque com sete
+  idiomas o nome é a única coisa que continua legível em todos eles.
+
+  O que NÃO entra aqui: nome de efeito, de parâmetro e de categoria. Eles são
+  IDENTIDADE do motor — mudam de idioma no rótulo, nunca no id que viaja no
+  projeto salvo.
+-->
+<resources>
+
+    <!-- =====================================================================
+         Comum: o que aparece em qualquer tela
+         ===================================================================== -->
+    <string name="common_ok">Entendi</string>
+    <string name="common_cancel">Cancelar</string>
+    <string name="common_save">Salvar</string>
+    <string name="common_delete">Excluir</string>
+    <string name="common_remove">Remover</string>
+    <string name="common_rename">Renomear</string>
+    <string name="common_duplicate">Duplicar</string>
+    <string name="common_open">Abrir</string>
+    <string name="common_back">Voltar</string>
+    <string name="common_close">Fechar</string>
+    <string name="common_apply">Aplicar</string>
+    <string name="common_undo">Desfazer</string>
+    <string name="common_redo">Refazer</string>
+    <string name="common_yes">Sim</string>
+    <string name="common_no">Não</string>
+    <string name="common_search">Buscar</string>
+    <string name="common_none">Nenhum</string>
+    <string name="common_all">Todos</string>
+    <string name="common_default">Padrão</string>
+    <string name="common_automatic">Automático</string>
+    <string name="common_off">Desligado</string>
+    <string name="common_on">Ligado</string>
+    <string name="common_percent">%1$d%%</string>
+    <string name="common_pixels">%1$d px</string>
+    <string name="common_seconds_short">%1$ss</string>
+    <string name="common_irreversible">Não dá para desfazer.</string>
+
+    <!-- =====================================================================
+         Home: a casca
+         ===================================================================== -->
+    <string name="home_tab_start">Início</string>
+    <string name="home_tab_projects">Projetos</string>
+    <string name="home_tab_settings">Ajustes</string>
+    <string name="home_title_start">Início</string>
+    <string name="home_title_projects">Projetos</string>
+    <string name="home_title_settings">Ajustes</string>
+    <string name="home_search_projects">Buscar projetos</string>
+    <string name="home_new_project">Novo projeto</string>
+    <string name="home_no_projects">Nenhum projeto ainda</string>
+    <string name="home_no_projects_hint">Toque em Novo projeto para começar.</string>
+    <string name="home_no_results">Nenhum projeto encontrado</string>
+    <string name="home_sort_recent">Recentes</string>
+    <string name="home_sort_name">Nome</string>
+    <string name="home_sort_created">Criação</string>
+    <string name="home_sort_size">Tamanho</string>
+    <string name="home_sort_title">Ordenar os projetos</string>
+    <string name="home_project_count">%1$d projeto</string>
+    <string name="home_project_count_plural">%1$d projetos</string>
+    <string name="home_selected_count">%1$d selecionados</string>
+    <string name="home_select_all">Selecionar todos</string>
+    <string name="home_clear_selection">Limpar seleção</string>
+
+    <!-- =====================================================================
+         Ajustes
+         ===================================================================== -->
+    <string name="settings_group_defaults">Padrões de novos projetos</string>
+    <string name="settings_aspect">Proporção</string>
+    <string name="settings_resolution">Resolução</string>
+    <string name="settings_fps">Quadros por segundo</string>
+    <string name="settings_defaults_note">É o que a folha "Novo projeto" já traz escolhido.</string>
+    <string name="settings_group_language">Idioma</string>
+    <string name="settings_language">Idioma do app</string>
+    <string name="settings_language_system">Padrão do sistema</string>
+    <string name="settings_language_note">Muda o texto do app. Nomes de projeto, mídia e efeitos continuam como estão.</string>
+    <string name="settings_group_captions">Legendas</string>
+    <string name="settings_groq_key">Chave da Groq</string>
+    <string name="settings_groq_set">Configurada — toque para trocar ou remover</string>
+    <string name="settings_groq_unset">Não configurada — toque para colocar</string>
+    <string name="settings_groq_note">A chave fica só neste aparelho, cifrada. O áudio só vai à Groq quando você toca em Gerar legendas; sem chave, dá para usar um arquivo SRT.</string>
+    <string name="settings_group_device">Desempenho</string>
+    <string name="settings_device_auto">Otimização automática</string>
+    <string name="settings_device_auto_note">Na primeira abertura o app mede o aparelho e escolhe o preview, o número de workers e o teto de export. Fica configurado para as próximas vezes.</string>
+    <string name="settings_device_analyse">Analisar o aparelho de novo</string>
+    <string name="settings_device_analysed">Aparelho analisado</string>
+    <string name="settings_group_general">Geral</string>
+    <string name="settings_clear_cache">Limpar cache</string>
+    <string name="settings_clear_cache_note">Remove prévias, miniaturas e quadros temporários</string>
+    <string name="settings_clear_recents">Limpar recentes de efeitos</string>
+    <string name="settings_clear_recents_note">A lista de "Recentes" do navegador de efeitos</string>
+    <string name="settings_recents_cleared">Recentes de efeitos limpos</string>
+    <string name="settings_group_about">Sobre</string>
+    <string name="settings_technology">Tecnologia</string>
+    <string name="settings_technology_value">Jetpack Compose + motor C++ / Vulkan</string>
+    <string name="settings_creator">Criador</string>
+    <string name="settings_beta_title">Versão beta para testes · %1$s</string>
+    <string name="settings_beta_body">Pode ter erros, travar ou perder alterações não salvas. Achou um problema? Toque aqui sete vezes para abrir as ferramentas de desenvolvedor.</string>
+    <string name="settings_dev_tools">Ferramentas de desenvolvedor</string>
+    <string name="settings_dev_on">Ferramentas de desenvolvedor ligadas</string>
+    <string name="settings_dev_off">Ferramentas de desenvolvedor desligadas</string>
+    <string name="settings_made_by">Feito por Ruanzitwo</string>
+
+    <!-- =====================================================================
+         Projetos: menu e diálogos
+         ===================================================================== -->
+    <string name="project_delete">Excluir projeto</string>
+    <string name="project_delete_all">Apagar todos os projetos</string>
+    <string name="project_delete_all_title">Apagar todos os projetos?</string>
+    <string name="project_delete_all_message">%1$d projeto(s) serão apagados. Isso não pode ser desfeito.</string>
+    <string name="project_delete_all_confirm">Apagar todos</string>
+    <string name="project_delete_many_title">Excluir %1$d projetos?</string>
+    <string name="project_new">Projeto %1$d</string>
+    <string name="project_untitled">Sem título</string>
+
+    <!-- =====================================================================
+         Unidades e tempo
+         ===================================================================== -->
+    <string name="unit_fps">%1$d fps</string>
+    <string name="unit_seconds">%1$s s</string>
+    <string name="unit_megabyte">%1$d MB</string>
+    <string name="unit_gigabyte">%1$s GB</string>
+
+</resources>

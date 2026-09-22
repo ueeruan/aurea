@@ -74,6 +74,7 @@ import com.aurea.aurea.engine.KeyframeRow
 import com.aurea.aurea.engine.TrackProperty
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.ds.AureaNamePrompt
+import com.aurea.aurea.ui.i18n.KeepLtr
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.CupertinoGlyph
@@ -295,7 +296,9 @@ private fun NarrowEditor(
     Column(Modifier.fillMaxSize().background(AureaColors.Background)) {
         if (!ui.fullscreen) TopBarHost(store, ui)
         val previewH = if (ui.fullscreen) (m.preview - ShellDims.FullscreenTimeBar.value).coerceAtLeast(0f) else m.preview
-        stage(Modifier.fillMaxWidth().height(previewH.dp))
+        // O palco e a timeline NÃO espelham em árabe: o quadro 0 fica à
+        // esquerda e o tempo anda para a direita em qualquer idioma.
+        KeepLtr { stage(Modifier.fillMaxWidth().height(previewH.dp)) }
         if (ui.fullscreen) {
             FullscreenTimeBar(store)
         } else {
@@ -303,7 +306,7 @@ private fun NarrowEditor(
         }
         TransportBar(store, ui)
         if (!ui.fullscreen) {
-            TimelineHost(store, ui, Modifier.fillMaxWidth().height(m.timeline.dp))
+            KeepLtr { TimelineHost(store, ui, Modifier.fillMaxWidth().height(m.timeline.dp)) }
             if (content != SheetContent.None) {
                 ContextArea(store, ui, content, Modifier.fillMaxWidth().height(m.sheet.dp))
             }
@@ -324,10 +327,13 @@ private fun WideEditor(
         TopBarHost(store, ui)
         Row(Modifier.weight(1f).fillMaxWidth()) {
             Column(Modifier.weight(1f).fillMaxHeight()) {
-                stage(Modifier.fillMaxWidth().weight(1f))
-                PreviewStrip(ui)
-                TransportBar(store, ui)
-                TimelineHost(store, ui, Modifier.fillMaxWidth().height(EditorLayout.wideTimeline(totalHeight).dp))
+                // Palco e timeline em LTR mesmo em árabe (ver `KeepLtr`).
+                KeepLtr {
+                    stage(Modifier.fillMaxWidth().weight(1f))
+                    PreviewStrip(ui)
+                    TransportBar(store, ui)
+                    TimelineHost(store, ui, Modifier.fillMaxWidth().height(EditorLayout.wideTimeline(totalHeight).dp))
+                }
             }
             // No largo a folha fica sempre à direita; sem nada escolhido ela
             // mostra a dica do palco.

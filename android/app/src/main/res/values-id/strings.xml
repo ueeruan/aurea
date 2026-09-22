@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Bahasa Indonesia. -->
+<resources>
+
+    <string name="common_ok">Mengerti</string>
+    <string name="common_cancel">Batal</string>
+    <string name="common_save">Simpan</string>
+    <string name="common_delete">Hapus</string>
+    <string name="common_remove">Buang</string>
+    <string name="common_rename">Ganti nama</string>
+    <string name="common_duplicate">Duplikat</string>
+    <string name="common_open">Buka</string>
+    <string name="common_back">Kembali</string>
+    <string name="common_close">Tutup</string>
+    <string name="common_apply">Terapkan</string>
+    <string name="common_undo">Urungkan</string>
+    <string name="common_redo">Ulangi</string>
+    <string name="common_yes">Ya</string>
+    <string name="common_no">Tidak</string>
+    <string name="common_search">Cari</string>
+    <string name="common_none">Tidak ada</string>
+    <string name="common_all">Semua</string>
+    <string name="common_default">Bawaan</string>
+    <string name="common_automatic">Otomatis</string>
+    <string name="common_off">Mati</string>
+    <string name="common_on">Nyala</string>
+    <string name="common_irreversible">Ini tidak bisa dibatalkan.</string>
+
+    <string name="home_tab_start">Beranda</string>
+    <string name="home_tab_projects">Proyek</string>
+    <string name="home_tab_settings">Pengaturan</string>
+    <string name="home_title_start">Beranda</string>
+    <string name="home_title_projects">Proyek</string>
+    <string name="home_title_settings">Pengaturan</string>
+    <string name="home_search_projects">Cari proyek</string>
+    <string name="home_new_project">Proyek baru</string>
+    <string name="home_no_projects">Belum ada proyek</string>
+    <string name="home_no_projects_hint">Ketuk Proyek baru untuk mulai.</string>
+    <string name="home_no_results">Proyek tidak ditemukan</string>
+    <string name="home_sort_recent">Terbaru</string>
+    <string name="home_sort_name">Nama</string>
+    <string name="home_sort_created">Dibuat</string>
+    <string name="home_sort_size">Ukuran</string>
+    <string name="home_sort_title">Urutkan proyek</string>
+    <string name="home_project_count">%1$d proyek</string>
+    <string name="home_project_count_plural">%1$d proyek</string>
+    <string name="home_selected_count">%1$d dipilih</string>
+    <string name="home_select_all">Pilih semua</string>
+    <string name="home_clear_selection">Hapus pilihan</string>
+
+    <string name="settings_group_defaults">Bawaan proyek baru</string>
+    <string name="settings_aspect">Rasio</string>
+    <string name="settings_resolution">Resolusi</string>
+    <string name="settings_fps">Frame per detik</string>
+    <string name="settings_defaults_note">Inilah yang sudah terpilih di lembar "Proyek baru".</string>
+    <string name="settings_group_language">Bahasa</string>
+    <string name="settings_language">Bahasa aplikasi</string>
+    <string name="settings_language_system">Bawaan sistem</string>
+    <string name="settings_language_note">Mengubah teks aplikasi. Nama proyek, media, dan efek tetap seperti semula.</string>
+    <string name="settings_group_captions">Teks</string>
+    <string name="settings_groq_key">Kunci Groq</string>
+    <string name="settings_groq_set">Sudah diisi — ketuk untuk mengganti atau menghapus</string>
+    <string name="settings_groq_unset">Belum diisi — ketuk untuk menambahkan</string>
+    <string name="settings_groq_note">Kunci hanya tersimpan di perangkat ini, terenkripsi. Audio hanya dikirim ke Groq saat Anda mengetuk Buat teks; tanpa kunci, berkas SRT tetap bisa dipakai.</string>
+    <string name="settings_group_device">Kinerja</string>
+    <string name="settings_device_auto">Optimasi otomatis</string>
+    <string name="settings_device_auto_note">Saat pertama dibuka, aplikasi mengukur perangkat dan memilih skala pratinjau, jumlah worker, dan batas ekspor. Setelah itu pengaturannya tetap.</string>
+    <string name="settings_device_analyse">Analisis perangkat lagi</string>
+    <string name="settings_device_analysed">Perangkat dianalisis</string>
+    <string name="settings_group_general">Umum</string>
+    <string name="settings_clear_cache">Bersihkan singgahan</string>
+    <string name="settings_clear_cache_note">Menghapus pratinjau, miniatur, dan frame sementara</string>
+    <string name="settings_clear_recents">Bersihkan efek terbaru</string>
+    <string name="settings_clear_recents_note">Daftar "Terbaru" di penjelajah efek</string>
+    <string name="settings_recents_cleared">Efek terbaru dibersihkan</string>
+    <string name="settings_group_about">Tentang</string>
+    <string name="settings_technology">Teknologi</string>
+    <string name="settings_technology_value">Jetpack Compose + mesin C++ / Vulkan</string>
+    <string name="settings_creator">Pembuat</string>
+    <string name="settings_beta_title">Versi beta untuk uji coba · %1$s</string>
+    <string name="settings_beta_body">Bisa error, macet, atau kehilangan perubahan yang belum disimpan. Menemukan masalah? Ketuk di sini tujuh kali untuk membuka alat pengembang.</string>
+    <string name="settings_dev_tools">Alat pengembang</string>
+    <string name="settings_dev_on">Alat pengembang dinyalakan</string>
+    <string name="settings_dev_off">Alat pengembang dimatikan</string>
+    <string name="settings_made_by">Dibuat oleh Ruanzitwo</string>
+
+    <string name="project_delete">Hapus proyek</string>
+    <string name="project_delete_all">Hapus semua proyek</string>
+    <string name="project_delete_all_title">Hapus semua proyek?</string>
+    <string name="project_delete_all_message">%1$d proyek akan dihapus. Ini tidak bisa dibatalkan.</string>
+    <string name="project_delete_all_confirm">Hapus semua</string>
+    <string name="project_delete_many_title">Hapus %1$d proyek?</string>
+    <string name="project_new">Proyek %1$d</string>
+    <string name="project_untitled">Tanpa judul</string>
+
+    <string name="unit_fps">%1$d fps</string>
+    <string name="unit_seconds">%1$s dtk</string>
+    <string name="unit_megabyte">%1$d MB</string>
+    <string name="unit_gigabyte">%1$s GB</string>
+
+</resources>

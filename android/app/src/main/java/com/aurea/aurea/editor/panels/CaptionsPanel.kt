@@ -6,6 +6,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -18,7 +20,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -62,74 +63,104 @@ internal fun CaptionsPanel(env: PanelEnv) {
     val s = cap.settings
     fun set(f: (CaptionSettings) -> CaptionSettings) { cap.settings = f(cap.settings) }
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 10.dp)) {
-        cap.busy?.let { Note(it, AureaColors.Accent) }
-        cap.error?.let { Note(it, AureaColors.Danger) }
-        if (!cap.hasGroqKey) {
-            Note("Sem a chave do serviço de transcrição: use um arquivo de legenda (.srt), ou coloque a chave em Ajustes › Legendas. O áudio só sai do aparelho quando você toca em Gerar legendas.", AureaColors.Muted)
-        }
-        Label("Idioma da fala")
-        Chips(Languages.map { it.second }, Languages.indexOfFirst { it.first == language }) { language = Languages[it].first }
-        Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Action(if (cap.words.isEmpty()) "Gerar legendas" else "Transcrever de novo", primary = true, enabled = cap.hasGroqKey && cap.busy == null) {
-                cap.transcribe(language)
+    // Fase 8D: LazyColumn. A transcrição de um vídeo longo tem 2000–5000
+    // palavras; num FlowRow dentro de um Column rolável TODAS eram compostas e
+    // medidas ao abrir o painel (e todas recompostas ao tocar numa). Agora a
+    // fala vai em pedaços de [WORDS_PER_ITEM] palavras e só os pedaços na tela
+    // existem; o editor da palavra aparece logo abaixo do pedaço dela.
+    val words = cap.words
+    val fillers = cap.fillers
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp)) {
+        item(key = "opcoes", contentType = "opcoes") {
+            Column {
+                cap.busy?.let { Note(it, AureaColors.Accent) }
+                cap.error?.let { Note(it, AureaColors.Danger) }
+                if (!cap.hasGroqKey) {
+                    Note("Sem a chave do serviço de transcrição: use um arquivo de legenda (.srt), ou coloque a chave em Ajustes › Legendas. O áudio só sai do aparelho quando você toca em Gerar legendas.", AureaColors.Muted)
+                }
+                Label("Idioma da fala")
+                Chips(Languages.map { it.second }, Languages.indexOfFirst { it.first == language }) { language = Languages[it].first }
+                Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Action(if (cap.words.isEmpty()) "Gerar legendas" else "Transcrever de novo", primary = true, enabled = cap.hasGroqKey && cap.busy == null) {
+                        cap.transcribe(language)
+                    }
+                    Action("Importar legenda (.srt)", enabled = cap.busy == null) { srt.launch(arrayOf("application/x-subrip", "text/*", "application/octet-stream")) }
+                }
+
+                Label("Estilo")
+                Chips(CaptionStyles, s.style) { i -> set { it.copy(style = i) } }
+                Label("Legenda")
+                Chips(listOf("Agrupadas", "Uma por palavra"), s.mode) { i -> set { it.copy(mode = i) } }
+                if (s.mode == 0) {
+                    Label("Palavras por legenda")
+                    Chips((1..6).map { "$it" }, s.maxWords - 1) { i -> set { it.copy(maxWords = i + 1) } }
+                    Label("Letras por linha")
+                    Chips(listOf("12", "18", "24", "32"), listOf(12, 18, 24, 32).indexOf(s.maxChars)) { i -> set { it.copy(maxChars = listOf(12, 18, 24, 32)[i]) } }
+                    Label("Linhas")
+                    Chips(listOf("1", "2", "3"), s.maxLines - 1) { i -> set { it.copy(maxLines = i + 1) } }
+                }
+                Label("Altura na tela")
+                val ys = listOf(0.2f, 0.5f, 0.78f)
+                Chips(listOf("Alto", "Meio", "Baixo"), ys.indexOfFirst { kotlin.math.abs(it - s.posY) < 0.01f }) { i -> set { it.copy(posY = ys[i]) } }
+                Label("Tamanho")
+                val sizes = listOf(0.045f, 0.065f, 0.09f)
+                Chips(listOf("P", "M", "G"), sizes.indexOfFirst { kotlin.math.abs(it - s.sizeFrac) < 0.001f }) { i -> set { it.copy(sizeFrac = sizes[i]) } }
+                Toggle("Destacar a palavra falada", s.highlight) { v -> set { it.copy(highlight = v) } }
+                Toggle("MAIÚSCULAS", s.uppercase) { v -> set { it.copy(uppercase = v) } }
+                Toggle("Quebrar nas pausas", s.breakOnPause) { v -> set { it.copy(breakOnPause = v) } }
+                Toggle("Tirar vícios (hum, ahn, tipo…)", s.removeFillers) { v -> set { it.copy(removeFillers = v) } }
+
+                Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Action(if (cap.captionCount > 0) "Refazer legendas" else "Criar legendas", primary = true, enabled = words.isNotEmpty() && cap.busy == null) { cap.generate() }
+                    if (cap.captionCount > 0) Action("Remover (${cap.captionCount})", enabled = cap.busy == null) { cap.removeAll() }
+                }
+                if (words.isNotEmpty()) Label("Texto da fala${cap.source?.let { " · $it" } ?: ""} — toque para corrigir (${words.size} palavras)")
             }
-            Action("Importar legenda (.srt)", enabled = cap.busy == null) { srt.launch(arrayOf("application/x-subrip", "text/*", "application/octet-stream")) }
         }
 
-        Label("Estilo")
-        Chips(CaptionStyles, s.style) { i -> set { it.copy(style = i) } }
-        Label("Legenda")
-        Chips(listOf("Agrupadas", "Uma por palavra"), s.mode) { i -> set { it.copy(mode = i) } }
-        if (s.mode == 0) {
-            Label("Palavras por legenda")
-            Chips((1..6).map { "$it" }, s.maxWords - 1) { i -> set { it.copy(maxWords = i + 1) } }
-            Label("Letras por linha")
-            Chips(listOf("12", "18", "24", "32"), listOf(12, 18, 24, 32).indexOf(s.maxChars)) { i -> set { it.copy(maxChars = listOf(12, 18, 24, 32)[i]) } }
-            Label("Linhas")
-            Chips(listOf("1", "2", "3"), s.maxLines - 1) { i -> set { it.copy(maxLines = i + 1) } }
-        }
-        Label("Altura na tela")
-        val ys = listOf(0.2f, 0.5f, 0.78f)
-        Chips(listOf("Alto", "Meio", "Baixo"), ys.indexOfFirst { kotlin.math.abs(it - s.posY) < 0.01f }) { i -> set { it.copy(posY = ys[i]) } }
-        Label("Tamanho")
-        val sizes = listOf(0.045f, 0.065f, 0.09f)
-        Chips(listOf("P", "M", "G"), sizes.indexOfFirst { kotlin.math.abs(it - s.sizeFrac) < 0.001f }) { i -> set { it.copy(sizeFrac = sizes[i]) } }
-        Toggle("Destacar a palavra falada", s.highlight) { v -> set { it.copy(highlight = v) } }
-        Toggle("MAIÚSCULAS", s.uppercase) { v -> set { it.copy(uppercase = v) } }
-        Toggle("Quebrar nas pausas", s.breakOnPause) { v -> set { it.copy(breakOnPause = v) } }
-        Toggle("Tirar vícios (hum, ahn, tipo…)", s.removeFillers) { v -> set { it.copy(removeFillers = v) } }
-
-        Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Action(if (cap.captionCount > 0) "Refazer legendas" else "Criar legendas", primary = true, enabled = cap.words.isNotEmpty()) { cap.generate() }
-            if (cap.captionCount > 0) Action("Remover (${cap.captionCount})") { cap.removeAll() }
-        }
-
-        if (cap.words.isNotEmpty()) {
-            Label("Texto da fala${cap.source?.let { " · $it" } ?: ""} — toque para corrigir")
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                cap.words.forEachIndexed { i, w ->
-                    val filler = i in cap.fillers
-                    Box(
-                        Modifier.clip(RoundedCornerShape(6.dp)).background(if (editing == i) AureaColors.AccentDim else AureaColors.Chip)
-                            .tocavel(onClick = { editing = i }).padding(horizontal = 8.dp, vertical = 4.dp),
-                    ) {
-                        Text(
-                            w.text,
-                            style = AureaType.Base.merge(
-                                TextStyle(
-                                    fontSize = 13.sp,
-                                    color = if (filler && s.removeFillers) AureaColors.Muted else AureaColors.Text,
-                                    textDecoration = if (filler && s.removeFillers) TextDecoration.LineThrough else null,
-                                ),
-                            ),
-                        )
+        if (words.isNotEmpty()) {
+            val chunks = (words.size + WORDS_PER_ITEM - 1) / WORDS_PER_ITEM
+            items(chunks, contentType = { "fala" }) { c ->
+                val from = c * WORDS_PER_ITEM
+                val to = minOf(words.size, from + WORDS_PER_ITEM)
+                FlowRow(
+                    Modifier.padding(bottom = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    for (i in from until to) {
+                        val struck = s.removeFillers && i in fillers
+                        WordChip(words[i].text, selected = editing == i, struck = struck) { editing = i }
+                    }
+                }
+                val e = editing
+                if (e != null && e in from until to) {
+                    words.getOrNull(e)?.let { w ->
+                        WordEditor(w.text, "${com.aurea.aurea.ui.ds.numeroPtBr(w.start.toFloat(), 2)} s", onDone = { t -> cap.editWord(e, t); editing = null })
+                        Spacer(Modifier.height(8.dp))
                     }
                 }
             }
-            editing?.let { i -> cap.words.getOrNull(i)?.let { w -> WordEditor(w.text, "${com.aurea.aurea.ui.ds.numeroPtBr(w.start.toFloat(), 2)} s", onDone = { t -> cap.editWord(i, t); editing = null }) } }
         }
-        Spacer(Modifier.height(24.dp))
+        item(key = "fim") { Spacer(Modifier.height(24.dp)) }
+    }
+}
+
+/** Palavras por item da lista preguiçosa (um parágrafo curto). */
+private const val WORDS_PER_ITEM = 24
+
+private val WordStyle = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Text))
+private val WordStruckStyle = AureaType.Base.merge(
+    TextStyle(fontSize = 13.sp, color = AureaColors.Muted, textDecoration = TextDecoration.LineThrough),
+)
+
+@Composable
+private fun WordChip(text: String, selected: Boolean, struck: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier.clip(RoundedCornerShape(6.dp)).background(if (selected) AureaColors.AccentDim else AureaColors.Chip)
+            .tocavel(onClick = onClick).padding(horizontal = 8.dp, vertical = 4.dp),
+    ) {
+        Text(text, style = if (struck) WordStruckStyle else WordStyle)
     }
 }
 

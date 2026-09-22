@@ -90,28 +90,47 @@ class CaptionsState(
         return cache.keyFor(path, size)
     }
 
-    /** Abre a camada: carrega a transcrição guardada (se houver). Nada é enviado. */
+    /**
+     * Abre a camada: carrega a transcrição guardada (se houver). Nada é enviado.
+     * Fase 8D: o tamanho do arquivo (content resolver) e o JSON de milhares de
+     * palavras são lidos fora da thread da UI — abrir o painel não engasga.
+     */
     fun open(layerId: Long) {
         if (layer != layerId) {
             layer = layerId
             error = null
+            setWords(emptyList(), null)
             val path = engine.layerMediaPath(layerId)
-            val cached = path?.let { p -> mediaKey(p)?.let { cache.load(it) } }
-            setWords(cached ?: emptyList(), if (cached != null) "cache" else null)
+            if (path != null) {
+                scope.launch {
+                    val cached = withContext(Dispatchers.IO) { mediaKey(path)?.let { cache.load(it) } }
+                    if (layer == layerId && cached != null && words.isEmpty()) setWords(cached, "cache")
+                }
+            }
         }
         captionCount = engine.captionCount(layerId)
     }
 
+    /** Palavras novas; os vícios (uma consulta ao motor por palavra) são marcados em segundo plano. */
     private fun setWords(list: List<Word>, from: String?) {
         words = list
         source = from
-        fillers = list.indices.filter { engine.isFillerWord(list[it].text) }.toSet()
+        if (list.isEmpty()) {
+            fillers = emptySet()
+            return
+        }
+        scope.launch {
+            val f = withContext(Dispatchers.Default) { list.indices.filterTo(HashSet()) { engine.isFillerWord(list[it].text) } }
+            if (words === list) fillers = f
+        }
     }
 
+    /** Guarda a transcrição (JSON + tamanho do arquivo) fora da thread da UI. */
     private fun persist() {
         val id = layer ?: return
         val path = engine.layerMediaPath(id) ?: return
-        mediaKey(path)?.let { cache.save(it, words) }
+        val snapshot = words
+        scope.launch(Dispatchers.IO) { mediaKey(path)?.let { cache.save(it, snapshot) } }
     }
 
     /** Envia o áudio da camada à Groq (só aqui) e guarda a transcrição. */
@@ -181,8 +200,18 @@ class CaptionsState(
         if (index !in words.indices) return
         val t = text.trim()
         val list = words.toMutableList()
-        if (t.isEmpty()) list.removeAt(index) else list[index] = list[index].copy(text = t)
-        setWords(list, source)
+        // Só a palavra mexida muda de vício (antes: as N palavras reconsultadas).
+        val f = HashSet<Int>(fillers.size + 1)
+        if (t.isEmpty()) {
+            list.removeAt(index)
+            for (i in fillers) if (i < index) f.add(i) else if (i > index) f.add(i - 1)
+        } else {
+            list[index] = list[index].copy(text = t)
+            for (i in fillers) if (i != index) f.add(i)
+            if (engine.isFillerWord(t)) f.add(index)
+        }
+        words = list
+        fillers = f
         persist()
     }
 
@@ -198,10 +227,16 @@ class CaptionsState(
             if (s.highlight) 1 else 0, if (s.uppercase) 1 else 0, if (s.breakOnPause) 1 else 0, if (s.removeFillers) 1 else 0,
         )
         val floats = floatArrayOf(s.pauseSec, s.posY, s.sizeFrac, s.highlightColor[0], s.highlightColor[1], s.highlightColor[2])
-        val n = engine.createCaptions(id, texts, times, ints, floats)
-        if (n < 0) error = "Não foi possível criar as legendas (erro ${-n})." else error = null
-        captionCount = engine.captionCount(id)
-        onModelChanged()
+        // Fase 8D: milhares de palavras viram milhares de camadas (texto medido
+        // uma a uma): fora da thread da UI, com aviso enquanto faz.
+        busy = "Criando legendas…"
+        scope.launch {
+            val n = withContext(Dispatchers.Default) { engine.createCaptions(id, texts, times, ints, floats) }
+            busy = null
+            if (n < 0) error = "Não foi possível criar as legendas (erro ${-n})." else error = null
+            captionCount = engine.captionCount(id)
+            onModelChanged()
+        }
     }
 
     fun removeAll() {

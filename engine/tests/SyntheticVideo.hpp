@@ -29,7 +29,7 @@
 
 namespace aurea::test {
 
-enum class SyntheticPattern : u8 { Quadrants = 0, FrameGray };
+enum class SyntheticPattern : u8 { Quadrants = 0, FrameGray, MovingSquare };
 
 struct SyntheticConfig {
     u32 width = 64;
@@ -52,6 +52,10 @@ struct SyntheticConfig {
     f64 audioBpm = 0.0;
     f64 audioBeatStart = 0.0;
 };
+
+/// Centro do quadrado do padrão MovingSquare no quadro `i`.
+inline i32 moving_square_x(i64 i) { return 30 + static_cast<i32>(i); }
+inline i32 moving_square_y(i64 i) { return 30 + static_cast<i32>(i / 2); }
 
 /// Valor exato da senoide sintética no instante `t` (s), canal `c`.
 inline f32 synthetic_audio_value(const SyntheticConfig& cfg, u32 c, f64 t) {
@@ -214,6 +218,13 @@ private:
                 u8 Y = 0, Cb = 128, Cr = 128;
                 if (cfg_.pattern == SyntheticPattern::FrameGray) {
                     Y = frame_gray_code(index);
+                } else if (cfg_.pattern == SyntheticPattern::MovingSquare) {
+                    // Fundo em degradê suave + quadrado xadrez 13×13 andando
+                    // (1 px por quadro em x, meio em y): alvo de rastreio.
+                    const i32 cx = moving_square_x(index), cy = moving_square_y(index);
+                    const i32 dx = static_cast<i32>(xx) - cx, dy = static_cast<i32>(yy) - cy;
+                    Y = static_cast<u8>(60 + (xx * 40) / std::max<u32>(1, w) + (yy * 30) / std::max<u32>(1, h));
+                    if (std::abs(dx) <= 6 && std::abs(dy) <= 6) Y = (((dx + 6) / 3 + (dy + 6) / 3) % 2) ? 235 : 20;
                 } else {
                     const bool right = xx >= w / 2, bottom = yy >= h / 2;
                     const f32 r = (!right && !bottom) || (right && bottom) ? 1.0f : 0.0f;

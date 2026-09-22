@@ -425,6 +425,35 @@ private suspend fun PointerInputScope.stageGestures(
         val downX = down.position.x
         val downY = down.position.y
 
+        // Escolhendo o ponto do rastreio: o toque vira coordenada da camada.
+        if (store.pointPick != null) {
+            val d = store.detail
+            val q = FloatArray(8)
+            if (d != null && m.valid && LayerGeometry.corners(d, q)) {
+                val cx = m.cx(downX)
+                val cy = m.cy(downY)
+                // Afim pelos cantos TL, TR, BL: p = TL + u·(TR − TL) + v·(BL − TL).
+                val ax = q[2] - q[0]; val ay = q[3] - q[1]
+                val bx = q[6] - q[0]; val by = q[7] - q[1]
+                val det = ax * by - ay * bx
+                if (kotlin.math.abs(det) > 1e-6f) {
+                    val px = cx - q[0]; val py = cy - q[1]
+                    val u = (px * by - py * bx) / det
+                    val v = (ax * py - ay * px) / det
+                    if (u in 0f..1f && v in 0f..1f) {
+                        store.finishPointPick(u * LayerGeometry.width(d), v * LayerGeometry.height(d))
+                    } else {
+                        store.showToast("Toque dentro do vídeo")
+                    }
+                }
+            }
+            do {
+                val e = awaitPointerEvent()
+                e.changes.forEach { it.consume() }
+            } while (e.changes.any { it.pressed })
+            return@awaitEachGesture
+        }
+
         // --- Alvo anotado no toque (nada muda ainda).
         var target = TARGET_EMPTY
         var handle = -1

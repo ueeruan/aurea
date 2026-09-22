@@ -740,6 +740,20 @@ AUREA_JNI jboolean AUREA_FN(nativeApplySpeedRamp)(JNIEnv*, jclass, jlong handle,
     return c && c->engine.apply_speed_ramp(static_cast<u64>(layer), static_cast<u32>(preset)) ? JNI_TRUE : JNI_FALSE;
 }
 
+AUREA_JNI jlong AUREA_FN(nativeTrackPoint)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloat x, jfloat y,
+                                           jboolean stabilize, jintArray trackedOut) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return -static_cast<jlong>(Errc::InvalidState);
+    u32 tracked = 0;
+    const Result<u64> r = c->engine.track_point(static_cast<u64>(layer), x, y, stabilize == JNI_TRUE, &tracked);
+    if (trackedOut && env->GetArrayLength(trackedOut) > 0) {
+        const jint t = static_cast<jint>(tracked);
+        env->SetIntArrayRegion(trackedOut, 0, 1, &t);
+    }
+    if (!r.ok()) return -static_cast<jlong>(r.status().code());
+    return static_cast<jlong>(*r);
+}
+
 AUREA_JNI jboolean AUREA_FN(nativeSetEcho)(JNIEnv*, jclass, jlong handle, jlong layer, jint count, jfloat delay, jfloat decay) {
     NativeContext* c = ctx_of(handle);
     return c && c->engine.set_echo(static_cast<u64>(layer), static_cast<u32>(std::max(0, count)), delay, decay) ? JNI_TRUE : JNI_FALSE;

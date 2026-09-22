@@ -1,5 +1,6 @@
 #include "aurea/Engine.hpp"
 #include "aurea/audio/Beats.hpp"
+#include "aurea/tracking/PointTracker.hpp"
 
 #include "aurea/text/Text.hpp"
 #include "aurea/core/Log.hpp"
@@ -877,6 +878,130 @@ Result<u64> Engine::add_null(bool threeD) noexcept {
     project_->mark_dirty();
     request_render();
     return lid.pack();
+}
+
+Result<u64> Engine::track_point(u64 layerId, f32 x, f32 y, bool stabilize, u32* trackedOut) noexcept {
+    // 1. O que decodificar (sob o lock).
+    Asset asset;
+    i64 start = 0, end = 0;
+    f64 fps = 30.0;
+    std::vector<i64> targetUs;
+    u32 layerW = 0, layerH = 0;
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        Composition* comp = project_ ? current_composition() : nullptr;
+        const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+        if (!l || l->kind != LayerKind::Video) return Status{Errc::InvalidArgument, "rastreio precisa de camada de video"};
+        const Asset* a = project_->asset(l->source);
+        if (!a || !a->has_video()) return Status{Errc::InvalidArgument, "camada sem video"};
+        asset = *a;
+        fps = comp->fps() > 0.0 ? comp->fps() : 30.0;
+        start = l->start.value;
+        end = std::min<i64>(l->end.value, start + 3600);   // até 2 min a 30 fps por vez
+        layerW = a->video.width;
+        layerH = a->video.height;
+        for (i64 f = start; f < end; ++f) {
+            targetUs.push_back(static_cast<i64>(std::llround(std::max(0.0, l->source_frame(FrameIndex{f})) * 1e6 / fps)));
+        }
+    }
+    VideoSourceFactory* factory = config_.mediaFactory;
+    if (!factory || layerW == 0 || layerH == 0) return Status{Errc::InvalidState, "sem decodificador"};
+    auto dec = factory->open_video(asset, MediaPriority::Thumbnail);
+    if (!dec) return Status{Errc::IoError, "video ilegivel"};
+    // 2. Quadro a quadro: cinza reduzido (até 360 px de altura) e NCC.
+    const u32 thumbH = std::min<u32>(360u, layerH);
+    const i64 halfFrame = static_cast<i64>(5e5 / fps);
+    std::vector<Vec2> track;   // px da camada, um por quadro rastreado
+    tracking::Gray prev;
+    Vec2 pos{};
+    f32 sx = 1, sy = 1;
+    i64 lastPts = std::numeric_limits<i64>::min();
+    for (usize i = 0; i < targetUs.size(); ++i) {
+        const i64 want = targetUs[i];
+        if (i == 0 || want < lastPts - halfFrame) {
+            if (!dec->seek_to_keyframe(want).ok()) break;
+            lastPts = std::numeric_limits<i64>::min();
+        }
+        FrameRef frame;
+        bool eos = false;
+        for (int guard = 0; guard < 600 && !eos; ++guard) {
+            FrameRef f;
+            i64 pts = 0;
+            if (!dec->next_frame(want - halfFrame, f, pts, eos).ok()) { eos = true; break; }
+            if (!f) continue;
+            lastPts = pts;
+            if (pts >= want - halfFrame) { frame = std::move(f); break; }
+        }
+        if (!frame) break;
+        ThumbnailService::Image img;
+        if (!frame_to_thumbnail(*frame.get(), thumbH, img)) break;
+        tracking::Gray g = tracking::to_gray(img.rgba.data(), img.width, img.height);
+        if (i == 0) {
+            sx = static_cast<f32>(img.width) / static_cast<f32>(layerW);
+            sy = static_cast<f32>(img.height) / static_cast<f32>(layerH);
+            pos = Vec2{x * sx, y * sy};
+        } else {
+            const tracking::TrackStep st = tracking::track_step(prev, g, pos);
+            if (st.score < 0.6f) break;   // ponto perdido: para aqui
+            pos = st.pos;
+        }
+        track.push_back(Vec2{pos.x / sx, pos.y / sy});
+        prev = std::move(g);
+    }
+    if (trackedOut) *trackedOut = static_cast<u32>(track.size());
+    if (track.size() < 2) return Status{Errc::InvalidArgument, "ponto sem textura para seguir"};
+    AUREA_LOG_INFO("rastreio: %zu de %zu quadros", track.size(), targetUs.size());
+
+    // 3. Keyframes (sob o lock, um passo de desfazer).
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l) return Status{Errc::NotFound, "camada sumiu"};
+    history_.before_mutation(*comp, project_->timeline().current(), stabilize ? "estabilizar" : "rastrear ponto");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    if (!stabilize) {
+        const LayerId nid = comp->add_layer(LayerKind::Null, "Rastreio");
+        Layer* n = comp->layer(nid);
+        l = comp->layer(LayerId::unpack(layerId));
+        if (!n || !l) return Status{Errc::OutOfMemory, "camada nao criada"};
+        n->start = l->start;
+        n->end = l->end;
+        n->transform.anchor = Vec3{50, 50, 0};
+        Track& px = n->tracks.get_or_create(TrackProperty::PositionX);
+        Track& py = n->tracks.get_or_create(TrackProperty::PositionY);
+        for (usize i = 0; i < track.size(); ++i) {
+            const FrameIndex f{start + static_cast<i64>(i)};
+            const Vec4 w = layer_world_matrix(*comp, *l, f) * Vec4{track[i].x, track[i].y, 0, 1};
+            const FrameIndex local = n->local_time(f);
+            px.set(local, w.x);
+            py.set(local, w.y);
+        }
+        n->transform.position = Vec3{px.keys.front().value, py.keys.front().value, 0};
+        project_->mark_dirty();
+        request_render();
+        return nid.pack();
+    }
+    // Estabilizar: a camada anda o contrário do ponto (no espaço do pai, pela
+    // rotação/escala dela) — somado à posição que ela já tinha em cada quadro.
+    const f32 rz = l->transform.rotation.z * kDeg2Rad;
+    const f32 c = std::cos(rz), s = std::sin(rz);
+    const f32 kx = l->transform.scale.x, ky = l->transform.scale.y;
+    Track base_x = l->tracks.find(TrackProperty::PositionX) ? *l->tracks.find(TrackProperty::PositionX) : Track{};
+    Track base_y = l->tracks.find(TrackProperty::PositionY) ? *l->tracks.find(TrackProperty::PositionY) : Track{};
+    Track& px = l->tracks.get_or_create(TrackProperty::PositionX);
+    Track& py = l->tracks.get_or_create(TrackProperty::PositionY);
+    for (usize i = 0; i < track.size(); ++i) {
+        const FrameIndex f{start + static_cast<i64>(i)};
+        const FrameIndex local = l->local_time(f);
+        const f32 dx = (track[0].x - track[i].x) * kx, dy = (track[0].y - track[i].y) * ky;
+        const f32 bx = base_x.keys.empty() ? l->transform.position.x : base_x.sample(local);
+        const f32 by = base_y.keys.empty() ? l->transform.position.y : base_y.sample(local);
+        px.set(local, bx + dx * c - dy * s);
+        py.set(local, by + dx * s + dy * c);
+    }
+    project_->mark_dirty();
+    request_render();
+    return layerId;
 }
 
 bool Engine::set_echo(u64 layerId, u32 count, f32 delay, f32 decay) noexcept {

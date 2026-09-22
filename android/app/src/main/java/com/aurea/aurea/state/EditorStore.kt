@@ -1203,6 +1203,49 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshNow()
     }
 
+    // --- Rastreio de ponto / estabilização ---------------------------------------------------
+    /** Esperando o toque no palco: null = não; senão, se é para estabilizar. */
+    var pointPick by mutableStateOf<Boolean?>(null)
+        private set
+    var tracking by mutableStateOf(false)
+        private set
+    private val trackHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    fun beginPointPick(stabilize: Boolean) {
+        val row = layers.firstOrNull { it.id == primary }
+        if (row == null || row.kind != com.aurea.aurea.ui.theme.LayerType.Video.kind) {
+            showToast("Escolha uma camada de vídeo")
+            return
+        }
+        pointPick = stabilize
+        showToast("Toque no ponto a seguir (um detalhe com contraste)")
+    }
+
+    fun cancelPointPick() { pointPick = null }
+
+    /** Toque em (x, y) — px da camada, no primeiro quadro dela. */
+    fun finishPointPick(x: Float, y: Float) {
+        val stabilize = pointPick ?: return
+        val id = primary ?: return
+        pointPick = null
+        if (tracking) return
+        tracking = true
+        showToast(if (stabilize) "Estabilizando…" else "Rastreando o ponto…")
+        lifecycleThread.execute {
+            val tracked = IntArray(1)
+            val r = synchronized(lifecycleLock) { if (ready) engine.trackPoint(id, x, y, stabilize, tracked) else -1L }
+            trackHandler.post {
+                tracking = false
+                refreshNow()
+                when {
+                    r >= 0 && !stabilize -> { select(r); showToast("Rastreio: ${tracked[0]} quadros · o Nulo segue o ponto") }
+                    r >= 0 -> showToast("Estabilizado em ${tracked[0]} quadros")
+                    else -> showToast("Não deu para seguir este ponto (${tracked[0]} quadros). Tente um detalhe com mais contraste.")
+                }
+            }
+        }
+    }
+
     // --- Eco e RGB no tempo -------------------------------------------------------------------
     /** {cópias, atraso, queda, atraso RGB} da camada escolhida. */
     var echo by mutableStateOf<List<Float>?>(null)

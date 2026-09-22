@@ -7,6 +7,7 @@
 
 #include "aurea/Engine.hpp"
 #include "aurea/audio/Audio.hpp"
+#include "aurea/render/Renderer.hpp"
 
 #include <cmath>
 #include <vector>
@@ -333,4 +334,57 @@ AUREA_TEST(ClipTime, TimeRemapOnIsIdenticalThenRampsFollowTheCurve) {
     AUREA_CHECK(back && back->timeRemapEnabled);
     AUREA_CHECK(back && std::fabs(back->source_frame(FrameIndex{80}) - expect80) < 0.01);
     std::remove(path.c_str());
+}
+
+// =============================================================================
+//  Rastreio de ponto e estabilização
+// =============================================================================
+namespace {
+SyntheticConfig moving_square_cfg() {
+    SyntheticConfig c;
+    c.width = 160;
+    c.height = 90;
+    c.frameCount = 90;
+    c.pattern = SyntheticPattern::MovingSquare;
+    return c;
+}
+} // namespace
+
+AUREA_TEST(ClipTime, PointTrackerFollowsTheSquareAndStabilizeHoldsIt) {
+    TimeRig r(moving_square_cfg());
+    u32 tracked = 0;
+    auto nid = r.e.track_point(r.layer.pack(), 30.0f, 30.0f, false, &tracked);
+    AUREA_CHECK(nid.ok());
+    if (!nid.ok()) return;
+    const Layer* n = r.comp()->layer(LayerId::unpack(*nid));
+    const Layer* v = r.L();
+    AUREA_CHECK(n != nullptr);
+    f64 worst = 0;
+    for (i64 f = 0; f < static_cast<i64>(tracked); f += 5) {
+        const Vec4 want = layer_world_matrix(*r.comp(), *v, FrameIndex{f})
+                        * Vec4{static_cast<f32>(moving_square_x(f)), static_cast<f32>(moving_square_y(f)), 0, 1};
+        const f32 gx = n->tracks.find(TrackProperty::PositionX)->sample(n->local_time(FrameIndex{f}));
+        const f32 gy = n->tracks.find(TrackProperty::PositionY)->sample(n->local_time(FrameIndex{f}));
+        worst = std::max<f64>(worst, std::hypot(gx - want.x, gy - want.y));
+    }
+    // Escala camada → composição (a composição do teste é menor que o vídeo).
+    const Mat4 m0 = layer_world_matrix(*r.comp(), *v, FrameIndex{0});
+    const f64 k = std::hypot(m0.col[0].x, m0.col[0].y);
+    std::printf("    rastreio: %u quadros, pior erro %.3f px da camada\n", tracked, worst / k);
+    AUREA_CHECK(tracked >= 85);
+    AUREA_CHECK(worst / k < 0.5);
+
+    // Estabilizar: o quadrado fica parado na tela.
+    auto sid = r.e.track_point(r.layer.pack(), 30.0f, 30.0f, true, &tracked);
+    AUREA_CHECK(sid.ok());
+    v = r.L();
+    const Vec4 w0 = layer_world_matrix(*r.comp(), *v, FrameIndex{0}) * Vec4{30, 30, 0, 1};
+    f64 drift = 0;
+    for (i64 f = 0; f < static_cast<i64>(tracked); f += 5) {
+        const Vec4 w = layer_world_matrix(*r.comp(), *v, FrameIndex{f})
+                     * Vec4{static_cast<f32>(moving_square_x(f)), static_cast<f32>(moving_square_y(f)), 0, 1};
+        drift = std::max<f64>(drift, std::hypot(w.x - w0.x, w.y - w0.y));
+    }
+    std::printf("    estabilizado: deriva maxima %.3f px da camada\n", drift / k);
+    AUREA_CHECK(drift / k < 0.5);
 }

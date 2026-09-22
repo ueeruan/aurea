@@ -162,6 +162,11 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
         }
         if (type == LayerType.Video) {
             MenuItemRow(ShellGlyph.Snow, "Congelar quadro", if (inside) act { store.freezeFrame(id) } else null)
+            MenuSection("Rastreio")
+            MenuItemRow(ShellGlyph.Viewfinder, "Rastrear um ponto", act { store.select(id); store.beginPointPick(false) },
+                detail = "Cria um Nulo que segue o ponto — ligue outras camadas a ele")
+            MenuItemRow(ShellGlyph.Viewfinder, "Estabilizar pelo ponto", act { store.select(id); store.beginPointPick(true) },
+                detail = "Move o vídeo para o ponto ficar parado na tela")
         }
 
         MenuSection("Mais")

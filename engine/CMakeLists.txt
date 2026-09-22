@@ -85,6 +85,7 @@ set(AUREA_CORE_SOURCES
     src/audio/AudioEngine.cpp
     src/audio/Waveform.cpp
     src/audio/Beats.cpp
+    src/tracking/PointTracker.cpp
     src/text/Text.cpp
     src/playback/Playback.cpp
     src/scene3d/GltfImporter.cpp

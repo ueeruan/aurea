@@ -290,6 +290,10 @@ class AureaEngine private constructor() {
     fun precompDepth(): Int = nativePrecompDepth(nativeHandle)
     fun compositionName(): String = nativeCompositionName(nativeHandle) ?: ""
 
+    /** Rastreio/estabilização (síncrono, fora da UI). Id da camada com os keyframes ou −Errc. */
+    fun trackPoint(layer: Long, x: Float, y: Float, stabilize: Boolean, tracked: IntArray): Long =
+        nativeTrackPoint(nativeHandle, layer, x, y, stabilize, tracked)
+
     // Eco e RGB no tempo.
     fun setEcho(layer: Long, count: Int, delay: Float, decay: Float): Boolean = nativeSetEcho(nativeHandle, layer, count, delay, decay)
     fun setRgbTime(layer: Long, delay: Float): Boolean = nativeSetRgbTime(nativeHandle, layer, delay)
@@ -428,6 +432,7 @@ class AureaEngine private constructor() {
     private external fun nativeAddParticles(handle: Long, preset: Int): Long
     private external fun nativeSetTransition(handle: Long, layer: Long, out: Boolean, type: Int, frames: Int): Boolean
     private external fun nativeSetEcho(handle: Long, layer: Long, count: Int, delay: Float, decay: Float): Boolean
+    private external fun nativeTrackPoint(handle: Long, layer: Long, x: Float, y: Float, stabilize: Boolean, tracked: IntArray): Long
     private external fun nativeSetRgbTime(handle: Long, layer: Long, delay: Float): Boolean
     private external fun nativeQueryEcho(handle: Long, layer: Long, out: FloatArray): Boolean
     private external fun nativeApplyParticlePreset(handle: Long, layer: Long, preset: Int): Boolean

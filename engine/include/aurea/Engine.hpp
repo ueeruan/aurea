@@ -283,6 +283,13 @@ public:
     /// e duração em quadros (limitada a metade da camada).
     bool set_transition(u64 layerId, bool out, u32 type, u32 frames) noexcept;
 
+    /// Rastreia o ponto (px da camada de vídeo, no primeiro quadro dela) pelo
+    /// clipe inteiro. `stabilize` = false cria um Nulo "Rastreio" que segue o
+    /// ponto; true move a própria camada para o ponto ficar parado na tela.
+    /// Síncrono (decodifica o vídeo): fora da thread de UI. Devolve o id da
+    /// camada que recebeu os keyframes; `tracked` = quadros rastreados.
+    [[nodiscard]] Result<u64> track_point(u64 layerId, f32 x, f32 y, bool stabilize, u32* tracked = nullptr) noexcept;
+
     /// Eco (0 = desligado; atraso em quadros; queda 0..1) e RGB no tempo
     /// (atraso em quadros, 0 = desligado).
     bool set_echo(u64 layerId, u32 count, f32 delay, f32 decay) noexcept;

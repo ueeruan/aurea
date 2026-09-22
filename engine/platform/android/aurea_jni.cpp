@@ -1331,7 +1331,7 @@ AUREA_JNI jfloatArray AUREA_FN(nativeParseCurvePreset)(JNIEnv* env, jclass, jbyt
     jfloatArray out = env->NewFloatArray(5);
     if (out) env->SetFloatArrayRegion(out, 0, 5, v);
     return out;
-
+}
 
 // =============================================================================
 // Expressões. Texto atravessa em BYTES UTF-8 (não jstring): o JNI fala "UTF-8

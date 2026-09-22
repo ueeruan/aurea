@@ -130,6 +130,7 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
     // relógio mestre do playback.
     audio_.initialize(config.mediaFactory, config.audioOutput, memory_.budget(MemoryClass::Audio));
     playback_.clock().set_master(&audio_);
+    waveforms_ = std::make_unique<audio::WaveformCache>(config.mediaFactory);
     thumbs_.set_factory(config.mediaFactory);
     if (config.mediaFactory) thumbs_.start();
 
@@ -153,6 +154,7 @@ void Engine::shutdown() noexcept {
     thumbs_.stop();
     playback_.clock().set_master(nullptr);
     audio_.shutdown();
+    waveforms_.reset();
     media_.close_all();
     jobs_.stop();
 
@@ -1336,6 +1338,31 @@ u32 Engine::query_keyframes(u64 layerId, bridge::KeyframeRow* out, u32 capacity)
         }
     }
     return written;
+}
+
+u32 Engine::query_waveform(u64 layerId, f64 startFrame, f64 framesPerBucket, u32 count, u8* out) noexcept {
+    if (!out || count == 0 || !waveforms_ || !(framesPerBucket > 0.0)) return 0;
+    u64 key = 0;
+    f64 srcStart = 0.0, perBucket = 0.0;
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        Composition* comp = current_composition();
+        if (!comp || !project_) return 0;
+        const Layer* l = comp->layer(LayerId::unpack(layerId));
+        if (!l || (l->kind != LayerKind::Video && l->kind != LayerKind::Audio)) return 0;
+        const Asset* a = project_->asset(l->source);
+        if (!a || !a->has_audio()) return 0;
+        key = l->source.pack();
+        const f64 fps = comp->fps() > 0.0 ? comp->fps() : 30.0;
+        // Frame da timeline → amostra da fonte (o conteúdo começa em start − offset).
+        srcStart = (startFrame - static_cast<f64>(l->start.value) + static_cast<f64>(l->offset.value)) * audio::kMixRate / fps;
+        perBucket = framesPerBucket * audio::kMixRate / fps;
+        i64 len = a->audio.sampleCount.value > 0 && a->audio.sampleRate > 0
+                ? a->audio.sampleCount.value * static_cast<i64>(audio::kMixRate) / a->audio.sampleRate
+                : audio::frame_to_sample(a->duration.value, a->timebaseFps > 0.0 ? a->timebaseFps : fps);
+        waveforms_->request(key, audio::AudioAssetRef{resolve_asset_path(a->sourcePath), len});
+    }
+    return waveforms_->query(key, srcStart, perBucket, count, out) ? count : 0;
 }
 
 u32 Engine::query_thumbnail(u64 layerId, i32 timelineFrame, u32 height, u8* out, u32 capacity,
@@ -2694,7 +2721,7 @@ void Engine::fill_status(bridge::EngineStatusPOD& out) noexcept {
     out.compFps = static_cast<f32>(st.compFps);
     out.compWidth = st.compWidth;
     out.compHeight = st.compHeight;
-    out.thumbnailGeneration = thumbs_.generation();
+    out.thumbnailGeneration = thumbs_.generation() + (waveforms_ ? waveforms_->generation() : 0u);
     out.modelRevision = modelRevision_.load(std::memory_order_acquire);
     out.layerCount = st.layerCount;
     out.selectedCount = st.selectedCount;

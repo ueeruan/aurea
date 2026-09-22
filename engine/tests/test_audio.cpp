@@ -408,3 +408,47 @@ AUREA_TEST(Audio, EngineClockFollowsTheSampleAtTheSpeaker) {
     AUREA_CHECK(!eng.available() && !out.started);
     eng.shutdown();
 }
+
+AUREA_TEST(Audio, WaveformPeaksAreComputedOnceAndServedAtAnyZoom) {
+    SyntheticConfig cfg = audio_cfg(44100);
+    cfg.audioSeconds = 6.0;
+    SyntheticFactory f(cfg);
+    audio::WaveformCache wf(&f);
+    const u32 gen0 = wf.generation();
+    wf.request(3, audio::AudioAssetRef{"s", 6 * 48000});
+    wait_until([&] { return wf.progress(3) >= 1.0f; }, 5000);
+    AUREA_CHECK_EQ(wf.progress(3), 1.0f);
+    AUREA_CHECK(wf.generation() != gen0);
+    // Senoide de amplitude 0,5 → 255·√0,5 ≈ 180, em qualquer zoom.
+    std::vector<u8> fine(100), coarse(4);
+    AUREA_CHECK(wf.query(3, 48000.0, 240.0, 100, fine.data()));
+    AUREA_CHECK(wf.query(3, 0.0, 48000.0 * 1.5, 4, coarse.data()));
+    for (u8 v : fine) AUREA_CHECK(std::abs(static_cast<int>(v) - 180) <= 3);
+    for (u8 v : coarse) AUREA_CHECK(std::abs(static_cast<int>(v) - 180) <= 3);
+    // Além do fim da mídia: zero. Asset desconhecido: false.
+    std::vector<u8> after(10);
+    AUREA_CHECK(wf.query(3, 7.0 * 48000.0, 480.0, 10, after.data()));
+    for (u8 v : after) AUREA_CHECK_EQ(v, 0);
+    AUREA_CHECK(!wf.query(99, 0.0, 480.0, 10, after.data()));
+
+    // Pela fachada: a camada de vídeo com som responde; sem som, 0 baldes.
+    EngineConfig ec = headless();
+    ec.mediaFactory = &f;
+    Engine e;
+    AUREA_CHECK(e.initialize(ec).ok());
+    AUREA_CHECK(e.new_project(64, 36, 30.0, nullptr).ok());
+    VideoImport vi;
+    vi.sourcePath = "s";
+    vi.displayName = "s";
+    auto id = e.import_video(vi);
+    AUREA_CHECK(id.ok());
+    std::vector<u8> w(60);
+    for (int i = 0; i < 400; ++i) {
+        (void)e.query_waveform(*id, 30.0, 1.0, 60, w.data());
+        if (w[59] > 0) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    AUREA_CHECK_EQ(e.query_waveform(*id, 30.0, 1.0, 60, w.data()), 60u);
+    AUREA_CHECK(std::abs(static_cast<int>(w[10]) - 180) <= 3);
+    e.shutdown();
+}

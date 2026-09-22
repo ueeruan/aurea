@@ -1058,6 +1058,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         showToast("Áudio extraído · o vídeo ficou mudo")
     }
 
+    /** Waveform de uma camada (ver `Engine::query_waveform`). 0 = sem som / motor não pronto. */
+    fun queryWaveform(layer: Long, startFrame: Double, framesPerBucket: Double, count: Int, out: java.nio.ByteBuffer): Int =
+        if (engineReady) engine.queryWaveform(layer, startFrame, framesPerBucket, count, out) else 0
+
     // --- Som da camada principal ---------------------------------------------
     fun setAudioMuted(muted: Boolean) {
         val id = primary ?: return

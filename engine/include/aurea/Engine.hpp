@@ -323,6 +323,12 @@ public:
     bool query_layer_detail(u64 layerId, bridge::LayerDetailPOD& out) noexcept;
     u32 query_curve(u64 layerId, u32 property, i32 startFrame, i32 endFrame,
                     f32* outValues, u32 sampleCount) noexcept;
+    /// Waveform da camada: `count` baldes a partir do frame `startFrame` da
+    /// timeline (fracionário), `framesPerBucket` frames cada; valor u8 com
+    /// compansão raiz (ver audio::WaveformCache). Devolve os baldes escritos,
+    /// 0 = a camada não tem som. Baldes ainda em cálculo saem 0 e o status
+    /// (`thumbnailGeneration`) muda quando chegam.
+    u32 query_waveform(u64 layerId, f64 startFrame, f64 framesPerBucket, u32 count, u8* out) noexcept;
 
     /// Tipos de efeito disponíveis.
     u32 query_effect_catalog(bridge::EffectCatalogRow* out, u32 capacity,
@@ -427,6 +433,7 @@ private:
     ThumbnailService   thumbs_;
     PlaybackController playback_;
     audio::AudioEngine audio_;
+    std::unique_ptr<audio::WaveformCache> waveforms_;
     u32  audioRevision_ = 0;          ///< modelRevision_ do último snapshot de áudio
     const Composition* audioComp_ = nullptr;
     u64  audioGeneration_ = 0;        ///< geração do playback com que o som começou

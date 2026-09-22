@@ -47,6 +47,9 @@ import kotlin.math.roundToInt
  * layouts de texto (nome, glifos, dígitos do relógio) e a tira de miniaturas
  * ficam em cache; o que muda por quadro são só números.
  */
+/** Baldes de waveform por linha e quadro (tela de 4K a 1,5 dp com folga). */
+private const val WAVE_MAX = 2048
+
 internal class TimelinePainter(
     private val m: TimelineMetrics,
     private val measurer: TextMeasurer,
@@ -57,6 +60,12 @@ internal class TimelinePainter(
     private val barClip = android.graphics.Path()
     private val rectF = RectF()
     private val bitmapPaint = Paint(Paint.FILTER_BITMAP_FLAG)
+
+    // Waveform: um buffer direto e um array de linhas reusados (nada de alocar por quadro).
+    private val waveBuf: java.nio.ByteBuffer = java.nio.ByteBuffer.allocateDirect(WAVE_MAX)
+    private val waveLines = FloatArray(WAVE_MAX * 4)
+    private val wavePaint = Paint().apply { isAntiAlias = false; strokeCap = Paint.Cap.BUTT }
+    private var waveStore: com.aurea.aurea.state.EditorStore? = null
     private val majorPath = Path()
     private val minorPath = Path()
     private val majorStroke = Stroke(m.tickMajorWidth)
@@ -155,6 +164,7 @@ internal class TimelinePainter(
         val view = c.view()
         val cx = w / 2f
         val compact = st.compact
+        waveStore = store
         val rows = c.rows.value
         val n = c.rowCount(rows)
 
@@ -255,6 +265,7 @@ internal class TimelinePainter(
             }
             // Trilho dos losangos, a faixa da cor do tipo e o fio de luz no alto.
             drawRect(TRACK_SHADE, Offset(left, top + m.trackTop), Size(right - left, m.track))
+            if (r.type == LayerType.Audio || r.type == LayerType.Video) drawWaveform(canvas, r, top, x0, x1, w, view, ppf, cx)
             drawRect(if (r.visible) r.type.color else r.type.color.copy(alpha = 0.5f), Offset(x0, top), Size(m.stripe, m.bar))
             drawLine(
                 Color.White.copy(alpha = if (selected) 0.24f else 0.10f),
@@ -380,6 +391,48 @@ internal class TimelinePainter(
             i++
         }
         return drew
+    }
+
+    /**
+     * Waveform do som da camada, só na parte visível: um balde a cada ~1,5 dp,
+     * pedido ao motor (picos já calculados, o nível certo para o zoom — pinça
+     * não recalcula nada). Fica na faixa de baixo da barra, sob o nome; no
+     * vídeo, por cima das miniaturas.
+     */
+    private fun drawWaveform(
+        canvas: android.graphics.Canvas, r: RowModel, top: Float, x0: Float, x1: Float, w: Float,
+        view: Double, ppf: Float, cx: Float,
+    ) {
+        val store = waveStore ?: return
+        val visL = max(x0 + m.stripe, 0f)
+        val visR = min(x1, w)
+        if (visR <= visL || ppf <= 0f) return
+        val step = max(1f, m.density * 1.5f)
+        val count = min(WAVE_MAX, ceil((visR - visL) / step).toInt())
+        if (count <= 0) return
+        val startFrame = TimeAxis.frameAt(visL, view, ppf, cx)
+        val n = store.queryWaveform(r.id, startFrame, (step / ppf).toDouble(), count, waveBuf)
+        if (n <= 0) return
+        val audio = r.type == LayerType.Audio
+        // Faixa de baixo da barra (abaixo do nome): no áudio, mais alta.
+        val areaTop = top + m.trackTop * (if (audio) 0.62f else 0.8f)
+        val areaBottom = top + m.bar - m.lightLine
+        val mid = (areaTop + areaBottom) / 2f
+        val half = (areaBottom - areaTop) / 2f
+        var k = 0
+        for (i in 0 until n) {
+            val v = (waveBuf.get(i).toInt() and 0xFF) / 255f * half
+            if (v < 0.5f) continue
+            val x = visL + i * step + step / 2f
+            waveLines[k++] = x
+            waveLines[k++] = mid - v
+            waveLines[k++] = x
+            waveLines[k++] = mid + v
+        }
+        if (k == 0) return
+        wavePaint.color = android.graphics.Color.argb(if (audio) 170 else 150, 255, 255, 255)
+        wavePaint.strokeWidth = max(1f, step * 0.72f)
+        canvas.drawLines(waveLines, 0, k, wavePaint)
     }
 
     /** Losangos da A.01: quadrado 11 girado, âmbar se escolhido; vizinhos a < 4 dp viram pílula. */

@@ -260,6 +260,10 @@ class AureaEngine private constructor() {
     /** O som do vídeo vira camada própria; o vídeo fica mudo. Id ≥ 0 ou −Errc. */
     fun extractAudio(layer: Long): Long = nativeExtractAudio(nativeHandle, layer)
 
+    /** Waveform: `count` baldes (u8, compansão raiz) a partir de `startFrame`. 0 = sem som. */
+    fun queryWaveform(layer: Long, startFrame: Double, framesPerBucket: Double, count: Int, out: ByteBuffer): Int =
+        nativeQueryWaveform(nativeHandle, layer, startFrame, framesPerBucket, count, out)
+
     /** RGBA8 sRGB (alfa reto) num buffer direto de `width * height * 4` bytes. */
     fun importImage(rgba: ByteBuffer, width: Int, height: Int, name: String, source: String): Long =
         nativeImportImage(nativeHandle, rgba, width, height, name, source)
@@ -336,6 +340,9 @@ class AureaEngine private constructor() {
     private external fun nativeImportVideo(handle: Long, source: String, name: String): Long
     private external fun nativeImportAudio(handle: Long, source: String, name: String): Long
     private external fun nativeExtractAudio(handle: Long, layer: Long): Long
+    private external fun nativeQueryWaveform(
+        handle: Long, layer: Long, startFrame: Double, framesPerBucket: Double, count: Int, out: ByteBuffer,
+    ): Int
     private external fun nativeImportImage(
         handle: Long, rgba: ByteBuffer, width: Int, height: Int, name: String, source: String,
     ): Long

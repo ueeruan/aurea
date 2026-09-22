@@ -584,6 +584,17 @@ AUREA_JNI jlong AUREA_FN(nativeImportAudio)(JNIEnv* env, jclass, jlong handle, j
     return static_cast<jlong>(*r);
 }
 
+/// Waveform: `count` baldes u8 em `out` (buffer direto). Devolve os escritos (0 = sem som).
+AUREA_JNI jint AUREA_FN(nativeQueryWaveform)(JNIEnv* env, jclass, jlong handle, jlong layerId, jdouble startFrame,
+                                             jdouble framesPerBucket, jint count, jobject out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || count <= 0) return 0;
+    auto* dst = pod_buffer<u8>(env, out, count);
+    if (!dst) return 0;
+    return static_cast<jint>(c->engine.query_waveform(static_cast<u64>(layerId), startFrame, framesPerBucket,
+                                                      static_cast<u32>(count), dst));
+}
+
 AUREA_JNI jlong AUREA_FN(nativeExtractAudio)(JNIEnv*, jclass, jlong handle, jlong layerId) {
     NativeContext* c = ctx_of(handle);
     if (!c) return -static_cast<jlong>(Errc::InvalidState);

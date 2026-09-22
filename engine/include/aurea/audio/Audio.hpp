@@ -292,6 +292,58 @@ public:
 };
 
 // =============================================================================
+// Waveform (picos multirresolução)
+// =============================================================================
+/// Picos de um asset, calculados UMA vez numa thread de fundo e guardados em
+/// níveis (cada nível é o máximo de dois do anterior). O zoom da timeline só
+/// escolhe o nível — pinça não recalcula nada.
+///
+/// Valor: pico absoluto de L/R no balde, em u8 com compansão raiz (255·√pico):
+/// fala baixa, respiração e silêncio ficam visíveis sem o pico estourar a
+/// altura. A UI desenha a altura direto do valor.
+class WaveformCache {
+public:
+    static constexpr u32 kBaseSamples = 240;   ///< 200 baldes por segundo no nível 0
+
+    explicit WaveformCache(VideoSourceFactory* factory);
+    ~WaveformCache();
+
+    WaveformCache(const WaveformCache&) = delete;
+    WaveformCache& operator=(const WaveformCache&) = delete;
+
+    /// Enfileira o asset (nada acontece se já está pronto ou na fila).
+    void request(u64 key, const AudioAssetRef& ref);
+    /// `count` baldes de `samplesPerBucket` amostras (48 kHz) a partir de
+    /// `srcStart` (amostra da FONTE). Baldes ainda não calculados ou fora da
+    /// mídia saem 0. false = asset desconhecido/ilegível.
+    [[nodiscard]] bool query(u64 key, f64 srcStart, f64 samplesPerBucket, u32 count, u8* out) const;
+    /// Fração pronta (0..1); −1 = desconhecido.
+    [[nodiscard]] f32 progress(u64 key) const;
+    /// Muda quando chega pedaço novo (a UI redesenha).
+    [[nodiscard]] u32 generation() const noexcept { return generation_.load(std::memory_order_acquire); }
+
+private:
+    struct Entry {
+        AudioAssetRef ref;
+        std::vector<std::vector<u8>> levels;   ///< levels[0] tem `total` baldes
+        i64 total = 0;
+        i64 ready = 0;                          ///< baldes do nível 0 já calculados
+        bool done = false;
+        bool failed = false;
+    };
+    void thread_main();
+
+    VideoSourceFactory* factory_;
+    mutable std::mutex mutex_;
+    std::condition_variable wake_;
+    std::unordered_map<u64, Entry> entries_;
+    std::vector<u64> queue_;
+    std::atomic<u32> generation_{1};
+    bool quit_ = false;
+    std::thread thread_;
+};
+
+// =============================================================================
 // Reprodução
 // =============================================================================
 class AudioEngine final : public MasterClock {

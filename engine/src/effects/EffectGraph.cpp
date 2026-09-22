@@ -77,10 +77,13 @@ u32 EffectBuildContext::fullscreen_pass(const char* name, PassStage stage, FGTex
         std::memcpy(u, uniforms, uniformBytes);
     }
 
+    // Passes de efeito leem no máximo 4 texturas; a captura fica pequena o
+    // bastante para o InplaceFunction (sem alocação por passe).
+    constexpr u32 kEffectTextures = 4;
     struct Bind { FGTexture graph; u64 raw; u64 sampler; };
     struct Capture {
         PipelineHandle pipeline;
-        Bind binds[binding::kTextureSlots];
+        Bind binds[kEffectTextures];
         u32 count;
         const void* uniforms;
         u32 uniformBytes;
@@ -89,7 +92,7 @@ u32 EffectBuildContext::fullscreen_pass(const char* name, PassStage stage, FGTex
     cap.uniforms = u;
     cap.uniformBytes = uniformBytes;
     for (const PassTexture& t : textures) {
-        if (cap.count >= binding::kTextureSlots) break;
+        if (cap.count >= kEffectTextures) break;
         cap.binds[cap.count++] = Bind{t.graph, t.raw.id, shaders_.sampler(t.sampler).id};
     }
 

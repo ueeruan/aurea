@@ -64,10 +64,12 @@ using ShaderHandle   = GpuHandle<ShaderTag>;
 //
 // Todo shader do Aurea declara (no máximo) estes slots, no set 0:
 //
-//   binding 0..3  sampler2D     u_tex0..u_tex3   (entrada, máscara, LUT...)
-//   binding 4     uniform block u_params          (parâmetros do passe)
-//   binding 5..6  image2D       u_img0..u_img1   (saída de compute)
-//   binding 7     buffer        u_data            (reduções, histograma)
+//   binding 0..11 sampler       u_tex0..u_tex11  (entrada, máscara, LUT; no 3D:
+//                                                 5 texturas de material + IBL
+//                                                 + sombra)
+//   binding 12    uniform block u_params          (parâmetros do passe)
+//   binding 13..14 image2D      u_img0..u_img1   (saída de compute)
+//   binding 15    buffer        u_data            (reduções, matrizes de junta)
 //
 //   push constants: até 128 bytes (o mínimo garantido pelo Vulkan).
 //
@@ -75,11 +77,12 @@ using ShaderHandle   = GpuHandle<ShaderTag>;
 // lados, e mudar um sem o outro quebra na validação, não em produção.
 // -----------------------------------------------------------------------------
 namespace binding {
-    inline constexpr u32 kTextureSlots      = 4;
-    inline constexpr u32 kUniform           = 4;
-    inline constexpr u32 kStorageImage0     = 5;
+    inline constexpr u32 kTextureSlots      = 12;
+    inline constexpr u32 kUniform           = 12;
+    inline constexpr u32 kStorageImage0     = 13;
     inline constexpr u32 kStorageImageSlots = 2;
-    inline constexpr u32 kStorageBuffer     = 7;
+    inline constexpr u32 kStorageBuffer     = 15;
+    inline constexpr u32 kBindingCount      = 16;
     inline constexpr u32 kPushConstantBytes = 128;
     /// Tamanho máximo de um bloco de uniform por passe. 1 KB cobre a matriz de
     /// cor de 16 operações fundidas com folga; passar disso é sinal de que o

@@ -20,6 +20,7 @@ add_executable(aurea_tests
     test_engine.cpp
     test_media.cpp
     test_gpu.cpp
+    test_scene3d.cpp
 )
 
 target_include_directories(aurea_tests PRIVATE
@@ -36,7 +37,8 @@ if(TARGET aurea_vulkan)
     target_compile_definitions(aurea_tests PRIVATE AUREA_TEST_VULKAN=1)
 endif()
 target_compile_definitions(aurea_tests PRIVATE
-    AUREA_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/golden")
+    AUREA_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/golden"
+    AUREA_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
 
 target_compile_options(aurea_tests PRIVATE
     $<$<CXX_COMPILER_ID:MSVC>:/W4 /permissive- /EHsc- /Zc:__cplusplus /utf-8>

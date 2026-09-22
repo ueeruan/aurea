@@ -80,11 +80,29 @@ set(AUREA_CORE_SOURCES
     src/media/MediaManager.cpp
     src/media/ThumbnailService.cpp
     src/playback/Playback.cpp
+    src/scene3d/GltfImporter.cpp
     src/engine/Engine.cpp
     ${AUREA_SHADER_SOURCES}
 )
 
+# -----------------------------------------------------------------------------
+# Terceiros (third_party/README.md). Compilados à parte, com os avisos deles:
+# o /W4 do motor não vale para código que não é nosso.
+# -----------------------------------------------------------------------------
+file(GLOB AUREA_MESHOPT_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/meshoptimizer/src/*.cpp)
+add_library(aurea_thirdparty STATIC ${AUREA_MESHOPT_SOURCES})
+target_include_directories(aurea_thirdparty PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/meshoptimizer/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/cgltf
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb)
+target_compile_options(aurea_thirdparty PRIVATE
+    $<$<CXX_COMPILER_ID:MSVC>:/W0 /utf-8>
+    $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-w -fno-exceptions>
+    $<$<AND:$<CONFIG:Release,RelWithDebInfo>,$<CXX_COMPILER_ID:GNU,Clang,AppleClang>>:-O2>)
+set_target_properties(aurea_thirdparty PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
 add_library(aurea_core STATIC ${AUREA_CORE_SOURCES})
+target_link_libraries(aurea_core PUBLIC aurea_thirdparty)
 
 target_include_directories(aurea_core
     PUBLIC

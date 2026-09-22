@@ -317,7 +317,7 @@ bool CommandListImpl::flush_descriptors() noexcept {
     VkDescriptorImageInfo storage[binding::kStorageImageSlots]{};
     VkDescriptorBufferInfo ubo{};
     VkDescriptorBufferInfo ssbo{};
-    VkWriteDescriptorSet writes[8]{};
+    VkWriteDescriptorSet writes[binding::kBindingCount]{};
     u32 n = 0;
 
     Texture& dummy = backend_->dummy_texture();

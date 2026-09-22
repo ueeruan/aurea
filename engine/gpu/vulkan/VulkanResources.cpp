@@ -384,31 +384,35 @@ VkPipelineLayout Backend::pipeline_layout(u64 immutableSampler, VkDescriptorSetL
     }
 
     const VkShaderStageFlags all = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
-    VkDescriptorSetLayoutBinding b[8]{};
+    VkDescriptorSetLayoutBinding b[binding::kBindingCount]{};
     for (u32 i = 0; i < binding::kTextureSlots; ++i) {
         b[i].binding = i;
         b[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         b[i].descriptorCount = 1;
-        b[i].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
+        // Vértice também: alvos de morph podem vir de textura.
+        b[i].stageFlags = all;
     }
     if (immutable) b[0].pImmutableSamplers = &immutable;
-    b[4].binding = binding::kUniform;
-    b[4].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-    b[4].descriptorCount = 1;
-    b[4].stageFlags = all;
+    const u32 u = binding::kUniform;
+    b[u].binding = binding::kUniform;
+    b[u].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+    b[u].descriptorCount = 1;
+    b[u].stageFlags = all;
     for (u32 i = 0; i < binding::kStorageImageSlots; ++i) {
-        b[5 + i].binding = binding::kStorageImage0 + i;
-        b[5 + i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        b[5 + i].descriptorCount = 1;
-        b[5 + i].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
+        const u32 k = binding::kStorageImage0 + i;
+        b[k].binding = k;
+        b[k].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        b[k].descriptorCount = 1;
+        b[k].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
     }
-    b[7].binding = binding::kStorageBuffer;
-    b[7].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    b[7].descriptorCount = 1;
-    b[7].stageFlags = all;
+    const u32 sb = binding::kStorageBuffer;
+    b[sb].binding = binding::kStorageBuffer;
+    b[sb].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    b[sb].descriptorCount = 1;
+    b[sb].stageFlags = all;
 
     VkDescriptorSetLayoutCreateInfo si{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-    si.bindingCount = 8;
+    si.bindingCount = binding::kBindingCount;
     si.pBindings = b;
     VkDescriptorSetLayout setLayout = VK_NULL_HANDLE;
     if (vkCreateDescriptorSetLayout(device_, &si, nullptr, &setLayout) != VK_SUCCESS) return VK_NULL_HANDLE;

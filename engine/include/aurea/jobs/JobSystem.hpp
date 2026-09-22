@@ -187,6 +187,10 @@ private:
     std::atomic<u64>         nextId_{1};
     std::atomic<u64>         completed_{0};
     std::atomic<u32>         activeTasks_{0};
+    /// Workers ainda dentro do laço. O stop() espera zerar: um worker
+    /// destacado que ainda lê `this` depois da destruição derrubava o
+    /// processo no teste seguinte.
+    std::atomic<u32>         liveWorkers_{0};
     u32                      workerCount_ = 0;
     void*                    threads_[32]{};
 };

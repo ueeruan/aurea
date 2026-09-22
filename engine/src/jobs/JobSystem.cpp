@@ -157,6 +157,8 @@ Status JobSystem::start(u32 workerCount) noexcept {
     workerCount_ = workerCount;
     stop_.store(false, std::memory_order_release);
     running_.store(true, std::memory_order_release);
+    // Contados ANTES de nascer: um stop() logo em seguida não pode achar zero.
+    liveWorkers_.store(workerCount_, std::memory_order_release);
 
     for (u32 i = 0; i < workerCount_; ++i) {
         std::thread t([this, i] { worker_main(this, i); });
@@ -174,13 +176,15 @@ void JobSystem::stop() noexcept {
 
     stop_.store(true, std::memory_order_release);
 
-    // Espera as tarefas em curso terminarem antes de deixar o pool morrer.
-    // Sem isso, um decode em andamento escreveria num buffer já liberado.
-    const u64 deadline = monotonic_ns() + 500'000'000ull;   // 500 ms
-    while (activeTasks_.load(std::memory_order_acquire) != 0) {
+    // Espera os WORKERS saírem do laço (cada um termina a tarefa em curso e
+    // não pega outra). Esperar só `activeTasks_` não basta: entre o try_pop e
+    // o incremento há uma janela, e um worker ainda no laço lê `this` — com o
+    // objeto destruído, o processo caía depois (use-after-free).
+    const u64 deadline = monotonic_ns() + 2'000'000'000ull;   // 2 s
+    while (liveWorkers_.load(std::memory_order_acquire) != 0) {
         if (monotonic_ns() > deadline) {
-            AUREA_LOG_WARN("JobSystem: shutdown com %u tarefas ativas apos 500 ms",
-                           activeTasks_.load(std::memory_order_relaxed));
+            AUREA_LOG_WARN("JobSystem: shutdown com %u workers presos apos 2 s (tarefa travada)",
+                           liveWorkers_.load(std::memory_order_relaxed));
             break;
         }
         std::this_thread::yield();
@@ -217,6 +221,8 @@ void JobSystem::worker_main(JobSystem* self, u32 index) {
             std::this_thread::yield();
         }
     }
+    // Última leitura de `self`: depois disto o stop() pode destruir o objeto.
+    self->liveWorkers_.fetch_sub(1, std::memory_order_acq_rel);
 }
 
 JobHandle JobSystem::submit(JobPriority prio, JobFn fn, void* userData) noexcept {

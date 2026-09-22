@@ -11,6 +11,7 @@
 
 #include <atomic>
 #include <memory>
+#include <chrono>
 #include <thread>
 
 using namespace aurea;
@@ -315,7 +316,10 @@ AUREA_TEST(Jobs, ParallelForCoversEveryIndex) {
     const bool ok = jobs.parallel_for(JobPriority::Critical, 100, slice_job, nullptr, 0);
     AUREA_CHECK(ok);
 
-    for (int i = 0; i < 200 && g_sliceHits.load() < 100; ++i) {
+    // parallel_for é assíncrono: espera com prazo de verdade (200 yields não
+    // bastavam com a máquina ocupada — o teste falhava de vez em quando).
+    const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (g_sliceHits.load() < 100 && std::chrono::steady_clock::now() < until) {
         std::this_thread::yield();
     }
     AUREA_CHECK_EQ(g_sliceHits.load(), 100);

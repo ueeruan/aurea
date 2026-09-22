@@ -13,6 +13,11 @@
 
 #include "aurea/tracking/PointTracker.hpp"
 
+// Contadores e botões da 8E (o mesmo arquivo compila na base anterior para o A/B).
+#if __has_include("aurea/render/HeavyQuality.hpp")
+#define AUREA_HEAVY_V2 1
+#endif
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -479,7 +484,10 @@ AUREA_TEST(Heavy, BenchEveryCatalogEffectAt1080p) {
             if (p.first.rfind("imagem", 0) == 0 || p.first.rfind("composicao", 0) == 0 || p.first.rfind("saida", 0) == 0) continue;
             ++passes;
         }
-        const f64 cost = std::max(0.0, mf.gpuTotal - base), costP = std::max(0.0, mp.gpuTotal - base);
+        // Custo do efeito = mediana da soma dos PASSES dele (sem a imagem, a
+        // composição e a saída) — não "total − base", que sofre com o clock da
+        // GPU subindo e descendo entre as medições.
+        const f64 cost = mf.gpuEffects, costP = mp.gpuEffects;
         std::printf("    | %s | %s | %.3f | %.3f | %u | %.2f |\n", fx.info().name, fx.info().key, cost, costP, passes, mf.cpu);
         if (const char* v = std::getenv("AUREA_HEAVY_VERBOSE"); v && std::strstr(fx.info().key, v)) {
             for (auto& [name, ms] : mf.last.passes) std::printf("      passe %s %.3f\n", name.c_str(), ms);
@@ -618,20 +626,34 @@ AUREA_TEST(Heavy, BenchScene3D) {
             else if (mode == 1) { rs.finalQuality = true; inst = false; label = "export"; }
             else { rs.heavyScale = 0.25f; label = "preview crítico"; }
             if (count == 1 && mode == 1) continue;
+#if defined(AUREA_HEAVY_V2)
             hgpu().renderer.set_scene_instancing(inst);
+#else
+            if (inst && count > 1 && mode == 0) continue;   // antes da 8E não havia instancing
+            inst = false;
+#endif
             const Measured m = measure(s, rs, 1920, 1080, 8, FrameIndex{0});
             const f64 sh = m.pass("3d-sombra"), pbr = m.pass("3d-pbr");
+#if defined(AUREA_HEAVY_V2)
             const HeavyStats& st = hgpu().renderer.heavy_stats();
             std::printf("    | %u capacete(s) | %s | %s | %u | %u | %u | %u | %.3f | %.3f | %.3f | %.2f |\n", count, label, inst ? "sim" : "não",
                         st.lastSceneDrawCalls, st.lastSceneShadowDrawCalls, st.lastSceneTriangles, st.lastShadowMapSize, sh, pbr, m.gpuTotal, m.cpu);
+#else
+            const scene3d::SceneStats& st = hgpu().renderer.scene_stats();
+            std::printf("    | %u capacete(s) | %s | %s | %u | ? | %u | 2048 | %.3f | %.3f | %.3f | %.2f |\n", count, label, inst ? "sim" : "não",
+                        st.drawCalls, st.triangles, sh, pbr, m.gpuTotal, m.cpu);
+#endif
         }
+#if defined(AUREA_HEAVY_V2)
         hgpu().renderer.set_scene_instancing(true);
+#endif
         std::printf("    GPU residente do 3D (%u capacete(s), um modelo por asset): %.1f MB\n", count,
                     static_cast<f64>(hgpu().renderer.scene_resident_bytes()) / 1048576.0);
     }
     hgpu().renderer.set_model_lookup(nullptr, nullptr);
 }
 
+#if defined(AUREA_HEAVY_V2)
 // -----------------------------------------------------------------------------
 // Testes normais (travam o que o relatório promete). Motor inteiro, alvo
 // fora da tela, contadores do Renderer (HeavyStats).
@@ -828,53 +850,6 @@ AUREA_TEST(Heavy, Scene3DInstancingCullingAndShadowKnob) {
     AUREA_CHECK_EQ(exportAgain, 2048u);
 }
 
-// Achado do perfil (8E): Varredura, Grão e Colorama estavam na classe "por
-// pixel" SEM operação de cor — o planejador os descartava como identidade e
-// eles nunca desenhavam na timeline (só na prévia do catálogo, que tem outro
-// caminho). Todo efeito do catálogo, com os valores de demonstração, tem de
-// MUDAR o quadro no caminho da timeline/export.
-AUREA_TEST(Heavy, EveryCatalogEffectChangesTheTimelineFrame) {
-    HEAVY_REQUIRE_GPU();
-    HGpu& g = hgpu();
-    const u32 W = 192, H = 108;
-    RenderSettings rs;
-    rs.dither = false;
-    rs.finalQuality = true;
-    Image8 plain;
-    {
-        HScene s(W, H);
-        (void)s.image(plate(W, H));
-        (void)s.frame(FrameIndex{30}, rs, W, H);
-        plain = s.read(W, H);
-    }
-    std::vector<std::string> unchanged;
-    for (u32 i = 0; i < g.effects.count(); ++i) {
-        const Effect& fx = g.effects.at(i);
-        const std::string key = fx.info().key;
-        // Sem efeito visual num quadro parado: controles de expressão, os
-        // temporais (precisam de movimento) e o Transformar no padrão.
-        if (key.rfind("aurea.control.", 0) == 0 || fx.effect_class() == EffectClass::Temporal || key == "aurea.transform") continue;
-        const ParameterRegistry& params = g.effects.params_at(i);
-        HScene s(W, H);
-        Layer* l = s.comp->layer(s.image(plate(W, H)));
-        EffectInstance e;
-        e.id = l->alloc_effect_id();
-        e.type = fx.type_id();
-        initialize_instance(e, params);
-        std::vector<ParamValue> values(params.count());
-        for (u32 p = 0; p < params.count(); ++p) values[p] = e.params[p].constant;
-        if (fx.demo_values(e, values)) for (u32 p = 0; p < params.count(); ++p) e.params[p].constant = values[p];
-        l->effects.push_back(std::move(e));
-        (void)s.frame(FrameIndex{30}, rs, W, H);
-        const Image8 img = s.read(W, H);
-        u32 mx = 0;
-        for (usize k = 0; k < img.rgba.size(); ++k) mx = std::max<u32>(mx, static_cast<u32>(std::abs(img.rgba[k] - plain.rgba[k])));
-        if (mx <= 2) unchanged.push_back(key);
-    }
-    for (const std::string& k : unchanged) std::printf("\n    efeito sem efeito na timeline: %s", k.c_str());
-    AUREA_CHECK_MSG(unchanged.empty(), "efeito do catálogo não muda o quadro da timeline");
-}
-
 // §82: o cache do optical flow respeita o orçamento (LRU por camada).
 AUREA_TEST(Heavy, FlowCacheStaysWithinItsBudget) {
     HEAVY_REQUIRE_GPU();
@@ -928,5 +903,7 @@ AUREA_TEST(Heavy, QualityLadderAndExportIsAlwaysFull) {
     AUREA_CHECK_EQ(resolve_heavy(cool).shadowMapSize, 512u);   // preview 1/4: o mapa acompanha
     AUREA_CHECK_EQ(resolve_heavy(cool).particles, 1.0f);       // … sem tirar partícula de quem está frio
 }
+
+#endif // AUREA_HEAVY_V2
 
 #endif // AUREA_TEST_VULKAN

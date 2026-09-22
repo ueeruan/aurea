@@ -1238,15 +1238,20 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
  * miniatura não chegou; a UI redesenha quando `thumbnailGeneration` muda.
  */
 class ThumbnailCache(private val engine: AureaEngine) {
-    private val cache = object : LinkedHashMap<Long, Bitmap>(256, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, Bitmap>?) = size > 400
+    // Chave composta: o id da camada é `geração << 32 | índice`, e o antigo
+    // `layer * 31 + frame` colidia entre camadas vizinhas (camada 0 no frame 31
+    // = camada 1 no frame 0 → miniatura de outra camada).
+    private data class Key(val layer: Long, val frame: Int, val height: Int)
+
+    private val cache = object : LinkedHashMap<Key, Bitmap>(256, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Key, Bitmap>?) = size > 400
     }
     private val buffer: ByteBuffer = directBuffer(512 * 512 * 4)
     private val width = IntArray(1)
 
-    /** Frame arredondado para a grade de 250 ms do motor, na chave. */
+    /** Quem chama arredonda o frame para a grade de 250 ms do motor (a timeline pede um frame por balde). */
     fun get(layer: Long, timelineFrame: Int, heightPx: Int): Bitmap? {
-        val key = (layer * 31 + timelineFrame) * 1024 + heightPx
+        val key = Key(layer, timelineFrame, heightPx)
         cache[key]?.let { return it }
         buffer.clear()
         val bytes = engine.queryThumbnail(layer, timelineFrame, heightPx, buffer, width)

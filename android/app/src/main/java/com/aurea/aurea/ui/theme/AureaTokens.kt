@@ -170,3 +170,32 @@ object AureaMotion {
     const val PRESS_ALPHA_DOWN_MS = 60
     const val PRESS_ALPHA_UP_MS = 180
 }
+
+/**
+ * Timeline da A.01 (`am_timeline.dart@aba36bb`), conferida no print t2
+ * (`docs/migration/ui_spec/03_timeline.md` §1.B). Só a timeline usa.
+ */
+object AureaTimeline {
+    // --- Cores ---------------------------------------------------------------
+    val TickMajor = Color(0xFF8A97AD)      // risco de segundo (e rótulo)
+    val TickMinor = Color(0xFF5A6880)      // risco de décimo / quadro
+    val HeaderPill = Color(0xFF1E222D)     // pílula do olho + quadradinho
+    val Swatch = Color(0xFFFFE899)         // quadradinho da camada sem etiqueta
+    val SwatchGlyph = Color(0xFF0F141A)    // cadeado / visto dentro do quadradinho
+    val KeyframeOn = Color(0xFFFFC107)     // losango escolhido (âmbar)
+    val TrimHandle = Color(0xFFF2F5F9)     // alça de trim (dentro das pontas)
+
+    // --- Medidas (dp) --------------------------------------------------------
+    val RulerTicks = 20.dp                 // faixa dos riscos
+    val RulerGap = 18.dp                   // respiro até a 1ª linha (o relógio mora aqui)
+    val Row = 46.dp
+    val Bar = 36.dp                        // barra colada no topo da linha
+    val BarRadius = 8.dp
+    val BarMinWidth = 40.dp
+    val KeyframeTrack = 15.dp              // faixa de baixo da barra, dos losangos
+    val HeaderColumn = 66.dp               // coluna das pílulas (gradiente por cima das barras)
+    val PillWidth = 58.dp
+    val PillHeight = 28.dp
+    val Playhead = 1.6.dp
+    val PlayheadKnob = 8.dp
+}

@@ -14,6 +14,7 @@ lifecycle = "2.9.4"
 activityCompose = "1.11.0"
 composeBom = "2025.09.00"
 coroutines = "1.10.2"
+junit = "4.13.2"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -28,6 +29,8 @@ androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "u
 androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
 androidx-compose-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
+# Testes de JVM da lógica pura (timeline: tempo ↔ px, ímã, régua, hit-test).
+junit = { group = "junit", name = "junit", version.ref = "junit" }
 
 [plugins]
 # O plugin do Android. O Kotlin vem EMBUTIDO no AGP 9 (aplicar

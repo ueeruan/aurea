@@ -201,4 +201,18 @@ object CupertinoGlyph {
     const val CloudFill = '\uF5FB'
     const val LockShield = '\uF6FE'
     const val PlusApp = '\uF775'
+
+    // Painéis e controles de propriedade
+    const val ArrowtriangleDownFill = '\uF55D'
+    const val ArrowtriangleRightFill = '\uF569'
+    const val ArrowUp = '\uF366'
+    const val ArrowDown = '\uF35D'
+    const val ChevronBack = '\uF3CF'
+    const val Star = '\uF81F'
+    const val StarFill = '\uF822'
+    const val Scribble = '\uF7CB'
+    const val Sportscourt = '\uF7F6'
+    const val WaveformPath = '\uF897'
+    const val Tortoise = '\uF86A'
+    const val Hare = '\uF6B9'
 }

@@ -1,14 +1,26 @@
 package com.aurea.aurea.editor.panels
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.aurea.aurea.state.EditorStore
-import com.aurea.aurea.ui.ds.AureaModalSheet
-import com.aurea.aurea.ui.theme.AureaType
+import com.aurea.aurea.ui.ds.ColorPickerSheet
+import com.aurea.aurea.ui.ds.KeypadRequest
+import com.aurea.aurea.ui.ds.NumericKeypadSheet
+import com.aurea.aurea.ui.theme.AureaColors
 
 /**
  * CONTRATO entre a casca do editor e os painéis.
@@ -26,7 +38,13 @@ enum class EditorPanel {
     Audio,         // volume
 }
 
-/** Conteúdo do painel aberto. `onClose` = voltar (fecha o painel). */
+/**
+ * Conteúdo do painel aberto. `onClose` = voltar (fecha o painel).
+ *
+ * As duas folhas de ajuste (teclado numérico e seletor de cor) moram AQUI, uma
+ * vez só: qualquer linha de qualquer painel pede a folha e ela sobe por cima da
+ * área do painel, que é baixa demais para um teclado.
+ */
 @Composable
 fun PanelContent(
     store: EditorStore,
@@ -36,15 +54,75 @@ fun PanelContent(
     onOpenEffectsBrowser: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text("Painel ${panel.name}", style = AureaType.Body)
+    var keypad by remember { mutableStateOf<KeypadRequest?>(null) }
+    var color by remember { mutableStateOf<ColorRequest?>(null) }
+    // De onde o editor de curva foi aberto: o ‹ do trilho dele volta para lá.
+    var returnTo by remember { mutableStateOf<EditorPanel?>(null) }
+    LaunchedEffect(panel) { if (panel != EditorPanel.Curve) returnTo = panel }
+    // A aba de Transformar sobe até aqui porque o TÍTULO a escreve
+    // ("Transformar · Escala"); corpo e título não podem discordar.
+    var transformTab by rememberSaveable { mutableStateOf(TransformTab.Mover) }
+
+    val close by rememberUpdatedState(onClose)
+    val open by rememberUpdatedState(onOpenPanel)
+    val browser by rememberUpdatedState(onOpenEffectsBrowser)
+    // Uma instância só: os painéis filhos pulam a recomposição quando a casca
+    // recompõe por outro motivo (o playhead, por exemplo).
+    val env = remember(store) {
+        PanelEnv(
+            store = store,
+            onClose = { close() },
+            onOpenPanel = { open(it) },
+            onOpenEffectsBrowser = { browser() },
+            openKeypad = { keypad = it },
+            openColor = { color = it },
+            returnTo = { returnTo },
+        )
+    }
+    // Só a existência da camada importa aqui — não o detalhe que muda a cada quadro.
+    val hasLayer by remember(store) { derivedStateOf { store.detail != null } }
+
+    val title = when (panel) {
+        EditorPanel.Transform -> "Transformar · ${transformTab.title}"
+        EditorPanel.Effects -> "Efeitos"
+        EditorPanel.Curve -> "Easing curve"
+        EditorPanel.Appearance -> "Mesclagem e opacidade"
+        EditorPanel.Speed -> "Tempo e velocidade"
+        EditorPanel.Audio -> "Som"
+    }
+
+    Column(modifier.fillMaxSize().background(AureaColors.EditorPanel)) {
+        PanelHeader(title, onBack = onClose)
+        Box(Modifier.fillMaxWidth().weight(1f)) {
+            if (hasLayer) {
+                when (panel) {
+                    EditorPanel.Transform -> TransformPanel(env, transformTab, onTab = { transformTab = it })
+                    EditorPanel.Effects -> EffectsPanel(env)
+                    EditorPanel.Curve -> CurvePanel(env)
+                    EditorPanel.Appearance -> AppearancePanel(env)
+                    EditorPanel.Speed -> SpeedPanel(env)
+                    EditorPanel.Audio -> AudioPanel(env)
+                }
+            }
+        }
+    }
+
+    keypad?.let { r -> NumericKeypadSheet(r, onDismiss = { keypad = null }) }
+    color?.let { r ->
+        DisposableEffect(r) { onDispose { r.finish() } }
+        ColorPickerSheet(
+            initial = r.initial,
+            onChange = r.onChange,
+            onDone = {
+                color = null
+                r.finish()
+            },
+        )
     }
 }
 
 /** Galeria de efeitos (folha modal). Adiciona o efeito às camadas escolhidas. */
 @Composable
 fun EffectsBrowserSheet(store: EditorStore, onDismiss: () -> Unit) {
-    AureaModalSheet(onDismiss = onDismiss) {
-        Text("Efeitos", style = AureaType.TitleLarge)
-    }
+    EffectsBrowser(store, onDismiss)
 }

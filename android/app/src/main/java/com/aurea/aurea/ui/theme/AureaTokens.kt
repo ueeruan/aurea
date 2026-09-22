@@ -68,6 +68,21 @@ object AureaColors {
     val DestructiveCupertino = Color(0xFFFF453A)
 
     val BrandGradient = listOf(BrandDeep, Brand, Accent)
+
+    // --- Painéis da A.01 (valores escritos à mão no Flutter, aqui viram token) ---
+    val RailModeFill = Color(0xFF1E222D)       // modo aceso do trilho, cartão de preset da curva
+    val RailDisabled = Color(0xFF434956)       // losango/curva do trilho sem alvo
+    val ControlButton = Color(0xFF434A60)      // corrente Largura/Altura, botão "Centro"
+    val DialTrack = Color(0xFF2E3548)          // anel do dial de rotação
+    val DialValueBox = Color(0xFF242436)       // caixa do ângulo no centro do dial
+    val CurveGrid = Color(0xFF34405A)          // grade pontilhada do editor de curva
+    val CurvePresetBorder = Color(0xFF333B4F)  // borda do preset de curva apagado
+    val EffectPreviewTop = Color(0xFF232B3A)   // cartela genérica do catálogo (degradê)
+    val EffectPreviewBottom = Color(0xFF606F98)
+    val EffectPreviewDisc = Color(0xFFFF4D2D)
+    val BlendThumbBottom = Color(0xFFFF8A3D)   // miniatura da mescla: disco de baixo
+    val BlendThumbTop = Color(0xFF3D9BFF)      // miniatura da mescla: disco de cima
+    val SheetScrim = Color(0x590A0E13)         // véu das folhas de ajuste: palco a 35 %
 }
 
 /** Cor (fundo de barra) e glifo por tipo de camada — `aurea_tipo_da_camada.dart`. */

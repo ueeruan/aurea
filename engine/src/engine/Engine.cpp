@@ -1188,6 +1188,94 @@ bool Engine::set_time_remap(u64 layerId, bool on) noexcept {
     return true;
 }
 
+namespace {
+/// Último quadro da fonte em quadros da composição (0 = sem limite conhecido).
+f64 source_last_frame(const Project& project, const Layer& l, f64 compFps) noexcept {
+    const Asset* a = project.asset(l.source);
+    if (!a || a->duration.value <= 0 || a->timebaseFps <= 0.0) return 0.0;
+    return std::max(0.0, static_cast<f64>(a->duration.value) * compFps / a->timebaseFps - 1.0);
+}
+} // namespace
+
+u32 Engine::query_time_remap(u64 layerId, f32* out, u32 maxFloats) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || !out || maxFloats < 5) return 0;
+    const f64 fps = comp->fps() > 0.0 ? comp->fps() : 30.0;
+    const Track& t = l->timeRemap;
+    const FrameIndex now = playback_.current();
+    const f64 speed = l->source_frame(FrameIndex{now.value + 1}) - l->source_frame(now);
+    out[0] = static_cast<f32>(t.keys.size());
+    out[1] = static_cast<f32>(l->local_time(l->start).value);
+    out[2] = static_cast<f32>(l->local_time(l->end).value);
+    out[3] = static_cast<f32>(source_last_frame(*project_, *l, fps));
+    out[4] = static_cast<f32>(speed);
+    u32 w = 5;
+    for (const Keyframe& k : t.keys) {
+        if (w + 7 > maxFloats) break;
+        out[w++] = static_cast<f32>(k.time.value);
+        out[w++] = k.value;
+        out[w++] = static_cast<f32>(static_cast<u8>(k.interp));
+        out[w++] = k.bx1;
+        out[w++] = k.by1;
+        out[w++] = k.bx2;
+        out[w++] = k.by2;
+    }
+    return w;
+}
+
+i32 Engine::edit_time_remap_key(u64 layerId, i32 index, i64 localFrame, f32 sourceFrame, i32 interp) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || !l->timeRemapEnabled || interp > static_cast<i32>(Interpolation::CustomCurve)) return -1;
+    Track& t = l->timeRemap;
+    const f64 fps = comp->fps() > 0.0 ? comp->fps() : 30.0;
+    const f64 last = source_last_frame(*project_, *l, fps);
+    auto clampValue = [&](f32 v) { return last > 0.0 ? std::clamp(v, 0.0f, static_cast<f32>(last)) : std::max(0.0f, v); };
+    const i64 lo = l->local_time(l->start).value, hi = l->local_time(l->end).value;
+    history_.before_mutation(*comp, project_->timeline().current(), index < 0 ? "ponto na curva de tempo" : "mover ponto da curva de tempo");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    i32 at = index;
+    if (index < 0) {
+        const FrameIndex f{std::clamp(localFrame, lo, hi)};
+        if (t.find_exact(f) != kInvalidIndex) return static_cast<i32>(t.find_exact(f));
+        const f32 v = t.sample(f);
+        // A curva que o ponto corta: o novo ponto herda a interpolação do trecho.
+        const u32 before = t.find_before(f);
+        const Interpolation in = before != kInvalidIndex ? t.keys[before].interp : Interpolation::Linear;
+        at = static_cast<i32>(t.set(f, v, interp >= 0 ? static_cast<Interpolation>(interp) : in));
+    } else {
+        if (static_cast<u32>(index) >= t.keys.size()) return -1;
+        Keyframe& k = t.keys[static_cast<u32>(index)];
+        // Tempo preso entre os vizinhos (a ordem não muda); pontas presas no lugar.
+        const i64 minT = index > 0 ? t.keys[static_cast<u32>(index) - 1].time.value + 1 : k.time.value;
+        const i64 maxT = static_cast<u32>(index) + 1 < t.keys.size() ? t.keys[static_cast<u32>(index) + 1].time.value - 1 : k.time.value;
+        k.time = FrameIndex{std::clamp(localFrame, minT, std::max(minT, maxT))};
+        k.value = clampValue(sourceFrame);
+        if (interp >= 0) k.interp = static_cast<Interpolation>(interp);
+    }
+    t.lastIndex = 0;
+    project_->mark_dirty();
+    request_render();
+    return at;
+}
+
+bool Engine::remove_time_remap_key(u64 layerId, u32 index) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || index >= l->timeRemap.keys.size() || l->timeRemap.keys.size() <= 2) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "apagar ponto da curva de tempo");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    l->timeRemap.keys.erase(l->timeRemap.keys.begin() + index);
+    l->timeRemap.lastIndex = 0;
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
 bool Engine::apply_speed_ramp(u64 layerId, u32 preset) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;

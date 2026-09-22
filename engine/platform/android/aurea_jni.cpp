@@ -909,6 +909,27 @@ AUREA_JNI jboolean AUREA_FN(nativeSetMotionBlur)(JNIEnv*, jclass, jlong handle, 
     return c && c->engine.set_motion_blur(static_cast<u64>(layer), on == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
 }
 
+AUREA_JNI jint AUREA_FN(nativeQueryTimeRemap)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloatArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !out) return 0;
+    const jsize n = env->GetArrayLength(out);
+    std::vector<f32> v(static_cast<usize>(n));
+    const u32 w = c->engine.query_time_remap(static_cast<u64>(layer), v.data(), static_cast<u32>(n));
+    if (w) env->SetFloatArrayRegion(out, 0, static_cast<jsize>(w), v.data());
+    return static_cast<jint>(w);
+}
+
+AUREA_JNI jint AUREA_FN(nativeEditTimeRemapKey)(JNIEnv*, jclass, jlong handle, jlong layer, jint index, jlong frame,
+                                               jfloat value, jint interp) {
+    NativeContext* c = ctx_of(handle);
+    return c ? c->engine.edit_time_remap_key(static_cast<u64>(layer), index, frame, value, interp) : -1;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeRemoveTimeRemapKey)(JNIEnv*, jclass, jlong handle, jlong layer, jint index) {
+    NativeContext* c = ctx_of(handle);
+    return c && index >= 0 && c->engine.remove_time_remap_key(static_cast<u64>(layer), static_cast<u32>(index)) ? JNI_TRUE : JNI_FALSE;
+}
+
 AUREA_JNI jboolean AUREA_FN(nativeSetFrameBlend)(JNIEnv*, jclass, jlong handle, jlong layer, jint mode) {
     NativeContext* c = ctx_of(handle);
     return c && c->engine.set_frame_blend(static_cast<u64>(layer), static_cast<u32>(mode)) ? JNI_TRUE : JNI_FALSE;

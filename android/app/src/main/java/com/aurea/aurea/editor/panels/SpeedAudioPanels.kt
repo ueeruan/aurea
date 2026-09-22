@@ -177,6 +177,8 @@ internal fun SpeedPanel(env: PanelEnv) {
             }
         }
         if (remap) {
+            Spacer(Modifier.height(8.dp))
+            TimeRemapGraph(store)
             Spacer(Modifier.height(6.dp))
             Text(
                 "Curva de tempo ligada: o som e o vídeo seguem a mesma rampa, do mesmo trecho da mídia.",

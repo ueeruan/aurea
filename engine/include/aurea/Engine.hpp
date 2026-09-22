@@ -278,6 +278,18 @@ public:
     /// 1 suave (entrada e saída), 2 herói (rápido-lento-rápido), 3 acelerar,
     /// 4 desacelerar. Liga o remapeamento.
     bool apply_speed_ramp(u64 layerId, u32 preset) noexcept;
+    /// Curva de tempo para o editor de gráfico. `out` = {nº de pontos, início
+    /// e fim locais da camada, último quadro da fonte (quadros da composição),
+    /// velocidade no cabeçote} e depois 7 floats por ponto: tempo local, quadro
+    /// da fonte, interpolação, bx1, by1, bx2, by2. Devolve os floats escritos.
+    u32 query_time_remap(u64 layerId, f32* out, u32 maxFloats) noexcept;
+    /// Ponto da curva: `index` < 0 insere em `localFrame` com o valor que a
+    /// curva JÁ tem ali (nada muda até mover); senão move o ponto (tempo
+    /// preso entre os vizinhos, valor dentro da fonte). `interp` < 0 mantém.
+    /// Devolve o índice do ponto, ou −1.
+    i32 edit_time_remap_key(u64 layerId, i32 index, i64 localFrame, f32 sourceFrame, i32 interp) noexcept;
+    /// Apaga um ponto (ficam pelo menos dois).
+    bool remove_time_remap_key(u64 layerId, u32 index) noexcept;
 
     /// Transição de entrada (`out` = false) ou saída: tipo (0 nenhuma, 1
     /// dissolver, 2 deslizar p/ cima, 3 deslizar da esquerda, 4 zoom, 5 girar)

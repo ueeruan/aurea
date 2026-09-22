@@ -334,6 +334,10 @@ class AureaEngine private constructor() {
     // Desfoque de movimento.
     fun setMotionBlur(layer: Long, on: Boolean): Boolean = nativeSetMotionBlur(nativeHandle, layer, on)
     fun setFrameBlend(layer: Long, mode: Int): Boolean = nativeSetFrameBlend(nativeHandle, layer, mode)
+    fun queryTimeRemap(layer: Long, out: FloatArray): Int = nativeQueryTimeRemap(nativeHandle, layer, out)
+    fun editTimeRemapKey(layer: Long, index: Int, frame: Long, value: Float, interp: Int): Int =
+        nativeEditTimeRemapKey(nativeHandle, layer, index, frame, value, interp)
+    fun removeTimeRemapKey(layer: Long, index: Int): Boolean = nativeRemoveTimeRemapKey(nativeHandle, layer, index)
     fun setCompositionMotionBlur(on: Boolean) = nativeSetCompositionMotionBlur(nativeHandle, on)
     fun setShutterAngle(degrees: Float) = nativeSetShutterAngle(nativeHandle, degrees)
     /** > 0 = ligado; |valor| − 1 = obturador em graus; 0 = sem projeto. */
@@ -449,6 +453,9 @@ class AureaEngine private constructor() {
     private external fun nativeSetEditMode(handle: Long, on: Boolean)
     private external fun nativeSetMotionBlur(handle: Long, layer: Long, on: Boolean): Boolean
     private external fun nativeSetFrameBlend(handle: Long, layer: Long, mode: Int): Boolean
+    private external fun nativeQueryTimeRemap(handle: Long, layer: Long, out: FloatArray): Int
+    private external fun nativeEditTimeRemapKey(handle: Long, layer: Long, index: Int, frame: Long, value: Float, interp: Int): Int
+    private external fun nativeRemoveTimeRemapKey(handle: Long, layer: Long, index: Int): Boolean
     private external fun nativeSetTimeRemap(handle: Long, layer: Long, on: Boolean): Boolean
     private external fun nativeAddParticles(handle: Long, preset: Int): Long
     private external fun nativeAddText3d(handle: Long, content: String, depth: Float, align: Int, r: Float, g: Float, b: Float): Long

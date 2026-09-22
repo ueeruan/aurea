@@ -2623,3 +2623,76 @@ AUREA_TEST(Gpu, OpticalFlowPlacesTheMovingSquareBetweenFrames) {
     e.gpu()->destroy_texture(target);
     e.shutdown();
 }
+
+AUREA_TEST(Gpu, TimeRemapGraphEditsPointsAndTheVideoFollows) {
+    AUREA_REQUIRE_GPU();
+    SyntheticConfig cfg;
+    cfg.width = 96;
+    cfg.height = 54;
+    cfg.frameCount = 300;
+    cfg.pattern = SyntheticPattern::FrameGray;
+    SyntheticFactory factory(cfg);
+    Engine e;
+    EngineConfig ec;
+    ec.backend = new vk::Backend();
+    ec.backendConfig.framesInFlight = 2;
+    ec.mediaFactory = &factory;
+    ec.workerCount = 2;
+    ec.disableAutosave = true;
+    AUREA_CHECK(e.initialize(ec).ok());
+    AUREA_CHECK(e.new_project(96, 54, 30.0, "remap").ok());
+    VideoImport imp;
+    imp.sourcePath = "sintetico";
+    imp.displayName = "clipe";
+    auto layer = e.import_video(imp);
+    AUREA_CHECK(layer.ok());
+    if (!layer.ok()) { e.shutdown(); return; }
+    TextureDesc d;
+    d.width = 96;
+    d.height = 54;
+    d.format = SurfaceFormat::RGBA16F;
+    d.renderTarget = true;
+    d.transferSrc = true;
+    const TextureHandle target = *e.gpu()->create_texture(d);
+    std::vector<u16> half(96 * 54 * 4);
+    auto shown = [&](i64 frame) {
+        Command seek;
+        seek.type = CommandType::PlaybackSeek;
+        seek.seek.time = tick_at(FrameIndex{frame}, 30.0);
+        AUREA_CHECK(e.submit_commands(&seek, 1) == 1);
+        AUREA_CHECK(e.render_offscreen(target, 96, 54).ok());
+        AUREA_CHECK(e.gpu()->read_texture(target, half.data(), 96 * 8).ok());
+        return srgb_encode(half_to_float(half[(27 * 96 + 48) * 4])) * 219.0f + 16.0f;
+    };
+    AUREA_CHECK(e.set_time_remap(*layer, true));
+    f32 q[5 + 7 * 16];
+    AUREA_CHECK(e.query_time_remap(*layer, q, 5 + 7 * 16) == 5 + 7 * 2);
+    const f32 before = shown(150);
+    // Inserir no meio: a curva não muda.
+    const i32 mid = e.edit_time_remap_key(*layer, -1, 150, 0.0f, -1);
+    const u32 floats = e.query_time_remap(*layer, q, 5 + 7 * 16);
+    const f32 inserted = shown(150);
+    // Mover o ponto do meio para o quadro 40 da fonte: no 150 da tela aparece o 40.
+    AUREA_CHECK(e.edit_time_remap_key(*layer, mid, 150, 40.0f, -1) == mid);
+    const f32 moved = shown(150);
+    const f32 halfway = shown(75);                                  // 0 → 40 em 150 quadros: fonte 20
+    // Congelar (Hold) do início até o ponto: tudo mostra o quadro 0.
+    AUREA_CHECK(e.edit_time_remap_key(*layer, 0, 0, 0.0f, static_cast<i32>(Interpolation::Hold)) == 0);
+    const f32 frozen = shown(100);
+    // Apagar o ponto do meio: volta à reta original.
+    AUREA_CHECK(e.edit_time_remap_key(*layer, 0, 0, 0.0f, static_cast<i32>(Interpolation::Linear)) == 0);
+    AUREA_CHECK(e.remove_time_remap_key(*layer, static_cast<u32>(mid)));
+    const f32 removed = shown(150);
+    AUREA_CHECK(!e.remove_time_remap_key(*layer, 0));                // ficam pelo menos dois
+    std::printf("    curva de tempo: 150 -> %.1f; inserido %.1f; ponto em 40 -> %.1f (75 = %.1f); congelado %.1f; apagado %.1f; floats %u\n",
+                before, inserted, moved, halfway, frozen, removed, floats);
+    AUREA_CHECK_NEAR(before, frame_gray_code(150), 0.5);
+    AUREA_CHECK(mid == 1 && floats == 5 + 7 * 3);
+    AUREA_CHECK_NEAR(inserted, frame_gray_code(150), 0.5);
+    AUREA_CHECK_NEAR(moved, frame_gray_code(40), 0.5);
+    AUREA_CHECK_NEAR(halfway, frame_gray_code(20), 0.5);
+    AUREA_CHECK_NEAR(frozen, frame_gray_code(0), 0.5);
+    AUREA_CHECK_NEAR(removed, frame_gray_code(150), 0.5);
+    e.gpu()->destroy_texture(target);
+    e.shutdown();
+}

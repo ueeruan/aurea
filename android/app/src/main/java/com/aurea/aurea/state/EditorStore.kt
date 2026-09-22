@@ -501,6 +501,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         } else {
             null
         }
+        timeRemap = if (id != null && detail?.timeRemap == true) {
+            val out = FloatArray(5 + 7 * 64)
+            val n = engine.queryTimeRemap(id, out)
+            if (n >= 5) out.copyOf(n) else null
+        } else {
+            null
+        }
         text3d = if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Model3D.kind) {
             val f = FloatArray(5)
             engine.queryText3d(id, f)?.let { Text3DInfo(it, f[0], f[1].toInt(), floatArrayOf(f[2], f[3], f[4], 1f)) }
@@ -1452,6 +1459,40 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         engine.setMotionBlur(layer, on)
         refreshNow()
         showToast(if (on) "Desfoque de movimento ligado" else "Desfoque de movimento desligado")
+    }
+
+    /** Curva de tempo da camada principal (ver `query_time_remap`); nulo = desligada. */
+    var timeRemap by mutableStateOf<FloatArray?>(null)
+        private set
+
+    /** Ponto novo na curva de tempo (no valor que ela já tem). Devolve o índice. */
+    fun remapInsert(localFrame: Long): Int {
+        val id = primary ?: return -1
+        val i = engine.editTimeRemapKey(id, -1, localFrame, 0f, -1)
+        refreshNow()
+        return i
+    }
+
+    fun remapMove(index: Int, localFrame: Long, sourceFrame: Float) {
+        val id = primary ?: return
+        engine.editTimeRemapKey(id, index, localFrame, sourceFrame, -1)
+        refreshDetail()
+    }
+
+    fun remapInterp(index: Int, interp: Int) {
+        val id = primary ?: return
+        val q = timeRemap ?: return
+        if (index < 0 || index >= q[0].toInt()) return
+        engine.editTimeRemapKey(id, index, q[5 + index * 7].toLong(), q[5 + index * 7 + 1], interp)
+        refreshNow()
+    }
+
+    fun remapRemove(index: Int): Boolean {
+        val id = primary ?: return false
+        val ok = engine.removeTimeRemapKey(id, index)
+        if (!ok) showToast("A curva precisa de pelo menos dois pontos")
+        refreshNow()
+        return ok
     }
 
     /** Câmera lenta sem "degraus": 0 repete, 1 mistura os quadros vizinhos, 2 movimento de pixels. */

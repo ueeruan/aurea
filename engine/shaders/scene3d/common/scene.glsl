@@ -50,6 +50,10 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform SceneBlock {
     ivec4 uvSet1;           // x = emissiva
     ivec4 texMask0;         // tem textura: base, mr, normal, oclusão
     ivec4 texMask1;         // x = emissiva
+
+    // Sombra da luz principal
+    mat4 shadowMatrix;      // (uv, profundidade) do mapa ← mundo
+    vec4 shadowParams;      // x = ligado, y = tamanho do texel, z = viés, w = índice da luz
 } u;
 
 const float PI = 3.14159265359;

@@ -1071,6 +1071,41 @@ AUREA_TEST(Gpu, Scene3DSkinnedModelAnimatesOnTheTimelineClock) {
     (void)write_png("scene3d_fox_t12.png", b);
 }
 
+AUREA_TEST(Gpu, Scene3DKeyLightCastsShadows) {
+    AUREA_REQUIRE_GPU();
+    const std::string path = gltf_data("MetalRoughSpheres.glb");
+    if (!file_exists(path)) return;
+    Scene3DRig rig(512, 288);
+    ModelImport mi;
+    mi.path = path;
+    auto id = rig.e.import_model(mi);
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) return;
+    const Image8 lit = rig.capture(512);
+    // Sem projetar sombra: a mesma cena, só o passe de sombra desligado.
+    Composition* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+    comp->layer(LayerId::unpack(*id))->model.castShadows = false;
+    rig.e.request_render();
+    const Image8 noShadow = rig.capture(512);
+    f64 sumLit = 0, sumNo = 0;
+    u64 darker = 0;
+    for (usize i = 0; i + 3 < lit.rgba.size() && i + 3 < noShadow.rgba.size(); i += 4) {
+        const int a = lit.rgba[i] + lit.rgba[i + 1] + lit.rgba[i + 2];
+        const int b = noShadow.rgba[i] + noShadow.rgba[i + 1] + noShadow.rgba[i + 2];
+        sumLit += a;
+        sumNo += b;
+        darker += static_cast<u64>(b - a > 30);
+    }
+    std::printf("    pixels escurecidos pela sombra: %llu (luz media %.1f -> %.1f)\n",
+                static_cast<unsigned long long>(darker), sumNo / (lit.rgba.size() / 4), sumLit / (lit.rgba.size() / 4));
+    // As esferas de trás recebem a sombra das da frente: há área mais escura,
+    // e nada fica mais claro com a sombra ligada.
+    AUREA_CHECK(darker > 120);   // medido: 182 (o IBL de estúdio domina; a chave é 1,2)
+    AUREA_CHECK(sumLit < sumNo);
+    (void)write_png("scene3d_sombra_on.png", lit);
+    (void)write_png("scene3d_sombra_off.png", noShadow);
+}
+
 AUREA_TEST(Gpu, Scene3DSurvivesSaveAndReopenIdentically) {
     AUREA_REQUIRE_GPU();
     const std::string path = gltf_data("DamagedHelmet.glb");

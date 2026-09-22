@@ -36,6 +36,8 @@ struct alignas(16) SceneBlock {
     i32  uvSet1[4];
     i32  texMask0[4];
     i32  texMask1[4];
+    Mat4 shadowMatrix;      ///< uv/profundidade do mapa ← mundo
+    Vec4 shadowParams;      ///< x = ligado, y = texel, z = viés, w = índice da luz
 };
 static_assert(sizeof(SceneBlock) <= binding::kMaxUniformBytes, "bloco da cena 3D maior que o limite de uniform");
 
@@ -496,6 +498,23 @@ u64 SceneRenderer::resident_bytes() const noexcept {
     return b;
 }
 
+PipelineKey SceneRenderer::shadow_key(bool skinned) const noexcept {
+    PipelineKey k = PipelineKey::graphics(skinned ? ShaderId::scene3d_shadow_shadow_skinned_vert : ShaderId::scene3d_shadow_shadow_vert,
+                                          ShaderId::scene3d_shadow_shadow_frag, SurfaceFormat::RGBA16F, false,
+                                          BlendMode::Normal);
+    k.mesh = skinned ? MeshLayout::SkinnedPosition : MeshLayout::PositionOnly;
+    k.hasDepth = true;
+    k.depthOnly = true;
+    k.depthTest = true;
+    k.depthWrite = true;
+    k.depthCompare = CompareOp::LessOrEqual;   // mapa de sombra: Z comum, limpa em 1
+    k.depthFormat = SurfaceFormat::Depth32F;
+    k.cull = CullMode::None;                   // dupla face e malhas abertas projetam sombra
+    k.depthBiasConstant = 1.25f;
+    k.depthBiasSlope = 1.75f;
+    return k;
+}
+
 PipelineKey SceneRenderer::key_for(AlphaMode mode, bool doubleSided, bool skinned) const noexcept {
     PipelineKey k = PipelineKey::graphics(skinned ? ShaderId::scene3d_pbr_mesh_skinned_vert : ShaderId::scene3d_pbr_mesh_vert,
                                           ShaderId::scene3d_pbr_pbr_frag, SurfaceFormat::RGBA16F,
@@ -522,6 +541,8 @@ void SceneRenderer::collect_pipelines(std::vector<PipelineKey>& out) const {
             out.push_back(key_for(mode, twoSided, true));
         }
     }
+    out.push_back(shadow_key(false));
+    out.push_back(shadow_key(true));
 }
 
 bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& frame, u32 width, u32 height,
@@ -659,6 +680,141 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         }
     }
 
+    // --- Sombra da luz principal ------------------------------------------------
+    // Ortográfica ao longo da luz, ajustada à caixa dos modelos do grupo (com
+    // folga: a pose animada sai da caixa de repouso).
+    struct ShadowDraw {
+        const GpuModel* model;
+        const GpuPrimitive* prim;
+        MeshPush push;   // model = luz ← local; normalCol[0].x = início das juntas
+        PipelineHandle pipeline;
+        bool skinned;
+    };
+    std::vector<ShadowDraw> shadowDraws;
+    Mat4 shadowMatrix = Mat4::identity();
+    i32 shadowLight = -1;
+    for (u32 i = 0; i < frame.lights.size() && i < 4; ++i) {
+        if (frame.lights[i].castShadows && frame.lights[i].kind == LightKindGpu::Directional) {
+            shadowLight = static_cast<i32>(i);
+            break;
+        }
+    }
+    if (shadowLight >= 0) {
+        Vec3 lo{1e30f, 1e30f, 1e30f}, hi{-1e30f, -1e30f, -1e30f};
+        bool any = false;
+        for (const SceneInstance& inst : frame.instances) {
+            if (!inst.asset) continue;
+            const Aabb& b = inst.asset->bounds;
+            for (int c = 0; c < 8; ++c) {
+                const Vec3 pt{(c & 1) ? b.max.x : b.min.x, (c & 2) ? b.max.y : b.min.y, (c & 4) ? b.max.z : b.min.z};
+                const Vec3 w = inst.world.transform_point(pt);
+                lo = Vec3{std::min(lo.x, w.x), std::min(lo.y, w.y), std::min(lo.z, w.z)};
+                hi = Vec3{std::max(hi.x, w.x), std::max(hi.y, w.y), std::max(hi.z, w.z)};
+                any = true;
+            }
+        }
+        if (any) {
+            const Vec3 center = (lo + hi) * 0.5f;
+            const f32 radius = std::max(1.0f, (hi - lo).length() * 0.5f * 1.25f);
+            const Vec3 fwd = frame.lights[static_cast<usize>(shadowLight)].direction.normalized();
+            const Vec3 upRef = std::fabs(fwd.y) > 0.95f ? Vec3{1, 0, 0} : Vec3{0, -1, 0};
+            const Vec3 right = upRef.cross(fwd).normalized();
+            const Vec3 up = fwd.cross(right);
+            const Vec3 eye = center - fwd * (radius * 2.0f);
+            Mat4 view;
+            view.col[0] = Vec4{right.x, up.x, fwd.x, 0};
+            view.col[1] = Vec4{right.y, up.y, fwd.y, 0};
+            view.col[2] = Vec4{right.z, up.z, fwd.z, 0};
+            view.col[3] = Vec4{-right.dot(eye), -up.dot(eye), -fwd.dot(eye), 1};
+            // Ortográfica: x,y em ±radius → [−1, 1]; z em [radius, 3·radius] → [0, 1].
+            Mat4 ortho;
+            ortho.col[0] = Vec4{1.0f / radius, 0, 0, 0};
+            ortho.col[1] = Vec4{0, 1.0f / radius, 0, 0};
+            ortho.col[2] = Vec4{0, 0, 1.0f / (radius * 2.0f), 0};
+            ortho.col[3] = Vec4{0, 0, -radius / (radius * 2.0f), 1};
+            const Mat4 lightViewProj = ortho * view;
+            // NDC → uv do mapa (o Y do Vulkan já desce com o v da textura).
+            Mat4 toUv;
+            toUv.col[0] = Vec4{0.5f, 0, 0, 0};
+            toUv.col[1] = Vec4{0, 0.5f, 0, 0};
+            toUv.col[3] = Vec4{0.5f, 0.5f, 0, 1};
+            shadowMatrix = toUv * lightViewProj;
+            for (usize instIndex = 0; instIndex < frame.instances.size(); ++instIndex) {
+                const SceneInstance& inst = frame.instances[instIndex];
+                if (!inst.asset || !inst.castShadows) continue;
+                const GpuModel* gm = model(inst.assetKey, *inst.asset);
+                if (!gm) continue;
+                const std::vector<Node>& nodes = inst.asset->nodes;
+                for (usize n = 0; n < nodes.size(); ++n) {
+                    const i32 mi = nodes[n].mesh;
+                    if (mi < 0 || mi >= static_cast<i32>(gm->meshes.size())) continue;
+                    const i32 skinIndex = nodes[n].skin;
+                    const bool skinnedNode = joints.valid() && skinIndex >= 0
+                                           && skinIndex < static_cast<i32>(inst.skinJointOffset.size()) && gm->skin.valid();
+                    const Mat4 world = skinnedNode ? inst.world
+                                                   : inst.world * (n < inst.nodeWorld.size() ? inst.nodeWorld[n] : Mat4::identity());
+                    for (const GpuPrimitive& p : gm->meshes[mi]) {
+                        const GpuMaterial* mat = p.material >= 0 && p.material < static_cast<i32>(gm->materials.size())
+                                               ? &gm->materials[p.material] : &gm->defaultMaterial;
+                        if (mat->factors.alphaMode == AlphaMode::Blend) continue;   // transparente não projeta
+                        const bool sk = skinnedNode && p.skinned;
+                        auto pipe = shaders_->pipeline(shadow_key(sk));
+                        if (!pipe.ok()) continue;
+                        ShadowDraw sd{};
+                        sd.model = gm;
+                        sd.prim = &p;
+                        sd.push.model = lightViewProj * world;
+                        sd.push.normalCol[0].x = sk ? static_cast<f32>(instJointBase[instIndex]
+                                                                        + inst.skinJointOffset[static_cast<usize>(skinIndex)]) : 0.0f;
+                        sd.pipeline = *pipe;
+                        sd.skinned = sk;
+                        shadowDraws.push_back(sd);
+                    }
+                }
+            }
+        }
+    }
+    const bool shadowsOn = !shadowDraws.empty();
+    header.shadowMatrix = shadowMatrix;
+    header.shadowParams = Vec4{shadowsOn ? 1.0f : 0.0f, 1.0f / static_cast<f32>(shadowSize_), 0.0015f,
+                               static_cast<f32>(shadowLight)};
+    FGTexture shadowTex{};
+    if (shadowsOn) {
+        TextureDesc sd;
+        sd.width = sd.height = shadowSize_;
+        sd.format = SurfaceFormat::Depth32F;
+        sd.sampled = true;
+        sd.renderTarget = true;
+        shadowTex = graph.create_texture("3d-sombra", sd);
+        const u32 n = static_cast<u32>(shadowDraws.size());
+        ShadowDraw* sl = arena.alloc_array<ShadowDraw>(n);
+        if (!sl) return false;
+        std::copy(shadowDraws.begin(), shadowDraws.end(), sl);
+        struct SCap {
+            ShadowDraw* draws;
+            u32 count;
+            BufferHandle joints;
+        } scap{sl, n, joints};
+        graph.add_raster_pass_depth("3d-sombra", PassStage::Scene3D, FGTexture{}, LoadOp::DontCare, Vec4{}, shadowTex,
+                                    LoadOp::Clear, true, 1.0f, [scap](PassContext& pc) {
+            CommandList& c = pc.cmds;
+            PipelineHandle bound{};
+            for (u32 i = 0; i < scap.count; ++i) {
+                const ShadowDraw& d = scap.draws[i];
+                if (!(d.pipeline == bound)) {
+                    c.bind_pipeline(d.pipeline);
+                    bound = d.pipeline;
+                }
+                if (d.skinned) c.bind_storage_buffer(scap.joints);
+                c.bind_vertex_buffer(0, d.model->positions, 0);
+                if (d.skinned) c.bind_vertex_buffer(2, d.model->skin, 0);
+                c.bind_index_buffer(d.model->indices, 0, d.model->indexType);
+                c.push_constants(&d.push, sizeof(MeshPush));
+                c.draw_indexed(d.prim->indexCount, 1, d.prim->firstIndex, d.prim->vertexOffset, 0);
+            }
+        });
+    }
+
     for (usize instIndex = 0; instIndex < frame.instances.size(); ++instIndex) {
         const SceneInstance& inst = frame.instances[instIndex];
         if (!inst.asset) continue;
@@ -736,12 +892,15 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         u64 linearSampler;
         u64 clampSampler;
         BufferHandle joints;
+        FGTexture shadow;
+        u64 nearestSampler;
     } cap{list, total, white_, flatNormal_, ibl ? irradiance_ : envCube_, ibl ? prefiltered_ : envCube_,
           ibl ? iblLut_ : brdfLut_, cubeSampler_, shaders_->sampler(CommonSampler::LinearRepeat).id,
-          shaders_->sampler(CommonSampler::LinearClamp).id, joints};
+          shaders_->sampler(CommonSampler::LinearClamp).id, joints, shadowTex,
+          shaders_->sampler(CommonSampler::NearestClamp).id};
 
     // Z reverso: limpa a profundidade com 0 (o infinito).
-    graph.add_raster_pass_depth("3d-pbr", PassStage::Scene3D, color, LoadOp::Clear, Vec4{0, 0, 0, 0}, depth,
+    const u32 pbrPass = graph.add_raster_pass_depth("3d-pbr", PassStage::Scene3D, color, LoadOp::Clear, Vec4{0, 0, 0, 0}, depth,
                                 LoadOp::Clear, false, 0.0f, [cap](PassContext& pc) {
         CommandList& c = pc.cmds;
         PipelineHandle bound{};
@@ -764,6 +923,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 c.bind_texture(5, cap.irradiance, cap.cubeSampler);
                 c.bind_texture(6, cap.prefiltered, cap.cubeSampler);
                 c.bind_texture(7, cap.brdf, SamplerHandle{cap.clampSampler});
+                c.bind_texture(8, cap.shadow.valid() ? pc.texture(cap.shadow) : cap.white, SamplerHandle{cap.nearestSampler});
                 boundMat = d.material;
             }
             if (d.skinned) c.bind_storage_buffer(cap.joints);
@@ -779,6 +939,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             c.draw_indexed(d.prim->indexCount, 1, d.prim->firstIndex, d.prim->vertexOffset, 0);
         }
     });
+    if (shadowTex.valid()) graph.read(pbrPass, shadowTex);
     outColor = color;
     return true;
 }

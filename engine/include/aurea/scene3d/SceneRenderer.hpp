@@ -73,6 +73,9 @@ struct SceneLight {
     f32  intensity = 1.0f;            ///< já em unidades do mundo do Aurea
     f32  range = 0.0f;
     f32  innerCone = 0.0f, outerCone = 0.7853982f;
+    /// Só a primeira DIRECIONAL com sombra projeta (mapa ortográfico ajustado
+    /// aos modelos do grupo).
+    bool castShadows = false;
 };
 
 /// Uma layer de modelo no frame.
@@ -170,6 +173,8 @@ private:
     };
 
     [[nodiscard]] PipelineKey key_for(AlphaMode mode, bool doubleSided, bool skinned) const noexcept;
+    [[nodiscard]] PipelineKey shadow_key(bool skinned) const noexcept;
+    u32 shadowSize_ = 2048;
 
     GPUBackend* gpu_ = nullptr;
     ShaderLibrary* shaders_ = nullptr;

@@ -542,6 +542,7 @@ void Renderer::fill_scene_context(const Composition& comp, FrameIndex time, Fram
             s.range = l->light.range;
             s.outerCone = l->light.coneAngle * 0.5f * kDeg2Rad;
             s.innerCone = s.outerCone * (1.0f - std::clamp(l->light.penumbra, 0.0f, 1.0f));
+            s.castShadows = l->light.castShadows;
             lights.push_back(s);
         }
     }
@@ -553,6 +554,7 @@ void Renderer::fill_scene_context(const Composition& comp, FrameIndex time, Fram
         key.direction = Vec3{0.45f, 1.0f, 0.75f}.normalized();
         key.color = Vec3{1.0f, 0.97f, 0.92f};
         key.intensity = 1.2f;   // o ambiente de estúdio já tem a caixa de luz principal
+        key.castShadows = true;
         lights.push_back(key);
     }
     for (scene3d::SceneFrame& f : out.scenes) {

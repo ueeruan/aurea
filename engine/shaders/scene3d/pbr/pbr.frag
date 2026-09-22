@@ -33,6 +33,33 @@ layout(set = 0, binding = TEX_EMISSIVE) uniform sampler2D t_emissive;
 layout(set = 0, binding = TEX_IRRADIANCE) uniform samplerCube t_irradiance;
 layout(set = 0, binding = TEX_PREFILTER) uniform samplerCube t_prefilter;
 layout(set = 0, binding = TEX_BRDF) uniform sampler2D t_brdf;
+layout(set = 0, binding = TEX_SHADOW) uniform sampler2D t_shadow;
+
+// Sombra da luz principal: PCF 5×5 com peso bilinear nas bordas do texel
+// (sem a escada do PCF de amostra única). 1 = iluminado, 0 = na sombra.
+float shadow_factor(vec3 world, float NdotL) {
+    if (u.shadowParams.x < 0.5) return 1.0;
+    vec4 sc = u.shadowMatrix * vec4(world, 1.0);
+    vec3 p = sc.xyz / sc.w;
+    if (p.x <= 0.0 || p.x >= 1.0 || p.y <= 0.0 || p.y >= 1.0 || p.z >= 1.0) return 1.0;
+    float texel = u.shadowParams.y;
+    // Viés maior em superfície rasante (onde a acne aparece primeiro).
+    float bias = u.shadowParams.z * (1.0 + 3.0 * (1.0 - clamp(NdotL, 0.0, 1.0)));
+    vec2 base = p.xy / texel - 0.5;
+    vec2 f = fract(base);
+    vec2 origin = (floor(base) + 0.5) * texel;
+    float lit = 0.0;
+    for (int y = -2; y <= 3; ++y) {
+        for (int x = -2; x <= 3; ++x) {
+            float d = texture(t_shadow, origin + vec2(x, y) * texel).r;
+            float s = (p.z - bias) <= d ? 1.0 : 0.0;
+            float wx = x == -2 ? 1.0 - f.x : (x == 3 ? f.x : 1.0);
+            float wy = y == -2 ? 1.0 - f.y : (y == 3 ? f.y : 1.0);
+            lit += s * wx * wy;
+        }
+    }
+    return lit / 25.0;
+}
 
 vec2 uv_for(int slot) {
     int set = slot < 4 ? u.uvSet0[slot] : u.uvSet1.x;
@@ -200,7 +227,8 @@ void main() {
         vec3 F = F_Schlick(f0, VdotH);
         vec3 spec = F * (D_GGX(NdotH, a) * V_SmithGGXCorrelated(NdotV, NdotL, a));
         vec3 diff = (1.0 - F) * diffuseColor / PI;
-        color += (diff + spec) * u.lightColor[i].rgb * (NdotL * atten);
+        float sh = i == int(u.shadowParams.w + 0.5) ? shadow_factor(v_world, NdotL) : 1.0;
+        color += (diff + spec) * u.lightColor[i].rgb * (NdotL * atten * sh);
     }
 
     // --- Ambiente --------------------------------------------------------------

@@ -115,7 +115,7 @@ internal fun SettingsTab(store: EditorStore, vm: HomeViewModel, listState: LazyL
             Group {
                 SwitchRow("Vibracao ao interagir", null, checked = true) { soon("Vibração") }
                 GroupDivider()
-                TapRow("Limpar cache", "Remove arquivos temporarios de preview e render") { soon("Limpar cache") }
+                TapRow("Limpar cache", "Remove arquivos temporarios de preview e render") { store.clearCache() }
             }
         }
     }

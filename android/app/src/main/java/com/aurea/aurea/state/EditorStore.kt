@@ -395,6 +395,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (status.modelRevision != lastRevision) {
             lastRevision = status.modelRevision
             lastPlayhead = playhead
+            lastModelChangeNs = System.nanoTime()
             refreshModel()
         } else if (playhead != lastPlayhead) {
             // Só o detalhe depende do playhead (valor animado, keyframe aqui).
@@ -402,11 +403,44 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             refreshDetail()
             refreshEffectParams()
         }
+        autosaveIfIdle()
+    }
+
+    // --- Autosave -------------------------------------------------------------
+    //
+    //  A A.01 só gravava ao ir para segundo plano; um processo morto em
+    //  primeiro plano (queda, reinstalação, o sistema matando) perdia tudo
+    //  desde a última gravação. O journal do motor ainda não está ligado, então
+    //  o store grava o projeto quando ele está SUJO e PARADO: nenhum gesto
+    //  aberto, sem tocar, sem scrub, [AUTOSAVE_IDLE_NS] depois da última
+    //  mudança. Sem miniatura (é a parte cara); ela sai ao fechar e ao ir
+    //  para segundo plano.
+    private var lastModelChangeNs = 0L
+    private var autosaving = false
+
+    private fun autosaveIfIdle() {
+        if (!status.dirty || autosaving || playing || scrubbing || gestureDepth > 0) return
+        if (System.nanoTime() - lastModelChangeNs < AUTOSAVE_IDLE_NS) return
+        val path = project.path ?: return
+        if (layers.isEmpty()) return
+        autosaving = true
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { saveBlocking(path, withThumbnail = false) }
+            autosaving = false
+        }
     }
 
     /** Relê tudo o que depende do modelo. Barato: dezenas de linhas POD. */
     private fun refreshModel() {
         layers = readLayers()
+        selectCreatedAfter?.let { before ->
+            val created = layers.map { it.id }.filter { it !in before }
+            if (created.isNotEmpty()) {
+                selectCreatedAfter = null
+                selection = LinkedHashSet(created)
+                engine.setSelection(selection.toLongArray())
+            }
+        }
         val alive = layers.map { it.id }.toSet()
         if (!alive.containsAll(selection)) {
             selection = selection.filter { it in alive }.toCollection(LinkedHashSet())
@@ -479,11 +513,18 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * Um gesto contínuo (arrasto, slider) = UM passo de desfazer. Abra no
      * começo do gesto e feche no fim; tudo que for enviado no meio desfaz junto.
      */
-    fun beginGesture(label: String) = send { beginUndoGroup(label) }
+    fun beginGesture(label: String) {
+        gestureDepth++
+        send { beginUndoGroup(label) }
+    }
     fun endGesture() {
+        gestureDepth = max(0, gestureDepth - 1)
         send { endUndoGroup() }
         refreshNow()
     }
+
+    /** Gestos abertos (arrasto, slider, folha de cor): o autosave espera fechar. */
+    private var gestureDepth = 0
 
     /** Várias ações como UM passo de desfazer (ex.: apagar 3 camadas). */
     private inline fun group(label: String, block: CommandBatch.() -> Unit) {
@@ -550,8 +591,18 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     fun duplicateLayers(ids: Collection<Long> = selection) {
         if (ids.isEmpty()) return
+        selectCreatedAfter = layers.map { it.id }.toSet()
         group("duplicar") { ids.forEach { duplicateLayer(it) } }
     }
+
+    /**
+     * Ids que existiam antes de um comando que CRIA camadas (duplicar). O
+     * comando é assíncrono; quando o modelo novo chega, as camadas que
+     * surgiram viram a seleção — a cópia fica escolhida, como na A.01
+     * (`duplicateLayer` selecionava a cópia). Sem isto a lixeira logo depois
+     * apagava o ORIGINAL.
+     */
+    private var selectCreatedAfter: Set<Long>? = null
 
     fun renameLayer(layer: Long, name: String) {
         send { setLayerName(layer, name) }
@@ -1054,12 +1105,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     /** Salva projeto, miniatura e o sidecar que a Home lê. */
-    private fun saveBlocking(path: String): Int {
+    private fun saveBlocking(path: String, withThumbnail: Boolean = true): Int {
         val code = engine.saveProject(path)
         if (code != 0) return code
         val file = File(path)
         val thumbFile = File(directories().thumbs, file.nameWithoutExtension + ".jpg")
-        writeThumbnail(thumbFile)
+        if (withThumbnail || !thumbFile.exists()) writeThumbnail(thumbFile)
         val meta = JSONObject()
             .put("title", project.title)
             .put("width", project.width)
@@ -1257,6 +1308,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         const val MAX_LAYERS = 512
         const val MAX_KEYS = 4096
         const val THUMB_MAX = 512
+        /** Silêncio depois da última mudança antes do autosave. */
+        const val AUTOSAVE_IDLE_NS = 3_000_000_000L
         const val META_SUFFIX = ".meta.json"
         /** `kInvalidIndex` do C++: keyframe que não é de efeito. */
         const val NO_EFFECT = -1

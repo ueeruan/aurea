@@ -1407,7 +1407,6 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         case CommandType::LayerDelete: {
             if (!comp) return Errc::InvalidState;
             if (!need_layer(cmd.layer_ref.layer)) return Errc::NotFound;
-            if (recordUndo) AUREA_LOG_WARN("undo de remocao de camada ainda sem payload");
             media_.close_layer(cmd.layer_ref.layer);
             comp->remove_layer(cmd.layer_ref.layer);
             selection_.erase(std::remove(selection_.begin(), selection_.end(), cmd.layer_ref.layer.pack()),

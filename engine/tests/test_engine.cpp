@@ -694,6 +694,50 @@ AUREA_TEST(History, SplitAndEffectAreUndoable) {
     e.shutdown();
 }
 
+AUREA_TEST(History, DeleteAndFpsChangeAreUndoable) {
+    Engine e;
+    AUREA_CHECK(e.initialize(headless_config()).ok());
+    AUREA_CHECK(e.new_project(1280, 720, 30.0, nullptr).ok());
+    Command create;
+    create.type = CommandType::LayerCreate;
+    create.layer_create.kind = LayerKind::Shape;
+    AUREA_CHECK(e.apply_command(create).ok());
+    const LayerId id = first_layer(e);
+    AUREA_CHECK(e.apply_command(position_cmd(id, 123, 45)).ok());
+    Command range;
+    range.type = CommandType::LayerSetTimeRange;
+    range.layer_range.layer = id;
+    range.layer_range.start = FrameIndex{0};
+    range.layer_range.end = FrameIndex{90};
+    AUREA_CHECK(e.apply_command(range).ok());
+
+    // Apagar e desfazer: volta com o MESMO id e o mesmo estado.
+    Command del;
+    del.type = CommandType::LayerDelete;
+    del.layer_ref.layer = id;
+    AUREA_CHECK(e.apply_command(del).ok());
+    AUREA_CHECK(layer_of(e, id) == nullptr);
+    Command undo;
+    undo.type = CommandType::Undo;
+    AUREA_CHECK(e.apply_command(undo).ok());
+    AUREA_CHECK(layer_of(e, id) != nullptr);
+    AUREA_CHECK_NEAR(layer_of(e, id)->transform.position.x, 123.0f, 1e-6f);
+
+    // 30 -> 60 fps preserva os segundos; desfazer volta a taxa E os frames.
+    Command fps;
+    fps.type = CommandType::CompositionSetFps;
+    fps.comp_fps.comp = e.project()->timeline().current();
+    fps.comp_fps.fps = 60.0;
+    AUREA_CHECK(e.apply_command(fps).ok());
+    AUREA_CHECK_EQ(layer_of(e, id)->end.value, static_cast<i64>(180));
+    AUREA_CHECK_EQ(e.read_status().compFps, 60.0f);
+    AUREA_CHECK(e.apply_command(undo).ok());
+    AUREA_CHECK_EQ(layer_of(e, id)->end.value, static_cast<i64>(90));
+    const Composition* c = e.project()->timeline().composition(e.project()->timeline().current());
+    AUREA_CHECK_EQ(c->fps(), 30.0);
+    e.shutdown();
+}
+
 AUREA_TEST(History, TrimStartKeepsContentWithOffset) {
     Engine e;
     AUREA_CHECK(e.initialize(headless_config()).ok());

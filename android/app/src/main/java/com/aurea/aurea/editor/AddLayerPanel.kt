@@ -301,7 +301,7 @@ private fun MediaTab(store: EditorStore, close: () -> Unit) {
             close()
         }
     }
-    Row(Modifier.fillMaxWidth().padding(6.dp), verticalAlignment = Alignment.Top) {
+    Row(Modifier.fillMaxWidth().padding(6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.Top) {
         AddOption(CupertinoGlyph.PhotoOnRectangle, "Galeria") {
             picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
         }
@@ -311,25 +311,27 @@ private fun MediaTab(store: EditorStore, close: () -> Unit) {
         AddOption(CupertinoGlyph.Videocam, "Vídeos do sistema") {
             picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
         }
-        Spacer(Modifier.weight(4f))
     }
 }
 
 @Composable
 private fun AudioTab(store: EditorStore) {
-    Row(Modifier.fillMaxWidth().padding(6.dp), verticalAlignment = Alignment.Top) {
+    Row(Modifier.fillMaxWidth().padding(6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.Top) {
         AddOption(CupertinoGlyph.MusicNote, "Arquivo de áudio") { store.comingSoon("Áudio") }
         AddOption(CupertinoGlyph.Film, "Extrair de vídeo") { store.comingSoon("Áudio de um vídeo") }
-        Spacer(Modifier.weight(5f))
     }
 }
 
-/** Bloco 60 × 60 (#212D3A, raio 18, ícone 28 em destaque) com rótulo 12. */
+/**
+ * Bloco 60 × 60 (#212D3A, raio 18, ícone 28 em destaque) com rótulo 12 em até
+ * duas linhas. Largura FIXA de 84: com peso, três blocos + espaçador davam
+ * 47 dp por bloco de 60 — os quadrados se tocavam e o rótulo cortava.
+ */
 @Composable
-private fun RowScope.AddOption(glyph: Char, label: String, onClick: () -> Unit) {
+private fun AddOption(glyph: Char, label: String, onClick: () -> Unit) {
     Column(
         Modifier
-            .weight(1f)
+            .width(84.dp)
             .semantics { contentDescription = label }
             .tocavel(onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -343,10 +345,10 @@ private fun RowScope.AddOption(glyph: Char, label: String, onClick: () -> Unit) 
         Spacer(Modifier.height(6.dp))
         Text(
             label,
-            maxLines = 1,
+            maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
-            style = AureaType.Base.merge(TextStyle(fontSize = 12.sp)),
+            style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 14.sp)),
         )
     }
 }

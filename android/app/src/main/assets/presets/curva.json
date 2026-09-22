@@ -1,0 +1,8 @@
+[
+  {"aurea_preset": 1, "kind": "curve", "name": "Suave (cúbica)", "curve": {"interp": 2, "x1": 0.65, "y1": 0, "x2": 0.35, "y2": 1}},
+  {"aurea_preset": 1, "kind": "curve", "name": "In-out forte", "curve": {"interp": 2, "x1": 0.83, "y1": 0, "x2": 0.17, "y2": 1}},
+  {"aurea_preset": 1, "kind": "curve", "name": "Saída exponencial", "curve": {"interp": 2, "x1": 0.16, "y1": 1, "x2": 0.3, "y2": 1}},
+  {"aurea_preset": 1, "kind": "curve", "name": "Entrada exponencial", "curve": {"interp": 2, "x1": 0.7, "y1": 0, "x2": 0.84, "y2": 0}},
+  {"aurea_preset": 1, "kind": "curve", "name": "Saída com recuo", "curve": {"interp": 2, "x1": 0.34, "y1": 1.56, "x2": 0.64, "y2": 1}},
+  {"aurea_preset": 1, "kind": "curve", "name": "Entrada com recuo", "curve": {"interp": 2, "x1": 0.36, "y1": 0, "x2": 0.66, "y2": -0.56}}
+]

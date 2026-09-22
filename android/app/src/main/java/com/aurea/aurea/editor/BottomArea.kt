@@ -97,6 +97,7 @@ private enum class DockSection(val glyph: Char, val label: String, val badge: St
     Echo(CupertinoGlyph.SquareStack3dDownRight, "Eco e rastro"),
     Effects(CupertinoGlyph.Sparkles, "Efeitos"),
     Captions(CupertinoGlyph.Textformat, "Legendas"),
+    Presets(CupertinoGlyph.WandStars, "Presets"),
 }
 
 /**
@@ -105,9 +106,9 @@ private enum class DockSection(val glyph: Char, val label: String, val badge: St
  * cor.
  */
 private fun sectionsFor(type: LayerType): List<DockSection> = when (type) {
-    LayerType.Audio -> listOf(DockSection.Volume, DockSection.Captions, DockSection.Effects)
-    LayerType.Null -> listOf(DockSection.Move, DockSection.Clone)
-    LayerType.Camera -> listOf(DockSection.Move, DockSection.Camera)
+    LayerType.Audio -> listOf(DockSection.Volume, DockSection.Captions, DockSection.Effects, DockSection.Presets)
+    LayerType.Null -> listOf(DockSection.Move, DockSection.Clone, DockSection.Presets)
+    LayerType.Camera -> listOf(DockSection.Move, DockSection.Camera, DockSection.Presets)
     else -> buildList {
         add(DockSection.Move)
         if (type == LayerType.Shape || type == LayerType.Text || type == LayerType.Model3D) add(DockSection.ColorFill)
@@ -123,6 +124,7 @@ private fun sectionsFor(type: LayerType): List<DockSection> = when (type) {
         add(DockSection.Transitions)
         add(DockSection.Echo)
         add(DockSection.Effects)
+        add(DockSection.Presets)
     }
 }
 
@@ -230,6 +232,7 @@ private fun onSection(store: EditorStore, ui: EditorUi, s: DockSection) {
         DockSection.Element3D -> openPanel(store, ui, EditorPanel.Element3D)
         DockSection.Echo -> openPanel(store, ui, EditorPanel.Echo)
         DockSection.Captions -> openPanel(store, ui, EditorPanel.Captions)
+        DockSection.Presets -> openPanel(store, ui, EditorPanel.Presets)
         DockSection.ColorFill, DockSection.EditShape, DockSection.EditText -> when (store.detail?.kind) {
             com.aurea.aurea.ui.theme.LayerType.Shape.kind -> openPanel(store, ui, EditorPanel.Shape)
             com.aurea.aurea.ui.theme.LayerType.Text.kind -> openPanel(store, ui, EditorPanel.Text)

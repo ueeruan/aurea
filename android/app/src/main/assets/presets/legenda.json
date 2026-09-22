@@ -1,0 +1,8 @@
+[
+  {"aurea_preset": 1, "kind": "caption", "name": "Viral (uma palavra)", "caption": {"mode": 1, "maxWords": 1, "style": 5, "highlight": true,
+    "uppercase": true, "posY": 0.5, "sizeFrac": 0.09, "removeFillers": true}},
+  {"aurea_preset": 1, "kind": "caption", "name": "Karaokê clássico", "caption": {"mode": 0, "maxWords": 4, "maxLines": 2, "style": 4,
+    "highlight": true, "posY": 0.78, "sizeFrac": 0.065}},
+  {"aurea_preset": 1, "kind": "caption", "name": "Discreta", "caption": {"mode": 0, "maxWords": 6, "maxChars": 32, "maxLines": 2, "style": 0,
+    "highlight": false, "posY": 0.85, "sizeFrac": 0.045}}
+]

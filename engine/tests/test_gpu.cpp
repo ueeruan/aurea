@@ -3388,3 +3388,57 @@ AUREA_TEST(Gpu, SoloIsolatesLayersInPreviewOnly) {
     s.comp->layer(bottom)->visible = false;
     AUREA_CHECK(near4(s.render().v(16, 16), Vec4{1, 0, 0, 1}, 0.004f));
 }
+
+// Preset de efeitos (Fase 7F): a camada que recebe o preset renderiza IGUAL à
+// camada de onde ele saiu — parâmetros, keyframes (no tempo relativo) e a
+// ordem da pilha fazem a ida e volta pelo JSON sem perda.
+AUREA_TEST(Gpu, EffectsPresetRendersLikeTheSourceLayer) {
+    AUREA_REQUIRE_GPU();
+    auto seek = [](Engine& e, i64 f) {
+        Command s;
+        s.type = CommandType::PlaybackSeek;
+        s.seek.time = tick_at(FrameIndex{f}, 30.0);
+        AUREA_CHECK(e.apply_command(s).ok());
+    };
+    auto add_fx = [](Engine& e, u64 layer, const char* key) {
+        Command fx;
+        fx.type = CommandType::EffectAdd;
+        fx.effect_add.layer = LayerId::unpack(layer);
+        fx.effect_add.effectType = effect_type_id(key);
+        fx.effect_add.index = kInvalidIndex;
+        AUREA_CHECK(e.apply_command(fx).ok());
+    };
+    auto layer_of = [](Engine& e, u64 id) {
+        Timeline& tl = e.project()->timeline();
+        return tl.composition(tl.current())->layer(LayerId::unpack(id));
+    };
+    std::string js;
+    Image8 source;
+    {
+        Scene3DRig rig(384, 216);
+        const u64 s = *rig.e.add_shape(0);
+        add_fx(rig.e, s, effect_keys::kGaussianBlur);
+        add_fx(rig.e, s, effect_keys::kTint);
+        Layer* l = layer_of(rig.e, s);
+        l->shape.fillColor = Vec4{0.9f, 0.8f, 0.2f, 1.0f};
+        // Raio animado de 0 a 12 entre os quadros 0 e 20; no 10 vale ~6.
+        Track& t = l->tracks.get_or_create(TrackProperty::EffectParam, l->effects[0].id, param_track_key(0, 0));
+        t.set(l->local_time(FrameIndex{0}), 0.0f, Interpolation::Linear);
+        t.set(l->local_time(FrameIndex{20}), 12.0f, Interpolation::Linear);
+        seek(rig.e, 10);
+        source = rig.capture(384);
+        js = rig.e.save_preset(s, presets::PresetKind::Effects, "Desfoque animado");
+    }
+    AUREA_CHECK(!js.empty());
+    Scene3DRig rig(384, 216);
+    const u64 s = *rig.e.add_shape(0);
+    layer_of(rig.e, s)->shape.fillColor = Vec4{0.9f, 0.8f, 0.2f, 1.0f};
+    seek(rig.e, 10);
+    const Image8 plain = rig.capture(384);
+    AUREA_CHECK(rig.e.apply_preset(s, js));
+    const Image8 applied = rig.capture(384);
+    const u32 before = max_diff(source, plain), after = max_diff(source, applied);
+    std::printf("    preset de efeitos: dif sem preset %u, com preset %u\n", before, after);
+    AUREA_CHECK(before > 20);   // os efeitos mudam a imagem de verdade
+    AUREA_CHECK(after <= 1);    // e o preset reproduz a origem
+}

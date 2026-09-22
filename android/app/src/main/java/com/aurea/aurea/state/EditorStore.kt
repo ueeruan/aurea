@@ -10,6 +10,7 @@ import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.provider.OpenableColumns
+import android.util.Log
 import android.view.Display
 import android.view.Surface
 import androidx.compose.runtime.getValue
@@ -124,6 +125,53 @@ data class PreviewState(
 
 /** `aurea::Errc::UnsupportedFormat` (core/Result.hpp). */
 private const val ERRC_UNSUPPORTED_FORMAT = 17L
+/** `aurea::Errc::IoError` / `StorageFull` (TEMP_STORAGE_FULL). */
+private const val ERRC_IO = 10
+private const val ERRC_STORAGE_FULL = 28
+
+private const val TAG = "AureaStore"
+
+/**
+ * Mensagem para humanos de um `aurea::Errc` (core/Result.hpp; os números têm
+ * static_assert lá). Os códigos padronizados da Fase 8 (§115) — GPU sem
+ * memória, decoder, encoder, mídia/projeto corrompido, armazenamento cheio —
+ * dizem o que aconteceu e o que fazer; nenhum mostra só "erro 28".
+ */
+fun humanError(code: Int): String = when (code) {
+    0 -> "Concluído."
+    3 -> "Arquivo não encontrado."
+    6, 24 -> "Recurso não suportado neste aparelho."
+    8, 9 -> "Memória insuficiente. Feche outros apps e tente de novo."
+    10 -> "Erro ao ler ou gravar o arquivo."
+    11, 13 -> "O arquivo está danificado."
+    12 -> "Este projeto foi salvo por uma versão mais nova do Aurea. Atualize o app para abri-lo."
+    14 -> "Não foi possível decodificar a mídia (DECODER_FAILED)."
+    15 -> "Falha ao codificar o vídeo."
+    16 -> "Codec de vídeo não suportado por este aparelho."
+    17 -> "Formato de arquivo não suportado."
+    18 -> "A mídia original não está mais no aparelho."
+    19 -> "A GPU foi reiniciada. Tente de novo."
+    20 -> "Memória de vídeo (GPU) insuficiente. Baixe a qualidade do preview ou feche outros apps."
+    25 -> "Cancelado."
+    28 -> "Sem espaço no aparelho. Libere espaço e tente de novo — o que já estava salvo continua intacto."
+    29 -> "O arquivo de mídia está danificado ou incompleto."
+    30 -> "O projeto está danificado e não há cópia válida para recuperar."
+    31 -> "Este aparelho não tem codificador para essa configuração de exportação."
+    else -> "Erro inesperado (código $code)."
+}
+
+/** Grava texto atomicamente: temporário → sync → rename (o sidecar nunca fica pela metade). */
+private fun writeTextAtomic(target: File, text: String) {
+    val tmp = File(target.path + ".tmp")
+    FileOutputStream(tmp).use { out ->
+        out.write(text.toByteArray(Charsets.UTF_8))
+        out.fd.sync()
+    }
+    if (!tmp.renameTo(target)) {
+        tmp.delete()
+        throw java.io.IOException("rename falhou: ${target.name}")
+    }
+}
 /** Floats do cabeçalho de cada máscara em Engine::query_masks (kMaskHeaderFloats). */
 private const val MASK_HEADER = 12
 
@@ -418,8 +466,18 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     fun onEnterBackground() {
         stopStatusLoop()
-        saveIfDirty()
-        lifecycleThread.execute { synchronized(lifecycleLock) { if (ready) engine.suspend() } }
+        // A gravação sai da main (antes travava a UI no onStop pelo tempo do
+        // encode + fsync + miniatura) e vai para a thread de ciclo de vida,
+        // ANTES do suspend na mesma fila: o motor ainda está de pé quando grava.
+        val path = if (screen == Screen.Editor && project.dirty) project.path else null
+        lifecycleThread.execute {
+            if (path != null) {
+                val t0 = System.nanoTime()
+                val code = saveBlocking(path)
+                Log.i(TAG, "gravacao ao ir para segundo plano: codigo $code, ${(System.nanoTime() - t0) / 1_000_000} ms fora da main")
+            }
+            synchronized(lifecycleLock) { if (ready) engine.suspend() }
+        }
     }
 
     fun shutdown() {
@@ -539,16 +597,30 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     //  para segundo plano.
     private var lastModelChangeNs = 0L
     private var autosaving = false
+    /** Última falha do autosave (código Errc); a mesma não é avisada de novo a cada tentativa. */
+    private var lastAutosaveError = 0
+    /** Depois de uma falha, espera mais antes de tentar de novo (disco cheio não some em 3 s). */
+    private var autosaveRetryAfterNs = 0L
 
     private fun autosaveIfIdle() {
         if (!status.dirty || autosaving || playing || scrubbing || gestureDepth > 0) return
-        if (System.nanoTime() - lastModelChangeNs < AUTOSAVE_IDLE_NS) return
+        val now = System.nanoTime()
+        if (now - lastModelChangeNs < AUTOSAVE_IDLE_NS || now < autosaveRetryAfterNs) return
         val path = project.path ?: return
         if (layers.isEmpty()) return
         autosaving = true
         viewModelScope.launch {
-            withContext(Dispatchers.IO) { saveBlocking(path, withThumbnail = false) }
+            // Tudo fora da main: o motor copia o modelo sob o lock (encode, ms) e
+            // grava sem ele (fsync). A main só dispara e recebe o código.
+            val code = withContext(Dispatchers.IO) { saveBlocking(path, withThumbnail = false) }
             autosaving = false
+            if (code != 0) {
+                autosaveRetryAfterNs = System.nanoTime() + AUTOSAVE_RETRY_NS
+                if (code != lastAutosaveError) errorMessage = "Salvamento automático falhou: ${humanError(code)}"
+            } else {
+                autosaveRetryAfterNs = 0L
+            }
+            lastAutosaveError = code
         }
     }
 
@@ -1523,7 +1595,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             val id = withContext(Dispatchers.IO) { engine.importVideo(uri.toString(), name) }
             busyMessage = null
             if (id < 0) {
-                errorMessage = "Não foi possível importar o vídeo (erro ${-id})."
+                errorMessage = "Não foi possível importar o vídeo. ${humanError((-id).toInt())}"
                 return@launch
             }
             refreshNow()
@@ -1547,7 +1619,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 errorMessage = if (-id == ERRC_UNSUPPORTED_FORMAT) {
                     "Esse arquivo não tem som que este aparelho consiga ler."
                 } else {
-                    "Não foi possível importar o áudio (erro ${-id})."
+                    "Não foi possível importar o áudio. ${humanError((-id).toInt())}"
                 }
                 return@launch
             }
@@ -2542,6 +2614,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (dst.exists()) tmp.delete() else tmp.renameTo(dst)
         dst
     } catch (e: Exception) {
+        // Temporário tem dono (§52): a cópia pela metade sai; o motivo fica no log (sem a URI).
+        Log.w(TAG, "copia para o app falhou ($sub): ${e.javaClass.simpleName}: ${e.message}")
+        File(File(File(getApplication<Application>().filesDir, "projetos"), sub), "importando.$ext").delete()
         null
     }
 
@@ -3021,7 +3096,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             busyMessage = null
             when {
                 id == -1_000L -> errorMessage = "Não consegui ler esse arquivo."
-                id < 0 -> errorMessage = "Não deu para importar o modelo: ${detail[0]?.trim()?.ifBlank { null } ?: "erro ${-id}"}."
+                id < 0 -> errorMessage = "Não deu para importar o modelo: ${detail[0]?.trim()?.ifBlank { null } ?: humanError((-id).toInt())}"
                 else -> {
                     refreshNow()
                     select(id)
@@ -3052,6 +3127,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (dst.exists()) tmp.delete() else tmp.renameTo(dst)
         dst
     } catch (e: Exception) {
+        // Temporário tem dono (§52): a cópia pela metade (disco cheio, stream cortado) sai.
+        Log.w(TAG, "copia do modelo 3D para o app falhou: ${e.javaClass.simpleName}: ${e.message}")
+        File(File(getApplication<Application>().filesDir, "modelos"), "importando.$ext").delete()
         null
     }
 
@@ -3118,12 +3196,26 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val code = withContext(Dispatchers.Default) { engine.loadProject(path) }
             if (code != 0) {
-                errorMessage = "Falha ao abrir o projeto (código $code)."
+                Log.w(TAG, "abrir projeto falhou: codigo $code")
+                errorMessage = "Não foi possível abrir o projeto. ${humanError(code)}"
                 return@launch
             }
             val meta = readMeta(File(path))
             project = ProjectState(title = meta?.title ?: File(path).nameWithoutExtension, path = path)
             enterEditor()
+            // O que a abertura precisou fazer vira aviso, não silêncio (§55, §120, §124).
+            val notice = engine.loadNotice()
+            val missing = notice ushr 16
+            val parts = buildList {
+                if (notice and 1 != 0) add("o arquivo principal estava danificado; abrimos a última cópia válida")
+                if (notice and 2 != 0) add("o projeto abriu com partes faltando (o arquivo original foi guardado)")
+                if (notice and 4 != 0) add("projeto de versão anterior: uma cópia do original foi guardada")
+                if (notice and 8 != 0) add("$missing mídia(s)/fonte(s)/modelo(s) não encontrada(s) — o espaço fica marcado para religar")
+            }
+            if (parts.isNotEmpty()) {
+                Log.w(TAG, "abertura com avisos: 0x${Integer.toHexString(notice)}")
+                errorMessage = parts.joinToString(";\n", postfix = ".").replaceFirstChar { it.uppercase() }
+            }
         }
     }
 
@@ -3141,7 +3233,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val path = project.path ?: return
         viewModelScope.launch {
             val code = withContext(Dispatchers.IO) { saveBlocking(path) }
-            if (code != 0) errorMessage = "Falha ao salvar (código $code)."
+            if (code != 0) errorMessage = "Não foi possível salvar. ${humanError(code)}"
             onDone?.invoke()
         }
     }
@@ -3149,25 +3241,42 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** Salva projeto, miniatura e o sidecar que a Home lê. */
     private fun saveBlocking(path: String, withThumbnail: Boolean = true): Int {
         val code = engine.saveProject(path)
-        if (code != 0) return code
+        if (code != 0) {
+            Log.w(TAG, "salvar projeto falhou: codigo $code (o arquivo anterior segue intacto)")
+            return code
+        }
         val file = File(path)
         val thumbFile = File(directories().thumbs, file.nameWithoutExtension + ".jpg")
-        if (withThumbnail || !thumbFile.exists()) writeThumbnail(thumbFile)
-        val meta = JSONObject()
-            .put("title", project.title)
-            .put("width", project.width)
-            .put("height", project.height)
-            .put("fps", project.fps.toDouble())
-            .put("durationFrames", project.durationFrames)
-            .put("thumbnail", thumbFile.absolutePath)
-        File(path + META_SUFFIX).writeText(meta.toString())
+        // Miniatura e sidecar são derivados: falhar neles (disco cheio) não
+        // desfaz o projeto já gravado, mas fica no log e o autosave tenta de novo.
+        try {
+            if (withThumbnail || !thumbFile.exists()) writeThumbnail(thumbFile)
+            val meta = JSONObject()
+                .put("title", project.title)
+                .put("width", project.width)
+                .put("height", project.height)
+                .put("fps", project.fps.toDouble())
+                .put("durationFrames", project.durationFrames)
+                .put("thumbnail", thumbFile.absolutePath)
+            writeTextAtomic(File(path + META_SUFFIX), meta.toString())
+        } catch (e: java.io.IOException) {
+            Log.w(TAG, "miniatura/sidecar do projeto nao gravados: ${e.message}")
+            return if (e.message?.contains("ENOSPC") == true) ERRC_STORAGE_FULL else ERRC_IO
+        }
         return 0
     }
 
     private fun writeThumbnail(target: File) {
         val bmp = captureBitmap(THUMB_MAX) ?: return
-        FileOutputStream(target).use { bmp.compress(Bitmap.CompressFormat.JPEG, 85, it) }
-        bmp.recycle()
+        // Temporário → rename: uma miniatura cortada pela metade não vira a capa do projeto.
+        val tmp = File(target.path + ".tmp")
+        try {
+            FileOutputStream(tmp).use { bmp.compress(Bitmap.CompressFormat.JPEG, 85, it) }
+            if (!tmp.renameTo(target)) throw java.io.IOException("rename da miniatura falhou")
+        } finally {
+            tmp.delete()
+            bmp.recycle()
+        }
     }
 
     /** O quadro do cabeçote renderizado pelo motor (lado maior ≤ `maxDim`). */
@@ -3228,10 +3337,16 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             val metaFile = File(path + META_SUFFIX)
             val j = try {
                 if (metaFile.exists()) JSONObject(metaFile.readText()) else JSONObject()
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                Log.w(TAG, "sidecar ilegivel ao renomear (refeito so com o titulo): ${e.message}")
                 JSONObject()
             }
-            metaFile.writeText(j.put("title", clean).toString())
+            try {
+                writeTextAtomic(metaFile, j.put("title", clean).toString())
+            } catch (e: java.io.IOException) {
+                Log.w(TAG, "renomear projeto: sidecar nao gravado: ${e.message}")
+                withContext(Dispatchers.Main) { errorMessage = "Não foi possível renomear. ${humanError(ERRC_IO)}" }
+            }
             withContext(Dispatchers.Main) { refreshProjects() }
         }
     }
@@ -3243,6 +3358,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 File(directories().thumbs, f.nameWithoutExtension + ".jpg").delete()
                 File(p + META_SUFFIX).delete()
                 f.delete()
+                // Arquivos de recuperação do motor: .bak, .tmp, .corrompido, .vN.bak.
+                f.parentFile?.listFiles { s -> s.name.startsWith(f.name + ".") }?.forEach { it.delete() }
             }
             withContext(Dispatchers.Main) { refreshProjects() }
         }
@@ -3254,21 +3371,35 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             val meta = readMeta(src)
             val title = (meta?.title ?: src.nameWithoutExtension) + " (cópia)"
             val dst = File(directories().projects, "${uniqueName(title)}.aurea")
-            src.copyTo(dst)
-            meta?.thumbnailPath?.let { t ->
-                val tf = File(t)
-                if (tf.exists()) tf.copyTo(File(directories().thumbs, dst.nameWithoutExtension + ".jpg"), overwrite = true)
+            // Disco cheio no meio da cópia derrubava o app (exceção sem dono na
+            // corrotina). Agora: o que foi copiado pela metade sai, e a pessoa é avisada.
+            val tmp = File(dst.path + ".tmp")
+            try {
+                src.copyTo(tmp, overwrite = true)
+                if (!tmp.renameTo(dst)) throw java.io.IOException("rename da copia falhou")
+                meta?.thumbnailPath?.let { t ->
+                    val tf = File(t)
+                    if (tf.exists()) tf.copyTo(File(directories().thumbs, dst.nameWithoutExtension + ".jpg"), overwrite = true)
+                }
+                writeTextAtomic(
+                    File(dst.absolutePath + META_SUFFIX),
+                    JSONObject()
+                        .put("title", title)
+                        .put("width", meta?.width ?: 0)
+                        .put("height", meta?.height ?: 0)
+                        .put("fps", (meta?.fps ?: 30f).toDouble())
+                        .put("durationFrames", meta?.durationFrames ?: 0)
+                        .put("thumbnail", File(directories().thumbs, dst.nameWithoutExtension + ".jpg").absolutePath)
+                        .toString(),
+                )
+            } catch (e: java.io.IOException) {
+                Log.w(TAG, "duplicar projeto falhou: ${e.message}")
+                tmp.delete()
+                dst.delete()
+                File(dst.absolutePath + META_SUFFIX).delete()
+                val code = if (e.message?.contains("ENOSPC") == true) ERRC_STORAGE_FULL else ERRC_IO
+                withContext(Dispatchers.Main) { errorMessage = "Não foi possível duplicar. ${humanError(code)}" }
             }
-            File(dst.absolutePath + META_SUFFIX).writeText(
-                JSONObject()
-                    .put("title", title)
-                    .put("width", meta?.width ?: 0)
-                    .put("height", meta?.height ?: 0)
-                    .put("fps", (meta?.fps ?: 30f).toDouble())
-                    .put("durationFrames", meta?.durationFrames ?: 0)
-                    .put("thumbnail", File(directories().thumbs, dst.nameWithoutExtension + ".jpg").absolutePath)
-                    .toString(),
-            )
             withContext(Dispatchers.Main) { refreshProjects() }
         }
     }
@@ -3292,7 +3423,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val metaFile = File(file.absolutePath + META_SUFFIX)
         val j = try {
             if (metaFile.exists()) JSONObject(metaFile.readText()) else null
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            // Sidecar ilegível: o cartão sai com o nome do arquivo (o projeto em si não depende dele).
+            Log.w(TAG, "sidecar ilegivel (${file.name}): ${e.message}")
             null
         }
         val thumb = j?.optString("thumbnail")?.takeIf { it.isNotEmpty() && File(it).exists() }
@@ -3360,6 +3493,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         const val THUMB_MAX = 512
         /** Silêncio depois da última mudança antes do autosave. */
         const val AUTOSAVE_IDLE_NS = 3_000_000_000L
+        /** Espera depois de um autosave que falhou (ex.: armazenamento cheio). */
+        const val AUTOSAVE_RETRY_NS = 30_000_000_000L
         const val META_SUFFIX = ".meta.json"
         /** `kInvalidIndex` do C++: keyframe que não é de efeito. */
         const val NO_EFFECT = -1

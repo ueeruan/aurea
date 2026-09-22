@@ -77,7 +77,10 @@ int open_content_fd(const char* uri, void*) {
     if (juri) {
         fd = env->CallStaticIntMethod(g_engineClass, g_openContentFd, juri);
         if (env->ExceptionCheck()) {
+            // Exceção Java atravessando a fronteira: limpa (senão a ART aborta
+            // na próxima chamada JNI) e registra — nunca some em silêncio.
             env->ExceptionClear();
+            AUREA_LOG_WARN("openContentFd: excecao Java (midia vira placeholder)");
             fd = -1;
         }
         env->DeleteLocalRef(juri);
@@ -101,7 +104,9 @@ bool load_image(const char* source, ImagePixels& out, void*) {
     if (jstring js = env->NewStringUTF(source)) {
         auto arr = static_cast<jbyteArray>(env->CallStaticObjectMethod(g_engineClass, g_decodeImage, js));
         if (env->ExceptionCheck()) {
+            // Tipicamente OutOfMemoryError do ByteArray da imagem grande.
             env->ExceptionClear();
+            AUREA_LOG_WARN("decodeImage: excecao Java (imagem vira placeholder)");
             arr = nullptr;
         }
         if (arr) {
@@ -1843,6 +1848,15 @@ AUREA_JNI jint AUREA_FN(nativeSaveProject)(JNIEnv* env, jclass, jlong handle, js
     if (!c) return static_cast<jint>(Errc::InvalidState);
     const std::string p = to_string(env, path);
     return static_cast<jint>(c->engine.save_project(p.c_str()).raw());
+}
+
+/// Bits de Engine::LoadNotice da última abertura (0 = abriu limpo); nos 16
+/// bits de cima, quantos assets faltaram. A UI avisa em vez de esconder.
+AUREA_JNI jint AUREA_FN(nativeLoadNotice)(JNIEnv*, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return 0;
+    const u32 missing = std::min<u32>(c->engine.last_load_missing_assets(), 0x7FFFu);
+    return static_cast<jint>((missing << 16) | (c->engine.last_load_notice() & 0xFFFFu));
 }
 
 AUREA_JNI jint AUREA_FN(nativeDiscardRecovery)(JNIEnv*, jclass, jlong handle) {

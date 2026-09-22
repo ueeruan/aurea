@@ -232,7 +232,11 @@ AUREA_TEST(Serialization, EffectsAndMasksSurviveRoundTrip) {
     k1.points[1].outTangent = Vec2{-7.5f, 2.25f};
     m.pathKeys = {k0, k1};
     c->layer(id)->masks.push_back(m);
-    c->layer(id)->matteSource = LayerId{7, 3};
+    // A matte aponta para uma camada que EXISTE: ao reabrir, os ids de camada
+    // são refeitos e a referência é remapeada (um id solto, sem camada, vira
+    // "nenhuma" — antes era copiado cru e apontava para outra camada).
+    const LayerId matte = c->add_layer(LayerKind::Shape, "Matte");
+    c->layer(id)->matteSource = matte;
     c->layer(id)->matteMode = MatteMode::LumaInverted;
 
     std::string error;
@@ -275,7 +279,7 @@ AUREA_TEST(Serialization, EffectsAndMasksSurviveRoundTrip) {
         AUREA_CHECK_NEAR(lk.points[1].outTangent.x, -7.5f, 1e-6);
         AUREA_CHECK_NEAR(lk.points[1].outTangent.y, 2.25f, 1e-6);
     }
-    AUREA_CHECK(ll->matteSource == (LayerId{7, 3}));
+    AUREA_CHECK(lc->layer(ll->matteSource) != nullptr && lc->layer(ll->matteSource)->name == "Matte");
     AUREA_CHECK(ll->matteMode == MatteMode::LumaInverted);
 
     std::remove(path.c_str());

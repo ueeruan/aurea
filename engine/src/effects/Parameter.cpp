@@ -203,18 +203,44 @@ ParamValue evaluate_param(const TrackSet& tracks, const EffectInstance& effect, 
 
     ParamValue out = slot.constant;
 
-    if (slot.source == ParamSource::Expression) {
+    const bool fromExpressionSlot = slot.source == ParamSource::Expression;
+    if (fromExpressionSlot) {
         // Gancho do avaliador de expressões: quando ele existir, o resultado
         // entra aqui e nada mais muda. Até lá, o valor constante vale e quem
         // chamou fica sabendo.
         if (usedFallback) *usedFallback = true;
-        return out;
     }
 
-    const u32 comps = spec.animatable() ? component_count(spec.type) : 0;
+    const u32 comps = spec.animatable() && !fromExpressionSlot ? component_count(spec.type) : 0;
     for (u32 c = 0; c < comps; ++c) {
         const Track* t = tracks.find(TrackProperty::EffectParam, effect.id, param_track_key(paramIndex, c));
         if (t) out.v[c] = t->value_or(localTime, out.v[c]);   // keyframes e/ou expressão
+    }
+    // O efeito só vê valores dentro do contrato do parâmetro (§117). Uma
+    // expressão, um keyframe antigo ou um arquivo corrompido podem trazer NaN,
+    // infinito ou 1e6: o RGB no tempo com deslocamento de 1e6 quadros prendia
+    // o quadro por 4–5 s esperando o decoder (fuzz Fuzz.EffectParameters…
+    // RenderOnGpu). NaN/inf viram o padrão; o resto entra em [min, max].
+    const u32 n = component_count(spec.type);
+    for (u32 c = 0; c < n; ++c) {
+        if (!std::isfinite(out.v[c])) out.v[c] = spec.defaultValue.v[c];
+    }
+    switch (spec.type) {
+        case ParamType::Float:
+        case ParamType::Int:
+        case ParamType::Angle:
+        case ParamType::Enum:
+        case ParamType::Point2D:
+        case ParamType::Point3D:
+            if (spec.minValue < spec.maxValue) {
+                for (u32 c = 0; c < n; ++c) out.v[c] = std::clamp(out.v[c], spec.minValue, spec.maxValue);
+            }
+            break;
+        case ParamType::Bool:
+            out.v[0] = std::clamp(out.v[0], 0.0f, 1.0f);
+            break;
+        default:
+            break;   // cor pode passar de 1 (HDR); curva/gradiente/referência não são números
     }
     return out;
 }

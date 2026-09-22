@@ -1205,6 +1205,8 @@ void apply_timeline_section(const u8* data, usize size, Project& p) {
 
     const u32 compCount = r.u32v();
     if (compCount > 256u) { r.skip_to_end(); return; }
+    std::vector<std::pair<u64, CompositionId>> compMap;
+    compMap.reserve(compCount);
 
     for (u32 ci = 0; ci < compCount && r.good(); ++ci) {
         const u64 idPack = r.u64v();
@@ -1215,13 +1217,13 @@ void apply_timeline_section(const u8* data, usize size, Project& p) {
 
         const CompositionId cid = t.create_composition(name, w, h, fps);
         Composition* c = t.composition(cid);
-        if (!c) { r.skip_to_end(); return; }
+        if (!c) { r.skip_to_end(); break; }
 
-        // O id original é reatribuído ao criado: os handles do arquivo são
-        // remapeados na leitura, porque os índices de slot dependem da ordem
-        // de criação desta sessão. O pack gravado serve só como referência
-        // dentro do próprio arquivo — a remoção real acontece abaixo.
-        (void)idPack;
+        // O id original é reatribuído ao criado: os slots desta sessão nascem
+        // na ordem do arquivo, sem os buracos de composições apagadas — o
+        // pack gravado só vale como chave, e as referências (pré-composição,
+        // raiz, atual) são remapeadas no fim.
+        compMap.emplace_back(idPack, cid);
 
         c->set_duration(FrameIndex{r.i64v()});
         c->set_background(r.color());
@@ -1230,7 +1232,7 @@ void apply_timeline_section(const u8* data, usize size, Project& p) {
         c->set_active_camera(LayerId::unpack(r.u64v()));
 
         const u32 layerCount = r.u32v();
-        if (layerCount > kMaxLayerCount) { r.skip_to_end(); return; }
+        if (layerCount > kMaxLayerCount) { r.skip_to_end(); break; }
 
         // Ids do arquivo → ids desta sessão. Os slots nascem na ordem VERTICAL,
         // não na de criação: sem remapear, pai e câmera ativa apontariam para
@@ -1257,9 +1259,22 @@ void apply_timeline_section(const u8* data, usize size, Project& p) {
             for (const auto& [pack, now] : idMap) if (pack == old.pack()) return now;
             return LayerId{};
         };
+        // TODA referência a camada passa pelo mapa. Antes só pai e câmera
+        // passavam: track matte, legenda (camada de origem) e texto no caminho
+        // apontavam para OUTRA camada depois de duplicar/reordenar/apagar e
+        // reabrir (teste Stability.LayerReferencesSurviveReopen…).
+        auto remapPack = [&remap](u64 old) {
+            const LayerId now = old ? remap(LayerId::unpack(old)) : LayerId{};
+            return now.valid() ? now.pack() : u64{0};   // 0 = nenhuma (contrato desses campos)
+        };
         for (const auto& [pack, now] : idMap) {
             (void)pack;
-            if (Layer* dst = c->layer(now)) dst->parent = remap(dst->parent);
+            if (Layer* dst = c->layer(now)) {
+                dst->parent = remap(dst->parent);
+                dst->matteSource = remap(dst->matteSource);
+                dst->text.captionSource = remapPack(dst->text.captionSource);
+                dst->text.pathLayer = remapPack(dst->text.pathLayer);
+            }
         }
         c->set_active_camera(remap(LayerId::unpack(activeCamPack)));
 
@@ -1300,7 +1315,7 @@ void apply_timeline_section(const u8* data, usize size, Project& p) {
         c->set_scene(Scene3DId::unpack(r.u64v()));
         if (g_readingTimelineVersion >= 4) {
             const u32 mc = r.u32v();
-            if (mc > 100000u) { r.skip_to_end(); return; }
+            if (mc > 100000u) { r.skip_to_end(); break; }
             for (u32 mi = 0; mi < mc && r.good(); ++mi) {
                 Marker m;
                 m.frame = FrameIndex{r.i64v()};
@@ -1314,8 +1329,25 @@ void apply_timeline_section(const u8* data, usize size, Project& p) {
         c->rebuild_draw_order();
     }
 
-    if (rootPack != 0) t.set_root(t.current());
-    if (currentPack != 0 && t.current().valid()) t.set_current(t.current());
+    // Pré-composições apontam para a composição pelo id do ARQUIVO: com uma
+    // composição apagada no meio (buraco de slot) ou reaproveitada (geração
+    // nova), o id desta sessão é outro e a pré-composição abriria vazia.
+    auto remapComp = [&compMap](CompositionId old) {
+        if (!old.valid()) return CompositionId{};
+        for (const auto& [pack, now] : compMap) if (pack == old.pack()) return now;
+        return CompositionId{};
+    };
+    for (const auto& [pack, cid] : compMap) {
+        (void)pack;
+        if (Composition* c = t.composition(cid)) {
+            c->layers().for_each([&](LayerId, Layer& l) {
+                if (l.nested.composition.valid()) l.nested.composition = remapComp(l.nested.composition);
+            });
+        }
+    }
+    if (const CompositionId root = remapComp(CompositionId::unpack(rootPack)); root.valid()) t.set_root(root);
+    else if (rootPack != 0) t.set_root(t.current());
+    if (const CompositionId cur = remapComp(CompositionId::unpack(currentPack)); cur.valid()) (void)t.set_current(cur);
 }
 
 void apply_assets_section(const u8* data, usize size, Project& p) {

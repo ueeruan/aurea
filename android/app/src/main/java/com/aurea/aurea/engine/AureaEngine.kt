@@ -59,7 +59,10 @@ class AureaEngine private constructor() {
             appContext?.contentResolver
                 ?.openFileDescriptor(Uri.parse(uri), "r")
                 ?.detachFd() ?: -1
-        } catch (_: Throwable) {
+        } catch (e: Throwable) {
+            // Mídia apagada ou permissão revogada: o motor mostra o espaço vazio
+            // (placeholder); o motivo fica no log, sem a URI (dado do usuário).
+            android.util.Log.w("AureaEngine", "openContentFd falhou: ${e.javaClass.simpleName}")
             -1
         }
 
@@ -98,7 +101,9 @@ class AureaEngine private constructor() {
                 inPremultiplied = false
             }
             cr.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, opts) }
-        } catch (_: Throwable) {
+        } catch (e: Throwable) {
+            // Imagem ausente/corrompida ou sem memória: null = placeholder + aviso na abertura.
+            android.util.Log.w("AureaEngine", "decodeBitmapRgba falhou: ${e.javaClass.simpleName}")
             null
         }
 
@@ -513,6 +518,12 @@ class AureaEngine private constructor() {
 
     fun loadProject(path: String): Int = nativeLoadProject(nativeHandle, path)
     fun saveProject(path: String): Int = nativeSaveProject(nativeHandle, path)
+    /**
+     * O que a última abertura precisou fazer (Engine::LoadNotice): bits 0–15 =
+     * 1 abriu da cópia (.bak/.tmp), 2 parcial, 4 formato antigo (cópia
+     * guardada), 8 mídia ausente; bits 16+ = quantos assets faltaram.
+     */
+    fun loadNotice(): Int = nativeLoadNotice(nativeHandle)
     fun discardRecovery(): Int = nativeDiscardRecovery(nativeHandle)
     fun recoverSession(): Int = nativeRecoverSession(nativeHandle)
 
@@ -710,6 +721,7 @@ class AureaEngine private constructor() {
     private external fun nativeNewProject(handle: Long, width: Int, height: Int, fps: Float, title: String): Boolean
     private external fun nativeLoadProject(handle: Long, path: String): Int
     private external fun nativeSaveProject(handle: Long, path: String): Int
+    private external fun nativeLoadNotice(handle: Long): Int
     private external fun nativeDiscardRecovery(handle: Long): Int
     private external fun nativeRecoverSession(handle: Long): Int
     private external fun nativeStartExport(handle: Long, outputPath: String, shortSide: Int, fps: Double, codec: Int, bitrateMbps: Int): Int

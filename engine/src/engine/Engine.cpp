@@ -846,7 +846,7 @@ Result<u64> Engine::import_video(const VideoImport& request) noexcept {
     const VideoStreamInfo& v = probe.video;
     const u32 dispW = v.display_width();
     const u32 dispH = v.display_height();
-    if (dispW == 0 || dispH == 0) return Status{Errc::CorruptData, "video sem dimensoes"};
+    if (dispW == 0 || dispH == 0) return Status{Errc::AssetCorrupted, "video sem dimensoes"};
 
     std::lock_guard<std::mutex> lock(modelMutex_);
     if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
@@ -932,7 +932,7 @@ Result<u64> Engine::import_audio(const VideoImport& request) noexcept {
     if (!factory->probe(request.sourcePath.c_str(), probe) || !probe.hasAudio || probe.audioSampleRate == 0) {
         return Status{Errc::UnsupportedFormat, "arquivo sem trilha de audio decodificavel"};
     }
-    if (probe.audioDurationUs <= 0) return Status{Errc::CorruptData, "audio sem duracao"};
+    if (probe.audioDurationUs <= 0) return Status{Errc::AssetCorrupted, "audio sem duracao"};
 
     std::lock_guard<std::mutex> lock(modelMutex_);
     if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
@@ -3567,7 +3567,7 @@ Result<u64> Engine::import_model(const ModelImport& request, scene3d::ImportProg
                         : r.error == scene3d::ImportError::OutOfMemory ? Errc::OutOfMemory
                         : r.error == scene3d::ImportError::UnsupportedCompression
                           || r.error == scene3d::ImportError::UnsupportedFeature ? Errc::UnsupportedFeature
-                        : Errc::CorruptData;
+                        : Errc::AssetCorrupted;
         return Status{code, scene3d::to_string(r.error)};
     }
     std::shared_ptr<const scene3d::SceneAsset> scene(std::move(r.asset));
@@ -4351,7 +4351,8 @@ u32 Engine::submit_commands(const Command* commands, u32 count,
         Command c = commands[i];
         // Sem blob no lote, o deslocamento já é da arena (push_string direto).
         if (c.stringLength > 0 && stringBlob && stringBlobSize) {
-            if (!haveBlob || c.stringOffset + c.stringLength > stringBlobSize) {
+            // Sem estouro de u32: offset e comprimento vêm da UI (e do fuzz).
+            if (!haveBlob || c.stringOffset > stringBlobSize || c.stringLength > stringBlobSize - c.stringOffset) {
                 c.stringLength = 0;   // string perdida: o comando chega sem ela (nunca com a de outro)
                 c.stringOffset = 0;
             } else {
@@ -5776,9 +5777,108 @@ void Engine::after_history_restore_locked() noexcept {
     request_render();
 }
 
+namespace {
+
+// -----------------------------------------------------------------------------
+// Validação do comando ANTES de mexer no modelo (§134, fuzz de comandos).
+//
+// O comando atravessa a bridge como bytes crus: um enum fora da faixa (camada
+// "tipo 999", modo de mistura 300) chegava ao renderer como índice de tabela,
+// e um NaN/inf num transform envenenava a matriz de todos os filhos. A UI não
+// manda isso — mas um bug de layout do lado Kotlin ou memória corrompida
+// mandaria, e a resposta certa é recusar o comando, não desenhar lixo.
+// -----------------------------------------------------------------------------
+constexpr i64 kMaxCommandFrame = i64{1} << 40;   // ~1100 anos a 30 fps: acima disso é lixo
+
+bool finite(f32 v) noexcept { return std::isfinite(v); }
+bool finite_all(std::initializer_list<f32> vs) noexcept {
+    for (f32 v : vs) if (!std::isfinite(v)) return false;
+    return true;
+}
+bool frame_ok(FrameIndex f) noexcept { return f.value > -kMaxCommandFrame && f.value < kMaxCommandFrame; }
+bool track_ok(const TrackRef& t) noexcept { return static_cast<u16>(t.property) < static_cast<u16>(TrackProperty::_Count); }
+
+bool command_valid(const Command& c) noexcept {
+    switch (c.type) {
+        case CommandType::LayerCreate:
+            return static_cast<u16>(c.layer_create.kind) <= static_cast<u16>(LayerKind::Composition);
+        case CommandType::LayerSetBlendMode:
+            return static_cast<u16>(c.layer_blend.mode) <= static_cast<u16>(BlendMode::Luminosity);
+        case CommandType::LayerSetTimeRange:
+            // `offset` só conta com `setOffset` (a UI e os testes deixam o resto do payload sem valor).
+            return frame_ok(c.layer_range.start) && frame_ok(c.layer_range.end)
+                && (!c.layer_range.setOffset || frame_ok(c.layer_range.offset));
+        case CommandType::LayerSplit:
+            return frame_ok(c.layer_split.at);
+        case CommandType::LayerSetTransform: {
+            const TransformPayload& t = c.transform;
+            return finite_all({t.x, t.y, t.z, t.sx, t.sy, t.sz, t.rx, t.ry, t.rz, t.ax, t.ay, t.az, t.opacity});
+        }
+        case CommandType::LayerSetPosition: return finite_all({c.position.x, c.position.y, c.position.z});
+        case CommandType::LayerSetScale:    return finite_all({c.scale.sx, c.scale.sy, c.scale.sz});
+        case CommandType::LayerSetRotation: return finite_all({c.rotation.rx, c.rotation.ry, c.rotation.rz});
+        case CommandType::LayerSetAnchor:   return finite_all({c.anchor.ax, c.anchor.ay, c.anchor.az});
+        case CommandType::LayerSetOpacity:  return finite(c.opacity.opacity);
+        case CommandType::LayerSetSkew:     return finite_all({c.skew.skewX, c.skew.skewY});
+        case CommandType::KeyframeInsert:
+        case CommandType::KeyframeSetValue:
+            return track_ok(c.keyframe.track) && frame_ok(c.keyframe.time) && finite(c.keyframe.value);
+        case CommandType::KeyframeDelete:
+            return track_ok(c.keyframe.track) && frame_ok(c.keyframe.time);
+        case CommandType::KeyframeMove:
+            return track_ok(c.keyframe_move.track) && frame_ok(c.keyframe_move.fromTime) && frame_ok(c.keyframe_move.toTime);
+        case CommandType::KeyframeSetInterpolation:
+        case CommandType::KeyframeSetBezier:
+        case CommandType::KeyframeSetEasing: {
+            const KeyframeInterpPayload& k = c.keyframe_interp;
+            return track_ok(k.track) && frame_ok(k.time)
+                && static_cast<u8>(k.interp) <= static_cast<u8>(Interpolation::CustomCurve)
+                && finite_all({k.bx1, k.by1, k.bx2, k.by2});
+        }
+        case CommandType::MaskSetOperation:
+            return static_cast<u8>(c.mask_op.op) <= static_cast<u8>(MaskOperation::None);
+        case CommandType::MaskSetFeather:
+        case CommandType::MaskSetExpansion:
+        case CommandType::MaskSetOpacity:
+            return finite(c.mask_scalar.value);
+        case CommandType::MaskSetPath: {
+            const MaskPointPayload& m = c.mask_point;
+            return finite_all({m.x, m.y, m.inX, m.inY, m.outX, m.outY});
+        }
+        case CommandType::EffectSetParam:       return finite(c.effect_param.value);
+        case CommandType::EffectSetColorParam:  return finite_all({c.effect_color.r, c.effect_color.g, c.effect_color.b, c.effect_color.a});
+        case CommandType::AudioSetGain:
+        case CommandType::AudioSetVolume:
+        case CommandType::AudioSetPan:
+        case CommandType::LayerSetSpeed:        return finite(c.audio_gain.gain);
+        case CommandType::AudioSetFadeIn:
+        case CommandType::AudioSetFadeOut:      return frame_ok(c.audio_fade.duration);
+        case CommandType::ShapeSetParam:        return finite(c.shape_param.value);
+        case CommandType::ShapeSetFill:
+        case CommandType::ShapeSetStroke:
+        case CommandType::TextSetColor:
+        case CommandType::TextSetStrokeColor:   return finite_all({c.text_color.r, c.text_color.g, c.text_color.b, c.text_color.a});
+        case CommandType::TextSetSize:          return finite(c.text_size.size);
+        case CommandType::TextSetStrokeWidth:   return finite(c.text_stroke_width.width);
+        case CommandType::CompositionSetFps:    return std::isfinite(c.comp_fps.fps) && c.comp_fps.fps > 0.0 && c.comp_fps.fps <= 1000.0;
+        case CommandType::CompositionSetDuration: return frame_ok(c.comp_duration.duration);
+        case CommandType::CompositionSetBackground:
+            return finite_all({c.comp_background.r, c.comp_background.g, c.comp_background.b, c.comp_background.a});
+        case CommandType::ViewportSetZoom:      return finite(c.viewport_zoom.zoom);
+        case CommandType::ViewportSetPan:       return finite_all({c.viewport_pan.x, c.viewport_pan.y});
+        case CommandType::PlaybackSetSpeed:     return finite(c.speed.speed);
+        default:
+            return true;
+    }
+}
+
+} // namespace
+
 Status Engine::apply_command_internal(const Command& cmd, const char* stringData,
                                       bool recordUndo) noexcept {
     if (!project_) return Errc::InvalidState;
+    // Antes do snapshot de desfazer: comando inválido não vira ação vazia no histórico.
+    if (!command_valid(cmd)) return Status{Errc::InvalidArgument, "comando com valor invalido"};
 
     Timeline& timeline = project_->timeline();
     Composition* comp = current_composition();

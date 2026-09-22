@@ -124,15 +124,7 @@ class TimelineMathTest {
         assertEquals(0, Snap.sortedDistinct(IntArray(4), 0).size)
     }
 
-    // --- Inércia e auto-rolagem ------------------------------------------------------------
-    @Test
-    fun `inercia do scrub percorre metade da velocidade`() {
-        assertEquals(0f, Friction.offset(1000f, 0f), 1e-3f)
-        assertEquals(1000f / 2.0025f, Friction.offset(1000f, 10f), 1f)
-        assertEquals(135f, Friction.velocity(1000f, 1f), 1e-2f)
-        assertEquals(-Friction.offset(800f, 0.3f), Friction.offset(-800f, 0.3f), 1e-4f)
-    }
-
+    // --- Auto-rolagem (a inércia do scrub saiu em 4ba17d4: o dono pediu scrub sem inércia) ---
     @Test
     fun `auto rolagem so para o lado a que o dedo foi`() {
         assertEquals(-1, AutoScroll.direction(50f, 200f, 104f, 400f, 4f))

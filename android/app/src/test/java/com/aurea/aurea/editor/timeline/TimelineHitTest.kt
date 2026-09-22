@@ -30,9 +30,10 @@ class TimelineHitTest {
     @Test
     fun `a geometria da A01`() {
         assertEquals(38f, m.rowsTop, 0f)
-        assertEquals(46f, m.row, 0f)
-        assertEquals(36f, m.bar, 0f)
-        assertEquals(21f, m.trackTop, 0f)
+        // Linha 36 / barra 30 (mais baixas que a A.01, 46/36: cabem mais camadas).
+        assertEquals(36f, m.row, 0f)
+        assertEquals(30f, m.bar, 0f)
+        assertEquals(19f, m.trackTop, 0f)
         // Pílula 58 a 4 da borda; olho centrado em ≈ 21,7 e quadradinho em 39,3 (print: 13,7–29,3 e 39,2–57,1).
         assertEquals(21.67f, m.eyeCenterX, 0.01f)
         assertEquals(39.33f, m.swatchLeft, 0.01f)
@@ -79,7 +80,7 @@ class TimelineHitTest {
     fun `losango na faixa de baixo ganha do corpo`() {
         val mid = intArrayOf(125)                            // x = 250
         assertEquals(HitKind.KEYFRAME, hit(260f, 30f, instants = mid))
-        assertEquals(HitKind.KEYFRAME, hit(250f, 44f, instants = mid))       // abaixo da barra, ainda na linha
+        assertEquals(HitKind.KEYFRAME, hit(250f, 34f, instants = mid))       // abaixo da barra, ainda na linha
         assertEquals(HitKind.BODY, hit(250f, 10f, instants = mid))
         assertEquals(HitKind.BODY, hit(270f, 30f, instants = mid))
         assertEquals(HitKind.BODY, hit(250f, 30f, instants = mid, keys = false))  // lote: o toque é da camada

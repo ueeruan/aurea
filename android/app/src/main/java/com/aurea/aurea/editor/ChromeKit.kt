@@ -449,18 +449,3 @@ internal fun ActivityIndicator(size: Dp = 22.dp, color: Color = AureaColors.Text
         }
     }
 }
-
-/** Interruptor no desenho do `CupertinoSwitch` (trilho ligado em destaque). */
-@Composable
-internal fun ShellSwitch(checked: Boolean) {
-    Box(
-        Modifier
-            .size(51.dp, 31.dp)
-            .clip(CircleShape)
-            .background(if (checked) AureaColors.Accent else AureaColors.ChipHigh)
-            .padding(2.dp),
-        contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart,
-    ) {
-        Box(Modifier.size(27.dp).clip(CircleShape).background(Color.White))
-    }
-}

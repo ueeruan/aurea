@@ -47,10 +47,6 @@ import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.CupertinoGlyph
 import com.aurea.aurea.ui.theme.CupertinoIcon
 
-private val LayerSeconds = listOf(2, 3, 5)
-private val Engine3D = listOf("Automático", "Sempre GPU", "Sempre CPU")
-private val Quality3D = listOf("Automática", "Máxima", "Equilibrada", "Leve")
-
 /** Rótulo curto de resolução (720p, 1080p, 4K). */
 private fun shortResolution(r: Int) = when (r) {
     720 -> "720p"
@@ -81,9 +77,9 @@ private fun readVersion(context: Context): AppVersion = try {
  * no fim.
  *
  * Reorganizada depois que Comunidade e Perfil saíram: os grupos agora são
- * Padrões de novos projetos · Legendas · Exportação · Cena 3D · Geral · Sobre.
- * As linhas que só existiam para parecer opção (Idioma, Tema, Motor 3D) saíram
- * — eram botões que avisavam "em breve".
+ * Padrões de novos projetos · Legendas · Exportação · Geral · Sobre.
+ * As linhas que só existiam para parecer opção (Idioma, Tema, Motor 3D e, na
+ * Fase 8I, Qualidade 3D) saíram — eram botões que avisavam "em breve".
  *
  * De verdade: proporção/resolução/fps padrão (a folha "Novo projeto" usa),
  * a chave da Groq das legendas, limpar cache e as ferramentas de
@@ -127,14 +123,6 @@ internal fun SettingsTab(store: EditorStore, vm: HomeViewModel, listState: LazyL
                 ) { keyDialog = true }
                 GroupNote("A chave fica só neste aparelho, cifrada. O áudio só vai à Groq quando você toca em Gerar legendas; sem chave, dá para usar um arquivo SRT.")
             }
-        }
-        item(key = "cena3d") {
-            Spacer(Modifier.height(AureaDims.S5))
-            GroupHeader("Cena 3D")
-            Group {
-                SegmentedRow("Qualidade 3D", Quality3D, Quality3D[0], { it }) { store.showToast("Qualidade 3D: em breve no Aurea novo") }
-            }
-            GroupNote("A cena 3D usa a GPU do aparelho. O motor não tem caminho de CPU — por isso não há \"Sempre CPU\".")
         }
         item(key = "aparelho") {
             Spacer(Modifier.height(AureaDims.S5))

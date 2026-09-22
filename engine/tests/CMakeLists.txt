@@ -38,6 +38,7 @@ add_executable(aurea_tests
     test_memory.cpp
     test_perf_render.cpp
     test_device.cpp
+    test_startup.cpp
 )
 
 target_include_directories(aurea_tests PRIVATE

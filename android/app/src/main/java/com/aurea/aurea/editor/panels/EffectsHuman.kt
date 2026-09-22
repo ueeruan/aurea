@@ -648,8 +648,6 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put("aurea.control.point", EffectHuman(keywords = "expressao ponto controle"))
 }
 
-internal fun effectHuman(typeId: Int): EffectHuman? = Table[typeId]
-
 /** Nome exibido: o da tabela, senão o do motor. */
 internal fun effectDisplayName(typeId: Int, engineName: String): String = Table[typeId]?.name ?: engineName
 

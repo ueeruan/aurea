@@ -78,6 +78,22 @@ SamplerDesc common_sampler_desc(CommonSampler s) noexcept {
 
 } // namespace
 
+u64 ShaderLibrary::spirv_fingerprint() noexcept {
+    static const u64 fp = [] {
+        u64 h = 1469598103934665603ull;
+        auto mix = [&h](u64 v) { h ^= v; h *= 1099511628211ull; };
+        mix(kShaderCount);
+        for (u32 i = 0; i < kShaderCount; ++i) {
+            const ShaderBlob& blob = shader_blob(static_cast<ShaderId>(i));
+            mix(blob.bytes);
+            const usize words = blob.bytes / 4;
+            for (usize w = 0; w < words; ++w) mix(blob.words[w]);
+        }
+        return h ? h : 1ull;   // 0 é "não confere"
+    }();
+    return fp;
+}
+
 Status ShaderLibrary::initialize(GPUBackend& backend) noexcept {
     backend_ = &backend;
     overrides_.assign(kShaderCount, {});

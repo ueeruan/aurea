@@ -8,6 +8,9 @@
 #include <atomic>
 #include <cstdio>
 #include <cstring>
+#if !defined(_WIN32)
+#include <unistd.h>
+#endif
 
 namespace aurea::vk {
 namespace {
@@ -419,53 +422,218 @@ void Backend::fill_capabilities() noexcept {
 }
 
 // =============================================================================
-// Cache de pipeline persistido
+// Cache de pipeline persistido (Fase 8I, §62 e §176)
+//
+// O arquivo é um CABEÇALHO NOSSO + o blob do driver:
+//
+//   magic "AUREAPC\0" · formato · versão (impressão digital do SPIR-V) ·
+//   fornecedor · dispositivo · versão do driver · UUID do cache · tamanho ·
+//   FNV-1a 64 do blob
+//
+// Motivo: o driver deveria recusar um cache que não é dele, mas há drivers de
+// celular que CAEM ao ler dado truncado ou de outra versão — e um cache que
+// derruba a abertura derruba toda abertura seguinte. Então: (1) o blob só vai
+// ao driver se o cabeçalho, o tamanho e a soma batem, e o cabeçalho do PRÓPRIO
+// Vulkan dentro do blob confere com este aparelho; (2) uma marca
+// ".carregando" é gravada antes de entregar o blob e apagada depois — se ela
+// sobreviveu, a carga anterior matou o processo e o cache é apagado sem ser
+// lido; (3) app atualizado (SPIR-V novo) descarta o arquivo em vez de deixá-lo
+// crescer com entradas mortas. Rejeitado → apagado → recompila (e regrava).
 // =============================================================================
-void Backend::load_pipeline_cache() noexcept {
-    std::vector<u8> data;
-    if (config_.cacheDirectory && *config_.cacheDirectory) {
-        cachePath_ = std::string(config_.cacheDirectory) + "/aurea_pipeline_cache.bin";
-        if (std::FILE* f = std::fopen(cachePath_.c_str(), "rb")) {
-            std::fseek(f, 0, SEEK_END);
-            const long size = std::ftell(f);
-            std::fseek(f, 0, SEEK_SET);
-            if (size > 0 && size < 64 * 1024 * 1024) {
-                data.resize(static_cast<usize>(size));
-                if (std::fread(data.data(), 1, data.size(), f) != data.size()) data.clear();
-            }
-            std::fclose(f);
+namespace {
+
+constexpr char kCacheMagic[8] = {'A', 'U', 'R', 'E', 'A', 'P', 'C', '\0'};
+constexpr u32 kCacheFormat = 1;
+constexpr usize kCacheMaxBytes = 64ull * 1024 * 1024;
+
+struct CacheFileHeader {
+    char magic[8];
+    u32  format;
+    u32  headerBytes;
+    u64  tag;            ///< BackendConfig::pipelineCacheTag
+    u32  vendorId;
+    u32  deviceId;
+    u32  driverVersion;
+    u32  reserved;
+    u8   uuid[VK_UUID_SIZE];
+    u64  dataBytes;
+    u64  checksum;
+};
+static_assert(sizeof(CacheFileHeader) == 72, "cabecalho do cache com tamanho fixo");
+
+u64 fnv1a(const u8* p, usize n) noexcept {
+    u64 h = 1469598103934665603ull;
+    for (usize i = 0; i < n; ++i) { h ^= p[i]; h *= 1099511628211ull; }
+    return h;
+}
+
+CacheFileHeader header_for(const VkPhysicalDeviceProperties& p, u64 tag) noexcept {
+    CacheFileHeader h{};
+    std::memcpy(h.magic, kCacheMagic, sizeof(h.magic));
+    h.format = kCacheFormat;
+    h.headerBytes = sizeof(CacheFileHeader);
+    h.tag = tag;
+    h.vendorId = p.vendorID;
+    h.deviceId = p.deviceID;
+    h.driverVersion = p.driverVersion;
+    std::memcpy(h.uuid, p.pipelineCacheUUID, VK_UUID_SIZE);
+    return h;
+}
+
+/// Confere o arquivo inteiro. Devolve o motivo da recusa (nullptr = aceito).
+const char* validate_cache_file(const std::vector<u8>& file, const CacheFileHeader& expect) noexcept {
+    if (file.size() < sizeof(CacheFileHeader)) return "arquivo curto";
+    CacheFileHeader h;
+    std::memcpy(&h, file.data(), sizeof(h));
+    if (std::memcmp(h.magic, kCacheMagic, sizeof(h.magic)) != 0) return "formato antigo ou lixo";
+    if (h.format != kCacheFormat || h.headerBytes != sizeof(CacheFileHeader)) return "formato de outra versao";
+    if (expect.tag != 0 && h.tag != expect.tag) return "shaders mudaram (app atualizado)";
+    if (h.vendorId != expect.vendorId || h.deviceId != expect.deviceId) return "outra GPU";
+    if (h.driverVersion != expect.driverVersion) return "driver atualizado";
+    if (std::memcmp(h.uuid, expect.uuid, VK_UUID_SIZE) != 0) return "UUID do cache diferente";
+    if (h.dataBytes != file.size() - sizeof(CacheFileHeader)) return "tamanho nao bate (truncado)";
+    const u8* data = file.data() + sizeof(CacheFileHeader);
+    if (fnv1a(data, static_cast<usize>(h.dataBytes)) != h.checksum) return "soma nao bate (corrompido)";
+    // O cabeçalho do próprio Vulkan (VkPipelineCacheHeaderVersionOne): 16 B +
+    // UUID. Conferido aqui também — é o que o driver com defeito não confere.
+    if (h.dataBytes < 16 + VK_UUID_SIZE) return "blob do driver curto";
+    u32 vk[4];
+    std::memcpy(vk, data, sizeof(vk));
+    if (vk[0] < 16 + VK_UUID_SIZE || vk[1] != VK_PIPELINE_CACHE_HEADER_VERSION_ONE) return "cabecalho Vulkan invalido";
+    if (vk[2] != expect.vendorId || vk[3] != expect.deviceId) return "cabecalho Vulkan de outra GPU";
+    if (std::memcmp(data + 16, expect.uuid, VK_UUID_SIZE) != 0) return "cabecalho Vulkan com outro UUID";
+    return nullptr;
+}
+
+bool read_whole(const std::string& path, std::vector<u8>& out) noexcept {
+    out.clear();
+    std::FILE* f = std::fopen(path.c_str(), "rb");
+    if (!f) return false;
+    bool ok = false;
+    if (std::fseek(f, 0, SEEK_END) == 0) {
+        const long size = std::ftell(f);
+        if (size > 0 && static_cast<usize>(size) <= kCacheMaxBytes + sizeof(CacheFileHeader)
+            && std::fseek(f, 0, SEEK_SET) == 0) {
+            out.resize(static_cast<usize>(size));
+            ok = std::fread(out.data(), 1, out.size(), f) == out.size();
         }
     }
-    // O driver valida o cabeçalho (fornecedor, dispositivo, UUID). Cache de
-    // outro driver é ignorado por ele — não há o que conferir aqui.
+    std::fclose(f);
+    if (!ok) out.clear();
+    return ok;
+}
+
+bool file_exists(const std::string& path) noexcept {
+    if (std::FILE* f = std::fopen(path.c_str(), "rb")) { std::fclose(f); return true; }
+    return false;
+}
+
+} // namespace
+
+void Backend::load_pipeline_cache() noexcept {
+    cacheInfo_ = PipelineCacheInfo{};
+    lastSavedCacheBytes_ = 0;
+    std::vector<u8> file;
+    const u8* initial = nullptr;
+    usize initialBytes = 0;
+    std::string guard;
+    if (config_.cacheDirectory && *config_.cacheDirectory) {
+        cachePath_ = std::string(config_.cacheDirectory) + "/aurea_pipeline_cache.bin";
+        guard = cachePath_ + ".carregando";
+        VkPhysicalDeviceProperties p{};
+        vkGetPhysicalDeviceProperties(physical_, &p);
+        cacheHeader_.resize(sizeof(CacheFileHeader));
+        const CacheFileHeader expect = header_for(p, config_.pipelineCacheTag);
+        std::memcpy(cacheHeader_.data(), &expect, sizeof(expect));
+
+        if (file_exists(guard)) {
+            // A carga anterior não chegou ao fim: o driver caiu lendo o blob.
+            AUREA_LOG_WARN("vulkan: a ultima carga do cache de pipeline derrubou o app; cache apagado");
+            std::remove(cachePath_.c_str());
+            std::remove(guard.c_str());
+            cacheInfo_.load = PipelineCacheInfo::Load::CrashGuard;
+        } else if (!read_whole(cachePath_, file)) {
+            cacheInfo_.load = PipelineCacheInfo::Load::Missing;
+        } else if (const char* why = validate_cache_file(file, expect)) {
+            AUREA_LOG_WARN("vulkan: cache de pipeline recusado (%s); recompilando", why);
+            std::remove(cachePath_.c_str());
+            cacheInfo_.load = PipelineCacheInfo::Load::Rejected;
+        } else {
+            initial = file.data() + sizeof(CacheFileHeader);
+            initialBytes = file.size() - sizeof(CacheFileHeader);
+        }
+    }
+
     VkPipelineCacheCreateInfo info{VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO};
-    info.initialDataSize = data.size();
-    info.pInitialData = data.empty() ? nullptr : data.data();
-    if (vkCreatePipelineCache(device_, &info, nullptr, &pipelineCache_) != VK_SUCCESS) {
+    info.initialDataSize = initialBytes;
+    info.pInitialData = initial;
+    if (initial) {
+        if (std::FILE* g = std::fopen(guard.c_str(), "wb")) std::fclose(g);
+    }
+    const VkResult r = vkCreatePipelineCache(device_, &info, nullptr, &pipelineCache_);
+    if (initial) std::remove(guard.c_str());
+    if (r != VK_SUCCESS) {
+        if (initial) {
+            AUREA_LOG_WARN("vulkan: driver recusou o cache de pipeline; recompilando");
+            std::remove(cachePath_.c_str());
+            cacheInfo_.load = PipelineCacheInfo::Load::Rejected;
+        }
         info.initialDataSize = 0;
         info.pInitialData = nullptr;
         (void)vkCreatePipelineCache(device_, &info, nullptr, &pipelineCache_);
+    } else if (initial) {
+        cacheInfo_.load = PipelineCacheInfo::Load::Loaded;
+        cacheInfo_.loadedBytes = initialBytes;
+        lastSavedCacheBytes_ = initialBytes;
+        AUREA_LOG_INFO("vulkan: cache de pipeline carregado (%zu KB)", initialBytes / 1024);
     }
-    if (!data.empty()) AUREA_LOG_INFO("vulkan: cache de pipeline carregado (%zu KB)", data.size() / 1024);
 }
 
 void Backend::save_pipeline_cache() noexcept {
-    if (!device_ || !pipelineCache_ || cachePath_.empty()) return;
+    if (!device_ || !pipelineCache_ || cachePath_.empty() || cacheHeader_.size() != sizeof(CacheFileHeader)) return;
     usize size = 0;
     if (vkGetPipelineCacheData(device_, pipelineCache_, &size, nullptr) != VK_SUCCESS || size == 0) return;
-    std::vector<u8> data(size);
-    if (vkGetPipelineCacheData(device_, pipelineCache_, &size, data.data()) != VK_SUCCESS) return;
-    const std::string tmp = cachePath_ + ".tmp";
-    if (std::FILE* f = std::fopen(tmp.c_str(), "wb")) {
-        const bool ok = std::fwrite(data.data(), 1, size, f) == size;
-        std::fclose(f);
-        // Troca atômica: um cache pela metade (app morto no meio) nunca
-        // substitui o bom.
-        if (ok) {
-            std::remove(cachePath_.c_str());
-            (void)std::rename(tmp.c_str(), cachePath_.c_str());
-        }
+    // Nada novo desde a carga/última gravação: ir para segundo plano não
+    // regrava centenas de KB à toa. (O blob só cresce quando entra pipeline.)
+    if (size == lastSavedCacheBytes_ && file_exists(cachePath_)) return;
+    if (size > kCacheMaxBytes) {
+        AUREA_LOG_WARN("vulkan: cache de pipeline grande demais (%zu KB); nao gravado", size / 1024);
+        return;
     }
+    std::vector<u8> file(sizeof(CacheFileHeader) + size);
+    if (vkGetPipelineCacheData(device_, pipelineCache_, &size, file.data() + sizeof(CacheFileHeader)) != VK_SUCCESS) return;
+    file.resize(sizeof(CacheFileHeader) + size);
+    CacheFileHeader h;
+    std::memcpy(&h, cacheHeader_.data(), sizeof(h));
+    h.dataBytes = size;
+    h.checksum = fnv1a(file.data() + sizeof(CacheFileHeader), size);
+    std::memcpy(file.data(), &h, sizeof(h));
+
+    const std::string tmp = cachePath_ + ".tmp";
+    std::FILE* f = std::fopen(tmp.c_str(), "wb");
+    if (!f) return;
+    bool ok = std::fwrite(file.data(), 1, file.size(), f) == file.size();
+    ok = std::fflush(f) == 0 && ok;
+#if !defined(_WIN32)
+    ok = ::fsync(::fileno(f)) == 0 && ok;
+#endif
+    ok = std::fclose(f) == 0 && ok;
+    // Troca atômica: um cache pela metade (app morto no meio, disco cheio)
+    // nunca substitui o bom. No POSIX o rename substitui; no Windows não.
+    if (!ok) {
+        std::remove(tmp.c_str());
+        return;
+    }
+#if defined(_WIN32)
+    std::remove(cachePath_.c_str());
+#endif
+    if (std::rename(tmp.c_str(), cachePath_.c_str()) != 0) {
+        std::remove(tmp.c_str());
+        return;
+    }
+    lastSavedCacheBytes_ = size;
+    cacheInfo_.savedBytes = size;
+    ++cacheInfo_.saves;
 }
 
 // =============================================================================

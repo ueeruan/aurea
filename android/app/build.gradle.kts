@@ -68,7 +68,13 @@ android {
 
         externalNativeBuild {
             cmake {
-                cppFlags += listOf("-std=c++23", "-fno-exceptions", "-fno-rtti")
+                // Visibilidade oculta (Fase 8I §187): só o que é JNIEXPORT
+                // (Java_*, JNI_OnLoad) sai da .so. Antes, ~4300 símbolos do
+                // motor inteiro iam para .dynsym/.dynstr (~400 KB por ABI) e
+                // toda chamada entre funções do motor passava pela PLT.
+                cppFlags += listOf("-std=c++23", "-fno-exceptions", "-fno-rtti",
+                                   "-fvisibility=hidden", "-fvisibility-inlines-hidden")
+                cFlags += listOf("-fvisibility=hidden")
                 arguments += listOf(
                     "-DANDROID_STL=c++_shared",
                     "-DCMAKE_BUILD_TYPE=RelWithDebInfo",
@@ -102,8 +108,14 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false      // o motor é C++; ofuscar só a UI não ajuda
-            isShrinkResources = false    // os assets de marca são referenciados por nome
+            // R8 (Fase 8I §180–187): o dex cru era 44 MB (material-icons-extended
+            // inteiro, Compose sem encolher). O motor é C++, mas o que o R8 tira
+            // é a UI e as bibliotecas que ninguém chama. O que o C++ chama por
+            // JNI está preso em proguard-rules.pro.
+            isMinifyEnabled = true
+            // Recursos sem referência saem. Tudo que o app usa é referenciado
+            // por R.* ou por XML (splash, ícone) — nenhum getIdentifier.
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",

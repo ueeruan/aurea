@@ -962,6 +962,18 @@ public:
 
     void debug_feed_frame_stats(const FrameStats& stats) noexcept;
 
+    /// Quanto cada etapa de `initialize` custou nesta execução (§59: abertura
+    /// medida, não estimada). Sai uma linha no log e o teste de abertura lê.
+    struct StartupTimings {
+        f32 jobsMs = 0.0f;       ///< detecção do aparelho + workers
+        f32 gpuMs = 0.0f;        ///< backend: instância, dispositivo, cache de pipeline
+        f32 rendererMs = 0.0f;   ///< shaders + pipelines pré-aquecidos
+        f32 restMs = 0.0f;       ///< fontes, mídia, áudio, miniaturas
+        f32 totalMs = 0.0f;
+        u32 pipelinesPrewarmed = 0;
+    };
+    [[nodiscard]] const StartupTimings& startup_timings() const noexcept { return startup_; }
+
     [[nodiscard]] const std::string& cache_directory() const noexcept { return config_.cacheDirectory; }
     [[nodiscard]] const std::string& documents_directory() const noexcept { return config_.documentsDirectory; }
 
@@ -993,6 +1005,7 @@ private:
     [[nodiscard]] AdaptiveResolutionController& adapt() noexcept { return *adaptive_; }
 
     EngineConfig       config_{};
+    StartupTimings     startup_{};
     std::atomic<EngineState> state_{EngineState::Uninitialized};
     Errc               lastError_ = Errc::Ok;
     char               lastErrorDetail_[128]{};

@@ -141,8 +141,8 @@ internal fun cubicBezier(x1: Float, y1: Float, x2: Float, y2: Float, x: Float): 
     return b(y1, y2, mid)
 }
 
-/** Um preset de uma família: nome [A] e o easing do motor. Nulo = sem suporte no motor ainda. */
-private class CurvePreset(val name: String, val ease: Ease?, val entry: com.aurea.aurea.presets.PresetEntry? = null)
+/** Um preset de uma família: nome [A] e o easing do motor. */
+private class CurvePreset(val name: String, val ease: Ease, val entry: com.aurea.aurea.presets.PresetEntry? = null)
 
 private class CurveFamily(val name: String, val glyph: Char, val presets: List<CurvePreset>)
 
@@ -151,7 +151,8 @@ private fun bez(x1: Float, y1: Float, x2: Float, y2: Float) = Ease(Interp.BEZIER
 /**
  * AS FAMÍLIAS DA CURVA [A] (`_familiasDaCurva`). As bézier da A.01 são as
  * mesmas alças (0,42 / 0,58); "Manter" é o `Hold` do motor. Quique, elástico,
- * degraus e osciladores ainda não existem no motor → "em breve".
+ * degraus e osciladores não existem no motor: as famílias que só mostravam
+ * "em breve" saíram na Fase 8I (§195, sem botão falso).
  */
 private val Families = listOf(
     CurveFamily(
@@ -164,28 +165,13 @@ private val Families = listOf(
         ),
     ),
     CurveFamily(
-        "Quique", CupertinoGlyph.Sportscourt,
-        listOf(CurvePreset("Quique na saída", null), CurvePreset("Quique na entrada", null), CurvePreset("Elástico na saída", null), CurvePreset("Elástico na entrada", null)),
-    ),
-    CurveFamily(
-        "Degraus", CupertinoGlyph.ChartBarAltFill,
-        listOf(CurvePreset("Degraus", null), CurvePreset("Degraus aleatórios", null), CurvePreset("Degraus elásticos", null), CurvePreset("Manter", Ease(Interp.HOLD, 0f, 0f, 1f, 1f))),
-    ),
-    CurveFamily(
-        "Outras", CupertinoGlyph.WaveformPath,
-        listOf(CurvePreset("Oscilar", null), CurvePreset("Cíclica", null), CurvePreset("Aleatória", null), CurvePreset("Repetir", null), CurvePreset("Dente de serra", null), CurvePreset("Mola", null)),
+        "Manter", CupertinoGlyph.ChartBarAltFill,
+        listOf(CurvePreset("Manter", Ease(Interp.HOLD, 0f, 0f, 1f, 1f))),
     ),
 )
 
-/** Miniaturas dos presets sem motor: o desenho da A.01 aproximado (só ilustração). */
-private fun previewOf(p: CurvePreset): Ease = p.ease ?: when (p.name) {
-    "Quique na saída", "Elástico na saída" -> bez(0.2f, 1.3f, 0.5f, 0.9f)
-    "Quique na entrada", "Elástico na entrada" -> bez(0.5f, 0.1f, 0.8f, -0.3f)
-    else -> Ease(Interp.LINEAR, 0f, 0f, 1f, 1f)
-}
-
 private fun nameOf(e: Ease): String {
-    for (f in Families) for (p in f.presets) if (p.ease != null && e.same(p.ease)) return p.name
+    for (f in Families) for (p in f.presets) if (e.same(p.ease)) return p.name
     return when (e.interp) {
         Interp.EASE_IN -> "Suave na entrada"
         Interp.EASE_OUT -> "Suave na saída"
@@ -194,7 +180,7 @@ private fun nameOf(e: Ease): String {
     }
 }
 
-private fun familyOf(e: Ease): Int = if (e.interp == Interp.HOLD) 2 else 0
+private fun familyOf(e: Ease): Int = if (e.interp == Interp.HOLD) 1 else 0
 
 /**
  * AS ALÇAS QUE O MOTOR NÃO PUBLICA. `KeyframeRow` traz só a interpolação, não os
@@ -373,14 +359,10 @@ internal fun CurvePanel(env: PanelEnv) {
             current = ease,
             saved = saved,
             onPick = { p ->
-                val e = p.ease
-                if (e == null) store.comingSoon(p.name)
-                else {
-                    store.beginGesture("curva")
-                    applyEase(store, layer, start, e)
-                    store.endGesture()
-                    p.entry?.let { store.presets.markUsed(it) }
-                }
+                store.beginGesture("curva")
+                applyEase(store, layer, start, p.ease)
+                store.endGesture()
+                p.entry?.let { store.presets.markUsed(it) }
             },
         )
     }
@@ -418,10 +400,6 @@ internal fun CurvePanel(env: PanelEnv) {
                     store.endGesture()
                 },
                 SheetAction(if (overshoot) "Overshoot ✓" else "Overshoot") { overshoot = !overshoot },
-                SheetAction("Gráfico de velocidade") { store.comingSoon("Gráfico de velocidade") },
-                SheetAction("Loop: nenhum") { store.comingSoon("Loop da propriedade") },
-                SheetAction("Loop: repetir") { store.comingSoon("Loop da propriedade") },
-                SheetAction("Loop: vai e volta") { store.comingSoon("Loop da propriedade") },
             ),
             onDismiss = { menu = false },
         )
@@ -583,7 +561,7 @@ private fun CurveFamilies(current: Ease, saved: List<CurvePreset>, onPick: (Curv
         Box(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(horizontal = 2.dp, vertical = 6.dp), contentAlignment = Alignment.Center) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 family.presets.forEach { p ->
-                    val on = p.ease != null && current.same(p.ease)
+                    val on = current.same(p.ease)
                     Box(
                         Modifier
                             .size(38.dp)
@@ -592,7 +570,7 @@ private fun CurveFamilies(current: Ease, saved: List<CurvePreset>, onPick: (Curv
                             .border(if (on) 1.8.dp else 1.dp, if (on) AureaColors.Accent else AureaColors.CurvePresetBorder, RoundedCornerShape(8.dp))
                             .tocavel { onPick(p) },
                     ) {
-                        PresetThumb(previewOf(p), on, Modifier.fillMaxSize().alpha(if (p.ease == null) 0.45f else 1f))
+                        PresetThumb(p.ease, on, Modifier.fillMaxSize())
                     }
                 }
             }

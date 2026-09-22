@@ -94,17 +94,6 @@ fun comUnidade(texto: String, unit: String): String = when {
     else -> "$texto $unit"
 }
 
-/** Casas automáticas da A.01 (`_casasAutomaticas`): faixa ≤ 2 → 3; ≤ 20 → 2; senão 1. */
-fun casasAutomaticas(min: Float, max: Float): Int {
-    val faixa = abs(max - min)
-    if (!faixa.isFinite()) return 1
-    return when {
-        faixa <= 2f -> 3
-        faixa <= 20f -> 2
-        else -> 1
-    }
-}
-
 // =============================================================================
 // Estado do keyframe (três estados, calculados dos dados do store)
 // =============================================================================

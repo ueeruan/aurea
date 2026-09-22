@@ -72,7 +72,6 @@ internal fun TimeRemapGraph(store: EditorStore) {
                         val h = size.height.toFloat()
                         fun px(k: FloatArray) = Offset(pad + (k[0] - t0) / (t1 - t0) * (w - 2 * pad), h - pad - k[1] / srcMax * (h - 2 * pad))
                         fun frameAt(x: Float) = (t0 + (x - pad) / (w - 2 * pad) * (t1 - t0)).roundToInt().toLong()
-                        fun valueAt(y: Float) = ((h - pad - y) / (h - 2 * pad) * srcMax).coerceIn(0f, srcMax)
                         fun hit(o: Offset): Int {
                             val cur = store.timeRemap ?: return -1
                             val m = cur[0].toInt()

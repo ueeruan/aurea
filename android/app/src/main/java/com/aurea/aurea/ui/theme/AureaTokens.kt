@@ -198,7 +198,7 @@ object AureaType {
     val HeadlineLarge = Base.merge(TextStyle(fontSize = 34.sp, fontWeight = FontWeight.W700, letterSpacing = (-0.8).sp, lineHeight = 1.1.em))
     /** Título de tela dentro de uma aba (21–22 w700). */
     val ScreenTitle = of(21f, FontWeight.W700, -0.4f)
-    /** Cabeçalho de tela grande (28 w800), como o "Comunidade" da A.01. */
+    /** Cabeçalho de tela grande (28 w800): o título das abas da Home. */
     val TitleLarge = Base.merge(TextStyle(fontSize = 22.sp, fontWeight = FontWeight.W700, letterSpacing = (-0.5).sp, lineHeight = 1.27.em))
     val TitleMedium = Base.merge(TextStyle(fontSize = 17.sp, fontWeight = FontWeight.W600, letterSpacing = (-0.3).sp, lineHeight = 1.5.em))
     val TitleSmall = of(17f, FontWeight.W700, -0.4f)
@@ -367,8 +367,6 @@ object AureaElevation {
     /** Tinta e cor sólida de recuo de cada vidro. */
     fun tabBarTint() = AureaColors.Background.copy(alpha = 0.72f)
     fun tabBarFallback() = AureaColors.Background.copy(alpha = 0.97f)
-    fun compactBarTint() = AureaColors.Background.copy(alpha = 0.62f)
-    fun compactBarFallback() = AureaColors.Background.copy(alpha = 0.97f)
     fun batchBarTint() = AureaColors.Surface.copy(alpha = 0.88f)
     fun batchBarFallback() = AureaColors.Surface
 }

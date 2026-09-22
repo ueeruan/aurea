@@ -60,7 +60,7 @@ import kotlin.math.roundToInt
 /**
  * Tudo o que se faz com UMA camada, com rótulo (A.01): camada, etiqueta,
  * recorte e grupo, na composição, mídia, tempo e o resto. O que o motor
- * novo já faz está ligado; o resto diz "em breve".
+ * novo já faz está ligado; o que ele não faz não aparece.
  */
 @Composable
 internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> Unit) {

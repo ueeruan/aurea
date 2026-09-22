@@ -342,6 +342,9 @@ public:
     [[nodiscard]] const TransientTexturePool::Stats& pool_stats() const noexcept { return pool_.stats(); }
     [[nodiscard]] ShaderLibrary& shaders() noexcept { return shaders_; }
     [[nodiscard]] u32 pipelines_prewarmed() const noexcept { return prewarmed_; }
+    /// Pipelines de efeito/3D compilados pela varredura do projeto (fora do
+    /// playback), depois da abertura. Teste de abertura e HUD.
+    [[nodiscard]] u32 pipelines_warmed_for_project() const noexcept { return warmedForProject_; }
     [[nodiscard]] bool last_frame_zero_copy() const noexcept { return lastZeroCopy_; }
     [[nodiscard]] std::string graph_dump() const { return graph_.dump(); }
     [[nodiscard]] u32 frames_rendered() const noexcept { return framesRendered_; }
@@ -538,6 +541,16 @@ private:
     u32 nestSalt_ = 0;                              ///< ≠ 0 dentro de uma pré-composição (ids únicos)
     u32 compTargetW_ = 0, compTargetH_ = 0;
     u32 prewarmed_ = 0;
+    // --- Pré-aquecimento preguiçoso (Fase 8I, §60–62) ------------------------
+    // A abertura só compila o que todo projeto usa. Fora do playback, cada
+    // quadro preparado varre o projeto (efeitos e 3D de TODAS as camadas, não
+    // só as do instante) e junta o que falta; o render compila antes do grafo.
+    void scan_for_warmup(const Project& project) noexcept;
+    void flush_warmup() noexcept;
+    std::vector<PipelineKey> warmPending_;
+    std::vector<EffectTypeId> warmedEffects_;   ///< ordenado; tipos já pedidos
+    bool warmed3d_ = false;
+    u32 warmedForProject_ = 0;
     u32 framesRendered_ = 0;
     u64 frameNumber_ = 0;
     bool lastZeroCopy_ = false;

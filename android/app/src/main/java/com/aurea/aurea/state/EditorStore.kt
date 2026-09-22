@@ -187,8 +187,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     private val engine = AureaEngine.create(app)
 
-    /** Legendas automáticas (transcrição + camadas); ver `CaptionsState`. */
-    val captions = com.aurea.aurea.captions.CaptionsState(app, engine, viewModelScope) { refreshNow() }
+    /**
+     * Legendas automáticas (transcrição + camadas); ver `CaptionsState`.
+     * Criadas no primeiro uso (8I): a abertura não lê o cofre da chave.
+     */
+    val captions by lazy { com.aurea.aurea.captions.CaptionsState(app, engine, viewModelScope) { refreshNow() } }
 
     /** Export (tela Exportar). O motor renderiza; aqui só acompanha e publica. */
     val exporter = Exporter(app, engine, viewModelScope)
@@ -254,12 +257,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * demonstração do motor, em RGBA8. Devolve nulo quando não dá para
      * pré-visualizar — e aí o cartão mostra a cartela genérica.
      *
-     * Cada chamada traz o SEU buffer: a geração roda em `Dispatchers.Default` e
-     * vários cartões podem pedir prévia ao mesmo tempo. Um buffer compartilhado
-     * aqui seria uma corrida silenciosa — a prévia de um efeito apareceria no
-     * cartão de outro.
+     * Cada chamada traz o SEU buffer. Hoje as prévias passam por uma fila de
+     * um só (EffectPreviewStore), mas um buffer compartilhado aqui voltaria a
+     * ser corrida silenciosa no dia em que a fila crescer — a prévia de um
+     * efeito apareceria no cartão de outro.
      */
     private fun renderEffectPreview(typeId: Int, width: Int, height: Int): ImageBitmap? {
+        ensureEffectPreviewPhoto()
         val pixels = directBuffer(width * height * 4)
         val dims = IntArray(2)
         if (!engine.renderEffectPreview(typeId, width, height, pixels, dims)) return null
@@ -322,7 +326,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     var selectedKeyframe by mutableStateOf<Pair<Long, KeyframeRow>?>(null)
         private set
 
-    /** Aviso curto e não bloqueante (ex.: "Em breve no Aurea novo"). A UI some com ele em ~2 s. */
+    /** Aviso curto e não bloqueante (ex.: "Salvo na galeria"). A UI some com ele em ~2 s. */
     var toast by mutableStateOf<String?>(null)
         private set
     private var toastSerial = 0
@@ -332,9 +336,6 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val serial = ++toastSerial
         main.postDelayed({ if (serial == toastSerial) toast = null }, 2200)
     }
-
-    /** Para os recursos que o motor novo ainda não tem: diz, não finge. */
-    fun comingSoon(feature: String) = showToast("$feature: em breve no Aurea novo")
 
     fun selectKeyframe(layer: Long, key: KeyframeRow) {
         selectedKeyframe = layer to key
@@ -411,8 +412,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                         startThermalWatch()
                         engineReady = true
                         catalog = readCatalog()
-                        loadEffectPreviewPhoto()
-                        effectPreviews = EffectPreviewStore(dirs.cache, ::renderEffectPreview)
+                        // Abertura (Fase 8I §59–63): a foto das prévias NÃO é
+                        // decodificada aqui (era JPEG + cópia de 1,6 MB no main
+                        // thread em toda abertura); sobe na primeira prévia.
+                        effectPreviews = EffectPreviewStore(dirs.cache, installStamp(), ::renderEffectPreview)
                         startStatusLoop()
                     } else {
                         errorMessage = "Não foi possível iniciar o motor gráfico (Vulkan) neste aparelho."
@@ -429,9 +432,15 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /**
      * A foto das prévias de efeito (assets/previa_efeitos.jpg): cada efeito é
-     * mostrado aplicado sobre ela, não sobre uma cartela de teste.
+     * mostrado aplicado sobre ela, não sobre uma cartela de teste. Carregada
+     * UMA vez, na primeira prévia pedida (fila de render das prévias, fora do
+     * main thread) — quem nunca abre o navegador de efeitos não paga nada.
      */
-    private fun loadEffectPreviewPhoto() {
+    @Volatile private var previewPhotoLoaded = false
+
+    private fun ensureEffectPreviewPhoto() {
+        if (previewPhotoLoaded) return
+        previewPhotoLoaded = true
         runCatching {
             getApplication<Application>().assets.open("previa_efeitos.jpg").use { input ->
                 val bmp = android.graphics.BitmapFactory.decodeStream(input, null,
@@ -443,6 +452,17 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 bmp.recycle()
             }
         }
+    }
+
+    /**
+     * Carimbo desta instalação (muda a cada atualização do app): versão das
+     * prévias de efeito guardadas em disco. Efeito ou foto novos → prévias
+     * refeitas, nunca a imagem velha de um efeito que mudou.
+     */
+    private fun installStamp(): String {
+        val app = getApplication<Application>()
+        return runCatching { app.packageManager.getPackageInfo(app.packageName, 0).lastUpdateTime.toString(16) }
+            .getOrDefault("0")
     }
 
     /** O que o motor decidiu para ESTE aparelho (mostrado nos Ajustes). */
@@ -899,12 +919,6 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         } else {
             null
         })
-        echo = if (id != null) {
-            val out = FloatArray(4)
-            if (engine.queryEcho(id, out)) out.toList() else null
-        } else {
-            null
-        }
         particles = if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Particles.kind) {
             val out = FloatArray(8)
             if (engine.queryParticles(id, out)) out.toList() else null
@@ -2110,8 +2124,6 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         showToast("Toque no ponto a seguir (um detalhe com contraste)")
     }
 
-    fun cancelPointPick() { pointPick = null; pickCursor = null }
-
     /** Mira do rastreio de ponto (px da composição): segue o dedo; no rastreio, fica no ponto. */
     var pickCursor by mutableStateOf<androidx.compose.ui.geometry.Offset?>(null)
     /** Tamanho do bloco e da janela de busca do rastreio, em px da composição (desenho da mira). */
@@ -2353,30 +2365,6 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshNow()
     }
 
-    // --- Eco e RGB no tempo -------------------------------------------------------------------
-    /** {cópias, atraso, queda, atraso RGB} da camada escolhida. */
-    var echo by mutableStateOf<List<Float>?>(null)
-        private set
-
-    fun setEcho(count: Int, delay: Float, decay: Float) {
-        val id = primary ?: return
-        engine.setEcho(id, count, delay, decay)
-        refreshNow()
-    }
-
-    fun setRgbTime(delay: Float) {
-        val id = primary ?: return
-        engine.setRgbTime(id, delay)
-        refreshNow()
-    }
-
-    // --- Transições ------------------------------------------------------------------------
-    fun setTransition(out: Boolean, type: Int, frames: Int) {
-        val id = primary ?: return
-        engine.setTransition(id, out, type, frames)
-        refreshNow()
-    }
-
     // --- Partículas ------------------------------------------------------------------------
     /** Parâmetros da camada de partículas escolhida (8, ver Engine::query_particles). */
     var particles by mutableStateOf<List<Float>?>(null)
@@ -2578,7 +2566,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     // =========================================================================
     // Presets (JSON do motor; arquivos em filesDir/presets/<tipo>/)
     // =========================================================================
-    val presets = com.aurea.aurea.presets.PresetLibrary(app)
+    /** Criada no primeiro uso (8I): a abertura não lista as pastas de presets. */
+    val presets by lazy { com.aurea.aurea.presets.PresetLibrary(app) }
 
     /**
      * JSON do preset `kind` a partir do que está na tela: a camada escolhida
@@ -3126,26 +3115,6 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun setParent(layer: Long, parent: Long) {
         send { setLayerParent(layer, parent) }
         refreshNow()
-    }
-
-    /**
-     * Vincular em lote: a ÚLTIMA camada escolhida vira o pai das outras (como
-     * arrastar o pick whip de várias camadas para uma). Um passo de desfazer.
-     */
-    fun parentSelectionToLast() {
-        val ids = selection.toList()
-        if (ids.size < 2) return
-        val parent = ids.last()
-        val children = ids.dropLast(1).filter { c -> parentCandidates(c).any { it.id == parent } }
-        if (children.isEmpty()) {
-            showToast("Essas camadas já formam uma cadeia — nada a vincular")
-            return
-        }
-        beginGesture("vincular camadas")
-        children.forEach { c -> send { setLayerParent(c, parent) } }
-        endGesture()
-        refreshNow()
-        showToast("${children.size} camada(s) seguindo a última escolhida")
     }
 
     /** Vários filhos para o mesmo pai (0 = soltar), num passo de desfazer. */
@@ -3766,10 +3735,6 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     fun dismissError() {
         errorMessage = null
-    }
-
-    fun showError(message: String) {
-        errorMessage = message
     }
 
     companion object {

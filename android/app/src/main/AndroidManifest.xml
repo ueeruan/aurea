@@ -20,19 +20,11 @@
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32"/>
 
-    <!-- Gravação: câmera e microfone para captura direta no editor. -->
-    <uses-permission android:name="android.permission.CAMERA"/>
-    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
-
-    <!-- Salvar na galeria em Android 9 e anteriores. Do 10 em diante o
-         MediaStore não pede permissão nenhuma. -->
-    <uses-permission
-        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
-        android:maxSdkVersion="28"/>
-
-    <!-- Atualização dentro do app: o aparelho baixa o APK e abre o instalador.
-         Sem esta permissão o Android recusa a instalação. -->
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+    <!-- Fase 8I (§185, §195): saíram CAMERA, RECORD_AUDIO (não há captura no
+         editor), REQUEST_INSTALL_PACKAGES (não há atualização dentro do app)
+         e WRITE_EXTERNAL_STORAGE (no Android 8–9 o export fica na pasta do
+         próprio app, que não pede permissão — ver Exporter). Permissão
+         declarada sem recurso que a use é promessa falsa na loja. -->
 
     <!-- O motor precisa de Vulkan. Sem `required`, o app instala em aparelhos
          sem Vulkan 1.1 e o preview nunca sobe — melhor recusar na loja do que

@@ -401,6 +401,10 @@ struct BackendConfig {
     bool enableValidation = false;
     /// Onde persistir o cache de pipeline entre execuções.
     const char* cacheDirectory = nullptr;
+    /// Versão do cache de pipeline (impressão digital dos SPIR-V embutidos).
+    /// Mudou (app atualizado, shader novo) → o arquivo antigo é descartado em
+    /// vez de crescer para sempre com entradas mortas. 0 = não confere.
+    u64 pipelineCacheTag = 0;
     /// Frames em voo (CPU gravando o N+1 enquanto a GPU executa o N).
     u32 framesInFlight = 3;
     /// Liga as timestamp queries por passe (painel DEV).
@@ -636,6 +640,23 @@ public:
     /// Grava o cache de pipeline. Chamado ao ir para segundo plano — pode
     /// bloquear enquanto o driver serializa, então NUNCA no caminho de frame.
     virtual void save_pipeline_cache() noexcept = 0;
+
+    /// O que aconteceu com o cache de pipeline em disco nesta execução
+    /// (relatório de abertura e testes de cache corrompido).
+    struct PipelineCacheInfo {
+        enum class Load : u8 {
+            None = 0,      ///< sem diretório de cache ou backend sem cache
+            Missing,       ///< primeira abertura: não havia arquivo
+            Loaded,        ///< aceito e entregue ao driver
+            Rejected,      ///< corrompido, de outro aparelho/driver ou de outra versão: apagado
+            CrashGuard,    ///< a carga anterior derrubou o processo: apagado sem ler
+        };
+        Load load = Load::None;
+        u64  loadedBytes = 0;   ///< tamanho do payload aceito
+        u64  savedBytes = 0;    ///< última gravação desta execução
+        u32  saves = 0;         ///< gravações feitas (sem pipeline novo, não grava)
+    };
+    [[nodiscard]] virtual PipelineCacheInfo pipeline_cache_info() const noexcept { return {}; }
 };
 
 // Não há `create_default()` aqui de propósito: o núcleo não pode depender de

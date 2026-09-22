@@ -185,6 +185,13 @@ struct ParticleData {
     u32  maxParticles = 10000;
     u32  blendMode = 1;          ///< aditivo por padrão
     bool collideEnvironment = false;
+    // v7: aparência e emissor (partículas analíticas na GPU)
+    Vec4 startColor{1.0f, 0.85f, 0.45f, 1.0f};   ///< sRGB, reta
+    Vec4 endColor{1.0f, 0.35f, 0.10f, 1.0f};
+    f32  direction = -90.0f;     ///< graus; −90 = para cima (y da tela para baixo)
+    u32  seed = 1;
+    Vec2 emitterSize{20.0f, 20.0f};
+    Vec2 emitterOffset{0.0f, 0.0f};   ///< do centro da camada (px)
 };
 
 struct CompositionRef {

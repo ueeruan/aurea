@@ -479,6 +479,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     private fun refreshDetail() {
         val id = primary
         detail = if (id != null && engine.queryLayerDetail(id, detailBuffer)) LayerDetail.read(detailBuffer) else null
+        particles = if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Particles.kind) {
+            val out = FloatArray(8)
+            if (engine.queryParticles(id, out)) out.toList() else null
+        } else {
+            null
+        }
         textDetail = if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Text.kind) {
             engine.queryText(id, textFloats)?.let { com.aurea.aurea.engine.TextDetail.of(it, textFloats) }
         } else {
@@ -1189,6 +1195,34 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (!engine.closePrecomp()) return
         selection = LinkedHashSet()
         refreshNow()
+    }
+
+    // --- Partículas ------------------------------------------------------------------------
+    /** Parâmetros da camada de partículas escolhida (8, ver Engine::query_particles). */
+    var particles by mutableStateOf<List<Float>?>(null)
+        private set
+
+    fun addParticles(preset: Int = 0): Long {
+        val id = engine.addParticles(preset)
+        if (id < 0) {
+            errorMessage = "Não foi possível criar as partículas (erro ${-id})."
+            return -1
+        }
+        refreshNow()
+        select(id)
+        return id
+    }
+
+    fun applyParticlePreset(preset: Int) {
+        val id = primary ?: return
+        engine.applyParticlePreset(id, preset)
+        refreshNow()
+    }
+
+    fun setParticleParam(param: Int, value: Float) {
+        val id = primary ?: return
+        engine.setParticleParam(id, param, value)
+        refreshDetail()
     }
 
     // --- Remapeamento de tempo -----------------------------------------------------------

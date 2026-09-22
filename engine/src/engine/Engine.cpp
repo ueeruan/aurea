@@ -879,6 +879,107 @@ Result<u64> Engine::add_null(bool threeD) noexcept {
     return lid.pack();
 }
 
+namespace {
+void particle_preset(ParticleData& p, u32 preset, f32 w, f32 h) noexcept {
+    p = ParticleData{};
+    switch (preset) {
+        case 1:   // neve: cai devagar, de toda a largura do topo
+            p.rate = 40; p.lifetime = 9; p.speed = 70; p.spread = 25; p.gravity = Vec3{0, 0, 0};
+            p.startSize = 9; p.endSize = 9; p.startOpacity = 0.9f; p.endOpacity = 0.5f;
+            p.startColor = Vec4{1, 1, 1, 1}; p.endColor = Vec4{0.85f, 0.92f, 1, 1};
+            p.direction = 90; p.blendMode = 0;
+            p.emitterSize = Vec2{w, 10}; p.emitterOffset = Vec2{0, -h * 0.5f - 10};
+            break;
+        case 2:   // poeira de luz: sobe devagar, grande e suave
+            p.rate = 12; p.lifetime = 6; p.speed = 25; p.spread = 360; p.gravity = Vec3{0, 0, 0};
+            p.startSize = 26; p.endSize = 44; p.startOpacity = 0.55f; p.endOpacity = 0;
+            p.startColor = Vec4{1, 0.92f, 0.75f, 1}; p.endColor = Vec4{1, 0.8f, 0.55f, 1};
+            p.direction = -90; p.blendMode = 1;
+            p.emitterSize = Vec2{w, h};
+            break;
+        default:  // faíscas: jato para cima com gravidade
+            p.rate = 120; p.lifetime = 1.3f; p.speed = 480; p.spread = 50; p.gravity = Vec3{0, -900, 0};
+            p.startSize = 10; p.endSize = 2; p.startOpacity = 1; p.endOpacity = 0;
+            p.direction = -90; p.blendMode = 1;
+            p.emitterSize = Vec2{24, 24};
+            break;
+    }
+}
+} // namespace
+
+Result<u64> Engine::add_particles(u32 preset) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp) return Status{Errc::InvalidState, "nenhum projeto aberto"};
+    history_.before_mutation(*comp, project_->timeline().current(), "adicionar particulas");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    const char* names[] = {"Faíscas", "Neve", "Poeira de luz"};
+    const LayerId lid = comp->add_layer(LayerKind::ParticleSystem, names[std::min<u32>(preset, 2u)]);
+    Layer* l = comp->layer(lid);
+    if (!l) return Status{Errc::OutOfMemory, "camada nao criada"};
+    const f32 w = static_cast<f32>(comp->width()), h = static_cast<f32>(comp->height());
+    particle_preset(l->particles, preset, w, h);
+    l->particles.seed = lid.index * 7919u + 1u;
+    const i64 t = std::clamp<i64>(playback_.current().value, 0, std::max<i64>(0, comp->duration().value - 1));
+    l->start = FrameIndex{t};
+    l->end = FrameIndex{std::max<i64>(t + 1, comp->duration().value)};
+    l->transform.anchor = Vec3{w * 0.5f, h * 0.5f, 0};
+    l->transform.position = Vec3{w * 0.5f, h * 0.5f, 0};
+    project_->mark_dirty();
+    request_render();
+    return lid.pack();
+}
+
+bool Engine::apply_particle_preset(u64 layerId, u32 preset) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->kind != LayerKind::ParticleSystem) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "preset de particulas");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    const u32 seed = l->particles.seed;
+    particle_preset(l->particles, preset, static_cast<f32>(comp->width()), static_cast<f32>(comp->height()));
+    l->particles.seed = seed;
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::set_particle_param(u64 layerId, u32 param, f32 v) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->kind != LayerKind::ParticleSystem || param > 7) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "particulas");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    ParticleData& p = l->particles;
+    switch (param) {
+        case 0: p.rate = std::clamp(v, 0.1f, 2000.0f); break;
+        case 1: p.lifetime = std::clamp(v, 0.05f, 30.0f); break;
+        case 2: p.speed = std::clamp(v, 0.0f, 5000.0f); break;
+        case 3: p.spread = std::clamp(v, 0.0f, 360.0f); break;
+        case 4: p.gravity.y = std::clamp(v, -5000.0f, 5000.0f); break;
+        case 5: p.startSize = std::clamp(v, 0.0f, 500.0f); break;
+        case 6: p.endSize = std::clamp(v, 0.0f, 500.0f); break;
+        case 7: p.direction = v; break;
+        default: break;
+    }
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::query_particles(u64 layerId, f32* out) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->kind != LayerKind::ParticleSystem || !out) return false;
+    const ParticleData& p = l->particles;
+    const f32 v[8] = {p.rate, p.lifetime, p.speed, p.spread, p.gravity.y, p.startSize, p.endSize, p.direction};
+    std::copy(v, v + 8, out);
+    return true;
+}
+
 bool Engine::set_time_remap(u64 layerId, bool on) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
@@ -2561,6 +2662,11 @@ bool Engine::fill_layer_detail_locked(u64 layerId, bridge::LayerDetailPOD& out) 
     if (l->kind == LayerKind::Null) {
         out.sourceWidth = 100;
         out.sourceHeight = 100;
+        return true;
+    }
+    if (l->kind == LayerKind::ParticleSystem) {
+        out.sourceWidth = comp->width();
+        out.sourceHeight = comp->height();
         return true;
     }
     if (l->kind == LayerKind::Composition) {

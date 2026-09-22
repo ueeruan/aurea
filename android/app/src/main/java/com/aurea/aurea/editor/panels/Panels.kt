@@ -39,6 +39,7 @@ enum class EditorPanel {
     Shape,         // cor e preenchimento / editar forma
     Text,          // editar texto
     Parent,        // seguir outra camada (parentesco)
+    Particles,     // partículas
 }
 
 /**
@@ -95,6 +96,7 @@ fun PanelContent(
         EditorPanel.Shape -> "Cor e preenchimento"
         EditorPanel.Text -> "Texto"
         EditorPanel.Parent -> "Seguir outra camada"
+        EditorPanel.Particles -> "Partículas"
     }
 
     Column(modifier.fillMaxSize().background(AureaColors.EditorPanel)) {
@@ -111,6 +113,7 @@ fun PanelContent(
                     EditorPanel.Shape -> ShapePanel(env)
                     EditorPanel.Text -> TextPanel(env)
                     EditorPanel.Parent -> ParentPanel(env)
+                    EditorPanel.Particles -> ParticlesPanel(env)
                 }
             }
         }

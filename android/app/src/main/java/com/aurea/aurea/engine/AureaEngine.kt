@@ -290,6 +290,12 @@ class AureaEngine private constructor() {
     fun precompDepth(): Int = nativePrecompDepth(nativeHandle)
     fun compositionName(): String = nativeCompositionName(nativeHandle) ?: ""
 
+    // Partículas.
+    fun addParticles(preset: Int): Long = nativeAddParticles(nativeHandle, preset)
+    fun applyParticlePreset(layer: Long, preset: Int): Boolean = nativeApplyParticlePreset(nativeHandle, layer, preset)
+    fun setParticleParam(layer: Long, param: Int, value: Float): Boolean = nativeSetParticleParam(nativeHandle, layer, param, value)
+    fun queryParticles(layer: Long, out: FloatArray): Boolean = nativeQueryParticles(nativeHandle, layer, out)
+
     // Remapeamento de tempo / rampas.
     fun setTimeRemap(layer: Long, on: Boolean): Boolean = nativeSetTimeRemap(nativeHandle, layer, on)
     fun applySpeedRamp(layer: Long, preset: Int): Boolean = nativeApplySpeedRamp(nativeHandle, layer, preset)
@@ -411,6 +417,10 @@ class AureaEngine private constructor() {
     private external fun nativeSetEditMode(handle: Long, on: Boolean)
     private external fun nativeSetMotionBlur(handle: Long, layer: Long, on: Boolean): Boolean
     private external fun nativeSetTimeRemap(handle: Long, layer: Long, on: Boolean): Boolean
+    private external fun nativeAddParticles(handle: Long, preset: Int): Long
+    private external fun nativeApplyParticlePreset(handle: Long, layer: Long, preset: Int): Boolean
+    private external fun nativeSetParticleParam(handle: Long, layer: Long, param: Int, value: Float): Boolean
+    private external fun nativeQueryParticles(handle: Long, layer: Long, out: FloatArray): Boolean
     private external fun nativeApplySpeedRamp(handle: Long, layer: Long, preset: Int): Boolean
     private external fun nativePrecompose(handle: Long, ids: LongArray): Long
     private external fun nativeOpenPrecomp(handle: Long, layer: Long): Boolean

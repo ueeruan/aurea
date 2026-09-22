@@ -1471,6 +1471,38 @@ AUREA_TEST(Gpu, PrecomposeChildOfOutsideParentStaysInPlace) {
     AUREA_CHECK(worst <= 3);
 }
 
+AUREA_TEST(Gpu, ParticlesAreDeterministicAndSeekable) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(320, 180);
+    auto id = rig.e.add_particles(0);   // faíscas
+    AUREA_CHECK(id.ok());
+    auto seekTo = [&](i64 f) {
+        Command c;
+        c.type = CommandType::PlaybackSeek;
+        c.seek.time = tick_at(FrameIndex{f}, 30.0);
+        AUREA_CHECK(rig.e.apply_command(c).ok());
+    };
+    seekTo(3);
+    const f32 early = coverage(rig.capture(320));
+    seekTo(30);
+    const Image8 a = rig.capture(320);
+    const f32 at1s = coverage(a);
+    seekTo(90);
+    (void)rig.capture(320);
+    seekTo(30);   // voltar: o mesmo quadro, sem simulação a refazer
+    const Image8 b = rig.capture(320);
+    u32 worst = 0;
+    for (usize i = 0; i < a.rgba.size() && i < b.rgba.size(); ++i)
+        worst = std::max<u32>(worst, static_cast<u32>(std::abs(a.rgba[i] - b.rgba[i])));
+    const Box8 box = lit_box(a);
+    std::printf("    particulas: cobertura 0,1 s %.4f -> 1 s %.4f; caixa %ux%u; ida e volta diferenca %u\n",
+                early, at1s, box.w(), box.h(), worst);
+    AUREA_CHECK(at1s > early * 3.0f && at1s > 0.002f);
+    AUREA_CHECK(worst == 0);
+    // Jato para cima com gravidade: mais alto que largo.
+    AUREA_CHECK(box.h() > box.w() / 2);
+}
+
 AUREA_TEST(Gpu, Scene3DSurvivesSaveAndReopenIdentically) {
     AUREA_REQUIRE_GPU();
     const std::string path = gltf_data("DamagedHelmet.glb");

@@ -278,6 +278,15 @@ public:
     /// 4 desacelerar. Liga o remapeamento.
     bool apply_speed_ramp(u64 layerId, u32 preset) noexcept;
 
+    /// Partículas (GPU, analíticas). Presets: 0 faíscas, 1 neve, 2 poeira de luz.
+    [[nodiscard]] Result<u64> add_particles(u32 preset) noexcept;
+    bool apply_particle_preset(u64 layerId, u32 preset) noexcept;
+    /// 0 taxa, 1 vida, 2 velocidade, 3 espalhamento, 4 gravidade, 5 tamanho
+    /// inicial, 6 tamanho final, 7 direção.
+    bool set_particle_param(u64 layerId, u32 param, f32 value) noexcept;
+    /// Os 8 parâmetros acima em `out`.
+    bool query_particles(u64 layerId, f32* out8) noexcept;
+
     /// Desfoque de movimento da camada (liga também o da composição).
     bool set_motion_blur(u64 layerId, bool on) noexcept;
     /// Obturador da composição em graus (0–720; 180 = padrão de cinema).

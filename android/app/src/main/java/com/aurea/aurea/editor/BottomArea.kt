@@ -218,6 +218,7 @@ private fun onSection(store: EditorStore, ui: EditorUi, s: DockSection) {
         DockSection.Blend -> openPanel(store, ui, EditorPanel.Appearance)
         DockSection.Volume -> openPanel(store, ui, EditorPanel.Audio)
         DockSection.Effects -> openPanel(store, ui, EditorPanel.Effects)
+        DockSection.Particles -> openPanel(store, ui, EditorPanel.Particles)
         DockSection.ColorFill, DockSection.EditShape, DockSection.EditText -> when (store.detail?.kind) {
             com.aurea.aurea.ui.theme.LayerType.Shape.kind -> openPanel(store, ui, EditorPanel.Shape)
             com.aurea.aurea.ui.theme.LayerType.Text.kind -> openPanel(store, ui, EditorPanel.Text)

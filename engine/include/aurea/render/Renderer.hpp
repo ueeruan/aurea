@@ -56,7 +56,7 @@ struct Layer;
 [[nodiscard]] Mat4 layer_comp_matrix(const Composition& comp, const Layer& l, FrameIndex time, bool* perspective = nullptr) noexcept;
 
 struct LayerSource {
-    enum class Kind : u8 { None = 0, Video, Image, Solid, Scene3D, Shape, Nested };
+    enum class Kind : u8 { None = 0, Video, Image, Solid, Scene3D, Shape, Nested, Particles };
     Kind kind = Kind::None;
     u32  width = 0;          ///< tamanho natural da layer (px)
     u32  height = 0;
@@ -77,6 +77,11 @@ struct LayerSource {
 
     // Pré-composição: índice em FrameSnapshot::nested
     u32      nestedIndex = 0;
+
+    // Partículas: o bloco de parâmetros do shader (7 vec4), nº de slots, blend.
+    Vec4     particleBlock[7]{};
+    u32      particleSlots = 0;
+    bool     particleAdditive = true;
 
     // Forma vetorial (SDF): tipo, canto, pontas, raio interno, preenchida,
     // cores lineares pré-multiplicadas, largura do contorno (px).

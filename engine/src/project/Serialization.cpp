@@ -457,13 +457,22 @@ void write_layer(ByteWriter& w, const Layer& l) {
     w.boolv(l.reversed);
     // v6
     w.boolv(l.motionBlur);
+    // v7
+    w.vec4(l.particles.startColor);
+    w.vec4(l.particles.endColor);
+    w.f32v(l.particles.direction);
+    w.u32v(l.particles.seed);
+    w.f32v(l.particles.emitterSize.x);
+    w.f32v(l.particles.emitterSize.y);
+    w.f32v(l.particles.emitterOffset.x);
+    w.f32v(l.particles.emitterOffset.y);
 }
 
 /// Versão da seção Timeline. v2: layer de modelo 3D guarda escala de unidade
 /// e pivô (o enquadramento do import). v1 continua sendo lida (campos novos
 /// com o padrão).
 /// v3: velocidade e reverso da layer.
-constexpr u32 kTimelineSectionVersion = 6;
+constexpr u32 kTimelineSectionVersion = 7;
 thread_local u32 g_readingTimelineVersion = kTimelineSectionVersion;
 
 void read_layer(ByteReader& r, Layer& l) {
@@ -619,6 +628,16 @@ void read_layer(ByteReader& r, Layer& l) {
         l.reversed = r.boolv();
     }
     if (g_readingTimelineVersion >= 6) l.motionBlur = r.boolv();
+    if (g_readingTimelineVersion >= 7) {
+        l.particles.startColor = r.vec4();
+        l.particles.endColor = r.vec4();
+        l.particles.direction = r.f32v();
+        l.particles.seed = r.u32v();
+        l.particles.emitterSize.x = r.f32v();
+        l.particles.emitterSize.y = r.f32v();
+        l.particles.emitterOffset.x = r.f32v();
+        l.particles.emitterOffset.y = r.f32v();
+    }
 }
 
 void write_asset(ByteWriter& w, const Asset& a) {

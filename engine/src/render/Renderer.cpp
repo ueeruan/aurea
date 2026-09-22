@@ -574,6 +574,32 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 rl.source.height = static_cast<u32>(std::ceil(ext.height + 2.0f * pad));
                 break;
             }
+            case LayerKind::ParticleSystem: {
+                // Partículas analíticas: o shader resolve tudo a partir do
+                // tempo local — aqui só o bloco de parâmetros.
+                const ParticleData& pd = l->particles;
+                const f32 lw = static_cast<f32>(comp.width()), lh = static_cast<f32>(comp.height());
+                const f32 tsec = static_cast<f32>(static_cast<f64>(local.value) / fps);
+                const f32 rate = std::clamp(pd.rate, 0.1f, 5000.0f);
+                const f32 life = std::clamp(pd.lifetime, 0.05f, 60.0f);
+                const u32 slots = std::min<u32>(std::max<u32>(1u, pd.maxParticles),
+                                                static_cast<u32>(std::ceil(rate * life * 1.25f)) + 1u);
+                auto lin = [](Vec4 c) { return Vec4{srgb_to_linear(c.x), srgb_to_linear(c.y), srgb_to_linear(c.z), c.w}; };
+                rl.source.kind = LayerSource::Kind::Particles;
+                rl.source.width = comp.width();
+                rl.source.height = comp.height();
+                rl.source.particleBlock[0] = Vec4{rate, life, pd.speed, pd.spread * kDeg2Rad};
+                // Gravidade do modelo: y para CIMA (−980 = cai); a tela tem y para baixo.
+                rl.source.particleBlock[1] = Vec4{pd.gravity.x, -pd.gravity.y, pd.startSize, pd.endSize};
+                rl.source.particleBlock[2] = Vec4{pd.startOpacity, pd.endOpacity, pd.direction * kDeg2Rad, static_cast<f32>(pd.seed % 1000003u)};
+                rl.source.particleBlock[3] = Vec4{pd.emitterSize.x, pd.emitterSize.y, tsec, static_cast<f32>(slots)};
+                rl.source.particleBlock[4] = lin(pd.startColor);
+                rl.source.particleBlock[5] = lin(pd.endColor);
+                rl.source.particleBlock[6] = Vec4{lw * 0.5f + pd.emitterOffset.x, lh * 0.5f + pd.emitterOffset.y, 0, 0};
+                rl.source.particleSlots = slots;
+                rl.source.particleAdditive = pd.blendMode == 1;
+                break;
+            }
             case LayerKind::Composition: {
                 // Pré-composição: a filha no tempo da FONTE da camada (entrada,
                 // velocidade, reverso), convertido para a taxa dela.
@@ -1062,6 +1088,26 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
             block.extra = Vec4{layer.source.shapeStrokeWidth, 0, 0, 0};
             return ctx.fullscreen_pass("forma", PassStage::Decode, out.texture, ShaderId::shape_shape_frag, {},
                                        &block, sizeof(block)) != kInvalidIndex;
+        }
+        case LayerSource::Kind::Particles: {
+            out.texture = graph_.create_texture("layer-particulas", d);
+            auto pipe = shaders_.pipeline(PipelineKey::graphics(
+                ShaderId::particles_particles_vert, ShaderId::particles_particles_frag, kWorkFormat, true,
+                layer.source.particleAdditive ? BlendMode::Add : BlendMode::Normal));
+            if (!pipe.ok()) return false;
+            struct Cap {
+                PipelineHandle p; Mat4 clip; Vec4 block[7]; u32 slots;
+            } cap{*pipe, clip_from_comp(static_cast<f32>(layer.source.width), static_cast<f32>(layer.source.height)), {},
+                  layer.source.particleSlots};
+            for (int i = 0; i < 7; ++i) cap.block[i] = layer.source.particleBlock[i];
+            graph_.add_raster_pass("particulas", PassStage::Decode, out.texture, LoadOp::Clear, Vec4{0, 0, 0, 0},
+                                   [cap](PassContext& pc) {
+                pc.cmds.bind_pipeline(cap.p);
+                pc.cmds.set_uniforms(cap.block, sizeof(cap.block));
+                pc.cmds.push_constants(&cap.clip, sizeof(cap.clip));
+                pc.cmds.draw(6, cap.slots);
+            });
+            return true;
         }
         case LayerSource::Kind::None: break;
     }

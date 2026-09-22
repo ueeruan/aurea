@@ -361,6 +361,21 @@ class AureaEngine private constructor() {
     fun setTextAnimParam(layer: Long, index: Int, param: Int, value: Float): Boolean = nativeSetTextAnimParam(nativeHandle, layer, index, param, value)
     fun toggleTextAnimKey(layer: Long, index: Int, param: Int): Boolean = nativeToggleTextAnimKey(nativeHandle, layer, index, param)
     fun applyTextPreset(layer: Long, preset: Int): Boolean = nativeApplyTextPreset(nativeHandle, layer, preset)
+
+    // Presets (JSON do motor, formato em engine/include/aurea/project/Presets.hpp).
+    /** kind 0 efeitos, 1 texto, 2 animação; parts (texto) 1 estilo, 2 animadores. Nulo = nada a salvar. */
+    fun savePreset(layer: Long, kind: Int, name: String, parts: Int = 3): String? =
+        nativeSavePreset(nativeHandle, layer, kind, name.toByteArray(Charsets.UTF_8), parts)?.toString(Charsets.UTF_8)
+    /** Um passo de desfazer. Nulo = aplicado; senão, o motivo. `duration` > 0 estica a animação. */
+    fun applyPreset(layer: Long, json: String, duration: Long = 0): String? =
+        nativeApplyPreset(nativeHandle, layer, json.toByteArray(Charsets.UTF_8), duration)?.toString(Charsets.UTF_8)
+    fun makeCaptionPreset(name: String, ints: IntArray, floats: FloatArray): String? =
+        nativeMakeCaptionPreset(name.toByteArray(Charsets.UTF_8), ints, floats)?.toString(Charsets.UTF_8)
+    fun parseCaptionPreset(json: String): FloatArray? = nativeParseCaptionPreset(json.toByteArray(Charsets.UTF_8))
+    fun makeCurvePreset(name: String, interp: Int, x1: Float, y1: Float, x2: Float, y2: Float): String? =
+        nativeMakeCurvePreset(name.toByteArray(Charsets.UTF_8), interp, x1, y1, x2, y2)?.toString(Charsets.UTF_8)
+    /** [interp, x1, y1, x2, y2]; nulo = não é um preset de curva válido. */
+    fun parseCurvePreset(json: String): FloatArray? = nativeParseCurvePreset(json.toByteArray(Charsets.UTF_8))
     /** PowerManager.THERMAL_STATUS_* → o preview reduz o que é caro sob calor. */
     fun setThermal(status: Int) = nativeSetThermal(nativeHandle, status)
     fun queryTimeRemap(layer: Long, out: FloatArray): Int = nativeQueryTimeRemap(nativeHandle, layer, out)
@@ -509,6 +524,12 @@ class AureaEngine private constructor() {
     private external fun nativeSetTextAnimParam(handle: Long, layer: Long, index: Int, param: Int, value: Float): Boolean
     private external fun nativeToggleTextAnimKey(handle: Long, layer: Long, index: Int, param: Int): Boolean
     private external fun nativeApplyTextPreset(handle: Long, layer: Long, preset: Int): Boolean
+    private external fun nativeSavePreset(handle: Long, layer: Long, kind: Int, name: ByteArray, parts: Int): ByteArray?
+    private external fun nativeApplyPreset(handle: Long, layer: Long, json: ByteArray, duration: Long): ByteArray?
+    private external fun nativeMakeCaptionPreset(name: ByteArray, ints: IntArray, floats: FloatArray): ByteArray?
+    private external fun nativeParseCaptionPreset(json: ByteArray): FloatArray?
+    private external fun nativeMakeCurvePreset(name: ByteArray, interp: Int, x1: Float, y1: Float, x2: Float, y2: Float): ByteArray?
+    private external fun nativeParseCurvePreset(json: ByteArray): FloatArray?
     private external fun nativeTextFont(handle: Long, layer: Long): String?
     private external fun nativeSetVectorBlur(handle: Long, layer: Long, amount: Float): Boolean
     private external fun nativeSetFrameBlend(handle: Long, layer: Long, mode: Int): Boolean

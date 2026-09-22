@@ -1,0 +1,21 @@
+[
+  {"aurea_preset": 1, "kind": "animation", "name": "Surgir", "fps": 30, "tracks": [
+    {"prop": "opacity", "keys": [[0, 0, 2, 0.16, 1, 0.3, 1], [12, 1]]}]},
+  {"aurea_preset": 1, "kind": "animation", "name": "Sumir", "fps": 30, "tracks": [
+    {"prop": "opacity", "keys": [[0, 1, 2, 0.7, 0, 0.84, 0], [12, 0]]}]},
+  {"aurea_preset": 1, "kind": "animation", "name": "Entrar pela esquerda", "fps": 30, "tracks": [
+    {"prop": "positionX", "relative": true, "keys": [[0, -600, 2, 0.16, 1, 0.3, 1], [18, 0]]},
+    {"prop": "opacity", "keys": [[0, 0], [8, 1]]}]},
+  {"aurea_preset": 1, "kind": "animation", "name": "Subir", "fps": 30, "tracks": [
+    {"prop": "positionY", "relative": true, "keys": [[0, 120, 2, 0.16, 1, 0.3, 1], [15, 0]]},
+    {"prop": "opacity", "keys": [[0, 0], [10, 1]]}]},
+  {"aurea_preset": 1, "kind": "animation", "name": "Zoom de entrada", "fps": 30, "tracks": [
+    {"prop": "scaleX", "keys": [[0, 0, 2, 0.34, 1.56, 0.64, 1], [15, 1]]},
+    {"prop": "scaleY", "keys": [[0, 0, 2, 0.34, 1.56, 0.64, 1], [15, 1]]}]},
+  {"aurea_preset": 1, "kind": "animation", "name": "Pulsar", "fps": 30, "tracks": [
+    {"prop": "scaleX", "keys": [[0, 1, 2, 0.42, 0, 0.58, 1], [8, 1.15, 2, 0.42, 0, 0.58, 1], [16, 1]]},
+    {"prop": "scaleY", "keys": [[0, 1, 2, 0.42, 0, 0.58, 1], [8, 1.15, 2, 0.42, 0, 0.58, 1], [16, 1]]}]},
+  {"aurea_preset": 1, "kind": "animation", "name": "Girar para entrar", "fps": 30, "tracks": [
+    {"prop": "rotationZ", "keys": [[0, -90, 2, 0.16, 1, 0.3, 1], [15, 0]]},
+    {"prop": "opacity", "keys": [[0, 0], [8, 1]]}]}
+]

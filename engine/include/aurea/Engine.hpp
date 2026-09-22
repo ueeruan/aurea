@@ -25,6 +25,7 @@
 #pragma once
 
 #include "aurea/text/Captions.hpp"
+#include "aurea/project/Presets.hpp"
 #include "aurea/export/ExportSink.hpp"
 #include "aurea/scene3d/Importer.hpp"
 #include "aurea/scene3d/Text3D.hpp"
@@ -482,6 +483,18 @@ public:
     u32 paste_keyframes(const u64* ids, u32 count, i64 frame) noexcept;
     /// Bits: 1 camadas, 2 estilo, 4 efeitos, 8 keyframes.
     [[nodiscard]] u32 clipboard_state() noexcept;
+
+    // --- Presets (formato em project/Presets.hpp) -------------------------------
+    /// Preset `kind` (Effects, Text, Animation) da camada, em JSON. Vazio = a
+    /// camada não tem o que salvar desse tipo. `parts` = TextPresetParts.
+    [[nodiscard]] std::string save_preset(u64 layerId, presets::PresetKind kind, const std::string& name,
+                                          u32 parts = presets::kTextAll) noexcept;
+    /// Aplica o preset (um passo de desfazer). Efeitos ACRESCENTAM; texto troca
+    /// estilo/animadores; animação começa no cabeçote (ou no início da camada
+    /// se o cabeçote estiver fora dela) e, com `durationFrames` > 0, estica até
+    /// essa duração. JSON inválido ou tipo que não serve à camada → false, sem
+    /// mudar nada. `error` (opcional) diz o porquê.
+    bool apply_preset(u64 layerId, const std::string& json, i64 durationFrames = 0, std::string* error = nullptr) noexcept;
 
     // --- Modo Edição (timeline magnética) ------------------------------------------
     void set_edit_mode(bool on) noexcept;

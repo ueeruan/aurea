@@ -1653,6 +1653,125 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshDetail()
     }
 
+    // =========================================================================
+    // Presets (JSON do motor; arquivos em filesDir/presets/<tipo>/)
+    // =========================================================================
+    val presets = com.aurea.aurea.presets.PresetLibrary(app)
+
+    /**
+     * JSON do preset `kind` a partir do que está na tela: a camada escolhida
+     * (efeitos, texto, animação) ou as opções de legenda. Curva vem do painel
+     * de curva ([curvePresetJson]). Nulo = nada a salvar.
+     */
+    fun capturePreset(kind: com.aurea.aurea.presets.PresetKind, name: String, parts: Int = 3): String? {
+        return when (kind) {
+            com.aurea.aurea.presets.PresetKind.Caption -> {
+                val s = captions.settings
+                engine.makeCaptionPreset(
+                    name,
+                    intArrayOf(
+                        s.mode, s.maxWords, s.maxChars, s.maxLines, s.style,
+                        if (s.highlight) 1 else 0, if (s.uppercase) 1 else 0, if (s.breakOnPause) 1 else 0, if (s.removeFillers) 1 else 0,
+                    ),
+                    floatArrayOf(s.pauseSec, s.posY, s.sizeFrac, s.highlightColor[0], s.highlightColor[1], s.highlightColor[2]),
+                )
+            }
+            com.aurea.aurea.presets.PresetKind.Curve -> null
+            else -> primary?.let { engine.savePreset(it, kind.id, name, parts) }
+        }
+    }
+
+    fun curvePresetJson(name: String, interp: Int, x1: Float, y1: Float, x2: Float, y2: Float): String? =
+        engine.makeCurvePreset(name, interp, x1, y1, x2, y2)
+
+    /** [interp, x1, y1, x2, y2] do preset de curva; nulo = inválido. */
+    fun curveOfPreset(e: com.aurea.aurea.presets.PresetEntry): FloatArray? = presets.jsonOf(e)?.let { engine.parseCurvePreset(it) }
+
+    fun savePreset(kind: com.aurea.aurea.presets.PresetKind, name: String, json: String?): Boolean {
+        if (json == null) {
+            showToast(
+                when (kind) {
+                    com.aurea.aurea.presets.PresetKind.Effects -> "Esta camada não tem efeitos"
+                    com.aurea.aurea.presets.PresetKind.Text -> "Só camada de texto tem estilo de texto"
+                    com.aurea.aurea.presets.PresetKind.Animation -> "Esta camada não tem keyframes de movimento"
+                    com.aurea.aurea.presets.PresetKind.Curve -> "Toque num keyframe (com o seguinte) da timeline primeiro"
+                    else -> "Nada para salvar"
+                },
+            )
+            return false
+        }
+        val e = presets.save(kind, name, json)
+        showToast(if (e != null) "Preset \"${e.name}\" salvo" else "Não foi possível salvar o preset")
+        return e != null
+    }
+
+    fun deletePreset(e: com.aurea.aurea.presets.PresetEntry) {
+        showToast(if (presets.delete(e)) "Preset \"${e.name}\" apagado" else "Não foi possível apagar")
+    }
+
+    /**
+     * Aplica um preset de camada (efeitos, texto, animação: um passo de
+     * desfazer) ou de legenda (opções da geração; refaz as legendas que já
+     * existem). Curva é aplicada pelo painel de curva, no keyframe escolhido.
+     * `stretch` = a animação ocupa do cabeçote até o fim da camada.
+     */
+    fun applyPreset(e: com.aurea.aurea.presets.PresetEntry, stretch: Boolean = false): Boolean {
+        when (e.kind) {
+            com.aurea.aurea.presets.PresetKind.Curve -> return false
+            com.aurea.aurea.presets.PresetKind.Caption -> {
+                val v = presets.jsonOf(e)?.let { engine.parseCaptionPreset(it) }
+                if (v == null || v.size < 15) {
+                    showToast("Preset de legenda inválido")
+                    return false
+                }
+                captions.settings = com.aurea.aurea.captions.CaptionSettings(
+                    mode = v[0].toInt(), maxWords = v[1].toInt(), maxChars = v[2].toInt(), maxLines = v[3].toInt(), style = v[4].toInt(),
+                    highlight = v[5] != 0f, uppercase = v[6] != 0f, breakOnPause = v[7] != 0f, removeFillers = v[8] != 0f,
+                    pauseSec = v[9], posY = v[10], sizeFrac = v[11], highlightColor = floatArrayOf(v[12], v[13], v[14]),
+                )
+                val id = primary
+                if (id != null && captions.layer == id && captions.captionCount > 0 && captions.words.isNotEmpty()) {
+                    captions.generate()
+                    showToast("Legendas refeitas com \"${e.name}\"")
+                } else {
+                    showToast("Estilo de legenda \"${e.name}\" escolhido")
+                }
+            }
+            else -> {
+                val id = primary ?: return false
+                val native = e.textPreset
+                if (native != null) {
+                    if (!engine.applyTextPreset(id, native)) {
+                        showToast("Animação de texto só vale para camada de texto")
+                        return false
+                    }
+                } else {
+                    val json = presets.jsonOf(e) ?: run {
+                        showToast("Arquivo do preset não encontrado")
+                        return false
+                    }
+                    var duration = 0L
+                    if (stretch && e.kind == com.aurea.aurea.presets.PresetKind.Animation) {
+                        layers.firstOrNull { it.id == id }?.let { l ->
+                            val from = if (playhead >= l.startFrame && playhead < l.endFrame) playhead else l.startFrame
+                            duration = (l.endFrame - from - 1).coerceAtLeast(1).toLong()
+                        }
+                    }
+                    val err = engine.applyPreset(id, json, duration)
+                    if (err != null) {
+                        showToast("Preset não aplicado: $err")
+                        return false
+                    }
+                }
+                refreshNow()
+                refreshDetail()
+                showToast("\"${e.name}\" aplicado")
+            }
+        }
+        presets.markUsed(e)
+        return true
+    }
+
     fun addTextAnimator(props: Int) {
         val id = primary ?: return
         engine.addTextAnimator(id, props)

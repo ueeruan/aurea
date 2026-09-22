@@ -2253,6 +2253,9 @@ namespace {
 void replace_effects(Layer& dst, const std::vector<EffectInstance>& effects, const TrackSet& srcTracks) {
     dst.tracks.remove_if([](const Track& t) { return t.property == TrackProperty::EffectParam; });
     dst.effects = effects;
+    for (const EffectInstance& e : effects) {
+        if (e.id != kInvalidIndex) dst.nextEffectId = std::max(dst.nextEffectId, e.id + 1);
+    }
     for (u32 i = 0; i < srcTracks.size(); ++i) {
         if (srcTracks.at(i).property == TrackProperty::EffectParam) dst.tracks.add(srcTracks.at(i));
     }
@@ -2335,6 +2338,9 @@ u32 Engine::paste_effects(const u64* ids, u32 count) noexcept {
             }
             d->effects.push_back(std::move(c));
         }
+        // O contador acompanha: o próximo EffectAdd não pode repetir um id colado
+        // (os keyframes de dois efeitos se misturariam).
+        d->nextEffectId = std::max(d->nextEffectId, next);
         ++done;
     }
     project_->mark_dirty();
@@ -2405,6 +2411,51 @@ u32 Engine::clipboard_state() noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     return (clipboard_.layers.empty() ? 0u : 1u) | (clipboard_.hasStyle ? 2u : 0u)
          | (clipboard_.effects.empty() ? 0u : 4u) | (clipboard_.keys.empty() ? 0u : 8u);
+}
+
+// =============================================================================
+// Presets (JSON; formato em project/Presets.hpp)
+// =============================================================================
+std::string Engine::save_preset(u64 layerId, presets::PresetKind kind, const std::string& name, u32 parts) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l) return {};
+    presets::Preset p;
+    if (!presets::capture(*l, kind, name, comp->fps(), parts, &effectRegistry_, p)) return {};
+    return presets::write(p, &effectRegistry_);
+}
+
+bool Engine::apply_preset(u64 layerId, const std::string& json, i64 durationFrames, std::string* error) noexcept {
+    // Lê e valida TUDO antes de travar/abrir o passo de desfazer: preset
+    // quebrado não deixa passo vazio no histórico nem camada pela metade.
+    presets::Preset p;
+    std::string err;
+    if (!presets::parse(json, p, &effectRegistry_, &err)) {
+        if (error) *error = err;
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l) {
+        if (error) *error = "camada nao encontrada";
+        return false;
+    }
+    if (!presets::applicable(p, *l)) {
+        if (error) *error = "este preset nao serve para esta camada";
+        return false;
+    }
+    history_.before_mutation(*comp, project_->timeline().current(), "aplicar preset");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    // Animação: começa no cabeçote; fora da camada, no início dela.
+    const FrameIndex ph = playback_.current();
+    const i64 anchor = l->contains_time(ph) ? l->local_time(ph).value : l->local_time(l->start).value;
+    const bool ok = presets::apply(p, *l, anchor, durationFrames, comp->fps(), &effectRegistry_);
+    if (ok && p.kind == presets::PresetKind::Text) recenter_text(*l);
+    project_->mark_dirty();
+    request_render();
+    return ok;
 }
 
 void Engine::set_edit_mode(bool on) noexcept {

@@ -1117,6 +1117,97 @@ AUREA_JNI jboolean AUREA_FN(nativeApplyTextPreset)(JNIEnv*, jclass, jlong handle
     return c && preset >= 0 && c->engine.apply_text_preset(static_cast<u64>(layer), static_cast<u32>(preset)) ? JNI_TRUE : JNI_FALSE;
 }
 
+// =============================================================================
+// Presets (JSON em project/Presets.hpp). O texto cruza a fronteira como bytes
+// UTF-8 — nada de "modified UTF-8" do NewStringUTF num nome com emoji.
+// =============================================================================
+namespace {
+std::string utf8_of(JNIEnv* env, jbyteArray a) {
+    if (!a) return {};
+    const jsize n = env->GetArrayLength(a);
+    std::string s(static_cast<usize>(n), '\0');
+    if (n > 0) env->GetByteArrayRegion(a, 0, n, reinterpret_cast<jbyte*>(s.data()));
+    return s;
+}
+jbyteArray bytes_of(JNIEnv* env, const std::string& s) {
+    jbyteArray out = env->NewByteArray(static_cast<jsize>(s.size()));
+    if (out && !s.empty()) env->SetByteArrayRegion(out, 0, static_cast<jsize>(s.size()), reinterpret_cast<const jbyte*>(s.data()));
+    return out;
+}
+} // namespace
+
+/// Preset da camada: kind 0 efeitos, 1 texto, 2 animação; parts = TextPresetParts.
+/// Nulo = a camada não tem o que salvar desse tipo.
+AUREA_JNI jbyteArray AUREA_FN(nativeSavePreset)(JNIEnv* env, jclass, jlong handle, jlong layer, jint kind, jbyteArray name, jint parts) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || kind < 0 || kind > static_cast<jint>(presets::PresetKind::Animation)) return nullptr;
+    const std::string js = c->engine.save_preset(static_cast<u64>(layer), static_cast<presets::PresetKind>(kind), utf8_of(env, name),
+                                                 static_cast<u32>(parts));
+    return js.empty() ? nullptr : bytes_of(env, js);
+}
+
+/// Aplica (um passo de desfazer). Nulo = aplicado; senão, o motivo (UTF-8).
+AUREA_JNI jbyteArray AUREA_FN(nativeApplyPreset)(JNIEnv* env, jclass, jlong handle, jlong layer, jbyteArray json, jlong duration) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return bytes_of(env, "motor indisponivel");
+    std::string err;
+    if (c->engine.apply_preset(static_cast<u64>(layer), utf8_of(env, json), static_cast<i64>(duration), &err)) return nullptr;
+    return bytes_of(env, err.empty() ? std::string("preset nao aplicado") : err);
+}
+
+/// Preset de legenda: ints/floats no MESMO layout do nativeCreateCaptions.
+AUREA_JNI jbyteArray AUREA_FN(nativeMakeCaptionPreset)(JNIEnv* env, jclass, jbyteArray name, jintArray ints, jfloatArray floats) {
+    if (!ints || !floats || env->GetArrayLength(ints) < 9 || env->GetArrayLength(floats) < 6) return nullptr;
+    jint iv[9];
+    jfloat fv[6];
+    env->GetIntArrayRegion(ints, 0, 9, iv);
+    env->GetFloatArrayRegion(floats, 0, 6, fv);
+    text::CaptionOptions o;
+    o.mode = static_cast<u32>(std::clamp(iv[0], 0, 1));
+    o.maxWords = static_cast<u32>(std::clamp(iv[1], 1, 20));
+    o.maxChars = static_cast<u32>(std::clamp(iv[2], 4, 80));
+    o.maxLines = static_cast<u32>(std::clamp(iv[3], 1, 5));
+    o.style = static_cast<u32>(std::clamp(iv[4], 0, static_cast<jint>(text::kCaptionStyleCount) - 1));
+    o.highlight = iv[5] != 0;
+    o.uppercase = iv[6] != 0;
+    o.breakOnPause = iv[7] != 0;
+    o.pauseSec = std::clamp(fv[0], 0.05f, 5.0f);
+    o.posY = std::clamp(fv[1], 0.1f, 0.9f);
+    o.sizeFrac = std::clamp(fv[2], 0.01f, 0.3f);
+    o.highlightColor = Vec4{std::clamp(fv[3], 0.0f, 1.0f), std::clamp(fv[4], 0.0f, 1.0f), std::clamp(fv[5], 0.0f, 1.0f), 1.0f};
+    return bytes_of(env, presets::make_caption_preset(utf8_of(env, name), o, iv[8] != 0));
+}
+
+/// Lê um preset de legenda: [modo, palavras, caracteres, linhas, estilo,
+/// destaque, maiúsculas, pausas, vícios, pausa s, y, tamanho, r, g, b]. Nulo = inválido.
+AUREA_JNI jfloatArray AUREA_FN(nativeParseCaptionPreset)(JNIEnv* env, jclass, jbyteArray json) {
+    presets::Preset p;
+    if (!presets::parse(utf8_of(env, json), p) || p.kind != presets::PresetKind::Caption) return nullptr;
+    const text::CaptionOptions& o = p.caption;
+    const f32 v[15] = {static_cast<f32>(o.mode), static_cast<f32>(o.maxWords), static_cast<f32>(o.maxChars), static_cast<f32>(o.maxLines),
+                       static_cast<f32>(o.style), o.highlight ? 1.0f : 0.0f, o.uppercase ? 1.0f : 0.0f, o.breakOnPause ? 1.0f : 0.0f,
+                       p.removeFillers ? 1.0f : 0.0f, o.pauseSec, o.posY, o.sizeFrac, o.highlightColor.x, o.highlightColor.y, o.highlightColor.z};
+    jfloatArray out = env->NewFloatArray(15);
+    if (out) env->SetFloatArrayRegion(out, 0, 15, v);
+    return out;
+}
+
+AUREA_JNI jbyteArray AUREA_FN(nativeMakeCurvePreset)(JNIEnv* env, jclass, jbyteArray name, jint interp, jfloat x1, jfloat y1, jfloat x2, jfloat y2) {
+    const jint i = std::clamp(interp, 0, static_cast<jint>(Interpolation::CustomCurve));
+    return bytes_of(env, presets::make_curve_preset(utf8_of(env, name), static_cast<Interpolation>(i), std::clamp(x1, 0.0f, 1.0f),
+                                                    std::clamp(y1, -2.0f, 3.0f), std::clamp(x2, 0.0f, 1.0f), std::clamp(y2, -2.0f, 3.0f)));
+}
+
+/// Lê um preset de curva: [interp, x1, y1, x2, y2]. Nulo = inválido.
+AUREA_JNI jfloatArray AUREA_FN(nativeParseCurvePreset)(JNIEnv* env, jclass, jbyteArray json) {
+    presets::Preset p;
+    if (!presets::parse(utf8_of(env, json), p) || p.kind != presets::PresetKind::Curve) return nullptr;
+    const f32 v[5] = {static_cast<f32>(p.curveInterp), p.x1, p.y1, p.x2, p.y2};
+    jfloatArray out = env->NewFloatArray(5);
+    if (out) env->SetFloatArrayRegion(out, 0, 5, v);
+    return out;
+}
+
 /// Fonte da camada de texto: "família\tpeso\titálico\tcaminho" (nulo = não é texto).
 AUREA_JNI jstring AUREA_FN(nativeTextFont)(JNIEnv* env, jclass, jlong handle, jlong layer) {
     NativeContext* c = ctx_of(handle);

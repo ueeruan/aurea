@@ -45,6 +45,8 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -54,6 +56,7 @@ import androidx.compose.ui.unit.sp
 import com.aurea.aurea.engine.KeyframeRow
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.ds.AureaActionSheet
+import com.aurea.aurea.ui.ds.AureaNamePrompt
 import com.aurea.aurea.ui.ds.SheetAction
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
@@ -139,7 +142,7 @@ internal fun cubicBezier(x1: Float, y1: Float, x2: Float, y2: Float, x: Float): 
 }
 
 /** Um preset de uma família: nome [A] e o easing do motor. Nulo = sem suporte no motor ainda. */
-private class CurvePreset(val name: String, val ease: Ease?)
+private class CurvePreset(val name: String, val ease: Ease?, val entry: com.aurea.aurea.presets.PresetEntry? = null)
 
 private class CurveFamily(val name: String, val glyph: Char, val presets: List<CurvePreset>)
 
@@ -211,7 +214,7 @@ private object CurveClipboard {
 }
 
 /** O easing de um keyframe como o motor o tem (com as alças lembradas). */
-private fun easeOf(layer: Long, k: KeyframeRow): Ease {
+internal fun easeOf(layer: Long, k: KeyframeRow): Ease {
     if (k.interpolation == Interp.BEZIER || k.interpolation == Interp.CUSTOM) {
         return HandleMemory.map[HandleMemory.key(layer, k)] ?: Ease(k.interpolation, 0.33f, 0f, 0.67f, 1f)
     }
@@ -222,7 +225,7 @@ private fun easeOf(layer: Long, k: KeyframeRow): Ease {
  * Escreve o easing no trecho que SAI de [start], em todas as trilhas irmãs que
  * têm marca no mesmo instante (X e Y da posição andam juntos, como a A.01).
  */
-private fun applyEase(store: EditorStore, layer: Long, start: KeyframeRow, e: Ease) {
+internal fun applyEase(store: EditorStore, layer: Long, start: KeyframeRow, e: Ease) {
     val keys = store.keyframes[layer] ?: return
     keys.filter { it.time == start.time && it.sameGroup(start) }.forEach { k ->
         store.setKeyframeEasing(layer, k, e.interp, e.x1, e.y1, e.x2, e.y2)
@@ -279,6 +282,7 @@ internal fun CurvePanel(env: PanelEnv) {
     val ease = easeOf(layer, start)
     var overshoot by rememberSaveable { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
+    var savePrompt by remember { mutableStateOf(false) }
 
     // Onde o cabeçote está dentro do trecho (0..1), lido NO DESENHO: só repinta.
     val progress: () -> Float? = {
@@ -361,8 +365,13 @@ internal fun CurvePanel(env: PanelEnv) {
                 }
             }
         }
+        // Presets de curva (nativos + os salvos): a aba ★ das famílias.
+        val saved = remember(store.presets.user) { store.presets.entries(com.aurea.aurea.presets.PresetKind.Curve).mapNotNull { entry ->
+            store.curveOfPreset(entry)?.let { v -> CurvePreset(entry.name, Ease(v[0].toInt(), v[1], v[2], v[3], v[4]), entry) }
+        } }
         CurveFamilies(
             current = ease,
+            saved = saved,
             onPick = { p ->
                 val e = p.ease
                 if (e == null) store.comingSoon(p.name)
@@ -370,8 +379,22 @@ internal fun CurvePanel(env: PanelEnv) {
                     store.beginGesture("curva")
                     applyEase(store, layer, start, e)
                     store.endGesture()
+                    p.entry?.let { store.presets.markUsed(it) }
                 }
             },
+        )
+    }
+
+    if (savePrompt) {
+        AureaNamePrompt(
+            title = "Salvar curva como preset",
+            initial = nameOf(ease),
+            onConfirm = { name ->
+                // A interpolação vai como está (nomeada, reta, manter ou bézier com as alças).
+                val h = ease.handles()
+                store.savePreset(com.aurea.aurea.presets.PresetKind.Curve, name, store.curvePresetJson(name, ease.interp, h[0], h[1], h[2], h[3]))
+            },
+            onDismiss = { savePrompt = false },
         )
     }
 
@@ -380,6 +403,7 @@ internal fun CurvePanel(env: PanelEnv) {
             title = "Curva",
             actions = listOf(
                 SheetAction("Copiar curva") { CurveClipboard.ease = ease },
+                SheetAction("Salvar curva como preset") { savePrompt = true },
                 SheetAction("Colar curva", enabled = CurveClipboard.ease != null) {
                     CurveClipboard.ease?.let {
                         store.beginGesture("colar curva")
@@ -550,9 +574,11 @@ private fun DrawScope.drawGrid(y0: Float, y1: Float) {
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun CurveFamilies(current: Ease, onPick: (CurvePreset) -> Unit) {
+private fun CurveFamilies(current: Ease, saved: List<CurvePreset>, onPick: (CurvePreset) -> Unit) {
+    // As famílias fixas + a aba ★ dos presets de curva (nativos e salvos).
+    val families = Families + CurveFamily("Presets", CupertinoGlyph.Star, saved)
     var tab by rememberSaveable { mutableIntStateOf(familyOf(current)) }
-    val family = Families[tab]
+    val family = families[tab.coerceIn(0, families.lastIndex)]
     Row(Modifier.width(132.dp).fillMaxHeight()) {
         Box(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(horizontal = 2.dp, vertical = 6.dp), contentAlignment = Alignment.Center) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -576,8 +602,8 @@ private fun CurveFamilies(current: Ease, onPick: (CurvePreset) -> Unit) {
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Families.forEachIndexed { i, f ->
-                Box(Modifier.size(34.dp, 40.dp).tocavel(shrink = 1f) { tab = i }, contentAlignment = Alignment.Center) {
+            families.forEachIndexed { i, f ->
+                Box(Modifier.size(34.dp, 34.dp).semantics { contentDescription = f.name }.tocavel(shrink = 1f) { tab = i }, contentAlignment = Alignment.Center) {
                     CupertinoIcon(f.glyph, 17.dp, if (i == tab) AureaColors.Accent else AureaColors.Muted)
                 }
             }

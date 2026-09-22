@@ -2,6 +2,7 @@
 
 #include "aurea/scene3d/Animation.hpp"
 #include "aurea/text/Text.hpp"
+#include "aurea/text/FontManager.hpp"
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Time.hpp"
 #include "aurea/project/Project.hpp"
@@ -603,7 +604,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             case LayerKind::Text: {
                 // Caixa do texto em px da layer (com a margem do contorno); os
                 // pixels vêm depois, na escala da tela (abaixo).
-                const auto font = text::default_font();
+                const auto font = text::FontManager::instance().font_for(l->text);
                 if (!font || l->text.content.empty() || (l->text.color.w <= 0.0f && l->text.strokeWidth <= 0.0f)) continue;
                 const text::TextExtent ext = text::measure(*font, l->text);
                 const f32 pad = l->text.strokeWidth > 0.0f ? l->text.strokeWidth + 2.0f : 2.0f;
@@ -811,7 +812,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         // Texto: rasteriza na escala em que aparece (potência de 2, para não
         // refazer a cada zoom) e só quando algo que muda os pixels mudou.
         if (l->kind == LayerKind::Text && backend_) {
-            const auto font = text::default_font();
+            const auto font = text::FontManager::instance().font_for(l->text);
             f32 want = std::max(0.5f, max_scale(m) * previewFactor);
             f32 scale = 0.5f;
             while (scale < want && scale < 4.0f) scale *= 2.0f;

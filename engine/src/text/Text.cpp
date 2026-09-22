@@ -402,6 +402,10 @@ u64 raster_key(const TextData& t, f32 scale) noexcept {
         for (usize i = 0; i < n; ++i) { h ^= b[i]; h *= 1099511628211ull; }
     };
     mix(t.content.data(), t.content.size());
+    mix(t.fontFamily.data(), t.fontFamily.size());
+    mix(&t.fontWeight, sizeof(t.fontWeight));
+    mix(&t.fontItalic, sizeof(t.fontItalic));
+    mix(t.fontPath.data(), t.fontPath.size());
     mix(&t.size, sizeof(t.size));
     mix(&t.color, sizeof(t.color));
     mix(&t.strokeWidth, sizeof(t.strokeWidth));

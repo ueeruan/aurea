@@ -537,6 +537,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         } else {
             null
         }
+        if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Text.kind) refreshTextFont() else textFont = null
         textDetail = if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Text.kind) {
             engine.queryText(id, textFloats)?.let { com.aurea.aurea.engine.TextDetail.of(it, textFloats) }
         } else {
@@ -1590,6 +1591,92 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (!ok) showToast("A curva precisa de pelo menos dois pontos")
         refreshNow()
         return ok
+    }
+
+    // --- Fontes ---------------------------------------------------------------------------
+    /** Uma fonte (arquivo) do aparelho ou importada. */
+    data class FontItem(val family: String, val style: String, val weight: Int, val italic: Boolean, val path: String, val imported: Boolean)
+
+    var fonts by mutableStateOf<List<FontItem>>(emptyList())
+        private set
+    /** Fonte da camada de texto escolhida (família vazia = padrão do aparelho). */
+    var textFont by mutableStateOf<FontItem?>(null)
+        private set
+
+    private fun parseFont(line: String): FontItem? {
+        val p = line.split('\t')
+        if (p.size < 6) return null
+        return FontItem(p[0], p[1], p[2].toIntOrNull() ?: 400, p[3] == "1", p[4], p[5] == "1")
+    }
+
+    /** Lista as fontes (a varredura lê só os cabeçalhos; fora da thread de UI). */
+    fun loadFonts() {
+        if (fonts.isNotEmpty()) return
+        viewModelScope.launch {
+            val list = withContext(Dispatchers.IO) { engine.listFonts()?.lineSequence()?.mapNotNull { parseFont(it) }?.toList() ?: emptyList() }
+            fonts = list
+        }
+    }
+
+    fun refreshTextFont() {
+        val id = primary ?: run { textFont = null; return }
+        val s = engine.textFont(id) ?: run { textFont = null; return }
+        val p = s.split('\t')
+        textFont = if (p.size >= 4) FontItem(p[0], "", p[1].toIntOrNull() ?: 400, p[2] == "1", p[3], p[3].isNotEmpty()) else null
+    }
+
+    fun applyTextFont(item: FontItem?) {
+        val id = primary ?: return
+        if (item == null) engine.setTextFont(id, "", 400, false, "")
+        else engine.setTextFont(id, item.family, item.weight, item.italic, if (item.imported) item.path else "")
+        refreshTextFont()
+        refreshNow()
+    }
+
+    /** TTF/OTF do seletor do sistema: copiado para o projeto, registrado e aplicado. */
+    fun importFont(uri: Uri) {
+        val name = displayName(uri) ?: "fonte.ttf"
+        val ext = name.substringAfterLast('.', "ttf").lowercase()
+        if (ext != "ttf" && ext != "otf") {
+            errorMessage = "Use uma fonte TTF ou OTF."
+            return
+        }
+        viewModelScope.launch {
+            val line = withContext(Dispatchers.IO) {
+                val file = copyToDir(uri, "fontes", ext) ?: return@withContext null
+                engine.importFont(file.absolutePath)
+            }
+            val item = line?.let { parseFont(it) }
+            if (item == null) {
+                errorMessage = "Não deu para ler essa fonte."
+                return@launch
+            }
+            fonts = (fonts.filterNot { it.path == item.path } + item).sortedWith(compareBy({ it.family }, { it.italic }, { it.weight }))
+            applyTextFont(item)
+            showToast("Fonte ${item.family} importada")
+        }
+    }
+
+    private fun copyToDir(uri: Uri, sub: String, ext: String): File? = try {
+        val dir = File(File(getApplication<Application>().filesDir, "projetos"), sub).apply { mkdirs() }
+        val tmp = File(dir, "importando.$ext")
+        val digest = java.security.MessageDigest.getInstance("SHA-1")
+        getApplication<Application>().contentResolver.openInputStream(uri)?.use { input ->
+            FileOutputStream(tmp).use { out ->
+                val buf = ByteArray(1 shl 16)
+                while (true) {
+                    val n = input.read(buf)
+                    if (n <= 0) break
+                    digest.update(buf, 0, n)
+                    out.write(buf, 0, n)
+                }
+            }
+        } ?: throw IllegalStateException("sem stream")
+        val dst = File(dir, digest.digest().joinToString("") { "%02x".format(it) } + ".$ext")
+        if (dst.exists()) tmp.delete() else tmp.renameTo(dst)
+        dst
+    } catch (e: Exception) {
+        null
     }
 
     /** Câmera lenta sem "degraus": 0 repete, 1 mistura os quadros vizinhos, 2 movimento de pixels. */

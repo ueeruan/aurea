@@ -7,7 +7,9 @@
 #include "aurea/text/Text.hpp"
 #include "aurea/timeline/Layer.hpp"
 
+#include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -86,4 +88,98 @@ AUREA_TEST(Text, MissingGlyphsFallBackToAnotherFont) {
     std::printf("    reserva: %zu glifos, %u de outra fonte, %u vazios (.notdef)\n", g.size(), fallback, notdef);
     AUREA_CHECK(fallback >= 3);
     AUREA_CHECK(notdef == 0);
+}
+
+// -----------------------------------------------------------------------------
+// Gerenciador de fontes
+// -----------------------------------------------------------------------------
+#include "aurea/text/FontManager.hpp"
+#include "aurea/Engine.hpp"
+
+#include <chrono>
+#include <filesystem>
+
+AUREA_TEST(Text, FontManagerReadsFamiliesWeightsAndResolvesTextFonts) {
+    text::FontEntry reg, bold, ital;
+    if (!text::read_font_info("C:/Windows/Fonts/arial.ttf", reg)) return;
+    AUREA_CHECK(text::read_font_info("C:/Windows/Fonts/arialbd.ttf", bold));
+    AUREA_CHECK(text::read_font_info("C:/Windows/Fonts/ariali.ttf", ital));
+    const auto t0 = std::chrono::steady_clock::now();
+    const std::vector<text::FontEntry> all = text::FontManager::instance().list();
+    const f64 ms = std::chrono::duration<f64, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    u32 arial = 0;
+    for (const auto& e : all) arial += e.family == "Arial" ? 1u : 0u;
+    // Camada pedindo Arial 700: resolve para o arquivo bold; família inexistente = padrão.
+    TextData t;
+    t.fontFamily = "Arial";
+    t.fontWeight = 700;
+    auto fb = text::FontManager::instance().font_for(t);
+    t.fontWeight = 400;
+    auto fr = text::FontManager::instance().font_for(t);
+    t.fontFamily = "Familia Que Nao Existe";
+    auto fd = text::FontManager::instance().font_for(t);
+    TextData w;
+    w.content = "Aurea";
+    w.size = 100;
+    const f32 wb = fb ? text::measure(*fb, w).width : 0, wr = fr ? text::measure(*fr, w).width : 0;
+    std::printf("    fontes: %zu no sistema (varredura %.0f ms), Arial %u estilos; '%s' %u / '%s' %u / '%s' italico %d; "
+                "Aurea regular %.0f px x bold %.0f px; inexistente = padrao %d\n",
+                all.size(), ms, arial, reg.style.c_str(), reg.weight, bold.style.c_str(), bold.weight, ital.style.c_str(), ital.italic ? 1 : 0,
+                wr, wb, fd == text::default_font() ? 1 : 0);
+    AUREA_CHECK(reg.family == "Arial" && reg.weight == 400 && !reg.italic);
+    AUREA_CHECK(bold.weight == 700 && ital.italic);
+    AUREA_CHECK(arial >= 4);
+    AUREA_CHECK(fb && fr && fb != fr && wb > wr);
+    AUREA_CHECK(fd == text::default_font());
+}
+
+AUREA_TEST(Text, ImportedFontIsUsedSavedAndReopened) {
+    const std::string src = "C:/Windows/Fonts/consola.ttf";
+    if (!std::filesystem::exists(src)) return;
+    const std::string dir = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_fontes";
+    std::filesystem::create_directories(dir);
+    const std::string copy = dir + "/minha_fonte.ttf";
+    std::filesystem::copy_file(src, copy, std::filesystem::copy_options::overwrite_existing);
+    Engine e;
+    EngineConfig ec;
+    ec.workerCount = 2;
+    ec.disableAutosave = true;
+    ec.documentsDirectory = dir;
+    AUREA_CHECK(e.initialize(ec).ok());
+    AUREA_CHECK(e.new_project(640, 360, 30.0, "fontes").ok());
+    auto imp = e.import_font(copy.c_str());
+    AUREA_CHECK(imp.ok());
+    auto layer = e.add_text("iiii");
+    AUREA_CHECK(layer.ok());
+    if (!imp.ok() || !layer.ok()) { e.shutdown(); return; }
+    AUREA_CHECK(e.set_text_font(*layer, imp->family, imp->weight, imp->italic, copy));
+    auto measureLayer = [&] {
+        const Composition* c = e.project()->timeline().composition(e.project()->timeline().current());
+        const Layer* l = c->layer(LayerId::unpack(*layer));
+        auto f = text::FontManager::instance().font_for(l->text);
+        return f ? text::measure(*f, l->text).width : 0.0f;
+    };
+    const f32 mono = measureLayer();   // monoespaçada: "iiii" larga
+    const std::string path = dir + "/p.aurea";
+    AUREA_CHECK(e.save_project(path.c_str()).ok());
+    AUREA_CHECK(e.load_project(path.c_str()).ok());
+    const Composition* c = e.project()->timeline().composition(e.project()->timeline().current());
+    const Layer* l = c->layer(LayerId::unpack(*layer));
+    const bool stored = l && l->text.fontPath.rfind("docs:", 0) == 0 && l->text.fontFamily == imp->family;
+    const f32 reopened = measureLayer();
+    bool listed = false;
+    for (const auto& f : e.list_fonts()) listed |= f.imported && f.path == copy;
+    TextData def;
+    def.content = "iiii";
+    def.size = l ? l->text.size : 72;
+    const f32 proportional = text::measure(*text::default_font(), def).width;
+    std::printf("    fonte importada '%s': iiii %.0f px (padrao %.0f); guardada %s; reaberta %.0f px; no seletor %d\n", imp->family.c_str(), mono,
+                proportional, l ? l->text.fontPath.c_str() : "?", reopened, listed ? 1 : 0);
+    AUREA_CHECK(mono > proportional * 1.5f);
+    AUREA_CHECK(stored);
+    AUREA_CHECK(std::fabs(reopened - mono) < 0.5f);
+    AUREA_CHECK(listed);
+    e.shutdown();
+    std::error_code ec2;
+    std::filesystem::remove_all(dir, ec2);
 }

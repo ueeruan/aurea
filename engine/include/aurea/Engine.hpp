@@ -27,6 +27,7 @@
 #include "aurea/export/ExportSink.hpp"
 #include "aurea/scene3d/Importer.hpp"
 #include "aurea/scene3d/Text3D.hpp"
+#include "aurea/text/FontManager.hpp"
 
 #include "aurea/bridge/BridgePods.hpp"
 #include "aurea/command/CommandQueue.hpp"
@@ -265,6 +266,16 @@ public:
     /// Nova forma no centro da composição, do cabeçote até o fim. `preset` é
     /// o ladrilho da aba Forma (0..14). Devolve o id da camada.
     [[nodiscard]] Result<u64> add_shape(u32 preset) noexcept;
+    // --- Fontes ---------------------------------------------------------------------
+    /// Fontes disponíveis (aparelho + importadas), por família e peso.
+    [[nodiscard]] std::vector<text::FontEntry> list_fonts() noexcept;
+    /// Registra um TTF/OTF já copiado para a pasta do app. Nulo se não for fonte.
+    [[nodiscard]] Result<text::FontEntry> import_font(const char* path) noexcept;
+    /// Fonte da camada de texto: família/peso/itálico e, se importada, o arquivo.
+    bool set_text_font(u64 layerId, const std::string& family, u32 weight, bool italic, const std::string& path) noexcept;
+    /// "família\tpeso\titálico\tcaminho real" da camada de texto (vazio = não é texto).
+    [[nodiscard]] std::string text_font(u64 layerId) noexcept;
+
     /// Nova camada de texto ("Texto", centralizada), do cabeçote até o fim.
     [[nodiscard]] Result<u64> add_text(const char* content = nullptr) noexcept;
     /// Nulo (não desenha; serve de pai/controle). `threeD` = nulo 3D (vive na

@@ -38,6 +38,7 @@ enum class EditorPanel {
     Audio,         // volume
     Shape,         // cor e preenchimento / editar forma
     Text,          // editar texto
+    Font,          // escolher a fonte do texto
     Parent,        // seguir outra camada (parentesco)
     Particles,     // partículas
     Transitions,   // entrada e saída
@@ -99,6 +100,7 @@ fun PanelContent(
         EditorPanel.Audio -> "Som"
         EditorPanel.Shape -> "Cor e preenchimento"
         EditorPanel.Text -> "Texto"
+        EditorPanel.Font -> "Fonte"
         EditorPanel.Parent -> "Seguir outra camada"
         EditorPanel.Particles -> "Partículas"
         EditorPanel.Transitions -> "Entrada e saída"
@@ -120,6 +122,7 @@ fun PanelContent(
                     EditorPanel.Audio -> AudioPanel(env)
                     EditorPanel.Shape -> ShapePanel(env)
                     EditorPanel.Text -> TextPanel(env)
+                    EditorPanel.Font -> FontPanel(env)
                     EditorPanel.Parent -> ParentPanel(env)
                     EditorPanel.Particles -> ParticlesPanel(env)
                     EditorPanel.Transitions -> TransitionsPanel(env)

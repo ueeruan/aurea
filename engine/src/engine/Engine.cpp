@@ -163,6 +163,8 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
     }
 
     text::set_default_font_path(config.defaultFontPath);
+    // Fonte importada guardada como "docs:…": o gerenciador resolve pelo motor.
+    text::FontManager::instance().set_path_resolver([this](const std::string& s) { return resolve_asset_path(s); });
     media_.set_factory(config.mediaFactory);
     media_.set_ready_callback(&Engine::on_frame_ready, this);
     // Som: cache de blocos na verba de áudio; com saída, o áudio passa a ser o
@@ -190,6 +192,7 @@ void Engine::shutdown() noexcept {
         exportCtx_->thread.join();
     }
     join_camera_track();
+    text::FontManager::instance().set_path_resolver(nullptr);
     stop_render_thread();
     thumbs_.stop();
     playback_.clock().set_master(nullptr);
@@ -452,6 +455,20 @@ Status Engine::load_project(const char* path) noexcept {
             images_[key] = std::move(px);
         }
         if (missing) AUREA_LOG_WARN("%u imagem(ns) do projeto nao puderam ser abertas", missing);
+    }
+    // Fontes importadas usadas pelo projeto voltam ao seletor.
+    {
+        std::vector<std::string> fonts;
+        {
+            std::lock_guard<std::mutex> lock(modelMutex_);
+            project_->timeline().for_each_composition([&](CompositionId, const Composition& c) {
+                for (u32 i = 0; i < c.order().size(); ++i) {
+                    const Layer* l = c.layer(c.order().at(i));
+                    if (l && l->kind == LayerKind::Text && !l->text.fontPath.empty()) fonts.push_back(resolve_asset_path(l->text.fontPath));
+                }
+            });
+        }
+        for (const std::string& f : fonts) (void)text::FontManager::instance().add_file(f, true);
     }
     // Modelos 3D: reabertos do caminho guardado (relativo ao sandbox). Ausente
     // = o projeto abre mesmo assim; a layer fica sem desenhar e a UI mostra
@@ -2828,6 +2845,41 @@ AssetId add_model_asset(Project& project, const scene3d::SceneAsset& scene, std:
     return project.add_asset(std::move(asset));
 }
 } // namespace
+
+std::vector<text::FontEntry> Engine::list_fonts() noexcept { return text::FontManager::instance().list(); }
+
+Result<text::FontEntry> Engine::import_font(const char* path) noexcept {
+    if (!path || !*path) return Status{Errc::InvalidArgument, "caminho vazio"};
+    const text::FontEntry* e = text::FontManager::instance().add_file(path, true);
+    if (!e) return Status{Errc::UnsupportedFormat, "nao e uma fonte TTF/OTF legivel"};
+    return *e;
+}
+
+bool Engine::set_text_font(u64 layerId, const std::string& family, u32 weight, bool italic, const std::string& path) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->kind != LayerKind::Text) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "fonte do texto");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    l->text.fontFamily = family;
+    l->text.fontWeight = static_cast<u16>(std::clamp<u32>(weight, 100, 1000));
+    l->text.fontItalic = italic;
+    // Importada: o arquivo vai relativo ao projeto (abre em outro aparelho).
+    l->text.fontPath = path.empty() ? std::string{} : store_asset_path(path);
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+std::string Engine::text_font(u64 layerId) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->kind != LayerKind::Text) return {};
+    return l->text.fontFamily + "\t" + std::to_string(l->text.fontWeight) + "\t" + (l->text.fontItalic ? "1" : "0") + "\t"
+         + (l->text.fontPath.empty() ? std::string{} : resolve_asset_path(l->text.fontPath));
+}
 
 Result<u64> Engine::add_text3d(const scene3d::Text3DSpec& spec) noexcept {
     const auto font = text::default_font();

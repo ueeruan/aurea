@@ -96,6 +96,13 @@ struct Mask {
 struct TextData {
     std::string content  = "Texto";
     FontId      font{};
+    /// Fonte: família + peso + itálico (fontes do aparelho, portável entre
+    /// aparelhos) e, para fonte importada, o arquivo no projeto ("docs:…").
+    /// Vazio = fonte padrão do aparelho.
+    std::string fontFamily;
+    u16         fontWeight = 400;
+    bool        fontItalic = false;
+    std::string fontPath;
     f32         size     = 72.0f;
     Vec4        color{1.0f, 1.0f, 1.0f, 1.0f};
     f32         strokeWidth = 0.0f;

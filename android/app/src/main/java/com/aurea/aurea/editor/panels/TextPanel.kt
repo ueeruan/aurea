@@ -78,6 +78,18 @@ internal fun TextPanel(env: PanelEnv) {
             if (draft.isEmpty()) Text("Digite o texto", style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = AureaColors.Muted)))
         }
         Spacer(Modifier.height(10.dp))
+        val font by remember(store) { derivedStateOf { store.textFont } }
+        Row(
+            Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(10.dp)).tocavel(onClick = { env.onOpenPanel(EditorPanel.Font) }),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Fonte", modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+            Text(
+                font?.family?.ifEmpty { null } ?: "Padrão do aparelho",
+                style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Accent)),
+            )
+            Text("  ›", style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = AureaColors.Muted)))
+        }
         TextRuler(store, "Tamanho", { store.textDetail?.size ?: 72f }, "${td.size.roundToInt()} px", 0.5f, 4f, 1000f, "tamanho do texto") {
             store.setTextSize(it)
         }

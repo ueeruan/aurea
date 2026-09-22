@@ -918,6 +918,50 @@ AUREA_JNI void AUREA_FN(nativeSetThermal)(JNIEnv*, jclass, jlong handle, jint st
     c->engine.set_thermal(level, status >= 2);
 }
 
+namespace {
+std::string font_line(const aurea::text::FontEntry& e) {
+    return e.family + "\t" + e.style + "\t" + std::to_string(e.weight) + "\t" + (e.italic ? "1" : "0") + "\t" + e.path + "\t" + (e.imported ? "1" : "0");
+}
+} // namespace
+
+/// Fontes (uma por linha: família, estilo, peso, itálico, caminho, importada).
+AUREA_JNI jstring AUREA_FN(nativeListFonts)(JNIEnv* env, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return nullptr;
+    std::string out;
+    for (const auto& e : c->engine.list_fonts()) { out += font_line(e); out += '\n'; }
+    return env->NewStringUTF(out.c_str());
+}
+
+AUREA_JNI jstring AUREA_FN(nativeImportFont)(JNIEnv* env, jclass, jlong handle, jstring path) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !path) return nullptr;
+    const char* p = env->GetStringUTFChars(path, nullptr);
+    auto r = c->engine.import_font(p);
+    env->ReleaseStringUTFChars(path, p);
+    return r.ok() ? env->NewStringUTF(font_line(*r).c_str()) : nullptr;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetTextFont)(JNIEnv* env, jclass, jlong handle, jlong layer, jstring family, jint weight,
+                                              jboolean italic, jstring path) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !family || !path) return JNI_FALSE;
+    const char* fa = env->GetStringUTFChars(family, nullptr);
+    const char* pa = env->GetStringUTFChars(path, nullptr);
+    const bool ok = c->engine.set_text_font(static_cast<u64>(layer), fa, static_cast<u32>(weight), italic == JNI_TRUE, pa);
+    env->ReleaseStringUTFChars(family, fa);
+    env->ReleaseStringUTFChars(path, pa);
+    return ok ? JNI_TRUE : JNI_FALSE;
+}
+
+/// Fonte da camada de texto: "família\tpeso\titálico\tcaminho" (nulo = não é texto).
+AUREA_JNI jstring AUREA_FN(nativeTextFont)(JNIEnv* env, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return nullptr;
+    const std::string s = c->engine.text_font(static_cast<u64>(layer));
+    return s.empty() ? nullptr : env->NewStringUTF(s.c_str());
+}
+
 AUREA_JNI jboolean AUREA_FN(nativeSetVectorBlur)(JNIEnv*, jclass, jlong handle, jlong layer, jfloat amount) {
     NativeContext* c = ctx_of(handle);
     return c && c->engine.set_vector_blur(static_cast<u64>(layer), amount) ? JNI_TRUE : JNI_FALSE;

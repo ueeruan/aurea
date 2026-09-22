@@ -480,13 +480,18 @@ void write_layer(ByteWriter& w, const Layer& l) {
     w.u8v(l.frameBlend);
     // v11
     w.f32v(l.vectorBlur);
+    // v12
+    w.str(l.text.fontFamily);
+    w.u32v(l.text.fontWeight);
+    w.boolv(l.text.fontItalic);
+    w.str(l.text.fontPath);
 }
 
 /// Versão da seção Timeline. v2: layer de modelo 3D guarda escala de unidade
 /// e pivô (o enquadramento do import). v1 continua sendo lida (campos novos
 /// com o padrão).
 /// v3: velocidade e reverso da layer.
-constexpr u32 kTimelineSectionVersion = 11;
+constexpr u32 kTimelineSectionVersion = 12;
 thread_local u32 g_readingTimelineVersion = kTimelineSectionVersion;
 
 void read_layer(ByteReader& r, Layer& l) {
@@ -666,6 +671,12 @@ void read_layer(ByteReader& r, Layer& l) {
     }
     if (g_readingTimelineVersion >= 10) l.frameBlend = r.u8v();
     if (g_readingTimelineVersion >= 11) l.vectorBlur = r.f32v();
+    if (g_readingTimelineVersion >= 12) {
+        l.text.fontFamily = r.str();
+        l.text.fontWeight = static_cast<u16>(r.u32v());
+        l.text.fontItalic = r.boolv();
+        l.text.fontPath = r.str();
+    }
 }
 
 void write_asset(ByteWriter& w, const Asset& a) {

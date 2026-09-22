@@ -225,6 +225,13 @@ enum class SurfaceFormat : u16 {
     BGRA8,
     RG16F,
     RGBA32F,
+    // Texturas de material (3D). A GPU lineariza o sRGB ao amostrar — o filtro
+    // bilinear e os mipmaps ficam corretos (filtrar em sRGB escurece bordas).
+    RGBA8_sRGB,
+    // Comprimidos por bloco 4×4 (KTX2/Basis transcodificado). 1 byte/texel.
+    BC7, BC7_sRGB,
+    ETC2_RGBA8, ETC2_RGBA8_sRGB,
+    ASTC4x4, ASTC4x4_sRGB,
 };
 
 enum class ScalingMode : u16 {

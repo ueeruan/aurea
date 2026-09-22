@@ -281,6 +281,10 @@ Status Backend::create_device() noexcept {
     // drivers móveis (e alguns recusam o dispositivo inteiro).
     enable.features.samplerAnisotropy = features2.features.samplerAnisotropy;
     enable.features.fragmentStoresAndAtomics = features2.features.fragmentStoresAndAtomics;
+    // Texturas comprimidas (KTX2/Basis transcodificado para o formato nativo).
+    enable.features.textureCompressionASTC_LDR = features2.features.textureCompressionASTC_LDR;
+    enable.features.textureCompressionETC2 = features2.features.textureCompressionETC2;
+    enable.features.textureCompressionBC = features2.features.textureCompressionBC;
 
     const float priority = 1.0f;
     VkDeviceQueueCreateInfo q{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
@@ -373,6 +377,14 @@ void Backend::fill_capabilities() noexcept {
     caps_.rgba16fFilterable = fmt(VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT);
     caps_.rgba16fStorage = fmt(VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT);
     caps_.r16UnormSampled = fmt(VK_FORMAT_R16_UNORM, VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT);
+    caps_.maxSamplerAnisotropy = f.samplerAnisotropy ? std::max(1.0f, l.maxSamplerAnisotropy) : 1.0f;
+    caps_.depth32fAttachment = fmt(VK_FORMAT_D32_SFLOAT, VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
+    caps_.depth24Attachment = fmt(VK_FORMAT_X8_D24_UNORM_PACK32, VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
+    caps_.depth32fSampled = fmt(VK_FORMAT_D32_SFLOAT, VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT);
+    caps_.textureCompressionASTC = f.textureCompressionASTC_LDR == VK_TRUE;
+    caps_.textureCompressionETC2 = f.textureCompressionETC2 == VK_TRUE;
+    caps_.textureCompressionBC = f.textureCompressionBC == VK_TRUE;
+    caps_.maxVertexInputAttributes = l.maxVertexInputAttributes;
 
     caps_.samplerYcbcrConversion = hasYcbcr_;
     caps_.externalMemoryHardwareBuffer = hasAhb_;

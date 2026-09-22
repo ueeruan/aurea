@@ -44,6 +44,10 @@ StateInfo state_info(ResourceState s) noexcept {
                     VK_ACCESS_TRANSFER_WRITE_BIT, true};
         case ResourceState::Present:
             return {VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, false};
+        case ResourceState::DepthAttachment:
+            return {VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                    VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+                    VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, true};
     }
     return {VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0, false};
 }
@@ -61,21 +65,22 @@ void Backend::transition(VkCommandBuffer cmd, Texture& t, ResourceState newState
     if (t.state == newState && !discard) {
         // Mesmo estado de só-leitura: nada a fazer. Mesmo estado de escrita
         // (storage → storage): ainda precisa ordenar escrita-depois-de-escrita.
-        if (!state_info(newState).write || newState == ResourceState::ColorAttachment) return;
+        if (!state_info(newState).write || newState == ResourceState::ColorAttachment
+            || newState == ResourceState::DepthAttachment) return;
     }
     const StateInfo from = state_info(t.state);
     const StateInfo to = state_info(newState);
 
     VkImageMemoryBarrier b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
     b.srcAccessMask = from.access & (VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
-                                     | VK_ACCESS_TRANSFER_WRITE_BIT);
+                                     | VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
     b.dstAccessMask = to.access;
     b.oldLayout = discard ? VK_IMAGE_LAYOUT_UNDEFINED : t.layout;
     b.newLayout = to.layout;
     b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     b.image = t.image;
-    b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS};
+    b.subresourceRange = {aspect_of(t.format), 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS};
     VkPipelineStageFlags srcStage = from.stage;
 
     if (t.external && !t.acquiredThisFrame) {
@@ -169,8 +174,48 @@ void CommandListImpl::barrier(TextureHandle texture, ResourceState newState, boo
 }
 
 void CommandListImpl::begin_render_pass(const RenderPassBegin& pass) noexcept {
+    if (inRenderPass_) return;
+    if (pass.depth.valid()) {
+        // 3D: cor (opcional) + profundidade.
+        Texture* d = backend_->texture(pass.depth.id);
+        Texture* c = pass.color.valid() ? backend_->texture(pass.color.id) : nullptr;
+        if (!d || (pass.color.valid() && !c)) return;
+        if (c && c->state != ResourceState::ColorAttachment) {
+            backend_->transition(cmd_, *c, ResourceState::ColorAttachment, pass.load != LoadOp::Load);
+        }
+        if (d->state != ResourceState::DepthAttachment) {
+            backend_->transition(cmd_, *d, ResourceState::DepthAttachment, pass.depthLoad != LoadOp::Load);
+        }
+        VkRenderPassBeginInfo info{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+        info.renderPass = backend_->render_pass(c ? c->format : VK_FORMAT_UNDEFINED, pass.load, d->format,
+                                                pass.depthLoad, pass.storeDepth);
+        info.framebuffer = backend_->framebuffer(c, *d, pass.depth.id, pass.load, pass.depthLoad, pass.storeDepth);
+        info.renderArea = {{0, 0}, {d->desc.width, d->desc.height}};
+        VkClearValue clears[2]{};
+        u32 n = 0;
+        if (c) {
+            std::memcpy(clears[n].color.float32, pass.clear, sizeof(f32) * 4);
+            ++n;
+        }
+        clears[n].depthStencil = {pass.clearDepth, 0};
+        ++n;
+        info.clearValueCount = n;
+        info.pClearValues = clears;
+        if (!info.renderPass || !info.framebuffer) return;
+        vkCmdBeginRenderPass(cmd_, &info, VK_SUBPASS_CONTENTS_INLINE);
+        inRenderPass_ = true;
+        targetWidth_ = d->desc.width;
+        targetHeight_ = d->desc.height;
+        if (frame_) {
+            d->lastUsedFrame = frame_->frameNumber;
+            if (c) c->lastUsedFrame = frame_->frameNumber;
+        }
+        set_viewport(0, 0, static_cast<f32>(targetWidth_), static_cast<f32>(targetHeight_));
+        set_scissor(0, 0, targetWidth_, targetHeight_);
+        return;
+    }
     Texture* t = backend_->texture(pass.color.id);
-    if (!t || inRenderPass_) return;
+    if (!t) return;
     // O grafo já deixou o alvo em ColorAttachment; se alguém chamar direto, a
     // transição fica garantida aqui.
     if (t->state != ResourceState::ColorAttachment) {
@@ -338,15 +383,38 @@ bool CommandListImpl::flush_descriptors() noexcept {
     return true;
 }
 
-void CommandListImpl::draw(u32 vertexCount, u32 instanceCount, u32 firstVertex) noexcept {
-    if (!inRenderPass_ || !pipeline_) return;
-    if (dirty_) {
-        if (!flush_descriptors()) return;
-    } else if (lastSet_) {
+bool CommandListImpl::prepare_draw() noexcept {
+    if (!inRenderPass_ || !pipeline_) return false;
+    if (dirty_) return flush_descriptors();
+    if (lastSet_) {
         const u32 dynamicOffset = uniformBuffer_ ? uniformOffset_ : 0;
         vkCmdBindDescriptorSets(cmd_, pipeline_->bindPoint, pipeline_->layout, 0, 1, &lastSet_, 1, &dynamicOffset);
     }
+    return true;
+}
+
+void CommandListImpl::draw(u32 vertexCount, u32 instanceCount, u32 firstVertex) noexcept {
+    if (!prepare_draw()) return;
     vkCmdDraw(cmd_, vertexCount, instanceCount, firstVertex, 0);
+}
+
+void CommandListImpl::bind_vertex_buffer(u32 binding, BufferHandle buffer, u64 offset) noexcept {
+    Buffer* b = backend_->buffer(buffer.id);
+    if (!b) return;
+    const VkDeviceSize off = offset;
+    vkCmdBindVertexBuffers(cmd_, binding, 1, &b->buffer, &off);
+}
+
+void CommandListImpl::bind_index_buffer(BufferHandle buffer, u64 offset, IndexType type) noexcept {
+    Buffer* b = backend_->buffer(buffer.id);
+    if (!b) return;
+    vkCmdBindIndexBuffer(cmd_, b->buffer, offset, type == IndexType::U16 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32);
+}
+
+void CommandListImpl::draw_indexed(u32 indexCount, u32 instanceCount, u32 firstIndex, i32 vertexOffset,
+                                   u32 firstInstance) noexcept {
+    if (!prepare_draw()) return;
+    vkCmdDrawIndexed(cmd_, indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
 }
 
 void CommandListImpl::dispatch(u32 x, u32 y, u32 z) noexcept {

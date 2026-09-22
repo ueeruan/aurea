@@ -18,7 +18,15 @@ namespace {
 VkImageUsageFlags usage_for(const TextureDesc& d) noexcept {
     VkImageUsageFlags u = 0;
     if (d.sampled)      u |= VK_IMAGE_USAGE_SAMPLED_BIT;
+    if (d.is_depth()) {
+        // Profundidade: anexo, e amostrada quando é mapa de sombra.
+        u |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+        if (d.transferSrc) u |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        return u;
+    }
     if (d.renderTarget) u |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    // Mips gerados por blit: o nível de origem é lido por transferência.
+    if (d.mipLevels > 1) u |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     if (d.storage)      u |= VK_IMAGE_USAGE_STORAGE_BIT;
     // Leitura de volta de alvo de render (testes, export) e upload de textura
     // amostrada são comuns o bastante para valerem a flag desde a criação —
@@ -101,6 +109,10 @@ Result<TextureHandle> Backend::create_texture(const TextureDesc& desc) noexcept 
     info.tiling = VK_IMAGE_TILING_OPTIMAL;
     info.usage = usage_for(desc);
     info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    if (desc.cube) {
+        info.flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+        info.arrayLayers = 6;
+    }
     info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     if (const Status s = check(vkCreateImage(device_, &info, nullptr, &t.image), "vkCreateImage"); !s.ok()) return s;
 
@@ -120,9 +132,10 @@ Result<TextureHandle> Backend::create_texture(const TextureDesc& desc) noexcept 
 
     VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
     vi.image = t.image;
-    vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    vi.viewType = desc.cube ? VK_IMAGE_VIEW_TYPE_CUBE
+                : info.arrayLayers > 1 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
     vi.format = t.format;
-    vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, info.mipLevels, 0, info.arrayLayers};
+    vi.subresourceRange = {aspect_of(t.format), 0, info.mipLevels, 0, info.arrayLayers};
     if (const Status s = check(vkCreateImageView(device_, &vi, nullptr, &t.view), "vkCreateImageView"); !s.ok()) {
         vkDestroyImage(device_, t.image, nullptr);
         allocator_.free(t.alloc);
@@ -138,6 +151,10 @@ void Backend::destroy_texture_now(Texture& t) noexcept {
         if (fb) vkDestroyFramebuffer(device_, fb, nullptr);
         fb = VK_NULL_HANDLE;
     }
+    for (Texture::DepthFramebuffer& d : t.depthFramebuffers) {
+        if (d.fb) vkDestroyFramebuffer(device_, d.fb, nullptr);
+    }
+    t.depthFramebuffers.clear();
     if (t.view) vkDestroyImageView(device_, t.view, nullptr);
     if (t.ownsImage && t.image) vkDestroyImage(device_, t.image, nullptr);
     if (t.importedMemory) vkFreeMemory(device_, t.importedMemory, nullptr);
@@ -151,6 +168,22 @@ void Backend::destroy_texture_now(Texture& t) noexcept {
 void Backend::destroy_texture(TextureHandle h) noexcept {
     Texture t;
     if (!textures_.remove(h.id, t)) return;
+    if (is_depth_format(t.format)) {
+        // Framebuffers de outras texturas que usam esta profundidade: saem
+        // junto (a view vai ser destruída).
+        textures_.for_each([&](u64, Texture& other) {
+            for (auto it = other.depthFramebuffers.begin(); it != other.depthFramebuffers.end();) {
+                if (it->depth != h.id) { ++it; continue; }
+                struct Node { Backend* b; VkFramebuffer fb; };
+                defer_until_gpu_done([](void* p) {
+                    auto* n = static_cast<Node*>(p);
+                    vkDestroyFramebuffer(n->b->device(), n->fb, nullptr);
+                    delete n;
+                }, new Node{this, it->fb});
+                it = other.depthFramebuffers.erase(it);
+            }
+        });
+    }
     if (t.external && t.nativeBuffer) importedByBuffer_.erase(t.nativeBuffer);
     auto* pending = new PendingTexture{this, std::move(t)};
     defer_until_gpu_done([](void* p) {
@@ -453,6 +486,110 @@ VkRenderPass Backend::render_pass(VkFormat format, LoadOp load) noexcept {
     return rp;
 }
 
+VkRenderPass Backend::render_pass(VkFormat format, LoadOp load, VkFormat depth, LoadOp depthLoad,
+                                  bool storeDepth) noexcept {
+    if (depth == VK_FORMAT_UNDEFINED) return render_pass(format, load);
+    const u64 key = (1ull << 63) | static_cast<u64>(format) | (static_cast<u64>(load) << 20)
+                  | (static_cast<u64>(depth) << 24) | (static_cast<u64>(depthLoad) << 44)
+                  | (static_cast<u64>(storeDepth) << 48);
+    if (auto it = renderPasses_.find(key); it != renderPasses_.end()) return it->second;
+
+    auto load_op = [](LoadOp l) {
+        return l == LoadOp::Clear ? VK_ATTACHMENT_LOAD_OP_CLEAR
+             : l == LoadOp::Load  ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    };
+    VkAttachmentDescription att[2]{};
+    u32 count = 0;
+    VkAttachmentReference colorRef{0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+    const bool hasColor = format != VK_FORMAT_UNDEFINED;
+    if (hasColor) {
+        VkAttachmentDescription& a = att[count++];
+        a.format = format;
+        a.samples = VK_SAMPLE_COUNT_1_BIT;
+        a.loadOp = load_op(load);
+        a.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        a.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        a.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        a.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        a.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    }
+    VkAttachmentReference depthRef{count, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+    {
+        VkAttachmentDescription& a = att[count++];
+        a.format = depth;
+        a.samples = VK_SAMPLE_COUNT_1_BIT;
+        a.loadOp = load_op(depthLoad);
+        a.storeOp = storeDepth ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        a.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        a.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        a.initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        a.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    }
+    VkSubpassDescription sub{};
+    sub.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    sub.colorAttachmentCount = hasColor ? 1 : 0;
+    sub.pColorAttachments = hasColor ? &colorRef : nullptr;
+    sub.pDepthStencilAttachment = &depthRef;
+
+    const VkPipelineStageFlags stages = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+                                      | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT
+                                      | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    const VkAccessFlags access = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+                               | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT
+                               | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    VkSubpassDependency deps[2]{};
+    deps[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+    deps[0].dstSubpass = 0;
+    deps[0].srcStageMask = stages;
+    deps[0].dstStageMask = stages;
+    deps[0].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    deps[0].dstAccessMask = access;
+    deps[1].srcSubpass = 0;
+    deps[1].dstSubpass = VK_SUBPASS_EXTERNAL;
+    deps[1].srcStageMask = stages;
+    deps[1].dstStageMask = stages;
+    deps[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    deps[1].dstAccessMask = access;
+
+    VkRenderPassCreateInfo info{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+    info.attachmentCount = count;
+    info.pAttachments = att;
+    info.subpassCount = 1;
+    info.pSubpasses = &sub;
+    info.dependencyCount = 2;
+    info.pDependencies = deps;
+    VkRenderPass rp = VK_NULL_HANDLE;
+    if (vkCreateRenderPass(device_, &info, nullptr, &rp) != VK_SUCCESS) return VK_NULL_HANDLE;
+    renderPasses_[key] = rp;
+    return rp;
+}
+
+VkFramebuffer Backend::framebuffer(Texture* color, Texture& depth, u64 depthId, LoadOp load, LoadOp depthLoad,
+                                   bool storeDepth) noexcept {
+    // O framebuffer mora na textura de cor (ou na de profundidade, num passe
+    // só de profundidade), indexado pela profundidade e pelos load ops.
+    Texture& owner = color ? *color : depth;
+    const u32 key = static_cast<u32>(load) | (static_cast<u32>(depthLoad) << 4) | (static_cast<u32>(storeDepth) << 8);
+    for (const Texture::DepthFramebuffer& d : owner.depthFramebuffers) {
+        if (d.depth == depthId && d.key == key) return d.fb;
+    }
+    VkImageView views[2];
+    u32 n = 0;
+    if (color) views[n++] = color->view;
+    views[n++] = depth.view;
+    VkFramebufferCreateInfo info{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+    info.renderPass = render_pass(color ? color->format : VK_FORMAT_UNDEFINED, load, depth.format, depthLoad, storeDepth);
+    info.attachmentCount = n;
+    info.pAttachments = views;
+    info.width = depth.desc.width;
+    info.height = depth.desc.height;
+    info.layers = 1;
+    VkFramebuffer fb = VK_NULL_HANDLE;
+    if (!info.renderPass || vkCreateFramebuffer(device_, &info, nullptr, &fb) != VK_SUCCESS) return VK_NULL_HANDLE;
+    owner.depthFramebuffers.push_back(Texture::DepthFramebuffer{depthId, key, fb});
+    return fb;
+}
+
 VkFramebuffer Backend::framebuffer(Texture& t, LoadOp load) noexcept {
     const u32 i = static_cast<u32>(load);
     if (t.framebuffers[i]) return t.framebuffers[i];
@@ -506,6 +643,31 @@ Result<PipelineHandle> Backend::create_pipeline(const PipelineDesc& desc) noexce
     stages[1].pName = "main";
 
     VkPipelineVertexInputStateCreateInfo vertexInput{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
+    VkVertexInputAttributeDescription attrs[VertexLayout::kMaxAttributes]{};
+    VkVertexInputBindingDescription binds[VertexLayout::kMaxBindings]{};
+    const VertexLayout& vl = desc.vertexLayout;
+    for (u32 i = 0; i < vl.attributeCount; ++i) {
+        attrs[i].location = vl.attributes[i].location;
+        attrs[i].binding = vl.attributes[i].binding;
+        attrs[i].format = to_vk(vl.attributes[i].format);
+        attrs[i].offset = vl.attributes[i].offset;
+    }
+    u32 bindCount = 0;
+    for (u32 b = 0; b < vl.bindingCount; ++b) {
+        if (vl.bindings[b].stride == 0) continue;
+        binds[bindCount].binding = b;
+        binds[bindCount].stride = vl.bindings[b].stride;
+        binds[bindCount].inputRate = vl.bindings[b].perInstance ? VK_VERTEX_INPUT_RATE_INSTANCE : VK_VERTEX_INPUT_RATE_VERTEX;
+        ++bindCount;
+    }
+    vertexInput.vertexAttributeDescriptionCount = vl.attributeCount;
+    vertexInput.pVertexAttributeDescriptions = attrs;
+    vertexInput.vertexBindingDescriptionCount = bindCount;
+    vertexInput.pVertexBindingDescriptions = binds;
+    VkPipelineDepthStencilStateCreateInfo depthState{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
+    depthState.depthTestEnable = desc.depth.test ? VK_TRUE : VK_FALSE;
+    depthState.depthWriteEnable = desc.depth.write ? VK_TRUE : VK_FALSE;
+    depthState.depthCompareOp = to_vk(desc.depth.compare);
     VkPipelineInputAssemblyStateCreateInfo assembly{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
     assembly.topology = to_vk(desc.topology);
     VkPipelineViewportStateCreateInfo viewport{VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
@@ -513,8 +675,14 @@ Result<PipelineHandle> Backend::create_pipeline(const PipelineDesc& desc) noexce
     viewport.scissorCount = 1;
     VkPipelineRasterizationStateCreateInfo raster{VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
     raster.polygonMode = VK_POLYGON_MODE_FILL;
-    raster.cullMode = VK_CULL_MODE_NONE;
-    raster.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    raster.cullMode = desc.cull == CullMode::Back ? VK_CULL_MODE_BACK_BIT
+                    : desc.cull == CullMode::Front ? VK_CULL_MODE_FRONT_BIT : VK_CULL_MODE_NONE;
+    raster.frontFace = desc.frontFaceCCW ? VK_FRONT_FACE_COUNTER_CLOCKWISE : VK_FRONT_FACE_CLOCKWISE;
+    if (desc.depth.biasConstant != 0.0f || desc.depth.biasSlope != 0.0f) {
+        raster.depthBiasEnable = VK_TRUE;
+        raster.depthBiasConstantFactor = desc.depth.biasConstant;
+        raster.depthBiasSlopeFactor = desc.depth.biasSlope;
+    }
     raster.lineWidth = 1.0f;
     VkPipelineMultisampleStateCreateInfo multisample{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
     multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
@@ -538,8 +706,8 @@ Result<PipelineHandle> Backend::create_pipeline(const PipelineDesc& desc) noexce
         }
     }
     VkPipelineColorBlendStateCreateInfo blendState{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
-    blendState.attachmentCount = 1;
-    blendState.pAttachments = &blend;
+    blendState.attachmentCount = desc.depthOnly ? 0 : 1;
+    blendState.pAttachments = desc.depthOnly ? nullptr : &blend;
 
     const VkDynamicState dyn[2] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
     VkPipelineDynamicStateCreateInfo dynamic{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
@@ -555,12 +723,16 @@ Result<PipelineHandle> Backend::create_pipeline(const PipelineDesc& desc) noexce
     info.pRasterizationState = &raster;
     info.pMultisampleState = &multisample;
     info.pColorBlendState = &blendState;
+    info.pDepthStencilState = desc.hasDepth ? &depthState : nullptr;
     info.pDynamicState = &dynamic;
     info.layout = p.layout;
     // Qualquer render pass com o mesmo formato é compatível: o load op não
     // entra na compatibilidade, então um pipeline serve para CLEAR, LOAD e
     // DONT_CARE.
-    info.renderPass = render_pass(to_vk(desc.colorFormat), LoadOp::Load);
+    info.renderPass = desc.hasDepth
+                    ? render_pass(desc.depthOnly ? VK_FORMAT_UNDEFINED : to_vk(desc.colorFormat), LoadOp::Load,
+                                  to_vk(desc.depthFormat), LoadOp::Load, true)
+                    : render_pass(to_vk(desc.colorFormat), LoadOp::Load);
     info.subpass = 0;
     if (!info.renderPass) return Status{Errc::PipelineCompileFailed, "render pass"};
     if (vkCreateGraphicsPipelines(device_, pipelineCache_, 1, &info, nullptr, &p.pipeline) != VK_SUCCESS) {
@@ -642,6 +814,127 @@ Status Backend::upload_texture(TextureHandle dst, const void* data, u32 bytesPer
     Buffer dead;
     if (buffers_.remove(staging->id, dead)) destroy_buffer_now(dead);
     return st;
+}
+
+Status Backend::upload_texture_level(TextureHandle dst, u32 mipLevel, u32 layer, const void* data,
+                                     usize bytes) noexcept {
+    Texture* t = textures_.get(dst.id);
+    if (!t || !data || bytes == 0) return Errc::InvalidArgument;
+    const u32 levels = std::max(1u, t->desc.mipLevels);
+    const u32 layers = t->desc.cube ? 6u : std::max(1u, t->desc.layers);
+    if (mipLevel >= levels || layer >= layers) return Status{Errc::OutOfRange, "mip/camada fora da textura"};
+    const u32 w = std::max(1u, t->desc.width >> mipLevel);
+    const u32 h = std::max(1u, t->desc.height >> mipLevel);
+    const bool block = is_block_compressed(t->desc.format);
+    const usize expected = block ? static_cast<usize>((w + 3) / 4) * ((h + 3) / 4) * 16
+                                 : static_cast<usize>(w) * h * t->desc.bytes_per_pixel();
+    if (bytes < expected) return Status{Errc::InvalidArgument, "dados menores que o nivel"};
+
+    struct Ctx { Backend* be; Texture* t; VkBuffer buf; VkDeviceSize off; u32 mip, layer, w, h; } ctx{};
+    auto record = [](Backend& be, VkCommandBuffer cmd, void* p) {
+        auto* c = static_cast<Ctx*>(p);
+        // Barreira só do subrecurso: os outros níveis mantêm o conteúdo.
+        VkImageMemoryBarrier b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+        b.srcAccessMask = 0;
+        b.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        b.image = c->t->image;
+        b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, c->mip, 1, c->layer, 1};
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                             nullptr, 1, &b);
+        VkBufferImageCopy region{};
+        region.bufferOffset = c->off;
+        region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, c->mip, c->layer, 1};
+        region.imageExtent = {c->w, c->h, 1};
+        vkCmdCopyBufferToImage(cmd, c->buf, c->t->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+        b.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        b.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr,
+                             0, nullptr, 1, &b);
+        c->t->layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        c->t->state = ResourceState::ShaderRead;
+        (void)be;
+    };
+    // Sempre por submissão própria: o import de 3D roda fora do frame, e um
+    // nível 4K não cabe no anel de staging do frame.
+    BufferDesc sd;
+    sd.bytes = expected;
+    sd.usage = BufferUsage::TransferSrc;
+    sd.access = MemoryAccess::Upload;
+    auto staging = create_buffer(sd);
+    if (!staging.ok()) return staging.status();
+    Buffer* s = buffers_.get(staging->id);
+    std::memcpy(s->alloc.mapped, data, expected);
+    ctx = Ctx{this, t, s->buffer, 0, mipLevel, layer, w, h};
+    const Status st = submit_immediate(record, &ctx);
+    Buffer dead;
+    if (buffers_.remove(staging->id, dead)) destroy_buffer_now(dead);
+    return st;
+}
+
+Status Backend::generate_mipmaps(TextureHandle texture) noexcept {
+    Texture* t = textures_.get(texture.id);
+    if (!t) return Errc::InvalidArgument;
+    const u32 levels = std::max(1u, t->desc.mipLevels);
+    if (levels <= 1) return OkStatus;
+    if (is_block_compressed(t->desc.format)) return Status{Errc::NotSupported, "mips de textura comprimida vem do arquivo"};
+    VkFormatProperties fp{};
+    vkGetPhysicalDeviceFormatProperties(physical_, t->format, &fp);
+    if (!(fp.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT)
+        || !(fp.optimalTilingFeatures & VK_FORMAT_FEATURE_BLIT_SRC_BIT)
+        || !(fp.optimalTilingFeatures & VK_FORMAT_FEATURE_BLIT_DST_BIT)) {
+        return Status{Errc::NotSupported, "formato sem blit linear"};
+    }
+    struct Ctx { Texture* t; u32 levels; u32 layers; } ctx{t, levels, t->desc.cube ? 6u : std::max(1u, t->desc.layers)};
+    return submit_immediate([](Backend&, VkCommandBuffer cmd, void* p) {
+        auto* c = static_cast<Ctx*>(p);
+        Texture& tx = *c->t;
+        auto barrier = [&](u32 mip, VkImageLayout from, VkImageLayout to, VkAccessFlags src, VkAccessFlags dst,
+                           VkPipelineStageFlags s0, VkPipelineStageFlags s1) {
+            VkImageMemoryBarrier b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+            b.srcAccessMask = src;
+            b.dstAccessMask = dst;
+            b.oldLayout = from;
+            b.newLayout = to;
+            b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            b.image = tx.image;
+            b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, mip, 1, 0, c->layers};
+            vkCmdPipelineBarrier(cmd, s0, s1, 0, 0, nullptr, 0, nullptr, 1, &b);
+        };
+        // Nível 0 vem de amostragem (subido antes); vira origem de blit.
+        barrier(0, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                VK_PIPELINE_STAGE_TRANSFER_BIT);
+        i32 w = static_cast<i32>(tx.desc.width), h = static_cast<i32>(tx.desc.height);
+        for (u32 m = 1; m < c->levels; ++m) {
+            const i32 nw = std::max(1, w / 2), nh = std::max(1, h / 2);
+            barrier(m, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT,
+                    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+            VkImageBlit blit{};
+            blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, m - 1, 0, c->layers};
+            blit.srcOffsets[1] = {w, h, 1};
+            blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, m, 0, c->layers};
+            blit.dstOffsets[1] = {nw, nh, 1};
+            vkCmdBlitImage(cmd, tx.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, tx.image,
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
+            barrier(m, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT);
+            w = nw;
+            h = nh;
+        }
+        for (u32 m = 0; m < c->levels; ++m) {
+            barrier(m, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+        }
+        tx.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        tx.state = ResourceState::ShaderRead;
+    }, &ctx);
 }
 
 Status Backend::read_texture(TextureHandle src, void* outData, u32 bytesPerRow) noexcept {

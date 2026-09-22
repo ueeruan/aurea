@@ -102,6 +102,8 @@ public:
     Status map_buffer(BufferHandle, void*&) noexcept override { return Errc::NotSupported; }
     void unmap_buffer(BufferHandle) noexcept override {}
     Status read_texture(TextureHandle, void*, u32) noexcept override { return Errc::NotSupported; }
+    Status upload_texture_level(TextureHandle, u32, u32, const void*, usize) noexcept override { return OkStatus; }
+    Status generate_mipmaps(TextureHandle) noexcept override { return OkStatus; }
     Result<ExternalTexture> import_external_image(const ExternalImageDesc&) noexcept override {
         return Status{Errc::NotSupported};
     }
@@ -138,6 +140,9 @@ public:
     void set_viewport(f32, f32, f32, f32) noexcept override {}
     void set_scissor(i32, i32, u32, u32) noexcept override {}
     void draw(u32, u32, u32) noexcept override { events.push_back({Event::Draw}); }
+    void bind_vertex_buffer(u32, BufferHandle, u64) noexcept override {}
+    void bind_index_buffer(BufferHandle, u64, IndexType) noexcept override {}
+    void draw_indexed(u32, u32, u32, i32, u32) noexcept override { events.push_back({Event::Draw}); }
     void dispatch(u32, u32, u32) noexcept override {}
     void copy_texture(TextureHandle, TextureHandle) noexcept override {}
     void copy_texture_to_buffer(TextureHandle, BufferHandle) noexcept override {}

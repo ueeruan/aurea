@@ -100,6 +100,7 @@ enum class ResourceState : u8 {
     TransferSrc,
     TransferDst,
     Present,           ///< pronta para o swapchain
+    DepthAttachment,   ///< profundidade de render pass (teste e escrita)
 };
 
 enum class LoadOp : u8 {
@@ -117,6 +118,8 @@ struct TextureDesc {
     u32 depth  = 1;
     u32 layers = 1;
     u32 mipLevels = 1;
+    /// Cubemap (ambiente/IBL): `layers` = 6, uma face por camada.
+    bool cube = false;
     SurfaceFormat format = SurfaceFormat::RGBA8;
     u32 sampleCount = 1;
 
@@ -163,6 +166,11 @@ struct TextureDesc {
             case SurfaceFormat::RGBA32F:  return 16;
             case SurfaceFormat::Depth24:  return 4;
             case SurfaceFormat::Depth32F: return 4;
+            case SurfaceFormat::RGBA8_sRGB: return 4;
+            case SurfaceFormat::BC7: case SurfaceFormat::BC7_sRGB:
+            case SurfaceFormat::ETC2_RGBA8: case SurfaceFormat::ETC2_RGBA8_sRGB:
+            case SurfaceFormat::ASTC4x4: case SurfaceFormat::ASTC4x4_sRGB:
+                return 1;   // 16 bytes por bloco 4×4
         }
         return 4;
     }
@@ -238,6 +246,70 @@ struct ShaderDesc {
 
 enum class Topology : u8 { TriangleList = 0, TriangleStrip, PointList, LineList };
 
+[[nodiscard]] constexpr bool is_block_compressed(SurfaceFormat f) noexcept {
+    return f == SurfaceFormat::BC7 || f == SurfaceFormat::BC7_sRGB || f == SurfaceFormat::ETC2_RGBA8
+        || f == SurfaceFormat::ETC2_RGBA8_sRGB || f == SurfaceFormat::ASTC4x4 || f == SurfaceFormat::ASTC4x4_sRGB;
+}
+
+/// Formato de um atributo de vértice. Só o necessário para 3D: posições e
+/// normais em float, UV em float ou unorm16, cor e pesos em unorm8, índices
+/// de junta em u8/u16.
+enum class VertexFormat : u8 {
+    Float = 0, Float2, Float3, Float4,
+    UByte4Norm,    ///< cor, pesos de skin
+    UShort2Norm,   ///< UV compacto
+    UShort4Norm,   ///< pesos de skin (16 bits)
+    UByte4,        ///< índices de junta (até 256)
+    UShort4,       ///< índices de junta (até 65536)
+    Short4Norm,    ///< normal/tangente compactas
+};
+
+struct VertexAttribute {
+    u32 location = 0;
+    u32 binding = 0;
+    VertexFormat format = VertexFormat::Float3;
+    u32 offset = 0;
+};
+
+struct VertexBindingDesc {
+    u32 stride = 0;
+    bool perInstance = false;
+};
+
+/// Layout de vértices do pipeline. Vazio = o shader gera os vértices sozinho
+/// (quads 2D do compositor). Cada fluxo (posição, normal, UV…) pode ficar num
+/// buffer próprio: a sombra lê só posições e não paga banda das outras.
+struct VertexLayout {
+    static constexpr u32 kMaxAttributes = 10;
+    static constexpr u32 kMaxBindings = 8;
+    VertexAttribute   attributes[kMaxAttributes]{};
+    u32               attributeCount = 0;
+    VertexBindingDesc bindings[kMaxBindings]{};
+    u32               bindingCount = 0;
+
+    void add(u32 location, u32 binding, VertexFormat format, u32 offset = 0) noexcept {
+        if (attributeCount < kMaxAttributes) attributes[attributeCount++] = VertexAttribute{location, binding, format, offset};
+    }
+    void set_binding(u32 binding, u32 stride, bool perInstance = false) noexcept {
+        if (binding >= kMaxBindings) return;
+        bindings[binding] = VertexBindingDesc{stride, perInstance};
+        if (binding + 1 > bindingCount) bindingCount = binding + 1;
+    }
+};
+
+enum class CompareOp : u8 { Never = 0, Less, Equal, LessOrEqual, Greater, NotEqual, GreaterOrEqual, Always };
+enum class CullMode : u8 { None = 0, Back, Front };
+enum class IndexType : u8 { U16 = 0, U32 };
+
+struct DepthState {
+    bool test = false;
+    bool write = false;
+    CompareOp compare = CompareOp::LessOrEqual;
+    /// Viés de profundidade (mapas de sombra). 0 = desligado.
+    f32 biasConstant = 0.0f;
+    f32 biasSlope = 0.0f;
+};
+
 struct PipelineDesc {
     bool isCompute = false;
 
@@ -253,6 +325,19 @@ struct PipelineDesc {
 
     SurfaceFormat colorFormat = SurfaceFormat::RGBA16F;
     Topology topology = Topology::TriangleList;
+
+    // --- 3D ------------------------------------------------------------------
+    VertexLayout vertexLayout{};
+    DepthState   depth{};
+    /// Formato do anexo de profundidade do render pass. Só vale com
+    /// `hasDepth`; um pipeline com profundidade é compatível apenas com passes
+    /// que também a tenham.
+    bool         hasDepth = false;
+    SurfaceFormat depthFormat = SurfaceFormat::Depth32F;
+    /// Sem cor (passe de sombra): só profundidade.
+    bool         depthOnly = false;
+    CullMode     cull = CullMode::None;
+    bool         frontFaceCCW = true;
 
     /// Sampler imutável no slot 0. É como a conversão YCbCr entra: o Vulkan
     /// exige que o sampler de uma imagem externa (NV12/P010 do decoder) seja
@@ -341,9 +426,18 @@ struct GpuMemoryStats {
 // Lista de comandos do frame. O backend grava; o motor só descreve.
 // -----------------------------------------------------------------------------
 struct RenderPassBegin {
-    TextureHandle color{};
+    TextureHandle color{};     ///< inválido = passe só de profundidade
     LoadOp  load = LoadOp::Clear;
     f32     clear[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+
+    /// Anexo de profundidade (3D). Inválido = passe 2D, sem profundidade.
+    TextureHandle depth{};
+    LoadOp  depthLoad = LoadOp::Clear;
+    f32     clearDepth = 1.0f;
+    /// Guardar a profundidade depois do passe (mapa de sombra, que é lido
+    /// depois). Profundidade só de teste não precisa ir para a memória — em
+    /// GPU tile-based isso economiza a escrita inteira.
+    bool    storeDepth = false;
 };
 
 class CommandList {
@@ -375,6 +469,12 @@ public:
     virtual void set_scissor(i32 x, i32 y, u32 w, u32 h) noexcept = 0;
 
     virtual void draw(u32 vertexCount, u32 instanceCount = 1, u32 firstVertex = 0) noexcept = 0;
+
+    // --- Geometria 3D ----------------------------------------------------------
+    virtual void bind_vertex_buffer(u32 binding, BufferHandle buffer, u64 offset = 0) noexcept = 0;
+    virtual void bind_index_buffer(BufferHandle buffer, u64 offset, IndexType type) noexcept = 0;
+    virtual void draw_indexed(u32 indexCount, u32 instanceCount = 1, u32 firstIndex = 0,
+                              i32 vertexOffset = 0, u32 firstInstance = 0) noexcept = 0;
     virtual void dispatch(u32 groupsX, u32 groupsY, u32 groupsZ) noexcept = 0;
 
     virtual void copy_texture(TextureHandle src, TextureHandle dst) noexcept = 0;
@@ -468,6 +568,14 @@ public:
 
     /// Lê uma textura de volta para a CPU. Síncrono e caro — testes visuais e
     /// export sem caminho de superfície. Nunca no preview.
+    /// Sobe um nível de mip (e camada, para cubemap/array) inteiro, com os
+    /// dados compactados (linhas sem preenchimento; blocos para comprimidos).
+    [[nodiscard]] virtual Status upload_texture_level(TextureHandle dst, u32 mipLevel, u32 layer,
+                                                      const void* data, usize bytes) noexcept = 0;
+    /// Gera os mips 1..N a partir do 0 (blit linear na GPU). Formatos
+    /// comprimidos não geram — trazem os mips prontos do arquivo.
+    [[nodiscard]] virtual Status generate_mipmaps(TextureHandle texture) noexcept = 0;
+
     [[nodiscard]] virtual Status read_texture(TextureHandle src, void* outData,
                                               u32 bytesPerRow) noexcept = 0;
 

@@ -168,6 +168,21 @@ u32 FrameGraph::add_raster_pass(const char* name, PassStage stage, FGTexture col
     return index;
 }
 
+u32 FrameGraph::add_raster_pass_depth(const char* name, PassStage stage, FGTexture colorTarget, LoadOp load,
+                                      Vec4 clear, FGTexture depthTarget, LoadOp depthLoad, bool storeDepth,
+                                      PassFn fn) noexcept {
+    const u32 index = add_raster_pass(name, stage, colorTarget, load, clear, std::move(fn));
+    Pass& p = passes_[index];
+    p.depthTarget = depthTarget;
+    p.depthLoad = depthLoad;
+    p.storeDepth = storeDepth;
+    if (depthTarget.valid()) {
+        if (depthLoad == LoadOp::Load) add_access(index, depthTarget, Access::Read);
+        add_access(index, depthTarget, Access::DepthWrite);
+    }
+    return index;
+}
+
 u32 FrameGraph::add_compute_pass(const char* name, PassStage stage, PassFn fn) noexcept {
     Pass p;
     p.name = name ? name : "";
@@ -459,7 +474,8 @@ void FrameGraph::plan_barriers() noexcept {
                 case Access::Read:
                     // Leitura do alvo do próprio passe (LoadOp::Load) é a carga do
                     // render pass, não amostragem: o estado certo é o de anexo.
-                    if (p.kind == PassKind::Raster && p.colorTarget.index == a.resource) continue;
+                    if (p.kind == PassKind::Raster
+                        && (p.colorTarget.index == a.resource || p.depthTarget.index == a.resource)) continue;
                     want = ResourceState::ShaderRead;
                     break;
                 case Access::ColorWrite:
@@ -472,6 +488,10 @@ void FrameGraph::plan_barriers() noexcept {
                     break;
                 case Access::CopySrc:
                     want = ResourceState::TransferSrc;
+                    break;
+                case Access::DepthWrite:
+                    want = ResourceState::DepthAttachment;
+                    discard = p.depthLoad != LoadOp::Load;
                     break;
                 case Access::CopyDst:
                     want = ResourceState::TransferDst;
@@ -512,10 +532,15 @@ void FrameGraph::execute(CommandList& cmds, bool timers) noexcept {
         cmds.begin_label(p.name);
         if (timers) cmds.begin_timer(p.name);
 
-        if (p.kind == PassKind::Raster && p.colorTarget.valid()) {
+        if (p.kind == PassKind::Raster && (p.colorTarget.valid() || p.depthTarget.valid())) {
             RenderPassBegin rp;
-            rp.color = resources_[p.colorTarget.index].physical;
+            if (p.colorTarget.valid()) rp.color = resources_[p.colorTarget.index].physical;
             rp.load = p.load;
+            if (p.depthTarget.valid()) {
+                rp.depth = resources_[p.depthTarget.index].physical;
+                rp.depthLoad = p.depthLoad;
+                rp.storeDepth = p.storeDepth;
+            }
             for (int c = 0; c < 4; ++c) rp.clear[c] = p.clear[c];
             cmds.begin_render_pass(rp);
             if (p.fn) p.fn(ctx);

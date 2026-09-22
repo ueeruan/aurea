@@ -42,6 +42,10 @@ namespace aurea::vk {
 [[nodiscard]] Status check(VkResult r, const char* what) noexcept;
 [[nodiscard]] const char* result_name(VkResult r) noexcept;
 [[nodiscard]] VkFormat to_vk(SurfaceFormat f) noexcept;
+[[nodiscard]] VkFormat to_vk(VertexFormat f) noexcept;
+[[nodiscard]] VkCompareOp to_vk(CompareOp c) noexcept;
+[[nodiscard]] bool is_depth_format(VkFormat f) noexcept;
+[[nodiscard]] VkImageAspectFlags aspect_of(VkFormat f) noexcept;
 [[nodiscard]] SurfaceFormat from_vk(VkFormat f) noexcept;
 
 // -----------------------------------------------------------------------------
@@ -177,6 +181,9 @@ struct Texture {
     void*         nativeBuffer = nullptr;
     u64           lastUsedFrame = 0;
     VkFramebuffer framebuffers[3]{};         ///< um por LoadOp
+    /// Framebuffers cor+profundidade (3D). Chave: profundidade e load ops.
+    struct DepthFramebuffer { u64 depth = 0; u32 key = 0; VkFramebuffer fb = VK_NULL_HANDLE; };
+    std::vector<DepthFramebuffer> depthFramebuffers;
 };
 
 struct Buffer {
@@ -251,6 +258,10 @@ public:
     void set_viewport(f32 x, f32 y, f32 w, f32 h) noexcept override;
     void set_scissor(i32 x, i32 y, u32 w, u32 h) noexcept override;
     void draw(u32 vertexCount, u32 instanceCount, u32 firstVertex) noexcept override;
+    void bind_vertex_buffer(u32 binding, BufferHandle buffer, u64 offset) noexcept override;
+    void bind_index_buffer(BufferHandle buffer, u64 offset, IndexType type) noexcept override;
+    void draw_indexed(u32 indexCount, u32 instanceCount, u32 firstIndex, i32 vertexOffset,
+                      u32 firstInstance) noexcept override;
     void dispatch(u32 x, u32 y, u32 z) noexcept override;
     void copy_texture(TextureHandle src, TextureHandle dst) noexcept override;
     void copy_texture_to_buffer(TextureHandle src, BufferHandle dst) noexcept override;
@@ -264,6 +275,7 @@ public:
 
 private:
     [[nodiscard]] bool flush_descriptors() noexcept;
+    [[nodiscard]] bool prepare_draw() noexcept;
 
     Backend* backend_ = nullptr;
     FrameContext* frame_ = nullptr;
@@ -354,6 +366,9 @@ public:
     [[nodiscard]] Status write_buffer(BufferHandle dst, usize offset, const void* data, usize bytes) noexcept override;
     [[nodiscard]] Status map_buffer(BufferHandle buffer, void*& outPtr) noexcept override;
     void unmap_buffer(BufferHandle buffer) noexcept override;
+    [[nodiscard]] Status upload_texture_level(TextureHandle dst, u32 mipLevel, u32 layer, const void* data,
+                                              usize bytes) noexcept override;
+    [[nodiscard]] Status generate_mipmaps(TextureHandle texture) noexcept override;
     [[nodiscard]] Status read_texture(TextureHandle src, void* outData, u32 bytesPerRow) noexcept override;
 
     [[nodiscard]] Result<ExternalTexture> import_external_image(const ExternalImageDesc& img) noexcept override;
@@ -375,6 +390,11 @@ public:
     [[nodiscard]] SamplerObject* sampler(u64 id) noexcept { return samplers_.get(id); }
     [[nodiscard]] const PipelineObject* pipeline(u64 id) noexcept { return pipelines_.get(id); }
     [[nodiscard]] VkRenderPass render_pass(VkFormat format, LoadOp load) noexcept;
+    /// Passe com profundidade. `format` UNDEFINED = só profundidade (sombra).
+    [[nodiscard]] VkRenderPass render_pass(VkFormat format, LoadOp load, VkFormat depth, LoadOp depthLoad,
+                                           bool storeDepth) noexcept;
+    [[nodiscard]] VkFramebuffer framebuffer(Texture* color, Texture& depth, u64 depthId, LoadOp load,
+                                            LoadOp depthLoad, bool storeDepth) noexcept;
     [[nodiscard]] VkFramebuffer framebuffer(Texture& t, LoadOp load) noexcept;
     [[nodiscard]] VkDescriptorSet allocate_set(FrameContext& frame, VkDescriptorSetLayout layout) noexcept;
     void transition(VkCommandBuffer cmd, Texture& t, ResourceState newState, bool discard) noexcept;

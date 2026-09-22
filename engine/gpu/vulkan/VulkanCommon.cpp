@@ -66,8 +66,54 @@ VkFormat to_vk(SurfaceFormat f) noexcept {
         case SurfaceFormat::RG16:     return VK_FORMAT_R16G16_UNORM;
         case SurfaceFormat::Depth24:  return VK_FORMAT_X8_D24_UNORM_PACK32;
         case SurfaceFormat::Depth32F: return VK_FORMAT_D32_SFLOAT;
+        case SurfaceFormat::RGBA8_sRGB: return VK_FORMAT_R8G8B8A8_SRGB;
+        case SurfaceFormat::BC7:        return VK_FORMAT_BC7_UNORM_BLOCK;
+        case SurfaceFormat::BC7_sRGB:   return VK_FORMAT_BC7_SRGB_BLOCK;
+        case SurfaceFormat::ETC2_RGBA8: return VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK;
+        case SurfaceFormat::ETC2_RGBA8_sRGB: return VK_FORMAT_ETC2_R8G8B8A8_SRGB_BLOCK;
+        case SurfaceFormat::ASTC4x4:    return VK_FORMAT_ASTC_4x4_UNORM_BLOCK;
+        case SurfaceFormat::ASTC4x4_sRGB: return VK_FORMAT_ASTC_4x4_SRGB_BLOCK;
     }
     return VK_FORMAT_R8G8B8A8_UNORM;
+}
+
+VkFormat to_vk(VertexFormat f) noexcept {
+    switch (f) {
+        case VertexFormat::Float:       return VK_FORMAT_R32_SFLOAT;
+        case VertexFormat::Float2:      return VK_FORMAT_R32G32_SFLOAT;
+        case VertexFormat::Float3:      return VK_FORMAT_R32G32B32_SFLOAT;
+        case VertexFormat::Float4:      return VK_FORMAT_R32G32B32A32_SFLOAT;
+        case VertexFormat::UByte4Norm:  return VK_FORMAT_R8G8B8A8_UNORM;
+        case VertexFormat::UShort2Norm: return VK_FORMAT_R16G16_UNORM;
+        case VertexFormat::UShort4Norm: return VK_FORMAT_R16G16B16A16_UNORM;
+        case VertexFormat::UByte4:      return VK_FORMAT_R8G8B8A8_UINT;
+        case VertexFormat::UShort4:     return VK_FORMAT_R16G16B16A16_UINT;
+        case VertexFormat::Short4Norm:  return VK_FORMAT_R16G16B16A16_SNORM;
+    }
+    return VK_FORMAT_R32G32B32_SFLOAT;
+}
+
+VkCompareOp to_vk(CompareOp c) noexcept {
+    switch (c) {
+        case CompareOp::Never:          return VK_COMPARE_OP_NEVER;
+        case CompareOp::Less:           return VK_COMPARE_OP_LESS;
+        case CompareOp::Equal:          return VK_COMPARE_OP_EQUAL;
+        case CompareOp::LessOrEqual:    return VK_COMPARE_OP_LESS_OR_EQUAL;
+        case CompareOp::Greater:        return VK_COMPARE_OP_GREATER;
+        case CompareOp::NotEqual:       return VK_COMPARE_OP_NOT_EQUAL;
+        case CompareOp::GreaterOrEqual: return VK_COMPARE_OP_GREATER_OR_EQUAL;
+        case CompareOp::Always:         return VK_COMPARE_OP_ALWAYS;
+    }
+    return VK_COMPARE_OP_LESS_OR_EQUAL;
+}
+
+bool is_depth_format(VkFormat f) noexcept {
+    return f == VK_FORMAT_D32_SFLOAT || f == VK_FORMAT_X8_D24_UNORM_PACK32 || f == VK_FORMAT_D16_UNORM
+        || f == VK_FORMAT_D24_UNORM_S8_UINT || f == VK_FORMAT_D32_SFLOAT_S8_UINT;
+}
+
+VkImageAspectFlags aspect_of(VkFormat f) noexcept {
+    return is_depth_format(f) ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
 }
 
 SurfaceFormat from_vk(VkFormat f) noexcept {

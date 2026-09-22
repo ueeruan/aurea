@@ -86,3 +86,4 @@ xcuserdata/
 .DS_Store
 Thumbs.db
 desktop.ini
+engine/tests/data/gltf/

@@ -140,6 +140,10 @@ namespace aurea::vk {
     X(vkCmdSetViewport)                         \
     X(vkCmdSetScissor)                          \
     X(vkCmdDraw)                                \
+    X(vkCmdDrawIndexed)                         \
+    X(vkCmdBindVertexBuffers)                   \
+    X(vkCmdBindIndexBuffer)                     \
+    X(vkCmdBlitImage)                           \
     X(vkCmdDispatch)                            \
     X(vkCmdPipelineBarrier)                     \
     X(vkCmdCopyBufferToImage)                   \

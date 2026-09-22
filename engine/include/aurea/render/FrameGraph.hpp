@@ -168,6 +168,10 @@ public:
     /// render pass com o `load` pedido.
     u32 add_raster_pass(const char* name, PassStage stage, FGTexture colorTarget,
                         LoadOp load, Vec4 clear, PassFn fn) noexcept;
+    /// Passe 3D: cor (opcional — inválida = só profundidade, sombra) e
+    /// profundidade. `storeDepth` quando outro passe lê a profundidade depois.
+    u32 add_raster_pass_depth(const char* name, PassStage stage, FGTexture colorTarget, LoadOp load, Vec4 clear,
+                              FGTexture depthTarget, LoadOp depthLoad, bool storeDepth, PassFn fn) noexcept;
     u32 add_compute_pass(const char* name, PassStage stage, PassFn fn) noexcept;
     u32 add_transfer_pass(const char* name, PassStage stage, PassFn fn) noexcept;
 
@@ -244,7 +248,7 @@ public:
     [[nodiscard]] std::string dump() const;
 
 private:
-    enum class Access : u8 { Read = 0, ColorWrite, StorageWrite, CopySrc, CopyDst };
+    enum class Access : u8 { Read = 0, ColorWrite, StorageWrite, CopySrc, CopyDst, DepthWrite };
 
     struct AccessRecord {
         u32 pass = 0;
@@ -271,6 +275,9 @@ private:
         PassKind    kind = PassKind::Raster;
         FGTexture   colorTarget{};
         LoadOp      load = LoadOp::Clear;
+        FGTexture   depthTarget{};
+        LoadOp      depthLoad = LoadOp::Clear;
+        bool        storeDepth = false;
         f32         clear[4] = {0, 0, 0, 0};
         PassFn      fn;
         bool        sideEffect = false;

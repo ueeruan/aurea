@@ -66,6 +66,16 @@ struct GPUCapabilities {
     bool rgba16fStorage = false;
     bool r16UnormSampled = false;   ///< planos de P010 enviados pela CPU
 
+    // --- 3D ------------------------------------------------------------------
+    f32  maxSamplerAnisotropy = 1.0f;   ///< 1 = sem filtro anisotrópico
+    bool depth32fAttachment = false;
+    bool depth24Attachment = false;
+    bool depth32fSampled = false;       ///< mapa de sombra amostrável
+    bool textureCompressionASTC = false;
+    bool textureCompressionETC2 = false;
+    bool textureCompressionBC = false;
+    u32  maxVertexInputAttributes = 16;
+
     // --- Mídia (zero-copy) ----------------------------------------------------
     bool samplerYcbcrConversion = false;       ///< NV12/P010 amostrados direto
     bool externalMemoryHardwareBuffer = false; ///< AHardwareBuffer como textura

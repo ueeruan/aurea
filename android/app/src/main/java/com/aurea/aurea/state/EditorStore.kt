@@ -847,7 +847,18 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         return true
     }
 
-    fun setLoop(loop: Boolean) = send { setLoop(loop) }
+    /**
+     * Reprodução em loop. O status do motor não traz esse flag, então o store
+     * guarda o último pedido (o motor nasce desligado) — é o que a casca pinta
+     * no play e marca no menu da linha do tempo.
+     */
+    var looping by mutableStateOf(false)
+        private set
+
+    fun setLoop(loop: Boolean) {
+        looping = loop
+        send { setLoop(loop) }
+    }
 
     fun setPreviewScale(automatic: Boolean, numerator: Int = 1, denominator: Int = 1) =
         send { setPreviewScale(automatic, numerator, denominator) }

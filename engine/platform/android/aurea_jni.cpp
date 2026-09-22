@@ -19,6 +19,7 @@
 #include <android/native_window_jni.h>
 #include <sys/system_properties.h>
 
+#include "MediaCodecExport.hpp"
 #include "MediaCodecSource.hpp"
 #include "VulkanBackend.hpp"
 
@@ -260,6 +261,7 @@ AUREA_JNI jboolean AUREA_FN(nativeInitialize)(JNIEnv* env, jclass, jlong handle,
     config.documentsDirectory = to_string(env, documentsDir);
     config.displayRefreshRate = refreshRate > 0.0f ? refreshRate : 60.0f;
     config.mediaFactory = &c->media;
+    config.exportSinkFactory = &android::make_mediacodec_export_sink;
     config.imageLoader = &load_image;
     config.enableTelemetry = true;
 
@@ -621,11 +623,19 @@ AUREA_JNI jint AUREA_FN(nativeRecoverSession)(JNIEnv*, jclass, jlong handle) {
 // =============================================================================
 // Export (próxima fase: reusa o mesmo renderer)
 // =============================================================================
-AUREA_JNI jint AUREA_FN(nativeStartExport)(JNIEnv* env, jclass, jlong handle, jstring outputPath) {
+/// `shortSide` = lado menor do vídeo (720/1080/1440/2160); `fps` 0 = o da
+/// composição; `codec` 0 = H.264, 1 = HEVC; `bitrateMbps` 0 = automático.
+AUREA_JNI jint AUREA_FN(nativeStartExport)(JNIEnv* env, jclass, jlong handle, jstring outputPath, jint shortSide,
+                                           jdouble fps, jint codec, jint bitrateMbps) {
     NativeContext* c = ctx_of(handle);
     if (!c) return static_cast<jint>(Errc::InvalidState);
     const std::string p = to_string(env, outputPath);
-    const ExportSettings settings;
+    ExportSettings settings;
+    settings.width = 0;
+    settings.height = shortSide > 0 ? static_cast<u32>(shortSide) : 0;
+    settings.fps = fps > 0.0 ? fps : 0.0;
+    settings.videoCodec = codec == 1 ? ExportCodec::HEVC : ExportCodec::H264;
+    settings.videoBitrateMbps = bitrateMbps > 0 ? static_cast<u32>(bitrateMbps) : 0;
     return static_cast<jint>(c->engine.start_export(settings, p.c_str()).raw());
 }
 

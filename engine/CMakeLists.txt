@@ -219,6 +219,7 @@ if(AUREA_PLATFORM_ANDROID)
     add_library(aurea SHARED
         platform/android/aurea_jni.cpp
         platform/android/MediaCodecSource.cpp
+        platform/android/MediaCodecExport.cpp
     )
     target_include_directories(aurea PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/platform/android)
     # `mediandk` é o MediaCodec/MediaExtractor/ImageReader: sem ele não há

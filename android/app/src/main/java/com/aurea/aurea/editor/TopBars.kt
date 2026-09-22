@@ -164,7 +164,10 @@ internal fun ProjectTopBar(store: EditorStore, ui: EditorUi) {
         ChromeButton(CupertinoGlyph.GearAltFill, "Projeto", onClick = { openSheet(store, ui, ShellSheet.ProjectSettings) }, size = 19.dp)
         // Exportar em destaque: a A.01 pintava em `acao` (#245D8C), 2,6:1
         // sobre o cromo (bug 27).
-        ChromeButton(CupertinoGlyph.SquareArrowUp, "Exportar", onClick = { store.comingSoon("Exportar") }, tint = AureaColors.Accent)
+        ChromeButton(CupertinoGlyph.SquareArrowUp, "Exportar", onClick = {
+            if (store.playing) store.pause()
+            ui.exporting = true
+        }, tint = AureaColors.Accent)
     }
 }
 

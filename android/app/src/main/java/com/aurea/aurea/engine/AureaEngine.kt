@@ -265,7 +265,13 @@ class AureaEngine private constructor() {
     fun discardRecovery(): Int = nativeDiscardRecovery(nativeHandle)
     fun recoverSession(): Int = nativeRecoverSession(nativeHandle)
 
-    fun startExport(outputPath: String): Int = nativeStartExport(nativeHandle, outputPath)
+    /**
+     * Exporta a composição atual para MP4. `shortSide` = lado menor (720…2160),
+     * `fps` 0 = o da composição, `codec` 0 = H.264 / 1 = HEVC, `bitrateMbps` 0 =
+     * automático. Devolve o código de erro do motor (0 = começou).
+     */
+    fun startExport(outputPath: String, shortSide: Int, fps: Double, codec: Int, bitrateMbps: Int): Int =
+        nativeStartExport(nativeHandle, outputPath, shortSide, fps, codec, bitrateMbps)
     fun cancelExport(): Int = nativeCancelExport(nativeHandle)
     fun exportProgress(out: ByteBuffer): Boolean = nativeExportProgress(nativeHandle, out)
 
@@ -318,7 +324,7 @@ class AureaEngine private constructor() {
     private external fun nativeSaveProject(handle: Long, path: String): Int
     private external fun nativeDiscardRecovery(handle: Long): Int
     private external fun nativeRecoverSession(handle: Long): Int
-    private external fun nativeStartExport(handle: Long, outputPath: String): Int
+    private external fun nativeStartExport(handle: Long, outputPath: String, shortSide: Int, fps: Double, codec: Int, bitrateMbps: Int): Int
     private external fun nativeCancelExport(handle: Long): Int
     private external fun nativeExportProgress(handle: Long, out: ByteBuffer): Boolean
 }

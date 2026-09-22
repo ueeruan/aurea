@@ -29,13 +29,32 @@ bool put_string(char* blob, u32 capacity, u32& cursor, const char* s, u32& outOf
 } // namespace
 
 // -----------------------------------------------------------------------------
-// ExportContext — o export entra na próxima fase, reusando `render_offscreen`.
+// ExportContext — uma sessão de export (thread, sink, alvos de GPU, progresso).
 // -----------------------------------------------------------------------------
 struct Engine::ExportContext {
+    mutable std::mutex mutex;          ///< protege `progress`
     ExportProgress progress{};
     ExportSettings settings{};
     std::string    outputPath;
     std::atomic<bool> cancelRequested{false};
+    std::thread    thread;
+    std::unique_ptr<ExportSink> sink;
+
+    // Plano da sessão, fixado no start (a timeline não muda durante o export:
+    // o preview e os comandos da UI ficam congelados).
+    u32 width = 0, height = 0;
+    f64 fps = 30.0;
+    f64 compFps = 30.0;
+    u32 frames = 0;
+    bool dither = true;
+    TextureHandle comp{}, y{}, uv{};
+    std::vector<u8> yBytes, uvBytes;
+    u64 waitNs = 0, renderNs = 0, readNs = 0, writeNs = 0;
+    u32 attempts = 0;
+
+    void set_message(const char* m) {
+        std::snprintf(progress.message, sizeof(progress.message), "%s", m);
+    }
 };
 
 Engine::Engine() {
@@ -114,6 +133,10 @@ void Engine::shutdown() noexcept {
     if (state_ == EngineState::Uninitialized || state_ == EngineState::ShuttingDown) return;
     state_ = EngineState::ShuttingDown;
 
+    if (exportCtx_ && exportCtx_->thread.joinable()) {
+        exportCtx_->cancelRequested.store(true, std::memory_order_release);
+        exportCtx_->thread.join();
+    }
     stop_render_thread();
     thumbs_.stop();
     media_.close_all();
@@ -617,6 +640,9 @@ Status Engine::recover_device_locked() noexcept {
 }
 
 Status Engine::render_frame(bool onlyIfChanged) noexcept {
+    // Export em andamento: o último quadro do preview fica na tela; a GPU e
+    // os decoders são do export.
+    if (exportActive_.load(std::memory_order_acquire)) return OkStatus;
     const u64 frameStart = monotonic_ns();
     std::lock_guard<std::mutex> rl(renderMutex_);
     lastSkipped_ = false;
@@ -1304,20 +1330,239 @@ bool Engine::is_selected(u64 layerId) const noexcept {
 }
 
 // =============================================================================
-// Export — a próxima fase. A superfície de API existe; o codificador não.
+// Export
 // =============================================================================
 Status Engine::start_export(const ExportSettings& settings, const char* outputPath) noexcept {
     if (!project_) return Errc::InvalidState;
-    if (!outputPath) return Errc::InvalidArgument;
-    if (!exportCtx_) exportCtx_ = std::make_unique<ExportContext>();
-    exportCtx_->settings = settings;
-    exportCtx_->outputPath = outputPath;
-    exportCtx_->cancelRequested.store(false, std::memory_order_release);
-    exportCtx_->progress = ExportProgress{};
-    exportCtx_->progress.result = Errc::NotImplemented;
-    std::snprintf(exportCtx_->progress.message, sizeof(exportCtx_->progress.message),
-                  "%s", "exportacao ainda nao implementada");
-    return Status{Errc::NotImplemented, "exportacao de video ainda nao implementada nesta fase"};
+    if (!outputPath || !*outputPath) return Errc::InvalidArgument;
+    if (!gpu_ || !renderer_.ready()) return Status{Errc::NotSupported, "export precisa de GPU"};
+    if (!config_.exportSinkFactory) return Status{Errc::NotSupported, "sem encoder de video nesta plataforma"};
+    if (exportCtx_ && exportCtx_->thread.joinable()) {
+        bool running = false;
+        {
+            std::lock_guard<std::mutex> pl(exportCtx_->mutex);
+            running = exportCtx_->progress.running;
+        }
+        if (running) return Status{Errc::InvalidState, "ja existe um export em andamento"};
+        exportCtx_->thread.join();
+    }
+
+    auto ctx = std::make_unique<ExportContext>();
+    ctx->settings = settings;
+    ctx->outputPath = outputPath;
+    ctx->dither = settings.dither;
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        Composition* comp = current_composition();
+        if (!comp) return Errc::NotFound;
+        ctx->compFps = comp->fps();
+        ctx->fps = settings.fps > 0.0 ? settings.fps : comp->fps();
+        // Lado menor pedido; a largura vem da proporção da composição (o
+        // renderer preenche o alvo inteiro — outra proporção esticaria).
+        const u32 cw = comp->width(), ch = comp->height();
+        const u32 compShort = std::min(cw, ch);
+        const u32 wantShort = settings.height > 0 ? settings.height : compShort;
+        const f64 k = static_cast<f64>(wantShort) / static_cast<f64>(compShort);
+        auto even = [](f64 v) { return std::max<u32>(2u, static_cast<u32>(std::llround(v / 2.0)) * 2u); };
+        ctx->width = even(cw * k);
+        ctx->height = even(ch * k);
+        const f64 seconds = comp->duration_seconds();
+        ctx->frames = std::max<u32>(1u, static_cast<u32>(std::ceil(seconds * ctx->fps - 1e-6)));
+    }
+    // Teto do aparelho (a mesma regra lado maior × lado menor da composição).
+    const u32 capLong = std::max(caps_.max_export_width(), caps_.max_export_height());
+    const u32 capShort = std::min(caps_.max_export_width(), caps_.max_export_height());
+    if (capLong > 0 && (std::max(ctx->width, ctx->height) > capLong || std::min(ctx->width, ctx->height) > capShort)) {
+        return Status{Errc::NotSupported, "resolucao acima do que este aparelho exporta"};
+    }
+    const u32 maxTex = gpu_->capabilities().maxTexture2D;
+    if (maxTex > 0 && std::max(ctx->width, ctx->height) > maxTex) {
+        return Status{Errc::NotSupported, "resolucao acima do limite de textura da GPU"};
+    }
+
+    ctx->sink = config_.exportSinkFactory(config_.exportSinkContext);
+    if (!ctx->sink) return Status{Errc::NotSupported, "encoder indisponivel"};
+
+    VideoStreamConfig vc;
+    vc.width = ctx->width;
+    vc.height = ctx->height;
+    vc.fps = ctx->fps;
+    vc.codec = settings.videoCodec;
+    // Mbps do projeto, ou proporcional aos pixels (0,2 bit por pixel·s:
+    // 1080p30 ≈ 12 Mbps, 4K30 ≈ 50 Mbps) — generoso, é arquivo de edição.
+    const f64 pixelsPerSecond = static_cast<f64>(ctx->width) * ctx->height * ctx->fps;
+    vc.bitrateBps = settings.videoBitrateMbps > 0
+                  ? settings.videoBitrateMbps * 1000000u
+                  : static_cast<u32>(std::clamp(pixelsPerSecond * 0.2, 2.0e6, 120.0e6));
+    vc.keyframeIntervalFrames = settings.keyframeIntervalFrames;
+    if (const Status s = ctx->sink->open(outputPath, vc, nullptr); !s.ok()) return s;
+
+    // Alvos de GPU da sessão: composição (linear), Y e CbCr.
+    {
+        std::lock_guard<std::mutex> rl(renderMutex_);
+        TextureDesc cd;
+        cd.width = ctx->width;
+        cd.height = ctx->height;
+        cd.format = SurfaceFormat::RGBA16F;
+        cd.sampled = true;
+        cd.renderTarget = true;
+        cd.transferSrc = true;
+        cd.debugName = "export-composicao";
+        TextureDesc yd = cd;
+        yd.format = SurfaceFormat::R8;
+        yd.debugName = "export-y";
+        TextureDesc ud = yd;
+        ud.width = ctx->width / 2;
+        ud.height = ctx->height / 2;
+        ud.format = SurfaceFormat::RG8;
+        ud.debugName = "export-cbcr";
+        auto c = gpu_->create_texture(cd);
+        auto y = gpu_->create_texture(yd);
+        auto u = gpu_->create_texture(ud);
+        if (!c.ok() || !y.ok() || !u.ok()) {
+            if (c.ok()) gpu_->destroy_texture(*c);
+            if (y.ok()) gpu_->destroy_texture(*y);
+            if (u.ok()) gpu_->destroy_texture(*u);
+            ctx->sink->abort();
+            return Status{Errc::OutOfMemory, "sem memoria de GPU para o export"};
+        }
+        ctx->comp = *c;
+        ctx->y = *y;
+        ctx->uv = *u;
+    }
+    ctx->yBytes.resize(static_cast<usize>(ctx->width) * ctx->height);
+    ctx->uvBytes.resize(static_cast<usize>(ctx->width) * (ctx->height / 2));
+
+    ctx->progress.running = true;
+    ctx->progress.framesTotal = ctx->frames;
+    ctx->set_message("exportando");
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        playback_.pause(monotonic_ns());
+        playingHint_ = false;
+    }
+    exportCtx_ = std::move(ctx);
+    exportActive_.store(true, std::memory_order_release);
+    exportCtx_->thread = std::thread([this] { export_thread_main(); });
+    return OkStatus;
+}
+
+Status Engine::render_export_frame(FrameIndex t, const OffscreenTarget& target) noexcept {
+    std::lock_guard<std::mutex> rl(renderMutex_);
+    if (!gpu_ || !renderer_.ready()) return Status{Errc::InvalidState, "sem GPU"};
+    RenderSettings rs;
+    rs.dither = false;
+    rs.gpuTimers = false;
+    // Quadros EXATOS de vídeo, em sequência (o modo Playback decodifica
+    // adiante). 4 s de tolerância por quadro: arquivo quebrado não trava.
+    const u64 t0 = monotonic_ns();
+    int attempts = 0;
+    for (int attempt = 0; attempt < 800; ++attempt) {
+        ++attempts;
+        {
+            std::lock_guard<std::mutex> lock(modelMutex_);
+            if (!project_) return Errc::InvalidState;
+            Composition* comp = current_composition();
+            if (!comp) return Errc::NotFound;
+            renderer_.prepare(*comp, *project_, t, &media_, &Engine::image_lookup, this, rs, ++frameCounter_,
+                              1, DecodeMode::Playback, 1.0f, snapshot_);
+        }
+        if (snapshot_.missingVideoFrames == 0 && snapshot_.staleVideoFrames == 0) break;
+        for (RenderLayer& l : snapshot_.layers) l.source.frame.reset();
+        if (exportCtx_->cancelRequested.load(std::memory_order_acquire)) return Errc::Cancelled;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    const u64 t1 = monotonic_ns();
+    FrameStats stats;
+    RenderTimings timings;
+    if (const Status s = renderer_.render(snapshot_, rs, &target, stats, timings); !s.ok()) return s;
+    const u64 t2 = monotonic_ns();
+    if (const Status r = gpu_->read_texture(target.yPlane, exportCtx_->yBytes.data(), exportCtx_->width); !r.ok()) {
+        return r;
+    }
+    const Status r = gpu_->read_texture(target.uvPlane, exportCtx_->uvBytes.data(), exportCtx_->width);
+    const u64 t3 = monotonic_ns();
+    ExportContext& c = *exportCtx_;
+    c.waitNs += t1 - t0;
+    c.renderNs += t2 - t1;
+    c.readNs += t3 - t2;
+    c.attempts += static_cast<u32>(attempts);
+    return r;
+}
+
+void Engine::export_thread_main() noexcept {
+    set_current_thread_name("aurea-export");
+    ExportContext& ctx = *exportCtx_;
+    OffscreenTarget target;
+    target.texture = ctx.comp;
+    target.width = ctx.width;
+    target.height = ctx.height;
+    target.yPlane = ctx.y;
+    target.uvPlane = ctx.uv;
+    target.encodeDither = ctx.dither;
+
+    const u64 start = monotonic_ns();
+    Status result = OkStatus;
+    for (u32 i = 0; i < ctx.frames; ++i) {
+        if (ctx.cancelRequested.load(std::memory_order_acquire)) { result = Errc::Cancelled; break; }
+        // Tempo de SAÍDA → quadro da composição (fps diferentes se encontram
+        // pelo instante, não pelo índice).
+        const f64 seconds = static_cast<f64>(i) / ctx.fps;
+        const FrameIndex t{static_cast<i64>(std::floor(seconds * ctx.compFps + 1e-6))};
+        result = render_export_frame(t, target);
+        if (!result.ok()) break;
+        const i64 pts = static_cast<i64>(std::llround(seconds * 1e6));
+        const u64 w0 = monotonic_ns();
+        result = ctx.sink->write_video(ctx.yBytes.data(), ctx.width, ctx.uvBytes.data(), ctx.width, pts);
+        ctx.writeNs += monotonic_ns() - w0;
+        if (!result.ok()) break;
+        // Diagnóstico a cada 300 quadros: onde o tempo do export está indo.
+        if ((i + 1) % 300 == 0 || i + 1 == ctx.frames) {
+            const f64 n = static_cast<f64>((i % 300) + 1);
+            AUREA_LOG_INFO("export %u/%u: espera %.1f ms (%.1f tentativas) render %.1f leitura %.1f encoder %.1f ms/quadro",
+                           i + 1, ctx.frames, ctx.waitNs / 1e6 / n, ctx.attempts / n, ctx.renderNs / 1e6 / n,
+                           ctx.readNs / 1e6 / n, ctx.writeNs / 1e6 / n);
+            ctx.waitNs = ctx.renderNs = ctx.readNs = ctx.writeNs = 0;
+            ctx.attempts = 0;
+        }
+
+        const f64 elapsed = static_cast<f64>(monotonic_ns() - start) / 1e9;
+        std::lock_guard<std::mutex> pl(ctx.mutex);
+        ctx.progress.framesDone = i + 1;
+        ctx.progress.fps = elapsed > 0.0 ? static_cast<f32>((i + 1) / elapsed) : 0.0f;
+        ctx.progress.etaSeconds = ctx.progress.fps > 0.0f
+                                ? static_cast<u32>((ctx.frames - (i + 1)) / ctx.progress.fps) : 0;
+    }
+
+    if (result.ok()) {
+        result = ctx.sink->finish();
+    } else {
+        ctx.sink->abort();
+    }
+    ctx.sink.reset();
+    {
+        std::lock_guard<std::mutex> rl(renderMutex_);
+        if (gpu_) {
+            gpu_->destroy_texture(ctx.comp);
+            gpu_->destroy_texture(ctx.y);
+            gpu_->destroy_texture(ctx.uv);
+        }
+    }
+    {
+        std::lock_guard<std::mutex> pl(ctx.mutex);
+        ctx.progress.running = false;
+        ctx.progress.finished = true;
+        ctx.progress.result = result.code();
+        if (result.ok()) ctx.set_message("concluido");
+        else if (result.code() == Errc::Cancelled) ctx.set_message("cancelado");
+        else ctx.set_message(result.message().data());
+    }
+    if (!result.ok() && result.code() != Errc::Cancelled) {
+        AUREA_LOG_ERROR("export falhou: %s", result.message().data());
+    }
+    exportActive_.store(false, std::memory_order_release);
+    forceRender_ = true;
+    request_render();
 }
 
 Status Engine::cancel_export() noexcept {
@@ -1328,6 +1573,7 @@ Status Engine::cancel_export() noexcept {
 
 Engine::ExportProgress Engine::export_progress() const noexcept {
     if (!exportCtx_) return ExportProgress{};
+    std::lock_guard<std::mutex> pl(exportCtx_->mutex);
     return exportCtx_->progress;
 }
 
@@ -2031,7 +2277,9 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         // Export
         // ---------------------------------------------------------------------
         case CommandType::ExportRequest:
-            return Status{Errc::NotImplemented, "exportacao de video ainda nao implementada nesta fase"};
+            // O export tem thread e sink próprios: entra por Engine::start_export,
+            // não pela fila (que roda com o modelo travado).
+            return Status{Errc::NotSupported, "use start_export"};
         case CommandType::ExportCancel:
             return cancel_export();
 
@@ -2136,7 +2384,7 @@ void Engine::fill_export_progress(bridge::ExportProgressPOD& out) const noexcept
         out.result = static_cast<i32>(Errc::InvalidState);
         return;
     }
-    const ExportProgress& p = exportCtx_->progress;
+    const ExportProgress p = export_progress();
     out.running = p.running ? 1u : 0u;
     out.finished = p.finished ? 1u : 0u;
     out.result = static_cast<i32>(p.result);

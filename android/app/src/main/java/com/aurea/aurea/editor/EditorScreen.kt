@@ -99,6 +99,7 @@ internal class EditorUi {
     var addTab by mutableStateOf(AddTab.Shape)
     var fullscreen by mutableStateOf(false)
     var effectsBrowser by mutableStateOf(false)
+    var exporting by mutableStateOf(false)
     var sheet by mutableStateOf<ShellSheet?>(null)
 
     /** Um dedo manipula algo no palco: o transporte vira a barra de informações. */
@@ -261,6 +262,7 @@ fun EditorScreen(store: EditorStore) {
 
     ShellSheets(store, ui)
     if (ui.effectsBrowser) EffectsBrowserSheet(store) { ui.effectsBrowser = false }
+    if (ui.exporting) ExportScreen(store) { ui.exporting = false }
 }
 
 @Composable

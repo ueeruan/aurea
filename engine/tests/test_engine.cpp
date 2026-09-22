@@ -456,9 +456,10 @@ AUREA_TEST(Engine, TelemetryReportsWorkersAndQueues) {
     e.shutdown();
 }
 
-AUREA_TEST(Engine, ExportIsDeclaredNotImplemented) {
-    // Honestidade do contrato. A UI precisa saber que o export não existe
-    // ainda, em vez de receber um "ok" e produzir um arquivo vazio.
+AUREA_TEST(Engine, ExportWithoutEncoderIsRefusedNotFaked) {
+    // Sem GPU ou sem encoder da plataforma, o export é recusado na hora — nada
+    // de "ok" seguido de um arquivo vazio que o usuário acharia que é o
+    // trabalho dele.
     Engine e;
     AUREA_CHECK(e.initialize(headless_config()).ok());
     AUREA_CHECK(e.new_project(1280, 720, 30.0, nullptr).ok());
@@ -466,14 +467,9 @@ AUREA_TEST(Engine, ExportIsDeclaredNotImplemented) {
     ExportSettings settings;
     const Status s = e.start_export(settings, "saida.mp4");
     AUREA_CHECK(!s.ok());
-    AUREA_CHECK_EQ(s.code(), Errc::NotImplemented);
+    AUREA_CHECK_EQ(s.code(), Errc::NotSupported);
+    AUREA_CHECK(!e.export_progress().running);
 
-    const Engine::ExportProgress p = e.export_progress();
-    AUREA_CHECK(!p.running);
-    AUREA_CHECK_EQ(p.result, Errc::NotImplemented);
-
-    // Nenhum arquivo foi criado: se tivesse sido, seria um vídeo vazio que o
-    // usuário acharia que é o trabalho dele.
     std::FILE* f = std::fopen("saida.mp4", "rb");
     AUREA_CHECK(f == nullptr);
     if (f) std::fclose(f);

@@ -35,8 +35,6 @@ import com.aurea.aurea.editor.panels.EditorPanel
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.ds.AureaNamePrompt
 import com.aurea.aurea.ui.ds.ColorPickerSheet
-import com.aurea.aurea.ui.ds.displayToEngine
-import com.aurea.aurea.ui.ds.engineToDisplay
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.CupertinoGlyph
@@ -397,7 +395,8 @@ internal fun ProjectSettingsSheet(store: EditorStore, ui: EditorUi, onDismiss: (
     if (pickingBackground && comp != null) {
         // Um passo de desfazer para a folha inteira; fecha também se ela
         // sair da tela sem o "Pronto".
-        val initial = remember { engineToDisplay(comp.background.toFloatArray()) }
+        // O fundo já é sRGB no motor (ao contrário das cores de efeito).
+        val initial = remember { comp.background.toFloatArray() }
         DisposableEffect(Unit) {
             store.beginGesture("fundo da composição")
             onDispose { store.endGesture() }
@@ -405,10 +404,7 @@ internal fun ProjectSettingsSheet(store: EditorStore, ui: EditorUi, onDismiss: (
         ColorPickerSheet(
             initial = initial,
             withAlpha = false,
-            onChange = { r, g, b, _ ->
-                val v = displayToEngine(r, g, b, 1f)
-                store.setCompositionBackground(v[0], v[1], v[2], v[3])
-            },
+            onChange = { r, g, b, _ -> store.setCompositionBackground(r, g, b, 1f) },
             onDone = { pickingBackground = false },
         )
     }

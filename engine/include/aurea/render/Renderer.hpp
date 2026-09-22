@@ -101,6 +101,13 @@ struct OffscreenTarget {
     TextureHandle texture{};
     u32 width = 0;
     u32 height = 0;
+
+    /// Export: se válidos, a composição também sai em Y'CbCr 4:2:0 8 bits
+    /// BT.709 de faixa limitada — Y em R8 (largura × altura) e CbCr em RG8
+    /// (metade de cada lado). É o NV12 que o encoder recebe.
+    TextureHandle yPlane{};
+    TextureHandle uvPlane{};
+    bool encodeDither = true;
 };
 
 /// Custo medido de um frame, por etapa. GPU vem das timestamp queries (de um

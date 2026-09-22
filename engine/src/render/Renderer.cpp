@@ -137,6 +137,9 @@ Status Renderer::initialize(GPUBackend& backend, const EffectRegistry& effects) 
     for (SurfaceFormat f : {SurfaceFormat::RGBA8, SurfaceFormat::BGRA8}) {
         keys.push_back(PipelineKey::graphics(ShaderId::composite_layer_vert, ShaderId::composite_output_frag, f));
     }
+    // Export: planos Y (R8) e CbCr (RG8).
+    keys.push_back(PipelineKey::fullscreen(ShaderId::export_yuv_encode_frag, SurfaceFormat::R8));
+    keys.push_back(PipelineKey::fullscreen(ShaderId::export_yuv_encode_frag, SurfaceFormat::RG8));
     prewarmed_ = shaders_.prewarm(keys.data(), static_cast<u32>(keys.size()));
     AUREA_LOG_INFO("renderer: %u pipelines pre-aquecidos", prewarmed_);
     return OkStatus;
@@ -307,6 +310,15 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             VideoSource* src = media->source_for(id, l->source, *asset, frameNumber);
             if (src) {
                 i64 mediaUs = static_cast<i64>(std::llround(static_cast<f64>(local.value) * 1e6 / fps));
+                // Na grade de quadros da FONTE: o quadro que está na tela no
+                // instante t (piso), não o "mais próximo". Composição a 60 sobre
+                // vídeo a 30 cai a cada dois quadros exatamente entre dois
+                // quadros da fonte — a meia distância de ambos, nenhum era
+                // "exato", e o export esperava o decoder até estourar o prazo.
+                if (const f64 srcFps = src->info().fps; srcFps > 0.0) {
+                    const f64 idx = std::floor(static_cast<f64>(mediaUs) * srcFps / 1e6 + 1e-3);
+                    mediaUs = static_cast<i64>(std::llround(idx * 1e6 / srcFps));
+                }
                 const i64 dur = src->info().durationUs;
                 if (dur > 0) mediaUs = std::clamp<i64>(mediaUs, 0, dur - src->frame_duration_us() / 2);
                 DecodeRequest req;
@@ -747,6 +759,31 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
         });
         graph_.read(pass, comp);
         graph_.set_output(bb, ResourceState::Present);
+    } else if (offscreen && offscreen->yPlane.valid() && offscreen->uvPlane.valid()) {
+        // Export: composição → NV12 na GPU (o encoder recebe planos prontos).
+        TextureDesc yd;
+        yd.width = cw;
+        yd.height = ch;
+        yd.format = SurfaceFormat::R8;
+        yd.renderTarget = true;
+        yd.transferSrc = true;
+        TextureDesc uvd = yd;
+        uvd.width = cw / 2;
+        uvd.height = ch / 2;
+        uvd.format = SurfaceFormat::RG8;
+        const FGTexture yTex = graph_.import_texture("export-y", offscreen->yPlane, yd);
+        const FGTexture uvTex = graph_.import_texture("export-cbcr", offscreen->uvPlane, uvd);
+        struct YuvUniforms { Vec4 cfg; Vec4 matrix; };
+        const f32 dither = offscreen->encodeDither ? 1.0f : 0.0f;
+        const YuvUniforms uy{Vec4{0.0f, dither, 0, 0}, Vec4{0.2126f, 0.0722f, 0, 0}};
+        const YuvUniforms uc{Vec4{1.0f, dither, 0, 0}, Vec4{0.2126f, 0.0722f, 0, 0}};
+        const u32 py = ctx.fullscreen_pass("export-y", PassStage::Output, yTex, ShaderId::export_yuv_encode_frag,
+                                           {PassTexture{comp, {}, CommonSampler::NearestClamp}}, &uy, sizeof(uy));
+        const u32 pc = ctx.fullscreen_pass("export-cbcr", PassStage::Output, uvTex, ShaderId::export_yuv_encode_frag,
+                                           {PassTexture{comp, {}, CommonSampler::NearestClamp}}, &uc, sizeof(uc));
+        if (py != kInvalidIndex) graph_.mark_side_effect(py);
+        if (pc != kInvalidIndex) graph_.mark_side_effect(pc);
+        graph_.set_output(comp, ResourceState::ShaderRead);
     } else {
         graph_.set_output(comp, ResourceState::ShaderRead);
     }

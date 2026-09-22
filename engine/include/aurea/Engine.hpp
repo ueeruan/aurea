@@ -24,6 +24,8 @@
 // =============================================================================
 #pragma once
 
+#include "aurea/export/ExportSink.hpp"
+
 #include "aurea/bridge/BridgePods.hpp"
 #include "aurea/command/CommandQueue.hpp"
 #include "aurea/command/History.hpp"
@@ -147,6 +149,11 @@ struct EngineConfig {
     /// Decodificador de imagem da plataforma (reabrir projeto com imagens).
     ImageLoaderFn imageLoader = nullptr;
     void* imageLoaderContext = nullptr;
+
+    /// Encoder/contêiner da plataforma para o export. Nulo = export
+    /// indisponível (recusado com NotSupported, nunca fingido).
+    ExportSinkFactory exportSinkFactory = nullptr;
+    void* exportSinkContext = nullptr;
 
     f32   displayRefreshRate = 60.0f;
     std::string cacheDirectory;
@@ -306,7 +313,11 @@ public:
     [[nodiscard]] bool is_selected(u64 layerId) const noexcept;
 
     // =========================================================================
-    // Export (próxima fase: reusa o MESMO renderer via render_offscreen)
+    // Export — o MESMO renderer do preview, quadro a quadro, no tempo de saída.
+    //
+    // `settings.height` é o LADO MENOR pedido (720/1080/1440/2160); a largura
+    // sai da proporção da composição (nunca estica). `fps` 0 = o da composição.
+    // Roda numa thread própria; o preview fica congelado até terminar.
     // =========================================================================
     [[nodiscard]] Status start_export(const ExportSettings& settings, const char* outputPath) noexcept;
     [[nodiscard]] Status cancel_export() noexcept;
@@ -430,6 +441,11 @@ private:
 
     struct ExportContext;
     std::unique_ptr<ExportContext> exportCtx_;
+    /// Export em andamento: o render do preview não toca na GPU nem nos
+    /// decoders (que o export usa em sequência).
+    std::atomic<bool> exportActive_{false};
+    void export_thread_main() noexcept;
+    [[nodiscard]] Status render_export_frame(FrameIndex t, const OffscreenTarget& target) noexcept;
 };
 
 } // namespace aurea

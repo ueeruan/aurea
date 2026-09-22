@@ -115,6 +115,9 @@ public:
         return static_cast<f64>(duration_.value) / fps_;
     }
 
+    /// Cor de fundo em sRGB (o valor que a pessoa escolheu e vê), alfa reto.
+    /// O renderer lineariza ao compor — ao contrário dos parâmetros de cor dos
+    /// efeitos, que já são lineares.
     [[nodiscard]] Color background() const noexcept { return background_; }
     void set_background(Color c) noexcept { background_ = c; }
 

@@ -72,7 +72,7 @@ data class ProjectState(
     val canRedo: Boolean = false,
 )
 
-/** Ajustes da composição atual (fonte: motor). Fundo em RGBA linear. */
+/** Ajustes da composição atual (fonte: motor). Fundo em RGBA sRGB (o valor exibido). */
 data class CompositionSettings(
     val id: Long,
     val width: Int,
@@ -115,6 +115,9 @@ data class PreviewState(
 class EditorStore(app: Application) : AndroidViewModel(app) {
 
     private val engine = AureaEngine.create(app)
+
+    /** Export (tela Exportar). O motor renderiza; aqui só acompanha e publica. */
+    val exporter = Exporter(app, engine, viewModelScope)
     private val batch = CommandBatch(engine)
     private val main = Handler(Looper.getMainLooper())
 
@@ -986,7 +989,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshNow()
     }
 
-    /** Fundo em RGBA LINEAR (o espaço de trabalho do motor). */
+    /** Fundo em RGBA sRGB — o motor guarda a cor como exibida e lineariza ao compor. */
     fun setCompositionBackground(r: Float, g: Float, b: Float, a: Float = 1f) {
         val c = composition ?: return
         send { setCompositionBackground(c.id, r, g, b, a) }
@@ -1123,15 +1126,19 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     private fun writeThumbnail(target: File) {
-        val buf = directBuffer(THUMB_MAX * THUMB_MAX * 4)
-        val size = IntArray(2)
-        val bytes = engine.captureFrame(THUMB_MAX, buf, size)
-        if (bytes <= 0 || size[0] <= 0 || size[1] <= 0) return
-        buf.rewind()
-        val bmp = Bitmap.createBitmap(size[0], size[1], Bitmap.Config.ARGB_8888)
-        bmp.copyPixelsFromBuffer(buf)
+        val bmp = captureBitmap(THUMB_MAX) ?: return
         FileOutputStream(target).use { bmp.compress(Bitmap.CompressFormat.JPEG, 85, it) }
         bmp.recycle()
+    }
+
+    /** O quadro do cabeçote renderizado pelo motor (lado maior ≤ `maxDim`). */
+    fun captureBitmap(maxDim: Int): Bitmap? {
+        val buf = directBuffer(maxDim * maxDim * 4)
+        val size = IntArray(2)
+        val bytes = engine.captureFrame(maxDim, buf, size)
+        if (bytes <= 0 || size[0] <= 0 || size[1] <= 0) return null
+        buf.rewind()
+        return Bitmap.createBitmap(size[0], size[1], Bitmap.Config.ARGB_8888).also { it.copyPixelsFromBuffer(buf) }
     }
 
     private fun saveIfDirty() {
@@ -1142,6 +1149,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** Sai do editor: salva (se mudou) e volta à Home. */
     fun closeProject() {
+        if (exporter.busy) {
+            showToast("Aguarde a exportação terminar")
+            return
+        }
         val path = project.path
         stopScrubIfNeeded()
         if (playing) pause()

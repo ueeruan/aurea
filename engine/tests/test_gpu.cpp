@@ -1030,3 +1030,243 @@ AUREA_TEST(Gpu, MotionTileLeavesNoHoleInAnyCombination) {
     AUREA_CHECK_EQ(cases, 36u);
     AUREA_CHECK_EQ(holes, 0u);
 }
+
+// -----------------------------------------------------------------------------
+// Export — o mesmo renderer do preview até os planos NV12 que o encoder recebe.
+// -----------------------------------------------------------------------------
+namespace {
+
+/// Sink de teste: guarda os quadros e registra a ordem das chamadas.
+struct CapturedExport {
+    VideoStreamConfig video{};
+    bool opened = false, finished = false, aborted = false;
+    std::vector<i64> pts;
+    std::vector<std::vector<u8>> y, uv;
+};
+
+class CaptureSink final : public ExportSink {
+public:
+    CaptureSink(CapturedExport* out, u32 delayMs) : out_(out), delayMs_(delayMs) {}
+    Status open(const char*, const VideoStreamConfig& v, const AudioStreamConfig*) noexcept override {
+        out_->video = v;
+        out_->opened = true;
+        return OkStatus;
+    }
+    Status write_video(const u8* y, u32 yStride, const u8* uv, u32 uvStride, i64 ptsUs) noexcept override {
+        const u32 w = out_->video.width, h = out_->video.height;
+        std::vector<u8> yy(static_cast<usize>(w) * h), cc(static_cast<usize>(w) * (h / 2));
+        for (u32 r = 0; r < h; ++r) std::memcpy(&yy[static_cast<usize>(r) * w], y + static_cast<usize>(r) * yStride, w);
+        for (u32 r = 0; r < h / 2; ++r) std::memcpy(&cc[static_cast<usize>(r) * w], uv + static_cast<usize>(r) * uvStride, w);
+        out_->y.push_back(std::move(yy));
+        out_->uv.push_back(std::move(cc));
+        out_->pts.push_back(ptsUs);
+        if (delayMs_) std::this_thread::sleep_for(std::chrono::milliseconds(delayMs_));
+        return OkStatus;
+    }
+    Status write_audio(const i16*, u32, i64) noexcept override { return OkStatus; }
+    Status finish() noexcept override { out_->finished = true; return OkStatus; }
+    void abort() noexcept override { out_->aborted = true; }
+private:
+    CapturedExport* out_;
+    u32 delayMs_;
+};
+
+struct SinkCtx { CapturedExport* out; u32 delayMs; };
+
+std::unique_ptr<ExportSink> make_capture_sink(void* user) {
+    auto* c = static_cast<SinkCtx*>(user);
+    return std::make_unique<CaptureSink>(c->out, c->delayMs);
+}
+
+bool wait_export(Engine& e, int timeoutMs = 20000) {
+    for (int i = 0; i < timeoutMs / 5; ++i) {
+        if (e.export_progress().finished) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    return false;
+}
+
+void set_duration(Engine& e, i64 frames) {
+    Command c;
+    c.type = CommandType::CompositionSetDuration;
+    c.comp_duration.comp = e.project()->timeline().current();
+    c.comp_duration.duration = FrameIndex{frames};
+    AUREA_CHECK(e.apply_command(c).ok());
+}
+
+/// Motor com Vulkan de verdade, vídeo sintético e o sink de captura.
+struct ExportRig {
+    SyntheticFactory factory;
+    CapturedExport cap;
+    SinkCtx sc;
+    Engine e;
+    ExportRig(const SyntheticConfig& cfg, u32 delayMs) : factory(cfg), sc{&cap, delayMs} {
+        EngineConfig ec;
+        ec.backend = new vk::Backend();
+        ec.backendConfig.enableValidation = false;
+        ec.mediaFactory = &factory;
+        ec.exportSinkFactory = &make_capture_sink;
+        ec.exportSinkContext = &sc;
+        ec.disableAutosave = true;
+        ec.workerCount = 2;
+        AUREA_CHECK(e.initialize(ec).ok());
+        AUREA_CHECK(e.new_project(cfg.width, cfg.height, 30.0, nullptr).ok());
+        VideoImport vi;
+        vi.sourcePath = "sintetico";
+        vi.displayName = "sintetico";
+        AUREA_CHECK(e.import_video(vi).ok());
+    }
+    ~ExportRig() { e.shutdown(); }
+};
+
+} // namespace
+
+AUREA_TEST(Gpu, ExportWritesBt709LimitedNv12WithExactTimestamps) {
+    Gpu& g = gpu();
+    if (!g.ok) return;
+    SyntheticConfig cfg;
+    cfg.width = 64;
+    cfg.height = 36;
+    ExportRig rig(cfg, 0);
+    set_duration(rig.e, 6);
+
+    ExportSettings s;
+    s.height = 36;          // lado menor = o da composição
+    s.fps = 0.0;            // o da composição
+    s.dither = false;       // códigos exatos
+    AUREA_CHECK(rig.e.start_export(s, "nao-usado.mp4").ok());
+    AUREA_CHECK(wait_export(rig.e));
+    const Engine::ExportProgress p = rig.e.export_progress();
+    AUREA_CHECK_EQ(p.result, Errc::Ok);
+    AUREA_CHECK_EQ(p.framesDone, 6u);
+    const CapturedExport& cap = rig.cap;
+    AUREA_CHECK(cap.opened && cap.finished && !cap.aborted);
+    AUREA_CHECK_EQ(cap.video.width, 64u);
+    AUREA_CHECK_EQ(cap.video.height, 36u);
+    AUREA_CHECK_EQ(cap.y.size(), static_cast<usize>(6));
+    for (usize i = 0; i < cap.pts.size(); ++i) {
+        AUREA_CHECK_EQ(cap.pts[i], static_cast<i64>(std::llround(static_cast<f64>(i) * 1e6 / 30.0)));
+    }
+    if (cap.y.size() < 4) return;
+    // Vermelho (canto superior esquerdo) e branco (inferior direito) em BT.709
+    // limitado: Y 63/235, Cb 102/128, Cr 240/128. ±2 pela ida e volta 8 bits.
+    auto near = [](int v, int want) { return std::abs(v - want) <= 2; };
+    const std::vector<u8>& Y = cap.y[3];
+    const std::vector<u8>& C = cap.uv[3];
+    AUREA_CHECK(near(Y[4 * 64 + 4], 63));
+    AUREA_CHECK(near(C[2 * 64 + 2 * 2 + 0], 102));
+    AUREA_CHECK(near(C[2 * 64 + 2 * 2 + 1], 240));
+    AUREA_CHECK(near(Y[30 * 64 + 60], 235));
+    AUREA_CHECK(near(C[15 * 64 + 30 * 2 + 0], 128));
+    AUREA_CHECK(near(C[15 * 64 + 30 * 2 + 1], 128));
+}
+
+AUREA_TEST(Gpu, ExportAtDoubleFpsRepeatsEachCompositionFrame) {
+    Gpu& g = gpu();
+    if (!g.ok) return;
+    SyntheticConfig cfg;
+    cfg.width = 64;
+    cfg.height = 36;
+    cfg.pattern = SyntheticPattern::FrameGray;
+    ExportRig rig(cfg, 0);
+    set_duration(rig.e, 4);
+
+    ExportSettings s;
+    s.height = 36;
+    s.fps = 60.0;
+    s.dither = false;
+    AUREA_CHECK(rig.e.start_export(s, "nao-usado.mp4").ok());
+    AUREA_CHECK(wait_export(rig.e));
+    AUREA_CHECK_EQ(rig.e.export_progress().result, Errc::Ok);
+    const CapturedExport& cap = rig.cap;
+    AUREA_CHECK_EQ(cap.y.size(), static_cast<usize>(8));   // 4 quadros a 30 = 8 a 60
+    if (cap.y.size() < 8) return;
+    // O mesmo instante da composição em pares (0,1)(2,3)…, e o nível muda.
+    const usize mid = 18 * 64 + 32;
+    for (usize k = 0; k < 4; ++k) {
+        AUREA_CHECK_EQ(static_cast<int>(cap.y[2 * k][mid]), static_cast<int>(cap.y[2 * k + 1][mid]));
+        if (k > 0) AUREA_CHECK(cap.y[2 * k][mid] != cap.y[2 * k - 2][mid]);
+    }
+    AUREA_CHECK_EQ(cap.pts[1], static_cast<i64>(16667));
+}
+
+AUREA_TEST(Gpu, ExportCancelAbortsTheSinkAndFreesThePreview) {
+    Gpu& g = gpu();
+    if (!g.ok) return;
+    SyntheticConfig cfg;
+    cfg.width = 64;
+    cfg.height = 36;
+    ExportRig rig(cfg, 30);   // 30 ms por quadro: dá tempo de cancelar no meio
+    set_duration(rig.e, 120);
+
+    ExportSettings s;
+    s.height = 36;
+    AUREA_CHECK(rig.e.start_export(s, "nao-usado.mp4").ok());
+    // Um segundo export ao mesmo tempo é recusado.
+    AUREA_CHECK_EQ(rig.e.start_export(s, "outro.mp4").code(), Errc::InvalidState);
+    std::this_thread::sleep_for(std::chrono::milliseconds(120));
+    AUREA_CHECK(rig.e.cancel_export().ok());
+    AUREA_CHECK(wait_export(rig.e));
+    const Engine::ExportProgress p = rig.e.export_progress();
+    AUREA_CHECK_EQ(p.result, Errc::Cancelled);
+    AUREA_CHECK(p.framesDone < 120u);
+    AUREA_CHECK(rig.cap.aborted && !rig.cap.finished);
+    // A GPU volta a atender o preview (capture usa o mesmo caminho).
+    std::vector<u8> rgba;
+    u32 w = 0, h = 0;
+    AUREA_CHECK(rig.e.capture_frame_rgba(32, rgba, w, h).ok());
+}
+
+AUREA_TEST(Gpu, ExportAt60OverA30FpsVideoNeverWaitsForAnInBetweenFrame) {
+    // Regressão: composição a 60 sobre vídeo a 30. O instante de cada quadro
+    // ímpar ficava a meia distância de dois quadros da fonte; nenhum contava
+    // como "exato" e o export esperava 4 s por quadro.
+    Gpu& g = gpu();
+    if (!g.ok) return;
+    SyntheticConfig cfg;
+    cfg.width = 64;
+    cfg.height = 36;
+    cfg.fps = 30.0;
+    cfg.pattern = SyntheticPattern::FrameGray;
+    SyntheticFactory factory(cfg);
+    CapturedExport cap;
+    SinkCtx sc{&cap, 0};
+    Engine e;
+    EngineConfig ec;
+    ec.backend = new vk::Backend();
+    ec.backendConfig.enableValidation = false;
+    ec.mediaFactory = &factory;
+    ec.exportSinkFactory = &make_capture_sink;
+    ec.exportSinkContext = &sc;
+    ec.disableAutosave = true;
+    ec.workerCount = 2;
+    AUREA_CHECK(e.initialize(ec).ok());
+    AUREA_CHECK(e.new_project(64, 36, 60.0, nullptr).ok());
+    VideoImport vi;
+    vi.sourcePath = "sintetico";
+    vi.displayName = "cinza";
+    AUREA_CHECK(e.import_video(vi).ok());   // o 1º vídeo traz a composição para 30
+    Command fps;
+    fps.type = CommandType::CompositionSetFps;
+    fps.comp_fps.comp = e.project()->timeline().current();
+    fps.comp_fps.fps = 60.0;
+    AUREA_CHECK(e.apply_command(fps).ok());
+    set_duration(e, 60);   // 1 s a 60
+
+    ExportSettings s;
+    s.height = 36;
+    s.dither = false;
+    const auto t0 = std::chrono::steady_clock::now();
+    AUREA_CHECK(e.start_export(s, "nao-usado.mp4").ok());
+    AUREA_CHECK(wait_export(e));
+    const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    AUREA_CHECK_EQ(e.export_progress().result, Errc::Ok);
+    AUREA_CHECK_EQ(cap.y.size(), static_cast<usize>(60));
+    AUREA_CHECK(secs < 3.0);   // antes: ~2 min
+    // Cada quadro da fonte aparece em dois quadros de saída seguidos.
+    const usize mid = 18 * 64 + 32;
+    if (cap.y.size() == 60) {
+        for (usize k = 0; k < 30; ++k) AUREA_CHECK_EQ(static_cast<int>(cap.y[2 * k][mid]), static_cast<int>(cap.y[2 * k + 1][mid]));
+    }
+    e.shutdown();
+}

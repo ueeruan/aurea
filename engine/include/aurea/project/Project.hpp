@@ -38,7 +38,7 @@ namespace aurea {
 struct ExportSettings {
     u32  width  = 1920;
     u32  height = 1080;
-    f64  fps    = 60.0;
+    f64  fps    = 0.0;    ///< 0 = o da composição
 
     ExportCodec videoCodec = ExportCodec::H264;
     u32  videoBitrateMbps  = 20;
@@ -69,6 +69,10 @@ struct ExportSettings {
 
     /// Escala de saída relativa à composição (1.0 = mesma resolução).
     f32  scale = 1.0f;
+
+    /// Dither de 1/2 LSB na conversão para 8 bits. Só os testes desligam
+    /// (querem códigos exatos). Não persiste.
+    bool dither = true;
 };
 
 /// Ajustes de interface persistidos com o projeto — zoom da timeline, escala

@@ -195,4 +195,18 @@ object CupertinoGlyph {
     const val Xmark = ''
     const val XmarkCircle = ''
     const val XmarkCircleFill = ''
+
+    // Painéis (efeitos, curva, velocidade).
+    const val ArrowtriangleDownFill = ''
+    const val ArrowtriangleRightFill = ''
+    const val ArrowUp = ''
+    const val ArrowDown = ''
+    const val ChevronBack = ''
+    const val Star = ''
+    const val StarFill = ''
+    const val Scribble = ''
+    const val Sportscourt = ''
+    const val WaveformPath = ''
+    const val Tortoise = ''
+    const val Hare = ''
 }

@@ -550,6 +550,17 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshNow()
     }
 
+    /**
+     * Modo de mesclagem da camada principal (`aurea::BlendMode`: 0 Normal,
+     * 1 Add…). Um comando = um passo de desfazer. O painel Mesclagem só oferece
+     * os modos que o renderer já desenha.
+     */
+    fun setBlendMode(mode: Int, layer: Long? = primary) {
+        val id = layer ?: return
+        send { setLayerBlendMode(id, mode) }
+        refreshNow()
+    }
+
     /** Divide as camadas escolhidas no playhead (as que o cobrem). */
     fun splitAtPlayhead(ids: Collection<Long> = selection) {
         val t = playhead

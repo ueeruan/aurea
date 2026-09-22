@@ -19,6 +19,7 @@
 #include <android/native_window_jni.h>
 #include <sys/system_properties.h>
 
+#include "AAudioOutput.hpp"
 #include "MediaCodecExport.hpp"
 #include "MediaCodecSource.hpp"
 #include "VulkanBackend.hpp"
@@ -129,6 +130,7 @@ bool load_image(const char* source, ImagePixels& out, void*) {
 // Contexto nativo: um por motor
 // -----------------------------------------------------------------------------
 struct NativeContext {
+    android::AAudioOutput audioOut;    ///< antes do motor: o motor fecha a saída no shutdown
     Engine engine;
     android::MediaCodecFactory media;
     std::mutex surfaceMutex;
@@ -263,6 +265,7 @@ AUREA_JNI jboolean AUREA_FN(nativeInitialize)(JNIEnv* env, jclass, jlong handle,
     config.displayRefreshRate = refreshRate > 0.0f ? refreshRate : 60.0f;
     config.mediaFactory = &c->media;
     config.exportSinkFactory = &android::make_mediacodec_export_sink;
+    config.audioOutput = &c->audioOut;
     config.imageLoader = &load_image;
     config.enableTelemetry = true;
 
@@ -564,6 +567,28 @@ AUREA_JNI jlong AUREA_FN(nativeImportVideo)(JNIEnv* env, jclass, jlong handle, j
         AUREA_LOG_ERROR("importacao de video falhou: %s", r.status().message().data());
         return -static_cast<jlong>(r.status().code());
     }
+    return static_cast<jlong>(*r);
+}
+
+AUREA_JNI jlong AUREA_FN(nativeImportAudio)(JNIEnv* env, jclass, jlong handle, jstring source, jstring name) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return -static_cast<jlong>(Errc::InvalidState);
+    VideoImport request;
+    request.sourcePath = to_string(env, source);
+    request.displayName = to_string(env, name);
+    const Result<u64> r = c->engine.import_audio(request);
+    if (!r.ok()) {
+        AUREA_LOG_ERROR("importacao de audio falhou: %s", r.status().message().data());
+        return -static_cast<jlong>(r.status().code());
+    }
+    return static_cast<jlong>(*r);
+}
+
+AUREA_JNI jlong AUREA_FN(nativeExtractAudio)(JNIEnv*, jclass, jlong handle, jlong layerId) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return -static_cast<jlong>(Errc::InvalidState);
+    const Result<u64> r = c->engine.extract_audio(static_cast<u64>(layerId));
+    if (!r.ok()) return -static_cast<jlong>(r.status().code());
     return static_cast<jlong>(*r);
 }
 

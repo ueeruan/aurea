@@ -17,6 +17,7 @@
 #include "aurea/media/MediaManager.hpp"
 #include "aurea/media/VideoSource.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -40,6 +41,62 @@ struct SyntheticConfig {
     SyntheticPattern pattern = SyntheticPattern::Quadrants;
     VideoColorInfo color{};
     u32 rotation = 0;
+    /// Trilha de áudio sintética (0 = sem áudio): senoide por canal, canal c
+    /// em audioFreq·(c+1) Hz, amplitude 0,5.
+    u32 audioRate = 0;
+    u32 audioChannels = 2;
+    f64 audioFreq = 440.0;
+    f64 audioSeconds = 10.0;
+};
+
+/// Valor exato da senoide sintética no instante `t` (s), canal `c`.
+inline f32 synthetic_audio_value(const SyntheticConfig& cfg, u32 c, f64 t) {
+    return static_cast<f32>(0.5 * std::sin(2.0 * 3.14159265358979323846 * cfg.audioFreq * (c + 1) * t));
+}
+
+/// "Decoder" de áudio: entrega quadros de 1024 amostras (como AAC), com pts
+/// exato; o seek cai no início do quadro de 1024 anterior ao alvo.
+class SyntheticAudioDecoder final : public audio::AudioDecoderBackend {
+public:
+    explicit SyntheticAudioDecoder(const SyntheticConfig& c) : cfg_(c) {
+        info_.sampleRate = c.audioRate;
+        info_.channels = c.audioChannels;
+        info_.durationUs = static_cast<i64>(c.audioSeconds * 1e6);
+        total_ = static_cast<i64>(c.audioSeconds * c.audioRate);
+    }
+    const audio::AudioStreamInfo& info() const noexcept override { return info_; }
+    Status seek(i64 us) noexcept override {
+        const i64 f = us * cfg_.audioRate / 1'000'000;
+        pos_ = (f / 1024) * 1024;
+        ++seeks;
+        return OkStatus;
+    }
+    Status read(std::vector<f32>& out, i64& ptsUs, bool& eos) noexcept override {
+        out.clear();
+        eos = false;
+        if (pos_ >= total_) {
+            eos = true;
+            return OkStatus;
+        }
+        const i64 n = std::min<i64>(1024, total_ - pos_);
+        out.resize(static_cast<usize>(n) * cfg_.audioChannels);
+        for (i64 i = 0; i < n; ++i) {
+            const f64 t = static_cast<f64>(pos_ + i) / cfg_.audioRate;
+            for (u32 c = 0; c < cfg_.audioChannels; ++c) out[static_cast<usize>(i) * cfg_.audioChannels + c] = synthetic_audio_value(cfg_, c, t);
+        }
+        ptsUs = pos_ * 1'000'000 / cfg_.audioRate;
+        pos_ += n;
+        ++chunks;
+        return OkStatus;
+    }
+    u32 seeks = 0;
+    u32 chunks = 0;
+
+private:
+    SyntheticConfig cfg_;
+    audio::AudioStreamInfo info_{};
+    i64 total_ = 0;
+    i64 pos_ = 0;
 };
 
 /// Código Y'CbCr (8 bits) de uma cor R'G'B' codificada, na matriz e faixa dadas.
@@ -183,9 +240,21 @@ public:
         SyntheticDecoder d(cfg_);
         out.video = d.info();
         out.video.color.fromStream = true;
-        out.hasVideo = true;
+        out.hasVideo = cfg_.width > 0;
+        if (cfg_.audioRate > 0) {
+            out.hasAudio = true;
+            out.audioSampleRate = cfg_.audioRate;
+            out.audioChannels = cfg_.audioChannels;
+            out.audioDurationUs = static_cast<i64>(cfg_.audioSeconds * 1e6);
+        }
         return true;
     }
+    std::unique_ptr<audio::AudioDecoderBackend> open_audio(const char*) override {
+        if (cfg_.audioRate == 0) return nullptr;
+        ++audioOpened;
+        return std::make_unique<SyntheticAudioDecoder>(cfg_);
+    }
+    u32 audioOpened = 0;
     std::unique_ptr<VideoDecoderBackend> open_video(const Asset&, MediaPriority) override {
         auto d = std::make_unique<SyntheticDecoder>(cfg_);
         last = d.get();

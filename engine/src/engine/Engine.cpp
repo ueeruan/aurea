@@ -49,6 +49,13 @@ struct Engine::ExportContext {
     bool dither = true;
     TextureHandle comp{}, y{}, uv{};
     std::vector<u8> yBytes, uvBytes;
+    // Áudio: o MESMO mixer do preview, com um cache próprio que decodifica
+    // na hora (o export não disputa decoder com o preview).
+    std::unique_ptr<audio::AudioBlockCache> audioCache;
+    std::shared_ptr<audio::AudioMixSnapshot> audioSnap;
+    i64 audioWritten = 0;
+    std::vector<f32> audioMix;
+    std::vector<i16> audioPcm;
     u64 waitNs = 0, renderNs = 0, readNs = 0, writeNs = 0;
     u32 attempts = 0;
 
@@ -119,6 +126,10 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
 
     media_.set_factory(config.mediaFactory);
     media_.set_ready_callback(&Engine::on_frame_ready, this);
+    // Som: cache de blocos na verba de áudio; com saída, o áudio passa a ser o
+    // relógio mestre do playback.
+    audio_.initialize(config.mediaFactory, config.audioOutput, memory_.budget(MemoryClass::Audio));
+    playback_.clock().set_master(&audio_);
     thumbs_.set_factory(config.mediaFactory);
     if (config.mediaFactory) thumbs_.start();
 
@@ -140,6 +151,8 @@ void Engine::shutdown() noexcept {
     }
     stop_render_thread();
     thumbs_.stop();
+    playback_.clock().set_master(nullptr);
+    audio_.shutdown();
     media_.close_all();
     jobs_.stop();
 
@@ -177,6 +190,7 @@ Status Engine::suspend() noexcept {
         std::lock_guard<std::mutex> lock(modelMutex_);
         playback_.pause(monotonic_ns());
         playingHint_ = false;
+        audio_.stop();
     }
     // Decoders de hardware são recurso do SISTEMA: segurar em segundo plano
     // faz outro app (ou o próprio Aurea ao voltar) falhar ao abrir um codec.
@@ -508,6 +522,7 @@ Result<u64> Engine::import_video(const VideoImport& request) noexcept {
     if (probe.hasAudio) {
         asset.audio.sampleRate = probe.audioSampleRate;
         asset.audio.channels = probe.audioChannels;
+        asset.audio.sampleCount = FrameIndex{probe.audioDurationUs * static_cast<i64>(probe.audioSampleRate) / 1'000'000};
     }
     const AssetId assetId = project_->add_asset(std::move(asset));
 
@@ -552,6 +567,88 @@ Result<u64> Engine::import_video(const VideoImport& request) noexcept {
     request_render();
     AUREA_LOG_INFO("video importado: %ux%u %.3f fps, %lld us, cor %s", dispW, dispH, v.fps,
                    static_cast<long long>(v.durationUs), v.color.fromStream ? "do arquivo" : "deduzida");
+    return lid.pack();
+}
+
+Result<u64> Engine::import_audio(const VideoImport& request) noexcept {
+    VideoSourceFactory* factory = config_.mediaFactory;
+    if (!factory) return Status{Errc::NotSupported, "sem decodificador de audio nesta plataforma"};
+    MediaProbe probe;
+    if (!factory->probe(request.sourcePath.c_str(), probe) || !probe.hasAudio || probe.audioSampleRate == 0) {
+        return Status{Errc::UnsupportedFormat, "arquivo sem trilha de audio decodificavel"};
+    }
+    if (probe.audioDurationUs <= 0) return Status{Errc::CorruptData, "audio sem duracao"};
+
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
+    Composition* comp = current_composition();
+    if (!comp) return Status{Errc::InvalidState, "projeto sem composicao"};
+    history_.before_mutation(*comp, project_->timeline().current(), "importar audio");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+
+    const f64 fps = comp->fps() > 0.0 ? comp->fps() : 30.0;
+    Asset asset;
+    asset.kind = AssetKind::Audio;
+    asset.name = request.displayName.empty() ? std::string("Audio") : request.displayName;
+    asset.sourcePath = request.sourcePath;
+    asset.originalFilename = request.displayName;
+    asset.audio.sampleRate = probe.audioSampleRate;
+    asset.audio.channels = probe.audioChannels;
+    asset.audio.sampleCount = FrameIndex{probe.audioDurationUs * static_cast<i64>(probe.audioSampleRate) / 1'000'000};
+    asset.timebaseFps = fps;
+    const i64 frames = std::max<i64>(1, static_cast<i64>(std::ceil(static_cast<f64>(probe.audioDurationUs) * fps / 1e6 - 1e-6)));
+    asset.duration = FrameIndex{frames};
+    const AssetId assetId = project_->add_asset(std::move(asset));
+
+    const bool first = comp->layers().count() == 0;
+    if (first || frames > comp->duration().value) comp->set_duration(FrameIndex{frames});
+    const LayerId lid = comp->add_layer(LayerKind::Audio, request.displayName);
+    Layer* l = comp->layer(lid);
+    if (!l) return Status{Errc::OutOfMemory, "camada nao criada"};
+    l->source = assetId;
+    l->start = FrameIndex{0};
+    l->end = FrameIndex{frames};
+    playback_.configure(comp->fps(), comp->duration());
+    project_->mark_dirty();
+    request_render();
+    AUREA_LOG_INFO("audio importado: %u Hz, %u canais, %lld us", probe.audioSampleRate, probe.audioChannels,
+                   static_cast<long long>(probe.audioDurationUs));
+    return lid.pack();
+}
+
+Result<u64> Engine::extract_audio(u64 videoLayerId) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
+    Composition* comp = current_composition();
+    if (!comp) return Status{Errc::InvalidState, "projeto sem composicao"};
+    Layer* v = comp->layer(LayerId::unpack(videoLayerId));
+    if (!v || v->kind != LayerKind::Video) return Status{Errc::NotFound, "camada de video nao encontrada"};
+    const Asset* a = project_->asset(v->source);
+    if (!a || !a->has_audio()) return Status{Errc::NotSupported, "este video nao tem som"};
+    history_.before_mutation(*comp, project_->timeline().current(), "extrair audio");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+
+    // Copia o que é de som (tempo, corte, ganho, fades, volume animado); o
+    // vídeo fica mudo — sem isso o som tocaria dobrado.
+    const Layer src = *v;
+    const LayerId lid = comp->add_layer(LayerKind::Audio, src.name.empty() ? std::string("Audio") : src.name + " (audio)");
+    Layer* l = comp->layer(lid);
+    if (!l) return Status{Errc::OutOfMemory, "camada nao criada"};
+    l->source = src.source;
+    l->start = src.start;
+    l->end = src.end;
+    l->offset = src.offset;
+    l->gain = src.gain;
+    l->pan = src.pan;
+    l->fadeIn = src.fadeIn;
+    l->fadeOut = src.fadeOut;
+    l->solo = src.solo;
+    if (const Track* vt = src.tracks.find(TrackProperty::AudioVolume)) {
+        l->tracks.get_or_create(TrackProperty::AudioVolume) = *vt;
+    }
+    if (Layer* vv = comp->layer(LayerId::unpack(videoLayerId))) vv->muted = true;
+    project_->mark_dirty();
+    request_render();
     return lid.pack();
 }
 
@@ -605,6 +702,37 @@ std::string Engine::store_asset_path(const std::string& absolute) const {
         return "docs:" + absolute.substr(start);
     }
     return absolute;
+}
+
+std::string Engine::audio_path_resolver(void* self, const std::string& stored) {
+    return static_cast<Engine*>(self)->resolve_asset_path(stored);
+}
+
+void Engine::sync_audio_locked(const Composition& comp) noexcept {
+    const u32 rev = modelRevision_.load(std::memory_order_acquire);
+    if (rev != audioRevision_ || &comp != audioComp_) {
+        audioRevision_ = rev;
+        audioComp_ = &comp;
+        audio_.set_snapshot(audio::build_snapshot(comp, *project_, audio_.cache(), &Engine::audio_path_resolver, this));
+    }
+    // Velocidade ≠ 1 ainda sem time stretch (fase 6): o som sai de cena e o
+    // relógio do sistema conduz — melhor mudo que tocando na velocidade errada.
+    const bool want = playback_.playing() && std::fabs(playback_.speed() - 1.0f) < 1e-3f
+                   && !exportActive_.load(std::memory_order_acquire);
+    if (want) {
+        if (!audio_.playing() || playback_.generation() != audioGeneration_) {
+            audio_.play(playback_.current_ns());
+            audioGeneration_ = playback_.generation();
+        }
+        return;
+    }
+    if (audio_.playing()) audio_.stop();
+    if (playback_.generation() != audioGeneration_) {
+        // Parado num ponto novo: o som dali já começa a decodificar, e o play
+        // seguinte sai sem buraco.
+        audioGeneration_ = playback_.generation();
+        audio_.prefetch(playback_.current_ns());
+    }
 }
 
 std::string Engine::resolve_asset_path(const std::string& stored) const {
@@ -796,7 +924,12 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         if (!comp) return Errc::NotFound;
 
         playback_.configure(comp->fps(), comp->duration());
+        // Antes do update: um seek/play desta leva recomeça o som no ponto
+        // novo (senão o relógio do áudio ainda diria o instante antigo).
+        sync_audio_locked(*comp);
         t = playback_.update(frameStart);
+        // Depois: o loop acontece dentro do update.
+        sync_audio_locked(*comp);
         project_->timeline().set_playhead(t);
         playing = playback_.playing();
         playingHint_ = playing;
@@ -1309,6 +1442,19 @@ bool Engine::query_layer_detail(u64 layerId, bridge::LayerDetailPOD& out) noexce
     out.maskCount = static_cast<u32>(l->masks.size());
     out.localPlayhead = static_cast<i32>(local.value);
     out.parentId = l->parent.valid() ? l->parent.pack() : 0;
+    out.audioGain = l->gain;
+    out.audioVolume = l->tracks.sample_or(TrackProperty::AudioVolume, local, 1.0f);
+    out.audioPan = l->pan;
+    out.audioFadeIn = static_cast<i32>(l->fadeIn.value);
+    out.audioFadeOut = static_cast<i32>(l->fadeOut.value);
+    {
+        const Asset* aa = project_->asset(l->source);
+        const Track* vt = l->tracks.find(TrackProperty::AudioVolume);
+        out.audioFlags = (l->muted ? bridge::kAudioFlagMuted : 0u) | (l->solo ? bridge::kAudioFlagSolo : 0u)
+                       | ((aa && aa->has_audio() && (l->kind == LayerKind::Video || l->kind == LayerKind::Audio))
+                              ? bridge::kAudioFlagHasAudio : 0u)
+                       | ((vt && vt->animated()) ? bridge::kAudioFlagVolumeAnimated : 0u);
+    }
     if (l->kind == LayerKind::Model3D) {
         // Silhueta de frente em escala 100% (o plano Z=0 é 1:1 com a
         // composição): é a caixa que o palco desenha e toca. A UI trata a
@@ -1517,6 +1663,8 @@ Status Engine::start_export(const ExportSettings& settings, const char* outputPa
         ctx->height = even(ch * k);
         const f64 seconds = comp->duration_seconds();
         ctx->frames = std::max<u32>(1u, static_cast<u32>(std::ceil(seconds * ctx->fps - 1e-6)));
+        ctx->audioCache = std::make_unique<audio::AudioBlockCache>(config_.mediaFactory, 16ull << 20, false);
+        ctx->audioSnap = audio::build_snapshot(*comp, *project_, ctx->audioCache.get(), &Engine::audio_path_resolver, this);
     }
     // Teto do aparelho (a mesma regra lado maior × lado menor da composição).
     const u32 capLong = std::max(caps_.max_export_width(), caps_.max_export_height());
@@ -1544,7 +1692,15 @@ Status Engine::start_export(const ExportSettings& settings, const char* outputPa
                   ? settings.videoBitrateMbps * 1000000u
                   : static_cast<u32>(std::clamp(pixelsPerSecond * 0.2, 2.0e6, 120.0e6));
     vc.keyframeIntervalFrames = settings.keyframeIntervalFrames;
-    if (const Status s = ctx->sink->open(outputPath, vc, nullptr); !s.ok()) return s;
+    // Com som na timeline, o arquivo leva AAC; sem, só vídeo (uma trilha de
+    // silêncio não serve para nada e alguns players a mostram como "com som").
+    AudioStreamConfig ac;
+    ac.sampleRate = audio::kMixRate;
+    ac.channels = audio::kMixChannels;
+    ac.bitrateBps = std::clamp<u32>(settings.audioBitrateKbps, 64, 320) * 1000u;
+    const bool withAudio = ctx->audioSnap && ctx->audioSnap->audible();
+    if (!withAudio) ctx->audioSnap.reset();
+    if (const Status s = ctx->sink->open(outputPath, vc, withAudio ? &ac : nullptr); !s.ok()) return s;
 
     // Alvos de GPU da sessão: composição (linear), Y e CbCr.
     {
@@ -1589,6 +1745,7 @@ Status Engine::start_export(const ExportSettings& settings, const char* outputPa
         std::lock_guard<std::mutex> lock(modelMutex_);
         playback_.pause(monotonic_ns());
         playingHint_ = false;
+        audio_.stop();
     }
     exportCtx_ = std::move(ctx);
     exportActive_.store(true, std::memory_order_release);
@@ -1639,6 +1796,50 @@ Status Engine::render_export_frame(FrameIndex t, const OffscreenTarget& target) 
     return r;
 }
 
+namespace {
+/// O mixer lê do cache de export, decodificando o que faltar na hora.
+class ExportBlocks final : public audio::BlockSource {
+public:
+    explicit ExportBlocks(audio::AudioBlockCache& c) : cache_(c) {}
+    const audio::AudioBlock* block(u64 asset, i64 b) override {
+        for (auto& h : recent_) {
+            if (h.asset == asset && h.block == b) return h.ptr.get();
+        }
+        auto p = cache_.fetch(asset, b);
+        if (!p) return nullptr;
+        recent_.push_back(Held{asset, b, p});
+        if (recent_.size() > 16) recent_.erase(recent_.begin());
+        return recent_.back().ptr.get();
+    }
+
+private:
+    struct Held {
+        u64 asset;
+        i64 block;
+        std::shared_ptr<const audio::AudioBlock> ptr;
+    };
+    audio::AudioBlockCache& cache_;
+    std::vector<Held> recent_;
+};
+} // namespace
+
+Status Engine::write_export_audio(i64 untilSample) noexcept {
+    ExportContext& ctx = *exportCtx_;
+    ExportBlocks blocks(*ctx.audioCache);
+    constexpr u32 kChunk = 4096;
+    ctx.audioMix.resize(static_cast<usize>(kChunk) * audio::kMixChannels);
+    ctx.audioPcm.resize(ctx.audioMix.size());
+    while (ctx.audioWritten < untilSample) {
+        const u32 n = static_cast<u32>(std::min<i64>(kChunk, untilSample - ctx.audioWritten));
+        audio::mix(*ctx.audioSnap, ctx.audioWritten, n, blocks, ctx.audioMix.data());
+        audio::to_pcm16(ctx.audioMix.data(), static_cast<usize>(n) * audio::kMixChannels, ctx.audioPcm.data());
+        const i64 ptsUs = audio::sample_to_ns(ctx.audioWritten) / 1000;
+        if (const Status s = ctx.sink->write_audio(ctx.audioPcm.data(), n, ptsUs); !s.ok()) return s;
+        ctx.audioWritten += n;
+    }
+    return OkStatus;
+}
+
 void Engine::export_thread_main() noexcept {
     set_current_thread_name("aurea-export");
     ExportContext& ctx = *exportCtx_;
@@ -1665,6 +1866,12 @@ void Engine::export_thread_main() noexcept {
         result = ctx.sink->write_video(ctx.yBytes.data(), ctx.width, ctx.uvBytes.data(), ctx.width, pts);
         ctx.writeNs += monotonic_ns() - w0;
         if (!result.ok()) break;
+        // O som até o fim DESTE quadro (em amostras inteiras: nenhuma deriva
+        // acumulada, nem em 29,97).
+        if (ctx.audioSnap) {
+            result = write_export_audio(audio::frame_to_sample(static_cast<i64>(i) + 1, ctx.fps));
+            if (!result.ok()) break;
+        }
         // Diagnóstico a cada 300 quadros: onde o tempo do export está indo.
         if ((i + 1) % 300 == 0 || i + 1 == ctx.frames) {
             const f64 n = static_cast<f64>((i % 300) + 1);
@@ -1743,7 +1950,8 @@ bool Engine::mutates_model(CommandType type) noexcept {
     // histórico, export, troca de composição e 3D (não implementado) não.
     return (t >= static_cast<u16>(CommandType::LayerCreate) && t <= static_cast<u16>(CommandType::TextSetStrokeColor))
         || type == CommandType::CompositionSetSize || type == CommandType::CompositionSetFps
-        || type == CommandType::CompositionSetDuration || type == CommandType::CompositionSetBackground;
+        || type == CommandType::CompositionSetDuration || type == CommandType::CompositionSetBackground
+        || type == CommandType::AudioSetVolume || type == CommandType::AudioSetPan;
 }
 
 void Engine::record_history_locked(CommandType type) noexcept {
@@ -2177,6 +2385,18 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             l->gain = clampf(cmd.audio_gain.gain, 0.0f, 4.0f);
             return OkStatus;
         }
+        case CommandType::AudioSetVolume: {
+            Layer* l = need_layer(cmd.audio_gain.layer);
+            if (!l) return Errc::NotFound;
+            l->tracks.set_static(TrackProperty::AudioVolume, clampf(cmd.audio_gain.gain, 0.0f, 2.0f));
+            return OkStatus;
+        }
+        case CommandType::AudioSetPan: {
+            Layer* l = need_layer(cmd.audio_gain.layer);
+            if (!l) return Errc::NotFound;
+            l->pan = clampf(cmd.audio_gain.gain, -1.0f, 1.0f);
+            return OkStatus;
+        }
         case CommandType::AudioSetMuted: {
             Layer* l = need_layer(cmd.audio_flag.layer);
             if (!l) return Errc::NotFound;
@@ -2186,14 +2406,10 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         case CommandType::AudioSetSolo: {
             Layer* l = need_layer(cmd.audio_flag.layer);
             if (!l) return Errc::NotFound;
+            // Solo é avaliado na mixagem (audio::build_snapshot), não gravado
+            // como "mudo" nas outras: sair do solo devolve cada uma ao estado
+            // que o usuário deixou.
             l->solo = cmd.audio_flag.flag;
-            if (comp) {
-                bool anySolo = false;
-                comp->layers().for_each([&anySolo](LayerId, const Layer& other) { if (other.solo) anySolo = true; });
-                comp->layers().for_each([anySolo](LayerId, Layer& other) {
-                    other.muted = anySolo ? !other.solo : other.muted;
-                });
-            }
             return OkStatus;
         }
         case CommandType::AudioSetFadeIn: {

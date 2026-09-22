@@ -44,6 +44,7 @@ public:
     [[nodiscard]] bool probe(const char* sourcePath, MediaProbe& out) override;
     [[nodiscard]] std::unique_ptr<VideoDecoderBackend> open_video(const Asset& asset,
                                                                   MediaPriority priority) override;
+    [[nodiscard]] std::unique_ptr<audio::AudioDecoderBackend> open_audio(const char* sourcePath) override;
 
 private:
     std::atomic<bool> zeroCopy_{true};

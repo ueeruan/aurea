@@ -253,6 +253,13 @@ class AureaEngine private constructor() {
     fun importVideo(source: String, displayName: String): Long =
         nativeImportVideo(nativeHandle, source, displayName)
 
+    /** Arquivo de áudio: camada de áudio no topo. Id ≥ 0 ou −Errc. */
+    fun importAudio(source: String, displayName: String): Long =
+        nativeImportAudio(nativeHandle, source, displayName)
+
+    /** O som do vídeo vira camada própria; o vídeo fica mudo. Id ≥ 0 ou −Errc. */
+    fun extractAudio(layer: Long): Long = nativeExtractAudio(nativeHandle, layer)
+
     /** RGBA8 sRGB (alfa reto) num buffer direto de `width * height * 4` bytes. */
     fun importImage(rgba: ByteBuffer, width: Int, height: Int, name: String, source: String): Long =
         nativeImportImage(nativeHandle, rgba, width, height, name, source)
@@ -327,6 +334,8 @@ class AureaEngine private constructor() {
     private external fun nativeSetSelection(handle: Long, layers: LongArray)
     private external fun nativeClearSelection(handle: Long)
     private external fun nativeImportVideo(handle: Long, source: String, name: String): Long
+    private external fun nativeImportAudio(handle: Long, source: String, name: String): Long
+    private external fun nativeExtractAudio(handle: Long, layer: Long): Long
     private external fun nativeImportImage(
         handle: Long, rgba: ByteBuffer, width: Int, height: Int, name: String, source: String,
     ): Long

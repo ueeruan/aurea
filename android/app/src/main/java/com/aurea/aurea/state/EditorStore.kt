@@ -112,6 +112,10 @@ data class PreviewState(
  * Ordem das camadas: [layers] vem da FRENTE para o FUNDO (`zIndex` 0 = frente),
  * que é a ordem da timeline.
  */
+
+/** `aurea::Errc::UnsupportedFormat` (core/Result.hpp). */
+private const val ERRC_UNSUPPORTED_FORMAT = 17L
+
 class EditorStore(app: Application) : AndroidViewModel(app) {
 
     private val engine = AureaEngine.create(app)
@@ -1014,6 +1018,103 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             refreshNow()
             select(id)
         }
+    }
+
+    /**
+     * Arquivo de áudio (ou o som de um vídeo, pelo mesmo caminho): o motor
+     * sonda a trilha e cria a camada de áudio no topo. Sem trilha legível, o
+     * erro diz isso — nada de camada muda fingindo que importou.
+     */
+    fun importAudio(uri: Uri) {
+        takePermission(uri)
+        val name = displayName(uri)?.substringBeforeLast('.') ?: "Áudio"
+        busyMessage = "Importando áudio…"
+        viewModelScope.launch {
+            val id = withContext(Dispatchers.IO) { engine.importAudio(uri.toString(), name) }
+            busyMessage = null
+            if (id < 0) {
+                errorMessage = if (-id == ERRC_UNSUPPORTED_FORMAT) {
+                    "Esse arquivo não tem som que este aparelho consiga ler."
+                } else {
+                    "Não foi possível importar o áudio (erro ${-id})."
+                }
+                return@launch
+            }
+            refreshNow()
+            select(id)
+        }
+    }
+
+    /** "Extrair o áudio": o som vira camada própria e o vídeo fica mudo (um passo de desfazer). */
+    fun extractAudio(layer: Long? = primary) {
+        val id = layer ?: return
+        val created = engine.extractAudio(id)
+        if (created < 0) {
+            errorMessage = "Este vídeo não tem som para extrair."
+            return
+        }
+        refreshNow()
+        select(created)
+        showToast("Áudio extraído · o vídeo ficou mudo")
+    }
+
+    // --- Som da camada principal ---------------------------------------------
+    fun setAudioMuted(muted: Boolean) {
+        val id = primary ?: return
+        send { setAudioMuted(id, muted) }
+        refreshNow()
+    }
+
+    fun setAudioSolo(solo: Boolean) {
+        val id = primary ?: return
+        send { setAudioSolo(id, solo) }
+        refreshNow()
+    }
+
+    /** Volume linear (1 = 100%). Animado: grava/atualiza o keyframe no playhead. */
+    fun setAudioVolume(volume: Float) {
+        val id = primary ?: return
+        val d = detail ?: return
+        val v = volume.coerceIn(0f, 2f)
+        if (d.volumeAnimated) {
+            send { insertKeyframe(id, TrackProperty.AUDIO_VOLUME, -1, 0, d.localPlayhead, v) }
+        } else {
+            send { setAudioVolume(id, v) }
+        }
+        refreshDetail()
+    }
+
+    /** Liga/desliga keyframe de volume no playhead. */
+    fun toggleVolumeKeyframe() {
+        val id = primary ?: return
+        val d = detail ?: return
+        val at = keyframes[id].orEmpty().any { it.property == TrackProperty.AUDIO_VOLUME && it.time == d.localPlayhead }
+        if (at) {
+            send { deleteKeyframe(id, TrackProperty.AUDIO_VOLUME, -1, 0, d.localPlayhead) }
+        } else {
+            send { insertKeyframe(id, TrackProperty.AUDIO_VOLUME, -1, 0, d.localPlayhead, d.audioVolume) }
+        }
+        refreshNow()
+    }
+
+    /** Ganho do clipe (linear). */
+    fun setAudioGain(gain: Float) {
+        val id = primary ?: return
+        send { setAudioGain(id, gain.coerceIn(0f, 4f)) }
+        refreshDetail()
+    }
+
+    fun setAudioPan(pan: Float) {
+        val id = primary ?: return
+        send { setAudioPan(id, pan.coerceIn(-1f, 1f)) }
+        refreshDetail()
+    }
+
+    fun setAudioFade(fadeIn: Boolean, frames: Int) {
+        val id = primary ?: return
+        val f = max(0, frames)
+        send { if (fadeIn) setAudioFadeIn(id, f) else setAudioFadeOut(id, f) }
+        refreshDetail()
     }
 
     /**

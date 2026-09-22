@@ -86,7 +86,7 @@ internal fun AddLayerPanel(store: EditorStore, ui: EditorUi) {
                 when (ui.addTab) {
                     AddTab.Shape -> ShapesTab(store, Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
                     AddTab.Media -> MediaTab(store, close)
-                    AddTab.Audio -> AudioTab(store)
+                    AddTab.Audio -> AudioTab(store, close)
                     AddTab.Object -> ObjectsTab(store, close)
                     AddTab.More -> MoreTab(store)
                 }
@@ -314,11 +314,29 @@ private fun MediaTab(store: EditorStore, close: () -> Unit) {
     }
 }
 
+/**
+ * Áudio: arquivo de som (m4a, mp3, wav, aac, ogg, flac…) ou o som de um vídeo
+ * da galeria — os dois viram camada de áudio pelo mesmo `importAudio`.
+ */
 @Composable
-private fun AudioTab(store: EditorStore) {
+private fun AudioTab(store: EditorStore, close: () -> Unit) {
+    val files = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) {
+            store.importAudio(uri)
+            close()
+        }
+    }
+    val videos = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
+        if (uri != null) {
+            store.importAudio(uri)
+            close()
+        }
+    }
     Row(Modifier.fillMaxWidth().padding(6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.Top) {
-        AddOption(CupertinoGlyph.MusicNote, "Arquivo de áudio") { store.comingSoon("Áudio") }
-        AddOption(CupertinoGlyph.Film, "Extrair de vídeo") { store.comingSoon("Áudio de um vídeo") }
+        AddOption(CupertinoGlyph.MusicNote, "Arquivo de áudio") { files.launch(arrayOf("audio/*")) }
+        AddOption(CupertinoGlyph.Film, "Extrair de vídeo") {
+            videos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
+        }
     }
 }
 

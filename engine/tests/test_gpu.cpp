@@ -1214,6 +1214,11 @@ namespace {
 /// Sink de teste: guarda os quadros e registra a ordem das chamadas.
 struct CapturedExport {
     VideoStreamConfig video{};
+    bool hasAudio = false;
+    AudioStreamConfig audio{};
+    std::vector<i16> pcm;
+    std::vector<i64> audioPts;
+    std::vector<u32> audioFrames;
     bool opened = false, finished = false, aborted = false;
     std::vector<i64> pts;
     std::vector<std::vector<u8>> y, uv;
@@ -1222,8 +1227,10 @@ struct CapturedExport {
 class CaptureSink final : public ExportSink {
 public:
     CaptureSink(CapturedExport* out, u32 delayMs) : out_(out), delayMs_(delayMs) {}
-    Status open(const char*, const VideoStreamConfig& v, const AudioStreamConfig*) noexcept override {
+    Status open(const char*, const VideoStreamConfig& v, const AudioStreamConfig* a) noexcept override {
         out_->video = v;
+        out_->hasAudio = a != nullptr;
+        if (a) out_->audio = *a;
         out_->opened = true;
         return OkStatus;
     }
@@ -1238,7 +1245,12 @@ public:
         if (delayMs_) std::this_thread::sleep_for(std::chrono::milliseconds(delayMs_));
         return OkStatus;
     }
-    Status write_audio(const i16*, u32, i64) noexcept override { return OkStatus; }
+    Status write_audio(const i16* pcm, u32 frames, i64 ptsUs) noexcept override {
+        out_->pcm.insert(out_->pcm.end(), pcm, pcm + static_cast<usize>(frames) * out_->audio.channels);
+        out_->audioPts.push_back(ptsUs);
+        out_->audioFrames.push_back(frames);
+        return OkStatus;
+    }
     Status finish() noexcept override { out_->finished = true; return OkStatus; }
     void abort() noexcept override { out_->aborted = true; }
 private:
@@ -1334,6 +1346,56 @@ AUREA_TEST(Gpu, ExportWritesBt709LimitedNv12WithExactTimestamps) {
     AUREA_CHECK(near(Y[30 * 64 + 60], 235));
     AUREA_CHECK(near(C[15 * 64 + 30 * 2 + 0], 128));
     AUREA_CHECK(near(C[15 * 64 + 30 * 2 + 1], 128));
+}
+
+AUREA_TEST(Gpu, ExportMixesTheTimelineAudioSampleExact) {
+    Gpu& g = gpu();
+    if (!g.ok) return;
+    SyntheticConfig cfg;
+    cfg.width = 64;
+    cfg.height = 36;
+    cfg.audioRate = 44100;          // reamostrado para 48 kHz no caminho
+    cfg.audioChannels = 2;
+    cfg.audioSeconds = 10.0;
+    ExportRig rig(cfg, 0);
+    set_duration(rig.e, 45);        // 1,5 s a 30 fps
+    ExportSettings s;
+    s.height = 36;
+    s.dither = false;
+    AUREA_CHECK(rig.e.start_export(s, "nao-usado.mp4").ok());
+    AUREA_CHECK(wait_export(rig.e));
+    AUREA_CHECK_EQ(rig.e.export_progress().result, Errc::Ok);
+    const CapturedExport& cap = rig.cap;
+    AUREA_CHECK(cap.hasAudio);
+    AUREA_CHECK_EQ(cap.audio.sampleRate, 48000u);
+    AUREA_CHECK_EQ(cap.audio.channels, 2u);
+    // Exatamente 1,5 s de som, em trechos contíguos (pts = amostras já escritas).
+    AUREA_CHECK_EQ(cap.pcm.size(), static_cast<usize>(72000 * 2));
+    i64 written = 0;
+    for (usize i = 0; i < cap.audioPts.size(); ++i) {
+        AUREA_CHECK_EQ(cap.audioPts[i], audio::sample_to_ns(written) / 1000);
+        written += cap.audioFrames[i];
+    }
+    // Conteúdo: a senoide da fonte na amostra 30000 (0,625 s), em 16 bits.
+    const f64 t = 30000.0 / 48000.0;
+    const f32 wantL = synthetic_audio_value(cfg, 0, t), wantR = synthetic_audio_value(cfg, 1, t);
+    AUREA_CHECK_NEAR(cap.pcm[2 * 30000] / 32767.0, wantL, 2e-4);
+    AUREA_CHECK_NEAR(cap.pcm[2 * 30000 + 1] / 32767.0, wantR, 2e-4);
+
+    // Sem som na timeline (mudo): o arquivo sai só com vídeo.
+    ExportRig silent(cfg, 0);
+    set_duration(silent.e, 10);
+    const Composition* comp = silent.e.project()->timeline().composition(silent.e.project()->timeline().current());
+    LayerId only{};
+    comp->layers().for_each([&](LayerId id, const Layer&) { only = id; });
+    Command m;
+    m.type = CommandType::AudioSetMuted;
+    m.audio_flag.layer = only;
+    m.audio_flag.flag = true;
+    AUREA_CHECK(silent.e.apply_command(m).ok());
+    AUREA_CHECK(silent.e.start_export(s, "nao-usado.mp4").ok());
+    AUREA_CHECK(wait_export(silent.e));
+    AUREA_CHECK(!silent.cap.hasAudio && silent.cap.pcm.empty());
 }
 
 AUREA_TEST(Gpu, ExportAtDoubleFpsRepeatsEachCompositionFrame) {

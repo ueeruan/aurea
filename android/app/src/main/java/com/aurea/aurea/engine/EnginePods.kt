@@ -711,6 +711,7 @@ object TrackProperty {
     const val SKEW_Y = 14
     const val TIME_REMAP = 30
     const val EFFECT_PARAM = 31
+    const val AUDIO_VOLUME = 32
 }
 
 /**
@@ -742,7 +743,19 @@ data class LayerDetail(
     val maskCount: Int,
     val localPlayhead: Int,
     val parentId: Long,
+    val audioGain: Float = 1f,
+    val audioVolume: Float = 1f,
+    val audioPan: Float = 0f,
+    val audioFadeIn: Int = 0,
+    val audioFadeOut: Int = 0,
+    val audioFlags: Int = 0,
 ) {
+    val audioMuted: Boolean get() = (audioFlags and 1) != 0
+    val audioSolo: Boolean get() = (audioFlags and 2) != 0
+    /** A camada tem som de verdade (vídeo com trilha, ou camada de áudio). */
+    val hasAudio: Boolean get() = (audioFlags and 4) != 0
+    val volumeAnimated: Boolean get() = (audioFlags and 8) != 0
+
     fun isAnimated(property: Int) = (animatedMask and (1 shl property)) != 0
     fun hasKeyAtPlayhead(property: Int) = (keyAtPlayheadMask and (1 shl property)) != 0
 
@@ -784,6 +797,12 @@ data class LayerDetail(
                 maskCount = b.getInt(120),
                 localPlayhead = b.getInt(124),
                 parentId = b.getLong(128),
+                audioGain = b.getFloat(136),
+                audioVolume = b.getFloat(140),
+                audioPan = b.getFloat(144),
+                audioFadeIn = b.getInt(148),
+                audioFadeOut = b.getInt(152),
+                audioFlags = b.getInt(156),
             )
         }
     }

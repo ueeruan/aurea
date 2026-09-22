@@ -27,20 +27,27 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.aurea.aurea.engine.TrackProperty
 import com.aurea.aurea.ui.ds.AureaToggle
+import com.aurea.aurea.ui.ds.KeyframeLook
 import com.aurea.aurea.ui.ds.PropertyCustomRow
 import com.aurea.aurea.ui.ds.TickRuler
 import com.aurea.aurea.ui.ds.ValueBox
+import com.aurea.aurea.ui.ds.valueDrag
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.CupertinoGlyph
 import com.aurea.aurea.ui.theme.CupertinoIcon
 import com.aurea.aurea.ui.theme.LayerType
 import com.aurea.aurea.ui.theme.tocavel
+import kotlin.math.abs
+import kotlin.math.log10
+import kotlin.math.max
+import kotlin.math.pow
 import kotlin.math.roundToInt
 
-// Velocidade e Som: o motor novo ainda não tem tempo de clipe nem áudio. A casca
-// visual da A.01 fica pronta e TODO toque diz "em breve" — nada finge editar.
+// Velocidade: o motor ainda não tem tempo de clipe (fase 6) — a casca da A.01
+// fica pronta e TODO toque diz "em breve". Som: ligado ao mixer do motor.
 
 /** Duração da camada em "m:ss" (a única coisa real que o painel de velocidade tem). */
 private fun clock(frames: Int, fps: Float): String {
@@ -139,52 +146,156 @@ private fun ShellToggle(label: String, onClick: () -> Unit) {
 }
 
 /**
- * SOM [A] (`audio_sheet.dart`): "Som" com o nível em dB, Mudo, Volume, Ganho,
- * fades e "Abaixar pela voz". Os números ficam "—" (o motor não publica áudio).
+ * SOM [A] (`audio_sheet.dart`): "Som" com o nível em dB, Mudo, Solo, Volume
+ * (animável, com ◇), Ganho, Balanço e fades de igual potência — tudo ligado ao
+ * mixer do motor (o mesmo que exporta). "Abaixar pela voz" ainda não existe.
  */
 @Composable
 internal fun AudioPanel(env: PanelEnv) {
     val store = env.store
-    val kind by remember(store) { derivedStateOf { store.detail?.kind ?: 0 } }
-    val soon = { store.comingSoon("Som") }
+    val d by remember(store) { derivedStateOf { store.detail } }
+    val detail = d
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 18.dp, top = 14.dp, end = 18.dp, bottom = 24.dp)) {
-        if (kind != LayerType.Video.kind && kind != LayerType.Audio.kind) {
-            Text("Esta camada não tem áudio.", style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)))
+        if (detail == null || !detail.hasAudio) {
+            Text(
+                if (detail?.kind == LayerType.Video.kind) "Este vídeo não tem trilha de som." else "Esta camada não tem áudio.",
+                style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)),
+            )
             return@Column
         }
+        val fps = store.project.fps.takeIf { it > 0f } ?: 30f
+        val level = detail.audioVolume * detail.audioGain
         Row(verticalAlignment = Alignment.CenterVertically) {
             CupertinoIcon(CupertinoGlyph.Speaker2, 18.dp, AureaColors.Accent)
             Spacer(Modifier.width(8.dp))
             Text("Som", style = AureaType.Base.merge(TextStyle(fontSize = 17.sp, fontWeight = FontWeight.W700)))
             Spacer(Modifier.weight(1f))
-            Text("— dB", style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Accent)))
+            Text(
+                if (detail.audioMuted || level <= 0f) "mudo" else db(level),
+                style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Accent)),
+            )
         }
         Spacer(Modifier.height(10.dp))
-        ShellToggle("Mudo", soon)
-        listOf("Volume", "Ganho", "Fade de entrada", "Fade de saída").forEach { label ->
-            PropertyCustomRow(label, selected = false, onSelect = soon) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.weight(1f).height(40.dp).tocavel(shrink = 1f, onClick = soon)) {
-                        TickRuler(value = { 0f }, unitsPerDp = 1f, active = false, modifier = Modifier.fillMaxSize())
-                    }
-                    Spacer(Modifier.width(8.dp))
-                    ValueBox("—", onTap = soon)
-                }
-            }
+        AudioToggle("Mudo", detail.audioMuted) { store.setAudioMuted(it) }
+        AudioToggle("Solo", detail.audioSolo) { store.setAudioSolo(it) }
+        val keyLook = when {
+            store.keyframes[detail.id].orEmpty().any { it.property == TrackProperty.AUDIO_VOLUME && it.time == detail.localPlayhead } -> KeyframeLook.KeyHere
+            detail.volumeAnimated -> KeyframeLook.Animated
+            else -> KeyframeLook.None
         }
+        AudioRuler(
+            label = "Volume", keyframe = keyLook, onKeyframe = { store.toggleVolumeKeyframe() },
+            value = { store.detail?.audioVolume?.times(100f) ?: 100f }, text = "${(detail.audioVolume * 100f).roundToInt()}%",
+            unitsPerDp = 0.5f, min = 0f, max = 200f, gesture = "volume", store = store,
+        ) { store.setAudioVolume(it / 100f) }
+        AudioRuler(
+            label = "Ganho", value = { dbValue(store.detail?.audioGain ?: 1f) }, text = db(detail.audioGain),
+            unitsPerDp = 0.1f, min = -24f, max = 12f, gesture = "ganho", store = store,
+        ) { store.setAudioGain(if (it <= -24f) 0f else 10f.pow(it / 20f)) }
+        AudioRuler(
+            label = "Balanço", value = { (store.detail?.audioPan ?: 0f) * 100f }, text = pan(detail.audioPan),
+            unitsPerDp = 0.5f, min = -100f, max = 100f, gesture = "balanço", store = store,
+        ) { store.setAudioPan(it / 100f) }
+        val maxFade = max(0f, (detail.endFrame - detail.startFrame) / fps / 2f)
+        AudioRuler(
+            label = "Fade de entrada", value = { (store.detail?.audioFadeIn ?: 0) / fps }, text = secs(detail.audioFadeIn / fps),
+            unitsPerDp = 0.02f, min = 0f, max = maxFade, gesture = "fade de entrada", store = store,
+        ) { store.setAudioFade(true, (it * fps).roundToInt()) }
+        AudioRuler(
+            label = "Fade de saída", value = { (store.detail?.audioFadeOut ?: 0) / fps }, text = secs(detail.audioFadeOut / fps),
+            unitsPerDp = 0.02f, min = 0f, max = maxFade, gesture = "fade de saída", store = store,
+        ) { store.setAudioFade(false, (it * fps).roundToInt()) }
         Spacer(Modifier.height(6.dp))
         Text(
             "O fade é de igual potência: fade reto de volume soa como um buraco no meio.",
             style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, lineHeight = 14.85.sp, color = AureaColors.Muted)),
         )
+        if (detail.kind == LayerType.Video.kind) {
+            Spacer(Modifier.height(12.dp))
+            Row(
+                Modifier.fillMaxWidth().height(44.dp).clip(RoundedCornerShape(10.dp)).background(AureaColors.Chip)
+                    .tocavel { store.extractAudio(detail.id) }.padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CupertinoIcon(CupertinoGlyph.MusicNote2, 16.dp, AureaColors.Accent)
+                Spacer(Modifier.width(8.dp))
+                Text("Extrair o áudio para uma camada", style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+            }
+        }
         Spacer(Modifier.height(14.dp))
-        Text("Abaixar pela voz", style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700)))
+        Text("Abaixar pela voz", style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700, color = AureaColors.Muted)))
         Spacer(Modifier.height(4.dp))
         Text(
-            "A trilha desce quando a voz entra e volta quando ela para — sem desenhar envelope na mão.",
+            "A trilha desce quando a voz entra e volta quando ela para. Ainda não disponível.",
             style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, lineHeight = 14.85.sp, color = AureaColors.Muted)),
         )
-        Spacer(Modifier.height(8.dp))
-        Text("Não há outra faixa com som no projeto.", style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, color = AureaColors.Muted)))
+    }
+}
+
+private fun dbValue(linear: Float): Float = if (linear <= 0f) -24f else (20f * log10(linear)).coerceIn(-24f, 12f)
+
+private fun db(linear: Float): String {
+    if (linear <= 0f) return "−∞ dB"
+    val v = 20f * log10(linear)
+    val r = (v * 10f).roundToInt() / 10f
+    return (if (r > 0f) "+" else if (r < 0f) "−" else "") + "%.1f".format(abs(r)).replace('.', ',') + " dB"
+}
+
+private fun pan(p: Float): String {
+    val v = (p * 100f).roundToInt()
+    return when {
+        v == 0 -> "Centro"
+        v < 0 -> "E ${-v}"
+        else -> "D $v"
+    }
+}
+
+private fun secs(s: Float): String = "%.2f s".format(s).replace('.', ',')
+
+@Composable
+private fun AudioToggle(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+        AureaToggle(checked = checked, onCheckedChange = onChange)
+    }
+}
+
+/** Linha com régua arrastável (um gesto = um passo de desfazer) e o valor à direita. */
+@Composable
+private fun AudioRuler(
+    label: String,
+    value: () -> Float,
+    text: String,
+    unitsPerDp: Float,
+    min: Float,
+    max: Float,
+    gesture: String,
+    store: com.aurea.aurea.state.EditorStore,
+    keyframe: KeyframeLook = KeyframeLook.None,
+    onKeyframe: (() -> Unit)? = null,
+    onValue: (Float) -> Unit,
+) {
+    PropertyCustomRow(label, selected = keyframe != KeyframeLook.None, onSelect = { onKeyframe?.invoke() }, keyframe = keyframe) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f).height(40.dp)) {
+                TickRuler(
+                    value = value,
+                    unitsPerDp = unitsPerDp,
+                    active = true,
+                    modifier = Modifier.fillMaxSize().valueDrag(
+                        enabled = true,
+                        start = value,
+                        unitsPerDp = { unitsPerDp },
+                        min = min,
+                        max = max,
+                        onStart = { store.beginGesture(gesture) },
+                        onValue = onValue,
+                        onEnd = { store.endGesture() },
+                    ),
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            ValueBox(text, onTap = null)
+        }
     }
 }

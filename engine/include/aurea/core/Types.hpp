@@ -186,6 +186,8 @@ enum class TrackProperty : u16 {
     TimeRemap,
     // Efeito (o índice do parâmetro vem junto no TrackRef)
     EffectParam,
+    // Áudio (no fim: os números anteriores estão gravados em projetos)
+    AudioVolume,       ///< volume linear (1 = 100%), animável
     _Count,
 };
 

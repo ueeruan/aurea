@@ -135,7 +135,7 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
                 MenuItemRow(
                     CupertinoGlyph.MusicNote2,
                     "Extrair o áudio",
-                    soon("Extrair o áudio"),
+                    act { store.extractAudio(id) },
                     detail = "O som vira uma camada própria e o vídeo fica mudo",
                 )
             }

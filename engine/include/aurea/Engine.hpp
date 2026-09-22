@@ -156,6 +156,11 @@ struct EngineConfig {
     ExportSinkFactory exportSinkFactory = nullptr;
     void* exportSinkContext = nullptr;
 
+    /// Saída de som da plataforma (AAudio no Android). NÃO é assumida a posse.
+    /// Nula = preview mudo; o relógio do sistema conduz o playback e o export
+    /// continua mixando o áudio normalmente.
+    audio::AudioOutput* audioOutput = nullptr;
+
     f32   displayRefreshRate = 60.0f;
     std::string cacheDirectory;
     std::string documentsDirectory;
@@ -239,6 +244,13 @@ public:
     /// TOPO da composição. Sendo o primeiro clipe, a composição adota tamanho,
     /// fps e duração do vídeo. Devolve o id da layer.
     [[nodiscard]] Result<u64> import_video(const VideoImport& request) noexcept;
+    /// Arquivo de áudio (m4a, mp3, wav, aac, ogg, flac…): camada de áudio no
+    /// topo, a partir do início. Sendo o primeiro conteúdo, a composição adota
+    /// a duração do som.
+    [[nodiscard]] Result<u64> import_audio(const VideoImport& request) noexcept;
+    /// "Extrair o áudio": o som de um vídeo vira uma camada própria (mesmo
+    /// tempo, mesmo corte) e o vídeo fica mudo. Uma ação de desfazer.
+    [[nodiscard]] Result<u64> extract_audio(u64 videoLayerId) noexcept;
     /// Imagem já decodificada pela plataforma (RGBA8 sRGB, alfa reto).
     /// `sourcePath` (URI/caminho) fica no projeto: ao reabrir, o motor pede a
     /// imagem de novo ao `imageLoader`. Sem origem, a imagem só vive na sessão.
@@ -365,6 +377,7 @@ public:
     [[nodiscard]] Renderer& renderer() noexcept { return renderer_; }
     [[nodiscard]] MediaManager& media() noexcept { return media_; }
     [[nodiscard]] PlaybackController& playback() noexcept { return playback_; }
+    [[nodiscard]] audio::AudioEngine& audio() noexcept { return audio_; }
     [[nodiscard]] CommandQueue& commands() noexcept { return *commandQueue_; }
 
     /// Executa um comando direto, sem fila. Testes e recuperação de projeto.
@@ -413,6 +426,14 @@ private:
     MediaManager       media_;
     ThumbnailService   thumbs_;
     PlaybackController playback_;
+    audio::AudioEngine audio_;
+    u32  audioRevision_ = 0;          ///< modelRevision_ do último snapshot de áudio
+    const Composition* audioComp_ = nullptr;
+    u64  audioGeneration_ = 0;        ///< geração do playback com que o som começou
+    /// Liga/desliga o som conforme o playback (play, pausa, seek tocando,
+    /// loop, velocidade ≠ 1). Sob o lock do modelo.
+    void sync_audio_locked(const Composition& comp) noexcept;
+    static std::string audio_path_resolver(void* self, const std::string& stored);
     FrameScheduler     frameScheduler_;
     FrameSnapshot      snapshot_;
 
@@ -471,6 +492,7 @@ private:
     std::atomic<bool> exportActive_{false};
     void export_thread_main() noexcept;
     [[nodiscard]] Status render_export_frame(FrameIndex t, const OffscreenTarget& target) noexcept;
+    [[nodiscard]] Status write_export_audio(i64 untilSample) noexcept;
 };
 
 } // namespace aurea

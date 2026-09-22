@@ -21,6 +21,7 @@ add_executable(aurea_tests
     test_media.cpp
     test_gpu.cpp
     test_scene3d.cpp
+    test_audio.cpp
 )
 
 target_include_directories(aurea_tests PRIVATE

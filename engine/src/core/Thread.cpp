@@ -16,7 +16,7 @@ namespace aurea {
 
 void set_current_thread_priority(ThreadPriority p) noexcept {
 #if defined(AUREA_PLATFORM_ANDROID)
-    // Valores de android/os/Process.java: DISPLAY = -4, URGENT_DISPLAY = -8,
+    // Valores de android/os/Process.java: DISPLAY = -4, URGENT_DISPLAY = -8, AUDIO = -16,
     // BACKGROUND = 10. `setpriority` por tid é o que o próprio framework usa.
     int nice = 0;
     switch (p) {
@@ -24,6 +24,7 @@ void set_current_thread_priority(ThreadPriority p) noexcept {
         case ThreadPriority::Normal:     nice = 0;  break;
         case ThreadPriority::Decode:     nice = -4; break;
         case ThreadPriority::Display:    nice = -8; break;
+        case ThreadPriority::Audio:      nice = -16; break;   // AUDIO
     }
     (void)setpriority(PRIO_PROCESS, static_cast<id_t>(gettid()), nice);
 #elif defined(_WIN32)
@@ -33,6 +34,7 @@ void set_current_thread_priority(ThreadPriority p) noexcept {
         case ThreadPriority::Normal:     prio = THREAD_PRIORITY_NORMAL; break;
         case ThreadPriority::Decode:     prio = THREAD_PRIORITY_ABOVE_NORMAL; break;
         case ThreadPriority::Display:    prio = THREAD_PRIORITY_HIGHEST; break;
+        case ThreadPriority::Audio:      prio = THREAD_PRIORITY_TIME_CRITICAL; break;
     }
     (void)SetThreadPriority(GetCurrentThread(), prio);
 #else

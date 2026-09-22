@@ -155,6 +155,10 @@ enum class CommandType : u16 {
     PlaybackScrub,         ///< o dedo moveu (SeekPayload): coalescido no decode
     PlaybackScrubEnd,
     PlaybackStep,          ///< avança/recua N frames (StepPayload)
+
+    // --- Áudio (fase 4) ---------------------------------------------------------
+    AudioSetVolume,        ///< volume parado (AudioGainPayload, linear); animado = keyframes de AudioVolume
+    AudioSetPan,           ///< balanço −1..1 (AudioGainPayload)
 };
 
 /// Alvo de um comando que mexe em uma propriedade animável.

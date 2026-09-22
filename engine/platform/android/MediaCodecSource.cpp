@@ -703,6 +703,173 @@ private:
     i64 keyframeUs_ = 2'000'000;
 };
 
+
+// -----------------------------------------------------------------------------
+// Decoder de áudio: MediaExtractor + MediaCodec → PCM float intercalado.
+//
+// HE-AAC anuncia metade da taxa no formato do contêiner (22,05 kHz) e só no
+// primeiro buffer de saída revela a real (44,1 kHz, SBR). Por isso o `open`
+// decodifica até o primeiro formato de saída e volta ao início: a taxa que o
+// cache usa é a que sai do codec, não a do cabeçalho.
+// -----------------------------------------------------------------------------
+constexpr const char* kKeyPcmEncoding = "pcm-encoding";
+constexpr i32 kPcm16 = 2, kPcmFloat = 4, kPcm8 = 3;
+
+class MediaCodecAudioDecoder final : public audio::AudioDecoderBackend {
+public:
+    explicit MediaCodecAudioDecoder(SourceFd fd) : fd_(std::move(fd)) {}
+    ~MediaCodecAudioDecoder() override {
+        if (codec_) {
+            AMediaCodec_stop(codec_);
+            AMediaCodec_delete(codec_);
+        }
+        if (ex_) AMediaExtractor_delete(ex_);
+    }
+
+    Status open() {
+        ex_ = AMediaExtractor_new();
+        if (!ex_) return Status{Errc::OutOfMemory, "AMediaExtractor_new"};
+        if (AMediaExtractor_setDataSourceFd(ex_, fd_.fd, fd_.offset, fd_.length) != AMEDIA_OK) {
+            return Status{Errc::UnsupportedFormat, "conteiner ilegivel"};
+        }
+        const size_t n = AMediaExtractor_getTrackCount(ex_);
+        AMediaFormat* fmt = nullptr;
+        const char* mime = nullptr;
+        for (size_t i = 0; i < n && track_ < 0; ++i) {
+            AMediaFormat* f = AMediaExtractor_getTrackFormat(ex_, i);
+            const char* m = nullptr;
+            if (f && AMediaFormat_getString(f, AMEDIAFORMAT_KEY_MIME, &m) && m && std::strncmp(m, "audio/", 6) == 0) {
+                track_ = static_cast<i32>(i);
+                fmt = f;
+                mime = m;
+            } else if (f) {
+                AMediaFormat_delete(f);
+            }
+        }
+        if (track_ < 0) return Status{Errc::UnsupportedFormat, "sem trilha de audio"};
+        mime_ = mime ? mime : "";
+        info_.sampleRate = static_cast<u32>(std::max(0, get_i32(fmt, AMEDIAFORMAT_KEY_SAMPLE_RATE, 0)));
+        info_.channels = static_cast<u32>(std::max(0, get_i32(fmt, AMEDIAFORMAT_KEY_CHANNEL_COUNT, 0)));
+        int64_t dur = 0;
+        if (AMediaFormat_getInt64(fmt, AMEDIAFORMAT_KEY_DURATION, &dur)) info_.durationUs = dur;
+        AMediaExtractor_selectTrack(ex_, static_cast<size_t>(track_));
+        codec_ = AMediaCodec_createDecoderByType(mime_.c_str());
+        if (!codec_) {
+            AMediaFormat_delete(fmt);
+            return Status{Errc::UnsupportedFormat, "sem decoder para este audio"};
+        }
+        // Pede float (menos conversão, sem perda); o decoder pode ignorar e
+        // mandar 16 bits — o formato de saída diz o que veio.
+        AMediaFormat_setInt32(fmt, kKeyPcmEncoding, kPcmFloat);
+        media_status_t ms = AMediaCodec_configure(codec_, fmt, nullptr, nullptr, 0);
+        if (ms != AMEDIA_OK) {
+            AMediaFormat_setInt32(fmt, kKeyPcmEncoding, kPcm16);
+            ms = AMediaCodec_configure(codec_, fmt, nullptr, nullptr, 0);
+        }
+        AMediaFormat_delete(fmt);
+        if (ms != AMEDIA_OK || AMediaCodec_start(codec_) != AMEDIA_OK) {
+            return Status{Errc::UnsupportedFormat, "decoder de audio nao iniciou"};
+        }
+        // Descobre a taxa/canais reais (HE-AAC, codecs que mudam no 1º buffer).
+        std::vector<f32> tmp;
+        i64 pts = 0;
+        bool eos = false;
+        for (int i = 0; i < 8 && !formatKnown_ && !eos; ++i) {
+            if (!read(tmp, pts, eos).ok()) break;
+        }
+        if (info_.sampleRate == 0 || info_.channels == 0) return Status{Errc::UnsupportedFormat, "audio sem formato"};
+        return seek(0);
+    }
+
+    const audio::AudioStreamInfo& info() const noexcept override { return info_; }
+
+    Status seek(i64 us) noexcept override {
+        AMediaExtractor_seekTo(ex_, std::max<i64>(0, us), AMEDIAEXTRACTOR_SEEK_PREVIOUS_SYNC);
+        AMediaCodec_flush(codec_);
+        inputEos_ = false;
+        return OkStatus;
+    }
+
+    Status read(std::vector<f32>& out, i64& ptsUs, bool& eos) noexcept override {
+        out.clear();
+        eos = false;
+        for (int guard = 0; guard < 400; ++guard) {
+            // Alimenta o que couber (sem bloquear).
+            while (!inputEos_) {
+                const ssize_t in = AMediaCodec_dequeueInputBuffer(codec_, 0);
+                if (in < 0) break;
+                size_t cap = 0;
+                u8* buf = AMediaCodec_getInputBuffer(codec_, static_cast<size_t>(in), &cap);
+                const ssize_t sz = buf ? AMediaExtractor_readSampleData(ex_, buf, cap) : -1;
+                if (sz < 0) {
+                    AMediaCodec_queueInputBuffer(codec_, static_cast<size_t>(in), 0, 0, 0,
+                                                 AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM);
+                    inputEos_ = true;
+                    break;
+                }
+                const i64 t = AMediaExtractor_getSampleTime(ex_);
+                AMediaCodec_queueInputBuffer(codec_, static_cast<size_t>(in), 0, static_cast<size_t>(sz),
+                                             static_cast<u64>(std::max<i64>(0, t)), 0);
+                AMediaExtractor_advance(ex_);
+            }
+            AMediaCodecBufferInfo bi{};
+            const ssize_t idx = AMediaCodec_dequeueOutputBuffer(codec_, &bi, 5000);
+            if (idx == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED) {
+                AMediaFormat* f = AMediaCodec_getOutputFormat(codec_);
+                if (f) {
+                    const i32 r = get_i32(f, AMEDIAFORMAT_KEY_SAMPLE_RATE, 0);
+                    const i32 c = get_i32(f, AMEDIAFORMAT_KEY_CHANNEL_COUNT, 0);
+                    if (r > 0) info_.sampleRate = static_cast<u32>(r);
+                    if (c > 0) info_.channels = static_cast<u32>(c);
+                    pcm_ = get_i32(f, kKeyPcmEncoding, kPcm16);
+                    AMediaFormat_delete(f);
+                    formatKnown_ = true;
+                }
+                continue;
+            }
+            if (idx < 0) continue;   // TRY_AGAIN / BUFFERS_CHANGED
+            size_t cap = 0;
+            const u8* data = AMediaCodec_getOutputBuffer(codec_, static_cast<size_t>(idx), &cap);
+            if (data && bi.size > 0) {
+                const u8* p = data + bi.offset;
+                if (pcm_ == kPcmFloat) {
+                    const usize n = static_cast<usize>(bi.size) / sizeof(f32);
+                    out.resize(n);
+                    std::memcpy(out.data(), p, n * sizeof(f32));
+                } else if (pcm_ == kPcm8) {
+                    out.resize(static_cast<usize>(bi.size));
+                    for (usize i = 0; i < out.size(); ++i) out[i] = (static_cast<f32>(p[i]) - 128.0f) / 128.0f;
+                } else {
+                    const usize n = static_cast<usize>(bi.size) / sizeof(i16);
+                    out.resize(n);
+                    const i16* s = reinterpret_cast<const i16*>(p);
+                    for (usize i = 0; i < n; ++i) out[i] = static_cast<f32>(s[i]) / 32768.0f;
+                }
+                formatKnown_ = true;
+            }
+            ptsUs = bi.presentationTimeUs;
+            const bool end = (bi.flags & AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM) != 0;
+            AMediaCodec_releaseOutputBuffer(codec_, static_cast<size_t>(idx), false);
+            if (end) eos = true;
+            if (!out.empty() || end) return OkStatus;
+        }
+        // Nada saiu em ~2 s: arquivo travado. Trata como fim (vira silêncio).
+        eos = true;
+        return OkStatus;
+    }
+
+private:
+    SourceFd fd_;
+    AMediaExtractor* ex_ = nullptr;
+    AMediaCodec* codec_ = nullptr;
+    i32 track_ = -1;
+    std::string mime_;
+    audio::AudioStreamInfo info_{};
+    i32 pcm_ = kPcm16;
+    bool inputEos_ = false;
+    bool formatKnown_ = false;
+};
+
 } // namespace
 
 // =============================================================================
@@ -733,10 +900,12 @@ bool MediaCodecFactory::probe(const char* sourcePath, MediaProbe& out) {
                 out.hasAudio = true;
                 out.audioSampleRate = static_cast<u32>(std::max(0, get_i32(f, AMEDIAFORMAT_KEY_SAMPLE_RATE, 0)));
                 out.audioChannels = static_cast<u32>(std::max(0, get_i32(f, AMEDIAFORMAT_KEY_CHANNEL_COUNT, 0)));
+                int64_t dur = 0;
+                if (AMediaFormat_getInt64(f, AMEDIAFORMAT_KEY_DURATION, &dur)) out.audioDurationUs = dur;
             }
             AMediaFormat_delete(f);
         }
-        ok = out.hasVideo;
+        ok = out.hasVideo || out.hasAudio;
     }
     AMediaExtractor_delete(ex);
     return ok;
@@ -756,6 +925,21 @@ std::unique_ptr<VideoDecoderBackend> MediaCodecFactory::open_video(const Asset& 
         return nullptr;
     }
     return decoder;
+}
+
+std::unique_ptr<audio::AudioDecoderBackend> MediaCodecFactory::open_audio(const char* sourcePath) {
+    SourceFd fd;
+    if (!open_source(sourcePath, opener_, openerCtx_, fd)) {
+        AUREA_LOG_ERROR("audio inacessivel");
+        return nullptr;
+    }
+    auto d = std::make_unique<MediaCodecAudioDecoder>(std::move(fd));
+    if (const Status s = d->open(); !s.ok()) {
+        AUREA_LOG_WARN("decoder de audio nao abriu: %s", s.message().data());
+        return nullptr;
+    }
+    AUREA_LOG_INFO("audio: %u Hz, %u canais", d->info().sampleRate, d->info().channels);
+    return d;
 }
 
 } // namespace aurea::android

@@ -13,6 +13,7 @@
 // =============================================================================
 #pragma once
 
+#include "aurea/audio/Audio.hpp"
 #include "aurea/core/Handle.hpp"
 #include "aurea/media/VideoSource.hpp"
 #include "aurea/project/Asset.hpp"
@@ -31,6 +32,7 @@ struct MediaProbe {
     bool hasAudio = false;
     u32 audioSampleRate = 0;
     u32 audioChannels = 0;
+    i64 audioDurationUs = 0;
 };
 
 class VideoSourceFactory {
@@ -42,6 +44,12 @@ public:
     /// Abre um decoder para o asset. `nullptr` quando o arquivo não abre.
     [[nodiscard]] virtual std::unique_ptr<VideoDecoderBackend> open_video(const Asset& asset,
                                                                           MediaPriority priority) = 0;
+    /// Abre a trilha de áudio de um arquivo (caminho já resolvido). `nullptr`
+    /// = sem áudio ou plataforma sem decoder de áudio.
+    [[nodiscard]] virtual std::unique_ptr<audio::AudioDecoderBackend> open_audio(const char* sourcePath) {
+        (void)sourcePath;
+        return nullptr;
+    }
 };
 
 class MediaManager {

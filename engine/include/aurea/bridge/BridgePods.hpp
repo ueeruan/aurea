@@ -138,12 +138,25 @@ struct LayerDetailPOD {
     u32 maskCount         = 0;    // +120
     i32 localPlayhead     = 0;    // +124 playhead no tempo local da layer
     u64 parentId          = 0;    // +128 0 = sem pai
-    u32 reserved[14]{};           // +136
+    // Áudio (vídeo com trilha e camada de áudio)
+    f32 audioGain         = 1.0f; // +136 ganho do clipe, linear
+    f32 audioVolume       = 1.0f; // +140 volume no playhead, linear (1 = 100%)
+    f32 audioPan          = 0.0f; // +144 balanço −1..1
+    i32 audioFadeIn       = 0;    // +148 frames
+    i32 audioFadeOut      = 0;    // +152 frames
+    u32 audioFlags        = 0;    // +156 kAudioFlag*
+    u32 reserved[8]{};            // +160
 };
+inline constexpr u32 kAudioFlagMuted = 1u << 0;
+inline constexpr u32 kAudioFlagSolo = 1u << 1;
+inline constexpr u32 kAudioFlagHasAudio = 1u << 2;
+inline constexpr u32 kAudioFlagVolumeAnimated = 1u << 3;
 static_assert(sizeof(LayerDetailPOD) == 192, "LayerDetailPOD e contrato de ABI");
 static_assert(offsetof(LayerDetailPOD, position) == 32);
 static_assert(offsetof(LayerDetailPOD, animatedMask) == 92);
 static_assert(offsetof(LayerDetailPOD, parentId) == 128);
+static_assert(offsetof(LayerDetailPOD, audioGain) == 136);
+static_assert(offsetof(LayerDetailPOD, audioFlags) == 156);
 
 static_assert(sizeof(KeyframeRow) == 24, "KeyframeRow e contrato de ABI com a UI");
 static_assert(offsetof(KeyframeRow, property) == 0);

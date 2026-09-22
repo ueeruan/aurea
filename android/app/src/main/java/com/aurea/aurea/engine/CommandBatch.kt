@@ -373,6 +373,33 @@ class CommandBatch(private val engine: AureaEngine) {
         b.put(Off.SECOND_U32, if (muted) 1 else 0)
     }
 
+    fun setAudioSolo(layer: Long, solo: Boolean) = emit(CommandType.AUDIO_SET_SOLO) { b ->
+        b.putHandle(Off.LAYER, layer)
+        b.put(Off.SECOND_U32, if (solo) 1 else 0)
+    }
+
+    /** AudioFadePayload { LayerId; FrameIndex duration } (i64 em +8). */
+    fun setAudioFadeIn(layer: Long, frames: Int) = emit(CommandType.AUDIO_SET_FADE_IN) { b ->
+        b.putHandle(Off.LAYER, layer)
+        b.putLong(Off.GAIN_VALUE, frames.toLong())
+    }
+
+    fun setAudioFadeOut(layer: Long, frames: Int) = emit(CommandType.AUDIO_SET_FADE_OUT) { b ->
+        b.putHandle(Off.LAYER, layer)
+        b.putLong(Off.GAIN_VALUE, frames.toLong())
+    }
+
+    /** Volume parado (linear, 1 = 100%). Com keyframes, use os de AUDIO_VOLUME. */
+    fun setAudioVolume(layer: Long, volume: Float) = emit(CommandType.AUDIO_SET_VOLUME) { b ->
+        b.putHandle(Off.LAYER, layer)
+        b.putFloat(Off.GAIN_VALUE, volume)
+    }
+
+    fun setAudioPan(layer: Long, pan: Float) = emit(CommandType.AUDIO_SET_PAN) { b ->
+        b.putHandle(Off.LAYER, layer)
+        b.putFloat(Off.GAIN_VALUE, pan)
+    }
+
     // =========================================================================
     // Histórico
     // =========================================================================
@@ -638,4 +665,6 @@ object CommandType {
     const val PLAYBACK_SCRUB = 86
     const val PLAYBACK_SCRUB_END = 87
     const val PLAYBACK_STEP = 88
+    const val AUDIO_SET_VOLUME = 89
+    const val AUDIO_SET_PAN = 90
 }

@@ -79,6 +79,10 @@ set(AUREA_CORE_SOURCES
     src/media/VideoSource.cpp
     src/media/MediaManager.cpp
     src/media/ThumbnailService.cpp
+    src/audio/AudioCore.cpp
+    src/audio/AudioBlockCache.cpp
+    src/audio/AudioMixer.cpp
+    src/audio/AudioEngine.cpp
     src/playback/Playback.cpp
     src/scene3d/GltfImporter.cpp
     src/scene3d/SceneRenderer.cpp
@@ -240,11 +244,12 @@ if(AUREA_PLATFORM_ANDROID)
         platform/android/aurea_jni.cpp
         platform/android/MediaCodecSource.cpp
         platform/android/MediaCodecExport.cpp
+        platform/android/AAudioOutput.cpp
     )
     target_include_directories(aurea PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/platform/android)
     # `mediandk` é o MediaCodec/MediaExtractor/ImageReader: sem ele não há
     # decode de hardware. `android` dá ANativeWindow e AHardwareBuffer.
-    target_link_libraries(aurea PRIVATE aurea_core aurea_vulkan android log mediandk)
+    target_link_libraries(aurea PRIVATE aurea_core aurea_vulkan android log mediandk aaudio)
     target_compile_options(aurea PRIVATE $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -fno-exceptions>)
     set_target_properties(aurea PROPERTIES OUTPUT_NAME "aurea" PREFIX "lib")
 endif()

@@ -18,6 +18,7 @@ enum class ThreadPriority : u8 {
     Normal,
     Decode,           ///< decode do preview e do export
     Display,          ///< a thread de render do preview
+    Audio,            ///< mixer de áudio (um buraco no som se ouve; um frame atrasado, quase não)
 };
 
 /// Aplica à thread atual. Falha silenciosa é aceitável (sem permissão o

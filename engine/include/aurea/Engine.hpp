@@ -270,6 +270,14 @@ public:
     /// cena: posição/rotação/escala em X, Y e Z).
     [[nodiscard]] Result<u64> add_null(bool threeD) noexcept;
 
+    /// Remapeamento de tempo: ligar cria a curva equivalente ao tempo atual
+    /// (nada muda até editar); desligar volta à velocidade (a curva fica guardada).
+    bool set_time_remap(u64 layerId, bool on) noexcept;
+    /// Rampa de velocidade pronta sobre o trecho da fonte atual: 0 linear,
+    /// 1 suave (entrada e saída), 2 herói (rápido-lento-rápido), 3 acelerar,
+    /// 4 desacelerar. Liga o remapeamento.
+    bool apply_speed_ramp(u64 layerId, u32 preset) noexcept;
+
     /// Desfoque de movimento da camada (liga também o da composição).
     bool set_motion_blur(u64 layerId, bool on) noexcept;
     /// Obturador da composição em graus (0–720; 180 = padrão de cinema).

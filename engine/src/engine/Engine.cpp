@@ -879,6 +879,72 @@ Result<u64> Engine::add_null(bool threeD) noexcept {
     return lid.pack();
 }
 
+bool Engine::set_time_remap(u64 layerId, bool on) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->timeRemapEnabled == on) return l != nullptr;
+    history_.before_mutation(*comp, project_->timeline().current(), on ? "remapear o tempo" : "desligar remapeamento");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    if (on && l->timeRemap.keys.empty()) {
+        // Curva equivalente ao tempo de agora: tocar igual até alguém mexer.
+        const f64 s0 = l->source_frame(l->start), s1 = l->source_frame(l->end);
+        l->timeRemap.property = TrackProperty::TimeRemap;
+        l->timeRemap.set(l->local_time(l->start), static_cast<f32>(s0));
+        l->timeRemap.set(l->local_time(l->end), static_cast<f32>(s1));
+    }
+    l->timeRemapEnabled = on;
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::apply_speed_ramp(u64 layerId, u32 preset) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || preset > 4) return false;
+    const i64 dur = l->end.value - l->start.value;
+    if (dur < 2) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "rampa de velocidade");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    // O trecho da fonte que a camada mostra agora (sem a curva antiga).
+    const bool had = l->timeRemapEnabled;
+    l->timeRemapEnabled = false;
+    const f64 s0 = l->source_frame(l->start), s1 = l->source_frame(l->end);
+    (void)had;
+    const f64 span = s1 - s0;
+    Track& t = l->timeRemap;
+    t.clear();
+    t.property = TrackProperty::TimeRemap;
+    const i64 k0 = l->local_time(l->start).value;
+    auto key = [&](f64 u, f64 v, Interpolation in, f32 bx1 = 0.33f, f32 by1 = 0.0f, f32 bx2 = 0.67f, f32 by2 = 1.0f) {
+        const FrameIndex at{k0 + static_cast<i64>(std::llround(u * static_cast<f64>(dur)))};
+        const u32 i = t.set(at, static_cast<f32>(s0 + v * span), in);
+        if (i < t.keys.size()) {
+            t.keys[i].bx1 = bx1; t.keys[i].by1 = by1; t.keys[i].bx2 = bx2; t.keys[i].by2 = by2;
+        }
+    };
+    switch (preset) {
+        case 0: key(0, 0, Interpolation::Linear); key(1, 1, Interpolation::Linear); break;
+        case 1: key(0, 0, Interpolation::Bezier, 0.42f, 0.0f, 0.58f, 1.0f); key(1, 1, Interpolation::Linear); break;
+        case 2:
+            // Rápido (1,5× a média) → lento (0,25×) → rápido; cantos suavizados.
+            key(0.0, 0.00, Interpolation::Bezier, 0.33f, 0.33f, 0.80f, 0.95f);
+            key(0.3, 0.45, Interpolation::Linear);
+            key(0.7, 0.55, Interpolation::Bezier, 0.20f, 0.05f, 0.67f, 0.67f);
+            key(1.0, 1.00, Interpolation::Linear);
+            break;
+        case 3: key(0, 0, Interpolation::Bezier, 0.42f, 0.0f, 1.0f, 1.0f); key(1, 1, Interpolation::Linear); break;
+        case 4: key(0, 0, Interpolation::Bezier, 0.0f, 0.0f, 0.58f, 1.0f); key(1, 1, Interpolation::Linear); break;
+        default: break;
+    }
+    l->timeRemapEnabled = true;
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
 bool Engine::set_motion_blur(u64 layerId, bool on) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
@@ -2284,6 +2350,9 @@ u32 Engine::query_waveform(u64 layerId, f64 startFrame, f64 framesPerBucket, u32
     u64 key = 0;
     f64 srcStart = 0.0, perBucket = 0.0;
     bool reversedWave = false;
+    std::optional<Layer> remapCopy;   // curva lida fora do lock
+    const Layer* remapLayer = nullptr;
+    f64 remapFps = 30.0;
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
         Composition* comp = current_composition();
@@ -2294,7 +2363,18 @@ u32 Engine::query_waveform(u64 layerId, f64 startFrame, f64 framesPerBucket, u32
         if (!a || !a->has_audio()) return 0;
         key = l->source.pack();
         const f64 fps = comp->fps() > 0.0 ? comp->fps() : 30.0;
-        if (l->speed <= 0.0f) return 0;   // quadro congelado: sem som
+        if (l->timeRemapEnabled && !l->timeRemap.keys.empty()) {
+            remapCopy.emplace();
+            remapCopy->start = l->start;
+            remapCopy->end = l->end;
+            remapCopy->offset = l->offset;
+            remapCopy->timeRemap = l->timeRemap;
+            remapCopy->timeRemapEnabled = true;
+            remapLayer = &*remapCopy;
+            remapFps = comp->fps() > 0.0 ? comp->fps() : 30.0;
+        } else if (l->speed <= 0.0f) {
+            return 0;   // quadro congelado: sem som
+        }
         // Frame da timeline → amostra da fonte pela MESMA conta do vídeo e do
         // mixer (velocidade e reverso incluídos).
         const f64 rate = static_cast<f64>(l->speed);
@@ -2307,6 +2387,17 @@ u32 Engine::query_waveform(u64 layerId, f64 startFrame, f64 framesPerBucket, u32
                 ? a->audio.sampleCount.value * static_cast<i64>(audio::kMixRate) / a->audio.sampleRate
                 : audio::frame_to_sample(a->duration.value, a->timebaseFps > 0.0 ? a->timebaseFps : fps);
         waveforms_->request(key, audio::AudioAssetRef{resolve_asset_path(a->sourcePath), len});
+    }
+    if (remapLayer) {
+        // Curva de tempo: cada balde pede o seu trecho da fonte.
+        for (u32 b = 0; b < count; ++b) {
+            const f64 a = remapLayer->source_frame_f(startFrame + b * framesPerBucket) * audio::kMixRate / remapFps;
+            const f64 z = remapLayer->source_frame_f(startFrame + (b + 1) * framesPerBucket) * audio::kMixRate / remapFps;
+            u8 v = 0;
+            if (!waveforms_->query(key, std::min(a, z), std::max(1.0, std::fabs(z - a)), 1, &v)) return 0;
+            out[b] = v;
+        }
+        return count;
     }
     if (!reversedWave) return waveforms_->query(key, srcStart, perBucket, count, out) ? count : 0;
     // Reverso: a fonte anda para trás — pede o trecho em ordem e inverte.
@@ -2458,7 +2549,7 @@ bool Engine::fill_layer_detail_locked(u64 layerId, bridge::LayerDetailPOD& out) 
     out.audioFadeIn = static_cast<i32>(l->fadeIn.value);
     out.audioFadeOut = static_cast<i32>(l->fadeOut.value);
     out.speed = l->speed;
-    out.timeFlags = (l->reversed ? 1u : 0u) | (l->motionBlur ? 2u : 0u);
+    out.timeFlags = (l->reversed ? 1u : 0u) | (l->motionBlur ? 2u : 0u) | (l->timeRemapEnabled ? 4u : 0u);
     {
         const Asset* aa = project_->asset(l->source);
         const Track* vt = l->tracks.find(TrackProperty::AudioVolume);

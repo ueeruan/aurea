@@ -49,7 +49,7 @@ struct Flatten {
             if (l.muted || (anySolo && !l.solo)) return;
             // Remapeamento por curva ainda não chega ao áudio; quadro
             // congelado não tem som. Um som fora de sincronia é pior que silêncio.
-            if (l.timeRemapEnabled || l.speed <= 0.0f) return;
+            if ((!l.timeRemapEnabled && l.speed <= 0.0f)) return;
             const i64 ls = frame_to_sample(l.start.value, fps);
             const i64 le = frame_to_sample(l.end.value, fps);
             if (le <= ls) return;
@@ -77,7 +77,18 @@ struct Flatten {
             // Amostra da fonte em `ls` (início da layer) = offset do conteúdo.
             const i64 srcAtLs = frame_to_sample(l.offset.value, fps);
             c.sourceAt0 = srcAtLs + (c.start - shift - ls);
-            if (l.speed != 1.0f || l.reversed) {
+            if (l.timeRemapEnabled && !l.timeRemap.keys.empty()) {
+                // Curva de tempo: posição da fonte quadro a quadro (a MESMA
+                // função do vídeo), interpolada amostra a amostra no mix.
+                c.srcFrame0 = l.start.value;
+                const i64 nf = l.end.value - l.start.value + 1;
+                c.srcByFrame.resize(static_cast<usize>(nf));
+                for (i64 i = 0; i < nf; ++i) {
+                    c.srcByFrame[static_cast<usize>(i)] =
+                        l.source_frame_f(static_cast<f64>(l.start.value + i)) * kMixRate / fps;
+                }
+                c.rate = 0.0;   // marca o caminho fracionário
+            } else if (l.speed != 1.0f || l.reversed) {
                 c.rate = static_cast<f64>(l.speed) * (l.reversed ? -1.0 : 1.0);
                 // A mesma função de tempo do vídeo (Layer::source_frame), em amostras.
                 const f64 srcFrameAtLs = l.source_frame(l.start);
@@ -158,6 +169,21 @@ std::shared_ptr<AudioMixSnapshot> build_snapshot(const Composition& comp, const 
     return snap;
 }
 
+namespace {
+/// Amostra (fracionária) da fonte que toca na amostra `t` da timeline raiz.
+f64 clip_pos(const AudioClip& c, i64 t) noexcept {
+    if (!c.srcByFrame.empty()) {
+        const f64 fr = static_cast<f64>(t - c.envShift) * c.fps / kMixRate - static_cast<f64>(c.srcFrame0);
+        const i64 n = static_cast<i64>(c.srcByFrame.size());
+        const i64 i = std::clamp<i64>(static_cast<i64>(std::floor(fr)), 0, n - 2 < 0 ? 0 : n - 2);
+        if (n < 2) return c.srcByFrame[0];
+        const f64 k = std::clamp(fr - static_cast<f64>(i), 0.0, 1.0);
+        return c.srcByFrame[static_cast<usize>(i)] + (c.srcByFrame[static_cast<usize>(i + 1)] - c.srcByFrame[static_cast<usize>(i)]) * k;
+    }
+    return c.sourceStartF + static_cast<f64>(t - c.start) * c.rate;
+}
+} // namespace
+
 void mix(const AudioMixSnapshot& snap, i64 start, u32 frames, BlockSource& blocks, f32* out, MixStats* stats) noexcept {
     std::fill(out, out + static_cast<usize>(frames) * kMixChannels, 0.0f);
     const i64 stop = start + frames;
@@ -195,7 +221,7 @@ void mix(const AudioMixSnapshot& snap, i64 start, u32 frames, BlockSource& block
                 return true;
             };
             for (i64 t = s0; t < s1; ++t) {
-                const f64 pos = c.sourceStartF + static_cast<f64>(t - c.start) * c.rate;
+                const f64 pos = clip_pos(c, t);
                 if (pos < 0.0 || pos >= static_cast<f64>(c.sourceLength)) continue;
                 const i64 i0 = static_cast<i64>(pos);
                 const f32 fr = static_cast<f32>(pos - static_cast<f64>(i0));
@@ -247,7 +273,18 @@ void blocks_needed(const AudioMixSnapshot& snap, i64 start, i64 frames, std::vec
         const i64 s1 = std::min(stop, c.end);
         if (s0 >= s1) continue;
         i64 a = 0, z = 0;
-        if (c.rate != 1.0) {
+        if (!c.srcByFrame.empty()) {
+            // A curva pode ir e voltar: extremos amostrados a cada quadro.
+            f64 lo = 1e300, hi = -1e300;
+            const i64 step = std::max<i64>(1, static_cast<i64>(kMixRate / std::max(1.0, c.fps)));
+            for (i64 t = s0; t < s1 + step; t += step) {
+                const f64 p = clip_pos(c, std::min(t, s1));
+                lo = std::min(lo, p);
+                hi = std::max(hi, p);
+            }
+            a = std::max<i64>(0, static_cast<i64>(std::floor(lo)));
+            z = std::min(c.sourceLength, static_cast<i64>(std::ceil(hi)) + 1);
+        } else if (c.rate != 1.0) {
             const f64 pa = c.sourceStartF + static_cast<f64>(s0 - c.start) * c.rate;
             const f64 pz = c.sourceStartF + static_cast<f64>(s1 - c.start) * c.rate;
             a = std::max<i64>(0, static_cast<i64>(std::floor(std::min(pa, pz))));

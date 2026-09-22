@@ -717,7 +717,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 req.targetUs = mediaUs;
                 req.mode = decodeMode;
                 // Clipe reverso ou congelado: o decoder não tem embalo para a frente.
-                req.direction = l->speed == 0.0f ? 0 : (l->reversed ? -playDirection : playDirection);
+                req.direction = (l->speed == 0.0f || l->timeRemapEnabled) ? 0 : (l->reversed ? -playDirection : playDirection);
                 req.speed = speed * std::max(0.0f, l->speed);
                 src->request(req);
                 bool exact = false;

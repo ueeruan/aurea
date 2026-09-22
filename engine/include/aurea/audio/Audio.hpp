@@ -232,6 +232,10 @@ struct AudioClip {
     std::vector<f32> volumeByFrame;
     i64 volumeFrame0 = 0;   ///< frame (composição da layer) de volumeByFrame[0]
     f64 fps = 30.0;         ///< fps da composição da layer
+    /// Remapeamento de tempo: amostra (fracionária) da fonte em cada quadro
+    /// da layer a partir de `srcFrame0` (inclusive o do fim). Vazio = `rate`.
+    std::vector<f64> srcByFrame;
+    i64 srcFrame0 = 0;
 };
 
 struct AudioMixSnapshot {

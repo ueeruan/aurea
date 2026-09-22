@@ -279,3 +279,58 @@ AUREA_TEST(ClipTime, MarkersToggleUndoSaveAndRetime) {
     AUREA_CHECK_EQ(m[3], 240);
     std::remove(path.c_str());
 }
+
+// =============================================================================
+//  Remapeamento de tempo e rampas de velocidade
+// =============================================================================
+AUREA_TEST(ClipTime, TimeRemapOnIsIdenticalThenRampsFollowTheCurve) {
+    TimeRig r(cfg_with_audio());
+    r.speed(2.0f);   // 150 quadros mostrando 300 da fonte
+    const u64 id = r.layer.pack();
+    std::vector<f64> before;
+    for (i64 f = 0; f < 150; f += 7) before.push_back(r.L()->source_frame(FrameIndex{f}));
+    AUREA_CHECK(r.e.set_time_remap(id, true));
+    f64 worst = 0;
+    usize k = 0;
+    for (i64 f = 0; f < 150; f += 7) worst = std::max(worst, std::fabs(r.L()->source_frame(FrameIndex{f}) - before[k++]));
+    AUREA_CHECK(worst < 0.01);
+
+    // Herói: rápido (1,5× a média) → lento (0,25×) → rápido; mesmas pontas.
+    AUREA_CHECK(r.e.apply_speed_ramp(id, 2));
+    const Layer* l = r.L();
+    const f64 s0 = l->source_frame(FrameIndex{0}), s1 = l->source_frame(FrameIndex{150});
+    const f64 avg = (s1 - s0) / 150.0;
+    const f64 midSpeed = l->source_frame(FrameIndex{80}) - l->source_frame(FrameIndex{79});
+    std::printf("    rampa heroi: %.1f..%.1f, media %.3f, meio %.3f (%.2fx)\n", s0, s1, avg, midSpeed, midSpeed / avg);
+    AUREA_CHECK(std::fabs(s0 - 0.0) < 0.5 && std::fabs(s1 - 300.0) < 0.5);
+    AUREA_CHECK(std::fabs(midSpeed / avg - 0.25) < 0.05);
+    bool monotonic = true;
+    for (i64 f = 1; f <= 150; ++f) if (l->source_frame(FrameIndex{f}) < l->source_frame(FrameIndex{f - 1}) - 1e-6) monotonic = false;
+    AUREA_CHECK(monotonic);
+
+    // Áudio segue a MESMA curva: no quadro 80 toca o instante da fonte dele.
+    auto snap = audio::build_snapshot(*r.comp(), *r.e.project(), nullptr, nullptr, nullptr);
+    AUREA_CHECK_EQ(snap->clips.size(), usize{1});
+    if (snap->clips.empty()) return;
+    AUREA_CHECK(!snap->clips[0].srcByFrame.empty());
+    audio::AudioBlockCache cache(&r.factory, 16ull << 20, false);
+    cache.register_asset(snap->clips[0].asset, audio::AudioAssetRef{"s", 10 * 48000});
+    Fetch f(cache);
+    std::vector<f32> out(2);
+    const i64 at = audio::frame_to_sample(80, 30.0);
+    audio::mix(*snap, at, 1, f, out.data());
+    const f64 srcSec = l->source_frame(FrameIndex{80}) / 30.0;
+    std::printf("    audio no quadro 80: %.5f (esperado %.5f)\n", out[0], synthetic_audio_value(cfg_with_audio(), 0, srcSec));
+    AUREA_CHECK_NEAR(out[0], synthetic_audio_value(cfg_with_audio(), 0, srcSec), 2e-3);
+
+    // Salvar e reabrir mantém a curva.
+    const f64 expect80 = l->source_frame(FrameIndex{80});
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_teste_remap.aurea";
+    AUREA_CHECK(r.e.save_project(path.c_str()).ok());
+    AUREA_CHECK(r.e.load_project(path.c_str()).ok());
+    const Layer* back = nullptr;
+    r.comp()->layers().for_each([&](LayerId, const Layer& x) { back = &x; });
+    AUREA_CHECK(back && back->timeRemapEnabled);
+    AUREA_CHECK(back && std::fabs(back->source_frame(FrameIndex{80}) - expect80) < 0.01);
+    std::remove(path.c_str());
+}

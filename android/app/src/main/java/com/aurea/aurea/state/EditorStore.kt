@@ -1191,6 +1191,14 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshNow()
     }
 
+    // --- Remapeamento de tempo -----------------------------------------------------------
+    /** Rampa pronta (0 linear, 1 suave, 2 herói, 3 acelerar, 4 desacelerar); −1 = sem rampa. */
+    fun applySpeedRamp(preset: Int) {
+        val id = primary ?: return
+        if (preset < 0) engine.setTimeRemap(id, false) else engine.applySpeedRamp(id, preset)
+        refreshNow()
+    }
+
     // --- Desfoque de movimento ---------------------------------------------------------
     var compMotionBlur by mutableStateOf(false)
         private set

@@ -25,6 +25,7 @@
 #include "aurea/animation/Curve.hpp"
 #include "aurea/effects/Parameter.hpp"
 
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -271,8 +272,22 @@ struct Layer {
     /// 0). É a ÚNICA função de tempo da fonte — vídeo, miniatura e áudio usam
     /// esta mesma conta.
     [[nodiscard]] f64 source_frame(FrameIndex timelineTime) const noexcept {
-        const f64 elapsed = reversed ? static_cast<f64>(end.value - 1 - timelineTime.value)
-                                     : static_cast<f64>(timelineTime.value - start.value);
+        return source_frame_f(static_cast<f64>(timelineTime.value));
+    }
+
+    /// `source_frame` num instante fracionário da timeline (áudio amostra a
+    /// amostra). Com o remapeamento ligado, a curva manda: o VALOR da trilha é
+    /// o quadro da fonte (entre quadros, interpolado linearmente).
+    [[nodiscard]] f64 source_frame_f(f64 timelineTime) const noexcept {
+        if (timeRemapEnabled && !timeRemap.keys.empty()) {
+            const f64 local = timelineTime - static_cast<f64>(start.value) + static_cast<f64>(offset.value);
+            const f64 f = std::floor(local);
+            const f64 a = timeRemap.sample(FrameIndex{static_cast<i64>(f)});
+            const f64 b = timeRemap.sample(FrameIndex{static_cast<i64>(f) + 1});
+            return a + (b - a) * (local - f);
+        }
+        const f64 elapsed = reversed ? static_cast<f64>(end.value - 1) - timelineTime
+                                     : timelineTime - static_cast<f64>(start.value);
         return static_cast<f64>(offset.value) + elapsed * static_cast<f64>(speed);
     }
 

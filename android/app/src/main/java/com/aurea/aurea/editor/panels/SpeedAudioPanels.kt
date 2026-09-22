@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -155,6 +156,31 @@ internal fun SpeedPanel(env: PanelEnv) {
                     Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = if (on) AureaColors.Accent else AureaColors.Text)))
                 }
             }
+        }
+        Spacer(Modifier.height(14.dp))
+        val remap by remember(store) { derivedStateOf { store.detail?.timeRemap ?: false } }
+        Text("Rampa de velocidade", style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.W700, color = AureaColors.Muted)))
+        Spacer(Modifier.height(6.dp))
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(-1 to "Sem rampa", 1 to "Suave", 2 to "Herói", 3 to "Acelerar", 4 to "Desacelerar").forEach { (preset, label) ->
+                val on = (preset == -1 && !remap)
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (on) AureaColors.AccentDim else AureaColors.Chip)
+                        .tocavel(onClick = { store.applySpeedRamp(preset) })
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                ) {
+                    Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = if (on) AureaColors.Accent else AureaColors.Text)))
+                }
+            }
+        }
+        if (remap) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Curva de tempo ligada: o som e o vídeo seguem a mesma rampa, do mesmo trecho da mídia.",
+                style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = AureaColors.Muted)),
+            )
         }
         Spacer(Modifier.height(8.dp))
         ShellToggle("Manter tom do áudio (em breve)") { store.comingSoon("Manter o tom") }

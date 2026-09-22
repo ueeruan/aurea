@@ -398,6 +398,32 @@ AUREA_JNI void AUREA_FN(nativeResume)(JNIEnv*, jclass, jlong handle) {
     if (NativeContext* c = ctx_of(handle)) (void)c->engine.resume();
 }
 
+// Fase 8B §13: nível de ComponentCallbacks2.onTrimMemory → ordem de despejo do
+// motor. Devolve os bytes liberados (caches de CPU + GPU medida no backend).
+AUREA_JNI jlong AUREA_FN(nativeTrimMemory)(JNIEnv*, jclass, jlong handle, jint level) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return 0;
+    return static_cast<jlong>(c->engine.trim_memory(static_cast<i32>(level)).total);
+}
+
+// Fase 8B §12/§15: uso e orçamento por categoria de memória do motor, para a
+// tela Ajustes › Armazenamento. `out`: [usado, orçamento] × categoria
+// (MemoryClass, na ordem do enum). Devolve o número de categorias escritas.
+AUREA_JNI jint AUREA_FN(nativeMemoryReport)(JNIEnv* env, jclass, jlong handle, jlongArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !out) return 0;
+    constexpr jint kClasses = static_cast<jint>(MemoryClass::_Count);
+    if (env->GetArrayLength(out) < kClasses * 2) return 0;
+    jlong v[kClasses * 2];
+    MemoryManager& m = c->engine.memory();
+    for (jint i = 0; i < kClasses; ++i) {
+        v[i * 2] = static_cast<jlong>(m.used(static_cast<MemoryClass>(i)));
+        v[i * 2 + 1] = static_cast<jlong>(m.budget(static_cast<MemoryClass>(i)));
+    }
+    env->SetLongArrayRegion(out, 0, kClasses * 2, v);
+    return kClasses;
+}
+
 // =============================================================================
 // Superfície
 // =============================================================================

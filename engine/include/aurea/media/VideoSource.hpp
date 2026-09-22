@@ -19,10 +19,15 @@
 //   keyframe e o alvo são decodificados (é inevitável em H.264) mas liberados
 //   sem render: não ocupam buffer do ImageReader, não vão para a GPU.
 //
-//   PREFETCH — tocando, a fonte mantém o atual, o próximo e o seguinte
-//   prontos. Arrastando para a frente, aproveita o embalo do decoder e deixa
-//   alguns à frente. Para trás não há embalo (cada frame anterior exigiria um
-//   novo seek), então não se inventa trabalho.
+//   PREFETCH POR MODO (§16) — tocando para a frente, a fonte mantém o atual,
+//   o próximo e o seguinte prontos. Arrastando para a frente, aproveita o
+//   embalo do decoder e deixa alguns à frente. PARA TRÁS (reverso, scrub
+//   descendo) não há embalo, mas o seek até o alvo decodifica os frames
+//   anteriores de qualquer jeito: em vez de jogá-los fora, os últimos
+//   `backFrames_` antes do alvo vão para o cache — os próximos passos para
+//   trás caem nele sem seek. No reverso tocando, a janela é reabastecida
+//   quando sobra menos de um frame atrás do playhead. Parado ou congelado
+//   (time remap sem movimento, direção 0): só o alvo.
 // =============================================================================
 #pragma once
 
@@ -160,6 +165,13 @@ private:
     i64 decoderPosUs_ = -1;        ///< pts do último frame que saiu do decoder
     bool decoderValid_ = false;
     bool eos_ = false;
+    /// Para trás (reverso, scrub descendo): quantos frames ANTES do alvo são
+    /// entregues ao cache quando o seek já vai decodificá-los de qualquer
+    /// jeito (§16). Cabe no cache junto com o atual.
+    i64 backFrames_ = 0;
+    /// Alvo do último preenchimento para trás tentado: um por alvo, senão um
+    /// começo de mídia sem frame em 0 viraria laço de seek.
+    i64 backfillAttemptUs_ = -1;
 
     void (*readyFn_)(void*) = nullptr;
     void* readyCtx_ = nullptr;

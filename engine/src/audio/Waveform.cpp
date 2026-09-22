@@ -23,6 +23,64 @@ WaveformCache::~WaveformCache() {
     }
     wake_.notify_all();
     if (thread_.joinable()) thread_.join();
+    attach(nullptr);
+}
+
+void WaveformCache::attach(MemoryManager* memory) noexcept {
+    MemoryManager* old = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (memory_ == memory) return;
+        old = memory_;
+        if (old) old->free(MemoryClass::Waveforms, static_cast<usize>(bytes_));
+        memory_ = memory;
+        if (memory_) memory_->commit(MemoryClass::Waveforms, static_cast<usize>(bytes_));
+    }
+    // Fora do lock do cache: um trim segura o registro e entra em reclaim().
+    if (old) old->unregister_reclaimable(this);
+    if (memory) (void)memory->register_reclaimable(this);
+}
+
+u64 WaveformCache::budget_locked() const noexcept {
+    const u64 b = memory_ ? memory_->budget(MemoryClass::Waveforms) : 0;
+    return b ? b : kDefaultBudget;
+}
+
+void WaveformCache::account_locked(Entry& e) noexcept {
+    u64 now = 0;
+    for (const std::vector<u8>& lv : e.levels) now += lv.capacity();
+    if (now > e.bytes) {
+        bytes_ += now - e.bytes;
+        if (memory_) memory_->commit(MemoryClass::Waveforms, static_cast<usize>(now - e.bytes));
+    } else if (now < e.bytes) {
+        bytes_ -= std::min<u64>(bytes_, e.bytes - now);
+        if (memory_) memory_->free(MemoryClass::Waveforms, static_cast<usize>(e.bytes - now));
+    }
+    e.bytes = now;
+}
+
+void WaveformCache::erase_locked(std::unordered_map<u64, Entry>::iterator it) noexcept {
+    const u64 b = std::min<u64>(bytes_, it->second.bytes);
+    bytes_ -= b;
+    if (memory_) memory_->free(MemoryClass::Waveforms, static_cast<usize>(b));
+    queue_.erase(std::remove(queue_.begin(), queue_.end(), it->first), queue_.end());
+    entries_.erase(it);
+    ++evictions_;
+}
+
+void WaveformCache::enforce_budget_locked() noexcept {
+    const u64 budget = budget_locked();
+    const u64 now = monotonic_ns();
+    while (bytes_ > budget) {
+        auto victim = entries_.end();
+        for (auto it = entries_.begin(); it != entries_.end(); ++it) {
+            if (activeValid_ && it->first == activeKey_) continue;
+            if (it->second.lastQueryNs && now - it->second.lastQueryNs < kRecentNs) continue;
+            if (victim == entries_.end() || it->second.lastQueryNs < victim->second.lastQueryNs) victim = it;
+        }
+        if (victim == entries_.end()) break;   // tudo na tela: não despeja o que se vê
+        erase_locked(victim);
+    }
 }
 
 void WaveformCache::request(u64 key, const AudioAssetRef& ref) {
@@ -30,12 +88,17 @@ void WaveformCache::request(u64 key, const AudioAssetRef& ref) {
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = entries_.find(key);
         if (it != entries_.end() && it->second.ref.path == ref.path) return;
+        if (it != entries_.end()) erase_locked(it);   // relink: o antigo não vale mais
         Entry e;
         e.ref = ref;
         e.total = std::max<i64>(1, (ref.durationSamples + kBaseSamples - 1) / kBaseSamples);
         e.levels.emplace_back(static_cast<usize>(e.total), u8{0});
-        entries_[key] = std::move(e);
+        e.lastQueryNs = monotonic_ns();   // pedida agora = está na tela
+        auto [ins, ok] = entries_.emplace(key, std::move(e));
+        (void)ok;
+        account_locked(ins->second);
         queue_.push_back(key);
+        enforce_budget_locked();
     }
     wake_.notify_one();
 }
@@ -44,8 +107,10 @@ bool WaveformCache::query(u64 key, f64 srcStart, f64 samplesPerBucket, u32 count
     std::fill(out, out + count, u8{0});
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = entries_.find(key);
-    if (it == entries_.end() || it->second.failed) return false;
+    if (it == entries_.end() || it->second.failed) { ++misses_; return false; }
+    ++hits_;
     const Entry& e = it->second;
+    e.lastQueryNs = monotonic_ns();
     // Nível: o mais grosso cujo balde ainda cabe no balde pedido.
     u32 level = 0;
     if (e.done) {
@@ -79,6 +144,63 @@ f32 WaveformCache::progress(u64 key) const {
     return it->second.done ? 1.0f : static_cast<f32>(it->second.ready) / static_cast<f32>(it->second.total);
 }
 
+void WaveformCache::clear() {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        while (!entries_.empty()) erase_locked(entries_.begin());
+        queue_.clear();
+        ++version_;
+    }
+    generation_.fetch_add(1, std::memory_order_acq_rel);
+}
+
+u64 WaveformCache::bytes() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return bytes_;
+}
+
+u32 WaveformCache::entry_count() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return static_cast<u32>(entries_.size());
+}
+
+usize WaveformCache::reclaim(usize targetBytes) noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const u64 before = bytes_;
+    const u64 now = monotonic_ns();
+    // Só a "antiga": pronta (ou com falha) e sem consulta recente. A que está
+    // sendo calculada ou na tela fica — tirar a da tela só a faria voltar.
+    for (;;) {
+        if (targetBytes != MemoryManager::kReclaimAll && before - bytes_ >= targetBytes) break;
+        auto victim = entries_.end();
+        for (auto it = entries_.begin(); it != entries_.end(); ++it) {
+            if (activeValid_ && it->first == activeKey_) continue;
+            if (!it->second.done && !it->second.failed) continue;
+            if (it->second.lastQueryNs && now - it->second.lastQueryNs < kRecentNs) continue;
+            if (victim == entries_.end() || it->second.lastQueryNs < victim->second.lastQueryNs) victim = it;
+        }
+        if (victim == entries_.end()) break;
+        erase_locked(victim);
+    }
+    if (before != bytes_) generation_.fetch_add(1, std::memory_order_acq_rel);
+    return static_cast<usize>(before - bytes_);
+}
+
+bool WaveformCache::metrics(CacheMetrics& out) const noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    out.name = "waveform";
+    out.cls = MemoryClass::Waveforms;
+    out.stage = TrimStage::OldWaveforms;
+    out.bytes = bytes_;
+    out.budgetBytes = budget_locked();
+    out.entries = static_cast<u32>(entries_.size());
+    out.hits = hits_;
+    out.misses = misses_;
+    out.evictions = evictions_;
+    out.version = version_;
+    return true;
+}
+
 void WaveformCache::thread_main() {
     set_current_thread_name("aurea-waveform");
     set_current_thread_priority(ThreadPriority::Background);
@@ -92,6 +214,9 @@ void WaveformCache::thread_main() {
         if (it == entries_.end() || it->second.done) continue;
         const AudioAssetRef ref = it->second.ref;
         const i64 total = it->second.total;
+        activeKey_ = key;
+        activeValid_ = true;
+        const u32 version = version_;
         lock.unlock();
 
         const u64 t0 = monotonic_ns();
@@ -120,7 +245,8 @@ void WaveformCache::thread_main() {
             {
                 std::lock_guard<std::mutex> g(mutex_);
                 auto e = entries_.find(key);
-                if (e == entries_.end() || quit_) break;
+                // Projeto trocado (clear) ou asset relinkado no meio: para.
+                if (e == entries_.end() || quit_ || version != version_) break;
                 std::copy(chunk.begin(), chunk.begin() + n, e->second.levels[0].begin() + done);
                 done += n;
                 e->second.ready = done;
@@ -133,8 +259,9 @@ void WaveformCache::thread_main() {
             if (quit_) break;
         }
         lock.lock();
+        activeValid_ = false;
         auto e = entries_.find(key);
-        if (e != entries_.end()) {
+        if (e != entries_.end() && version == version_) {
             if (failed) {
                 e->second.failed = true;
                 AUREA_LOG_WARN("waveform: audio ilegivel");
@@ -151,6 +278,8 @@ void WaveformCache::thread_main() {
                 }
                 e->second.done = true;
                 e->second.ready = e->second.total;
+                account_locked(e->second);
+                enforce_budget_locked();
                 AUREA_LOG_INFO("waveform: %.1f s de audio em %.0f ms", static_cast<f64>(total * kBaseSamples) / kMixRate,
                                static_cast<f64>(monotonic_ns() - t0) / 1e6);
             }

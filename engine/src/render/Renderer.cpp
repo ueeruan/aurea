@@ -1333,6 +1333,14 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 req.mode = decodeMode;
                 // Clipe reverso ou congelado: o decoder não tem embalo para a frente.
                 req.direction = (l->speed == 0.0f || l->timeRemapEnabled) ? 0 : (l->reversed ? -playDirection : playDirection);
+                if (l->timeRemapEnabled && playDirection != 0) {
+                    // Time remap (§16): a direção do DECODER é a da curva no
+                    // próximo quadro — subindo, prefetch à frente; descendo,
+                    // janela para trás; parada, só o alvo.
+                    const f64 a = l->source_frame(layerTime);
+                    const f64 b = l->source_frame(FrameIndex{layerTime.value + playDirection});
+                    req.direction = b > a + 1e-6 ? 1 : (b < a - 1e-6 ? -1 : 0);
+                }
                 req.speed = speed * std::max(0.0f, l->speed);
                 src->request(req);
                 bool exact = false;
@@ -3312,6 +3320,42 @@ void Renderer::collect_resources(u64 frameNumber) noexcept {
             ++it;
         }
     }
+}
+
+u32 Renderer::trim_memory(u8 stage, u64 frameNumber) noexcept {
+    if (!backend_ || stage < 4) return 0;
+    u32 n = 0;
+    auto unused = [frameNumber](u64 lastFrame) { return lastFrame < frameNumber; };
+    for (auto it = planar_.begin(); it != planar_.end();) {
+        if (!unused(it->second.lastFrame)) { ++it; continue; }
+        for (TextureHandle& t : it->second.plane) if (t.valid()) { backend_->destroy_texture(t); ++n; }
+        it = planar_.erase(it);
+    }
+    for (auto it = flowCache_.begin(); it != flowCache_.end();) {
+        if (!unused(it->second.lastFrame)) { ++it; continue; }
+        for (TextureHandle& t : it->second.tex) if (t.valid()) { backend_->destroy_texture(t); ++n; }
+        it = flowCache_.erase(it);
+    }
+    for (auto it = maskCache_.begin(); it != maskCache_.end();) {
+        if (!unused(it->second.lastFrame)) { ++it; continue; }
+        for (TextureHandle& t : it->second.tex) if (t.valid()) { backend_->destroy_texture(t); ++n; }
+        it = maskCache_.erase(it);
+    }
+    for (auto it = luts_.begin(); it != luts_.end();) {
+        if (!unused(it->second.lastFrame)) { ++it; continue; }
+        backend_->destroy_texture(it->second.texture);
+        ++n;
+        it = luts_.erase(it);
+    }
+    for (auto it = vectorCache_.begin(); it != vectorCache_.end();) {
+        if (unused(it->second.lastFrame)) it = vectorCache_.erase(it);
+        else ++it;
+    }
+    // Entre quadros nada do pool está em uso: tudo volta a nascer sob demanda.
+    n += pool_.stats().alive;
+    pool_.clear();
+    if (stage >= 6) scene3d_.collect(frameNumber, 0);
+    return n;
 }
 
 void Renderer::read_timings(RenderTimings& t) noexcept {

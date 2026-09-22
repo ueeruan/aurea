@@ -9,6 +9,12 @@
 //  A UI pede; se não está em cache, o pedido entra na fila (os mais recentes
 //  primeiro — quem rola a timeline quer o que está na tela agora) e a
 //  `generation()` muda quando algo fica pronto.
+//
+//  Fase 8 (§12, §14–15): o cache é por BYTES (categoria Thumbnails do
+//  orçamento), LRU, com métricas (acertos/erros/despejos) e versão. A chave
+//  leva o caminho da mídia: relinkar o asset invalida sozinho as miniaturas
+//  velhas. Sob pressão do sistema (primeiro estágio) solta tudo — a UI guarda
+//  os bitmaps do que está na tela.
 // =============================================================================
 #pragma once
 
@@ -25,7 +31,7 @@
 
 namespace aurea {
 
-class ThumbnailService {
+class ThumbnailService final : public IMemoryReclaimable {
 public:
     struct Image {
         u32 width = 0;
@@ -33,7 +39,13 @@ public:
         std::vector<u8> rgba;   ///< sRGB, alfa 255
     };
 
-    ~ThumbnailService();
+    ThumbnailService() = default;
+    ~ThumbnailService() override;
+    ThumbnailService(const ThumbnailService&) = delete;
+    ThumbnailService& operator=(const ThumbnailService&) = delete;
+
+    /// Liga ao orçamento (categoria Thumbnails). Nulo desliga (teto padrão).
+    void attach(MemoryManager* memory) noexcept;
 
     void set_factory(VideoSourceFactory* factory) noexcept { factory_ = factory; }
     void start();
@@ -54,18 +66,27 @@ public:
     void clear();
 
     [[nodiscard]] u32 cached() const;
+    [[nodiscard]] u64 cached_bytes() const;
+
+    // IMemoryReclaimable
+    [[nodiscard]] MemoryClass memory_class() const noexcept override { return MemoryClass::Thumbnails; }
+    [[nodiscard]] usize reclaim(usize targetBytes) noexcept override;
+    [[nodiscard]] const char* debug_name() const noexcept override { return "miniaturas"; }
+    [[nodiscard]] bool accounts_itself() const noexcept override { return true; }
+    [[nodiscard]] bool metrics(CacheMetrics& out) const noexcept override;
 
 private:
     struct Key {
         u64 asset = 0;
         i64 bucket = 0;    ///< tempo / 250 ms; -1 para imagem
         u32 height = 0;
+        u64 source = 0;    ///< hash do caminho da mídia (relink = chave nova)
         friend bool operator==(const Key&, const Key&) = default;
     };
     struct KeyHash {
         usize operator()(const Key& k) const noexcept {
             return static_cast<usize>(k.asset * 0x9E3779B97F4A7C15ull ^ static_cast<u64>(k.bucket) * 0xC2B2AE3D27D4EB4Full
-                                      ^ k.height);
+                                      ^ k.height ^ k.source * 0x165667B19E3779F9ull);
         }
     };
     struct Request {
@@ -80,9 +101,13 @@ private:
     void thread_main() noexcept;
     bool decode(const Request& r, Image& out);
     void insert_locked(const Key& k, Image img);
+    void pop_lru_locked();
+    [[nodiscard]] u64 budget_locked() const noexcept;
 
     static constexpr i64 kBucketUs = 250'000;
     static constexpr usize kMaxCached = 900;
+    /// Teto sem orçamento ligado (testes, motor sem MemoryManager).
+    static constexpr u64 kDefaultBudget = 16ull << 20;
     static constexpr usize kMaxQueued = 256;
 
     VideoSourceFactory* factory_ = nullptr;
@@ -95,6 +120,10 @@ private:
     std::unordered_map<u64, bool> failedAssets_;   ///< decoder não abriu: não tenta de novo
     std::vector<Decoder> decoders_;            ///< no máximo 2, só a thread mexe
     std::atomic<u32> generation_{0};
+    MemoryManager* memory_ = nullptr;
+    u64 bytes_ = 0;
+    u64 hits_ = 0, misses_ = 0, evictions_ = 0;
+    u32 version_ = 0;
     bool running_ = false;
     std::thread thread_;
 };

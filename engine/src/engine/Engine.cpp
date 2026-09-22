@@ -215,13 +215,16 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
     // Fonte importada guardada como "docs:…": o gerenciador resolve pelo motor.
     text::FontManager::instance().set_path_resolver([this](const std::string& s) { return resolve_asset_path(s); });
     media_.set_factory(config.mediaFactory);
+    media_.set_memory(&memory_);
     media_.set_ready_callback(&Engine::on_frame_ready, this);
     // Som: cache de blocos na verba de áudio; com saída, o áudio passa a ser o
     // relógio mestre do playback.
     audio_.initialize(config.mediaFactory, config.audioOutput, memory_.budget(MemoryClass::Audio));
     playback_.clock().set_master(&audio_);
     waveforms_ = std::make_unique<audio::WaveformCache>(config.mediaFactory);
+    waveforms_->attach(&memory_);
     thumbs_.set_factory(config.mediaFactory);
+    thumbs_.attach(&memory_);
     if (config.mediaFactory) thumbs_.start();
 
     adapt().configure(1920, 1080, config.displayRefreshRate);
@@ -244,16 +247,10 @@ u32 Engine::model_texture_cap() const noexcept {
 }
 
 void Engine::apply_memory_budgets() noexcept {
+    // Uma tabela só (kBudgetShare, em MemoryManager.hpp): cada consumidor com o
+    // seu pedaço do orçamento medido do aparelho. Ver PHASE_8_REPORT §8B.
     const u64 budget = config_.memoryBudgetBytes ? config_.memoryBudgetBytes : caps_.memory_budget_bytes();
-    memory_.set_budget(MemoryClass::Thumbnails,     budget * 6 / 100);
-    memory_.set_budget(MemoryClass::Proxies,        budget * 10 / 100);
-    memory_.set_budget(MemoryClass::DecodedFrames,  budget * 24 / 100);
-    memory_.set_budget(MemoryClass::RenderedFrames, budget * 16 / 100);
-    memory_.set_budget(MemoryClass::GpuTextures,    budget * 20 / 100);
-    memory_.set_budget(MemoryClass::GpuGeometry,    budget * 10 / 100);
-    memory_.set_budget(MemoryClass::Audio,          budget * 4 / 100);
-    memory_.set_budget(MemoryClass::Assets,         budget * 8 / 100);
-    memory_.set_budget(MemoryClass::Persistent,     budget * 2 / 100);
+    memory_.apply_budget_table(budget);
 }
 
 void Engine::shutdown() noexcept {
@@ -268,10 +265,13 @@ void Engine::shutdown() noexcept {
     text::FontManager::instance().set_path_resolver(nullptr);
     stop_render_thread();
     thumbs_.stop();
+    thumbs_.clear();
+    thumbs_.attach(nullptr);
     playback_.clock().set_master(nullptr);
     audio_.shutdown();
     waveforms_.reset();
     media_.close_all();
+    media_.set_memory(nullptr);
     jobs_.stop();
 
     {
@@ -322,6 +322,43 @@ Status Engine::suspend() noexcept {
     }
     state_ = EngineState::Suspended;
     return OkStatus;
+}
+
+MemoryManager::TrimReport Engine::trim_memory(i32 osLevel) noexcept {
+    const TrimStage upTo = trim_stage_for_os_level(osLevel);
+    if (upTo == TrimStage::None || state_ == EngineState::Uninitialized) return MemoryManager::TrimReport{};
+    // 1–3 (e o que mais estiver registrado): os caches de CPU, cada um com o
+    // próprio lock. O projeto (Persistent) não é registrável.
+    (void)memory_.trim(upTo);
+    const u8 st = static_cast<u8>(upTo);
+    // 4–6: o cache de render e os assets 3D são do renderer, sob o lock de
+    // render (entre quadros). Com export rodando, a GPU é dele: fica para o
+    // próximo aviso do sistema.
+    if (st >= static_cast<u8>(TrimStage::OldRenderCache) && !exportActive_.load(std::memory_order_acquire)) {
+        std::lock_guard<std::mutex> rl(renderMutex_);
+        if (gpu_ && renderer_.ready()) {
+            gpu_->wait_idle();   // fora do caminho quente: é um aviso do sistema
+            const u64 before = gpu_->memory_stats().usedBytes;
+            const u32 textures = renderer_.trim_memory(st, frameCounter_);
+            gpu_->wait_idle();   // roda as destruições adiadas até o fence
+            const u64 after = gpu_->memory_stats().usedBytes;
+            memory_.note_trim_freed(TrimStage::OldRenderCache, before > after ? before - after : 0);
+            AUREA_LOG_INFO("memoria: renderer soltou %u texturas (%llu KB de GPU)", textures,
+                           static_cast<unsigned long long>((before > after ? before - after : 0) / 1024));
+        }
+    }
+    // 7: temporários — fontes de vídeo que não entraram no último quadro
+    // (decoder + thread + buffers); reabrem sozinhas quando voltarem à tela.
+    if (st >= static_cast<u8>(TrimStage::Temporaries) && !exportActive_.load(std::memory_order_acquire)) {
+        std::lock_guard<std::mutex> rl(renderMutex_);
+        const u32 before = media_.stats().sources;
+        const usize framesBefore = memory_.used(MemoryClass::DecodedFrames);
+        media_.collect(frameCounter_, 1);
+        const usize framesAfter = memory_.used(MemoryClass::DecodedFrames);
+        memory_.note_trim_freed(TrimStage::Temporaries, framesBefore > framesAfter ? framesBefore - framesAfter : 0);
+        AUREA_LOG_INFO("memoria: %u fonte(s) de video ociosa(s) fechada(s)", before - media_.stats().sources);
+    }
+    return memory_.last_trim();
 }
 
 Status Engine::resume() noexcept {
@@ -452,6 +489,7 @@ Status Engine::new_project(u32 width, u32 height, f64 fps, const char* title) no
 
     media_.close_all();
     thumbs_.clear();
+    if (waveforms_) waveforms_->clear();
     {
         std::lock_guard<std::mutex> rl(renderMutex_);
         renderer_.release_project_resources();
@@ -513,6 +551,7 @@ Status Engine::load_project(const char* path) noexcept {
 
     media_.close_all();
     thumbs_.clear();
+    if (waveforms_) waveforms_->clear();
     {
         std::lock_guard<std::mutex> rl(renderMutex_);
         renderer_.release_project_resources();
@@ -4344,6 +4383,7 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
     stats.cpuMemoryBytes = memory_.total_used();
     (void)adapt().update(stats, caps_.thermal());
     media_.collect(frameCounter_);
+    if (frameCounter_ % 120 == 0) (void)memory_.balance();
     update_perf(stats, timings, snapshot_, frameStart);
     return s;
 }
@@ -4353,6 +4393,8 @@ void Engine::set_thermal(u32 level, bool throttling) noexcept {
     t.level = static_cast<ThermalState::Level>(std::min<u32>(level, static_cast<u32>(ThermalState::Level::Unknown)));
     t.throttling = throttling;
     caps_.set_thermal_state(t);
+    // Morno: menos tarefa de fundo; crítico: metade do pool (§33, §35).
+    jobs_.apply_thermal(static_cast<u32>(t.level));
     request_render();
 }
 
@@ -4644,6 +4686,17 @@ EngineTelemetry Engine::read_telemetry() noexcept {
     t.commandsDropped = commandQueue_->dropped_count();
     t.thermal = caps_.thermal().level;
     t.throttling = caps_.thermal().throttling;
+    // Cache de quadros decodificados (§15): acerto somado de todas as fontes.
+    CacheMetrics m[MemoryManager::kMaxReclaimables];
+    const u32 n = memory_.collect_metrics(m, MemoryManager::kMaxReclaimables);
+    u64 hits = 0, misses = 0;
+    for (u32 i = 0; i < n; ++i) {
+        if (m[i].cls != MemoryClass::DecodedFrames) continue;
+        hits += m[i].hits;
+        misses += m[i].misses;
+        t.frameCacheEntries += m[i].entries;
+    }
+    t.frameCacheHitRate = hits + misses ? static_cast<f32>(static_cast<f64>(hits) / static_cast<f64>(hits + misses)) : 0.0f;
     return t;
 }
 

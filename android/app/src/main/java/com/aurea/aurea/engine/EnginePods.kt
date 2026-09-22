@@ -825,3 +825,29 @@ data class LayerDetail(
         }
     }
 }
+
+
+/** Texto da camada de texto (lido por `queryText`, não cabe no LayerDetail). */
+data class TextDetail(
+    val content: String,
+    val size: Float,
+    val color: FloatArray,
+    val strokeWidth: Float,
+    val strokeColor: FloatArray,
+    val alignment: Int,
+    val lineHeight: Float,
+    val tracking: Float,
+) {
+    companion object {
+        fun of(content: String, v: FloatArray) = TextDetail(
+            content = content,
+            size = v[0],
+            color = floatArrayOf(v[1], v[2], v[3], v[4]),
+            strokeWidth = v[5],
+            strokeColor = floatArrayOf(v[6], v[7], v[8], v[9]),
+            alignment = v[10].toInt(),
+            lineHeight = v[11],
+            tracking = v[12],
+        )
+    }
+}

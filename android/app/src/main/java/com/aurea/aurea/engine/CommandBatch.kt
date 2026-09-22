@@ -359,6 +359,19 @@ class CommandBatch(private val engine: AureaEngine) {
         b.putInt(Off.TEXT_ALIGNMENT, alignment)
     }
 
+    fun setTextStrokeWidth(layer: Long, width: Float) = emit(CommandType.TEXT_SET_STROKE_WIDTH) { b ->
+        b.putHandle(Off.LAYER, layer)
+        b.putFloat(Off.GAIN_VALUE, width)
+    }
+
+    fun setTextStrokeColor(layer: Long, r: Float, g: Float, bl: Float, a: Float) = emit(CommandType.TEXT_SET_STROKE_COLOR) { b ->
+        b.putHandle(Off.LAYER, layer)
+        b.putFloat(Off.TEXT_COLOR_R, r)
+        b.putFloat(Off.TEXT_COLOR_G, g)
+        b.putFloat(Off.TEXT_COLOR_B, bl)
+        b.putFloat(Off.TEXT_COLOR_A, a)
+    }
+
     // =========================================================================
     // Áudio
     // =========================================================================

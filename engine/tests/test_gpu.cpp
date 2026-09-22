@@ -1225,6 +1225,60 @@ AUREA_TEST(Gpu, ShapesRenderAsCrispVectorSdfs) {
     (void)write_png("forma_contorno.png", img);
 }
 
+AUREA_TEST(Gpu, TextRendersCrispWithStrokeAndStaysCentered) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(512, 288);
+    auto id = rig.e.add_text("Aurea");
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) return;
+    const Image8 a = rig.capture(512);
+    const f32 cov = coverage(a);
+    AUREA_CHECK_MSG(cov > 0.004f && cov < 0.3f, "texto sem pixels");
+    // Branco puro em algum lugar (miolo das letras).
+    u32 white = 0;
+    for (usize i = 0; i + 3 < a.rgba.size(); i += 4) white += a.rgba[i] > 245 && a.rgba[i + 1] > 245 && a.rgba[i + 2] > 245;
+    AUREA_CHECK(white > 50);
+    (void)write_png("texto_simples.png", a);
+
+    // Cor, contorno e duas linhas: a caixa cresce mas o centro fica.
+    bridge::LayerDetailPOD d0{};
+    AUREA_CHECK(rig.e.query_layer_detail(*id, d0));
+    Command col;
+    col.type = CommandType::TextSetColor;
+    col.text_color.layer = LayerId::unpack(*id);
+    col.text_color.r = 1; col.text_color.g = 0.8f; col.text_color.b = 0; col.text_color.a = 1;
+    AUREA_CHECK(rig.e.apply_command(col).ok());
+    Command sw;
+    sw.type = CommandType::TextSetStrokeWidth;
+    sw.text_stroke_width.layer = LayerId::unpack(*id);
+    sw.text_stroke_width.width = 4.0f;
+    AUREA_CHECK(rig.e.apply_command(sw).ok());
+    Command sc;
+    sc.type = CommandType::TextSetStrokeColor;
+    sc.text_color.layer = LayerId::unpack(*id);
+    sc.text_color.r = 0; sc.text_color.g = 0; sc.text_color.b = 1; sc.text_color.a = 1;
+    AUREA_CHECK(rig.e.apply_command(sc).ok());
+    const char* two = "Aurea\nEditor";
+    Command ct;
+    ct.type = CommandType::TextSetContent;
+    ct.layer_ref.layer = LayerId::unpack(*id);
+    AUREA_CHECK(rig.e.apply_command(ct, two).ok());
+    bridge::LayerDetailPOD d1{};
+    AUREA_CHECK(rig.e.query_layer_detail(*id, d1));
+    AUREA_CHECK(d1.sourceHeight > d0.sourceHeight * 1.6f);             // duas linhas
+    AUREA_CHECK_NEAR(d1.anchor[0], d1.sourceWidth * 0.5f, 1.0f);       // âncora no centro
+    AUREA_CHECK_NEAR(d1.anchor[1], d1.sourceHeight * 0.5f, 1.0f);
+    const Image8 b = rig.capture(512);
+    u32 yellow = 0, blue = 0;
+    for (usize i = 0; i + 3 < b.rgba.size(); i += 4) {
+        yellow += b.rgba[i] > 230 && b.rgba[i + 1] > 180 && b.rgba[i + 2] < 40;
+        blue += b.rgba[i] < 40 && b.rgba[i + 1] < 40 && b.rgba[i + 2] > 200;
+    }
+    AUREA_CHECK(yellow > 50);
+    AUREA_CHECK(blue > 50);
+    (void)write_png("texto_contorno.png", b);
+}
+
 AUREA_TEST(Gpu, Scene3DSurvivesSaveAndReopenIdentically) {
     AUREA_REQUIRE_GPU();
     const std::string path = gltf_data("DamagedHelmet.glb");

@@ -266,6 +266,7 @@ AUREA_JNI jboolean AUREA_FN(nativeInitialize)(JNIEnv* env, jclass, jlong handle,
     config.mediaFactory = &c->media;
     config.exportSinkFactory = &android::make_mediacodec_export_sink;
     config.audioOutput = &c->audioOut;
+    config.defaultFontPath = "/system/fonts/Roboto-Regular.ttf";
     config.imageLoader = &load_image;
     config.enableTelemetry = true;
 
@@ -613,6 +614,31 @@ AUREA_JNI jlong AUREA_FN(nativeAddShape)(JNIEnv*, jclass, jlong handle, jint pre
     const Result<u64> r = c->engine.add_shape(static_cast<u32>(std::max(0, preset)));
     if (!r.ok()) return -static_cast<jlong>(r.status().code());
     return static_cast<jlong>(*r);
+}
+
+AUREA_JNI jlong AUREA_FN(nativeAddText)(JNIEnv* env, jclass, jlong handle, jstring content) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return -static_cast<jlong>(Errc::InvalidState);
+    const std::string s = to_string(env, content);
+    const Result<u64> r = c->engine.add_text(s.c_str());
+    if (!r.ok()) return -static_cast<jlong>(r.status().code());
+    return static_cast<jlong>(*r);
+}
+
+/// Texto da camada: devolve o conteúdo e preenche `out` (10 floats): tamanho,
+/// cor RGBA (sRGB), contorno, cor do contorno RGBA... na ordem de TextDetail.kt.
+AUREA_JNI jstring AUREA_FN(nativeQueryText)(JNIEnv* env, jclass, jlong handle, jlong layerId, jfloatArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return nullptr;
+    TextData t;
+    if (!c->engine.query_text(static_cast<u64>(layerId), t)) return nullptr;
+    if (out && env->GetArrayLength(out) >= 13) {
+        const jfloat v[13] = {t.size, t.color.x, t.color.y, t.color.z, t.color.w, t.strokeWidth,
+                              t.strokeColor.x, t.strokeColor.y, t.strokeColor.z, t.strokeColor.w,
+                              static_cast<jfloat>(t.alignment), t.lineHeight, t.tracking};
+        env->SetFloatArrayRegion(out, 0, 13, v);
+    }
+    return env->NewStringUTF(t.content.c_str());
 }
 
 AUREA_JNI jlong AUREA_FN(nativeExtractAudio)(JNIEnv*, jclass, jlong handle, jlong layerId) {

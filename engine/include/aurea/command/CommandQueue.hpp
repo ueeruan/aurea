@@ -73,12 +73,19 @@ public:
 
     /// Reserva espaço no blob de strings e devolve o offset. A UI escreve
     /// direto no buffer devolvido. Devolve nullptr se o blob encheu.
+    ///
+    /// ANEL: quando não cabe no fim, volta ao início. Cada string é lida no
+    /// próximo quadro (a drenagem copia na hora); para uma ser sobrescrita
+    /// antes de lida, a UI teria de escrever o blob inteiro num único quadro.
     [[nodiscard]] char* alloc_string(u32 bytes) noexcept {
-        const u32 off = stringWrite_.load(std::memory_order_relaxed);
-        if (off + bytes > kStringBlobSize) return nullptr;
+        if (bytes == 0 || bytes >= kStringBlobSize) return nullptr;
+        u32 off = stringWrite_.load(std::memory_order_relaxed);
+        if (off + bytes >= kStringBlobSize) off = 0;
         stringWrite_.store(off + bytes, std::memory_order_relaxed);
         return stringBlob_ + off;
     }
+    /// Deslocamento de um ponteiro devolvido por alloc_string.
+    [[nodiscard]] u32 offset_of(const char* p) const noexcept { return static_cast<u32>(p - stringBlob_); }
 
     /// Conveniência: escreve uma string terminada em NUL e devolve offset e
     /// tamanho prontos para o Command.

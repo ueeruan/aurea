@@ -472,7 +472,17 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     private fun refreshDetail() {
         val id = primary
         detail = if (id != null && engine.queryLayerDetail(id, detailBuffer)) LayerDetail.read(detailBuffer) else null
+        textDetail = if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Text.kind) {
+            engine.queryText(id, textFloats)?.let { com.aurea.aurea.engine.TextDetail.of(it, textFloats) }
+        } else {
+            null
+        }
     }
+
+    /** Texto da camada principal (quando é texto). */
+    var textDetail by mutableStateOf<com.aurea.aurea.engine.TextDetail?>(null)
+        private set
+    private val textFloats = FloatArray(13)
 
     private fun readCatalog(): List<EffectCatalogEntry> {
         val n = engine.queryEffectCatalog(rowBuffer, 64, textBlob)
@@ -1065,6 +1075,75 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** A janela do editor voltou a aparecer: o preview é reapresentado. */
     fun invalidatePreview() {
         if (engineReady) engine.invalidate()
+    }
+
+    // --- Texto ------------------------------------------------------------------
+    /** Botão "Texto": camada nova no centro, já escolhida. */
+    fun addText(): Long {
+        val id = engine.addText("Texto")
+        if (id < 0) {
+            errorMessage = "Não foi possível criar o texto (erro ${-id})."
+            return -1
+        }
+        refreshNow()
+        select(id)
+        return id
+    }
+
+    /**
+     * Digitação: um passo de desfazer por "rajada" (fecha depois de 1 s sem
+     * tecla), não um por letra.
+     */
+    var textEditing = false
+        private set
+    private val typingHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val closeTyping = Runnable {
+        if (textEditing) {
+            textEditing = false
+            endGesture()
+        }
+    }
+
+    fun setTextContent(content: String) {
+        val id = primary ?: return
+        if (!textEditing) {
+            textEditing = true
+            beginGesture("editar texto")
+        }
+        typingHandler.removeCallbacks(closeTyping)
+        typingHandler.postDelayed(closeTyping, 1000)
+        send { setTextContent(id, content) }
+        refreshDetail()
+    }
+
+    fun setTextSize(size: Float) {
+        val id = primary ?: return
+        send { setTextSize(id, size.coerceIn(1f, 2000f)) }
+        refreshDetail()
+    }
+
+    fun setTextColor(r: Float, g: Float, b: Float, a: Float) {
+        val id = primary ?: return
+        send { setTextColor(id, r, g, b, a) }
+        refreshDetail()
+    }
+
+    fun setTextAlignment(alignment: Int) {
+        val id = primary ?: return
+        send { setTextAlignment(id, alignment) }
+        refreshNow()
+    }
+
+    fun setTextStrokeWidth(width: Float) {
+        val id = primary ?: return
+        send { setTextStrokeWidth(id, width.coerceIn(0f, 200f)) }
+        refreshDetail()
+    }
+
+    fun setTextStrokeColor(r: Float, g: Float, b: Float, a: Float) {
+        val id = primary ?: return
+        send { setTextStrokeColor(id, r, g, b, a) }
+        refreshDetail()
     }
 
     // --- Forma ------------------------------------------------------------------

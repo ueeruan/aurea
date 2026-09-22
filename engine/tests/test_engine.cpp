@@ -10,6 +10,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 #include <tuple>
 
@@ -835,4 +836,55 @@ AUREA_TEST(Engine, ImagesComeBackWhenTheProjectIsReopened) {
     AUREA_CHECK_EQ(d.sourceHeight, 2u);
     e.shutdown();
     std::remove(path.c_str());
+}
+
+AUREA_TEST(Engine, QueuedStringsAreNotGluedToThePreviousOnes) {
+    // As strings da fila ficam coladas no blob, sem terminador. Duas edições
+    // de texto seguidas (a digitação da UI): a segunda não pode levar a
+    // primeira junto.
+    Engine e;
+    AUREA_CHECK(e.initialize(headless_config()).ok());
+    AUREA_CHECK(e.new_project(640, 360, 30.0, nullptr).ok());
+    auto id = e.add_text("Texto");
+    if (!id.ok()) { e.shutdown(); return; }   // sem fonte no host: nada a verificar
+    const char* edits[] = {"Texto A", "Texto Au"};
+    for (const char* s : edits) {
+        u32 offset = 0, length = 0;
+        AUREA_CHECK(e.commands().push_string(s, static_cast<u32>(std::strlen(s)), offset, length));
+        Command c;
+        c.type = CommandType::TextSetContent;
+        c.layer_ref.layer = LayerId::unpack(*id);
+        c.stringOffset = offset;
+        c.stringLength = length;
+        AUREA_CHECK_EQ(e.submit_commands(&c, 1), 1u);
+    }
+    AUREA_CHECK(e.render_frame().ok());
+    TextData t;
+    AUREA_CHECK(e.query_text(*id, t));
+    AUREA_CHECK_EQ(t.content, std::string("Texto Au"));
+    e.shutdown();
+}
+
+AUREA_TEST(Engine, BatchStringBlobOffsetsAreRebasedIntoTheQueue) {
+    // O caminho da bridge: cada lote traz seu blob com deslocamentos a partir
+    // de 0. Dois lotes seguidos com string: o segundo não pode ler a do primeiro.
+    Engine e;
+    AUREA_CHECK(e.initialize(headless_config()).ok());
+    AUREA_CHECK(e.new_project(640, 360, 30.0, nullptr).ok());
+    auto id = e.add_text("Texto");
+    if (!id.ok()) { e.shutdown(); return; }
+    const char* blobs[] = {"editar texto", "Texto Aurea"};
+    for (int i = 0; i < 2; ++i) {
+        Command c;
+        c.type = i == 0 ? CommandType::UndoBeginGroup : CommandType::TextSetContent;
+        c.layer_ref.layer = LayerId::unpack(*id);
+        c.stringOffset = 0;
+        c.stringLength = static_cast<u32>(std::strlen(blobs[i]));
+        AUREA_CHECK_EQ(e.submit_commands(&c, 1, blobs[i], c.stringLength), 1u);
+    }
+    AUREA_CHECK(e.render_frame().ok());
+    TextData t;
+    AUREA_CHECK(e.query_text(*id, t));
+    AUREA_CHECK_EQ(t.content, std::string("Texto Aurea"));
+    e.shutdown();
 }

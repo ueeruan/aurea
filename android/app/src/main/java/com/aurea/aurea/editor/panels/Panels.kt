@@ -37,6 +37,7 @@ enum class EditorPanel {
     Speed,         // velocidade/tempo
     Audio,         // volume
     Shape,         // cor e preenchimento / editar forma
+    Text,          // editar texto
 }
 
 /**
@@ -91,6 +92,7 @@ fun PanelContent(
         EditorPanel.Speed -> "Tempo e velocidade"
         EditorPanel.Audio -> "Som"
         EditorPanel.Shape -> "Cor e preenchimento"
+        EditorPanel.Text -> "Texto"
     }
 
     Column(modifier.fillMaxSize().background(AureaColors.EditorPanel)) {
@@ -105,6 +107,7 @@ fun PanelContent(
                     EditorPanel.Speed -> SpeedPanel(env)
                     EditorPanel.Audio -> AudioPanel(env)
                     EditorPanel.Shape -> ShapePanel(env)
+                    EditorPanel.Text -> TextPanel(env)
                 }
             }
         }

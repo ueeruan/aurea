@@ -1,6 +1,7 @@
 #include "aurea/render/Renderer.hpp"
 
 #include "aurea/scene3d/Animation.hpp"
+#include "aurea/text/Text.hpp"
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Time.hpp"
 #include "aurea/project/Project.hpp"
@@ -405,8 +406,20 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             case LayerKind::Camera:
             case LayerKind::Light:
                 continue;   // não desenham; entram na cena depois do laço
+            case LayerKind::Text: {
+                // Caixa do texto em px da layer (com a margem do contorno); os
+                // pixels vêm depois, na escala da tela (abaixo).
+                const auto font = text::default_font();
+                if (!font || l->text.content.empty() || (l->text.color.w <= 0.0f && l->text.strokeWidth <= 0.0f)) continue;
+                const text::TextExtent ext = text::measure(*font, l->text);
+                const f32 pad = l->text.strokeWidth > 0.0f ? l->text.strokeWidth + 2.0f : 2.0f;
+                rl.source.kind = LayerSource::Kind::Image;
+                rl.source.width = static_cast<u32>(std::ceil(ext.width + 2.0f * pad));
+                rl.source.height = static_cast<u32>(std::ceil(ext.height + 2.0f * pad));
+                break;
+            }
             default:
-                continue;   // texto, partículas: fora desta fase
+                continue;   // partículas: fora desta fase
         }
         if (rl.source.kind != LayerSource::Kind::Scene3D) groupOpen = false;
         if (rl.source.kind == LayerSource::Kind::Scene3D) {
@@ -430,6 +443,48 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         }
         rl.compFromLayer = m;
         rl.texelScale = texel_scale_for(max_scale(m) * previewFactor);
+
+        // Texto: rasteriza na escala em que aparece (potência de 2, para não
+        // refazer a cada zoom) e só quando algo que muda os pixels mudou.
+        if (l->kind == LayerKind::Text && backend_) {
+            const auto font = text::default_font();
+            f32 want = std::max(0.5f, max_scale(m) * previewFactor);
+            f32 scale = 0.5f;
+            while (scale < want && scale < 4.0f) scale *= 2.0f;
+            const u64 key = (static_cast<u64>(id.generation) << 32) | (0x80000000u | id.index);   // fora do espaço de assets
+            const u64 rkey = text::raster_key(l->text, scale);
+            auto it = textKeys_.find(key);
+            if (font && (it == textKeys_.end() || it->second != rkey || images_.find(key) == images_.end())) {
+                text::TextRaster raster;
+                if (text::rasterize(*font, l->text, scale, raster)) {
+                    if (auto old = images_.find(key); old != images_.end()) {
+                        backend_->destroy_texture(old->second.texture);
+                        images_.erase(old);
+                    }
+                    TextureDesc d;
+                    d.width = raster.width;
+                    d.height = raster.height;
+                    d.format = SurfaceFormat::RGBA8;
+                    d.sampled = true;
+                    d.transferDst = true;
+                    d.debugName = "texto";
+                    auto tex = backend_->create_texture(d);
+                    if (tex.ok()) {
+                        PendingUpload up;
+                        up.texture = *tex;
+                        up.bytesPerRow = raster.width * 4;
+                        up.data = std::move(raster.rgba);
+                        uploads_.push_back(std::move(up));
+                        images_[key] = ImageTexture{*tex, raster.width, raster.height, frameNumber};
+                        textKeys_[key] = rkey;
+                    }
+                }
+            }
+            if (auto img = images_.find(key); img != images_.end()) img->second.lastFrame = frameNumber;
+            else continue;
+            rl.source.image = AssetId::unpack(key);
+            rl.source.pixels = nullptr;
+        }
 
         // Vídeo: pede o frame e pega o melhor disponível AGORA (nunca espera).
         if (rl.source.kind == LayerSource::Kind::Video && media) {
@@ -469,7 +524,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         }
 
         // Imagem nova: sobe uma vez (a cópia dos pixels só acontece aqui).
-        if (rl.source.kind == LayerSource::Kind::Image && backend_) {
+        if (rl.source.kind == LayerSource::Kind::Image && backend_ && l->kind == LayerKind::Image) {
             const u64 key = l->source.pack();
             auto it = images_.find(key);
             // Mesmo id com outro tamanho = outro conteúdo (projeto trocado

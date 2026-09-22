@@ -1,4 +1,6 @@
 #include "aurea/Engine.hpp"
+
+#include "aurea/text/Text.hpp"
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Thread.hpp"
 #include "aurea/project/Serialization.hpp"
@@ -129,6 +131,7 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
         }
     }
 
+    text::set_default_font_path(config.defaultFontPath);
     media_.set_factory(config.mediaFactory);
     media_.set_ready_callback(&Engine::on_frame_ready, this);
     // Som: cache de blocos na verba de áudio; com saída, o áudio passa a ser o
@@ -726,6 +729,56 @@ Result<u64> Engine::freeze_frame(u64 layerId, i64 frame, i64 holdFrames) noexcep
     return hold.pack();
 }
 
+void Engine::recenter_text(Layer& l) noexcept {
+    if (l.kind != LayerKind::Text) return;
+    const auto font = text::default_font();
+    if (!font) return;
+    // A caixa cresce/encolhe em volta do centro: o texto não "anda" ao editar.
+    const text::TextExtent ext = text::measure(*font, l.text);
+    const f32 pad = l.text.strokeWidth > 0.0f ? l.text.strokeWidth + 2.0f : 2.0f;
+    const Vec3 oldAnchor = l.transform.anchor;
+    const Vec3 anchor{std::ceil(ext.width + 2.0f * pad) * 0.5f, std::ceil(ext.height + 2.0f * pad) * 0.5f, 0.0f};
+    l.transform.anchor = anchor;
+    if (Track* ax = l.tracks.find(TrackProperty::AnchorX); ax && ax->keys.empty()) ax->staticValue = anchor.x;
+    if (Track* ay = l.tracks.find(TrackProperty::AnchorY); ay && ay->keys.empty()) ay->staticValue = anchor.y;
+    (void)oldAnchor;
+}
+
+bool Engine::query_text(u64 layerId, TextData& out) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = current_composition();
+    if (!comp) return false;
+    const Layer* l = comp->layer(LayerId::unpack(layerId));
+    if (!l || l->kind != LayerKind::Text) return false;
+    out = l->text;
+    return true;
+}
+
+Result<u64> Engine::add_text(const char* content) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
+    Composition* comp = current_composition();
+    if (!comp) return Status{Errc::InvalidState, "projeto sem composicao"};
+    if (!text::default_font()) return Status{Errc::NotSupported, "nenhuma fonte disponivel neste aparelho"};
+    history_.before_mutation(*comp, project_->timeline().current(), "adicionar texto");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    const LayerId lid = comp->add_layer(LayerKind::Text, "Texto");
+    Layer* l = comp->layer(lid);
+    if (!l) return Status{Errc::OutOfMemory, "camada nao criada"};
+    l->text.content = content && *content ? content : "Texto";
+    l->text.size = std::round(0.12f * static_cast<f32>(std::min(comp->width(), comp->height())));
+    l->text.color = Vec4{1, 1, 1, 1};
+    l->text.alignment = 1;
+    const i64 t = std::clamp<i64>(playback_.current().value, 0, std::max<i64>(0, comp->duration().value - 1));
+    l->start = FrameIndex{t};
+    l->end = FrameIndex{std::max<i64>(t + 1, comp->duration().value)};
+    l->transform.position = Vec3{static_cast<f32>(comp->width()) * 0.5f, static_cast<f32>(comp->height()) * 0.5f, 0.0f};
+    recenter_text(*l);
+    project_->mark_dirty();
+    request_render();
+    return lid.pack();
+}
+
 Result<u64> Engine::add_shape(u32 preset) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
@@ -966,15 +1019,33 @@ u32 Engine::submit_commands(const Command* commands, u32 count,
     const EngineState s = state_;
     if (s != EngineState::Ready && s != EngineState::Rendering && s != EngineState::Suspended) return 0;
 
-    u32 accepted = 0;
-    for (u32 i = 0; i < count; ++i) {
-        if (commandQueue_->push(commands[i]) == kInvalidIndex) break;
-        ++accepted;
-    }
+    // As strings do lote vêm com deslocamento RELATIVO ao blob do lote: o
+    // blob é copiado para a arena da fila e cada comando com string é
+    // rebaseado para onde a cópia caiu (sem isso, o comando apontava para a
+    // string de um lote anterior — um texto editado virava "editar texto").
+    u32 base = 0;
+    bool haveBlob = false;
     if (stringBlob && stringBlobSize) {
         if (char* dst = commandQueue_->alloc_string(stringBlobSize)) {
             std::memcpy(dst, stringBlob, stringBlobSize);
+            base = commandQueue_->offset_of(dst);
+            haveBlob = true;
         }
+    }
+    u32 accepted = 0;
+    for (u32 i = 0; i < count; ++i) {
+        Command c = commands[i];
+        // Sem blob no lote, o deslocamento já é da arena (push_string direto).
+        if (c.stringLength > 0 && stringBlob && stringBlobSize) {
+            if (!haveBlob || c.stringOffset + c.stringLength > stringBlobSize) {
+                c.stringLength = 0;   // string perdida: o comando chega sem ela (nunca com a de outro)
+                c.stringOffset = 0;
+            } else {
+                c.stringOffset += base;
+            }
+        }
+        if (commandQueue_->push(c) == kInvalidIndex) break;
+        ++accepted;
     }
     commandQueue_->commit();
     request_render();
@@ -984,8 +1055,17 @@ u32 Engine::submit_commands(const Command* commands, u32 count,
 void Engine::drain_commands_locked() noexcept {
     if (!project_) return;
     const u32 n = commandQueue_->drain([this](const Command& cmd) {
+        // O blob da fila guarda as strings coladas, SEM terminador: cópia com o
+        // comprimento exato (lida até o NUL, um texto novo levava junto os
+        // anteriores — "Texto ATexto AuTexto…").
+        std::string owned;
         const char* str = nullptr;
-        if (cmd.stringLength > 0) str = commandQueue_->string_at(cmd.stringOffset, cmd.stringLength);
+        if (cmd.stringLength > 0) {
+            if (const char* raw = commandQueue_->string_at(cmd.stringOffset, cmd.stringLength)) {
+                owned.assign(raw, cmd.stringLength);
+                str = owned.c_str();
+            }
+        }
         const Status s = apply_command_internal(cmd, str, true);
         if (!s.ok()) {
             AUREA_LOG_WARN("comando %u recusado: %s", static_cast<unsigned>(cmd.type), s.message().data());
@@ -1633,6 +1713,15 @@ bool Engine::query_layer_detail(u64 layerId, bridge::LayerDetailPOD& out) noexce
                        | ((aa && aa->has_audio() && (l->kind == LayerKind::Video || l->kind == LayerKind::Audio))
                               ? bridge::kAudioFlagHasAudio : 0u)
                        | ((vt && vt->animated()) ? bridge::kAudioFlagVolumeAnimated : 0u);
+    }
+    if (l->kind == LayerKind::Text) {
+        if (const auto font = text::default_font()) {
+            const text::TextExtent ext = text::measure(*font, l->text);
+            const f32 pad = l->text.strokeWidth > 0.0f ? l->text.strokeWidth + 2.0f : 2.0f;
+            out.sourceWidth = static_cast<u32>(std::ceil(ext.width + 2.0f * pad));
+            out.sourceHeight = static_cast<u32>(std::ceil(ext.height + 2.0f * pad));
+        }
+        return true;
     }
     if (l->kind == LayerKind::Shape) {
         auto rgba8 = [](Vec4 c) {
@@ -2697,6 +2786,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             Layer* l = need_layer(cmd.layer_ref.layer);
             if (!l) return Errc::NotFound;
             if (stringData) l->text.content = stringData;
+            recenter_text(*l);
             return OkStatus;
         }
         case CommandType::TextSetFont:
@@ -2704,7 +2794,8 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         case CommandType::TextSetSize: {
             Layer* l = need_layer(cmd.text_size.layer);
             if (!l) return Errc::NotFound;
-            l->text.size = cmd.text_size.size;
+            l->text.size = std::clamp(cmd.text_size.size, 1.0f, 2000.0f);
+            recenter_text(*l);
             return OkStatus;
         }
         case CommandType::TextSetColor: {
@@ -2722,7 +2813,8 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         case CommandType::TextSetStrokeWidth: {
             Layer* l = need_layer(cmd.text_stroke_width.layer);
             if (!l) return Errc::NotFound;
-            l->text.strokeWidth = cmd.text_stroke_width.width;
+            l->text.strokeWidth = std::clamp(cmd.text_stroke_width.width, 0.0f, 200.0f);
+            recenter_text(*l);
             return OkStatus;
         }
         case CommandType::TextSetStrokeColor: {

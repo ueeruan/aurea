@@ -262,6 +262,12 @@ class AureaEngine private constructor() {
     /** O som do vídeo vira camada própria; o vídeo fica mudo. Id ≥ 0 ou −Errc. */
     fun extractAudio(layer: Long): Long = nativeExtractAudio(nativeHandle, layer)
 
+    /** Nova camada de texto no centro. Id ≥ 0 ou −Errc. */
+    fun addText(content: String): Long = nativeAddText(nativeHandle, content)
+
+    /** Texto da camada: conteúdo (nulo = não é texto) e 13 floats (ver TextDetail). */
+    fun queryText(layer: Long, out: FloatArray): String? = nativeQueryText(nativeHandle, layer, out)
+
     /** Nova forma (ladrilho `preset` da aba Forma) no centro. Id ≥ 0 ou −Errc. */
     fun addShape(preset: Int): Long = nativeAddShape(nativeHandle, preset)
 
@@ -350,6 +356,8 @@ class AureaEngine private constructor() {
     private external fun nativeImportAudio(handle: Long, source: String, name: String): Long
     private external fun nativeExtractAudio(handle: Long, layer: Long): Long
     private external fun nativeAddShape(handle: Long, preset: Int): Long
+    private external fun nativeAddText(handle: Long, content: String): Long
+    private external fun nativeQueryText(handle: Long, layer: Long, out: FloatArray): String?
     private external fun nativeFreezeFrame(handle: Long, layer: Long, frame: Int, holdFrames: Int): Long
     private external fun nativeQueryWaveform(
         handle: Long, layer: Long, startFrame: Double, framesPerBucket: Double, count: Int, out: ByteBuffer,

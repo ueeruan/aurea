@@ -95,7 +95,9 @@ internal fun AddLayerPanel(store: EditorStore, ui: EditorUi) {
         Column(Modifier.width(52.dp).fillMaxHeight()) {
             SideShortcut(ShellGlyph.Scribble, "Desenho à\nmão livre") { store.comingSoon("Desenho livre") }
             SideShortcut(CupertinoGlyph.PencilOutline, "Desenho\nvetorial") { store.comingSoon("Desenho vetorial") }
-            SideShortcut(CupertinoGlyph.Textformat, "Texto") { store.comingSoon("Texto") }
+            SideShortcut(CupertinoGlyph.Textformat, "Texto") {
+                if (store.addText() >= 0) openPanel(store, ui, com.aurea.aurea.editor.panels.EditorPanel.Text)
+            }
             ChromeButton(CupertinoGlyph.Xmark, "Fechar adicionar", onClick = close, size = 20.dp, width = 52.dp, height = 44.dp)
         }
     }

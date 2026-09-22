@@ -162,6 +162,8 @@ struct EngineConfig {
     audio::AudioOutput* audioOutput = nullptr;
 
     f32   displayRefreshRate = 60.0f;
+    /// Fonte padrão do texto (arquivo TTF/OTF); vazio = procurar a do sistema.
+    std::string defaultFontPath;
     std::string cacheDirectory;
     std::string documentsDirectory;
     u32   workerCount = 0;
@@ -262,6 +264,10 @@ public:
     /// Nova forma no centro da composição, do cabeçote até o fim. `preset` é
     /// o ladrilho da aba Forma (0..14). Devolve o id da camada.
     [[nodiscard]] Result<u64> add_shape(u32 preset) noexcept;
+    /// Nova camada de texto ("Texto", centralizada), do cabeçote até o fim.
+    [[nodiscard]] Result<u64> add_text(const char* content = nullptr) noexcept;
+    /// Dados de texto da camada (para a UI editar). false = não é texto.
+    bool query_text(u64 layerId, TextData& out) noexcept;
     /// Imagem já decodificada pela plataforma (RGBA8 sRGB, alfa reto).
     /// `sourcePath` (URI/caminho) fica no projeto: ao reabrir, o motor pede a
     /// imagem de novo ao `imageLoader`. Sem origem, a imagem só vive na sessão.
@@ -513,6 +519,8 @@ private:
     void export_thread_main() noexcept;
     [[nodiscard]] Status render_export_frame(FrameIndex t, const OffscreenTarget& target) noexcept;
     [[nodiscard]] Status write_export_audio(i64 untilSample) noexcept;
+    /// Âncora da camada de texto no centro da caixa atual (depois de editar).
+    void recenter_text(Layer& l) noexcept;
 };
 
 } // namespace aurea

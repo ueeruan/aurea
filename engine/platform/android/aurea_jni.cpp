@@ -1165,6 +1165,17 @@ AUREA_JNI void AUREA_FN(nativeSetThermal)(JNIEnv*, jclass, jlong handle, jint st
 ///   7 largura máxima de preview · 8 altura máxima de preview
 ///   9 largura máxima de export · 10 altura máxima de export
 ///   11 decodes paralelos · 12 workers do pool · 13 escala inicial (0..3)
+/// Foto de base das prévias de efeito: RGBA8 (alfa reto), largura × altura.
+AUREA_JNI jboolean AUREA_FN(nativeSetEffectPreviewSource)(JNIEnv* env, jclass, jlong handle, jbyteArray rgba, jint width, jint height) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !rgba || width <= 0 || height <= 0) return JNI_FALSE;
+    const jsize n = env->GetArrayLength(rgba);
+    if (n < width * height * 4) return JNI_FALSE;
+    std::vector<u8> px(static_cast<usize>(n));
+    env->GetByteArrayRegion(rgba, 0, n, reinterpret_cast<jbyte*>(px.data()));
+    return c->engine.set_effect_preview_source(px.data(), static_cast<u32>(width), static_cast<u32>(height)) ? JNI_TRUE : JNI_FALSE;
+}
+
 AUREA_JNI jboolean AUREA_FN(nativeDeviceReport)(JNIEnv* env, jclass, jlong handle, jlongArray out) {
     NativeContext* c = ctx_of(handle);
     if (!c || !out) return JNI_FALSE;

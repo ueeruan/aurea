@@ -16,7 +16,7 @@ internal fun EditorStore.primaryKeys(): List<KeyframeRow> = primary?.let { keyfr
 
 /** A mesma trilha? Transform = mesma propriedade; efeito = mesmo efeito e mesmo `param*4+componente`. */
 internal fun KeyframeRow.sameTrack(o: KeyframeRow): Boolean =
-    property == o.property && (property != TrackProperty.EFFECT_PARAM || (effectIndex == o.effectIndex && paramIndex == o.paramIndex))
+    property == o.property && (property < TrackProperty.EFFECT_PARAM || (effectIndex == o.effectIndex && paramIndex == o.paramIndex))
 
 /**
  * Trilhas IRMÃS: as que andam juntas no mesmo instante — X/Y de posição, escala
@@ -26,6 +26,13 @@ internal fun KeyframeRow.sameTrack(o: KeyframeRow): Boolean =
 internal fun KeyframeRow.sameGroup(o: KeyframeRow): Boolean {
     if (property == TrackProperty.EFFECT_PARAM || o.property == TrackProperty.EFFECT_PARAM) {
         return property == o.property && effectIndex == o.effectIndex && paramIndex / 4 == o.paramIndex / 4
+    }
+    // Forma: largura e altura andam juntas (Tamanho); o resto é trilha própria.
+    if (property == TrackProperty.SHAPE_PARAM && o.property == TrackProperty.SHAPE_PARAM) {
+        return paramIndex == o.paramIndex || (paramIndex in 5..6 && o.paramIndex in 5..6)
+    }
+    if (property > TrackProperty.EFFECT_PARAM || o.property > TrackProperty.EFFECT_PARAM) {
+        return property == o.property && effectIndex == o.effectIndex && paramIndex == o.paramIndex
     }
     return transformGroup(property) == transformGroup(o.property)
 }
@@ -45,6 +52,10 @@ internal fun List<KeyframeRow>.track(of: KeyframeRow): List<KeyframeRow> = filte
 /** As marcas da trilha de uma propriedade de transform. */
 internal fun List<KeyframeRow>.transformTrack(property: Int): List<KeyframeRow> =
     filter { it.property == property }.sortedBy { it.time }
+
+/** As marcas da trilha de um parâmetro da forma (ShapeParam). */
+internal fun List<KeyframeRow>.shapeTrack(param: Int): List<KeyframeRow> =
+    filter { it.property == TrackProperty.SHAPE_PARAM && it.paramIndex == param }.sortedBy { it.time }
 
 /** As marcas da trilha de um componente de parâmetro de efeito. */
 internal fun List<KeyframeRow>.effectTrack(effectId: Int, param: Int, component: Int): List<KeyframeRow> =

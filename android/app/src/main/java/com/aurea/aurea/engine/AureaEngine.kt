@@ -149,6 +149,10 @@ class AureaEngine private constructor() {
     /** "Adreno (TM) 740 · driver 0x…" — o aparelho, não um rótulo genérico. */
     fun deviceSummary(): String = nativeDeviceSummary(nativeHandle) ?: ""
 
+    /** Foto de base das prévias de efeito (RGBA8, alfa reto). */
+    fun setEffectPreviewSource(rgba: ByteArray, width: Int, height: Int): Boolean =
+        nativeSetEffectPreviewSource(nativeHandle, rgba, width, height)
+
     fun shutdown() = nativeShutdown(nativeHandle)
 
     fun destroy() {
@@ -542,6 +546,7 @@ class AureaEngine private constructor() {
     ): Boolean
     private external fun nativeDeviceReport(handle: Long, out: LongArray): Boolean
     private external fun nativeDeviceSummary(handle: Long): String?
+    private external fun nativeSetEffectPreviewSource(handle: Long, rgba: ByteArray, width: Int, height: Int): Boolean
     private external fun nativeShutdown(handle: Long)
     private external fun nativeSuspend(handle: Long)
     private external fun nativeResume(handle: Long)

@@ -725,6 +725,8 @@ public:
     /// a cartela de demonstração. RGBA8 sRGB de alfa reto. Não depende de
     /// projeto nem de composição aberta — o navegador de efeitos existe antes
     /// de qualquer camada. `NotImplemented` = efeito sem prévia de um quadro.
+    /// Foto de base das prévias de efeito (RGBA8 sRGB). O app manda uma vez.
+    bool set_effect_preview_source(const u8* rgba, u32 width, u32 height) noexcept;
     [[nodiscard]] Status render_effect_preview(u32 typeId, u32 width, u32 height, std::vector<u8>& out,
                                                u32& outWidth, u32& outHeight) noexcept;
 

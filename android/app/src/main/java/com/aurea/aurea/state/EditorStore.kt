@@ -321,6 +321,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                         startThermalWatch()
                         engineReady = true
                         catalog = readCatalog()
+                        loadEffectPreviewPhoto()
                         effectPreviews = EffectPreviewStore(dirs.cache, ::renderEffectPreview)
                         startStatusLoop()
                     } else {
@@ -330,6 +331,24 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             }
         }
         refreshProjects()
+    }
+
+    /**
+     * A foto das prévias de efeito (assets/previa_efeitos.jpg): cada efeito é
+     * mostrado aplicado sobre ela, não sobre uma cartela de teste.
+     */
+    private fun loadEffectPreviewPhoto() {
+        runCatching {
+            getApplication<Application>().assets.open("previa_efeitos.jpg").use { input ->
+                val bmp = android.graphics.BitmapFactory.decodeStream(input, null,
+                    android.graphics.BitmapFactory.Options().apply { inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888 })
+                    ?: return
+                val buf = java.nio.ByteBuffer.allocate(bmp.byteCount)
+                bmp.copyPixelsToBuffer(buf)   // ARGB_8888 na memória = R, G, B, A
+                engine.setEffectPreviewSource(buf.array(), bmp.width, bmp.height)
+                bmp.recycle()
+            }
+        }
     }
 
     /** O que o motor decidiu para ESTE aparelho (mostrado nos Ajustes). */

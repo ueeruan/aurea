@@ -298,6 +298,9 @@ public:
     /// para efeito que não faz sentido num quadro solto (temporal, global) e
     /// `PipelineCompileFailed` quando o efeito não conseguiu montar os passes —
     /// nos dois casos a UI mostra a cartela genérica.
+    /// Foto de base das prévias de efeito (RGBA8 sRGB, alfa reto). Vazia =
+    /// a cartela de teste gerada no shader.
+    void set_effect_preview_source(std::vector<u8> rgba, u32 width, u32 height) noexcept;
     [[nodiscard]] Status render_effect_preview(const EffectRegistry& effects, EffectTypeId type,
                                                u32 width, u32 height, std::vector<u8>& outRgba) noexcept;
 
@@ -350,6 +353,12 @@ private:
         PixelFormat format = PixelFormat::Unknown;
         u64 lastFrame = 0;
     };
+
+    // Foto de base das prévias de efeito (sobe na primeira prévia depois de trocada).
+    std::vector<u8> previewSrc_;
+    u32 previewSrcW_ = 0, previewSrcH_ = 0;
+    bool previewSrcDirty_ = false;
+    TextureHandle previewSrcTex_{};
 
     struct ImageTexture {
         TextureHandle texture{};

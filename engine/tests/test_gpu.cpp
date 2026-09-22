@@ -4183,3 +4183,29 @@ AUREA_TEST(Gpu, EveryRegisteredEffectBuildsAndRenders) {
     for (const std::string& b : broken) std::printf("\n    efeito quebrado: %s", b.c_str());
     AUREA_CHECK_MSG(broken.empty(), "efeito do catálogo nao desenha");
 }
+
+// A foto do app como base das prévias: o efeito é mostrado sobre ela.
+AUREA_TEST(Gpu, EffectPreviewUsesThePhotoWhenGiven) {
+    AUREA_REQUIRE_GPU();
+    Gpu& g = gpu();
+    // "Foto" 64×64: metade de cima vermelha, metade de baixo azul.
+    std::vector<u8> photo(64 * 64 * 4);
+    for (u32 y = 0; y < 64; ++y) for (u32 x = 0; x < 64; ++x) {
+        u8* p = &photo[(y * 64 + x) * 4];
+        p[0] = y < 32 ? 220 : 20; p[1] = 30; p[2] = y < 32 ? 20 : 220; p[3] = 255;
+    }
+    g.renderer.set_effect_preview_source(photo, 64, 64);
+    std::vector<u8> rgba;
+    AUREA_CHECK(g.renderer.render_effect_preview(g.effects, effect_type_id(effect_keys::kSaturation), 160, 100, rgba).ok());
+    // Card 1,6:1 recorta em cima/embaixo com o corte puxado para cima: o topo
+    // do card é a parte vermelha e o pé é a azul.
+    const u8* top = &rgba[(5 * 160 + 80) * 4];
+    const u8* bottom = &rgba[(95 * 160 + 80) * 4];
+    std::printf("    previa com foto: topo (%u,%u,%u) pe (%u,%u,%u)\n", top[0], top[1], top[2], bottom[0], bottom[1], bottom[2]);
+    AUREA_CHECK(top[0] > top[2]);
+    AUREA_CHECK(bottom[2] > bottom[0]);
+    g.renderer.set_effect_preview_source({}, 0, 0);   // os outros testes usam a cartela
+    std::vector<u8> plate;
+    AUREA_CHECK(g.renderer.render_effect_preview(g.effects, effect_type_id(effect_keys::kSaturation), 160, 100, plate).ok());
+    AUREA_CHECK(plate != rgba);
+}

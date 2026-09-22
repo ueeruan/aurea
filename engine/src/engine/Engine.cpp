@@ -4400,6 +4400,14 @@ Status Engine::render_offscreen(TextureHandle target, u32 width, u32 height, boo
     return s;
 }
 
+bool Engine::set_effect_preview_source(const u8* rgba, u32 width, u32 height) noexcept {
+    if (!rgba || width == 0 || height == 0 || width > 4096 || height > 4096) return false;
+    std::vector<u8> px(rgba, rgba + static_cast<usize>(width) * height * 4);
+    std::lock_guard<std::mutex> rl(renderMutex_);
+    renderer_.set_effect_preview_source(std::move(px), width, height);
+    return true;
+}
+
 Status Engine::render_effect_preview(u32 typeId, u32 width, u32 height, std::vector<u8>& out, u32& outWidth,
                                      u32& outHeight) noexcept {
     if (!gpu_ || !renderer_.ready()) return Status{Errc::InvalidState, "sem GPU"};

@@ -722,6 +722,8 @@ object TrackProperty {
     const val EFFECT_PARAM = 31
     const val AUDIO_VOLUME = 32
     const val TEXT_ANIM_PARAM = 33
+    const val VECTOR_PARAM = 34
+    const val SHAPE_PARAM = 35
 }
 
 /**

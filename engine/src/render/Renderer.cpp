@@ -416,6 +416,9 @@ void Renderer::shutdown() noexcept {
     release_project_resources();
     if (glyphAtlas_.valid()) backend_->destroy_texture(glyphAtlas_);
     glyphAtlas_ = TextureHandle{};
+    if (previewSrcTex_.valid()) backend_->destroy_texture(previewSrcTex_);
+    previewSrcTex_ = TextureHandle{};
+    previewSrcDirty_ = !previewSrc_.empty();
     for (u32 i = 0; i < kGlyphRing; ++i) {
         if (glyphBuf_[i].valid()) backend_->destroy_buffer(glyphBuf_[i]);
         glyphBuf_[i] = BufferHandle{};
@@ -2949,6 +2952,26 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     return endStatus;
 }
 
+void Renderer::set_effect_preview_source(std::vector<u8> rgba, u32 width, u32 height) noexcept {
+    if (width == 0 || height == 0) {   // sem foto: volta para a cartela de teste
+        if (previewSrcTex_.valid()) backend_->destroy_texture(previewSrcTex_);
+        previewSrcTex_ = TextureHandle{};
+        previewSrc_.clear();
+        previewSrcW_ = previewSrcH_ = 0;
+        previewSrcDirty_ = false;
+        return;
+    }
+    if (rgba.size() < static_cast<usize>(width) * height * 4) return;
+    if (previewSrcTex_.valid() && (width != previewSrcW_ || height != previewSrcH_)) {
+        backend_->destroy_texture(previewSrcTex_);
+        previewSrcTex_ = TextureHandle{};
+    }
+    previewSrc_ = std::move(rgba);
+    previewSrcW_ = width;
+    previewSrcH_ = height;
+    previewSrcDirty_ = true;
+}
+
 Status Renderer::render_effect_preview(const EffectRegistry& effects, EffectTypeId type,
                                        u32 width, u32 height, std::vector<u8>& outRgba) noexcept {
     if (!backend_) return Status{Errc::InvalidState, "renderer sem backend"};
@@ -3001,7 +3024,51 @@ Status Renderer::render_effect_preview(const EffectRegistry& effects, EffectType
     const FGTexture plate = graph_.create_texture("cartela", inDesc);
 
     EffectBuildContext ctx(graph_, shaders_, arena_, *this, kWorkFormat, maxTex);
-    {
+    // A foto de base (quando o app mandou uma): sobe uma vez, vira linear e é
+    // recortada no formato pedido, puxando o corte para o terço de cima (o
+    // rosto fica no card). Sem foto, a cartela de teste do shader.
+    bool usedPhoto = false;
+    if (previewSrcW_ > 0 && previewSrcH_ > 0) {
+        if (!previewSrcTex_.valid()) {
+            TextureDesc d;
+            d.width = previewSrcW_;
+            d.height = previewSrcH_;
+            d.format = SurfaceFormat::RGBA8;
+            d.sampled = true;
+            d.transferDst = true;
+            d.debugName = "foto-das-previas";
+            auto t = backend_->create_texture(d);
+            if (t.ok()) {
+                previewSrcTex_ = *t;
+                previewSrcDirty_ = true;
+            }
+        }
+        if (previewSrcTex_.valid() && previewSrcDirty_) {
+            previewSrcDirty_ = !backend_->upload_texture(previewSrcTex_, previewSrc_.data(), previewSrcW_ * 4).ok();
+        }
+        if (previewSrcTex_.valid() && !previewSrcDirty_) {
+            TextureDesc ld = inDesc;
+            ld.width = previewSrcW_;
+            ld.height = previewSrcH_;
+            const FGTexture lin = graph_.create_texture("foto-linear", ld);
+            const Vec4 flags{0.0f, 0.0f, 0.0f, 0.0f};
+            const f32 src = static_cast<f32>(previewSrcW_) / static_cast<f32>(previewSrcH_);
+            const f32 dst = static_cast<f32>(width) / static_cast<f32>(height);
+            Vec4 map{1.0f, 1.0f, 0.0f, 0.0f};   // uv = v_uv * xy + zw
+            if (dst > src) {                     // mais largo: corta em cima/embaixo
+                map.y = src / dst;
+                map.w = (1.0f - map.y) * 0.35f;
+            } else {                             // mais alto: corta dos lados
+                map.x = dst / src;
+                map.z = (1.0f - map.x) * 0.5f;
+            }
+            usedPhoto = ctx.fullscreen_pass("foto", PassStage::Decode, lin, ShaderId::video_rgba_to_linear_frag,
+                                            {PassTexture{{}, previewSrcTex_, CommonSampler::LinearClamp}}, &flags, sizeof(flags)) != kInvalidIndex
+                     && ctx.fullscreen_pass("foto-recorte", PassStage::Decode, plate, ShaderId::common_copy_frag,
+                                            {PassTexture{lin, {}, CommonSampler::LinearClamp}}, &map, sizeof(map)) != kInvalidIndex;
+        }
+    }
+    if (!usedPhoto) {
         const Vec4 size{static_cast<f32>(width), static_cast<f32>(height), 0.0f, 0.0f};
         if (ctx.fullscreen_pass("cartela", PassStage::Effects, plate, ShaderId::effects_preview_plate_frag,
                                 {}, &size, sizeof(size)) == kInvalidIndex) {

@@ -134,7 +134,21 @@ internal fun ShapeEditPanel(env: PanelEnv) {
             keyframeLook = look,
             onKeyframe = { store.toggleShapeParamKey(sel) },
             curveAnimated = animBits and (1 shl sel) != 0,
-            onCurve = null,
+            // Curva do trecho sob o cabeçote, na trilha da linha acesa.
+            onCurve = if (store.primaryKeys().shapeTrack(sel).size >= 2) {
+                {
+                    val layer = store.primary
+                    val t = store.detail?.localPlayhead
+                    if (layer != null && t != null) {
+                        store.primaryKeys().shapeTrack(sel).segmentStart(t)?.let { key ->
+                            store.selectKeyframe(layer, key)
+                            env.onOpenPanel(EditorPanel.Curve)
+                        }
+                    }
+                }
+            } else {
+                null
+            },
         )
         Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(top = 6.dp, end = 10.dp, bottom = 16.dp)) {
             ShapeSwitcher(store, type)

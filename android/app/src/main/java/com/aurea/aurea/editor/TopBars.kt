@@ -1,6 +1,25 @@
 package com.aurea.aurea.editor
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupPositionProvider
+import androidx.compose.ui.window.PopupProperties
+import com.aurea.aurea.editor.timeline.Keyframes
+import com.aurea.aurea.editor.timeline.Thumbs
+import com.aurea.aurea.engine.LayerRow
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
@@ -54,27 +73,32 @@ import com.aurea.aurea.ui.theme.LayerType
 import com.aurea.aurea.ui.theme.tocavel
 
 /** O que a barra da camada mostra (data class: recompõe só quando muda). */
-private data class LayerHeader(val id: Long, val name: String, val kind: Int, val locked: Boolean)
+private data class LayerHeader(val id: Long, val name: String, val kind: Int, val locked: Boolean, val parent: Long)
 
 private val TitleStyle = AureaType.Base.merge(TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W600))
 
+/** Pai da linha na lista de camadas (0 = solta): `parentIndex` é índice na mesma lista. */
+private fun parentOf(rows: List<LayerRow>, row: LayerRow): Long = rows.getOrNull(row.parentIndex)?.id ?: 0L
+
 // =============================================================================
-// Camada escolhida — `BarraDaCamada`
+// Camada escolhida — `BarraDaCamada` (ref15)
 // =============================================================================
 
 /**
- * ‹ · selo do tipo · nome editável ali mesmo · [parentesco] · duplicar ·
- * lixeira · ⋮. Centros medidos no print: duplicar 307,4 · lixeira 347,4 ·
- * ⋮ 387,4 dp (alvos de 40 com 4 de respiro à direita).
+ * ‹ · nome editável ali mesmo · VINCULAR · lixeira · ⋯. O vincular mora aqui
+ * (pedido do dono, ref20): toque abre a lista "Nenhum" + camadas com
+ * miniatura; aceso quando a camada já segue outra. Duplicar fica no
+ * transporte, um lugar só.
  */
 @Composable
 internal fun LayerTopBar(store: EditorStore, ui: EditorUi, layerId: Long) {
     val header by remember(layerId) {
         derivedStateOf {
-            store.layers.firstOrNull { it.id == layerId }?.let { LayerHeader(it.id, it.name, it.kind, it.locked) }
+            val rows = store.layers
+            rows.firstOrNull { it.id == layerId }?.let { LayerHeader(it.id, it.name, it.kind, it.locked, parentOf(rows, it)) }
         }
     }
-    val hasParent by remember { derivedStateOf { (store.detail?.parentId ?: 0L) != 0L } }
+    var linking by remember(layerId) { mutableStateOf(false) }
     val h = header
     Row(
         Modifier
@@ -86,17 +110,6 @@ internal fun LayerTopBar(store: EditorStore, ui: EditorUi, layerId: Long) {
     ) {
         ChromeButton(CupertinoGlyph.ChevronLeft, "Voltar (tirar a seleção)", onClick = { shellBack(store, ui) }, width = 44.dp)
         if (h == null) return@Row
-        val type = LayerType.of(h.kind)
-        Box(
-            Modifier
-                .padding(end = 8.dp)
-                .size(24.dp)
-                .clip(RoundedCornerShape(7.dp))
-                .background(type.color),
-            contentAlignment = Alignment.Center,
-        ) {
-            CupertinoIcon(type.glyph, 14.dp, Color.White)
-        }
         Box(Modifier.weight(1f)) {
             InlineName(
                 key = h.id,
@@ -106,20 +119,172 @@ internal fun LayerTopBar(store: EditorStore, ui: EditorUi, layerId: Long) {
                 onRename = { store.renameLayer(h.id, it) },
             )
         }
-        // Parentesco só acende quando ESTÁ ligado: é informação, não ação de
-        // todo dia.
-        if (hasParent) {
+        Box {
             ChromeButton(
-                CupertinoGlyph.LinkCircleFill,
-                "Segue outra camada",
-                onClick = { openPanel(store, ui, com.aurea.aurea.editor.panels.EditorPanel.Parent) },
+                if (h.parent != 0L) CupertinoGlyph.LinkCircleFill else CupertinoGlyph.Link,
+                if (h.parent != 0L) "Vinculada a outra camada · trocar" else "Vincular a outra camada",
+                onClick = {
+                    if (store.playing) store.pause()
+                    linking = true
+                },
                 size = 20.dp,
-                tint = AureaColors.Accent,
+                width = 44.dp,
+                tint = if (h.parent != 0L) AureaColors.Accent else AureaColors.Text,
             )
+            if (linking) LinkMenu(store, listOf(h.id)) { linking = false }
         }
-        ChromeButton(CupertinoGlyph.PlusSquareOnSquare, "Duplicar camada", onClick = { store.duplicateLayers(listOf(h.id)) }, size = 19.dp)
-        ChromeButton(CupertinoGlyph.Trash, "Excluir camada", onClick = { LayerOps.delete(store, listOf(h.id)) }, size = 19.dp)
-        ChromeVectorButton(Icons.Filled.MoreVert, "Tudo o que se faz com a camada", onClick = { openSheet(store, ui, ShellSheet.LayerMenu) })
+        ChromeButton(CupertinoGlyph.Trash, "Excluir camada", onClick = { LayerOps.delete(store, listOf(h.id)) }, size = 19.dp, width = 44.dp)
+        ChromeVectorButton(Icons.Filled.MoreHoriz, "Mais ações da camada", onClick = { openSheet(store, ui, ShellSheet.LayerMenu) }, size = 22.dp, width = 44.dp)
+    }
+}
+
+// =============================================================================
+// VINCULAR — a lista que desce do ícone (ref20)
+// =============================================================================
+
+/**
+ * "Nenhum" + as camadas que podem ser pai de TODAS as `ids` (nenhuma delas
+ * nem descendente delas: seria um ciclo), com miniatura e nome, da frente
+ * para o fundo como na timeline. Tocar vincula (um passo de desfazer) e fecha.
+ * O motor compensa: a camada fica onde está na tela e passa a seguir o pai.
+ */
+@Composable
+internal fun LinkMenu(store: EditorStore, ids: List<Long>, onDismiss: () -> Unit) {
+    val density = LocalDensity.current
+    val provider = remember(density) { with(density) { LinkMenuPosition(8.dp.roundToPx()) } }
+    val rows = store.layers
+    val candidates = remember(rows, ids) { store.parentCandidatesForAll(ids) }
+    // Pai em comum (0 = todas soltas; −1 = pais diferentes: nada marcado).
+    val current = remember(rows, ids) {
+        val parents = rows.filter { it.id in ids }.map { parentOf(rows, it) }.distinct()
+        parents.singleOrNull() ?: -1L
+    }
+    fun pick(parent: Long) {
+        onDismiss()
+        if (parent == current) return
+        if (ids.size == 1) store.setParent(ids[0], parent) else store.setParentMany(ids, parent)
+    }
+    Popup(popupPositionProvider = provider, onDismissRequest = onDismiss, properties = PopupProperties(focusable = true)) {
+        Column(
+            Modifier
+                .width(300.dp)
+                .heightIn(max = 420.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(AureaColors.Pill)
+                .border(1.dp, AureaColors.Border, RoundedCornerShape(12.dp))
+                .verticalScroll(rememberScrollState()),
+        ) {
+            LinkRow(
+                thumb = {
+                    Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
+                        CupertinoIcon(ShellGlyph.Nosign, 22.dp, AureaColors.Text)
+                    }
+                },
+                label = "Nenhum",
+                bold = true,
+                on = current == 0L,
+                background = AureaColors.Chip,
+            ) { pick(0L) }
+            candidates.forEach { row ->
+                val type = LayerType.of(row.kind)
+                LinkRow(
+                    thumb = { LayerThumb(store, row) },
+                    label = row.name.ifBlank { type.label },
+                    on = current == row.id,
+                ) { pick(row.id) }
+            }
+            if (candidates.isEmpty()) {
+                Text(
+                    "Nenhuma outra camada para seguir. Crie um Nulo em Adicionar › Objeto.",
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                    style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, lineHeight = 17.sp, color = AureaColors.Muted)),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LinkRow(
+    thumb: @Composable () -> Unit,
+    label: String,
+    on: Boolean,
+    bold: Boolean = false,
+    background: Color = Color.Transparent,
+    onClick: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(56.dp)
+            .background(if (on) AureaColors.AccentDim else background)
+            .tocavel(shrink = 1f, haptic = true, onClick = onClick)
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        thumb()
+        Spacer(Modifier.width(14.dp))
+        Text(
+            label,
+            modifier = Modifier.weight(1f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            style = AureaType.Base.merge(
+                TextStyle(
+                    fontSize = 15.sp,
+                    fontWeight = if (bold) FontWeight.W700 else FontWeight.W500,
+                    color = if (on) AureaColors.Accent else AureaColors.Text,
+                ),
+            ),
+        )
+        if (on) CupertinoIcon(CupertinoGlyph.CheckmarkAlt, 16.dp, AureaColors.Accent)
+    }
+}
+
+/**
+ * Miniatura da camada: vídeo e imagem pedem o quadro ao motor (o mesmo cache
+ * da timeline; enquanto não chega, o selo do tipo); o resto é o selo colorido.
+ */
+@Composable
+private fun LayerThumb(store: EditorStore, row: LayerRow) {
+    val type = LayerType.of(row.kind)
+    val media = type == LayerType.Video || type == LayerType.Image
+    val px = with(LocalDensity.current) { 44.dp.roundToPx() }.coerceIn(16, 256)
+    val generation = if (media) store.thumbnailGeneration else 0
+    val bitmap = remember(row.id, row.startFrame, row.offsetFrames, generation, media) {
+        if (!media) return@remember null
+        val fps = store.project.fps
+        val frame = if (type == LayerType.Image) row.startFrame
+        else Keyframes.toTimeline(Thumbs.requestLocalFrame(Thumbs.bucketOf(row.offsetFrames.toDouble(), fps), fps), row.startFrame, row.offsetFrames)
+        store.thumbnails.get(row.id, frame, px)?.asImageBitmap()
+    }
+    Box(
+        Modifier
+            .size(44.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .background(type.color),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (bitmap != null) {
+            Image(bitmap, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.matchParentSize())
+        } else {
+            CupertinoIcon(type.glyph, 20.dp, Color.White)
+        }
+    }
+}
+
+/** Abaixo do ícone, alinhada pela direita dele, presa a `margin` das bordas. */
+private class LinkMenuPosition(private val margin: Int) : PopupPositionProvider {
+    override fun calculatePosition(
+        anchorBounds: IntRect,
+        windowSize: IntSize,
+        layoutDirection: LayoutDirection,
+        popupContentSize: IntSize,
+    ): IntOffset {
+        val x = (anchorBounds.right - popupContentSize.width)
+            .coerceIn(margin, (windowSize.width - popupContentSize.width - margin).coerceAtLeast(margin))
+        val y = anchorBounds.bottom.coerceAtMost((windowSize.height - popupContentSize.height - margin).coerceAtLeast(margin))
+        return IntOffset(x, y)
     }
 }
 
@@ -259,88 +424,59 @@ private fun InlineName(
 }
 
 // =============================================================================
-// Lote — `BarraDoLote` (fundo `selecao` #123A63, duas páginas)
+// Lote — "N camadas selecionadas" (ref19): faixa em destaque
 // =============================================================================
 
+/**
+ * ✕ · "N camadas selecionadas" · vincular · agrupar · desagrupar (só com grupo
+ * na seleção) · lixeira · play. Dividir/aparar e alinhar ficam na barra de
+ * baixo ([MultiSelectionPanel]).
+ */
 @Composable
 internal fun BatchTopBar(store: EditorStore) {
-    var layoutPage by remember { mutableStateOf(false) }
     val count by remember { derivedStateOf { store.selection.size } }
-    BoxWithConstraints(
+    val groups by remember {
+        derivedStateOf { store.layers.filter { it.id in store.selection && it.kind == LayerType.Group.kind }.map { it.id } }
+    }
+    var linking by remember { mutableStateOf(false) }
+    val ink = AureaColors.OnAccent
+    Row(
         Modifier
             .fillMaxWidth()
             .height(ShellDims.TopBar)
-            .background(AureaColors.Selection),
+            .background(AureaColors.Accent)
+            .padding(end = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Os botões de 30 da A.01 (bug 28) crescem até 44 quando a largura deixa.
-        val pageButton: Dp = ((maxWidth.value - 36f - 2f) / 9f).coerceIn(30f, 44f).dp
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            BatchButton(CupertinoGlyph.Xmark, "Cancelar seleção", 36.dp) { store.clearSelection() }
-            if (!layoutPage) {
-                Text(
-                    if (count >= 2) "$count selecionadas" else "Selecione ao menos duas camadas",
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700)),
-                    modifier = Modifier.weight(1f),
-                )
-                BatchButton(CupertinoGlyph.RectangleStack, "Agrupar seleção", 36.dp) { store.comingSoon("Agrupar") }
-                BatchButton(CupertinoGlyph.SquareStack3dDownRightFill, "Agrupar e mascarar: a de cima mostra só o que cobre", 36.dp) {
-                    store.comingSoon("Agrupar e mascarar")
-                }
-                BatchButton(CupertinoGlyph.SquareStack3dDownRight, "Agrupar e recortar: a de cima fura as de baixo", 36.dp) {
-                    store.comingSoon("Agrupar e recortar")
-                }
-                BatchButton(CupertinoGlyph.Trash, "Excluir seleção", 36.dp) { LayerOps.delete(store, store.selection) }
-                BatchButton(CupertinoGlyph.ChevronRight, "Alinhar e distribuir", 36.dp) { layoutPage = true }
-            } else {
-                BatchButton(CupertinoGlyph.ChevronLeft, "Voltar às ações do lote", pageButton) { layoutPage = false }
-                Spacer(Modifier.weight(1f))
-                AlignButton(store, CupertinoGlyph.ArrowLeftToLine, "Alinhar à esquerda", LayerOps.Edge.Left, pageButton)
-                AlignButton(store, CupertinoGlyph.ArrowLeftRight, "Centralizar na horizontal", LayerOps.Edge.CenterH, pageButton)
-                AlignButton(store, CupertinoGlyph.ArrowRightToLine, "Alinhar à direita", LayerOps.Edge.Right, pageButton)
-                AlignButton(store, CupertinoGlyph.ArrowUpToLine, "Alinhar ao topo", LayerOps.Edge.Top, pageButton)
-                AlignButton(store, CupertinoGlyph.ArrowUpArrowDown, "Centralizar na vertical", LayerOps.Edge.CenterV, pageButton)
-                AlignButton(store, CupertinoGlyph.ArrowDownToLine, "Alinhar à base", LayerOps.Edge.Bottom, pageButton)
-                val three = count >= 3
-                BatchButton(
-                    CupertinoGlyph.ArrowUpDownSquare,
-                    "Distribuir na vertical (vãos iguais)",
-                    pageButton,
-                    enabled = three,
-                ) { LayerOps.distribute(store, store.selection, horizontal = false) }
-                BatchButton(
-                    CupertinoGlyph.ArrowLeftRightSquare,
-                    "Distribuir na horizontal (vãos iguais)",
-                    pageButton,
-                    enabled = three,
-                ) { LayerOps.distribute(store, store.selection, horizontal = true) }
-                Spacer(Modifier.width(2.dp))
-            }
+        ChromeButton(CupertinoGlyph.Xmark, "Cancelar seleção", onClick = { store.clearSelection() }, size = 18.dp, width = 44.dp, tint = ink)
+        Text(
+            if (count >= 2) "$count camadas selecionadas" else "Selecione ao menos duas camadas",
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700, color = ink)),
+            modifier = Modifier.weight(1f),
+        )
+        Box {
+            ChromeButton(CupertinoGlyph.Link, "Vincular as escolhidas a uma camada", onClick = {
+                if (store.playing) store.pause()
+                linking = true
+            }, size = 19.dp, tint = ink)
+            if (linking) LinkMenu(store, store.selection.toList()) { linking = false }
         }
+        ChromeButton(ShellGlyph.FolderBadgePlus, "Agrupar", onClick = { store.precompose() }, size = 19.dp, tint = ink)
+        if (groups.isNotEmpty()) {
+            ChromeButton(ShellGlyph.SquareSplit2x2, "Desagrupar", onClick = {
+                val ids = groups
+                ids.forEach { store.ungroupPrecomp(it) }
+            }, size = 19.dp, tint = ink)
+        }
+        ChromeButton(CupertinoGlyph.Trash, "Excluir seleção", onClick = { LayerOps.delete(store, store.selection) }, size = 19.dp, tint = ink)
+        ChromeButton(
+            if (store.playing) CupertinoGlyph.PauseFill else CupertinoGlyph.PlayFill,
+            if (store.playing) "Pausar" else "Reproduzir",
+            onClick = { store.togglePlayback() },
+            size = 20.dp,
+            tint = ink,
+        )
     }
-}
-
-@Composable
-private fun BatchButton(glyph: Char, description: String, width: Dp, enabled: Boolean = true, onLongClick: (() -> Unit)? = null, onClick: () -> Unit) {
-    ChromeButton(
-        glyph,
-        description,
-        onClick = if (enabled) onClick else null,
-        size = 18.dp,
-        width = width,
-        tint = if (enabled) AureaColors.Text else AureaColors.Disabled,
-        onLongClick = onLongClick,
-    )
-}
-
-/** Alinhar (à composição); segurar abriria a folha Alinhar completa. */
-@Composable
-private fun AlignButton(store: EditorStore, glyph: Char, description: String, edge: LayerOps.Edge, width: Dp) {
-    BatchButton(
-        glyph,
-        "$description · segure para mais",
-        width,
-        onLongClick = { store.comingSoon("Alinhar") },
-    ) { LayerOps.align(store, store.selection, edge) }
 }

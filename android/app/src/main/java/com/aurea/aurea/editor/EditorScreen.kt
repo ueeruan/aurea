@@ -213,7 +213,7 @@ fun EditorScreen(store: EditorStore) {
 
     val content = when {
         ui.adding -> SheetContent.Adding
-        ui.panel != null && (selectionSize == 1 || (selectionSize >= 2 && ui.panel == com.aurea.aurea.editor.panels.EditorPanel.Parent)) -> SheetContent.Panel
+        ui.panel != null && selectionSize == 1 -> SheetContent.Panel
         selectionSize >= 2 -> SheetContent.Batch
         selectionSize == 1 -> SheetContent.Dock
         else -> SheetContent.None
@@ -479,7 +479,7 @@ private fun ShellSheets(store: EditorStore, ui: EditorUi) {
     when (ui.sheet) {
         ShellSheet.LayerMenu -> LayerMenuSheet(store, ui, dismiss)
         ShellSheet.TimelineMenu -> TimelineMenuSheet(store, ui, dismiss)
-        ShellSheet.ProjectSettings -> ProjectSettingsSheet(store, ui, dismiss)
+        ShellSheet.ProjectSettings -> ProjectSettingsSheet(store, dismiss)
         ShellSheet.CopyPaste -> CopyPasteSheet(store, dismiss)
         ShellSheet.SearchLayers -> SearchLayersSheet(store, dismiss)
         ShellSheet.GoToTime -> {

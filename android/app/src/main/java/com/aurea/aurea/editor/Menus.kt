@@ -80,7 +80,6 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
         onDismiss()
         block()
     }
-    fun soon(feature: String) = act { store.comingSoon(feature) }
     fun timeAct(block: () -> Unit): () -> Unit = act {
         if (row.locked) store.showToast("Camada bloqueada: desbloqueie para editar") else block()
     }
@@ -141,26 +140,16 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
         LabelRow(row.label) { store.setLayerLabel(id, it) }
 
         if (visual) {
-            MenuSection("Recorte e grupo")
-            MenuItemRow(CupertinoGlyph.ArrowTurnLeftDown, "Recortar pela camada de baixo", soon("Recortar pela camada de baixo"))
+            MenuSection("Grupo")
             if (type != LayerType.Group) {
                 MenuItemRow(CupertinoGlyph.RectangleStack, "Converter em grupo", act { store.precompose(listOf(id)) })
             } else {
                 MenuItemRow(CupertinoGlyph.ArrowDownRightSquare, "Editar o grupo", act { store.openPrecomp(id) })
                 MenuItemRow(ShellGlyph.SquareSplit2x2, "Desagrupar", act { store.ungroupPrecomp(id) })
-                MenuItemRow(CupertinoGlyph.SquareStack3dDownRightFill, "Grupo de máscara", soon("Grupo de máscara"), detail = "A camada de cima mostra só o que cobre")
-                MenuItemRow(CupertinoGlyph.SquareStack3dDownRight, "Grupo de recorte", soon("Grupo de recorte"), detail = "A camada de cima fura as de baixo")
             }
-            MenuSection("Na composição")
-            MenuItemRow(ShellGlyph.RectangleArrowUpRightArrowDownLeft, "Caber na composição", soon("Caber na composição"))
-            MenuItemRow(CupertinoGlyph.Fullscreen, "Preencher a composição", soon("Preencher a composição"))
-            MenuItemRow(ShellGlyph.ArrowUpLeftArrowDownRight, "Esticar até as bordas", soon("Esticar até as bordas"))
-            MenuItemRow(CupertinoGlyph.ArrowLeftRightSquare, "Espelhar na horizontal", soon("Espelhar"))
-            MenuItemRow(CupertinoGlyph.ArrowUpDownSquare, "Espelhar na vertical", soon("Espelhar"))
         }
-        if (media || type == LayerType.Audio) {
+        if (type == LayerType.Video || type == LayerType.Audio) {
             MenuSection("Mídia")
-            MenuItemRow(CupertinoGlyph.InfoCircle, "Informações da mídia", soon("Informações da mídia"))
             if (type == LayerType.Video) {
                 MenuItemRow(
                     CupertinoGlyph.MusicNote2,
@@ -209,8 +198,6 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
         }
 
         MenuSection("Mais")
-        MenuItemRow(CupertinoGlyph.Link, "Seguir outra camada (parentesco)", act { openPanel(store, ui, EditorPanel.Parent) })
-        MenuItemRow(CupertinoGlyph.SquareGrid2x2, "Todas as ações…", soon("Todas as ações"))
         MenuItemRow(CupertinoGlyph.Trash, "Excluir camada", act { LayerOps.delete(store, listOf(id)) }, danger = true)
     }
 }
@@ -334,7 +321,6 @@ internal fun TimelineMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -
         onDismiss()
         block()
     }
-    fun soon(feature: String) = act { store.comingSoon(feature) }
     ShellMenuSheet(onDismiss, maxHeightFraction = 0.78f) {
         MenuSection("Seleção")
         MenuItemRow(CupertinoGlyph.CheckmarkSquare, "Selecionar todas as camadas", if (count >= 2) act { store.selectAll() } else null)
@@ -348,9 +334,32 @@ internal fun TimelineMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -
             if (ui.fullscreen) "Sair da tela cheia" else "Tela cheia",
             act { ui.fullscreen = !ui.fullscreen },
         )
-        MenuItemRow(CupertinoGlyph.Sparkles, "Prévia: Resultado final", act {}, checked = true, radio = true)
-        MenuItemRow(ShellGlyph.WandRaysInverse, "Prévia: Sem efeitos", soon("Prévia sem efeitos"), checked = false, radio = true)
-        MenuItemRow(CupertinoGlyph.CircleLefthalfFill, "Prévia: Selecionada a 50%", soon("Prévia da selecionada a 50%"), checked = false, radio = true)
+        MenuItemRow(
+            CupertinoGlyph.Speedometer,
+            "Desfoque de movimento da composição",
+            { store.setCompositionMotionBlur(!store.compMotionBlur) },
+            checked = store.compMotionBlur,
+            detail = "As camadas com desfoque de movimento só borram com isto ligado",
+        )
+        if (store.compMotionBlur) {
+            val shutter = store.shutterAngle.roundToInt()
+            MenuItemRow(
+                CupertinoGlyph.CircleLefthalfFill,
+                "Obturador: $shutter°",
+                {
+                    val next = ShutterOptions.firstOrNull { it > shutter } ?: ShutterOptions.first()
+                    store.changeShutterAngle(next.toFloat())
+                },
+                detail = "Toque para trocar (90°, 180°, 270°, 360°): maior = rastro mais longo",
+            )
+        }
+        MenuItemRow(
+            ShellGlyph.WaveformPathEcg,
+            "Diagnóstico na tela",
+            { store.toggleHud() },
+            checked = store.hudVisible,
+            detail = "Quadros por segundo, tempos da GPU, memória e o decodificador",
+        )
 
         MenuSection("Edição")
         MenuItemRow(
@@ -369,274 +378,18 @@ internal fun TimelineMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -
             if (store.playhead > 0) act { store.trimProjectAtPlayhead() } else null,
             detail = "Corta tudo o que passa de $now",
         )
-        MenuItemRow(CupertinoGlyph.Photo, "Usar este quadro como miniatura", soon("Miniatura do projeto"))
-        MenuItemRow(
-            CupertinoGlyph.ArrowRightToLine,
-            "Marcar aqui o fim da introdução",
-            soon("Marca da introdução"),
-            detail = "Esticado noutro projeto, a introdução toca intacta",
-        )
-        MenuItemRow(
-            CupertinoGlyph.ArrowLeftToLine,
-            "Marcar aqui o começo do final",
-            soon("Marca do final"),
-            detail = "Esticado noutro projeto, o final toca intacto",
-        )
 
         MenuSection("Marcas e ritmo")
         MenuItemRow(CupertinoGlyph.Bookmark, "Marcar (ou desmarcar) este instante", act { store.toggleMarker() })
         MenuItemRow(ShellGlyph.BookmarkSolid, "Ir para a próxima marca", if (store.markers.size > 0) act { store.seekToNextMarker() } else null)
         MenuItemRow(CupertinoGlyph.MusicNote2, "Detectar batidas da camada escolhida", act { store.detectBeats() })
 
-        MenuSection("Cronômetro de edição")
-        MenuItemRow(
-            CupertinoGlyph.Timer,
-            "Iniciar o cronômetro",
-            soon("Cronômetro de edição"),
-            detail = "Conta o tempo que você passa editando este projeto",
-        )
-
         MenuSection("Mais")
         MenuItemRow(
             CupertinoGlyph.RectangleStack, "Agrupar as camadas escolhidas",
             if (store.selection.isNotEmpty()) act { store.precompose() } else null,
         )
-        MenuItemRow(CupertinoGlyph.Book, "Guia rápido", soon("Guia rápido"))
     }
 }
 
-// =============================================================================
-// ⚙ Projeto — `showProjectSettingsSheet` (A.01: `folhaDoEstudio`)
-// =============================================================================
-
-private val Aspects = listOf("16:9" to 16f / 9f, "9:16" to 9f / 16f, "1:1" to 1f, "4:5" to 4f / 5f, "4:3" to 4f / 3f)
-private val Resolutions = listOf(720 to "HD 720p", 1080 to "Full HD 1080p", 1440 to "QHD 1440p", 2160 to "4K 2160p")
-private val FpsOptions = listOf(24, 30, 60)
 private val ShutterOptions = listOf(90, 180, 270, 360)
-
-/**
- * Os ajustes do projeto, lidos e escritos no motor (`store.composition`).
- * Proporção mantém o lado menor; resolução mantém a proporção; trocar a taxa
- * preserva os segundos (o motor reescala os tempos). O fundo abre o seletor
- * de cor num passo só de desfazer. O nome renomeia de verdade, e
- * "Diagnóstico na tela" liga o HUD de desempenho.
- */
-@Composable
-internal fun ProjectSettingsSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> Unit) {
-    val p = store.project
-    val comp = store.composition
-    var renaming by remember { mutableStateOf(false) }
-    var pickingBackground by remember { mutableStateOf(false) }
-    val w = comp?.width ?: p.width
-    val h = comp?.height ?: p.height
-    val aspect = if (h > 0) w.toFloat() / h else 0f
-    val currentAspect = Aspects.firstOrNull { abs(it.second - aspect) < 0.01f }?.first
-    val shortSide = min(w, h)
-    val fps = (comp?.fps ?: p.fps.toDouble()).roundToInt()
-    val seconds = if (fps > 0) (comp?.durationFrames ?: p.durationFrames).toFloat() / (comp?.fps?.toFloat() ?: p.fps) else 0f
-    ShellMenuSheet(onDismiss, maxHeightFraction = 0.82f, scrim = ShellColors.SettingsScrim, handle = ShellColors.SheetHandle) {
-        Text(
-            "Projeto",
-            style = AureaType.Base.merge(TextStyle(fontSize = 17.sp, fontWeight = FontWeight.W700)),
-            modifier = Modifier.padding(start = 18.dp, top = 12.dp, end = 18.dp, bottom = 4.dp),
-        )
-        SettingRow(CupertinoGlyph.Pencil, p.title.ifBlank { "(Sem título)" }, "Toque para renomear", chevron = true) { renaming = true }
-
-        SettingSection("Composição")
-        ChipsRow("Proporção", Aspects.map { it.first }, currentAspect) { label ->
-            val c = comp ?: return@ChipsRow
-            val ratio = Aspects.first { it.first == label }.second
-            var (nw, nh) = sizeFor(shortSide, ratio)
-            if (!c.fits(nw, nh)) {
-                // Não cabe mantendo o lado menor: encolhe até caber, na proporção pedida.
-                val k = min(c.capLong.toFloat() / max(nw, nh), c.capShort.toFloat() / min(nw, nh))
-                nw = even(nw * k)
-                nh = even(nh * k)
-            }
-            store.setCompositionSize(nw, nh)
-        }
-        ChipsRow("Resolução", Resolutions.map { it.second }, Resolutions.firstOrNull { it.first == shortSide }?.second) { label ->
-            val c = comp ?: return@ChipsRow
-            val short = Resolutions.first { it.second == label }.first
-            val (nw, nh) = sizeFor(short, if (aspect > 0f) aspect else 16f / 9f)
-            if (c.fits(nw, nh)) {
-                store.setCompositionSize(nw, nh)
-            } else {
-                store.showToast("Este aparelho exporta até ${c.capLong} × ${c.capShort}")
-            }
-        }
-        ChipsRow("Quadros", FpsOptions.map { it.toString() }, FpsOptions.firstOrNull { it == fps }?.toString()) { label ->
-            store.setCompositionFps(label.toDouble())
-        }
-        SettingRow(
-            ShellGlyph.SquareFill,
-            "Fundo da composição",
-            "$w × $h · ${String.format(Locale.ROOT, "%.1f", seconds).replace('.', ',')} s",
-            onClick = if (comp != null) ({ pickingBackground = true }) else null,
-        )
-
-        SettingSection("Preview")
-        SettingRow(ShellGlyph.SquareStack3dDownDottedline, "Casca de cebola", "Desligada") { store.comingSoon("Casca de cebola") }
-
-        SettingSection("Guias")
-        SettingRow(ShellGlyph.RectangleDock, "Áreas seguras", "Margens de título e ação no preview", switch = false) { store.comingSoon("Áreas seguras") }
-        ChipsRow("Colunas", listOf("Sem", "2", "3", "4", "6", "12"), "Sem") { store.comingSoon("Colunas") }
-        SettingRow(CupertinoGlyph.LineHorizontal3, "Adicionar guia vertical", "0 vertical, 0 horizontal") { store.comingSoon("Guias") }
-        SettingRow(CupertinoGlyph.LineHorizontal3, "Adicionar guia horizontal") { store.comingSoon("Guias") }
-
-        SettingSection("Motion blur da composição")
-        SettingRow(
-            CupertinoGlyph.Speedometer,
-            "Motion blur",
-            if (store.compMotionBlur) "Ligado · obturador de ${store.shutterAngle.roundToInt()}°"
-            else "Desligado (as camadas com motion blur só borram com isto ligado)",
-            switch = store.compMotionBlur,
-        ) { store.setCompositionMotionBlur(!store.compMotionBlur) }
-        ChipsRow("Obturador", ShutterOptions.map { "$it°" }, ShutterOptions.firstOrNull { it == store.shutterAngle.roundToInt() }?.let { "$it°" }) { label ->
-            store.changeShutterAngle(label.removeSuffix("°").toFloat())
-        }
-
-        SettingSection("Paleta do projeto")
-        SettingRow(CupertinoGlyph.AddCircled, "Adicionar cor à paleta") { store.comingSoon("Paleta do projeto") }
-
-        SettingSection("Propriedades expostas (template)")
-        SettingRow(
-            CupertinoGlyph.SliderHorizontal3,
-            "Nenhuma propriedade exposta",
-            "Exponha um parâmetro para quem usar este projeto como template.",
-            onClick = null,
-        )
-
-        SettingSection("Dados (CSV)")
-        SettingRow(
-            ShellGlyph.Table,
-            "Carregar CSV",
-            "Colunas viram fontes para textos (vincular no painel do texto)",
-            chevron = true,
-        ) { store.comingSoon("Dados (CSV)") }
-
-        SettingSection("Ajuda")
-        SettingRow(CupertinoGlyph.QuestionCircle, "Como usar o editor", "Guia rápido, com busca", chevron = true) { store.comingSoon("Guia rápido") }
-        SettingRow(CupertinoGlyph.Lightbulb, "Ver as dicas de novo", "As quatro dicas de primeiro uso voltam ao abrir o editor") {
-            store.comingSoon("Dicas de primeiro uso")
-        }
-        SettingRow(
-            ShellGlyph.WaveformPathEcg,
-            "Diagnóstico na tela",
-            "Quadros por segundo, tempos da GPU, memória e o decodificador.",
-            switch = store.hudVisible,
-        ) { store.toggleHud() }
-        Spacer(Modifier.height(12.dp))
-    }
-    if (renaming) {
-        AureaNamePrompt(
-            title = "Nome do projeto",
-            initial = p.title,
-            onConfirm = { store.renameProject(it) },
-            onDismiss = { renaming = false },
-        )
-    }
-    if (pickingBackground && comp != null) {
-        // Um passo de desfazer para a folha inteira; fecha também se ela
-        // sair da tela sem o "Pronto".
-        // O fundo já é sRGB no motor (ao contrário das cores de efeito).
-        val initial = remember { comp.background.toFloatArray() }
-        DisposableEffect(Unit) {
-            store.beginGesture("fundo da composição")
-            onDispose { store.endGesture() }
-        }
-        ColorPickerSheet(
-            initial = initial,
-            withAlpha = false,
-            onChange = { r, g, b, _ -> store.setCompositionBackground(r, g, b, 1f) },
-            onDone = { pickingBackground = false },
-        )
-    }
-}
-
-/** Tamanho par com lado menor `short` na proporção `ratio` (largura / altura). */
-private fun sizeFor(short: Int, ratio: Float): Pair<Int, Int> =
-    if (ratio >= 1f) even(short * ratio) to even(short.toFloat()) else even(short.toFloat()) to even(short / ratio)
-
-private fun even(v: Float): Int = max(2, (v / 2f).roundToInt() * 2)
-
-@Composable
-private fun SettingSection(title: String) {
-    Text(
-        title.uppercase(Locale.ROOT),
-        style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, letterSpacing = 0.6.sp, fontWeight = FontWeight.W600, color = AureaColors.Muted)),
-        modifier = Modifier.padding(start = 18.dp, top = 14.dp, end = 18.dp, bottom = 4.dp),
-    )
-}
-
-/** `LinhaDoEstudio`: ícone 20, título 15, subtítulo 11,5; fim = switch ou seta. */
-@Composable
-private fun SettingRow(
-    glyph: Char,
-    title: String,
-    subtitle: String? = null,
-    chevron: Boolean = false,
-    switch: Boolean? = null,
-    onClick: (() -> Unit)?,
-) {
-    val color = if (onClick == null && switch == null) AureaColors.Muted else AureaColors.Text
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .tocavel(enabled = onClick != null, shrink = 1f) { onClick?.invoke() }
-            .padding(horizontal = 18.dp, vertical = 11.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        CupertinoIcon(glyph, 20.dp, color)
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = color)))
-            if (subtitle != null) {
-                Text(
-                    subtitle,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, lineHeight = 15.sp, color = AureaColors.Muted)),
-                )
-            }
-        }
-        when {
-            switch != null -> ShellSwitch(switch)
-            chevron -> CupertinoIcon(CupertinoGlyph.ChevronRight, 15.dp, AureaColors.Muted)
-        }
-    }
-}
-
-/** `_Chips`: rótulo na coluna de 84, pílulas que quebram linha. */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun ChipsRow(label: String, options: List<String>, selected: String?, onPick: (String) -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 6.dp)) {
-        Text(
-            label,
-            style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)),
-            modifier = Modifier.width(84.dp).padding(top = 7.dp),
-        )
-        FlowRow(
-            Modifier.weight(1f),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            options.forEach { o ->
-                val on = o == selected
-                Text(
-                    o,
-                    style = AureaType.Base.merge(
-                        TextStyle(fontSize = 12.5.sp, fontWeight = FontWeight.W600, color = if (on) AureaColors.Accent else AureaColors.Text),
-                    ),
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(9.dp))
-                        .background(if (on) AureaColors.ActionDim else AureaColors.Chip)
-                        .then(if (on) Modifier.border(1.dp, AureaColors.Action, RoundedCornerShape(9.dp)) else Modifier)
-                        .tocavel(shrink = 1f) { if (!on) onPick(o) }
-                        .padding(horizontal = 11.dp, vertical = 7.dp),
-                )
-            }
-        }
-    }
-}

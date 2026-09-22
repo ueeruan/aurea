@@ -82,6 +82,7 @@ set(AUREA_CORE_SOURCES
     src/playback/Playback.cpp
     src/scene3d/GltfImporter.cpp
     src/scene3d/SceneRenderer.cpp
+    src/scene3d/Environment.cpp
     src/engine/Engine.cpp
     ${AUREA_SHADER_SOURCES}
 )

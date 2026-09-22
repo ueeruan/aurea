@@ -18,8 +18,10 @@
 #include "aurea/memory/Arena.hpp"
 #include "aurea/render/FrameGraph.hpp"
 #include "aurea/render/ShaderLibrary.hpp"
+#include "aurea/scene3d/Environment.hpp"
 #include "aurea/scene3d/SceneAsset.hpp"
 
+#include <future>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -149,6 +151,14 @@ public:
     /// Pipelines 3D para aquecer junto com os 2D.
     void collect_pipelines(std::vector<PipelineKey>& out) const;
 
+    /// Troca o ambiente (IBL). Sem chamada, o primeiro grupo 3D usa o estúdio
+    /// neutro padrão.
+    [[nodiscard]] Status set_environment(const EnvironmentMaps& maps) noexcept;
+    [[nodiscard]] bool has_environment() const noexcept { return irradiance_.valid(); }
+    /// Export e captura usam a qualidade final: esperam o ambiente (ou o geram
+    /// agora). O preview não chama — segue sem travar.
+    void finish_environment() noexcept;
+
     [[nodiscard]] const SceneStats& stats() const noexcept { return stats_; }
     [[nodiscard]] u64 resident_bytes() const noexcept;
 
@@ -165,7 +175,14 @@ private:
     ShaderLibrary* shaders_ = nullptr;
     std::unordered_map<u64, Entry> models_;
     TextureHandle white_{}, flatNormal_{}, black_{}, envCube_{}, brdfLut_{};
+    TextureHandle irradiance_{}, prefiltered_{}, iblLut_{};
+    u32 prefilteredMips_ = 1;
+    /// Estúdio padrão sendo gerado numa thread de fundo (~0,3 s no desktop):
+    /// o primeiro quadro 3D não espera; usa o céu analítico até ficar pronto.
+    std::future<EnvironmentMaps> pendingEnv_;
+    bool envRequested_ = false;
     SamplerHandle cubeSampler_{};
+    void release_environment() noexcept;
     SceneStats stats_{};
 };
 

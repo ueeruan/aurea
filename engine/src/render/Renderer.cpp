@@ -535,7 +535,7 @@ void Renderer::fill_scene_context(const Composition& comp, FrameIndex time, Fram
         key.kind = scene3d::LightKindGpu::Directional;
         key.direction = Vec3{0.45f, 1.0f, 0.75f}.normalized();
         key.color = Vec3{1.0f, 0.97f, 0.92f};
-        key.intensity = 2.2f;
+        key.intensity = 1.2f;   // o ambiente de estúdio já tem a caixa de luz principal
         lights.push_back(key);
     }
     for (scene3d::SceneFrame& f : out.scenes) {
@@ -809,6 +809,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
                          ? graph_.import_texture("composicao", offscreen->texture, compDesc)
                          : graph_.create_texture("composicao", compDesc);
     currentScenes_ = &snap.scenes;
+    if (offscreen && !snap.scenes.empty()) scene3d_.finish_environment();
     compTargetW_ = cw;
     compTargetH_ = ch;
 

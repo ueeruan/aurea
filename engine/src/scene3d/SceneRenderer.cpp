@@ -6,6 +6,7 @@
 #include "aurea/core/Log.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 
@@ -350,9 +351,82 @@ Status SceneRenderer::initialize(GPUBackend& gpu, ShaderLibrary& shaders) noexce
     return OkStatus;
 }
 
+void SceneRenderer::release_environment() noexcept {
+    if (!gpu_) return;
+    for (TextureHandle* t : {&irradiance_, &prefiltered_, &iblLut_}) {
+        if (t->valid()) gpu_->destroy_texture(*t);
+        *t = TextureHandle{};
+    }
+}
+
+Status SceneRenderer::set_environment(const EnvironmentMaps& maps) noexcept {
+    if (!gpu_) return Errc::InvalidState;
+    auto cube = [&](const CubeData& c, const char* name, TextureHandle& out) -> Status {
+        TextureDesc d;
+        d.width = d.height = c.size;
+        d.cube = true;
+        d.layers = 6;
+        d.mipLevels = c.mips;
+        d.format = SurfaceFormat::RGBA16F;
+        d.sampled = true;
+        d.transferDst = true;
+        d.debugName = name;
+        auto t = gpu_->create_texture(d);
+        if (!t.ok()) return t.status();
+        for (u32 m = 0; m < c.mips; ++m) {
+            const u32 s = std::max(1u, c.size >> m);
+            const usize faceHalfs = static_cast<usize>(s) * s * 4;
+            for (u32 f = 0; f < 6; ++f) {
+                const Status st = gpu_->upload_texture_level(*t, m, f, c.levels[m].data() + faceHalfs * f, faceHalfs * 2);
+                if (!st.ok()) {
+                    gpu_->destroy_texture(*t);
+                    return st;
+                }
+            }
+        }
+        out = *t;
+        return OkStatus;
+    };
+    TextureHandle irr{}, pre{}, lut{};
+    if (Status s = cube(maps.irradiance, "3d-irradiancia", irr); !s.ok()) return s;
+    if (Status s = cube(maps.prefiltered, "3d-especular", pre); !s.ok()) {
+        gpu_->destroy_texture(irr);
+        return s;
+    }
+    TextureDesc ld;
+    ld.width = ld.height = maps.lutSize;
+    ld.format = SurfaceFormat::RGBA16F;
+    ld.sampled = true;
+    ld.transferDst = true;
+    ld.debugName = "3d-brdf";
+    auto l = gpu_->create_texture(ld);
+    if (!l.ok() || !gpu_->upload_texture_level(*l, 0, 0, maps.brdfLut.data(), maps.brdfLut.size() * 2).ok()) {
+        if (l.ok()) gpu_->destroy_texture(*l);
+        gpu_->destroy_texture(irr);
+        gpu_->destroy_texture(pre);
+        return Status{Errc::OutOfDeviceMemory, "LUT da BRDF"};
+    }
+    lut = *l;
+    release_environment();
+    irradiance_ = irr;
+    prefiltered_ = pre;
+    iblLut_ = lut;
+    prefilteredMips_ = maps.prefiltered.mips;
+    return OkStatus;
+}
+
+void SceneRenderer::finish_environment() noexcept {
+    if (irradiance_.valid() || !gpu_) return;
+    EnvironmentMaps maps = pendingEnv_.valid() ? pendingEnv_.get() : build_studio_environment();
+    envRequested_ = true;
+    if (const Status s = set_environment(maps); !s.ok()) AUREA_LOG_WARN("3D: ambiente nao subiu: %s", s.message().data());
+}
+
 void SceneRenderer::shutdown() noexcept {
+    if (pendingEnv_.valid()) pendingEnv_.wait();
     if (!gpu_) return;
     release_all();
+    release_environment();
     for (TextureHandle* t : {&white_, &flatNormal_, &black_, &envCube_, &brdfLut_}) {
         if (t->valid()) gpu_->destroy_texture(*t);
         *t = TextureHandle{};
@@ -364,6 +438,7 @@ void SceneRenderer::shutdown() noexcept {
 
 void SceneRenderer::forget_device() noexcept {
     models_.clear();
+    irradiance_ = prefiltered_ = iblLut_ = TextureHandle{};
     white_ = flatNormal_ = black_ = envCube_ = brdfLut_ = TextureHandle{};
     cubeSampler_ = SamplerHandle{};
     gpu_ = nullptr;
@@ -441,6 +516,19 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                           u64 frameNumber, FGTexture& outColor) noexcept {
     stats_ = SceneStats{};
     if (!gpu_ || !shaders_ || width == 0 || height == 0) return false;
+    if (!irradiance_.valid()) {
+        // Primeiro grupo 3D: o estúdio neutro (IBL), gerado fora da thread de
+        // render. Pronto → sobe e passa a valer no próximo quadro.
+        if (!envRequested_) {
+            envRequested_ = true;
+            pendingEnv_ = std::async(std::launch::async, [] { return build_studio_environment(); });
+        } else if (pendingEnv_.valid()
+                   && pendingEnv_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+            const Status s = set_environment(pendingEnv_.get());
+            if (!s.ok()) AUREA_LOG_WARN("3D: ambiente padrao nao subiu: %s", s.message().data());
+        }
+    }
+    const bool ibl = irradiance_.valid();
 
     TextureDesc cd;
     cd.width = width;
@@ -462,7 +550,8 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     SceneBlock header{};
     header.viewProj = viewProj;
     header.cameraPos = Vec4{frame.camera.position, frame.environment.exposure};
-    header.envParams = Vec4{frame.environment.intensity, 0.0f, 1.0f, frame.environment.rotation};
+    header.envParams = Vec4{frame.environment.intensity, ibl ? 1.0f : 0.0f, static_cast<f32>(prefilteredMips_),
+                            frame.environment.rotation};
     header.skyColor = Vec4{frame.environment.sky, 1.0f};
     header.groundColor = Vec4{frame.environment.ground, 1.0f};
     const u32 lights = static_cast<u32>(std::min<usize>(frame.lights.size(), 4));
@@ -579,11 +668,13 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     struct Cap {
         Draw* draws;
         u32 count;
-        TextureHandle white, flatNormal, black, envCube, brdf;
+        TextureHandle white, flatNormal, irradiance, prefiltered, brdf;
         SamplerHandle cubeSampler;
         u64 linearSampler;
-    } cap{list, total, white_, flatNormal_, black_, envCube_, brdfLut_, cubeSampler_,
-          shaders_->sampler(CommonSampler::LinearRepeat).id};
+        u64 clampSampler;
+    } cap{list, total, white_, flatNormal_, ibl ? irradiance_ : envCube_, ibl ? prefiltered_ : envCube_,
+          ibl ? iblLut_ : brdfLut_, cubeSampler_, shaders_->sampler(CommonSampler::LinearRepeat).id,
+          shaders_->sampler(CommonSampler::LinearClamp).id};
 
     // Z reverso: limpa a profundidade com 0 (o infinito).
     graph.add_raster_pass_depth("3d-pbr", PassStage::Scene3D, color, LoadOp::Clear, Vec4{0, 0, 0, 0}, depth,
@@ -606,9 +697,9 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                     c.bind_texture(k, has ? d.material->tex[k] : fallback[k],
                                    has && d.material->samp[k].valid() ? d.material->samp[k] : SamplerHandle{cap.linearSampler});
                 }
-                c.bind_texture(5, cap.envCube, cap.cubeSampler);
-                c.bind_texture(6, cap.envCube, cap.cubeSampler);
-                c.bind_texture(7, cap.brdf, SamplerHandle{cap.linearSampler});
+                c.bind_texture(5, cap.irradiance, cap.cubeSampler);
+                c.bind_texture(6, cap.prefiltered, cap.cubeSampler);
+                c.bind_texture(7, cap.brdf, SamplerHandle{cap.clampSampler});
                 boundMat = d.material;
             }
             if (d.model != boundModel) {

@@ -227,3 +227,28 @@ AUREA_TEST(Scene3D, TextureCapDownscalesAndWarns) {
     }
     AUREA_CHECK(!r.asset->warnings.empty());
 }
+
+#include "aurea/scene3d/Environment.hpp"
+#include <chrono>
+
+AUREA_TEST(Scene3D, EnvironmentBuildIsFastAndSane) {
+    const auto t0 = std::chrono::steady_clock::now();
+    const EnvironmentMaps m = build_studio_environment(128);
+    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    std::printf("\n    (ambiente de estudio: %.0f ms)", ms);
+    AUREA_CHECK_EQ(m.prefiltered.size, 128u);
+    AUREA_CHECK_EQ(m.prefiltered.mips, 6u);   // 128..4
+    AUREA_CHECK_EQ(m.irradiance.levels[0].size(), static_cast<usize>(32 * 32 * 6 * 4));
+    // Irradiância de cima (+Y) mais clara que a de baixo (−Y): céu × chão.
+    auto lum = [](const CubeData& c, u32 face) {
+        const usize idx = (static_cast<usize>(face) * c.size * c.size + (c.size / 2) * c.size + c.size / 2) * 4;
+        return half_to_float(c.levels[0][idx]) + half_to_float(c.levels[0][idx + 1]) + half_to_float(c.levels[0][idx + 2]);
+    };
+    AUREA_CHECK(lum(m.irradiance, 2) > lum(m.irradiance, 3) * 2.0f);
+    // LUT: A+B ≤ ~1 (energia) e B cresce com rugosidade em ângulo rasante.
+    for (usize i = 0; i + 1 < m.brdfLut.size(); i += 4) {
+        const f32 a = half_to_float(m.brdfLut[i]), b = half_to_float(m.brdfLut[i + 1]);
+        AUREA_CHECK(a >= 0.0f && b >= 0.0f && a + b <= 1.05f);
+    }
+    for (f32 v : {0.0f, 0.5f, 1.0f, 65504.0f, 1e-3f}) AUREA_CHECK_NEAR(half_to_float(float_to_half(v)), v, std::fmax(1e-3f, v * 1e-3f));
+}

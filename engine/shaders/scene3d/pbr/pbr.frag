@@ -97,6 +97,25 @@ vec3 rotate_env(vec3 d) {
 // Y para baixo. Converte a direção antes de amostrar.
 vec3 env_dir(vec3 worldDir) { return rotate_env(vec3(worldDir.x, -worldDir.y, -worldDir.z)); }
 
+// Tone mapping "PBR Neutral" (Khronos): leva a cena (linear, sem teto) para o
+// espaço de trabalho do compositor (linear, 0..1) preservando a cor base até
+// ~0,76 e comprimindo só os realces. É a transformação de SAÍDA do grupo 3D —
+// aplicada uma vez, aqui; o 2D nunca passa por ela.
+vec3 pbr_neutral(vec3 color) {
+    const float startCompression = 0.8 - 0.04;
+    const float desaturation = 0.15;
+    float x = min(color.r, min(color.g, color.b));
+    float offset = x < 0.08 ? x - 6.25 * x * x : 0.04;
+    color -= offset;
+    float peak = max(color.r, max(color.g, color.b));
+    if (peak < startCompression) return color;
+    const float d = 1.0 - startCompression;
+    float newPeak = 1.0 - d * d / (peak + d - startCompression);
+    color *= newPeak / peak;
+    float g = 1.0 - 1.0 / (desaturation * (peak - newPeak) + 1.0);
+    return mix(color, vec3(newPeak), g);
+}
+
 void main() {
     // --- Cor base e alfa -------------------------------------------------------
     vec4 base = u.baseColor * v_color;
@@ -212,6 +231,6 @@ void main() {
     if (has_tex(4)) emissive *= texture(t_emissive, uv_for(4)).rgb;
     color += emissive;
 
-    color *= u.cameraPos.w;
+    color = pbr_neutral(color * u.cameraPos.w);
     o_color = vec4(color * alpha, alpha);
 }

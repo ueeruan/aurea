@@ -315,6 +315,15 @@ public:
     /// {ligado, obturador em graus} da composição atual.
     bool query_motion_blur(bool& on, f32& shutter) noexcept;
 
+    // --- Gizmo 3D ----------------------------------------------------------------
+    /// Setas do gizmo da camada (só camadas que vivem no espaço 3D): origem e
+    /// pontas dos eixos X, Y, Z do MUNDO (comprimento `length` no mundo),
+    /// projetadas em px da composição: {ox, oy, xx, xy, yx, yy, zx, zy}.
+    bool query_gizmo(u64 layerId, f32 length, f32* out8) noexcept;
+    /// Posição LOCAL (espaço do pai) que leva a camada `amount` unidades do
+    /// mundo ao longo do eixo `axis` (0 X, 1 Y, 2 Z) a partir de onde está.
+    bool gizmo_move_local(u64 layerId, u32 axis, f32 amount, f32* outXYZ) noexcept;
+
     // --- Ambiente 3D (HDRI) ------------------------------------------------------
     /// HDRI Radiance (.hdr) do arquivo local: ilumina e reflete nos modelos 3D
     /// da composição atual. Devolve o asset.

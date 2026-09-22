@@ -261,6 +261,16 @@ scene3d::SceneCamera camera_for(const Composition& comp, FrameIndex time, u32 w,
 
 } // namespace
 
+Mat4 comp_view_projection(const Composition& comp, FrameIndex time) noexcept {
+    const u32 w = std::max(1u, comp.width()), h = std::max(1u, comp.height());
+    const scene3d::SceneCamera cam = camera_for(comp, time, w, h);
+    return comp_from_clip(static_cast<f32>(w), static_cast<f32>(h))
+         * scene3d::reverse_z_perspective(cam.fovY, static_cast<f32>(w) / static_cast<f32>(h), cam.nearZ) * cam.view;
+}
+
+Mat4 layer_world_3d(const Composition& comp, const Layer& l, FrameIndex time) noexcept { return world_3d(comp, l, time); }
+bool wants_layer_3d(const Composition& comp, const Layer& l, FrameIndex time) noexcept { return wants_3d(comp, l, time); }
+
 Mat4 layer_comp_matrix(const Composition& comp, const Layer& l, FrameIndex time, bool* perspective) noexcept {
     const bool is3d = wants_3d(comp, l, time);
     if (perspective) *perspective = is3d;
@@ -519,8 +529,9 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 for (u32 depth = 0; parent3.valid() && depth < 16; ++depth) {
                     const Layer* p = comp.layer(parent3);
                     if (!p) break;
-                    m3 = (p->threeD || p->kind == LayerKind::Model3D ? layer_matrix_3d(*p, p->local_time(time))
-                                                                       : layer_matrix(*p, p->local_time(time))) * m3;
+                    // Matriz 3D para qualquer pai (num pai 2D comum ela é a
+                    // mesma da 2D): o mesmo mundo que world_3d e o parentesco usam.
+                    m3 = layer_matrix_3d(*p, p->local_time(time)) * m3;
                     parent3 = p->parent;
                 }
                 inst.world = m3 * layer_from_model(l->model);

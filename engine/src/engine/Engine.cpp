@@ -836,7 +836,9 @@ void set_local_from(Layer& lay, const Mat4& local) noexcept {
     const Vec3 pos{m.col[3].x, m.col[3].y, std::fabs(m.col[3].z) < 1e-3f ? 0.0f : m.col[3].z};
     l->transform.position = pos;
     l->transform.rotation = rotDeg;
-    l->transform.scale = Vec3{sx, sy, l->threeD ? sz : l->transform.scale.z};
+    l->transform.scale = Vec3{sx, sy, l->kind == LayerKind::Model3D ? sz / std::max(1e-6f, sx)
+                                          : ((l->threeD || l->kind == LayerKind::Camera || l->kind == LayerKind::Light) ? sz
+                                                                                                                         : l->transform.scale.z)};
     auto set = [&](TrackProperty prop, f32 v) {
         if (Track* tr = l->tracks.find(prop); tr && tr->keys.size() <= 1) {
             if (tr->keys.size() == 1) tr->keys[0].value = v; else tr->staticValue = v;
@@ -1272,6 +1274,67 @@ bool Engine::set_shutter_angle(f32 degrees) noexcept {
     comp->motion_blur().shutterAngle = std::clamp(degrees, 0.0f, 720.0f);
     project_->mark_dirty();
     request_render();
+    return true;
+}
+
+// =============================================================================
+// Gizmo 3D
+// =============================================================================
+namespace {
+bool lives_in_3d(const Layer& l) noexcept {
+    return l.threeD || l.kind == LayerKind::Model3D || l.kind == LayerKind::Camera || l.kind == LayerKind::Light
+        || l.transform.rotation.x != 0.0f || l.transform.rotation.y != 0.0f || l.transform.position.z != 0.0f;
+}
+} // namespace
+
+bool Engine::query_gizmo(u64 layerId, f32 length, f32* out) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || !out || !lives_in_3d(*l)) return false;
+    const FrameIndex now = playback_.current();
+    const Mat4 w = layer_world_3d(*comp, *l, now);
+    const Vec3 a = l->kind == LayerKind::Model3D ? Vec3{0, 0, 0} : l->transform.anchor;
+    const Vec4 o4 = w * Vec4{a.x, a.y, a.z, 1};
+    const Vec3 o{o4.x, o4.y, o4.z};
+    const Mat4 vp = comp_view_projection(*comp, now);
+    auto proj = [&](Vec3 p, f32* xy) {
+        const Vec4 c = vp * Vec4{p.x, p.y, p.z, 1};
+        if (!(c.w > 1e-6f)) return false;
+        xy[0] = c.x / c.w;
+        xy[1] = c.y / c.w;
+        return true;
+    };
+    // Mundo da cena: X para a direita, Y para BAIXO (px da composição), Z para
+    // dentro da tela — os mesmos eixos da posição da camada.
+    return proj(o, out) && proj(o + Vec3{length, 0, 0}, out + 2) && proj(o + Vec3{0, length, 0}, out + 4)
+        && proj(o + Vec3{0, 0, length}, out + 6);
+}
+
+bool Engine::gizmo_move_local(u64 layerId, u32 axis, f32 amount, f32* out) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || !out || axis > 2) return false;
+    const FrameIndex now = playback_.current();
+    const FrameIndex local = l->local_time(now);
+    auto s = [&](TrackProperty prop, f32 fallback) {
+        const Track* tr = l->tracks.find(prop);
+        return (tr && !tr->keys.empty()) ? tr->sample(local) : fallback;
+    };
+    Vec3 pos{s(TrackProperty::PositionX, l->transform.position.x), s(TrackProperty::PositionY, l->transform.position.y),
+             s(TrackProperty::PositionZ, l->transform.position.z)};
+    Vec3 d{axis == 0 ? amount : 0.0f, axis == 1 ? amount : 0.0f, axis == 2 ? amount : 0.0f};
+    // Com pai, o passo no mundo vira passo no espaço do pai (só a parte linear).
+    if (const Layer* p = l->parent.valid() ? comp->layer(l->parent) : nullptr) {
+        const Mat4 pw = layer_world_3d(*comp, *p, now);
+        const Mat4 inv = inverse4(pw);
+        const Vec4 v = inv * Vec4{d.x, d.y, d.z, 0};
+        d = Vec3{v.x, v.y, v.z};
+    }
+    out[0] = pos.x + d.x;
+    out[1] = pos.y + d.y;
+    out[2] = pos.z + d.z;
     return true;
 }
 
@@ -3664,22 +3727,84 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                     cursor = p->parent;
                 }
             }
-            // Compensação: o filho fica onde está na tela ao ganhar (ou perder)
-            // um pai — o transform local vira "pai⁻¹ × mundo". Só com posição,
-            // rotação e escala sem keyframes (animadas, o local é a animação).
+            // Compensação: o filho fica onde está na tela ao ganhar, trocar ou
+            // perder o pai. M = (pai novo)⁻¹ × (pai antigo) leva o espaço do pai
+            // antigo para o do novo; os valores parados viram "M × local" e os
+            // keyframes animados passam pela MESMA M (a animação continua igual
+            // na tela). Modelo 3D, câmera e luz: tudo pelo mundo 3D.
+            if (!comp) { l->parent = parent; return OkStatus; }
             const FrameIndex now = playback_.current();
-            auto animated = [&](TrackProperty p) { const Track* tr = l->tracks.find(p); return tr && tr->animated(); };
-            const bool canCompensate = comp && !animated(TrackProperty::PositionX) && !animated(TrackProperty::PositionY)
-                                    && !animated(TrackProperty::PositionZ) && !animated(TrackProperty::RotationX)
-                                    && !animated(TrackProperty::RotationY) && !animated(TrackProperty::RotationZ)
-                                    && !animated(TrackProperty::ScaleX) && !animated(TrackProperty::ScaleY)
-                                    && l->kind != LayerKind::Model3D;
-            const Mat4 world = canCompensate ? layer_world_matrix(*comp, *l, now) : Mat4::identity();
+            const bool in3d = l->kind == LayerKind::Model3D || l->kind == LayerKind::Camera || l->kind == LayerKind::Light
+                           || l->threeD;
+            auto worldOf = [&](const Layer& x) { return in3d ? layer_world_3d(*comp, x, now) : layer_world_matrix(*comp, x, now); };
+            const Layer* oldP = l->parent.valid() ? comp->layer(l->parent) : nullptr;
+            const Mat4 oldPw = oldP ? worldOf(*oldP) : Mat4::identity();
+            const Mat4 world = worldOf(*l);
             l->parent = parent;
-            if (canCompensate) {
-                const Layer* p = parent.valid() ? comp->layer(parent) : nullptr;
-                const Mat4 pw = p ? layer_world_matrix(*comp, *p, now) : Mat4::identity();
-                set_local_from(*l, inverse4(pw) * world);
+            const Layer* newP = parent.valid() ? comp->layer(parent) : nullptr;
+            // Pai novo pode puxar a camada para o 3D (pai 3D): mede no mesmo espaço.
+            const bool now3d = in3d || (newP && (newP->threeD || wants_layer_3d(*comp, *l, now)));
+            const Mat4 newPw = newP ? (now3d ? layer_world_3d(*comp, *newP, now) : layer_world_matrix(*comp, *newP, now))
+                                    : Mat4::identity();
+            const Mat4 M = inverse4(newPw) * oldPw;
+            // Keyframes: posição como ponto (M inteira), rotação Z mais o giro
+            // de M, escala vezes a escala de M. Tudo lido ANTES de reescrever.
+            const Vec3 mx{M.col[0].x, M.col[0].y, M.col[0].z}, my{M.col[1].x, M.col[1].y, M.col[1].z};
+            const f32 mScale = std::max(1e-6f, 0.5f * (mx.length() + my.length()));
+            const f32 mRotZ = std::atan2(M.col[0].y, M.col[0].x) / kDeg2Rad;
+            auto animatedTrack = [](Track* t) { return t && t->keys.size() > 1; };
+            Track* tx0 = l->tracks.find(TrackProperty::PositionX);
+            Track* ty0 = l->tracks.find(TrackProperty::PositionY);
+            Track* tz0 = l->tracks.find(TrackProperty::PositionZ);
+            struct PosKey { FrameIndex t; Vec3 p; Keyframe style; };
+            std::vector<PosKey> posKeys;
+            if (animatedTrack(tx0) || animatedTrack(ty0) || animatedTrack(tz0)) {
+                const Vec3 base = l->transform.position;
+                auto sampleAt = [&](Track* t, FrameIndex k, f32 fb) { return (t && !t->keys.empty()) ? t->sample(k) : fb; };
+                for (Track* t : {tx0, ty0, tz0}) {
+                    if (!animatedTrack(t)) continue;
+                    for (const Keyframe& k : t->keys) {
+                        if (std::any_of(posKeys.begin(), posKeys.end(), [&](const PosKey& q) { return q.t == k.time; })) continue;
+                        const Vec3 old{sampleAt(tx0, k.time, base.x), sampleAt(ty0, k.time, base.y), sampleAt(tz0, k.time, base.z)};
+                        const Vec4 np = M * Vec4{old.x, old.y, old.z, 1};
+                        posKeys.push_back({k.time, Vec3{np.x, np.y, np.z}, k});
+                    }
+                }
+            }
+            set_local_from(*l, inverse4(newPw) * world);
+            if (!posKeys.empty()) {
+                // Com giro na troca de pai, X animado e Y parado viram os dois
+                // animados: todas as trilhas de posição recebem o vetor inteiro,
+                // com a curva da chave de origem.
+                const bool useZ = now3d || std::any_of(posKeys.begin(), posKeys.end(), [](const PosKey& q) { return std::fabs(q.p.z) > 1e-4f; });
+                Track& X = l->tracks.get_or_create(TrackProperty::PositionX);
+                Track& Y = l->tracks.get_or_create(TrackProperty::PositionY);
+                X.clear();
+                Y.clear();
+                Track* Z = useZ ? &l->tracks.get_or_create(TrackProperty::PositionZ) : nullptr;
+                if (Z) Z->clear();
+                for (const PosKey& q : posKeys) {
+                    auto put = [&](Track& tr, f32 v) {
+                        const u32 i = tr.set(q.t, v, q.style.interp);
+                        if (i < tr.keys.size()) {
+                            Keyframe k = q.style;
+                            k.time = q.t;
+                            k.value = v;
+                            tr.keys[i] = k;
+                        }
+                    };
+                    put(X, q.p.x);
+                    put(Y, q.p.y);
+                    if (Z) put(*Z, q.p.z);
+                }
+            }
+            if (Track* rz = l->tracks.find(TrackProperty::RotationZ); animatedTrack(rz)) {
+                for (Keyframe& k : rz->keys) k.value += mRotZ;
+            }
+            for (TrackProperty sp : {TrackProperty::ScaleX, TrackProperty::ScaleY}) {
+                if (Track* st = l->tracks.find(sp); animatedTrack(st)) {
+                    for (Keyframe& k : st->keys) k.value *= mScale;
+                }
             }
             return OkStatus;
         }

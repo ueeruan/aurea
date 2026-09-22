@@ -1713,6 +1713,88 @@ AUREA_TEST(Gpu, HdriLightsTheModelAndSurvivesReopen) {
     std::remove(hdr.c_str());
 }
 
+namespace {
+u32 max_diff(const Image8& a, const Image8& b) {
+    u32 w = 0;
+    for (usize i = 0; i < a.rgba.size() && i < b.rgba.size(); ++i) w = std::max<u32>(w, static_cast<u32>(std::abs(a.rgba[i] - b.rgba[i])));
+    return w;
+}
+void set_parent(Engine& e, u64 child, u64 parent) {
+    Command pc;
+    pc.type = CommandType::LayerSetParent;
+    pc.layer_parent.layer = LayerId::unpack(child);
+    pc.layer_parent.parent = parent ? LayerId::unpack(parent) : LayerId{};
+    AUREA_CHECK(e.apply_command(pc).ok());
+}
+void seek_frame(Engine& e, i64 f) {
+    Command c;
+    c.type = CommandType::PlaybackSeek;
+    c.seek.time = tick_at(FrameIndex{f}, 30.0);
+    AUREA_CHECK(e.apply_command(c).ok());
+}
+} // namespace
+
+AUREA_TEST(Gpu, ParentingKeepsModelAndAnimatedLayerInPlace) {
+    AUREA_REQUIRE_GPU();
+    // Modelo 3D vinculado a um nulo deslocado e girado: a tela não muda.
+    {
+        const std::string path = gltf_data("Box.glb");
+        if (file_exists(path)) {
+            Scene3DRig rig(320, 180);
+            ModelImport mi;
+            mi.path = path;
+            auto m = rig.e.import_model(mi);
+            auto n = rig.e.add_null(false);
+            AUREA_CHECK(m.ok() && n.ok());
+            Composition* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+            Layer* nl = comp->layer(LayerId::unpack(*n));
+            nl->transform.position = Vec3{230, 60, 0};
+            nl->transform.rotation = Vec3{0, 0, 35};
+            nl->transform.scale = Vec3{1.5f, 1.5f, 1};
+            const Image8 before = rig.capture(320);
+            set_parent(rig.e, *m, *n);
+            const u32 d1 = max_diff(before, rig.capture(320));
+            set_parent(rig.e, *m, 0);   // soltar volta ao mesmo lugar
+            const u32 d2 = max_diff(before, rig.capture(320));
+            std::printf("    modelo 3D: vincular diferenca %u, soltar %u\n", d1, d2);
+            AUREA_CHECK(d1 <= 3);
+            AUREA_CHECK(d2 <= 3);
+        }
+    }
+    // Forma com posição e rotação ANIMADAS: igual em dois instantes.
+    {
+        Scene3DRig rig(320, 180);
+        auto sh = rig.e.add_shape(9);
+        auto n = rig.e.add_null(false);
+        AUREA_CHECK(sh.ok() && n.ok());
+        Composition* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+        Layer* l = comp->layer(LayerId::unpack(*sh));
+        l->transform.scale = Vec3{0.4f, 0.4f, 1};
+        Track& px = l->tracks.get_or_create(TrackProperty::PositionX);
+        px.set(l->local_time(FrameIndex{0}), 60.0f);
+        px.set(l->local_time(FrameIndex{20}), 260.0f);
+        Track& rz = l->tracks.get_or_create(TrackProperty::RotationZ);
+        rz.set(l->local_time(FrameIndex{0}), 0.0f);
+        rz.set(l->local_time(FrameIndex{20}), 90.0f);
+        Layer* nl = comp->layer(LayerId::unpack(*n));
+        nl->transform.position = Vec3{200, 120, 0};
+        nl->transform.rotation = Vec3{0, 0, -20};
+        nl->transform.scale = Vec3{0.8f, 0.8f, 1};
+        seek_frame(rig.e, 5);
+        const Image8 a5 = rig.capture(320);
+        seek_frame(rig.e, 15);
+        const Image8 a15 = rig.capture(320);
+        set_parent(rig.e, *sh, *n);
+        seek_frame(rig.e, 5);
+        const u32 d5 = max_diff(a5, rig.capture(320));
+        seek_frame(rig.e, 15);
+        const u32 d15 = max_diff(a15, rig.capture(320));
+        std::printf("    forma animada: diferenca q5 %u, q15 %u\n", d5, d15);
+        AUREA_CHECK(d5 <= 3);
+        AUREA_CHECK(d15 <= 3);
+    }
+}
+
 AUREA_TEST(Gpu, Scene3DSurvivesSaveAndReopenIdentically) {
     AUREA_REQUIRE_GPU();
     const std::string path = gltf_data("DamagedHelmet.glb");

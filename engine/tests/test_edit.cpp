@@ -291,3 +291,36 @@ AUREA_TEST(Precomp, MovesLayersKeepsTimesAndSurvivesReopen) {
     (void)mainId;
     std::remove(path.c_str());
 }
+
+// =============================================================================
+//  Gizmo 3D
+// =============================================================================
+AUREA_TEST(Gizmo, AxesProjectAndMoveInWorldEvenWithAParent) {
+    EditRig r;
+    // Camada 2D comum: sem gizmo 3D.
+    f32 g[8] = {};
+    AUREA_CHECK(!r.e.query_gizmo(r.a, 100.0f, g));
+    // Nulo girado em X vive no espaço 3D: gizmo com X para a direita e Y para baixo.
+    const u64 n = *r.e.add_null(false);
+    Layer* nl = r.comp()->layer(LayerId::unpack(n));
+    nl->transform.rotation = Vec3{30, 0, 0};
+    AUREA_CHECK(r.e.query_gizmo(n, 50.0f, g));
+    std::printf("    gizmo: origem (%.1f, %.1f) X (%.1f, %.1f) Y (%.1f, %.1f) Z (%.1f, %.1f)\n",
+                g[0], g[1], g[2], g[3], g[4], g[5], g[6], g[7]);
+    AUREA_CHECK(g[2] > g[0] + 20.0f && std::fabs(g[3] - g[1]) < 1.0f);   // X → direita
+    AUREA_CHECK(g[5] > g[1] + 20.0f && std::fabs(g[4] - g[0]) < 1.0f);   // Y → baixo
+    // Z para dentro da tela: encolhe em perspectiva, perto da origem.
+    AUREA_CHECK(std::hypot(g[6] - g[0], g[7] - g[1]) < 10.0f);
+    // Filho do nulo (escala 2 no pai): 10 unidades no mundo = 5 no espaço do pai.
+    nl->transform.rotation = Vec3{0, 0, 0};
+    nl->transform.scale = Vec3{2, 2, 2};
+    nl->threeD = true;
+    Layer* bl = r.comp()->layer(LayerId::unpack(r.b));
+    bl->parent = LayerId::unpack(n);
+    const f32 x0 = bl->transform.position.x;
+    f32 out[3] = {};
+    AUREA_CHECK(r.e.gizmo_move_local(r.b, 0, 10.0f, out));
+    AUREA_CHECK(std::fabs(out[0] - (x0 + 5.0f)) < 1e-3f);
+    AUREA_CHECK(r.e.gizmo_move_local(r.b, 2, 8.0f, out));
+    AUREA_CHECK(std::fabs(out[2] - (bl->transform.position.z + 4.0f)) < 1e-3f);
+}

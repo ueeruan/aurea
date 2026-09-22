@@ -54,6 +54,12 @@ struct Layer;
 /// Composição ← camada como o renderer desenha: igual a `layer_world_matrix`
 /// no 2D; no espaço 3D, já com a câmera e a perspectiva (dividir por w).
 [[nodiscard]] Mat4 layer_comp_matrix(const Composition& comp, const Layer& l, FrameIndex time, bool* perspective = nullptr) noexcept;
+/// Composição (px) ← mundo 3D: a câmera ativa da composição no instante.
+[[nodiscard]] Mat4 comp_view_projection(const Composition& comp, FrameIndex time) noexcept;
+/// A camada (ou um pai) vive no espaço 3D no instante? (a mesma regra do render)
+[[nodiscard]] bool wants_layer_3d(const Composition& comp, const Layer& l, FrameIndex time) noexcept;
+/// Mundo 3D da camada com a cadeia de pais (o mesmo dos modelos/luzes).
+[[nodiscard]] Mat4 layer_world_3d(const Composition& comp, const Layer& l, FrameIndex time) noexcept;
 
 struct LayerSource {
     enum class Kind : u8 { None = 0, Video, Image, Solid, Scene3D, Shape, Nested, Particles };

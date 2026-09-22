@@ -69,7 +69,7 @@ key.properties
 /android/local.properties
 
 # ---- iOS ----
-ios/Pods/
+Pods/
 ios/build/
 DerivedData/
 *.xcuserstate

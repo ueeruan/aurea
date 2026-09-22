@@ -154,3 +154,14 @@ powershell -ExecutionPolicy Bypass -File .\docs\migration\limpar_aurea_antigo.ps
 ```
 
 Ensaio rodado em 21/09/2026: as 5 travas passaram, alvo 50,49 GB.
+
+## 12. Encerramento
+
+**PHASE 3 — COMPLETE** (21/09/2026, aprovada pelo dono). Revalidado no
+fechamento: 0 dependências do caminho antigo em código/build/assets (só texto
+de documentação), 0 symlinks; motor 252 testes 0 falhas; Android clean build
+sem cache e com `.cxx` apagado OK; testes JVM da timeline 27, 0 falhas.
+
+A exclusão física da pasta antiga fica com o dono, pelo script da §11 (o
+Aurea V2 não depende dela). O projeto antigo não é mais consultado a partir
+daqui.

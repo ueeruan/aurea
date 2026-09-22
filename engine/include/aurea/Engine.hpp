@@ -229,6 +229,15 @@ public:
     [[nodiscard]] Status suspend() noexcept;
     [[nodiscard]] Status resume() noexcept;
 
+    /// Pressão de memória do SISTEMA (Fase 8 §13): o nível do Android
+    /// (ComponentCallbacks2.TRIM_MEMORY_*: 5, 10, 15, 20, 40, 60, 80) vira um
+    /// estágio da ordem de despejo — miniaturas fora da tela, waveform antiga,
+    /// quadros sem uso, cache de render antigo, mips altos, assets 3D sem uso,
+    /// temporários. Projeto, alterações não salvas, histórico e timeline nunca
+    /// entram. Qualquer thread. Devolve o relatório (bytes por estágio; os de
+    /// GPU medidos no backend).
+    MemoryManager::TrimReport trim_memory(i32 osLevel) noexcept;
+
     // --- Superfície (Android: SurfaceView → ANativeWindow) -------------------
     /// Chamadas da thread da UI. `detach_surface` só volta depois que a GPU
     /// parou de usar a janela — o Android destrói a superfície logo depois.

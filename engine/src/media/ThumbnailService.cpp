@@ -7,6 +7,7 @@
 #include "aurea/core/Thread.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 
 namespace aurea {
@@ -96,7 +97,36 @@ bool frame_to_thumbnail(const DecodedFrame& f, u32 height, ThumbnailService::Ima
     return true;
 }
 
-ThumbnailService::~ThumbnailService() { stop(); }
+ThumbnailService::~ThumbnailService() {
+    stop();
+    attach(nullptr);
+}
+
+namespace {
+inline u64 image_bytes(const ThumbnailService::Image& img) noexcept {
+    return static_cast<u64>(img.rgba.capacity()) + 64;   // pixels + cabeçalho aproximado
+}
+inline u64 path_hash(const std::string& s) noexcept {
+    u64 h = 1469598103934665603ull;   // FNV-1a
+    for (unsigned char c : s) { h ^= c; h *= 1099511628211ull; }
+    return h;
+}
+} // namespace
+
+void ThumbnailService::attach(MemoryManager* memory) noexcept {
+    MemoryManager* old = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (memory_ == memory) return;
+        old = memory_;
+        if (old) old->free(MemoryClass::Thumbnails, static_cast<usize>(bytes_));
+        memory_ = memory;
+        if (memory_) memory_->commit(MemoryClass::Thumbnails, static_cast<usize>(bytes_));
+    }
+    // Fora do lock do cache: um trim segura o registro e entra em reclaim().
+    if (old) old->unregister_reclaimable(this);
+    if (memory) (void)memory->register_reclaimable(this);
+}
 
 void ThumbnailService::start() {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -123,6 +153,9 @@ void ThumbnailService::clear() {
     failedAssets_.clear();
     index_.clear();
     lru_.clear();
+    if (memory_) memory_->free(MemoryClass::Thumbnails, static_cast<usize>(bytes_));
+    bytes_ = 0;
+    ++version_;
     generation_.fetch_add(1, std::memory_order_acq_rel);
 }
 
@@ -131,27 +164,84 @@ u32 ThumbnailService::cached() const {
     return static_cast<u32>(lru_.size());
 }
 
+u64 ThumbnailService::cached_bytes() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return bytes_;
+}
+
+u64 ThumbnailService::budget_locked() const noexcept {
+    const u64 b = memory_ ? memory_->budget(MemoryClass::Thumbnails) : 0;
+    return b ? b : kDefaultBudget;
+}
+
+void ThumbnailService::pop_lru_locked() {
+    const u64 b = std::min<u64>(bytes_, image_bytes(lru_.back().second));
+    bytes_ -= b;
+    if (memory_) memory_->free(MemoryClass::Thumbnails, static_cast<usize>(b));
+    index_.erase(lru_.back().first);
+    lru_.pop_back();
+    ++evictions_;
+}
+
 void ThumbnailService::insert_locked(const Key& k, Image img) {
     if (auto it = index_.find(k); it != index_.end()) {
+        const u64 b = std::min<u64>(bytes_, image_bytes(it->second->second));
+        bytes_ -= b;
+        if (memory_) memory_->free(MemoryClass::Thumbnails, static_cast<usize>(b));
         lru_.erase(it->second);
         index_.erase(it);
     }
+    const u64 b = image_bytes(img);
     lru_.emplace_front(k, std::move(img));
     index_[k] = lru_.begin();
-    while (lru_.size() > kMaxCached) {
-        index_.erase(lru_.back().first);
-        lru_.pop_back();
+    bytes_ += b;
+    if (memory_) memory_->commit(MemoryClass::Thumbnails, static_cast<usize>(b));
+    // Teto em BYTES (o orçamento) e em quantidade (o índice não cresce sem
+    // fim com miniaturas minúsculas). O mais antigo sai; o recém-inserido fica.
+    const u64 budget = budget_locked();
+    while (lru_.size() > 1 && (bytes_ > budget || lru_.size() > kMaxCached)) pop_lru_locked();
+}
+
+usize ThumbnailService::reclaim(usize targetBytes) noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const u64 before = bytes_;
+    // Trim: tudo (a UI guarda os bitmaps do que está na tela). Orçamento:
+    // pelo mais antigo até cobrir o pedido.
+    while (!lru_.empty() && (targetBytes == MemoryManager::kReclaimAll || before - bytes_ < targetBytes)) pop_lru_locked();
+    if (targetBytes == MemoryManager::kReclaimAll) {
+        // Pedidos na fila também saem: decodificar agora para jogar fora
+        // depois é trabalho e memória sem motivo.
+        queue_.clear();
+        pending_.clear();
     }
+    return static_cast<usize>(before - bytes_);
+}
+
+bool ThumbnailService::metrics(CacheMetrics& out) const noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    out.name = "miniaturas";
+    out.cls = MemoryClass::Thumbnails;
+    out.stage = TrimStage::OffscreenThumbnails;
+    out.bytes = bytes_;
+    out.budgetBytes = budget_locked();
+    out.entries = static_cast<u32>(lru_.size());
+    out.hits = hits_;
+    out.misses = misses_;
+    out.evictions = evictions_;
+    out.version = version_;
+    return true;
 }
 
 bool ThumbnailService::video(u64 assetKey, const Asset& asset, i64 timeUs, u32 height, Image& out) {
-    const Key k{assetKey, std::max<i64>(0, timeUs) / kBucketUs, height};
+    const Key k{assetKey, std::max<i64>(0, timeUs) / kBucketUs, height, path_hash(asset.sourcePath)};
     std::lock_guard<std::mutex> lock(mutex_);
     if (auto it = index_.find(k); it != index_.end()) {
         lru_.splice(lru_.begin(), lru_, it->second);
         out = it->second->second;
+        ++hits_;
         return true;
     }
+    ++misses_;
     if (!pending_.contains(k) && !failedAssets_.contains(assetKey) && factory_ && running_) {
         pending_[k] = true;
         queue_.push_front(Request{k, asset});
@@ -165,13 +255,16 @@ bool ThumbnailService::video(u64 assetKey, const Asset& asset, i64 timeUs, u32 h
 }
 
 bool ThumbnailService::image(u64 assetKey, const u8* rgba, u32 width, u32 height, u32 thumbHeight, Image& out) {
-    const Key k{assetKey, -1, thumbHeight};
+    const Key k{assetKey, -1, thumbHeight, 0};
     std::lock_guard<std::mutex> lock(mutex_);
     if (auto it = index_.find(k); it != index_.end()) {
+        lru_.splice(lru_.begin(), lru_, it->second);
         out = it->second->second;
+        ++hits_;
         return true;
     }
     if (!rgba || width == 0 || height == 0 || thumbHeight == 0) return false;
+    ++misses_;
     Image img;
     img.height = thumbHeight;
     img.width = std::max<u32>(1, static_cast<u32>(std::lround(static_cast<f64>(thumbHeight) * width / height)));
@@ -225,19 +318,32 @@ void ThumbnailService::thread_main() noexcept {
     set_current_thread_priority(ThreadPriority::Background);
     for (;;) {
         Request req;
+        u32 version = 0;
         {
             std::unique_lock<std::mutex> lock(mutex_);
-            wake_.wait(lock, [&] { return !running_ || !queue_.empty(); });
+            auto ready = [&] { return !running_ || !queue_.empty(); };
+            if (!wake_.wait_for(lock, std::chrono::seconds(3), ready)) {
+                // Ocioso há 3 s: devolve os decoders (codec de hardware é
+                // recurso do sistema, e o do projeto anterior ficava aberto
+                // até a próxima miniatura). Reabrir custa dezenas de ms, uma vez.
+                lock.unlock();
+                decoders_.clear();
+                lock.lock();
+                wake_.wait(lock, ready);
+            }
             if (!running_) break;
             req = std::move(queue_.front());
             queue_.pop_front();
+            version = version_;
         }
         Image img;
         const bool ok = decode(req, img);
         {
             std::lock_guard<std::mutex> lock(mutex_);
             pending_.erase(req.key);
-            if (ok) insert_locked(req.key, std::move(img));
+            // Projeto trocado enquanto decodificava (clear): a miniatura é do
+            // projeto velho e não entra no cache novo.
+            if (ok && version == version_) insert_locked(req.key, std::move(img));
         }
         if (ok) generation_.fetch_add(1, std::memory_order_acq_rel);
     }

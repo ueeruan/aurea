@@ -12,6 +12,12 @@ void MediaManager::set_factory(VideoSourceFactory* factory) noexcept {
     factory_ = factory;
 }
 
+void MediaManager::set_memory(MemoryManager* memory) noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    memory_ = memory;
+    for (Entry& e : entries_) if (e.source) e.source->cache().attach(memory);
+}
+
 VideoSource* MediaManager::source_for(LayerId layer, AssetId assetId, const Asset& asset,
                                       u64 frameNumber) {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -37,6 +43,7 @@ VideoSource* MediaManager::source_for(LayerId layer, AssetId assetId, const Asse
         return nullptr;
     }
     e.source = std::make_unique<VideoSource>(std::move(backend), MediaPriority::Preview);
+    e.source->cache().attach(memory_);
     e.source->set_ready_callback(readyFn_, readyCtx_);
     e.source->start();
     if (suspended_) e.source->suspend();

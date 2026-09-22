@@ -29,6 +29,13 @@ class AureaEngine private constructor() {
         /** Tamanho de um `Command` no C++ (`static_assert` do lado nativo). */
         const val COMMAND_SIZE_BYTES = 128
 
+        /** `MemoryClass::_Count` do C++ (MemoryManager.hpp). */
+        const val MEMORY_CLASSES = 11
+        /** Índices de MemoryClass usados na tela Armazenamento. */
+        const val MEM_THUMBNAILS = 0
+        const val MEM_WAVEFORMS = 1
+        const val MEM_DECODED_FRAMES = 3
+
         /** Capacidade do lote. 4096 comandos = 512 KB, o pior caso de um gesto. */
         const val MAX_COMMANDS_PER_FRAME = 4096
 
@@ -171,6 +178,25 @@ class AureaEngine private constructor() {
     fun suspend() = nativeSuspend(nativeHandle)
 
     fun resume() = nativeResume(nativeHandle)
+
+    /**
+     * Pressão de memória do sistema (Fase 8B): o nível de
+     * ComponentCallbacks2.onTrimMemory. O motor solta caches na ordem do spec
+     * (miniaturas fora da tela → waveform antiga → quadros sem uso → cache de
+     * render → assets 3D sem uso → temporários); o projeto nunca. Devolve os
+     * bytes liberados.
+     */
+    fun trimMemory(level: Int): Long = if (nativeHandle != 0L) nativeTrimMemory(nativeHandle, level) else 0L
+
+    /**
+     * Uso e orçamento de memória do motor por categoria (MemoryClass):
+     * [usado, orçamento] intercalados. null = motor ainda não subiu.
+     */
+    fun memoryReport(): LongArray? {
+        if (nativeHandle == 0L) return null
+        val out = LongArray(MEMORY_CLASSES * 2)
+        return if (nativeMemoryReport(nativeHandle, out) > 0) out else null
+    }
     /** Redesenha o preview mesmo sem mudança (a janela voltou a aparecer). */
     fun invalidate() = nativeInvalidate(nativeHandle)
 
@@ -570,6 +596,8 @@ class AureaEngine private constructor() {
     private external fun nativeShutdown(handle: Long)
     private external fun nativeSuspend(handle: Long)
     private external fun nativeResume(handle: Long)
+    private external fun nativeTrimMemory(handle: Long, level: Int): Long
+    private external fun nativeMemoryReport(handle: Long, out: LongArray): Int
     private external fun nativeInvalidate(handle: Long)
     private external fun nativeAttachSurface(handle: Long, surface: Surface, width: Int, height: Int): Boolean
     private external fun nativeDetachSurface(handle: Long)

@@ -58,6 +58,9 @@ public:
     ~MediaManager();
 
     void set_factory(VideoSourceFactory* factory) noexcept;
+    /// Orçamento de quadros decodificados (Fase 8 §12): cada fonte nova liga o
+    /// cache dela à categoria DecodedFrames, compartilhada entre as fontes.
+    void set_memory(MemoryManager* memory) noexcept;
     [[nodiscard]] VideoSourceFactory* factory() const noexcept { return factory_; }
 
     /// Fonte da layer. Abre na primeira vez (a abertura é síncrona e custa
@@ -102,6 +105,7 @@ private:
     };
 
     VideoSourceFactory* factory_ = nullptr;
+    MemoryManager* memory_ = nullptr;
     mutable std::mutex mutex_;
     std::vector<Entry> entries_;
     void (*readyFn_)(void*) = nullptr;

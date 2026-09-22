@@ -294,6 +294,14 @@ public:
     /// Descarta texturas de imagem e LUTs (projeto fechado).
     void release_project_resources() noexcept;
 
+    /// Pressão de memória do sistema (Fase 8 §13), com o lock de render do
+    /// motor. `stage` segue aurea::TrimStage: ≥ 4 solta o cache de render que
+    /// não entrou no último quadro (`frameNumber`) — planos de vídeo, flow,
+    /// máscara, LUT, malha vetorial e o pool transitório; ≥ 6 solta os
+    /// assets 3D sem uso. O quadro na tela não perde nada. Devolve quantas
+    /// texturas saíram.
+    u32 trim_memory(u8 stage, u64 frameNumber) noexcept;
+
     /// A PRÉVIA DE UM EFEITO (Fase 7.3 §13–§15): o efeito de verdade, com os
     /// valores PADRÃO da declaração, rodando sobre a cartela de demonstração
     /// (`effects/preview_plate.frag`). Um frame, fora da tela, sem projeto e

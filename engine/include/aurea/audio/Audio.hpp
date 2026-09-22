@@ -30,6 +30,7 @@
 #include "aurea/animation/Curve.hpp"
 #include "aurea/core/Result.hpp"
 #include "aurea/core/Types.hpp"
+#include "aurea/memory/MemoryManager.hpp"
 #include "aurea/playback/Playback.hpp"
 
 #include <array>
@@ -310,12 +311,21 @@ public:
 /// Valor: pico absoluto de L/R no balde, em u8 com compansão raiz (255·√pico):
 /// fala baixa, respiração e silêncio ficam visíveis sem o pico estourar a
 /// altura. A UI desenha a altura direto do valor.
-class WaveformCache {
+///
+/// Fase 8 (§12, §14–15): orçamento em bytes (categoria Waveforms), LRU pela
+/// última consulta, métricas e versão. "Waveform antiga" (segundo estágio da
+/// pressão do sistema) = pronta e sem consulta há mais de 2 s — a que está
+/// na tela é consultada a cada redesenho e fica.
+class WaveformCache final : public IMemoryReclaimable {
 public:
     static constexpr u32 kBaseSamples = 240;   ///< 200 baldes por segundo no nível 0
+    /// Consulta mais recente que isto não é "antiga" (está na tela).
+    static constexpr u64 kRecentNs = 2'000'000'000ull;
+    /// Teto sem orçamento ligado (testes).
+    static constexpr u64 kDefaultBudget = 8ull << 20;
 
     explicit WaveformCache(VideoSourceFactory* factory);
-    ~WaveformCache();
+    ~WaveformCache() override;
 
     WaveformCache(const WaveformCache&) = delete;
     WaveformCache& operator=(const WaveformCache&) = delete;
@@ -324,6 +334,9 @@ public:
     /// próxima abertura do projeto os lê em vez de decodificar o áudio
     /// inteiro de novo. Vazio = sem disco (o padrão; testes).
     void set_disk_directory(std::string dir);
+    /// Liga ao orçamento (categoria Waveforms). Nulo desliga.
+    void attach(MemoryManager* memory) noexcept;
+
     /// Enfileira o asset (nada acontece se já está pronto ou na fila).
     void request(u64 key, const AudioAssetRef& ref);
     /// `count` baldes de `samplesPerBucket` amostras (48 kHz) a partir de
@@ -335,6 +348,18 @@ public:
     /// Muda quando chega pedaço novo (a UI redesenha).
     [[nodiscard]] u32 generation() const noexcept { return generation_.load(std::memory_order_acquire); }
 
+    /// Projeto fechado: tudo sai (as chaves são ids do projeto).
+    void clear();
+    [[nodiscard]] u64 bytes() const;
+    [[nodiscard]] u32 entry_count() const;
+
+    // IMemoryReclaimable
+    [[nodiscard]] MemoryClass memory_class() const noexcept override { return MemoryClass::Waveforms; }
+    [[nodiscard]] usize reclaim(usize targetBytes) noexcept override;
+    [[nodiscard]] const char* debug_name() const noexcept override { return "waveform"; }
+    [[nodiscard]] bool accounts_itself() const noexcept override { return true; }
+    [[nodiscard]] bool metrics(CacheMetrics& out) const noexcept override;
+
 private:
     struct Entry {
         AudioAssetRef ref;
@@ -343,11 +368,19 @@ private:
         i64 ready = 0;                          ///< baldes do nível 0 já calculados
         bool done = false;
         bool failed = false;
+        u64 bytes = 0;                          ///< contado no orçamento
+        mutable u64 lastQueryNs = 0;
     };
     void thread_main();
     [[nodiscard]] std::string disk_path(const AudioAssetRef& ref) const;
     [[nodiscard]] static bool load_disk(const std::string& file, i64 total, std::vector<u8>& out);
     static void save_disk(const std::string& file, const std::vector<u8>& level0);
+    void account_locked(Entry& e) noexcept;
+    void erase_locked(std::unordered_map<u64, Entry>::iterator it) noexcept;
+    /// Despeja pela consulta mais antiga até caber (nunca a que está sendo
+    /// calculada nem uma consultada nos últimos `kRecentNs`).
+    void enforce_budget_locked() noexcept;
+    [[nodiscard]] u64 budget_locked() const noexcept;
 
     VideoSourceFactory* factory_;
     std::string diskDir_;   ///< lido sob `mutex_`
@@ -356,6 +389,13 @@ private:
     std::unordered_map<u64, Entry> entries_;
     std::vector<u64> queue_;
     std::atomic<u32> generation_{1};
+    MemoryManager* memory_ = nullptr;
+    u64 bytes_ = 0;
+    u64 activeKey_ = 0;
+    bool activeValid_ = false;
+    mutable u64 hits_ = 0, misses_ = 0;
+    u64 evictions_ = 0;
+    u32 version_ = 0;
     bool quit_ = false;
     std::thread thread_;
 };

@@ -29,6 +29,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -157,15 +158,14 @@ internal fun SettingsTab(store: EditorStore, vm: HomeViewModel, listState: LazyL
             }
             GroupNote("Na primeira vez que abre, o Aurea mede este celular (memória, GPU e codecs de vídeo) e ajusta sozinho a qualidade da prévia, o uso de memória e o limite de exportação. Fica guardado; só mede de novo se o sistema for atualizado.")
         }
+        item(key = "armazenamento") {
+            Spacer(Modifier.height(AureaDims.S5))
+            StorageSection(store)
+        }
         item(key = "geral") {
             Spacer(Modifier.height(AureaDims.S5))
             GroupHeader("Geral")
             Group {
-                TapRow("Limpar cache", "Remove prévias, miniaturas e quadros temporários") {
-                    store.clearCache()
-                    store.effectPreviews?.clear()
-                }
-                GroupDivider()
                 TapRow("Limpar recentes de efeitos", "A lista de \"Recentes\" do navegador de efeitos") {
                     store.effectPrefs.clearRecents()
                     store.showToast("Recentes de efeitos limpos")
@@ -211,6 +211,94 @@ internal fun SettingsTab(store: EditorStore, vm: HomeViewModel, listState: LazyL
             Text("Feito por Ruanzitwo", style = AureaType.Footer, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
         }
     }
+}
+
+/** Um tamanho legível: "0 KB", "812 KB", "3,4 MB", "1,2 GB". */
+private fun sizeLabel(bytes: Long): String = when {
+    bytes < 1024L * 1024L -> "${(bytes + 1023) / 1024} KB"
+    bytes < 1024L * 1024L * 1024L -> "%.1f MB".format(bytes / (1024.0 * 1024.0))
+    else -> "%.2f GB".format(bytes / (1024.0 * 1024.0 * 1024.0))
+}
+
+/** O que a tela Armazenamento mostra: disco por tipo + memória do motor agora. */
+private class StorageSnapshot(
+    val kinds: List<com.aurea.aurea.state.CacheKind>,
+    val thumbsRam: Long,
+    val waveRam: Long,
+    val framesRam: Long,
+    val engineRam: Long,
+)
+
+/**
+ * AJUSTES › ARMAZENAMENTO (Fase 8B §49–51). Tamanhos REAIS, lidos do disco e
+ * do motor quando a seção aparece e depois de cada limpeza. Cada linha limpa
+ * só o próprio tipo; "Limpar tudo" limpa todos. Nada disso é projeto: os
+ * projetos, presets, fontes e modelos importados não aparecem aqui porque não
+ * são apagáveis por esta tela.
+ */
+@Composable
+private fun StorageSection(store: EditorStore) {
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var snapshot by remember { mutableStateOf<StorageSnapshot?>(null) }
+    var refresh by remember { mutableIntStateOf(0) }
+    var busy by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(refresh, store.engineReady) {
+        snapshot = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val mem = store.engineMemory()
+            fun used(i: Int) = mem?.getOrNull(i * 2) ?: 0L
+            StorageSnapshot(
+                kinds = store.storage.scan(store.exporter.busy),
+                thumbsRam = used(com.aurea.aurea.engine.AureaEngine.MEM_THUMBNAILS) + store.uiThumbnailBytes(),
+                waveRam = used(com.aurea.aurea.engine.AureaEngine.MEM_WAVEFORMS),
+                framesRam = used(com.aurea.aurea.engine.AureaEngine.MEM_DECODED_FRAMES),
+                engineRam = (0 until com.aurea.aurea.engine.AureaEngine.MEMORY_CLASSES).sumOf { used(it) },
+            )
+        }
+    }
+    fun clear(id: String?) {
+        if (busy) return
+        busy = true
+        scope.launch {
+            val freed = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                if (id == null) store.clearCache() else store.clearStorage(id)
+            }
+            busy = false
+            if (id != null) store.showToast("Liberado: ${sizeLabel(freed)}")
+            refresh++
+        }
+    }
+
+    GroupHeader("Armazenamento")
+    val snap = snapshot
+    Group {
+        if (snap == null) {
+            TileRow(
+                leading = { CupertinoIcon(CupertinoGlyph.Film, 21.dp, AureaColors.Muted) },
+                title = "Medindo…",
+                subtitle = "Lendo o tamanho de cada tipo de cache",
+            )
+        } else {
+            val diskTotal = snap.kinds.sumOf { it.bytes }
+            snap.kinds.forEachIndexed { i, k ->
+                if (i > 0) GroupDivider()
+                TapRow(
+                    "${k.title} · ${sizeLabel(k.bytes)}",
+                    if (k.bytes > 0) "${k.detail}. Toque para limpar." else "${k.detail}. Vazio.",
+                ) { if (k.bytes > 0) clear(k.id) }
+            }
+            GroupDivider()
+            TapRow(
+                "Na memória agora · ${sizeLabel(snap.engineRam + store.uiThumbnailBytes())}",
+                "Miniaturas ${sizeLabel(snap.thumbsRam)} · waveform ${sizeLabel(snap.waveRam)} · quadros de vídeo ${sizeLabel(snap.framesRam)}. Toque para soltar.",
+            ) { clear(EditorStore.MEMORY) }
+            GroupDivider()
+            TapRow(
+                if (busy) "Limpando…" else "Limpar tudo · ${sizeLabel(diskTotal)} no disco",
+                "Todo o cache acima, no disco e na memória",
+            ) { clear(null) }
+        }
+    }
+    GroupNote("Só cache: tudo aqui se refaz sozinho quando for preciso. Projetos, presets, fontes e modelos importados nunca são apagados por esta tela. Quando um tipo passa do limite, o Aurea apaga sozinho os arquivos mais antigos.")
 }
 
 /**

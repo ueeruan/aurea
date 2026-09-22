@@ -12,6 +12,19 @@
 //  mais do que ajuda), com filas por prioridade e uma fila sem trava para o
 //  caminho de submissão.
 //
+//  Fase 8 (§31–34, §38):
+//   - cinco prioridades: REALTIME (áudio), HIGH (preview, decode atual,
+//     scrub), NORMAL (miniaturas/waveform visíveis), LOW (proxy, análise) e
+//     BACKGROUND;
+//   - sem starvation: cada fila de baixo ganha a vez depois de N tarefas de
+//     cima passarem na frente dela (envelhecimento por contagem);
+//   - LOW/BACKGROUND nunca ocupam todos os workers: sobra sempre um para o
+//     que segura o quadro (medido em Jobs.BackgroundDoesNotDelayHighPriority);
+//   - worker sem trabalho DORME (variável de condição). Antes ele girava em
+//     `yield()` — cada worker queimava um núcleo inteiro com o app parado;
+//   - workers ativos seguem a temperatura (`apply_thermal`): quente, menos
+//     trabalho de fundo; crítico, metade do pool.
+//
 //  Toda tarefa é `void(void*, JobContext&)`. Sem std::function no caminho
 //  quente: o custo de uma alocação por submissão seria pago 60 vezes por
 //  segundo, por layer, por efeito.
@@ -22,22 +35,41 @@
 #include "aurea/core/Result.hpp"
 
 #include <atomic>
-#include <functional>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
+#include <vector>
 
 namespace aurea {
 
 /// Prioridades. A ordem importa: `Count` é o número de filas.
 enum class JobPriority : u8 {
-    /// Trabalho que segura um frame. Tem que terminar antes do próximo vsync.
-    Critical = 0,
-    /// Trabalho do frame atual, mas que pode cair para o próximo.
-    High,
-    /// Prefetch, decode antecipado, geração de proxy.
-    Normal,
-    /// Miniaturas, análise de waveform, indexação. Cede para tudo.
-    Low,
-    Count,
+    /// Áudio e o que segura o quadro. Tem que terminar antes do próximo vsync.
+    Realtime = 0,
+    /// Nome antigo de Realtime (mesma fila).
+    Critical = Realtime,
+    /// Preview, decode do quadro atual, scrub.
+    High = 1,
+    /// Miniaturas e waveform VISÍVEIS, prefetch.
+    Normal = 2,
+    /// Proxy, análise, indexação. Cede para tudo.
+    Low = 3,
+    /// Limpeza, cache em disco, o que pode esperar minutos.
+    Background = 4,
+    Count = 5,
 };
+
+[[nodiscard]] constexpr const char* to_string(JobPriority p) noexcept {
+    switch (p) {
+        case JobPriority::Realtime:   return "realtime";
+        case JobPriority::High:       return "high";
+        case JobPriority::Normal:     return "normal";
+        case JobPriority::Low:        return "low";
+        case JobPriority::Background: return "background";
+        case JobPriority::Count:      break;
+    }
+    return "?";
+}
 
 using JobFn = void (*)(void* userData, class JobContext& ctx);
 
@@ -82,6 +114,9 @@ struct JobHandle {
 
 class JobSystem {
 public:
+    static constexpr u32 kMaxWorkers = 32;
+    static constexpr u8  kQueueCount = static_cast<u8>(JobPriority::Count);
+
     JobSystem() = default;
     ~JobSystem();
 
@@ -92,7 +127,9 @@ public:
     /// DeviceCapabilities (núcleos de performance, não o total).
     [[nodiscard]] Status start(u32 workerCount = 0) noexcept;
 
-    /// Encerra o pool e espera todas as tarefas. Idempotente.
+    /// Encerra o pool e espera todas as tarefas. Idempotente. As threads são
+    /// JUNTADAS (join): depois do stop a contagem de threads do processo volta
+    /// ao que era — é o que o teste de ciclo longo confere.
     void stop() noexcept;
 
     /// Submete uma tarefa. Devolve handle inválido se o sistema está parado.
@@ -120,10 +157,33 @@ public:
     /// A UI chama isto antes de dormir, para não deixar o pool ocioso.
     void pump(u32 maxTasks = 64) noexcept;
 
+    /// Quantos workers podem pegar trabalho (os demais dormem). 1..worker_count.
+    void set_active_workers(u32 n) noexcept;
+    /// Teto de workers rodando LOW/BACKGROUND ao mesmo tempo. Sempre deixa ao
+    /// menos um worker livre para o trabalho de cima quando há mais de um ativo.
+    void set_background_limit(u32 n) noexcept;
+    /// Política térmica (§35–36, §33): nível de ThermalState::Level (0 nominal
+    /// .. 4 emergência). Nominal: tudo; Fair (morno): metade dos workers para
+    /// fundo; Serious (quente): um só para fundo; Critical/Emergency: metade
+    /// do pool ativo e um só para fundo.
+    void apply_thermal(u32 thermalLevel) noexcept;
+
     [[nodiscard]] u32 worker_count() const noexcept { return workerCount_; }
+    [[nodiscard]] u32 active_workers() const noexcept { return activeWorkers_.load(std::memory_order_relaxed); }
+    [[nodiscard]] u32 background_limit() const noexcept { return bgLimit_.load(std::memory_order_relaxed); }
     [[nodiscard]] bool running() const noexcept { return running_.load(std::memory_order_acquire); }
     [[nodiscard]] u64 completed_count() const noexcept { return completed_.load(std::memory_order_relaxed); }
     [[nodiscard]] u32 queue_depth(JobPriority p) const noexcept;
+
+    struct Stats {
+        u64 completed[kQueueCount]{};
+        /// Vezes que uma fila de baixo ganhou a vez por envelhecimento.
+        u64 agedPromotions[kQueueCount]{};
+        /// Vezes que um worker dormiu sem trabalho (ociosidade real, sem giro).
+        u64 sleeps = 0;
+        u32 liveThreads = 0;
+    };
+    [[nodiscard]] Stats stats() const noexcept;
 
 private:
     friend class JobContext;
@@ -181,18 +241,45 @@ private:
         alignas(64) std::atomic<u32> storage_{0};
     };
 
-    WorkQueue                queues_[static_cast<u8>(JobPriority::Count)];
+    /// Pega a próxima tarefa respeitando prioridade, envelhecimento e o teto
+    /// de fundo. `bgSlot` volta true quando a tarefa ocupou uma vaga de fundo
+    /// (quem roda devolve a vaga ao terminar).
+    [[nodiscard]] bool take(Task& out, bool allowBackground, bool& bgSlot) noexcept;
+    void run_task(const Task& t, u32 workerIndex, bool bgSlot) noexcept;
+    [[nodiscard]] bool has_work_for(u32 workerIndex) const noexcept;
+    void notify_workers(u32 n) noexcept;
+
+    static constexpr bool is_background(u8 p) noexcept { return p >= static_cast<u8>(JobPriority::Low); }
+
+    WorkQueue                queues_[kQueueCount];
     std::atomic<bool>        running_{false};
     std::atomic<bool>        stop_{false};
     std::atomic<u64>         nextId_{1};
     std::atomic<u64>         completed_{0};
     std::atomic<u32>         activeTasks_{0};
-    /// Workers ainda dentro do laço. O stop() espera zerar: um worker
-    /// destacado que ainda lê `this` depois da destruição derrubava o
-    /// processo no teste seguinte.
+    /// Workers ainda dentro do laço. O stop() espera zerar antes de juntar.
     std::atomic<u32>         liveWorkers_{0};
     u32                      workerCount_ = 0;
-    void*                    threads_[32]{};
+    std::vector<std::thread> threads_;
+
+    // Sono dos workers. `pending*` é contado ANTES de acordar alguém e o
+    // predicado da espera o relê sob o mutex: sem janela de despertar perdido.
+    std::mutex               sleepMutex_;
+    std::condition_variable  sleepCv_;
+    std::atomic<u32>         sleepers_{0};
+    std::atomic<u32>         pendingFg_{0};   ///< REALTIME/HIGH/NORMAL enfileiradas
+    std::atomic<u32>         pendingBg_{0};   ///< LOW/BACKGROUND enfileiradas
+    std::atomic<u32>         bgRunning_{0};   ///< LOW/BACKGROUND rodando agora
+    std::atomic<u32>         bgLimit_{1};
+    std::atomic<u32>         bgLimitUser_{0}; ///< 0 = automático (ativos − 1)
+    std::atomic<u32>         activeWorkers_{0};
+
+    /// Envelhecimento: tarefas de cima que passaram na frente de cada fila
+    /// enquanto ela tinha trabalho esperando.
+    std::atomic<u32>         skipped_[kQueueCount]{};
+    std::atomic<u64>         doneByPrio_[kQueueCount]{};
+    std::atomic<u64>         aged_[kQueueCount]{};
+    std::atomic<u64>         sleeps_{0};
 };
 
 } // namespace aurea

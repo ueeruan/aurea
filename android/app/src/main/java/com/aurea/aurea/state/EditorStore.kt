@@ -308,6 +308,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         private set
     val thumbnails = ThumbnailCache(engine)
 
+    /** Arquivos regeneráveis do app (Ajustes › Armazenamento, Fase 8B §49–52). */
+    val storage = CacheStorage(getApplication())
+
     /** Camada principal da seleção. */
     val primary: Long? get() = selection.firstOrNull()
 
@@ -418,6 +421,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             }
         }
         refreshProjects()
+        // Limpeza automática (§51): tipo acima do teto perde os mais antigos;
+        // sobra de export/legenda de uma sessão que morreu (crash, force kill)
+        // sai aqui. Fora da main thread; nunca toca em projeto.
+        viewModelScope.launch(Dispatchers.IO) { runCatching { storage.enforceLimits(exporting = false) } }
     }
 
     /**
@@ -516,6 +523,29 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 Log.i(TAG, "gravacao ao ir para segundo plano: codigo $code, ${(System.nanoTime() - t0) / 1_000_000} ms fora da main")
             }
             synchronized(lifecycleLock) { if (ready) engine.suspend() }
+        }
+    }
+
+    /**
+     * Pressão de memória do SISTEMA (ComponentCallbacks2.onTrimMemory, Fase 8B
+     * §13). A UI solta os bitmaps dela (miniaturas e prévias fora da tela) e o
+     * motor segue a ordem do spec. O projeto, as alterações não salvas e o
+     * histórico nunca entram — só cache que se refaz.
+     */
+    fun onTrimMemory(level: Int) {
+        when {
+            level >= TRIM_UI_HIDDEN || level == TRIM_RUNNING_CRITICAL -> {
+                thumbnails.clear()
+                effectPreviews?.trimMemory()
+            }
+            level >= TRIM_RUNNING_LOW -> thumbnails.trimTo(0.5f)
+        }
+        lifecycleThread.execute {
+            synchronized(lifecycleLock) {
+                if (!ready) return@synchronized
+                val freed = engine.trimMemory(level)
+                android.util.Log.i("Aurea", "onTrimMemory($level): motor liberou ${freed / 1024} KB")
+            }
         }
     }
 
@@ -3641,32 +3671,42 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         return name
     }
 
+    /** Uso de memória do motor por categoria (null = motor ainda subindo). */
+    fun engineMemory(): LongArray? = if (ready) engine.memoryReport() else null
+
+    /** Bitmaps de miniatura guardados pela UI agora. */
+    fun uiThumbnailBytes(): Long = thumbnails.bytes()
+
     /**
-     * "Limpar cache". Onde fica cada cache do app (e nada fora daqui):
-     *  - `cacheDir/motor/` — cache de pipeline do Vulkan (regenerável; o motor
-     *    regrava no próximo segundo plano);
-     *  - `filesDir/projetos/.miniaturas/` — miniaturas dos projetos da Home
-     *    (só as ÓRFÃS, de projetos apagados, saem);
-     *  - miniaturas da timeline e frames decodificados vivem só na memória.
-     * Devolve os bytes liberados.
+     * Limpa um tipo de cache (Ajustes › Armazenamento). `MEMORY` = caches de
+     * memória (miniaturas, waveform, quadros decodificados, cache de render):
+     * o mesmo caminho do aviso de pressão do sistema, no nível mais forte.
+     * Devolve os bytes liberados. Nunca toca em projeto.
+     */
+    fun clearStorage(id: String): Long {
+        if (id == MEMORY) {
+            thumbnails.clear()
+            effectPreviews?.trimMemory()
+            var freed = 0L
+            synchronized(lifecycleLock) { if (ready) freed = engine.trimMemory(TRIM_COMPLETE) }
+            return freed
+        }
+        if (id == CacheStorage.EXPORT && exporter.busy) return 0L
+        val freed = storage.clear(id)
+        if (id == CacheStorage.PREVIEWS) effectPreviews?.clear()
+        return freed
+    }
+
+    /**
+     * "Limpar tudo": todos os tipos regeneráveis, em disco e na memória.
+     * Onde fica cada um está em [CacheStorage]; projetos nunca. Devolve os
+     * bytes liberados (disco + memória do motor).
      */
     fun clearCache(): Long {
-        val dirs = directories()
         var freed = 0L
-        dirs.cache.listFiles()?.forEach { f ->
-            freed += f.walkBottomUp().filter { it.isFile }.sumOf { it.length() }
-            f.deleteRecursively()
-        }
-        val alive = dirs.projects.listFiles { f -> f.extension == "aurea" }
-            ?.map { it.nameWithoutExtension }?.toSet() ?: emptySet()
-        dirs.thumbs.listFiles()?.forEach { t ->
-            if (t.nameWithoutExtension !in alive) {
-                freed += t.length()
-                t.delete()
-            }
-        }
-        thumbnails.clear()
-        showToast("Cache limpo: ${"%.1f".format(freed / (1024.0 * 1024.0))} MB")
+        for (k in storage.scan(exporter.busy)) freed += clearStorage(k.id)
+        freed += clearStorage(MEMORY)
+        main.post { showToast("Cache limpo: ${"%.1f".format(freed / (1024.0 * 1024.0))} MB") }
         return freed
     }
 
@@ -3690,6 +3730,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         const val META_SUFFIX = ".meta.json"
         /** `kInvalidIndex` do C++: keyframe que não é de efeito. */
         const val NO_EFFECT = -1
+        /** Id do "tipo" memória na tela Armazenamento. */
+        const val MEMORY = "memoria"
+        // ComponentCallbacks2.TRIM_MEMORY_* (valores do SDK).
+        const val TRIM_RUNNING_LOW = 10
+        const val TRIM_RUNNING_CRITICAL = 15
+        const val TRIM_UI_HIDDEN = 20
+        const val TRIM_COMPLETE = 80
     }
 }
 
@@ -3704,8 +3751,10 @@ class ThumbnailCache(private val engine: AureaEngine) {
     // = camada 1 no frame 0 → miniatura de outra camada).
     private data class Key(val layer: Long, val frame: Int, val height: Int)
 
-    private val cache = object : LinkedHashMap<Key, Bitmap>(256, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Key, Bitmap>?) = size > 400
+    // Por BYTES (Fase 8B §12): 400 miniaturas de 96 px de altura em 16:9 já
+    // passavam de 25 MB. Teto: 1/16 do heap do app, entre 8 e 24 MB.
+    private val cache = object : android.util.LruCache<Key, Bitmap>(MAX_BYTES) {
+        override fun sizeOf(key: Key, value: Bitmap) = value.allocationByteCount
     }
     private val buffer: ByteBuffer = directBuffer(512 * 512 * 4)
     private val width = IntArray(1)
@@ -3713,18 +3762,27 @@ class ThumbnailCache(private val engine: AureaEngine) {
     /** Quem chama arredonda o frame para a grade de 250 ms do motor (a timeline pede um frame por balde). */
     fun get(layer: Long, timelineFrame: Int, heightPx: Int): Bitmap? {
         val key = Key(layer, timelineFrame, heightPx)
-        cache[key]?.let { return it }
+        cache.get(key)?.let { return it }
         buffer.clear()
         val bytes = engine.queryThumbnail(layer, timelineFrame, heightPx, buffer, width)
         if (bytes <= 0 || width[0] <= 0) return null
         buffer.rewind()
         val bmp = Bitmap.createBitmap(width[0], heightPx, Bitmap.Config.ARGB_8888)
         bmp.copyPixelsFromBuffer(buffer)
-        cache[key] = bmp
+        cache.put(key, bmp)
         return bmp
     }
 
-    fun clear() = cache.clear()
+    fun clear() = cache.evictAll()
+
+    /** Pressão de memória: fica só a fração mais recente (o que está na tela). */
+    fun trimTo(fraction: Float) = cache.trimToSize((cache.size() * fraction).toInt())
+
+    fun bytes(): Long = cache.size().toLong()
+
+    private companion object {
+        val MAX_BYTES: Int = (Runtime.getRuntime().maxMemory() / 16).coerceIn(8L shl 20, 24L shl 20).toInt()
+    }
 }
 
 /** Comprimento das setas do gizmo 3D, em unidades do mundo (px da composição no plano Z = 0). */

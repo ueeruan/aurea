@@ -21,6 +21,9 @@ VideoSource::VideoSource(std::unique_ptr<VideoDecoderBackend> backend, MediaPrio
     const u32 live = backend_->max_live_frames();
     cfg.maxFrames = live > 5 ? live - 5 : 1;
     cache_.configure(cfg);
+    // Janela para trás: cabe no cache com o atual e um de folga (o que acabou
+    // de ser mostrado), no máximo 6 — o decoder de hardware tem 12 buffers.
+    backFrames_ = std::clamp<i64>(static_cast<i64>(cfg.maxFrames) - 2, 0, 6);
 }
 
 VideoSource::~VideoSource() { stop(); }
@@ -140,7 +143,16 @@ void VideoSource::thread_main() noexcept {
         {
             std::unique_lock<std::mutex> lock(mutex_);
             auto prefetch_pending = [&] {
-                if (request_.mode != DecodeMode::Playback || eos_ || suspended_) return false;
+                if (request_.mode != DecodeMode::Playback || suspended_) return false;
+                if (request_.direction < 0) {
+                    // Reverso: reabastece quando sobra menos de um frame atrás
+                    // do playhead (uma tentativa por alvo).
+                    if (backFrames_ == 0 || request_.targetUs == backfillAttemptUs_) return false;
+                    const i64 low = std::max<i64>(0, request_.targetUs - frameUs_);
+                    const i64 begin = cache_.contiguous_begin(request_.targetUs, frameUs_);
+                    return begin <= request_.targetUs && begin > low + half;
+                }
+                if (request_.direction == 0 || eos_) return false;   // congelado: só o alvo
                 const i64 ahead = frameUs_ * (request_.speed > 1.5f ? 4 : 3);
                 return cache_.contiguous_end(request_.targetUs, frameUs_) < request_.targetUs + ahead - half;
             };
@@ -182,7 +194,27 @@ void VideoSource::thread_main() noexcept {
         // Qual frame falta, e até onde ir.
         i64 need = req.targetUs;
         i64 limit = req.targetUs;
-        if (req.mode == DecodeMode::Playback) {
+        // Primeiro pts entregue ao cache (os anteriores são decodificados e
+        // soltos sem render). Para a frente: o próprio alvo.
+        i64 deliverStart = -1;
+        const bool backward = req.direction < 0 && req.mode != DecodeMode::Still && backFrames_ > 0;
+        if (req.mode == DecodeMode::Playback && backward) {
+            // REVERSO tocando: janela [alvo − N, alvo]. Com o alvo no cache,
+            // completa o que falta abaixo do começo contíguo.
+            const i64 begin = cache_.contiguous_begin(req.targetUs, frameUs_);
+            const bool haveTarget = begin <= req.targetUs;
+            const i64 low = std::max<i64>(0, req.targetUs - frameUs_);
+            if (haveTarget && begin <= low + half) continue;
+            if (haveTarget && req.targetUs == backfillAttemptUs_) continue;
+            backfillAttemptUs_ = req.targetUs;
+            need = std::max<i64>(0, req.targetUs - backFrames_ * frameUs_);
+            limit = haveTarget ? begin - frameUs_ : req.targetUs;
+            if (limit < need - half) continue;
+            deliverStart = need;
+        } else if (req.mode == DecodeMode::Playback && req.direction == 0) {
+            // Congelado / time remap parado: só o alvo, exato.
+            if (cache_.contains(req.targetUs, half)) continue;
+        } else if (req.mode == DecodeMode::Playback) {
             const i64 ahead = frameUs_ * (req.speed > 1.5f ? 4 : 3);
             const i64 end = cache_.contiguous_end(req.targetUs, frameUs_);
             if (end >= req.targetUs + ahead - half) continue;   // já está adiantado
@@ -191,8 +223,12 @@ void VideoSource::thread_main() noexcept {
         } else {
             if (cache_.contains(req.targetUs, half)) continue;
             // Arrastando para a frente, o decoder já está andando: deixa dois
-            // frames prontos adiante. Para trás, não há embalo a aproveitar.
+            // frames prontos adiante. Para trás, não há embalo a aproveitar —
+            // mas o caminho do keyframe até o alvo passa pelos anteriores, e
+            // os últimos deles vão para o cache (a latência do alvo não muda:
+            // o seek é o mesmo).
             if (req.mode == DecodeMode::Scrub && req.direction > 0) limit = need + 2 * frameUs_;
+            if (backward) deliverStart = std::max<i64>(0, need - backFrames_ * frameUs_);
         }
         if (durationUs > 0 && need > durationUs - half) need = std::max<i64>(0, durationUs - frameUs_);
         if (eos_ && need > decoderPosUs_) continue;   // pedido além do fim: o último frame já está no cache
@@ -216,8 +252,21 @@ void VideoSource::thread_main() noexcept {
             {
                 std::lock_guard<std::mutex> lock(mutex_);
                 if (!running_ || suspended_) break;
-                if (requestGen_ != gen) {
+                if (requestGen_ != gen && deliverStart >= 0) {
+                    // Janela para trás em curso: um alvo novo DENTRO dela só
+                    // troca o pedido (o frame dele sai nesta mesma passada).
                     const DecodeRequest nr = request_;
+                    const bool inWindow = nr.direction < 0 && nr.mode == req.mode
+                                       && nr.targetUs >= deliverStart - half && nr.targetUs <= limit + half;
+                    if (!inWindow) break;
+                    req = nr;
+                    gen = requestGen_;
+                    handledGen_ = gen;
+                    requestNs = requestTimeNs_;
+                    if (nr.mode == DecodeMode::Scrub) { need = nr.targetUs; limit = std::min(limit, need); }
+                } else if (requestGen_ != gen) {
+                    const DecodeRequest nr = request_;
+                    if (nr.direction < 0 && nr.mode != DecodeMode::Still) break;   // para trás: o laço externo monta a janela
                     const bool sameKind = (nr.mode == DecodeMode::Playback) == (req.mode == DecodeMode::Playback);
                     const i64 pos = decoderPosUs_ >= 0 ? decoderPosUs_ : seekTarget - half;
                     const bool ahead = nr.targetUs > pos - half
@@ -238,7 +287,9 @@ void VideoSource::thread_main() noexcept {
                 }
             }
 
-            const i64 deliverFrom = (req.mode == DecodeMode::Playback) ? req.targetUs - half : need - half;
+            const i64 deliverFrom = deliverStart >= 0                ? deliverStart - half
+                                 : (req.mode == DecodeMode::Playback) ? req.targetUs - half
+                                                                      : need - half;
             FrameRef frame;
             i64 pts = 0;
             bool eos = false;

@@ -189,8 +189,12 @@ private fun Options(
         val h = ((compH.toDouble() * side / short) / 2).roundToInt() * 2
         return w to h
     }
-    // Só o que o aparelho exporta (o motor recusaria o resto).
+    // Tudo aparece (§109): o que o aparelho não exporta fica marcado e
+    // desligado, com a frase do porquê embaixo — o motor recusaria, e o
+    // usuário não descobre só depois de tocar.
     val available = Resolutions.filter { (side, _) -> val (w, h) = sizeFor(side); comp?.fits(w, h) ?: true }
+    val blocked = Resolutions.filter { it !in available }.map { it.second }.toSet()
+    val device = store.deviceReport
     val fpsOptions = listOf(0.0, 24.0, 30.0, 60.0)
     val (w, h) = sizeFor(options.shortSide)
     val fps = if (options.fps > 0) options.fps else compFps
@@ -198,8 +202,15 @@ private fun Options(
     val sizeMb = mbps * seconds / 8.0
 
     Section("Resolução")
-    Chips(available.map { it.second }, available.firstOrNull { it.first == options.shortSide }?.second) { label ->
+    Chips(Resolutions.map { it.second }, available.firstOrNull { it.first == options.shortSide }?.second, blocked) { label ->
         onChange(options.copy(shortSide = available.first { it.second == label }.first))
+    }
+    if (blocked.isNotEmpty()) {
+        Text(
+            device?.exportLimitReason() ?: "${blocked.joinToString()}: acima do que este aparelho exporta.",
+            style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)),
+            modifier = Modifier.padding(top = 6.dp),
+        )
     }
     Section("Quadros por segundo")
     Chips(fpsOptions.map { if (it == 0.0) "Do projeto (${fmt(compFps)})" else fmt(it) },
@@ -207,9 +218,13 @@ private fun Options(
         onChange(options.copy(fps = if (label.startsWith("Do projeto")) 0.0 else label.replace(',', '.').toDouble()))
     }
     Section("Formato")
-    Chips(listOf("H.264", "HEVC"), if (options.hevc) "HEVC" else "H.264") { onChange(options.copy(hevc = it == "HEVC")) }
+    val hevcOk = device?.hevcExportAvailable ?: true
+    Chips(listOf("H.264", "HEVC"), if (options.hevc) "HEVC" else "H.264", if (hevcOk) emptySet() else setOf("HEVC")) {
+        onChange(options.copy(hevc = it == "HEVC"))
+    }
     Text(
-        if (options.hevc) "HEVC: arquivo menor, mesma qualidade. Alguns aparelhos antigos não reproduzem."
+        if (!hevcOk) device?.hevcExportReason() ?: ""
+        else if (options.hevc) "HEVC: arquivo menor, mesma qualidade. Alguns aparelhos antigos não reproduzem."
         else "H.264: abre em qualquer aparelho e rede social.",
         style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)),
         modifier = Modifier.padding(top = 6.dp),
@@ -227,20 +242,24 @@ private fun Options(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun Chips(options: List<String>, selected: String?, onPick: (String) -> Unit) {
+private fun Chips(options: List<String>, selected: String?, disabled: Set<String> = emptySet(), onPick: (String) -> Unit) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         options.forEach { o ->
             val on = o == selected
+            val off = o in disabled
             Text(
                 o,
                 style = AureaType.Base.merge(
-                    TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W600, color = if (on) AureaColors.Accent else AureaColors.Text),
+                    TextStyle(
+                        fontSize = 14.sp, fontWeight = FontWeight.W600,
+                        color = if (off) AureaColors.Disabled else if (on) AureaColors.Accent else AureaColors.Text,
+                    ),
                 ),
                 modifier = Modifier
                     .clip(RoundedCornerShape(10.dp))
                     .background(if (on) AureaColors.ActionDim else AureaColors.Chip)
                     .then(if (on) Modifier.border(1.dp, AureaColors.Brand, RoundedCornerShape(10.dp)) else Modifier)
-                    .tocavel(shrink = 1f) { if (!on) onPick(o) }
+                    .tocavel(enabled = !off, shrink = 1f) { if (!on && !off) onPick(o) }
                     .padding(horizontal = 14.dp, vertical = 10.dp),
             )
         }

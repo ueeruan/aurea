@@ -5,11 +5,15 @@
 #include "aurea/core/Log.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <cstring>
 
 namespace aurea::vk {
 namespace {
+
+std::atomic<u32> gValidationErrors{0};
+std::atomic<u32> gValidationWarnings{0};
 
 bool has_extension(const std::vector<VkExtensionProperties>& list, const char* name) {
     for (const VkExtensionProperties& e : list) {
@@ -23,8 +27,10 @@ VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(VkDebugUtilsMessageSeverityFlagBit
                                               const VkDebugUtilsMessengerCallbackDataEXT* data, void*) {
     // Erro de validação é bug. Aviso de sincronização também: não se ignora.
     if (severity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
+        gValidationErrors.fetch_add(1, std::memory_order_relaxed);
         AUREA_LOG_ERROR("validacao: %s", data && data->pMessage ? data->pMessage : "?");
     } else if (severity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
+        gValidationWarnings.fetch_add(1, std::memory_order_relaxed);
         AUREA_LOG_WARN("validacao: %s", data && data->pMessage ? data->pMessage : "?");
     }
     return VK_FALSE;
@@ -33,6 +39,9 @@ VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(VkDebugUtilsMessageSeverityFlagBit
 } // namespace
 
 Backend::~Backend() { shutdown(); }
+
+u32 Backend::validation_errors() noexcept { return gValidationErrors.load(std::memory_order_relaxed); }
+u32 Backend::validation_warnings() noexcept { return gValidationWarnings.load(std::memory_order_relaxed); }
 
 bool Backend::note_device_lost(VkResult r) noexcept {
     if (r == VK_ERROR_DEVICE_LOST) {

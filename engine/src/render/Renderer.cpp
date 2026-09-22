@@ -369,6 +369,11 @@ Renderer::~Renderer() { shutdown(); }
 Status Renderer::initialize(GPUBackend& backend, const EffectRegistry& effects) noexcept {
     backend_ = &backend;
     effects_ = &effects;
+    // Tipos que o prepare consulta por camada: resolvidos uma vez (a busca
+    // por chave é linear no registro).
+    posterizeType_ = effects.find_key(effect_keys::kPosterizeTime);
+    echoType_ = effects.find_key(effect_keys::kEchoTrail);
+    rgbTimeType_ = effects.find_key(effect_keys::kTimeWarpRgb);
     if (const Status s = shaders_.initialize(backend); !s.ok()) {
         backend_ = nullptr;
         return s;
@@ -480,6 +485,19 @@ void Renderer::release_project_resources() noexcept {
     scene3d_.release_all();
 }
 
+PreviewQuality Renderer::effective_quality(const RenderSettings& s) noexcept {
+    if (s.finalQuality) return PreviewQuality{};   // export: nada do preview entra
+    PreviewQuality q = s.quality;
+    const f32 h = std::clamp(s.heavyScale, 0.0f, 1.0f);
+    q.motionBlurSamples = std::min(q.motionBlurSamples, h);
+    q.flowResolution = std::min(q.flowResolution, h);
+    q.ssao = std::min(q.ssao, h);
+    q.shadowResolution = std::min(q.shadowResolution, h);
+    q.particles = std::min(q.particles, h);
+    q.blurSamples = std::min(q.blurSamples, h);
+    return q;
+}
+
 // =============================================================================
 // EffectResources
 // =============================================================================
@@ -527,6 +545,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                        void* imageCtx, const RenderSettings& settings, u64 frameNumber,
                        i32 playDirection, DecodeMode decodeMode, f32 speed, FrameSnapshot& out) {
     frameNumber_ = frameNumber;
+    if (prepareDepth_ == 0) quality_ = effective_quality(settings);
     // Expressões: a timeline do quadro (camada dona, outras camadas) e o memo
     // por (propriedade, quadro). O quadro é preparado sob o lock do modelo.
     const expr::Scope exprScope(project.timeline());
@@ -552,6 +571,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
     out.videoLayers = 0;
     out.staleVideoFrames = 0;
     out.missingVideoFrames = 0;
+    out.culledLayers = 0;
 
     const f32 previewFactor = static_cast<f32>(settings.previewNumerator)
                             / static_cast<f32>(std::max(1u, settings.previewDenominator));
@@ -613,7 +633,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         // o efeito não seria um efeito, seria um nome no painel.
         FrameIndex layerTime = time;
         if (effects_) {
-            const EffectTypeId posterize = effects_->find_key(effect_keys::kPosterizeTime);
+            const EffectTypeId posterize = posterizeType_;
             const ParameterRegistry* pp = posterize ? effects_->params(posterize) : nullptr;
             if (pp && pp->count() >= 2) {
                 for (const EffectInstance& inst : l->effects) {
@@ -1076,6 +1096,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 out.videoLayers += snapChild->videoLayers;
                 out.staleVideoFrames += snapChild->staleVideoFrames;
                 out.missingVideoFrames += snapChild->missingVideoFrames;
+                out.culledLayers += snapChild->culledLayers;
                 rl.source.kind = LayerSource::Kind::Nested;
                 rl.source.width = child->width();
                 rl.source.height = child->height();
@@ -1225,7 +1246,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         u32 echoCount = l->echoCount;
         f32 echoDelay = l->echoDelay, echoDecay = l->echoDecay, rgbDelay = l->rgbDelay;
         if (effects_) {
-            const EffectTypeId echoType = effects_->find_key(effect_keys::kEchoTrail);
+            const EffectTypeId echoType = echoType_;
             const ParameterRegistry* ep = effects_->params(echoType);
             for (const EffectInstance& inst : l->effects) {
                 if (!inst.enabled || inst.type != echoType || !ep || ep->count() < 4) continue;
@@ -1272,7 +1293,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         f32 rgbUnit = 1.0f;
         f32 rgbAmount = 0.0f;
         if (effects_ && !wants_3d(comp, *l, time)) {
-            const EffectTypeId rgbType = effects_->find_key(effect_keys::kTimeWarpRgb);
+            const EffectTypeId rgbType = rgbTimeType_;
             const ParameterRegistry* rp = rgbType ? effects_->params(rgbType) : nullptr;
             for (const EffectInstance& inst : l->effects) {
                 if (!inst.enabled || inst.type != rgbType || !rp || rp->count() < 6) continue;
@@ -1290,6 +1311,50 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             // O deslocamento por canal já está aplicado nas fontes extras; a
             // camada não precisa de amostras de matriz.
             rl.temporal.clear();
+        }
+
+        // Plano de efeitos ANTES do decode: é ele que diz se a camada pode
+        // alcançar a tela (Fase 8C §19–22).
+        if (out.plans.size() <= used) out.plans.emplace_back();
+        {
+            LayerPlacement placement;
+            placement.compFromLayer = m;
+            placement.compWidth = out.compWidth;
+            placement.compHeight = out.compHeight;
+            placement.layerWidth = rl.source.width;
+            placement.layerHeight = rl.source.height;
+            EffectGraph::plan(*l, *effects_, local, rl.texelScale, placement, this, out.plans[used]);
+        }
+        // FORA DA TELA: a caixa da camada (com o Transform dobrado) não toca a
+        // composição e nada na pilha dela pode trazer pixel para dentro (só
+        // efeitos de cor, sem desfoque/eco/RGB no tempo, sem perspectiva) —
+        // então ela não decodifica, não sobe textura e não gera passe. Vale
+        // também para matte: uma matte fora da tela recorta exatamente como
+        // uma matte ausente (nada no normal, tudo no invertido).
+        if (!inScene3d && rl.blurMatrices.empty() && rl.temporal.empty() && !rgbOn
+            && rl.source.width > 0 && rl.source.height > 0) {
+            const EffectPlan& plan = out.plans[used];
+            bool colorOnly = true;
+            for (const EffectStage& st : plan.stages) colorOnly &= st.kind == EffectStage::Kind::FusedColor;
+            if (colorOnly) {
+                const Mat4 mm = plan.hasFold ? m * plan.foldMatrix : m;
+                const f32 lw = static_cast<f32>(rl.source.width), lh = static_cast<f32>(rl.source.height);
+                f32 x0 = 1e30f, y0 = 1e30f, x1 = -1e30f, y1 = -1e30f;
+                bool affine = true;
+                for (const Vec2 c : {Vec2{0, 0}, Vec2{lw, 0}, Vec2{0, lh}, Vec2{lw, lh}}) {
+                    const Vec4 q = mm * Vec4{c.x, c.y, 0, 1};
+                    affine &= std::fabs(q.w - 1.0f) < 1e-4f;
+                    x0 = std::min(x0, q.x); x1 = std::max(x1, q.x);
+                    y0 = std::min(y0, q.y); y1 = std::max(y1, q.y);
+                }
+                // 2 px de folga: o filtro bilinear da borda.
+                const f32 cw = static_cast<f32>(out.compWidth), chh = static_cast<f32>(out.compHeight);
+                if (affine && (x1 < -2.0f || y1 < -2.0f || x0 > cw + 2.0f || y0 > chh + 2.0f)) {
+                    if (rl.maskCount > 0) out.maskData.resize(rl.maskFirst);
+                    ++out.culledLayers;
+                    continue;
+                }
+            }
         }
 
         // Vídeo: pede o frame e pega o melhor disponível AGORA (nunca espera).
@@ -1441,15 +1506,6 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             }
             rl.source.pixels = nullptr;   // não vale fora do lock
         }
-
-        if (out.plans.size() <= used) out.plans.emplace_back();
-        LayerPlacement placement;
-        placement.compFromLayer = m;
-        placement.compWidth = out.compWidth;
-        placement.compHeight = out.compHeight;
-        placement.layerWidth = rl.source.width;
-        placement.layerHeight = rl.source.height;
-        EffectGraph::plan(*l, *effects_, local, rl.texelScale, placement, this, out.plans[used]);
 
         // Camada 2D no espaço 3D: entra na cena (profundidade de verdade com os
         // modelos e as outras camadas 3D vizinhas na pilha). Com desfoque/eco
@@ -2801,6 +2857,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     if (!backend_) return Status{Errc::InvalidState, "renderer sem backend"};
     const u64 t0 = monotonic_ns();
     heavyScale_ = settings.finalQuality ? 1.0f : settings.heavyScale;
+    quality_ = effective_quality(settings);
 
     FrameBegin fb;
     if (const Status s = backend_->begin_frame(fb); !s.ok()) {
@@ -3059,6 +3116,7 @@ Status Renderer::render_effect_preview(const EffectRegistry& effects, EffectType
     // Preview de efeito NUNCA é rebaixado pelo calor: a cartela é 320×200 e
     // roda uma vez. O que o aparelho mostra tem de ser o que o efeito faz.
     heavyScale_ = 1.0f;
+    quality_ = PreviewQuality{};
 
     pool_.begin_frame(*backend_, fb.frameNumber);
     graph_.reset();

@@ -4209,6 +4209,9 @@ void Engine::drain_commands_locked() noexcept {
 
 RenderSettings Engine::current_render_settings() noexcept {
     RenderSettings rs;
+    // AUTO 2.0: os botões de redução decididos pela medição, nunca acima do
+    // piso térmico do instante (o calor muda entre dois quadros medidos).
+    rs.quality = adapt().quality().min(PreviewQuality::level(thermal_heavy_level()));
     rs.heavyScale = preview_heavy_scale();
     rs.previewNumerator = adapt().current_numerator();
     rs.previewDenominator = adapt().current_denominator();
@@ -4325,6 +4328,7 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
 
     lastRenderedFrame_ = t.value;
     lastIncomplete_ = snapshot_.missingVideoFrames > 0 || snapshot_.staleVideoFrames > 0;
+    lastCulledLayers_.store(snapshot_.culledLayers, std::memory_order_relaxed);
     // Recurso pendente: tenta de novo nos próximos quadros — no máximo ~1 s
     // (uma camada que nunca fica pronta não pode prender a GPU em laço).
     if (renderer_.take_incomplete()) {
@@ -4342,6 +4346,7 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
     stats.decodeMs = media_.stats().decodeMsAvg;
     stats.droppedFrames = frameScheduler_.dropped_total();
     stats.cpuMemoryBytes = memory_.total_used();
+    stats.memoryPressure = memory_.pressure();
     (void)adapt().update(stats, caps_.thermal());
     media_.collect(frameCounter_);
     update_perf(stats, timings, snapshot_, frameStart);
@@ -4356,11 +4361,14 @@ void Engine::set_thermal(u32 level, bool throttling) noexcept {
     request_render();
 }
 
-f32 Engine::preview_heavy_scale() const noexcept {
+u32 Engine::thermal_heavy_level() const noexcept {
     const ThermalState& t = caps_.thermal();
-    if (t.severe()) return 0.25f;
-    if (t.should_degrade()) return 0.5f;
-    return 1.0f;
+    return t.severe() ? 2u : t.should_degrade() ? 1u : 0u;
+}
+
+f32 Engine::preview_heavy_scale() const noexcept {
+    // O menor entre o piso térmico do instante e a decisão do AUTO 2.0.
+    return std::min(PreviewQuality::level(thermal_heavy_level()).heavy(), adaptive_->quality().heavy());
 }
 
 Status Engine::render_offscreen(TextureHandle target, u32 width, u32 height, bool asPreview) noexcept {
@@ -4640,6 +4648,13 @@ EngineTelemetry Engine::read_telemetry() noexcept {
     t.physicalResources = renderer_.graph_stats().physicalTextures;
     t.logicalResources = renderer_.graph_stats().transientTextures;
     t.adaptiveScaleChanges = adaptive_ ? adaptive_->change_count() : 0;
+    if (adaptive_) {
+        t.previewDenominator = adaptive_->current_denominator();
+        t.previewHeavyLevel = adaptive_->state().heavyLevel;
+        t.previewBottleneck = adaptive_->state().bottleneck;
+        t.previewUpBackoff = adaptive_->state().upBackoff;
+    }
+    t.culledLayers = lastCulledLayers_.load(std::memory_order_relaxed);
     t.undoBlobBytes = 0;   // snapshots de composição: KB por ação, contados por profundidade
     t.commandsDropped = commandQueue_->dropped_count();
     t.thermal = caps_.thermal().level;

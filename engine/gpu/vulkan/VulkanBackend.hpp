@@ -377,6 +377,10 @@ public:
     void defer_until_gpu_done(void (*fn)(void*), void* ctx) noexcept override;
 
     void wait_idle() noexcept override;
+    /// Mensagens da camada de validação (erros / avisos) desde o início do
+    /// processo. Os testes de GPU exigem zero erros quando a camada existe.
+    [[nodiscard]] static u32 validation_errors() noexcept;
+    [[nodiscard]] static u32 validation_warnings() noexcept;
     [[nodiscard]] u32 read_gpu_timings(GpuTiming* out, u32 capacity, f32* totalMs) noexcept override;
     [[nodiscard]] bool is_device_lost() const noexcept override { return deviceLost_; }
     [[nodiscard]] u32 frames_in_flight() const noexcept override { return framesInFlight_; }

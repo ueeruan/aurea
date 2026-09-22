@@ -214,6 +214,12 @@ public:
     /// Piso imposto de fora (perfil de aparelho fraco, Fase 8H): o AUTO nunca
     /// sobe acima dele. `minDenominator` 1/2/4/8; `heavyLevel` 0..2.
     void set_quality_floor(u32 minDenominator, u32 heavyLevel) noexcept;
+    /// Preview PARADO (Fase 8): o melhor que os pisos (aparelho/calor) deixam.
+    /// O AUTO reduz para manter o ritmo; parado não há ritmo a manter.
+    [[nodiscard]] u32 still_denominator(const ThermalState& thermal) const noexcept {
+        return userScale_ == PreviewScale::Auto ? floor_denominator(thermal) : state_.denominator;
+    }
+    [[nodiscard]] u32 still_heavy_level(const ThermalState& thermal) const noexcept { return floor_heavy(thermal); }
     /// Razão de custo de GPU medida entre um degrau de resolução e o de baixo
     /// (índice = degrau de cima: 0 FULL→1/2, 1 1/2→1/4, 2 1/4→1/8).
     [[nodiscard]] f32 measured_ratio(u32 step) const noexcept { return step < 3 ? ratio_[step] : 0.0f; }

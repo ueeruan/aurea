@@ -132,7 +132,7 @@ public:
         p.add_float("offset_y", "Deslocamento Y", 0.0f, -1000.0f, 1000.0f, kParamAnimatable | kParamPixels, "px");
         p.add_int("seed", "Semente", 3, 0, 9999);
         p.add_bool("horizontal_only", "Só na horizontal", false);
-        p.add_enum("edges", "Bordas", kEdgeModes, 3, 0);
+        p.add_enum("edges", "Bordas", kEdgeModes, 3, 1);
         p.add_angle("spin", "Girar o deslocamento", 0.0f);
         p.add_float("mix", "Mistura", 100.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
     }
@@ -195,7 +195,7 @@ public:
         p.add_angle("phase", "Fase", 0.0f);
         p.add_enum("direction", "Direção", kDirs, 4, 0);
         p.add_bool("square", "Onda quadrada", false);
-        p.add_enum("edges", "Bordas", kEdgeModes, 3, 0);
+        p.add_enum("edges", "Bordas", kEdgeModes, 3, 1);
         p.add_bool("pin_edges", "Travar nas bordas", false);
         p.add_float("mix", "Mistura", 100.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
     }
@@ -250,7 +250,7 @@ public:
         p.add_float("amount", "Intensidade", 60.0f, -1000.0f, 1000.0f, kParamAnimatable | kParamPixels, "px");
         p.add_float("radius", "Raio", 260.0f, 1.0f, 4000.0f, kParamAnimatable | kParamPixels, "px");
         p.add_point2("center", "Centro", Vec2{0.5f, 0.5f}, -1.0f, 2.0f, kParamAnimatable | kParamRelative);
-        p.add_enum("edges", "Bordas", kEdgeModes, 3, 0);
+        p.add_enum("edges", "Bordas", kEdgeModes, 3, 1);
         p.add_float("mix", "Mistura", 100.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
         p.add_float("sphere_light", "Luz da esfera", 0.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
     }

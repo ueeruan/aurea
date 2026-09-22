@@ -44,7 +44,7 @@ void main() {
     const vec2 weave = vec2(sin(frame * 0.31 + p.p1.z), cos(frame * 0.27 + p.p1.z * 1.7)) * p.p0.w;
     const vec2 base = inUv + weave * uvPerLayer;
 
-    vec4 src = unpremultiply(texture(u_tex0, clamp(base, 0.0, 1.0)));
+    vec4 src = unpremultiply(texture(u_tex0, base));   // fora da imagem: transparente (amostrador de borda)
     vec3 c = max(src.rgb, vec3(0.0));
 
     // 3. Piscar: a exposição oscila. Vale para o quadro inteiro.

@@ -200,7 +200,7 @@ public:
         u.color = e.color(kColor);
         out = LayerImage{ctx.texture("meio-tom", w, h), region, w, h};
         if (ctx.fullscreen_pass("meio-tom", PassStage::Effects, out.texture, ShaderId::effects_halftone_frag,
-                                {PassTexture{input.texture, {}, CommonSampler::LinearClamp}},
+                                {PassTexture{input.texture, {}, CommonSampler::LinearBorder}},
                                 &u, sizeof(u)) == kInvalidIndex) {
             return Errc::PipelineCompileFailed;
         }
@@ -256,7 +256,7 @@ public:
 
         out = LayerImage{ctx.texture("minimax", w, h), region, w, h};
         if (ctx.fullscreen_pass("minimax", PassStage::Effects, out.texture, ShaderId::effects_minimax_frag,
-                                {PassTexture{input.texture, {}, CommonSampler::LinearClamp}},
+                                {PassTexture{input.texture, {}, CommonSampler::LinearBorder}},
                                 &u, sizeof(u)) == kInvalidIndex) {
             return Errc::PipelineCompileFailed;
         }
@@ -343,7 +343,7 @@ public:
         out = LayerImage{ctx.texture("mascara-nitidez", w, h), region, w, h};
         if (ctx.fullscreen_pass("mascara-nitidez", PassStage::Effects, out.texture,
                                 ShaderId::effects_unsharp_combine_frag,
-                                {PassTexture{input.texture, {}, CommonSampler::LinearClamp},
+                                {PassTexture{input.texture, {}, CommonSampler::LinearBorder},
                                  PassTexture{blurred.texture, {}, CommonSampler::LinearClamp}},
                                 &u, sizeof(u)) == kInvalidIndex) {
             return Errc::PipelineCompileFailed;

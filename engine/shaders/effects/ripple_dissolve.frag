@@ -57,6 +57,8 @@ void main() {
     if (p.p2.x > 0.5) {
         uv += normalize(relPx + vec2(1e-6)) * wavePx * uvPerLayer * 9.0;
     }
-    const vec4 s = unpremultiply(texture(u_tex0, clamp(uv, 0.0, 1.0)));
+    // Fora da imagem: transparente (esticar a borda inventava faixas).
+    const bool inside = all(greaterThanEqual(uv, vec2(0.0))) && all(lessThanEqual(uv, vec2(1.0)));
+    const vec4 s = inside ? unpremultiply(texture(u_tex0, uv)) : vec4(0.0);
     o_color = premultiply(vec4(max(s.rgb, vec3(0.0)), s.a * clamp(mask, 0.0, 1.0)));
 }

@@ -868,12 +868,18 @@ AUREA_TEST(Perf8C, PausedWithoutChangesPresentsNothing) {
     const u32 first = mock->presents;
     for (u32 i = 0; i < 20; ++i) (void)e.render_frame(true);
     AUREA_CHECK_EQ(mock->presents, first);   // nada mudou: nada apresentado
-    // A thread de render ociosa por 1,2 s: acorda (no máximo a cada 500 ms) e não desenha.
+    // A thread de render ociosa: no máximo UM quadro (o refino, quando o AUTO
+    // começou reduzido) e depois nada.
     e.start_render_thread();
     std::this_thread::sleep_for(std::chrono::milliseconds(1200));
+    const u32 afterIdle = mock->presents;
+    std::this_thread::sleep_for(std::chrono::milliseconds(800));
     e.stop_render_thread();
-    std::printf("    parado: %u apresentacao(oes) em 21 chamadas + 1,2 s de thread ociosa\n", mock->presents);
-    AUREA_CHECK_EQ(mock->presents, first);
+    std::printf("    parado: %u apresentacao(oes) em 21 chamadas + 2 s de thread ociosa (refino: %u)\n",
+                mock->presents, afterIdle - first);
+    AUREA_CHECK(afterIdle <= first + 1);
+    AUREA_CHECK_EQ(mock->presents, afterIdle);   // o refino não se repete
+    const u32 base = mock->presents;
     // Uma mudança (seek) desenha exatamente um quadro.
     Command seek;
     seek.type = CommandType::PlaybackSeek;
@@ -881,7 +887,7 @@ AUREA_TEST(Perf8C, PausedWithoutChangesPresentsNothing) {
     AUREA_CHECK(e.submit_commands(&seek, 1) == 1);
     (void)e.render_frame(true);
     (void)e.render_frame(true);
-    AUREA_CHECK_EQ(mock->presents, first + 1);
+    AUREA_CHECK_EQ(mock->presents, base + 1);
     e.shutdown();
 }
 
@@ -948,3 +954,43 @@ AUREA_TEST(Perf8C, VulkanCachedImageIsPixelExactAndValidationClean) {
     backend.shutdown();
 }
 #endif
+
+// Preview parado com o AUTO reduzido (aparelho fraco começa em 1/4): depois de
+// 250 ms sem nada acontecer sai UM quadro na melhor resolução permitida.
+AUREA_TEST(Perf8C, PausedReducedPreviewRefinesOnce) {
+    auto* mock = new MockBackend();
+    Engine e;
+    EngineConfig ec;
+    ec.backend = mock;
+    ec.workerCount = 1;
+    ec.disableAutosave = true;
+    AUREA_CHECK(e.initialize(ec).ok());
+    AUREA_CHECK(e.new_project(1920, 1080, 30.0, "refino").ok());
+    int dummyWindow = 0;
+    AUREA_CHECK(e.attach_surface(&dummyWindow, 1920, 1080).ok());
+    // Quadros pesados medidos: o AUTO desce a resolução.
+    for (u32 i = 0; i < 6; ++i) {
+        FrameStats heavy;
+        heavy.cpuMs = 120.0f;
+        heavy.gpuMs = 120.0f;
+        heavy.passesExecuted = 10;
+        heavy.layersRendered = 1;
+        e.debug_feed_frame_stats(heavy);
+    }
+    Command seek;
+    seek.type = CommandType::PlaybackSeek;
+    seek.seek.time = tick_at(FrameIndex{3}, 30.0);
+    AUREA_CHECK(e.submit_commands(&seek, 1) == 1);
+    const u32 den = e.read_telemetry().previewDenominator;
+    AUREA_CHECK(e.render_frame(true).ok());
+    const u32 first = mock->presents;
+    e.start_render_thread();
+    std::this_thread::sleep_for(std::chrono::milliseconds(900));
+    e.stop_render_thread();
+    std::printf("    AUTO em 1/%u: %u quadro(s) de refino parado\n", den, mock->presents - first);
+    if (den > 1) AUREA_CHECK_EQ(mock->presents, first + 1);
+    else AUREA_CHECK_EQ(mock->presents, first);
+    AUREA_CHECK(den > 1);
+    AUREA_CHECK_EQ(e.read_telemetry().previewDenominator, den);   // o refino não mexe no AUTO
+    e.shutdown();
+}

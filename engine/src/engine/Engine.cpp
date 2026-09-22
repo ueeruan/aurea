@@ -544,6 +544,13 @@ void Engine::render_thread_main() noexcept {
                 // request_render. Antes este caso também acordava a cada
                 // 500 ms só para ver que não havia superfície (§38).
                 wakeCv_.wait(lock, [this] { return !renderRunning_ || wakeFlag_; });
+            } else if (refinePending_) {
+                // Parado com o último quadro reduzido: se nada acordar em
+                // 250 ms, redesenha na melhor resolução (refino).
+                const bool woke = wakeCv_.wait_for(lock, std::chrono::milliseconds(250), [this] {
+                    return !renderRunning_ || wakeFlag_ || playingHint_.load();
+                });
+                if (!woke) refineNow_ = true;
             } else {
                 // Parado: dorme até ter o que mostrar. O teto de 500 ms é a
                 // rede das mudanças do modelo que sobem `modelRevision_` sem
@@ -558,6 +565,12 @@ void Engine::render_thread_main() noexcept {
         }
         if (!renderRunning_) break;
         if (!surfaceAttached_ || state_ == EngineState::Suspended) continue;
+        if (refineNow_) {
+            forceRender_.store(true, std::memory_order_release);
+            (void)render_frame(true);
+            refineNow_ = false;
+            continue;
+        }
         (void)render_frame(true);
     }
 }
@@ -4523,6 +4536,13 @@ RenderSettings Engine::current_render_settings() noexcept {
     rs.heavyScale = preview_heavy_scale();
     rs.previewNumerator = adapt().current_numerator();
     rs.previewDenominator = adapt().current_denominator();
+    if (refineNow_) {
+        const u32 heavy = std::max(adapt().still_heavy_level(caps_.thermal()), thermal_heavy_level());
+        rs.quality = PreviewQuality::level(heavy);
+        rs.heavyScale = caps_.policy().heavyScale;
+        rs.previewNumerator = 1;
+        rs.previewDenominator = adapt().still_denominator(caps_.thermal());
+    }
     rs.gpuTimers = config_.enableTelemetry;
     if (project_) {
         rs.viewportZoom = project_->editor_settings().viewportZoom > 0.0f
@@ -4655,7 +4675,12 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
     stats.droppedFrames = frameScheduler_.dropped_total();
     stats.cpuMemoryBytes = memory_.total_used();
     stats.memoryPressure = memory_.pressure();
-    (void)adapt().update(stats, caps_.thermal());
+    // O refino não entra na média do AUTO: é um quadro avulso em outra
+    // resolução, não o ritmo do preview.
+    if (!refineNow_) (void)adapt().update(stats, caps_.thermal());
+    refinePending_ = !playing && !refineNow_
+        && (rs.previewDenominator > adapt().still_denominator(caps_.thermal())
+            || adapt().state().heavyLevel > adapt().still_heavy_level(caps_.thermal()));
     media_.collect(frameCounter_);
     if (frameCounter_ % 120 == 0) (void)memory_.balance();
     update_perf(stats, timings, snapshot_, frameStart);

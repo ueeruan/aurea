@@ -4246,3 +4246,110 @@ AUREA_TEST(Gpu, EffectPreviewUsesThePhotoWhenGiven) {
     AUREA_CHECK(g.renderer.render_effect_preview(g.effects, effect_type_id(effect_keys::kSaturation), 160, 100, plate).ok());
     AUREA_CHECK(plate != rgba);
 }
+
+// Auditoria das prévias sobre a foto real (opcional): AUREA_PREVIEW_AUDIT=<jpg>
+// [AUREA_PREVIEW_DUMP=<pasta>]. Mede, por efeito, a fração de pixels estourados
+// (branco) e apagados (preto): um card que vira só branco ou só preto não diz
+// nada do efeito.
+extern "C" unsigned char* stbi_load_from_memory(const unsigned char*, int, int*, int*, int*, int);
+extern "C" void stbi_image_free(void*);
+AUREA_TEST(Gpu, EffectPreviewAuditOnThePhoto) {
+    const char* path = std::getenv("AUREA_PREVIEW_AUDIT");
+    if (!path || !*path) return;
+    AUREA_REQUIRE_GPU();
+    Gpu& g = gpu();
+    std::FILE* f = std::fopen(path, "rb");
+    AUREA_CHECK(f != nullptr);
+    if (!f) return;
+    std::vector<u8> bytes;
+    u8 buf[65536];
+    for (usize n; (n = std::fread(buf, 1, sizeof(buf), f)) > 0;) bytes.insert(bytes.end(), buf, buf + n);
+    std::fclose(f);
+    int w = 0, h = 0, c = 0;
+    u8* px = stbi_load_from_memory(bytes.data(), static_cast<int>(bytes.size()), &w, &h, &c, 4);
+    AUREA_CHECK(px != nullptr);
+    if (!px) return;
+    g.renderer.set_effect_preview_source(std::vector<u8>(px, px + static_cast<usize>(w) * h * 4), static_cast<u32>(w), static_cast<u32>(h));
+    stbi_image_free(px);
+    const char* dump = std::getenv("AUREA_PREVIEW_DUMP");
+    constexpr u32 W = 320, H = 200;
+    for (u32 i = 0; i < g.effects.count(); ++i) {
+        const Effect& e = g.effects.at(i);
+        std::vector<u8> rgba;
+        if (!g.renderer.render_effect_preview(g.effects, e.type_id(), W, H, rgba).ok()) {
+            std::printf("\n    %-28s sem previa", e.info().key);
+            continue;
+        }
+        u32 white = 0, black = 0;
+        for (u32 p = 0; p < W * H; ++p) {
+            const u8* q = &rgba[p * 4];
+            if (std::min({q[0], q[1], q[2]}) >= 245) ++white;
+            if (std::max({q[0], q[1], q[2]}) <= 10) ++black;
+        }
+        std::printf("\n    %-34s branco %5.1f%%  preto %5.1f%%", e.info().key, 100.0 * white / (W * H), 100.0 * black / (W * H));
+        if (dump && *dump) {
+            test::Image8 img{W, H, rgba};
+            (void)test::write_png(std::string(dump) + "/" + e.info().key + ".png", img);
+        }
+    }
+    std::printf("\n");
+    g.renderer.set_effect_preview_source({}, 0, 0);
+}
+
+// Efeito que aumenta a área da camada não pode ESTICAR a borda da imagem para
+// fora (amostrador repetindo o último pixel): fora da imagem é transparente, e
+// só o que o efeito desloca/espalha de verdade aparece lá. Mede, a cada
+// distância fora da caixa da camada, a fração de pixels que não são fundo.
+namespace {
+f32 outside_fill(const FloatImage& img, u32 x0, u32 y0, u32 x1, u32 y1, u32 d) {
+    u32 hit = 0, n = 0;
+    auto lit = [&](u32 x, u32 y) {
+        const Vec4 c = img.v(x, y);
+        ++n;
+        if (c.x + c.y + c.z > 0.03f) ++hit;
+    };
+    for (u32 y = y0 + 8; y < y1 - 8; ++y) { lit(x0 - d, y); lit(x1 - 1 + d, y); }
+    for (u32 x = x0 + 8; x < x1 - 8; ++x) { lit(x, y0 - d); lit(x, y1 - 1 + d); }
+    return n ? static_cast<f32>(hit) / static_cast<f32>(n) : 0.0f;
+}
+} // namespace
+
+AUREA_TEST(Gpu, EffectsDoNotStretchTheLayerEdgeOutward) {
+    AUREA_REQUIRE_GPU();
+    static const char* const kKeys[] = {
+        effect_keys::kTurbulence, effect_keys::kWaveWarp, effect_keys::kWarp, effect_keys::kRippleDissolve,
+        effect_keys::kShake, effect_keys::kGlitchify, effect_keys::kVhs, effect_keys::kUniVhs,
+        effect_keys::kSignal, effect_keys::kCrossGlitch, effect_keys::kHoloMatrix, effect_keys::kFilmDamage,
+        effect_keys::kJpegDamage, effect_keys::kPixelSort, effect_keys::kHalftone, effect_keys::kMinimax,
+        effect_keys::kUnsharp, effect_keys::kLensBlur, effect_keys::kDeepGlow,
+    };
+    constexpr u32 kComp = 320, kSide = 160, kX0 = (kComp - kSide) / 2, kX1 = kX0 + kSide;
+    // Xadrez de 8 px (verde/azul): conteúdo deslocado para fora não é uniforme.
+    ImagePixels px = uniform_image(kSide, kSide, 0, 0, 0);
+    for (u32 y = 0; y < kSide; ++y) for (u32 x = 0; x < kSide; ++x) {
+        u8* p = &px.rgba[(static_cast<usize>(y) * kSide + x) * 4];
+        const bool a = ((x / 8) + (y / 8)) % 2 == 0;
+        p[0] = 40; p[1] = a ? 200 : 60; p[2] = a ? 60 : 200;
+    }
+    const bool verbose = std::getenv("AUREA_EDGE_VERBOSE") != nullptr;
+    for (const char* key : kKeys) {
+        Scene s(kComp, kComp);
+        const LayerId id = s.image(px, kComp * 0.5f, kComp * 0.5f);
+        EffectInstance& e = s.add_effect(id, key);
+        const Effect* fx = gpu().effects.find(e.type);
+        AUREA_CHECK(fx != nullptr);
+        if (!fx) continue;
+        std::vector<ParamValue> v(e.params.size());
+        for (usize i = 0; i < v.size(); ++i) v[i] = e.params[i].constant;
+        if (fx->demo_values(e, v)) for (usize i = 0; i < v.size(); ++i) e.params[i].constant = v[i];
+        const FloatImage img = s.render(FrameIndex{12});
+        const f32 f2 = outside_fill(img, kX0, kX0, kX1, kX1, 2);
+        const f32 f24 = outside_fill(img, kX0, kX0, kX1, kX1, 24);
+        const f32 f48 = outside_fill(img, kX0, kX0, kX1, kX1, 48);
+        if (verbose) std::printf("\n    %-30s fora a 2px %5.1f%%  24px %5.1f%%  48px %5.1f%%", key, f2 * 100, f24 * 100, f48 * 100);
+        // Esticada, a borda enche a margem inteira (~100% em qualquer distância
+        // até o alcance do efeito). Sem esticar, longe da caixa sobra pouco.
+        AUREA_CHECK_MSG(f48 < 0.35f, key);
+    }
+    if (verbose) std::printf("\n");
+}

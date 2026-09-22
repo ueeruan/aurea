@@ -64,11 +64,13 @@ public:
         out.push_back(PipelineKey::fullscreen(ShaderId::effects_deep_glow_combine_frag, work));
     }
     bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
-        v[kThreshold] = ParamValue::scalar(48.0f);
-        v[kCoreRadius] = ParamValue::scalar(14.0f);
-        v[kHaloRadius] = ParamValue::scalar(85.0f);
-        v[kCoreIntensity] = ParamValue::scalar(1.6f);
-        v[kHaloIntensity] = ParamValue::scalar(1.0f);
+        // Calibrado na foto das prévias (clara): limite alto para só as luzes
+        // acenderem; com 48% / 1,6 o card estourava 83% dos pixels.
+        v[kThreshold] = ParamValue::scalar(92.0f);
+        v[kCoreRadius] = ParamValue::scalar(8.0f);
+        v[kHaloRadius] = ParamValue::scalar(40.0f);
+        v[kCoreIntensity] = ParamValue::scalar(0.6f);
+        v[kHaloIntensity] = ParamValue::scalar(0.5f);
         v[kColor] = ParamValue::color(0.75f, 0.88f, 1.0f, 1.0f);
         return true;
     }
@@ -168,7 +170,7 @@ public:
         out = LayerImage{ctx.texture("brilho-profundo", w, h), region, w, h};
         if (ctx.fullscreen_pass("brilho-profundo", PassStage::Effects, out.texture,
                                 ShaderId::effects_deep_glow_combine_frag,
-                                {PassTexture{input.texture, {}, CommonSampler::LinearClamp},
+                                {PassTexture{input.texture, {}, CommonSampler::LinearBorder},
                                  PassTexture{core.texture, {}, CommonSampler::LinearClamp},
                                  PassTexture{haloImage.texture, {}, CommonSampler::LinearClamp}},
                                 &u, sizeof(u)) == kInvalidIndex) {
@@ -331,7 +333,7 @@ public:
 
         out = LayerImage{ctx.texture("desfoque-lente", w, h), region, w, h};
         if (ctx.fullscreen_pass("desfoque-lente", PassStage::Effects, out.texture, ShaderId::effects_lens_blur_frag,
-                                {PassTexture{input.texture, {}, CommonSampler::LinearClamp}},
+                                {PassTexture{input.texture, {}, CommonSampler::LinearBorder}},
                                 &u, sizeof(u)) == kInvalidIndex) {
             return Errc::PipelineCompileFailed;
         }

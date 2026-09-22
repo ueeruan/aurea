@@ -82,7 +82,8 @@ void main() {
     }
 
     const vec4 outc = read_edge(uv);
-    const vec4 src = unpremultiply(texture(u_tex0, inUv));
+    const bool srcInside = all(greaterThanEqual(inUv, vec2(0.0))) && all(lessThanEqual(inUv, vec2(1.0)));
+    const vec4 src = srcInside ? unpremultiply(texture(u_tex0, inUv)) : vec4(0.0);
     const float k = clamp(p.p1.w, 0.0, 1.0);
     const vec3 c = mix(src.rgb, outc.rgb, k) * shade;
     o_color = premultiply(vec4(max(c, vec3(0.0)), mix(src.a, outc.a, k)));

@@ -77,7 +77,7 @@ public:
 
         out = LayerImage{ctx.texture("glitchify", w, h), region, w, h};
         if (ctx.fullscreen_pass("glitchify", PassStage::Transform, out.texture, ShaderId::effects_glitchify_frag,
-                                {PassTexture{input.texture, {}, CommonSampler::LinearClamp}},
+                                {PassTexture{input.texture, {}, CommonSampler::LinearBorder}},
                                 &u, sizeof(u)) == kInvalidIndex) {
             return Errc::PipelineCompileFailed;
         }
@@ -142,7 +142,7 @@ public:
 
         out = LayerImage{ctx.texture("vhs", w, h), region, w, h};
         if (ctx.fullscreen_pass("vhs", PassStage::Transform, out.texture, ShaderId::effects_vhs_frag,
-                                {PassTexture{input.texture, {}, CommonSampler::LinearClamp}},
+                                {PassTexture{input.texture, {}, CommonSampler::LinearBorder}},
                                 &u, sizeof(u)) == kInvalidIndex) {
             return Errc::PipelineCompileFailed;
         }
@@ -206,7 +206,7 @@ public:
 
         out = LayerImage{ctx.texture("vhs-fita", w, h), region, w, h};
         if (ctx.fullscreen_pass("vhs-fita", PassStage::Transform, out.texture, ShaderId::effects_uni_vhs_frag,
-                                {PassTexture{input.texture, {}, CommonSampler::LinearClamp}},
+                                {PassTexture{input.texture, {}, CommonSampler::LinearBorder}},
                                 &u, sizeof(u)) == kInvalidIndex) {
             return Errc::PipelineCompileFailed;
         }
@@ -269,7 +269,7 @@ public:
 
         out = LayerImage{ctx.texture("sinal", w, h), region, w, h};
         if (ctx.fullscreen_pass("sinal", PassStage::Transform, out.texture, ShaderId::effects_signal_frag,
-                                {PassTexture{input.texture, {}, CommonSampler::LinearClamp}},
+                                {PassTexture{input.texture, {}, CommonSampler::LinearBorder}},
                                 &u, sizeof(u)) == kInvalidIndex) {
             return Errc::PipelineCompileFailed;
         }
@@ -333,7 +333,7 @@ public:
         out = LayerImage{ctx.texture("glitch-cruz", w, h), region, w, h};
         if (ctx.fullscreen_pass("glitch-cruz", PassStage::Transform, out.texture,
                                 ShaderId::effects_cross_glitch_frag,
-                                {PassTexture{input.texture, {}, CommonSampler::LinearClamp}},
+                                {PassTexture{input.texture, {}, CommonSampler::LinearBorder}},
                                 &u, sizeof(u)) == kInvalidIndex) {
             return Errc::PipelineCompileFailed;
         }
@@ -445,7 +445,7 @@ public:
         out = LayerImage{ctx.texture("dano-de-filme", w, h), region, w, h};
         if (ctx.fullscreen_pass("dano-de-filme", PassStage::Transform, out.texture,
                                 ShaderId::effects_film_damage_frag,
-                                {PassTexture{input.texture, {}, CommonSampler::LinearClamp}},
+                                {PassTexture{input.texture, {}, CommonSampler::LinearBorder}},
                                 &u, sizeof(u)) == kInvalidIndex) {
             return Errc::PipelineCompileFailed;
         }
@@ -504,7 +504,7 @@ public:
         out = LayerImage{ctx.texture("dano-de-jpeg", w, h), region, w, h};
         if (ctx.fullscreen_pass("dano-de-jpeg", PassStage::Effects, out.texture,
                                 ShaderId::effects_jpeg_damage_frag,
-                                {PassTexture{input.texture, {}, CommonSampler::LinearClamp}},
+                                {PassTexture{input.texture, {}, CommonSampler::LinearBorder}},
                                 &u, sizeof(u)) == kInvalidIndex) {
             return Errc::PipelineCompileFailed;
         }
@@ -571,7 +571,7 @@ public:
         out = LayerImage{ctx.texture("ordenar-pixels", w, h), region, w, h};
         if (ctx.fullscreen_pass("ordenar-pixels", PassStage::Transform, out.texture,
                                 ShaderId::effects_pixel_sort_frag,
-                                {PassTexture{input.texture, {}, CommonSampler::LinearClamp}},
+                                {PassTexture{input.texture, {}, CommonSampler::LinearBorder}},
                                 &u, sizeof(u)) == kInvalidIndex) {
             return Errc::PipelineCompileFailed;
         }

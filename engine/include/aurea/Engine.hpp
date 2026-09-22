@@ -1101,6 +1101,10 @@ private:
     u64  lastMediaGen_ = 0;
     bool lastIncomplete_ = true;              ///< último frame tinha vídeo faltando/aproximado
     bool lastSkipped_ = false;
+    // Refino do preview parado: o AUTO baixa a resolução para manter o ritmo;
+    // parado, um quadro na melhor resolução permitida substitui o reduzido.
+    bool refinePending_ = false;              ///< último quadro saiu reduzido
+    bool refineNow_ = false;                  ///< este quadro é o refino
     u64  nextFrameDueNs_ = 0;                 ///< quando o playhead muda de frame (tocando)
     std::atomic<bool> renderRunning_{false};
     std::atomic<bool> playingHint_{false};

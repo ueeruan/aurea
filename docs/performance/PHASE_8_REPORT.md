@@ -1289,3 +1289,19 @@ Restos conhecidos (não resolvidos nesta fase):
 - `SceneAsset` guarda texturas decodificadas na RAM depois do upload (80 MB no capacete); sem streaming de mip.
 - Atlas de glifos sobe inteiro quando entra glifo novo.
 - Camada de validação Vulkan indisponível no host.
+
+### Correções do fechamento (teste no emulador)
+
+- **Borda esticada nos efeitos**: 19 efeitos que aumentam a área da camada
+  (distorcer, glitch, estilizar, luz) liam a imagem com amostrador de borda
+  repetida — fora da imagem aparecia o último pixel esticado. Agora fora da
+  imagem é transparente; os de distorcer começam em "Bordas: Recortar"
+  (Repetir/Esticar continuam como opção). Teste `EffectsDoNotStretchTheLayerEdgeOutward`:
+  antes 8 efeitos com a margem 100% cheia a 48 px da caixa; depois 0.
+- **Preview parado preso em 1/4**: no aparelho LOW o AUTO começa em 1/4 e só
+  sobe com quadros medidos — parado (render sob demanda) não sai quadro, e o
+  preview ficava serrilhado. Agora, 250 ms sem nada acontecer, sai UM quadro na
+  melhor resolução que os pisos (aparelho/calor) deixam, sem mexer na média do
+  AUTO. Teste `PausedReducedPreviewRefinesOnce` (AUTO em 1/8 → 1 refino, nenhum depois).
+- **Prévia do Brilho profundo** estourava 83% do card na foto clara (valores de
+  demonstração da 7.3 feitos para a cartela escura) → 28%.

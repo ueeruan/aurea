@@ -221,6 +221,8 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
     audio_.initialize(config.mediaFactory, config.audioOutput, memory_.budget(MemoryClass::Audio));
     playback_.clock().set_master(&audio_);
     waveforms_ = std::make_unique<audio::WaveformCache>(config.mediaFactory);
+    // Picos guardados em disco: reabrir o projeto não decodifica o áudio de novo (8D).
+    if (!config_.cacheDirectory.empty()) waveforms_->set_disk_directory(config_.cacheDirectory + "/waveform");
     thumbs_.set_factory(config.mediaFactory);
     if (config.mediaFactory) thumbs_.start();
 

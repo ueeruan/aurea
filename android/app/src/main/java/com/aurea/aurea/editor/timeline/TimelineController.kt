@@ -289,6 +289,17 @@ internal class TimelineController(
         endInteraction()
     }
 
+    /** Mais um quadro de desenho (fora da fase de desenho: escrever estado lido nela ali mesmo é frágil). */
+    private var redrawPosted = false
+    fun requestRedraw() {
+        if (redrawPosted) return
+        redrawPosted = true
+        scope.launch {
+            redrawPosted = false
+            state.redrawTick++
+        }
+    }
+
     // --- Toque ------------------------------------------------------------------
     /**
      * Toque na régua: o cabeçote vai para o instante do dedo e a marca nasce

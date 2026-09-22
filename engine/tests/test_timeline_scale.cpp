@@ -17,6 +17,9 @@
 #include <cstring>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
+#include <filesystem>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -187,4 +190,71 @@ AUREA_TEST(TimelineScale, Captions5000Words) {
     std::printf("    create_captions(5000 palavras): %u camadas em %.1f ms | releitura da timeline: %u camadas, %llu kf em %.2f ms\n",
                 count, createMs, n, static_cast<unsigned long long>(kf), refreshMs);
     e.shutdown();
+}
+
+AUREA_TEST(TimelineScale, WaveformThirtyMinutes) {
+    // 30 min de áudio: o cálculo (fundo) e o que a timeline paga por consulta.
+    SyntheticConfig cfg;
+    cfg.audioRate = 48000;
+    cfg.audioSeconds = 1800.0;
+    cfg.frameCount = 30 * 1800;
+    SyntheticFactory f(cfg);
+    const i64 samples = static_cast<i64>(1800.0 * audio::kMixRate);
+    std::vector<u8> out(900), first(900);
+    const std::string dir = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_teste_waveform";
+    std::filesystem::remove_all(dir);
+    u64 t0 = monotonic_ns();
+    f64 computeMs = 0.0, partialQueryMs = 0.0;
+    {
+        audio::WaveformCache wave(&f);
+        wave.set_disk_directory(dir);
+        wave.request(1, audio::AudioAssetRef{"s", samples});
+        // Consulta com a vista inteira (zoom de enquadrar) ENQUANTO calcula.
+        u32 partial = 0;
+        while (wave.progress(1) < 1.0f && ms_since(t0) < 60000.0) {
+            const u64 q0 = monotonic_ns();
+            AUREA_CHECK(wave.query(1, 0.0, static_cast<f64>(samples) / 900.0, 900, out.data()));
+            partialQueryMs += ms_since(q0);
+            ++partial;
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+        computeMs = ms_since(t0);
+        if (partial) partialQueryMs /= partial;
+        constexpr u32 kIters = 200;
+        t0 = monotonic_ns();
+        for (u32 it = 0; it < kIters; ++it) AUREA_CHECK(wave.query(1, 0.0, static_cast<f64>(samples) / 900.0, 900, out.data()));
+        const f64 doneQueryMs = ms_since(t0) / kIters;
+        std::printf("    waveform 30 min: calculo %.0f ms | consulta 900 baldes (vista inteira): calculando %.3f ms, pronta %.4f ms\n",
+                    computeMs, partialQueryMs, doneQueryMs);
+        AUREA_CHECK(wave.progress(1) >= 1.0f);
+        first = out;
+    }
+    // Reabrir: os picos vêm do disco (fase 8D), iguais aos calculados.
+    {
+        audio::WaveformCache wave(&f);
+        wave.set_disk_directory(dir);
+        t0 = monotonic_ns();
+        wave.request(1, audio::AudioAssetRef{"s", samples});
+        while (wave.progress(1) < 1.0f && ms_since(t0) < 60000.0) std::this_thread::sleep_for(std::chrono::microseconds(200));
+        const f64 loadMs = ms_since(t0);
+        AUREA_CHECK(wave.query(1, 0.0, static_cast<f64>(samples) / 900.0, 900, out.data()));
+        AUREA_CHECK(out == first);
+        std::printf("    waveform 30 min reaberta: %.1f ms (cache em disco) contra %.0f ms calculando\n", loadMs, computeMs);
+        AUREA_CHECK(loadMs < computeMs);
+    }
+    // Arquivo corrompido: apagado e recalculado, sem crash.
+    for (const auto& ent : std::filesystem::directory_iterator(dir)) {
+        std::FILE* fp = std::fopen(ent.path().string().c_str(), "wb");
+        if (fp) { std::fputs("lixo", fp); std::fclose(fp); }
+    }
+    {
+        audio::WaveformCache wave(&f);
+        wave.set_disk_directory(dir);
+        wave.request(1, audio::AudioAssetRef{"s", samples});
+        t0 = monotonic_ns();
+        while (wave.progress(1) < 1.0f && ms_since(t0) < 60000.0) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        AUREA_CHECK(wave.query(1, 0.0, static_cast<f64>(samples) / 900.0, 900, out.data()));
+        AUREA_CHECK(out == first);
+    }
+    std::filesystem::remove_all(dir);
 }

@@ -43,6 +43,8 @@ internal class TimelineState {
     var height by mutableIntStateOf(0)
     /** Projeto já enquadrado pelo auto-zoom da A.01 (uma vez por projeto). */
     var fittedPath: String? = null
+    /** Lido no desenho: mudar pede mais um quadro (miniaturas que ficaram para depois). */
+    var redrawTick by mutableIntStateOf(0)
 }
 
 /**
@@ -67,6 +69,23 @@ internal class ThumbStrip {
         override fun hashCode(): Int = ((layer xor (layer ushr 32)).toInt() * 31 + bucket) * 31 + height
     }
 
+    /**
+     * Perguntas ao motor que ainda cabem neste quadro (fase 8D). Cada uma trava
+     * o modelo do motor (que o quadro do preview segura enquanto prepara) e a
+     * que acerta cria um Bitmap na thread da UI: rolando rápido, dezenas de
+     * baldes novos por quadro viravam engasgo. O resto espera o próximo quadro
+     * ([starved] pede o redesenho) — a miniatura perfeita não passa na frente
+     * da rolagem.
+     */
+    var budget = Int.MAX_VALUE
+    var starved = false
+        private set
+
+    fun beginFrame(queries: Int) {
+        budget = queries
+        starved = false
+    }
+
     // Busca com uma chave reaproveitada: acerto no cache não aloca (a tira repinta a 60 Hz).
     private val probe = Key()
     private val hits = object : LinkedHashMap<Key, Bitmap>(128, 0.75f, true) {
@@ -84,6 +103,11 @@ internal class ThumbStrip {
         hits[probe]?.let { return it }
         val missed = misses[probe]
         if (missed != null && missed == generation) return null
+        if (budget <= 0) {
+            starved = true
+            return null
+        }
+        budget--
         val bmp = cache.get(layer, timelineFrame, heightPx)
         val key = probe.copy()
         if (bmp == null) {
@@ -105,5 +129,84 @@ internal class ThumbStrip {
         const val DEFAULT_ASPECT = 16f / 9f
         const val MIN_ASPECT = 0.3f
         const val MAX_ASPECT = 4f
+    }
+}
+
+/** Quem responde a waveform (o store; nos testes, um falso). */
+internal fun interface WaveSource {
+    fun query(layer: Long, startFrame: Double, framesPerBucket: Double, count: Int, out: java.nio.ByteBuffer): Int
+}
+
+/**
+ * Waveform da timeline guardada por linha em grade fixa do tempo
+ * ([WaveGrid]), numa janela maior que a tela (fase 8D). Antes cada linha de
+ * áudio/vídeo visível perguntava ao motor A CADA QUADRO (tocando, rolando) —
+ * travando o modelo do motor, que o quadro do preview segura enquanto
+ * prepara. Agora pergunta quando a vista sai da janela, o degrau de zoom
+ * muda, o modelo muda ou chega pedaço novo da waveform.
+ */
+internal class WaveStrip(private val capacity: Int) {
+    class Entry(capacity: Int) {
+        var model: Any? = null
+        var generation = -1
+        var fpb = 0.0
+        /** Janela guardada: baldes `[w0, w1)`. */
+        var w0 = 0L
+        var w1 = 0L
+        var count = 0
+        val data = ByteArray(capacity)
+
+        fun at(k: Long): Int = if (k < w0 || k >= w0 + count) 0 else data[(k - w0).toInt()].toInt() and 0xFF
+    }
+
+    // Poucas linhas de som na tela: busca linear num array (sem encaixotar o id a cada quadro).
+    private val ids = LongArray(MAX_ROWS)
+    private val entries = arrayOfNulls<Entry>(MAX_ROWS)
+    private var used = 0
+    private var nextSlot = 0
+    private val buf: java.nio.ByteBuffer = java.nio.ByteBuffer.allocateDirect(capacity)
+    private val win = LongArray(2)
+    /** Perguntas feitas ao motor (telemetria dos testes). */
+    var queries = 0
+        private set
+
+    /** A entrada da camada com `[first, last]` coberto, pedindo ao motor só se preciso; null = sem som. */
+    fun get(
+        source: WaveSource, layer: Long, model: Any?, generation: Int,
+        fpb: Double, first: Long, last: Long,
+    ): Entry? {
+        if (last < first || last - first + 1 > capacity) return null
+        var e: Entry? = null
+        for (i in 0 until used) if (ids[i] == layer) { e = entries[i]; break }
+        if (e != null && e.model === model && e.generation == generation && e.fpb == fpb &&
+            first >= e.w0 && last < e.w1
+        ) {
+            return if (e.count > 0) e else null
+        }
+        if (e == null) {
+            val slot = if (used < MAX_ROWS) used++ else nextSlot.also { nextSlot = (nextSlot + 1) % MAX_ROWS }
+            e = entries[slot] ?: Entry(capacity).also { entries[slot] = it }
+            ids[slot] = layer
+        }
+        WaveGrid.window(first, last, capacity, win)
+        val n = (win[1] - win[0]).toInt()
+        queries++
+        buf.clear()
+        val got = source.query(layer, win[0] * fpb, fpb, n, buf)
+        e.model = model
+        e.generation = generation
+        e.fpb = fpb
+        e.w0 = win[0]
+        e.w1 = win[1]
+        e.count = if (got > 0) minOf(got, n) else 0
+        if (e.count > 0) {
+            buf.position(0)
+            buf.get(e.data, 0, e.count)
+        }
+        return if (e.count > 0) e else null
+    }
+
+    private companion object {
+        const val MAX_ROWS = 32
     }
 }

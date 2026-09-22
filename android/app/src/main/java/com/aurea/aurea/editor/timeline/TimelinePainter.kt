@@ -62,11 +62,14 @@ internal class TimelinePainter(
     private val rectF = RectF()
     private val bitmapPaint = Paint(Paint.FILTER_BITMAP_FLAG)
 
-    // Waveform: um buffer direto e um array de linhas reusados (nada de alocar por quadro).
-    private val waveBuf: java.nio.ByteBuffer = java.nio.ByteBuffer.allocateDirect(WAVE_MAX)
+    // Waveform: janela por linha em grade fixa do tempo + um array de linhas reusado (nada de alocar por quadro).
+    private val waves = WaveStrip(WAVE_MAX)
     private val waveLines = FloatArray(WAVE_MAX * 4)
     private val wavePaint = Paint().apply { isAntiAlias = false; strokeCap = Paint.Cap.BUTT }
     private var waveStore: com.aurea.aurea.state.EditorStore? = null
+    private val waveSource = WaveSource { layer, start, fpb, count, out ->
+        waveStore?.queryWaveform(layer, start, fpb, count, out) ?: 0
+    }
     private val majorPath = Path()
     private val minorPath = Path()
     private val majorStroke = Stroke(m.tickMajorWidth)
@@ -168,6 +171,8 @@ internal class TimelinePainter(
         waveStore = store
         val rows = c.rows.value
         val n = c.rowCount(rows)
+        st.redrawTick   // lido: as miniaturas que não couberam neste quadro pedem o próximo
+        thumbs.beginFrame(THUMB_QUERIES_PER_FRAME)
 
         if (n > 0) {
             clipRect(top = m.rowsTop) {
@@ -177,6 +182,7 @@ internal class TimelinePainter(
         drawRuler(w, view, ppf, cx, fps, st.pps)
         drawMarkers(store.markers, w, view, ppf, cx)
         drawTimecode(cx, store.playhead, fps)
+        if (thumbs.starved) c.requestRedraw()
         val color = if (compact) AureaColors.Danger else AureaColors.Playhead
         drawRect(color, Offset(cx - m.playhead / 2f, 0f), Size(m.playhead, h))
         // Cabeçote vermelho do compacto tem o "botão" 8×8 no alto (A.01, painel aberto).
@@ -411,12 +417,14 @@ internal class TimelinePainter(
         val visL = max(x0 + m.stripe, 0f)
         val visR = min(x1, w)
         if (visR <= visL || ppf <= 0f) return
-        val step = max(1f, m.density * 1.5f)
-        val count = min(WAVE_MAX, ceil((visR - visL) / step).toInt())
-        if (count <= 0) return
-        val startFrame = TimeAxis.frameAt(visL, view, ppf, cx)
-        val n = store.queryWaveform(r.id, startFrame, (step / ppf).toDouble(), count, waveBuf)
-        if (n <= 0) return
+        // Grade fixa do tempo (WaveGrid): o balde não anda com a vista, e a janela
+        // guardada serve várias telas — tocando ou rolando, o motor não é consultado
+        // a cada quadro.
+        val fpb = WaveGrid.framesPerBucket(max(1f, m.density * 1.5f), ppf)
+        val first = WaveGrid.bucketAt(TimeAxis.frameAt(visL, view, ppf, cx), fpb)
+        val last = WaveGrid.bucketAt(TimeAxis.frameAt(visR, view, ppf, cx), fpb)
+        val e = waves.get(waveSource, r.id, store.layers, store.thumbnailGeneration, fpb, first, last) ?: return
+        val step = (fpb * ppf).toFloat()
         val audio = r.type == LayerType.Audio
         // Faixa de baixo da barra (abaixo do nome): no áudio, mais alta.
         val areaTop = top + m.trackTop * (if (audio) 0.62f else 0.8f)
@@ -424,10 +432,12 @@ internal class TimelinePainter(
         val mid = (areaTop + areaBottom) / 2f
         val half = (areaBottom - areaTop) / 2f
         var k = 0
-        for (i in 0 until n) {
-            val v = (waveBuf.get(i).toInt() and 0xFF) / 255f * half
-            if (v < 0.5f) continue
-            val x = visL + i * step + step / 2f
+        var b = first
+        while (b <= last && k + 4 <= waveLines.size) {
+            val v = e.at(b) / 255f * half
+            val x = TimeAxis.xOf((b + 0.5) * fpb, view, ppf, cx)
+            b++
+            if (v < 0.5f || x < visL || x > visR) continue
             waveLines[k++] = x
             waveLines[k++] = mid - v
             waveLines[k++] = x
@@ -746,6 +756,8 @@ internal class TimelinePainter(
         const val STATE_SELECTED = 1
         const val STATE_HIDDEN = 2
         const val THUMB_MAX_PX = 512
+        /** Perguntas de miniatura ao motor por quadro (o resto no quadro seguinte). */
+        const val THUMB_QUERIES_PER_FRAME = 6
         const val NAME_STEP_DP = 12f
         const val NAME_MIN_DP = 8f
         const val NAME_CACHE = 256

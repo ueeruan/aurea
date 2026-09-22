@@ -320,6 +320,10 @@ public:
     WaveformCache(const WaveformCache&) = delete;
     WaveformCache& operator=(const WaveformCache&) = delete;
 
+    /// Pasta do cache em disco (fase 8D): os picos calculados ficam lá e a
+    /// próxima abertura do projeto os lê em vez de decodificar o áudio
+    /// inteiro de novo. Vazio = sem disco (o padrão; testes).
+    void set_disk_directory(std::string dir);
     /// Enfileira o asset (nada acontece se já está pronto ou na fila).
     void request(u64 key, const AudioAssetRef& ref);
     /// `count` baldes de `samplesPerBucket` amostras (48 kHz) a partir de
@@ -341,8 +345,12 @@ private:
         bool failed = false;
     };
     void thread_main();
+    [[nodiscard]] std::string disk_path(const AudioAssetRef& ref) const;
+    [[nodiscard]] static bool load_disk(const std::string& file, i64 total, std::vector<u8>& out);
+    static void save_disk(const std::string& file, const std::vector<u8>& level0);
 
     VideoSourceFactory* factory_;
+    std::string diskDir_;   ///< lido sob `mutex_`
     mutable std::mutex mutex_;
     std::condition_variable wake_;
     std::unordered_map<u64, Entry> entries_;

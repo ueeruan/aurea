@@ -700,6 +700,35 @@ AUREA_JNI jint AUREA_FN(nativeClipboardState)(JNIEnv*, jclass, jlong handle) {
     return c ? static_cast<jint>(c->engine.clipboard_state()) : 0;
 }
 
+AUREA_JNI jlong AUREA_FN(nativeImportHdri)(JNIEnv* env, jclass, jlong handle, jstring path) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !path) return -static_cast<jlong>(Errc::InvalidState);
+    const char* p = env->GetStringUTFChars(path, nullptr);
+    const Result<u64> r = c->engine.import_hdri(p);
+    env->ReleaseStringUTFChars(path, p);
+    if (!r.ok()) return -static_cast<jlong>(r.status().code());
+    return static_cast<jlong>(*r);
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeClearHdri)(JNIEnv*, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.clear_hdri() ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetEnvironment)(JNIEnv*, jclass, jlong handle, jfloat intensity, jfloat rotation) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.set_environment_params(intensity, rotation) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeQueryEnvironment)(JNIEnv* env, jclass, jlong handle, jfloatArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !out || env->GetArrayLength(out) < 3) return JNI_FALSE;
+    f32 v[3];
+    if (!c->engine.query_environment(v)) return JNI_FALSE;
+    env->SetFloatArrayRegion(out, 0, 3, v);
+    return JNI_TRUE;
+}
+
 AUREA_JNI jlong AUREA_FN(nativePrecompose)(JNIEnv* env, jclass, jlong handle, jlongArray ids) {
     NativeContext* c = ctx_of(handle);
     if (!c) return -static_cast<jlong>(Errc::InvalidState);

@@ -315,6 +315,17 @@ public:
     /// {ligado, obturador em graus} da composição atual.
     bool query_motion_blur(bool& on, f32& shutter) noexcept;
 
+    // --- Ambiente 3D (HDRI) ------------------------------------------------------
+    /// HDRI Radiance (.hdr) do arquivo local: ilumina e reflete nos modelos 3D
+    /// da composição atual. Devolve o asset.
+    [[nodiscard]] Result<u64> import_hdri(const char* path) noexcept;
+    /// Volta ao estúdio neutro.
+    bool clear_hdri() noexcept;
+    /// Intensidade (≥ 0) e giro (graus) do ambiente.
+    bool set_environment_params(f32 intensity, f32 rotationDeg) noexcept;
+    /// {tem HDRI (0/1), intensidade, giro}.
+    bool query_environment(f32* out3) noexcept;
+
     // --- Pré-composição ----------------------------------------------------------
     /// Move as camadas para uma composição nova (mesmo tamanho, taxa e
     /// duração; fundo transparente) e põe no lugar UMA camada que a mostra, na
@@ -572,6 +583,8 @@ private:
     std::unique_ptr<CommandQueue> commandQueue_;
     std::unique_ptr<Project>      project_;
     std::vector<CompositionId>    compStack_;   ///< caminho da principal até a aberta
+    std::unordered_map<u64, std::shared_ptr<const scene3d::HdriPixels>> hdris_;
+    static std::shared_ptr<const scene3d::HdriPixels> hdri_lookup(void* self, AssetId id);
     struct Clipboard {
         std::vector<std::pair<u64, Layer>> layers;   ///< id original → cópia
         i64 layersAnchor = 0;

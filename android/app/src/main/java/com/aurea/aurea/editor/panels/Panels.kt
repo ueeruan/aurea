@@ -43,6 +43,7 @@ enum class EditorPanel {
     Transitions,   // entrada e saída
     Echo,          // eco e rgb no tempo
     Tracking,      // rastreio de ponto / estabilização
+    Element3D,     // ambiente 3D (HDRI)
 }
 
 /**
@@ -103,6 +104,7 @@ fun PanelContent(
         EditorPanel.Transitions -> "Entrada e saída"
         EditorPanel.Echo -> "Eco e rastro"
         EditorPanel.Tracking -> "Rastreio"
+        EditorPanel.Element3D -> "Elemento 3D"
     }
 
     Column(modifier.fillMaxSize().background(AureaColors.EditorPanel)) {
@@ -123,6 +125,7 @@ fun PanelContent(
                     EditorPanel.Transitions -> TransitionsPanel(env)
                     EditorPanel.Echo -> EchoPanel(env)
                     EditorPanel.Tracking -> TrackingPanel(env)
+                    EditorPanel.Element3D -> Element3DPanel(env)
                 }
             }
         }

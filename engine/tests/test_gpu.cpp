@@ -1650,6 +1650,69 @@ AUREA_TEST(Gpu, Scene3DLodDropsTrianglesWhenSmallOnScreen) {
     AUREA_CHECK(far <= mid);
 }
 
+namespace {
+/// HDRI Radiance mínimo (sem RLE): metade de cima = `top`, de baixo = `bottom`.
+std::string write_test_hdr(Vec3 top, Vec3 bottom) {
+    const u32 w = 64, h = 32;
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_teste.hdr";
+    FILE* f = std::fopen(path.c_str(), "wb");
+    if (!f) return {};
+    std::fprintf(f, "#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y %u +X %u\n", h, w);
+    auto rgbe = [](Vec3 c, u8* o) {
+        const f32 m = std::max(c.x, std::max(c.y, c.z));
+        if (m < 1e-32f) { o[0] = o[1] = o[2] = o[3] = 0; return; }
+        int e = 0;
+        const f32 k = std::frexp(m, &e) * 256.0f / m;
+        o[0] = static_cast<u8>(c.x * k); o[1] = static_cast<u8>(c.y * k); o[2] = static_cast<u8>(c.z * k);
+        o[3] = static_cast<u8>(e + 128);
+    };
+    for (u32 y = 0; y < h; ++y) {
+        for (u32 x = 0; x < w; ++x) {
+            u8 px[4];
+            rgbe(y < h / 2 ? top : bottom, px);
+            std::fwrite(px, 1, 4, f);
+        }
+    }
+    std::fclose(f);
+    return path;
+}
+} // namespace
+
+AUREA_TEST(Gpu, HdriLightsTheModelAndSurvivesReopen) {
+    AUREA_REQUIRE_GPU();
+    const std::string model = gltf_data("DamagedHelmet.glb");
+    if (!file_exists(model)) return;
+    Scene3DRig rig(320, 180);
+    ModelImport mi;
+    mi.path = model;
+    AUREA_CHECK(rig.e.import_model(mi).ok());
+    auto tint = [](const Image8& img) {
+        f64 r = 0, g = 0;
+        for (usize i = 0; i < img.rgba.size(); i += 4) { r += img.rgba[i]; g += img.rgba[i + 1]; }
+        return r / std::max(1.0, g);
+    };
+    const f64 studio = tint(rig.capture(320));
+    const std::string hdr = write_test_hdr(Vec3{4.0f, 0.3f, 0.2f}, Vec3{0.6f, 0.05f, 0.03f});
+    auto id = rig.e.import_hdri(hdr.c_str());
+    AUREA_CHECK(id.ok());
+    const f64 red = tint(rig.capture(320));
+    std::printf("    hdri: vermelho/verde estudio %.3f -> hdri vermelho %.3f\n", studio, red);
+    AUREA_CHECK(red > studio * 1.3);
+    // Salvar e reabrir: o HDRI volta (lido do arquivo).
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_teste_hdri.aurea";
+    AUREA_CHECK(rig.e.save_project(path.c_str()).ok());
+    AUREA_CHECK(rig.e.load_project(path.c_str()).ok());
+    const f64 back = tint(rig.capture(320));
+    std::printf("    reaberto: %.3f\n", back);
+    AUREA_CHECK(std::fabs(back - red) < 0.05 * red);
+    // Voltar ao estúdio.
+    AUREA_CHECK(rig.e.clear_hdri());
+    const f64 again = tint(rig.capture(320));
+    AUREA_CHECK(std::fabs(again - studio) < 0.05 * studio);
+    std::remove(path.c_str());
+    std::remove(hdr.c_str());
+}
+
 AUREA_TEST(Gpu, Scene3DSurvivesSaveAndReopenIdentically) {
     AUREA_REQUIRE_GPU();
     const std::string path = gltf_data("DamagedHelmet.glb");

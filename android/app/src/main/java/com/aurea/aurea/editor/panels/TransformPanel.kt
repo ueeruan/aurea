@@ -95,13 +95,18 @@ enum class TransformTab(val title: String, val icon: ImageVector, val railLabel:
  * (almofada, dial, fitas) e o trilho direito com as faces. Nenhum deslizante:
  * posição é 2D, ângulo é circular, escala não tem intervalo natural.
  */
+/** Eixo do dial de Rotação: 0 = X, 1 = Y, 2 = Z (no plano da tela). */
+private val rotationAxis = androidx.compose.runtime.mutableIntStateOf(2)
+private val RotationProps = intArrayOf(TrackProperty.ROTATION_X, TrackProperty.ROTATION_Y, TrackProperty.ROTATION_Z)
+
 @Composable
 internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformTab) -> Unit) {
     val store = env.store
     var menu by remember { mutableStateOf(false) }
-    val props = tab.props
-    val look by remember(store, tab) { derivedStateOf { transformLook(store.detail, props) } }
-    val curveReady by remember(store, tab) { derivedStateOf { store.primaryKeys().transformTrack(props[0]).size >= 2 } }
+    val axis by rotationAxis
+    val props = if (tab == TransformTab.Girar) intArrayOf(RotationProps[axis]) else tab.props
+    val look by remember(store, tab, axis) { derivedStateOf { transformLook(store.detail, props) } }
+    val curveReady by remember(store, tab, axis) { derivedStateOf { store.primaryKeys().transformTrack(props[0]).size >= 2 } }
     val canKey = tab != TransformTab.Inclinar
 
     Row(Modifier.fillMaxSize()) {
@@ -130,8 +135,8 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
             when (tab) {
                 TransformTab.Mover -> MoveFace(env, pivot = false)
                 TransformTab.Girar -> {
-                    Spacer(Modifier.height(44.dp))
-                    Box(Modifier.weight(1f).fillMaxWidth()) { RotationDial(env) }
+                    AxisRow(axis) { rotationAxis.intValue = it }
+                    Box(Modifier.weight(1f).fillMaxWidth()) { RotationDial(env, axis) }
                 }
                 TransformTab.Escalar -> ScaleFace(env)
                 TransformTab.Inclinar -> Unit
@@ -154,7 +159,6 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
         AureaActionSheet(
             title = "Transformar",
             actions = buildList {
-                add(SheetAction("Transformação 3D") { store.comingSoon("Transformação 3D") })
                 if (tab == TransformTab.Mover) add(SheetAction("Vincular posição") { store.comingSoon("Vincular posição") })
                 add(SheetAction("Auto-key") { store.comingSoon("Auto-key") })
                 add(SheetAction("Keyframe anterior") { store.pause(); store.stepToKeyframe(-1) })
@@ -176,7 +180,7 @@ private fun resetTab(env: PanelEnv, tab: TransformTab) {
         TransformTab.Mover -> store.setTransform2(
             TrackProperty.POSITION_X, store.project.width / 2f, TrackProperty.POSITION_Y, store.project.height / 2f,
         )
-        TransformTab.Girar -> store.setTransform(TrackProperty.ROTATION_Z, 0f)
+        TransformTab.Girar -> store.setTransform(RotationProps[rotationAxis.intValue], 0f)
         TransformTab.Escalar -> store.setTransform2(TrackProperty.SCALE_X, 1f, TrackProperty.SCALE_Y, 1f)
         TransformTab.Pivo -> store.setTransform2(
             TrackProperty.ANCHOR_X, d.sourceWidth / 2f, TrackProperty.ANCHOR_Y, d.sourceHeight / 2f,
@@ -378,15 +382,43 @@ private const val DEAD_ZONE_DP = 22f
  * girou (o ângulo não enrola: 361° é mais que uma volta); o toque seco no anel
  * põe o ângulo tocado na volta em que a camada já está.
  */
+/**
+ * X · Y · Z: o eixo que o dial gira. X e Y inclinam a camada em perspectiva
+ * (com a câmera da cena); Z gira no plano da tela.
+ */
 @Composable
-private fun RotationDial(env: PanelEnv) {
+private fun AxisRow(axis: Int, onAxis: (Int) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        listOf("X", "Y", "Z").forEachIndexed { i, label ->
+            val on = axis == i
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (on) AureaColors.AccentDim else AureaColors.Chip)
+                    .tocavel(onClick = { onAxis(i) })
+                    .padding(horizontal = 18.dp, vertical = 6.dp),
+            ) {
+                Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700,
+                    color = if (on) AureaColors.Accent else AureaColors.Text)))
+            }
+        }
+    }
+}
+
+@Composable
+private fun RotationDial(env: PanelEnv, axis: Int) {
     val store = env.store
-    val angle by remember(store) { derivedStateOf { store.detail?.rotation?.get(2) ?: 0f } }
+    val prop = RotationProps[axis]
+    val angle by remember(store, axis) { derivedStateOf { store.detail?.rotation?.get(axis) ?: 0f } }
     val current by rememberUpdatedState(angle)
     BoxWithConstraints(
         Modifier
             .fillMaxSize()
-            .pointerInput(store) {
+            .pointerInput(store, axis) {
                 awaitEachGesture {
                     val center = Offset(size.width / 2f, size.height / 2f)
                     val dead = DEAD_ZONE_DP * density
@@ -422,14 +454,14 @@ private fun RotationDial(env: PanelEnv) {
                             store.beginGesture("girar")
                         }
                         total += step
-                        store.setTransform(TrackProperty.ROTATION_Z, total)
+                        store.setTransform(prop, total)
                     }
                     if (began) {
                         store.endGesture()
                     } else if (walked < 2f * density && (last - center).getDistance() >= dead) {
                         // Toque seco: o ângulo apontado, na volta atual.
                         val turns = floor(current / 360f)
-                        store.setTransform(TrackProperty.ROTATION_Z, turns * 360f + raw(last))
+                        store.setTransform(prop, turns * 360f + raw(last))
                     }
                 }
             },
@@ -465,8 +497,8 @@ private fun RotationDial(env: PanelEnv) {
                 .clip(RoundedCornerShape(8.dp))
                 .background(AureaColors.DialValueBox)
                 .tocavel(shrink = 1f) {
-                    env.openKeypad(KeypadRequest("Rotação", angle, "°", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) {
-                        store.setTransform(TrackProperty.ROTATION_Z, it)
+                    env.openKeypad(KeypadRequest("Rotação ${"XYZ"[axis]}", angle, "°", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) {
+                        store.setTransform(prop, it)
                     })
                 }
                 .padding(horizontal = 16.dp, vertical = 8.dp),

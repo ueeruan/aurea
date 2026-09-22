@@ -6,6 +6,7 @@
 //  deste arquivo.
 // =============================================================================
 #include "aurea/scene3d/Importer.hpp"
+#include "aurea/scene3d/Environment.hpp"
 
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Time.hpp"
@@ -35,6 +36,7 @@
 #define STBI_NO_STDIO
 #define STBI_ONLY_PNG
 #define STBI_ONLY_JPEG
+#define STBI_ONLY_HDR
 #define STBI_FAILURE_USERMSG
 #include "stb_image.h"
 
@@ -1016,6 +1018,22 @@ ImportResult import_gltf_file(const std::string& path, const ImportOptions& opti
         r.asset->sourceName = slash == std::string::npos ? path : path.substr(slash + 1);
     }
     return r;
+}
+
+std::shared_ptr<HdriPixels> decode_hdri(const u8* bytes, usize size) noexcept {
+    if (!bytes || size == 0) return nullptr;
+    int w = 0, h = 0, c = 0;
+    f32* px = stbi_loadf_from_memory(bytes, static_cast<int>(size), &w, &h, &c, 3);
+    if (!px || w <= 0 || h <= 0) {
+        if (px) stbi_image_free(px);
+        return nullptr;
+    }
+    auto out = std::make_shared<HdriPixels>();
+    out->width = static_cast<u32>(w);
+    out->height = static_cast<u32>(h);
+    out->rgb.assign(px, px + static_cast<usize>(w) * h * 3);
+    stbi_image_free(px);
+    return out;
 }
 
 #include "UfbxImport.inl"

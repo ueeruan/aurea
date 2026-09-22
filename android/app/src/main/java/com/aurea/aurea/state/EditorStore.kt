@@ -443,6 +443,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshMarkers()
         editMode = engine.editMode()
         precompDepth = engine.precompDepth()
+        run {
+            val out = FloatArray(3)
+            if (engine.queryEnvironment(out)) environment = out.toList()
+        }
         compositionName = if (precompDepth > 0) engine.compositionName() else ""
         val mb = engine.motionBlurState()
         compMotionBlur = mb > 0f
@@ -765,6 +769,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                     TrackProperty.POSITION_Z -> setPosition(id, d.position[0], d.position[1], value)
                     TrackProperty.SCALE_X -> setScale(id, value, d.scale[1], d.scale[2])
                     TrackProperty.SCALE_Y -> setScale(id, d.scale[0], value, d.scale[2])
+                    TrackProperty.ROTATION_X -> setRotation(id, value, d.rotation[1], d.rotation[2])
+                    TrackProperty.ROTATION_Y -> setRotation(id, d.rotation[0], value, d.rotation[2])
                     TrackProperty.ROTATION_Z -> setRotation(id, d.rotation[0], d.rotation[1], value)
                     TrackProperty.ANCHOR_X -> setAnchor(id, value, d.anchor[1], d.anchor[2])
                     TrackProperty.ANCHOR_Y -> setAnchor(id, d.anchor[0], value, d.anchor[2])
@@ -1169,6 +1175,40 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val id = primary ?: return
         send { setTextStrokeColor(id, r, g, b, a) }
         refreshDetail()
+    }
+
+    // --- Ambiente 3D (HDRI) --------------------------------------------------------------
+    /** {tem HDRI, intensidade, giro°}. */
+    var environment by mutableStateOf(listOf(0f, 1f, 0f))
+        private set
+
+    fun importHdri(uri: Uri) {
+        val name = displayName(uri) ?: "ambiente.hdr"
+        if (!name.lowercase().endsWith(".hdr")) {
+            errorMessage = "Use um HDRI .hdr (Radiance)."
+            return
+        }
+        busyMessage = "Carregando o HDRI…"
+        viewModelScope.launch {
+            val id = withContext(Dispatchers.IO) {
+                val file = copyModelToSandbox(uri, "hdr") ?: return@withContext -1_000L
+                engine.importHdri(file.absolutePath)
+            }
+            busyMessage = null
+            if (id < 0) errorMessage = "Não deu para ler esse HDRI (${if (id == -1_000L) "arquivo" else "erro ${-id}"})."
+            else showToast("HDRI aplicado aos modelos 3D")
+            refreshNow()
+        }
+    }
+
+    fun clearHdri() {
+        engine.clearHdri()
+        refreshNow()
+    }
+
+    fun setEnvironment(intensity: Float, rotation: Float) {
+        engine.setEnvironment(intensity, rotation)
+        refreshNow()
     }
 
     // --- Pré-composição (grupo) ----------------------------------------------------------

@@ -225,6 +225,7 @@ private fun onSection(store: EditorStore, ui: EditorUi, s: DockSection) {
         DockSection.Particles -> openPanel(store, ui, EditorPanel.Particles)
         DockSection.Transitions -> openPanel(store, ui, EditorPanel.Transitions)
         DockSection.Track -> openPanel(store, ui, EditorPanel.Tracking)
+        DockSection.Element3D -> openPanel(store, ui, EditorPanel.Element3D)
         DockSection.Echo -> openPanel(store, ui, EditorPanel.Echo)
         DockSection.ColorFill, DockSection.EditShape, DockSection.EditText -> when (store.detail?.kind) {
             com.aurea.aurea.ui.theme.LayerType.Shape.kind -> openPanel(store, ui, EditorPanel.Shape)

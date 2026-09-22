@@ -283,6 +283,12 @@ class AureaEngine private constructor() {
     /** Bits: 1 camadas, 2 estilo, 4 efeitos, 8 keyframes. */
     fun clipboardState(): Int = nativeClipboardState(nativeHandle)
 
+    // Ambiente 3D (HDRI).
+    fun importHdri(path: String): Long = nativeImportHdri(nativeHandle, path)
+    fun clearHdri(): Boolean = nativeClearHdri(nativeHandle)
+    fun setEnvironment(intensity: Float, rotation: Float): Boolean = nativeSetEnvironment(nativeHandle, intensity, rotation)
+    fun queryEnvironment(out: FloatArray): Boolean = nativeQueryEnvironment(nativeHandle, out)
+
     // Pré-composição.
     fun precompose(ids: LongArray): Long = nativePrecompose(nativeHandle, ids)
     fun openPrecomp(layer: Long): Boolean = nativeOpenPrecomp(nativeHandle, layer)
@@ -440,6 +446,10 @@ class AureaEngine private constructor() {
     private external fun nativeQueryParticles(handle: Long, layer: Long, out: FloatArray): Boolean
     private external fun nativeApplySpeedRamp(handle: Long, layer: Long, preset: Int): Boolean
     private external fun nativePrecompose(handle: Long, ids: LongArray): Long
+    private external fun nativeImportHdri(handle: Long, path: String): Long
+    private external fun nativeClearHdri(handle: Long): Boolean
+    private external fun nativeSetEnvironment(handle: Long, intensity: Float, rotation: Float): Boolean
+    private external fun nativeQueryEnvironment(handle: Long, out: FloatArray): Boolean
     private external fun nativeOpenPrecomp(handle: Long, layer: Long): Boolean
     private external fun nativeClosePrecomp(handle: Long): Boolean
     private external fun nativePrecompDepth(handle: Long): Int

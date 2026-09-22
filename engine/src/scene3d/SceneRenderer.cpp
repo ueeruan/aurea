@@ -429,11 +429,49 @@ Status SceneRenderer::set_environment(const EnvironmentMaps& maps) noexcept {
     return OkStatus;
 }
 
-void SceneRenderer::finish_environment() noexcept {
-    if (irradiance_.valid() || !gpu_) return;
-    EnvironmentMaps maps = pendingEnv_.valid() ? pendingEnv_.get() : build_studio_environment();
+namespace {
+EnvironmentMaps build_for(const SceneEnvironment& env) {
+    if (env.hdri && env.hdri->width > 0 && !env.hdri->rgb.empty()) {
+        return build_environment_from_equirect(env.hdri->rgb.data(), env.hdri->width, env.hdri->height);
+    }
+    return build_studio_environment();
+}
+u64 key_of(const SceneEnvironment& env) { return env.hdri ? env.hdriKey : 0ull; }
+} // namespace
+
+void SceneRenderer::request_environment(const SceneEnvironment& env) noexcept {
+    if (!gpu_) return;
+    const u64 key = key_of(env);
+    if (pendingEnv_.valid()) {
+        if (pendingEnv_.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;   // ainda gerando
+        const Status s = set_environment(pendingEnv_.get());
+        if (!s.ok()) AUREA_LOG_WARN("3D: ambiente nao subiu: %s", s.message().data());
+        else envKey_ = pendingKey_;
+    }
+    if (key == envKey_) return;
+    envRequested_ = true;
+    pendingKey_ = key;
+    SceneEnvironment copy = env;
+    pendingEnv_ = std::async(std::launch::async, [copy] { return build_for(copy); });
+}
+
+void SceneRenderer::finish_environment(const SceneEnvironment& env) noexcept {
+    // Export: o ambiente CERTO já no primeiro quadro (sem esperar a troca).
+    if (!gpu_) return;
+    const u64 key = key_of(env);
+    if (key == envKey_ && !pendingEnv_.valid()) return;
+    EnvironmentMaps maps;
+    if (pendingEnv_.valid() && pendingKey_ == key) {
+        maps = pendingEnv_.get();
+    } else {
+        if (pendingEnv_.valid()) pendingEnv_.wait();
+        pendingEnv_ = {};
+        if (key == envKey_) return;
+        maps = build_for(env);
+    }
     envRequested_ = true;
     if (const Status s = set_environment(maps); !s.ok()) AUREA_LOG_WARN("3D: ambiente nao subiu: %s", s.message().data());
+    else envKey_ = key;
 }
 
 void SceneRenderer::shutdown() noexcept {
@@ -562,18 +600,9 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                           u64 frameNumber, FGTexture& outColor) noexcept {
     stats_ = SceneStats{};
     if (!gpu_ || !shaders_ || width == 0 || height == 0) return false;
-    if (!irradiance_.valid()) {
-        // Primeiro grupo 3D: o estúdio neutro (IBL), gerado fora da thread de
-        // render. Pronto → sobe e passa a valer no próximo quadro.
-        if (!envRequested_) {
-            envRequested_ = true;
-            pendingEnv_ = std::async(std::launch::async, [] { return build_studio_environment(); });
-        } else if (pendingEnv_.valid()
-                   && pendingEnv_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
-            const Status s = set_environment(pendingEnv_.get());
-            if (!s.ok()) AUREA_LOG_WARN("3D: ambiente padrao nao subiu: %s", s.message().data());
-        }
-    }
+    // Ambiente (IBL): o estúdio neutro ou o HDRI do projeto, gerado fora da
+    // thread de render; pronto → vale no próximo quadro.
+    request_environment(frame.environment);
     const bool ibl = irradiance_.valid();
 
     TextureDesc cd;

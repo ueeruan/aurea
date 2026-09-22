@@ -912,9 +912,22 @@ void Renderer::fill_scene_context(const Composition& comp, FrameIndex time, Fram
         key.castShadows = true;
         lights.push_back(key);
     }
+    // Ambiente da composição: intensidade, giro e o HDRI (se houver).
+    scene3d::SceneEnvironment env;
+    const EnvironmentSettings& es = comp.environment();
+    env.intensity = std::max(0.0f, es.intensity);
+    env.rotation = es.rotation * kDeg2Rad;
+    if (es.hdri.valid() && hdriLookup_) {
+        env.hdri = hdriLookup_(hdriCtx_, es.hdri);
+        env.hdriKey = es.hdri.pack();
+    }
     for (scene3d::SceneFrame& f : out.scenes) {
         f.camera = cam;
         f.lights = lights;
+        f.environment.intensity = env.intensity;
+        f.environment.rotation = env.rotation;
+        f.environment.hdri = env.hdri;
+        f.environment.hdriKey = env.hdriKey;
     }
 }
 
@@ -1374,7 +1387,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
                          ? graph_.import_texture("composicao", offscreen->texture, compDesc)
                          : graph_.create_texture("composicao", compDesc);
     currentScenes_ = &snap.scenes;
-    if (offscreen && !snap.scenes.empty()) scene3d_.finish_environment();
+    if (offscreen && !snap.scenes.empty()) scene3d_.finish_environment(snap.scenes[0].environment);
     compTargetW_ = cw;
     compTargetH_ = ch;
 

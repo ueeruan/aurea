@@ -208,6 +208,8 @@ public:
     /// O último quadro deixou alguma camada de fora por recurso pendente? (lê e zera)
     [[nodiscard]] bool take_incomplete() noexcept { const bool b = incomplete_; incomplete_ = false; return b; }
     void set_model_lookup(ModelLookup fn, void* ctx) noexcept { modelLookup_ = fn; modelCtx_ = ctx; }
+    using HdriLookup = std::shared_ptr<const scene3d::HdriPixels> (*)(void* ctx, AssetId id);
+    void set_hdri_lookup(HdriLookup fn, void* ctx) noexcept { hdriLookup_ = fn; hdriCtx_ = ctx; }
     [[nodiscard]] const scene3d::SceneStats& scene_stats() const noexcept { return scene3d_.stats(); }
     [[nodiscard]] u64 scene_resident_bytes() const noexcept { return scene3d_.resident_bytes(); }
 
@@ -280,6 +282,8 @@ private:
     ShaderLibrary shaders_;
     scene3d::SceneRenderer scene3d_;
     ModelLookup modelLookup_ = nullptr;
+    HdriLookup hdriLookup_ = nullptr;
+    void* hdriCtx_ = nullptr;
     void* modelCtx_ = nullptr;
     FrameGraph graph_;
     TransientTexturePool pool_;

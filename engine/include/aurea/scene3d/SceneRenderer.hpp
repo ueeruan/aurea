@@ -105,6 +105,9 @@ struct SceneCamera {
 };
 
 struct SceneEnvironment {
+    /// HDRI do projeto (chave = asset); nulo = estúdio neutro.
+    u64  hdriKey = 0;
+    std::shared_ptr<const HdriPixels> hdri;
     f32  intensity = 1.0f;
     f32  exposure = 1.0f;
     f32  rotation = 0.0f;              ///< radianos em torno do eixo vertical
@@ -166,7 +169,9 @@ public:
     [[nodiscard]] bool has_environment() const noexcept { return irradiance_.valid(); }
     /// Export e captura usam a qualidade final: esperam o ambiente (ou o geram
     /// agora). O preview não chama — segue sem travar.
-    void finish_environment() noexcept;
+    void finish_environment(const SceneEnvironment& env) noexcept;
+    /// Ambiente atual (0 = estúdio; ~0 = nenhum ainda).
+    [[nodiscard]] u64 environment_key() const noexcept { return envKey_; }
 
     [[nodiscard]] const SceneStats& stats() const noexcept { return stats_; }
     [[nodiscard]] u64 resident_bytes() const noexcept;
@@ -203,6 +208,11 @@ private:
     /// o primeiro quadro 3D não espera; usa o céu analítico até ficar pronto.
     std::future<EnvironmentMaps> pendingEnv_;
     bool envRequested_ = false;
+    u64 envKey_ = ~0ull;       ///< o que está na GPU
+    u64 pendingKey_ = ~0ull;   ///< o que está sendo gerado
+    /// Pede o ambiente do quadro: gera fora da thread de render e troca quando
+    /// ficar pronto (o anterior continua valendo até lá).
+    void request_environment(const SceneEnvironment& env) noexcept;
     SamplerHandle cubeSampler_{};
     void release_environment() noexcept;
     SceneStats stats_{};

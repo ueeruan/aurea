@@ -17,6 +17,7 @@
 #include "aurea/core/Math.hpp"
 #include "aurea/core/Types.hpp"
 
+#include <memory>
 #include <vector>
 
 namespace aurea::scene3d {
@@ -27,6 +28,15 @@ struct CubeData {
     u32 mips = 0;
     std::vector<std::vector<u16>> levels;
 };
+
+/// HDRI decodificado: RGB float linear, linhas de cima para baixo.
+struct HdriPixels {
+    u32 width = 0, height = 0;
+    std::vector<f32> rgb;
+};
+
+/// Decodifica um arquivo Radiance (.hdr) da memória. Vazio = formato não lido.
+[[nodiscard]] std::shared_ptr<HdriPixels> decode_hdri(const u8* bytes, usize size) noexcept;
 
 struct EnvironmentMaps {
     CubeData irradiance;      ///< 32², 1 mip

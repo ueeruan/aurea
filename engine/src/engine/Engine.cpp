@@ -116,6 +116,7 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
 
     gpu_.reset(config.backend);
     renderer_.set_model_lookup(&Engine::model_lookup, this);
+    renderer_.set_hdri_lookup(&Engine::hdri_lookup, this);
     if (gpu_) {
         // O backend guarda o caminho do cache de pipeline: por padrão, o mesmo
         // diretório de cache do motor (que vive em config_, não no chamador).
@@ -1271,6 +1272,96 @@ bool Engine::set_shutter_angle(f32 degrees) noexcept {
     comp->motion_blur().shutterAngle = std::clamp(degrees, 0.0f, 720.0f);
     project_->mark_dirty();
     request_render();
+    return true;
+}
+
+// =============================================================================
+// Ambiente 3D (HDRI)
+// =============================================================================
+namespace {
+std::shared_ptr<scene3d::HdriPixels> read_hdri_file(const std::string& path) {
+    FILE* f = std::fopen(path.c_str(), "rb");
+    if (!f) return nullptr;
+    std::fseek(f, 0, SEEK_END);
+    const long n = std::ftell(f);
+    std::fseek(f, 0, SEEK_SET);
+    if (n <= 0 || n > (512l << 20)) { std::fclose(f); return nullptr; }
+    std::vector<u8> bytes(static_cast<usize>(n));
+    const usize got = std::fread(bytes.data(), 1, bytes.size(), f);
+    std::fclose(f);
+    if (got != bytes.size()) return nullptr;
+    return scene3d::decode_hdri(bytes.data(), bytes.size());
+}
+} // namespace
+
+std::shared_ptr<const scene3d::HdriPixels> Engine::hdri_lookup(void* selfPtr, AssetId id) {
+    // Dentro do prepare (modelo travado): o cache; se faltar (projeto reaberto),
+    // lê do arquivo uma vez.
+    auto* self = static_cast<Engine*>(selfPtr);
+    if (auto it = self->hdris_.find(id.pack()); it != self->hdris_.end()) return it->second;
+    const Asset* a = self->project_ ? self->project_->asset(id) : nullptr;
+    if (!a || a->kind != AssetKind::Environment) return nullptr;
+    std::shared_ptr<const scene3d::HdriPixels> px = read_hdri_file(self->resolve_asset_path(a->sourcePath));
+    self->hdris_[id.pack()] = px;   // nulo também fica: não tenta de novo a cada quadro
+    return px;
+}
+
+Result<u64> Engine::import_hdri(const char* path) noexcept {
+    if (!path || !*path) return Status{Errc::InvalidArgument, "sem arquivo"};
+    std::shared_ptr<scene3d::HdriPixels> px = read_hdri_file(path);
+    if (!px) return Status{Errc::UnsupportedFormat, "HDRI nao lido (use .hdr Radiance)"};
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp) return Status{Errc::InvalidState, "nenhum projeto aberto"};
+    history_.before_mutation(*comp, project_->timeline().current(), "hdri");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    Asset asset;
+    asset.kind = AssetKind::Environment;
+    std::string name = path;
+    if (const usize s = name.find_last_of("/\\"); s != std::string::npos) name = name.substr(s + 1);
+    asset.name = name;
+    asset.sourcePath = path;
+    const AssetId id = project_->add_asset(std::move(asset));
+    hdris_[id.pack()] = px;
+    comp->environment().hdri = id;
+    project_->mark_dirty();
+    request_render();
+    AUREA_LOG_INFO("hdri: %ux%u", px->width, px->height);
+    return id.pack();
+}
+
+bool Engine::clear_hdri() noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp || !comp->environment().hdri.valid()) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "estudio neutro");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    comp->environment().hdri = AssetId{};
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::set_environment_params(f32 intensity, f32 rotationDeg) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "ambiente");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    comp->environment().intensity = std::clamp(intensity, 0.0f, 20.0f);
+    comp->environment().rotation = std::fmod(rotationDeg, 360.0f);
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::query_environment(f32* out) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp || !out) return false;
+    out[0] = comp->environment().hdri.valid() ? 1.0f : 0.0f;
+    out[1] = comp->environment().intensity;
+    out[2] = comp->environment().rotation;
     return true;
 }
 

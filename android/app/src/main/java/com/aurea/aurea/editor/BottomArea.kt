@@ -154,8 +154,8 @@ internal fun LayerToolsDock(store: EditorStore, ui: EditorUi, layerId: Long) {
             ) {
                 // As portas do grupo: entrar, desagrupar e o tempo dele.
                 if (type == LayerType.Group) {
-                    DockTool(CupertinoGlyph.ArrowDownRightSquare, "Entrar no grupo", 20) { store.comingSoon("Entrar no grupo") }
-                    DockTool(ShellGlyph.SquareSplit2x2, "Desagrupar", 20) { store.comingSoon("Desagrupar") }
+                    DockTool(CupertinoGlyph.ArrowDownRightSquare, "Entrar no grupo", 20) { store.openPrecomp(l.id) }
+                    DockTool(ShellGlyph.SquareSplit2x2, "Desagrupar", 20) { store.ungroupPrecomp(l.id) }
                     DockTool(CupertinoGlyph.Timer, "Tempo", 20) { store.comingSoon("Tempo do grupo") }
                 }
                 if (type == LayerType.Audio) {

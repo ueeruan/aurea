@@ -296,6 +296,8 @@ class AureaEngine private constructor() {
     // Pré-composição.
     fun precompose(ids: LongArray): Long = nativePrecompose(nativeHandle, ids)
     fun openPrecomp(layer: Long): Boolean = nativeOpenPrecomp(nativeHandle, layer)
+    /** null = desagrupou; senão o motivo da recusa. */
+    fun ungroupPrecomp(layer: Long): String? = nativeUngroupPrecomp(nativeHandle, layer)
     fun closePrecomp(): Boolean = nativeClosePrecomp(nativeHandle)
     fun precompDepth(): Int = nativePrecompDepth(nativeHandle)
     fun compositionName(): String = nativeCompositionName(nativeHandle) ?: ""
@@ -460,6 +462,7 @@ class AureaEngine private constructor() {
     private external fun nativeQueryParticles(handle: Long, layer: Long, out: FloatArray): Boolean
     private external fun nativeApplySpeedRamp(handle: Long, layer: Long, preset: Int): Boolean
     private external fun nativePrecompose(handle: Long, ids: LongArray): Long
+    private external fun nativeUngroupPrecomp(handle: Long, layer: Long): String?
     private external fun nativeImportHdri(handle: Long, path: String): Long
     private external fun nativeQueryGizmo(handle: Long, layer: Long, length: Float, out: FloatArray): Boolean
     private external fun nativeGizmoMoveLocal(handle: Long, layer: Long, axis: Int, amount: Float, out: FloatArray): Boolean

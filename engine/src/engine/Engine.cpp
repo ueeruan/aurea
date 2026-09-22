@@ -1522,6 +1522,123 @@ Result<u64> Engine::precompose(const u64* ids, u32 count, const char* name) noex
     return pl.pack();
 }
 
+Result<u32> Engine::ungroup_precomp(u64 layerId, std::string* why) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const LayerId pid = LayerId::unpack(layerId);
+    const Layer* P = comp ? comp->layer(pid) : nullptr;
+    if (!P || P->kind != LayerKind::Composition) return Status{Errc::InvalidArgument, "nao e uma pre-composicao"};
+    Timeline& tl = project_->timeline();
+    const CompositionId parentId = tl.current();
+    const Composition* C = tl.composition(P->nested.composition);
+    if (!C) return Status{Errc::NotFound, "composicao ausente"};
+    auto refuse = [&](const char* reason) {
+        if (why) *why = reason;
+        return Status{Errc::NotSupported, reason};
+    };
+    const FrameIndex pLocal = P->local_time(P->start);
+    if (!P->effects.empty()) return refuse("a camada do grupo tem efeitos");
+    if (!P->masks.empty()) return refuse("a camada do grupo tem mascaras");
+    if (P->blendMode != BlendMode::Normal) return refuse("a camada do grupo tem modo de mistura");
+    if (const Track* o = P->tracks.find(TrackProperty::Opacity); (o && o->animated())
+        || std::fabs(P->tracks.sample_or(TrackProperty::Opacity, pLocal, P->transform.opacity) - 1.0f) > 1e-4f)
+        return refuse("a camada do grupo tem opacidade");
+    if (P->threeD) return refuse("a camada do grupo esta em 3D");
+    if (P->timeRemapEnabled || P->speed != 1.0f || P->reversed) return refuse("o tempo do grupo foi alterado");
+    if (P->transitionIn || P->transitionOut || P->echoCount || P->rgbDelay > 0.0f) return refuse("o grupo tem transicao ou eco");
+    if (!C->transparent_background()) return refuse("o grupo tem fundo proprio");
+    bool camOrLight = false;
+    for (u32 i = 0; i < C->order().size(); ++i) {
+        if (const Layer* x = C->layer(C->order().at(i))) camOrLight |= x->kind == LayerKind::Camera || x->kind == LayerKind::Light;
+    }
+    if (camOrLight) return refuse("o grupo tem camera ou luz propria");
+
+    history_.before_mutation(*comp, parentId, "desagrupar");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    // Quadro c da filha aparece no quadro c + shift da mãe; só o trecho que a
+    // camada mostrava (e que existe na filha) continua visível.
+    const i64 shift = P->start.value - P->offset.value;
+    const i64 visLo = std::max(P->start.value, shift), visHi = std::min(P->end.value, shift + C->duration().value);
+    u32 index = 0;
+    for (u32 i = 0; i < comp->order().size(); ++i) if (comp->order().at(i) == pid) index = i;
+    // Transform do grupo: identidade = direto; senão um Nulo com o transform
+    // (e keyframes) da camada vira o pai das raízes.
+    bool identity = !P->tracks.has_animation() && !P->parent.valid();
+    if (identity) {
+        const Mat4 m = layer_world_matrix(*comp, *P, P->start);
+        const Mat4 I = Mat4::identity();
+        for (int c = 0; c < 4 && identity; ++c)
+            identity = std::fabs(m.col[c].x - I.col[c].x) < 1e-4f && std::fabs(m.col[c].y - I.col[c].y) < 1e-4f
+                    && std::fabs(m.col[c].z - I.col[c].z) < 1e-4f && std::fabs(m.col[c].w - I.col[c].w) < 1e-4f;
+    }
+    const Layer group = *P;
+    LayerId nullId{};
+    if (!identity) {
+        nullId = comp->add_layer(LayerKind::Null, "Grupo · " + group.name);
+        if (Layer* n = comp->layer(nullId)) {
+            n->start = group.start;
+            n->end = group.end;
+            n->offset = group.offset;
+            n->parent = group.parent;
+            n->transform = group.transform;
+            n->transform.opacity = 1.0f;
+            n->tracks = group.tracks;
+            n->tracks.remove_if([](const Track& t) { return t.property == TrackProperty::Opacity; });
+        }
+    }
+    // Cópias na ordem vertical da filha (de baixo para cima), pais remapeados.
+    std::vector<std::pair<LayerId, LayerId>> map;
+    std::vector<LayerId> added;
+    for (u32 i = 0; i < C->order().size(); ++i) {
+        const LayerId cid = C->order().at(i);
+        const Layer* src = C->layer(cid);
+        if (!src) continue;
+        i64 s = src->start.value + shift, e = src->end.value + shift;
+        const i64 cutIn = std::max<i64>(0, visLo - s);
+        s = std::max(s, visLo);
+        e = std::min(e, visHi);
+        if (e <= s) continue;   // fora do trecho mostrado: não aparecia
+        const LayerId nid = comp->add_layer(src->kind, src->name);
+        Layer* dst = comp->layer(nid);
+        if (!dst) continue;
+        *dst = *src;
+        dst->start = FrameIndex{s};
+        dst->end = FrameIndex{e};
+        // Aparar a entrada: o conteúdo continua no mesmo lugar do tempo.
+        if (cutIn > 0) {
+            dst->offset = FrameIndex{src->offset.value + (dst->timeRemapEnabled || dst->speed == 1.0f
+                                                              ? cutIn
+                                                              : static_cast<i64>(std::llround(static_cast<f64>(cutIn) * dst->speed)))};
+        }
+        map.emplace_back(cid, nid);
+        added.push_back(nid);
+    }
+    for (auto& [oldId, nid] : map) {
+        Layer* dst = comp->layer(nid);
+        if (!dst) continue;
+        LayerId np{};
+        for (auto& [o, nn] : map) if (o == dst->parent) np = nn;
+        dst->parent = np.valid() ? np : nullId;
+    }
+    // Quem era filho da camada do grupo passa a ser do Nulo (ou do pai dela).
+    for (u32 i = 0; i < comp->order().size(); ++i) {
+        Layer* x = comp->layer(comp->order().at(i));
+        if (x && x->parent == pid) x->parent = nullId.valid() ? nullId : group.parent;
+    }
+    media_.close_layer(pid);
+    comp->remove_layer(pid);
+    // No lugar do grupo: as camadas na mesma ordem, o Nulo logo acima delas.
+    u32 at = index;
+    for (LayerId id : added) (void)comp->reorder_layer(id, at++);
+    if (nullId.valid()) (void)comp->reorder_layer(nullId, at);
+    comp->rebuild_draw_order();
+    selection_.clear();
+    for (LayerId id : added) selection_.push_back(id.pack());
+    project_->mark_dirty();
+    request_render();
+    return static_cast<u32>(added.size());
+}
+
 bool Engine::open_precomp(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;

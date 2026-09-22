@@ -1315,6 +1315,18 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         showToast("Agrupado · toque em Editar o grupo para mexer dentro")
     }
 
+    /** "Desagrupar": as camadas voltam para cá, no mesmo lugar e tempo da tela. */
+    fun ungroupPrecomp(layer: Long) {
+        val why = engine.ungroupPrecomp(layer)
+        if (why != null) {
+            errorMessage = "Não dá para desagrupar: $why (o resultado mudaria)."
+            return
+        }
+        selection = LinkedHashSet()
+        refreshNow()
+        showToast("Desagrupado")
+    }
+
     fun openPrecomp(layer: Long) {
         if (!engine.openPrecomp(layer)) return
         selection = LinkedHashSet()

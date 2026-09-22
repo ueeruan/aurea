@@ -2367,3 +2367,76 @@ AUREA_TEST(Gpu, Text3DRendersEditsUndoesAndSurvivesReopen) {
     AUREA_CHECK(reopened <= 3);
     std::remove(path.c_str());
 }
+
+AUREA_TEST(Gpu, UngroupPrecompKeepsTheScreenAndRefusesWhatWouldChange) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(320, 180);
+    auto a = rig.e.add_shape(0);
+    auto b = rig.e.add_shape(9);
+    AUREA_CHECK(a.ok() && b.ok());
+    auto cur = [&] { return rig.e.project()->timeline().composition(rig.e.project()->timeline().current()); };
+    cur()->layer(LayerId::unpack(*a))->transform.position = Vec3{100, 90, 0};
+    cur()->layer(LayerId::unpack(*b))->transform.position = Vec3{220, 90, 0};
+    const Image8 orig = rig.capture(320);
+    u64 ids[2] = {*a, *b};
+    // 1. Grupo sem transform: volta direto, sem Nulo.
+    auto pre = rig.e.precompose(ids, 2);
+    AUREA_CHECK(pre.ok());
+    auto n1 = rig.e.ungroup_precomp(*pre);
+    AUREA_CHECK(n1.ok() && *n1 == 2u);
+    const u32 layers1 = cur()->layers().count();
+    const u32 d1 = max_diff(orig, rig.capture(320));
+    // 2. Grupo movido, girado, com escala animada e entrada aparada: um Nulo
+    //    leva o transform; a tela fica igual em dois instantes.
+    std::vector<u64> now;
+    for (u32 i = 0; i < cur()->order().size(); ++i) now.push_back(cur()->order().at(i).pack());
+    pre = rig.e.precompose(now.data(), static_cast<u32>(now.size()));
+    AUREA_CHECK(pre.ok());
+    Layer* p = cur()->layer(LayerId::unpack(*pre));
+    p->transform.position = Vec3{180, 100, 0};
+    p->transform.rotation = Vec3{0, 0, 20};
+    Track& sx = p->tracks.get_or_create(TrackProperty::ScaleX);
+    sx.keys = {Keyframe{FrameIndex{0}, 0.6f}, Keyframe{FrameIndex{30}, 1.2f}};
+    p->start = FrameIndex{p->start.value + 5};
+    p->offset = FrameIndex{p->offset.value + 5};
+    seek_frame(rig.e, 8);
+    const Image8 g8 = rig.capture(320);
+    seek_frame(rig.e, 20);
+    const Image8 g20 = rig.capture(320);
+    auto n2 = rig.e.ungroup_precomp(*pre);
+    AUREA_CHECK(n2.ok() && *n2 == 2u);
+    const u32 layers2 = cur()->layers().count();
+    seek_frame(rig.e, 8);
+    // Com transform o grupo é amostrado de uma textura intermediária; solto,
+    // cada forma é vetorial: só a borda antisserrilhada muda. Mede-se a média
+    // e a fração de pixels que mudam MUITO (forma fora do lugar).
+    auto edge = [](const Image8& x, const Image8& y, f64* mean) {
+        u64 sum = 0, big = 0, n = 0;
+        for (usize i = 0; i + 3 < x.rgba.size() && i + 3 < y.rgba.size(); i += 4, ++n) {
+            const u32 d = static_cast<u32>(std::abs(x.rgba[i] - y.rgba[i]));
+            sum += d;
+            big += d > 128;
+        }
+        *mean = static_cast<f64>(sum) / std::max<u64>(1, n);
+        return static_cast<f64>(big) / std::max<u64>(1, n);
+    };
+    f64 m8 = 0, m20 = 0;
+    const f64 b8 = edge(g8, rig.capture(320), &m8);
+    seek_frame(rig.e, 20);
+    const f64 b20 = edge(g20, rig.capture(320), &m20);
+    // Desfazer devolve a camada do grupo.
+    Command u;
+    u.type = CommandType::Undo;
+    AUREA_CHECK(rig.e.apply_command(u).ok());
+    const bool back = cur()->layer(LayerId::unpack(*pre)) != nullptr;
+    // 3. Opacidade no grupo mudaria a mistura das sobreposições: recusa.
+    cur()->layer(LayerId::unpack(*pre))->transform.opacity = 0.5f;
+    std::string why;
+    auto n3 = rig.e.ungroup_precomp(*pre, &why);
+    std::printf("    desagrupar: direto dif %u (%u camadas); com Nulo media %.3f/%.3f, pixels muito diferentes %.4f%%/%.4f%% (%u camadas); desfazer %s; opacidade recusada: \"%s\"\n", d1,
+                layers1, m8, m20, b8 * 100, b20 * 100, layers2, back ? "ok" : "falhou", why.c_str());
+    AUREA_CHECK(layers1 == 2u && d1 <= 2);
+    AUREA_CHECK(layers2 == 3u && m8 < 0.5 && m20 < 0.5 && b8 < 0.002 && b20 < 0.002);
+    AUREA_CHECK(back);
+    AUREA_CHECK(!n3.ok() && !why.empty());
+}

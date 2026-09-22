@@ -341,6 +341,14 @@ public:
     /// duração; fundo transparente) e põe no lugar UMA camada que a mostra, na
     /// posição da mais alta. Os tempos não mudam. Devolve a camada nova.
     [[nodiscard]] Result<u64> precompose(const u64* ids, u32 count, const char* name = nullptr) noexcept;
+    /// Desagrupa: as camadas da pré-composição voltam para a composição atual,
+    /// no lugar da camada, com os mesmos tempos na tela (aparadas ao trecho que
+    /// a camada mostrava). Transform da camada ≠ identidade vira um Nulo pai
+    /// (a tela não muda). Recusa, com o motivo em `why`, o que mudaria o
+    /// resultado: efeitos, máscaras, mistura, opacidade, 3D, tempo alterado,
+    /// transições/eco na camada; câmera/luz ou fundo opaco dentro.
+    /// Devolve quantas camadas voltaram.
+    [[nodiscard]] Result<u32> ungroup_precomp(u64 layerId, std::string* why = nullptr) noexcept;
     /// Entra na pré-composição da camada (a timeline passa a mostrar ela).
     bool open_precomp(u64 layerId) noexcept;
     /// Volta para a composição principal. false = já estava nela.

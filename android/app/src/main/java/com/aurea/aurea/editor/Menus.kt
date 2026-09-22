@@ -117,7 +117,7 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
                 MenuItemRow(CupertinoGlyph.RectangleStack, "Converter em grupo", act { store.precompose(listOf(id)) })
             } else {
                 MenuItemRow(CupertinoGlyph.ArrowDownRightSquare, "Editar o grupo", act { store.openPrecomp(id) })
-                MenuItemRow(ShellGlyph.SquareSplit2x2, "Desagrupar", soon("Desagrupar"))
+                MenuItemRow(ShellGlyph.SquareSplit2x2, "Desagrupar", act { store.ungroupPrecomp(id) })
                 MenuItemRow(CupertinoGlyph.SquareStack3dDownRightFill, "Grupo de máscara", soon("Grupo de máscara"), detail = "A camada de cima mostra só o que cobre")
                 MenuItemRow(CupertinoGlyph.SquareStack3dDownRight, "Grupo de recorte", soon("Grupo de recorte"), detail = "A camada de cima fura as de baixo")
             }

@@ -747,6 +747,16 @@ AUREA_JNI jboolean AUREA_FN(nativeQueryEnvironment)(JNIEnv* env, jclass, jlong h
     return JNI_TRUE;
 }
 
+/// Desagrupar: nulo = feito; senão o motivo da recusa (frase para a UI).
+AUREA_JNI jstring AUREA_FN(nativeUngroupPrecomp)(JNIEnv* env, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return env->NewStringUTF("motor indisponivel");
+    std::string why;
+    const Result<u32> r = c->engine.ungroup_precomp(static_cast<u64>(layer), &why);
+    if (r.ok()) return nullptr;
+    return env->NewStringUTF(why.empty() ? "nao deu para desagrupar" : why.c_str());
+}
+
 AUREA_JNI jlong AUREA_FN(nativePrecompose)(JNIEnv* env, jclass, jlong handle, jlongArray ids) {
     NativeContext* c = ctx_of(handle);
     if (!c) return -static_cast<jlong>(Errc::InvalidState);

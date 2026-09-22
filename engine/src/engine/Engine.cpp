@@ -3977,7 +3977,17 @@ Result<u32> Engine::create_captions(u64 sourceLayer, const std::vector<text::Cap
     std::vector<f64> srcSec(static_cast<usize>(s1 - s0));
     for (i64 f = s0; f < s1; ++f) srcSec[static_cast<usize>(f - s0)] = src->source_frame(FrameIndex{f}) / fps;
     const f64 half = 0.5 / fps;
+    // Fase 8D: a busca era linear na camada inteira POR palavra (5000 palavras
+    // num vídeo de 30 min = ~10^8 comparações, 104 ms no host). Com o tempo da
+    // fonte crescente (o caso normal: sem reverso nem curva que volta) é uma
+    // busca binária; senão, a varredura de antes (mesmo resultado).
+    const bool monotonic = std::is_sorted(srcSec.begin(), srcSec.end());
     auto frame_of = [&](f64 sec) -> i64 {
+        if (monotonic) {
+            const auto it = std::lower_bound(srcSec.begin(), srcSec.end(), sec,
+                                             [half](f64 v, f64 target) { return v + half < target; });
+            return it == srcSec.end() ? -1 : s0 + static_cast<i64>(it - srcSec.begin());
+        }
         for (usize i = 0; i < srcSec.size(); ++i) if (srcSec[i] + half >= sec) return s0 + static_cast<i64>(i);
         return -1;   // depois do fim da camada
     };
@@ -4716,16 +4726,12 @@ u32 Engine::query_layers(bridge::LayerRow* out, u32 capacity, char* outNameBlob,
     return written;
 }
 
-u32 Engine::query_keyframes(u64 layerId, bridge::KeyframeRow* out, u32 capacity) noexcept {
-    if (!out) return 0;
-    std::lock_guard<std::mutex> lock(modelMutex_);
-    Composition* comp = current_composition();
-    if (!comp) return 0;
-    Layer* l = comp->layer(LayerId::unpack(layerId));
-    if (!l) return 0;
+namespace {
+/// Linhas de keyframe de uma camada (trilha a trilha), no máximo `capacity`.
+u32 write_keyframe_rows(const Layer& l, bridge::KeyframeRow* out, u32 capacity) noexcept {
     u32 written = 0;
-    for (u32 t = 0; t < l->tracks.size() && written < capacity; ++t) {
-        const Track& track = l->tracks.at(t);
+    for (u32 t = 0; t < l.tracks.size() && written < capacity; ++t) {
+        const Track& track = l.tracks.at(t);
         for (const Keyframe& k : track.keys) {
             if (written >= capacity) break;
             bridge::KeyframeRow row;
@@ -4739,6 +4745,51 @@ u32 Engine::query_keyframes(u64 layerId, bridge::KeyframeRow* out, u32 capacity)
         }
     }
     return written;
+}
+} // namespace
+
+u32 Engine::query_keyframes(u64 layerId, bridge::KeyframeRow* out, u32 capacity) noexcept {
+    if (!out) return 0;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = current_composition();
+    if (!comp) return 0;
+    Layer* l = comp->layer(LayerId::unpack(layerId));
+    if (!l) return 0;
+    return write_keyframe_rows(*l, out, capacity);
+}
+
+u32 Engine::query_all_keyframes(bridge::KeyframeIndexRow* outIndex, u32 layerCapacity,
+                                bridge::KeyframeRow* out, u32 capacity, u32* outLayers) noexcept {
+    if (outLayers) *outLayers = 0;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    const Composition* comp = current_composition();
+    if (!comp) return 0;
+    const u32 n = comp->order().size();
+    // 1ª passada: quanto espaço precisa (sem escrever nada se não couber).
+    u32 layers = 0;
+    u64 total = 0;
+    for (u32 i = 0; i < n; ++i) {
+        const Layer* l = comp->layer(comp->order().at(n - 1 - i));
+        if (!l) continue;
+        ++layers;
+        for (u32 t = 0; t < l->tracks.size(); ++t) total += l->tracks.at(t).keys.size();
+    }
+    if (outLayers) *outLayers = layers;
+    const u32 totalU = static_cast<u32>(std::min<u64>(total, 0xFFFFFFFFull));
+    if (!outIndex || !out || layers > layerCapacity || total > capacity) return totalU;
+    u32 li = 0, cursor = 0;
+    for (u32 i = 0; i < n; ++i) {
+        const LayerId id = comp->order().at(n - 1 - i);
+        const Layer* l = comp->layer(id);
+        if (!l) continue;
+        const u32 written = write_keyframe_rows(*l, out + cursor, capacity - cursor);
+        outIndex[li].layerId = id.pack();
+        outIndex[li].count = written;
+        outIndex[li].reserved = 0;
+        ++li;
+        cursor += written;
+    }
+    return totalU;
 }
 
 u32 Engine::query_waveform(u64 layerId, f64 startFrame, f64 framesPerBucket, u32 count, u8* out) noexcept {

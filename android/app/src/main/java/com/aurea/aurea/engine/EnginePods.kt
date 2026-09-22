@@ -218,6 +218,13 @@ class LayerRow internal constructor(
             return String(bytes, Charsets.UTF_8)
         }
 
+    /** O nome é `utf8` (os bytes)? Sem alocar — a timeline compara a cada revisão. */
+    fun nameEquals(utf8: ByteArray): Boolean {
+        if (utf8.size != (if (nameLength > 0) nameLength else 0)) return false
+        for (i in utf8.indices) if (nameBlob.get(nameOffset + i) != utf8[i]) return false
+        return true
+    }
+
     companion object {
         const val INVALID_INDEX = -1
 

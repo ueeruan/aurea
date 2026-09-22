@@ -55,8 +55,9 @@ internal class TimelineController(
     var onKeyframeTap: (Long, KeyframeRow) -> Unit = { _, _ -> }
     var haptics: HapticFeedback? = null
 
-    /** Linhas derivadas do que o store leu; recalculadas só quando o modelo muda. */
-    val rows = derivedStateOf { buildRows(store.layers, store.keyframes) }
+    /** Linhas derivadas do que o store leu; refeitas só as que mudaram (fase 8D). */
+    private val rowCache = RowCache()
+    val rows = derivedStateOf { rowCache.build(store.layers, store.keyframes) }
     // Seleção como LongArray ordenado: `Set<Long>.contains` encaixotaria o id a cada linha pintada.
     private val selectedIds = derivedStateOf { store.selection.toLongArray().also { it.sort() } }
     private val primaryId = derivedStateOf { store.primary ?: NO_ID }
@@ -528,7 +529,6 @@ internal class TimelineController(
         }
         if (group.isEmpty()) return consumeUntilUp()
         pauseIfPlaying()
-        val anchor = r.id
         val length = r.end - r.start
         // O lote para inteiro no zero: nenhuma distância entre as camadas encolhe.
         val floorStart = r.start - minStart
@@ -536,15 +536,29 @@ internal class TimelineController(
         val grab = r.start - frameAt(down.position.x)
         val targets = snapTargets(ids, own = null, ownEdges = false, ownKeys = false)
         val out = IntArray(2)
+        // Fase 8D: posições ABSOLUTAS a partir do começo do gesto. O delta era
+        // medido contra a linha relida do motor, que pode ainda não ter o passo
+        // anterior (o comando é aplicado no quadro do motor): passo repetido ou
+        // perdido. Absoluto é idempotente e o gesto não precisa reler nada.
+        val groupIds = group.toLongArray()
+        val baseStarts = IntArray(groupIds.size) { rowById(groupIds[it])?.start ?: 0 }
+        val baseEnds = IntArray(groupIds.size) { rowById(groupIds[it])?.end ?: 0 }
+        val starts = IntArray(groupIds.size)
+        val ends = IntArray(groupIds.size)
+        var sent = 0
         dragLoop(down.id, down.position, horizontal = true) { p ->
             val desired = (frameAt(p.x) + grab).toFrame()
             Snap.span(targets, desired, length, playheadFrame(), (metrics.snapClip / pxPerFrame()).toDouble(), out)
             val target = max(out[0], floorStart)
-            val current = rowById(anchor)?.start ?: return@dragLoop
-            val delta = target - current
-            if (delta != 0) {
+            val delta = target - r.start
+            if (delta != sent) {
                 openUndo("mover")
-                store.moveLayers(group, delta)
+                for (i in groupIds.indices) {
+                    starts[i] = baseStarts[i] + delta
+                    ends[i] = baseEnds[i] + delta
+                }
+                store.setLayerRanges(groupIds, starts, ends)
+                sent = delta
             }
             setGuide(if (target == out[0]) out[1] else Snap.NONE)
         }

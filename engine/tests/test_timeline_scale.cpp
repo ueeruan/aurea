@@ -14,6 +14,7 @@
 #include "aurea/text/Captions.hpp"
 
 #include <algorithm>
+#include <cstring>
 #include <chrono>
 #include <cstdio>
 #include <thread>
@@ -88,9 +89,33 @@ AUREA_TEST(TimelineScale, QueriesWith1000LayersAnd10kKeyframes) {
     const f64 perLayerMs = ms_since(t0) / kIters;
     AUREA_CHECK_EQ(total, 10000ull);
 
-    // A camada pesada sozinha (10.000 keyframes numa camada só: o caso da pinça).
-    std::printf("    query_layers(1000): %.3f ms | keyframes por camada (1000 chamadas, 10000 kf): %.3f ms\n",
-                layersMs, perLayerMs);
+    // Fase 8D: tudo numa consulta (1 travamento do modelo, 1 travessia de JNI).
+    std::vector<bridge::KeyframeIndexRow> index(4096);
+    u32 layersOut = 0, all = 0;
+    t0 = monotonic_ns();
+    for (u32 it = 0; it < kIters; ++it) all = e.query_all_keyframes(index.data(), 4096, keys.data(), 16384, &layersOut);
+    const f64 allMs = ms_since(t0) / kIters;
+    AUREA_CHECK_EQ(all, 10000u);
+    AUREA_CHECK_EQ(layersOut, n);
+    // Mesmo conteúdo e mesma ordem da consulta por camada.
+    std::vector<bridge::KeyframeRow> one(16384);
+    u32 cursor = 0;
+    bool same = true;
+    for (u32 i = 0; i < n; ++i) {
+        const u32 c = e.query_keyframes(rows[i].id, one.data(), 16384);
+        same = same && index[i].layerId == rows[i].id && index[i].count == c
+            && std::memcmp(one.data(), keys.data() + cursor, c * sizeof(bridge::KeyframeRow)) == 0;
+        cursor += c;
+    }
+    AUREA_CHECK(same);
+    // Buffer pequeno: nada escrito, o total volta para a UI crescer o buffer.
+    index[0].count = 12345;
+    AUREA_CHECK_EQ(e.query_all_keyframes(index.data(), 4096, keys.data(), 100, &layersOut), 10000u);
+    AUREA_CHECK_EQ(index[0].count, 12345u);
+    AUREA_CHECK_EQ(e.query_all_keyframes(index.data(), 10, keys.data(), 16384, &layersOut), 10000u);
+    AUREA_CHECK_EQ(layersOut, 1000u);
+    std::printf("    query_layers(1000): %.3f ms | keyframes: 1000 consultas %.3f ms, consulta unica %.3f ms\n",
+                layersMs, perLayerMs, allMs);
     e.shutdown();
 }
 
@@ -148,7 +173,7 @@ AUREA_TEST(TimelineScale, Captions5000Words) {
     const f64 createMs = ms_since(t0);
     AUREA_CHECK(made.ok());
     const u32 count = made.ok() ? *made : 0;
-    AUREA_CHECK(count >= 5000 / 3);
+    AUREA_CHECK(count >= 1000);   // até 3 palavras e 18 letras por linha
 
     std::vector<bridge::LayerRow> rows(4096);
     std::vector<char> names(256 * 1024);

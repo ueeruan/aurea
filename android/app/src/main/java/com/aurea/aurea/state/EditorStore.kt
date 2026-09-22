@@ -271,13 +271,21 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     // =========================================================================
     // Buffers (diretos, reutilizados)
     // =========================================================================
-    private val layerBuffer = directBuffer(MAX_LAYERS * PodLayout.LAYER_ROW_BYTES)
-    private val nameBlob = directBuffer(32 * 1024)
+    // Camadas e keyframes CRESCEM com o projeto (fase 8D): o teto fixo de 512
+    // camadas e 4096 keyframes por camada cortava a timeline em silêncio — 5000
+    // palavras de legenda dão ~1400 camadas.
+    private var layerCapacity = 256
+    private var layerBuffer = directBuffer(layerCapacity * PodLayout.LAYER_ROW_BYTES)
+    private var nameBlob = directBuffer(32 * 1024)
+    private var keyIndexCapacity = 256
+    private var keyIndex = directBuffer(keyIndexCapacity * KeyframeSnapshot.INDEX_BYTES)
+    private var allKeysCapacity = 4096
+    private var allKeys = directBuffer(allKeysCapacity * PodLayout.KEYFRAME_ROW_BYTES)
+    private val keySnapshot = KeyframeSnapshot()
     private val statusBuffer = directBuffer(PodLayout.STATUS_BYTES)
     private val perfBuffer = directBuffer(PerfStats.BYTES)
     private val detailBuffer = directBuffer(LayerDetail.BYTES)
     private val rowBuffer = directBuffer(64 * EffectParam.ROW_BYTES)
-    private val keyBuffer = directBuffer(MAX_KEYS * PodLayout.KEYFRAME_ROW_BYTES)
     private val textBlob = directBuffer(16 * 1024)
     private val status = EngineStatus()
 
@@ -470,6 +478,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             if (!ready) return@RenderLoop
             engine.readStatus(statusBuffer)
             status.readFrom(statusBuffer)
+            updateIdle()
             publish()
             uiFrames++
             if (hudVisible && frameTimeNanos - lastPerfNs > 250_000_000L) {
@@ -480,6 +489,39 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 perf = PerfStats.read(perfBuffer)
             }
         }.also { it.start() }
+    }
+
+    // --- Laço ocioso (fase 8D) ---------------------------------------------------
+    //  Parado (sem tocar, sem scrub, sem gesto, nada mudando no motor), o laço
+    //  deixa o vsync e lê o status 4×/s: o que o motor termina sozinho (miniatura,
+    //  waveform, import) aparece em até 250 ms; qualquer comando acorda na hora.
+    private var quietFrames = 0
+    private var lastSignature = 0L
+
+    private fun statusSignature(): Long {
+        var h = status.modelRevision.toLong()
+        h = h * 31 + status.playhead
+        h = h * 31 + status.thumbnailGeneration
+        h = h * 31 + status.duration
+        h = h * 31 + status.previewWidth * 7919 + status.previewHeight
+        h = h * 31 + (if (status.dirty) 1 else 0) + (if (status.canUndo) 2 else 0) + (if (status.canRedo) 4 else 0)
+        h = h * 31 + status.state + status.lastError * 17
+        return h
+    }
+
+    private fun updateIdle() {
+        val loop = statusLoop ?: return
+        val sig = statusSignature()
+        val busy = status.playing || scrubbing || gestureDepth > 0 || hudVisible || sig != lastSignature
+        lastSignature = sig
+        quietFrames = if (busy) 0 else quietFrames + 1
+        if (busy) loop.wake() else if (quietFrames >= QUIET_FRAMES) loop.idleDelayMs = IDLE_POLL_MS
+    }
+
+    /** Volta ao vsync (um comando saiu: o resultado tem de aparecer no próximo quadro). */
+    private fun wakeStatusLoop() {
+        quietFrames = 0
+        statusLoop?.wake()
     }
 
     private fun stopStatusLoop() {
@@ -579,32 +621,62 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             selection = selection.filter { it in alive }.toCollection(LinkedHashSet())
             engine.setSelection(selection.toLongArray())
         }
-        keyframes = layers.associate { it.id to readKeyframes(it.id) }
+        // Uma consulta para todas as camadas; o mapa só troca se algum keyframe mudou.
+        if (readAllKeyframes()) keyframes = keySnapshot.map
         refreshComposition()
         refreshDetail()
         refreshEffects()
     }
 
     private fun readLayers(): List<LayerRow> {
-        val n = engine.queryLayers(layerBuffer, MAX_LAYERS, nameBlob)
-        return List(max(0, n)) { LayerRow.read(layerBuffer, it, nameBlob) }
+        while (true) {
+            val n = max(0, engine.queryLayers(layerBuffer, layerCapacity, nameBlob))
+            // Cheio = pode haver mais: dobra e pergunta de novo. Nomes perto do fim
+            // do blob (o motor pula o que não cabe) também dobram o blob.
+            var used = 0
+            for (i in 0 until n) {
+                val b = i * PodLayout.LAYER_ROW_BYTES
+                used = max(used, layerBuffer.getInt(b + PodLayout.LAYER_OFF_NAME_OFFSET) + layerBuffer.getInt(b + PodLayout.LAYER_OFF_NAME_LENGTH))
+            }
+            val full = n >= layerCapacity
+            val namesFull = used > nameBlob.capacity() * 3 / 4
+            if (!full && !namesFull) return List(n) { LayerRow.read(layerBuffer, it, nameBlob) }
+            if (full) {
+                layerCapacity *= 2
+                layerBuffer = directBuffer(layerCapacity * PodLayout.LAYER_ROW_BYTES)
+            }
+            if (namesFull || full) nameBlob = directBuffer(nameBlob.capacity() * 2)
+        }
     }
 
-    private fun readKeyframes(layer: Long): List<KeyframeRow> {
-        val n = engine.queryKeyframes(layer, keyBuffer, MAX_KEYS)
-        return List(max(0, n)) { KeyframeRow.read(keyBuffer, it) }
+    /** Keyframes de todas as camadas numa consulta; devolve se o mapa mudou. */
+    private fun readAllKeyframes(): Boolean {
+        while (true) {
+            val r = engine.queryAllKeyframes(keyIndex, keyIndexCapacity, allKeys, allKeysCapacity)
+            val count = (r ushr 32).toInt()
+            val total = (r and 0xFFFFFFFFL).toInt()
+            if (count <= keyIndexCapacity && total <= allKeysCapacity) return keySnapshot.update(keyIndex, count, allKeys)
+            if (count > keyIndexCapacity) {
+                while (keyIndexCapacity < count) keyIndexCapacity *= 2
+                keyIndex = directBuffer(keyIndexCapacity * KeyframeSnapshot.INDEX_BYTES)
+            }
+            if (total > allKeysCapacity) {
+                while (allKeysCapacity < total) allKeysCapacity *= 2
+                allKeys = directBuffer(allKeysCapacity * PodLayout.KEYFRAME_ROW_BYTES)
+            }
+        }
     }
 
     private fun refreshDetail() {
         val id = primary
-        detail = if (id != null && engine.queryLayerDetail(id, detailBuffer)) LayerDetail.read(detailBuffer) else null
+        detail = if (id != null && engine.queryLayerDetail(id, detailBuffer)) readDetailIfChanged() else null
         expressions = if (id != null) engine.queryExpressions(id) else emptyList()
-        gizmo = if (id != null) {
+        gizmo = same(gizmo, if (id != null) {
             val out = FloatArray(8)
             if (engine.queryGizmo(id, GIZMO_LENGTH, out)) out else null
         } else {
             null
-        }
+        })
         echo = if (id != null) {
             val out = FloatArray(4)
             if (engine.queryEcho(id, out)) out.toList() else null
@@ -620,7 +692,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         timeRemap = if (id != null && detail?.timeRemap == true) {
             val out = FloatArray(5 + 7 * 64)
             val n = engine.queryTimeRemap(id, out)
-            if (n >= 5) out.copyOf(n) else null
+            same(timeRemap, if (n >= 5) out.copyOf(n) else null)
         } else {
             null
         }
@@ -633,23 +705,51 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Text.kind) {
             refreshTextFont()
             val st = FloatArray(18)
-            textStyle = if (engine.queryTextStyle(id, st)) st else null
-            textAnimators = engine.queryTextAnimators(id)?.let { a -> List(a.size / 40) { i -> a.copyOfRange(i * 40, i * 40 + 40) } } ?: emptyList()
+            textStyle = same(textStyle, if (engine.queryTextStyle(id, st)) st else null)
+            val anim = engine.queryTextAnimators(id)?.let { a -> List(a.size / 40) { i -> a.copyOfRange(i * 40, i * 40 + 40) } } ?: emptyList()
+            val old = textAnimators
+            if (anim.size != old.size || anim.indices.any { !anim[it].contentEquals(old[it]) }) textAnimators = anim
         } else {
             textFont = null
             textStyle = null
             textAnimators = emptyList()
         }
-        shapeParams = if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Shape.kind && !isVectorLayer) engine.queryShapeParams(id) else null
+        shapeParams = same(shapeParams, if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Shape.kind && !isVectorLayer) engine.queryShapeParams(id) else null)
         textDetail = if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Text.kind) {
             engine.queryText(id, textFloats)?.let { com.aurea.aurea.engine.TextDetail.of(it, textFloats) }
         } else {
             null
         }
         refreshMasks()
-        textPath = if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Text.kind) engine.queryTextPath(id) else null
+        val tp = if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Text.kind) engine.queryTextPath(id) else null
+        if (!(tp === textPath || (tp != null && textPath?.contentEquals(tp) == true))) textPath = tp
         refreshVector()
     }
+
+    // --- Releitura sem escrita à toa (fase 8D) ----------------------------------
+    //  Arrays e o detalhe (que tem arrays dentro) nunca comparam iguais no
+    //  estado do Compose: cada releitura — a cada quadro tocando, a cada
+    //  revisão do modelo — invalidava quem os lê mesmo sem mudar nada. Aqui o
+    //  valor velho volta quando o conteúdo é o mesmo.
+    private val detailRaw = ByteArray(LayerDetail.BYTES)
+    private var detailRawOf: LayerDetail? = null
+
+    private fun readDetailIfChanged(): LayerDetail {
+        val cur = detail
+        var same = cur != null && cur === detailRawOf
+        for (i in detailRaw.indices) {
+            val b = detailBuffer.get(i)
+            if (b != detailRaw[i]) {
+                same = false
+                detailRaw[i] = b
+            }
+        }
+        if (same) return cur!!
+        return LayerDetail.read(detailBuffer).also { detailRawOf = it }
+    }
+
+    private fun same(old: FloatArray?, new: FloatArray?): FloatArray? =
+        if (old != null && new != null && old.contentEquals(new)) old else new
 
     // --- Camada vetorial (Fase 7D) -----------------------------------------------
     /** Ferramenta do palco: 0 normal, 1 pontos (editar caminho), 2 mão livre. */
@@ -951,9 +1051,16 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** Força a releitura na mesma volta (depois de um comando local). */
     private fun refreshNow() {
+        lastRevision = -1
+        wakeStatusLoop()
+        // Fase 8D: DENTRO de um gesto (arrasto, slider) a releitura fica para o
+        // próximo quadro do laço. Ler agora era refazer o modelo inteiro a cada
+        // evento de toque (vários por quadro; um por trilha no losango) e ainda
+        // esperar o motor largar o modelo — e o comando recém-enviado só é
+        // aplicado no quadro do motor, então a leitura imediata era a velha.
+        if (gestureDepth > 0 && statusLoop?.isRunning == true) return
         engine.readStatus(statusBuffer)
         status.readFrom(statusBuffer)
-        lastRevision = -1
         publish()
     }
 
@@ -964,6 +1071,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         engine.beginCommandBatch()
         batch.block()
         engine.submitCommands()
+        wakeStatusLoop()
     }
 
     /**
@@ -1157,6 +1265,17 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val d = max(deltaFrames, -minStart)   // nada antes do instante 0
         if (d == 0) return
         send { rows.forEach { setLayerTimeRange(it.id, it.startFrame + d, it.endFrame + d) } }
+        refreshNow()
+    }
+
+    /**
+     * Arrasto de clipes na timeline: início/fim ABSOLUTOS de cada camada (o
+     * gesto os calcula do estado no começo dele). Idempotente — não depende de
+     * a releitura do modelo já ter chegado (fase 8D).
+     */
+    fun setLayerRanges(ids: LongArray, starts: IntArray, ends: IntArray) {
+        if (ids.isEmpty()) return
+        send { for (i in ids.indices) setLayerTimeRange(ids[i], max(0, starts[i]), max(1, ends[i])) }
         refreshNow()
     }
 
@@ -3202,6 +3321,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             clearSelection()
             layers = emptyList()
             keyframes = emptyMap()
+            keySnapshot.clear()
             screen = Screen.Home
             refreshProjects()
         }
@@ -3355,9 +3475,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     companion object {
-        const val MAX_LAYERS = 512
-        const val MAX_KEYS = 4096
         const val THUMB_MAX = 512
+        /** Quadros parados antes de o laço de status ficar ocioso (~0,5 s a 60 Hz). */
+        const val QUIET_FRAMES = 30
+        const val IDLE_POLL_MS = 250L
         /** Silêncio depois da última mudança antes do autosave. */
         const val AUTOSAVE_IDLE_NS = 3_000_000_000L
         const val META_SUFFIX = ".meta.json"

@@ -505,6 +505,20 @@ AUREA_JNI jint AUREA_FN(nativeQueryKeyframes)(JNIEnv* env, jclass, jlong handle,
                                                        row_capacity<bridge::KeyframeRow>(env, rows, capacity)));
 }
 
+/// Devolve (camadas << 32) | total de keyframes; nada é escrito se não coube
+/// (ver Engine::query_all_keyframes).
+AUREA_JNI jlong AUREA_FN(nativeQueryAllKeyframes)(JNIEnv* env, jclass, jlong handle, jobject index,
+                                                 jint layerCapacity, jobject rows, jint capacity) {
+    NativeContext* c = ctx_of(handle);
+    auto* idx = static_cast<bridge::KeyframeIndexRow*>(buffer_ptr(env, index));
+    auto* out = static_cast<bridge::KeyframeRow*>(buffer_ptr(env, rows));
+    if (!c || !idx || !out) return 0;
+    u32 layers = 0;
+    const u32 total = c->engine.query_all_keyframes(idx, row_capacity<bridge::KeyframeIndexRow>(env, index, layerCapacity),
+                                                    out, row_capacity<bridge::KeyframeRow>(env, rows, capacity), &layers);
+    return (static_cast<jlong>(layers) << 32) | static_cast<jlong>(total);
+}
+
 AUREA_JNI jint AUREA_FN(nativeQueryCurve)(JNIEnv* env, jclass, jlong handle, jlong layer, jint property,
                                           jint from, jint to, jfloatArray out, jint count) {
     NativeContext* c = ctx_of(handle);

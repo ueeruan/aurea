@@ -726,6 +726,49 @@ Result<u64> Engine::freeze_frame(u64 layerId, i64 frame, i64 holdFrames) noexcep
     return hold.pack();
 }
 
+Result<u64> Engine::add_shape(u32 preset) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
+    Composition* comp = current_composition();
+    if (!comp) return Status{Errc::InvalidState, "projeto sem composicao"};
+    history_.before_mutation(*comp, project_->timeline().current(), "adicionar forma");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    // Ladrilhos da aba Forma, na ordem da grade (A.01).
+    struct Preset { const char* name; u32 type; f32 corner; f32 points; f32 inner; f32 aspect; };
+    static constexpr Preset kPresets[] = {
+        {"Círculo", 1, 0, 5, 0.5f, 1.0f},          {"Quadrado arredondado", 0, 0.18f, 5, 0.5f, 1.0f},
+        {"Cruz", 5, 0, 5, 0.34f, 1.0f},            {"Anel", 6, 0, 5, 0.6f, 1.0f},
+        {"Triângulo", 3, 0, 3, 0.5f, 1.0f},        {"Fatia", 7, 0, 5, 0.5f, 1.0f},
+        {"Hexágono", 3, 0, 6, 0.5f, 1.0f},         {"Flor", 8, 0, 6, 0.5f, 1.0f},
+        {"Seta", 9, 0, 5, 0.5f, 1.6f},             {"Hexágono (pontos)", 3, 0, 6, 0.5f, 1.0f},
+        {"Quadrado", 0, 0, 5, 0.5f, 1.0f},         {"Estrela", 4, 0, 5, 0.45f, 1.0f},
+        {"Cápsula", 0, 0.5f, 5, 0.5f, 3.0f},       {"Retângulo arredondado", 0, 0.12f, 5, 0.5f, 1.0f},
+        {"Triângulo retângulo", 10, 0, 3, 0.5f, 1.0f},
+    };
+    const Preset& pr = kPresets[std::min<u32>(preset, static_cast<u32>(std::size(kPresets) - 1))];
+    const LayerId lid = comp->add_layer(LayerKind::Shape, pr.name);
+    Layer* l = comp->layer(lid);
+    if (!l) return Status{Errc::OutOfMemory, "camada nao criada"};
+    const f32 base = 0.3f * static_cast<f32>(std::min(comp->width(), comp->height()));
+    ShapeData& sh = l->shape;
+    sh.shapeType = pr.type;
+    sh.bounds = Rect{0.0f, 0.0f, std::round(base * pr.aspect), std::round(pr.aspect > 1.5f ? base : base)};
+    if (pr.aspect == 3.0f) sh.bounds.h = std::round(base * 0.9f);
+    sh.cornerRadius = pr.corner * std::min(sh.bounds.w, sh.bounds.h);
+    sh.points = pr.points;
+    sh.innerRadius = pr.inner;
+    sh.fillColor = Vec4{1.0f, 1.0f, 1.0f, 1.0f};
+    sh.filled = true;
+    const i64 t = std::clamp<i64>(playback_.current().value, 0, std::max<i64>(0, comp->duration().value - 1));
+    l->start = FrameIndex{t};
+    l->end = FrameIndex{std::max<i64>(t + 1, comp->duration().value)};
+    l->transform.anchor = Vec3{sh.bounds.w * 0.5f, sh.bounds.h * 0.5f, 0.0f};
+    l->transform.position = Vec3{static_cast<f32>(comp->width()) * 0.5f, static_cast<f32>(comp->height()) * 0.5f, 0.0f};
+    project_->mark_dirty();
+    request_render();
+    return lid.pack();
+}
+
 Result<u64> Engine::import_image(const u8* rgba, u32 width, u32 height, const char* name,
                                  const char* sourcePath) noexcept {
     if (!rgba || width == 0 || height == 0) return Status{Errc::InvalidArgument, "imagem vazia"};
@@ -1068,6 +1111,16 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
 
     lastRenderedFrame_ = t.value;
     lastIncomplete_ = snapshot_.missingVideoFrames > 0 || snapshot_.staleVideoFrames > 0;
+    // Recurso pendente: tenta de novo nos próximos quadros — no máximo ~1 s
+    // (uma camada que nunca fica pronta não pode prender a GPU em laço).
+    if (renderer_.take_incomplete()) {
+        if (++incompleteRetries_ <= 60) {
+            forceRender_.store(true, std::memory_order_release);
+            request_render();
+        }
+    } else {
+        incompleteRetries_ = 0;
+    }
     if (!s.ok()) forceRender_.store(true, std::memory_order_release);
     frameScheduler_.presented(t, playing);
     stats.frameIndex = static_cast<u32>(frameCounter_);
@@ -1581,6 +1634,22 @@ bool Engine::query_layer_detail(u64 layerId, bridge::LayerDetailPOD& out) noexce
                               ? bridge::kAudioFlagHasAudio : 0u)
                        | ((vt && vt->animated()) ? bridge::kAudioFlagVolumeAnimated : 0u);
     }
+    if (l->kind == LayerKind::Shape) {
+        auto rgba8 = [](Vec4 c) {
+            auto b = [](f32 v) { return static_cast<u32>(std::lround(std::clamp(v, 0.0f, 1.0f) * 255.0f)); };
+            return b(c.x) | (b(c.y) << 8) | (b(c.z) << 16) | (b(c.w) << 24);
+        };
+        const ShapeData& sh = l->shape;
+        out.sourceWidth = static_cast<u32>(std::max(1.0f, sh.bounds.w));
+        out.sourceHeight = static_cast<u32>(std::max(1.0f, sh.bounds.h));
+        out.shapeTypePoints = sh.shapeType | (static_cast<u32>(sh.points) << 16);
+        out.shapeFill = sh.filled ? rgba8(sh.fillColor) : (rgba8(sh.fillColor) & 0x00FFFFFFu);
+        out.shapeStroke = rgba8(sh.strokeColor);
+        out.shapeStrokeWidth = sh.strokeWidth;
+        out.shapeCorner = sh.cornerRadius;
+        out.shapeInner = sh.innerRadius;
+        return true;
+    }
     if (l->kind == LayerKind::Model3D) {
         // Silhueta de frente em escala 100% (o plano Z=0 é 1:1 com a
         // composição): é a caixa que o palco desenha e toca. A UI trata a
@@ -2078,7 +2147,9 @@ bool Engine::mutates_model(CommandType type) noexcept {
         || type == CommandType::CompositionSetSize || type == CommandType::CompositionSetFps
         || type == CommandType::CompositionSetDuration || type == CommandType::CompositionSetBackground
         || type == CommandType::AudioSetVolume || type == CommandType::AudioSetPan
-        || type == CommandType::LayerSetSpeed || type == CommandType::LayerSetReversed;
+        || type == CommandType::LayerSetSpeed || type == CommandType::LayerSetReversed
+        || type == CommandType::ShapeSetFill || type == CommandType::ShapeSetStroke
+        || type == CommandType::ShapeSetParam;
 }
 
 void Engine::record_history_locked(CommandType type) noexcept {
@@ -2534,6 +2605,43 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             l->end = FrameIndex{l->start.value + frames};
             if (l->end.value > comp->duration().value) comp->set_duration(l->end);
             playback_.configure(comp->fps(), comp->duration());
+            return OkStatus;
+        }
+        case CommandType::ShapeSetFill:
+        case CommandType::ShapeSetStroke: {
+            Layer* l = need_layer(cmd.text_color.layer);
+            if (!l || l->kind != LayerKind::Shape) return Errc::NotFound;
+            const Vec4 c{clampf(cmd.text_color.r, 0, 1), clampf(cmd.text_color.g, 0, 1), clampf(cmd.text_color.b, 0, 1),
+                         clampf(cmd.text_color.a, 0, 1)};
+            if (cmd.type == CommandType::ShapeSetFill) {
+                l->shape.fillColor = c;
+                l->shape.filled = c.w > 0.0f;
+            } else {
+                l->shape.strokeColor = c;
+            }
+            return OkStatus;
+        }
+        case CommandType::ShapeSetParam: {
+            Layer* l = need_layer(cmd.shape_param.layer);
+            if (!l || l->kind != LayerKind::Shape) return Errc::NotFound;
+            const f32 v = cmd.shape_param.value;
+            ShapeData& sh = l->shape;
+            switch (cmd.shape_param.param) {
+                case 0: sh.shapeType = static_cast<u32>(std::clamp(v, 0.0f, 10.0f)); break;
+                case 1: sh.cornerRadius = std::max(0.0f, v); break;
+                case 2: sh.points = std::clamp(std::round(v), 3.0f, 64.0f); break;
+                case 3: sh.innerRadius = clampf(v, 0.05f, 0.95f); break;
+                case 4: sh.strokeWidth = std::clamp(v, 0.0f, 500.0f); break;
+                case 5:
+                case 6: {
+                    // Tamanho muda em volta do centro: a âncora acompanha a metade.
+                    const f32 nv = std::clamp(v, 1.0f, 16384.0f);
+                    if (cmd.shape_param.param == 5) { sh.bounds.w = nv; l->transform.anchor.x = nv * 0.5f; }
+                    else { sh.bounds.h = nv; l->transform.anchor.y = nv * 0.5f; }
+                    break;
+                }
+                default: return Errc::InvalidArgument;
+            }
             return OkStatus;
         }
         case CommandType::LayerSetReversed: {

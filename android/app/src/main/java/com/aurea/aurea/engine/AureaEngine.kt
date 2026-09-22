@@ -262,6 +262,9 @@ class AureaEngine private constructor() {
     /** O som do vídeo vira camada própria; o vídeo fica mudo. Id ≥ 0 ou −Errc. */
     fun extractAudio(layer: Long): Long = nativeExtractAudio(nativeHandle, layer)
 
+    /** Nova forma (ladrilho `preset` da aba Forma) no centro. Id ≥ 0 ou −Errc. */
+    fun addShape(preset: Int): Long = nativeAddShape(nativeHandle, preset)
+
     /** Congela o quadro do clipe no `frame` por `holdFrames`; o resto anda. Id ≥ 0 ou −Errc. */
     fun freezeFrame(layer: Long, frame: Int, holdFrames: Int): Long = nativeFreezeFrame(nativeHandle, layer, frame, holdFrames)
 
@@ -346,6 +349,7 @@ class AureaEngine private constructor() {
     private external fun nativeImportVideo(handle: Long, source: String, name: String): Long
     private external fun nativeImportAudio(handle: Long, source: String, name: String): Long
     private external fun nativeExtractAudio(handle: Long, layer: Long): Long
+    private external fun nativeAddShape(handle: Long, preset: Int): Long
     private external fun nativeFreezeFrame(handle: Long, layer: Long, frame: Int, holdFrames: Int): Long
     private external fun nativeQueryWaveform(
         handle: Long, layer: Long, startFrame: Double, framesPerBucket: Double, count: Int, out: ByteBuffer,

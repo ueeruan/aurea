@@ -147,7 +147,12 @@ struct LayerDetailPOD {
     u32 audioFlags        = 0;    // +156 kAudioFlag*
     f32 speed             = 1.0f; // +160 velocidade do conteúdo (0 = congelado)
     u32 timeFlags         = 0;    // +164 bit0 = reverso
-    u32 reserved[6]{};            // +168
+    u32 shapeTypePoints   = 0;    // +168 tipo | pontas << 16
+    u32 shapeFill         = 0;    // +172 RGBA8 sRGB
+    u32 shapeStroke       = 0;    // +176 RGBA8 sRGB
+    f32 shapeStrokeWidth  = 0.0f; // +180
+    f32 shapeCorner       = 0.0f; // +184
+    f32 shapeInner        = 0.0f; // +188
 };
 inline constexpr u32 kAudioFlagMuted = 1u << 0;
 inline constexpr u32 kAudioFlagSolo = 1u << 1;

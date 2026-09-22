@@ -1067,6 +1067,36 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (engineReady) engine.invalidate()
     }
 
+    // --- Forma ------------------------------------------------------------------
+    /** Ladrilho `preset` da aba Forma: nova camada no centro, já escolhida. */
+    fun addShape(preset: Int) {
+        val id = engine.addShape(preset)
+        if (id < 0) {
+            errorMessage = "Não foi possível criar a forma (erro ${-id})."
+            return
+        }
+        refreshNow()
+        select(id)
+    }
+
+    fun setShapeFill(r: Float, g: Float, b: Float, a: Float) {
+        val id = primary ?: return
+        send { setShapeFill(id, r, g, b, a) }
+        refreshDetail()
+    }
+
+    fun setShapeStroke(r: Float, g: Float, b: Float, a: Float) {
+        val id = primary ?: return
+        send { setShapeStroke(id, r, g, b, a) }
+        refreshDetail()
+    }
+
+    fun setShapeParam(param: Int, value: Float) {
+        val id = primary ?: return
+        send { setShapeParam(id, param, value) }
+        refreshDetail()
+    }
+
     // --- Tempo do clipe --------------------------------------------------------
     fun setLayerSpeed(speed: Float) {
         val id = primary ?: return

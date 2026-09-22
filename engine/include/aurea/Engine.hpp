@@ -259,6 +259,9 @@ public:
     /// do quadro parado e empurra o resto do clipe para depois. Uma ação de
     /// desfazer. Devolve o id do clipe congelado.
     [[nodiscard]] Result<u64> freeze_frame(u64 layerId, i64 frame, i64 holdFrames) noexcept;
+    /// Nova forma no centro da composição, do cabeçote até o fim. `preset` é
+    /// o ladrilho da aba Forma (0..14). Devolve o id da camada.
+    [[nodiscard]] Result<u64> add_shape(u32 preset) noexcept;
     /// Imagem já decodificada pela plataforma (RGBA8 sRGB, alfa reto).
     /// `sourcePath` (URI/caminho) fica no projeto: ao reabrir, o motor pede a
     /// imagem de novo ao `imageLoader`. Sem origem, a imagem só vive na sessão.
@@ -482,6 +485,7 @@ private:
     std::atomic<u64>  mediaReadyGen_{0};      ///< frames novos do decoder
     i64  lastRenderedFrame_ = -1;
     u32  lastRenderedRevision_ = 0;           ///< modelRevision_ do último frame desenhado
+    u32  incompleteRetries_ = 0;              ///< quadros seguidos com camada pendente
     u64  lastMediaGen_ = 0;
     bool lastIncomplete_ = true;              ///< último frame tinha vídeo faltando/aproximado
     bool lastSkipped_ = false;

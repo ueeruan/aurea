@@ -163,6 +163,11 @@ enum class CommandType : u16 {
     // --- Tempo do clipe (fase 6) -----------------------------------------------
     LayerSetSpeed,         ///< velocidade (AudioGainPayload: layer + f32); a duração acompanha
     LayerSetReversed,      ///< reverso (AudioFlagPayload)
+
+    // --- Forma (fase 6) -----------------------------------------------------------
+    ShapeSetFill,          ///< cor de preenchimento sRGB + alfa (TextColorPayload); alfa 0 = sem preenchimento
+    ShapeSetStroke,        ///< cor do contorno (TextColorPayload)
+    ShapeSetParam,         ///< ShapeParamPayload: 0 tipo, 1 canto, 2 pontas, 3 raio interno, 4 contorno, 5 largura, 6 altura
 };
 
 /// Alvo de um comando que mexe em uma propriedade animável.
@@ -218,6 +223,7 @@ struct EffectEnabledPayload { LayerId layer; EffectId effect; bool enabled; };
 struct AudioGainPayload { LayerId layer; f32 gain; };
 struct AudioFlagPayload { LayerId layer; bool flag; };
 struct AudioFadePayload { LayerId layer; FrameIndex duration; };
+struct ShapeParamPayload { LayerId layer; u32 param; f32 value; };
 struct TextSizePayload { LayerId layer; f32 size; };
 struct TextColorPayload { LayerId layer; f32 r, g, b, a; };
 struct TextAlignPayload { LayerId layer; u32 alignment; };
@@ -303,6 +309,7 @@ struct Command {
         AudioGainPayload audio_gain;
         AudioFlagPayload audio_flag;
         AudioFadePayload audio_fade;
+        ShapeParamPayload shape_param;
         TextSizePayload text_size;
         TextColorPayload text_color;
         TextAlignPayload text_align;

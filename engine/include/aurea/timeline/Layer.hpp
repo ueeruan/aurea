@@ -112,7 +112,10 @@ struct TextData {
 };
 
 struct ShapeData {
-    u32  shapeType = 0;        ///< 0 retângulo, 1 elipse, 2 path, 3 poligono, 4 estrela
+    /// 0 retângulo (cantos arredondados), 1 elipse, 2 caminho, 3 polígono
+    /// regular, 4 estrela, 5 cruz, 6 anel, 7 fatia, 8 flor, 9 seta,
+    /// 10 triângulo retângulo (shaders/shape/shape.frag).
+    u32  shapeType = 0;
     Rect bounds{0.0f, 0.0f, 200.0f, 200.0f};
     f32  cornerRadius = 0.0f;
     f32  points = 5.0f;        ///< estrela/polígono

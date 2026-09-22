@@ -1176,6 +1176,55 @@ AUREA_TEST(Gpu, ImportedImageIsVisibleOnTheVeryFirstFrame) {
     AUREA_CHECK_MSG(c[0] > 200 && c[1] < 40 && c[2] < 40, "imagem nova saiu preta no primeiro quadro");
 }
 
+AUREA_TEST(Gpu, ShapesRenderAsCrispVectorSdfs) {
+    AUREA_REQUIRE_GPU();
+    for (u32 preset = 0; preset < 15; ++preset) {
+        Scene3DRig rig(256, 256);
+        auto id = rig.e.add_shape(preset);
+        AUREA_CHECK(id.ok());
+        const Image8 img = rig.capture(256);
+        const f32 cov = coverage(img);
+        // Aparece e não estoura: toda forma ocupa uma parte do quadro.
+        AUREA_CHECK_MSG(cov > 0.02f && cov < 0.5f, "forma sem pixels ou enchendo o quadro");
+        char name[48];
+        std::snprintf(name, sizeof(name), "forma_%02u.png", preset);
+        (void)write_png(name, img);
+        if (preset == 0) {
+            // Círculo: centro branco, canto da caixa vazio (é um círculo, não um quadrado).
+            const u8* c = img.at(128, 128);
+            AUREA_CHECK(c[0] > 240 && c[1] > 240 && c[2] > 240);
+            const u8* corner = img.at(128 - 36, 128 - 36);
+            AUREA_CHECK(corner[0] < 20);
+        }
+    }
+    // Contorno e cor: um anel vermelho de contorno azul.
+    Scene3DRig rig(256, 256);
+    auto id = rig.e.add_shape(10);   // quadrado
+    Command f;
+    f.type = CommandType::ShapeSetFill;
+    f.text_color.layer = LayerId::unpack(*id);
+    f.text_color.r = 1; f.text_color.g = 0; f.text_color.b = 0; f.text_color.a = 1;
+    AUREA_CHECK(rig.e.apply_command(f).ok());
+    Command st;
+    st.type = CommandType::ShapeSetStroke;
+    st.text_color.layer = LayerId::unpack(*id);
+    st.text_color.r = 0; st.text_color.g = 0; st.text_color.b = 1; st.text_color.a = 1;
+    AUREA_CHECK(rig.e.apply_command(st).ok());
+    Command w;
+    w.type = CommandType::ShapeSetParam;
+    w.shape_param.layer = LayerId::unpack(*id);
+    w.shape_param.param = 4;
+    w.shape_param.value = 8.0f;
+    AUREA_CHECK(rig.e.apply_command(w).ok());
+    const Image8 img = rig.capture(256);
+    const u8* center = img.at(128, 128);
+    AUREA_CHECK(center[0] > 240 && center[2] < 20);                   // preenchimento vermelho
+    // Borda da caixa (~38 px do centro): azul do contorno.
+    const u8* edge = img.at(128 - 36, 128);
+    AUREA_CHECK_MSG(edge[2] > 200 && edge[0] < 60, "contorno azul ausente");
+    (void)write_png("forma_contorno.png", img);
+}
+
 AUREA_TEST(Gpu, Scene3DSurvivesSaveAndReopenIdentically) {
     AUREA_REQUIRE_GPU();
     const std::string path = gltf_data("DamagedHelmet.glb");

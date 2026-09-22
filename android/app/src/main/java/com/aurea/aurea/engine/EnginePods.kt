@@ -751,6 +751,12 @@ data class LayerDetail(
     val audioFlags: Int = 0,
     val speed: Float = 1f,
     val timeFlags: Int = 0,
+    val shapeTypePoints: Int = 0,
+    val shapeFill: Int = 0,
+    val shapeStroke: Int = 0,
+    val shapeStrokeWidth: Float = 0f,
+    val shapeCorner: Float = 0f,
+    val shapeInner: Float = 0f,
 ) {
     val reversed: Boolean get() = (timeFlags and 1) != 0
 
@@ -809,6 +815,12 @@ data class LayerDetail(
                 audioFlags = b.getInt(156),
                 speed = b.getFloat(160),
                 timeFlags = b.getInt(164),
+                shapeTypePoints = b.getInt(168),
+                shapeFill = b.getInt(172),
+                shapeStroke = b.getInt(176),
+                shapeStrokeWidth = b.getFloat(180),
+                shapeCorner = b.getFloat(184),
+                shapeInner = b.getFloat(188),
             )
         }
     }

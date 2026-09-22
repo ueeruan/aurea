@@ -46,7 +46,7 @@ struct ImagePixels {
 
 /// Origem da imagem de uma layer neste frame.
 struct LayerSource {
-    enum class Kind : u8 { None = 0, Video, Image, Solid, Scene3D };
+    enum class Kind : u8 { None = 0, Video, Image, Solid, Scene3D, Shape };
     Kind kind = Kind::None;
     u32  width = 0;          ///< tamanho natural da layer (px)
     u32  height = 0;
@@ -64,6 +64,14 @@ struct LayerSource {
 
     // Grupo 3D: índice em FrameSnapshot::scenes
     u32      sceneGroup = 0;
+
+    // Forma vetorial (SDF): tipo, canto, pontas, raio interno, preenchida,
+    // cores lineares pré-multiplicadas, largura do contorno (px).
+    u32      shapeType = 0;
+    Vec4     shapeParams{};      ///< canto, pontas, raio interno, preenchida
+    Vec4     shapeFill{};
+    Vec4     shapeStroke{};
+    f32      shapeStrokeWidth = 0.0f;
 };
 
 struct RenderLayer {
@@ -165,6 +173,8 @@ public:
 
     /// De onde vêm os modelos 3D (o motor guarda os SceneAsset).
     using ModelLookup = std::shared_ptr<const scene3d::SceneAsset> (*)(void* ctx, AssetId id);
+    /// O último quadro deixou alguma camada de fora por recurso pendente? (lê e zera)
+    [[nodiscard]] bool take_incomplete() noexcept { const bool b = incomplete_; incomplete_ = false; return b; }
     void set_model_lookup(ModelLookup fn, void* ctx) noexcept { modelLookup_ = fn; modelCtx_ = ctx; }
     [[nodiscard]] const scene3d::SceneStats& scene_stats() const noexcept { return scene3d_.stats(); }
     [[nodiscard]] u64 scene_resident_bytes() const noexcept { return scene3d_.resident_bytes(); }
@@ -245,6 +255,7 @@ private:
     std::unordered_map<u64, ImageTexture> images_;     ///< por AssetId empacotado
     std::unordered_map<u64, LutTexture> luts_;         ///< por hash da curva
     std::vector<PendingUpload> uploads_;
+    bool incomplete_ = false;   ///< o último quadro deixou camada de fora (recurso pendente)
     std::vector<GpuTiming> timingScratch_;
 
     const std::vector<scene3d::SceneFrame>* currentScenes_ = nullptr;

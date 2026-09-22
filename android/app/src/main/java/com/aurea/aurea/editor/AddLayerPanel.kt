@@ -84,7 +84,7 @@ internal fun AddLayerPanel(store: EditorStore, ui: EditorUi) {
             AddTabs(ui)
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 when (ui.addTab) {
-                    AddTab.Shape -> ShapesTab(store, Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                    AddTab.Shape -> ShapesTab(store, Modifier.padding(horizontal = 6.dp, vertical = 2.dp), close)
                     AddTab.Media -> MediaTab(store, close)
                     AddTab.Audio -> AudioTab(store, close)
                     AddTab.Object -> ObjectsTab(store, close)
@@ -156,14 +156,17 @@ private fun ColumnScope.SideShortcut(glyph: Char, label: String, onClick: () -> 
 // =============================================================================
 
 @Composable
-private fun ShapesTab(store: EditorStore, modifier: Modifier) {
+private fun ShapesTab(store: EditorStore, modifier: Modifier, close: () -> Unit) {
     Column(modifier.fillMaxSize()) {
         Column(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             for (r in 0 until 3) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     for (c in 0 until 5) {
                         val index = r * 5 + c
-                        ShapeTile(index) { store.comingSoon("Formas") }
+                        ShapeTile(index) {
+                            store.addShape(index)
+                            close()
+                        }
                     }
                 }
             }

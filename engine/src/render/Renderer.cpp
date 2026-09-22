@@ -170,6 +170,7 @@ Status Renderer::initialize(GPUBackend& backend, const EffectRegistry& effects) 
     scene3d_.collect_pipelines(keys);
     keys.push_back(PipelineKey::fullscreen(ShaderId::video_yuv_planar_frag, kWorkFormat));
     keys.push_back(PipelineKey::fullscreen(ShaderId::video_rgba_to_linear_frag, kWorkFormat));
+    keys.push_back(PipelineKey::fullscreen(ShaderId::shape_shape_frag, kWorkFormat));
     keys.push_back(PipelineKey::fullscreen(ShaderId::common_copy_frag, kWorkFormat));
     keys.push_back(PipelineKey::graphics(ShaderId::composite_layer_vert, ShaderId::composite_layer_frag,
                                          kWorkFormat, true, BlendMode::Normal));
@@ -328,13 +329,27 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 break;
             }
             case LayerKind::Shape: {
-                if (l->shape.shapeType != 0 || !l->shape.filled) continue;   // só retângulo sólido nesta fase
-                rl.source.kind = LayerSource::Kind::Solid;
-                const Vec4 c = l->shape.fillColor;
-                rl.source.solid = Vec4{srgb_to_linear(c.x) * c.w, srgb_to_linear(c.y) * c.w,
-                                       srgb_to_linear(c.z) * c.w, c.w};
-                rl.source.width = static_cast<u32>(std::max(1.0f, l->shape.bounds.w));
-                rl.source.height = static_cast<u32>(std::max(1.0f, l->shape.bounds.h));
+                const ShapeData& sh = l->shape;
+                const bool fill = sh.filled && sh.fillColor.w > 0.0f;
+                const bool stroke = sh.strokeWidth > 0.0f && sh.strokeColor.w > 0.0f;
+                if (!fill && !stroke) continue;   // nada a desenhar
+                auto premul = [](Vec4 c) {
+                    return Vec4{srgb_to_linear(c.x) * c.w, srgb_to_linear(c.y) * c.w, srgb_to_linear(c.z) * c.w, c.w};
+                };
+                rl.source.width = static_cast<u32>(std::max(1.0f, sh.bounds.w));
+                rl.source.height = static_cast<u32>(std::max(1.0f, sh.bounds.h));
+                if (sh.shapeType == 0 && sh.cornerRadius <= 0.0f && !stroke) {
+                    // Retângulo reto sem contorno: um clear basta (o caminho mais barato).
+                    rl.source.kind = LayerSource::Kind::Solid;
+                    rl.source.solid = premul(sh.fillColor);
+                    break;
+                }
+                rl.source.kind = LayerSource::Kind::Shape;
+                rl.source.shapeType = sh.shapeType;
+                rl.source.shapeParams = Vec4{sh.cornerRadius, sh.points, sh.innerRadius, fill ? 1.0f : 0.0f};
+                rl.source.shapeFill = premul(sh.fillColor);
+                rl.source.shapeStroke = premul(sh.strokeColor);
+                rl.source.shapeStrokeWidth = stroke ? sh.strokeWidth : 0.0f;
                 break;
             }
             case LayerKind::Model3D: {
@@ -773,6 +788,21 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                                    [](PassContext&) {});
             return true;
         }
+        case LayerSource::Kind::Shape: {
+            out.texture = graph_.create_texture("layer-forma", d);
+            EffectBuildContext ctx(graph_, shaders_, arena_, *this, kWorkFormat, maxTex);
+            struct ShapeBlock {
+                Vec4 size, shape, fill, stroke, extra;
+            } block{};
+            const f32 lw = static_cast<f32>(layer.source.width), lh = static_cast<f32>(layer.source.height);
+            block.size = Vec4{lw, lh, lw / static_cast<f32>(w), static_cast<f32>(layer.source.shapeType)};
+            block.shape = layer.source.shapeParams;
+            block.fill = layer.source.shapeFill;
+            block.stroke = layer.source.shapeStroke;
+            block.extra = Vec4{layer.source.shapeStrokeWidth, 0, 0, 0};
+            return ctx.fullscreen_pass("forma", PassStage::Decode, out.texture, ShaderId::shape_shape_frag, {},
+                                       &block, sizeof(block)) != kInvalidIndex;
+        }
         case LayerSource::Kind::None: break;
     }
     return false;
@@ -841,7 +871,12 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
         const RenderLayer& layer = snap.layers[i];
         LayerImage src;
         const bool hasEffects = i < snap.plans.size() && !snap.plans[i].empty();
-        if (!build_source(layer, i, hasEffects, src, framesInFlight_, fb.frameNumber)) continue;
+        if (!build_source(layer, i, hasEffects, src, framesInFlight_, fb.frameNumber)) {
+            // Camada fora deste quadro por recurso ainda não pronto (pipeline
+            // compilando, textura a caminho): o próximo quadro tenta de novo.
+            if (layer.source.kind != LayerSource::Kind::Video) incomplete_ = true;
+            continue;
+        }
         LayerImage fin = src;
         if (i < snap.plans.size() && !snap.plans[i].empty()) {
             (void)EffectGraph::build(snap.plans[i], ctx, src, fin);

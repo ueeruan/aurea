@@ -406,6 +406,30 @@ class CommandBatch(private val engine: AureaEngine) {
         b.putFloat(Off.GAIN_VALUE, speed)
     }
 
+    /** Cor sRGB + alfa (TextColorPayload); alfa 0 = sem preenchimento. */
+    fun setShapeFill(layer: Long, r: Float, g: Float, bl: Float, a: Float) = emit(CommandType.SHAPE_SET_FILL) { b ->
+        b.putHandle(Off.LAYER, layer)
+        b.putFloat(Off.TEXT_COLOR_R, r)
+        b.putFloat(Off.TEXT_COLOR_G, g)
+        b.putFloat(Off.TEXT_COLOR_B, bl)
+        b.putFloat(Off.TEXT_COLOR_A, a)
+    }
+
+    fun setShapeStroke(layer: Long, r: Float, g: Float, bl: Float, a: Float) = emit(CommandType.SHAPE_SET_STROKE) { b ->
+        b.putHandle(Off.LAYER, layer)
+        b.putFloat(Off.TEXT_COLOR_R, r)
+        b.putFloat(Off.TEXT_COLOR_G, g)
+        b.putFloat(Off.TEXT_COLOR_B, bl)
+        b.putFloat(Off.TEXT_COLOR_A, a)
+    }
+
+    /** ShapeParamPayload { LayerId; u32 param; f32 value }: 0 tipo, 1 canto, 2 pontas, 3 raio interno, 4 contorno, 5 largura, 6 altura. */
+    fun setShapeParam(layer: Long, param: Int, value: Float) = emit(CommandType.SHAPE_SET_PARAM) { b ->
+        b.putHandle(Off.LAYER, layer)
+        b.putInt(Off.GAIN_VALUE, param)
+        b.putFloat(Off.GAIN_VALUE + 4, value)
+    }
+
     fun setLayerReversed(layer: Long, reversed: Boolean) = emit(CommandType.LAYER_SET_REVERSED) { b ->
         b.putHandle(Off.LAYER, layer)
         b.put(Off.SECOND_U32, if (reversed) 1 else 0)
@@ -680,4 +704,7 @@ object CommandType {
     const val AUDIO_SET_PAN = 90
     const val LAYER_SET_SPEED = 91
     const val LAYER_SET_REVERSED = 92
+    const val SHAPE_SET_FILL = 93
+    const val SHAPE_SET_STROKE = 94
+    const val SHAPE_SET_PARAM = 95
 }

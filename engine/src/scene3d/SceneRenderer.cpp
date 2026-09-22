@@ -1083,7 +1083,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         merged.reserve(opaque.size());
         for (u32 i = 0; i < opaque.size(); ++i) {
             const Draw& d = opaque[i];
-            if (d.skinned || d.morph) { merged.push_back(d); members.emplace_back(); continue; }
+            if (d.skinned || d.morph || !instancing_) { merged.push_back(d); members.emplace_back(); continue; }
             u64 h = 0xCBF29CE484222325ull;
             h = mix(h, reinterpret_cast<uintptr_t>(d.model));
             h = mix(h, reinterpret_cast<uintptr_t>(d.prim));
@@ -1119,7 +1119,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         std::vector<ShadowDraw> smerged;
         for (u32 i = 0; i < shadowDraws.size(); ++i) {
             const ShadowDraw& d = shadowDraws[i];
-            if (d.skinned) { smerged.push_back(d); smembers.emplace_back(); continue; }
+            if (d.skinned || !instancing_) { smerged.push_back(d); smembers.emplace_back(); continue; }
             u64 h = 0xCBF29CE484222325ull;
             h = mix(h, reinterpret_cast<uintptr_t>(d.model));
             h = mix(h, reinterpret_cast<uintptr_t>(d.prim));

@@ -1896,7 +1896,7 @@ FGTexture Renderer::video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture
     if (!fc.tex[slot].valid()) {
         // Orçamento do cache (todas as camadas): antes de criar, solta as
         // camadas paradas há mais tempo.
-        trim_flow_cache(layerKey);
+        trim_flow_cache(layerKey, static_cast<u64>(lw) * lh * 8);
         auto t = backend_->create_texture(fd);
         if (!t.ok()) return FGTexture{};
         fc.tex[slot] = *t;
@@ -1938,11 +1938,11 @@ FGTexture Renderer::video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture
     return flow;
 }
 
-void Renderer::trim_flow_cache(u64 keepLayer) noexcept {
+void Renderer::trim_flow_cache(u64 keepLayer, u64 incomingBytes) noexcept {
     // LRU por camada: o flow de uma camada é um par de texturas pequenas
     // (≤ 384 px), mas 30 camadas com flow num projeto longo somam. Acima do
     // orçamento, sai a camada usada há mais tempo (nunca a que pede agora).
-    while (heavyStats_.flowCacheBytes > kFlowCacheBudget) {
+    while (heavyStats_.flowCacheBytes + incomingBytes > flowCacheBudget_) {
         auto victim = flowCache_.end();
         for (auto it = flowCache_.begin(); it != flowCache_.end(); ++it) {
             if (it->first == keepLayer) continue;

@@ -205,6 +205,8 @@ public:
     /// Qualidade do preview (HeavyQuality): mapa de sombra (512..2048), filtro
     /// (2 = PCF 6×6, 1 = 2×2 bilinear, 0 = uma amostra) e viés do LOD. O
     /// export chama com (2048, 2, 1).
+    /// Instancing ligado (padrão). Desligar serve só ao benchmark A/B.
+    void set_instancing(bool on) noexcept { instancing_ = on; }
     void set_quality(u32 shadowMapSize, u32 shadowFilter, f32 lodBias, bool lodHysteresis = true) noexcept {
         lodHysteresis_ = lodHysteresis;
         shadowSize_ = std::clamp(shadowMapSize, 256u, 4096u);
@@ -226,6 +228,7 @@ private:
     u32 shadowFilter_ = 2;
     f32 lodBias_ = 1.0f;
     bool lodHysteresis_ = true;
+    bool instancing_ = true;
     u64 statsFrame_ = ~0ull;
     /// Nível de LOD da última escolha por (camada, nó, primitiva): a troca só
     /// acontece fora de uma faixa de ±15% em volta do limiar (sem "piscar"

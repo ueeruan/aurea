@@ -327,6 +327,11 @@ public:
     void reset_heavy_stats() noexcept { heavyStats_ = HeavyStats{}; }
     /// A qualidade dos sistemas pesados do último quadro renderizado.
     [[nodiscard]] const HeavyQuality& heavy_quality() const noexcept { return heavyQ_; }
+    /// Benchmark A/B do instancing 3D (padrão: ligado).
+    void set_scene_instancing(bool on) noexcept { scene3d_.set_instancing(on); }
+    /// Orçamento do cache do optical flow (padrão 48 MB; o gerenciador de
+    /// memória pode baixar sob pressão). Acima dele sai a camada mais antiga.
+    void set_flow_cache_budget(u64 bytes) noexcept { flowCacheBudget_ = bytes; }
     [[nodiscard]] f32 effect_quality() const noexcept override { return heavyQ_.effects; }
 
     // --- EffectResources -----------------------------------------------------
@@ -481,8 +486,8 @@ private:
     u32 glyphRasterSeen_ = 0, glyphResetSeen_ = 0;   ///< leitura anterior de text::glyph_atlas_stats
     BufferHandle particleQuad_{};                      ///< 6 índices u16 do quad (partículas indexadas)
     /// Orçamento do cache do optical flow (texturas residentes, todas as camadas).
-    static constexpr u64 kFlowCacheBudget = 48ull << 20;
-    void trim_flow_cache(u64 keepLayer) noexcept;
+    u64 flowCacheBudget_ = 48ull << 20;
+    void trim_flow_cache(u64 keepLayer, u64 incomingBytes) noexcept;
     /// Planos de cada grupo 3D do snapshot sendo composto (camadas 2D na cena).
     std::vector<std::vector<scene3d::ScenePlane>> groupPlanes_;
     bool flowCacheEnabled_ = true;   ///< do quadro sendo renderizado (RenderSettings::heavyScale)

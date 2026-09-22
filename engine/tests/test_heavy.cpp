@@ -117,6 +117,7 @@ AUREA_TEST(Heavy, BenchTrackingPrecisionVersusResolution) {
 #include "aurea/effects/EffectGraph.hpp"
 #include "aurea/project/Project.hpp"
 #include "aurea/render/Renderer.hpp"
+#include "aurea/scene3d/Importer.hpp"
 #include "aurea/text/Text.hpp"
 #include "aurea/vector/Vector.hpp"
 
@@ -277,8 +278,10 @@ struct HScene {
         return id;
     }
     LayerId video(const SyntheticConfig& cfg) {
-        factory = std::make_unique<SyntheticFactory>(cfg);
-        media.set_factory(factory.get());
+        if (!factory) {
+            factory = std::make_unique<SyntheticFactory>(cfg);
+            media.set_factory(factory.get());
+        }
         Asset a;
         a.kind = AssetKind::Video;
         a.video.width = cfg.width;
@@ -337,7 +340,21 @@ struct HScene {
 
 /// Mede N quadros iguais: a leitura de GPU é a de 2 quadros atrás (anel de
 /// 2 em voo) — o mesmo conteúdo, então a mediana é o custo em regime.
-struct Measured { f64 gpuTotal = 0, gpuEffects = 0, cpu = 0; PassCost last; };
+struct Measured {
+    f64 gpuTotal = 0, gpuEffects = 0, cpu = 0;
+    PassCost last;
+    std::vector<PassCost> all;
+    /// Mediana, entre os quadros medidos, da soma dos passes com este nome.
+    [[nodiscard]] f64 pass(const char* name) const {
+        std::vector<f64> v;
+        for (const PassCost& c : all) {
+            f64 t = 0;
+            for (auto& [n, ms] : c.passes) if (n == name) t += ms;
+            v.push_back(t);
+        }
+        return median(v);
+    }
+};
 Measured measure(HScene& s, const RenderSettings& rs, u32 w, u32 h, u32 frames = 8, FrameIndex t = FrameIndex{30}) {
     std::vector<f64> tot, fx, cpu;
     Measured m;
@@ -349,6 +366,7 @@ Measured measure(HScene& s, const RenderSettings& rs, u32 w, u32 h, u32 frames =
         fx.push_back(pc.effects);
         cpu.push_back(c);
         m.last = pc;
+        m.all.push_back(pc);
     }
     hgpu().backend.wait_idle();
     m.gpuTotal = median(tot);
@@ -536,11 +554,82 @@ AUREA_TEST(Heavy, BenchOpticalFlowStages) {
         else { label = "preview 0,25"; rs.heavyScale = 0.25f; }
         const Measured m = measure(s, rs, 1920, 1080, 8, FrameIndex{101});
         f64 st[5] = {0, 0, 0, 0, 0};
-        for (auto& [name, ms] : m.last.passes) for (int k = 0; k < 5; ++k) if (name == stages[k]) st[k] += ms;
+        for (int k = 0; k < 5; ++k) st[k] = m.pass(stages[k]);
         std::printf("    | %s | %.3f | %.3f | %.3f | %.3f | %.3f | %.3f | %.2f |\n", label, st[0], st[1], st[2], st[3], st[4], m.gpuTotal, m.cpu);
         if (std::getenv("AUREA_HEAVY_VERBOSE")) for (auto& [name, ms] : m.last.passes) std::printf("      passe %s %.3f\n", name.c_str(), ms);
         hgpu().renderer.set_flow_cache_enabled(true);
     }
+}
+
+// -----------------------------------------------------------------------------
+// 3D (§68–75): desenhos, sombra e instancing medidos. Capacete (DamagedHelmet,
+// 5 texturas 2048²) 1× e 25× numa grade; export × preview crítico; instancing
+// ligado × desligado (o "antes").
+// -----------------------------------------------------------------------------
+namespace {
+struct Models {
+    std::unordered_map<u64, std::shared_ptr<const scene3d::SceneAsset>> byId;
+    static std::shared_ptr<const scene3d::SceneAsset> lookup(void* self, AssetId id) {
+        auto* m = static_cast<Models*>(self);
+        auto it = m->byId.find(id.pack());
+        return it == m->byId.end() ? nullptr : it->second;
+    }
+};
+} // namespace
+
+AUREA_TEST(Heavy, BenchScene3D) {
+    HEAVY_REQUIRE_GPU();
+    if (!heavy_bench()) { std::printf("    (pulado: AUREA_BENCH=1 para medir)\n"); return; }
+    const std::string path = std::string(AUREA_TEST_DATA_DIR) + "/gltf/DamagedHelmet.glb";
+    scene3d::ImportOptions io;
+    io.maxTextureSize = 2048;
+    scene3d::ImportResult r = scene3d::import_scene_file(path, io);
+    if (!r.ok()) { std::printf("    (modelo de amostra ausente)\n"); return; }
+    std::shared_ptr<const scene3d::SceneAsset> helmet(std::move(r.asset));
+    std::printf("    capacete: %u triângulos, texturas decodificadas na RAM %.1f MB (teto de import 2048)\n", helmet->stats.triangles,
+                static_cast<f64>(helmet->stats.imageBytes) / 1048576.0);
+    Models models;
+    hgpu().renderer.set_model_lookup(&Models::lookup, &models);
+    std::printf("    | Cena | Modo | Instancing | Desenhos | Sombra (desenhos) | Triângulos | Mapa | GPU sombra (ms) | GPU 3D cor (ms) | GPU total (ms) | CPU (ms) |\n");
+    for (u32 count : {1u, 25u}) {
+        HScene s(1920, 1080);
+        Asset a;
+        a.kind = AssetKind::Model3D;
+        const AssetId aid = s.project.add_asset(std::move(a));
+        models.byId[aid.pack()] = helmet;
+        const scene3d::Aabb& b = helmet->bounds;
+        const f32 maxExt = std::max({b.extent().x, b.extent().y, b.extent().z, 1e-3f});
+        const u32 side = count == 1 ? 1u : 5u;
+        for (u32 i = 0; i < count; ++i) {
+            const LayerId id = s.comp->add_layer(LayerKind::Model3D, "capacete");
+            Layer* l = s.comp->layer(id);
+            l->model.scene = aid;
+            l->model.pivot = b.center();
+            l->model.unitScale = 0.55f * 1080.0f / maxExt / static_cast<f32>(side);
+            l->transform.position = Vec3{1920.0f * (static_cast<f32>(i % side) + 0.5f) / static_cast<f32>(side),
+                                         1080.0f * (static_cast<f32>(i / side) + 0.5f) / static_cast<f32>(side), 0.0f};
+        }
+        for (int mode = 0; mode < 3; ++mode) {
+            RenderSettings rs;
+            rs.dither = false;
+            bool inst = true;
+            const char* label = "export";
+            if (mode == 0) rs.finalQuality = true;
+            else if (mode == 1) { rs.finalQuality = true; inst = false; label = "export"; }
+            else { rs.heavyScale = 0.25f; label = "preview crítico"; }
+            if (count == 1 && mode == 1) continue;
+            hgpu().renderer.set_scene_instancing(inst);
+            const Measured m = measure(s, rs, 1920, 1080, 8, FrameIndex{0});
+            const f64 sh = m.pass("3d-sombra"), pbr = m.pass("3d-pbr");
+            const HeavyStats& st = hgpu().renderer.heavy_stats();
+            std::printf("    | %u capacete(s) | %s | %s | %u | %u | %u | %u | %.3f | %.3f | %.3f | %.2f |\n", count, label, inst ? "sim" : "não",
+                        st.lastSceneDrawCalls, st.lastSceneShadowDrawCalls, st.lastSceneTriangles, st.lastShadowMapSize, sh, pbr, m.gpuTotal, m.cpu);
+        }
+        hgpu().renderer.set_scene_instancing(true);
+        std::printf("    GPU residente do 3D (%u capacete(s), um modelo por asset): %.1f MB\n", count,
+                    static_cast<f64>(hgpu().renderer.scene_resident_bytes()) / 1048576.0);
+    }
+    hgpu().renderer.set_model_lookup(nullptr, nullptr);
 }
 
 // -----------------------------------------------------------------------------
@@ -737,6 +826,42 @@ AUREA_TEST(Heavy, Scene3DInstancingCullingAndShadowKnob) {
     AUREA_CHECK_EQ(full, 2048u);
     AUREA_CHECK_EQ(hot, 512u);
     AUREA_CHECK_EQ(exportAgain, 2048u);
+}
+
+// §82: o cache do optical flow respeita o orçamento (LRU por camada).
+AUREA_TEST(Heavy, FlowCacheStaysWithinItsBudget) {
+    HEAVY_REQUIRE_GPU();
+    HScene s(640, 360);
+    SyntheticConfig cfg;
+    cfg.width = 640;
+    cfg.height = 360;
+    cfg.frameCount = 300;
+    cfg.pattern = SyntheticPattern::FastSquare;
+    for (int i = 0; i < 3; ++i) {
+        Layer* l = s.comp->layer(s.video(cfg));
+        l->speed = 0.2f;
+        l->end = FrameIndex{1000};
+        l->frameBlend = 2;
+        l->transform.scale = Vec3{0.5f, 0.5f, 1.0f};
+    }
+    Renderer& r = hgpu().renderer;
+    // Uma textura de flow deste vídeo: base 384 no lado maior (384×216 RGBA16F).
+    const u64 one = 384ull * 216ull * 8ull;
+    r.set_flow_cache_budget(one * 3);
+    r.reset_heavy_stats();
+    RenderSettings rs;
+    rs.dither = false;
+    for (i64 f = 101; f < 131; f += 3) (void)s.frame(FrameIndex{f}, rs, 640, 360);
+    hgpu().backend.wait_idle();
+    const HeavyStats st = r.heavy_stats();
+    std::printf("    3 camadas com flow, orçamento %.2f MB: residente %.2f MB, %u calculados, %u despejos\n",
+                static_cast<f64>(one * 3) / 1048576.0, static_cast<f64>(st.flowCacheBytes) / 1048576.0, st.flowComputed, st.flowCacheEvictions);
+    AUREA_CHECK(st.flowCacheBytes <= one * 3);
+    AUREA_CHECK(st.flowCacheEvictions > 0u);
+    AUREA_CHECK(st.flowComputed > 0u);
+    r.set_flow_cache_budget(48ull << 20);
+    r.release_project_resources();
+    AUREA_CHECK_EQ(r.heavy_stats().flowCacheBytes, 0ull);
 }
 
 // Sistemas pesados no preview adaptativo: a escada do HeavyQuality desce tudo

@@ -308,7 +308,7 @@ private fun DockVector(icon: ImageVector, size: androidx.compose.ui.unit.Dp) {
 
 /** "N camadas" e o que se faz com um conjunto. */
 @Composable
-internal fun MultiSelectionPanel(store: EditorStore) {
+internal fun MultiSelectionPanel(store: EditorStore, ui: EditorUi) {
     val count by remember { derivedStateOf { store.selection.size } }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -337,7 +337,7 @@ internal fun MultiSelectionPanel(store: EditorStore) {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             BatchAction(ShellGlyph.FolderBadgePlus, "Agrupar") { store.precompose() }
-            BatchAction(CupertinoGlyph.Link, "Vincular") { store.parentSelectionToLast() }
+            BatchAction(CupertinoGlyph.Link, "Vincular") { openPanel(store, ui, EditorPanel.Parent) }
             BatchAction(CupertinoGlyph.ChartBarAltFill, "Cascata") { store.comingSoon("Cascata") }
             BatchAction(ShellGlyph.SquareGrid3x2, "Alinhar") { store.comingSoon("Alinhar") }
             BatchAction(CupertinoGlyph.Scissors, "Dividir") {

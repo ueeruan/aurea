@@ -213,7 +213,7 @@ fun EditorScreen(store: EditorStore) {
 
     val content = when {
         ui.adding -> SheetContent.Adding
-        ui.panel != null && selectionSize == 1 -> SheetContent.Panel
+        ui.panel != null && (selectionSize == 1 || (selectionSize >= 2 && ui.panel == com.aurea.aurea.editor.panels.EditorPanel.Parent)) -> SheetContent.Panel
         selectionSize >= 2 -> SheetContent.Batch
         selectionSize == 1 -> SheetContent.Dock
         else -> SheetContent.None
@@ -426,7 +426,7 @@ private fun ContextArea(store: EditorStore, ui: EditorUi, content: SheetContent,
         SheetBody {
             when (content) {
                 SheetContent.Adding -> AddLayerPanel(store, ui)
-                SheetContent.Batch -> MultiSelectionPanel(store)
+                SheetContent.Batch -> MultiSelectionPanel(store, ui)
                 SheetContent.Dock -> {
                     val id by remember { derivedStateOf { store.primary } }
                     id?.let { LayerToolsDock(store, ui, it) }

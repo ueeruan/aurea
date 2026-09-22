@@ -313,7 +313,7 @@ AUREA_TEST(Gizmo, AxesProjectAndMoveInWorldEvenWithAParent) {
     AUREA_CHECK(std::hypot(g[6] - g[0], g[7] - g[1]) < 10.0f);
     // Filho do nulo (escala 2 no pai): 10 unidades no mundo = 5 no espaço do pai.
     nl->transform.rotation = Vec3{0, 0, 0};
-    nl->transform.scale = Vec3{2, 2, 2};
+    nl->transform.scale = Vec3{2, 2, 1};   // Z relativo a X: profundidade também 2
     nl->threeD = true;
     Layer* bl = r.comp()->layer(LayerId::unpack(r.b));
     bl->parent = LayerId::unpack(n);

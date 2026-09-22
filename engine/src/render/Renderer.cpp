@@ -123,10 +123,11 @@ Mat4 layer_matrix_3d_frac(const Layer& l, f64 local) noexcept {
                    s(TrackProperty::PositionZ, l.transform.position.z)};
     Vec3 scale{s(TrackProperty::ScaleX, l.transform.scale.x), s(TrackProperty::ScaleY, l.transform.scale.y),
                s(TrackProperty::ScaleZ, l.transform.scale.z)};
-    // Modelo 3D: a profundidade acompanha a largura (Z multiplica X). Os
-    // controles de escala da UI mexem só em X/Y; sem isto, escalar um modelo
-    // o achataria em profundidade (sombreamento e perfil mudam).
-    if (l.kind == LayerKind::Model3D) scale.z *= scale.x;
+    // A profundidade acompanha a largura (Z multiplica X) em tudo que não é
+    // câmera/luz: os controles de escala da UI mexem só em X/Y. Sem isto,
+    // escalar um modelo — ou o NULO pai dele — o achataria em profundidade
+    // (perfil e sombreamento esticam em vez de dar zoom).
+    if (l.kind != LayerKind::Camera && l.kind != LayerKind::Light) scale.z *= scale.x;
     const Vec3 rot{s(TrackProperty::RotationX, l.transform.rotation.x) * kDeg2Rad,
                    s(TrackProperty::RotationY, l.transform.rotation.y) * kDeg2Rad,
                    s(TrackProperty::RotationZ, l.transform.rotation.z) * kDeg2Rad};

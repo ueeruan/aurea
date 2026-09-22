@@ -868,9 +868,8 @@ void set_local_from(Layer& lay, const Mat4& local) noexcept {
     const Vec3 pos{m.col[3].x, m.col[3].y, std::fabs(m.col[3].z) < 1e-3f ? 0.0f : m.col[3].z};
     l->transform.position = pos;
     l->transform.rotation = rotDeg;
-    l->transform.scale = Vec3{sx, sy, l->kind == LayerKind::Model3D ? sz / std::max(1e-6f, sx)
-                                          : ((l->threeD || l->kind == LayerKind::Camera || l->kind == LayerKind::Light) ? sz
-                                                                                                                         : l->transform.scale.z)};
+    // Z guardado relativo a X (o render multiplica), menos câmera e luz.
+    l->transform.scale = Vec3{sx, sy, (l->kind == LayerKind::Camera || l->kind == LayerKind::Light) ? sz : sz / std::max(1e-6f, sx)};
     auto set = [&](TrackProperty prop, f32 v) {
         if (Track* tr = l->tracks.find(prop); tr && tr->keys.size() <= 1) {
             if (tr->keys.size() == 1) tr->keys[0].value = v; else tr->staticValue = v;

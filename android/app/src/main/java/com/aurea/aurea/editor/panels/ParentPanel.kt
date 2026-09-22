@@ -42,15 +42,26 @@ import com.aurea.aurea.ui.theme.tocavel
 @Composable
 internal fun ParentPanel(env: PanelEnv) {
     val store = env.store
-    val layerId = store.primary ?: return
-    val current by remember(store) { derivedStateOf { store.detail?.parentId ?: 0L } }
-    val candidates by remember(store, layerId) { derivedStateOf { store.parentCandidates(layerId) } }
+    // Várias escolhidas: o mesmo pai para todas (o Nulo, por exemplo).
+    val ids by remember(store) { derivedStateOf { if (store.selection.size >= 2) store.selection.toList() else listOfNotNull(store.primary) } }
+    if (ids.isEmpty()) return
+    val multi = ids.size >= 2
+    val current by remember(store) { derivedStateOf { if (store.selection.size >= 2) -1L else store.detail?.parentId ?: 0L } }
+    val candidates by remember(store, ids) { derivedStateOf { store.parentCandidatesForAll(ids) } }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 8.dp)) {
-        ParentRow(CupertinoGlyph.Xmark, AureaColors.Chip, "Nenhuma (solta)", current == 0L) { store.setParent(layerId, 0L) }
-        candidates.forEach { row ->
+        if (multi) {
+            Text(
+                "${ids.size} camadas escolhidas: todas passam a seguir o pai que você tocar.",
+                modifier = Modifier.padding(8.dp),
+                style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)),
+            )
+        }
+        ParentRow(CupertinoGlyph.Xmark, AureaColors.Chip, "Nenhuma (solta)", current == 0L) { store.setParentMany(ids, 0L) }
+        // Nulos primeiro: é o que se procura ao vincular.
+        candidates.sortedBy { if (LayerType.of(it.kind) == LayerType.Null) 0 else 1 }.forEach { row ->
             val type = LayerType.of(row.kind)
             val name = row.name.ifEmpty { type.label }
-            ParentRow(type.glyph, type.color, name, current == row.id) { store.setParent(layerId, row.id) }
+            ParentRow(type.glyph, type.color, name, current == row.id) { store.setParentMany(ids, row.id) }
         }
         if (candidates.isEmpty()) {
             Text(

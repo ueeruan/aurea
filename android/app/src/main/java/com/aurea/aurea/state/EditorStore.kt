@@ -1819,6 +1819,29 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         showToast("${children.size} camada(s) seguindo a última escolhida")
     }
 
+    /** Vários filhos para o mesmo pai (0 = soltar), num passo de desfazer. */
+    fun setParentMany(ids: Collection<Long>, parent: Long) {
+        val children = ids.filter { it != parent && (parent == 0L || parentCandidates(it).any { c -> c.id == parent }) }
+        if (children.isEmpty()) return
+        beginGesture(if (parent == 0L) "soltar camadas" else "vincular camadas")
+        children.forEach { c -> send { setLayerParent(c, parent) } }
+        endGesture()
+        refreshNow()
+        if (parent != 0L) showToast("${children.size} camada(s) seguindo o pai escolhido")
+    }
+
+    /** Pais possíveis para todas: nenhuma das escolhidas nem descendente delas. */
+    fun parentCandidatesForAll(ids: Collection<Long>): List<LayerRow> {
+        if (ids.isEmpty()) return emptyList()
+        var set: Set<Long>? = null
+        for (id in ids) {
+            val c = parentCandidates(id).map { it.id }.toSet()
+            set = set?.intersect(c) ?: c
+        }
+        val ok = (set ?: emptySet()) - ids.toSet()
+        return layers.filter { it.id in ok }
+    }
+
     /** Pais possíveis: toda camada que não é ela nem descendente dela. */
     fun parentCandidates(layer: Long): List<LayerRow> {
         val rows = layers

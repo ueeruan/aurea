@@ -2978,3 +2978,43 @@ AUREA_TEST(Gpu, TwoDLayersInSceneOccludeAndAreOccludedByModels) {
 }
 
 
+
+AUREA_TEST(Gpu, ZoomingANullZoomsItsModelUniformly) {
+    AUREA_REQUIRE_GPU();
+    const std::string path = gltf_data("DamagedHelmet.glb");
+    if (!file_exists(path)) return;
+    // Nulo com escala 2 (a UI só mexe em X/Y) = o próprio modelo com escala 2:
+    // zoom de verdade, sem achatar a profundidade.
+    Image8 viaNull, direct;
+    {
+        Scene3DRig rig(320, 180);
+        ModelImport mi;
+        mi.path = path;
+        auto m = rig.e.import_model(mi);
+        auto n = rig.e.add_null(false);
+        AUREA_CHECK(m.ok() && n.ok());
+        Composition* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+        Layer* model = comp->layer(LayerId::unpack(*m));
+        model->transform.rotation = Vec3{0, 35, 0};
+        set_parent(rig.e, *m, *n);
+        comp->layer(LayerId::unpack(*n))->transform.scale = Vec3{1.6f, 1.6f, 1};
+        viaNull = rig.capture(320);
+    }
+    {
+        Scene3DRig rig(320, 180);
+        ModelImport mi;
+        mi.path = path;
+        auto m = rig.e.import_model(mi);
+        AUREA_CHECK(m.ok());
+        Composition* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+        Layer* model = comp->layer(LayerId::unpack(*m));
+        model->transform.rotation = Vec3{0, 35, 0};
+        model->transform.scale = Vec3{1.6f, 1.6f, 1};
+        direct = rig.capture(320);
+    }
+    f64 sum = 0;
+    for (usize i = 0; i < viaNull.rgba.size() && i < direct.rgba.size(); ++i) sum += std::abs(viaNull.rgba[i] - direct.rgba[i]);
+    const f64 mean = sum / static_cast<f64>(std::max<usize>(1, viaNull.rgba.size()));
+    std::printf("    zoom pelo nulo vs escala do modelo: diferenca media %.3f, maxima %u\n", mean, max_diff(viaNull, direct));
+    AUREA_CHECK(mean < 0.5);
+}

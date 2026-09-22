@@ -657,6 +657,31 @@ ImportResult finalize_asset(std::unique_ptr<SceneAsset> asset, const ImportOptio
             }
         }
     }
+    // --- Níveis de detalhe ------------------------------------------------------
+    // Malha densa (≥ 512 triângulos) sem skin nem morph: 50 % e 25 % dos
+    // triângulos, erro relativo até 2 % do tamanho. Cada nível só entra se
+    // de fato encolheu (malha já enxuta não ganha nível inútil).
+    if (options.generateLods) {
+        for (Mesh& mesh : A.meshes) {
+            for (Primitive& p : mesh.primitives) {
+                p.lods.clear();
+                if (p.skinned() || !p.morphTargets.empty() || p.triangle_count() < 512 || p.positions.empty()) continue;
+                usize prev = p.indices.size();
+                for (f32 ratio : {0.5f, 0.25f}) {
+                    const usize target = static_cast<usize>(static_cast<f32>(p.indices.size()) * ratio) / 3 * 3;
+                    std::vector<u32> out(p.indices.size());
+                    f32 err = 0.0f;
+                    const usize n = meshopt_simplify(out.data(), p.indices.data(), p.indices.size(),
+                                                     &p.positions[0].x, p.positions.size(), sizeof(Vec3),
+                                                     target, 0.02f, 0, &err);
+                    if (n < 3 || n > prev * 8 / 10) break;
+                    out.resize(n);
+                    prev = n;
+                    p.lods.push_back(std::move(out));
+                }
+            }
+        }
+    }
     A.stats.optimizeMs = ms_since(tOpt);
 
     // --- Validação final e estatísticas -----------------------------------------

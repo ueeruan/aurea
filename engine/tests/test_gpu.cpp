@@ -1623,6 +1623,33 @@ AUREA_TEST(Gpu, StressThreeHundredAnimatedLayers) {
     std::remove(path.c_str());
 }
 
+AUREA_TEST(Gpu, Scene3DLodDropsTrianglesWhenSmallOnScreen) {
+    AUREA_REQUIRE_GPU();
+    const std::string path = gltf_data("DamagedHelmet.glb");
+    if (!file_exists(path)) return;
+    Scene3DRig rig(512, 288);
+    ModelImport mi;
+    mi.path = path;
+    auto id = rig.e.import_model(mi);
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) return;
+    (void)rig.capture(512);
+    const u32 near = rig.e.renderer().scene_stats().triangles;
+    Composition* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+    Layer* l = comp->layer(LayerId::unpack(*id));
+    const Vec3 s0 = l->transform.scale;
+    l->transform.scale = s0 * 0.25f;
+    (void)rig.capture(512);
+    const u32 mid = rig.e.renderer().scene_stats().triangles;
+    l->transform.scale = s0 * 0.08f;
+    (void)rig.capture(512);
+    const u32 far = rig.e.renderer().scene_stats().triangles;
+    std::printf("    LOD na tela: perto %u, 1/4 %u, 1/12 %u triangulos\n", near, mid, far);
+    AUREA_CHECK(near >= 15000);
+    AUREA_CHECK(far < near / 2);
+    AUREA_CHECK(far <= mid);
+}
+
 AUREA_TEST(Gpu, Scene3DSurvivesSaveAndReopenIdentically) {
     AUREA_REQUIRE_GPU();
     const std::string path = gltf_data("DamagedHelmet.glb");

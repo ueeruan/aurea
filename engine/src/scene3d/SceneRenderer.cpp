@@ -140,6 +140,7 @@ Status GpuModel::upload(GPUBackend& gpu, const SceneAsset& asset) noexcept {
         for (const Primitive& p : m.primitives) {
             vertexTotal += p.positions.size();
             indexTotal += p.indices.size();
+            for (const auto& l : p.lods) indexTotal += l.size();
             anySkin = anySkin || p.skinned();
             fits16 = fits16 && p.positions.size() <= 65536;
         }
@@ -197,6 +198,17 @@ Status GpuModel::upload(GPUBackend& gpu, const SceneAsset& asset) noexcept {
             }
             for (u32 i : p.indices) {
                 if (fits16) idx16.push_back(static_cast<u16>(i)); else idx32.push_back(i);
+            }
+            g.lodFirst[0] = g.firstIndex;
+            g.lodCount[0] = g.indexCount;
+            for (const auto& lod : p.lods) {
+                if (g.lodLevels >= GpuPrimitive::kMaxLods) break;
+                g.lodFirst[g.lodLevels] = static_cast<u32>(fits16 ? idx16.size() : idx32.size());
+                g.lodCount[g.lodLevels] = static_cast<u32>(lod.size());
+                for (u32 i : lod) {
+                    if (fits16) idx16.push_back(static_cast<u16>(i)); else idx32.push_back(i);
+                }
+                ++g.lodLevels;
             }
             meshes[mi].push_back(g);
         }
@@ -613,6 +625,25 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         bool skinned;
         bool morph;
         usize morphPos, morphShade;
+        u32 firstIndex, indexCount;   ///< o nível de detalhe escolhido
+    };
+    // Nível de detalhe pelo tamanho na tela: diâmetro projetado da caixa.
+    const f32 pxPerUnit = static_cast<f32>(height) * 0.5f / std::tan(frame.camera.fovY * 0.5f);
+    auto pick_lod = [&](const GpuPrimitive& p, const Mat4& world, const Mat4& viewFromLocal, u32& first, u32& count) {
+        first = p.firstIndex;
+        count = p.indexCount;
+        if (p.lodLevels <= 1 || !p.bounds.valid()) return;
+        const Vec3 c = viewFromLocal.transform_point(p.bounds.center());
+        const f32 depth = std::max(std::fabs(c.z), frame.camera.nearZ);
+        const f32 sx = Vec3{world.col[0].x, world.col[0].y, world.col[0].z}.length();
+        const f32 sy = Vec3{world.col[1].x, world.col[1].y, world.col[1].z}.length();
+        const f32 sz = Vec3{world.col[2].x, world.col[2].y, world.col[2].z}.length();
+        const f32 diameter = p.bounds.extent().length() * std::max(sx, std::max(sy, sz));
+        const f32 px = diameter / depth * pxPerUnit;
+        u32 level = px < 60.0f ? 2u : (px < 160.0f ? 1u : 0u);
+        level = std::min(level, p.lodLevels - 1);
+        first = p.lodFirst[level];
+        count = p.lodCount[level];
     };
     std::vector<Draw> opaque, blended;
     std::unordered_map<const GpuMaterial*, const SceneBlock*> blocks;
@@ -968,11 +999,13 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                                                              + inst.skinJointOffset[static_cast<usize>(skinIndex)]);
                 }
                 d.pipeline = *pipe;
+                if (skinDraw || d.morph) { d.firstIndex = p.firstIndex; d.indexCount = p.indexCount; }
+                else pick_lod(p, world, viewFromLocal, d.firstIndex, d.indexCount);
                 d.viewDepth = viewFromLocal.transform_point(p.bounds.center()).z;
                 d.sortKey = static_cast<u32>(pipe->id & 0xFFFF) << 16 | static_cast<u32>(reinterpret_cast<uintptr_t>(mat) >> 4 & 0xFFFF);
                 (mat->factors.alphaMode == AlphaMode::Blend ? blended : opaque).push_back(d);
                 ++stats_.visiblePrimitives;
-                stats_.triangles += p.indexCount / 3;
+                stats_.triangles += d.indexCount / 3;
             }
         }
         stats_.geometryBytes += gm->geometryBytes;
@@ -1046,7 +1079,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 boundModel = nullptr;   // o próximo desenho normal re-liga a malha
                 c.set_uniforms(d.block, sizeof(SceneBlock));
                 c.push_constants(&d.push, sizeof(MeshPush));
-                c.draw_indexed(d.prim->indexCount, 1, d.prim->firstIndex, 0, 0);
+                c.draw_indexed(d.indexCount, 1, d.firstIndex, 0, 0);
                 continue;
             }
             if (d.model != boundModel || d.skinned) {
@@ -1058,7 +1091,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             }
             c.set_uniforms(d.block, sizeof(SceneBlock));
             c.push_constants(&d.push, sizeof(MeshPush));
-            c.draw_indexed(d.prim->indexCount, 1, d.prim->firstIndex, d.prim->vertexOffset, 0);
+            c.draw_indexed(d.indexCount, 1, d.firstIndex, d.prim->vertexOffset, 0);
         }
     });
     if (shadowTex.valid()) graph.read(pbrPass, shadowTex);

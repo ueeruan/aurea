@@ -93,6 +93,15 @@ AUREA_TEST(Scene3D, DamagedHelmetHasFullPbrSetWithTangents) {
     AUREA_CHECK(p.generatedTangents);
     for (const Vec4& t : p.tangents) AUREA_CHECK(t.w == 1.0f || t.w == -1.0f);
     AUREA_CHECK_EQ(a.stats.triangles, 15452u);   // 46356 índices
+    // Níveis de detalhe: dois, cada um de fato mais leve que o anterior.
+    std::printf("    LOD: %u -> %zu -> %zu triangulos\n", p.triangle_count(),
+                p.lods.size() > 0 ? p.lods[0].size() / 3 : 0, p.lods.size() > 1 ? p.lods[1].size() / 3 : 0);
+    AUREA_CHECK_EQ(p.lods.size(), usize{2});
+    if (p.lods.size() == 2) {
+        AUREA_CHECK(p.lods[0].size() < p.indices.size() * 8 / 10);
+        AUREA_CHECK(p.lods[1].size() < p.lods[0].size() * 8 / 10);
+        for (u32 i : p.lods[1]) AUREA_CHECK(i < p.positions.size());
+    }
 }
 
 AUREA_TEST(Scene3D, FoxHasSkinAndThreeNamedClips) {

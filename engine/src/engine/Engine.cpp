@@ -2028,7 +2028,12 @@ Result<u64> Engine::import_model(const ModelImport& request, scene3d::ImportProg
     asset.model.materialCount = scene->stats.materials;
     asset.model.animationCount = scene->stats.animations;
     asset.model.triangleCount = scene->stats.triangles;
-    asset.model.lodCount = 1;
+    {
+        u32 levels = 1;
+        for (const scene3d::Mesh& m : scene->meshes) for (const scene3d::Primitive& p : m.primitives)
+            levels = std::max<u32>(levels, static_cast<u32>(p.lods.size()) + 1u);
+        asset.model.lodCount = levels;
+    }
     asset.model.hasSkeleton = scene->stats.skins > 0;
     asset.model.hasMorphTargets = scene->stats.morphTargets > 0;
     for (const scene3d::Animation& a : scene->animations) asset.model.animationNames.push_back(a.name);

@@ -51,6 +51,7 @@ struct ImportOptions {
     ResourceReader reader = nullptr;   ///< nulo = arquivos ao lado do principal
     void* readerUser = nullptr;
     bool optimize = true;              ///< ordem de vértices/índices (meshoptimizer)
+    bool generateLods = true;          ///< níveis de detalhe (50 % e 25 %) para malhas densas
     /// Maior lado aceito para textura. Maior que isso é reduzido NO IMPORT
     /// (o celular não amostra 8K de qualquer forma). 0 = sem limite.
     u32 maxTextureSize = 4096;

@@ -31,6 +31,11 @@ namespace aurea::scene3d {
 struct GpuPrimitive {
     u32  firstIndex = 0;
     u32  indexCount = 0;
+    /// Níveis de detalhe (0 = o próprio firstIndex/indexCount).
+    static constexpr u32 kMaxLods = 3;
+    u32  lodFirst[kMaxLods]{};
+    u32  lodCount[kMaxLods]{};
+    u32  lodLevels = 1;
     i32  vertexOffset = 0;
     u32  vertexCount = 0;
     i32  material = -1;

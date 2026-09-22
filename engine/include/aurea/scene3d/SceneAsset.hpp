@@ -115,6 +115,9 @@ struct Primitive {
     std::vector<MorphTarget> morphTargets;
 
     std::vector<u32> indices;       ///< triângulos; o upload usa u16 quando cabe
+    /// Níveis de detalhe: índices mais leves sobre os MESMOS vértices
+    /// (meshoptimizer), do mais fino para o mais grosso. Vazio = só o nível 0.
+    std::vector<std::vector<u32>> lods;
     i32  material = -1;             ///< -1 = material padrão
     Aabb bounds{};
     bool generatedNormals = false;

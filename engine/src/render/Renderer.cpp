@@ -361,7 +361,7 @@ Mat4 layer_world_matrix(const Composition& comp, const Layer& l, FrameIndex time
 Renderer::Renderer() {
     draws_.reserve(64);
     framesInFlight_.reserve(16);
-    timingScratch_.resize(128);
+    timingScratch_.resize(1024);   // um por passe: 50 camadas com efeitos passam de 190
 }
 
 Renderer::~Renderer() { shutdown(); }

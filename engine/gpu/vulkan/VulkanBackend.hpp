@@ -416,7 +416,7 @@ public:
     void destroy_texture_now(Texture& t) noexcept;
     void destroy_buffer_now(Buffer& b) noexcept;
 
-    static constexpr u32 kMaxTimers = 64;
+    static constexpr u32 kMaxTimers = 512;   // um por passe: 50 camadas com efeitos passam de 190 (64 cortava o detalhe por etapa)
 
 private:
     [[nodiscard]] Status create_instance(bool validation) noexcept;

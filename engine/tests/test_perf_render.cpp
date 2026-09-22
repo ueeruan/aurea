@@ -216,7 +216,7 @@ struct BenchScene {
 };
 
 struct FrameMeasure {
-    f64 prepareMs = 0, recordMs = 0, gpuMs = 0;
+    f64 prepareMs = 0, recordMs = 0, gpuMs = 0, convMs = 0, fxMs = 0, compMs = 0;
     f64 intervalMeanMs = 0, intervalStdMs = 0, intervalP99Ms = 0;
     u32 passes = 0, culled = 0, created = 0, transient = 0, physical = 0, aliased = 0;
     f64 allocsPerFrame = 0;
@@ -244,7 +244,7 @@ FrameMeasure run_frames(Renderer& r, GPUBackend& backend, BenchScene& s, u32 fra
     rs.gpuTimers = true;
     rs.finalQuality = finalQuality;
     FrameSnapshot snap;
-    std::vector<f64> prep, rec, gpu, intervals;
+    std::vector<f64> prep, rec, gpu, conv, fxv, compv, intervals;
     FrameMeasure m;
     u64 allocs = 0, allocsPrep = 0;
     u32 counted = 0;
@@ -272,7 +272,12 @@ FrameMeasure run_frames(Renderer& r, GPUBackend& backend, BenchScene& s, u32 fra
             ++counted;
             prep.push_back(tp);
             rec.push_back(std::chrono::duration<f64, std::milli>(t2 - t1).count());
-            if (tm.gpuMeasured) gpu.push_back(tm.gpuTotalMs);
+            if (tm.gpuMeasured) {
+                gpu.push_back(tm.gpuTotalMs);
+                conv.push_back(tm.gpuColorConvMs);
+                fxv.push_back(tm.gpuEffectsMs);
+                compv.push_back(tm.gpuCompositeMs + tm.gpuOutputMs);
+            }
             intervals.push_back(std::chrono::duration<f64, std::milli>(t2 - last).count());
             m.created += r.pool_stats().createdThisFrame;
         }
@@ -289,6 +294,9 @@ FrameMeasure run_frames(Renderer& r, GPUBackend& backend, BenchScene& s, u32 fra
     m.prepareMs = median(prep);
     m.recordMs = median(rec);
     m.gpuMs = median(gpu);
+    m.convMs = median(conv);
+    m.fxMs = median(fxv);
+    m.compMs = median(compv);
     m.allocsPerFrame = counted ? static_cast<f64>(allocs) / counted : 0.0;
     m.allocsPrepare = counted ? static_cast<f64>(allocsPrep) / counted : 0.0;
     if (!intervals.empty()) {
@@ -358,7 +366,7 @@ AUREA_TEST(Perf8C, BenchGpuFrameAndPacing) {
     register_builtin_effects(effects);
     Renderer renderer;
     AUREA_CHECK(renderer.initialize(backend, effects).ok());
-    std::printf("\n    GPU %s: res camadas fx | prepare | gravacao | GPU ms | passes | intervalo media/desvio/p99 ms\n",
+    std::printf("\n    GPU %s: res camadas fx | prepare | gravacao | GPU ms (fonte/efeitos/composicao) | passes | intervalo media/desvio/p99 ms\n",
                 backend.capabilities().deviceName.c_str());
     for (const u32 w : {1920u, 3840u}) {
         for (const u32 n : {1u, 10u, 50u}) {
@@ -366,8 +374,9 @@ AUREA_TEST(Perf8C, BenchGpuFrameAndPacing) {
                 BenchScene s(w, w * 9 / 16);
                 s.populate(effects, n, fx);
                 const FrameMeasure m = run_frames(renderer, backend, s, 60);
-                std::printf("    %4u %2u %s | %6.2f | %6.2f | %6.2f | %4u | %6.2f / %5.2f / %6.2f\n", w, n, fx ? "fx" : "--",
-                            m.prepareMs, m.recordMs, m.gpuMs, m.passes, m.intervalMeanMs, m.intervalStdMs, m.intervalP99Ms);
+                std::printf("    %4u %2u %s | %6.2f | %6.2f | %6.2f (%5.2f/%5.2f/%5.2f) | %4u | %6.2f / %5.2f / %6.2f\n", w, n,
+                            fx ? "fx" : "--", m.prepareMs, m.recordMs, m.gpuMs, m.convMs, m.fxMs, m.compMs, m.passes,
+                            m.intervalMeanMs, m.intervalStdMs, m.intervalP99Ms);
                 renderer.release_project_resources();
             }
         }

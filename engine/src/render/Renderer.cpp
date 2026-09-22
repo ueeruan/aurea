@@ -464,7 +464,10 @@ void Renderer::release_project_resources() noexcept {
     for (auto& [k, p] : planar_) {
         for (TextureHandle& t : p.plane) if (t.valid()) backend_->destroy_texture(t);
     }
-    for (auto& [k, i] : images_) backend_->destroy_texture(i.texture);
+    for (auto& [k, i] : images_) {
+        destroy_image_linear(i);
+        backend_->destroy_texture(i.texture);
+    }
     for (auto& [k, l] : luts_) backend_->destroy_texture(l.texture);
     for (auto& [k, f] : flowCache_) for (TextureHandle& t : f.tex) if (t.valid()) backend_->destroy_texture(t);
     flowCache_.clear();
@@ -1411,6 +1414,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             // sem liberar, asset reimportado): a textura velha não serve.
             if (it != images_.end()
                 && (it->second.width != rl.source.width || it->second.height != rl.source.height)) {
+                destroy_image_linear(it->second);
                 backend_->destroy_texture(it->second.texture);
                 images_.erase(it);
                 it = images_.end();
@@ -1605,8 +1609,10 @@ void Renderer::fill_scene_context(const Composition& comp, FrameIndex time, Fram
 void Renderer::upload_glyphs(FrameSnapshot& snap) noexcept {
     // Todos os snapshots (pré-composições incluídas) num buffer só do quadro.
     usize total = 0;
-    std::vector<FrameSnapshot*> all;
-    std::vector<FrameSnapshot*> stack{&snap};
+    std::vector<FrameSnapshot*>& all = snapAll_;       // listas do renderer: sem alocar por quadro
+    std::vector<FrameSnapshot*>& stack = snapStack_;
+    all.clear();
+    stack.assign(1, &snap);
     while (!stack.empty()) {
         FrameSnapshot* s = stack.back();
         stack.pop_back();
@@ -1641,8 +1647,10 @@ void Renderer::upload_glyphs(FrameSnapshot& snap) noexcept {
 void Renderer::upload_vectors(FrameSnapshot& snap) noexcept {
     // Todas as malhas do quadro (pré-composições incluídas) num buffer só.
     usize total = 0;
-    std::vector<FrameSnapshot*> all;
-    std::vector<FrameSnapshot*> stack{&snap};
+    std::vector<FrameSnapshot*>& all = snapAll_;       // listas do renderer: sem alocar por quadro
+    std::vector<FrameSnapshot*>& stack = snapStack_;
+    all.clear();
+    stack.assign(1, &snap);
     while (!stack.empty()) {
         FrameSnapshot* s = stack.back();
         stack.pop_back();
@@ -2151,12 +2159,64 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
         case LayerSource::Kind::Image: {
             auto it = images_.find(layer.source.image.pack());
             if (it == images_.end()) return false;
-            out.texture = graph_.create_texture("layer-imagem", d);
+            // A imagem não muda: a versão linear nesta densidade, se já existe,
+            // é importada pronta — nenhum passe (mesmos pixels: o mesmo passe
+            // de conversão, só que feito uma vez).
+            ImageTexture& img = it->second;
+            TextureDesc ld = d;
+            ld.debugName = "imagem-linear";
+            ImageTexture::Linear* lin = nullptr;
+            for (ImageTexture::Linear& L : img.linear) {
+                if (L.tex.valid() && L.w == w && L.h == h) lin = &L;
+            }
+            if (lin) {
+                lin->lastFrame = frameNumber;
+                if (lin->fgFrame == frameNumber) {   // outra camada da mesma imagem, neste quadro
+                    out.texture = lin->fg;
+                    ++imageLinearHits_;
+                    return true;
+                }
+                out.texture = graph_.import_texture("layer-imagem", lin->tex, ld);
+                lin->fg = out.texture;
+                lin->fgFrame = frameNumber;
+                ++imageLinearHits_;
+                return out.texture.valid();
+            }
+            // Tamanho novo: ocupa o slot vazio ou o menos usado (a textura
+            // velha sai depois da GPU terminar com ela).
+            ImageTexture::Linear* slot = &img.linear[0];
+            for (ImageTexture::Linear& L : img.linear) {
+                if (!L.tex.valid()) { slot = &L; break; }
+                if (L.lastFrame < slot->lastFrame) slot = &L;
+            }
+            if (slot->tex.valid()) backend_->destroy_texture(slot->tex);
+            *slot = ImageTexture::Linear{};
+            auto t = backend_->create_texture(ld);
+            if (!t.ok()) return false;
+            slot->tex = *t;
+            slot->w = w;
+            slot->h = h;
+            slot->lastFrame = frameNumber;
+            out.texture = graph_.import_texture("layer-imagem", slot->tex, ld);
             EffectBuildContext ctx(graph_, shaders_, arena_, *this, kWorkFormat, maxTex);
             const Vec4 flags{0.0f, 0.0f, 0.0f, 0.0f};
-            return ctx.fullscreen_pass("imagem", PassStage::Decode, out.texture, ShaderId::video_rgba_to_linear_frag,
-                                       {PassTexture{{}, it->second.texture, CommonSampler::LinearClamp}},
-                                       &flags, sizeof(flags)) != kInvalidIndex;
+            const u32 pass = ctx.fullscreen_pass("imagem", PassStage::Decode, out.texture, ShaderId::video_rgba_to_linear_frag,
+                                                 {PassTexture{{}, img.texture, CommonSampler::LinearClamp}},
+                                                 &flags, sizeof(flags));
+            if (pass == kInvalidIndex) {
+                // Pipeline ainda compilando: o slot não fica "pronto" sem conteúdo.
+                backend_->destroy_texture(slot->tex);
+                *slot = ImageTexture::Linear{};
+                return false;
+            }
+            // Escreve uma textura que sobrevive ao quadro: o passe nunca é
+            // podado (senão o próximo quadro importaria lixo).
+            graph_.mark_side_effect(pass);
+            slot->builtFrame = frameNumber;
+            slot->fg = out.texture;
+            slot->fgFrame = frameNumber;
+            ++imageLinearBuilds_;
+            return true;
         }
         case LayerSource::Kind::Solid: {
             // Sólido: um clear, sem shader. Sem efeitos, 1x1 basta — a
@@ -2234,8 +2294,10 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
 void Renderer::upload_masks(FrameSnapshot& snap) noexcept {
     // Blocos de todas as pré-composições num buffer só do quadro (como os glifos).
     usize total = 0;
-    std::vector<FrameSnapshot*> all;
-    std::vector<FrameSnapshot*> stack{&snap};
+    std::vector<FrameSnapshot*>& all = snapAll_;       // listas do renderer: sem alocar por quadro
+    std::vector<FrameSnapshot*>& stack = snapStack_;
+    all.clear();
+    stack.assign(1, &snap);
     while (!stack.empty()) {
         FrameSnapshot* s = stack.back();
         stack.pop_back();
@@ -3311,6 +3373,22 @@ void Renderer::collect_resources(u64 frameNumber) noexcept {
         } else {
             ++it;
         }
+    }
+    // Versões lineares de imagens que saíram de cena (a RGBA8 original fica).
+    for (auto& [k, img] : images_) {
+        for (ImageTexture::Linear& L : img.linear) {
+            if (L.tex.valid() && frameNumber > L.lastFrame + 240) {
+                backend_->destroy_texture(L.tex);
+                L = ImageTexture::Linear{};
+            }
+        }
+    }
+}
+
+void Renderer::destroy_image_linear(ImageTexture& img) noexcept {
+    for (ImageTexture::Linear& L : img.linear) {
+        if (L.tex.valid() && backend_) backend_->destroy_texture(L.tex);
+        L = ImageTexture::Linear{};
     }
 }
 

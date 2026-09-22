@@ -319,8 +319,20 @@ private:
     std::vector<u32> edgeBegin_;   ///< CSR: início dos sucessores de cada passe
     std::vector<u32> succ_;
     std::vector<u32> fill_;
-    std::vector<u32> queue_;
+    std::vector<u32> queue_;       ///< heap mínimo (desempate pelo menor índice)
     std::vector<ResourceState> tracked_;
+    // Fase 8C: compilação LINEAR no número de acessos. Antes, a busca do
+    // produtor varria todos os acessos por acesso (quadrático): 200 camadas
+    // com efeitos custavam 7,9 ms de CPU só para ordenar o grafo no host.
+    std::vector<u32> passBucket_;  ///< contagem por passe (ordenação estável sem alocar)
+    std::vector<u32> resBegin_;    ///< CSR: acessos de cada recurso, na ordem dos passes
+    std::vector<u32> resAccess_;
+    std::vector<u32> producer_;    ///< por acesso de leitura: o passe que produziu a versão lida
+    std::vector<u32> writers_;     ///< escritores (passes distintos) do recurso em curso
+    std::vector<u32> bornBegin_;   ///< CSR: recursos que nascem / morrem em cada posição
+    std::vector<u32> born_;
+    std::vector<u32> diesBegin_;
+    std::vector<u32> dies_;
 
     Stats stats_{};
     bool  compiled_ = false;

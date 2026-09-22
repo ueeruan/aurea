@@ -31,6 +31,7 @@ add_executable(aurea_tests
     test_expr.cpp
     test_vector.cpp
     test_vector_gpu.cpp
+    test_perf_render.cpp
 )
 
 target_include_directories(aurea_tests PRIVATE

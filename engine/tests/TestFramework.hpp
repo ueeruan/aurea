@@ -52,7 +52,7 @@ public:
     [[nodiscard]] u32 checks() const noexcept { return checks_; }
 
 private:
-    static constexpr u32 kMax = 512;
+    static constexpr u32 kMax = 1024;   // 443 na Fase 7; as frentes da Fase 8 somam muitos
     TestCase tests_[kMax]{};
     u32 count_ = 0;
     u32 failures_ = 0;

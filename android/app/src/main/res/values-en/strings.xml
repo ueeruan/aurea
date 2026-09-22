@@ -38,7 +38,8 @@
     <string name="home_no_projects_hint">Tap New project to start.</string>
     <string name="home_no_results">No projects found</string>
     <string name="home_sort_recent">Recent</string>
-    <string name="home_sort_name">Name</string>
+    <string name="home_sort_name">Name (A-Z)</string>
+    <string name="home_sort_longest">Longest</string>
     <string name="home_sort_created">Created</string>
     <string name="home_sort_size">Size</string>
     <string name="home_sort_title">Sort projects</string>
@@ -97,5 +98,45 @@
     <string name="unit_seconds">%1$s s</string>
     <string name="unit_megabyte">%1$d MB</string>
     <string name="unit_gigabyte">%1$s GB</string>
+
+    <string name="home_import_media">Import media</string>
+    <string name="home_see_all">See all</string>
+    <string name="home_empty_hint">Your projects show up here, with a thumbnail of what you made.</string>
+
+    <plurals name="home_project_count">
+        <item quantity="one">%1$d project</item>
+        <item quantity="other">%1$d projects</item>
+    </plurals>
+
+    <string name="greeting_morning">Good morning</string>
+    <string name="greeting_afternoon">Good afternoon</string>
+    <string name="greeting_evening">Good evening</string>
+    <string name="home_continue">Continue editing</string>
+    <string name="home_continue_action">Continue</string>
+    <string name="home_search_hint">Search by name</string>
+    <string name="home_clear_search">Clear search</string>
+    <string name="home_mark_all">Mark all</string>
+    <string name="home_exit_selection">Exit selection</string>
+    <string name="home_select">Select</string>
+    <string name="home_menu_content">Project menu</string>
+    <string name="home_selected_chosen">%1$d selected</string>
+
+    <string name="new_project_title">New project</string>
+    <string name="new_project_free">Free size</string>
+    <string name="new_project_width">Width</string>
+    <string name="new_project_height">Height</string>
+    <string name="new_project_name">Name</string>
+    <string name="new_project_name_hint">Project name</string>
+    <string name="new_project_untitled">Untitled project</string>
+    <string name="new_project_create">Create project</string>
+
+    <string name="aspect_hint_tv">YouTube / TV</string>
+    <string name="aspect_hint_reels">Reels / TikTok</string>
+    <string name="aspect_hint_feed">Feed</string>
+    <string name="aspect_hint_instagram">Instagram</string>
+    <string name="aspect_hint_classic">Classic</string>
+    <string name="aspect_free">Free</string>
+    <string name="aspect_free_hint">You choose</string>
+    <string name="import_failed">I couldn\'t import that media.</string>
 
 </resources>

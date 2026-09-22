@@ -38,7 +38,8 @@
     <string name="home_no_projects_hint">Ketuk Proyek baru untuk mulai.</string>
     <string name="home_no_results">Proyek tidak ditemukan</string>
     <string name="home_sort_recent">Terbaru</string>
-    <string name="home_sort_name">Nama</string>
+    <string name="home_sort_name">Nama (A-Z)</string>
+    <string name="home_sort_longest">Terpanjang</string>
     <string name="home_sort_created">Dibuat</string>
     <string name="home_sort_size">Ukuran</string>
     <string name="home_sort_title">Urutkan proyek</string>
@@ -97,5 +98,44 @@
     <string name="unit_seconds">%1$s dtk</string>
     <string name="unit_megabyte">%1$d MB</string>
     <string name="unit_gigabyte">%1$s GB</string>
+
+    <string name="home_import_media">Impor media</string>
+    <string name="home_see_all">Lihat semua</string>
+    <string name="home_empty_hint">Proyek Anda muncul di sini, dengan miniatur hasil karya Anda.</string>
+
+    <plurals name="home_project_count">
+        <item quantity="other">%1$d proyek</item>
+    </plurals>
+
+    <string name="greeting_morning">Selamat pagi</string>
+    <string name="greeting_afternoon">Selamat siang</string>
+    <string name="greeting_evening">Selamat malam</string>
+    <string name="home_continue">Lanjut mengedit</string>
+    <string name="home_continue_action">Lanjut</string>
+    <string name="home_search_hint">Cari berdasarkan nama</string>
+    <string name="home_clear_search">Hapus pencarian</string>
+    <string name="home_mark_all">Tandai semua</string>
+    <string name="home_exit_selection">Keluar dari pilihan</string>
+    <string name="home_select">Pilih</string>
+    <string name="home_menu_content">Menu proyek</string>
+    <string name="home_selected_chosen">%1$d dipilih</string>
+
+    <string name="new_project_title">Proyek baru</string>
+    <string name="new_project_free">Ukuran bebas</string>
+    <string name="new_project_width">Lebar</string>
+    <string name="new_project_height">Tinggi</string>
+    <string name="new_project_name">Nama</string>
+    <string name="new_project_name_hint">Nama proyek</string>
+    <string name="new_project_untitled">Proyek tanpa judul</string>
+    <string name="new_project_create">Buat proyek</string>
+
+    <string name="aspect_hint_tv">YouTube / TV</string>
+    <string name="aspect_hint_reels">Reels / TikTok</string>
+    <string name="aspect_hint_feed">Feed</string>
+    <string name="aspect_hint_instagram">Instagram</string>
+    <string name="aspect_hint_classic">Klasik</string>
+    <string name="aspect_free">Bebas</string>
+    <string name="aspect_free_hint">Anda yang pilih</string>
+    <string name="import_failed">Tidak bisa mengimpor media itu.</string>
 
 </resources>

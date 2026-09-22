@@ -19,11 +19,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
+import com.aurea.aurea.R
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.state.ProjectEntry
 import com.aurea.aurea.ui.ds.AureaActionSheet
@@ -71,11 +73,11 @@ internal fun ProjectDialogs(
             title = d.entry.title,
             message = projectSpec(d.entry),
             actions = listOf(
-                SheetAction("Abrir") { onOpen(d.entry) },
-                SheetAction("Duplicar") { store.duplicateProject(d.entry.path) },
-                SheetAction("Renomear") { state.current = ProjectDialog.Rename(d.entry) },
-                SheetAction("Excluir projeto", destructive = true) { state.current = ProjectDialog.ConfirmDelete(d.entry) },
-                SheetAction("Apagar todos os projetos", destructive = true) { if (all.isNotEmpty()) state.current = ProjectDialog.DeleteAll },
+                SheetAction(stringResource(R.string.common_open)) { onOpen(d.entry) },
+                SheetAction(stringResource(R.string.common_duplicate)) { store.duplicateProject(d.entry.path) },
+                SheetAction(stringResource(R.string.common_rename)) { state.current = ProjectDialog.Rename(d.entry) },
+                SheetAction(stringResource(R.string.project_delete), destructive = true) { state.current = ProjectDialog.ConfirmDelete(d.entry) },
+                SheetAction(stringResource(R.string.project_delete_all), destructive = true) { if (all.isNotEmpty()) state.current = ProjectDialog.DeleteAll },
             ),
             onDismiss = close,
         )
@@ -83,7 +85,7 @@ internal fun ProjectDialogs(
         // de apagar tudo por engano não se paga.
         is ProjectDialog.ConfirmDelete -> AureaActionSheet(
             title = d.entry.title,
-            actions = listOf(SheetAction("Excluir projeto", destructive = true) { store.deleteProjects(listOf(d.entry.path)) }),
+            actions = listOf(SheetAction(stringResource(R.string.project_delete), destructive = true) { store.deleteProjects(listOf(d.entry.path)) }),
             onDismiss = close,
         )
         is ProjectDialog.Rename -> RenameProjectDialog(
@@ -92,10 +94,9 @@ internal fun ProjectDialogs(
             onDismiss = close,
         )
         ProjectDialog.DeleteAll -> AureaAlert(
-            title = "Apagar todos os projetos?",
-            message = "${all.size} projeto(s) serão apagados. Isso não pode ser desfeito.",
-            confirmLabel = "Apagar todos",
-            cancelLabel = "Cancelar",
+            title = stringResource(R.string.project_delete_all_title),
+            message = stringResource(R.string.project_delete_all_message, all.size),
+            confirmLabel = stringResource(R.string.project_delete_all_confirm),
             destructive = true,
             onConfirm = {
                 store.deleteProjects(all.map { it.path })
@@ -104,10 +105,10 @@ internal fun ProjectDialogs(
             onDismiss = close,
         )
         is ProjectDialog.BatchDelete -> AureaActionSheet(
-            title = "Excluir ${d.paths.size} projetos?",
-            message = "Não dá para desfazer.",
+            title = stringResource(R.string.project_delete_many_title, d.paths.size),
+            message = stringResource(R.string.common_irreversible),
             actions = listOf(
-                SheetAction("Excluir", destructive = true) {
+                SheetAction(stringResource(R.string.common_delete), destructive = true) {
                     store.deleteProjects(d.paths)
                     vm.clearSelection()
                 },
@@ -115,8 +116,8 @@ internal fun ProjectDialogs(
             onDismiss = close,
         )
         ProjectDialog.Sort -> AureaActionSheet(
-            title = "Ordenar os projetos",
-            actions = ProjectSort.entries.map { s -> SheetAction(s.label) { vm.changeSort(s) } },
+            title = stringResource(R.string.home_sort_title),
+            actions = ProjectSort.entries.map { s -> SheetAction(stringResource(s.label)) { vm.changeSort(s) } },
             onDismiss = close,
         )
     }
@@ -136,9 +137,8 @@ private fun RenameProjectDialog(initial: String, onSave: (String) -> Unit, onDis
         if (t.isNotEmpty()) onSave(t)
     }
     AureaAlert(
-        title = "Renomear",
-        confirmLabel = "Salvar",
-        cancelLabel = "Cancelar",
+        title = stringResource(R.string.common_rename),
+        confirmLabel = stringResource(R.string.common_save),
         onConfirm = save,
         onDismiss = onDismiss,
         extra = {
@@ -169,7 +169,7 @@ private fun RenameProjectDialog(initial: String, onSave: (String) -> Unit, onDis
 @Composable
 internal fun NewProjectSheetFor(store: EditorStore, vm: HomeViewModel, all: List<ProjectEntry>, onDismiss: () -> Unit) {
     NewProjectSheet(
-        suggestedName = "Projeto ${all.size + 1}",
+        suggestedName = stringResource(R.string.project_new, all.size + 1),
         defaultAspectKey = vm.defaultAspectKey,
         defaultResolution = vm.defaultResolution,
         defaultFps = vm.defaultFps,

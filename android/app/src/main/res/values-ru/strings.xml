@@ -37,8 +37,9 @@
     <string name="home_no_projects">Проектов пока нет</string>
     <string name="home_no_projects_hint">Нажмите «Новый проект», чтобы начать.</string>
     <string name="home_no_results">Проекты не найдены</string>
-    <string name="home_sort_recent">Недавние</string>
-    <string name="home_sort_name">Имя</string>
+    <string name="home_sort_recent">Сначала новые</string>
+    <string name="home_sort_name">Имя (A-Z)</string>
+    <string name="home_sort_longest">Самые длинные</string>
     <string name="home_sort_created">Дата создания</string>
     <string name="home_sort_size">Размер</string>
     <string name="home_sort_title">Сортировка проектов</string>
@@ -97,5 +98,47 @@
     <string name="unit_seconds">%1$s с</string>
     <string name="unit_megabyte">%1$d МБ</string>
     <string name="unit_gigabyte">%1$s ГБ</string>
+
+    <string name="home_import_media">Импорт медиа</string>
+    <string name="home_see_all">Показать все</string>
+    <string name="home_empty_hint">Ваши проекты появятся здесь — с миниатюрой того, что вы сделали.</string>
+
+    <plurals name="home_project_count">
+        <item quantity="one">%1$d проект</item>
+        <item quantity="few">%1$d проекта</item>
+        <item quantity="many">%1$d проектов</item>
+        <item quantity="other">%1$d проекта</item>
+    </plurals>
+
+    <string name="greeting_morning">Доброе утро</string>
+    <string name="greeting_afternoon">Добрый день</string>
+    <string name="greeting_evening">Добрый вечер</string>
+    <string name="home_continue">Продолжить монтаж</string>
+    <string name="home_continue_action">Продолжить</string>
+    <string name="home_search_hint">Поиск по имени</string>
+    <string name="home_clear_search">Очистить поиск</string>
+    <string name="home_mark_all">Отметить все</string>
+    <string name="home_exit_selection">Выйти из выбора</string>
+    <string name="home_select">Выбрать</string>
+    <string name="home_menu_content">Меню проекта</string>
+    <string name="home_selected_chosen">Выбрано: %1$d</string>
+
+    <string name="new_project_title">Новый проект</string>
+    <string name="new_project_free">Свободный размер</string>
+    <string name="new_project_width">Ширина</string>
+    <string name="new_project_height">Высота</string>
+    <string name="new_project_name">Имя</string>
+    <string name="new_project_name_hint">Имя проекта</string>
+    <string name="new_project_untitled">Проект без названия</string>
+    <string name="new_project_create">Создать проект</string>
+
+    <string name="aspect_hint_tv">YouTube / ТВ</string>
+    <string name="aspect_hint_reels">Reels / TikTok</string>
+    <string name="aspect_hint_feed">Лента</string>
+    <string name="aspect_hint_instagram">Instagram</string>
+    <string name="aspect_hint_classic">Классика</string>
+    <string name="aspect_free">Свободно</string>
+    <string name="aspect_free_hint">Вы выбираете</string>
+    <string name="import_failed">Не удалось импортировать этот файл.</string>
 
 </resources>

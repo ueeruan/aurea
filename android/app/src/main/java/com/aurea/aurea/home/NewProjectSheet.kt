@@ -35,6 +35,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -89,8 +91,11 @@ internal fun NewProjectSheet(
     val frame = if (free) Frame(fw, fh) else frameFor(aspect.ratio, resolution)
     val ratioOnScreen = if (free) (fw.toFloat() / fh).coerceIn(0.2f, 5f) else aspect.ratio
 
+    // O texto padrão sai do catálogo AQUI: `create()` é chamada de um onClick e
+    // não pode invocar composable nenhum.
+    val untitled = stringResource(R.string.new_project_untitled)
     fun create() {
-        val title = name.trim().ifEmpty { suggestedName.ifEmpty { "Projeto sem titulo" } }
+        val title = name.trim().ifEmpty { suggestedName.ifEmpty { untitled } }
         onDismiss()
         onCreate(NewProjectSpec(frame.width, frame.height, fps, title))
     }
@@ -103,7 +108,7 @@ internal fun NewProjectSheet(
                 .padding(start = 20.dp, top = 12.dp, end = 20.dp, bottom = 16.dp),
         ) {
             Row(verticalAlignment = Alignment.Bottom) {
-                Text("Novo projeto", style = AureaType.TitleLarge, modifier = Modifier.weight(1f))
+                Text(stringResource(R.string.new_project_title), style = AureaType.TitleLarge, modifier = Modifier.weight(1f))
                 // A ficha, viva: muda com cada escolha.
                 Text("${frame.width} × ${frame.height} · $fps fps", style = AureaType.SheetSpec)
             }
@@ -111,7 +116,7 @@ internal fun NewProjectSheet(
             AspectPreviewFrame(
                 ratio = ratioOnScreen,
                 label = if (free) "$fw × $fh" else aspect.label,
-                hint = if (free) "Medida livre" else aspect.hint,
+                hint = if (free) stringResource(R.string.aspect_free) else stringResource(aspect.hint),
             )
             Spacer(Modifier.height(12.dp))
             Row(Modifier.fillMaxWidth()) {
@@ -126,18 +131,18 @@ internal fun NewProjectSheet(
             if (free) {
                 Spacer(Modifier.height(12.dp))
                 Row(verticalAlignment = Alignment.Bottom) {
-                    DimensionField("Largura", freeWidth, Modifier.weight(1f)) { freeWidth = it }
+                    DimensionField(stringResource(R.string.new_project_width), freeWidth, Modifier.weight(1f)) { freeWidth = it }
                     Text("×", style = AureaType.Times, modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp))
-                    DimensionField("Altura", freeHeight, Modifier.weight(1f)) { freeHeight = it }
+                    DimensionField(stringResource(R.string.new_project_height), freeHeight, Modifier.weight(1f)) { freeHeight = it }
                 }
             }
             Spacer(Modifier.height(20.dp))
-            CapsLabel("Nome")
+            CapsLabel(stringResource(R.string.new_project_name))
             Spacer(Modifier.height(8.dp))
             SheetTextField(
                 value = name,
                 onValueChange = { name = it },
-                placeholder = suggestedName.ifEmpty { "Nome do projeto" },
+                placeholder = suggestedName.ifEmpty { stringResource(R.string.new_project_name_hint) },
                 textStyle = AureaType.NameField,
                 placeholderStyle = AureaType.NamePlaceholder,
                 keyboard = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
@@ -150,7 +155,7 @@ internal fun NewProjectSheet(
             )
             if (!free) {
                 Spacer(Modifier.height(18.dp))
-                CapsLabel("Resolução")
+                CapsLabel(stringResource(R.string.settings_resolution))
                 Spacer(Modifier.height(8.dp))
                 AureaSegmented(
                     ProjectPresets.resolutions, resolution, ProjectPresets::resolutionLabel, { resolution = it },
@@ -174,7 +179,7 @@ internal fun NewProjectSheet(
                 )
             }
             Spacer(Modifier.height(18.dp))
-            CapsLabel("Quadros por segundo")
+            CapsLabel(stringResource(R.string.settings_fps))
             Spacer(Modifier.height(8.dp))
             AureaSegmented(
                 ProjectPresets.fpsOptions, fps, { "$it fps" }, { fps = it },
@@ -190,7 +195,7 @@ internal fun NewProjectSheet(
                     .pressHighlight { create() },
                 contentAlignment = Alignment.Center,
             ) {
-                Text("Criar projeto", style = AureaType.Button)
+                Text(stringResource(R.string.new_project_create), style = AureaType.Button)
             }
         }
     }
@@ -258,7 +263,7 @@ private fun AspectOptionItem(option: AspectOption, selected: Boolean, modifier: 
         }
         Spacer(Modifier.height(7.dp))
         Text(option.label, style = AureaType.FormatLabel, color = if (selected) AureaColors.Accent else AureaColors.Text)
-        Text(option.hint, style = AureaType.FormatHint, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+        Text(stringResource(option.hint), style = AureaType.FormatHint, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
     }
 }
 

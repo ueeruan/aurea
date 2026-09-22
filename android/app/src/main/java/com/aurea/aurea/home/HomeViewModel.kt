@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.content.edit
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.aurea.aurea.R
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.state.ProjectEntry
 import com.aurea.aurea.state.Screen
@@ -166,7 +167,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val media = withContext(Dispatchers.IO) { probeMedia(uri) }
             if (media == null) {
-                store.showToast("Não consegui importar essa mídia.")
+                store.showToast(getApplication<Application>().getString(R.string.import_failed))
                 return@launch
             }
             if (!awaitEngine(store)) return@launch

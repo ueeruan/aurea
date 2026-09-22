@@ -22,6 +22,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.aurea.aurea.state.EditorStore
@@ -71,7 +73,7 @@ internal fun ProjectsTab(
             item(key = "titulo") {
                 Column {
                     Text(
-                        "Projetos",
+                        stringResource(R.string.home_title_projects),
                         style = AureaType.HeadlineLarge,
                         modifier = Modifier.padding(start = AureaDims.Gutter, top = AureaDims.S5, end = AureaDims.Gutter),
                     )
@@ -96,8 +98,8 @@ internal fun ProjectsTab(
             if (loaded && arranged.isEmpty()) {
                 item(key = "vazio") {
                     ProjectsEmptyState(
-                        if (query.isNotBlank()) "Nenhum projeto com esse nome."
-                        else "Seus projetos aparecem aqui, com a miniatura do que você fez.",
+                        if (query.isNotBlank()) stringResource(R.string.home_no_results)
+                        else stringResource(R.string.home_empty_hint),
                     )
                 }
             }

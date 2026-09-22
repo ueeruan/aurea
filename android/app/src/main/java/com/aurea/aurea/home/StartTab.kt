@@ -32,6 +32,9 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
+import com.aurea.aurea.ui.i18n.plural
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.state.ProjectEntry
 import com.aurea.aurea.ui.theme.AureaColors
@@ -125,13 +128,13 @@ internal fun StartTab(
             }
             item(key = "criar") {
                 Column(Modifier.fillMaxWidth().padding(start = AureaDims.Gutter, top = AureaDims.S1, end = AureaDims.Gutter)) {
-                    FillButton("Novo projeto", CupertinoGlyph.Plus) { newSheet = true }
+                    FillButton(stringResource(R.string.home_new_project), CupertinoGlyph.Plus) { newSheet = true }
                     Spacer(Modifier.height(AureaDims.S2))
                     Row(horizontalArrangement = Arrangement.spacedBy(AureaDims.S3)) {
-                        QuickAction(CupertinoGlyph.PhotoOnRectangle, "Importar mídia", Modifier.weight(1f)) {
+                        QuickAction(CupertinoGlyph.PhotoOnRectangle, stringResource(R.string.home_import_media), Modifier.weight(1f)) {
                             picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
                         }
-                        QuickAction(CupertinoGlyph.ArrowUpArrowDown, "Ordenar", Modifier.weight(1f)) {
+                        QuickAction(CupertinoGlyph.ArrowUpArrowDown, stringResource(R.string.home_sort_title), Modifier.weight(1f)) {
                             dialog.current = ProjectDialog.Sort
                         }
                     }
@@ -149,7 +152,7 @@ internal fun StartTab(
             if (arranged.isNotEmpty()) {
                 item(key = "recentes") {
                     SectionHeader(
-                        if (filtering) "${arranged.size} projeto(s)" else "Recentes",
+                        if (filtering) plural(R.string.home_project_count, arranged.size) else stringResource(R.string.home_sort_recent),
                         actionLabel = if (!filtering && all.size > visible.size + (if (hero != null) 1 else 0)) "Ver todos" else null,
                         onAction = { onSelectTab(HomeViewModel.PROJECTS_TAB) },
                     )
@@ -160,8 +163,8 @@ internal fun StartTab(
             if (loaded && arranged.isEmpty()) {
                 item(key = "vazio") {
                     ProjectsEmptyState(
-                        if (query.isNotBlank()) "Nenhum projeto com esse nome."
-                        else "Seus projetos aparecem aqui, com a miniatura do que você fez.",
+                        if (query.isNotBlank()) stringResource(R.string.home_no_results)
+                        else stringResource(R.string.home_empty_hint),
                     )
                 }
             }

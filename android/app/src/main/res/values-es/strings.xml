@@ -37,8 +37,9 @@
     <string name="home_no_projects">Todavía no hay proyectos</string>
     <string name="home_no_projects_hint">Toca Nuevo proyecto para empezar.</string>
     <string name="home_no_results">No se encontraron proyectos</string>
-    <string name="home_sort_recent">Recientes</string>
-    <string name="home_sort_name">Nombre</string>
+    <string name="home_sort_recent">Más recientes</string>
+    <string name="home_sort_name">Nombre (A-Z)</string>
+    <string name="home_sort_longest">Más largos</string>
     <string name="home_sort_created">Creación</string>
     <string name="home_sort_size">Tamaño</string>
     <string name="home_sort_title">Ordenar los proyectos</string>
@@ -97,5 +98,45 @@
     <string name="unit_seconds">%1$s s</string>
     <string name="unit_megabyte">%1$d MB</string>
     <string name="unit_gigabyte">%1$s GB</string>
+
+    <string name="home_import_media">Importar medios</string>
+    <string name="home_see_all">Ver todos</string>
+    <string name="home_empty_hint">Tus proyectos aparecen aquí, con la miniatura de lo que hiciste.</string>
+
+    <plurals name="home_project_count">
+        <item quantity="one">%1$d proyecto</item>
+        <item quantity="other">%1$d proyectos</item>
+    </plurals>
+
+    <string name="greeting_morning">Buenos días</string>
+    <string name="greeting_afternoon">Buenas tardes</string>
+    <string name="greeting_evening">Buenas noches</string>
+    <string name="home_continue">Seguir editando</string>
+    <string name="home_continue_action">Seguir</string>
+    <string name="home_search_hint">Buscar por nombre</string>
+    <string name="home_clear_search">Quitar búsqueda</string>
+    <string name="home_mark_all">Marcar todos</string>
+    <string name="home_exit_selection">Salir de la selección</string>
+    <string name="home_select">Seleccionar</string>
+    <string name="home_menu_content">Menú del proyecto</string>
+    <string name="home_selected_chosen">%1$d elegidos</string>
+
+    <string name="new_project_title">Nuevo proyecto</string>
+    <string name="new_project_free">Medida libre</string>
+    <string name="new_project_width">Ancho</string>
+    <string name="new_project_height">Alto</string>
+    <string name="new_project_name">Nombre</string>
+    <string name="new_project_name_hint">Nombre del proyecto</string>
+    <string name="new_project_untitled">Proyecto sin título</string>
+    <string name="new_project_create">Crear proyecto</string>
+
+    <string name="aspect_hint_tv">YouTube / TV</string>
+    <string name="aspect_hint_reels">Reels / TikTok</string>
+    <string name="aspect_hint_feed">Feed</string>
+    <string name="aspect_hint_instagram">Instagram</string>
+    <string name="aspect_hint_classic">Clásico</string>
+    <string name="aspect_free">Libre</string>
+    <string name="aspect_free_hint">Tú eliges</string>
+    <string name="import_failed">No pude importar ese medio.</string>
 
 </resources>

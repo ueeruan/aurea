@@ -49,6 +49,9 @@ import com.aurea.aurea.ui.theme.AureaShape
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.CupertinoGlyph
 import com.aurea.aurea.ui.theme.CupertinoIcon
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
+import com.aurea.aurea.ui.i18n.plural
 import com.aurea.aurea.ui.theme.tocavel
 import java.time.LocalTime
 
@@ -58,13 +61,19 @@ private val PlaceholderBrush = Brush.linearGradient(listOf(AureaColors.SurfaceHi
 /** Scrim do hero: transparente até 45 %, preto 70 % no fim. */
 private val HeroScrimBrush = Brush.verticalGradient(0.45f to Color.Transparent, 1f to AureaColors.ImageScrim)
 
-/** A saudação pela hora do aparelho (05–11 dia, 12–17 tarde, resto noite). */
+/**
+ * A saudação pela hora do aparelho (05–11 dia, 12–17 tarde, resto noite).
+ *
+ * @Composable porque o texto vem do catálogo — a hora continua sendo a do
+ * aparelho, o rótulo é que muda de idioma.
+ */
+@Composable
 private fun greeting(): String {
     val h = LocalTime.now().hour
     return when {
-        h in 5..11 -> "Bom dia"
-        h in 12..17 -> "Boa tarde"
-        else -> "Boa noite"
+        h in 5..11 -> stringResource(R.string.greeting_morning)
+        h in 12..17 -> stringResource(R.string.greeting_afternoon)
+        else -> stringResource(R.string.greeting_evening)
     }
 }
 
@@ -85,9 +94,9 @@ internal fun HomeHeader(onSearch: () -> Unit, onSettings: () -> Unit) {
             Spacer(Modifier.height(2.dp))
             Text(greeting(), style = AureaType.Greeting, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        RoundIconButton(CupertinoGlyph.Search, "Buscar projetos", onSearch)
+        RoundIconButton(CupertinoGlyph.Search, stringResource(R.string.home_search_projects), onSearch)
         Spacer(Modifier.width(2.dp))
-        RoundIconButton(CupertinoGlyph.SliderHorizontal3, "Ajustes", onSettings)
+        RoundIconButton(CupertinoGlyph.SliderHorizontal3, stringResource(R.string.home_title_settings), onSettings)
     }
 }
 
@@ -120,7 +129,7 @@ internal fun ContinueEditingCard(entry: ProjectEntry, thumbs: HomeThumbnails, on
             verticalAlignment = Alignment.Bottom,
         ) {
             Column(Modifier.weight(1f)) {
-                Text("Continuar editando", style = AureaType.HeroKicker)
+                Text(stringResource(R.string.home_continue), style = AureaType.HeroKicker)
                 Spacer(Modifier.height(3.dp))
                 Text(entry.title, style = AureaType.HeroTitle, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.height(2.dp))
@@ -133,15 +142,16 @@ internal fun ContinueEditingCard(entry: ProjectEntry, thumbs: HomeThumbnails, on
             ) {
                 CupertinoIcon(CupertinoGlyph.PlayFill, AureaDims.IconXs, AureaColors.OnAccent)
                 Spacer(Modifier.width(6.dp))
-                Text("Continuar", style = AureaType.HeroPill)
+                Text(stringResource(R.string.home_continue_action), style = AureaType.HeroPill)
             }
         }
+        val menuLabel = stringResource(R.string.home_menu_content)
         Box(
             Modifier
                 .align(Alignment.TopEnd)
                 .padding(top = 2.dp, end = 2.dp)
                 .size(40.dp)
-                .semantics { contentDescription = "Menu do projeto" }
+                .semantics { contentDescription = menuLabel }
                 .tocavel(onClick = onMenu),
             contentAlignment = Alignment.Center,
         ) {
@@ -200,10 +210,11 @@ internal fun ProjectGridCard(
                 Spacer(Modifier.height(1.dp))
                 Text(spec, style = AureaType.CardSpec, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
+            val menuLabel = stringResource(R.string.home_menu_content)
             Box(
                 Modifier
                     .size(40.dp)
-                    .semantics { contentDescription = "Menu do projeto" }
+                    .semantics { contentDescription = menuLabel }
                     .tocavel(onClick = if (selecting) onMark else onMenu),
                 contentAlignment = Alignment.Center,
             ) {
@@ -230,14 +241,15 @@ private fun FormatPlaceholder(ratio: Float) {
 
 /** `_SemProjetos`: film + a frase. Também serve para busca sem resultado. */
 @Composable
-internal fun ProjectsEmptyState(message: String = "Seus projetos aparecem aqui, com a miniatura do que você fez.") {
+internal fun ProjectsEmptyState(message: String? = null) {
+    val text = message ?: stringResource(R.string.home_empty_hint)
     Row(
         Modifier.fillMaxWidth().padding(start = AureaDims.Gutter, top = AureaDims.S1, end = AureaDims.Gutter),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         CupertinoIcon(CupertinoGlyph.Film, 22.dp, AureaColors.Muted)
         Spacer(Modifier.width(AureaDims.S3))
-        Text(message, style = AureaType.Empty, modifier = Modifier.weight(1f))
+        Text(text, style = AureaType.Empty, modifier = Modifier.weight(1f))
     }
 }
 
@@ -265,19 +277,19 @@ internal fun ProjectListBar(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (selecting) {
-            Text("$selectedCount escolhidos", style = AureaType.ListCount, modifier = Modifier.weight(1f))
-            BarButton(CupertinoGlyph.CheckmarkCircle, "Marcar todos", onSelectAll)
-            BarButton(CupertinoGlyph.Xmark, "Sair da seleção", onExitSelection)
+            Text(stringResource(R.string.home_selected_chosen, selectedCount), style = AureaType.ListCount, modifier = Modifier.weight(1f))
+            BarButton(CupertinoGlyph.CheckmarkCircle, stringResource(R.string.home_mark_all), onSelectAll)
+            BarButton(CupertinoGlyph.Xmark, stringResource(R.string.home_exit_selection), onExitSelection)
             return@Row
         }
         if (!searching) {
-            Text(if (count == 1) "1 projeto" else "$count projetos", style = AureaType.ListCount, modifier = Modifier.weight(1f))
-            BarButton(CupertinoGlyph.Search, "Buscar", onOpenSearch)
+            Text(plural(R.string.home_project_count, count), style = AureaType.ListCount, modifier = Modifier.weight(1f))
+            BarButton(CupertinoGlyph.Search, stringResource(R.string.common_search), onOpenSearch)
         } else {
             SearchField(query, onQuery, onClearSearch, Modifier.weight(1f))
         }
-        BarButton(CupertinoGlyph.ArrowUpArrowDown, "Ordenar", onSort)
-        if (!searching) BarButton(CupertinoGlyph.CheckmarkCircle, "Selecionar") { onSelectAll() }
+        BarButton(CupertinoGlyph.ArrowUpArrowDown, stringResource(R.string.home_sort_title), onSort)
+        if (!searching) BarButton(CupertinoGlyph.CheckmarkCircle, stringResource(R.string.home_select)) { onSelectAll() }
     }
 }
 
@@ -320,13 +332,14 @@ internal fun SearchField(query: String, onQuery: (String) -> Unit, onClear: () -
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box(Modifier.weight(1f).padding(horizontal = 7.dp), contentAlignment = Alignment.CenterStart) {
-                    if (query.isEmpty()) Text("Procurar pelo nome", style = AureaType.SearchPlaceholder, maxLines = 1)
+                    if (query.isEmpty()) Text(stringResource(R.string.home_search_hint), style = AureaType.SearchPlaceholder, maxLines = 1)
                     inner()
                 }
+                val clearLabel = stringResource(R.string.home_clear_search)
                 Box(
                     Modifier
                         .fillMaxHeight()
-                        .semantics { contentDescription = "Limpar busca" }
+                        .semantics { contentDescription = clearLabel }
                         .tocavel(onClick = onClear)
                         .padding(horizontal = AureaDims.S2),
                     contentAlignment = Alignment.Center,
@@ -354,9 +367,9 @@ internal fun BatchActionsBar(count: Int, backdrop: Backdrop, onDuplicate: () -> 
     ) {
         Box(Modifier.fillMaxWidth().height(AureaDims.Hairline).background(AureaColors.Border))
         Row(Modifier.fillMaxWidth().padding(horizontal = AureaDims.S3, vertical = AureaDims.S2), verticalAlignment = Alignment.CenterVertically) {
-            Text("$count escolhidos", style = AureaType.BatchCount, modifier = Modifier.weight(1f))
-            BatchButton(CupertinoGlyph.PlusSquareOnSquare, "Duplicar", AureaColors.Text, AureaType.BatchAction, onDuplicate)
-            BatchButton(CupertinoGlyph.Trash, "Excluir", AureaColors.Danger, AureaType.BatchDanger, onDelete)
+            Text(stringResource(R.string.home_selected_chosen, count), style = AureaType.BatchCount, modifier = Modifier.weight(1f))
+            BatchButton(CupertinoGlyph.PlusSquareOnSquare, stringResource(R.string.common_duplicate), AureaColors.Text, AureaType.BatchAction, onDuplicate)
+            BatchButton(CupertinoGlyph.Trash, stringResource(R.string.common_delete), AureaColors.Danger, AureaType.BatchDanger, onDelete)
         }
     }
 }

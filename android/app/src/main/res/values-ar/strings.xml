@@ -48,7 +48,8 @@
     <string name="home_no_projects_hint">اضغط على «مشروع جديد» للبدء.</string>
     <string name="home_no_results">لم يُعثر على مشاريع</string>
     <string name="home_sort_recent">الأحدث</string>
-    <string name="home_sort_name">الاسم</string>
+    <string name="home_sort_name">الاسم (أ-ي)</string>
+    <string name="home_sort_longest">الأطول</string>
     <string name="home_sort_created">تاريخ الإنشاء</string>
     <string name="home_sort_size">الحجم</string>
     <string name="home_sort_title">ترتيب المشاريع</string>
@@ -107,5 +108,49 @@
     <string name="unit_seconds">%1$s ث</string>
     <string name="unit_megabyte">%1$d م.ب</string>
     <string name="unit_gigabyte">%1$s ج.ب</string>
+
+    <string name="home_import_media">استيراد وسائط</string>
+    <string name="home_see_all">عرض الكل</string>
+    <string name="home_empty_hint">تظهر مشاريعك هنا مع صورة مصغّرة لما أنجزته.</string>
+
+    <plurals name="home_project_count">
+        <item quantity="zero">لا مشاريع</item>
+        <item quantity="one">مشروع واحد</item>
+        <item quantity="two">مشروعان</item>
+        <item quantity="few">%1$d مشاريع</item>
+        <item quantity="many">%1$d مشروعًا</item>
+        <item quantity="other">%1$d مشروع</item>
+    </plurals>
+
+    <string name="greeting_morning">صباح الخير</string>
+    <string name="greeting_afternoon">مساء الخير</string>
+    <string name="greeting_evening">مساء الخير</string>
+    <string name="home_continue">متابعة التحرير</string>
+    <string name="home_continue_action">متابعة</string>
+    <string name="home_search_hint">ابحث بالاسم</string>
+    <string name="home_clear_search">مسح البحث</string>
+    <string name="home_mark_all">تحديد الكل</string>
+    <string name="home_exit_selection">الخروج من التحديد</string>
+    <string name="home_select">تحديد</string>
+    <string name="home_menu_content">قائمة المشروع</string>
+    <string name="home_selected_chosen">%1$d محدّد</string>
+
+    <string name="new_project_title">مشروع جديد</string>
+    <string name="new_project_free">مقاس حر</string>
+    <string name="new_project_width">العرض</string>
+    <string name="new_project_height">الارتفاع</string>
+    <string name="new_project_name">الاسم</string>
+    <string name="new_project_name_hint">اسم المشروع</string>
+    <string name="new_project_untitled">مشروع بلا عنوان</string>
+    <string name="new_project_create">إنشاء المشروع</string>
+
+    <string name="aspect_hint_tv">يوتيوب / تلفاز</string>
+    <string name="aspect_hint_reels">ريلز / تيك توك</string>
+    <string name="aspect_hint_feed">الخلاصة</string>
+    <string name="aspect_hint_instagram">إنستغرام</string>
+    <string name="aspect_hint_classic">كلاسيكي</string>
+    <string name="aspect_free">حر</string>
+    <string name="aspect_free_hint">أنت تختار</string>
+    <string name="import_failed">لم أتمكّن من استيراد هذه الوسائط.</string>
 
 </resources>

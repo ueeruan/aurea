@@ -60,8 +60,9 @@
     <string name="home_no_projects">Nenhum projeto ainda</string>
     <string name="home_no_projects_hint">Toque em Novo projeto para começar.</string>
     <string name="home_no_results">Nenhum projeto encontrado</string>
-    <string name="home_sort_recent">Recentes</string>
-    <string name="home_sort_name">Nome</string>
+    <string name="home_sort_recent">Mais recentes</string>
+    <string name="home_sort_name">Nome (A-Z)</string>
+    <string name="home_sort_longest">Mais longos</string>
     <string name="home_sort_created">Criação</string>
     <string name="home_sort_size">Tamanho</string>
     <string name="home_sort_title">Ordenar os projetos</string>
@@ -129,5 +130,47 @@
     <string name="unit_seconds">%1$s s</string>
     <string name="unit_megabyte">%1$d MB</string>
     <string name="unit_gigabyte">%1$s GB</string>
+
+    <string name="home_import_media">Importar mídia</string>
+    <string name="home_see_all">Ver todos</string>
+    <string name="home_empty_hint">Seus projetos aparecem aqui, com a miniatura do que você fez.</string>
+
+    <!-- Plural de verdade: russo e árabe não têm duas formas, têm quatro e seis.
+         Um "%d projeto(s)" em português vira erro de concordância nos dois. -->
+    <plurals name="home_project_count">
+        <item quantity="one">%1$d projeto</item>
+        <item quantity="other">%1$d projetos</item>
+    </plurals>
+
+    <string name="greeting_morning">Bom dia</string>
+    <string name="greeting_afternoon">Boa tarde</string>
+    <string name="greeting_evening">Boa noite</string>
+    <string name="home_continue">Continuar editando</string>
+    <string name="home_continue_action">Continuar</string>
+    <string name="home_search_hint">Procurar pelo nome</string>
+    <string name="home_clear_search">Limpar busca</string>
+    <string name="home_mark_all">Marcar todos</string>
+    <string name="home_exit_selection">Sair da seleção</string>
+    <string name="home_select">Selecionar</string>
+    <string name="home_menu_content">Menu do projeto</string>
+    <string name="home_selected_chosen">%1$d escolhidos</string>
+
+    <string name="new_project_title">Novo projeto</string>
+    <string name="new_project_free">Medida livre</string>
+    <string name="new_project_width">Largura</string>
+    <string name="new_project_height">Altura</string>
+    <string name="new_project_name">Nome</string>
+    <string name="new_project_name_hint">Nome do projeto</string>
+    <string name="new_project_untitled">Projeto sem título</string>
+    <string name="new_project_create">Criar projeto</string>
+
+    <string name="aspect_hint_tv">YouTube / TV</string>
+    <string name="aspect_hint_reels">Reels / TikTok</string>
+    <string name="aspect_hint_feed">Feed</string>
+    <string name="aspect_hint_instagram">Instagram</string>
+    <string name="aspect_hint_classic">Clássico</string>
+    <string name="aspect_free">Livre</string>
+    <string name="aspect_free_hint">Você escolhe</string>
+    <string name="import_failed">Não consegui importar essa mídia.</string>
 
 </resources>

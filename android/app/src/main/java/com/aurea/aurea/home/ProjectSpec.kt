@@ -1,25 +1,33 @@
 package com.aurea.aurea.home
 
+import androidx.annotation.StringRes
+import com.aurea.aurea.R
 import com.aurea.aurea.state.ProjectEntry
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.roundToInt
 
-/** Um formato de quadro oferecido ao criar um projeto (`project_presets.dart`). */
-internal data class AspectOption(val key: String, val label: String, val hint: String, val ratio: Float)
+/**
+ * Um formato de quadro oferecido ao criar um projeto.
+ *
+ * [key] é a IDENTIDADE (vai para as preferências e para o projeto) e nunca
+ * muda; [label] e [hint] são ID de recurso, porque é o que o usuário lê. A
+ * proporção em si ("16:9") é universal e fica como está.
+ */
+internal data class AspectOption(val key: String, val label: String, @StringRes val hint: Int, val ratio: Float)
 
 internal object ProjectPresets {
     val aspects = listOf(
-        AspectOption("16:9", "16:9", "YouTube / TV", 16f / 9f),
-        AspectOption("9:16", "9:16", "Reels / TikTok", 9f / 16f),
-        AspectOption("1:1", "1:1", "Feed", 1f),
-        AspectOption("4:5", "4:5", "Instagram", 4f / 5f),
-        AspectOption("4:3", "4:3", "Clássico", 4f / 3f),
+        AspectOption("16:9", "16:9", R.string.aspect_hint_tv, 16f / 9f),
+        AspectOption("9:16", "9:16", R.string.aspect_hint_reels, 9f / 16f),
+        AspectOption("1:1", "1:1", R.string.aspect_hint_feed, 1f),
+        AspectOption("4:5", "4:5", R.string.aspect_hint_instagram, 4f / 5f),
+        AspectOption("4:3", "4:3", R.string.aspect_hint_classic, 4f / 3f),
     )
 
     /** "Livre": os dois números na mão; a razão sai deles. */
-    val free = AspectOption("livre", "Livre", "Você escolhe", 1f)
+    val free = AspectOption("livre", "1:1", R.string.aspect_free_hint, 1f)
 
     val resolutions = listOf(720, 1080, 1440, 2160)
     val fpsOptions = listOf(24, 30, 60)
@@ -72,11 +80,17 @@ internal fun projectSpec(p: ProjectEntry): String {
 internal fun projectRatio(p: ProjectEntry): Float =
     if (p.width > 0 && p.height > 0) p.width.toFloat() / p.height else 16f / 9f
 
-/** Ordem da lista (`OrdemDosProjetos`); o índice é o que vai para as preferências. */
-internal enum class ProjectSort(val label: String) {
-    Recent("Mais recentes"),
-    Name("Nome (A-Z)"),
-    Longest("Mais longos");
+/**
+ * Ordem da lista; o índice é o que vai para as preferências.
+ *
+ * [label] é ID de recurso, não texto: o rótulo muda de idioma, o ÍNDICE não —
+ * é ele que fica gravado, então um idioma novo nunca reordena a preferência de
+ * quem já escolheu.
+ */
+internal enum class ProjectSort(@StringRes val label: Int) {
+    Recent(R.string.home_sort_recent),
+    Name(R.string.home_sort_name),
+    Longest(R.string.home_sort_longest);
 
     companion object {
         fun fromIndex(i: Int): ProjectSort = entries.getOrElse(i) { Recent }

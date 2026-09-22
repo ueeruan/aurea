@@ -13,16 +13,16 @@ struct Glyph {
     vec4 uv;       // u0 v0 u1 v1
     vec4 fill;     // cor linear, alfa
     vec4 stroke;   // cor linear, alfa
-    vec4 xf;       // matriz 2×2 (a b c d): x' = a·x + c·y, y' = b·x + d·y
-    vec4 misc;     // tx, ty, k (px da layer por px da base), largura do contorno (px da layer)
-    vec4 pivot;    // px, py, desfoque (px), _
+    mat4 xform;    // px da layer (Z = profundidade por caractere)
+    vec4 misc;     // _, _, k (px da layer por px da base), largura do contorno (px da layer)
+    vec4 extra;    // desfoque (px), _, _, _
 };
 
 layout(set = 0, binding = AUREA_DATA, std430) readonly buffer Glyphs { Glyph g[]; } glyphs;
 
 layout(push_constant) uniform Push {
     mat4 clipFromLayer;
-    vec4 params;   // x = primeiro glifo desta camada no buffer
+    vec4 params;   // x = primeiro glifo, yz = centro da layer, w = distância focal (0 = sem perspectiva)
 } pc;
 
 layout(location = 0) out vec2 v_uv;
@@ -37,10 +37,13 @@ void main() {
     const Glyph gl = glyphs.g[idx];
     const vec2 c = kCorners[gl_VertexIndex];
     const vec2 p = mix(gl.rect.xy, gl.rect.zw, c);
-    const vec2 d = p - gl.pivot.xy;
-    const vec2 q = gl.pivot.xy + vec2(gl.xf.x * d.x + gl.xf.z * d.y, gl.xf.y * d.x + gl.xf.w * d.y) + gl.misc.xy;
+    const vec4 q3 = gl.xform * vec4(p, 0.0, 1.0);
+    // Perspectiva em volta do centro da layer: w = (f + z) / f (uv correto na GPU).
+    const float w = pc.params.w > 0.0 ? max(0.05, (pc.params.w + q3.z) / pc.params.w) : 1.0;
+    const vec2 cxy = pc.params.yz;
+    const vec2 q = cxy * w + (q3.xy - cxy);
     // Sólido (fundo): uv = posição local em px, para o retângulo arredondado.
     v_uv = gl.uv.x < 0.0 ? c * (gl.rect.zw - gl.rect.xy) : mix(gl.uv.xy, gl.uv.zw, c);
     v_index = idx;
-    gl_Position = pc.clipFromLayer * vec4(q, 0.0, 1.0);
+    gl_Position = pc.clipFromLayer * vec4(q, 0.0, w);
 }

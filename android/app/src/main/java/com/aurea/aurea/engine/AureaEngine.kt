@@ -347,6 +347,13 @@ class AureaEngine private constructor() {
     fun setTextSpan(layer: Long, start: Int, end: Int, hasColor: Boolean, r: Float, g: Float, b: Float, weight: Int, scale: Float): Boolean =
         nativeSetTextSpan(nativeHandle, layer, start, end, hasColor, r, g, b, weight, scale)
     fun clearTextSpans(layer: Long, start: Int, end: Int): Boolean = nativeClearTextSpans(nativeHandle, layer, start, end)
+    fun queryTextAnimators(layer: Long): FloatArray? = nativeQueryTextAnimators(nativeHandle, layer)
+    fun addTextAnimator(layer: Long, props: Int): Int = nativeAddTextAnimator(nativeHandle, layer, props)
+    fun removeTextAnimator(layer: Long, index: Int): Boolean = nativeRemoveTextAnimator(nativeHandle, layer, index)
+    fun setTextAnimator(layer: Long, index: Int, v: FloatArray): Boolean = nativeSetTextAnimator(nativeHandle, layer, index, v)
+    fun setTextAnimParam(layer: Long, index: Int, param: Int, value: Float): Boolean = nativeSetTextAnimParam(nativeHandle, layer, index, param, value)
+    fun toggleTextAnimKey(layer: Long, index: Int, param: Int): Boolean = nativeToggleTextAnimKey(nativeHandle, layer, index, param)
+    fun applyTextPreset(layer: Long, preset: Int): Boolean = nativeApplyTextPreset(nativeHandle, layer, preset)
     /** PowerManager.THERMAL_STATUS_* → o preview reduz o que é caro sob calor. */
     fun setThermal(status: Int) = nativeSetThermal(nativeHandle, status)
     fun queryTimeRemap(layer: Long, out: FloatArray): Int = nativeQueryTimeRemap(nativeHandle, layer, out)
@@ -482,6 +489,13 @@ class AureaEngine private constructor() {
     private external fun nativeQueryTextStyle(handle: Long, layer: Long, out: FloatArray): Boolean
     private external fun nativeSetTextSpan(handle: Long, layer: Long, start: Int, end: Int, hasColor: Boolean, r: Float, g: Float, b: Float, weight: Int, scale: Float): Boolean
     private external fun nativeClearTextSpans(handle: Long, layer: Long, start: Int, end: Int): Boolean
+    private external fun nativeQueryTextAnimators(handle: Long, layer: Long): FloatArray?
+    private external fun nativeAddTextAnimator(handle: Long, layer: Long, props: Int): Int
+    private external fun nativeRemoveTextAnimator(handle: Long, layer: Long, index: Int): Boolean
+    private external fun nativeSetTextAnimator(handle: Long, layer: Long, index: Int, v: FloatArray): Boolean
+    private external fun nativeSetTextAnimParam(handle: Long, layer: Long, index: Int, param: Int, value: Float): Boolean
+    private external fun nativeToggleTextAnimKey(handle: Long, layer: Long, index: Int, param: Int): Boolean
+    private external fun nativeApplyTextPreset(handle: Long, layer: Long, preset: Int): Boolean
     private external fun nativeTextFont(handle: Long, layer: Long): String?
     private external fun nativeSetVectorBlur(handle: Long, layer: Long, amount: Float): Boolean
     private external fun nativeSetFrameBlend(handle: Long, layer: Long, mode: Int): Boolean

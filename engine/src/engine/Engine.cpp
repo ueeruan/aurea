@@ -4,6 +4,7 @@
 #include "aurea/tracking/CameraTracker.hpp"
 
 #include "aurea/text/Text.hpp"
+#include "aurea/text/TextAnimator.hpp"
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Thread.hpp"
 #include "aurea/project/Serialization.hpp"
@@ -2962,6 +2963,214 @@ bool Engine::clear_text_spans(u64 layerId, u32 start, u32 end) noexcept {
     project_->mark_dirty();
     request_render();
     return true;
+}
+
+namespace {
+/// Posição do parâmetro animável no vetor de 40 floats (−1 = sem posição).
+i32 text_param_slot(u32 p) noexcept {
+    if (p <= text::kSelEaseLow) return 7 + static_cast<i32>(p);
+    if (p == text::kWiggleRate) return 13;
+    if (p >= text::kPosX && p <= text::kCharOffset) return 14 + static_cast<i32>(p - text::kPosX);
+    return -1;
+}
+f32* text_param_ref(TextAnimator& a, u32 p) noexcept {
+    switch (p) {
+        case text::kSelStart: return &a.selector.start;
+        case text::kSelEnd: return &a.selector.end;
+        case text::kSelOffset: return &a.selector.offset;
+        case text::kSelAmount: return &a.selector.amount;
+        case text::kSelEaseHigh: return &a.selector.easeHigh;
+        case text::kSelEaseLow: return &a.selector.easeLow;
+        case text::kWiggleRate: return &a.selector.wiggleRate;
+        case text::kPosX: return &a.position.x;
+        case text::kPosY: return &a.position.y;
+        case text::kPosZ: return &a.position.z;
+        case text::kScaleX: return &a.scale.x;
+        case text::kScaleY: return &a.scale.y;
+        case text::kRotX: return &a.rotation.x;
+        case text::kRotY: return &a.rotation.y;
+        case text::kRotZ: return &a.rotation.z;
+        case text::kOpacity: return &a.opacity;
+        case text::kTracking: return &a.tracking;
+        case text::kBlur: return &a.blur;
+        case text::kSkew: return &a.skew;
+        case text::kStrokeWidth: return &a.strokeWidth;
+        case text::kCharOffset: return &a.charOffset;
+        default: return nullptr;
+    }
+}
+f32 clamp_text_param(u32 p, f32 v) noexcept {
+    switch (p) {
+        case text::kSelStart: case text::kSelEnd: return std::clamp(v, 0.0f, 100.0f);
+        case text::kSelOffset: return std::clamp(v, -1000.0f, 1000.0f);
+        case text::kSelAmount: return std::clamp(v, -100.0f, 100.0f);
+        case text::kSelEaseHigh: case text::kSelEaseLow: return std::clamp(v, -100.0f, 100.0f);
+        case text::kWiggleRate: return std::clamp(v, 0.0f, 60.0f);
+        case text::kOpacity: return std::clamp(v, 0.0f, 100.0f);
+        case text::kScaleX: case text::kScaleY: return std::clamp(v, -2000.0f, 2000.0f);
+        case text::kBlur: return std::clamp(v, 0.0f, 200.0f);
+        case text::kSkew: return std::clamp(v, -80.0f, 80.0f);
+        case text::kStrokeWidth: return std::clamp(v, -50.0f, 50.0f);
+        default: return std::clamp(v, -100000.0f, 100000.0f);
+    }
+}
+} // namespace
+
+u32 Engine::query_text_animators(u64 layerId, f32* out, u32 capacity) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->kind != LayerKind::Text) return 0;
+    const FrameIndex local = l->local_time(playback_.current());
+    const u32 n = static_cast<u32>(l->text.animators.size());
+    for (u32 i = 0; i < n && out && (i + 1) * kTextAnimFloats <= capacity; ++i) {
+        TextAnimator a = l->text.animators[i];
+        f32* v = out + i * kTextAnimFloats;
+        u32 animSel = 0, animProp = 0, keySel = 0, keyProp = 0;
+        for (u32 p = 0; p <= text::kWiggleRate; ++p) {
+            f32* r = text_param_ref(a, p);
+            if (!r) continue;
+            const Track* tr = l->tracks.find(TrackProperty::TextAnimParam, i, p);
+            if (!tr || tr->keys.empty()) continue;
+            *r = tr->sample(local);
+            const bool k = tr->find_exact(local) != kInvalidIndex;
+            if (p < 10) { animSel |= 1u << p; if (k) keySel |= 1u << p; }
+            else { animProp |= 1u << (p - 10); if (k) keyProp |= 1u << (p - 10); }
+        }
+        const TextSelector& s = a.selector;
+        const f32 o[kTextAnimFloats] = {a.enabled ? 1.0f : 0.0f, static_cast<f32>(a.props), static_cast<f32>(s.basedOn), static_cast<f32>(s.type),
+            static_cast<f32>(s.shape), s.randomOrder ? 1.0f : 0.0f, static_cast<f32>(s.seed), s.start, s.end, s.offset, s.amount, s.easeHigh,
+            s.easeLow, s.wiggleRate, a.position.x, a.position.y, a.position.z, a.scale.x, a.scale.y, a.rotation.x, a.rotation.y,
+            a.rotation.z, a.opacity, a.tracking, a.blur, a.skew, a.strokeWidth, a.charOffset, a.fill.x, a.fill.y, a.fill.z, a.fill.w,
+            a.stroke.x, a.stroke.y, a.stroke.z, a.stroke.w, static_cast<f32>(animSel), static_cast<f32>(animProp), static_cast<f32>(keySel),
+            static_cast<f32>(keyProp)};
+        std::copy(o, o + kTextAnimFloats, v);
+    }
+    return n;
+}
+
+i32 Engine::add_text_animator(u64 layerId, u32 props) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->kind != LayerKind::Text || l->text.animators.size() >= 64) return -1;
+    history_.before_mutation(*comp, project_->timeline().current(), "novo animador de texto");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    TextAnimator a;
+    a.name = "Animador " + std::to_string(l->text.animators.size() + 1);
+    a.props = props & 0x7FFu;
+    l->text.animators.push_back(a);
+    project_->mark_dirty();
+    request_render();
+    return static_cast<i32>(l->text.animators.size() - 1);
+}
+
+bool Engine::remove_text_animator(u64 layerId, u32 index) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->kind != LayerKind::Text || index >= l->text.animators.size()) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "remover animador de texto");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    l->text.animators.erase(l->text.animators.begin() + index);
+    // As trilhas do removido saem; as dos seguintes descem um índice.
+    l->tracks.remove_if([&](const Track& t) { return t.property == TrackProperty::TextAnimParam && t.effectIndex == index; });
+    for (u32 i = 0; i < l->tracks.size(); ++i) {
+        Track& t = l->tracks.at(i);
+        if (t.property == TrackProperty::TextAnimParam && t.effectIndex > index) --t.effectIndex;
+    }
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::set_text_animator(u64 layerId, u32 index, const f32* v) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->kind != LayerKind::Text || !v || index >= l->text.animators.size()) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "animador de texto");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    TextAnimator& a = l->text.animators[index];
+    a.enabled = v[0] > 0.5f;
+    a.props = static_cast<u32>(std::max(0.0f, v[1])) & 0x7FFu;
+    a.selector.basedOn = static_cast<u8>(std::clamp(v[2], 0.0f, 2.0f));
+    a.selector.type = static_cast<u8>(std::clamp(v[3], 0.0f, 1.0f));
+    a.selector.shape = static_cast<u8>(std::clamp(v[4], 0.0f, 5.0f));
+    a.selector.randomOrder = v[5] > 0.5f;
+    a.selector.seed = static_cast<u32>(std::clamp(v[6], 0.0f, 1.0e6f));
+    a.fill = Vec4{v[28], v[29], v[30], v[31]};
+    a.stroke = Vec4{v[32], v[33], v[34], v[35]};
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::set_text_anim_param(u64 layerId, u32 index, u32 param, f32 value) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->kind != LayerKind::Text || index >= l->text.animators.size()) return false;
+    f32* r = text_param_ref(l->text.animators[index], param);
+    if (!r) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "valor do animador de texto");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    value = clamp_text_param(param, value);
+    Track* tr = l->tracks.find(TrackProperty::TextAnimParam, index, param);
+    if (tr && !tr->keys.empty()) {
+        // Animado: o valor vira keyframe no playhead (como nas outras propriedades).
+        const FrameIndex local = l->local_time(playback_.current());
+        const u32 k = tr->find_exact(local);
+        if (k != kInvalidIndex) tr->keys[k].value = value;
+        else (void)tr->set(local, value, Interpolation::Bezier);
+    } else {
+        *r = value;
+    }
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::toggle_text_anim_key(u64 layerId, u32 index, u32 param) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->kind != LayerKind::Text || index >= l->text.animators.size()) return false;
+    f32* r = text_param_ref(l->text.animators[index], param);
+    if (!r) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "keyframe do animador de texto");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    const FrameIndex local = l->local_time(playback_.current());
+    Track& tr = l->tracks.get_or_create(TrackProperty::TextAnimParam, index, param);
+    const u32 k = tr.find_exact(local);
+    if (k != kInvalidIndex) {
+        // Tirar o último keyframe devolve o valor parado (o do instante).
+        if (tr.keys.size() == 1) *r = tr.keys[0].value;
+        (void)tr.remove(local);
+    } else {
+        (void)tr.set(local, tr.keys.empty() ? *r : tr.sample(local), Interpolation::Bezier);
+    }
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::apply_text_preset(u64 layerId, u32 preset) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->kind != LayerKind::Text || preset >= text::kTextPresetCount) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "preset de texto");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    const f64 fps = comp->fps();
+    const i64 s = l->local_time(l->start).value;
+    const i64 len = std::max<i64>(2, l->end.value - l->start.value);
+    // A entrada leva ~1 s (no máximo metade da camada).
+    const i64 d = std::clamp<i64>(static_cast<i64>(std::lround(fps)), 2, std::max<i64>(2, len / 2));
+    const bool ok = text::apply_text_preset(preset, l->text, l->tracks, s, d, fps);
+    project_->mark_dirty();
+    request_render();
+    return ok;
 }
 
 std::string Engine::text_font(u64 layerId) noexcept {

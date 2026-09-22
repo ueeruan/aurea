@@ -986,6 +986,53 @@ AUREA_JNI jboolean AUREA_FN(nativeClearTextSpans)(JNIEnv*, jclass, jlong handle,
                ? JNI_TRUE : JNI_FALSE;
 }
 
+AUREA_JNI jfloatArray AUREA_FN(nativeQueryTextAnimators)(JNIEnv* env, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return nullptr;
+    std::vector<f32> v(64 * Engine::kTextAnimFloats);
+    const u32 n = c->engine.query_text_animators(static_cast<u64>(layer), v.data(), static_cast<u32>(v.size()));
+    jfloatArray out = env->NewFloatArray(static_cast<jsize>(n * Engine::kTextAnimFloats));
+    if (out && n) env->SetFloatArrayRegion(out, 0, static_cast<jsize>(n * Engine::kTextAnimFloats), v.data());
+    return out;
+}
+
+AUREA_JNI jint AUREA_FN(nativeAddTextAnimator)(JNIEnv*, jclass, jlong handle, jlong layer, jint props) {
+    NativeContext* c = ctx_of(handle);
+    return c ? c->engine.add_text_animator(static_cast<u64>(layer), static_cast<u32>(props)) : -1;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeRemoveTextAnimator)(JNIEnv*, jclass, jlong handle, jlong layer, jint index) {
+    NativeContext* c = ctx_of(handle);
+    return c && index >= 0 && c->engine.remove_text_animator(static_cast<u64>(layer), static_cast<u32>(index)) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetTextAnimator)(JNIEnv* env, jclass, jlong handle, jlong layer, jint index, jfloatArray in) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !in || index < 0 || env->GetArrayLength(in) < static_cast<jsize>(Engine::kTextAnimFloats)) return JNI_FALSE;
+    f32 v[Engine::kTextAnimFloats];
+    env->GetFloatArrayRegion(in, 0, Engine::kTextAnimFloats, v);
+    return c->engine.set_text_animator(static_cast<u64>(layer), static_cast<u32>(index), v) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetTextAnimParam)(JNIEnv*, jclass, jlong handle, jlong layer, jint index, jint param, jfloat value) {
+    NativeContext* c = ctx_of(handle);
+    return c && index >= 0 && param >= 0
+                   && c->engine.set_text_anim_param(static_cast<u64>(layer), static_cast<u32>(index), static_cast<u32>(param), value)
+               ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeToggleTextAnimKey)(JNIEnv*, jclass, jlong handle, jlong layer, jint index, jint param) {
+    NativeContext* c = ctx_of(handle);
+    return c && index >= 0 && param >= 0
+                   && c->engine.toggle_text_anim_key(static_cast<u64>(layer), static_cast<u32>(index), static_cast<u32>(param))
+               ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeApplyTextPreset)(JNIEnv*, jclass, jlong handle, jlong layer, jint preset) {
+    NativeContext* c = ctx_of(handle);
+    return c && preset >= 0 && c->engine.apply_text_preset(static_cast<u64>(layer), static_cast<u32>(preset)) ? JNI_TRUE : JNI_FALSE;
+}
+
 /// Fonte da camada de texto: "família\tpeso\titálico\tcaminho" (nulo = não é texto).
 AUREA_JNI jstring AUREA_FN(nativeTextFont)(JNIEnv* env, jclass, jlong handle, jlong layer) {
     NativeContext* c = ctx_of(handle);

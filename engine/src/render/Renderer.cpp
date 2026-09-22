@@ -3,6 +3,7 @@
 #include "aurea/scene3d/Animation.hpp"
 #include "aurea/text/Text.hpp"
 #include "aurea/text/FontManager.hpp"
+#include "aurea/text/TextAnimator.hpp"
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Time.hpp"
 #include "aurea/project/Project.hpp"
@@ -532,6 +533,9 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         const LayerId rid = nestSalt_ == 0 ? id
                           : LayerId{0x40000000u | ((nestSalt_ & 0x3FFFu) << 16) | (id.index & 0xFFFFu), id.generation};
         RenderLayer rl;
+        // Margem além da que a âncora do texto conta (animadores, fundo, sombra):
+        // a fonte cresce em volta, o texto não anda.
+        f32 srcShift = 0.0f;
         rl.id = rid;
         rl.blend = l->blendMode;
         rl.opacity = layer_opacity(*l, local);
@@ -613,65 +617,143 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             case LayerKind::Light:
                 continue;   // não desenham; entram na cena depois do laço
             case LayerKind::Text: {
-                // Caixa do texto em px da layer (com a margem do contorno); os
-                // pixels vêm depois, na escala da tela (abaixo).
                 const auto font = text::FontManager::instance().font_for(l->text);
                 if (!font || l->text.content.empty() || (l->text.color.w <= 0.0f && l->text.strokeWidth <= 0.0f)) continue;
+                const TextData& T = l->text;
+                const bool animated = text::has_animators(T);
                 // O contorno cabe na distância do atlas (16 px da base × escala).
-                const f32 strokeMax = text::kGlyphSpread * std::max(1.0f, l->text.size) / text::kGlyphBasePx - 1.0f;
-                const f32 stroke = std::clamp(l->text.strokeWidth, 0.0f, std::max(0.0f, strokeMax));
-                // Margem: contorno, fundo e sombra (deslocamento + desfoque) cabem na layer.
+                const f32 strokeMax = text::kGlyphSpread * std::max(1.0f, T.size) / text::kGlyphBasePx - 1.0f;
+                const f32 stroke = std::clamp(T.strokeWidth, 0.0f, std::max(0.0f, strokeMax));
+                // Margem: contorno, fundo, sombra e o quanto os animadores podem
+                // levar uma letra para fora da caixa (maior valor parado/keyframe).
                 f32 pad = stroke > 0.0f ? stroke + 2.0f : 2.0f;
-                if (l->text.background) pad = std::max(pad, std::max(0.0f, l->text.backgroundPadding) + 2.0f);
-                if (l->text.shadow) {
-                    pad = std::max(pad, std::max(std::fabs(l->text.shadowOffset.x), std::fabs(l->text.shadowOffset.y))
-                                           + std::max(0.0f, l->text.shadowBlur) + stroke + 2.0f);
+                if (T.background) pad = std::max(pad, std::max(0.0f, T.backgroundPadding) + 2.0f);
+                if (T.shadow) {
+                    pad = std::max(pad, std::max(std::fabs(T.shadowOffset.x), std::fabs(T.shadowOffset.y)) + std::max(0.0f, T.shadowBlur) + stroke + 2.0f);
+                }
+                if (animated) {
+                    auto maxAbs = [&](u32 ai, u32 p, f32 v) {
+                        f32 m = std::fabs(v);
+                        if (const Track* tr = l->tracks.find(TrackProperty::TextAnimParam, ai, p)) for (const Keyframe& k : tr->keys) m = std::max(m, std::fabs(k.value));
+                        return m;
+                    };
+                    f32 extra = 0;
+                    for (u32 ai = 0; ai < T.animators.size(); ++ai) {
+                        const TextAnimator& a = T.animators[ai];
+                        if (!a.enabled) continue;
+                        if (a.props & kTextPropPosition) extra += std::max({maxAbs(ai, text::kPosX, a.position.x), maxAbs(ai, text::kPosY, a.position.y), maxAbs(ai, text::kPosZ, a.position.z) * 0.5f});
+                        if (a.props & kTextPropScale) extra += T.size * std::max(0.0f, std::max(maxAbs(ai, text::kScaleX, a.scale.x), maxAbs(ai, text::kScaleY, a.scale.y)) / 100.0f - 1.0f);
+                        if (a.props & kTextPropRotation) extra += T.size * 0.5f;
+                        if (a.props & kTextPropBlur) extra += maxAbs(ai, text::kBlur, a.blur) * 2.0f;
+                        if (a.props & kTextPropTracking) extra += maxAbs(ai, text::kTracking, a.tracking) * static_cast<f32>(std::min<usize>(T.content.size(), 200));
+                    }
+                    pad += std::min(extra, 4000.0f);
+                }
+                // Deslocamento de caractere troca as letras antes do layout.
+                TextData shaped;
+                const TextData* src = &T;
+                if (animated) {
+                    const std::string c = text::apply_char_offset(T, l->tracks, static_cast<f64>(local.value), fps);
+                    if (c != T.content) { shaped = T; shaped.content = c; src = &shaped; }
                 }
                 text::TextLayout L;
-                if (!text::layout_quads(*font, l->text, pad, L)) continue;
+                if (!text::layout_quads(*font, *src, pad, L)) continue;
+                srcShift = pad - (T.strokeWidth > 0.0f ? T.strokeWidth + 2.0f : 2.0f);   // a mesma margem de recenter_text
                 rl.source.kind = LayerSource::Kind::Text;
                 rl.source.width = static_cast<u32>(std::ceil(L.width));
                 rl.source.height = static_cast<u32>(std::ceil(L.height));
                 rl.source.glyphFirst = static_cast<u32>(out.glyphs.size());
+                // Perspectiva do 3D por caractere: a distância da câmera padrão.
+                rl.source.textPersp = Vec4{L.width * 0.5f, L.height * 0.5f, static_cast<f32>(std::max(1u, comp.height())) * 1.2f, 0};
                 auto lin = [](Vec4 c) { return Vec4{srgb_to_linear(c.x), srgb_to_linear(c.y), srgb_to_linear(c.z), c.w}; };
-                const Vec4 strokeCol = lin(l->text.strokeColor);
-                // Fundo (caixa arredondada atrás do texto): uv.x < 0 marca "sólido".
-                if (l->text.background && l->text.backgroundColor.w > 0.0f) {
-                    const f32 bp = std::max(0.0f, l->text.backgroundPadding);
-                    GlyphInstance b;
-                    b.rect = Vec4{L.pad - bp, L.pad - bp, L.pad + L.contentWidth + bp, L.pad + L.contentHeight + bp};
-                    b.uv = Vec4{-1.0f, std::max(0.0f, l->text.backgroundRadius), 0, 0};
-                    b.fill = lin(l->text.backgroundColor);
-                    b.stroke = Vec4{0, 0, 0, 0};
-                    b.misc = Vec4{0, 0, 1, 0};
-                    b.pivot = Vec4{0, 0, 0, 0};
-                    out.glyphs.push_back(b);
+                const Vec4 strokeCol = lin(T.strokeColor);
+                std::vector<text::GlyphUnits> units(L.quads.size());
+                for (usize g = 0; g < L.quads.size(); ++g) units[g] = text::GlyphUnits{L.quads[g].charIndex, L.quads[g].wordIndex, L.quads[g].lineIndex};
+                // Desfoque de movimento POR LETRA: um conjunto de glifos por instante do obturador.
+                u32 sets = 1;
+                f64 open = 0.0;
+                if (animated && l->motionBlur && comp.motion_blur().enabled && comp.motion_blur().shutterAngle > 0.0f) {
+                    const MotionBlurSettings& mb = comp.motion_blur();
+                    sets = std::clamp<u32>(settings.finalQuality ? mb.samples
+                                                                 : static_cast<u32>(static_cast<f32>(mb.previewSamples) * std::clamp(settings.heavyScale, 0.1f, 1.0f)),
+                                           2u, 16u);
+                    open = std::clamp(static_cast<f64>(mb.shutterAngle), 0.0, 720.0) / 360.0;
                 }
-                // Sombra: os mesmos glifos, deslocados, na cor da sombra e desfocados pelo SDF.
-                if (l->text.shadow && l->text.shadowColor.w > 0.0f) {
-                    const Vec4 sc = lin(l->text.shadowColor);
-                    for (const text::GlyphQuad& q : L.quads) {
-                        GlyphInstance g;
-                        g.rect = Vec4{q.x0, q.y0, q.x1, q.y1};
-                        g.uv = Vec4{q.u0, q.v0, q.u1, q.v1};
-                        g.fill = sc;
-                        g.stroke = sc;
-                        g.misc = Vec4{l->text.shadowOffset.x, l->text.shadowOffset.y, q.k, stroke};
-                        g.pivot = Vec4{q.penX + q.advance * 0.5f, q.baseline, std::max(0.0f, l->text.shadowBlur) * 0.5f, 0};
-                        out.glyphs.push_back(g);
+                std::vector<text::GlyphAnim> anim;
+                for (u32 si = 0; si < sets; ++si) {
+                    const f64 lt = static_cast<f64>(local.value) + (sets > 1 ? ((static_cast<f64>(si) + 0.5) / static_cast<f64>(sets) - 0.5) * open : 0.0);
+                    text::evaluate_text_animators(T, l->tracks, lt, fps, units, L.chars, L.words, L.lines, anim);
+                    auto glyphMatrix = [&](const text::GlyphQuad& q, const text::GlyphAnim& a) {
+                        const Vec3 pivot{(q.x0 + q.x1) * 0.5f, (q.y0 + q.y1) * 0.5f, 0};
+                        Mat4 m = Mat4::translation(pivot + a.translate + Vec3{a.trackingShift, 0, 0});
+                        if (a.rotation.x != 0 || a.rotation.y != 0 || a.rotation.z != 0)
+                            m = m * Mat4::from_quat(Quat::from_euler_zyx(a.rotation.x * kDeg2Rad, a.rotation.y * kDeg2Rad, a.rotation.z * kDeg2Rad));
+                        if (a.skew != 0) {
+                            Mat4 sk;
+                            sk.col[1].x = -std::tan(std::clamp(a.skew, -80.0f, 80.0f) * kDeg2Rad);   // inclina para a direita
+                            m = m * sk;
+                        }
+                        return m * Mat4::scale(Vec3{a.scale.x, a.scale.y, 1}) * Mat4::translation(-pivot);
+                    };
+                    const f32 w = 1.0f / static_cast<f32>(sets);
+                    // Fundo (caixa arredondada atrás do texto): uv.x < 0 marca "sólido".
+                    if (T.background && T.backgroundColor.w > 0.0f) {
+                        const f32 bp = std::max(0.0f, T.backgroundPadding);
+                        GlyphInstance b;
+                        b.rect = Vec4{L.pad - bp, L.pad - bp, L.pad + L.contentWidth + bp, L.pad + L.contentHeight + bp};
+                        b.uv = Vec4{-1.0f, std::max(0.0f, T.backgroundRadius), 0, 0};
+                        b.fill = lin(T.backgroundColor);
+                        b.fill.w *= w;
+                        b.misc = Vec4{0, 0, 1, 0};
+                        out.glyphs.push_back(b);
                     }
+                    // Sombra: os mesmos glifos (com a animação), deslocados, desfocados pelo SDF.
+                    if (T.shadow && T.shadowColor.w > 0.0f) {
+                        const Vec4 sc = lin(T.shadowColor);
+                        for (usize g = 0; g < L.quads.size(); ++g) {
+                            const text::GlyphQuad& q = L.quads[g];
+                            const text::GlyphAnim& a = anim[g];
+                            GlyphInstance gi;
+                            gi.rect = Vec4{q.x0, q.y0, q.x1, q.y1};
+                            gi.uv = Vec4{q.u0, q.v0, q.u1, q.v1};
+                            gi.fill = sc;
+                            gi.fill.w *= a.opacity * w;
+                            gi.stroke = sc;
+                            gi.stroke.w *= a.opacity * w;
+                            gi.xform = Mat4::translation(Vec3{T.shadowOffset.x, T.shadowOffset.y, 0}) * glyphMatrix(q, a);
+                            gi.misc = Vec4{0, 0, q.k, std::clamp(stroke + a.strokeAdd, 0.0f, std::max(0.0f, strokeMax))};
+                            gi.extra = Vec4{std::max(0.0f, T.shadowBlur) * 0.5f + a.blur, 0, 0, 0};
+                            out.glyphs.push_back(gi);
+                        }
+                    }
+                    for (usize g = 0; g < L.quads.size(); ++g) {
+                        const text::GlyphQuad& q = L.quads[g];
+                        const text::GlyphAnim& a = anim[g];
+                        GlyphInstance gi;
+                        gi.rect = Vec4{q.x0, q.y0, q.x1, q.y1};
+                        gi.uv = Vec4{q.u0, q.v0, q.u1, q.v1};
+                        Vec4 fill = lin(q.color);
+                        if (a.fill.w > 0.0f) {
+                            const Vec4 af = lin(Vec4{a.fill.x, a.fill.y, a.fill.z, 1});
+                            fill = Vec4{fill.x + (af.x - fill.x) * a.fill.w, fill.y + (af.y - fill.y) * a.fill.w, fill.z + (af.z - fill.z) * a.fill.w, fill.w};
+                        }
+                        Vec4 sc = strokeCol;
+                        if (a.stroke.w > 0.0f) {
+                            const Vec4 as = lin(Vec4{a.stroke.x, a.stroke.y, a.stroke.z, 1});
+                            sc = Vec4{sc.x + (as.x - sc.x) * a.stroke.w, sc.y + (as.y - sc.y) * a.stroke.w, sc.z + (as.z - sc.z) * a.stroke.w, sc.w};
+                        }
+                        fill.w *= a.opacity * w;
+                        sc.w *= a.opacity * w;
+                        gi.fill = fill;
+                        gi.stroke = sc;
+                        gi.xform = glyphMatrix(q, a);
+                        gi.misc = Vec4{0, 0, q.k, std::clamp(stroke + a.strokeAdd, 0.0f, std::max(0.0f, strokeMax))};
+                        gi.extra = Vec4{a.blur, 0, 0, 0};
+                        out.glyphs.push_back(gi);
+                    }
+                    if (si == 0) rl.source.glyphCount = static_cast<u32>(out.glyphs.size()) - rl.source.glyphFirst;
                 }
-                for (const text::GlyphQuad& q : L.quads) {
-                    GlyphInstance g;
-                    g.rect = Vec4{q.x0, q.y0, q.x1, q.y1};
-                    g.uv = Vec4{q.u0, q.v0, q.u1, q.v1};
-                    g.fill = lin(q.color);
-                    g.stroke = strokeCol;
-                    g.misc = Vec4{0, 0, q.k, stroke};
-                    g.pivot = Vec4{q.penX + q.advance * 0.5f, q.baseline, 0, 0};
-                    out.glyphs.push_back(g);
-                }
-                rl.source.glyphCount = static_cast<u32>(out.glyphs.size()) - rl.source.glyphFirst;
+                rl.source.glyphSets = sets;
                 break;
             }
             case LayerKind::ParticleSystem: {
@@ -758,6 +840,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             // modelos 3D (padrão = plano Z=0 1:1 com a composição).
             m = compFromClip * viewProj3d * world_3d(comp, *l, time);
         }
+        const Mat4 shiftM = Mat4::translation(Vec3{-srcShift, -srcShift, 0});
+        if (srcShift != 0.0f) m = m * shiftM;
         // Transições de entrada/saída: ajuste procedural perto das bordas.
         if (l->transitionIn != 0 || l->transitionOut != 0) {
             const f32 cw = static_cast<f32>(comp.width()), chh = static_cast<f32>(comp.height());
@@ -846,6 +930,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     const f64 ts = static_cast<f64>(time.value) + u * open;
                     rl.blurMatrices[i] = in3d ? comp_view_projection_frac(comp, ts, out.compWidth, out.compHeight) * world_3d_frac(comp, *l, ts)
                                               : world_2d_frac(comp, *l, ts);
+                    if (srcShift != 0.0f) rl.blurMatrices[i] = rl.blurMatrices[i] * shiftM;
                     for (int c = 0; c < 4 && !moves; ++c) {
                         const Vec4 d = rl.blurMatrices[i].col[c] - rl.blurMatrices[0].col[c];
                         if (std::fabs(d.x) + std::fabs(d.y) + std::fabs(d.z) + std::fabs(d.w) > 1e-4f) moves = true;
@@ -866,6 +951,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             } else {
                 rl.temporal.push_back({m, 1.0f, Vec3{0, 0, 0}});
             }
+            if (srcShift != 0.0f && l->rgbDelay > 0.0f) for (auto& t : rl.temporal) t.m = t.m * shiftM;
             if (l->echoCount > 0) {
                 const u32 n = std::min<u32>(l->echoCount, 16u);
                 const f64 d = std::clamp(static_cast<f64>(l->echoDelay), 0.25, 120.0);
@@ -873,7 +959,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 for (u32 i = 1; i <= n; ++i) {
                     w *= std::clamp(l->echoDecay, 0.0f, 1.0f);
                     if (w < 0.01f) break;
-                    rl.temporal.push_back({world_2d_frac(comp, *l, t0 - static_cast<f64>(i) * d), w, Vec3{0, 0, 0}});
+                    rl.temporal.push_back({world_2d_frac(comp, *l, t0 - static_cast<f64>(i) * d) * shiftM, w, Vec3{0, 0, 0}});
                 }
             }
         }
@@ -1562,19 +1648,56 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
             auto pipe = shaders_.pipeline(PipelineKey::graphics(ShaderId::text_glyph_vert, ShaderId::text_glyph_frag, kWorkFormat, true,
                                                                 BlendMode::Normal));
             if (!pipe.ok()) return false;
+            const u32 sets = std::max(1u, layer.source.glyphSets);
+            struct Cap { PipelineHandle p; TextureHandle atlas; u64 sampler; BufferHandle buf; Mat4 clip; Vec4 params; u32 count; };
+            const Mat4 clip = clip_from_comp(static_cast<f32>(layer.source.width), static_cast<f32>(layer.source.height));
+            const Vec4 persp = layer.source.textPersp;
+            auto drawSet = [&](FGTexture target, u32 set) {
+                Cap cap{*pipe, glyphAtlas_, shaders_.sampler(CommonSampler::LinearClamp).id, glyphFrameBuf_, clip,
+                        Vec4{static_cast<f32>(currentSnap_->glyphBase + layer.source.glyphFirst + set * layer.source.glyphCount), persp.x, persp.y, persp.z},
+                        layer.source.glyphCount};
+                graph_.add_raster_pass("texto", PassStage::Decode, target, LoadOp::Clear, Vec4{0, 0, 0, 0}, [cap](PassContext& pc) {
+                    pc.cmds.bind_pipeline(cap.p);
+                    pc.cmds.bind_texture(0, cap.atlas, SamplerHandle{cap.sampler});
+                    pc.cmds.bind_storage_buffer(cap.buf);
+                    struct { Mat4 m; Vec4 params; } push{cap.clip, cap.params};
+                    pc.cmds.push_constants(&push, sizeof(push));
+                    pc.cmds.draw(6, cap.count);
+                });
+            };
+            if (sets == 1) {
+                out.texture = graph_.create_texture("layer-texto", d);
+                drawSet(out.texture, 0);
+                return true;
+            }
+            // Desfoque de movimento por letra: cada instante num alvo (letras
+            // por cima umas das outras certinho) e a média (os glifos já têm 1/K).
+            auto pAdd = shaders_.pipeline(PipelineKey::graphics(
+                ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat, true, BlendMode::Add));
+            if (!pAdd.ok()) return false;
+            FGTexture* frames = arena_.alloc_array<FGTexture>(sets);
+            for (u32 si = 0; si < sets; ++si) {
+                frames[si] = graph_.create_texture("texto-instante", d);
+                drawSet(frames[si], si);
+            }
             out.texture = graph_.create_texture("layer-texto", d);
-            struct Cap { PipelineHandle p; TextureHandle atlas; u64 sampler; BufferHandle buf; Mat4 clip; f32 first; u32 count; }
-                cap{*pipe, glyphAtlas_, shaders_.sampler(CommonSampler::LinearClamp).id, glyphFrameBuf_,
-                    clip_from_comp(static_cast<f32>(layer.source.width), static_cast<f32>(layer.source.height)),
-                    static_cast<f32>(currentSnap_->glyphBase + layer.source.glyphFirst), layer.source.glyphCount};
-            graph_.add_raster_pass("texto", PassStage::Decode, out.texture, LoadOp::Clear, Vec4{0, 0, 0, 0}, [cap](PassContext& pc) {
-                pc.cmds.bind_pipeline(cap.p);
-                pc.cmds.bind_texture(0, cap.atlas, SamplerHandle{cap.sampler});
-                pc.cmds.bind_storage_buffer(cap.buf);
-                struct { Mat4 m; Vec4 params; } push{cap.clip, Vec4{cap.first, 0, 0, 0}};
-                pc.cmds.push_constants(&push, sizeof(push));
-                pc.cmds.draw(6, cap.count);
+            struct Acc { FGTexture* frames; u32 n; PipelineHandle p; u64 sampler; f32 w; f32 h; } acc{frames, sets, *pAdd,
+                shaders_.sampler(CommonSampler::LinearClamp).id, static_cast<f32>(layer.source.width), static_cast<f32>(layer.source.height)};
+            const u32 pass = graph_.add_raster_pass("texto-desfoque", PassStage::Decode, out.texture, LoadOp::Clear, Vec4{0, 0, 0, 0},
+                                                    [acc](PassContext& pc) {
+                pc.cmds.bind_pipeline(acc.p);
+                for (u32 si = 0; si < acc.n; ++si) {
+                    pc.cmds.bind_texture(0, pc.texture(acc.frames[si]), SamplerHandle{acc.sampler});
+                    LayerPush push;
+                    push.clipFromLayer = clip_from_comp(acc.w, acc.h);
+                    push.region = Vec4{0.0f, 0.0f, acc.w, acc.h};
+                    push.uvRect = Vec4{0.0f, 0.0f, 1.0f, 1.0f};
+                    push.params = Vec4{1.0f, 0, 0, 0};
+                    pc.cmds.push_constants(&push, sizeof(push));
+                    pc.cmds.draw(6);
+                }
             });
+            for (u32 si = 0; si < sets; ++si) graph_.read(pass, frames[si]);
             return true;
         }
         case LayerSource::Kind::Image: {

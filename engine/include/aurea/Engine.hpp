@@ -282,6 +282,29 @@ public:
     bool set_text_span(u64 layerId, u32 start, u32 end, bool hasColor, Vec4 color, u32 weight, f32 scale) noexcept;
     /// Tira o estilo próprio de [start, end).
     bool clear_text_spans(u64 layerId, u32 start, u32 end) noexcept;
+
+    /// Text Animator. Cada animador = 40 floats (kTextAnimFloats):
+    ///  0 ativo, 1 props (TextAnimProp), 2 base (0 letra/1 palavra/2 linha),
+    ///  3 tipo (0 intervalo/1 wiggly), 4 forma, 5 ordem aleatória, 6 semente,
+    ///  7 início %, 8 fim %, 9 deslocamento %, 10 quantidade %, 11 ease alto,
+    ///  12 ease baixo, 13 variações/s, 14-16 posição, 17-18 escala %,
+    ///  19-21 rotação°, 22 opacidade %, 23 tracking, 24 desfoque, 25 inclinar,
+    ///  26 contorno, 27 deslocar caractere, 28-31 cor, 32-35 cor do contorno,
+    ///  36/37 bits animados (seletor: param; props: param-10),
+    ///  38/39 bits com keyframe no playhead. Valores = avaliados no playhead.
+    static constexpr u32 kTextAnimFloats = 40;
+    u32 query_text_animators(u64 layerId, f32* out, u32 capacity) noexcept;
+    /// Novo animador com `props`; devolve o índice (−1 = falhou).
+    i32 add_text_animator(u64 layerId, u32 props) noexcept;
+    bool remove_text_animator(u64 layerId, u32 index) noexcept;
+    /// Ajustes não animáveis (0..6 e as cores 28..35) de uma vez.
+    bool set_text_animator(u64 layerId, u32 index, const f32* v40) noexcept;
+    /// Valor de um parâmetro (TextAnimParam): com keyframes, grava no playhead.
+    bool set_text_anim_param(u64 layerId, u32 index, u32 param, f32 value) noexcept;
+    /// Liga/desliga o keyframe do parâmetro no playhead (losango).
+    bool toggle_text_anim_key(u64 layerId, u32 index, u32 param) noexcept;
+    /// Preset nativo (substitui os animadores), a partir do início da camada.
+    bool apply_text_preset(u64 layerId, u32 preset) noexcept;
     /// "família\tpeso\titálico\tcaminho real" da camada de texto (vazio = não é texto).
     [[nodiscard]] std::string text_font(u64 layerId) noexcept;
 

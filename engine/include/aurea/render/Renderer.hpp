@@ -67,11 +67,11 @@ struct GlyphInstance {
     Vec4 uv;
     Vec4 fill;     ///< linear, alfa
     Vec4 stroke;   ///< linear, alfa
-    Vec4 xf{1, 0, 0, 1};   ///< 2×2 em volta do pivô
-    Vec4 misc;     ///< tx, ty, k, largura do contorno (px da layer)
-    Vec4 pivot;    ///< px, py, desfoque (px), _
+    Mat4 xform = Mat4::identity();   ///< px da layer (Z = profundidade por caractere)
+    Vec4 misc;     ///< _, _, k, largura do contorno (px da layer)
+    Vec4 extra;    ///< desfoque (px), _, _, _
 };
-static_assert(sizeof(GlyphInstance) == 112, "layout std430 do glifo");
+static_assert(sizeof(GlyphInstance) == 160, "layout std430 do glifo");
 
 struct LayerSource {
     enum class Kind : u8 { None = 0, Video, Image, Solid, Scene3D, Shape, Nested, Particles, Text };
@@ -102,9 +102,12 @@ struct LayerSource {
     // Pré-composição: índice em FrameSnapshot::nested
     u32      nestedIndex = 0;
 
-    // Texto (GPU): glifos em FrameSnapshot::glyphs.
+    // Texto (GPU): glifos em FrameSnapshot::glyphs. Com desfoque de movimento
+    // por letra, `glyphSets` conjuntos seguidos (um por instante do obturador).
     u32      glyphFirst = 0;
     u32      glyphCount = 0;
+    u32      glyphSets = 1;
+    Vec4     textPersp{0, 0, 0, 0};   ///< cx, cy da layer, distância focal (px) para o 3D por caractere
 
     // Partículas: o bloco de parâmetros do shader (7 vec4), nº de slots, blend.
     Vec4     particleBlock[7]{};

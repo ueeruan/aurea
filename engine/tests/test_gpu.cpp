@@ -27,6 +27,7 @@
 #include "aurea/effects/MotionTile.hpp"
 #include "aurea/project/Project.hpp"
 #include "aurea/render/Renderer.hpp"
+#include "aurea/text/TextAnimator.hpp"
 
 #include <chrono>
 #include <cmath>
@@ -3077,4 +3078,83 @@ AUREA_TEST(Gpu, TextBackgroundAndShadowRender) {
     AUREA_CHECK(blue > 10000);
     AUREA_CHECK(red > 1000);
     AUREA_CHECK(whiteShadow * 10 > whitePlain * 8);   // a sombra fica ATRÁS do texto
+}
+
+AUREA_TEST(Gpu, TextAnimatorTypewriterPerCharRotationAndMotionBlur) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(640, 360);
+    auto tid = rig.e.add_text("Texto Aurea");
+    AUREA_CHECK(tid.ok());
+    auto seek = [&](i64 f) {
+        Command s;
+        s.type = CommandType::PlaybackSeek;
+        s.seek.time = tick_at(FrameIndex{f}, 30.0);
+        AUREA_CHECK(rig.e.apply_command(s).ok());
+    };
+    const Box8 full = lit_box(rig.capture(640));
+    const f32 cov0 = coverage(rig.capture(640));
+    // Typewriter (preset 8): nada no começo, metade no meio, tudo no fim.
+    AUREA_CHECK(rig.e.apply_text_preset(*tid, 8));
+    seek(0);
+    const f32 c0 = coverage(rig.capture(640));
+    seek(15);
+    const Image8 mid = rig.capture(640);
+    const f32 c15 = coverage(mid);
+    const Box8 bmid = lit_box(mid);
+    seek(40);
+    const f32 c40 = coverage(rig.capture(640));
+    std::printf("    typewriter: cobertura %.4f -> %.4f -> %.4f (texto %.4f), meio x %u..%u de %u..%u\n", c0, c15, c40, cov0, bmid.x0, bmid.x1,
+                full.x0, full.x1);
+    AUREA_CHECK(c0 < cov0 * 0.05f);
+    AUREA_CHECK(c15 > cov0 * 0.25f && c15 < cov0 * 0.75f);
+    AUREA_CHECK(std::fabs(c40 - cov0) < cov0 * 0.02f);
+    AUREA_CHECK(bmid.x0 <= full.x0 + 2 && bmid.x1 < full.x1 - 40);   // revela da esquerda
+
+    // 3D por caractere: rotação X de 60° achata a altura das letras (~cos 60°).
+    Composition* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+    Layer* l = comp->layer(LayerId::unpack(*tid));
+    l->tracks.remove_if([](const Track& t) { return t.property == TrackProperty::TextAnimParam; });
+    l->text.animators.clear();
+    const i32 ai = rig.e.add_text_animator(*tid, kTextPropRotation);
+    AUREA_CHECK_EQ(ai, 0);
+    AUREA_CHECK(rig.e.set_text_anim_param(*tid, 0, text::kRotX, 60.0f));
+    const Box8 rx = lit_box(rig.capture(640));
+    std::printf("    rotacao X 60: altura %u de %u, largura %u de %u\n", rx.h(), full.h(), rx.w(), full.w());
+    AUREA_CHECK(rx.h() < full.h() * 0.7f && rx.h() > full.h() * 0.35f);
+    AUREA_CHECK(rx.w() + 6 >= full.w());
+
+    // Desfoque de movimento POR LETRA: posição X animada 20 px/quadro.
+    AUREA_CHECK(rig.e.remove_text_animator(*tid, 0));
+    AUREA_CHECK(rig.e.add_text_animator(*tid, kTextPropPosition) == 0);
+    AUREA_CHECK(rig.e.set_text_anim_param(*tid, 0, text::kPosX, 100.0f));
+    const Box8 st100 = lit_box(rig.capture(640));
+    AUREA_CHECK(st100.x0 >= full.x0 + 98 && st100.x0 <= full.x0 + 102);   // margem maior, texto no lugar
+    AUREA_CHECK(rig.e.set_text_anim_param(*tid, 0, text::kPosX, 0.0f));
+    seek(10);
+    AUREA_CHECK(rig.e.toggle_text_anim_key(*tid, 0, text::kPosX));   // 0 px no quadro 10
+    seek(20);
+    AUREA_CHECK(rig.e.set_text_anim_param(*tid, 0, text::kPosX, 200.0f));
+    // Linear para medir o rastro.
+    if (Track* px = l->tracks.find(TrackProperty::TextAnimParam, 0, text::kPosX)) {
+        AUREA_CHECK_EQ(px->keys.size(), 2u);
+        for (const i64 f : {10, 20}) px->set_interpolation(FrameIndex{f}, Interpolation::Linear, 0, 0, 1, 1);
+    }
+    seek(15);
+    const Box8 sharp = lit_box(rig.capture(640));
+    AUREA_CHECK(rig.e.set_motion_blur(*tid, true));
+    const Box8 blur = lit_box(rig.capture(640));
+    std::printf("    desfoque por letra: %u -> %u px de largura\n", sharp.w(), blur.w());
+    AUREA_CHECK(sharp.x0 >= full.x0 + 90 && sharp.x0 <= full.x0 + 110);   // meio caminho (100 px)
+    AUREA_CHECK(blur.w() >= sharp.w() + 6 && blur.w() <= sharp.w() + 14);
+
+    // Salvar e reabrir: animadores e keyframes voltam iguais.
+    const Image8 before = rig.capture(640);
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_teste_animtexto.aurea";
+    AUREA_CHECK(rig.e.save_project(path.c_str()).ok());
+    AUREA_CHECK(rig.e.load_project(path.c_str()).ok());
+    seek(15);
+    const u32 reopened = max_diff(before, rig.capture(640));
+    std::printf("    reaberto dif %u\n", reopened);
+    AUREA_CHECK(reopened <= 3);
+    std::remove(path.c_str());
 }

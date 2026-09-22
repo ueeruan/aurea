@@ -14,9 +14,9 @@ struct Glyph {
     vec4 uv;
     vec4 fill;
     vec4 stroke;
-    vec4 xf;
+    mat4 xform;
     vec4 misc;
-    vec4 pivot;
+    vec4 extra;
 };
 
 layout(set = 0, binding = AUREA_DATA, std430) readonly buffer Glyphs { Glyph g[]; } glyphs;
@@ -43,7 +43,7 @@ void main() {
     }
     // Distância assinada em px da layer (positiva dentro do glifo).
     const float sd = (texture(u_atlas, v_uv).r * 255.0 - 128.0) / kDistScale * gl.misc.z;
-    const float blur = gl.pivot.z;
+    const float blur = gl.extra.x;
     const float w = max(fwidth(sd) * 0.5, 1e-4) + blur;
     const float fillA = smoothstep(-w, w, sd) * gl.fill.a;
     float strokeA = 0.0;

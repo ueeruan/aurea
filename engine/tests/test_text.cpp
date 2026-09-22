@@ -5,6 +5,7 @@
 #include "TestFramework.hpp"
 
 #include "aurea/text/Text.hpp"
+#include "aurea/text/TextAnimator.hpp"
 #include "aurea/timeline/Layer.hpp"
 
 #include <cmath>
@@ -244,4 +245,80 @@ AUREA_TEST(Text, RichTextSpansColorBoldAndSize) {
     AUREA_CHECK(green == 5 && white == 11);
     AUREA_CHECK(hRich > hPlain * 1.3f);
     AUREA_CHECK(rich.contentWidth > plain.contentWidth);
+}
+
+AUREA_TEST(Text, AnimatorSelectorWeights) {
+    TextAnimator a;
+    a.props = kTextPropOpacity;
+    a.selector.start = 0;
+    a.selector.end = 50;
+    TrackSet tr;
+    // Quadrado, 4 letras, 0–50%: as duas primeiras dentro, as duas últimas fora.
+    f32 w[4];
+    for (u32 i = 0; i < 4; ++i) w[i] = text::selector_weight(a, 0, tr, 0, 0, i, 4);
+    AUREA_CHECK(w[0] > 0.99f && w[1] > 0.99f && w[2] < 0.01f && w[3] < 0.01f);
+    // Fração: 0–37.5% cobre metade da segunda letra.
+    a.selector.end = 37.5f;
+    AUREA_CHECK(std::fabs(text::selector_weight(a, 0, tr, 0, 0, 1, 4) - 0.5f) < 0.01f);
+    // Deslocamento +50% leva a seleção para as duas últimas.
+    a.selector.end = 50;
+    a.selector.offset = 50;
+    AUREA_CHECK(text::selector_weight(a, 0, tr, 0, 0, 0, 4) < 0.01f && text::selector_weight(a, 0, tr, 0, 0, 3, 4) > 0.99f);
+    // Keyframe no deslocamento vence o valor parado (e interpola no sub-quadro).
+    Track& k = tr.get_or_create(TrackProperty::TextAnimParam, 0, text::kSelOffset);
+    k.set(FrameIndex{0}, 0.0f, Interpolation::Linear);
+    k.set(FrameIndex{10}, 50.0f, Interpolation::Linear);
+    AUREA_CHECK(text::selector_weight(a, 0, tr, 0, 0, 0, 4) > 0.99f);
+    AUREA_CHECK(std::fabs(text::anim_param(tr, 0, text::kSelOffset, 2.5, 0) - 12.5f) < 0.01f);
+    // Ordem aleatória: mesma quantidade selecionada, outra ordem.
+    TrackSet none;
+    a.selector.offset = 0;
+    a.selector.randomOrder = true;
+    a.selector.seed = 7;
+    {
+        TextData t;
+        t.animators.push_back(a);
+        t.animators[0].opacity = 0;
+        std::vector<text::GlyphUnits> units(8);
+        for (u32 i = 0; i < 8; ++i) units[i].charIndex = i;
+        std::vector<text::GlyphAnim> out;
+        text::evaluate_text_animators(t, none, 0, 30.0, units, 8, 1, 1, out);
+        u32 hidden = 0;
+        bool moved = false;
+        for (u32 i = 0; i < 8; ++i) {
+            hidden += out[i].opacity < 0.5f;
+            if ((out[i].opacity < 0.5f) != (i < 4)) moved = true;
+        }
+        AUREA_CHECK_EQ(hidden, 4u);
+        AUREA_CHECK(moved);
+    }
+    // Wiggly: dentro de −1..1 e muda com o tempo.
+    a.selector.type = 1;
+    f32 lo = 1, hi = -1;
+    for (u32 f = 0; f < 60; ++f) {
+        const f32 x = text::selector_weight(a, 0, none, f, f / 30.0, 2, 8);
+        lo = std::min(lo, x);
+        hi = std::max(hi, x);
+    }
+    AUREA_CHECK(lo >= -1.0f && hi <= 1.0f && hi - lo > 0.5f);
+}
+
+AUREA_TEST(Text, PresetsAreDataAndCharOffsetRolls) {
+    for (u32 p = 0; p < text::kTextPresetCount; ++p) {
+        TextData t;
+        t.content = "Ola mundo";
+        TrackSet tr;
+        AUREA_CHECK(text::apply_text_preset(p, t, tr, 0, 30, 30.0));
+        AUREA_CHECK(!t.animators.empty());
+        AUREA_CHECK(text::text_preset_name(p) != nullptr);
+    }
+    TextData t;
+    t.content = "Az9 !";
+    TextAnimator a;
+    a.props = kTextPropCharOffset;
+    a.charOffset = 1;
+    t.animators.push_back(a);
+    TrackSet tr;
+    // A→B, z→a (volta), 9→0, espaço e pontuação ficam.
+    AUREA_CHECK_EQ(text::apply_char_offset(t, tr, 0, 30.0), std::string("Ba0 !"));
 }

@@ -505,13 +505,28 @@ void write_layer(ByteWriter& w, const Layer& l) {
     w.f32v(l.text.shadowOffset.x);
     w.f32v(l.text.shadowOffset.y);
     w.f32v(l.text.shadowBlur);
+    // v14: animadores de texto
+    w.u32v(static_cast<u32>(l.text.animators.size()));
+    for (const TextAnimator& a : l.text.animators) {
+        w.str(a.name);
+        w.boolv(a.enabled);
+        const TextSelector& s = a.selector;
+        w.u32v(s.basedOn); w.u32v(s.type); w.u32v(s.shape); w.boolv(s.randomOrder); w.u32v(s.seed);
+        w.f32v(s.start); w.f32v(s.end); w.f32v(s.offset); w.f32v(s.amount); w.f32v(s.easeHigh); w.f32v(s.easeLow); w.f32v(s.wiggleRate);
+        w.u32v(a.props);
+        w.f32v(a.position.x); w.f32v(a.position.y); w.f32v(a.position.z);
+        w.f32v(a.scale.x); w.f32v(a.scale.y);
+        w.f32v(a.rotation.x); w.f32v(a.rotation.y); w.f32v(a.rotation.z);
+        w.f32v(a.opacity); w.f32v(a.tracking); w.f32v(a.blur); w.f32v(a.skew); w.f32v(a.strokeWidth); w.f32v(a.charOffset);
+        w.vec4(a.fill); w.vec4(a.stroke);
+    }
 }
 
 /// Versão da seção Timeline. v2: layer de modelo 3D guarda escala de unidade
 /// e pivô (o enquadramento do import). v1 continua sendo lida (campos novos
 /// com o padrão).
 /// v3: velocidade e reverso da layer.
-constexpr u32 kTimelineSectionVersion = 13;
+constexpr u32 kTimelineSectionVersion = 14;
 thread_local u32 g_readingTimelineVersion = kTimelineSectionVersion;
 
 void read_layer(ByteReader& r, Layer& l) {
@@ -718,6 +733,25 @@ void read_layer(ByteReader& r, Layer& l) {
         l.text.shadowOffset.x = r.f32v();
         l.text.shadowOffset.y = r.f32v();
         l.text.shadowBlur = r.f32v();
+    }
+    if (g_readingTimelineVersion >= 14) {
+        const u32 n = std::min<u32>(r.u32v(), 64);
+        l.text.animators.resize(n);
+        for (TextAnimator& a : l.text.animators) {
+            a.name = r.str();
+            a.enabled = r.boolv();
+            TextSelector& s = a.selector;
+            s.basedOn = static_cast<u8>(r.u32v()); s.type = static_cast<u8>(r.u32v()); s.shape = static_cast<u8>(r.u32v());
+            s.randomOrder = r.boolv(); s.seed = r.u32v();
+            s.start = r.f32v(); s.end = r.f32v(); s.offset = r.f32v(); s.amount = r.f32v(); s.easeHigh = r.f32v(); s.easeLow = r.f32v();
+            s.wiggleRate = r.f32v();
+            a.props = r.u32v();
+            a.position.x = r.f32v(); a.position.y = r.f32v(); a.position.z = r.f32v();
+            a.scale.x = r.f32v(); a.scale.y = r.f32v();
+            a.rotation.x = r.f32v(); a.rotation.y = r.f32v(); a.rotation.z = r.f32v();
+            a.opacity = r.f32v(); a.tracking = r.f32v(); a.blur = r.f32v(); a.skew = r.f32v(); a.strokeWidth = r.f32v(); a.charOffset = r.f32v();
+            a.fill = r.vec4(); a.stroke = r.vec4();
+        }
     }
 }
 

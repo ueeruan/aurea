@@ -93,6 +93,40 @@ struct Mask {
 };
 
 /// Blocos de dado específico de tipo. Mantidos pequenos e POD.
+/// Seletor do animador de texto: quanto cada unidade está "dentro".
+struct TextSelector {
+    u8   basedOn = 0;       ///< 0 caractere, 1 palavra, 2 linha
+    u8   type = 0;          ///< 0 intervalo, 1 wiggly (aleatório no tempo)
+    u8   shape = 0;         ///< 0 quadrado, 1 rampa sobe, 2 rampa desce, 3 triângulo, 4 redondo, 5 suave
+    bool randomOrder = false;
+    u32  seed = 1;
+    f32  start = 0.0f, end = 100.0f, offset = 0.0f;   ///< %
+    f32  amount = 100.0f, easeHigh = 0.0f, easeLow = 0.0f;
+    f32  wiggleRate = 2.0f;                           ///< variações por segundo
+};
+
+enum TextAnimProp : u32 {
+    kTextPropPosition = 1u << 0, kTextPropScale = 1u << 1, kTextPropRotation = 1u << 2, kTextPropOpacity = 1u << 3,
+    kTextPropTracking = 1u << 4, kTextPropBlur = 1u << 5, kTextPropSkew = 1u << 6, kTextPropStrokeWidth = 1u << 7,
+    kTextPropCharOffset = 1u << 8, kTextPropFill = 1u << 9, kTextPropStroke = 1u << 10,
+};
+
+/// Animador de texto: seletor + propriedades (valor com a unidade toda dentro).
+struct TextAnimator {
+    std::string  name;
+    bool         enabled = true;
+    TextSelector selector;
+    u32  props = 0;                        ///< TextAnimProp
+    Vec3 position{0.0f, 0.0f, 0.0f};       ///< px (Z = profundidade por caractere)
+    Vec2 scale{100.0f, 100.0f};            ///< %
+    Vec3 rotation{0.0f, 0.0f, 0.0f};       ///< graus (X/Y = 3D por caractere)
+    f32  opacity = 100.0f;                 ///< %
+    f32  tracking = 0.0f;                  ///< px entre caracteres
+    f32  blur = 0.0f, skew = 0.0f, strokeWidth = 0.0f, charOffset = 0.0f;
+    Vec4 fill{1.0f, 1.0f, 1.0f, 1.0f};     ///< sRGB
+    Vec4 stroke{0.0f, 0.0f, 0.0f, 1.0f};
+};
+
 /// Trecho com estilo próprio (rich text): caracteres [start, end) do texto.
 struct TextSpan {
     u32  start = 0, end = 0;
@@ -137,9 +171,9 @@ struct TextData {
     Vec2        shadowOffset{4.0f, 6.0f};
     f32         shadowBlur = 6.0f;
 
-    /// Text Animator: seletores (char/word/line) e animadores por seletor.
-    /// O conteúdo é resolvido no shape de texto, não aqui.
-    u32         animatorCount = 0;
+    /// Text Animator: pilha de animadores (os valores animados moram na
+    /// TrackSet da camada como TrackProperty::TextAnimParam).
+    std::vector<TextAnimator> animators;
 };
 
 struct ShapeData {

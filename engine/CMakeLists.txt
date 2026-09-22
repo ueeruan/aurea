@@ -89,6 +89,7 @@ set(AUREA_CORE_SOURCES
     src/tracking/CameraTracker.cpp
     src/text/Text.cpp
     src/text/FontManager.cpp
+    src/text/TextAnimator.cpp
     src/playback/Playback.cpp
     src/scene3d/GltfImporter.cpp
     src/scene3d/SceneRenderer.cpp

@@ -188,6 +188,7 @@ enum class TrackProperty : u16 {
     EffectParam,
     // Áudio (no fim: os números anteriores estão gravados em projetos)
     AudioVolume,       ///< volume linear (1 = 100%), animável
+    TextAnimParam,     ///< parâmetro de animador de texto (effectIndex = animador, paramIndex = TextAnimParam)
     _Count,
 };
 

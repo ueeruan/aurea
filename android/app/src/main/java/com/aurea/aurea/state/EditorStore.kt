@@ -541,9 +541,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             refreshTextFont()
             val st = FloatArray(18)
             textStyle = if (engine.queryTextStyle(id, st)) st else null
+            textAnimators = engine.queryTextAnimators(id)?.let { a -> List(a.size / 40) { i -> a.copyOfRange(i * 40, i * 40 + 40) } } ?: emptyList()
         } else {
             textFont = null
             textStyle = null
+            textAnimators = emptyList()
         }
         textDetail = if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Text.kind) {
             engine.queryText(id, textFloats)?.let { com.aurea.aurea.engine.TextDetail.of(it, textFloats) }
@@ -1635,6 +1637,49 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         v[index] = value
         textStyle = v
         engine.setTextStyle(id, v)
+        refreshDetail()
+    }
+
+    /** Animadores da camada de texto (40 floats cada; ver `query_text_animators`). */
+    var textAnimators by mutableStateOf<List<FloatArray>>(emptyList())
+        private set
+
+    fun applyTextPreset(preset: Int) {
+        val id = primary ?: return
+        engine.applyTextPreset(id, preset)
+        refreshDetail()
+    }
+
+    fun addTextAnimator(props: Int) {
+        val id = primary ?: return
+        engine.addTextAnimator(id, props)
+        refreshDetail()
+    }
+
+    fun removeTextAnimator(index: Int) {
+        val id = primary ?: return
+        engine.removeTextAnimator(id, index)
+        refreshDetail()
+    }
+
+    /** Ajuste não animável (0..6, cores 28..35) do animador. */
+    fun setTextAnimatorValues(index: Int, values: Map<Int, Float>) {
+        val id = primary ?: return
+        val v = textAnimators.getOrNull(index)?.copyOf() ?: return
+        values.forEach { (k, x) -> v[k] = x }
+        engine.setTextAnimator(id, index, v)
+        refreshDetail()
+    }
+
+    fun setTextAnimParam(index: Int, param: Int, value: Float) {
+        val id = primary ?: return
+        engine.setTextAnimParam(id, index, param, value)
+        refreshDetail()
+    }
+
+    fun toggleTextAnimKey(index: Int, param: Int) {
+        val id = primary ?: return
+        engine.toggleTextAnimKey(id, index, param)
         refreshDetail()
     }
 

@@ -1,6 +1,7 @@
 #include "aurea/timeline/Composition.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include "aurea/core/Log.hpp"
 
 #if !defined(NDEBUG)
@@ -176,6 +177,46 @@ bool Composition::can_nest(const Composition& candidate) const noexcept {
     if (candidate.nestingDepth_ >= kMaxNestingDepth) return false;
     if (nestingDepth_ + candidate.nestingDepth_ + 1 > kMaxNestingDepth) return false;
     return true;
+}
+
+namespace {
+
+/// Reescala os tempos de uma track. Keyframes que caem no mesmo frame depois
+/// do arredondamento (60 → 24 fps) colapsam no primeiro: dois keys no mesmo
+/// instante não têm intervalo entre eles.
+void retime_track(Track& t, f64 k, bool scaleValues) noexcept {
+    for (Keyframe& key : t.keys) {
+        key.time = FrameIndex{static_cast<i64>(std::llround(static_cast<f64>(key.time.value) * k))};
+        if (scaleValues) key.value = static_cast<f32>(static_cast<f64>(key.value) * k);
+    }
+    t.keys.erase(std::unique(t.keys.begin(), t.keys.end(),
+                             [](const Keyframe& a, const Keyframe& b) { return a.time.value == b.time.value; }),
+                 t.keys.end());
+    t.lastIndex = 0;
+}
+
+} // namespace
+
+void Composition::retime(f64 fps) noexcept {
+    const f64 old = fps_;
+    set_fps(fps);
+    if (old <= 0.0 || fps_ == old) return;
+    const f64 k = fps_ / old;
+    const auto scale = [k](FrameIndex f) {
+        return FrameIndex{static_cast<i64>(std::llround(static_cast<f64>(f.value) * k))};
+    };
+    duration_ = FrameIndex{std::max<i64>(1, scale(duration_).value)};
+    layers_.for_each([&](LayerId, Layer& l) {
+        l.start = scale(l.start);
+        l.end = FrameIndex{std::max(l.start.value + 1, scale(l.end).value)};
+        l.offset = scale(l.offset);
+        l.fadeIn = scale(l.fadeIn);
+        l.fadeOut = scale(l.fadeOut);
+        // O remap guarda frames locais nos VALORES também.
+        retime_track(l.timeRemap, k, true);
+        for (u32 i = 0; i < l.tracks.size(); ++i) retime_track(l.tracks.at(i), k, false);
+    });
+    touch();
 }
 
 std::unique_ptr<Composition> Composition::clone() const {

@@ -80,7 +80,14 @@ data class CompositionSettings(
     val fps: Double,
     val durationFrames: Int,
     val background: List<Float>,
-)
+    /** Teto do aparelho (lado maior × lado menor); 0 = desconhecido. */
+    val capLong: Int = 0,
+    val capShort: Int = 0,
+) {
+    /** Cabe no teto com que o motor recusa CompositionSetSize. */
+    fun fits(w: Int, h: Int): Boolean =
+        capLong <= 0 || (max(w, h) <= capLong && min(w, h) <= capShort)
+}
 
 data class PreviewState(
     val width: Int = 0,
@@ -893,7 +900,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** Ajustes da composição atual, relidos do motor a cada mudança do modelo. */
     var composition by mutableStateOf<CompositionSettings?>(null)
         private set
-    private val compBuffer = DoubleArray(8)
+    private val compBuffer = DoubleArray(10)
 
     private fun refreshComposition() {
         val id = engine.queryComposition(compBuffer)
@@ -904,6 +911,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             fps = compBuffer[2],
             durationFrames = compBuffer[3].toInt(),
             background = listOf(compBuffer[4].toFloat(), compBuffer[5].toFloat(), compBuffer[6].toFloat(), compBuffer[7].toFloat()),
+            capLong = compBuffer[8].toInt(),
+            capShort = compBuffer[9].toInt(),
         )
     }
 

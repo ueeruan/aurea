@@ -1094,6 +1094,11 @@ bool Engine::query_composition(u64& id, u32& width, u32& height, f64& fps, i64& 
     return true;
 }
 
+void Engine::composition_size_cap(u32& longSide, u32& shortSide) const noexcept {
+    longSide = std::max(caps_.max_export_width(), caps_.max_export_height());
+    shortSide = std::min(caps_.max_export_width(), caps_.max_export_height());
+}
+
 bool Engine::query_layer_detail(u64 layerId, bridge::LayerDetailPOD& out) noexcept {
     out = bridge::LayerDetailPOD{};
     std::lock_guard<std::mutex> lock(modelMutex_);
@@ -1885,14 +1890,27 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             Composition* c = timeline.composition(cmd.comp_fps.comp);
             if (!c) return Errc::NotFound;
             if (cmd.comp_fps.fps <= 0.0 || cmd.comp_fps.fps > 240.0) return Errc::InvalidArgument;
-            c->set_fps(cmd.comp_fps.fps);
-            if (cmd.comp_fps.comp == timeline.current()) timeline.clock().set_fps(cmd.comp_fps.fps);
+            const f64 k = cmd.comp_fps.fps / c->fps();
+            c->retime(cmd.comp_fps.fps);
+            if (c == comp) {
+                timeline.clock().set_fps(cmd.comp_fps.fps);
+                // O cabeçote fica no mesmo SEGUNDO.
+                const FrameIndex at{static_cast<i64>(std::llround(static_cast<f64>(playback_.current().value) * k))};
+                playback_.configure(c->fps(), c->duration());
+                playback_.seek(at, now);
+                sync_timeline();
+                adapt().configure(c->width(), c->height(), static_cast<f32>(c->fps()));
+            }
             return OkStatus;
         }
         case CommandType::CompositionSetDuration: {
             Composition* c = timeline.composition(cmd.comp_duration.comp);
             if (!c) return Errc::NotFound;
             c->set_duration(cmd.comp_duration.duration);
+            if (c == comp) {
+                playback_.configure(c->fps(), c->duration());
+                sync_timeline();
+            }
             return OkStatus;
         }
         case CommandType::CompositionSetBackground: {

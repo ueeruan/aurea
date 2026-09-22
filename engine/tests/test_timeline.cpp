@@ -319,3 +319,41 @@ AUREA_TEST(Layer, ContainsTimeIsHalfOpen) {
     AUREA_CHECK(l.contains_time(FrameIndex{19}));
     AUREA_CHECK(!l.contains_time(FrameIndex{20}));
 }
+
+AUREA_TEST(Composition, RetimeKeepsSecondsNotFrames) {
+    Composition c = make_comp(1920, 1080, 30.0);
+    c.set_duration(FrameIndex{300});                 // 10 s
+    const LayerId id = c.add_layer(LayerKind::Video, "V");
+    Layer* l = c.layer(id);
+    l->start = FrameIndex{30};                       // 1 s
+    l->end = FrameIndex{150};                        // 5 s
+    l->offset = FrameIndex{15};                      // 0,5 s
+    Track& t = l->tracks.get_or_create(TrackProperty::Opacity);
+    t.keys.push_back(Keyframe{FrameIndex{0}, 0.0f});
+    t.keys.push_back(Keyframe{FrameIndex{60}, 1.0f});
+    const u64 rev = c.revision();
+
+    c.retime(60.0);
+    l = c.layer(id);
+    AUREA_CHECK_EQ(c.fps(), 60.0);
+    AUREA_CHECK_EQ(c.duration().value, static_cast<i64>(600));
+    AUREA_CHECK_EQ(l->start.value, static_cast<i64>(60));
+    AUREA_CHECK_EQ(l->end.value, static_cast<i64>(300));
+    AUREA_CHECK_EQ(l->offset.value, static_cast<i64>(30));
+    const Track* tr = l->tracks.find(TrackProperty::Opacity);
+    AUREA_CHECK(tr != nullptr);
+    AUREA_CHECK_EQ(tr->keys.size(), static_cast<size_t>(2));
+    AUREA_CHECK_EQ(tr->keys[1].time.value, static_cast<i64>(120));
+    AUREA_CHECK(c.revision() > rev);
+
+    // Para baixo, keys que colapsam no mesmo frame viram um só.
+    Track& dense = c.layer(id)->tracks.get_or_create(TrackProperty::RotationZ);
+    dense.keys.push_back(Keyframe{FrameIndex{0}, 0.0f});
+    dense.keys.push_back(Keyframe{FrameIndex{1}, 1.0f});
+    dense.keys.push_back(Keyframe{FrameIndex{10}, 2.0f});
+    c.retime(6.0);
+    const Track* d = c.layer(id)->tracks.find(TrackProperty::RotationZ);
+    AUREA_CHECK_EQ(d->keys.size(), static_cast<size_t>(2));
+    AUREA_CHECK_EQ(d->keys[1].time.value, static_cast<i64>(1));
+    AUREA_CHECK(c.layer(id)->end.value > c.layer(id)->start.value);
+}

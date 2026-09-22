@@ -50,6 +50,8 @@ import com.aurea.aurea.ui.ds.SheetAction
 import com.aurea.aurea.ui.ds.casasAutomaticas
 import com.aurea.aurea.ui.ds.comUnidade
 import com.aurea.aurea.ui.ds.numeroPtBr
+import com.aurea.aurea.ui.ds.displayToEngine
+import com.aurea.aurea.ui.ds.engineToDisplay
 import com.aurea.aurea.ui.ds.rgbaColor
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
@@ -428,7 +430,7 @@ private fun EffectColorRow(env: PanelEnv, effectId: Int, s: ParamSlot, selected:
     // Derivado como `Color` (igualdade por valor): um FloatArray novo a cada
     // leitura faria a linha recompor a cada quadro da reprodução.
     val color by remember(store, effectId, s.index) {
-        derivedStateOf { rgbaColor(store.paramOf(effectId, s.index)?.value ?: floatArrayOf(1f, 1f, 1f, 1f)) }
+        derivedStateOf { rgbaColor(engineToDisplay(store.paramOf(effectId, s.index)?.value ?: floatArrayOf(1f, 1f, 1f, 1f))) }
     }
     val look = rememberLook(env, effectId, s.index, null)
     PropertyCustomRow(s.label, selected, onSelect = { onSelect(ParamKey(effectId, s.index, 0)) }, keyframe = look) {
@@ -445,7 +447,7 @@ private fun EffectColorRow(env: PanelEnv, effectId: Int, s: ParamSlot, selected:
                     ColorRequest(
                         initial = floatArrayOf(color.red, color.green, color.blue, color.alpha),
                         onChange = { r, g, b, a ->
-                            store.paramOf(effectId, s.index)?.let { store.writeParamVector(effectId, it, floatArrayOf(r, g, b, a)) }
+                            store.paramOf(effectId, s.index)?.let { store.writeParamVector(effectId, it, displayToEngine(r, g, b, a)) }
                         },
                         onDone = { store.endGesture() },
                     ),

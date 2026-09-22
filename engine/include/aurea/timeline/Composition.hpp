@@ -93,6 +93,13 @@ public:
     }
     void set_fps(f64 fps) noexcept { fps_ = fps > 0.0 ? fps : 30.0; ++formatRevision_; }
 
+    /// Troca a taxa PRESERVANDO os segundos: todo tempo guardado em frames
+    /// (duração, início/fim/offset e fades das layers, keyframes e o remap)
+    /// é reescalado. Sem isto, 30 → 60 fps deixaria o vídeo tocando na
+    /// velocidade certa mas cortado na metade, porque o tempo da fonte é
+    /// `frames locais / fps`.
+    void retime(f64 fps) noexcept;
+
     [[nodiscard]] f32 aspect() const noexcept {
         return static_cast<f32>(width_) / static_cast<f32>(height_);
     }

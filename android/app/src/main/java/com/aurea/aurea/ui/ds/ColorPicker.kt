@@ -47,11 +47,33 @@ import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.tocavel
 import java.util.Locale
+import kotlin.math.pow
 import kotlin.math.roundToInt
 
-/** Cor RGBA 0..1 (o formato dos parâmetros de cor do motor). */
+/** Cor de TELA (sRGB) a partir de RGBA 0..1 já em sRGB. */
 fun rgbaColor(v: FloatArray): Color =
     Color(v.getOrElse(0) { 0f }.coerceIn(0f, 1f), v.getOrElse(1) { 0f }.coerceIn(0f, 1f), v.getOrElse(2) { 0f }.coerceIn(0f, 1f), v.getOrElse(3) { 1f }.coerceIn(0f, 1f))
+
+private fun linearToSrgb(c: Float): Float {
+    val x = c.coerceIn(0f, 1f)
+    return if (x <= 0.0031308f) x * 12.92f else 1.055f * x.pow(1f / 2.4f) - 0.055f
+}
+
+private fun srgbToLinear(c: Float): Float {
+    val x = c.coerceIn(0f, 1f)
+    return if (x <= 0.04045f) x / 12.92f else ((x + 0.055f) / 1.055f).pow(2.4f)
+}
+
+/**
+ * O motor guarda cor (parâmetro de efeito, fundo da composição) em RGBA
+ * LINEAR; o seletor e as amostras trabalham em sRGB, que é o que a tela
+ * mostra. Estas duas são a fronteira — alfa não tem curva.
+ */
+fun engineToDisplay(v: FloatArray): FloatArray =
+    floatArrayOf(linearToSrgb(v.getOrElse(0) { 0f }), linearToSrgb(v.getOrElse(1) { 0f }), linearToSrgb(v.getOrElse(2) { 0f }), v.getOrElse(3) { 1f })
+
+fun displayToEngine(r: Float, g: Float, b: Float, a: Float): FloatArray =
+    floatArrayOf(srgbToLinear(r), srgbToLinear(g), srgbToLinear(b), a.coerceIn(0f, 1f))
 
 /**
  * A AMOSTRA DE COR (`_LinhaDeCor` da A.01): quadrado 30 × 30, raio 6, com o

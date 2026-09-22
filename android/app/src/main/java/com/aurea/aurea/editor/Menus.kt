@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -33,6 +34,9 @@ import androidx.compose.ui.unit.sp
 import com.aurea.aurea.editor.panels.EditorPanel
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.ds.AureaNamePrompt
+import com.aurea.aurea.ui.ds.ColorPickerSheet
+import com.aurea.aurea.ui.ds.displayToEngine
+import com.aurea.aurea.ui.ds.engineToDisplay
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.CupertinoGlyph
@@ -41,6 +45,7 @@ import com.aurea.aurea.ui.theme.LayerType
 import com.aurea.aurea.ui.theme.tocavel
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
@@ -272,20 +277,25 @@ private val Resolutions = listOf(720 to "HD 720p", 1080 to "Full HD 1080p", 1440
 private val FpsOptions = listOf(24, 30, 60)
 
 /**
- * Os ajustes do projeto. Mostra a composição de verdade (tamanho, fps,
- * duração) lida do store; editar a composição fica "em breve" — o motor
- * novo ainda não tem comandos de composição. O nome renomeia de verdade, e
+ * Os ajustes do projeto, lidos e escritos no motor (`store.composition`).
+ * Proporção mantém o lado menor; resolução mantém a proporção; trocar a taxa
+ * preserva os segundos (o motor reescala os tempos). O fundo abre o seletor
+ * de cor num passo só de desfazer. O nome renomeia de verdade, e
  * "Diagnóstico na tela" liga o HUD de desempenho.
  */
 @Composable
 internal fun ProjectSettingsSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> Unit) {
     val p = store.project
+    val comp = store.composition
     var renaming by remember { mutableStateOf(false) }
-    val aspect = if (p.height > 0) p.width.toFloat() / p.height else 0f
+    var pickingBackground by remember { mutableStateOf(false) }
+    val w = comp?.width ?: p.width
+    val h = comp?.height ?: p.height
+    val aspect = if (h > 0) w.toFloat() / h else 0f
     val currentAspect = Aspects.firstOrNull { abs(it.second - aspect) < 0.01f }?.first
-    val shortSide = min(p.width, p.height)
-    val fps = p.fps.roundToInt()
-    val seconds = if (p.fps > 0f) p.durationFrames / p.fps else 0f
+    val shortSide = min(w, h)
+    val fps = (comp?.fps ?: p.fps.toDouble()).roundToInt()
+    val seconds = if (fps > 0) (comp?.durationFrames ?: p.durationFrames).toFloat() / (comp?.fps?.toFloat() ?: p.fps) else 0f
     ShellMenuSheet(onDismiss, maxHeightFraction = 0.82f, scrim = ShellColors.SettingsScrim, handle = ShellColors.SheetHandle) {
         Text(
             "Projeto",
@@ -295,18 +305,37 @@ internal fun ProjectSettingsSheet(store: EditorStore, ui: EditorUi, onDismiss: (
         SettingRow(CupertinoGlyph.Pencil, p.title.ifBlank { "(Sem título)" }, "Toque para renomear", chevron = true) { renaming = true }
 
         SettingSection("Composição")
-        ChipsRow("Proporção", Aspects.map { it.first }, currentAspect) { store.comingSoon("Mudar a composição") }
-        ChipsRow("Resolução", Resolutions.map { it.second }, Resolutions.firstOrNull { it.first == shortSide }?.second) {
-            store.comingSoon("Mudar a composição")
+        ChipsRow("Proporção", Aspects.map { it.first }, currentAspect) { label ->
+            val c = comp ?: return@ChipsRow
+            val ratio = Aspects.first { it.first == label }.second
+            var (nw, nh) = sizeFor(shortSide, ratio)
+            if (!c.fits(nw, nh)) {
+                // Não cabe mantendo o lado menor: encolhe até caber, na proporção pedida.
+                val k = min(c.capLong.toFloat() / max(nw, nh), c.capShort.toFloat() / min(nw, nh))
+                nw = even(nw * k)
+                nh = even(nh * k)
+            }
+            store.setCompositionSize(nw, nh)
         }
-        ChipsRow("Quadros", FpsOptions.map { it.toString() }, FpsOptions.firstOrNull { it == fps }?.toString()) {
-            store.comingSoon("Mudar a composição")
+        ChipsRow("Resolução", Resolutions.map { it.second }, Resolutions.firstOrNull { it.first == shortSide }?.second) { label ->
+            val c = comp ?: return@ChipsRow
+            val short = Resolutions.first { it.second == label }.first
+            val (nw, nh) = sizeFor(short, if (aspect > 0f) aspect else 16f / 9f)
+            if (c.fits(nw, nh)) {
+                store.setCompositionSize(nw, nh)
+            } else {
+                store.showToast("Este aparelho exporta até ${c.capLong} × ${c.capShort}")
+            }
+        }
+        ChipsRow("Quadros", FpsOptions.map { it.toString() }, FpsOptions.firstOrNull { it == fps }?.toString()) { label ->
+            store.setCompositionFps(label.toDouble())
         }
         SettingRow(
             ShellGlyph.SquareFill,
             "Fundo da composição",
-            "${p.width} × ${p.height} · ${String.format(Locale.ROOT, "%.1f", seconds).replace('.', ',')} s",
-        ) { store.comingSoon("Fundo da composição") }
+            "$w × $h · ${String.format(Locale.ROOT, "%.1f", seconds).replace('.', ',')} s",
+            onClick = if (comp != null) ({ pickingBackground = true }) else null,
+        )
 
         SettingSection("Preview")
         SettingRow(ShellGlyph.SquareStack3dDownDottedline, "Casca de cebola", "Desligada") { store.comingSoon("Casca de cebola") }
@@ -365,7 +394,31 @@ internal fun ProjectSettingsSheet(store: EditorStore, ui: EditorUi, onDismiss: (
             onDismiss = { renaming = false },
         )
     }
+    if (pickingBackground && comp != null) {
+        // Um passo de desfazer para a folha inteira; fecha também se ela
+        // sair da tela sem o "Pronto".
+        val initial = remember { engineToDisplay(comp.background.toFloatArray()) }
+        DisposableEffect(Unit) {
+            store.beginGesture("fundo da composição")
+            onDispose { store.endGesture() }
+        }
+        ColorPickerSheet(
+            initial = initial,
+            withAlpha = false,
+            onChange = { r, g, b, _ ->
+                val v = displayToEngine(r, g, b, 1f)
+                store.setCompositionBackground(v[0], v[1], v[2], v[3])
+            },
+            onDone = { pickingBackground = false },
+        )
+    }
 }
+
+/** Tamanho par com lado menor `short` na proporção `ratio` (largura / altura). */
+private fun sizeFor(short: Int, ratio: Float): Pair<Int, Int> =
+    if (ratio >= 1f) even(short * ratio) to even(short.toFloat()) else even(short.toFloat()) to even(short / ratio)
+
+private fun even(v: Float): Int = max(2, (v / 2f).roundToInt() * 2)
 
 @Composable
 private fun SettingSection(title: String) {

@@ -474,6 +474,12 @@ AUREA_JNI jlong AUREA_FN(nativeQueryComposition)(JNIEnv* env, jclass, jlong hand
     const jdouble v[8] = {static_cast<jdouble>(w), static_cast<jdouble>(h), fps, static_cast<jdouble>(dur),
                           bg[0], bg[1], bg[2], bg[3]};
     env->SetDoubleArrayRegion(out, 0, 8, v);
+    if (env->GetArrayLength(out) >= 10) {
+        u32 capLong = 0, capShort = 0;
+        c->engine.composition_size_cap(capLong, capShort);
+        const jdouble cap[2] = {static_cast<jdouble>(capLong), static_cast<jdouble>(capShort)};
+        env->SetDoubleArrayRegion(out, 8, 2, cap);
+    }
     return static_cast<jlong>(id);
 }
 

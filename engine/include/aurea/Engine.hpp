@@ -277,6 +277,9 @@ public:
     /// frames, fundo RGBA linear). false = sem projeto.
     bool query_composition(u64& id, u32& width, u32& height, f64& fps, i64& durationFrames,
                            f32 background[4]) noexcept;
+    /// Teto de tamanho de composição do aparelho, como lado maior × lado
+    /// menor (a mesma regra com que CompositionSetSize recusa).
+    void composition_size_cap(u32& longSide, u32& shortSide) const noexcept;
 
     /// Detalhe de uma camada no playhead. false = camada não existe.
     bool query_layer_detail(u64 layerId, bridge::LayerDetailPOD& out) noexcept;

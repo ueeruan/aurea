@@ -63,6 +63,8 @@ enum class ColorOpCode : u32 {
     ColorMatrix = 5,
     Levels = 6,
     Curves = 7,
+    LumaKey = 8,     ///< mexe no alfa (Chave de luma)
+    ChromaKey = 9,   ///< mexe no alfa e tira o derramamento (Chave de croma)
 };
 
 /// Uma operação de cor: 16 floats (4 vec4 no shader). `p[0]` é reservado para

@@ -1,6 +1,7 @@
 #include "aurea/Engine.hpp"
 #include "aurea/audio/Beats.hpp"
 #include "aurea/tracking/PointTracker.hpp"
+#include "aurea/render/MaskRaster.hpp"
 #include "aurea/tracking/CameraTracker.hpp"
 
 #include "aurea/text/Text.hpp"
@@ -933,6 +934,71 @@ Result<u64> Engine::add_null(bool threeD) noexcept {
     return lid.pack();
 }
 
+namespace {
+
+/// Segue `pts` (px da camada, no 1º quadro de `targetUs`) quadro a quadro por
+/// NCC numa miniatura de até 360 px de altura. `out[i][k]` = ponto k no quadro
+/// i; ponto perdido (NCC < 0,6) vira NaN e não volta. Para quando sobram menos
+/// de `minAlive` pontos. false = vídeo ilegível.
+bool follow_points(VideoSourceFactory& factory, const Asset& asset, const std::vector<i64>& targetUs, f64 fps, u32 layerW,
+                   u32 layerH, const std::vector<Vec2>& pts, u32 minAlive, std::vector<std::vector<Vec2>>& out) {
+    out.clear();
+    auto dec = factory.open_video(asset, MediaPriority::Thumbnail);
+    if (!dec) return false;
+    const u32 thumbH = std::min<u32>(360u, layerH);
+    const i64 halfFrame = static_cast<i64>(5e5 / fps);
+    const f32 nan = std::numeric_limits<f32>::quiet_NaN();
+    tracking::Gray prev;
+    std::vector<Vec2> pos(pts.size());
+    f32 sx = 1, sy = 1;
+    i64 lastPts = std::numeric_limits<i64>::min();
+    for (usize i = 0; i < targetUs.size(); ++i) {
+        const i64 want = targetUs[i];
+        if (i == 0 || want < lastPts - halfFrame) {
+            if (!dec->seek_to_keyframe(want).ok()) break;
+            lastPts = std::numeric_limits<i64>::min();
+        }
+        FrameRef frame;
+        bool eos = false;
+        for (int guard = 0; guard < 600 && !eos; ++guard) {
+            FrameRef f;
+            i64 pts64 = 0;
+            if (!dec->next_frame(want - halfFrame, f, pts64, eos).ok()) { eos = true; break; }
+            if (!f) continue;
+            lastPts = pts64;
+            if (pts64 >= want - halfFrame) { frame = std::move(f); break; }
+        }
+        if (!frame) break;
+        ThumbnailService::Image img;
+        if (!frame_to_thumbnail(*frame.get(), thumbH, img)) break;
+        tracking::Gray g = tracking::to_gray(img.rgba.data(), img.width, img.height);
+        u32 alive = 0;
+        if (i == 0) {
+            sx = static_cast<f32>(img.width) / static_cast<f32>(layerW);
+            sy = static_cast<f32>(img.height) / static_cast<f32>(layerH);
+            for (usize k = 0; k < pts.size(); ++k) pos[k] = Vec2{pts[k].x * sx, pts[k].y * sy};
+            alive = static_cast<u32>(pts.size());
+        } else {
+            for (usize k = 0; k < pos.size(); ++k) {
+                if (std::isnan(pos[k].x)) continue;
+                const tracking::TrackStep st = tracking::track_step(prev, g, pos[k]);
+                if (st.score < 0.6f) { pos[k] = Vec2{nan, nan}; continue; }   // perdido: fica de fora
+                pos[k] = st.pos;
+                ++alive;
+            }
+        }
+        if (alive < std::max(1u, minAlive)) break;
+        std::vector<Vec2> row(pos.size());
+        for (usize k = 0; k < pos.size(); ++k) row[k] = std::isnan(pos[k].x) ? Vec2{nan, nan} : Vec2{pos[k].x / sx, pos[k].y / sy};
+        out.push_back(std::move(row));
+        prev = std::move(g);
+    }
+    AUREA_LOG_INFO("rastreio: %zu de %zu quadros (%zu pontos)", out.size(), targetUs.size(), pts.size());
+    return true;
+}
+
+} // namespace
+
 Result<u64> Engine::track_point(u64 layerId, f32 x, f32 y, bool stabilize, u32* trackedOut) noexcept {
     // 1. O que decodificar (sob o lock).
     Asset asset;
@@ -961,48 +1027,13 @@ Result<u64> Engine::track_point(u64 layerId, f32 x, f32 y, bool stabilize, u32* 
     }
     VideoSourceFactory* factory = config_.mediaFactory;
     if (!factory || layerW == 0 || layerH == 0) return Status{Errc::InvalidState, "sem decodificador"};
-    auto dec = factory->open_video(asset, MediaPriority::Thumbnail);
-    if (!dec) return Status{Errc::IoError, "video ilegivel"};
-    // 2. Quadro a quadro: cinza reduzido (até 360 px de altura) e NCC.
-    const u32 thumbH = std::min<u32>(360u, layerH);
-    const i64 halfFrame = static_cast<i64>(5e5 / fps);
-    std::vector<Vec2> track;   // px da camada, um por quadro rastreado
-    tracking::Gray prev;
-    Vec2 pos{};
-    f32 sx = 1, sy = 1;
-    i64 lastPts = std::numeric_limits<i64>::min();
-    for (usize i = 0; i < targetUs.size(); ++i) {
-        const i64 want = targetUs[i];
-        if (i == 0 || want < lastPts - halfFrame) {
-            if (!dec->seek_to_keyframe(want).ok()) break;
-            lastPts = std::numeric_limits<i64>::min();
-        }
-        FrameRef frame;
-        bool eos = false;
-        for (int guard = 0; guard < 600 && !eos; ++guard) {
-            FrameRef f;
-            i64 pts = 0;
-            if (!dec->next_frame(want - halfFrame, f, pts, eos).ok()) { eos = true; break; }
-            if (!f) continue;
-            lastPts = pts;
-            if (pts >= want - halfFrame) { frame = std::move(f); break; }
-        }
-        if (!frame) break;
-        ThumbnailService::Image img;
-        if (!frame_to_thumbnail(*frame.get(), thumbH, img)) break;
-        tracking::Gray g = tracking::to_gray(img.rgba.data(), img.width, img.height);
-        if (i == 0) {
-            sx = static_cast<f32>(img.width) / static_cast<f32>(layerW);
-            sy = static_cast<f32>(img.height) / static_cast<f32>(layerH);
-            pos = Vec2{x * sx, y * sy};
-        } else {
-            const tracking::TrackStep st = tracking::track_step(prev, g, pos);
-            if (st.score < 0.6f) break;   // ponto perdido: para aqui
-            pos = st.pos;
-        }
-        track.push_back(Vec2{pos.x / sx, pos.y / sy});
-        prev = std::move(g);
+    // 2. Quadro a quadro (NCC na miniatura), até o ponto se perder.
+    std::vector<std::vector<Vec2>> followed;
+    if (!follow_points(*factory, asset, targetUs, fps, layerW, layerH, {Vec2{x, y}}, 1, followed)) {
+        return Status{Errc::IoError, "video ilegivel"};
     }
+    std::vector<Vec2> track;   // px da camada, um por quadro rastreado
+    for (const auto& f : followed) track.push_back(f[0]);
     if (trackedOut) *trackedOut = static_cast<u32>(track.size());
     if (track.size() < 2) return Status{Errc::InvalidArgument, "ponto sem textura para seguir"};
     AUREA_LOG_INFO("rastreio: %zu de %zu quadros", track.size(), targetUs.size());
@@ -1057,6 +1088,326 @@ Result<u64> Engine::track_point(u64 layerId, f32 x, f32 y, bool stabilize, u32* 
     project_->mark_dirty();
     request_render();
     return layerId;
+}
+
+// =============================================================================
+// Máscaras (roto) e track matte
+// =============================================================================
+namespace {
+
+void read_points6(const f32* p, u32 n, std::vector<MaskPoint>& out) {
+    out.resize(n);
+    for (u32 i = 0; i < n; ++i) {
+        const f32* q = p + static_cast<usize>(i) * 6;
+        auto fin = [](f32 v) { return std::isfinite(v) ? v : 0.0f; };
+        out[i].position = Vec2{fin(q[0]), fin(q[1])};
+        out[i].inTangent = Vec2{fin(q[2]), fin(q[3])};
+        out[i].outTangent = Vec2{fin(q[4]), fin(q[5])};
+    }
+}
+
+Mask* mask_by_id(Layer& l, u32 id) noexcept {
+    for (Mask& m : l.masks) if (m.id == id) return &m;
+    return nullptr;
+}
+
+/// Key do caminho no instante local (índice), ou −1.
+i32 path_key_at(const Mask& m, i64 local) noexcept {
+    for (usize i = 0; i < m.pathKeys.size(); ++i) if (m.pathKeys[i].frame == local) return static_cast<i32>(i);
+    return -1;
+}
+
+/// Grava a forma num key (cria em ordem se não houver key ali).
+void put_path_key(Mask& m, i64 local, const std::vector<MaskPoint>& pts) {
+    const i32 at = path_key_at(m, local);
+    if (at >= 0) { m.pathKeys[static_cast<usize>(at)].points = pts; return; }
+    MaskPathKey k;
+    k.frame = local;
+    k.points = pts;
+    auto it = std::lower_bound(m.pathKeys.begin(), m.pathKeys.end(), local,
+                               [](const MaskPathKey& a, i64 f) { return a.frame < f; });
+    m.pathKeys.insert(it, std::move(k));
+}
+
+} // namespace
+
+i32 Engine::add_mask(u64 layerId, const f32* pts6, u32 count, bool closed) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->masks.size() >= kMaxMaskCount || count > 4096 || (count > 0 && !pts6)) return -1;
+    history_.before_mutation(*comp, project_->timeline().current(), "nova mascara");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    Mask m;
+    m.id = l->alloc_mask_id();
+    m.name = "Mascara " + std::to_string(m.id + 1);
+    m.closed = closed;
+    read_points6(pts6, count, m.points);
+    l->masks.push_back(std::move(m));
+    project_->mark_dirty();
+    request_render();
+    return static_cast<i32>(l->masks.back().id);
+}
+
+bool Engine::remove_mask(u64 layerId, u32 maskId) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || !mask_by_id(*l, maskId)) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "apagar mascara");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    l->masks.erase(std::remove_if(l->masks.begin(), l->masks.end(), [maskId](const Mask& m) { return m.id == maskId; }),
+                   l->masks.end());
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::set_mask_path(u64 layerId, u32 maskId, const f32* pts6, u32 count, bool closed, bool undo) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    Mask* m = l ? mask_by_id(*l, maskId) : nullptr;
+    if (!m || count > 4096 || (count > 0 && !pts6)) return false;
+    if (undo) history_.before_mutation(*comp, project_->timeline().current(), "editar mascara");
+    std::vector<MaskPoint> pts;
+    read_points6(pts6, count, pts);
+    // Caminho animado: a edição vira (ou atualiza) o key no cabeçote.
+    if (!m->pathKeys.empty()) put_path_key(*m, l->local_time(playback_.current()).value, pts);
+    else m->points = std::move(pts);
+    m->closed = closed;
+    m->cacheKey = 0;
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::set_mask_props(u64 layerId, u32 maskId, u32 op, bool inverted, f32 feather, f32 expansion, f32 opacity) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    Mask* m = l ? mask_by_id(*l, maskId) : nullptr;
+    if (!m || op > static_cast<u32>(MaskOperation::None)) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "ajustar mascara");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    m->operation = static_cast<MaskOperation>(op);
+    m->inverted = inverted;
+    m->feather = std::clamp(std::isfinite(feather) ? feather : 0.0f, 0.0f, 2000.0f);
+    m->expansion = std::clamp(std::isfinite(expansion) ? expansion : 0.0f, -2000.0f, 2000.0f);
+    m->opacity = std::clamp(std::isfinite(opacity) ? opacity : 1.0f, 0.0f, 1.0f);
+    m->cacheKey = 0;
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::toggle_mask_path_key(u64 layerId, u32 maskId, bool* keyedOut) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    Mask* m = l ? mask_by_id(*l, maskId) : nullptr;
+    if (!m) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "keyframe da mascara");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    const i64 local = l->local_time(playback_.current()).value;
+    const i32 at = path_key_at(*m, local);
+    bool keyed = false;
+    if (at >= 0) {
+        // Tirar o último key: a forma dele fica como o caminho parado.
+        if (m->pathKeys.size() == 1) m->points = m->pathKeys[0].points;
+        m->pathKeys.erase(m->pathKeys.begin() + at);
+    } else {
+        std::vector<MaskPoint> shape;
+        mask::evaluate_path(*m, static_cast<f64>(local), shape);
+        put_path_key(*m, local, shape);
+        keyed = true;
+    }
+    m->cacheKey = 0;
+    if (keyedOut) *keyedOut = keyed;
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+u32 Engine::query_masks(u64 layerId, f32* out, u32 capacity) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l) return 0;
+    const FrameIndex t = playback_.current();
+    const i64 local = l->local_time(t).value;
+    // Tamanho primeiro: quem chama realoca se não couber.
+    std::vector<MaskPoint> pts;
+    u32 need = 7;
+    for (const Mask& m : l->masks) {
+        mask::evaluate_path(m, static_cast<f64>(local), pts);
+        need += kMaskHeaderFloats + static_cast<u32>(pts.size()) * 6;
+    }
+    if (!out || capacity < need) return need;
+    const Mat4 w = layer_comp_matrix(*comp, *l, t);
+    out[0] = w.col[0].x; out[1] = w.col[0].y; out[2] = w.col[1].x; out[3] = w.col[1].y; out[4] = w.col[3].x; out[5] = w.col[3].y;
+    out[6] = static_cast<f32>(l->masks.size());
+    u32 o = 7;
+    for (const Mask& m : l->masks) {
+        mask::evaluate_path(m, static_cast<f64>(local), pts);
+        f32* h = out + o;
+        h[0] = static_cast<f32>(m.id);
+        h[1] = static_cast<f32>(static_cast<u8>(m.operation));
+        h[2] = m.inverted ? 1.0f : 0.0f;
+        h[3] = m.feather;
+        h[4] = m.expansion;
+        h[5] = m.opacity;
+        h[6] = m.closed ? 1.0f : 0.0f;
+        h[7] = static_cast<f32>(pts.size());
+        h[8] = static_cast<f32>(m.pathKeys.size());
+        h[9] = path_key_at(m, local) >= 0 ? 1.0f : 0.0f;
+        h[10] = mask::active(m) ? 1.0f : 0.0f;
+        h[11] = 0.0f;
+        o += kMaskHeaderFloats;
+        for (const MaskPoint& p : pts) {
+            out[o++] = p.position.x; out[o++] = p.position.y;
+            out[o++] = p.inTangent.x; out[o++] = p.inTangent.y;
+            out[o++] = p.outTangent.x; out[o++] = p.outTangent.y;
+        }
+    }
+    return o;
+}
+
+Result<u32> Engine::track_mask(u64 layerId, u32 maskId, u32 mode) noexcept {
+    // 1. O que decodificar e a forma de partida (sob o lock).
+    Asset asset;
+    i64 start = 0, end = 0, localStart = 0;
+    f64 fps = 30.0;
+    std::vector<i64> targetUs;
+    u32 layerW = 0, layerH = 0;
+    std::vector<MaskPoint> base;
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        Composition* comp = project_ ? current_composition() : nullptr;
+        Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+        if (!l || l->kind != LayerKind::Video) return Status{Errc::InvalidArgument, "rastreio de mascara precisa de camada de video"};
+        Mask* m = mask_by_id(*l, maskId);
+        if (!m) return Status{Errc::NotFound, "mascara nao existe"};
+        const Asset* a = project_->asset(l->source);
+        if (!a || !a->has_video()) return Status{Errc::InvalidArgument, "camada sem video"};
+        asset = *a;
+        fps = comp->fps() > 0.0 ? comp->fps() : 30.0;
+        start = std::clamp<i64>(playback_.current().value, l->start.value, std::max<i64>(l->start.value, l->end.value - 2));
+        end = std::min<i64>(l->end.value, start + 3600);
+        localStart = l->local_time(FrameIndex{start}).value;
+        mask::evaluate_path(*m, static_cast<f64>(localStart), base);
+        layerW = a->video.width;
+        layerH = a->video.height;
+        for (i64 f = start; f < end; ++f) {
+            targetUs.push_back(static_cast<i64>(std::llround(std::max(0.0, l->source_frame(FrameIndex{f})) * 1e6 / fps)));
+        }
+    }
+    if (base.size() < 2) return Status{Errc::InvalidArgument, "mascara sem caminho"};
+    VideoSourceFactory* factory = config_.mediaFactory;
+    if (!factory || layerW == 0 || layerH == 0) return Status{Errc::InvalidState, "sem decodificador"};
+    // 2. Pontos seguidos: o centro da máscara e quatro por dentro da caixa dela
+    // (a borda da máscara costuma cair na borda do objeto, onde o fundo engana).
+    Vec2 lo{1e30f, 1e30f}, hi{-1e30f, -1e30f};
+    for (const MaskPoint& p : base) {
+        lo = Vec2{std::min(lo.x, p.position.x), std::min(lo.y, p.position.y)};
+        hi = Vec2{std::max(hi.x, p.position.x), std::max(hi.y, p.position.y)};
+    }
+    const Vec2 c{(lo.x + hi.x) * 0.5f, (lo.y + hi.y) * 0.5f};
+    const f32 hx = std::max(12.0f, (hi.x - lo.x) * 0.5f) * 0.4f, hy = std::max(12.0f, (hi.y - lo.y) * 0.5f) * 0.4f;
+    std::vector<Vec2> feats = {c, {c.x - hx, c.y - hy}, {c.x + hx, c.y - hy}, {c.x + hx, c.y + hy}, {c.x - hx, c.y + hy}};
+    for (Vec2& f : feats) {
+        f.x = std::clamp(f.x, 9.0f, static_cast<f32>(layerW) - 10.0f);
+        f.y = std::clamp(f.y, 9.0f, static_cast<f32>(layerH) - 10.0f);
+    }
+    const bool similarity = mode == 1;
+    std::vector<std::vector<Vec2>> followed;
+    if (!follow_points(*factory, asset, targetUs, fps, layerW, layerH, feats, similarity ? 2u : 1u, followed)) {
+        return Status{Errc::IoError, "video ilegivel"};
+    }
+    if (followed.size() < 2) return Status{Errc::InvalidArgument, "mascara sem textura para seguir"};
+    // 3. Forma por quadro: translação média (modo 0) ou semelhança por mínimos
+    // quadrados (Umeyama 2D: escala + giro + translação) dos pontos vivos.
+    std::vector<std::vector<MaskPoint>> shapes(followed.size());
+    for (usize i = 0; i < followed.size(); ++i) {
+        Vec2 oc{0, 0}, pc{0, 0};
+        u32 n = 0;
+        for (usize k = 0; k < feats.size(); ++k) {
+            if (std::isnan(followed[i][k].x)) continue;
+            oc = Vec2{oc.x + followed[0][k].x, oc.y + followed[0][k].y};
+            pc = Vec2{pc.x + followed[i][k].x, pc.y + followed[i][k].y};
+            ++n;
+        }
+        if (n == 0) { shapes[i] = i > 0 ? shapes[i - 1] : base; continue; }
+        const f32 fn = static_cast<f32>(n);
+        oc = Vec2{oc.x / fn, oc.y / fn};
+        pc = Vec2{pc.x / fn, pc.y / fn};
+        f32 sc = 1.0f, ss = 0.0f;   // s·cos, s·sin
+        if (similarity && n >= 2) {
+            f32 a = 0, b = 0, den = 0;
+            for (usize k = 0; k < feats.size(); ++k) {
+                if (std::isnan(followed[i][k].x)) continue;
+                const f32 ox = followed[0][k].x - oc.x, oy = followed[0][k].y - oc.y;
+                const f32 px = followed[i][k].x - pc.x, py = followed[i][k].y - pc.y;
+                a += ox * px + oy * py;
+                b += ox * py - oy * px;
+                den += ox * ox + oy * oy;
+            }
+            if (den > 1.0f) { sc = a / den; ss = b / den; }
+        }
+        auto lin = [sc, ss](Vec2 v) { return Vec2{sc * v.x - ss * v.y, ss * v.x + sc * v.y}; };
+        shapes[i].resize(base.size());
+        for (usize k = 0; k < base.size(); ++k) {
+            const Vec2 r = lin(Vec2{base[k].position.x - oc.x, base[k].position.y - oc.y});
+            shapes[i][k].position = Vec2{r.x + pc.x, r.y + pc.y};
+            shapes[i][k].inTangent = lin(base[k].inTangent);
+            shapes[i][k].outTangent = lin(base[k].outTangent);
+        }
+    }
+    // 4. Keys do caminho (um passo de desfazer): os do trecho rastreado são trocados.
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    Mask* m = l ? mask_by_id(*l, maskId) : nullptr;
+    if (!m) return Status{Errc::NotFound, "mascara sumiu"};
+    history_.before_mutation(*comp, project_->timeline().current(), "rastrear mascara");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    const i64 localEnd = localStart + static_cast<i64>(shapes.size());
+    m->pathKeys.erase(std::remove_if(m->pathKeys.begin(), m->pathKeys.end(),
+                                     [&](const MaskPathKey& k) { return k.frame >= localStart && k.frame < localEnd; }),
+                      m->pathKeys.end());
+    for (usize i = 0; i < shapes.size(); ++i) put_path_key(*m, localStart + static_cast<i64>(i), shapes[i]);
+    m->cacheKey = 0;
+    project_->mark_dirty();
+    request_render();
+    return static_cast<u32>(shapes.size());
+}
+
+bool Engine::set_track_matte(u64 layerId, u64 matteLayerId, u32 mode) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || mode > static_cast<u32>(MatteMode::LumaInverted)) return false;
+    const bool clear = mode == 0 || matteLayerId == 0;
+    if (!clear && (matteLayerId == layerId || !comp->layer(LayerId::unpack(matteLayerId)))) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "track matte");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    l->matteSource = clear ? LayerId{} : LayerId::unpack(matteLayerId);
+    l->matteMode = clear ? MatteMode::None : static_cast<MatteMode>(mode);
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::query_track_matte(u64 layerId, u64& matte, u32& mode) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l) return false;
+    const bool ok = l->matteMode != MatteMode::None && l->matteSource.valid() && comp->layer(l->matteSource);
+    matte = ok ? l->matteSource.pack() : 0;
+    mode = ok ? static_cast<u32>(l->matteMode) : 0;
+    return true;
 }
 
 // =============================================================================
@@ -5094,7 +5445,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         }
 
         // ---------------------------------------------------------------------
-        // Máscaras (dados do modelo; o rasterizador de máscara é fase futura)
+        // Máscaras (dados do modelo; a rasterização é do Renderer — MaskRaster)
         // ---------------------------------------------------------------------
         case CommandType::MaskCreate: {
             Layer* l = need_layer(cmd.layer_ref.layer);
@@ -5158,6 +5509,9 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             Mask* m = l->find_mask(cmd.mask_commit.mask);
             if (!m) return Errc::NotFound;
             if (cmd.mask_commit.pointCount > 100000u) return Errc::OutOfRange;
+            // Aplica o número de pontos desenhado (os novos entram na origem e o
+            // MaskSetPath de cada um os coloca no lugar).
+            m->points.resize(cmd.mask_commit.pointCount);
             m->closed = cmd.mask_commit.closed;
             m->cacheKey = 0;
             return OkStatus;

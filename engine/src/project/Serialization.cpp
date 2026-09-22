@@ -522,13 +522,31 @@ void write_layer(ByteWriter& w, const Layer& l) {
     }
     // v15: legenda de qual camada
     w.u64v(l.text.captionSource);
+    // v17: track matte e caminho animado das máscaras (na ordem de l.masks)
+    w.u64v(l.matteSource.pack());
+    w.u8v(static_cast<u8>(l.matteMode));
+    w.u32v(static_cast<u32>(l.masks.size()));
+    for (const Mask& m : l.masks) {
+        w.u32v(static_cast<u32>(m.pathKeys.size()));
+        for (const MaskPathKey& k : m.pathKeys) {
+            w.i64v(k.frame);
+            w.u8v(k.interp);
+            w.u32v(static_cast<u32>(k.points.size()));
+            for (const MaskPoint& pt : k.points) {
+                w.vec2(pt.position);
+                w.vec2(pt.inTangent);
+                w.vec2(pt.outTangent);
+            }
+        }
+    }
 }
 
 /// Versão da seção Timeline. v2: layer de modelo 3D guarda escala de unidade
 /// e pivô (o enquadramento do import). v1 continua sendo lida (campos novos
 /// com o padrão).
 /// v3: velocidade e reverso da layer.
-constexpr u32 kTimelineSectionVersion = 15;
+/// v17: track matte (camada + modo) e keyframes do caminho das máscaras.
+constexpr u32 kTimelineSectionVersion = 17;
 thread_local u32 g_readingTimelineVersion = kTimelineSectionVersion;
 
 void read_layer(ByteReader& r, Layer& l) {
@@ -756,6 +774,30 @@ void read_layer(ByteReader& r, Layer& l) {
         }
     }
     if (g_readingTimelineVersion >= 15) l.text.captionSource = r.u64v();
+    if (g_readingTimelineVersion >= 17) {
+        l.matteSource = LayerId::unpack(r.u64v());
+        const u8 mm = r.u8v();
+        l.matteMode = mm <= static_cast<u8>(MatteMode::LumaInverted) ? static_cast<MatteMode>(mm) : MatteMode::None;
+        const u32 nm = r.u32v();
+        for (u32 i = 0; i < nm && r.good(); ++i) {
+            const u32 nk = r.u32v();
+            if (nk > 100000u) { r.skip_to_end(); return; }
+            std::vector<MaskPathKey> keys(nk);
+            for (MaskPathKey& k : keys) {
+                k.frame = r.i64v();
+                k.interp = r.u8v();
+                const u32 np = r.u32v();
+                if (np > 100000u || !r.good()) { r.skip_to_end(); return; }
+                k.points.resize(np);
+                for (MaskPoint& pt : k.points) {
+                    pt.position = r.vec2();
+                    pt.inTangent = r.vec2();
+                    pt.outTangent = r.vec2();
+                }
+            }
+            if (i < l.masks.size()) l.masks[i].pathKeys = std::move(keys);
+        }
+    }
 }
 
 void write_asset(ByteWriter& w, const Asset& a) {

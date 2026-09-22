@@ -811,6 +811,97 @@ AUREA_JNI jlong AUREA_FN(nativeTrackPoint)(JNIEnv* env, jclass, jlong handle, jl
     return static_cast<jlong>(*r);
 }
 
+// --- Máscaras (roto) e track matte ----------------------------------------------
+namespace {
+/// Pontos do caminho (6 floats cada) de um FloatArray; nulo = sem pontos.
+std::vector<f32> mask_points(JNIEnv* env, jfloatArray pts, jint count, u32& n) {
+    std::vector<f32> v;
+    n = 0;
+    if (!pts || count <= 0) return v;
+    const jsize len = env->GetArrayLength(pts);
+    n = static_cast<u32>(std::min<jint>(count, len / 6));
+    v.resize(static_cast<usize>(n) * 6);
+    if (n) env->GetFloatArrayRegion(pts, 0, static_cast<jsize>(v.size()), v.data());
+    return v;
+}
+} // namespace
+
+AUREA_JNI jint AUREA_FN(nativeAddMask)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloatArray pts, jint count, jboolean closed) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return -1;
+    u32 n = 0;
+    const std::vector<f32> v = mask_points(env, pts, count, n);
+    return c->engine.add_mask(static_cast<u64>(layer), v.data(), n, closed == JNI_TRUE);
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeRemoveMask)(JNIEnv*, jclass, jlong handle, jlong layer, jint mask) {
+    NativeContext* c = ctx_of(handle);
+    return c && mask >= 0 && c->engine.remove_mask(static_cast<u64>(layer), static_cast<u32>(mask)) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetMaskPath)(JNIEnv* env, jclass, jlong handle, jlong layer, jint mask, jfloatArray pts, jint count,
+                                               jboolean closed, jboolean undo) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || mask < 0) return JNI_FALSE;
+    u32 n = 0;
+    const std::vector<f32> v = mask_points(env, pts, count, n);
+    return c->engine.set_mask_path(static_cast<u64>(layer), static_cast<u32>(mask), v.data(), n, closed == JNI_TRUE, undo == JNI_TRUE)
+               ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetMaskProps)(JNIEnv*, jclass, jlong handle, jlong layer, jint mask, jint op, jboolean inverted,
+                                                jfloat feather, jfloat expansion, jfloat opacity) {
+    NativeContext* c = ctx_of(handle);
+    return c && mask >= 0 && op >= 0
+               && c->engine.set_mask_props(static_cast<u64>(layer), static_cast<u32>(mask), static_cast<u32>(op), inverted == JNI_TRUE,
+                                           feather, expansion, opacity) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jint AUREA_FN(nativeToggleMaskPathKey)(JNIEnv*, jclass, jlong handle, jlong layer, jint mask) {
+    NativeContext* c = ctx_of(handle);
+    bool keyed = false;
+    if (!c || mask < 0 || !c->engine.toggle_mask_path_key(static_cast<u64>(layer), static_cast<u32>(mask), &keyed)) return -1;
+    return keyed ? 1 : 0;
+}
+
+/// Floats necessários (escreve só se couberem em `out`).
+AUREA_JNI jint AUREA_FN(nativeQueryMasks)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloatArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return 0;
+    const jsize cap = out ? env->GetArrayLength(out) : 0;
+    std::vector<f32> v(static_cast<usize>(cap));
+    const u32 need = c->engine.query_masks(static_cast<u64>(layer), cap ? v.data() : nullptr, static_cast<u32>(cap));
+    if (need && need <= static_cast<u32>(cap)) env->SetFloatArrayRegion(out, 0, static_cast<jsize>(need), v.data());
+    return static_cast<jint>(need);
+}
+
+/// Quadros rastreados, ou −Errc.
+AUREA_JNI jint AUREA_FN(nativeTrackMask)(JNIEnv*, jclass, jlong handle, jlong layer, jint mask, jint mode) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || mask < 0) return -static_cast<jint>(Errc::InvalidState);
+    const Result<u32> r = c->engine.track_mask(static_cast<u64>(layer), static_cast<u32>(mask), static_cast<u32>(std::max(0, mode)));
+    if (!r.ok()) return -static_cast<jint>(r.status().code());
+    return static_cast<jint>(*r);
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetTrackMatte)(JNIEnv*, jclass, jlong handle, jlong layer, jlong matte, jint mode) {
+    NativeContext* c = ctx_of(handle);
+    return c && mode >= 0 && c->engine.set_track_matte(static_cast<u64>(layer), static_cast<u64>(matte), static_cast<u32>(mode))
+               ? JNI_TRUE : JNI_FALSE;
+}
+
+/// {matte, modo} em `out` (matte 0 = nenhuma).
+AUREA_JNI jboolean AUREA_FN(nativeQueryTrackMatte)(JNIEnv* env, jclass, jlong handle, jlong layer, jlongArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !out || env->GetArrayLength(out) < 2) return JNI_FALSE;
+    u64 matte = 0;
+    u32 mode = 0;
+    if (!c->engine.query_track_matte(static_cast<u64>(layer), matte, mode)) return JNI_FALSE;
+    const jlong v[2] = {static_cast<jlong>(matte), static_cast<jlong>(mode)};
+    env->SetLongArrayRegion(out, 0, 2, v);
+    return JNI_TRUE;
+}
+
 AUREA_JNI jboolean AUREA_FN(nativeSetEcho)(JNIEnv*, jclass, jlong handle, jlong layer, jint count, jfloat delay, jfloat decay) {
     NativeContext* c = ctx_of(handle);
     return c && c->engine.set_echo(static_cast<u64>(layer), static_cast<u32>(std::max(0, count)), delay, decay) ? JNI_TRUE : JNI_FALSE;

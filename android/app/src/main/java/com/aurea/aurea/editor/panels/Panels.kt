@@ -46,6 +46,7 @@ enum class EditorPanel {
     Tracking,      // rastreio de ponto / estabilização
     Element3D,     // ambiente 3D (HDRI)
     Captions,      // legendas automáticas da fala
+    Mask,          // máscaras (roto) e track matte
 }
 
 /**
@@ -109,6 +110,7 @@ fun PanelContent(
         EditorPanel.Tracking -> "Rastreio"
         EditorPanel.Element3D -> "Elemento 3D"
         EditorPanel.Captions -> "Legendas"
+        EditorPanel.Mask -> "Máscara e recorte"
     }
 
     Column(modifier.fillMaxSize().background(AureaColors.EditorPanel)) {
@@ -132,6 +134,7 @@ fun PanelContent(
                     EditorPanel.Tracking -> TrackingPanel(env)
                     EditorPanel.Element3D -> Element3DPanel(env)
                     EditorPanel.Captions -> CaptionsPanel(env)
+                    EditorPanel.Mask -> MaskPanel(env)
                 }
             }
         }

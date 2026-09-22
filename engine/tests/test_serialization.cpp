@@ -220,7 +220,20 @@ AUREA_TEST(Serialization, EffectsAndMasksSurviveRoundTrip) {
     m.closed = false;
     m.points.push_back(MaskPoint{Vec2{10.0f, 20.0f}, Vec2{1, 0}, Vec2{0, 1}});
     m.points.push_back(MaskPoint{Vec2{30.0f, 40.0f}, Vec2{0, 0}, Vec2{0, 0}});
+    // v17: caminho animado e track matte.
+    MaskPathKey k0;
+    k0.frame = 3;
+    k0.interp = 2;
+    k0.points = m.points;
+    MaskPathKey k1 = k0;
+    k1.frame = 12;
+    k1.interp = 0;
+    k1.points[0].position = Vec2{55.0f, 66.0f};
+    k1.points[1].outTangent = Vec2{-7.5f, 2.25f};
+    m.pathKeys = {k0, k1};
     c->layer(id)->masks.push_back(m);
+    c->layer(id)->matteSource = LayerId{7, 3};
+    c->layer(id)->matteMode = MatteMode::LumaInverted;
 
     std::string error;
     AUREA_CHECK(ProjectSerializer::save(original, path, SaveOptions{}, &error).ok());
@@ -251,6 +264,19 @@ AUREA_TEST(Serialization, EffectsAndMasksSurviveRoundTrip) {
     AUREA_CHECK(!ll->masks[0].closed);
     AUREA_CHECK_EQ(ll->masks[0].points.size(), static_cast<usize>(2));
     AUREA_CHECK_NEAR(ll->masks[0].points[1].position.y, 40.0f, 1e-5);
+    AUREA_CHECK_EQ(ll->masks[0].pathKeys.size(), static_cast<usize>(2));
+    if (ll->masks[0].pathKeys.size() == 2) {
+        const MaskPathKey& lk = ll->masks[0].pathKeys[1];
+        AUREA_CHECK_EQ(lk.frame, static_cast<i64>(12));
+        AUREA_CHECK_EQ(lk.interp, static_cast<u8>(0));
+        AUREA_CHECK_EQ(ll->masks[0].pathKeys[0].interp, static_cast<u8>(2));
+        AUREA_CHECK_EQ(lk.points.size(), static_cast<usize>(2));
+        AUREA_CHECK_NEAR(lk.points[0].position.x, 55.0f, 1e-6);
+        AUREA_CHECK_NEAR(lk.points[1].outTangent.x, -7.5f, 1e-6);
+        AUREA_CHECK_NEAR(lk.points[1].outTangent.y, 2.25f, 1e-6);
+    }
+    AUREA_CHECK(ll->matteSource == (LayerId{7, 3}));
+    AUREA_CHECK(ll->matteMode == MatteMode::LumaInverted);
 
     std::remove(path.c_str());
 }

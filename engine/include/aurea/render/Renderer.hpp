@@ -140,6 +140,20 @@ struct RenderLayer {
     /// Camada 2D no espaço 3D que vive dentro de um grupo de cena (desenhada
     /// com profundidade pelo grupo, não na composição): índice do grupo, ou −1.
     i32 planeGroup = -1;
+    /// Máscaras (render/MaskRaster.hpp): bloco em FrameSnapshot::maskData a
+    /// partir de `maskFirst`, `maskCount` ativas, cobertura inicial e a chave
+    /// do bloco (cache da cobertura).
+    u32 maskFirst = 0;
+    u32 maskCount = 0;
+    f32 maskStart = 0.0f;
+    u64 maskKey = 0;
+    /// Track matte: esta camada aparece através da matte `matteIndex` (índice
+    /// neste snapshot; −1 = matte ausente no instante).
+    MatteMode matteMode = MatteMode::None;
+    u64  matteId = 0;          ///< id (com sal da pré-composição) da matte
+    i32  matteIndex = -1;
+    /// Usada como matte por outra camada: não desenha por conta própria.
+    bool matteOnly = false;
 };
 
 struct FrameSnapshot {
@@ -162,6 +176,9 @@ struct FrameSnapshot {
     /// Glifos das camadas de texto deste quadro (a camada guarda o trecho).
     std::vector<GlyphInstance> glyphs;
     u32 glyphBase = 0;   ///< onde este snapshot começa no buffer do quadro (render)
+    /// Blocos de máscara das camadas deste quadro (cabeçalhos + arestas).
+    std::vector<Vec4> maskData;
+    u32 maskBase = 0;    ///< onde este snapshot começa no buffer de máscaras (render)
 };
 
 struct RenderSettings {
@@ -317,6 +334,11 @@ private:
                                           FGTexture target, u64 frameNumber, DecodedFrame* frame) noexcept;
     [[nodiscard]] bool build_video_source(const RenderLayer& layer, u32 layerIndex, u32 w, u32 h,
                                           FGTexture target, u64 frameNumber) noexcept;
+    /// Imagem da camada × cobertura das máscaras (cobertura em cache por camada).
+    void apply_masks(const RenderLayer& layer, LayerImage& img, u64 frameNumber) noexcept;
+    /// O desenho da camada sozinho num alvo do tamanho da composição.
+    [[nodiscard]] FGTexture draw_to_comp(const CompositeDraw& d, const TextureDesc& compDesc, f32 compW, f32 compH,
+                                         const char* name) noexcept;
     void flush_uploads() noexcept;
     void collect_resources(u64 frameNumber) noexcept;
     void read_timings(RenderTimings& t) noexcept;
@@ -345,6 +367,22 @@ private:
     u32 glyphSlot_ = 0;
     BufferHandle glyphFrameBuf_{};
     void upload_glyphs(FrameSnapshot& snap) noexcept;
+    // Máscaras: o buffer de arestas do quadro (anel) e a cobertura em cache por
+    // camada — duas texturas alternadas, como o optical flow.
+    BufferHandle maskBuf_[kGlyphRing]{};
+    usize maskCap_[kGlyphRing]{};
+    u32 maskSlot_ = 0;
+    BufferHandle maskFrameBuf_{};
+    void upload_masks(FrameSnapshot& snap) noexcept;
+    struct MaskCache {
+        TextureHandle tex[2]{};
+        u64 key[2]{0, 0};
+        u32 width = 0, height = 0;
+        u32 next = 0;
+        u64 lastFrame = 0;
+    };
+    std::unordered_map<u64, MaskCache> maskCache_;
+    u32 maskHits_ = 0, maskMisses_ = 0;
     /// Cache do optical flow por camada: duas texturas alternadas (a que um
     /// quadro em voo lê nunca é a que o próximo escreve), cada uma com o par
     /// de quadros da fonte que a gerou.
@@ -368,6 +406,8 @@ public:
     void flow_cache_stats(u32& hits, u32& misses) const noexcept { hits = flowHits_; misses = flowMisses_; }
     /// Benchmark: sem cache, todo quadro calcula o fluxo.
     void set_flow_cache_enabled(bool on) noexcept { flowCacheEnabled_ = on; }
+    /// Coberturas de máscara reaproveitadas / rasterizadas (testes e HUD).
+    void mask_cache_stats(u32& hits, u32& misses) const noexcept { hits = maskHits_; misses = maskMisses_; }
 private:
     std::unordered_map<u64, ImageTexture> images_;     ///< por AssetId empacotado
     std::unordered_map<u64, LutTexture> luts_;         ///< por hash da curva

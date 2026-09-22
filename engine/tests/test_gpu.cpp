@@ -26,6 +26,7 @@
 #include "aurea/effects/EffectGraph.hpp"
 #include "aurea/effects/MotionTile.hpp"
 #include "aurea/project/Project.hpp"
+#include "aurea/render/MaskRaster.hpp"
 #include "aurea/render/Renderer.hpp"
 #include "aurea/text/TextAnimator.hpp"
 
@@ -3156,5 +3157,294 @@ AUREA_TEST(Gpu, TextAnimatorTypewriterPerCharRotationAndMotionBlur) {
     const u32 reopened = max_diff(before, rig.capture(640));
     std::printf("    reaberto dif %u\n", reopened);
     AUREA_CHECK(reopened <= 3);
+    std::remove(path.c_str());
+}
+
+// =============================================================================
+// Fase 7E — máscaras, track matte e keying
+// =============================================================================
+namespace {
+
+/// Máscara retangular (px da camada) sem tangentes.
+Mask rect_mask(u32 id, f32 x0, f32 y0, f32 x1, f32 y1, MaskOperation op = MaskOperation::Add) {
+    Mask m;
+    m.id = id;
+    m.operation = op;
+    m.points = {MaskPoint{Vec2{x0, y0}}, MaskPoint{Vec2{x1, y0}}, MaskPoint{Vec2{x1, y1}}, MaskPoint{Vec2{x0, y1}}};
+    return m;
+}
+
+/// Camada branca que cobre a composição 1:1 (px da camada = px da composição).
+LayerId white_full(Scene& s) {
+    return s.solid(static_cast<f32>(s.comp->width()), static_cast<f32>(s.comp->height()), Vec4{1, 1, 1, 1},
+                   s.comp->width() * 0.5f, s.comp->height() * 0.5f);
+}
+
+} // namespace
+
+AUREA_TEST(Gpu, MaskRectangleCoverageIsPixelExactWithinAntialiasing) {
+    AUREA_REQUIRE_GPU();
+    Scene s(128, 96);
+    const LayerId id = white_full(s);
+    s.comp->layer(id)->masks.push_back(rect_mask(0, 20, 16, 100, 80));
+    FloatImage img = s.render();
+    // Bordas inteiras: dentro 1, fora 0, em todo pixel.
+    f32 worst = 0;
+    for (u32 y = 0; y < img.height; ++y) {
+        for (u32 x = 0; x < img.width; ++x) {
+            const f32 want = (x >= 20 && x < 100 && y >= 16 && y < 80) ? 1.0f : 0.0f;
+            worst = std::max(worst, std::fabs(img.v(x, y).x - want));
+        }
+    }
+    // Bordas fracionárias: o pixel da borda recebe a área coberta.
+    Layer* l = s.comp->layer(id);
+    l->masks[0] = rect_mask(0, 20.25f, 16.5f, 100.75f, 80.5f);
+    img = s.render();
+    const f32 left = img.v(20, 48).x, right = img.v(100, 48).x, top = img.v(60, 16).x, bottom = img.v(60, 80).x;
+    const f32 corner = img.v(20, 16).x;
+    std::printf("    borda inteira: pior %.4f | fracionaria: esq %.3f dir %.3f topo %.3f base %.3f canto %.3f (area %.3f)\n", worst, left,
+                right, top, bottom, corner, 0.75f * 0.5f);
+    AUREA_CHECK(worst <= 1.0f / 255.0f + 1e-3f);
+    AUREA_CHECK_NEAR(left, 0.75f, 0.01f);
+    AUREA_CHECK_NEAR(right, 0.75f, 0.01f);
+    AUREA_CHECK_NEAR(top, 0.5f, 0.01f);
+    AUREA_CHECK_NEAR(bottom, 0.5f, 0.01f);
+    AUREA_CHECK_NEAR(corner, 0.375f, 0.15f);
+    AUREA_CHECK_NEAR(img.v(60, 48).x, 1.0f, 0.004f);
+    AUREA_CHECK(img.v(10, 48).x < 0.004f);
+    // O mesmo bloco na CPU (mask::coverage_at) dá o mesmo número do shader.
+    std::vector<Vec4> block;
+    f32 start = 0;
+    u64 key = 0;
+    const u32 n = mask::build_block(*l, 0.0, Vec2{0, 0}, 0.2f, block, start, key);
+    AUREA_CHECK_EQ(n, 1u);
+    AUREA_CHECK_NEAR(mask::coverage_at(block.data(), n, start, Vec2{20.5f, 48.5f}, 1.0f), left, 0.006f);
+    AUREA_CHECK_NEAR(mask::coverage_at(block.data(), n, start, Vec2{20.5f, 16.5f}, 1.0f), corner, 0.006f);
+}
+
+AUREA_TEST(Gpu, MaskModesCombineInStackOrder) {
+    AUREA_REQUIRE_GPU();
+    Scene s(128, 96);
+    const LayerId id = white_full(s);
+    Layer* l = s.comp->layer(id);
+    l->masks = {rect_mask(0, 10, 10, 70, 70), rect_mask(1, 40, 40, 100, 90, MaskOperation::Subtract)};
+    auto px = [&](const FloatImage& im, u32 x, u32 y) { return im.v(x, y).x; };
+    FloatImage sub = s.render();
+    l->masks[1].operation = MaskOperation::Intersect;
+    FloatImage inter = s.render();
+    l->masks[1].operation = MaskOperation::Difference;
+    FloatImage diff = s.render();
+    l->masks[1].operation = MaskOperation::None;   // fora da pilha
+    FloatImage none = s.render();
+    l->masks = {rect_mask(0, 10, 10, 70, 70)};
+    l->masks[0].inverted = true;
+    l->masks[0].opacity = 0.5f;
+    FloatImage inv = s.render();
+    std::printf("    subtrair %.2f/%.2f/%.2f  intersectar %.2f/%.2f/%.2f  diferenca %.2f/%.2f/%.2f  invertida 50%% %.3f/%.3f\n",
+                px(sub, 20, 20), px(sub, 50, 50), px(sub, 80, 80), px(inter, 20, 20), px(inter, 50, 50), px(inter, 80, 80),
+                px(diff, 20, 20), px(diff, 50, 50), px(diff, 80, 80), px(inv, 20, 20), px(inv, 100, 20));
+    const f32 t = 0.004f;
+    AUREA_CHECK(std::fabs(px(sub, 20, 20) - 1) < t && px(sub, 50, 50) < t && px(sub, 80, 80) < t);
+    AUREA_CHECK(px(inter, 20, 20) < t && std::fabs(px(inter, 50, 50) - 1) < t && px(inter, 80, 80) < t);
+    AUREA_CHECK(std::fabs(px(diff, 20, 20) - 1) < t && px(diff, 50, 50) < t && std::fabs(px(diff, 80, 80) - 1) < t);
+    AUREA_CHECK(std::fabs(px(none, 50, 50) - 1) < t && px(none, 80, 80) < t);
+    AUREA_CHECK(px(inv, 20, 20) < t && std::fabs(px(inv, 100, 20) - 0.5f) < t);
+}
+
+AUREA_TEST(Gpu, MaskFeatherIsAGaussianRampOfTheExpectedWidth) {
+    AUREA_REQUIRE_GPU();
+    Scene s(192, 96);
+    const LayerId id = white_full(s);
+    Layer* l = s.comp->layer(id);
+    l->masks = {rect_mask(0, 60, -50, 250, 150)};   // só a borda esquerda (x = 60) aparece
+    l->masks[0].feather = 24.0f;
+    // Posição (px) onde a linha do meio cruza o nível `v`, interpolando.
+    auto crossing = [](const FloatImage& im, f32 v) {
+        const u32 y = im.height / 2;
+        for (u32 x = 1; x < im.width; ++x) {
+            const f32 a = im.v(x - 1, y).x, b = im.v(x, y).x;
+            if (a < v && b >= v) return static_cast<f32>(x - 1) + 0.5f + (v - a) / std::max(1e-6f, b - a);
+        }
+        return -1.0f;
+    };
+    FloatImage img = s.render();
+    bool monotone = true;
+    for (u32 x = 1; x < img.width; ++x) monotone &= img.v(x, 48).x + 1e-3f >= img.v(x - 1, 48).x;
+    const f32 x10 = crossing(img, 0.1f), x50 = crossing(img, 0.5f), x90 = crossing(img, 0.9f);
+    // σ = feather/4 (e o antisserrilhado de 1/√12 texel): 10–90 % = 2·1,2816·σ.
+    const f32 sigma = std::sqrt(6.0f * 6.0f + 1.0f / 12.0f);
+    const f32 expected = 2.0f * 1.28155f * sigma;
+    l->masks[0].expansion = 5.0f;
+    const f32 x50e = crossing(s.render(), 0.5f);
+    std::printf("    feather 24 px: 10-90%% = %.2f px (esperado %.2f), meio em x=%.2f; expansao +5 -> meio em x=%.2f\n", x90 - x10,
+                expected, x50, x50e);
+    AUREA_CHECK(monotone);
+    AUREA_CHECK(std::fabs((x90 - x10) - expected) < 1.0f);
+    AUREA_CHECK(std::fabs(x50 - 60.0f) < 0.5f);
+    AUREA_CHECK(std::fabs(x50e - 55.0f) < 0.5f);
+}
+
+AUREA_TEST(Gpu, AnimatedMaskPathMovesAndIsCached) {
+    AUREA_REQUIRE_GPU();
+    Scene s(128, 64);
+    const LayerId id = white_full(s);
+    Layer* l = s.comp->layer(id);
+    Mask m = rect_mask(0, 10, 10, 40, 50);
+    MaskPathKey a, b;
+    a.frame = 0;
+    a.points = m.points;
+    b.frame = 10;
+    b.points = rect_mask(0, 60, 10, 90, 50).points;
+    m.pathKeys = {a, b};
+    l->masks = {m};
+    u32 h0 = 0, m0 = 0;
+    gpu().renderer.mask_cache_stats(h0, m0);
+    const FloatImage f0 = s.render(FrameIndex{0});
+    const FloatImage f5 = s.render(FrameIndex{5});
+    const FloatImage f5again = s.render(FrameIndex{5});
+    const FloatImage f10 = s.render(FrameIndex{10});
+    u32 h1 = 0, m1 = 0;
+    gpu().renderer.mask_cache_stats(h1, m1);
+    // No quadro 5 (linear): x 35..65.
+    std::printf("    quadro 0: x20=%.2f x50=%.2f | quadro 5: x30=%.2f x50=%.2f x70=%.2f | quadro 10: x75=%.2f | cache +%u acertos +%u raster\n",
+                f0.v(20, 30).x, f0.v(50, 30).x, f5.v(30, 30).x, f5.v(50, 30).x, f5.v(70, 30).x, f10.v(75, 30).x, h1 - h0, m1 - m0);
+    AUREA_CHECK(f0.v(20, 30).x > 0.99f && f0.v(50, 30).x < 0.01f);
+    AUREA_CHECK(f5.v(30, 30).x < 0.01f && f5.v(50, 30).x > 0.99f && f5.v(70, 30).x < 0.01f);
+    AUREA_CHECK(f5.v(34, 30).x < 0.01f && f5.v(35, 30).x > 0.99f);   // borda exatamente em x = 35
+    AUREA_CHECK(f10.v(75, 30).x > 0.99f && f10.v(20, 30).x < 0.01f);
+    AUREA_CHECK_EQ(m1 - m0, 3u);   // três formas diferentes
+    AUREA_CHECK(h1 - h0 >= 1u);    // o quadro 5 repetido reaproveita a cobertura
+    (void)f5again;
+}
+
+AUREA_TEST(Gpu, TrackMatteAlphaAndLuma) {
+    AUREA_REQUIRE_GPU();
+    Scene s(128, 64);
+    // Camada vermelha em tela cheia (embaixo) e a matte em cima (como no AE).
+    const LayerId red = s.solid(128, 64, Vec4{1, 0, 0, 1}, 64, 32);
+    const LayerId matte = s.solid(40, 20, Vec4{1, 1, 1, 1}, 64, 32);   // x 44..84, y 22..42
+    Layer* r = s.comp->layer(red);
+    r->matteSource = matte;
+    r->matteMode = MatteMode::Alpha;
+    const FloatImage alpha = s.render();
+    r->matteMode = MatteMode::AlphaInverted;
+    const FloatImage alphaInv = s.render();
+    // Luma: matte cinza sRGB 0,25 cobrindo tudo → 25 % (e 75 % invertida).
+    Layer* m = s.comp->layer(matte);
+    m->shape.bounds = Rect{0, 0, 128, 64};
+    m->shape.fillColor = Vec4{0.25f, 0.25f, 0.25f, 1};
+    m->transform.anchor = Vec3{64, 32, 0};
+    r->matteMode = MatteMode::Luma;
+    const FloatImage luma = s.render();
+    r->matteMode = MatteMode::LumaInverted;
+    const FloatImage lumaInv = s.render();
+    std::printf("    alfa: dentro %.3f fora %.3f (g %.3f) | invertido %.3f/%.3f | luma %.3f | luma invertida %.3f\n", alpha.v(64, 32).x,
+                alpha.v(10, 10).x, alpha.v(64, 32).y, alphaInv.v(64, 32).x, alphaInv.v(10, 10).x, luma.v(10, 10).x, lumaInv.v(10, 10).x);
+    // A matte não aparece por conta própria (o verde/azul do branco seria > 0).
+    AUREA_CHECK(near4(alpha.v(64, 32), Vec4{1, 0, 0, 1}, 0.004f));
+    AUREA_CHECK(near4(alpha.v(10, 10), Vec4{0, 0, 0, 1}, 0.004f));
+    AUREA_CHECK(near4(alpha.v(43, 32), Vec4{0, 0, 0, 1}, 0.004f));
+    AUREA_CHECK(near4(alphaInv.v(64, 32), Vec4{0, 0, 0, 1}, 0.004f));
+    AUREA_CHECK(near4(alphaInv.v(10, 10), Vec4{1, 0, 0, 1}, 0.004f));
+    AUREA_CHECK_NEAR(luma.v(10, 10).x, 0.25f, 0.01f);
+    AUREA_CHECK_NEAR(lumaInv.v(10, 10).x, 0.75f, 0.01f);
+    AUREA_CHECK(luma.v(10, 10).y < 0.004f);
+}
+
+AUREA_TEST(Gpu, ChromaKeyRemovesGreenAndKeepsSkin) {
+    AUREA_REQUIRE_GPU();
+    Scene s(128, 64);
+    s.comp->set_transparent_background(true);
+    // Esquerda: fundo verde com variação (luz desigual); direita: tons de pele.
+    ImagePixels px = uniform_image(128, 64, 0, 0, 0);
+    const u8 greens[4][3] = {{25, 184, 56}, {40, 170, 70}, {18, 200, 48}, {30, 150, 60}};
+    const u8 skins[3][3] = {{222, 171, 140}, {141, 85, 60}, {250, 214, 190}};
+    for (u32 y = 0; y < 64; ++y) {
+        for (u32 x = 0; x < 128; ++x) {
+            u8* p = &px.rgba[(static_cast<usize>(y) * 128 + x) * 4];
+            const u8* c = x < 64 ? greens[(x / 16 + y / 16) % 4] : skins[((x - 64) / 22) % 3];
+            p[0] = c[0]; p[1] = c[1]; p[2] = c[2];
+        }
+    }
+    const LayerId id = s.image(std::move(px), 64, 32);
+    s.add_effect(id, effect_keys::kChromaKey);   // cor-chave padrão: verde de fundo
+    const FloatImage img = s.render();
+    f32 greenMax = 0, skinMin = 1, skinShift = 0;
+    for (u32 y = 2; y < 62; ++y) {
+        for (u32 x = 2; x < 126; ++x) {
+            if (x > 60 && x < 68) continue;   // fronteira (reamostragem)
+            const Vec4 v = img.v(x, y);
+            if (x < 64) {
+                greenMax = std::max(greenMax, v.w);
+            } else {
+                skinMin = std::min(skinMin, v.w);
+                const u8* c = skins[((x - 64) / 22) % 3];
+                if ((x - 64) % 22 > 1 && (x - 64) % 22 < 20) skinShift = std::max(skinShift, std::fabs(srgb_encode(v.y) - c[1] / 255.0f));
+            }
+        }
+    }
+    // Chave de luma: tira os escuros.
+    Scene s2(64, 32);
+    s2.comp->set_transparent_background(true);
+    ImagePixels bw = uniform_image(64, 32, 0, 0, 0);
+    for (u32 y = 0; y < 32; ++y) for (u32 x = 32; x < 64; ++x) for (int c = 0; c < 3; ++c) bw.rgba[(static_cast<usize>(y) * 64 + x) * 4 + c] = 230;
+    const LayerId lk = s2.image(std::move(bw), 32, 16);
+    s2.add_effect(lk, effect_keys::kLumaKey);
+    const FloatImage lum = s2.render();
+    std::printf("    croma: alfa max no verde %.4f, alfa min na pele %.4f, desvio do verde da pele %.4f | luma: escuro %.3f claro %.3f\n",
+                greenMax, skinMin, skinShift, lum.v(10, 16).w, lum.v(50, 16).w);
+    AUREA_CHECK(greenMax < 0.02f);
+    AUREA_CHECK(skinMin > 0.98f);
+    AUREA_CHECK(skinShift < 0.02f);
+    AUREA_CHECK(lum.v(10, 16).w < 0.01f && lum.v(50, 16).w > 0.99f);
+}
+
+AUREA_TEST(Gpu, MasksMatteAndKeysSurviveSaveAndReopen) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(256, 144);
+    auto a = rig.e.add_shape(0);
+    auto b = rig.e.add_shape(1);
+    AUREA_CHECK(a.ok() && b.ok());
+    if (!a.ok() || !b.ok()) return;
+    Composition* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+    const Rect box = comp->layer(LayerId::unpack(*a))->shape.bounds;
+    const f32 w = box.w, h = box.h;
+    // Losango com tangentes (bezier), feather e expansão; caminho animado.
+    const f32 p0[4 * 6] = {w * 0.5f, 0, -8, 0, 8, 0,   w, h * 0.5f, 0, -8, 0, 8,   w * 0.5f, h, 8, 0, -8, 0,   0, h * 0.5f, 0, 8, 0, -8};
+    const i32 mid = rig.e.add_mask(*a, p0, 4, true);
+    AUREA_CHECK(mid >= 0);
+    AUREA_CHECK(rig.e.set_mask_props(*a, static_cast<u32>(mid), 0, false, 6.0f, 2.0f, 0.9f));
+    seek_frame(rig.e, 0);
+    bool keyed = false;
+    AUREA_CHECK(rig.e.toggle_mask_path_key(*a, static_cast<u32>(mid), &keyed) && keyed);
+    seek_frame(rig.e, 20);
+    f32 p1[4 * 6];
+    for (int i = 0; i < 24; ++i) p1[i] = p0[i] * ((i % 6) < 2 ? 0.6f : 1.0f);
+    AUREA_CHECK(rig.e.set_mask_path(*a, static_cast<u32>(mid), p1, 4, true, true));
+    // Track matte por luma na elipse, e chave de croma na camada.
+    AUREA_CHECK(rig.e.set_track_matte(*a, *b, 3));
+    Command fx;
+    fx.type = CommandType::EffectAdd;
+    fx.effect_add.layer = LayerId::unpack(*a);
+    fx.effect_add.effectType = effect_type_id(effect_keys::kChromaKey);
+    AUREA_CHECK(rig.e.apply_command(fx).ok());
+    std::vector<f32> q(rig.e.query_masks(*a, nullptr, 0));
+    AUREA_CHECK(rig.e.query_masks(*a, q.data(), static_cast<u32>(q.size())) == q.size());
+    AUREA_CHECK(q.size() > 7 && q[6] == 1.0f && q[7 + 8] == 2.0f);   // 1 máscara, 2 keys
+    seek_frame(rig.e, 10);
+    const Image8 before = rig.capture(256);
+    const f32 cov = coverage(before);
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_teste_mascaras.aurea";
+    AUREA_CHECK(rig.e.save_project(path.c_str()).ok());
+    AUREA_CHECK(rig.e.load_project(path.c_str()).ok());
+    seek_frame(rig.e, 10);
+    const Image8 after = rig.capture(256);
+    u64 matte = 0;
+    u32 mode = 0;
+    AUREA_CHECK(rig.e.query_track_matte(*a, matte, mode) && matte == *b && mode == 3);
+    const u32 diff = max_diff(before, after);
+    std::printf("    salvo e reaberto: cobertura %.4f, diferenca maxima %u\n", cov, diff);
+    AUREA_CHECK(cov > 0.005f);
+    AUREA_CHECK_EQ(diff, 0u);
     std::remove(path.c_str());
 }

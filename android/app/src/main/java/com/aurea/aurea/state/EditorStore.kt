@@ -501,11 +501,65 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         } else {
             null
         }
+        text3d = if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Model3D.kind) {
+            val f = FloatArray(5)
+            engine.queryText3d(id, f)?.let { Text3DInfo(it, f[0], f[1].toInt(), floatArrayOf(f[2], f[3], f[4], 1f)) }
+        } else {
+            null
+        }
         textDetail = if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Text.kind) {
             engine.queryText(id, textFloats)?.let { com.aurea.aurea.engine.TextDetail.of(it, textFloats) }
         } else {
             null
         }
+    }
+
+    /** Receita do texto 3D da camada principal (nulo = não é texto 3D). */
+    var text3d by mutableStateOf<Text3DInfo?>(null)
+        private set
+
+    fun addText3D(): Long {
+        val id = engine.addText3d("Texto", 0.25f, 1, 1f, 1f, 1f)
+        if (id < 0) {
+            errorMessage = "Não foi possível criar o texto 3D (erro ${-id})."
+            return -1
+        }
+        refreshNow()
+        select(id)
+        return id
+    }
+
+    /** Aplica a receita (a malha é gerada de novo). Digitação agrupada como no texto 2D. */
+    fun setText3D(info: Text3DInfo, typing: Boolean = false, lazy: Boolean = false) {
+        val id = primary ?: return
+        text3d = info
+        if (lazy) {
+            // Arrasto (cor, profundidade): a malha acompanha em passos curtos.
+            typingHandler.removeCallbacks(applyText3d)
+            typingHandler.postDelayed(applyText3d, 90)
+            return
+        }
+        if (typing) {
+            if (!textEditing) {
+                textEditing = true
+                beginGesture("editar texto 3D")
+            }
+            typingHandler.removeCallbacks(closeTyping)
+            typingHandler.postDelayed(closeTyping, 1000)
+            // A malha segue a digitação com um respiro (não uma malha por tecla).
+            typingHandler.removeCallbacks(applyText3d)
+            typingHandler.postDelayed(applyText3d, 250)
+            return
+        }
+        pushText3D(id, info)
+    }
+
+    private val applyText3d = Runnable { primary?.let { id -> text3d?.let { pushText3D(id, it) } } }
+
+    private fun pushText3D(id: Long, info: Text3DInfo) {
+        if (info.content.isBlank()) return
+        engine.setText3d(id, info.content, info.depth, info.alignment, info.color[0], info.color[1], info.color[2])
+        refreshNow()
     }
 
     /** Texto da camada principal (quando é texto). */
@@ -2180,3 +2234,6 @@ class ThumbnailCache(private val engine: AureaEngine) {
 
 /** Comprimento das setas do gizmo 3D, em unidades do mundo (px da composição no plano Z = 0). */
 const val GIZMO_LENGTH = 320f
+
+/** Receita do texto 3D: texto, profundidade (em alturas de letra), alinhamento e cor sRGB. */
+data class Text3DInfo(val content: String, val depth: Float, val alignment: Int, val color: FloatArray)

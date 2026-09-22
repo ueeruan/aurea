@@ -171,6 +171,76 @@ TextExtent measure(const Font& font, const TextData& t) {
     return TextExtent{std::max(1.0f, std::ceil(w)), std::max(1.0f, std::ceil(h))};
 }
 
+bool outline(const Font& font, const TextData& t, std::vector<std::vector<Vec2>>& contours) {
+    const Font::Impl& f = font.impl();
+    const f32 size = std::max(1.0f, t.size);
+    const f32 fs = stbtt_ScaleForPixelHeight(&f.info, size);
+    const f32 tracking = t.tracking * size / 1000.0f;
+    const std::vector<Line> lines = layout(f, t, fs, tracking);
+    f32 maxW = 0.0f;
+    for (const Line& l : lines) maxW = std::max(maxW, l.width);
+    const f32 lineAdvance = size * std::max(0.1f, t.lineHeight);
+    const f32 ascent = static_cast<f32>(f.ascent) * fs;
+    // Passos por curva: ~1 segmento a cada 2 px do tamanho pedido, entre 4 e 16.
+    const int steps = std::clamp(static_cast<int>(size / 8.0f), 4, 16);
+    contours.clear();
+    for (usize li = 0; li < lines.size(); ++li) {
+        const Line& l = lines[li];
+        f32 x = 0.0f;
+        if (t.alignment == 1) x += (maxW - l.width) * 0.5f;
+        else if (t.alignment == 2) x += maxW - l.width;
+        const f32 baseline = ascent + lineAdvance * static_cast<f32>(li);
+        for (usize i = 0; i < l.cps.size(); ++i) {
+            const int cp = static_cast<int>(l.cps[i]);
+            stbtt_vertex* v = nullptr;
+            const int n = stbtt_GetCodepointShape(&f.info, cp, &v);
+            auto P = [&](f32 fx, f32 fy) { return Vec2{x + fx * fs, baseline - fy * fs}; };
+            Vec2 cur{0, 0};
+            for (int k = 0; k < n; ++k) {
+                const stbtt_vertex& e = v[k];
+                const Vec2 to = P(e.x, e.y);
+                if (e.type == STBTT_vmove) {
+                    contours.emplace_back();
+                    contours.back().push_back(to);
+                } else if (!contours.empty()) {
+                    std::vector<Vec2>& c = contours.back();
+                    if (e.type == STBTT_vline) {
+                        c.push_back(to);
+                    } else if (e.type == STBTT_vcurve) {
+                        const Vec2 q = P(e.cx, e.cy);
+                        for (int s = 1; s <= steps; ++s) {
+                            const f32 u = static_cast<f32>(s) / static_cast<f32>(steps), w = 1.0f - u;
+                            c.push_back(Vec2{w * w * cur.x + 2 * w * u * q.x + u * u * to.x, w * w * cur.y + 2 * w * u * q.y + u * u * to.y});
+                        }
+                    } else if (e.type == STBTT_vcubic) {
+                        const Vec2 q0 = P(e.cx, e.cy), q1 = P(e.cx1, e.cy1);
+                        for (int s = 1; s <= steps; ++s) {
+                            const f32 u = static_cast<f32>(s) / static_cast<f32>(steps), w = 1.0f - u;
+                            c.push_back(Vec2{w * w * w * cur.x + 3 * w * w * u * q0.x + 3 * w * u * u * q1.x + u * u * u * to.x,
+                                             w * w * w * cur.y + 3 * w * w * u * q0.y + 3 * w * u * u * q1.y + u * u * u * to.y});
+                        }
+                    }
+                }
+                cur = to;
+            }
+            if (v) stbtt_FreeShape(&f.info, v);
+            int adv = 0, lsb = 0;
+            stbtt_GetCodepointHMetrics(&f.info, cp, &adv, &lsb);
+            x += static_cast<f32>(adv) * fs;
+            if (i + 1 < l.cps.size()) {
+                x += static_cast<f32>(stbtt_GetCodepointKernAdvance(&f.info, cp, static_cast<int>(l.cps[i + 1]))) * fs + tracking;
+            }
+        }
+    }
+    // Fecho explícito repetido (último == primeiro) sai; contornos degenerados também.
+    for (std::vector<Vec2>& c : contours) {
+        while (c.size() > 1 && std::fabs(c.back().x - c.front().x) < 1e-4f && std::fabs(c.back().y - c.front().y) < 1e-4f) c.pop_back();
+    }
+    contours.erase(std::remove_if(contours.begin(), contours.end(), [](const std::vector<Vec2>& c) { return c.size() < 3; }),
+                   contours.end());
+    return !contours.empty();
+}
+
 u64 raster_key(const TextData& t, f32 scale) noexcept {
     u64 h = 1469598103934665603ull;
     auto mix = [&](const void* p, usize n) {

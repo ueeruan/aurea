@@ -92,6 +92,7 @@ set(AUREA_CORE_SOURCES
     src/scene3d/SceneRenderer.cpp
     src/scene3d/Environment.cpp
     src/scene3d/Animation.cpp
+    src/scene3d/Text3D.cpp
     src/engine/Engine.cpp
     ${AUREA_SHADER_SOURCES}
 )

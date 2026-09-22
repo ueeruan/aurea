@@ -16,6 +16,7 @@
 // =============================================================================
 #pragma once
 
+#include "aurea/core/Math.hpp"
 #include "aurea/core/Types.hpp"
 
 #include <memory>
@@ -67,6 +68,13 @@ struct TextRaster {
 
 /// Rasteriza em `scale` px de textura por px da layer.
 [[nodiscard]] bool rasterize(const Font& font, const TextData& t, f32 scale, TextRaster& out);
+
+/// Contornos vetoriais do texto (curvas achatadas em segmentos), em px da
+/// layer com Y para BAIXO e a origem no canto de cima da caixa — o mesmo
+/// layout (linhas, alinhamento, entrelinha, espaçamento) da rasterização.
+/// Cada contorno é fechado implicitamente (o último ponto liga no primeiro).
+/// É a base do texto 3D extrudado.
+[[nodiscard]] bool outline(const Font& font, const TextData& t, std::vector<std::vector<Vec2>>& contours);
 
 /// Chave de cache: muda quando qualquer coisa que altera os pixels muda.
 [[nodiscard]] u64 raster_key(const TextData& t, f32 scale) noexcept;

@@ -725,6 +725,12 @@ ImportResult finalize_asset(std::unique_ptr<SceneAsset> asset, const ImportOptio
 
 } // namespace
 
+/// Otimização, níveis de detalhe, caixa e estatísticas para uma cena montada
+/// em código (texto 3D): o mesmo acabamento de um arquivo importado.
+ImportResult finalize_scene_asset(std::unique_ptr<SceneAsset> asset, const ImportOptions& options) {
+    return finalize_asset(std::move(asset), options, nullptr, 0);
+}
+
 std::vector<Mat4> SceneAsset::rest_world_matrices() const {
     std::vector<Mat4> world(nodes.size());
     std::vector<i32> stack(roots.begin(), roots.end());

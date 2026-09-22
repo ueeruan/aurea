@@ -26,6 +26,7 @@
 
 #include "aurea/export/ExportSink.hpp"
 #include "aurea/scene3d/Importer.hpp"
+#include "aurea/scene3d/Text3D.hpp"
 
 #include "aurea/bridge/BridgePods.hpp"
 #include "aurea/command/CommandQueue.hpp"
@@ -407,6 +408,14 @@ public:
     /// Asset 3D carregado (nulo = ausente/ilegível). Compartilhado: a layer
     /// apagada não invalida quem ainda desenha.
     [[nodiscard]] std::shared_ptr<const scene3d::SceneAsset> model_asset(u64 assetId) const noexcept;
+
+    /// Texto 3D: malha extrudada dos contornos da fonte, numa camada de
+    /// modelo 3D centrada. Devolve a layer.
+    [[nodiscard]] Result<u64> add_text3d(const scene3d::Text3DSpec& spec) noexcept;
+    /// Troca texto/profundidade/cor/alinhamento (a malha é gerada de novo; desfazível).
+    Status set_text3d(u64 layerId, const scene3d::Text3DSpec& spec) noexcept;
+    /// Receita do texto 3D da camada (falso = não é texto 3D).
+    bool query_text3d(u64 layerId, scene3d::Text3DSpec& out) noexcept;
 
     // =========================================================================
     // A fronteira

@@ -415,6 +415,7 @@ private fun ObjectsTab(store: EditorStore, close: () -> Unit) {
                                 ObjectCard.Scene3D -> picker.launch(arrayOf("model/gltf-binary", "model/gltf+json", "model/obj", "application/octet-stream", "*/*"))
                                 ObjectCard.Null -> { store.addNull(false); close() }
                                 ObjectCard.Particles -> { store.addParticles(0); close() }
+                                ObjectCard.Text3D -> { store.addText3D(); close() }
                                 else -> store.comingSoon(card.label)
                             }
                         }

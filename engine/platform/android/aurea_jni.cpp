@@ -826,6 +826,47 @@ AUREA_JNI jboolean AUREA_FN(nativeSetTransition)(JNIEnv*, jclass, jlong handle, 
                                          static_cast<u32>(std::max(0, frames))) ? JNI_TRUE : JNI_FALSE;
 }
 
+namespace {
+aurea::scene3d::Text3DSpec text3d_spec(JNIEnv* env, jstring content, jfloat depth, jint align, jfloat r, jfloat g, jfloat b) {
+    aurea::scene3d::Text3DSpec s;
+    const char* p = env->GetStringUTFChars(content, nullptr);
+    s.content = p;
+    env->ReleaseStringUTFChars(content, p);
+    s.depth = depth;
+    s.alignment = static_cast<u32>(align);
+    s.color = Vec4{r, g, b, 1.0f};
+    return s;
+}
+} // namespace
+
+AUREA_JNI jlong AUREA_FN(nativeAddText3d)(JNIEnv* env, jclass, jlong handle, jstring content, jfloat depth, jint align,
+                                         jfloat r, jfloat g, jfloat b) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !content) return -static_cast<jlong>(Errc::InvalidState);
+    const Result<u64> res = c->engine.add_text3d(text3d_spec(env, content, depth, align, r, g, b));
+    if (!res.ok()) return -static_cast<jlong>(res.status().code());
+    return static_cast<jlong>(*res);
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetText3d)(JNIEnv* env, jclass, jlong handle, jlong layer, jstring content, jfloat depth,
+                                            jint align, jfloat r, jfloat g, jfloat b) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !content) return JNI_FALSE;
+    return c->engine.set_text3d(static_cast<u64>(layer), text3d_spec(env, content, depth, align, r, g, b)).ok() ? JNI_TRUE : JNI_FALSE;
+}
+
+/// Receita do texto 3D: devolve o texto (nulo = não é texto 3D) e preenche
+/// {profundidade, alinhamento, r, g, b}.
+AUREA_JNI jstring AUREA_FN(nativeQueryText3d)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloatArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !out || env->GetArrayLength(out) < 5) return nullptr;
+    aurea::scene3d::Text3DSpec s;
+    if (!c->engine.query_text3d(static_cast<u64>(layer), s)) return nullptr;
+    const f32 v[5] = {s.depth, static_cast<f32>(s.alignment), s.color.x, s.color.y, s.color.z};
+    env->SetFloatArrayRegion(out, 0, 5, v);
+    return env->NewStringUTF(s.content.c_str());
+}
+
 AUREA_JNI jlong AUREA_FN(nativeAddParticles)(JNIEnv*, jclass, jlong handle, jint preset) {
     NativeContext* c = ctx_of(handle);
     if (!c) return -static_cast<jlong>(Errc::InvalidState);

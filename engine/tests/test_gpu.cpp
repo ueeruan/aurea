@@ -2314,3 +2314,56 @@ AUREA_TEST(Gpu, Scene3DIsInTheExportedFrames) {
     e.shutdown();
 }
 #endif
+
+AUREA_TEST(Gpu, Text3DRendersEditsUndoesAndSurvivesReopen) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(320, 180);
+    scene3d::Text3DSpec spec;
+    spec.content = "AUREA";
+    spec.color = Vec4{1.0f, 0.45f, 0.0f, 1.0f};
+    auto id = rig.e.add_text3d(spec);
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) return;
+    auto orange = [](const Image8& img) {
+        u32 n = 0;
+        for (usize i = 0; i < img.rgba.size(); i += 4)
+            if (img.rgba[i] > 90 && img.rgba[i] > img.rgba[i + 1] + 30 && img.rgba[i + 1] > img.rgba[i + 2] + 10) ++n;
+        return n;
+    };
+    const Image8 a = rig.capture(320);
+    const u32 na = orange(a);
+    // Girada em Y a 60°: as laterais aparecem (a malha tem profundidade).
+    Composition* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+    Layer* l = comp->layer(LayerId::unpack(*id));
+    l->transform.rotation = Vec3{0, 60, 0};
+    const Image8 t60 = rig.capture(320);
+    const u32 turned = orange(t60);
+    l->transform.rotation = Vec3{0, 0, 0};
+    // Editar: texto maior ocupa mais pixels; desfazer volta ao original.
+    scene3d::Text3DSpec longer = spec;
+    longer.content = "AUREA\nAUREA";
+    AUREA_CHECK(rig.e.set_text3d(*id, longer).ok());
+    const u32 nb = orange(rig.capture(320));
+    scene3d::Text3DSpec q;
+    AUREA_CHECK(rig.e.query_text3d(*id, q) && q.content == longer.content);
+    Command u;
+    u.type = CommandType::Undo;
+    AUREA_CHECK(rig.e.apply_command(u).ok());
+    const u32 undone = max_diff(a, rig.capture(320));
+    u.type = CommandType::Redo;
+    AUREA_CHECK(rig.e.apply_command(u).ok());
+    // Salvar e reabrir: a malha é gerada de novo da receita.
+    const Image8 before = rig.capture(320);
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_teste_texto3d.aurea";
+    AUREA_CHECK(rig.e.save_project(path.c_str()).ok());
+    AUREA_CHECK(rig.e.load_project(path.c_str()).ok());
+    const u32 reopened = max_diff(before, rig.capture(320));
+    std::printf("    texto 3D: %u px laranja, girado 60 graus %u, 2 linhas %u, desfazer dif %u, reaberto dif %u\n", na, turned, nb,
+                undone, reopened);
+    AUREA_CHECK(na > 700);
+    AUREA_CHECK(turned > 300 && max_diff(a, t60) > 100);
+    AUREA_CHECK(nb > na);
+    AUREA_CHECK(undone <= 3);
+    AUREA_CHECK(reopened <= 3);
+    std::remove(path.c_str());
+}

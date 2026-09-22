@@ -314,6 +314,13 @@ class AureaEngine private constructor() {
 
     // Partículas.
     fun addParticles(preset: Int): Long = nativeAddParticles(nativeHandle, preset)
+
+    // Texto 3D.
+    fun addText3d(content: String, depth: Float, align: Int, r: Float, g: Float, b: Float): Long =
+        nativeAddText3d(nativeHandle, content, depth, align, r, g, b)
+    fun setText3d(layer: Long, content: String, depth: Float, align: Int, r: Float, g: Float, b: Float): Boolean =
+        nativeSetText3d(nativeHandle, layer, content, depth, align, r, g, b)
+    fun queryText3d(layer: Long, out: FloatArray): String? = nativeQueryText3d(nativeHandle, layer, out)
     fun applyParticlePreset(layer: Long, preset: Int): Boolean = nativeApplyParticlePreset(nativeHandle, layer, preset)
     fun setParticleParam(layer: Long, param: Int, value: Float): Boolean = nativeSetParticleParam(nativeHandle, layer, param, value)
     fun queryParticles(layer: Long, out: FloatArray): Boolean = nativeQueryParticles(nativeHandle, layer, out)
@@ -440,6 +447,9 @@ class AureaEngine private constructor() {
     private external fun nativeSetMotionBlur(handle: Long, layer: Long, on: Boolean): Boolean
     private external fun nativeSetTimeRemap(handle: Long, layer: Long, on: Boolean): Boolean
     private external fun nativeAddParticles(handle: Long, preset: Int): Long
+    private external fun nativeAddText3d(handle: Long, content: String, depth: Float, align: Int, r: Float, g: Float, b: Float): Long
+    private external fun nativeSetText3d(handle: Long, layer: Long, content: String, depth: Float, align: Int, r: Float, g: Float, b: Float): Boolean
+    private external fun nativeQueryText3d(handle: Long, layer: Long, out: FloatArray): String?
     private external fun nativeSetTransition(handle: Long, layer: Long, out: Boolean, type: Int, frames: Int): Boolean
     private external fun nativeSetEcho(handle: Long, layer: Long, count: Int, delay: Float, decay: Float): Boolean
     private external fun nativeTrackPoint(handle: Long, layer: Long, x: Float, y: Float, stabilize: Boolean, tracked: IntArray): Long

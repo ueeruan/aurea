@@ -439,7 +439,11 @@ Status Engine::load_project(const char* path) noexcept {
         for (const auto& [key, src] : pending) {
             scene3d::ImportOptions o;
             o.maxTextureSize = kModelTextureCap;
-            scene3d::ImportResult r = scene3d::import_scene_file(resolve_asset_path(src), o);
+            // Texto 3D: a origem é a receita; a malha é gerada de novo.
+            scene3d::Text3DSpec spec;
+            const auto font = scene3d::decode_text3d(src, spec) ? text::default_font() : nullptr;
+            scene3d::ImportResult r = font ? scene3d::build_text3d(*font, spec)
+                                           : scene3d::import_scene_file(resolve_asset_path(src), o);
             if (!r.ok()) {
                 ++missing;
                 AUREA_LOG_WARN("modelo 3D do projeto nao abriu: %s (%s)", src.c_str(), r.detail.c_str());
@@ -2217,6 +2221,87 @@ Result<u64> Engine::import_model(const ModelImport& request, scene3d::ImportProg
     AUREA_LOG_INFO("modelo 3D importado: %s (%u triangulos, escala %.3f px/m)", scene->sourceName.c_str(),
                    scene->stats.triangles, l->model.unitScale);
     return lid.pack();
+}
+
+namespace {
+AssetId add_model_asset(Project& project, const scene3d::SceneAsset& scene, std::string name, std::string sourcePath) {
+    Asset asset;
+    asset.kind = AssetKind::Model3D;
+    asset.name = std::move(name);
+    asset.sourcePath = std::move(sourcePath);
+    asset.originalFilename = scene.sourceName;
+    asset.model.meshCount = scene.stats.meshes;
+    asset.model.materialCount = scene.stats.materials;
+    asset.model.triangleCount = scene.stats.triangles;
+    asset.model.lodCount = 1;
+    return project.add_asset(std::move(asset));
+}
+} // namespace
+
+Result<u64> Engine::add_text3d(const scene3d::Text3DSpec& spec) noexcept {
+    const auto font = text::default_font();
+    if (!font) return Status{Errc::NotSupported, "nenhuma fonte disponivel neste aparelho"};
+    scene3d::ImportResult r = scene3d::build_text3d(*font, spec);
+    if (!r.ok()) return Status{Errc::InvalidArgument, "texto sem letras visiveis"};
+    std::shared_ptr<const scene3d::SceneAsset> scene(std::move(r.asset));
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp) return Status{Errc::InvalidState, "nenhum projeto aberto"};
+    history_.before_mutation(*comp, project_->timeline().current(), "texto 3D");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    const AssetId assetId = add_model_asset(*project_, *scene, "Texto 3D", scene3d::encode_text3d(spec));
+    models_[assetId.pack()] = scene;
+    const LayerId lid = comp->add_layer(LayerKind::Model3D, "Texto 3D");
+    Layer* l = comp->layer(lid);
+    if (!l) return Status{Errc::OutOfMemory, "camada nao criada"};
+    l->threeD = true;
+    l->model.scene = assetId;
+    l->model.animationClip = -1;
+    // Letra com ~25 % da altura da composição; texto longo encolhe para caber
+    // em 80 % da largura.
+    const Vec3 ext = scene->bounds.extent();
+    const f32 w = static_cast<f32>(comp->width()), h = static_cast<f32>(comp->height());
+    l->model.unitScale = std::min(0.25f * h, 0.8f * w / std::max(ext.x, 1e-3f));
+    l->model.pivot = scene->bounds.center();
+    l->transform.position = Vec3{w * 0.5f, h * 0.5f, 0.0f};
+    l->transform.scale = Vec3{1.0f, 1.0f, 1.0f};
+    project_->mark_dirty();
+    request_render();
+    return lid.pack();
+}
+
+Status Engine::set_text3d(u64 layerId, const scene3d::Text3DSpec& spec) noexcept {
+    const auto font = text::default_font();
+    if (!font) return Status{Errc::NotSupported, "nenhuma fonte disponivel neste aparelho"};
+    scene3d::ImportResult r = scene3d::build_text3d(*font, spec);
+    if (!r.ok()) return Status{Errc::InvalidArgument, "texto sem letras visiveis"};
+    std::shared_ptr<const scene3d::SceneAsset> scene(std::move(r.asset));
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->kind != LayerKind::Model3D) return Errc::InvalidArgument;
+    const Asset* old = project_->asset(l->model.scene);
+    scene3d::Text3DSpec prev;
+    if (!old || !scene3d::decode_text3d(old->sourcePath, prev)) return Errc::InvalidArgument;
+    history_.before_mutation(*comp, project_->timeline().current(), "editar texto 3D");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    // Asset novo (o antigo fica para o desfazer religar a malha anterior).
+    const AssetId assetId = add_model_asset(*project_, *scene, "Texto 3D", scene3d::encode_text3d(spec));
+    models_[assetId.pack()] = scene;
+    l->model.scene = assetId;
+    l->model.pivot = scene->bounds.center();
+    project_->mark_dirty();
+    request_render();
+    return OkStatus;
+}
+
+bool Engine::query_text3d(u64 layerId, scene3d::Text3DSpec& out) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->kind != LayerKind::Model3D) return false;
+    const Asset* a = project_->asset(l->model.scene);
+    return a && scene3d::decode_text3d(a->sourcePath, out);
 }
 
 std::shared_ptr<const scene3d::SceneAsset> Engine::model_asset(u64 assetId) const noexcept {

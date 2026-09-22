@@ -344,3 +344,90 @@ AUREA_TEST(Scene3D, ObjAndFbxImportThroughUfbx) {
     AUREA_CHECK(!junk.ok() && junk.error == ImportError::InvalidFormat);
     (void)dir;
 }
+
+// -----------------------------------------------------------------------------
+// Texto 3D
+// -----------------------------------------------------------------------------
+#include "aurea/scene3d/Text3D.hpp"
+#include "aurea/text/Text.hpp"
+#include "aurea/timeline/Layer.hpp"
+
+AUREA_TEST(Scene3D, TriangulatesPolygonWithHoleExactly) {
+    using namespace aurea;
+    // Quadrado 4×4 com furo 2×2: área 12, 8 triângulos, nenhum dentro do furo.
+    std::vector<std::vector<Vec2>> rings{{{0, 0}, {4, 0}, {4, 4}, {0, 4}}, {{1, 1}, {1, 3}, {3, 3}, {3, 1}}};
+    std::vector<u32> idx;
+    AUREA_CHECK(scene3d::triangulate_polygon(rings, idx));
+    std::vector<Vec2> pts;
+    for (const auto& r : rings) pts.insert(pts.end(), r.begin(), r.end());
+    f64 area = 0;
+    for (usize t = 0; t + 2 < idx.size(); t += 3) {
+        const Vec2 a = pts[idx[t]], b = pts[idx[t + 1]], c = pts[idx[t + 2]];
+        area += std::fabs((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)) * 0.5;
+        const Vec2 m{(a.x + b.x + c.x) / 3, (a.y + b.y + c.y) / 3};
+        AUREA_CHECK(!(m.x > 1 && m.x < 3 && m.y > 1 && m.y < 3));
+    }
+    std::printf("    quadrado com furo: %zu triangulos, area %.3f\n", idx.size() / 3, area);
+    AUREA_CHECK(idx.size() / 3 == 8);
+    AUREA_CHECK(std::fabs(area - 12.0) < 1e-6);
+}
+
+AUREA_TEST(Scene3D, Text3DMeshIsClosedAndFacesOutward) {
+    using namespace aurea;
+    const auto font = text::default_font();
+    if (!font) return;
+    scene3d::Text3DSpec spec;
+    spec.content = "Aurea 80B\nog";
+    spec.depth = 0.3f;
+    spec.color = Vec4{1.0f, 0.5f, 0.0f, 1.0f};
+    scene3d::ImportResult r = scene3d::build_text3d(*font, spec);
+    AUREA_CHECK(r.ok());
+    if (!r.ok()) return;
+    const scene3d::Primitive& p = r.asset->meshes[0].primitives[0];
+    // Toda face aponta para o lado da própria normal (frente, fundo e laterais).
+    u32 wrong = 0;
+    f64 front = 0, back = 0;
+    for (usize t = 0; t + 2 < p.indices.size(); t += 3) {
+        const Vec3 a = p.positions[p.indices[t]], b = p.positions[p.indices[t + 1]], c = p.positions[p.indices[t + 2]];
+        const Vec3 g = (b - a).cross(c - a);
+        const Vec3 n = p.normals[p.indices[t]] + p.normals[p.indices[t + 1]] + p.normals[p.indices[t + 2]];
+        if (g.dot(n) < 0) ++wrong;
+        if (n.z > 2.9f) front += g.length() * 0.5;
+        if (n.z < -2.9f) back += g.length() * 0.5;
+    }
+    // Área da frente = área das letras pela regra do aninhamento (furos descontados).
+    TextData td;
+    td.content = spec.content;
+    td.size = 100.0f;
+    td.alignment = spec.alignment;
+    std::vector<std::vector<Vec2>> cs;
+    AUREA_CHECK(text::outline(*font, td, cs));
+    f64 expected = 0;
+    for (usize i = 0; i < cs.size(); ++i) {
+        f64 a = 0;
+        for (usize k = 0, j = cs[i].size() - 1; k < cs[i].size(); j = k++) a += cs[i][j].x * cs[i][k].y - cs[i][k].x * cs[i][j].y;
+        a = std::fabs(a) * 0.5 / 10000.0;
+        u32 depth = 0;
+        for (usize j = 0; j < cs.size(); ++j) {
+            if (j == i) continue;
+            bool in = false;
+            const Vec2 q = cs[i][0];
+            for (usize k = 0, m = cs[j].size() - 1; k < cs[j].size(); m = k++)
+                if (((cs[j][k].y > q.y) != (cs[j][m].y > q.y)) && (q.x < (cs[j][m].x - cs[j][k].x) * (q.y - cs[j][k].y) / (cs[j][m].y - cs[j][k].y) + cs[j][k].x)) in = !in;
+            if (in) ++depth;
+        }
+        expected += (depth & 1u) ? -a : a;
+    }
+    const Vec3 ext = r.asset->bounds.extent();
+    std::printf("    texto 3D: %u triangulos, %u vertices, caixa %.2f x %.2f x %.2f, frente %.4f (esperado %.4f), fundo %.4f, invertidas %u\n",
+                p.triangle_count(), p.vertex_count(), ext.x, ext.y, ext.z, front, expected, back, wrong);
+    AUREA_CHECK(wrong == 0);
+    AUREA_CHECK(std::fabs(front - expected) < 0.01 * expected);
+    AUREA_CHECK(std::fabs(back - expected) < 0.01 * expected);
+    AUREA_CHECK(std::fabs(ext.z - 0.3f) < 1e-4f);
+    AUREA_CHECK(r.asset->materials[0].baseColor.x > 0.99f && r.asset->materials[0].baseColor.z < 0.01f);
+    // Receita ida e volta.
+    scene3d::Text3DSpec back2;
+    AUREA_CHECK(scene3d::decode_text3d(scene3d::encode_text3d(spec), back2));
+    AUREA_CHECK(back2.content == spec.content && std::fabs(back2.depth - 0.3f) < 1e-4f && back2.alignment == 1);
+}

@@ -1190,7 +1190,7 @@ private fun ResolutionChip(store: EditorStore, ui: EditorUi, modifier: Modifier)
 @Composable
 private fun PerfHud(store: EditorStore, modifier: Modifier) {
     if (!store.hudVisible) return
-    val text = hudText(store.perf, store.uiFps)
+    val text = hudText(store.perf, store.uiFps, store.appMemory)
     Box(
         modifier
             .clip(RoundedCornerShape(8.dp))
@@ -1205,37 +1205,89 @@ private fun PerfHud(store: EditorStore, modifier: Modifier) {
     }
 }
 
-private fun hudText(p: PerfStats, uiFps: Float): String {
+/** Nome do nível térmico do motor (`ThermalState::Level`). */
+private fun thermalName(level: Int) = when (level) {
+    0 -> "normal"
+    1 -> "morno"
+    2 -> "sério"
+    3 -> "crítico"
+    4 -> "emergência"
+    else -> "desconhecido"
+}
+
+/**
+ * Texto da HUD (Fase 8A, §3). Só aparece o que foi MEDIDO: GPU sem timestamp
+ * sai "—", ritmo só depois de tocar, áudio só com a saída aberta, 3D e
+ * partículas só com cena/emissor no quadro. Nada estimado para parecer bonito.
+ */
+private fun hudText(p: PerfStats, uiFps: Float, m: EditorStore.AppMemory): String {
     fun f1(v: Float) = String.format(Locale.ROOT, "%.1f", v)
     fun mb(b: Long) = (b / (1024 * 1024)).toString()
+    fun gpu(v: Float) = if (p.gpuTimers) f1(v) else "—"
+    fun rate(hits: Int, misses: Int): String {
+        val total = hits + misses
+        return if (total == 0) "—" else "${hits * 100 / total}% ($hits/$total)"
+    }
     val scale = if (p.renderScaleDen <= 1 && p.renderScaleNum <= 1) "1/1" else "${p.renderScaleNum}/${p.renderScaleDen}"
     return buildString {
-        append("prévia ").append(f1(p.previewFps)).append(" fps · UI ").append(f1(uiFps)).append(" fps\n")
-        append("cpu ").append(f1(p.cpuFrameMs)).append(" · gpu ").append(f1(p.gpuFrameMs))
+        append("prévia ").append(f1(p.previewFps)).append(" fps · UI ").append(f1(uiFps)).append(" fps")
+        if (m.uiSlowFrames > 0) append(" (").append(m.uiSlowFrames).append(" lentos, pior ").append(f1(m.uiWorstFrameMs)).append(" ms)")
+        append('\n')
+        if (p.pacingSamples > 0) {
+            append("ritmo p50 ").append(f1(p.pacingP50Ms)).append(" · p95 ").append(f1(p.pacingP95Ms))
+                .append(" · p99 ").append(f1(p.pacingP99Ms)).append(" · σ ").append(f1(p.pacingStdMs))
+                .append(" ms (").append(p.pacingSamples).append(")\n")
+        }
+        append("cpu ").append(f1(p.cpuFrameMs)).append(" (prep ").append(f1(p.cpuPrepareMs))
+            .append(" · grav ").append(f1(p.cpuRecordMs)).append(") · gpu ").append(gpu(p.gpuFrameMs))
             .append(" · orçamento ").append(f1(p.frameBudgetMs)).append(" ms\n")
-        append("decode ").append(f1(p.decodeMs)).append(" · cor ").append(f1(p.colorConvMs))
-            .append(" · efeitos ").append(f1(p.effectsMs)).append('\n')
-        append("blur ").append(f1(p.blurMs)).append(" · glow ").append(f1(p.glowMs))
-            .append(" · comp ").append(f1(p.compositeMs)).append('\n')
-        append("saída ").append(f1(p.outputMs)).append(" · present ").append(f1(p.presentMs))
+        append("decode ").append(f1(p.decodeMs)).append(" · cor ").append(gpu(p.colorConvMs))
+            .append(" · efeitos ").append(gpu(p.effectsMs)).append('\n')
+        append("blur ").append(gpu(p.blurMs)).append(" · glow ").append(gpu(p.glowMs))
+            .append(" · comp ").append(gpu(p.compositeMs)).append('\n')
+        append("saída ").append(gpu(p.outputMs)).append(" · present ").append(f1(p.presentMs))
             .append(" · acquire ").append(f1(p.acquireMs)).append('\n')
         append("descartes ").append(p.droppedFrames).append(" (recentes ").append(p.droppedRecent)
             .append(") · seek ").append(f1(p.lastSeekMs)).append(" ms\n")
         append("escala ").append(scale).append(if (p.renderAuto) " auto" else "")
-            .append(" · ").append(p.previewWidth).append('×').append(p.previewHeight).append('\n')
-        append("cache ").append(p.decodedCacheFrames).append(" quadros · ").append(mb(p.decodedCacheBytes)).append(" MB\n")
-        append("RAM ").append(mb(p.ramBytes)).append(" MB · GPU ").append(mb(p.gpuMemoryBytes))
-            .append(" MB · transit. ").append(mb(p.transientBytes)).append(" MB\n")
+            .append(" · ").append(p.previewWidth).append('×').append(p.previewHeight)
+            .append(" · térmico ").append(thermalName(p.thermal))
+        if (p.heavyScale < 1f) append(" (caros ×").append(String.format(Locale.ROOT, "%.2f", p.heavyScale)).append(')')
+        append('\n')
+        append("cache decode ").append(p.decodedCacheFrames).append(" quadros · ").append(mb(p.decodedCacheBytes)).append(" MB\n")
+        if (p.flowCacheHits + p.flowCacheMisses + p.maskCacheHits + p.maskCacheMisses > 0) {
+            append("acerto flow ").append(rate(p.flowCacheHits, p.flowCacheMisses))
+                .append(" · máscara ").append(rate(p.maskCacheHits, p.maskCacheMisses)).append('\n')
+        }
+        append("RAM motor ").append(mb(p.ramBytes)).append('/').append(p.memoryBudgetMB).append(" MB · nativo ")
+            .append(mb(m.nativeHeapBytes)).append(" · Java ").append(mb(m.javaHeapBytes)).append(" MB\n")
+        if (m.systemTotalBytes > 0) {
+            append("sistema livre ").append(mb(m.systemAvailBytes)).append('/').append(mb(m.systemTotalBytes)).append(" MB")
+                .append(if (m.lowMemory) " · MEMÓRIA BAIXA" else "").append('\n')
+        }
+        append("GPU ").append(mb(p.gpuMemoryBytes)).append(" MB usada · ").append(mb(p.gpuReservedBytes))
+            .append(" reservada · ").append(p.gpuAllocations).append(" alocações · transit. ")
+            .append(mb(p.transientBytes)).append(" MB\n")
         append("passes ").append(p.passesExecuted).append(" (+").append(p.passesCulled).append(" cortados)")
-            .append(" · camadas ").append(p.layersRendered).append('\n')
+            .append(" · draws ").append(p.drawCalls).append(" · camadas ").append(p.layersRendered)
+            .append(" · efeitos ").append(p.activeEffects).append('\n')
+        if (p.draws3D > 0 || p.triangles3D > 0) {
+            append("3D draws ").append(p.draws3D).append(" · triângulos ").append(p.triangles3D)
+                .append(" · fora do frustum ").append(p.culled3D).append(" · residente ").append(mb(p.scene3dBytes)).append(" MB\n")
+        }
+        if (p.particles > 0) append("partículas ").append(p.particles).append('\n')
+        if (p.audioOutputOpen) {
+            append("áudio fila ").append(p.audioQueuedMs).append(" ms · saída ").append(p.audioOutputMs)
+                .append(" ms · underruns ").append(p.audioUnderruns).append(" · sem bloco ").append(p.audioMissingBlocks).append('\n')
+        }
         append("texturas ").append(p.physicalTextures).append(" fís · ").append(p.aliasedTextures)
             .append(" alias · pipelines ").append(p.pipelinesTotal).append(" (+").append(p.pipelineCompilesLive).append(")\n")
         append("seeks ").append(p.seeks).append(" · coalescidos ").append(p.coalesced)
             .append(" · atrasados ").append(p.staleFrames).append('\n')
         append("decoder ").append(p.decoder.ifEmpty { "—" }).append(if (p.hardwareDecoder) " (HW)" else "")
             .append(if (p.zeroCopy) " · zero-copy" else "").append('\n')
-        append("GPU ").append(p.gpuName.ifEmpty { "—" }).append(" · térmico ").append(p.thermal)
-            .append(if (p.gpuTimers) " · timers" else "")
+        append("GPU ").append(p.gpuName.ifEmpty { "—" })
+            .append(if (p.gpuTimers) " · timers" else " · sem timestamp")
     }
 }
 

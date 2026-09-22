@@ -715,6 +715,40 @@ public:
     /// Renderiza o instante atual numa textura (export, testes visuais), em
     /// resolução cheia, sem superfície. Espera a GPU terminar.
     [[nodiscard]] Status render_offscreen(TextureHandle target, u32 width, u32 height, bool asPreview = false) noexcept;
+
+    /// Medição do último `render_offscreen` (suíte de benchmark da Fase 8A).
+    /// Tudo cronometrado de verdade; a GPU só com os timers ligados
+    /// (`set_offscreen_timers`) — sem eles `gpuMeasured` fica falso e `gpuMs` 0,
+    /// nunca "instantâneo". O quadro é o que acabou de ser desenhado (o
+    /// `render_offscreen` espera a GPU, então os timestamps já são dele).
+    struct OffscreenMeasure {
+        f32  prepareMs = 0.0f;     ///< CPU: prepare sob o lock (a tentativa que valeu)
+        f32  mediaWaitMs = 0.0f;   ///< CPU parada esperando os quadros exatos do decoder
+        u32  mediaAttempts = 0;    ///< prepares até ter todos os quadros (1 = já estavam)
+        f32  recordMs = 0.0f;      ///< CPU: gravação do FrameGraph
+        f32  submitMs = 0.0f;      ///< CPU: end_frame (submissão)
+        f32  gpuWaitMs = 0.0f;     ///< CPU parada no wait_idle
+        f32  gpuMs = 0.0f;         ///< timestamp início → fim do quadro
+        bool gpuMeasured = false;
+        u32  gpuPasses = 0;        ///< passes com timestamp (last_offscreen_gpu_passes)
+        u32  passesExecuted = 0;
+        u32  passesCulled = 0;
+        u32  drawCalls = 0;        ///< contagem do renderer 2D (camadas + passes)
+        u32  layersRendered = 0;
+        u32  draws3D = 0;          ///< SceneStats do quadro
+        u32  triangles3D = 0;
+        u32  culled3D = 0;
+        u32  particles = 0;        ///< slots de partícula desenhados
+        u32  activeEffects = 0;    ///< efeitos vivos no plano (neutros saem)
+        u64  transientBytes = 0;   ///< físicas do FrameGraph neste quadro
+        u64  gpuUsedBytes = 0;     ///< alocador do backend depois do quadro
+    };
+    /// Liga as timestamp queries no render_offscreen (o export e as capturas
+    /// continuam sem elas; é só para medir).
+    void set_offscreen_timers(bool on) noexcept { offscreenTimers_ = on; }
+    [[nodiscard]] OffscreenMeasure last_offscreen_measure() const noexcept { return offscreenMeasure_; }
+    /// Tempos por passe do último render_offscreen medido (rótulo estático).
+    u32 last_offscreen_gpu_passes(GpuTiming* out, u32 capacity) const noexcept;
     /// Estado térmico do aparelho (PowerManager no Android): o preview reduz
     /// as operações caras sob calor; o export não muda.
     void set_thermal(u32 level, bool throttling) noexcept;
@@ -987,6 +1021,20 @@ private:
     u64 fpsWindowStartNs_ = 0;
     u32 fpsWindowFrames_ = 0;
     f32 measuredFps_ = 0.0f;
+    // Ritmo dos quadros (§145): intervalo entre quadros APRESENTADOS tocando,
+    // num anel fixo (sem alocação); percentis recalculados uma vez por janela.
+    static constexpr u32 kPacingRing = 128;
+    f32 pacingMs_[kPacingRing]{};
+    u32 pacingCount_ = 0;
+    u32 pacingHead_ = 0;
+    u64 lastPresentNs_ = 0;
+    f32 pacingP50_ = 0.0f, pacingP95_ = 0.0f, pacingP99_ = 0.0f, pacingStd_ = 0.0f;
+    u32 pacingSamples_ = 0;
+    void roll_pacing() noexcept;
+    // Benchmark offscreen (Fase 8A).
+    bool offscreenTimers_ = false;
+    OffscreenMeasure offscreenMeasure_{};
+    GpuTiming offscreenPasses_[64]{};
 
     struct ExportContext;
     std::unique_ptr<ExportContext> exportCtx_;

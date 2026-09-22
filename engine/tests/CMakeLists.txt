@@ -32,6 +32,7 @@ add_executable(aurea_tests
     test_vector.cpp
     test_vector_gpu.cpp
     test_export.cpp
+    test_perf.cpp
 )
 
 target_include_directories(aurea_tests PRIVATE
@@ -50,7 +51,9 @@ endif()
 target_compile_definitions(aurea_tests PRIVATE
     AUREA_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/golden"
     AUREA_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data"
-    AUREA_APP_PRESETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../android/app/src/main/assets/presets")
+    AUREA_APP_PRESETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../android/app/src/main/assets/presets"
+    # Fase 8A: baseline de performance (AUREA_BENCH=baseline grava, =compare lê).
+    AUREA_PERF_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../docs/performance")
 
 target_compile_options(aurea_tests PRIVATE
     $<$<CXX_COMPILER_ID:MSVC>:/W4 /permissive- /EHsc- /Zc:__cplusplus /utf-8>

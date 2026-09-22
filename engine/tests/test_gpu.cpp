@@ -4184,6 +4184,43 @@ AUREA_TEST(Gpu, EveryRegisteredEffectBuildsAndRenders) {
     AUREA_CHECK_MSG(broken.empty(), "efeito do catálogo nao desenha");
 }
 
+// Fase 8A (custo por efeito): Varredura, Grão e Colorama eram PerPixel sem
+// ColorOp — o EffectGraph os tirava do plano como identidade e, aplicados no
+// projeto, não mudavam nada (só a prévia do catálogo, que chama o build
+// direto, mostrava o efeito). Aqui cada efeito do catálogo, com os valores de
+// demonstração, tem de MUDAR o quadro do projeto. Ficam de fora os controles
+// de expressão (não desenham por definição) e os temporais (numa imagem
+// parada não há outro instante para misturar).
+AUREA_TEST(Gpu, EveryCatalogEffectChangesTheProjectFrame) {
+    AUREA_REQUIRE_GPU();
+    std::vector<std::string> inert;
+    for (u32 i = 0; i < gpu().effects.count(); ++i) {
+        const Effect& fx = gpu().effects.at(i);
+        const char* key = fx.info().key;
+        if (fx.effect_class() == EffectClass::Temporal || std::strncmp(key, "aurea.control.", 14) == 0) continue;
+        const ParameterRegistry& params = gpu().effects.params_at(i);
+        Scene s(96, 96);
+        const LayerId id = s.image(reference_image(96, 96), 48, 48);
+        const FloatImage plain = s.render();
+        EffectInstance e;
+        e.id = s.comp->layer(id)->alloc_effect_id();
+        e.type = fx.type_id();
+        initialize_instance(e, params);
+        std::vector<ParamValue> values(params.count());
+        for (u32 p = 0; p < params.count(); ++p) values[p] = e.params[p].constant;
+        if (fx.demo_values(e, values)) {
+            for (u32 p = 0; p < params.count(); ++p) e.params[p].constant = values[p];
+        }
+        s.comp->layer(id)->effects.push_back(std::move(e));
+        const FloatImage with = s.render();
+        u32 changed = 0;
+        for (usize k = 0; k < with.px.size() && k < plain.px.size(); ++k) changed += std::fabs(with.px[k] - plain.px[k]) > 0.004f ? 1u : 0u;
+        if (changed == 0) inert.emplace_back(key);
+    }
+    for (const std::string& k : inert) std::printf("\n    efeito sem efeito no projeto: %s", k.c_str());
+    AUREA_CHECK_MSG(inert.empty(), "efeito do catalogo aplicado nao muda o quadro");
+}
+
 // A foto do app como base das prévias: o efeito é mostrado sobre ela.
 AUREA_TEST(Gpu, EffectPreviewUsesThePhotoWhenGiven) {
     AUREA_REQUIRE_GPU();

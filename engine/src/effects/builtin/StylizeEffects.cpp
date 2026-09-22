@@ -67,7 +67,10 @@ public:
     enum : u32 { kHeight = 0, kIntensity, kOffset, kSoftness, kContrast, kSpeed, kChannel, kBlur, kRoll, kColor };
 
     const EffectInfo& info() const noexcept override {
-        static const EffectInfo i{effect_keys::kScanlines, "Varredura", "Estilizar", EffectClass::PerPixel};
+        // Passe próprio (e desfoque vertical opcional): NÃO é ColorOp do passe
+        // fundido. Como PerPixel o EffectGraph o tirava do plano como
+        // identidade — o efeito não desenhava no projeto (Fase 8A, custo por efeito).
+        static const EffectInfo i{effect_keys::kScanlines, "Varredura", "Estilizar", EffectClass::Neighborhood};
         return i;
     }
     void declare_parameters(ParameterRegistry& p) const override {
@@ -113,7 +116,9 @@ public:
                  kMono, kBlend };
 
     const EffectInfo& info() const noexcept override {
-        static const EffectInfo i{effect_keys::kGrain, "Grão", "Estilizar", EffectClass::PerPixel};
+        // Por pixel, mas com passe próprio (ruído procedural), sem ColorOp:
+        // como PerPixel saía do plano e não desenhava (ver Varredura).
+        static const EffectInfo i{effect_keys::kGrain, "Grão", "Estilizar", EffectClass::Neighborhood};
         return i;
     }
     void declare_parameters(ParameterRegistry& p) const override {

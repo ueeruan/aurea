@@ -362,13 +362,49 @@ struct PerfPOD {
     u32 thermal             = 0;     // +180
     char decoder[48]{};              // +184
     char gpuName[24]{};              // +232
+    // --- Fase 8A (HUD): só contadores que o motor já tem na mão -------------
+    // Ritmo (§145): intervalo entre quadros APRESENTADOS tocando, percentis
+    // da última janela de 1 s. 0 amostras = não tocou (os campos não valem).
+    f32 pacingP50Ms         = 0.0f;  // +256
+    f32 pacingP95Ms         = 0.0f;  // +260
+    f32 pacingP99Ms         = 0.0f;  // +264
+    f32 pacingStdMs         = 0.0f;  // +268 desvio padrão (variância = ²)
+    u32 pacingSamples       = 0;     // +272
+    f32 cpuPrepareMs        = 0.0f;  // +276 parte do cpuFrameMs sob o lock
+    f32 cpuRecordMs         = 0.0f;  // +280 gravação do FrameGraph
+    u32 drawCalls           = 0;     // +284 renderer 2D (camadas + passes)
+    u32 draws3D             = 0;     // +288 SceneStats (0 sem cena 3D)
+    u32 triangles3D         = 0;     // +292
+    u32 culled3D            = 0;     // +296 primitivas fora do frustum
+    u32 particles           = 0;     // +300 slots de partícula no quadro
+    u32 activeEffects       = 0;     // +304 efeitos vivos (neutros saem do plano)
+    u32 flowCacheHits       = 0;     // +308 optical flow (acumulado)
+    u32 flowCacheMisses     = 0;     // +312
+    u32 maskCacheHits       = 0;     // +316 máscaras rasterizadas (acumulado)
+    u32 maskCacheMisses     = 0;     // +320
+    u32 audioQueuedMs       = 0;     // +324 anel do mixer (à frente da saída)
+    u32 audioOutputMs       = 0;     // +328 buffer da saída da plataforma
+    u32 audioUnderruns      = 0;     // +332 total da sessão
+    u32 audioMissingBlocks  = 0;     // +336 trechos mixados sem o bloco decodificado
+    u32 audioOutputOpen     = 0;     // +340 0 = sem saída (os campos de áudio não valem)
+    f32 heavyScale          = 1.0f;  // +344 fração das operações caras (calor)
+    u32 memoryBudgetMB      = 0;     // +348 orçamento do MemoryManager
+    u64 scene3dBytes        = 0;     // +352 geometria + texturas 3D residentes
+    u64 gpuReservedBytes    = 0;     // +360 blocos pedidos ao driver
+    u32 gpuAllocations      = 0;     // +368
+    u32 reserved8a[3]{};             // +372
 };
-static_assert(sizeof(PerfPOD) == 256, "PerfPOD e contrato de ABI");
+static_assert(sizeof(PerfPOD) == 384, "PerfPOD e contrato de ABI");
 static_assert(offsetof(PerfPOD, droppedFrames) == 56);
 static_assert(offsetof(PerfPOD, decodedCacheBytes) == 88);
 static_assert(offsetof(PerfPOD, passesExecuted) == 120);
 static_assert(offsetof(PerfPOD, decoder) == 184);
 static_assert(offsetof(PerfPOD, gpuName) == 232);
+static_assert(offsetof(PerfPOD, pacingP50Ms) == 256);
+static_assert(offsetof(PerfPOD, drawCalls) == 284);
+static_assert(offsetof(PerfPOD, audioQueuedMs) == 324);
+static_assert(offsetof(PerfPOD, scene3dBytes) == 352);
+static_assert(offsetof(PerfPOD, gpuAllocations) == 368);
 
 // -----------------------------------------------------------------------------
 // Catálogo de efeitos (menu "adicionar efeito"). Nomes no blob de strings.

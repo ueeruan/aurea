@@ -606,7 +606,7 @@ class EffectParam(
 }
 
 // =============================================================================
-// Métricas do painel DEV — espelho de `bridge::PerfPOD` (256 bytes)
+// Métricas do painel DEV — espelho de `bridge::PerfPOD` (384 bytes)
 // =============================================================================
 data class PerfStats(
     val previewFps: Float = 0f,
@@ -653,9 +653,37 @@ data class PerfStats(
     val thermal: Int = 0,
     val decoder: String = "",
     val gpuName: String = "",
+    // Fase 8A (HUD): contadores que o motor já tinha na mão.
+    val pacingP50Ms: Float = 0f,
+    val pacingP95Ms: Float = 0f,
+    val pacingP99Ms: Float = 0f,
+    val pacingStdMs: Float = 0f,
+    val pacingSamples: Int = 0,
+    val cpuPrepareMs: Float = 0f,
+    val cpuRecordMs: Float = 0f,
+    val drawCalls: Int = 0,
+    val draws3D: Int = 0,
+    val triangles3D: Int = 0,
+    val culled3D: Int = 0,
+    val particles: Int = 0,
+    val activeEffects: Int = 0,
+    val flowCacheHits: Int = 0,
+    val flowCacheMisses: Int = 0,
+    val maskCacheHits: Int = 0,
+    val maskCacheMisses: Int = 0,
+    val audioQueuedMs: Int = 0,
+    val audioOutputMs: Int = 0,
+    val audioUnderruns: Int = 0,
+    val audioMissingBlocks: Int = 0,
+    val audioOutputOpen: Boolean = false,
+    val heavyScale: Float = 1f,
+    val memoryBudgetMB: Int = 0,
+    val scene3dBytes: Long = 0,
+    val gpuReservedBytes: Long = 0,
+    val gpuAllocations: Int = 0,
 ) {
     companion object {
-        const val BYTES = 256
+        const val BYTES = 384
 
         private fun ByteBuffer.cString(offset: Int, max: Int): String {
             var n = 0
@@ -708,6 +736,33 @@ data class PerfStats(
             thermal = b.getInt(180),
             decoder = b.cString(184, 48),
             gpuName = b.cString(232, 24),
+            pacingP50Ms = b.getFloat(256),
+            pacingP95Ms = b.getFloat(260),
+            pacingP99Ms = b.getFloat(264),
+            pacingStdMs = b.getFloat(268),
+            pacingSamples = b.getInt(272),
+            cpuPrepareMs = b.getFloat(276),
+            cpuRecordMs = b.getFloat(280),
+            drawCalls = b.getInt(284),
+            draws3D = b.getInt(288),
+            triangles3D = b.getInt(292),
+            culled3D = b.getInt(296),
+            particles = b.getInt(300),
+            activeEffects = b.getInt(304),
+            flowCacheHits = b.getInt(308),
+            flowCacheMisses = b.getInt(312),
+            maskCacheHits = b.getInt(316),
+            maskCacheMisses = b.getInt(320),
+            audioQueuedMs = b.getInt(324),
+            audioOutputMs = b.getInt(328),
+            audioUnderruns = b.getInt(332),
+            audioMissingBlocks = b.getInt(336),
+            audioOutputOpen = b.getInt(340) != 0,
+            heavyScale = b.getFloat(344),
+            memoryBudgetMB = b.getInt(348),
+            scene3dBytes = b.getLong(352),
+            gpuReservedBytes = b.getLong(360),
+            gpuAllocations = b.getInt(368),
         )
     }
 }

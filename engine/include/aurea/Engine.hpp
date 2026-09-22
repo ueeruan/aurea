@@ -270,6 +270,26 @@ public:
     /// cena: posição/rotação/escala em X, Y e Z).
     [[nodiscard]] Result<u64> add_null(bool threeD) noexcept;
 
+    // --- Copiar e colar -----------------------------------------------------------
+    /// Área de transferência do motor (vive enquanto o app vive; colar em outro
+    /// projeto só leva camadas cuja mídia exista lá).
+    u32 copy_layers(const u64* ids, u32 count) noexcept;
+    /// Cola no frame (o começo da mais cedo cai nele; as outras mantêm a
+    /// distância). As coladas ficam escolhidas. Devolve quantas entraram.
+    u32 paste_layers(i64 frame) noexcept;
+    /// Estilo = mesclagem, opacidade, efeitos (trocados) e a aparência do tipo
+    /// (texto: fonte/tamanho/cor/contorno; forma: preenchimento/contorno).
+    bool copy_style(u64 layerId) noexcept;
+    u32 paste_style(const u64* ids, u32 count) noexcept;
+    /// Efeitos (com os keyframes deles): colar ACRESCENTA ao fim da pilha.
+    u32 copy_effects(u64 layerId) noexcept;
+    u32 paste_effects(const u64* ids, u32 count) noexcept;
+    /// Keyframes no instante do frame (todas as propriedades com marca ali).
+    u32 copy_keyframes(u64 layerId, i64 frame) noexcept;
+    u32 paste_keyframes(const u64* ids, u32 count, i64 frame) noexcept;
+    /// Bits: 1 camadas, 2 estilo, 4 efeitos, 8 keyframes.
+    [[nodiscard]] u32 clipboard_state() noexcept;
+
     // --- Modo Edição (timeline magnética) ------------------------------------------
     void set_edit_mode(bool on) noexcept;
     [[nodiscard]] bool edit_mode() noexcept;
@@ -492,6 +512,16 @@ private:
 
     std::unique_ptr<CommandQueue> commandQueue_;
     std::unique_ptr<Project>      project_;
+    struct Clipboard {
+        std::vector<std::pair<u64, Layer>> layers;   ///< id original → cópia
+        i64 layersAnchor = 0;
+        bool hasStyle = false;
+        Layer style;
+        std::vector<EffectInstance> effects;
+        std::vector<Track> effectTracks;            ///< EffectParam dos efeitos copiados
+        struct Key { TrackProperty property; u32 effectIndex; u32 effectParamIndex; EffectTypeId effectType; Keyframe key; };
+        std::vector<Key> keys;                       ///< tempo relativo ao instante copiado (0)
+    } clipboard_;
     std::unordered_map<u64, ImagePixels> images_;   ///< por AssetId empacotado
     /// Modelos 3D carregados, por AssetId. Um por asset, qualquer número de
     /// layers (ModelInstance) apontando para ele.

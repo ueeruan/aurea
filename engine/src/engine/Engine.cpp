@@ -834,6 +834,235 @@ Result<u64> Engine::add_null(bool threeD) noexcept {
     return lid.pack();
 }
 
+// =============================================================================
+// Copiar e colar
+// =============================================================================
+u32 Engine::copy_layers(const u64* ids, u32 count) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp || !ids) return 0;
+    clipboard_.layers.clear();
+    clipboard_.layersAnchor = std::numeric_limits<i64>::max();
+    for (u32 i = 0; i < count; ++i) {
+        if (const Layer* l = comp->layer(LayerId::unpack(ids[i]))) {
+            clipboard_.layers.emplace_back(ids[i], *l);
+            clipboard_.layersAnchor = std::min(clipboard_.layersAnchor, l->start.value);
+        }
+    }
+    // Ordem vertical preservada ao colar: de baixo para cima.
+    std::sort(clipboard_.layers.begin(), clipboard_.layers.end(), [comp](const auto& a, const auto& b) {
+        return comp->z_index_of(LayerId::unpack(a.first)) < comp->z_index_of(LayerId::unpack(b.first));
+    });
+    return static_cast<u32>(clipboard_.layers.size());
+}
+
+u32 Engine::paste_layers(i64 frame) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp || clipboard_.layers.empty()) return 0;
+    history_.before_mutation(*comp, project_->timeline().current(), "colar camadas");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    const i64 delta = std::max<i64>(0, frame) - clipboard_.layersAnchor;
+    std::vector<std::pair<u64, LayerId>> made;
+    for (const auto& [oldPack, src] : clipboard_.layers) {
+        // Mídia de outro projeto não existe aqui: essa camada não entra.
+        if (src.source.valid() && !project_->asset(src.source)) continue;
+        if (src.kind == LayerKind::Composition && !project_->timeline().composition(src.nested.composition)) continue;
+        const LayerId lid = comp->add_layer(src.kind, src.name);
+        Layer* dst = comp->layer(lid);
+        if (!dst) continue;
+        *dst = src;
+        dst->start = FrameIndex{std::max<i64>(0, src.start.value + delta)};
+        dst->end = FrameIndex{std::max<i64>(dst->start.value + 1, src.end.value + delta)};
+        made.emplace_back(oldPack, lid);
+    }
+    // Pai: se veio junto, o novo; se ainda existe aqui, o mesmo; senão, solto.
+    for (const auto& [oldPack, lid] : made) {
+        Layer* dst = comp->layer(lid);
+        if (!dst || !dst->parent.valid()) continue;
+        LayerId np{};
+        for (const auto& [op, nl] : made) if (op == dst->parent.pack()) np = nl;
+        if (!np.valid() && comp->layer(dst->parent)) np = dst->parent;
+        dst->parent = np;
+    }
+    comp->rebuild_draw_order();
+    selection_.clear();
+    for (const auto& [op, lid] : made) selection_.push_back(lid.pack());
+    std::sort(selection_.begin(), selection_.end());
+    project_->mark_dirty();
+    request_render();
+    return static_cast<u32>(made.size());
+}
+
+bool Engine::copy_style(u64 layerId) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l) return false;
+    clipboard_.style = *l;
+    clipboard_.hasStyle = true;
+    return true;
+}
+
+namespace {
+/// Troca a pilha de efeitos de `dst` pela de `src` (com os keyframes deles).
+void replace_effects(Layer& dst, const std::vector<EffectInstance>& effects, const TrackSet& srcTracks) {
+    dst.tracks.remove_if([](const Track& t) { return t.property == TrackProperty::EffectParam; });
+    dst.effects = effects;
+    for (u32 i = 0; i < srcTracks.size(); ++i) {
+        if (srcTracks.at(i).property == TrackProperty::EffectParam) dst.tracks.add(srcTracks.at(i));
+    }
+}
+/// Copia uma track de transform/aparência (valor e keyframes) de `src`.
+void copy_track(Layer& dst, const Layer& src, TrackProperty p) {
+    dst.tracks.remove_if([p](const Track& t) { return t.property == p && t.effectIndex == kInvalidIndex; });
+    if (const Track* t = src.tracks.find(p)) dst.tracks.add(*t);
+}
+} // namespace
+
+u32 Engine::paste_style(const u64* ids, u32 count) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp || !ids || !clipboard_.hasStyle) return 0;
+    history_.before_mutation(*comp, project_->timeline().current(), "colar estilo");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    const Layer& s = clipboard_.style;
+    u32 done = 0;
+    for (u32 i = 0; i < count; ++i) {
+        Layer* d = comp->layer(LayerId::unpack(ids[i]));
+        if (!d) continue;
+        d->blendMode = s.blendMode;
+        d->transform.opacity = s.transform.opacity;
+        copy_track(*d, s, TrackProperty::Opacity);
+        replace_effects(*d, s.effects, s.tracks);
+        if (d->kind == LayerKind::Text && s.kind == LayerKind::Text) {
+            const std::string content = d->text.content;
+            d->text = s.text;
+            d->text.content = content;
+        }
+        if (d->kind == LayerKind::Shape && s.kind == LayerKind::Shape) {
+            d->shape.fillColor = s.shape.fillColor;
+            d->shape.filled = s.shape.filled;
+            d->shape.strokeColor = s.shape.strokeColor;
+            d->shape.strokeWidth = s.shape.strokeWidth;
+        }
+        ++done;
+    }
+    project_->mark_dirty();
+    request_render();
+    return done;
+}
+
+u32 Engine::copy_effects(u64 layerId) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l) return 0;
+    clipboard_.effects = l->effects;
+    clipboard_.effectTracks.clear();
+    for (u32 i = 0; i < l->tracks.size(); ++i) {
+        if (l->tracks.at(i).property == TrackProperty::EffectParam) clipboard_.effectTracks.push_back(l->tracks.at(i));
+    }
+    return static_cast<u32>(clipboard_.effects.size());
+}
+
+u32 Engine::paste_effects(const u64* ids, u32 count) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp || !ids || clipboard_.effects.empty()) return 0;
+    history_.before_mutation(*comp, project_->timeline().current(), "colar efeitos");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    u32 done = 0;
+    for (u32 i = 0; i < count; ++i) {
+        Layer* d = comp->layer(LayerId::unpack(ids[i]));
+        if (!d) continue;
+        // Ids novos depois do maior da camada: os keyframes seguem pelo id.
+        u32 next = 0;
+        for (const EffectInstance& e : d->effects) if (e.id != kInvalidIndex) next = std::max(next, e.id + 1);
+        for (const EffectInstance& e : clipboard_.effects) {
+            EffectInstance c = e;
+            const u32 oldId = e.id;
+            c.id = next++;
+            for (const Track& t : clipboard_.effectTracks) {
+                if (t.effectIndex != oldId) continue;
+                Track nt = t;
+                nt.effectIndex = c.id;
+                d->tracks.add(std::move(nt));
+            }
+            d->effects.push_back(std::move(c));
+        }
+        ++done;
+    }
+    project_->mark_dirty();
+    request_render();
+    return done;
+}
+
+u32 Engine::copy_keyframes(u64 layerId, i64 frame) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l) return 0;
+    const FrameIndex local = l->local_time(FrameIndex{frame});
+    clipboard_.keys.clear();
+    for (u32 i = 0; i < l->tracks.size(); ++i) {
+        const Track& t = l->tracks.at(i);
+        const u32 k = t.find_exact(local);
+        if (k == kInvalidIndex) continue;
+        EffectTypeId type = 0;
+        if (t.property == TrackProperty::EffectParam) {
+            for (const EffectInstance& e : l->effects) if (e.id == t.effectIndex) type = e.type;
+        }
+        Keyframe key = t.keys[k];
+        key.time = FrameIndex{0};
+        clipboard_.keys.push_back(Clipboard::Key{t.property, t.effectIndex, t.effectParamIndex, type, key});
+    }
+    return static_cast<u32>(clipboard_.keys.size());
+}
+
+u32 Engine::paste_keyframes(const u64* ids, u32 count, i64 frame) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp || !ids || clipboard_.keys.empty()) return 0;
+    history_.before_mutation(*comp, project_->timeline().current(), "colar keyframes");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    u32 placed = 0;
+    for (u32 i = 0; i < count; ++i) {
+        Layer* d = comp->layer(LayerId::unpack(ids[i]));
+        if (!d) continue;
+        const FrameIndex local = d->local_time(FrameIndex{frame});
+        for (const Clipboard::Key& ck : clipboard_.keys) {
+            u32 effectIndex = ck.effectIndex;
+            if (ck.property == TrackProperty::EffectParam) {
+                // O mesmo efeito (pelo tipo) na camada de destino; sem ele, pula.
+                effectIndex = kInvalidIndex;
+                for (const EffectInstance& e : d->effects) {
+                    if (e.type == ck.effectType) { effectIndex = e.id; break; }
+                }
+                if (effectIndex == kInvalidIndex) continue;
+            }
+            Track& t = d->tracks.get_or_create(ck.property, effectIndex, ck.effectParamIndex);
+            const u32 k = t.set(local, ck.key.value, ck.key.interp);
+            if (k < t.keys.size()) {
+                // Curva inteira (bezier, tangentes, easing) do keyframe copiado.
+                Keyframe nk = ck.key;
+                nk.time = local;
+                t.keys[k] = nk;
+            }
+            ++placed;
+        }
+    }
+    project_->mark_dirty();
+    request_render();
+    return placed;
+}
+
+u32 Engine::clipboard_state() noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    return (clipboard_.layers.empty() ? 0u : 1u) | (clipboard_.hasStyle ? 2u : 0u)
+         | (clipboard_.effects.empty() ? 0u : 4u) | (clipboard_.keys.empty() ? 0u : 8u);
+}
+
 void Engine::set_edit_mode(bool on) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;

@@ -271,6 +271,18 @@ class AureaEngine private constructor() {
     /** Nova forma (ladrilho `preset` da aba Forma) no centro. Id ≥ 0 ou −Errc. */
     fun addShape(preset: Int): Long = nativeAddShape(nativeHandle, preset)
 
+    // Copiar e colar (área de transferência do motor).
+    fun copyLayers(ids: LongArray): Int = nativeCopyLayers(nativeHandle, ids)
+    fun pasteLayers(frame: Long): Int = nativePasteLayers(nativeHandle, frame)
+    fun copyStyle(layer: Long): Boolean = nativeCopyStyle(nativeHandle, layer)
+    fun pasteStyle(ids: LongArray): Int = nativePasteStyle(nativeHandle, ids)
+    fun copyEffects(layer: Long): Int = nativeCopyEffects(nativeHandle, layer)
+    fun pasteEffects(ids: LongArray): Int = nativePasteEffects(nativeHandle, ids)
+    fun copyKeyframes(layer: Long, frame: Long): Int = nativeCopyKeyframes(nativeHandle, layer, frame)
+    fun pasteKeyframes(ids: LongArray, frame: Long): Int = nativePasteKeyframes(nativeHandle, ids, frame)
+    /** Bits: 1 camadas, 2 estilo, 4 efeitos, 8 keyframes. */
+    fun clipboardState(): Int = nativeClipboardState(nativeHandle)
+
     /** Modo Edição (timeline magnética) da composição atual. */
     fun setEditMode(on: Boolean) = nativeSetEditMode(nativeHandle, on)
     fun editMode(): Boolean = nativeEditMode(nativeHandle)
@@ -379,6 +391,15 @@ class AureaEngine private constructor() {
     private external fun nativeAddNull(handle: Long, threeD: Boolean): Long
     private external fun nativeToggleMarker(handle: Long, frame: Long): Boolean
     private external fun nativeSetEditMode(handle: Long, on: Boolean)
+    private external fun nativeCopyLayers(handle: Long, ids: LongArray): Int
+    private external fun nativePasteLayers(handle: Long, frame: Long): Int
+    private external fun nativeCopyStyle(handle: Long, layer: Long): Boolean
+    private external fun nativePasteStyle(handle: Long, ids: LongArray): Int
+    private external fun nativeCopyEffects(handle: Long, layer: Long): Int
+    private external fun nativePasteEffects(handle: Long, ids: LongArray): Int
+    private external fun nativeCopyKeyframes(handle: Long, layer: Long, frame: Long): Int
+    private external fun nativePasteKeyframes(handle: Long, ids: LongArray, frame: Long): Int
+    private external fun nativeClipboardState(handle: Long): Int
     private external fun nativeEditMode(handle: Long): Boolean
     private external fun nativeRippleDelete(handle: Long, ids: LongArray): Boolean
     private external fun nativeRemoveGaps(handle: Long): Long

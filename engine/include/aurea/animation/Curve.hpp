@@ -22,6 +22,7 @@
 #include "aurea/core/Types.hpp"
 #include "aurea/core/Math.hpp"
 
+#include <algorithm>
 #include <vector>
 
 namespace aurea {
@@ -159,6 +160,14 @@ public:
     [[nodiscard]] const Track& at(u32 i) const noexcept { return tracks_[i]; }
 
     void clear() noexcept { tracks_.clear(); }
+
+    /// Remove as tracks em que `pred(track)` é verdadeiro.
+    template <class Pred>
+    void remove_if(Pred pred) {
+        tracks_.erase(std::remove_if(tracks_.begin(), tracks_.end(), pred), tracks_.end());
+    }
+    /// Acrescenta uma track pronta (quem chama garante que a chave é nova).
+    void add(Track t) { tracks_.push_back(std::move(t)); }
 
 private:
     std::vector<Track> tracks_;

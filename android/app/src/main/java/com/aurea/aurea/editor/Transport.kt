@@ -268,8 +268,9 @@ internal fun CopyPasteSheet(store: EditorStore, onDismiss: () -> Unit) {
     }
     ShellMenuSheet(onDismiss) {
         MenuSection("Copiar e colar")
-        MenuItemRow(CupertinoGlyph.DocOnDoc, "Copiar camada", if (primary != null) act { store.comingSoon("Copiar camada") } else null)
-        MenuItemRow(CupertinoGlyph.DocOnClipboard, "Colar camada no cabeçote", act { store.comingSoon("Colar camada") })
+        val clip = store.clipboard
+        MenuItemRow(CupertinoGlyph.DocOnDoc, "Copiar camada", if (primary != null) act { store.copyLayers() } else null)
+        MenuItemRow(CupertinoGlyph.DocOnClipboard, "Colar camada no cabeçote", if (clip and 1 != 0) act { store.pasteLayers() } else null)
         MenuItemRow(
             CupertinoGlyph.PlusSquareOnSquare,
             "Duplicar camada",
@@ -278,9 +279,15 @@ internal fun CopyPasteSheet(store: EditorStore, onDismiss: () -> Unit) {
         MenuItemRow(CupertinoGlyph.CheckmarkSquare, "Selecionar todas as camadas", if (count >= 2) act { store.selectAll() } else null)
         MenuItemRow(CupertinoGlyph.Square, "Limpar seleção", act { store.clearSelection() })
         MenuSection("Estilo e efeitos")
-        MenuItemRow(CupertinoGlyph.Paintbrush, "Copiar estilo", if (primary != null) act { store.comingSoon("Copiar estilo") } else null)
-        MenuItemRow(ShellGlyph.PaintbrushFill, "Colar estilo…", if (primary != null) act { store.comingSoon("Colar estilo") } else null)
-        MenuItemRow(CupertinoGlyph.Sparkles, "Copiar efeitos", if (primary != null) act { store.comingSoon("Copiar efeitos") } else null)
-        MenuItemRow(CupertinoGlyph.WandStars, "Colar efeitos", if (primary != null) act { store.comingSoon("Colar efeitos") } else null)
+        MenuItemRow(CupertinoGlyph.Paintbrush, "Copiar estilo", if (primary != null) act { store.copyStyle() } else null)
+        MenuItemRow(
+            ShellGlyph.PaintbrushFill, "Colar estilo", if (primary != null && clip and 2 != 0) act { store.pasteStyle() } else null,
+            detail = "Mesclagem, opacidade, efeitos e cores",
+        )
+        MenuItemRow(CupertinoGlyph.Sparkles, "Copiar efeitos", if (primary != null) act { store.copyEffects() } else null)
+        MenuItemRow(CupertinoGlyph.WandStars, "Colar efeitos", if (primary != null && clip and 4 != 0) act { store.pasteEffects() } else null)
+        MenuSection("Keyframes")
+        MenuItemRow(CupertinoGlyph.DocOnDoc, "Copiar keyframes do cabeçote", if (primary != null) act { store.copyKeyframes() } else null)
+        MenuItemRow(CupertinoGlyph.DocOnClipboard, "Colar keyframes no cabeçote", if (primary != null && clip and 8 != 0) act { store.pasteKeyframes() } else null)
     }
 }

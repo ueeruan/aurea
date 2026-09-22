@@ -1154,6 +1154,76 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshDetail()
     }
 
+    // --- Copiar e colar ---------------------------------------------------------------
+    /** O que há para colar (bits: 1 camadas, 2 estilo, 4 efeitos, 8 keyframes). */
+    var clipboard by mutableStateOf(0)
+        private set
+
+    private fun afterClipboard() { clipboard = engine.clipboardState() }
+
+    fun copyLayers(ids: Collection<Long> = selection) {
+        if (ids.isEmpty()) return
+        val n = engine.copyLayers(ids.toLongArray())
+        afterClipboard()
+        showToast(if (n == 1) "Camada copiada" else "$n camadas copiadas")
+    }
+
+    fun pasteLayers() {
+        // As coladas ficam escolhidas (o mesmo caminho do duplicar).
+        selectCreatedAfter = layers.map { it.id }.toSet()
+        val n = engine.pasteLayers(playhead.toLong())
+        if (n <= 0) selectCreatedAfter = null
+        refreshNow()
+        showToast(
+            when {
+                n <= 0 -> "Nada para colar (a mídia não existe neste projeto)"
+                n == 1 -> "Camada colada no cabeçote"
+                else -> "$n camadas coladas no cabeçote"
+            },
+        )
+    }
+
+    fun copyStyle() {
+        val id = primary ?: return
+        if (engine.copyStyle(id)) showToast("Estilo copiado")
+        afterClipboard()
+    }
+
+    fun pasteStyle(ids: Collection<Long> = selection) {
+        if (ids.isEmpty()) return
+        val n = engine.pasteStyle(ids.toLongArray())
+        refreshNow()
+        if (n > 0) showToast("Estilo colado")
+    }
+
+    fun copyEffects() {
+        val id = primary ?: return
+        val n = engine.copyEffects(id)
+        afterClipboard()
+        showToast(if (n > 0) "$n efeito(s) copiado(s)" else "Esta camada não tem efeitos")
+    }
+
+    fun pasteEffects(ids: Collection<Long> = selection) {
+        if (ids.isEmpty()) return
+        val n = engine.pasteEffects(ids.toLongArray())
+        refreshNow()
+        if (n > 0) showToast("Efeitos colados")
+    }
+
+    fun copyKeyframes() {
+        val id = primary ?: return
+        val n = engine.copyKeyframes(id, playhead.toLong())
+        afterClipboard()
+        showToast(if (n > 0) "$n keyframe(s) copiado(s)" else "Nenhum keyframe no cabeçote")
+    }
+
+    fun pasteKeyframes(ids: Collection<Long> = selection) {
+        if (ids.isEmpty()) return
+        val n = engine.pasteKeyframes(ids.toLongArray(), playhead.toLong())
+        refreshNow()
+        showToast(if (n > 0) "$n keyframe(s) colado(s) no cabeçote" else "Nenhuma propriedade compatível")
+    }
+
     // --- Modo Edição (timeline magnética) -------------------------------------------
     /** Aparar empurra/puxa as seguintes; excluir fecha o buraco. */
     var editMode by mutableStateOf(false)

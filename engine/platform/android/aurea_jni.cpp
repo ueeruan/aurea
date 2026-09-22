@@ -641,6 +641,65 @@ AUREA_JNI jstring AUREA_FN(nativeQueryText)(JNIEnv* env, jclass, jlong handle, j
     return env->NewStringUTF(t.content.c_str());
 }
 
+namespace {
+std::vector<u64> jlongs(JNIEnv* env, jlongArray ids) {
+    std::vector<u64> v;
+    if (!ids) return v;
+    v.resize(static_cast<usize>(env->GetArrayLength(ids)));
+    if (!v.empty()) env->GetLongArrayRegion(ids, 0, static_cast<jsize>(v.size()), reinterpret_cast<jlong*>(v.data()));
+    return v;
+}
+} // namespace
+
+AUREA_JNI jint AUREA_FN(nativeCopyLayers)(JNIEnv* env, jclass, jlong handle, jlongArray ids) {
+    NativeContext* c = ctx_of(handle);
+    const auto v = jlongs(env, ids);
+    return c ? static_cast<jint>(c->engine.copy_layers(v.data(), static_cast<u32>(v.size()))) : 0;
+}
+
+AUREA_JNI jint AUREA_FN(nativePasteLayers)(JNIEnv*, jclass, jlong handle, jlong frame) {
+    NativeContext* c = ctx_of(handle);
+    return c ? static_cast<jint>(c->engine.paste_layers(frame)) : 0;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeCopyStyle)(JNIEnv*, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.copy_style(static_cast<u64>(layer)) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jint AUREA_FN(nativePasteStyle)(JNIEnv* env, jclass, jlong handle, jlongArray ids) {
+    NativeContext* c = ctx_of(handle);
+    const auto v = jlongs(env, ids);
+    return c ? static_cast<jint>(c->engine.paste_style(v.data(), static_cast<u32>(v.size()))) : 0;
+}
+
+AUREA_JNI jint AUREA_FN(nativeCopyEffects)(JNIEnv*, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    return c ? static_cast<jint>(c->engine.copy_effects(static_cast<u64>(layer))) : 0;
+}
+
+AUREA_JNI jint AUREA_FN(nativePasteEffects)(JNIEnv* env, jclass, jlong handle, jlongArray ids) {
+    NativeContext* c = ctx_of(handle);
+    const auto v = jlongs(env, ids);
+    return c ? static_cast<jint>(c->engine.paste_effects(v.data(), static_cast<u32>(v.size()))) : 0;
+}
+
+AUREA_JNI jint AUREA_FN(nativeCopyKeyframes)(JNIEnv*, jclass, jlong handle, jlong layer, jlong frame) {
+    NativeContext* c = ctx_of(handle);
+    return c ? static_cast<jint>(c->engine.copy_keyframes(static_cast<u64>(layer), frame)) : 0;
+}
+
+AUREA_JNI jint AUREA_FN(nativePasteKeyframes)(JNIEnv* env, jclass, jlong handle, jlongArray ids, jlong frame) {
+    NativeContext* c = ctx_of(handle);
+    const auto v = jlongs(env, ids);
+    return c ? static_cast<jint>(c->engine.paste_keyframes(v.data(), static_cast<u32>(v.size()), frame)) : 0;
+}
+
+AUREA_JNI jint AUREA_FN(nativeClipboardState)(JNIEnv*, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    return c ? static_cast<jint>(c->engine.clipboard_state()) : 0;
+}
+
 AUREA_JNI void AUREA_FN(nativeSetEditMode)(JNIEnv*, jclass, jlong handle, jboolean on) {
     if (NativeContext* c = ctx_of(handle)) c->engine.set_edit_mode(on == JNI_TRUE);
 }

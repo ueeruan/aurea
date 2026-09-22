@@ -96,10 +96,10 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
             { store.setLayerVisible(id, !row.visible) },
         )
         MenuItemRow(CupertinoGlyph.PlusSquareOnSquare, "Duplicar", act { store.duplicateLayers(listOf(id)) })
-        MenuItemRow(CupertinoGlyph.DocOnDoc, "Copiar camada", soon("Copiar camada"))
-        MenuItemRow(CupertinoGlyph.DocOnClipboard, "Colar camada no cabeçote", soon("Colar camada"))
-        MenuItemRow(CupertinoGlyph.Paintbrush, "Copiar estilo", soon("Copiar estilo"))
-        MenuItemRow(ShellGlyph.PaintbrushFill, "Colar estilo…", soon("Colar estilo"))
+        MenuItemRow(CupertinoGlyph.DocOnDoc, "Copiar camada", act { store.copyLayers(listOf(id)) })
+        MenuItemRow(CupertinoGlyph.DocOnClipboard, "Colar camada no cabeçote", if (store.clipboard and 1 != 0) act { store.pasteLayers() } else null)
+        MenuItemRow(CupertinoGlyph.Paintbrush, "Copiar estilo", act { store.select(id); store.copyStyle() })
+        MenuItemRow(ShellGlyph.PaintbrushFill, "Colar estilo", if (store.clipboard and 2 != 0) act { store.pasteStyle(listOf(id)) } else null)
         MenuItemRow(CupertinoGlyph.ArrowUpToLine, "Trazer para a frente", if (index > 0) act { store.reorderLayer(id, index - 1) } else null)
         MenuItemRow(
             CupertinoGlyph.ArrowDownToLine,

@@ -5,6 +5,7 @@
 #include "TestFramework.hpp"
 
 #include "aurea/Engine.hpp"
+#include "aurea/effects/EffectRegistry.hpp"
 
 #include <cstdio>
 #include <cstdlib>
@@ -143,4 +144,104 @@ AUREA_TEST(Edit, EditModeSurvivesSaveAndReopen) {
     AUREA_CHECK(r.e.load_project(path.c_str()).ok());
     AUREA_CHECK(r.e.edit_mode());
     std::remove(path.c_str());
+}
+
+// =============================================================================
+//  Copiar e colar
+// =============================================================================
+AUREA_TEST(Clipboard, PasteLayersKeepsSpacingParentAndUndo) {
+    EditRig r;
+    // B filho de A; copia os dois e cola em 100.
+    Command pc;
+    pc.type = CommandType::LayerSetParent;
+    pc.layer_parent.layer = LayerId::unpack(r.b);
+    pc.layer_parent.parent = LayerId::unpack(r.a);
+    AUREA_CHECK(r.e.apply_command(pc).ok());
+    const u64 ids[2] = {r.a, r.b};
+    AUREA_CHECK_EQ(r.e.copy_layers(ids, 2), 2u);
+    AUREA_CHECK_EQ(r.e.clipboard_state() & 1u, 1u);
+    const u32 before = r.comp()->layers().count();
+    AUREA_CHECK_EQ(r.e.paste_layers(100), 2u);
+    AUREA_CHECK_EQ(r.comp()->layers().count(), before + 2);
+    AUREA_CHECK_EQ(r.e.selection_count(), 2u);
+    u64 sel[2] = {};
+    r.e.get_selection(sel, 2);
+    const Layer* na = nullptr;
+    const Layer* nb = nullptr;
+    for (u64 id : sel) {
+        const Layer* l = r.L(id);
+        if (l && l->start.value == 100) na = l;
+        if (l && l->start.value == 130) nb = l;
+    }
+    AUREA_CHECK(na && nb);
+    if (na && nb) {
+        AUREA_CHECK_EQ(na->end.value, 130);
+        AUREA_CHECK_EQ(nb->end.value, 160);
+        // O filho colado segue o pai COLADO, não o original.
+        const Layer* p = r.comp()->layer(nb->parent);
+        AUREA_CHECK(p == na);
+    }
+    r.undo();
+    AUREA_CHECK_EQ(r.comp()->layers().count(), before);
+}
+
+AUREA_TEST(Clipboard, PasteIntoAnotherProjectWorksForLayersWithoutMedia) {
+    EditRig r;
+    const u64 shape = *r.e.add_shape(0);
+    const u64 ids[2] = {shape, r.a};
+    AUREA_CHECK_EQ(r.e.copy_layers(ids, 2), 2u);
+    // Projeto novo: a forma e o nulo (sem mídia) entram.
+    AUREA_CHECK(r.e.new_project(320, 180, 30.0, nullptr).ok());
+    AUREA_CHECK_EQ(r.e.paste_layers(0), 2u);
+}
+
+AUREA_TEST(Clipboard, StyleAndEffectsAndKeyframes) {
+    EditRig r;
+    const u64 s1 = *r.e.add_shape(0);
+    const u64 s2 = *r.e.add_shape(3);
+    Layer* a = r.comp()->layer(LayerId::unpack(s1));
+    a->shape.fillColor = Vec4{1, 0, 0, 1};
+    a->blendMode = BlendMode::Multiply;
+    Command fx;
+    fx.type = CommandType::EffectAdd;
+    fx.effect_add.layer = LayerId::unpack(s1);
+    fx.effect_add.effectType = effect_type_id(effect_keys::kGaussianBlur);
+    fx.effect_add.index = kInvalidIndex;
+    AUREA_CHECK(r.e.apply_command(fx).ok());
+    a = r.comp()->layer(LayerId::unpack(s1));
+    AUREA_CHECK_EQ(a->effects.size(), usize{1});
+    // Keyframe no parâmetro 0 do efeito e na opacidade, no frame 10.
+    const u32 fxId = a->effects[0].id;
+    a->tracks.get_or_create(TrackProperty::EffectParam, fxId, 0).set(a->local_time(FrameIndex{10}), 7.0f);
+    a->tracks.get_or_create(TrackProperty::Opacity).set(a->local_time(FrameIndex{10}), 0.5f);
+    const u32 shapeType2 = r.L(s2)->shape.shapeType;
+
+    // Estilo: cor, mesclagem e efeitos; a geometria do destino fica.
+    AUREA_CHECK(r.e.copy_style(s1));
+    AUREA_CHECK_EQ(r.e.paste_style(&s2, 1), 1u);
+    const Layer* b = r.L(s2);
+    AUREA_CHECK(b->shape.fillColor.x == 1.0f && b->shape.fillColor.y == 0.0f);
+    AUREA_CHECK(b->blendMode == BlendMode::Multiply);
+    AUREA_CHECK_EQ(b->effects.size(), usize{1});
+    AUREA_CHECK_EQ(b->shape.shapeType, shapeType2);
+
+    // Efeitos: colar ACRESCENTA com id novo e leva o keyframe junto.
+    AUREA_CHECK_EQ(r.e.copy_effects(s1), 1u);
+    AUREA_CHECK_EQ(r.e.paste_effects(&s2, 1), 1u);
+    b = r.L(s2);
+    AUREA_CHECK_EQ(b->effects.size(), usize{2});
+    AUREA_CHECK(b->effects[0].id != b->effects[1].id);
+    const Track* t = b->tracks.find(TrackProperty::EffectParam, b->effects[1].id, 0);
+    AUREA_CHECK(t && t->keys.size() == 1 && t->keys[0].value == 7.0f);
+
+    // Keyframes do instante 10 → colados em 40 na outra camada.
+    AUREA_CHECK_EQ(r.e.copy_keyframes(s1, 10), 2u);
+    AUREA_CHECK_EQ(r.e.paste_keyframes(&s2, 1, 40), 2u);
+    b = r.L(s2);
+    const Track* op = b->tracks.find(TrackProperty::Opacity);
+    AUREA_CHECK(op && op->find_exact(b->local_time(FrameIndex{40})) != kInvalidIndex);
+    r.undo();
+    b = r.L(s2);
+    op = b->tracks.find(TrackProperty::Opacity);
+    AUREA_CHECK(!op || op->find_exact(b->local_time(FrameIndex{40})) == kInvalidIndex);
 }

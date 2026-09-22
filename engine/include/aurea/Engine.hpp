@@ -37,6 +37,7 @@
 #include "aurea/core/Time.hpp"
 #include "aurea/core/Types.hpp"
 #include "aurea/effects/EffectRegistry.hpp"
+#include "aurea/expr/Expression.hpp"
 #include "aurea/jobs/JobSystem.hpp"
 #include "aurea/media/MediaManager.hpp"
 #include "aurea/media/ThumbnailService.hpp"
@@ -306,6 +307,38 @@ public:
     bool toggle_text_anim_key(u64 layerId, u32 index, u32 param) noexcept;
     /// Preset nativo (substitui os animadores), a partir do início da camada.
     bool apply_text_preset(u64 layerId, u32 preset) noexcept;
+
+    // =========================================================================
+    // Expressões (expr/Expression.hpp). A trilha é (property, effectIndex,
+    // paramIndex) — a mesma chave dos keyframes: transform com effectIndex =
+    // kInvalidIndex e paramIndex 0; efeito com o id do efeito e
+    // param_track_key(parâmetro, componente); animador de texto com o índice
+    // do animador e o TextAnimParam; TrackProperty::TimeRemap = o remap.
+    // =========================================================================
+    /// Liga (ou troca) a expressão da trilha; fonte vazia remove. Com erro de
+    /// sintaxe a expressão fica gravada (a propriedade usa os keyframes até a
+    /// pessoa corrigir) e `diag` diz onde. Desfazível.
+    Status set_expression(u64 layerId, u32 property, u32 effectIndex, u32 paramIndex, const char* source,
+                          expr::Diagnostic* diag = nullptr) noexcept;
+    /// Liga/desliga sem apagar o texto. Desfazível.
+    bool set_expression_enabled(u64 layerId, u32 property, u32 effectIndex, u32 paramIndex, bool enabled) noexcept;
+    /// Várias trilhas com o MESMO texto num passo de desfazer (Posição = X e Y;
+    /// a expressão é vetorial e cada trilha pega o seu componente). `keys3` =
+    /// `count` trincas (property, effectIndex, paramIndex), no máximo 16.
+    Status set_expressions(u64 layerId, const u32* keys3, u32 count, const char* source,
+                           expr::Diagnostic* diag = nullptr) noexcept;
+    bool set_expressions_enabled(u64 layerId, const u32* keys3, u32 count, bool enabled) noexcept;
+    struct ExpressionInfo {
+        bool             exists = false;
+        bool             enabled = true;
+        std::string      source;
+        expr::Diagnostic error;       ///< sintaxe ou execução (avaliada no playhead agora)
+        f32              value = 0;   ///< valor resultante no playhead (unidade guardada)
+    };
+    bool query_expression(u64 layerId, u32 property, u32 effectIndex, u32 paramIndex, ExpressionInfo& out) noexcept;
+    /// Trilhas com expressão na camada: 4 u32 por linha (property, effectIndex,
+    /// paramIndex, flags: 1 ligada, 2 com erro). Devolve o número de linhas.
+    u32 query_expressions(u64 layerId, u32* out, u32 capacityRows) noexcept;
 
     /// Arquivo de mídia da camada de vídeo/áudio (caminho ou content://), para
     /// o provedor de transcrição ler o áudio. Vazio = não tem mídia.

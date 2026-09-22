@@ -280,6 +280,7 @@ fun EditorScreen(store: EditorStore) {
 
     ShellSheets(store, ui)
     if (ui.effectsBrowser) EffectsBrowserSheet(store) { ui.effectsBrowser = false }
+    store.expressionTarget?.let { com.aurea.aurea.editor.panels.ExpressionSheet(store, it) }
     if (ui.exporting) ExportScreen(store) { ui.exporting = false }
 }
 

@@ -1,5 +1,6 @@
 package com.aurea.aurea.editor.panels
 
+import com.aurea.aurea.engine.TrackKey
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -108,6 +109,8 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
     val look by remember(store, tab, axis) { derivedStateOf { transformLook(store.detail, props) } }
     val curveReady by remember(store, tab, axis) { derivedStateOf { store.primaryKeys().transformTrack(props[0]).size >= 2 } }
     val canKey = tab != TransformTab.Inclinar
+    val exprKeys = props.map { TrackKey(it) }
+    val exprLook by remember(store, tab, axis) { derivedStateOf { store.expressionLook(exprKeys) } }
 
     Row(Modifier.fillMaxSize()) {
         LeftRail(
@@ -130,6 +133,18 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
                 null
             },
             more = { RailMoreButton(active = tab == TransformTab.Pivo) { menu = true } },
+            expression = exprLook,
+            // Uma expressão para o GRUPO (Posição = X e Y): cada trilha pega o
+            // seu componente do vetor; escala na unidade da tela (%).
+            onExpression = if (canKey) {
+                {
+                    val title = if (tab == TransformTab.Girar) "Rotação ${"XYZ"[axis]}" else tab.title
+                    if (tab == TransformTab.Escalar) store.openExpression(title, exprKeys, 100f, "%")
+                    else store.openExpression(title, exprKeys, 1f, if (tab == TransformTab.Girar) "°" else "px")
+                }
+            } else {
+                null
+            },
         )
         Column(Modifier.weight(1f).fillMaxHeight()) {
             when (tab) {
@@ -164,6 +179,9 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
                 add(SheetAction("Keyframe anterior") { store.pause(); store.stepToKeyframe(-1) })
                 add(SheetAction("Próximo keyframe") { store.pause(); store.stepToKeyframe(1) })
                 add(SheetAction("Resetar propriedade") { resetTab(env, tab) })
+                if (canKey) add(SheetAction(if (exprLook == com.aurea.aurea.engine.ExpressionLook.None) "Adicionar expressão" else "Editar expressão") {
+                    store.openExpression(tab.title, exprKeys, if (tab == TransformTab.Escalar) 100f else 1f, if (tab == TransformTab.Escalar) "%" else "")
+                })
                 add(SheetAction("Editar pivô") { onTab(TransformTab.Pivo) })
                 add(SheetAction("Opacidade") { env.onOpenPanel(EditorPanel.Appearance) })
             },

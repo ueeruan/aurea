@@ -29,6 +29,7 @@
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Version.hpp"
 
+#include <cstdio>
 #include <cstring>
 #include <mutex>
 #include <new>
@@ -1115,6 +1116,98 @@ AUREA_JNI jboolean AUREA_FN(nativeToggleTextAnimKey)(JNIEnv*, jclass, jlong hand
 AUREA_JNI jboolean AUREA_FN(nativeApplyTextPreset)(JNIEnv*, jclass, jlong handle, jlong layer, jint preset) {
     NativeContext* c = ctx_of(handle);
     return c && preset >= 0 && c->engine.apply_text_preset(static_cast<u64>(layer), static_cast<u32>(preset)) ? JNI_TRUE : JNI_FALSE;
+}
+
+
+// =============================================================================
+// Expressões. Texto atravessa em BYTES UTF-8 (não jstring): o JNI fala "UTF-8
+// modificado", e um emoji no comentário da expressão (4 bytes) viraria abort
+// no CheckJNI. Campos separados por \x1F; a fonte, quando vem, é o ÚLTIMO campo.
+// =============================================================================
+namespace {
+std::string bytes_to_string(JNIEnv* env, jbyteArray a) {
+    if (!a) return {};
+    const jsize n = env->GetArrayLength(a);
+    std::string s(static_cast<usize>(n), '\0');
+    if (n) env->GetByteArrayRegion(a, 0, n, reinterpret_cast<jbyte*>(s.data()));
+    return s;
+}
+jbyteArray string_to_bytes(JNIEnv* env, const std::string& s) {
+    jbyteArray out = env->NewByteArray(static_cast<jsize>(s.size()));
+    if (out && !s.empty()) env->SetByteArrayRegion(out, 0, static_cast<jsize>(s.size()), reinterpret_cast<const jbyte*>(s.data()));
+    return out;
+}
+std::string diag_fields(const expr::Diagnostic& d) {
+    return std::string(d.ok ? "1" : "0") + '\x1F' + std::to_string(d.line) + '\x1F' + std::to_string(d.column) + '\x1F' + d.message;
+}
+} // namespace
+
+/// Trincas (property, effectIndex, paramIndex) de um IntArray; vazio se inválido.
+static std::vector<u32> read_keys(JNIEnv* env, jintArray keys) {
+    std::vector<u32> k;
+    if (!keys) return k;
+    const jsize n = env->GetArrayLength(keys);
+    if (n <= 0 || n % 3 != 0 || n > 48) return k;
+    k.resize(static_cast<usize>(n));
+    env->GetIntArrayRegion(keys, 0, n, reinterpret_cast<jint*>(k.data()));
+    return k;
+}
+
+/// Grava o MESMO texto nas trilhas `keys` (trincas), num passo de desfazer;
+/// vazio remove. Devolve "ok US linha US coluna US mensagem" da sintaxe; nulo =
+/// camada/propriedade inválida.
+AUREA_JNI jbyteArray AUREA_FN(nativeSetExpression)(JNIEnv* env, jclass, jlong handle, jlong layer, jintArray keys, jbyteArray source) {
+    NativeContext* c = ctx_of(handle);
+    const std::vector<u32> k = read_keys(env, keys);
+    if (!c || k.empty()) return nullptr;
+    const std::string src = bytes_to_string(env, source);
+    expr::Diagnostic d;
+    const Status s = c->engine.set_expressions(static_cast<u64>(layer), k.data(), static_cast<u32>(k.size() / 3), src.c_str(), &d);
+    if (!s.ok()) return nullptr;
+    return string_to_bytes(env, diag_fields(d));
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetExpressionEnabled)(JNIEnv* env, jclass, jlong handle, jlong layer, jintArray keys, jboolean enabled) {
+    NativeContext* c = ctx_of(handle);
+    const std::vector<u32> k = read_keys(env, keys);
+    return c && !k.empty()
+                   && c->engine.set_expressions_enabled(static_cast<u64>(layer), k.data(), static_cast<u32>(k.size() / 3), enabled == JNI_TRUE)
+               ? JNI_TRUE : JNI_FALSE;
+}
+
+/// "existe US ligada US ok US linha US coluna US mensagem US valor US fonte"
+/// (valor no playhead, unidade guardada). Nulo = camada não existe.
+AUREA_JNI jbyteArray AUREA_FN(nativeQueryExpression)(JNIEnv* env, jclass, jlong handle, jlong layer, jint property,
+                                                      jint effectIndex, jint paramIndex) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || property < 0) return nullptr;
+    Engine::ExpressionInfo info;
+    if (!c->engine.query_expression(static_cast<u64>(layer), static_cast<u32>(property), static_cast<u32>(effectIndex),
+                                    static_cast<u32>(paramIndex), info)) {
+        return nullptr;
+    }
+    char value[32];
+    std::snprintf(value, sizeof(value), "%.6g", static_cast<double>(info.value));
+    const std::string out = std::string(info.exists ? "1" : "0") + '\x1F' + (info.enabled ? "1" : "0") + '\x1F'
+                          + diag_fields(info.error) + '\x1F' + value + '\x1F' + info.source;
+    return string_to_bytes(env, out);
+}
+
+/// Trilhas com expressão na camada: 4 ints por linha (property, effectIndex,
+/// paramIndex, flags 1 ligada | 2 com erro).
+AUREA_JNI jintArray AUREA_FN(nativeQueryExpressions)(JNIEnv* env, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return nullptr;
+    std::vector<u32> rows(4 * (kMaxTrackCount + 1));
+    const u32 n = c->engine.query_expressions(static_cast<u64>(layer), rows.data(), kMaxTrackCount + 1);
+    jintArray out = env->NewIntArray(static_cast<jsize>(n * 4));
+    if (out && n) env->SetIntArrayRegion(out, 0, static_cast<jsize>(n * 4), reinterpret_cast<const jint*>(rows.data()));
+    return out;
+}
+
+/// Só a sintaxe (a folha valida enquanto a pessoa digita). Sem motor.
+AUREA_JNI jbyteArray AUREA_FN(nativeCheckExpressionSyntax)(JNIEnv* env, jclass, jbyteArray source) {
+    return string_to_bytes(env, diag_fields(expr::check_syntax(bytes_to_string(env, source))));
 }
 
 /// Fonte da camada de texto: "família\tpeso\titálico\tcaminho" (nulo = não é texto).

@@ -1823,6 +1823,52 @@ AUREA_TEST(Gpu, Scene3DSurvivesSaveAndReopenIdentically) {
     if (worst > 2) { (void)write_png("reaberto_antes.png", before); (void)write_png("reaberto_depois.png", after); }
 }
 
+AUREA_TEST(Gpu, ExpressionOnPositionMovesTheLayer) {
+    AUREA_REQUIRE_GPU();
+    // Centro de massa dos pixels acesos (a forma branca sobre o preto).
+    auto centroid = [](const Image8& img, f32& cx, f32& cy) {
+        f64 sx = 0, sy = 0, n = 0;
+        for (u32 y = 0; y < img.height; ++y) {
+            for (u32 x = 0; x < img.width; ++x) {
+                if (img.at(x, y)[0] > 128) { sx += x; sy += y; n += 1; }
+            }
+        }
+        cx = n > 0 ? static_cast<f32>(sx / n) : -1.0f;
+        cy = n > 0 ? static_cast<f32>(sy / n) : -1.0f;
+        return n;
+    };
+    Scene3DRig rig(256, 256);
+    auto id = rig.e.add_shape(0);   // círculo
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) return;
+    f32 x0 = 0, y0 = 0, x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+    AUREA_CHECK(centroid(rig.capture(256), x0, y0) > 100);
+    const u32 px = static_cast<u32>(TrackProperty::PositionX);
+    const u32 py = static_cast<u32>(TrackProperty::PositionY);
+    AUREA_CHECK(rig.e.set_expression(*id, px, kInvalidIndex, 0, "value + 60").ok());
+    AUREA_CHECK(rig.e.set_expression(*id, py, kInvalidIndex, 0, "[value[0], value[1] - 40]").ok());
+    AUREA_CHECK(centroid(rig.capture(256), x1, y1) > 100);
+    AUREA_CHECK_NEAR(x1 - x0, 60.0f, 1.5f);
+    AUREA_CHECK_NEAR(y1 - y0, -40.0f, 1.5f);
+    // Dependente do tempo: no quadro 15 (0,5 s) a expressão "time*120" desloca 60 px.
+    AUREA_CHECK(rig.e.set_expression(*id, px, kInvalidIndex, 0, "value + time * 120").ok());
+    Command c;
+    c.type = CommandType::PlaybackSeek;
+    c.seek.time = TickNs{15 * 1'000'000'000LL / 30};
+    AUREA_CHECK(rig.e.apply_command(c).ok());
+    AUREA_CHECK(centroid(rig.capture(256), x2, y2) > 100);
+    AUREA_CHECK_NEAR(x2 - x0, 60.0f, 1.5f);
+    // Desligada: volta ao lugar (Y também desligada).
+    AUREA_CHECK(rig.e.set_expression_enabled(*id, px, kInvalidIndex, 0, false));
+    AUREA_CHECK(rig.e.set_expression_enabled(*id, py, kInvalidIndex, 0, false));
+    f32 x3 = 0, y3 = 0;
+    AUREA_CHECK(centroid(rig.capture(256), x3, y3) > 100);
+    AUREA_CHECK_NEAR(x3, x0, 1.0f);
+    AUREA_CHECK_NEAR(y3, y0, 1.0f);
+    std::printf("    centro (%.1f, %.1f) -> expressao (%.1f, %.1f) [esperado +60, -40]; time*120 em 0,5 s: +%.1f px; desligada: (%.1f, %.1f)\n",
+                x0, y0, x1, y1, x2 - x0, x3, y3);
+}
+
 #endif // AUREA_TEST_VULKAN
 
 AUREA_TEST(Gpu, CaptureFrameGivesSrgbThumbnail) {

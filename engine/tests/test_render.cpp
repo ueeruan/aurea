@@ -503,7 +503,7 @@ AUREA_TEST(EffectGraph, RegistryRefusesDuplicateKeys) {
     const u32 before = reg.count();
     register_builtin_effects(reg);
     AUREA_CHECK_EQ(reg.count(), before);
-    AUREA_CHECK_EQ(before, static_cast<u32>(12));
+    AUREA_CHECK_EQ(before, static_cast<u32>(17));   // 12 efeitos + 5 controles de expressão
 }
 
 AUREA_TEST(EffectGraph, CurveIsMonotoneBetweenPoints) {

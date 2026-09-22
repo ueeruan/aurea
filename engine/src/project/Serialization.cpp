@@ -1,6 +1,7 @@
 #include "aurea/project/Serialization.hpp"
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Time.hpp"
+#include "aurea/expr/Expression.hpp"
 
 #include <cstdio>
 #include <cstring>
@@ -522,13 +523,31 @@ void write_layer(ByteWriter& w, const Layer& l) {
     }
     // v15: legenda de qual camada
     w.u64v(l.text.captionSource);
+    // v18: expressões por trilha (a chave da trilha + ligada + fonte). Só as
+    // trilhas que têm expressão; o programa é recompilado na leitura.
+    u32 exprCount = l.timeRemap.expression ? 1u : 0u;
+    for (u32 i = 0; i < l.tracks.size(); ++i) exprCount += l.tracks.at(i).expression ? 1u : 0u;
+    w.u32v(exprCount);
+    auto writeExpr = [&](const Track& t, u8 where) {
+        w.u8v(where);   // 0 = TrackSet, 1 = time remap
+        w.u16v(static_cast<u16>(t.property));
+        w.u32v(t.effectIndex);
+        w.u32v(t.effectParamIndex);
+        w.boolv(t.expressionEnabled);
+        w.str(t.expression->source);
+    };
+    if (l.timeRemap.expression) writeExpr(l.timeRemap, 1);
+    for (u32 i = 0; i < l.tracks.size(); ++i) {
+        if (l.tracks.at(i).expression) writeExpr(l.tracks.at(i), 0);
+    }
 }
 
 /// Versão da seção Timeline. v2: layer de modelo 3D guarda escala de unidade
 /// e pivô (o enquadramento do import). v1 continua sendo lida (campos novos
 /// com o padrão).
 /// v3: velocidade e reverso da layer.
-constexpr u32 kTimelineSectionVersion = 15;
+/// v18: expressões por trilha (fonte + ligada), no fim de cada layer.
+constexpr u32 kTimelineSectionVersion = 18;
 thread_local u32 g_readingTimelineVersion = kTimelineSectionVersion;
 
 void read_layer(ByteReader& r, Layer& l) {
@@ -756,6 +775,22 @@ void read_layer(ByteReader& r, Layer& l) {
         }
     }
     if (g_readingTimelineVersion >= 15) l.text.captionSource = r.u64v();
+    if (g_readingTimelineVersion >= 18) {
+        const u32 n = r.u32v();
+        if (n > kMaxTrackCount + 1) { r.skip_to_end(); return; }
+        for (u32 i = 0; i < n && r.good(); ++i) {
+            const u8 where = r.u8v();
+            const auto prop = static_cast<TrackProperty>(r.u16v());
+            const u32 effectIndex = r.u32v();
+            const u32 paramIndex = r.u32v();
+            const bool enabled = r.boolv();
+            std::string source = r.str();
+            if (!r.good() || source.size() > expr::kMaxSourceBytes) break;
+            Track& t = where == 1 ? l.timeRemap : l.tracks.get_or_create(prop, effectIndex, paramIndex);
+            t.expression = expr::compile(source);
+            t.expressionEnabled = enabled;
+        }
+    }
 }
 
 void write_asset(ByteWriter& w, const Asset& a) {

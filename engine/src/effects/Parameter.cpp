@@ -214,7 +214,7 @@ ParamValue evaluate_param(const TrackSet& tracks, const EffectInstance& effect, 
     const u32 comps = spec.animatable() ? component_count(spec.type) : 0;
     for (u32 c = 0; c < comps; ++c) {
         const Track* t = tracks.find(TrackProperty::EffectParam, effect.id, param_track_key(paramIndex, c));
-        if (t && !t->keys.empty()) out.v[c] = t->sample(localTime);
+        if (t) out.v[c] = t->value_or(localTime, out.v[c]);   // keyframes e/ou expressão
     }
     return out;
 }

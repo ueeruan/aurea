@@ -6,6 +6,7 @@
 #include "aurea/text/Text.hpp"
 #include "aurea/text/TextAnimator.hpp"
 #include "aurea/core/Log.hpp"
+#include "aurea/expr/Expression.hpp"
 #include "aurea/core/Thread.hpp"
 #include "aurea/project/Serialization.hpp"
 
@@ -105,9 +106,16 @@ constexpr u32 kModelTextureCap = 2048;
 Engine::Engine() {
     commandQueue_ = std::make_unique<CommandQueue>();
     adaptive_ = new AdaptiveResolutionController(caps_);
+    // Expressões lidas FORA de um quadro do renderer (consultas da UI, que já
+    // seguram o lock do modelo) acham a camada dona pela timeline deste motor.
+    expr::register_provider([](void* self) -> const Timeline* {
+        const Engine* e = static_cast<const Engine*>(self);
+        return e->project_ ? &e->project_->timeline() : nullptr;
+    }, this);
 }
 
 Engine::~Engine() {
+    expr::unregister_provider(this);
     shutdown();
     delete adaptive_;
     adaptive_ = nullptr;
@@ -1049,8 +1057,8 @@ Result<u64> Engine::track_point(u64 layerId, f32 x, f32 y, bool stabilize, u32* 
         const FrameIndex f{start + static_cast<i64>(i)};
         const FrameIndex local = l->local_time(f);
         const f32 dx = (track[0].x - track[i].x) * kx, dy = (track[0].y - track[i].y) * ky;
-        const f32 bx = base_x.keys.empty() ? l->transform.position.x : base_x.sample(local);
-        const f32 by = base_y.keys.empty() ? l->transform.position.y : base_y.sample(local);
+        const f32 bx = base_x.keys.empty() ? l->transform.position.x : base_x.sample_keys(local);
+        const f32 by = base_y.keys.empty() ? l->transform.position.y : base_y.sample_keys(local);
         px.set(local, bx + dx * c - dy * s);
         py.set(local, by + dx * s + dy * c);
     }
@@ -1619,7 +1627,7 @@ i32 Engine::edit_time_remap_key(u64 layerId, i32 index, i64 localFrame, f32 sour
     if (index < 0) {
         const FrameIndex f{std::clamp(localFrame, lo, hi)};
         if (t.find_exact(f) != kInvalidIndex) return static_cast<i32>(t.find_exact(f));
-        const f32 v = t.sample(f);
+        const f32 v = t.sample_keys(f);
         // A curva que o ponto corta: o novo ponto herda a interpolação do trecho.
         const u32 before = t.find_before(f);
         const Interpolation in = before != kInvalidIndex ? t.keys[before].interp : Interpolation::Linear;
@@ -1816,7 +1824,7 @@ bool Engine::gizmo_move_local(u64 layerId, u32 axis, f32 amount, f32* out) noexc
     const FrameIndex local = l->local_time(now);
     auto s = [&](TrackProperty prop, f32 fallback) {
         const Track* tr = l->tracks.find(prop);
-        return (tr && !tr->keys.empty()) ? tr->sample(local) : fallback;
+        return tr ? tr->value_or(local, fallback) : fallback;
     };
     Vec3 pos{s(TrackProperty::PositionX, l->transform.position.x), s(TrackProperty::PositionY, l->transform.position.y),
              s(TrackProperty::PositionZ, l->transform.position.z)};
@@ -3031,8 +3039,9 @@ u32 Engine::query_text_animators(u64 layerId, f32* out, u32 capacity) noexcept {
             f32* r = text_param_ref(a, p);
             if (!r) continue;
             const Track* tr = l->tracks.find(TrackProperty::TextAnimParam, i, p);
-            if (!tr || tr->keys.empty()) continue;
-            *r = tr->sample(local);
+            if (!tr || !tr->driven()) continue;
+            *r = tr->value_or(local, *r);   // keyframes e/ou expressão
+            if (tr->keys.empty()) continue;  // só expressão: sem losango
             const bool k = tr->find_exact(local) != kInvalidIndex;
             if (p < 10) { animSel |= 1u << p; if (k) keySel |= 1u << p; }
             else { animProp |= 1u << (p - 10); if (k) keyProp |= 1u << (p - 10); }
@@ -3148,11 +3157,155 @@ bool Engine::toggle_text_anim_key(u64 layerId, u32 index, u32 param) noexcept {
         if (tr.keys.size() == 1) *r = tr.keys[0].value;
         (void)tr.remove(local);
     } else {
-        (void)tr.set(local, tr.keys.empty() ? *r : tr.sample(local), Interpolation::Bezier);
+        (void)tr.set(local, tr.keys.empty() ? *r : tr.sample_keys(local), Interpolation::Bezier);
     }
     project_->mark_dirty();
     request_render();
     return true;
+}
+
+// =============================================================================
+// Expressões
+// =============================================================================
+namespace {
+/// A trilha da chave (property, effectIndex, paramIndex); TimeRemap = o remap.
+Track* expression_track(Layer& l, u32 property, u32 effectIndex, u32 paramIndex, bool create) noexcept {
+    if (property >= static_cast<u32>(TrackProperty::_Count)) return nullptr;
+    const auto p = static_cast<TrackProperty>(property);
+    if (p == TrackProperty::TimeRemap) return &l.timeRemap;
+    if (p == TrackProperty::EffectParam && !l.find_effect(EffectId{effectIndex, 0})) return nullptr;
+    if (p == TrackProperty::TextAnimParam && effectIndex >= l.text.animators.size()) return nullptr;
+    const bool keyed = p == TrackProperty::EffectParam || p == TrackProperty::TextAnimParam;
+    const u32 ei = keyed ? effectIndex : kInvalidIndex;
+    const u32 pi = keyed ? paramIndex : 0u;
+    if (Track* t = l.tracks.find(p, ei, pi)) return t;
+    if (!create || l.tracks.size() >= kMaxTrackCount) return nullptr;
+    Track& t = l.tracks.get_or_create(p, ei, pi);
+    // Trilha nova: o valor parado é o da camada (quem lê por `sample_or`, como
+    // o volume, continua vendo o mesmo número).
+    t.staticValue = p == TrackProperty::AudioVolume ? 1.0f : expr::static_value(l, t);
+    return &t;
+}
+} // namespace
+
+Status Engine::set_expression(u64 layerId, u32 property, u32 effectIndex, u32 paramIndex, const char* source,
+                              expr::Diagnostic* diag) noexcept {
+    const u32 key[3] = {property, effectIndex, paramIndex};
+    return set_expressions(layerId, key, 1, source, diag);
+}
+
+Status Engine::set_expressions(u64 layerId, const u32* keys3, u32 count, const char* source, expr::Diagnostic* diag) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    if (diag) *diag = expr::Diagnostic{};
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l) return Status{Errc::NotFound, "camada nao existe"};
+    if (!keys3 || count == 0 || count > 16) return Status{Errc::InvalidArgument, "trilhas invalidas"};
+    const std::string_view src = source ? std::string_view(source) : std::string_view();
+    if (src.size() > expr::kMaxSourceBytes) return Status{Errc::InvalidArgument, "expressao longa demais"};
+    const bool remove = src.find_first_not_of(" \t\r\n") == std::string_view::npos;
+    // Tudo validado ANTES de mexer: ou todas as trilhas recebem, ou nenhuma.
+    bool anyChange = false;
+    for (u32 i = 0; i < count; ++i) {
+        const u32* k = keys3 + i * 3;
+        Track* t = expression_track(*l, k[0], k[1], k[2], false);
+        if (!t && !remove) {
+            const auto p = k[0] < static_cast<u32>(TrackProperty::_Count) ? static_cast<TrackProperty>(k[0]) : TrackProperty::_Count;
+            if (p == TrackProperty::_Count || (p == TrackProperty::EffectParam && !l->find_effect(EffectId{k[1], 0}))
+                || (p == TrackProperty::TextAnimParam && k[1] >= l->text.animators.size())) {
+                return Status{Errc::InvalidArgument, "propriedade invalida"};
+            }
+        }
+        anyChange |= remove ? (t && t->expression) : true;
+    }
+    if (!anyChange) return OkStatus;
+    // UM passo de desfazer para o grupo (Posição = X e Y).
+    history_.before_mutation(*comp, project_->timeline().current(), remove ? "remover expressão" : "expressão");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    const std::shared_ptr<const expr::TrackExpression> compiled = remove ? nullptr : expr::compile(src);
+    for (u32 i = 0; i < count; ++i) {
+        const u32* k = keys3 + i * 3;
+        Track* t = expression_track(*l, k[0], k[1], k[2], !remove);
+        if (!t) continue;
+        // Cada trilha ganha o SEU objeto (o diagnóstico de execução é por
+        // trilha); o programa compilado é o mesmo (cache por texto).
+        t->expression = remove ? nullptr : (i == 0 ? compiled : expr::compile(src));
+        t->expressionEnabled = true;
+    }
+    if (diag && compiled) *diag = compiled->parseError;
+    project_->mark_dirty();
+    request_render();
+    return OkStatus;
+}
+
+bool Engine::set_expression_enabled(u64 layerId, u32 property, u32 effectIndex, u32 paramIndex, bool enabled) noexcept {
+    const u32 key[3] = {property, effectIndex, paramIndex};
+    return set_expressions_enabled(layerId, key, 1, enabled);
+}
+
+bool Engine::set_expressions_enabled(u64 layerId, const u32* keys3, u32 count, bool enabled) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || !keys3 || count == 0 || count > 16) return false;
+    bool found = false, change = false;
+    for (u32 i = 0; i < count; ++i) {
+        const Track* t = expression_track(*l, keys3[i * 3], keys3[i * 3 + 1], keys3[i * 3 + 2], false);
+        if (!t || !t->expression) continue;
+        found = true;
+        change |= t->expressionEnabled != enabled;
+    }
+    if (!found) return false;
+    if (!change) return true;
+    history_.before_mutation(*comp, project_->timeline().current(), enabled ? "ligar expressão" : "desligar expressão");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    for (u32 i = 0; i < count; ++i) {
+        Track* t = expression_track(*l, keys3[i * 3], keys3[i * 3 + 1], keys3[i * 3 + 2], false);
+        if (t && t->expression) t->expressionEnabled = enabled;
+    }
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::query_expression(u64 layerId, u32 property, u32 effectIndex, u32 paramIndex, ExpressionInfo& out) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    out = ExpressionInfo{};
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    const Track* t = l ? expression_track(*l, property, effectIndex, paramIndex, false) : nullptr;
+    if (!t || !t->expression) return l != nullptr;
+    out.exists = true;
+    out.enabled = t->expressionEnabled;
+    out.source = t->expression->source;
+    // Avalia no playhead agora: o erro de execução mostrado é o do instante
+    // que a pessoa está vendo, não o de um quadro antigo.
+    const expr::Scope scope(project_->timeline());
+    const FrameIndex local = l->local_time(playback_.current());
+    out.value = t->value_or(local, expr::static_value(*l, *t));
+    out.error = t->expression->error();
+    return true;
+}
+
+u32 Engine::query_expressions(u64 layerId, u32* out, u32 capacityRows) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l) return 0;
+    u32 n = 0;
+    auto put = [&](const Track& t, u32 property) {
+        if (!t.expression) return;
+        if (out && n < capacityRows) {
+            out[n * 4 + 0] = property;
+            out[n * 4 + 1] = t.effectIndex;
+            out[n * 4 + 2] = t.effectParamIndex;
+            out[n * 4 + 3] = (t.expressionEnabled ? 1u : 0u) | (t.expression->error().ok ? 0u : 2u);
+        }
+        ++n;
+    };
+    put(l->timeRemap, static_cast<u32>(TrackProperty::TimeRemap));
+    for (u32 i = 0; i < l->tracks.size(); ++i) put(l->tracks.at(i), static_cast<u32>(l->tracks.at(i).property));
+    return std::min(n, capacityRows);
 }
 
 bool Engine::apply_text_preset(u64 layerId, u32 preset) noexcept {
@@ -4108,10 +4261,13 @@ bool Engine::fill_layer_detail_locked(u64 layerId, bridge::LayerDetailPOD& out) 
     const FrameIndex local = l->local_time(playback_.current());
     auto value = [&](TrackProperty p, f32 fallback, u32 bit) noexcept {
         const Track* tr = l->tracks.find(p);
-        if (!tr || tr->keys.empty()) return fallback;
-        out.animatedMask |= 1u << bit;
-        if (tr->find_exact(local) != kInvalidIndex) out.keyAtPlayheadMask |= 1u << bit;
-        return tr->sample(local);
+        if (!tr) return fallback;
+        if (!tr->keys.empty()) {
+            out.animatedMask |= 1u << bit;
+            if (tr->find_exact(local) != kInvalidIndex) out.keyAtPlayheadMask |= 1u << bit;
+        }
+        // Com expressão, a UI mostra o valor RESULTANTE (como o After Effects).
+        return tr->value_or(local, fallback);
     };
     using TP = TrackProperty;
     const Transform& tf = l->transform;
@@ -4244,7 +4400,7 @@ u32 Engine::query_curve(u64 layerId, u32 property, i32 startFrame, i32 endFrame,
     if (!track) return 0;
     const f64 step = static_cast<f64>(endFrame - startFrame) / static_cast<f64>(sampleCount > 1 ? sampleCount - 1 : 1);
     for (u32 i = 0; i < sampleCount; ++i) {
-        outValues[i] = track->sample(FrameIndex{static_cast<i64>(static_cast<f64>(startFrame) + step * i)});
+        outValues[i] = track->sample_keys(FrameIndex{static_cast<i64>(static_cast<f64>(startFrame) + step * i)});
     }
     return sampleCount;
 }
@@ -4921,7 +5077,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             std::vector<PosKey> posKeys;
             if (animatedTrack(tx0) || animatedTrack(ty0) || animatedTrack(tz0)) {
                 const Vec3 base = l->transform.position;
-                auto sampleAt = [&](Track* t, FrameIndex k, f32 fb) { return (t && !t->keys.empty()) ? t->sample(k) : fb; };
+                auto sampleAt = [&](Track* t, FrameIndex k, f32 fb) { return (t && !t->keys.empty()) ? t->sample_keys(k) : fb; };
                 for (Track* t : {tx0, ty0, tz0}) {
                     if (!animatedTrack(t)) continue;
                     for (const Keyframe& k : t->keys) {

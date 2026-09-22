@@ -23,6 +23,10 @@ import com.aurea.aurea.engine.CommandBatch
 import com.aurea.aurea.engine.EffectCatalogEntry
 import com.aurea.aurea.engine.EffectParam
 import com.aurea.aurea.engine.EngineStatus
+import com.aurea.aurea.engine.ExpressionDiag
+import com.aurea.aurea.engine.ExpressionInfo
+import com.aurea.aurea.engine.ExpressionLook
+import com.aurea.aurea.engine.ExpressionRow
 import com.aurea.aurea.engine.KeyframeRow
 import com.aurea.aurea.engine.LayerDetail
 import com.aurea.aurea.engine.LayerEffect
@@ -30,6 +34,7 @@ import com.aurea.aurea.engine.LayerRow
 import com.aurea.aurea.engine.ParamType
 import com.aurea.aurea.engine.PerfStats
 import com.aurea.aurea.engine.PodLayout
+import com.aurea.aurea.engine.TrackKey
 import com.aurea.aurea.engine.TrackProperty
 import com.aurea.aurea.engine.directBuffer
 import kotlinx.coroutines.Dispatchers
@@ -509,6 +514,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     private fun refreshDetail() {
         val id = primary
         detail = if (id != null && engine.queryLayerDetail(id, detailBuffer)) LayerDetail.read(detailBuffer) else null
+        expressions = if (id != null) engine.queryExpressions(id) else emptyList()
         gizmo = if (id != null) {
             val out = FloatArray(8)
             if (engine.queryGizmo(id, GIZMO_LENGTH, out)) out else null
@@ -1684,6 +1690,74 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val id = primary ?: return
         engine.toggleTextAnimKey(id, index, param)
         refreshDetail()
+    }
+
+    // =========================================================================
+    // Expressões
+    // =========================================================================
+
+    /**
+     * Propriedade aberta na folha de expressão. [tracks] = as trilhas que
+     * recebem o MESMO texto (Posição = X e Y: a expressão é vetorial e cada
+     * trilha pega o seu componente). [scale] converte a unidade guardada para a
+     * mostrada (opacidade/escala/volume: ×100).
+     */
+    data class ExpressionTarget(val layer: Long, val label: String, val tracks: List<TrackKey>, val scale: Float = 1f, val unit: String = "")
+
+    /** Folha aberta (nulo = fechada). */
+    var expressionTarget by mutableStateOf<ExpressionTarget?>(null)
+        private set
+
+    /** Trilhas com expressão na camada principal (o "=" das linhas). */
+    var expressions by mutableStateOf<List<ExpressionRow>>(emptyList())
+        private set
+
+    fun openExpression(label: String, tracks: List<TrackKey>, scale: Float = 1f, unit: String = "") {
+        val id = primary ?: return
+        if (tracks.isEmpty()) return
+        expressionTarget = ExpressionTarget(id, label, tracks, scale, unit)
+    }
+
+    fun closeExpression() {
+        expressionTarget = null
+    }
+
+    /** Estado da 1ª trilha do alvo, avaliada no playhead agora. */
+    fun expressionInfo(t: ExpressionTarget): ExpressionInfo? = engine.queryExpression(t.layer, t.tracks.first())
+
+    /** Valor resultante (unidade mostrada) de cada trilha do alvo, no playhead. */
+    fun expressionValues(t: ExpressionTarget): List<Float> =
+        t.tracks.map { k -> (engine.queryExpression(t.layer, k)?.value ?: 0f) * t.scale }
+
+    /**
+     * Grava o texto em todas as trilhas do alvo (o motor faz UM passo de
+     * desfazer). Vazio remove. Nulo = o motor recusou (propriedade inválida).
+     */
+    fun applyExpression(t: ExpressionTarget, source: String): ExpressionDiag? {
+        val d = engine.setExpression(t.layer, t.tracks, source)
+        refreshModel()
+        refreshNow()
+        return d
+    }
+
+    fun setExpressionEnabled(t: ExpressionTarget, enabled: Boolean) {
+        engine.setExpressionEnabled(t.layer, t.tracks, enabled)
+        refreshModel()
+        refreshNow()
+    }
+
+    /** Só a sintaxe (enquanto digita). */
+    fun checkExpressionSyntax(source: String): ExpressionDiag = engine.checkExpressionSyntax(source)
+
+    /** O "=" de uma linha: alguma das [tracks] tem expressão? (erro > ligada > desligada). */
+    fun expressionLook(tracks: List<TrackKey>): ExpressionLook {
+        var look = ExpressionLook.None
+        for (r in expressions) {
+            if (r.key !in tracks) continue
+            if (r.hasError && r.enabled) return ExpressionLook.Error
+            look = if (r.enabled) ExpressionLook.On else if (look == ExpressionLook.None) ExpressionLook.Off else look
+        }
+        return look
     }
 
     fun setTextStyleValues(values: Map<Int, Float>) {

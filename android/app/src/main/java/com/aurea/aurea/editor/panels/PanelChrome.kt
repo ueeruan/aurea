@@ -1,5 +1,7 @@
 package com.aurea.aurea.editor.panels
 
+import com.aurea.aurea.engine.ExpressionLook
+import com.aurea.aurea.ui.ds.expressionColor
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -134,6 +136,8 @@ internal fun LeftRail(
     onCurve: (() -> Unit)?,
     modifier: Modifier = Modifier,
     more: (@Composable () -> Unit)? = null,
+    expression: ExpressionLook = ExpressionLook.None,
+    onExpression: (() -> Unit)? = null,
 ) {
     Column(modifier.width(46.dp).fillMaxHeight()) {
         RailCell(onBack, "Voltar às ferramentas") {
@@ -144,6 +148,21 @@ internal fun LeftRail(
         }
         RailCell(onCurve, "Editar curva da propriedade") {
             CurveRailIcon(enabled = onCurve != null, animated = curveAnimated)
+        }
+        if (onExpression != null) {
+            // "=": o editor de expressão da propriedade (acende quando há uma).
+            RailCell(onExpression, if (expression == ExpressionLook.None) "Adicionar expressão" else "Editar expressão") {
+                androidx.compose.material3.Text(
+                    "=",
+                    style = com.aurea.aurea.ui.theme.AureaType.Base.merge(
+                        androidx.compose.ui.text.TextStyle(
+                            fontSize = 22.sp,
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.W700,
+                            color = if (expression == ExpressionLook.None) AureaColors.Text else expressionColor(expression),
+                        ),
+                    ),
+                )
+            }
         }
         if (more != null) {
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { more() }

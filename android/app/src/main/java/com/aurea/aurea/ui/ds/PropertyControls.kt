@@ -1,5 +1,6 @@
 package com.aurea.aurea.ui.ds
 
+import com.aurea.aurea.engine.ExpressionLook
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -327,6 +328,10 @@ fun ValueBox(
  * marca no cabeçote) — é o que diz, linha a linha, o que o losango do trilho
  * esquerdo vai fazer, sem ocupar largura (a linha não pula ao nascer a 1ª marca,
  * bug B-02).
+ *
+ * [expression] desenha um "=" no canto direito quando a trilha tem expressão
+ * (destaque = ligada, apagado = desligada, vermelho = com erro); segurar o chip
+ * ([onLongClick]) abre o editor de expressão da propriedade.
  */
 @Composable
 fun PropertyLabelChip(
@@ -334,6 +339,8 @@ fun PropertyLabelChip(
     selected: Boolean,
     modifier: Modifier = Modifier,
     keyframe: KeyframeLook = KeyframeLook.None,
+    expression: ExpressionLook = ExpressionLook.None,
+    onLongClick: (() -> Unit)? = null,
     onClick: (() -> Unit)? = null,
 ) {
     Box(
@@ -341,7 +348,13 @@ fun PropertyLabelChip(
             .size(width = 94.dp, height = 32.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(if (selected) AureaColors.Chip else Color.Transparent)
-            .then(if (onClick != null) Modifier.tocavel(shrink = 1f, onClick = onClick) else Modifier)
+            .then(
+                if (onClick != null || onLongClick != null) {
+                    Modifier.tocavel(shrink = 1f, onLongClick = onLongClick, onClick = { onClick?.invoke() })
+                } else {
+                    Modifier
+                },
+            )
             .padding(horizontal = 6.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -381,7 +394,27 @@ fun PropertyLabelChip(
                 }
             }
         }
+        if (expression != ExpressionLook.None) ExpressionBadge(expression, Modifier.align(Alignment.TopEnd).offset(x = 4.dp))
     }
+}
+
+/** Cor do "=" de expressão. */
+fun expressionColor(look: ExpressionLook): Color = when (look) {
+    ExpressionLook.Error -> Color(0xFFFF6B5E)
+    ExpressionLook.On -> AureaColors.Accent
+    else -> AureaColors.Muted
+}
+
+/** O "=" pequeno das linhas com expressão. */
+@Composable
+fun ExpressionBadge(look: ExpressionLook, modifier: Modifier = Modifier) {
+    Text(
+        "=",
+        modifier = modifier,
+        style = AureaType.Base.merge(
+            TextStyle(fontSize = 11.sp, lineHeight = 1.em, fontWeight = FontWeight.W800, color = expressionColor(look)),
+        ),
+    )
 }
 
 /**
@@ -409,6 +442,8 @@ fun PropertyRow(
     modifier: Modifier = Modifier,
     keyframe: KeyframeLook = KeyframeLook.None,
     enabled: Boolean = true,
+    expression: ExpressionLook = ExpressionLook.None,
+    onExpression: (() -> Unit)? = null,
 ) {
     var dragging by remember { mutableStateOf(false) }
     var live by remember { mutableFloatStateOf(value) }
@@ -428,7 +463,7 @@ fun PropertyRow(
             .alpha(if (enabled) 1f else 0.45f),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        PropertyLabelChip(label, selected, keyframe = keyframe, onClick = onSelect)
+        PropertyLabelChip(label, selected, keyframe = keyframe, expression = expression, onLongClick = onExpression, onClick = onSelect)
         Spacer(Modifier.width(8.dp))
         TickRuler(
             value = { if (dragging) live else current },
@@ -477,6 +512,8 @@ fun PropertyCustomRow(
     modifier: Modifier = Modifier,
     keyframe: KeyframeLook = KeyframeLook.None,
     minHeight: Dp = 48.dp,
+    expression: ExpressionLook = ExpressionLook.None,
+    onExpression: (() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     Row(
@@ -485,7 +522,7 @@ fun PropertyCustomRow(
             .heightIn(min = minHeight),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        PropertyLabelChip(label, selected, keyframe = keyframe, onClick = onSelect)
+        PropertyLabelChip(label, selected, keyframe = keyframe, expression = expression, onLongClick = onExpression, onClick = onSelect)
         Spacer(Modifier.width(8.dp))
         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) { content() }
     }

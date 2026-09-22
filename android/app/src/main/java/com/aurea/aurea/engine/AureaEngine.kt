@@ -361,6 +361,25 @@ class AureaEngine private constructor() {
     fun setTextAnimParam(layer: Long, index: Int, param: Int, value: Float): Boolean = nativeSetTextAnimParam(nativeHandle, layer, index, param, value)
     fun toggleTextAnimKey(layer: Long, index: Int, param: Int): Boolean = nativeToggleTextAnimKey(nativeHandle, layer, index, param)
     fun applyTextPreset(layer: Long, preset: Int): Boolean = nativeApplyTextPreset(nativeHandle, layer, preset)
+
+    // --- Expressões (motor: expr/Expression.hpp) ---------------------------------
+    /**
+     * Grava o MESMO texto em todas as [keys] num passo de desfazer (Posição =
+     * X e Y); vazio remove. Nulo = camada/propriedade inválida.
+     */
+    fun setExpression(layer: Long, keys: List<TrackKey>, source: String): ExpressionDiag? =
+        ExpressionDiag.decode(nativeSetExpression(nativeHandle, layer, packKeys(keys), source.toByteArray(Charsets.UTF_8)))
+    fun setExpressionEnabled(layer: Long, keys: List<TrackKey>, enabled: Boolean): Boolean =
+        nativeSetExpressionEnabled(nativeHandle, layer, packKeys(keys), enabled)
+    private fun packKeys(keys: List<TrackKey>): IntArray =
+        IntArray(keys.size * 3) { i -> keys[i / 3].let { k -> when (i % 3) { 0 -> k.property; 1 -> k.effectIndex; else -> k.paramIndex } } }
+    /** Estado no playhead (avaliada agora: o erro de execução é o do instante visto). */
+    fun queryExpression(layer: Long, key: TrackKey): ExpressionInfo? =
+        ExpressionInfo.decode(nativeQueryExpression(nativeHandle, layer, key.property, key.effectIndex, key.paramIndex))
+    fun queryExpressions(layer: Long): List<ExpressionRow> = ExpressionRow.decode(nativeQueryExpressions(nativeHandle, layer))
+    /** Só a sintaxe, sem gravar (validação enquanto digita). */
+    fun checkExpressionSyntax(source: String): ExpressionDiag =
+        ExpressionDiag.decode(nativeCheckExpressionSyntax(source.toByteArray(Charsets.UTF_8))) ?: ExpressionDiag.OK
     /** PowerManager.THERMAL_STATUS_* → o preview reduz o que é caro sob calor. */
     fun setThermal(status: Int) = nativeSetThermal(nativeHandle, status)
     fun queryTimeRemap(layer: Long, out: FloatArray): Int = nativeQueryTimeRemap(nativeHandle, layer, out)
@@ -509,6 +528,11 @@ class AureaEngine private constructor() {
     private external fun nativeSetTextAnimParam(handle: Long, layer: Long, index: Int, param: Int, value: Float): Boolean
     private external fun nativeToggleTextAnimKey(handle: Long, layer: Long, index: Int, param: Int): Boolean
     private external fun nativeApplyTextPreset(handle: Long, layer: Long, preset: Int): Boolean
+    private external fun nativeSetExpression(handle: Long, layer: Long, keys: IntArray, source: ByteArray): ByteArray?
+    private external fun nativeSetExpressionEnabled(handle: Long, layer: Long, keys: IntArray, enabled: Boolean): Boolean
+    private external fun nativeQueryExpression(handle: Long, layer: Long, property: Int, effectIndex: Int, paramIndex: Int): ByteArray?
+    private external fun nativeQueryExpressions(handle: Long, layer: Long): IntArray?
+    private external fun nativeCheckExpressionSyntax(source: ByteArray): ByteArray?
     private external fun nativeTextFont(handle: Long, layer: Long): String?
     private external fun nativeSetVectorBlur(handle: Long, layer: Long, amount: Float): Boolean
     private external fun nativeSetFrameBlend(handle: Long, layer: Long, mode: Int): Boolean

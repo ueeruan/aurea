@@ -198,7 +198,14 @@ private fun AnimRuler(store: EditorStore, index: Int, p: AnimParam, v: FloatArra
         else -> KeyframeLook.None
     }
     val value = { store.textAnimators.getOrNull(index)?.get(p.slot) ?: v[p.slot] }
-    PropertyCustomRow(p.label, selected = false, onSelect = {}, keyframe = look) {
+    val exprKeys = listOf(com.aurea.aurea.engine.TrackKey(com.aurea.aurea.engine.TrackProperty.TEXT_ANIM_PARAM, index, p.id))
+    val exprLook by androidx.compose.runtime.remember(store, index, p.id) {
+        androidx.compose.runtime.derivedStateOf { store.expressionLook(exprKeys) }
+    }
+    PropertyCustomRow(
+        p.label, selected = false, onSelect = {}, keyframe = look,
+        expression = exprLook, onExpression = { store.openExpression(p.label, exprKeys, 1f, p.unit) },
+    ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.weight(1f).height(40.dp)) {
                 TickRuler(

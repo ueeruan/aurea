@@ -124,6 +124,7 @@ internal fun AppearancePanel(env: PanelEnv) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     val look by remember(store) { derivedStateOf { transformLook(store.detail, intArrayOf(TrackProperty.OPACITY)) } }
     val curveReady by remember(store) { derivedStateOf { store.primaryKeys().transformTrack(TrackProperty.OPACITY).size >= 2 } }
+    val exprLook by remember(store) { derivedStateOf { store.expressionLook(OpacityKeys) } }
 
     Row(Modifier.fillMaxSize()) {
         LeftRail(
@@ -145,6 +146,8 @@ internal fun AppearancePanel(env: PanelEnv) {
             } else {
                 null
             },
+            expression = exprLook,
+            onExpression = if (tab == 0) ({ store.openExpression("Opacidade", OpacityKeys, 100f, "%") }) else null,
         )
         Column(Modifier.weight(1f).fillMaxHeight()) {
             ParamTabs(

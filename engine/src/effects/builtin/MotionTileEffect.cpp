@@ -217,6 +217,7 @@ void register_builtin_effects(EffectRegistry& registry) {
     builtin::register_blur_effects(registry);
     builtin::register_glow_effect(registry);
     builtin::register_motion_tile_effect(registry);
+    builtin::register_expression_controls(registry);
 }
 
 } // namespace aurea

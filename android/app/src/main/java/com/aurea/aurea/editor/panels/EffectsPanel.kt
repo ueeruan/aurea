@@ -1,5 +1,7 @@
 package com.aurea.aurea.editor.panels
 
+import com.aurea.aurea.engine.TrackKey
+import com.aurea.aurea.engine.ExpressionLook
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -176,6 +178,9 @@ internal fun EffectsPanel(env: PanelEnv) {
             selected?.let { k -> store.paramOf(k.effectId, k.param)?.let { ParamSlot.of(it).animatable } } ?: false
         }
     }
+    val railExpr by remember(store) {
+        derivedStateOf { selected?.let { k -> store.paramOf(k.effectId, k.param)?.let { store.expressionLook(paramKeys(k.effectId, ParamSlot.of(it))) } } ?: ExpressionLook.None }
+    }
     val curveTrackReady by remember(store) {
         derivedStateOf { selected?.let { k -> store.primaryKeys().effectTrack(k.effectId, k.param, k.component).size >= 2 } ?: false }
     }
@@ -205,6 +210,12 @@ internal fun EffectsPanel(env: PanelEnv) {
                         }
                     }
                 }
+            } else {
+                null
+            },
+            expression = railExpr,
+            onExpression = if (railAnimatable) {
+                { selected?.let { k -> store.paramOf(k.effectId, k.param)?.let { openParamExpression(store, k.effectId, ParamSlot.of(it)) } } }
             } else {
                 null
             },
@@ -343,6 +354,23 @@ private fun rememberParamValue(env: PanelEnv, effectId: Int, index: Int, compone
     return v
 }
 
+/** As trilhas de um parâmetro (um por componente): a chave dos keyframes. */
+internal fun paramKeys(effectId: Int, s: ParamSlot): List<TrackKey> =
+    List(ParamType.componentCount(s.type).coerceAtLeast(1)) { c -> TrackKey(TrackProperty.EFFECT_PARAM, effectId, s.index * 4 + c) }
+
+/** Editor de expressão do parâmetro inteiro (ponto/cor: a expressão é vetorial). */
+internal fun openParamExpression(store: com.aurea.aurea.state.EditorStore, effectId: Int, s: ParamSlot) {
+    if (!s.animatable) return
+    store.openExpression(s.label, paramKeys(effectId, s), 1f, s.unit)
+}
+
+@Composable
+private fun rememberExpr(env: PanelEnv, effectId: Int, s: ParamSlot): ExpressionLook {
+    val store = env.store
+    val look by remember(store, effectId, s.index) { derivedStateOf { store.expressionLook(paramKeys(effectId, s)) } }
+    return look
+}
+
 @Composable
 private fun rememberLook(env: PanelEnv, effectId: Int, index: Int, component: Int?): KeyframeLook {
     val store = env.store
@@ -380,6 +408,8 @@ private fun EffectNumberRow(
         format = { comUnidade(numeroPtBr(it, s.decimals), s.unit) },
         selected = selected,
         keyframe = look,
+        expression = rememberExpr(env, effectId, s),
+        onExpression = if (s.animatable) ({ openParamExpression(store, effectId, s) }) else null,
         onSelect = { onSelect(ParamKey(effectId, s.index, component)) },
         onGestureStart = { store.beginGesture("ajustar $label") },
         onValue = ::write,
@@ -396,7 +426,10 @@ private fun EffectToggleRow(env: PanelEnv, effectId: Int, s: ParamSlot, selected
     val store = env.store
     val value = rememberParamValue(env, effectId, s.index, 0)
     val look = rememberLook(env, effectId, s.index, null)
-    PropertyCustomRow(s.label, selected, onSelect = { onSelect(ParamKey(effectId, s.index, 0)) }, keyframe = look) {
+    PropertyCustomRow(
+        s.label, selected, onSelect = { onSelect(ParamKey(effectId, s.index, 0)) }, keyframe = look,
+        expression = rememberExpr(env, effectId, s), onExpression = if (s.animatable) ({ openParamExpression(store, effectId, s) }) else null,
+    ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             AureaToggle(
                 checked = value >= 0.5f,
@@ -414,7 +447,10 @@ private fun EffectChoiceRow(env: PanelEnv, effectId: Int, s: ParamSlot, selected
     val value = rememberParamValue(env, effectId, s.index, 0)
     val look = rememberLook(env, effectId, s.index, null)
     val options = s.enumLabels.ifEmpty { List((s.max - s.min).roundToInt().coerceAtLeast(0) + 1) { "${it + 1}" } }
-    PropertyCustomRow(s.label, selected, onSelect = { onSelect(ParamKey(effectId, s.index, 0)) }, keyframe = look) {
+    PropertyCustomRow(
+        s.label, selected, onSelect = { onSelect(ParamKey(effectId, s.index, 0)) }, keyframe = look,
+        expression = rememberExpr(env, effectId, s), onExpression = if (s.animatable) ({ openParamExpression(store, effectId, s) }) else null,
+    ) {
         ChoiceChips(
             options = options,
             selected = value.roundToInt().coerceIn(0, max(0, options.lastIndex)),
@@ -433,7 +469,10 @@ private fun EffectColorRow(env: PanelEnv, effectId: Int, s: ParamSlot, selected:
         derivedStateOf { rgbaColor(engineToDisplay(store.paramOf(effectId, s.index)?.value ?: floatArrayOf(1f, 1f, 1f, 1f))) }
     }
     val look = rememberLook(env, effectId, s.index, null)
-    PropertyCustomRow(s.label, selected, onSelect = { onSelect(ParamKey(effectId, s.index, 0)) }, keyframe = look) {
+    PropertyCustomRow(
+        s.label, selected, onSelect = { onSelect(ParamKey(effectId, s.index, 0)) }, keyframe = look,
+        expression = rememberExpr(env, effectId, s), onExpression = if (s.animatable) ({ openParamExpression(store, effectId, s) }) else null,
+    ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
             Text(
                 "${(color.red * 255).roundToInt()} ${(color.green * 255).roundToInt()} ${(color.blue * 255).roundToInt()}",
@@ -529,11 +568,17 @@ private fun AdjustmentIntensity(env: PanelEnv) {
     }
 }
 
+/** A trilha da opacidade (expressão). */
+internal val OpacityKeys = listOf(TrackKey(TrackProperty.OPACITY))
+
 /** A linha de opacidade (0–100 %, casas 0) — Efeitos (ajuste) e Mesclagem. */
 @Composable
 internal fun OpacityRow(env: PanelEnv, opacity: Float, selected: Boolean, keyframe: KeyframeLook = KeyframeLook.None) {
     val store = env.store
+    val exprLook by remember(store) { derivedStateOf { store.expressionLook(OpacityKeys) } }
     PropertyRow(
+        expression = exprLook,
+        onExpression = { store.openExpression("Opacidade", OpacityKeys, 100f, "%") },
         label = "Opacidade",
         value = opacity,
         unitsPerDp = 0.35f,

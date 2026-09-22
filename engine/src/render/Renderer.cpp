@@ -367,6 +367,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     inst.nodeWorld = std::move(pose.nodeWorld);
                     inst.jointMatrices = std::move(pose.jointMatrices);
                     inst.skinJointOffset = std::move(pose.skinJointOffset);
+                    inst.morphWeights = std::move(pose.morphWeights);
                 }
                 inst.castShadows = l->model.castShadows;
                 inst.assetKey = l->model.scene.pack();

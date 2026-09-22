@@ -429,8 +429,9 @@ void SceneRenderer::shutdown() noexcept {
     if (!gpu_) return;
     for (u32 i = 0; i < kJointRing; ++i) {
         if (jointBuf_[i].valid()) gpu_->destroy_buffer(jointBuf_[i]);
-        jointBuf_[i] = BufferHandle{};
-        jointCap_[i] = 0;
+        if (morphBuf_[i].valid()) gpu_->destroy_buffer(morphBuf_[i]);
+        jointBuf_[i] = morphBuf_[i] = BufferHandle{};
+        jointCap_[i] = morphCap_[i] = 0;
     }
     release_all();
     release_environment();
@@ -446,8 +447,8 @@ void SceneRenderer::shutdown() noexcept {
 void SceneRenderer::forget_device() noexcept {
     models_.clear();
     for (u32 i = 0; i < kJointRing; ++i) {
-        jointBuf_[i] = BufferHandle{};
-        jointCap_[i] = 0;
+        jointBuf_[i] = morphBuf_[i] = BufferHandle{};
+        jointCap_[i] = morphCap_[i] = 0;
     }
     irradiance_ = prefiltered_ = iblLut_ = TextureHandle{};
     white_ = flatNormal_ = black_ = envCube_ = brdfLut_ = TextureHandle{};
@@ -610,6 +611,8 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         f32 viewDepth;
         u32 sortKey;
         bool skinned;
+        bool morph;
+        usize morphPos, morphShade;
     };
     std::vector<Draw> opaque, blended;
     std::unordered_map<const GpuMaterial*, const SceneBlock*> blocks;
@@ -815,6 +818,102 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         });
     }
 
+    // --- Morph (blend shapes): deformação na CPU, um bloco por primitiva -------
+    // (instância, nó, primitiva) → deslocamento no buffer do quadro. Só entra
+    // quem tem alvo E peso ≠ 0; o resto desenha direto da malha na GPU.
+    struct MorphJob {
+        usize inst, node, prim;
+        const Primitive* src;
+        const std::vector<f32>* weights;
+        usize posOffset, shadeOffset;
+    };
+    std::vector<MorphJob> morphJobs;
+    BufferHandle morphBuf{};
+    {
+        usize bytes = 0;
+        for (usize ii = 0; ii < frame.instances.size(); ++ii) {
+            const SceneInstance& inst = frame.instances[ii];
+            if (!inst.asset) continue;
+            const std::vector<Node>& nodes = inst.asset->nodes;
+            for (usize n = 0; n < nodes.size(); ++n) {
+                const i32 mi = nodes[n].mesh;
+                if (mi < 0 || mi >= static_cast<i32>(inst.asset->meshes.size())) continue;
+                const Mesh& mesh = inst.asset->meshes[static_cast<usize>(mi)];
+                const std::vector<f32>* w = n < inst.morphWeights.size() && !inst.morphWeights[n].empty()
+                                          ? &inst.morphWeights[n] : &mesh.morphWeights;
+                bool any = false;
+                for (f32 v : *w) any = any || std::fabs(v) > 1e-5f;
+                if (!any) continue;
+                for (usize k = 0; k < mesh.primitives.size(); ++k) {
+                    const Primitive& p = mesh.primitives[k];
+                    if (p.morphTargets.empty()) continue;
+                    MorphJob j{ii, n, k, &p, w, bytes, 0};
+                    bytes += p.positions.size() * sizeof(Vec3);
+                    j.shadeOffset = bytes;
+                    bytes += p.positions.size() * sizeof(ShadingVertex);
+                    bytes = (bytes + 255) & ~usize(255);
+                    morphJobs.push_back(j);
+                }
+            }
+        }
+        if (bytes > 0) {
+            const u32 slot = morphSlot_++ % kJointRing;
+            if (morphCap_[slot] < bytes) {
+                if (morphBuf_[slot].valid()) gpu_->destroy_buffer(morphBuf_[slot]);
+                BufferDesc bd;
+                bd.bytes = bytes * 2;
+                bd.usage = BufferUsage::Vertex;
+                bd.access = MemoryAccess::Upload;
+                bd.debugName = "3d-morph";
+                auto b = gpu_->create_buffer(bd);
+                morphBuf_[slot] = b.ok() ? *b : BufferHandle{};
+                morphCap_[slot] = b.ok() ? bd.bytes : 0;
+            }
+            void* ptr = nullptr;
+            if (morphBuf_[slot].valid() && gpu_->map_buffer(morphBuf_[slot], ptr).ok() && ptr) {
+                u8* base = static_cast<u8*>(ptr);
+                for (const MorphJob& j : morphJobs) {
+                    const Primitive& p = *j.src;
+                    auto* pos = reinterpret_cast<Vec3*>(base + j.posOffset);
+                    auto* sh = reinterpret_cast<ShadingVertex*>(base + j.shadeOffset);
+                    const usize nv = p.positions.size();
+                    const usize nt = std::min(p.morphTargets.size(), j.weights->size());
+                    for (usize v = 0; v < nv; ++v) {
+                        Vec3 P = p.positions[v];
+                        Vec3 N = v < p.normals.size() ? p.normals[v] : Vec3{0, 0, 1};
+                        for (usize t = 0; t < nt; ++t) {
+                            const f32 wt = (*j.weights)[t];
+                            if (wt == 0.0f) continue;
+                            const MorphTarget& mt = p.morphTargets[t];
+                            if (v < mt.positions.size()) P = P + mt.positions[v] * wt;
+                            if (v < mt.normals.size()) N = N + mt.normals[v] * wt;
+                        }
+                        pos[v] = P;
+                        ShadingVertex s{};
+                        const Vec3 nn = N.normalized();
+                        s.normal[0] = nn.x; s.normal[1] = nn.y; s.normal[2] = nn.z;
+                        const Vec4 tg = v < p.tangents.size() ? p.tangents[v] : Vec4{1, 0, 0, 1};
+                        s.tangent[0] = tg.x; s.tangent[1] = tg.y; s.tangent[2] = tg.z; s.tangent[3] = tg.w;
+                        const Vec2 a = v < p.uv0.size() ? p.uv0[v] : Vec2{0, 0};
+                        const Vec2 b = v < p.uv1.size() ? p.uv1[v] : a;
+                        s.uv0[0] = a.x; s.uv0[1] = a.y;
+                        s.uv1[0] = b.x; s.uv1[1] = b.y;
+                        s.color = v < p.colors.size() ? p.colors[v] : 0xFFFFFFFFu;
+                        sh[v] = s;
+                    }
+                }
+                gpu_->unmap_buffer(morphBuf_[slot]);
+                morphBuf = morphBuf_[slot];
+            } else {
+                morphJobs.clear();
+            }
+        }
+    }
+    auto morph_for = [&](usize ii, usize n, usize k) -> const MorphJob* {
+        for (const MorphJob& j : morphJobs) if (j.inst == ii && j.node == n && j.prim == k) return &j;
+        return nullptr;
+    };
+
     for (usize instIndex = 0; instIndex < frame.instances.size(); ++instIndex) {
         const SceneInstance& inst = frame.instances[instIndex];
         if (!inst.asset) continue;
@@ -835,9 +934,11 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                                            : inst.world * (n < inst.nodeWorld.size() ? inst.nodeWorld[n] : Mat4::identity());
             const Mat4 clipFromLocal = viewProj * world;
             const Mat4 viewFromLocal = frame.camera.view * world;
-            for (const GpuPrimitive& p : gm->meshes[mi]) {
-                // Com skin a caixa de repouso não vale para a pose: sem recorte.
-                if (!(skinnedNode && p.skinned) && outside_frustum(clipFromLocal, p.bounds, frame.camera.nearZ)) {
+            for (usize primIndex = 0; primIndex < gm->meshes[mi].size(); ++primIndex) {
+                const GpuPrimitive& p = gm->meshes[mi][primIndex];
+                const MorphJob* mj = morph_for(instIndex, n, primIndex);
+                // Com skin (ou morph) a caixa de repouso não vale para a pose: sem recorte.
+                if (!(skinnedNode && p.skinned) && !mj && outside_frustum(clipFromLocal, p.bounds, frame.camera.nearZ)) {
                     ++stats_.culledPrimitives;
                     continue;
                 }
@@ -857,6 +958,11 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 d.push.model = world;
                 normal_matrix(world, d.push.normalCol);
                 d.skinned = skinDraw;
+                d.morph = mj != nullptr;
+                if (mj) {
+                    d.morphPos = mj->posOffset;
+                    d.morphShade = mj->shadeOffset;
+                }
                 if (skinDraw) {
                     d.push.normalCol[0].w = static_cast<f32>(instJointBase[instIndex]
                                                              + inst.skinJointOffset[static_cast<usize>(skinIndex)]);
@@ -894,10 +1000,11 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         BufferHandle joints;
         FGTexture shadow;
         u64 nearestSampler;
+        BufferHandle morph;
     } cap{list, total, white_, flatNormal_, ibl ? irradiance_ : envCube_, ibl ? prefiltered_ : envCube_,
           ibl ? iblLut_ : brdfLut_, cubeSampler_, shaders_->sampler(CommonSampler::LinearRepeat).id,
           shaders_->sampler(CommonSampler::LinearClamp).id, joints, shadowTex,
-          shaders_->sampler(CommonSampler::NearestClamp).id};
+          shaders_->sampler(CommonSampler::NearestClamp).id, morphBuf};
 
     // Z reverso: limpa a profundidade com 0 (o infinito).
     const u32 pbrPass = graph.add_raster_pass_depth("3d-pbr", PassStage::Scene3D, color, LoadOp::Clear, Vec4{0, 0, 0, 0}, depth,
@@ -927,6 +1034,21 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 boundMat = d.material;
             }
             if (d.skinned) c.bind_storage_buffer(cap.joints);
+            if (d.morph) {
+                // Vértices deformados deste quadro: só os desta primitiva, a
+                // partir do 0 (a skin continua vindo da malha, deslocada).
+                c.bind_vertex_buffer(0, cap.morph, d.morphPos);
+                c.bind_vertex_buffer(1, cap.morph, d.morphShade);
+                if (d.model->skin.valid()) {
+                    c.bind_vertex_buffer(2, d.model->skin, static_cast<u64>(d.prim->vertexOffset) * sizeof(SkinVertex));
+                }
+                c.bind_index_buffer(d.model->indices, 0, d.model->indexType);
+                boundModel = nullptr;   // o próximo desenho normal re-liga a malha
+                c.set_uniforms(d.block, sizeof(SceneBlock));
+                c.push_constants(&d.push, sizeof(MeshPush));
+                c.draw_indexed(d.prim->indexCount, 1, d.prim->firstIndex, 0, 0);
+                continue;
+            }
             if (d.model != boundModel || d.skinned) {
                 c.bind_vertex_buffer(0, d.model->positions, 0);
                 c.bind_vertex_buffer(1, d.model->shading, 0);

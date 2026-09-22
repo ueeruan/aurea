@@ -88,6 +88,7 @@ struct SceneInstance {
     std::vector<Mat4> nodeWorld;       ///< por nó, no espaço da cena (animação avaliada)
     std::vector<Mat4> jointMatrices;   ///< por skin, achatado (juntas × inversa de bind)
     std::vector<u32>  skinJointOffset; ///< início de cada skin em jointMatrices
+    std::vector<std::vector<f32>> morphWeights;   ///< por nó (vazio = pesos da malha)
     bool castShadows = true;
 };
 
@@ -185,6 +186,11 @@ private:
     BufferHandle jointBuf_[kJointRing]{};
     usize jointCap_[kJointRing]{};
     u32 jointSlot_ = 0;
+    // Morph: vértices deformados na CPU por quadro (posição + shading), no
+    // mesmo esquema de anel.
+    BufferHandle morphBuf_[kJointRing]{};
+    usize morphCap_[kJointRing]{};
+    u32 morphSlot_ = 0;
     TextureHandle white_{}, flatNormal_{}, black_{}, envCube_{}, brdfLut_{};
     TextureHandle irradiance_{}, prefiltered_{}, iblLut_{};
     u32 prefilteredMips_ = 1;

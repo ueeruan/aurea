@@ -700,6 +700,24 @@ AUREA_JNI jint AUREA_FN(nativeClipboardState)(JNIEnv*, jclass, jlong handle) {
     return c ? static_cast<jint>(c->engine.clipboard_state()) : 0;
 }
 
+AUREA_JNI jboolean AUREA_FN(nativeQueryGizmo)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloat length, jfloatArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !out || env->GetArrayLength(out) < 8) return JNI_FALSE;
+    f32 v[8];
+    if (!c->engine.query_gizmo(static_cast<u64>(layer), length, v)) return JNI_FALSE;
+    env->SetFloatArrayRegion(out, 0, 8, v);
+    return JNI_TRUE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeGizmoMoveLocal)(JNIEnv* env, jclass, jlong handle, jlong layer, jint axis, jfloat amount, jfloatArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !out || env->GetArrayLength(out) < 3) return JNI_FALSE;
+    f32 v[3];
+    if (!c->engine.gizmo_move_local(static_cast<u64>(layer), static_cast<u32>(axis), amount, v)) return JNI_FALSE;
+    env->SetFloatArrayRegion(out, 0, 3, v);
+    return JNI_TRUE;
+}
+
 AUREA_JNI jlong AUREA_FN(nativeImportHdri)(JNIEnv* env, jclass, jlong handle, jstring path) {
     NativeContext* c = ctx_of(handle);
     if (!c || !path) return -static_cast<jlong>(Errc::InvalidState);

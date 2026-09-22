@@ -483,6 +483,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     private fun refreshDetail() {
         val id = primary
         detail = if (id != null && engine.queryLayerDetail(id, detailBuffer)) LayerDetail.read(detailBuffer) else null
+        gizmo = if (id != null) {
+            val out = FloatArray(8)
+            if (engine.queryGizmo(id, GIZMO_LENGTH, out)) out else null
+        } else {
+            null
+        }
         echo = if (id != null) {
             val out = FloatArray(4)
             if (engine.queryEcho(id, out)) out.toList() else null
@@ -1175,6 +1181,30 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val id = primary ?: return
         send { setTextStrokeColor(id, r, g, b, a) }
         refreshDetail()
+    }
+
+    // --- Gizmo 3D ---------------------------------------------------------------------------
+    /** Setas da camada 3D escolhida: origem e pontas X, Y, Z em px da composição. */
+    var gizmo by mutableStateOf<FloatArray?>(null)
+        private set
+
+    /** Arrasto numa seta: anda `amount` unidades do mundo no eixo (0 X, 1 Y, 2 Z). */
+    fun gizmoDrag(axis: Int, amount: Float) {
+        val id = primary ?: return
+        val d = detail ?: return
+        val out = FloatArray(3)
+        if (!engine.gizmoMoveLocal(id, axis, amount, out)) return
+        val animated = d.isAnimated(TrackProperty.POSITION_X) || d.isAnimated(TrackProperty.POSITION_Y) || d.isAnimated(TrackProperty.POSITION_Z)
+        send {
+            if (animated) {
+                insertKeyframe(id, TrackProperty.POSITION_X, NO_EFFECT, 0, d.localPlayhead, out[0])
+                insertKeyframe(id, TrackProperty.POSITION_Y, NO_EFFECT, 0, d.localPlayhead, out[1])
+                insertKeyframe(id, TrackProperty.POSITION_Z, NO_EFFECT, 0, d.localPlayhead, out[2])
+            } else {
+                setPosition(id, out[0], out[1], out[2])
+            }
+        }
+        refreshNow()
     }
 
     // --- Ambiente 3D (HDRI) --------------------------------------------------------------
@@ -2147,3 +2177,6 @@ class ThumbnailCache(private val engine: AureaEngine) {
 
     fun clear() = cache.clear()
 }
+
+/** Comprimento das setas do gizmo 3D, em unidades do mundo (px da composição no plano Z = 0). */
+const val GIZMO_LENGTH = 320f

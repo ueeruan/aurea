@@ -50,6 +50,7 @@ import com.aurea.aurea.engine.LayerDetail
 import com.aurea.aurea.engine.PerfStats
 import com.aurea.aurea.engine.TrackProperty
 import com.aurea.aurea.state.EditorStore
+import com.aurea.aurea.state.GIZMO_LENGTH
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.CupertinoGlyph
@@ -271,6 +272,39 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
         drawCircle(AureaColors.Accent, r, c, style = m.ring15)
     }
     drawRotateHandle(m, grabbed == 0)
+    // Camada no espaço 3D: as setas do mundo por cima (têm prioridade no toque).
+    store.gizmo?.let { drawGizmo(m, it) }
+}
+
+private val GizmoX = Color(0xFFFF5A5A)
+private val GizmoY = Color(0xFF5AD27A)
+private val GizmoZ = Color(0xFF5AA8FF)
+
+/** Ponta de cada eixo na tela (Z colapsado vira uma alça ao lado da origem). */
+private fun gizmoTips(m: StageMapper, g: FloatArray, zOffset: Float): FloatArray {
+    val t = FloatArray(8)
+    t[0] = m.sx(g[0]); t[1] = m.sy(g[1])
+    for (i in 1..3) { t[i * 2] = m.sx(g[i * 2]); t[i * 2 + 1] = m.sy(g[i * 2 + 1]) }
+    if (kotlin.math.hypot(t[6] - t[0], t[7] - t[1]) < zOffset * 0.6f) {
+        t[6] = t[0] + zOffset * 0.7f
+        t[7] = t[1] - zOffset * 0.7f
+    }
+    return t
+}
+
+/** Gizmo 3D: setas X (vermelha), Y (verde) e Z (azul) do mundo, na origem da camada. */
+private fun DrawScope.drawGizmo(m: StageMapper, g: FloatArray) {
+    val t = gizmoTips(m, g, 44.dp.toPx())
+    val o = Offset(t[0], t[1])
+    val colors = arrayOf(GizmoX, GizmoY, GizmoZ)
+    for (i in 1..3) {
+        val tip = Offset(t[i * 2], t[i * 2 + 1])
+        drawLine(ShellColors.OutlineUnder, o, tip, 5.dp.toPx())
+        drawLine(colors[i - 1], o, tip, 2.5.dp.toPx())
+        drawCircle(ShellColors.OutlineUnder, 9.dp.toPx(), tip)
+        drawCircle(colors[i - 1], 7.5.dp.toPx(), tip)
+    }
+    drawCircle(Color.White, 4.dp.toPx(), o)
 }
 
 private fun activeAt(d: LayerDetail, frame: Int) = frame >= d.startFrame && frame < d.endFrame
@@ -424,6 +458,47 @@ private suspend fun PointerInputScope.stageGestures(
         val down = awaitFirstDown(requireUnconsumed = false)
         val downX = down.position.x
         val downY = down.position.y
+
+        // Gizmo 3D: tocar numa ponta de seta arrasta no eixo do mundo.
+        val gz = store.gizmo
+        if (gz != null && store.selection.size == 1 && m.valid) {
+            val zOff = 44.dp.toPx()
+            val tips = gizmoTips(m, gz, zOff)
+            val reach = 24.dp.toPx()
+            var axis = -1
+            var best = reach
+            for (i in 1..3) {
+                val dd = kotlin.math.hypot(downX - tips[i * 2], downY - tips[i * 2 + 1])
+                if (dd < best) { best = dd; axis = i - 1 }
+            }
+            if (axis >= 0) {
+                val ax = tips[(axis + 1) * 2] - tips[0]
+                val ay = tips[(axis + 1) * 2 + 1] - tips[1]
+                val len2 = ax * ax + ay * ay
+                val zCollapsed = axis == 2 && kotlin.math.hypot(m.sx(gz[6]) - tips[0], m.sy(gz[7]) - tips[1]) < zOff * 0.6f
+                var last = down.position
+                store.beginGesture("mover no eixo ${"XYZ"[axis]}")
+                do {
+                    val e = awaitPointerEvent()
+                    val c = e.changes.firstOrNull { it.id == down.id } ?: break
+                    c.consume()
+                    val dx = c.position.x - last.x
+                    val dy = c.position.y - last.y
+                    last = c.position
+                    val amount = if (zCollapsed) {
+                        // Olhando reto para Z: arrastar para cima afasta (Z+ é para dentro).
+                        -dy / m.fit * 2f
+                    } else if (len2 > 1f) {
+                        (dx * ax + dy * ay) / len2 * GIZMO_LENGTH
+                    } else {
+                        0f
+                    }
+                    if (amount != 0f) store.gizmoDrag(axis, amount)
+                } while (c.pressed)
+                store.endGesture()
+                return@awaitEachGesture
+            }
+        }
 
         // Escolhendo o ponto do rastreio: o toque vira coordenada da camada.
         if (store.pointPick != null) {

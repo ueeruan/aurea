@@ -283,6 +283,10 @@ class AureaEngine private constructor() {
     /** Bits: 1 camadas, 2 estilo, 4 efeitos, 8 keyframes. */
     fun clipboardState(): Int = nativeClipboardState(nativeHandle)
 
+    // Gizmo 3D.
+    fun queryGizmo(layer: Long, length: Float, out: FloatArray): Boolean = nativeQueryGizmo(nativeHandle, layer, length, out)
+    fun gizmoMoveLocal(layer: Long, axis: Int, amount: Float, out: FloatArray): Boolean = nativeGizmoMoveLocal(nativeHandle, layer, axis, amount, out)
+
     // Ambiente 3D (HDRI).
     fun importHdri(path: String): Long = nativeImportHdri(nativeHandle, path)
     fun clearHdri(): Boolean = nativeClearHdri(nativeHandle)
@@ -447,6 +451,8 @@ class AureaEngine private constructor() {
     private external fun nativeApplySpeedRamp(handle: Long, layer: Long, preset: Int): Boolean
     private external fun nativePrecompose(handle: Long, ids: LongArray): Long
     private external fun nativeImportHdri(handle: Long, path: String): Long
+    private external fun nativeQueryGizmo(handle: Long, layer: Long, length: Float, out: FloatArray): Boolean
+    private external fun nativeGizmoMoveLocal(handle: Long, layer: Long, axis: Int, amount: Float, out: FloatArray): Boolean
     private external fun nativeClearHdri(handle: Long): Boolean
     private external fun nativeSetEnvironment(handle: Long, intensity: Float, rotation: Float): Boolean
     private external fun nativeQueryEnvironment(handle: Long, out: FloatArray): Boolean

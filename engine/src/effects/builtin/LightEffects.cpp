@@ -348,7 +348,7 @@ public:
                  kChroma, kOffset, kGain, kTint };
 
     const EffectInfo& info() const noexcept override {
-        static const EffectInfo i{effect_keys::kColorama, "Colorama", "Cor", EffectClass::PerPixel};
+        static const EffectInfo i{effect_keys::kColorama, "Colorama", "Cor", EffectClass::Neighborhood};
         return i;
     }
     void declare_parameters(ParameterRegistry& p) const override {

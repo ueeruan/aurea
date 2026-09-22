@@ -67,7 +67,7 @@ public:
     enum : u32 { kHeight = 0, kIntensity, kOffset, kSoftness, kContrast, kSpeed, kChannel, kBlur, kRoll, kColor };
 
     const EffectInfo& info() const noexcept override {
-        static const EffectInfo i{effect_keys::kScanlines, "Varredura", "Estilizar", EffectClass::PerPixel};
+        static const EffectInfo i{effect_keys::kScanlines, "Varredura", "Estilizar", EffectClass::Neighborhood};
         return i;
     }
     void declare_parameters(ParameterRegistry& p) const override {
@@ -113,7 +113,7 @@ public:
                  kMono, kBlend };
 
     const EffectInfo& info() const noexcept override {
-        static const EffectInfo i{effect_keys::kGrain, "Grão", "Estilizar", EffectClass::PerPixel};
+        static const EffectInfo i{effect_keys::kGrain, "Grão", "Estilizar", EffectClass::Neighborhood};
         return i;
     }
     void declare_parameters(ParameterRegistry& p) const override {

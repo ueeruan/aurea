@@ -828,6 +828,53 @@ AUREA_TEST(Heavy, Scene3DInstancingCullingAndShadowKnob) {
     AUREA_CHECK_EQ(exportAgain, 2048u);
 }
 
+// Achado do perfil (8E): Varredura, Grão e Colorama estavam na classe "por
+// pixel" SEM operação de cor — o planejador os descartava como identidade e
+// eles nunca desenhavam na timeline (só na prévia do catálogo, que tem outro
+// caminho). Todo efeito do catálogo, com os valores de demonstração, tem de
+// MUDAR o quadro no caminho da timeline/export.
+AUREA_TEST(Heavy, EveryCatalogEffectChangesTheTimelineFrame) {
+    HEAVY_REQUIRE_GPU();
+    HGpu& g = hgpu();
+    const u32 W = 192, H = 108;
+    RenderSettings rs;
+    rs.dither = false;
+    rs.finalQuality = true;
+    Image8 plain;
+    {
+        HScene s(W, H);
+        (void)s.image(plate(W, H));
+        (void)s.frame(FrameIndex{30}, rs, W, H);
+        plain = s.read(W, H);
+    }
+    std::vector<std::string> unchanged;
+    for (u32 i = 0; i < g.effects.count(); ++i) {
+        const Effect& fx = g.effects.at(i);
+        const std::string key = fx.info().key;
+        // Sem efeito visual num quadro parado: controles de expressão, os
+        // temporais (precisam de movimento) e o Transformar no padrão.
+        if (key.rfind("aurea.control.", 0) == 0 || fx.effect_class() == EffectClass::Temporal || key == "aurea.transform") continue;
+        const ParameterRegistry& params = g.effects.params_at(i);
+        HScene s(W, H);
+        Layer* l = s.comp->layer(s.image(plate(W, H)));
+        EffectInstance e;
+        e.id = l->alloc_effect_id();
+        e.type = fx.type_id();
+        initialize_instance(e, params);
+        std::vector<ParamValue> values(params.count());
+        for (u32 p = 0; p < params.count(); ++p) values[p] = e.params[p].constant;
+        if (fx.demo_values(e, values)) for (u32 p = 0; p < params.count(); ++p) e.params[p].constant = values[p];
+        l->effects.push_back(std::move(e));
+        (void)s.frame(FrameIndex{30}, rs, W, H);
+        const Image8 img = s.read(W, H);
+        u32 mx = 0;
+        for (usize k = 0; k < img.rgba.size(); ++k) mx = std::max<u32>(mx, static_cast<u32>(std::abs(img.rgba[k] - plain.rgba[k])));
+        if (mx <= 2) unchanged.push_back(key);
+    }
+    for (const std::string& k : unchanged) std::printf("\n    efeito sem efeito na timeline: %s", k.c_str());
+    AUREA_CHECK_MSG(unchanged.empty(), "efeito do catálogo não muda o quadro da timeline");
+}
+
 // §82: o cache do optical flow respeita o orçamento (LRU por camada).
 AUREA_TEST(Heavy, FlowCacheStaysWithinItsBudget) {
     HEAVY_REQUIRE_GPU();

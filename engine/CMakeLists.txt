@@ -102,12 +102,22 @@ set(AUREA_CORE_SOURCES
 # o /W4 do motor não vale para código que não é nosso.
 # -----------------------------------------------------------------------------
 file(GLOB AUREA_MESHOPT_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/meshoptimizer/src/*.cpp)
-add_library(aurea_thirdparty STATIC ${AUREA_MESHOPT_SOURCES} ${CMAKE_CURRENT_SOURCE_DIR}/third_party/ufbx/ufbx.c)
+add_library(aurea_thirdparty STATIC ${AUREA_MESHOPT_SOURCES} ${CMAKE_CURRENT_SOURCE_DIR}/third_party/ufbx/ufbx.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/basisu/transcoder/basisu_transcoder.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/basisu/zstd/zstddeclib.c)
+# KTX2 (ETC1S e UASTC, com Zstd) transcodificado para RGBA no import; os
+# alvos de GPU que o motor não usa ficam fora (binário menor). PUBLIC: o
+# cabeçalho do transcoder precisa ver a mesma configuração.
+target_compile_definitions(aurea_thirdparty PUBLIC
+    BASISD_SUPPORT_KTX2=1 BASISD_SUPPORT_KTX2_ZSTD=1
+    BASISD_SUPPORT_PVRTC1=0 BASISD_SUPPORT_PVRTC2=0 BASISD_SUPPORT_ATC=0 BASISD_SUPPORT_FXT1=0
+    BASISD_SUPPORT_ETC2_EAC_RG11=0 BASISD_SUPPORT_UASTC_HDR=0)
 target_include_directories(aurea_thirdparty PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/ufbx
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/meshoptimizer/src
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/cgltf
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb)
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/basisu/transcoder)
 target_compile_options(aurea_thirdparty PRIVATE
     $<$<CXX_COMPILER_ID:MSVC>:/W0 /utf-8>
     $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-w -fno-exceptions>

@@ -79,6 +79,11 @@ struct ImportResult {
 
 /// Importa de memória (GLB inteiro, ou JSON de um .gltf). `baseDir` resolve
 /// URIs externas quando não há `reader`.
+/// KTX2 (Basis Universal ETC1S/UASTC, com ou sem Zstd): transcodifica o
+/// nível 0 para RGBA8. Usado pelo import de KHR_texture_basisu.
+[[nodiscard]] bool is_ktx2(const u8* data, usize size) noexcept;
+[[nodiscard]] bool decode_ktx2(const u8* data, usize size, Image& out);
+
 [[nodiscard]] ImportResult import_gltf_memory(const u8* data, usize size, const std::string& baseDir,
                                               const ImportOptions& options, ImportProgress* progress = nullptr);
 

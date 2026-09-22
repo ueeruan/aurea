@@ -42,6 +42,7 @@
 
 #include "meshoptimizer.h"
 #include "ufbx.h"
+#include "basisu_transcoder.h"
 #if defined(_MSC_VER)
     #pragma warning(pop)
 #elif defined(__clang__)
@@ -445,6 +446,34 @@ void downscale_to(Image& img, u32 maxSize) {
     }
 }
 
+} // namespace
+
+bool is_ktx2(const u8* data, usize size) noexcept {
+    static const u8 id[12] = {0xAB, 0x4B, 0x54, 0x58, 0x20, 0x32, 0x30, 0xBB, 0x0D, 0x0A, 0x1A, 0x0A};   // identificador do KTX2
+    return data && size > sizeof(id) && std::memcmp(data, id, sizeof(id)) == 0;
+}
+
+bool decode_ktx2(const u8* data, usize size, Image& out) {
+    static const bool ready = [] { basist::basisu_transcoder_init(); return true; }();
+    (void)ready;
+    basist::ktx2_transcoder t;
+    if (!t.init(data, static_cast<u32>(size)) || t.get_faces() != 1 || !t.start_transcoding()) return false;
+    const u32 w = t.get_width(), h = t.get_height();
+    if (w == 0 || h == 0 || static_cast<u64>(w) * h > 8192ull * 8192ull) return false;
+    std::vector<u8> rgba(static_cast<usize>(w) * h * 4);
+    // Nível 0, camada 0, face 0; RGBA32 = pixels (sem blocos), largura = w.
+    if (!t.transcode_image_level(0, 0, 0, rgba.data(), w * h, basist::transcoder_texture_format::cTFRGBA32, 0, w, h)) {
+        return false;
+    }
+    out.width = w;
+    out.height = h;
+    out.rgba = std::move(rgba);
+    out.hasAlpha = t.get_has_alpha();
+    return true;
+}
+
+namespace {
+
 bool decode_image(const cgltf_image& src, const cgltf_options& opts, const std::string& baseDir, Image& out,
                   Failure& fail) {
     out.name = src.name ? src.name : "";
@@ -491,6 +520,13 @@ bool decode_image(const cgltf_image& src, const cgltf_options& opts, const std::
         return false;
     }
 
+    // KTX2 (KHR_texture_basisu): transcodificado para RGBA no import.
+    if (is_ktx2(data, size)) {
+        const bool ok = decode_ktx2(data, size, out);
+        if (b64) std::free(b64);
+        if (!ok) fail = {ImportError::TextureDecodeFailed, "textura KTX2 '" + (out.uri.empty() ? out.name : out.uri) + "' ilegivel"};
+        return ok;
+    }
     int w = 0, h = 0, comp = 0;
     stbi_uc* px = stbi_load_from_memory(data, static_cast<int>(size), &w, &h, &comp, 4);
     if (b64) std::free(b64);

@@ -7,6 +7,7 @@
 
 #include "aurea/scene3d/Importer.hpp"
 
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -430,4 +431,127 @@ AUREA_TEST(Scene3D, Text3DMeshIsClosedAndFacesOutward) {
     scene3d::Text3DSpec back2;
     AUREA_CHECK(scene3d::decode_text3d(scene3d::encode_text3d(spec), back2));
     AUREA_CHECK(back2.content == spec.content && std::fabs(back2.depth - 0.3f) < 1e-4f && back2.alignment == 1);
+}
+
+// -----------------------------------------------------------------------------
+// KTX2 (KHR_texture_basisu)
+// -----------------------------------------------------------------------------
+namespace {
+void put32(std::vector<aurea::u8>& v, usize at, aurea::u32 x) { for (int i = 0; i < 4; ++i) v[at + i] = static_cast<aurea::u8>(x >> (8 * i)); }
+void put64(std::vector<aurea::u8>& v, usize at, aurea::u64 x) { for (int i = 0; i < 8; ++i) v[at + i] = static_cast<aurea::u8>(x >> (8 * i)); }
+
+/// Bloco UASTC 4x4 de cor sólida (modo 8: código 0x17 em 5 bits, depois R, G, B, A).
+void uastc_solid(aurea::u8* blk, aurea::u8 r, aurea::u8 g, aurea::u8 b, aurea::u8 a) {
+    std::memset(blk, 0, 16);
+    const aurea::u64 bits = 0x17ull | (aurea::u64(r) << 5) | (aurea::u64(g) << 13) | (aurea::u64(b) << 21) | (aurea::u64(a) << 29);
+    for (int i = 0; i < 8; ++i) blk[i] = static_cast<aurea::u8>(bits >> (8 * i));
+}
+
+/// KTX2 8×8 UASTC (sRGB, RGBA) com 4 blocos: vermelho, verde / azul, branco meio transparente.
+/// `zstd` = nível supercomprimido num quadro Zstd de bloco cru (válido pela especificação).
+std::vector<aurea::u8> make_ktx2(bool zstd) {
+    using aurea::u8;
+    std::vector<u8> blocks(64);
+    uastc_solid(&blocks[0], 255, 0, 0, 255);
+    uastc_solid(&blocks[16], 0, 255, 0, 255);
+    uastc_solid(&blocks[32], 0, 0, 255, 255);
+    uastc_solid(&blocks[48], 255, 255, 255, 128);
+    std::vector<u8> level = blocks;
+    if (zstd) {
+        level = {0x28, 0xB5, 0x2F, 0xFD, 0x20, 64, 0x01, 0x02, 0x00};   // magia, FHD (segmento único), tamanho, bloco cru final de 64
+        level.insert(level.end(), blocks.begin(), blocks.end());
+    }
+    const usize dfdAt = 104, dfdLen = 44, dataAt = 160;
+    std::vector<u8> f(dataAt + level.size(), 0);
+    const u8 id[12] = {0xAB, 0x4B, 0x54, 0x58, 0x20, 0x32, 0x30, 0xBB, 0x0D, 0x0A, 0x1A, 0x0A};
+    std::memcpy(f.data(), id, 12);
+    put32(f, 12, 0);                 // vkFormat indefinido (Basis)
+    put32(f, 16, 1);                 // typeSize
+    put32(f, 20, 8);                 // largura
+    put32(f, 24, 8);                 // altura
+    put32(f, 36, 1);                 // faces
+    put32(f, 40, 1);                 // níveis
+    put32(f, 44, zstd ? 2 : 0);      // supercompressão: nenhuma / Zstd
+    put32(f, 48, dfdAt);
+    put32(f, 52, dfdLen);
+    put64(f, 80, dataAt);            // índice do nível 0
+    put64(f, 88, level.size());
+    put64(f, 96, blocks.size());
+    put32(f, dfdAt, dfdLen);
+    put32(f, dfdAt + 4, 0);                          // Khronos, bloco básico
+    put32(f, dfdAt + 8, 2u | (40u << 16));           // versão 2, 40 bytes
+    f[dfdAt + 12] = 166;                             // modelo UASTC
+    f[dfdAt + 13] = 1;                               // BT.709
+    f[dfdAt + 14] = 2;                               // sRGB
+    f[dfdAt + 16] = 3; f[dfdAt + 17] = 3;            // bloco 4×4
+    f[dfdAt + 20] = 16;                              // 16 bytes por bloco
+    put32(f, dfdAt + 28, 127u << 16 | (3u << 24));   // amostra: 128 bits, canal RGBA
+    put32(f, dfdAt + 40, 0xFFFFFFFFu);
+    std::memcpy(&f[dataAt], level.data(), level.size());
+    return f;
+}
+} // namespace
+
+AUREA_TEST(Scene3D, Ktx2UastcTranscodesRawAndZstd) {
+    using namespace aurea;
+    for (bool z : {false, true}) {
+        const std::vector<u8> f = make_ktx2(z);
+        AUREA_CHECK(scene3d::is_ktx2(f.data(), f.size()));
+        scene3d::Image img;
+        AUREA_CHECK(scene3d::decode_ktx2(f.data(), f.size(), img));
+        if (img.rgba.size() != 8 * 8 * 4) continue;
+        auto px = [&](u32 x, u32 y) { const u8* p = &img.rgba[(y * 8 + x) * 4]; return std::array<int, 4>{p[0], p[1], p[2], p[3]}; };
+        std::printf("    ktx2 %s: %ux%u, cantos (%d,%d,%d) (%d,%d,%d) (%d,%d,%d) (%d,%d,%d,a%d), alfa %d\n", z ? "zstd" : "cru", img.width,
+                    img.height, px(1, 1)[0], px(1, 1)[1], px(1, 1)[2], px(6, 1)[0], px(6, 1)[1], px(6, 1)[2], px(1, 6)[0], px(1, 6)[1],
+                    px(1, 6)[2], px(6, 6)[0], px(6, 6)[1], px(6, 6)[2], px(6, 6)[3], img.hasAlpha ? 1 : 0);
+        AUREA_CHECK((px(1, 1) == std::array<int, 4>{255, 0, 0, 255}));
+        AUREA_CHECK((px(6, 1) == std::array<int, 4>{0, 255, 0, 255}));
+        AUREA_CHECK((px(1, 6) == std::array<int, 4>{0, 0, 255, 255}));
+        AUREA_CHECK((px(6, 6) == std::array<int, 4>{255, 255, 255, 128}));
+        AUREA_CHECK(img.hasAlpha);
+    }
+    // Arquivo truncado: recusa, sem ler fora.
+    std::vector<u8> bad = make_ktx2(false);
+    bad.resize(120);
+    scene3d::Image img;
+    AUREA_CHECK(!scene3d::decode_ktx2(bad.data(), bad.size(), img));
+}
+
+AUREA_TEST(Scene3D, GltfWithKtx2OnlyTextureImports) {
+    using namespace aurea;
+    const std::string dir = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/";
+    const std::vector<u8> k = make_ktx2(true);
+    {
+        std::FILE* f = std::fopen((dir + "aurea_teste_tex.ktx2").c_str(), "wb");
+        AUREA_CHECK(f != nullptr);
+        if (!f) return;
+        std::fwrite(k.data(), 1, k.size(), f);
+        std::fclose(f);
+    }
+    const char* json = R"({"asset":{"version":"2.0"},"extensionsUsed":["KHR_texture_basisu"],"extensionsRequired":["KHR_texture_basisu"],
+"buffers":[{"byteLength":36,"uri":"data:application/octet-stream;base64,AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAA"}],
+"bufferViews":[{"buffer":0,"byteLength":36}],
+"accessors":[{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0,0,0],"max":[1,1,0]}],
+"images":[{"uri":"aurea_teste_tex.ktx2","mimeType":"image/ktx2"}],
+"textures":[{"extensions":{"KHR_texture_basisu":{"source":0}}}],
+"materials":[{"pbrMetallicRoughness":{"baseColorTexture":{"index":0}}}],
+"meshes":[{"primitives":[{"attributes":{"POSITION":0},"material":0}]}],
+"nodes":[{"mesh":0}],"scenes":[{"nodes":[0]}],"scene":0})";
+    const std::string path = dir + "aurea_teste_ktx2.gltf";
+    {
+        std::FILE* f = std::fopen(path.c_str(), "wb");
+        std::fwrite(json, 1, std::strlen(json), f);
+        std::fclose(f);
+    }
+    scene3d::ImportOptions o;
+    scene3d::ImportResult r = scene3d::import_gltf_file(path, o);
+    std::printf("    glTF com KTX2: %s (%s)\n", r.ok() ? "importou" : "falhou", r.detail.c_str());
+    AUREA_CHECK(r.ok());
+    if (r.ok()) {
+        AUREA_CHECK(r.asset->images.size() == 1 && r.asset->images[0].width == 8);
+        AUREA_CHECK(r.asset->materials[0].baseColorTex.image == 0);
+        AUREA_CHECK(!r.asset->images[0].rgba.empty() && r.asset->images[0].rgba[0] == 255 && r.asset->images[0].rgba[1] == 0);
+    }
+    std::remove(path.c_str());
+    std::remove((dir + "aurea_teste_tex.ktx2").c_str());
 }

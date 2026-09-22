@@ -193,6 +193,9 @@ struct FrameSnapshot {
     u32  videoLayers = 0;
     u32  staleVideoFrames = 0;         ///< mostrando frame aproximado (scrub)
     u32  missingVideoFrames = 0;       ///< nenhum frame ainda (primeiro decode)
+    /// Camadas visíveis no instante que ficaram de fora por estarem inteiras
+    /// fora da composição (sem decode, sem passe). Fase 8C §20.
+    u32  culledLayers = 0;
     /// Pré-composições deste quadro (cada uma com o seu próprio snapshot,
     /// no tempo da fonte da camada). `target` = onde ela foi composta.
     std::vector<std::unique_ptr<FrameSnapshot>> nested;
@@ -226,6 +229,10 @@ struct RenderSettings {
     /// 1 = completo; ≤ 0,25 também troca o movimento de pixels pela mistura.
     /// O export sempre usa 1.
     f32  heavyScale = 1.0f;
+    /// Botões do preview AUTO 2.0 (Fase 8C): cada sistema lê o seu pelo
+    /// `Renderer::preview_quality()`. O efetivo é o menor entre isto e
+    /// `heavyScale`; com `finalQuality` tudo volta a 1 (o export não muda).
+    PreviewQuality quality{};
 };
 
 /// Alvo fora da tela (export, testes visuais): a composição é escrita nesta
@@ -338,6 +345,12 @@ public:
     [[nodiscard]] bool last_frame_zero_copy() const noexcept { return lastZeroCopy_; }
     [[nodiscard]] std::string graph_dump() const { return graph_.dump(); }
     [[nodiscard]] u32 frames_rendered() const noexcept { return framesRendered_; }
+    /// Reduções do preview em vigor no quadro sendo preparado/renderizado
+    /// (tudo 1 no export). Os sistemas pesados (3D, partículas, flow, blur)
+    /// leem daqui o botão deles.
+    [[nodiscard]] const PreviewQuality& preview_quality() const noexcept { return quality_; }
+    /// O efetivo de um `RenderSettings` (a mesma regra do prepare/render).
+    [[nodiscard]] static PreviewQuality effective_quality(const RenderSettings& s) noexcept;
 
 private:
     struct CompositeDraw {
@@ -377,7 +390,27 @@ private:
         TextureHandle texture{};
         u32 width = 0, height = 0;
         u64 lastFrame = 0;
+        /// A imagem já no espaço de trabalho (linear, pré-multiplicada) na
+        /// densidade da camada: a conversão roda uma vez por tamanho, não a
+        /// cada quadro (Fase 8C — eram N passes por quadro com N imagens).
+        /// Dois tamanhos: a mesma imagem em duas camadas de escalas diferentes
+        /// não se expulsa a cada quadro.
+        struct Linear {
+            TextureHandle tex{};
+            u32 w = 0, h = 0;
+            u64 builtFrame = ~0ull;   ///< quadro (do backend) em que o passe foi declarado
+            u64 lastFrame = 0;
+            FGTexture fg{};           ///< a importação no grafo do quadro `fgFrame`
+            u64 fgFrame = ~0ull;
+        };
+        Linear linear[2];
     };
+    void destroy_image_linear(ImageTexture& img) noexcept;
+    u32 imageLinearHits_ = 0, imageLinearBuilds_ = 0;
+public:
+    /// Imagens: conversões reaproveitadas / feitas (testes e HUD).
+    void image_cache_stats(u32& hits, u32& builds) const noexcept { hits = imageLinearHits_; builds = imageLinearBuilds_; }
+private:
 
     struct LutTexture {
         TextureHandle texture{};
@@ -413,6 +446,7 @@ private:
 
     GPUBackend* backend_ = nullptr;
     const EffectRegistry* effects_ = nullptr;
+    EffectTypeId posterizeType_ = 0, echoType_ = 0, rgbTimeType_ = 0;
     ShaderLibrary shaders_;
     scene3d::SceneRenderer scene3d_;
     ModelLookup modelLookup_ = nullptr;
@@ -425,6 +459,9 @@ private:
 
     std::vector<CompositeDraw> draws_;
     std::vector<FrameRef> framesInFlight_;
+    /// Percurso dos snapshots (raiz + pré-composições) nos uploads do quadro:
+    /// listas reaproveitadas — eram 6 alocações por quadro (Fase 8C).
+    std::vector<FrameSnapshot*> snapAll_, snapStack_;
     std::unordered_map<u64, PlanarTextures> planar_;   ///< por LayerId empacotado
     // Texto na GPU: atlas de glifos (R8) e o buffer de glifos do quadro (anel).
     TextureHandle glyphAtlas_{};
@@ -474,6 +511,7 @@ private:
     std::unordered_map<u64, FlowCache> flowCache_;
     u32 flowHits_ = 0, flowMisses_ = 0;
     f32 heavyScale_ = 1.0f;
+    PreviewQuality quality_{};
     /// Planos de cada grupo 3D do snapshot sendo composto (camadas 2D na cena).
     std::vector<std::vector<scene3d::ScenePlane>> groupPlanes_;
     bool flowCacheEnabled_ = true;   ///< do quadro sendo renderizado (RenderSettings::heavyScale)

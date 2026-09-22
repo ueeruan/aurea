@@ -379,6 +379,10 @@ public:
     void wait_idle() noexcept override;
     [[nodiscard]] u64 last_submitted_frame() const noexcept override;
     [[nodiscard]] Status wait_frame(u64 frameNumber, u64 timeoutNs) noexcept override;
+    /// Mensagens da camada de validação (erros / avisos) desde o início do
+    /// processo. Os testes de GPU exigem zero erros quando a camada existe.
+    [[nodiscard]] static u32 validation_errors() noexcept;
+    [[nodiscard]] static u32 validation_warnings() noexcept;
     [[nodiscard]] u32 read_gpu_timings(GpuTiming* out, u32 capacity, f32* totalMs) noexcept override;
     [[nodiscard]] bool is_device_lost() const noexcept override { return deviceLost_; }
     [[nodiscard]] u32 frames_in_flight() const noexcept override { return framesInFlight_; }
@@ -414,7 +418,7 @@ public:
     void destroy_texture_now(Texture& t) noexcept;
     void destroy_buffer_now(Buffer& b) noexcept;
 
-    static constexpr u32 kMaxTimers = 64;
+    static constexpr u32 kMaxTimers = 512;   // um por passe: 50 camadas com efeitos passam de 190 (64 cortava o detalhe por etapa)
 
 private:
     [[nodiscard]] Status create_instance(bool validation) noexcept;

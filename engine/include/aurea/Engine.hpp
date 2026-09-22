@@ -131,6 +131,12 @@ struct EngineTelemetry {
     u32  frameCacheEntries = 0;
     f32  frameCacheHitRate = 0.0f;
     u32  adaptiveScaleChanges = 0;
+    // Preview AUTO 2.0 (Fase 8C §164): a escala e as reduções em vigor, e o gargalo medido.
+    u32  previewDenominator = 1;
+    u32  previewHeavyLevel = 0;
+    PreviewBottleneck previewBottleneck = PreviewBottleneck::None;
+    u32  previewUpBackoff = 1;
+    u32  culledLayers = 0;          ///< camadas fora da tela no último quadro (sem decode/passe)
     u32  effectsInPreviewMode = 0;
     u64  undoBlobBytes = 0;
     u64  commandsDropped = 0;
@@ -796,8 +802,11 @@ public:
     /// Estado térmico do aparelho (PowerManager no Android): o preview reduz
     /// as operações caras sob calor; o export não muda.
     void set_thermal(u32 level, bool throttling) noexcept;
-    /// Fração de custo do preview para o estado térmico atual (1 = completo).
+    /// Fração de custo do preview (1 = completo): o menor entre o piso
+    /// térmico do instante e o degrau de reduções do AUTO 2.0.
     [[nodiscard]] f32 preview_heavy_scale() const noexcept;
+    /// Degrau de reduções que o estado térmico impõe (0 normal, 1 quente, 2 crítico).
+    [[nodiscard]] u32 thermal_heavy_level() const noexcept;
 
     /// O frame do playhead em RGBA8 sRGB (alfa reto), com o lado maior em
     /// `maxDim`. Miniatura do projeto na Home. Síncrono (espera a GPU).
@@ -1077,6 +1086,7 @@ private:
     std::atomic<bool> renderRunning_{false};
     std::atomic<bool> playingHint_{false};
     std::atomic<bool> surfaceAttached_{false};
+    std::atomic<u32>  lastCulledLayers_{0};       ///< telemetria (Fase 8C)
 
     SurfaceDesc surface_{};
 

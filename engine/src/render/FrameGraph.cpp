@@ -236,16 +236,20 @@ Status FrameGraph::compile(TransientTexturePool& pool) noexcept {
     stats_ = Stats{};
     stats_.passesDeclared = static_cast<u32>(passes_.size());
 
-    // Acessos agrupados por passe (ordenação estável: a ordem de declaração
-    // dentro do passe é preservada).
-    sortedAccess_ = accesses_;
-    std::stable_sort(sortedAccess_.begin(), sortedAccess_.end(),
-                     [](const AccessRecord& a, const AccessRecord& b) { return a.pass < b.pass; });
-    for (Pass& p : passes_) { p.accessBegin = 0; p.accessCount = 0; p.culled = false; }
-    for (u32 i = 0; i < sortedAccess_.size(); ++i) {
-        Pass& p = passes_[sortedAccess_[i].pass];
-        if (p.accessCount == 0) p.accessBegin = i;
-        ++p.accessCount;
+    // Acessos agrupados por passe (contagem: estável — a ordem de declaração
+    // dentro do passe é preservada — e sem o buffer que o stable_sort aloca).
+    const u32 passCount = static_cast<u32>(passes_.size());
+    passBucket_.assign(passCount + 1, 0);
+    for (const AccessRecord& a : accesses_) ++passBucket_[a.pass + 1];
+    for (u32 i = 0; i < passCount; ++i) passBucket_[i + 1] += passBucket_[i];
+    sortedAccess_.resize(accesses_.size());
+    fill_.assign(passBucket_.begin(), passBucket_.end() - 1);
+    for (const AccessRecord& a : accesses_) sortedAccess_[fill_[a.pass]++] = a;
+    for (u32 i = 0; i < passCount; ++i) {
+        Pass& p = passes_[i];
+        p.accessBegin = passBucket_[i];
+        p.accessCount = passBucket_[i + 1] - passBucket_[i];
+        p.culled = false;
     }
 
     if (!sort_passes()) {
@@ -320,40 +324,55 @@ bool FrameGraph::sort_passes() noexcept {
     // mais tarde, e é isso que "ordem por dependência" permite). Uma escrita
     // que não é a primeira depende do escritor anterior (escrita sobre
     // escrita) e de quem leu a versão anterior (leitura antes de escrita).
+    //
+    // Por recurso (CSR na ordem dos passes), não por varredura global: cada
+    // acesso é visitado um número constante de vezes (mais a busca binária no
+    // punhado de escritores do recurso).
     edges_.clear();
     const u32 accessCount = static_cast<u32>(sortedAccess_.size());
-    auto producer_of = [&](u32 resource, u32 readerPass) -> u32 {
-        u32 before = kInvalidIndex, after = kInvalidIndex;
-        for (u32 j = 0; j < accessCount; ++j) {
-            const AccessRecord& w = sortedAccess_[j];
-            if (w.resource != resource || w.pass == readerPass || !is_write(static_cast<u8>(w.access))) continue;
-            if (w.pass < readerPass) before = (before == kInvalidIndex || w.pass > before) ? w.pass : before;
-            else after = (after == kInvalidIndex || w.pass < after) ? w.pass : after;
+    const u32 resourceCount = static_cast<u32>(resources_.size());
+    resBegin_.assign(resourceCount + 1, 0);
+    for (u32 i = 0; i < accessCount; ++i) ++resBegin_[sortedAccess_[i].resource + 1];
+    for (u32 r = 0; r < resourceCount; ++r) resBegin_[r + 1] += resBegin_[r];
+    resAccess_.resize(accessCount);
+    fill_.assign(resBegin_.begin(), resBegin_.end() - 1);
+    for (u32 i = 0; i < accessCount; ++i) resAccess_[fill_[sortedAccess_[i].resource]++] = i;
+    producer_.assign(accessCount, kInvalidIndex);
+    for (u32 r = 0; r < resourceCount; ++r) {
+        const u32 b = resBegin_[r], e = resBegin_[r + 1];
+        writers_.clear();
+        for (u32 k = b; k < e; ++k) {
+            const AccessRecord& a = sortedAccess_[resAccess_[k]];
+            if (is_write(static_cast<u8>(a.access)) && (writers_.empty() || writers_.back() != a.pass)) writers_.push_back(a.pass);
         }
-        return before != kInvalidIndex ? before : after;
-    };
-    for (u32 i = 0; i < accessCount; ++i) {
-        const AccessRecord& a = sortedAccess_[i];
-        if (!is_write(static_cast<u8>(a.access))) {
-            const u32 p = producer_of(a.resource, a.pass);
-            if (p != kInvalidIndex) { edges_.push_back(p); edges_.push_back(a.pass); }
-            continue;
-        }
-        // Escritor anterior (declarado antes) desta mesma textura.
-        u32 prev = kInvalidIndex;
-        for (u32 j = 0; j < accessCount; ++j) {
-            const AccessRecord& w = sortedAccess_[j];
-            if (w.resource == a.resource && w.pass < a.pass && is_write(static_cast<u8>(w.access))) {
-                prev = (prev == kInvalidIndex || w.pass > prev) ? w.pass : prev;
+        if (writers_.empty()) continue;
+        // Leitura: o último escritor ANTES dela; sem nenhum, o primeiro depois
+        // (nunca o próprio passe).
+        for (u32 k = b; k < e; ++k) {
+            const AccessRecord& a = sortedAccess_[resAccess_[k]];
+            if (is_write(static_cast<u8>(a.access))) continue;
+            auto it = std::lower_bound(writers_.begin(), writers_.end(), a.pass);
+            u32 prod = kInvalidIndex;
+            if (it != writers_.begin()) {
+                prod = *(it - 1);
+            } else {
+                if (it != writers_.end() && *it == a.pass) ++it;
+                if (it != writers_.end()) prod = *it;
             }
+            producer_[resAccess_[k]] = prod;
+            if (prod != kInvalidIndex) { edges_.push_back(prod); edges_.push_back(a.pass); }
         }
-        if (prev == kInvalidIndex) continue;
-        edges_.push_back(prev);
-        edges_.push_back(a.pass);
-        for (u32 j = 0; j < accessCount; ++j) {
-            const AccessRecord& r = sortedAccess_[j];
-            if (r.resource != a.resource || r.pass == a.pass || is_write(static_cast<u8>(r.access))) continue;
-            if (producer_of(r.resource, r.pass) == prev) { edges_.push_back(r.pass); edges_.push_back(a.pass); }
+        // Escrita que não é a primeira: depois do escritor anterior e de
+        // quem leu a versão dele.
+        for (usize w = 1; w < writers_.size(); ++w) {
+            const u32 prev = writers_[w - 1], pass = writers_[w];
+            edges_.push_back(prev);
+            edges_.push_back(pass);
+            for (u32 k = b; k < e; ++k) {
+                const AccessRecord& a = sortedAccess_[resAccess_[k]];
+                if (a.pass == pass || is_write(static_cast<u8>(a.access))) continue;
+                if (producer_[resAccess_[k]] == prev) { edges_.push_back(a.pass); edges_.push_back(pass); }
+            }
         }
     }
 
@@ -373,19 +392,24 @@ bool FrameGraph::sort_passes() noexcept {
     // determinística, e igual à de declaração quando ela já respeita as
     // dependências (o caso normal). Arestas duplicadas são inofensivas: cada
     // uma soma e subtrai um do grau de entrada.
+    // Heap mínimo: a varredura linear da fila era quadrática com centenas de
+    // passes independentes (uma fonte por camada).
     queue_.clear();
+    const auto later = [](u32 a, u32 b) noexcept { return a > b; };
     for (u32 i = 0; i < n; ++i) if (indegree_[i] == 0) queue_.push_back(i);
+    std::make_heap(queue_.begin(), queue_.end(), later);
 
     while (!queue_.empty()) {
-        usize best = 0;
-        for (usize q = 1; q < queue_.size(); ++q) if (queue_[q] < queue_[best]) best = q;
-        const u32 p = queue_[best];
-        queue_[best] = queue_.back();
+        std::pop_heap(queue_.begin(), queue_.end(), later);
+        const u32 p = queue_.back();
         queue_.pop_back();
         order_.push_back(p);
         for (u32 e = edgeBegin_[p]; e < edgeBegin_[p + 1]; ++e) {
             const u32 s = succ_[e];
-            if (--indegree_[s] == 0) queue_.push_back(s);
+            if (--indegree_[s] == 0) {
+                queue_.push_back(s);
+                std::push_heap(queue_.begin(), queue_.end(), later);
+            }
         }
     }
     return order_.size() == n;
@@ -417,12 +441,39 @@ void FrameGraph::cull() noexcept {
 Status FrameGraph::assign_physical(TransientTexturePool& pool) noexcept {
     slots_.clear();
     const u32 steps = static_cast<u32>(order_.size());
+    const u32 resourceCount = static_cast<u32>(resources_.size());
+    // Quem nasce e quem morre em cada posição (CSR, na ordem dos índices —
+    // a mesma escolha de física que a varredura completa fazia).
+    bornBegin_.assign(steps + 1, 0);
+    diesBegin_.assign(steps + 1, 0);
+    for (const Resource& r : resources_) {
+        if (r.imported || r.firstUse == kInvalidIndex) continue;
+        ++bornBegin_[r.firstUse + 1];
+        if (!r.isOutput) ++diesBegin_[r.lastUse + 1];
+    }
+    for (u32 s = 0; s < steps; ++s) {
+        bornBegin_[s + 1] += bornBegin_[s];
+        diesBegin_[s + 1] += diesBegin_[s];
+    }
+    born_.resize(bornBegin_[steps]);
+    dies_.resize(diesBegin_[steps]);
+    fill_.assign(bornBegin_.begin(), bornBegin_.end() - 1);
+    for (u32 i = 0; i < resourceCount; ++i) {
+        const Resource& r = resources_[i];
+        if (r.imported || r.firstUse == kInvalidIndex) continue;
+        born_[fill_[r.firstUse]++] = i;
+    }
+    fill_.assign(diesBegin_.begin(), diesBegin_.end() - 1);
+    for (u32 i = 0; i < resourceCount; ++i) {
+        const Resource& r = resources_[i];
+        if (r.imported || r.firstUse == kInvalidIndex || r.isOutput) continue;
+        dies_[fill_[r.lastUse]++] = i;
+    }
 
     for (u32 pos = 0; pos < steps; ++pos) {
         // Nasce aqui: pega uma física livre compatível deste frame, senão o pool.
-        for (u32 i = 0; i < resources_.size(); ++i) {
-            Resource& r = resources_[i];
-            if (r.imported || r.firstUse != pos) continue;
+        for (u32 bi = bornBegin_[pos]; bi < bornBegin_[pos + 1]; ++bi) {
+            Resource& r = resources_[born_[bi]];
             ++stats_.transientTextures;
 
             u32 chosen = kInvalidIndex;
@@ -448,8 +499,9 @@ Status FrameGraph::assign_physical(TransientTexturePool& pool) noexcept {
         }
         // Morre aqui: a física volta a ficar livre para quem nascer depois.
         // Saídas nunca morrem dentro do frame.
-        for (Resource& r : resources_) {
-            if (r.imported || r.isOutput || r.lastUse != pos || r.slot == kInvalidIndex) continue;
+        for (u32 di = diesBegin_[pos]; di < diesBegin_[pos + 1]; ++di) {
+            const Resource& r = resources_[dies_[di]];
+            if (r.slot == kInvalidIndex) continue;
             slots_[r.slot].free = true;
         }
     }

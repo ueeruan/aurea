@@ -36,6 +36,7 @@ add_executable(aurea_tests
     test_timeline_scale.cpp
     test_stability.cpp
     test_memory.cpp
+    test_perf_render.cpp
 )
 
 target_include_directories(aurea_tests PRIVATE

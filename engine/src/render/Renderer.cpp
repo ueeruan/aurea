@@ -361,7 +361,7 @@ Mat4 layer_world_matrix(const Composition& comp, const Layer& l, FrameIndex time
 Renderer::Renderer() {
     draws_.reserve(64);
     framesInFlight_.reserve(16);
-    timingScratch_.resize(128);
+    timingScratch_.resize(1024);   // um por passe: 50 camadas com efeitos passam de 190
 }
 
 Renderer::~Renderer() { shutdown(); }
@@ -369,6 +369,11 @@ Renderer::~Renderer() { shutdown(); }
 Status Renderer::initialize(GPUBackend& backend, const EffectRegistry& effects) noexcept {
     backend_ = &backend;
     effects_ = &effects;
+    // Tipos que o prepare consulta por camada: resolvidos uma vez (a busca
+    // por chave é linear no registro).
+    posterizeType_ = effects.find_key(effect_keys::kPosterizeTime);
+    echoType_ = effects.find_key(effect_keys::kEchoTrail);
+    rgbTimeType_ = effects.find_key(effect_keys::kTimeWarpRgb);
     if (const Status s = shaders_.initialize(backend); !s.ok()) {
         backend_ = nullptr;
         return s;
@@ -464,7 +469,10 @@ void Renderer::release_project_resources() noexcept {
     for (auto& [k, p] : planar_) {
         for (TextureHandle& t : p.plane) if (t.valid()) backend_->destroy_texture(t);
     }
-    for (auto& [k, i] : images_) backend_->destroy_texture(i.texture);
+    for (auto& [k, i] : images_) {
+        destroy_image_linear(i);
+        backend_->destroy_texture(i.texture);
+    }
     for (auto& [k, l] : luts_) backend_->destroy_texture(l.texture);
     for (auto& [k, f] : flowCache_) for (TextureHandle& t : f.tex) if (t.valid()) backend_->destroy_texture(t);
     flowCache_.clear();
@@ -475,6 +483,19 @@ void Renderer::release_project_resources() noexcept {
     luts_.clear();
     uploads_.clear();
     scene3d_.release_all();
+}
+
+PreviewQuality Renderer::effective_quality(const RenderSettings& s) noexcept {
+    if (s.finalQuality) return PreviewQuality{};   // export: nada do preview entra
+    PreviewQuality q = s.quality;
+    const f32 h = std::clamp(s.heavyScale, 0.0f, 1.0f);
+    q.motionBlurSamples = std::min(q.motionBlurSamples, h);
+    q.flowResolution = std::min(q.flowResolution, h);
+    q.ssao = std::min(q.ssao, h);
+    q.shadowResolution = std::min(q.shadowResolution, h);
+    q.particles = std::min(q.particles, h);
+    q.blurSamples = std::min(q.blurSamples, h);
+    return q;
 }
 
 // =============================================================================
@@ -524,6 +545,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                        void* imageCtx, const RenderSettings& settings, u64 frameNumber,
                        i32 playDirection, DecodeMode decodeMode, f32 speed, FrameSnapshot& out) {
     frameNumber_ = frameNumber;
+    if (prepareDepth_ == 0) quality_ = effective_quality(settings);
     // Expressões: a timeline do quadro (camada dona, outras camadas) e o memo
     // por (propriedade, quadro). O quadro é preparado sob o lock do modelo.
     const expr::Scope exprScope(project.timeline());
@@ -549,6 +571,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
     out.videoLayers = 0;
     out.staleVideoFrames = 0;
     out.missingVideoFrames = 0;
+    out.culledLayers = 0;
 
     const f32 previewFactor = static_cast<f32>(settings.previewNumerator)
                             / static_cast<f32>(std::max(1u, settings.previewDenominator));
@@ -610,7 +633,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         // o efeito não seria um efeito, seria um nome no painel.
         FrameIndex layerTime = time;
         if (effects_) {
-            const EffectTypeId posterize = effects_->find_key(effect_keys::kPosterizeTime);
+            const EffectTypeId posterize = posterizeType_;
             const ParameterRegistry* pp = posterize ? effects_->params(posterize) : nullptr;
             if (pp && pp->count() >= 2) {
                 for (const EffectInstance& inst : l->effects) {
@@ -1073,6 +1096,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 out.videoLayers += snapChild->videoLayers;
                 out.staleVideoFrames += snapChild->staleVideoFrames;
                 out.missingVideoFrames += snapChild->missingVideoFrames;
+                out.culledLayers += snapChild->culledLayers;
                 rl.source.kind = LayerSource::Kind::Nested;
                 rl.source.width = child->width();
                 rl.source.height = child->height();
@@ -1222,7 +1246,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         u32 echoCount = l->echoCount;
         f32 echoDelay = l->echoDelay, echoDecay = l->echoDecay, rgbDelay = l->rgbDelay;
         if (effects_) {
-            const EffectTypeId echoType = effects_->find_key(effect_keys::kEchoTrail);
+            const EffectTypeId echoType = echoType_;
             const ParameterRegistry* ep = effects_->params(echoType);
             for (const EffectInstance& inst : l->effects) {
                 if (!inst.enabled || inst.type != echoType || !ep || ep->count() < 4) continue;
@@ -1269,7 +1293,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         f32 rgbUnit = 1.0f;
         f32 rgbAmount = 0.0f;
         if (effects_ && !wants_3d(comp, *l, time)) {
-            const EffectTypeId rgbType = effects_->find_key(effect_keys::kTimeWarpRgb);
+            const EffectTypeId rgbType = rgbTimeType_;
             const ParameterRegistry* rp = rgbType ? effects_->params(rgbType) : nullptr;
             for (const EffectInstance& inst : l->effects) {
                 if (!inst.enabled || inst.type != rgbType || !rp || rp->count() < 6) continue;
@@ -1287,6 +1311,50 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             // O deslocamento por canal já está aplicado nas fontes extras; a
             // camada não precisa de amostras de matriz.
             rl.temporal.clear();
+        }
+
+        // Plano de efeitos ANTES do decode: é ele que diz se a camada pode
+        // alcançar a tela (Fase 8C §19–22).
+        if (out.plans.size() <= used) out.plans.emplace_back();
+        {
+            LayerPlacement placement;
+            placement.compFromLayer = m;
+            placement.compWidth = out.compWidth;
+            placement.compHeight = out.compHeight;
+            placement.layerWidth = rl.source.width;
+            placement.layerHeight = rl.source.height;
+            EffectGraph::plan(*l, *effects_, local, rl.texelScale, placement, this, out.plans[used]);
+        }
+        // FORA DA TELA: a caixa da camada (com o Transform dobrado) não toca a
+        // composição e nada na pilha dela pode trazer pixel para dentro (só
+        // efeitos de cor, sem desfoque/eco/RGB no tempo, sem perspectiva) —
+        // então ela não decodifica, não sobe textura e não gera passe. Vale
+        // também para matte: uma matte fora da tela recorta exatamente como
+        // uma matte ausente (nada no normal, tudo no invertido).
+        if (!inScene3d && rl.blurMatrices.empty() && rl.temporal.empty() && !rgbOn
+            && rl.source.width > 0 && rl.source.height > 0) {
+            const EffectPlan& plan = out.plans[used];
+            bool colorOnly = true;
+            for (const EffectStage& st : plan.stages) colorOnly &= st.kind == EffectStage::Kind::FusedColor;
+            if (colorOnly) {
+                const Mat4 mm = plan.hasFold ? m * plan.foldMatrix : m;
+                const f32 lw = static_cast<f32>(rl.source.width), lh = static_cast<f32>(rl.source.height);
+                f32 x0 = 1e30f, y0 = 1e30f, x1 = -1e30f, y1 = -1e30f;
+                bool affine = true;
+                for (const Vec2 c : {Vec2{0, 0}, Vec2{lw, 0}, Vec2{0, lh}, Vec2{lw, lh}}) {
+                    const Vec4 q = mm * Vec4{c.x, c.y, 0, 1};
+                    affine &= std::fabs(q.w - 1.0f) < 1e-4f;
+                    x0 = std::min(x0, q.x); x1 = std::max(x1, q.x);
+                    y0 = std::min(y0, q.y); y1 = std::max(y1, q.y);
+                }
+                // 2 px de folga: o filtro bilinear da borda.
+                const f32 cw = static_cast<f32>(out.compWidth), chh = static_cast<f32>(out.compHeight);
+                if (affine && (x1 < -2.0f || y1 < -2.0f || x0 > cw + 2.0f || y0 > chh + 2.0f)) {
+                    if (rl.maskCount > 0) out.maskData.resize(rl.maskFirst);
+                    ++out.culledLayers;
+                    continue;
+                }
+            }
         }
 
         // Vídeo: pede o frame e pega o melhor disponível AGORA (nunca espera).
@@ -1419,6 +1487,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             // sem liberar, asset reimportado): a textura velha não serve.
             if (it != images_.end()
                 && (it->second.width != rl.source.width || it->second.height != rl.source.height)) {
+                destroy_image_linear(it->second);
                 backend_->destroy_texture(it->second.texture);
                 images_.erase(it);
                 it = images_.end();
@@ -1445,15 +1514,6 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             }
             rl.source.pixels = nullptr;   // não vale fora do lock
         }
-
-        if (out.plans.size() <= used) out.plans.emplace_back();
-        LayerPlacement placement;
-        placement.compFromLayer = m;
-        placement.compWidth = out.compWidth;
-        placement.compHeight = out.compHeight;
-        placement.layerWidth = rl.source.width;
-        placement.layerHeight = rl.source.height;
-        EffectGraph::plan(*l, *effects_, local, rl.texelScale, placement, this, out.plans[used]);
 
         // Camada 2D no espaço 3D: entra na cena (profundidade de verdade com os
         // modelos e as outras camadas 3D vizinhas na pilha). Com desfoque/eco
@@ -1613,8 +1673,10 @@ void Renderer::fill_scene_context(const Composition& comp, FrameIndex time, Fram
 void Renderer::upload_glyphs(FrameSnapshot& snap) noexcept {
     // Todos os snapshots (pré-composições incluídas) num buffer só do quadro.
     usize total = 0;
-    std::vector<FrameSnapshot*> all;
-    std::vector<FrameSnapshot*> stack{&snap};
+    std::vector<FrameSnapshot*>& all = snapAll_;       // listas do renderer: sem alocar por quadro
+    std::vector<FrameSnapshot*>& stack = snapStack_;
+    all.clear();
+    stack.assign(1, &snap);
     while (!stack.empty()) {
         FrameSnapshot* s = stack.back();
         stack.pop_back();
@@ -1649,8 +1711,10 @@ void Renderer::upload_glyphs(FrameSnapshot& snap) noexcept {
 void Renderer::upload_vectors(FrameSnapshot& snap) noexcept {
     // Todas as malhas do quadro (pré-composições incluídas) num buffer só.
     usize total = 0;
-    std::vector<FrameSnapshot*> all;
-    std::vector<FrameSnapshot*> stack{&snap};
+    std::vector<FrameSnapshot*>& all = snapAll_;       // listas do renderer: sem alocar por quadro
+    std::vector<FrameSnapshot*>& stack = snapStack_;
+    all.clear();
+    stack.assign(1, &snap);
     while (!stack.empty()) {
         FrameSnapshot* s = stack.back();
         stack.pop_back();
@@ -2159,12 +2223,64 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
         case LayerSource::Kind::Image: {
             auto it = images_.find(layer.source.image.pack());
             if (it == images_.end()) return false;
-            out.texture = graph_.create_texture("layer-imagem", d);
+            // A imagem não muda: a versão linear nesta densidade, se já existe,
+            // é importada pronta — nenhum passe (mesmos pixels: o mesmo passe
+            // de conversão, só que feito uma vez).
+            ImageTexture& img = it->second;
+            TextureDesc ld = d;
+            ld.debugName = "imagem-linear";
+            ImageTexture::Linear* lin = nullptr;
+            for (ImageTexture::Linear& L : img.linear) {
+                if (L.tex.valid() && L.w == w && L.h == h) lin = &L;
+            }
+            if (lin) {
+                lin->lastFrame = frameNumber;
+                if (lin->fgFrame == frameNumber) {   // outra camada da mesma imagem, neste quadro
+                    out.texture = lin->fg;
+                    ++imageLinearHits_;
+                    return true;
+                }
+                out.texture = graph_.import_texture("layer-imagem", lin->tex, ld);
+                lin->fg = out.texture;
+                lin->fgFrame = frameNumber;
+                ++imageLinearHits_;
+                return out.texture.valid();
+            }
+            // Tamanho novo: ocupa o slot vazio ou o menos usado (a textura
+            // velha sai depois da GPU terminar com ela).
+            ImageTexture::Linear* slot = &img.linear[0];
+            for (ImageTexture::Linear& L : img.linear) {
+                if (!L.tex.valid()) { slot = &L; break; }
+                if (L.lastFrame < slot->lastFrame) slot = &L;
+            }
+            if (slot->tex.valid()) backend_->destroy_texture(slot->tex);
+            *slot = ImageTexture::Linear{};
+            auto t = backend_->create_texture(ld);
+            if (!t.ok()) return false;
+            slot->tex = *t;
+            slot->w = w;
+            slot->h = h;
+            slot->lastFrame = frameNumber;
+            out.texture = graph_.import_texture("layer-imagem", slot->tex, ld);
             EffectBuildContext ctx(graph_, shaders_, arena_, *this, kWorkFormat, maxTex);
             const Vec4 flags{0.0f, 0.0f, 0.0f, 0.0f};
-            return ctx.fullscreen_pass("imagem", PassStage::Decode, out.texture, ShaderId::video_rgba_to_linear_frag,
-                                       {PassTexture{{}, it->second.texture, CommonSampler::LinearClamp}},
-                                       &flags, sizeof(flags)) != kInvalidIndex;
+            const u32 pass = ctx.fullscreen_pass("imagem", PassStage::Decode, out.texture, ShaderId::video_rgba_to_linear_frag,
+                                                 {PassTexture{{}, img.texture, CommonSampler::LinearClamp}},
+                                                 &flags, sizeof(flags));
+            if (pass == kInvalidIndex) {
+                // Pipeline ainda compilando: o slot não fica "pronto" sem conteúdo.
+                backend_->destroy_texture(slot->tex);
+                *slot = ImageTexture::Linear{};
+                return false;
+            }
+            // Escreve uma textura que sobrevive ao quadro: o passe nunca é
+            // podado (senão o próximo quadro importaria lixo).
+            graph_.mark_side_effect(pass);
+            slot->builtFrame = frameNumber;
+            slot->fg = out.texture;
+            slot->fgFrame = frameNumber;
+            ++imageLinearBuilds_;
+            return true;
         }
         case LayerSource::Kind::Solid: {
             // Sólido: um clear, sem shader. Sem efeitos, 1x1 basta — a
@@ -2242,8 +2358,10 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
 void Renderer::upload_masks(FrameSnapshot& snap) noexcept {
     // Blocos de todas as pré-composições num buffer só do quadro (como os glifos).
     usize total = 0;
-    std::vector<FrameSnapshot*> all;
-    std::vector<FrameSnapshot*> stack{&snap};
+    std::vector<FrameSnapshot*>& all = snapAll_;       // listas do renderer: sem alocar por quadro
+    std::vector<FrameSnapshot*>& stack = snapStack_;
+    all.clear();
+    stack.assign(1, &snap);
     while (!stack.empty()) {
         FrameSnapshot* s = stack.back();
         stack.pop_back();
@@ -2747,6 +2865,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     if (!backend_) return Status{Errc::InvalidState, "renderer sem backend"};
     const u64 t0 = monotonic_ns();
     heavyScale_ = settings.finalQuality ? 1.0f : settings.heavyScale;
+    quality_ = effective_quality(settings);
 
     FrameBegin fb;
     // Alvo offscreen (export, captura): frame SEM swapchain. Com begin_frame o
@@ -3016,6 +3135,7 @@ Status Renderer::render_effect_preview(const EffectRegistry& effects, EffectType
     // Preview de efeito NUNCA é rebaixado pelo calor: a cartela é 320×200 e
     // roda uma vez. O que o aparelho mostra tem de ser o que o efeito faz.
     heavyScale_ = 1.0f;
+    quality_ = PreviewQuality{};
 
     pool_.begin_frame(*backend_, fb.frameNumber);
     graph_.reset();
@@ -3330,6 +3450,22 @@ void Renderer::collect_resources(u64 frameNumber) noexcept {
         } else {
             ++it;
         }
+    }
+    // Versões lineares de imagens que saíram de cena (a RGBA8 original fica).
+    for (auto& [k, img] : images_) {
+        for (ImageTexture::Linear& L : img.linear) {
+            if (L.tex.valid() && frameNumber > L.lastFrame + 240) {
+                backend_->destroy_texture(L.tex);
+                L = ImageTexture::Linear{};
+            }
+        }
+    }
+}
+
+void Renderer::destroy_image_linear(ImageTexture& img) noexcept {
+    for (ImageTexture::Linear& L : img.linear) {
+        if (L.tex.valid() && backend_) backend_->destroy_texture(L.tex);
+        L = ImageTexture::Linear{};
     }
 }
 

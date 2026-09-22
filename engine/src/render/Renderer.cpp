@@ -417,6 +417,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                        i32 playDirection, DecodeMode decodeMode, f32 speed, FrameSnapshot& out) {
     frameNumber_ = frameNumber;
     out.layers.clear();
+    out.nested.clear();
+    out.target = FGTexture{};
     out.compWidth = comp.width();
     out.compHeight = comp.height();
     const Color bg = comp.background();
@@ -453,8 +455,12 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         if (!l || !l->visible || !l->contains_time(time)) continue;
         const FrameIndex local = l->local_time(time);
 
+        // Dentro de uma pré-composição os ids se repetem (cada composição tem a
+        // sua tabela): decoder, texto e caches precisam de uma chave própria.
+        const LayerId rid = nestSalt_ == 0 ? id
+                          : LayerId{0x40000000u | ((nestSalt_ & 0x3FFFu) << 16) | (id.index & 0xFFFFu), id.generation};
         RenderLayer rl;
-        rl.id = id;
+        rl.id = rid;
         rl.blend = l->blendMode;
         rl.opacity = layer_opacity(*l, local);
         if (rl.opacity <= 0.0f) continue;   // invisível: nenhum passe, nenhum decode
@@ -568,6 +574,34 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 rl.source.height = static_cast<u32>(std::ceil(ext.height + 2.0f * pad));
                 break;
             }
+            case LayerKind::Composition: {
+                // Pré-composição: a filha no tempo da FONTE da camada (entrada,
+                // velocidade, reverso), convertido para a taxa dela.
+                const Composition* child = project.timeline().composition(l->nested.composition);
+                if (!child || child == &comp || prepareDepth_ >= 8) continue;
+                const f64 childFps = child->fps() > 0.0 ? child->fps() : fps;
+                const i64 cf = static_cast<i64>(std::floor(l->source_frame(time) * childFps / fps + 1e-6));
+                if (cf < 0 || cf >= child->duration().value) continue;
+                auto snapChild = std::make_unique<FrameSnapshot>();
+                const u32 savedSalt = nestSalt_;
+                nestSalt_ = (savedSalt * 131u + l->nested.composition.index + 1u) & 0x3FFFu;
+                if (nestSalt_ == 0) nestSalt_ = 1;
+                ++prepareDepth_;
+                prepare(*child, project, FrameIndex{cf}, media, imageLookup, imageCtx, settings, frameNumber,
+                        playDirection, decodeMode, speed, *snapChild);
+                --prepareDepth_;
+                nestSalt_ = savedSalt;
+                frameNumber_ = frameNumber;
+                out.videoLayers += snapChild->videoLayers;
+                out.staleVideoFrames += snapChild->staleVideoFrames;
+                out.missingVideoFrames += snapChild->missingVideoFrames;
+                rl.source.kind = LayerSource::Kind::Nested;
+                rl.source.width = child->width();
+                rl.source.height = child->height();
+                rl.source.nestedIndex = static_cast<u32>(out.nested.size());
+                out.nested.push_back(std::move(snapChild));
+                break;
+            }
             default:
                 continue;   // partículas: fora desta fase
         }
@@ -627,7 +661,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             f32 want = std::max(0.5f, max_scale(m) * previewFactor);
             f32 scale = 0.5f;
             while (scale < want && scale < 4.0f) scale *= 2.0f;
-            const u64 key = (static_cast<u64>(id.generation) << 32) | (0x80000000u | id.index);   // fora do espaço de assets
+            const u64 key = (static_cast<u64>(rid.generation) << 32) | (0x80000000u | rid.index);   // fora do espaço de assets
             const u64 rkey = text::raster_key(l->text, scale);
             auto it = textKeys_.find(key);
             if (font && (it == textKeys_.end() || it->second != rkey || images_.find(key) == images_.end())) {
@@ -665,7 +699,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         // Vídeo: pede o frame e pega o melhor disponível AGORA (nunca espera).
         if (rl.source.kind == LayerSource::Kind::Video && media) {
             const Asset* asset = project.asset(l->source);
-            VideoSource* src = media->source_for(id, l->source, *asset, frameNumber);
+            VideoSource* src = media->source_for(rid, l->source, *asset, frameNumber);
             if (src) {
                 i64 mediaUs = static_cast<i64>(std::llround(l->source_frame(time) * 1e6 / fps));
                 // Na grade de quadros da FONTE: o quadro que está na tela no
@@ -939,6 +973,16 @@ bool Renderer::build_video_source(const RenderLayer& layer, u32 layerIndex, u32 
 
 bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEffects, LayerImage& out,
                             std::vector<FrameRef>& framesUsed, u64 frameNumber) noexcept {
+    if (layer.source.kind == LayerSource::Kind::Nested) {
+        if (!currentSnap_ || layer.source.nestedIndex >= currentSnap_->nested.size()) return false;
+        const FrameSnapshot* child = currentSnap_->nested[layer.source.nestedIndex].get();
+        if (!child || !child->target.valid()) return false;
+        out.texture = child->target;
+        out.region = Rect{0.0f, 0.0f, static_cast<f32>(layer.source.width), static_cast<f32>(layer.source.height)};
+        out.width = std::max(1u, static_cast<u32>(std::lround(static_cast<f32>(layer.source.width) * layer.texelScale)));
+        out.height = std::max(1u, static_cast<u32>(std::lround(static_cast<f32>(layer.source.height) * layer.texelScale)));
+        return true;
+    }
     if (layer.source.kind == LayerSource::Kind::Scene3D) {
         // O grupo 3D renderiza no tamanho do alvo da composição (resolução de
         // preview incluída) e cobre a composição inteira.
@@ -1024,61 +1068,27 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
     return false;
 }
 
-Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
-                        const OffscreenTarget* offscreen, FrameStats& stats,
-                        RenderTimings& timings) noexcept {
-    if (!backend_) return Status{Errc::InvalidState, "renderer sem backend"};
-    const u64 t0 = monotonic_ns();
-
-    FrameBegin fb;
-    if (const Status s = backend_->begin_frame(fb); !s.ok()) {
-        // Sem imagem de swapchain neste vsync (superfície em recriação): os
-        // frames de vídeo deste snapshot só são soltos — não houve GPU.
-        for (RenderLayer& l : snap.layers) l.source.frame.reset();
-        return s;
+void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const TextureDesc& compDesc, u64 frameNumber,
+                              std::vector<CompositeDraw>& draws, u32 depth) noexcept {
+    // Pré-composições primeiro: cada uma no seu alvo, na MESMA escala de
+    // prévia deste (tamanho da filha × alvo/composição).
+    for (std::unique_ptr<FrameSnapshot>& child : snap.nested) {
+        if (!child || depth >= 8) continue;
+        const f32 kx = static_cast<f32>(compDesc.width) / static_cast<f32>(std::max(1u, snap.compWidth));
+        const f32 ky = static_cast<f32>(compDesc.height) / static_cast<f32>(std::max(1u, snap.compHeight));
+        TextureDesc d = compDesc;
+        d.transferSrc = false;
+        d.width = std::max(1u, static_cast<u32>(std::lround(static_cast<f32>(child->compWidth) * kx)));
+        d.height = std::max(1u, static_cast<u32>(std::lround(static_cast<f32>(child->compHeight) * ky)));
+        child->target = graph_.create_texture("pre-composicao", d);
+        std::vector<CompositeDraw> childDraws;
+        compose_layers(*child, child->target, d, frameNumber, childDraws, depth + 1);
     }
-    const u64 tBegin = monotonic_ns();
-    timings.acquireWaitMs = static_cast<f32>(static_cast<f64>(tBegin - t0) * 1e-6);
-
-    flush_uploads();
-    pool_.begin_frame(*backend_, fb.frameNumber);
-    graph_.reset();
-    arena_.reset();
-    draws_.clear();
-    lastZeroCopy_ = false;
-    framesInFlight_.clear();
-
-    // --- Alvo da composição: resolução de PREVIEW, coordenadas de COMPOSIÇÃO.
-    u32 cw = 0, ch = 0;
-    if (offscreen && offscreen->texture.valid()) {
-        cw = offscreen->width;
-        ch = offscreen->height;
-    } else {
-        const u32 num = std::max(1u, settings.previewNumerator);
-        const u32 den = std::max(1u, settings.previewDenominator);
-        cw = std::max(1u, snap.compWidth * num / den);
-        ch = std::max(1u, snap.compHeight * num / den);
-        const u32 maxTex = backend_->capabilities().maxTexture2D;
-        if (cw > maxTex || ch > maxTex) {
-            const f32 r = static_cast<f32>(maxTex) / static_cast<f32>(std::max(cw, ch));
-            cw = std::max(1u, static_cast<u32>(static_cast<f32>(cw) * r));
-            ch = std::max(1u, static_cast<u32>(static_cast<f32>(ch) * r));
-        }
-    }
-    TextureDesc compDesc;
-    compDesc.width = cw;
-    compDesc.height = ch;
-    compDesc.format = kWorkFormat;
-    compDesc.sampled = true;
-    compDesc.renderTarget = true;
-    compDesc.transferSrc = true;
-    const FGTexture comp = (offscreen && offscreen->texture.valid())
-                         ? graph_.import_texture("composicao", offscreen->texture, compDesc)
-                         : graph_.create_texture("composicao", compDesc);
+    // Estado da composição em curso (a recursão acima trocou).
     currentScenes_ = &snap.scenes;
-    if (offscreen && !snap.scenes.empty()) scene3d_.finish_environment();
-    compTargetW_ = cw;
-    compTargetH_ = ch;
+    currentSnap_ = &snap;
+    compTargetW_ = compDesc.width;
+    compTargetH_ = compDesc.height;
 
     // --- Layers: fonte → efeitos → desenho na composição.
     EffectBuildContext ctx(graph_, shaders_, arena_, *this, kWorkFormat,
@@ -1087,7 +1097,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
         const RenderLayer& layer = snap.layers[i];
         LayerImage src;
         const bool hasEffects = i < snap.plans.size() && !snap.plans[i].empty();
-        if (!build_source(layer, i, hasEffects, src, framesInFlight_, fb.frameNumber)) {
+        if (!build_source(layer, i, hasEffects, src, framesInFlight_, frameNumber)) {
             // Camada fora deste quadro por recurso ainda não pronto (pipeline
             // compilando, textura a caminho): o próximo quadro tenta de novo.
             if (layer.source.kind != LayerSource::Kind::Video) incomplete_ = true;
@@ -1150,7 +1160,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
                 draw.sampler = shaders_.sampler(CommonSampler::LinearClamp).id;
             }
         }
-        draws_.push_back(draw);
+        draws.push_back(draw);
     }
 
     // --- Composição: um passe, todas as layers, blend de hardware.
@@ -1159,9 +1169,9 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
             ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat, true, BlendMode::Normal));
         auto pAdd = shaders_.pipeline(PipelineKey::graphics(
             ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat, true, BlendMode::Add));
-        const u32 count = static_cast<u32>(draws_.size());
+        const u32 count = static_cast<u32>(draws.size());
         CompositeDraw* arr = count ? arena_.alloc_array<CompositeDraw>(count) : nullptr;
-        for (u32 i = 0; i < count; ++i) arr[i] = draws_[i];
+        for (u32 i = 0; i < count; ++i) arr[i] = draws[i];
         struct Cap {
             CompositeDraw* draws; u32 count; PipelineHandle normal; PipelineHandle add;
             f32 compW; f32 compH;
@@ -1189,8 +1199,74 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
                 pc.cmds.draw(6);
             }
         });
-        for (const CompositeDraw& d : draws_) graph_.read(pass, d.texture);
+        for (const CompositeDraw& d : draws) graph_.read(pass, d.texture);
     }
+}
+
+Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
+                        const OffscreenTarget* offscreen, FrameStats& stats,
+                        RenderTimings& timings) noexcept {
+    if (!backend_) return Status{Errc::InvalidState, "renderer sem backend"};
+    const u64 t0 = monotonic_ns();
+
+    FrameBegin fb;
+    if (const Status s = backend_->begin_frame(fb); !s.ok()) {
+        // Sem imagem de swapchain neste vsync (superfície em recriação): os
+        // frames de vídeo deste snapshot só são soltos — não houve GPU.
+        for (RenderLayer& l : snap.layers) l.source.frame.reset();
+        return s;
+    }
+    const u64 tBegin = monotonic_ns();
+    timings.acquireWaitMs = static_cast<f32>(static_cast<f64>(tBegin - t0) * 1e-6);
+
+    flush_uploads();
+    pool_.begin_frame(*backend_, fb.frameNumber);
+    graph_.reset();
+    arena_.reset();
+    draws_.clear();
+    lastZeroCopy_ = false;
+    framesInFlight_.clear();
+
+    // --- Alvo da composição: resolução de PREVIEW, coordenadas de COMPOSIÇÃO.
+    u32 cw = 0, ch = 0;
+    if (offscreen && offscreen->texture.valid()) {
+        cw = offscreen->width;
+        ch = offscreen->height;
+    } else {
+        const u32 num = std::max(1u, settings.previewNumerator);
+        const u32 den = std::max(1u, settings.previewDenominator);
+        cw = std::max(1u, snap.compWidth * num / den);
+        ch = std::max(1u, snap.compHeight * num / den);
+        const u32 maxTex = backend_->capabilities().maxTexture2D;
+        if (cw > maxTex || ch > maxTex) {
+            const f32 r = static_cast<f32>(maxTex) / static_cast<f32>(std::max(cw, ch));
+            cw = std::max(1u, static_cast<u32>(static_cast<f32>(cw) * r));
+            ch = std::max(1u, static_cast<u32>(static_cast<f32>(ch) * r));
+        }
+    }
+    TextureDesc compDesc;
+    compDesc.width = cw;
+    compDesc.height = ch;
+    compDesc.format = kWorkFormat;
+    compDesc.sampled = true;
+    compDesc.renderTarget = true;
+    compDesc.transferSrc = true;
+    const FGTexture comp = (offscreen && offscreen->texture.valid())
+                         ? graph_.import_texture("composicao", offscreen->texture, compDesc)
+                         : graph_.create_texture("composicao", compDesc);
+    currentScenes_ = &snap.scenes;
+    if (offscreen && !snap.scenes.empty()) scene3d_.finish_environment();
+    compTargetW_ = cw;
+    compTargetH_ = ch;
+
+    compose_layers(snap, comp, compDesc, fb.frameNumber, draws_, 0);
+    // A raiz de novo (as pré-composições trocaram o estado em curso).
+    currentScenes_ = &snap.scenes;
+    currentSnap_ = &snap;
+    compTargetW_ = cw;
+    compTargetH_ = ch;
+    EffectBuildContext ctx(graph_, shaders_, arena_, *this, kWorkFormat,
+                           std::min<u32>(backend_->capabilities().maxTexture2D, 8192));
 
     // --- Saída.
     if (!offscreen && fb.backbuffer.valid()) {

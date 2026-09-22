@@ -114,9 +114,9 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
             MenuSection("Recorte e grupo")
             MenuItemRow(CupertinoGlyph.ArrowTurnLeftDown, "Recortar pela camada de baixo", soon("Recortar pela camada de baixo"))
             if (type != LayerType.Group) {
-                MenuItemRow(CupertinoGlyph.RectangleStack, "Converter em grupo", soon("Converter em grupo"))
+                MenuItemRow(CupertinoGlyph.RectangleStack, "Converter em grupo", act { store.precompose(listOf(id)) })
             } else {
-                MenuItemRow(CupertinoGlyph.ArrowDownRightSquare, "Editar o grupo", soon("Editar o grupo"))
+                MenuItemRow(CupertinoGlyph.ArrowDownRightSquare, "Editar o grupo", act { store.openPrecomp(id) })
                 MenuItemRow(ShellGlyph.SquareSplit2x2, "Desagrupar", soon("Desagrupar"))
                 MenuItemRow(CupertinoGlyph.SquareStack3dDownRightFill, "Grupo de máscara", soon("Grupo de máscara"), detail = "A camada de cima mostra só o que cobre")
                 MenuItemRow(CupertinoGlyph.SquareStack3dDownRight, "Grupo de recorte", soon("Grupo de recorte"), detail = "A camada de cima fura as de baixo")
@@ -280,7 +280,10 @@ internal fun TimelineMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -
         )
 
         MenuSection("Mais")
-        MenuItemRow(CupertinoGlyph.RectangleStack, "Agrupar camadas…", soon("Agrupar camadas"))
+        MenuItemRow(
+            CupertinoGlyph.RectangleStack, "Agrupar as camadas escolhidas",
+            if (store.selection.isNotEmpty()) act { store.precompose() } else null,
+        )
         MenuItemRow(CupertinoGlyph.Book, "Guia rápido", soon("Guia rápido"))
     }
 }

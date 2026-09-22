@@ -17,6 +17,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -140,24 +141,34 @@ internal fun ProjectTopBar(store: EditorStore, ui: EditorUi) {
             .padding(end = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // A porta com a seta (Icons.logout espelhado): sair do projeto.
-        ChromeVectorButton(
-            Icons.AutoMirrored.Filled.Logout,
-            "Projetos",
-            onClick = { shellBack(store, ui) },
-            size = 20.dp,
-            width = 44.dp,
-            mirror = true,
-        )
-        Box(Modifier.weight(1f)) {
-            val title by remember { derivedStateOf { store.project.title } }
-            InlineName(
-                key = 0L,
-                name = title,
-                placeholder = "(Sem título)",
-                maxLength = 320,
-                onRename = { store.renameProject(it) },
+        val nested by remember { derivedStateOf { store.precompDepth > 0 } }
+        if (nested) {
+            // Dentro de um grupo: ‹ volta para a composição de cima.
+            ChromeButton(CupertinoGlyph.ChevronLeft, "Voltar para a composição principal", onClick = { store.closePrecomp() }, width = 44.dp)
+            Column(Modifier.weight(1f)) {
+                Text("Editando o grupo", style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, color = AureaColors.Accent)))
+                Text(store.compositionName, maxLines = 1, style = TitleStyle)
+            }
+        } else {
+            // A porta com a seta (Icons.logout espelhado): sair do projeto.
+            ChromeVectorButton(
+                Icons.AutoMirrored.Filled.Logout,
+                "Projetos",
+                onClick = { shellBack(store, ui) },
+                size = 20.dp,
+                width = 44.dp,
+                mirror = true,
             )
+            Box(Modifier.weight(1f)) {
+                val title by remember { derivedStateOf { store.project.title } }
+                InlineName(
+                    key = 0L,
+                    name = title,
+                    placeholder = "(Sem título)",
+                    maxLength = 320,
+                    onRename = { store.renameProject(it) },
+                )
+            }
         }
         ProjectClock(store) { openSheet(store, ui, ShellSheet.GoToTime) }
         ChromeVectorButton(Icons.Filled.MoreVert, "Mais da linha do tempo", onClick = { openSheet(store, ui, ShellSheet.TimelineMenu) })

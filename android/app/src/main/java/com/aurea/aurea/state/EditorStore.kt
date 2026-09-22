@@ -442,6 +442,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         layers = readLayers()
         refreshMarkers()
         editMode = engine.editMode()
+        precompDepth = engine.precompDepth()
+        compositionName = if (precompDepth > 0) engine.compositionName() else ""
         val mb = engine.motionBlurState()
         compMotionBlur = mb > 0f
         shutterAngle = if (mb != 0f) kotlin.math.abs(mb) - 1f else 180f
@@ -1155,6 +1157,38 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val id = primary ?: return
         send { setTextStrokeColor(id, r, g, b, a) }
         refreshDetail()
+    }
+
+    // --- Pré-composição (grupo) ----------------------------------------------------------
+    /** 0 = composição principal; > 0 = dentro de uma pré-composição. */
+    var precompDepth by mutableStateOf(0)
+        private set
+    var compositionName by mutableStateOf("")
+        private set
+
+    /** "Agrupar": as camadas viram uma pré-composição (mesmo visual, tempos iguais). */
+    fun precompose(ids: Collection<Long> = selection) {
+        if (ids.isEmpty()) return
+        val id = engine.precompose(ids.toLongArray())
+        if (id < 0) {
+            errorMessage = "Não foi possível agrupar (erro ${-id})."
+            return
+        }
+        refreshNow()
+        select(id)
+        showToast("Agrupado · toque em Editar o grupo para mexer dentro")
+    }
+
+    fun openPrecomp(layer: Long) {
+        if (!engine.openPrecomp(layer)) return
+        selection = LinkedHashSet()
+        refreshNow()
+    }
+
+    fun closePrecomp() {
+        if (!engine.closePrecomp()) return
+        selection = LinkedHashSet()
+        refreshNow()
     }
 
     // --- Desfoque de movimento ---------------------------------------------------------

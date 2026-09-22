@@ -30,6 +30,7 @@
 #include "aurea/scene3d/SceneRenderer.hpp"
 #include "aurea/timeline/Composition.hpp"
 
+#include <memory>
 #include <unordered_map>
 #include <vector>
 
@@ -55,7 +56,7 @@ struct Layer;
 [[nodiscard]] Mat4 layer_comp_matrix(const Composition& comp, const Layer& l, FrameIndex time, bool* perspective = nullptr) noexcept;
 
 struct LayerSource {
-    enum class Kind : u8 { None = 0, Video, Image, Solid, Scene3D, Shape };
+    enum class Kind : u8 { None = 0, Video, Image, Solid, Scene3D, Shape, Nested };
     Kind kind = Kind::None;
     u32  width = 0;          ///< tamanho natural da layer (px)
     u32  height = 0;
@@ -73,6 +74,9 @@ struct LayerSource {
 
     // Grupo 3D: índice em FrameSnapshot::scenes
     u32      sceneGroup = 0;
+
+    // Pré-composição: índice em FrameSnapshot::nested
+    u32      nestedIndex = 0;
 
     // Forma vetorial (SDF): tipo, canto, pontas, raio interno, preenchida,
     // cores lineares pré-multiplicadas, largura do contorno (px).
@@ -108,6 +112,10 @@ struct FrameSnapshot {
     u32  videoLayers = 0;
     u32  staleVideoFrames = 0;         ///< mostrando frame aproximado (scrub)
     u32  missingVideoFrames = 0;       ///< nenhum frame ainda (primeiro decode)
+    /// Pré-composições deste quadro (cada uma com o seu próprio snapshot,
+    /// no tempo da fonte da camada). `target` = onde ela foi composta.
+    std::vector<std::unique_ptr<FrameSnapshot>> nested;
+    FGTexture target{};
 };
 
 struct RenderSettings {
@@ -245,6 +253,10 @@ private:
     };
 
     void fill_scene_context(const Composition& comp, FrameIndex time, FrameSnapshot& out) const noexcept;
+    /// Camadas do snapshot → alvo (fonte, efeitos, desfoque, composição). As
+    /// pré-composições entram antes, cada uma no seu alvo (recursivo).
+    void compose_layers(FrameSnapshot& snap, FGTexture comp, const TextureDesc& compDesc, u64 frameNumber,
+                        std::vector<CompositeDraw>& draws, u32 depth) noexcept;
     [[nodiscard]] bool build_source(const RenderLayer& layer, u32 layerIndex, bool hasEffects,
                                     LayerImage& out, std::vector<FrameRef>& framesUsed,
                                     u64 frameNumber) noexcept;
@@ -275,6 +287,9 @@ private:
     std::vector<GpuTiming> timingScratch_;
 
     const std::vector<scene3d::SceneFrame>* currentScenes_ = nullptr;
+    const FrameSnapshot* currentSnap_ = nullptr;   ///< dono das pré-composições da composição em curso
+    u32 prepareDepth_ = 0;                          ///< aninhamento do prepare (guarda de recursão)
+    u32 nestSalt_ = 0;                              ///< ≠ 0 dentro de uma pré-composição (ids únicos)
     u32 compTargetW_ = 0, compTargetH_ = 0;
     u32 prewarmed_ = 0;
     u32 framesRendered_ = 0;

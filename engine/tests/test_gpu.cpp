@@ -1402,6 +1402,75 @@ AUREA_TEST(Gpu, MotionBlurSmearsAlongTheMotionAndKeepsEnergy) {
     AUREA_CHECK(worst <= 1);
 }
 
+AUREA_TEST(Gpu, PrecomposeLooksIdenticalAndTransformsAsOne) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(320, 180);
+    auto a = rig.e.add_shape(0);    // círculo
+    auto b = rig.e.add_shape(9);    // seta
+    AUREA_CHECK(a.ok() && b.ok());
+    Composition* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+    comp->layer(LayerId::unpack(*a))->transform.position = Vec3{100, 90, 0};
+    comp->layer(LayerId::unpack(*b))->transform.position = Vec3{220, 90, 0};
+    const Image8 before = rig.capture(320);
+    const u64 ids[2] = {*a, *b};
+    auto pre = rig.e.precompose(ids, 2);
+    AUREA_CHECK(pre.ok());
+    comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+    AUREA_CHECK_EQ(comp->layers().count(), 1u);
+    const Image8 after = rig.capture(320);
+    u32 worst = 0;
+    for (usize i = 0; i < before.rgba.size() && i < after.rgba.size(); ++i)
+        worst = std::max<u32>(worst, static_cast<u32>(std::abs(before.rgba[i] - after.rgba[i])));
+    // Metade da escala: o conjunto encolhe junto, em volta do centro.
+    Layer* p = comp->layer(LayerId::unpack(*pre));
+    p->transform.scale = Vec3{0.5f, 0.5f, 1};
+    const Box8 half = lit_box(rig.capture(320));
+    const Box8 full = lit_box(before);
+    std::printf("    pre-composicao: diferenca maxima %u; caixa %ux%u -> %ux%u\n", worst, full.w(), full.h(), half.w(), half.h());
+    AUREA_CHECK(worst <= 2);
+    AUREA_CHECK(std::abs(static_cast<i32>(half.w()) * 2 - static_cast<i32>(full.w())) <= 4);
+    // Dentro dela: as duas camadas, nos mesmos tempos; voltar funciona.
+    AUREA_CHECK(rig.e.open_precomp(*pre));
+    AUREA_CHECK_EQ(rig.e.precomp_depth(), 1u);
+    const Composition* child = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+    AUREA_CHECK(child && child->layers().count() == 2u);
+    AUREA_CHECK(rig.e.close_precomp());
+    AUREA_CHECK_EQ(rig.e.precomp_depth(), 0u);
+    // Desfazer devolve as duas camadas à principal.
+    Command u;
+    u.type = CommandType::Undo;
+    AUREA_CHECK(rig.e.apply_command(u).ok());   // a escala foi direta: desfaz o pré-compor
+    comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+    AUREA_CHECK_EQ(comp->layers().count(), 2u);
+}
+
+AUREA_TEST(Gpu, PrecomposeChildOfOutsideParentStaysInPlace) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(320, 180);
+    auto nul = rig.e.add_null(false);
+    auto shp = rig.e.add_shape(9);   // seta
+    AUREA_CHECK(nul.ok() && shp.ok());
+    Composition* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+    Layer* n = comp->layer(LayerId::unpack(*nul));
+    n->transform.position = Vec3{200, 70, 0};
+    n->transform.rotation = Vec3{0, 0, 25};
+    Command pc;
+    pc.type = CommandType::LayerSetParent;
+    pc.layer_parent.layer = LayerId::unpack(*shp);
+    pc.layer_parent.parent = LayerId::unpack(*nul);
+    AUREA_CHECK(rig.e.apply_command(pc).ok());
+    n->transform.position = Vec3{230, 100, 0};   // o pai anda: a seta vai junto
+    const Image8 before = rig.capture(320);
+    const u64 ids[1] = {*shp};
+    AUREA_CHECK(rig.e.precompose(ids, 1).ok());
+    const Image8 after = rig.capture(320);
+    u32 worst = 0;
+    for (usize i = 0; i < before.rgba.size() && i < after.rgba.size(); ++i)
+        worst = std::max<u32>(worst, static_cast<u32>(std::abs(before.rgba[i] - after.rgba[i])));
+    std::printf("    filho de pai de fora: diferenca maxima %u\n", worst);
+    AUREA_CHECK(worst <= 3);
+}
+
 AUREA_TEST(Gpu, Scene3DSurvivesSaveAndReopenIdentically) {
     AUREA_REQUIRE_GPU();
     const std::string path = gltf_data("DamagedHelmet.glb");

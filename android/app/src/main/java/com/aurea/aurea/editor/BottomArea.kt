@@ -327,7 +327,7 @@ internal fun MultiSelectionPanel(store: EditorStore) {
                 .padding(horizontal = 12.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            BatchAction(ShellGlyph.FolderBadgePlus, "Agrupar") { store.comingSoon("Agrupar") }
+            BatchAction(ShellGlyph.FolderBadgePlus, "Agrupar") { store.precompose() }
             BatchAction(CupertinoGlyph.Link, "Vincular") { store.parentSelectionToLast() }
             BatchAction(CupertinoGlyph.ChartBarAltFill, "Cascata") { store.comingSoon("Cascata") }
             BatchAction(ShellGlyph.SquareGrid3x2, "Alinhar") { store.comingSoon("Alinhar") }

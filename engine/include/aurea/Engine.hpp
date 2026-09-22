@@ -279,6 +279,20 @@ public:
     /// {ligado, obturador em graus} da composição atual.
     bool query_motion_blur(bool& on, f32& shutter) noexcept;
 
+    // --- Pré-composição ----------------------------------------------------------
+    /// Move as camadas para uma composição nova (mesmo tamanho, taxa e
+    /// duração; fundo transparente) e põe no lugar UMA camada que a mostra, na
+    /// posição da mais alta. Os tempos não mudam. Devolve a camada nova.
+    [[nodiscard]] Result<u64> precompose(const u64* ids, u32 count, const char* name = nullptr) noexcept;
+    /// Entra na pré-composição da camada (a timeline passa a mostrar ela).
+    bool open_precomp(u64 layerId) noexcept;
+    /// Volta para a composição principal. false = já estava nela.
+    bool close_precomp() noexcept;
+    /// Profundidade atual (0 = principal).
+    [[nodiscard]] u32 precomp_depth() noexcept;
+    /// Nome da composição aberta.
+    [[nodiscard]] std::string current_composition_name() noexcept;
+
     // --- Copiar e colar -----------------------------------------------------------
     /// Área de transferência do motor (vive enquanto o app vive; colar em outro
     /// projeto só leva camadas cuja mídia exista lá).
@@ -521,6 +535,7 @@ private:
 
     std::unique_ptr<CommandQueue> commandQueue_;
     std::unique_ptr<Project>      project_;
+    std::vector<CompositionId>    compStack_;   ///< caminho da principal até a aberta
     struct Clipboard {
         std::vector<std::pair<u64, Layer>> layers;   ///< id original → cópia
         i64 layersAnchor = 0;

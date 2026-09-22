@@ -811,6 +811,51 @@ Mat4 inverse4(const Mat4& a) noexcept {
     return r;
 }
 
+/// Escreve o transform local (posição/rotação/escala, âncora mantida) que
+/// reproduz `local` (camada → espaço do pai). Trilhas sem keyframe acompanham.
+/// Usado pelo parentesco compensado e ao tirar a camada de perto do pai.
+void set_local_from(Layer& lay, const Mat4& local) noexcept {
+    Layer* l = &lay;
+    const Vec3 anc = l->transform.anchor;
+    const Mat4 m = local * Mat4::translation(anc);
+    const Vec3 c0{m.col[0].x, m.col[0].y, m.col[0].z};
+    const Vec3 c1{m.col[1].x, m.col[1].y, m.col[1].z};
+    const Vec3 c2{m.col[2].x, m.col[2].y, m.col[2].z};
+    const f32 sx = c0.length(), sy = c1.length(), sz = std::max(1e-6f, c2.length());
+    if (!(sx > 1e-6f && sy > 1e-6f)) return;
+    const f32 r20 = c0.z / sx, r21 = c1.z / sy, r22 = c2.z / sz, r10 = c0.y / sx, r00 = c0.x / sx;
+    const f32 ry = std::asin(std::clamp(-r20, -1.0f, 1.0f));
+    const f32 rx = std::atan2(r21, r22);
+    const f32 rz = std::atan2(r10, r00);
+    Vec3 rotDeg{rx / kDeg2Rad, ry / kDeg2Rad, rz / kDeg2Rad};
+    // Camada 2D fica 2D: sem inclinar em X/Y por arredondamento.
+    if (std::fabs(rotDeg.x) < 1e-3f) rotDeg.x = 0.0f;
+    if (std::fabs(rotDeg.y) < 1e-3f) rotDeg.y = 0.0f;
+    const Vec3 pos{m.col[3].x, m.col[3].y, std::fabs(m.col[3].z) < 1e-3f ? 0.0f : m.col[3].z};
+    l->transform.position = pos;
+    l->transform.rotation = rotDeg;
+    l->transform.scale = Vec3{sx, sy, l->threeD ? sz : l->transform.scale.z};
+    auto set = [&](TrackProperty prop, f32 v) {
+        if (Track* tr = l->tracks.find(prop); tr && tr->keys.size() <= 1) {
+            if (tr->keys.size() == 1) tr->keys[0].value = v; else tr->staticValue = v;
+        }
+    };
+    set(TrackProperty::PositionX, pos.x); set(TrackProperty::PositionY, pos.y); set(TrackProperty::PositionZ, pos.z);
+    set(TrackProperty::RotationX, rotDeg.x); set(TrackProperty::RotationY, rotDeg.y); set(TrackProperty::RotationZ, rotDeg.z);
+    set(TrackProperty::ScaleX, sx); set(TrackProperty::ScaleY, sy);
+}
+
+/// Transform parado (posição/rotação/escala sem keyframes)? Só aí dá para
+/// reescrever o local sem destruir uma animação.
+bool transform_is_static(const Layer& l) noexcept {
+    for (TrackProperty p : {TrackProperty::PositionX, TrackProperty::PositionY, TrackProperty::PositionZ,
+                            TrackProperty::RotationX, TrackProperty::RotationY, TrackProperty::RotationZ,
+                            TrackProperty::ScaleX, TrackProperty::ScaleY}) {
+        if (const Track* t = l.tracks.find(p); t && t->animated()) return false;
+    }
+    return true;
+}
+
 } // namespace
 
 Result<u64> Engine::add_null(bool threeD) noexcept {
@@ -879,6 +924,143 @@ bool Engine::set_shutter_angle(f32 degrees) noexcept {
     project_->mark_dirty();
     request_render();
     return true;
+}
+
+// =============================================================================
+// Pré-composição
+// =============================================================================
+Result<u64> Engine::precompose(const u64* ids, u32 count, const char* name) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp || !ids || count == 0) return Status{Errc::InvalidArgument, "nada para pre-compor"};
+    Timeline& tl = project_->timeline();
+    const CompositionId parentId = tl.current();
+    // Camadas na ordem vertical (de baixo para cima) e o trecho que ocupam.
+    std::vector<LayerId> moving;
+    i64 lo = std::numeric_limits<i64>::max(), hi = 0;
+    i32 top = -1;
+    for (u32 i = 0; i < comp->order().size(); ++i) {
+        const LayerId id = comp->order().at(i);
+        for (u32 k = 0; k < count; ++k) {
+            if (ids[k] != id.pack()) continue;
+            const Layer* l = comp->layer(id);
+            if (!l) break;
+            moving.push_back(id);
+            lo = std::min(lo, l->start.value);
+            hi = std::max(hi, l->end.value);
+            top = static_cast<i32>(i);
+        }
+    }
+    if (moving.empty()) return Status{Errc::NotFound, "camadas nao encontradas"};
+    history_.before_mutation(*comp, parentId, "pre-compor");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    u32 n = 1;
+    tl.for_each_composition([&](CompositionId, const Composition&) { ++n; });
+    const std::string label = name && *name ? std::string(name) : "Pré-composição " + std::to_string(n - 1);
+    const CompositionId cid = tl.create_composition(label, comp->width(), comp->height(), comp->fps());
+    Composition* child = tl.composition(cid);
+    comp = tl.composition(parentId);   // a criação pode ter realocado
+    if (!child || !comp) return Status{Errc::OutOfMemory, "composicao nao criada"};
+    child->set_duration(comp->duration());
+    child->set_transparent_background(true);
+    child->set_nesting_depth(comp->nesting_depth() + 1);
+    // Copia (mantendo tempos) e remapeia pais DENTRO do grupo; pai de fora
+    // fica para trás (a camada perderia a referência — solta).
+    std::vector<std::pair<LayerId, LayerId>> map;
+    for (LayerId id : moving) {
+        const Layer* src = comp->layer(id);
+        const LayerId nid = child->add_layer(src->kind, src->name);
+        if (Layer* dst = child->layer(nid)) {
+            *dst = *src;
+            map.emplace_back(id, nid);
+        }
+    }
+    const FrameIndex now = playback_.current();
+    for (auto& [oldId, nid] : map) {
+        Layer* dst = child->layer(nid);
+        if (!dst || !dst->parent.valid()) continue;
+        LayerId np{};
+        for (auto& [o, nn] : map) if (o == dst->parent) np = nn;
+        if (!np.valid() && dst->kind != LayerKind::Model3D && transform_is_static(*dst)) {
+            // Pai ficou de fora: a camada leva o lugar de MUNDO que ocupava
+            // (senão o transform local passaria a valer sozinho e ela pularia).
+            if (const Layer* orig = comp->layer(oldId)) set_local_from(*dst, layer_world_matrix(*comp, *orig, now));
+        }
+        dst->parent = np;
+    }
+    child->rebuild_draw_order();
+    for (LayerId id : moving) {
+        media_.close_layer(id);
+        comp->remove_layer(id);
+    }
+    // A camada que mostra a pré-composição: ocupa o trecho, tempo 1:1.
+    const LayerId pl = comp->add_layer(LayerKind::Composition, label);
+    Layer* p = comp->layer(pl);
+    if (!p) return Status{Errc::OutOfMemory, "camada nao criada"};
+    p->nested.composition = cid;
+    p->start = FrameIndex{lo};
+    p->end = FrameIndex{hi};
+    p->offset = FrameIndex{lo};
+    const Vec3 center{static_cast<f32>(comp->width()) * 0.5f, static_cast<f32>(comp->height()) * 0.5f, 0.0f};
+    p->transform.anchor = center;
+    p->transform.position = center;
+    p->transform.scale = Vec3{1, 1, 1};
+    p->transform.rotation = Vec3{0, 0, 0};
+    p->transform.opacity = 1.0f;
+    const i32 target = std::max(0, top - static_cast<i32>(moving.size()) + 1);
+    (void)comp->reorder_layer(pl, static_cast<u32>(target));
+    comp->rebuild_draw_order();
+    selection_.assign(1, pl.pack());
+    project_->mark_dirty();
+    request_render();
+    return pl.pack();
+}
+
+bool Engine::open_precomp(u64 layerId) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->kind != LayerKind::Composition) return false;
+    Timeline& tl = project_->timeline();
+    if (!tl.composition(l->nested.composition)) return false;
+    // Cabeçote no tempo correspondente dentro da filha.
+    const f64 f = l->source_frame(playback_.current());
+    compStack_.push_back(tl.current());
+    tl.set_current(l->nested.composition);
+    selection_.clear();
+    if (Composition* child = current_composition()) {
+        playback_.configure(child->fps(), child->duration());
+        playback_.seek(FrameIndex{std::clamp<i64>(static_cast<i64>(f), 0, child->duration().value - 1)}, monotonic_ns());
+    }
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    request_render();
+    return true;
+}
+
+bool Engine::close_precomp() noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    if (!project_ || compStack_.empty()) return false;
+    Timeline& tl = project_->timeline();
+    const CompositionId back = compStack_.back();
+    compStack_.pop_back();
+    if (!tl.composition(back)) return false;
+    tl.set_current(back);
+    selection_.clear();
+    if (Composition* c = current_composition()) playback_.configure(c->fps(), c->duration());
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    request_render();
+    return true;
+}
+
+std::string Engine::current_composition_name() noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    const Composition* c = project_ ? current_composition() : nullptr;
+    return c ? c->name() : std::string{};
+}
+
+u32 Engine::precomp_depth() noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    return static_cast<u32>(compStack_.size());
 }
 
 // =============================================================================
@@ -2290,6 +2472,15 @@ bool Engine::fill_layer_detail_locked(u64 layerId, bridge::LayerDetailPOD& out) 
         out.sourceHeight = 100;
         return true;
     }
+    if (l->kind == LayerKind::Composition) {
+        if (const Composition* child = project_->timeline().composition(l->nested.composition)) {
+            out.sourceWidth = child->width();
+            out.sourceHeight = child->height();
+            out.sourceFps = static_cast<f32>(child->fps());
+            out.sourceFrames = static_cast<i32>(child->duration().value);
+        }
+        return true;
+    }
     if (l->kind == LayerKind::Text) {
         if (const auto font = text::default_font()) {
             const text::TextExtent ext = text::measure(*font, l->text);
@@ -3011,35 +3202,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             if (canCompensate) {
                 const Layer* p = parent.valid() ? comp->layer(parent) : nullptr;
                 const Mat4 pw = p ? layer_world_matrix(*comp, *p, now) : Mat4::identity();
-                const Vec3 anc = l->transform.anchor;
-                const Mat4 m = inverse4(pw) * world * Mat4::translation(anc);
-                const Vec3 c0{m.col[0].x, m.col[0].y, m.col[0].z};
-                const Vec3 c1{m.col[1].x, m.col[1].y, m.col[1].z};
-                const Vec3 c2{m.col[2].x, m.col[2].y, m.col[2].z};
-                const f32 sx = c0.length(), sy = c1.length(), sz = std::max(1e-6f, c2.length());
-                if (sx > 1e-6f && sy > 1e-6f) {
-                    const f32 r20 = c0.z / sx, r21 = c1.z / sy, r22 = c2.z / sz, r10 = c0.y / sx, r00 = c0.x / sx;
-                    const f32 ry = std::asin(std::clamp(-r20, -1.0f, 1.0f));
-                    const f32 rx = std::atan2(r21, r22);
-                    const f32 rz = std::atan2(r10, r00);
-                    Vec3 rotDeg{rx / kDeg2Rad, ry / kDeg2Rad, rz / kDeg2Rad};
-                    // Camada 2D fica 2D: sem inclinar em X/Y por arredondamento.
-                    if (std::fabs(rotDeg.x) < 1e-3f) rotDeg.x = 0.0f;
-                    if (std::fabs(rotDeg.y) < 1e-3f) rotDeg.y = 0.0f;
-                    const Vec3 pos{m.col[3].x, m.col[3].y, std::fabs(m.col[3].z) < 1e-3f ? 0.0f : m.col[3].z};
-                    l->transform.position = pos;
-                    l->transform.rotation = rotDeg;
-                    l->transform.scale = Vec3{sx, sy, l->threeD ? sz : l->transform.scale.z};
-                    // Valores parados em trilhas sem keyframe acompanham.
-                    auto set = [&](TrackProperty prop, f32 v) {
-                        if (Track* tr = l->tracks.find(prop); tr && tr->keys.size() <= 1) {
-                            if (tr->keys.size() == 1) tr->keys[0].value = v; else tr->staticValue = v;
-                        }
-                    };
-                    set(TrackProperty::PositionX, pos.x); set(TrackProperty::PositionY, pos.y); set(TrackProperty::PositionZ, pos.z);
-                    set(TrackProperty::RotationX, rotDeg.x); set(TrackProperty::RotationY, rotDeg.y); set(TrackProperty::RotationZ, rotDeg.z);
-                    set(TrackProperty::ScaleX, sx); set(TrackProperty::ScaleY, sy);
-                }
+                set_local_from(*l, inverse4(pw) * world);
             }
             return OkStatus;
         }

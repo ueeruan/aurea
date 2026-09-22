@@ -159,6 +159,7 @@ internal fun shellBack(store: EditorStore, ui: EditorUi) {
         ui.fullscreen -> ui.fullscreen = false
         ui.panel != null -> ui.panel = null
         store.selection.isNotEmpty() -> store.clearSelection()
+        store.precompDepth > 0 -> store.closePrecomp()
         else -> store.closeProject()
     }
 }

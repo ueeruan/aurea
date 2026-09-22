@@ -245,3 +245,49 @@ AUREA_TEST(Clipboard, StyleAndEffectsAndKeyframes) {
     op = b->tracks.find(TrackProperty::Opacity);
     AUREA_CHECK(!op || op->find_exact(b->local_time(FrameIndex{40})) == kInvalidIndex);
 }
+
+// =============================================================================
+//  Pré-composição
+// =============================================================================
+AUREA_TEST(Precomp, MovesLayersKeepsTimesAndSurvivesReopen) {
+    EditRig r;
+    // B filho de A; pré-compõe A e B.
+    Command pc;
+    pc.type = CommandType::LayerSetParent;
+    pc.layer_parent.layer = LayerId::unpack(r.b);
+    pc.layer_parent.parent = LayerId::unpack(r.a);
+    AUREA_CHECK(r.e.apply_command(pc).ok());
+    r.comp()->layer(LayerId::unpack(r.a))->name = "A";
+    r.comp()->layer(LayerId::unpack(r.b))->name = "B";
+    const CompositionId mainId = r.e.project()->timeline().current();
+    const u64 ids[2] = {r.a, r.b};
+    auto pre = r.e.precompose(ids, 2, "Grupo");
+    AUREA_CHECK(pre.ok());
+    const Layer* p = r.L(*pre);
+    AUREA_CHECK(p && p->kind == LayerKind::Composition);
+    AUREA_CHECK(p && p->start.value == 0 && p->end.value == 60 && p->offset.value == 0);
+    AUREA_CHECK_EQ(r.comp()->layers().count(), 2u);   // C + a pré-composição
+    const Composition* child = p ? r.e.project()->timeline().composition(p->nested.composition) : nullptr;
+    AUREA_CHECK(child && child->layers().count() == 2u);
+    const Layer* ca = nullptr;
+    const Layer* cb = nullptr;
+    if (child) child->layers().for_each([&](LayerId, const Layer& l) { if (l.name == "A") ca = &l; if (l.name == "B") cb = &l; });
+    AUREA_CHECK(ca && cb && cb->start.value == 30 && cb->end.value == 60);
+    AUREA_CHECK(ca && cb && child->layer(cb->parent) == ca);
+    // Salvar e reabrir: a principal continua sendo a principal e a camada
+    // continua apontando para a MESMA pré-composição.
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_teste_precomp.aurea";
+    AUREA_CHECK(r.e.save_project(path.c_str()).ok());
+    AUREA_CHECK(r.e.load_project(path.c_str()).ok());
+    const Timeline& tl = r.e.project()->timeline();
+    const Composition* mainC = tl.composition(tl.current());
+    AUREA_CHECK(mainC && mainC->layers().count() == 2u);
+    AUREA_CHECK(tl.current() == tl.root());
+    const Layer* reP = nullptr;
+    if (mainC) mainC->layers().for_each([&](LayerId, const Layer& l) { if (l.kind == LayerKind::Composition) reP = &l; });
+    AUREA_CHECK(reP != nullptr);
+    const Composition* reChild = reP ? tl.composition(reP->nested.composition) : nullptr;
+    AUREA_CHECK(reChild && reChild->layers().count() == 2u && reChild != mainC);
+    (void)mainId;
+    std::remove(path.c_str());
+}

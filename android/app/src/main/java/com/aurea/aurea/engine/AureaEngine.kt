@@ -283,6 +283,13 @@ class AureaEngine private constructor() {
     /** Bits: 1 camadas, 2 estilo, 4 efeitos, 8 keyframes. */
     fun clipboardState(): Int = nativeClipboardState(nativeHandle)
 
+    // Pré-composição.
+    fun precompose(ids: LongArray): Long = nativePrecompose(nativeHandle, ids)
+    fun openPrecomp(layer: Long): Boolean = nativeOpenPrecomp(nativeHandle, layer)
+    fun closePrecomp(): Boolean = nativeClosePrecomp(nativeHandle)
+    fun precompDepth(): Int = nativePrecompDepth(nativeHandle)
+    fun compositionName(): String = nativeCompositionName(nativeHandle) ?: ""
+
     // Desfoque de movimento.
     fun setMotionBlur(layer: Long, on: Boolean): Boolean = nativeSetMotionBlur(nativeHandle, layer, on)
     fun setCompositionMotionBlur(on: Boolean) = nativeSetCompositionMotionBlur(nativeHandle, on)
@@ -399,6 +406,11 @@ class AureaEngine private constructor() {
     private external fun nativeToggleMarker(handle: Long, frame: Long): Boolean
     private external fun nativeSetEditMode(handle: Long, on: Boolean)
     private external fun nativeSetMotionBlur(handle: Long, layer: Long, on: Boolean): Boolean
+    private external fun nativePrecompose(handle: Long, ids: LongArray): Long
+    private external fun nativeOpenPrecomp(handle: Long, layer: Long): Boolean
+    private external fun nativeClosePrecomp(handle: Long): Boolean
+    private external fun nativePrecompDepth(handle: Long): Int
+    private external fun nativeCompositionName(handle: Long): String?
     private external fun nativeSetCompositionMotionBlur(handle: Long, on: Boolean)
     private external fun nativeSetShutterAngle(handle: Long, degrees: Float)
     private external fun nativeMotionBlurState(handle: Long): Float

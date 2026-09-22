@@ -11,5 +11,6 @@ dos materiais e da integração com timeline/export.
 | `stb/stb_truetype.h`, `stb/stb_image.h` | github.com/nothings/stb | 2c980bb | MIT ou domínio público | contornos de fonte do Texto 3D; PNG/JPEG embutidos nos modelos (igual em Android e iOS) |
 | `ufbx/` | github.com/ufbx/ufbx | v0.18.0 (729ab83) | MIT ou domínio público | leitor FBX (entrada → formato interno) |
 | `basisu/` | github.com/BinomialLLC/basis_universal | v1_50_0_2 (b76a431), só o transcoder + zstd de decodificação (`zstd/zstd.h` é nosso: declara só as 2 funções usadas) | Apache-2.0 (zstd: BSD) | KTX2 (ETC1S/UASTC, Zstd) → RGBA no import |
+| `harfbuzz/` | github.com/harfbuzz/harfbuzz | 14.5.0 (863d3f7), só `src/` (.cc/.hh/.h), compilado pelo amálgama `harfbuzz.cc` | MIT (COPYING) | shaping de texto (kerning, ligaduras, árabe, scripts complexos) |
 
 Atualizar: trocar os arquivos pela nova versão e esta tabela no mesmo commit.

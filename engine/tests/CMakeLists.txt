@@ -26,6 +26,7 @@ add_executable(aurea_tests
     test_beats.cpp
     test_edit.cpp
     test_tracking.cpp
+    test_text.cpp
 )
 
 target_include_directories(aurea_tests PRIVATE

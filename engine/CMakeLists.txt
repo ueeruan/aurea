@@ -105,7 +105,8 @@ set(AUREA_CORE_SOURCES
 file(GLOB AUREA_MESHOPT_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/meshoptimizer/src/*.cpp)
 add_library(aurea_thirdparty STATIC ${AUREA_MESHOPT_SOURCES} ${CMAKE_CURRENT_SOURCE_DIR}/third_party/ufbx/ufbx.c
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/basisu/transcoder/basisu_transcoder.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/basisu/zstd/zstddeclib.c)
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/basisu/zstd/zstddeclib.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/harfbuzz/src/harfbuzz.cc)
 # KTX2 (ETC1S e UASTC, com Zstd) transcodificado para RGBA no import; os
 # alvos de GPU que o motor não usa ficam fora (binário menor). PUBLIC: o
 # cabeçalho do transcoder precisa ver a mesma configuração.
@@ -118,7 +119,8 @@ target_include_directories(aurea_thirdparty PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/meshoptimizer/src
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/cgltf
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/basisu/transcoder)
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/basisu/transcoder
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/harfbuzz/src)
 target_compile_options(aurea_thirdparty PRIVATE
     $<$<CXX_COMPILER_ID:MSVC>:/W0 /utf-8>
     $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-w -fno-exceptions>

@@ -76,6 +76,19 @@ struct TextRaster {
 /// É a base do texto 3D extrudado.
 [[nodiscard]] bool outline(const Font& font, const TextData& t, std::vector<std::vector<Vec2>>& contours);
 
+/// Um glifo depois do shaping (HarfBuzz): índice na fonte, caractere de
+/// origem (cluster, na linha), posição na linha de base (px da layer) e se
+/// veio de uma fonte de reserva (fallback).
+struct ShapedGlyph {
+    u32 glyph = 0;
+    u32 cluster = 0;
+    u32 line = 0;
+    f32 x = 0.0f, y = 0.0f;
+    bool fallback = false;
+};
+/// Glifos do texto em ordem visual (kerning, ligaduras, árabe contextual, RTL).
+u32 shaped_glyphs(const Font& font, const TextData& t, std::vector<ShapedGlyph>& out);
+
 /// Chave de cache: muda quando qualquer coisa que altera os pixels muda.
 [[nodiscard]] u64 raster_key(const TextData& t, f32 scale) noexcept;
 

@@ -1,18 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- A TELA DE ABERTURA.
+<!-- A TELA DE ABERTURA (antes do Android 12; no 12+ é a SplashScreen do
+     sistema, ver values-v31/styles.xml).
 
      Ela era BRANCA (`@android:color/white`) enquanto o app inteiro e escuro,
      entao abrir o Aurea dava um flash branco na cara antes do primeiro
      quadro. Agora ela usa o fundo da marca e mostra a logo no meio: e a
      mesma identidade do icone, e nao um retangulo generico.
 
-     A logo vem de `@drawable/splash_logo`, gerada por `tool_icones.py` nas
-     cinco densidades. -->
+     A logo vem de `@drawable/splash_logo` (160 dp), gerada por
+     `tool_icones.py` nas cinco densidades. Desenhada em 288 dp — o tamanho
+     do ícone da SplashScreen do 12+ — para as duas aberturas saírem iguais
+     ao print 17_splash (glifo ~97 × 85 dp). -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:drawable="@color/aurea_background" />
-    <item>
-        <bitmap
-            android:gravity="center"
-            android:src="@drawable/splash_logo" />
-    </item>
+    <item
+        android:width="288dp"
+        android:height="288dp"
+        android:gravity="center"
+        android:drawable="@drawable/splash_logo" />
 </layer-list>

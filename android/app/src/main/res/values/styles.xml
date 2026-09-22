@@ -10,7 +10,7 @@
       Sem ActionBar: a UI é toda Compose, e uma barra do sistema em cima de um
       editor já apertado é área desperdiçada.
     -->
-    <style name="AureaTheme" parent="@android:style/Theme.Material.NoActionBar">
+    <style name="Base.AureaTheme" parent="@android:style/Theme.Material.NoActionBar">
         <item name="android:windowBackground">@color/aurea_background</item>
         <item name="android:colorBackground">@color/aurea_background</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
@@ -20,6 +20,14 @@
         <!-- O editor desenha atrás das barras do sistema; sem isto, a área
              segura não é calculada e a timeline fica sob a barra de gestos. -->
         <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+    </style>
+
+    <!-- A SPLASH antes do Android 12: não há SplashScreen do sistema, então a
+         logo vem do fundo da janela até o Compose desenhar o primeiro quadro
+         (a raiz do Compose pinta a tela inteira e cobre o fundo depois).
+         No 12+ quem mostra a logo é o sistema: ver values-v31. -->
+    <style name="AureaTheme" parent="Base.AureaTheme">
+        <item name="android:windowBackground">@drawable/launch_background</item>
     </style>
 
     <!-- Tema da janela enquanto o processo sobe: mostra a logo sobre o fundo da

@@ -1154,8 +1154,11 @@ CameraSolution solve_camera(const Tracks2D& tracks, const SolveOptions& opt, con
         for (int k = 0; k < 9; ++k) out.poses[i].R[k] = p.R.m[k];
         out.poses[i].t[0] = p.t.x; out.poses[i].t[1] = p.t.y; out.poses[i].t[2] = p.t.z;
     }
+    out.trackSolved.assign(tracks.pos.size(), rot ? 1 : 0);
     for (usize t = 0; t < best.X.size(); ++t) {
-        if (best.hasX[t]) out.points.push_back(Vec3{static_cast<f32>(best.X[t].x), static_cast<f32>(best.X[t].y), static_cast<f32>(best.X[t].z)});
+        if (!best.hasX[t]) continue;
+        out.points.push_back(Vec3{static_cast<f32>(best.X[t].x), static_cast<f32>(best.X[t].y), static_cast<f32>(best.X[t].z)});
+        out.trackSolved[t] = 1;
     }
     out.inliers = rot ? best.inliers : static_cast<u32>(out.points.size());
     out.framesSolved = best.solved;

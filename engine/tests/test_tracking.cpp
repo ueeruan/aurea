@@ -345,6 +345,25 @@ AUREA_TEST(Tracking, EngineTracksVideoAndPointsStayPinned) {
     std::sort(errs.begin(), errs.end());
     const f64 med = errs.empty() ? 1e9 : errs[errs.size() / 2];
     const f64 p90 = errs.empty() ? 1e9 : errs[errs.size() * 9 / 10];
+    // Pontos seguidos no vídeo (os "pontos do AE"): no quadro 45, cada um cai
+    // perto de uma mancha verdadeira; a maioria entrou no solve.
+    std::vector<f32> feat(3 * 1000);
+    const u32 nf = e.camera_track_features(45, feat.data(), 1000);
+    u32 nearTruth = 0, solved = 0, solvedNear = 0;
+    for (u32 k = 0; k < nf; ++k) {
+        const bool s1 = feat[k * 3 + 2] > 0.5f;
+        solved += s1 ? 1u : 0u;
+        for (const auto& X : truth) {
+            f64 tu, tv;
+            if (scene3d_project(X, 45, 90, 640, 360, tu, tv) && std::hypot(tu - feat[k * 3], tv - feat[k * 3 + 1]) < 2.0) {
+                ++nearTruth;
+                solvedNear += s1 ? 1u : 0u;
+                break;
+            }
+        }
+    }
+    std::printf("    pontos no video (quadro 45): %u, %u no solve (%u sobre mancha), %u sobre uma mancha verdadeira\n", nf, solved, solvedNear, nearTruth);
+    AUREA_CHECK(nf >= 100 && solved * 2 > nf && nearTruth * 10 >= nf * 8 && solvedNear * 10 >= solved * 8);
     // De novo, mesmo vídeo e ajustes: do cache, na hora.
     AUREA_CHECK(e.start_camera_track(*layer, 1));
     const Engine::CameraTrackStatus again = e.camera_track_status();

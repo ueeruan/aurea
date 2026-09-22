@@ -945,6 +945,17 @@ AUREA_JNI jstring AUREA_FN(nativeCameraTrackStatus)(JNIEnv* env, jclass, jlong h
     return env->NewStringUTF(s.message.c_str());
 }
 
+/// Pontos seguidos no quadro (x, y, estado) em px da composição; devolve quantos.
+AUREA_JNI jint AUREA_FN(nativeCameraTrackFeatures)(JNIEnv* env, jclass, jlong handle, jlong frame, jfloatArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !out) return 0;
+    const jsize cap = env->GetArrayLength(out) / 3;
+    std::vector<f32> v(static_cast<usize>(cap) * 3);
+    const u32 n = c->engine.camera_track_features(frame, v.data(), static_cast<u32>(cap));
+    if (n) env->SetFloatArrayRegion(out, 0, static_cast<jsize>(n * 3), v.data());
+    return static_cast<jint>(n);
+}
+
 AUREA_JNI jlong AUREA_FN(nativeApplyCameraTrack)(JNIEnv*, jclass, jlong handle) {
     NativeContext* c = ctx_of(handle);
     if (!c) return -static_cast<jlong>(Errc::InvalidState);

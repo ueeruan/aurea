@@ -296,8 +296,8 @@ public:
     /// e duração em quadros (limitada a metade da camada).
     bool set_transition(u64 layerId, bool out, u32 type, u32 frames) noexcept;
 
-    /// Rastreia o ponto (px da camada de vídeo, no primeiro quadro dela) pelo
-    /// clipe inteiro. `stabilize` = false cria um Nulo "Rastreio" que segue o
+    /// Rastreia o ponto (px da camada de vídeo, no quadro do CABEÇOTE) dali
+    /// até o fim do clipe. `stabilize` = false cria um Nulo "Rastreio" que segue o
     /// ponto; true move a própria camada para o ponto ficar parado na tela.
     /// Síncrono (decodifica o vídeo): fora da thread de UI. Devolve o id da
     /// camada que recebeu os keyframes; `tracked` = quadros rastreados.
@@ -360,6 +360,10 @@ public:
     [[nodiscard]] Result<u64> apply_camera_track() noexcept;
     /// Pontos 3D reconstruídos, no mundo da composição (depois de aplicar).
     [[nodiscard]] std::vector<Vec3> camera_track_points() noexcept;
+    /// Pontos seguidos no quadro `frame` da composição, em px da composição
+    /// sobre o vídeo analisado: (x, y, estado) — estado 1 = entrou no solve,
+    /// 0 = rejeitado. Como os pontos coloridos do AE. Devolve quantos.
+    u32 camera_track_features(i64 frame, f32* out3, u32 maxPoints) noexcept;
 
     // --- Gizmo 3D ----------------------------------------------------------------
     /// Setas do gizmo da camada (só camadas que vivem no espaço 3D): origem e

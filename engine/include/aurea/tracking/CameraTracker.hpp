@@ -73,6 +73,7 @@ struct CameraSolution {
     f32  fovY = 0.0f;                ///< radianos, vertical
     std::vector<CameraPose> poses;   ///< um por quadro
     std::vector<Vec3> points;        ///< pontos 3D reconstruídos
+    std::vector<u8> trackSolved;     ///< por rastro 2D: entrou no solve (1) ou foi rejeitado (0)
     // Qualidade (nunca maquiada: solve ruim aparece ruim).
     u32 tracks = 0;                  ///< rastros 2D com pelo menos 2 quadros
     u32 inliers = 0;                 ///< pontos 3D usados no solve final

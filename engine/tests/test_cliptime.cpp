@@ -388,3 +388,31 @@ AUREA_TEST(ClipTime, PointTrackerFollowsTheSquareAndStabilizeHoldsIt) {
     std::printf("    estabilizado: deriva maxima %.3f px da camada\n", drift / k);
     AUREA_CHECK(drift / k < 0.5);
 }
+
+AUREA_TEST(ClipTime, PointTrackerStartsAtThePlayhead) {
+    // O toque é no quadro do cabeçote: o rastreio começa ali (e não no 1º quadro).
+    TimeRig r(moving_square_cfg());
+    Command seek;
+    seek.type = CommandType::PlaybackSeek;
+    seek.seek.time = tick_at(FrameIndex{40}, 30.0);
+    AUREA_CHECK(r.e.apply_command(seek).ok());
+    u32 tracked = 0;
+    auto nid = r.e.track_point(r.layer.pack(), static_cast<f32>(moving_square_x(40)), static_cast<f32>(moving_square_y(40)), false, &tracked);
+    AUREA_CHECK(nid.ok());
+    if (!nid.ok()) return;
+    const Layer* n = r.comp()->layer(LayerId::unpack(*nid));
+    const Layer* v = r.L();
+    f64 worst = 0;
+    for (i64 f = 40; f < 40 + static_cast<i64>(tracked); f += 5) {
+        const Vec4 want = layer_world_matrix(*r.comp(), *v, FrameIndex{f})
+                        * Vec4{static_cast<f32>(moving_square_x(f)), static_cast<f32>(moving_square_y(f)), 0, 1};
+        const f32 gx = n->tracks.find(TrackProperty::PositionX)->sample(n->local_time(FrameIndex{f}));
+        const f32 gy = n->tracks.find(TrackProperty::PositionY)->sample(n->local_time(FrameIndex{f}));
+        worst = std::max<f64>(worst, std::hypot(gx - want.x, gy - want.y));
+    }
+    const Mat4 m0 = layer_world_matrix(*r.comp(), *v, FrameIndex{0});
+    const f64 k = std::hypot(m0.col[0].x, m0.col[0].y);
+    std::printf("    rastreio a partir do cabecote (40): %u quadros, pior erro %.3f px\n", tracked, worst / k);
+    AUREA_CHECK(tracked >= 45 && tracked <= 50);
+    AUREA_CHECK(worst / k < 0.5);
+}

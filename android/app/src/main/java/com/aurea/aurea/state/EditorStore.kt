@@ -1387,14 +1387,19 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         showToast("Toque no ponto a seguir (um detalhe com contraste)")
     }
 
-    fun cancelPointPick() { pointPick = null }
+    fun cancelPointPick() { pointPick = null; pickCursor = null }
+
+    /** Mira do rastreio de ponto (px da composição): segue o dedo; no rastreio, fica no ponto. */
+    var pickCursor by mutableStateOf<androidx.compose.ui.geometry.Offset?>(null)
+    /** Tamanho do bloco e da janela de busca do rastreio, em px da composição (desenho da mira). */
+    var pickBoxes by mutableStateOf(floatArrayOf(17f, 65f))
 
     /** Toque em (x, y) — px da camada, no primeiro quadro dela. */
     fun finishPointPick(x: Float, y: Float) {
         val stabilize = pointPick ?: return
         val id = primary ?: return
         pointPick = null
-        if (tracking) return
+        if (tracking) { pickCursor = null; return }
         tracking = true
         showToast(if (stabilize) "Estabilizando…" else "Rastreando o ponto…")
         lifecycleThread.execute {
@@ -1402,6 +1407,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             val r = synchronized(lifecycleLock) { if (ready) engine.trackPoint(id, x, y, stabilize, tracked) else -1L }
             trackHandler.post {
                 tracking = false
+                pickCursor = null
                 refreshNow()
                 when {
                     r >= 0 && !stabilize -> { select(r); showToast("Rastreio: ${tracked[0]} quadros · o Nulo segue o ponto") }
@@ -1517,6 +1523,22 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 kotlinx.coroutines.delay(150)
             }
         }
+    }
+
+    /** Pontos seguidos no quadro do cabeçote (x, y, estado)×n, px da composição; nulo = nada a mostrar. */
+    var cameraFeatures by mutableStateOf<FloatArray?>(null)
+        private set
+    private val featureBuf = FloatArray(3 * 1500)
+
+    /** Chamado a cada atualização: mostra os pontos enquanto o painel de rastreio está aberto. */
+    fun refreshCameraFeatures(show: Boolean) {
+        val st = cameraTrack
+        if (!show || st == null || st.state != 2) {
+            if (cameraFeatures != null) cameraFeatures = null
+            return
+        }
+        val n = engine.cameraTrackFeatures(playhead.toLong(), featureBuf)
+        cameraFeatures = if (n > 0) featureBuf.copyOf(n * 3) else null
     }
 
     fun cancelCameraTrack() {

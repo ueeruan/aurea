@@ -80,6 +80,9 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
     val mapper = remember { StageMapper() }
     val haptic = LocalHapticFeedback.current
     val insetPx = with(LocalDensity.current) { ShellDims.StageInset.toPx() }
+    // Pontos do rastreio de câmera no vídeo (painel de Rastreio aberto).
+    val showTrack = ui.panel == com.aurea.aurea.editor.panels.EditorPanel.Tracking
+    androidx.compose.runtime.LaunchedEffect(store.playhead, showTrack, store.cameraTrack) { store.refreshCameraFeatures(showTrack) }
     Box(modifier.background(AureaColors.EditorTopBar).clipToBounds()) {
         PreviewSurface(store, Modifier.fillMaxSize().padding(ShellDims.StageInset))
         Spacer(
@@ -242,6 +245,40 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
     val snapY = ui.snapY
     if (!snapY.isNaN()) drawLine(ShellColors.SnapLine, Offset(m.ox, m.sy(snapY)), Offset(m.sx(m.compW), m.sy(snapY)), snapStroke)
 
+    // Rastreio de câmera: os pontos seguidos neste quadro (amarelo = entrou no
+    // solve, vermelho = rejeitado), como no AE.
+    store.cameraFeatures?.let { f ->
+        val arm = 3.dp.toPx()
+        val w = 1.2.dp.toPx()
+        var k = 0
+        while (k + 2 < f.size) {
+            val c = Offset(m.sx(f[k]), m.sy(f[k + 1]))
+            val col = if (f[k + 2] > 0.5f) TrackSolved else TrackRejected
+            drawLine(Color.Black.copy(alpha = 0.5f), Offset(c.x - arm - 1, c.y), Offset(c.x + arm + 1, c.y), w + 1.5f)
+            drawLine(Color.Black.copy(alpha = 0.5f), Offset(c.x, c.y - arm - 1), Offset(c.x, c.y + arm + 1), w + 1.5f)
+            drawLine(col, Offset(c.x - arm, c.y), Offset(c.x + arm, c.y), w)
+            drawLine(col, Offset(c.x, c.y - arm), Offset(c.x, c.y + arm), w)
+            k += 3
+        }
+    }
+    // Rastreio de ponto: a mira onde o dedo está (bloco seguido + janela de busca).
+    store.pickCursor?.let { p ->
+        val c = Offset(m.sx(p.x), m.sy(p.y))
+        val boxes = store.pickBoxes
+        val inner = boxes[0] * 0.5f * m.fit
+        val outer = boxes[1] * 0.5f * m.fit
+        val stroke = 1.5.dp.toPx()
+        drawRect(Color.Black.copy(alpha = 0.55f), Offset(c.x - outer, c.y - outer), androidx.compose.ui.geometry.Size(outer * 2, outer * 2), style = Stroke(stroke + 2f))
+        drawRect(TrackSolved, Offset(c.x - outer, c.y - outer), androidx.compose.ui.geometry.Size(outer * 2, outer * 2), style = Stroke(stroke))
+        drawRect(Color.Black.copy(alpha = 0.55f), Offset(c.x - inner, c.y - inner), androidx.compose.ui.geometry.Size(inner * 2, inner * 2), style = Stroke(stroke + 2f))
+        drawRect(Color.White, Offset(c.x - inner, c.y - inner), androidx.compose.ui.geometry.Size(inner * 2, inner * 2), style = Stroke(stroke))
+        val arm = 10.dp.toPx()
+        drawLine(Color.Black.copy(alpha = 0.55f), Offset(c.x - arm, c.y), Offset(c.x + arm, c.y), stroke + 2f)
+        drawLine(Color.Black.copy(alpha = 0.55f), Offset(c.x, c.y - arm), Offset(c.x, c.y + arm), stroke + 2f)
+        drawLine(Color.White, Offset(c.x - arm, c.y), Offset(c.x + arm, c.y), stroke)
+        drawLine(Color.White, Offset(c.x, c.y - arm), Offset(c.x, c.y + arm), stroke)
+    }
+
     val selection = store.selection
     val d = store.detail ?: return
     if (selection.isEmpty()) return
@@ -275,6 +312,9 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
     // Camada no espaço 3D: as setas do mundo por cima (têm prioridade no toque).
     store.gizmo?.let { drawGizmo(m, it) }
 }
+
+private val TrackSolved = Color(0xFFFFD34D)
+private val TrackRejected = Color(0xFFFF5A5A)
 
 private val GizmoX = Color(0xFFFF5A5A)
 private val GizmoY = Color(0xFF5AD27A)
@@ -500,13 +540,31 @@ private suspend fun PointerInputScope.stageGestures(
             }
         }
 
-        // Escolhendo o ponto do rastreio: o toque vira coordenada da camada.
+        // Escolhendo o ponto do rastreio: a mira segue o dedo (dá para ajustar
+        // antes de soltar); soltar vira a coordenada da camada.
         if (store.pointPick != null) {
             val d = store.detail
             val q = FloatArray(8)
+            var upX = downX
+            var upY = downY
+            if (m.valid) store.pickCursor = Offset(m.cx(downX), m.cy(downY))
+            do {
+                val ev = awaitPointerEvent()
+                val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
+                ch.consume()
+                upX = ch.position.x
+                upY = ch.position.y
+                if (m.valid) store.pickCursor = Offset(m.cx(upX), m.cy(upY))
+            } while (ch.pressed)
             if (d != null && m.valid && LayerGeometry.corners(d, q)) {
-                val cx = m.cx(downX)
-                val cy = m.cy(downY)
+                val cx = m.cx(upX)
+                val cy = m.cy(upY)
+                // Bloco (17 px) e janela de busca (17 + 2·24 px) do rastreio, que roda
+                // numa miniatura de até 360 px de altura → px da camada → composição.
+                val layerH = LayerGeometry.height(d).coerceAtLeast(1f)
+                val thumb = layerH / kotlin.math.min(360f, layerH)
+                val compPerLayer = kotlin.math.hypot(q[2] - q[0], q[3] - q[1]) / LayerGeometry.width(d).coerceAtLeast(1f)
+                store.pickBoxes = floatArrayOf(17f * thumb * compPerLayer, 65f * thumb * compPerLayer)
                 // Afim pelos cantos TL, TR, BL: p = TL + u·(TR − TL) + v·(BL − TL).
                 val ax = q[2] - q[0]; val ay = q[3] - q[1]
                 val bx = q[6] - q[0]; val by = q[7] - q[1]
@@ -518,14 +576,11 @@ private suspend fun PointerInputScope.stageGestures(
                     if (u in 0f..1f && v in 0f..1f) {
                         store.finishPointPick(u * LayerGeometry.width(d), v * LayerGeometry.height(d))
                     } else {
+                        store.pickCursor = null
                         store.showToast("Toque dentro do vídeo")
                     }
                 }
             }
-            do {
-                val e = awaitPointerEvent()
-                e.changes.forEach { it.consume() }
-            } while (e.changes.any { it.pressed })
             return@awaitEachGesture
         }
 

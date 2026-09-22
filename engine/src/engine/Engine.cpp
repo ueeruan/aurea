@@ -21,6 +21,7 @@ constexpr u32 kCameraTrackerVersion = 1;
 
 struct CameraTrackResult {
     tracking::CameraSolution solution;
+    tracking::Tracks2D tracks;       ///< os pontos seguidos (mostrados no vídeo)
     u32 frames = 0;
     u32 analysisW = 0, analysisH = 0;
 };
@@ -930,7 +931,9 @@ Result<u64> Engine::track_point(u64 layerId, f32 x, f32 y, bool stabilize, u32* 
         if (!a || !a->has_video()) return Status{Errc::InvalidArgument, "camada sem video"};
         asset = *a;
         fps = comp->fps() > 0.0 ? comp->fps() : 30.0;
-        start = l->start.value;
+        // Do quadro do cabeçote (onde o ponto foi tocado) até o fim, como o
+        // rastreio para a frente do AE; antes dele o Nulo fica no 1º ponto.
+        start = std::clamp<i64>(playback_.current().value, l->start.value, std::max<i64>(l->start.value, l->end.value - 2));
         end = std::min<i64>(l->end.value, start + 3600);   // até 2 min a 30 fps por vez
         layerW = a->video.width;
         layerH = a->video.height;
@@ -1153,6 +1156,7 @@ bool Engine::start_camera_track(u64 layerId, u32 mode) noexcept {
         if (job->cancel.load()) return fail("cancelado");
         auto res = std::make_shared<CameraTrackResult>();
         res->solution = std::move(sol);
+        res->tracks = ft.tracks();
         res->frames = ft.tracks().frames;
         res->analysisW = aw;
         res->analysisH = ah;
@@ -1326,6 +1330,40 @@ Result<u64> Engine::apply_camera_track() noexcept {
     (void)w;
     (void)h;
     return cid.pack();
+}
+
+u32 Engine::camera_track_features(i64 frame, f32* out, u32 maxPoints) noexcept {
+    if (!cameraTrack_ || !out || maxPoints == 0) return 0;
+    CameraTrackJob* job = cameraTrack_.get();
+    std::shared_ptr<CameraTrackResult> res;
+    {
+        std::lock_guard<std::mutex> g(job->mutex);
+        res = job->result;
+    }
+    if (!res || res->tracks.width == 0) return 0;
+    const i64 i = frame - job->start;
+    if (i < 0 || i >= static_cast<i64>(res->tracks.frames)) return 0;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(job->layerId)) : nullptr;
+    const Asset* a = l ? project_->asset(l->source) : nullptr;
+    if (!l || !a || a->video.width == 0) return 0;
+    // px da análise → px do vídeo → composição (transform da camada no quadro).
+    const f32 kx = static_cast<f32>(a->video.width) / static_cast<f32>(res->tracks.width);
+    const f32 ky = static_cast<f32>(a->video.height) / static_cast<f32>(res->tracks.height);
+    const Mat4 m = layer_comp_matrix(*comp, *l, FrameIndex{frame});
+    u32 n = 0;
+    for (usize t = 0; t < res->tracks.pos.size() && n < maxPoints; ++t) {
+        const Vec2 p = res->tracks.pos[t][static_cast<usize>(i)];
+        if (!tracking::Tracks2D::present(p)) continue;
+        const Vec4 c = m * Vec4{p.x * kx, p.y * ky, 0, 1};
+        if (c.w <= 1e-6f) continue;
+        out[n * 3] = c.x / c.w;
+        out[n * 3 + 1] = c.y / c.w;
+        out[n * 3 + 2] = t < res->solution.trackSolved.size() && res->solution.trackSolved[t] ? 1.0f : 0.0f;
+        ++n;
+    }
+    return n;
 }
 
 std::vector<Vec3> Engine::camera_track_points() noexcept {

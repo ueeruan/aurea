@@ -161,8 +161,16 @@ enum class Interpolation : u8 {
     CustomCurve,
 };
 
+/// Modo da máscara na pilha (AE). `None` entra no FIM para os projetos
+/// gravados antes dele continuarem com os mesmos números.
 enum class MaskOperation : u8 {
-    Add = 0, Subtract, Intersect, Difference,
+    Add = 0, Subtract, Intersect, Difference, None,
+};
+
+/// Track matte: a camada só aparece através do alfa/luma de outra (a matte,
+/// que deixa de ser desenhada por conta própria — semântica do AE).
+enum class MatteMode : u8 {
+    None = 0, Alpha, AlphaInverted, Luma, LumaInverted,
 };
 
 enum class TrackProperty : u16 {

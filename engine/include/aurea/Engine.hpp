@@ -360,6 +360,38 @@ public:
     /// camada que recebeu os keyframes; `tracked` = quadros rastreados.
     [[nodiscard]] Result<u64> track_point(u64 layerId, f32 x, f32 y, bool stabilize, u32* tracked = nullptr) noexcept;
 
+    // --- Máscaras (roto) e track matte ----------------------------------------------
+    /// Pontos de caminho = 6 floats cada: x, y, tangente de entrada x/y, de
+    /// saída x/y (px da camada, tangentes relativas ao ponto).
+    /// Máscara nova com o caminho dado. Devolve o id (−1 = falhou).
+    i32 add_mask(u64 layerId, const f32* pts6, u32 count, bool closed) noexcept;
+    bool remove_mask(u64 layerId, u32 maskId) noexcept;
+    /// Troca o caminho inteiro. Com o caminho animado, grava/atualiza o key no
+    /// CABEÇOTE. `undo` = abre um passo de desfazer (false nos eventos
+    /// seguintes de um arrasto, que entram no mesmo passo).
+    bool set_mask_path(u64 layerId, u32 maskId, const f32* pts6, u32 count, bool closed, bool undo) noexcept;
+    /// Modo (MaskOperation: 0 somar, 1 subtrair, 2 intersectar, 3 diferença,
+    /// 4 nenhum), invertida, feather e expansão (px da camada), opacidade 0..1.
+    bool set_mask_props(u64 layerId, u32 maskId, u32 op, bool inverted, f32 feather, f32 expansion, f32 opacity) noexcept;
+    /// Liga/desliga o key do caminho no cabeçote (`keyed` = ficou com key).
+    bool toggle_mask_path_key(u64 layerId, u32 maskId, bool* keyed = nullptr) noexcept;
+    /// Máscaras no cabeçote: [0..5] composição ← camada (a b c d tx ty), [6] nº
+    /// de máscaras; por máscara kMaskHeaderFloats floats (id, modo, invertida,
+    /// feather, expansão, opacidade, fechada, nº de pontos, nº de keys, key no
+    /// cabeçote, ativa, 0) e 6 por ponto (a forma no cabeçote). Devolve os
+    /// floats necessários; só escreve se `capacity` couber.
+    static constexpr u32 kMaskHeaderFloats = 12;
+    u32 query_masks(u64 layerId, f32* out, u32 capacity) noexcept;
+    /// Rastreia a máscara no vídeo da camada do cabeçote em diante (NCC no
+    /// centro e em 4 pontos por dentro dela) e grava um key de caminho por
+    /// quadro. `mode` 0 = só posição; 1 = posição + escala + giro. Síncrono
+    /// (decodifica): fora da thread de UI. Devolve os quadros rastreados.
+    [[nodiscard]] Result<u32> track_mask(u64 layerId, u32 maskId, u32 mode) noexcept;
+    /// Track matte: a camada aparece através da `matteLayerId` (MatteMode: 1
+    /// alfa, 2 alfa invertido, 3 luma, 4 luma invertido; 0 ou matte 0 = tira).
+    bool set_track_matte(u64 layerId, u64 matteLayerId, u32 mode) noexcept;
+    bool query_track_matte(u64 layerId, u64& matte, u32& mode) noexcept;
+
     /// Eco (0 = desligado; atraso em quadros; queda 0..1) e RGB no tempo
     /// (atraso em quadros, 0 = desligado).
     bool set_echo(u64 layerId, u32 count, f32 delay, f32 decay) noexcept;
@@ -399,6 +431,8 @@ public:
     /// Acertos/erros do cache do optical flow do renderer.
     void flow_cache_stats(u32& hits, u32& misses) const noexcept { renderer_.flow_cache_stats(hits, misses); }
     void set_flow_cache_enabled(bool on) noexcept { renderer_.set_flow_cache_enabled(on); }
+    /// Coberturas de máscara reaproveitadas/rasterizadas pelo renderer.
+    void mask_cache_stats(u32& hits, u32& misses) const noexcept { renderer_.mask_cache_stats(hits, misses); }
     /// Obturador da composição em graus (0–720; 180 = padrão de cinema).
     bool set_shutter_angle(f32 degrees) noexcept;
     /// Chave geral da composição (as camadas com desfoque só borram com ela).

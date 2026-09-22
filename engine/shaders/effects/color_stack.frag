@@ -29,6 +29,8 @@
 #define OP_COLOR_MATRIX  5
 #define OP_LEVELS        6
 #define OP_CURVES        7
+#define OP_LUMA_KEY      8
+#define OP_CHROMA_KEY    9
 
 #define MAX_OPS 12
 
@@ -57,9 +59,21 @@ vec3 curves_lut(vec3 e) {
                 texture(u_tex1, vec2(t.b, 0.5)).b);
 }
 
+// Crominância BT.709 (Cb, Cr) de um valor codificado, e a volta com a luma.
+vec2 chroma709(vec3 e, float y) {
+    return vec2((e.b - y) / 1.8556, (e.r - y) / 1.5748);
+}
+vec3 from_ycc709(float y, vec2 cc) {
+    float r = y + 1.5748 * cc.y;
+    float b = y + 1.8556 * cc.x;
+    float g = (y - 0.2126 * r - 0.0722 * b) / 0.7152;
+    return vec3(r, g, b);
+}
+
 void main() {
     vec4 src = unpremultiply(texture(u_tex0, v_uv));
     vec3 c = src.rgb;   // linear, alfa reto
+    float alpha = src.a;   // as chaves multiplicam o alfa
 
     int count = int(p.header.x + 0.5);
     for (int i = 0; i < MAX_OPS; ++i) {
@@ -106,8 +120,33 @@ void main() {
             c = srgb_to_linear(enc);
         } else if (op == OP_CURVES) {
             c = srgb_to_linear(curves_lut(linear_to_srgb(c)));
+        } else if (op == OP_LUMA_KEY) {
+            // a.y limiar, a.z suavidade, a.w: 0 tira escuros, 1 tira claros.
+            float y = dot(linear_to_srgb(c), vec3(0.2126, 0.7152, 0.0722));
+            float lo = a.y - a.z * 0.5;
+            float hi = a.y + a.z * 0.5;
+            float keep = hi - lo > 1e-5 ? smoothstep(lo, hi, y) : step(a.y, y);
+            if (a.w > 0.5) keep = 1.0 - keep;
+            alpha *= keep;
+        } else if (op == OP_CHROMA_KEY) {
+            // a.yzw cor-chave codificada, b.x tolerância, b.y suavidade, b.z derramamento.
+            vec3 enc = linear_to_srgb(c);
+            float y = dot(enc, vec3(0.2126, 0.7152, 0.0722));
+            vec2 cc = chroma709(enc, y);
+            vec2 kc = chroma709(a.yzw, dot(a.yzw, vec3(0.2126, 0.7152, 0.0722)));
+            float dist = length(cc - kc);
+            alpha *= smoothstep(b.x, b.x + max(b.y, 1e-4), dist);
+            float kl = length(kc);
+            if (b.z > 0.0 && kl > 1e-4) {
+                vec2 dir = kc / kl;
+                float along = dot(cc, dir);
+                if (along > 0.0) {
+                    cc -= dir * along * b.z;
+                    c = srgb_to_linear(max(from_ycc709(y, cc), vec3(0.0)));
+                }
+            }
         }
     }
 
-    o_color = premultiply(vec4(c, src.a));
+    o_color = premultiply(vec4(c, alpha));
 }

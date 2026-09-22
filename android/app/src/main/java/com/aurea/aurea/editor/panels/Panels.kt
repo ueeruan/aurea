@@ -47,6 +47,7 @@ enum class EditorPanel {
     Element3D,     // ambiente 3D (HDRI)
     Captions,      // legendas automáticas da fala
     Presets,       // navegador de presets (efeitos, texto, animação, legenda, curva)
+    Mask,          // máscaras (roto) e track matte
 }
 
 /**
@@ -111,6 +112,7 @@ fun PanelContent(
         EditorPanel.Element3D -> "Elemento 3D"
         EditorPanel.Captions -> "Legendas"
         EditorPanel.Presets -> "Presets"
+        EditorPanel.Mask -> "Máscara e recorte"
     }
 
     Column(modifier.fillMaxSize().background(AureaColors.EditorPanel)) {
@@ -135,6 +137,7 @@ fun PanelContent(
                     EditorPanel.Element3D -> Element3DPanel(env)
                     EditorPanel.Captions -> CaptionsPanel(env)
                     EditorPanel.Presets -> PresetsPanel(env)
+                    EditorPanel.Mask -> MaskPanel(env)
                 }
             }
         }

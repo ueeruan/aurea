@@ -115,6 +115,8 @@ data class PreviewState(
 
 /** `aurea::Errc::UnsupportedFormat` (core/Result.hpp). */
 private const val ERRC_UNSUPPORTED_FORMAT = 17L
+/** Floats do cabeçalho de cada máscara em Engine::query_masks (kMaskHeaderFloats). */
+private const val MASK_HEADER = 12
 
 class EditorStore(app: Application) : AndroidViewModel(app) {
 
@@ -555,6 +557,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         } else {
             null
         }
+        refreshMasks()
     }
 
     /** Receita do texto 3D da camada principal (nulo = não é texto 3D). */
@@ -1460,6 +1463,218 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 }
             }
         }
+    }
+
+
+    // --- Máscaras (roto) e track matte ----------------------------------------------------------
+    /**
+     * Uma máscara no cabeçote: modo (0 somar, 1 subtrair, 2 intersectar, 3
+     * diferença, 4 nenhum), ajustes e os pontos (6 floats cada: x, y, entrada
+     * x/y, saída x/y — px da camada; tangentes relativas ao ponto).
+     */
+    class MaskPath(
+        val id: Int,
+        val op: Int,
+        val inverted: Boolean,
+        val feather: Float,
+        val expansion: Float,
+        val opacity: Float,
+        val closed: Boolean,
+        val keyCount: Int,
+        val keyHere: Boolean,
+        val active: Boolean,
+        val points: FloatArray,
+    ) {
+        val count: Int get() = points.size / 6
+    }
+
+    /** Máscaras da camada principal; [m] = composição ← camada (a b c d tx ty). */
+    class MaskState(val layer: Long, val m: FloatArray, val masks: List<MaskPath>) {
+        fun find(id: Int?) = masks.firstOrNull { it.id == id }
+        fun toCompX(x: Float, y: Float) = m[0] * x + m[2] * y + m[4]
+        fun toCompY(x: Float, y: Float) = m[1] * x + m[3] * y + m[5]
+        /** Composição → camada (inversa da afim); nulo se degenerada. */
+        fun toLayer(cx: Float, cy: Float): FloatArray? {
+            val det = m[0] * m[3] - m[1] * m[2]
+            if (kotlin.math.abs(det) < 1e-9f) return null
+            val px = cx - m[4]
+            val py = cy - m[5]
+            return floatArrayOf((m[3] * px - m[2] * py) / det, (-m[1] * px + m[0] * py) / det)
+        }
+        /** Vetor da composição → camada (tangentes). */
+        fun toLayerVec(dx: Float, dy: Float): FloatArray? {
+            val det = m[0] * m[3] - m[1] * m[2]
+            if (kotlin.math.abs(det) < 1e-9f) return null
+            return floatArrayOf((m[3] * dx - m[2] * dy) / det, (-m[1] * dx + m[0] * dy) / det)
+        }
+    }
+
+    var masks by mutableStateOf<MaskState?>(null)
+        private set
+    /** Máscara em edição no palco (modo roto); nulo = palco normal. */
+    var maskEdit by mutableStateOf<Int?>(null)
+    /** Desenhando o caminho (toques no palco acrescentam pontos). */
+    var maskDrawing by mutableStateOf(false)
+    /** Ponto escolhido da máscara em edição (alças de bezier dele no palco). */
+    var maskPoint by mutableStateOf(-1)
+    /** Track matte da camada principal: {matte, modo}. */
+    var trackMatte by mutableStateOf<LongArray?>(null)
+        private set
+    var maskTracking by mutableStateOf(false)
+        private set
+    private var maskBuf = FloatArray(1024)
+
+    private fun refreshMasks() {
+        val id = primary
+        if (id == null) {
+            masks = null
+            trackMatte = null
+            maskEdit = null
+            maskDrawing = false
+            return
+        }
+        var need = engine.queryMasks(id, maskBuf)
+        if (need > maskBuf.size) {
+            maskBuf = FloatArray(need + 256)
+            need = engine.queryMasks(id, maskBuf)
+        }
+        masks = if (need >= 7) {
+            val b = maskBuf
+            val n = b[6].toInt()
+            var o = 7
+            val list = ArrayList<MaskPath>(n)
+            repeat(n) {
+                val pc = b[o + 7].toInt()
+                val pts = b.copyOfRange(o + MASK_HEADER, o + MASK_HEADER + pc * 6)
+                list += MaskPath(
+                    id = b[o].toInt(), op = b[o + 1].toInt(), inverted = b[o + 2] > 0.5f, feather = b[o + 3],
+                    expansion = b[o + 4], opacity = b[o + 5], closed = b[o + 6] > 0.5f, keyCount = b[o + 8].toInt(),
+                    keyHere = b[o + 9] > 0.5f, active = b[o + 10] > 0.5f, points = pts,
+                )
+                o += MASK_HEADER + pc * 6
+            }
+            MaskState(id, b.copyOfRange(0, 6), list)
+        } else {
+            null
+        }
+        if (masks?.find(maskEdit) == null) {
+            maskEdit = null
+            maskDrawing = false
+            maskPoint = -1
+        }
+        val tm = LongArray(2)
+        trackMatte = if (engine.queryTrackMatte(id, tm)) tm else null
+    }
+
+    /** Começa uma máscara desenhada à mão: os próximos toques no palco põem pontos. */
+    fun startMaskDrawing() {
+        val id = primary ?: return
+        val mid = engine.addMask(id, null, 0, false)
+        if (mid < 0) { showToast("Esta camada não aceita mais máscaras"); return }
+        refreshNow()
+        maskEdit = mid
+        maskDrawing = true
+        maskPoint = -1
+        showToast("Toque no palco para pôr pontos · arraste para curvar · toque no 1º ponto para fechar")
+    }
+
+    /** Máscara pronta (0 retângulo, 1 elipse) em 70 % da camada, centrada. */
+    fun addMaskPreset(shape: Int) {
+        val id = primary ?: return
+        val d = detail ?: return
+        val w = com.aurea.aurea.editor.LayerGeometry.width(d)
+        val h = com.aurea.aurea.editor.LayerGeometry.height(d)
+        if (w <= 0f || h <= 0f) return
+        val cx = w / 2
+        val cy = h / 2
+        val rx = w * 0.35f
+        val ry = h * 0.35f
+        val pts = if (shape == 0) {
+            floatArrayOf(cx - rx, cy - ry, 0f, 0f, 0f, 0f, cx + rx, cy - ry, 0f, 0f, 0f, 0f,
+                cx + rx, cy + ry, 0f, 0f, 0f, 0f, cx - rx, cy + ry, 0f, 0f, 0f, 0f)
+        } else {
+            // Elipse de 4 cúbicas (k = 0,5523: erro radial < 0,03 %).
+            val kx = rx * 0.5523f
+            val ky = ry * 0.5523f
+            floatArrayOf(cx, cy - ry, -kx, 0f, kx, 0f, cx + rx, cy, 0f, -ky, 0f, ky,
+                cx, cy + ry, kx, 0f, -kx, 0f, cx - rx, cy, 0f, ky, 0f, -ky)
+        }
+        val mid = engine.addMask(id, pts, 4, true)
+        if (mid < 0) { showToast("Esta camada não aceita mais máscaras"); return }
+        refreshNow()
+        maskEdit = mid
+        maskDrawing = false
+        maskPoint = -1
+    }
+
+    /** Troca o caminho da máscara em edição (`undo` = abre um passo de desfazer). */
+    fun setMaskPoints(mask: Int, pts: FloatArray, closed: Boolean, undo: Boolean) {
+        val id = primary ?: return
+        engine.setMaskPath(id, mask, pts, pts.size / 6, closed, undo)
+        refreshMasks()
+    }
+
+    /** Fim de um gesto de máscara no palco: relê tudo (timeline, keyframes). */
+    fun maskGestureEnd() = refreshNow()
+
+    fun closeMaskPath() {
+        val mid = maskEdit ?: return
+        val m = masks?.find(mid) ?: return
+        if (m.count < 3) { showToast("Ponha pelo menos 3 pontos"); return }
+        setMaskPoints(mid, m.points, true, true)
+        maskDrawing = false
+        refreshNow()
+    }
+
+    fun setMaskProps(mask: Int, op: Int, inverted: Boolean, feather: Float, expansion: Float, opacity: Float) {
+        val id = primary ?: return
+        engine.setMaskProps(id, mask, op, inverted, feather, expansion, opacity)
+        refreshMasks()
+    }
+
+    fun deleteMask(mask: Int) {
+        val id = primary ?: return
+        if (engine.removeMask(id, mask)) {
+            if (maskEdit == mask) { maskEdit = null; maskDrawing = false; maskPoint = -1 }
+            refreshNow()
+        }
+    }
+
+    fun toggleMaskKey(mask: Int) {
+        val id = primary ?: return
+        when (engine.toggleMaskPathKey(id, mask)) {
+            1 -> showToast("Keyframe do caminho no cabeçote")
+            0 -> showToast("Keyframe do caminho removido")
+        }
+        refreshNow()
+    }
+
+    /** Rastreia a máscara no vídeo (0 posição, 1 posição + escala + giro). */
+    fun trackMask(mask: Int, mode: Int) {
+        val id = primary ?: return
+        val row = layers.firstOrNull { it.id == id }
+        if (row == null || row.kind != com.aurea.aurea.ui.theme.LayerType.Video.kind) {
+            showToast("O rastreio de máscara precisa de uma camada de vídeo")
+            return
+        }
+        if (maskTracking || tracking) return
+        maskTracking = true
+        showToast("Rastreando a máscara…")
+        lifecycleThread.execute {
+            val r = synchronized(lifecycleLock) { if (ready) engine.trackMask(id, mask, mode) else -1 }
+            trackHandler.post {
+                maskTracking = false
+                refreshNow()
+                if (r >= 0) showToast("Máscara rastreada em $r quadros")
+                else showToast("Não deu para seguir a máscara. Ponha-a sobre um detalhe com contraste.")
+            }
+        }
+    }
+
+    fun setTrackMatte(matte: Long, mode: Int) {
+        val id = primary ?: return
+        if (!engine.setTrackMatte(id, matte, mode)) showToast("Escolha outra camada como matte")
+        refreshNow()
     }
 
     // --- Eco e RGB no tempo -------------------------------------------------------------------

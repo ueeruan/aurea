@@ -306,6 +306,24 @@ class AureaEngine private constructor() {
     fun trackPoint(layer: Long, x: Float, y: Float, stabilize: Boolean, tracked: IntArray): Long =
         nativeTrackPoint(nativeHandle, layer, x, y, stabilize, tracked)
 
+    // Máscaras (roto) e track matte. Pontos = 6 floats cada (x, y, entrada x/y,
+    // saída x/y — px da camada).
+    fun addMask(layer: Long, pts: FloatArray?, count: Int, closed: Boolean): Int = nativeAddMask(nativeHandle, layer, pts, count, closed)
+    fun removeMask(layer: Long, mask: Int): Boolean = nativeRemoveMask(nativeHandle, layer, mask)
+    fun setMaskPath(layer: Long, mask: Int, pts: FloatArray?, count: Int, closed: Boolean, undo: Boolean): Boolean =
+        nativeSetMaskPath(nativeHandle, layer, mask, pts, count, closed, undo)
+    fun setMaskProps(layer: Long, mask: Int, op: Int, inverted: Boolean, feather: Float, expansion: Float, opacity: Float): Boolean =
+        nativeSetMaskProps(nativeHandle, layer, mask, op, inverted, feather, expansion, opacity)
+    /** 1 = ficou com key no cabeçote, 0 = tirou, −1 = falhou. */
+    fun toggleMaskPathKey(layer: Long, mask: Int): Int = nativeToggleMaskPathKey(nativeHandle, layer, mask)
+    /** Floats necessários (Engine::query_masks); só escreve se couber em [out]. */
+    fun queryMasks(layer: Long, out: FloatArray): Int = nativeQueryMasks(nativeHandle, layer, out)
+    /** Síncrono (decodifica): fora da UI. Quadros rastreados, ou −Errc. */
+    fun trackMask(layer: Long, mask: Int, mode: Int): Int = nativeTrackMask(nativeHandle, layer, mask, mode)
+    fun setTrackMatte(layer: Long, matte: Long, mode: Int): Boolean = nativeSetTrackMatte(nativeHandle, layer, matte, mode)
+    /** {matte, modo} (matte 0 = nenhuma). */
+    fun queryTrackMatte(layer: Long, out: LongArray): Boolean = nativeQueryTrackMatte(nativeHandle, layer, out)
+
     // Eco e RGB no tempo.
     fun setEcho(layer: Long, count: Int, delay: Float, decay: Float): Boolean = nativeSetEcho(nativeHandle, layer, count, delay, decay)
     fun setRgbTime(layer: Long, delay: Float): Boolean = nativeSetRgbTime(nativeHandle, layer, delay)
@@ -561,6 +579,15 @@ class AureaEngine private constructor() {
     private external fun nativeQueryText3d(handle: Long, layer: Long, out: FloatArray): String?
     private external fun nativeSetTransition(handle: Long, layer: Long, out: Boolean, type: Int, frames: Int): Boolean
     private external fun nativeSetEcho(handle: Long, layer: Long, count: Int, delay: Float, decay: Float): Boolean
+    private external fun nativeAddMask(handle: Long, layer: Long, pts: FloatArray?, count: Int, closed: Boolean): Int
+    private external fun nativeRemoveMask(handle: Long, layer: Long, mask: Int): Boolean
+    private external fun nativeSetMaskPath(handle: Long, layer: Long, mask: Int, pts: FloatArray?, count: Int, closed: Boolean, undo: Boolean): Boolean
+    private external fun nativeSetMaskProps(handle: Long, layer: Long, mask: Int, op: Int, inverted: Boolean, feather: Float, expansion: Float, opacity: Float): Boolean
+    private external fun nativeToggleMaskPathKey(handle: Long, layer: Long, mask: Int): Int
+    private external fun nativeQueryMasks(handle: Long, layer: Long, out: FloatArray): Int
+    private external fun nativeTrackMask(handle: Long, layer: Long, mask: Int, mode: Int): Int
+    private external fun nativeSetTrackMatte(handle: Long, layer: Long, matte: Long, mode: Int): Boolean
+    private external fun nativeQueryTrackMatte(handle: Long, layer: Long, out: LongArray): Boolean
     private external fun nativeTrackPoint(handle: Long, layer: Long, x: Float, y: Float, stabilize: Boolean, tracked: IntArray): Long
     private external fun nativeSetRgbTime(handle: Long, layer: Long, delay: Float): Boolean
     private external fun nativeQueryEcho(handle: Long, layer: Long, out: FloatArray): Boolean

@@ -179,6 +179,7 @@ internal class StageMapper {
 
     val scratch = FloatArray(8)
     val path = Path()
+    val maskPath = Path()
     val arrow = Path()
 
     // Traços do overlay, recriados só quando a densidade muda (o desenho roda
@@ -279,6 +280,12 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
         drawLine(Color.White, Offset(c.x, c.y - arm), Offset(c.x, c.y + arm), stroke)
     }
 
+    // Painel de Máscara aberto: os caminhos da camada (a editada com pontos e alças).
+    val masking = maskMode(store, ui)
+    if (ui.panel == com.aurea.aurea.editor.panels.EditorPanel.Mask) {
+        store.masks?.let { drawMasks(m, it, store.maskEdit, store.maskPoint, store.maskDrawing) }
+    }
+
     val selection = store.selection
     val d = store.detail ?: return
     if (selection.isEmpty()) return
@@ -297,7 +304,7 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
     if (!activeAt(d, playhead) || !toScreenCorners(d, m, m.corners)) return
     // Principal: escuro 55 % em 3,5 e destaque em 2 (travada: secundário).
     outline(m, m.corners, m.outlineUnder, m.outlineOver, if (d.locked) AureaColors.Muted else AureaColors.Accent)
-    if (selection.size != 1 || d.locked) return
+    if (selection.size != 1 || d.locked || masking) return   // no modo de máscara o toque é do caminho
     placeHandles(m)
     m.handlesValid = true
     val grabbed = ui.grabbedHandle
@@ -581,6 +588,14 @@ private suspend fun PointerInputScope.stageGestures(
                     }
                 }
             }
+            return@awaitEachGesture
+        }
+
+        // Modo de máscara: o gesto edita o caminho da máscara escolhida.
+        val ms = store.masks
+        val editMask = store.maskEdit
+        if (maskMode(store, ui) && ms != null && editMask != null && m.valid && ms.layer == store.primary) {
+            maskGesture(store, m, ms, editMask, down, slop, 22.dp.toPx(), haptic)
             return@awaitEachGesture
         }
 
@@ -1149,4 +1164,167 @@ private fun hudText(p: PerfStats, uiFps: Float): String {
         append("GPU ").append(p.gpuName.ifEmpty { "—" }).append(" · térmico ").append(p.thermal)
             .append(if (p.gpuTimers) " · timers" else "")
     }
+}
+
+// =============================================================================
+// Modo de máscara (roto): desenho do caminho e gestos
+// =============================================================================
+
+private val MaskEditColor = Color(0xFFFFD34D)
+private val MaskOtherColor = Color(0xB3FFFFFF)
+
+/** Painel de Máscara aberto com uma máscara escolhida: o palco edita o caminho. */
+internal fun maskMode(store: EditorStore, ui: EditorUi): Boolean =
+    ui.panel == com.aurea.aurea.editor.panels.EditorPanel.Mask && store.maskEdit != null && store.masks != null
+
+/** Caminhos das máscaras da camada na tela; a editada com pontos e alças. */
+private fun DrawScope.drawMasks(m: StageMapper, ms: EditorStore.MaskState, edit: Int?, sel: Int, drawing: Boolean) {
+    fun sx(x: Float, y: Float) = m.sx(ms.toCompX(x, y))
+    fun sy(x: Float, y: Float) = m.sy(ms.toCompY(x, y))
+    val path = m.maskPath
+    for (mask in ms.masks) {
+        val n = mask.count
+        if (n == 0) continue
+        val p = mask.points
+        val on = mask.id == edit
+        path.reset()
+        path.moveTo(sx(p[0], p[1]), sy(p[0], p[1]))
+        val segs = if (mask.closed) n else n - 1
+        for (i in 0 until segs) {
+            val a = i * 6
+            val b = ((i + 1) % n) * 6
+            val c1x = p[a] + p[a + 4]
+            val c1y = p[a + 1] + p[a + 5]
+            val c2x = p[b] + p[b + 2]
+            val c2y = p[b + 1] + p[b + 3]
+            path.cubicTo(sx(c1x, c1y), sy(c1x, c1y), sx(c2x, c2y), sy(c2x, c2y), sx(p[b], p[b + 1]), sy(p[b], p[b + 1]))
+        }
+        if (mask.closed) path.close()
+        drawPath(path, ShellColors.OutlineUnder, style = m.outlineUnder)
+        drawPath(path, if (on) MaskEditColor else MaskOtherColor, style = if (on) m.outlineOver else m.batchOver)
+        if (!on) continue
+        // Pontos: quadrados (o 1º maior enquanto desenha: tocar nele fecha).
+        val half = 4.dp.toPx()
+        for (i in 0 until n) {
+            val c = Offset(sx(p[i * 6], p[i * 6 + 1]), sy(p[i * 6], p[i * 6 + 1]))
+            val h = if (drawing && i == 0 && n >= 3) half * 1.6f else half
+            drawRect(ShellColors.OutlineUnder, Offset(c.x - h - 1.5f, c.y - h - 1.5f), androidx.compose.ui.geometry.Size(2 * h + 3f, 2 * h + 3f))
+            drawRect(if (i == sel) MaskEditColor else Color.White, Offset(c.x - h, c.y - h), androidx.compose.ui.geometry.Size(2 * h, 2 * h))
+        }
+        // Alças de bezier do ponto escolhido.
+        if (sel in 0 until n) {
+            val o = sel * 6
+            val c = Offset(sx(p[o], p[o + 1]), sy(p[o], p[o + 1]))
+            for (k in intArrayOf(2, 4)) {
+                if (p[o + k] == 0f && p[o + k + 1] == 0f) continue
+                val tx = p[o] + p[o + k]
+                val ty = p[o + 1] + p[o + k + 1]
+                val t = Offset(sx(tx, ty), sy(tx, ty))
+                drawLine(ShellColors.OutlineUnder, c, t, 3f * density)
+                drawLine(MaskEditColor, c, t, 1.5f * density)
+                drawCircle(ShellColors.OutlineUnder, 5.5.dp.toPx(), t)
+                drawCircle(MaskEditColor, 4.dp.toPx(), t)
+            }
+        }
+    }
+}
+
+/**
+ * Um gesto no modo de máscara. Alça do ponto escolhido > ponto > vazio.
+ * Desenhando: tocar no vazio põe um ponto (arrastar puxa as alças dele,
+ * simétricas); tocar no 1º ponto (com 3 ou mais) fecha. Arrastar um ponto o
+ * move; arrastar uma alça curva (a oposta espelha). Um gesto = um passo de
+ * desfazer (o 1º envio abre, os outros entram nele).
+ */
+private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.maskGesture(
+    store: EditorStore,
+    m: StageMapper,
+    ms: EditorStore.MaskState,
+    editId: Int,
+    down: androidx.compose.ui.input.pointer.PointerInputChange,
+    slop: Float,
+    reach: Float,
+    haptic: HapticFeedback,
+) {
+    val mask = ms.find(editId) ?: return
+    val n = mask.count
+    var cur = mask.points.copyOf()
+    val closed = mask.closed
+    fun scrX(x: Float, y: Float) = m.sx(ms.toCompX(x, y))
+    fun scrY(x: Float, y: Float) = m.sy(ms.toCompY(x, y))
+    val dx = down.position.x
+    val dy = down.position.y
+    // 1 ponto, 2 alça de entrada, 3 alça de saída.
+    var hitKind = 0
+    var hitIdx = -1
+    var best = reach
+    val sel = store.maskPoint
+    if (sel in 0 until n) {
+        val o = sel * 6
+        for ((kind, k) in listOf(2 to 2, 3 to 4)) {
+            if (cur[o + k] == 0f && cur[o + k + 1] == 0f) continue
+            val tx = cur[o] + cur[o + k]
+            val ty = cur[o + 1] + cur[o + k + 1]
+            val d = hypot(scrX(tx, ty) - dx, scrY(tx, ty) - dy)
+            if (d < best) { best = d; hitKind = kind; hitIdx = sel }
+        }
+    }
+    if (hitKind == 0) {
+        for (i in 0 until n) {
+            val d = hypot(scrX(cur[i * 6], cur[i * 6 + 1]) - dx, scrY(cur[i * 6], cur[i * 6 + 1]) - dy)
+            if (d < best) { best = d; hitKind = 1; hitIdx = i }
+        }
+    }
+    var undo = true
+    var created = -1
+    if (hitKind == 0 && store.maskDrawing) {
+        val lp = ms.toLayer(m.cx(dx), m.cy(dy)) ?: return
+        cur = cur.copyOf(cur.size + 6)
+        cur[n * 6] = lp[0]
+        cur[n * 6 + 1] = lp[1]
+        created = n
+        store.setMaskPoints(editId, cur, false, true)
+        undo = false
+        store.maskPoint = created
+        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+    }
+    var moved = false
+    do {
+        val e = awaitPointerEvent()
+        val c = e.changes.firstOrNull { it.id == down.id } ?: break
+        c.consume()
+        if (!moved && hypot(c.position.x - dx, c.position.y - dy) > slop) moved = true
+        if (!moved || (hitKind == 0 && created < 0)) continue
+        val lp = ms.toLayer(m.cx(c.position.x), m.cy(c.position.y)) ?: continue
+        val i = if (created >= 0) created else hitIdx
+        val o = i * 6
+        when {
+            created >= 0 || hitKind == 3 -> {
+                val ox = lp[0] - cur[o]
+                val oy = lp[1] - cur[o + 1]
+                cur[o + 4] = ox; cur[o + 5] = oy
+                cur[o + 2] = -ox; cur[o + 3] = -oy
+            }
+            hitKind == 2 -> {
+                val ix = lp[0] - cur[o]
+                val iy = lp[1] - cur[o + 1]
+                cur[o + 2] = ix; cur[o + 3] = iy
+                cur[o + 4] = -ix; cur[o + 5] = -iy
+            }
+            hitKind == 1 -> {
+                cur[o] = lp[0]
+                cur[o + 1] = lp[1]
+            }
+        }
+        store.setMaskPoints(editId, cur, if (created >= 0) false else closed, undo)
+        undo = false
+    } while (c.pressed)
+    if (!moved) {
+        when {
+            hitKind == 1 && store.maskDrawing && hitIdx == 0 && n >= 3 -> store.closeMaskPath()
+            hitKind == 1 -> store.maskPoint = hitIdx
+            hitKind == 0 && !store.maskDrawing -> store.maskPoint = -1
+        }
+    }
+    store.maskGestureEnd()
 }

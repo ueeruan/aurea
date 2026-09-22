@@ -69,6 +69,7 @@ set(AUREA_CORE_SOURCES
     src/render/ShaderLibrary.cpp
     src/render/RenderScheduler.cpp
     src/render/Renderer.cpp
+    src/render/MaskRaster.cpp
     src/effects/Parameter.cpp
     src/effects/EffectGraph.cpp
     src/effects/builtin/ColorEffects.cpp
@@ -76,6 +77,7 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/GlowEffect.cpp
     src/effects/builtin/TransformEffect.cpp
     src/effects/builtin/MotionTileEffect.cpp
+    src/effects/builtin/KeyingEffects.cpp
     src/media/DecodedFrameCache.cpp
     src/media/VideoSource.cpp
     src/media/MediaManager.cpp

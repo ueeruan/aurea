@@ -56,6 +56,8 @@ namespace effect_keys {
     inline constexpr const char* kSharpen            = "aurea.blur.sharpen";
     inline constexpr const char* kGlow               = "aurea.light.glow";
     inline constexpr const char* kMotionTile         = "aurea.stylize.motion_tile";
+    inline constexpr const char* kLumaKey            = "aurea.key.luma";
+    inline constexpr const char* kChromaKey          = "aurea.key.chroma";
 }
 
 } // namespace aurea

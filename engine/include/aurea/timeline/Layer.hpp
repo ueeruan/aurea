@@ -61,12 +61,23 @@ struct Transform {
 // Efeitos: a instância (`EffectInstance`) e os parâmetros genéricos vivem em
 // effects/Parameter.hpp. A layer só guarda a lista, na ordem de aplicação.
 
-/// Máscara. Os pontos são animáveis: o path vive aqui, a animação nos tracks.
+/// Máscara: caminho bezier em px da camada (0,0 = canto superior esquerdo da
+/// fonte). Rasterizada na GPU (render/MaskRaster.hpp) em cobertura
+/// antisserrilhada que multiplica o alfa da camada ANTES dos efeitos.
 struct MaskPoint {
     Vec2 position{0.0f, 0.0f};
     /// Tangentes de bezier, relativas à posição.
     Vec2 inTangent{0.0f, 0.0f};
     Vec2 outTangent{0.0f, 0.0f};
+};
+
+/// Forma do caminho num keyframe (tempo LOCAL da camada). Entre dois keys com
+/// o mesmo número de pontos, cada ponto e as tangentes interpolam; com número
+/// diferente, a forma segura até o próximo key.
+struct MaskPathKey {
+    i64 frame = 0;
+    u8  interp = 1;      ///< 0 segura, 1 linear, 2 suave (ease in-out)
+    std::vector<MaskPoint> points;
 };
 
 struct Mask {
@@ -76,12 +87,15 @@ struct Mask {
     std::string   name;
     MaskOperation operation = MaskOperation::Add;
     bool          inverted = false;
-    f32           feather  = 0.0f;     ///< em pixels de composição
-    f32           expansion = 0.0f;    ///< dilata/erode o path
+    f32           feather  = 0.0f;     ///< px da camada: largura da rampa (±2σ do gaussiano)
+    f32           expansion = 0.0f;    ///< px da camada: dilata (+) / erode (−) o path
     f32           opacity  = 1.0f;
     bool          closed   = true;
 
     std::vector<MaskPoint> points;
+    /// Caminho animado: vazio = `points` parado; senão os keys mandam (e
+    /// `points` guarda a última forma editada fora deles).
+    std::vector<MaskPathKey> pathKeys;
 
     /// Quantos pontos o preview pode usar. Máscaras com centenas de pontos
     /// entram no modo adaptativo com uma versão simplificada.
@@ -332,6 +346,10 @@ struct Layer {
     /// Etiqueta de cor da camada (0 = nenhuma; 1..kLayerLabelCount-1 = paleta
     /// fixa da UI). Só organização: não muda o render.
     u8       label = 0;
+    /// Track matte: camada cujo alfa/luma recorta esta (inválido = nenhuma).
+    /// A matte deixa de ser desenhada por conta própria enquanto é usada.
+    LayerId   matteSource{};
+    MatteMode matteMode = MatteMode::None;
 
     // --- Conteúdo ------------------------------------------------------------
     AssetId source{};              ///< vídeo, imagem, áudio ou modelo

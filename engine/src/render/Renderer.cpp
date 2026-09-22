@@ -1,4 +1,5 @@
 #include "aurea/render/Renderer.hpp"
+#include "aurea/render/MaskRaster.hpp"
 
 #include "aurea/scene3d/Animation.hpp"
 #include "aurea/text/Text.hpp"
@@ -377,6 +378,9 @@ Status Renderer::initialize(GPUBackend& backend, const EffectRegistry& effects) 
     keys.push_back(PipelineKey::fullscreen(ShaderId::video_rgba_to_linear_frag, kWorkFormat));
     keys.push_back(PipelineKey::fullscreen(ShaderId::shape_shape_frag, kWorkFormat));
     keys.push_back(PipelineKey::fullscreen(ShaderId::common_copy_frag, kWorkFormat));
+    keys.push_back(PipelineKey::fullscreen(ShaderId::mask_raster_frag, SurfaceFormat::R8));
+    keys.push_back(PipelineKey::fullscreen(ShaderId::mask_apply_frag, kWorkFormat));
+    keys.push_back(PipelineKey::fullscreen(ShaderId::mask_track_matte_frag, kWorkFormat));
     keys.push_back(PipelineKey::graphics(ShaderId::composite_layer_vert, ShaderId::composite_layer_frag,
                                          kWorkFormat, true, BlendMode::Normal));
     keys.push_back(PipelineKey::graphics(ShaderId::composite_layer_vert, ShaderId::composite_layer_frag,
@@ -406,6 +410,9 @@ void Renderer::shutdown() noexcept {
         if (glyphBuf_[i].valid()) backend_->destroy_buffer(glyphBuf_[i]);
         glyphBuf_[i] = BufferHandle{};
         glyphCap_[i] = 0;
+        if (maskBuf_[i].valid()) backend_->destroy_buffer(maskBuf_[i]);
+        maskBuf_[i] = BufferHandle{};
+        maskCap_[i] = 0;
     }
     scene3d_.shutdown();
     pool_.clear();
@@ -416,7 +423,8 @@ void Renderer::shutdown() noexcept {
 void Renderer::forget_device() noexcept {
     glyphAtlas_ = TextureHandle{};
     glyphAtlasGen_ = 0;
-    for (u32 i = 0; i < kGlyphRing; ++i) { glyphBuf_[i] = BufferHandle{}; glyphCap_[i] = 0; }
+    for (u32 i = 0; i < kGlyphRing; ++i) { glyphBuf_[i] = BufferHandle{}; glyphCap_[i] = 0; maskBuf_[i] = BufferHandle{}; maskCap_[i] = 0; }
+    maskCache_.clear();
     framesInFlight_.clear();
     planar_.clear();
     flowCache_.clear();
@@ -438,6 +446,8 @@ void Renderer::release_project_resources() noexcept {
     for (auto& [k, l] : luts_) backend_->destroy_texture(l.texture);
     for (auto& [k, f] : flowCache_) for (TextureHandle& t : f.tex) if (t.valid()) backend_->destroy_texture(t);
     flowCache_.clear();
+    for (auto& [k, m] : maskCache_) for (TextureHandle& t : m.tex) if (t.valid()) backend_->destroy_texture(t);
+    maskCache_.clear();
     planar_.clear();
     images_.clear();
     luts_.clear();
@@ -495,6 +505,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
     out.layers.clear();
     out.nested.clear();
     out.glyphs.clear();
+    out.maskData.clear();
     out.target = FGTexture{};
     out.compWidth = comp.width();
     out.compHeight = comp.height();
@@ -536,20 +547,38 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             anySolo = l && l->visible && l->solo && l->kind != LayerKind::Camera && l->kind != LayerKind::Light;
         }
     }
+    // Dentro de uma pré-composição os ids se repetem (cada composição tem a
+    // sua tabela): decoder, texto e caches precisam de uma chave própria.
+    auto render_id = [this](LayerId id) {
+        return nestSalt_ == 0 ? id : LayerId{0x40000000u | ((nestSalt_ & 0x3FFFu) << 16) | (id.index & 0xFFFFu), id.generation};
+    };
+    // Track matte: camadas usadas como matte por alguma outra. Elas não
+    // desenham por conta própria (mesmo com o olho desligado, recortam).
+    std::vector<u64> mattes;
+    for (u32 i = 0; i < n; ++i) {
+        const Layer* l = comp.layer(order.at(i));
+        if (l && l->matteMode != MatteMode::None && l->matteSource.valid() && l->matteSource.pack() != order.at(i).pack()) {
+            mattes.push_back(l->matteSource.pack());
+        }
+    }
     for (u32 i = 0; i < n; ++i) {
         const LayerId id = order.at(i);
         const Layer* l = comp.layer(id);
-        if (!l || !l->visible || !l->contains_time(time)) continue;
+        if (!l || !l->contains_time(time)) continue;
+        const bool isMatte = std::find(mattes.begin(), mattes.end(), id.pack()) != mattes.end();
+        if (!l->visible && !isMatte) continue;
         // Guia: referência de trabalho no editor, nunca no arquivo final.
         if (l->guide && settings.finalQuality) continue;
-        if (anySolo && !l->solo) continue;
+        if (anySolo && !l->solo && !isMatte) continue;
         const FrameIndex local = l->local_time(time);
 
-        // Dentro de uma pré-composição os ids se repetem (cada composição tem a
-        // sua tabela): decoder, texto e caches precisam de uma chave própria.
-        const LayerId rid = nestSalt_ == 0 ? id
-                          : LayerId{0x40000000u | ((nestSalt_ & 0x3FFFu) << 16) | (id.index & 0xFFFFu), id.generation};
+        const LayerId rid = render_id(id);
         RenderLayer rl;
+        rl.matteOnly = isMatte;
+        if (l->matteMode != MatteMode::None && l->matteSource.valid() && l->matteSource.pack() != id.pack()) {
+            rl.matteMode = l->matteMode;
+            rl.matteId = render_id(l->matteSource).pack();
+        }
         // Margem além da que a âncora do texto conta (animadores, fundo, sombra):
         // a fonte cresce em volta, o texto não anda.
         f32 srcShift = 0.0f;
@@ -958,6 +987,13 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             while (k < want && k < 4.0f) k *= 2.0f;
             rl.texelScale = std::max(rl.texelScale, k);
         }
+        // Máscaras: o caminho no instante, achatado a 0,2 texel da densidade de
+        // trabalho (px da camada → px da fonte: a margem do texto).
+        if (!l->masks.empty()) {
+            rl.maskFirst = static_cast<u32>(out.maskData.size());
+            rl.maskCount = mask::build_block(*l, static_cast<f64>(local.value), Vec2{srcShift, srcShift},
+                                             0.2f / std::max(rl.texelScale, 1e-3f), out.maskData, rl.maskStart, rl.maskKey);
+        }
 
         // Desfoque de movimento (transform 2D, com pais): K amostras no
         // obturador centrado no quadro. Camada parada no intervalo = nada.
@@ -1135,7 +1171,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         // modelos e as outras camadas 3D vizinhas na pilha). Com desfoque/eco
         // ou modo de mistura ela continua na composição, como antes.
         const bool asPlane = inScene3d && rl.blurMatrices.empty() && rl.temporal.empty() && rl.blend == BlendMode::Normal
-                          && rl.source.kind != LayerSource::Kind::Particles && !out.plans[used].hasFold;
+                          && rl.source.kind != LayerSource::Kind::Particles && !out.plans[used].hasFold
+                          && rl.matteMode == MatteMode::None && !rl.matteOnly;
         if (asPlane) {
             if (!groupOpen || out.scenes.empty()) {
                 out.scenes.emplace_back();
@@ -1165,6 +1202,13 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         ++used;
     }
     for (u32 k = used; k < out.plans.size(); ++k) out.plans[k].clear();
+    // Track matte: a matte de cada camada neste snapshot (ausente = −1).
+    for (RenderLayer& rl : out.layers) {
+        if (rl.matteMode == MatteMode::None) continue;
+        for (u32 j = 0; j < out.layers.size(); ++j) {
+            if (out.layers[j].matteOnly && out.layers[j].id.pack() == rl.matteId) { rl.matteIndex = static_cast<i32>(j); break; }
+        }
+    }
     if (!out.scenes.empty()) fill_scene_context(comp, time, out);
     // Desfoque de movimento 3D: cada grupo com modelo que pede desfoque vira
     // K cenas no obturador (câmera, mundo e pose no sub-quadro).
@@ -1809,6 +1853,147 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
     return false;
 }
 
+void Renderer::upload_masks(FrameSnapshot& snap) noexcept {
+    // Blocos de todas as pré-composições num buffer só do quadro (como os glifos).
+    usize total = 0;
+    std::vector<FrameSnapshot*> all;
+    std::vector<FrameSnapshot*> stack{&snap};
+    while (!stack.empty()) {
+        FrameSnapshot* s = stack.back();
+        stack.pop_back();
+        s->maskBase = static_cast<u32>(total);
+        total += s->maskData.size();
+        all.push_back(s);
+        for (auto& c : s->nested) if (c) stack.push_back(c.get());
+    }
+    maskFrameBuf_ = BufferHandle{};
+    if (total == 0) return;
+    const u32 slot = maskSlot_++ % kGlyphRing;
+    const usize bytes = total * sizeof(Vec4);
+    if (maskCap_[slot] < bytes) {
+        if (maskBuf_[slot].valid()) backend_->destroy_buffer(maskBuf_[slot]);
+        BufferDesc bd;
+        bd.bytes = std::max<usize>(bytes * 2, 1024 * sizeof(Vec4));
+        bd.usage = BufferUsage::Storage;
+        bd.access = MemoryAccess::Upload;
+        bd.debugName = "mascaras";
+        auto b = backend_->create_buffer(bd);
+        maskBuf_[slot] = b.ok() ? *b : BufferHandle{};
+        maskCap_[slot] = b.ok() ? bd.bytes : 0;
+    }
+    void* ptr = nullptr;
+    if (!maskBuf_[slot].valid() || !backend_->map_buffer(maskBuf_[slot], ptr).ok() || !ptr) return;
+    auto* dst = static_cast<Vec4*>(ptr);
+    for (FrameSnapshot* s : all) std::copy(s->maskData.begin(), s->maskData.end(), dst + s->maskBase);
+    backend_->unmap_buffer(maskBuf_[slot]);
+    maskFrameBuf_ = maskBuf_[slot];
+}
+
+void Renderer::apply_masks(const RenderLayer& layer, LayerImage& img, u64 frameNumber) noexcept {
+    if (layer.maskCount == 0 || !img.valid() || !currentSnap_) return;
+    const u32 w = img.width, h = img.height;
+    const f32 k = img.region.w > 0.0f ? static_cast<f32>(w) / img.region.w : 1.0f;
+    // A cobertura depende do bloco (caminho, modos, feather...), do tamanho e
+    // da região: com tudo igual, a textura do quadro anterior serve.
+    u64 key = layer.maskKey ^ (static_cast<u64>(w) << 40) ^ (static_cast<u64>(h) << 20);
+    for (f32 v : {img.region.x, img.region.y, img.region.w, img.region.h}) {
+        u32 b;
+        std::memcpy(&b, &v, 4);
+        key = (key ^ b) * 1099511628211ull;
+    }
+    key |= 1ull;
+    TextureDesc md;
+    md.width = w;
+    md.height = h;
+    md.format = SurfaceFormat::R8;
+    md.sampled = true;
+    md.renderTarget = true;
+    md.debugName = "cobertura-da-mascara";
+    MaskCache& mc = maskCache_[layer.id.pack()];
+    mc.lastFrame = frameNumber;
+    if (mc.width != w || mc.height != h) {
+        for (TextureHandle& t : mc.tex) if (t.valid()) backend_->destroy_texture(t);
+        mc = MaskCache{};
+        mc.width = w;
+        mc.height = h;
+        mc.lastFrame = frameNumber;
+    }
+    FGTexture cov{};
+    for (u32 i = 0; i < 2; ++i) {
+        if (mc.tex[i].valid() && mc.key[i] == key) {
+            ++maskHits_;
+            cov = graph_.import_texture("cobertura-da-mascara", mc.tex[i], md);
+            break;
+        }
+    }
+    if (!cov.valid()) {
+        if (!maskFrameBuf_.valid()) return;
+        auto pipe = shaders_.pipeline(PipelineKey::fullscreen(ShaderId::mask_raster_frag, SurfaceFormat::R8));
+        if (!pipe.ok()) { incomplete_ = true; return; }
+        // A que um quadro em voo pode estar lendo nunca é a que se escreve.
+        const u32 slot = mc.next;
+        mc.next ^= 1u;
+        if (!mc.tex[slot].valid()) {
+            auto t = backend_->create_texture(md);
+            if (!t.ok()) return;
+            mc.tex[slot] = *t;
+        }
+        mc.key[slot] = key;
+        ++maskMisses_;
+        cov = graph_.import_texture("cobertura-da-mascara", mc.tex[slot], md);
+        struct { Vec4 region; Vec4 info; } u{Vec4{img.region.x, img.region.y, img.region.w, img.region.h},
+                                             Vec4{static_cast<f32>(currentSnap_->maskBase + layer.maskFirst),
+                                                  static_cast<f32>(layer.maskCount), k, layer.maskStart}};
+        void* ubo = arena_.alloc(sizeof(u), 16);
+        std::memcpy(ubo, &u, sizeof(u));
+        struct Cap { PipelineHandle p; BufferHandle buf; void* ubo; } cap{*pipe, maskFrameBuf_, ubo};
+        graph_.add_raster_pass("mascara-raster", PassStage::Mask, cov, LoadOp::DontCare, Vec4{0, 0, 0, 0},
+                               [cap](PassContext& pc) {
+            pc.cmds.bind_pipeline(cap.p);
+            pc.cmds.bind_storage_buffer(cap.buf);
+            pc.cmds.set_uniforms(cap.ubo, 32);
+            pc.cmds.draw(3);
+        });
+    }
+    TextureDesc od;
+    od.width = w;
+    od.height = h;
+    od.format = kWorkFormat;
+    od.sampled = true;
+    od.renderTarget = true;
+    const FGTexture masked = graph_.create_texture("layer-mascarada", od);
+    EffectBuildContext ctx(graph_, shaders_, arena_, *this, kWorkFormat, 8192);
+    if (ctx.fullscreen_pass("mascara", PassStage::Mask, masked, ShaderId::mask_apply_frag,
+                            {PassTexture{img.texture}, PassTexture{cov}}, nullptr, 0) != kInvalidIndex) {
+        img.texture = masked;
+    }
+}
+
+FGTexture Renderer::draw_to_comp(const CompositeDraw& d, const TextureDesc& compDesc, f32 compW, f32 compH,
+                                 const char* name) noexcept {
+    auto pNormal = shaders_.pipeline(PipelineKey::graphics(
+        ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat, true, BlendMode::Normal));
+    if (!pNormal.ok()) return FGTexture{};
+    TextureDesc td = compDesc;
+    td.transferSrc = false;
+    const FGTexture t = graph_.create_texture(name, td);
+    struct Cap { CompositeDraw d; PipelineHandle p; f32 w, h; } cap{d, *pNormal, compW, compH};
+    const u32 pass = graph_.add_raster_pass(name, PassStage::Composite, t, LoadOp::Clear, Vec4{0, 0, 0, 0},
+                                            [cap](PassContext& pc) {
+        pc.cmds.bind_pipeline(cap.p);
+        LayerPush push;
+        push.clipFromLayer = clip_from_comp(cap.w, cap.h) * cap.d.compFromLayer;
+        push.region = Vec4{cap.d.region.x, cap.d.region.y, cap.d.region.w, cap.d.region.h};
+        push.uvRect = Vec4{0.0f, 0.0f, 1.0f, 1.0f};
+        push.params = Vec4{cap.d.opacity, 0.0f, 0.0f, 0.0f};
+        pc.cmds.bind_texture(0, pc.texture(cap.d.texture), SamplerHandle{cap.d.sampler});
+        pc.cmds.push_constants(&push, sizeof(push));
+        pc.cmds.draw(6);
+    });
+    graph_.read(pass, d.texture);
+    return t;
+}
+
 void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const TextureDesc& compDesc, u64 frameNumber,
                               std::vector<CompositeDraw>& draws, u32 depth) noexcept {
     // Pré-composições primeiro: cada uma no seu alvo, na MESMA escala de
@@ -1831,7 +2016,7 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
     compTargetW_ = compDesc.width;
     compTargetH_ = compDesc.height;
 
-    // --- Layers: fonte → efeitos → desenho na composição.
+    // --- Layers: fonte → máscaras → efeitos → desenho na composição.
     EffectBuildContext ctx(graph_, shaders_, arena_, *this, kWorkFormat,
                            std::min<u32>(backend_->capabilities().maxTexture2D, 8192));
     // Camadas 2D que vivem numa cena 3D: imagem (com efeitos) primeiro; o
@@ -1842,10 +2027,11 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
         if (layer.planeGroup < 0 || static_cast<usize>(layer.planeGroup) >= groupPlanes_.size()) continue;
         LayerImage src;
         const bool hasEffects = i < snap.plans.size() && !snap.plans[i].empty();
-        if (!build_source(layer, i, hasEffects, src, framesInFlight_, frameNumber)) {
+        if (!build_source(layer, i, hasEffects || layer.maskCount > 0, src, framesInFlight_, frameNumber)) {
             if (layer.source.kind != LayerSource::Kind::Video) incomplete_ = true;
             continue;
         }
+        apply_masks(layer, src, frameNumber);
         LayerImage fin = src;
         if (hasEffects) (void)EffectGraph::build(snap.plans[i], ctx, src, fin);
         scene3d::ScenePlane p;
@@ -1861,29 +2047,23 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
         p.viewDepth = c.w;
         groupPlanes_[static_cast<usize>(layer.planeGroup)].push_back(p);
     }
-    for (u32 i = 0; i < snap.layers.size(); ++i) {
+    const f32 compW = static_cast<f32>(snap.compWidth), compH = static_cast<f32>(snap.compHeight);
+    // Uma camada até o desenho na composição (fonte, máscaras, efeitos,
+    // desfoque/eco acumulados). false = fora deste quadro.
+    auto make_draw = [&](u32 i, CompositeDraw& draw) -> bool {
         const RenderLayer& layer = snap.layers[i];
-        if (layer.planeGroup >= 0) continue;   // desenhada dentro da cena
-        if (layer.source.kind == LayerSource::Kind::Adjustment) {
-            CompositeDraw draw;
-            draw.adjustPlan = i;
-            draw.opacity = layer.opacity;
-            draws.push_back(draw);
-            continue;
-        }
         LayerImage src;
         const bool hasEffects = i < snap.plans.size() && !snap.plans[i].empty();
-        if (!build_source(layer, i, hasEffects, src, framesInFlight_, frameNumber)) {
+        if (!build_source(layer, i, hasEffects || layer.maskCount > 0, src, framesInFlight_, frameNumber)) {
             // Camada fora deste quadro por recurso ainda não pronto (pipeline
             // compilando, textura a caminho): o próximo quadro tenta de novo.
             if (layer.source.kind != LayerSource::Kind::Video) incomplete_ = true;
-            continue;
+            return false;
         }
+        // Máscaras ANTES dos efeitos (como no AE): o blur vê a borda recortada.
+        apply_masks(layer, src, frameNumber);
         LayerImage fin = src;
-        if (i < snap.plans.size() && !snap.plans[i].empty()) {
-            (void)EffectGraph::build(snap.plans[i], ctx, src, fin);
-        }
-        CompositeDraw draw;
+        if (hasEffects) (void)EffectGraph::build(snap.plans[i], ctx, src, fin);
         draw.texture = fin.texture;
         draw.region = fin.region;
         draw.compFromLayer = layer.compFromLayer;
@@ -1923,8 +2103,7 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
                 struct Cap {
                     Mat4* mats; Vec4* prm; u32 k; PipelineHandle p; FGTexture src; u64 sampler; Rect region;
                     f32 compW; f32 compH;
-                } cap{mats, prm, k, *pAdd, draw.texture, draw.sampler, draw.region,
-                      static_cast<f32>(snap.compWidth), static_cast<f32>(snap.compHeight)};
+                } cap{mats, prm, k, *pAdd, draw.texture, draw.sampler, draw.region, compW, compH};
                 const u32 pass = graph_.add_raster_pass("desfoque de movimento", PassStage::Composite, acc, LoadOp::Clear,
                                                         Vec4{0, 0, 0, 0}, [cap](PassContext& pc) {
                     const Mat4 clip = clip_from_comp(cap.compW, cap.compH);
@@ -1942,10 +2121,63 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
                 });
                 graph_.read(pass, draw.texture);
                 draw.texture = acc;
-                draw.region = Rect{0.0f, 0.0f, static_cast<f32>(snap.compWidth), static_cast<f32>(snap.compHeight)};
+                draw.region = Rect{0.0f, 0.0f, compW, compH};
                 draw.compFromLayer = Mat4::identity();
                 draw.sampler = shaders_.sampler(CommonSampler::LinearClamp).id;
             }
+        }
+        return true;
+    };
+    // Track matte: as mattes primeiro, cada uma sozinha num alvo do tamanho
+    // da composição (transform, opacidade, máscaras e efeitos dela). Elas não
+    // entram na composição por conta própria.
+    FGTexture* matteTex = snap.layers.empty() ? nullptr : arena_.alloc_array<FGTexture>(static_cast<u32>(snap.layers.size()));
+    for (u32 i = 0; i < snap.layers.size(); ++i) {
+        const RenderLayer& layer = snap.layers[i];
+        matteTex[i] = FGTexture{};
+        if (!layer.matteOnly || layer.planeGroup >= 0) continue;
+        bool wanted = false;   // alguém neste quadro usa esta matte?
+        for (const RenderLayer& o : snap.layers) wanted |= o.matteIndex == static_cast<i32>(i);
+        if (!wanted) continue;
+        CompositeDraw d;
+        if (make_draw(i, d)) matteTex[i] = draw_to_comp(d, compDesc, compW, compH, "track-matte-fonte");
+    }
+    for (u32 i = 0; i < snap.layers.size(); ++i) {
+        const RenderLayer& layer = snap.layers[i];
+        if (layer.planeGroup >= 0 || layer.matteOnly) continue;   // na cena 3D / só recorta
+        CompositeDraw draw;
+        if (layer.source.kind == LayerSource::Kind::Adjustment) {
+            // Camada de ajuste: montada na composição, sobre o fundo acumulado.
+            draw.adjustPlan = i;
+            draw.opacity = layer.opacity;
+            draws.push_back(draw);
+            continue;
+        }
+        if (layer.matteMode != MatteMode::None) {
+            const bool inverted = layer.matteMode == MatteMode::AlphaInverted || layer.matteMode == MatteMode::LumaInverted;
+            const FGTexture m = layer.matteIndex >= 0 ? matteTex[layer.matteIndex] : FGTexture{};
+            // Sem matte no instante: nada aparece através dela (ou tudo, no invertido).
+            if (!m.valid() && !inverted) continue;
+            if (!make_draw(i, draw)) continue;
+            if (m.valid()) {
+                const FGTexture lc = draw_to_comp(draw, compDesc, compW, compH, "track-matte-camada");
+                TextureDesc td = compDesc;
+                td.transferSrc = false;
+                const FGTexture out = graph_.create_texture("track-matte", td);
+                const Vec4 mode{static_cast<f32>(static_cast<u8>(layer.matteMode)), 0, 0, 0};
+                if (!lc.valid() || ctx.fullscreen_pass("track-matte", PassStage::Composite, out, ShaderId::mask_track_matte_frag,
+                                                       {PassTexture{lc}, PassTexture{m}}, &mode, sizeof(mode)) == kInvalidIndex) {
+                    incomplete_ = true;
+                    continue;
+                }
+                draw.texture = out;
+                draw.region = Rect{0.0f, 0.0f, compW, compH};
+                draw.compFromLayer = Mat4::identity();
+                draw.opacity = 1.0f;   // já aplicada no alvo da camada
+                draw.sampler = shaders_.sampler(CommonSampler::LinearClamp).id;
+            }
+        } else if (!make_draw(i, draw)) {
+            continue;
         }
         draws.push_back(draw);
     }
@@ -2207,6 +2439,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     compTargetH_ = ch;
 
     upload_glyphs(snap);
+    upload_masks(snap);
     compose_layers(snap, comp, compDesc, fb.frameNumber, draws_, 0);
     // A raiz de novo (as pré-composições trocaram o estado em curso).
     currentScenes_ = &snap.scenes;
@@ -2357,6 +2590,14 @@ void Renderer::collect_resources(u64 frameNumber) noexcept {
         if (frameNumber > it->second.lastFrame + 240) {
             for (TextureHandle& t : it->second.tex) if (t.valid()) backend_->destroy_texture(t);
             it = flowCache_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    for (auto it = maskCache_.begin(); it != maskCache_.end();) {
+        if (frameNumber > it->second.lastFrame + 240) {
+            for (TextureHandle& t : it->second.tex) if (t.valid()) backend_->destroy_texture(t);
+            it = maskCache_.erase(it);
         } else {
             ++it;
         }

@@ -98,6 +98,7 @@ private enum class DockSection(val glyph: Char, val label: String, val badge: St
     Effects(CupertinoGlyph.Sparkles, "Efeitos"),
     Captions(CupertinoGlyph.Textformat, "Legendas"),
     Presets(CupertinoGlyph.WandStars, "Presets"),
+    Mask(CupertinoGlyph.PencilOutline, "Máscara e recorte"),
 }
 
 /**
@@ -114,6 +115,8 @@ private fun sectionsFor(type: LayerType): List<DockSection> = when (type) {
         if (type == LayerType.Shape || type == LayerType.Text || type == LayerType.Model3D) add(DockSection.ColorFill)
         add(DockSection.BorderShadow)
         add(DockSection.Blend)
+        // Máscara/track matte: tudo que desenha em 2D (o grupo 3D ainda não recorta).
+        if (type != LayerType.Model3D && type != LayerType.Light) add(DockSection.Mask)
         if (type == LayerType.Video) add(DockSection.Volume)
         if (type == LayerType.Video) add(DockSection.Track)
         if (type == LayerType.Video) add(DockSection.Captions)
@@ -233,6 +236,7 @@ private fun onSection(store: EditorStore, ui: EditorUi, s: DockSection) {
         DockSection.Echo -> openPanel(store, ui, EditorPanel.Echo)
         DockSection.Captions -> openPanel(store, ui, EditorPanel.Captions)
         DockSection.Presets -> openPanel(store, ui, EditorPanel.Presets)
+        DockSection.Mask -> openPanel(store, ui, EditorPanel.Mask)
         DockSection.ColorFill, DockSection.EditShape, DockSection.EditText -> when (store.detail?.kind) {
             com.aurea.aurea.ui.theme.LayerType.Shape.kind -> openPanel(store, ui, EditorPanel.Shape)
             com.aurea.aurea.ui.theme.LayerType.Text.kind -> openPanel(store, ui, EditorPanel.Text)

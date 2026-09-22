@@ -7,6 +7,7 @@
 
 #include "aurea/Engine.hpp"
 #include "aurea/audio/Audio.hpp"
+#include "aurea/render/MaskRaster.hpp"
 #include "aurea/render/Renderer.hpp"
 
 #include <cmath>
@@ -415,4 +416,34 @@ AUREA_TEST(ClipTime, PointTrackerStartsAtThePlayhead) {
     std::printf("    rastreio a partir do cabecote (40): %u quadros, pior erro %.3f px\n", tracked, worst / k);
     AUREA_CHECK(tracked >= 45 && tracked <= 50);
     AUREA_CHECK(worst / k < 0.5);
+}
+
+AUREA_TEST(ClipTime, MaskTrackerMovesThePathWithTheSquare) {
+    // Máscara em volta do quadrado (px da camada): o rastreio grava um key de
+    // caminho por quadro e o centro do caminho acompanha o quadrado.
+    TimeRig r(moving_square_cfg());
+    const f32 pts[4 * 6] = {22, 22, 0, 0, 0, 0,  38, 22, 0, 0, 0, 0,  38, 38, 0, 0, 0, 0,  22, 38, 0, 0, 0, 0};
+    const i32 mid = r.e.add_mask(r.layer.pack(), pts, 4, true);
+    AUREA_CHECK(mid >= 0);
+    for (u32 mode : {0u, 1u}) {
+        auto res = r.e.track_mask(r.layer.pack(), static_cast<u32>(mid), mode);
+        AUREA_CHECK(res.ok());
+        if (!res.ok()) return;
+        const Layer* v = r.L();
+        const Mask& m = v->masks[0];
+        AUREA_CHECK_EQ(m.pathKeys.size(), static_cast<usize>(*res));
+        f64 worst = 0, worstSize = 0;
+        std::vector<MaskPoint> shape;
+        for (i64 f = 0; f < static_cast<i64>(*res); f += 3) {
+            mask::evaluate_path(m, static_cast<f64>(v->local_time(FrameIndex{f}).value), shape);
+            f32 cx = 0, cy = 0;
+            for (const MaskPoint& p : shape) { cx += p.position.x * 0.25f; cy += p.position.y * 0.25f; }
+            worst = std::max<f64>(worst, std::hypot(cx - static_cast<f32>(moving_square_x(f)), cy - static_cast<f32>(moving_square_y(f))));
+            worstSize = std::max<f64>(worstSize, std::fabs((shape[1].position.x - shape[0].position.x) - 16.0f));
+        }
+        std::printf("    mascara rastreada (modo %u): %u quadros, pior erro do centro %.3f px, tamanho +-%.3f px\n", mode, *res, worst, worstSize);
+        AUREA_CHECK(*res >= 85);
+        AUREA_CHECK(worst < 0.75);
+        AUREA_CHECK(worstSize < 0.75);
+    }
 }

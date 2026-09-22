@@ -86,10 +86,6 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         selection = if (path in selection) selection - path else selection + path
     }
 
-    fun selectOnly(path: String) {
-        selection = setOf(path)
-    }
-
     fun selectAll(paths: Collection<String>) {
         selection = paths.toSet()
     }
@@ -276,14 +272,6 @@ internal class HomeThumbnails(private val resources: Resources) {
         null
     }
 
-    fun decodeResource(id: Int, widthPx: Int): Bitmap? = try {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeResource(resources, id, bounds)
-        BitmapFactory.decodeResource(resources, id, BitmapFactory.Options().apply { inSampleSize = sampleFor(bounds.outWidth, widthPx) })
-    } catch (_: Exception) {
-        null
-    }
-
     /** Maior potência de 2 que ainda deixa a imagem com ≥ a largura pedida. */
     private fun sampleFor(sourceWidth: Int, targetWidth: Int): Int {
         var sample = 1
@@ -326,16 +314,6 @@ internal fun rememberProjectThumbnail(
             return@produceState
         }
         value = thumbs.peek(key) ?: thumbs.load(key) { thumbs.decodeFile(path, widthPx) }
-    }
-    return state.value
-}
-
-/** Imagem de um modelo (drawable empacotado). */
-@Composable
-internal fun rememberResourceThumbnail(thumbs: HomeThumbnails, id: Int, widthPx: Int): ImageBitmap? {
-    val key = remember(id, widthPx) { "res:$id|$widthPx" }
-    val state = produceState(thumbs.peek(key), key) {
-        value = thumbs.peek(key) ?: thumbs.load(key) { thumbs.decodeResource(id, widthPx) }
     }
     return state.value
 }

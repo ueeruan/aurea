@@ -48,8 +48,9 @@ import kotlin.math.roundToInt
 // =============================================================================
 
 /**
- * ↶ ↷ · [|◀ ▶ ▶|] centrado · copiar/colar · olho · tela cheia. Botões dos
- * lados com `clamp((W − 132)/6, 30, 40)` (num 320 os seis em 40 estouravam).
+ * ↶ ↷ · [|◀ ▶ ▶|] centrado · copiar/colar · tela cheia (o "olho" de opções
+ * de visualização só dizia "em breve" e saiu na Fase 8I). Botões dos lados com
+ * `clamp((W − 132)/6, 30, 40)` (num 320 os seis em 40 estouravam).
  * Enquanto um dedo manipula algo no palco, a barra vira a de informações.
  */
 @Composable
@@ -92,7 +93,6 @@ internal fun TransportBar(store: EditorStore, ui: EditorUi) {
                 )
             }
             ChromeButton(CupertinoGlyph.DocOnClipboard, "Copiar e colar", onClick = { openSheet(store, ui, ShellSheet.CopyPaste) }, width = side, height = ShellDims.Transport)
-            ChromeButton(CupertinoGlyph.Eye, "Opções de visualização", onClick = { store.comingSoon("Opções de visualização") }, width = side, height = ShellDims.Transport)
             ChromeButton(
                 if (ui.fullscreen) CupertinoGlyph.FullscreenExit else CupertinoGlyph.Fullscreen,
                 if (ui.fullscreen) "Sair da tela cheia" else "Tela cheia",

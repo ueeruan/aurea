@@ -148,10 +148,6 @@ object CupertinoGlyph {
     const val PauseFill = '\uF478'
     const val Pencil = '\uF37E'
     const val PencilOutline = '\uF73D'
-    const val Person = '\uF47D'
-    const val PersonFill = '\uF47E'
-    const val Person2 = '\uF740'
-    const val Person2Fill = '\uF741'
     const val PersonCropCircle = '\uF419'
     const val Photo = '\uF767'
     const val PhotoFill = '\uF768'
@@ -196,12 +192,6 @@ object CupertinoGlyph {
     const val XmarkCircle = '\uF405'
     const val XmarkCircleFill = '\uF36E'
 
-    // Home (Comunidade e Perfil da A.01)
-    const val At = '\uF574'
-    const val CloudFill = '\uF5FB'
-    const val LockShield = '\uF6FE'
-    const val PlusApp = '\uF775'
-
     // Painéis e controles de propriedade
     const val ArrowtriangleDownFill = '\uF55D'
     const val ArrowtriangleRightFill = '\uF569'
@@ -211,8 +201,6 @@ object CupertinoGlyph {
     const val Star = '\uF81F'
     const val StarFill = '\uF822'
     const val Scribble = '\uF7CB'
-    const val Sportscourt = '\uF7F6'
-    const val WaveformPath = '\uF897'
     const val Tortoise = '\uF86A'
     const val Hare = '\uF6B9'
 }

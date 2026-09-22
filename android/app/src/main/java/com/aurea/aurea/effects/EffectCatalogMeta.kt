@@ -157,8 +157,6 @@ class EffectMeta(
     val keywords: String = "",
 )
 
-internal fun effectMeta(typeId: Int): EffectMeta? = Table[typeId]
-
 /** A descrição de gente. Efeito sem ficha não fica mudo: diz o que ele é. */
 fun effectDescription(typeId: Int, category: String): String =
     Table[typeId]?.description ?: "Efeito de $category. Os parâmetros estão no painel do efeito."
@@ -254,18 +252,3 @@ fun filterCatalog(
 /** Índice de busca do catálogo inteiro (uma passada, memoizado por quem chama). */
 fun catalogHaystack(catalog: List<EffectCatalogEntry>): Map<Int, String> =
     catalog.associate { it.typeId to catalogSearchText(it) }
-
-/** Rótulo humano do tipo de parâmetro, para a ficha de documentação visual (§68). */
-fun paramTypeLabel(type: Int): String = when (type) {
-    ParamType.FLOAT -> "número"
-    ParamType.INT -> "inteiro"
-    ParamType.BOOL -> "ligado/desligado"
-    ParamType.COLOR -> "cor"
-    ParamType.POINT2D -> "ponto"
-    ParamType.POINT3D -> "ponto 3D"
-    ParamType.ANGLE -> "ângulo"
-    ParamType.ENUM -> "escolha"
-    ParamType.CURVE -> "curva"
-    ParamType.GRADIENT -> "degradê"
-    else -> "valor"
-}

@@ -39,10 +39,7 @@ enum class EditorPanel {
     Shape,         // cor e preenchimento / editar forma
     Text,          // editar texto
     Font,          // escolher a fonte do texto
-    Parent,        // seguir outra camada (parentesco)
     Particles,     // partículas
-    Transitions,   // entrada e saída
-    Echo,          // eco e rgb no tempo
     Tracking,      // rastreio de ponto / estabilização
     Element3D,     // ambiente 3D (HDRI)
     Captions,      // legendas automáticas da fala
@@ -106,10 +103,7 @@ fun PanelContent(
         EditorPanel.Shape -> "Cor e preenchimento"
         EditorPanel.Text -> "Texto"
         EditorPanel.Font -> "Fonte"
-        EditorPanel.Parent -> "Seguir outra camada"
         EditorPanel.Particles -> "Partículas"
-        EditorPanel.Transitions -> "Entrada e saída"
-        EditorPanel.Echo -> "Eco e rastro"
         EditorPanel.Tracking -> "Rastreio"
         EditorPanel.Element3D -> "Material e ambiente"
         EditorPanel.Captions -> "Legendas"
@@ -133,10 +127,7 @@ fun PanelContent(
                     EditorPanel.Shape -> ShapePanel(env)
                     EditorPanel.Text -> TextPanel(env)
                     EditorPanel.Font -> FontPanel(env)
-                    EditorPanel.Parent -> ParentPanel(env)
                     EditorPanel.Particles -> ParticlesPanel(env)
-                    EditorPanel.Transitions -> TransitionsPanel(env)
-                    EditorPanel.Echo -> EchoPanel(env)
                     EditorPanel.Tracking -> TrackingPanel(env)
                     EditorPanel.Element3D -> Element3DPanel(env)
                     EditorPanel.Captions -> CaptionsPanel(env)

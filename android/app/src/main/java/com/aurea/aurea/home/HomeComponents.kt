@@ -103,23 +103,6 @@ internal fun SectionHeader(text: String, actionLabel: String? = null, onAction: 
     }
 }
 
-/** `_Linha`: ícone 19 · texto 14,5 · chevron 15 (altura 45,6). */
-@Composable
-internal fun HomeLinkRow(glyph: Char, text: String, onClick: () -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .tocavel(onClick = onClick)
-            .padding(horizontal = AureaDims.Gutter, vertical = 13.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        CupertinoIcon(glyph, 19.dp, AureaColors.Accent)
-        Spacer(Modifier.width(14.dp))
-        Text(text, style = AureaType.LinkRow, modifier = Modifier.weight(1f))
-        CupertinoIcon(CupertinoGlyph.ChevronRight, 15.dp, AureaColors.Muted)
-    }
-}
-
 /** Rótulo em caixa-alta. */
 @Composable
 internal fun CapsLabel(text: String, modifier: Modifier = Modifier) {
@@ -295,24 +278,6 @@ internal fun <T> SegmentedRow(label: String, values: List<T>, selected: T, label
     }
 }
 
-/** Título + subtítulo e o interruptor. */
-@Composable
-internal fun SwitchRow(title: String, subtitle: String?, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().padding(start = AureaDims.S4, top = 10.dp, end = AureaDims.S3, bottom = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(title, style = AureaType.BodyLarge)
-            if (subtitle != null) {
-                Spacer(Modifier.height(1.dp))
-                Text(subtitle, style = AureaType.BodySmall)
-            }
-        }
-        AureaSwitch(checked, onChange)
-    }
-}
-
 /** Título + subtítulo e chevron 16. */
 @Composable
 internal fun TapRow(title: String, subtitle: String?, onClick: () -> Unit) {
@@ -368,18 +333,6 @@ internal fun TileRow(
     }
 }
 
-/** A seta Cupertino 16 das linhas tocáveis de grupo. */
-@Composable
-internal fun TileChevron() {
-    CupertinoIcon(CupertinoGlyph.ChevronRight, AureaDims.IconSm, AureaColors.Muted)
-}
-
-/** Seta do Material (`Icons.chevron_right`) da linha de Idioma. */
-@Composable
-internal fun MaterialChevron() {
-    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = AureaColors.Muted)
-}
-
 /** Um botão cheio de largura inteira (criar projeto, ação principal). */
 @Composable
 internal fun FillButton(label: String, glyph: Char? = null, onClick: () -> Unit) {
@@ -399,16 +352,5 @@ internal fun FillButton(label: String, glyph: Char? = null, onClick: () -> Unit)
             }
             Text(label, style = AureaType.Button)
         }
-    }
-}
-
-/** Círculo com um ícone dentro — o atalho redondo. */
-@Composable
-internal fun GlyphCircle(glyph: Char, size: Dp = 56.dp, tint: Color = AureaColors.Accent) {
-    Box(
-        Modifier.size(size).clip(CircleShape).background(AureaColors.SurfaceHigh),
-        contentAlignment = Alignment.Center,
-    ) {
-        CupertinoIcon(glyph, size * 0.41f, tint)
     }
 }

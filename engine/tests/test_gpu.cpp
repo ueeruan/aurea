@@ -1036,6 +1036,34 @@ AUREA_TEST(Gpu, Scene3DModelsAppearFramedWithPbr) {
     }
 }
 
+
+AUREA_TEST(Gpu, Scene3DSurvivesSaveAndReopenIdentically) {
+    AUREA_REQUIRE_GPU();
+    const std::string path = gltf_data("DamagedHelmet.glb");
+    if (!file_exists(path)) return;
+    Image8 before, after;
+    {
+        Scene3DRig rig(384, 216);
+        ModelImport mi;
+        mi.path = path;
+        AUREA_CHECK(rig.e.import_model(mi).ok());
+        before = rig.capture(384);
+        AUREA_CHECK(rig.e.save_project("aurea_teste_3d.aurea").ok());
+    }
+    {
+        Scene3DRig rig(384, 216);
+        AUREA_CHECK(rig.e.load_project("aurea_teste_3d.aurea").ok());
+        after = rig.capture(384);
+    }
+    AUREA_CHECK_EQ(before.width, after.width);
+    AUREA_CHECK_EQ(before.height, after.height);
+    if (before.rgba.size() != after.rgba.size()) return;
+    u32 worst = 0;
+    for (usize i = 0; i < before.rgba.size(); ++i) worst = std::max<u32>(worst, static_cast<u32>(std::abs(before.rgba[i] - after.rgba[i])));
+    AUREA_CHECK_MSG(worst <= 2, "o modelo reaberto nao e o mesmo quadro");
+    if (worst > 2) { (void)write_png("reaberto_antes.png", before); (void)write_png("reaberto_depois.png", after); }
+}
+
 #endif // AUREA_TEST_VULKAN
 
 AUREA_TEST(Gpu, CaptureFrameGivesSrgbThumbnail) {
@@ -1417,3 +1445,52 @@ AUREA_TEST(Gpu, ExportAt60OverA30FpsVideoNeverWaitsForAnInBetweenFrame) {
     }
     e.shutdown();
 }
+
+#if defined(AUREA_TEST_VULKAN)
+namespace {
+std::string gltf_data3(const char* rel) { return std::string(AUREA_TEST_DATA_DIR) + "/gltf/" + rel; }
+bool file_exists3(const std::string& p) {
+    std::FILE* f = std::fopen(p.c_str(), "rb");
+    if (f) std::fclose(f);
+    return f != nullptr;
+}
+} // namespace
+
+AUREA_TEST(Gpu, Scene3DIsInTheExportedFrames) {
+    // O 3D do export sai do MESMO renderer do preview: o quadro exportado tem
+    // o modelo no centro (luma bem acima do preto de faixa limitada, 16).
+    AUREA_REQUIRE_GPU();
+    const std::string path = gltf_data3("Box.glb");
+    if (!file_exists3(path)) return;
+    CapturedExport cap;
+    SinkCtx sc{&cap, 0};
+    Engine e;
+    EngineConfig ec;
+    ec.backend = new vk::Backend();
+    ec.backendConfig.enableValidation = false;
+    ec.exportSinkFactory = &make_capture_sink;
+    ec.exportSinkContext = &sc;
+    ec.disableAutosave = true;
+    ec.workerCount = 2;
+    AUREA_CHECK(e.initialize(ec).ok());
+    AUREA_CHECK(e.new_project(128, 72, 30.0, nullptr).ok());
+    ModelImport mi;
+    mi.path = path;
+    AUREA_CHECK(e.import_model(mi).ok());
+    set_duration(e, 3);
+    ExportSettings s;
+    s.height = 72;
+    s.dither = false;
+    AUREA_CHECK(e.start_export(s, "nao-usado.mp4").ok());
+    AUREA_CHECK(wait_export(e));
+    AUREA_CHECK_EQ(e.export_progress().result, Errc::Ok);
+    AUREA_CHECK_EQ(cap.y.size(), static_cast<usize>(3));
+    if (cap.y.size() == 3) {
+        const int center = cap.y[1][36 * 128 + 64];
+        const int corner = cap.y[1][2 * 128 + 2];
+        AUREA_CHECK(center > 40);
+        AUREA_CHECK(corner <= 17);
+    }
+    e.shutdown();
+}
+#endif

@@ -87,7 +87,7 @@ internal fun AddLayerPanel(store: EditorStore, ui: EditorUi) {
                     AddTab.Shape -> ShapesTab(store, Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
                     AddTab.Media -> MediaTab(store, close)
                     AddTab.Audio -> AudioTab(store)
-                    AddTab.Object -> ObjectsTab(store)
+                    AddTab.Object -> ObjectsTab(store, close)
                     AddTab.More -> MoreTab(store)
                 }
             }
@@ -363,7 +363,15 @@ private enum class ObjectCard(val label: String) {
 }
 
 @Composable
-private fun ObjectsTab(store: EditorStore) {
+private fun ObjectsTab(store: EditorStore, close: () -> Unit) {
+    // Cena 3D: glTF/GLB do aparelho. O tipo MIME de modelo 3D varia por
+    // gerenciador de arquivos; o filtro real é a extensão, no store.
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) {
+            store.importModel(uri)
+            close()
+        }
+    }
     BoxWithConstraints(Modifier.fillMaxSize().padding(horizontal = 6.dp, vertical = 2.dp)) {
         val rows = 3
         val cardH = ((maxHeight.value - 8f - 8f * (rows - 1)) / rows).coerceIn(52f, 118f)
@@ -379,7 +387,12 @@ private fun ObjectsTab(store: EditorStore) {
                     for (k in 0 until 3) {
                         val card = row.getOrNull(k)
                         if (card == null) Spacer(Modifier.weight(1f))
-                        else ObjectCardTile(card, cardH) { store.comingSoon(card.label) }
+                        else ObjectCardTile(card, cardH) {
+                            when (card) {
+                                ObjectCard.Scene3D -> picker.launch(arrayOf("model/gltf-binary", "model/gltf+json", "application/octet-stream", "*/*"))
+                                else -> store.comingSoon(card.label)
+                            }
+                        }
                     }
                 }
             }

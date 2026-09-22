@@ -273,6 +273,17 @@ class AureaEngine private constructor() {
     fun startExport(outputPath: String, shortSide: Int, fps: Double, codec: Int, bitrateMbps: Int): Int =
         nativeStartExport(nativeHandle, outputPath, shortSide, fps, codec, bitrateMbps)
     fun cancelExport(): Int = nativeCancelExport(nativeHandle)
+
+    /**
+     * Importa um glTF/GLB (arquivo no sandbox do app). Bloqueia: chamar fora da
+     * UI. Devolve o id da layer, ou −código de erro; `detail[0]` recebe o
+     * motivo (falha) ou os avisos do import (sucesso).
+     */
+    fun importModel(path: String, name: String, detail: Array<String?>): Long =
+        nativeImportModel(nativeHandle, path, name, detail)
+    /** Etapa × 1000 + fração × 1000 (ImportPhase do motor). */
+    fun importModelProgress(): Int = nativeImportModelProgress(nativeHandle)
+    fun cancelModelImport() = nativeCancelModelImport(nativeHandle)
     fun exportProgress(out: ByteBuffer): Boolean = nativeExportProgress(nativeHandle, out)
 
     // -------------------------------------------------------------------------
@@ -326,5 +337,8 @@ class AureaEngine private constructor() {
     private external fun nativeRecoverSession(handle: Long): Int
     private external fun nativeStartExport(handle: Long, outputPath: String, shortSide: Int, fps: Double, codec: Int, bitrateMbps: Int): Int
     private external fun nativeCancelExport(handle: Long): Int
+    private external fun nativeImportModel(handle: Long, path: String, name: String, detail: Array<String?>): Long
+    private external fun nativeImportModelProgress(handle: Long): Int
+    private external fun nativeCancelModelImport(handle: Long)
     private external fun nativeExportProgress(handle: Long, out: ByteBuffer): Boolean
 }

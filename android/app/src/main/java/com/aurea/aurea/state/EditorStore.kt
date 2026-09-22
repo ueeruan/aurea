@@ -1016,6 +1016,83 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Modelo 3D (glTF/GLB) do seletor de arquivos. O arquivo é COPIADO para o
+     * sandbox do app (`files/modelos/<hash>.glb`): a permissão de uma URI
+     * `content://` pode sumir, e o projeto guarda só o caminho relativo — o
+     * mesmo .aurea abre no Android e no iOS. Dois imports do mesmo arquivo
+     * reaproveitam a cópia (hash do conteúdo).
+     *
+     * O motor valida de verdade (buffers, acessores, texturas): falha mostra o
+     * MOTIVO, nunca "importado" com a tela preta.
+     */
+    fun importModel(uri: Uri) {
+        val name = displayName(uri) ?: "Modelo 3D"
+        val ext = name.substringAfterLast('.', "").lowercase()
+        if (ext != "glb" && ext != "gltf") {
+            errorMessage = "Esse arquivo não é um modelo glTF/GLB (.glb ou .gltf)."
+            return
+        }
+        busyMessage = "Importando modelo 3D…"
+        viewModelScope.launch {
+            val poll = launch {
+                while (true) {
+                    kotlinx.coroutines.delay(150)
+                    val p = engine.importModelProgress()
+                    val phase = when (p / 1000) {
+                        1 -> "Lendo o arquivo"
+                        2 -> "Geometria"
+                        3 -> "Texturas"
+                        4 -> "Otimizando"
+                        5, 6 -> "Preparando"
+                        else -> "Importando"
+                    }
+                    busyMessage = "$phase… ${(p % 1000) / 10}%"
+                }
+            }
+            val detail = arrayOfNulls<String>(1)
+            val id = withContext(Dispatchers.IO) {
+                val file = copyModelToSandbox(uri, ext) ?: return@withContext -1_000L
+                engine.importModel(file.absolutePath, name.substringBeforeLast('.'), detail)
+            }
+            poll.cancel()
+            busyMessage = null
+            when {
+                id == -1_000L -> errorMessage = "Não consegui ler esse arquivo."
+                id < 0 -> errorMessage = "Não deu para importar o modelo: ${detail[0]?.trim()?.ifBlank { null } ?: "erro ${-id}"}."
+                else -> {
+                    refreshNow()
+                    select(id)
+                    val warnings = detail[0]?.lines()?.filter { it.isNotBlank() }.orEmpty()
+                    if (warnings.isNotEmpty()) showToast("Modelo importado · ${warnings.size} aviso(s): ${warnings.first()}")
+                }
+            }
+        }
+    }
+
+    private fun copyModelToSandbox(uri: Uri, ext: String): File? = try {
+        val dir = File(getApplication<Application>().filesDir, "modelos").apply { mkdirs() }
+        val tmp = File(dir, "importando.$ext")
+        val digest = java.security.MessageDigest.getInstance("SHA-1")
+        getApplication<Application>().contentResolver.openInputStream(uri)?.use { input ->
+            FileOutputStream(tmp).use { out ->
+                val buf = ByteArray(1 shl 16)
+                while (true) {
+                    val n = input.read(buf)
+                    if (n <= 0) break
+                    digest.update(buf, 0, n)
+                    out.write(buf, 0, n)
+                }
+            }
+        } ?: throw IllegalStateException("sem stream")
+        val hash = digest.digest().joinToString("") { "%02x".format(it) }
+        val dst = File(dir, "$hash.$ext")
+        if (dst.exists()) tmp.delete() else tmp.renameTo(dst)
+        dst
+    } catch (e: Exception) {
+        null
+    }
+
     /** Imagem do seletor do sistema: decodificada aqui (RGBA8) e entregue ao motor. */
     fun importImage(uri: Uri) {
         takePermission(uri)

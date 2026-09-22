@@ -134,6 +134,7 @@ struct NativeContext {
     std::mutex surfaceMutex;
     ANativeWindow* window = nullptr;   ///< referência adquirida; devolvida no detach
     bool initialized = false;
+    scene3d::ImportProgress importProgress;   ///< o import 3D em curso (um por vez)
 };
 
 [[nodiscard]] NativeContext* ctx_of(jlong handle) noexcept {
@@ -579,6 +580,44 @@ AUREA_JNI jlong AUREA_FN(nativeImportImage)(JNIEnv* env, jclass, jlong handle, j
                                                  src.empty() ? nullptr : src.c_str());
     if (!r.ok()) return -static_cast<jlong>(r.status().code());
     return static_cast<jlong>(*r);
+}
+
+// =============================================================================
+// Modelo 3D (glTF/GLB). Chamado numa thread de fundo; progresso e cancelamento
+// pelas duas funções abaixo, de qualquer thread.
+// =============================================================================
+AUREA_JNI jlong AUREA_FN(nativeImportModel)(JNIEnv* env, jclass, jlong handle, jstring path, jstring name,
+                                            jobjectArray detailOut) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return -static_cast<jlong>(Errc::InvalidState);
+    ModelImport req;
+    req.path = to_string(env, path);
+    req.displayName = to_string(env, name);
+    c->importProgress.cancel.store(false);
+    c->importProgress.phase.store(scene3d::ImportPhase::Queued);
+    c->importProgress.fraction.store(0.0f);
+    std::string detail;
+    const Result<u64> r = c->engine.import_model(req, &c->importProgress, &detail);
+    if (detailOut && env->GetArrayLength(detailOut) > 0) {
+        jstring d = env->NewStringUTF(detail.c_str());
+        env->SetObjectArrayElement(detailOut, 0, d);
+        env->DeleteLocalRef(d);
+    }
+    if (!r.ok()) return -static_cast<jlong>(r.status().code());
+    return static_cast<jlong>(*r);
+}
+
+/// Etapa (ImportPhase) × 1000 + fração × 1000 da etapa.
+AUREA_JNI jint AUREA_FN(nativeImportModelProgress)(JNIEnv*, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return 0;
+    const u32 phase = static_cast<u32>(c->importProgress.phase.load());
+    const f32 f = std::clamp(c->importProgress.fraction.load(), 0.0f, 0.999f);
+    return static_cast<jint>(phase * 1000 + static_cast<u32>(f * 1000.0f));
+}
+
+AUREA_JNI void AUREA_FN(nativeCancelModelImport)(JNIEnv*, jclass, jlong handle) {
+    if (NativeContext* c = ctx_of(handle)) c->importProgress.cancel.store(true);
 }
 
 // =============================================================================

@@ -1309,6 +1309,17 @@ bool Engine::query_layer_detail(u64 layerId, bridge::LayerDetailPOD& out) noexce
     out.maskCount = static_cast<u32>(l->masks.size());
     out.localPlayhead = static_cast<i32>(local.value);
     out.parentId = l->parent.valid() ? l->parent.pack() : 0;
+    if (l->kind == LayerKind::Model3D) {
+        // Silhueta de frente em escala 100% (o plano Z=0 é 1:1 com a
+        // composição): é a caixa que o palco desenha e toca. A UI trata a
+        // âncora da layer 3D como o CENTRO dessa caixa (o pivô do modelo).
+        if (const auto it = models_.find(l->model.scene.pack()); it != models_.end()) {
+            const Vec3 ext = it->second->bounds.extent();
+            out.sourceWidth = static_cast<u32>(std::max(1.0f, std::round(ext.x * l->model.unitScale)));
+            out.sourceHeight = static_cast<u32>(std::max(1.0f, std::round(ext.y * l->model.unitScale)));
+        }
+        return true;
+    }
     if (l->source.valid()) {
         if (const Asset* a = project_->asset(l->source)) {
             out.sourceWidth = a->video.width;

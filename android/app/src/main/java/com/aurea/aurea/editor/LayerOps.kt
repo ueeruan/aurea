@@ -52,8 +52,10 @@ internal object LayerGeometry {
         val s = sin(rad).toFloat()
         val sx = d.scale[0]
         val sy = d.scale[1]
-        val ax = d.anchor[0]
-        val ay = d.anchor[1]
+        // Layer 3D: a âncora é o CENTRO da silhueta (o pivô do modelo).
+        val centered = d.kind == LayerType.Model3D.kind
+        val ax = d.anchor[0] + if (centered) w * 0.5f else 0f
+        val ay = d.anchor[1] + if (centered) h * 0.5f else 0f
         val px = d.position[0]
         val py = d.position[1]
         for (i in 0 until 4) {

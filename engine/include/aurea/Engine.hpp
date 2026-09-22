@@ -331,6 +331,30 @@ public:
     /// {ligado, obturador em graus} da composição atual.
     bool query_motion_blur(bool& on, f32& shutter) noexcept;
 
+    // --- Rastreio de câmera 3D -----------------------------------------------------
+    /// Estado da análise: 0 parado, 1 analisando, 2 pronto, 3 falhou, 4 cancelado.
+    struct CameraTrackStatus {
+        u32 state = 0;
+        f32 progress = 0.0f;
+        u32 frames = 0, framesSolved = 0, tracks = 0, inliers = 0;
+        f32 rmsError = 0.0f, confidence = 0.0f, fovDeg = 0.0f;
+        bool rotationOnly = false;
+        bool cached = false;              ///< resultado veio do cache (vídeo e ajustes iguais)
+        std::string message;
+    };
+    /// Analisa o vídeo da camada em segundo plano (0 rápido, 1 equilibrado,
+    /// 2 alta qualidade). Uma análise por vez; a UI continua navegando.
+    bool start_camera_track(u64 layerId, u32 mode) noexcept;
+    /// Interrompe a análise (libera os quadros; o projeto não muda).
+    void cancel_camera_track() noexcept;
+    [[nodiscard]] CameraTrackStatus camera_track_status() noexcept;
+    /// Cria a câmera rastreada (keyframes por quadro, FOV resolvida) e um Nulo
+    /// 3D no chão da cena (plano dominante) ou no centro dos pontos. Devolve a
+    /// câmera. A câmera antiga ativa é desativada (desfazível).
+    [[nodiscard]] Result<u64> apply_camera_track() noexcept;
+    /// Pontos 3D reconstruídos, no mundo da composição (depois de aplicar).
+    [[nodiscard]] std::vector<Vec3> camera_track_points() noexcept;
+
     // --- Gizmo 3D ----------------------------------------------------------------
     /// Setas do gizmo da camada (só camadas que vivem no espaço 3D): origem e
     /// pontas dos eixos X, Y, Z do MUNDO (comprimento `length` no mundo),
@@ -625,6 +649,10 @@ private:
     std::unique_ptr<Project>      project_;
     std::vector<CompositionId>    compStack_;   ///< caminho da principal até a aberta
     std::unordered_map<u64, std::shared_ptr<const scene3d::HdriPixels>> hdris_;
+    struct CameraTrackJob;
+    std::unique_ptr<CameraTrackJob> cameraTrack_;
+    std::unordered_map<u64, std::shared_ptr<void>> cameraTrackCache_;
+    void join_camera_track() noexcept;
     static std::shared_ptr<const scene3d::HdriPixels> hdri_lookup(void* self, AssetId id);
     struct Clipboard {
         std::vector<std::pair<u64, Layer>> layers;   ///< id original → cópia

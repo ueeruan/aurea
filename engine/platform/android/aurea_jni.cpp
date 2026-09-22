@@ -909,6 +909,36 @@ AUREA_JNI jboolean AUREA_FN(nativeSetMotionBlur)(JNIEnv*, jclass, jlong handle, 
     return c && c->engine.set_motion_blur(static_cast<u64>(layer), on == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
 }
 
+AUREA_JNI jboolean AUREA_FN(nativeStartCameraTrack)(JNIEnv*, jclass, jlong handle, jlong layer, jint mode) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.start_camera_track(static_cast<u64>(layer), static_cast<u32>(mode)) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI void AUREA_FN(nativeCancelCameraTrack)(JNIEnv*, jclass, jlong handle) {
+    if (NativeContext* c = ctx_of(handle)) c->engine.cancel_camera_track();
+}
+
+/// {estado, progresso, quadros, resolvidos, rastros, pontos, erro px, confiança,
+///  FOV°, só rotação, do cache}; devolve a mensagem.
+AUREA_JNI jstring AUREA_FN(nativeCameraTrackStatus)(JNIEnv* env, jclass, jlong handle, jfloatArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !out || env->GetArrayLength(out) < 11) return nullptr;
+    const Engine::CameraTrackStatus s = c->engine.camera_track_status();
+    const f32 v[11] = {static_cast<f32>(s.state), s.progress, static_cast<f32>(s.frames), static_cast<f32>(s.framesSolved),
+                       static_cast<f32>(s.tracks), static_cast<f32>(s.inliers), s.rmsError, s.confidence, s.fovDeg,
+                       s.rotationOnly ? 1.0f : 0.0f, s.cached ? 1.0f : 0.0f};
+    env->SetFloatArrayRegion(out, 0, 11, v);
+    return env->NewStringUTF(s.message.c_str());
+}
+
+AUREA_JNI jlong AUREA_FN(nativeApplyCameraTrack)(JNIEnv*, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return -static_cast<jlong>(Errc::InvalidState);
+    const Result<u64> r = c->engine.apply_camera_track();
+    if (!r.ok()) return -static_cast<jlong>(r.status().code());
+    return static_cast<jlong>(*r);
+}
+
 AUREA_JNI jint AUREA_FN(nativeQueryTimeRemap)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloatArray out) {
     NativeContext* c = ctx_of(handle);
     if (!c || !out) return 0;

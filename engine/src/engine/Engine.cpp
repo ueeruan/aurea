@@ -1,6 +1,7 @@
 #include "aurea/Engine.hpp"
 #include "aurea/audio/Beats.hpp"
 #include "aurea/tracking/PointTracker.hpp"
+#include "aurea/tracking/CameraTracker.hpp"
 
 #include "aurea/text/Text.hpp"
 #include "aurea/core/Log.hpp"
@@ -14,6 +15,32 @@
 #include <cstring>
 
 namespace aurea {
+
+namespace {
+constexpr u32 kCameraTrackerVersion = 1;
+
+struct CameraTrackResult {
+    tracking::CameraSolution solution;
+    u32 frames = 0;
+    u32 analysisW = 0, analysisH = 0;
+};
+} // namespace
+
+struct Engine::CameraTrackJob {
+    std::thread thread;
+    std::atomic<bool> cancel{false};
+    std::atomic<f32> progress{0.0f};
+    std::atomic<u32> state{0};
+    std::mutex mutex;
+    std::shared_ptr<CameraTrackResult> result;
+    std::string message;
+    u64 layerId = 0;
+    i64 start = 0;
+    u64 cacheKey = 0;
+    bool cached = false;
+    std::vector<Vec3> appliedPoints;
+};
+
 namespace {
 
 /// Escreve uma string no blob da UI. Devolve false quando não cabe.
@@ -161,6 +188,7 @@ void Engine::shutdown() noexcept {
         exportCtx_->cancelRequested.store(true, std::memory_order_release);
         exportCtx_->thread.join();
     }
+    join_camera_track();
     stop_render_thread();
     thumbs_.stop();
     playback_.clock().set_master(nullptr);
@@ -1009,6 +1037,300 @@ Result<u64> Engine::track_point(u64 layerId, f32 x, f32 y, bool stabilize, u32* 
     project_->mark_dirty();
     request_render();
     return layerId;
+}
+
+// =============================================================================
+// Rastreio de câmera 3D
+// =============================================================================
+void Engine::join_camera_track() noexcept {
+    if (!cameraTrack_) return;
+    cameraTrack_->cancel.store(true);
+    if (cameraTrack_->thread.joinable()) cameraTrack_->thread.join();
+}
+
+bool Engine::start_camera_track(u64 layerId, u32 mode) noexcept {
+    if (cameraTrack_ && cameraTrack_->state.load() == 1) return false;   // uma por vez
+    join_camera_track();
+    Asset asset;
+    std::vector<i64> targetUs;
+    i64 start = 0;
+    u32 analysisH = 0;
+    u64 key = 1469598103934665603ull;
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        Composition* comp = project_ ? current_composition() : nullptr;
+        const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+        if (!l || l->kind != LayerKind::Video) return false;
+        const Asset* a = project_->asset(l->source);
+        if (!a || !a->has_video() || a->video.height == 0) return false;
+        asset = *a;
+        const f64 fps = comp->fps() > 0.0 ? comp->fps() : 30.0;
+        start = l->start.value;
+        const i64 end = std::min<i64>(l->end.value, start + 1800);   // até 1 min a 30 fps por análise
+        for (i64 f = start; f < end; ++f)
+            targetUs.push_back(static_cast<i64>(std::llround(std::max(0.0, l->source_frame(FrameIndex{f})) * 1e6 / fps)));
+        // Proxy de análise: 360 / 540 / 720 px de altura (nunca acima do vídeo).
+        analysisH = std::min<u32>(a->video.height, mode == 0 ? 360u : (mode == 2 ? 720u : 540u));
+        // Cache: vídeo (conteúdo), trecho, tempo, resolução, versão e modo.
+        auto mix = [&](const void* p, usize n) { const u8* b = static_cast<const u8*>(p); for (usize i = 0; i < n; ++i) { key ^= b[i]; key *= 1099511628211ull; } };
+        mix(&a->contentHash, sizeof(a->contentHash));
+        mix(a->sourcePath.data(), a->sourcePath.size());
+        for (i64 us : targetUs) mix(&us, sizeof(us));
+        mix(&analysisH, sizeof(analysisH));
+        mix(&mode, sizeof(mode));
+        const u32 ver = kCameraTrackerVersion;
+        mix(&ver, sizeof(ver));
+    }
+    if (targetUs.size() < 10) return false;
+    cameraTrack_ = std::make_unique<CameraTrackJob>();
+    CameraTrackJob* job = cameraTrack_.get();
+    job->layerId = layerId;
+    job->start = start;
+    job->cacheKey = key;
+    if (auto it = cameraTrackCache_.find(key); it != cameraTrackCache_.end()) {
+        job->result = std::static_pointer_cast<CameraTrackResult>(it->second);
+        job->cached = true;
+        job->progress.store(1.0f);
+        job->state.store(job->result->solution.ok ? 2u : 3u);
+        job->message = job->result->solution.failure;
+        return true;
+    }
+    job->state.store(1);
+    VideoSourceFactory* factory = config_.mediaFactory;
+    job->thread = std::thread([this, job, asset, targetUs, analysisH, mode, factory]() {
+        auto fail = [&](const char* why) {
+            std::lock_guard<std::mutex> g(job->mutex);
+            job->message = why;
+            job->state.store(job->cancel.load() ? 4u : 3u);
+        };
+        if (!factory) return fail("sem decodificador");
+        auto dec = factory->open_video(asset, MediaPriority::Thumbnail);
+        if (!dec) return fail("video ilegivel");
+        const tracking::TrackMode tm = mode == 0 ? tracking::TrackMode::Fast : (mode == 2 ? tracking::TrackMode::High : tracking::TrackMode::Balanced);
+        tracking::FeatureTracker ft(tm);
+        const f64 fps = asset.timebaseFps > 0.0 ? asset.timebaseFps : 30.0;
+        const i64 halfFrame = static_cast<i64>(5e5 / fps);
+        i64 lastPts = std::numeric_limits<i64>::min();
+        u32 aw = 0, ah = 0;
+        for (usize i = 0; i < targetUs.size(); ++i) {
+            if (job->cancel.load()) return fail("cancelado");
+            const i64 want = targetUs[i];
+            if (i == 0 || want < lastPts - halfFrame) {
+                if (!dec->seek_to_keyframe(want).ok()) break;
+                lastPts = std::numeric_limits<i64>::min();
+            }
+            FrameRef frame;
+            bool eos = false;
+            for (int guard = 0; guard < 600 && !eos; ++guard) {
+                FrameRef f;
+                i64 pts = 0;
+                if (!dec->next_frame(want - halfFrame, f, pts, eos).ok()) { eos = true; break; }
+                if (!f) continue;
+                lastPts = pts;
+                if (pts >= want - halfFrame) { frame = std::move(f); break; }
+            }
+            if (!frame) break;
+            ThumbnailService::Image img;
+            if (!frame_to_thumbnail(*frame.get(), analysisH, img)) break;
+            aw = img.width;
+            ah = img.height;
+            ft.add_frame(tracking::to_gray(img.rgba.data(), img.width, img.height));
+            job->progress.store(0.5f * static_cast<f32>(i + 1) / static_cast<f32>(targetUs.size()));
+        }
+        if (ft.tracks().frames < 10) return fail("nao deu para ler quadros suficientes do video");
+        tracking::SolveOptions opt;
+        opt.mode = tm;
+        std::atomic<f32> solveProgress{0.0f};
+        // O solve informa 0..1; a análise mostra 0,5..1.
+        std::thread watcher([&] {
+            while (job->state.load() == 1 && solveProgress.load() < 1.0f && !job->cancel.load()) {
+                job->progress.store(0.5f + 0.5f * solveProgress.load());
+                std::this_thread::sleep_for(std::chrono::milliseconds(30));
+            }
+        });
+        tracking::CameraSolution sol = tracking::solve_camera(ft.tracks(), opt, &job->cancel, &solveProgress);
+        solveProgress.store(1.0f);
+        watcher.join();
+        if (job->cancel.load()) return fail("cancelado");
+        auto res = std::make_shared<CameraTrackResult>();
+        res->solution = std::move(sol);
+        res->frames = ft.tracks().frames;
+        res->analysisW = aw;
+        res->analysisH = ah;
+        std::lock_guard<std::mutex> g(job->mutex);
+        job->result = res;
+        job->message = res->solution.ok ? (res->solution.rotationOnly ? "camera parada no lugar (so gira): sem profundidade" : "") : res->solution.failure;
+        job->progress.store(1.0f);
+        job->state.store(res->solution.ok ? 2u : 3u);
+        AUREA_LOG_INFO("rastreio de camera: %s, %u/%u quadros, %u pontos, erro %.2f px, FOV %.1f",
+                       res->solution.ok ? "ok" : "falhou", res->solution.framesSolved, res->frames, res->solution.inliers,
+                       static_cast<double>(res->solution.rmsError), static_cast<double>(res->solution.fovY / kDeg2Rad));
+    });
+    return true;
+}
+
+void Engine::cancel_camera_track() noexcept {
+    if (!cameraTrack_) return;
+    cameraTrack_->cancel.store(true);
+    if (cameraTrack_->thread.joinable()) cameraTrack_->thread.join();
+    if (cameraTrack_->state.load() == 1) cameraTrack_->state.store(4);
+}
+
+Engine::CameraTrackStatus Engine::camera_track_status() noexcept {
+    CameraTrackStatus st;
+    if (!cameraTrack_) return st;
+    CameraTrackJob* job = cameraTrack_.get();
+    st.state = job->state.load();
+    st.progress = job->progress.load();
+    std::lock_guard<std::mutex> g(job->mutex);
+    st.message = job->message;
+    st.cached = job->cached;
+    if (job->result) {
+        const tracking::CameraSolution& s = job->result->solution;
+        st.frames = job->result->frames;
+        st.framesSolved = s.framesSolved;
+        st.tracks = s.tracks;
+        st.inliers = s.inliers;
+        st.rmsError = s.rmsError;
+        st.confidence = s.confidence;
+        st.fovDeg = s.fovY / kDeg2Rad;
+        st.rotationOnly = s.rotationOnly;
+        if (job->state.load() == 2 && job->thread.joinable()) {
+            // Terminou: guarda no cache (reanalisar o mesmo vídeo é instantâneo).
+            cameraTrackCache_[job->cacheKey] = job->result;
+        }
+    }
+    return st;
+}
+
+Result<u64> Engine::apply_camera_track() noexcept {
+    if (!cameraTrack_ || cameraTrack_->state.load() != 2) return Status{Errc::InvalidState, "rastreio nao terminou"};
+    CameraTrackJob* job = cameraTrack_.get();
+    if (job->thread.joinable()) job->thread.join();
+    std::shared_ptr<CameraTrackResult> res;
+    {
+        std::lock_guard<std::mutex> g(job->mutex);
+        res = job->result;
+    }
+    if (!res || !res->solution.ok) return Status{Errc::InvalidState, "sem solucao"};
+    cameraTrackCache_[job->cacheKey] = res;
+    const tracking::CameraSolution& s = res->solution;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* video = comp ? comp->layer(LayerId::unpack(job->layerId)) : nullptr;
+    if (!video) return Status{Errc::NotFound, "camada sumiu"};
+    history_.before_mutation(*comp, project_->timeline().current(), "camera rastreada");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    const f32 w = static_cast<f32>(comp->width()), h = static_cast<f32>(comp->height());
+    // A câmera do 1º quadro vira a câmera padrão da composição (mesmo lugar,
+    // olhando para +Z); a mediana da profundidade dos pontos cai no plano Z = 0.
+    const scene3d::SceneCamera def = scene3d::default_camera(comp->width(), comp->height());
+    const Vec3 C0 = def.position;
+    const f32 dist = -C0.z;
+    std::vector<f32> depth;
+    const tracking::CameraPose* first = nullptr;
+    for (const auto& p : s.poses) if (p.valid) { first = &p; break; }
+    for (const Vec3& X : s.points) {
+        if (!first) break;
+        const f64 z = first->R[6] * X.x + first->R[7] * X.y + first->R[8] * X.z + first->t[2];
+        if (z > 0) depth.push_back(static_cast<f32>(z));
+    }
+    f32 scale = 1.0f;
+    if (!depth.empty()) {
+        std::nth_element(depth.begin(), depth.begin() + static_cast<long>(depth.size() / 2), depth.end());
+        scale = dist / std::max(1e-6f, depth[depth.size() / 2]);
+    }
+    auto toComp = [&](Vec3 X) { return Vec3{X.x * scale + C0.x, X.y * scale + C0.y, X.z * scale + C0.z}; };
+    // Outras câmeras ativas saem (a rastreada manda).
+    for (u32 i = 0; i < comp->order().size(); ++i) {
+        Layer* x = comp->layer(comp->order().at(i));
+        if (x && x->kind == LayerKind::Camera) x->camera.active = false;
+    }
+    const LayerId cid = comp->add_layer(LayerKind::Camera, "Câmera rastreada");
+    Layer* cam = comp->layer(cid);
+    video = comp->layer(LayerId::unpack(job->layerId));
+    if (!cam || !video) return Status{Errc::OutOfMemory, "camada nao criada"};
+    cam->start = video->start;
+    cam->end = video->end;
+    cam->camera.active = true;
+    cam->camera.fov = s.fovY / kDeg2Rad;
+    cam->camera.nearPlane = std::max(1.0f, dist * 0.01f);
+    cam->transform.anchor = Vec3{0, 0, 0};
+    cam->transform.scale = Vec3{1, 1, 1};
+    Track& px = cam->tracks.get_or_create(TrackProperty::PositionX);
+    Track& py = cam->tracks.get_or_create(TrackProperty::PositionY);
+    Track& pz = cam->tracks.get_or_create(TrackProperty::PositionZ);
+    Track& rx = cam->tracks.get_or_create(TrackProperty::RotationX);
+    Track& ry = cam->tracks.get_or_create(TrackProperty::RotationY);
+    Track& rz = cam->tracks.get_or_create(TrackProperty::RotationZ);
+    Vec3 prevE{0, 0, 0};
+    bool havePrev = false;
+    for (u32 i = 0; i < s.poses.size(); ++i) {
+        const tracking::CameraPose& p = s.poses[i];
+        if (!p.valid) continue;
+        const FrameIndex local = cam->local_time(FrameIndex{job->start + static_cast<i64>(i)});
+        const Vec3 c = toComp(p.center());
+        // Câmera → mundo = Rᵀ (colunas = eixos da câmera).
+        const f64 Rwc[9] = {p.R[0], p.R[3], p.R[6], p.R[1], p.R[4], p.R[7], p.R[2], p.R[5], p.R[8]};
+        Vec3 e = tracking::euler_zyx_from_matrix(Rwc) * (1.0f / kDeg2Rad);
+        if (havePrev) {   // sem pulo de 360° entre quadros
+            auto unwrap = [](f32 v, f32 ref) { while (v - ref > 180.0f) v -= 360.0f; while (v - ref < -180.0f) v += 360.0f; return v; };
+            e = Vec3{unwrap(e.x, prevE.x), unwrap(e.y, prevE.y), unwrap(e.z, prevE.z)};
+        }
+        prevE = e;
+        havePrev = true;
+        px.set(local, c.x);
+        py.set(local, c.y);
+        pz.set(local, c.z);
+        rx.set(local, e.x);
+        ry.set(local, e.y);
+        rz.set(local, e.z);
+    }
+    if (!px.keys.empty()) {
+        cam->transform.position = Vec3{px.keys.front().value, py.keys.front().value, pz.keys.front().value};
+        cam->transform.rotation = Vec3{rx.keys.front().value, ry.keys.front().value, rz.keys.front().value};
+    }
+    // Referência da cena: chão (plano dominante) ou o centro dos pontos.
+    job->appliedPoints.clear();
+    for (const Vec3& X : s.points) job->appliedPoints.push_back(toComp(X));
+    if (!job->appliedPoints.empty()) {
+        Vec3 centroid{}, normal{};
+        const bool plane = tracking::dominant_plane(job->appliedPoints, dist * 0.02f, 0.3f, centroid, normal);
+        if (!plane) {
+            std::vector<f32> xs, ys, zs;
+            for (const Vec3& q : job->appliedPoints) { xs.push_back(q.x); ys.push_back(q.y); zs.push_back(q.z); }
+            auto med = [](std::vector<f32>& v) { std::nth_element(v.begin(), v.begin() + static_cast<long>(v.size() / 2), v.end()); return v[v.size() / 2]; };
+            centroid = Vec3{med(xs), med(ys), med(zs)};
+        }
+        const LayerId nid = comp->add_layer(LayerKind::Null, plane ? "Chão da cena" : "Centro da cena");
+        if (Layer* n = comp->layer(nid)) {
+            n->threeD = true;
+            n->start = cam->start;
+            n->end = cam->end;
+            n->transform.anchor = Vec3{0, 0, 0};
+            n->transform.position = centroid;
+            if (plane) {
+                // Eixo Y do nulo = para dentro do chão (Y do Aurea aponta para baixo).
+                if ((C0 - centroid).dot(normal) < 0) normal = normal * -1.0f;
+                const Vec3 yA = normal * -1.0f;
+                Vec3 xA = Vec3{1, 0, 0} - yA * yA.x;
+                xA = xA.length() > 1e-4f ? xA.normalized() : Vec3{0, 0, 1};
+                const Vec3 zA = xA.cross(yA);
+                const f64 m[9] = {xA.x, yA.x, zA.x, xA.y, yA.y, zA.y, xA.z, yA.z, zA.z};
+                n->transform.rotation = tracking::euler_zyx_from_matrix(m) * (1.0f / kDeg2Rad);
+            }
+        }
+    }
+    comp->rebuild_draw_order();
+    project_->mark_dirty();
+    request_render();
+    (void)w;
+    (void)h;
+    return cid.pack();
+}
+
+std::vector<Vec3> Engine::camera_track_points() noexcept {
+    return cameraTrack_ ? cameraTrack_->appliedPoints : std::vector<Vec3>{};
 }
 
 bool Engine::set_echo(u64 layerId, u32 count, f32 delay, f32 decay) noexcept {

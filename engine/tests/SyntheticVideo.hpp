@@ -18,6 +18,7 @@
 #include "aurea/media/VideoSource.hpp"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -29,7 +30,7 @@
 
 namespace aurea::test {
 
-enum class SyntheticPattern : u8 { Quadrants = 0, FrameGray, MovingSquare, FastSquare };
+enum class SyntheticPattern : u8 { Quadrants = 0, FrameGray, MovingSquare, FastSquare, Scene3D };
 
 struct SyntheticConfig {
     u32 width = 64;
@@ -55,6 +56,53 @@ struct SyntheticConfig {
 
 /// Centro do quadrado do padrão MovingSquare no quadro `i`.
 inline i32 moving_square_x(i64 i) { return 30 + static_cast<i32>(i); }
+/// Cena 3D (rastreio de câmera): pontos fixos no mundo filmados por uma câmera
+/// que anda e gira (FOV vertical 55°). Mundo → câmera, convenção do Aurea
+/// (X direita, Y baixo, Z frente).
+struct Scene3DTruth {
+    f64 R[9];   // mundo → câmera
+    f64 C[3];   // centro
+};
+inline constexpr f64 kScene3DFov = 55.0;
+inline Scene3DTruth scene3d_camera(u32 i, u32 n) {
+    const f64 pi = 3.14159265358979323846;
+    const f64 u = static_cast<f64>(i) / static_cast<f64>(n > 1 ? n - 1 : 1);
+    const f64 ry = (-8.0 + 16.0 * u) * pi / 180.0, rx = 3.0 * std::sin(u * pi) * pi / 180.0, rz = 1.5 * u * pi / 180.0;
+    const f64 cx = std::cos(rx), sx = std::sin(rx), cy = std::cos(ry), sy = std::sin(ry), cz = std::cos(rz), sz = std::sin(rz);
+    const f64 Rx[9] = {1, 0, 0, 0, cx, -sx, 0, sx, cx}, Ry[9] = {cy, 0, sy, 0, 1, 0, -sy, 0, cy}, Rz[9] = {cz, -sz, 0, sz, cz, 0, 0, 0, 1};
+    f64 T[9], W[9];
+    for (int r = 0; r < 3; ++r) for (int c = 0; c < 3; ++c) { T[r * 3 + c] = 0; for (int k = 0; k < 3; ++k) T[r * 3 + c] += Ry[r * 3 + k] * Rx[k * 3 + c]; }
+    for (int r = 0; r < 3; ++r) for (int c = 0; c < 3; ++c) { W[r * 3 + c] = 0; for (int k = 0; k < 3; ++k) W[r * 3 + c] += Rz[r * 3 + k] * T[k * 3 + c]; }
+    Scene3DTruth t{};
+    for (int r = 0; r < 3; ++r) for (int c = 0; c < 3; ++c) t.R[r * 3 + c] = W[c * 3 + r];
+    t.C[0] = -1.2 + 2.4 * u;
+    t.C[1] = -0.3 * u;
+    t.C[2] = 0.8 * u;
+    return t;
+}
+inline const std::vector<std::array<f64, 3>>& scene3d_points() {
+    static const std::vector<std::array<f64, 3>> pts = [] {
+        std::vector<std::array<f64, 3>> v;
+        u32 seed = 12345u;
+        auto rnd = [&seed] { seed = seed * 1664525u + 1013904223u; return static_cast<f64>(seed >> 8) / static_cast<f64>(1u << 24); };
+        for (int i = 0; i < 220; ++i) v.push_back({-5.0 + 10.0 * rnd(), -3.0 + 6.0 * rnd(), 5.0 + 7.0 * rnd()});
+        return v;
+    }();
+    return pts;
+}
+/// Projeção verdadeira (px) do ponto no quadro i de n; falso se atrás.
+inline bool scene3d_project(const std::array<f64, 3>& X, u32 i, u32 n, u32 w, u32 h, f64& u, f64& v) {
+    const Scene3DTruth c = scene3d_camera(i, n);
+    const f64 f = 0.5 * h / std::tan(0.5 * kScene3DFov * 3.14159265358979323846 / 180.0);
+    const f64 d[3] = {X[0] - c.C[0], X[1] - c.C[1], X[2] - c.C[2]};
+    const f64 x = c.R[0] * d[0] + c.R[1] * d[1] + c.R[2] * d[2], y = c.R[3] * d[0] + c.R[4] * d[1] + c.R[5] * d[2];
+    const f64 z = c.R[6] * d[0] + c.R[7] * d[1] + c.R[8] * d[2];
+    if (z < 0.5) return false;
+    u = f * x / z + 0.5 * w;
+    v = f * y / z + 0.5 * h;
+    return true;
+}
+
 /// Quadrado rápido (optical flow): 8 px por quadro em x, dando a volta.
 inline i32 fast_square_x(i64 i) { return 20 + static_cast<i32>((i * 8) % 56); }
 inline i32 moving_square_y(i64 i) { return 30 + static_cast<i32>(i / 2); }
@@ -215,10 +263,30 @@ private:
         f->bufferId = index;
         f->y.assign(static_cast<usize>(w) * h, 0);
         f->uv.assign(static_cast<usize>((w + 1) / 2) * ((h + 1) / 2) * 2, 128);
+        // Cena 3D: manchas gaussianas somadas num buffer antes (220 pontos).
+        std::vector<f32> scene;
+        if (cfg_.pattern == SyntheticPattern::Scene3D) {
+            scene.assign(static_cast<usize>(w) * h, 0.0f);
+            const auto& pts = scene3d_points();
+            for (usize k = 0; k < pts.size(); ++k) {
+                f64 u, v;
+                if (!scene3d_project(pts[k], index, cfg_.frameCount, w, h, u, v)) continue;
+                const f32 amp = 0.35f + 0.55f * static_cast<f32>((k * 37) % 100) / 100.0f;
+                for (int dy = -6; dy <= 6; ++dy)
+                    for (int dx = -6; dx <= 6; ++dx) {
+                        const i32 X = static_cast<i32>(std::floor(u)) + dx, Yy = static_cast<i32>(std::floor(v)) + dy;
+                        if (X < 0 || Yy < 0 || X >= static_cast<i32>(w) || Yy >= static_cast<i32>(h)) continue;
+                        const f64 ddx = X - u, ddy = Yy - v;
+                        scene[static_cast<usize>(Yy) * w + static_cast<usize>(X)] += amp * static_cast<f32>(std::exp(-(ddx * ddx + ddy * ddy) / (2.0 * 1.8 * 1.8)));
+                    }
+            }
+        }
         for (u32 yy = 0; yy < h; ++yy) {
             for (u32 xx = 0; xx < w; ++xx) {
                 u8 Y = 0, Cb = 128, Cr = 128;
-                if (cfg_.pattern == SyntheticPattern::FrameGray) {
+                if (cfg_.pattern == SyntheticPattern::Scene3D) {
+                    Y = static_cast<u8>(std::clamp(30.0f + 200.0f * scene[static_cast<usize>(yy) * w + xx], 16.0f, 235.0f));
+                } else if (cfg_.pattern == SyntheticPattern::FrameGray) {
                     Y = frame_gray_code(index);
                 } else if (cfg_.pattern == SyntheticPattern::FastSquare) {
                     // Fundo em degradê + quadrado xadrez 21×21 (casas de 7 px)

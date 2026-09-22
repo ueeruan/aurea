@@ -335,6 +335,12 @@ class AureaEngine private constructor() {
     fun setMotionBlur(layer: Long, on: Boolean): Boolean = nativeSetMotionBlur(nativeHandle, layer, on)
     fun setFrameBlend(layer: Long, mode: Int): Boolean = nativeSetFrameBlend(nativeHandle, layer, mode)
     fun queryTimeRemap(layer: Long, out: FloatArray): Int = nativeQueryTimeRemap(nativeHandle, layer, out)
+
+    // Rastreio de câmera 3D.
+    fun startCameraTrack(layer: Long, mode: Int): Boolean = nativeStartCameraTrack(nativeHandle, layer, mode)
+    fun cancelCameraTrack() = nativeCancelCameraTrack(nativeHandle)
+    fun cameraTrackStatus(out: FloatArray): String? = nativeCameraTrackStatus(nativeHandle, out)
+    fun applyCameraTrack(): Long = nativeApplyCameraTrack(nativeHandle)
     fun editTimeRemapKey(layer: Long, index: Int, frame: Long, value: Float, interp: Int): Int =
         nativeEditTimeRemapKey(nativeHandle, layer, index, frame, value, interp)
     fun removeTimeRemapKey(layer: Long, index: Int): Boolean = nativeRemoveTimeRemapKey(nativeHandle, layer, index)
@@ -453,6 +459,10 @@ class AureaEngine private constructor() {
     private external fun nativeSetEditMode(handle: Long, on: Boolean)
     private external fun nativeSetMotionBlur(handle: Long, layer: Long, on: Boolean): Boolean
     private external fun nativeSetFrameBlend(handle: Long, layer: Long, mode: Int): Boolean
+    private external fun nativeStartCameraTrack(handle: Long, layer: Long, mode: Int): Boolean
+    private external fun nativeCancelCameraTrack(handle: Long)
+    private external fun nativeCameraTrackStatus(handle: Long, out: FloatArray): String?
+    private external fun nativeApplyCameraTrack(handle: Long): Long
     private external fun nativeQueryTimeRemap(handle: Long, layer: Long, out: FloatArray): Int
     private external fun nativeEditTimeRemapKey(handle: Long, layer: Long, index: Int, frame: Long, value: Float, interp: Int): Int
     private external fun nativeRemoveTimeRemapKey(handle: Long, layer: Long, index: Int): Boolean

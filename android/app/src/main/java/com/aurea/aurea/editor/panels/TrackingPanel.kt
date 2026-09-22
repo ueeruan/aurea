@@ -1,7 +1,16 @@
 package com.aurea.aurea.editor.panels
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -44,6 +53,70 @@ internal fun TrackingPanel(env: PanelEnv) {
             "Toque num detalhe com contraste (canto, luz, marca). Depois de escolher, o rastreio roda sozinho.",
             style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = AureaColors.Muted)),
         )
+        Spacer(Modifier.height(18.dp))
+        CameraTrackSection(env)
+    }
+}
+
+/**
+ * CÂMERA 3D: analisa o movimento da câmera do vídeo (pontos, rastreio,
+ * solve) em segundo plano e cria uma câmera 3D animada — modelos 3D ligados
+ * ao Nulo da cena ficam presos no vídeo.
+ */
+@Composable
+private fun CameraTrackSection(env: PanelEnv) {
+    val store = env.store
+    val st by remember(store) { derivedStateOf { store.cameraTrack } }
+    var mode by remember { mutableIntStateOf(1) }
+    Text("Câmera 3D", style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700, color = AureaColors.Muted)))
+    Spacer(Modifier.height(6.dp))
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        listOf(0 to "Rápido", 1 to "Equilibrado", 2 to "Alta qualidade").forEach { (m, label) ->
+            val on = mode == m
+            Box(
+                Modifier.clip(RoundedCornerShape(8.dp)).background(if (on) AureaColors.AccentDim else AureaColors.Chip)
+                    .tocavel(onClick = { mode = m }).padding(horizontal = 10.dp, vertical = 6.dp),
+            ) {
+                Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = if (on) AureaColors.Accent else AureaColors.Text)))
+            }
+        }
+    }
+    Spacer(Modifier.height(8.dp))
+    val s = st
+    when {
+        s != null && s.state == 1 -> {
+            Text("Analisando a câmera… ${(s.progress * 100).toInt()}%", style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+            Spacer(Modifier.height(6.dp))
+            Box(Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)).background(AureaColors.Chip)) {
+                Box(Modifier.fillMaxWidth(s.progress.coerceIn(0f, 1f)).fillMaxHeight().background(AureaColors.Accent))
+            }
+            Spacer(Modifier.height(8.dp))
+            Action("Cancelar", "Para a análise; o projeto não muda.") { store.cancelCameraTrack() }
+        }
+        s != null && s.state == 2 -> {
+            val kind = if (s.rotationOnly) "Câmera parada no lugar (só gira) — sem profundidade" else "Câmera resolvida"
+            Text(kind + if (s.cached) " (do cache)" else "", style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W600)))
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "${s.solved}/${s.frames} quadros · ${s.points} pontos de ${s.tracks} rastros · erro ${"%.2f".format(s.errorPx)} px · " +
+                    "FOV ${"%.1f".format(s.fovDeg)}° · confiança ${(s.confidence * 100).toInt()}%",
+                style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = AureaColors.Muted)),
+            )
+            Spacer(Modifier.height(8.dp))
+            Action("Criar câmera", "Câmera 3D animada + Nulo no chão (ou no centro) da cena.") { store.applyCameraTrack() }
+            Spacer(Modifier.height(8.dp))
+            Action("Analisar de novo", "Com o modo escolhido acima.") { store.startCameraTrack(mode) }
+        }
+        else -> {
+            if (s != null && (s.state == 3 || s.state == 4)) {
+                Text(
+                    if (s.state == 4) "Análise cancelada." else "Não deu para resolver: ${s.message}",
+                    style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = AureaColors.Muted)),
+                )
+                Spacer(Modifier.height(8.dp))
+            }
+            Action("Analisar câmera", "Acha o movimento da câmera do vídeo (roda em segundo plano).") { store.startCameraTrack(mode) }
+        }
     }
 }
 

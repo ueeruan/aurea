@@ -1461,6 +1461,58 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         showToast(if (on) "Desfoque de movimento ligado" else "Desfoque de movimento desligado")
     }
 
+    // --- Rastreio de câmera 3D ------------------------------------------------------------
+    /** Estado da análise (ver `camera_track_status`) e a mensagem do motor. */
+    data class CameraTrackUi(
+        val state: Int, val progress: Float, val frames: Int, val solved: Int, val tracks: Int, val points: Int,
+        val errorPx: Float, val confidence: Float, val fovDeg: Float, val rotationOnly: Boolean, val cached: Boolean, val message: String,
+    )
+    var cameraTrack by mutableStateOf<CameraTrackUi?>(null)
+        private set
+    private var cameraTrackPoll: kotlinx.coroutines.Job? = null
+
+    private fun readCameraTrack(): CameraTrackUi {
+        val f = FloatArray(11)
+        val msg = engine.cameraTrackStatus(f) ?: ""
+        return CameraTrackUi(f[0].toInt(), f[1], f[2].toInt(), f[3].toInt(), f[4].toInt(), f[5].toInt(), f[6], f[7], f[8],
+            f[9] > 0.5f, f[10] > 0.5f, msg)
+    }
+
+    /** Analisa a câmera do vídeo escolhido em segundo plano (0 rápido, 1 equilibrado, 2 alta). */
+    fun startCameraTrack(mode: Int) {
+        val id = primary ?: return
+        if (!engine.startCameraTrack(id, mode)) {
+            errorMessage = "Não foi possível analisar esta camada (precisa ser um vídeo com pelo menos 10 quadros)."
+            return
+        }
+        cameraTrackPoll?.cancel()
+        cameraTrackPoll = viewModelScope.launch {
+            while (true) {
+                val st = readCameraTrack()
+                cameraTrack = st
+                if (st.state != 1) break
+                kotlinx.coroutines.delay(150)
+            }
+        }
+    }
+
+    fun cancelCameraTrack() {
+        engine.cancelCameraTrack()
+        cameraTrack = readCameraTrack()
+    }
+
+    /** Cria a câmera rastreada e o Nulo de referência da cena. */
+    fun applyCameraTrack() {
+        val id = engine.applyCameraTrack()
+        if (id < 0) {
+            errorMessage = "Não foi possível criar a câmera (erro ${-id})."
+            return
+        }
+        refreshNow()
+        select(id)
+        showToast("Câmera rastreada criada · ligue modelos 3D ao Nulo da cena")
+    }
+
     /** Curva de tempo da camada principal (ver `query_time_remap`); nulo = desligada. */
     var timeRemap by mutableStateOf<FloatArray?>(null)
         private set

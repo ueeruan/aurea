@@ -2550,3 +2550,76 @@ AUREA_TEST(Gpu, FrameBlendMixesNeighbourSourceFramesInSlowMotion) {
     e.gpu()->destroy_texture(target);
     e.shutdown();
 }
+
+AUREA_TEST(Gpu, OpticalFlowPlacesTheMovingSquareBetweenFrames) {
+    AUREA_REQUIRE_GPU();
+    SyntheticConfig cfg;
+    cfg.width = 96;
+    cfg.height = 54;
+    cfg.frameCount = 300;
+    cfg.pattern = SyntheticPattern::FastSquare;
+    SyntheticFactory factory(cfg);
+    Engine e;
+    EngineConfig ec;
+    ec.backend = new vk::Backend();
+    ec.backendConfig.framesInFlight = 2;
+    ec.mediaFactory = &factory;
+    ec.workerCount = 2;
+    ec.disableAutosave = true;
+    AUREA_CHECK(e.initialize(ec).ok());
+    AUREA_CHECK(e.new_project(96, 54, 30.0, "flow").ok());
+    VideoImport imp;
+    imp.sourcePath = "sintetico";
+    imp.displayName = "clipe";
+    auto layer = e.import_video(imp);
+    AUREA_CHECK(layer.ok());
+    if (!layer.ok()) { e.shutdown(); return; }
+    {
+        Composition* c = e.project()->timeline().composition(e.project()->timeline().current());
+        Layer* l = c->layer(LayerId::unpack(*layer));
+        l->speed = 0.5f;
+        l->end = FrameIndex{l->start.value + 400};
+        c->set_duration(FrameIndex{400});
+    }
+    TextureDesc d;
+    d.width = 96;
+    d.height = 54;
+    d.format = SurfaceFormat::RGBA16F;
+    d.renderTarget = true;
+    d.transferSrc = true;
+    const TextureHandle target = *e.gpu()->create_texture(d);
+    std::vector<u16> half(96 * 54 * 4);
+    // Linha do meio: colunas com contraste de xadrez "cheio" (preto ou branco
+    // de verdade) e o centro delas. Fantasma de mistura = meio-tom.
+    struct Row { u32 full; f32 center; };
+    auto row = [&](i64 frame) {
+        Command seek;
+        seek.type = CommandType::PlaybackSeek;
+        seek.seek.time = tick_at(FrameIndex{frame}, 30.0);
+        AUREA_CHECK(e.submit_commands(&seek, 1) == 1);
+        AUREA_CHECK(e.render_offscreen(target, 96, 54).ok());
+        AUREA_CHECK(e.gpu()->read_texture(target, half.data(), 96 * 8).ok());
+        Row r{0, 0};
+        f32 sum = 0, n = 0;
+        for (u32 x = 0; x < 96; ++x) {
+            const f32 v = srgb_encode(half_to_float(half[(27 * 96 + x) * 4])) * 219.0f + 16.0f;
+            if (v > 215.0f || v < 40.0f) { ++r.full; sum += static_cast<f32>(x); n += 1; }
+        }
+        r.center = n > 0 ? sum / n : -1;
+        return r;
+    };
+    const Row a = row(100);                                  // fonte 50 (quadrado em x = 28)
+    const Row b = row(102);                                  // fonte 51 (x = 36)
+    AUREA_CHECK(e.set_frame_blend(*layer, 1));
+    const Row mix = row(101);                                // fonte 50,5
+    AUREA_CHECK(e.set_frame_blend(*layer, 2));
+    const Row flow = row(101);
+    std::printf("    optical flow: quadros %u px cheios em %.1f / %u em %.1f; mistura %u px cheios; movimento %u px cheios em %.1f (esperado %.1f)\n",
+                a.full, a.center, b.full, b.center, mix.full, flow.full, flow.center, (a.center + b.center) * 0.5f);
+    AUREA_CHECK(std::fabs(a.center - static_cast<f32>(fast_square_x(50))) < 1.0f);
+    AUREA_CHECK(mix.full < a.full / 2);                       // mistura: dois fantasmas em meio-tom
+    AUREA_CHECK(flow.full >= a.full * 7 / 10);                // movimento: um quadrado nítido
+    AUREA_CHECK(std::fabs(flow.center - (a.center + b.center) * 0.5f) < 1.5f);
+    e.gpu()->destroy_texture(target);
+    e.shutdown();
+}

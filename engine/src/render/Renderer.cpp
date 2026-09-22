@@ -830,7 +830,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 // Mistura de quadros: posição FRACIONÁRIA na grade da fonte.
                 i64 nextUs = -1;
                 f32 blendT = 0.0f;
-                if (l->frameBlend == 1) {
+                if (l->frameBlend >= 1) {
                     if (const f64 srcFps = src->info().fps; srcFps > 0.0) {
                         const f64 pos = l->source_frame(time) / fps * srcFps;
                         const f64 idx = std::floor(pos + 1e-3);
@@ -872,6 +872,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     if (exact && exactB) {
                         rl.source.frameB = std::move(b);
                         rl.source.blendT = blendT;
+                        rl.source.blendMode = l->frameBlend;
                     } else {
                         exact = false;   // falta um dos dois: o export espera; o preview mostra o que tem
                     }
@@ -1287,8 +1288,54 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                 const FGTexture b = graph_.create_texture("layer-video-seguinte", d);
                 auto pNormal = shaders_.pipeline(PipelineKey::graphics(
                     ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat, true, BlendMode::Normal));
-                if (pNormal.ok() && build_video_source(layer, layerIndex, w, h, b, frameNumber, layer.source.frameB.get())) {
-                    framesUsed.push_back(layer.source.frameB);
+                const bool haveB = build_video_source(layer, layerIndex, w, h, b, frameNumber, layer.source.frameB.get());
+                if (haveB) framesUsed.push_back(layer.source.frameB);
+                if (haveB && layer.source.blendMode == 2) {
+                    // Movimento de pixels: pirâmide de luminância (base com o
+                    // lado maior ≤ 384), Lucas-Kanade do nível mais grosso ao
+                    // mais fino e deformação dos dois quadros até t.
+                    EffectBuildContext ctx(graph_, shaders_, arena_, *this, kWorkFormat, maxTex);
+                    const f32 s = std::min(1.0f, 384.0f / static_cast<f32>(std::max(w, h)));
+                    u32 lw = std::max(8u, static_cast<u32>(std::lround(static_cast<f32>(w) * s)));
+                    u32 lh = std::max(8u, static_cast<u32>(std::lround(static_cast<f32>(h) * s)));
+                    const u32 baseW = lw, baseH = lh;
+                    FGTexture levels[6];
+                    u32 sizes[6][2];
+                    u32 n = 0;
+                    levels[0] = ctx.texture("flow-nivel", lw, lh);
+                    sizes[0][0] = lw;
+                    sizes[0][1] = lh;
+                    const Vec4 lumaParams{1.0f / static_cast<f32>(lw), 1.0f / static_cast<f32>(lh), 0, 0};
+                    ctx.fullscreen_pass("flow-luma", PassStage::Decode, levels[0], ShaderId::video_flow_luma_frag,
+                                        {PassTexture{out.texture}, PassTexture{b}}, &lumaParams, sizeof(lumaParams));
+                    n = 1;
+                    while (n < 6 && std::min(lw, lh) >= 12) {
+                        const u32 nw = (lw + 1) / 2, nh = (lh + 1) / 2;
+                        struct { Vec4 uvMap; Vec4 texel; } dp{Vec4{1, 1, 0, 0}, Vec4{1.0f / static_cast<f32>(lw), 1.0f / static_cast<f32>(lh), 0, 0}};
+                        levels[n] = ctx.texture("flow-nivel", nw, nh);
+                        ctx.fullscreen_pass("flow-reduz", PassStage::Decode, levels[n], ShaderId::effects_downsample_frag,
+                                            {PassTexture{levels[n - 1]}}, &dp, sizeof(dp));
+                        sizes[n][0] = lw = nw;
+                        sizes[n][1] = lh = nh;
+                        ++n;
+                    }
+                    FGTexture flow{};
+                    bool haveFlow = false;
+                    for (u32 i = n; i-- > 0;) {
+                        const f32 fw = static_cast<f32>(sizes[i][0]), fh = static_cast<f32>(sizes[i][1]);
+                        struct { Vec4 texel; Vec4 flags; } lp{Vec4{1.0f / fw, 1.0f / fh, fw, fh}, Vec4{haveFlow ? 1.0f : 0.0f, 6.0f, 0, 0}};
+                        const FGTexture f = ctx.texture("flow", sizes[i][0], sizes[i][1]);
+                        ctx.fullscreen_pass("flow-lk", PassStage::Decode, f, ShaderId::video_flow_lk_frag,
+                                            {PassTexture{levels[i]}, PassTexture{haveFlow ? flow : levels[i]}}, &lp, sizeof(lp));
+                        flow = f;
+                        haveFlow = true;
+                    }
+                    const FGTexture moved = graph_.create_texture("layer-video-movimento", d);
+                    const Vec4 wp{layer.source.blendT, 1.0f / static_cast<f32>(baseW), 1.0f / static_cast<f32>(baseH), 0};
+                    ctx.fullscreen_pass("flow-deforma", PassStage::Decode, moved, ShaderId::video_flow_warp_frag,
+                                        {PassTexture{out.texture}, PassTexture{b}, PassTexture{flow}}, &wp, sizeof(wp));
+                    out.texture = moved;
+                } else if (pNormal.ok() && haveB) {
                     // Alvo novo que LÊ os dois (o grafo ordena e não descarta A).
                     const FGTexture mix = graph_.create_texture("layer-video-mistura", d);
                     struct Cap { PipelineHandle p; FGTexture a; FGTexture b; u64 sampler; f32 w; f32 h; f32 t; }

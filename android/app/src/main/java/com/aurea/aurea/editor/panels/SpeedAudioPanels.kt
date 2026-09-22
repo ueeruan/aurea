@@ -71,7 +71,7 @@ internal fun SpeedPanel(env: PanelEnv) {
     val frames by remember(store) { derivedStateOf { store.detail?.let { it.endFrame - it.startFrame } ?: 0 } }
     val speed by remember(store) { derivedStateOf { store.detail?.speed ?: 1f } }
     val reversed by remember(store) { derivedStateOf { store.detail?.reversed ?: false } }
-    val frameBlend by remember(store) { derivedStateOf { store.detail?.frameBlend ?: false } }
+    val frameBlend by remember(store) { derivedStateOf { store.detail?.frameBlendMode ?: 0 } }
     val media = kind == LayerType.Video.kind || kind == LayerType.Audio.kind
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 18.dp, top = 14.dp, end = 18.dp, bottom = 24.dp)) {
         if (!media) {
@@ -191,8 +191,18 @@ internal fun SpeedPanel(env: PanelEnv) {
                 AureaToggle(checked = reversed, onCheckedChange = { store.setLayerReversed(it) })
             }
             Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Mistura de quadros", modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
-                AureaToggle(checked = frameBlend, onCheckedChange = { store.setFrameBlend(it) })
+                Text("Câmera lenta", modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf(0 to "Repetir", 1 to "Mistura", 2 to "Movimento").forEach { (m, label) ->
+                        val on = frameBlend == m
+                        Box(
+                            Modifier.clip(RoundedCornerShape(8.dp)).background(if (on) AureaColors.AccentDim else AureaColors.Chip)
+                                .tocavel(onClick = { store.setFrameBlend(m) }).padding(horizontal = 10.dp, vertical = 6.dp),
+                        ) {
+                            Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = if (on) AureaColors.Accent else AureaColors.Text)))
+                        }
+                    }
+                }
             }
             ShellToggle("Blur proporcional à velocidade (em breve)") { store.comingSoon("Blur proporcional") }
         }

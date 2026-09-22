@@ -73,6 +73,7 @@ struct LayerSource {
     /// Mistura de quadros: o quadro seguinte da fonte e o peso dele (0..1).
     FrameRef frameB;
     f32      blendT = 0.0f;
+    u8       blendMode = 0;   ///< 1 mistura, 2 optical flow
 
     // Imagem
     AssetId  image{};

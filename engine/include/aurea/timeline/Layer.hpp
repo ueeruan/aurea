@@ -222,7 +222,8 @@ struct Layer {
     bool  motionBlur = false;
     /// Vídeo fora da grade da fonte (câmera lenta, velocidade quebrada):
     /// 0 = quadro mais próximo (repete), 1 = mistura dos dois quadros vizinhos
-    /// da fonte pelo tempo entre eles.
+    /// da fonte pelo tempo entre eles, 2 = movimento de pixels (optical flow:
+    /// o quadro intermediário é deformado pelo fluxo entre os dois).
     u8    frameBlend = 0;
     /// Transições de entrada/saída (avaliadas no render, não viram keyframes):
     /// 0 nenhuma, 1 dissolver, 2 deslizar para cima, 3 deslizar da esquerda,

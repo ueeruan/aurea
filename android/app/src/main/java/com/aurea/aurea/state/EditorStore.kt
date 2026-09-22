@@ -1454,10 +1454,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         showToast(if (on) "Desfoque de movimento ligado" else "Desfoque de movimento desligado")
     }
 
-    /** Câmera lenta: mistura os dois quadros vizinhos da fonte (sem "degraus"). */
-    fun setFrameBlend(on: Boolean) {
+    /** Câmera lenta sem "degraus": 0 repete, 1 mistura os quadros vizinhos, 2 movimento de pixels. */
+    fun setFrameBlend(mode: Int) {
         val id = primary ?: return
-        engine.setFrameBlend(id, if (on) 1 else 0)
+        engine.setFrameBlend(id, mode)
         refreshNow()
     }
 

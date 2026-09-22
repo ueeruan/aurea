@@ -29,7 +29,7 @@
 
 namespace aurea::test {
 
-enum class SyntheticPattern : u8 { Quadrants = 0, FrameGray, MovingSquare };
+enum class SyntheticPattern : u8 { Quadrants = 0, FrameGray, MovingSquare, FastSquare };
 
 struct SyntheticConfig {
     u32 width = 64;
@@ -55,6 +55,8 @@ struct SyntheticConfig {
 
 /// Centro do quadrado do padrão MovingSquare no quadro `i`.
 inline i32 moving_square_x(i64 i) { return 30 + static_cast<i32>(i); }
+/// Quadrado rápido (optical flow): 8 px por quadro em x, dando a volta.
+inline i32 fast_square_x(i64 i) { return 20 + static_cast<i32>((i * 8) % 56); }
 inline i32 moving_square_y(i64 i) { return 30 + static_cast<i32>(i / 2); }
 
 /// Valor exato da senoide sintética no instante `t` (s), canal `c`.
@@ -218,6 +220,12 @@ private:
                 u8 Y = 0, Cb = 128, Cr = 128;
                 if (cfg_.pattern == SyntheticPattern::FrameGray) {
                     Y = frame_gray_code(index);
+                } else if (cfg_.pattern == SyntheticPattern::FastSquare) {
+                    // Fundo em degradê + quadrado xadrez 21×21 (casas de 7 px)
+                    // centrado em fast_square_x, meio da altura.
+                    const i32 dx = static_cast<i32>(xx) - fast_square_x(index), dy = static_cast<i32>(yy) - static_cast<i32>(h / 2);
+                    Y = static_cast<u8>(100 + (xx * 30) / std::max<u32>(1, w));
+                    if (std::abs(dx) <= 10 && std::abs(dy) <= 10) Y = (((dx + 10) / 7 + (dy + 10) / 7) % 2) ? 235 : 20;
                 } else if (cfg_.pattern == SyntheticPattern::MovingSquare) {
                     // Fundo em degradê suave + quadrado xadrez 13×13 andando
                     // (1 px por quadro em x, meio em y): alvo de rastreio.

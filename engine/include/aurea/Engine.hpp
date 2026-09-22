@@ -310,7 +310,7 @@ public:
     /// Desfoque de movimento da camada (liga também o da composição).
     bool set_motion_blur(u64 layerId, bool on) noexcept;
     /// Vídeo em câmera lenta/velocidade quebrada: 0 repete o quadro, 1 mistura
-    /// os dois quadros vizinhos da fonte.
+    /// os dois quadros vizinhos da fonte, 2 movimento de pixels (optical flow).
     bool set_frame_blend(u64 layerId, u32 mode) noexcept;
     /// Obturador da composição em graus (0–720; 180 = padrão de cinema).
     bool set_shutter_angle(f32 degrees) noexcept;

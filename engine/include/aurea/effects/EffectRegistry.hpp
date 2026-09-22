@@ -58,6 +58,7 @@ namespace effect_keys {
     inline constexpr const char* kMotionTile         = "aurea.stylize.motion_tile";
     inline constexpr const char* kLumaKey            = "aurea.key.luma";
     inline constexpr const char* kChromaKey          = "aurea.key.chroma";
+    inline constexpr const char* kEchoTrail          = "aurea.time.echo";
     // Controles de expressão (não desenham; ver ExpressionControls.cpp).
     inline constexpr const char* kSliderControl      = "aurea.control.slider";
     inline constexpr const char* kAngleControl       = "aurea.control.angle";

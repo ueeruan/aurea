@@ -532,12 +532,30 @@ private fun MoreTab(store: EditorStore, ui: EditorUi) {
         }
     }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(6.dp)) {
-        MoreItem(ShellGlyph.Scribble, "Desenho livre") { startFreehand(store, ui) }
-        MoreItem(CupertinoGlyph.PencilOutline, "Desenho vetorial") { startVector(store, ui) }
+        // Desenho à mão livre e vetorial ficam só no trilho da direita (A.01).
         MoreItem(CupertinoGlyph.DocText, "Importar SVG") { svgPicker.launch(arrayOf("image/svg+xml")) }
-        MoreItem(CupertinoGlyph.CaptionsBubble, "Legendas") { store.comingSoon("Legendas") }
-        MoreItem(CupertinoGlyph.WandStars, "Camada de ajuste") { store.comingSoon("Camada de ajuste") }
-        MoreItem(CupertinoGlyph.Folder, "Agrupar camadas") { store.comingSoon("Agrupar camadas") }
+        MoreItem(CupertinoGlyph.CaptionsBubble, "Legendas") {
+            // Legendas saem da fala de um vídeo/áudio: abre o painel dele.
+            val kind = store.detail?.kind
+            if (kind == com.aurea.aurea.ui.theme.LayerType.Video.kind || kind == com.aurea.aurea.ui.theme.LayerType.Audio.kind) {
+                ui.adding = false
+                openPanel(store, ui, com.aurea.aurea.editor.panels.EditorPanel.Captions)
+            } else {
+                store.showToast("Selecione um vídeo ou áudio com fala para gerar legendas")
+            }
+        }
+        MoreItem(CupertinoGlyph.WandStars, "Camada de ajuste") {
+            ui.adding = false
+            store.addAdjustmentLayer()
+        }
+        MoreItem(CupertinoGlyph.Folder, "Agrupar camadas") {
+            if (store.selection.size < 1) {
+                store.showToast("Selecione as camadas a agrupar")
+            } else {
+                ui.adding = false
+                store.precompose()
+            }
+        }
         MoreItem(CupertinoGlyph.Bookmark, "Marca no cabeçote") { store.toggleMarker() }
         MoreItem(ShellGlyph.Metronome, "Detectar batidas") { store.detectBeats() }
         MoreItem(CupertinoGlyph.QuestionCircle, "Como editar") { store.comingSoon("Guia rápido") }

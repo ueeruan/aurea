@@ -1577,6 +1577,50 @@ AUREA_TEST(Gpu, EchoTrailsAndRgbTimeSplitsChannels) {
     AUREA_CHECK(old > 20 && old < now);
     AUREA_CHECK(lead[0] > 200 && lead[1] < 20 && lead[2] < 20);
     AUREA_CHECK(tail[2] > 200 && tail[0] < 20 && tail[1] < 20);
+
+    // Eco como EFEITO ("Eco e rastro"): o mesmo quadro do eco antigo da camada.
+    auto diff8 = [](const Image8& a, const Image8& b) {
+        u32 w = 0;
+        for (usize k = 0; k < a.rgba.size() && k < b.rgba.size(); ++k) w = std::max<u32>(w, static_cast<u32>(std::abs(a.rgba[k] - b.rgba[k])));
+        return a.rgba.size() == b.rgba.size() ? w : 999u;
+    };
+    AUREA_CHECK(rig.e.set_rgb_time(*id, 0.0f));
+    AUREA_CHECK(rig.e.set_echo(*id, 3, 3.0f, 0.5f));
+    const Image8 viaLayer = rig.capture(400);
+    AUREA_CHECK(rig.e.set_echo(*id, 0, 3.0f, 0.5f));
+    const EffectTypeId echoType = rig.e.effects().find_key(effect_keys::kEchoTrail);
+    Command add;
+    add.type = CommandType::EffectAdd;
+    add.effect_add.layer = LayerId::unpack(*id);
+    add.effect_add.effectType = echoType;
+    add.effect_add.index = 0xFFFFFFFFu;
+    AUREA_CHECK(rig.e.apply_command(add).ok());
+    l = comp->layer(LayerId::unpack(*id));
+    AUREA_CHECK_EQ(l->effects.size(), 1u);
+    l->effects[0].params[0].constant = ParamValue::scalar(3.0f);
+    l->effects[0].params[1].constant = ParamValue::scalar(3.0f);
+    l->effects[0].params[2].constant = ParamValue::scalar(0.5f);
+    const Image8 viaEffect = rig.capture(400);
+    const u32 effDiff = diff8(viaLayer, viaEffect);
+    // Projeto antigo (eco nos campos da camada) abre com o efeito no lugar.
+    l->effects.clear();
+    AUREA_CHECK(rig.e.set_echo(*id, 3, 3.0f, 0.5f));
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_teste_eco.aurea";
+    AUREA_CHECK(rig.e.save_project(path.c_str()).ok());
+    AUREA_CHECK(rig.e.load_project(path.c_str()).ok());
+    AUREA_CHECK(rig.e.apply_command(seek).ok());
+    comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+    l = comp->layer(LayerId::unpack(*id));
+    AUREA_CHECK(l != nullptr);
+    u32 migDiff = 999;
+    if (l) {
+        AUREA_CHECK(l->echoCount == 0 && l->effects.size() == 1 && l->effects[0].type == echoType);
+        migDiff = diff8(viaLayer, rig.capture(400));
+    }
+    std::printf("    eco como efeito: dif %u; projeto antigo migrado: dif %u\n", effDiff, migDiff);
+    AUREA_CHECK(effDiff <= 1);
+    AUREA_CHECK(migDiff <= 1);
+    std::remove(path.c_str());
 }
 
 AUREA_TEST(Gpu, StressThreeHundredAnimatedLayers) {
@@ -3777,4 +3821,15 @@ AUREA_TEST(Gpu, MasksMatteAndKeysSurviveSaveAndReopen) {
     AUREA_CHECK(cov > 0.005f);
     AUREA_CHECK_EQ(diff, 0u);
     std::remove(path.c_str());
+}
+
+AUREA_TEST(Gpu, TextStaysVisibleAcrossRepeatedFrames) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(640, 360);
+    auto tid = rig.e.add_text("Texto");
+    AUREA_CHECK(tid.ok());
+    f32 c[6];
+    for (int i = 0; i < 6; ++i) c[i] = coverage(rig.capture(640));
+    std::printf("    cobertura por quadro: %.4f %.4f %.4f %.4f %.4f %.4f\n", c[0], c[1], c[2], c[3], c[4], c[5]);
+    for (int i = 0; i < 6; ++i) AUREA_CHECK(c[i] > 0.002f && std::fabs(c[i] - c[0]) < 1e-6f);
 }

@@ -79,6 +79,7 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/MotionTileEffect.cpp
     src/effects/builtin/KeyingEffects.cpp
     src/effects/builtin/ExpressionControls.cpp
+    src/effects/builtin/EchoEffect.cpp
     src/expr/Expression.cpp
     src/media/DecodedFrameCache.cpp
     src/media/VideoSource.cpp

@@ -412,6 +412,31 @@ Status Engine::new_project(u32 width, u32 height, f64 fps, const char* title) no
     return OkStatus;
 }
 
+/// Eco antigo (campos da camada) → efeito "Eco e rastro": o painel de eco
+/// saiu; o efeito é o lugar do eco agora (com keyframes). Mesmo resultado.
+void Engine::migrate_echo_to_effect() noexcept {
+    const EffectTypeId type = effectRegistry_.find_key(effect_keys::kEchoTrail);
+    const ParameterRegistry* params = effectRegistry_.params(type);
+    if (!params || params->count() < 4) return;
+    project_->timeline().for_each_composition([&](CompositionId, Composition& c) {
+        for (u32 i = 0; i < c.order().size(); ++i) {
+            Layer* l = c.layer(c.order().at(i));
+            if (!l || (l->echoCount == 0 && l->rgbDelay <= 0.0f) || l->effects.size() >= kMaxEffectCount) continue;
+            EffectInstance e;
+            e.id = l->alloc_effect_id();
+            e.type = type;
+            initialize_instance(e, *params);
+            e.params[0].constant = ParamValue::scalar(static_cast<f32>(l->echoCount));
+            e.params[1].constant = ParamValue::scalar(l->echoDelay);
+            e.params[2].constant = ParamValue::scalar(l->echoDecay);
+            e.params[3].constant = ParamValue::scalar(l->rgbDelay);
+            l->effects.push_back(std::move(e));
+            l->echoCount = 0;
+            l->rgbDelay = 0.0f;
+        }
+    });
+}
+
 Status Engine::load_project(const char* path) noexcept {
     if (!path) return Errc::InvalidArgument;
 
@@ -433,6 +458,7 @@ Status Engine::load_project(const char* path) noexcept {
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
         project_ = std::make_unique<Project>(std::move(loaded));
+        migrate_echo_to_effect();
         images_.clear();
         models_.clear();
         history_.clear();

@@ -1160,24 +1160,40 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             }
         }
         // Eco e RGB no tempo (transform 2D com pais, em instantes passados).
-        if ((l->echoCount > 0 || l->rgbDelay > 0.0f) && !wants_3d(comp, *l, time)) {
+        // Eco e rastro: o efeito "Eco e rastro" (parâmetros no instante, com
+        // keyframes) manda; sem ele, os campos antigos da camada.
+        u32 echoCount = l->echoCount;
+        f32 echoDelay = l->echoDelay, echoDecay = l->echoDecay, rgbDelay = l->rgbDelay;
+        if (effects_) {
+            const EffectTypeId echoType = effects_->find_key(effect_keys::kEchoTrail);
+            const ParameterRegistry* ep = effects_->params(echoType);
+            for (const EffectInstance& inst : l->effects) {
+                if (!inst.enabled || inst.type != echoType || !ep || ep->count() < 4) continue;
+                echoCount = static_cast<u32>(std::clamp(evaluate_param(l->tracks, inst, 0, ep->at(0), local).v[0], 0.0f, 16.0f) + 0.5f);
+                echoDelay = evaluate_param(l->tracks, inst, 1, ep->at(1), local).v[0];
+                echoDecay = evaluate_param(l->tracks, inst, 2, ep->at(2), local).v[0];
+                rgbDelay = evaluate_param(l->tracks, inst, 3, ep->at(3), local).v[0];
+                break;
+            }
+        }
+        if ((echoCount > 0 || rgbDelay > 0.0f) && !wants_3d(comp, *l, time)) {
             const f64 t0 = static_cast<f64>(time.value);
             rl.blurMatrices.clear();
-            if (l->rgbDelay > 0.0f) {
-                const f64 d = std::clamp(static_cast<f64>(l->rgbDelay), 0.0, 60.0);
+            if (rgbDelay > 0.0f) {
+                const f64 d = std::clamp(static_cast<f64>(rgbDelay), 0.0, 60.0);
                 rl.temporal.push_back({world_2d_frac(comp, *l, t0), 1.0f, Vec3{1, 0, 0}});
                 rl.temporal.push_back({world_2d_frac(comp, *l, t0 - d), 1.0f, Vec3{0, 1, 0}});
                 rl.temporal.push_back({world_2d_frac(comp, *l, t0 - 2.0 * d), 1.0f, Vec3{0, 0, 1}});
             } else {
                 rl.temporal.push_back({m, 1.0f, Vec3{0, 0, 0}});
             }
-            if (shifted && l->rgbDelay > 0.0f) for (auto& t : rl.temporal) t.m = t.m * shiftM;
-            if (l->echoCount > 0) {
-                const u32 n = std::min<u32>(l->echoCount, 16u);
-                const f64 d = std::clamp(static_cast<f64>(l->echoDelay), 0.25, 120.0);
+            if (shifted && rgbDelay > 0.0f) for (auto& t : rl.temporal) t.m = t.m * shiftM;
+            if (echoCount > 0) {
+                const u32 n = std::min<u32>(echoCount, 16u);
+                const f64 d = std::clamp(static_cast<f64>(echoDelay), 0.25, 120.0);
                 f32 w = 1.0f;
                 for (u32 i = 1; i <= n; ++i) {
-                    w *= std::clamp(l->echoDecay, 0.0f, 1.0f);
+                    w *= std::clamp(echoDecay, 0.0f, 1.0f);
                     if (w < 0.01f) break;
                     rl.temporal.push_back({world_2d_frac(comp, *l, t0 - static_cast<f64>(i) * d) * shiftM, w, Vec3{0, 0, 0}});
                 }

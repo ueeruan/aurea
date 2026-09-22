@@ -77,7 +77,7 @@ internal fun StageHint() {
 // =============================================================================
 
 /** O que a doca precisa da camada (data class: recompõe só quando muda). */
-private data class DockLayer(val id: Long, val kind: Int, val locked: Boolean, val start: Int, val end: Int)
+private data class DockLayer(val id: Long, val kind: Int, val locked: Boolean, val start: Int, val end: Int, val adjustment: Boolean = false)
 
 /** As seções da grade (`AmSecao`, na ordem do enum da A.01). */
 private enum class DockSection(val glyph: Char, val label: String, val badge: String? = null) {
@@ -106,7 +106,10 @@ private enum class DockSection(val glyph: Char, val label: String, val badge: St
  * tipo não existe para ele — um som não tem posição na tela, um nulo não tem
  * cor.
  */
-private fun sectionsFor(type: LayerType): List<DockSection> = when (type) {
+private fun sectionsFor(type: LayerType, adjustment: Boolean = false): List<DockSection> = if (adjustment) {
+    // Camada de ajuste não tem conteúdo: só a mistura e os efeitos que ela aplica abaixo.
+    listOf(DockSection.Blend, DockSection.Effects, DockSection.Presets)
+} else when (type) {
     LayerType.Audio -> listOf(DockSection.Volume, DockSection.Captions, DockSection.Effects, DockSection.Presets)
     LayerType.Null -> listOf(DockSection.Move, DockSection.Clone, DockSection.Presets)
     LayerType.Camera -> listOf(DockSection.Move, DockSection.Camera, DockSection.Presets)
@@ -124,8 +127,6 @@ private fun sectionsFor(type: LayerType): List<DockSection> = when (type) {
         if (type == LayerType.Text) add(DockSection.EditText)
         if (type == LayerType.Particles) add(DockSection.Particles)
         if (type == LayerType.Model3D) add(DockSection.Element3D)
-        add(DockSection.Transitions)
-        add(DockSection.Echo)
         add(DockSection.Effects)
         add(DockSection.Presets)
     }
@@ -140,7 +141,7 @@ private fun sectionsFor(type: LayerType): List<DockSection> = when (type) {
 internal fun LayerToolsDock(store: EditorStore, ui: EditorUi, layerId: Long) {
     val layer by remember(layerId) {
         derivedStateOf {
-            store.layers.firstOrNull { it.id == layerId }?.let { DockLayer(it.id, it.kind, it.locked, it.startFrame, it.endFrame) }
+            store.layers.firstOrNull { it.id == layerId }?.let { DockLayer(it.id, it.kind, it.locked, it.startFrame, it.endFrame, it.adjustment) }
         }
     }
     val hasParent by remember { derivedStateOf { (store.detail?.parentId ?: 0L) != 0L } }
@@ -194,7 +195,7 @@ internal fun LayerToolsDock(store: EditorStore, ui: EditorUi, layerId: Long) {
                     .verticalScroll(rememberScrollState())
                     .padding(start = 10.dp, end = 10.dp, bottom = 8.dp),
             ) {
-                sectionsFor(type).chunked(3).forEach { row ->
+                sectionsFor(type, l.adjustment).chunked(3).forEach { row ->
                     Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         for (k in 0 until 3) {
                             val s = row.getOrNull(k)

@@ -106,7 +106,9 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
     var menu by remember { mutableStateOf(false) }
     val axis by rotationAxis
     val props = if (tab == TransformTab.Girar) intArrayOf(RotationProps[axis]) else tab.props
-    val look by remember(store, tab, axis) { derivedStateOf { transformLook(store.detail, props) } }
+    // O losango da Rotação vale para X, Y e Z juntos (um keyframe só).
+    val keyProps = if (tab == TransformTab.Girar) RotationProps else props
+    val look by remember(store, tab, axis) { derivedStateOf { transformLook(store.detail, keyProps) } }
     val curveReady by remember(store, tab, axis) { derivedStateOf { store.primaryKeys().transformTrack(props[0]).size >= 2 } }
     val canKey = tab != TransformTab.Inclinar
     val exprKeys = props.map { TrackKey(it) }
@@ -116,7 +118,7 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
         LeftRail(
             onBack = env.onClose,
             keyframeLook = look,
-            onKeyframe = if (canKey) ({ store.toggleTransformKeyframe(props) }) else null,
+            onKeyframe = if (canKey) ({ store.toggleTransformKeyframe(keyProps) }) else null,
             curveAnimated = look != com.aurea.aurea.ui.ds.KeyframeLook.None,
             onCurve = if (curveReady) {
                 {

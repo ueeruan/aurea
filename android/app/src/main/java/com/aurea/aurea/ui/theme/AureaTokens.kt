@@ -203,14 +203,14 @@ object AureaTimeline {
     // --- Medidas (dp) --------------------------------------------------------
     val RulerTicks = 20.dp                 // faixa dos riscos
     val RulerGap = 18.dp                   // respiro até a 1ª linha (o relógio mora aqui)
-    val Row = 46.dp
-    val Bar = 36.dp                        // barra colada no topo da linha
+    val Row = 36.dp                        // mais baixa que a A.01 (46): cabem mais camadas
+    val Bar = 30.dp                        // barra colada no topo da linha
     val BarRadius = 8.dp
     val BarMinWidth = 40.dp
-    val KeyframeTrack = 15.dp              // faixa de baixo da barra, dos losangos
+    val KeyframeTrack = 11.dp              // faixa de baixo da barra, dos losangos
     val HeaderColumn = 66.dp               // coluna das pílulas (gradiente por cima das barras)
     val PillWidth = 58.dp
-    val PillHeight = 28.dp
+    val PillHeight = 24.dp
     val Playhead = 1.6.dp
     val PlayheadKnob = 8.dp
 }

@@ -884,6 +884,7 @@ private:
     static std::shared_ptr<const scene3d::SceneAsset> model_lookup(void* self, AssetId id);
     [[nodiscard]] std::string resolve_asset_path(const std::string& stored) const;
     [[nodiscard]] u32 caption_count_locked(const Composition& comp, u64 sourceLayer) const noexcept;
+    void migrate_echo_to_effect() noexcept;
     [[nodiscard]] std::string store_asset_path(const std::string& absolute) const;
 
     std::vector<u64> selection_;

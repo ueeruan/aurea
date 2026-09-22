@@ -292,7 +292,7 @@ private fun NarrowEditor(
     m: EditorMetrics,
     stage: @Composable (Modifier) -> Unit,
 ) {
-    Column(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().background(AureaColors.Background)) {
         if (!ui.fullscreen) TopBarHost(store, ui)
         val previewH = if (ui.fullscreen) (m.preview - ShellDims.FullscreenTimeBar.value).coerceAtLeast(0f) else m.preview
         stage(Modifier.fillMaxWidth().height(previewH.dp))
@@ -320,7 +320,7 @@ private fun WideEditor(
     sheetWidth: Float,
     stage: @Composable (Modifier) -> Unit,
 ) {
-    Column(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().background(AureaColors.Background)) {
         TopBarHost(store, ui)
         Row(Modifier.weight(1f).fillMaxWidth()) {
             Column(Modifier.weight(1f).fillMaxHeight()) {
@@ -350,22 +350,10 @@ private fun TopBarHost(store: EditorStore, ui: EditorUi) {
     }
 }
 
-/** A faixa de 8 dp entre prévia e transporte, com o botão de tela cheia. */
+/** A faixa de 8 dp entre prévia e transporte (a tela cheia mora no transporte, um botão só). */
 @Composable
-private fun PreviewStrip(ui: EditorUi) {
-    Box(Modifier.fillMaxWidth().height(ShellDims.Strip).background(AureaColors.EditorPanelHigh)) {
-        Box(
-            Modifier
-                .align(Alignment.CenterEnd)
-                .padding(end = 4.dp)
-                .size(40.dp, ShellDims.Strip)
-                .semantics { contentDescription = if (ui.fullscreen) "Voltar ao editor" else "Expandir preview" }
-                .tocavel(shrink = 1f) { ui.fullscreen = !ui.fullscreen },
-            contentAlignment = Alignment.Center,
-        ) {
-            CupertinoIcon(if (ui.fullscreen) CupertinoGlyph.FullscreenExit else CupertinoGlyph.Fullscreen, 10.dp, AureaColors.Muted)
-        }
-    }
+private fun PreviewStrip(@Suppress("UNUSED_PARAMETER") ui: EditorUi) {
+    Box(Modifier.fillMaxWidth().height(ShellDims.Strip).background(AureaColors.EditorPanelHigh))
 }
 
 @Composable

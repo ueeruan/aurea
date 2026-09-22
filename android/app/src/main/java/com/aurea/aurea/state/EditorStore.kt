@@ -998,6 +998,20 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     // --- Papel e organização da camada (ajuste, guia, etiqueta, solo, busca) ------------
 
+    /** Camada de ajuste nova (no topo): um nulo marcado como ajuste — os efeitos que entrarem nela valem para tudo abaixo. */
+    fun addAdjustmentLayer() {
+        val id = engine.addNull(false)
+        if (id < 0) {
+            errorMessage = "Não foi possível criar a camada de ajuste (erro ${-id})."
+            return
+        }
+        engine.setLayerAdjustment(id, true)
+        renameLayer(id, "Camada de ajuste")
+        refreshNow()
+        select(id)
+        showToast("Camada de ajuste: adicione efeitos nela")
+    }
+
     /** Camada de ajuste: os efeitos dela passam a valer para tudo o que está abaixo. */
     fun setLayerAdjustment(layer: Long, on: Boolean) {
         if (!engine.setLayerAdjustment(layer, on)) return
@@ -1110,7 +1124,15 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val id = layer ?: return
         val d = if (id == primary) detail else detailOf(id)
         d ?: return
-        if (d.isAnimated(property)) {
+        val rot = intArrayOf(TrackProperty.ROTATION_X, TrackProperty.ROTATION_Y, TrackProperty.ROTATION_Z)
+        val axis = rot.indexOf(property)
+        if (axis >= 0 && rot.any { d.isAnimated(it) }) {
+            // Rotação X/Y/Z têm UM keyframe só: mexer num eixo grava os três
+            // no mesmo instante (os outros com o valor que já têm ali).
+            send {
+                for (k in 0 until 3) insertKeyframe(id, rot[k], NO_EFFECT, 0, d.localPlayhead, if (k == axis) value else d.rotation[k])
+            }
+        } else if (d.isAnimated(property)) {
             send { insertKeyframe(id, property, NO_EFFECT, 0, d.localPlayhead, value) }
         } else {
             send {

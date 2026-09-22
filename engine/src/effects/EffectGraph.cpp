@@ -2,6 +2,7 @@
 #include "aurea/core/Log.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstring>
 
@@ -275,6 +276,23 @@ void EffectGraph::plan(const Layer& layer, const EffectRegistry& registry, Frame
 // =============================================================================
 namespace {
 
+std::atomic<u64> g_bypassed{0};
+/// Tipos que já logaram a falha (log uma vez por tipo; o contador segue).
+std::atomic<u32> g_loggedTypes[32]{};
+
+void note_bypass(EffectTypeId type, const char* name) noexcept {
+    g_bypassed.fetch_add(1, std::memory_order_relaxed);
+    for (auto& slot : g_loggedTypes) {
+        u32 cur = slot.load(std::memory_order_relaxed);
+        if (cur == type) return;
+        if (cur == 0 && slot.compare_exchange_strong(cur, type, std::memory_order_relaxed)) {
+            AUREA_LOG_WARN("efeito '%s' falhou ao montar: bypass (a camada segue sem ele)", name ? name : "?");
+            return;
+        }
+        if (cur == type) return;
+    }
+}
+
 struct ColorStackUniforms {
     f32 header[4];
     f32 ops[kMaxFusedColorOps * 16];
@@ -313,6 +331,7 @@ Status EffectGraph::build(const EffectPlan& plan, EffectBuildContext& ctx,
             if (pass == kInvalidIndex) {
                 // Sem pipeline o passe não existe: a layer segue sem os efeitos
                 // de cor em vez de desenhar com estado inválido.
+                note_bypass(1u, "cor fundida");
                 continue;
             }
             cur = next;
@@ -325,7 +344,8 @@ Status EffectGraph::build(const EffectPlan& plan, EffectBuildContext& ctx,
         LayerImage next;
         const Status s = e.effect->build(ctx, e, cur, st.margin, next);
         if (!s.ok() || !next.valid()) {
-            AUREA_LOG_WARN("efeito '%s' nao montou os passes: pulado", e.effect->info().name);
+            // Bypass: `cur` segue sendo a entrada; o quadro não cai por um efeito.
+            note_bypass(e.effect->type_id(), e.effect->info().name);
             continue;
         }
         cur = next;
@@ -334,6 +354,8 @@ Status EffectGraph::build(const EffectPlan& plan, EffectBuildContext& ctx,
     out = cur;
     return OkStatus;
 }
+
+u64 EffectGraph::bypassed_total() noexcept { return g_bypassed.load(std::memory_order_relaxed); }
 
 // =============================================================================
 // Registro

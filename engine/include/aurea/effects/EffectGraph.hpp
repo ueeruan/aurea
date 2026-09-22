@@ -82,6 +82,11 @@ public:
     /// layer. Sem etapas, devolve a própria entrada.
     [[nodiscard]] static Status build(const EffectPlan& plan, EffectBuildContext& ctx,
                                       const LayerImage& input, LayerImage& out);
+
+    /// Etapas de efeito que falharam ao montar e viraram bypass (§117): a
+    /// camada segue com a imagem de antes do efeito, o quadro sai, e isto sobe.
+    /// O log sai uma vez por tipo de efeito, não a cada quadro.
+    [[nodiscard]] static u64 bypassed_total() noexcept;
 };
 
 } // namespace aurea

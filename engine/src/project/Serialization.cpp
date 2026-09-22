@@ -1,9 +1,11 @@
 #include "aurea/project/Serialization.hpp"
+#include "aurea/project/FileIO.hpp"
 #include "aurea/vector/Vector.hpp"
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Time.hpp"
 #include "aurea/expr/Expression.hpp"
 
+#include <cerrno>
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
@@ -175,8 +177,16 @@ void write_track(ByteWriter& w, const Track& t) {
     }
 }
 
+/// Enum lido de arquivo: valor fora da faixa é corrupção (ou fuzz) e vira o
+/// padrão. Sem isto um byte ruim chega ao renderer como índice de tabela.
+template <typename E, typename Raw>
+E checked_enum(Raw raw, E last, E fallback) noexcept {
+    return static_cast<u32>(raw) <= static_cast<u32>(last) ? static_cast<E>(raw) : fallback;
+}
+
 void read_track(ByteReader& r, Track& t) {
-    t.property = static_cast<TrackProperty>(r.u16v());
+    t.property = checked_enum(r.u16v(), static_cast<TrackProperty>(static_cast<u16>(TrackProperty::_Count) - 1),
+                              TrackProperty::_Count);
     t.effectIndex = r.u32v();
     t.effectParamIndex = r.u32v();
     t.staticValue = r.f32v();
@@ -192,7 +202,7 @@ void read_track(ByteReader& r, Track& t) {
         Keyframe k;
         k.time = FrameIndex{r.i64v()};
         k.value = r.f32v();
-        k.interp = static_cast<Interpolation>(r.u8v());
+        k.interp = checked_enum(r.u8v(), Interpolation::CustomCurve, Interpolation::Linear);
         k.bx1 = r.f32v(); k.by1 = r.f32v(); k.bx2 = r.f32v(); k.by2 = r.f32v();
         k.tangentIn = r.f32v(); k.tangentOut = r.f32v();
         k.easingPreset = r.u16v();
@@ -303,7 +313,7 @@ void write_mask(ByteWriter& w, const Mask& m) {
 void read_mask(ByteReader& r, Mask& m) {
     m.id = r.u32v();
     m.name = r.str();
-    m.operation = static_cast<MaskOperation>(r.u8v());
+    m.operation = checked_enum(r.u8v(), MaskOperation::None, MaskOperation::Add);
     m.inverted = r.boolv();
     m.feather = r.f32v();
     m.expansion = r.f32v();
@@ -589,7 +599,7 @@ constexpr u32 kTimelineSectionVersion = 19;
 thread_local u32 g_readingTimelineVersion = kTimelineSectionVersion;
 
 void read_layer(ByteReader& r, Layer& l) {
-    l.kind = static_cast<LayerKind>(r.u8v());
+    l.kind = checked_enum(r.u8v(), LayerKind::Composition, LayerKind::Unknown);
     l.name = r.str();
 
     l.start = FrameIndex{r.i64v()};
@@ -600,7 +610,7 @@ void read_layer(ByteReader& r, Layer& l) {
 
     l.parent = LayerId::unpack(r.u64v());
     l.zOrder = r.u32v();
-    l.blendMode = static_cast<BlendMode>(r.u16v());
+    l.blendMode = checked_enum(r.u16v(), BlendMode::Luminosity, BlendMode::Normal);
     l.visible = r.boolv();
     l.locked = r.boolv();
     l.solo = r.boolv();
@@ -626,6 +636,8 @@ void read_layer(ByteReader& r, Layer& l) {
     for (u32 i = 0; i < trackCount && r.good(); ++i) {
         Track t;
         read_track(r, t);
+        // Propriedade fora do enum (corrupção): a trilha não tem dono, cai fora.
+        if (t.property == TrackProperty::_Count) continue;
         l.tracks.get_or_create(t.property, t.effectIndex, t.effectParamIndex) = t;
     }
 
@@ -692,7 +704,7 @@ void read_layer(ByteReader& r, Layer& l) {
     l.camera.aperture = r.f32v();
     l.camera.active = r.boolv();
 
-    l.light.kind = static_cast<LightKind>(r.u8v());
+    l.light.kind = checked_enum(r.u8v(), LightKind::Ambient, LightKind::Directional);
     l.light.color = r.vec4();
     l.light.intensity = r.f32v();
     l.light.range = r.f32v();
@@ -848,7 +860,8 @@ void read_layer(ByteReader& r, Layer& l) {
         if (n > kMaxTrackCount + 1) { r.skip_to_end(); return; }
         for (u32 i = 0; i < n && r.good(); ++i) {
             const u8 where = r.u8v();
-            const auto prop = static_cast<TrackProperty>(r.u16v());
+            const auto prop = checked_enum(r.u16v(), static_cast<TrackProperty>(static_cast<u16>(TrackProperty::_Count) - 1),
+                                           TrackProperty::Opacity);
             const u32 effectIndex = r.u32v();
             const u32 paramIndex = r.u32v();
             const bool enabled = r.boolv();
@@ -927,7 +940,7 @@ void write_asset(ByteWriter& w, const Asset& a) {
 }
 
 void read_asset(ByteReader& r, Asset& a) {
-    a.kind = static_cast<AssetKind>(r.u8v());
+    a.kind = checked_enum(r.u8v(), AssetKind::Shape, AssetKind::Unknown);
     a.name = r.str();
     a.sourcePath = r.str();
     a.proxyPath = r.str();
@@ -943,8 +956,8 @@ void read_asset(ByteReader& r, Asset& a) {
     a.profile.bitDepth = r.u8v();
     a.profile.chromaSubsampling = r.u8v();
     a.profile.hdr = r.boolv();
-    a.profile.transfer = static_cast<ColorSpace>(r.u16v());
-    a.profile.primaries = static_cast<ColorSpace>(r.u16v());
+    a.profile.transfer = checked_enum(r.u16v(), ColorSpace::HLG, ColorSpace::Unknown);
+    a.profile.primaries = checked_enum(r.u16v(), ColorSpace::HLG, ColorSpace::Unknown);
 
     a.video.index = r.u32v();
     a.video.width = r.u32v();
@@ -1145,16 +1158,16 @@ void apply_project_section(const u8* data, usize size, Project& p) {
     e.width = r.u32v();
     e.height = r.u32v();
     e.fps = r.f64v();
-    e.videoCodec = static_cast<ExportCodec>(r.u16v());
+    e.videoCodec = checked_enum(r.u16v(), ExportCodec::ProRes, ExportCodec::H264);
     e.videoBitrateMbps = r.u32v();
     e.rateMode = r.u32v();
     e.keyframeIntervalFrames = r.u32v();
-    e.audioCodec = static_cast<AudioCodec>(r.u16v());
+    e.audioCodec = checked_enum(r.u16v(), AudioCodec::PCM, AudioCodec::AAC);
     e.audioBitrateKbps = r.u32v();
     e.audioSampleRate = r.u32v();
     e.audioChannels = r.u32v();
     e.container = r.u32v();
-    e.outputColorSpace = static_cast<ColorSpace>(r.u16v());
+    e.outputColorSpace = checked_enum(r.u16v(), ColorSpace::HLG, ColorSpace::Rec709);
     e.toneMapToSdr = r.boolv();
     e.parallelSegments = r.u32v();
     e.motionBlurSamples = r.u32v();
@@ -1162,7 +1175,7 @@ void apply_project_section(const u8* data, usize size, Project& p) {
     e.scale = r.f32v();
 
     EditorSettings& ed = p.editor_settings();
-    ed.previewScale = static_cast<PreviewScale>(r.u8v());
+    ed.previewScale = checked_enum(r.u8v(), PreviewScale::Eighth, PreviewScale::Auto);
     ed.timelineZoom = r.f32v();
     ed.timelineScroll = r.f32v();
     ed.viewportZoom = r.f32v();
@@ -1318,46 +1331,9 @@ void apply_assets_section(const u8* data, usize size, Project& p) {
 }
 
 // -----------------------------------------------------------------------------
-// I/O
+// Migrações registradas. A E/S de arquivo mora em FileIO (escrita atômica com
+// fsync checado, .bak e injeção de falha para os testes de disco cheio).
 // -----------------------------------------------------------------------------
-
-bool write_file_exact(const std::string& path, const std::vector<u8>& data, bool fsync) noexcept {
-    std::FILE* f = std::fopen(path.c_str(), "wb");
-    if (!f) return false;
-    const usize written = data.empty() ? 0 : std::fwrite(data.data(), 1, data.size(), f);
-    if (fsync) std::fflush(f);
-    const bool ok = (written == data.size());
-    std::fclose(f);
-    return ok;
-}
-
-bool read_file_all(const std::string& path, std::vector<u8>& out, usize maxBytes) noexcept {
-    std::FILE* f = std::fopen(path.c_str(), "rb");
-    if (!f) return false;
-    std::fseek(f, 0, SEEK_END);
-    const long size = std::ftell(f);
-    std::fseek(f, 0, SEEK_SET);
-    if (size < 0 || static_cast<usize>(size) > maxBytes) {
-        std::fclose(f);
-        return false;
-    }
-    out.resize(static_cast<usize>(size));
-    const usize read = out.empty() ? 0 : std::fread(out.data(), 1, out.size(), f);
-    std::fclose(f);
-    return read == out.size();
-}
-
-/// Renomeia de forma atômica. No Windows `rename` já sobrescreve (ao contrário
-/// do POSIX), então não há caminho especial — mas o `remove` antes existe para
-/// garantir comportamento idêntico nas duas famílias.
-bool rename_replace(const std::string& from, const std::string& to) noexcept {
-#if defined(_WIN32)
-    std::remove(to.c_str());
-#endif
-    if (std::rename(from.c_str(), to.c_str()) == 0) return true;
-    std::remove(to.c_str());
-    return std::rename(from.c_str(), to.c_str()) == 0;
-}
 
 struct MigrationEntry {
     SectionKind kind;
@@ -1437,14 +1413,9 @@ void decode_section_header(const u8* buf, SectionHeader& s) noexcept {
 // -----------------------------------------------------------------------------
 // API pública
 // -----------------------------------------------------------------------------
-Status ProjectSerializer::save(const Project& project, const std::string& path,
-                               const SaveOptions& options,
-                               std::string* outError) {
-    auto fail = [&](const char* msg) -> Status {
-        if (outError) *outError = msg;
-        return Errc::IoError;
-    };
-
+Status ProjectSerializer::encode(const Project& project, const SaveOptions& options,
+                                 std::vector<u8>& file) {
+    (void)options;
     struct PendingSection {
         SectionKind kind;
         u32 version;
@@ -1469,8 +1440,10 @@ Status ProjectSerializer::save(const Project& project, const std::string& path,
     const u64 indexOffset = kFileHeaderSize;
     const u64 dataOffset = indexOffset + kSectionHeaderSize * sections.size();
 
-    std::vector<u8> file;
-    file.reserve(static_cast<usize>(dataOffset + 4096));
+    usize total = static_cast<usize>(dataOffset);
+    for (const PendingSection& s : sections) total += s.data.size();
+    file.clear();
+    file.reserve(total);
     file.resize(static_cast<usize>(dataOffset));
 
     std::vector<SectionHeader> headers;
@@ -1506,47 +1479,63 @@ Status ProjectSerializer::save(const Project& project, const std::string& path,
     std::snprintf(fh.appVersion, sizeof(fh.appVersion), "%d.%d.%d",
                   AUREA_VERSION_MAJOR, AUREA_VERSION_MINOR, AUREA_VERSION_PATCH);
     encode_file_header(file.data(), fh);
-
-    // Escrita atômica: grava num temporário e renomeia. Uma queda no meio da
-    // escrita deixa o arquivo antigo intacto — nunca um .aurea pela metade, que
-    // seria pior do que não ter salvado.
-    const std::string tmp = path + ".tmp";
-    if (!write_file_exact(tmp, file, options.fsyncOnComplete)) {
-        std::remove(tmp.c_str());
-        return fail("nao foi possivel gravar o arquivo temporario");
-    }
-    if (!rename_replace(tmp, path)) {
-        std::remove(tmp.c_str());
-        return fail("nao foi possivel substituir o arquivo de projeto");
-    }
-
-    AUREA_LOG_INFO("projeto gravado: %s (%llu bytes, %llu secoes)",
-                   path.c_str(), static_cast<unsigned long long>(file.size()),
-                   static_cast<unsigned long long>(sections.size()));
     return OkStatus;
+}
+
+Status ProjectSerializer::write_encoded(const std::vector<u8>& file, const std::string& path,
+                                        const SaveOptions& options, std::string* outError) {
+    // Escrita atômica (FileIO): temporário → fflush/fsync/fclose checados →
+    // .bak da versão anterior → rename. Uma queda ou um disco cheio no meio
+    // deixa o arquivo antigo intacto — nunca um .aurea pela metade, que seria
+    // pior do que não ter salvado.
+    fileio::AtomicWriteOptions wo;
+    wo.fsync = options.fsyncOnComplete;
+    wo.keepBackup = options.keepBackup;
+    const Status s = fileio::write_atomic(path, file.data(), file.size(), wo, outError);
+    if (!s.ok()) return s;
+    AUREA_LOG_INFO("projeto gravado (%llu bytes)", static_cast<unsigned long long>(file.size()));
+    return OkStatus;
+}
+
+Status ProjectSerializer::save(const Project& project, const std::string& path,
+                               const SaveOptions& options,
+                               std::string* outError) {
+    std::vector<u8> file;
+    if (const Status s = encode(project, options, file); !s.ok()) return s;
+    return write_encoded(file, path, options, outError);
 }
 
 Status ProjectSerializer::load(Project& out, const std::string& path,
                                const LoadOptions& options,
                                LoadReport* outReport,
                                std::string* outError) {
-    auto fail = [&](Errc code, const char* msg) -> Status {
-        if (outError) *outError = msg;
-        return code;
-    };
-
     std::vector<u8> file;
     // Teto de 2 GB: um .aurea maior que isso é corrupção ou um arquivo que não
     // é do Aurea, e tentar alocar seria o caminho para o OOM killer.
-    if (!read_file_all(path, file, 2ull * 1024 * 1024 * 1024)) {
-        return fail(Errc::IoError, "nao foi possivel ler o arquivo");
+    if (!fileio::read_all(path, file, 2ull * 1024 * 1024 * 1024)) {
+        const bool present = fileio::exists(path);
+        if (outError) *outError = present ? "nao foi possivel ler o arquivo" : "arquivo nao encontrado";
+        return present ? Status{Errc::IoError, "nao foi possivel ler o arquivo"}
+                       : Status{Errc::NotFound, "arquivo nao encontrado"};
     }
-    if (file.size() < kFileHeaderSize) {
+    return load_bytes(out, file.data(), file.size(), options, outReport, outError);
+}
+
+Status ProjectSerializer::load_bytes(Project& out, const u8* fileData, usize fileSize,
+                                     const LoadOptions& options,
+                                     LoadReport* outReport,
+                                     std::string* outError) {
+    auto fail = [&](Errc code, const char* msg) -> Status {
+        if (outError) *outError = msg;
+        return Status{code, msg};
+    };
+
+    if (!fileData || fileSize < kFileHeaderSize) {
         return fail(Errc::CorruptData, "arquivo menor que o cabecalho");
     }
 
     FileHeader fh;
-    decode_file_header(file.data(), fh);
+    decode_file_header(fileData, fh);
     if (fh.magic != FileHeader::kMagic) {
         return fail(Errc::UnsupportedFormat, "nao e um arquivo .aurea");
     }
@@ -1564,19 +1553,24 @@ Status ProjectSerializer::load(Project& out, const std::string& path,
     LoadReport report;
 
     for (u32 i = 0; i < fh.sectionCount; ++i) {
-        const u64 hdrOffset = fh.indexOffset + kSectionHeaderSize * i;
-        if (hdrOffset + kSectionHeaderSize > file.size()) {
+        // Aritmética sem estouro: `indexOffset`, `offset` e `size` vêm do
+        // arquivo, e um u64 perto do máximo somado a qualquer coisa dá a volta
+        // e passaria no teste de limite — leitura fora do buffer.
+        const u64 hdrRel = static_cast<u64>(kSectionHeaderSize) * i;
+        if (fh.indexOffset > fileSize || hdrRel > fileSize - fh.indexOffset
+            || kSectionHeaderSize > fileSize - fh.indexOffset - hdrRel) {
             if (!options.tolerateCorruptSections) {
                 return fail(Errc::CorruptData, "indice de secoes truncado");
             }
             report.partial = true;
             break;
         }
+        const u64 hdrOffset = fh.indexOffset + hdrRel;
 
         SectionHeader sh;
-        decode_section_header(file.data() + hdrOffset, sh);
+        decode_section_header(fileData + hdrOffset, sh);
 
-        if (sh.offset + sh.size > file.size()) {
+        if (sh.offset > fileSize || sh.size > fileSize - sh.offset) {
             report.sectionsCorrupt.push_back(sh.kind);
             report.partial = true;
             if (!options.tolerateCorruptSections) {
@@ -1585,11 +1579,12 @@ Status ProjectSerializer::load(Project& out, const std::string& path,
             continue;
         }
 
-        const u8* data = file.data() + sh.offset;
+        const u8* data = fileData + sh.offset;
+        const usize dataSize = static_cast<usize>(sh.size);
 
         // Checksum antes de interpretar. Interpretar lixo como layers pode
         // produzir handles inválidos e, a partir daí, acesso a memória errada.
-        const u32 actual = crc32(data, sh.size);
+        const u32 actual = crc32(data, dataSize);
         if (actual != sh.crc32) {
             report.sectionsCorrupt.push_back(sh.kind);
             report.partial = true;
@@ -1602,16 +1597,17 @@ Status ProjectSerializer::load(Project& out, const std::string& path,
         // Migração quando a versão da seção é antiga.
         std::vector<u8> migrated;
         const u8* effective = data;
-        usize effectiveSize = sh.size;
+        usize effectiveSize = dataSize;
 
-        // Versões lidas nativamente (sem migração): 1 de toda seção; 1 e 2 da
-        // Timeline.
-        const bool native = sh.version == 1 || (sh.kind == SectionKind::Timeline && sh.version <= kTimelineSectionVersion);
+        // Versões lidas nativamente (sem migração): 1 de toda seção; 1 a
+        // kTimelineSectionVersion da Timeline.
+        const bool native = sh.version == 1 || (sh.kind == SectionKind::Timeline && sh.version >= 1
+                                                && sh.version <= kTimelineSectionVersion);
         if (!native) {
             bool handled = false;
             for (u32 m = 0; m < g_migrationCount; ++m) {
                 if (g_migrations[m].kind == sh.kind && g_migrations[m].fromVersion == sh.version) {
-                    const Status s = g_migrations[m].fn(sh.kind, sh.version, data, sh.size, migrated);
+                    const Status s = g_migrations[m].fn(sh.kind, sh.version, data, dataSize, migrated);
                     if (!s.ok()) {
                         return fail(s.code(), "falha ao migrar secao");
                     }
@@ -1623,6 +1619,16 @@ Status ProjectSerializer::load(Project& out, const std::string& path,
                 }
             }
             if (!handled) {
+                const bool known = sh.kind == SectionKind::Project || sh.kind == SectionKind::Timeline
+                                || sh.kind == SectionKind::Assets;
+                const u32 current = sh.kind == SectionKind::Timeline ? kTimelineSectionVersion : 1u;
+                if (known && sh.version > current && !options.metadataOnly) {
+                    // Seção que ESTA versão sabe ler, gravada numa versão mais
+                    // nova do formato: abrir sem ela e o usuário salvar por cima
+                    // apagaria a timeline. Recusa com a causa (§124).
+                    return fail(Errc::UnsupportedVersion,
+                                "projeto gravado por uma versao mais nova do Aurea");
+                }
                 // Sem caminho de migração: pular a seção e reportar. Abrir o
                 // resto é melhor que recusar o arquivo inteiro, e o usuário é
                 // avisado de que algo não veio.
@@ -1643,6 +1649,8 @@ Status ProjectSerializer::load(Project& out, const std::string& path,
                 apply_project_section(effective, effectiveSize, out);
                 break;
             case SectionKind::Timeline:
+                report.timelineVersion = sh.version;
+                if (sh.version < kTimelineSectionVersion) report.olderFormat = true;
                 g_readingTimelineVersion = sh.version;
                 apply_timeline_section(effective, effectiveSize, out);
                 g_readingTimelineVersion = kTimelineSectionVersion;
@@ -1665,6 +1673,7 @@ Status ProjectSerializer::load(Project& out, const std::string& path,
     if (report.partial) {
         report.warning = "o projeto abriu com partes faltando";
     }
+    if (!report.sectionsMigrated.empty()) report.olderFormat = true;
 
     out.mark_clean();
     if (outReport) *outReport = report;
@@ -1712,8 +1721,11 @@ Status ProjectSerializer::peek(const std::string& path, FileHeader& outHeader,
     outSections.clear();
     const u32 count = outHeader.sectionCount < 64u ? outHeader.sectionCount : 64u;
     for (u32 i = 0; i < count; ++i) {
-        const u64 off = outHeader.indexOffset + kSectionHeaderSize * i;
-        if (off + kSectionHeaderSize > read) break;
+        // Sem estouro: `indexOffset` vem do arquivo (ver load_bytes).
+        const u64 rel = static_cast<u64>(kSectionHeaderSize) * i;
+        if (outHeader.indexOffset > read || rel > read - outHeader.indexOffset
+            || kSectionHeaderSize > read - outHeader.indexOffset - rel) break;
+        const u64 off = outHeader.indexOffset + rel;
         SectionHeader sh;
         decode_section_header(head.data() + off, sh);
         outSections.push_back(sh);
@@ -1756,13 +1768,15 @@ Status ProjectSerializer::append_journal(const std::string& journalPath,
     h.stringBlobSize = stringBlobSize;
     h.commandsCrc = content_hash(commands, sizeof(Command) * count);
 
-    std::fwrite(&h, sizeof(h), 1, f);
-    std::fwrite(commands, sizeof(Command), count, f);
-    if (stringBlob && stringBlobSize) {
-        std::fwrite(stringBlob, 1, stringBlobSize, f);
-    }
-    std::fflush(f);
-    std::fclose(f);
+    // Cada escrita é checada: disco cheio no meio deixa um bloco truncado que
+    // o leitor descarta, mas quem chamou precisa saber que o autosave falhou.
+    bool ok = std::fwrite(&h, sizeof(h), 1, f) == 1;
+    ok = ok && std::fwrite(commands, sizeof(Command), count, f) == count;
+    if (ok && stringBlob && stringBlobSize) ok = std::fwrite(stringBlob, 1, stringBlobSize, f) == stringBlobSize;
+    ok = ok && std::fflush(f) == 0;
+    const int err = ok ? 0 : errno;
+    ok = (std::fclose(f) == 0) && ok;
+    if (!ok) return err == ENOSPC ? Status{Errc::StorageFull, "armazenamento cheio"} : Status{Errc::IoError};
     return OkStatus;
 }
 
@@ -1771,25 +1785,25 @@ Status ProjectSerializer::read_journal(const std::string& journalPath,
     outCommands.clear();
     if (journalPath.empty()) return Errc::NotFound;
 
-    std::FILE* f = std::fopen(journalPath.c_str(), "rb");
-    if (!f) return Errc::NotFound;
+    std::vector<u8> bytes;
+    if (!fileio::read_all(journalPath, bytes, 512ull * 1024 * 1024)) return Errc::NotFound;
 
-    for (;;) {
+    // Lido da memória: as contagens do cabeçalho são checadas contra o que
+    // SOBROU do arquivo antes de qualquer alocação — um bloco corrompido
+    // declarando 4 GB de strings não pode virar um `vector` de 4 GB.
+    usize pos = 0;
+    while (bytes.size() - pos >= sizeof(JournalBlockHeader)) {
         JournalBlockHeader h;
-        const usize got = std::fread(&h, sizeof(h), 1, f);
-        if (got != 1) break;                       // fim, ou bloco truncado
+        std::memcpy(&h, bytes.data() + pos, sizeof(h));
+        pos += sizeof(h);
         if (h.magic != JournalBlockHeader::kMagic) break;
-        if (h.commandCount > 1u << 20) break;      // valor absurdo: para aqui
+        const usize remaining = bytes.size() - pos;
+        const u64 cmdBytes = static_cast<u64>(h.commandCount) * sizeof(Command);
+        if (cmdBytes > remaining || h.stringBlobSize > remaining - cmdBytes) break;   // bloco truncado
 
         std::vector<Command> block(h.commandCount);
-        const usize read = std::fread(block.data(), sizeof(Command), h.commandCount, f);
-        if (read != h.commandCount) break;         // bloco truncado
-
-        if (h.stringBlobSize) {
-            std::vector<char> blob(h.stringBlobSize);
-            const usize r = std::fread(blob.data(), 1, h.stringBlobSize, f);
-            if (r != h.stringBlobSize) break;
-        }
+        if (cmdBytes) std::memcpy(block.data(), bytes.data() + pos, static_cast<usize>(cmdBytes));
+        pos += static_cast<usize>(cmdBytes) + h.stringBlobSize;
 
         // Checksum por bloco: um bloco corrompido é descartado sozinho, sem
         // invalidar os anteriores. É o que faz a recuperação funcionar mesmo
@@ -1801,7 +1815,6 @@ Status ProjectSerializer::read_journal(const std::string& journalPath,
         outCommands.insert(outCommands.end(), block.begin(), block.end());
     }
 
-    std::fclose(f);
     return outCommands.empty() ? Status{Errc::NotFound, "journal vazio"} : Status{OkStatus};
 }
 

@@ -52,7 +52,9 @@ public:
     [[nodiscard]] u32 checks() const noexcept { return checks_; }
 
 private:
-    static constexpr u32 kMax = 512;
+    // 1024: a Fase 8 soma suítes em paralelo; acima do teto o `add` descartaria
+    // testes EM SILÊNCIO (a contagem final pareceria verde).
+    static constexpr u32 kMax = 1024;
     TestCase tests_[kMax]{};
     u32 count_ = 0;
     u32 failures_ = 0;

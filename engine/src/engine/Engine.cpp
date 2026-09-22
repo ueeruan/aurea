@@ -11,6 +11,7 @@
 #include "aurea/expr/Expression.hpp"
 #include "aurea/core/Thread.hpp"
 #include "aurea/project/Serialization.hpp"
+#include "aurea/project/FileIO.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -254,6 +255,11 @@ void Engine::apply_memory_budgets() noexcept {
     memory_.set_budget(MemoryClass::Audio,          budget * 4 / 100);
     memory_.set_budget(MemoryClass::Assets,         budget * 8 / 100);
     memory_.set_budget(MemoryClass::Persistent,     budget * 2 / 100);
+    // Desfazer (§126): 1/16 do orçamento, entre 16 e 128 MB.
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        history_.set_budget_bytes(std::clamp<u64>(budget / 16, 16ull << 20, 128ull << 20));
+    }
 }
 
 void Engine::shutdown() noexcept {
@@ -499,17 +505,120 @@ void Engine::migrate_echo_to_effect() noexcept {
     });
 }
 
-Status Engine::load_project(const char* path) noexcept {
-    if (!path) return Errc::InvalidArgument;
+void Engine::set_last_error(Status s, const char* context) noexcept {
+    lastError_ = s.code();
+    std::snprintf(lastErrorDetail_, sizeof(lastErrorDetail_), "%s", s.detail().empty() ? "" : s.detail().data());
+    if (!s.ok()) {
+        // Nome padronizado + número + contexto fixo: nada de caminho nem de
+        // título do usuário no log (§113).
+        AUREA_LOG_ERROR("%s: %.*s (%d) %.*s", context ? context : "erro",
+                        static_cast<int>(error_code_name(s.code()).size()), error_code_name(s.code()).data(),
+                        s.raw(), static_cast<int>(s.detail().size()), s.detail().data());
+    }
+}
 
+namespace {
+
+/// Abertura estrita: só vale se TODAS as seções vieram (checksum, versão).
+bool load_strict(const std::string& path, Project& out, LoadReport& report, Status& status) {
+    LoadOptions o;
+    o.lazyAssets = true;
+    o.tolerateCorruptSections = false;
+    std::string err;
+    status = ProjectSerializer::load(out, path, o, &report, &err);
+    if (status.ok() && report.partial) status = Status{Errc::CorruptData, "secoes faltando"};
+    return status.ok();
+}
+
+} // namespace
+
+Status Engine::load_project(const char* path) noexcept {
+    if (!path || !*path) return Errc::InvalidArgument;
+    const std::string main = path;
+    u32 notice = 0;
+
+    // 1. O principal, estrito.
     Project loaded;
     LoadReport report;
-    std::string error;
-    LoadOptions options;
-    options.lazyAssets = true;
-    options.tolerateCorruptSections = true;
-    const Status s = ProjectSerializer::load(loaded, path, options, &report, &error);
-    if (!s.ok() && report.sectionsRead.empty()) return s;
+    Status mainStatus;
+    std::string openedFrom = main;
+    bool ok = load_strict(main, loaded, report, mainStatus);
+
+    // Versão futura: recusa sem tentar cópias. Abrir um .bak mais velho e
+    // salvar por cima apagaria o trabalho feito na versão nova.
+    if (!ok && mainStatus.code() == Errc::UnsupportedVersion) {
+        set_last_error(mainStatus, "abrir projeto");
+        return mainStatus;
+    }
+
+    // 2. Principal ilegível: o último estado válido. O `.tmp` só sobra quando
+    //    a queda foi entre o fsync e o rename — é o mais novo; o `.bak` é a
+    //    gravação anterior.
+    if (!ok) {
+        for (const std::string& candidate : {fileio::temp_path(main), fileio::backup_path(main)}) {
+            if (!fileio::exists(candidate)) continue;
+            Project p;
+            LoadReport r;
+            Status s;
+            if (load_strict(candidate, p, r, s)) {
+                loaded = std::move(p);
+                report = r;
+                openedFrom = candidate;
+                notice |= kLoadRecoveredCopy;
+                ok = true;
+                AUREA_LOG_WARN("projeto: principal ilegivel (%.*s); aberto da copia %s",
+                               static_cast<int>(error_code_name(mainStatus.code()).size()),
+                               error_code_name(mainStatus.code()).data(),
+                               candidate.size() > 4 && candidate.compare(candidate.size() - 4, 4, ".bak") == 0 ? ".bak" : ".tmp");
+                break;
+            }
+        }
+    }
+
+    // 3. Nenhuma cópia inteira: abre o que der do principal, desde que a
+    //    timeline tenha vindo (sem ela seria um projeto vazio fingindo ser o
+    //    do usuário).
+    if (!ok && mainStatus.code() != Errc::NotFound) {
+        Project p;
+        LoadReport r;
+        LoadOptions o;
+        o.lazyAssets = true;
+        o.tolerateCorruptSections = true;
+        const Status s = ProjectSerializer::load(p, main, o, &r, nullptr);
+        const bool hasTimeline = std::find(r.sectionsRead.begin(), r.sectionsRead.end(), SectionKind::Timeline)
+                                 != r.sectionsRead.end();
+        if (s.ok() && hasTimeline) {
+            loaded = std::move(p);
+            report = r;
+            notice |= kLoadPartial;
+            ok = true;
+        }
+    }
+
+    if (!ok) {
+        const Status err = mainStatus.code() == Errc::NotFound
+                               ? Status{Errc::NotFound, "arquivo do projeto nao encontrado"}
+                               : Status{Errc::ProjectCorrupted, "nenhuma copia valida do projeto"};
+        set_last_error(err, "abrir projeto");
+        return err;
+    }
+
+    // O principal ruim NÃO é apagado nem sobrescrito às cegas: vai para
+    // `.corrompido` (uma cópia) antes que a próxima gravação o substitua.
+    if ((notice & (kLoadRecoveredCopy | kLoadPartial)) && fileio::exists(main)) {
+        (void)fileio::copy_file(main, main + ".corrompido");
+    }
+    // Formato antigo (§123–124): cópia de recuperação ANTES de qualquer
+    // regravação no formato novo. Uma por versão de origem; não sobrescreve.
+    if (report.olderFormat) {
+        notice |= kLoadOlderFormat;
+        const std::string copy = main + ".v" + std::to_string(report.timelineVersion) + ".bak";
+        if (!fileio::exists(copy)) {
+            const Status c = fileio::copy_file(openedFrom, copy);
+            if (!c.ok()) AUREA_LOG_WARN("copia do formato antigo nao gravada (%d)", c.raw());
+            else AUREA_LOG_INFO("formato antigo (timeline v%u): copia de recuperacao guardada", report.timelineVersion);
+        }
+    }
 
     media_.close_all();
     thumbs_.clear();
@@ -520,6 +629,8 @@ Status Engine::load_project(const char* path) noexcept {
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
         project_ = std::make_unique<Project>(std::move(loaded));
+        project_->set_path(main);
+        mainFileSuspect_ = (notice & (kLoadRecoveredCopy | kLoadPartial)) != 0;
         migrate_echo_to_effect();
         images_.clear();
         models_.clear();
@@ -531,7 +642,10 @@ Status Engine::load_project(const char* path) noexcept {
             playback_ = PlaybackController{};
             playback_.configure(c->fps(), c->duration());
         }
+        // Recuperado de cópia/parcial: está sujo (o principal ainda é o ruim).
+        if (mainFileSuspect_) project_->mark_dirty();
     }
+    u32 missingTotal = 0;
     // Imagens: o projeto guarda a origem; os pixels voltam pela plataforma. Fora
     // do lock do modelo (decodificar um JPEG grande custa dezenas de ms).
     if (config_.imageLoader) {
@@ -554,8 +668,10 @@ Status Engine::load_project(const char* path) noexcept {
             images_[key] = std::move(px);
         }
         if (missing) AUREA_LOG_WARN("%u imagem(ns) do projeto nao puderam ser abertas", missing);
+        missingTotal += missing;
     }
-    // Fontes importadas usadas pelo projeto voltam ao seletor.
+    // Fontes importadas usadas pelo projeto voltam ao seletor. Ausente = o
+    // texto desenha com a fonte padrão (o nome fica guardado para religar).
     {
         std::vector<std::string> fonts;
         {
@@ -567,7 +683,14 @@ Status Engine::load_project(const char* path) noexcept {
                 }
             });
         }
-        for (const std::string& f : fonts) (void)text::FontManager::instance().add_file(f, true);
+        std::sort(fonts.begin(), fonts.end());
+        fonts.erase(std::unique(fonts.begin(), fonts.end()), fonts.end());
+        u32 missing = 0;
+        for (const std::string& f : fonts) {
+            if (!text::FontManager::instance().add_file(f, true)) ++missing;
+        }
+        if (missing) AUREA_LOG_WARN("%u fonte(s) do projeto ausente(s): texto na fonte padrao", missing);
+        missingTotal += missing;
     }
     // Modelos 3D: reabertos do caminho guardado (relativo ao sandbox). Ausente
     // = o projeto abre mesmo assim; a layer fica sem desenhar e a UI mostra
@@ -591,28 +714,86 @@ Status Engine::load_project(const char* path) noexcept {
                                            : scene3d::import_scene_file(resolve_asset_path(src), o);
             if (!r.ok()) {
                 ++missing;
-                AUREA_LOG_WARN("modelo 3D do projeto nao abriu: %s (%s)", src.c_str(), r.detail.c_str());
+                AUREA_LOG_WARN("modelo 3D do projeto nao abriu (%s)", r.detail.c_str());
                 continue;
             }
             std::lock_guard<std::mutex> lock(modelMutex_);
             models_[key] = std::shared_ptr<const scene3d::SceneAsset>(std::move(r.asset));
         }
         if (missing) AUREA_LOG_WARN("%u modelo(s) 3D ausente(s) no projeto", missing);
+        missingTotal += missing;
     }
+    if (missingTotal) notice |= kLoadMissingMedia;
+    lastLoadMissing_.store(missingTotal, std::memory_order_relaxed);
+    lastLoadNotice_.store(notice, std::memory_order_relaxed);
+    set_last_error(OkStatus, nullptr);
     request_render();
-    if (!report.clean()) return Status{Errc::CorruptData, "projeto aberto parcialmente"};
     return OkStatus;
 }
 
 Status Engine::save_project(const char* path) noexcept {
+    if (!path || !*path) return Errc::InvalidArgument;
+    // Uma gravação por vez: autosave, "Salvar" e ir para segundo plano podem
+    // chegar juntos, cada um na sua thread.
+    std::lock_guard<std::mutex> saveLock(saveMutex_);
+
+    std::vector<u8> bytes;
+    u64 generation = 0;
+    u32 revision = 0;
+    bool keepBackup = true;
+    SaveOptions options;
+    const u64 t0 = monotonic_ns();
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        if (!project_) return Errc::InvalidState;
+        project_->metadata().modifiedUnixMs = wall_clock_ms();
+        if (const Status s = ProjectSerializer::encode(*project_, options, bytes); !s.ok()) {
+            set_last_error(s, "salvar projeto");
+            return s;
+        }
+        generation = project_->edit_generation();
+        revision = modelRevision_.load(std::memory_order_acquire);
+        // Principal ruim (aberto da cópia): não vira .bak — o .bak bom fica.
+        const bool samePath = project_->path() == path;
+        keepBackup = !(mainFileSuspect_ && samePath);
+    }
+    const u64 t1 = monotonic_ns();
+
+    options.keepBackup = keepBackup;
+    std::string error;
+    const Status s = ProjectSerializer::write_encoded(bytes, path, options, &error);
+    const u64 t2 = monotonic_ns();
+    {
+        std::lock_guard<std::mutex> sl(saveStatsMutex_);
+        saveStats_.lastLockNs = t1 - t0;
+        saveStats_.lastWriteNs = t2 - t1;
+        saveStats_.maxLockNs = std::max(saveStats_.maxLockNs, t1 - t0);
+        saveStats_.lastBytes = bytes.size();
+        saveStats_.lastError = s.code();
+        if (s.ok()) ++saveStats_.saves; else ++saveStats_.failures;
+    }
+    if (!s.ok()) {
+        // O arquivo anterior está intacto (FileIO); o projeto segue sujo e o
+        // próximo autosave tenta de novo.
+        set_last_error(s, "salvar projeto");
+        return s;
+    }
+
     std::lock_guard<std::mutex> lock(modelMutex_);
-    if (!project_) return Errc::InvalidState;
-    if (!path) return Errc::InvalidArgument;
-    if (const Status s = project_->save(path); !s.ok()) return s;
+    if (!project_) return OkStatus;
+    project_->set_path(path);
+    mainFileSuspect_ = false;
+    // Só limpa se ninguém mexeu durante a escrita: a edição feita durante o
+    // fsync continua "suja" e entra no próximo autosave.
+    if (modelRevision_.load(std::memory_order_acquire) == revision) project_->mark_clean_if(generation);
     project_->discard_recovery();
     return OkStatus;
 }
 
+Engine::SaveStats Engine::save_stats() const noexcept {
+    std::lock_guard<std::mutex> sl(saveStatsMutex_);
+    return saveStats_;
+}
 Status Engine::save_project() noexcept {
     std::string path;
     {
@@ -4640,7 +4821,11 @@ EngineTelemetry Engine::read_telemetry() noexcept {
     t.physicalResources = renderer_.graph_stats().physicalTextures;
     t.logicalResources = renderer_.graph_stats().transientTextures;
     t.adaptiveScaleChanges = adaptive_ ? adaptive_->change_count() : 0;
-    t.undoBlobBytes = 0;   // snapshots de composição: KB por ação, contados por profundidade
+    {
+        // Snapshots de composição do desfazer, estimados (History::bytes).
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        t.undoBlobBytes = history_.bytes();
+    }
     t.commandsDropped = commandQueue_->dropped_count();
     t.thermal = caps_.thermal().level;
     t.throttling = caps_.thermal().throttling;

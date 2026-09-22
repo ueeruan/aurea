@@ -63,6 +63,7 @@ set(AUREA_CORE_SOURCES
     src/timeline/Timeline.cpp
     src/project/Project.cpp
     src/project/Serialization.cpp
+    src/project/FileIO.cpp
     src/project/Presets.cpp
     src/render/GPUCapabilities.cpp
     src/render/FrameGraph.cpp

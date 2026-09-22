@@ -100,6 +100,9 @@ struct SaveOptions {
     bool incremental = false;         ///< aproveita seções inalteradas do arquivo existente
     bool writeThumbnail = true;
     bool fsyncOnComplete = true;      ///< garante que os bytes chegaram ao disco
+    /// A versão anterior do arquivo vira `<path>.bak` (o "último estado
+    /// válido" que a abertura usa se o principal estiver corrompido).
+    bool keepBackup = true;
 
     /// Seções que mudaram desde a última gravação. Vazio + incremental = grava
     /// tudo. O chamador marca o que mudou (ex.: só mexeu em animação).
@@ -127,6 +130,11 @@ struct LoadReport {
     std::vector<SectionKind> sectionsSkipped;
     std::string warning;    ///< texto para a UI quando algo foi degradado
     bool partial = false;   ///< true = abriu com seções faltando
+    u32  timelineVersion = 0;   ///< versão da seção Timeline lida (0 = não lida)
+    /// Alguma seção veio de formato ANTERIOR ao corrente (lida por migração
+    /// ou pelo caminho de versão antiga). Quem abre guarda uma cópia antes de
+    /// regravar (§123–124).
+    bool olderFormat = false;
 
     [[nodiscard]] bool clean() const noexcept {
         return sectionsCorrupt.empty() && sectionsMigrated.empty() && !partial;
@@ -149,6 +157,16 @@ public:
                                      const SaveOptions& options,
                                      std::string* outError = nullptr);
 
+    /// `save` em duas metades. `encode` só lê o modelo (é o que precisa do lock
+    /// do motor, e custa pouco); `write_encoded` é a E/S com fsync (dezenas de
+    /// ms no flash de um celular) e roda SEM o lock — a UI não congela
+    /// esperando o disco.
+    [[nodiscard]] static Status encode(const Project& project, const SaveOptions& options,
+                                       std::vector<u8>& outBytes);
+    [[nodiscard]] static Status write_encoded(const std::vector<u8>& bytes, const std::string& path,
+                                              const SaveOptions& options,
+                                              std::string* outError = nullptr);
+
     /// Grava só o journal de comandos. É o autosave incremental: barato o
     /// bastante para rodar a cada poucos segundos.
     [[nodiscard]] static Status append_journal(const std::string& journalPath,
@@ -165,6 +183,13 @@ public:
                                      const LoadOptions& options,
                                      LoadReport* outReport = nullptr,
                                      std::string* outError = nullptr);
+
+    /// `load` de um buffer já lido. É o mesmo leitor — o fuzz do parser usa
+    /// isto para rodar milhares de iterações sem tocar o disco.
+    [[nodiscard]] static Status load_bytes(Project& out, const u8* data, usize size,
+                                           const LoadOptions& options,
+                                           LoadReport* outReport = nullptr,
+                                           std::string* outError = nullptr);
 
     /// Lê só o cabeçalho e o índice de seções, sem descomprimir nada. A Home
     /// usa isto para validar um arquivo antes de oferecê-lo como "abrir".

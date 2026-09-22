@@ -428,12 +428,23 @@ void Engine::render_thread_main() noexcept {
                 wakeCv_.wait_for(lock, std::chrono::nanoseconds(waitNs), [this] {
                     return !renderRunning_ || wakeFlag_;
                 });
+            } else if (!surfaceAttached_ || state_ == EngineState::Suspended) {
+                // Sem onde desenhar (segundo plano, tela bloqueada, superfície
+                // ainda não chegou): nada para fazer até alguém acordar. Quem
+                // devolve a tela — attach_surface, resume — já chama
+                // request_render. Antes este caso também acordava a cada
+                // 500 ms só para ver que não havia superfície (§38).
+                wakeCv_.wait(lock, [this] { return !renderRunning_ || wakeFlag_; });
             } else {
-                // Parado: dorme até ter o que mostrar.
+                // Parado: dorme até ter o que mostrar. O teto de 500 ms é a
+                // rede das mudanças do modelo que sobem `modelRevision_` sem
+                // chamar request_render (a render_frame pula barato quando
+                // nada mudou).
                 wakeCv_.wait_for(lock, std::chrono::milliseconds(500), [this] {
                     return !renderRunning_ || wakeFlag_ || playingHint_.load();
                 });
             }
+            ++renderWakeups_;
             wakeFlag_ = false;
         }
         if (!renderRunning_) break;

@@ -240,6 +240,12 @@ public:
     void stop_render_thread() noexcept;
     /// Acorda a thread de render (há algo novo para mostrar).
     void request_render() noexcept;
+    /// Quantas vezes a thread de render acordou desde que subiu (§38: parado,
+    /// sem superfície, tem de ficar parado; com superfície, no máximo a rede
+    /// de 500 ms).
+    [[nodiscard]] u64 render_wakeups() const noexcept { return renderWakeups_.load(std::memory_order_relaxed); }
+    /// Acordadas dos workers do pool (ver JobSystem::idle_wakeups).
+    [[nodiscard]] u64 job_idle_wakeups() const noexcept { return jobs_.idle_wakeups(); }
     /// Redesenha e reapresenta mesmo sem mudança no modelo: a janela voltou a
     /// aparecer (seletor do sistema fechou) e o último quadro apresentado com
     /// ela escondida pode ter sido descartado pelo compositor.
@@ -956,6 +962,7 @@ private:
     std::atomic<bool> renderRunning_{false};
     std::atomic<bool> playingHint_{false};
     std::atomic<bool> surfaceAttached_{false};
+    std::atomic<u64>  renderWakeups_{0};
 
     SurfaceDesc surface_{};
 

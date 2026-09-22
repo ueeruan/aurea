@@ -22,7 +22,9 @@
 #include "aurea/core/Result.hpp"
 
 #include <atomic>
+#include <condition_variable>
 #include <functional>
+#include <mutex>
 
 namespace aurea {
 
@@ -125,9 +127,23 @@ public:
     [[nodiscard]] u64 completed_count() const noexcept { return completed_.load(std::memory_order_relaxed); }
     [[nodiscard]] u32 queue_depth(JobPriority p) const noexcept;
 
+    /// Ociosidade medida (§38): quantas vezes um worker foi dormir sem
+    /// trabalho e quantas vezes acordou. Parado, os dois ficam PARADOS — um
+    /// contador que sobe sem tarefa nenhuma é um worker girando à toa.
+    [[nodiscard]] u64 idle_parks() const noexcept { return parks_.load(std::memory_order_relaxed); }
+    [[nodiscard]] u64 idle_wakeups() const noexcept { return wakeups_.load(std::memory_order_relaxed); }
+
 private:
     friend class JobContext;
     static void worker_main(JobSystem* self, u32 index);
+
+    struct Task;
+    /// Tira a próxima tarefa (a de maior prioridade) e desconta `pending_`.
+    /// Todo consumidor passa aqui — worker, `wait`, `pump` —, senão o contador
+    /// que acorda os workers descola das filas.
+    [[nodiscard]] bool pop_any(Task& out) noexcept;
+    /// Dorme até haver tarefa pendente ou o pool parar.
+    void park() noexcept;
 
     struct Task {
         JobFn    fn       = nullptr;
@@ -191,6 +207,18 @@ private:
     /// destacado que ainda lê `this` depois da destruição derrubava o
     /// processo no teste seguinte.
     std::atomic<u32>         liveWorkers_{0};
+
+    /// Tarefas enfileiradas e ainda não retiradas. É o que o worker ocioso
+    /// espera virar > 0. Sobe ANTES do push (nunca fica negativo) e desce no
+    /// pop; `sleepers_` diz ao `submit` se há alguém para acordar — sem worker
+    /// dormindo, a submissão não toca no mutex.
+    std::atomic<u32>         pending_{0};
+    std::atomic<u32>         sleepers_{0};
+    std::mutex               idleMutex_;
+    std::condition_variable  idleCv_;
+    std::atomic<u64>         parks_{0};
+    std::atomic<u64>         wakeups_{0};
+
     u32                      workerCount_ = 0;
     void*                    threads_[32]{};
 };

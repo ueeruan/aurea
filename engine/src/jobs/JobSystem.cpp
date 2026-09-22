@@ -175,6 +175,13 @@ void JobSystem::stop() noexcept {
     if (!running_.exchange(false, std::memory_order_acq_rel)) return;
 
     stop_.store(true, std::memory_order_release);
+    // Acorda quem está dormindo. O aviso sai COM o mutex: um worker que acabou
+    // de ver `running_` verdadeiro e ainda não entrou no wait não perde o
+    // aviso (ele só solta o mutex dentro do wait).
+    {
+        std::lock_guard<std::mutex> lk(idleMutex_);
+        idleCv_.notify_all();
+    }
 
     // Espera os WORKERS saírem do laço (cada um termina a tarefa em curso e
     // não pega outra). Esperar só `activeTasks_` não basta: entre o try_pop e
@@ -194,32 +201,69 @@ void JobSystem::stop() noexcept {
         Task t;
         while (queues_[i].try_pop(t)) { /* descarta o que sobrou */ }
     }
+    pending_.store(0, std::memory_order_seq_cst);
+}
+
+bool JobSystem::pop_any(Task& out) noexcept {
+    // Varre as filas em ordem de prioridade. Critical é checada primeiro
+    // em toda chamada — é o que segura o frame.
+    for (u8 p = 0; p < static_cast<u8>(JobPriority::Count); ++p) {
+        if (!queues_[p].try_pop(out)) continue;
+        pending_.fetch_sub(1, std::memory_order_seq_cst);
+        out.prio = static_cast<JobPriority>(p);
+        return true;
+    }
+    return false;
+}
+
+void JobSystem::park() noexcept {
+    std::unique_lock<std::mutex> lk(idleMutex_);
+    // Dekker com o `submit`: aqui sobe `sleepers_` e depois lê `pending_`; lá
+    // sobe `pending_` e depois lê `sleepers_` (os dois seq_cst). Pelo menos um
+    // lado vê o outro — ou este worker vê a tarefa e não dorme, ou o submit vê
+    // o worker e o acorda sob o mutex. Nenhuma tarefa fica esperando um worker
+    // que dormiu depois dela.
+    sleepers_.fetch_add(1, std::memory_order_seq_cst);
+    parks_.fetch_add(1, std::memory_order_relaxed);
+    idleCv_.wait(lk, [this] {
+        return pending_.load(std::memory_order_seq_cst) > 0 || !running_.load(std::memory_order_acquire);
+    });
+    sleepers_.fetch_sub(1, std::memory_order_seq_cst);
+    wakeups_.fetch_add(1, std::memory_order_relaxed);
 }
 
 void JobSystem::worker_main(JobSystem* self, u32 index) {
+    // Rajada: o trabalho de um frame chega em várias tarefas a microssegundos
+    // umas das outras. Girar um pouco antes de dormir evita pagar o acordar
+    // (dezenas de µs no Android) entre duas fatias do mesmo parallel_for.
+    constexpr u64 kSpinNs = 200'000;   // 0,2 ms
+    u64 idleSince = 0;
     while (self->running_.load(std::memory_order_acquire)) {
-        bool ran = false;
-
-        // Varre as filas em ordem de prioridade. Critical é checada primeiro
-        // em toda iteração — é o que segura o frame.
-        for (u8 p = 0; p < static_cast<u8>(JobPriority::Count); ++p) {
-            Task t;
-            if (!self->queues_[p].try_pop(t)) continue;
-
+        Task t;
+        if (self->pop_any(t)) {
             self->activeTasks_.fetch_add(1, std::memory_order_acq_rel);
-            JobContext ctx(static_cast<JobPriority>(p), index, &self->stop_);
+            JobContext ctx(t.prio, index, &self->stop_);
             t.fn(t.userData, ctx);
             self->activeTasks_.fetch_sub(1, std::memory_order_acq_rel);
             self->completed_.fetch_add(1, std::memory_order_relaxed);
-            ran = true;
-            break;
+            idleSince = 0;
+            continue;
         }
 
-        if (!ran) {
-            // Sem trabalho. Cede a CPU em vez de girar: girar em 8 núcleos
-            // aquece o aparelho e derruba a bateria sem fazer nada.
+        // Sem trabalho. Antes (até a Fase 8) o worker cedia a CPU com yield e
+        // voltava a olhar a fila PARA SEMPRE: `yield` sem outra thread pronta
+        // volta na hora, então cada worker ocioso ocupava um núcleo inteiro
+        // (medido no host: 4 workers parados = 384 % de um núcleo). No
+        // celular, isso é aquecer e gastar bateria com o app parado. Agora:
+        // gira 0,2 ms e dorme até alguém submeter.
+        const u64 now = monotonic_ns();
+        if (idleSince == 0) idleSince = now;
+        if (now - idleSince < kSpinNs) {
             std::this_thread::yield();
+            continue;
         }
+        self->park();
+        idleSince = 0;
     }
     // Última leitura de `self`: depois disto o stop() pode destruir o objeto.
     self->liveWorkers_.fetch_sub(1, std::memory_order_acq_rel);
@@ -234,10 +278,18 @@ JobHandle JobSystem::submit(JobPriority prio, JobFn fn, void* userData) noexcept
     t.id = nextId_.fetch_add(1, std::memory_order_relaxed);
     t.prio = prio;
 
+    // `pending_` sobe ANTES do push: um worker que pegue a tarefa entre o push
+    // e o incremento não pode levar o contador abaixo de zero.
+    pending_.fetch_add(1, std::memory_order_seq_cst);
     if (!queues_[static_cast<u8>(prio)].try_push(t)) {
+        pending_.fetch_sub(1, std::memory_order_seq_cst);
         AUREA_LOG_WARN("JobSystem: fila %u cheia, submissao recusada",
                        static_cast<unsigned>(prio));
         return JobHandle{};
+    }
+    if (sleepers_.load(std::memory_order_seq_cst) > 0) {
+        std::lock_guard<std::mutex> lk(idleMutex_);
+        idleCv_.notify_one();
     }
     return JobHandle{t.id};
 }
@@ -312,19 +364,16 @@ void JobSystem::wait(JobHandle handle) noexcept {
                            static_cast<unsigned long long>(handle.id));
             return;
         }
-        bool ran = false;
-        for (u8 p = 0; p < static_cast<u8>(JobPriority::Count); ++p) {
-            Task t;
-            if (!queues_[p].try_pop(t)) continue;
+        Task t;
+        if (pop_any(t)) {
             activeTasks_.fetch_add(1, std::memory_order_acq_rel);
-            JobContext ctx(static_cast<JobPriority>(p), 0, &stop_);
+            JobContext ctx(t.prio, 0, &stop_);
             t.fn(t.userData, ctx);
             activeTasks_.fetch_sub(1, std::memory_order_acq_rel);
             completed_.fetch_add(1, std::memory_order_relaxed);
-            ran = true;
-            break;
+        } else {
+            std::this_thread::yield();
         }
-        if (!ran) std::this_thread::yield();
     }
 }
 
@@ -340,20 +389,14 @@ void JobSystem::wait_idle(JobPriority prio) noexcept {
 void JobSystem::pump(u32 maxTasks) noexcept {
     u32 done = 0;
     while (done < maxTasks) {
-        bool ran = false;
-        for (u8 p = 0; p < static_cast<u8>(JobPriority::Count); ++p) {
-            Task t;
-            if (!queues_[p].try_pop(t)) continue;
-            activeTasks_.fetch_add(1, std::memory_order_acq_rel);
-            JobContext ctx(static_cast<JobPriority>(p), 0, &stop_);
-            t.fn(t.userData, ctx);
-            activeTasks_.fetch_sub(1, std::memory_order_acq_rel);
-            completed_.fetch_add(1, std::memory_order_relaxed);
-            ran = true;
-            ++done;
-            break;
-        }
-        if (!ran) break;
+        Task t;
+        if (!pop_any(t)) break;
+        activeTasks_.fetch_add(1, std::memory_order_acq_rel);
+        JobContext ctx(t.prio, 0, &stop_);
+        t.fn(t.userData, ctx);
+        activeTasks_.fetch_sub(1, std::memory_order_acq_rel);
+        completed_.fetch_add(1, std::memory_order_relaxed);
+        ++done;
     }
 }
 

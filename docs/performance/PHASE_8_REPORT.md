@@ -7,8 +7,6 @@ em que resolução e o que o número é. Seção por marco; esta é a **8A (base
 
 ## 8A — Profiling: baseline do host
 
-## 8E — Sistemas pesados (texto, vetor, máscara, 3D, partículas, optical flow, tracking, efeitos)
-
 ### Ambiente (o que estes números são e o que NÃO são)
 
 | | |
@@ -972,6 +970,14 @@ Tirado da abertura: **decodificação da foto das prévias** (JPEG 640² + cópi
 - **8H:** `DeviceProfile.surveyed/hardwareDecoderCount` e `DeviceReport.exportCeiling` sem chamador.
 - Espelho JNI: `AureaEngine`/`CommandBatch` têm ~15 wrappers sem chamador (echo, rgb, transição, recuperação de sessão, telemetria…). O R8 já os tira do dex; o C++ correspondente continua na .so.
 
+---
+
+## 8E — Sistemas pesados (texto, vetor, máscara, 3D, partículas, optical flow, tracking, efeitos)
+
+### Ambiente (o que estes números são e o que NÃO são)
+
+| | |
+|---|---|
 | Máquina | PC de mesa: AMD Ryzen 5 5500, NVIDIA GeForce RTX 3050 (Vulkan), Windows 11 Pro 22631 |
 | Build | Release, MSVC (`aurea_tests.exe`: motor real, backend Vulkan real, validação desligada na medição) |
 | Projeto / alvo | 1080p (1920×1080) fora da tela, RGBA16F; preview = mesma resolução com a escala pesada indicada (0,5 / 0,25) — a resolução do preview (1/2, 1/4) é da 8C |
@@ -1248,3 +1254,38 @@ com as 9 frentes somando testes, 512 estourava).
 - Deduplicar o MESMO arquivo importado duas vezes (hoje vira dois assets) —
   é do import no Engine.
 - HUD: os contadores estão em `Renderer::heavy_stats()`; mostrar é da 8A.
+
+---
+
+## Fechamento da Fase 8 (as 9 frentes no master)
+
+Suíte do motor no master depois do último merge (8E): **558 testes, 0 falhas**
+(Release, host). APK debug x86_64 compila. Todos os números são do **host**
+(Ryzen 5 5500 + RTX 3050), salvo onde dito; nenhum celular real foi medido e
+iOS/Metal não foi testado (sem Mac).
+
+| Frente | Antes → depois (medido) |
+|---|---|
+| 8A baseline | `AUREA_BENCH=compare` falha em regressão > 40% + piso absoluto; Grain/Scanlines/Colorama voltaram a renderizar |
+| 8B memória/jobs | workers ociosos 402% → 0,8% de CPU; todo cache com orçamento e LRU; `trim_memory`; tela Armazenamento |
+| 8C render | CPU de gravação 7,93 → 0,85 ms (200 camadas); 0 alocações por quadro; troca de qualidade do AUTO 34 → 1 (histerese); render sob demanda |
+| 8D timeline | sem teto de 512 camadas; releitura 0,8 → 0,2 ms; waveform em cache no disco; laço de status ocioso |
+| 8E pesados | 3D crítico −30% (1 modelo) / −25% (25 instanciados, desenhos 25 → 1); desfoque vetorial no preview 0,5: 0,281 → 0,152 ms; texto/vetor/máscara parados: 0 retrabalho por quadro |
+| 8F export | 1,4–2,3× mais rápido, saída idêntica (golden) |
+| 8G estabilidade | salvamento atômico com `.bak`; disco cheio tratado; fuzz; ASan limpo; 7 P0 + 9 P1 corrigidos |
+| 8H aparelho fraco | níveis LOW/MID/HIGH/ULTRA; política térmica; bug de 1 núcleo corrigido; teto de export vindo do encoder |
+| 8I release | APK 23 → 11 MB (R8); pipelines na abertura 40 → 16; cache de pipeline em disco |
+
+Decisões para o dono:
+
+- **Deep Glow no export mudou levemente (8E)**: diferença média 0,084/255;
+  0,45% dos canais passam de 3/255. Invisível a olho, mas não é bit-idêntico.
+- **Teto de resolução do export (8F/8H)** vem da tabela de codecs do aparelho;
+  4K é recusado onde o encoder não declara suporte.
+
+Restos conhecidos (não resolvidos nesta fase):
+
+- Efeito "atraso RGB" (G8-24) muito lento em cenas longas.
+- `SceneAsset` guarda texturas decodificadas na RAM depois do upload (80 MB no capacete); sem streaming de mip.
+- Atlas de glifos sobe inteiro quando entra glifo novo.
+- Camada de validação Vulkan indisponível no host.

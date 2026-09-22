@@ -656,6 +656,45 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             // modelos 3D (padrão = plano Z=0 1:1 com a composição).
             m = compFromClip * viewProj3d * world_3d(comp, *l, time);
         }
+        // Transições de entrada/saída: ajuste procedural perto das bordas.
+        if (l->transitionIn != 0 || l->transitionOut != 0) {
+            const f32 cw = static_cast<f32>(comp.width()), chh = static_cast<f32>(comp.height());
+            const Vec4 c4 = m * Vec4{static_cast<f32>(rl.source.width) * 0.5f, static_cast<f32>(rl.source.height) * 0.5f, 0, 1};
+            const Vec3 center{c4.w != 0.0f ? c4.x / c4.w : c4.x, c4.w != 0.0f ? c4.y / c4.w : c4.y, 0};
+            auto apply = [&](u8 type, f32 u, f32 dirSign) {
+                // u: 0 = fora de cena, 1 = no lugar; curva suave (ease in-out).
+                const f32 e = u * u * (3.0f - 2.0f * u);
+                switch (type) {
+                    case 1: rl.opacity *= e; break;
+                    case 2: m = Mat4::translation(Vec3{0, (1.0f - e) * chh * 0.25f * dirSign, 0}) * m; rl.opacity *= std::min(1.0f, e * 1.5f); break;
+                    case 3: m = Mat4::translation(Vec3{-(1.0f - e) * cw * 0.25f * dirSign, 0, 0}) * m; rl.opacity *= std::min(1.0f, e * 1.5f); break;
+                    case 4: {
+                        const f32 k = 0.6f + 0.4f * e;
+                        m = Mat4::translation(center) * Mat4::scale(Vec3{k, k, 1}) * Mat4::translation(-center) * m;
+                        rl.opacity *= e;
+                        break;
+                    }
+                    case 5: {
+                        const f32 k = 0.5f + 0.5f * e;
+                        const f32 a = (1.0f - e) * 1.5708f * dirSign;
+                        m = Mat4::translation(center) * Mat4::from_quat(Quat::from_axis_angle(Vec3{0, 0, 1}, a))
+                          * Mat4::scale(Vec3{k, k, 1}) * Mat4::translation(-center) * m;
+                        rl.opacity *= e;
+                        break;
+                    }
+                    default: break;
+                }
+            };
+            if (l->transitionIn != 0 && l->transitionInFrames > 0) {
+                const f32 u = static_cast<f32>(time.value - l->start.value) / static_cast<f32>(l->transitionInFrames);
+                if (u < 1.0f) apply(l->transitionIn, std::clamp(u, 0.0f, 1.0f), 1.0f);
+            }
+            if (l->transitionOut != 0 && l->transitionOutFrames > 0) {
+                const f32 u = static_cast<f32>(l->end.value - 1 - time.value) / static_cast<f32>(l->transitionOutFrames);
+                if (u < 1.0f) apply(l->transitionOut, std::clamp(u, 0.0f, 1.0f), -1.0f);
+            }
+            if (rl.opacity <= 0.0f) continue;
+        }
         rl.compFromLayer = m;
         rl.texelScale = texel_scale_for(max_scale(m) * previewFactor);
 

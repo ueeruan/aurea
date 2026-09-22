@@ -466,13 +466,18 @@ void write_layer(ByteWriter& w, const Layer& l) {
     w.f32v(l.particles.emitterSize.y);
     w.f32v(l.particles.emitterOffset.x);
     w.f32v(l.particles.emitterOffset.y);
+    // v8
+    w.u8v(l.transitionIn);
+    w.u8v(l.transitionOut);
+    w.u32v(l.transitionInFrames);
+    w.u32v(l.transitionOutFrames);
 }
 
 /// Versão da seção Timeline. v2: layer de modelo 3D guarda escala de unidade
 /// e pivô (o enquadramento do import). v1 continua sendo lida (campos novos
 /// com o padrão).
 /// v3: velocidade e reverso da layer.
-constexpr u32 kTimelineSectionVersion = 7;
+constexpr u32 kTimelineSectionVersion = 8;
 thread_local u32 g_readingTimelineVersion = kTimelineSectionVersion;
 
 void read_layer(ByteReader& r, Layer& l) {
@@ -637,6 +642,12 @@ void read_layer(ByteReader& r, Layer& l) {
         l.particles.emitterSize.y = r.f32v();
         l.particles.emitterOffset.x = r.f32v();
         l.particles.emitterOffset.y = r.f32v();
+    }
+    if (g_readingTimelineVersion >= 8) {
+        l.transitionIn = r.u8v();
+        l.transitionOut = r.u8v();
+        l.transitionInFrames = r.u32v();
+        l.transitionOutFrames = r.u32v();
     }
 }
 

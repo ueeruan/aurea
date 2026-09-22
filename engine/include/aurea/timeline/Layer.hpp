@@ -220,6 +220,11 @@ struct Layer {
     bool  reversed = false;
     /// Desfoque de movimento desta camada (a composição define o obturador).
     bool  motionBlur = false;
+    /// Transições de entrada/saída (avaliadas no render, não viram keyframes):
+    /// 0 nenhuma, 1 dissolver, 2 deslizar para cima, 3 deslizar da esquerda,
+    /// 4 zoom, 5 girar. Duração em quadros.
+    u8    transitionIn = 0, transitionOut = 0;
+    u32   transitionInFrames = 0, transitionOutFrames = 0;
 
     // --- Hierarquia e composição --------------------------------------------
     LayerId  parent{};

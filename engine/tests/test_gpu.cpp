@@ -1503,6 +1503,42 @@ AUREA_TEST(Gpu, ParticlesAreDeterministicAndSeekable) {
     AUREA_CHECK(box.h() > box.w() / 2);
 }
 
+AUREA_TEST(Gpu, TransitionsFadeAndSlideAtTheEdges) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(320, 180);
+    auto id = rig.e.add_shape(10);
+    AUREA_CHECK(id.ok());
+    auto seekTo = [&](i64 f) {
+        Command c;
+        c.type = CommandType::PlaybackSeek;
+        c.seek.time = tick_at(FrameIndex{f}, 30.0);
+        AUREA_CHECK(rig.e.apply_command(c).ok());
+    };
+    auto energy = [](const Image8& img) { f64 e = 0; for (usize i = 0; i < img.rgba.size(); i += 4) e += img.rgba[i]; return e; };
+    seekTo(20);
+    const Image8 full = rig.capture(320);
+    const Box8 fb = lit_box(full);
+    AUREA_CHECK(rig.e.set_transition(*id, false, 1, 10));   // dissolver 10 quadros
+    seekTo(0);
+    const f64 e0 = energy(rig.capture(320));
+    seekTo(5);
+    const f64 e5 = energy(rig.capture(320));
+    seekTo(20);
+    const Image8 after = rig.capture(320);
+    u32 worst = 0;
+    for (usize i = 0; i < full.rgba.size(); ++i) worst = std::max<u32>(worst, static_cast<u32>(std::abs(full.rgba[i] - after.rgba[i])));
+    // Deslizar para cima: no meio da entrada a caixa está mais baixa.
+    AUREA_CHECK(rig.e.set_transition(*id, false, 2, 10));
+    seekTo(5);
+    const Box8 sb = lit_box(rig.capture(320));
+    std::printf("    dissolver: q0 %.3f q5 %.3f do cheio; depois diferenca %u; deslizar: y %u -> %u\n",
+                e0 / energy(full), e5 / energy(full), worst, fb.y0, sb.y0);
+    AUREA_CHECK(e0 / energy(full) < 0.01);
+    AUREA_CHECK(e5 / energy(full) > 0.3 && e5 / energy(full) < 0.95);
+    AUREA_CHECK(worst == 0);
+    AUREA_CHECK(sb.y0 > fb.y0 + 5);
+}
+
 AUREA_TEST(Gpu, Scene3DSurvivesSaveAndReopenIdentically) {
     AUREA_REQUIRE_GPU();
     const std::string path = gltf_data("DamagedHelmet.glb");

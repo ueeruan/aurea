@@ -1197,6 +1197,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshNow()
     }
 
+    // --- Transições ------------------------------------------------------------------------
+    fun setTransition(out: Boolean, type: Int, frames: Int) {
+        val id = primary ?: return
+        engine.setTransition(id, out, type, frames)
+        refreshNow()
+    }
+
     // --- Partículas ------------------------------------------------------------------------
     /** Parâmetros da camada de partículas escolhida (8, ver Engine::query_particles). */
     var particles by mutableStateOf<List<Float>?>(null)

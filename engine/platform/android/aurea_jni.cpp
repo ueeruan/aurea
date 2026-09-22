@@ -740,6 +740,12 @@ AUREA_JNI jboolean AUREA_FN(nativeApplySpeedRamp)(JNIEnv*, jclass, jlong handle,
     return c && c->engine.apply_speed_ramp(static_cast<u64>(layer), static_cast<u32>(preset)) ? JNI_TRUE : JNI_FALSE;
 }
 
+AUREA_JNI jboolean AUREA_FN(nativeSetTransition)(JNIEnv*, jclass, jlong handle, jlong layer, jboolean out, jint type, jint frames) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.set_transition(static_cast<u64>(layer), out == JNI_TRUE, static_cast<u32>(type),
+                                         static_cast<u32>(std::max(0, frames))) ? JNI_TRUE : JNI_FALSE;
+}
+
 AUREA_JNI jlong AUREA_FN(nativeAddParticles)(JNIEnv*, jclass, jlong handle, jint preset) {
     NativeContext* c = ctx_of(handle);
     if (!c) return -static_cast<jlong>(Errc::InvalidState);

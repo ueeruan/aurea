@@ -40,6 +40,7 @@ enum class EditorPanel {
     Text,          // editar texto
     Parent,        // seguir outra camada (parentesco)
     Particles,     // partículas
+    Transitions,   // entrada e saída
 }
 
 /**
@@ -97,6 +98,7 @@ fun PanelContent(
         EditorPanel.Text -> "Texto"
         EditorPanel.Parent -> "Seguir outra camada"
         EditorPanel.Particles -> "Partículas"
+        EditorPanel.Transitions -> "Entrada e saída"
     }
 
     Column(modifier.fillMaxSize().background(AureaColors.EditorPanel)) {
@@ -114,6 +116,7 @@ fun PanelContent(
                     EditorPanel.Text -> TextPanel(env)
                     EditorPanel.Parent -> ParentPanel(env)
                     EditorPanel.Particles -> ParticlesPanel(env)
+                    EditorPanel.Transitions -> TransitionsPanel(env)
                 }
             }
         }

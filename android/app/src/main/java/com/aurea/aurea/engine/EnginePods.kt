@@ -762,7 +762,13 @@ data class LayerDetail(
     /** Pai → composição (a b c d tx ty). Identidade sem pai. */
     val parentAffine: FloatArray = floatArrayOf(1f, 0f, 0f, 1f, 0f, 0f),
     val geomFlags: Int = 0,
+    val transitions: Int = 0,
 ) {
+    val transitionIn: Int get() = transitions and 0xF
+    val transitionOut: Int get() = (transitions shr 4) and 0xF
+    val transitionInFrames: Int get() = (transitions ushr 8) and 0xFFF
+    val transitionOutFrames: Int get() = (transitions ushr 20) and 0xFFF
+
     val hasWorldCorners: Boolean get() = (geomFlags and 1) != 0
     val perspective: Boolean get() = (geomFlags and 2) != 0
 
@@ -852,6 +858,7 @@ data class LayerDetail(
                 worldCorners = FloatArray(8) { b.getFloat(192 + it * 4) },
                 parentAffine = FloatArray(6) { b.getFloat(224 + it * 4) },
                 geomFlags = b.getInt(248),
+                transitions = b.getInt(252),
             )
         }
     }

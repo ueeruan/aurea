@@ -278,6 +278,11 @@ public:
     /// 4 desacelerar. Liga o remapeamento.
     bool apply_speed_ramp(u64 layerId, u32 preset) noexcept;
 
+    /// Transição de entrada (`out` = false) ou saída: tipo (0 nenhuma, 1
+    /// dissolver, 2 deslizar p/ cima, 3 deslizar da esquerda, 4 zoom, 5 girar)
+    /// e duração em quadros (limitada a metade da camada).
+    bool set_transition(u64 layerId, bool out, u32 type, u32 frames) noexcept;
+
     /// Partículas (GPU, analíticas). Presets: 0 faíscas, 1 neve, 2 poeira de luz.
     [[nodiscard]] Result<u64> add_particles(u32 preset) noexcept;
     bool apply_particle_preset(u64 layerId, u32 preset) noexcept;

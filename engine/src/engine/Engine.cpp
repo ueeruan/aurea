@@ -879,6 +879,22 @@ Result<u64> Engine::add_null(bool threeD) noexcept {
     return lid.pack();
 }
 
+bool Engine::set_transition(u64 layerId, bool out, u32 type, u32 frames) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || type > 5) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), out ? "transicao de saida" : "transicao de entrada");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    const u32 maxF = static_cast<u32>(std::max<i64>(1, (l->end.value - l->start.value) / 2));
+    const u32 f = std::clamp<u32>(frames, 1u, maxF);
+    if (out) { l->transitionOut = static_cast<u8>(type); l->transitionOutFrames = type ? f : 0; }
+    else { l->transitionIn = static_cast<u8>(type); l->transitionInFrames = type ? f : 0; }
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
 namespace {
 void particle_preset(ParticleData& p, u32 preset, f32 w, f32 h) noexcept {
     p = ParticleData{};
@@ -2651,6 +2667,9 @@ bool Engine::fill_layer_detail_locked(u64 layerId, bridge::LayerDetailPOD& out) 
     out.audioFadeOut = static_cast<i32>(l->fadeOut.value);
     out.speed = l->speed;
     out.timeFlags = (l->reversed ? 1u : 0u) | (l->motionBlur ? 2u : 0u) | (l->timeRemapEnabled ? 4u : 0u);
+    // Transições: tipo entrada (4 bits) | saída (4) | quadros entrada (12) | saída (12).
+    out.reserved0 = (l->transitionIn & 0xFu) | ((l->transitionOut & 0xFu) << 4)
+                  | ((std::min<u32>(l->transitionInFrames, 4095u)) << 8) | ((std::min<u32>(l->transitionOutFrames, 4095u)) << 20);
     {
         const Asset* aa = project_->asset(l->source);
         const Track* vt = l->tracks.find(TrackProperty::AudioVolume);

@@ -374,15 +374,23 @@ Status Renderer::initialize(GPUBackend& backend, const EffectRegistry& effects) 
         return s;
     }
 
-    // PRÉ-AQUECIMENTO: todo pipeline embutido é compilado aqui, antes do
-    // primeiro frame. Com o cache de pipeline persistido pelo backend, da
-    // segunda abertura em diante isto é quase instantâneo.
+    // PRÉ-AQUECIMENTO DA ABERTURA (Fase 8I, §60): só o que TODO projeto usa
+    // — vídeo, forma, vetor, texto, máscara, pilha de cor, composição e
+    // saída. Efeitos e 3D (antes: todos os ~40 pipelines aqui, pagos em toda
+    // abertura mesmo sem projeto) são compilados quando o projeto aberto os
+    // tem (scan_for_warmup), fora do playback. O 3D sobe só as texturas
+    // neutras de 1 px; os pipelines dele esperam a primeira camada 3D.
     if (const Status s = scene3d_.initialize(backend, shaders_); !s.ok()) {
         AUREA_LOG_ERROR("renderer: 3D indisponivel: %s", s.message().data());
     }
+    warmPending_.clear();
+    warmedEffects_.clear();
+    warmed3d_ = false;
+    warmedForProject_ = 0;
     std::vector<PipelineKey> keys;
-    effects.collect_pipelines(keys, kWorkFormat);
-    scene3d_.collect_pipelines(keys);
+    keys.push_back(PipelineKey::fullscreen(ShaderId::effects_color_stack_frag, kWorkFormat));
+    keys.push_back(PipelineKey::graphics(ShaderId::text_glyph_vert, ShaderId::text_glyph_frag, kWorkFormat, true,
+                                         BlendMode::Normal));
     keys.push_back(PipelineKey::fullscreen(ShaderId::video_yuv_planar_frag, kWorkFormat));
     keys.push_back(PipelineKey::fullscreen(ShaderId::video_rgba_to_linear_frag, kWorkFormat));
     keys.push_back(PipelineKey::fullscreen(ShaderId::shape_shape_frag, kWorkFormat));
@@ -401,12 +409,42 @@ Status Renderer::initialize(GPUBackend& backend, const EffectRegistry& effects) 
     for (SurfaceFormat f : {SurfaceFormat::RGBA8, SurfaceFormat::BGRA8}) {
         keys.push_back(PipelineKey::graphics(ShaderId::composite_layer_vert, ShaderId::composite_output_frag, f));
     }
-    // Export: planos Y (R8) e CbCr (RG8).
-    keys.push_back(PipelineKey::fullscreen(ShaderId::export_yuv_encode_frag, SurfaceFormat::R8));
-    keys.push_back(PipelineKey::fullscreen(ShaderId::export_yuv_encode_frag, SurfaceFormat::RG8));
+    // Export (planos Y em R8 e CbCr em RG8) não entra: compila no primeiro
+    // quadro do export, que não é tempo real.
     prewarmed_ = shaders_.prewarm(keys.data(), static_cast<u32>(keys.size()));
     AUREA_LOG_INFO("renderer: %u pipelines pre-aquecidos", prewarmed_);
     return OkStatus;
+}
+
+void Renderer::scan_for_warmup(const Project& project) noexcept {
+    if (!effects_ || !shaders_.ready()) return;
+    // Sem alocação no caso comum: tudo já visto → nenhuma inserção.
+    bool want3d = false;
+    project.timeline().for_each_composition([&](CompositionId, const Composition& c) {
+        c.layers().for_each([&](LayerId, const Layer& l) {
+            if (!warmed3d_ && (l.threeD || l.kind == LayerKind::Model3D)) want3d = true;
+            for (const EffectInstance& e : l.effects) {
+                if (!e.enabled) continue;
+                const auto it = std::lower_bound(warmedEffects_.begin(), warmedEffects_.end(), e.type);
+                if (it != warmedEffects_.end() && *it == e.type) continue;
+                warmedEffects_.insert(it, e.type);
+                if (const Effect* fx = effects_->find(e.type)) fx->pipelines(warmPending_, kWorkFormat);
+            }
+        });
+    });
+    if (want3d) {
+        warmed3d_ = true;
+        scene3d_.collect_pipelines(warmPending_);
+    }
+}
+
+void Renderer::flush_warmup() noexcept {
+    if (warmPending_.empty()) return;
+    // Só o que ainda não existe: vários efeitos dividem pipelines.
+    const u32 made = shaders_.prewarm(warmPending_.data(), static_cast<u32>(warmPending_.size()));
+    warmedForProject_ += made;
+    if (made) AUREA_LOG_INFO("renderer: %u pipelines do projeto pre-aquecidos", made);
+    warmPending_.clear();
 }
 
 void Renderer::shutdown() noexcept {
@@ -524,6 +562,10 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                        void* imageCtx, const RenderSettings& settings, u64 frameNumber,
                        i32 playDirection, DecodeMode decodeMode, f32 speed, FrameSnapshot& out) {
     frameNumber_ = frameNumber;
+    // Fora do playback contínuo (parado, scrub, export): o que o projeto usa e
+    // ainda não foi compilado entra na fila; render() compila antes do grafo.
+    // No playback não varre — nada muda no modelo sem pausar.
+    if (prepareDepth_ == 0 && decodeMode != DecodeMode::Playback) scan_for_warmup(project);
     // Expressões: a timeline do quadro (camada dona, outras camadas) e o memo
     // por (propriedade, quadro). O quadro é preparado sob o lock do modelo.
     const expr::Scope exprScope(project.timeline());
@@ -2737,6 +2779,9 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
                         const OffscreenTarget* offscreen, FrameStats& stats,
                         RenderTimings& timings) noexcept {
     if (!backend_) return Status{Errc::InvalidState, "renderer sem backend"};
+    // Pipelines que a varredura do projeto pediu: antes de pegar a imagem da
+    // swapchain (compilar segurando a imagem atrasaria a apresentação).
+    flush_warmup();
     const u64 t0 = monotonic_ns();
     heavyScale_ = settings.finalQuality ? 1.0f : settings.heavyScale;
 

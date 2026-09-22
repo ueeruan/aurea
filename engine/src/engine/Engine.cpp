@@ -166,6 +166,9 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
         return Status{Errc::InvalidState, "motor ja inicializado"};
     }
     config_ = config;
+    startup_ = StartupTimings{};
+    const u64 tStart = monotonic_ns();
+    auto ms_since = [](u64 t0) noexcept { return static_cast<f32>(static_cast<f64>(monotonic_ns() - t0) * 1e-6); };
     // A medição da plataforma entra ANTES da detecção: o que ela traz é medido
     // no aparelho, e o que a detecção genérica não alcança (codec de hardware,
     // núcleos grandes) fica com o conservador.
@@ -182,6 +185,7 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
     apply_memory_budgets();
 
     if (effectRegistry_.count() == 0) register_builtin_effects(effectRegistry_);
+    startup_.jobsMs = ms_since(tStart);
 
     gpu_.reset(config.backend);
     renderer_.set_model_lookup(&Engine::model_lookup, this);
@@ -191,8 +195,14 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
         // diretório de cache do motor (que vive em config_, não no chamador).
         BackendConfig bc = config_.backendConfig;
         if (!bc.cacheDirectory || !*bc.cacheDirectory) bc.cacheDirectory = config_.cacheDirectory.c_str();
-        if (const Status s = gpu_->initialize(bc); !s.ok()) {
-            AUREA_LOG_ERROR("backend grafico nao inicializou: %s", s.message().data());
+        // Versão do cache: SPIR-V mudou (app atualizado) → arquivo antigo fora.
+        if (bc.pipelineCacheTag == 0) bc.pipelineCacheTag = ShaderLibrary::spirv_fingerprint();
+        const u64 tGpu = monotonic_ns();
+        const Status gs = gpu_->initialize(bc);
+        startup_.gpuMs = ms_since(tGpu);
+        const u64 tRenderer = monotonic_ns();
+        if (!gs.ok()) {
+            AUREA_LOG_ERROR("backend grafico nao inicializou: %s", gs.message().data());
             gpu_.reset();
         } else if (const Status r = renderer_.initialize(*gpu_, effectRegistry_); !r.ok()) {
             AUREA_LOG_ERROR("renderer nao inicializou: %s", r.message().data());
@@ -201,6 +211,8 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
         } else {
             AUREA_LOG_INFO("GPU: %s", gpu_->capabilities().summary().c_str());
         }
+        startup_.rendererMs = ms_since(tRenderer);
+        startup_.pipelinesPrewarmed = renderer_.pipelines_prewarmed();
     }
     // A GPU de verdade só passa a existir agora: o backend acabou de subir e é
     // o único que sabe os limites reais. É aqui que "gpu=desconhecida
@@ -228,7 +240,12 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
     adapt().set_user_scale(config.initialPreviewScale);
 
     state_ = EngineState::Ready;
+    startup_.totalMs = ms_since(tStart);
+    startup_.restMs = std::max(0.0f, startup_.totalMs - startup_.jobsMs - startup_.gpuMs - startup_.rendererMs);
     AUREA_LOG_INFO("Aurea Engine pronta: %s", caps_.summary().c_str());
+    AUREA_LOG_INFO("abertura do motor: %.1f ms (aparelho %.1f, gpu %.1f, renderer %.1f com %u pipelines, resto %.1f)",
+                   startup_.totalMs, startup_.jobsMs, startup_.gpuMs, startup_.rendererMs,
+                   startup_.pipelinesPrewarmed, startup_.restMs);
     return OkStatus;
 }
 

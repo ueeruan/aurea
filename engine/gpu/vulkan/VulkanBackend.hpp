@@ -382,6 +382,7 @@ public:
     [[nodiscard]] u32 frames_in_flight() const noexcept override { return framesInFlight_; }
     [[nodiscard]] GpuMemoryStats memory_stats() const noexcept override;
     void save_pipeline_cache() noexcept override;
+    [[nodiscard]] PipelineCacheInfo pipeline_cache_info() const noexcept override { return cacheInfo_; }
 
     // --- Internos, usados pelas peças do backend -----------------------------
     [[nodiscard]] VkDevice device() const noexcept { return device_; }
@@ -460,6 +461,9 @@ private:
     MemoryAllocator allocator_;
     VkPipelineCache pipelineCache_ = VK_NULL_HANDLE;
     std::string cachePath_;
+    std::vector<u8> cacheHeader_;        ///< cabeçalho esperado (aparelho + versão), montado na carga
+    usize lastSavedCacheBytes_ = 0;      ///< tamanho do blob no disco (pula gravação sem novidade)
+    PipelineCacheInfo cacheInfo_{};
 
     HandlePool<Texture> textures_;
     HandlePool<Buffer> buffers_;

@@ -13,10 +13,16 @@
 //   2. CHAVE ESTRUTURAL. O pipeline é identificado por (shaders, blend, formato,
 //      sampler imutável) — duas layers com o mesmo efeito dividem o pipeline.
 //
-//   3. PRÉ-AQUECIMENTO. Todo efeito embutido declara os pipelines que usa, e o
-//      renderer compila todos antes do primeiro frame. O cache de pipeline do
-//      driver é persistido em disco pelo backend, então a partir da segunda
-//      execução isso é quase instantâneo.
+//   3. PRÉ-AQUECIMENTO EM DUAS ETAPAS (Fase 8I, §60–62). Na abertura, só os
+//      pipelines que TODO projeto usa (composição, vídeo, forma, vetor, texto,
+//      máscara, pilha de cor, saída). Os de efeito e de 3D ficam para quando
+//      o projeto aberto os tem: o renderer varre a composição quando ela muda
+//      e compila o que falta antes do quadro seguinte — fora do playback
+//      contínuo, que é onde um pipeline novo congela a imagem. Todo efeito
+//      declara os pipelines que usa (Effect::pipelines). O cache de pipeline
+//      do driver é persistido em disco pelo backend (com versão, conferência
+//      e descarte do arquivo corrompido), então da segunda execução em diante
+//      cada compilação é quase só uma consulta.
 //
 //  `compiles_since_mark()` conta pipelines criados depois que o playback
 //  começou. O número certo é ZERO, e há teste e telemetria para isso.
@@ -149,6 +155,13 @@ public:
     [[nodiscard]] u32 compiles_since_mark() const noexcept { return compilesSinceMark_; }
 
     [[nodiscard]] u32 pipeline_count() const noexcept { return static_cast<u32>(pipelines_.size()); }
+    [[nodiscard]] bool has_pipeline(const PipelineKey& key) const noexcept { return pipelines_.contains(key); }
+
+    /// Impressão digital (FNV-1a 64) de todo o SPIR-V embutido. É a versão do
+    /// cache de pipeline em disco: shader mudou (app atualizado) → o arquivo
+    /// antigo é descartado em vez de acumular entradas mortas. Calculada uma
+    /// vez por processo (~330 KB de SPIR-V, fração de milissegundo).
+    [[nodiscard]] static u64 spirv_fingerprint() noexcept;
     [[nodiscard]] u32 compile_failures() const noexcept { return failures_; }
     [[nodiscard]] const std::string& last_error() const noexcept { return lastError_; }
 

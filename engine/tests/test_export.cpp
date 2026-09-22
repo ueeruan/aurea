@@ -328,6 +328,13 @@ bool bench_enabled() {
     return v && *v && *v != '0';
 }
 
+/// AUREA_BENCH_DEPTH=1 mede o mesmo pipeline em serial (separa o ganho da
+/// sobreposição do ganho de não ler a GPU de forma síncrona). 0 = automático.
+u32 bench_depth() {
+    const char* v = std::getenv("AUREA_BENCH_DEPTH");
+    return v ? static_cast<u32>(std::atoi(v)) : 0u;
+}
+
 bool gpu_ok() {
     static const bool ok = [] {
         vk::Backend b;
@@ -501,7 +508,7 @@ AUREA_TEST(ExportBench, Resolutions) {
         cfg.pattern = SyntheticPattern::FrameGray;
         cfg.audioRate = 48000;
         cfg.audioSeconds = static_cast<f64>(c.frames) / c.fps + 1.0;
-        Rig r(cfg, c.fps, c.frames, 0);
+        Rig r(cfg, c.fps, c.frames, bench_depth());
         if (!r.ok) { AUREA_CHECK(r.ok); continue; }
         const Outcome o = run_export(r, c.h, 0.0);
         AUREA_CHECK(o.finished && o.p.result == Errc::Ok);
@@ -528,7 +535,7 @@ AUREA_TEST(ExportBench, EffectsAnd3D) {
         cfg.pattern = SyntheticPattern::FrameGray;
         cfg.audioRate = 48000;
         cfg.audioSeconds = static_cast<f64>(c.frames) / c.fps + 1.0;
-        Rig r(cfg, c.fps, c.frames, 0);
+        Rig r(cfg, c.fps, c.frames, bench_depth());
         if (!r.ok) { AUREA_CHECK(r.ok); continue; }
         if (c.fx) build_effects_scene(r);
         else if (!build_3d_scene(r)) { std::printf("\n    %-22s sem modelos glTF (AUREA_BENCH_GLTF): pulado", c.name); continue; }

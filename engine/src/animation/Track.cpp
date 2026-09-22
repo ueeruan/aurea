@@ -66,7 +66,7 @@ void TrackSet::set_static(TrackProperty p, f32 value, u32 effectIndex,
 
 bool TrackSet::has_animation() const noexcept {
     for (const auto& t : tracks_) {
-        if (t.keys.size() > 1) return true;
+        if (t.animated()) return true;   // keyframes ou expressão ligada
     }
     return false;
 }

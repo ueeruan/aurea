@@ -55,12 +55,12 @@ u32 unit_of(const TextSelector& s, const GlyphUnits& u) { return s.basedOn == 1 
 
 f32 anim_param(const TrackSet& tracks, u32 animator, u32 param, f64 local, f32 fallback) noexcept {
     const Track* tr = tracks.find(TrackProperty::TextAnimParam, animator, param);
-    if (!tr || tr->keys.empty()) return fallback;
+    if (!tr || !tr->driven()) return fallback;
     const f64 f = std::floor(local);
-    const f32 a = tr->sample(FrameIndex{static_cast<i64>(f)});
+    const f32 a = tr->value_or(FrameIndex{static_cast<i64>(f)}, fallback);
     const f32 k = static_cast<f32>(local - f);
     if (k <= 0.0f) return a;
-    return a + (tr->sample(FrameIndex{static_cast<i64>(f) + 1}) - a) * k;
+    return a + (tr->value_or(FrameIndex{static_cast<i64>(f) + 1}, fallback) - a) * k;
 }
 
 bool has_animators(const TextData& t) noexcept {

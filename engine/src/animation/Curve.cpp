@@ -13,6 +13,7 @@
 //   - nenhuma alocação.
 // =============================================================================
 #include "aurea/animation/Curve.hpp"
+#include "aurea/expr/Expression.hpp"
 
 namespace aurea {
 
@@ -69,6 +70,18 @@ u32 Track::find_before(FrameIndex t) const noexcept {
 }
 
 f32 Track::sample(FrameIndex t) const noexcept {
+    // O gancho das expressões: TODA leitura de propriedade passa por aqui ou
+    // por `value_or` — não há como um caminho de render ignorar a expressão.
+    if (has_expression()) return expr::evaluate_track(*this, t, nullptr);
+    return sample_keys(t);
+}
+
+f32 Track::value_or(FrameIndex t, f32 fallback) const noexcept {
+    if (has_expression()) return expr::evaluate_track(*this, t, &fallback);
+    return keys.empty() ? fallback : sample_keys(t);
+}
+
+f32 Track::sample_keys(FrameIndex t) const noexcept {
     const usize n = keys.size();
     if (n == 0) return staticValue;
     if (n == 1) return keys[0].value;

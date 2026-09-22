@@ -15,6 +15,7 @@ void register_glow_effect(EffectRegistry& r);
 void register_transform_effect(EffectRegistry& r);
 void register_motion_tile_effect(EffectRegistry& r);
 void register_keying_effects(EffectRegistry& r);
+void register_expression_controls(EffectRegistry& r);
 
 /// Pedido de gaussiano, em pixels de LAYER. O construtor converte para texels
 /// pela densidade da entrada e reduz a imagem enquanto o sigma passar de 8

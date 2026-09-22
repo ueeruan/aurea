@@ -1,5 +1,6 @@
 #include "aurea/render/Renderer.hpp"
 #include "aurea/render/MaskRaster.hpp"
+#include "aurea/expr/Expression.hpp"
 
 #include "aurea/scene3d/Animation.hpp"
 #include "aurea/text/Text.hpp"
@@ -73,7 +74,7 @@ Mat4 layer_matrix(const Layer& l, FrameIndex local) noexcept {
     const TrackSet& t = l.tracks;
     auto s = [&](TrackProperty p, f32 fallback) noexcept {
         const Track* tr = t.find(p);
-        return (tr && !tr->keys.empty()) ? tr->sample(local) : fallback;
+        return tr ? tr->value_or(local, fallback) : fallback;
     };
     const Vec3 pos{s(TrackProperty::PositionX, l.transform.position.x),
                    s(TrackProperty::PositionY, l.transform.position.y), 0.0f};
@@ -89,12 +90,14 @@ Mat4 layer_matrix(const Layer& l, FrameIndex local) noexcept {
 /// Valor da trilha num instante FRACIONÁRIO: interpola entre os dois quadros
 /// vizinhos (sub-quadro do obturador). Exato para keyframe linear; nas curvas,
 /// a corda de um quadro — invisível no desfoque.
-f32 sample_frac(const Track& tr, f64 t) noexcept {
+/// `fallback` = valor parado da camada (sem keyframe); a expressão, se houver,
+/// entra pelo `value_or`.
+f32 sample_frac(const Track& tr, f64 t, f32 fallback) noexcept {
     const f64 f = std::floor(t);
-    const f32 a = tr.sample(FrameIndex{static_cast<i64>(f)});
+    const f32 a = tr.value_or(FrameIndex{static_cast<i64>(f)}, fallback);
     const f32 k = static_cast<f32>(t - f);
     if (k <= 0.0f) return a;
-    return a + (tr.sample(FrameIndex{static_cast<i64>(f) + 1}) - a) * k;
+    return a + (tr.value_or(FrameIndex{static_cast<i64>(f) + 1}, fallback) - a) * k;
 }
 
 /// `layer_matrix` num tempo local fracionário.
@@ -102,7 +105,7 @@ Mat4 layer_matrix_frac(const Layer& l, f64 local) noexcept {
     const TrackSet& t = l.tracks;
     auto s = [&](TrackProperty p, f32 fallback) noexcept {
         const Track* tr = t.find(p);
-        return (tr && !tr->keys.empty()) ? sample_frac(*tr, local) : fallback;
+        return tr ? sample_frac(*tr, local, fallback) : fallback;
     };
     const Vec3 pos{s(TrackProperty::PositionX, l.transform.position.x),
                    s(TrackProperty::PositionY, l.transform.position.y), 0.0f};
@@ -121,7 +124,7 @@ Mat4 layer_matrix_3d_frac(const Layer& l, f64 local) noexcept {
     const TrackSet& t = l.tracks;
     auto s = [&](TrackProperty p, f32 fallback) noexcept {
         const Track* tr = t.find(p);
-        return (tr && !tr->keys.empty()) ? sample_frac(*tr, local) : fallback;
+        return tr ? sample_frac(*tr, local, fallback) : fallback;
     };
     const Vec3 pos{s(TrackProperty::PositionX, l.transform.position.x), s(TrackProperty::PositionY, l.transform.position.y),
                    s(TrackProperty::PositionZ, l.transform.position.z)};
@@ -147,7 +150,7 @@ Mat4 layer_matrix_3d(const Layer& l, FrameIndex local) noexcept {
 
 f32 layer_opacity(const Layer& l, FrameIndex local) noexcept {
     const Track* tr = l.tracks.find(TrackProperty::Opacity);
-    const f32 v = (tr && !tr->keys.empty()) ? tr->sample(local) : l.transform.opacity;
+    const f32 v = tr ? tr->value_or(local, l.transform.opacity) : l.transform.opacity;
     return std::clamp(v, 0.0f, 1.0f);
 }
 
@@ -197,7 +200,7 @@ bool wants_3d(const Composition& comp, const Layer& l, FrameIndex time) noexcept
         const FrameIndex local = p->local_time(time);
         auto s = [&](TrackProperty prop, f32 fallback) noexcept {
             const Track* tr = p->tracks.find(prop);
-            return (tr && !tr->keys.empty()) ? tr->sample(local) : fallback;
+            return tr ? tr->value_or(local, fallback) : fallback;
         };
         if (s(TrackProperty::RotationX, p->transform.rotation.x) != 0.0f
             || s(TrackProperty::RotationY, p->transform.rotation.y) != 0.0f
@@ -291,7 +294,7 @@ scene3d::SceneCamera camera_for_frac(const Composition& comp, f64 timeF, u32 w, 
         cam.view = v;
         cam.position = t;
         const Track* fov = l->tracks.find(TrackProperty::Fov);
-        const f32 deg = fov && !fov->keys.empty() ? sample_frac(*fov, local) : l->camera.fov;
+        const f32 deg = fov ? sample_frac(*fov, local, l->camera.fov) : l->camera.fov;
         cam.fovY = std::clamp(deg, 1.0f, 170.0f) * kDeg2Rad;
         cam.nearZ = std::max(0.1f, l->camera.nearPlane);
         break;
@@ -502,6 +505,9 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                        void* imageCtx, const RenderSettings& settings, u64 frameNumber,
                        i32 playDirection, DecodeMode decodeMode, f32 speed, FrameSnapshot& out) {
     frameNumber_ = frameNumber;
+    // Expressões: a timeline do quadro (camada dona, outras camadas) e o memo
+    // por (propriedade, quadro). O quadro é preparado sob o lock do modelo.
+    const expr::Scope exprScope(project.timeline());
     out.layers.clear();
     out.nested.clear();
     out.glyphs.clear();
@@ -709,7 +715,11 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 if (animated) {
                     auto maxAbs = [&](u32 ai, u32 p, f32 v) {
                         f32 m = std::fabs(v);
-                        if (const Track* tr = l->tracks.find(TrackProperty::TextAnimParam, ai, p)) for (const Keyframe& k : tr->keys) m = std::max(m, std::fabs(k.value));
+                        if (const Track* tr = l->tracks.find(TrackProperty::TextAnimParam, ai, p)) {
+                            for (const Keyframe& k : tr->keys) m = std::max(m, std::fabs(k.value));
+                            // Expressão: o limite dos keyframes não vale; mede o valor do quadro.
+                            if (tr->has_expression()) m = std::max(m, std::fabs(tr->value_or(local, v)));
+                        }
                         return m;
                     };
                     f32 extra = 0;

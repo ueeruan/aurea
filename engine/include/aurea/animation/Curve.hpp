@@ -23,9 +23,12 @@
 #include "aurea/core/Math.hpp"
 
 #include <algorithm>
+#include <memory>
 #include <vector>
 
 namespace aurea {
+
+namespace expr { struct TrackExpression; }
 
 /// Um keyframe. 48 bytes, POD, memcpy-ável para o arquivo .aurea.
 struct Keyframe {
@@ -78,7 +81,22 @@ struct Track {
     /// transforma a busca em um teste.
     mutable u32 lastIndex = 0;
 
-    [[nodiscard]] bool animated() const noexcept { return keys.size() > 1; }
+    /// Expressão (expr/Expression.hpp): nula = sem expressão. O objeto é
+    /// imutável e compartilhado entre cópias da track (histórico, duplicar);
+    /// trocar a expressão troca o ponteiro. `expressionEnabled` mora aqui, e
+    /// não no objeto, para desligar/ligar ser desfazível como qualquer ajuste.
+    std::shared_ptr<const expr::TrackExpression> expression;
+    bool expressionEnabled = true;
+
+    [[nodiscard]] bool has_expression() const noexcept { return expression && expressionEnabled; }
+
+    /// A propriedade muda no tempo: keyframes ou uma expressão ligada (uma
+    /// expressão pode depender do tempo, de outra camada ou de um controle).
+    [[nodiscard]] bool animated() const noexcept { return keys.size() > 1 || has_expression(); }
+    /// Há algo além do valor parado da camada: keyframe ou expressão. É a
+    /// pergunta que os leitores fazem antes de trocar o valor do Transform
+    /// pelo da track.
+    [[nodiscard]] bool driven() const noexcept { return !keys.empty() || has_expression(); }
     [[nodiscard]] bool empty() const noexcept { return keys.empty(); }
 
     /// Define o valor usado quando a track não tem keyframe (ou tem só um).
@@ -93,8 +111,18 @@ struct Track {
     /// primeiro.
     [[nodiscard]] u32 find_before(FrameIndex t) const noexcept;
 
-    /// Valor da propriedade em `t`.
+    /// Valor da propriedade em `t`, COM a expressão (se houver e estiver
+    /// ligada). Sem keyframe, o valor parado é `staticValue`.
     [[nodiscard]] f32 sample(FrameIndex t) const noexcept;
+
+    /// Como `sample`, mas sem keyframe o valor parado é `fallback` (o campo da
+    /// camada que quem chama usaria — a posição do Transform, por exemplo). É
+    /// a leitura dos renderers: `tr ? tr->value_or(t, base) : base`.
+    [[nodiscard]] f32 value_or(FrameIndex t, f32 fallback) const noexcept;
+
+    /// Só os keyframes (valor "pré-expressão"): editar keyframe, o graph
+    /// editor e o próprio avaliador (`value`, loopOut) leem daqui.
+    [[nodiscard]] f32 sample_keys(FrameIndex t) const noexcept;
 
     /// Insere ou substitui um keyframe em `t`. Devolve o índice resultante.
     u32 set(FrameIndex t, f32 value, Interpolation interp = Interpolation::Linear) noexcept;
@@ -150,7 +178,7 @@ public:
     void set_static(TrackProperty p, f32 value, u32 effectIndex = kInvalidIndex,
                     u32 effectParamIndex = 0) noexcept;
 
-    /// Verdadeiro se QUALQUER track tem mais de um keyframe. É o que decide se
+    /// Verdadeiro se QUALQUER track tem mais de um keyframe (ou expressão). É o que decide se
     /// a layer precisa de avaliação animada no frame ou pode usar o cache.
     [[nodiscard]] bool has_animation() const noexcept;
 

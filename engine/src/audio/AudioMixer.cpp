@@ -3,6 +3,7 @@
 // =============================================================================
 #include "aurea/audio/Audio.hpp"
 
+#include "aurea/expr/Expression.hpp"
 #include "aurea/project/Project.hpp"
 #include "aurea/timeline/Composition.hpp"
 
@@ -165,6 +166,8 @@ std::shared_ptr<AudioMixSnapshot> build_snapshot(const Composition& comp, const 
     const f64 fps = comp.fps() > 0.0 ? comp.fps() : 30.0;
     snap->endSample = frame_to_sample(comp.duration().value, fps);
     Flatten f{project, cache, resolve, resolveCtx, snap->clips};
+    // Volume com expressão: avaliado quadro a quadro aqui (sob o lock do modelo).
+    const expr::Scope exprScope(project.timeline());
     f.add(comp, 0, 0, snap->endSample, 1.0f, 0);
     return snap;
 }

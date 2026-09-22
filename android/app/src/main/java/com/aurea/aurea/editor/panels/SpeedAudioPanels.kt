@@ -267,8 +267,10 @@ internal fun AudioPanel(env: PanelEnv) {
             detail.volumeAnimated -> KeyframeLook.Animated
             else -> KeyframeLook.None
         }
+        val volumeKeys = listOf(com.aurea.aurea.engine.TrackKey(TrackProperty.AUDIO_VOLUME))
         AudioRuler(
             label = "Volume", keyframe = keyLook, onKeyframe = { store.toggleVolumeKeyframe() },
+            expression = store.expressionLook(volumeKeys), onExpression = { store.openExpression("Volume", volumeKeys, 100f, "%") },
             value = { store.detail?.audioVolume?.times(100f) ?: 100f }, text = "${(detail.audioVolume * 100f).roundToInt()}%",
             unitsPerDp = 0.5f, min = 0f, max = 200f, gesture = "volume", store = store,
         ) { store.setAudioVolume(it / 100f) }
@@ -357,9 +359,14 @@ private fun AudioRuler(
     store: com.aurea.aurea.state.EditorStore,
     keyframe: KeyframeLook = KeyframeLook.None,
     onKeyframe: (() -> Unit)? = null,
+    expression: com.aurea.aurea.engine.ExpressionLook = com.aurea.aurea.engine.ExpressionLook.None,
+    onExpression: (() -> Unit)? = null,
     onValue: (Float) -> Unit,
 ) {
-    PropertyCustomRow(label, selected = keyframe != KeyframeLook.None, onSelect = { onKeyframe?.invoke() }, keyframe = keyframe) {
+    PropertyCustomRow(
+        label, selected = keyframe != KeyframeLook.None, onSelect = { onKeyframe?.invoke() }, keyframe = keyframe,
+        expression = expression, onExpression = onExpression,
+    ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.weight(1f).height(40.dp)) {
                 TickRuler(

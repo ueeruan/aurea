@@ -718,6 +718,29 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 if (!moves) rl.blurMatrices.clear();
             }
         }
+        // Eco e RGB no tempo (transform 2D com pais, em instantes passados).
+        if ((l->echoCount > 0 || l->rgbDelay > 0.0f) && !wants_3d(comp, *l, time)) {
+            const f64 t0 = static_cast<f64>(time.value);
+            rl.blurMatrices.clear();
+            if (l->rgbDelay > 0.0f) {
+                const f64 d = std::clamp(static_cast<f64>(l->rgbDelay), 0.0, 60.0);
+                rl.temporal.push_back({world_2d_frac(comp, *l, t0), 1.0f, Vec3{1, 0, 0}});
+                rl.temporal.push_back({world_2d_frac(comp, *l, t0 - d), 1.0f, Vec3{0, 1, 0}});
+                rl.temporal.push_back({world_2d_frac(comp, *l, t0 - 2.0 * d), 1.0f, Vec3{0, 0, 1}});
+            } else {
+                rl.temporal.push_back({m, 1.0f, Vec3{0, 0, 0}});
+            }
+            if (l->echoCount > 0) {
+                const u32 n = std::min<u32>(l->echoCount, 16u);
+                const f64 d = std::clamp(static_cast<f64>(l->echoDelay), 0.25, 120.0);
+                f32 w = 1.0f;
+                for (u32 i = 1; i <= n; ++i) {
+                    w *= std::clamp(l->echoDecay, 0.0f, 1.0f);
+                    if (w < 0.01f) break;
+                    rl.temporal.push_back({world_2d_frac(comp, *l, t0 - static_cast<f64>(i) * d), w, Vec3{0, 0, 0}});
+                }
+            }
+        }
 
         // Texto: rasteriza na escala em que aparece (potência de 2, para não
         // refazer a cada zoom) e só quando algo que muda os pixels mudou.
@@ -1204,24 +1227,35 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
             draw.compFromLayer = draw.compFromLayer * snap.plans[i].foldMatrix;
             draw.opacity *= snap.plans[i].foldOpacity;
         }
-        if (!layer.blurMatrices.empty()) {
-            // Acumula as K amostras (pré-multiplicadas, × 1/K, soma aditiva)
-            // num alvo do tamanho da composição = a MÉDIA no tempo; depois a
-            // média entra na composição como uma camada comum.
+        if (!layer.blurMatrices.empty() || !layer.temporal.empty()) {
+            // Acumula as amostras no tempo (pré-multiplicadas, com peso, soma
+            // aditiva) num alvo do tamanho da composição: desfoque = média
+            // (peso 1/K); eco = soma com queda; RGB = um canal por amostra.
             auto pAdd = shaders_.pipeline(PipelineKey::graphics(
                 ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat, true, BlendMode::Add));
             if (pAdd.ok()) {
-                const u32 k = static_cast<u32>(layer.blurMatrices.size());
+                const bool temporal = !layer.temporal.empty();
+                const u32 k = static_cast<u32>(temporal ? layer.temporal.size() : layer.blurMatrices.size());
                 Mat4* mats = arena_.alloc_array<Mat4>(k);
+                Vec4* prm = arena_.alloc_array<Vec4>(k);
                 const Mat4 fold = (i < snap.plans.size() && snap.plans[i].hasFold) ? snap.plans[i].foldMatrix : Mat4::identity();
-                for (u32 s = 0; s < k; ++s) mats[s] = layer.blurMatrices[s] * fold;
+                for (u32 s = 0; s < k; ++s) {
+                    if (temporal) {
+                        const RenderLayer::TemporalSample& ts = layer.temporal[s];
+                        mats[s] = ts.m * fold;
+                        prm[s] = Vec4{ts.weight, ts.mask.x, ts.mask.y, ts.mask.z};
+                    } else {
+                        mats[s] = layer.blurMatrices[s] * fold;
+                        prm[s] = Vec4{1.0f / static_cast<f32>(k), 0, 0, 0};
+                    }
+                }
                 TextureDesc accDesc = compDesc;
                 accDesc.transferSrc = false;
                 const FGTexture acc = graph_.create_texture("desfoque de movimento", accDesc);
                 struct Cap {
-                    Mat4* mats; u32 k; PipelineHandle p; FGTexture src; u64 sampler; Rect region;
+                    Mat4* mats; Vec4* prm; u32 k; PipelineHandle p; FGTexture src; u64 sampler; Rect region;
                     f32 compW; f32 compH;
-                } cap{mats, k, *pAdd, draw.texture, draw.sampler, draw.region,
+                } cap{mats, prm, k, *pAdd, draw.texture, draw.sampler, draw.region,
                       static_cast<f32>(snap.compWidth), static_cast<f32>(snap.compHeight)};
                 const u32 pass = graph_.add_raster_pass("desfoque de movimento", PassStage::Composite, acc, LoadOp::Clear,
                                                         Vec4{0, 0, 0, 0}, [cap](PassContext& pc) {
@@ -1233,7 +1267,7 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
                         push.clipFromLayer = clip * cap.mats[s];
                         push.region = Vec4{cap.region.x, cap.region.y, cap.region.w, cap.region.h};
                         push.uvRect = Vec4{0.0f, 0.0f, 1.0f, 1.0f};
-                        push.params = Vec4{1.0f / static_cast<f32>(cap.k), 0.0f, 0.0f, 0.0f};
+                        push.params = cap.prm[s];
                         pc.cmds.push_constants(&push, sizeof(push));
                         pc.cmds.draw(6);
                     }

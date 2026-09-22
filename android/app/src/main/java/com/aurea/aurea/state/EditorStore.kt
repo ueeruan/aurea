@@ -479,6 +479,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     private fun refreshDetail() {
         val id = primary
         detail = if (id != null && engine.queryLayerDetail(id, detailBuffer)) LayerDetail.read(detailBuffer) else null
+        echo = if (id != null) {
+            val out = FloatArray(4)
+            if (engine.queryEcho(id, out)) out.toList() else null
+        } else {
+            null
+        }
         particles = if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Particles.kind) {
             val out = FloatArray(8)
             if (engine.queryParticles(id, out)) out.toList() else null
@@ -1194,6 +1200,23 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun closePrecomp() {
         if (!engine.closePrecomp()) return
         selection = LinkedHashSet()
+        refreshNow()
+    }
+
+    // --- Eco e RGB no tempo -------------------------------------------------------------------
+    /** {cópias, atraso, queda, atraso RGB} da camada escolhida. */
+    var echo by mutableStateOf<List<Float>?>(null)
+        private set
+
+    fun setEcho(count: Int, delay: Float, decay: Float) {
+        val id = primary ?: return
+        engine.setEcho(id, count, delay, decay)
+        refreshNow()
+    }
+
+    fun setRgbTime(delay: Float) {
+        val id = primary ?: return
+        engine.setRgbTime(id, delay)
         refreshNow()
     }
 

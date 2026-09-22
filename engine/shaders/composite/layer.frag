@@ -21,5 +21,13 @@ layout(location = 0) out vec4 o_color;
 layout(set = 0, binding = AUREA_TEX0) uniform sampler2D u_tex0;
 
 void main() {
-    o_color = texture(u_tex0, v_uv) * pc.params.x;
+    const vec4 c = texture(u_tex0, v_uv);
+    // params.yzw ≠ 0: amostra de UM canal (RGB no tempo) — o canal inteiro e
+    // um terço do alfa (três amostras somadas refazem a cor e o alfa).
+    const vec3 mask = pc.params.yzw;
+    if (mask.x + mask.y + mask.z > 0.0) {
+        o_color = vec4(c.rgb * mask, c.a / 3.0) * pc.params.x;
+    } else {
+        o_color = c * pc.params.x;
+    }
 }

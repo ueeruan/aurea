@@ -283,6 +283,13 @@ public:
     /// e duração em quadros (limitada a metade da camada).
     bool set_transition(u64 layerId, bool out, u32 type, u32 frames) noexcept;
 
+    /// Eco (0 = desligado; atraso em quadros; queda 0..1) e RGB no tempo
+    /// (atraso em quadros, 0 = desligado).
+    bool set_echo(u64 layerId, u32 count, f32 delay, f32 decay) noexcept;
+    bool set_rgb_time(u64 layerId, f32 delay) noexcept;
+    /// {cópias, atraso, queda, atraso RGB}.
+    bool query_echo(u64 layerId, f32* out4) noexcept;
+
     /// Partículas (GPU, analíticas). Presets: 0 faíscas, 1 neve, 2 poeira de luz.
     [[nodiscard]] Result<u64> add_particles(u32 preset) noexcept;
     bool apply_particle_preset(u64 layerId, u32 preset) noexcept;

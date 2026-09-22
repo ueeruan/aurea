@@ -94,6 +94,7 @@ private enum class DockSection(val glyph: Char, val label: String, val badge: St
     Track(ShellGlyph.Viewfinder, "Cena 3D", "NEW"),
     Camera(CupertinoGlyph.Videocam, "Câmera", "NEW"),
     Transitions(CupertinoGlyph.ArrowRightToLine, "Entrada e saída"),
+    Echo(CupertinoGlyph.SquareStack3dDownRight, "Eco e rastro"),
     Effects(CupertinoGlyph.Sparkles, "Efeitos"),
 }
 
@@ -118,6 +119,7 @@ private fun sectionsFor(type: LayerType): List<DockSection> = when (type) {
         if (type == LayerType.Particles) add(DockSection.Particles)
         if (type == LayerType.Model3D) add(DockSection.Element3D)
         add(DockSection.Transitions)
+        add(DockSection.Echo)
         add(DockSection.Effects)
     }
 }
@@ -222,6 +224,7 @@ private fun onSection(store: EditorStore, ui: EditorUi, s: DockSection) {
         DockSection.Effects -> openPanel(store, ui, EditorPanel.Effects)
         DockSection.Particles -> openPanel(store, ui, EditorPanel.Particles)
         DockSection.Transitions -> openPanel(store, ui, EditorPanel.Transitions)
+        DockSection.Echo -> openPanel(store, ui, EditorPanel.Echo)
         DockSection.ColorFill, DockSection.EditShape, DockSection.EditText -> when (store.detail?.kind) {
             com.aurea.aurea.ui.theme.LayerType.Shape.kind -> openPanel(store, ui, EditorPanel.Shape)
             com.aurea.aurea.ui.theme.LayerType.Text.kind -> openPanel(store, ui, EditorPanel.Text)

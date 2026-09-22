@@ -1539,6 +1539,42 @@ AUREA_TEST(Gpu, TransitionsFadeAndSlideAtTheEdges) {
     AUREA_CHECK(sb.y0 > fb.y0 + 5);
 }
 
+AUREA_TEST(Gpu, EchoTrailsAndRgbTimeSplitsChannels) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(400, 200);
+    auto id = rig.e.add_shape(10);
+    AUREA_CHECK(id.ok());
+    Composition* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+    Layer* l = comp->layer(LayerId::unpack(*id));
+    l->transform.scale = Vec3{0.4f, 0.4f, 1};   // quadrado pequeno (24 px)
+    Track& px = l->tracks.get_or_create(TrackProperty::PositionX);
+    px.set(l->local_time(FrameIndex{0}), 60.0f);
+    px.set(l->local_time(FrameIndex{15}), 360.0f);   // 20 px/quadro
+    Command seek;
+    seek.type = CommandType::PlaybackSeek;
+    seek.seek.time = tick_at(FrameIndex{12}, 30.0);
+    AUREA_CHECK(rig.e.apply_command(seek).ok());
+    const Box8 plain = lit_box(rig.capture(400));
+    AUREA_CHECK(rig.e.set_echo(*id, 3, 3.0f, 0.5f));
+    const Image8 ec = rig.capture(400);
+    const Box8 echoBox = lit_box(ec);
+    // A cópia mais velha (9 quadros = 180 px atrás) é mais fraca que a atual.
+    const u32 y = (plain.y0 + plain.y1) / 2;
+    const u8 now = ec.at((plain.x0 + plain.x1) / 2, y)[0];
+    const u8 old = ec.at((plain.x0 + plain.x1) / 2 - 180, y)[0];
+    AUREA_CHECK(rig.e.set_echo(*id, 0, 3.0f, 0.5f));
+    AUREA_CHECK(rig.e.set_rgb_time(*id, 2.0f));
+    const Image8 rgb = rig.capture(400);
+    const u8* lead = rgb.at(plain.x1 - 3, y);             // só a amostra atual (vermelho) chega aqui
+    const u8* tail = rgb.at(plain.x0 - 80 + 3, y);        // só a de 4 quadros atrás (azul)
+    std::printf("    eco: caixa %u -> %u px; atual %u, mais velha %u; rgb: frente (%u,%u,%u) cauda (%u,%u,%u)\n",
+                plain.w(), echoBox.w(), now, old, lead[0], lead[1], lead[2], tail[0], tail[1], tail[2]);
+    AUREA_CHECK(echoBox.w() >= plain.w() + 170);
+    AUREA_CHECK(old > 20 && old < now);
+    AUREA_CHECK(lead[0] > 200 && lead[1] < 20 && lead[2] < 20);
+    AUREA_CHECK(tail[2] > 200 && tail[0] < 20 && tail[1] < 20);
+}
+
 AUREA_TEST(Gpu, Scene3DSurvivesSaveAndReopenIdentically) {
     AUREA_REQUIRE_GPU();
     const std::string path = gltf_data("DamagedHelmet.glb");

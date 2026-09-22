@@ -879,6 +879,46 @@ Result<u64> Engine::add_null(bool threeD) noexcept {
     return lid.pack();
 }
 
+bool Engine::set_echo(u64 layerId, u32 count, f32 delay, f32 decay) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "eco");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    l->echoCount = std::min<u32>(count, 16u);
+    l->echoDelay = std::clamp(delay, 0.25f, 120.0f);
+    l->echoDecay = std::clamp(decay, 0.0f, 1.0f);
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::set_rgb_time(u64 layerId, f32 delay) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "rgb no tempo");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    l->rgbDelay = std::clamp(delay, 0.0f, 60.0f);
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::query_echo(u64 layerId, f32* out) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || !out) return false;
+    out[0] = static_cast<f32>(l->echoCount);
+    out[1] = l->echoDelay;
+    out[2] = l->echoDecay;
+    out[3] = l->rgbDelay;
+    return true;
+}
+
 bool Engine::set_transition(u64 layerId, bool out, u32 type, u32 frames) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;

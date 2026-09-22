@@ -740,6 +740,25 @@ AUREA_JNI jboolean AUREA_FN(nativeApplySpeedRamp)(JNIEnv*, jclass, jlong handle,
     return c && c->engine.apply_speed_ramp(static_cast<u64>(layer), static_cast<u32>(preset)) ? JNI_TRUE : JNI_FALSE;
 }
 
+AUREA_JNI jboolean AUREA_FN(nativeSetEcho)(JNIEnv*, jclass, jlong handle, jlong layer, jint count, jfloat delay, jfloat decay) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.set_echo(static_cast<u64>(layer), static_cast<u32>(std::max(0, count)), delay, decay) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetRgbTime)(JNIEnv*, jclass, jlong handle, jlong layer, jfloat delay) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.set_rgb_time(static_cast<u64>(layer), delay) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeQueryEcho)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloatArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !out || env->GetArrayLength(out) < 4) return JNI_FALSE;
+    f32 v[4];
+    if (!c->engine.query_echo(static_cast<u64>(layer), v)) return JNI_FALSE;
+    env->SetFloatArrayRegion(out, 0, 4, v);
+    return JNI_TRUE;
+}
+
 AUREA_JNI jboolean AUREA_FN(nativeSetTransition)(JNIEnv*, jclass, jlong handle, jlong layer, jboolean out, jint type, jint frames) {
     NativeContext* c = ctx_of(handle);
     return c && c->engine.set_transition(static_cast<u64>(layer), out == JNI_TRUE, static_cast<u32>(type),

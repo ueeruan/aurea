@@ -290,6 +290,11 @@ class AureaEngine private constructor() {
     fun precompDepth(): Int = nativePrecompDepth(nativeHandle)
     fun compositionName(): String = nativeCompositionName(nativeHandle) ?: ""
 
+    // Eco e RGB no tempo.
+    fun setEcho(layer: Long, count: Int, delay: Float, decay: Float): Boolean = nativeSetEcho(nativeHandle, layer, count, delay, decay)
+    fun setRgbTime(layer: Long, delay: Float): Boolean = nativeSetRgbTime(nativeHandle, layer, delay)
+    fun queryEcho(layer: Long, out: FloatArray): Boolean = nativeQueryEcho(nativeHandle, layer, out)
+
     /** Transição de entrada/saída (tipo 0..5, duração em quadros). */
     fun setTransition(layer: Long, out: Boolean, type: Int, frames: Int): Boolean = nativeSetTransition(nativeHandle, layer, out, type, frames)
 
@@ -422,6 +427,9 @@ class AureaEngine private constructor() {
     private external fun nativeSetTimeRemap(handle: Long, layer: Long, on: Boolean): Boolean
     private external fun nativeAddParticles(handle: Long, preset: Int): Long
     private external fun nativeSetTransition(handle: Long, layer: Long, out: Boolean, type: Int, frames: Int): Boolean
+    private external fun nativeSetEcho(handle: Long, layer: Long, count: Int, delay: Float, decay: Float): Boolean
+    private external fun nativeSetRgbTime(handle: Long, layer: Long, delay: Float): Boolean
+    private external fun nativeQueryEcho(handle: Long, layer: Long, out: FloatArray): Boolean
     private external fun nativeApplyParticlePreset(handle: Long, layer: Long, preset: Int): Boolean
     private external fun nativeSetParticleParam(handle: Long, layer: Long, param: Int, value: Float): Boolean
     private external fun nativeQueryParticles(handle: Long, layer: Long, out: FloatArray): Boolean

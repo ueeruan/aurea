@@ -41,6 +41,7 @@ enum class EditorPanel {
     Parent,        // seguir outra camada (parentesco)
     Particles,     // partículas
     Transitions,   // entrada e saída
+    Echo,          // eco e rgb no tempo
 }
 
 /**
@@ -99,6 +100,7 @@ fun PanelContent(
         EditorPanel.Parent -> "Seguir outra camada"
         EditorPanel.Particles -> "Partículas"
         EditorPanel.Transitions -> "Entrada e saída"
+        EditorPanel.Echo -> "Eco e rastro"
     }
 
     Column(modifier.fillMaxSize().background(AureaColors.EditorPanel)) {
@@ -117,6 +119,7 @@ fun PanelContent(
                     EditorPanel.Parent -> ParentPanel(env)
                     EditorPanel.Particles -> ParticlesPanel(env)
                     EditorPanel.Transitions -> TransitionsPanel(env)
+                    EditorPanel.Echo -> EchoPanel(env)
                 }
             }
         }

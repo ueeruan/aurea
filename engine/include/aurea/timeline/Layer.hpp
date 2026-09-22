@@ -225,6 +225,12 @@ struct Layer {
     /// 4 zoom, 5 girar. Duração em quadros.
     u8    transitionIn = 0, transitionOut = 0;
     u32   transitionInFrames = 0, transitionOutFrames = 0;
+    /// Eco (rastro do movimento, operador "somar"): cópias em t − i·atraso com
+    /// peso queda^i. RGB no tempo: vermelho em t, verde em t − d, azul em t − 2d.
+    u32   echoCount = 0;
+    f32   echoDelay = 2.0f;      ///< quadros
+    f32   echoDecay = 0.6f;
+    f32   rgbDelay = 0.0f;       ///< quadros (0 = desligado)
 
     // --- Hierarquia e composição --------------------------------------------
     LayerId  parent{};

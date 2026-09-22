@@ -112,6 +112,27 @@ AUREA_TEST(Heavy, BenchTrackingPrecisionVersusResolution) {
     }
 }
 
+#if defined(AUREA_HEAVY_V2)
+#include "aurea/vector/Vector.hpp"
+// §66: caminho com morph fora do intervalo dos keys é o do key da ponta — o
+// hash (a chave do cache da malha) não muda e a camada não retriangula.
+AUREA_TEST(Heavy, VectorMorphHashIsStableOutsideTheKeyRange) {
+    VectorGroup g;
+    VectorPath p;
+    PathKey a, b;
+    a.frame = 10;
+    a.path = vector::make_rect(Vec2{0, 0}, Vec2{10, 10}, 0.0f);
+    b.frame = 20;
+    b.path = vector::make_ellipse(Vec2{5, 5}, Vec2{20, 20});
+    p.keys = {a, b};
+    g.paths.push_back(p);
+    const std::vector<VectorGroup> gs{g};
+    AUREA_CHECK_EQ(vector::content_hash(gs, 0.0), vector::content_hash(gs, 9.0));
+    AUREA_CHECK_EQ(vector::content_hash(gs, 20.0), vector::content_hash(gs, 300.0));
+    AUREA_CHECK(vector::content_hash(gs, 12.0) != vector::content_hash(gs, 15.0));
+}
+#endif
+
 #if defined(AUREA_TEST_VULKAN)
 
 #include "ImageIO.hpp"

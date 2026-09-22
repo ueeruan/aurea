@@ -5,6 +5,7 @@
 
 #include "aurea/text/Text.hpp"
 #include "aurea/text/TextAnimator.hpp"
+#include "aurea/vector/Vector.hpp"
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Thread.hpp"
 #include "aurea/project/Serialization.hpp"
@@ -4066,6 +4067,21 @@ void Engine::composition_size_cap(u32& longSide, u32& shortSide) const noexcept 
     shortSide = std::min(caps_.max_export_width(), caps_.max_export_height());
 }
 
+namespace {
+/// Caixa do conteúdo da camada vetorial no instante (px da camada). Sem
+/// conteúdo desenhável, a tela da camada (para o palco ainda mostrar e tocar).
+Rect vector_content_box(const Layer& l, FrameIndex local) {
+    std::vector<VectorGroup> ev;
+    ev.reserve(l.shape.vector.groups.size());
+    for (u32 gi = 0; gi < l.shape.vector.groups.size(); ++gi)
+        ev.push_back(vector::evaluate_group(l.shape.vector.groups[gi], l.tracks, gi, static_cast<f64>(local.value)));
+    Vec2 mn, mx;
+    if (vector::bounds_of(ev, static_cast<f64>(local.value), mn, mx) && mx.x - mn.x >= 1.0f && mx.y - mn.y >= 1.0f)
+        return Rect{mn.x, mn.y, mx.x - mn.x, mx.y - mn.y};
+    return l.shape.bounds;
+}
+} // namespace
+
 bool Engine::query_layer_detail(u64 layerId, bridge::LayerDetailPOD& out) noexcept {
     out = bridge::LayerDetailPOD{};
     std::lock_guard<std::mutex> lock(modelMutex_);
@@ -4087,7 +4103,13 @@ bool Engine::query_layer_detail(u64 layerId, bridge::LayerDetailPOD& out) noexce
         bool persp = false;
         const Mat4 m = layer_comp_matrix(*comp, *l, now, &persp);
         const f32 w = static_cast<f32>(out.sourceWidth), h = static_cast<f32>(out.sourceHeight);
-        const f32 xs[4] = {0, w, w, 0}, ys[4] = {0, 0, h, h};
+        // Vetor: a caixa do conteúdo pode começar fora da origem da camada.
+        Vec2 o{0.0f, 0.0f};
+        if (l->kind == LayerKind::Shape && l->shape.shapeType == kShapeVector) {
+            const Rect b = vector_content_box(*l, l->local_time(now));
+            o = Vec2{b.x, b.y};
+        }
+        const f32 xs[4] = {o.x, o.x + w, o.x + w, o.x}, ys[4] = {o.y, o.y, o.y + h, o.y + h};
         bool ok = true;
         for (int i = 0; i < 4; ++i) {
             const Vec4 v = m * Vec4{xs[i], ys[i], 0, 1};
@@ -4199,6 +4221,11 @@ bool Engine::fill_layer_detail_locked(u64 layerId, bridge::LayerDetailPOD& out) 
         const ShapeData& sh = l->shape;
         out.sourceWidth = static_cast<u32>(std::max(1.0f, sh.bounds.w));
         out.sourceHeight = static_cast<u32>(std::max(1.0f, sh.bounds.h));
+        if (sh.shapeType == kShapeVector) {
+            const Rect b = vector_content_box(*l, local);
+            out.sourceWidth = static_cast<u32>(std::max(1.0f, std::ceil(b.w)));
+            out.sourceHeight = static_cast<u32>(std::max(1.0f, std::ceil(b.h)));
+        }
         out.shapeTypePoints = sh.shapeType | (static_cast<u32>(sh.points) << 16);
         out.shapeFill = sh.filled ? rgba8(sh.fillColor) : (rgba8(sh.fillColor) & 0x00FFFFFFu);
         out.shapeStroke = rgba8(sh.strokeColor);

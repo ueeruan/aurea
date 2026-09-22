@@ -29,6 +29,7 @@
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Version.hpp"
 
+#include <algorithm>
 #include <cstring>
 #include <mutex>
 #include <new>
@@ -1411,4 +1412,161 @@ AUREA_JNI jboolean AUREA_FN(nativeExportProgress)(JNIEnv* env, jclass, jlong han
     if (!c || !pod) return JNI_FALSE;
     c->engine.fill_export_progress(*pod);
     return JNI_TRUE;
+}
+
+// =============================================================================
+// Camada vetorial (Fase 7D). Documento e caminhos como float[] no codec de
+// vector/VectorDocument.cpp; nomes dos grupos numa string (um por linha).
+// =============================================================================
+namespace {
+jfloatArray to_float_array(JNIEnv* env, const std::vector<f32>& v) {
+    jfloatArray out = env->NewFloatArray(static_cast<jsize>(v.size()));
+    if (out && !v.empty()) env->SetFloatArrayRegion(out, 0, static_cast<jsize>(v.size()), v.data());
+    return out;
+}
+std::vector<f32> from_float_array(JNIEnv* env, jfloatArray a) {
+    std::vector<f32> v;
+    if (!a) return v;
+    v.resize(static_cast<usize>(env->GetArrayLength(a)));
+    if (!v.empty()) env->GetFloatArrayRegion(a, 0, static_cast<jsize>(v.size()), v.data());
+    return v;
+}
+jlong result_id(const Result<u64>& r) { return r.ok() ? static_cast<jlong>(*r) : -static_cast<jlong>(r.status().code()); }
+} // namespace
+
+AUREA_JNI jlong AUREA_FN(nativeAddVectorLayer)(JNIEnv*, jclass, jlong handle, jint preset) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return -static_cast<jlong>(Errc::InvalidState);
+    return result_id(c->engine.add_vector_layer(static_cast<u32>(std::max(0, preset))));
+}
+
+AUREA_JNI jfloatArray AUREA_FN(nativeVectorDocument)(JNIEnv* env, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    std::vector<f32> v;
+    std::string names;
+    if (!c || !c->engine.vector_document(static_cast<u64>(layer), v, names)) return nullptr;
+    return to_float_array(env, v);
+}
+
+AUREA_JNI jstring AUREA_FN(nativeVectorGroupNames)(JNIEnv* env, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    std::vector<f32> v;
+    std::string names;
+    if (!c || !c->engine.vector_document(static_cast<u64>(layer), v, names)) return nullptr;
+    return env->NewStringUTF(names.c_str());
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetVectorDocument)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloatArray doc, jstring names, jboolean continuing) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !doc) return JNI_FALSE;
+    const std::vector<f32> v = from_float_array(env, doc);
+    return c->engine.set_vector_document(static_cast<u64>(layer), v.data(), v.size(), to_string(env, names), continuing == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jfloatArray AUREA_FN(nativeVectorPathAt)(JNIEnv* env, jclass, jlong handle, jlong layer, jint group, jint path) {
+    NativeContext* c = ctx_of(handle);
+    std::vector<f32> v;
+    if (!c || group < 0 || path < 0 || !c->engine.vector_path_at(static_cast<u64>(layer), static_cast<u32>(group), static_cast<u32>(path), v)) return nullptr;
+    return to_float_array(env, v);
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetVectorPath)(JNIEnv* env, jclass, jlong handle, jlong layer, jint group, jint path, jfloatArray bez, jboolean continuing) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || group < 0 || path < 0 || !bez) return JNI_FALSE;
+    const std::vector<f32> v = from_float_array(env, bez);
+    return c->engine.set_vector_path(static_cast<u64>(layer), static_cast<u32>(group), static_cast<u32>(path), v.data(), v.size(), continuing == JNI_TRUE)
+               ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeToggleVectorPathKey)(JNIEnv*, jclass, jlong handle, jlong layer, jint group, jint path) {
+    NativeContext* c = ctx_of(handle);
+    return c && group >= 0 && path >= 0 && c->engine.toggle_vector_path_key(static_cast<u64>(layer), static_cast<u32>(group), static_cast<u32>(path))
+               ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jint AUREA_FN(nativeAddVectorGroup)(JNIEnv*, jclass, jlong handle, jlong layer, jint kind) {
+    NativeContext* c = ctx_of(handle);
+    return c && kind >= 0 ? c->engine.add_vector_group(static_cast<u64>(layer), static_cast<u32>(kind)) : -1;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeRemoveVectorGroup)(JNIEnv*, jclass, jlong handle, jlong layer, jint group) {
+    NativeContext* c = ctx_of(handle);
+    return c && group >= 0 && c->engine.remove_vector_group(static_cast<u64>(layer), static_cast<u32>(group)) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jint AUREA_FN(nativeAddVectorPath)(JNIEnv* env, jclass, jlong handle, jlong layer, jint group, jint kind, jfloatArray bez) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || group < 0 || kind < 0) return -1;
+    const std::vector<f32> v = from_float_array(env, bez);
+    return c->engine.add_vector_path(static_cast<u64>(layer), static_cast<u32>(group), static_cast<u32>(kind), v.empty() ? nullptr : v.data(), v.size());
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeRemoveVectorPath)(JNIEnv*, jclass, jlong handle, jlong layer, jint group, jint path) {
+    NativeContext* c = ctx_of(handle);
+    return c && group >= 0 && path >= 0 && c->engine.remove_vector_path(static_cast<u64>(layer), static_cast<u32>(group), static_cast<u32>(path))
+               ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeMakeVectorPathEditable)(JNIEnv*, jclass, jlong handle, jlong layer, jint group, jint path) {
+    NativeContext* c = ctx_of(handle);
+    return c && group >= 0 && path >= 0 && c->engine.make_vector_path_editable(static_cast<u64>(layer), static_cast<u32>(group), static_cast<u32>(path))
+               ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jfloatArray AUREA_FN(nativeQueryVectorParams)(JNIEnv* env, jclass, jlong handle, jlong layer, jint group) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || group < 0) return nullptr;
+    std::vector<f32> v(Engine::kVectorParamFloats);
+    if (c->engine.query_vector_params(static_cast<u64>(layer), static_cast<u32>(group), v.data(), Engine::kVectorParamFloats) == 0) return nullptr;
+    return to_float_array(env, v);
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetVectorParam)(JNIEnv*, jclass, jlong handle, jlong layer, jint group, jint param, jfloat value, jboolean continuing) {
+    NativeContext* c = ctx_of(handle);
+    return c && group >= 0 && param >= 0
+                   && c->engine.set_vector_param(static_cast<u64>(layer), static_cast<u32>(group), static_cast<u32>(param), value, continuing == JNI_TRUE)
+               ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeToggleVectorParamKey)(JNIEnv*, jclass, jlong handle, jlong layer, jint group, jint param) {
+    NativeContext* c = ctx_of(handle);
+    return c && group >= 0 && param >= 0 && c->engine.toggle_vector_param_key(static_cast<u64>(layer), static_cast<u32>(group), static_cast<u32>(param))
+               ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jlong AUREA_FN(nativeAddFreehandPath)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloatArray xy, jfloat error) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return -static_cast<jlong>(Errc::InvalidState);
+    const std::vector<f32> v = from_float_array(env, xy);
+    return result_id(c->engine.add_freehand_path(static_cast<u64>(layer), v.data(), v.size(), error));
+}
+
+AUREA_JNI jlong AUREA_FN(nativeImportSvg)(JNIEnv* env, jclass, jlong handle, jbyteArray bytes, jstring name) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !bytes) return -static_cast<jlong>(Errc::InvalidArgument);
+    std::string text(static_cast<usize>(env->GetArrayLength(bytes)), '\0');
+    if (!text.empty()) env->GetByteArrayRegion(bytes, 0, static_cast<jsize>(text.size()), reinterpret_cast<jbyte*>(text.data()));
+    const std::string n = to_string(env, name);
+    return result_id(c->engine.import_svg(text, n.c_str()));
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetTextPath)(JNIEnv*, jclass, jlong handle, jlong layer, jlong pathLayer, jfloat offset, jboolean perpendicular, jboolean reverse) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.set_text_path(static_cast<u64>(layer), static_cast<u64>(pathLayer), offset, perpendicular == JNI_TRUE, reverse == JNI_TRUE)
+               ? JNI_TRUE : JNI_FALSE;
+}
+
+/// Texto no caminho: [camada-guia, margem (bits do float), perpendicular, invertido].
+AUREA_JNI jlongArray AUREA_FN(nativeQueryTextPath)(JNIEnv* env, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    u64 pl = 0;
+    f32 off = 0.0f;
+    bool perp = true, rev = false;
+    if (!c || !c->engine.query_text_path(static_cast<u64>(layer), pl, off, perp, rev)) return nullptr;
+    u32 offBits = 0;
+    std::memcpy(&offBits, &off, 4);
+    const jlong v[4] = {static_cast<jlong>(pl), static_cast<jlong>(offBits), perp ? 1 : 0, rev ? 1 : 0};
+    jlongArray out = env->NewLongArray(4);
+    if (out) env->SetLongArrayRegion(out, 0, 4, v);
+    return out;
 }

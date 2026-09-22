@@ -1,4 +1,5 @@
 #include "aurea/project/Serialization.hpp"
+#include "aurea/vector/Vector.hpp"
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Time.hpp"
 
@@ -522,13 +523,27 @@ void write_layer(ByteWriter& w, const Layer& l) {
     }
     // v15: legenda de qual camada
     w.u64v(l.text.captionSource);
+    // v19: camada vetorial (o documento em floats, o mesmo codec da UI) e texto no caminho
+    {
+        std::vector<f32> doc;
+        std::string names;
+        vector::encode_document(l.shape.vector, doc, names);
+        w.str(names);
+        w.u32v(static_cast<u32>(doc.size()));
+        for (f32 v : doc) w.f32v(v);
+        w.u64v(l.text.pathLayer);
+        w.f32v(l.text.pathOffset);
+        w.boolv(l.text.pathPerpendicular);
+        w.boolv(l.text.pathReverse);
+    }
 }
 
 /// Versão da seção Timeline. v2: layer de modelo 3D guarda escala de unidade
 /// e pivô (o enquadramento do import). v1 continua sendo lida (campos novos
 /// com o padrão).
 /// v3: velocidade e reverso da layer.
-constexpr u32 kTimelineSectionVersion = 15;
+/// v19: camada vetorial (VectorData) e texto no caminho, no fim da camada.
+constexpr u32 kTimelineSectionVersion = 19;
 thread_local u32 g_readingTimelineVersion = kTimelineSectionVersion;
 
 void read_layer(ByteReader& r, Layer& l) {
@@ -756,6 +771,19 @@ void read_layer(ByteReader& r, Layer& l) {
         }
     }
     if (g_readingTimelineVersion >= 15) l.text.captionSource = r.u64v();
+    if (g_readingTimelineVersion >= 19) {
+        const std::string names = r.str();
+        const u32 n = r.u32v();
+        if (n <= 64u * 1024u * 1024u && r.good()) {
+            std::vector<f32> doc(n);
+            for (u32 i = 0; i < n && r.good(); ++i) doc[i] = r.f32v();
+            if (r.good() && n > 0 && !vector::decode_document(doc.data(), doc.size(), names, l.shape.vector)) l.shape.vector = VectorData{};
+        }
+        l.text.pathLayer = r.u64v();
+        l.text.pathOffset = r.f32v();
+        l.text.pathPerpendicular = r.boolv();
+        l.text.pathReverse = r.boolv();
+    }
 }
 
 void write_asset(ByteWriter& w, const Asset& a) {

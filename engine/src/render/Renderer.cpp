@@ -4,6 +4,7 @@
 #include "aurea/text/Text.hpp"
 #include "aurea/text/FontManager.hpp"
 #include "aurea/text/TextAnimator.hpp"
+#include "aurea/vector/Vector.hpp"
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Time.hpp"
 #include "aurea/project/Project.hpp"
@@ -375,6 +376,7 @@ Status Renderer::initialize(GPUBackend& backend, const EffectRegistry& effects) 
     keys.push_back(PipelineKey::fullscreen(ShaderId::video_yuv_planar_frag, kWorkFormat));
     keys.push_back(PipelineKey::fullscreen(ShaderId::video_rgba_to_linear_frag, kWorkFormat));
     keys.push_back(PipelineKey::fullscreen(ShaderId::shape_shape_frag, kWorkFormat));
+    keys.push_back(PipelineKey::graphics(ShaderId::vector_path_vert, ShaderId::vector_path_frag, kWorkFormat, true, BlendMode::Normal));
     keys.push_back(PipelineKey::fullscreen(ShaderId::common_copy_frag, kWorkFormat));
     keys.push_back(PipelineKey::graphics(ShaderId::composite_layer_vert, ShaderId::composite_layer_frag,
                                          kWorkFormat, true, BlendMode::Normal));
@@ -402,7 +404,11 @@ void Renderer::shutdown() noexcept {
         if (glyphBuf_[i].valid()) backend_->destroy_buffer(glyphBuf_[i]);
         glyphBuf_[i] = BufferHandle{};
         glyphCap_[i] = 0;
+        if (vecBuf_[i].valid()) backend_->destroy_buffer(vecBuf_[i]);
+        vecBuf_[i] = BufferHandle{};
+        vecCap_[i] = 0;
     }
+    vectorCache_.clear();
     scene3d_.shutdown();
     pool_.clear();
     shaders_.shutdown();
@@ -412,7 +418,8 @@ void Renderer::shutdown() noexcept {
 void Renderer::forget_device() noexcept {
     glyphAtlas_ = TextureHandle{};
     glyphAtlasGen_ = 0;
-    for (u32 i = 0; i < kGlyphRing; ++i) { glyphBuf_[i] = BufferHandle{}; glyphCap_[i] = 0; }
+    for (u32 i = 0; i < kGlyphRing; ++i) { glyphBuf_[i] = BufferHandle{}; glyphCap_[i] = 0; vecBuf_[i] = BufferHandle{}; vecCap_[i] = 0; }
+    vecFrameBuf_ = BufferHandle{};
     framesInFlight_.clear();
     planar_.clear();
     flowCache_.clear();
@@ -491,6 +498,14 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
     out.layers.clear();
     out.nested.clear();
     out.glyphs.clear();
+    out.vec.clear();
+    // Malhas vetoriais de camadas que saíram de cena há tempo: fora do cache.
+    if (prepareDepth_ == 0 && vectorCache_.size() > 32) {
+        for (auto it = vectorCache_.begin(); it != vectorCache_.end();) {
+            if (it->second.lastFrame + 300 < frameNumber) it = vectorCache_.erase(it);
+            else ++it;
+        }
+    }
     out.target = FGTexture{};
     out.compWidth = comp.width();
     out.compHeight = comp.height();
@@ -535,7 +550,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         RenderLayer rl;
         // Margem além da que a âncora do texto conta (animadores, fundo, sombra):
         // a fonte cresce em volta, o texto não anda.
-        f32 srcShift = 0.0f;
+        // (Vetor: a caixa do conteúdo, que pode começar em coordenada negativa.)
+        Vec2 srcShift{0.0f, 0.0f};
         rl.id = rid;
         rl.blend = l->blendMode;
         rl.opacity = layer_opacity(*l, local);
@@ -563,6 +579,56 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             }
             case LayerKind::Shape: {
                 const ShapeData& sh = l->shape;
+                if (sh.shapeType == kShapeVector) {
+                    // Densidade provável na tela (a mesma conta do texelScale
+                    // adiante): tolerância do achatamento e largura do AA.
+                    Mat4 wm = layer_matrix(*l, local);
+                    LayerId par = l->parent;
+                    for (u32 depth = 0; par.valid() && depth < 16; ++depth) {
+                        const Layer* p = comp.layer(par);
+                        if (!p) break;
+                        wm = layer_matrix(*p, p->local_time(time)) * wm;
+                        par = p->parent;
+                    }
+                    const f32 want = std::min(max_scale(wm), 4.0f) * previewFactor;
+                    f32 dens = 1.0f;
+                    while (dens < want && dens < 4.0f) dens *= 2.0f;
+                    dens = std::max(dens, texel_scale_for(want));
+                    const f64 lf = static_cast<f64>(local.value);
+                    std::vector<VectorGroup> ev;
+                    ev.reserve(sh.vector.groups.size());
+                    for (u32 gi = 0; gi < sh.vector.groups.size(); ++gi) ev.push_back(vector::evaluate_group(sh.vector.groups[gi], l->tracks, gi, lf));
+                    const u64 key = vector::content_hash(ev, lf) ^ (static_cast<u64>(dens * 64.0f) * 0x9E3779B97F4A7C15ull);
+                    VectorCacheEntry& ce = vectorCache_[rid.pack()];
+                    if (ce.key != key || ce.lastFrame == 0) {
+                        vector::VectorMesh mesh;
+                        vector::build_mesh(ev, lf, dens, mesh);
+                        ce.verts = std::move(mesh.verts);
+                        ce.paints = std::move(mesh.paints);
+                        ce.min = mesh.min;
+                        ce.max = mesh.max;
+                        ce.key = key;
+                    }
+                    ce.lastFrame = frameNumber + 1;
+                    if (ce.verts.empty()) continue;
+                    // Textura = caixa do conteúdo (+1 px); a camada continua na origem dela.
+                    const Vec2 mn = ce.min - Vec2{1.0f, 1.0f}, mx = ce.max + Vec2{1.0f, 1.0f};
+                    rl.source.kind = LayerSource::Kind::Vector;
+                    rl.source.width = static_cast<u32>(std::max(1.0f, std::ceil(mx.x - mn.x)));
+                    rl.source.height = static_cast<u32>(std::max(1.0f, std::ceil(mx.y - mn.y)));
+                    srcShift = Vec2{-mn.x, -mn.y};
+                    rl.source.vecFirst = static_cast<u32>(out.vec.size());
+                    rl.source.vecCount = static_cast<u32>(ce.verts.size() / 2);
+                    out.vec.reserve(out.vec.size() + ce.verts.size() + ce.paints.size());
+                    for (usize vi = 0; vi + 1 < ce.verts.size(); vi += 2) {
+                        const Vec4 a = ce.verts[vi];
+                        out.vec.push_back(Vec4{a.x - mn.x, a.y - mn.y, a.z, a.w});
+                        out.vec.push_back(ce.verts[vi + 1]);
+                    }
+                    rl.source.paintFirst = static_cast<u32>(out.vec.size());
+                    out.vec.insert(out.vec.end(), ce.paints.begin(), ce.paints.end());
+                    break;
+                }
                 const bool fill = sh.filled && sh.fillColor.w > 0.0f;
                 const bool stroke = sh.strokeWidth > 0.0f && sh.strokeColor.w > 0.0f;
                 if (!fill && !stroke) continue;   // nada a desenhar
@@ -658,7 +724,10 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 }
                 text::TextLayout L;
                 if (!text::layout_quads(*font, *src, pad, L)) continue;
-                srcShift = pad - (T.strokeWidth > 0.0f ? T.strokeWidth + 2.0f : 2.0f);   // a mesma margem de recenter_text
+                {
+                    const f32 s = pad - (T.strokeWidth > 0.0f ? T.strokeWidth + 2.0f : 2.0f);   // a mesma margem de recenter_text
+                    srcShift = Vec2{s, s};
+                }
                 rl.source.kind = LayerSource::Kind::Text;
                 rl.source.width = static_cast<u32>(std::ceil(L.width));
                 rl.source.height = static_cast<u32>(std::ceil(L.height));
@@ -679,6 +748,37 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                                            2u, 16u);
                     open = std::clamp(static_cast<f64>(mb.shutterAngle), 0.0, 720.0) / 360.0;
                 }
+                // Texto no caminho: cada letra vai para o seu ponto do caminho-guia
+                // (pelo centro do avanço), girada pela tangente. O animador age
+                // antes, no lugar de origem da letra.
+                std::vector<Mat4> onPath;
+                if (T.pathLayer != 0) {
+                    const Layer* guide = comp.layer(LayerId::unpack(T.pathLayer));
+                    vector::Contour C;
+                    if (guide && guide != l && guide->kind == LayerKind::Shape && guide->shape.shapeType == kShapeVector
+                        && vector::guide_contour(guide->shape.vector, guide->tracks, static_cast<f64>(guide->local_time(time).value), C)) {
+                        auto aff = [](const Mat4& mm) { return vector::Affine2{mm.col[0].x, mm.col[0].y, mm.col[1].x, mm.col[1].y, mm.col[3].x, mm.col[3].y}; };
+                        // Guia → composição → camada de texto → textura do texto.
+                        const vector::Affine2 toText = aff(layer_world_matrix(comp, *l, time)).inverse() * aff(layer_world_matrix(comp, *guide, time));
+                        for (Vec2& p : C.pts) p = toText.apply(p) + srcShift;
+                        f32 base0 = 0.0f;
+                        for (const text::GlyphQuad& q : L.quads) if (q.lineIndex == 0) { base0 = q.baseline; break; }
+                        onPath.assign(L.quads.size(), Mat4::identity());
+                        for (usize g = 0; g < L.quads.size(); ++g) {
+                            const text::GlyphQuad& q = L.quads[g];
+                            const f32 xc = q.penX + q.advance * 0.5f;
+                            Vec2 pos;
+                            f32 ang = 0.0f;
+                            if (!vector::place_on_path(C, T.pathOffset, T.pathReverse, T.pathPerpendicular, xc - L.pad, q.baseline - base0, pos, ang)) {
+                                onPath.clear();
+                                break;
+                            }
+                            onPath[g] = Mat4::translation(Vec3{pos.x, pos.y, 0}) * Mat4::from_quat(Quat::from_axis_angle(Vec3{0, 0, 1}, ang * kDeg2Rad))
+                                      * Mat4::translation(Vec3{-xc, -q.baseline, 0});
+                        }
+                    }
+                }
+                auto pathM = [&](usize g) { return onPath.empty() ? Mat4::identity() : onPath[g]; };
                 std::vector<text::GlyphAnim> anim;
                 for (u32 si = 0; si < sets; ++si) {
                     const f64 lt = static_cast<f64>(local.value) + (sets > 1 ? ((static_cast<f64>(si) + 0.5) / static_cast<f64>(sets) - 0.5) * open : 0.0);
@@ -697,7 +797,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     };
                     const f32 w = 1.0f / static_cast<f32>(sets);
                     // Fundo (caixa arredondada atrás do texto): uv.x < 0 marca "sólido".
-                    if (T.background && T.backgroundColor.w > 0.0f) {
+                    if (T.background && T.backgroundColor.w > 0.0f && onPath.empty()) {
                         const f32 bp = std::max(0.0f, T.backgroundPadding);
                         GlyphInstance b;
                         b.rect = Vec4{L.pad - bp, L.pad - bp, L.pad + L.contentWidth + bp, L.pad + L.contentHeight + bp};
@@ -720,7 +820,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                             gi.fill.w *= a.opacity * w;
                             gi.stroke = sc;
                             gi.stroke.w *= a.opacity * w;
-                            gi.xform = Mat4::translation(Vec3{T.shadowOffset.x, T.shadowOffset.y, 0}) * glyphMatrix(q, a);
+                            gi.xform = Mat4::translation(Vec3{T.shadowOffset.x, T.shadowOffset.y, 0}) * pathM(g) * glyphMatrix(q, a);
                             gi.misc = Vec4{0, 0, q.k, std::clamp(stroke + a.strokeAdd, 0.0f, std::max(0.0f, strokeMax))};
                             gi.extra = Vec4{std::max(0.0f, T.shadowBlur) * 0.5f + a.blur, 0, 0, 0};
                             out.glyphs.push_back(gi);
@@ -746,7 +846,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         sc.w *= a.opacity * w;
                         gi.fill = fill;
                         gi.stroke = sc;
-                        gi.xform = glyphMatrix(q, a);
+                        gi.xform = pathM(g) * glyphMatrix(q, a);
                         gi.misc = Vec4{0, 0, q.k, std::clamp(stroke + a.strokeAdd, 0.0f, std::max(0.0f, strokeMax))};
                         gi.extra = Vec4{a.blur, 0, 0, 0};
                         out.glyphs.push_back(gi);
@@ -754,6 +854,28 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     if (si == 0) rl.source.glyphCount = static_cast<u32>(out.glyphs.size()) - rl.source.glyphFirst;
                 }
                 rl.source.glyphSets = sets;
+                if (!onPath.empty()) {
+                    // A textura passa a ser a caixa das letras já no caminho (+ a margem).
+                    Vec2 bmin{1e30f, 1e30f}, bmax{-1e30f, -1e30f};
+                    for (usize gi = rl.source.glyphFirst; gi < out.glyphs.size(); ++gi) {
+                        const GlyphInstance& G = out.glyphs[gi];
+                        for (Vec2 c : {Vec2{G.rect.x, G.rect.y}, Vec2{G.rect.z, G.rect.y}, Vec2{G.rect.x, G.rect.w}, Vec2{G.rect.z, G.rect.w}}) {
+                            const Vec4 q = G.xform * Vec4{c.x, c.y, 0, 1};
+                            bmin = Vec2{std::min(bmin.x, q.x), std::min(bmin.y, q.y)};
+                            bmax = Vec2{std::max(bmax.x, q.x), std::max(bmax.y, q.y)};
+                        }
+                    }
+                    if (bmin.x <= bmax.x) {
+                        const Vec2 S{pad - bmin.x, pad - bmin.y};
+                        const Mat4 st = Mat4::translation(Vec3{S.x, S.y, 0});
+                        for (usize gi = rl.source.glyphFirst; gi < out.glyphs.size(); ++gi) out.glyphs[gi].xform = st * out.glyphs[gi].xform;
+                        rl.source.width = static_cast<u32>(std::ceil(bmax.x - bmin.x + 2.0f * pad));
+                        rl.source.height = static_cast<u32>(std::ceil(bmax.y - bmin.y + 2.0f * pad));
+                        srcShift = srcShift + S;
+                        rl.source.textPersp.x = static_cast<f32>(rl.source.width) * 0.5f;
+                        rl.source.textPersp.y = static_cast<f32>(rl.source.height) * 0.5f;
+                    }
+                }
                 break;
             }
             case LayerKind::ParticleSystem: {
@@ -840,8 +962,9 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             // modelos 3D (padrão = plano Z=0 1:1 com a composição).
             m = compFromClip * viewProj3d * world_3d(comp, *l, time);
         }
-        const Mat4 shiftM = Mat4::translation(Vec3{-srcShift, -srcShift, 0});
-        if (srcShift != 0.0f) m = m * shiftM;
+        const Mat4 shiftM = Mat4::translation(Vec3{-srcShift.x, -srcShift.y, 0});
+        const bool shifted = srcShift.x != 0.0f || srcShift.y != 0.0f;
+        if (shifted) m = m * shiftM;
         // Transições de entrada/saída: ajuste procedural perto das bordas.
         if (l->transitionIn != 0 || l->transitionOut != 0) {
             const f32 cw = static_cast<f32>(comp.width()), chh = static_cast<f32>(comp.height());
@@ -906,7 +1029,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         rl.texelScale = texel_scale_for(std::min(onScreen, 4.0f) * previewFactor);
         // Vetor (texto na GPU, forma SDF): não há "pixel da fonte" — ampliado,
         // a camada é desenhada mais densa (até 4×) e continua nítida.
-        if (rl.source.kind == LayerSource::Kind::Text || rl.source.kind == LayerSource::Kind::Shape) {
+        if (rl.source.kind == LayerSource::Kind::Text || rl.source.kind == LayerSource::Kind::Shape
+            || rl.source.kind == LayerSource::Kind::Vector) {
             f32 k = 1.0f;
             const f32 want = std::min(onScreen, 4.0f) * previewFactor;
             while (k < want && k < 4.0f) k *= 2.0f;
@@ -930,7 +1054,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     const f64 ts = static_cast<f64>(time.value) + u * open;
                     rl.blurMatrices[i] = in3d ? comp_view_projection_frac(comp, ts, out.compWidth, out.compHeight) * world_3d_frac(comp, *l, ts)
                                               : world_2d_frac(comp, *l, ts);
-                    if (srcShift != 0.0f) rl.blurMatrices[i] = rl.blurMatrices[i] * shiftM;
+                    if (shifted) rl.blurMatrices[i] = rl.blurMatrices[i] * shiftM;
                     for (int c = 0; c < 4 && !moves; ++c) {
                         const Vec4 d = rl.blurMatrices[i].col[c] - rl.blurMatrices[0].col[c];
                         if (std::fabs(d.x) + std::fabs(d.y) + std::fabs(d.z) + std::fabs(d.w) > 1e-4f) moves = true;
@@ -951,7 +1075,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             } else {
                 rl.temporal.push_back({m, 1.0f, Vec3{0, 0, 0}});
             }
-            if (srcShift != 0.0f && l->rgbDelay > 0.0f) for (auto& t : rl.temporal) t.m = t.m * shiftM;
+            if (shifted && l->rgbDelay > 0.0f) for (auto& t : rl.temporal) t.m = t.m * shiftM;
             if (l->echoCount > 0) {
                 const u32 n = std::min<u32>(l->echoCount, 16u);
                 const f64 d = std::clamp(static_cast<f64>(l->echoDelay), 0.25, 120.0);
@@ -1266,6 +1390,42 @@ void Renderer::upload_glyphs(FrameSnapshot& snap) noexcept {
     for (FrameSnapshot* s : all) std::copy(s->glyphs.begin(), s->glyphs.end(), dst + s->glyphBase);
     backend_->unmap_buffer(glyphBuf_[slot]);
     glyphFrameBuf_ = glyphBuf_[slot];
+}
+
+void Renderer::upload_vectors(FrameSnapshot& snap) noexcept {
+    // Todas as malhas do quadro (pré-composições incluídas) num buffer só.
+    usize total = 0;
+    std::vector<FrameSnapshot*> all;
+    std::vector<FrameSnapshot*> stack{&snap};
+    while (!stack.empty()) {
+        FrameSnapshot* s = stack.back();
+        stack.pop_back();
+        s->vecBase = static_cast<u32>(total);
+        total += s->vec.size();
+        all.push_back(s);
+        for (auto& c : s->nested) if (c) stack.push_back(c.get());
+    }
+    vecFrameBuf_ = BufferHandle{};
+    if (total == 0) return;
+    const u32 slot = vecSlot_++ % kGlyphRing;
+    const usize bytes = total * sizeof(Vec4);
+    if (vecCap_[slot] < bytes) {
+        if (vecBuf_[slot].valid()) backend_->destroy_buffer(vecBuf_[slot]);
+        BufferDesc bd;
+        bd.bytes = std::max<usize>(bytes * 2, 4096 * sizeof(Vec4));
+        bd.usage = BufferUsage::Storage;
+        bd.access = MemoryAccess::Upload;
+        bd.debugName = "vetores";
+        auto b = backend_->create_buffer(bd);
+        vecBuf_[slot] = b.ok() ? *b : BufferHandle{};
+        vecCap_[slot] = b.ok() ? bd.bytes : 0;
+    }
+    void* ptr = nullptr;
+    if (!vecBuf_[slot].valid() || !backend_->map_buffer(vecBuf_[slot], ptr).ok() || !ptr) return;
+    auto* dst = static_cast<Vec4*>(ptr);
+    for (FrameSnapshot* s : all) std::copy(s->vec.begin(), s->vec.end(), dst + s->vecBase);
+    backend_->unmap_buffer(vecBuf_[slot]);
+    vecFrameBuf_ = vecBuf_[slot];
 }
 
 void Renderer::flush_uploads() noexcept {
@@ -1738,6 +1898,26 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
             return ctx.fullscreen_pass("forma", PassStage::Decode, out.texture, ShaderId::shape_shape_frag, {},
                                        &block, sizeof(block)) != kInvalidIndex;
         }
+        case LayerSource::Kind::Vector: {
+            // Triângulos da CPU com a distância até a borda: AA exato no shader.
+            if (!vecFrameBuf_.valid() || layer.source.vecCount == 0 || !currentSnap_) return false;
+            auto pipe = shaders_.pipeline(PipelineKey::graphics(ShaderId::vector_path_vert, ShaderId::vector_path_frag, kWorkFormat, true,
+                                                                BlendMode::Normal));
+            if (!pipe.ok()) return false;
+            out.texture = graph_.create_texture("layer-vetor", d);
+            struct Cap { PipelineHandle p; BufferHandle buf; Mat4 clip; Vec4 params; u32 count; } cap{
+                *pipe, vecFrameBuf_, clip_from_comp(static_cast<f32>(layer.source.width), static_cast<f32>(layer.source.height)),
+                Vec4{static_cast<f32>(currentSnap_->vecBase + layer.source.vecFirst), static_cast<f32>(currentSnap_->vecBase + layer.source.paintFirst), 0, 0},
+                layer.source.vecCount};
+            graph_.add_raster_pass("vetor", PassStage::Decode, out.texture, LoadOp::Clear, Vec4{0, 0, 0, 0}, [cap](PassContext& pc) {
+                pc.cmds.bind_pipeline(cap.p);
+                pc.cmds.bind_storage_buffer(cap.buf);
+                struct { Mat4 m; Vec4 params; } push{cap.clip, cap.params};
+                pc.cmds.push_constants(&push, sizeof(push));
+                pc.cmds.draw(cap.count);
+            });
+            return true;
+        }
         case LayerSource::Kind::Particles: {
             out.texture = graph_.create_texture("layer-particulas", d);
             auto pipe = shaders_.pipeline(PipelineKey::graphics(
@@ -2021,6 +2201,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     compTargetH_ = ch;
 
     upload_glyphs(snap);
+    upload_vectors(snap);
     compose_layers(snap, comp, compDesc, fb.frameNumber, draws_, 0);
     // A raiz de novo (as pré-composições trocaram o estado em curso).
     currentScenes_ = &snap.scenes;

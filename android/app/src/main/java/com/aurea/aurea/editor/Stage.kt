@@ -679,12 +679,12 @@ private class StageEdit(
         rot0 = d.rotation[2]
     }
 
-    /** Fator de escala preso para que |escala| fique em [0,05; 8] nos dois eixos. */
+    /** Fator de escala preso para que |escala| fique em [0,001; 100] nos dois eixos. */
     private fun clampFactor(f: Float): Float {
         val ax = max(abs(sx0), 1e-4f)
         val ay = max(abs(sy0), 1e-4f)
-        val lo = max(0.05f / ax, 0.05f / ay)
-        val hi = min(8f / ax, 8f / ay)
+        val lo = max(0.001f / ax, 0.001f / ay)
+        val hi = min(100f / ax, 100f / ay)
         return if (lo <= hi) f.coerceIn(lo, hi) else f
     }
 

@@ -42,6 +42,7 @@ enum class EditorPanel {
     Particles,     // partículas
     Transitions,   // entrada e saída
     Echo,          // eco e rgb no tempo
+    Tracking,      // rastreio de ponto / estabilização
 }
 
 /**
@@ -101,6 +102,7 @@ fun PanelContent(
         EditorPanel.Particles -> "Partículas"
         EditorPanel.Transitions -> "Entrada e saída"
         EditorPanel.Echo -> "Eco e rastro"
+        EditorPanel.Tracking -> "Rastreio"
     }
 
     Column(modifier.fillMaxSize().background(AureaColors.EditorPanel)) {
@@ -120,6 +122,7 @@ fun PanelContent(
                     EditorPanel.Particles -> ParticlesPanel(env)
                     EditorPanel.Transitions -> TransitionsPanel(env)
                     EditorPanel.Echo -> EchoPanel(env)
+                    EditorPanel.Tracking -> TrackingPanel(env)
                 }
             }
         }

@@ -216,7 +216,6 @@ fun EditorScreen(store: EditorStore) {
         ui.panel != null && selectionSize == 1 -> SheetContent.Panel
         selectionSize >= 2 -> SheetContent.Batch
         selectionSize == 1 -> SheetContent.Dock
-        hasLayers -> SheetContent.Hint
         else -> SheetContent.None
     }
     val stage = remember(store, ui) {

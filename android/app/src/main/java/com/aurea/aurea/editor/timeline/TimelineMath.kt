@@ -188,18 +188,6 @@ internal object Snap {
 }
 
 /**
- * Inércia do scrub (A, `FrictionSimulation(0.135)`): a distância total é
- * ≈ `v0 / 2`, ou seja ~0,5 s da velocidade de soltura.
- */
-internal object Friction {
-    const val DRAG = 0.135
-    private val LN_DRAG = ln(DRAG)
-
-    fun offset(v0: Float, seconds: Float): Float = (v0 * (DRAG.pow(seconds.toDouble()) - 1.0) / LN_DRAG).toFloat()
-    fun velocity(v0: Float, seconds: Float): Float = (v0 * DRAG.pow(seconds.toDouble())).toFloat()
-}
-
-/**
  * Auto-rolagem na borda durante arrastos: só rola para o lado a que o dedo
  * FOI desde o começo do gesto (pegar um clipe já perto da borda não sai rolando).
  */

@@ -130,7 +130,6 @@ internal class TimelineMetrics(val density: Float, val fontScale: Float = 1f) {
     val autoIntent = dp(4f)
     val axisSlop = dp(8f)           // depois do toque longo, o eixo se decide com 8 dp
     val flingMin = dp(50f)          // px/s
-    val flingStop = dp(10f)         // px/s: abaixo disso a inércia acabou
 
     // --- Guias ----------------------------------------------------------------------------
     val guide = dp(1f)

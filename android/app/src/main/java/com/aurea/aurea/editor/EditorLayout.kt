@@ -34,7 +34,7 @@ internal object EditorLayout {
     private const val PREVIEW_FRACTION_MAX = 0.50f   // EditorSession.alturaDoPreview
     private const val DOCK_FRACTION = 0.40f          // EditorSession.alturaDaFolha
     private const val PANEL_FRACTION = 0.46f
-    private const val ADD_FRACTION = 0.48f
+    private const val ADD_BODY = 280f                // abas 54 + 3 fileiras de ladrilhos + paginação
     private const val SHEET_HANDLE = 12f             // ContextSheet.handleHeight
     private const val BATCH_BODY = 124f
     private const val HINT_BODY = 30f
@@ -60,14 +60,13 @@ internal object EditorLayout {
             SheetContent.Batch -> if (ws > 0f) (SHEET_HANDLE + BATCH_BODY) / ws else 0f
             SheetContent.Dock -> DOCK_FRACTION
             SheetContent.Panel -> PANEL_FRACTION
-            SheetContent.Adding -> ADD_FRACTION
+            SheetContent.Adding -> if (ws > 0f) (SHEET_HANDLE + ADD_BODY) / ws else 0f
         }
         var sheet = if (content != SheetContent.None) ws * sheetFraction.coerceIn(0f, 0.60f) else 0f
         // Camada escolhida ou painel: piso de 90 (uma linha de camada viva).
         // Nada escolhido: 120. Adicionando: o menu pode cobrir a timeline.
         val floor = when (content) {
-            SheetContent.Adding -> 0f
-            SheetContent.Dock, SheetContent.Panel, SheetContent.Batch -> 90f
+            SheetContent.Adding, SheetContent.Dock, SheetContent.Panel, SheetContent.Batch -> 90f
             else -> 120f
         }
         var timeline = ws - preview - sheet

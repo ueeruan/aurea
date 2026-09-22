@@ -443,12 +443,9 @@ internal class TimelineController(
             val ev = awaitPointerEvent()
             if (pressedCount(ev) >= 2) return pinch()
             val ch = changeOf(ev, id)
-            if (ch == null || !ch.pressed) {
-                val vx = tracker.calculateVelocity().x
-                if (ch != null && abs(vx) > metrics.flingMin) startScrubFling(vx)
-                return
-            }
-            tracker.addPointerInputChange(ch)
+            // Soltou: o tempo fica onde o dedo parou (sem inércia — o dono
+            // pediu; o quadro escolhido é o que estava sob o cabeçote).
+            if (ch == null || !ch.pressed) return
             ch.consume()
             holdView(view0 - (ch.position.x - start.x) / ppf)
         }
@@ -723,33 +720,6 @@ internal class TimelineController(
     // =========================================================================
     private var flingJob: Job? = null
     private var scrollJob: Job? = null
-
-    /** Inércia do scrub (`0.135^t`): o motor continua recebendo scrub até ela assentar. */
-    private fun startScrubFling(vx: Float) {
-        val view0 = view()
-        val ppf = pxPerFrame()
-        val duration = store.project.durationFrames
-        var job: Job? = null
-        job = scope.launch {
-            try {
-                val t0 = withFrameNanos { it }
-                while (true) {
-                    val t = (withFrameNanos { it } - t0) / 1e9f
-                    val raw = view0 - Friction.offset(vx, t) / ppf
-                    val target = TimeAxis.clampView(raw, duration)
-                    holdView(target)
-                    // Assentou, bateu na ponta, ou alguém deu play: o scrub acaba.
-                    if (abs(Friction.velocity(vx, t)) < metrics.flingStop || target != raw || store.playing) break
-                }
-            } finally {
-                if (flingJob === job) {
-                    flingJob = null
-                    releaseView()
-                }
-            }
-        }
-        flingJob = job
-    }
 
     /** Rolagem vertical com o fling do Android (Clamping). */
     private fun startScrollFling(vy: Float) {

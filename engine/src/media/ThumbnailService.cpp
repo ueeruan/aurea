@@ -7,6 +7,7 @@
 #include "aurea/core/Thread.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 
 namespace aurea {
@@ -114,6 +115,7 @@ void ThumbnailService::stop() noexcept {
     wake_.notify_all();
     if (thread_.joinable()) thread_.join();
     decoders_.clear();
+    openDecoders_.store(0, std::memory_order_relaxed);
 }
 
 void ThumbnailService::clear() {
@@ -202,6 +204,7 @@ bool ThumbnailService::decode(const Request& r, Image& out) {
         }
         if (decoders_.size() >= 2) decoders_.erase(decoders_.begin());
         decoders_.push_back(Decoder{r.key.asset, std::move(backend)});
+        openDecoders_.store(static_cast<u32>(decoders_.size()), std::memory_order_relaxed);
         it = decoders_.end() - 1;
     }
     VideoDecoderBackend& dec = *it->backend;
@@ -227,7 +230,21 @@ void ThumbnailService::thread_main() noexcept {
         Request req;
         {
             std::unique_lock<std::mutex> lock(mutex_);
-            wake_.wait(lock, [&] { return !running_ || !queue_.empty(); });
+            const auto ready = [&] { return !running_ || !queue_.empty(); };
+            if (!decoders_.empty()) {
+                // Fila vazia com decoder aberto: espera o próximo pedido por um
+                // tempo; nada chegou, fecha. Antes os dois decoders ficavam
+                // abertos até fechar o projeto (§38: sem decoder ocioso). Uma
+                // rajada de rolagem reabre — ~30 ms, uma vez por rajada.
+                if (!wake_.wait_for(lock, std::chrono::milliseconds(kDecoderIdleMs), ready)) {
+                    lock.unlock();
+                    decoders_.clear();   // só esta thread mexe em decoders_
+                    openDecoders_.store(0, std::memory_order_relaxed);
+                    continue;
+                }
+            } else {
+                wake_.wait(lock, ready);
+            }
             if (!running_) break;
             req = std::move(queue_.front());
             queue_.pop_front();
@@ -240,6 +257,12 @@ void ThumbnailService::thread_main() noexcept {
             if (ok) insert_locked(req.key, std::move(img));
         }
         if (ok) generation_.fetch_add(1, std::memory_order_acq_rel);
+        // Aparelho quente (WARM/HOT/CRITICAL): uma pausa entre miniaturas. Sai
+        // na hora se o serviço parar.
+        if (const u32 pause = pacingMs_.load(std::memory_order_relaxed)) {
+            std::unique_lock<std::mutex> lock(mutex_);
+            wake_.wait_for(lock, std::chrono::milliseconds(pause), [&] { return !running_; });
+        }
     }
 }
 

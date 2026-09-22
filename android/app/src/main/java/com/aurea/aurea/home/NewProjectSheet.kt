@@ -71,6 +71,8 @@ internal fun NewProjectSheet(
     defaultFps: Int,
     onCreate: (NewProjectSpec) -> Unit,
     onDismiss: () -> Unit,
+    /** O que o motor decidiu para o aparelho (nulo = motor subindo: nada a avisar). */
+    device: com.aurea.aurea.engine.DeviceReport? = null,
 ) {
     var aspectKey by rememberSaveable { mutableStateOf(defaultAspectKey) }
     var free by rememberSaveable { mutableStateOf(false) }
@@ -153,6 +155,22 @@ internal fun NewProjectSheet(
                 AureaSegmented(
                     ProjectPresets.resolutions, resolution, ProjectPresets::resolutionLabel, { resolution = it },
                     AureaColors.SurfaceHigh, AureaColors.Background, 7.dp,
+                )
+            }
+            // §109: a resolução acima do que o aparelho exporta continua
+            // escolhível (o projeto edita e abre em outro aparelho), mas a
+            // folha diz o teto e o porquê — não esconde, não deixa descobrir
+            // só na hora de exportar.
+            val over = device?.takeIf { d ->
+                d.maxExportHeight > 0 && (kotlin.math.min(frame.width, frame.height) > d.maxExportHeight ||
+                    kotlin.math.max(frame.width, frame.height) > d.maxExportWidth)
+            }
+            if (over != null) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    (over.exportLimitReason() ?: "Este aparelho exporta até ${com.aurea.aurea.engine.DeviceReport.shortLabel(over.maxExportHeight)}.") +
+                        " Dá para editar em ${frame.width} × ${frame.height}; a exportação sai em no máximo ${com.aurea.aurea.engine.DeviceReport.shortLabel(over.maxExportHeight)}.",
+                    style = AureaType.Note,
                 )
             }
             Spacer(Modifier.height(18.dp))

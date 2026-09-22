@@ -1193,23 +1193,16 @@ AUREA_JNI jlongArray AUREA_FN(nativeSearchLayers)(JNIEnv* env, jclass, jlong han
 }
 
 /// Estado térmico do PowerManager (THERMAL_STATUS_*: 0 nenhum … 6 desligando).
+/// A tradução mora no núcleo (`thermal_state_from_android`, testada no host):
+/// 0 NONE → NORMAL · 1 LIGHT → WARM · 2 MODERATE, 3 SEVERE → HOT ·
+/// 4 CRITICAL e acima → CRITICAL.
 AUREA_JNI void AUREA_FN(nativeSetThermal)(JNIEnv*, jclass, jlong handle, jint status) {
     NativeContext* c = ctx_of(handle);
     if (!c) return;
-    // Android: 0 NONE, 1 LIGHT, 2 MODERATE, 3 SEVERE, 4 CRITICAL, 5 EMERGENCY, 6 SHUTDOWN.
-    const u32 level = status <= 0 ? 0u : status == 1 ? 1u : status == 2 ? 1u : status == 3 ? 2u : status == 4 ? 3u : 4u;
-    c->engine.set_thermal(level, status >= 2);
+    const ThermalState t = thermal_state_from_android(static_cast<i32>(status));
+    c->engine.set_thermal(static_cast<u32>(t.level), t.throttling);
 }
 
-/// O que o motor decidiu para ESTE aparelho, em números.
-///
-/// A UI mostra o que foi decidido — não um "otimizado!" sem lastro. Cada slot
-/// é uma decisão que o motor tomou a partir da sondagem:
-///   0 núcleos · 1 núcleos grandes · 2 núcleos pequenos · 3 RAM total (MB)
-///   4 RAM disponível (MB) · 5 orçamento do motor (MB) · 6 maior textura
-///   7 largura máxima de preview · 8 altura máxima de preview
-///   9 largura máxima de export · 10 altura máxima de export
-///   11 decodes paralelos · 12 workers do pool · 13 escala inicial (0..3)
 /// Foto de base das prévias de efeito: RGBA8 (alfa reto), largura × altura.
 AUREA_JNI jboolean AUREA_FN(nativeSetEffectPreviewSource)(JNIEnv* env, jclass, jlong handle, jbyteArray rgba, jint width, jint height) {
     NativeContext* c = ctx_of(handle);
@@ -1221,29 +1214,20 @@ AUREA_JNI jboolean AUREA_FN(nativeSetEffectPreviewSource)(JNIEnv* env, jclass, j
     return c->engine.set_effect_preview_source(px.data(), static_cast<u32>(width), static_cast<u32>(height)) ? JNI_TRUE : JNI_FALSE;
 }
 
+/// O que o motor decidiu para ESTE aparelho, em números.
+///
+/// A UI mostra o que foi decidido — não um "otimizado!" sem lastro. O layout
+/// dos slots é o de `write_device_report` (DeviceCapabilities.hpp), o mesmo
+/// que o `DeviceReport.kt` lê; um array menor que ele é recusado.
 AUREA_JNI jboolean AUREA_FN(nativeDeviceReport)(JNIEnv* env, jclass, jlong handle, jlongArray out) {
     NativeContext* c = ctx_of(handle);
     if (!c || !out) return JNI_FALSE;
-    if (env->GetArrayLength(out) < 14) return JNI_FALSE;
-    const DeviceCapabilities& caps = c->engine.caps();
-
-    const jlong mb = 1024 * 1024;
-    jlong report[14];
-    report[0]  = static_cast<jlong>(caps.cpu().totalCores);
-    report[1]  = static_cast<jlong>(caps.cpu().performanceCores);
-    report[2]  = static_cast<jlong>(caps.cpu().efficiencyCores);
-    report[3]  = static_cast<jlong>(caps.cpu().totalMemoryBytes / mb);
-    report[4]  = static_cast<jlong>(caps.cpu().availableMemoryBytes / mb);
-    report[5]  = static_cast<jlong>(caps.memory_budget_bytes() / mb);
-    report[6]  = static_cast<jlong>(caps.max_texture_dimension());
-    report[7]  = static_cast<jlong>(caps.max_preview_width());
-    report[8]  = static_cast<jlong>(caps.max_preview_height());
-    report[9]  = static_cast<jlong>(caps.max_export_width());
-    report[10] = static_cast<jlong>(caps.max_export_height());
-    report[11] = static_cast<jlong>(caps.decode_parallelism());
-    report[12] = static_cast<jlong>(caps.recommended_worker_count());
-    report[13] = static_cast<jlong>(caps.recommended_initial_scale(1920, 1080));
-    env->SetLongArrayRegion(out, 0, 14, report);
+    if (env->GetArrayLength(out) < static_cast<jsize>(kDeviceReportSlots)) return JNI_FALSE;
+    i64 report[kDeviceReportSlots];
+    write_device_report(c->engine.caps(), report);
+    jlong copy[kDeviceReportSlots];
+    for (u32 i = 0; i < kDeviceReportSlots; ++i) copy[i] = static_cast<jlong>(report[i]);
+    env->SetLongArrayRegion(out, 0, static_cast<jsize>(kDeviceReportSlots), copy);
     return JNI_TRUE;
 }
 

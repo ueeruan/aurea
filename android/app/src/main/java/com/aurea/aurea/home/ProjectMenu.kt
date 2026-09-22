@@ -175,5 +175,6 @@ internal fun NewProjectSheetFor(store: EditorStore, vm: HomeViewModel, all: List
         defaultFps = vm.defaultFps,
         onCreate = { spec -> vm.afterEngine(store) { store.newProject(spec.width, spec.height, spec.fps.toFloat(), spec.title) } },
         onDismiss = onDismiss,
+        device = store.deviceReport,
     )
 }

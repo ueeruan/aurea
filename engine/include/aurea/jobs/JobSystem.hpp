@@ -184,6 +184,11 @@ public:
         u32 liveThreads = 0;
     };
     [[nodiscard]] Stats stats() const noexcept;
+    /// Vezes que um worker foi dormir sem trabalho (§38: com o app parado,
+    /// o número fica parado — nada de giro).
+    [[nodiscard]] u64 idle_wakeups() const noexcept { return stats().sleeps; }
+    /// Mesmo contador, pelo lado de quem dorme (testes da 8H).
+    [[nodiscard]] u64 idle_parks() const noexcept { return stats().sleeps; }
 
 private:
     friend class JobContext;

@@ -38,6 +38,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.content.pm.PackageInfoCompat
+import com.aurea.aurea.engine.DeviceReport
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaDims
@@ -138,6 +139,9 @@ internal fun SettingsTab(store: EditorStore, vm: HomeViewModel, listState: LazyL
         item(key = "aparelho") {
             Spacer(Modifier.height(AureaDims.S5))
             GroupHeader("Este aparelho")
+            // O relatório é relido ao abrir a seção: a temperatura (e o que ela
+            // muda na prévia) é de AGORA, não da abertura do app.
+            androidx.compose.runtime.LaunchedEffect(Unit) { store.refreshDeviceReport() }
             val rep = store.deviceReport
             Group {
                 TileRow(
@@ -148,15 +152,35 @@ internal fun SettingsTab(store: EditorStore, vm: HomeViewModel, listState: LazyL
                 if (rep != null) {
                     GroupDivider()
                     TileRow(
+                        leading = { CupertinoIcon(CupertinoGlyph.Speedometer, 21.dp, AureaColors.Muted) },
+                        title = rep.tierLabel(),
+                        subtitle = rep.tierReason() ?: "Nada limita a edição neste celular.",
+                    )
+                    GroupDivider()
+                    TileRow(
                         leading = { CupertinoIcon(CupertinoGlyph.Film, 21.dp, AureaColors.Muted) },
-                        title = "Prévia até ${rep.maxPreviewHeight}p · exporta até ${rep.maxExportHeight}p",
+                        title = "Prévia até ${rep.maxPreviewHeight}p · exporta até ${DeviceReport.shortLabel(rep.maxExportHeight)}",
+                        subtitle = rep.planSummary(),
+                    )
+                    GroupDivider()
+                    TileRow(
+                        leading = { CupertinoIcon(CupertinoGlyph.Timer, 21.dp, AureaColors.Muted) },
+                        title = rep.thermalLabel(),
                         subtitle = "Textura máx. ${rep.maxTexture} px · ${rep.workers} tarefas em paralelo",
                     )
+                    // §109: o que o aparelho não faz fica DITO, uma frase por item.
+                    rep.limitations().forEach { line ->
+                        GroupDivider()
+                        TileRow(
+                            leading = { CupertinoIcon(CupertinoGlyph.InfoCircle, 21.dp, AureaColors.Muted) },
+                            title = line,
+                        )
+                    }
                 }
                 GroupDivider()
                 TapRow("Medir o aparelho de novo", "Refaz a otimização automática na próxima abertura") { store.remeasureDevice() }
             }
-            GroupNote("Na primeira vez que abre, o Aurea mede este celular (memória, GPU e codecs de vídeo) e ajusta sozinho a qualidade da prévia, o uso de memória e o limite de exportação. Fica guardado; só mede de novo se o sistema for atualizado.")
+            GroupNote("Na primeira vez que abre, o Aurea mede este celular (memória, processador, placa de vídeo e codecs de vídeo) e ajusta sozinho a qualidade da prévia, o uso de memória e o limite de exportação. Quando o celular esquenta, a prévia fica mais leve até ele esfriar; a exportação nunca perde qualidade por isso, só demora mais. Fica guardado; só mede de novo se o sistema for atualizado.")
         }
         item(key = "armazenamento") {
             Spacer(Modifier.height(AureaDims.S5))

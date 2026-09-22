@@ -292,6 +292,11 @@ void Engine::apply_memory_budgets() noexcept {
     // seu pedaço do orçamento medido do aparelho. Ver PHASE_8_REPORT §8B.
     const u64 budget = config_.memoryBudgetBytes ? config_.memoryBudgetBytes : caps_.memory_budget_bytes();
     memory_.apply_budget_table(budget);
+    // Aparelho de entrada (§107): cache de decode menor que o da tabela
+    // (a fatia da tabela vale para o plano de sempre, 24 %).
+    if (const u32 pct = caps_.policy().decodedFramesBudgetPercent; pct != 24) {
+        memory_.set_budget(MemoryClass::DecodedFrames, budget * pct / 100);
+    }
     // Desfazer (§126): 1/16 do orçamento, entre 16 e 128 MB.
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
@@ -515,12 +520,23 @@ void Engine::render_thread_main() noexcept {
                 wakeCv_.wait_for(lock, std::chrono::nanoseconds(waitNs), [this] {
                     return !renderRunning_ || wakeFlag_;
                 });
+            } else if (!surfaceAttached_ || state_ == EngineState::Suspended) {
+                // Sem onde desenhar (segundo plano, tela bloqueada, superfície
+                // ainda não chegou): nada para fazer até alguém acordar. Quem
+                // devolve a tela — attach_surface, resume — já chama
+                // request_render. Antes este caso também acordava a cada
+                // 500 ms só para ver que não havia superfície (§38).
+                wakeCv_.wait(lock, [this] { return !renderRunning_ || wakeFlag_; });
             } else {
-                // Parado: dorme até ter o que mostrar.
+                // Parado: dorme até ter o que mostrar. O teto de 500 ms é a
+                // rede das mudanças do modelo que sobem `modelRevision_` sem
+                // chamar request_render (a render_frame pula barato quando
+                // nada mudou).
                 wakeCv_.wait_for(lock, std::chrono::milliseconds(500), [this] {
                     return !renderRunning_ || wakeFlag_ || playingHint_.load();
                 });
             }
+            ++renderWakeups_;
             wakeFlag_ = false;
         }
         if (!renderRunning_) break;
@@ -4631,12 +4647,23 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
 
 void Engine::set_thermal(u32 level, bool throttling) noexcept {
     ThermalState t = caps_.thermal();
+    const ThermalTier before = t.tier();
     t.level = static_cast<ThermalState::Level>(std::min<u32>(level, static_cast<u32>(ThermalState::Level::Unknown)));
     t.throttling = throttling;
     caps_.set_thermal_state(t);
     thermalDegrade_.store(t.should_degrade(), std::memory_order_release);
     // Morno: menos tarefa de fundo; crítico: metade do pool (§33, §35).
     jobs_.apply_thermal(static_cast<u32>(t.level));
+    // A política térmica (DevicePolicy, §35–36) nos knobs que existem hoje:
+    // o custo das operações caras do preview sai de preview_heavy_scale() no
+    // próximo quadro; o trabalho de fundo (miniaturas) ganha pausa. O export
+    // não lê nada disto (§37).
+    const DevicePolicy p = caps_.policy();
+    thumbs_.set_pacing_ms(p.backgroundPauseMs);
+    if (p.thermal != before) {
+        AUREA_LOG_INFO("termico: %s -> %s (preview x%.2f, fundo %u ms)", thermal_tier_name(before),
+                       thermal_tier_name(p.thermal), static_cast<double>(p.heavyScale), p.backgroundPauseMs);
+    }
     request_render();
 }
 
@@ -4646,8 +4673,9 @@ u32 Engine::thermal_heavy_level() const noexcept {
 }
 
 f32 Engine::preview_heavy_scale() const noexcept {
-    // O menor entre o piso térmico do instante e a decisão do AUTO 2.0.
-    return std::min(PreviewQuality::level(thermal_heavy_level()).heavy(), adaptive_->quality().heavy());
+    // O menor entre a política do aparelho × temperatura (8H) e a decisão do
+    // AUTO 2.0 (8C).
+    return std::min(caps_.policy().heavyScale, adaptive_->quality().heavy());
 }
 
 Status Engine::render_offscreen(TextureHandle target, u32 width, u32 height, bool asPreview) noexcept {
@@ -4742,9 +4770,11 @@ Status Engine::render_effect_preview(u32 typeId, u32 width, u32 height, std::vec
                                      u32& outHeight) noexcept {
     if (!gpu_ || !renderer_.ready()) return Status{Errc::InvalidState, "sem GPU"};
     if (width == 0 || height == 0) return Status{Errc::InvalidArgument, "previa sem tamanho"};
-    const u32 maxTex = gpu_->capabilities().maxTexture2D;
     // A cartela é pequena, mas o aparelho manda: nunca pedir textura maior do
-    // que ele cria. Passando do teto, encolhe pela proporção (nunca estica).
+    // que ele cria — e, no aparelho de entrada, prévia com metade do lado
+    // (DevicePolicy::effectPreviewMaxSide). Passando do teto, encolhe pela
+    // proporção (nunca estica); a UI escala o bitmap no cartão.
+    const u32 maxTex = std::min<u32>(gpu_->capabilities().maxTexture2D, std::max<u32>(16, caps_.policy().effectPreviewMaxSide));
     u32 w = width, h = height;
     if (w > maxTex || h > maxTex) {
         const f32 k = static_cast<f32>(maxTex) / static_cast<f32>(std::max(w, h));

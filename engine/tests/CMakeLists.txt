@@ -37,6 +37,7 @@ add_executable(aurea_tests
     test_stability.cpp
     test_memory.cpp
     test_perf_render.cpp
+    test_device.cpp
 )
 
 target_include_directories(aurea_tests PRIVATE

@@ -25,6 +25,7 @@
     // evita trazer winsock, shell e companhia, que ninguém aqui usa.
     #define WIN32_LEAN_AND_MEAN
     #define NOGDI
+    #define NOMINMAX   // sem as macros min/max: std::min/std::max continuam funções
     #include <windows.h>
 #elif defined(AUREA_PLATFORM_HOST) || defined(__ANDROID__)
     #include <unistd.h>
@@ -175,7 +176,19 @@ void DeviceCapabilities::detect_cpu() noexcept {
     // sabe — no Android, o `ActivityManager` conhece o limite real de memória
     // do processo, que o /proc não mostra. Sem esta guarda, `apply_platform_info`
     // seria sobrescrito por `detect()` e o doc dele viraria mentira.
-    const CpuCapabilities measured = cpu_;
+    //
+    // "Medido" é o que veio em `platform_` (apply_platform_info), NÃO o que
+    // está em `cpu_`: os padrões de CpuCapabilities são 1 núcleo / 1 grande /
+    // 1 pequeno, e tomá-los por medição fazia TODO aparelho (e o host) sair
+    // com 1 núcleo — 1 worker, "1 núcleos (1+1)" nos Ajustes, classe LOW
+    // pela CPU. O Kotlin não manda núcleos: eles são medidos aqui.
+    CpuCapabilities measured{};
+    measured.totalCores           = platform_.totalCores;
+    measured.performanceCores     = platform_.performanceCores;
+    measured.efficiencyCores      = platform_.performanceCores ? platform_.efficiencyCores : 0;
+    measured.maxFrequencyKhz      = platform_.maxFrequencyKhz;
+    measured.totalMemoryBytes     = platform_.totalMemoryBytes;
+    measured.availableMemoryBytes = platform_.availableMemoryBytes;
 
 #if defined(AUREA_PLATFORM_HOST)
     unsigned hw = std::thread::hardware_concurrency();
@@ -243,8 +256,19 @@ void DeviceCapabilities::detect_cpu() noexcept {
     // Devolve o que veio medido. `acima` fica o que a heurística só conseguiu
     // estimar; o campo que a plataforma mediu não é reescrito.
     if (measured.totalCores)         cpu_.totalCores = measured.totalCores;
-    if (measured.performanceCores)   cpu_.performanceCores = measured.performanceCores;
-    if (measured.efficiencyCores)    cpu_.efficiencyCores = measured.efficiencyCores;
+    if (measured.performanceCores) {
+        cpu_.performanceCores = measured.performanceCores;
+        cpu_.efficiencyCores = measured.efficiencyCores;   // 0 pode ser medição
+    } else if (measured.totalCores) {
+        // A plataforma contou os núcleos mas não separou: todos iguais (a regra
+        // de apply_platform_info — subestimar workers é o lado seguro).
+        cpu_.performanceCores = measured.totalCores;
+        cpu_.efficiencyCores = 0;
+    }
+    if (cpu_.performanceCores > cpu_.totalCores) cpu_.performanceCores = cpu_.totalCores;
+    if (cpu_.performanceCores + cpu_.efficiencyCores > cpu_.totalCores) {
+        cpu_.efficiencyCores = cpu_.totalCores - cpu_.performanceCores;
+    }
     if (measured.maxFrequencyKhz)    cpu_.maxFrequencyKhz = measured.maxFrequencyKhz;
     if (measured.totalMemoryBytes)   cpu_.totalMemoryBytes = measured.totalMemoryBytes;
     if (measured.availableMemoryBytes) cpu_.availableMemoryBytes = measured.availableMemoryBytes;
@@ -342,6 +366,16 @@ u64 DeviceCapabilities::memory_budget_bytes() const noexcept {
 
 PreviewScale DeviceCapabilities::recommended_initial_scale(u32 compWidth,
                                                            u32 compHeight) const noexcept {
+    // Aparelho de entrada (§107): o preview já COMEÇA em 1/4 — o adaptativo
+    // sobe se o tempo de quadro medido deixar. Composição pequena não desce
+    // tanto: abaixo de ~180 linhas o preview vira borrão sem ganhar nada.
+    if (class_.tier == DeviceTier::Low) {
+        const u32 shortSide = std::min(compWidth, compHeight);
+        const u32 den = device_policy(DeviceTier::Low, ThermalTier::Normal).previewInitialDenominator;
+        if (den >= 4 && shortSide >= 720) return PreviewScale::Quarter;
+        if (den >= 2 && shortSide >= 360) return PreviewScale::Half;
+        return PreviewScale::Auto;
+    }
     if (compWidth <= maxPreviewWidth_ && compHeight <= maxPreviewHeight_) {
         return PreviewScale::Auto;
     }
@@ -367,7 +401,9 @@ std::string DeviceCapabilities::summary() const {
        << " decode_hevc=" << (decodeHevc_.supported ? (decodeHevc_.hardwareAccelerated ? "hw" : "sw") : "nao")
        << " decode_av1=" << (decodeAv1_.supported ? (decodeAv1_.hardwareAccelerated ? "hw" : "sw") : "nao")
        << " encode_h264=" << (encodeH264_.supported ? (encodeH264_.hardwareAccelerated ? "hw" : "sw") : "nao")
-       << " orcamento_mb=" << (memory_budget_bytes() / (1024ull * 1024ull));
+       << " orcamento_mb=" << (memory_budget_bytes() / (1024ull * 1024ull))
+       << " classe=" << device_tier_name(class_.tier)
+       << " termico=" << thermal_tier_name(thermal_.tier());
     return os.str();
 }
 
@@ -378,24 +414,31 @@ void DeviceCapabilities::compute_budget() noexcept {
     maxPreviewWidth_ = 1920;
     maxPreviewHeight_ = 1080;
 
-    // Teto de export limitado pelo decoder: um aparelho que não decodifica 4K
-    // não deve deixar o usuário escolher export 4K sem aviso — a exportação
-    // sairia com frames faltando ou levaria uma eternidade em software.
-    u32 decMaxW = 0, decMaxH = 0;
-    for (const CodecCapability* c : {&decodeH264_, &decodeHevc_, &decodeAv1_}) {
-        if (!c->supported) continue;
-        if (c->maxWidth > decMaxW) decMaxW = c->maxWidth;
-        if (c->maxHeight > decMaxH) decMaxH = c->maxHeight;
-    }
-
-    if (decMaxW && decMaxH) {
-        maxExportWidth_ = decMaxW;
-        maxExportHeight_ = decMaxH;
+    // Teto de export. Com a tabela de codecs da plataforma, é o do CODIFICADOR
+    // H.264: é ele que escreve o arquivo (o HEVC é opção, o H.264 é o que
+    // sempre existe). Antes o teto saía do DECODER — e um aparelho de entrada
+    // que decodifica 4K mas só codifica 1080p oferecia 4K e falhava no meio
+    // do export. Lado maior × lado menor: o codificador aceita o quadro em pé.
+    if (codecs_known()) {
+        if (encodeH264_.supported && encodeH264_.maxWidth && encodeH264_.maxHeight) {
+            // Nada acima de 4K é oferecido: o resto do pipeline (memória,
+            // textura, tempo) não foi medido além disso.
+            maxExportWidth_  = std::min<u32>(std::max(encodeH264_.maxWidth, encodeH264_.maxHeight), 3840);
+            maxExportHeight_ = std::min<u32>(std::min(encodeH264_.maxWidth, encodeH264_.maxHeight), 2160);
+            exportLimit_ = (maxExportHeight_ < 2160) ? ExportLimit::Encoder : ExportLimit::None;
+        } else {
+            // A tabela veio e não tem H.264: conservador, e a UI diz o porquê.
+            maxExportWidth_ = 1920;
+            maxExportHeight_ = 1080;
+            exportLimit_ = ExportLimit::NoEncoder;
+        }
     } else if (detected_) {
-        // Nenhum decoder detectado: o caminho é software. Exportar em software
-        // aguenta 1080p com paciência; 4K não.
+        // Sem tabela (host, ou a sondagem falhou): mantido como era — 1080p
+        // depois que a GPU real chega — para o host não mudar de
+        // comportamento; num aparelho, a tabela sempre vem.
         maxExportWidth_ = 1920;
         maxExportHeight_ = 1080;
+        exportLimit_ = ExportLimit::Unknown;
     }
 
     // Teto por memória: um frame 4K RGBA16F ocupa 3840*2160*8 = 66 MB. Com
@@ -403,9 +446,301 @@ void DeviceCapabilities::compute_budget() noexcept {
     const u64 budget = memory_budget_bytes();
     const u64 frame4k = 3840ull * 2160ull * 8ull;
     if (budget < frame4k * 6) {
+        if (exportLimit_ == ExportLimit::None) exportLimit_ = ExportLimit::Memory;   // era o codificador que deixava 4K
         if (maxExportWidth_ > 1920) maxExportWidth_ = 1920;
         if (maxExportHeight_ > 1080) maxExportHeight_ = 1080;
     }
+
+    class_ = classify_device(class_input());
+}
+
+DeviceClassInput DeviceCapabilities::class_input() const noexcept {
+    DeviceClassInput in;
+    in.totalMemoryBytes     = cpu_.totalMemoryBytes;
+    in.availableMemoryBytes = cpu_.availableMemoryBytes;
+    in.totalCores           = cpu_.totalCores;
+    in.performanceCores     = cpu_.performanceCores;
+    in.maxFrequencyKhz      = cpu_.maxFrequencyKhz;
+
+    in.gpuKnown        = !gpu_.deviceName.empty();
+    in.gpuApiMajor     = gpu_.apiVersionMajor;
+    in.gpuApiMinor     = gpu_.apiVersionMinor;
+    in.gpuMaxTexture   = gpu_.maxTextureSize;
+    in.gpuMaxWorkgroup = gpu_.maxComputeWorkgroupSize;
+    in.gpuCompute      = gpu_.supportsCompute;
+    in.gpuFp16         = gpu_.supportsFloat16;
+    in.gpuFp16Storage  = gpu_.supportsFloat16Storage;
+
+    in.codecsKnown  = codecs_known();
+    in.hwDecodeH264 = decodeH264_.supported && decodeH264_.hardwareAccelerated;
+    in.hwDecodeHevc = decodeHevc_.supported && decodeHevc_.hardwareAccelerated;
+    for (const CodecCapability* c : {&decodeH264_, &decodeHevc_, &decodeAv1_, &decodeVp9_}) {
+        if (!c->supported || !c->hardwareAccelerated) continue;
+        const u32 lng = std::max(c->maxWidth, c->maxHeight);
+        const u32 sht = std::min(c->maxWidth, c->maxHeight);
+        if (static_cast<u64>(lng) * sht > static_cast<u64>(in.hwDecodeMaxLong) * in.hwDecodeMaxShort) {
+            in.hwDecodeMaxLong = lng;
+            in.hwDecodeMaxShort = sht;
+        }
+    }
+    return in;
+}
+
+// =============================================================================
+// Classe do aparelho (§110–111)
+// =============================================================================
+namespace {
+
+constexpr u64 kMB = 1024ull * 1024ull;
+
+/// RAM TOTAL → faixa. Os cortes ficam entre as capacidades nominais, porque o
+/// Android reporta menos que o rótulo da caixa (o kernel e a GPU reservam):
+/// 3 GB ≈ 2,7 GB · 4 GB ≈ 3,6 · 6 GB ≈ 5,5 · 8 GB ≈ 7,4 · 12 GB ≈ 11,2.
+/// Aparelho de 4 GB ainda é de entrada para edição de vídeo: o sistema e a
+/// UI ficam com metade, e um único quadro 4K RGBA16F são 66 MB.
+DeviceTier memory_tier(u64 total) noexcept {
+    if (total == 0) return DeviceTier::Ultra;            // não medido: neutro
+    if (total < 4608 * kMB)  return DeviceTier::Low;     // até 4 GB
+    if (total < 7168 * kMB)  return DeviceTier::Mid;     // 6 GB
+    if (total < 10752 * kMB) return DeviceTier::High;    // 8 GB
+    return DeviceTier::Ultra;                            // 12 GB ou mais
+}
+
+/// GPU pelos LIMITES que o backend respondeu — não pelo nome. O que separa
+/// uma GPU de entrada de uma de topo, entre os limites expostos:
+///   · API: Vulkan 1.0 é driver de geração antiga (Mali-T, Adreno 3xx/4xx);
+///   · compute: sem ele, flow, partículas e metade dos efeitos não rodam;
+///   · invocações por workgroup: 256 (Mali-T, Mali-G31/G51) × 1024 (Adreno
+///     6xx/7xx, Mali-G7xx, Xclipse, GPUs de desktop);
+///   · fp16 aritmético/armazenamento: metade da banda nos efeitos;
+///   · textura 2D máxima.
+DeviceTier gpu_tier(const DeviceClassInput& in) noexcept {
+    const u32 api = in.gpuApiMajor * 100 + in.gpuApiMinor;
+    if (!in.gpuCompute || in.gpuMaxTexture < 4096 || in.gpuMaxWorkgroup < 256 || api < 101) {
+        return DeviceTier::Low;
+    }
+    if (in.gpuMaxWorkgroup < 512 || !in.gpuFp16 || in.gpuMaxTexture < 8192) return DeviceTier::Mid;
+    if (in.gpuMaxWorkgroup >= 1024 && api >= 103 && in.gpuMaxTexture >= 16384 && in.gpuFp16Storage) {
+        return DeviceTier::Ultra;
+    }
+    return DeviceTier::High;
+}
+
+/// CPU pela frequência máxima do núcleo mais rápido. É o que manda na thread
+/// de render e no decode de software; o número de núcleos só pesa no extremo
+/// (menos de 4 = entrada). Sem frequência medida (Windows, iOS): neutro.
+DeviceTier cpu_tier(const DeviceClassInput& in) noexcept {
+    if (in.totalCores > 0 && in.totalCores < 4) return DeviceTier::Low;
+    const u32 f = in.maxFrequencyKhz;
+    if (f == 0) return DeviceTier::Ultra;
+    if (f < 2'200'000) return DeviceTier::Low;    // A53/A55 a 2,0 GHz, Helio G85, SD 665
+    if (f < 2'400'000) return DeviceTier::Mid;    // SD 720G/732G, Dimensity 700
+    if (f < 2'950'000) return DeviceTier::High;   // SD 778G, 865/888, Tensor G2
+    return DeviceTier::Ultra;                     // SD 8 Gen 1+, Dimensity 9000+
+}
+
+/// Codecs: sem H.264 de hardware ou sem 1080p de hardware, o preview de vídeo
+/// não acompanha o tempo real (entrada). Sem HEVC de hardware ou sem 4K,
+/// metade dos vídeos de celular atuais decodifica em software (no máximo MID).
+DeviceTier codec_tier(const DeviceClassInput& in) noexcept {
+    if (!in.codecsKnown) return DeviceTier::Ultra;
+    if (!in.hwDecodeH264 || in.hwDecodeMaxShort < 1080) return DeviceTier::Low;
+    if (!in.hwDecodeHevc || in.hwDecodeMaxShort < 2160) return DeviceTier::Mid;
+    return DeviceTier::Ultra;
+}
+
+DeviceTier lower(DeviceTier t) noexcept {
+    return t == DeviceTier::Low ? DeviceTier::Low : static_cast<DeviceTier>(static_cast<u8>(t) - 1);
+}
+
+} // namespace
+
+DeviceClass classify_device(const DeviceClassInput& in) noexcept {
+    DeviceClass c;
+    c.memory = memory_tier(in.totalMemoryBytes);
+    c.gpu    = in.gpuKnown ? gpu_tier(in) : DeviceTier::Mid;
+    c.cpu    = cpu_tier(in);
+    c.codecs = codec_tier(in);
+
+    // Pressão AGORA: com menos de 512 MB livres, ou menos de 1/8 da RAM, o
+    // sistema já está matando processos — o plano desce uma faixa.
+    DeviceTier memNow = c.memory;
+    const bool pressure = in.availableMemoryBytes > 0 && in.totalMemoryBytes > 0
+                       && (in.availableMemoryBytes < 512 * kMB || in.availableMemoryBytes * 8 < in.totalMemoryBytes);
+    if (pressure) memNow = lower(c.memory);
+
+    // A menor faixa manda; o empate fica com o eixo mais grave (a ordem abaixo).
+    struct Axis { DeviceTier t; DeviceLimit why; };
+    const Axis axes[] = {
+        {c.memory, DeviceLimit::Memory},
+        {memNow,   DeviceLimit::MemoryPressure},
+        {c.gpu,    in.gpuKnown ? DeviceLimit::Gpu : DeviceLimit::GpuUnknown},
+        {c.cpu,    DeviceLimit::Cpu},
+        {c.codecs, DeviceLimit::Codecs},
+    };
+    c.tier = DeviceTier::Ultra;
+    c.limit = DeviceLimit::None;
+    for (const Axis& a : axes) {
+        if (static_cast<u8>(a.t) < static_cast<u8>(c.tier)) {
+            c.tier = a.t;
+            c.limit = a.why;
+        }
+    }
+    return c;
+}
+
+const char* device_tier_name(DeviceTier t) noexcept {
+    switch (t) {
+        case DeviceTier::Low:   return "LOW";
+        case DeviceTier::Mid:   return "MID";
+        case DeviceTier::High:  return "HIGH";
+        case DeviceTier::Ultra: return "ULTRA";
+    }
+    return "?";
+}
+
+const char* thermal_tier_name(ThermalTier t) noexcept {
+    switch (t) {
+        case ThermalTier::Normal:   return "NORMAL";
+        case ThermalTier::Warm:     return "WARM";
+        case ThermalTier::Hot:      return "HOT";
+        case ThermalTier::Critical: return "CRITICAL";
+    }
+    return "?";
+}
+
+// =============================================================================
+// Política (§107–108, §35–37)
+// =============================================================================
+DevicePolicy device_policy(DeviceTier tier, ThermalTier thermal) noexcept {
+    DevicePolicy p;
+    p.tier = tier;
+    p.thermal = thermal;
+
+    // --- Classe ---------------------------------------------------------------
+    switch (tier) {
+        case DeviceTier::Low:
+            // Perfil de entrada (§107): preview 1/4, metade do custo das
+            // operações caras, sombra e partículas menores, proxy para tudo
+            // acima de 720p, um terço a menos de cache de decode, prévias de
+            // efeito com metade do lado, pipeline de export raso (memória).
+            p.previewInitialDenominator  = 4;
+            p.heavyScale                 = 0.5f;
+            p.shadowMapSize              = 1024;
+            p.particleScale              = 0.5f;
+            p.preferProxyAboveShortSide  = 720;
+            p.decodedFramesBudgetPercent = 16;
+            p.effectPreviewMaxSide       = 160;
+            p.exportPipelineDepth        = 2;
+            break;
+        case DeviceTier::Mid:
+            // O plano de sempre (o de antes da Fase 8): nada muda para quem já
+            // funcionava. Proxy só para fonte acima de 1440p (4K).
+            p.preferProxyAboveShortSide  = 1440;
+            break;
+        case DeviceTier::High:
+            p.preferProxyAboveShortSide  = 2160;   // só acima de 4K
+            p.effectPreviewMaxSide       = 512;
+            break;
+        case DeviceTier::Ultra:
+            p.preferProxyAboveShortSide  = 0;      // nunca
+            p.effectPreviewMaxSide       = 512;
+            p.exportPipelineDepth        = 4;
+            break;
+    }
+
+    // --- Temperatura (§35–36) -------------------------------------------------
+    // Por cima da classe, só para baixo. A qualidade do EXPORT não aparece em
+    // nenhum ramo (§37): o calor tira paralelismo dele, nunca pixel.
+    switch (thermal) {
+        case ThermalTier::Normal:
+            break;
+        case ThermalTier::Warm:
+            // Menos trabalho de fundo. O preview fica como está: o usuário
+            // não vê diferença, e a folga térmica dura mais.
+            p.backgroundPauseMs = 150;
+            break;
+        case ThermalTier::Hot:
+            p.minPreviewDenominator = std::max<u32>(p.minPreviewDenominator, 2);
+            p.heavyScale     *= 0.5f;          // partículas, amostras de blur, flow
+            p.particleScale  *= 0.5f;
+            p.shadowMapSize   = std::max<u32>(512, p.shadowMapSize / 2);
+            p.backgroundPauseMs = 500;
+            p.exportPipelineDepth = std::max<u32>(1, p.exportPipelineDepth - 1);
+            break;
+        case ThermalTier::Critical:
+            // O editor tem de continuar respondendo: preview no mínimo útil
+            // (1/4, mistura no lugar do flow, sombra 512), fundo quase parado
+            // e export serial. Nada é desligado — só fica mais barato.
+            p.minPreviewDenominator = std::max<u32>(p.minPreviewDenominator, 4);
+            p.heavyScale     = std::min(0.25f, p.heavyScale * 0.25f);
+            p.particleScale  = std::min(0.25f, p.particleScale * 0.25f);
+            p.shadowMapSize  = 512;
+            p.backgroundPauseMs = 1000;
+            p.exportPipelineDepth = 1;
+            break;
+    }
+    // Pisos: abaixo disto o renderer já trava por conta própria (0,1 blur,
+    // 0,05 partículas), e um preview irreconhecível não ajuda ninguém.
+    p.heavyScale    = std::max(0.125f, p.heavyScale);
+    p.particleScale = std::max(0.0625f, p.particleScale);
+    p.previewInitialDenominator = std::max(p.previewInitialDenominator, p.minPreviewDenominator);
+    p.previewOpticalFlow = p.heavyScale > 0.25f;
+    return p;
+}
+
+void write_device_report(const DeviceCapabilities& caps, i64 out[kDeviceReportSlots]) noexcept {
+    constexpr u64 mb = 1024ull * 1024ull;
+    const DeviceClass& cls = caps.device_class();
+    const DeviceClassInput in = caps.class_input();
+    const DevicePolicy pol = caps.policy();
+    const DevicePolicy base = device_policy(cls.tier, ThermalTier::Normal);
+
+    for (u32 i = 0; i < kDeviceReportSlots; ++i) out[i] = 0;
+    out[0]  = caps.cpu().totalCores;
+    out[1]  = caps.cpu().performanceCores;
+    out[2]  = caps.cpu().efficiencyCores;
+    out[3]  = static_cast<i64>(caps.cpu().totalMemoryBytes / mb);
+    out[4]  = static_cast<i64>(caps.cpu().availableMemoryBytes / mb);
+    out[5]  = static_cast<i64>(caps.memory_budget_bytes() / mb);
+    out[6]  = caps.max_texture_dimension();
+    out[7]  = caps.max_preview_width();
+    out[8]  = caps.max_preview_height();
+    out[9]  = caps.max_export_width();
+    out[10] = caps.max_export_height();
+    out[11] = caps.decode_parallelism();
+    out[12] = caps.recommended_worker_count();
+    out[13] = static_cast<i64>(caps.recommended_initial_scale(1920, 1080));
+    out[14] = static_cast<i64>(cls.tier);
+    out[15] = static_cast<i64>(cls.limit);
+    out[16] = static_cast<i64>(cls.memory);
+    out[17] = static_cast<i64>(cls.gpu);
+    out[18] = static_cast<i64>(cls.cpu);
+    out[19] = static_cast<i64>(cls.codecs);
+
+    i64 bits = 0;
+    if (in.codecsKnown) bits |= kReportCodecsKnown;
+    if (in.hwDecodeH264) bits |= kReportHwDecodeH264;
+    if (in.hwDecodeHevc) bits |= kReportHwDecodeHevc;
+    if (in.hwDecodeMaxShort >= 2160) bits |= kReportHwDecode4K;
+    if (caps.encoder_h264().supported) bits |= kReportEncodeH264;
+    if (caps.encoder_h264().supported && caps.encoder_h264().hardwareAccelerated) bits |= kReportHwEncodeH264;
+    if (caps.encoder_hevc().supported) bits |= kReportEncodeHevc;
+    if (in.gpuKnown) bits |= kReportGpuKnown;
+    out[20] = bits;
+    out[21] = static_cast<i64>(caps.export_limit());
+    if (caps.encoder_hevc().supported) {
+        out[22] = std::max(caps.encoder_hevc().maxWidth, caps.encoder_hevc().maxHeight);
+        out[23] = std::min(caps.encoder_hevc().maxWidth, caps.encoder_hevc().maxHeight);
+    }
+    out[24] = static_cast<i64>(pol.heavyScale * 100.0f + 0.5f);
+    out[25] = base.previewInitialDenominator;
+    out[26] = base.effectPreviewMaxSide;
+    out[27] = base.decodedFramesBudgetPercent;
+    out[28] = static_cast<i64>(pol.thermal);
+    out[29] = base.shadowMapSize;
+    out[30] = base.preferProxyAboveShortSide;
+    out[31] = caps.cpu().maxFrequencyKhz / 1000;
 }
 
 } // namespace aurea

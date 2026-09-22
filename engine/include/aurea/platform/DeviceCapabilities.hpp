@@ -15,6 +15,7 @@
 #pragma once
 
 #include "aurea/core/Types.hpp"
+#include "aurea/platform/DevicePolicy.hpp"
 
 #include <string>
 
@@ -112,6 +113,40 @@ struct ThermalState {
     [[nodiscard]] bool severe() const noexcept {
         return level == Level::Critical || level == Level::Emergency;
     }
+    /// A faixa da política (DevicePolicy.hpp). `throttling` sobe uma faixa
+    /// até HOT: o sistema já baixou clock, e isso vale mais que o rótulo.
+    [[nodiscard]] ThermalTier tier() const noexcept {
+        switch (level) {
+            case Level::Nominal:   return throttling ? ThermalTier::Warm : ThermalTier::Normal;
+            case Level::Fair:      return throttling ? ThermalTier::Hot : ThermalTier::Warm;
+            case Level::Serious:   return ThermalTier::Hot;
+            case Level::Critical:
+            case Level::Emergency: return ThermalTier::Critical;
+            default:               return throttling ? ThermalTier::Warm : ThermalTier::Normal;
+        }
+    }
+};
+
+/// `PowerManager.THERMAL_STATUS_*` (0 NONE … 6 SHUTDOWN) → estado do motor.
+/// Uma tabela só, testada no host; o JNI só repassa o número.
+[[nodiscard]] constexpr ThermalState thermal_state_from_android(i32 status) noexcept {
+    ThermalState t;
+    t.level = status <= 0 ? ThermalState::Level::Nominal
+            : status <= 2 ? ThermalState::Level::Fair
+            : status == 3 ? ThermalState::Level::Serious
+            : status == 4 ? ThermalState::Level::Critical
+                          : ThermalState::Level::Emergency;
+    t.throttling = status >= 2;
+    return t;
+}
+
+/// Por que o teto de export é o que é — a UI diz a frase certa (§109).
+enum class ExportLimit : u8 {
+    Unknown = 0,   ///< sem tabela de codecs (host, ou sondagem falhou): teto padrão
+    None,          ///< o codificador dá conta de 4K
+    Encoder,       ///< o codificador de vídeo do aparelho não passa do teto
+    Memory,        ///< a RAM não segura os quadros de 4K do export
+    NoEncoder,     ///< a tabela veio sem codificador H.264: teto conservador
 };
 
 /// Opção de escala concreta, já resolvida em pixels para a composição atual.
@@ -152,8 +187,15 @@ struct PlatformInfo {
 
     /// Mapa de codecTag ('avc1', 'hvc1', 'av01', 'vp09') para o índice em
     /// `decoders`. 0xFFFFFFFF = ausente.
-    u32 decoderIndexForTag[8]{};
-    u32 encoderIndexForTag[8]{};
+    ///
+    /// O padrão TEM de ser "ausente". Era `{}` (zeros): todo tag que a tabela
+    /// não trazia apontava para o codec 0 — num aparelho sem HEVC, o HEVC
+    /// "existia" e era o decoder H.264. A classe do aparelho e o aviso
+    /// "HEVC indisponível" (§109) dependem disto.
+    u32 decoderIndexForTag[8]{kInvalidIndex, kInvalidIndex, kInvalidIndex, kInvalidIndex,
+                              kInvalidIndex, kInvalidIndex, kInvalidIndex, kInvalidIndex};
+    u32 encoderIndexForTag[8]{kInvalidIndex, kInvalidIndex, kInvalidIndex, kInvalidIndex,
+                              kInvalidIndex, kInvalidIndex, kInvalidIndex, kInvalidIndex};
 
     /// Liga um tag ('avc1', 'hvc1', 'av01', 'vp09') ao índice em `decoders`.
     ///
@@ -220,6 +262,24 @@ public:
     /// PowerManager. iOS: ProcessInfo.thermalState.
     void set_thermal_state(const ThermalState& state) noexcept { thermal_ = state; }
 
+    // --- Classe e política (Fase 8H) --------------------------------------------
+
+    /// Classe do aparelho (LOW/MID/HIGH/ULTRA) pelo que foi medido. Calculada
+    /// em `detect()` e de novo quando a GPU real chega (`apply_gpu`) — não em
+    /// `refresh_dynamic`: a classe não pode oscilar no meio da sessão porque a
+    /// RAM livre mudou.
+    [[nodiscard]] const DeviceClass& device_class() const noexcept { return class_; }
+    [[nodiscard]] DeviceTier tier() const noexcept { return class_.tier; }
+    [[nodiscard]] ThermalTier thermal_tier() const noexcept { return thermal_.tier(); }
+    /// O que o motor faz AGORA: classe + temperatura.
+    [[nodiscard]] DevicePolicy policy() const noexcept { return device_policy(class_.tier, thermal_.tier()); }
+    /// A entrada da classificação, montada do que foi medido.
+    [[nodiscard]] DeviceClassInput class_input() const noexcept;
+
+    /// A plataforma mandou a tabela de codecs (MediaCodecList)?
+    [[nodiscard]] bool codecs_known() const noexcept { return platform_.decoderCount + platform_.encoderCount > 0; }
+    [[nodiscard]] ExportLimit export_limit() const noexcept { return exportLimit_; }
+
     // --- Consultas ------------------------------------------------------------
 
     [[nodiscard]] const CpuCapabilities&  cpu()  const noexcept { return cpu_; }
@@ -254,8 +314,10 @@ public:
     [[nodiscard]] u32 max_preview_width()  const noexcept { return maxPreviewWidth_; }
     [[nodiscard]] u32 max_preview_height() const noexcept { return maxPreviewHeight_; }
 
-    /// Teto de resolução de export. Um aparelho que não decodifica 4K não deve
-    /// deixar o usuário escolher export 4K sem aviso.
+    /// Teto de resolução de export: LADO MAIOR × LADO MENOR (um 1920×1080
+    /// também exporta 1080×1920). Com a tabela de codecs, é o do CODIFICADOR
+    /// H.264 — é ele que escreve o arquivo; o decoder só limita a fonte. O
+    /// motivo fica em `export_limit()`, para a UI não esconder a opção.
     [[nodiscard]] u32 max_export_width()  const noexcept { return maxExportWidth_; }
     [[nodiscard]] u32 max_export_height() const noexcept { return maxExportHeight_; }
 
@@ -306,8 +368,35 @@ private:
     u32 maxPreviewHeight_ = 1080;
     u32 maxExportWidth_   = 3840;
     u32 maxExportHeight_  = 2160;
+    ExportLimit exportLimit_ = ExportLimit::Unknown;
+
+    DeviceClass class_{};
 
     bool detected_ = false;
 };
+
+/// O relatório "Este aparelho", em números, slot a slot — o layout que o
+/// `DeviceReport.kt` lê. Mora aqui (e não no JNI) para ser testado no host.
+///   0 núcleos · 1 grandes · 2 pequenos · 3 RAM total (MB) · 4 RAM livre (MB)
+///   5 orçamento (MB) · 6 maior textura · 7/8 teto do preview (L × A)
+///   9/10 teto do export (lado maior × lado menor) · 11 decodes paralelos
+///   12 workers · 13 escala inicial de um 1080p (PreviewScale)
+///   14 classe · 15 eixo que segurou (DeviceLimit) · 16..19 faixa de memória,
+///   GPU, CPU e codecs · 20 bits (ver kReport*) · 21 ExportLimit
+///   22/23 teto do codificador HEVC (lado maior × menor; 0 = sem HEVC)
+///   24 heavyScale × 100 AGORA · 25 denominador inicial do preview
+///   26 lado das prévias de efeito · 27 % do orçamento para decode
+///   28 faixa térmica AGORA · 29 sombra (px) · 30 proxy acima de (lado menor)
+///   31 frequência máxima da CPU (MHz; 0 = não medida)
+inline constexpr u32 kDeviceReportSlots = 32;
+inline constexpr i64 kReportCodecsKnown  = 1 << 0;
+inline constexpr i64 kReportHwDecodeH264 = 1 << 1;
+inline constexpr i64 kReportHwDecodeHevc = 1 << 2;
+inline constexpr i64 kReportHwDecode4K   = 1 << 3;
+inline constexpr i64 kReportEncodeH264   = 1 << 4;
+inline constexpr i64 kReportEncodeHevc   = 1 << 5;
+inline constexpr i64 kReportGpuKnown     = 1 << 6;
+inline constexpr i64 kReportHwEncodeH264 = 1 << 7;
+void write_device_report(const DeviceCapabilities& caps, i64 out[kDeviceReportSlots]) noexcept;
 
 } // namespace aurea

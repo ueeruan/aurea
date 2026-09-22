@@ -51,10 +51,16 @@ object DeviceProfile {
      * versão do SO (a tabela de codecs vem dela) e o hardware.
      */
     private fun fingerprint(): String =
-        "${Build.FINGERPRINT}|${Build.VERSION.SDK_INT}|${Runtime.getRuntime().availableProcessors()}|$SURVEY_VERSION"
+        "${Build.FINGERPRINT}|${Build.VERSION.SDK_INT}|${Runtime.getRuntime().availableProcessors()}|$SCHEMA"
 
-    /** Sobe quando a REGRA da sondagem muda: a tabela guardada é refeita uma vez. */
-    private const val SURVEY_VERSION = 2
+    /**
+     * Versão do FORMATO da sondagem. Sobe quando o que se mede muda — a
+     * sondagem guardada com o formato velho é refeita na próxima abertura.
+     * 2: instâncias simultâneas de cada codec (antes iam 0, e o motor limitava
+     * o decode paralelo a 1 em todo aparelho).
+     * 3: + encoder de software reconhecido pelo nome antes do Android 10 (8F).
+     */
+    private const val SCHEMA = 3
 
     /**
      * A sondagem para passar ao motor: memória viva + codecs (guardados).
@@ -165,7 +171,9 @@ object DeviceProfile {
                         video.supportedWidths.upper,
                         video.supportedHeights.upper,
                         maxBitDepth(tag, caps),
-                        0,
+                        // Quantas sessões simultâneas o codec aceita: é o que
+                        // limita quantos vídeos decodificam em paralelo.
+                        runCatching { caps.maxSupportedInstances }.getOrDefault(0),
                     )
                     val key = (tag.toLong() shl 1) or (if (info.isEncoder) 1L else 0L)
                     val current = best[key]

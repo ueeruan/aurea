@@ -62,6 +62,17 @@ public:
     /// Muda quando uma miniatura nova fica pronta (a UI redesenha).
     [[nodiscard]] u32 generation() const noexcept { return generation_.load(std::memory_order_acquire); }
 
+    /// Pausa entre duas miniaturas (ms). É o "menos trabalho de fundo" da
+    /// política térmica (DevicePolicy::backgroundPauseMs): quente, a timeline
+    /// enche mais devagar em vez de disputar CPU e calor com o preview.
+    void set_pacing_ms(u32 ms) noexcept { pacingMs_.store(ms, std::memory_order_relaxed); }
+    [[nodiscard]] u32 pacing_ms() const noexcept { return pacingMs_.load(std::memory_order_relaxed); }
+
+    /// Decoders abertos agora. Fila vazia por `kDecoderIdleMs`: fecha todos
+    /// (§38 — decoder parado segura memória e sessão de codec do sistema).
+    [[nodiscard]] u32 open_decoders() const noexcept { return openDecoders_.load(std::memory_order_relaxed); }
+    static constexpr u32 kDecoderIdleMs = 2000;
+
     /// Projeto fechado: cache e fila zerados, decoders fechados.
     void clear();
 
@@ -124,6 +135,8 @@ private:
     u64 bytes_ = 0;
     u64 hits_ = 0, misses_ = 0, evictions_ = 0;
     u32 version_ = 0;
+    std::atomic<u32> pacingMs_{0};
+    std::atomic<u32> openDecoders_{0};
     bool running_ = false;
     std::thread thread_;
 };

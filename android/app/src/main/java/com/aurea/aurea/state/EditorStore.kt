@@ -451,6 +451,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     var deviceName by mutableStateOf("")
         private set
 
+    /** Relê o que o motor decidiu (a faixa térmica e o que ela muda são de agora). */
+    fun refreshDeviceReport() {
+        if (!ready) return
+        engine.deviceReport()?.let { deviceReport = it }
+    }
+
     /** Esquece a sondagem guardada: a próxima abertura mede o aparelho de novo. */
     fun remeasureDevice() {
         com.aurea.aurea.engine.DeviceProfile.forget(getApplication())
@@ -590,9 +596,54 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     // =========================================================================
     // Laço de estado (vsync da UI)
+    //
+    //  Fase 8 §38 (bateria): o laço rodava a CADA vsync enquanto o app estava
+    //  aberto — 60 a 120 acordadas por segundo da thread da UI, cada uma com uma
+    //  leitura JNI do status, com o app parado na Home ou o editor pausado.
+    //  Agora: no ritmo do vsync enquanto algo muda (tocando, scrub, gesto, HUD,
+    //  status diferente do anterior); depois de [STATUS_IDLE_FRAMES] quadros
+    //  iguais, cai para uma leitura a cada [STATUS_IDLE_POLL_MS] ms (4/s). Um
+    //  comando local (`send`, `group`, `refreshNow`) volta ao vsync na hora; o
+    //  que muda sozinho no motor (miniatura pronta, fim do play) aparece em até
+    //  250 ms e também devolve o vsync.
     // =========================================================================
+    private var statusIdleFrames = 0
+    private var statusSlow = false
+    /** Última assinatura do status (o que a UI mostra); igual = nada a fazer. */
+    private val statusSig = LongArray(16)
+    private val statusSigNow = LongArray(16)
+
+    /** Acordadas do laço de estado desde que o app subiu (HUD / medição §38). */
+    var statusWakeups = 0L
+        private set
+
+    /** Lê o status do motor e publica. Devolve se algo que a UI mostra mudou. */
+    private fun pollStatus(): Boolean {
+        engine.readStatus(statusBuffer)
+        status.readFrom(statusBuffer)
+        val n = statusSigNow
+        n[0] = status.playhead; n[1] = if (status.playing) 1 else 0; n[2] = status.modelRevision.toLong()
+        n[3] = status.thumbnailGeneration.toLong(); n[4] = if (status.dirty) 1 else 0
+        n[5] = (if (status.canUndo) 1L else 0L) or (if (status.canRedo) 2L else 0L)
+        n[6] = status.previewWidth.toLong(); n[7] = status.previewHeight.toLong()
+        n[8] = status.previewDenominator.toLong() * 2 + (if (status.previewAuto) 1 else 0)
+        n[9] = status.duration; n[10] = status.compWidth.toLong() * 65536 + status.compHeight
+        n[11] = status.layerCount.toLong(); n[12] = status.selectedCount.toLong()
+        n[13] = status.state.toLong() * 65536 + status.lastError; n[14] = status.assetCount.toLong()
+        n[15] = if (status.recoveryAvailable) 1 else 0
+        val changed = !n.contentEquals(statusSig)
+        if (changed) n.copyInto(statusSig)
+        publish()
+        return changed
+    }
+
+    /** Algo em curso que precisa do ritmo do vsync mesmo sem mudança no status. */
+    private fun statusBusy(): Boolean = playing || scrubbing || gestureDepth > 0 || hudVisible || autosaving
+
     private fun startStatusLoop() {
         if (statusLoop != null) return
+        statusSlow = false
+        statusIdleFrames = 0
         statusLoop = RenderLoop { frameTimeNanos ->
             if (!ready) return@RenderLoop
             engine.readStatus(statusBuffer)
@@ -683,6 +734,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     private fun stopStatusLoop() {
         statusLoop?.stop()
         statusLoop = null
+        statusSlow = false
     }
 
     private fun publish() {
@@ -1232,6 +1284,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         engine.readStatus(statusBuffer)
         status.readFrom(statusBuffer)
         publish()
+        wakeStatusLoop()
     }
 
     // =========================================================================
@@ -1752,6 +1805,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     fun toggleHud() {
         hudVisible = !hudVisible
+        wakeStatusLoop()   // o HUD mede o FPS da UI: precisa do vsync
     }
 
     // --- Composição (⚙ Projeto) ---------------------------------------------

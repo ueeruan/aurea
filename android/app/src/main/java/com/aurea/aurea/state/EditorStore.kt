@@ -134,8 +134,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     private val engine = AureaEngine.create(app)
 
-    /** Legendas automáticas (transcrição + camadas); ver `CaptionsState`. */
-    val captions = com.aurea.aurea.captions.CaptionsState(app, engine, viewModelScope) { refreshNow() }
+    /**
+     * Legendas automáticas (transcrição + camadas); ver `CaptionsState`.
+     * Criadas no primeiro uso (8I): a abertura não lê o cofre da chave.
+     */
+    val captions by lazy { com.aurea.aurea.captions.CaptionsState(app, engine, viewModelScope) { refreshNow() } }
 
     /** Export (tela Exportar). O motor renderiza; aqui só acompanha e publica. */
     val exporter = Exporter(app, engine, viewModelScope)
@@ -2220,7 +2223,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     // =========================================================================
     // Presets (JSON do motor; arquivos em filesDir/presets/<tipo>/)
     // =========================================================================
-    val presets = com.aurea.aurea.presets.PresetLibrary(app)
+    /** Criada no primeiro uso (8I): a abertura não lista as pastas de presets. */
+    val presets by lazy { com.aurea.aurea.presets.PresetLibrary(app) }
 
     /**
      * JSON do preset `kind` a partir do que está na tela: a camada escolhida

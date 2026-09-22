@@ -2834,3 +2834,147 @@ AUREA_TEST(Gpu, ThermalReducesPreviewButNotExport) {
     e.gpu()->destroy_texture(target);
     e.shutdown();
 }
+
+// -----------------------------------------------------------------------------
+// Benchmarks (item 109): só com AUREA_BENCH=1 (a suíte normal não paga o custo).
+// Tempo de parede por quadro no host; os quadros de vídeo já decodificados
+// (o tempo do decoder sintético não entra) e o cache do fluxo desligado.
+// -----------------------------------------------------------------------------
+namespace {
+bool bench_enabled() { const char* v = std::getenv("AUREA_BENCH"); return v && *v == '1'; }
+
+f64 bench_video(u32 w, u32 h, f32 speed, u32 blendMode, u32 frames, bool exportQuality) {
+    SyntheticConfig cfg;
+    cfg.width = w;
+    cfg.height = h;
+    cfg.frameCount = 300;
+    cfg.pattern = SyntheticPattern::FastSquare;
+    SyntheticFactory factory(cfg);
+    Engine e;
+    EngineConfig ec;
+    ec.backend = new vk::Backend();
+    ec.backendConfig.framesInFlight = 2;
+    ec.mediaFactory = &factory;
+    ec.workerCount = 2;
+    ec.disableAutosave = true;
+    ec.memoryBudgetBytes = 1024ull << 20;
+    if (!e.initialize(ec).ok() || !e.new_project(w, h, 30.0, "bench").ok()) return -1;
+    VideoImport imp;
+    imp.sourcePath = "sintetico";
+    auto layer = e.import_video(imp);
+    if (!layer.ok()) { e.shutdown(); return -1; }
+    {
+        Composition* c = e.project()->timeline().composition(e.project()->timeline().current());
+        Layer* l = c->layer(LayerId::unpack(*layer));
+        l->speed = speed;
+        l->end = FrameIndex{l->start.value + 1000};
+        c->set_duration(FrameIndex{1000});
+    }
+    (void)e.set_frame_blend(*layer, blendMode);
+    e.set_flow_cache_enabled(false);
+    TextureDesc d;
+    d.width = w;
+    d.height = h;
+    d.format = SurfaceFormat::RGBA16F;
+    d.renderTarget = true;
+    d.transferSrc = true;
+    const TextureHandle target = *e.gpu()->create_texture(d);
+    f64 total = 0;
+    for (u32 i = 0; i < frames; ++i) {
+        Command seek;
+        seek.type = CommandType::PlaybackSeek;
+        seek.seek.time = tick_at(FrameIndex{static_cast<i64>(11 + i * 2 + 1)}, 30.0);   // entre dois quadros da fonte
+        e.submit_commands(&seek, 1);
+        (void)e.render_offscreen(target, w, h, !exportQuality);   // aquece: decodifica os dois quadros
+        const auto t0 = std::chrono::steady_clock::now();
+        (void)e.render_offscreen(target, w, h, !exportQuality);
+        total += std::chrono::duration<f64, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    }
+    e.gpu()->destroy_texture(target);
+    e.shutdown();
+    return total / frames;
+}
+} // namespace
+
+AUREA_TEST(Gpu, BenchTemporalAndParticles) {
+    AUREA_REQUIRE_GPU();
+    if (!bench_enabled()) { std::printf("    (pulado: AUREA_BENCH=1 para medir)\n"); return; }
+    const f64 a = bench_video(1920, 1080, 0.5f, 1, 12, false);
+    const f64 b = bench_video(1920, 1080, 0.2f, 2, 12, false);
+    const f64 c = bench_video(3840, 2160, 0.5f, 2, 6, true);
+    std::printf("    Temporal A 1080p 50%% mistura: %.2f ms/quadro (%.0f fps)\n", a, 1000.0 / a);
+    std::printf("    Temporal B 1080p 20%% optical flow: %.2f ms/quadro (%.0f fps)\n", b, 1000.0 / b);
+    std::printf("    Temporal C 4K optical flow (export): %.2f ms/quadro\n", c);
+    for (u32 count : {100000u, 500000u, 1000000u}) {
+        Scene3DRig rig(1920, 1080);
+        auto p = rig.e.add_particles(0);
+        if (!p.ok()) continue;
+        Composition* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+        Layer* l = comp->layer(LayerId::unpack(*p));
+        l->particles.maxParticles = count;
+        l->particles.lifetime = 4.0f;
+        l->particles.rate = static_cast<f32>(count) / 4.0f;
+        l->particles.startSize = 3.0f;
+        l->particles.endSize = 1.0f;
+        TextureDesc d;
+        d.width = 1920;
+        d.height = 1080;
+        d.format = SurfaceFormat::RGBA16F;
+        d.renderTarget = true;
+        d.transferSrc = true;
+        const TextureHandle target = *rig.e.gpu()->create_texture(d);
+        f64 total = 0;
+        for (i64 f = 150; f < 160; ++f) {
+            Command seek;
+            seek.type = CommandType::PlaybackSeek;
+            seek.seek.time = tick_at(FrameIndex{f}, 30.0);
+            rig.e.submit_commands(&seek, 1);
+            const auto t0 = std::chrono::steady_clock::now();
+            (void)rig.e.render_offscreen(target, 1920, 1080);
+            total += std::chrono::duration<f64, std::milli>(std::chrono::steady_clock::now() - t0).count();
+        }
+        rig.e.gpu()->destroy_texture(target);
+        std::printf("    Particulas %uk (1080p): %.2f ms/quadro (%.0f fps)\n", count / 1000, total / 10, 10000.0 / total);
+    }
+}
+
+AUREA_TEST(Gpu, TwoDLayersInSceneOccludeAndAreOccludedByModels) {
+    AUREA_REQUIRE_GPU();
+    const std::string path = gltf_data("Box.glb");
+    if (!file_exists(path)) return;
+    // Forma azul ACIMA do modelo na pilha. Atrás dele em profundidade = o
+    // modelo tapa; na frente = ela tapa; inclinada atravessando = metade de cada.
+    auto run = [&](f32 z, f32 rotY, Image8& out, f32 k = 2.5f) {
+        Scene3DRig rig(320, 180);
+        ModelImport mi;
+        mi.path = path;
+        auto m = rig.e.import_model(mi);
+        auto s = rig.e.add_shape(10);
+        AUREA_CHECK(m.ok() && s.ok());
+        Composition* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+        Layer* sh = comp->layer(LayerId::unpack(*s));
+        sh->shape.fillColor = Vec4{0, 0.3f, 1, 1};
+        sh->transform.position = Vec3{160, 90, z};
+        sh->transform.rotation = Vec3{0, rotY, 0};
+        sh->transform.scale = Vec3{k, k, 1};
+        out = rig.capture(320);
+    };
+    auto redAt = [](const Image8& img, u32 x, u32 y) { const u8* p = img.at(x, y); return p[2] > 150 && p[0] < 80; };   // azul da forma
+    Image8 behind, front, cross;
+    run(150.0f, 0.0f, behind, 8.0f);   // câmera padrão em z = −216; a caixa vai de ~−50 a +50
+    run(-100.0f, 0.0f, front);
+    run(0.0f, 60.0f, cross);
+    // Coluna do meio: quantos pixels vermelhos (a forma cobre o centro nos três casos).
+    auto redCount = [&](const Image8& img) { u32 n = 0; for (u32 x = 0; x < 320; ++x) n += redAt(img, x, 90) ? 1 : 0; return n; };
+    const u32 rb = redCount(behind), rf = redCount(front), rc = redCount(cross);
+    const bool centerHidden = !redAt(behind, 160, 90);
+    const bool centerShown = redAt(front, 160, 90);
+    std::printf("    camada 2D na cena: atras do modelo %u px azuis (centro escondido %d); na frente %u (centro visivel %d); atravessando %u\n", rb,
+                centerHidden ? 1 : 0, rf, centerShown ? 1 : 0, rc);
+    AUREA_CHECK(centerHidden);
+    AUREA_CHECK(centerShown);
+    AUREA_CHECK(rf > rb && rb > 0);   // atrás: só as bordas aparecem em volta da caixa
+    AUREA_CHECK(rc > 0 && rc < rf);   // atravessando: parte some dentro do modelo
+}
+
+

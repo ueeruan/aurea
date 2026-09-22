@@ -10,6 +10,7 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <random>
 #include <vector>
 
@@ -367,4 +368,37 @@ AUREA_TEST(Tracking, EngineTracksVideoAndPointsStayPinned) {
     AUREA_CHECK(cancelled.state == 4);
     AUREA_CHECK(comp->layers().count() == layersBefore);
     e.shutdown();
+}
+
+AUREA_TEST(Tracking, BenchTracker1080p10s) {
+    const char* v = std::getenv("AUREA_BENCH");
+    if (!v || *v != '1') { std::printf("    (pulado: AUREA_BENCH=1 para medir)\n"); return; }
+    using namespace aurea::test;
+    SyntheticConfig cfg;
+    cfg.width = 1920;
+    cfg.height = 1080;
+    cfg.frameCount = 300;
+    cfg.pattern = SyntheticPattern::Scene3D;
+    SyntheticFactory factory(cfg);
+    for (u32 mode : {0u, 1u, 2u}) {
+        Engine e;
+        EngineConfig ec;
+        ec.workerCount = 2;
+        ec.memoryBudgetBytes = 512ull << 20;
+        ec.disableAutosave = true;
+        ec.mediaFactory = &factory;
+        if (!e.initialize(ec).ok() || !e.new_project(1920, 1080, 30.0, "bench").ok()) return;
+        VideoImport imp;
+        imp.sourcePath = "sintetico";
+        auto layer = e.import_video(imp);
+        if (!layer.ok()) return;
+        const auto t0 = std::chrono::steady_clock::now();
+        AUREA_CHECK(e.start_camera_track(*layer, mode));
+        while (e.camera_track_status().state == 1) std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        const f64 secs = std::chrono::duration<f64>(std::chrono::steady_clock::now() - t0).count();
+        const Engine::CameraTrackStatus st = e.camera_track_status();
+        std::printf("    Tracker 1080p 10 s modo %u: %.1f s (%.1f quadros/s); FOV %.1f; erro %.2f px; %u/%u quadros; %u pontos\n", mode, secs,
+                    st.frames / secs, st.fovDeg, st.rmsError, st.framesSolved, st.frames, st.inliers);
+        e.shutdown();
+    }
 }

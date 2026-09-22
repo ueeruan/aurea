@@ -118,6 +118,9 @@ struct RenderLayer {
     /// máscara de canal (0 = todos). Com elas, o desfoque fica de fora.
     struct TemporalSample { Mat4 m; f32 weight = 1.0f; Vec3 mask{0, 0, 0}; };
     std::vector<TemporalSample> temporal;
+    /// Camada 2D no espaço 3D que vive dentro de um grupo de cena (desenhada
+    /// com profundidade pelo grupo, não na composição): índice do grupo, ou −1.
+    i32 planeGroup = -1;
 };
 
 struct FrameSnapshot {
@@ -323,12 +326,17 @@ private:
     };
     std::unordered_map<u64, FlowCache> flowCache_;
     u32 flowHits_ = 0, flowMisses_ = 0;
-    f32 heavyScale_ = 1.0f;   ///< do quadro sendo renderizado (RenderSettings::heavyScale)
+    f32 heavyScale_ = 1.0f;
+    /// Planos de cada grupo 3D do snapshot sendo composto (camadas 2D na cena).
+    std::vector<std::vector<scene3d::ScenePlane>> groupPlanes_;
+    bool flowCacheEnabled_ = true;   ///< do quadro sendo renderizado (RenderSettings::heavyScale)
     [[nodiscard]] FGTexture video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture b, u32 w, u32 h, u32& baseW, u32& baseH,
                                        u64 frameNumber) noexcept;
 public:
     /// Acertos/erros do cache do optical flow (testes e HUD).
     void flow_cache_stats(u32& hits, u32& misses) const noexcept { hits = flowHits_; misses = flowMisses_; }
+    /// Benchmark: sem cache, todo quadro calcula o fluxo.
+    void set_flow_cache_enabled(bool on) noexcept { flowCacheEnabled_ = on; }
 private:
     std::unordered_map<u64, ImageTexture> images_;     ///< por AssetId empacotado
     std::unordered_map<u64, LutTexture> luts_;         ///< por hash da curva

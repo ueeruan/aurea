@@ -585,6 +585,18 @@ PipelineKey SceneRenderer::key_for(AlphaMode mode, bool doubleSided, bool skinne
     return k;
 }
 
+PipelineKey SceneRenderer::plane_key() const noexcept {
+    PipelineKey k = PipelineKey::graphics(ShaderId::composite_layer_vert, ShaderId::scene3d_plane_frag, SurfaceFormat::RGBA16F, true,
+                                          BlendMode::Normal);
+    k.hasDepth = true;
+    k.depthTest = true;
+    k.depthWrite = true;                       // o descarte do alfa baixo evita tapar o que está atrás
+    k.depthCompare = CompareOp::GreaterOrEqual;
+    k.depthFormat = SurfaceFormat::Depth32F;
+    k.cull = CullMode::None;                   // camada vista de costas continua visível
+    return k;
+}
+
 void SceneRenderer::collect_pipelines(std::vector<PipelineKey>& out) const {
     for (AlphaMode mode : {AlphaMode::Opaque, AlphaMode::Mask, AlphaMode::Blend}) {
         for (bool twoSided : {false, true}) {
@@ -594,10 +606,11 @@ void SceneRenderer::collect_pipelines(std::vector<PipelineKey>& out) const {
     }
     out.push_back(shadow_key(false));
     out.push_back(shadow_key(true));
+    out.push_back(plane_key());
 }
 
 bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& frame, u32 width, u32 height,
-                          u64 frameNumber, FGTexture& outColor) noexcept {
+                          u64 frameNumber, FGTexture& outColor, const std::vector<ScenePlane>* planes) noexcept {
     stats_ = SceneStats{};
     if (!gpu_ || !shaders_ || width == 0 || height == 0) return false;
     // Ambiente (IBL): o estúdio neutro ou o HDRI do projeto, gerado fora da
@@ -1048,6 +1061,22 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     const u32 total = static_cast<u32>(opaque.size() + blended.size());
     Draw* list = total ? arena.alloc_array<Draw>(total) : nullptr;
     if (total && !list) return false;
+    // Planos (camadas 2D na cena): depois dos opacos, do mais longe para o
+    // mais perto, antes dos modelos transparentes.
+    u32 planeCount = 0;
+    ScenePlane* planeList = nullptr;
+    PipelineHandle planePipe{};
+    if (planes && !planes->empty()) {
+        auto pp = shaders_->pipeline(plane_key());
+        if (pp.ok()) {
+            planePipe = *pp;
+            planeCount = static_cast<u32>(planes->size());
+            planeList = arena.alloc_array<ScenePlane>(planeCount);
+            for (u32 i = 0; i < planeCount; ++i) planeList[i] = (*planes)[i];
+            std::sort(planeList, planeList + planeCount, [](const ScenePlane& a, const ScenePlane& b) { return a.viewDepth > b.viewDepth; });
+        }
+    }
+    const u32 opaqueCount = static_cast<u32>(opaque.size());
     for (usize i = 0; i < opaque.size(); ++i) list[i] = opaque[i];
     for (usize i = 0; i < blended.size(); ++i) list[opaque.size() + i] = blended[i];
     stats_.drawCalls = total;
@@ -1063,10 +1092,14 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         FGTexture shadow;
         u64 nearestSampler;
         BufferHandle morph;
+        ScenePlane* planes;
+        u32 planeCount;
+        u32 opaqueCount;
+        PipelineHandle planePipe;
     } cap{list, total, white_, flatNormal_, ibl ? irradiance_ : envCube_, ibl ? prefiltered_ : envCube_,
           ibl ? iblLut_ : brdfLut_, cubeSampler_, shaders_->sampler(CommonSampler::LinearRepeat).id,
           shaders_->sampler(CommonSampler::LinearClamp).id, joints, shadowTex,
-          shaders_->sampler(CommonSampler::NearestClamp).id, morphBuf};
+          shaders_->sampler(CommonSampler::NearestClamp).id, morphBuf, planeList, planeCount, opaqueCount, planePipe};
 
     // Z reverso: limpa a profundidade com 0 (o infinito).
     const u32 pbrPass = graph.add_raster_pass_depth("3d-pbr", PassStage::Scene3D, color, LoadOp::Clear, Vec4{0, 0, 0, 0}, depth,
@@ -1075,7 +1108,22 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         PipelineHandle bound{};
         const GpuModel* boundModel = nullptr;
         const GpuMaterial* boundMat = nullptr;
+        auto drawPlanes = [&]() {
+            if (!cap.planeCount) return;
+            c.bind_pipeline(cap.planePipe);
+            for (u32 k = 0; k < cap.planeCount; ++k) {
+                const ScenePlane& p = cap.planes[k];
+                c.bind_texture(0, pc.texture(p.texture), SamplerHandle{p.sampler});
+                struct { Mat4 m; Vec4 region; Vec4 uv; Vec4 params; } push{p.clipFromLayer, p.region, Vec4{0, 0, 1, 1}, Vec4{p.opacity, 0, 0, 0}};
+                c.push_constants(&push, sizeof(push));
+                c.draw(6);
+            }
+            bound = PipelineHandle{};
+            boundMat = nullptr;
+            boundModel = nullptr;
+        };
         for (u32 i = 0; i < cap.count; ++i) {
+            if (i == cap.opaqueCount) drawPlanes();
             const Draw& d = cap.draws[i];
             if (!(d.pipeline == bound)) {
                 c.bind_pipeline(d.pipeline);
@@ -1122,8 +1170,10 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             c.push_constants(&d.push, sizeof(MeshPush));
             c.draw_indexed(d.indexCount, 1, d.firstIndex, d.prim->vertexOffset, 0);
         }
+        if (cap.opaqueCount >= cap.count) drawPlanes();
     });
     if (shadowTex.valid()) graph.read(pbrPass, shadowTex);
+    for (u32 k = 0; k < planeCount; ++k) graph.read(pbrPass, planeList[k].texture);
     outColor = color;
     return true;
 }

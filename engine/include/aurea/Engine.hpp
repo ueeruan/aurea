@@ -329,6 +329,7 @@ public:
     bool set_vector_blur(u64 layerId, f32 amount) noexcept;
     /// Acertos/erros do cache do optical flow do renderer.
     void flow_cache_stats(u32& hits, u32& misses) const noexcept { renderer_.flow_cache_stats(hits, misses); }
+    void set_flow_cache_enabled(bool on) noexcept { renderer_.set_flow_cache_enabled(on); }
     /// Obturador da composição em graus (0–720; 180 = padrão de cinema).
     bool set_shutter_angle(f32 degrees) noexcept;
     /// Chave geral da composição (as camadas com desfoque só borram com ela).

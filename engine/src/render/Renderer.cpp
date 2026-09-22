@@ -617,7 +617,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 const ParticleData& pd = l->particles;
                 const f32 lw = static_cast<f32>(comp.width()), lh = static_cast<f32>(comp.height());
                 const f32 tsec = static_cast<f32>(static_cast<f64>(local.value) / fps);
-                const f32 rate = std::clamp(pd.rate, 0.1f, 5000.0f);
+                const f32 rate = std::clamp(pd.rate, 0.1f, 1000000.0f);   // o shader analítico aceita milhões
                 const f32 life = std::clamp(pd.lifetime, 0.05f, 60.0f);
                 const u32 cap = settings.finalQuality ? std::max<u32>(1u, pd.maxParticles)
                                                       : std::max<u32>(1u, static_cast<u32>(static_cast<f32>(pd.maxParticles) * std::clamp(settings.heavyScale, 0.05f, 1.0f)));
@@ -670,7 +670,6 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             default:
                 continue;   // partículas: fora desta fase
         }
-        if (rl.source.kind != LayerSource::Kind::Scene3D) groupOpen = false;
         if (rl.source.kind == LayerSource::Kind::Scene3D) {
             // O grupo não tem efeitos de layer nesta fase (entram sobre o
             // resultado do grupo quando o 3D ganhar efeitos compatíveis).
@@ -690,7 +689,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             m = layer_matrix(*p, p->local_time(time)) * m;
             parent = p->parent;
         }
-        if (wants_3d(comp, *l, time)) {
+        const bool inScene3d = wants_3d(comp, *l, time);
+        if (inScene3d) {
             // Rotação X/Y, profundidade, nulo 3D na cadeia: a MESMA câmera dos
             // modelos 3D (padrão = plano Z=0 1:1 com a composição).
             m = compFromClip * viewProj3d * world_3d(comp, *l, time);
@@ -735,7 +735,28 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             if (rl.opacity <= 0.0f) continue;
         }
         rl.compFromLayer = m;
-        rl.texelScale = texel_scale_for(max_scale(m) * previewFactor);
+        // Densidade na tela: no 2D, a escala da matriz; no 3D, a PROJEÇÃO dos
+        // cantos (com a divisão pela profundidade) — perto da câmera a camada
+        // aparece maior e precisa de mais texels.
+        f32 onScreen = max_scale(m);
+        if (inScene3d && rl.source.width > 0 && rl.source.height > 0) {
+            const f32 lw = static_cast<f32>(rl.source.width), lh = static_cast<f32>(rl.source.height);
+            Vec2 q[4];
+            bool ok = true;
+            const Vec2 corners[4] = {{0, 0}, {lw, 0}, {lw, lh}, {0, lh}};
+            for (int k = 0; k < 4 && ok; ++k) {
+                const Vec4 c = m * Vec4{corners[k].x, corners[k].y, 0, 1};
+                ok = c.w > 1e-4f;
+                if (ok) q[k] = Vec2{c.x / c.w, c.y / c.w};
+            }
+            if (ok) {
+                auto len = [](Vec2 a, Vec2 b) { return std::hypot(a.x - b.x, a.y - b.y); };
+                onScreen = std::max({len(q[0], q[1]) / lw, len(q[3], q[2]) / lw, len(q[0], q[3]) / lh, len(q[1], q[2]) / lh});
+            } else {
+                onScreen = 4.0f;   // atravessa a câmera: densidade alta
+            }
+        }
+        rl.texelScale = texel_scale_for(std::min(onScreen, 4.0f) * previewFactor);
 
         // Desfoque de movimento (transform 2D, com pais): K amostras no
         // obturador centrado no quadro. Camada parada no intervalo = nada.
@@ -949,6 +970,36 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         placement.layerHeight = rl.source.height;
         EffectGraph::plan(*l, *effects_, local, rl.texelScale, placement, this, out.plans[used]);
 
+        // Camada 2D no espaço 3D: entra na cena (profundidade de verdade com os
+        // modelos e as outras camadas 3D vizinhas na pilha). Com desfoque/eco
+        // ou modo de mistura ela continua na composição, como antes.
+        const bool asPlane = inScene3d && rl.blurMatrices.empty() && rl.temporal.empty() && rl.blend == BlendMode::Normal
+                          && rl.source.kind != LayerSource::Kind::Particles && !out.plans[used].hasFold;
+        if (asPlane) {
+            if (!groupOpen || out.scenes.empty()) {
+                out.scenes.emplace_back();
+                RenderLayer g;
+                g.id = rid;
+                g.source.kind = LayerSource::Kind::Scene3D;
+                g.source.sceneGroup = static_cast<u32>(out.scenes.size() - 1);
+                g.source.width = out.compWidth;
+                g.source.height = out.compHeight;
+                g.compFromLayer = Mat4::identity();
+                g.texelScale = previewFactor;
+                // O plano de efeitos desta camada vai com ela (índice seguinte).
+                EffectPlan planeFx = std::move(out.plans[used]);
+                out.plans[used].clear();
+                out.layers.push_back(std::move(g));
+                ++used;
+                if (out.plans.size() <= used) out.plans.emplace_back();
+                out.plans[used] = std::move(planeFx);
+                groupOpen = true;
+            }
+            rl.planeGroup = static_cast<i32>(out.scenes.size() - 1);
+            out.scenes.back().planeLayers.push_back(used);
+        } else {
+            groupOpen = false;
+        }
         out.layers.push_back(std::move(rl));
         ++used;
     }
@@ -1235,7 +1286,7 @@ FGTexture Renderer::video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture
         fc.height = lh;
         fc.lastFrame = frameNumber;
     }
-    for (u32 i = 0; i < 2; ++i) {
+    for (u32 i = 0; i < 2 && flowCacheEnabled_; ++i) {
         if (fc.tex[i].valid() && fc.key[i] == pairKey) {
             ++flowHits_;
             return graph_.import_texture("flow-cache", fc.tex[i], fd);
@@ -1303,8 +1354,10 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
         if (!currentScenes_ || layer.source.sceneGroup >= currentScenes_->size()) return false;
         const scene3d::SceneFrame& group = (*currentScenes_)[layer.source.sceneGroup];
         FGTexture tex{};
+        const std::vector<scene3d::ScenePlane>* planes =
+            layer.source.sceneGroup < groupPlanes_.size() && !groupPlanes_[layer.source.sceneGroup].empty() ? &groupPlanes_[layer.source.sceneGroup] : nullptr;
         if (group.blurFrames.empty()) {
-            if (!scene3d_.build(graph_, arena_, group, compTargetW_, compTargetH_, frameNumber, tex)) return false;
+            if (!scene3d_.build(graph_, arena_, group, compTargetW_, compTargetH_, frameNumber, tex, planes)) return false;
         } else {
             // Desfoque: K cenas no obturador, média aditiva (peso 1/K, cor
             // pré-multiplicada) num alvo do tamanho da composição.
@@ -1312,7 +1365,7 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
             FGTexture* frames = arena_.alloc_array<FGTexture>(k);
             u32 built = 0;
             for (u32 s = 0; s < k; ++s) {
-                if (scene3d_.build(graph_, arena_, group.blurFrames[s], compTargetW_, compTargetH_, frameNumber, frames[built])) ++built;
+                if (scene3d_.build(graph_, arena_, group.blurFrames[s], compTargetW_, compTargetH_, frameNumber, frames[built], planes)) ++built;
             }
             auto pAdd = shaders_.pipeline(PipelineKey::graphics(
                 ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat, true, BlendMode::Add));
@@ -1526,8 +1579,36 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
     // --- Layers: fonte → efeitos → desenho na composição.
     EffectBuildContext ctx(graph_, shaders_, arena_, *this, kWorkFormat,
                            std::min<u32>(backend_->capabilities().maxTexture2D, 8192));
+    // Camadas 2D que vivem numa cena 3D: imagem (com efeitos) primeiro; o
+    // grupo as desenha com profundidade junto dos modelos.
+    groupPlanes_.assign(snap.scenes.size(), {});
     for (u32 i = 0; i < snap.layers.size(); ++i) {
         const RenderLayer& layer = snap.layers[i];
+        if (layer.planeGroup < 0 || static_cast<usize>(layer.planeGroup) >= groupPlanes_.size()) continue;
+        LayerImage src;
+        const bool hasEffects = i < snap.plans.size() && !snap.plans[i].empty();
+        if (!build_source(layer, i, hasEffects, src, framesInFlight_, frameNumber)) {
+            if (layer.source.kind != LayerSource::Kind::Video) incomplete_ = true;
+            continue;
+        }
+        LayerImage fin = src;
+        if (hasEffects) (void)EffectGraph::build(snap.plans[i], ctx, src, fin);
+        scene3d::ScenePlane p;
+        p.texture = fin.texture;
+        // Sólido otimizado (1×1): clamp, como na composição (a borda transparente
+        // viraria um degradê).
+        p.sampler = shaders_.sampler(layer.source.kind == LayerSource::Kind::Solid && fin.width == 1 ? CommonSampler::LinearClamp
+                                                                                                      : CommonSampler::LinearBorder).id;
+        p.clipFromLayer = clip_from_comp(static_cast<f32>(snap.compWidth), static_cast<f32>(snap.compHeight)) * layer.compFromLayer;
+        p.region = Vec4{fin.region.x, fin.region.y, fin.region.w, fin.region.h};
+        p.opacity = layer.opacity;
+        const Vec4 c = p.clipFromLayer * Vec4{fin.region.x + fin.region.w * 0.5f, fin.region.y + fin.region.h * 0.5f, 0, 1};
+        p.viewDepth = c.w;
+        groupPlanes_[static_cast<usize>(layer.planeGroup)].push_back(p);
+    }
+    for (u32 i = 0; i < snap.layers.size(); ++i) {
+        const RenderLayer& layer = snap.layers[i];
+        if (layer.planeGroup >= 0) continue;   // desenhada dentro da cena
         LayerImage src;
         const bool hasEffects = i < snap.plans.size() && !snap.plans[i].empty();
         if (!build_source(layer, i, hasEffects, src, framesInFlight_, frameNumber)) {

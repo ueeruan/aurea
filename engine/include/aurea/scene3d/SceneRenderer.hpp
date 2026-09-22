@@ -119,6 +119,18 @@ struct SceneEnvironment {
 
 /// Tudo que um grupo 3D precisa para um frame. Montado no prepare (com o
 /// modelo travado), consumido no render (sem trava).
+/// Camada 2D no espaço 3D desenhada dentro da cena (profundidade de verdade
+/// com os modelos e as outras camadas 3D). A textura é a imagem final da
+/// camada (efeitos aplicados); clipFromLayer = projeção × mundo da camada.
+struct ScenePlane {
+    FGTexture texture{};
+    u64  sampler = 0;
+    Mat4 clipFromLayer = Mat4::identity();
+    Vec4 region{};                 ///< px da camada
+    f32  opacity = 1.0f;
+    f32  viewDepth = 0.0f;         ///< w do centro (ordem do mais longe para o mais perto)
+};
+
 struct SceneFrame {
     SceneCamera camera;
     SceneEnvironment environment;
@@ -128,6 +140,8 @@ struct SceneFrame {
     /// modelos e pose da animação). Vazio = sem desfoque; o render acumula a
     /// média dos K quadros.
     std::vector<SceneFrame> blurFrames;
+    /// Índices (no snapshot) das camadas 2D que vivem nesta cena.
+    std::vector<u32> planeLayers;
 };
 
 struct SceneStats {
@@ -164,7 +178,8 @@ public:
     /// Monta os passes do grupo: cor (RGBA16F, limpa transparente) e
     /// profundidade (transitória). `outColor` recebe a textura a compor.
     [[nodiscard]] bool build(FrameGraph& graph, Arena& arena, const SceneFrame& frame, u32 width, u32 height,
-                             u64 frameNumber, FGTexture& outColor) noexcept;
+                             u64 frameNumber, FGTexture& outColor, const std::vector<ScenePlane>* planes = nullptr) noexcept;
+    [[nodiscard]] PipelineKey plane_key() const noexcept;
 
     /// Pipelines 3D para aquecer junto com os 2D.
     void collect_pipelines(std::vector<PipelineKey>& out) const;

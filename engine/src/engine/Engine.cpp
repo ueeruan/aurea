@@ -1459,12 +1459,12 @@ bool Engine::set_particle_param(u64 layerId, u32 param, f32 v) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
-    if (!l || l->kind != LayerKind::ParticleSystem || param > 7) return false;
+    if (!l || l->kind != LayerKind::ParticleSystem || param > 8) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "particulas");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     ParticleData& p = l->particles;
     switch (param) {
-        case 0: p.rate = std::clamp(v, 0.1f, 2000.0f); break;
+        case 0: p.rate = std::clamp(v, 0.1f, 1000000.0f); break;
         case 1: p.lifetime = std::clamp(v, 0.05f, 30.0f); break;
         case 2: p.speed = std::clamp(v, 0.0f, 5000.0f); break;
         case 3: p.spread = std::clamp(v, 0.0f, 360.0f); break;
@@ -1472,6 +1472,7 @@ bool Engine::set_particle_param(u64 layerId, u32 param, f32 v) noexcept {
         case 5: p.startSize = std::clamp(v, 0.0f, 500.0f); break;
         case 6: p.endSize = std::clamp(v, 0.0f, 500.0f); break;
         case 7: p.direction = v; break;
+        case 8: p.maxParticles = static_cast<u32>(std::clamp(v, 1.0f, 1000000.0f)); break;
         default: break;
     }
     project_->mark_dirty();

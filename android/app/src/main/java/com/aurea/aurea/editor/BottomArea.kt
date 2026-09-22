@@ -238,7 +238,7 @@ private fun onSection(store: EditorStore, ui: EditorUi, s: DockSection) {
         DockSection.Presets -> openPanel(store, ui, EditorPanel.Presets)
         DockSection.Mask -> openPanel(store, ui, EditorPanel.Mask)
         DockSection.ColorFill, DockSection.EditShape, DockSection.EditText -> when (store.detail?.kind) {
-            com.aurea.aurea.ui.theme.LayerType.Shape.kind -> openPanel(store, ui, EditorPanel.Shape)
+            com.aurea.aurea.ui.theme.LayerType.Shape.kind -> openPanel(store, ui, if (store.isVectorLayer) EditorPanel.Vector else EditorPanel.Shape)
             com.aurea.aurea.ui.theme.LayerType.Text.kind -> openPanel(store, ui, EditorPanel.Text)
             else -> store.comingSoon(s.label)
         }

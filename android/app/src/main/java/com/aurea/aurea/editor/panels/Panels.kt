@@ -48,6 +48,7 @@ enum class EditorPanel {
     Captions,      // legendas automáticas da fala
     Presets,       // navegador de presets (efeitos, texto, animação, legenda, curva)
     Mask,          // máscaras (roto) e track matte
+    Vector,        // camada vetorial: caminhos, tinta, contorno, aparar, repetidor
 }
 
 /**
@@ -113,6 +114,7 @@ fun PanelContent(
         EditorPanel.Captions -> "Legendas"
         EditorPanel.Presets -> "Presets"
         EditorPanel.Mask -> "Máscara e recorte"
+        EditorPanel.Vector -> "Vetor"
     }
 
     Column(modifier.fillMaxSize().background(AureaColors.EditorPanel)) {
@@ -138,6 +140,7 @@ fun PanelContent(
                     EditorPanel.Captions -> CaptionsPanel(env)
                     EditorPanel.Presets -> PresetsPanel(env)
                     EditorPanel.Mask -> MaskPanel(env)
+                    EditorPanel.Vector -> VectorPanel(env)
                 }
             }
         }

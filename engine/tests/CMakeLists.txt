@@ -29,6 +29,8 @@ add_executable(aurea_tests
     test_text.cpp
     test_presets.cpp
     test_expr.cpp
+    test_vector.cpp
+    test_vector_gpu.cpp
 )
 
 target_include_directories(aurea_tests PRIVATE

@@ -76,7 +76,7 @@ static_assert(sizeof(GlyphInstance) == 160, "layout std430 do glifo");
 struct LayerSource {
     /// Adjustment: camada de ajuste — sem fonte; os efeitos dela (plano no
     /// mesmo índice) leem a composição acumulada abaixo dela.
-    enum class Kind : u8 { None = 0, Video, Image, Solid, Scene3D, Shape, Nested, Particles, Text, Adjustment };
+    enum class Kind : u8 { None = 0, Video, Image, Solid, Scene3D, Shape, Nested, Particles, Text, Adjustment, Vector };
     Kind kind = Kind::None;
     u32  width = 0;          ///< tamanho natural da layer (px)
     u32  height = 0;
@@ -123,6 +123,12 @@ struct LayerSource {
     Vec4     shapeFill{};
     Vec4     shapeStroke{};
     f32      shapeStrokeWidth = 0.0f;
+
+    // Camada vetorial: triângulos em FrameSnapshot::vec (2 vec4 por vértice,
+    // a partir de `vecFirst`) e as tintas logo depois (`paintFirst`, em vec4).
+    u32      vecFirst = 0;
+    u32      vecCount = 0;       ///< vértices
+    u32      paintFirst = 0;
 };
 
 struct RenderLayer {
@@ -181,6 +187,9 @@ struct FrameSnapshot {
     /// Blocos de máscara das camadas deste quadro (cabeçalhos + arestas).
     std::vector<Vec4> maskData;
     u32 maskBase = 0;    ///< onde este snapshot começa no buffer de máscaras (render)
+    /// Malhas das camadas vetoriais (vec4) e onde começam no buffer do quadro.
+    std::vector<Vec4> vec;
+    u32 vecBase = 0;
 };
 
 struct RenderSettings {
@@ -392,6 +401,16 @@ private:
     };
     std::unordered_map<u64, MaskCache> maskCache_;
     u32 maskHits_ = 0, maskMisses_ = 0;
+    // Malhas vetoriais: o mesmo anel de buffers do quadro que os glifos.
+    BufferHandle vecBuf_[kGlyphRing]{};
+    usize vecCap_[kGlyphRing]{};
+    u32 vecSlot_ = 0;
+    BufferHandle vecFrameBuf_{};
+    void upload_vectors(FrameSnapshot& snap) noexcept;
+    /// Malha vetorial por camada: refeita só quando a chave (grupos avaliados +
+    /// densidade) muda — camada parada não retriangula a cada quadro.
+    struct VectorCacheEntry { u64 key = 0; u64 lastFrame = 0; std::vector<Vec4> verts, paints; Vec2 min{}, max{}; };
+    std::unordered_map<u64, VectorCacheEntry> vectorCache_;
     /// Cache do optical flow por camada: duas texturas alternadas (a que um
     /// quadro em voo lê nunca é a que o próximo escreve), cada uma com o par
     /// de quadros da fonte que a gerou.

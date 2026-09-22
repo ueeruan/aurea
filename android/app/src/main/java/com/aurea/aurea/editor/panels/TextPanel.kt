@@ -154,6 +154,7 @@ internal fun TextPanel(env: PanelEnv) {
         TextRuler(store, "Largura do contorno", { store.textDetail?.strokeWidth ?: 0f }, "${td.strokeWidth.roundToInt()} px",
             0.1f, 0f, 60f, "contorno do texto") { store.setTextStrokeWidth(it) }
         TextStyleSections(env)
+        TextPathSection(env)
         TextAnimSection(env)
     }
 }

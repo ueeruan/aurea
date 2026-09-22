@@ -269,6 +269,56 @@ public:
     /// Nova forma no centro da composição, do cabeçote até o fim. `preset` é
     /// o ladrilho da aba Forma (0..14). Devolve o id da camada.
     [[nodiscard]] Result<u64> add_shape(u32 preset) noexcept;
+
+    // --- Camada vetorial (Fase 7D; EngineVector.cpp) --------------------------------
+    // Coordenadas: a camada nasce do tamanho da composição, com a âncora no
+    // centro e a posição no centro — espaço da camada = espaço da composição
+    // até alguém mover/girar a camada. Os caminhos ficam no espaço do GRUPO.
+    // `continuing` = continuação de um arrasto: não abre passo de desfazer
+    // novo (o primeiro envio do gesto, com false, capturou o "antes").
+    /// Nova camada vetorial: 0 vazia (um caminho livre sem pontos, contorno
+    /// branco — pronta para o modo de pontos), 1 retângulo, 2 elipse,
+    /// 3 polígono, 4 estrela. Do cabeçote até o fim.
+    [[nodiscard]] Result<u64> add_vector_layer(u32 preset) noexcept;
+    /// Documento inteiro (vector::encode_document) e nomes dos grupos.
+    bool vector_document(u64 layerId, std::vector<f32>& out, std::string& names) noexcept;
+    /// Substitui o documento. Mesmo nº de grupos (a estrutura muda pelas
+    /// funções abaixo, que remapeiam as trilhas animadas).
+    bool set_vector_document(u64 layerId, const f32* data, usize count, const std::string& names, bool continuing) noexcept;
+    /// Caminho avaliado no cabeçote (morph e paramétrico resolvidos), no espaço
+    /// do grupo, precedido da afim grupo → composição (a b c d tx ty) e de
+    /// flags (bit0 livre, bit1 tem keyframes de forma, bit2 keyframe no cabeçote).
+    bool vector_path_at(u64 layerId, u32 group, u32 path, std::vector<f32>& out) noexcept;
+    /// Grava a forma do caminho livre (bezier codificado). Com keyframes de
+    /// forma, grava no cabeçote (cria o keyframe se não houver).
+    bool set_vector_path(u64 layerId, u32 group, u32 path, const f32* bez, usize count, bool continuing) noexcept;
+    /// Liga/desliga o keyframe de forma no cabeçote (morph).
+    bool toggle_vector_path_key(u64 layerId, u32 group, u32 path) noexcept;
+    /// Grupo novo com um caminho (VectorPathKind; Free = sem pontos). Índice ou −1.
+    i32 add_vector_group(u64 layerId, u32 pathKind) noexcept;
+    bool remove_vector_group(u64 layerId, u32 group) noexcept;
+    /// Caminho novo no grupo (bezier opcional para Free). Índice ou −1.
+    i32 add_vector_path(u64 layerId, u32 group, u32 pathKind, const f32* bez, usize count) noexcept;
+    bool remove_vector_path(u64 layerId, u32 group, u32 path) noexcept;
+    /// Paramétrico → caminho livre editável (mesma forma).
+    bool make_vector_path_editable(u64 layerId, u32 group, u32 path) noexcept;
+    /// Valores animáveis do grupo no cabeçote (kVecParamCount floats) + bits
+    /// animados + bits com keyframe no cabeçote. Devolve quantos floats.
+    static constexpr u32 kVectorParamFloats = kVecParamCount + 2;
+    u32 query_vector_params(u64 layerId, u32 group, f32* out, u32 capacity) noexcept;
+    /// Valor (VectorParam): com keyframes, grava no cabeçote.
+    bool set_vector_param(u64 layerId, u32 group, u32 param, f32 value, bool continuing) noexcept;
+    bool toggle_vector_param_key(u64 layerId, u32 group, u32 param) noexcept;
+    /// Desenho à mão livre: pontos do dedo (x,y em px da composição) viram um
+    /// caminho suave (ajuste de Schneider, `error` px). `layerId` = 0 cria uma
+    /// camada vetorial nova; senão entra como grupo novo nela. Devolve a camada.
+    [[nodiscard]] Result<u64> add_freehand_path(u64 layerId, const f32* xy, usize count, f32 error) noexcept;
+    /// SVG → camada vetorial nova (um grupo por forma), centrada na composição.
+    [[nodiscard]] Result<u64> import_svg(const std::string& text, const char* name) noexcept;
+    /// Texto no caminho: camada-guia vetorial (0 = desliga), margem inicial,
+    /// perpendicular, invertido.
+    bool set_text_path(u64 layerId, u64 pathLayer, f32 offset, bool perpendicular, bool reverse) noexcept;
+    bool query_text_path(u64 layerId, u64& pathLayer, f32& offset, bool& perpendicular, bool& reverse) noexcept;
     // --- Fontes ---------------------------------------------------------------------
     /// Fontes disponíveis (aparelho + importadas), por família e peso.
     [[nodiscard]] std::vector<text::FontEntry> list_fonts() noexcept;

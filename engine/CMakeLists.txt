@@ -96,6 +96,11 @@ set(AUREA_CORE_SOURCES
     src/text/FontManager.cpp
     src/text/TextAnimator.cpp
     src/text/Captions.cpp
+    src/vector/Vector.cpp
+    src/vector/Clipper.cpp
+    src/vector/Svg.cpp
+    src/vector/VectorDocument.cpp
+    src/engine/EngineVector.cpp
     src/playback/Playback.cpp
     src/scene3d/GltfImporter.cpp
     src/scene3d/SceneRenderer.cpp

@@ -123,6 +123,9 @@ private const val ERRC_UNSUPPORTED_FORMAT = 17L
 /** Floats do cabeçalho de cada máscara em Engine::query_masks (kMaskHeaderFloats). */
 private const val MASK_HEADER = 12
 
+/** shapeType da camada vetorial no motor (`kShapeVector`, vector/VectorData.hpp). */
+const val VECTOR_SHAPE_TYPE = 11
+
 class EditorStore(app: Application) : AndroidViewModel(app) {
 
     private val engine = AureaEngine.create(app)
@@ -564,6 +567,211 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             null
         }
         refreshMasks()
+        textPath = if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Text.kind) engine.queryTextPath(id) else null
+        refreshVector()
+    }
+
+    // --- Camada vetorial (Fase 7D) -----------------------------------------------
+    /** Ferramenta do palco: 0 normal, 1 pontos (editar caminho), 2 mão livre. */
+    var vectorTool by mutableIntStateOf(0)
+        private set
+    /** Documento da camada vetorial principal (nulo = não é vetorial). */
+    var vectorDoc by mutableStateOf<com.aurea.aurea.engine.VectorDoc?>(null)
+        private set
+    var vectorGroup by mutableIntStateOf(0)
+        private set
+    var vectorPath by mutableIntStateOf(0)
+        private set
+    /** Caminho escolhido no cabeçote (com a afim para a composição). */
+    var vectorPathAt by mutableStateOf<com.aurea.aurea.engine.VPathAt?>(null)
+        private set
+    /** Valores animáveis do grupo no cabeçote + bits animados + bits com keyframe. */
+    var vectorParams by mutableStateOf<FloatArray?>(null)
+        private set
+    /** Ponto escolhido no modo de pontos (−1 = nenhum). */
+    var vectorPoint by mutableIntStateOf(-1)
+    /** Texto no caminho da camada de texto: [guia, bits da margem, perpendicular, invertido]. */
+    var textPath by mutableStateOf<LongArray?>(null)
+        private set
+    /** Camada que recebe os traços seguintes da mão livre (0 = cria uma). */
+    private var freehandLayer = 0L
+
+    val isVectorLayer: Boolean
+        get() = detail?.let { it.kind == com.aurea.aurea.ui.theme.LayerType.Shape.kind && (it.shapeTypePoints and 0xFFFF) == VECTOR_SHAPE_TYPE } == true
+
+    private fun refreshVector() {
+        val id = primary
+        if (id == null || !isVectorLayer) {
+            vectorDoc = null
+            vectorPathAt = null
+            vectorParams = null
+            if (vectorTool == 1) vectorTool = 0
+            return
+        }
+        val doc = com.aurea.aurea.engine.VectorDoc.decode(engine.vectorDocument(id), engine.vectorGroupNames(id))
+        vectorDoc = doc
+        val groups = doc?.groups?.size ?: 0
+        if (vectorGroup >= groups) vectorGroup = max(0, groups - 1)
+        val paths = doc?.groups?.getOrNull(vectorGroup)?.paths?.size ?: 0
+        if (vectorPath >= paths) vectorPath = max(0, paths - 1)
+        vectorPathAt = if (paths > 0) com.aurea.aurea.engine.VPathAt.of(engine.vectorPathAt(id, vectorGroup, vectorPath)) else null
+        val n = vectorPathAt?.path?.v?.size ?: 0
+        if (vectorPoint >= n) vectorPoint = -1
+        vectorParams = if (groups > 0) engine.queryVectorParams(id, vectorGroup) else null
+    }
+
+    /** "Desenho vetorial" (preset 0, entra no modo de pontos) e formas paramétricas (1..4). */
+    fun addVectorLayer(preset: Int): Long {
+        val id = engine.addVectorLayer(preset)
+        if (id < 0) {
+            errorMessage = "Não foi possível criar a camada vetorial (erro ${-id})."
+            return -1
+        }
+        refreshNow()
+        vectorGroup = 0
+        vectorPath = 0
+        vectorPoint = -1
+        select(id)
+        if (preset == 0) vectorTool = 1
+        return id
+    }
+
+    fun chooseVectorTool(tool: Int) {
+        if (tool == 2 && vectorTool != 2) freehandLayer = 0L
+        vectorTool = if (tool == 1 && !isVectorLayer) 0 else tool
+        vectorPoint = -1
+    }
+
+    fun selectVectorPath(group: Int, path: Int) {
+        vectorGroup = max(0, group)
+        vectorPath = max(0, path)
+        vectorPoint = -1
+        refreshVector()
+    }
+
+    /** Muda uma cópia do documento e devolve ao motor. `continuing` = meio de um arrasto (mesmo passo de desfazer). */
+    fun editVectorDoc(continuing: Boolean = false, change: (com.aurea.aurea.engine.VectorDoc) -> Unit) {
+        val id = primary ?: return
+        val doc = vectorDoc?.copyDeep() ?: return
+        change(doc)
+        engine.setVectorDocument(id, doc.encode(), doc.names(), continuing)
+        refreshVector()
+    }
+
+    /** Edita o grupo escolhido. */
+    fun editVectorGroup(continuing: Boolean = false, change: (com.aurea.aurea.engine.VGroup) -> Unit) {
+        val g = vectorGroup
+        editVectorDoc(continuing) { d -> d.groups.getOrNull(g)?.let(change) }
+    }
+
+    /** Forma do caminho escolhido (com keyframes de forma: grava no cabeçote). */
+    fun setVectorPathShape(path: com.aurea.aurea.engine.VBezier, continuing: Boolean) {
+        val id = primary ?: return
+        engine.setVectorPath(id, vectorGroup, vectorPath, path.toArray(), continuing)
+        refreshVector()
+    }
+
+    fun toggleVectorPathKey() {
+        val id = primary ?: return
+        engine.toggleVectorPathKey(id, vectorGroup, vectorPath)
+        refreshNow()
+    }
+
+    fun setVectorParam(param: Int, value: Float, continuing: Boolean) {
+        val id = primary ?: return
+        engine.setVectorParam(id, vectorGroup, param, value, continuing)
+        refreshVector()
+    }
+
+    fun toggleVectorParamKey(param: Int) {
+        val id = primary ?: return
+        engine.toggleVectorParamKey(id, vectorGroup, param)
+        refreshNow()
+    }
+
+    fun addVectorGroup(kind: Int) {
+        val id = primary ?: return
+        val g = engine.addVectorGroup(id, kind)
+        if (g >= 0) {
+            vectorGroup = g
+            vectorPath = 0
+            vectorPoint = -1
+            if (kind == 0) vectorTool = 1
+        }
+        refreshNow()
+    }
+
+    fun removeVectorGroup(group: Int) {
+        val id = primary ?: return
+        engine.removeVectorGroup(id, group)
+        refreshNow()
+    }
+
+    fun addVectorPath(kind: Int) {
+        val id = primary ?: return
+        val p = engine.addVectorPath(id, vectorGroup, kind, null)
+        if (p >= 0) {
+            vectorPath = p
+            vectorPoint = -1
+            if (kind == 0) vectorTool = 1
+        }
+        refreshNow()
+    }
+
+    fun removeVectorPath(path: Int) {
+        val id = primary ?: return
+        engine.removeVectorPath(id, vectorGroup, path)
+        refreshNow()
+    }
+
+    fun makeVectorPathEditable() {
+        val id = primary ?: return
+        engine.makeVectorPathEditable(id, vectorGroup, vectorPath)
+        refreshNow()
+    }
+
+    /** Traço do dedo (px da composição) → caminho suave; os traços seguintes entram na mesma camada. */
+    fun commitFreehand(xy: FloatArray) {
+        if (xy.size < 8) return
+        val target = if (freehandLayer != 0L && layers.any { it.id == freehandLayer }) freehandLayer else 0L
+        val id = engine.addFreehandPath(target, xy, 1.5f)
+        if (id < 0) {
+            errorMessage = "Não foi possível criar o desenho (erro ${-id})."
+            return
+        }
+        freehandLayer = id
+        refreshNow()
+        select(id)
+    }
+
+    /** SVG pelo seletor de documentos do sistema. */
+    fun importSvg(uri: Uri) {
+        viewModelScope.launch {
+            val bytes = withContext(Dispatchers.IO) {
+                runCatching { getApplication<Application>().contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
+            }
+            if (bytes == null || bytes.isEmpty()) {
+                errorMessage = "Não foi possível ler o SVG."
+                return@launch
+            }
+            val name = displayName(uri)?.substringBeforeLast('.') ?: "SVG"
+            val id = engine.importSvg(bytes, name)
+            if (id < 0) {
+                errorMessage = if (-id == ERRC_UNSUPPORTED_FORMAT) "SVG sem formas suportadas." else "Não foi possível importar o SVG (erro ${-id})."
+                return@launch
+            }
+            refreshNow()
+            select(id)
+        }
+    }
+
+    /** Texto no caminho: camada-guia vetorial (0 = desliga). */
+    fun setTextPath(pathLayer: Long, offset: Float, perpendicular: Boolean, reverse: Boolean) {
+        val id = primary ?: return
+        if (!engine.setTextPath(id, pathLayer, offset, perpendicular, reverse)) {
+            showToast("A guia precisa ser uma camada vetorial")
+        }
+        refreshNow()
     }
 
     /** Receita do texto 3D da camada principal (nulo = não é texto 3D). */

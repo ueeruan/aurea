@@ -24,6 +24,7 @@
 #include "aurea/core/Math.hpp"
 #include "aurea/animation/Curve.hpp"
 #include "aurea/effects/Parameter.hpp"
+#include "aurea/vector/VectorData.hpp"
 
 #include <cmath>
 #include <string>
@@ -192,12 +193,23 @@ struct TextData {
     /// Legenda gerada da fala de outra camada (id empacotado; 0 = texto comum).
     /// Gerar de novo substitui as legendas daquela camada.
     u64         captionSource = 0;
+
+    /// Texto no caminho: camada vetorial-guia (id empacotado; 0 = linha reta).
+    /// O primeiro caminho dela, no espaço da composição, conduz a linha de
+    /// base; `pathOffset` = margem inicial (px ao longo do caminho);
+    /// `pathPerpendicular` gira cada letra pela tangente; `pathReverse`
+    /// percorre o caminho ao contrário.
+    u64         pathLayer = 0;
+    f32         pathOffset = 0.0f;
+    bool        pathPerpendicular = true;
+    bool        pathReverse = false;
 };
 
 struct ShapeData {
     /// 0 retângulo (cantos arredondados), 1 elipse, 2 caminho, 3 polígono
     /// regular, 4 estrela, 5 cruz, 6 anel, 7 fatia, 8 flor, 9 seta,
-    /// 10 triângulo retângulo (shaders/shape/shape.frag).
+    /// 10 triângulo retângulo (shaders/shape/shape.frag), 11 vetorial
+    /// (kShapeVector: grupos em `vector`, vector/Vector.hpp).
     u32  shapeType = 0;
     Rect bounds{0.0f, 0.0f, 200.0f, 200.0f};
     f32  cornerRadius = 0.0f;
@@ -214,6 +226,8 @@ struct ShapeData {
     bool trimEnabled = false;
     /// Pontos livres para shapeType == path.
     std::vector<Vec2> path;
+    /// Camada vetorial (shapeType == kShapeVector).
+    VectorData vector;
 };
 
 struct CameraData {

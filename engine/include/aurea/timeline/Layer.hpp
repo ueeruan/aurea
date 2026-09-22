@@ -93,6 +93,15 @@ struct Mask {
 };
 
 /// Blocos de dado específico de tipo. Mantidos pequenos e POD.
+/// Trecho com estilo próprio (rich text): caracteres [start, end) do texto.
+struct TextSpan {
+    u32  start = 0, end = 0;
+    bool hasColor = false;
+    Vec4 color{1.0f, 1.0f, 1.0f, 1.0f};
+    u16  weight = 0;        ///< 0 = o do texto; 700 = negrito…
+    f32  scale = 1.0f;      ///< tamanho relativo ao do texto
+};
+
 struct TextData {
     std::string content  = "Texto";
     FontId      font{};
@@ -113,6 +122,20 @@ struct TextData {
     bool        rtl        = false;
     bool        autoSize   = true;
     Rect        box{0.0f, 0.0f, 800.0f, 200.0f};   ///< quando autoSize == false
+    /// Caixa: 0 texto de ponto (largura automática), 1 parágrafo (quebra na
+    /// largura, altura automática), 2 caixa fixa (quebra e corta), 3 caixa fixa
+    /// que encolhe o texto para caber.
+    u32         boxMode = 0;
+    std::vector<TextSpan> spans;
+    /// Fundo atrás do texto (caixa arredondada) e sombra projetada.
+    bool        background = false;
+    Vec4        backgroundColor{0.0f, 0.0f, 0.0f, 0.6f};
+    f32         backgroundPadding = 14.0f;
+    f32         backgroundRadius = 10.0f;
+    bool        shadow = false;
+    Vec4        shadowColor{0.0f, 0.0f, 0.0f, 0.6f};
+    Vec2        shadowOffset{4.0f, 6.0f};
+    f32         shadowBlur = 6.0f;
 
     /// Text Animator: seletores (char/word/line) e animadores por seletor.
     /// O conteúdo é resolvido no shape de texto, não aqui.

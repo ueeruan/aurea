@@ -2872,6 +2872,98 @@ bool Engine::set_text_font(u64 layerId, const std::string& family, u32 weight, b
     return true;
 }
 
+bool Engine::set_text_style(u64 layerId, const f32* v) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->kind != LayerKind::Text || !v) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "estilo do texto");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    TextData& t = l->text;
+    t.boxMode = static_cast<u32>(std::clamp(v[0], 0.0f, 3.0f));
+    t.autoSize = t.boxMode == 0;
+    t.box.w = std::clamp(v[1], 10.0f, 20000.0f);
+    t.box.h = std::clamp(v[2], 10.0f, 20000.0f);
+    t.background = v[3] > 0.5f;
+    t.backgroundColor = Vec4{v[4], v[5], v[6], v[7]};
+    t.backgroundPadding = std::clamp(v[8], 0.0f, 500.0f);
+    t.backgroundRadius = std::clamp(v[9], 0.0f, 500.0f);
+    t.shadow = v[10] > 0.5f;
+    t.shadowColor = Vec4{v[11], v[12], v[13], v[14]};
+    t.shadowOffset = Vec2{std::clamp(v[15], -500.0f, 500.0f), std::clamp(v[16], -500.0f, 500.0f)};
+    t.shadowBlur = std::clamp(v[17], 0.0f, 200.0f);
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::query_text_style(u64 layerId, f32* v) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->kind != LayerKind::Text || !v) return false;
+    const TextData& t = l->text;
+    const f32 o[18] = {static_cast<f32>(t.boxMode), t.box.w, t.box.h, t.background ? 1.0f : 0.0f, t.backgroundColor.x, t.backgroundColor.y,
+                       t.backgroundColor.z, t.backgroundColor.w, t.backgroundPadding, t.backgroundRadius, t.shadow ? 1.0f : 0.0f,
+                       t.shadowColor.x, t.shadowColor.y, t.shadowColor.z, t.shadowColor.w, t.shadowOffset.x, t.shadowOffset.y, t.shadowBlur};
+    std::copy(o, o + 18, v);
+    return true;
+}
+
+namespace {
+/// Tira [s, e) dos trechos existentes (corta os que atravessam a borda).
+void cut_spans(std::vector<TextSpan>& spans, u32 s, u32 e) {
+    std::vector<TextSpan> out;
+    for (const TextSpan& sp : spans) {
+        if (sp.end <= s || sp.start >= e) { out.push_back(sp); continue; }
+        if (sp.start < s) { TextSpan a = sp; a.end = s; out.push_back(a); }
+        if (sp.end > e) { TextSpan b = sp; b.start = e; out.push_back(b); }
+    }
+    spans.swap(out);
+}
+} // namespace
+
+bool Engine::set_text_span(u64 layerId, u32 start, u32 end, bool hasColor, Vec4 color, u32 weight, f32 scale) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->kind != LayerKind::Text || end <= start) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "estilo do trecho");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    // O mesmo trecho de novo: junta (cor + negrito + tamanho), não substitui.
+    for (const TextSpan& old : l->text.spans) {
+        if (old.start != start || old.end != end) continue;
+        if (!hasColor && old.hasColor) { hasColor = true; color = old.color; }
+        if (weight == 0) weight = old.weight;
+        if (scale == 1.0f) scale = old.scale;
+    }
+    cut_spans(l->text.spans, start, end);
+    TextSpan sp;
+    sp.start = start;
+    sp.end = end;
+    sp.hasColor = hasColor;
+    sp.color = color;
+    sp.weight = static_cast<u16>(std::min<u32>(weight, 1000));
+    sp.scale = std::clamp(scale, 0.1f, 10.0f);
+    l->text.spans.push_back(sp);
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::clear_text_spans(u64 layerId, u32 start, u32 end) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->kind != LayerKind::Text) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "limpar estilo do trecho");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    cut_spans(l->text.spans, start, end);
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
 std::string Engine::text_font(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;

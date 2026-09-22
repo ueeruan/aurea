@@ -537,7 +537,14 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         } else {
             null
         }
-        if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Text.kind) refreshTextFont() else textFont = null
+        if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Text.kind) {
+            refreshTextFont()
+            val st = FloatArray(18)
+            textStyle = if (engine.queryTextStyle(id, st)) st else null
+        } else {
+            textFont = null
+            textStyle = null
+        }
         textDetail = if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Text.kind) {
             engine.queryText(id, textFloats)?.let { com.aurea.aurea.engine.TextDetail.of(it, textFloats) }
         } else {
@@ -1616,6 +1623,51 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             val list = withContext(Dispatchers.IO) { engine.listFonts()?.lineSequence()?.mapNotNull { parseFont(it) }?.toList() ?: emptyList() }
             fonts = list
         }
+    }
+
+    /** Estilo de parágrafo da camada de texto (ver `set_text_style`: 18 valores). */
+    var textStyle by mutableStateOf<FloatArray?>(null)
+        private set
+
+    fun setTextStyleValue(index: Int, value: Float) {
+        val id = primary ?: return
+        val v = (textStyle ?: return).copyOf()
+        v[index] = value
+        textStyle = v
+        engine.setTextStyle(id, v)
+        refreshDetail()
+    }
+
+    fun setTextStyleValues(values: Map<Int, Float>) {
+        val id = primary ?: return
+        val v = (textStyle ?: return).copyOf()
+        values.forEach { (k, x) -> v[k] = x }
+        textStyle = v
+        engine.setTextStyle(id, v)
+        refreshDetail()
+    }
+
+    /** Trecho [start, end) do texto (índices do Kotlin, UTF-16) → caracteres do motor. */
+    private fun cpRange(start: Int, end: Int): Pair<Int, Int>? {
+        val c = textDetail?.content ?: return null
+        val s = start.coerceIn(0, c.length)
+        val e = end.coerceIn(0, c.length)
+        if (e <= s) return null
+        return c.codePointCount(0, s) to c.codePointCount(0, e)
+    }
+
+    fun setTextSpan(start: Int, end: Int, color: FloatArray?, weight: Int, scale: Float) {
+        val id = primary ?: return
+        val (s, e) = cpRange(start, end) ?: return
+        engine.setTextSpan(id, s, e, color != null, color?.get(0) ?: 1f, color?.get(1) ?: 1f, color?.get(2) ?: 1f, weight, scale)
+        refreshDetail()
+    }
+
+    fun clearTextSpans(start: Int, end: Int) {
+        val id = primary ?: return
+        val (s, e) = cpRange(start, end) ?: return
+        engine.clearTextSpans(id, s, e)
+        refreshDetail()
     }
 
     fun refreshTextFont() {

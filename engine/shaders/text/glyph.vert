@@ -39,7 +39,8 @@ void main() {
     const vec2 p = mix(gl.rect.xy, gl.rect.zw, c);
     const vec2 d = p - gl.pivot.xy;
     const vec2 q = gl.pivot.xy + vec2(gl.xf.x * d.x + gl.xf.z * d.y, gl.xf.y * d.x + gl.xf.w * d.y) + gl.misc.xy;
-    v_uv = mix(gl.uv.xy, gl.uv.zw, c);
+    // Sólido (fundo): uv = posição local em px, para o retângulo arredondado.
+    v_uv = gl.uv.x < 0.0 ? c * (gl.rect.zw - gl.rect.xy) : mix(gl.uv.xy, gl.uv.zw, c);
     v_index = idx;
     gl_Position = pc.clipFromLayer * vec4(q, 0.0, 1.0);
 }

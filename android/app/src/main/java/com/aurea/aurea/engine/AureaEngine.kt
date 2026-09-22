@@ -342,6 +342,11 @@ class AureaEngine private constructor() {
     fun setTextFont(layer: Long, family: String, weight: Int, italic: Boolean, path: String): Boolean =
         nativeSetTextFont(nativeHandle, layer, family, weight, italic, path)
     fun textFont(layer: Long): String? = nativeTextFont(nativeHandle, layer)
+    fun setTextStyle(layer: Long, v: FloatArray): Boolean = nativeSetTextStyle(nativeHandle, layer, v)
+    fun queryTextStyle(layer: Long, out: FloatArray): Boolean = nativeQueryTextStyle(nativeHandle, layer, out)
+    fun setTextSpan(layer: Long, start: Int, end: Int, hasColor: Boolean, r: Float, g: Float, b: Float, weight: Int, scale: Float): Boolean =
+        nativeSetTextSpan(nativeHandle, layer, start, end, hasColor, r, g, b, weight, scale)
+    fun clearTextSpans(layer: Long, start: Int, end: Int): Boolean = nativeClearTextSpans(nativeHandle, layer, start, end)
     /** PowerManager.THERMAL_STATUS_* → o preview reduz o que é caro sob calor. */
     fun setThermal(status: Int) = nativeSetThermal(nativeHandle, status)
     fun queryTimeRemap(layer: Long, out: FloatArray): Int = nativeQueryTimeRemap(nativeHandle, layer, out)
@@ -473,6 +478,10 @@ class AureaEngine private constructor() {
     private external fun nativeListFonts(handle: Long): String?
     private external fun nativeImportFont(handle: Long, path: String): String?
     private external fun nativeSetTextFont(handle: Long, layer: Long, family: String, weight: Int, italic: Boolean, path: String): Boolean
+    private external fun nativeSetTextStyle(handle: Long, layer: Long, v: FloatArray): Boolean
+    private external fun nativeQueryTextStyle(handle: Long, layer: Long, out: FloatArray): Boolean
+    private external fun nativeSetTextSpan(handle: Long, layer: Long, start: Int, end: Int, hasColor: Boolean, r: Float, g: Float, b: Float, weight: Int, scale: Float): Boolean
+    private external fun nativeClearTextSpans(handle: Long, layer: Long, start: Int, end: Int): Boolean
     private external fun nativeTextFont(handle: Long, layer: Long): String?
     private external fun nativeSetVectorBlur(handle: Long, layer: Long, amount: Float): Boolean
     private external fun nativeSetFrameBlend(handle: Long, layer: Long, mode: Int): Boolean

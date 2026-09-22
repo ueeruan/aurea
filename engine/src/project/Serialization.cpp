@@ -485,13 +485,33 @@ void write_layer(ByteWriter& w, const Layer& l) {
     w.u32v(l.text.fontWeight);
     w.boolv(l.text.fontItalic);
     w.str(l.text.fontPath);
+    // v13: rich text, caixa, fundo, sombra
+    w.u32v(l.text.boxMode);
+    w.u32v(static_cast<u32>(l.text.spans.size()));
+    for (const TextSpan& sp : l.text.spans) {
+        w.u32v(sp.start);
+        w.u32v(sp.end);
+        w.boolv(sp.hasColor);
+        w.vec4(sp.color);
+        w.u32v(sp.weight);
+        w.f32v(sp.scale);
+    }
+    w.boolv(l.text.background);
+    w.vec4(l.text.backgroundColor);
+    w.f32v(l.text.backgroundPadding);
+    w.f32v(l.text.backgroundRadius);
+    w.boolv(l.text.shadow);
+    w.vec4(l.text.shadowColor);
+    w.f32v(l.text.shadowOffset.x);
+    w.f32v(l.text.shadowOffset.y);
+    w.f32v(l.text.shadowBlur);
 }
 
 /// Versão da seção Timeline. v2: layer de modelo 3D guarda escala de unidade
 /// e pivô (o enquadramento do import). v1 continua sendo lida (campos novos
 /// com o padrão).
 /// v3: velocidade e reverso da layer.
-constexpr u32 kTimelineSectionVersion = 12;
+constexpr u32 kTimelineSectionVersion = 13;
 thread_local u32 g_readingTimelineVersion = kTimelineSectionVersion;
 
 void read_layer(ByteReader& r, Layer& l) {
@@ -676,6 +696,28 @@ void read_layer(ByteReader& r, Layer& l) {
         l.text.fontWeight = static_cast<u16>(r.u32v());
         l.text.fontItalic = r.boolv();
         l.text.fontPath = r.str();
+    }
+    if (g_readingTimelineVersion >= 13) {
+        l.text.boxMode = r.u32v();
+        const u32 n = std::min<u32>(r.u32v(), 4096);
+        l.text.spans.resize(n);
+        for (TextSpan& sp : l.text.spans) {
+            sp.start = r.u32v();
+            sp.end = r.u32v();
+            sp.hasColor = r.boolv();
+            sp.color = r.vec4();
+            sp.weight = static_cast<u16>(r.u32v());
+            sp.scale = r.f32v();
+        }
+        l.text.background = r.boolv();
+        l.text.backgroundColor = r.vec4();
+        l.text.backgroundPadding = r.f32v();
+        l.text.backgroundRadius = r.f32v();
+        l.text.shadow = r.boolv();
+        l.text.shadowColor = r.vec4();
+        l.text.shadowOffset.x = r.f32v();
+        l.text.shadowOffset.y = r.f32v();
+        l.text.shadowBlur = r.f32v();
     }
 }
 

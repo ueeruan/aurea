@@ -620,7 +620,13 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 // O contorno cabe na distância do atlas (16 px da base × escala).
                 const f32 strokeMax = text::kGlyphSpread * std::max(1.0f, l->text.size) / text::kGlyphBasePx - 1.0f;
                 const f32 stroke = std::clamp(l->text.strokeWidth, 0.0f, std::max(0.0f, strokeMax));
-                const f32 pad = stroke > 0.0f ? stroke + 2.0f : 2.0f;
+                // Margem: contorno, fundo e sombra (deslocamento + desfoque) cabem na layer.
+                f32 pad = stroke > 0.0f ? stroke + 2.0f : 2.0f;
+                if (l->text.background) pad = std::max(pad, std::max(0.0f, l->text.backgroundPadding) + 2.0f);
+                if (l->text.shadow) {
+                    pad = std::max(pad, std::max(std::fabs(l->text.shadowOffset.x), std::fabs(l->text.shadowOffset.y))
+                                           + std::max(0.0f, l->text.shadowBlur) + stroke + 2.0f);
+                }
                 text::TextLayout L;
                 if (!text::layout_quads(*font, l->text, pad, L)) continue;
                 rl.source.kind = LayerSource::Kind::Text;
@@ -628,12 +634,38 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 rl.source.height = static_cast<u32>(std::ceil(L.height));
                 rl.source.glyphFirst = static_cast<u32>(out.glyphs.size());
                 auto lin = [](Vec4 c) { return Vec4{srgb_to_linear(c.x), srgb_to_linear(c.y), srgb_to_linear(c.z), c.w}; };
-                const Vec4 fill = lin(l->text.color), strokeCol = lin(l->text.strokeColor);
+                const Vec4 strokeCol = lin(l->text.strokeColor);
+                // Fundo (caixa arredondada atrás do texto): uv.x < 0 marca "sólido".
+                if (l->text.background && l->text.backgroundColor.w > 0.0f) {
+                    const f32 bp = std::max(0.0f, l->text.backgroundPadding);
+                    GlyphInstance b;
+                    b.rect = Vec4{L.pad - bp, L.pad - bp, L.pad + L.contentWidth + bp, L.pad + L.contentHeight + bp};
+                    b.uv = Vec4{-1.0f, std::max(0.0f, l->text.backgroundRadius), 0, 0};
+                    b.fill = lin(l->text.backgroundColor);
+                    b.stroke = Vec4{0, 0, 0, 0};
+                    b.misc = Vec4{0, 0, 1, 0};
+                    b.pivot = Vec4{0, 0, 0, 0};
+                    out.glyphs.push_back(b);
+                }
+                // Sombra: os mesmos glifos, deslocados, na cor da sombra e desfocados pelo SDF.
+                if (l->text.shadow && l->text.shadowColor.w > 0.0f) {
+                    const Vec4 sc = lin(l->text.shadowColor);
+                    for (const text::GlyphQuad& q : L.quads) {
+                        GlyphInstance g;
+                        g.rect = Vec4{q.x0, q.y0, q.x1, q.y1};
+                        g.uv = Vec4{q.u0, q.v0, q.u1, q.v1};
+                        g.fill = sc;
+                        g.stroke = sc;
+                        g.misc = Vec4{l->text.shadowOffset.x, l->text.shadowOffset.y, q.k, stroke};
+                        g.pivot = Vec4{q.penX + q.advance * 0.5f, q.baseline, std::max(0.0f, l->text.shadowBlur) * 0.5f, 0};
+                        out.glyphs.push_back(g);
+                    }
+                }
                 for (const text::GlyphQuad& q : L.quads) {
                     GlyphInstance g;
                     g.rect = Vec4{q.x0, q.y0, q.x1, q.y1};
                     g.uv = Vec4{q.u0, q.v0, q.u1, q.v1};
-                    g.fill = fill;
+                    g.fill = lin(q.color);
                     g.stroke = strokeCol;
                     g.misc = Vec4{0, 0, q.k, stroke};
                     g.pivot = Vec4{q.penX + q.advance * 0.5f, q.baseline, 0, 0};

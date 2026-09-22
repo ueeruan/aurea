@@ -29,7 +29,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.TextFieldValue
+import com.aurea.aurea.ui.ds.AureaToggle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -58,24 +61,47 @@ internal fun TextPanel(env: PanelEnv) {
             style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)))
         return
     }
-    var draft by remember(store.primary) { mutableStateOf(td.content) }
-    LaunchedEffect(td.content) { if (td.content != draft && !store.textEditing) draft = td.content }
+    var field by remember(store.primary) { mutableStateOf(TextFieldValue(td.content)) }
+    val draft = field.text
+    LaunchedEffect(td.content) {
+        if (td.content != field.text && !store.textEditing) {
+            field = TextFieldValue(td.content, TextRange(field.selection.start.coerceAtMost(td.content.length), field.selection.end.coerceAtMost(td.content.length)))
+        }
+    }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 18.dp, top = 12.dp, end = 18.dp, bottom = 24.dp)) {
         Box(
             Modifier.fillMaxWidth().heightIn(min = 56.dp).clip(RoundedCornerShape(10.dp)).background(AureaColors.Chip)
                 .padding(horizontal = 12.dp, vertical = 10.dp),
         ) {
             BasicTextField(
-                value = draft,
+                value = field,
                 onValueChange = {
-                    draft = it
-                    store.setTextContent(it)
+                    val changed = it.text != field.text
+                    field = it
+                    if (changed) store.setTextContent(it.text)
                 },
                 textStyle = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = AureaColors.Text)),
                 cursorBrush = SolidColor(AureaColors.Accent),
                 modifier = Modifier.fillMaxWidth(),
             )
             if (draft.isEmpty()) Text("Digite o texto", style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = AureaColors.Muted)))
+        }
+        // Trecho selecionado no campo: estilo próprio (rich text).
+        val sel = field.selection
+        if (!sel.collapsed) {
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Trecho", style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
+                SpanChip("Cor") {
+                    val a = sel.min
+                    val b = sel.max
+                    env.openColor(ColorRequest(td.color.copyOf(), onChange = { r, g, bl, _ -> store.setTextSpan(a, b, floatArrayOf(r, g, bl), 0, 1f) },
+                        onDone = {}))
+                }
+                SpanChip("Negrito") { store.setTextSpan(sel.min, sel.max, null, 700, 1f) }
+                SpanChip("Maior") { store.setTextSpan(sel.min, sel.max, null, 0, 1.35f) }
+                SpanChip("Normal") { store.clearTextSpans(sel.min, sel.max) }
+            }
         }
         Spacer(Modifier.height(10.dp))
         val font by remember(store) { derivedStateOf { store.textFont } }
@@ -127,6 +153,85 @@ internal fun TextPanel(env: PanelEnv) {
         }
         TextRuler(store, "Largura do contorno", { store.textDetail?.strokeWidth ?: 0f }, "${td.strokeWidth.roundToInt()} px",
             0.1f, 0f, 60f, "contorno do texto") { store.setTextStrokeWidth(it) }
+        TextStyleSections(env)
+    }
+}
+
+@Composable
+private fun SpanChip(label: String, onClick: () -> Unit) {
+    Box(
+        Modifier.clip(RoundedCornerShape(8.dp)).background(AureaColors.Chip).tocavel(onClick = onClick).padding(horizontal = 10.dp, vertical = 6.dp),
+    ) {
+        Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Text)))
+    }
+}
+
+/** Caixa de parágrafo, fundo e sombra (ver `set_text_style`). */
+@Composable
+private fun TextStyleSections(env: PanelEnv) {
+    val store = env.store
+    val st by remember(store) { derivedStateOf { store.textStyle } }
+    val v = st ?: return
+    Spacer(Modifier.height(6.dp))
+    Text("Caixa", style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700, color = AureaColors.Muted)))
+    Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        listOf(0 to "Ponto", 1 to "Parágrafo", 2 to "Fixa", 3 to "Encolher").forEach { (m, label) ->
+            val on = v[0].toInt() == m
+            Box(
+                Modifier.clip(RoundedCornerShape(8.dp)).background(if (on) AureaColors.AccentDim else AureaColors.Chip)
+                    .tocavel(onClick = { store.setTextStyleValue(0, m.toFloat()) }).padding(horizontal = 10.dp, vertical = 6.dp),
+            ) {
+                Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = if (on) AureaColors.Accent else AureaColors.Text)))
+            }
+        }
+    }
+    if (v[0] >= 1f) {
+        TextRuler(store, "Largura da caixa", { store.textStyle?.get(1) ?: 800f }, "${v[1].roundToInt()} px", 2f, 10f, 20000f, "largura da caixa") {
+            store.setTextStyleValue(1, it)
+        }
+        if (v[0] >= 2f) {
+            TextRuler(store, "Altura da caixa", { store.textStyle?.get(2) ?: 200f }, "${v[2].roundToInt()} px", 2f, 10f, 20000f, "altura da caixa") {
+                store.setTextStyleValue(2, it)
+            }
+        }
+    }
+    Spacer(Modifier.height(6.dp))
+    Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text("Fundo", modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700)))
+        if (v[3] > 0.5f) {
+            ColorWell(Color(v[4], v[5], v[6])) {
+                store.beginGesture("cor do fundo do texto")
+                env.openColor(ColorRequest(floatArrayOf(v[4], v[5], v[6], v[7]),
+                    onChange = { r, g, b, a -> store.setTextStyleValues(mapOf(4 to r, 5 to g, 6 to b, 7 to a)) }, onDone = { store.endGesture() }))
+            }
+            Spacer(Modifier.width(10.dp))
+        }
+        AureaToggle(checked = v[3] > 0.5f, onCheckedChange = { store.setTextStyleValue(3, if (it) 1f else 0f) })
+    }
+    if (v[3] > 0.5f) {
+        TextRuler(store, "Margem do fundo", { store.textStyle?.get(8) ?: 14f }, "${v[8].roundToInt()} px", 0.2f, 0f, 500f, "margem do fundo") {
+            store.setTextStyleValue(8, it)
+        }
+        TextRuler(store, "Arredondar", { store.textStyle?.get(9) ?: 10f }, "${v[9].roundToInt()} px", 0.2f, 0f, 500f, "raio do fundo") {
+            store.setTextStyleValue(9, it)
+        }
+    }
+    Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text("Sombra", modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700)))
+        if (v[10] > 0.5f) {
+            ColorWell(Color(v[11], v[12], v[13])) {
+                store.beginGesture("cor da sombra do texto")
+                env.openColor(ColorRequest(floatArrayOf(v[11], v[12], v[13], v[14]),
+                    onChange = { r, g, b, a -> store.setTextStyleValues(mapOf(11 to r, 12 to g, 13 to b, 14 to a)) }, onDone = { store.endGesture() }))
+            }
+            Spacer(Modifier.width(10.dp))
+        }
+        AureaToggle(checked = v[10] > 0.5f, onCheckedChange = { store.setTextStyleValue(10, if (it) 1f else 0f) })
+    }
+    if (v[10] > 0.5f) {
+        TextRuler(store, "Deslocar X", { store.textStyle?.get(15) ?: 4f }, "${v[15].roundToInt()} px", 0.2f, -500f, 500f, "sombra x") { store.setTextStyleValue(15, it) }
+        TextRuler(store, "Deslocar Y", { store.textStyle?.get(16) ?: 6f }, "${v[16].roundToInt()} px", 0.2f, -500f, 500f, "sombra y") { store.setTextStyleValue(16, it) }
+        TextRuler(store, "Desfoque", { store.textStyle?.get(17) ?: 6f }, "${v[17].roundToInt()} px", 0.1f, 0f, 200f, "desfoque da sombra") { store.setTextStyleValue(17, it) }
     }
 }
 

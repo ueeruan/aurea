@@ -183,3 +183,65 @@ AUREA_TEST(Text, ImportedFontIsUsedSavedAndReopened) {
     std::error_code ec2;
     std::filesystem::remove_all(dir, ec2);
 }
+
+AUREA_TEST(Text, ParagraphBoxesWrapClipAndShrink) {
+    auto f = text::default_font();
+    if (!f) return;
+    TextData t;
+    t.content = "Um texto longo o bastante para quebrar em varias linhas dentro da caixa";
+    t.size = 40;
+    text::TextLayout point, para, fixed, shrink;
+    AUREA_CHECK(text::layout_quads(*f, t, 2, point));
+    t.boxMode = 1;
+    t.box.w = 300;
+    AUREA_CHECK(text::layout_quads(*f, t, 2, para));
+    t.boxMode = 2;
+    t.box.h = 100;
+    AUREA_CHECK(text::layout_quads(*f, t, 2, fixed));
+    t.boxMode = 3;
+    AUREA_CHECK(text::layout_quads(*f, t, 2, shrink));
+    f32 maxRight = 0, shrinkBottom = 0;
+    for (const auto& q : para.quads) maxRight = std::max(maxRight, q.penX + q.advance);   // o quad tem a margem do SDF
+    for (const auto& q : shrink.quads) shrinkBottom = std::max(shrinkBottom, q.baseline);
+    std::printf("    caixas: ponto 1 linha %.0f px; paragrafo 300 px -> %u linhas, altura %.0f, direita max %.0f; fixa 100 px %zu de %zu glifos; "
+                "encolher: %zu glifos, ultima linha de base %.0f (caixa 100)\n",
+                point.contentWidth, para.lines, para.contentHeight, maxRight, fixed.quads.size(), para.quads.size(), shrink.quads.size(),
+                shrinkBottom - 2);
+    AUREA_CHECK(point.lines == 1 && point.contentWidth > 600);
+    AUREA_CHECK(para.lines >= 4 && para.contentWidth == 300 && maxRight <= 2 + 300 + 0.5f);
+    AUREA_CHECK(fixed.contentHeight == 100 && fixed.quads.size() < para.quads.size());
+    AUREA_CHECK(shrink.quads.size() == para.quads.size() && shrinkBottom - 2 <= 100);
+}
+
+AUREA_TEST(Text, RichTextSpansColorBoldAndSize) {
+    auto f = text::default_font();
+    if (!f) return;
+    TextData t;
+    t.content = "EDITAR ficou FACIL";
+    t.size = 60;
+    text::TextLayout plain, rich;
+    AUREA_CHECK(text::layout_quads(*f, t, 2, plain));
+    TextSpan sp;
+    sp.start = 13;
+    sp.end = 18;
+    sp.hasColor = true;
+    sp.color = Vec4{0.2f, 1, 0.3f, 1};
+    sp.weight = 700;
+    sp.scale = 1.4f;
+    t.spans.push_back(sp);
+    AUREA_CHECK(text::layout_quads(*f, t, 2, rich));
+    u32 green = 0, white = 0;
+    f32 hPlain = 0, hRich = 0;
+    for (const auto& q : rich.quads) {
+        const bool g = q.color.y > 0.9f && q.color.x < 0.3f;
+        green += g ? 1u : 0u;
+        white += q.color.x > 0.9f ? 1u : 0u;
+        if (q.charIndex == 13) hRich = q.y1 - q.y0;
+    }
+    for (const auto& q : plain.quads) if (q.charIndex == 13) hPlain = q.y1 - q.y0;
+    std::printf("    rich text: %u glifos verdes (FACIL), %u brancos; F normal %.1f px x trecho %.1f px; largura %.0f -> %.0f\n", green, white, hPlain,
+                hRich, plain.contentWidth, rich.contentWidth);
+    AUREA_CHECK(green == 5 && white == 11);
+    AUREA_CHECK(hRich > hPlain * 1.3f);
+    AUREA_CHECK(rich.contentWidth > plain.contentWidth);
+}

@@ -3049,3 +3049,32 @@ AUREA_TEST(Gpu, GpuTextIsSharpScalesAndStrokes) {
     AUREA_CHECK(fullBig > white * 4);
     AUREA_CHECK(edgeBig * 5 < fullBig);
 }
+
+AUREA_TEST(Gpu, TextBackgroundAndShadowRender) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(640, 360);
+    auto t = rig.e.add_text("Legenda");
+    AUREA_CHECK(t.ok());
+    if (!t.ok()) return;
+    Composition* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+    Layer* l = comp->layer(LayerId::unpack(*t));
+    l->text.size = 70;
+    const Image8 plain = rig.capture(640);
+    l->text.background = true;
+    l->text.backgroundColor = Vec4{0.1f, 0.2f, 0.9f, 1};
+    const Image8 bg = rig.capture(640);
+    l->text.background = false;
+    l->text.shadow = true;
+    l->text.shadowColor = Vec4{1, 0, 0, 1};
+    l->text.shadowOffset = Vec2{8, 8};
+    const Image8 sh = rig.capture(640);
+    auto count = [](const Image8& img, auto pred) { u32 n = 0; for (usize i = 0; i + 3 < img.rgba.size(); i += 4) n += pred(&img.rgba[i]) ? 1u : 0u; return n; };
+    const u32 blue = count(bg, [](const u8* p) { return p[2] > 150 && p[0] < 80; });
+    const u32 red = count(sh, [](const u8* p) { return p[0] > 150 && p[1] < 80; });
+    const u32 whitePlain = count(plain, [](const u8* p) { return p[0] > 200 && p[1] > 200 && p[2] > 200; });
+    const u32 whiteShadow = count(sh, [](const u8* p) { return p[0] > 200 && p[1] > 200 && p[2] > 200; });
+    std::printf("    fundo %u px azuis; sombra %u px vermelhos; texto branco %u -> %u com sombra (por cima)\n", blue, red, whitePlain, whiteShadow);
+    AUREA_CHECK(blue > 10000);
+    AUREA_CHECK(red > 1000);
+    AUREA_CHECK(whiteShadow * 10 > whitePlain * 8);   // a sombra fica ATRÁS do texto
+}

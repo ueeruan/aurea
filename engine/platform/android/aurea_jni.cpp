@@ -954,6 +954,38 @@ AUREA_JNI jboolean AUREA_FN(nativeSetTextFont)(JNIEnv* env, jclass, jlong handle
     return ok ? JNI_TRUE : JNI_FALSE;
 }
 
+AUREA_JNI jboolean AUREA_FN(nativeSetTextStyle)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloatArray in) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !in || env->GetArrayLength(in) < 18) return JNI_FALSE;
+    f32 v[18];
+    env->GetFloatArrayRegion(in, 0, 18, v);
+    return c->engine.set_text_style(static_cast<u64>(layer), v) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeQueryTextStyle)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloatArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !out || env->GetArrayLength(out) < 18) return JNI_FALSE;
+    f32 v[18];
+    if (!c->engine.query_text_style(static_cast<u64>(layer), v)) return JNI_FALSE;
+    env->SetFloatArrayRegion(out, 0, 18, v);
+    return JNI_TRUE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetTextSpan)(JNIEnv*, jclass, jlong handle, jlong layer, jint start, jint end, jboolean hasColor,
+                                              jfloat r, jfloat g, jfloat b, jint weight, jfloat scale) {
+    NativeContext* c = ctx_of(handle);
+    return c && start >= 0 && end > start
+                   && c->engine.set_text_span(static_cast<u64>(layer), static_cast<u32>(start), static_cast<u32>(end), hasColor == JNI_TRUE,
+                                              Vec4{r, g, b, 1.0f}, static_cast<u32>(std::max(0, weight)), scale)
+               ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeClearTextSpans)(JNIEnv*, jclass, jlong handle, jlong layer, jint start, jint end) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.clear_text_spans(static_cast<u64>(layer), static_cast<u32>(std::max(0, start)), static_cast<u32>(std::max(0, end)))
+               ? JNI_TRUE : JNI_FALSE;
+}
+
 /// Fonte da camada de texto: "família\tpeso\titálico\tcaminho" (nulo = não é texto).
 AUREA_JNI jstring AUREA_FN(nativeTextFont)(JNIEnv* env, jclass, jlong handle, jlong layer) {
     NativeContext* c = ctx_of(handle);

@@ -30,6 +30,17 @@ const float kDistScale = 8.0;   // valor 0..255 por px da base (Text.hpp)
 
 void main() {
     const Glyph gl = glyphs.g[v_index];
+    if (gl.uv.x < 0.0) {
+        // Fundo: caixa arredondada (raio em uv.y), borda suave de 1 px.
+        const vec2 size = gl.rect.zw - gl.rect.xy;
+        const float r = min(gl.uv.y, 0.5 * min(size.x, size.y));
+        const vec2 q = abs(v_uv - 0.5 * size) - (0.5 * size - vec2(r));
+        const float d = length(max(q, vec2(0.0))) + min(max(q.x, q.y), 0.0) - r;
+        const float aw = max(fwidth(d) * 0.5, 1e-4);
+        const float a = (1.0 - smoothstep(-aw, aw, d)) * gl.fill.a;
+        o_color = vec4(gl.fill.rgb * a, a);
+        return;
+    }
     // Distância assinada em px da layer (positiva dentro do glifo).
     const float sd = (texture(u_atlas, v_uv).r * 255.0 - 128.0) / kDistScale * gl.misc.z;
     const float blur = gl.pivot.z;

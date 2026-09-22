@@ -109,12 +109,14 @@ struct GlyphQuad {
     u32 charIndex = 0;                    ///< caractere de origem, em ordem lógica no texto inteiro
     u32 wordIndex = 0;
     u32 lineIndex = 0;
+    Vec4 color{1, 1, 1, 1};               ///< sRGB: a do texto ou a do trecho (rich text)
 };
 
 struct TextLayout {
     std::vector<GlyphQuad> quads;         ///< em ordem visual
     f32 width = 0, height = 0;            ///< caixa da layer com a margem
     f32 pad = 0;
+    f32 contentWidth = 0, contentHeight = 0;   ///< sem a margem
     u32 chars = 0, words = 0, lines = 0;
 };
 

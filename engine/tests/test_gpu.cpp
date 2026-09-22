@@ -1575,6 +1575,54 @@ AUREA_TEST(Gpu, EchoTrailsAndRgbTimeSplitsChannels) {
     AUREA_CHECK(tail[2] > 200 && tail[0] < 20 && tail[1] < 20);
 }
 
+AUREA_TEST(Gpu, StressThreeHundredAnimatedLayers) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(640, 360);
+    Composition* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+    const u64 t0 = monotonic_ns();
+    for (u32 i = 0; i < 300; ++i) {
+        auto id = rig.e.add_shape(i % 11);
+        if (!id.ok()) { AUREA_CHECK(false); return; }
+        Layer* l = comp->layer(LayerId::unpack(*id));
+        l->transform.scale = Vec3{0.15f, 0.15f, 1};
+        Track& x = l->tracks.get_or_create(TrackProperty::PositionX);
+        Track& r = l->tracks.get_or_create(TrackProperty::RotationZ);
+        for (i64 k = 0; k < 10; ++k) {   // 3000 keyframes de posição + 3000 de rotação
+            x.set(FrameIndex{k * 6}, static_cast<f32>((i * 37 + k * 50) % 640));
+            r.set(FrameIndex{k * 6}, static_cast<f32>(k * 36));
+        }
+    }
+    const f64 buildMs = static_cast<f64>(monotonic_ns() - t0) / 1e6;
+    (void)rig.capture(640);   // pipelines prontos
+    const u64 t1 = monotonic_ns();
+    constexpr int kFrames = 10;
+    for (int f = 0; f < kFrames; ++f) {
+        Command c;
+        c.type = CommandType::PlaybackSeek;
+        c.seek.time = tick_at(FrameIndex{f * 5}, 30.0);
+        AUREA_CHECK(rig.e.apply_command(c).ok());
+        (void)rig.capture(640);
+    }
+    const f64 frameMs = static_cast<f64>(monotonic_ns() - t1) / 1e6 / kFrames;
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_estresse.aurea";
+    const u64 t2 = monotonic_ns();
+    AUREA_CHECK(rig.e.save_project(path.c_str()).ok());
+    const f64 saveMs = static_cast<f64>(monotonic_ns() - t2) / 1e6;
+    FILE* fp = std::fopen(path.c_str(), "rb");
+    long bytes = 0;
+    if (fp) { std::fseek(fp, 0, SEEK_END); bytes = std::ftell(fp); std::fclose(fp); }
+    const u64 t3 = monotonic_ns();
+    AUREA_CHECK(rig.e.load_project(path.c_str()).ok());
+    const f64 loadMs = static_cast<f64>(monotonic_ns() - t3) / 1e6;
+    comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+    AUREA_CHECK_EQ(comp->layers().count(), 300u);
+    std::printf("    300 camadas / 6000 keyframes: montar %.0f ms, quadro (captura) %.1f ms, salvar %.1f ms (%ld KB), abrir %.1f ms\n",
+                buildMs, frameMs, saveMs, bytes / 1024, loadMs);
+    AUREA_CHECK(frameMs < 500.0);
+    AUREA_CHECK(loadMs < 2000.0);
+    std::remove(path.c_str());
+}
+
 AUREA_TEST(Gpu, Scene3DSurvivesSaveAndReopenIdentically) {
     AUREA_REQUIRE_GPU();
     const std::string path = gltf_data("DamagedHelmet.glb");

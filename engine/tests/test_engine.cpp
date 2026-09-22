@@ -990,3 +990,79 @@ AUREA_TEST(Engine, BatchStringBlobOffsetsAreRebasedIntoTheQueue) {
     AUREA_CHECK_EQ(t.content, std::string("Texto Aurea"));
     e.shutdown();
 }
+
+// =============================================================================
+// 7H — papel e organização da camada: ajuste, guia, etiqueta, solo, busca
+// =============================================================================
+AUREA_TEST(Engine, LayerRoleFlagsReachTheRowsAndUndo) {
+    Engine e;
+    AUREA_CHECK(e.initialize(headless_config()).ok());
+    AUREA_CHECK(e.new_project(640, 360, 30.0, nullptr).ok());
+    const auto a = e.add_shape(10);
+    const auto b = e.add_shape(10);
+    AUREA_CHECK(a.ok() && b.ok());
+
+    AUREA_CHECK(e.set_layer_adjustment(*b, true));
+    AUREA_CHECK(e.set_layer_guide(*a, true));
+    AUREA_CHECK(e.set_layer_label(*a, 5));
+    AUREA_CHECK(!e.set_layer_label(*a, kLayerLabelCount));   // fora da paleta: recusa
+    AUREA_CHECK(e.set_layer_solo(*b, true));
+    AUREA_CHECK(!e.set_layer_guide(0xDEADBEEFull, true));
+
+    bridge::LayerRow rows[4];
+    char names[256];
+    const u32 n = e.query_layers(rows, 4, names, sizeof(names));
+    AUREA_CHECK_EQ(n, 2u);
+    // A frente primeiro: b, depois a.
+    AUREA_CHECK_EQ(rows[0].id, *b);
+    AUREA_CHECK((rows[0].flags & bridge::kLayerRowFlagAdjustment) != 0);
+    AUREA_CHECK((rows[0].flags & bridge::kLayerRowFlagSolo) != 0);
+    AUREA_CHECK((rows[0].flags & bridge::kLayerRowFlagGuide) == 0);
+    AUREA_CHECK((rows[1].flags & bridge::kLayerRowFlagGuide) != 0);
+    AUREA_CHECK_EQ((rows[1].flags & bridge::kLayerRowLabelMask) >> bridge::kLayerRowLabelShift, 5u);
+    bridge::LayerDetailPOD d;
+    AUREA_CHECK(e.query_layer_detail(*b, d));
+    AUREA_CHECK((d.flags & bridge::kLayerRowFlagAdjustment) != 0 && (d.flags & bridge::kLayerRowFlagSolo) != 0);
+
+    // Cada troca é um passo de desfazer: o último (solo) volta primeiro.
+    Command undo;
+    undo.type = CommandType::Undo;
+    AUREA_CHECK(e.apply_command(undo).ok());
+    AUREA_CHECK(!layer_of(e, LayerId::unpack(*b))->solo);
+    AUREA_CHECK(layer_of(e, LayerId::unpack(*b))->adjustment);
+    AUREA_CHECK(e.apply_command(undo).ok());
+    AUREA_CHECK_EQ(layer_of(e, LayerId::unpack(*a))->label, static_cast<u8>(0));
+    e.shutdown();
+}
+
+AUREA_TEST(Engine, SearchLayersFoldsCaseAndAccents) {
+    Engine e;
+    AUREA_CHECK(e.initialize(headless_config()).ok());
+    AUREA_CHECK(e.new_project(640, 360, 30.0, nullptr).ok());
+    const auto a = e.add_shape(10);
+    const auto b = e.add_shape(10);
+    const auto t = e.add_shape(10);
+    AUREA_CHECK(a.ok() && b.ok() && t.ok());
+    Composition* c = e.project()->timeline().composition(e.project()->timeline().current());
+    c->layer(LayerId::unpack(*a))->name = "TÍTULO Principal";
+    c->layer(LayerId::unpack(*b))->name = "Fundo azul";
+    // Texto: acha pelo conteúdo, não só pelo nome.
+    Layer* tl = c->layer(LayerId::unpack(*t));
+    tl->name = "Texto";
+    tl->kind = LayerKind::Text;
+    tl->text.content = "Coração de São Paulo";
+
+    auto ids = e.search_layers("titulo");
+    AUREA_CHECK(ids.size() == 1 && ids[0] == *a);
+    ids = e.search_layers("PRINCIPAL");
+    AUREA_CHECK(ids.size() == 1 && ids[0] == *a);
+    ids = e.search_layers("sao paulo");
+    AUREA_CHECK(ids.size() == 1 && ids[0] == *t);
+    ids = e.search_layers("CORAÇÃO");
+    AUREA_CHECK(ids.size() == 1 && ids[0] == *t);
+    ids = e.search_layers("u");   // as três: da frente para o fundo
+    AUREA_CHECK(ids.size() == 3 && ids[0] == *t && ids[1] == *b && ids[2] == *a);
+    AUREA_CHECK(e.search_layers("").empty());
+    AUREA_CHECK(e.search_layers("xyz").empty());
+    e.shutdown();
+}

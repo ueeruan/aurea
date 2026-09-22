@@ -85,7 +85,7 @@ import com.aurea.aurea.ui.theme.tocavel
 // =============================================================================
 
 /** Folhas e diálogos que a casca abre (um por vez). */
-internal enum class ShellSheet { LayerMenu, RenameLayer, TimelineMenu, ProjectSettings, CopyPaste, GoToTime }
+internal enum class ShellSheet { LayerMenu, RenameLayer, TimelineMenu, ProjectSettings, CopyPaste, GoToTime, SearchLayers }
 
 /**
  * O que está aberto na casca. Nada aqui é do projeto: o motor não sabe que
@@ -492,6 +492,7 @@ private fun ShellSheets(store: EditorStore, ui: EditorUi) {
         ShellSheet.TimelineMenu -> TimelineMenuSheet(store, ui, dismiss)
         ShellSheet.ProjectSettings -> ProjectSettingsSheet(store, ui, dismiss)
         ShellSheet.CopyPaste -> CopyPasteSheet(store, dismiss)
+        ShellSheet.SearchLayers -> SearchLayersSheet(store, dismiss)
         ShellSheet.GoToTime -> {
             val fps = store.project.fps
             val seconds = remember { "%.2f".format(java.util.Locale.ROOT, store.playhead / (if (fps > 0f) fps else 30f)) }

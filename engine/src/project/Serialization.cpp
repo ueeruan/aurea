@@ -522,13 +522,18 @@ void write_layer(ByteWriter& w, const Layer& l) {
     }
     // v15: legenda de qual camada
     w.u64v(l.text.captionSource);
+    // v16: camada de ajuste, guia e etiqueta de cor
+    w.boolv(l.adjustment);
+    w.boolv(l.guide);
+    w.u8v(l.label);
 }
 
 /// Versão da seção Timeline. v2: layer de modelo 3D guarda escala de unidade
 /// e pivô (o enquadramento do import). v1 continua sendo lida (campos novos
 /// com o padrão).
 /// v3: velocidade e reverso da layer.
-constexpr u32 kTimelineSectionVersion = 15;
+/// v16: camada de ajuste, guia (não exporta) e etiqueta de cor.
+constexpr u32 kTimelineSectionVersion = 16;
 thread_local u32 g_readingTimelineVersion = kTimelineSectionVersion;
 
 void read_layer(ByteReader& r, Layer& l) {
@@ -756,6 +761,12 @@ void read_layer(ByteReader& r, Layer& l) {
         }
     }
     if (g_readingTimelineVersion >= 15) l.text.captionSource = r.u64v();
+    if (g_readingTimelineVersion >= 16) {
+        l.adjustment = r.boolv();
+        l.guide = r.boolv();
+        const u8 label = r.u8v();
+        l.label = label < kLayerLabelCount ? label : 0;   // etiqueta de versão futura: nenhuma
+    }
 }
 
 void write_asset(ByteWriter& w, const Asset& a) {

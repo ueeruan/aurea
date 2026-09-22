@@ -909,6 +909,39 @@ AUREA_JNI jboolean AUREA_FN(nativeSetMotionBlur)(JNIEnv*, jclass, jlong handle, 
     return c && c->engine.set_motion_blur(static_cast<u64>(layer), on == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
 }
 
+AUREA_JNI jboolean AUREA_FN(nativeSetLayerAdjustment)(JNIEnv*, jclass, jlong handle, jlong layer, jboolean on) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.set_layer_adjustment(static_cast<u64>(layer), on == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetLayerGuide)(JNIEnv*, jclass, jlong handle, jlong layer, jboolean on) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.set_layer_guide(static_cast<u64>(layer), on == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetLayerLabel)(JNIEnv*, jclass, jlong handle, jlong layer, jint label) {
+    NativeContext* c = ctx_of(handle);
+    return c && label >= 0 && c->engine.set_layer_label(static_cast<u64>(layer), static_cast<u32>(label)) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetLayerSolo)(JNIEnv*, jclass, jlong handle, jlong layer, jboolean on) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.set_layer_solo(static_cast<u64>(layer), on == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+}
+
+/// Camadas cujo nome/texto contém a consulta (frente → fundo). Nunca nulo.
+AUREA_JNI jlongArray AUREA_FN(nativeSearchLayers)(JNIEnv* env, jclass, jlong handle, jstring query) {
+    NativeContext* c = ctx_of(handle);
+    std::vector<u64> ids;
+    if (c && query) ids = c->engine.search_layers(to_string(env, query));
+    jlongArray arr = env->NewLongArray(static_cast<jsize>(ids.size()));
+    if (arr && !ids.empty()) {
+        std::vector<jlong> v(ids.begin(), ids.end());
+        env->SetLongArrayRegion(arr, 0, static_cast<jsize>(v.size()), v.data());
+    }
+    return arr;
+}
+
 /// Estado térmico do PowerManager (THERMAL_STATUS_*: 0 nenhum … 6 desligando).
 AUREA_JNI void AUREA_FN(nativeSetThermal)(JNIEnv*, jclass, jlong handle, jint status) {
     NativeContext* c = ctx_of(handle);

@@ -333,6 +333,14 @@ class AureaEngine private constructor() {
 
     // Desfoque de movimento.
     fun setMotionBlur(layer: Long, on: Boolean): Boolean = nativeSetMotionBlur(nativeHandle, layer, on)
+
+    // Organização e papel da camada (7H).
+    fun setLayerAdjustment(layer: Long, on: Boolean): Boolean = nativeSetLayerAdjustment(nativeHandle, layer, on)
+    fun setLayerGuide(layer: Long, on: Boolean): Boolean = nativeSetLayerGuide(nativeHandle, layer, on)
+    fun setLayerLabel(layer: Long, label: Int): Boolean = nativeSetLayerLabel(nativeHandle, layer, label)
+    fun setLayerSolo(layer: Long, on: Boolean): Boolean = nativeSetLayerSolo(nativeHandle, layer, on)
+    /** Camadas cujo nome/texto contém [query] (sem maiúscula nem acento), da frente para o fundo. */
+    fun searchLayers(query: String): LongArray = nativeSearchLayers(nativeHandle, query)
     fun setFrameBlend(layer: Long, mode: Int): Boolean = nativeSetFrameBlend(nativeHandle, layer, mode)
     fun setVectorBlur(layer: Long, amount: Float): Boolean = nativeSetVectorBlur(nativeHandle, layer, amount)
 
@@ -488,6 +496,11 @@ class AureaEngine private constructor() {
     private external fun nativeToggleMarker(handle: Long, frame: Long): Boolean
     private external fun nativeSetEditMode(handle: Long, on: Boolean)
     private external fun nativeSetMotionBlur(handle: Long, layer: Long, on: Boolean): Boolean
+    private external fun nativeSetLayerAdjustment(handle: Long, layer: Long, on: Boolean): Boolean
+    private external fun nativeSetLayerGuide(handle: Long, layer: Long, on: Boolean): Boolean
+    private external fun nativeSetLayerLabel(handle: Long, layer: Long, label: Int): Boolean
+    private external fun nativeSetLayerSolo(handle: Long, layer: Long, on: Boolean): Boolean
+    private external fun nativeSearchLayers(handle: Long, query: String): LongArray
     private external fun nativeSetThermal(handle: Long, status: Int)
     private external fun nativeListFonts(handle: Long): String?
     private external fun nativeImportFont(handle: Long, path: String): String?

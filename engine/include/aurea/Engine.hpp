@@ -377,6 +377,18 @@ public:
 
     /// Desfoque de movimento da camada (liga também o da composição).
     bool set_motion_blur(u64 layerId, bool on) noexcept;
+    /// Camada de ajuste: os efeitos dela valem para tudo o que está abaixo.
+    bool set_layer_adjustment(u64 layerId, bool on) noexcept;
+    /// Guia: aparece no preview e nunca sai no export.
+    bool set_layer_guide(u64 layerId, bool on) noexcept;
+    /// Etiqueta de cor (0 = nenhuma, até kLayerLabelCount − 1).
+    bool set_layer_label(u64 layerId, u32 label) noexcept;
+    /// Solo: com alguma camada em solo, o preview (e o áudio) só tocam as em solo.
+    bool set_layer_solo(u64 layerId, bool on) noexcept;
+    /// Camadas da composição atual cujo nome ou texto contém `query` (sem
+    /// diferença de maiúsculas nem de acento: "titulo" acha "TÍTULO"). Da
+    /// frente para o fundo, como a timeline mostra. Consulta vazia = nenhuma.
+    [[nodiscard]] std::vector<u64> search_layers(const std::string& query) noexcept;
     /// Vídeo em câmera lenta/velocidade quebrada: 0 repete o quadro, 1 mistura
     /// os dois quadros vizinhos da fonte, 2 movimento de pixels (optical flow).
     bool set_frame_blend(u64 layerId, u32 mode) noexcept;

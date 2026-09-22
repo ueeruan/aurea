@@ -26,6 +26,7 @@ import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.sp
+import com.aurea.aurea.editor.ShellColors
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaTimeline
 import com.aurea.aurea.ui.theme.CupertinoGlyph
@@ -267,7 +268,9 @@ internal class TimelinePainter(
             // Trilho dos losangos, a faixa da cor do tipo e o fio de luz no alto.
             drawRect(TRACK_SHADE, Offset(left, top + m.trackTop), Size(right - left, m.track))
             if (r.type == LayerType.Audio || r.type == LayerType.Video) drawWaveform(canvas, r, top, x0, x1, w, view, ppf, cx)
-            drawRect(if (r.visible) r.type.color else r.type.color.copy(alpha = 0.5f), Offset(x0, top), Size(m.stripe, m.bar))
+            // A faixa da ponta: a cor da etiqueta, quando a camada tem uma; senão a do tipo.
+            val stripe = ShellColors.LabelPalette.getOrNull(r.label - 1) ?: r.type.color
+            drawRect(if (r.visible) stripe else stripe.copy(alpha = 0.5f), Offset(x0, top), Size(m.stripe, m.bar))
             drawLine(
                 Color.White.copy(alpha = if (selected) 0.24f else 0.10f),
                 Offset(max(x0 + m.stripe, left), top + m.lightLine / 2f),

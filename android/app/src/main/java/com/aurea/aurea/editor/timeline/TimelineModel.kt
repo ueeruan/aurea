@@ -20,6 +20,8 @@ internal class RowModel(
     val locked: Boolean,
     val animated: Boolean,
     val name: String,
+    /** Etiqueta de cor (0 = nenhuma; i = `ShellColors.LabelPalette[i - 1]`). */
+    val label: Int,
     /** Instantes com keyframe (qualquer trilha), em frames da TIMELINE, ordenados e sem repetição. */
     val instants: IntArray,
     /** Keyframes de cada instante (todas as trilhas que têm marca ali), paralelo a [instants]. */
@@ -55,6 +57,7 @@ internal fun buildRows(layers: List<LayerRow>, keyframes: Map<Long, List<Keyfram
             locked = l.locked,
             animated = l.animated || keys.isNotEmpty(),
             name = l.name,
+            label = l.label,
             instants = times.toIntArray(),
             keysAt = groups.toTypedArray(),
         )

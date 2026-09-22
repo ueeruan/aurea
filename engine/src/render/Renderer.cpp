@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <new>
 
 namespace aurea {
 namespace {
@@ -380,6 +381,9 @@ Status Renderer::initialize(GPUBackend& backend, const EffectRegistry& effects) 
                                          kWorkFormat, true, BlendMode::Normal));
     keys.push_back(PipelineKey::graphics(ShaderId::composite_layer_vert, ShaderId::composite_layer_frag,
                                          kWorkFormat, true, BlendMode::Add));
+    // Modos que leem o fundo: cópia do fundo (sem blend) + quad com blend.frag.
+    keys.push_back(PipelineKey::graphics(ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat));
+    keys.push_back(PipelineKey::graphics(ShaderId::composite_layer_vert, ShaderId::composite_blend_frag, kWorkFormat));
     for (SurfaceFormat f : {SurfaceFormat::RGBA8, SurfaceFormat::BGRA8}) {
         keys.push_back(PipelineKey::graphics(ShaderId::composite_layer_vert, ShaderId::composite_output_frag, f));
     }
@@ -522,10 +526,23 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
     // profundidade compartilhada: elas se ocluem). Qualquer layer 2D entre
     // elas fecha o grupo — a ordem da pilha continua sendo a lei.
     bool groupOpen = false;
+    // Solo (só no preview): com alguma camada visível em solo, as outras que
+    // desenham ficam de fora. Câmera e luz não entram na regra (a cena
+    // continua enquadrada e iluminada, como no AE).
+    bool anySolo = false;
+    if (!settings.finalQuality) {
+        for (u32 i = 0; i < n && !anySolo; ++i) {
+            const Layer* l = comp.layer(order.at(i));
+            anySolo = l && l->visible && l->solo && l->kind != LayerKind::Camera && l->kind != LayerKind::Light;
+        }
+    }
     for (u32 i = 0; i < n; ++i) {
         const LayerId id = order.at(i);
         const Layer* l = comp.layer(id);
         if (!l || !l->visible || !l->contains_time(time)) continue;
+        // Guia: referência de trabalho no editor, nunca no arquivo final.
+        if (l->guide && settings.finalQuality) continue;
+        if (anySolo && !l->solo) continue;
         const FrameIndex local = l->local_time(time);
 
         // Dentro de uma pré-composição os ids se repetem (cada composição tem a
@@ -540,6 +557,35 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         rl.blend = l->blendMode;
         rl.opacity = layer_opacity(*l, local);
         if (rl.opacity <= 0.0f) continue;   // invisível: nenhum passe, nenhum decode
+
+        if (l->adjustment) {
+            // Camada de ajuste: o "conteúdo" é a composição acumulada abaixo
+            // dela, no quadro inteiro (px da camada = px da composição). Os
+            // efeitos são planejados como os de qualquer camada; a montagem
+            // acontece na composição, quando o fundo já existe.
+            rl.source.kind = LayerSource::Kind::Adjustment;
+            rl.source.width = out.compWidth;
+            rl.source.height = out.compHeight;
+            rl.compFromLayer = Mat4::identity();
+            rl.texelScale = previewFactor;
+            rl.blend = BlendMode::Normal;   // a mistura dela é o peso da opacidade
+            if (out.plans.size() <= used) out.plans.emplace_back();
+            LayerPlacement pl;
+            pl.compFromLayer = Mat4::identity();
+            pl.compWidth = out.compWidth;
+            pl.compHeight = out.compHeight;
+            pl.layerWidth = out.compWidth;
+            pl.layerHeight = out.compHeight;
+            EffectGraph::plan(*l, *effects_, local, rl.texelScale, pl, this, out.plans[used]);
+            if (out.plans[used].empty()) {   // nenhum efeito vivo: não muda nada
+                out.plans[used].clear();
+                continue;
+            }
+            groupOpen = false;   // fecha o grupo 3D: o que vem acima vê o ajuste
+            out.layers.push_back(std::move(rl));
+            ++used;
+            continue;
+        }
 
         switch (l->kind) {
             case LayerKind::Video: {
@@ -1818,6 +1864,13 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
     for (u32 i = 0; i < snap.layers.size(); ++i) {
         const RenderLayer& layer = snap.layers[i];
         if (layer.planeGroup >= 0) continue;   // desenhada dentro da cena
+        if (layer.source.kind == LayerSource::Kind::Adjustment) {
+            CompositeDraw draw;
+            draw.adjustPlan = i;
+            draw.opacity = layer.opacity;
+            draws.push_back(draw);
+            continue;
+        }
         LayerImage src;
         const bool hasEffects = i < snap.plans.size() && !snap.plans[i].empty();
         if (!build_source(layer, i, hasEffects, src, framesInFlight_, frameNumber)) {
@@ -1897,29 +1950,73 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
         draws.push_back(draw);
     }
 
-    // --- Composição: um passe, todas as layers, blend de hardware.
-    {
-        auto pNormal = shaders_.pipeline(PipelineKey::graphics(
-            ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat, true, BlendMode::Normal));
-        auto pAdd = shaders_.pipeline(PipelineKey::graphics(
-            ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat, true, BlendMode::Add));
-        const u32 count = static_cast<u32>(draws.size());
-        CompositeDraw* arr = count ? arena_.alloc_array<CompositeDraw>(count) : nullptr;
-        for (u32 i = 0; i < count; ++i) arr[i] = draws[i];
-        struct Cap {
-            CompositeDraw* draws; u32 count; PipelineHandle normal; PipelineHandle add;
-            f32 compW; f32 compH;
-        } cap{arr, count, pNormal.ok() ? *pNormal : PipelineHandle{}, pAdd.ok() ? *pAdd : PipelineHandle{},
-              static_cast<f32>(snap.compWidth), static_cast<f32>(snap.compHeight)};
-        const u32 pass = graph_.add_raster_pass("composicao", PassStage::Composite, comp, LoadOp::Clear,
+    composite_draws(snap, comp, compDesc, draws, ctx);
+}
+
+// =============================================================================
+// Composição da pilha
+//
+// Normal é blend de hardware: todos os desenhos Normal seguidos vão num passe
+// só, no mesmo alvo (nenhuma leitura do destino). Add também passa pelo shader:
+// a soma de hardware somava o ALFA (1 + 0,6 = 1,6 sobre fundo opaco) e quem
+// despré-multiplica depois (captura, export) escurecia a cor. Um modo que
+// precisa do fundo (Add, Multiply, Overlay, Hue...) ou uma camada de ajuste corta
+// o lote: o passe seguinte escreve um alvo NOVO com a cópia do fundo e, por
+// cima, o quad da camada com blend.frag lendo o fundo como textura. O último
+// desses passes escreve direto no alvo final (nenhuma cópia extra no fim) e
+// o que sobra da pilha continua nele com LoadOp::Load. Sem nenhum modo desses
+// no quadro, o caminho é exatamente o de antes: um passe, zero texturas a mais.
+// =============================================================================
+void Renderer::composite_draws(FrameSnapshot& snap, FGTexture comp, const TextureDesc& compDesc,
+                               const std::vector<CompositeDraw>& draws, EffectBuildContext& ctx) noexcept {
+    auto pNormal = shaders_.pipeline(PipelineKey::graphics(
+        ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat, true, BlendMode::Normal));
+    auto pAdd = shaders_.pipeline(PipelineKey::graphics(
+        ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat, true, BlendMode::Add));
+    const f32 compW = static_cast<f32>(snap.compWidth), compH = static_cast<f32>(snap.compHeight);
+    const u32 count = static_cast<u32>(draws.size());
+    auto hardware = [](const CompositeDraw& d) noexcept {
+        return d.adjustPlan == kInvalidIndex && d.blend == BlendMode::Normal;
+    };
+    u32 lastRead = kInvalidIndex;   // último desenho que lê o fundo
+    for (u32 i = 0; i < count; ++i) if (!hardware(draws[i])) lastRead = i;
+    PipelineHandle copyP{}, blendP{};
+    if (lastRead != kInvalidIndex) {
+        auto c = shaders_.pipeline(PipelineKey::graphics(ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat));
+        auto b = shaders_.pipeline(PipelineKey::graphics(ShaderId::composite_layer_vert, ShaderId::composite_blend_frag, kWorkFormat));
+        if (c.ok() && b.ok()) { copyP = *c; blendP = *b; }
+        else incomplete_ = true;   // pipeline compilando: este quadro cai no Normal, o próximo tenta de novo
+    }
+    const bool readsBackdrop = lastRead != kInvalidIndex && copyP.valid() && blendP.valid();
+    TextureDesc pingDesc = compDesc;
+    pingDesc.transferSrc = false;
+    pingDesc.sampled = true;
+    pingDesc.renderTarget = true;
+    // O alvo final (import do export/captura) pode não ser amostrável: o
+    // fundo lido é sempre uma textura do grafo.
+    FGTexture cur = readsBackdrop ? graph_.create_texture("composicao-fundo", pingDesc) : comp;
+    bool fresh = true;        // `cur` ainda não foi escrito (o lote limpa com o fundo)
+    u32 batchBegin = 0;
+
+    struct HwCap {
+        CompositeDraw* draws; u32 count; PipelineHandle normal; PipelineHandle add; f32 compW; f32 compH;
+    };
+    auto flush = [&](u32 end) {
+        if (end == batchBegin && !fresh) return;
+        u32 n = 0;
+        for (u32 i = batchBegin; i < end; ++i) n += draws[i].adjustPlan == kInvalidIndex ? 1u : 0u;
+        CompositeDraw* arr = n ? arena_.alloc_array<CompositeDraw>(n) : nullptr;
+        u32 k = 0;
+        for (u32 i = batchBegin; i < end; ++i) if (draws[i].adjustPlan == kInvalidIndex) arr[k++] = draws[i];
+        const HwCap cap{arr, n, pNormal.ok() ? *pNormal : PipelineHandle{}, pAdd.ok() ? *pAdd : PipelineHandle{}, compW, compH};
+        const u32 pass = graph_.add_raster_pass("composicao", PassStage::Composite, cur, fresh ? LoadOp::Clear : LoadOp::Load,
                                                 snap.background, [cap](PassContext& pc) {
             const Mat4 clip = clip_from_comp(cap.compW, cap.compH);
             PipelineHandle bound{};
             for (u32 i = 0; i < cap.count; ++i) {
                 const CompositeDraw& d = cap.draws[i];
-                // Blend: Normal e Add são de hardware. Os demais modos ainda
-                // não têm passe com leitura do destino — caem no Normal (e o
-                // painel mostra), em vez de uma aproximação silenciosa.
+                // Os modos que leem o fundo só chegam aqui se o pipeline deles
+                // ainda não existe: Add cai na soma de hardware, o resto no Normal.
                 const PipelineHandle p = d.blend == BlendMode::Add && cap.add.valid() ? cap.add : cap.normal;
                 if (!p.valid()) continue;
                 if (!(p == bound)) { pc.cmds.bind_pipeline(p); bound = p; }
@@ -1933,8 +2030,97 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
                 pc.cmds.draw(6);
             }
         });
-        for (const CompositeDraw& d : draws) graph_.read(pass, d.texture);
+        for (u32 i = 0; i < n; ++i) graph_.read(pass, arr[i].texture);
+        fresh = false;
+    };
+
+    struct ReadCap {
+        PipelineHandle copy, blend;
+        FGTexture backdrop{}, src{};
+        u64 copySampler = 0, srcSampler = 0;
+        Mat4 compFromLayer = Mat4::identity();
+        Vec4 region{};
+        f32 opacity = 1.0f, mode = 0.0f, compW = 0.0f, compH = 0.0f;
+        bool drawSrc = false;
+    };
+    for (u32 i = 0; readsBackdrop && i < count; ++i) {
+        const CompositeDraw& d = draws[i];
+        if (hardware(d)) continue;
+        flush(i);
+        batchBegin = i + 1;
+        ReadCap* rc = arena_.alloc_array<ReadCap>(1);
+        new (rc) ReadCap{};
+        rc->copy = copyP;
+        rc->blend = blendP;
+        rc->backdrop = cur;
+        rc->copySampler = shaders_.sampler(CommonSampler::NearestClamp).id;
+        rc->compW = compW;
+        rc->compH = compH;
+        rc->opacity = d.opacity;
+        if (d.adjustPlan != kInvalidIndex) {
+            // Os efeitos da camada de ajuste sobre o fundo acumulado (px da
+            // composição, na resolução do alvo). Resultado misturado ao fundo
+            // pela opacidade.
+            LayerImage in;
+            in.texture = cur;
+            in.region = Rect{0.0f, 0.0f, compW, compH};
+            in.width = compDesc.width;
+            in.height = compDesc.height;
+            LayerImage fin = in;
+            const EffectPlan& plan = snap.plans[d.adjustPlan];
+            (void)EffectGraph::build(plan, ctx, in, fin);
+            rc->drawSrc = fin.valid() && !(fin.texture == cur) ;
+            rc->src = fin.texture;
+            rc->region = Vec4{fin.region.x, fin.region.y, fin.region.w, fin.region.h};
+            rc->compFromLayer = plan.hasFold ? plan.foldMatrix : Mat4::identity();
+            rc->opacity = d.opacity * (plan.hasFold ? plan.foldOpacity : 1.0f);
+            rc->srcSampler = shaders_.sampler(CommonSampler::LinearClamp).id;
+            rc->mode = 100.0f;
+            if (plan.hasFold && !rc->drawSrc) {
+                // Só o Transform (dobrado na matriz): o fundo movido é a fonte.
+                rc->drawSrc = true;
+                rc->src = cur;
+                rc->srcSampler = shaders_.sampler(CommonSampler::LinearBorder).id;
+            }
+        } else {
+            rc->drawSrc = d.texture.valid();
+            rc->src = d.texture;
+            rc->region = Vec4{d.region.x, d.region.y, d.region.w, d.region.h};
+            rc->compFromLayer = d.compFromLayer;
+            rc->srcSampler = d.sampler;
+            rc->mode = static_cast<f32>(static_cast<u16>(d.blend));
+        }
+        const FGTexture next = i == lastRead ? comp : graph_.create_texture("composicao-mistura", pingDesc);
+        const u32 pass = graph_.add_raster_pass("mistura", PassStage::Composite, next, LoadOp::Clear, Vec4{0, 0, 0, 0},
+                                                [rc](PassContext& pc) {
+            const Mat4 clip = clip_from_comp(rc->compW, rc->compH);
+            // 1) o fundo, texel a texel (mesmo tamanho, amostra no centro).
+            pc.cmds.bind_pipeline(rc->copy);
+            LayerPush push;
+            push.clipFromLayer = clip;
+            push.region = Vec4{0.0f, 0.0f, rc->compW, rc->compH};
+            push.uvRect = Vec4{0.0f, 0.0f, 1.0f, 1.0f};
+            push.params = Vec4{1.0f, 0.0f, 0.0f, 0.0f};
+            pc.cmds.bind_texture(0, pc.texture(rc->backdrop), SamplerHandle{rc->copySampler});
+            pc.cmds.push_constants(&push, sizeof(push));
+            pc.cmds.draw(6);
+            if (!rc->drawSrc) return;
+            // 2) a camada, com a cor final calculada contra o fundo.
+            pc.cmds.bind_pipeline(rc->blend);
+            push.clipFromLayer = clip * rc->compFromLayer;
+            push.region = rc->region;
+            push.params = Vec4{rc->opacity, rc->mode, 0.0f, 0.0f};
+            pc.cmds.bind_texture(0, pc.texture(rc->src), SamplerHandle{rc->srcSampler});
+            pc.cmds.bind_texture(1, pc.texture(rc->backdrop), SamplerHandle{rc->copySampler});
+            pc.cmds.push_constants(&push, sizeof(push));
+            pc.cmds.draw(6);
+        });
+        graph_.read(pass, cur);
+        if (rc->drawSrc && !(rc->src == cur)) graph_.read(pass, rc->src);
+        cur = next;
+        fresh = false;
     }
+    flush(count);
 }
 
 Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,

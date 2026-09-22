@@ -1714,6 +1714,125 @@ bool Engine::set_motion_blur(u64 layerId, bool on) noexcept {
     return true;
 }
 
+namespace {
+/// Minúsculas ASCII sem acento: o UTF-8 é decodificado e as letras latinas
+/// acentuadas (Latin-1 e Latin Extended-A — português, espanhol, francês,
+/// europeu central) viram a letra base. O resto passa como está, o que basta
+/// para "contém".
+std::string fold_for_search(const std::string& s) {
+    // U+00C0..U+00FF → letra base ('0' = mantém: ×, ÷).
+    static constexpr char kLatin1[] = "aaaaaaaceeeeiiii" "dnooooo0ouuuuyts" "aaaaaaaceeeeiiii" "dnooooo0ouuuuyty";
+    // U+0100..U+017F (pares maiúscula/minúscula da mesma base; Ĳ ĳ mantidos).
+    static constexpr char kExtA[] = "aaaaaa" "cccccccc" "dddd" "eeeeeeeeee" "gggggggg" "hhhh" "iiiiiiiiii" "00" "jj" "kkk"
+                                    "llllllllll" "nnnnnnnnn" "oooooo" "oo" "rrrrrr" "ssssssss" "tttttt" "uuuuuuuuuuuu"
+                                    "ww" "yyy" "zzzzzz" "s";
+    static_assert(sizeof(kLatin1) == 64 + 1 && sizeof(kExtA) == 128 + 1, "tabelas de acento");
+    std::string out;
+    out.reserve(s.size());
+    for (usize i = 0; i < s.size();) {
+        const u8 c = static_cast<u8>(s[i]);
+        if (c < 0x80) {
+            out.push_back(static_cast<char>(c >= 'A' && c <= 'Z' ? c + 32 : c));
+            ++i;
+            continue;
+        }
+        u32 cp = 0, len = 0;
+        if ((c & 0xE0) == 0xC0) { cp = c & 0x1Fu; len = 2; }
+        else if ((c & 0xF0) == 0xE0) { cp = c & 0x0Fu; len = 3; }
+        else if ((c & 0xF8) == 0xF0) { cp = c & 0x07u; len = 4; }
+        bool ok = len != 0 && i + len <= s.size();
+        for (u32 k = 1; ok && k < len; ++k) {
+            const u8 cc = static_cast<u8>(s[i + k]);
+            ok = (cc & 0xC0) == 0x80;
+            cp = (cp << 6) | (cc & 0x3Fu);
+        }
+        if (!ok) { out.push_back(static_cast<char>(c)); ++i; continue; }   // UTF-8 quebrado: byte cru
+        char base = '0';
+        if (cp >= 0xC0 && cp <= 0xFF) base = kLatin1[cp - 0xC0];
+        else if (cp >= 0x100 && cp <= 0x17F) base = kExtA[cp - 0x100];
+        if (base != '0') out.push_back(base);
+        else out.append(s, i, len);
+        i += len;
+    }
+    return out;
+}
+} // namespace
+
+bool Engine::set_layer_adjustment(u64 layerId, bool on) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l) return false;
+    if (l->adjustment == on) return true;
+    history_.before_mutation(*comp, project_->timeline().current(), on ? "camada de ajuste" : "desligar camada de ajuste");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    l->adjustment = on;
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::set_layer_guide(u64 layerId, bool on) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l) return false;
+    if (l->guide == on) return true;
+    history_.before_mutation(*comp, project_->timeline().current(), on ? "camada guia" : "desligar camada guia");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    l->guide = on;
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::set_layer_label(u64 layerId, u32 label) noexcept {
+    if (label >= kLayerLabelCount) return false;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l) return false;
+    if (l->label == label) return true;
+    history_.before_mutation(*comp, project_->timeline().current(), "etiqueta da camada");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    l->label = static_cast<u8>(label);
+    project_->mark_dirty();
+    return true;   // só organização: nenhum pixel muda
+}
+
+bool Engine::set_layer_solo(u64 layerId, bool on) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l) return false;
+    if (l->solo == on) return true;
+    history_.before_mutation(*comp, project_->timeline().current(), on ? "solo" : "desligar solo");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    l->solo = on;
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+std::vector<u64> Engine::search_layers(const std::string& query) noexcept {
+    std::vector<u64> out;
+    const std::string q = fold_for_search(query);
+    if (q.empty()) return out;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp) return out;
+    const u32 n = comp->order().size();
+    for (u32 i = 0; i < n; ++i) {
+        const LayerId id = comp->order().at(n - 1 - i);   // a frente primeiro
+        const Layer* l = comp->layer(id);
+        if (!l) continue;
+        const bool hit = fold_for_search(l->name).find(q) != std::string::npos
+                      || (l->kind == LayerKind::Text && fold_for_search(l->text.content).find(q) != std::string::npos);
+        if (hit) out.push_back(id.pack());
+    }
+    return out;
+}
+
 bool Engine::set_frame_blend(u64 layerId, u32 mode) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
@@ -3908,6 +4027,9 @@ u32 Engine::query_layers(bridge::LayerRow* out, u32 capacity, char* outNameBlob,
         if (l->animated()) flags |= bridge::kLayerRowFlagAnimated;
         if (std::binary_search(selection_.begin(), selection_.end(), row.id)) flags |= bridge::kLayerRowFlagSelected;
         if (l->threeD)  flags |= bridge::kLayerRowFlagThreeD;
+        if (l->adjustment) flags |= bridge::kLayerRowFlagAdjustment;
+        if (l->guide)   flags |= bridge::kLayerRowFlagGuide;
+        flags |= (static_cast<u32>(l->label) << bridge::kLayerRowLabelShift) & bridge::kLayerRowLabelMask;
         row.flags = flags;
         row.parentIndex = kInvalidIndex;
         if (outNameBlob && nameCursor + l->name.size() < nameBlobCapacity) {
@@ -4120,7 +4242,9 @@ bool Engine::fill_layer_detail_locked(u64 layerId, bridge::LayerDetailPOD& out) 
     bool selected = false;
     for (u64 s : selection_) if (s == layerId) selected = true;
     out.flags = (l->visible ? bridge::kLayerRowFlagVisible : 0u) | (l->locked ? bridge::kLayerRowFlagLocked : 0u)
-              | (selected ? bridge::kLayerRowFlagSelected : 0u);
+              | (selected ? bridge::kLayerRowFlagSelected : 0u) | (l->solo ? bridge::kLayerRowFlagSolo : 0u)
+              | (l->adjustment ? bridge::kLayerRowFlagAdjustment : 0u) | (l->guide ? bridge::kLayerRowFlagGuide : 0u)
+              | ((static_cast<u32>(l->label) << bridge::kLayerRowLabelShift) & bridge::kLayerRowLabelMask);
     out.startFrame = static_cast<i32>(l->start.value);
     out.endFrame = static_cast<i32>(l->end.value);
     out.offsetFrames = static_cast<i32>(l->offset.value);

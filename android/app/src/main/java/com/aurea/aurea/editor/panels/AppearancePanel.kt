@@ -110,8 +110,12 @@ private val BlendCategories = listOf(
     BlendCategory("Máscara", listOf(BlendChoice("Máscara", null, BlendMode.DstIn), BlendChoice("Recortar", null, BlendMode.DstOut))),
 )
 
-/** Os modos que o renderer desenha HOJE (Normal e Adicionar); o resto é "em breve". */
-private val RenderedBlendModes = setOf(0, 1)
+/**
+ * Os modos que o renderer desenha: todos os de `aurea::BlendMode` (Normal no
+ * blend de hardware; os outros num passe que lê o fundo). Os chips sem número
+ * no motor continuam "em breve".
+ */
+private val RenderedBlendModes = (0..17).toSet()
 
 /**
  * MESCLAGEM E OPACIDADE [A] (`BlendingPanel`): trilho com ◇ e curva da opacidade,

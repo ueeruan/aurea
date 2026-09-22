@@ -638,3 +638,35 @@ AUREA_TEST(Serialization, IncrementalSaveIsDeclaredUnimplemented) {
     // o motor diz isso em vez de aceitar a opção e gravar tudo em silêncio.
     AUREA_CHECK(!ProjectSerializer::incremental_save_implemented());
 }
+
+AUREA_TEST(Serialization, AdjustmentGuideAndLabelSurviveRoundTrip) {
+    const std::string path = temp_path("papel_da_camada");
+    std::remove(path.c_str());
+    Project original = make_project();
+    Composition* c = original.timeline().composition(original.timeline().root());
+    const LayerId adj = c->add_layer(LayerKind::Shape, "Ajuste");
+    const LayerId guide = c->add_layer(LayerKind::Shape, "Guia");
+    const LayerId plain = c->add_layer(LayerKind::Shape, "Comum");
+    c->layer(adj)->adjustment = true;
+    c->layer(adj)->label = 3;
+    c->layer(guide)->guide = true;
+    c->layer(guide)->solo = true;
+    c->layer(guide)->label = 12;
+    std::string error;
+    AUREA_CHECK_MSG(ProjectSerializer::save(original, path, SaveOptions{}, &error).ok(), error.c_str());
+
+    Project loaded;
+    AUREA_CHECK(ProjectSerializer::load(loaded, path, LoadOptions{}, nullptr, &error).ok());
+    const Composition* lc = loaded.timeline().composition(loaded.timeline().root());
+    AUREA_CHECK(lc != nullptr);
+    AUREA_CHECK_EQ(lc->order().size(), 3u);
+    const Layer* la = lc->layer(lc->order().at(0));
+    const Layer* lg = lc->layer(lc->order().at(1));
+    const Layer* lp = lc->layer(lc->order().at(2));
+    AUREA_CHECK(la && lg && lp);
+    AUREA_CHECK(la->name == "Ajuste" && la->adjustment && !la->guide && la->label == 3);
+    AUREA_CHECK(lg->name == "Guia" && lg->guide && lg->solo && !lg->adjustment && lg->label == 12);
+    AUREA_CHECK(lp->name == "Comum" && !lp->adjustment && !lp->guide && lp->label == 0);
+    (void)plain;
+    std::remove(path.c_str());
+}

@@ -267,6 +267,10 @@ struct CompositionRef {
     bool          collapsed = false;   ///< exibição colapsada na timeline
 };
 
+/// Etiquetas de cor: 0 = nenhuma + as 12 cores da paleta da UI (4 bits nas
+/// flags da linha da timeline).
+inline constexpr u8 kLayerLabelCount = 13;
+
 struct Layer {
     LayerKind kind = LayerKind::Unknown;
     std::string name;
@@ -315,8 +319,19 @@ struct Layer {
     BlendMode blendMode = BlendMode::Normal;
     bool     visible = true;
     bool     locked  = false;
+    /// Solo: com QUALQUER camada em solo, o preview só desenha as que estão
+    /// (o áudio já seguia a mesma chave). O export ignora o solo.
     bool     solo    = false;
     bool     threeD  = false;  ///< participa da cena 3D da composição
+    /// Camada de ajuste: não desenha conteúdo próprio; os efeitos dela valem
+    /// para a composição de TUDO o que está abaixo (no trecho de tempo dela),
+    /// no quadro inteiro, misturados pela opacidade da camada.
+    bool     adjustment = false;
+    /// Guia: aparece no preview do editor e nunca sai no export.
+    bool     guide = false;
+    /// Etiqueta de cor da camada (0 = nenhuma; 1..kLayerLabelCount-1 = paleta
+    /// fixa da UI). Só organização: não muda o render.
+    u8       label = 0;
 
     // --- Conteúdo ------------------------------------------------------------
     AssetId source{};              ///< vídeo, imagem, áudio ou modelo

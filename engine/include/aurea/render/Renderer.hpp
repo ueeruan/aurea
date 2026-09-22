@@ -74,7 +74,9 @@ struct GlyphInstance {
 static_assert(sizeof(GlyphInstance) == 160, "layout std430 do glifo");
 
 struct LayerSource {
-    enum class Kind : u8 { None = 0, Video, Image, Solid, Scene3D, Shape, Nested, Particles, Text };
+    /// Adjustment: camada de ajuste — sem fonte; os efeitos dela (plano no
+    /// mesmo índice) leem a composição acumulada abaixo dela.
+    enum class Kind : u8 { None = 0, Video, Image, Solid, Scene3D, Shape, Nested, Particles, Text, Adjustment };
     Kind kind = Kind::None;
     u32  width = 0;          ///< tamanho natural da layer (px)
     u32  height = 0;
@@ -277,7 +279,14 @@ private:
         /// Borda transparente (antisserrilhado de layer girada) para texturas
         /// de imagem; repetição para o sólido de 1x1, que a borda apagaria.
         u64       sampler = 0;
+        /// Camada de ajuste: índice do plano de efeitos em `FrameSnapshot::plans`
+        /// (a textura só existe no passe, feita do fundo acumulado).
+        u32       adjustPlan = kInvalidIndex;
     };
+    /// Os desenhos da pilha → alvo: lotes de blend de hardware (Normal, Add)
+    /// no mesmo alvo; modo que lê o fundo ou camada de ajuste = ping-pong.
+    void composite_draws(FrameSnapshot& snap, FGTexture comp, const TextureDesc& compDesc,
+                         const std::vector<CompositeDraw>& draws, EffectBuildContext& ctx) noexcept;
 
     /// Textura persistente de planos de vídeo (fallback sem zero-copy): uma
     /// por layer, reaproveitada frame a frame.

@@ -81,6 +81,11 @@ inline constexpr u32 kLayerRowFlagSolo     = 1u << 2;
 inline constexpr u32 kLayerRowFlagAnimated = 1u << 3;
 inline constexpr u32 kLayerRowFlagSelected = 1u << 4;
 inline constexpr u32 kLayerRowFlagThreeD   = 1u << 5;
+inline constexpr u32 kLayerRowFlagAdjustment = 1u << 6;   ///< camada de ajuste
+inline constexpr u32 kLayerRowFlagGuide    = 1u << 7;     ///< guia (não exporta)
+/// Etiqueta de cor (0 = nenhuma) nos bits 8..11.
+inline constexpr u32 kLayerRowLabelShift   = 8;
+inline constexpr u32 kLayerRowLabelMask    = 0xFu << kLayerRowLabelShift;
 
 static_assert(sizeof(LayerRow) == 64, "LayerRow e contrato de ABI com a UI");
 static_assert(offsetof(LayerRow, id) == 0);

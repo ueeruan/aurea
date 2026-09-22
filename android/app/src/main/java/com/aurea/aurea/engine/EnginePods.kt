@@ -63,6 +63,11 @@ internal object PodLayout {
     const val FLAG_ANIMATED = 1 shl 3
     const val FLAG_SELECTED = 1 shl 4
     const val FLAG_THREE_D = 1 shl 5
+    const val FLAG_ADJUSTMENT = 1 shl 6
+    const val FLAG_GUIDE = 1 shl 7
+    /** Etiqueta de cor (0 = nenhuma) nos bits 8..11 (`kLayerRowLabelShift`). */
+    const val LABEL_SHIFT = 8
+    const val LABEL_MASK = 0xF
 
     // =========================================================================
     // KeyframeRow
@@ -194,6 +199,10 @@ class LayerRow internal constructor(
     val animated: Boolean get() = (flags and PodLayout.FLAG_ANIMATED) != 0
     val selected: Boolean get() = (flags and PodLayout.FLAG_SELECTED) != 0
     val isThreeD: Boolean get() = (flags and PodLayout.FLAG_THREE_D) != 0
+    val adjustment: Boolean get() = (flags and PodLayout.FLAG_ADJUSTMENT) != 0
+    val guide: Boolean get() = (flags and PodLayout.FLAG_GUIDE) != 0
+    /** Etiqueta de cor: 0 = nenhuma, 1..12 = `ShellColors.LabelPalette[label - 1]`. */
+    val label: Int get() = (flags ushr PodLayout.LABEL_SHIFT) and PodLayout.LABEL_MASK
 
     val durationFrames: Int get() = endFrame - startFrame
     val hasParent: Boolean get() = parentIndex != INVALID_INDEX
@@ -814,6 +823,10 @@ data class LayerDetail(
 
     val visible: Boolean get() = (flags and PodLayout.FLAG_VISIBLE) != 0
     val locked: Boolean get() = (flags and PodLayout.FLAG_LOCKED) != 0
+    val solo: Boolean get() = (flags and PodLayout.FLAG_SOLO) != 0
+    val adjustment: Boolean get() = (flags and PodLayout.FLAG_ADJUSTMENT) != 0
+    val guide: Boolean get() = (flags and PodLayout.FLAG_GUIDE) != 0
+    val label: Int get() = (flags ushr PodLayout.LABEL_SHIFT) and PodLayout.LABEL_MASK
 
     companion object {
         const val BYTES = 256

@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -26,6 +27,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -95,6 +101,30 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
             if (row.visible) "Ocultar camada" else "Mostrar camada",
             { store.setLayerVisible(id, !row.visible) },
         )
+        // Solo, ajuste e guia não fecham a folha: o visto troca na hora.
+        MenuItemRow(
+            CupertinoGlyph.Speaker2,
+            "Solo",
+            { store.setLayerSolo(id, !row.solo) },
+            checked = row.solo,
+            detail = "Com alguma camada em solo, a prévia e o som só tocam as que estão",
+        )
+        if (visual) {
+            MenuItemRow(
+                CupertinoGlyph.SliderHorizontal3,
+                "Camada de ajuste",
+                { store.setLayerAdjustment(id, !row.adjustment) },
+                checked = row.adjustment,
+                detail = "Os efeitos desta camada valem para todas as de baixo",
+            )
+            MenuItemRow(
+                CupertinoGlyph.Grid,
+                "Guia (não exporta)",
+                { store.setLayerGuide(id, !row.guide) },
+                checked = row.guide,
+                detail = "Aparece aqui no editor e fica fora do vídeo exportado",
+            )
+        }
         MenuItemRow(CupertinoGlyph.PlusSquareOnSquare, "Duplicar", act { store.duplicateLayers(listOf(id)) })
         MenuItemRow(CupertinoGlyph.DocOnDoc, "Copiar camada", act { store.copyLayers(listOf(id)) })
         MenuItemRow(CupertinoGlyph.DocOnClipboard, "Colar camada no cabeçote", if (store.clipboard and 1 != 0) act { store.pasteLayers() } else null)
@@ -108,7 +138,7 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
         )
 
         MenuSection("Etiqueta")
-        LabelRow { store.comingSoon("Etiqueta") }
+        LabelRow(row.label) { store.setLayerLabel(id, it) }
 
         if (visual) {
             MenuSection("Recorte e grupo")
@@ -185,16 +215,25 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
     }
 }
 
-/** A linha de etiquetas: "sem" e as doze cores (círculos 24 num alvo de 34). */
+/**
+ * A linha de etiquetas: "sem" e as doze cores (círculos 24 num alvo de 34).
+ * `current` é a etiqueta da camada (0 = nenhuma, i = `LabelPalette[i - 1]`),
+ * marcada com o anel de destaque.
+ */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun LabelRow(onPick: () -> Unit) {
+private fun LabelRow(current: Int, onPick: (Int) -> Unit) {
     FlowRow(
         Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(2.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        Box(Modifier.size(34.dp).tocavel(haptic = true, onClick = onPick), contentAlignment = Alignment.Center) {
+        Box(
+            Modifier.size(34.dp)
+                .then(if (current == 0) Modifier.border(2.dp, AureaColors.Accent, CircleShape) else Modifier)
+                .tocavel(haptic = true, onClick = { onPick(0) }),
+            contentAlignment = Alignment.Center,
+        ) {
             Box(
                 Modifier.size(24.dp).border(1.5.dp, AureaColors.Muted, CircleShape),
                 contentAlignment = Alignment.Center,
@@ -202,9 +241,72 @@ private fun LabelRow(onPick: () -> Unit) {
                 CupertinoIcon(ShellGlyph.Nosign, 14.dp, AureaColors.Muted)
             }
         }
-        ShellColors.LabelPalette.forEach { color ->
-            Box(Modifier.size(34.dp).tocavel(haptic = true, onClick = onPick), contentAlignment = Alignment.Center) {
+        ShellColors.LabelPalette.forEachIndexed { i, color ->
+            Box(
+                Modifier.size(34.dp)
+                    .then(if (current == i + 1) Modifier.border(2.dp, AureaColors.Accent, CircleShape) else Modifier)
+                    .tocavel(haptic = true, onClick = { onPick(i + 1) }),
+                contentAlignment = Alignment.Center,
+            ) {
                 Box(Modifier.size(24.dp).background(color, CircleShape))
+            }
+        }
+    }
+}
+
+/**
+ * Busca de camadas: nome ou texto, sem diferença de maiúscula nem de acento
+ * (a busca é do motor, `search_layers`). Tocar num resultado seleciona a
+ * camada e fecha a folha.
+ */
+@Composable
+internal fun SearchLayersSheet(store: EditorStore, onDismiss: () -> Unit) {
+    var query by remember { mutableStateOf("") }
+    val focus = remember { FocusRequester() }
+    val hits = remember(query, store.layers) { store.searchLayers(query) }
+    ShellMenuSheet(onDismiss, maxHeightFraction = 0.7f) {
+        MenuSection("Buscar camadas")
+        Box(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+                .heightIn(min = 40.dp).clip(RoundedCornerShape(10.dp)).background(AureaColors.Chip)
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+        ) {
+            BasicTextField(
+                value = query,
+                onValueChange = { query = it },
+                singleLine = true,
+                textStyle = AureaType.Base.merge(TextStyle(fontSize = 14.sp, color = AureaColors.Text)),
+                cursorBrush = SolidColor(AureaColors.Accent),
+                modifier = Modifier.fillMaxWidth().focusRequester(focus),
+            )
+            if (query.isEmpty()) Text("Nome ou texto da camada", style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, color = AureaColors.Muted)))
+        }
+        LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+        if (query.isNotBlank() && hits.isEmpty()) {
+            Text(
+                "Nenhuma camada com \"${query.trim()}\"",
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)),
+            )
+        }
+        hits.forEach { id ->
+            val row = store.layers.firstOrNull { it.id == id } ?: return@forEach
+            Row(
+                Modifier.fillMaxWidth().height(44.dp)
+                    .tocavel(onClick = { store.select(id); onDismiss() })
+                    .padding(horizontal = 20.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val label = row.label
+                val dot = if (label in 1..ShellColors.LabelPalette.size) ShellColors.LabelPalette[label - 1] else AureaColors.Muted
+                Box(Modifier.size(10.dp).background(dot, CircleShape))
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    row.name.ifBlank { "Camada" },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = if (row.selected) AureaColors.Accent else AureaColors.Text)),
+                )
             }
         }
     }
@@ -237,6 +339,7 @@ internal fun TimelineMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -
         MenuSection("Seleção")
         MenuItemRow(CupertinoGlyph.CheckmarkSquare, "Selecionar todas as camadas", if (count >= 2) act { store.selectAll() } else null)
         MenuItemRow(CupertinoGlyph.Square, "Limpar seleção", act { store.clearSelection() })
+        MenuItemRow(CupertinoGlyph.Search, "Buscar camadas…", if (count > 0) act { ui.sheet = ShellSheet.SearchLayers } else null)
 
         MenuSection("Reprodução e prévia")
         MenuItemRow(CupertinoGlyph.Repeat, "Reprodução em loop", act { store.setLoop(!store.looping) }, checked = store.looping)

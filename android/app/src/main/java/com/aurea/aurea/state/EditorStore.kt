@@ -779,6 +779,37 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshNow()
     }
 
+    // --- Papel e organização da camada (ajuste, guia, etiqueta, solo, busca) ------------
+
+    /** Camada de ajuste: os efeitos dela passam a valer para tudo o que está abaixo. */
+    fun setLayerAdjustment(layer: Long, on: Boolean) {
+        if (!engine.setLayerAdjustment(layer, on)) return
+        refreshNow()
+        showToast(if (on) "Camada de ajuste: os efeitos valem para as camadas abaixo" else "Camada de ajuste desligada")
+    }
+
+    /** Guia: aparece aqui no editor e fica fora do vídeo exportado. */
+    fun setLayerGuide(layer: Long, on: Boolean) {
+        if (!engine.setLayerGuide(layer, on)) return
+        refreshNow()
+        showToast(if (on) "Guia: aparece no editor, não sai no export" else "Guia desligada: a camada volta ao export")
+    }
+
+    /** Etiqueta de cor (0 = nenhuma, 1..12 = paleta da casca). */
+    fun setLayerLabel(layer: Long, label: Int) {
+        if (engine.setLayerLabel(layer, label)) refreshNow()
+    }
+
+    /** Solo: com alguma camada em solo, a prévia e o som só tocam as que estão. */
+    fun setLayerSolo(layer: Long, on: Boolean) {
+        if (!engine.setLayerSolo(layer, on)) return
+        refreshNow()
+    }
+
+    /** Busca de camadas (nome ou texto, sem maiúscula nem acento), da frente para o fundo. */
+    fun searchLayers(query: String): List<Long> =
+        if (query.isBlank()) emptyList() else engine.searchLayers(query.trim()).toList()
+
     /** Divide as camadas escolhidas no playhead (as que o cobrem). */
     fun splitAtPlayhead(ids: Collection<Long> = selection) {
         val t = playhead

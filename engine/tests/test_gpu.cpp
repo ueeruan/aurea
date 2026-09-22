@@ -29,6 +29,7 @@
 #include "aurea/render/Renderer.hpp"
 #include "aurea/text/TextAnimator.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -248,12 +249,13 @@ struct Scene {
     }
 
     /// Renderiza o instante `t` fora da tela e lê a composição de volta.
-    FloatImage render(FrameIndex t = FrameIndex{0}, u32 den = 1) {
+    FloatImage render(FrameIndex t = FrameIndex{0}, u32 den = 1, bool finalQuality = false) {
         Gpu& g = gpu();
         RenderSettings rs;
         rs.previewDenominator = den;
         rs.dither = false;
         rs.gpuTimers = true;
+        rs.finalQuality = finalQuality;
         FrameSnapshot snap;
         static u64 frame = 0;
         for (int attempt = 0; attempt < 1500; ++attempt) {
@@ -3157,4 +3159,232 @@ AUREA_TEST(Gpu, TextAnimatorTypewriterPerCharRotationAndMotionBlur) {
     std::printf("    reaberto dif %u\n", reopened);
     AUREA_CHECK(reopened <= 3);
     std::remove(path.c_str());
+}
+
+// =============================================================================
+// 7H — modos de mistura, camada de ajuste, guia e solo
+// =============================================================================
+namespace {
+
+/// Referência INDEPENDENTE do shader (W3C Compositing and Blending), em cor
+/// linear reta. Mesmas regras de faixa do blend.frag: os modos que supõem
+/// [0,1] recebem as cores presas; luminância Rec.709.
+struct BlendRef {
+    static f32 lum(Vec3 c) { return 0.2126f * c.x + 0.7152f * c.y + 0.0722f * c.z; }
+    static Vec3 clip(Vec3 c) {
+        const f32 l = lum(c);
+        const f32 n = std::min({c.x, c.y, c.z}), x = std::max({c.x, c.y, c.z});
+        if (n < 0.0f) c = Vec3{l + (c.x - l) * l / (l - n), l + (c.y - l) * l / (l - n), l + (c.z - l) * l / (l - n)};
+        if (x > 1.0f) c = Vec3{l + (c.x - l) * (1 - l) / (x - l), l + (c.y - l) * (1 - l) / (x - l), l + (c.z - l) * (1 - l) / (x - l)};
+        return c;
+    }
+    static Vec3 set_lum(Vec3 c, f32 l) { const f32 d = l - lum(c); return clip(Vec3{c.x + d, c.y + d, c.z + d}); }
+    static f32 sat(Vec3 c) { return std::max({c.x, c.y, c.z}) - std::min({c.x, c.y, c.z}); }
+    static Vec3 set_sat(Vec3 c, f32 s) {
+        const f32 mx = std::max({c.x, c.y, c.z}), mn = std::min({c.x, c.y, c.z});
+        if (mx - mn <= 1e-6f) return Vec3{0, 0, 0};
+        const f32 k = s / (mx - mn);
+        return Vec3{(c.x - mn) * k, (c.y - mn) * k, (c.z - mn) * k};
+    }
+    static f32 ch(BlendMode m, f32 b, f32 s) {
+        switch (m) {
+            case BlendMode::Subtract: return std::max(b - s, 0.0f);
+            case BlendMode::Multiply: return b * s;
+            case BlendMode::Darken: return std::min(b, s);
+            case BlendMode::Lighten: return std::max(b, s);
+            case BlendMode::Difference: return std::fabs(b - s);
+            default: break;
+        }
+        b = std::clamp(b, 0.0f, 1.0f);
+        s = std::clamp(s, 0.0f, 1.0f);
+        auto hard = [](f32 bb, f32 ss) { return ss <= 0.5f ? bb * 2 * ss : bb + (2 * ss - 1) - bb * (2 * ss - 1); };
+        switch (m) {
+            case BlendMode::Screen: return b + s - b * s;
+            case BlendMode::Overlay: return hard(s, b);
+            case BlendMode::HardLight: return hard(b, s);
+            case BlendMode::ColorDodge: return b <= 0 ? 0.0f : s >= 1 ? 1.0f : std::min(1.0f, b / (1 - s));
+            case BlendMode::ColorBurn: return b >= 1 ? 1.0f : s <= 0 ? 0.0f : 1 - std::min(1.0f, (1 - b) / s);
+            case BlendMode::SoftLight: {
+                if (s <= 0.5f) return b - (1 - 2 * s) * b * (1 - b);
+                const f32 d = b <= 0.25f ? ((16 * b - 12) * b + 4) * b : std::sqrt(b);
+                return b + (2 * s - 1) * (d - b);
+            }
+            case BlendMode::Exclusion: return b + s - 2 * b * s;
+            default: return s;
+        }
+    }
+    static Vec3 mix(BlendMode m, Vec3 b, Vec3 s) {
+        auto c01 = [](Vec3 v) { return Vec3{std::clamp(v.x, 0.0f, 1.0f), std::clamp(v.y, 0.0f, 1.0f), std::clamp(v.z, 0.0f, 1.0f)}; };
+        switch (m) {
+            case BlendMode::Hue: return set_lum(set_sat(c01(s), sat(c01(b))), lum(c01(b)));
+            case BlendMode::Saturation: return set_lum(set_sat(c01(b), sat(c01(s))), lum(c01(b)));
+            case BlendMode::Color: return set_lum(c01(s), lum(c01(b)));
+            case BlendMode::Luminosity: return set_lum(c01(b), lum(c01(s)));
+            default: return Vec3{ch(m, b.x, s.x), ch(m, b.y, s.y), ch(m, b.z, s.z)};
+        }
+    }
+};
+
+Vec3 lin3(f32 r, f32 g, f32 b) { return Vec3{srgb_decode(r), srgb_decode(g), srgb_decode(b)}; }
+
+const char* blend_name(BlendMode m) {
+    static const char* const k[] = {"Normal", "Add", "Subtract", "Multiply", "Screen", "Overlay", "Darken", "Lighten",
+                                    "ColorDodge", "ColorBurn", "HardLight", "SoftLight", "Difference", "Exclusion",
+                                    "Hue", "Saturation", "Color", "Luminosity"};
+    return k[static_cast<u16>(m)];
+}
+
+} // namespace
+
+AUREA_TEST(Gpu, EveryBlendModeMatchesTheFormulaPixelForPixel) {
+    AUREA_REQUIRE_GPU();
+    // Dois pares de cor: o primeiro passa pelos dois ramos de HardLight/Overlay
+    // e SoftLight (canais acima e abaixo de 0,5 / 0,25); o segundo tem fonte
+    // clara para Dodge/Burn/Screen perto dos limites.
+    const f32 pairs[2][6] = {{0.80f, 0.35f, 0.10f, 0.30f, 0.70f, 0.90f},
+                             {0.25f, 0.55f, 0.95f, 0.85f, 0.20f, 0.60f}};
+    const f32 opacity = 0.6f;
+    const f32 tol = 3.0f / 255.0f;
+    f32 worst = 0.0f;
+    BlendMode worstMode = BlendMode::Normal;
+    for (const auto& pc : pairs) {
+        const Vec3 cb = lin3(pc[0], pc[1], pc[2]);
+        const Vec3 cs = lin3(pc[3], pc[4], pc[5]);
+        for (u16 mi = 0; mi <= static_cast<u16>(BlendMode::Luminosity); ++mi) {
+            const BlendMode m = static_cast<BlendMode>(mi);
+            Scene s(64, 64);
+            s.solid(64, 64, Vec4{pc[0], pc[1], pc[2], 1}, 32, 32);
+            // Camada de cima só no quadrado central (32×32): o canto mostra que
+            // o fundo fora dela sai intacto no passe de ping-pong.
+            const LayerId top = s.solid(32, 32, Vec4{pc[3], pc[4], pc[5], 1}, 32, 32);
+            s.comp->layer(top)->blendMode = m;
+            s.comp->layer(top)->transform.opacity = opacity;
+            const FloatImage img = s.render();
+            Vec3 expect;
+            if (m == BlendMode::Normal) {
+                expect = Vec3{cs.x * opacity + cb.x * (1 - opacity), cs.y * opacity + cb.y * (1 - opacity), cs.z * opacity + cb.z * (1 - opacity)};
+            } else if (m == BlendMode::Add) {
+                expect = Vec3{cb.x + cs.x * opacity, cb.y + cs.y * opacity, cb.z + cs.z * opacity};   // B = cb + cs, alfa continua 1
+            } else {
+                // Fundo opaco (ab = 1): co = as·B + (1 − as)·cb.
+                const Vec3 B = BlendRef::mix(m, cb, cs);
+                expect = Vec3{opacity * B.x + (1 - opacity) * cb.x, opacity * B.y + (1 - opacity) * cb.y, opacity * B.z + (1 - opacity) * cb.z};
+            }
+            const Vec4 got = img.v(32, 32);
+            const f32 err = std::max({std::fabs(got.x - expect.x), std::fabs(got.y - expect.y), std::fabs(got.z - expect.z), std::fabs(got.w - 1.0f)});
+            if (err > worst) { worst = err; worstMode = m; }
+            AUREA_CHECK_MSG(err <= tol, blend_name(m));
+            if (err > tol) {
+                std::printf("\n    %s: obtido (%.4f %.4f %.4f) esperado (%.4f %.4f %.4f)", blend_name(m), got.x, got.y, got.z,
+                            expect.x, expect.y, expect.z);
+            }
+            const Vec4 corner = img.v(4, 4);
+            AUREA_CHECK_MSG(near4(corner, Vec4{cb.x, cb.y, cb.z, 1}, tol), blend_name(m));
+        }
+    }
+    std::printf("    18 modos x 2 pares, pior erro %.5f (%.2f/255) em %s ", worst, worst * 255.0f, blend_name(worstMode));
+}
+
+AUREA_TEST(Gpu, BlendModesChainAndLandInTheOffscreenTarget) {
+    AUREA_REQUIRE_GPU();
+    // Três modos seguidos (ping-pong duas vezes) com uma Normal entre eles e
+    // outra no fim: a ordem da pilha é respeitada e o último passe cai no alvo.
+    Scene s(32, 32);
+    s.solid(32, 32, Vec4{0.5f, 0.5f, 0.5f, 1}, 16, 16);
+    const LayerId a = s.solid(32, 32, Vec4{0.8f, 0.4f, 0.2f, 1}, 16, 16);
+    s.comp->layer(a)->blendMode = BlendMode::Multiply;
+    const LayerId b = s.solid(32, 32, Vec4{0.3f, 0.3f, 0.3f, 1}, 16, 16);
+    s.comp->layer(b)->blendMode = BlendMode::Screen;
+    const LayerId n = s.solid(8, 8, Vec4{0, 1, 0, 1}, 4, 4);   // Normal no canto
+    (void)n;
+    const LayerId d = s.solid(32, 32, Vec4{0.1f, 0.9f, 0.5f, 1}, 16, 16);
+    s.comp->layer(d)->blendMode = BlendMode::Difference;
+    s.comp->layer(d)->transform.opacity = 0.5f;
+    const FloatImage img = s.render();
+    const Vec3 g = lin3(0.5f, 0.5f, 0.5f), ca = lin3(0.8f, 0.4f, 0.2f), cbb = lin3(0.3f, 0.3f, 0.3f), cd = lin3(0.1f, 0.9f, 0.5f);
+    auto step = [](Vec3 base, Vec3 x, f32 op, BlendMode m) {
+        const Vec3 B = BlendRef::mix(m, base, x);
+        return Vec3{op * B.x + (1 - op) * base.x, op * B.y + (1 - op) * base.y, op * B.z + (1 - op) * base.z};
+    };
+    Vec3 e = step(g, ca, 1.0f, BlendMode::Multiply);
+    e = step(e, cbb, 1.0f, BlendMode::Screen);
+    const Vec3 centre = step(e, cd, 0.5f, BlendMode::Difference);
+    const Vec3 corner = step(Vec3{0, 1, 0}, cd, 0.5f, BlendMode::Difference);
+    AUREA_CHECK(near4(img.v(16, 16), Vec4{centre.x, centre.y, centre.z, 1}, 3.0f / 255.0f));
+    AUREA_CHECK(near4(img.v(2, 2), Vec4{corner.x, corner.y, corner.z, 1}, 3.0f / 255.0f));
+}
+
+AUREA_TEST(Gpu, AdjustmentLayerAffectsOnlyTheLayersBelow) {
+    AUREA_REQUIRE_GPU();
+    const Vec3 a = lin3(0.4f, 0.3f, 0.2f), b = lin3(0.2f, 0.6f, 0.3f);
+    auto build = [&](Scene& s, f32 opacity) {
+        s.solid(64, 64, Vec4{0.4f, 0.3f, 0.2f, 1}, 32, 32);                 // abaixo
+        const LayerId adj = s.solid(8, 8, Vec4{1, 0, 1, 1}, 4, 4);          // o conteúdo NÃO aparece
+        s.comp->layer(adj)->adjustment = true;
+        s.comp->layer(adj)->transform.opacity = opacity;
+        s.add_effect(adj, effect_keys::kExposure).params[0].constant.v[0] = 1.0f;   // ×2 linear
+        s.solid(16, 16, Vec4{0.2f, 0.6f, 0.3f, 1}, 32, 32);                 // acima
+        return adj;
+    };
+    {
+        Scene s(64, 64);
+        build(s, 1.0f);
+        const FloatImage img = s.render();
+        AUREA_CHECK(near4(img.v(60, 60), Vec4{a.x * 2, a.y * 2, a.z * 2, 1}, 0.004f));   // abaixo: exposto
+        AUREA_CHECK(near4(img.v(2, 2), Vec4{a.x * 2, a.y * 2, a.z * 2, 1}, 0.004f));     // onde estaria o sólido da camada de ajuste
+        AUREA_CHECK(near4(img.v(32, 32), Vec4{b.x, b.y, b.z, 1}, 0.004f));               // acima: intacta
+        std::printf("    abaixo %.4f (esperado %.4f), acima %.4f (esperado %.4f) ", img.v(60, 60).x, a.x * 2, img.v(32, 32).y, b.y);
+    }
+    {
+        // Opacidade 50 %: metade do caminho entre o fundo e o fundo exposto.
+        Scene s(64, 64);
+        build(s, 0.5f);
+        const FloatImage img = s.render();
+        AUREA_CHECK(near4(img.v(60, 60), Vec4{a.x * 1.5f, a.y * 1.5f, a.z * 1.5f, 1}, 0.004f));
+    }
+    {
+        // Fora do trecho de tempo dela: não faz nada.
+        Scene s(64, 64);
+        const LayerId adj = build(s, 1.0f);
+        s.comp->layer(adj)->end = FrameIndex{10};
+        const FloatImage img = s.render(FrameIndex{20});
+        AUREA_CHECK(near4(img.v(60, 60), Vec4{a.x, a.y, a.z, 1}, 0.004f));
+    }
+    {
+        // Sem efeito vivo: nenhum passe, e o sólido dela não aparece.
+        Scene s(64, 64);
+        s.solid(64, 64, Vec4{0.4f, 0.3f, 0.2f, 1}, 32, 32);
+        const LayerId adj = s.solid(64, 64, Vec4{1, 0, 1, 1}, 32, 32);
+        s.comp->layer(adj)->adjustment = true;
+        const FloatImage img = s.render();
+        AUREA_CHECK(near4(img.v(32, 32), Vec4{a.x, a.y, a.z, 1}, 0.004f));
+    }
+}
+
+AUREA_TEST(Gpu, GuideLayerShowsInPreviewButNeverInExport) {
+    AUREA_REQUIRE_GPU();
+    Scene s(32, 32);
+    s.solid(32, 32, Vec4{0.2f, 0.2f, 0.8f, 1}, 16, 16);
+    const LayerId g = s.solid(16, 16, Vec4{1, 1, 0, 1}, 16, 16);
+    s.comp->layer(g)->guide = true;
+    const Vec3 blue = lin3(0.2f, 0.2f, 0.8f);
+    const FloatImage preview = s.render(FrameIndex{0}, 1, false);
+    const FloatImage exported = s.render(FrameIndex{0}, 1, true);
+    AUREA_CHECK(near4(preview.v(16, 16), Vec4{1, 1, 0, 1}, 0.004f));
+    AUREA_CHECK(near4(exported.v(16, 16), Vec4{blue.x, blue.y, blue.z, 1}, 0.004f));
+}
+
+AUREA_TEST(Gpu, SoloIsolatesLayersInPreviewOnly) {
+    AUREA_REQUIRE_GPU();
+    Scene s(32, 32);
+    const LayerId bottom = s.solid(32, 32, Vec4{0.2f, 0.8f, 0.2f, 1}, 16, 16);
+    s.solid(16, 16, Vec4{1, 0, 0, 1}, 16, 16);
+    const Vec3 green = lin3(0.2f, 0.8f, 0.2f);
+    AUREA_CHECK(near4(s.render().v(16, 16), Vec4{1, 0, 0, 1}, 0.004f));
+    s.comp->layer(bottom)->solo = true;
+    AUREA_CHECK(near4(s.render().v(16, 16), Vec4{green.x, green.y, green.z, 1}, 0.004f));   // só a de solo
+    AUREA_CHECK(near4(s.render(FrameIndex{0}, 1, true).v(16, 16), Vec4{1, 0, 0, 1}, 0.004f));   // export ignora
+    // Camada em solo mas oculta não isola nada.
+    s.comp->layer(bottom)->visible = false;
+    AUREA_CHECK(near4(s.render().v(16, 16), Vec4{1, 0, 0, 1}, 0.004f));
 }

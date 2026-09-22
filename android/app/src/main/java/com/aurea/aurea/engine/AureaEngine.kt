@@ -333,6 +333,7 @@ class AureaEngine private constructor() {
 
     // Desfoque de movimento.
     fun setMotionBlur(layer: Long, on: Boolean): Boolean = nativeSetMotionBlur(nativeHandle, layer, on)
+    fun setFrameBlend(layer: Long, mode: Int): Boolean = nativeSetFrameBlend(nativeHandle, layer, mode)
     fun setCompositionMotionBlur(on: Boolean) = nativeSetCompositionMotionBlur(nativeHandle, on)
     fun setShutterAngle(degrees: Float) = nativeSetShutterAngle(nativeHandle, degrees)
     /** > 0 = ligado; |valor| − 1 = obturador em graus; 0 = sem projeto. */
@@ -447,6 +448,7 @@ class AureaEngine private constructor() {
     private external fun nativeToggleMarker(handle: Long, frame: Long): Boolean
     private external fun nativeSetEditMode(handle: Long, on: Boolean)
     private external fun nativeSetMotionBlur(handle: Long, layer: Long, on: Boolean): Boolean
+    private external fun nativeSetFrameBlend(handle: Long, layer: Long, mode: Int): Boolean
     private external fun nativeSetTimeRemap(handle: Long, layer: Long, on: Boolean): Boolean
     private external fun nativeAddParticles(handle: Long, preset: Int): Long
     private external fun nativeAddText3d(handle: Long, content: String, depth: Float, align: Int, r: Float, g: Float, b: Float): Long

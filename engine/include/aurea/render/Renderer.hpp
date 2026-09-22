@@ -70,6 +70,9 @@ struct LayerSource {
     // Vídeo
     FrameRef frame;
     bool     frameExact = false;
+    /// Mistura de quadros: o quadro seguinte da fonte e o peso dele (0..1).
+    FrameRef frameB;
+    f32      blendT = 0.0f;
 
     // Imagem
     AssetId  image{};
@@ -277,6 +280,8 @@ private:
     [[nodiscard]] bool build_source(const RenderLayer& layer, u32 layerIndex, bool hasEffects,
                                     LayerImage& out, std::vector<FrameRef>& framesUsed,
                                     u64 frameNumber) noexcept;
+    [[nodiscard]] bool build_video_source(const RenderLayer& layer, u32 layerIndex, u32 w, u32 h,
+                                          FGTexture target, u64 frameNumber, DecodedFrame* frame) noexcept;
     [[nodiscard]] bool build_video_source(const RenderLayer& layer, u32 layerIndex, u32 w, u32 h,
                                           FGTexture target, u64 frameNumber) noexcept;
     void flush_uploads() noexcept;

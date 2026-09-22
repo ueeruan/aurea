@@ -827,6 +827,21 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             VideoSource* src = media->source_for(rid, l->source, *asset, frameNumber);
             if (src) {
                 i64 mediaUs = static_cast<i64>(std::llround(l->source_frame(time) * 1e6 / fps));
+                // Mistura de quadros: posição FRACIONÁRIA na grade da fonte.
+                i64 nextUs = -1;
+                f32 blendT = 0.0f;
+                if (l->frameBlend == 1) {
+                    if (const f64 srcFps = src->info().fps; srcFps > 0.0) {
+                        const f64 pos = l->source_frame(time) / fps * srcFps;
+                        const f64 idx = std::floor(pos + 1e-3);
+                        const f64 frac = pos - idx;
+                        const i64 us = static_cast<i64>(std::llround((idx + 1.0) * 1e6 / srcFps));
+                        if (frac > 0.01 && frac < 0.99 && (src->info().durationUs <= 0 || us < src->info().durationUs)) {
+                            nextUs = us;
+                            blendT = static_cast<f32>(frac);
+                        }
+                    }
+                }
                 // Na grade de quadros da FONTE: o quadro que está na tela no
                 // instante t (piso), não o "mais próximo". Composição a 60 sobre
                 // vídeo a 30 cai a cada dois quadros exatamente entre dois
@@ -839,7 +854,11 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 const i64 dur = src->info().durationUs;
                 if (dur > 0) mediaUs = std::clamp<i64>(mediaUs, 0, dur - src->frame_duration_us() / 2);
                 DecodeRequest req;
-                req.targetUs = mediaUs;
+                // Com mistura: primeiro o quadro atual; com ele no cache, o
+                // seguinte (os dois precisam estar lá ao mesmo tempo).
+                bool haveA = false;
+                if (nextUs >= 0) (void)src->frame_for(mediaUs, &haveA);
+                req.targetUs = nextUs >= 0 && haveA ? nextUs : mediaUs;
                 req.mode = decodeMode;
                 // Clipe reverso ou congelado: o decoder não tem embalo para a frente.
                 req.direction = (l->speed == 0.0f || l->timeRemapEnabled) ? 0 : (l->reversed ? -playDirection : playDirection);
@@ -847,6 +866,16 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 src->request(req);
                 bool exact = false;
                 rl.source.frame = src->frame_for(mediaUs, &exact);
+                if (nextUs >= 0) {
+                    bool exactB = false;
+                    FrameRef b = src->frame_for(nextUs, &exactB);
+                    if (exact && exactB) {
+                        rl.source.frameB = std::move(b);
+                        rl.source.blendT = blendT;
+                    } else {
+                        exact = false;   // falta um dos dois: o export espera; o preview mostra o que tem
+                    }
+                }
                 rl.source.frameExact = exact;
                 if (!rl.source.frame) ++out.missingVideoFrames;
                 else if (!exact) ++out.staleVideoFrames;
@@ -1028,7 +1057,11 @@ void Renderer::flush_uploads() noexcept {
 
 bool Renderer::build_video_source(const RenderLayer& layer, u32 layerIndex, u32 w, u32 h,
                                   FGTexture target, u64 frameNumber) noexcept {
-    DecodedFrame* f = layer.source.frame.get();
+    return build_video_source(layer, layerIndex, w, h, target, frameNumber, layer.source.frame.get());
+}
+
+bool Renderer::build_video_source(const RenderLayer& layer, u32 layerIndex, u32 w, u32 h,
+                                  FGTexture target, u64 frameNumber, DecodedFrame* f) noexcept {
     if (!f) return false;
     (void)layerIndex;
 
@@ -1108,7 +1141,9 @@ bool Renderer::build_video_source(const RenderLayer& layer, u32 layerIndex, u32 
     if (f->planeCount < 2 || !f->planes[0]) return false;
     const bool tenBit = f->format == PixelFormat::P010;
     const bool threePlane = f->format == PixelFormat::YUV420P;
-    const u64 key = layer.id.pack();
+    // O quadro seguinte da mistura sobe em texturas próprias (senão o upload
+    // dele sobrescreveria o do atual antes do passe de cor).
+    const u64 key = layer.id.pack() ^ (f == layer.source.frameB.get() ? 0x8000000000000000ull : 0ull);
     PlanarTextures& pt = planar_[key];
     if (pt.width != f->width || pt.height != f->height || pt.format != f->format) {
         for (TextureHandle& t : pt.plane) {
@@ -1246,6 +1281,40 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
             out.texture = graph_.create_texture("layer-video", d);
             if (!build_video_source(layer, layerIndex, w, h, out.texture, frameNumber)) return false;
             framesUsed.push_back(layer.source.frame);
+            // Mistura de quadros: o seguinte por cima, com o peso do tempo
+            // entre os dois (vídeo opaco: A·(1−t) + B·t).
+            if (layer.source.frameB && layer.source.blendT > 0.0f) {
+                const FGTexture b = graph_.create_texture("layer-video-seguinte", d);
+                auto pNormal = shaders_.pipeline(PipelineKey::graphics(
+                    ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat, true, BlendMode::Normal));
+                if (pNormal.ok() && build_video_source(layer, layerIndex, w, h, b, frameNumber, layer.source.frameB.get())) {
+                    framesUsed.push_back(layer.source.frameB);
+                    // Alvo novo que LÊ os dois (o grafo ordena e não descarta A).
+                    const FGTexture mix = graph_.create_texture("layer-video-mistura", d);
+                    struct Cap { PipelineHandle p; FGTexture a; FGTexture b; u64 sampler; f32 w; f32 h; f32 t; }
+                        cap{*pNormal, out.texture, b, shaders_.sampler(CommonSampler::LinearClamp).id, static_cast<f32>(w),
+                            static_cast<f32>(h), layer.source.blendT};
+                    const u32 pass = graph_.add_raster_pass("mistura-de-quadros", PassStage::Decode, mix, LoadOp::Clear,
+                                                            Vec4{0, 0, 0, 0}, [cap](PassContext& pc) {
+                        pc.cmds.bind_pipeline(cap.p);
+                        LayerPush push;
+                        push.clipFromLayer = clip_from_comp(cap.w, cap.h);
+                        push.region = Vec4{0.0f, 0.0f, cap.w, cap.h};
+                        push.uvRect = Vec4{0.0f, 0.0f, 1.0f, 1.0f};
+                        pc.cmds.bind_texture(0, pc.texture(cap.a), SamplerHandle{cap.sampler});
+                        push.params = Vec4{1.0f, 0, 0, 0};
+                        pc.cmds.push_constants(&push, sizeof(push));
+                        pc.cmds.draw(6);
+                        pc.cmds.bind_texture(0, pc.texture(cap.b), SamplerHandle{cap.sampler});
+                        push.params = Vec4{cap.t, 0, 0, 0};
+                        pc.cmds.push_constants(&push, sizeof(push));
+                        pc.cmds.draw(6);
+                    });
+                    graph_.read(pass, out.texture);
+                    graph_.read(pass, b);
+                    out.texture = mix;
+                }
+            }
             return true;
         }
         case LayerSource::Kind::Image: {

@@ -2488,3 +2488,65 @@ AUREA_TEST(Gpu, MotionBlurWorksOn3DLayersAndModels) {
         AUREA_CHECK(d3 <= 1);
     }
 }
+
+AUREA_TEST(Gpu, FrameBlendMixesNeighbourSourceFramesInSlowMotion) {
+    AUREA_REQUIRE_GPU();
+    SyntheticConfig cfg;
+    cfg.width = 96;
+    cfg.height = 54;
+    cfg.frameCount = 300;
+    cfg.pattern = SyntheticPattern::FrameGray;
+    SyntheticFactory factory(cfg);
+    Engine e;
+    EngineConfig ec;
+    ec.backend = new vk::Backend();
+    ec.backendConfig.framesInFlight = 2;
+    ec.mediaFactory = &factory;
+    ec.workerCount = 2;
+    ec.disableAutosave = true;
+    AUREA_CHECK(e.initialize(ec).ok());
+    AUREA_CHECK(e.new_project(96, 54, 30.0, "mistura").ok());
+    VideoImport imp;
+    imp.sourcePath = "sintetico";
+    imp.displayName = "clipe";
+    auto layer = e.import_video(imp);
+    AUREA_CHECK(layer.ok());
+    if (!layer.ok()) { e.shutdown(); return; }
+    {
+        Composition* c = e.project()->timeline().composition(e.project()->timeline().current());
+        Layer* l = c->layer(LayerId::unpack(*layer));
+        l->speed = 0.5f;                                   // câmera lenta: 2 quadros da tela por quadro da fonte
+        l->end = FrameIndex{l->start.value + 400};
+        c->set_duration(FrameIndex{400});
+    }
+    TextureDesc d;
+    d.width = 96;
+    d.height = 54;
+    d.format = SurfaceFormat::RGBA16F;
+    d.renderTarget = true;
+    d.transferSrc = true;
+    const TextureHandle target = *e.gpu()->create_texture(d);
+    std::vector<u16> half(96 * 54 * 4);
+    auto shown = [&](i64 frame) {
+        Command seek;
+        seek.type = CommandType::PlaybackSeek;
+        seek.seek.time = tick_at(FrameIndex{frame}, 30.0);
+        AUREA_CHECK(e.submit_commands(&seek, 1) == 1);
+        AUREA_CHECK(e.render_offscreen(target, 96, 54).ok());
+        AUREA_CHECK(e.gpu()->read_texture(target, half.data(), 96 * 8).ok());
+        return srgb_encode(half_to_float(half[(27 * 96 + 48) * 4])) * 219.0f + 16.0f;
+    };
+    const f32 off = shown(101);                             // fonte 50,5 sem mistura = quadro 50
+    AUREA_CHECK(e.set_frame_blend(*layer, 1));
+    const f32 mixed = shown(101);
+    const f32 onGrid = shown(100);                          // fonte 50,0: exato, nada a misturar
+    auto lin = [](u32 f) { return srgb_decode((static_cast<f32>(frame_gray_code(f)) - 16.0f) / 219.0f); };
+    const f32 expected = srgb_encode((lin(50) + lin(51)) * 0.5f) * 219.0f + 16.0f;
+    std::printf("    mistura de quadros: sem %.2f (quadro 50 = %u), com %.2f (esperado %.2f; 51 = %u), na grade %.2f\n", off,
+                frame_gray_code(50), mixed, expected, frame_gray_code(51), onGrid);
+    AUREA_CHECK_NEAR(off, frame_gray_code(50), 0.5);
+    AUREA_CHECK_NEAR(mixed, expected, 0.8);
+    AUREA_CHECK_NEAR(onGrid, frame_gray_code(50), 0.5);
+    e.gpu()->destroy_texture(target);
+    e.shutdown();
+}

@@ -220,6 +220,10 @@ struct Layer {
     bool  reversed = false;
     /// Desfoque de movimento desta camada (a composição define o obturador).
     bool  motionBlur = false;
+    /// Vídeo fora da grade da fonte (câmera lenta, velocidade quebrada):
+    /// 0 = quadro mais próximo (repete), 1 = mistura dos dois quadros vizinhos
+    /// da fonte pelo tempo entre eles.
+    u8    frameBlend = 0;
     /// Transições de entrada/saída (avaliadas no render, não viram keyframes):
     /// 0 nenhuma, 1 dissolver, 2 deslizar para cima, 3 deslizar da esquerda,
     /// 4 zoom, 5 girar. Duração em quadros.

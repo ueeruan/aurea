@@ -29,7 +29,8 @@ import java.io.File
 //      Dispatchers.Default presos esperando o mesmo mutex de render do motor.
 //      Cartão que saiu da tela antes da vez dele é cancelado sem custo.
 //   3. NADA RECOMPUTA. Memória (LruCache por bytes) e disco
-//      (`cache/motor/previas/<versão>/<tipo>@<l>x<a>.png`). A versão é a da
+//      (`cache/motor/previas/<versão>/<tipo>@<l>x<a>.webp`; WebP 90 — é foto,
+//      PNG seria várias vezes maior em disco). A versão é a da
 //      instalação do app: app atualizado (efeito ou foto novos) → pasta nova,
 //      a antiga é apagada. Da segunda abertura do navegador em diante, nenhuma
 //      prévia volta à GPU (nem compila o pipeline do efeito).
@@ -62,7 +63,7 @@ class EffectPreviewStore(
     suspend fun load(typeId: Int, width: Int, height: Int): ImageBitmap? {
         val k = key(typeId, width, height)
         memory.get(k)?.let { return it }
-        val file = File(dir, "$k.png")
+        val file = File(dir, "$k.webp")
         withContext(Disk) { readPng(file) }?.let { memory.put(k, it); return it }
         val bmp = withContext(Gpu) {
             // Outro cartão com o mesmo efeito pode ter gerado enquanto este esperava.
@@ -100,7 +101,7 @@ class EffectPreviewStore(
         ensureDir()
         val tmp = File(file.path + ".tmp")
         runCatching {
-            tmp.outputStream().use { bmp.asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, it) }
+            tmp.outputStream().use { bmp.asAndroidBitmap().compress(WEBP_LOSSY, 90, it) }
             if (!tmp.renameTo(file)) tmp.delete()
         }.onFailure { tmp.delete() }   // disco cheio: só não guarda
     }
@@ -109,6 +110,10 @@ class EffectPreviewStore(
 
     private companion object {
         const val MAX_MEMORY_BYTES = 16 * 1024 * 1024
+        /** WebP com perda: o nome novo existe a partir do Android 11. */
+        @Suppress("DEPRECATION")
+        val WEBP_LOSSY: Bitmap.CompressFormat =
+            if (android.os.Build.VERSION.SDK_INT >= 30) Bitmap.CompressFormat.WEBP_LOSSY else Bitmap.CompressFormat.WEBP
         /** O motor serializa o render: mais de uma aqui só prende threads. */
         @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
         val Gpu = Dispatchers.Default.limitedParallelism(1)

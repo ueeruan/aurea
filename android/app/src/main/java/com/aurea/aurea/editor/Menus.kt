@@ -144,6 +144,15 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
             }
         }
 
+        MenuSection("Movimento")
+        MenuItemRow(
+            CupertinoGlyph.Speedometer,
+            "Desfoque de movimento",
+            act { store.setLayerMotionBlur(id, !(store.detail?.motionBlur ?: false)) },
+            checked = store.detail?.motionBlur == true,
+            detail = "Borra na direção do movimento (obturador nas configurações do projeto)",
+        )
+
         MenuSection("Tempo")
         MenuItemRow(CupertinoGlyph.ArrowRightToLine, "Aparar o início no cabeçote", if (inside) timeAct { store.trimStart(id, t) } else null)
         MenuItemRow(CupertinoGlyph.Scissors, "Dividir no cabeçote", if (inside) timeAct { store.splitAtPlayhead(listOf(id)) } else null)
@@ -283,6 +292,7 @@ internal fun TimelineMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -
 private val Aspects = listOf("16:9" to 16f / 9f, "9:16" to 9f / 16f, "1:1" to 1f, "4:5" to 4f / 5f, "4:3" to 4f / 3f)
 private val Resolutions = listOf(720 to "HD 720p", 1080 to "Full HD 1080p", 1440 to "QHD 1440p", 2160 to "4K 2160p")
 private val FpsOptions = listOf(24, 30, 60)
+private val ShutterOptions = listOf(90, 180, 270, 360)
 
 /**
  * Os ajustes do projeto, lidos e escritos no motor (`store.composition`).
@@ -358,9 +368,13 @@ internal fun ProjectSettingsSheet(store: EditorStore, ui: EditorUi, onDismiss: (
         SettingRow(
             CupertinoGlyph.Speedometer,
             "Motion blur",
-            "Desligado (as camadas com motion blur só borram com isto ligado)",
-            switch = false,
-        ) { store.comingSoon("Motion blur") }
+            if (store.compMotionBlur) "Ligado · obturador de ${store.shutterAngle.roundToInt()}°"
+            else "Desligado (as camadas com motion blur só borram com isto ligado)",
+            switch = store.compMotionBlur,
+        ) { store.setCompositionMotionBlur(!store.compMotionBlur) }
+        ChipsRow("Obturador", ShutterOptions.map { "$it°" }, ShutterOptions.firstOrNull { it == store.shutterAngle.roundToInt() }?.let { "$it°" }) { label ->
+            store.changeShutterAngle(label.removeSuffix("°").toFloat())
+        }
 
         SettingSection("Paleta do projeto")
         SettingRow(CupertinoGlyph.AddCircled, "Adicionar cor à paleta") { store.comingSoon("Paleta do projeto") }

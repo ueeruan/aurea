@@ -455,13 +455,15 @@ void write_layer(ByteWriter& w, const Layer& l) {
     // v3
     w.f32v(l.speed);
     w.boolv(l.reversed);
+    // v6
+    w.boolv(l.motionBlur);
 }
 
 /// Versão da seção Timeline. v2: layer de modelo 3D guarda escala de unidade
 /// e pivô (o enquadramento do import). v1 continua sendo lida (campos novos
 /// com o padrão).
 /// v3: velocidade e reverso da layer.
-constexpr u32 kTimelineSectionVersion = 5;
+constexpr u32 kTimelineSectionVersion = 6;
 thread_local u32 g_readingTimelineVersion = kTimelineSectionVersion;
 
 void read_layer(ByteReader& r, Layer& l) {
@@ -616,6 +618,7 @@ void read_layer(ByteReader& r, Layer& l) {
         l.speed = r.f32v();
         l.reversed = r.boolv();
     }
+    if (g_readingTimelineVersion >= 6) l.motionBlur = r.boolv();
 }
 
 void write_asset(ByteWriter& w, const Asset& a) {

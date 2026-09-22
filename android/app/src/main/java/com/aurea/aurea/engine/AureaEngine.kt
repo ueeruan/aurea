@@ -283,6 +283,13 @@ class AureaEngine private constructor() {
     /** Bits: 1 camadas, 2 estilo, 4 efeitos, 8 keyframes. */
     fun clipboardState(): Int = nativeClipboardState(nativeHandle)
 
+    // Desfoque de movimento.
+    fun setMotionBlur(layer: Long, on: Boolean): Boolean = nativeSetMotionBlur(nativeHandle, layer, on)
+    fun setCompositionMotionBlur(on: Boolean) = nativeSetCompositionMotionBlur(nativeHandle, on)
+    fun setShutterAngle(degrees: Float) = nativeSetShutterAngle(nativeHandle, degrees)
+    /** > 0 = ligado; |valor| − 1 = obturador em graus; 0 = sem projeto. */
+    fun motionBlurState(): Float = nativeMotionBlurState(nativeHandle)
+
     /** Modo Edição (timeline magnética) da composição atual. */
     fun setEditMode(on: Boolean) = nativeSetEditMode(nativeHandle, on)
     fun editMode(): Boolean = nativeEditMode(nativeHandle)
@@ -391,6 +398,10 @@ class AureaEngine private constructor() {
     private external fun nativeAddNull(handle: Long, threeD: Boolean): Long
     private external fun nativeToggleMarker(handle: Long, frame: Long): Boolean
     private external fun nativeSetEditMode(handle: Long, on: Boolean)
+    private external fun nativeSetMotionBlur(handle: Long, layer: Long, on: Boolean): Boolean
+    private external fun nativeSetCompositionMotionBlur(handle: Long, on: Boolean)
+    private external fun nativeSetShutterAngle(handle: Long, degrees: Float)
+    private external fun nativeMotionBlurState(handle: Long): Float
     private external fun nativeCopyLayers(handle: Long, ids: LongArray): Int
     private external fun nativePasteLayers(handle: Long, frame: Long): Int
     private external fun nativeCopyStyle(handle: Long, layer: Long): Boolean

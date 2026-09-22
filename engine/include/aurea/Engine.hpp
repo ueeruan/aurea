@@ -270,6 +270,15 @@ public:
     /// cena: posição/rotação/escala em X, Y e Z).
     [[nodiscard]] Result<u64> add_null(bool threeD) noexcept;
 
+    /// Desfoque de movimento da camada (liga também o da composição).
+    bool set_motion_blur(u64 layerId, bool on) noexcept;
+    /// Obturador da composição em graus (0–720; 180 = padrão de cinema).
+    bool set_shutter_angle(f32 degrees) noexcept;
+    /// Chave geral da composição (as camadas com desfoque só borram com ela).
+    bool set_composition_motion_blur(bool on) noexcept;
+    /// {ligado, obturador em graus} da composição atual.
+    bool query_motion_blur(bool& on, f32& shutter) noexcept;
+
     // --- Copiar e colar -----------------------------------------------------------
     /// Área de transferência do motor (vive enquanto o app vive; colar em outro
     /// projeto só leva camadas cuja mídia exista lá).

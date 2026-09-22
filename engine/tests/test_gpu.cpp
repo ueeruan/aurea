@@ -1352,6 +1352,56 @@ AUREA_TEST(Gpu, ChildOfMovedNullRendersWhole) {
     AUREA_CHECK(b2.y0 + 100 == b0.y0);
 }
 
+AUREA_TEST(Gpu, MotionBlurSmearsAlongTheMotionAndKeepsEnergy) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(400, 200);
+    auto id = rig.e.add_shape(10);   // quadrado
+    AUREA_CHECK(id.ok());
+    Composition* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+    Layer* l = comp->layer(LayerId::unpack(*id));
+    // 20 px por quadro na horizontal (keyframes lineares 0 → 10).
+    Track& px = l->tracks.get_or_create(TrackProperty::PositionX);
+    px.set(l->local_time(FrameIndex{0}), 100.0f);
+    px.set(l->local_time(FrameIndex{10}), 300.0f);
+    Command seek;
+    seek.type = CommandType::PlaybackSeek;
+    seek.seek.time = tick_at(FrameIndex{5}, 30.0);
+    AUREA_CHECK(rig.e.apply_command(seek).ok());
+    auto measure = [&](const Image8& img, u32& partial, f64& energy) {
+        Box8 b = lit_box(img);
+        partial = 0;
+        energy = 0.0;
+        const u32 y = (b.y0 + b.y1) / 2;
+        for (u32 x = 0; x < img.width; ++x) {
+            const u8 v = img.at(x, y)[0];
+            if (v > 8 && v < 200) ++partial;
+        }
+        for (usize i = 0; i < img.rgba.size(); i += 4) energy += img.rgba[i];
+        return b;
+    };
+    u32 p0 = 0, p1 = 0;
+    f64 e0 = 0, e1 = 0;
+    const Box8 sharp = measure(rig.capture(400), p0, e0);
+    AUREA_CHECK(rig.e.set_motion_blur(*id, true));
+    const Box8 blur = measure(rig.capture(400), p1, e1);
+    std::printf("    sem desfoque %ux%u (%u meio-tons); com desfoque %ux%u (%u meio-tons); energia %.3f\n",
+                sharp.w(), sharp.h(), p0, blur.w(), blur.h(), p1, e1 / e0);
+    // 180° de obturador a 20 px/quadro = rastro de ~10 px (±3).
+    AUREA_CHECK(blur.w() >= sharp.w() + 7 && blur.w() <= sharp.w() + 13);
+    AUREA_CHECK(blur.h() == sharp.h());          // nada na vertical
+    AUREA_CHECK(p1 >= 8 && p0 <= 2);              // ~5 px de degradê em cada borda
+    // Energia em gama sRGB não é linear: tolerância larga, mas sem sumir/estourar.
+    AUREA_CHECK(e1 / e0 > 0.85 && e1 / e0 < 1.15);
+    // Parado: o desfoque não muda nada.
+    px.clear();
+    const Image8 still = rig.capture(400);
+    AUREA_CHECK(rig.e.set_motion_blur(*id, false));
+    const Image8 stillOff = rig.capture(400);
+    u32 worst = 0;
+    for (usize i = 0; i < still.rgba.size(); ++i) worst = std::max<u32>(worst, static_cast<u32>(std::abs(still.rgba[i] - stillOff.rgba[i])));
+    AUREA_CHECK(worst <= 1);
+}
+
 AUREA_TEST(Gpu, Scene3DSurvivesSaveAndReopenIdentically) {
     AUREA_REQUIRE_GPU();
     const std::string path = gltf_data("DamagedHelmet.glb");

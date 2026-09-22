@@ -442,6 +442,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         layers = readLayers()
         refreshMarkers()
         editMode = engine.editMode()
+        val mb = engine.motionBlurState()
+        compMotionBlur = mb > 0f
+        shutterAngle = if (mb != 0f) kotlin.math.abs(mb) - 1f else 180f
         selectCreatedAfter?.let { before ->
             val created = layers.map { it.id }.filter { it !in before }
             if (created.isNotEmpty()) {
@@ -1152,6 +1155,28 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val id = primary ?: return
         send { setTextStrokeColor(id, r, g, b, a) }
         refreshDetail()
+    }
+
+    // --- Desfoque de movimento ---------------------------------------------------------
+    var compMotionBlur by mutableStateOf(false)
+        private set
+    var shutterAngle by mutableStateOf(180f)
+        private set
+
+    fun setLayerMotionBlur(layer: Long, on: Boolean) {
+        engine.setMotionBlur(layer, on)
+        refreshNow()
+        showToast(if (on) "Desfoque de movimento ligado" else "Desfoque de movimento desligado")
+    }
+
+    fun setCompositionMotionBlur(on: Boolean) {
+        engine.setCompositionMotionBlur(on)
+        refreshNow()
+    }
+
+    fun changeShutterAngle(degrees: Float) {
+        engine.setShutterAngle(degrees)
+        refreshNow()
     }
 
     // --- Copiar e colar ---------------------------------------------------------------

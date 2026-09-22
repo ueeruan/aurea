@@ -210,6 +210,8 @@ struct Layer {
     /// entrada. `offset` continua sendo o ponto de entrada na fonte.
     f32   speed = 1.0f;
     bool  reversed = false;
+    /// Desfoque de movimento desta camada (a composição define o obturador).
+    bool  motionBlur = false;
 
     // --- Hierarquia e composição --------------------------------------------
     LayerId  parent{};

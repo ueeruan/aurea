@@ -700,6 +700,27 @@ AUREA_JNI jint AUREA_FN(nativeClipboardState)(JNIEnv*, jclass, jlong handle) {
     return c ? static_cast<jint>(c->engine.clipboard_state()) : 0;
 }
 
+AUREA_JNI jboolean AUREA_FN(nativeSetMotionBlur)(JNIEnv*, jclass, jlong handle, jlong layer, jboolean on) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.set_motion_blur(static_cast<u64>(layer), on == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI void AUREA_FN(nativeSetCompositionMotionBlur)(JNIEnv*, jclass, jlong handle, jboolean on) {
+    if (NativeContext* c = ctx_of(handle)) c->engine.set_composition_motion_blur(on == JNI_TRUE);
+}
+
+AUREA_JNI void AUREA_FN(nativeSetShutterAngle)(JNIEnv*, jclass, jlong handle, jfloat degrees) {
+    if (NativeContext* c = ctx_of(handle)) c->engine.set_shutter_angle(degrees);
+}
+
+AUREA_JNI jfloat AUREA_FN(nativeMotionBlurState)(JNIEnv*, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    bool on = false;
+    f32 shutter = 180.0f;
+    if (!c || !c->engine.query_motion_blur(on, shutter)) return 0.0f;
+    return on ? shutter + 1.0f : -(shutter + 1.0f);   // sinal = ligado; módulo − 1 = obturador
+}
+
 AUREA_JNI void AUREA_FN(nativeSetEditMode)(JNIEnv*, jclass, jlong handle, jboolean on) {
     if (NativeContext* c = ctx_of(handle)) c->engine.set_edit_mode(on == JNI_TRUE);
 }

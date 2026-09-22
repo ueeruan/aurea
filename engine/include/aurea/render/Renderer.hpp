@@ -90,6 +90,9 @@ struct RenderLayer {
     f32         opacity = 1.0f;
     BlendMode   blend = BlendMode::Normal;
     f32         texelScale = 1.0f;
+    /// Desfoque de movimento: composição ← camada em cada amostra do
+    /// obturador. Vazio = sem desfoque (ou camada parada no intervalo).
+    std::vector<Mat4> blurMatrices;
 };
 
 struct FrameSnapshot {
@@ -117,6 +120,9 @@ struct RenderSettings {
     Vec4 editorBackground{0.0048f, 0.0070f, 0.0103f, 1.0f};
     f32  viewportZoom = 1.0f;
     Vec2 viewportPan{0.0f, 0.0f};
+    /// Export: amostras de desfoque de movimento da qualidade final
+    /// (`MotionBlurSettings::samples`); prévia usa `previewSamples`.
+    bool finalQuality = false;
 };
 
 /// Alvo fora da tela (export, testes visuais): a composição é escrita nesta

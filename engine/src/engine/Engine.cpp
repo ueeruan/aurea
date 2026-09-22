@@ -834,6 +834,53 @@ Result<u64> Engine::add_null(bool threeD) noexcept {
     return lid.pack();
 }
 
+bool Engine::set_motion_blur(u64 layerId, bool on) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), on ? "ligar desfoque de movimento" : "desligar desfoque de movimento");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    l->motionBlur = on;
+    if (on) comp->motion_blur().enabled = true;
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::set_composition_motion_blur(bool on) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "motion blur da composicao");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    comp->motion_blur().enabled = on;
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::query_motion_blur(bool& on, f32& shutter) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp) return false;
+    on = comp->motion_blur().enabled;
+    shutter = comp->motion_blur().shutterAngle;
+    return true;
+}
+
+bool Engine::set_shutter_angle(f32 degrees) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "obturador");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    comp->motion_blur().shutterAngle = std::clamp(degrees, 0.0f, 720.0f);
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
 // =============================================================================
 // Copiar e colar
 // =============================================================================
@@ -2229,7 +2276,7 @@ bool Engine::fill_layer_detail_locked(u64 layerId, bridge::LayerDetailPOD& out) 
     out.audioFadeIn = static_cast<i32>(l->fadeIn.value);
     out.audioFadeOut = static_cast<i32>(l->fadeOut.value);
     out.speed = l->speed;
-    out.timeFlags = l->reversed ? 1u : 0u;
+    out.timeFlags = (l->reversed ? 1u : 0u) | (l->motionBlur ? 2u : 0u);
     {
         const Asset* aa = project_->asset(l->source);
         const Track* vt = l->tracks.find(TrackProperty::AudioVolume);
@@ -2572,6 +2619,7 @@ Status Engine::render_export_frame(FrameIndex t, const OffscreenTarget& target) 
     RenderSettings rs;
     rs.dither = false;
     rs.gpuTimers = false;
+    rs.finalQuality = true;
     // Quadros EXATOS de vídeo, em sequência (o modo Playback decodifica
     // adiante). 4 s de tolerância por quadro: arquivo quebrado não trava.
     const u64 t0 = monotonic_ns();

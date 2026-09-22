@@ -106,6 +106,35 @@ Mat4 layer_matrix(const Layer& l, FrameIndex local) noexcept {
          * Mat4::scale(scale) * Mat4::translation(-anchor);
 }
 
+/// Valor da trilha num instante FRACIONÁRIO: interpola entre os dois quadros
+/// vizinhos (sub-quadro do obturador). Exato para keyframe linear; nas curvas,
+/// a corda de um quadro — invisível no desfoque.
+f32 sample_frac(const Track& tr, f64 t) noexcept {
+    const f64 f = std::floor(t);
+    const f32 a = tr.sample(FrameIndex{static_cast<i64>(f)});
+    const f32 k = static_cast<f32>(t - f);
+    if (k <= 0.0f) return a;
+    return a + (tr.sample(FrameIndex{static_cast<i64>(f) + 1}) - a) * k;
+}
+
+/// `layer_matrix` num tempo local fracionário.
+Mat4 layer_matrix_frac(const Layer& l, f64 local) noexcept {
+    const TrackSet& t = l.tracks;
+    auto s = [&](TrackProperty p, f32 fallback) noexcept {
+        const Track* tr = t.find(p);
+        return (tr && !tr->keys.empty()) ? sample_frac(*tr, local) : fallback;
+    };
+    const Vec3 pos{s(TrackProperty::PositionX, l.transform.position.x),
+                   s(TrackProperty::PositionY, l.transform.position.y), 0.0f};
+    const Vec3 scale{s(TrackProperty::ScaleX, l.transform.scale.x),
+                     s(TrackProperty::ScaleY, l.transform.scale.y), 1.0f};
+    const f32 rot = s(TrackProperty::RotationZ, l.transform.rotation.z) * kDeg2Rad;
+    const Vec3 anchor{s(TrackProperty::AnchorX, l.transform.anchor.x),
+                      s(TrackProperty::AnchorY, l.transform.anchor.y), 0.0f};
+    return Mat4::translation(pos) * Mat4::from_quat(Quat::from_axis_angle(Vec3{0, 0, 1}, rot))
+         * Mat4::scale(scale) * Mat4::translation(-anchor);
+}
+
 f32 layer_opacity(const Layer& l, FrameIndex local) noexcept {
     const Track* tr = l.tracks.find(TrackProperty::Opacity);
     const f32 v = (tr && !tr->keys.empty()) ? tr->sample(local) : l.transform.opacity;
@@ -168,6 +197,22 @@ bool wants_3d(const Composition& comp, const Layer& l, FrameIndex time) noexcept
         p = p->parent.valid() ? comp.layer(p->parent) : nullptr;
     }
     return false;
+}
+
+/// Cadeia 2D (camada e pais) num instante fracionário da timeline.
+Mat4 world_2d_frac(const Composition& comp, const Layer& l, f64 time) noexcept {
+    auto localOf = [time](const Layer& x) {
+        return time - static_cast<f64>(x.start.value) + static_cast<f64>(x.offset.value);
+    };
+    Mat4 m = layer_matrix_frac(l, localOf(l));
+    LayerId parent = l.parent;
+    for (u32 depth = 0; parent.valid() && depth < 16; ++depth) {
+        const Layer* p = comp.layer(parent);
+        if (!p) break;
+        m = layer_matrix_frac(*p, localOf(*p)) * m;
+        parent = p->parent;
+    }
+    return m;
 }
 
 /// Mundo 3D da camada com a cadeia de pais (cada pai no próprio tempo).
@@ -553,6 +598,27 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         }
         rl.compFromLayer = m;
         rl.texelScale = texel_scale_for(max_scale(m) * previewFactor);
+
+        // Desfoque de movimento (transform 2D, com pais): K amostras no
+        // obturador centrado no quadro. Camada parada no intervalo = nada.
+        if (l->motionBlur && comp.motion_blur().enabled && !wants_3d(comp, *l, time)) {
+            const MotionBlurSettings& mb = comp.motion_blur();
+            const u32 k = std::clamp<u32>(settings.finalQuality ? mb.samples : mb.previewSamples, 2u, 64u);
+            const f64 open = std::clamp(static_cast<f64>(mb.shutterAngle), 0.0, 720.0) / 360.0;
+            if (open > 0.0) {
+                rl.blurMatrices.resize(k);
+                bool moves = false;
+                for (u32 i = 0; i < k; ++i) {
+                    const f64 u = (static_cast<f64>(i) + 0.5) / static_cast<f64>(k) - 0.5;
+                    rl.blurMatrices[i] = world_2d_frac(comp, *l, static_cast<f64>(time.value) + u * open);
+                    for (int c = 0; c < 4 && !moves; ++c) {
+                        const Vec4 d = rl.blurMatrices[i].col[c] - rl.blurMatrices[0].col[c];
+                        if (std::fabs(d.x) + std::fabs(d.y) + std::fabs(d.z) + std::fabs(d.w) > 1e-4f) moves = true;
+                    }
+                }
+                if (!moves) rl.blurMatrices.clear();
+            }
+        }
 
         // Texto: rasteriza na escala em que aparece (potência de 2, para não
         // refazer a cada zoom) e só quando algo que muda os pixels mudou.
@@ -1042,6 +1108,47 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
         if (i < snap.plans.size() && snap.plans[i].hasFold) {
             draw.compFromLayer = draw.compFromLayer * snap.plans[i].foldMatrix;
             draw.opacity *= snap.plans[i].foldOpacity;
+        }
+        if (!layer.blurMatrices.empty()) {
+            // Acumula as K amostras (pré-multiplicadas, × 1/K, soma aditiva)
+            // num alvo do tamanho da composição = a MÉDIA no tempo; depois a
+            // média entra na composição como uma camada comum.
+            auto pAdd = shaders_.pipeline(PipelineKey::graphics(
+                ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat, true, BlendMode::Add));
+            if (pAdd.ok()) {
+                const u32 k = static_cast<u32>(layer.blurMatrices.size());
+                Mat4* mats = arena_.alloc_array<Mat4>(k);
+                const Mat4 fold = (i < snap.plans.size() && snap.plans[i].hasFold) ? snap.plans[i].foldMatrix : Mat4::identity();
+                for (u32 s = 0; s < k; ++s) mats[s] = layer.blurMatrices[s] * fold;
+                TextureDesc accDesc = compDesc;
+                accDesc.transferSrc = false;
+                const FGTexture acc = graph_.create_texture("desfoque de movimento", accDesc);
+                struct Cap {
+                    Mat4* mats; u32 k; PipelineHandle p; FGTexture src; u64 sampler; Rect region;
+                    f32 compW; f32 compH;
+                } cap{mats, k, *pAdd, draw.texture, draw.sampler, draw.region,
+                      static_cast<f32>(snap.compWidth), static_cast<f32>(snap.compHeight)};
+                const u32 pass = graph_.add_raster_pass("desfoque de movimento", PassStage::Composite, acc, LoadOp::Clear,
+                                                        Vec4{0, 0, 0, 0}, [cap](PassContext& pc) {
+                    const Mat4 clip = clip_from_comp(cap.compW, cap.compH);
+                    pc.cmds.bind_pipeline(cap.p);
+                    pc.cmds.bind_texture(0, pc.texture(cap.src), SamplerHandle{cap.sampler});
+                    for (u32 s = 0; s < cap.k; ++s) {
+                        LayerPush push;
+                        push.clipFromLayer = clip * cap.mats[s];
+                        push.region = Vec4{cap.region.x, cap.region.y, cap.region.w, cap.region.h};
+                        push.uvRect = Vec4{0.0f, 0.0f, 1.0f, 1.0f};
+                        push.params = Vec4{1.0f / static_cast<f32>(cap.k), 0.0f, 0.0f, 0.0f};
+                        pc.cmds.push_constants(&push, sizeof(push));
+                        pc.cmds.draw(6);
+                    }
+                });
+                graph_.read(pass, draw.texture);
+                draw.texture = acc;
+                draw.region = Rect{0.0f, 0.0f, static_cast<f32>(snap.compWidth), static_cast<f32>(snap.compHeight)};
+                draw.compFromLayer = Mat4::identity();
+                draw.sampler = shaders_.sampler(CommonSampler::LinearClamp).id;
+            }
         }
         draws_.push_back(draw);
     }

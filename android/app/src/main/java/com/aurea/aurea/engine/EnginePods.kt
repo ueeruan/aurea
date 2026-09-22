@@ -785,6 +785,7 @@ data class LayerDetail(
     }
 
     val reversed: Boolean get() = (timeFlags and 1) != 0
+    val motionBlur: Boolean get() = (timeFlags and 2) != 0
 
     val audioMuted: Boolean get() = (audioFlags and 1) != 0
     val audioSolo: Boolean get() = (audioFlags and 2) != 0

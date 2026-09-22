@@ -91,7 +91,7 @@ internal fun TextPanel(env: PanelEnv) {
         if (!sel.collapsed) {
             Spacer(Modifier.height(6.dp))
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Trecho", style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
+                Text("Trecho escolhido", style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
                 SpanChip("Cor") {
                     val a = sel.min
                     val b = sel.max
@@ -130,7 +130,7 @@ internal fun TextPanel(env: PanelEnv) {
         Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Alinhamento", modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf(0 to "Esq.", 1 to "Centro", 2 to "Dir.").forEach { (a, label) ->
+                listOf(0 to "Esquerda", 1 to "Centro", 2 to "Direita").forEach { (a, label) ->
                     val on = td.alignment == a
                     Box(
                         Modifier.clip(RoundedCornerShape(8.dp)).background(if (on) AureaColors.AccentDim else AureaColors.Chip)
@@ -177,7 +177,7 @@ private fun TextStyleSections(env: PanelEnv) {
     Spacer(Modifier.height(6.dp))
     Text("Caixa", style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700, color = AureaColors.Muted)))
     Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        listOf(0 to "Ponto", 1 to "Parágrafo", 2 to "Fixa", 3 to "Encolher").forEach { (m, label) ->
+        listOf(0 to "Livre", 1 to "Parágrafo", 2 to "Tamanho fixo", 3 to "Encolher para caber").forEach { (m, label) ->
             val on = v[0].toInt() == m
             Box(
                 Modifier.clip(RoundedCornerShape(8.dp)).background(if (on) AureaColors.AccentDim else AureaColors.Chip)
@@ -214,7 +214,7 @@ private fun TextStyleSections(env: PanelEnv) {
         TextRuler(store, "Margem do fundo", { store.textStyle?.get(8) ?: 14f }, "${v[8].roundToInt()} px", 0.2f, 0f, 500f, "margem do fundo") {
             store.setTextStyleValue(8, it)
         }
-        TextRuler(store, "Arredondar", { store.textStyle?.get(9) ?: 10f }, "${v[9].roundToInt()} px", 0.2f, 0f, 500f, "raio do fundo") {
+        TextRuler(store, "Cantos arredondados", { store.textStyle?.get(9) ?: 10f }, "${v[9].roundToInt()} px", 0.2f, 0f, 500f, "raio do fundo") {
             store.setTextStyleValue(9, it)
         }
     }
@@ -231,8 +231,8 @@ private fun TextStyleSections(env: PanelEnv) {
         AureaToggle(checked = v[10] > 0.5f, onCheckedChange = { store.setTextStyleValue(10, if (it) 1f else 0f) })
     }
     if (v[10] > 0.5f) {
-        TextRuler(store, "Deslocar X", { store.textStyle?.get(15) ?: 4f }, "${v[15].roundToInt()} px", 0.2f, -500f, 500f, "sombra x") { store.setTextStyleValue(15, it) }
-        TextRuler(store, "Deslocar Y", { store.textStyle?.get(16) ?: 6f }, "${v[16].roundToInt()} px", 0.2f, -500f, 500f, "sombra y") { store.setTextStyleValue(16, it) }
+        TextRuler(store, "Distância X", { store.textStyle?.get(15) ?: 4f }, "${v[15].roundToInt()} px", 0.2f, -500f, 500f, "sombra x") { store.setTextStyleValue(15, it) }
+        TextRuler(store, "Distância Y", { store.textStyle?.get(16) ?: 6f }, "${v[16].roundToInt()} px", 0.2f, -500f, 500f, "sombra y") { store.setTextStyleValue(16, it) }
         TextRuler(store, "Desfoque", { store.textStyle?.get(17) ?: 6f }, "${v[17].roundToInt()} px", 0.1f, 0f, 200f, "desfoque da sombra") { store.setTextStyleValue(17, it) }
     }
 }

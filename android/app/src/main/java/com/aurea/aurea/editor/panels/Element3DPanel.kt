@@ -49,8 +49,12 @@ import com.aurea.aurea.ui.theme.tocavel
 import kotlin.math.roundToInt
 
 /**
- * ELEMENTO 3D: o ambiente da cena (HDRI que ilumina e reflete nos modelos, ou
- * o estúdio neutro), intensidade e giro do ambiente.
+ * MATERIAL E AMBIENTE do objeto 3D. Material: só o que o motor muda de verdade
+ * — a cor do texto 3D (a malha é gerada de novo); o modelo importado usa o
+ * material do próprio arquivo (a cena do motor ainda não aceita troca de
+ * material: `SceneSetMaterialParam` responde "não implementado"), então aqui
+ * não há régua de Metálico/Rugosidade que não faria nada. Ambiente: a luz que
+ * envolve a cena (HDRI ou estúdio neutro), intensidade e giro.
  */
 @Composable
 internal fun Element3DPanel(env: PanelEnv) {
@@ -62,33 +66,56 @@ internal fun Element3DPanel(env: PanelEnv) {
     val t3 by remember(store) { derivedStateOf { store.text3d } }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 18.dp, top = 12.dp, end = 18.dp, bottom = 24.dp)) {
         t3?.let { Text3DSection(env, it) }
-        Text("Ambiente", style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700, color = AureaColors.Muted)))
-        Spacer(Modifier.height(6.dp))
+        SectionTitle("Material")
+        val info = t3
+        if (info != null) {
+            Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Cor", modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+                ColorWell(Color(info.color[0], info.color[1], info.color[2])) {
+                    store.beginGesture("cor do texto 3D")
+                    env.openColor(ColorRequest(info.color.copyOf(), onChange = { r, g, b, _ ->
+                        store.text3d?.let { store.setText3D(it.copy(color = floatArrayOf(r, g, b, 1f)), lazy = true) }
+                    }, onDone = { store.endGesture() }))
+                }
+            }
+        } else {
+            Text(
+                "Cor, brilho metálico e rugosidade vêm do arquivo do modelo (glTF, FBX).",
+                style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = AureaColors.Muted)),
+            )
+        }
+        Spacer(Modifier.height(16.dp))
+        SectionTitle("Luz do ambiente")
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Chip("Estúdio neutro", on = e[0] < 0.5f) { store.clearHdri() }
-            Chip(if (e[0] >= 0.5f) "HDRI carregado" else "Carregar HDRI (.hdr)", on = e[0] >= 0.5f) {
+            Chip(if (e[0] >= 0.5f) "Imagem de ambiente ✓" else "Usar imagem de ambiente (.hdr)", on = e[0] >= 0.5f) {
                 pick.launch(arrayOf("image/vnd.radiance", "application/octet-stream", "*/*"))
             }
         }
         Spacer(Modifier.height(10.dp))
         EnvRuler(store, "Intensidade", 0.01f, 0f, 20f, e[1], "${(e[1] * 100).roundToInt()}%") { store.setEnvironment(it, store.environment[2]) }
-        EnvRuler(store, "Giro do ambiente", 1f, -360f, 360f, e[2], "${e[2].roundToInt()}°") { store.setEnvironment(store.environment[1], it) }
+        EnvRuler(store, "Girar a luz", 1f, -360f, 360f, e[2], "${e[2].roundToInt()}°") { store.setEnvironment(store.environment[1], it) }
         Spacer(Modifier.height(8.dp))
         Text(
-            "O HDRI ilumina e reflete nos modelos 3D de toda a composição. Arquivos .hdr (Radiance).",
+            "A luz do ambiente ilumina e reflete em todos os objetos 3D do projeto.",
             style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = AureaColors.Muted)),
         )
     }
 }
 
-/** Texto 3D: texto, profundidade, cor e alinhamento (a malha é gerada de novo a cada mudança). */
+@Composable
+private fun SectionTitle(t: String) {
+    Text(t, style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700, color = AureaColors.Muted)))
+    Spacer(Modifier.height(6.dp))
+}
+
+/** Texto 3D: texto, profundidade e alinhamento (a cor mora em Material) (a malha é gerada de novo a cada mudança). */
 @Composable
 private fun Text3DSection(env: PanelEnv, info: Text3DInfo) {
     val store = env.store
     var draft by remember(store.primary) { mutableStateOf(info.content) }
     LaunchedEffect(info.content) { if (info.content != draft && !store.textEditing) draft = info.content }
-    Text("Texto 3D", style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700, color = AureaColors.Muted)))
-    Spacer(Modifier.height(6.dp))
+    SectionTitle("Texto 3D")
     Box(
         Modifier.fillMaxWidth().heightIn(min = 52.dp).clip(RoundedCornerShape(10.dp)).background(AureaColors.Chip)
             .padding(horizontal = 12.dp, vertical = 10.dp),
@@ -130,18 +157,9 @@ private fun Text3DSection(env: PanelEnv, info: Text3DInfo) {
         }
     }
     Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text("Cor", modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
-        ColorWell(Color(info.color[0], info.color[1], info.color[2])) {
-            store.beginGesture("cor do texto 3D")
-            env.openColor(ColorRequest(info.color.copyOf(), onChange = { r, g, b, _ ->
-                store.text3d?.let { store.setText3D(it.copy(color = floatArrayOf(r, g, b, 1f)), lazy = true) }
-            }, onDone = { store.endGesture() }))
-        }
-    }
-    Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
         Text("Alinhamento", modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf(0 to "Esq.", 1 to "Centro", 2 to "Dir.").forEach { (a, label) ->
+            listOf(0 to "Esquerda", 1 to "Centro", 2 to "Direita").forEach { (a, label) ->
                 Chip(label, on = info.alignment == a) { store.text3d?.let { store.setText3D(it.copy(alignment = a)) } }
             }
         }
@@ -170,7 +188,7 @@ private fun EnvRuler(
     text: String,
     onValue: (Float) -> Unit,
 ) {
-    val index = if (label == "Intensidade") 1 else 2
+    val index = if (label == "Intensidade") 1 else 2  // 2 = "Girar a luz"
     PropertyCustomRow(label, selected = false, onSelect = {}) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.weight(1f).height(40.dp)) {

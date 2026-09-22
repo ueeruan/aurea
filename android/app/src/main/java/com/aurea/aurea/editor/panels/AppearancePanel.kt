@@ -67,13 +67,12 @@ private class BlendCategory(val name: String, val modes: List<BlendChoice>)
  * Luminosity 17.
  */
 private val BlendCategories = listOf(
-    BlendCategory("Normal", listOf(BlendChoice("Normal", 0, BlendMode.SrcOver), BlendChoice("Dissolver", null, BlendMode.SrcOver))),
+    BlendCategory("Normal", listOf(BlendChoice("Normal", 0, BlendMode.SrcOver))),
     BlendCategory(
         "Escurecer",
         listOf(
             BlendChoice("Escurecer", 6, BlendMode.Darken), BlendChoice("Multiplicar", 3, BlendMode.Multiply),
-            BlendChoice("Queimar cor", 9, BlendMode.ColorBurn), BlendChoice("Queimar linear", null, BlendMode.SrcOver),
-            BlendChoice("Cor mais escura", null, BlendMode.SrcOver),
+            BlendChoice("Queimar cor", 9, BlendMode.ColorBurn),
         ),
     ),
     BlendCategory(
@@ -81,23 +80,20 @@ private val BlendCategories = listOf(
         listOf(
             BlendChoice("Clarear", 7, BlendMode.Lighten), BlendChoice("Tela", 4, BlendMode.Screen),
             BlendChoice("Subexpor cor", 8, BlendMode.ColorDodge), BlendChoice("Adicionar", 1, BlendMode.Plus),
-            BlendChoice("Cor mais clara", null, BlendMode.SrcOver),
         ),
     ),
     BlendCategory(
         "Contraste",
         listOf(
             BlendChoice("Sobrepor", 5, BlendMode.Overlay), BlendChoice("Luz suave", 11, BlendMode.Softlight),
-            BlendChoice("Luz forte", 10, BlendMode.Hardlight), BlendChoice("Luz viva", null, BlendMode.SrcOver),
-            BlendChoice("Luz linear", null, BlendMode.SrcOver), BlendChoice("Luz pontual", null, BlendMode.SrcOver),
-            BlendChoice("Mistura dura", null, BlendMode.SrcOver),
+            BlendChoice("Luz forte", 10, BlendMode.Hardlight),
         ),
     ),
     BlendCategory(
         "Diferença",
         listOf(
             BlendChoice("Diferença", 12, BlendMode.Difference), BlendChoice("Exclusão", 13, BlendMode.Exclusion),
-            BlendChoice("Subtrair", 2, BlendMode.SrcOver), BlendChoice("Dividir", null, BlendMode.SrcOver),
+            BlendChoice("Subtrair", 2, BlendMode.SrcOver),
         ),
     ),
     BlendCategory(
@@ -107,20 +103,19 @@ private val BlendCategories = listOf(
             BlendChoice("Cor", 16, BlendMode.Color), BlendChoice("Luminosidade", 17, BlendMode.Luminosity),
         ),
     ),
-    BlendCategory("Máscara", listOf(BlendChoice("Máscara", null, BlendMode.DstIn), BlendChoice("Recortar", null, BlendMode.DstOut))),
 )
 
 /**
  * Os modos que o renderer desenha: todos os de `aurea::BlendMode` (Normal no
- * blend de hardware; os outros num passe que lê o fundo). Os chips sem número
- * no motor continuam "em breve".
+ * blend de hardware; os outros num passe que lê o fundo). Só entra na lista o
+ * modo que o motor desenha: nada de chip que não faz nada.
  */
 private val RenderedBlendModes = (0..17).toSet()
 
 /**
  * MESCLAGEM E OPACIDADE [A] (`BlendingPanel`): trilho com ◇ e curva da opacidade,
- * abas "Opacidade · Mesclagem · Máscara · Recorte por camada". Máscara e recorte
- * ainda não existem no motor novo.
+ * abas "Opacidade · Mistura · Máscara". Máscara abre o painel de máscara e
+ * recorte (o mesmo da doca), onde mora também o recorte por outra camada.
  */
 @Composable
 internal fun AppearancePanel(env: PanelEnv) {
@@ -155,13 +150,12 @@ internal fun AppearancePanel(env: PanelEnv) {
         )
         Column(Modifier.weight(1f).fillMaxHeight()) {
             ParamTabs(
-                labels = listOf("Opacidade", "Mesclagem", "Máscara", "Recorte por camada"),
+                labels = listOf("Opacidade", "Mistura", "Máscara e recorte"),
                 selected = tab,
                 animated = { it == 0 && look != KeyframeLook.None },
                 onSelect = { i ->
                     when (i) {
-                        2 -> store.comingSoon("Máscara")
-                        3 -> store.comingSoon("Recorte por camada")
+                        2 -> env.onOpenPanel(EditorPanel.Mask)
                         else -> tab = i
                     }
                 },
@@ -246,7 +240,7 @@ private fun BlendTab(env: PanelEnv) {
                             cat.modes.forEach { m ->
                                 BlendChip(m, lit = m.engine != null && m.engine == mode) {
                                     val e = m.engine
-                                    if (e != null && e in RenderedBlendModes) store.setBlendMode(e) else store.comingSoon(m.label)
+                                    if (e != null && e in RenderedBlendModes) store.setBlendMode(e)
                                 }
                             }
                         }
@@ -256,7 +250,7 @@ private fun BlendTab(env: PanelEnv) {
         }
         item(key = "ajuda") {
             Text(
-                "A mescla combina esta camada com as camadas abaixo. Branco em Clarear cobre a imagem; em Escurecer deixa a imagem aparecer. Ajuste também a opacidade para reduzir a intensidade.",
+                "A mistura combina esta camada com as camadas abaixo. Branco em Clarear cobre a imagem; em Escurecer deixa a imagem aparecer. Ajuste também a opacidade para reduzir a intensidade.",
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(top = 4.dp),

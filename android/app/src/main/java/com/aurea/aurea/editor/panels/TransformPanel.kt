@@ -19,15 +19,18 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AspectRatio
+import androidx.compose.material.icons.rounded.BlurOn
+import androidx.compose.material.icons.rounded.Opacity
 import androidx.compose.material.icons.rounded.FilterCenterFocus
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.LinkOff
 import androidx.compose.material.icons.rounded.OpenWith
 import androidx.compose.material.icons.automirrored.rounded.RotateRight
-import androidx.compose.material.icons.rounded.Transform
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -78,41 +81,71 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 
 /**
- * As faces de Transformar [A] (`ModoDeTransformacao`), na ordem do trilho
- * direito. [title] vai para o cabeçalho ("Transformar · Posição"); [props] é o
- * grupo que o losango do trilho crava.
+ * As faces de Transformar, na ordem do trilho direito (a do pedido do dono:
+ * Posição, Escala, Rotação, Opacidade, Pivô, Desfoque de movimento). [title] vai
+ * para o cabeçalho ("Transformar · Posição"); [props] é o grupo que o losango do
+ * trilho crava (vazio = face sem keyframe).
  */
 enum class TransformTab(val title: String, val icon: ImageVector, val railLabel: String, val props: IntArray) {
-    Mover("Posição", Icons.Rounded.OpenWith, "Mover", intArrayOf(TrackProperty.POSITION_X, TrackProperty.POSITION_Y)),
-    Girar("Rotação", Icons.AutoMirrored.Rounded.RotateRight, "Girar", intArrayOf(TrackProperty.ROTATION_Z)),
-    Escalar("Escala", Icons.Rounded.AspectRatio, "Escalar", intArrayOf(TrackProperty.SCALE_X, TrackProperty.SCALE_Y)),
-    Inclinar("Inclinação", Icons.Rounded.Transform, "Inclinar", intArrayOf(TrackProperty.SKEW_X, TrackProperty.SKEW_Y)),
-    Pivo("Pivô", Icons.Rounded.FilterCenterFocus, "Pivô", intArrayOf(TrackProperty.ANCHOR_X, TrackProperty.ANCHOR_Y)),
+    Mover("Posição", Icons.Rounded.OpenWith, "Posição", intArrayOf(TrackProperty.POSITION_X, TrackProperty.POSITION_Y)),
+    Escalar("Escala", Icons.Rounded.AspectRatio, "Escala", intArrayOf(TrackProperty.SCALE_X, TrackProperty.SCALE_Y)),
+    Girar("Rotação", Icons.AutoMirrored.Rounded.RotateRight, "Rotação", intArrayOf(TrackProperty.ROTATION_Z)),
+    Opacidade("Opacidade", Icons.Rounded.Opacity, "Opacidade", intArrayOf(TrackProperty.OPACITY)),
+    Pivo("Pivô", Icons.Rounded.FilterCenterFocus, "Pivô (ponto de giro)", intArrayOf(TrackProperty.ANCHOR_X, TrackProperty.ANCHOR_Y)),
+    Desfoque("Desfoque de movimento", Icons.Rounded.BlurOn, "Desfoque de movimento", intArrayOf()),
 }
 
 /**
  * O PAINEL DE TRANSFORMAÇÃO [A] (`PainelDeTransformacao`): trilho esquerdo
  * (‹ · ◇ · curva · ⋯), miolo com os campos no topo e UMA superfície por face
- * (almofada, dial, fitas) e o trilho direito com as faces. Nenhum deslizante:
- * posição é 2D, ângulo é circular, escala não tem intervalo natural.
+ * (almofada, dial, fitas, régua) e o trilho direito com as faces.
  */
 /** Eixo do dial de Rotação: 0 = X, 1 = Y, 2 = Z (no plano da tela). */
 private val rotationAxis = androidx.compose.runtime.mutableIntStateOf(2)
 private val RotationProps = intArrayOf(TrackProperty.ROTATION_X, TrackProperty.ROTATION_Y, TrackProperty.ROTATION_Z)
 
+/** "Girar em 3D" aberto à mão numa camada 2D (X/Y e profundidade aparecem). */
+private val threeDOpen = androidx.compose.runtime.mutableStateOf(false)
+
+/**
+ * X/Y/Z SÓ QUANDO SE APLICA: camada 3D de verdade (objeto 3D, câmera, luz, nulo
+ * 3D) ou 2D que JÁ usa a terceira dimensão (inclinada em X/Y, com profundidade
+ * ou com esses keyframes) — senão a face mostra só o plano da tela.
+ */
+internal fun uses3D(d: com.aurea.aurea.engine.LayerDetail?): Boolean {
+    if (d == null) return false
+    if (d.kind == LayerType.Model3D.kind || d.kind == LayerType.Camera.kind || d.kind == LayerType.Light.kind) return true
+    if ((d.flags and com.aurea.aurea.engine.PodLayout.FLAG_THREE_D) != 0) return true
+    if (abs(d.rotation[0]) > 0.01f || abs(d.rotation[1]) > 0.01f || abs(d.position[2]) > 0.01f) return true
+    return d.isAnimated(TrackProperty.ROTATION_X) || d.isAnimated(TrackProperty.ROTATION_Y) || d.isAnimated(TrackProperty.POSITION_Z)
+}
+
 @Composable
 internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformTab) -> Unit) {
     val store = env.store
     var menu by remember { mutableStateOf(false) }
-    val axis by rotationAxis
+    val show3D by remember(store) { derivedStateOf { threeDOpen.value || uses3D(store.detail) } }
+    val axis = if (show3D) rotationAxis.intValue else 2
     val props = if (tab == TransformTab.Girar) intArrayOf(RotationProps[axis]) else tab.props
     // O losango da Rotação vale para X, Y e Z juntos (um keyframe só).
     val keyProps = if (tab == TransformTab.Girar) RotationProps else props
-    val look by remember(store, tab, axis) { derivedStateOf { transformLook(store.detail, keyProps) } }
-    val curveReady by remember(store, tab, axis) { derivedStateOf { store.primaryKeys().transformTrack(props[0]).size >= 2 } }
-    val canKey = tab != TransformTab.Inclinar
+    val canKey = props.isNotEmpty()
+    val look by remember(store, tab, axis) {
+        derivedStateOf { if (keyProps.isEmpty()) com.aurea.aurea.ui.ds.KeyframeLook.None else transformLook(store.detail, keyProps) }
+    }
+    val curveReady by remember(store, tab, axis) {
+        derivedStateOf { props.isNotEmpty() && store.primaryKeys().transformTrack(props[0]).size >= 2 }
+    }
     val exprKeys = props.map { TrackKey(it) }
     val exprLook by remember(store, tab, axis) { derivedStateOf { store.expressionLook(exprKeys) } }
+    // Expressão na unidade da tela: escala e opacidade em %, ângulo em °, o resto em px.
+    val exprTitle = if (tab == TransformTab.Girar) "Rotação ${"XYZ"[axis]}" else tab.title
+    val exprScale = if (tab == TransformTab.Escalar || tab == TransformTab.Opacidade) 100f else 1f
+    val exprUnit = when (tab) {
+        TransformTab.Escalar, TransformTab.Opacidade -> "%"
+        TransformTab.Girar -> "°"
+        else -> "px"
+    }
 
     Row(Modifier.fillMaxSize()) {
         LeftRail(
@@ -134,41 +167,32 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
             } else {
                 null
             },
-            more = { RailMoreButton(active = tab == TransformTab.Pivo) { menu = true } },
+            more = { RailMoreButton(active = false) { menu = true } },
             expression = exprLook,
-            // Uma expressão para o GRUPO (Posição = X e Y): cada trilha pega o
-            // seu componente do vetor; escala na unidade da tela (%).
-            onExpression = if (canKey) {
-                {
-                    val title = if (tab == TransformTab.Girar) "Rotação ${"XYZ"[axis]}" else tab.title
-                    if (tab == TransformTab.Escalar) store.openExpression(title, exprKeys, 100f, "%")
-                    else store.openExpression(title, exprKeys, 1f, if (tab == TransformTab.Girar) "°" else "px")
-                }
-            } else {
-                null
-            },
+            onExpression = if (canKey) ({ store.openExpression(exprTitle, exprKeys, exprScale, exprUnit) }) else null,
         )
         Column(Modifier.weight(1f).fillMaxHeight()) {
             when (tab) {
-                TransformTab.Mover -> MoveFace(env, pivot = false)
+                TransformTab.Mover -> MoveFace(env, pivot = false, depth = show3D)
                 TransformTab.Girar -> {
-                    AxisRow(axis) { rotationAxis.intValue = it }
+                    if (show3D) {
+                        AxisRow(axis) { rotationAxis.intValue = it }
+                    } else {
+                        Open3DRow { threeDOpen.value = true }
+                    }
                     Box(Modifier.weight(1f).fillMaxWidth()) { RotationDial(env, axis) }
                 }
                 TransformTab.Escalar -> ScaleFace(env)
-                TransformTab.Inclinar -> Unit
-                TransformTab.Pivo -> MoveFace(env, pivot = true)
+                TransformTab.Opacidade -> OpacityFace(env, look)
+                TransformTab.Pivo -> MoveFace(env, pivot = true, depth = false)
+                TransformTab.Desfoque -> MotionBlurFace(env)
             }
             Spacer(Modifier.height(10.dp))
         }
         RightRail(
             modes = TransformTab.entries.map { RailMode(it.icon, it.railLabel) },
             selected = tab.ordinal,
-            onSelect = { i ->
-                val t = TransformTab.entries[i]
-                // O motor novo ainda não tem inclinação: diz, não finge.
-                if (t == TransformTab.Inclinar) store.comingSoon("Inclinação") else onTab(t)
-            },
+            onSelect = { i -> onTab(TransformTab.entries[i]) },
         )
     }
 
@@ -176,36 +200,154 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
         AureaActionSheet(
             title = "Transformar",
             actions = buildList {
-                if (tab == TransformTab.Mover) add(SheetAction("Vincular posição") { store.comingSoon("Vincular posição") })
-                add(SheetAction("Auto-key") { store.comingSoon("Auto-key") })
                 add(SheetAction("Keyframe anterior") { store.pause(); store.stepToKeyframe(-1) })
                 add(SheetAction("Próximo keyframe") { store.pause(); store.stepToKeyframe(1) })
-                add(SheetAction("Resetar propriedade") { resetTab(env, tab) })
+                if (tab != TransformTab.Desfoque) add(SheetAction("Voltar ao padrão") { resetTab(env, tab, axis) })
                 if (canKey) add(SheetAction(if (exprLook == com.aurea.aurea.engine.ExpressionLook.None) "Adicionar expressão" else "Editar expressão") {
-                    store.openExpression(tab.title, exprKeys, if (tab == TransformTab.Escalar) 100f else 1f, if (tab == TransformTab.Escalar) "%" else "")
+                    store.openExpression(exprTitle, exprKeys, exprScale, exprUnit)
                 })
-                add(SheetAction("Editar pivô") { onTab(TransformTab.Pivo) })
-                add(SheetAction("Opacidade") { env.onOpenPanel(EditorPanel.Appearance) })
+                if (!uses3D(store.detail)) {
+                    add(SheetAction(if (threeDOpen.value) "Esconder X/Y/Z (3D)" else "Mostrar X/Y/Z (3D)") { threeDOpen.value = !threeDOpen.value })
+                }
             },
             onDismiss = { menu = false },
         )
     }
 }
 
-/** "Resetar propriedade": posição no centro da composição, rotação 0, escala 100 %, pivô no centro da mídia. */
-private fun resetTab(env: PanelEnv, tab: TransformTab) {
+/** "Voltar ao padrão": posição no centro da composição, rotação 0, escala 100 %, opacidade 100 %, pivô no centro da mídia. */
+private fun resetTab(env: PanelEnv, tab: TransformTab, axis: Int) {
     val store = env.store
     val d = store.detail ?: return
     when (tab) {
         TransformTab.Mover -> store.setTransform2(
             TrackProperty.POSITION_X, store.project.width / 2f, TrackProperty.POSITION_Y, store.project.height / 2f,
         )
-        TransformTab.Girar -> store.setTransform(RotationProps[rotationAxis.intValue], 0f)
+        TransformTab.Girar -> store.setTransform(RotationProps[axis], 0f)
         TransformTab.Escalar -> store.setTransform2(TrackProperty.SCALE_X, 1f, TrackProperty.SCALE_Y, 1f)
+        TransformTab.Opacidade -> store.setTransform(TrackProperty.OPACITY, 1f)
         TransformTab.Pivo -> store.setTransform2(
             TrackProperty.ANCHOR_X, d.sourceWidth / 2f, TrackProperty.ANCHOR_Y, d.sourceHeight / 2f,
         )
-        TransformTab.Inclinar -> store.comingSoon("Inclinação")
+        TransformTab.Desfoque -> Unit
+    }
+}
+
+/** Camada 2D: a Rotação é só no plano; um toque abre X/Y (inclinar em perspectiva). */
+@Composable
+private fun Open3DRow(onOpen: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .background(AureaColors.Chip)
+                .tocavel(onClick = onOpen)
+                .padding(horizontal = 14.dp, vertical = 6.dp),
+        ) {
+            Text("Girar em 3D (X e Y)", style = AureaType.Base.merge(TextStyle(fontSize = 12.5.sp, fontWeight = FontWeight.W600, color = AureaColors.Text)))
+        }
+    }
+}
+
+// =============================================================================
+// Opacidade e desfoque de movimento
+// =============================================================================
+
+/** OPACIDADE: a linha (0–100 %, ◇ no rótulo) e, embaixo, uma régua grande no mesmo valor. */
+@Composable
+private fun androidx.compose.foundation.layout.ColumnScope.OpacityFace(env: PanelEnv, look: com.aurea.aurea.ui.ds.KeyframeLook) {
+    val store = env.store
+    val opacity by remember(store) { derivedStateOf { (store.detail?.opacity ?: 1f) * 100f } }
+    Column(Modifier.weight(1f).fillMaxWidth().padding(start = 2.dp, top = 6.dp, end = 10.dp)) {
+        OpacityRow(env, opacity, selected = true, keyframe = look)
+        Spacer(Modifier.height(6.dp))
+        TickRuler(
+            value = { opacity },
+            unitsPerDp = 0.35f,
+            active = true,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .valueDrag(
+                    enabled = true,
+                    start = { (store.detail?.opacity ?: 1f) * 100f },
+                    unitsPerDp = { 0.35f },
+                    min = 0f,
+                    max = 100f,
+                    onStart = { store.beginGesture("opacidade") },
+                    onValue = { store.setTransform(TrackProperty.OPACITY, it / 100f) },
+                    onEnd = { store.endGesture() },
+                ),
+        )
+    }
+}
+
+/**
+ * DESFOQUE DE MOVIMENTO: liga na camada (e no projeto, se estava desligado lá —
+ * o motor só borra com os dois ligados); a intensidade é a abertura do obturador
+ * do projeto em % (180° = 50 %). Vídeo tem ainda o desfoque pelo movimento de
+ * dentro do próprio vídeo.
+ */
+@Composable
+private fun androidx.compose.foundation.layout.ColumnScope.MotionBlurFace(env: PanelEnv) {
+    val store = env.store
+    val d = store.detail ?: return
+    val on = d.motionBlur && store.compMotionBlur
+    val strength = store.shutterAngle / 3.6f
+    Column(
+        Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 8.dp, top = 6.dp, end = 12.dp),
+    ) {
+        BlurToggleRow("Desfoque de movimento", "Borra a camada na direção em que ela se move.", on) { v ->
+            if (v) {
+                if (!store.compMotionBlur) store.setCompositionMotionBlur(true)
+                if (!d.motionBlur) store.setLayerMotionBlur(d.id, true)
+            } else {
+                store.setLayerMotionBlur(d.id, false)
+            }
+        }
+        if (on) {
+            com.aurea.aurea.ui.ds.PropertyRow(
+                label = "Intensidade",
+                value = strength,
+                unitsPerDp = 0.5f,
+                min = 0f,
+                max = 200f,
+                format = { "${numeroPtBr(it, 0)}%" },
+                selected = true,
+                onSelect = {},
+                onGestureStart = { store.beginGesture("intensidade do desfoque") },
+                onValue = { store.changeShutterAngle(it.coerceIn(0f, 200f) * 3.6f) },
+                onGestureEnd = { store.endGesture() },
+                onTapValue = {
+                    env.openKeypad(KeypadRequest("Intensidade do desfoque", strength, "%", 0f, 200f, 0) { store.changeShutterAngle(it * 3.6f) })
+                },
+            )
+            Text(
+                "A intensidade vale para todas as camadas com desfoque neste projeto.",
+                modifier = Modifier.padding(top = 4.dp, start = 4.dp),
+                style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, lineHeight = 15.sp, color = AureaColors.Muted)),
+            )
+        }
+        if (d.kind == LayerType.Video.kind) {
+            Spacer(Modifier.height(8.dp))
+            BlurToggleRow("Desfoque do movimento do vídeo", "Borra o que se mexe dentro do vídeo.", d.vectorBlur) { store.setVectorBlur(d.id, it) }
+        }
+    }
+}
+
+@Composable
+private fun BlurToggleRow(label: String, hint: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp).padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W600, color = AureaColors.Text)))
+            Text(hint, style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, lineHeight = 15.sp, color = AureaColors.Muted)))
+        }
+        Spacer(Modifier.width(10.dp))
+        com.aurea.aurea.ui.ds.AureaToggle(checked = checked, onCheckedChange = onChange)
     }
 }
 
@@ -220,9 +362,11 @@ private fun resetTab(env: PanelEnv, tab: TransformTab) {
  * ficam na fileira de cima com o botão "Centro".
  */
 @Composable
-private fun androidx.compose.foundation.layout.ColumnScope.MoveFace(env: PanelEnv, pivot: Boolean) {
+private fun androidx.compose.foundation.layout.ColumnScope.MoveFace(env: PanelEnv, pivot: Boolean, depth: Boolean) {
     val store = env.store
-    var zMode by rememberSaveable { mutableStateOf(false) }
+    var zPicked by rememberSaveable { mutableStateOf(false) }
+    // Sem 3D não há profundidade: o arrasto é sempre X/Y.
+    val zMode = zPicked && depth
     var dragging by remember { mutableStateOf(false) }
     val x by remember(store, pivot) {
         derivedStateOf { store.detail?.let { if (pivot) it.anchor[0] - it.sourceWidth / 2f else it.position[0] } ?: 0f }
@@ -234,20 +378,20 @@ private fun androidx.compose.foundation.layout.ColumnScope.MoveFace(env: PanelEn
 
     val fields: @Composable () -> Unit = {
         Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.Center) {
-            ValueBox(numeroPtBr(x, 1), width = 61.dp, label = "x", onTap = {
+            ValueBox("${numeroPtBr(x, 0)}px", width = 64.dp, label = "x", onTap = {
                 val d = store.detail ?: return@ValueBox
                 env.openKeypad(
-                    KeypadRequest(if (pivot) "Pivô em X" else "Posição X", x, "", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) {
+                    KeypadRequest(if (pivot) "Pivô em X" else "Posição X", x, "px", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) {
                         if (pivot) store.setTransform(TrackProperty.ANCHOR_X, it + d.sourceWidth / 2f)
                         else store.setTransform(TrackProperty.POSITION_X, it)
                     },
                 )
             })
             Spacer(Modifier.width(6.dp))
-            ValueBox(numeroPtBr(y, 1), width = 61.dp, label = "y", onTap = {
+            ValueBox("${numeroPtBr(y, 0)}px", width = 64.dp, label = "y", onTap = {
                 val d = store.detail ?: return@ValueBox
                 env.openKeypad(
-                    KeypadRequest(if (pivot) "Pivô em Y" else "Posição Y", y, "", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) {
+                    KeypadRequest(if (pivot) "Pivô em Y" else "Posição Y", y, "px", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) {
                         if (pivot) store.setTransform(TrackProperty.ANCHOR_Y, it + d.sourceHeight / 2f)
                         else store.setTransform(TrackProperty.POSITION_Y, it)
                     },
@@ -269,19 +413,19 @@ private fun androidx.compose.foundation.layout.ColumnScope.MoveFace(env: PanelEn
                 ) {
                     Text("Centro", style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, fontWeight = FontWeight.W600, color = Color.White)))
                 }
-            } else {
+            } else if (depth) {
                 // z: o toque ESCOLHE a profundidade para o arrasto; segurar digita.
                 ValueBox(
-                    numeroPtBr(z, 1),
-                    width = 61.dp,
+                    "${numeroPtBr(z, 0)}px",
+                    width = 64.dp,
                     label = "z",
                     color = if (zMode) AureaColors.Accent else Color.White,
                     onLongPress = {
-                        env.openKeypad(KeypadRequest("Profundidade Z", z, "", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) {
+                        env.openKeypad(KeypadRequest("Profundidade Z", z, "px", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) {
                             store.setTransform(TrackProperty.POSITION_Z, it)
                         })
                     },
-                    onTap = { zMode = !zMode },
+                    onTap = { zPicked = !zPicked },
                 )
             }
         }
@@ -292,15 +436,16 @@ private fun androidx.compose.foundation.layout.ColumnScope.MoveFace(env: PanelEn
     }
     val hint = when {
         pivot -> "Deslize o ponto de giro · o botão Centro devolve o zero"
-        zMode -> "Deslize para ajustar Z · toque em Z para voltar a X/Y"
-        else -> "Deslize para mover X/Y · toque em Z para profundidade"
+        zMode -> "Deslize para ajustar a profundidade · toque em Z para voltar a X/Y"
+        depth -> "Deslize para mover · toque em Z para profundidade"
+        else -> "Deslize para mover a camada"
     }
     val zNow by rememberUpdatedState(zMode)
     Box(
         Modifier
             .weight(1f)
             .fillMaxWidth()
-            .pointerInput(store, pivot) {
+            .pointerInput(store, pivot, depth) {
                 var startX = 0f
                 var startY = 0f
                 var startZ = 0f

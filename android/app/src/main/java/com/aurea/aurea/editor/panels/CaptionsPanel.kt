@@ -66,7 +66,7 @@ internal fun CaptionsPanel(env: PanelEnv) {
         cap.busy?.let { Note(it, AureaColors.Accent) }
         cap.error?.let { Note(it, AureaColors.Danger) }
         if (!cap.hasGroqKey) {
-            Note("Sem chave da Groq: gere com um arquivo SRT, ou coloque a chave em Ajustes › Legendas. O áudio só é enviado quando você toca em Gerar legendas.", AureaColors.Muted)
+            Note("Sem a chave do serviço de transcrição: use um arquivo de legenda (.srt), ou coloque a chave em Ajustes › Legendas. O áudio só sai do aparelho quando você toca em Gerar legendas.", AureaColors.Muted)
         }
         Label("Idioma da fala")
         Chips(Languages.map { it.second }, Languages.indexOfFirst { it.first == language }) { language = Languages[it].first }
@@ -74,7 +74,7 @@ internal fun CaptionsPanel(env: PanelEnv) {
             Action(if (cap.words.isEmpty()) "Gerar legendas" else "Transcrever de novo", primary = true, enabled = cap.hasGroqKey && cap.busy == null) {
                 cap.transcribe(language)
             }
-            Action("Importar SRT", enabled = cap.busy == null) { srt.launch(arrayOf("application/x-subrip", "text/*", "application/octet-stream")) }
+            Action("Importar legenda (.srt)", enabled = cap.busy == null) { srt.launch(arrayOf("application/x-subrip", "text/*", "application/octet-stream")) }
         }
 
         Label("Estilo")
@@ -84,12 +84,12 @@ internal fun CaptionsPanel(env: PanelEnv) {
         if (s.mode == 0) {
             Label("Palavras por legenda")
             Chips((1..6).map { "$it" }, s.maxWords - 1) { i -> set { it.copy(maxWords = i + 1) } }
-            Label("Caracteres por linha")
+            Label("Letras por linha")
             Chips(listOf("12", "18", "24", "32"), listOf(12, 18, 24, 32).indexOf(s.maxChars)) { i -> set { it.copy(maxChars = listOf(12, 18, 24, 32)[i]) } }
             Label("Linhas")
             Chips(listOf("1", "2", "3"), s.maxLines - 1) { i -> set { it.copy(maxLines = i + 1) } }
         }
-        Label("Posição (área segura)")
+        Label("Altura na tela")
         val ys = listOf(0.2f, 0.5f, 0.78f)
         Chips(listOf("Alto", "Meio", "Baixo"), ys.indexOfFirst { kotlin.math.abs(it - s.posY) < 0.01f }) { i -> set { it.copy(posY = ys[i]) } }
         Label("Tamanho")
@@ -106,7 +106,7 @@ internal fun CaptionsPanel(env: PanelEnv) {
         }
 
         if (cap.words.isNotEmpty()) {
-            Label("Transcrição${cap.source?.let { " · $it" } ?: ""} — toque para corrigir")
+            Label("Texto da fala${cap.source?.let { " · $it" } ?: ""} — toque para corrigir")
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 cap.words.forEachIndexed { i, w ->
                     val filler = i in cap.fillers
@@ -127,7 +127,7 @@ internal fun CaptionsPanel(env: PanelEnv) {
                     }
                 }
             }
-            editing?.let { i -> cap.words.getOrNull(i)?.let { w -> WordEditor(w.text, "%.2f s".format(w.start), onDone = { t -> cap.editWord(i, t); editing = null }) } }
+            editing?.let { i -> cap.words.getOrNull(i)?.let { w -> WordEditor(w.text, "${com.aurea.aurea.ui.ds.numeroPtBr(w.start.toFloat(), 2)} s", onDone = { t -> cap.editWord(i, t); editing = null }) } }
         }
         Spacer(Modifier.height(24.dp))
     }
@@ -144,7 +144,7 @@ private fun WordEditor(initial: String, time: String, onDone: (String) -> Unit) 
                 textStyle = AureaType.Base.merge(TextStyle(fontSize = 14.sp, color = AureaColors.Text)), modifier = Modifier.fillMaxWidth())
         }
         Action("OK", primary = true) { onDone(text) }
-        Action("Tirar") { onDone("") }
+        Action("Apagar palavra") { onDone("") }
     }
 }
 

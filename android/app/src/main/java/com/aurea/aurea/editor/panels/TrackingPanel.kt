@@ -39,7 +39,7 @@ import com.aurea.aurea.ui.theme.tocavel
 internal fun TrackingPanel(env: PanelEnv) {
     val store = env.store
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 18.dp, top = 12.dp, end = 18.dp, bottom = 24.dp)) {
-        Action("Rastrear um ponto", "Cria um Nulo que segue o ponto — ligue textos e formas a ele.") {
+        Action("Rastrear um ponto", "Cria um ponto guia que segue o objeto — ligue textos e formas a ele.") {
             env.onClose()
             store.beginPointPick(false)
         }
@@ -85,7 +85,7 @@ private fun CameraTrackSection(env: PanelEnv) {
     val s = st
     when {
         s != null && s.state == 1 -> {
-            Text("Analisando a câmera… ${(s.progress * 100).toInt()}%", style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+            Text("Analisando o movimento… ${(s.progress * 100).toInt()}%", style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
             Spacer(Modifier.height(6.dp))
             Box(Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)).background(AureaColors.Chip)) {
                 Box(Modifier.fillMaxWidth(s.progress.coerceIn(0f, 1f)).fillMaxHeight().background(AureaColors.Accent))
@@ -94,16 +94,15 @@ private fun CameraTrackSection(env: PanelEnv) {
             Action("Cancelar", "Para a análise; o projeto não muda.") { store.cancelCameraTrack() }
         }
         s != null && s.state == 2 -> {
-            val kind = if (s.rotationOnly) "Câmera parada no lugar (só gira) — sem profundidade" else "Câmera resolvida"
-            Text(kind + if (s.cached) " (do cache)" else "", style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W600)))
+            val kind = if (s.rotationOnly) "A câmera só gira no lugar — sem profundidade" else "Movimento da câmera encontrado"
+            Text(kind + if (s.cached) " (análise guardada)" else "", style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W600)))
             Spacer(Modifier.height(4.dp))
             Text(
-                "${s.solved}/${s.frames} quadros · ${s.points} pontos de ${s.tracks} rastros · erro ${"%.2f".format(s.errorPx)} px · " +
-                    "FOV ${"%.1f".format(s.fovDeg)}° · confiança ${(s.confidence * 100).toInt()}%",
+                "${s.solved} de ${s.frames} quadros · precisão ${(s.confidence * 100).toInt()}% · abertura da lente ${kotlin.math.round(s.fovDeg).toInt()}°",
                 style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = AureaColors.Muted)),
             )
             Spacer(Modifier.height(8.dp))
-            Action("Criar câmera", "Câmera 3D animada + Nulo no chão (ou no centro) da cena.") { store.applyCameraTrack() }
+            Action("Criar câmera", "Cria a câmera 3D animada e um ponto guia no chão da cena.") { store.applyCameraTrack() }
             Spacer(Modifier.height(8.dp))
             Action("Analisar de novo", "Com o modo escolhido acima.") { store.startCameraTrack(mode) }
         }

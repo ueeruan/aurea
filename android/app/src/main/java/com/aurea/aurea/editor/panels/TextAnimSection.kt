@@ -54,7 +54,7 @@ private val AnimProps = listOf(
     AnimProp(1 shl 0, "Posição", listOf(
         AnimParam(10, 14, "Posição X", "px", 1f, -5000f, 5000f),
         AnimParam(11, 15, "Posição Y", "px", 1f, -5000f, 5000f),
-        AnimParam(12, 16, "Profundidade Z", "px", 1f, -5000f, 5000f),
+        AnimParam(12, 16, "Profundidade", "px", 1f, -5000f, 5000f),
     )),
     AnimProp(1 shl 1, "Escala", listOf(
         AnimParam(13, 17, "Escala X", "%", 1f, -2000f, 2000f),
@@ -68,9 +68,9 @@ private val AnimProps = listOf(
     AnimProp(1 shl 3, "Opacidade", listOf(AnimParam(18, 22, "Opacidade", "%", 0.5f, 0f, 100f))),
     AnimProp(1 shl 4, "Espaçamento", listOf(AnimParam(19, 23, "Espaçamento", "px", 0.5f, -500f, 500f))),
     AnimProp(1 shl 5, "Desfoque", listOf(AnimParam(20, 24, "Desfoque", "px", 0.2f, 0f, 200f))),
-    AnimProp(1 shl 6, "Inclinar", listOf(AnimParam(21, 25, "Inclinar", "°", 0.5f, -80f, 80f))),
+    AnimProp(1 shl 6, "Inclinação", listOf(AnimParam(21, 25, "Inclinação", "°", 0.5f, -80f, 80f))),
     AnimProp(1 shl 7, "Contorno", listOf(AnimParam(22, 26, "Contorno", "px", 0.1f, -50f, 50f))),
-    AnimProp(1 shl 8, "Trocar letra", listOf(AnimParam(23, 27, "Trocar letra", "", 0.1f, -1000f, 1000f))),
+    AnimProp(1 shl 8, "Embaralhar letra", listOf(AnimParam(23, 27, "Embaralhar letra", "", 0.1f, -1000f, 1000f))),
     AnimProp(1 shl 9, "Cor", emptyList()),
     AnimProp(1 shl 10, "Cor do contorno", emptyList()),
 )
@@ -79,8 +79,8 @@ private val AnimProps = listOf(
 private val SelectorParams = listOf(
     AnimParam(0, 7, "Início", "%", 0.5f, 0f, 100f),
     AnimParam(1, 8, "Fim", "%", 0.5f, 0f, 100f),
-    AnimParam(2, 9, "Deslocamento", "%", 0.5f, -1000f, 1000f),
-    AnimParam(3, 10, "Quantidade", "%", 0.5f, -100f, 100f),
+    AnimParam(2, 9, "Atraso entre elas", "%", 0.5f, -1000f, 1000f),
+    AnimParam(3, 10, "Intensidade", "%", 0.5f, -100f, 100f),
 )
 
 /**
@@ -103,7 +103,7 @@ internal fun TextAnimSection(env: PanelEnv) {
     }
     list.forEachIndexed { index, v -> AnimatorCard(env, index, v) }
     Spacer(Modifier.height(4.dp))
-    AnimChip("+ Animador", false) { store.addTextAnimator(1 shl 3) }
+    AnimChip("+ Adicionar animação", false) { store.addTextAnimator(1 shl 3) }
 }
 
 @Composable
@@ -113,16 +113,16 @@ private fun AnimatorCard(env: PanelEnv, index: Int, v: FloatArray) {
     Spacer(Modifier.height(8.dp))
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(AureaColors.Chip.copy(alpha = 0.45f)).padding(8.dp)) {
         Row(Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Animador ${index + 1}", modifier = Modifier.weight(1f),
+            Text("Animação ${index + 1}", modifier = Modifier.weight(1f),
                 style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700)))
             AnimChip("Remover", false) { store.removeTextAnimator(index) }
             Spacer(Modifier.width(8.dp))
             AureaToggle(checked = v[0] > 0.5f, onCheckedChange = { store.setTextAnimatorValues(index, mapOf(0 to if (it) 1f else 0f)) })
         }
-        ChipRow("Por", listOf("Letra", "Palavra", "Linha"), v[2].toInt()) { store.setTextAnimatorValues(index, mapOf(2 to it.toFloat())) }
-        ChipRow("Tipo", listOf("Intervalo", "Aleatório"), v[3].toInt()) { store.setTextAnimatorValues(index, mapOf(3 to it.toFloat())) }
+        ChipRow("Anima cada", listOf("Letra", "Palavra", "Linha"), v[2].toInt()) { store.setTextAnimatorValues(index, mapOf(2 to it.toFloat())) }
+        ChipRow("Escolhe", listOf("Em ordem", "Sorteado"), v[3].toInt()) { store.setTextAnimatorValues(index, mapOf(3 to it.toFloat())) }
         if (v[3] < 0.5f) {
-            ChipRow("Forma", listOf("Quadrado", "Sobe", "Desce", "Triângulo", "Redondo", "Suave"), v[4].toInt()) {
+            ChipRow("Passagem", listOf("Seco", "Sobe", "Desce", "Triângulo", "Redondo", "Suave"), v[4].toInt()) {
                 store.setTextAnimatorValues(index, mapOf(4 to it.toFloat()))
             }
             Row(Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -131,7 +131,7 @@ private fun AnimatorCard(env: PanelEnv, index: Int, v: FloatArray) {
             }
             SelectorParams.forEach { p -> AnimRuler(store, index, p, v) }
         } else {
-            AnimRuler(store, index, AnimParam(25, 13, "Variações por segundo", "", 0.05f, 0f, 60f), v)
+            AnimRuler(store, index, AnimParam(25, 13, "Trocas por segundo", "", 0.05f, 0f, 60f), v)
             AnimRuler(store, index, SelectorParams[3], v)
         }
         AnimProps.forEach { p ->
@@ -226,7 +226,7 @@ private fun AnimRuler(store: EditorStore, index: Int, p: AnimParam, v: FloatArra
             }
             Spacer(Modifier.width(8.dp))
             val shown = v[p.slot]
-            ValueBox(if (p.step < 0.5f) "${"%.1f".format(shown)} ${p.unit}".trim() else "${shown.roundToInt()} ${p.unit}".trim(), onTap = null)
+            ValueBox(if (p.step < 0.5f) "${com.aurea.aurea.ui.ds.numeroPtBr(shown, 1)}${p.unit}" else "${shown.roundToInt()}${p.unit}", onTap = null)
             Spacer(Modifier.width(4.dp))
             Box(Modifier.tocavel(onClick = { store.toggleTextAnimKey(index, p.id) }).padding(4.dp)) {
                 KeyframeDiamondIcon(look, enabled = true)

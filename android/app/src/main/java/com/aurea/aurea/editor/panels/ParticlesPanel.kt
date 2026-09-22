@@ -61,12 +61,12 @@ internal fun ParticlesPanel(env: PanelEnv) {
             }
         }
         Spacer(Modifier.height(8.dp))
-        ParticleRuler(store, "Quantidade por segundo", 0, p[0], "${p[0].roundToInt()}", 1f, 0.1f, 2000f)
-        ParticleRuler(store, "Vida", 1, p[1], "%.1f s".format(p[1]).replace('.', ','), 0.02f, 0.05f, 30f)
+        ParticleRuler(store, "Partículas por segundo", 0, p[0], "${p[0].roundToInt()}", 1f, 0.1f, 2000f)
+        ParticleRuler(store, "Duração de cada uma", 1, p[1], "${com.aurea.aurea.ui.ds.numeroPtBr(p[1], 1)} s", 0.02f, 0.05f, 30f)
         ParticleRuler(store, "Velocidade", 2, p[2], "${p[2].roundToInt()} px/s", 4f, 0f, 5000f)
-        ParticleRuler(store, "Espalhamento", 3, p[3], "${p[3].roundToInt()}°", 1f, 0f, 360f)
+        ParticleRuler(store, "Abertura", 3, p[3], "${p[3].roundToInt()}°", 1f, 0f, 360f)
         ParticleRuler(store, "Direção", 7, p[7], "${p[7].roundToInt()}°", 1f, -360f, 360f)
-        ParticleRuler(store, "Gravidade", 4, p[4], "${(-p[4]).roundToInt()}", 8f, -5000f, 5000f)
+        ParticleRuler(store, "Gravidade", 4, p[4], "${(-p[4]).roundToInt()} px/s²", 8f, -5000f, 5000f)
         ParticleRuler(store, "Tamanho inicial", 5, p[5], "${p[5].roundToInt()} px", 0.5f, 0f, 500f)
         ParticleRuler(store, "Tamanho final", 6, p[6], "${p[6].roundToInt()} px", 0.5f, 0f, 500f)
     }

@@ -2942,6 +2942,7 @@ void Engine::drain_commands_locked() noexcept {
 
 RenderSettings Engine::current_render_settings() noexcept {
     RenderSettings rs;
+    rs.heavyScale = preview_heavy_scale();
     rs.previewNumerator = adapt().current_numerator();
     rs.previewDenominator = adapt().current_denominator();
     rs.gpuTimers = config_.enableTelemetry;
@@ -3080,13 +3081,29 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
     return s;
 }
 
-Status Engine::render_offscreen(TextureHandle target, u32 width, u32 height) noexcept {
+void Engine::set_thermal(u32 level, bool throttling) noexcept {
+    ThermalState t = caps_.thermal();
+    t.level = static_cast<ThermalState::Level>(std::min<u32>(level, static_cast<u32>(ThermalState::Level::Unknown)));
+    t.throttling = throttling;
+    caps_.set_thermal_state(t);
+    request_render();
+}
+
+f32 Engine::preview_heavy_scale() const noexcept {
+    const ThermalState& t = caps_.thermal();
+    if (t.severe()) return 0.25f;
+    if (t.should_degrade()) return 0.5f;
+    return 1.0f;
+}
+
+Status Engine::render_offscreen(TextureHandle target, u32 width, u32 height, bool asPreview) noexcept {
     std::lock_guard<std::mutex> rl(renderMutex_);
     if (!gpu_ || !renderer_.ready()) return Status{Errc::InvalidState, "sem GPU"};
 
     RenderSettings rs;
     rs.dither = false;
     rs.gpuTimers = false;
+    if (asPreview) rs.heavyScale = preview_heavy_scale();
     // Espera os frames EXATOS de vídeo (export e teste não aceitam o frame
     // aproximado que o scrub mostra). Limite de 4 s para arquivo quebrado não
     // travar para sempre.

@@ -258,6 +258,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 pendingSurface = null
                 main.post {
                     if (ok) {
+                        startThermalWatch()
                         engineReady = true
                         catalog = readCatalog()
                         startStatusLoop()
@@ -340,7 +341,29 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         lifecycleThread.shutdown()
     }
 
+    // --- Temperatura do aparelho -----------------------------------------------------------
+    /** PowerManager (Android 10+): sob calor o preview reduz o que é caro; o export não muda. */
+    private var thermalListener: Any? = null
+
+    private fun startThermalWatch() {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) return
+        val pm = getApplication<Application>().getSystemService(android.content.Context.POWER_SERVICE) as? android.os.PowerManager ?: return
+        engine.setThermal(pm.currentThermalStatus)
+        val l = android.os.PowerManager.OnThermalStatusChangedListener { status -> engine.setThermal(status) }
+        pm.addThermalStatusListener(l)
+        thermalListener = l
+    }
+
+    private fun stopThermalWatch() {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) return
+        val l = thermalListener as? android.os.PowerManager.OnThermalStatusChangedListener ?: return
+        val pm = getApplication<Application>().getSystemService(android.content.Context.POWER_SERVICE) as? android.os.PowerManager ?: return
+        pm.removeThermalStatusListener(l)
+        thermalListener = null
+    }
+
     override fun onCleared() {
+        stopThermalWatch()
         saveIfDirty()
         shutdown()
         super.onCleared()

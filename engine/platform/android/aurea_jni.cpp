@@ -909,6 +909,15 @@ AUREA_JNI jboolean AUREA_FN(nativeSetMotionBlur)(JNIEnv*, jclass, jlong handle, 
     return c && c->engine.set_motion_blur(static_cast<u64>(layer), on == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
 }
 
+/// Estado térmico do PowerManager (THERMAL_STATUS_*: 0 nenhum … 6 desligando).
+AUREA_JNI void AUREA_FN(nativeSetThermal)(JNIEnv*, jclass, jlong handle, jint status) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return;
+    // Android: 0 NONE, 1 LIGHT, 2 MODERATE, 3 SEVERE, 4 CRITICAL, 5 EMERGENCY, 6 SHUTDOWN.
+    const u32 level = status <= 0 ? 0u : status == 1 ? 1u : status == 2 ? 1u : status == 3 ? 2u : status == 4 ? 3u : 4u;
+    c->engine.set_thermal(level, status >= 2);
+}
+
 AUREA_JNI jboolean AUREA_FN(nativeSetVectorBlur)(JNIEnv*, jclass, jlong handle, jlong layer, jfloat amount) {
     NativeContext* c = ctx_of(handle);
     return c && c->engine.set_vector_blur(static_cast<u64>(layer), amount) ? JNI_TRUE : JNI_FALSE;

@@ -487,7 +487,12 @@ public:
 
     /// Renderiza o instante atual numa textura (export, testes visuais), em
     /// resolução cheia, sem superfície. Espera a GPU terminar.
-    [[nodiscard]] Status render_offscreen(TextureHandle target, u32 width, u32 height) noexcept;
+    [[nodiscard]] Status render_offscreen(TextureHandle target, u32 width, u32 height, bool asPreview = false) noexcept;
+    /// Estado térmico do aparelho (PowerManager no Android): o preview reduz
+    /// as operações caras sob calor; o export não muda.
+    void set_thermal(u32 level, bool throttling) noexcept;
+    /// Fração de custo do preview para o estado térmico atual (1 = completo).
+    [[nodiscard]] f32 preview_heavy_scale() const noexcept;
 
     /// O frame do playhead em RGBA8 sRGB (alfa reto), com o lado maior em
     /// `maxDim`. Miniatura do projeto na Home. Síncrono (espera a GPU).

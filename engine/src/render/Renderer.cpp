@@ -619,7 +619,9 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 const f32 tsec = static_cast<f32>(static_cast<f64>(local.value) / fps);
                 const f32 rate = std::clamp(pd.rate, 0.1f, 5000.0f);
                 const f32 life = std::clamp(pd.lifetime, 0.05f, 60.0f);
-                const u32 slots = std::min<u32>(std::max<u32>(1u, pd.maxParticles),
+                const u32 cap = settings.finalQuality ? std::max<u32>(1u, pd.maxParticles)
+                                                      : std::max<u32>(1u, static_cast<u32>(static_cast<f32>(pd.maxParticles) * std::clamp(settings.heavyScale, 0.05f, 1.0f)));
+                const u32 slots = std::min<u32>(cap,
                                                 static_cast<u32>(std::ceil(rate * life * 1.25f)) + 1u);
                 auto lin = [](Vec4 c) { return Vec4{srgb_to_linear(c.x), srgb_to_linear(c.y), srgb_to_linear(c.z), c.w}; };
                 rl.source.kind = LayerSource::Kind::Particles;
@@ -740,7 +742,9 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         if (l->motionBlur && comp.motion_blur().enabled) {
             const bool in3d = wants_3d(comp, *l, time);
             const MotionBlurSettings& mb = comp.motion_blur();
-            const u32 k = std::clamp<u32>(settings.finalQuality ? mb.samples : mb.previewSamples, 2u, 64u);
+            const u32 k = std::clamp<u32>(settings.finalQuality ? mb.samples
+                                                               : static_cast<u32>(static_cast<f32>(mb.previewSamples) * std::clamp(settings.heavyScale, 0.1f, 1.0f)),
+                                          2u, 64u);
             const f64 open = std::clamp(static_cast<f64>(mb.shutterAngle), 0.0, 720.0) / 360.0;
             if (open > 0.0) {
                 rl.blurMatrices.resize(k);
@@ -878,7 +882,9 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     if (exact && exactB) {
                         rl.source.frameB = std::move(b);
                         rl.source.blendT = blendT;
-                        rl.source.blendMode = l->frameBlend;
+                        // Aparelho em estado crítico: o preview mistura em vez de
+                        // calcular o movimento de pixels (o export mantém o modo).
+                        rl.source.blendMode = (l->frameBlend == 2 && !settings.finalQuality && settings.heavyScale <= 0.25f) ? 1 : l->frameBlend;
                         // Desfoque vetorial: o fluxo cobre um quadro da FONTE;
                         // o obturador da composição dá a fração (× velocidade).
                         rl.source.vectorBlur = wantVector
@@ -952,7 +958,9 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
     // K cenas no obturador (câmera, mundo e pose no sub-quadro).
     if (!out.scenes.empty() && comp.motion_blur().enabled && comp.motion_blur().shutterAngle > 0.0f) {
         const MotionBlurSettings& mb = comp.motion_blur();
-        const u32 k = std::clamp<u32>(settings.finalQuality ? mb.samples : mb.previewSamples, 2u, 64u);
+        const u32 k = std::clamp<u32>(settings.finalQuality ? mb.samples
+                                                           : static_cast<u32>(static_cast<f32>(mb.previewSamples) * std::clamp(settings.heavyScale, 0.1f, 1.0f)),
+                                      2u, 64u);
         const f64 open = std::clamp(static_cast<f64>(mb.shutterAngle), 0.0, 720.0) / 360.0;
         auto differs = [](const Mat4& a, const Mat4& b) {
             for (int c = 0; c < 4; ++c) {
@@ -1205,7 +1213,8 @@ bool Renderer::build_video_source(const RenderLayer& layer, u32 layerIndex, u32 
 FGTexture Renderer::video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture b, u32 w, u32 h, u32& baseW, u32& baseH,
                                u64 frameNumber) noexcept {
     // Base da pirâmide com o lado maior ≤ 384 (o flow não precisa de 4K).
-    const f32 s = std::min(1.0f, 384.0f / static_cast<f32>(std::max(w, h)));
+    const f32 base = std::max(96.0f, 384.0f * std::clamp(heavyScale_, 0.25f, 1.0f));
+    const f32 s = std::min(1.0f, base / static_cast<f32>(std::max(w, h)));
     u32 lw = std::max(8u, static_cast<u32>(std::lround(static_cast<f32>(w) * s)));
     u32 lh = std::max(8u, static_cast<u32>(std::lround(static_cast<f32>(h) * s)));
     baseW = lw;
@@ -1643,6 +1652,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
                         RenderTimings& timings) noexcept {
     if (!backend_) return Status{Errc::InvalidState, "renderer sem backend"};
     const u64 t0 = monotonic_ns();
+    heavyScale_ = settings.finalQuality ? 1.0f : settings.heavyScale;
 
     FrameBegin fb;
     if (const Status s = backend_->begin_frame(fb); !s.ok()) {

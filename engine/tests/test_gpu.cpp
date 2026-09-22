@@ -2763,3 +2763,74 @@ AUREA_TEST(Gpu, VectorBlurSmearsFootageMotionAndFlowIsCached) {
     e.gpu()->destroy_texture(target);
     e.shutdown();
 }
+
+AUREA_TEST(Gpu, ThermalReducesPreviewButNotExport) {
+    AUREA_REQUIRE_GPU();
+    // Optical flow no preview: aparelho crítico = mistura (mais barata); o
+    // export (render sem "preview") mantém o movimento de pixels.
+    SyntheticConfig cfg;
+    cfg.width = 96;
+    cfg.height = 54;
+    cfg.frameCount = 300;
+    cfg.pattern = SyntheticPattern::FastSquare;
+    SyntheticFactory factory(cfg);
+    Engine e;
+    EngineConfig ec;
+    ec.backend = new vk::Backend();
+    ec.backendConfig.framesInFlight = 2;
+    ec.mediaFactory = &factory;
+    ec.workerCount = 2;
+    ec.disableAutosave = true;
+    AUREA_CHECK(e.initialize(ec).ok());
+    AUREA_CHECK(e.new_project(96, 54, 30.0, "termico").ok());
+    VideoImport imp;
+    imp.sourcePath = "sintetico";
+    imp.displayName = "clipe";
+    auto layer = e.import_video(imp);
+    AUREA_CHECK(layer.ok());
+    if (!layer.ok()) { e.shutdown(); return; }
+    {
+        Composition* c = e.project()->timeline().composition(e.project()->timeline().current());
+        Layer* l = c->layer(LayerId::unpack(*layer));
+        l->speed = 0.5f;
+        l->end = FrameIndex{l->start.value + 400};
+        c->set_duration(FrameIndex{400});
+    }
+    AUREA_CHECK(e.set_frame_blend(*layer, 2));
+    TextureDesc d;
+    d.width = 96;
+    d.height = 54;
+    d.format = SurfaceFormat::RGBA16F;
+    d.renderTarget = true;
+    d.transferSrc = true;
+    const TextureHandle target = *e.gpu()->create_texture(d);
+    std::vector<u16> half(96 * 54 * 4);
+    auto sharp = [&](bool preview) {
+        Command seek;
+        seek.type = CommandType::PlaybackSeek;
+        seek.seek.time = tick_at(FrameIndex{101}, 30.0);
+        AUREA_CHECK(e.submit_commands(&seek, 1) == 1);
+        AUREA_CHECK(e.render_offscreen(target, 96, 54, preview).ok());
+        AUREA_CHECK(e.gpu()->read_texture(target, half.data(), 96 * 8).ok());
+        u32 full = 0;
+        for (u32 x = 0; x < 96; ++x) {
+            const f32 v = srgb_encode(half_to_float(half[(27 * 96 + x) * 4])) * 219.0f + 16.0f;
+            if (v > 215.0f || v < 40.0f) ++full;
+        }
+        return full;
+    };
+    const u32 cool = sharp(true);
+    e.set_thermal(3, true);                        // crítico
+    const f32 scale = e.preview_heavy_scale();
+    const u32 hotPreview = sharp(true);
+    const u32 hotExport = sharp(false);
+    e.set_thermal(0, false);
+    std::printf("    termico: frio %u px nitidos; critico (escala %.2f) preview %u px (mistura), export %u px (movimento)\n", cool, scale, hotPreview,
+                hotExport);
+    AUREA_CHECK(cool >= 18);
+    AUREA_CHECK(scale <= 0.25f);
+    AUREA_CHECK(hotPreview < cool / 2);
+    AUREA_CHECK(hotExport >= 18);
+    e.gpu()->destroy_texture(target);
+    e.shutdown();
+}

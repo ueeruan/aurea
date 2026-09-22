@@ -152,6 +152,11 @@ struct RenderSettings {
     /// Export: amostras de desfoque de movimento da qualidade final
     /// (`MotionBlurSettings::samples`); prévia usa `previewSamples`.
     bool finalQuality = false;
+    /// Preview sob calor (ThermalManager): fração do custo das operações
+    /// caras — resolução do optical flow, partículas, amostras de desfoque.
+    /// 1 = completo; ≤ 0,25 também troca o movimento de pixels pela mistura.
+    /// O export sempre usa 1.
+    f32  heavyScale = 1.0f;
 };
 
 /// Alvo fora da tela (export, testes visuais): a composição é escrita nesta
@@ -318,6 +323,7 @@ private:
     };
     std::unordered_map<u64, FlowCache> flowCache_;
     u32 flowHits_ = 0, flowMisses_ = 0;
+    f32 heavyScale_ = 1.0f;   ///< do quadro sendo renderizado (RenderSettings::heavyScale)
     [[nodiscard]] FGTexture video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture b, u32 w, u32 h, u32& baseW, u32& baseH,
                                        u64 frameNumber) noexcept;
 public:

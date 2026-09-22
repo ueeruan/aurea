@@ -461,7 +461,7 @@ void write_layer(ByteWriter& w, const Layer& l) {
 /// e pivô (o enquadramento do import). v1 continua sendo lida (campos novos
 /// com o padrão).
 /// v3: velocidade e reverso da layer.
-constexpr u32 kTimelineSectionVersion = 4;
+constexpr u32 kTimelineSectionVersion = 5;
 thread_local u32 g_readingTimelineVersion = kTimelineSectionVersion;
 
 void read_layer(ByteReader& r, Layer& l) {
@@ -853,6 +853,8 @@ std::vector<u8> build_timeline_section(const Project& p) {
             w.u32v(m.kind);
             w.str(m.label);
         }
+        // v5: modo da timeline.
+        w.boolv(c.edit_mode());
     });
 
     return std::vector<u8>(w.bytes().begin(), w.bytes().end());
@@ -1039,6 +1041,7 @@ void apply_timeline_section(const u8* data, usize size, Project& p) {
                 c->put_marker(std::move(m));
             }
         }
+        if (g_readingTimelineVersion >= 5) c->set_edit_mode(r.boolv());
         c->rebuild_draw_order();
     }
 

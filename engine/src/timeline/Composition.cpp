@@ -223,6 +223,51 @@ void Composition::retime(f64 fps) noexcept {
     touch();
 }
 
+void Composition::shift_from(FrameIndex from, i64 delta, LayerId except) noexcept {
+    if (delta == 0) return;
+    layers_.for_each([&](LayerId id, Layer& l) {
+        if (id == except || l.start.value < from.value) return;
+        l.start = FrameIndex{std::max<i64>(0, l.start.value + delta)};
+        l.end = FrameIndex{std::max<i64>(l.start.value + 1, l.end.value + delta)};
+    });
+    for (Marker& m : markers_) {
+        if (m.frame.value >= from.value) m.frame = FrameIndex{std::max<i64>(0, m.frame.value + delta)};
+    }
+    // Marcas que caírem no mesmo frame: fica a primeira.
+    markers_.erase(std::unique(markers_.begin(), markers_.end(),
+                               [](const Marker& a, const Marker& b) { return a.frame.value == b.frame.value; }),
+                   markers_.end());
+    touch();
+}
+
+i64 Composition::close_gaps(FrameIndex from, FrameIndex to) noexcept {
+    // Intervalos ocupados, ordenados e fundidos.
+    std::vector<std::pair<i64, i64>> busy;
+    layers_.for_each([&](LayerId, const Layer& l) { busy.emplace_back(l.start.value, l.end.value); });
+    std::sort(busy.begin(), busy.end());
+    std::vector<std::pair<i64, i64>> merged;
+    for (const auto& b : busy) {
+        if (!merged.empty() && b.first <= merged.back().second) merged.back().second = std::max(merged.back().second, b.second);
+        else merged.push_back(b);
+    }
+    // Buracos dentro de [from, to): antes do 1º ocupado e entre ocupados (não
+    // depois do último — ali não há ninguém para puxar).
+    std::vector<std::pair<i64, i64>> gaps;
+    i64 cursor = 0;
+    for (const auto& m : merged) {
+        const i64 a = std::max(cursor, from.value), b = std::min(m.first, to.value);
+        if (b > a) gaps.emplace_back(a, b);
+        cursor = std::max(cursor, m.second);
+    }
+    i64 removed = 0;
+    // Do fim para o começo: cada deslocamento não mexe nos buracos anteriores.
+    for (auto it = gaps.rbegin(); it != gaps.rend(); ++it) {
+        shift_from(FrameIndex{it->second}, -(it->second - it->first));
+        removed += it->second - it->first;
+    }
+    return removed;
+}
+
 u32 Composition::put_marker(Marker m) {
     auto it = std::lower_bound(markers_.begin(), markers_.end(), m.frame,
                                [](const Marker& a, FrameIndex f) { return a.frame.value < f.value; });
@@ -267,6 +312,7 @@ std::unique_ptr<Composition> Composition::clone() const {
     c->motionBlur_ = motionBlur_;
     c->scene_ = scene_;
     c->markers_ = markers_;
+    c->editMode_ = editMode_;
     c->revision_ = revision_;
     c->formatRevision_ = formatRevision_;
     c->nestingDepth_ = nestingDepth_;
@@ -293,6 +339,7 @@ void Composition::restore_from(const Composition& snapshot) {
     motionBlur_ = snapshot.motionBlur_;
     scene_ = snapshot.scene_;
     markers_ = snapshot.markers_;
+    editMode_ = snapshot.editMode_;
     nestingDepth_ = snapshot.nestingDepth_;
     revision_ = revision;
     formatRevision_ = formatRevision;

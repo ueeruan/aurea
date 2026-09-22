@@ -547,12 +547,22 @@ internal class TimelineController(
         val grab = (if (start) r.start else r.end) - frameAt(down.position.x)
         // Os keyframes da própria camada ficam parados no tempo ao aparar: bons alvos.
         val targets = snapTargets(longArrayOf(id), own = r, ownEdges = false, ownKeys = true)
+        // Modo Edição: aparar o começo não move a camada — conta o que já foi.
+        val magnetic = start && store.editMode
+        var applied = 0
         dragLoop(down.id, down.position, horizontal = true) { p ->
             val desired = frameAt(p.x) + grab
             val snapped = Snap.nearest(targets, desired, playheadFrame(), (metrics.snapClip / pxPerFrame()).toDouble())
             val target = max(0, if (snapped != Snap.NONE) snapped else desired.toFrame())
             val cur = rowById(id) ?: return@dragLoop
-            if (start && target != cur.start) {
+            if (magnetic) {
+                val step = (target - r.start) - applied
+                if (step != 0) {
+                    openUndo("aparar")
+                    store.trimStartBy(id, step)
+                    applied += step
+                }
+            } else if (start && target != cur.start) {
                 openUndo("aparar")
                 store.trimStart(id, target)
             } else if (!start && target != cur.end) {

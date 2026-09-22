@@ -270,6 +270,17 @@ public:
     /// cena: posição/rotação/escala em X, Y e Z).
     [[nodiscard]] Result<u64> add_null(bool threeD) noexcept;
 
+    // --- Modo Edição (timeline magnética) ------------------------------------------
+    void set_edit_mode(bool on) noexcept;
+    [[nodiscard]] bool edit_mode() noexcept;
+    /// Exclui as camadas e fecha só os buracos que a exclusão criou (um passo
+    /// de desfazer). Vale em qualquer modo.
+    bool ripple_delete(const u64* ids, u32 count) noexcept;
+    /// Fecha todos os intervalos vazios da composição. Devolve os frames removidos.
+    i64 remove_gaps() noexcept;
+    /// Corta a composição no frame (duração = frame; camadas além são aparadas).
+    bool trim_composition(i64 frame) noexcept;
+
     // --- Marcas e batidas -------------------------------------------------------
     /// Liga/desliga a marca da pessoa no frame (toggle). true = ficou marcada.
     bool toggle_marker(i64 frame) noexcept;

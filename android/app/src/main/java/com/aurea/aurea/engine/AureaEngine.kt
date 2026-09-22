@@ -271,6 +271,15 @@ class AureaEngine private constructor() {
     /** Nova forma (ladrilho `preset` da aba Forma) no centro. Id ≥ 0 ou −Errc. */
     fun addShape(preset: Int): Long = nativeAddShape(nativeHandle, preset)
 
+    /** Modo Edição (timeline magnética) da composição atual. */
+    fun setEditMode(on: Boolean) = nativeSetEditMode(nativeHandle, on)
+    fun editMode(): Boolean = nativeEditMode(nativeHandle)
+    /** Exclui e fecha só os buracos criados (um passo de desfazer). */
+    fun rippleDelete(ids: LongArray): Boolean = nativeRippleDelete(nativeHandle, ids)
+    /** Fecha todos os espaços vazios. Devolve os frames removidos. */
+    fun removeGaps(): Long = nativeRemoveGaps(nativeHandle)
+    fun trimComposition(frame: Long): Boolean = nativeTrimComposition(nativeHandle, frame)
+
     /** Liga/desliga a marca no frame. true = ficou marcada. */
     fun toggleMarker(frame: Long): Boolean = nativeToggleMarker(nativeHandle, frame)
     fun moveMarker(from: Long, to: Long): Boolean = nativeMoveMarker(nativeHandle, from, to)
@@ -369,6 +378,11 @@ class AureaEngine private constructor() {
     private external fun nativeAddShape(handle: Long, preset: Int): Long
     private external fun nativeAddNull(handle: Long, threeD: Boolean): Long
     private external fun nativeToggleMarker(handle: Long, frame: Long): Boolean
+    private external fun nativeSetEditMode(handle: Long, on: Boolean)
+    private external fun nativeEditMode(handle: Long): Boolean
+    private external fun nativeRippleDelete(handle: Long, ids: LongArray): Boolean
+    private external fun nativeRemoveGaps(handle: Long): Long
+    private external fun nativeTrimComposition(handle: Long, frame: Long): Boolean
     private external fun nativeMoveMarker(handle: Long, from: Long, to: Long): Boolean
     private external fun nativeQueryMarkers(handle: Long, out: LongArray): Int
     private external fun nativeDetectBeats(handle: Long, layer: Long, bpm: DoubleArray): Long

@@ -641,6 +641,34 @@ AUREA_JNI jstring AUREA_FN(nativeQueryText)(JNIEnv* env, jclass, jlong handle, j
     return env->NewStringUTF(t.content.c_str());
 }
 
+AUREA_JNI void AUREA_FN(nativeSetEditMode)(JNIEnv*, jclass, jlong handle, jboolean on) {
+    if (NativeContext* c = ctx_of(handle)) c->engine.set_edit_mode(on == JNI_TRUE);
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeEditMode)(JNIEnv*, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.edit_mode() ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeRippleDelete)(JNIEnv* env, jclass, jlong handle, jlongArray ids) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !ids) return JNI_FALSE;
+    const jsize n = env->GetArrayLength(ids);
+    std::vector<u64> v(static_cast<usize>(n));
+    env->GetLongArrayRegion(ids, 0, n, reinterpret_cast<jlong*>(v.data()));
+    return c->engine.ripple_delete(v.data(), static_cast<u32>(n)) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jlong AUREA_FN(nativeRemoveGaps)(JNIEnv*, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    return c ? static_cast<jlong>(c->engine.remove_gaps()) : 0;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeTrimComposition)(JNIEnv*, jclass, jlong handle, jlong frame) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.trim_composition(frame) ? JNI_TRUE : JNI_FALSE;
+}
+
 AUREA_JNI jboolean AUREA_FN(nativeToggleMarker)(JNIEnv*, jclass, jlong handle, jlong frame) {
     NativeContext* c = ctx_of(handle);
     return c && c->engine.toggle_marker(frame) ? JNI_TRUE : JNI_FALSE;

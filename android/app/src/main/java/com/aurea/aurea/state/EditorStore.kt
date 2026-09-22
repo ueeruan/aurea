@@ -441,6 +441,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     private fun refreshModel() {
         layers = readLayers()
         refreshMarkers()
+        editMode = engine.editMode()
         selectCreatedAfter?.let { before ->
             val created = layers.map { it.id }.filter { it !in before }
             if (created.isNotEmpty()) {
@@ -603,7 +604,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     // --- Camadas ------------------------------------------------------------
     fun deleteLayers(ids: Collection<Long> = selection) {
         if (ids.isEmpty()) return
-        group("apagar") { ids.forEach { deleteLayer(it) } }
+        if (editMode) {
+            // Modo Edição: some e o buraco fecha (um passo de desfazer).
+            engine.rippleDelete(ids.toLongArray())
+            refreshNow()
+        } else {
+            group("apagar") { ids.forEach { deleteLayer(it) } }
+        }
         clearSelection()
     }
 
@@ -1147,6 +1154,49 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshDetail()
     }
 
+    // --- Modo Edição (timeline magnética) -------------------------------------------
+    /** Aparar empurra/puxa as seguintes; excluir fecha o buraco. */
+    var editMode by mutableStateOf(false)
+        private set
+
+    fun toggleEditMode() {
+        engine.setEditMode(!editMode)
+        refreshNow()
+        showToast(if (editMode) "Modo Edição: a timeline fecha os espaços sozinha" else "Modo Composição: camadas livres no tempo")
+    }
+
+    fun removeGaps() {
+        val removed = engine.removeGaps()
+        refreshNow()
+        val fps = project.fps.takeIf { it > 0f } ?: 30f
+        showToast(if (removed > 0) "Espaços vazios removidos (${"%.1f".format(removed / fps)} s)" else "Não há espaços vazios")
+    }
+
+    fun trimProjectAtPlayhead() {
+        if (engine.trimComposition(playhead.toLong())) {
+            refreshNow()
+            showToast("Projeto aparado no cabeçote")
+        }
+    }
+
+    /**
+     * Aparar o começo por um INCREMENTO (arrasto no modo Edição: a camada não
+     * sai do lugar, então o alvo absoluto não serve — conta o que já aparou).
+     */
+    fun trimStartBy(layer: Long, delta: Int) {
+        val d = detailOf(layer) ?: return
+        var start = min(d.startFrame + delta, d.endFrame - 1)
+        var offset = d.offsetFrames + (start - d.startFrame)
+        if (d.sourceFrames > 0 && offset < 0) {
+            start -= offset
+            offset = 0
+        }
+        start = max(0, start)
+        if (start == d.startFrame) return
+        send { setLayerTimeRange(layer, start, d.endFrame, offset) }
+        refreshNow()
+    }
+
     // --- Marcas e batidas ----------------------------------------------------------
     /** Marcas da composição, em ordem de frame. */
     class Markers(val frames: IntArray, val kinds: IntArray, val colors: IntArray) {
@@ -1169,6 +1219,14 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val cur = markers
         if (f.contentEquals(cur.frames) && k.contentEquals(cur.kinds) && c.contentEquals(cur.colors)) return
         markers = Markers(f, k, c)
+    }
+
+    /** Cabeçote na próxima marca (volta à primeira depois da última). */
+    fun seekToNextMarker() {
+        val f = markers.frames
+        if (f.isEmpty()) return
+        val next = f.firstOrNull { it > playhead } ?: f.first()
+        seek(next)
     }
 
     /** "Marcas": marca (ou desmarca) o frame do cabeçote. */

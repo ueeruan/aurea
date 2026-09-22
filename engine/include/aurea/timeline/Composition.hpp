@@ -181,6 +181,21 @@ public:
     [[nodiscard]] MotionBlurSettings& motion_blur() noexcept { return motionBlur_; }
     [[nodiscard]] const MotionBlurSettings& motion_blur() const noexcept { return motionBlur_; }
 
+    // --- Modo da timeline --------------------------------------------------------
+    /// Modo Edição (ímã): aparar empurra/puxa as camadas seguintes e excluir
+    /// fecha o buraco. Modo Composição (padrão): tudo livre, camada por camada.
+    [[nodiscard]] bool edit_mode() const noexcept { return editMode_; }
+    void set_edit_mode(bool on) noexcept { editMode_ = on; }
+
+    /// Desloca no tempo toda camada que começa em `from` ou depois (menos
+    /// `except`) e as marcas a partir de `from`. `delta` < 0 puxa para trás.
+    void shift_from(FrameIndex from, i64 delta, LayerId except = LayerId{}) noexcept;
+
+    /// Fecha os intervalos vazios (sem nenhuma camada) dentro de [from, to):
+    /// quem vem depois de cada buraco anda para trás o tamanho dele. Devolve o
+    /// total de frames removidos.
+    i64 close_gaps(FrameIndex from, FrameIndex to) noexcept;
+
     // --- Marcas ----------------------------------------------------------------
     /// Sempre em ordem de frame; no máximo uma marca por frame.
     [[nodiscard]] const std::vector<Marker>& markers() const noexcept { return markers_; }
@@ -243,6 +258,7 @@ private:
     MotionBlurSettings  motionBlur_{};
     Scene3DId           scene_{};
     std::vector<Marker> markers_;
+    bool                editMode_ = false;
 
     u64 revision_       = 1;
     u64 formatRevision_ = 1;

@@ -226,11 +226,21 @@ internal fun TimelineMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -
         MenuItemRow(ShellGlyph.WandRaysInverse, "Prévia: Sem efeitos", soon("Prévia sem efeitos"), checked = false, radio = true)
         MenuItemRow(CupertinoGlyph.CircleLefthalfFill, "Prévia: Selecionada a 50%", soon("Prévia da selecionada a 50%"), checked = false, radio = true)
 
+        MenuSection("Edição")
+        MenuItemRow(
+            CupertinoGlyph.Link,
+            "Timeline magnética (modo Edição)",
+            act { store.toggleEditMode() },
+            checked = store.editMode,
+            detail = "Aparar empurra as camadas seguintes e excluir fecha o espaço",
+        )
+        MenuItemRow(ShellGlyph.ScissorsAlt, "Remover espaços vazios", act { store.removeGaps() })
+
         MenuSection("Projeto")
         MenuItemRow(
             ShellGlyph.ScissorsAlt,
             "Aparar o projeto no cabeçote",
-            if (store.playhead > 0) soon("Aparar o projeto") else null,
+            if (store.playhead > 0) act { store.trimProjectAtPlayhead() } else null,
             detail = "Corta tudo o que passa de $now",
         )
         MenuItemRow(CupertinoGlyph.Photo, "Usar este quadro como miniatura", soon("Miniatura do projeto"))
@@ -248,9 +258,9 @@ internal fun TimelineMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -
         )
 
         MenuSection("Marcas e ritmo")
-        MenuItemRow(CupertinoGlyph.Bookmark, "Marcar este instante", soon("Marcas"))
-        MenuItemRow(ShellGlyph.BookmarkSolid, "Marcas na timeline", soon("Marcas"))
-        MenuItemRow(CupertinoGlyph.MusicNote2, "Batidas da música", soon("Batidas"))
+        MenuItemRow(CupertinoGlyph.Bookmark, "Marcar (ou desmarcar) este instante", act { store.toggleMarker() })
+        MenuItemRow(ShellGlyph.BookmarkSolid, "Ir para a próxima marca", if (store.markers.size > 0) act { store.seekToNextMarker() } else null)
+        MenuItemRow(CupertinoGlyph.MusicNote2, "Detectar batidas da camada escolhida", act { store.detectBeats() })
 
         MenuSection("Cronômetro de edição")
         MenuItemRow(

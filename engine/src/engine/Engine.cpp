@@ -834,6 +834,91 @@ Result<u64> Engine::add_null(bool threeD) noexcept {
     return lid.pack();
 }
 
+void Engine::set_edit_mode(bool on) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp || comp->edit_mode() == on) return;
+    history_.before_mutation(*comp, project_->timeline().current(), on ? "modo edicao" : "modo composicao");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    comp->set_edit_mode(on);
+    project_->mark_dirty();
+}
+
+bool Engine::edit_mode() noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    return comp && comp->edit_mode();
+}
+
+bool Engine::ripple_delete(const u64* ids, u32 count) noexcept {
+    if (!ids || count == 0) return false;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp) return false;
+    // Trecho que as camadas excluídas ocupavam: só buracos DENTRO dele fecham.
+    i64 lo = std::numeric_limits<i64>::max(), hi = 0;
+    for (u32 i = 0; i < count; ++i) {
+        if (const Layer* l = comp->layer(LayerId::unpack(ids[i]))) {
+            lo = std::min(lo, l->start.value);
+            hi = std::max(hi, l->end.value);
+        }
+    }
+    if (hi <= 0) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "excluir e fechar o espaco");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    for (u32 i = 0; i < count; ++i) {
+        const LayerId id = LayerId::unpack(ids[i]);
+        if (!comp->layer(id)) continue;
+        media_.close_layer(id);
+        comp->remove_layer(id);
+        selection_.erase(std::remove(selection_.begin(), selection_.end(), ids[i]), selection_.end());
+    }
+    comp->close_gaps(FrameIndex{lo}, FrameIndex{hi});
+    comp->rebuild_draw_order();
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+i64 Engine::remove_gaps() noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp) return 0;
+    // Ensaio numa cópia: sem buraco, nada entra no histórico.
+    if (comp->clone()->close_gaps(FrameIndex{0}, comp->duration()) == 0) return 0;
+    history_.before_mutation(*comp, project_->timeline().current(), "remover espacos vazios");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    const i64 removed = comp->close_gaps(FrameIndex{0}, comp->duration());
+    project_->mark_dirty();
+    request_render();
+    return removed;
+}
+
+bool Engine::trim_composition(i64 frame) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp || frame <= 0 || frame >= comp->duration().value) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "aparar o projeto");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    std::vector<LayerId> gone;
+    comp->layers().for_each([&](LayerId id, Layer& l) {
+        if (l.start.value >= frame) gone.push_back(id);
+        else if (l.end.value > frame) l.end = FrameIndex{frame};
+    });
+    for (LayerId id : gone) {
+        media_.close_layer(id);
+        comp->remove_layer(id);
+    }
+    comp->remove_markers(kMarkerManual, FrameIndex{frame}, FrameIndex{std::numeric_limits<i64>::max()});
+    comp->remove_markers(kMarkerBeat, FrameIndex{frame}, FrameIndex{std::numeric_limits<i64>::max()});
+    comp->set_duration(FrameIndex{frame});
+    comp->rebuild_draw_order();
+    if (playback_.current().value >= frame) playback_.seek(FrameIndex{frame - 1}, monotonic_ns());
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
 bool Engine::toggle_marker(i64 frame) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
@@ -2545,6 +2630,30 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             Layer* l = need_layer(cmd.layer_ref.layer);
             if (!l) return Errc::NotFound;
             if (cmd.layer_range.end.value <= cmd.layer_range.start.value) return Errc::InvalidArgument;
+            if (comp && comp->edit_mode()) {
+                // Modo Edição (ímã): aparar não abre nem sobrepõe — quem vem
+                // depois anda junto. Mover (início e fim juntos) fica livre.
+                const i64 oldStart = l->start.value, oldEnd = l->end.value;
+                const i64 ds = cmd.layer_range.start.value - oldStart, de = cmd.layer_range.end.value - oldEnd;
+                const LayerId self = cmd.layer_ref.layer;
+                if (ds == 0 && de != 0) {
+                    l->end = cmd.layer_range.end;
+                    if (cmd.layer_range.setOffset) l->offset = cmd.layer_range.offset;
+                    comp->shift_from(FrameIndex{oldEnd}, de, self);
+                    return OkStatus;
+                }
+                if (ds != 0 && de == 0) {
+                    // Aparar o começo: a camada fica no lugar (encostada na
+                    // anterior), perde o trecho no FIM da posição, e quem vem
+                    // depois recua o mesmo tanto.
+                    const i64 len = oldEnd - cmd.layer_range.start.value;
+                    if (len <= 0) return Errc::InvalidArgument;
+                    l->end = FrameIndex{oldStart + len};
+                    if (cmd.layer_range.setOffset) l->offset = cmd.layer_range.offset;
+                    comp->shift_from(FrameIndex{oldEnd}, -ds, self);
+                    return OkStatus;
+                }
+            }
             l->start = cmd.layer_range.start;
             l->end = cmd.layer_range.end;
             if (cmd.layer_range.setOffset) l->offset = cmd.layer_range.offset;

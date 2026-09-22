@@ -690,6 +690,10 @@ class AureaEngine private constructor() {
     fun makeVectorPathEditable(layer: Long, group: Int, path: Int): Boolean = nativeMakeVectorPathEditable(nativeHandle, layer, group, path)
     /** Valores animáveis do grupo no cabeçote + bits animados + bits com keyframe. */
     fun queryVectorParams(layer: Long, group: Int): FloatArray? = nativeQueryVectorParams(nativeHandle, layer, group)
+    fun queryShapeParams(layer: Long): FloatArray? = nativeQueryShapeParams(nativeHandle, layer)
+    fun setShapeParamAnim(layer: Long, param: Int, value: Float, continuing: Boolean): Boolean =
+        nativeSetShapeParamAnim(nativeHandle, layer, param, value, continuing)
+    fun toggleShapeParamKey(layer: Long, param: Int): Boolean = nativeToggleShapeParamKey(nativeHandle, layer, param)
     fun setVectorParam(layer: Long, group: Int, param: Int, value: Float, continuing: Boolean): Boolean =
         nativeSetVectorParam(nativeHandle, layer, group, param, value, continuing)
     fun toggleVectorParamKey(layer: Long, group: Int, param: Int): Boolean = nativeToggleVectorParamKey(nativeHandle, layer, group, param)
@@ -713,6 +717,9 @@ class AureaEngine private constructor() {
     private external fun nativeAddVectorPath(handle: Long, layer: Long, group: Int, kind: Int, bez: FloatArray?): Int
     private external fun nativeRemoveVectorPath(handle: Long, layer: Long, group: Int, path: Int): Boolean
     private external fun nativeMakeVectorPathEditable(handle: Long, layer: Long, group: Int, path: Int): Boolean
+    private external fun nativeQueryShapeParams(handle: Long, layer: Long): FloatArray?
+    private external fun nativeSetShapeParamAnim(handle: Long, layer: Long, param: Int, value: Float, continuing: Boolean): Boolean
+    private external fun nativeToggleShapeParamKey(handle: Long, layer: Long, param: Int): Boolean
     private external fun nativeQueryVectorParams(handle: Long, layer: Long, group: Int): FloatArray?
     private external fun nativeSetVectorParam(handle: Long, layer: Long, group: Int, param: Int, value: Float, continuing: Boolean): Boolean
     private external fun nativeToggleVectorParamKey(handle: Long, layer: Long, group: Int, param: Int): Boolean

@@ -1841,6 +1841,25 @@ AUREA_JNI jboolean AUREA_FN(nativeToggleVectorParamKey)(JNIEnv*, jclass, jlong h
                ? JNI_TRUE : JNI_FALSE;
 }
 
+AUREA_JNI jfloatArray AUREA_FN(nativeQueryShapeParams)(JNIEnv* env, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return nullptr;
+    std::vector<f32> v(Engine::kShapeParamFloats);
+    if (c->engine.query_shape_params(static_cast<u64>(layer), v.data(), Engine::kShapeParamFloats) == 0) return nullptr;
+    return to_float_array(env, v);
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetShapeParamAnim)(JNIEnv*, jclass, jlong handle, jlong layer, jint param, jfloat value, jboolean continuing) {
+    NativeContext* c = ctx_of(handle);
+    return c && param >= 0 && c->engine.set_shape_param(static_cast<u64>(layer), static_cast<u32>(param), value, continuing == JNI_TRUE)
+               ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeToggleShapeParamKey)(JNIEnv*, jclass, jlong handle, jlong layer, jint param) {
+    NativeContext* c = ctx_of(handle);
+    return c && param >= 0 && c->engine.toggle_shape_param_key(static_cast<u64>(layer), static_cast<u32>(param)) ? JNI_TRUE : JNI_FALSE;
+}
+
 AUREA_JNI jlong AUREA_FN(nativeAddFreehandPath)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloatArray xy, jfloat error) {
     NativeContext* c = ctx_of(handle);
     if (!c) return -static_cast<jlong>(Errc::InvalidState);

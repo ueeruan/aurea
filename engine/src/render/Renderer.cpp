@@ -663,7 +663,33 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 break;
             }
             case LayerKind::Shape: {
-                const ShapeData& sh = l->shape;
+                ShapeData animated;
+                const ShapeData* shp = &l->shape;
+                // Tamanho, raio, lados, raio interno e contorno animáveis
+                // (TrackProperty::ShapeParam, os índices de ShapeSetParam).
+                if (l->shape.shapeType != kShapeVector) {
+                    auto pick = [&](u32 p, f32& dst, f32 lo, f32 hi, bool round = false) {
+                        const Track* tr = l->tracks.find(TrackProperty::ShapeParam, 0, p);
+                        if (!tr || tr->keys.empty()) return;
+                        if (shp != &animated) { animated = l->shape; shp = &animated; }
+                        const f32 v = tr->sample(local);
+                        dst = std::clamp(round ? std::round(v) : v, lo, hi);
+                    };
+                    animated = l->shape;
+                    ShapeData& a = animated;
+                    pick(1, a.cornerRadius, 0.0f, 100000.0f);
+                    pick(2, a.points, 3.0f, 64.0f, true);
+                    pick(3, a.innerRadius, 0.05f, 0.95f);
+                    pick(4, a.strokeWidth, 0.0f, 500.0f);
+                    pick(5, a.bounds.w, 1.0f, 16384.0f);
+                    pick(6, a.bounds.h, 1.0f, 16384.0f);
+                    if (shp == &animated) {
+                        // O centro da forma continua na posição da camada
+                        // mesmo com o tamanho animado (a âncora é parada).
+                        srcShift = Vec2{a.bounds.w * 0.5f - l->transform.anchor.x, a.bounds.h * 0.5f - l->transform.anchor.y};
+                    }
+                }
+                const ShapeData& sh = *shp;
                 if (sh.shapeType == kShapeVector) {
                     // Densidade provável na tela (a mesma conta do texelScale
                     // adiante): tolerância do achatamento e largura do AA.

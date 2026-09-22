@@ -561,6 +561,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             textStyle = null
             textAnimators = emptyList()
         }
+        shapeParams = if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Shape.kind && !isVectorLayer) engine.queryShapeParams(id) else null
         textDetail = if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Text.kind) {
             engine.queryText(id, textFloats)?.let { com.aurea.aurea.engine.TextDetail.of(it, textFloats) }
         } else {
@@ -2761,11 +2762,31 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshDetail()
     }
 
-    fun setShapeParam(param: Int, value: Float) {
+    /**
+     * Parâmetro da forma. Do 1 ao 6 (raio, lados, raio interno, contorno,
+     * largura, altura) é ANIMÁVEL: com keyframes, grava no cabeçote; parado,
+     * muda o valor. O 0 (tipo da forma) continua sendo um comando.
+     */
+    fun setShapeParam(param: Int, value: Float, continuing: Boolean = false) {
         val id = primary ?: return
+        if (param in 1..6) {
+            engine.setShapeParamAnim(id, param, value, continuing)
+            refreshDetail()
+            return
+        }
         send { setShapeParam(id, param, value) }
         refreshDetail()
     }
+
+    /** Liga/desliga o keyframe do parâmetro da forma no cabeçote. */
+    fun toggleShapeParamKey(param: Int) {
+        val id = primary ?: return
+        if (engine.toggleShapeParamKey(id, param)) refreshNow()
+    }
+
+    /** Valores da forma no cabeçote + bits de animado + bits de keyframe aqui. */
+    var shapeParams by mutableStateOf<FloatArray?>(null)
+        private set
 
     // --- Tempo do clipe --------------------------------------------------------
     fun setLayerSpeed(speed: Float) {

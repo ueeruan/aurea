@@ -309,6 +309,16 @@ public:
     /// Valor (VectorParam): com keyframes, grava no cabeçote.
     bool set_vector_param(u64 layerId, u32 group, u32 param, f32 value, bool continuing) noexcept;
     bool toggle_vector_param_key(u64 layerId, u32 group, u32 param) noexcept;
+
+    /// Forma (SDF): os mesmos parâmetros de `ShapeSetParam` (1 raio, 2 lados,
+    /// 3 raio interno, 4 contorno, 5 largura, 6 altura), agora ANIMÁVEIS.
+    /// `out` recebe os 7 valores no playhead + bits de animado + bits de
+    /// keyframe aqui (kShapeParamFloats no total).
+    static constexpr u32 kShapeParamCount = 7;
+    static constexpr u32 kShapeParamFloats = kShapeParamCount + 2;
+    u32 query_shape_params(u64 layerId, f32* out, u32 capacity) noexcept;
+    bool set_shape_param(u64 layerId, u32 param, f32 value, bool continuing) noexcept;
+    bool toggle_shape_param_key(u64 layerId, u32 param) noexcept;
     /// Desenho à mão livre: pontos do dedo (x,y em px da composição) viram um
     /// caminho suave (ajuste de Schneider, `error` px). `layerId` = 0 cria uma
     /// camada vetorial nova; senão entra como grupo novo nela. Devolve a camada.

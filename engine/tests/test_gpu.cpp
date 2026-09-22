@@ -3833,3 +3833,47 @@ AUREA_TEST(Gpu, TextStaysVisibleAcrossRepeatedFrames) {
     std::printf("    cobertura por quadro: %.4f %.4f %.4f %.4f %.4f %.4f\n", c[0], c[1], c[2], c[3], c[4], c[5]);
     for (int i = 0; i < 6; ++i) AUREA_CHECK(c[i] > 0.002f && std::fabs(c[i] - c[0]) < 1e-6f);
 }
+
+AUREA_TEST(Gpu, ShapeSizeAndRadiusAnimateWithKeyframes) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(400, 400);
+    auto id = rig.e.add_shape(1);   // quadrado
+    AUREA_CHECK(id.ok());
+    Composition* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+    Layer* l = comp->layer(LayerId::unpack(*id));
+    AUREA_CHECK(rig.e.set_shape_param(*id, 5, 100.0f, false));
+    AUREA_CHECK(rig.e.set_shape_param(*id, 6, 100.0f, false));
+    const Box8 small = lit_box(rig.capture(400));
+    // Keyframe no quadro 0 e outro no 10 com o dobro do tamanho.
+    AUREA_CHECK(rig.e.toggle_shape_param_key(*id, 5));
+    AUREA_CHECK(rig.e.toggle_shape_param_key(*id, 6));
+    Command seek;
+    seek.type = CommandType::PlaybackSeek;
+    seek.seek.time = tick_at(FrameIndex{10}, 30.0);
+    AUREA_CHECK(rig.e.apply_command(seek).ok());
+    AUREA_CHECK(rig.e.set_shape_param(*id, 5, 200.0f, false));
+    AUREA_CHECK(rig.e.set_shape_param(*id, 6, 200.0f, false));
+    const Box8 big = lit_box(rig.capture(400));
+    seek.seek.time = tick_at(FrameIndex{5}, 30.0);
+    AUREA_CHECK(rig.e.apply_command(seek).ok());
+    const Box8 mid = lit_box(rig.capture(400));
+    f32 v[Engine::kShapeParamFloats];
+    AUREA_CHECK_EQ(rig.e.query_shape_params(*id, v, Engine::kShapeParamFloats), Engine::kShapeParamFloats);
+    std::printf("    forma animada: %ux%u -> %ux%u (meio %ux%u), centro %u,%u; bits anim %.0f\n", small.w(), small.h(), big.w(), big.h(),
+                mid.w(), mid.h(), (mid.x0 + mid.x1) / 2, (mid.y0 + mid.y1) / 2, v[7]);
+    AUREA_CHECK(big.w() >= small.w() * 2 - 3 && big.w() <= small.w() * 2 + 3);
+    AUREA_CHECK(mid.w() > small.w() + 20 && mid.w() < big.w() - 20);
+    // O centro fica no lugar enquanto o tamanho cresce.
+    AUREA_CHECK(std::abs(static_cast<int>((mid.x0 + mid.x1) / 2) - 200) <= 2);
+    AUREA_CHECK(std::abs(static_cast<int>((mid.y0 + mid.y1) / 2) - 200) <= 2);
+    AUREA_CHECK(static_cast<u32>(v[7]) == ((1u << 5) | (1u << 6)));
+    // Salvar e reabrir mantém a animação da forma.
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_teste_forma.aurea";
+    AUREA_CHECK(rig.e.save_project(path.c_str()).ok());
+    AUREA_CHECK(rig.e.load_project(path.c_str()).ok());
+    AUREA_CHECK(rig.e.apply_command(seek).ok());
+    const Box8 again = lit_box(rig.capture(400));
+    AUREA_CHECK(again.w() == mid.w() && again.h() == mid.h());
+    std::remove(path.c_str());
+    (void)l;
+}

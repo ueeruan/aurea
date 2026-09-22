@@ -341,6 +341,109 @@ bool Engine::toggle_vector_param_key(u64 layerId, u32 group, u32 param) noexcept
     return true;
 }
 
+namespace {
+/// Camada de forma SDF (a vetorial edita pelo caminho, não por estes valores).
+Layer* sdf_shape_layer(Composition* comp, u64 layerId) noexcept {
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    return l && l->kind == LayerKind::Shape && l->shape.shapeType != kShapeVector ? l : nullptr;
+}
+/// Onde cada parâmetro mora na ShapeData (o índice é o de ShapeSetParam).
+f32* shape_param_ref(ShapeData& sh, u32 param) noexcept {
+    switch (param) {
+        case 1: return &sh.cornerRadius;
+        case 2: return &sh.points;
+        case 3: return &sh.innerRadius;
+        case 4: return &sh.strokeWidth;
+        case 5: return &sh.bounds.w;
+        case 6: return &sh.bounds.h;
+        default: return nullptr;   // 0 = tipo da forma, não é animável
+    }
+}
+f32 clamp_shape_param(u32 param, f32 v) noexcept {
+    switch (param) {
+        case 1: return std::max(0.0f, v);
+        case 2: return std::clamp(std::round(v), 3.0f, 64.0f);
+        case 3: return std::clamp(v, 0.05f, 0.95f);
+        case 4: return std::clamp(v, 0.0f, 500.0f);
+        default: return std::clamp(v, 1.0f, 16384.0f);
+    }
+}
+} // namespace
+
+u32 Engine::query_shape_params(u64 layerId, f32* out, u32 capacity) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = sdf_shape_layer(comp, layerId);
+    if (!l || !out || capacity < kShapeParamFloats) return 0;
+    const FrameIndex local = l->local_time(playback_.current());
+    ShapeData sh = l->shape;
+    u32 anim = 0, keys = 0;
+    out[0] = static_cast<f32>(sh.shapeType);
+    for (u32 p = 1; p < kShapeParamCount; ++p) {
+        f32* r = shape_param_ref(sh, p);
+        const Track* tr = l->tracks.find(TrackProperty::ShapeParam, 0, p);
+        if (tr && !tr->keys.empty()) {
+            anim |= 1u << p;
+            if (tr->find_exact(local) != kInvalidIndex) keys |= 1u << p;
+            if (r) *r = clamp_shape_param(p, tr->sample(local));
+        }
+        out[p] = r ? *r : 0.0f;
+    }
+    out[kShapeParamCount] = static_cast<f32>(anim);
+    out[kShapeParamCount + 1] = static_cast<f32>(keys);
+    return kShapeParamFloats;
+}
+
+bool Engine::set_shape_param(u64 layerId, u32 param, f32 value, bool continuing) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = sdf_shape_layer(comp, layerId);
+    if (!l || param == 0 || param >= kShapeParamCount) return false;
+    f32* r = shape_param_ref(l->shape, param);
+    if (!r) return false;
+    if (!continuing) history_.before_mutation(*comp, project_->timeline().current(), "valor da forma");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    value = clamp_shape_param(param, value);
+    Track* tr = l->tracks.find(TrackProperty::ShapeParam, 0, param);
+    if (tr && !tr->keys.empty()) {
+        const FrameIndex local = l->local_time(playback_.current());
+        const u32 k = tr->find_exact(local);
+        if (k != kInvalidIndex) tr->keys[k].value = value;
+        else (void)tr->set(local, value, Interpolation::Bezier);
+    } else {
+        *r = value;
+        // Tamanho parado muda em volta do centro (a âncora acompanha a metade).
+        if (param == 5) l->transform.anchor.x = value * 0.5f;
+        if (param == 6) l->transform.anchor.y = value * 0.5f;
+    }
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::toggle_shape_param_key(u64 layerId, u32 param) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = sdf_shape_layer(comp, layerId);
+    if (!l || param == 0 || param >= kShapeParamCount) return false;
+    f32* r = shape_param_ref(l->shape, param);
+    if (!r) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "keyframe da forma");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    const FrameIndex local = l->local_time(playback_.current());
+    Track& tr = l->tracks.get_or_create(TrackProperty::ShapeParam, 0, param);
+    const u32 k = tr.find_exact(local);
+    if (k != kInvalidIndex) {
+        if (tr.keys.size() == 1) *r = clamp_shape_param(param, tr.keys[0].value);
+        (void)tr.remove(local);
+    } else {
+        (void)tr.set(local, tr.keys.empty() ? *r : tr.sample(local), Interpolation::Bezier);
+    }
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
 Result<u64> Engine::add_freehand_path(u64 layerId, const f32* xy, usize count, f32 error) noexcept {
     if (!xy || count < 4) return Status{Errc::InvalidArgument, "traço vazio"};
     std::lock_guard<std::mutex> lock(modelMutex_);

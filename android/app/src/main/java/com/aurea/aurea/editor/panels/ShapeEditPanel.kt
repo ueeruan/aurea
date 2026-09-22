@@ -24,6 +24,7 @@ import androidx.compose.material.icons.rounded.LinkOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -73,6 +74,8 @@ import kotlin.math.sin
  */
 internal object ShapeEditState {
     var linked by mutableStateOf(false)
+    /** Parâmetro que o losango do trilho grava (5 = largura, 6 = altura, 1 = raio…). */
+    var param by mutableIntStateOf(5)
 }
 
 /** As formas simples (SDF do motor, `shape.frag`) na ordem da troca ‹ ›. */
@@ -97,8 +100,8 @@ internal fun shapeName(type: Int): String = when (type) {
  * corrente de proporção; embaixo só os controles que a forma escolhida tem —
  * Tamanho (x, y) e Raio no retângulo; Pontas e Raio interno na estrela; Lados
  * no polígono… O palco mostra alças de tamanho (cantos e lados) e, no
- * retângulo, a alça do raio. Os parâmetros da forma não são animáveis no
- * motor: o losango e a curva do trilho ficam apagados (sem botão falso).
+ * retângulo, a alça do raio. Tudo isto é ANIMÁVEL: a linha escolhida acende e
+ * o losango do trilho grava o keyframe dela no cabeçote.
  */
 @Composable
 internal fun ShapeEditPanel(env: PanelEnv) {
@@ -115,8 +118,24 @@ internal fun ShapeEditPanel(env: PanelEnv) {
     }
     val type = detail.shapeTypePoints and 0xFFFF
     val points = (detail.shapeTypePoints ushr 16) and 0xFFFF
+    // Estado de animação dos parâmetros (valores + bits) no cabeçote.
+    val sp by remember(store) { derivedStateOf { store.shapeParams } }
+    val sel = ShapeEditState.param
+    val animBits = sp?.getOrNull(7)?.toInt() ?: 0
+    val keyBits = sp?.getOrNull(8)?.toInt() ?: 0
+    val look = when {
+        keyBits and (1 shl sel) != 0 -> KeyframeLook.KeyHere
+        animBits and (1 shl sel) != 0 -> KeyframeLook.Animated
+        else -> KeyframeLook.None
+    }
     Row(Modifier.fillMaxSize()) {
-        LeftRail(onBack = env.onClose, keyframeLook = KeyframeLook.None, onKeyframe = null, curveAnimated = false, onCurve = null)
+        LeftRail(
+            onBack = env.onClose,
+            keyframeLook = look,
+            onKeyframe = { store.toggleShapeParamKey(sel) },
+            curveAnimated = animBits and (1 shl sel) != 0,
+            onCurve = null,
+        )
         Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(top = 6.dp, end = 10.dp, bottom = 16.dp)) {
             ShapeSwitcher(store, type)
             Spacer(Modifier.height(4.dp))
@@ -124,21 +143,21 @@ internal fun ShapeEditPanel(env: PanelEnv) {
             val w = detail.sourceWidth.toFloat()
             val h = detail.sourceHeight.toFloat()
             when (type) {
-                0 -> ShapeRow(env, "Raio", detail.shapeCorner, 0.3f, 0f, max(0f, min(w, h) / 2f), "px", 0, 0f, "raio") { store.setShapeParam(1, it) }
-                3, 4, 8 -> ShapeRow(env, when (type) { 3 -> "Lados"; 8 -> "Pétalas"; else -> "Pontas" }, points.toFloat(), 0.06f, 3f, 64f, "", 0, 5f, "pontas") {
+                0 -> ShapeRow(env, 1, "Raio", detail.shapeCorner, 0.3f, 0f, max(0f, min(w, h) / 2f), "px", 0, 0f, "raio") { store.setShapeParam(1, it) }
+                3, 4, 8 -> ShapeRow(env, 2, when (type) { 3 -> "Lados"; 8 -> "Pétalas"; else -> "Pontas" }, points.toFloat(), 0.06f, 3f, 64f, "", 0, 5f, "pontas") {
                     store.setShapeParam(2, it.roundToInt().toFloat())
                 }
             }
             when (type) {
-                4 -> ShapeRow(env, "Raio interno", detail.shapeInner * 100f, 0.3f, 5f, 95f, "%", 0, 50f, "raio interno") { store.setShapeParam(3, it / 100f) }
-                5 -> ShapeRow(env, "Espessura", detail.shapeInner * 100f, 0.3f, 5f, 95f, "%", 0, 50f, "espessura") { store.setShapeParam(3, it / 100f) }
+                4 -> ShapeRow(env, 3, "Raio interno", detail.shapeInner * 100f, 0.3f, 5f, 95f, "%", 0, 50f, "raio interno") { store.setShapeParam(3, it / 100f) }
+                5 -> ShapeRow(env, 3, "Espessura", detail.shapeInner * 100f, 0.3f, 5f, 95f, "%", 0, 50f, "espessura") { store.setShapeParam(3, it / 100f) }
                 // Anel: o motor guarda o FURO; a pessoa pensa na espessura do aro.
-                6 -> ShapeRow(env, "Espessura", (1f - detail.shapeInner) * 100f, 0.3f, 5f, 95f, "%", 0, 50f, "espessura") { store.setShapeParam(3, 1f - it / 100f) }
+                6 -> ShapeRow(env, 3, "Espessura", (1f - detail.shapeInner) * 100f, 0.3f, 5f, 95f, "%", 0, 50f, "espessura") { store.setShapeParam(3, 1f - it / 100f) }
             }
             Spacer(Modifier.height(6.dp))
             KitHint(
                 "Arraste as alças no palco para mudar o tamanho" + (if (type == 0) "; a alça azul arredonda os cantos. " else ". ") +
-                    "Para ANIMAR o tamanho, use Movimentação e transformação (Escala).",
+                    "O losango do trilho grava um keyframe da linha acesa no cabeçote.",
             )
         }
     }
@@ -200,6 +219,7 @@ private fun ShapeSwitcher(store: EditorStore, type: Int) {
 private fun SizeRow(env: PanelEnv, w: Float, h: Float) {
     val store = env.store
     var axis by remember { mutableIntStateOf(0) }
+    LaunchedEffect(axis) { ShapeEditState.param = if (axis == 0) 5 else 6 }
     var dragging by remember { mutableStateOf(false) }
     var live by remember { mutableFloatStateOf(0f) }
     val cur = if (axis == 0) w else h
@@ -280,6 +300,7 @@ private fun SizeRow(env: PanelEnv, w: Float, h: Float) {
 @Composable
 private fun ShapeRow(
     env: PanelEnv,
+    param: Int,
     label: String,
     value: Float,
     step: Float,
@@ -292,16 +313,23 @@ private fun ShapeRow(
     set: (Float) -> Unit,
 ) {
     val store = env.store
+    val sp = store.shapeParams
+    val anim = (sp?.getOrNull(7)?.toInt() ?: 0) and (1 shl param) != 0
+    val here = (sp?.getOrNull(8)?.toInt() ?: 0) and (1 shl param) != 0
     HumanRow(
         env, label, value, step, min, max, unit, decimals, default,
-        onStart = { store.beginGesture(gesture) },
+        onStart = { ShapeEditState.param = param; store.beginGesture(gesture) },
         onValue = set,
         onEnd = { store.endGesture() },
         onCommit = { v ->
+            ShapeEditState.param = param
             store.beginGesture(gesture)
             set(v)
             store.endGesture()
         },
+        selected = ShapeEditState.param == param,
+        onSelect = { ShapeEditState.param = param },
+        keyframe = if (here) KeyframeLook.KeyHere else if (anim) KeyframeLook.Animated else KeyframeLook.None,
     )
 }
 

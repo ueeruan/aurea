@@ -118,7 +118,7 @@ internal fun ExportScreen(store: EditorStore, onDismiss: () -> Unit) {
                         Options(store, options, compW, compH, compFps, seconds) { options = it }
                     }
                     ExportPhase.Running, ExportPhase.Publishing -> Progress(st.fraction, st.framesDone, st.framesTotal,
-                        st.fps, st.etaSeconds, publishing = st.phase == ExportPhase.Publishing)
+                        st.fps, st.etaSeconds, publishing = st.phase == ExportPhase.Publishing, notice = st.notice)
                     ExportPhase.Done -> Done(st.message)
                 }
                 Spacer(Modifier.height(24.dp))
@@ -278,7 +278,7 @@ private fun Notice(text: String, danger: Boolean) {
 }
 
 @Composable
-private fun Progress(fraction: Float, done: Int, total: Int, fps: Float, eta: Int, publishing: Boolean) {
+private fun Progress(fraction: Float, done: Int, total: Int, fps: Float, eta: Int, publishing: Boolean, notice: String) {
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         Spacer(Modifier.height(12.dp))
         Text(
@@ -306,6 +306,11 @@ private fun Progress(fraction: Float, done: Int, total: Int, fps: Float, eta: In
                 "Mantenha o Aurea aberto até terminar.",
                 style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)),
             )
+            // Encoder de software ou aparelho quente: dito, não escondido.
+            if (notice.isNotEmpty()) {
+                Spacer(Modifier.height(12.dp))
+                Notice(notice, danger = false)
+            }
         }
     }
 }

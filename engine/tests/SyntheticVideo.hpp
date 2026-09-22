@@ -261,6 +261,19 @@ private:
         f->format = PixelFormat::NV12;
         f->color = cfg_.color;
         f->bufferId = index;
+        f->strides[0] = w;
+        f->strides[1] = ((w + 1) / 2) * 2;
+        f->planeCount = 2;
+        if (cfg_.pattern == SyntheticPattern::FrameGray) {
+            // Cinza uniforme: os mesmos bytes do laço abaixo, sem o custo por
+            // pixel (em 4K o laço levava ~40 ms e virava o gargalo de qualquer
+            // benchmark — um decoder de hardware entrega bem mais rápido).
+            f->y.assign(static_cast<usize>(w) * h, frame_gray_code(index));
+            f->uv.assign(static_cast<usize>((w + 1) / 2) * ((h + 1) / 2) * 2, 128);
+            f->planes[0] = f->y.data();
+            f->planes[1] = f->uv.data();
+            return f;
+        }
         f->y.assign(static_cast<usize>(w) * h, 0);
         f->uv.assign(static_cast<usize>((w + 1) / 2) * ((h + 1) / 2) * 2, 128);
         // Cena 3D: manchas gaussianas somadas num buffer antes (220 pontos).

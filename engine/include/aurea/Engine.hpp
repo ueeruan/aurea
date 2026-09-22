@@ -160,6 +160,10 @@ struct EngineConfig {
     /// indisponível (recusado com NotSupported, nunca fingido).
     ExportSinkFactory exportSinkFactory = nullptr;
     void* exportSinkContext = nullptr;
+    /// Quadros de export em voo (GPU renderizando um enquanto o encoder recebe
+    /// o anterior). 0 = automático (3; 1 sob calor). 1 = serial — o teste de
+    /// equivalência compara os dois bytes a bytes.
+    u32 exportPipelineDepth = 0;
 
     /// Saída de som da plataforma (AAudio no Android). NÃO é assumida a posse.
     /// Nula = preview mudo; o relógio do sistema conduz o playback e o export
@@ -817,6 +821,22 @@ public:
         f32   fps = 0.0f;
         u32   etaSeconds = 0;
         char  message[128]{};
+        /// Diagnóstico da sessão: média em ms por quadro de cada estágio, medida
+        /// na thread que o executa. Com o pipeline sobreposto os estágios correm
+        /// juntos — a soma passa do tempo de parede por quadro, e é o esperado.
+        f32   decodeWaitMs = 0.0f;   ///< esperando o quadro exato do decoder
+        f32   renderMs = 0.0f;       ///< CPU: preparar + gravar + submeter
+        f32   readbackMs = 0.0f;     ///< esperando a GPU entregar os planos NV12
+        f32   encodeMs = 0.0f;       ///< dentro do sink (write_video)
+        f32   audioMs = 0.0f;        ///< mixar + write_audio
+        u32   flags = 0;             ///< ExportFlag
+        u32   pipelineDepth = 0;     ///< quadros em voo (1 = serial)
+    };
+    /// Bits de `ExportProgress::flags` (o mesmo valor vai para a UI).
+    enum ExportFlag : u32 {
+        kExportHardwareEncoder = 1u << 0,   ///< o sink confirmou encoder de hardware
+        kExportSoftwareEncoder = 1u << 1,   ///< caiu para encoder de software (mais lento)
+        kExportThermalReduced  = 1u << 2,   ///< calor: menos quadros em voo (qualidade igual)
     };
     [[nodiscard]] ExportProgress export_progress() const noexcept;
 
@@ -973,8 +993,15 @@ private:
     /// Export em andamento: o render do preview não toca na GPU nem nos
     /// decoders (que o export usa em sequência).
     std::atomic<bool> exportActive_{false};
+    /// O decoder entregou quadro: acorda o export que espera o quadro exato
+    /// (sem dormir 5 ms às cegas por tentativa).
+    std::mutex exportWakeMutex_;
+    std::condition_variable exportWakeCv_;
+    /// Calor (set_thermal): o export reduz quadros em voo, nunca a qualidade.
+    std::atomic<bool> thermalDegrade_{false};
     void export_thread_main() noexcept;
-    [[nodiscard]] Status render_export_frame(FrameIndex t, const OffscreenTarget& target) noexcept;
+    void export_encoder_main() noexcept;
+    [[nodiscard]] Status render_export_frame(FrameIndex t, const OffscreenTarget& target, u64& gpuFrame) noexcept;
     [[nodiscard]] Status write_export_audio(i64 untilSample) noexcept;
     /// Âncora da camada de texto no centro da caixa atual (depois de editar).
     void recenter_text(Layer& l) noexcept;

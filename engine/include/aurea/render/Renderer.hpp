@@ -241,6 +241,11 @@ struct OffscreenTarget {
     TextureHandle yPlane{};
     TextureHandle uvPlane{};
     bool encodeDither = true;
+    /// Export sobreposto: se válidos, os planos Y e CbCr são copiados para
+    /// estes buffers de leitura NO MESMO frame (sem submissão extra nem espera);
+    /// quem chama espera o fence do frame e lê do buffer mapeado.
+    BufferHandle yReadback{};
+    BufferHandle uvReadback{};
 };
 
 /// Custo medido de um frame, por etapa. GPU vem das timestamp queries (de um

@@ -15,6 +15,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -33,6 +34,31 @@ using GetInputFormatFn = AMediaFormat* (*)(AMediaCodec*);
 GetInputFormatFn get_input_format_fn() {
     static GetInputFormatFn fn = reinterpret_cast<GetInputFormatFn>(dlsym(RTLD_DEFAULT, "AMediaCodec_getInputFormat"));
     return fn;
+}
+
+// AMediaCodec_getName/releaseName também são API 28. Sem elas o nome fica
+// desconhecido e quem decide hardware/software é a tabela do MediaCodecList.
+using GetNameFn = media_status_t (*)(AMediaCodec*, char**);
+using ReleaseNameFn = void (*)(AMediaCodec*, char*);
+bool codec_name(AMediaCodec* codec, char* out, usize cap) {
+    static GetNameFn get = reinterpret_cast<GetNameFn>(dlsym(RTLD_DEFAULT, "AMediaCodec_getName"));
+    static ReleaseNameFn rel = reinterpret_cast<ReleaseNameFn>(dlsym(RTLD_DEFAULT, "AMediaCodec_releaseName"));
+    out[0] = '\0';
+    if (!get || !codec) return false;
+    char* name = nullptr;
+    if (get(codec, &name) != AMEDIA_OK || !name) return false;
+    std::snprintf(out, cap, "%s", name);
+    if (rel) rel(codec, name);
+    return true;
+}
+
+/// Encoders de software do AOSP (e os de terceiros que se declaram assim). O
+/// NDK não expõe `isHardwareAccelerated`; o nome é o que a própria
+/// MediaCodecList usa para classificar os do sistema.
+bool software_codec_name(const char* n) {
+    auto starts = [n](const char* p) { return std::strncmp(n, p, std::strlen(p)) == 0; };
+    return starts("OMX.google.") || starts("c2.android.") || starts("c2.google.") || starts("OMX.ffmpeg.")
+        || std::strstr(n, ".sw.") != nullptr;
 }
 
 /// Uma trilha: encoder + índice no muxer.
@@ -178,15 +204,11 @@ public:
     void abort() noexcept override { release(true); }
 
 private:
-    Status open_video() noexcept {
-        const char* mime = video_.codec == ExportCodec::HEVC ? "video/hevc" : "video/avc";
-        video__.codec = AMediaCodec_createEncoderByType(mime);
-        if (!video__.codec) {
-            return fail(Errc::NotSupported, video_.codec == ExportCodec::HEVC ? "este aparelho nao codifica HEVC"
-                                                                              : "este aparelho nao codifica H.264");
-        }
+    /// Configura o codec com a MESMA receita (resolução, taxa, GOP, cor) nos
+    /// formatos de entrada que o motor sabe entregar. Nada de baixar resolução
+    /// ou taxa para "caber": se não aceita, quem chama decide o que fazer.
+    bool configure_video(AMediaCodec* codec, const char* mime) noexcept {
         const i32 order[] = {kColorFormatNv12, kColorFormatI420, kColorFormatFlexible};
-        bool configured = false;
         for (i32 cf : order) {
             AMediaFormat* f = AMediaFormat_new();
             AMediaFormat_setString(f, AMEDIAFORMAT_KEY_MIME, mime);
@@ -202,13 +224,62 @@ private:
             AMediaFormat_setInt32(f, "color-standard", 1);
             AMediaFormat_setInt32(f, "color-range", video_.color.fullRange ? 1 : 2);
             AMediaFormat_setInt32(f, "color-transfer", 3);
-            const media_status_t ms = AMediaCodec_configure(video__.codec, f, nullptr, nullptr,
+            const media_status_t ms = AMediaCodec_configure(codec, f, nullptr, nullptr,
                                                             AMEDIACODEC_CONFIGURE_FLAG_ENCODE);
             AMediaFormat_delete(f);
             if (ms == AMEDIA_OK) {
                 colorFormat_ = cf == kColorFormatNv12 ? kColorFormatNv12 : kColorFormatI420;
-                configured = true;
-                break;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void note_codec(AMediaCodec* codec) noexcept {
+        if (codec_name(codec, info_.name, sizeof(info_.name))) {
+            info_.acceleration = software_codec_name(info_.name) ? Acceleration::Software : Acceleration::Hardware;
+        } else {
+            info_.acceleration = Acceleration::Unknown;
+        }
+    }
+
+    Status open_video() noexcept {
+        const bool hevc = video_.codec == ExportCodec::HEVC;
+        const char* mime = hevc ? "video/hevc" : "video/avc";
+        // O sistema devolve o encoder PREFERIDO do tipo — o de hardware, quando
+        // existe. Qual veio de fato fica registrado (nome + hardware/software).
+        video__.codec = AMediaCodec_createEncoderByType(mime);
+        if (!video__.codec) {
+            return fail(Errc::NotSupported, hevc ? "este aparelho nao codifica HEVC" : "este aparelho nao codifica H.264");
+        }
+        note_codec(video__.codec);
+        bool configured = configure_video(video__.codec, mime);
+        if (!configured && info_.acceleration != Acceleration::Software) {
+            // O de hardware recusou a receita (resolução/fps acima do bloco do
+            // aparelho). Fallback: o encoder de software do sistema, com a MESMA
+            // receita — mais lento, nunca menor. Avisado no log e na UI.
+            char hwName[64];
+            std::snprintf(hwName, sizeof(hwName), "%s", info_.name[0] ? info_.name : "?");
+            AMediaCodec_delete(video__.codec);
+            video__.codec = nullptr;
+            const char* const avc[] = {"c2.android.avc.encoder", "OMX.google.h264.encoder"};
+            const char* const hvc[] = {"c2.android.hevc.encoder", "OMX.google.hevc.encoder"};
+            const char* const* names = hevc ? hvc : avc;
+            for (int k = 0; k < 2; ++k) {
+                const char* name = names[k];
+                AMediaCodec* sw = AMediaCodec_createCodecByName(name);
+                if (!sw) continue;
+                if (configure_video(sw, mime)) {
+                    video__.codec = sw;
+                    std::snprintf(info_.name, sizeof(info_.name), "%s", name);
+                    info_.acceleration = Acceleration::Software;
+                    configured = true;
+                    AUREA_LOG_WARN("export: encoder de hardware %s recusou %ux%u @%.2f; usando o de SOFTWARE %s "
+                                   "(mais lento, mesma resolucao e taxa)",
+                                   hwName, video_.width, video_.height, video_.fps, name);
+                    break;
+                }
+                AMediaCodec_delete(sw);
             }
         }
         if (!configured) return fail(Errc::NotSupported, "encoder nao aceita essa resolucao/formato");
@@ -225,11 +296,19 @@ private:
             }
         }
         if (AMediaCodec_start(video__.codec) != AMEDIA_OK) return fail(Errc::IoError, "encoder de video nao iniciou");
-        AUREA_LOG_INFO("export: %s %ux%u @%.2f %u bps, entrada %s stride %u fatia %u", mime, video_.width, video_.height,
-                       video_.fps, video_.bitrateBps, colorFormat_ == kColorFormatNv12 ? "NV12" : "I420", stride_,
-                       sliceHeight_);
+        AUREA_LOG_INFO("export: %s %s (%s) %ux%u @%.2f %u bps, entrada %s stride %u fatia %u", mime,
+                       info_.name[0] ? info_.name : "?",
+                       info_.acceleration == Acceleration::Hardware ? "hardware"
+                       : info_.acceleration == Acceleration::Software ? "SOFTWARE" : "aceleracao desconhecida",
+                       video_.width, video_.height, video_.fps, video_.bitrateBps,
+                       colorFormat_ == kColorFormatNv12 ? "NV12" : "I420", stride_, sliceHeight_);
         return OkStatus;
     }
+
+public:
+    EncoderInfo encoder_info() const noexcept override { return info_; }
+
+private:
 
     Status open_audio() noexcept {
         audio__.audio = true;
@@ -369,6 +448,7 @@ private:
     bool muxStarted_ = false;
     Track video__{};
     Track audio__{};
+    EncoderInfo info_{};
     i32 colorFormat_ = kColorFormatNv12;
     u32 stride_ = 0;
     u32 sliceHeight_ = 0;

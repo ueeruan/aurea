@@ -17,6 +17,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <deque>
 
 namespace aurea {
 
@@ -65,7 +66,20 @@ bool put_string(char* blob, u32 capacity, u32& cursor, const char* s, u32& outOf
 } // namespace
 
 // -----------------------------------------------------------------------------
-// ExportContext — uma sessão de export (thread, sink, alvos de GPU, progresso).
+// ExportContext — uma sessão de export (threads, sink, alvos de GPU, progresso).
+//
+// PIPELINE SOBREPOSTO (Fase 8F). Três coisas andam ao mesmo tempo:
+//
+//   decoder  ── quadro N+1..N+3 (a thread de decode anda adiantada no modo Playback)
+//   produtor ── prepara e grava o quadro N; a GPU renderiza, converte para NV12
+//               e COPIA os planos para o buffer de leitura do slot, tudo num
+//               frame só (sem submissão extra, sem fence próprio)
+//   encoder  ── entrega o quadro N−1 ao sink direto do buffer mapeado + áudio
+//
+// Os slots (buffers de leitura) circulam produtor → encoder → produtor. A
+// profundidade é o número de slots: limita a memória (3 × 1,5 × L × A bytes —
+// 37 MB em 4K) e é o que a temperatura reduz (1 = serial). A GPU só é esperada
+// no fence do quadro ANTERIOR, depois de submeter o atual.
 // -----------------------------------------------------------------------------
 struct Engine::ExportContext {
     mutable std::mutex mutex;          ///< protege `progress`
@@ -73,7 +87,8 @@ struct Engine::ExportContext {
     ExportSettings settings{};
     std::string    outputPath;
     std::atomic<bool> cancelRequested{false};
-    std::thread    thread;
+    std::thread    thread;             ///< produtor (GPU)
+    std::thread    encoder;            ///< consumidor (sink)
     std::unique_ptr<ExportSink> sink;
 
     // Plano da sessão, fixado no start (a timeline não muda durante o export:
@@ -84,7 +99,6 @@ struct Engine::ExportContext {
     u32 frames = 0;
     bool dither = true;
     TextureHandle comp{}, y{}, uv{};
-    std::vector<u8> yBytes, uvBytes;
     // Áudio: o MESMO mixer do preview, com um cache próprio que decodifica
     // na hora (o export não disputa decoder com o preview).
     std::unique_ptr<audio::AudioBlockCache> audioCache;
@@ -92,8 +106,32 @@ struct Engine::ExportContext {
     i64 audioWritten = 0;
     std::vector<f32> audioMix;
     std::vector<i16> audioPcm;
-    u64 waitNs = 0, renderNs = 0, readNs = 0, writeNs = 0;
-    u32 attempts = 0;
+
+    // --- Pipeline -------------------------------------------------------------
+    struct Slot {
+        BufferHandle y{}, uv{};
+        const u8* yPtr = nullptr;      ///< mapeado persistente (invalidado após o fence)
+        const u8* uvPtr = nullptr;
+        u32 frame = 0;                 ///< índice de saída
+        u64 gpuFrame = 0;              ///< frame do backend que escreveu o slot
+    };
+    std::vector<Slot> slots;
+    u32 depth = 1;                     ///< slots em circulação (sem calor)
+    std::mutex qMutex;                 ///< protege as duas filas e os estados abaixo
+    std::condition_variable qCv;
+    std::vector<u32> freeSlots;        ///< prontos para a GPU escrever
+    std::deque<u32>  readySlots;       ///< planos prontos, em ordem de quadro (FIFO)
+    bool producerDone = false;         ///< nada mais vai entrar em readySlots
+    bool stop = false;                 ///< encerrar já (cancelamento ou erro)
+    Status encoderStatus = OkStatus;   ///< erro do sink (escrito pelo encoder)
+    bool encoderFailed = false;
+
+    // Medição (ns acumulados na sessão; cada lado escreve só os seus).
+    // Atômicos: o encoder publica as médias do produtor no progresso.
+    std::atomic<u64> decodeNs{0}, renderNs{0}, readNs{0};   // produtor
+    std::atomic<u64> writeNs{0}, audioNs{0};                // encoder
+    u64 startNs = 0;
+    u32 thermalReducedFrames = 0;
 
     void set_message(const char* m) {
         std::snprintf(progress.message, sizeof(progress.message), "%s", m);
@@ -261,7 +299,7 @@ void Engine::shutdown() noexcept {
     state_ = EngineState::ShuttingDown;
 
     if (exportCtx_ && exportCtx_->thread.joinable()) {
-        exportCtx_->cancelRequested.store(true, std::memory_order_release);
+        (void)cancel_export();   // marca e ACORDA as esperas do pipeline
         exportCtx_->thread.join();
     }
     join_camera_track();
@@ -408,6 +446,10 @@ void Engine::on_frame_ready(void* self) {
         e->wakeFlag_ = true;
     }
     e->wakeCv_.notify_one();
+    if (e->exportActive_.load(std::memory_order_acquire)) {
+        std::lock_guard<std::mutex> lock(e->exportWakeMutex_);
+        e->exportWakeCv_.notify_all();
+    }
 }
 
 void Engine::render_thread_main() noexcept {
@@ -4353,6 +4395,7 @@ void Engine::set_thermal(u32 level, bool throttling) noexcept {
     t.level = static_cast<ThermalState::Level>(std::min<u32>(level, static_cast<u32>(ThermalState::Level::Unknown)));
     t.throttling = throttling;
     caps_.set_thermal_state(t);
+    thermalDegrade_.store(t.should_degrade(), std::memory_order_release);
     request_render();
 }
 
@@ -5317,6 +5360,26 @@ Status Engine::start_export(const ExportSettings& settings, const char* outputPa
     if (!withAudio) ctx->audioSnap.reset();
     if (const Status s = ctx->sink->open(outputPath, vc, withAudio ? &ac : nullptr); !s.ok()) return s;
 
+    // O encoder que o sink REALMENTE abriu. Quando o sink não sabe dizer (host,
+    // plataforma sem essa consulta), vale a tabela do MediaCodecList.
+    {
+        const ExportSink::EncoderInfo enc = ctx->sink->encoder_info();
+        const CodecCapability& table = vc.codec == ExportCodec::HEVC ? caps_.encoder_hevc() : caps_.encoder_h264();
+        bool hw = false, sw = false;
+        if (enc.acceleration == ExportSink::Acceleration::Hardware) hw = true;
+        else if (enc.acceleration == ExportSink::Acceleration::Software) sw = true;
+        else if (table.supported) (table.hardwareAccelerated ? hw : sw) = true;
+        if (hw) ctx->progress.flags |= kExportHardwareEncoder;
+        if (sw) {
+            ctx->progress.flags |= kExportSoftwareEncoder;
+            AUREA_LOG_WARN("export: encoder de SOFTWARE (%s) — mais lento; a qualidade pedida nao muda",
+                           enc.name[0] ? enc.name : "tabela do aparelho");
+        } else {
+            AUREA_LOG_INFO("export: encoder %s (%s)", enc.name[0] ? enc.name : "?",
+                           hw ? "hardware" : "aceleracao desconhecida");
+        }
+    }
+
     // Alvos de GPU da sessão: composição (linear), Y e CbCr.
     {
         std::lock_guard<std::mutex> rl(renderMutex_);
@@ -5349,12 +5412,48 @@ Status Engine::start_export(const ExportSettings& settings, const char* outputPa
         ctx->comp = *c;
         ctx->y = *y;
         ctx->uv = *u;
+
+        // Slots de leitura (host-visible, mapeados de vez). Sem memória para os
+        // três, o export segue com menos — mais lento, nunca pior.
+        const u32 want = std::clamp<u32>(config_.exportPipelineDepth ? config_.exportPipelineDepth : 3u, 1u, 4u);
+        for (u32 k = 0; k < want; ++k) {
+            BufferDesc bd;
+            bd.usage = BufferUsage::TransferDst;
+            bd.access = MemoryAccess::Readback;
+            bd.bytes = static_cast<usize>(ctx->width) * ctx->height;
+            bd.debugName = "export-leitura-y";
+            auto by = gpu_->create_buffer(bd);
+            bd.bytes = static_cast<usize>(ctx->width) * (ctx->height / 2);
+            bd.debugName = "export-leitura-cbcr";
+            auto bu = gpu_->create_buffer(bd);
+            void* py = nullptr;
+            void* pu = nullptr;
+            if (!by.ok() || !bu.ok() || !gpu_->map_buffer(*by, py).ok() || !gpu_->map_buffer(*bu, pu).ok()) {
+                if (by.ok()) gpu_->destroy_buffer(*by);
+                if (bu.ok()) gpu_->destroy_buffer(*bu);
+                break;
+            }
+            ExportContext::Slot slot;
+            slot.y = *by;
+            slot.uv = *bu;
+            slot.yPtr = static_cast<const u8*>(py);
+            slot.uvPtr = static_cast<const u8*>(pu);
+            ctx->slots.push_back(slot);
+        }
+        if (ctx->slots.empty()) {
+            gpu_->destroy_texture(ctx->comp);
+            gpu_->destroy_texture(ctx->y);
+            gpu_->destroy_texture(ctx->uv);
+            ctx->sink->abort();
+            return Status{Errc::OutOfMemory, "sem memoria para ler os quadros do export"};
+        }
+        ctx->depth = static_cast<u32>(ctx->slots.size());
+        for (u32 k = 0; k < ctx->depth; ++k) ctx->freeSlots.push_back(ctx->depth - 1 - k);
     }
-    ctx->yBytes.resize(static_cast<usize>(ctx->width) * ctx->height);
-    ctx->uvBytes.resize(static_cast<usize>(ctx->width) * (ctx->height / 2));
 
     ctx->progress.running = true;
     ctx->progress.framesTotal = ctx->frames;
+    ctx->progress.pipelineDepth = ctx->depth;
     ctx->set_message("exportando");
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
@@ -5368,48 +5467,56 @@ Status Engine::start_export(const ExportSettings& settings, const char* outputPa
     return OkStatus;
 }
 
-Status Engine::render_export_frame(FrameIndex t, const OffscreenTarget& target) noexcept {
-    std::lock_guard<std::mutex> rl(renderMutex_);
-    if (!gpu_ || !renderer_.ready()) return Status{Errc::InvalidState, "sem GPU"};
+Status Engine::render_export_frame(FrameIndex t, const OffscreenTarget& target, u64& gpuFrame) noexcept {
+    ExportContext& c = *exportCtx_;
+    gpuFrame = 0;
     RenderSettings rs;
     rs.dither = false;
     rs.gpuTimers = false;
     rs.finalQuality = true;
     // Quadros EXATOS de vídeo, em sequência (o modo Playback decodifica
-    // adiante). 4 s de tolerância por quadro: arquivo quebrado não trava.
+    // adiante). Falta quadro: espera o decoder AVISAR que entregou (antes era
+    // um sono cego de 5 ms por tentativa), no máximo 4 s — arquivo quebrado
+    // não trava. O lock do render só vale para preparar e gravar: esperando o
+    // decoder, a GPU fica livre para quem precisar (captura, prévia de efeito).
     const u64 t0 = monotonic_ns();
-    int attempts = 0;
-    for (int attempt = 0; attempt < 800; ++attempt) {
-        ++attempts;
-        {
-            std::lock_guard<std::mutex> lock(modelMutex_);
-            if (!project_) return Errc::InvalidState;
-            Composition* comp = current_composition();
-            if (!comp) return Errc::NotFound;
-            renderer_.prepare(*comp, *project_, t, &media_, &Engine::image_lookup, this, rs, ++frameCounter_,
-                              1, DecodeMode::Playback, 1.0f, snapshot_);
-        }
+    const u64 deadline = t0 + 4'000'000'000ull;
+    std::unique_lock<std::mutex> rl(renderMutex_, std::defer_lock);
+    auto prepare = [&]() -> Status {
+        if (!gpu_ || !renderer_.ready()) return Status{Errc::InvalidState, "sem GPU"};
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        if (!project_) return Errc::InvalidState;
+        Composition* comp = current_composition();
+        if (!comp) return Errc::NotFound;
+        renderer_.prepare(*comp, *project_, t, &media_, &Engine::image_lookup, this, rs, ++frameCounter_,
+                          1, DecodeMode::Playback, 1.0f, snapshot_);
+        return OkStatus;
+    };
+    for (;;) {
+        const u64 gen = mediaReadyGen_.load(std::memory_order_acquire);
+        rl.lock();
+        if (const Status s = prepare(); !s.ok()) return s;
         if (snapshot_.missingVideoFrames == 0 && snapshot_.staleVideoFrames == 0) break;
+        if (monotonic_ns() > deadline) break;   // sai com o que o decoder tiver (a regra de antes)
         for (RenderLayer& l : snapshot_.layers) l.source.frame.reset();
-        if (exportCtx_->cancelRequested.load(std::memory_order_acquire)) return Errc::Cancelled;
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        rl.unlock();
+        if (c.cancelRequested.load(std::memory_order_acquire)) return Errc::Cancelled;
+        std::unique_lock<std::mutex> wl(exportWakeMutex_);
+        exportWakeCv_.wait_for(wl, std::chrono::milliseconds(5), [&] {
+            return mediaReadyGen_.load(std::memory_order_acquire) != gen
+                || c.cancelRequested.load(std::memory_order_acquire);
+        });
     }
     const u64 t1 = monotonic_ns();
     FrameStats stats;
     RenderTimings timings;
-    if (const Status s = renderer_.render(snapshot_, rs, &target, stats, timings); !s.ok()) return s;
-    const u64 t2 = monotonic_ns();
-    if (const Status r = gpu_->read_texture(target.yPlane, exportCtx_->yBytes.data(), exportCtx_->width); !r.ok()) {
-        return r;
-    }
-    const Status r = gpu_->read_texture(target.uvPlane, exportCtx_->uvBytes.data(), exportCtx_->width);
-    const u64 t3 = monotonic_ns();
-    ExportContext& c = *exportCtx_;
-    c.waitNs += t1 - t0;
-    c.renderNs += t2 - t1;
-    c.readNs += t3 - t2;
-    c.attempts += static_cast<u32>(attempts);
-    return r;
+    // Grava e submete: composição → NV12 → cópia para o slot, num frame só.
+    // A GPU NÃO é esperada aqui (o produtor espera o quadro anterior depois).
+    const Status s = renderer_.render(snapshot_, rs, &target, stats, timings);
+    gpuFrame = gpu_->last_submitted_frame();
+    c.decodeNs.fetch_add(t1 - t0, std::memory_order_relaxed);
+    c.renderNs.fetch_add(monotonic_ns() - t1, std::memory_order_relaxed);
+    return s;
 }
 
 namespace {
@@ -5467,44 +5574,92 @@ void Engine::export_thread_main() noexcept {
     target.uvPlane = ctx.uv;
     target.encodeDither = ctx.dither;
 
-    const u64 start = monotonic_ns();
+    ctx.startNs = monotonic_ns();
+    ctx.encoder = std::thread([this] { export_encoder_main(); });
+
+    // Quadros submetidos à GPU e ainda não entregues ao encoder, em ordem.
+    std::deque<u32> inflight;
+    auto cancelled = [&] { return ctx.cancelRequested.load(std::memory_order_acquire); };
+    // Espera a GPU terminar o quadro mais antigo em voo e o passa ao encoder.
+    auto deliver_oldest = [&]() -> Status {
+        const u32 si = inflight.front();
+        ExportContext::Slot& slot = ctx.slots[si];
+        const u64 r0 = monotonic_ns();
+        {
+            std::lock_guard<std::mutex> rl(renderMutex_);
+            if (!gpu_) return Status{Errc::InvalidState, "sem GPU"};
+            if (const Status s = gpu_->wait_frame(slot.gpuFrame, 5'000'000'000ull); !s.ok()) return s;
+            // Memória não coerente: invalida para a CPU ver o que a GPU
+            // escreveu (o ponteiro é o mesmo; coerente = nada a fazer).
+            void* p = nullptr;
+            (void)gpu_->map_buffer(slot.y, p);
+            (void)gpu_->map_buffer(slot.uv, p);
+        }
+        ctx.readNs.fetch_add(monotonic_ns() - r0, std::memory_order_relaxed);
+        inflight.pop_front();
+        {
+            std::lock_guard<std::mutex> ql(ctx.qMutex);
+            ctx.readySlots.push_back(si);
+        }
+        ctx.qCv.notify_all();
+        return OkStatus;
+    };
+
     Status result = OkStatus;
-    for (u32 i = 0; i < ctx.frames; ++i) {
-        if (ctx.cancelRequested.load(std::memory_order_acquire)) { result = Errc::Cancelled; break; }
+    for (u32 i = 0; i < ctx.frames && result.ok(); ++i) {
+        if (cancelled()) { result = Errc::Cancelled; break; }
+        // Calor (§37): um quadro em voo só — menos CPU e GPU ao mesmo tempo.
+        // Resolução, fps, efeitos e amostras NÃO mudam.
+        const bool hot = thermalDegrade_.load(std::memory_order_acquire);
+        const u32 allowed = hot ? 1u : ctx.depth;
+        const usize lag = (allowed > 1) ? 1u : 0u;   // quadros esperando o fence
+        if (hot && ctx.thermalReducedFrames++ == 0) {
+            AUREA_LOG_WARN("export: aparelho quente — 1 quadro em voo (qualidade igual)");
+            std::lock_guard<std::mutex> pl(ctx.mutex);
+            ctx.progress.flags |= kExportThermalReduced;
+        }
+        while (inflight.size() > lag && result.ok()) result = deliver_oldest();
+        if (!result.ok()) break;
+
+        // Um slot livre; todos em uso = o encoder ainda não devolveu (é o que
+        // limita a memória e segura o ritmo).
+        u32 si = 0;
+        {
+            std::unique_lock<std::mutex> ql(ctx.qMutex);
+            ctx.qCv.wait(ql, [&] {
+                return ctx.encoderFailed || cancelled()
+                    || (!ctx.freeSlots.empty() && ctx.depth - static_cast<u32>(ctx.freeSlots.size()) < allowed);
+            });
+            if (ctx.encoderFailed) { result = ctx.encoderStatus; break; }
+            if (cancelled()) { result = Errc::Cancelled; break; }
+            si = ctx.freeSlots.back();
+            ctx.freeSlots.pop_back();
+        }
+        ExportContext::Slot& slot = ctx.slots[si];
+        slot.frame = i;
+        target.yReadback = slot.y;
+        target.uvReadback = slot.uv;
         // Tempo de SAÍDA → quadro da composição (fps diferentes se encontram
         // pelo instante, não pelo índice).
         const f64 seconds = static_cast<f64>(i) / ctx.fps;
         const FrameIndex t{static_cast<i64>(std::floor(seconds * ctx.compFps + 1e-6))};
-        result = render_export_frame(t, target);
+        result = render_export_frame(t, target, slot.gpuFrame);
         if (!result.ok()) break;
-        const i64 pts = static_cast<i64>(std::llround(seconds * 1e6));
-        const u64 w0 = monotonic_ns();
-        result = ctx.sink->write_video(ctx.yBytes.data(), ctx.width, ctx.uvBytes.data(), ctx.width, pts);
-        ctx.writeNs += monotonic_ns() - w0;
-        if (!result.ok()) break;
-        // O som até o fim DESTE quadro (em amostras inteiras: nenhuma deriva
-        // acumulada, nem em 29,97).
-        if (ctx.audioSnap) {
-            result = write_export_audio(audio::frame_to_sample(static_cast<i64>(i) + 1, ctx.fps));
-            if (!result.ok()) break;
-        }
-        // Diagnóstico a cada 300 quadros: onde o tempo do export está indo.
-        if ((i + 1) % 300 == 0 || i + 1 == ctx.frames) {
-            const f64 n = static_cast<f64>((i % 300) + 1);
-            AUREA_LOG_INFO("export %u/%u: espera %.1f ms (%.1f tentativas) render %.1f leitura %.1f encoder %.1f ms/quadro",
-                           i + 1, ctx.frames, ctx.waitNs / 1e6 / n, ctx.attempts / n, ctx.renderNs / 1e6 / n,
-                           ctx.readNs / 1e6 / n, ctx.writeNs / 1e6 / n);
-            ctx.waitNs = ctx.renderNs = ctx.readNs = ctx.writeNs = 0;
-            ctx.attempts = 0;
-        }
-
-        const f64 elapsed = static_cast<f64>(monotonic_ns() - start) / 1e9;
-        std::lock_guard<std::mutex> pl(ctx.mutex);
-        ctx.progress.framesDone = i + 1;
-        ctx.progress.fps = elapsed > 0.0 ? static_cast<f32>((i + 1) / elapsed) : 0.0f;
-        ctx.progress.etaSeconds = ctx.progress.fps > 0.0f
-                                ? static_cast<u32>((ctx.frames - (i + 1)) / ctx.progress.fps) : 0;
+        inflight.push_back(si);
     }
+    // Fim da timeline: entrega o que ainda está na GPU.
+    while (result.ok() && !inflight.empty()) result = deliver_oldest();
+    {
+        std::lock_guard<std::mutex> ql(ctx.qMutex);
+        ctx.producerDone = true;
+        if (!result.ok()) ctx.stop = true;
+    }
+    ctx.qCv.notify_all();
+    ctx.encoder.join();
+    if (result.ok() && ctx.encoderFailed) result = ctx.encoderStatus;
+    // Cancelado enquanto o encoder esvaziava a fila: faltam quadros — nada de
+    // finalizar um arquivo incompleto como se estivesse pronto.
+    if (result.ok() && cancelled()) result = Errc::Cancelled;
 
     if (result.ok()) {
         result = ctx.sink->finish();
@@ -5518,6 +5673,11 @@ void Engine::export_thread_main() noexcept {
             gpu_->destroy_texture(ctx.comp);
             gpu_->destroy_texture(ctx.y);
             gpu_->destroy_texture(ctx.uv);
+            for (ExportContext::Slot& s : ctx.slots) {
+                gpu_->destroy_buffer(s.y);
+                gpu_->destroy_buffer(s.uv);
+                s.yPtr = s.uvPtr = nullptr;
+            }
         }
     }
     {
@@ -5537,9 +5697,92 @@ void Engine::export_thread_main() noexcept {
     request_render();
 }
 
+void Engine::export_encoder_main() noexcept {
+    set_current_thread_name("aurea-export-enc");
+    ExportContext& ctx = *exportCtx_;
+    u32 sinceLog = 0;
+    u64 logWrite = 0, logRead = 0, logRender = 0, logDecode = 0;
+    for (;;) {
+        u32 si = 0;
+        {
+            std::unique_lock<std::mutex> ql(ctx.qMutex);
+            ctx.qCv.wait(ql, [&] {
+                return ctx.stop || ctx.cancelRequested.load(std::memory_order_acquire) || !ctx.readySlots.empty()
+                    || ctx.producerDone;
+            });
+            if (ctx.stop || ctx.cancelRequested.load(std::memory_order_acquire)) return;
+            if (ctx.readySlots.empty()) return;   // produtor terminou e a fila esvaziou
+            si = ctx.readySlots.front();
+            ctx.readySlots.pop_front();
+        }
+        const ExportContext::Slot& slot = ctx.slots[si];
+        const u32 i = slot.frame;
+        const f64 seconds = static_cast<f64>(i) / ctx.fps;
+        const i64 pts = static_cast<i64>(std::llround(seconds * 1e6));
+        // Direto do buffer de leitura para o sink: nenhuma cópia intermediária.
+        const u64 w0 = monotonic_ns();
+        Status s = ctx.sink->write_video(slot.yPtr, ctx.width, slot.uvPtr, ctx.width, pts);
+        const u64 w1 = monotonic_ns();
+        ctx.writeNs.fetch_add(w1 - w0, std::memory_order_relaxed);
+        // O som até o fim DESTE quadro (em amostras inteiras: nenhuma deriva
+        // acumulada, nem em 29,97). Mesma thread do vídeo: o sink não é
+        // chamado de duas threads.
+        if (s.ok() && ctx.audioSnap) {
+            s = write_export_audio(audio::frame_to_sample(static_cast<i64>(i) + 1, ctx.fps));
+            ctx.audioNs.fetch_add(monotonic_ns() - w1, std::memory_order_relaxed);
+        }
+        {
+            std::lock_guard<std::mutex> ql(ctx.qMutex);
+            ctx.freeSlots.push_back(si);
+            if (!s.ok()) {
+                ctx.encoderFailed = true;
+                ctx.encoderStatus = s;
+                ctx.stop = true;
+            }
+        }
+        ctx.qCv.notify_all();
+        if (!s.ok()) return;
+
+        const u32 done = i + 1;
+        const f64 k = 1e-6 / static_cast<f64>(done);
+        // Diagnóstico a cada 300 quadros: onde o tempo do export está indo.
+        if (++sinceLog == 300 || done == ctx.frames) {
+            const u64 wr = ctx.writeNs.load(std::memory_order_relaxed), rd = ctx.readNs.load(std::memory_order_relaxed);
+            const u64 rn = ctx.renderNs.load(std::memory_order_relaxed), dc = ctx.decodeNs.load(std::memory_order_relaxed);
+            const f64 n = static_cast<f64>(sinceLog);
+            AUREA_LOG_INFO("export %u/%u (%u em voo): decode %.1f render %.1f leitura %.1f encoder %.1f ms/quadro",
+                           done, ctx.frames, ctx.depth, (dc - logDecode) / 1e6 / n, (rn - logRender) / 1e6 / n,
+                           (rd - logRead) / 1e6 / n, (wr - logWrite) / 1e6 / n);
+            logWrite = wr; logRead = rd; logRender = rn; logDecode = dc;
+            sinceLog = 0;
+        }
+        const f64 elapsed = static_cast<f64>(monotonic_ns() - ctx.startNs) / 1e9;
+        std::lock_guard<std::mutex> pl(ctx.mutex);
+        ctx.progress.framesDone = done;
+        ctx.progress.decodeWaitMs = static_cast<f32>(ctx.decodeNs.load(std::memory_order_relaxed) * k);
+        ctx.progress.renderMs = static_cast<f32>(ctx.renderNs.load(std::memory_order_relaxed) * k);
+        ctx.progress.readbackMs = static_cast<f32>(ctx.readNs.load(std::memory_order_relaxed) * k);
+        ctx.progress.encodeMs = static_cast<f32>(ctx.writeNs.load(std::memory_order_relaxed) * k);
+        ctx.progress.audioMs = static_cast<f32>(ctx.audioNs.load(std::memory_order_relaxed) * k);
+        ctx.progress.fps = elapsed > 0.0 ? static_cast<f32>(done / elapsed) : 0.0f;
+        ctx.progress.etaSeconds = ctx.progress.fps > 0.0f
+                                ? static_cast<u32>((ctx.frames - done) / ctx.progress.fps) : 0;
+    }
+}
+
 Status Engine::cancel_export() noexcept {
     if (!exportCtx_) return Errc::InvalidState;
     exportCtx_->cancelRequested.store(true, std::memory_order_release);
+    // Acorda quem estiver esperando (slot livre, fila do encoder, decoder):
+    // o cancelamento responde no próximo passo, não no fim de uma espera.
+    {
+        std::lock_guard<std::mutex> ql(exportCtx_->qMutex);
+    }
+    exportCtx_->qCv.notify_all();
+    {
+        std::lock_guard<std::mutex> wl(exportWakeMutex_);
+    }
+    exportWakeCv_.notify_all();
     return OkStatus;
 }
 
@@ -6551,6 +6794,7 @@ void Engine::fill_export_progress(bridge::ExportProgressPOD& out) const noexcept
     out.framesDone = p.framesDone;
     out.fps = p.fps;
     out.etaSeconds = p.etaSeconds;
+    out.flags = p.flags;
     std::snprintf(out.message, sizeof(out.message), "%s", p.message);
 }
 

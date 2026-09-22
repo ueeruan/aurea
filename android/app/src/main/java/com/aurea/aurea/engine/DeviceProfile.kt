@@ -51,7 +51,10 @@ object DeviceProfile {
      * versão do SO (a tabela de codecs vem dela) e o hardware.
      */
     private fun fingerprint(): String =
-        "${Build.FINGERPRINT}|${Build.VERSION.SDK_INT}|${Runtime.getRuntime().availableProcessors()}"
+        "${Build.FINGERPRINT}|${Build.VERSION.SDK_INT}|${Runtime.getRuntime().availableProcessors()}|$SURVEY_VERSION"
+
+    /** Sobe quando a REGRA da sondagem muda: a tabela guardada é refeita uma vez. */
+    private const val SURVEY_VERSION = 2
 
     /**
      * A sondagem para passar ao motor: memória viva + codecs (guardados).
@@ -150,7 +153,11 @@ object DeviceProfile {
                         continue
                     }
                     val video = caps.videoCapabilities ?: continue
-                    val hw = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) info.isHardwareAccelerated else true
+                    // Antes do Android 10 não há `isHardwareAccelerated`: o nome
+                    // separa os de software do AOSP (antes, TODOS contavam como
+                    // hardware — e o export 4K por software passava por hardware).
+                    val hw = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) info.isHardwareAccelerated
+                             else !softwareName(info.name)
                     val line = intArrayOf(
                         tag,
                         if (info.isEncoder) 1 else 0,
@@ -190,6 +197,11 @@ object DeviceProfile {
         } - (-1)
         return if (caps.profileLevels.any { it.profile in ten }) 10 else 8
     }
+
+    /** Codecs de software do AOSP (a mesma regra do MediaCodecExport no motor). */
+    private fun softwareName(name: String): Boolean =
+        name.startsWith("OMX.google.") || name.startsWith("c2.android.") || name.startsWith("c2.google.") ||
+            name.startsWith("OMX.ffmpeg.") || name.contains(".sw.")
 
     /** Uma linha é melhor que outra se é de hardware, ou se é maior. */
     private fun better(a: IntArray, b: IntArray): Boolean {

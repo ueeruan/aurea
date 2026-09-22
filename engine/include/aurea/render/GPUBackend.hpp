@@ -609,6 +609,21 @@ public:
     // --- Sincronização e medição ----------------------------------------------
     virtual void wait_idle() noexcept = 0;
 
+    /// Número do último frame submetido (o `FrameBegin::frameNumber` dele).
+    /// 0 = nenhum / backend sem essa noção.
+    [[nodiscard]] virtual u64 last_submitted_frame() const noexcept { return 0; }
+    /// Espera a GPU concluir UM frame já submetido — o fence dele, não a fila
+    /// inteira. É o que deixa o export ler os planos do quadro N enquanto a
+    /// GPU já trabalha no N+1. Frame já reciclado = concluído (o begin_frame
+    /// esperou o fence dele). O padrão, para backend sem fence por frame, é
+    /// esperar tudo.
+    [[nodiscard]] virtual Status wait_frame(u64 frameNumber, u64 timeoutNs) noexcept {
+        (void)frameNumber;
+        (void)timeoutNs;
+        wait_idle();
+        return OkStatus;
+    }
+
     /// Tempos de GPU do frame mais recente já concluído. `out` é preenchido
     /// até `capacity`; devolve quantos. Zero quando o aparelho não mede.
     [[nodiscard]] virtual u32 read_gpu_timings(GpuTiming* out, u32 capacity,

@@ -72,6 +72,16 @@ public:
 
     /// Cancelamento: solta tudo e apaga o arquivo parcial.
     virtual void abort() noexcept = 0;
+
+    /// O encoder que o `open` REALMENTE conseguiu — para o log e para a UI
+    /// avisar quando o aparelho caiu para software (nada de export várias
+    /// vezes mais lento em silêncio).
+    enum class Acceleration : u8 { Unknown = 0, Hardware, Software };
+    struct EncoderInfo {
+        char name[64]{};
+        Acceleration acceleration = Acceleration::Unknown;
+    };
+    [[nodiscard]] virtual EncoderInfo encoder_info() const noexcept { return EncoderInfo{}; }
 };
 
 /// A plataforma registra a fábrica em `EngineConfig`. Nula = export indisponível

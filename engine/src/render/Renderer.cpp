@@ -2741,7 +2741,11 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     heavyScale_ = settings.finalQuality ? 1.0f : settings.heavyScale;
 
     FrameBegin fb;
-    if (const Status s = backend_->begin_frame(fb); !s.ok()) {
+    // Alvo offscreen (export, captura): frame SEM swapchain. Com begin_frame o
+    // backend adquiria uma imagem da tela e a apresentava vazia a cada quadro
+    // exportado — e disputava a superfície com o ciclo de vida do app.
+    const bool offscreenFrame = offscreen && offscreen->texture.valid();
+    if (const Status s = offscreenFrame ? backend_->begin_offscreen_frame(fb) : backend_->begin_frame(fb); !s.ok()) {
         // Sem imagem de swapchain neste vsync (superfície em recriação): os
         // frames de vídeo deste snapshot só são soltos — não houve GPU.
         for (RenderLayer& l : snap.layers) l.source.frame.reset();
@@ -2913,6 +2917,13 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     Status result = graph_.compile(pool_);
     if (result.ok()) {
         graph_.execute(*fb.commands, settings.gpuTimers);
+        // Export: os planos NV12 vão para os buffers de leitura no mesmo frame.
+        if (offscreen && offscreen->yReadback.valid() && offscreen->uvReadback.valid()
+            && offscreen->yPlane.valid() && offscreen->uvPlane.valid()) {
+            fb.commands->end_render_pass();
+            fb.commands->copy_texture_to_buffer(offscreen->yPlane, offscreen->yReadback);
+            fb.commands->copy_texture_to_buffer(offscreen->uvPlane, offscreen->uvReadback);
+        }
     } else {
         AUREA_LOG_ERROR("FrameGraph nao compilou: %s", result.message().data());
     }

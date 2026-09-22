@@ -261,13 +261,14 @@ struct ExportProgressPOD {
     u32 framesDone  = 0;      // +16
     f32 fps         = 0.0f;   // +20
     u32 etaSeconds  = 0;      // +24
-    u32 reserved    = 0;      // +28
+    u32 flags       = 0;      // +28  Engine::ExportFlag (encoder hw/sw, calor)
     char message[96]{};       // +32
 };
 
 static_assert(sizeof(ExportProgressPOD) == 128, "ExportProgressPOD e contrato de ABI");
 static_assert(offsetof(ExportProgressPOD, running) == 0);
 static_assert(offsetof(ExportProgressPOD, result) == 8);
+static_assert(offsetof(ExportProgressPOD, flags) == 28);
 static_assert(offsetof(ExportProgressPOD, message) == 32);
 
 // -----------------------------------------------------------------------------

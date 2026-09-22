@@ -132,6 +132,7 @@ internal object PodLayout {
     const val EPD_OFF_DONE = 16
     const val EPD_OFF_FPS = 20            // f32
     const val EPD_OFF_ETA = 24
+    const val EPD_OFF_FLAGS = 28          // u32: Engine::ExportFlag
     const val EPD_OFF_MESSAGE = 32        // char[96]
 
     // =========================================================================
@@ -429,6 +430,12 @@ class ExportProgress {
     var fps: Float = 0f
     var etaSeconds: Int = 0
     var message: String = ""
+    /** Bits de Engine::ExportFlag: encoder de hardware/software, calor. */
+    var flags: Int = 0
+
+    val hardwareEncoder: Boolean get() = flags and FLAG_HARDWARE_ENCODER != 0
+    val softwareEncoder: Boolean get() = flags and FLAG_SOFTWARE_ENCODER != 0
+    val thermalReduced: Boolean get() = flags and FLAG_THERMAL_REDUCED != 0
 
     internal fun readFrom(buffer: ByteBuffer) {
         running = buffer.getInt(PodLayout.EPD_OFF_RUNNING) != 0
@@ -438,11 +445,19 @@ class ExportProgress {
         framesDone = buffer.getInt(PodLayout.EPD_OFF_DONE)
         fps = buffer.getFloat(PodLayout.EPD_OFF_FPS)
         etaSeconds = buffer.getInt(PodLayout.EPD_OFF_ETA)
+        flags = buffer.getInt(PodLayout.EPD_OFF_FLAGS)
         val bytes = ByteArray(95)
         val dup = buffer.duplicate()
         dup.position(PodLayout.EPD_OFF_MESSAGE)
         dup.get(bytes, 0, 95)
         message = String(bytes, Charsets.UTF_8).takeWhile { it.code != 0 }
+    }
+
+    companion object {
+        // Engine::ExportFlag (Engine.hpp).
+        const val FLAG_HARDWARE_ENCODER = 1 shl 0
+        const val FLAG_SOFTWARE_ENCODER = 1 shl 1
+        const val FLAG_THERMAL_REDUCED = 1 shl 2
     }
 }
 

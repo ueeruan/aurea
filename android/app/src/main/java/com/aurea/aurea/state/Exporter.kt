@@ -47,6 +47,8 @@ data class ExportUiState(
     /** Resultado publicado (galeria), para abrir e compartilhar. */
     val outputUri: Uri? = null,
     val outputLabel: String = "",
+    /** Aviso durante o export (encoder de software, aparelho quente). Vazio = nada. */
+    val notice: String = "",
 ) {
     val fraction: Float get() = if (framesTotal > 0) framesDone.toFloat() / framesTotal else 0f
 }
@@ -69,6 +71,16 @@ class Exporter internal constructor(
     private var poll: Job? = null
 
     val busy: Boolean get() = state.phase == ExportPhase.Running || state.phase == ExportPhase.Publishing
+
+    init {
+        // Temporário de um export que o sistema matou no meio (o app não teve
+        // como apagar): some na abertura, fora da main thread. Só o que é mais
+        // velho que esta sessão — um export novo nunca é tocado.
+        val sessionStart = System.currentTimeMillis()
+        scope.launch(Dispatchers.IO) {
+            File(app.cacheDir, "export").listFiles()?.forEach { if (it.lastModified() < sessionStart) it.delete() }
+        }
+    }
 
     /** Bitrate automático do motor (0,2 bit/pixel·s) × fator de qualidade, em Mbps. */
     fun estimatedMbps(width: Int, height: Int, fps: Double, options: ExportOptions): Double {
@@ -107,6 +119,7 @@ class Exporter internal constructor(
                     framesTotal = progress.framesTotal,
                     fps = progress.fps,
                     etaSeconds = progress.etaSeconds,
+                    notice = noticeFor(progress, options),
                 )
                 if (!progress.finished) continue
                 when (progress.result) {
@@ -184,6 +197,23 @@ class Exporter internal constructor(
         val dst = File(dir, file.name)
         file.copyTo(dst, overwrite = true)
         return Uri.fromFile(dst) to "Salvo em ${dst.absolutePath}."
+    }
+
+    /**
+     * O que o motor avisou sobre ESTE export. Nenhum dos dois muda o vídeo:
+     * resolução, fps e qualidade continuam os pedidos — muda só o tempo.
+     */
+    private fun noticeFor(p: ExportProgress, options: ExportOptions): String {
+        val lines = ArrayList<String>(2)
+        if (p.softwareEncoder) {
+            val codec = if (options.hevc) "HEVC" else "H.264"
+            lines += "Este aparelho não tem encoder de hardware $codec para esta resolução: " +
+                "exportando por software (mais lento, mesma qualidade)."
+        }
+        if (p.thermalReduced) {
+            lines += "Aparelho quente: a exportação desacelerou para esfriar. A qualidade não muda."
+        }
+        return lines.joinToString("\n")
     }
 
     private fun startError(code: Int, options: ExportOptions): String = when (code) {

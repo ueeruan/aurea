@@ -446,6 +446,17 @@ void CommandListImpl::copy_texture_to_buffer(TextureHandle src, BufferHandle dst
     region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
     region.imageExtent = {s->desc.width, s->desc.height, 1};
     vkCmdCopyImageToBuffer(cmd_, s->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, b->buffer, 1, &region);
+    // A CPU lê o buffer depois do fence (export): a escrita da cópia tem de
+    // ficar disponível para o domínio do host.
+    VkBufferMemoryBarrier hb{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
+    hb.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    hb.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+    hb.srcQueueFamilyIndex = hb.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    hb.buffer = b->buffer;
+    hb.offset = 0;
+    hb.size = VK_WHOLE_SIZE;
+    vkCmdPipelineBarrier(cmd_, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1, &hb, 0,
+                         nullptr);
 }
 
 // Medição: um timestamp BOTTOM_OF_PIPE no começo e no fim de cada passe (fora
@@ -750,6 +761,26 @@ void Backend::wait_idle() noexcept {
         if (frames_[i].submitted) collect_timings(frames_[i]);
         run_deferred(frames_[i]);
     }
+}
+
+u64 Backend::last_submitted_frame() const noexcept {
+    return lastSubmitted_ && lastSubmitted_->submitted ? lastSubmitted_->frameNumber : 0;
+}
+
+Status Backend::wait_frame(u64 frameNumber, u64 timeoutNs) noexcept {
+    if (!device_) return Status{Errc::InvalidState, "backend nao inicializado"};
+    if (deviceLost_) return Status{Errc::DeviceLost, "dispositivo perdido"};
+    for (u32 i = 0; i < framesInFlight_; ++i) {
+        FrameContext& f = frames_[i];
+        if (&f == current_ || !f.submitted || f.frameNumber != frameNumber) continue;
+        // Só espera: coletar tempos e rodar a fila adiada continua com o
+        // begin_frame que reciclar este contexto (uma thread só mexe nisso).
+        const VkResult w = vkWaitForFences(device_, 1, &f.fence, VK_TRUE, timeoutNs);
+        if (note_device_lost(w)) return Status{Errc::DeviceLost, "fence"};
+        if (w == VK_TIMEOUT) return Status{Errc::Timeout, "GPU atrasada"};
+        return check(w, "vkWaitForFences");
+    }
+    return OkStatus;
 }
 
 GpuMemoryStats Backend::memory_stats() const noexcept {

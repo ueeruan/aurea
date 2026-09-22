@@ -92,8 +92,50 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
                 .drawBehind { drawStageOverlay(store, ui, mapper, insetPx) },
         )
         LockBanner(store, Modifier.align(Alignment.TopCenter).padding(top = 8.dp, start = 8.dp, end = 8.dp))
+        VectorToolBanner(store, Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp, start = 8.dp, end = 8.dp))
         ResolutionChip(store, ui, Modifier.align(Alignment.TopEnd).padding(top = 4.dp, end = 4.dp))
         PerfHud(store, Modifier.align(Alignment.TopStart).padding(start = 8.dp, top = 6.dp))
+    }
+}
+
+/** Faixa do modo vetorial: o que o dedo faz agora e "Concluir" (volta ao palco normal). */
+@Composable
+private fun VectorToolBanner(store: EditorStore, modifier: Modifier) {
+    val tool = store.vectorTool
+    if (tool == 0) return
+    Row(
+        modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(AureaColors.EditorPanelHigh)
+            .border(1.dp, ShellColors.AccentHalf, RoundedCornerShape(10.dp))
+            .padding(start = 12.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            if (tool == 2) "Mão livre: desenhe com o dedo" else "Pontos: toque para criar, arraste para curvar",
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, fontWeight = FontWeight.W600)),
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        Spacer(Modifier.width(6.dp))
+        Box(
+            Modifier
+                .heightIn(min = 36.dp)
+                .semantics { contentDescription = "Concluir desenho" }
+                .tocavel(haptic = true) { store.chooseVectorTool(0) }
+                .padding(horizontal = 4.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                "Concluir",
+                style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, fontWeight = FontWeight.W700, color = AureaColors.OnAccent)),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(AureaColors.Accent)
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+            )
+        }
     }
 }
 
@@ -237,6 +279,11 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
     m.strokesFor(density)
     m.handlesValid = false
     if (!m.valid) return
+    // Modo vetorial (pontos / mão livre): o palco é do caminho, sem alças da camada.
+    if (store.vectorTool != 0) {
+        drawVectorOverlay(store, m)
+        return
+    }
 
     // Linha de encaixe: só durante o arrasto e só no eixo que encaixou.
     val snapStroke = 1.5.dp.toPx()
@@ -498,6 +545,12 @@ private suspend fun PointerInputScope.stageGestures(
         val down = awaitFirstDown(requireUnconsumed = false)
         val downX = down.position.x
         val downY = down.position.y
+
+        // Modo vetorial: pontos do caminho ou traço da mão livre.
+        if (store.vectorTool != 0) {
+            vectorGesture(store, m, down)
+            return@awaitEachGesture
+        }
 
         // Gizmo 3D: tocar numa ponta de seta arrasta no eixo do mundo.
         val gz = store.gizmo

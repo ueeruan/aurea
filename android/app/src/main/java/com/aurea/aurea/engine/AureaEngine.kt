@@ -585,4 +585,55 @@ class AureaEngine private constructor() {
     private external fun nativeImportModelProgress(handle: Long): Int
     private external fun nativeCancelModelImport(handle: Long)
     private external fun nativeExportProgress(handle: Long, out: ByteBuffer): Boolean
+
+    // --- Camada vetorial (Fase 7D) ---------------------------------------------
+    /** Nova camada vetorial: 0 vazia (modo de pontos), 1 retângulo, 2 elipse, 3 polígono, 4 estrela. Id ≥ 0 ou −Errc. */
+    fun addVectorLayer(preset: Int): Long = nativeAddVectorLayer(nativeHandle, preset)
+    /** Documento (codec de VectorDocument.cpp; ver VectorDoc.kt). */
+    fun vectorDocument(layer: Long): FloatArray? = nativeVectorDocument(nativeHandle, layer)
+    fun vectorGroupNames(layer: Long): String? = nativeVectorGroupNames(nativeHandle, layer)
+    fun setVectorDocument(layer: Long, doc: FloatArray, names: String, continuing: Boolean): Boolean =
+        nativeSetVectorDocument(nativeHandle, layer, doc, names, continuing)
+    /** [afim grupo→composição (6), flags, bezier…] do caminho no cabeçote. */
+    fun vectorPathAt(layer: Long, group: Int, path: Int): FloatArray? = nativeVectorPathAt(nativeHandle, layer, group, path)
+    fun setVectorPath(layer: Long, group: Int, path: Int, bez: FloatArray, continuing: Boolean): Boolean =
+        nativeSetVectorPath(nativeHandle, layer, group, path, bez, continuing)
+    fun toggleVectorPathKey(layer: Long, group: Int, path: Int): Boolean = nativeToggleVectorPathKey(nativeHandle, layer, group, path)
+    fun addVectorGroup(layer: Long, kind: Int): Int = nativeAddVectorGroup(nativeHandle, layer, kind)
+    fun removeVectorGroup(layer: Long, group: Int): Boolean = nativeRemoveVectorGroup(nativeHandle, layer, group)
+    fun addVectorPath(layer: Long, group: Int, kind: Int, bez: FloatArray?): Int = nativeAddVectorPath(nativeHandle, layer, group, kind, bez)
+    fun removeVectorPath(layer: Long, group: Int, path: Int): Boolean = nativeRemoveVectorPath(nativeHandle, layer, group, path)
+    fun makeVectorPathEditable(layer: Long, group: Int, path: Int): Boolean = nativeMakeVectorPathEditable(nativeHandle, layer, group, path)
+    /** Valores animáveis do grupo no cabeçote + bits animados + bits com keyframe. */
+    fun queryVectorParams(layer: Long, group: Int): FloatArray? = nativeQueryVectorParams(nativeHandle, layer, group)
+    fun setVectorParam(layer: Long, group: Int, param: Int, value: Float, continuing: Boolean): Boolean =
+        nativeSetVectorParam(nativeHandle, layer, group, param, value, continuing)
+    fun toggleVectorParamKey(layer: Long, group: Int, param: Int): Boolean = nativeToggleVectorParamKey(nativeHandle, layer, group, param)
+    /** Traço do dedo (x,y em px da composição) → caminho suave. `layer` 0 = camada nova. Id ≥ 0 ou −Errc. */
+    fun addFreehandPath(layer: Long, xy: FloatArray, error: Float): Long = nativeAddFreehandPath(nativeHandle, layer, xy, error)
+    fun importSvg(bytes: ByteArray, name: String): Long = nativeImportSvg(nativeHandle, bytes, name)
+    fun setTextPath(layer: Long, pathLayer: Long, offset: Float, perpendicular: Boolean, reverse: Boolean): Boolean =
+        nativeSetTextPath(nativeHandle, layer, pathLayer, offset, perpendicular, reverse)
+    /** [guia, bits da margem, perpendicular, invertido] ou nulo. */
+    fun queryTextPath(layer: Long): LongArray? = nativeQueryTextPath(nativeHandle, layer)
+
+    private external fun nativeAddVectorLayer(handle: Long, preset: Int): Long
+    private external fun nativeVectorDocument(handle: Long, layer: Long): FloatArray?
+    private external fun nativeVectorGroupNames(handle: Long, layer: Long): String?
+    private external fun nativeSetVectorDocument(handle: Long, layer: Long, doc: FloatArray, names: String, continuing: Boolean): Boolean
+    private external fun nativeVectorPathAt(handle: Long, layer: Long, group: Int, path: Int): FloatArray?
+    private external fun nativeSetVectorPath(handle: Long, layer: Long, group: Int, path: Int, bez: FloatArray, continuing: Boolean): Boolean
+    private external fun nativeToggleVectorPathKey(handle: Long, layer: Long, group: Int, path: Int): Boolean
+    private external fun nativeAddVectorGroup(handle: Long, layer: Long, kind: Int): Int
+    private external fun nativeRemoveVectorGroup(handle: Long, layer: Long, group: Int): Boolean
+    private external fun nativeAddVectorPath(handle: Long, layer: Long, group: Int, kind: Int, bez: FloatArray?): Int
+    private external fun nativeRemoveVectorPath(handle: Long, layer: Long, group: Int, path: Int): Boolean
+    private external fun nativeMakeVectorPathEditable(handle: Long, layer: Long, group: Int, path: Int): Boolean
+    private external fun nativeQueryVectorParams(handle: Long, layer: Long, group: Int): FloatArray?
+    private external fun nativeSetVectorParam(handle: Long, layer: Long, group: Int, param: Int, value: Float, continuing: Boolean): Boolean
+    private external fun nativeToggleVectorParamKey(handle: Long, layer: Long, group: Int, param: Int): Boolean
+    private external fun nativeAddFreehandPath(handle: Long, layer: Long, xy: FloatArray, error: Float): Long
+    private external fun nativeImportSvg(handle: Long, bytes: ByteArray, name: String): Long
+    private external fun nativeSetTextPath(handle: Long, layer: Long, pathLayer: Long, offset: Float, perpendicular: Boolean, reverse: Boolean): Boolean
+    private external fun nativeQueryTextPath(handle: Long, layer: Long): LongArray?
 }

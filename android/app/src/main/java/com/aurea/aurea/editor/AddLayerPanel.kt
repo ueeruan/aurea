@@ -73,8 +73,8 @@ internal enum class AddTab(val label: String, val glyph: Char) {
  * (0,48 do espaço, pode cobrir a timeline): abas em cima e um trilho à
  * direita com os modos de criar (desenho livre, vetorial, texto).
  *
- * Só a mídia já existe no motor novo (vídeo e imagem pelo seletor do
- * sistema); o resto diz "em breve" em vez de fingir.
+ * Mídia, formas, texto, desenho vetorial (modo de pontos), desenho à mão
+ * livre e SVG existem no motor; o resto diz "em breve" em vez de fingir.
  */
 @Composable
 internal fun AddLayerPanel(store: EditorStore, ui: EditorUi) {
@@ -88,19 +88,31 @@ internal fun AddLayerPanel(store: EditorStore, ui: EditorUi) {
                     AddTab.Media -> MediaTab(store, close)
                     AddTab.Audio -> AudioTab(store, close)
                     AddTab.Object -> ObjectsTab(store, close)
-                    AddTab.More -> MoreTab(store)
+                    AddTab.More -> MoreTab(store, ui)
                 }
             }
         }
         Column(Modifier.width(52.dp).fillMaxHeight()) {
-            SideShortcut(ShellGlyph.Scribble, "Desenho à\nmão livre") { store.comingSoon("Desenho livre") }
-            SideShortcut(CupertinoGlyph.PencilOutline, "Desenho\nvetorial") { store.comingSoon("Desenho vetorial") }
+            SideShortcut(ShellGlyph.Scribble, "Desenho à\nmão livre") { startFreehand(store, ui) }
+            SideShortcut(CupertinoGlyph.PencilOutline, "Desenho\nvetorial") { startVector(store, ui) }
             SideShortcut(CupertinoGlyph.Textformat, "Texto") {
                 if (store.addText() >= 0) openPanel(store, ui, com.aurea.aurea.editor.panels.EditorPanel.Text)
             }
             ChromeButton(CupertinoGlyph.Xmark, "Fechar adicionar", onClick = close, size = 20.dp, width = 52.dp, height = 44.dp)
         }
     }
+}
+
+/** "Desenho vetorial": camada vetorial vazia, modo de pontos e o painel do vetor. */
+private fun startVector(store: EditorStore, ui: EditorUi) {
+    if (store.addVectorLayer(0) >= 0) openPanel(store, ui, com.aurea.aurea.editor.panels.EditorPanel.Vector)
+}
+
+/** "Desenho à mão livre": o palco passa a receber traços (cada traço vira um caminho suave). */
+private fun startFreehand(store: EditorStore, ui: EditorUi) {
+    if (store.playing) store.pause()
+    ui.adding = false
+    store.chooseVectorTool(2)
 }
 
 /** Ícone em cima, rótulo embaixo (a aba se reconhece de relance). */
@@ -511,11 +523,18 @@ private fun DrawScope.drawObjectIcon(card: ObjectCard) {
 // =============================================================================
 
 @Composable
-private fun MoreTab(store: EditorStore) {
+private fun MoreTab(store: EditorStore, ui: EditorUi) {
+    // SVG pelo seletor de documentos do sistema (o arquivo é lido e convertido no motor).
+    val svgPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) {
+            ui.adding = false
+            store.importSvg(uri)
+        }
+    }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(6.dp)) {
-        MoreItem(ShellGlyph.Scribble, "Desenho livre") { store.comingSoon("Desenho livre") }
-        MoreItem(CupertinoGlyph.PencilOutline, "Desenho vetorial") { store.comingSoon("Desenho vetorial") }
-        MoreItem(CupertinoGlyph.DocText, "Importar SVG") { store.comingSoon("Importar SVG") }
+        MoreItem(ShellGlyph.Scribble, "Desenho livre") { startFreehand(store, ui) }
+        MoreItem(CupertinoGlyph.PencilOutline, "Desenho vetorial") { startVector(store, ui) }
+        MoreItem(CupertinoGlyph.DocText, "Importar SVG") { svgPicker.launch(arrayOf("image/svg+xml")) }
         MoreItem(CupertinoGlyph.CaptionsBubble, "Legendas") { store.comingSoon("Legendas") }
         MoreItem(CupertinoGlyph.WandStars, "Camada de ajuste") { store.comingSoon("Camada de ajuste") }
         MoreItem(CupertinoGlyph.Folder, "Agrupar camadas") { store.comingSoon("Agrupar camadas") }

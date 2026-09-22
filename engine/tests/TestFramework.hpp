@@ -40,7 +40,9 @@ public:
     }
 
     void add(const char* suite, const char* name, TestFn fn) noexcept {
+        // Passar do teto não pode sumir com teste calado: vira falha visível.
         if (count_ < kMax) tests_[count_++] = TestCase{suite, name, fn};
+        else ++dropped_;
     }
 
     [[nodiscard]] u32 count() const noexcept { return count_; }
@@ -52,11 +54,13 @@ public:
     [[nodiscard]] u32 checks() const noexcept { return checks_; }
 
 private:
-    static constexpr u32 kMax = 512;
+    static constexpr u32 kMax = 4096;
     TestCase tests_[kMax]{};
     u32 count_ = 0;
     u32 failures_ = 0;
     u32 checks_ = 0;
+public:
+    u32 dropped_ = 0;   ///< testes que não couberam no registro (erro)
 };
 
 /// Executa todos os testes registrados. Devolve o número de falhas — é o código
@@ -98,6 +102,10 @@ inline int run_all(const char* filter = nullptr) noexcept {
     std::printf("\n---------------------\n");
     std::printf("%u testes, %u verificacoes, %u falhas\n",
                 ran, reg.checks(), reg.failures());
+    if (reg.dropped_ > 0) {
+        std::printf("ERRO: %u testes nao couberam no registro (aumente Registry::kMax)\n", reg.dropped_);
+        return static_cast<int>(reg.failures() + reg.dropped_);
+    }
     return static_cast<int>(reg.failures());
 }
 

@@ -115,6 +115,15 @@ struct KeyframeRow {
     u32 paramIndex    = 0;    // +20  parâmetro de efeito: param*4 + componente
 };
 
+/// Índice de `Engine::query_all_keyframes`: quantos keyframes de cada camada
+/// vêm em seguida no buffer de KeyframeRow (mesma ordem de query_layers).
+struct KeyframeIndexRow {
+    u64 layerId = 0;          // +0
+    u32 count   = 0;          // +8
+    u32 reserved = 0;         // +12
+};
+static_assert(sizeof(KeyframeIndexRow) == 16, "KeyframeIndexRow e contrato de ABI com a UI");
+
 /// Detalhe de UMA camada para o inspetor: transform avaliado no playhead (a
 /// animação já aplicada), o que está animado e o que tem keyframe exatamente
 /// no playhead (estado do botão de losango). A UI não guarda cópia disso:

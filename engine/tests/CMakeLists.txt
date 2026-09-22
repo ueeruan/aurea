@@ -33,6 +33,7 @@ add_executable(aurea_tests
     test_vector_gpu.cpp
     test_export.cpp
     test_perf.cpp
+    test_timeline_scale.cpp
 )
 
 target_include_directories(aurea_tests PRIVATE

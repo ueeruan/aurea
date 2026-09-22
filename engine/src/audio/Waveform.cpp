@@ -1,5 +1,10 @@
 // =============================================================================
 //  Aurea / audio / Waveform.cpp — picos multirresolução, calculados uma vez.
+//
+//  Fase 8D: e guardados em disco. Um áudio de 30 min leva segundos de decode
+//  no celular (a thread de fundo esquentando a cada abertura do projeto); os
+//  picos do nível 0 são 200 bytes por segundo (360 KB para 30 min). A próxima
+//  abertura lê o arquivo e monta os níveis em milissegundos.
 // =============================================================================
 #include "aurea/audio/Audio.hpp"
 
@@ -9,8 +14,35 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstring>
+#include <filesystem>
+#include <system_error>
 
 namespace aurea::audio {
+
+namespace {
+constexpr char kDiskMagic[4] = {'A', 'W', 'V', '1'};
+
+/// Níveis mais grossos a partir do 0: máximo de pares até sobrar um balde.
+void build_levels(std::vector<std::vector<u8>>& levels) {
+    levels.resize(1);
+    while (levels.back().size() > 1) {
+        const std::vector<u8>& prev = levels.back();
+        std::vector<u8> next((prev.size() + 1) / 2);
+        for (usize i = 0; i < next.size(); ++i) {
+            next[i] = std::max(prev[2 * i], 2 * i + 1 < prev.size() ? prev[2 * i + 1] : u8{0});
+        }
+        levels.push_back(std::move(next));
+    }
+}
+
+u64 fnv1a(const void* data, usize n, u64 h = 1469598103934665603ull) {
+    const auto* p = static_cast<const u8*>(data);
+    for (usize i = 0; i < n; ++i) h = (h ^ p[i]) * 1099511628211ull;
+    return h;
+}
+} // namespace
 
 WaveformCache::WaveformCache(VideoSourceFactory* factory) : factory_(factory) {
     thread_ = std::thread([this] { thread_main(); });
@@ -23,6 +55,67 @@ WaveformCache::~WaveformCache() {
     }
     wake_.notify_all();
     if (thread_.joinable()) thread_.join();
+}
+
+void WaveformCache::set_disk_directory(std::string dir) {
+    if (!dir.empty()) {
+        std::error_code ec;
+        std::filesystem::create_directories(std::filesystem::u8path(dir), ec);
+        if (ec) dir.clear();   // sem pasta: calcula como antes, sem guardar
+    }
+    std::lock_guard<std::mutex> lock(mutex_);
+    diskDir_ = std::move(dir);
+}
+
+std::string WaveformCache::disk_path(const AudioAssetRef& ref) const {
+    if (diskDir_.empty() || ref.path.empty()) return {};
+    // Caminho + duração + tamanho do arquivo (content:// não tem tamanho aqui:
+    // fica caminho + duração, que já muda quando a mídia troca de verdade).
+    std::error_code ec;
+    const u64 size = static_cast<u64>(std::filesystem::file_size(std::filesystem::u8path(ref.path), ec));
+    u64 h = fnv1a(ref.path.data(), ref.path.size());
+    h = fnv1a(&ref.durationSamples, sizeof(ref.durationSamples), h);
+    if (!ec) h = fnv1a(&size, sizeof(size), h);
+    char name[40];
+    std::snprintf(name, sizeof(name), "%016llx.awv", static_cast<unsigned long long>(h));
+    return diskDir_ + "/" + name;
+}
+
+bool WaveformCache::load_disk(const std::string& file, i64 total, std::vector<u8>& out) {
+    std::FILE* f = std::fopen(file.c_str(), "rb");
+    if (!f) return false;
+    char magic[4] = {};
+    i64 n = -1;
+    bool ok = std::fread(magic, 1, 4, f) == 4 && std::memcmp(magic, kDiskMagic, 4) == 0
+           && std::fread(&n, sizeof(n), 1, f) == 1 && n == total && n > 0;
+    if (ok) {
+        out.assign(static_cast<usize>(n), u8{0});
+        ok = std::fread(out.data(), 1, out.size(), f) == out.size();
+    }
+    std::fclose(f);
+    if (!ok) {
+        // Arquivo truncado/de outra versão: apaga e recalcula (cache corrompido é refeito).
+        std::error_code ec;
+        std::filesystem::remove(std::filesystem::u8path(file), ec);
+    }
+    return ok;
+}
+
+void WaveformCache::save_disk(const std::string& file, const std::vector<u8>& level0) {
+    // Escrita atômica: temporário + rename (um cache pela metade nunca é lido).
+    const std::string tmp = file + ".tmp";
+    std::FILE* f = std::fopen(tmp.c_str(), "wb");
+    if (!f) return;
+    const i64 n = static_cast<i64>(level0.size());
+    bool ok = std::fwrite(kDiskMagic, 1, 4, f) == 4 && std::fwrite(&n, sizeof(n), 1, f) == 1
+           && std::fwrite(level0.data(), 1, level0.size(), f) == level0.size();
+    ok = std::fclose(f) == 0 && ok;
+    std::error_code ec;
+    if (ok) std::filesystem::rename(std::filesystem::u8path(tmp), std::filesystem::u8path(file), ec);
+    if (!ok || ec) {
+        AUREA_LOG_WARN("waveform: cache em disco nao gravado");
+        std::filesystem::remove(std::filesystem::u8path(tmp), ec);
+    }
 }
 
 void WaveformCache::request(u64 key, const AudioAssetRef& ref) {
@@ -92,9 +185,28 @@ void WaveformCache::thread_main() {
         if (it == entries_.end() || it->second.done) continue;
         const AudioAssetRef ref = it->second.ref;
         const i64 total = it->second.total;
+        const std::string disk = disk_path(ref);
         lock.unlock();
 
         const u64 t0 = monotonic_ns();
+        // Já calculada numa sessão anterior: lê do disco em vez de decodificar.
+        std::vector<u8> stored;
+        if (!disk.empty() && load_disk(disk, total, stored)) {
+            lock.lock();
+            auto e = entries_.find(key);
+            if (e != entries_.end() && e->second.ref.path == ref.path && e->second.total == total) {
+                e->second.levels.assign(1, std::move(stored));
+                build_levels(e->second.levels);
+                e->second.ready = e->second.total;
+                e->second.done = true;
+                AUREA_LOG_INFO("waveform: %.1f s de audio lidos do cache em %.1f ms",
+                               static_cast<f64>(total * kBaseSamples) / kMixRate,
+                               static_cast<f64>(monotonic_ns() - t0) / 1e6);
+            }
+            generation_.fetch_add(1, std::memory_order_acq_rel);
+            continue;
+        }
+
         // Decoder próprio (cache sem thread, pequeno): não disputa com o som
         // do preview nem com o export.
         AudioBlockCache blocks(factory_, 2ull << 20, false);
@@ -139,20 +251,18 @@ void WaveformCache::thread_main() {
                 e->second.failed = true;
                 AUREA_LOG_WARN("waveform: audio ilegivel");
             } else {
-                // Níveis: máximo de pares até sobrar um balde.
-                auto& levels = e->second.levels;
-                while (levels.back().size() > 1) {
-                    const std::vector<u8>& prev = levels.back();
-                    std::vector<u8> next((prev.size() + 1) / 2);
-                    for (usize i = 0; i < next.size(); ++i) {
-                        next[i] = std::max(prev[2 * i], 2 * i + 1 < prev.size() ? prev[2 * i + 1] : u8{0});
-                    }
-                    levels.push_back(std::move(next));
-                }
+                build_levels(e->second.levels);
                 e->second.done = true;
                 e->second.ready = e->second.total;
                 AUREA_LOG_INFO("waveform: %.1f s de audio em %.0f ms", static_cast<f64>(total * kBaseSamples) / kMixRate,
                                static_cast<f64>(monotonic_ns() - t0) / 1e6);
+                // Só o cálculo COMPLETO vai para o disco (parado no meio = recalcula).
+                if (!disk.empty() && done >= total && !quit_) {
+                    std::vector<u8> level0 = e->second.levels[0];
+                    lock.unlock();
+                    save_disk(disk, level0);
+                    lock.lock();
+                }
             }
         }
         generation_.fetch_add(1, std::memory_order_acq_rel);

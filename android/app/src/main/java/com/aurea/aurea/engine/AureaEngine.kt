@@ -245,6 +245,15 @@ class AureaEngine private constructor() {
     fun queryKeyframes(layer: Long, outBuffer: ByteBuffer, capacity: Int): Int =
         nativeQueryKeyframes(nativeHandle, layer, outBuffer, capacity)
 
+    /**
+     * Keyframes de todas as camadas numa consulta só: `index` recebe 16 bytes
+     * por camada (id u64, quantidade u32, reservado) e `rows` as linhas
+     * concatenadas. Devolve `(camadas shl 32) or total`; se não coube, nada
+     * foi escrito e quem chama cresce os buffers.
+     */
+    fun queryAllKeyframes(index: ByteBuffer, layerCapacity: Int, rows: ByteBuffer, capacity: Int): Long =
+        nativeQueryAllKeyframes(nativeHandle, index, layerCapacity, rows, capacity)
+
     fun queryCurve(layer: Long, property: Int, from: Int, to: Int, out: FloatArray): Int =
         nativeQueryCurve(nativeHandle, layer, property, from, to, out, out.size)
 
@@ -564,6 +573,7 @@ class AureaEngine private constructor() {
         handle: Long, rows: ByteBuffer, capacity: Int, blob: ByteBuffer, blobCapacity: Int,
     ): Int
     private external fun nativeQueryKeyframes(handle: Long, layer: Long, rows: ByteBuffer, capacity: Int): Int
+    private external fun nativeQueryAllKeyframes(handle: Long, index: ByteBuffer, layerCapacity: Int, rows: ByteBuffer, capacity: Int): Long
     private external fun nativeQueryCurve(
         handle: Long, layer: Long, property: Int, from: Int, to: Int, out: FloatArray, count: Int,
     ): Int

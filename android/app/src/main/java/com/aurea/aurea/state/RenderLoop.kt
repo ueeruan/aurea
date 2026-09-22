@@ -27,6 +27,13 @@ class RenderLoop(private val onFrame: (frameTimeNanos: Long) -> Unit) {
     private var lastFrameNanos = 0L
 
     /**
+     * Ocioso (fase 8D, §38/§40): > 0 = o próximo callback vem depois de tantos
+     * ms, não no próximo vsync. Com o app parado o laço não acorda a CPU 60–120
+     * vezes por segundo à toa; [wake] volta ao vsync na hora (comando, gesto).
+     */
+    var idleDelayMs: Long = 0L
+
+    /**
      * Estatística de cadência. Serve para a telemetria distinguir "a UI está
      * lenta" de "o motor está lento": se o intervalo entre callbacks já é
      * maior que o esperado, o problema está acima do motor.
@@ -53,7 +60,12 @@ class RenderLoop(private val onFrame: (frameTimeNanos: Long) -> Unit) {
             // reagendar por causa de um frame lento transformaria um engasgo
             // momentâneo numa parada até a próxima interação.
             if (running) {
-                Choreographer.getInstance().postFrameCallback(this)
+                if (idleDelayMs > 0L) {
+                    lastFrameNanos = 0L   // o intervalo ocioso não entra na média de cadência
+                    Choreographer.getInstance().postFrameCallbackDelayed(this, idleDelayMs)
+                } else {
+                    Choreographer.getInstance().postFrameCallback(this)
+                }
             }
         }
     }
@@ -63,6 +75,15 @@ class RenderLoop(private val onFrame: (frameTimeNanos: Long) -> Unit) {
         running = true
         lastFrameNanos = 0L
         Choreographer.getInstance().postFrameCallback(callback)
+    }
+
+    /** Sai do modo ocioso já (o callback agendado com atraso é trocado pelo do próximo vsync). */
+    fun wake() {
+        if (!running || idleDelayMs == 0L) return
+        idleDelayMs = 0L
+        val c = Choreographer.getInstance()
+        c.removeFrameCallback(callback)
+        c.postFrameCallback(callback)
     }
 
     fun stop() {

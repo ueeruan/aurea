@@ -782,6 +782,15 @@ public:
     u32 query_layers(bridge::LayerRow* out, u32 capacity,
                      char* outNameBlob, u32 nameBlobCapacity) noexcept;
     u32 query_keyframes(u64 layerId, bridge::KeyframeRow* out, u32 capacity) noexcept;
+    /// Keyframes de TODAS as camadas da composição atual numa consulta só (a
+    /// timeline relê a cada `modelRevision`: um travamento do modelo e uma
+    /// travessia de JNI em vez de uma por camada). Ordem de query_layers
+    /// (frente → fundo); `outIndex[i]` diz de que camada e quantos, e as
+    /// linhas vêm concatenadas em `out`. Devolve o TOTAL de keyframes e põe em
+    /// `outLayers` o total de camadas; se não couber (total > capacity ou
+    /// camadas > layerCapacity) nada é escrito e a UI cresce os buffers.
+    u32 query_all_keyframes(bridge::KeyframeIndexRow* outIndex, u32 layerCapacity,
+                            bridge::KeyframeRow* out, u32 capacity, u32* outLayers) noexcept;
     /// Miniatura da layer no instante `timelineFrame` (RGBA8 sRGB, `height`
     /// linhas). Devolve os bytes escritos, ou 0 se ainda não está pronta (o
     /// pedido fica na fila; `thumbnailGeneration` no status avisa quando

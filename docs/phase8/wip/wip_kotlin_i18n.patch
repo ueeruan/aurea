@@ -1,0 +1,2432 @@
+diff --git a/android/app/src/main/java/com/aurea/aurea/editor/AddLayerPanel.kt b/android/app/src/main/java/com/aurea/aurea/editor/AddLayerPanel.kt
+index ca98d5b..0fdeb35 100644
+--- a/android/app/src/main/java/com/aurea/aurea/editor/AddLayerPanel.kt
++++ b/android/app/src/main/java/com/aurea/aurea/editor/AddLayerPanel.kt
+@@ -30,6 +30,7 @@ import androidx.compose.runtime.Composable
+ import androidx.compose.runtime.LaunchedEffect
+ import androidx.compose.ui.Alignment
+ import androidx.compose.ui.Modifier
++import androidx.annotation.StringRes
+ import androidx.compose.ui.res.stringResource
+ import com.aurea.aurea.R
+ import androidx.compose.ui.draw.clip
+@@ -69,15 +70,15 @@ import kotlin.math.sin
+  * foram distribuídos aqui: SVG em Vetor, legendas em Texto, ajuste/agrupar em
+  * Elemento, marca e batidas em Áudio. `Shape` continua o 1º (padrão do `openAdd`).
+  */
+-internal enum class AddTab(val label: String, val glyph: Char) {
+-    Shape("Forma", ShellGlyph.SquareOnCircle),
+-    Media("Mídia", CupertinoGlyph.PhotoOnRectangle),
+-    Audio("Áudio", CupertinoGlyph.MusicNote2),
+-    Text("Texto", CupertinoGlyph.Textformat),
+-    Element("Elemento", ShellGlyph.CircleGridHex),
+-    Model3D("3D", CupertinoGlyph.Cube),
+-    Draw("Desenho", ShellGlyph.Scribble),
+-    Vector("Vetor", CupertinoGlyph.PencilOutline),
++internal enum class AddTab(@StringRes val label: Int, val glyph: Char) {
++    Shape(R.string.sh_add_tab_shape, ShellGlyph.SquareOnCircle),
++    Media(R.string.sh_add_tab_media, CupertinoGlyph.PhotoOnRectangle),
++    Audio(R.string.sh_add_tab_audio, CupertinoGlyph.MusicNote2),
++    Text(R.string.sh_add_tab_text, CupertinoGlyph.Textformat),
++    Element(R.string.sh_add_tab_element, ShellGlyph.CircleGridHex),
++    Model3D(R.string.sh_add_tab_3d, CupertinoGlyph.Cube),
++    Draw(R.string.sh_add_tab_draw, ShellGlyph.Scribble),
++    Vector(R.string.sh_add_tab_vector, CupertinoGlyph.PencilOutline),
+ }
+ 
+ /**
+@@ -131,6 +132,7 @@ private fun AddCategories(ui: EditorUi, close: () -> Unit) {
+         ) {
+             AddTab.entries.forEach { tab ->
+                 val on = ui.addTab == tab
++                val tabLabel = stringResource(tab.label)
+                 val color = if (on) AureaColors.Accent else AureaColors.Text
+                 Column(
+                     Modifier
+@@ -139,7 +141,7 @@ private fun AddCategories(ui: EditorUi, close: () -> Unit) {
+                         .padding(horizontal = 2.dp, vertical = 5.dp)
+                         .clip(RoundedCornerShape(12.dp))
+                         .background(if (on) AureaColors.Chip else Color.Transparent)
+-                        .semantics { contentDescription = tab.label }
++                        .semantics { contentDescription = tabLabel }
+                         .tocavel(shrink = 1f) { ui.addTab = tab },
+                     horizontalAlignment = Alignment.CenterHorizontally,
+                     verticalArrangement = Arrangement.Center,
+@@ -147,7 +149,7 @@ private fun AddCategories(ui: EditorUi, close: () -> Unit) {
+                     CupertinoIcon(tab.glyph, 24.dp, color)
+                     Spacer(Modifier.height(4.dp))
+                     Text(
+-                        tab.label,
++                        tabLabel,
+                         maxLines = 1,
+                         overflow = TextOverflow.Ellipsis,
+                         style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, fontWeight = FontWeight.W600, color = color)),
+@@ -243,9 +245,10 @@ private fun RowScope.AddCard(item: AddItem) {
+  * (hexágono repetido) e o 13 (quase igual ao arredondado) — nada em dobro.
+  */
+ private val SHAPES = listOf(
+-    0 to "Círculo", 10 to "Quadrado", 1 to "Arredondado", 12 to "Cápsula", 4 to "Triângulo",
+-    14 to "Triângulo reto", 6 to "Polígono", 11 to "Estrela", 2 to "Cruz", 3 to "Anel",
+-    5 to "Fatia", 7 to "Flor", 8 to "Seta",
++    0 to R.string.sh_shape_circle, 10 to R.string.sh_shape_square, 1 to R.string.sh_shape_rounded,
++    12 to R.string.sh_shape_capsule, 4 to R.string.sh_shape_triangle, 14 to R.string.sh_shape_right_triangle,
++    6 to R.string.editor_poligono, 11 to R.string.editor_estrela, 2 to R.string.sh_shape_cross,
++    3 to R.string.sh_shape_ring, 5 to R.string.sh_shape_slice, 7 to R.string.sh_shape_flower, 8 to R.string.sh_shape_arrow,
+ )
+ 
+ /** Tocar põe a forma no centro da cena, já escolhida (e fecha o adicionar). */
+@@ -268,7 +271,7 @@ private fun ShapesTab(store: EditorStore, close: () -> Unit) {
+                         if (shape == null) {
+                             Spacer(Modifier.weight(1f))
+                         } else {
+-                            ShapeTile(shape.first, shape.second) {
++                            ShapeTile(shape.first, stringResource(shape.second)) {
+                                 store.addShape(shape.first)
+                                 close()
+                             }
+@@ -426,14 +429,14 @@ private fun AudioTab(store: EditorStore, close: () -> Unit) {
+     CardGrid(
+         listOf(
+             AddItem(stringResource(R.string.editor_musica_ou_som), CupertinoGlyph.MusicNote, AureaColors.Accent) { files.launch(arrayOf("audio/*")) },
+-            AddItem("Som de um vídeo", CupertinoGlyph.Film) {
++            AddItem(stringResource(R.string.sh_add_video_sound), CupertinoGlyph.Film) {
+                 videos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
+             },
+-            AddItem("Detectar batidas", ShellGlyph.Metronome) {
++            AddItem(stringResource(R.string.sh_add_detect_beats), ShellGlyph.Metronome) {
+                 close()
+                 store.detectBeats()
+             },
+-            AddItem("Marca no cabeçote", CupertinoGlyph.Bookmark) {
++            AddItem(stringResource(R.string.sh_add_marker_at_playhead), CupertinoGlyph.Bookmark) {
+                 close()
+                 store.toggleMarker()
+             },
+@@ -447,18 +450,19 @@ private fun AudioTab(store: EditorStore, close: () -> Unit) {
+ 
+ @Composable
+ private fun TextTab(store: EditorStore, ui: EditorUi) {
++    val needsSpeech = stringResource(R.string.sh_add_captions_need_speech)
+     CardGrid(
+         listOf(
+-            AddItem("Texto", CupertinoGlyph.Textformat, AureaColors.Accent) {
++            AddItem(stringResource(R.string.sh_add_tab_text), CupertinoGlyph.Textformat, AureaColors.Accent) {
+                 if (store.addText() >= 0) openPanel(store, ui, EditorPanel.Text)
+             },
+-            AddItem("Legendas da fala", CupertinoGlyph.CaptionsBubble) {
++            AddItem(stringResource(R.string.sh_add_speech_captions), CupertinoGlyph.CaptionsBubble) {
+                 // Legendas saem da fala de um vídeo/áudio: abre o painel dele.
+                 val kind = store.detail?.kind
+                 if (kind == LayerType.Video.kind || kind == LayerType.Audio.kind) {
+                     openPanel(store, ui, EditorPanel.Captions)
+                 } else {
+-                    store.showToast("Selecione um vídeo ou áudio com fala para gerar legendas")
++                    store.showToast(needsSpeech)
+                 }
+             },
+         ),
+@@ -468,18 +472,19 @@ private fun TextTab(store: EditorStore, ui: EditorUi) {
+ /** Peças que não são mídia nem desenho: nulo, partículas (3 receitas), ajuste e grupo. */
+ @Composable
+ private fun ElementTab(store: EditorStore, close: () -> Unit) {
++    val pickToGroup = stringResource(R.string.sh_add_pick_layers_to_group)
+     CardGrid(
+         listOf(
+-            AddItem("Nulo", draw = { drawNullIcon() }) { store.addNull(false); close() },
++            AddItem(stringResource(R.string.sh_add_null), draw = { drawNullIcon() }) { store.addNull(false); close() },
+             // UM sistema, nao tres. Faiscas/Neve/Poeira de luz viraram preset
+             // do mesmo motor — listar os tres aqui prometia tres motores.
+             AddItem(stringResource(R.string.particular_title), CupertinoGlyph.Sparkles, ShellColors.Text3D) {
+                 close(); store.addParticles(0)
+             },
+-            AddItem("Camada de ajuste", CupertinoGlyph.WandStars) { close(); store.addAdjustmentLayer() },
+-            AddItem("Agrupar seleção", CupertinoGlyph.Folder) {
++            AddItem(stringResource(R.string.editor_camada_ajuste), CupertinoGlyph.WandStars) { close(); store.addAdjustmentLayer() },
++            AddItem(stringResource(R.string.sh_add_group_selection), CupertinoGlyph.Folder) {
+                 if (store.selection.isEmpty()) {
+-                    store.showToast("Selecione as camadas a agrupar")
++                    store.showToast(pickToGroup)
+                 } else {
+                     close()
+                     store.precompose()
+@@ -501,13 +506,13 @@ private fun Model3DTab(store: EditorStore, close: () -> Unit) {
+     }
+     CardGrid(
+         listOf(
+-            AddItem("Modelo 3D", CupertinoGlyph.Cube, AureaColors.Accent) {
++            AddItem(stringResource(R.string.sh_add_model_3d), CupertinoGlyph.Cube, AureaColors.Accent) {
+                 picker.launch(arrayOf("model/gltf-binary", "model/gltf+json", "model/obj", "application/octet-stream", "*/*"))
+             },
+-            AddItem("Texto 3D", ShellGlyph.TextformatAlt, ShellColors.Text3D) { store.addText3D(); close() },
+-            AddItem("Nulo 3D", draw = { drawNullIcon() }) { store.addNull(true); close() },
++            AddItem(stringResource(R.string.sh_add_text_3d), ShellGlyph.TextformatAlt, ShellColors.Text3D) { store.addText3D(); close() },
++            AddItem(stringResource(R.string.sh_add_null_3d), draw = { drawNullIcon() }) { store.addNull(true); close() },
+         ),
+-        hint = "Modelo 3D: arquivos .glb, .gltf, .fbx ou .obj",
++        hint = stringResource(R.string.sh_add_model_3d_hint),
+     )
+ }
+ 
+diff --git a/android/app/src/main/java/com/aurea/aurea/editor/BottomArea.kt b/android/app/src/main/java/com/aurea/aurea/editor/BottomArea.kt
+index 9520dea..2a0f196 100644
+--- a/android/app/src/main/java/com/aurea/aurea/editor/BottomArea.kt
++++ b/android/app/src/main/java/com/aurea/aurea/editor/BottomArea.kt
+@@ -31,8 +31,11 @@ import androidx.compose.runtime.getValue
+ import androidx.compose.runtime.remember
+ import androidx.compose.ui.Alignment
+ import androidx.compose.ui.Modifier
++import android.app.Application
++import androidx.annotation.StringRes
+ import androidx.compose.ui.res.stringResource
+ import com.aurea.aurea.R
++import com.aurea.aurea.ui.i18n.AppText
+ import androidx.compose.ui.draw.clip
+ import androidx.compose.ui.draw.drawBehind
+ import androidx.compose.ui.geometry.Size
+@@ -97,21 +100,21 @@ private data class DockLayer(
+  * As fichas da grade: ícone grande + nome curto, cada uma abre UM painel que
+  * existe de verdade. Ficha sem painel não entra (nada de "em breve").
+  */
+-private enum class DockSection(val glyph: Char, val label: String, val panel: EditorPanel) {
+-    ColorFill(CupertinoGlyph.Paintbrush, "Cor e preenchimento", EditorPanel.Shape),
+-    EditShape(ShellGlyph.SliderHorizontalBelowRectangle, "Editar forma", EditorPanel.Shape),
+-    EditVector(CupertinoGlyph.PencilOutline, "Editar vetor", EditorPanel.Vector),
+-    EditText(CupertinoGlyph.Textformat, "Editar texto", EditorPanel.Text),
+-    Particles(CupertinoGlyph.Sparkles, "Partículas", EditorPanel.Particles),
+-    Audio(CupertinoGlyph.Speaker2, "Áudio", EditorPanel.Audio),
+-    Move(CupertinoGlyph.Move, "Transformar", EditorPanel.Transform),
+-    Blend(CupertinoGlyph.CircleLefthalfFill, "Opacidade e mistura", EditorPanel.Appearance),
+-    Environment(CupertinoGlyph.Lightbulb, "Ambiente", EditorPanel.Element3D),
+-    Mask(CupertinoGlyph.PencilOutline, "Máscara", EditorPanel.Mask),
+-    Track(ShellGlyph.Viewfinder, "Rastreio", EditorPanel.Tracking),
+-    Captions(CupertinoGlyph.CaptionsBubble, "Legendas", EditorPanel.Captions),
+-    Presets(CupertinoGlyph.WandStars, "Presets", EditorPanel.Presets),
+-    Effects(CupertinoGlyph.Sparkles, "Efeitos", EditorPanel.Effects),
++private enum class DockSection(val glyph: Char, @StringRes val label: Int, val panel: EditorPanel) {
++    ColorFill(CupertinoGlyph.Paintbrush, R.string.sh_dock_color_fill, EditorPanel.Shape),
++    EditShape(ShellGlyph.SliderHorizontalBelowRectangle, R.string.sh_dock_edit_shape, EditorPanel.Shape),
++    EditVector(CupertinoGlyph.PencilOutline, R.string.sh_dock_edit_vector, EditorPanel.Vector),
++    EditText(CupertinoGlyph.Textformat, R.string.sh_dock_edit_text, EditorPanel.Text),
++    Particles(CupertinoGlyph.Sparkles, R.string.sh_dock_particles, EditorPanel.Particles),
++    Audio(CupertinoGlyph.Speaker2, R.string.sh_add_tab_audio, EditorPanel.Audio),
++    Move(CupertinoGlyph.Move, R.string.sh_dock_transform, EditorPanel.Transform),
++    Blend(CupertinoGlyph.CircleLefthalfFill, R.string.sh_dock_opacity_blend, EditorPanel.Appearance),
++    Environment(CupertinoGlyph.Lightbulb, R.string.sh_dock_environment, EditorPanel.Element3D),
++    Mask(CupertinoGlyph.PencilOutline, R.string.sh_dock_mask, EditorPanel.Mask),
++    Track(ShellGlyph.Viewfinder, R.string.editor_rastreio, EditorPanel.Tracking),
++    Captions(CupertinoGlyph.CaptionsBubble, R.string.sh_dock_captions, EditorPanel.Captions),
++    Presets(CupertinoGlyph.WandStars, R.string.sh_dock_presets, EditorPanel.Presets),
++    Effects(CupertinoGlyph.Sparkles, R.string.sh_dock_effects, EditorPanel.Effects),
+ }
+ 
+ /**
+@@ -253,8 +256,8 @@ internal fun LayerToolsDock(store: EditorStore, ui: EditorUi, layerId: Long) {
+ private inline fun timeEdit(store: EditorStore, l: DockLayer, action: () -> Unit) {
+     val t = store.playhead
+     when {
+-        l.locked -> store.showToast("Camada bloqueada: desbloqueie para editar")
+-        t <= l.start || t >= l.end -> store.showToast("Leve o cabeçote para dentro da camada")
++        l.locked -> store.toastRes(R.string.editor_camada_bloqueada_desbloqueie_editar)
++        t <= l.start || t >= l.end -> store.toastRes(R.string.sh_playhead_into_layer)
+         else -> {
+             if (store.playing) store.pause()
+             action()
+@@ -300,13 +303,14 @@ private fun RowScope.DockTool(
+ @Composable
+ private fun RowScope.DockTile(section: DockSection, height: Float, onClick: () -> Unit) {
+     val small = height < 72f
++    val label = stringResource(section.label)
+     Column(
+         Modifier
+             .weight(1f)
+             .height(height.dp)
+             .clip(RoundedCornerShape(10.dp))
+             .background(ShellColors.DockTile)
+-            .semantics { contentDescription = section.label }
++            .semantics { contentDescription = label }
+             .tocavel(haptic = true, onClick = onClick)
+             .padding(horizontal = 4.dp, vertical = 4.dp),
+         horizontalAlignment = Alignment.CenterHorizontally,
+@@ -318,7 +322,7 @@ private fun RowScope.DockTile(section: DockSection, height: Float, onClick: () -
+         else CupertinoIcon(section.glyph, iconSize, ShellColors.DockTileContent)
+         Spacer(Modifier.height(if (small) 4.dp else 7.dp))
+         Text(
+-            section.label,
++            label,
+             textAlign = TextAlign.Center,
+             maxLines = 2,
+             overflow = TextOverflow.Ellipsis,
+@@ -351,6 +355,7 @@ private fun DockVector(icon: ImageVector, size: androidx.compose.ui.unit.Dp) {
+ @Composable
+ internal fun MultiSelectionPanel(store: EditorStore, @Suppress("UNUSED_PARAMETER") ui: EditorUi) {
+     val count by remember { derivedStateOf { store.selection.size } }
++    val intoLayers = stringResource(R.string.editor_leve_cabecote_dentro_camadas)
+     Column(Modifier.fillMaxSize().padding(horizontal = 10.dp)) {
+         Spacer(Modifier.height(4.dp))
+         Row(
+@@ -365,7 +370,7 @@ internal fun MultiSelectionPanel(store: EditorStore, @Suppress("UNUSED_PARAMETER
+                     if (store.playing) store.pause()
+                     store.splitAtPlayhead(store.layers.filter { it.id in store.selection && !it.locked }.map { it.id })
+                 } else {
+-                    store.showToast("Leve o cabeçote para dentro das camadas")
++                    store.showToast(intoLayers)
+                 }
+             }
+             BatchTool(CupertinoGlyph.ArrowLeftToLine, stringResource(R.string.editor_aparar_fim_cabecote)) { batchTrim(store, start = false) }
+@@ -403,8 +408,10 @@ private fun batchTrim(store: EditorStore, start: Boolean) {
+     val targets = rows.filter { !it.locked && t > it.startFrame && t < it.endFrame }
+     if (targets.isEmpty()) {
+         store.showToast(
+-            if (rows.isNotEmpty() && rows.all { it.locked }) "Camadas bloqueadas: desbloqueie para editar"
+-            else "Leve o cabeçote para dentro das camadas",
++            store.appText(
++                if (rows.isNotEmpty() && rows.all { it.locked }) R.string.sh_layers_locked_unlock_to_edit
++                else R.string.editor_leve_cabecote_dentro_camadas,
++            ),
+         )
+         return
+     }
+@@ -416,6 +423,11 @@ private fun batchTrim(store: EditorStore, start: Boolean) {
+ 
+ private enum class TimeAlign { Start, Cascade, End }
+ 
++/** Toast fora do Compose: no idioma escolhido no app (ver [AppText]). */
++private fun EditorStore.appText(@StringRes id: Int): String = AppText.get(getApplication<Application>(), id)
++
++private fun EditorStore.toastRes(@StringRes id: Int) = showToast(appText(id))
++
+ /**
+  * Arruma as escolhidas no TEMPO, sem mudar a duração de nenhuma: inícios
+  * juntos, fins juntos ou em escada (na ordem da timeline, de cima para baixo;
+@@ -424,7 +436,7 @@ private enum class TimeAlign { Start, Cascade, End }
+ private fun timeAlign(store: EditorStore, mode: TimeAlign) {
+     val rows = store.layers.filter { it.id in store.selection && !it.locked }
+     if (rows.size < 2) {
+-        store.showToast("Escolha ao menos duas camadas desbloqueadas")
++        store.toastRes(R.string.sh_pick_two_unlocked_layers)
+         return
+     }
+     if (store.playing) store.pause()
+diff --git a/android/app/src/main/java/com/aurea/aurea/editor/EditorScreen.kt b/android/app/src/main/java/com/aurea/aurea/editor/EditorScreen.kt
+index a8492f7..0f537c4 100644
+--- a/android/app/src/main/java/com/aurea/aurea/editor/EditorScreen.kt
++++ b/android/app/src/main/java/com/aurea/aurea/editor/EditorScreen.kt
+@@ -262,12 +262,13 @@ fun EditorScreen(store: EditorStore) {
+                 }
+                 // A.01: o círculo "Voltar ao editor" no canto (a HEAD perdeu — bug 1).
+                 if (ui.fullscreen) {
++                    val backLabel = stringResource(R.string.editor_voltar_editor)
+                     Box(
+                         Modifier
+                             .align(Alignment.TopEnd)
+                             .padding(10.dp)
+                             .size(40.dp)
+-                            .semantics { contentDescription = "Voltar ao editor" }
++                            .semantics { contentDescription = backLabel }
+                             .background(ShellColors.FloatingDark, CircleShape)
+                             .tocavel { ui.fullscreen = false },
+                         contentAlignment = Alignment.Center,
+@@ -442,13 +443,14 @@ private fun ColumnScope.SheetBody(content: @Composable () -> Unit) {
+ /** O "+" da A.01: 52 dp, fundo #1E2130, anel 2,2 `acao`, sombra 45 %. */
+ @Composable
+ private fun AddFab(onClick: () -> Unit, modifier: Modifier) {
++    val label = stringResource(R.string.editor_adicionar_camada)
+     Box(
+         modifier
+             .size(ShellDims.Fab)
+             .shadow(6.dp, CircleShape, ambientColor = ShellColors.FabShadow, spotColor = ShellColors.FabShadow)
+             .background(ShellColors.Fab, CircleShape)
+             .border(2.2.dp, AureaColors.Action, CircleShape)
+-            .semantics { contentDescription = "Adicionar camada" }
++            .semantics { contentDescription = label }
+             .tocavel(haptic = true, onClick = onClick),
+         contentAlignment = Alignment.Center,
+     ) {
+diff --git a/android/app/src/main/java/com/aurea/aurea/editor/ExportScreen.kt b/android/app/src/main/java/com/aurea/aurea/editor/ExportScreen.kt
+index bde334d..1ef3ff7 100644
+--- a/android/app/src/main/java/com/aurea/aurea/editor/ExportScreen.kt
++++ b/android/app/src/main/java/com/aurea/aurea/editor/ExportScreen.kt
+@@ -209,15 +209,17 @@ private fun Options(
+     }
+     if (blocked.isNotEmpty()) {
+         Text(
+-            device?.exportLimitReason() ?: "${blocked.joinToString()}: acima do que este aparelho exporta.",
++            device?.exportLimitReason() ?: stringResource(R.string.sh_export_above_device, blocked.joinToString()),
+             style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)),
+             modifier = Modifier.padding(top = 6.dp),
+         )
+     }
+     Section(stringResource(R.string.editor_quadros_segundo))
+-    Chips(fpsOptions.map { if (it == 0.0) "Do projeto (${fmt(compFps)})" else fmt(it) },
+-          if (options.fps == 0.0) "Do projeto (${fmt(compFps)})" else fmt(options.fps)) { label ->
+-        onChange(options.copy(fps = if (label.startsWith("Do projeto")) 0.0 else label.replace(',', '.').toDouble()))
++    // A ficha "do projeto" é achada pelo texto inteiro (traduzido), não pelo começo.
++    val fromProject = stringResource(R.string.sh_export_fps_from_project, fmt(compFps))
++    Chips(fpsOptions.map { if (it == 0.0) fromProject else fmt(it) },
++          if (options.fps == 0.0) fromProject else fmt(options.fps)) { label ->
++        onChange(options.copy(fps = if (label == fromProject) 0.0 else label.replace(',', '.').toDouble()))
+     }
+     Section(stringResource(R.string.editor_formato))
+     val hevcOk = device?.hevcExportAvailable ?: true
+@@ -232,13 +234,14 @@ private fun Options(
+         modifier = Modifier.padding(top = 6.dp),
+     )
+     Section(stringResource(R.string.editor_qualidade))
+-    Chips(listOf(stringResource(R.string.editor_padrao), stringResource(R.string.editor_alta)), if (options.highQuality) stringResource(R.string.editor_alta) else stringResource(R.string.editor_padrao)) {
+-        onChange(options.copy(highQuality = it == "Alta"))
++    val high = stringResource(R.string.editor_alta)
++    Chips(listOf(stringResource(R.string.editor_padrao), high), if (options.highQuality) high else stringResource(R.string.editor_padrao)) {
++        onChange(options.copy(highQuality = it == high))
+     }
+     Spacer(Modifier.height(18.dp))
+-    SummaryRow("Vídeo", "$w × $h · ${fmt(fps)} fps · ${if (options.hevc) "HEVC" else "H.264"}")
++    SummaryRow(stringResource(R.string.editor_video), "$w × $h · ${fmt(fps)} fps · ${if (options.hevc) "HEVC" else "H.264"}")
+     SummaryRow(stringResource(R.string.editor_duracao), fmtTime(seconds))
+-    SummaryRow(stringResource(R.string.editor_tamanho_estimado), if (sizeMb >= 1000) "${fmt(sizeMb / 1000.0)} GB" else "${sizeMb.roundToInt()} MB")
++    SummaryRow(stringResource(R.string.editor_tamanho_estimado), if (sizeMb >= 1000) stringResource(R.string.unit_gigabyte, fmt(sizeMb / 1000.0)) else stringResource(R.string.unit_megabyte, sizeMb.roundToInt()))
+     SummaryRow(stringResource(R.string.editor_cor), stringResource(R.string.editor_sdr_bt_709))
+ }
+ 
+@@ -318,7 +321,7 @@ private fun Progress(fraction: Float, done: Int, total: Int, fps: Float, eta: In
+         Spacer(Modifier.height(12.dp))
+         if (!publishing) {
+             Text(
+-                "Quadro $done de $total · ${fmt(fps.toDouble())} q/s · falta ${fmtTime(eta.toDouble())}",
++                stringResource(R.string.sh_export_progress, done, total, fmt(fps.toDouble()), fmtTime(eta.toDouble())),
+                 style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted, fontFeatureSettings = "tnum")),
+                 textAlign = TextAlign.Center,
+             )
+@@ -353,6 +356,7 @@ private fun BottomAction(store: EditorStore, options: ExportOptions, compW: Int,
+     val exporter = store.exporter
+     val st = exporter.state
+     val context = LocalContext.current
++    val noViewer = stringResource(R.string.editor_nenhum_app_abre_video)
+     Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp)) {
+         when (st.phase) {
+             ExportPhase.Running -> WideButton(stringResource(R.string.editor_cancelar), filled = false) { exporter.cancel() }
+@@ -361,7 +365,7 @@ private fun BottomAction(store: EditorStore, options: ExportOptions, compW: Int,
+                 Box(Modifier.weight(1f)) {
+                     WideButton(stringResource(R.string.editor_abrir), filled = false) {
+                         exporter.viewIntent()?.let { runCatching { context.startActivity(it) }.onFailure { e ->
+-                            if (e is ActivityNotFoundException) store.showToast("Nenhum app abre vídeo") } }
++                            if (e is ActivityNotFoundException) store.showToast(noViewer) } }
+                     }
+                 }
+                 Box(Modifier.weight(1f)) {
+diff --git a/android/app/src/main/java/com/aurea/aurea/editor/Menus.kt b/android/app/src/main/java/com/aurea/aurea/editor/Menus.kt
+index 8655eb2..142d4c7 100644
+--- a/android/app/src/main/java/com/aurea/aurea/editor/Menus.kt
++++ b/android/app/src/main/java/com/aurea/aurea/editor/Menus.kt
+@@ -82,8 +82,9 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
+         onDismiss()
+         block()
+     }
++    val lockedMsg = stringResource(R.string.editor_camada_bloqueada_desbloqueie_editar)
+     fun timeAct(block: () -> Unit): () -> Unit = act {
+-        if (row.locked) store.showToast("Camada bloqueada: desbloqueie para editar") else block()
++        if (row.locked) store.showToast(lockedMsg) else block()
+     }
+ 
+     ShellMenuSheet(onDismiss) {
+@@ -151,7 +152,7 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
+             }
+         }
+         if (type == LayerType.Video || type == LayerType.Audio) {
+-            MenuSection("Mídia")
++            MenuSection(stringResource(R.string.sh_menu_media))
+             if (type == LayerType.Video) {
+                 MenuItemRow(
+                     CupertinoGlyph.MusicNote2,
+@@ -161,7 +162,7 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
+                 )
+             }
+             if (type == LayerType.Audio || type == LayerType.Video) {
+-                MenuItemRow(CupertinoGlyph.Speaker2, "Volume", act { openPanel(store, ui, EditorPanel.Audio) })
++                MenuItemRow(CupertinoGlyph.Speaker2, stringResource(R.string.sh_menu_volume), act { openPanel(store, ui, EditorPanel.Audio) })
+             }
+         }
+ 
+@@ -188,10 +189,10 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
+         MenuItemRow(CupertinoGlyph.Scissors, stringResource(R.string.editor_dividir_cabecote), if (inside) timeAct { store.splitAtPlayhead(listOf(id)) } else null)
+         MenuItemRow(CupertinoGlyph.ArrowLeftToLine, stringResource(R.string.editor_aparar_fim_cabecote), if (inside) timeAct { store.trimEnd(id, t) } else null)
+         if (type == LayerType.Video || type == LayerType.Audio) {
+-            MenuItemRow(CupertinoGlyph.Speedometer, "Velocidade e remapear o tempo", act { openPanel(store, ui, EditorPanel.Speed) })
++            MenuItemRow(CupertinoGlyph.Speedometer, stringResource(R.string.sh_menu_speed_remap), act { openPanel(store, ui, EditorPanel.Speed) })
+         }
+         if (type == LayerType.Video) {
+-            MenuItemRow(ShellGlyph.Snow, "Congelar quadro", if (inside) act { store.freezeFrame(id) } else null)
++            MenuItemRow(ShellGlyph.Snow, stringResource(R.string.sh_menu_freeze_frame), if (inside) act { store.freezeFrame(id) } else null)
+             MenuSection(stringResource(R.string.editor_rastreio))
+             MenuItemRow(ShellGlyph.Viewfinder, stringResource(R.string.editor_rastrear_ponto), act { store.select(id); store.beginPointPick(false) },
+                 detail = stringResource(R.string.editor_cria_nulo_segue_ponto_ligue_outras))
+@@ -254,7 +255,7 @@ internal fun SearchLayersSheet(store: EditorStore, onDismiss: () -> Unit) {
+     val focus = remember { FocusRequester() }
+     val hits = remember(query, store.layers) { store.searchLayers(query) }
+     ShellMenuSheet(onDismiss, maxHeightFraction = 0.7f) {
+-        MenuSection("Buscar camadas")
++        MenuSection(stringResource(R.string.sh_menu_search_layers))
+         Box(
+             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+                 .heightIn(min = 40.dp).clip(RoundedCornerShape(10.dp)).background(AureaColors.Chip)
+@@ -273,7 +274,7 @@ internal fun SearchLayersSheet(store: EditorStore, onDismiss: () -> Unit) {
+         LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+         if (query.isNotBlank() && hits.isEmpty()) {
+             Text(
+-                "Nenhuma camada com \"${query.trim()}\"",
++                stringResource(R.string.sh_menu_no_layer_matches, query.trim()),
+                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                 style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)),
+             )
+@@ -324,7 +325,7 @@ internal fun TimelineMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -
+         block()
+     }
+     ShellMenuSheet(onDismiss, maxHeightFraction = 0.78f) {
+-        MenuSection("Seleção")
++        MenuSection(stringResource(R.string.sh_menu_selection))
+         MenuItemRow(CupertinoGlyph.CheckmarkSquare, stringResource(R.string.editor_selecionar_todas_camadas), if (count >= 2) act { store.selectAll() } else null)
+         MenuItemRow(CupertinoGlyph.Square, stringResource(R.string.editor_limpar_selecao), act { store.clearSelection() })
+         MenuItemRow(CupertinoGlyph.Search, stringResource(R.string.editor_buscar_camadas), if (count > 0) act { ui.sheet = ShellSheet.SearchLayers } else null)
+@@ -347,7 +348,7 @@ internal fun TimelineMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -
+             val shutter = store.shutterAngle.roundToInt()
+             MenuItemRow(
+                 CupertinoGlyph.CircleLefthalfFill,
+-                "Obturador: $shutter°",
++                stringResource(R.string.sh_menu_shutter, shutter),
+                 {
+                     val next = ShutterOptions.firstOrNull { it > shutter } ?: ShutterOptions.first()
+                     store.changeShutterAngle(next.toFloat())
+@@ -378,7 +379,7 @@ internal fun TimelineMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -
+             ShellGlyph.ScissorsAlt,
+             stringResource(R.string.editor_aparar_projeto_cabecote),
+             if (store.playhead > 0) act { store.trimProjectAtPlayhead() } else null,
+-            detail = "Corta tudo o que passa de $now",
++            detail = stringResource(R.string.sh_menu_cut_after, now),
+         )
+ 
+         MenuSection(stringResource(R.string.editor_marcas_ritmo))
+diff --git a/android/app/src/main/java/com/aurea/aurea/editor/ProjectSettingsSheet.kt b/android/app/src/main/java/com/aurea/aurea/editor/ProjectSettingsSheet.kt
+index db56ff7..1aecbd7 100644
+--- a/android/app/src/main/java/com/aurea/aurea/editor/ProjectSettingsSheet.kt
++++ b/android/app/src/main/java/com/aurea/aurea/editor/ProjectSettingsSheet.kt
+@@ -21,8 +21,10 @@ import androidx.compose.runtime.remember
+ import androidx.compose.runtime.setValue
+ import androidx.compose.ui.Alignment
+ import androidx.compose.ui.Modifier
++import android.app.Application
+ import androidx.compose.ui.res.stringResource
+ import com.aurea.aurea.R
++import com.aurea.aurea.ui.i18n.AppText
+ import androidx.compose.ui.draw.clip
+ import androidx.compose.ui.graphics.Color
+ import androidx.compose.ui.semantics.contentDescription
+@@ -60,7 +62,7 @@ private val Resolutions = listOf(480 to "480p (SD)", 720 to "720p (HD)", 1080 to
+ private val FpsOptions = listOf(24, 25, 30, 50, 60)
+ 
+ /** Cores de fundo de um toque; "Outra cor…" abre o seletor. */
+-private val Backgrounds = listOf("Preto" to floatArrayOf(0f, 0f, 0f), "Branco" to floatArrayOf(1f, 1f, 1f))
++private val Backgrounds = listOf(R.string.sh_bg_black to floatArrayOf(0f, 0f, 0f), R.string.sh_bg_white to floatArrayOf(1f, 1f, 1f))
+ 
+ /**
+  * A folha da engrenagem: proporção (16:9 · 9:16 · 4:5 · 1:1 · 4:3 · ✎ livre),
+@@ -81,7 +83,10 @@ internal fun ProjectSettingsSheet(store: EditorStore, onDismiss: () -> Unit) {
+     val shortSide = min(w, h)
+     val fpsValue = comp?.fps ?: p.fps.toDouble()
+     val bg = comp?.background ?: listOf(0f, 0f, 0f, 1f)
+-    val bgName = Backgrounds.firstOrNull { (_, c) -> (0..2).all { abs(c[it] - bg[it]) < 0.01f } }?.first ?: stringResource(R.string.editor_personalizada)
++    val bgName = Backgrounds.firstOrNull { (_, c) -> (0..2).all { abs(c[it] - bg[it]) < 0.01f } }?.first
++        ?.let { stringResource(it) } ?: stringResource(R.string.editor_personalizada)
++    val widthLabel = stringResource(R.string.editor_largura)
++    val heightLabel = stringResource(R.string.editor_altura)
+ 
+     var keypad by remember { mutableStateOf<KeypadRequest?>(null) }
+     var pickingBackground by remember { mutableStateOf(false) }
+@@ -108,12 +113,13 @@ internal fun ProjectSettingsSheet(store: EditorStore, onDismiss: () -> Unit) {
+                     if (comp != null && preset != label) applyAspect(store, comp, ratio, shortSide)
+                 }
+             }
++            val freeLabel = stringResource(R.string.editor_tamanho_livre)
+             Box(
+                 Modifier
+                     .size(40.dp)
+                     .clip(RoundedCornerShape(8.dp))
+                     .background(if (free) AureaColors.Accent else AureaColors.Chip)
+-                    .semantics { contentDescription = "Tamanho livre" }
++                    .semantics { contentDescription = freeLabel }
+                     .tocavel(haptic = true) { free = true },
+                 contentAlignment = Alignment.Center,
+             ) {
+@@ -125,13 +131,13 @@ internal fun ProjectSettingsSheet(store: EditorStore, onDismiss: () -> Unit) {
+             SettingLine(stringResource(R.string.editor_tamanho)) {
+                 Row(verticalAlignment = Alignment.CenterVertically) {
+                     SizeBox("$w", Modifier.weight(1f)) {
+-                        keypad = KeypadRequest("Largura", w.toFloat(), "px", 16f, 8192f, 0) { v ->
++                        keypad = KeypadRequest(widthLabel, w.toFloat(), "px", 16f, 8192f, 0) { v ->
+                             setSize(store, comp, v.roundToInt(), h)
+                         }
+                     }
+                     Text("×", modifier = Modifier.padding(horizontal = 10.dp), style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = AureaColors.Muted)))
+                     SizeBox("$h", Modifier.weight(1f)) {
+-                        keypad = KeypadRequest("Altura", h.toFloat(), "px", 16f, 8192f, 0) { v ->
++                        keypad = KeypadRequest(heightLabel, h.toFloat(), "px", 16f, 8192f, 0) { v ->
+                             setSize(store, comp, w, v.roundToInt())
+                         }
+                     }
+@@ -151,7 +157,7 @@ internal fun ProjectSettingsSheet(store: EditorStore, onDismiss: () -> Unit) {
+                         val c = comp ?: return@PopupItem
+                         val (nw, nh) = sizeFor(short, if (aspect > 0f) aspect else 16f / 9f)
+                         if (c.fits(nw, nh)) store.setCompositionSize(nw, nh)
+-                        else store.showToast("Este aparelho exporta até ${c.capLong} × ${c.capShort}")
++                        else store.showToast(capMessage(store, c))
+                     }
+                 },
+             )
+@@ -179,7 +185,8 @@ internal fun ProjectSettingsSheet(store: EditorStore, onDismiss: () -> Unit) {
+                 open = menu == "bg",
+                 onOpen = { menu = "bg" },
+                 onDismiss = { menu = null },
+-                items = Backgrounds.map { (name, c) ->
++                items = Backgrounds.map { (res, c) ->
++                    val name = stringResource(res)
+                     PopupItem(name, name == bgName) { store.setCompositionBackground(c[0], c[1], c[2], 1f) }
+                 } + PopupItem(stringResource(R.string.editor_outra_cor), bgName == stringResource(R.string.editor_personalizada)) { if (comp != null) pickingBackground = true },
+             )
+@@ -221,9 +228,13 @@ private fun setSize(store: EditorStore, c: CompositionSettings, width: Int, heig
+     val nw = even(width.toFloat())
+     val nh = even(height.toFloat())
+     if (c.fits(nw, nh)) store.setCompositionSize(nw, nh)
+-    else store.showToast("Este aparelho exporta até ${c.capLong} × ${c.capShort}")
++    else store.showToast(capMessage(store, c))
+ }
+ 
++/** O teto do aparelho, no idioma escolhido no app (fora do Compose). */
++private fun capMessage(store: EditorStore, c: CompositionSettings): String =
++    AppText.get(store.getApplication<Application>(), R.string.sh_device_exports_up_to, c.capLong, c.capShort)
++
+ /** Tamanho par com lado menor `short` na proporção `ratio` (largura / altura). */
+ private fun sizeFor(short: Int, ratio: Float): Pair<Int, Int> =
+     if (ratio >= 1f) even(short * ratio) to even(short.toFloat()) else even(short.toFloat()) to even(short / ratio)
+@@ -233,6 +244,7 @@ private fun even(v: Float): Int = max(2, (v / 2f).roundToInt() * 2)
+ /** Caixinha no formato da proporção (lado maior 44), rótulo dentro. */
+ @Composable
+ private fun AspectBox(label: String, ratio: Float, on: Boolean, onClick: () -> Unit) {
++    val description = stringResource(R.string.sh_aspect_ratio_desc, label)
+     val long = 44f
+     val bw = if (ratio >= 1f) long else long * ratio.coerceAtLeast(0.5f) + 6f
+     val bh = if (ratio >= 1f) long / ratio + 6f else long
+@@ -241,7 +253,7 @@ private fun AspectBox(label: String, ratio: Float, on: Boolean, onClick: () -> U
+             .size(bw.dp, bh.dp)
+             .clip(RoundedCornerShape(6.dp))
+             .background(if (on) AureaColors.Accent else AureaColors.Chip)
+-            .semantics { contentDescription = "Proporção $label" }
++            .semantics { contentDescription = description }
+             .tocavel(haptic = true, onClick = onClick),
+         contentAlignment = Alignment.Center,
+     ) {
+diff --git a/android/app/src/main/java/com/aurea/aurea/editor/Stage.kt b/android/app/src/main/java/com/aurea/aurea/editor/Stage.kt
+index ed5f3bb..de2b0dd 100644
+--- a/android/app/src/main/java/com/aurea/aurea/editor/Stage.kt
++++ b/android/app/src/main/java/com/aurea/aurea/editor/Stage.kt
+@@ -21,8 +21,12 @@ import androidx.compose.runtime.remember
+ import androidx.compose.runtime.setValue
+ import androidx.compose.ui.Alignment
+ import androidx.compose.ui.Modifier
++import android.app.Application
++import android.content.res.Resources
++import androidx.compose.ui.platform.LocalContext
+ import androidx.compose.ui.res.stringResource
+ import com.aurea.aurea.R
++import com.aurea.aurea.ui.i18n.AppText
+ import androidx.compose.ui.draw.clip
+ import androidx.compose.ui.draw.clipToBounds
+ import androidx.compose.ui.draw.drawBehind
+@@ -105,6 +109,7 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier)
+ private fun VectorToolBanner(store: EditorStore, modifier: Modifier) {
+     val tool = store.vectorTool
+     if (tool == 0) return
++    val finishLabel = stringResource(R.string.editor_concluir_desenho)
+     Row(
+         modifier
+             .clip(RoundedCornerShape(10.dp))
+@@ -130,7 +135,7 @@ private fun VectorToolBanner(store: EditorStore, modifier: Modifier) {
+         Box(
+             Modifier
+                 .heightIn(min = 36.dp)
+-                .semantics { contentDescription = "Concluir desenho" }
++                .semantics { contentDescription = finishLabel }
+                 .tocavel(haptic = true) { store.chooseVectorTool(0) }
+                 .padding(horizontal = 4.dp),
+             contentAlignment = Alignment.Center,
+@@ -162,6 +167,7 @@ private fun LockBanner(store: EditorStore, modifier: Modifier) {
+         }
+     }
+     val id = lockedId ?: return
++    val unlockLabel = stringResource(R.string.editor_desbloquear)
+     Row(
+         modifier
+             .clip(RoundedCornerShape(10.dp))
+@@ -183,7 +189,7 @@ private fun LockBanner(store: EditorStore, modifier: Modifier) {
+         Box(
+             Modifier
+                 .heightIn(min = 36.dp)
+-                .semantics { contentDescription = "Desbloquear" }
++                .semantics { contentDescription = unlockLabel }
+                 .tocavel(haptic = true) { store.setLayerLocked(id, false) }
+                 .padding(horizontal = 4.dp),
+             contentAlignment = Alignment.Center,
+@@ -659,7 +665,7 @@ private suspend fun PointerInputScope.stageGestures(
+                         store.finishPointPick(u * LayerGeometry.width(d), v * LayerGeometry.height(d))
+                     } else {
+                         store.pickCursor = null
+-                        store.showToast("Toque dentro do vídeo")
++                        store.showToast(AppText.get(store.getApplication<Application>(), R.string.sh_tap_inside_video))
+                     }
+                 }
+             }
+@@ -800,7 +806,7 @@ private fun startDrag(store: EditorStore, edit: StageEdit, target: Int, handle:
+                 row == null || d == null || d.id != layer -> MODE_IDLE
+                 row.locked -> {
+                     // Recusa, e diz por quê (uma vez por gesto).
+-                    store.showToast("Camada bloqueada: desbloqueie para mover")
++                    store.showToast(AppText.get(store.getApplication<Application>(), R.string.sh_layer_locked_unlock_to_move))
+                     MODE_IDLE
+                 }
+                 else -> {
+@@ -1160,12 +1166,13 @@ private fun ResolutionChip(store: EditorStore, ui: EditorUi, modifier: Modifier)
+         "FULL" -> "Full"
+         else -> l
+     }
++    val chipDescription = stringResource(R.string.editor_resolucao_previa_segure_diagnostico)
+     Box(modifier) {
+         Box(
+             Modifier
+                 .clip(RoundedCornerShape(6.dp))
+                 .background(ShellColors.ResolutionChip)
+-                .semantics { contentDescription = "Resolução da prévia · segure para o diagnóstico" }
++                .semantics { contentDescription = chipDescription }
+                 .tocavel(haptic = true, onLongClick = { store.toggleHud() }) { open = true }
+                 .padding(horizontal = 10.dp, vertical = 8.dp),
+         ) {
+@@ -1192,7 +1199,8 @@ private fun ResolutionChip(store: EditorStore, ui: EditorUi, modifier: Modifier)
+ @Composable
+ private fun PerfHud(store: EditorStore, modifier: Modifier) {
+     if (!store.hudVisible) return
+-    val text = hudText(store.perf, store.uiFps, store.appMemory)
++    val res = LocalContext.current.resources
++    val text = hudText(res, store.perf, store.uiFps, store.appMemory)
+     Box(
+         modifier
+             .clip(RoundedCornerShape(8.dp))
+@@ -1208,21 +1216,24 @@ private fun PerfHud(store: EditorStore, modifier: Modifier) {
+ }
+ 
+ /** Nome do nível térmico do motor (`ThermalState::Level`). */
+-private fun thermalName(level: Int) = when (level) {
+-    0 -> "normal"
+-    1 -> "morno"
+-    2 -> "sério"
+-    3 -> "crítico"
+-    4 -> "emergência"
+-    else -> "desconhecido"
+-}
++private fun thermalName(res: Resources, level: Int) = res.getString(
++    when (level) {
++        0 -> R.string.sh_diag_thermal_normal
++        1 -> R.string.sh_diag_thermal_warm
++        2 -> R.string.sh_diag_thermal_serious
++        3 -> R.string.sh_diag_thermal_critical
++        4 -> R.string.sh_diag_thermal_emergency
++        else -> R.string.sh_diag_thermal_unknown
++    },
++)
+ 
+ /**
+  * Texto da HUD (Fase 8A, §3). Só aparece o que foi MEDIDO: GPU sem timestamp
+  * sai "—", ritmo só depois de tocar, áudio só com a saída aberta, 3D e
+  * partículas só com cena/emissor no quadro. Nada estimado para parecer bonito.
++ * Uma linha = um recurso de formato; as siglas (fps, ms, MB, GPU) ficam latinas.
+  */
+-private fun hudText(p: PerfStats, uiFps: Float, m: EditorStore.AppMemory): String {
++private fun hudText(res: Resources, p: PerfStats, uiFps: Float, m: EditorStore.AppMemory): String {
+     fun f1(v: Float) = String.format(Locale.ROOT, "%.1f", v)
+     fun mb(b: Long) = (b / (1024 * 1024)).toString()
+     fun gpu(v: Float) = if (p.gpuTimers) f1(v) else "—"
+@@ -1230,66 +1241,59 @@ private fun hudText(p: PerfStats, uiFps: Float, m: EditorStore.AppMemory): Strin
+         val total = hits + misses
+         return if (total == 0) "—" else "${hits * 100 / total}% ($hits/$total)"
+     }
++    fun line(id: Int, vararg args: Any): String = res.getString(id, *args)
+     val scale = if (p.renderScaleDen <= 1 && p.renderScaleNum <= 1) "1/1" else "${p.renderScaleNum}/${p.renderScaleDen}"
+     return buildString {
+-        append("prévia ").append(f1(p.previewFps)).append(" fps · UI ").append(f1(uiFps)).append(" fps")
+-        if (m.uiSlowFrames > 0) append(" (").append(m.uiSlowFrames).append(" lentos, pior ").append(f1(m.uiWorstFrameMs)).append(" ms)")
++        append(line(R.string.sh_diag_fps, f1(p.previewFps), f1(uiFps)))
++        if (m.uiSlowFrames > 0) append(' ').append(line(R.string.sh_diag_ui_slow, m.uiSlowFrames, f1(m.uiWorstFrameMs)))
+         append('\n')
+         if (p.pacingSamples > 0) {
+-            append("ritmo p50 ").append(f1(p.pacingP50Ms)).append(" · p95 ").append(f1(p.pacingP95Ms))
+-                .append(" · p99 ").append(f1(p.pacingP99Ms)).append(" · σ ").append(f1(p.pacingStdMs))
+-                .append(" ms (").append(p.pacingSamples).append(")\n")
++            append(line(R.string.sh_diag_pacing, f1(p.pacingP50Ms), f1(p.pacingP95Ms), f1(p.pacingP99Ms), f1(p.pacingStdMs), p.pacingSamples))
++                .append('\n')
+         }
+-        append("cpu ").append(f1(p.cpuFrameMs)).append(" (prep ").append(f1(p.cpuPrepareMs))
+-            .append(" · grav ").append(f1(p.cpuRecordMs)).append(") · gpu ").append(gpu(p.gpuFrameMs))
+-            .append(" · orçamento ").append(f1(p.frameBudgetMs)).append(" ms\n")
+-        append("decode ").append(f1(p.decodeMs)).append(" · cor ").append(gpu(p.colorConvMs))
+-            .append(" · efeitos ").append(gpu(p.effectsMs)).append('\n')
+-        append("blur ").append(gpu(p.blurMs)).append(" · glow ").append(gpu(p.glowMs))
+-            .append(" · comp ").append(gpu(p.compositeMs)).append('\n')
+-        append("saída ").append(gpu(p.outputMs)).append(" · present ").append(f1(p.presentMs))
+-            .append(" · acquire ").append(f1(p.acquireMs)).append('\n')
+-        append("descartes ").append(p.droppedFrames).append(" (recentes ").append(p.droppedRecent)
+-            .append(") · seek ").append(f1(p.lastSeekMs)).append(" ms\n")
+-        append("escala ").append(scale).append(if (p.renderAuto) " auto" else "")
+-            .append(" · ").append(p.previewWidth).append('×').append(p.previewHeight)
+-            .append(" · térmico ").append(thermalName(p.thermal))
+-        if (p.heavyScale < 1f) append(" (caros ×").append(String.format(Locale.ROOT, "%.2f", p.heavyScale)).append(')')
++        append(line(R.string.sh_diag_cpu, f1(p.cpuFrameMs), f1(p.cpuPrepareMs), f1(p.cpuRecordMs), gpu(p.gpuFrameMs), f1(p.frameBudgetMs)))
++            .append('\n')
++        append(line(R.string.sh_diag_decode, f1(p.decodeMs), gpu(p.colorConvMs), gpu(p.effectsMs))).append('\n')
++        append(line(R.string.sh_diag_blur, gpu(p.blurMs), gpu(p.glowMs), gpu(p.compositeMs))).append('\n')
++        append(line(R.string.sh_diag_output, gpu(p.outputMs), f1(p.presentMs), f1(p.acquireMs))).append('\n')
++        append(line(R.string.sh_diag_dropped, p.droppedFrames, p.droppedRecent, f1(p.lastSeekMs))).append('\n')
++        append(
++            line(
++                R.string.sh_diag_scale, scale, if (p.renderAuto) " auto" else "",
++                p.previewWidth, p.previewHeight, thermalName(res, p.thermal),
++            ),
++        )
++        if (p.heavyScale < 1f) append(' ').append(line(R.string.sh_diag_heavy, String.format(Locale.ROOT, "%.2f", p.heavyScale)))
+         append('\n')
+-        append("cache decode ").append(p.decodedCacheFrames).append(" quadros · ").append(mb(p.decodedCacheBytes)).append(" MB\n")
++        append(line(R.string.sh_diag_cache, p.decodedCacheFrames, mb(p.decodedCacheBytes))).append('\n')
+         if (p.flowCacheHits + p.flowCacheMisses + p.maskCacheHits + p.maskCacheMisses > 0) {
+-            append("acerto flow ").append(rate(p.flowCacheHits, p.flowCacheMisses))
+-                .append(" · máscara ").append(rate(p.maskCacheHits, p.maskCacheMisses)).append('\n')
++            append(line(R.string.sh_diag_hit_rate, rate(p.flowCacheHits, p.flowCacheMisses), rate(p.maskCacheHits, p.maskCacheMisses)))
++                .append('\n')
+         }
+-        append("RAM motor ").append(mb(p.ramBytes)).append('/').append(p.memoryBudgetMB).append(" MB · nativo ")
+-            .append(mb(m.nativeHeapBytes)).append(" · Java ").append(mb(m.javaHeapBytes)).append(" MB\n")
++        append(line(R.string.sh_diag_ram, mb(p.ramBytes), p.memoryBudgetMB, mb(m.nativeHeapBytes), mb(m.javaHeapBytes))).append('\n')
+         if (m.systemTotalBytes > 0) {
+-            append("sistema livre ").append(mb(m.systemAvailBytes)).append('/').append(mb(m.systemTotalBytes)).append(" MB")
+-                .append(if (m.lowMemory) " · MEMÓRIA BAIXA" else "").append('\n')
++            append(line(R.string.sh_diag_system_free, mb(m.systemAvailBytes), mb(m.systemTotalBytes)))
++            if (m.lowMemory) append(" · ").append(line(R.string.sh_diag_low_memory))
++            append('\n')
+         }
+-        append("GPU ").append(mb(p.gpuMemoryBytes)).append(" MB usada · ").append(mb(p.gpuReservedBytes))
+-            .append(" reservada · ").append(p.gpuAllocations).append(" alocações · transit. ")
+-            .append(mb(p.transientBytes)).append(" MB\n")
+-        append("passes ").append(p.passesExecuted).append(" (+").append(p.passesCulled).append(" cortados)")
+-            .append(" · draws ").append(p.drawCalls).append(" · camadas ").append(p.layersRendered)
+-            .append(" · efeitos ").append(p.activeEffects).append('\n')
++        append(line(R.string.sh_diag_gpu_memory, mb(p.gpuMemoryBytes), mb(p.gpuReservedBytes), p.gpuAllocations, mb(p.transientBytes)))
++            .append('\n')
++        append(line(R.string.sh_diag_passes, p.passesExecuted, p.passesCulled, p.drawCalls, p.layersRendered, p.activeEffects))
++            .append('\n')
+         if (p.draws3D > 0 || p.triangles3D > 0) {
+-            append("3D draws ").append(p.draws3D).append(" · triângulos ").append(p.triangles3D)
+-                .append(" · fora do frustum ").append(p.culled3D).append(" · residente ").append(mb(p.scene3dBytes)).append(" MB\n")
++            append(line(R.string.sh_diag_3d, p.draws3D, p.triangles3D, p.culled3D, mb(p.scene3dBytes))).append('\n')
+         }
+-        if (p.particles > 0) append("partículas ").append(p.particles).append('\n')
++        if (p.particles > 0) append(line(R.string.sh_diag_particles, p.particles)).append('\n')
+         if (p.audioOutputOpen) {
+-            append("áudio fila ").append(p.audioQueuedMs).append(" ms · saída ").append(p.audioOutputMs)
+-                .append(" ms · underruns ").append(p.audioUnderruns).append(" · sem bloco ").append(p.audioMissingBlocks).append('\n')
++            append(line(R.string.sh_diag_audio, p.audioQueuedMs, p.audioOutputMs, p.audioUnderruns, p.audioMissingBlocks)).append('\n')
+         }
+-        append("texturas ").append(p.physicalTextures).append(" fís · ").append(p.aliasedTextures)
+-            .append(" alias · pipelines ").append(p.pipelinesTotal).append(" (+").append(p.pipelineCompilesLive).append(")\n")
+-        append("seeks ").append(p.seeks).append(" · coalescidos ").append(p.coalesced)
+-            .append(" · atrasados ").append(p.staleFrames).append('\n')
++        append(line(R.string.sh_diag_textures, p.physicalTextures, p.aliasedTextures, p.pipelinesTotal, p.pipelineCompilesLive))
++            .append('\n')
++        append(line(R.string.sh_diag_seeks, p.seeks, p.coalesced, p.staleFrames)).append('\n')
+         append("decoder ").append(p.decoder.ifEmpty { "—" }).append(if (p.hardwareDecoder) " (HW)" else "")
+             .append(if (p.zeroCopy) " · zero-copy" else "").append('\n')
+-        append("GPU ").append(p.gpuName.ifEmpty { "—" })
+-            .append(if (p.gpuTimers) " · timers" else " · sem timestamp")
++        val gpuName = p.gpuName.ifEmpty { "—" }
++        append(line(if (p.gpuTimers) R.string.sh_diag_gpu_timers else R.string.sh_diag_gpu_no_timestamp, gpuName))
+     }
+ }
+ 
+diff --git a/android/app/src/main/java/com/aurea/aurea/editor/panels/AppearancePanel.kt b/android/app/src/main/java/com/aurea/aurea/editor/panels/AppearancePanel.kt
+index 683707b..06a96be 100644
+--- a/android/app/src/main/java/com/aurea/aurea/editor/panels/AppearancePanel.kt
++++ b/android/app/src/main/java/com/aurea/aurea/editor/panels/AppearancePanel.kt
+@@ -31,6 +31,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
+ import androidx.compose.runtime.setValue
+ import androidx.compose.ui.Alignment
+ import androidx.compose.ui.Modifier
++import androidx.annotation.StringRes
+ import androidx.compose.ui.res.stringResource
+ import com.aurea.aurea.R
+ import androidx.compose.ui.draw.clip
+@@ -57,9 +58,9 @@ import com.aurea.aurea.ui.theme.tocavel
+  * Um modo de mescla [A] (`ModoDeMescla`): rótulo, o `aurea::BlendMode` (nulo =
+  * modo que o motor não tem) e o modo do Compose para a miniatura.
+  */
+-private class BlendChoice(val label: String, val engine: Int?, val preview: BlendMode)
++private class BlendChoice(@StringRes val label: Int, val engine: Int?, val preview: BlendMode)
+ 
+-private class BlendCategory(val name: String, val modes: List<BlendChoice>)
++private class BlendCategory(@StringRes val name: Int, val modes: List<BlendChoice>)
+ 
+ /**
+  * AS SETE CATEGORIAS DA MESCLAGEM [A] (`categoriasDeMescla`, v1.1.1). Os números
+@@ -69,40 +70,40 @@ private class BlendCategory(val name: String, val modes: List<BlendChoice>)
+  * Luminosity 17.
+  */
+ private val BlendCategories = listOf(
+-    BlendCategory("Normal", listOf(BlendChoice("Normal", 0, BlendMode.SrcOver))),
++    BlendCategory(R.string.panel_normal, listOf(BlendChoice(R.string.panel_normal, 0, BlendMode.SrcOver))),
+     BlendCategory(
+-        "Escurecer",
++        R.string.pn_blend_darken,
+         listOf(
+-            BlendChoice("Escurecer", 6, BlendMode.Darken), BlendChoice("Multiplicar", 3, BlendMode.Multiply),
+-            BlendChoice("Queimar cor", 9, BlendMode.ColorBurn),
++            BlendChoice(R.string.pn_blend_darken, 6, BlendMode.Darken), BlendChoice(R.string.pn_blend_multiply, 3, BlendMode.Multiply),
++            BlendChoice(R.string.pn_blend_color_burn, 9, BlendMode.ColorBurn),
+         ),
+     ),
+     BlendCategory(
+-        "Clarear",
++        R.string.pn_blend_lighten,
+         listOf(
+-            BlendChoice("Clarear", 7, BlendMode.Lighten), BlendChoice("Tela", 4, BlendMode.Screen),
+-            BlendChoice("Subexpor cor", 8, BlendMode.ColorDodge), BlendChoice("Adicionar", 1, BlendMode.Plus),
++            BlendChoice(R.string.pn_blend_lighten, 7, BlendMode.Lighten), BlendChoice(R.string.pn_blend_screen, 4, BlendMode.Screen),
++            BlendChoice(R.string.pn_blend_color_dodge, 8, BlendMode.ColorDodge), BlendChoice(R.string.pn_blend_add, 1, BlendMode.Plus),
+         ),
+     ),
+     BlendCategory(
+-        "Contraste",
++        R.string.pn_blend_cat_contrast,
+         listOf(
+-            BlendChoice("Sobrepor", 5, BlendMode.Overlay), BlendChoice("Luz suave", 11, BlendMode.Softlight),
+-            BlendChoice("Luz forte", 10, BlendMode.Hardlight),
++            BlendChoice(R.string.pn_blend_overlay, 5, BlendMode.Overlay), BlendChoice(R.string.pn_blend_soft_light, 11, BlendMode.Softlight),
++            BlendChoice(R.string.pn_blend_hard_light, 10, BlendMode.Hardlight),
+         ),
+     ),
+     BlendCategory(
+-        "Diferença",
++        R.string.pn_blend_difference,
+         listOf(
+-            BlendChoice("Diferença", 12, BlendMode.Difference), BlendChoice("Exclusão", 13, BlendMode.Exclusion),
+-            BlendChoice("Subtrair", 2, BlendMode.SrcOver),
++            BlendChoice(R.string.pn_blend_difference, 12, BlendMode.Difference), BlendChoice(R.string.pn_blend_exclusion, 13, BlendMode.Exclusion),
++            BlendChoice(R.string.pn_blend_subtract, 2, BlendMode.SrcOver),
+         ),
+     ),
+     BlendCategory(
+-        "Cor",
++        R.string.pn_blend_color,
+         listOf(
+-            BlendChoice("Matiz", 14, BlendMode.Hue), BlendChoice("Saturação", 15, BlendMode.Saturation),
+-            BlendChoice("Cor", 16, BlendMode.Color), BlendChoice("Luminosidade", 17, BlendMode.Luminosity),
++            BlendChoice(R.string.pn_blend_hue, 14, BlendMode.Hue), BlendChoice(R.string.pn_blend_saturation, 15, BlendMode.Saturation),
++            BlendChoice(R.string.pn_blend_color, 16, BlendMode.Color), BlendChoice(R.string.pn_blend_luminosity, 17, BlendMode.Luminosity),
+         ),
+     ),
+ )
+@@ -126,6 +127,7 @@ internal fun AppearancePanel(env: PanelEnv) {
+     val look by remember(store) { derivedStateOf { transformLook(store.detail, intArrayOf(TrackProperty.OPACITY)) } }
+     val curveReady by remember(store) { derivedStateOf { store.primaryKeys().transformTrack(TrackProperty.OPACITY).size >= 2 } }
+     val exprLook by remember(store) { derivedStateOf { store.expressionLook(OpacityKeys) } }
++    val opacityTitle = stringResource(R.string.panel_opacidade)
+ 
+     Row(Modifier.fillMaxSize()) {
+         LeftRail(
+@@ -148,7 +150,7 @@ internal fun AppearancePanel(env: PanelEnv) {
+                 null
+             },
+             expression = exprLook,
+-            onExpression = if (tab == 0) ({ store.openExpression("Opacidade", OpacityKeys, 100f, "%") }) else null,
++            onExpression = if (tab == 0) ({ store.openExpression(opacityTitle, OpacityKeys, 100f, "%") }) else null,
+         )
+         Column(Modifier.weight(1f).fillMaxHeight()) {
+             ParamTabs(
+@@ -224,11 +226,11 @@ private fun BlendTab(env: PanelEnv) {
+                     ) {
+                         CupertinoIcon(if (isOpen) CupertinoGlyph.ChevronDown else CupertinoGlyph.ChevronRight, 13.dp, AureaColors.Muted)
+                         Spacer(Modifier.width(8.dp))
+-                        Text(cat.name, style = AureaType.Base.merge(TextStyle(fontSize = 13.5.sp, fontWeight = FontWeight.W600)))
++                        Text(stringResource(cat.name), style = AureaType.Base.merge(TextStyle(fontSize = 13.5.sp, fontWeight = FontWeight.W600)))
+                         Spacer(Modifier.weight(1f))
+                         val on = cat.modes.firstOrNull { it.engine == mode }
+                         if (on != null) {
+-                            Text(on.label, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Accent)))
++                            Text(stringResource(on.label), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Accent)))
+                             Spacer(Modifier.width(6.dp))
+                             CupertinoIcon(CupertinoGlyph.CheckmarkCircleFill, 16.dp, AureaColors.Accent)
+                         }
+@@ -252,7 +254,7 @@ private fun BlendTab(env: PanelEnv) {
+         }
+         item(key = "ajuda") {
+             Text(
+-                "A mistura combina esta camada com as camadas abaixo. Branco em Clarear cobre a imagem; em Escurecer deixa a imagem aparecer. Ajuste também a opacidade para reduzir a intensidade.",
++                stringResource(R.string.pn_blend_help),
+                 maxLines = 3,
+                 overflow = TextOverflow.Ellipsis,
+                 modifier = Modifier.padding(top = 4.dp),
+@@ -283,7 +285,7 @@ private fun BlendChip(m: BlendChoice, lit: Boolean, onClick: () -> Unit) {
+         }
+         Spacer(Modifier.height(4.dp))
+         Text(
+-            m.label,
++            stringResource(m.label),
+             maxLines = 1,
+             overflow = TextOverflow.Ellipsis,
+             modifier = Modifier.padding(horizontal = 4.dp),
+diff --git a/android/app/src/main/java/com/aurea/aurea/editor/panels/CaptionsPanel.kt b/android/app/src/main/java/com/aurea/aurea/editor/panels/CaptionsPanel.kt
+index 0f30e9e..503ed34 100644
+--- a/android/app/src/main/java/com/aurea/aurea/editor/panels/CaptionsPanel.kt
++++ b/android/app/src/main/java/com/aurea/aurea/editor/panels/CaptionsPanel.kt
+@@ -29,6 +29,7 @@ import androidx.compose.runtime.remember
+ import androidx.compose.runtime.setValue
+ import androidx.compose.ui.Alignment
+ import androidx.compose.ui.Modifier
++import androidx.compose.ui.res.pluralStringResource
+ import androidx.compose.ui.res.stringResource
+ import com.aurea.aurea.R
+ import androidx.compose.ui.draw.clip
+@@ -44,8 +45,13 @@ import com.aurea.aurea.ui.theme.AureaColors
+ import com.aurea.aurea.ui.theme.AureaType
+ import com.aurea.aurea.ui.theme.tocavel
+ 
+-private val CaptionStyles = listOf("Clássico", "Caixa", "Destaque", "Neon", "Karaokê", "Pop")
+-private val Languages = listOf(null to "Automático", "pt" to "Português", "en" to "English", "es" to "Español")
++// O índice é o `style` salvo nas opções da legenda; o rótulo sai do idioma do app.
++private val CaptionStyles = listOf(
++    R.string.pn_caption_style_classic, R.string.panel_caixa, R.string.pn_caption_style_highlight,
++    R.string.pn_caption_style_neon, R.string.pn_karaoke, R.string.pn_pop,
++)
++// Nome do idioma da fala no próprio idioma (endônimo); nulo = "Automático", traduzido.
++private val Languages = listOf<Pair<String?, String?>>(null to null, "pt" to "Português", "en" to "English", "es" to "Español")
+ 
+ /**
+  * LEGENDAS da camada de vídeo/áudio: gerar (Groq, com a chave dos Ajustes) ou
+@@ -81,7 +87,7 @@ internal fun CaptionsPanel(env: PanelEnv) {
+                     Note(stringResource(R.string.panel_sem_chave_servico_transcricao_use_arquivo), AureaColors.Muted)
+                 }
+                 Label(stringResource(R.string.panel_idioma_fala))
+-                Chips(Languages.map { it.second }, Languages.indexOfFirst { it.first == language }) { language = Languages[it].first }
++                Chips(Languages.map { it.second ?: stringResource(R.string.pn_caption_lang_auto) }, Languages.indexOfFirst { it.first == language }) { language = Languages[it].first }
+                 Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                     Action(if (cap.words.isEmpty()) stringResource(R.string.panel_gerar_legendas) else stringResource(R.string.panel_transcrever_novo), primary = true, enabled = cap.hasGroqKey && cap.busy == null) {
+                         cap.transcribe(language)
+@@ -89,34 +95,40 @@ internal fun CaptionsPanel(env: PanelEnv) {
+                     Action(stringResource(R.string.panel_importar_legenda_srt), enabled = cap.busy == null) { srt.launch(arrayOf("application/x-subrip", "text/*", "application/octet-stream")) }
+                 }
+ 
+-                Label("Estilo")
+-                Chips(CaptionStyles, s.style) { i -> set { it.copy(style = i) } }
+-                Label("Legenda")
+-                Chips(listOf("Agrupadas", "Uma por palavra"), s.mode) { i -> set { it.copy(mode = i) } }
++                Label(stringResource(R.string.panel_estilo))
++                Chips(CaptionStyles.map { stringResource(it) }, s.style) { i -> set { it.copy(style = i) } }
++                Label(stringResource(R.string.pn_caption))
++                Chips(listOf(stringResource(R.string.pn_caption_grouped), stringResource(R.string.pn_caption_one_per_word)), s.mode) { i -> set { it.copy(mode = i) } }
+                 if (s.mode == 0) {
+-                    Label("Palavras por legenda")
++                    Label(stringResource(R.string.pn_caption_words_per_caption))
+                     Chips((1..6).map { "$it" }, s.maxWords - 1) { i -> set { it.copy(maxWords = i + 1) } }
+-                    Label("Letras por linha")
++                    Label(stringResource(R.string.pn_caption_chars_per_line))
+                     Chips(listOf("12", "18", "24", "32"), listOf(12, 18, 24, 32).indexOf(s.maxChars)) { i -> set { it.copy(maxChars = listOf(12, 18, 24, 32)[i]) } }
+-                    Label("Linhas")
++                    Label(stringResource(R.string.pn_caption_lines))
+                     Chips(listOf("1", "2", "3"), s.maxLines - 1) { i -> set { it.copy(maxLines = i + 1) } }
+                 }
+-                Label("Altura na tela")
++                Label(stringResource(R.string.pn_caption_screen_height))
+                 val ys = listOf(0.2f, 0.5f, 0.78f)
+-                Chips(listOf("Alto", "Meio", "Baixo"), ys.indexOfFirst { kotlin.math.abs(it - s.posY) < 0.01f }) { i -> set { it.copy(posY = ys[i]) } }
+-                Label("Tamanho")
++                Chips(listOf(stringResource(R.string.pn_caption_pos_top), stringResource(R.string.pn_caption_pos_middle), stringResource(R.string.pn_caption_pos_bottom)), ys.indexOfFirst { kotlin.math.abs(it - s.posY) < 0.01f }) { i -> set { it.copy(posY = ys[i]) } }
++                Label(stringResource(R.string.panel_tamanho))
+                 val sizes = listOf(0.045f, 0.065f, 0.09f)
+-                Chips(listOf("P", "M", "G"), sizes.indexOfFirst { kotlin.math.abs(it - s.sizeFrac) < 0.001f }) { i -> set { it.copy(sizeFrac = sizes[i]) } }
+-                Toggle("Destacar a palavra falada", s.highlight) { v -> set { it.copy(highlight = v) } }
+-                Toggle("MAIÚSCULAS", s.uppercase) { v -> set { it.copy(uppercase = v) } }
+-                Toggle("Quebrar nas pausas", s.breakOnPause) { v -> set { it.copy(breakOnPause = v) } }
+-                Toggle("Tirar vícios (hum, ahn, tipo…)", s.removeFillers) { v -> set { it.copy(removeFillers = v) } }
++                Chips(listOf(stringResource(R.string.pn_size_small_short), stringResource(R.string.pn_size_medium_short), stringResource(R.string.pn_size_large_short)), sizes.indexOfFirst { kotlin.math.abs(it - s.sizeFrac) < 0.001f }) { i -> set { it.copy(sizeFrac = sizes[i]) } }
++                Toggle(stringResource(R.string.pn_caption_highlight_word), s.highlight) { v -> set { it.copy(highlight = v) } }
++                Toggle(stringResource(R.string.pn_caption_uppercase), s.uppercase) { v -> set { it.copy(uppercase = v) } }
++                Toggle(stringResource(R.string.pn_caption_break_pauses), s.breakOnPause) { v -> set { it.copy(breakOnPause = v) } }
++                Toggle(stringResource(R.string.pn_caption_remove_fillers), s.removeFillers) { v -> set { it.copy(removeFillers = v) } }
+ 
+                 Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+-                    Action(if (cap.captionCount > 0) "Refazer legendas" else "Criar legendas", primary = true, enabled = words.isNotEmpty() && cap.busy == null) { cap.generate() }
+-                    if (cap.captionCount > 0) Action("Remover (${cap.captionCount})", enabled = cap.busy == null) { cap.removeAll() }
++                    Action(if (cap.captionCount > 0) stringResource(R.string.pn_caption_redo) else stringResource(R.string.pn_caption_create), primary = true, enabled = words.isNotEmpty() && cap.busy == null) { cap.generate() }
++                    if (cap.captionCount > 0) Action(stringResource(R.string.pn_caption_remove_n, cap.captionCount), enabled = cap.busy == null) { cap.removeAll() }
++                }
++                if (words.isNotEmpty()) {
++                    val src = cap.source
++                    Label(
++                        if (src != null) pluralStringResource(R.plurals.pn_caption_transcript_source, words.size, src, words.size)
++                        else pluralStringResource(R.plurals.pn_caption_transcript, words.size, words.size),
++                    )
+                 }
+-                if (words.isNotEmpty()) Label("Texto da fala${cap.source?.let { " · $it" } ?: ""} — toque para corrigir (${words.size} palavras)")
+             }
+         }
+ 
+@@ -176,8 +188,8 @@ private fun WordEditor(initial: String, time: String, onDone: (String) -> Unit)
+             BasicTextField(text, onValueChange = { text = it }, singleLine = true, cursorBrush = SolidColor(AureaColors.Accent),
+                 textStyle = AureaType.Base.merge(TextStyle(fontSize = 14.sp, color = AureaColors.Text)), modifier = Modifier.fillMaxWidth())
+         }
+-        Action("OK", primary = true) { onDone(text) }
+-        Action("Apagar palavra") { onDone("") }
++        Action(stringResource(R.string.pn_ok), primary = true) { onDone(text) }
++        Action(stringResource(R.string.pn_caption_delete_word)) { onDone("") }
+     }
+ }
+ 
+diff --git a/android/app/src/main/java/com/aurea/aurea/editor/panels/CurvePanel.kt b/android/app/src/main/java/com/aurea/aurea/editor/panels/CurvePanel.kt
+index fa33cca..b53ce76 100644
+--- a/android/app/src/main/java/com/aurea/aurea/editor/panels/CurvePanel.kt
++++ b/android/app/src/main/java/com/aurea/aurea/editor/panels/CurvePanel.kt
+@@ -36,6 +36,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
+ import androidx.compose.runtime.setValue
+ import androidx.compose.ui.Alignment
+ import androidx.compose.ui.Modifier
++import androidx.annotation.StringRes
+ import androidx.compose.ui.res.stringResource
+ import com.aurea.aurea.R
+ import androidx.compose.ui.draw.alpha
+@@ -144,9 +145,10 @@ internal fun cubicBezier(x1: Float, y1: Float, x2: Float, y2: Float, x: Float):
+ }
+ 
+ /** Um preset de uma família: nome [A] e o easing do motor. */
+-private class CurvePreset(val name: String, val ease: Ease, val entry: com.aurea.aurea.presets.PresetEntry? = null)
++/** [name] nulo = preset salvo (o nome dele está em [entry]). */
++private class CurvePreset(@StringRes val name: Int?, val ease: Ease, val entry: com.aurea.aurea.presets.PresetEntry? = null)
+ 
+-private class CurveFamily(val name: String, val glyph: Char, val presets: List<CurvePreset>)
++private class CurveFamily(@StringRes val name: Int, val glyph: Char, val presets: List<CurvePreset>)
+ 
+ private fun bez(x1: Float, y1: Float, x2: Float, y2: Float) = Ease(Interp.BEZIER, x1, y1, x2, y2)
+ 
+@@ -158,27 +160,28 @@ private fun bez(x1: Float, y1: Float, x2: Float, y2: Float) = Ease(Interp.BEZIER
+  */
+ private val Families = listOf(
+     CurveFamily(
+-        "Bézier", CupertinoGlyph.Scribble,
++        R.string.pn_curve_family_bezier, CupertinoGlyph.Scribble,
+         listOf(
+-            CurvePreset("Linear", Ease(Interp.LINEAR, 0f, 0f, 1f, 1f)),
+-            CurvePreset("Suave na entrada", bez(0.42f, 0f, 1f, 1f)),
+-            CurvePreset("Suave na saída", bez(0f, 0f, 0.58f, 1f)),
+-            CurvePreset("Suave nas duas pontas", bez(0.42f, 0f, 0.58f, 1f)),
++            CurvePreset(R.string.panel_linear, Ease(Interp.LINEAR, 0f, 0f, 1f, 1f)),
++            CurvePreset(R.string.pn_ease_in, bez(0.42f, 0f, 1f, 1f)),
++            CurvePreset(R.string.pn_ease_out, bez(0f, 0f, 0.58f, 1f)),
++            CurvePreset(R.string.pn_ease_in_out, bez(0.42f, 0f, 0.58f, 1f)),
+         ),
+     ),
+     CurveFamily(
+-        "Manter", CupertinoGlyph.ChartBarAltFill,
+-        listOf(CurvePreset("Manter", Ease(Interp.HOLD, 0f, 0f, 1f, 1f))),
++        R.string.pn_ease_hold, CupertinoGlyph.ChartBarAltFill,
++        listOf(CurvePreset(R.string.pn_ease_hold, Ease(Interp.HOLD, 0f, 0f, 1f, 1f))),
+     ),
+ )
+ 
+-private fun nameOf(e: Ease): String {
+-    for (f in Families) for (p in f.presets) if (e.same(p.ease)) return p.name
++@StringRes
++private fun nameOf(e: Ease): Int {
++    for (f in Families) for (p in f.presets) if (e.same(p.ease) && p.name != null) return p.name
+     return when (e.interp) {
+-        Interp.EASE_IN -> "Suave na entrada"
+-        Interp.EASE_OUT -> "Suave na saída"
+-        Interp.EASE_IN_OUT -> "Suave nas duas pontas"
+-        else -> "Bézier (personalizada)"
++        Interp.EASE_IN -> R.string.pn_ease_in
++        Interp.EASE_OUT -> R.string.pn_ease_out
++        Interp.EASE_IN_OUT -> R.string.pn_ease_in_out
++        else -> R.string.pn_ease_bezier_custom
+     }
+ }
+ 
+@@ -296,6 +299,7 @@ internal fun CurvePanel(env: PanelEnv) {
+         store.detail?.let { d -> store.seek(d.timelineFrame(a.time + (b.time - a.time) / 2)) }
+     }
+ 
++    val symmetricMsg = stringResource(R.string.pn_curve_symmetric)
+     Row(Modifier.fillMaxSize()) {
+         // Trilho esquerdo: voltar · inverter · menu.
+         Column(Modifier.width(44.dp).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally) {
+@@ -307,7 +311,7 @@ internal fun CurvePanel(env: PanelEnv) {
+             Box(
+                 Modifier.size(44.dp).tocavel {
+                     val inv = ease.inverted()
+-                    if (inv == null) store.showToast("Esta curva é igual nos dois sentidos")
++                    if (inv == null) store.showToast(symmetricMsg)
+                     else {
+                         store.beginGesture("inverter curva")
+                         applyEase(store, layer, start, inv)
+@@ -341,7 +345,7 @@ internal fun CurvePanel(env: PanelEnv) {
+                 val track = (store.keyframes[layer] ?: emptyList()).track(start)
+                 val n = track.indexOfFirst { it.time == start.time }
+                 Text(
+-                    if (inside) nameOf(ease) else "Trecho ${n + 1} → ${n + 2}",
++                    if (inside) stringResource(nameOf(ease)) else stringResource(R.string.pn_curve_segment, n + 1, n + 2),
+                     maxLines = 1,
+                     overflow = TextOverflow.Ellipsis,
+                     modifier = Modifier.weight(1f, fill = false),
+@@ -355,7 +359,7 @@ internal fun CurvePanel(env: PanelEnv) {
+         }
+         // Presets de curva (nativos + os salvos): a aba ★ das famílias.
+         val saved = remember(store.presets.user) { store.presets.entries(com.aurea.aurea.presets.PresetKind.Curve).mapNotNull { entry ->
+-            store.curveOfPreset(entry)?.let { v -> CurvePreset(entry.name, Ease(v[0].toInt(), v[1], v[2], v[3], v[4]), entry) }
++            store.curveOfPreset(entry)?.let { v -> CurvePreset(null, Ease(v[0].toInt(), v[1], v[2], v[3], v[4]), entry) }
+         } }
+         CurveFamilies(
+             current = ease,
+@@ -372,7 +376,7 @@ internal fun CurvePanel(env: PanelEnv) {
+     if (savePrompt) {
+         AureaNamePrompt(
+             title = stringResource(R.string.panel_salvar_curva_como_preset),
+-            initial = nameOf(ease),
++            initial = stringResource(nameOf(ease)),
+             onConfirm = { name ->
+                 // A interpolação vai como está (nomeada, reta, manter ou bézier com as alças).
+                 val h = ease.handles()
+@@ -556,7 +560,7 @@ private fun DrawScope.drawGrid(y0: Float, y1: Float) {
+ @Composable
+ private fun CurveFamilies(current: Ease, saved: List<CurvePreset>, onPick: (CurvePreset) -> Unit) {
+     // As famílias fixas + a aba ★ dos presets de curva (nativos e salvos).
+-    val families = Families + CurveFamily(stringResource(R.string.panel_presets), CupertinoGlyph.Star, saved)
++    val families = Families + CurveFamily(R.string.panel_presets, CupertinoGlyph.Star, saved)
+     var tab by rememberSaveable { mutableIntStateOf(familyOf(current)) }
+     val family = families[tab.coerceIn(0, families.lastIndex)]
+     Row(Modifier.width(132.dp).fillMaxHeight()) {
+@@ -583,7 +587,8 @@ private fun CurveFamilies(current: Ease, saved: List<CurvePreset>, onPick: (Curv
+             horizontalAlignment = Alignment.CenterHorizontally,
+         ) {
+             families.forEachIndexed { i, f ->
+-                Box(Modifier.size(34.dp, 34.dp).semantics { contentDescription = f.name }.tocavel(shrink = 1f) { tab = i }, contentAlignment = Alignment.Center) {
++                val familyName = stringResource(f.name)
++                Box(Modifier.size(34.dp, 34.dp).semantics { contentDescription = familyName }.tocavel(shrink = 1f) { tab = i }, contentAlignment = Alignment.Center) {
+                     CupertinoIcon(f.glyph, 17.dp, if (i == tab) AureaColors.Accent else AureaColors.Muted)
+                 }
+             }
+diff --git a/android/app/src/main/java/com/aurea/aurea/editor/panels/EffectsHuman.kt b/android/app/src/main/java/com/aurea/aurea/editor/panels/EffectsHuman.kt
+index 40425cc..e8da844 100644
+--- a/android/app/src/main/java/com/aurea/aurea/editor/panels/EffectsHuman.kt
++++ b/android/app/src/main/java/com/aurea/aurea/editor/panels/EffectsHuman.kt
+@@ -53,8 +53,16 @@ private const val SHOW_ALL_UP_TO = 6
+ 
+ private val Percent0 = ParamHuman(scale = 100f, suffix = "%", decimals = 0)
+ 
+-private val MatrixRows = listOf("Vermelho", "Verde", "Azul")
+-private val MatrixCols = listOf("do vermelho", "do verde", "do azul", "extra")
++/**
++ * As 12 células da matriz (linha = canal de saída, coluna = de onde vem). Uma
++ * frase por célula, e não "linha + coluna": "Vermelho do verde" não se monta
++ * por concatenação em russo nem em árabe.
++ */
++private val MatrixLabels = listOf(
++    R.string.fx_matrix_rr, R.string.fx_matrix_rg, R.string.fx_matrix_rb, R.string.fx_matrix_ro,
++    R.string.fx_matrix_gr, R.string.fx_matrix_gg, R.string.fx_matrix_gb, R.string.fx_matrix_go,
++    R.string.fx_matrix_br, R.string.fx_matrix_bg, R.string.fx_matrix_bb, R.string.fx_matrix_bo,
++)
+ 
+ private val Table: Map<Int, EffectHuman> = buildMap {
+     fun put(key: String, e: EffectHuman) = put(effectTypeId(key), e)
+@@ -64,7 +72,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
+             keywords = "transform mover posicao escala girar rotacao opacidade",
+             principal = listOf(1, 2, 3, 4),
+             params = mapOf(
+-                0 to ParamHuman(label = "Pivô"),
++                0 to ParamHuman(label = R.string.fx_pivo),
+                 2 to ParamHuman(suffix = "%", decimals = 0),
+             ),
+         ),
+@@ -76,8 +84,8 @@ private val Table: Map<Int, EffectHuman> = buildMap {
+             principal = listOf(0),
+             params = mapOf(
+                 0 to ParamHuman(suffix = "", decimals = 2),
+-                1 to ParamHuman(label = "Compensação", scale = 100f, suffix = "%", decimals = 0),
+-                2 to ParamHuman(label = "Tons médios", decimals = 2),
++                1 to ParamHuman(label = R.string.fx_compensacao, scale = 100f, suffix = "%", decimals = 0),
++                2 to ParamHuman(label = R.string.fx_tons_medios, decimals = 2),
+             ),
+         ),
+     )
+@@ -93,23 +101,19 @@ private val Table: Map<Int, EffectHuman> = buildMap {
+         "aurea.color.tint",
+         EffectHuman(
+             keywords = "tint colorir duotone",
+-            params = mapOf(0 to ParamHuman(label = "Cor das sombras"), 1 to ParamHuman(label = "Cor das luzes")),
++            params = mapOf(0 to ParamHuman(label = R.string.fx_cor_sombras), 1 to ParamHuman(label = R.string.fx_cor_luzes)),
+         ),
+     )
+     put(
+         "aurea.color.matrix",
+         EffectHuman(
+-            name = "Misturar canais",
++            name = R.string.fx_misturar_canais,
+             keywords = "matriz de cor channel mixer rgb canais",
+             principal = listOf(0, 5, 10),
+             params = (0 until 12).associateWith { i ->
+-                val row = i / 4
+-                val col = i % 4
+-                when {
+-                    col == 3 -> ParamHuman(label = "${MatrixRows[row]} ${MatrixCols[col]}", scale = 100f, suffix = "%", decimals = 0)
+-                    col == row -> ParamHuman(label = MatrixRows[row], suffix = "x", decimals = 2)
+-                    else -> ParamHuman(label = "${MatrixRows[row]} ${MatrixCols[col]}", suffix = "x", decimals = 2)
+-                }
++                // Coluna 3 é o deslocamento (%); as outras, o ganho (×).
++                if (i % 4 == 3) ParamHuman(label = MatrixLabels[i], scale = 100f, suffix = "%", decimals = 0)
++                else ParamHuman(label = MatrixLabels[i], suffix = "x", decimals = 2)
+             },
+         ),
+     )
+@@ -119,9 +123,9 @@ private val Table: Map<Int, EffectHuman> = buildMap {
+             keywords = "levels niveis preto branco",
+             principal = listOf(0, 1, 2),
+             params = mapOf(
+-                0 to ParamHuman(label = "Ponto preto", decimals = 0),
+-                1 to ParamHuman(label = "Ponto branco", decimals = 0),
+-                2 to ParamHuman(label = "Tons médios", decimals = 2),
++                0 to ParamHuman(label = R.string.fx_ponto_preto, decimals = 0),
++                1 to ParamHuman(label = R.string.fx_ponto_branco, decimals = 0),
++                2 to ParamHuman(label = R.string.fx_tons_medios, decimals = 2),
+                 3 to ParamHuman(decimals = 0),
+                 4 to ParamHuman(decimals = 0),
+             ),
+@@ -131,13 +135,13 @@ private val Table: Map<Int, EffectHuman> = buildMap {
+     put(
+         "aurea.blur.gaussian",
+         EffectHuman(
+-            name = "Desfoque",
++            name = R.string.fx_desfoque,
+             keywords = "blur gaussian gaussiano borrar embacar",
+             principal = listOf(0, 1),
+             params = mapOf(
+-                0 to ParamHuman(label = "Intensidade"),
+-                1 to ParamHuman(label = "Direção"),
+-                2 to ParamHuman(label = "Esticar bordas"),
++                0 to ParamHuman(label = R.string.fx_intensidade),
++                1 to ParamHuman(label = R.string.fx_direcao),
++                2 to ParamHuman(label = R.string.fx_esticar_bordas),
+             ),
+         ),
+     )
+@@ -148,7 +152,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
+             keywords = "glow brilho luz neon",
+             principal = listOf(2, 1, 0, 3),
+             params = mapOf(
+-                0 to ParamHuman(label = "Limite"),
++                0 to ParamHuman(label = R.string.fx_limite),
+                 2 to ParamHuman(suffix = "x", decimals = 1),
+             ),
+         ),
+@@ -156,37 +160,37 @@ private val Table: Map<Int, EffectHuman> = buildMap {
+     put(
+         "aurea.stylize.motion_tile",
+         EffectHuman(
+-            name = "Mosaico",
++            name = R.string.fx_mosaico,
+             keywords = "motion tile azulejos repetir ladrilho",
+             principal = listOf(1, 2, 5, 7),
+             params = mapOf(
+-                0 to ParamHuman(label = "Centro"),
+-                1 to ParamHuman(label = "Largura"),
+-                2 to ParamHuman(label = "Altura"),
+-                3 to ParamHuman(label = "Largura total"),
+-                4 to ParamHuman(label = "Altura total"),
+-                5 to ParamHuman(label = "Espelhar"),
+-                6 to ParamHuman(label = "Esticar bordas"),
+-                7 to ParamHuman(label = "Deslocamento"),
+-                8 to ParamHuman(label = "Deslocar na horizontal"),
++                0 to ParamHuman(label = R.string.fx_centro),
++                1 to ParamHuman(label = R.string.fx_largura),
++                2 to ParamHuman(label = R.string.fx_altura),
++                3 to ParamHuman(label = R.string.fx_largura_total),
++                4 to ParamHuman(label = R.string.fx_altura_total),
++                5 to ParamHuman(label = R.string.fx_espelhar),
++                6 to ParamHuman(label = R.string.fx_esticar_bordas),
++                7 to ParamHuman(label = R.string.fx_deslocamento),
++                8 to ParamHuman(label = R.string.fx_deslocar_horizontal),
+             ),
+         ),
+     )
+     put(
+         "aurea.key.luma",
+         EffectHuman(
+-            name = "Recorte por brilho",
++            name = R.string.fx_recorte_brilho,
+             keywords = "chave de luma luma key remover preto branco",
+-            params = mapOf(0 to ParamHuman(label = "Remover"), 1 to ParamHuman(label = "Limite")),
++            params = mapOf(0 to ParamHuman(label = R.string.fx_remover), 1 to ParamHuman(label = R.string.fx_limite)),
+         ),
+     )
+     put(
+         "aurea.key.chroma",
+         EffectHuman(
+-            name = "Recorte por cor",
++            name = R.string.fx_recorte_cor,
+             keywords = "chave de croma chroma key fundo verde green screen remover cor",
+             principal = listOf(0, 1, 2),
+-            params = mapOf(0 to ParamHuman(label = "Cor a remover"), 3 to ParamHuman(label = "Limpar contorno")),
++            params = mapOf(0 to ParamHuman(label = R.string.fx_cor_remover), 3 to ParamHuman(label = R.string.fx_limpar_contorno)),
+         ),
+     )
+     put(
+@@ -195,9 +199,9 @@ private val Table: Map<Int, EffectHuman> = buildMap {
+             keywords = "echo eco rastro trail copias",
+             principal = listOf(0, 1, 2),
+             params = mapOf(
+-                1 to ParamHuman(label = "Intervalo", suffix = "quadros", decimals = 1),
+-                2 to ParamHuman(label = "Desvanecer"),
+-                3 to ParamHuman(label = "Separar cores", suffix = "quadros", decimals = 1),
++                1 to ParamHuman(label = R.string.fx_intervalo, suffix = "quadros", decimals = 1),
++                2 to ParamHuman(label = R.string.fx_desvanecer),
++                3 to ParamHuman(label = R.string.fx_separar_cores, suffix = "quadros", decimals = 1),
+             ),
+         ),
+     )
+@@ -211,11 +215,11 @@ private val Table: Map<Int, EffectHuman> = buildMap {
+             keywords = "scanline varredura crt tv tubo linha",
+             principal = listOf(0, 1, 3, 4),
+             params = mapOf(
+-                0 to ParamHuman(label = "Altura da linha", suffix = "px", decimals = 1),
+-                3 to ParamHuman(label = "Suavidade", decimals = 0),
+-                4 to ParamHuman(label = "Contraste", decimals = 0),
+-                6 to ParamHuman(label = "Canal"),
+-                8 to ParamHuman(label = "Rolagem", suffix = "px", decimals = 0),
++                0 to ParamHuman(label = R.string.fx_altura_linha, suffix = "px", decimals = 1),
++                3 to ParamHuman(label = R.string.fx_suavidade, decimals = 0),
++                4 to ParamHuman(label = R.string.fx_contraste, decimals = 0),
++                6 to ParamHuman(label = R.string.fx_canal),
++                8 to ParamHuman(label = R.string.fx_rolagem, suffix = "px", decimals = 0),
+             ),
+         ),
+     )
+@@ -225,14 +229,14 @@ private val Table: Map<Int, EffectHuman> = buildMap {
+             keywords = "grain grao filme ruido textura analogico",
+             principal = listOf(0, 1, 2, 4, 7),
+             params = mapOf(
+-                0 to ParamHuman(label = "Intensidade", decimals = 0),
+-                1 to ParamHuman(label = "Tamanho do grão", suffix = "px", decimals = 1),
+-                2 to ParamHuman(label = "Grão de cor", decimals = 0),
+-                3 to ParamHuman(label = "Rugosidade", suffix = "x", decimals = 2),
+-                4 to ParamHuman(label = "Sombras", decimals = 0),
+-                5 to ParamHuman(label = "Luzes", decimals = 0),
+-                7 to ParamHuman(label = "Animado"),
+-                8 to ParamHuman(label = "Monocromático"),
++                0 to ParamHuman(label = R.string.fx_intensidade, decimals = 0),
++                1 to ParamHuman(label = R.string.fx_tamanho_grao, suffix = "px", decimals = 1),
++                2 to ParamHuman(label = R.string.fx_grao_cor, decimals = 0),
++                3 to ParamHuman(label = R.string.fx_rugosidade, suffix = "x", decimals = 2),
++                4 to ParamHuman(label = R.string.fx_sombras, decimals = 0),
++                5 to ParamHuman(label = R.string.fx_luzes, decimals = 0),
++                7 to ParamHuman(label = R.string.fx_animado),
++                8 to ParamHuman(label = R.string.fx_monocromatico),
+             ),
+         ),
+     )
+@@ -242,15 +246,15 @@ private val Table: Map<Int, EffectHuman> = buildMap {
+             keywords = "halftone meio tom reticula pontos impressao jornal pontilhado",
+             principal = listOf(0, 1, 2, 5, 7),
+             params = mapOf(
+-                0 to ParamHuman(label = "Tamanho do ponto", suffix = "px", decimals = 0),
+-                1 to ParamHuman(label = "Contraste", decimals = 0),
+-                2 to ParamHuman(label = "Ângulo", suffix = "°", decimals = 0),
+-                3 to ParamHuman(label = "Suavidade", decimals = 0),
+-                4 to ParamHuman(label = "Rotação por canal", suffix = "°", decimals = 0),
+-                5 to ParamHuman(label = "Padrão"),
+-                6 to ParamHuman(label = "Grades separadas"),
+-                7 to ParamHuman(label = "Fundo claro", decimals = 0),
+-                8 to ParamHuman(label = "Ganho do ponto", decimals = 0),
++                0 to ParamHuman(label = R.string.fx_tamanho_ponto, suffix = "px", decimals = 0),
++                1 to ParamHuman(label = R.string.fx_contraste, decimals = 0),
++                2 to ParamHuman(label = R.string.fx_angulo, suffix = "°", decimals = 0),
++                3 to ParamHuman(label = R.string.fx_suavidade, decimals = 0),
++                4 to ParamHuman(label = R.string.fx_rotacao_canal, suffix = "°", decimals = 0),
++                5 to ParamHuman(label = R.string.fx_padrao),
++                6 to ParamHuman(label = R.string.fx_grades_separadas),
++                7 to ParamHuman(label = R.string.fx_fundo_claro, decimals = 0),
++                8 to ParamHuman(label = R.string.fx_ganho_ponto, decimals = 0),
+             ),
+         ),
+     )
+@@ -260,11 +264,11 @@ private val Table: Map<Int, EffectHuman> = buildMap {
+             keywords = "minimax dilatar erodir morfologia matte afinar engrossar",
+             principal = listOf(1, 0, 4, 3),
+             params = mapOf(
+-                0 to ParamHuman(label = "Raio", suffix = "px", decimals = 0),
+-                1 to ParamHuman(label = "Operação"),
+-                2 to ParamHuman(label = "Forma"),
+-                3 to ParamHuman(label = "Intensidade", decimals = 0),
+-                4 to ParamHuman(label = "Comparar por"),
++                0 to ParamHuman(label = R.string.fx_raio, suffix = "px", decimals = 0),
++                1 to ParamHuman(label = R.string.fx_operacao),
++                2 to ParamHuman(label = R.string.fx_forma),
++                3 to ParamHuman(label = R.string.fx_intensidade, decimals = 0),
++                4 to ParamHuman(label = R.string.fx_comparar),
+             ),
+         ),
+     )
+@@ -274,10 +278,10 @@ private val Table: Map<Int, EffectHuman> = buildMap {
+             keywords = "unsharp mascara de nitidez sharpen afiar detalhe",
+             principal = listOf(0, 1, 2),
+             params = mapOf(
+-                0 to ParamHuman(label = "Intensidade", decimals = 0),
+-                1 to ParamHuman(label = "Raio", suffix = "px", decimals = 1),
+-                2 to ParamHuman(label = "Limiar", decimals = 0),
+-                4 to ParamHuman(label = "Mistura", decimals = 0),
++                0 to ParamHuman(label = R.string.fx_intensidade, decimals = 0),
++                1 to ParamHuman(label = R.string.fx_raio, suffix = "px", decimals = 1),
++                2 to ParamHuman(label = R.string.fx_limiar, decimals = 0),
++                4 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
+             ),
+         ),
+     )
+@@ -287,12 +291,12 @@ private val Table: Map<Int, EffectHuman> = buildMap {
+             keywords = "lens blur desfoque de lente bokeh iris",
+             principal = listOf(0, 1, 2, 4),
+             params = mapOf(
+-                0 to ParamHuman(label = "Raio", suffix = "px", decimals = 0),
+-                1 to ParamHuman(label = "Ganho das luzes", decimals = 0),
+-                2 to ParamHuman(label = "Lados da íris", decimals = 0),
+-                3 to ParamHuman(label = "Rotação da íris", suffix = "°", decimals = 0),
+-                4 to ParamHuman(label = "Qualidade", decimals = 0),
+-                7 to ParamHuman(label = "Mistura", decimals = 0),
++                0 to ParamHuman(label = R.string.fx_raio, suffix = "px", decimals = 0),
++                1 to ParamHuman(label = R.string.fx_ganho_luzes, decimals = 0),
++                2 to ParamHuman(label = R.string.fx_lados_iris, decimals = 0),
++                3 to ParamHuman(label = R.string.fx_rotacao_iris, suffix = "°", decimals = 0),
++                4 to ParamHuman(label = R.string.fx_qualidade, decimals = 0),
++                7 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
+             ),
+         ),
+     )
+@@ -302,13 +306,13 @@ private val Table: Map<Int, EffectHuman> = buildMap {
+             keywords = "shake tremor camera balancar vibrar tremer",
+             principal = listOf(0, 1, 2, 4, 5),
+             params = mapOf(
+-                0 to ParamHuman(label = "Amplitude X", suffix = "px", decimals = 0),
+-                1 to ParamHuman(label = "Amplitude Y", suffix = "px", decimals = 0),
+-                2 to ParamHuman(label = "Frequência", suffix = "x", decimals = 2),
+-                4 to ParamHuman(label = "Eixos separados"),
+-                5 to ParamHuman(label = "Rotação", suffix = "°", decimals = 0),
+-                6 to ParamHuman(label = "Suavização", decimals = 0),
+-                7 to ParamHuman(label = "Mistura", decimals = 0),
++                0 to ParamHuman(label = R.string.fx_amplitude_x, suffix = "px", decimals = 0),
++                1 to ParamHuman(label = R.string.fx_amplitude_y, suffix = "px", decimals = 0),
++                2 to ParamHuman(label = R.string.fx_frequencia, suffix = "x", decimals = 2),
++                4 to ParamHuman(label = R.string.fx_eixos_separados),
++                5 to ParamHuman(label = R.string.fx_rotacao, suffix = "°", decimals = 0),
++                6 to ParamHuman(label = R.string.fx_suavizacao, decimals = 0),
++                7 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
+             ),
+         ),
+     )
+@@ -318,14 +322,14 @@ private val Table: Map<Int, EffectHuman> = buildMap {
+             keywords = "turbulencia displacement deslocamento ruido organico fumaca",
+             principal = listOf(0, 1, 2, 4),
+             params = mapOf(
+-                0 to ParamHuman(label = "Intensidade", suffix = "px", decimals = 0),
+-                1 to ParamHuman(label = "Tamanho do ruído", suffix = "px", decimals = 0),
+-                2 to ParamHuman(label = "Complexidade", suffix = "oitavas", decimals = 0),
+-                3 to ParamHuman(label = "Evolução", suffix = "px/q", decimals = 1),
+-                4 to ParamHuman(label = "Deslocamento X", suffix = "px", decimals = 0),
+-                5 to ParamHuman(label = "Deslocamento Y", suffix = "px", decimals = 0),
+-                8 to ParamHuman(label = "Bordas"),
+-                10 to ParamHuman(label = "Girar o deslocamento", suffix = "°", decimals = 0),
++                0 to ParamHuman(label = R.string.fx_intensidade, suffix = "px", decimals = 0),
++                1 to ParamHuman(label = R.string.fx_tamanho_ruido, suffix = "px", decimals = 0),
++                2 to ParamHuman(label = R.string.fx_complexidade, suffix = "oitavas", decimals = 0),
++                3 to ParamHuman(label = R.string.fx_evolucao, suffix = "px/q", decimals = 1),
++                4 to ParamHuman(label = R.string.fx_deslocamento_x, suffix = "px", decimals = 0),
++                5 to ParamHuman(label = R.string.fx_deslocamento_y, suffix = "px", decimals = 0),
++                8 to ParamHuman(label = R.string.fx_bordas),
++                10 to ParamHuman(label = R.string.fx_girar_deslocamento, suffix = "°", decimals = 0),
+             ),
+         ),
+     )
+@@ -335,14 +339,14 @@ private val Table: Map<Int, EffectHuman> = buildMap {
+             keywords = "wave warp onda ondular senoide agua",
+             principal = listOf(0, 1, 2, 4),
+             params = mapOf(
+-                0 to ParamHuman(label = "Altura da onda", suffix = "px", decimals = 0),
+-                1 to ParamHuman(label = "Largura de onda", suffix = "px", decimals = 0),
+-                2 to ParamHuman(label = "Velocidade", suffix = "px/q", decimals = 0),
+-                3 to ParamHuman(label = "Fase", suffix = "°", decimals = 0),
+-                4 to ParamHuman(label = "Direção"),
+-                5 to ParamHuman(label = "Onda quadrada"),
+-                6 to ParamHuman(label = "Bordas"),
+-                7 to ParamHuman(label = "Travar nas bordas"),
++                0 to ParamHuman(label = R.string.fx_altura_onda, suffix = "px", decimals = 0),
++                1 to ParamHuman(label = R.string.fx_largura_onda, suffix = "px", decimals = 0),
++                2 to ParamHuman(label = R.string.fx_velocidade, suffix = "px/q", decimals = 0),
++                3 to ParamHuman(label = R.string.fx_fase, suffix = "°", decimals = 0),
++                4 to ParamHuman(label = R.string.fx_direcao),
++                5 to ParamHuman(label = R.string.fx_onda_quadrada),
++                6 to ParamHuman(label = R.string.fx_bordas),
++                7 to ParamHuman(label = R.string.fx_travar_nas_bordas),
+             ),
+         ),
+     )
+@@ -352,13 +356,13 @@ private val Table: Map<Int, EffectHuman> = buildMap {
+             keywords = "warp lente distorcer empurrar puxar torcer esfera canto bulge pinch twist",
+             principal = listOf(0, 1, 2, 3),
+             params = mapOf(
+-                0 to ParamHuman(label = "Modo"),
+-                1 to ParamHuman(label = "Intensidade", suffix = "px", decimals = 0),
+-                2 to ParamHuman(label = "Raio", suffix = "px", decimals = 0),
+-                3 to ParamHuman(label = "Centro"),
+-                4 to ParamHuman(label = "Bordas"),
+-                5 to ParamHuman(label = "Mistura", decimals = 0),
+-                6 to ParamHuman(label = "Luz da esfera", decimals = 0),
++                0 to ParamHuman(label = R.string.fx_modo),
++                1 to ParamHuman(label = R.string.fx_intensidade, suffix = "px", decimals = 0),
++                2 to ParamHuman(label = R.string.fx_raio, suffix = "px", decimals = 0),
++                3 to ParamHuman(label = R.string.fx_centro),
++                4 to ParamHuman(label = R.string.fx_bordas),
++                5 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
++                6 to ParamHuman(label = R.string.fx_luz_esfera, decimals = 0),
+             ),
+         ),
+     )
+@@ -368,14 +372,14 @@ private val Table: Map<Int, EffectHuman> = buildMap {
+             keywords = "ripple dissolve ondulacao dissolver transicao circular agua",
+             principal = listOf(0, 1, 2, 3),
+             params = mapOf(
+-                0 to ParamHuman(label = "Progresso", decimals = 0),
+-                1 to ParamHuman(label = "Ondulação", suffix = "px", decimals = 0),
+-                2 to ParamHuman(label = "Comprimento da onda", suffix = "px", decimals = 0),
+-                3 to ParamHuman(label = "Suavidade da borda", decimals = 0),
+-                4 to ParamHuman(label = "Centro"),
+-                5 to ParamHuman(label = "Velocidade da onda", suffix = "x", decimals = 2),
+-                7 to ParamHuman(label = "Distorcer a imagem junto"),
+-                8 to ParamHuman(label = "De fora para dentro"),
++                0 to ParamHuman(label = R.string.fx_progresso, decimals = 0),
++                1 to ParamHuman(label = R.string.fx_ondulacao, suffix = "px", decimals = 0),
++                2 to ParamHuman(label = R.string.fx_comprimento_onda, suffix = "px", decimals = 0),
++                3 to ParamHuman(label = R.string.fx_suavidade_borda, decimals = 0),
++                4 to ParamHuman(label = R.string.fx_centro),
++                5 to ParamHuman(label = R.string.fx_velocidade_onda, suffix = "x", decimals = 2),
++                7 to ParamHuman(label = R.string.fx_distorcer_imagem_junto),
++                8 to ParamHuman(label = R.string.fx_fora_dentro),
+             ),
+         ),
+     )
+@@ -385,16 +389,16 @@ private val Table: Map<Int, EffectHuman> = buildMap {
+             keywords = "deep glow brilho profundo halo neon luz bloom",
+             principal = listOf(0, 1, 2, 3, 4),
+             params = mapOf(
+-                0 to ParamHuman(label = "Limite", decimals = 0),
+-                1 to ParamHuman(label = "Raio do núcleo", suffix = "px", decimals = 0),
+-                2 to ParamHuman(label = "Raio do halo", suffix = "px", decimals = 0),
+-                3 to ParamHuman(label = "Força do núcleo", suffix = "x", decimals = 2),
+-                4 to ParamHuman(label = "Força do halo", suffix = "x", decimals = 2),
+-                5 to ParamHuman(label = "Cor do brilho"),
+-                6 to ParamHuman(label = "Preservar as sombras"),
+-                7 to ParamHuman(label = "Halo em tela"),
+-                10 to ParamHuman(label = "Só o brilho"),
+-                11 to ParamHuman(label = "Estouro", decimals = 0),
++                0 to ParamHuman(label = R.string.fx_limite, decimals = 0),
++                1 to ParamHuman(label = R.string.fx_raio_nucleo, suffix = "px", decimals = 0),
++                2 to ParamHuman(label = R.string.fx_raio_halo, suffix = "px", decimals = 0),
++                3 to ParamHuman(label = R.string.fx_forca_nucleo, suffix = "x", decimals = 2),
++                4 to ParamHuman(label = R.string.fx_forca_halo, suffix = "x", decimals = 2),
++                5 to ParamHuman(label = R.string.fx_cor_brilho),
++                6 to ParamHuman(label = R.string.fx_preservar_sombras),
++                7 to ParamHuman(label = R.string.fx_halo_tela),
++                10 to ParamHuman(label = R.string.fx_so_brilho),
++                11 to ParamHuman(label = R.string.fx_estouro, decimals = 0),
+             ),
+         ),
+     )
+@@ -404,14 +408,14 @@ private val Table: Map<Int, EffectHuman> = buildMap {
+             keywords = "rays raios de luz god rays sol volumetrico spread",
+             principal = listOf(0, 1, 2, 3, 4),
+             params = mapOf(
+-                0 to ParamHuman(label = "Intensidade", suffix = "x", decimals = 2),
+-                1 to ParamHuman(label = "Comprimento", decimals = 0),
+-                2 to ParamHuman(label = "Limite", decimals = 0),
+-                3 to ParamHuman(label = "Decaimento", decimals = 0),
+-                4 to ParamHuman(label = "Ponto de luz"),
+-                5 to ParamHuman(label = "Amostras", decimals = 0),
+-                7 to ParamHuman(label = "Guardar a cor da fonte"),
+-                8 to ParamHuman(label = "Girar a cor", suffix = "°", decimals = 0),
++                0 to ParamHuman(label = R.string.fx_intensidade, suffix = "x", decimals = 2),
++                1 to ParamHuman(label = R.string.fx_comprimento, decimals = 0),
++                2 to ParamHuman(label = R.string.fx_limite, decimals = 0),
++                3 to ParamHuman(label = R.string.fx_decaimento, decimals = 0),
++                4 to ParamHuman(label = R.string.fx_ponto_luz),
++                5 to ParamHuman(label = R.string.fx_amostras, decimals = 0),
++                7 to ParamHuman(label = R.string.fx_guardar_cor_fonte),
++                8 to ParamHuman(label = R.string.fx_girar_cor, suffix = "°", decimals = 0),
+             ),
+         ),
+     )
+@@ -421,14 +425,14 @@ private val Table: Map<Int, EffectHuman> = buildMap {
+             keywords = "light sweep faixa de luz brilho varredura reflexo",
+             principal = listOf(0, 1, 2, 4, 5),
+             params = mapOf(
+-                0 to ParamHuman(label = "Posição", decimals = 0),
+-                1 to ParamHuman(label = "Largura", decimals = 0),
+-                2 to ParamHuman(label = "Intensidade", suffix = "x", decimals = 2),
+-                3 to ParamHuman(label = "Suavidade da borda", decimals = 0),
+-                4 to ParamHuman(label = "Ângulo", suffix = "°", decimals = 0),
+-                5 to ParamHuman(label = "Relevo", decimals = 0),
+-                6 to ParamHuman(label = "Multiplicar"),
+-                7 to ParamHuman(label = "Só onde a imagem é clara"),
++                0 to ParamHuman(label = R.string.fx_posicao, decimals = 0),
++                1 to ParamHuman(label = R.string.fx_largura, decimals = 0),
++                2 to ParamHuman(label = R.string.fx_intensidade, suffix = "x", decimals = 2),
++                3 to ParamHuman(label = R.string.fx_suavidade_borda, decimals = 0),
++                4 to ParamHuman(label = R.string.fx_angulo, suffix = "°", decimals = 0),
++                5 to ParamHuman(label = R.string.fx_relevo, decimals = 0),
++                6 to ParamHuman(label = R.string.fx_multiplicar),
++                7 to ParamHuman(label = R.string.fx_so_onde_imagem_clara),
+             ),
+         ),
+     )
+@@ -438,15 +442,15 @@ private val Table: Map<Int, EffectHuman> = buildMap {
+             keywords = "colorama remapeamento de cor arco-iris psicodelico mapa de cor",
+             principal = listOf(0, 1, 2, 4, 5),
+             params = mapOf(
+-                0 to ParamHuman(label = "Fase", suffix = "voltas", decimals = 2),
+-                1 to ParamHuman(label = "Ciclos", suffix = "x", decimals = 2),
+-                2 to ParamHuman(label = "Saturação", decimals = 0),
+-                3 to ParamHuman(label = "Brilho", decimals = 0),
+-                4 to ParamHuman(label = "Entrada"),
+-                5 to ParamHuman(label = "Mistura", decimals = 0),
+-                6 to ParamHuman(label = "Inverter o arco-íris"),
+-                7 to ParamHuman(label = "Peso do croma", decimals = 0),
+-                9 to ParamHuman(label = "Ganho", suffix = "x", decimals = 2),
++                0 to ParamHuman(label = R.string.fx_fase, suffix = "voltas", decimals = 2),
++                1 to ParamHuman(label = R.string.fx_ciclos, suffix = "x", decimals = 2),
++                2 to ParamHuman(label = R.string.fx_saturacao, decimals = 0),
++                3 to ParamHuman(label = R.string.fx_brilho, decimals = 0),
++                4 to ParamHuman(label = R.string.fx_entrada),
++                5 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
++                6 to ParamHuman(label = R.string.fx_inverter_arco_iris),
++                7 to ParamHuman(label = R.string.fx_peso_croma, decimals = 0),
++                9 to ParamHuman(label = R.string.fx_ganho, suffix = "x", decimals = 2),
+             ),
+         ),
+     )
+@@ -456,15 +460,15 @@ private val Table: Map<Int, EffectHuman> = buildMap {
+             keywords = "pixel sort ordenar pixels derreter listras glitch sort",
+             principal = listOf(0, 1, 2, 4),
+             params = mapOf(
+-                0 to ParamHuman(label = "Limiar baixo", decimals = 0),
+-                1 to ParamHuman(label = "Limiar alto", decimals = 0),
+-                2 to ParamHuman(label = "Comprimento", decimals = 0),
+-                3 to ParamHuman(label = "Aleatoriedade", decimals = 0),
+-                4 to ParamHuman(label = "Direção"),
+-                5 to ParamHuman(label = "Sentido inverso"),
+-                6 to ParamHuman(label = "Ordenar por"),
+-                8 to ParamHuman(label = "Por faixa de tom"),
+-                9 to ParamHuman(label = "Passo", suffix = "px", decimals = 0),
++                0 to ParamHuman(label = R.string.fx_limiar_baixo, decimals = 0),
++                1 to ParamHuman(label = R.string.fx_limiar_alto, decimals = 0),
++                2 to ParamHuman(label = R.string.fx_comprimento, decimals = 0),
++                3 to ParamHuman(label = R.string.fx_aleatoriedade, decimals = 0),
++                4 to ParamHuman(label = R.string.fx_direcao),
++                5 to ParamHuman(label = R.string.fx_sentido_inverso),
++                6 to ParamHuman(label = R.string.fx_ordenar),
++                8 to ParamHuman(label = R.string.fx_faixa_tom),
++                9 to ParamHuman(label = R.string.fx_passo, suffix = "px", decimals = 0),
+             ),
+         ),
+     )
+@@ -474,16 +478,16 @@ private val Table: Map<Int, EffectHuman> = buildMap {
+             keywords = "film damage dano de filme poeira riscos arranhao projetor pelicula",
+             principal = listOf(0, 1, 2, 3, 4),
+             params = mapOf(
+-                0 to ParamHuman(label = "Poeira", decimals = 0),
+-                1 to ParamHuman(label = "Riscos", decimals = 0),
+-                2 to ParamHuman(label = "Piscar", decimals = 0),
+-                3 to ParamHuman(label = "Balanço de porta", suffix = "px", decimals = 1),
+-                4 to ParamHuman(label = "Queimado", decimals = 0),
+-                5 to ParamHuman(label = "Emenda"),
+-                7 to ParamHuman(label = "Mistura", decimals = 0),
+-                8 to ParamHuman(label = "Tamanho da poeira", suffix = "px", decimals = 1),
+-                9 to ParamHuman(label = "Comprimento do risco", decimals = 0),
+-                11 to ParamHuman(label = "Calor do queimado", decimals = 0),
++                0 to ParamHuman(label = R.string.fx_poeira, decimals = 0),
++                1 to ParamHuman(label = R.string.fx_riscos, decimals = 0),
++                2 to ParamHuman(label = R.string.fx_piscar, decimals = 0),
++                3 to ParamHuman(label = R.string.fx_balanco_porta, suffix = "px", decimals = 1),
++                4 to ParamHuman(label = R.string.fx_queimado, decimals = 0),
++                5 to ParamHuman(label = R.string.fx_emenda),
++                7 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
++                8 to ParamHuman(label = R.string.fx_tamanho_poeira, suffix = "px", decimals = 1),
++                9 to ParamHuman(label = R.string.fx_comprimento_risco, decimals = 0),
++                11 to ParamHuman(label = R.string.fx_calor_queimado, decimals = 0),
+             ),
+         ),
+     )
+@@ -493,14 +497,14 @@ private val Table: Map<Int, EffectHuman> = buildMap {
+             keywords = "jpeg damage dano compressao artefato bloco qualidade",
+             principal = listOf(0, 1, 2, 3),
+             params = mapOf(
+-                0 to ParamHuman(label = "Qualidade", decimals = 0),
+-                1 to ParamHuman(label = "Blocos", decimals = 0),
+-                2 to ParamHuman(label = "Anelamento", decimals = 0),
+-                3 to ParamHuman(label = "Dano de cor", decimals = 0),
+-                4 to ParamHuman(label = "Tamanho do bloco", suffix = "px", decimals = 0),
+-                5 to ParamHuman(label = "Suavizar o bloco", decimals = 0),
+-                7 to ParamHuman(label = "Mistura", decimals = 0),
+-                8 to ParamHuman(label = "Blocos corrompidos", decimals = 0),
++                0 to ParamHuman(label = R.string.fx_qualidade, decimals = 0),
++                1 to ParamHuman(label = R.string.fx_blocos, decimals = 0),
++                2 to ParamHuman(label = R.string.fx_anelamento, decimals = 0),
++                3 to ParamHuman(label = R.string.fx_dano_cor, decimals = 0),
++                4 to ParamHuman(label = R.string.fx_tamanho_bloco, suffix = "px", decimals = 0),
++                5 to ParamHuman(label = R.string.fx_suavizar_bloco, decimals = 0),
++                7 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
++                8 to ParamHuman(label = R.string.fx_blocos_corrompidos, decimals = 0),
+             ),
+         ),
+     )
+@@ -510,16 +514,16 @@ private val Table: Map<Int, EffectHuman> = buildMap {
+             keywords = "holo matrix holograma projecao grade tecnologica scanner",
+             principal = listOf(0, 1, 3, 4, 6),
+             params = mapOf(
+-                0 to ParamHuman(label = "Mistura da cor", decimals = 0),
+-                1 to ParamHuman(label = "Grade", decimals = 0),
+-                2 to ParamHuman(label = "Células da grade", decimals = 0),
+-                3 to ParamHuman(label = "Brilho das bordas", decimals = 0),
+-                4 to ParamHuman(label = "Posição da varredura", decimals = 0),
+-                5 to ParamHuman(label = "Largura da varredura", decimals = 0),
+-                6 to ParamHuman(label = "Interferência", decimals = 0),
+-                7 to ParamHuman(label = "Velocidade da varredura", suffix = "x", decimals = 2),
+-                9 to ParamHuman(label = "Fundo aceso", decimals = 0),
+-                11 to ParamHuman(label = "Mistura", decimals = 0),
++                0 to ParamHuman(label = R.string.fx_mistura_cor, decimals = 0),
++                1 to ParamHuman(label = R.string.fx_grade, decimals = 0),
++                2 to ParamHuman(label = R.string.fx_celulas_grade, decimals = 0),
++                3 to ParamHuman(label = R.string.fx_brilho_bordas, decimals = 0),
++                4 to ParamHuman(label = R.string.fx_posicao_varredura, decimals = 0),
++                5 to ParamHuman(label = R.string.fx_largura_varredura, decimals = 0),
++                6 to ParamHuman(label = R.string.fx_interferencia, decimals = 0),
++                7 to ParamHuman(label = R.string.fx_velocidade_varredura, suffix = "x", decimals = 2),
++                9 to ParamHuman(label = R.string.fx_fundo_aceso, decimals = 0),
++                11 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
+             ),
+         ),
+     )
+@@ -529,15 +533,15 @@ private val Table: Map<Int, EffectHuman> = buildMap {
+             keywords = "glitchify glitch defeito digital rasgo bloco corrupcao",
+             principal = listOf(0, 1, 2, 3, 4),
+             params = mapOf(
+-                0 to ParamHuman(label = "Altura da faixa", suffix = "px", decimals = 0),
+-                1 to ParamHuman(label = "Deslocamento", suffix = "px", decimals = 0),
+-                2 to ParamHuman(label = "Picos", decimals = 0),
+-                3 to ParamHuman(label = "Separação RGB", suffix = "px", decimals = 0),
+-                4 to ParamHuman(label = "Frequência", suffix = "quadros", decimals = 1),
+-                6 to ParamHuman(label = "Travar o quadro"),
+-                7 to ParamHuman(label = "Mistura", decimals = 0),
+-                8 to ParamHuman(label = "Blocos verticais"),
+-                9 to ParamHuman(label = "Corrupção de cor", decimals = 0),
++                0 to ParamHuman(label = R.string.fx_altura_faixa, suffix = "px", decimals = 0),
++                1 to ParamHuman(label = R.string.fx_deslocamento, suffix = "px", decimals = 0),
++                2 to ParamHuman(label = R.string.fx_picos, decimals = 0),
++                3 to ParamHuman(label = R.string.fx_separacao_rgb, suffix = "px", decimals = 0),
++                4 to ParamHuman(label = R.string.fx_frequencia, suffix = "quadros", decimals = 1),
++                6 to ParamHuman(label = R.string.fx_travar_quadro),
++                7 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
++                8 to ParamHuman(label = R.string.fx_blocos_verticais),
++                9 to ParamHuman(label = R.string.fx_corrupcao_cor, decimals = 0),
+             ),
+         ),
+     )
+@@ -547,17 +551,17 @@ private val Table: Map<Int, EffectHuman> = buildMap {
+             keywords = "vhs fita cassette videocassete tracking dropouts analogico videotape",
+             principal = listOf(0, 1, 2, 3, 4, 5, 6),
+             params = mapOf(
+-                0 to ParamHuman(label = "Borrado da luma", suffix = "px", decimals = 1),
+-                1 to ParamHuman(label = "Alargar a cor", suffix = "px", decimals = 1),
+-                2 to ParamHuman(label = "Instabilidade", suffix = "px", decimals = 0),
+-                3 to ParamHuman(label = "Perdas de fita", decimals = 0),
+-                4 to ParamHuman(label = "Varredura de cabeçote", decimals = 0),
+-                5 to ParamHuman(label = "Ruído", decimals = 0),
+-                6 to ParamHuman(label = "Degradação de cor", decimals = 0),
+-                7 to ParamHuman(label = "Sangramento", decimals = 0),
+-                10 to ParamHuman(label = "Velocidade da instabilidade", suffix = "x", decimals = 2),
+-                11 to ParamHuman(label = "Altura da perda", suffix = "px", decimals = 1),
+-                12 to ParamHuman(label = "Mistura", decimals = 0),
++                0 to ParamHuman(label = R.string.fx_borrado_luma, suffix = "px", decimals = 1),
++                1 to ParamHuman(label = R.string.fx_alargar_cor, suffix = "px", decimals = 1),
++                2 to ParamHuman(label = R.string.fx_instabilidade, suffix = "px", decimals = 0),
++                3 to ParamHuman(label = R.string.fx_perdas_fita, decimals = 0),
++                4 to ParamHuman(label = R.string.fx_varredura_cabecote, decimals = 0),
++                5 to ParamHuman(label = R.string.fx_ruido, decimals = 0),
++                6 to ParamHuman(label = R.string.fx_degradacao_cor, decimals = 0),
++                7 to ParamHuman(label = R.string.fx_sangramento, decimals = 0),
++                10 to ParamHuman(label = R.string.fx_velocidade_instabilidade, suffix = "x", decimals = 2),
++                11 to ParamHuman(label = R.string.fx_altura_perda, suffix = "px", decimals = 1),
++                12 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
+             ),
+         ),
+     )
+@@ -567,15 +571,15 @@ private val Table: Map<Int, EffectHuman> = buildMap {
+             keywords = "vhs fita estilizado anos 80 retro neon chroma warp",
+             principal = listOf(0, 1, 2, 3, 6),
+             params = mapOf(
+-                0 to ParamHuman(label = "Separação RGB", suffix = "px", decimals = 0),
+-                1 to ParamHuman(label = "Ondulação", suffix = "px", decimals = 0),
+-                2 to ParamHuman(label = "Brilho sujo", decimals = 0),
+-                3 to ParamHuman(label = "Vinheta", decimals = 0),
+-                4 to ParamHuman(label = "Varredura", decimals = 0),
+-                5 to ParamHuman(label = "Ruído", decimals = 0),
+-                6 to ParamHuman(label = "Saturação", decimals = 0),
+-                7 to ParamHuman(label = "Mistura", decimals = 0),
+-                9 to ParamHuman(label = "Frequência da ondulação", suffix = "x", decimals = 1),
++                0 to ParamHuman(label = R.string.fx_separacao_rgb, suffix = "px", decimals = 0),
++                1 to ParamHuman(label = R.string.fx_ondulacao, suffix = "px", decimals = 0),
++                2 to ParamHuman(label = R.string.fx_brilho_sujo, decimals = 0),
++                3 to ParamHuman(label = R.string.fx_vinheta, decimals = 0),
++                4 to ParamHuman(label = R.string.fx_varredura, decimals = 0),
++                5 to ParamHuman(label = R.string.fx_ruido, decimals = 0),
++                6 to ParamHuman(label = R.string.fx_saturacao, decimals = 0),
++                7 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
++                9 to ParamHuman(label = R.string.fx_frequencia_ondulacao, suffix = "x", decimals = 1),
+             ),
+         ),
+     )
+@@ -585,15 +589,15 @@ private val Table: Map<Int, EffectHuman> = buildMap {
+             keywords = "signal sinal interferencia transmissao banda sincronia chiado",
+             principal = listOf(0, 1, 2, 3, 4),
+             params = mapOf(
+-                0 to ParamHuman(label = "Bandas perdidas", decimals = 0),
+-                1 to ParamHuman(label = "Deslocamento", suffix = "px", decimals = 0),
+-                2 to ParamHuman(label = "Deriva", suffix = "px/q", decimals = 2),
+-                3 to ParamHuman(label = "Altura da banda", suffix = "px", decimals = 0),
+-                4 to ParamHuman(label = "Ruído de sinal", decimals = 0),
+-                6 to ParamHuman(label = "Frequência", suffix = "quadros", decimals = 1),
+-                7 to ParamHuman(label = "Mistura", decimals = 0),
+-                8 to ParamHuman(label = "Perder a sincronia"),
+-                9 to ParamHuman(label = "Separação de cor", suffix = "px", decimals = 0),
++                0 to ParamHuman(label = R.string.fx_bandas_perdidas, decimals = 0),
++                1 to ParamHuman(label = R.string.fx_deslocamento, suffix = "px", decimals = 0),
++                2 to ParamHuman(label = R.string.fx_deriva, suffix = "px/q", decimals = 2),
++                3 to ParamHuman(label = R.string.fx_altura_banda, suffix = "px", decimals = 0),
++                4 to ParamHuman(label = R.string.fx_ruido_sinal, decimals = 0),
++                6 to ParamHuman(label = R.string.fx_frequencia, suffix = "quadros", decimals = 1),
++                7 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
++                8 to ParamHuman(label = R.string.fx_perder_sincronia),
++                9 to ParamHuman(label = R.string.fx_separacao_cor, suffix = "px", decimals = 0),
+             ),
+         ),
+     )
+@@ -603,15 +607,15 @@ private val Table: Map<Int, EffectHuman> = buildMap {
+             keywords = "cross glitch cruz transicao varredura rasgo",
+             principal = listOf(0, 1, 2, 4),
+             params = mapOf(
+-                0 to ParamHuman(label = "Progresso", decimals = 0),
+-                1 to ParamHuman(label = "Largura da faixa", decimals = 0),
+-                2 to ParamHuman(label = "Deslocamento", suffix = "px", decimals = 0),
+-                3 to ParamHuman(label = "Ruído de fundo", decimals = 0),
+-                4 to ParamHuman(label = "Separação RGB", suffix = "px", decimals = 0),
+-                6 to ParamHuman(label = "Frequência", suffix = "quadros", decimals = 1),
+-                7 to ParamHuman(label = "Mistura", decimals = 0),
+-                8 to ParamHuman(label = "Faixa vertical"),
+-                9 to ParamHuman(label = "Faixa horizontal"),
++                0 to ParamHuman(label = R.string.fx_progresso, decimals = 0),
++                1 to ParamHuman(label = R.string.fx_largura_faixa, decimals = 0),
++                2 to ParamHuman(label = R.string.fx_deslocamento, suffix = "px", decimals = 0),
++                3 to ParamHuman(label = R.string.fx_ruido_fundo, decimals = 0),
++                4 to ParamHuman(label = R.string.fx_separacao_rgb, suffix = "px", decimals = 0),
++                6 to ParamHuman(label = R.string.fx_frequencia, suffix = "quadros", decimals = 1),
++                7 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
++                8 to ParamHuman(label = R.string.fx_faixa_vertical),
++                9 to ParamHuman(label = R.string.fx_faixa_horizontal),
+             ),
+         ),
+     )
+@@ -621,8 +625,8 @@ private val Table: Map<Int, EffectHuman> = buildMap {
+             keywords = "posterize time posterizar tempo taxa quadros stop motion animacao",
+             principal = listOf(0, 1),
+             params = mapOf(
+-                0 to ParamHuman(label = "Quadros por segundo", suffix = "fps", decimals = 1),
+-                1 to ParamHuman(label = "Segurar o quadro"),
++                0 to ParamHuman(label = R.string.fx_quadros_segundo, suffix = "fps", decimals = 1),
++                1 to ParamHuman(label = R.string.fx_segurar_quadro),
+             ),
+         ),
+     )
+@@ -632,12 +636,12 @@ private val Table: Map<Int, EffectHuman> = buildMap {
+             keywords = "rgb no tempo time warp separar canais atrasar cor chromatic",
+             principal = listOf(0, 1, 2, 3, 4),
+             params = mapOf(
+-                0 to ParamHuman(label = "Vermelho", suffix = "quadros", decimals = 1),
+-                1 to ParamHuman(label = "Verde", suffix = "quadros", decimals = 1),
+-                2 to ParamHuman(label = "Azul", suffix = "quadros", decimals = 1),
+-                3 to ParamHuman(label = "Unidade"),
+-                4 to ParamHuman(label = "Intensidade", decimals = 0),
+-                5 to ParamHuman(label = "Prender nas pontas"),
++                0 to ParamHuman(label = R.string.fx_vermelho_c031, suffix = "quadros", decimals = 1),
++                1 to ParamHuman(label = R.string.fx_verde_14e6, suffix = "quadros", decimals = 1),
++                2 to ParamHuman(label = R.string.fx_azul_582d, suffix = "quadros", decimals = 1),
++                3 to ParamHuman(label = R.string.fx_unidade),
++                4 to ParamHuman(label = R.string.fx_intensidade, decimals = 0),
++                5 to ParamHuman(label = R.string.fx_prender_nas_pontas),
+             ),
+         ),
+     )
+diff --git a/android/app/src/main/java/com/aurea/aurea/editor/panels/Element3DPanel.kt b/android/app/src/main/java/com/aurea/aurea/editor/panels/Element3DPanel.kt
+index 75dbea0..e8b9eda 100644
+--- a/android/app/src/main/java/com/aurea/aurea/editor/panels/Element3DPanel.kt
++++ b/android/app/src/main/java/com/aurea/aurea/editor/panels/Element3DPanel.kt
+@@ -95,11 +95,11 @@ internal fun Element3DPanel(env: PanelEnv) {
+             }
+         }
+         Spacer(Modifier.height(10.dp))
+-        EnvRuler(store, "Intensidade", 0.01f, 0f, 20f, e[1], "${(e[1] * 100).roundToInt()}%") { store.setEnvironment(it, store.environment[2]) }
+-        EnvRuler(store, "Girar a luz", 1f, -360f, 360f, e[2], "${e[2].roundToInt()}°") { store.setEnvironment(store.environment[1], it) }
++        EnvRuler(store, 1, stringResource(R.string.panel_intensidade), 0.01f, 0f, 20f, e[1], "${(e[1] * 100).roundToInt()}%") { store.setEnvironment(it, store.environment[2]) }
++        EnvRuler(store, 2, stringResource(R.string.pn_env_rotate_light), 1f, -360f, 360f, e[2], "${e[2].roundToInt()}°") { store.setEnvironment(store.environment[1], it) }
+         Spacer(Modifier.height(8.dp))
+         Text(
+-            "A luz do ambiente ilumina e reflete em todos os objetos 3D do projeto.",
++            stringResource(R.string.pn_env_light_hint),
+             style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = AureaColors.Muted)),
+         )
+     }
+@@ -117,7 +117,7 @@ private fun Text3DSection(env: PanelEnv, info: Text3DInfo) {
+     val store = env.store
+     var draft by remember(store.primary) { mutableStateOf(info.content) }
+     LaunchedEffect(info.content) { if (info.content != draft && !store.textEditing) draft = info.content }
+-    SectionTitle("Texto 3D")
++    SectionTitle(stringResource(R.string.pn_text3d_title))
+     Box(
+         Modifier.fillMaxWidth().heightIn(min = 52.dp).clip(RoundedCornerShape(10.dp)).background(AureaColors.Chip)
+             .padding(horizontal = 12.dp, vertical = 10.dp),
+@@ -132,10 +132,10 @@ private fun Text3DSection(env: PanelEnv, info: Text3DInfo) {
+             cursorBrush = SolidColor(AureaColors.Accent),
+             modifier = Modifier.fillMaxWidth(),
+         )
+-        if (draft.isEmpty()) Text("Digite o texto", style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = AureaColors.Muted)))
++        if (draft.isEmpty()) Text(stringResource(R.string.pn_text3d_placeholder), style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = AureaColors.Muted)))
+     }
+     Spacer(Modifier.height(6.dp))
+-    PropertyCustomRow("Profundidade", selected = false, onSelect = {}) {
++    PropertyCustomRow(stringResource(R.string.pn_depth), selected = false, onSelect = {}) {
+         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+             Box(Modifier.weight(1f).height(40.dp)) {
+                 TickRuler(
+@@ -159,9 +159,9 @@ private fun Text3DSection(env: PanelEnv, info: Text3DInfo) {
+         }
+     }
+     Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
+-        Text("Alinhamento", modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
++        Text(stringResource(R.string.panel_alinhamento), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+-            listOf(0 to "EsquerdastringResource(R.string.panel_1_to)CentrostringResource(R.string.panel_2_to)Direita").forEach { (a, label) ->
++            listOf(0 to stringResource(R.string.panel_esquerda), 1 to stringResource(R.string.panel_centro), 2 to stringResource(R.string.panel_direita)).forEach { (a, label) ->
+                 Chip(label, on = info.alignment == a) { store.text3d?.let { store.setText3D(it.copy(alignment = a)) } }
+             }
+         }
+@@ -182,6 +182,7 @@ private fun Chip(label: String, on: Boolean, onClick: () -> Unit) {
+ @Composable
+ private fun EnvRuler(
+     store: com.aurea.aurea.state.EditorStore,
++    index: Int, // 1 = intensidade, 2 = girar a luz (posição em `environment`)
+     label: String,
+     unitsPerDp: Float,
+     min: Float,
+@@ -190,7 +191,6 @@ private fun EnvRuler(
+     text: String,
+     onValue: (Float) -> Unit,
+ ) {
+-    val index = if (label == "Intensidade") 1 else 2  // 2 = "Girar a luz"
+     PropertyCustomRow(label, selected = false, onSelect = {}) {
+         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+             Box(Modifier.weight(1f).height(40.dp)) {
+diff --git a/android/app/src/main/java/com/aurea/aurea/editor/panels/ExpressionSheet.kt b/android/app/src/main/java/com/aurea/aurea/editor/panels/ExpressionSheet.kt
+index 0d198a1..a8e1325 100644
+--- a/android/app/src/main/java/com/aurea/aurea/editor/panels/ExpressionSheet.kt
++++ b/android/app/src/main/java/com/aurea/aurea/editor/panels/ExpressionSheet.kt
+@@ -135,9 +135,9 @@ internal fun ExpressionSheet(store: EditorStore, target: EditorStore.ExpressionT
+             val status = when {
+                 refused -> stringResource(R.string.panel_motor_recusou_esta_propriedade) to AureaColors.Danger
+                 shownError != null -> {
+-                    val where = if (shownError.line > 0) "Linha ${shownError.line}, coluna ${shownError.column}: " else ""
++                    val msg = if (shownError.line > 0) stringResource(R.string.pn_expr_error_at, shownError.line, shownError.column, shownError.message) else shownError.message
+                     val tail = if (!dirty && applied && syntax.ok) stringResource(R.string.panel_usando_valor_keyframes) else ""
+-                    (where + shownError.message + tail) to AureaColors.Danger
++                    (msg + tail) to AureaColors.Danger
+                 }
+                 dirty -> (if (field.text.isBlank()) stringResource(R.string.panel_aplicar_sem_texto_remove_expressao) else stringResource(R.string.panel_sintaxe_ok_toque_aplicar)) to AureaColors.Muted
+                 applied && info?.enabled == false -> stringResource(R.string.panel_desligada_propriedade_usa_keyframes) to AureaColors.Muted
+diff --git a/android/app/src/main/java/com/aurea/aurea/editor/panels/FormaKit.kt b/android/app/src/main/java/com/aurea/aurea/editor/panels/FormaKit.kt
+index 4ccf727..5fa7f48 100644
+--- a/android/app/src/main/java/com/aurea/aurea/editor/panels/FormaKit.kt
++++ b/android/app/src/main/java/com/aurea/aurea/editor/panels/FormaKit.kt
+@@ -147,11 +147,12 @@ internal fun HumanRow(
+ /** O ↺ da linha: 34 dp de toque; reserva o lugar mesmo apagado (a régua não pula). */
+ @Composable
+ internal fun ResetButton(visible: Boolean, onClick: () -> Unit) {
++    val desc = stringResource(R.string.panel_voltar_padrao)
+     Box(
+         Modifier
+             .size(34.dp, 44.dp)
+             .alpha(if (visible) 1f else 0f)
+-            .semantics { contentDescription = "Voltar ao padrão" }
++            .semantics { contentDescription = desc }
+             .then(if (visible) Modifier.tocavel(shrink = 1f, onClick = onClick) else Modifier),
+         contentAlignment = Alignment.Center,
+     ) {
+diff --git a/android/app/src/main/java/com/aurea/aurea/editor/panels/MaskPanel.kt b/android/app/src/main/java/com/aurea/aurea/editor/panels/MaskPanel.kt
+index 146b2bd..ce94b5e 100644
+--- a/android/app/src/main/java/com/aurea/aurea/editor/panels/MaskPanel.kt
++++ b/android/app/src/main/java/com/aurea/aurea/editor/panels/MaskPanel.kt
+@@ -20,6 +20,7 @@ import androidx.compose.runtime.remember
+ import androidx.compose.runtime.saveable.rememberSaveable
+ import androidx.compose.runtime.setValue
+ import androidx.compose.ui.Modifier
++import androidx.compose.ui.res.pluralStringResource
+ import androidx.compose.ui.res.stringResource
+ import com.aurea.aurea.R
+ import androidx.compose.ui.text.TextStyle
+@@ -93,7 +94,7 @@ private fun MasksTab(env: PanelEnv, state: EditorStore.MaskState?, m: EditorStor
+     }
+     ChipRow {
+         masks.forEachIndexed { i, mk ->
+-            KitChip("Máscara ${i + 1}" + if (!mk.closed) stringResource(R.string.panel_aberta) else "", m?.id == mk.id) {
++            KitChip(if (mk.closed) stringResource(R.string.pn_mask_n, i + 1) else stringResource(R.string.pn_mask_n_open, i + 1), m?.id == mk.id) {
+                 store.maskEdit = mk.id
+                 store.maskDrawing = !mk.closed
+                 store.maskPoint = -1
+@@ -142,7 +143,7 @@ private fun MaskSteps(env: PanelEnv, m: EditorStore.MaskPath, drawing: Boolean)
+             if (drawing) {
+                 KitHint(stringResource(R.string.panel_toque_palco_pontos_arraste_curvar_toque))
+                 Spacer(Modifier.height(8.dp))
+-                ActionCard(stringResource(R.string.panel_fechar_caminho), "${m.count} ponto(s) até agora") { store.closeMaskPath() }
++                ActionCard(stringResource(R.string.panel_fechar_caminho), pluralStringResource(R.plurals.pn_mask_points_so_far, m.count, m.count)) { store.closeMaskPath() }
+             } else {
+                 KitHint(stringResource(R.string.panel_arraste_pontos_palco_toque_num_ponto))
+                 val look = when {
+@@ -152,7 +153,7 @@ private fun MaskSteps(env: PanelEnv, m: EditorStore.MaskPath, drawing: Boolean)
+                 }
+                 PropertyCustomRow(stringResource(R.string.panel_caminho), selected = true, onSelect = {}, keyframe = look) {
+                     Text(
+-                        if (m.keyCount == 0) stringResource(R.string.panel_parado_toque_trilho_animar) else "${m.keyCount} keyframe(s) — editar no cabeçote grava ali",
++                        if (m.keyCount == 0) stringResource(R.string.panel_parado_toque_trilho_animar) else pluralStringResource(R.plurals.pn_keyframes_edit_at_playhead, m.keyCount, m.keyCount),
+                         style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)),
+                     )
+                 }
+@@ -229,6 +230,7 @@ private fun TrackMatteTab(store: EditorStore) {
+     val me = rows.firstOrNull { it.id == self }
+     val candidates = rows.filter { it.id != self && it.kind != LayerType.Audio.kind && it.kind != LayerType.Camera.kind && it.kind != LayerType.Light.kind }
+     KitTitle(stringResource(R.string.panel_1_recortar_pelo))
++    val pickBelowMsg = stringResource(R.string.pn_mask_pick_layer_below)
+     val modes = listOf(0 to stringResource(R.string.panel_nao_recortar), 1 to stringResource(R.string.panel_pela_forma), 2 to stringResource(R.string.panel_pela_forma_invertido), 3 to stringResource(R.string.panel_pelo_brilho), 4 to stringResource(R.string.panel_pelo_brilho_invertido))
+     ChoiceChips(modes.map { it.second }, modes.indexOfFirst { it.first == mode }, onSelect = { i ->
+         val value = modes[i].first
+@@ -238,7 +240,7 @@ private fun TrackMatteTab(store: EditorStore) {
+             // Sem camada escolhida: a logo acima na pilha (AE).
+             val target = if (matte != 0L) matte
+             else candidates.filter { me != null && it.zIndex > me.zIndex }.minByOrNull { it.zIndex }?.id ?: 0L
+-            if (target == 0L) store.showToast("Escolha a camada abaixo") else store.setTrackMatte(target, value)
++            if (target == 0L) store.showToast(pickBelowMsg) else store.setTrackMatte(target, value)
+         }
+     })
+     KitTitle(stringResource(R.string.panel_2_qual_camada_recorta))
+diff --git a/android/app/src/main/java/com/aurea/aurea/editor/panels/PanelChrome.kt b/android/app/src/main/java/com/aurea/aurea/editor/panels/PanelChrome.kt
+index 39d2300..0b7f606 100644
+--- a/android/app/src/main/java/com/aurea/aurea/editor/panels/PanelChrome.kt
++++ b/android/app/src/main/java/com/aurea/aurea/editor/panels/PanelChrome.kt
+@@ -94,6 +94,7 @@ internal class PanelEnv(
+  */
+ @Composable
+ internal fun PanelHeader(title: String, onBack: () -> Unit) {
++    val backDesc = stringResource(R.string.pn_back_to_layer_tools)
+     Column(Modifier.fillMaxWidth()) {
+         Box(Modifier.fillMaxWidth().height(1.dp).background(AureaColors.Border))
+         Row(
+@@ -106,7 +107,7 @@ internal fun PanelHeader(title: String, onBack: () -> Unit) {
+             Box(
+                 Modifier
+                     .size(48.dp, 44.dp)
+-                    .semantics { contentDescription = "Voltar às ferramentas da camada" }
++                    .semantics { contentDescription = backDesc }
+                     .tocavel(onClick = onBack),
+                 contentAlignment = Alignment.Center,
+             ) {
+diff --git a/android/app/src/main/java/com/aurea/aurea/editor/panels/Panels.kt b/android/app/src/main/java/com/aurea/aurea/editor/panels/Panels.kt
+index bcd51d0..b88f608 100644
+--- a/android/app/src/main/java/com/aurea/aurea/editor/panels/Panels.kt
++++ b/android/app/src/main/java/com/aurea/aurea/editor/panels/Panels.kt
+@@ -96,7 +96,7 @@ fun PanelContent(
+     val hasLayer by remember(store) { derivedStateOf { store.detail != null } }
+ 
+     val title = when (panel) {
+-        EditorPanel.Transform -> "Transformar · ${transformTab.title}"
++        EditorPanel.Transform -> stringResource(R.string.pn_transform_title_tab, stringResource(transformTab.title))
+         EditorPanel.Effects -> stringResource(R.string.panel_efeitos)
+         EditorPanel.Curve -> stringResource(R.string.panel_easing_curve)
+         EditorPanel.Appearance -> stringResource(R.string.panel_mistura_opacidade)
+diff --git a/android/app/src/main/java/com/aurea/aurea/effects/EffectCatalogMeta.kt b/android/app/src/main/java/com/aurea/aurea/effects/EffectCatalogMeta.kt
+index 125810d..99435fc 100644
+--- a/android/app/src/main/java/com/aurea/aurea/effects/EffectCatalogMeta.kt
++++ b/android/app/src/main/java/com/aurea/aurea/effects/EffectCatalogMeta.kt
+@@ -82,82 +82,77 @@ private val AllTargets = EffectTarget.entries.toList()
+ private val Table: Map<Int, EffectMeta> = buildMap {
+     fun put(key: String, meta: EffectMeta) = put(effectTypeId(key), meta)
+ 
+-    put("aurea.transform", EffectMeta("Move, gira, escala e muda a opacidade da camada sem perder qualidade.", AllTargets))
+-    put("aurea.color.exposure", EffectMeta("Clareia ou escurece como a exposição de uma câmera: multiplica a luz sem estourar a cor.", AllTargets))
+-    put("aurea.color.brightness_contrast", EffectMeta("Sobe o brilho e abre ou fecha o contraste em volta do cinza médio.", AllTargets))
+-    put("aurea.color.saturation", EffectMeta("Deixa a cor mais viva ou leva tudo para o preto e branco.", AllTargets))
+-    put("aurea.color.tint", EffectMeta("Pinta as sombras de uma cor e as luzes de outra — o duotone do cinema.", AllTargets))
+-    put("aurea.color.matrix", EffectMeta("Mistura os canais R, G e B entre si: troca, soma e cruza cores.", AllTargets))
+-    put("aurea.color.levels", EffectMeta("Define onde começa o preto, onde termina o branco e onde fica o meio.", AllTargets))
+-    put("aurea.color.curves", EffectMeta("A curva de tom: controle fino de luz e de cada canal de cor.", AllTargets))
+-    put("aurea.blur.gaussian", EffectMeta("Desfoque suave e ajustável, com direção — dá para desfocar só num eixo.", AllTargets))
+-    put("aurea.blur.sharpen", EffectMeta("Realça os detalhes e as bordas sem inventar textura.", AllTargets))
+-    put("aurea.light.glow", EffectMeta("Espalha a luz das partes claras: o brilho que sai da tela.", AllTargets))
+-    put("aurea.light.rays", EffectMeta("Raios de luz que saem de um ponto, como o sol entrando pela lente.", AllTargets))
+-    put("aurea.light.sweep", EffectMeta("Uma faixa de luz atravessa a imagem, com largura e ângulo ajustáveis.", AllTargets))
+-    put("aurea.light.deep_glow", EffectMeta("Brilho em várias passadas: núcleo forte, halo largo e cor própria.", AllTargets))
++    put("aurea.transform", EffectMeta(R.string.fx_desc_transform, AllTargets))
++    put("aurea.color.exposure", EffectMeta(R.string.fx_desc_color_exposure, AllTargets))
++    put("aurea.color.brightness_contrast", EffectMeta(R.string.fx_desc_color_brightness_contrast, AllTargets))
++    put("aurea.color.saturation", EffectMeta(R.string.fx_desc_color_saturation, AllTargets))
++    put("aurea.color.tint", EffectMeta(R.string.fx_desc_color_tint, AllTargets))
++    put("aurea.color.matrix", EffectMeta(R.string.fx_desc_color_matrix, AllTargets))
++    put("aurea.color.levels", EffectMeta(R.string.fx_desc_color_levels, AllTargets))
++    put("aurea.color.curves", EffectMeta(R.string.fx_desc_color_curves, AllTargets))
++    put("aurea.blur.gaussian", EffectMeta(R.string.fx_desc_blur_gaussian, AllTargets))
++    put("aurea.blur.sharpen", EffectMeta(R.string.fx_desc_blur_sharpen, AllTargets))
++    put("aurea.light.glow", EffectMeta(R.string.fx_desc_light_glow, AllTargets))
+     put(
+         "aurea.stylize.motion_tile",
+         EffectMeta(
+-            "Repete a imagem em mosaico até cobrir o quadro, com espelho e fase opcionais.",
++            R.string.fx_desc_stylize_motion_tile,
+             listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Ajuste),
+         ),
+     )
+-    put("aurea.key.luma", EffectMeta("Remove o preto (ou o branco) da camada e deixa o resto aparecer.", listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.PreComposicao)))
+-    put("aurea.key.chroma", EffectMeta("Tira o fundo verde ou azul e limpa o derramamento da cor na borda.", listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.PreComposicao)))
+-    put("aurea.time.echo", EffectMeta("Deixa rastro: cópias da própria imagem atrasadas no tempo, com desvanecimento.", AllTargets))
+-    put("aurea.time.posterize", EffectMeta("Trava a taxa de quadros: a imagem passa a andar em passos, como animação desenhada.", AllTargets))
+-    put("aurea.time.warp_rgb", EffectMeta("Cada canal de cor vem de um instante diferente — o deslocamento RGB no tempo.", AllTargets))
++    put("aurea.key.luma", EffectMeta(R.string.fx_desc_key_luma, listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.PreComposicao)))
++    put("aurea.key.chroma", EffectMeta(R.string.fx_desc_key_chroma, listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.PreComposicao)))
++    put("aurea.time.echo", EffectMeta(R.string.fx_desc_time_echo, AllTargets))
+     // --- Fase 7.3: o pacote novo ---------------------------------------------
+-    put("aurea.color.invert", EffectMeta("O negativo: cada cor vira o seu contrário, como um filme revelado errado.", AllTargets))
+-    put("aurea.color.colorama", EffectMeta("Remapeia a cor: a luz de cada pixel vira uma posição num arco-íris que gira.", AllTargets))
+-    put("aurea.blur.unsharp", EffectMeta("Máscara de nitidez de verdade: original + ganho × (original − borrado), com limiar para não amplificar o grão.", AllTargets))
++    put("aurea.color.invert", EffectMeta(R.string.fx_desc_color_invert, AllTargets))
++    put("aurea.color.colorama", EffectMeta(R.string.fx_desc_color_colorama, AllTargets))
++    put("aurea.blur.unsharp", EffectMeta(R.string.fx_desc_blur_unsharp, AllTargets))
+     put("aurea.blur.lens", EffectMeta(
+-        "Desfoque de lente: um disco de amostras com o formato da íris, e as luzes pesam mais — é o bokeh, não um borrão.",
++        R.string.fx_desc_blur_lens,
+         AllTargets,
+     ))
+-    put("aurea.light.deep_glow", EffectMeta("Brilho em dois halos, um apertado e um largo, com cor própria: o núcleo estoura e o ambiente preenche.", AllTargets))
+-    put("aurea.light.rays", EffectMeta("Raios de luz que saem de um ponto: a clareira das partes claras se espalha em linha reta.", AllTargets))
+-    put("aurea.light.sweep", EffectMeta("Uma lâmina de luz atravessa a imagem. Com relevo, ela acende só onde a superfície está virada para ela.", AllTargets))
++    put("aurea.light.deep_glow", EffectMeta(R.string.fx_desc_light_deep_glow, AllTargets))
++    put("aurea.light.rays", EffectMeta(R.string.fx_desc_light_rays, AllTargets))
++    put("aurea.light.sweep", EffectMeta(R.string.fx_desc_light_sweep, AllTargets))
+     put(
+         "aurea.distort.shake",
+         EffectMeta(
+-            "Tremor determinístico: a camada treme igual toda vez que você reabre o projeto, com frequência e eixos separados.",
++            R.string.fx_desc_distort_shake,
+             listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Ajuste),
+         ),
+     )
+-    put("aurea.distort.turbulence", EffectMeta("Um campo de ruído empurra cada pixel. O campo evolui com o tempo — fumaça, calor, água.", AllTargets))
+-    put("aurea.distort.wave_warp", EffectMeta("Uma onda atravessa a imagem, horizontal, vertical ou na diagonal, e pode ser travada nas bordas.", AllTargets))
+-    put("aurea.distort.warp", EffectMeta("Lente: empurrar, puxar, torcer, esfera e canto, com raio e ponto próprios.", AllTargets))
+-    put("aurea.distort.ripple_dissolve", EffectMeta("A imagem some em círculos que crescem do centro com a borda ondulando. Anime o progresso para virar transição.", AllTargets))
+-    put("aurea.stylize.scanlines", EffectMeta("Varredura de tela: a linha escurece o que está atrás dela, com altura, suavidade e canal próprios.", AllTargets))
+-    put("aurea.stylize.grain", EffectMeta("Grão de filme: cristal do tamanho que você quiser, luma e croma separados, mais forte nas sombras.", AllTargets))
+-    put("aurea.stylize.halftone", EffectMeta("Meio-tom: a imagem vira pontos, com a grade girada por canal para as três retículas não brigarem.", AllTargets))
+-    put("aurea.stylize.minimax", EffectMeta("Dilata ou erode o que estiver claro: engrossa ou afina um recorte e limpa um pixel de borda.", AllTargets))
+-    put("aurea.stylize.pixel_sort", EffectMeta("Ordena os pixels de cada linha pela luz: a imagem derrete em riscos.", AllTargets))
+-    put("aurea.stylize.film_damage", EffectMeta("Filme danificado: poeira, riscos, piscar, balanço de porta, queimado e emenda — cada um com o seu controle.", AllTargets))
+-    put("aurea.stylize.jpeg_damage", EffectMeta("Dano de JPEG: os blocos, o anelamento das bordas e a cor em meia resolução. Qualidade escala os três.", AllTargets))
+-    put("aurea.stylize.holomatrix", EffectMeta("Holograma: a imagem vira projeção, com grade técnica, varredura e interferência.", AllTargets))
+-    put("aurea.glitch.glitchify", EffectMeta("Glitch digital: a imagem se parte em blocos que deslizam, os canais se separam e blocos inteiros saem do lugar.", AllTargets))
+-    put("aurea.glitch.vhs", EffectMeta("VHS de verdade: borrão, croma alargada, instabilidade de tracking, perdas de fita, varredura e degradação de cor.", AllTargets))
+-    put("aurea.glitch.uni_vhs", EffectMeta("O VHS estilizado: separação RGB grande, ondulação, brilho sujo e vinheta — o vocabulário da fita a serviço do visual.", AllTargets))
+-    put("aurea.glitch.signal", EffectMeta("Sinal de transmissão: bandas que se perdem, sincronia que escorrega e deriva constante.", AllTargets))
+-    put("aurea.glitch.cross", EffectMeta("Duas faixas, uma vertical e uma horizontal, varrem a imagem lendo do lugar errado. Anime o progresso para virar transição.", AllTargets))
++    put("aurea.distort.turbulence", EffectMeta(R.string.fx_desc_distort_turbulence, AllTargets))
++    put("aurea.distort.wave_warp", EffectMeta(R.string.fx_desc_distort_wave_warp, AllTargets))
++    put("aurea.distort.warp", EffectMeta(R.string.fx_desc_distort_warp, AllTargets))
++    put("aurea.distort.ripple_dissolve", EffectMeta(R.string.fx_desc_distort_ripple_dissolve, AllTargets))
++    put("aurea.stylize.scanlines", EffectMeta(R.string.fx_desc_stylize_scanlines, AllTargets))
++    put("aurea.stylize.grain", EffectMeta(R.string.fx_desc_stylize_grain, AllTargets))
++    put("aurea.stylize.halftone", EffectMeta(R.string.fx_desc_stylize_halftone, AllTargets))
++    put("aurea.stylize.minimax", EffectMeta(R.string.fx_desc_stylize_minimax, AllTargets))
++    put("aurea.stylize.pixel_sort", EffectMeta(R.string.fx_desc_stylize_pixel_sort, AllTargets))
++    put("aurea.stylize.film_damage", EffectMeta(R.string.fx_desc_stylize_film_damage, AllTargets))
++    put("aurea.stylize.jpeg_damage", EffectMeta(R.string.fx_desc_stylize_jpeg_damage, AllTargets))
++    put("aurea.stylize.holomatrix", EffectMeta(R.string.fx_desc_stylize_holomatrix, AllTargets))
++    put("aurea.glitch.glitchify", EffectMeta(R.string.fx_desc_glitch_glitchify, AllTargets))
++    put("aurea.glitch.vhs", EffectMeta(R.string.fx_desc_glitch_vhs, AllTargets))
++    put("aurea.glitch.uni_vhs", EffectMeta(R.string.fx_desc_glitch_uni_vhs, AllTargets))
++    put("aurea.glitch.signal", EffectMeta(R.string.fx_desc_glitch_signal, AllTargets))
++    put("aurea.glitch.cross", EffectMeta(R.string.fx_desc_glitch_cross, AllTargets))
+     put("aurea.time.posterize", EffectMeta(
+-        "Trava a taxa de quadros: a imagem passa a andar em passos, como animação desenhada.",
++        R.string.fx_desc_time_posterize,
+         listOf(EffectTarget.Video, EffectTarget.PreComposicao, EffectTarget.Imagem, EffectTarget.Ajuste),
+         "stop motion quadros taxa travada",
+     ))
+     put("aurea.time.warp_rgb", EffectMeta(
+-        "Cada canal de cor vem de um instante diferente: o vermelho do quadro de trás, o azul do da frente.",
++        R.string.fx_desc_time_warp_rgb,
+         listOf(EffectTarget.Video, EffectTarget.PreComposicao, EffectTarget.Imagem),
+         "rgb no tempo canais separados atraso de cor",
+     ))
+-    put("aurea.control.slider", EffectMeta("Um valor de 0 a 100 que você liga na expressão de outro parâmetro.", AllTargets))
+-    put("aurea.control.angle", EffectMeta("Um ângulo que você liga na expressão de outro parâmetro.", AllTargets))
+-    put("aurea.control.checkbox", EffectMeta("Um liga/desliga que você liga na expressão de outro parâmetro.", AllTargets))
+-    put("aurea.control.color", EffectMeta("Uma cor que você liga na expressão de outro parâmetro.", AllTargets))
+-    put("aurea.control.point", EffectMeta("Um ponto X/Y que você liga na expressão de outro parâmetro.", AllTargets))
++    put("aurea.control.slider", EffectMeta(R.string.fx_desc_control_slider, AllTargets))
++    put("aurea.control.angle", EffectMeta(R.string.fx_desc_control_angle, AllTargets))
++    put("aurea.control.checkbox", EffectMeta(R.string.fx_desc_control_checkbox, AllTargets))
++    put("aurea.control.color", EffectMeta(R.string.fx_desc_control_color, AllTargets))
++    put("aurea.control.point", EffectMeta(R.string.fx_desc_control_point, AllTargets))
+ }
+ 
+ /** Descrição, alvos e palavras extras de um efeito. */
+diff --git a/android/app/src/main/java/com/aurea/aurea/presets/BuiltinPresets.kt b/android/app/src/main/java/com/aurea/aurea/presets/BuiltinPresets.kt
+index 47a1b60..313b785 100644
+--- a/android/app/src/main/java/com/aurea/aurea/presets/BuiltinPresets.kt
++++ b/android/app/src/main/java/com/aurea/aurea/presets/BuiltinPresets.kt
+@@ -1,8 +1,22 @@
+ package com.aurea.aurea.presets
+ 
++import android.content.Context
+ import android.content.res.AssetManager
++import android.content.res.Resources
++import com.aurea.aurea.R
++import com.aurea.aurea.ui.i18n.AppText
+ import org.json.JSONArray
+ 
++/**
++ * Nomes dos 11 presets de animação de texto do motor, na ordem de
++ * `text::text_preset_name` (o índice é o que vai para o motor).
++ */
++internal val TextPresetNames = listOf(
++    R.string.pn_pop, R.string.pn_textpreset_bounce, R.string.pn_textpreset_slide, R.string.panel_escala,
++    R.string.pn_textpreset_appear, R.string.panel_desfoque, R.string.pn_textpreset_word_highlight, R.string.pn_karaoke,
++    R.string.pn_textpreset_typewriter, R.string.pn_textpreset_wave, R.string.pn_textpreset_elastic,
++)
++
+ /**
+  * Presets que vêm no app: assets/presets/<tipo>.json, uma LISTA de presets no
+  * MESMO formato dos salvos pela pessoa (engine/include/aurea/project/Presets.hpp)
+@@ -12,20 +26,24 @@ import org.json.JSONArray
+  * Os 11 de animação de texto são os presets nativos do motor (dependem do
+  * texto: palavras, letras), então vão pelo número.
+  */
+-class BuiltinPresets(private val assets: AssetManager) {
+-    /** Mesma ordem de `text::text_preset_name`. */
+-    private val textNames = listOf(
+-        "Pop", "Pulo", "Deslizar", "Escala", "Surgir", "Desfoque", "Destaque palavra", "Karaokê", "Máquina de escrever", "Onda", "Elástico",
+-    )
++class BuiltinPresets(private val context: Context) {
++    private val assets: AssetManager = context.assets
+ 
+     private val byKind: Map<PresetKind, List<PresetEntry>> by lazy {
+-        PresetKind.entries.associateWith { kind ->
+-            if (kind == PresetKind.Text) {
+-                textNames.mapIndexed { i, n -> PresetEntry("b:texto:$i", kind, n, builtin = true, textPreset = i) }
+-            } else {
+-                load(kind)
+-            }
++        PresetKind.entries.filter { it != PresetKind.Text }.associateWith { load(it) }
++    }
++
++    /** Os de texto levam o nome no idioma do app: refeitos só quando o idioma muda. */
++    @Volatile private var text: Pair<Resources, List<PresetEntry>>? = null
++
++    private fun textEntries(): List<PresetEntry> {
++        val res = AppText.resources(context)
++        text?.let { (r, list) -> if (r === res) return list }
++        val list = TextPresetNames.mapIndexed { i, id ->
++            PresetEntry("b:texto:$i", PresetKind.Text, res.getString(id), builtin = true, textPreset = i)
+         }
++        text = res to list
++        return list
+     }
+ 
+     private fun load(kind: PresetKind): List<PresetEntry> {
+@@ -34,9 +52,10 @@ class BuiltinPresets(private val assets: AssetManager) {
+         val arr = runCatching { JSONArray(text) }.getOrNull() ?: return emptyList()
+         return (0 until arr.length()).mapNotNull { i ->
+             val o = arr.optJSONObject(i) ?: return@mapNotNull null
+-            PresetEntry("b:${kind.dir}:$i", kind, o.optString("name", "Preset ${i + 1}"), builtin = true, json = o.toString())
++            val name = o.optString("name").ifEmpty { AppText.get(context, R.string.pn_preset_n, i + 1) }
++            PresetEntry("b:${kind.dir}:$i", kind, name, builtin = true, json = o.toString())
+         }
+     }
+ 
+-    fun of(kind: PresetKind): List<PresetEntry> = byKind[kind].orEmpty()
++    fun of(kind: PresetKind): List<PresetEntry> = if (kind == PresetKind.Text) textEntries() else byKind[kind].orEmpty()
+ }
+diff --git a/android/app/src/main/java/com/aurea/aurea/presets/PresetLibrary.kt b/android/app/src/main/java/com/aurea/aurea/presets/PresetLibrary.kt
+index 2b2d3a2..e3cf2a0 100644
+--- a/android/app/src/main/java/com/aurea/aurea/presets/PresetLibrary.kt
++++ b/android/app/src/main/java/com/aurea/aurea/presets/PresetLibrary.kt
+@@ -2,21 +2,23 @@ package com.aurea.aurea.presets
+ 
+ import android.app.Application
+ import android.content.Context
++import androidx.annotation.StringRes
+ import androidx.compose.runtime.getValue
+ import androidx.compose.runtime.mutableStateOf
+ import androidx.compose.runtime.setValue
++import com.aurea.aurea.R
+ import java.io.File
+ 
+ /**
+  * Tipos de preset (o `kind` do JSON do motor, `presets::PresetKind`). O
+  * número é o do motor; `dir` é a pasta em filesDir/presets/.
+  */
+-enum class PresetKind(val id: Int, val dir: String, val label: String) {
+-    Effects(0, "efeitos", "Efeitos"),
+-    Text(1, "texto", "Texto"),
+-    Animation(2, "animacao", "Animação"),
+-    Caption(3, "legenda", "Legenda"),
+-    Curve(4, "curva", "Curva"),
++enum class PresetKind(val id: Int, val dir: String, @StringRes val label: Int) {
++    Effects(0, "efeitos", R.string.panel_efeitos),
++    Text(1, "texto", R.string.panel_texto),
++    Animation(2, "animacao", R.string.panel_animacao),
++    Caption(3, "legenda", R.string.pn_caption),
++    Curve(4, "curva", R.string.panel_curva),
+ }
+ 
+ /**
+@@ -42,7 +44,7 @@ data class PresetEntry(
+ class PresetLibrary(private val app: Application) {
+     private val prefs = app.getSharedPreferences("presets", Context.MODE_PRIVATE)
+     private val root = File(app.filesDir, "presets")
+-    private val builtins = BuiltinPresets(app.assets)
++    private val builtins = BuiltinPresets(app)
+ 
+     var user by mutableStateOf<Map<PresetKind, List<PresetEntry>>>(emptyMap())
+         private set

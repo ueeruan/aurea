@@ -18,3 +18,11 @@ Master em `8da7427`: keyframes nos parâmetros do Particular e contrato v21
 3. `cmake -S . -B build/host` (arquivos novos), build Release, `aurea_tests.exe` inteiro (0 falhas), `assembleDebug`.
 4. Emulador: SÓ em projeto novo (o dono usa o emulador): troca de idioma pt-BR → ar → ru → hi → en → es → id → pt-BR; em árabe: criar projeto, importar, timeline, pinça, efeitos, keyframes, curvas, 3D, Null 3D, export, salvar/reabrir.
 5. Fechar com números medidos. Metal/iOS: não testável sem Mac — declarar.
+
+## Estado ao fim da sessão (2026-09-22)
+
+- **A (idiomas) — MERGEADO no master.** 570 testes, 0 falhas. Entrou: `test_i18n.cpp` (árabe RTL com formas contextuais, devanágari em cluster, cirílico, nome/caminho Unicode salva e reabre), correção real do `fopen` UTF-8 no Windows (`FileIO::open_file`), `AppText.kt`, `tools/i18n_count.py` (867 literais visíveis restantes, 59 arquivos) e `tools/i18n_check.py` (852/849 chaves, 0 problemas de formato). Rascunho da conversão Kotlin que não fechou: `docs/phase8/wip/wip_kotlin_i18n.patch` (inclui a correção de `Element3DPanel.kt:164`). Falta: converter os 867 literais, auditoria RTL, limpar `panel_1_to`/`panel_2_to`/`editor_else`.
+- **B (emissão/aparência) — NÃO mergeado**, branch `worktree-agent-a3d6f3accc69cf62f` (commit 08f098a): shader em funções + `particles_extras.glsl` (binding AUREA_DATA) + `ParticleExtras.cpp` (pontos de emissão de imagem/texto/forma/vetor/máscara/modelo, malha da partícula, curvas, aleatórios, colisão esfera/caixa). Falta ligar no Renderer, API/JNI/painel, testes e benchmark.
+- **C (3D) — NÃO mergeado**, branch `worktree-agent-a256aa5de592bf86f` (commit 6172ca9): binding 16 para histórico, funções `ps_*` no shader (histórico no nascimento, taxa animada por aceitação, Z/billboard, subamostra de tempo), desenho na cena com depth. Falta `ParticleScene.cpp`, upload do histórico, entrar no grupo de cena (`asPlane`), motion blur, testes (a)–(h). ATENÇÃO: `Renderer.hpp` declara 3 funções ainda sem corpo.
+- **B e C conflitam em `particles.vert`** (ambos isolaram em funções: B `emit_*`/`collide_*`, C `ps_*`/`emit_vertex`) — mergear B primeiro, depois C resolvendo o `main`.
+- **Bug achado (B):** projeto anterior à v20 com Faíscas/Neve/Poeira abre com emissor 0 (Ponto); o antigo era sempre Caixa → corrigir na leitura v<20.

@@ -2327,6 +2327,22 @@ void particle_preset(ParticleData& p, u32 preset, f32 w, f32 h) noexcept {
     }
 }
 
+/// Preset 9 (Explosão de logo): com uma camada de TEXTO na composição, o logo
+/// é o texto — o estouro sai dos glifos (emissor Texto, superfície), a de
+/// cima na pilha. Sem texto, fica o ponto de sempre.
+void logo_burst_from_text(const Composition& comp, LayerId self, ParticleData& p) noexcept {
+    const OrderedIds<LayerId>& order = comp.order();
+    for (u32 i = order.size(); i-- > 0;) {
+        const LayerId id = order.at(i);
+        const Layer* t = comp.layer(id);
+        if (!t || id == self || t->kind != LayerKind::Text || !t->visible || t->text.content.empty()) continue;
+        p.emitterType = static_cast<u32>(ParticleEmitter::Text);
+        p.emitterSource = id.pack();
+        p.emitFrom = 1;
+        return;
+    }
+}
+
 } // namespace
 
 Result<u64> Engine::add_particles(u32 preset) noexcept {
@@ -2343,6 +2359,7 @@ Result<u64> Engine::add_particles(u32 preset) noexcept {
     if (!l) return Status{Errc::OutOfMemory, "camada nao criada"};
     const f32 w = static_cast<f32>(comp->width()), h = static_cast<f32>(comp->height());
     particle_preset(l->particles, preset, w, h);
+    if (preset == 9) logo_burst_from_text(*comp, lid, l->particles);
     l->particles.seed = lid.index * 7919u + 1u;
     const i64 t = std::clamp<i64>(playback_.current().value, 0, std::max<i64>(0, comp->duration().value - 1));
     l->start = FrameIndex{t};
@@ -2363,6 +2380,7 @@ bool Engine::apply_particle_preset(u64 layerId, u32 preset) noexcept {
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     const u32 seed = l->particles.seed;
     particle_preset(l->particles, preset, static_cast<f32>(comp->width()), static_cast<f32>(comp->height()));
+    if (preset == 9) logo_burst_from_text(*comp, LayerId::unpack(layerId), l->particles);
     l->particles.seed = seed;
     project_->mark_dirty();
     request_render();
@@ -2566,6 +2584,153 @@ bool Engine::query_particles(u64 layerId, f32* out) noexcept {
     out[69] = p.meshLit ? 1.0f : 0.0f;
     static_assert(static_cast<u32>(ParticleParam::Count) == 70, "query_particles: um valor por ParticleParam");
     return true;
+}
+
+// --- Aurea Particular 8.2: o que vem de OUTRA camada / asset -----------------
+// Cada troca é UM passo de desfazer (history_ + modelRevision_), como os
+// parâmetros. As ligações são por id: apagar a fonte não quebra nada — o
+// renderizador não acha a camada e volta para a caixa do emissor.
+namespace {
+Layer* particle_layer(Composition* comp, u64 layerId) noexcept {
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    return l && l->kind == LayerKind::ParticleSystem ? l : nullptr;
+}
+} // namespace
+
+bool Engine::set_particle_source(u64 layerId, u64 sourceLayerId) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = particle_layer(comp, layerId);
+    if (!l) return false;
+    if (sourceLayerId != 0) {
+        // A fonte vive na MESMA composição e não é a própria camada.
+        const Layer* src = comp->layer(LayerId::unpack(sourceLayerId));
+        if (!src || sourceLayerId == layerId) return false;
+    }
+    if (l->particles.emitterSource == sourceLayerId) return true;
+    history_.before_mutation(*comp, project_->timeline().current(), "fonte das particulas");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    l->particles.emitterSource = sourceLayerId;
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::set_particle_texture(u64 layerId, u64 assetOrImageLayer) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = particle_layer(comp, layerId);
+    if (!l) return false;
+    u64 asset = 0;
+    if (assetOrImageLayer != 0) {
+        // Primeiro como CAMADA de imagem (o que a UI lista); senão, como asset
+        // de imagem já carregado. O que não for imagem é recusado.
+        const Layer* il = comp->layer(LayerId::unpack(assetOrImageLayer));
+        if (il && il->kind == LayerKind::Image) asset = il->source.pack();
+        else if (images_.count(assetOrImageLayer)) asset = assetOrImageLayer;
+        else return false;
+    }
+    if (l->particles.textureAsset == asset) return true;
+    history_.before_mutation(*comp, project_->timeline().current(), "imagem das particulas");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    l->particles.textureAsset = asset;
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::set_particle_mesh(u64 layerId, u64 modelLayerId) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = particle_layer(comp, layerId);
+    if (!l) return false;
+    if (modelLayerId != 0) {
+        const Layer* ml = comp->layer(LayerId::unpack(modelLayerId));
+        if (!ml || ml->kind != LayerKind::Model3D) return false;
+    }
+    if (l->particles.meshSource == modelLayerId) return true;
+    history_.before_mutation(*comp, project_->timeline().current(), "malha das particulas");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    l->particles.meshSource = modelLayerId;
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::set_particle_life_curves(u64 layerId, u32 kind, const f32* values, u32 count) noexcept {
+    if (kind > 2 || (count > 0 && !values)) return false;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = particle_layer(comp, layerId);
+    if (!l) return false;
+    count = std::min(count, ParticleData::kMaxLifeStops);
+    history_.before_mutation(*comp, project_->timeline().current(),
+                             kind == 0 ? "cor ao longo da vida" : kind == 1 ? "tamanho ao longo da vida" : "opacidade ao longo da vida");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    ParticleData& p = l->particles;
+    // Posição presa em 0..1 e valores sem NaN: o shader assume isso.
+    auto fin = [](f32 v, f32 lo, f32 hi) { return std::isfinite(v) ? std::clamp(v, lo, hi) : lo; };
+    if (kind == 0) {
+        p.colorStopCount = count;
+        for (u32 i = 0; i < count; ++i) {
+            const f32* v = values + i * 4;
+            p.colorStops[i] = Vec4{fin(v[0], 0, 1), fin(v[1], 0, 1), fin(v[2], 0, 1), fin(v[3], 0, 1)};
+        }
+    } else {
+        Vec2* dst = kind == 1 ? p.sizeCurve : p.opacityCurve;
+        (kind == 1 ? p.sizeCurveCount : p.opacityCurveCount) = count;
+        for (u32 i = 0; i < count; ++i) {
+            const f32* v = values + i * 2;
+            dst[i] = Vec2{fin(v[0], 0, 1), fin(v[1], 0, kind == 1 ? 20.0f : 1.0f)};
+        }
+    }
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::query_particle_links(u64 layerId, u64* out4) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = particle_layer(comp, layerId);
+    if (!l || !out4) return false;
+    const ParticleData& p = l->particles;
+    // A UI lista CAMADAS: a textura sai também como a 1ª camada de imagem
+    // que usa aquele asset (0 = nenhuma na composição).
+    u64 texLayer = 0;
+    if (p.textureAsset != 0) {
+        const OrderedIds<LayerId>& order = comp->order();
+        for (u32 i = 0; i < order.size() && !texLayer; ++i) {
+            const Layer* il = comp->layer(order.at(i));
+            if (il && il->kind == LayerKind::Image && il->source.pack() == p.textureAsset) texLayer = order.at(i).pack();
+        }
+    }
+    out4[0] = p.emitterSource;
+    out4[1] = texLayer;
+    out4[2] = p.meshSource;
+    out4[3] = p.textureAsset;
+    return true;
+}
+
+u32 Engine::query_particle_curve(u64 layerId, u32 kind, f32* out, u32 capacity) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = particle_layer(comp, layerId);
+    if (!l || !out || kind > 2) return 0;
+    const ParticleData& p = l->particles;
+    const u32 per = kind == 0 ? 4u : 2u;
+    const u32 n = std::min(kind == 0 ? p.colorStopCount : kind == 1 ? p.sizeCurveCount : p.opacityCurveCount,
+                           std::min(ParticleData::kMaxLifeStops, capacity / per));
+    for (u32 i = 0; i < n; ++i) {
+        if (kind == 0) {
+            const Vec4 c = p.colorStops[i];
+            out[i * 4] = c.x; out[i * 4 + 1] = c.y; out[i * 4 + 2] = c.z; out[i * 4 + 3] = c.w;
+        } else {
+            const Vec2 c = kind == 1 ? p.sizeCurve[i] : p.opacityCurve[i];
+            out[i * 2] = c.x; out[i * 2 + 1] = c.y;
+        }
+    }
+    return n;
 }
 
 bool Engine::set_time_remap(u64 layerId, bool on) noexcept {

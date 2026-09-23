@@ -931,11 +931,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             null
         })
         particles = if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Particles.kind) {
-            val out = FloatArray(8)
+            // Um valor por ParticleParam (o JNI recusa array menor que o contrato).
+            val out = FloatArray(PARTICLE_PARAM_COUNT)
             if (engine.queryParticles(id, out)) out.toList() else null
         } else {
             null
         }
+        refreshParticleLinks(id)
         timeRemap = if (id != null && detail?.timeRemap == true) {
             val out = FloatArray(5 + 7 * 64)
             val n = engine.queryTimeRemap(id, out)
@@ -2410,6 +2412,56 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshDetail()
     }
 
+    /** 8.2: {fonte, camada da textura, malha, asset da textura} da camada escolhida. */
+    var particleLinks by mutableStateOf<List<Long>?>(null)
+        private set
+    /** 8.2: pontos das curvas ao longo da vida — [cor (pos,r,g,b)...], [tamanho (pos,×)...], [opacidade (pos,v)...]. */
+    var particleCurves by mutableStateOf<List<List<Float>>>(listOf(emptyList(), emptyList(), emptyList()))
+        private set
+
+    private fun refreshParticleLinks(id: Long?) {
+        if (id == null || particles == null) {
+            particleLinks = null
+            return
+        }
+        val links = LongArray(4)
+        particleLinks = if (engine.queryParticleLinks(id, links)) links.toList() else null
+        val buf = FloatArray(32)
+        particleCurves = (0..2).map { kind ->
+            val n = engine.queryParticleCurve(id, kind, buf)
+            buf.copyOf(n * (if (kind == 0) 4 else 2)).toList()
+        }
+    }
+
+    /** Camada que emite (Camada/Texto/Caminho/Malha); 0 = nenhuma. */
+    fun setParticleSource(source: Long) {
+        val id = primary ?: return
+        if (!engine.setParticleSource(id, source)) showToast(appText(R.string.particular_msg_source_invalid))
+        refreshNow()
+    }
+
+    /** Imagem da partícula de textura (uma camada de imagem); 0 = nenhuma. */
+    fun setParticleTexture(imageLayer: Long) {
+        val id = primary ?: return
+        if (!engine.setParticleTexture(id, imageLayer)) showToast(appText(R.string.particular_msg_source_invalid))
+        refreshNow()
+    }
+
+    /** Modelo 3D da partícula de malha; 0 = nenhum. */
+    fun setParticleMesh(modelLayer: Long) {
+        val id = primary ?: return
+        if (!engine.setParticleMesh(id, modelLayer)) showToast(appText(R.string.particular_msg_source_invalid))
+        refreshNow()
+    }
+
+    /** Curva ao longo da vida (`kind` 0 cor, 1 tamanho, 2 opacidade); lista vazia = volta às pontas. */
+    fun setParticleLifeCurve(kind: Int, values: List<Float>) {
+        val id = primary ?: return
+        val per = if (kind == 0) 4 else 2
+        engine.setParticleLifeCurve(id, kind, values.toFloatArray(), values.size / per)
+        refreshDetail()
+    }
+
     /** Losango de keyframe de um parâmetro do Aurea Particular. */
     fun toggleParticleKeyframe(param: Int) {
         val id = primary ?: return
@@ -3798,6 +3850,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         const val META_SUFFIX = ".meta.json"
         /** `kInvalidIndex` do C++: keyframe que não é de efeito. */
         const val NO_EFFECT = -1
+        /** `ParticleParam::Count` do motor (contrato v21: 70 parâmetros). */
+        const val PARTICLE_PARAM_COUNT = 70
         /** Id do "tipo" memória na tela Armazenamento. */
         const val MEMORY = "memoria"
         // ComponentCallbacks2.TRIM_MEMORY_* (valores do SDK).

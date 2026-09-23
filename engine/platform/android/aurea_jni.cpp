@@ -1156,6 +1156,58 @@ AUREA_JNI jboolean AUREA_FN(nativeQueryParticles)(JNIEnv* env, jclass, jlong han
     return JNI_TRUE;
 }
 
+// --- Aurea Particular 8.2: fonte, textura, malha e curvas ao longo da vida ---
+AUREA_JNI jboolean AUREA_FN(nativeSetParticleSource)(JNIEnv*, jclass, jlong handle, jlong layer, jlong source) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.set_particle_source(static_cast<u64>(layer), static_cast<u64>(source)) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetParticleTexture)(JNIEnv*, jclass, jlong handle, jlong layer, jlong image) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.set_particle_texture(static_cast<u64>(layer), static_cast<u64>(image)) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetParticleMesh)(JNIEnv*, jclass, jlong handle, jlong layer, jlong model) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.set_particle_mesh(static_cast<u64>(layer), static_cast<u64>(model)) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetParticleLifeCurve)(JNIEnv* env, jclass, jlong handle, jlong layer, jint kind,
+                                                        jfloatArray values, jint count) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || kind < 0 || kind > 2 || count < 0) return JNI_FALSE;
+    const jsize per = kind == 0 ? 4 : 2;
+    const jsize n = std::min<jsize>(count, static_cast<jsize>(ParticleData::kMaxLifeStops));
+    f32 v[ParticleData::kMaxLifeStops * 4]{};
+    if (n > 0) {
+        if (!values || env->GetArrayLength(values) < n * per) return JNI_FALSE;
+        env->GetFloatArrayRegion(values, 0, n * per, v);
+    }
+    return c->engine.set_particle_life_curves(static_cast<u64>(layer), static_cast<u32>(kind), v, static_cast<u32>(n))
+               ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeQueryParticleLinks)(JNIEnv* env, jclass, jlong handle, jlong layer, jlongArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !out || env->GetArrayLength(out) < 4) return JNI_FALSE;
+    u64 v[4]{};
+    if (!c->engine.query_particle_links(static_cast<u64>(layer), v)) return JNI_FALSE;
+    const jlong j[4] = {static_cast<jlong>(v[0]), static_cast<jlong>(v[1]), static_cast<jlong>(v[2]), static_cast<jlong>(v[3])};
+    env->SetLongArrayRegion(out, 0, 4, j);
+    return JNI_TRUE;
+}
+
+AUREA_JNI jint AUREA_FN(nativeQueryParticleCurve)(JNIEnv* env, jclass, jlong handle, jlong layer, jint kind, jfloatArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !out || kind < 0 || kind > 2) return 0;
+    f32 v[ParticleData::kMaxLifeStops * 4]{};
+    const u32 cap = static_cast<u32>(std::min<jsize>(env->GetArrayLength(out), static_cast<jsize>(ParticleData::kMaxLifeStops * 4)));
+    const u32 n = c->engine.query_particle_curve(static_cast<u64>(layer), static_cast<u32>(kind), v, cap);
+    const jsize per = kind == 0 ? 4 : 2;
+    if (n > 0) env->SetFloatArrayRegion(out, 0, static_cast<jsize>(n) * per, v);
+    return static_cast<jint>(n);
+}
+
 AUREA_JNI jboolean AUREA_FN(nativeSetMotionBlur)(JNIEnv*, jclass, jlong handle, jlong layer, jboolean on) {
     NativeContext* c = ctx_of(handle);
     return c && c->engine.set_motion_blur(static_cast<u64>(layer), on == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;

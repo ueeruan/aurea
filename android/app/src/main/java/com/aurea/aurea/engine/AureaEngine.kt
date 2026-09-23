@@ -423,6 +423,19 @@ class AureaEngine private constructor() {
     fun applyParticlePreset(layer: Long, preset: Int): Boolean = nativeApplyParticlePreset(nativeHandle, layer, preset)
     fun setParticleParam(layer: Long, param: Int, value: Float): Boolean = nativeSetParticleParam(nativeHandle, layer, param, value)
     fun queryParticles(layer: Long, out: FloatArray): Boolean = nativeQueryParticles(nativeHandle, layer, out)
+    /** 8.2: camada que emite (Camada/Texto/Caminho/Malha); 0 = nenhuma. */
+    fun setParticleSource(layer: Long, source: Long): Boolean = nativeSetParticleSource(nativeHandle, layer, source)
+    /** 8.2: imagem da partícula — camada de imagem (ou asset de imagem); 0 = nenhuma. */
+    fun setParticleTexture(layer: Long, image: Long): Boolean = nativeSetParticleTexture(nativeHandle, layer, image)
+    /** 8.2: modelo 3D da partícula de malha (camada de modelo); 0 = nenhum. */
+    fun setParticleMesh(layer: Long, model: Long): Boolean = nativeSetParticleMesh(nativeHandle, layer, model)
+    /** 8.2: curva ao longo da vida (0 cor: pos,r,g,b; 1 tamanho e 2 opacidade: pos,valor). */
+    fun setParticleLifeCurve(layer: Long, kind: Int, values: FloatArray, count: Int): Boolean =
+        nativeSetParticleLifeCurve(nativeHandle, layer, kind, values, count)
+    /** {fonte, camada da textura, malha, asset da textura}. */
+    fun queryParticleLinks(layer: Long, out: LongArray): Boolean = nativeQueryParticleLinks(nativeHandle, layer, out)
+    /** Pontos da curva `kind` em `out`; devolve quantos. */
+    fun queryParticleCurve(layer: Long, kind: Int, out: FloatArray): Int = nativeQueryParticleCurve(nativeHandle, layer, kind, out)
 
     // Remapeamento de tempo / rampas.
     fun setTimeRemap(layer: Long, on: Boolean): Boolean = nativeSetTimeRemap(nativeHandle, layer, on)
@@ -715,6 +728,12 @@ class AureaEngine private constructor() {
     private external fun nativeApplyParticlePreset(handle: Long, layer: Long, preset: Int): Boolean
     private external fun nativeSetParticleParam(handle: Long, layer: Long, param: Int, value: Float): Boolean
     private external fun nativeQueryParticles(handle: Long, layer: Long, out: FloatArray): Boolean
+    private external fun nativeSetParticleSource(handle: Long, layer: Long, source: Long): Boolean
+    private external fun nativeSetParticleTexture(handle: Long, layer: Long, image: Long): Boolean
+    private external fun nativeSetParticleMesh(handle: Long, layer: Long, model: Long): Boolean
+    private external fun nativeSetParticleLifeCurve(handle: Long, layer: Long, kind: Int, values: FloatArray, count: Int): Boolean
+    private external fun nativeQueryParticleLinks(handle: Long, layer: Long, out: LongArray): Boolean
+    private external fun nativeQueryParticleCurve(handle: Long, layer: Long, kind: Int, out: FloatArray): Int
     private external fun nativeApplySpeedRamp(handle: Long, layer: Long, preset: Int): Boolean
     private external fun nativePrecompose(handle: Long, ids: LongArray): Long
     private external fun nativeUngroupPrecomp(handle: Long, layer: Long): String?

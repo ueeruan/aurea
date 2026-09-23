@@ -571,6 +571,22 @@ public:
     /// Os 8 parâmetros acima em `out`.
     /// Um valor por ParticleParam, na ordem do enum (`ParticleParam::Count` no total).
     bool query_particles(u64 layerId, f32* out) noexcept;
+    /// 8.2 — o que vem de OUTRA camada/asset (cada troca = um passo de desfazer).
+    /// Camada que emite (emissores Camada/Texto/Caminho/Malha); 0 = nenhuma.
+    bool set_particle_source(u64 layerId, u64 sourceLayerId) noexcept;
+    /// Imagem da partícula de textura: uma CAMADA de imagem (usa a imagem
+    /// dela) ou um AssetId de imagem carregado; 0 = nenhuma.
+    bool set_particle_texture(u64 layerId, u64 assetOrImageLayer) noexcept;
+    /// Modelo da partícula de malha: camada de modelo 3D; 0 = nenhuma.
+    bool set_particle_mesh(u64 layerId, u64 modelLayerId) noexcept;
+    /// Curvas ao longo da vida, até 8 pontos (`count`; 0 = volta às pontas
+    /// início/fim). kind 0 = cor (posição, r, g, b sRGB — 4 floats por ponto),
+    /// 1 = tamanho (posição, multiplicador), 2 = opacidade (posição, 0..1).
+    bool set_particle_life_curves(u64 layerId, u32 kind, const f32* values, u32 count) noexcept;
+    /// {fonte, 1ª camada de imagem com a textura (ou 0), malha, asset da textura}.
+    bool query_particle_links(u64 layerId, u64* out4) noexcept;
+    /// Pontos da curva `kind` em `out` (4 ou 2 floats por ponto); devolve quantos.
+    u32 query_particle_curve(u64 layerId, u32 kind, f32* out, u32 capacity) noexcept;
 
     /// Desfoque de movimento da camada (liga também o da composição).
     bool set_motion_blur(u64 layerId, bool on) noexcept;

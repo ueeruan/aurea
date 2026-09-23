@@ -41,6 +41,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aurea.aurea.state.Text3DInfo
+import com.aurea.aurea.state.Text3DPreset
 import com.aurea.aurea.ui.ds.ColorWell
 import com.aurea.aurea.ui.ds.PropertyCustomRow
 import com.aurea.aurea.ui.ds.TickRuler
@@ -81,12 +82,14 @@ internal fun Element3DPanel(env: PanelEnv) {
                     }, onDone = { store.endGesture() }))
                 }
             }
+            Text3DPbrSection(env, store)
         } else {
             Text(
                 stringResource(R.string.panel_cor_brilho_metalico_rugosidade_vem_arquivo),
                 style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = AureaColors.Muted)),
             )
         }
+        LightingSection(store)
         Spacer(Modifier.height(16.dp))
         SectionTitle(stringResource(R.string.panel_luz_ambiente))
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -212,6 +215,157 @@ private fun Text3DSection(env: PanelEnv, info: Text3DInfo) {
         }
     }
     Spacer(Modifier.height(14.dp))
+    SectionTitle(stringResource(R.string.pn_t3d_geometry))
+    // O chanfro e GEOMETRIA: ligado, a malha ganha frente/fundo recuados e o
+    // anel de chanfro (mais triângulos, não um brilho no shader).
+    Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(stringResource(R.string.pn_t3d_bevel), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Chip(stringResource(R.string.pn_t3d_off), on = !info.bevel) { store.text3d?.let { store.setText3D(it.copy(bevel = false)) } }
+            Chip(stringResource(R.string.pn_t3d_on), on = info.bevel) { store.text3d?.let { store.setText3D(it.copy(bevel = true)) } }
+        }
+    }
+    if (info.bevel) {
+        T3DRuler(store, stringResource(R.string.pn_t3d_bevel_width), 0.0002f, 0f, 0.2f, info.bevelWidth,
+            "${(info.bevelWidth * 1000).roundToInt()}", "chanfro") { v -> store.setText3D(info.copy(bevelWidth = v), lazy = true) }
+        T3DRuler(store, stringResource(R.string.pn_t3d_bevel_depth), 0.0002f, 0f, 0.2f, info.bevelDepth,
+            "${(info.bevelDepth * 1000).roundToInt()}", "chanfro") { v -> store.setText3D(info.copy(bevelDepth = v), lazy = true) }
+        Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.pn_t3d_bevel_segments), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf(1, 2, 3, 5, 8).forEach { n ->
+                    Chip("$n", on = info.bevelSegments == n) { store.text3d?.let { store.setText3D(it.copy(bevelSegments = n)) } }
+                }
+            }
+        }
+        T3DRuler(store, stringResource(R.string.pn_t3d_bevel_roundness), 0.006f, 0f, 1f, info.bevelRoundness,
+            "${(info.bevelRoundness * 100).roundToInt()}%", "arredondamento") { v -> store.setText3D(info.copy(bevelRoundness = v), lazy = true) }
+    }
+    Spacer(Modifier.height(14.dp))
+    SectionTitle(stringResource(R.string.pn_t3d_presets))
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text3DPreset.values().forEach { preset ->
+            Chip(stringResource(preset.labelRes), on = false) {
+                store.text3d?.let { store.setText3D(preset.apply(it)) }
+            }
+        }
+    }
+    Spacer(Modifier.height(14.dp))
+}
+
+/**
+ * MATERIAL do texto 3D: o MESMO PBR dos modelos importados (metal, rugosidade,
+ * especular, emissão). Nada de caminho especial de texto.
+ */
+@Composable
+private fun Text3DPbrSection(env: PanelEnv, store: EditorStore) {
+    val info by remember(store) { derivedStateOf { store.text3d } }
+    val cur = info ?: return
+    T3DRuler(store, stringResource(R.string.pn_t3d_metallic), 0.005f, 0f, 1f, cur.metallic,
+        "${(cur.metallic * 100).roundToInt()}%", "metalico") { v -> store.setText3D(cur.copy(metallic = v), lazy = true) }
+    T3DRuler(store, stringResource(R.string.pn_t3d_roughness), 0.005f, 0f, 1f, cur.roughness,
+        "${(cur.roughness * 100).roundToInt()}%", "rugosidade") { v -> store.setText3D(cur.copy(roughness = v), lazy = true) }
+    T3DRuler(store, stringResource(R.string.pn_t3d_specular), 0.005f, 0f, 1f, cur.specular,
+        "${(cur.specular * 100).roundToInt()}%", "especular") { v -> store.setText3D(cur.copy(specular = v), lazy = true) }
+    Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(stringResource(R.string.pn_t3d_emissive), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+        ColorWell(Color(cur.emissive[0], cur.emissive[1], cur.emissive[2])) {
+            store.beginGesture("emissao do texto 3D")
+            env.openColor(ColorRequest(cur.emissive.copyOf(), onChange = { r, g, b, _ ->
+                store.text3d?.let { store.setText3D(it.copy(emissive = floatArrayOf(r, g, b)), lazy = true) }
+            }, onDone = { store.endGesture() }))
+        }
+    }
+    T3DRuler(store, stringResource(R.string.pn_t3d_emissive_strength), 0.02f, 0f, 8f, cur.emissiveStrength,
+        "${(cur.emissiveStrength * 100).roundToInt()}%", "forca da emissao") { v -> store.setText3D(cur.copy(emissiveStrength = v), lazy = true) }
+    Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(stringResource(R.string.pn_t3d_regions), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Chip(stringResource(R.string.pn_t3d_off), on = !cur.regionMaterials) { store.text3d?.let { store.setText3D(it.copy(regionMaterials = false)) } }
+            Chip(stringResource(R.string.pn_t3d_on), on = cur.regionMaterials) { store.text3d?.let { store.setText3D(it.copy(regionMaterials = true)) } }
+        }
+    }
+    if (cur.regionMaterials) {
+        // Frente = a cor de Material (acima). Aqui vão a lateral e o chanfro.
+        T3DRuler(store, stringResource(R.string.pn_t3d_region_side), 0.005f, 0f, 1f, cur.sideRoughness,
+            "${(cur.sideRoughness * 100).roundToInt()}%", "rugosidade da lateral") { v ->
+            store.setText3D(cur.copy(sideRoughness = v), lazy = true)
+        }
+        Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.pn_t3d_region_bevel), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+            ColorWell(Color(cur.bevelColor[0], cur.bevelColor[1], cur.bevelColor[2])) {
+                store.beginGesture("cor do chanfro")
+                env.openColor(ColorRequest(cur.bevelColor.copyOf(), onChange = { r, g, b, _ ->
+                    store.text3d?.let { store.setText3D(it.copy(bevelColor = floatArrayOf(r, g, b, 1f)), lazy = true) }
+                }, onDone = { store.endGesture() }))
+            }
+        }
+        T3DRuler(store, stringResource(R.string.pn_t3d_metallic) + " · " + stringResource(R.string.pn_t3d_region_bevel), 0.005f, 0f, 1f, cur.bevelMetallic,
+            "${(cur.bevelMetallic * 100).roundToInt()}%", "metalico do chanfro") { v ->
+            store.setText3D(cur.copy(bevelMetallic = v), lazy = true)
+        }
+    }
+}
+
+/** ILUMINAÇÃO: o objeto projeta e recebe a sombra dos outros. */
+@Composable
+private fun LightingSection(store: EditorStore) {
+    val sh by remember(store) { derivedStateOf { store.modelShadows } }
+    val cur = sh ?: return
+    Spacer(Modifier.height(16.dp))
+    SectionTitle(stringResource(R.string.pn_t3d_lighting))
+    Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(stringResource(R.string.pn_t3d_cast_shadow), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Chip(stringResource(R.string.pn_t3d_off), on = !cur.first) { store.setModelShadows(false, cur.second) }
+            Chip(stringResource(R.string.pn_t3d_on), on = cur.first) { store.setModelShadows(true, cur.second) }
+        }
+    }
+    Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(stringResource(R.string.pn_t3d_receive_shadow), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Chip(stringResource(R.string.pn_t3d_off), on = !cur.second) { store.setModelShadows(cur.first, false) }
+            Chip(stringResource(R.string.pn_t3d_on), on = cur.second) { store.setModelShadows(cur.first, true) }
+        }
+    }
+}
+
+/** Uma régua de valor do texto 3D: arrasto com passo, rótulo e caixa. */
+@Composable
+private fun T3DRuler(
+    store: EditorStore,
+    label: String,
+    unitsPerDp: Float,
+    min: Float,
+    max: Float,
+    value: Float,
+    shown: String,
+    gesture: String,
+    onValue: (Float) -> Unit,
+) {
+    PropertyCustomRow(label, selected = false, onSelect = {}) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f).height(40.dp)) {
+                TickRuler(
+                    value = { value },
+                    unitsPerDp = unitsPerDp,
+                    active = true,
+                    modifier = Modifier.fillMaxSize().valueDrag(
+                        enabled = true,
+                        start = { value },
+                        unitsPerDp = { unitsPerDp },
+                        min = min,
+                        max = max,
+                        onStart = { store.beginGesture(gesture) },
+                        onValue = onValue,
+                        onEnd = { store.endGesture() },
+                    ),
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            ValueBox(shown, onTap = null)
+        }
+    }
 }
 
 @Composable

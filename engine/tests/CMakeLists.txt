@@ -21,6 +21,7 @@ add_executable(aurea_tests
     test_media.cpp
     test_gpu.cpp
     test_scene3d.cpp
+    test_text3d.cpp
     test_audio.cpp
     test_cliptime.cpp
     test_beats.cpp

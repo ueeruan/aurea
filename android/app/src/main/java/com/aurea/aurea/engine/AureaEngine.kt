@@ -423,11 +423,15 @@ class AureaEngine private constructor() {
     fun addParticles(preset: Int): Long = nativeAddParticles(nativeHandle, preset)
 
     // Texto 3D.
-    fun addText3d(content: String, depth: Float, align: Int, r: Float, g: Float, b: Float): Long =
-        nativeAddText3d(nativeHandle, content, depth, align, r, g, b)
-    fun setText3d(layer: Long, content: String, depth: Float, align: Int, r: Float, g: Float, b: Float): Boolean =
-        nativeSetText3d(nativeHandle, layer, content, depth, align, r, g, b)
+    fun addText3d(content: String, fields: FloatArray): Long = nativeAddText3d(nativeHandle, content, fields)
+    fun setText3d(layer: Long, content: String, fields: FloatArray): Boolean =
+        nativeSetText3d(nativeHandle, layer, content, fields)
     fun queryText3d(layer: Long, out: FloatArray): String? = nativeQueryText3d(nativeHandle, layer, out)
+
+    /** Sombras do objeto 3D: projeta / recebe. */
+    fun setModelShadows(layer: Long, cast: Boolean, receive: Boolean): Boolean =
+        nativeSetModelShadows(nativeHandle, layer, cast, receive)
+    fun queryModelShadows(layer: Long, out: FloatArray): Boolean = nativeQueryModelShadows(nativeHandle, layer, out)
     fun applyParticlePreset(layer: Long, preset: Int): Boolean = nativeApplyParticlePreset(nativeHandle, layer, preset)
     fun setParticleParam(layer: Long, param: Int, value: Float): Boolean = nativeSetParticleParam(nativeHandle, layer, param, value)
     fun queryParticles(layer: Long, out: FloatArray): Boolean = nativeQueryParticles(nativeHandle, layer, out)
@@ -716,9 +720,11 @@ class AureaEngine private constructor() {
     private external fun nativeRemoveTimeRemapKey(handle: Long, layer: Long, index: Int): Boolean
     private external fun nativeSetTimeRemap(handle: Long, layer: Long, on: Boolean): Boolean
     private external fun nativeAddParticles(handle: Long, preset: Int): Long
-    private external fun nativeAddText3d(handle: Long, content: String, depth: Float, align: Int, r: Float, g: Float, b: Float): Long
-    private external fun nativeSetText3d(handle: Long, layer: Long, content: String, depth: Float, align: Int, r: Float, g: Float, b: Float): Boolean
+    private external fun nativeAddText3d(handle: Long, content: String, fields: FloatArray): Long
+    private external fun nativeSetText3d(handle: Long, layer: Long, content: String, fields: FloatArray): Boolean
     private external fun nativeQueryText3d(handle: Long, layer: Long, out: FloatArray): String?
+    private external fun nativeSetModelShadows(handle: Long, layer: Long, cast: Boolean, receive: Boolean): Boolean
+    private external fun nativeQueryModelShadows(handle: Long, layer: Long, out: FloatArray): Boolean
     private external fun nativeSetTransition(handle: Long, layer: Long, out: Boolean, type: Int, frames: Int): Boolean
     private external fun nativeSetEcho(handle: Long, layer: Long, count: Int, delay: Float, decay: Float): Boolean
     private external fun nativeAddMask(handle: Long, layer: Long, pts: FloatArray?, count: Int, closed: Boolean): Int

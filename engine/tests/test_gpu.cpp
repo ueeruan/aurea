@@ -1963,9 +1963,9 @@ AUREA_TEST(Gpu, Scene3DLodDropsTrianglesWhenSmallOnScreen) {
 
 namespace {
 /// HDRI Radiance mínimo (sem RLE): metade de cima = `top`, de baixo = `bottom`.
-std::string write_test_hdr(Vec3 top, Vec3 bottom) {
+std::string write_test_hdr(Vec3 top, Vec3 bottom, const char* suffix = "") {
     const u32 w = 64, h = 32;
-    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_teste.hdr";
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_teste" + suffix + ".hdr";
     FILE* f = std::fopen(path.c_str(), "wb");
     if (!f) return {};
     std::fprintf(f, "#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y %u +X %u\n", h, w);
@@ -2671,6 +2671,113 @@ AUREA_TEST(Gpu, Scene3DIsInTheExportedFrames) {
     e.shutdown();
 }
 #endif
+
+namespace {
+/// Média dos canais RGB numa faixa horizontal (esquerda/direita da composição).
+Vec3 faixa_media(const Image8& img, u32 x0, u32 x1) {
+    f64 r = 0, g = 0, b = 0;
+    u32 n = 0;
+    for (u32 y = 0; y < img.height; ++y) {
+        for (u32 x = x0; x < std::min(x1, img.width); ++x) {
+            const u8* p = img.at(x, y);
+            r += p[0]; g += p[1]; b += p[2];
+            ++n;
+        }
+    }
+    const f64 d = static_cast<f64>(std::max(1u, n));
+    return Vec3{static_cast<f32>(r / d), static_cast<f32>(g / d), static_cast<f32>(b / d)};
+}
+f32 dist3(Vec3 a, Vec3 b) { return std::fabs(a.x - b.x) + std::fabs(a.y - b.y) + std::fabs(a.z - b.z); }
+} // namespace
+
+AUREA_TEST(Gpu, Text3DPbrReflectsTheEnvironmentAndKeepsItsOwn) {
+    AUREA_REQUIRE_GPU();
+    if (!text::default_font()) return;
+    Scene3DRig rig(320, 180);
+    Composition* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+    const f32 w = static_cast<f32>(comp->width()), h = static_cast<f32>(comp->height());
+
+    scene3d::Text3DSpec spec;
+    spec.content = "AUREA";
+    spec.color = Vec4{0.8f, 0.82f, 0.85f, 1.0f};
+    spec.bevel = true;
+    spec.bevelWidth = 0.02f;
+    spec.bevelDepth = 0.03f;
+    spec.bevelSegments = 3;
+    const Result<u64> a = rig.e.add_text3d(spec);
+    AUREA_CHECK(a.ok());
+    if (!a.ok()) return;
+    comp->layer(LayerId::unpack(*a))->transform.position = Vec3{w * 0.30f, h * 0.5f, 0.0f};
+
+    // --- o PBR responde ao material (mesmo caminho dos modelos) ------------
+    const Image8 padrao = rig.capture(320);
+    scene3d::Text3DSpec espelho = spec;
+    espelho.metallic = 1.0f;
+    espelho.roughness = 0.03f;
+    AUREA_CHECK(rig.e.set_text3d(*a, espelho).ok());
+    const Image8 cromado = rig.capture(320);
+    scene3d::Text3DSpec mate = spec;
+    mate.metallic = 0.0f;
+    mate.roughness = 0.95f;
+    AUREA_CHECK(rig.e.set_text3d(*a, mate).ok());
+    const Image8 fosco = rig.capture(320);
+    std::printf("\n    material: padrao->cromado dif %u, cromado->mate dif %u\n", max_diff(padrao, cromado),
+                max_diff(cromado, fosco));
+    AUREA_CHECK(max_diff(padrao, cromado) > 20);
+    AUREA_CHECK(max_diff(cromado, fosco) > 20);
+
+    // --- o HDRI do projeto chega no texto (metal = espelho) ----------------
+    AUREA_CHECK(rig.e.set_text3d(*a, espelho).ok());
+    const Image8 estudio = rig.capture(320);
+    const std::string hdrVerde = write_test_hdr(Vec3{0.05f, 3.0f, 0.1f}, Vec3{0.02f, 0.6f, 0.03f}, "_verde");
+    const Result<u64> verde = rig.e.import_hdri(hdrVerde.c_str());
+    AUREA_CHECK(verde.ok());
+    if (!verde.ok()) return;
+    const Image8 comHdri = rig.capture(320);
+    std::printf("    hdri do projeto: dif %u\n", max_diff(estudio, comHdri));
+    AUREA_CHECK(max_diff(estudio, comHdri) > 20);
+    const Vec3 media = faixa_media(comHdri, 0, 320);
+    std::printf("    media com hdri verde: r %.1f g %.1f b %.1f\n", media.x, media.y, media.z);
+    AUREA_CHECK(media.y > media.x * 1.2f);
+
+    // --- ambiente POR OBJETO: A com o dele, B com o do projeto -------------
+    scene3d::Text3DSpec specB = espelho;
+    const Result<u64> b = rig.e.add_text3d(specB);
+    AUREA_CHECK(b.ok());
+    if (!b.ok()) return;
+    comp->layer(LayerId::unpack(*b))->transform.position = Vec3{w * 0.72f, h * 0.5f, 0.0f};
+    const std::string hdrVermelho = write_test_hdr(Vec3{3.0f, 0.15f, 0.1f}, Vec3{0.6f, 0.02f, 0.02f}, "_vermelho");
+    const Result<u64> vermelho = rig.e.import_hdri(hdrVermelho.c_str());
+    AUREA_CHECK(vermelho.ok());
+    if (!vermelho.ok()) return;
+    // A importação acima pôs o vermelho no PROJETO (A e B vermelhos). Dá o
+    // verde SÓ para A e mede os dois lados.
+    AUREA_CHECK(rig.e.set_object_environment(*a, 1, *verde, 1.0f, 0.0f, 1.0f));
+    const Image8 separado = rig.capture(320);
+    const Vec3 la = faixa_media(separado, 0, 160);
+    const Vec3 rb = faixa_media(separado, 160, 320);
+    // A volta ao ambiente do projeto: A fica vermelho como B, e B não se mexe.
+    AUREA_CHECK(rig.e.set_object_environment(*a, 0, 0, 1.0f, 0.0f, 1.0f));
+    const Image8 igual = rig.capture(320);
+    const Vec3 la2 = faixa_media(igual, 0, 160);
+    const Vec3 rb2 = faixa_media(igual, 160, 320);
+    std::printf("    A proprio->do projeto: A mudou %.1f, B mudou %.1f\n", dist3(la, la2), dist3(rb, rb2));
+    std::printf("    A (verde) r %.1f g %.1f | B (vermelho) r %.1f g %.1f\n", la.x, la.y, rb.x, rb.y);
+    AUREA_CHECK(dist3(la, la2) > 1.5f);      // A sentiu a troca
+    AUREA_CHECK(dist3(rb, rb2) < 0.6f);      // B não — o estado é de cada objeto
+    AUREA_CHECK(la.y > la.x * 1.2f);         // A estava com o HDRI verde
+    AUREA_CHECK(rb.x > rb.y * 1.2f);         // B com o vermelho do projeto
+
+    // Sombras: o objeto tem o controle dele.
+    AUREA_CHECK(rig.e.set_model_shadows(*a, true, true));
+    f32 sh[2]{};
+    AUREA_CHECK(rig.e.query_model_shadows(*a, sh) && sh[0] == 1.0f && sh[1] == 1.0f);
+    AUREA_CHECK(rig.e.set_model_shadows(*a, false, false));
+    AUREA_CHECK(rig.e.query_model_shadows(*a, sh) && sh[0] == 0.0f && sh[1] == 0.0f);
+
+    std::remove(hdrVerde.c_str());
+    std::remove(hdrVermelho.c_str());
+}
 
 AUREA_TEST(Gpu, Text3DRendersEditsUndoesAndSurvivesReopen) {
     AUREA_REQUIRE_GPU();

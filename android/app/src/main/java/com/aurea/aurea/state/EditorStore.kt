@@ -947,8 +947,14 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             null
         }
         text3d = if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Model3D.kind) {
-            val f = FloatArray(5)
-            engine.queryText3d(id, f)?.let { Text3DInfo(it, f[0], f[1].toInt(), floatArrayOf(f[2], f[3], f[4], 1f)) }
+            val f = FloatArray(Text3DInfo.FIELDS)
+            engine.queryText3d(id, f)?.let { novo -> Text3DInfo.of(novo, f).takeIf { !it.sameAs(text3d) } ?: text3d }
+        } else {
+            null
+        }
+        modelShadows = if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Model3D.kind) {
+            val sh = FloatArray(2)
+            if (engine.queryModelShadows(id, sh)) (sh[0] >= 0.5f) to (sh[1] >= 0.5f) else null
         } else {
             null
         }
@@ -1209,7 +1215,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         private set
 
     fun addText3D(): Long {
-        val id = engine.addText3d("Texto", 0.25f, 1, 1f, 1f, 1f)
+        val id = engine.addText3d("Texto", Text3DInfo("Texto", 0.25f, 1, floatArrayOf(1f, 1f, 1f, 1f)).toFields())
         if (id < 0) {
             errorMessage = appText(R.string.msg_nao_foi_possivel_criar_o_texto, -id)
             return -1
@@ -1248,7 +1254,18 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     private fun pushText3D(id: Long, info: Text3DInfo) {
         if (info.content.isBlank()) return
-        engine.setText3d(id, info.content, info.depth, info.alignment, info.color[0], info.color[1], info.color[2])
+        engine.setText3d(id, info.content, info.toFields())
+        refreshNow()
+    }
+
+    /** Sombras do objeto 3D selecionado: projeta / recebe. */
+    var modelShadows by mutableStateOf<Pair<Boolean, Boolean>?>(null)
+        private set
+
+    fun setModelShadows(cast: Boolean, receive: Boolean) {
+        val id = primary ?: return
+        modelShadows = cast to receive
+        engine.setModelShadows(id, cast, receive)
         refreshNow()
     }
 
@@ -3965,5 +3982,105 @@ class ThumbnailCache(private val engine: AureaEngine) {
 /** Comprimento das setas do gizmo 3D, em unidades do mundo (px da composição no plano Z = 0). */
 const val GIZMO_LENGTH = 320f
 
-/** Receita do texto 3D: texto, profundidade (em alturas de letra), alinhamento e cor sRGB. */
-data class Text3DInfo(val content: String, val depth: Float, val alignment: Int, val color: FloatArray)
+/**
+ * Receita do texto 3D: geometria, chanfro e PBR. A ordem dos numeros em
+ * [toFields] e o contrato com o motor (`kText3DFields` em aurea_jni.cpp e
+ * `Text3DSpec` em Text3D.hpp) - mexer aqui sem mexer la desalinha os dois.
+ *
+ * Profundidade e chanfro sao em "alturas de letra" (1 = o tamanho da fonte).
+ */
+data class Text3DInfo(
+    val content: String,
+    val depth: Float,
+    val alignment: Int,
+    val color: FloatArray,
+    val bevel: Boolean = false,
+    val bevelWidth: Float = 0.02f,
+    val bevelDepth: Float = 0.02f,
+    val bevelSegments: Int = 3,
+    val bevelRoundness: Float = 1f,
+    val metallic: Float = 0f,
+    val roughness: Float = 0.35f,
+    val specular: Float = 1f,
+    val occlusion: Float = 1f,
+    val emissive: FloatArray = floatArrayOf(0f, 0f, 0f),
+    val emissiveStrength: Float = 1f,
+    val regionMaterials: Boolean = false,
+    val sideColor: FloatArray = floatArrayOf(1f, 1f, 1f, 1f),
+    val sideMetallic: Float = 0f,
+    val sideRoughness: Float = 0.35f,
+    val bevelColor: FloatArray = floatArrayOf(1f, 1f, 1f, 1f),
+    val bevelMetallic: Float = 0f,
+    val bevelRoughness: Float = 0.35f,
+) {
+    fun toFields(): FloatArray = floatArrayOf(
+        depth, alignment.toFloat(), color[0], color[1], color[2],
+        if (bevel) 1f else 0f, bevelWidth, bevelDepth, bevelSegments.toFloat(), bevelRoundness,
+        metallic, roughness, specular, occlusion,
+        emissive[0], emissive[1], emissive[2], emissiveStrength,
+        if (regionMaterials) 1f else 0f,
+        sideColor[0], sideColor[1], sideColor[2], sideMetallic, sideRoughness,
+        bevelColor[0], bevelColor[1], bevelColor[2], bevelMetallic, bevelRoughness,
+    )
+
+    fun sameAs(o: Text3DInfo?): Boolean =
+        o != null && content == o.content && alignment == o.alignment &&
+            depth == o.depth && bevel == o.bevel && bevelWidth == o.bevelWidth &&
+            bevelDepth == o.bevelDepth && bevelSegments == o.bevelSegments &&
+            bevelRoundness == o.bevelRoundness && metallic == o.metallic &&
+            roughness == o.roughness && specular == o.specular && occlusion == o.occlusion &&
+            emissiveStrength == o.emissiveStrength && regionMaterials == o.regionMaterials &&
+            sideMetallic == o.sideMetallic && sideRoughness == o.sideRoughness &&
+            bevelMetallic == o.bevelMetallic && bevelRoughness == o.bevelRoughness &&
+            color.contentEquals(o.color) && emissive.contentEquals(o.emissive) &&
+            sideColor.contentEquals(o.sideColor) && bevelColor.contentEquals(o.bevelColor)
+
+    companion object {
+        const val FIELDS = 29
+
+        fun of(content: String, f: FloatArray): Text3DInfo = Text3DInfo(
+            content = content,
+            depth = f[0],
+            alignment = f[1].toInt(),
+            color = floatArrayOf(f[2], f[3], f[4], 1f),
+            bevel = f[5] >= 0.5f,
+            bevelWidth = f[6],
+            bevelDepth = f[7],
+            bevelSegments = f[8].toInt(),
+            bevelRoundness = f[9],
+            metallic = f[10], roughness = f[11], specular = f[12], occlusion = f[13],
+            emissive = floatArrayOf(f[14], f[15], f[16]),
+            emissiveStrength = f[17],
+            regionMaterials = f[18] >= 0.5f,
+            sideColor = floatArrayOf(f[19], f[20], f[21], 1f),
+            sideMetallic = f[22], sideRoughness = f[23],
+            bevelColor = floatArrayOf(f[24], f[25], f[26], 1f),
+            bevelMetallic = f[27], bevelRoughness = f[28],
+        )
+    }
+}
+
+/** Presets de material do texto 3D - o MESMO PBR, so parametros. */
+enum class Text3DPreset(val labelRes: Int) {
+    Chrome(R.string.pn_t3d_preset_chrome),
+    Gold(R.string.pn_t3d_preset_gold),
+    Brushed(R.string.pn_t3d_preset_brushed),
+    Glossy(R.string.pn_t3d_preset_glossy),
+    Matte(R.string.pn_t3d_preset_matte),
+    Neon(R.string.pn_t3d_preset_neon);
+
+    fun apply(i: Text3DInfo): Text3DInfo = when (this) {
+        Chrome -> i.copy(color = floatArrayOf(0.95f, 0.96f, 0.98f, 1f), metallic = 1f, roughness = 0.05f,
+            specular = 1f, emissive = floatArrayOf(0f, 0f, 0f), emissiveStrength = 1f)
+        Gold -> i.copy(color = floatArrayOf(1f, 0.77f, 0.34f, 1f), metallic = 1f, roughness = 0.18f,
+            specular = 1f, emissive = floatArrayOf(0f, 0f, 0f), emissiveStrength = 1f)
+        Brushed -> i.copy(color = floatArrayOf(0.78f, 0.79f, 0.8f, 1f), metallic = 1f, roughness = 0.45f,
+            specular = 1f, emissive = floatArrayOf(0f, 0f, 0f), emissiveStrength = 1f)
+        Glossy -> i.copy(color = floatArrayOf(0.9f, 0.1f, 0.12f, 1f), metallic = 0f, roughness = 0.08f,
+            specular = 1f, emissive = floatArrayOf(0f, 0f, 0f), emissiveStrength = 1f)
+        Matte -> i.copy(color = floatArrayOf(0.85f, 0.85f, 0.86f, 1f), metallic = 0f, roughness = 0.92f,
+            specular = 0.15f, emissive = floatArrayOf(0f, 0f, 0f), emissiveStrength = 1f)
+        Neon -> i.copy(color = floatArrayOf(0.1f, 1f, 0.85f, 1f), metallic = 0f, roughness = 0.35f,
+            specular = 1f, emissive = floatArrayOf(0.1f, 1f, 0.85f), emissiveStrength = 3.5f)
+    }
+}

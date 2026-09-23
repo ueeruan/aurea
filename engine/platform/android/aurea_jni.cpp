@@ -1106,44 +1106,100 @@ AUREA_JNI jboolean AUREA_FN(nativeSetTransition)(JNIEnv*, jclass, jlong handle, 
 }
 
 namespace {
-aurea::scene3d::Text3DSpec text3d_spec(JNIEnv* env, jstring content, jfloat depth, jint align, jfloat r, jfloat g, jfloat b) {
-    aurea::scene3d::Text3DSpec s;
-    const char* p = env->GetStringUTFChars(content, nullptr);
-    s.content = p;
-    env->ReleaseStringUTFChars(content, p);
-    s.depth = depth;
-    s.alignment = static_cast<u32>(align);
-    s.color = Vec4{r, g, b, 1.0f};
-    return s;
+/// Receita do texto 3D, campo a campo. O Kotlin manda e recebe os números num
+/// FloatArray só: a ordem é o contrato entre os dois lados (kText3DFields).
+constexpr jint kText3DFields = 29;
+
+void write_text3d(const aurea::scene3d::Text3DSpec& s, f32* v) {
+    v[0] = s.depth;
+    v[1] = static_cast<f32>(s.alignment);
+    v[2] = s.color.x; v[3] = s.color.y; v[4] = s.color.z;
+    v[5] = s.bevel ? 1.0f : 0.0f;
+    v[6] = s.bevelWidth;
+    v[7] = s.bevelDepth;
+    v[8] = static_cast<f32>(s.bevelSegments);
+    v[9] = s.bevelRoundness;
+    v[10] = s.metallic; v[11] = s.roughness; v[12] = s.specular; v[13] = s.occlusion;
+    v[14] = s.emissive.x; v[15] = s.emissive.y; v[16] = s.emissive.z;
+    v[17] = s.emissiveStrength;
+    v[18] = s.regionMaterials ? 1.0f : 0.0f;
+    v[19] = s.side.color.x; v[20] = s.side.color.y; v[21] = s.side.color.z;
+    v[22] = s.side.metallic; v[23] = s.side.roughness;
+    v[24] = s.bevelMat.color.x; v[25] = s.bevelMat.color.y; v[26] = s.bevelMat.color.z;
+    v[27] = s.bevelMat.metallic; v[28] = s.bevelMat.roughness;
+}
+
+bool read_text3d(JNIEnv* env, jstring content, jfloatArray p, aurea::scene3d::Text3DSpec& s) {
+    const char* text = env->GetStringUTFChars(content, nullptr);
+    s.content = text ? text : "";
+    if (text) env->ReleaseStringUTFChars(content, text);
+    if (!p || env->GetArrayLength(p) < kText3DFields) return false;
+    f32 v[kText3DFields]{};
+    env->GetFloatArrayRegion(p, 0, kText3DFields, v);
+    s.depth = v[0];
+    s.alignment = static_cast<u32>(std::max(0.0f, v[1]));
+    s.color = Vec4{v[2], v[3], v[4], 1.0f};
+    s.bevel = v[5] >= 0.5f;
+    s.bevelWidth = v[6];
+    s.bevelDepth = v[7];
+    s.bevelSegments = static_cast<u32>(std::clamp(v[8], 1.0f, 8.0f));
+    s.bevelRoundness = v[9];
+    s.metallic = v[10]; s.roughness = v[11]; s.specular = v[12]; s.occlusion = v[13];
+    s.emissive = Vec3{v[14], v[15], v[16]};
+    s.emissiveStrength = v[17];
+    s.regionMaterials = v[18] >= 0.5f;
+    s.side.color = Vec4{v[19], v[20], v[21], 1.0f};
+    s.side.metallic = v[22]; s.side.roughness = v[23];
+    s.bevelMat.color = Vec4{v[24], v[25], v[26], 1.0f};
+    s.bevelMat.metallic = v[27]; s.bevelMat.roughness = v[28];
+    return true;
 }
 } // namespace
 
-AUREA_JNI jlong AUREA_FN(nativeAddText3d)(JNIEnv* env, jclass, jlong handle, jstring content, jfloat depth, jint align,
-                                         jfloat r, jfloat g, jfloat b) {
+AUREA_JNI jlong AUREA_FN(nativeAddText3d)(JNIEnv* env, jclass, jlong handle, jstring content, jfloatArray p) {
     NativeContext* c = ctx_of(handle);
     if (!c || !content) return -static_cast<jlong>(Errc::InvalidState);
-    const Result<u64> res = c->engine.add_text3d(text3d_spec(env, content, depth, align, r, g, b));
+    aurea::scene3d::Text3DSpec s;
+    if (!read_text3d(env, content, p, s)) return -static_cast<jlong>(Errc::InvalidArgument);
+    const Result<u64> res = c->engine.add_text3d(s);
     if (!res.ok()) return -static_cast<jlong>(res.status().code());
     return static_cast<jlong>(*res);
 }
 
-AUREA_JNI jboolean AUREA_FN(nativeSetText3d)(JNIEnv* env, jclass, jlong handle, jlong layer, jstring content, jfloat depth,
-                                            jint align, jfloat r, jfloat g, jfloat b) {
+AUREA_JNI jboolean AUREA_FN(nativeSetText3d)(JNIEnv* env, jclass, jlong handle, jlong layer, jstring content, jfloatArray p) {
     NativeContext* c = ctx_of(handle);
     if (!c || !content) return JNI_FALSE;
-    return c->engine.set_text3d(static_cast<u64>(layer), text3d_spec(env, content, depth, align, r, g, b)).ok() ? JNI_TRUE : JNI_FALSE;
+    aurea::scene3d::Text3DSpec s;
+    if (!read_text3d(env, content, p, s)) return JNI_FALSE;
+    return c->engine.set_text3d(static_cast<u64>(layer), s).ok() ? JNI_TRUE : JNI_FALSE;
 }
 
-/// Receita do texto 3D: devolve o texto (nulo = não é texto 3D) e preenche
-/// {profundidade, alinhamento, r, g, b}.
+/// Receita do texto 3D: devolve o texto (nulo = não é texto 3D) e preenche o
+/// FloatArray com os 29 campos de `write_text3d`.
 AUREA_JNI jstring AUREA_FN(nativeQueryText3d)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloatArray out) {
     NativeContext* c = ctx_of(handle);
-    if (!c || !out || env->GetArrayLength(out) < 5) return nullptr;
+    if (!c || !out || env->GetArrayLength(out) < kText3DFields) return nullptr;
     aurea::scene3d::Text3DSpec s;
     if (!c->engine.query_text3d(static_cast<u64>(layer), s)) return nullptr;
-    const f32 v[5] = {s.depth, static_cast<f32>(s.alignment), s.color.x, s.color.y, s.color.z};
-    env->SetFloatArrayRegion(out, 0, 5, v);
+    f32 v[kText3DFields]{};
+    write_text3d(s, v);
+    env->SetFloatArrayRegion(out, 0, kText3DFields, v);
     return env->NewStringUTF(s.content.c_str());
+}
+
+/// Sombras do objeto 3D: projeta / recebe.
+AUREA_JNI jboolean AUREA_FN(nativeSetModelShadows)(JNIEnv*, jclass, jlong handle, jlong layer, jboolean cast, jboolean receive) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.set_model_shadows(static_cast<u64>(layer), cast == JNI_TRUE, receive == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeQueryModelShadows)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloatArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !out || env->GetArrayLength(out) < 2) return JNI_FALSE;
+    f32 v[2]{};
+    if (!c->engine.query_model_shadows(static_cast<u64>(layer), v)) return JNI_FALSE;
+    env->SetFloatArrayRegion(out, 0, 2, v);
+    return JNI_TRUE;
 }
 
 AUREA_JNI jlong AUREA_FN(nativeAddParticles)(JNIEnv*, jclass, jlong handle, jint preset) {

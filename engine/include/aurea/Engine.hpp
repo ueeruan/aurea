@@ -694,6 +694,12 @@ public:
     /// {fonte, asset, intensidade, giro, exposição}.
     bool query_object_environment(u64 layerId, f32* out5) noexcept;
 
+    /// Sombras de um objeto 3D (modelo importado ou texto 3D): se ele projeta
+    /// (`cast`) e se recebe (`receive`) a sombra dos outros.
+    bool set_model_shadows(u64 layerId, bool cast, bool receive) noexcept;
+    /// {projeta, recebe}.
+    bool query_model_shadows(u64 layerId, f32* out2) noexcept;
+
     // --- Pré-composição ----------------------------------------------------------
     /// Move as camadas para uma composição nova (mesmo tamanho, taxa e
     /// duração; fundo transparente) e põe no lugar UMA camada que a mostra, na

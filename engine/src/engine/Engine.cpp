@@ -3283,6 +3283,30 @@ bool Engine::query_object_environment(u64 layerId, f32* out) noexcept {
     return true;
 }
 
+bool Engine::set_model_shadows(u64 layerId, bool cast, bool receive) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->kind != LayerKind::Model3D) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "sombras do objeto");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    l->model.castShadows = cast;
+    l->model.receiveShadows = receive;
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::query_model_shadows(u64 layerId, f32* out) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || !out || l->kind != LayerKind::Model3D) return false;
+    out[0] = l->model.castShadows ? 1.0f : 0.0f;
+    out[1] = l->model.receiveShadows ? 1.0f : 0.0f;
+    return true;
+}
+
 // =============================================================================
 // Pré-composição
 // =============================================================================

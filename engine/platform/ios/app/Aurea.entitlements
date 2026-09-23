@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Aurea / platform / ios / app / Aurea.entitlements
+
+  VAZIO DE PROPÓSITO. O Aurea não usa nenhuma capability dos entitlements:
+
+   · sem iCloud (os projetos são arquivos locais em Documents, como no Android);
+   · sem push, sem chaves de assinatura de app, sem grupos de app;
+   · sem background audio (o Android não tem serviço de reprodução em segundo
+     plano: o motor PAUSA ao ir para trás — ver Engine::suspend);
+   · sem App Sandbox (isto é iOS, não macOS).
+
+  O arquivo existe porque o alvo do Xcode o referencia
+  (`CODE_SIGN_ENTITLEMENTS`): se algum dia entrar uma capability, o lugar é
+  este, e a decisão fica registrada.
+
+  A ASSINATURA (team, provisioning, certificado) NÃO ESTÁ AQUI: ela é do dono,
+  preenchida no Xcode. Ver README.
+-->
+<plist version="1.0">
+<dict/>
+</plist>

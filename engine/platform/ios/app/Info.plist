@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Aurea / platform / ios / app / Info.plist
+
+  O QUE ESTE ARQUIVO NÃO TEM, E POR QUÊ:
+
+   · NSMicrophoneUsageDescription / NSPhotoLibraryUsageDescription: o Android
+     NÃO pede RECORD_AUDIO nem CAMERA (o manifest diz explicitamente "saiu
+     CAMERA, RECORD_AUDIO: não há captura no editor"), e a mídia entra pelo
+     seletor do sistema, que não pede permissão. Declarar uma permissão que o
+     app não usa é promessa falsa — na loja e para quem lê o Info.plist.
+   · Dados de assinatura (Team ID, provisioning): quem assina é o dono, com a
+     conta dele. Ver README.
+
+  BUNDLE ID: com.aurea.aurea — o MESMO `applicationId` do
+  android/app/build.gradle.kts. É o que faz um projeto aberto nos dois sistemas
+  ser o mesmo app.
+-->
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>pt-BR</string>
+    <key>CFBundleDisplayName</key>
+    <string>Aurea</string>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleIdentifier</key>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>$(PRODUCT_NAME)</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>2.0.0-beta1</string>
+    <!-- 2102 é o MESMO número do versionCode do Android: um aparelho de cada
+         sistema conta a mesma história sobre qual versão está instalada. -->
+    <key>CFBundleVersion</key>
+    <string>2102</string>
+    <key>LSRequiresIPhoneOS</key>
+    <true/>
+
+    <!-- O motor precisa de Metal. Sem esta exigência o app instalaria num
+         aparelho sem GPU Metal e o preview nunca subiria — o mesmo critério do
+         `uses-feature android.hardware.vulkan` required="true" do Android. -->
+    <key>UIRequiredDeviceCapabilities</key>
+    <array>
+        <string>metal</string>
+    </array>
+
+    <key>UILaunchScreen</key>
+    <dict>
+        <key>UIColorName</key>
+        <string></string>
+    </dict>
+
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+    <key>UISupportedInterfaceOrientations~ipad</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationPortraitUpsideDown</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+
+    <!-- O Aurea é escuro em todas as telas (o tema do Android não tem modo
+         claro). Fixar evita o sistema inverter o que não deve. -->
+    <key>UIUserInterfaceStyle</key>
+    <string>Dark</string>
+
+    <!-- O app é árabe-tradutor-ready como o Android (`supportsRtl="true"`). -->
+    <key>CFBundleAllowMixedLocalizations</key>
+    <true/>
+
+    <!-- Os exports e os projetos ficam em Documents; deixar visível no app
+         Arquivos é o que permite ao usuário pegar o vídeo exportado sem
+         passar por uma folha de compartilhamento. -->
+    <key>UIFileSharingEnabled</key>
+    <true/>
+    <key>LSSupportsOpeningDocumentsInPlace</key>
+    <true/>
+
+    <!-- Sem criptografia própria: dispensa o aviso de conformidade a cada
+         envio para a loja. -->
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <false/>
+</dict>
+</plist>

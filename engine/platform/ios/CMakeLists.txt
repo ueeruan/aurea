@@ -46,14 +46,9 @@ set(AUREA_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." CACHE PATH "Raiz do motor (engi
 # Opções
 # -----------------------------------------------------------------------------
 option(AUREA_GPU_METAL "Compila e liga o backend Metal (gpu/metal)" ON)
-# Ponto de extensão dos shaders MSL: o SPIR-V embutido pelo motor é traduzido
-# para MSL no build (SPIRV-Cross), como o MetalBackend espera. O script e a
-# ferramenta NÃO entram nesta entrega — ligar a opção sem eles falha no
-# configure, com a mensagem dizendo exatamente o que falta. Ver README.
-option(AUREA_METAL_SHADERS "Gera MSL do SPIR-V no build (exige SPIRV-Cross)" OFF)
-set(AUREA_SPIRV_CROSS "" CACHE FILEPATH "Binario spirv-cross (para AUREA_METAL_SHADERS)")
-set(AUREA_METAL_SHADER_SCRIPT "${CMAKE_CURRENT_LIST_DIR}/cmake/AureaMetalShaders.cmake"
-    CACHE FILEPATH "Script que gera os .metal do SPIR-V")
+option(AUREA_METAL_SHADERS "Traduz os shaders para Metal no build" ON)
+set(AUREA_METAL_COMPILER "$ENV{AUREA_METAL_COMPILER}" CACHE FILEPATH "Compilador Metal do host")
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -61,6 +56,54 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "" FORCE)
+endif()
+
+# -----------------------------------------------------------------------------
+# Compilador de Metal do HOST (SPIR-V → MSL). Ele traduz os shaders no build,
+# e é a ÚNICA peça do iOS que compila para a máquina, não para o aparelho — por
+# isso é construído à parte, com o compilador do host, num passo de configuração.
+#
+# Sem isto o configure para com "set AUREA_METAL_COMPILER": um pré-requisito
+# manual que quebra o build na primeira tentativa num Mac limpo. Com isto, o
+# único requisito externo continua sendo o glslc, que o motor já usa.
+# -----------------------------------------------------------------------------
+if(AUREA_METAL_SHADERS AND NOT AUREA_METAL_COMPILER)
+    set(_mc_dir "${CMAKE_BINARY_DIR}/metal-compiler")
+    set(_mc_bin "${_mc_dir}/aurea-metal-compiler")
+    if(NOT EXISTS "${_mc_bin}")
+        message(STATUS "Aurea iOS: construindo o compilador de Metal do host (SPIRV-Cross)")
+        execute_process(
+            COMMAND "${CMAKE_COMMAND}" -S "${AUREA_ROOT}/tools/metal-shaders" -B "${_mc_dir}"
+                    -DCMAKE_BUILD_TYPE=Release
+            RESULT_VARIABLE _mc_cfg
+            OUTPUT_VARIABLE _mc_out ERROR_VARIABLE _mc_out)
+        if(NOT _mc_cfg EQUAL 0)
+            message(FATAL_ERROR
+                "Nao foi possivel configurar o compilador de Metal do host.\n"
+                "Ele busca o SPIRV-Cross (KhronosGroup/SPIRV-Cross) na primeira vez, "
+                "entao precisa de rede e de um compilador C++ do host.\n${_mc_out}")
+        endif()
+        execute_process(
+            COMMAND "${CMAKE_COMMAND}" --build "${_mc_dir}" --config Release
+            RESULT_VARIABLE _mc_build
+            OUTPUT_VARIABLE _mc_out2 ERROR_VARIABLE _mc_out2)
+        if(NOT _mc_build EQUAL 0)
+            message(FATAL_ERROR "Falha ao compilar o compilador de Metal do host.\n${_mc_out2}")
+        endif()
+    endif()
+    # Makefiles/Ninja escrevem o executável na raiz; o Visual Studio, em Release/.
+    foreach(_cand "${_mc_bin}" "${_mc_bin}.exe" "${_mc_dir}/Release/aurea-metal-compiler.exe")
+        if(EXISTS "${_cand}")
+            set(AUREA_METAL_COMPILER "${_cand}" CACHE FILEPATH "Compilador Metal do host" FORCE)
+            break()
+        endif()
+    endforeach()
+    if(NOT AUREA_METAL_COMPILER)
+        message(FATAL_ERROR
+            "O compilador de Metal do host foi construido mas nao foi encontrado em ${_mc_dir}.\n"
+            "Defina -DAUREA_METAL_COMPILER=<caminho> a mao.")
+    endif()
+    message(STATUS "Aurea iOS: compilador de Metal do host  ${AUREA_METAL_COMPILER}")
 endif()
 
 # -----------------------------------------------------------------------------
@@ -94,38 +137,7 @@ if(AUREA_GPU_METAL)
     if(NOT TARGET aurea_metal)
         add_subdirectory("${AUREA_METAL_DIR}" "${CMAKE_BINARY_DIR}/aurea-metal")
     endif()
-    if(AUREA_METAL_SHADERS)
-        if(NOT AUREA_SPIRV_CROSS OR NOT EXISTS "${AUREA_SPIRV_CROSS}")
-            message(FATAL_ERROR
-                "AUREA_METAL_SHADERS=ON exige -DAUREA_SPIRV_CROSS=<binario>. "
-                "O spirv-cross nao vem no SDK da Apple; baixe em "
-                "https://github.com/KhronosGroup/SPIRV-Cross e aponte aqui.")
-        endif()
-        if(NOT EXISTS "${AUREA_METAL_SHADER_SCRIPT}")
-            message(FATAL_ERROR
-                "AUREA_METAL_SHADERS=ON exige ${AUREA_METAL_SHADER_SCRIPT}.\n"
-                "O ponto de extensao esta NOMEADO: o script recebe AUREA_METAL_SPV_DIR "
-                "(os .spv que o motor ja gera em generated/shaders) e AUREA_SPIRV_CROSS, "
-                "e emite os .metal em AUREA_METAL_OUT_DIR. Ele ainda nao foi escrito.")
-        endif()
-        # O ponto de extensão: quando o script existir, é aqui que a tradução
-        # SPIR-V → MSL entra no build. Os .spv saem de `AUREA_SHADER_SPV_DIR`,
-        # que cmake/AureaShaders.cmake publica no escopo do subdiretório.
-        add_custom_command(
-            OUTPUT "${CMAKE_BINARY_DIR}/metal-shaders/.stamp"
-            COMMAND ${CMAKE_COMMAND}
-                    "-DAUREA_METAL_SPV_DIR=${AUREA_SHADER_SPV_DIR}"
-                    "-DAUREA_METAL_OUT_DIR=${CMAKE_BINARY_DIR}/metal-shaders"
-                    "-DAUREA_SPIRV_CROSS=${AUREA_SPIRV_CROSS}"
-                    -P "${AUREA_METAL_SHADER_SCRIPT}"
-            COMMAND ${CMAKE_COMMAND} -E touch "${CMAKE_BINARY_DIR}/metal-shaders/.stamp"
-            DEPENDS ${AUREA_SHADER_SPV_DIR}
-            COMMENT "SPIR-V -> MSL (seu script: ${AUREA_METAL_SHADER_SCRIPT})"
-            VERBATIM)
-        add_custom_target(aurea_metal_shaders ALL
-            DEPENDS "${CMAKE_BINARY_DIR}/metal-shaders/.stamp")
-        add_dependencies(aurea_metal aurea_metal_shaders)
-    endif()
+
 endif()
 
 # -----------------------------------------------------------------------------

@@ -1,0 +1,16 @@
+cmake_minimum_required(VERSION 3.22)
+project(AureaMetalCompiler LANGUAGES CXX)
+include(FetchContent)
+set(SPIRV_CROSS_CLI OFF CACHE BOOL "" FORCE)
+set(SPIRV_CROSS_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
+set(SPIRV_CROSS_ENABLE_HLSL OFF CACHE BOOL "" FORCE)
+set(SPIRV_CROSS_ENABLE_CPP OFF CACHE BOOL "" FORCE)
+set(SPIRV_CROSS_ENABLE_REFLECT OFF CACHE BOOL "" FORCE)
+set(SPIRV_CROSS_ENABLE_C_API OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(spirv_cross
+    GIT_REPOSITORY https://github.com/KhronosGroup/SPIRV-Cross.git
+    GIT_TAG d8e3e2b141b8c8a167b2e3984736a6baacff316c)
+FetchContent_MakeAvailable(spirv_cross)
+add_executable(aurea-metal-compiler main.cpp)
+target_compile_features(aurea-metal-compiler PRIVATE cxx_std_17)
+target_link_libraries(aurea-metal-compiler PRIVATE spirv-cross-msl)

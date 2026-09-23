@@ -26,3 +26,8 @@ Master em `8da7427`: keyframes nos parâmetros do Particular e contrato v21
 - **C (3D) — NÃO mergeado**, branch `worktree-agent-a256aa5de592bf86f` (commit 6172ca9): binding 16 para histórico, funções `ps_*` no shader (histórico no nascimento, taxa animada por aceitação, Z/billboard, subamostra de tempo), desenho na cena com depth. Falta `ParticleScene.cpp`, upload do histórico, entrar no grupo de cena (`asPlane`), motion blur, testes (a)–(h). ATENÇÃO: `Renderer.hpp` declara 3 funções ainda sem corpo.
 - **B e C conflitam em `particles.vert`** (ambos isolaram em funções: B `emit_*`/`collide_*`, C `ps_*`/`emit_vertex`) — mergear B primeiro, depois C resolvendo o `main`.
 - **Bug achado (B):** projeto anterior à v20 com Faíscas/Neve/Poeira abre com emissor 0 (Ponto); o antigo era sempre Caixa → corrigir na leitura v<20.
+
+## Atualização 2026-09-23 — escopo reduzido pelo dono
+
+- **8.1 FECHADA (1511a94): só pt-BR + inglês.** Ajustes > Idioma = Sistema / Português / English; APK só com `pt`/`en` (`androidResources.localeFilters`); sistema em outro idioma abre em inglês e LTR. Catálogos es/ru/hi/id/ar ficam no repositório para uma fase futura — não editar agora. Restam 328 literais visíveis em tabelas de rótulo (TransformPanel, VectorPanel, TextAnimSection, PresetsPanel, DeviceReport…): próximo passo quando voltar a idiomas.
+- **8.2:** B e C mergeados (1dd76a7, 05b2ab6). Ligação em andamento em duas worktrees novas: B2 (Renderer ← `particles::build_frame`, textura/malha, API/JNI/painel, testes, benchmark) e C2 (`ParticleScene.cpp`: histórico, mundo/local, cena 3D com depth, motion blur, testes). Merge: B2 → C2, resolvendo o ponto de desenho uma vez; suíte inteira só no fim.

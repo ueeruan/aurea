@@ -82,7 +82,12 @@ namespace binding {
     inline constexpr u32 kStorageImage0     = 13;
     inline constexpr u32 kStorageImageSlots = 2;
     inline constexpr u32 kStorageBuffer     = 15;
-    inline constexpr u32 kBindingCount      = 16;
+    /// Segundo storage buffer do passe (16): dado AUXILIAR que não pode
+    /// disputar o 15 com o dado principal do shader — o histórico de emissão
+    /// das partículas (8.2) mora aqui.
+    inline constexpr u32 kStorageBuffer1    = 16;
+    inline constexpr u32 kStorageBufferSlots = 2;
+    inline constexpr u32 kBindingCount      = 17;
     inline constexpr u32 kPushConstantBytes = 128;
     /// Tamanho máximo de um bloco de uniform por passe. 1 KB cobre a matriz de
     /// cor de 16 operações fundidas com folga; passar disso é sinal de que o
@@ -465,6 +470,10 @@ public:
     virtual void bind_texture(u32 slot, TextureHandle texture, SamplerHandle sampler) noexcept = 0;
     virtual void bind_storage_image(u32 slot, TextureHandle texture) noexcept = 0;
     virtual void bind_storage_buffer(BufferHandle buffer) noexcept = 0;
+    /// Storage buffer no slot `slot` (0 = binding 15, o mesmo de
+    /// `bind_storage_buffer`; 1 = binding 16). Sem chamada, o slot lê um
+    /// buffer vazio do backend.
+    virtual void bind_storage_buffer_at(u32 slot, BufferHandle buffer) noexcept = 0;
 
     /// Bloco de parâmetros do passe. Copiado para o anel de uniforms do frame
     /// — o chamador pode reusar a memória logo em seguida.

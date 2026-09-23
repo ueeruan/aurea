@@ -253,6 +253,7 @@ public:
     void bind_texture(u32 slot, TextureHandle texture, SamplerHandle sampler) noexcept override;
     void bind_storage_image(u32 slot, TextureHandle texture) noexcept override;
     void bind_storage_buffer(BufferHandle buffer) noexcept override;
+    void bind_storage_buffer_at(u32 slot, BufferHandle buffer) noexcept override;
     void set_uniforms(const void* data, u32 bytes) noexcept override;
     void push_constants(const void* data, u32 bytes) noexcept override;
     void set_viewport(f32 x, f32 y, f32 w, f32 h) noexcept override;
@@ -288,6 +289,7 @@ private:
     TexBinding textures_[binding::kTextureSlots]{};
     u64 storageImages_[binding::kStorageImageSlots]{};
     u64 storageBuffer_ = 0;
+    u64 storageBuffer1_ = 0;   ///< binding 16 (kStorageBuffer1)
     VkBuffer uniformBuffer_ = VK_NULL_HANDLE;
     u32 uniformOffset_ = 0;
     u32 uniformSize_ = 0;

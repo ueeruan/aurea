@@ -26,6 +26,7 @@
 #include "aurea/memory/Arena.hpp"
 #include "aurea/render/FrameGraph.hpp"
 #include "aurea/render/HeavyQuality.hpp"
+#include "aurea/render/ParticleScene.hpp"
 #include "aurea/render/RenderScheduler.hpp"
 #include "aurea/render/ShaderLibrary.hpp"
 #include "aurea/scene3d/SceneRenderer.hpp"
@@ -183,6 +184,8 @@ struct RenderLayer {
     i32  matteIndex = -1;
     /// Usada como matte por outra camada: não desenha por conta própria.
     bool matteOnly = false;
+    /// Partículas (8.2): cena 3D, espaço mundo, histórico e desfoque por tempo.
+    ParticleSpace particle;
 };
 
 struct FrameSnapshot {
@@ -214,6 +217,9 @@ struct FrameSnapshot {
     /// Malhas das camadas vetoriais (vec4) e onde começam no buffer do quadro.
     std::vector<Vec4> vec;
     u32 vecBase = 0;
+    /// Histórico das partículas (8.2, render/ParticleScene.hpp) e onde começa.
+    std::vector<Vec4> particleData;
+    u32 particleBase = 0;
 };
 
 struct RenderSettings {
@@ -521,6 +527,18 @@ private:
     u32 vecSlot_ = 0;
     BufferHandle vecFrameBuf_{};
     void upload_vectors(FrameSnapshot& snap) noexcept;
+    // Partículas (8.2): o histórico do quadro (binding 16), no mesmo anel.
+    BufferHandle particleBuf_[kGlyphRing]{};
+    usize particleCap_[kGlyphRing]{};
+    u32 particleSlot_ = 0;
+    BufferHandle particleFrameBuf_{};
+    void upload_particle_history(FrameSnapshot& snap) noexcept;
+    /// Push do particles.vert para a subamostra `sub` da camada.
+    [[nodiscard]] ParticlePush particle_push(const RenderLayer& layer, u32 sub, f32 weight) const noexcept;
+    /// Desenhos das partículas 3D do grupo no passe da cena, com a câmera e o
+    /// deslocamento de tempo do (sub)quadro `frame`. Memória da arena.
+    [[nodiscard]] u32 scene_particle_draws(const scene3d::SceneFrame& group, const scene3d::SceneFrame& frame,
+                                           scene3d::SceneParticleDraw*& out) noexcept;
     /// Malha vetorial por camada: refeita só quando a chave (grupos avaliados +
     /// densidade) muda — camada parada não retriangula a cada quadro.
     struct VectorCacheEntry { u64 key = 0; u64 lastFrame = 0; std::vector<Vec4> verts, paints; Vec2 min{}, max{}; };

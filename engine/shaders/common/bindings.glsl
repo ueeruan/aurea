@@ -26,5 +26,6 @@
 #define AUREA_IMG0    13
 #define AUREA_IMG1    14
 #define AUREA_DATA    15
+#define AUREA_DATA1   16
 
 #endif

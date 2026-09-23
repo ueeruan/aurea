@@ -419,6 +419,11 @@ VkPipelineLayout Backend::pipeline_layout(u64 immutableSampler, VkDescriptorSetL
     b[sb].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     b[sb].descriptorCount = 1;
     b[sb].stageFlags = all;
+    const u32 sb1 = binding::kStorageBuffer1;
+    b[sb1].binding = binding::kStorageBuffer1;
+    b[sb1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    b[sb1].descriptorCount = 1;
+    b[sb1].stageFlags = all;
 
     VkDescriptorSetLayoutCreateInfo si{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
     si.bindingCount = binding::kBindingCount;

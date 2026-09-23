@@ -95,6 +95,12 @@ struct HeavyStats {
     // Partículas (último quadro).
     u32 lastParticleSlots = 0;    ///< instâncias desenhadas
     u32 lastParticleLayers = 0;
+    /// Aurea Particular 8.2 (render/ParticleExtras): bytes residentes dos dados
+    /// extras (cache de pontos/malhas na CPU + buffers de GPU) e camadas com
+    /// eles ligados no último quadro.
+    u64 particleExtraCpuBytes = 0;
+    u64 particleExtraGpuBytes = 0;
+    u32 lastParticleExtraLayers = 0;
     // 3D (último quadro, todas as cenas e subquadros).
     u32 lastSceneDrawCalls = 0;
     u32 lastSceneShadowDrawCalls = 0;

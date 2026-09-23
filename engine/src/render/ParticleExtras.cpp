@@ -844,6 +844,8 @@ void build_frame(const BuildContext& ctx, const Layer& pl, const ParticleData& p
         if (px && px->width > 0 && px->height > 0) {
             out.texture = a;
             flags |= kFlagTexture;
+            // Proporção da imagem (l/a): o vértice encaixa a imagem no quadrado.
+            H[1].w = static_cast<f32>(px->width) / static_cast<f32>(px->height);
         }
     }
 
@@ -912,7 +914,10 @@ BufferHandle GpuBuffers::upload(GPUBackend& backend, const FrameData& fd, u64 fr
     void* ptr = nullptr;
     if (!backend.map_buffer(e.buffer, ptr).ok() || !ptr) return BufferHandle{};
     auto* dst = static_cast<Vec4*>(ptr);
-    e.ring = (e.ring + 1) % kRing;
+    // Uma cópia do anel por QUADRO: a mesma camada desenhada de novo no mesmo
+    // quadro (subamostra, pré-composição repetida) reescreve a cópia dele —
+    // o conteúdo é o mesmo — e nunca a de um quadro ainda em voo.
+    if (rebuild || e.lastFrame != frameNumber) e.ring = (e.ring + 1) % kRing;
     headerBase = e.ring * kHeaderVec4;
     std::memcpy(dst + headerBase, fd.header, sizeof(fd.header));
     if (rebuild) {

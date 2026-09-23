@@ -18,7 +18,7 @@
 //    H0      nº de pontos, 1º ponto (índice absoluto), modo, tamanho da célula
 //            modo: 0 ponto exato, 1 célula (jitter ± célula/2), 2 polilinha
 //            (sorteia um segmento e um ponto nele — distribuição por comprimento)
-//    H1      nº de vértices da malha, 1º vértice, bandeiras, _
+//    H1      nº de vértices da malha, 1º vértice, bandeiras, proporção da textura (l/a)
 //    H2      aleatório de tamanho, de opacidade, de cor, probabilidade do aux
 //    H3      largura do rastro, opacidade do rastro, escala da malha, malha iluminada
 //    H4      colisão: centro (px da camada), raio

@@ -313,12 +313,16 @@ vec3 shape_offset(float type, inout uint s) {
     return vec3((vec2(rnd(s), rnd(s)) - 0.5) * vec2(w, h), 0.0);   // fonte ainda sem pontos: caixa
 }
 
-/// Onde a partícula nasce (px da camada; z = profundidade). Camada, texto,
-/// caminho e malha leem os pontos da fonte; as formas, a conta de cima.
+/// Onde a partícula nasce, RELATIVO à origem do emissor (z = profundidade):
+/// quem chama soma a origem do nascimento (`em.origin`, que pode vir do
+/// histórico). Camada, texto, caminho e malha leem os pontos da fonte — que
+/// estão em px ABSOLUTOS da camada, então saem menos a origem de agora; as
+/// formas, a conta de cima. (No merge B+C a origem entrava duas vezes: o
+/// emissor ia parar em 2× o centro e metade das partículas saía da tela.)
 vec3 emit_start(float type, inout uint s) {
     vec3 q;
-    if (type > 5.5 && emit_from_source(s, q)) return q;
-    return vec3(p.origin.xy, 0.0) + shape_offset(type, s);
+    if (type > 5.5 && emit_from_source(s, q)) return q - vec3(p.origin.xy, 0.0);
+    return shape_offset(type, s);
 }
 
 /// O que é FIXO numa partícula (sai do nascimento) — a trajetória inteira é
@@ -489,10 +493,12 @@ void emit_vertex(vec2 pos, float z, float size, float rot, vec4 colPremul, vec2 
         v_color = vec4(colPremul.rgb * mc.rgb, colPremul.a) * mc.a;
         v_local = vec2(0.0);
         v_shape = 5.0;
-        gl_Position = pc.clipFromLayer * vec4(pos + local.xy, 0.0, 1.0);
+        // A saída passa pelo MESMO ps_place do quad (o vértice da malha é o
+        // "canto"): 2D de sempre, espaço mundo e desfoque valem para a malha.
+        ps_place(vec3(pos, z), local.xy, birth, grav);
         // Profundidade do passe de malha (Z reverso: perto = maior). Faixa de
-        // ±8192 px em torno do plano da camada.
-        gl_Position.z = clamp(0.5 - (z + local.z) / 16384.0, 0.0, 1.0) * gl_Position.w;
+        // ±8192 px em torno do plano da camada. No 3D quem manda é a câmera.
+        if (!ps_has(PS_3D)) gl_Position.z = clamp(0.5 - (z + local.z) / 16384.0, 0.0, 1.0) * gl_Position.w;
         return;
     }
     const vec2 local = c * 2.0 - 1.0;
@@ -500,6 +506,12 @@ void emit_vertex(vec2 pos, float z, float size, float rot, vec4 colPremul, vec2 
     const vec2 rl = vec2(local.x * cs - local.y * sn, local.x * sn + local.y * cs);
     v_local = rl;
     v_misc.zw = c;
+    // Textura: a imagem CABE no quadrado com a proporção dela (H1.w = l/a); o
+    // que sobra do quadrado sai do uv [0,1] e o fragmento descarta.
+    if (v_shape > 3.5 && v_shape < 4.5) {
+        const float asp = max(px_h(1).w, 1e-3);
+        v_misc.zw = 0.5 + (c - 0.5) * (asp >= 1.0 ? vec2(1.0, asp) : vec2(1.0 / asp, 1.0));
+    }
     // Saída: no 2D sem histórico é a MESMA conta de antes (posição + canto
     // girado); no 3D o billboard vai ao mundo pelos eixos da câmera da cena.
     ps_place(vec3(pos, z), rl * size * 0.5, birth, grav);

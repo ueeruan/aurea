@@ -26,6 +26,7 @@
 #include "aurea/memory/Arena.hpp"
 #include "aurea/render/FrameGraph.hpp"
 #include "aurea/render/HeavyQuality.hpp"
+#include "aurea/render/ParticleExtras.hpp"
 #include "aurea/render/ParticleScene.hpp"
 #include "aurea/render/RenderScheduler.hpp"
 #include "aurea/render/ShaderLibrary.hpp"
@@ -137,6 +138,10 @@ struct LayerSource {
     Vec4     particleBlock[kParticleBlocks]{};
     u32      particleSlots = 0;      ///< primárias (o aux multiplica por 1+n)
     bool     particleAdditive = true;
+    /// Aurea Particular 8.2: cabeçalho do quadro + pontos/malha da fonte
+    /// (render/ParticleExtras.hpp). Nulo = nada além do bloco (o shader não
+    /// lê o storage buffer — o caminho de antes).
+    std::shared_ptr<const particles::FrameData> particleExtras;
 
     // Forma vetorial (SDF): tipo, canto, pontas, raio interno, preenchida,
     // cores lineares pré-multiplicadas, largura do contorno (px).
@@ -561,6 +566,27 @@ private:
     HeavyStats heavyStats_{};
     u32 glyphRasterSeen_ = 0, glyphResetSeen_ = 0;   ///< leitura anterior de text::glyph_atlas_stats
     BufferHandle particleQuad_{};                      ///< 6 índices u16 do quad (partículas indexadas)
+    // --- Aurea Particular 8.2: dados extras (render/ParticleExtras) -----------
+    // Isolado do caminho 3D/histórico: o prepare monta o cabeçalho e o
+    // desenho 2D sobe o buffer da camada (binding AUREA_DATA).
+    particles::StaticCache particleStatics_;
+    particles::GpuBuffers particleExtraBufs_;
+    /// Prepare: o cabeçalho do quadro da camada de partículas (e a textura
+    /// da partícula na GPU, se houver). Nada muda sem recurso em uso.
+    void prepare_particle_extras(const Composition& comp, const Layer& layer, const ParticleData& pd, FrameIndex time,
+                                 const ImagePixels* (*imageLookup)(void*, AssetId), void* imageCtx, u64 frameNumber,
+                                 LayerId rid, LayerSource& src) noexcept;
+    /// Desenho: sobe o cabeçalho (e o estático, se mudou) e devolve o que o
+    /// passe liga. `on` falso = o shader fica no caminho de antes.
+    struct ParticleExtrasBind {
+        bool on = false;
+        BufferHandle buffer{};
+        u32 headerBase = 0;
+        TextureHandle texture{};   ///< imagem da partícula (RGBA8 sRGB, alfa reto)
+        bool mesh = false;
+        u32 meshVertices = 0;
+    };
+    [[nodiscard]] ParticleExtrasBind particle_extras_bind(const LayerSource& src, u64 frameNumber) noexcept;
     /// Orçamento do cache do optical flow (texturas residentes, todas as camadas).
     u64 flowCacheBudget_ = 48ull << 20;
     void trim_flow_cache(u64 keepLayer, u64 incomingBytes) noexcept;

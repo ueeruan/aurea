@@ -521,6 +521,8 @@ void Renderer::forget_device() noexcept {
     images_.clear();
     luts_.clear();
     uploads_.clear();
+    particleExtraBufs_.forget();
+    particleStatics_.clear();
     scene3d_.forget_device();
     pool_.forget();
     shaders_.forget_device();
@@ -546,6 +548,8 @@ void Renderer::release_project_resources() noexcept {
     images_.clear();
     luts_.clear();
     uploads_.clear();
+    particleExtraBufs_.release(*backend_);
+    particleStatics_.clear();
     scene3d_.release_all();
 }
 
@@ -1190,6 +1194,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 // (so estouro) `slots` seria 1 e o burst nao teria onde caber.
                 rl.source.particleSlots = std::min<u32>(cap, slots + pd.burst);
                 rl.source.particleAdditive = pd.blendMode == 1;
+                // 8.2: fonte de emissão, textura, malha, curvas... (isolado).
+                prepare_particle_extras(comp, *l, pd, layerTime, imageLookup, imageCtx, frameNumber, rid, rl.source);
                 break;
             }
             case LayerKind::Composition: {
@@ -2499,9 +2505,22 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
         }
         case LayerSource::Kind::Particles: {
             out.texture = graph_.create_texture("layer-particulas", d);
-            auto pipe = shaders_.pipeline(PipelineKey::graphics(
+            // 8.2: dados extras da camada (binding AUREA_DATA) — ver particle_extras_bind.
+            const ParticleExtrasBind px = particle_extras_bind(layer.source, frameNumber);
+            PipelineKey pkey = PipelineKey::graphics(
                 ShaderId::particles_particles_vert, ShaderId::particles_particles_frag, kWorkFormat, true,
-                layer.source.particleAdditive ? BlendMode::Add : BlendMode::Normal));
+                layer.source.particleAdditive ? BlendMode::Add : BlendMode::Normal);
+            if (px.mesh) {
+                // Partícula de MALHA: profundidade de verdade entre as malhas
+                // (teste e escrita, Z reverso, limpa em 0) num alvo próprio.
+                pkey.hasDepth = true;
+                pkey.depthTest = true;
+                pkey.depthWrite = true;
+                pkey.depthCompare = CompareOp::GreaterOrEqual;
+                pkey.depthFormat = SurfaceFormat::Depth32F;
+                pkey.cull = CullMode::None;
+            }
+            auto pipe = shaders_.pipeline(pkey);
             if (!pipe.ok()) return false;
             if (!particleQuad_.valid()) {
                 BufferDesc bd;
@@ -2526,24 +2545,138 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
             push.clip = clip_from_comp(static_cast<f32>(layer.source.width), static_cast<f32>(layer.source.height));
             struct Cap {
                 PipelineHandle p; ParticlePush clip; Vec4 params[LayerSource::kParticleBlocks];
-                u32 slots; BufferHandle quad;
-            } cap{*pipe, push, {}, layer.source.particleSlots, particleQuad_};
+                u32 slots; u32 meshVerts; BufferHandle quad;
+                BufferHandle extras; TextureHandle tex; u64 sampler;   // 8.2 (a captura cabe em 512 B)
+            } cap{*pipe, push, {}, layer.source.particleSlots, px.mesh ? px.meshVertices : 0u, particleQuad_,
+                  px.buffer, px.texture, shaders_.sampler(CommonSampler::LinearClamp).id};
             for (u32 i = 0; i < LayerSource::kParticleBlocks; ++i) cap.params[i] = layer.source.particleBlock[i];
+            // extras: slots do fluxo (já), 1º vec4 do cabeçalho, dados prontos, passe de malha.
+            cap.params[19].y = static_cast<f32>(px.headerBase);
+            cap.params[19].z = px.on ? 1.0f : 0.0f;
+            cap.params[19].w = px.mesh ? 1.0f : 0.0f;
             heavyStats_.lastParticleSlots += layer.source.particleSlots;
             ++heavyStats_.lastParticleLayers;
-            graph_.add_raster_pass("particulas", PassStage::Decode, out.texture, LoadOp::Clear, Vec4{0, 0, 0, 0},
-                                   [cap](PassContext& pc) {
+            auto draw = [cap](PassContext& pc) {
                 pc.cmds.bind_pipeline(cap.p);
                 pc.cmds.set_uniforms(cap.params, sizeof(cap.params));
                 pc.cmds.push_constants(&cap.clip, sizeof(cap.clip));
+                // O binding do storage buffer sobrevive entre passes: liga sempre
+                // (inválido = o nulo do backend; o shader não lê sem extras.z).
+                pc.cmds.bind_storage_buffer(cap.extras);
+                if (cap.tex.valid()) pc.cmds.bind_texture(0, cap.tex, SamplerHandle{cap.sampler});
+                if (cap.meshVerts) {
+                    // Malha instanciada: gl_VertexIndex = vértice da malha,
+                    // instância = partícula (a mesma conta do quad).
+                    pc.cmds.draw(cap.meshVerts, cap.slots, 0);
+                    return;
+                }
                 pc.cmds.bind_index_buffer(cap.quad, 0, IndexType::U16);
                 pc.cmds.draw_indexed(6, cap.slots, 0, 0, 0);
-            });
+            };
+            if (px.mesh) {
+                TextureDesc dd = d;
+                dd.format = SurfaceFormat::Depth32F;
+                dd.sampled = false;
+                dd.debugName = "particulas-profundidade";
+                const FGTexture depth = graph_.create_texture("particulas-profundidade", dd);
+                graph_.add_raster_pass_depth("particulas", PassStage::Decode, out.texture, LoadOp::Clear, Vec4{0, 0, 0, 0},
+                                             depth, LoadOp::Clear, false, 0.0f, draw);
+            } else {
+                graph_.add_raster_pass("particulas", PassStage::Decode, out.texture, LoadOp::Clear, Vec4{0, 0, 0, 0}, draw);
+            }
             return true;
         }
         case LayerSource::Kind::None: break;
     }
     return false;
+}
+
+// =============================================================================
+// Aurea Particular 8.2 — dados extras (render/ParticleExtras)
+// =============================================================================
+void Renderer::prepare_particle_extras(const Composition& comp, const Layer& layer, const ParticleData& pd,
+                                       FrameIndex time, const ImagePixels* (*imageLookup)(void*, AssetId),
+                                       void* imageCtx, u64 frameNumber, LayerId rid, LayerSource& src) noexcept {
+    src.particleExtras.reset();
+    // Só liga com algum recurso do 8.2 em uso: sem ele o shader nem lê o
+    // buffer e o quadro é exatamente o de antes (projeto antigo não muda).
+    const bool sourced = pd.emitterSource != 0 && pd.emitterType >= static_cast<u32>(ParticleEmitter::Layer)
+                      && pd.emitterType <= static_cast<u32>(ParticleEmitter::Mesh);
+    const bool texture = pd.particleType == static_cast<u32>(ParticleShape::Texture) && pd.textureAsset != 0;
+    const bool mesh = pd.particleType == static_cast<u32>(ParticleShape::Mesh) && pd.meshSource != 0;
+    const bool look = pd.colorStopCount > 0 || pd.sizeCurveCount > 0 || pd.opacityCurveCount > 0
+                   || pd.sizeRandom > 0.0f || pd.opacityRandom > 0.0f || pd.colorRandom > 0.0f
+                   || pd.auxProbability < 1.0f || pd.trailWidth != 1.0f || pd.trailOpacity < 1.0f
+                   || pd.collision >= static_cast<u32>(ParticleCollision::Sphere);
+    if (!sourced && !texture && !mesh && !look) return;
+    auto fd = std::make_shared<particles::FrameData>();
+    particles::BuildContext ctx;
+    ctx.comp = &comp;
+    ctx.time = time;
+    ctx.imageLookup = imageLookup;
+    ctx.imageCtx = imageCtx;
+    ctx.modelLookup = modelLookup_;
+    ctx.modelCtx = modelCtx_;
+    ctx.frameNumber = frameNumber;
+    particles::build_frame(ctx, layer, pd, particleStatics_, *fd);
+    fd->layerKey = rid.pack();
+    // Imagem da partícula: a MESMA RGBA8 (sRGB, alfa reto) das camadas de
+    // imagem, no mesmo mapa — uma imagem usada como camada e como partícula
+    // sobe uma vez só. O shader converte para linear na hora de amostrar.
+    if (fd->texture.valid() && backend_) {
+        const ImagePixels* px = imageLookup ? imageLookup(imageCtx, fd->texture) : nullptr;
+        const u64 key = fd->texture.pack();
+        auto it = images_.find(key);
+        if (it != images_.end() && px && (it->second.width != px->width || it->second.height != px->height)) {
+            destroy_image_linear(it->second);
+            backend_->destroy_texture(it->second.texture);
+            images_.erase(it);
+            it = images_.end();
+        }
+        if (it == images_.end() && px && px->width && px->height) {
+            TextureDesc d;
+            d.width = px->width;
+            d.height = px->height;
+            d.format = SurfaceFormat::RGBA8;
+            d.sampled = true;
+            d.transferDst = true;
+            d.debugName = "imagem-particula";
+            auto tex = backend_->create_texture(d);
+            if (tex.ok()) {
+                PendingUpload up;
+                up.texture = *tex;
+                up.bytesPerRow = px->width * 4;
+                up.data = px->rgba;
+                uploads_.push_back(std::move(up));
+                images_[key] = ImageTexture{*tex, px->width, px->height, frameNumber};
+            }
+        } else if (it != images_.end()) {
+            it->second.lastFrame = frameNumber;
+        }
+    }
+    heavyStats_.particleExtraCpuBytes = particleStatics_.resident_bytes();
+    src.particleExtras = std::move(fd);
+}
+
+Renderer::ParticleExtrasBind Renderer::particle_extras_bind(const LayerSource& src, u64 frameNumber) noexcept {
+    ParticleExtrasBind b;
+    if (!src.particleExtras || !backend_) return b;
+    const particles::FrameData& fd = *src.particleExtras;
+    b.buffer = particleExtraBufs_.upload(*backend_, fd, frameNumber, b.headerBase);
+    if (!b.buffer.valid()) return b;   // sem buffer: o caminho de antes (nunca lixo)
+    b.on = true;
+    if (fd.texture.valid()) {
+        auto it = images_.find(fd.texture.pack());
+        if (it != images_.end()) {
+            b.texture = it->second.texture;
+            it->second.lastFrame = frameNumber;
+        }
+    }
+    b.mesh = fd.meshMode && fd.meshVertices >= 3;
+    b.meshVertices = fd.meshVertices;
+    ++heavyStats_.lastParticleExtraLayers;
+    heavyStats_.particleExtraGpuBytes = particleExtraBufs_.resident_bytes();
+    return b;
 }
 
 void Renderer::upload_masks(FrameSnapshot& snap) noexcept {
@@ -3064,6 +3197,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     quality_ = effective_quality(settings);
     heavyQ_ = resolve_heavy(settings);
     heavyStats_.lastParticleSlots = heavyStats_.lastParticleLayers = 0;
+    heavyStats_.lastParticleExtraLayers = 0;
     heavyStats_.lastSceneDrawCalls = heavyStats_.lastSceneShadowDrawCalls = heavyStats_.lastSceneInstancedDraws = 0;
     heavyStats_.lastSceneVisible = heavyStats_.lastSceneCulled = heavyStats_.lastSceneTriangles = 0;
     heavyStats_.lastShadowMapSize = 0;
@@ -3629,6 +3763,9 @@ void Renderer::collect_resources(u64 frameNumber) noexcept {
     // há pressa, e varrer mapas a cada frame é custo sem ganho.
     if (frameNumber % 120 != 0) return;
     scene3d_.collect(frameNumber);
+    // Aurea Particular: pontos/malhas de fontes e buffers de camadas que sumiram.
+    particleStatics_.collect(frameNumber);
+    particleExtraBufs_.collect(*backend_, frameNumber);
     for (auto it = planar_.begin(); it != planar_.end();) {
         if (frameNumber > it->second.lastFrame + 240) {
             for (TextureHandle& t : it->second.plane) if (t.valid()) backend_->destroy_texture(t);
@@ -3712,6 +3849,8 @@ u32 Renderer::trim_memory(u8 stage, u64 frameNumber) noexcept {
         if (unused(it->second.lastFrame)) it = vectorCache_.erase(it);
         else ++it;
     }
+    particleStatics_.collect(frameNumber, 0);
+    particleExtraBufs_.collect(*backend_, frameNumber, 1);
     // Entre quadros nada do pool está em uso: tudo volta a nascer sob demanda.
     n += pool_.stats().alive;
     pool_.clear();

@@ -708,4 +708,15 @@ struct Layer {
     return pd;
 }
 
+/// A ponte dos projetos antigos: Faíscas, Neve e Poeira de luz.
+///
+/// Os três emitiam SEMPRE de uma caixa — o emissor era o retângulo da camada e
+/// o campo `emitterType` nem chegava a ser escrito (ficava no zero). Lido como
+/// está, um projeto anterior à v20 reabriria emitindo de um PONTO e a neve
+/// viraria um borrifo no centro. Aqui ele volta a ser caixa, que é o que o
+/// shader antigo fazia com aquele `emitterSize`.
+inline void migrate_legacy_particles(ParticleData& p, u32 timelineVersion) noexcept {
+    if (timelineVersion < 20) p.emitterType = static_cast<u32>(ParticleEmitter::Box);
+}
+
 } // namespace aurea

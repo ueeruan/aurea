@@ -806,6 +806,8 @@ void read_layer(ByteReader& r, Layer& l) {
     l.particles.maxParticles = r.u32v();
     l.particles.blendMode = r.u32v();
     l.particles.collideEnvironment = r.boolv();
+    // Projeto antigo: o emissor dos três presets de antes era sempre a caixa.
+    migrate_legacy_particles(l.particles, g_readingTimelineVersion);
 
     l.gain = r.f32v();
     l.pan = r.f32v();

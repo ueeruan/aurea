@@ -700,3 +700,31 @@ AUREA_TEST(Serialization, AdjustmentGuideAndLabelSurviveRoundTrip) {
     (void)plain;
     std::remove(path.c_str());
 }
+
+AUREA_TEST(Serialization, LegacyParticleProjectsComeBackAsBoxEmitters) {
+    // Faíscas, Neve e Poeira de luz emitiam SEMPRE da caixa da camada, e os
+    // projetos delas gravaram `emitterType` no zero (o campo nem era escrito
+    // pela UI da época). Sem esta correção a neve de um projeto antigo reabriria
+    // saindo de um ponto, no centro — o trabalho do usuário mudaria de cara.
+    ParticleData p;
+    p.emitterType = 0;
+    p.emitterSize = Vec2{320.0f, 10.0f};
+    p.emitterOffset = Vec2{0.0f, -100.0f};
+    migrate_legacy_particles(p, 19);
+    AUREA_CHECK_EQ(p.emitterType, static_cast<u32>(ParticleEmitter::Box));
+    AUREA_CHECK(p.emitterSize.x == 320.0f && p.emitterOffset.y == -100.0f);
+    // O emissor de verdade do arquivo antigo continua onde estava: só o TIPO
+    // muda, porque era o único que o formato não guardava.
+
+    // De v20 em diante o campo é do usuário e NÃO se mexe — inclusive Ponto,
+    // que é uma escolha legítima de quem montou o sistema no Particular.
+    ParticleData q;
+    q.emitterType = static_cast<u32>(ParticleEmitter::Point);
+    migrate_legacy_particles(q, 20);
+    AUREA_CHECK_EQ(q.emitterType, static_cast<u32>(ParticleEmitter::Point));
+    migrate_legacy_particles(q, 21);
+    AUREA_CHECK_EQ(q.emitterType, static_cast<u32>(ParticleEmitter::Point));
+    q.emitterType = static_cast<u32>(ParticleEmitter::Mesh);
+    migrate_legacy_particles(q, 21);
+    AUREA_CHECK_EQ(q.emitterType, static_cast<u32>(ParticleEmitter::Mesh));
+}

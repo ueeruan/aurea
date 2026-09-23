@@ -62,6 +62,24 @@ internal fun List<KeyframeRow>.effectTrack(effectId: Int, param: Int, component:
     filter { it.property == TrackProperty.EFFECT_PARAM && it.effectIndex == effectId && it.paramIndex == param * 4 + component }
         .sortedBy { it.time }
 
+/** As marcas da trilha de um parâmetro do Aurea Particular. */
+internal fun List<KeyframeRow>.particleTrack(param: Int): List<KeyframeRow> =
+    filter { it.property == TrackProperty.PARTICLE_PARAM && it.paramIndex == param }.sortedBy { it.time }
+
+/** Losango de um parâmetro do Aurea Particular. */
+internal fun particleLook(store: EditorStore, param: Int): KeyframeLook {
+    val t = store.detail?.localPlayhead ?: return KeyframeLook.None
+    var animated = false
+    val keys = store.primaryKeys()
+    for (i in keys.indices) {
+        val k = keys[i]
+        if (k.property != TrackProperty.PARTICLE_PARAM || k.paramIndex != param) continue
+        if (k.time == t) return KeyframeLook.KeyHere
+        animated = true
+    }
+    return if (animated) KeyframeLook.Animated else KeyframeLook.None
+}
+
 /**
  * A MARCA QUE ABRE O TRECHO sob o cabeçote (a curva de um keyframe é a do trecho
  * que SAI dele). Fora dos trechos: o primeiro (antes) ou o último (depois).

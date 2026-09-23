@@ -17,6 +17,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -31,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aurea.aurea.R
 import com.aurea.aurea.state.EditorStore
+import com.aurea.aurea.ui.ds.KeyframeLook
 import com.aurea.aurea.ui.ds.PropertyCustomRow
 import com.aurea.aurea.ui.ds.TickRuler
 import com.aurea.aurea.ui.ds.ValueBox
@@ -62,7 +65,44 @@ internal fun ParticlesPanel(env: PanelEnv) {
         return
     }
     var advanced by remember { mutableStateOf(false) }
+    // A linha escolhida é o alvo do losango do trilho (mesmo caminho dos efeitos).
+    var selected by remember(store.primary) { mutableStateOf<Int?>(null) }
+    val railLook by remember(store) { derivedStateOf { selected?.let { particleLook(store, it) } ?: KeyframeLook.None } }
+    val railTrack by remember(store) { derivedStateOf { selected?.let { store.primaryKeys().particleTrack(it) }.orEmpty() } }
 
+    Row(Modifier.fillMaxSize()) {
+        LeftRail(
+            onBack = env.onClose,
+            keyframeLook = railLook,
+            onKeyframe = selected?.let { param -> { store.toggleParticleKeyframe(param) } },
+            curveAnimated = railTrack.size >= 2,
+            onCurve = if (railTrack.size >= 2) {
+                {
+                    val layer = store.primary
+                    val t = store.detail?.localPlayhead
+                    if (layer != null && t != null) {
+                        railTrack.segmentStart(t)?.let { key ->
+                            store.selectKeyframe(layer, key)
+                            env.onOpenPanel(EditorPanel.Curve)
+                        }
+                    }
+                }
+            } else {
+                null
+            },
+        )
+        CompositionLocalProvider(LocalParticleSelection provides (selected to { selected = it })) {
+            ParticleBody(env, p, advanced) { advanced = it }
+        }
+    }
+}
+
+/** A linha escolhida do painel (param) e como escolhê-la. */
+private val LocalParticleSelection = compositionLocalOf<Pair<Int?, (Int) -> Unit>> { null to {} }
+
+@Composable
+private fun ParticleBody(env: PanelEnv, p: List<Float>, advanced: Boolean, setAdvanced: (Boolean) -> Unit) {
+    val store = env.store
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 18.dp, top = 12.dp, end = 18.dp, bottom = 24.dp)) {
         PresetRow(store)
         Spacer(Modifier.height(10.dp))
@@ -164,7 +204,7 @@ internal fun ParticlesPanel(env: PanelEnv) {
 
         Spacer(Modifier.height(10.dp))
         Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(9.dp)).background(AureaColors.Chip)
-            .tocavel { advanced = !advanced }.padding(horizontal = 12.dp, vertical = 9.dp),
+            .tocavel { setAdvanced(!advanced) }.padding(horizontal = 12.dp, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically) {
             Text(if (advanced) "▾ " else "▸ " + stringResource(R.string.particular_advanced),
                 style = AureaType.Base.merge(TextStyle(fontSize = 12.5.sp, color = AureaColors.Text)))
@@ -237,7 +277,8 @@ private fun Group(title: String) {
 @Composable
 private fun Choice(store: EditorStore, label: String, param: Int, options: @Composable () -> List<String>) {
     val current = (store.particles?.getOrNull(param) ?: 0f).roundToInt()
-    PropertyCustomRow(label, selected = false, onSelect = {}) {
+    val (sel, pick) = LocalParticleSelection.current
+    PropertyCustomRow(label, selected = sel == param, onSelect = { pick(param) }, keyframe = particleLook(store, param)) {
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             options().forEachIndexed { i, name ->
                 val on = i == current
@@ -256,7 +297,8 @@ private fun Choice(store: EditorStore, label: String, param: Int, options: @Comp
 @Composable
 private fun Toggle(store: EditorStore, label: String, param: Int, p: List<Float>) {
     val on = (p.getOrNull(param) ?: 0f) >= 0.5f
-    PropertyCustomRow(label, selected = false, onSelect = {}) {
+    val (sel, pick) = LocalParticleSelection.current
+    PropertyCustomRow(label, selected = sel == param, onSelect = { pick(param) }, keyframe = particleLook(store, param)) {
         Box(Modifier.clip(RoundedCornerShape(7.dp))
             .background(if (on) AureaColors.Accent else AureaColors.Chip)
             .tocavel(onClick = { store.setParticleParam(param, if (on) 0f else 1f) })
@@ -291,7 +333,8 @@ private fun Pct(store: EditorStore, label: String, param: Int, p: List<Float>, u
 @Composable
 private fun Ruler(store: EditorStore, label: String, param: Int, value: Float,
                   text: String, unitsPerDp: Float, min: Float, max: Float) {
-    PropertyCustomRow(label, selected = false, onSelect = {}) {
+    val (sel, pick) = LocalParticleSelection.current
+    PropertyCustomRow(label, selected = sel == param, onSelect = { pick(param) }, keyframe = particleLook(store, param)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.weight(1f).height(40.dp)) {
                 TickRuler(

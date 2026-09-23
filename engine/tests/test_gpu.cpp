@@ -1584,6 +1584,60 @@ AUREA_TEST(Gpu, ParticularIsDeterministicWithAuxTurbulenceAndCollision) {
     AUREA_CHECK(coverage(a) > 0.002f);
 }
 
+AUREA_TEST(Gpu, ParticularParamKeyframesDriveTheRender) {
+    AUREA_REQUIRE_GPU();
+    // Um parametro do Particular com keyframe tem de MUDAR o desenho no tempo:
+    // a taxa vai de 0 a 400/s num segundo. Sem keyframes o valor parado ficaria
+    // valendo em todo lugar e os dois instantes sairiam iguais.
+    Scene3DRig rig(320, 180);
+    auto id = rig.e.add_particles(2);   // poeira de luz
+    AUREA_CHECK(id.ok());
+    // Tamanho fixo e sem rastro: a cobertura volta a medir a CONTAGEM.
+    AUREA_CHECK(rig.e.set_particle_param(*id, static_cast<u32>(ParticleParam::StartSize), 1.5f));
+    AUREA_CHECK(rig.e.set_particle_param(*id, static_cast<u32>(ParticleParam::EndSize), 1.5f));
+    AUREA_CHECK(rig.e.set_particle_param(*id, static_cast<u32>(ParticleParam::TrailLength), 0.0f));
+    AUREA_CHECK(rig.e.set_particle_param(*id, static_cast<u32>(ParticleParam::StartOpacity), 1.0f));
+    AUREA_CHECK(rig.e.set_particle_param(*id, static_cast<u32>(ParticleParam::EndOpacity), 1.0f));
+    AUREA_CHECK(rig.e.set_particle_param(*id, static_cast<u32>(ParticleParam::Rate), 0.0f));
+    auto seekTo = [&](i64 f) {
+        Command c;
+        c.type = CommandType::PlaybackSeek;
+        c.seek.time = tick_at(FrameIndex{f}, 30.0);
+        AUREA_CHECK(rig.e.apply_command(c).ok());
+    };
+    auto key = [&](i64 f, f32 v) {
+        Command c;
+        c.type = CommandType::KeyframeInsert;
+        c.keyframe.track.layer = LayerId::unpack(*id);
+        c.keyframe.track.property = TrackProperty::ParticleParam;
+        c.keyframe.track.effectIndex = kInvalidIndex;
+        c.keyframe.track.effectParamIndex = static_cast<u32>(ParticleParam::Rate);
+        c.keyframe.time = FrameIndex{f};
+        c.keyframe.value = v;
+        AUREA_CHECK(rig.e.apply_command(c).ok());
+    };
+    seekTo(0);
+    key(0, 0.0f);
+    key(60, 400.0f);
+    seekTo(6);
+    const f32 early = coverage(rig.capture(320));
+    seekTo(54);
+    const f32 late = coverage(rig.capture(320));
+    std::printf("    particular com keyframe na taxa: cobertura q6 %.4f -> q54 %.4f\n", early, late);
+    AUREA_CHECK(late > early * 3.0f);
+    AUREA_CHECK(late > 0.002f);
+    // E o valor lido pela UI acompanha o instante (o controle mostra o que a
+    // previa desenha), nao o campo parado.
+    f32 out[static_cast<usize>(ParticleParam::Count)]{};
+    AUREA_CHECK(rig.e.query_particles(*id, out));
+    const f32 shownLate = out[static_cast<usize>(ParticleParam::Rate)];
+    seekTo(6);
+    AUREA_CHECK(rig.e.query_particles(*id, out));
+    const f32 shownEarly = out[static_cast<usize>(ParticleParam::Rate)];
+    std::printf("    taxa lida: q54 %.1f -> q6 %.1f\n", shownLate, shownEarly);
+    AUREA_CHECK(shownLate > shownEarly * 3.0f);
+}
+
 AUREA_TEST(Gpu, TransitionsFadeAndSlideAtTheEdges) {
     AUREA_REQUIRE_GPU();
     Scene3DRig rig(320, 180);

@@ -83,6 +83,7 @@ set(AUREA_CORE_SOURCES
     src/render/Renderer.cpp
     src/render/MaskRaster.cpp
     src/render/ParticleExtras.cpp
+    src/render/ParticleScene.cpp
     src/effects/Parameter.cpp
     src/effects/EffectGraph.cpp
     src/effects/builtin/ColorEffects.cpp
